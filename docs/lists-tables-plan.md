@@ -75,10 +75,9 @@ Two departures from the plan below, both deliberate:
   columns ARE lists, and every phase-1 behaviour (broadcasting, zipping into
   a scatter, reductions, 1-based indexing, length-mismatch errors) applies
   with no new code. No `{kind: 'member'}` node exists.
-- **No `{kind: 'data'}` typed-array leaf yet**, so a column expands to
-  ordinary number expressions, and rows are capped at 5000 (`TABLE_MAX_ROWS`)
-  — measured at ~8 ms per keystroke and no dropped frames with 3000 points.
-  Lifting that cap is phase 4's instanced rendering, not a tweak.
+- **No `{kind: 'data'}` typed-array leaf yet**, so a column expanded to
+  ordinary number expressions and rows were capped at 5000
+  (`TABLE_MAX_ROWS`). Phase 4 added the leaf and raised the cap to 200 000.
 
 Still phase 3: filters (`person[person.age >= 18]`), string columns
 (recognized and named, but plotting one is an error), and the preview grid.
@@ -89,6 +88,7 @@ Dense scatters lost their per-dot outline (>200 points): at CSV densities the
 outlines of later dots painted over the fill of earlier ones, turning a
 3000-point trace the outline colour.
 
+As planned:
 
 - **Grammar**: string literals (double or single quotes), legal only as
   `open()`'s first argument. `open` joins RESERVED. The hash argument is a
@@ -146,19 +146,37 @@ outlines of later dots painted over the fill of earlier ones, turning a
   to phase 4, where it belongs: what it buys is per-frame rendering cost,
   and only instanced rendering cashes that in.
 
-## Phase 4 — scale and polish
+## Phase 4 — scale and polish *(built)*
 
-- A `{ kind: 'data' }` leaf wrapping a typed array, so a column never
-  expands to one expression per row — with the fast paths that make it pay:
-  broadcasting/zip over data leaves, and numeric folding of reductions.
-  This is what lifts `TABLE_MAX_ROWS` (5000).
-- Constant column scatters upload typed arrays straight to a GPU buffer
-  (instanced), no per-point Expr eval; t-dependent list rows re-evaluate per
-  frame under a perf-guard cap.
-- `hist(L)` as the first stats renderer (reuses the KDE binner's bucketing
-  in lib/dist.ts) — the bridge to regressions
-  (`fit(person.height ~ a*person.age + b)`), which is its own plan on top of
-  this foundation.
+- **`{ kind: 'data' }`, a typed-array list.** Semantically a list of numbers;
+  the point is that a 120k-row column costs two objects instead of 120k.
+  `lower` has a fast path (`fastMap`) taken when every operand is a typed
+  array or a *literal* number, and `expand` falls back to one expression per
+  element otherwise. The line is deliberate: a **slider** stays symbolic,
+  because folding its value in would turn a shader uniform into a constant
+  and recompile the shader on every drag. So `col/2`, `sin(col)`,
+  `(a, b)`, reductions and `hist` stay compact; `col·t` and `col > 3` expand.
+- Two caps, for two different costs: `TABLE_MAX_ROWS` = 200 000 rows (what
+  the renderer will draw) and `ITEMS_MAX` = 100 000 (what may become
+  expressions). Both fail loud and name the number.
+- **Not a GPU buffer after all.** The plan said instanced rendering; the
+  goal was 100k points at frame rate, and the renderer has no vertex-buffer
+  path at all (every layer is a fullscreen-quad shader; points live on the
+  canvas-2D overlay). Batching there — one `fillStyle`, one `fillRect` per
+  point, off-screen points skipped — hits the goal in the layer points
+  already live in. Measured with 120 000 points: 8.3 ms frames (no drops on
+  a 120 Hz display) and 8.3 ms per keystroke including a full recompile. A
+  VBO path can come if 3D clouds or 10⁶ points ever need it.
+- **`hist(L)`**, `hist(L, bins)`. Bins default to ≈√n (5…60); NaNs are left
+  out; one repeated value is one bar. It is a whole row, not a value — the
+  one thing you may do is scale it (`hist(L, 40)/800`), because the plane
+  has a single scale for both axes and counts in the thousands otherwise
+  cannot share a view with values in the units.
+
+Still open, and the natural next step: **text**. `person[person.city ==
+"NYC"]` wants a string leaf through the same dozen exhaustive switches, an
+`==` that only means something inside a filter, and text columns readable by
+the mask machinery. `==` and quoted text currently explain themselves.
 
 ## Testing
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDefs, evalConstEnv, resolveExpr, scanDefinition } from './defs.ts';
+import { buildDefs, evalConstEnv, listGetter, listNamesOf, resolveExpr, scanDefinition } from './defs.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import { lowerLists, usesListReduction } from './list.ts';
@@ -14,12 +14,15 @@ function lowerRow(text: string, defRows: string[] = []): Expr {
   const { defs } = defsOf(defRows);
   const consts = evalConstEnv(defs, 0);
   const getFn = (n: string) => defs.fns.get(n);
-  let e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), new Set(defs.lists.keys())), getFn, { consts });
+  let e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNamesOf(defs)), getFn, { consts });
   e = lowerGeom(e, () => null, n => defs.mats.get(n) ?? null);
-  return lowerLists(e, n => defs.lists.get(n) ?? null, { consts });
+  return lowerLists(e, listGetter(defs), { consts });
 }
 
 const values = (e: Expr, env: Record<string, number> = {}): number[] => {
+  // Either representation of a list: a typed array (a column, or constant
+  // arithmetic over one) or one expression per element.
+  if (e.kind === 'data') return [...e.values];
   if (e.kind !== 'list') throw new Error(`expected a list, got ${e.kind}`);
   return e.items.map(it => evaluate(it, env));
 };

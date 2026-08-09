@@ -666,6 +666,7 @@ function substAll(e: Expr, v: string, val: Expr): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substAll(a, v, val)) };
     case 'list': return { kind: 'list', items: e.items.map(a => substAll(a, v, val)) };
+    case 'data': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: substAll(c.cond, v, val), value: substAll(c.value, v, val) })),

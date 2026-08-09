@@ -194,6 +194,7 @@ export function toGLSL(e: Expr): string {
     case 'vec':
       throw new Error('Vector in scalar context.');
     case 'list':
+    case 'data':
       throw new Error('A list can only be plotted as its own row.');
     case 'piecewise':
       return piecewiseGLSL(e, toGLSL);

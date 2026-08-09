@@ -26,6 +26,14 @@ export type Expr =
   | { kind: 'vec'; items: Expr[] }
   /** A data list [1, 4, 2] or [(1,2), (3,4)]. Plottable as its own row only. */
   | { kind: 'list'; items: Expr[] }
+  /**
+   * A list of numbers held as a typed array — a CSV column, or anything
+   * constant derived from one. Semantically a `list` of num nodes; the point
+   * is that a 100k-row column costs two objects instead of 100k. Only list
+   * lowering makes or reads one, and like `list` it never survives lowering:
+   * GLSL, diff, and the integrator never see it.
+   */
+  | { kind: 'data'; values: Float64Array }
   /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
   | { kind: 'piecewise'; cases: Array<{ cond: Expr; value: Expr }>; otherwise?: Expr };
 
@@ -40,7 +48,7 @@ export const FUNCTIONS = new Set([
   're', 'im', 'arg', 'conj',
   // List reductions and transforms: lowered symbolically (or evaluated
   // numerically) by list.ts, so nothing downstream ever sees them.
-  'mean', 'total', 'count', 'stdev', 'median', 'sort',
+  'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
   'dot', 'cross', 'perp', 'midpoint', 'unit',
@@ -62,7 +70,7 @@ export const FUNCTIONS = new Set([
  */
 export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'gamma', 'factorial', 'sinc', 'coth',
-  'mean', 'total', 'count', 'stdev', 'median', 'sort',
+  'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
 ]);
 
 /**
@@ -555,6 +563,7 @@ export function substVars(e: Expr, env: Record<string, Expr>): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: substVars(e.l, env), r: substVars(e.r, env) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substVars(a, env)) };
     case 'list': return { kind: 'list', items: e.items.map(a => substVars(a, env)) };
+    case 'data': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: substVars(c.cond, env), value: substVars(c.value, env) })),
@@ -743,7 +752,8 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
     case 'eq': return evaluate(e.l, env) - evaluate(e.r, env);
     case 'ineq': throw new Error('Cannot evaluate an inequality.');
     case 'vec': throw new Error('Vector in scalar context.');
-    case 'list': throw new Error('List in scalar context.');
+    case 'list':
+    case 'data': throw new Error('List in scalar context.');
     case 'piecewise': {
       for (const c of e.cases) {
         if (c.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities.');

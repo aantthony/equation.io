@@ -134,10 +134,14 @@ export const emptyDefs = (): Defs => ({
   tables: new Map(),
 });
 
-/** Rows one data file may expand to. Every element becomes an expression the
- *  renderer evaluates per frame, so this is a responsiveness limit, not a
- *  storage one — instanced typed-array rendering (phase 4) is what lifts it. */
-export const TABLE_MAX_ROWS = 5000;
+/**
+ * Rows one data file may plot. A column reaches the renderer as its own
+ * Float64Array with nothing to evaluate per point, so this is now a drawing
+ * limit rather than an expression one — a much higher ceiling. Combining a
+ * column with t, a slider, or a comparison still expands it to one
+ * expression per row, and list.ts caps that separately (ITEMS_MAX).
+ */
+export const TABLE_MAX_ROWS = 200_000;
 
 /**
  * Thrown when a row needs data this device does not have. The web app turns
@@ -166,7 +170,7 @@ export function columnExprs(col: Column): Expr[] {
 export function listGetter(defs: Defs): GetList {
   return name => {
     const hit = defs.lists.get(name);
-    if (hit) return hit;
+    if (hit) return { kind: 'list', items: hit };
     const dot = name.indexOf('.');
     if (dot <= 0) {
       // A data file is not a value on its own: it is where columns live.
@@ -188,9 +192,11 @@ export function listGetter(defs: Defs): GetList {
       throw new Error(`${name} holds text, not numbers — only number columns plot for now.`);
     }
     if (table.data.rows > TABLE_MAX_ROWS) {
-      throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS} for now.`);
+      throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS}.`);
     }
-    return columnExprs(found);
+    // The column's own array, never mutated downstream: every operation in
+    // list.ts allocates its result.
+    return { kind: 'data', values: found.nums! };
   };
 }
 
@@ -544,6 +550,7 @@ function substIdx(e: Expr, idx: string, val: Expr): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substIdx(a, idx, val)) };
     case 'list': return { kind: 'list', items: e.items.map(a => substIdx(a, idx, val)) };
+    case 'data': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: substIdx(c.cond, idx, val), value: substIdx(c.value, idx, val) })),
@@ -575,6 +582,7 @@ function foldNums(e: Expr): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: foldNums(e.l), r: foldNums(e.r) };
     case 'vec': return { kind: 'vec', items: e.items.map(foldNums) };
     case 'list': return { kind: 'list', items: e.items.map(foldNums) };
+    case 'data': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: foldNums(c.cond), value: foldNums(c.value) })),
@@ -729,6 +737,7 @@ export function usesIntegral(e: Expr): boolean {
     case 'ineq': return usesIntegral(e.l) || usesIntegral(e.r);
     case 'vec': return e.items.some(usesIntegral);
     case 'list': return e.items.some(usesIntegral);
+    case 'data': return false;
     case 'piecewise':
       return e.cases.some(c => usesIntegral(c.cond) || usesIntegral(c.value))
         || (e.otherwise ? usesIntegral(e.otherwise) : false);
@@ -811,6 +820,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         ? { kind: 'call', name: '[range]', args: x.args.map(a => rx(a, ctx)) }
         : rx(x, ctx))),
     };
+    case 'data': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),

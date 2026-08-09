@@ -43,6 +43,7 @@ function exprKey(e: Expr): string {
     case 'ineq': return `(${exprKey(e.l)}${e.op}${exprKey(e.r)})`;
     case 'vec': return `(${e.items.map(exprKey).join(',')})`;
     case 'list': return `[${e.items.map(exprKey).join(',')}]`;
+    case 'data': return `#${e.values.length}`;
     case 'piecewise':
       return `{${e.cases.map(c => `${exprKey(c.cond)}:${exprKey(c.value)}`).join(',')}${e.otherwise ? `,${exprKey(e.otherwise)}` : ''}}`;
   }

@@ -43,6 +43,9 @@ function lowerRow(text: string, defRows: string[], tables: TableSource | null = 
 }
 
 const values = (e: Expr): number[] => {
+  // Either representation of a list: a typed array (a column, or constant
+  // arithmetic over one) or one expression per element.
+  if (e.kind === 'data') return [...e.values];
   if (e.kind !== 'list') throw new Error(`expected a list, got ${e.kind}`);
   return e.items.map(it => evaluate(it, {}));
 };
@@ -107,10 +110,17 @@ describe('columns as lists', () => {
 
   it('broadcasts and zips columns into a scatter', () => {
     expect(values(lowerRow('person.age / 2', rows))).toEqual([18, 20.5, 14.5]);
-    const pts = lowerRow('(person.age, person.height)', rows);
-    expect(classify(pts, new Set()).plot).toMatchObject({ type: 'plist', dim: 2 });
-    expect((pts as Expr & { kind: 'list' }).items.map(p => evaluate((p as Expr & { kind: 'vec' }).items[1], {})))
-      .toEqual([1.7, 1.82, 1.65]);
+    // Two columns stay two typed arrays — the scatter never becomes N points.
+    const plot = classify(lowerRow('(person.age, person.height)', rows), new Set()).plot;
+    expect(plot).toMatchObject({ type: 'dscatter', dim: 2 });
+    expect((plot as { coords: Float64Array[] }).coords.map(c => [...c]))
+      .toEqual([[36, 41, 29], [1.7, 1.82, 1.65]]);
+  });
+
+  it('rides a constant along as the other coordinate', () => {
+    const plot = classify(lowerRow('(person.age, 0)', rows), new Set()).plot;
+    expect(plot).toMatchObject({ type: 'dscatter', dim: 2 });
+    expect([...(plot as { coords: Float64Array[] }).coords[1]]).toEqual([0, 0, 0]);
   });
 
   it('reduces and indexes like any other list', () => {
@@ -138,6 +148,82 @@ describe('columns as lists', () => {
     // A dotted name with no table behind it is just a name.
     expect(lowerRow('foo.bar', rows)).toEqual({ kind: 'var', name: 'foo.bar' });
     expect(evaluate(lowerRow('x.y', []), { 'x.y': 7 })).toBe(7);
+  });
+});
+
+describe('typed-array columns', () => {
+  const rows = [`person = open("people.csv", ${HASH})`];
+  const kindOf = (text: string, defs = rows) => lowerRow(text, defs).kind;
+
+  it('keeps constant arithmetic in the array', () => {
+    for (const text of ['person.age', 'person.age / 2', '-person.age', 'sin(person.age)',
+      'person.age^2 + 1', 'min(person.age, 40)', 'sort(person.age)']) {
+      expect([text, kindOf(text)]).toEqual([text, 'data']);
+    }
+    expect(values(lowerRow('min(person.age, 40)', rows))).toEqual([36, 40, 29]);
+  });
+
+  it('falls back to one expression per row when a slider or t is involved', () => {
+    // A slider has to stay a name, or the shader it feeds would recompile on
+    // every drag; t has no value at all until the frame draws.
+    expect(kindOf('person.age t')).toBe('list');
+    expect(kindOf('person.age c', [...rows, 'c = 2'])).toBe('list');
+    const low = lowerRow('person.age c', [...rows, 'c = 2']) as Expr & { kind: 'list' };
+    expect(low.items.map(it => evaluate(it, { c: 2 }))).toEqual([72, 82, 58]);
+  });
+
+  it('reduces without building an expression per element', () => {
+    // 100k nested adds used to be both the tree and the recursion that read it.
+    const long = ['v', ...Array.from({ length: 100_000 }, () => '2')].join('\n');
+    const tbl = store({ 'long.csv': long });
+    const defs = [`long = open("long.csv", ${HASH})`];
+    expect(evaluate(lowerRow('total(long.v)', defs, tbl), {})).toBe(200_000);
+    expect(evaluate(lowerRow('mean(long.v)', defs, tbl), {})).toBe(2);
+  });
+});
+
+describe('hist', () => {
+  const rows = [`person = open("people.csv", ${HASH})`];
+  const histOf = (text: string, defs = rows, tables?: TableSource) =>
+    classify(lowerRow(text, defs, tables ?? store()), new Set()).plot as
+      { type: string; centers: Float64Array; counts: Float64Array; width: number };
+
+  it('bins a list into touching bars', () => {
+    const h = histOf('hist(L, 4)', ['L = [0, 1, 1, 2, 3]']);
+    expect(h.type).toBe('histogram');
+    expect(h.width).toBeCloseTo(0.75, 12);
+    expect([...h.counts]).toEqual([1, 2, 1, 1]); // the top value joins the last bin
+    expect([...h.centers]).toEqual([0.375, 1.125, 1.875, 2.625]);
+  });
+
+  it('bins a column, choosing a bin count when the row does not', () => {
+    const h = histOf('hist(person.age)');
+    expect(h.counts.length).toBeGreaterThanOrEqual(5);
+    expect([...h.counts].reduce((a, b) => a + b, 0)).toBe(3);
+  });
+
+  it('leaves out missing values and survives a flat column', () => {
+    const tables = store({ 'g.csv': 'v\n1\n\n5\n' });
+    const defs = [`g = open("g.csv", ${HASH})`];
+    expect([...histOf('hist(g.v, 2)', defs, tables).counts]).toEqual([1, 1]);
+    // One repeated value is one bar, whatever bin count was asked for.
+    const flat = store({ 'f.csv': 'v\n3\n3\n3\n' });
+    const h = histOf('hist(f.v, 2)', [`f = open("f.csv", ${HASH})`], flat);
+    expect([...h.counts]).toEqual([3]);
+    expect([...h.centers]).toEqual([3]);
+  });
+
+  it('scales, because the plane has one scale for both axes', () => {
+    const h = histOf('hist(L, 2) / 4', ['L = [0, 0, 0, 1]']);
+    expect([...h.counts]).toEqual([0.75, 0.25]);
+    expect([...histOf('2 hist(L, 2)', ['L = [0, 0, 0, 1]']).counts]).toEqual([6, 2]);
+  });
+
+  it('is a whole row, not a value', () => {
+    expect(() => lowerRow('hist(person.age) + 1', rows)).toThrow(/whole plot/);
+    expect(() => lowerRow('sin(hist(person.age))', rows)).toThrow(/whole plot/);
+    expect(() => lowerRow('hist(4)', rows)).toThrow(/needs a list/);
+    expect(() => lowerRow('hist(person.age, 1)', rows)).toThrow(/2 to 500 bins/);
   });
 });
 
@@ -251,11 +337,16 @@ describe('tables and the rest of the definition system', () => {
     expect(errors.get('avg')).toMatch(/person\.age/);
   });
 
-  it('caps how much data one row expands to', () => {
-    const big = ['v', ...Array.from({ length: 6000 }, (_, k) => String(k))].join('\n');
+  it('plots a big column whole, and expands it only when it must', () => {
+    const big = ['v', ...Array.from({ length: 120_000 }, (_, k) => String(k))].join('\n');
     const rows = [`big = open("big.csv", ${HASH})`];
     const tables = store({ 'big.csv': big });
-    expect(build(rows, tables).errors.size).toBe(0); // the file itself is fine
-    expect(() => lowerRow('big.v', rows, tables)).toThrow(/6000 rows; plotting is limited to 5000/);
+    expect(build(rows, tables).errors.size).toBe(0);
+    // Constant arithmetic stays a typed array however long the column is…
+    const col = lowerRow('(big.v, big.v / 2)', rows, tables);
+    expect(classify(col, new Set()).plot).toMatchObject({ type: 'dscatter' });
+    // …but a slider or t needs one expression per row, and that has a limit.
+    expect(() => lowerRow('big.v sin(t)', rows, tables))
+      .toThrow(/120000 values; only 100000 can be combined/);
   });
 });

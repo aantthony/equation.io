@@ -134,6 +134,11 @@ demand instead of living in a tool description. No authentication required.
   constant shows the numeric value as a readout. mean/total/count/min/max
   expand symbolically, so elements may animate (`mean([sin(t), 2])`);
   stdev/median/sort need constant elements.
+- `hist(L)` bins a list into a bar chart — `hist(L, 40)` sets the bin count
+  (default ≈ √n, between 5 and 60). It is a whole row, not a value, and the
+  one thing you may do to it is scale it: the plane has a single scale for
+  both axes, so counts in the thousands need `hist(L, 40) / 800` to share a
+  view with values in the units. Missing values are left out.
 - List indexing is 1-based, on named lists: with `L = [5, 6, 7]` in a row
   above, `L[2]` is 6 and `L[k]` takes k from a slider. Only a named list
   indexes — `x[2]` is plain multiplication (2x).
@@ -295,9 +300,12 @@ demand instead of living in a tool description. No authentication required.
   enter the URL, opening the link on another device (or rendering it
   server-side, as `create_graph` previews do) reports the data as
   device-local instead of drawing it; dropping the same file there restores
-  it. Up to 5000 rows plot for now. The row's readout opens a preview of the
-  first rows as they parsed. `adults = person[person.age >= 18]` names a
-  filtered copy of a file (see Filters above).
+  it. The row's readout opens a preview of the first rows as they parsed.
+  `adults = person[person.age >= 18]` names a filtered copy of a file (see
+  Filters above). Size: a column and constant arithmetic over it (`col/2`,
+  `sin(col)`, `(a, b)`, reductions, `hist`) stay a single array and plot to
+  200 000 rows; combining a column with t, a slider, or a comparison needs
+  one expression per row and is capped at 100 000.
 - List: `L = [3, 1, 4]` or `L = [1..100]` names a data list; rows below
   broadcast over it (`L^2`, `(L, sort(L))`), reduce it (`mean(L)`), or index
   it (`L[2]`, 1-based). Elements may use constants, states, and t. A list of

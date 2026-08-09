@@ -17,17 +17,30 @@
  * - indexing is 1-based: L[1] is the first element.
  * - mean/total/count and min/max over a list lower symbolically, so their
  *   elements may animate with t; stdev/median/sort need a constant list.
+ *
+ * Two representations, one meaning. A list of PLAIN NUMBERS — a CSV column,
+ * or anything built from one by constant arithmetic — is a `data` node
+ * wrapping a Float64Array, so a 100k-row scatter costs two objects and the
+ * renderer reads coordinates straight out of the array. Anything else (an
+ * element that moves with t, a slider that must stay a shader uniform, a
+ * comparison) takes the symbolic path, where every element is its own
+ * expression and ITEMS_MAX bounds the damage. `expand` converts the first
+ * into the second whenever the fast path cannot carry an operation.
  */
 import { add, div, mul } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
-import { type Expr, evaluate, freeVars, ineqComparisons } from './expr.ts';
+import { EVAL_FNS, type Expr, evaluate, freeVars, ineqComparisons, realPow } from './expr.ts';
 
-export type GetList = (name: string) => readonly Expr[] | null;
+/** A named list's elements: a `list` node (symbolic) or a `data` node. */
+export type GetList = (name: string) => Expr | null;
 
 /** Elements one [a..b] range may expand to. */
 const RANGE_MAX = 10_000;
-/** Total list elements one lowering may materialize across all operations. */
+/** Total list elements one lowering may materialize AS EXPRESSIONS. Typed
+ *  arrays do not count: they are the cheap path, bounded by DATA_MAX. */
 const ITEMS_MAX = 100_000;
+/** Numbers one row's typed arrays may hold, in total (8 bytes each). */
+const DATA_MAX = 4_000_000;
 
 /** Reductions that lower symbolically — their elements may depend on t. */
 const SYMBOLIC_REDUCTIONS = new Set(['mean', 'total', 'count']);
@@ -44,11 +57,20 @@ interface Ctx {
   opts: ResolveOpts;
   /** List elements materialized so far (ranges, zips, maps all count). */
   items: number;
+  /** Numbers held in typed arrays built so far. */
+  data: number;
+  /** hist(…) nodes built: they are whole rows, not values. */
+  hists: number;
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 
 const isList = (e: Expr): e is Expr & { kind: 'list' } => e.kind === 'list';
+const isData = (e: Expr): e is Expr & { kind: 'data' } => e.kind === 'data';
+/** Either representation of a list of values. */
+const isSeq = (e: Expr): e is Expr & { kind: 'list' | 'data' } => isList(e) || isData(e);
+const seqLength = (e: Expr & { kind: 'list' | 'data' }): number =>
+  (e.kind === 'data' ? e.values.length : e.items.length);
 const isRange = (e: Expr): e is Expr & { kind: 'call' } =>
   e.kind === 'call' && e.name === '[range]';
 
@@ -59,6 +81,65 @@ function listOf(items: Expr[], ctx: Ctx): Expr {
   }
   return { kind: 'list', items };
 }
+
+function dataOf(values: Float64Array, ctx: Ctx): Expr {
+  ctx.data += values.length;
+  if (ctx.data > DATA_MAX) {
+    throw new Error(`This expression works over too much data (limit ${DATA_MAX} values).`);
+  }
+  return { kind: 'data', values };
+}
+
+/**
+ * Turn a typed array back into one expression per element, for operations the
+ * fast path cannot carry — anything involving t, a slider that must stay a
+ * uniform, or a comparison. This is where a big column meets ITEMS_MAX.
+ */
+function expand(e: Expr, ctx: Ctx): Expr {
+  if (!isData(e)) return e;
+  if (e.values.length > ITEMS_MAX) {
+    throw new Error(`That is ${e.values.length} values; only ${ITEMS_MAX} can be combined with sliders, t, or comparisons.`);
+  }
+  return listOf([...e.values].map(num), ctx);
+}
+
+/**
+ * Combine operands elementwise as numbers, when they all are numbers: typed
+ * arrays and literals only. A slider or an unresolved variable returns null,
+ * so those keep the symbolic path and shaders keep their uniforms.
+ */
+function fastMap(parts: Expr[], f: (xs: number[]) => number, ctx: Ctx): Expr | null {
+  let n: number | null = null;
+  for (const p of parts) {
+    if (isData(p)) {
+      if (n !== null && p.values.length !== n) {
+        throw new Error(`Lists have different lengths (${n} vs ${p.values.length}).`);
+      }
+      n = p.values.length;
+    } else if (p.kind !== 'num') {
+      return null;
+    }
+  }
+  if (n === null) return null;
+  const out = new Float64Array(n);
+  const xs = parts.map(p => (isData(p) ? 0 : (p as Expr & { kind: 'num' }).value));
+  for (let k = 0; k < n; k++) {
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      if (isData(p)) xs[i] = p.values[k];
+    }
+    out[k] = f(xs);
+  }
+  return dataOf(out, ctx);
+}
+
+const BIN_OPS: Record<string, (a: number, b: number) => number> = {
+  '+': (a, b) => a + b,
+  '-': (a, b) => a - b,
+  '*': (a, b) => a * b,
+  '/': (a, b) => a / b,
+  '^': realPow,
+};
 
 /** Evaluate a subexpression that must be a known number (range bounds,
  *  indices) from constants and sliders, like Σ/Π bounds. */
@@ -85,7 +166,7 @@ function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
   for (const item of raw) {
     if (!isRange(item)) {
       const low = lower(item, ctx);
-      if (isList(low)) throw new Error('Lists cannot be nested.');
+      if (isSeq(low)) throw new Error('Lists cannot be nested.');
       out.push(low);
       continue;
     }
@@ -192,6 +273,41 @@ function numericItems(items: readonly Expr[], ctx: Ctx, name: string): number[] 
   return items.map(it => constVal(it, ctx, `${name}(…) needs a constant list, so each element`));
 }
 
+/**
+ * Reductions straight off a typed array: no expression tree at all, which
+ * matters twice over — a 100k-element `total` used to build a 100k-deep sum
+ * that `evaluate` then recursed through.
+ */
+function reduceData(name: string, xs: Float64Array, ctx: Ctx): Expr {
+  const n = xs.length;
+  switch (name) {
+    case 'count': return num(n);
+    case 'total':
+    case 'mean': {
+      let sum = 0;
+      for (const x of xs) sum += x;
+      return num(name === 'total' ? sum : sum / n);
+    }
+    case 'min': return num(n ? xs.reduce((a, b) => Math.min(a, b)) : NaN);
+    case 'max': return num(n ? xs.reduce((a, b) => Math.max(a, b)) : NaN);
+    case 'stdev': {
+      if (n < 2) throw new Error('stdev needs at least 2 elements.');
+      let sum = 0;
+      for (const x of xs) sum += x;
+      const mean = sum / n;
+      let sq = 0;
+      for (const x of xs) sq += (x - mean) ** 2;
+      return num(Math.sqrt(sq / (n - 1)));
+    }
+    case 'median': {
+      const s = Float64Array.from(xs).sort();
+      return num(n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2);
+    }
+    case 'sort': return dataOf(Float64Array.from(xs).sort(), ctx);
+  }
+  throw new Error(`Unknown reduction: ${name}.`);
+}
+
 function reduce(name: string, items: readonly Expr[], ctx: Ctx): Expr {
   if (items.some(it => it.kind === 'vec')) {
     throw new Error(`${name}(…) over a list of points is not supported yet.`);
@@ -227,89 +343,216 @@ function reduce(name: string, items: readonly Expr[], ctx: Ctx): Expr {
   throw new Error(`Unknown reduction: ${name}.`);
 }
 
+/** Bins for n values, when the row did not say: about √n, kept readable. */
+const binCount = (n: number): number => Math.min(60, Math.max(5, Math.round(Math.sqrt(n))));
+
+/**
+ * Bin values into a histogram. The result is a call node carrying three
+ * typed arrays — centers, counts, and one bin width — which classify turns
+ * into a bar row; it is not a value, so it may not feed anything else.
+ * Missing values (NaN) are left out, exactly as filtering leaves them out.
+ */
+function histBars(centers: Float64Array, counts: Float64Array, width: number, ctx: Ctx): Expr {
+  ctx.hists++;
+  return {
+    kind: 'call',
+    name: '[hist]',
+    args: [dataOf(centers, ctx), dataOf(counts, ctx), num(width)],
+  };
+}
+
+const oneBin = (at: number, count: number, ctx: Ctx): Expr =>
+  histBars(Float64Array.of(at), Float64Array.of(count), 1, ctx);
+
+const isHist = (e: Expr): e is Expr & { kind: 'call' } =>
+  e.kind === 'call' && e.name === '[hist]';
+
+/**
+ * `hist(L) / 1000`, `0.001 hist(L)` — scale the bars.
+ *
+ * The plane has one scale for both axes (a circle has to look like a circle),
+ * so counts in the thousands cannot share a view with values in the units.
+ * Rather than pick a normalization and call it the truth, the row says what
+ * it wants: the counts are still counts, divided by a number you can see.
+ */
+function scaleHist(op: string, a: Expr, b: Expr, ctx: Ctx): Expr | null {
+  const hist = isHist(a) ? a : isHist(b) ? b : null;
+  if (!hist) return null;
+  const other = hist === a ? b : a;
+  if (other.kind !== 'num' || !(op === '*' || (op === '/' && hist === a))) {
+    throw new Error('hist(…) is a whole plot — it can only be scaled, as hist(L)/1000.');
+  }
+  const factor = op === '*' ? other.value : 1 / other.value;
+  const counts = (hist.args[1] as Expr & { kind: 'data' }).values;
+  const scaled = new Float64Array(counts.length);
+  for (let k = 0; k < counts.length; k++) scaled[k] = counts[k] * factor;
+  // The original bars were counted once; only their heights change.
+  ctx.hists--;
+  return histBars((hist.args[0] as Expr & { kind: 'data' }).values, scaled,
+    (hist.args[2] as Expr & { kind: 'num' }).value, ctx);
+}
+
+function histogram(xs: Float64Array, bins: number | null, ctx: Ctx): Expr {
+  const finite = xs.filter(v => isFinite(v));
+  if (!finite.length) throw new Error('hist(…) needs at least one value.');
+  let lo = finite[0];
+  let hi = finite[0];
+  for (const v of finite) {
+    if (v < lo) lo = v;
+    if (v > hi) hi = v;
+  }
+  // Every value identical: one bin, a unit wide, centred on the value —
+  // splitting a single value across bins says nothing.
+  if (hi === lo) return oneBin(lo, finite.length, ctx);
+  const k = bins ?? binCount(finite.length);
+  const width = (hi - lo) / k;
+  const counts = new Float64Array(k);
+  for (const v of finite) {
+    // The top edge belongs to the last bin, not to a bin past the end.
+    const at = Math.min(k - 1, Math.floor((v - lo) / width));
+    counts[at]++;
+  }
+  const centers = new Float64Array(k);
+  for (let i = 0; i < k; i++) centers[i] = lo + (i + 0.5) * width;
+  return histBars(centers, counts, width, ctx);
+}
+
 function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
   const low = lower(target, ctx);
-  if (!isList(low)) {
+  if (!isSeq(low)) {
     const name = target.kind === 'var' ? target.name : 'this';
     throw new Error(`${name} is not a list here — define it above where it is used.`);
   }
+  const n = seqLength(low);
   const idxLow = lower(idx, ctx);
   const keep = maskValues(idxLow, ctx.opts);
   if (keep) {
-    if (keep.length !== low.items.length) {
-      throw new Error(`The filter tests ${keep.length} values but the list has ${low.items.length}.`);
+    if (keep.length !== n) {
+      throw new Error(`The filter tests ${keep.length} values but the list has ${n}.`);
     }
-    const items = low.items.filter((_, k) => keep[k]);
-    if (!items.length) throw new Error(`That filter keeps nothing (0 of ${keep.length}).`);
-    return listOf(items, ctx);
+    const kept = keep.reduce((c, k) => c + (k ? 1 : 0), 0);
+    if (!kept) throw new Error(`That filter keeps nothing (0 of ${keep.length}).`);
+    if (isData(low)) {
+      const out = new Float64Array(kept);
+      let at = 0;
+      for (let k = 0; k < n; k++) if (keep[k]) out[at++] = low.values[k];
+      return dataOf(out, ctx);
+    }
+    return listOf(low.items.filter((_, k) => keep[k]), ctx);
   }
-  if (isList(idxLow)) {
+  if (isSeq(idxLow)) {
     throw new Error('Slicing L[a..b] is not supported yet — index one element, like L[1].');
   }
   const v = constVal(idxLow, ctx, 'A list index');
   const k = Math.round(v);
   if (Math.abs(v - k) > 1e-9) throw new Error('List indices must be whole numbers.');
   if (k === 0) throw new Error('Lists are 1-based: the first element is L[1].');
-  if (k < 1 || k > low.items.length) {
-    throw new Error(`Index ${k} is out of range — the list has ${low.items.length} element${low.items.length === 1 ? '' : 's'}.`);
+  if (k < 1 || k > n) {
+    throw new Error(`Index ${k} is out of range — the list has ${n} element${n === 1 ? '' : 's'}.`);
   }
-  return low.items[k - 1];
+  return isData(low) ? num(low.values[k - 1]) : low.items[k - 1];
 }
 
 function lower(e: Expr, ctx: Ctx): Expr {
   switch (e.kind) {
     case 'num':
-    case 'var': {
-      if (e.kind === 'var') {
-        const items = ctx.getList(e.name);
-        if (items) return listOf([...items], ctx);
-      }
+    case 'data':
       return e;
+    case 'var': {
+      const hit = ctx.getList(e.name);
+      if (!hit) return e;
+      // A `list` node's items belong to the definition: copy before anything
+      // downstream can hold on to the array.
+      return isList(hit) ? listOf([...hit.items], ctx) : hit;
     }
-    case 'neg':
-      return zipN([lower(e.a, ctx)], ([a]) => ({ kind: 'neg', a }), ctx);
-    case 'bin':
-      return zipN(
-        [lower(e.a, ctx), lower(e.b, ctx)],
-        ([a, b]) => ({ kind: 'bin', op: e.op, a, b }),
-        ctx,
-      );
+    case 'neg': {
+      const a = lower(e.a, ctx);
+      return fastMap([a], xs => -xs[0], ctx)
+        ?? zipN([expand(a, ctx)], ([x]) => ({ kind: 'neg', a: x }), ctx);
+    }
+    case 'bin': {
+      const a = lower(e.a, ctx);
+      const b = lower(e.b, ctx);
+      const scaled = scaleHist(e.op, a, b, ctx);
+      if (scaled) return scaled;
+      const op = BIN_OPS[e.op];
+      return fastMap([a, b], xs => op(xs[0], xs[1]), ctx)
+        ?? zipN(
+          [expand(a, ctx), expand(b, ctx)],
+          ([x, y]) => ({ kind: 'bin', op: e.op, a: x, b: y }),
+          ctx,
+        );
+    }
     case 'call': {
       if (e.name === '[index]') return lowerIndex(e, ctx);
       const args = e.args.map(a => lower(a, ctx));
-      const listArgs = args.filter(isList);
+      if (e.name === 'hist') {
+        const [arg, binsArg] = args;
+        if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
+        const bins = binsArg === undefined ? null
+          : Math.round(constVal(binsArg, ctx, 'The number of bins'));
+        if (bins !== null && (bins < 2 || bins > 500)) {
+          throw new Error('hist(…) takes 2 to 500 bins.');
+        }
+        if (args.length > 2) throw new Error('hist(…) takes a list and, optionally, a number of bins.');
+        const xs = isData(arg)
+          ? arg.values
+          : Float64Array.from(numericItems(arg.items, ctx, 'hist'));
+        return histogram(xs, bins, ctx);
+      }
       const isMinMax = e.name === 'min' || e.name === 'max';
       if (SYMBOLIC_REDUCTIONS.has(e.name) || NUMERIC_REDUCTIONS.has(e.name)
-        || (isMinMax && args.length === 1 && isList(args[0]))) {
-        if (args.length !== 1 || !isList(args[0])) {
+        || (isMinMax && args.length === 1 && isSeq(args[0]))) {
+        if (args.length !== 1 || !isSeq(args[0])) {
           if (args.length === 1 && args[0].kind === 'var') {
             throw new Error(`${e.name}(${args[0].name}) needs ${args[0].name} to be a list defined above this row.`);
           }
           throw new Error(`${e.name}(…) needs a list, like ${e.name}([1, 4, 2]).`);
         }
-        return reduce(e.name, args[0].items, ctx);
+        const arg = args[0];
+        return isData(arg)
+          ? reduceData(e.name, arg.values, ctx)
+          : reduce(e.name, (arg as Expr & { kind: 'list' }).items, ctx);
       }
-      if (!listArgs.length) return { kind: 'call', name: e.name, args };
+      if (!args.some(isSeq)) return { kind: 'call', name: e.name, args };
       if (NO_LIST_INSIDE.has(e.name)) {
         const label = e.name.startsWith('[') ? e.name.slice(1, -1) : e.name;
         throw new Error(`Lists cannot appear inside ${label}(…).`);
       }
       // Scalar builtins map elementwise: sin(L), atan2(L, M), min(L, 5).
-      return zipN(args, comps => ({ kind: 'call', name: e.name, args: comps }), ctx);
+      const fn = EVAL_FNS[e.name];
+      const fast = fn && fastMap(args, xs => fn(...xs), ctx);
+      return fast
+        ?? zipN(args.map(a => expand(a, ctx)), comps => ({ kind: 'call', name: e.name, args: comps }), ctx);
     }
-    case 'vec':
+    case 'vec': {
+      const items = e.items.map(it => lower(it, ctx));
+      // A scatter of columns stays two typed arrays rather than N points:
+      // classify reads the coordinates straight out of them.
+      if (items.some(isData) && items.every(it => isData(it) || it.kind === 'num')) {
+        const n = seqLength(items.find(isData)!);
+        for (const it of items) {
+          if (isData(it) && it.values.length !== n) {
+            throw new Error(`Lists have different lengths (${n} vs ${it.values.length}).`);
+          }
+        }
+        return { kind: 'vec', items };
+      }
       return zipN(
-        e.items.map(it => lower(it, ctx)),
+        items.map(it => expand(it, ctx)),
         comps => ({ kind: 'vec', items: comps }),
         ctx,
       );
+    }
     case 'list':
       return listOf(expandItems(e.items, ctx), ctx);
     case 'eq':
     case 'ineq': {
-      const l = lower(e.l, ctx);
-      const r = lower(e.r, ctx);
+      // Comparisons are the symbolic path: a mask is per-element structure
+      // (and chains nest), so a typed array expands here.
+      const l = expand(lower(e.l, ctx), ctx);
+      const r = expand(lower(e.r, ctx), ctx);
       if (e.kind === 'ineq' && (isList(l) || isList(r))) {
         // A mask, for a filter. It is only meaningful inside [ ]; anywhere
         // else it reaches classify as a list of comparisons and is refused.
@@ -325,7 +568,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
     case 'piecewise': {
       const cases = e.cases.map(c => ({ cond: lower(c.cond, ctx), value: lower(c.value, ctx) }));
       const otherwise = e.otherwise && lower(e.otherwise, ctx);
-      if (cases.some(c => isList(c.value)) || (otherwise && isList(otherwise))) {
+      if (cases.some(c => isSeq(c.value)) || (otherwise && isSeq(otherwise))) {
         throw new Error('Lists are not supported inside {…} piecewise yet.');
       }
       return { kind: 'piecewise', cases, otherwise };
@@ -341,9 +584,13 @@ function lower(e: Expr, ctx: Ctx): Expr {
  * to integers), exactly as Σ/Π expansion does.
  */
 export function lowerLists(e: Expr, getList: GetList, opts: ResolveOpts = {}): Expr {
-  const out = lower(e, { getList, opts, items: 0 });
+  const ctx: Ctx = { getList, opts, items: 0, data: 0, hists: 0 };
+  const out = lower(e, ctx);
   if (isMask(out)) {
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
+  }
+  if (ctx.hists && !(out.kind === 'call' && out.name === '[hist]')) {
+    throw new Error('hist(…) is a whole plot — give it its own row.');
   }
   return out;
 }
@@ -355,7 +602,7 @@ export function lowerLists(e: Expr, getList: GetList, opts: ResolveOpts = {}): E
  * over a list.
  */
 export function lowerMask(cond: Expr, getList: GetList, opts: ResolveOpts = {}): boolean[] | null {
-  return maskValues(lower(cond, { getList, opts, items: 0 }), opts);
+  return maskValues(lower(cond, { getList, opts, items: 0, data: 0, hists: 0 }), opts);
 }
 
 /** Whether a parsed (unresolved) row calls a list reduction — such rows get
@@ -364,6 +611,7 @@ export function usesListReduction(e: Expr): boolean {
   const REDUCTIONS = new Set([...SYMBOLIC_REDUCTIONS, ...NUMERIC_REDUCTIONS]);
   switch (e.kind) {
     case 'num':
+    case 'data':
     case 'var': return false;
     case 'neg': return usesListReduction(e.a);
     case 'bin': return usesListReduction(e.a) || usesListReduction(e.b);

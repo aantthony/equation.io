@@ -175,6 +175,9 @@ const CURVE_SAMPLES = 400;
 const ODE_STEPS = 1400;
 /** Most integral-curve seeds kept at once; older seeds evict first. */
 const MAX_DROPS = 12;
+/** Above this many points, a typed-array list draws as a bulk cloud rather
+ *  than as individual (outlined, hoverable) points. */
+const CLOUD_MIN = 400;
 const TUBE_SEGMENTS = 24;
 const COMB_STEP = 4;
 
@@ -558,6 +561,8 @@ function render() {
         case 'vfield2d':
         case 'polygon':
         case 'vlist':
+        case 'dlist':
+        case 'histogram':
         case 'sequence':
         case 'cobweb':
         case 'bifurcation':
@@ -565,6 +570,18 @@ function render() {
         case 'prob':
         case 'expect':
           break; // 2D-only plots (densities, flows, sequences, planar figures); skipped in 3D scenes
+        case 'dscatter': {
+          // A 3D cloud still draws one sprite per point (render3d has no
+          // instanced path), so it stays capped where 2D does not.
+          const [xs, ys, zs] = plot.coords;
+          const n = Math.min(xs.length, CLOUD_MIN * 25);
+          for (let k = 0; k < n; k++) {
+            if (isFinite(xs[k]) && isFinite(ys[k])) {
+              scene.points.push({ pos: [xs[k], ys[k], zs ? zs[k] : 0], color });
+            }
+          }
+          break;
+        }
         case 'plist': {
           const env = { ...constEnv, t: time };
           for (const comps of plot.pts) {
@@ -646,7 +663,7 @@ function render() {
       levels: [], fractals: [], domains: [], conformals: [], vfields: [],
       ineqs: [], bifs: [], scalars: [], complexes: [], curves: [],
     };
-    const extras: Overlay2D = { points: [], polylines: [], bars: [] };
+    const extras: Overlay2D = { points: [], polylines: [], bars: [], clouds: [] };
     // Spacing for any level-set family (custom grids, contour stacks): sample
     // |∇c| around the view to convert the target pixel gap into coordinate
     // units (π-based for angles).
@@ -742,6 +759,46 @@ function render() {
               const py = evaluate(comps[1], env);
               if (isFinite(px) && isFinite(py)) extras.points.push({ x: px, y: py, color: css, r, bare: dense });
             } catch { /* skip unevaluable points */ }
+          }
+          break;
+        }
+        // Typed-array lists: nothing to evaluate, so the only question is how
+        // to draw them. Few enough to read as individual points, and they go
+        // through the same path as any other point (outlines, bars); past
+        // that they are a cloud, drawn in bulk.
+        case 'dlist': {
+          const { values } = plot;
+          if (values.length <= CLOUD_MIN) {
+            values.forEach((v, k) => {
+              if (!isFinite(v)) return;
+              if (eq.barMode) extras.bars!.push({ x: k + 1, y: v, halfWidth: 0.35, color: css });
+              else extras.points.push({ x: k + 1, y: v, color: css, r: 4 });
+            });
+            break;
+          }
+          const xs = new Float64Array(values.length);
+          for (let k = 0; k < xs.length; k++) xs[k] = k + 1;
+          extras.clouds!.push({ xs, ys: values, color: css });
+          break;
+        }
+        case 'dscatter': {
+          if (plot.dim === 3) break; // drawn in the 3D pass
+          const [xs, ys] = plot.coords;
+          if (xs.length <= CLOUD_MIN) {
+            for (let k = 0; k < xs.length; k++) {
+              if (isFinite(xs[k]) && isFinite(ys[k])) {
+                extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
+              }
+            }
+            break;
+          }
+          extras.clouds!.push({ xs, ys, color: css });
+          break;
+        }
+        case 'histogram': {
+          const { centers, counts, width } = plot;
+          for (let k = 0; k < centers.length; k++) {
+            extras.bars!.push({ x: centers[k], y: counts[k], halfWidth: width / 2, color: css });
           }
           break;
         }
@@ -1804,6 +1861,15 @@ function rowToggle(eq: Equation): { label: string; title: string; on: boolean; f
       };
     case 'vlist':
       return {
+        label: 'bars',
+        title: 'Draw the list as bars instead of dots',
+        on: !!eq.barMode,
+        flip: () => { eq.barMode = !eq.barMode; },
+      };
+    case 'dlist':
+      // Bars only while the list is small enough to draw as shapes; past
+      // that it is a cloud and a bar per point would be a solid block.
+      return eq.cls.plot.values.length > CLOUD_MIN ? null : {
         label: 'bars',
         title: 'Draw the list as bars instead of dots',
         on: !!eq.barMode,
