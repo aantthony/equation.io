@@ -102,7 +102,11 @@ describe('open() rows', () => {
   it('needs a hash long enough to name one file', () => {
     // A row resolves by hash PREFIX, so a short token can match more than one
     // stored file — binding to the wrong bytes is what the pin exists to stop.
-    expect(scanDefinition('p = open("a.csv", abc123)')).not.toMatchObject({ kind: 'table' });
+    // Not scanned as a constant either, or the row validator — the only
+    // thing that can explain the short hash — would never run on it.
+    expect(scanDefinition('p = open("a.csv", abc123)')).toBeNull();
+    expect(scanDefinition('p = open("a.csv"')).toBeNull();
+    expect(badTableRow('p = open("a.csv"')).toMatch(/reads p = open\("file\.csv"\)/);
     expect(scanDefinition('p = open("a.csv", abc123abc123)')).toMatchObject({ hash: 'abc123abc123' });
     // Which would otherwise read as a constant and complain about the quotes.
     expect(badTableRow('p = open("a.csv", abc123)')).toMatch(/hash is 12 hex digits; that is 6/);
@@ -307,6 +311,18 @@ describe('filters', () => {
     expect(values(lowerRow('p.age[p.age > 0]', rows, src))).toEqual([30, 40]);
   });
 
+  it('drops a missing TEXT cell from every test too', () => {
+    const src: TableSource = () => parseCsv('city,pop\nNYC,10\n,20\nOslo,30\n');
+    const rows = ['p = open("gaps.csv")'];
+    expect(values(lowerRow('p.pop[p.city != "NYC"]', rows, src))).toEqual([30]);
+    expect(values(lowerRow('p.pop[p.city == "NYC"]', rows, src))).toEqual([10]);
+    // An "N/A" reads as a gap in a text column exactly as in a numeric one,
+    // so the only other row drops out and the filter keeps nothing at all.
+    const na: TableSource = () => parseCsv('city,pop\nNYC,10\nN/A,20\n');
+    expect(() => lowerRow('p.pop[p.city != "NYC"]', rows, na)).toThrow(/keeps nothing/);
+    expect(parseCsv('city,pop\nNYC,10\n,20\n').missing.get('city')).toBe(1);
+  });
+
   it('reads a chained comparison as one test', () => {
     expect(values(lowerRow('person.age[30 <= person.age < 40]', rows))).toEqual([36]);
   });
@@ -394,7 +410,10 @@ describe('data that is not on this device', () => {
     // not. Without this a shared link calls `person[5]` fine and the author's
     // own device rejects it the moment the data arrives.
     const shape = 'person[…] needs a comparison, like person[person.x > 0].';
-    for (const cond of ['5', 'person.age', 'sin(person.age)', 'person.age + 1', '1 < 2']) {
+    for (const cond of ['5', 'person.age', 'sin(person.age)', 'person.age + 1', '1 < 2',
+      // A list has to REACH the comparison: these collapse to one scalar
+      // first, so they decide the same answer for every row.
+      'mean(person.age) > 0', 'person.age[1] > 0', 'min(person.age) > 0']) {
       expect([...build([...rows, `adults = person[${cond}]`], null).errors])
         .toEqual([['adults', shape]]);
       // …and the device WITH the data agrees, which is the whole point.

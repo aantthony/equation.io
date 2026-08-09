@@ -109,6 +109,20 @@ let activeUserFns: ReadonlySet<string> = new Set();
 let activeListNames: ReadonlySet<string> = new Set();
 
 /**
+ * Whether `name[…]` indexes rather than multiplies.
+ *
+ * A dotted path counts when its HEAD is known, not only the full path: a data
+ * file whose bytes are on another device cannot list its columns, and without
+ * this `person.age[2]` would parse as a product there and as an index on the
+ * author's machine — the same row meaning two things.
+ */
+const indexes = (name: string): boolean => {
+  if (activeListNames.has(name)) return true;
+  const dot = name.indexOf('.');
+  return dot > 0 && activeListNames.has(name.slice(0, dot));
+};
+
+/**
  * Resolve a symbol to a built-in function name, folding case so `Sin`, `SIN`
  * and `sin` all reach the same builtin. Returns null if it is not a builtin
  * (user functions, which are case-sensitive, are handled separately).
@@ -499,7 +513,7 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
       // both: a CSV column headed `sin` gives `person.sin`, and `mean` is
       // shadowable, so `mean = [1, 4, 2]` then `mean[2]` is an index.
       const isIndex = token.type === 'parenopen' && token.str === '['
-        && last!.type === 'symbol' && activeListNames.has(path ?? last!.str);
+        && last!.type === 'symbol' && indexes(path ?? last!.str);
       const isFnCall = !isIndex && token.type === 'parenopen' && last!.type === 'symbol' && isFnName(last!.str);
       yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };

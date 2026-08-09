@@ -249,7 +249,20 @@ export function parseCsv(text: string): Table {
       }
     }
     if (!seen) numeric = false; // an all-blank column is text, not a run of NaN
-    if (!numeric) return { name, label: header[c].trim(), type: 'str', strs: cells.map(s => s.trim()) };
+    if (!numeric) {
+      // A gap is a gap in a text column too: the same cell that would read as
+      // NaN in a numeric column ("", "N/A", "-") is stored as the empty
+      // string, which every comparison answers no to (list.ts), and counted
+      // like any other missing value.
+      let blanks = 0;
+      const strs = cells.map(s => {
+        if (!isBlankCell(s)) return s.trim();
+        blanks++;
+        return '';
+      });
+      if (blanks) missing.set(name, blanks);
+      return { name, label: header[c].trim(), type: 'str', strs };
+    }
     const nums = new Float64Array(cells.length);
     let gaps = 0;
     cells.forEach((cell, k) => {

@@ -1510,14 +1510,28 @@ async function openDataFiles(files: File[]) {
     if (!changed) pushUndo(null);
     changed = true;
     // Re-dropping a file the document already names re-pins those rows,
-    // rather than adding a second copy under another name.
+    // rather than adding a second copy under another name — but only rows
+    // that asked for it. A row pinned to a DIFFERENT hash named those exact
+    // bytes on purpose; silently repointing it is the substitution the pin
+    // exists to prevent, and it would happen to whoever opened a shared graph
+    // and picked their own file of the same name. Those rows keep their
+    // hash, and the new bytes arrive as a row of their own.
     let known = false;
+    let pinnedElsewhere = 0;
     for (const eq of equations) {
       const d = eq.def;
       if (d?.kind !== 'table' || d.file !== loaded.file) continue;
+      if (d.hash && !loaded.hash.startsWith(d.hash)) {
+        pinnedElsewhere++;
+        continue;
+      }
       known = true;
       const text = formatTableRow(d.name, d.file, loaded.hash);
       if (text !== eq.text.trim()) eq.text = text;
+    }
+    if (pinnedElsewhere) {
+      added.push(`${loaded.file}: ${pinnedElsewhere} row${pinnedElsewhere === 1 ? '' : 's'}`
+        + ' pinned to other bytes kept — delete the hash there to use this file');
     }
     if (known) {
       added.push(`${loaded.file} reloaded`);
@@ -2556,9 +2570,16 @@ listEl.addEventListener('click', e => {
 });
 
 // Highlight the line holding the caret (no per-line focus to key off).
+let focusedLine: number | undefined;
 document.addEventListener('selectionchange', () => {
   const pos = caretPos();
   lineEls().forEach((line, i) => line.classList.toggle('focused', i === pos?.line));
+  // Leaving a row is when its hash gets pinned. pinTableHashes skips whatever
+  // line the caret is on, so without this the exception outlives the editing:
+  // type `open("people.csv")`, click away, share, and the link is unpinned.
+  if (pos?.line === focusedLine) return;
+  focusedLine = pos?.line;
+  if (pinTableHashes()) reconcile();
 });
 
 // --- examples menu ---

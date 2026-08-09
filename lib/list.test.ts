@@ -166,6 +166,22 @@ describe('reductions', () => {
   });
 });
 
+describe('range steps', () => {
+  it('takes the step from a constant, like the bounds', () => {
+    // The element before `..` sets the step, so it has the same standing as
+    // the bounds themselves: a constant or a slider, not only a literal.
+    const { errors } = defsOf(['a = 0', 'b = 0.5', 'L = [a, b..2]']);
+    expect([...errors]).toEqual([]);
+    // `a` stays symbolic (only the range expands), so read it with a in scope.
+    expect(values(lowerRow('[a, b..2]', ['a = 0', 'b = 0.5']), { a: 0 }))
+      .toEqual([0, 0.5, 1, 1.5, 2]);
+  });
+
+  it('still refuses one that cannot settle', () => {
+    expect(() => lowerRow('[t, 0.5..2]')).toThrow(/cannot depend on t/);
+  });
+});
+
 describe('indexing', () => {
   const L = ['L = [5,6,7]'];
   it('is 1-based', () => {

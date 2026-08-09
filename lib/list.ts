@@ -50,6 +50,10 @@ const ITEMS_MAX = 100_000;
 const DATA_MAX = 4_000_000;
 
 /** Reductions that lower symbolically — their elements may depend on t. */
+/** Reductions that answer with ONE number however long the list is. `sort` is
+ *  not among them: it hands back a list of the same length. */
+export const SCALAR_REDUCTIONS = new Set(['mean', 'total', 'count', 'stdev', 'median']);
+
 const SYMBOLIC_REDUCTIONS = new Set(['mean', 'total', 'count']);
 /** Reductions that need numeric elements (ordering), so a constant list. */
 const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
@@ -185,11 +189,11 @@ function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
     const hi = constVal(item.args[1], ctx, 'A ".." range bound');
     let step = hi >= lo ? 1 : -1;
     if (out.length) {
-      const prev = out[out.length - 1];
-      if (prev.kind !== 'num') {
-        throw new Error('The element before a ".." range must be a plain number (it sets the step).');
-      }
-      step = lo - prev.value;
+      // The element before the range sets the step, so it needs a value at
+      // expansion time — the same standing as the bounds themselves, which
+      // means a constant or a slider counts: `a = 0; b = 0.5; [a, b..2]`.
+      const prev = constVal(out[out.length - 1], ctx, 'The element before a ".." range (it sets the step)');
+      step = lo - prev;
       if (step === 0) throw new Error('The ".." range step is zero.');
       if ((hi - lo) / step < -1e-9) {
         throw new Error('The ".." range step points away from its end value.');
@@ -261,6 +265,9 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
     // Text compares as text and numbers as numbers; the two never match,
     // which is the honest answer for `person.city == 3`.
     if (l.kind === 'str' || r.kind === 'str') {
+      // A blank cell is text's NaN (csv.ts stores it as ""), so it fails
+      // every test including `!=` — the same rule the numeric side follows.
+      if ((l.kind === 'str' && !l.value) || (r.kind === 'str' && !r.value)) return false;
       const same = l.kind === 'str' && r.kind === 'str' && l.value === r.value;
       return cond.name === '[eq]' ? same : !same;
     }

@@ -265,6 +265,42 @@ Four of these came out of the first round of fixes, three were older:
   picked the comma. The final counter is dropped only when it is the empty
   row after a newline, or a record the sample limit cut short.
 
+### Third pass
+
+Four of these six came out of the second:
+
+- **The short-hash message never reached the row.** `scanDefinition` fell
+  through to `CONST_RE`, so the row was a definition and the row validator —
+  the only thing that could explain the hash — never ran on it; the reader
+  got "p_x can only depend on other constants and t (found open)". Any
+  `name = open("…` row that does not parse as a table is now left to
+  `badTableRow`, which also has a general message for the other malformations.
+- **The filter shape check still let a reduced list through.**
+  `person[mean(person.age) > 0]` mentions a column but compares one scalar.
+  `staysList` now asks whether a list actually *reaches* the comparison:
+  arithmetic and scalar functions map over one, a reduction or an index
+  collapses it.
+- **Column paths parse the same with or without the file.** `person.age[2]`
+  read as a product where the bytes were absent, because `listNamesOf` cannot
+  enumerate the columns of a file it does not have — so the same row meant two
+  different things. Indexing now accepts a dotted path whose *head* is known.
+- **Leaving a row did not pin it.** `pinTableHashes` skips the caret's row,
+  and nothing ran when the caret left, so the exception outlived the editing:
+  type an unpinned row, click away, share, and the link was unpinned. The
+  `selectionchange` handler pins on a line change.
+- **A missing text cell now fails every comparison**, `!=` included, like the
+  numeric side: blanks and `N/A` in a text column are stored as `""` and
+  counted as missing, rather than comparing as ordinary text.
+- **A stepped range takes its step from a constant.** `a = 0; b = 0.5;
+  [a, b..2]` threw, though the documented rule gives bounds and step the same
+  standing.
+
+And the guarantee in the design stance above is now actually enforced:
+**dropping a same-named file no longer repoints a row pinned to other bytes.**
+Only unpinned rows and matching hashes are re-pinned; the new bytes arrive as
+a row of their own, with a notice, so nothing is substituted silently and
+nothing is a dead end.
+
 ## Testing
 
 - lib: parser (ranges, indexing, strings, member), broadcasting incl.

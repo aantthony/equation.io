@@ -22,11 +22,11 @@
  */
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, SHADOWABLE_FNS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { FUNCTIONS, SHADOWABLE_FNS, type Expr, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
-import { type GetList, type Seq, isSeq, lowerLists, lowerMask } from './list.ts';
+import { type GetList, type Seq, SCALAR_REDUCTIONS, isSeq, lowerLists, lowerMask } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 
 export type Definition =
@@ -228,6 +228,34 @@ export function listNamesOf(defs: Defs): Set<string> {
 }
 
 /**
+ * Whether this side of a comparison is still a list by the time the
+ * comparison sees it — the question list.ts answers by lowering, asked here
+ * of the shape alone, because on a device without the bytes there is nothing
+ * to lower. Arithmetic and scalar functions map over a list; a reduction or
+ * an index collapses one, and `[ ]` is itself a filter.
+ */
+function staysList(e: Expr, defs: Defs): boolean {
+  switch (e.kind) {
+    case 'var':
+      return defs.lists.has(e.name) || defs.missingLists.has(e.name)
+        || (e.name.includes('.') && defs.tables.has(e.name.slice(0, e.name.indexOf('.'))));
+    case 'list':
+    case 'data':
+    case 'text': return true;
+    case 'neg': return staysList(e.a, defs);
+    case 'bin': return staysList(e.a, defs) || staysList(e.b, defs);
+    case 'call':
+      // A reduction answers with one number however long its argument is,
+      // and `[at]`/`[index]` pick one element out.
+      if (SCALAR_REDUCTIONS.has(e.name) || e.name === '[at]' || e.name === '[index]') return false;
+      if ((e.name === 'min' || e.name === 'max') && e.args.length === 1) return false;
+      return e.args.some(a => staysList(a, defs));
+    case 'vec': return e.items.some(a => staysList(a, defs));
+    default: return false;
+  }
+}
+
+/**
  * What a filter can be judged without reading a single row: that it is a
  * comparison over a list, and that it could ever settle. Everything else —
  * which rows it keeps, how many there are — needs the file (list.ts decides
@@ -240,13 +268,15 @@ function checkFilterShape(cond: Expr, defs: Defs, shape: string): void {
   const comparison = cond.kind === 'ineq'
     || (cond.kind === 'call' && (cond.name === '[eq]' || cond.name === '[ne]'));
   if (!comparison) throw new Error(shape);
-  // …and it has to compare a list, or it decides one answer for every row:
-  // `person[1 < 2]` is not a filter, it is an opinion.
-  const vars = freeVars(cond);
-  const overList = [...vars].some(n => defs.lists.has(n) || defs.missingLists.has(n)
-    || (n.includes('.') && defs.tables.has(n.slice(0, n.indexOf('.')))));
-  if (!overList) throw new Error(shape);
-  if (vars.has('t')) {
+  // …and a list has to REACH it. Merely mentioning one is not enough:
+  // `person[mean(person.age) > 0]` and `person[person.age[1] > 0]` reduce to a
+  // single scalar, so they decide one answer for every row — `person[1 < 2]`
+  // wearing a column's name. Only operations that map over a list keep it one.
+  const operands = cond.kind === 'ineq'
+    ? ineqComparisons(cond).flatMap(c => [c.l, c.r])
+    : cond.args;
+  if (!operands.some(a => staysList(a, defs))) throw new Error(shape);
+  if (freeVars(cond).has('t')) {
     throw new Error('A filter cannot depend on t — the list would change length every frame.');
   }
 }
@@ -315,6 +345,9 @@ const TABLE_RE = new RegExp(
 export const rowSafeFileName = (name: string): string =>
   name.replace(/["\r\n\t]+/g, '_').trim() || 'data.csv';
 
+/** A row that means to open a file, whether or not it succeeds at saying so. */
+const OPEN_HEAD_RE = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*["']/;
+
 /** How an `open(…)` row is written, for the app's write-back. */
 export const formatTableRow = (name: string, file: string, hash: string): string =>
   `${name} = open("${rowSafeFileName(file)}"${hash ? `, ${shortHash(hash)}` : ''})`;
@@ -326,7 +359,7 @@ export const formatTableRow = (name: string, file: string, hash: string): string
  * knows that quotes are not arithmetic.
  */
 export function badTableRow(text: string): string | null {
-  const m = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*["']/.exec(text);
+  const m = OPEN_HEAD_RE.exec(text);
   if (!m) return null;
   if (!nameable(m[1])) {
     return `${m[1]} is a built-in name, so it cannot name a data file — try ${m[1]}_data = open(…).`;
@@ -337,7 +370,11 @@ export function badTableRow(text: string): string | null {
     return `A data file's hash is ${HASH_TOKEN_LEN} hex digits; that is ${short[1].length}.`
       + ' Delete it and the app will fill in the right one.';
   }
-  return null;
+  // Something else malformed. scanDefinition hands every open-shaped row here
+  // rather than reading it as a constant, so this is the only explanation the
+  // row will get — the expression parser only knows quotes are not arithmetic.
+  return `A data file row reads ${m[1]} = open("file.csv")`
+    + `, with an optional ${HASH_TOKEN_LEN}-digit hash after the name.`;
 }
 
 /** A name a definition may claim: not a builtin (except the late-addition
@@ -358,6 +395,11 @@ export function scanDefinition(text: string): Definition | null {
   if (m && nameable(m[1])) {
     return { kind: 'table', name: m[1], file: m[2] ?? m[3], hash: (m[4] ?? '').toLowerCase() };
   }
+  // A row that plainly means to open a file but does not parse as one is NOT
+  // a constant: `p = open("a.csv", abc123)` would otherwise be scanned as a
+  // definition, and the row validator — the only thing that can explain the
+  // short hash — never runs on definition rows. Leave it to badTableRow.
+  if (OPEN_HEAD_RE.test(text)) return null;
   m = FN_RE.exec(text);
   if (m && nameable(m[1])) {
     return { kind: 'fn', name: m[1], params: m[2].split(/\s*,\s*/), rhs: m[3] };
