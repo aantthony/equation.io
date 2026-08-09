@@ -13,7 +13,7 @@ import {
   resolveExpr,
   scanDefinition,
 } from './defs.ts';
-import { type Expr, evaluate, parseExpr } from './expr.ts';
+import { type Expr, evaluate, freeVars, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import { lowerLists } from './list.ts';
 import { classify } from './plot.ts';
@@ -245,6 +245,30 @@ describe('a scatter of three columns', () => {
   });
 });
 
+describe('a reduction over a whole column', () => {
+  it('nests logarithmically, so the stack survives it', () => {
+    // Folding left nested one node per element, and every consumer of an Expr
+    // recurses (freeVars, evaluate, toGLSL, diff): a column crossed with t
+    // blew the stack well inside the advertised expansion limit.
+    const N = 30000;
+    const rows = ['big = open("big.csv")'];
+    const src: TableSource = () => parseCsv('v\n' + Array.from({ length: N }, (_, i) => i + 1).join('\n') + '\n');
+    for (const text of ['total(big.v t)', 'mean(big.v t)', 'min(big.v t)']) {
+      const e = lowerRow(text, rows, src);
+      let depth = 0;
+      for (let n: Expr | undefined = e; n; ) {
+        if (n.kind === 'bin') { depth++; n = n.a; }
+        else if (n.kind === 'call' && n.args.length) { depth++; n = n.args[0]; }
+        else break;
+      }
+      expect(depth).toBeLessThan(64);
+      expect(() => freeVars(e)).not.toThrow();
+      expect(evaluate(e, { t: 1 })).toBeGreaterThan(0);
+    }
+    expect(evaluate(lowerRow('total(big.v t)', rows, src), { t: 2 })).toBe(N * (N + 1));
+  });
+});
+
 describe('hist', () => {
   const rows = [`person = open("people.csv", ${HASH})`];
   const histOf = (text: string, defs = rows, tables?: TableSource) =>
@@ -413,7 +437,9 @@ describe('data that is not on this device', () => {
     for (const cond of ['5', 'person.age', 'sin(person.age)', 'person.age + 1', '1 < 2',
       // A list has to REACH the comparison: these collapse to one scalar
       // first, so they decide the same answer for every row.
-      'mean(person.age) > 0', 'person.age[1] > 0', 'min(person.age) > 0']) {
+      'mean(person.age) > 0', 'person.age[1] > 0', 'min(person.age) > 0',
+      // hist is a whole plot, so it is not a value a filter can compare.
+      'hist(person.age) > 0']) {
       expect([...build([...rows, `adults = person[${cond}]`], null).errors])
         .toEqual([['adults', shape]]);
       // …and the device WITH the data agrees, which is the whole point.
@@ -437,6 +463,22 @@ describe('data that is not on this device', () => {
     // clean, which they deliberately are not here).
     const use = parseExpr('mean(ages)', new Set(), listNamesOf(defs));
     expect(() => lowerLists(use, listGetter(defs), {})).toThrow(/does not travel in the link/);
+  });
+
+  it('tells a missing LIST from a missing number', () => {
+    // Both keep their provenance, but only the list-shaped one is a list:
+    // calling a scalar one would make `avg` index here and multiply on the
+    // device that has the bytes, and would let a filter over it pass here.
+    const { defs, errors } = build([...rows, 'ages = person.age / 2', 'avg = mean(person.age)'], null);
+    expect([...errors].map(e => e[0])).toEqual(['ages', 'avg']);
+    expect(defs.missingData.get('ages')).toMatchObject({ list: true });
+    expect(defs.missingData.get('avg')).toMatchObject({ list: false });
+    expect(listNamesOf(defs).has('ages')).toBe(true);
+    expect(listNamesOf(defs).has('avg')).toBe(false);
+    // So a filter over the scalar is refused here exactly as it is there.
+    const shape = 'person[…] needs a comparison, like person[person.x > 0].';
+    expect(build([...rows, 'avg = mean(person.age)', 'adults = person[avg > 30]'], null)
+      .errors.get('adults')).toBe(shape);
   });
 
   it('points a row that reads a missing file at the file, not at the name', () => {

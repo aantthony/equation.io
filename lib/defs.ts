@@ -110,12 +110,17 @@ export interface Defs {
    */
   lists: Map<string, Seq>;
   /**
-   * Named lists whose definition needed a data file this device does not
-   * have (`ages = person.age / 2`), and the reason. Registered instead of
-   * the list, so a row below reports the file rather than degrading into
+   * Definitions that needed a data file this device does not have
+   * (`ages = person.age / 2`, `avg = mean(person.age)`): the reason, and
+   * whether the value would have been a list. Registered instead of the
+   * definition, so a row below reports the file rather than degrading into
    * "ages is not defined" — the same courtesy `tables` does for a column.
+   *
+   * The `list` flag has to be right: it decides whether the name indexes and
+   * whether a filter over it is well formed, and getting it wrong makes a
+   * shared link valid on one device and not the other.
    */
-  missingLists: Map<string, string>;
+  missingData: Map<string, { message: string; list: boolean }>;
   /**
    * Data files opened by name: `person = open("people.csv", 3a7f…)`. Each
    * numeric column reads as a list under its dotted name (`person.age`), so
@@ -143,7 +148,7 @@ export const emptyDefs = (): Defs => ({
   vecStates: new Map(),
   mats: new Map(),
   lists: new Map(),
-  missingLists: new Map(),
+  missingData: new Map(),
   tables: new Map(),
 });
 
@@ -184,8 +189,8 @@ export function listGetter(defs: Defs): GetList {
   return name => {
     const hit = defs.lists.get(name);
     if (hit) return hit;
-    const absent = defs.missingLists.get(name);
-    if (absent) throw new MissingDataError(absent);
+    const absent = defs.missingData.get(name);
+    if (absent?.list) throw new MissingDataError(absent.message);
     const dot = name.indexOf('.');
     if (dot <= 0) {
       // A data file is not a value on its own: it is where columns live.
@@ -219,7 +224,10 @@ export function listGetter(defs: Defs): GetList {
  *  `person[…]` index instead of multiplying (parseExpr needs this before it
  *  parses). Table names count: a data file is indexed by a filter. */
 export function listNamesOf(defs: Defs): Set<string> {
-  const out = new Set([...defs.lists.keys(), ...defs.missingLists.keys()]);
+  const out = new Set([...defs.lists.keys()]);
+  // A list whose file is elsewhere still indexes: the row must parse the same
+  // way on every device (see `indexes` in expr.ts).
+  for (const [name, m] of defs.missingData) if (m.list) out.add(name);
   for (const [name, t] of defs.tables) {
     out.add(name);
     for (const c of t.data?.columns ?? []) out.add(`${name}.${c.name}`);
@@ -237,7 +245,7 @@ export function listNamesOf(defs: Defs): Set<string> {
 function staysList(e: Expr, defs: Defs): boolean {
   switch (e.kind) {
     case 'var':
-      return defs.lists.has(e.name) || defs.missingLists.has(e.name)
+      return defs.lists.has(e.name) || defs.missingData.get(e.name)?.list === true
         || (e.name.includes('.') && defs.tables.has(e.name.slice(0, e.name.indexOf('.'))));
     case 'list':
     case 'data':
@@ -249,6 +257,9 @@ function staysList(e: Expr, defs: Defs): boolean {
       // and `[at]`/`[index]` pick one element out.
       if (SCALAR_REDUCTIONS.has(e.name) || e.name === '[at]' || e.name === '[index]') return false;
       if ((e.name === 'min' || e.name === 'max') && e.args.length === 1) return false;
+      // hist is a whole plot, not a value — list.ts refuses it in a filter
+      // once the bytes are here, so it must not look list-shaped before then.
+      if (e.name === 'hist' || e.name === '[hist]') return false;
       return e.args.some(a => staysList(a, defs));
     case 'vec': return e.items.some(a => staysList(a, defs));
     default: return false;
@@ -1129,10 +1140,21 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       errors.set(defKey(d), msg(e));
       if (e instanceof MissingDataError) {
         needsFile.add(defKey(d));
-        // The name is still a list — one whose file is elsewhere. Registered
-        // so rows below report the file too, instead of "ages is not
-        // defined", which sends the reader looking for a typo.
-        if (d.kind === 'const') defs.missingLists.set(d.name, e.message);
+        // The name still means something — a value whose file is elsewhere.
+        // Registered so rows below report the file too, instead of "ages is
+        // not defined", which sends the reader looking for a typo.
+        //
+        // Whether it is a LIST is read off the shape, the same way a filter's
+        // is: `ages = person.age / 2` is one, `avg = mean(person.age)` is a
+        // number. Calling a scalar a list would make it index here and
+        // multiply on the device that has the bytes.
+        if (d.kind === 'const') {
+          const shape = parsed.get(defKey(d));
+          defs.missingData.set(d.name, {
+            message: e.message,
+            list: shape ? staysList(shape, defs) : false,
+          });
+        }
       }
     }
   }

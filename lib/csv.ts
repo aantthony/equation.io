@@ -293,7 +293,12 @@ export function filterTable(table: Table, keep: readonly boolean[]): Table {
   const missing = new Map<string, number>();
   const columns = table.columns.map((col): Column => {
     if (col.type === 'str') {
-      return { ...col, strs: col.strs!.filter((_, k) => keep[k]) };
+      const strs = col.strs!.filter((_, k) => keep[k]);
+      // A blank text cell is a gap like a NaN, and the cut has to recount
+      // them or the derived table's preview claims the data is complete.
+      const gaps = strs.reduce((n, s) => n + (s ? 0 : 1), 0);
+      if (gaps) missing.set(col.name, gaps);
+      return { ...col, strs };
     }
     const nums = new Float64Array(rows);
     let at = 0;

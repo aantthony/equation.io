@@ -22,6 +22,9 @@ export interface LoadedFile {
   table: Table;
   size: number;
   addedAt: number;
+  /** False when the bytes could not be written to storage, so this file lasts
+   *  only as long as the tab does (private browsing, quota, disabled IDB). */
+  durable?: boolean;
 }
 
 /**
@@ -205,10 +208,16 @@ export async function ingest(rawName: string, bytes: Uint8Array): Promise<Loaded
   attempted.delete(`${hash}|${fileName}`);
   // Ask for durable storage the first time the user actually keeps data here.
   navigator.storage?.persist?.().catch(() => {});
-  await withStores('readwrite', async tx => {
+  const written = await withStores('readwrite', async tx => {
     tx.objectStore(BLOBS).put({ hash, bytes } satisfies StoredBytes);
     await request(tx.objectStore(STORE).put(rec));
+    return true;
   });
+  // The file works right now either way — it is in memory. But the row that
+  // is about to name it promises the bytes will be here after a reload, and
+  // with storage disabled (private browsing, a full quota) they will not be.
+  // Say so at the drop, rather than letting the graph come back empty.
+  loaded.durable = written === true;
   return loaded;
 }
 

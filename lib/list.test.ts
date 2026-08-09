@@ -166,6 +166,15 @@ describe('reductions', () => {
   });
 });
 
+describe('reductions build a balanced tree', () => {
+  it('still sums, means, and picks the same values', () => {
+    expect(evaluate(lowerRow('total([1..4] t)'), { t: 2 })).toBe(20);
+    expect(evaluate(lowerRow('mean([1..4] t)'), { t: 2 })).toBe(5);
+    expect(evaluate(lowerRow('min([3,1,2] t)'), { t: 1 })).toBe(1);
+    expect(evaluate(lowerRow('max([3,1,2] t)'), { t: 1 })).toBe(3);
+  });
+});
+
 describe('range steps', () => {
   it('takes the step from a constant, like the bounds', () => {
     // The element before `..` sets the step, so it has the same standing as
@@ -175,6 +184,17 @@ describe('range steps', () => {
     // `a` stays symbolic (only the range expands), so read it with a in scope.
     expect(values(lowerRow('[a, b..2]', ['a = 0', 'b = 0.5']), { a: 0 }))
       .toEqual([0, 0.5, 1, 1.5, 2]);
+  });
+
+  it('does not snap the step slider to whole numbers', () => {
+    // boundConsts makes the app give a slider step="1", so recording a
+    // fractional step there stopped `b = 0.5` from ever being 0.5.
+    expect([...defsOf(['b = 0.5', 'L = [0, b..2]']).sumBoundConsts]).toEqual([]);
+    expect([...defsOf(['b = 0.5', 'M = median([b, 2])']).sumBoundConsts]).toEqual([]);
+    // Nor a range bound, which is an ordinary number too ([1..3.5] is legal).
+    expect([...defsOf(['N = 4', 'L = [1..N]']).sumBoundConsts]).toEqual([]);
+    // An index does snap: there is no element 2.5.
+    expect([...defsOf(['k = 2', 'L = [1..5]', 'val = L[k]']).sumBoundConsts]).toEqual(['k']);
   });
 
   it('still refuses one that cannot settle', () => {

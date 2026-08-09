@@ -49,11 +49,11 @@ const ITEMS_MAX = 100_000;
 /** Numbers one row's typed arrays may hold, in total (8 bytes each). */
 const DATA_MAX = 4_000_000;
 
-/** Reductions that lower symbolically — their elements may depend on t. */
 /** Reductions that answer with ONE number however long the list is. `sort` is
  *  not among them: it hands back a list of the same length. */
 export const SCALAR_REDUCTIONS = new Set(['mean', 'total', 'count', 'stdev', 'median']);
 
+/** Reductions that lower symbolically — their elements may depend on t. */
 const SYMBOLIC_REDUCTIONS = new Set(['mean', 'total', 'count']);
 /** Reductions that need numeric elements (ordering), so a constant list. */
 const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
@@ -158,7 +158,7 @@ const BIN_OPS: Record<string, (a: number, b: number) => number> = {
 
 /** Evaluate a subexpression that must be a known number (range bounds,
  *  indices) from constants and sliders, like Σ/Π bounds. */
-function constVal(e: Expr, ctx: Ctx, what: string): number {
+function constVal(e: Expr, ctx: Ctx, what: string, whole = false): number {
   const env: Record<string, number> = {};
   for (const fv of freeVars(e)) {
     const v = ctx.opts.consts?.[fv];
@@ -166,7 +166,10 @@ function constVal(e: Expr, ctx: Ctx, what: string): number {
       if (fv === 't') throw new Error(`${what} cannot depend on t.`);
       throw new Error(`${what} must be constant — add "${fv} = 5" in a row above.`);
     }
-    ctx.opts.boundConsts?.add(fv);
+    // boundConsts snaps a slider to whole numbers, so only record the
+    // variables of something that HAS to be an integer. A step or an element
+    // is an ordinary number: `b = 0.5; [0, b..2]` must keep its half.
+    if (whole) ctx.opts.boundConsts?.add(fv);
     env[fv] = v;
   }
   const v = evaluate(e, env);
@@ -185,6 +188,8 @@ function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
       out.push(low);
       continue;
     }
+    // NOT marked whole: a range bound is an ordinary number ([1..3.5] is
+    // legal), and in `[0, b..2]` the bound IS the thing that sets the step.
     const lo = constVal(item.args[0], ctx, 'A ".." range bound');
     const hi = constVal(item.args[1], ctx, 'A ".." range bound');
     let step = hi >= lo ? 1 : -1;
@@ -352,6 +357,29 @@ function reduceData(name: string, xs: Float64Array, ctx: Ctx): Expr {
   throw new Error(`Unknown reduction: ${name}.`);
 }
 
+/**
+ * Combine a list into one expression as a BALANCED tree, pairing neighbours
+ * and halving until one is left.
+ *
+ * Folding left instead would nest as deep as the list is long, and the
+ * consumers of an Expr — freeVars, evaluate, toGLSL, diff — all recurse: a
+ * column of 30 000 elements crossed with `t` overflowed the stack while
+ * still inside the advertised expansion limit. Balanced, the depth is log₂ n
+ * (17 for 100 000), and the arithmetic is the same expression either way.
+ */
+function fold(items: readonly Expr[], join: (a: Expr, b: Expr) => Expr): Expr | null {
+  if (!items.length) return null;
+  let level = items as Expr[];
+  while (level.length > 1) {
+    const next: Expr[] = [];
+    for (let k = 0; k < level.length; k += 2) {
+      next.push(k + 1 < level.length ? join(level[k], level[k + 1]) : level[k]);
+    }
+    level = next;
+  }
+  return level[0];
+}
+
 function reduce(name: string, items: readonly Expr[], ctx: Ctx): Expr {
   if (items.some(it => it.kind === 'vec')) {
     throw new Error(`${name}(…) over a list of points is not supported yet.`);
@@ -361,16 +389,12 @@ function reduce(name: string, items: readonly Expr[], ctx: Ctx): Expr {
     case 'count': return num(n);
     case 'total':
     case 'mean': {
-      let acc: Expr = items[0] ?? num(0);
-      for (let k = 1; k < n; k++) acc = add(acc, items[k]);
+      const acc = fold(items, add) ?? num(0);
       return name === 'total' ? acc : div(acc, num(n));
     }
     case 'min':
-    case 'max': {
-      let acc: Expr = items[0];
-      for (let k = 1; k < n; k++) acc = { kind: 'call', name, args: [acc, items[k]] };
-      return acc;
-    }
+    case 'max':
+      return fold(items, (a, b) => ({ kind: 'call', name, args: [a, b] }))!;
     case 'stdev': {
       if (n < 2) throw new Error('stdev needs at least 2 elements.');
       const xs = numericItems(items, ctx, name);
@@ -489,7 +513,7 @@ function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   if (isSeq(idxLow)) {
     throw new Error('Slicing L[a..b] is not supported yet — index one element, like L[1].');
   }
-  const v = constVal(idxLow, ctx, 'A list index');
+  const v = constVal(idxLow, ctx, 'A list index', true);
   const k = Math.round(v);
   if (Math.abs(v - k) > 1e-9) throw new Error('List indices must be whole numbers.');
   if (k === 0) throw new Error('Lists are 1-based: the first element is L[1].');
@@ -540,7 +564,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
         const [arg, binsArg] = args;
         if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
         const bins = binsArg === undefined ? null
-          : Math.round(constVal(binsArg, ctx, 'The number of bins'));
+          : Math.round(constVal(binsArg, ctx, 'The number of bins', true));
         if (bins !== null && (bins < 2 || bins > 500)) {
           throw new Error('hist(…) takes 2 to 500 bins.');
         }

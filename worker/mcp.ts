@@ -170,7 +170,13 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
   let png: string | undefined;
   let preview: string;
   if (!plotRows.length) {
-    preview = 'none — no plot rows to draw';
+    // A row reading a local CSV never classifies, so it is not in plotRows —
+    // "no plot rows to draw" would tell the caller their graph is empty when
+    // it is only unrenderable HERE, and preview_omits says otherwise two
+    // lines down.
+    preview = dataOmits.length
+      ? 'none — every plot row reads a data file on the author\'s device (see preview_omits; the graph itself is fine)'
+      : 'none — no plot rows to draw';
   } else if (omitted.length === plotRows.length) {
     preview = 'none — the static preview cannot draw any of these rows (see preview_omits; this says nothing about whether the graph works)';
   } else {

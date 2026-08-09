@@ -301,6 +301,37 @@ Only unpinned rows and matching hashes are re-pinned; the new bytes arrive as
 a row of their own, with a notice, so nothing is substituted silently and
 nothing is a dead end.
 
+### Fourth pass
+
+- **A reduction over a big column overflowed the stack.** `total`/`mean`/
+  `min`/`max` folded LEFT, nesting one node per element, and every consumer
+  of an Expr recurses — a 30 000-row column crossed with `t` blew the stack
+  well inside the advertised expansion limit. `fold` pairs neighbours and
+  halves, so the depth is log₂ n (17 at 100 000) for the same arithmetic.
+- **A dropped file that could not be stored said nothing.** `ingest`
+  discarded the write result, so with IndexedDB unavailable the row promised
+  bytes that would not survive a reload. The notice says so at the drop.
+- **The 3D cap covered one representation of two.** Crossing a column with a
+  slider or `t` expands the cloud into a symbolic `plist`, which bypassed
+  `CLOUD_3D_MAX` — and that is the more expensive form, re-evaluated per
+  frame. Both are capped.
+- **`missingData` distinguishes a missing list from a missing number.**
+  Registering every failed constant as a missing *list* (last round's fix)
+  made `avg = mean(person.age)` index like a list and let a filter over it
+  pass — on the device without the bytes only. The shape decides now.
+- **`hist` is not list-shaped** for the filter check: it is a whole plot, and
+  list.ts refuses it in a filter once the data is there.
+- **A slider only snaps to whole numbers where a whole number is required.**
+  `constVal` recorded every variable it touched, so `b = 0.5; [0, b..2]` and
+  even `median([b, 2])` forced `b` to integer steps. Only an index and a bin
+  count do that now — a range bound does not, since `[1..3.5]` is legal and
+  in `[0, b..2]` the bound IS the step.
+- Smaller: a filtered table recounts gaps in its text columns; the notice is
+  a live region (it is the only feedback a drop gets, and it disappears); the
+  file-delete button has a name beyond `✕`; and the MCP preview no longer
+  reports "no plot rows to draw" for a graph whose every plot row reads a
+  local file, which contradicted its own `preview_omits`.
+
 ## Testing
 
 - lib: parser (ranges, indexing, strings, member), broadcasting incl.

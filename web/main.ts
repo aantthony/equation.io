@@ -1342,13 +1342,16 @@ function recompileAll() {
       eq.cls = classify(parsed, constNames);
       // A 3-column scatter only ever draws in 3D, where every point is a
       // sprite. Say so here rather than plotting the first CLOUD_3D_MAX of a
-      // sorted file, which looks like the whole thing.
-      if (eq.cls.plot.type === 'dscatter' && eq.cls.plot.dim === 3) {
-        const n = eq.cls.plot.coords[0].length;
-        if (n > CLOUD_3D_MAX) {
-          throw new Error(`A 3D cloud draws at most ${CLOUD_3D_MAX} points; that is ${n}.`
-            + ' Filter it first, or plot two of the columns.');
-        }
+      // sorted file, which looks like the whole thing. BOTH representations
+      // count: crossing a column with a slider or t expands the same cloud
+      // into a symbolic plist, which is if anything the more expensive one
+      // (every point re-evaluated per frame).
+      const cloud3d = eq.cls.plot.type === 'dscatter' && eq.cls.plot.dim === 3
+        ? eq.cls.plot.coords[0].length
+        : eq.cls.plot.type === 'plist' && eq.cls.plot.dim === 3 ? eq.cls.plot.pts.length : 0;
+      if (cloud3d > CLOUD_3D_MAX) {
+        throw new Error(`A 3D cloud draws at most ${CLOUD_3D_MAX} points; that is ${cloud3d}.`
+          + ' Filter it first, or plot two of the columns.');
       }
       eq.parsed = parsed;
       // A row that wrote an ∫ or a list reduction and resolved to a constant
@@ -1547,7 +1550,8 @@ async function openDataFiles(files: File[]) {
     if (nums.length >= 2 && loaded.table.rows <= TABLE_MAX_ROWS) {
       addEquation(`(${name}.${nums[0].name}, ${name}.${nums[1].name})`, at + 1);
     }
-    added.push(`${loaded.file}: ${loaded.table.rows} rows as ${name}`);
+    added.push(`${loaded.file}: ${loaded.table.rows} rows as ${name}`
+      + (loaded.durable ? '' : ' (this browser is not storing files — it will be gone on reload)'));
   }
   if (!changed) return;
   recompileAll();
@@ -1569,7 +1573,14 @@ let noticeEl: HTMLElement | null = null;
 let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
 function showNotice(text: string) {
-  noticeEl ??= document.body.appendChild(Object.assign(document.createElement('div'), { className: 'notice' }));
+  // A live region: this is the ONLY feedback that a file parsed, failed, or
+  // will not survive a reload, and it disappears after five seconds — with no
+  // announcement, a screen-reader user has nothing to go back and read.
+  noticeEl ??= document.body.appendChild(Object.assign(document.createElement('div'), {
+    className: 'notice',
+    role: 'status',
+  }));
+  noticeEl.setAttribute('aria-live', 'polite');
   noticeEl.textContent = text;
   noticeEl.classList.add('show');
   if (noticeTimer !== null) clearTimeout(noticeTimer);
@@ -1629,6 +1640,9 @@ async function refreshFileMenu() {
     del.className = 'file-del';
     del.textContent = '✕';
     del.title = `Forget ${f.name} (rows that open it will ask for it again)`;
+    // The glyph is the whole visible label, so the file name has to come from
+    // somewhere a screen reader reads — title is not that place.
+    del.setAttribute('aria-label', `Forget ${f.name}`);
     del.addEventListener('click', async () => {
       await removeFile(f.hash);
       await refreshFileMenu();

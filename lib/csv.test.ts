@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { cellNumber, parseCsv, parseRecords, sniffDelimiter, tableNameFor } from './csv.ts';
+import { cellNumber, filterTable, parseCsv, parseRecords, sniffDelimiter, tableNameFor } from './csv.ts';
 
 const col = (t: ReturnType<typeof parseCsv>, name: string) => t.columns.find(c => c.name === name)!;
 const nums = (t: ReturnType<typeof parseCsv>, name: string) => [...col(t, name).nums!];
@@ -148,6 +148,20 @@ describe('parseCsv', () => {
     const t = parseCsv('a,b\n');
     expect(t.rows).toBe(0);
     expect(t.columns.map(c => c.type)).toEqual(['str', 'str']);
+  });
+});
+
+describe('filterTable', () => {
+  it('recounts gaps in text columns as well as numeric ones', () => {
+    const t = parseCsv('city,pop\nNYC,10\n,20\nOslo,\n');
+    const all = filterTable(t, [true, true, true]);
+    expect(all.missing.get('city')).toBe(1);
+    expect(all.missing.get('pop')).toBe(1);
+    expect(all.warnings[0]).toMatch(/2 missing values/);
+    // …and forgets the ones the cut removed.
+    const cut = filterTable(t, [true, false, false]);
+    expect([...cut.missing]).toEqual([]);
+    expect(cut.warnings).toEqual([]);
   });
 });
 
