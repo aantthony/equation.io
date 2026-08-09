@@ -23,7 +23,7 @@
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import { FUNCTIONS, SHADOWABLE_FNS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
-import { shortHash } from './hash.ts';
+import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
 import { type GetList, type Seq, isSeq, lowerLists, lowerMask } from './list.ts';
@@ -110,6 +110,13 @@ export interface Defs {
    */
   lists: Map<string, Seq>;
   /**
+   * Named lists whose definition needed a data file this device does not
+   * have (`ages = person.age / 2`), and the reason. Registered instead of
+   * the list, so a row below reports the file rather than degrading into
+   * "ages is not defined" — the same courtesy `tables` does for a column.
+   */
+  missingLists: Map<string, string>;
+  /**
    * Data files opened by name: `person = open("people.csv", 3a7f…)`. Each
    * numeric column reads as a list under its dotted name (`person.age`), so
    * everything lists can do — broadcasting, reductions, scatters — applies to
@@ -136,6 +143,7 @@ export const emptyDefs = (): Defs => ({
   vecStates: new Map(),
   mats: new Map(),
   lists: new Map(),
+  missingLists: new Map(),
   tables: new Map(),
 });
 
@@ -176,6 +184,8 @@ export function listGetter(defs: Defs): GetList {
   return name => {
     const hit = defs.lists.get(name);
     if (hit) return hit;
+    const absent = defs.missingLists.get(name);
+    if (absent) throw new MissingDataError(absent);
     const dot = name.indexOf('.');
     if (dot <= 0) {
       // A data file is not a value on its own: it is where columns live.
@@ -209,7 +219,7 @@ export function listGetter(defs: Defs): GetList {
  *  `person[…]` index instead of multiplying (parseExpr needs this before it
  *  parses). Table names count: a data file is indexed by a filter. */
 export function listNamesOf(defs: Defs): Set<string> {
-  const out = new Set(defs.lists.keys());
+  const out = new Set([...defs.lists.keys(), ...defs.missingLists.keys()]);
   for (const [name, t] of defs.tables) {
     out.add(name);
     for (const c of t.data?.columns ?? []) out.add(`${name}.${c.name}`);
@@ -219,14 +229,24 @@ export function listNamesOf(defs: Defs): Set<string> {
 
 /**
  * What a filter can be judged without reading a single row: that it is a
- * comparison at all, and that it could ever settle. Everything else — which
- * rows it keeps, how many there are — needs the file (list.ts decides those).
+ * comparison over a list, and that it could ever settle. Everything else —
+ * which rows it keeps, how many there are — needs the file (list.ts decides
+ * those). The two answers must agree, or a shared link is valid only on the
+ * device that has the bytes.
  */
-function checkFilterShape(cond: Expr, shape: string): void {
-  // A value where a comparison belongs. `person[5]`, `person[person.age]`:
-  // exactly the rows list.ts refuses once the bytes are here.
-  if (['num', 'str', 'data', 'text', 'vec', 'var'].includes(cond.kind)) throw new Error(shape);
-  if (freeVars(cond).has('t')) {
+function checkFilterShape(cond: Expr, defs: Defs, shape: string): void {
+  // A mask is a list of comparisons, so the condition has to BE one:
+  // `person[5]`, `person[person.age]`, `person[sin(person.age)]` are values.
+  const comparison = cond.kind === 'ineq'
+    || (cond.kind === 'call' && (cond.name === '[eq]' || cond.name === '[ne]'));
+  if (!comparison) throw new Error(shape);
+  // …and it has to compare a list, or it decides one answer for every row:
+  // `person[1 < 2]` is not a filter, it is an opinion.
+  const vars = freeVars(cond);
+  const overList = [...vars].some(n => defs.lists.has(n) || defs.missingLists.has(n)
+    || (n.includes('.') && defs.tables.has(n.slice(0, n.indexOf('.')))));
+  if (!overList) throw new Error(shape);
+  if (vars.has('t')) {
     throw new Error('A filter cannot depend on t — the list would change length every frame.');
   }
 }
@@ -249,7 +269,7 @@ function filteredTable(e: Expr, defs: Defs, opts: ResolveOpts): TableDef | null 
   // and whether it could ever settle, are answered here either way, or a
   // shared link would call `person[5]` valid and the author's device would not.
   if (!src.data) {
-    checkFilterShape(e.args[1], shape);
+    checkFilterShape(e.args[1], defs, shape);
     return { file: src.file, hash: src.hash, data: null, missing: src.missing };
   }
   const keep = lowerMask(e.args[1], listGetter(defs), opts);
@@ -273,9 +293,17 @@ const FN_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\
 const CONST_RE = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]+)$/;
 const STATE_RE = /^\s*([A-Za-z_]\w*)'\s*=(?!=)([\s\S]+)$/;
 const INIT_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$/;
-/** `person = open("people.csv", 3a7f9c…)` — the hash is optional as typed;
- *  the app fills it in from the file it finds (like a slider's write-back). */
-const TABLE_RE = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{6,64})\s*)?\)\s*$/;
+/**
+ * `person = open("people.csv", 3a7f9c…)` — the hash is optional as typed;
+ * the app fills it in from the file it finds (like a slider's write-back).
+ *
+ * At least `HASH_TOKEN_LEN` hex digits, because a row is resolved by hash
+ * *prefix*: a shorter token can match more than one stored file, and binding
+ * a row to the wrong bytes is the exact failure the pin exists to prevent.
+ */
+const TABLE_RE = new RegExp(
+  String.raw`^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{${HASH_TOKEN_LEN},64})\s*)?\)\s*$`,
+);
 
 /**
  * The name a file is stored and written under. A row quotes the file name
@@ -292,14 +320,24 @@ export const formatTableRow = (name: string, file: string, hash: string): string
   `${name} = open("${rowSafeFileName(file)}"${hash ? `, ${shortHash(hash)}` : ''})`;
 
 /**
- * A row that means to open a file but claims a name it may not have (`w`,
- * `e`, `open` itself). Without this it falls through to the expression
- * parser, which only knows that quotes are not arithmetic.
+ * A row that means to open a file but cannot: it claims a name it may not
+ * have (`w`, `e`, `open` itself), or pins a hash too short to identify one
+ * file. Without this it falls through to the expression parser, which only
+ * knows that quotes are not arithmetic.
  */
-export function badTableName(text: string): string | null {
+export function badTableRow(text: string): string | null {
   const m = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*["']/.exec(text);
-  if (!m || nameable(m[1])) return null;
-  return `${m[1]} is a built-in name, so it cannot name a data file — try ${m[1]}_data = open(…).`;
+  if (!m) return null;
+  if (!nameable(m[1])) {
+    return `${m[1]} is a built-in name, so it cannot name a data file — try ${m[1]}_data = open(…).`;
+  }
+  if (TABLE_RE.test(text)) return null;
+  const short = /,\s*([0-9a-fA-F]+)\s*\)\s*$/.exec(text);
+  if (short && short[1].length < HASH_TOKEN_LEN) {
+    return `A data file's hash is ${HASH_TOKEN_LEN} hex digits; that is ${short[1].length}.`
+      + ' Delete it and the app will fill in the right one.';
+  }
+  return null;
 }
 
 /** A name a definition may claim: not a builtin (except the late-addition
@@ -1047,7 +1085,13 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       }
     } catch (e) {
       errors.set(defKey(d), msg(e));
-      if (e instanceof MissingDataError) needsFile.add(defKey(d));
+      if (e instanceof MissingDataError) {
+        needsFile.add(defKey(d));
+        // The name is still a list — one whose file is elsewhere. Registered
+        // so rows below report the file too, instead of "ages is not
+        // defined", which sends the reader looking for a typo.
+        if (d.kind === 'const') defs.missingLists.set(d.name, e.message);
+      }
     }
   }
 

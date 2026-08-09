@@ -7,7 +7,7 @@
  */
 import {
   animatedConstNames,
-  badTableName,
+  badTableRow,
   buildDefs,
   compsOf,
   defKey,
@@ -107,7 +107,12 @@ export function analyze(texts: string[]): Analysis {
   const defs = built.defs;
   for (const [key, message] of built.errors) {
     const row = rows.find(r => r.def && defKey(r.def) === key);
-    if (row) row.error = message;
+    if (!row) continue;
+    // A definition that only wants a dropped CSV (`ages = person.age / 2`)
+    // is not a broken row — the bytes never travelled in the link. Same
+    // distinction the plot-row catch below makes.
+    if (built.needsFile.has(key)) row.dataLocal = message;
+    else row.error = message;
   }
   for (const row of dupRows) {
     if (defs.fields.has(row.def!.name)) row.def = undefined;
@@ -192,8 +197,8 @@ export function analyze(texts: string[]): Analysis {
   for (const [ri, row] of rows.entries()) {
     if (row.def || row.comment || row.error || row.cls || !row.text) continue;
     try {
-      const badName = badTableName(row.text);
-      if (badName) throw new Error(badName);
+      const badRow = badTableRow(row.text);
+      if (badRow) throw new Error(badRow);
       const view = parseViewRow(row.text, constEnv);
       if (view) {
         if (seenViewKinds.has(view.kind)) throw new Error(`${view.kind} is already set by another row.`);

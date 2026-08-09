@@ -494,10 +494,13 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
 
     let emit = token;
     if (afterValue && (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen')) {
-      const isFnCall = token.type === 'parenopen' && last!.type === 'symbol' && isFnName(last!.str);
-      // A column indexes under its full name: person.age[2].
-      const isIndex = !isFnCall && token.type === 'parenopen' && token.str === '['
+      // A column or list indexes under its full name: person.age[2]. Decided
+      // BEFORE the function reading and beating it, because a name can be
+      // both: a CSV column headed `sin` gives `person.sin`, and `mean` is
+      // shadowable, so `mean = [1, 4, 2]` then `mean[2]` is an index.
+      const isIndex = token.type === 'parenopen' && token.str === '['
         && last!.type === 'symbol' && activeListNames.has(path ?? last!.str);
+      const isFnCall = !isIndex && token.type === 'parenopen' && last!.type === 'symbol' && isFnName(last!.str);
       yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };
     }

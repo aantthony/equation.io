@@ -297,7 +297,8 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
     // Vector-field streamlines drift continuously, so they always animate.
     animated: animated || plot.type === 'vfield2d',
     needs3D: plot.type === 'implicit3d' || plot.type === 'psurface'
-      || ((plot.type === 'point' || plot.type === 'pcurve' || plot.type === 'plist' || plot.type === 'system') && plot.dim === 3),
+      || ((plot.type === 'point' || plot.type === 'pcurve' || plot.type === 'plist'
+        || plot.type === 'dscatter' || plot.type === 'system') && plot.dim === 3),
     params,
   });
 

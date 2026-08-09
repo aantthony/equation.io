@@ -28,6 +28,16 @@ describe('record grammar (RFC 4180)', () => {
     expect(parseRecords('size\n5" pipe\n', ',')).toEqual([['size'], ['5" pipe']]);
   });
 
+  it('scores the last record when the file has no trailing newline', () => {
+    // Dropping it unconditionally left a two-line file judged on its header
+    // alone, where a comma inside a title beats the real delimiter.
+    expect(sniffDelimiter('coords(x,y);value\na;2')).toBe(';');
+    expect(parseCsv('coords(x,y);value\na;2').columns.map(c => c.name)).toEqual(['coords_x_y', 'value']);
+    // A trailing newline still leaves an empty counter that must not score.
+    expect(sniffDelimiter('a;b\n1;2\n')).toBe(';');
+    expect(sniffDelimiter('a,b\n1,2\n')).toBe(',');
+  });
+
   it('refuses a quoted field that never closes', () => {
     // The rest of the file would become one cell, so every row after the
     // stray quote is silently wrong — the file is nearly always truncated.

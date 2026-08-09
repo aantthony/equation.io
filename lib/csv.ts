@@ -58,7 +58,8 @@ export function sniffDelimiter(text: string): string {
   const perLine = new Map<string, number[]>(DELIMITERS.map(d => [d, [0]]));
   let inQuotes = false;
   let lines = 1;
-  for (let i = 0; i < text.length && lines <= SAMPLE; i++) {
+  let i = 0;
+  for (; i < text.length && lines <= SAMPLE; i++) {
     const c = text[i];
     if (c === '"') {
       // A doubled quote inside a quoted field is an escape, not a toggle.
@@ -75,12 +76,16 @@ export function sniffDelimiter(text: string): string {
     const row = perLine.get(c);
     if (row) row[row.length - 1]++;
   }
+  // The last counter is worth nothing when it is the empty row after a
+  // trailing newline, or a record the sample limit cut in half — but a file
+  // with no trailing newline ends on a REAL record, and dropping that one
+  // left a two-line file judged on its header alone.
+  const partial = i < text.length || text.endsWith('\n');
   let best = ',';
   let bestScore = 0;
   for (const d of DELIMITERS) {
-    // The final sampled line may be cut short, so judge on complete ones.
     const seen = perLine.get(d)!;
-    const full = seen.length > 1 ? seen.slice(0, -1) : seen;
+    const full = partial && seen.length > 1 ? seen.slice(0, -1) : seen;
     if (!full[0]) continue;
     // A real delimiter appears the same number of times in every record.
     const score = full[0] * (full.every(n => n === full[0]) ? 2 : 1);

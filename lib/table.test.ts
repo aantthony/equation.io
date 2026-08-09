@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseCsv } from './csv.ts';
 import {
   MissingDataError,
-  badTableName,
+  badTableRow,
   type TableSource,
   buildDefs,
   evalConstEnv,
@@ -76,9 +76,9 @@ describe('open() rows', () => {
   it('says so when the row claims a built-in name', () => {
     // `w` is the 4th coordinate, so this row is not a definition at all — but
     // the reason has to be the name, not "quotes are not arithmetic".
-    expect(badTableName('w = open("wave.csv")')).toMatch(/w is a built-in name/);
-    expect(badTableName(`person = open("people.csv", ${HASH})`)).toBeNull();
-    expect(badTableName('y = sin(x)')).toBeNull();
+    expect(badTableRow('w = open("wave.csv")')).toMatch(/w is a built-in name/);
+    expect(badTableRow(`person = open("people.csv", ${HASH})`)).toBeNull();
+    expect(badTableRow('y = sin(x)')).toBeNull();
   });
 
   it('round-trips through the row text the app writes', () => {
@@ -97,6 +97,16 @@ describe('open() rows', () => {
     expect(rowSafeFileName('plain.csv')).toBe('plain.csv');
     const text = formatTableRow('p', 'sales "final".csv', '');
     expect(scanDefinition(text)).toMatchObject({ name: 'p', file: 'sales _final_.csv' });
+  });
+
+  it('needs a hash long enough to name one file', () => {
+    // A row resolves by hash PREFIX, so a short token can match more than one
+    // stored file — binding to the wrong bytes is what the pin exists to stop.
+    expect(scanDefinition('p = open("a.csv", abc123)')).not.toMatchObject({ kind: 'table' });
+    expect(scanDefinition('p = open("a.csv", abc123abc123)')).toMatchObject({ hash: 'abc123abc123' });
+    // Which would otherwise read as a constant and complain about the quotes.
+    expect(badTableRow('p = open("a.csv", abc123)')).toMatch(/hash is 12 hex digits; that is 6/);
+    expect(badTableRow(`p = open("a.csv", ${HASH})`)).toBeNull();
   });
 
   it('registers the file and its columns', () => {
@@ -196,6 +206,38 @@ describe('typed-array columns', () => {
     const defs = [`long = open("long.csv", ${HASH})`];
     expect(evaluate(lowerRow('total(long.v)', defs, tbl), {})).toBe(200_000);
     expect(evaluate(lowerRow('mean(long.v)', defs, tbl), {})).toBe(2);
+  });
+});
+
+describe('a column or list named after a builtin', () => {
+  it('still indexes, because indexing beats the function reading', () => {
+    // A CSV headed `sin` is perfectly legal, and `mean` is shadowable.
+    const src: TableSource = () => parseCsv('sin,age\n7,2\n8,4\n');
+    expect(values(lowerRow('p.sin', ['p = open("t.csv")'], src))).toEqual([7, 8]);
+    expect(lowerRow('p.sin[2]', ['p = open("t.csv")'], src)).toMatchObject({ kind: 'num', value: 8 });
+    // A function that is NOT a list still calls: sin[2] is sin applied to 2.
+    expect(lowerRow('sin[0]', ['p = open("t.csv")'], src))
+      .toMatchObject({ kind: 'call', name: 'sin' });
+  });
+
+  it('indexes a named list that shadows a reduction', () => {
+    const { defs, errors } = build(['mean = [3, 1, 4]']);
+    expect([...errors]).toEqual([]);
+    expect(listNamesOf(defs).has('mean')).toBe(true);
+    expect(lowerRow('mean[2]', ['mean = [3, 1, 4]'])).toMatchObject({ kind: 'num', value: 1 });
+  });
+});
+
+describe('a scatter of three columns', () => {
+  const rows = [`person = open("people.csv", ${HASH})`];
+
+  it('asks for a 3D scene, or it would draw nothing at all', () => {
+    // The 2D pass deliberately skips dim-3 clouds, so without this the row
+    // renders only when some unrelated row happens to turn 3D on.
+    const c = classify(lowerRow('(person.age, person.height, person.age)', rows));
+    expect(c.plot).toMatchObject({ type: 'dscatter', dim: 3 });
+    expect(c.needs3D).toBe(true);
+    expect(classify(lowerRow('(person.age, person.height)', rows)).needs3D).toBe(false);
   });
 });
 
@@ -351,12 +393,31 @@ describe('data that is not on this device', () => {
     // The rows it keeps need the file; whether it is a comparison at all does
     // not. Without this a shared link calls `person[5]` fine and the author's
     // own device rejects it the moment the data arrives.
-    expect([...build([...rows, 'adults = person[5]'], null).errors])
-      .toEqual([['adults', 'person[…] needs a comparison, like person[person.x > 0].']]);
+    const shape = 'person[…] needs a comparison, like person[person.x > 0].';
+    for (const cond of ['5', 'person.age', 'sin(person.age)', 'person.age + 1', '1 < 2']) {
+      expect([...build([...rows, `adults = person[${cond}]`], null).errors])
+        .toEqual([['adults', shape]]);
+      // …and the device WITH the data agrees, which is the whole point.
+      expect([...build([...rows, `adults = person[${cond}]`]).errors])
+        .toEqual([['adults', shape]]);
+    }
     expect([...build([...rows, 'adults = person[person.age > t]'], null).errors])
       .toEqual([['adults', 'A filter cannot depend on t — the list would change length every frame.']]);
     // And a well-formed one is still accepted, data or no data.
     expect([...build([...rows, 'adults = person[person.age >= 18]'], null).errors]).toEqual([]);
+  });
+
+  it('carries through a NAMED list, so the row below still reports the file', () => {
+    // `ages` cannot be built without the bytes, but it is still a list whose
+    // file is elsewhere — a row using it must not degrade into "not defined".
+    const { defs, errors, needsFile } = build([...rows, 'ages = person.age / 2'], null);
+    expect([...errors]).toEqual([['ages', expect.stringMatching(/does not travel in the link/)]]);
+    expect([...needsFile]).toEqual(['ages']);
+    expect(() => listGetter(defs)('ages')).toThrow(MissingDataError);
+    // …and so does a row that uses it (lowerRow's helper insists the defs are
+    // clean, which they deliberately are not here).
+    const use = parseExpr('mean(ages)', new Set(), listNamesOf(defs));
+    expect(() => lowerLists(use, listGetter(defs), {})).toThrow(/does not travel in the link/);
   });
 
   it('points a row that reads a missing file at the file, not at the name', () => {

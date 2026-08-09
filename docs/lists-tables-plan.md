@@ -229,6 +229,42 @@ The "data files" section stays hidden until there is a file to manage — what
 it was hiding was the way *in*, so that moved out to a **`+ csv`** link in
 the panel's bottom row beside `github`, which is always there.
 
+### Second pass
+
+Four of these came out of the first round of fixes, three were older:
+
+- **A 3-column data scatter never set `needs3D`.** The 2D pass deliberately
+  skips a dim-3 cloud and `done()` only recognized `plist`, so a CSV 3D cloud
+  drew *nothing* unless an unrelated row happened to turn 3D on. (Seen while
+  verifying the 3D cap and wrongly written off as scene-framing.)
+- **The filter shape check was too weak.** Rejecting bare leaves let
+  `person[sin(person.age)]`, `person[person.age + 1]` and `person[1 < 2]`
+  through on the missing-data path — the same divergence it was added to
+  close. It now requires a comparison at the root *and* a list among its free
+  variables.
+- **A missing-data list definition erased its dependents.** With the file
+  absent, `ages = person.age / 2` failed and `ages` went unregistered, so
+  `mean(ages)` reported "ages is not a list defined above this row". Now
+  `defs.missingLists` registers the name with its reason, exactly as
+  `defs.tables` does for a column, and the worker maps those definition
+  failures to `dataLocal` — so `create_graph` reports a device-local graph as
+  valid with `preview_omits` instead of broken.
+- **A hash prefix could be as short as 6 hex digits.** A row resolves by
+  prefix, so 24 bits can match two stored files. `TABLE_RE` is built from
+  `HASH_TOKEN_LEN` now, and a short token gets its own message rather than
+  falling through to "quoted text only belongs in a data row".
+- **Indexing lost to the function reading.** `isFnName` won before the list
+  check, so a column headed `sin` (`person.sin[2]`) or a shadowing
+  `mean = [3, 1, 4]` could never be indexed.
+- **Dropping several files at once could name two of them the same.**
+  `freeTableName` read `eq.def`, which the rows added moments earlier do not
+  have yet — `sales.csv` and `sales.tsv` both became `sales`. It scans the
+  row text now.
+- **Delimiter sniffing always discarded the last record**, so a file with no
+  trailing newline was judged on its header alone: `coords(x,y);value\na;2`
+  picked the comma. The final counter is dropped only when it is the empty
+  row after a newline, or a record the sample limit cut short.
+
 ## Testing
 
 - lib: parser (ranges, indexing, strings, member), broadcasting incl.

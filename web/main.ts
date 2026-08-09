@@ -1,7 +1,7 @@
 import {
   MissingDataError,
   animatedConstNames,
-  badTableName,
+  badTableRow,
   buildDefs,
   compsOf,
   constsAnimated,
@@ -1207,8 +1207,8 @@ function recompileAll() {
     const text = eq.text.trim();
     if (!text) continue;
     try {
-      const badName = badTableName(text);
-      if (badName) throw new Error(badName);
+      const badRow = badTableRow(text);
+      if (badRow) throw new Error(badRow);
       const vspec = parseViewRow(text, constVals);
       if (vspec) {
         if (seenViewport.has(vspec.kind)) throw new Error(`${vspec.kind} is already set by another row.`);
@@ -1475,7 +1475,14 @@ function pinTableHashes(): boolean {
 
 /** A row name for a dropped file that no definition has claimed. */
 function freeTableName(base: string): string {
-  const taken = new Set(equations.map(eq => eq.def?.name).filter((n): n is string => !!n));
+  // Scanned from the row TEXT, not from `eq.def`: dropping several files at
+  // once appends a row per file and recompiles only at the end, so the rows
+  // added moments ago have no def yet. Reading the stale defs gave two files
+  // with the same stem (sales.csv, sales.tsv) the same name, and the second
+  // row then lost to the duplicate check.
+  const taken = new Set(equations
+    .map(eq => eq.def?.name ?? scanDefinition(eq.text)?.name)
+    .filter((n): n is string => !!n));
   if (nameable(base) && !taken.has(base)) return base;
   for (let k = 2; ; k++) {
     const name = `${base}_${k}`;
