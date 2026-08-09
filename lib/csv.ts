@@ -256,6 +256,35 @@ export function parseCsv(text: string): Table {
   return { columns, rows: body.length, skipped, missing, delimiter, warnings };
 }
 
+/**
+ * A table of the rows a mask keeps — `adults = person[person.age >= 18]`.
+ * Every column is filtered together, so the rows stay aligned; missing-value
+ * counts are recomputed, because dropping rows drops gaps with them.
+ */
+export function filterTable(table: Table, keep: readonly boolean[]): Table {
+  const rows = keep.reduce((n, k) => n + (k ? 1 : 0), 0);
+  const missing = new Map<string, number>();
+  const columns = table.columns.map((col): Column => {
+    if (col.type === 'str') {
+      return { ...col, strs: col.strs!.filter((_, k) => keep[k]) };
+    }
+    const nums = new Float64Array(rows);
+    let at = 0;
+    let gaps = 0;
+    col.nums!.forEach((v, k) => {
+      if (!keep[k]) return;
+      if (Number.isNaN(v)) gaps++;
+      nums[at++] = v;
+    });
+    if (gaps) missing.set(col.name, gaps);
+    return { ...col, nums };
+  });
+  const warnings = missing.size
+    ? [`${[...missing.values()].reduce((a, b) => a + b, 0)} missing values in ${[...missing.keys()].join(', ')}`]
+    : [];
+  return { columns, rows, skipped: 0, missing, delimiter: table.delimiter, warnings };
+}
+
 /** Suggest a row name from a file name: "people 2024.csv" → "people_2024". */
 export function tableNameFor(fileName: string): string {
   const stem = fileName.replace(/\.[^.]*$/, '').trim();

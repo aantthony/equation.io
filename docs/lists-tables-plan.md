@@ -119,24 +119,39 @@ outlines of later dots painted over the fill of earlier ones, turning a
   device-local. Later option (not now): `open("https://…/x.csv", hash)`
   remote fetch with the same hash pin.
 
-## Phase 3 — tables and filters
+## Phase 3 — tables and filters *(built, except text)*
 
 - ~~**Member access**~~ — built in phase 2, as a name-joining `.` operator
   rather than a `{ kind: 'member' }` node.
-- **Columns are data-backed, not ASTs**: a new leaf (`{ kind: 'data' }`)
-  wraps a typed array so a 100k-row column never expands symbolically.
-  Broadcasting/zip from phase 1 gains a fast path over data leaves;
-  reductions of constant columns fold numerically at resolve time.
-- **Row-wise math**: `person.weight / person.height^2` — same-table columns
-  are always aligned.
-- **Filters**: `adults = person[person.age >= 18]` (derived table),
-  `L[L > 2]`, string equality `person[person.city == "NYC"]`.
-- **Preview UI**: collapsible read-only grid under an `open()` row — first
-  ~8 rows, column names/types, row count. Editable Desmos-style tables stay
-  out (small literal data is already `[(1,2),(3,4)]`).
+- ~~**Row-wise math**~~ — falls out of phase 1 broadcasting; same-table
+  columns are always the same length, so they zip.
+- **Filters** *(built)*: a comparison over a list lowers to a *mask* — a list
+  of comparisons — and only `[ ]` consumes one; a mask that escapes says so
+  rather than plotting nothing. `L[L > 2]`, `person.height[person.age > 30]`,
+  chains (`person.age[30 <= person.age < 40]`), and
+  `adults = person[person.age >= 18]`, which cuts every column of the file
+  together and registers the result as another table. Masks are decided at
+  lowering time (constants and sliders, never t) because the result is a
+  list literal, and a list whose length moved with t could not be one.
+  NaN comparisons are false, so filtering drops gaps.
+- **Preview UI** *(built)*: the data row's readout is a `<details>` summary;
+  opening it shows the first 8 rows as parsed, with missing cells as "—".
+  Editable Desmos-style tables stay out (small literal data is already
+  `[(1,2),(3,4)]`).
+- **Text is still out.** `person[person.city == "NYC"]` needs string
+  literals in the expression language (a new Expr kind through a dozen
+  exhaustive switches) and an `==` operator. Both now report themselves
+  instead of failing as a parse error, but neither is implemented.
+- **Columns are still ASTs.** The `{ kind: 'data' }` typed-array leaf moves
+  to phase 4, where it belongs: what it buys is per-frame rendering cost,
+  and only instanced rendering cashes that in.
 
 ## Phase 4 — scale and polish
 
+- A `{ kind: 'data' }` leaf wrapping a typed array, so a column never
+  expands to one expression per row — with the fast paths that make it pay:
+  broadcasting/zip over data leaves, and numeric folding of reductions.
+  This is what lifts `TABLE_MAX_ROWS` (5000).
 - Constant column scatters upload typed arrays straight to a GPU buffer
   (instanced), no per-point Expr eval; t-dependent list rows re-evaluate per
   frame under a perf-guard cap.

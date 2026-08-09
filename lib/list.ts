@@ -20,7 +20,7 @@
  */
 import { add, div, mul } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
-import { type Expr, evaluate, freeVars } from './expr.ts';
+import { type Expr, evaluate, freeVars, ineqComparisons } from './expr.ts';
 
 export type GetList = (name: string) => readonly Expr[] | null;
 
@@ -124,6 +124,9 @@ function zipN(parts: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
     n = p.items.length;
   }
   if (n === null) return build(parts);
+  // A mask only ever grows into a longer comparison chain (18 <= a < 65);
+  // anything else built from one is arithmetic on a filter.
+  const masked = parts.some(isMask);
   const items: Expr[] = [];
   for (let k = 0; k < n; k++) {
     const comps = parts.map(p => (isList(p) ? p.items[k] : p));
@@ -132,9 +135,56 @@ function zipN(parts: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
     if (comps.some((c, i) => c.kind === 'vec' && isList(parts[i]))) {
       throw new Error('Arithmetic over a list of points is not supported yet — operate on coordinate lists instead.');
     }
-    items.push(build(comps));
+    const built = build(comps);
+    if (masked && built.kind !== 'ineq') {
+      throw new Error('A comparison over a list is a filter, not a value — put it in brackets, like L[L > 2].');
+    }
+    items.push(built);
   }
   return listOf(items, ctx);
+}
+
+/**
+ * A comparison over a list is a mask — the thing a filter selects with
+ * (`L[L > 2]`, `person[person.age >= 18]`). It is not a value: only
+ * indexing consumes one, and any other use reports itself.
+ */
+const isMask = (e: Expr): e is Expr & { kind: 'list' } =>
+  isList(e) && e.items.length > 0 && e.items.every(it => it.kind === 'ineq');
+
+/** Whether one comparison (or a chain like 18 <= a < 65) holds. */
+function holds(cond: Expr, env: Record<string, number>): boolean {
+  return ineqComparisons(cond as Expr & { kind: 'ineq' }).every(({ op, l, r }) => {
+    const a = evaluate(l, env);
+    const b = evaluate(r, env);
+    return op === '<' ? a < b : op === '<=' ? a <= b : op === '>' ? a > b : a >= b;
+  });
+}
+
+/**
+ * Decide a mask, element by element.
+ *
+ * A filter has to settle at lowering time: the result is a list literal, and
+ * a list whose LENGTH moved with t could not be one. So conditions read
+ * constants and sliders (which recompile when dragged) but not t — the same
+ * line ranges and indices draw. Comparisons against a missing cell (NaN) are
+ * false, so filtering a column also drops its gaps.
+ */
+function maskValues(mask: Expr, opts: ResolveOpts): boolean[] | null {
+  if (!isMask(mask)) return null;
+  return mask.items.map(cond => {
+    const env: Record<string, number> = {};
+    for (const fv of freeVars(cond)) {
+      const v = opts.consts?.[fv];
+      if (v === undefined) {
+        throw new Error(fv === 't'
+          ? 'A filter cannot depend on t — the list would change length every frame.'
+          : `A filter must be constant — add "${fv} = 5" in a row above.`);
+      }
+      env[fv] = v;
+    }
+    return holds(cond, env);
+  });
 }
 
 /** Numeric values of a constant list, for order-dependent reductions. */
@@ -185,6 +235,15 @@ function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
     throw new Error(`${name} is not a list here — define it above where it is used.`);
   }
   const idxLow = lower(idx, ctx);
+  const keep = maskValues(idxLow, ctx.opts);
+  if (keep) {
+    if (keep.length !== low.items.length) {
+      throw new Error(`The filter tests ${keep.length} values but the list has ${low.items.length}.`);
+    }
+    const items = low.items.filter((_, k) => keep[k]);
+    if (!items.length) throw new Error(`That filter keeps nothing (0 of ${keep.length}).`);
+    return listOf(items, ctx);
+  }
   if (isList(idxLow)) {
     throw new Error('Slicing L[a..b] is not supported yet — index one element, like L[1].');
   }
@@ -251,6 +310,11 @@ function lower(e: Expr, ctx: Ctx): Expr {
     case 'ineq': {
       const l = lower(e.l, ctx);
       const r = lower(e.r, ctx);
+      if (e.kind === 'ineq' && (isList(l) || isList(r))) {
+        // A mask, for a filter. It is only meaningful inside [ ]; anywhere
+        // else it reaches classify as a list of comparisons and is refused.
+        return zipN([l, r], ([a, b]) => ({ kind: 'ineq', op: e.op, l: a, r: b }), ctx);
+      }
       if (isList(l) || isList(r)) {
         throw new Error('Cannot put a list in an equation — plot the list on its own row.');
       }
@@ -277,7 +341,21 @@ function lower(e: Expr, ctx: Ctx): Expr {
  * to integers), exactly as Σ/Π expansion does.
  */
 export function lowerLists(e: Expr, getList: GetList, opts: ResolveOpts = {}): Expr {
-  return lower(e, { getList, opts, items: 0 });
+  const out = lower(e, { getList, opts, items: 0 });
+  if (isMask(out)) {
+    throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
+  }
+  return out;
+}
+
+/**
+ * Lower a filter's condition and decide it, for callers that filter
+ * something other than a list — `adults = person[person.age >= 18]` cuts a
+ * whole data file (defs.ts). Null when the condition is not a comparison
+ * over a list.
+ */
+export function lowerMask(cond: Expr, getList: GetList, opts: ResolveOpts = {}): boolean[] | null {
+  return maskValues(lower(cond, { getList, opts, items: 0 }), opts);
 }
 
 /** Whether a parsed (unresolved) row calls a list reduction — such rows get

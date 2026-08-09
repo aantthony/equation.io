@@ -232,6 +232,12 @@ const ops = operators<PNode>({
     throw new Error("'!=' is not supported — for a factorial equation, put a space before '=': x! = 2.");
   }),
 
+  // Also one token, so `a == b` explains itself instead of arriving as two
+  // '=' operators and a parse error.
+  '==': BinaryInfix<PNode>((): PNode => {
+    throw new Error("'==' is not supported — an equation takes one '=' (x^2 = y), and a filter takes a comparison (L[L > 2]).");
+  }),
+
   '<': asIneq('<'),
   '<=': asIneq('<='),
   '≤': asIneq('<='),
@@ -357,7 +363,8 @@ const syntax: PatternDict = {
   operator: x => !!ops[x] || MULTI_CHAR_OPS.some(m => m.startsWith(x)),
   invalid(x) {
     if (x === '"' || x === "'") {
-      throw new Error('Quoted text only belongs in a data row, like people = open("people.csv").');
+      throw new Error('Quoted text only belongs in a data row, like people = open("people.csv")'
+        + ' — filtering by text is not supported yet.');
     }
     throw new Error(`Invalid character: ${JSON.stringify(x)}.`);
   },

@@ -20,13 +20,13 @@
  *   otherwise by expanding a fixed Gauss–Legendre sum the same way Σ
  *   expands — so every downstream consumer still sees ordinary expressions.
  */
-import { type Column, type Table } from './csv.ts';
+import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import { FUNCTIONS, SHADOWABLE_FNS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
-import { type GetList, lowerLists } from './list.ts';
+import { type GetList, lowerLists, lowerMask } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 
 export type Definition =
@@ -168,7 +168,14 @@ export function listGetter(defs: Defs): GetList {
     const hit = defs.lists.get(name);
     if (hit) return hit;
     const dot = name.indexOf('.');
-    if (dot <= 0) return null;
+    if (dot <= 0) {
+      // A data file is not a value on its own: it is where columns live.
+      const bare = defs.tables.get(name);
+      if (!bare) return null;
+      const col = bare.data?.columns.find(c => c.type === 'num')?.name;
+      throw new Error(`${name} is a data file — plot one of its columns${col ? `, like ${name}.${col}` : ''},`
+        + ` or name a filtered copy: adults = ${name}[…].`);
+    }
     const table = defs.tables.get(name.slice(0, dot));
     if (!table) return null;
     const col = name.slice(dot + 1);
@@ -187,14 +194,39 @@ export function listGetter(defs: Defs): GetList {
   };
 }
 
-/** Every name that reads as a list, so `L[2]` and `person.age[2]` index
- *  instead of multiplying (parseExpr needs this before it parses). */
+/** Every name that reads as a list, so `L[2]`, `person.age[2]` and
+ *  `person[…]` index instead of multiplying (parseExpr needs this before it
+ *  parses). Table names count: a data file is indexed by a filter. */
 export function listNamesOf(defs: Defs): Set<string> {
   const out = new Set(defs.lists.keys());
   for (const [name, t] of defs.tables) {
+    out.add(name);
     for (const c of t.data?.columns ?? []) out.add(`${name}.${c.name}`);
   }
   return out;
+}
+
+/**
+ * A definition that filters a whole data file: `adults = person[cond]`.
+ * Recognized before list lowering, which knows only about values — the
+ * result is a new table, with every column cut to the rows the mask keeps.
+ * Returns null when the row is not that shape.
+ */
+function filteredTable(e: Expr, defs: Defs, opts: ResolveOpts): TableDef | null {
+  if (e.kind !== 'call' || e.name !== '[index]' || e.args[0]?.kind !== 'var') return null;
+  const src = defs.tables.get(e.args[0].name);
+  if (!src) return null;
+  // No bytes to cut (a shared link elsewhere, or a server-side preview): the
+  // cut is a table too, and reports the same reason its source does.
+  if (!src.data) return { file: src.file, hash: src.hash, data: null, missing: src.missing };
+  const keep = lowerMask(e.args[1], listGetter(defs), opts);
+  if (!keep) {
+    throw new Error(`${e.args[0].name}[…] needs a comparison, like ${e.args[0].name}[${e.args[0].name}.x > 0].`);
+  }
+  if (keep.length !== src.data.rows) {
+    throw new Error(`The filter tests ${keep.length} values but ${src.file} has ${src.data.rows} rows.`);
+  }
+  return { file: src.file, hash: src.hash, data: filterTable(src.data, keep) };
 }
 
 /** Component names `name` expands to under geometry lowering, or null. */
@@ -883,6 +915,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
           n => (defs.points.has(n) ? pointComps(n) : null),
           n => defs.mats.get(n) ?? null,
         );
+        // `adults = person[person.age >= 18]` names a cut of a data file.
+        const cut = filteredTable(e, defs, ropts);
+        if (cut) {
+          defs.tables.set(d.name, cut);
+          continue;
+        }
         if (e.kind === 'list') {
           // A named list of 2–3 equal-length tuple/nested rows is a matrix
           // (that syntax predates data lists); every other shape falls

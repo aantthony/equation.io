@@ -143,6 +143,14 @@ demand instead of living in a tool description. No authentication required.
   scatter, `mean(person.age)` a readout, `person.age[2]` one value. Only the
   device that dropped the file has its data — the link carries the file's
   name and hash, not its bytes.
+- Filters keep the elements a comparison selects: `L[L > 2]`,
+  `person.height[person.age >= 18]` (one column chosen by another — rows stay
+  aligned), and chains, `person.age[30 <= person.age < 40]`. Filtering a
+  whole file names a new one, `adults = person[person.age >= 18]`, whose
+  columns work like any others (`(adults.age, adults.height)`). A filter
+  settles when the row compiles, so it may use constants and sliders but not
+  t; a comparison with a missing cell is false, so filtering also drops gaps.
+  Comparing text (`person.city == "NYC"`) is not supported yet.
 - Comments: a row starting with `#` (e.g. `# tangent lines`) plots nothing; in
   the app it renders as a heading whose group (the rows until the next `#` row)
   can be collapsed. Use them to label sections of longer documents.
@@ -287,7 +295,9 @@ demand instead of living in a tool description. No authentication required.
   enter the URL, opening the link on another device (or rendering it
   server-side, as `create_graph` previews do) reports the data as
   device-local instead of drawing it; dropping the same file there restores
-  it. Up to 5000 rows plot for now.
+  it. Up to 5000 rows plot for now. The row's readout opens a preview of the
+  first rows as they parsed. `adults = person[person.age >= 18]` names a
+  filtered copy of a file (see Filters above).
 - List: `L = [3, 1, 4]` or `L = [1..100]` names a data list; rows below
   broadcast over it (`L^2`, `(L, sort(L))`), reduce it (`mean(L)`), or index
   it (`L[2]`, 1-based). Elements may use constants, states, and t. A list of

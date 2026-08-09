@@ -129,7 +129,10 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
             kind: row.comment
               ? 'comment (group heading)'
               : row.def
-                ? `definition (${row.def.kind})`
+                // `adults = person[…]` scans as a constant, but what it
+                // defines is another data file.
+                ? `definition (${row.def.kind === 'const' && analysis.defs.tables.has(row.def.name)
+                  ? 'filtered data' : row.def.kind})`
                 : row.view
                   ? `viewport (${row.view.kind})`
                   : row.dist === 'density'

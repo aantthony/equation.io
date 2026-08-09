@@ -57,7 +57,7 @@ import {
   formatViewRow,
   parseViewRow,
 } from '../lib/view.ts';
-import { tableNameFor } from '../lib/csv.ts';
+import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
 import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
 import { fullscreenQuad } from './gl.ts';
@@ -113,6 +113,8 @@ interface Equation {
   curveUI?: CurveUI;
   errorEl?: HTMLElement;
   infoEl?: HTMLElement;
+  /** Data rows: the collapsible grid of the file's first rows. */
+  tableUI?: TableUI;
   /** Cached hover points (axis intercepts/roots) for the cached view range. */
   spCache?: { text: string; env: string; xlo: number; xhi: number; ylo: number; yhi: number; pts: SpecialPoint[] };
   toggleUI?: { box: HTMLElement; btn: HTMLButtonElement };
@@ -132,6 +134,17 @@ interface Grabbable {
   /** True when `set` rewrites row text (so the drag is undoable and re-saved). */
   edits: boolean;
   set: (x: number, y: number) => void;
+}
+
+/** Read-only preview of a data file, under its `open(…)` row. */
+interface TableUI {
+  box: HTMLDetailsElement;
+  summary: HTMLElement;
+  scroll: HTMLElement;
+  /** The parsed table the grid was built from. Identity is the test: a file
+   *  keeps one Table across recompiles, while a filtered copy is rebuilt
+   *  whenever anything it depends on moves — exactly when the grid is stale. */
+  data?: Table;
 }
 
 interface SliderUI {
@@ -1818,6 +1831,63 @@ function makeToggle(eq: Equation): { box: HTMLElement; btn: HTMLButtonElement } 
   return { box, btn };
 }
 
+/** Data rows shown in the preview grid under an `open(…)` row. */
+const PREVIEW_ROWS = 8;
+
+function makeTablePreview(): TableUI {
+  const box = document.createElement('details');
+  box.className = 'eq-widget eq-table';
+  box.contentEditable = 'false';
+  const summary = document.createElement('summary');
+  const scroll = document.createElement('div');
+  scroll.className = 'eq-table-scroll';
+  box.append(summary, scroll);
+  return { box, summary, scroll };
+}
+
+/**
+ * Fill the preview: the readout as its summary, and — once opened — the head
+ * of the file as it was actually parsed, which is the only way to see that
+ * a column really did read as numbers.
+ */
+function fillTablePreview(ui: TableUI, info: string, data: Table) {
+  ui.summary.textContent = info;
+  if (ui.data === data) return;
+  ui.data = data;
+  const table = document.createElement('table');
+  const head = table.insertRow();
+  for (const col of data.columns) {
+    const th = document.createElement('th');
+    th.textContent = col.name;
+    th.title = col.label === col.name ? col.type : `${col.label} (${col.type})`;
+    th.className = col.type === 'num' ? 'num' : '';
+    head.append(th);
+  }
+  const shown = Math.min(data.rows, PREVIEW_ROWS);
+  for (let r = 0; r < shown; r++) {
+    const tr = table.insertRow();
+    for (const col of data.columns) {
+      const td = tr.insertCell();
+      if (col.type === 'num') {
+        const v = col.nums![r];
+        td.textContent = Number.isNaN(v) ? '—' : fmtNum(v);
+        td.className = 'num';
+      } else {
+        td.textContent = col.strs![r];
+      }
+    }
+  }
+  if (data.rows > shown) {
+    const tr = table.insertRow();
+    const td = tr.insertCell();
+    td.colSpan = data.columns.length;
+    td.className = 'more';
+    td.textContent = `${data.rows - shown} more row${data.rows - shown === 1 ? '' : 's'}`;
+  }
+  ui.scroll.textContent = '';
+  ui.scroll.append(table);
+}
+
 /**
  * Sync per-line decorations (color, error state, placeholder) and the
  * interleaved widget blocks with current state. Never touches line text, so
@@ -1886,7 +1956,14 @@ function reconcile() {
       btn.classList.toggle('on', toggle.on);
       wanted.push(box);
     }
-    if (eq.info) {
+    // A data row's readout is the handle on a preview of the file itself:
+    // the summary says what was parsed, opening it shows the first rows.
+    const table = eq.def && !eq.error ? defs.tables.get(eq.def.name) : undefined;
+    if (table?.data && eq.info) {
+      eq.tableUI ??= makeTablePreview();
+      fillTablePreview(eq.tableUI, eq.info, table.data);
+      wanted.push(eq.tableUI.box);
+    } else if (eq.info) {
       eq.infoEl ??= (() => {
         const el = document.createElement('div');
         el.className = 'eq-widget eq-info';
