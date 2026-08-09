@@ -164,17 +164,23 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
     .filter((g): g is { row: string; why: string } => g.why !== null);
   // Rows reading a dropped CSV never reach the preview at all: the bytes are
   // on the author's device, not in the link. Disclose them the same way.
-  const dataOmits = analysis.rows
-    .filter(r => r.dataLocal)
-    .map(r => ({ row: r.text, why: r.dataLocal! }));
+  const dataLocalRows = analysis.rows.filter(r => r.dataLocal);
+  const dataOmits = dataLocalRows.map(r => ({ row: r.text, why: r.dataLocal! }));
+  // A row that would have drawn something if the bytes were here — as opposed
+  // to a definition it feeds, which draws nothing anywhere.
+  const dataWouldPlot = dataLocalRows.some(r => !r.def && !r.comment && !r.view);
   let png: string | undefined;
   let preview: string;
   if (!plotRows.length) {
     // A row reading a local CSV never classifies, so it is not in plotRows —
     // "no plot rows to draw" would tell the caller their graph is empty when
     // it is only unrenderable HERE, and preview_omits says otherwise two
-    // lines down.
-    preview = dataOmits.length
+    // lines down. Only a would-be plot row earns that reassurance though: a
+    // document of definitions alone (`ages = person.age / 2` and nothing
+    // that draws) genuinely has nothing to plot on any device, and saying
+    // "the graph itself is fine" would send the caller away satisfied with a
+    // blank graph.
+    preview = dataWouldPlot
       ? 'none — every plot row reads a data file on the author\'s device (see preview_omits; the graph itself is fine)'
       : 'none — no plot rows to draw';
   } else if (omitted.length === plotRows.length) {

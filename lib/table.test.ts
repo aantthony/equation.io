@@ -15,6 +15,7 @@ import {
 } from './defs.ts';
 import { type Expr, evaluate, freeVars, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
+import { decodePayload, encodePayload } from './link.ts';
 import { type Seq, lowerLists, seqLength } from './list.ts';
 import { classify } from './plot.ts';
 
@@ -98,6 +99,18 @@ describe('open() rows', () => {
     expect(rowSafeFileName('plain.csv')).toBe('plain.csv');
     const text = formatTableRow('p', 'sales "final".csv', '');
     expect(scanDefinition(text)).toMatchObject({ name: 'p', file: 'sales _final_.csv' });
+  });
+
+  it('writes a file name a LINK can read back', () => {
+    // `;` separates rows in the payload, and the payload percent-encodes the
+    // quotes — so a `;` in the name is indistinguishable from the separator
+    // by the time the link comes back, and the row returns split in two.
+    expect(rowSafeFileName('sales;2026.csv')).toBe('sales_2026.csv');
+    const text = formatTableRow('p', 'sales;2026.csv', '');
+    expect(decodePayload(encodePayload([text, 'y = p.v']))).toEqual([text, 'y = p.v']);
+    // And a hand-typed one is refused rather than silently lost on reload.
+    expect(scanDefinition('p = open("a;b.csv")')).toBeNull();
+    expect(badTableRow('p = open("a;b.csv")')).toMatch(/separates rows/);
   });
 
   it('needs a hash long enough to name one file', () => {

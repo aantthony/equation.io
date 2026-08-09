@@ -414,6 +414,25 @@ describe('graph previews', () => {
     expect(body.result.structuredContent.preview).toContain('no plot rows');
   });
 
+  it('says a graph is fine when only the CSV is missing', async () => {
+    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'y = person.age']);
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(true);
+    expect(out.preview).toContain('the graph itself is fine');
+    expect(out.preview_omits).toEqual([
+      { row: 'y = person.age', why: expect.stringContaining('not on this device') },
+    ]);
+  });
+
+  it('does not call a definition-only document fine', async () => {
+    // `ages` draws nothing on any device, so "every plot row is device-local"
+    // would send the caller away satisfied with a graph that is simply empty.
+    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'ages = person.age / 2']);
+    const out = body.result.structuredContent;
+    expect(out.preview).toContain('no plot rows');
+    expect(out.preview).not.toContain('the graph itself is fine');
+  });
+
   it('still previews the working rows of a partly-broken graph', async () => {
     const { body } = await call(['y = x^2', 'y = florb(x)']);
     expect(body.result.structuredContent.valid).toBe(false);

@@ -361,6 +361,48 @@ nothing is a dead end.
 - The phase-2 notes claimed pasting CSV text was an ingest path, three
   paragraphs after recording that it was dropped.
 
+### Sixth pass
+
+Two findings, both about the same thing from opposite ends: **this phase gave
+the grammar strings, and `statements.ts` had written down, in advance, what
+that would break.**
+
+> the grammar has no strings, comments, or other tokens that can contain
+> bracket or separator characters. If such tokens are ever added, rebuild this
+> on the tokenizer.
+
+- **A `;` in quoted text destroyed the row on reload.** `t =
+  open("sales;2026.csv")` with `y = t.v` came back as *three* rows, split
+  mid-name. The link joins rows with `;` and percent-encodes the quotes, so by
+  the time `decodePayload` runs there is nothing left to tell an in-row `;`
+  from a separator — the ambiguity is unresolvable in the payload, which is
+  why llms.txt already promised the invariant ("never put a literal `;` inside
+  an equation"). The fix keeps the promise instead of weakening the codec:
+  `rowSafeFileName` strips `;` at ingest, `TABLE_RE` excludes it from a file
+  name, and `createLeaf` refuses it in any text literal. Copilot reported this
+  only as an MCP-surface nuisance (`create_graph` rejects rows containing
+  `;`); the link corruption underneath it was the real finding.
+- **Brackets inside text skewed the editor's split.** `open("a(b.csv");y = 2
+  x` merged into one row, because the `(` in the name left the scan at depth
+  one and the separator never fired. `splitStatements` now tracks
+  double-quoted text — the rebuild the file asked for. A newline always ends a
+  string, so a half-typed `y = "` cannot swallow the rows below it; single
+  quotes are deliberately left alone, since `f'(x)` is prime notation.
+- **"The graph itself is fine" was told to documents that had no graph.**
+  `dataOmits` collects every data-local row, definitions included, so
+  `person = open(…)` plus `ages = person.age / 2` and nothing that draws
+  reported "every plot row reads a data file on the author's device" — sending
+  the caller away satisfied with a document that plots nothing anywhere. The
+  reassurance is now earned by a data-local row that would have *drawn*
+  something. Worth noting that neither branch of this message had a test; both
+  do now.
+
+One thing the fix does not do: a `;` typed into text is refused with an error,
+but the row is still written to the URL verbatim (as every unparseable row
+is), so reloading that link still splits it. Prevention lives at ingest, where
+the app controls the name; for a hand-typed one the guarantee is only that you
+are told immediately, while the text is still on screen.
+
 ## Testing
 
 - lib: parser (ranges, indexing, strings, member), broadcasting incl.

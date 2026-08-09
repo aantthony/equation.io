@@ -398,6 +398,21 @@ describe('lists', () => {
   });
 });
 
+describe('text', () => {
+  it('reads quoted text', () => {
+    expect(parseExpr('"New York"')).toEqual({ kind: 'str', value: 'New York' });
+  });
+
+  it('refuses a ";" inside text', () => {
+    // The URL joins rows with ';' and percent-encodes the quotes, so nothing
+    // in the payload distinguishes this from a separator: the row would come
+    // back split. Refusing it here keeps the "a row never contains a bare ;"
+    // invariant that decodePayload relies on.
+    expect(() => parseExpr('p[p.city = "a;b"]')).toThrow(/separates rows/);
+    expect(() => parseExpr('t = open("sales;2026.csv")')).toThrow(/separates rows/);
+  });
+});
+
 describe('number theory', () => {
   const ev = (s: string) => evaluate(parseExpr(s), {});
 

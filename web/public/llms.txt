@@ -19,7 +19,11 @@ Format:
   additionally escape ( ) ! ' * as %28 %29 %21 %27 %2A — chat apps cut
   auto-linked URLs at bare parentheses, silently truncating the graph.
 - Encoded equations are joined with `;`. Never put a literal `;` inside an
-  equation; it is only the row separator.
+  equation; it is only the row separator. Quoted text is not an exception —
+  the payload encodes the quotes too, so a `;` in a file name or a compared
+  value is indistinguishable from a separator when the link is read back.
+  The app strips it from dropped file names, and rows containing one are
+  rejected.
 - Every equation gets its own row and color. Definitions (constants,
   functions, coordinate fields) are rows too — order does not matter.
 - `/g/` links unfurl with a rendered preview image (og:image) in chat apps

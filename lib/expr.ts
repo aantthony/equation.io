@@ -535,7 +535,15 @@ function createLeaf(token: Token): PNode {
     if (token.str.length < 2 || !token.str.endsWith(q)) {
       throw new Error(`Unterminated text: ${token.str}`);
     }
-    return { kind: 'str', value: token.str.slice(1, -1) };
+    const value = token.str.slice(1, -1);
+    // `;` separates rows in the URL, and the payload percent-encodes the
+    // quotes — so by the time a link is read back there is nothing left to
+    // tell a `;` inside text from the one between rows, and the row returns
+    // split in two. Refuse it here rather than lose the row on reload.
+    if (value.includes(';')) {
+      throw new Error(`Text cannot contain ';' — that character separates rows, so this would come back as two rows.`);
+    }
+    return { kind: 'str', value };
   }
   if (token.type === 'parenopen') return { kind: 'popen', bracket: token.str, call: !!token.call };
   if (token.type === 'symbol') {

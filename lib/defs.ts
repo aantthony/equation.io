@@ -347,18 +347,22 @@ const INIT_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$/;
  * a row to the wrong bytes is the exact failure the pin exists to prevent.
  */
 const TABLE_RE = new RegExp(
-  String.raw`^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{${HASH_TOKEN_LEN},64})\s*)?\)\s*$`,
+  // `;` is excluded from the name deliberately: it separates rows in the URL,
+  // so such a row cannot survive a reload. See rowSafeFileName.
+  String.raw`^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^";]*)"|'([^';]*)')\s*(?:,\s*([0-9a-fA-F]{${HASH_TOKEN_LEN},64})\s*)?\)\s*$`,
 );
 
 /**
  * The name a file is stored and written under. A row quotes the file name
  * with no escape (`open("sales.csv")`), so a name holding a quote or a line
  * break could not be read back — and a row that cannot be read back is worse
- * than one whose title lost a character. Applied at ingest, so what is stored
- * and what the row says are the same string, and re-dropping the file matches.
+ * than one whose title lost a character. `;` goes too: it separates rows in
+ * the URL, so `sales;2026.csv` would come back as two broken rows. Applied at
+ * ingest, so what is stored and what the row says are the same string, and
+ * re-dropping the file matches.
  */
 export const rowSafeFileName = (name: string): string =>
-  name.replace(/["\r\n\t]+/g, '_').trim() || 'data.csv';
+  name.replace(/[";\r\n\t]+/g, '_').trim() || 'data.csv';
 
 /** A row that means to open a file, whether or not it succeeds at saying so. */
 const OPEN_HEAD_RE = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*["']/;
@@ -380,6 +384,14 @@ export function badTableRow(text: string): string | null {
     return `${m[1]} is a built-in name, so it cannot name a data file — try ${m[1]}_data = open(…).`;
   }
   if (TABLE_RE.test(text)) return null;
+  const quoted = /["']([^"']*)["']/.exec(text);
+  if (quoted?.[1].includes(';')) {
+    // The row works until it is reloaded: the payload joins rows with ';' and
+    // encodes the quotes, so the name comes back as two broken rows. Say so
+    // now, while the name is still on screen to be changed.
+    return `A data file's name cannot contain ';' — that character separates rows,`
+      + ' so the link would come back split. Rename the file and drop it again.';
+  }
   const short = /,\s*([0-9a-fA-F]+)\s*\)\s*$/.exec(text);
   if (short && short[1].length < HASH_TOKEN_LEN) {
     return `A data file's hash is ${HASH_TOKEN_LEN} hex digits; that is ${short[1].length}.`

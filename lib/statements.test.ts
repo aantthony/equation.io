@@ -28,6 +28,24 @@ describe('splitStatements', () => {
     expect(splitStatements('x)\ny = 1')).toEqual(['x)', 'y = 1']);
   });
 
+  it('does not let a bracket inside quoted text skew the depth', () => {
+    // A file name is the one token that can hold an unbalanced bracket. Before
+    // quote tracking, the ')' here returned the scan to depth zero early and
+    // the ';' split the row down the middle.
+    expect(splitStatements('t = open("a)b.csv");y = t.v')).toEqual(['t = open("a)b.csv")', 'y = t.v']);
+    expect(splitStatements('t = open("a(b.csv")\ny = t.v')).toEqual(['t = open("a(b.csv")', 'y = t.v']);
+  });
+
+  it('ends a string at the newline so a half-typed quote cannot swallow rows', () => {
+    expect(splitStatements('y = "\ny = x')).toEqual(['y = "', 'y = x']);
+  });
+
+  it('leaves the prime mark alone', () => {
+    // `'` opens text in the grammar but is also prime notation; treating it as
+    // a quote here would eat the rest of the line.
+    expect(splitStatements("y = f'(x);y = 2")).toEqual(["y = f'(x)", 'y = 2']);
+  });
+
   it('preserves empty statements and single statements verbatim', () => {
     expect(splitStatements('')).toEqual(['']);
     expect(splitStatements('y = sin(x)')).toEqual(['y = sin(x)']);
