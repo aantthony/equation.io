@@ -179,6 +179,41 @@ describe('mcp endpoint', () => {
     expect(out.preview).toBe('attached');
   });
 
+  it('reads a list inside P(…) and E(…), like every other row', async () => {
+    // These two bodies were the last rows parsed without the document's list
+    // names and never lowered, so a reduction over a list defined above them
+    // reported `Unknown variable: L` — about a name two rows up.
+    const { body } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['L = [1, 4, 2]', 'X ~ Normal(0, 1)', 'P(X < mean(L))', 'E(X + mean(L))'] },
+    });
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(true);
+    expect(out.rows[2].value).toBe('≈ 0.9902'); // Φ(7/3)
+    expect(out.rows[3].value).toBe('≈ 2.3333'); // E[X] + 7/3
+  });
+
+  it('keeps a graph shared before `total` and `open` had meanings of their own', async () => {
+    // Both names arrived with data files. A link written before that says
+    // `total = 3` and means the product `total (x + 1)`, or names a slider
+    // `open` — and the row it was shared as has to keep drawing.
+    const { body } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['total = 3', 'open = 2', 'y = total(x + 1)', 'y = open x'] },
+    });
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(true);
+    expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual([
+      'definition (const)', 'definition (const)', 'implicit2d', 'implicit2d',
+    ]);
+    // …while a document that binds neither still reduces and still opens.
+    const { body: b2 } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['L = [1, 4, 2]', 'total(L)'] },
+    });
+    expect(b2.result.structuredContent.rows[1].value).toBe('≈ 7');
+  });
+
   it('validates E(…) rows: exact and sampled means', async () => {
     const { body } = await rpc('tools/call', {
       name: 'create_graph',

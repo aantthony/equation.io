@@ -240,6 +240,32 @@ export function listNamesOf(defs: Defs): Set<string> {
 }
 
 /**
+ * Whether a name reads as a list — what `d/dx L` asks before it differentiates.
+ *
+ * A dotted path counts when its HEAD is known, not only the full path: without
+ * the bytes there is no column list to enumerate, and answering "no" there
+ * made `d/dx person.age` refuse on the author's device and quietly answer 0
+ * in the same graph shared, previewed, or read through the MCP server. Same
+ * rule, and the same reason, as `indexes` in expr.ts.
+ */
+export const isListName = (names: ReadonlySet<string>, n: string): boolean => {
+  if (names.has(n)) return true;
+  const dot = n.indexOf('.');
+  return dot > 0 && names.has(n.slice(0, dot));
+};
+
+/**
+ * Of the names a document binds as values, the ones a late-addition builtin
+ * would otherwise claim — what parseExpr needs to keep `total = 3` followed by
+ * `total(x + 1)` the product it was before `total` became a reduction.
+ */
+export const shadowedFnNames = (names: Iterable<string>): Set<string> => {
+  const out = new Set<string>();
+  for (const n of names) if (SHADOWABLE_FNS.has(n)) out.add(n);
+  return out;
+};
+
+/**
  * Whether a name is already spoken for — what a `~` row asks before claiming
  * one. Shared by the app and the worker because it drifted while it was
  * written out twice, and because it must answer the same on both.
@@ -359,8 +385,17 @@ export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
     : defs.vecStates.has(name) ? vecStateComps(name, defs.vecStates.get(name)!)
       : null;
 
-/** Names with built-in meaning that definitions may not shadow. */
-export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi', 'tau', 'open']);
+/**
+ * Names with built-in meaning that definitions may not shadow.
+ *
+ * `open` is deliberately NOT one of them, common as it is in data (a price
+ * series names a column that). A row is a data file because of its SHAPE —
+ * `name = open("file.csv")`, matched before the function and constant forms —
+ * so a graph that says `open = 3` keeps the slider it was shared with, and a
+ * graph that says `open(f) = f` keeps its function; only the quoted-file-name
+ * shape belongs to the data syntax.
+ */
+export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi', 'tau']);
 
 const FN_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\)\s*=(?!=)([\s\S]+)$/;
 const CONST_RE = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]+)$/;
@@ -436,6 +471,26 @@ export function badTableRow(text: string): string | null {
  *  ones old graphs may define themselves), not reserved, not a uniform. */
 export const nameable = (n: string): boolean =>
   (!FUNCTIONS.has(n) || SHADOWABLE_FNS.has(n)) && !RESERVED.has(n) && !n.startsWith('u_');
+
+/**
+ * A definable name for a dropped file, starting from the one its file name
+ * suggests: the stem itself where a definition may claim it, `data_…` where it
+ * may not, then numbered until nothing else has taken it.
+ *
+ * Both halves matter, because numbering alone cannot rescue every stem: no
+ * `u_2`, `u_3`, … is nameable either (they all read as uniforms), so `u.csv`
+ * sent the search for a free name round forever and froze the tab — after the
+ * bytes were already stored. `data_u` is nameable, and so is every number
+ * after it.
+ */
+export function freeTableName(base: string, taken: ReadonlySet<string>): string {
+  const stem = nameable(base) ? base : `data_${base}`;
+  if (!taken.has(stem)) return stem;
+  for (let k = 2; ; k++) {
+    const name = `${stem}_${k}`;
+    if (!taken.has(name)) return name;
+  }
+}
 
 /** Detect a definition row before parsing (so calls to it parse everywhere). */
 export function scanDefinition(text: string): Definition | null {
@@ -1055,6 +1110,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   const byName = new Map(raw.map(d => [d.name, d]));
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
   const stateNames = new Set(raw.filter(d => d.kind === 'state').map(d => d.name));
+  // Names this document binds as values shadow a late-addition builtin of the
+  // same name, so `total = 3` still reads `total(x + 1)` as a product.
+  const valueNames = shadowedFnNames(raw.filter(d => d.kind !== 'fn').map(d => d.name));
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   // Numeric values of constants resolved so far: Σ/Π bounds in later
@@ -1064,7 +1122,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
     consts: numEnv,
     boundConsts: new Set(),
     // Live: list names accumulate as definitions are processed.
-    isList: n => listNamesOf(defs).has(n),
+    isList: n => isListName(listNamesOf(defs), n),
     isSlice: idx => isSliceIndex(idx, defs),
   };
 
@@ -1075,7 +1133,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   const parse = (d: Definition & { rhs: string }): Expr => {
     const key = defKey(d);
     let p = parsed.get(key);
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, listNamesOf(defs))));
+    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, listNamesOf(defs), valueNames)));
     return p;
   };
 

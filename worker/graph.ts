@@ -14,10 +14,12 @@ import {
   evalConstEnv,
   listGetter,
   listNamesOf,
+  isListName,
   isSliceIndex,
   MissingDataError,
   nameTaken,
   resolveExpr,
+  shadowedFnNames,
   scanDefinition,
   usesIntegral,
   type Definition,
@@ -139,6 +141,13 @@ export function analyze(texts: string[]): Analysis {
   const fieldEnv = Object.fromEntries(defs.fields);
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
   const listNames = listNamesOf(defs);
+  // Names this document binds that a late-addition builtin would otherwise
+  // claim (`total = 3` followed by `total(x + 1)`), as in web/main.ts.
+  const valueNames = shadowedFnNames([
+    ...raw.filter(d => d.kind !== 'fn').map(d => d.name),
+    ...[...rvScan.base.values()].map(s => s.name),
+    ...[...rvScan.derived.values()].map(s => s.name),
+  ]);
   const getList = listGetter(defs);
   const getFn = (name: string) => {
     const fn = defs.fns.get(name);
@@ -154,7 +163,7 @@ export function analyze(texts: string[]): Analysis {
   const ropts = {
     consts: boundVals,
     boundConsts: built.sumBoundConsts,
-    isList: (n: string) => listNames.has(n),
+    isList: (n: string) => isListName(listNames, n),
     isSlice: (idx: Expr) => isSliceIndex(idx, defs),
   };
 
@@ -199,6 +208,15 @@ export function analyze(texts: string[]): Analysis {
     }
   }
 
+  // The body of a P(…)/E(…) row, read exactly as a plot row is read — with the
+  // list names, and lowered — so `P(X < mean(L))` sees the list two rows above
+  // rather than reporting it unknown (mirror of web/main.ts).
+  const parseRowBody = (body: string): Expr => lowerLists(
+    resolveExpr(parseExpr(body, fnNames, listNames, valueNames), getFn, ropts),
+    getList,
+    ropts,
+  );
+
   const seenViewKinds = new Set<string>();
   for (const [ri, row] of rows.entries()) {
     if (row.def || row.comment || row.error || row.cls || !row.text) continue;
@@ -217,7 +235,7 @@ export function analyze(texts: string[]): Analysis {
       const probBody = defs.consts.has('P') || defs.fns.has('P') ? null : matchProbability(row.text);
       if (probBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-        const p = toProbability(resolveExpr(parseExpr(probBody, fnNames), getFn, ropts), rvNames);
+        const p = toProbability(parseRowBody(probBody), rvNames);
         for (const name of p.rvs) {
           if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
@@ -273,7 +291,7 @@ export function analyze(texts: string[]): Analysis {
       const expectBody = defs.consts.has('E') || defs.fns.has('E') ? null : matchExpectation(row.text);
       if (expectBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-        const ex = toExpectation(resolveExpr(parseExpr(expectBody, fnNames), getFn, ropts), rvNames);
+        const ex = toExpectation(parseRowBody(expectBody), rvNames);
         for (const name of ex.rvs) {
           if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
@@ -309,7 +327,7 @@ export function analyze(texts: string[]): Analysis {
         row.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts);
         continue;
       }
-      const rawParsed = parseExpr(row.text, fnNames, listNames);
+      const rawParsed = parseExpr(row.text, fnNames, listNames, valueNames);
       let parsed = resolveExpr(rawParsed, getFn, ropts);
       // A bare expression in random variables plots that derived density.
       const rvRefs = [...freeVars(parsed)].filter(n => rvNames.has(n));

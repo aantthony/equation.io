@@ -81,26 +81,37 @@ export function sniffDelimiter(text: string): string {
   // with no trailing newline ends on a REAL record, and dropping that one
   // left a two-line file judged on its header alone.
   const partial = i < text.length || text.endsWith('\n');
-  let best = ',';
-  let bestCount = 0;
-  let bestEven = false;
-  for (const d of DELIMITERS) {
-    const seen = perLine.get(d)!;
-    const full = partial && seen.length > 1 ? seen.slice(0, -1) : seen;
-    if (!full[0]) continue;
-    // A real delimiter appears the same number of times in every record, and
-    // that outranks appearing often: in `notes, with, commas;value` the prose
-    // commas outnumber the ';' that actually separates the fields, but they
-    // do not line up, and choosing them throws every data row away as ragged.
-    // Count decides only among candidates that are equally (in)consistent.
-    const even = full.every(n => n === full[0]);
-    if (even === bestEven ? full[0] > bestCount : even) {
-      best = d;
-      bestCount = full[0];
-      bestEven = even;
+  const pick = (skipFirst: boolean): string | null => {
+    let best: string | null = null;
+    let bestCount = 0;
+    let bestEven = false;
+    for (const d of DELIMITERS) {
+      const seen = perLine.get(d)!;
+      const sampled = partial && seen.length > 1 ? seen.slice(0, -1) : seen;
+      const full = skipFirst ? sampled.slice(1) : sampled;
+      if (!full[0]) continue;
+      // A real delimiter appears the same number of times in every record, and
+      // that outranks appearing often: in `notes, with, commas;value` the prose
+      // commas outnumber the ';' that actually separates the fields, but they
+      // do not line up, and choosing them throws every data row away as ragged.
+      // Count decides only among candidates that are equally (in)consistent.
+      const even = full.every(n => n === full[0]);
+      if (best === null || (even === bestEven ? full[0] > bestCount : even)) {
+        best = d;
+        bestCount = full[0];
+        bestEven = even;
+      }
     }
-  }
-  return best;
+    return best;
+  };
+  // Nothing separates anything on line 1, but the lines below are a table:
+  // that line is a title, not a record ("Sales report" over a tab-separated
+  // export, as spreadsheets write). Judging the file by it threw the real
+  // delimiter away and fell back to ',', which made the whole file ONE text
+  // column — silently, since a single field per line is never ragged. Only a
+  // fallback, so a file whose header simply lacks the delimiter its rows use
+  // is still read by its rows, and a file that HAS an answer keeps it.
+  return pick(false) ?? pick(true) ?? ',';
 }
 
 /**
@@ -191,9 +202,18 @@ function toIdent(label: string, index: number): string {
 
 const isBlankCell = (s: string): boolean => BLANKS.has(s.trim().toLowerCase());
 
-/** Numeric reading of a cell, or NaN. Accepts a leading '+', thousands
- *  separators, and a trailing '%' (scaled), which real exports are full of. */
-export function cellNumber(s: string): number {
+/**
+ * Numeric reading of a cell, or NaN. Accepts a leading '+', thousands
+ * separators, and a trailing '%' (scaled), which real exports are full of.
+ *
+ * `decimalComma` says the file writes 1,5 for one and a half: what a comma
+ * means cannot be read off the cell, only off the file, and reading `1,500`
+ * as fifteen hundred in a ';'-delimited European export made every value in
+ * the column 1000× too large with nothing to show for it — no skipped cell,
+ * no warning, just wrong numbers. A file that chose ';' or a tab over ','
+ * usually did so because the comma was already spoken for (parseCsv decides).
+ */
+export function cellNumber(s: string, decimalComma = false): number {
   let t = s.trim();
   if (!t) return NaN;
   let scale = 1;
@@ -201,7 +221,13 @@ export function cellNumber(s: string): number {
     scale = 0.01;
     t = t.slice(0, -1).trim();
   }
-  if (/^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) t = t.replace(/,/g, '');
+  if (decimalComma) {
+    // 1.234.567,89 — dots group, the comma is the point.
+    if (/^[+-]?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) t = t.replace(/\./g, '').replace(',', '.');
+    else if (/^[+-]?\d+,\d+$/.test(t)) t = t.replace(',', '.');
+  } else if (/^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(t)) {
+    t = t.replace(/,/g, '');
+  }
   if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(t)) return NaN;
   return Number(t) * scale;
 }
@@ -216,8 +242,20 @@ export function parseCsv(text: string): Table {
   const delimiter = sniffDelimiter(text);
   const records = parseRecords(text, delimiter);
   if (!records.length) throw new Error('That file has no rows.');
-  const header = records[0];
   const warnings: string[] = [];
+  // A single-field line above the header is a title, not a record ("Sales
+  // report" over a tab-separated export). Read as the header it makes every
+  // real row ragged, and the file arrives as one column and no rows — so drop
+  // it, but only when the lines below agree on a wider shape, which is what
+  // tells a title apart from a genuine one-column file.
+  const titled = records.length > 2 && records[0].length === 1 && records[1].length > 1
+    && records.filter(r => r.length === records[1].length).length > records.length / 2;
+  if (titled) warnings.push('1 title line above the header ignored');
+  const first = titled ? 1 : 0;
+  const header = records[first];
+  // What a comma means is a property of the file, not of a cell: only a file
+  // that kept ',' for itself can be using it to group thousands.
+  const decimalComma = delimiter !== ',';
 
   const names: string[] = [];
   const used = new Set<string>();
@@ -236,7 +274,7 @@ export function parseCsv(text: string): Table {
 
   const body: string[][] = [];
   let skipped = 0;
-  for (let r = 1; r < records.length; r++) {
+  for (let r = first + 1; r < records.length; r++) {
     if (records[r].length !== header.length) {
       skipped++;
       continue;
@@ -248,6 +286,9 @@ export function parseCsv(text: string): Table {
   }
 
   const missing = new Map<string, number>();
+  /** Cells whose comma was read as a decimal point — said out loud below,
+   *  because the other reading would have been 1000× larger. */
+  let pointedByComma = 0;
   const columns: Column[] = names.map((name, c) => {
     const cells = body.map(row => row[c]);
     let numeric = cells.length > 0;
@@ -255,7 +296,7 @@ export function parseCsv(text: string): Table {
     for (const cell of cells) {
       if (isBlankCell(cell)) continue;
       seen++;
-      if (Number.isNaN(cellNumber(cell))) {
+      if (Number.isNaN(cellNumber(cell, decimalComma))) {
         numeric = false;
         break;
       }
@@ -278,14 +319,20 @@ export function parseCsv(text: string): Table {
     const nums = new Float64Array(cells.length);
     let gaps = 0;
     cells.forEach((cell, k) => {
-      const v = isBlankCell(cell) ? NaN : cellNumber(cell);
+      const v = isBlankCell(cell) ? NaN : cellNumber(cell, decimalComma);
       if (Number.isNaN(v)) gaps++;
+      else if (decimalComma && cell.includes(',')) pointedByComma++;
       nums[k] = v;
     });
     if (gaps) missing.set(name, gaps);
     return { name, label: header[c].trim(), type: 'num', nums };
   });
 
+  if (pointedByComma) {
+    const named = delimiter === '\t' ? 'tabs' : `"${delimiter}"`;
+    warnings.push(`${pointedByComma} value${pointedByComma === 1 ? '' : 's'} read with ',' as the decimal point`
+      + ` (the file separates its columns with ${named})`);
+  }
   const gaps = [...missing.entries()];
   if (gaps.length) {
     const total = gaps.reduce((a, [, n]) => a + n, 0);

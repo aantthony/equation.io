@@ -7,10 +7,13 @@ import {
   buildDefs,
   evalConstEnv,
   formatTableRow,
+  freeTableName,
+  isListName,
   isSliceIndex,
   listGetter,
   listNamesOf,
   nameTaken,
+  nameable,
   rowSafeFileName,
   resolveExpr,
   scanDefinition,
@@ -43,7 +46,7 @@ function lowerRow(text: string, defRows: string[], tables: TableSource | null = 
   // skipping a check the real pipeline runs.
   const ropts = {
     consts,
-    isList: (n: string) => listNames.has(n),
+    isList: (n: string) => isListName(listNames, n),
     isSlice: (idx: Expr) => isSliceIndex(idx, defs),
   };
   const e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), n => defs.fns.get(n), ropts);
@@ -75,9 +78,34 @@ describe('open() rows', () => {
     expect(scanDefinition('p = 2 open("a.csv")')).toMatchObject({ kind: 'const' });
   });
 
-  it('reserves the name open', () => {
-    expect(scanDefinition('open = 2')).toBeNull();
-    expect(scanDefinition('open(f) = f')).toBeNull();
+  it('finds a free row name for every dropped file', () => {
+    const free = (base: string, ...taken: string[]) => freeTableName(base, new Set(taken));
+    expect(free('people')).toBe('people');
+    expect(free('people', 'people')).toBe('people_2');
+    expect(free('people', 'people', 'people_2')).toBe('people_3');
+    // A stem no definition may claim gets one that can be. Numbering alone
+    // could not rescue these: `u`, `u_2`, `u_3`, … all read as uniform names,
+    // so the search went round forever and froze the tab on a dropped `u.csv`
+    // — with the bytes already written to storage.
+    expect(nameable(free('u'))).toBe(true);
+    expect(free('u')).toBe('data_u');
+    expect(free('u_sales')).toBe('data_u_sales');
+    expect(free('sin')).toBe('data_sin');
+    expect(free('u', 'data_u')).toBe('data_u_2');
+    // The names it invents are ones a row can actually define.
+    for (const stem of ['u', 'u_2', 'x', 'pi', 'sin', 'people']) {
+      expect([stem, nameable(free(stem, stem, `data_${stem}`))]).toEqual([stem, true]);
+    }
+  });
+
+  it('leaves the name open to a graph that already used it', () => {
+    // A price series names a column `open`, and graphs shared before data
+    // files existed named sliders that. The data syntax is the SHAPE of the
+    // row, so those definitions keep their meaning…
+    expect(scanDefinition('open = 2')).toMatchObject({ kind: 'const', name: 'open' });
+    expect(scanDefinition('open(f) = f')).toMatchObject({ kind: 'fn', name: 'open' });
+    // …and a row that opens a file is still a file, whatever else is defined.
+    expect(scanDefinition(`p = open("people.csv", ${HASH})`)).toMatchObject({ kind: 'table' });
   });
 
   it('says so when the row claims a built-in name', () => {
@@ -307,6 +335,16 @@ describe('differentiating a list', () => {
     expect(evaluate(lowerRow('d/dx x^2', []), { x: 3 })).toBe(6);
   });
 
+  it('says it on a device without the file too', () => {
+    // Nothing here can enumerate the columns, so `person.age` was not a known
+    // list name and diff() differentiated it as an opaque constant: the row
+    // errored for the author and drew the line y = 0 in every shared link,
+    // preview, and MCP listing. The head of the path is enough to answer.
+    const rows = [`person = open("people.csv", ${HASH})`];
+    expect(() => lowerRow('d/dx person.age', rows, null)).toThrow(/is a list/);
+    expect(() => lowerRow('d/dx (person.age + 1)', rows, null)).toThrow(/is a list/);
+  });
+
   it('says the same about text, instead of the internal "Unreachable"', () => {
     // A text literal is a leaf diff() had no case for, so it fell off the end
     // of the switch. The name guard above cannot catch it: a literal has no
@@ -338,6 +376,34 @@ describe('a reduction over a whole column', () => {
       expect(evaluate(e, { t: 1 })).toBeGreaterThan(0);
     }
     expect(evaluate(lowerRow('total(big.v t)', rows, src), { t: 2 })).toBe(N * (N + 1));
+  });
+
+  it('reduces the values that are there, not the gaps between them', () => {
+    // A missing cell is NaN. Reduced with the rest it made mean, total, min,
+    // max and stdev NaN outright, and sorted to the END for the median, which
+    // then indexed as if the gap were a value: a wrong number, shown with the
+    // same confident ≈ as a right one. hist() has always skipped them.
+    // The gap sits inside a wider row: a line holding nothing at all is a
+    // blank line, not a row of one missing value (see csv.ts).
+    const src = store({ 'g.csv': 'a,b\n1,10\n,20\n3,30\n' });
+    const defs = [`g = open("g.csv", ${HASH})`];
+    const val = (text: string) => evaluate(lowerRow(text, defs, src), {});
+    expect(val('median(g.a)')).toBe(2);
+    expect(val('mean(g.a)')).toBe(2);
+    expect(val('total(g.a)')).toBe(4);
+    expect(val('min(g.a)')).toBe(1);
+    expect(val('max(g.a)')).toBe(3);
+    expect(val('stdev(g.a)')).toBeCloseTo(Math.SQRT2, 12);
+    expect(values(lowerRow('sort(g.a)', defs, src))).toEqual([1, 3]);
+    // …but `count` answers how many rows there are, gaps included — the same
+    // answer it gives for a text column, and what the file's preview shows.
+    expect(val('count(g.a)')).toBe(3);
+  });
+
+  it('says so when a filter has left it nothing to reduce', () => {
+    const src = store({ 'g.csv': 'a,b\n1,1\n,2\n' });
+    const defs = [`g = open("g.csv", ${HASH})`, 'late = g[g.b > 1]'];
+    expect(() => lowerRow('mean(late.a)', defs, src)).toThrow(/no values to work with/);
   });
 });
 
@@ -383,6 +449,16 @@ describe('hist', () => {
     expect(() => lowerRow('sin(hist(person.age))', rows)).toThrow(/whole plot/);
     expect(() => lowerRow('hist(4)', rows)).toThrow(/needs a list/);
     expect(() => lowerRow('hist(person.age, 1)', rows)).toThrow(/2 to 500 bins/);
+  });
+
+  it('cannot be named either, rather than storing an unspeakable node', () => {
+    // A definition skips the plot-row checks (text is a value worth naming),
+    // and the bars slipped through with them: `h` was stored as a constant
+    // holding the internal `[hist]` node, and both rows then reported
+    // "Unknown function: [hist]" — a token no one can type or fix.
+    const { errors } = build([...rows, 'h = hist(person.age)', 'k = h + 1']);
+    expect(errors.get('h')).toMatch(/whole plot, not a value/);
+    expect([...errors.values()].join(' ')).not.toMatch(/\[hist\]/);
   });
 });
 

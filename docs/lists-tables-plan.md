@@ -1,8 +1,17 @@
 # Lists, tables, and CSV files
 
 Plan agreed 2026-08-08. Decisions locked: **1-based list indexing**, **raw hash
-token in the row for v1**, **warnings (not silence) for skipped rows**, and
-**`open` is reserved** (not shadowable).
+token in the row for v1**, and **warnings (not silence) for skipped rows**.
+
+Reserving `open` was planned and then reversed (2026-08-09): a graph shared
+before data files existed may name a slider or a function `open` — a price
+series does — and reserving it turned those rows into an error whose advice
+(`define "open = 1"`) was the row that had just failed. A data row is
+recognized by its SHAPE (`name = open("file.csv")`, matched ahead of the
+function and constant forms), which needs no reservation. Same reasoning
+applies to the reductions: `mean`, `total`, `count`, `median`, `sort`,
+`stdev` and `hist` are shadowable, and a document that binds one of them
+parses that name as its own value everywhere (lib/expr.ts `activeValueNames`).
 
 The goal, end to end:
 
@@ -91,7 +100,7 @@ outlines of later dots painted over the fill of earlier ones, turning a
 As planned:
 
 - **Grammar**: string literals (double or single quotes), legal only as
-  `open()`'s first argument. `open` joins RESERVED. The hash argument is a
+  `open()`'s first argument (`open` itself stays definable — see above). The hash argument is a
   bare 12-hex token, shown raw in the row for v1 (a chip widget can come
   later). Note `'` is LINK_UNSAFE in lib/link.ts — canonical serialization
   uses double quotes.

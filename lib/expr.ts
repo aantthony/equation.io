@@ -109,6 +109,16 @@ let activeUserFns: ReadonlySet<string> = new Set();
 let activeListNames: ReadonlySet<string> = new Set();
 
 /**
+ * Names the document binds as values (set by parseExpr). A late-addition
+ * builtin is only a function while nothing else claims its name: a graph
+ * shared before `total` and `count` existed may hold `total = 3`, and there
+ * `total(x + 1)` is the product it has always been, not a reduction over a
+ * list that isn't there. SHADOWABLE_FNS says which names may be taken;
+ * this says which ones a particular document took.
+ */
+let activeValueNames: ReadonlySet<string> = new Set();
+
+/**
  * Whether `name[…]` indexes rather than multiplies.
  *
  * A dotted path counts when its HEAD is known, not only the full path: a data
@@ -137,7 +147,18 @@ export const builtinFn = (name: string): string | null => {
 const canonicalFn = (name: string): string =>
   activeUserFns.has(name) ? name : (builtinFn(name) ?? name);
 
-const isFnName = (name: string): boolean => activeUserFns.has(name) || builtinFn(name) !== null;
+/** Whether this document defines the builtin `name` would fold to, so the
+ *  name reads as a value. Folds case with builtinFn, so `Total(…)` does not
+ *  become a call either: every spelling means what it meant before the
+ *  builtin existed. */
+const shadowedFn = (name: string): boolean => {
+  if (!activeValueNames.size) return false;
+  const b = builtinFn(name);
+  return b !== null && SHADOWABLE_FNS.has(b) && activeValueNames.has(b);
+};
+
+const isFnName = (name: string): boolean =>
+  activeUserFns.has(name) || (builtinFn(name) !== null && !shadowedFn(name));
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const bin = (op: '+' | '-' | '*' | '/' | '^') => (a: Expr, b: Expr): Expr => ({ kind: 'bin', op, a, b });
@@ -571,15 +592,19 @@ function createLeaf(token: Token): PNode {
 
 /**
  * Parse an expression or equation, keeping free variables symbolic.
- * Names in userFns parse as function calls (`f(x+1)`) instead of products.
+ * Names in userFns parse as function calls (`f(x+1)`) instead of products;
+ * names in valueNames that a late-addition builtin would claim parse as
+ * variables, so an older graph keeps the meaning it was shared with.
  */
 export function parseExpr(
   str: string,
   userFns: ReadonlySet<string> = new Set(),
   listNames: ReadonlySet<string> = new Set(),
+  valueNames: ReadonlySet<string> = new Set(),
 ): Expr {
   activeUserFns = userFns;
   activeListNames = listNames;
+  activeValueNames = valueNames;
   try {
     const tokens = addImplicitTokens(normalizeTokens(tokenize(str)));
     const stack: PNode[] = [];
@@ -598,6 +623,7 @@ export function parseExpr(
   } finally {
     activeUserFns = new Set();
     activeListNames = new Set();
+    activeValueNames = new Set();
   }
 }
 

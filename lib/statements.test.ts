@@ -61,6 +61,19 @@ describe('splitStatements', () => {
     expect(splitStatements("y = f'(x);y = 2")).toEqual(["y = f'(x)", 'y = 2']);
   });
 
+  it('reads a prime after anything a value can end with', () => {
+    // A prime that follows ')', ']' or '!' is a typo or a half-typed row —
+    // but no string can begin there either, and reading one swallowed the ';'
+    // and took the perfectly good row after it out of the document. Splitting
+    // wrongly costs a whole row; tokenizing wrongly costs one row its message.
+    expect(splitStatements("f(x)' ; y = 2")).toEqual(["f(x)' ", ' y = 2']);
+    expect(splitStatements("L[1]' ; y = 2")).toEqual(["L[1]' ", ' y = 2']);
+    expect(splitStatements("y = 3!' ; y = 2")).toEqual(["y = 3!' ", ' y = 2']);
+    // A quote where a token CAN start still opens text, brackets and all.
+    expect(splitStatements("t = open('a;b.csv');y = 2")).toEqual(["t = open('a;b.csv')", 'y = 2']);
+    expect(splitStatements("p[p.city == 'a;b'];y = 2")).toEqual(["p[p.city == 'a;b']", 'y = 2']);
+  });
+
   it('preserves empty statements and single statements verbatim', () => {
     expect(splitStatements('')).toEqual(['']);
     expect(splitStatements('y = sin(x)')).toEqual(['y = sin(x)']);

@@ -9,11 +9,13 @@ import {
   emptyDefs,
   evalConstEnv,
   formatTableRow,
+  freeTableName,
   listGetter,
   listNamesOf,
+  isListName,
   isSliceIndex,
   nameTaken,
-  nameable,
+  shadowedFnNames,
   resolveExpr,
   scanDefinition,
   usesIntegral,
@@ -1107,6 +1109,13 @@ function recompileAll() {
   const fieldEnv = Object.fromEntries(defs.fields);
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
   const listNames = listNamesOf(defs);
+  // Names bound by this document that a late-addition builtin would otherwise
+  // claim, so `total = 3` keeps `total(x + 1)` the product it was shared as.
+  const valueNames = shadowedFnNames([
+    ...raw.filter(d => d.kind !== 'fn').map(d => d.name),
+    ...[...rvScan.base.values()].map(s => s.name),
+    ...[...rvScan.derived.values()].map(s => s.name),
+  ]);
   const getList = listGetter(defs);
   const getFn = (name: string) => {
     const fn = defs.fns.get(name);
@@ -1124,7 +1133,7 @@ function recompileAll() {
   const ropts = {
     consts: constVals,
     boundConsts: sumBoundNames,
-    isList: (n: string) => listNames.has(n),
+    isList: (n: string) => isListName(listNames, n),
     isSlice: (idx: Expr) => isSliceIndex(idx, defs),
   };
 
@@ -1206,6 +1215,18 @@ function recompileAll() {
     }
   }
 
+  /**
+   * The body of a P(…)/E(…) row, read exactly as a plot row is read — lists
+   * and all. Without the list names, `P(X < mean(L))` reported `Unknown
+   * variable: L` about a list defined two rows above; without the lowering,
+   * the reduction never became the number the bound needs.
+   */
+  const parseRowBody = (body: string): Expr => lowerLists(
+    resolveExpr(parseExpr(body, fnNames, listNames, valueNames), getFn, ropts),
+    getList,
+    ropts,
+  );
+
   const seenViewport = new Set<string>();
   for (const eq of equations) {
     if (eq.def || eq.comment || distRows.has(eq)) continue;
@@ -1224,7 +1245,7 @@ function recompileAll() {
       const probBody = defs.consts.has('P') || defs.fns.has('P') ? null : matchProbability(text);
       if (probBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-        const p = toProbability(resolveExpr(parseExpr(probBody, fnNames), getFn, ropts), rvNames);
+        const p = toProbability(parseRowBody(probBody), rvNames);
         for (const name of p.rvs) {
           if (!rvSys.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
@@ -1279,7 +1300,7 @@ function recompileAll() {
       const expectBody = defs.consts.has('E') || defs.fns.has('E') ? null : matchExpectation(text);
       if (expectBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-        const ex = toExpectation(resolveExpr(parseExpr(expectBody, fnNames), getFn, ropts), rvNames);
+        const ex = toExpectation(parseRowBody(expectBody), rvNames);
         for (const name of ex.rvs) {
           if (!rvSys.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
@@ -1317,7 +1338,7 @@ function recompileAll() {
         eq.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts);
         continue;
       }
-      const rawParsed = parseExpr(text, fnNames, listNames);
+      const rawParsed = parseExpr(text, fnNames, listNames, valueNames);
       let parsed = resolveExpr(rawParsed, getFn, ropts);
       // A bare expression in random variables (`X + Y`, `X^2`) plots the
       // density of that derived variable — distribution arithmetic in place.
@@ -1482,20 +1503,15 @@ function pinTableHashes(): boolean {
 }
 
 /** A row name for a dropped file that no definition has claimed. */
-function freeTableName(base: string): string {
+function rowNameFor(base: string): string {
   // Scanned from the row TEXT, not from `eq.def`: dropping several files at
   // once appends a row per file and recompiles only at the end, so the rows
   // added moments ago have no def yet. Reading the stale defs gave two files
   // with the same stem (sales.csv, sales.tsv) the same name, and the second
   // row then lost to the duplicate check.
-  const taken = new Set(equations
+  return freeTableName(base, new Set(equations
     .map(eq => eq.def?.name ?? scanDefinition(eq.text)?.name)
-    .filter((n): n is string => !!n));
-  if (nameable(base) && !taken.has(base)) return base;
-  for (let k = 2; ; k++) {
-    const name = `${base}_${k}`;
-    if (nameable(name) && !taken.has(name)) return name;
-  }
+    .filter((n): n is string => !!n)));
 }
 
 /**
@@ -1550,7 +1566,7 @@ async function openDataFiles(files: File[]) {
       added.push(`${loaded.file} reloaded${fragile}`);
       continue;
     }
-    const name = freeTableName(tableNameFor(loaded.file));
+    const name = rowNameFor(tableNameFor(loaded.file));
     // Land on the trailing blank row if there is one, so dropping twice does
     // not leave gaps.
     const last = equations[equations.length - 1];

@@ -137,7 +137,9 @@ demand instead of living in a tool description. No authentication required.
   `stdev(L)` (sample), `median(L)`, `sort(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
   expand symbolically, so elements may animate (`mean([sin(t), 2])`);
-  stdev/median/sort need constant elements.
+  stdev/median/sort need constant elements. Over a column, a missing cell is
+  left out of every reduction (as it is of `hist`) except `count(L)`, which
+  answers how many rows there are.
 - `hist(L)` bins a list into a bar chart — `hist(L, 40)` sets the bin count
   (default ≈ √n, between 5 and 60). It is a whole row, not a value, and the
   one thing you may do to it is scale it: the plane has a single scale for
@@ -304,7 +306,11 @@ demand instead of living in a tool description. No authentication required.
   parsed once and kept in the browser's local storage, pinned by the SHA-256
   prefix in the row. Each numeric column reads as a list under its dotted
   name (`person.age`); text columns read as lists of text, which filters can
-  compare; missing cells become gaps the row's readout counts. Because the bytes never
+  compare; missing cells become gaps the row's readout counts. The delimiter
+  is sniffed (`,`, `;`, or a tab), a title line above the header is skipped,
+  and in a file that separates its columns with `;` or tabs a comma reads as
+  the decimal point (`1,5` is 1.5) — the readout's preview names anything it
+  had to decide. Because the bytes never
   enter the URL, opening the link on another device (or rendering it
   server-side, as `create_graph` previews do) reports the data as
   device-local instead of drawing it; dropping the same file there restores

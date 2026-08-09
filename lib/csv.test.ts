@@ -79,6 +79,17 @@ describe('delimiter sniffing', () => {
   it('falls back to a comma with nothing to go on', () => {
     expect(sniffDelimiter('single\n1\n')).toBe(',');
   });
+
+  it('reads past a title line above the header', () => {
+    // A line that separates nothing is not a record: judging the file by it
+    // threw the tab away and read the whole file as one text column, with
+    // nothing ragged to warn about.
+    expect(sniffDelimiter('Sales report\nname\tage\nada\t3\nbob\t4\n')).toBe('\t');
+    expect(sniffDelimiter('Sales report\nname;age\nada;3\nbob;4\n')).toBe(';');
+    // Only a fallback: a file whose header IS a record keeps that answer,
+    // even where the rows hold commas of their own.
+    expect(sniffDelimiter('name;price\nada;1,500\nbob;2,250\n')).toBe(';');
+  });
 });
 
 describe('cell numbers', () => {
@@ -98,6 +109,14 @@ describe('cell numbers', () => {
     expect(cellNumber('12px')).toBeNaN();
     expect(cellNumber('1,23')).toBeNaN();
     expect(cellNumber('')).toBeNaN();
+  });
+
+  it('takes the comma as the decimal point where the file says so', () => {
+    expect(cellNumber('1,5', true)).toBe(1.5);
+    expect(cellNumber('1.234.567,89', true)).toBeCloseTo(1234567.89, 9);
+    // The reading a ';'-separated European export needs — as a thousands
+    // group this was 1000× too large, with no gap and no warning to show it.
+    expect(cellNumber('1,500', true)).toBe(1.5);
   });
 });
 
@@ -155,6 +174,27 @@ describe('parseCsv', () => {
     expect(t.delimiter).toBe(';');
     expect(col(t, 'city').strs).toEqual(['Paris, FR', 'Lyon, FR']);
     expect(nums(t, 'pop')).toEqual([2148000, 513275]);
+  });
+
+  it('reads a European export, and says the comma was a decimal point', () => {
+    const t = parseCsv('name;price\nada;1,500\nbob;2,25\n');
+    expect(t.delimiter).toBe(';');
+    expect(nums(t, 'price')).toEqual([1.5, 2.25]);
+    expect(t.warnings.some(w => /2 values read with ',' as the decimal point/.test(w))).toBe(true);
+    // A comma-separated file keeps the thousands reading it has always had.
+    expect(nums(parseCsv('name,price\nada,"1,500"\n'), 'price')).toEqual([1500]);
+  });
+
+  it('drops a title line above the header', () => {
+    const t = parseCsv('Sales report\nname\tage\nada\t3\nbob\t4\n');
+    expect(t.columns.map(c => c.name)).toEqual(['name', 'age']);
+    expect(t.rows).toBe(2);
+    expect(nums(t, 'age')).toEqual([3, 4]);
+    expect(t.warnings.some(w => /title line/.test(w))).toBe(true);
+    // A genuine one-column file is not a title and a header — it is a column.
+    const one = parseCsv('v\n1\n2\n3\n');
+    expect(one.columns.map(c => c.name)).toEqual(['v']);
+    expect(one.rows).toBe(3);
   });
 
   it('refuses an empty document', () => {

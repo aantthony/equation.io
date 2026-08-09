@@ -335,6 +335,31 @@ describe('case-insensitive builtin functions', () => {
   });
 });
 
+describe('a name the document already bound', () => {
+  const NONE = new Set<string>();
+
+  it('reads as that value, not as the builtin added later', () => {
+    // `total`, `count` and `mean` became reductions long after graphs were
+    // shared using them as slider names, where `total(x + 1)` was a product.
+    // Nothing else in a saved link could tell those two readings apart.
+    expect(parseExpr('total(x + 1)')).toMatchObject({ kind: 'call', name: 'total' });
+    expect(parseExpr('total(x + 1)', NONE, NONE, new Set(['total'])))
+      .toMatchObject({ kind: 'bin', op: '*', a: { kind: 'var', name: 'total' } });
+    // Case folds with the builtin lookup, so no spelling sneaks back in.
+    expect(parseExpr('Count(x)', NONE, NONE, new Set(['count'])))
+      .toMatchObject({ kind: 'bin', op: '*' });
+  });
+
+  it('only shadows the builtins a graph was allowed to claim', () => {
+    // `sin` was never nameable, so a stray entry cannot turn sin(x) into a
+    // product — the shadow list and the naming rule answer the same question.
+    expect(parseExpr('sin(x)', NONE, NONE, new Set(['sin'])))
+      .toMatchObject({ kind: 'call', name: 'sin' });
+    // …and a document that binds nothing keeps every reduction a reduction.
+    expect(parseExpr('mean(L)', NONE, new Set(['L']))).toMatchObject({ kind: 'call', name: 'mean' });
+  });
+});
+
 describe('piecewise', () => {
   const ev = (s: string, env: Record<string, number> = {}) => evaluate(parseExpr(s), env);
 

@@ -334,18 +334,28 @@ function numericItems(items: readonly Expr[], ctx: Ctx, name: string): number[] 
  * matters twice over — a 100k-element `total` used to build a 100k-deep sum
  * that `evaluate` then recursed through.
  */
-function reduceData(name: string, xs: Float64Array, ctx: Ctx): Expr {
+function reduceData(name: string, all: Float64Array, ctx: Ctx): Expr {
+  // `count` asks how many rows there are, gaps included — the same answer it
+  // gives for a text column. Every other reduction answers about the values
+  // that are there: a missing cell is NaN, and one of them would otherwise
+  // poison a mean into NaN, or sort to the end of a median and shift it onto
+  // the wrong element. hist() has always skipped them; so does the warning
+  // the file's own preview shows ("2 missing values in age").
+  if (name === 'count') return num(all.length);
+  const xs = all.some(Number.isNaN) ? all.filter(v => !Number.isNaN(v)) : all;
   const n = xs.length;
+  if (!n) {
+    throw new Error(`${name}(…) has no values to work with — every cell there is missing.`);
+  }
   switch (name) {
-    case 'count': return num(n);
     case 'total':
     case 'mean': {
       let sum = 0;
       for (const x of xs) sum += x;
       return num(name === 'total' ? sum : sum / n);
     }
-    case 'min': return num(n ? xs.reduce((a, b) => Math.min(a, b)) : NaN);
-    case 'max': return num(n ? xs.reduce((a, b) => Math.max(a, b)) : NaN);
+    case 'min': return num(xs.reduce((a, b) => Math.min(a, b)));
+    case 'max': return num(xs.reduce((a, b) => Math.max(a, b)));
     case 'stdev': {
       if (n < 2) throw new Error('stdev needs at least 2 elements.');
       let sum = 0;
@@ -710,8 +720,14 @@ export function lowerLists(
   if (!named && (out.kind === 'text' || out.kind === 'str')) {
     throw new Error('Text cannot be plotted — compare it inside a filter, like people[people.city == "NYC"].');
   }
-  if (ctx.hists && !(out.kind === 'call' && out.name === '[hist]')) {
-    throw new Error('hist(…) is a whole plot — give it its own row.');
+  // Bars are a whole row, never a value — including a named one. `h = hist(L)`
+  // would otherwise store the internal `[hist]` node as a constant and every
+  // row touching it would report "Unknown function: [hist]", a token no user
+  // ever typed.
+  if (ctx.hists && !(!named && isHist(out))) {
+    throw new Error(named
+      ? 'hist(…) is a whole plot, not a value — write it on a row of its own, with no name.'
+      : 'hist(…) is a whole plot — give it its own row.');
   }
   return out;
 }
