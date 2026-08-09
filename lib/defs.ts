@@ -20,10 +20,13 @@
  *   otherwise by expanding a fixed Gauss–Legendre sum the same way Σ
  *   expands — so every downstream consumer still sees ordinary expressions.
  */
+import { type Column, type Table } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import { FUNCTIONS, SHADOWABLE_FNS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
+import { type GetList, lowerLists } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 
 export type Definition =
@@ -32,7 +35,10 @@ export type Definition =
   /** `a' = …` — da/dt, integrated forward in time. */
   | { kind: 'state'; name: string; rhs: string }
   /** `a(0) = …` — where the state a starts. */
-  | { kind: 'init'; name: string; rhs: string };
+  | { kind: 'init'; name: string; rhs: string }
+  /** `person = open("people.csv", 3a7f…)` — a local data file, pinned by
+   *  content hash. The bytes live on the device, not in the link. */
+  | { kind: 'table'; name: string; file: string; hash: string };
 
 /**
  * Row identity for duplicate detection. `a = 1` and `a' = 2` share a key —
@@ -91,6 +97,29 @@ export interface Defs {
    * matrix survives into anything downstream (see mat.ts).
    */
   mats: Map<string, Mat>;
+  /**
+   * Named data lists: `L = [1, 4, 2]` or `[1..20]` — scalar elements or
+   * points, in constants/states/t. List lowering (list.ts) substitutes and
+   * broadcasts them wherever rows use the name, so, like matrices, no list
+   * name survives into anything downstream.
+   */
+  lists: Map<string, Expr[]>;
+  /**
+   * Data files opened by name: `person = open("people.csv", 3a7f…)`. Each
+   * numeric column reads as a list under its dotted name (`person.age`), so
+   * everything lists can do — broadcasting, reductions, scatters — applies to
+   * columns unchanged. `data` is null when the bytes are not on this device
+   * (a shared link elsewhere, or a server-side preview).
+   */
+  tables: Map<string, TableDef>;
+}
+
+export interface TableDef {
+  file: string;
+  hash: string;
+  data: Table | null;
+  /** Why `data` is null, phrased for wherever this ran. */
+  missing?: string;
 }
 
 export const emptyDefs = (): Defs => ({
@@ -101,7 +130,72 @@ export const emptyDefs = (): Defs => ({
   states: new Map(),
   vecStates: new Map(),
   mats: new Map(),
+  lists: new Map(),
+  tables: new Map(),
 });
+
+/** Rows one data file may expand to. Every element becomes an expression the
+ *  renderer evaluates per frame, so this is a responsiveness limit, not a
+ *  storage one — instanced typed-array rendering (phase 4) is what lifts it. */
+export const TABLE_MAX_ROWS = 5000;
+
+/**
+ * Thrown when a row needs data this device does not have. The web app turns
+ * it into "drop the file here"; the server-side preview reports the row as
+ * device-local rather than broken, because it is not the graph that is wrong.
+ */
+export class MissingDataError extends Error {}
+
+/** Expression elements of a numeric column, built once per parsed column. */
+const colExprs = new WeakMap<Column, Expr[]>();
+
+export function columnExprs(col: Column): Expr[] {
+  let hit = colExprs.get(col);
+  if (!hit) {
+    hit = [...col.nums!].map((value): Expr => ({ kind: 'num', value }));
+    colExprs.set(col, hit);
+  }
+  return hit;
+}
+
+/**
+ * Resolve a name to list elements: a named list, or a data column written
+ * `table.column`. Throws (rather than returning null) when the name clearly
+ * means a column but cannot produce one, so the row explains itself.
+ */
+export function listGetter(defs: Defs): GetList {
+  return name => {
+    const hit = defs.lists.get(name);
+    if (hit) return hit;
+    const dot = name.indexOf('.');
+    if (dot <= 0) return null;
+    const table = defs.tables.get(name.slice(0, dot));
+    if (!table) return null;
+    const col = name.slice(dot + 1);
+    if (!table.data) throw new MissingDataError(table.missing ?? `${table.file} is not loaded.`);
+    const found = table.data.columns.find(c => c.name === col);
+    if (!found) {
+      throw new Error(`${table.file} has no column "${col}" (columns: ${table.data.columns.map(c => c.name).join(', ')}).`);
+    }
+    if (found.type !== 'num') {
+      throw new Error(`${name} holds text, not numbers — only number columns plot for now.`);
+    }
+    if (table.data.rows > TABLE_MAX_ROWS) {
+      throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS} for now.`);
+    }
+    return columnExprs(found);
+  };
+}
+
+/** Every name that reads as a list, so `L[2]` and `person.age[2]` index
+ *  instead of multiplying (parseExpr needs this before it parses). */
+export function listNamesOf(defs: Defs): Set<string> {
+  const out = new Set(defs.lists.keys());
+  for (const [name, t] of defs.tables) {
+    for (const c of t.data?.columns ?? []) out.add(`${name}.${c.name}`);
+  }
+  return out;
+}
 
 /** Component names `name` expands to under geometry lowering, or null. */
 export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
@@ -110,12 +204,30 @@ export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
       : null;
 
 /** Names with built-in meaning that definitions may not shadow. */
-export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi', 'tau']);
+export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi', 'tau', 'open']);
 
 const FN_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\)\s*=(?!=)([\s\S]+)$/;
 const CONST_RE = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]+)$/;
 const STATE_RE = /^\s*([A-Za-z_]\w*)'\s*=(?!=)([\s\S]+)$/;
 const INIT_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$/;
+/** `person = open("people.csv", 3a7f9c…)` — the hash is optional as typed;
+ *  the app fills it in from the file it finds (like a slider's write-back). */
+const TABLE_RE = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{6,64})\s*)?\)\s*$/;
+
+/** How an `open(…)` row is written, for the app's write-back. */
+export const formatTableRow = (name: string, file: string, hash: string): string =>
+  `${name} = open("${file}"${hash ? `, ${shortHash(hash)}` : ''})`;
+
+/**
+ * A row that means to open a file but claims a name it may not have (`w`,
+ * `e`, `open` itself). Without this it falls through to the expression
+ * parser, which only knows that quotes are not arithmetic.
+ */
+export function badTableName(text: string): string | null {
+  const m = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*["']/.exec(text);
+  if (!m || nameable(m[1])) return null;
+  return `${m[1]} is a built-in name, so it cannot name a data file — try ${m[1]}_data = open(…).`;
+}
 
 /** A name a definition may claim: not a builtin (except the late-addition
  *  ones old graphs may define themselves), not reserved, not a uniform. */
@@ -130,6 +242,11 @@ export function scanDefinition(text: string): Definition | null {
   if (m && nameable(m[1])) return { kind: 'state', name: m[1], rhs: m[2] };
   m = INIT_RE.exec(text);
   if (m && nameable(m[1])) return { kind: 'init', name: m[1], rhs: m[2] };
+  // Before the function form: `open(…)` takes a file name, not parameters.
+  m = TABLE_RE.exec(text);
+  if (m && nameable(m[1])) {
+    return { kind: 'table', name: m[1], file: m[2] ?? m[3], hash: (m[4] ?? '').toLowerCase() };
+  }
   m = FN_RE.exec(text);
   if (m && nameable(m[1])) {
     return { kind: 'fn', name: m[1], params: m[2].split(/\s*,\s*/), rhs: m[3] };
@@ -640,7 +757,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const body = e.args[e.args.length - 1];
         return expandInt(e.args.length === 3 ? [e.args[0], e.args[1]] : null, body, ctx);
       }
-      if (e.name === '[range]') throw new Error("'..' ranges only appear in sum(n=1..N, …), prod(…) or int[a..b].");
+      if (e.name === '[range]') throw new Error("'..' ranges only appear in sum(n=1..N, …), prod(…), int[a..b], or a list like [1..10].");
       const args = e.args.map(x => rx(x, ctx));
       const fn = getFn(e.name);
       if (fn) {
@@ -654,7 +771,14 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'eq': return { kind: 'eq', l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'ineq': return { kind: 'ineq', op: e.op, l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'vec': return { kind: 'vec', items: e.items.map(x => rx(x, ctx)) };
-    case 'list': return { kind: 'list', items: e.items.map(x => rx(x, ctx)) };
+    case 'list': return {
+      kind: 'list',
+      // `[1..10]` ranges survive resolution intact (bounds resolve) and
+      // expand later in list lowering, where constant values are known.
+      items: e.items.map((x): Expr => (x.kind === 'call' && x.name === '[range]'
+        ? { kind: 'call', name: '[range]', args: x.args.map(a => rx(a, ctx)) }
+        : rx(x, ctx))),
+    };
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
@@ -671,8 +795,15 @@ export interface BuiltDefs {
   sumBoundConsts: Set<string>;
 }
 
+/**
+ * Look up the bytes behind an `open(…)` row. Omitted (the worker, tests)
+ * means no device data at all: the row still defines a table, but one whose
+ * columns report themselves as device-local rather than missing.
+ */
+export type TableSource = (d: { file: string; hash: string }) => Table | null;
+
 /** Parse and resolve a set of uniquely named definitions. */
-export function buildDefs(raw: Definition[]): BuiltDefs {
+export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   const errors = new Map<string, string>();
   const defs = emptyDefs();
   const byName = new Map(raw.map(d => [d.name, d]));
@@ -686,10 +817,13 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
   const ropts: ResolveOpts = { consts: numEnv, boundConsts: new Set() };
 
   const parsed = new Map<string, Expr>();
-  const parse = (d: Definition): Expr => {
+  // List names accumulate in definition order, so `L[2]` indexes only when
+  // L's list definition sits above (below, it parses as multiplication and
+  // is reported as a forward reference after the loop).
+  const parse = (d: Definition & { rhs: string }): Expr => {
     const key = defKey(d);
     let p = parsed.get(key);
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames)));
+    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, listNamesOf(defs))));
     return p;
   };
 
@@ -724,6 +858,18 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
       if (d.kind === 'fn') {
         if (new Set(d.params).size !== d.params.length) throw new Error('Duplicate parameter names.');
         getFn(d.name);
+      } else if (d.kind === 'table') {
+        // The data itself never comes from the document, so there is nothing
+        // to resolve: look the file up and register its columns as lists.
+        const data = tables ? tables(d) : null;
+        // Registered even when the bytes are missing, so the rows that read
+        // its columns report the file rather than "unknown variable".
+        const named = d.hash ? `${d.file} (${shortHash(d.hash)})` : d.file;
+        const missing = data ? undefined : tables
+          ? `${named} is not on this device — drop the file here to load it.`
+          : `${named} is not on this device — its data does not travel in the link.`;
+        defs.tables.set(d.name, { file: d.file, hash: d.hash, data, missing });
+        if (missing && tables) throw new Error(missing);
       } else if (d.kind === 'state') {
         derivs.set(d.name, resolveExpr(parse(d), getFn, ropts));
       } else if (d.kind === 'init') {
@@ -732,17 +878,39 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
         // Lowering expands point arithmetic; a pair result names a point.
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
-        const e = lowerGeom(
+        let e = lowerGeom(
           resolveExpr(parse(d), getFn, ropts),
           n => (defs.points.has(n) ? pointComps(n) : null),
           n => defs.mats.get(n) ?? null,
         );
         if (e.kind === 'list') {
-          // A named list of rows is a matrix; anything else a list could
-          // mean has no definition-side meaning yet.
-          const m = matrixFromList(e);
-          if (!m) throw new Error(`${d.name} = […] defines a matrix — write rows: ${d.name} = [(a, b), (c, d)].`);
-          defs.mats.set(d.name, m);
+          // A named list of 2–3 equal-length tuple/nested rows is a matrix
+          // (that syntax predates data lists); every other shape falls
+          // through to data-list handling below.
+          let mat: Mat | null = null;
+          try {
+            mat = matrixFromList(e);
+          } catch (err) {
+            // Nested-list rows ([[1,2],[3,4],…]) always spell a matrix, so
+            // a bad shape there keeps the matrix error.
+            if (e.items.some(it => it.kind === 'list')) throw err;
+          }
+          if (mat) {
+            defs.mats.set(d.name, mat);
+            continue;
+          }
+        }
+        e = lowerLists(e, listGetter(defs), ropts);
+        if (e.kind === 'list') {
+          // A named data list: scalar elements, or points for a named scatter.
+          const vecs = e.items.filter((it): it is Expr & { kind: 'vec' } => it.kind === 'vec');
+          if (vecs.length && vecs.length !== e.items.length) {
+            throw new Error('Lists cannot mix numbers and points.');
+          }
+          if (new Set(vecs.map(it => it.items.length)).size > 1) {
+            throw new Error('All points in a list need the same number of coordinates.');
+          }
+          defs.lists.set(d.name, e.items);
           continue;
         }
         const store: Array<[string, Expr]> = [[d.name, e]];
@@ -985,11 +1153,32 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
     }
   }
 
+  // A list holds data: its elements may only use constants, states, and t.
+  // (References to other lists never survive — lowering already inlined
+  // any list defined above, and one defined below parses as a product and
+  // lands in the constant check above.)
+  outer: for (const [name, items] of defs.lists) {
+    for (const item of items) {
+      for (const fv of freeVars(item)) {
+        if (fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
+          errors.set(name, `${name} is a list, so its elements may only use constants and t (found ${fv}).`);
+          defs.lists.delete(name);
+          continue outer;
+        }
+      }
+    }
+  }
+
   // Trial-evaluate to surface cycles and unsupported calls at definition time.
   // States are leaves here: the integrator supplies their values, so they
   // stand in as 0 and never recurse.
   const check = (name: string, visiting: Set<string>): void => {
     const e = defs.consts.get(name);
+    // A surviving list (or matrix) name means it was defined below its use,
+    // so lowering saw it as a plain scalar.
+    if (!e && (defs.lists.has(name) || defs.mats.has(name))) {
+      throw new Error(`${name} is a ${defs.lists.has(name) ? 'list' : 'matrix'} — move its definition above where it is used.`);
+    }
     if (!e) throw new Error(`${name} is not defined.`);
     if (visiting.has(name)) throw new Error(`${name} is defined in terms of itself.`);
     visiting.add(name);

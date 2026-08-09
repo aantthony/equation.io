@@ -33,10 +33,13 @@ describe('matrix definitions', () => {
     expect(at(m[0][1], { r1_y: 2 })).toBe(2);
   });
 
-  it('rejects ragged, non-square, and flat shapes', () => {
-    expect(buildDefs(rows('M = [(1, 2), (3, 4, 5)]')).errors.get('M')).toMatch(/2×2 or 3×3/);
-    expect(buildDefs(rows('M = [(1, 2), (3, 4), (5, 6)]')).errors.get('M')).toMatch(/2×2 or 3×3/);
-    expect(buildDefs(rows('M = [1, 2, 3]')).errors.get('M')).toMatch(/defines a matrix/);
+  it('rejects ragged shapes; non-square and flat lists are data lists', () => {
+    expect(buildDefs(rows('M = [(1, 2), (3, 4, 5)]')).errors.get('M')).toMatch(/same number of coordinates/);
+    expect(buildDefs(rows('M = [[1, 2], [3, 4], [5, 6]]')).errors.get('M')).toMatch(/2×2 or 3×3/);
+    // Not matrices: a non-square tuple list is a named scatter, a flat list
+    // is a named data list (list.ts).
+    expect(buildDefs(rows('M = [(1, 2), (3, 4), (5, 6)]')).defs.lists.get('M')).toHaveLength(3);
+    expect(buildDefs(rows('M = [1, 2, 3]')).defs.lists.get('M')).toHaveLength(3);
   });
 
   it('rejects a bare matrix name in scalar context', () => {

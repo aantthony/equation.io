@@ -122,6 +122,27 @@ demand instead of living in a tool description. No authentication required.
   `int[-inf..inf] exp(-x^2) dx` reads √π, and `int[-inf..x] normalpdf(t, 0, 1) dt`
   is the normal cdf. Divergent limits are refused (the closed form is checked
   against real quadrature), not misreported.
+- Lists: `[3, 1, 4]`, or ranges `[1..20]`, `[0, 0.5..10]` (the first two
+  elements set the step), `[10..1]` (counts down). Range bounds are numbers
+  or constants defined in another row, like Σ bounds. List math broadcasts
+  elementwise — `2L + 1`, `sin(L)`, `L^2` — and two lists combine
+  positionwise (they must have equal lengths). `(xs, ys)` with list
+  components zips into a list of points: `([1..50]/5, sin([1..50]/5))` is a
+  scatter of samples.
+- List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
+  `stdev(L)` (sample), `median(L)`, `sort(L)`. A row that reduces to a
+  constant shows the numeric value as a readout. mean/total/count/min/max
+  expand symbolically, so elements may animate (`mean([sin(t), 2])`);
+  stdev/median/sort need constant elements.
+- List indexing is 1-based, on named lists: with `L = [5, 6, 7]` in a row
+  above, `L[2]` is 6 and `L[k]` takes k from a slider. Only a named list
+  indexes — `x[2]` is plain multiplication (2x).
+- Data columns: with `person = open("people.csv", 3a7f9c1d2e4b)` in a row
+  above (see Definitions), `person.age` is a list of that column's numbers.
+  Everything lists can do applies: `(person.age, person.height)` is a
+  scatter, `mean(person.age)` a readout, `person.age[2]` one value. Only the
+  device that dropped the file has its data — the link carries the file's
+  name and hash, not its bytes.
 - Comments: a row starting with `#` (e.g. `# tangent lines`) plots nothing; in
   the app it renders as a heading whose group (the rows until the next `#` row)
   can be collapsed. Use them to label sections of longer documents.
@@ -160,6 +181,10 @@ demand instead of living in a tool description. No authentication required.
   `iter(z^2 + w, 600)` (default 250, max 5000). Any expression works:
   `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship.
 - Point: `(2, 3)`; animate with t: `(2cos(t), 2sin(t))`.
+- Data list: `[3, 1, 4]` draws dots at (1, 3), (2, 1), (3, 4) — the panel can
+  switch them to bars — and `[(1, 2), (3, 4)]` draws a scatter of points.
+  Any list-valued expression plots the same way (`L^2 + 1`,
+  `(L, sort(L))` with `L` defined above, or a CSV column: `person.age`).
 - Geometry: with points defined in rows above (`A = (0, 0)`), `segment(A, B)`,
   `line(A, B)` (the infinite line through A and B), `polygon(A, B, C, …)`
   (filled), `square(A, B)` (erected on side A→B, to the left of the direction
@@ -252,6 +277,22 @@ demand instead of living in a tool description. No authentication required.
   draws as a moving point and works in point arithmetic (`perp(r)`,
   `dot(r, r)`, `r/|r|`, segment endpoints). 3-component states (Lorenz) plot
   through their components.
+- Data file: `person = open("people.csv", 3a7f9c1d2e4b)` names a CSV dropped
+  onto the app. Drag a .csv/.tsv anywhere in the window and this row (plus a
+  scatter of its first two numeric columns) is written for you; the file is
+  parsed once and kept in the browser's local storage, pinned by the SHA-256
+  prefix in the row. Each numeric column reads as a list under its dotted
+  name (`person.age`), text columns are named but not yet plottable, and
+  missing cells become gaps the row's readout counts. Because the bytes never
+  enter the URL, opening the link on another device (or rendering it
+  server-side, as `create_graph` previews do) reports the data as
+  device-local instead of drawing it; dropping the same file there restores
+  it. Up to 5000 rows plot for now.
+- List: `L = [3, 1, 4]` or `L = [1..100]` names a data list; rows below
+  broadcast over it (`L^2`, `(L, sort(L))`), reduce it (`mean(L)`), or index
+  it (`L[2]`, 1-based). Elements may use constants, states, and t. A list of
+  tuples names a scatter — except 2–3 equal-length tuple rows, which define
+  a matrix (below).
 - Matrix: `M = [(a, b), (c, d)]` (also `[[a, b], [c, d]]`, or named points
   as rows) defines a 2×2 or 3×3 matrix. `det(M)`, `trace(M)`, the matvec
   `M v`, and `solve(M, v)` (Cramer's rule) expand symbolically, so entries

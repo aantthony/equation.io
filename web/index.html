@@ -55,6 +55,13 @@
     <button id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">☾</button>
     <button id="state-reset" type="button" aria-label="Restart the simulation" title="Restart the simulation" hidden>↻</button>
     <div id="equations" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Equations, one per line" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="enter"></div>
+    <!-- CSV files dropped onto the app, kept in this browser (filestore.ts).
+         Hidden until there is one; sits above #examples so the panel's link
+         row stays anchored to the examples summary. -->
+    <details id="data-files" hidden>
+      <summary>data files</summary>
+      <div id="data-files-list"></div>
+    </details>
     <details id="examples">
     <summary>examples</summary>
     <div id="examples-list"></div>

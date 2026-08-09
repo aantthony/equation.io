@@ -1,14 +1,20 @@
 import {
   animatedConstNames,
+  badTableName,
   buildDefs,
   compsOf,
   constsAnimated,
   defKey,
   emptyDefs,
   evalConstEnv,
+  formatTableRow,
+  listGetter,
+  listNamesOf,
+  nameable,
   resolveExpr,
   scanDefinition,
   usesIntegral,
+  TABLE_MAX_ROWS,
   type Definition,
   type Defs,
 } from '../lib/defs.ts';
@@ -34,6 +40,7 @@ import {
 import { SLIDER_NUM_RE as NUM_RE, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
+import { lowerLists, usesListReduction } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
 import { type Classified, classify } from '../lib/plot.ts';
@@ -50,6 +57,9 @@ import {
   formatViewRow,
   parseViewRow,
 } from '../lib/view.ts';
+import { tableNameFor } from '../lib/csv.ts';
+import { shortHash } from '../lib/hash.ts';
+import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
 import { fullscreenQuad } from './gl.ts';
 import {
   type GridSpec,
@@ -709,11 +719,15 @@ function render() {
           break;
         }
         case 'plist': {
+          // A handful of points read as points; a few thousand read as a
+          // cloud, where fat outlined dots would merge into one white smear.
+          const dense = plot.pts.length > 200;
+          const r = dense ? 2 : 4;
           for (const comps of plot.pts) {
             try {
               const px = evaluate(comps[0], env);
               const py = evaluate(comps[1], env);
-              if (isFinite(px) && isFinite(py)) extras.points.push({ x: px, y: py, color: css, r: 4 });
+              if (isFinite(px) && isFinite(py)) extras.points.push({ x: px, y: py, color: css, r, bare: dense });
             } catch { /* skip unevaluable points */ }
           }
           break;
@@ -938,8 +952,17 @@ function recompileAll() {
     raw.push(d);
   }
 
-  const built = buildDefs(raw);
+  // Data files resolve out of the local store, which is already in memory:
+  // this runs on every keystroke, so nothing here may await (see filestore.ts).
+  const built = buildDefs(raw, ref => lookupFile(ref.file, ref.hash)?.table ?? null);
   defs = built.defs;
+  ensureTables(raw);
+  for (const [name, table] of defs.tables) {
+    const row = defRows.get(name);
+    if (!row || row.error || !table.data) continue;
+    const cols = table.data.columns.map(c => (c.type === 'num' ? c.name : `${c.name} (text)`));
+    row.info = [`${table.data.rows} rows`, cols.join(', '), ...table.data.warnings].join(' · ');
+  }
   // A state moves every frame, so anything reading one is animated too.
   defsAnimated = constsAnimated(defs) || defs.states.size > 0;
   sumBoundNames = built.sumBoundConsts;
@@ -983,6 +1006,8 @@ function recompileAll() {
   }
   const fieldEnv = Object.fromEntries(defs.fields);
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
+  const listNames = listNamesOf(defs);
+  const getList = listGetter(defs);
   const getFn = (name: string) => {
     const fn = defs.fns.get(name);
     if (!fn && fnNames.has(name)) throw new Error(`${name} has an error in its definition.`);
@@ -1006,7 +1031,8 @@ function recompileAll() {
     ropts,
     constNames,
     taken: n => defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n)
-      || defs.states.has(n) || defs.points.has(n) || defs.mats.has(n),
+      || defs.states.has(n) || defs.points.has(n) || defs.mats.has(n) || defs.lists.has(n)
+      || defs.tables.has(n),
   });
   rvNames = builtRVs.names;
   const distRows = new Set<Equation>();
@@ -1083,6 +1109,8 @@ function recompileAll() {
     const text = eq.text.trim();
     if (!text) continue;
     try {
+      const badName = badTableName(text);
+      if (badName) throw new Error(badName);
       const vspec = parseViewRow(text, constVals);
       if (vspec) {
         if (seenViewport.has(vspec.kind)) throw new Error(`${vspec.kind} is already set by another row.`);
@@ -1186,7 +1214,7 @@ function recompileAll() {
         eq.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts);
         continue;
       }
-      const rawParsed = parseExpr(text, fnNames);
+      const rawParsed = parseExpr(text, fnNames, listNames);
       let parsed = resolveExpr(rawParsed, getFn, ropts);
       // A bare expression in random variables (`X + Y`, `X^2`) plots the
       // density of that derived variable — distribution arithmetic in place.
@@ -1207,14 +1235,17 @@ function recompileAll() {
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
       parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
+      // Lists broadcast/reduce away: the row becomes a plain list literal
+      // (dots, bars, or a scatter) or a scalar expression (reductions).
+      parsed = lowerLists(parsed, getList, ropts);
       // Coordinate fields substitute in as functions of the plane, so
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       eq.cls = classify(parsed, constNames);
       eq.parsed = parsed;
-      // A row that wrote an ∫ and resolved to a constant gets its value as a
-      // readout (the plot is the horizontal line y = that value).
-      if (envT0 && usesIntegral(rawParsed)) {
+      // A row that wrote an ∫ or a list reduction and resolved to a constant
+      // gets its value as a readout (the plot is the horizontal line there).
+      if (envT0 && (usesIntegral(rawParsed) || usesListReduction(rawParsed))) {
         try {
           const value = evaluate(parsed, envT0);
           if (isFinite(value)) eq.info = `≈ ${Number(value.toPrecision(6))}`;
@@ -1228,6 +1259,231 @@ function recompileAll() {
   spGen++; // queued hover recomputes predate this compile: drop them
   spQueue.clear();
   setHover(null);
+}
+
+// --- local data files (drag a CSV in) ---
+
+/** In flight: the IndexedDB read for files the document names. */
+let tableLoad: Promise<void> | null = null;
+
+/**
+ * Fetch the files an `open(…)` row names out of local storage. Compiling is
+ * synchronous, so this runs beside it and recompiles once bytes arrive; each
+ * (hash, name) is asked for only once, so a genuinely missing file settles on
+ * its error instead of spinning.
+ */
+function ensureTables(raw: Definition[]) {
+  if (tableLoad) return;
+  const refs = raw
+    .filter((d): d is Definition & { kind: 'table' } => d.kind === 'table')
+    .filter(d => !lookupFile(d.file, d.hash))
+    .map(({ file, hash }) => ({ file, hash }));
+  if (!refs.length) return;
+  tableLoad = loadRefs(refs)
+    .then(added => {
+      tableLoad = null;
+      if (added) refreshRows();
+    })
+    .catch(() => { tableLoad = null; });
+}
+
+/** Recompile and redraw after something outside the document changed (a file
+ *  arrived), keeping the caret where the user left it. */
+function refreshRows() {
+  const caret = caretPos();
+  recompileAll();
+  if (pinTableHashes()) renderAll();
+  else reconcile();
+  if (caret && caret.line < equations.length) {
+    setCaret(caret.line, Math.min(caret.offset, equations[caret.line].text.length));
+  }
+  requestRender();
+}
+
+/**
+ * Write the resolved hash back into a row that named a file without one, so
+ * the link pins the exact data it was built against — the same two-way
+ * binding sliders, point drags, and `view(…)` rows already have.
+ */
+function pinTableHashes(): boolean {
+  let changed = false;
+  for (const eq of equations) {
+    const d = eq.def;
+    if (d?.kind !== 'table' || d.hash || eq.error) continue;
+    const f = lookupFile(d.file, '');
+    if (!f) continue;
+    const text = formatTableRow(d.name, d.file, f.hash);
+    if (text === eq.text.trim()) continue;
+    eq.text = text;
+    changed = true;
+  }
+  if (changed) {
+    recompileAll();
+    saveUrl();
+  }
+  return changed;
+}
+
+/** A row name for a dropped file that no definition has claimed. */
+function freeTableName(base: string): string {
+  const taken = new Set(equations.map(eq => eq.def?.name).filter((n): n is string => !!n));
+  if (nameable(base) && !taken.has(base)) return base;
+  for (let k = 2; ; k++) {
+    const name = `${base}_${k}`;
+    if (nameable(name) && !taken.has(name)) return name;
+  }
+}
+
+/**
+ * Read dropped/picked files into the local store and wire them into the
+ * document: an existing row naming the same file is re-pinned to the new
+ * bytes, otherwise a fresh `open(…)` row appears (with a scatter of the first
+ * two numeric columns, so the drop draws something immediately).
+ */
+async function openDataFiles(files: File[]) {
+  const added: string[] = [];
+  let changed = false;
+  for (const file of files) {
+    let loaded;
+    try {
+      loaded = await ingest(file.name, new Uint8Array(await file.arrayBuffer()));
+    } catch (e) {
+      showNotice(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    if (!changed) pushUndo(null);
+    changed = true;
+    // Re-dropping a file the document already names re-pins those rows,
+    // rather than adding a second copy under another name.
+    let known = false;
+    for (const eq of equations) {
+      const d = eq.def;
+      if (d?.kind !== 'table' || d.file !== loaded.file) continue;
+      known = true;
+      const text = formatTableRow(d.name, d.file, loaded.hash);
+      if (text !== eq.text.trim()) eq.text = text;
+    }
+    if (known) {
+      added.push(`${loaded.file} reloaded`);
+      continue;
+    }
+    const name = freeTableName(tableNameFor(loaded.file));
+    // Land on the trailing blank row if there is one, so dropping twice does
+    // not leave gaps.
+    const last = equations[equations.length - 1];
+    const at = last && !last.text.trim() ? equations.length - 1 : equations.length;
+    addEquation(formatTableRow(name, loaded.file, loaded.hash), at);
+    const nums = loaded.table.columns.filter(c => c.type === 'num');
+    if (nums.length >= 2 && loaded.table.rows <= TABLE_MAX_ROWS) {
+      addEquation(`(${name}.${nums[0].name}, ${name}.${nums[1].name})`, at + 1);
+    }
+    added.push(`${loaded.file}: ${loaded.table.rows} rows as ${name}`);
+  }
+  if (!changed) return;
+  recompileAll();
+  renderAll();
+  saveUrl();
+  requestRender();
+  if (added.length) showNotice(added.join(' · '));
+  void refreshFileMenu();
+}
+
+const DATA_EXT = /\.(csv|tsv|txt)$/i;
+
+const dataFilesIn = (dt: DataTransfer | null): File[] =>
+  [...(dt?.files ?? [])].filter(f => DATA_EXT.test(f.name) || f.type.includes('csv'));
+
+/** Transient message for things with no row to live on (a file that would
+ *  not parse, a drop that landed). */
+let noticeEl: HTMLElement | null = null;
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showNotice(text: string) {
+  noticeEl ??= document.body.appendChild(Object.assign(document.createElement('div'), { className: 'notice' }));
+  noticeEl.textContent = text;
+  noticeEl.classList.add('show');
+  if (noticeTimer !== null) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => noticeEl?.classList.remove('show'), 5000);
+}
+
+/** Depth counter: dragenter/dragleave fire for every element crossed, so a
+ *  single counter is what tells a real exit from a child boundary. */
+let dragDepth = 0;
+
+addEventListener('dragenter', e => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  if (++dragDepth === 1) document.body.classList.add('file-drag');
+});
+addEventListener('dragover', e => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+addEventListener('dragleave', () => {
+  if (dragDepth && --dragDepth === 0) document.body.classList.remove('file-drag');
+});
+addEventListener('drop', e => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('file-drag');
+  const files = dataFilesIn(e.dataTransfer);
+  if (files.length) void openDataFiles(files);
+  else if (e.dataTransfer.files.length) showNotice('Only .csv, .tsv, and .txt data files can be opened here.');
+});
+
+/**
+ * The panel's list of files this browser is holding: what a graph can open,
+ * and the only place to throw one away again.
+ */
+async function refreshFileMenu() {
+  const box = document.getElementById('data-files') as HTMLDetailsElement | null;
+  const list = document.getElementById('data-files-list');
+  if (!box || !list) return;
+  const files = await listFiles();
+  box.hidden = !files.length;
+  list.textContent = '';
+  for (const f of files) {
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    const label = document.createElement('span');
+    label.textContent = `${f.name} — ${f.rows} rows`;
+    label.title = f.columns.join(', ');
+    const hash = document.createElement('code');
+    hash.textContent = shortHash(f.hash);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'file-del';
+    del.textContent = '✕';
+    del.title = `Forget ${f.name} (rows that open it will ask for it again)`;
+    del.addEventListener('click', async () => {
+      await removeFile(f.hash);
+      await refreshFileMenu();
+      refreshRows();
+    });
+    item.append(label, hash, del);
+    list.append(item);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'file-add';
+  add.textContent = '+ open a CSV…';
+  add.addEventListener('click', pickDataFiles);
+  list.append(add);
+}
+
+/** File picker, for the "drop the file here" row error and the menu. */
+function pickDataFiles() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,.tsv,.txt,text/csv';
+  input.multiple = true;
+  input.addEventListener('change', () => {
+    const files = [...(input.files ?? [])];
+    if (files.length) void openDataFiles(files);
+  });
+  input.click();
 }
 
 // The address bar shows the /g/ share form: it survives chat-app URL
@@ -1586,12 +1842,12 @@ function reconcile() {
     const wanted: HTMLElement[] = [];
     // Initial values get a slider too: dragging one relaunches the system
     // from there, which is the whole point of `a(0)` in a chaotic system.
-    const sliderable = (eq.def?.kind === 'const' || eq.def?.kind === 'init')
-      && !eq.error && NUM_RE.test(eq.def.rhs);
-    if (sliderable) {
+    const sliderDef = (eq.def?.kind === 'const' || eq.def?.kind === 'init')
+      && !eq.error && NUM_RE.test(eq.def.rhs) ? eq.def : null;
+    if (sliderDef) {
       eq.sliderUI ??= makeSlider(eq);
       const { min, range, max } = eq.sliderUI;
-      const v = Number(eq.def!.rhs);
+      const v = Number(sliderDef.rhs);
       if (eq.sliderMin === undefined || eq.sliderMax === undefined) {
         eq.sliderMin = Math.min(-10, Math.floor(v));
         eq.sliderMax = Math.max(10, Math.ceil(v));
@@ -1603,7 +1859,7 @@ function reconcile() {
       range.min = String(eq.sliderMin);
       range.max = String(eq.sliderMax);
       // Σ/Π bounds are integers, so their sliders step whole terms at a time.
-      range.step = sumBoundNames.has(eq.def!.name) ? '1' : String((eq.sliderMax - eq.sliderMin) / 400);
+      range.step = sumBoundNames.has(sliderDef.name) ? '1' : String((eq.sliderMax - eq.sliderMin) / 400);
       range.value = String(v);
       wanted.push(eq.sliderUI.box);
     }
@@ -1648,6 +1904,12 @@ function reconcile() {
         return el;
       })();
       eq.errorEl.textContent = eq.error;
+      // A data row whose file is not here heals by supplying the file, so the
+      // error is also the button that asks for it.
+      const wantsFile = eq.def?.kind === 'table';
+      eq.errorEl.classList.toggle('eq-error-pick', wantsFile);
+      eq.errorEl.onclick = wantsFile ? pickDataFiles : null;
+      eq.errorEl.title = wantsFile ? 'Choose the file' : '';
       wanted.push(eq.errorEl);
     }
     // Place widgets directly after their line, then drop anything stale
@@ -2302,8 +2564,10 @@ function makePairWriter(pairText: string, commit: (pair: string) => void): ((x: 
 const pointWriter = (eq: Equation) => makePairWriter(eq.text, p => { eq.text = p; });
 
 /** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
-const defPointWriter = (eq: Equation) =>
-  makePairWriter(eq.def!.rhs, p => { eq.text = `${eq.def!.name} = ${p}`; });
+const defPointWriter = (eq: Equation) => {
+  const def = eq.def as Definition & { kind: 'const' };
+  return makePairWriter(def.rhs, p => { eq.text = `${def.name} = ${p}`; });
+};
 
 /** Push text a drag rewrote back into the editor lines. */
 function syncLineTexts() {
@@ -2848,6 +3112,7 @@ addEventListener('hashchange', loadFromUrl);
 resize();
 renderAll();
 buildExamplesMenu();
+void refreshFileMenu();
 
 // Dev-only handle for driving/inspecting the view in automated tests.
 if (import.meta.env.DEV) (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback };

@@ -24,6 +24,7 @@ describe('llms.txt', () => {
       "(x', y')", // ODE systems / phase portraits
       'd/dx', // symbolic derivatives
       'atan2(y,x)', // the polar coordinate-field recipe
+      'open("people.csv"', // CSV data files, dropped in and pinned by hash
       'view(x = ', // 2D framing row
       'camera(', // 3D orbit-camera row
       '## Row types',

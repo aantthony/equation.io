@@ -138,9 +138,12 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
                       ? 'probability (shaded area)'
                       : row.dist === 'expectation'
                         ? 'expectation (mean readout)'
-                        : row.cls!.plot.type,
+                        : row.dataLocal
+                          ? 'data (reads a file on the author\'s device)'
+                          : row.cls!.plot.type,
             ...(row.cls?.animated ? { animated: true } : {}),
             ...(row.info ? { value: row.info } : {}),
+            ...(row.dataLocal ? { note: row.dataLocal } : {}),
             ...(drag === undefined ? {} : { draggable: drag }),
           }),
     };
@@ -156,6 +159,11 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
   const omitted = plotRows
     .map(r => ({ row: r.text, why: previewGap(r, needs3D) }))
     .filter((g): g is { row: string; why: string } => g.why !== null);
+  // Rows reading a dropped CSV never reach the preview at all: the bytes are
+  // on the author's device, not in the link. Disclose them the same way.
+  const dataOmits = analysis.rows
+    .filter(r => r.dataLocal)
+    .map(r => ({ row: r.text, why: r.dataLocal! }));
   let png: string | undefined;
   let preview: string;
   if (!plotRows.length) {
@@ -183,7 +191,7 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
       url: `${origin}/#${payload}`,
       share_url: `${origin}/g/${payload}`,
       preview,
-      ...(omitted.length ? { preview_omits: omitted } : {}),
+      ...(omitted.length || dataOmits.length ? { preview_omits: [...omitted, ...dataOmits] } : {}),
       rows,
     },
   };

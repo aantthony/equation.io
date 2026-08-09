@@ -38,6 +38,9 @@ export const FUNCTIONS = new Set([
   'erf', 'normalpdf', 'normalcdf',
   'gcd', 'isprime', 'gamma', 'factorial', 'sinc', 'coth',
   're', 'im', 'arg', 'conj',
+  // List reductions and transforms: lowered symbolically (or evaluated
+  // numerically) by list.ts, so nothing downstream ever sees them.
+  'mean', 'total', 'count', 'stdev', 'median', 'sort',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
   'dot', 'cross', 'perp', 'midpoint', 'unit',
@@ -57,7 +60,10 @@ export const FUNCTIONS = new Set([
  * variable may claim these names, shadowing the builtin, so a saved graph
  * that defines its own `gamma(x) = …` or `sinc = …` keeps its meaning.
  */
-export const SHADOWABLE_FNS: ReadonlySet<string> = new Set(['gamma', 'factorial', 'sinc', 'coth']);
+export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
+  'gamma', 'factorial', 'sinc', 'coth',
+  'mean', 'total', 'count', 'stdev', 'median', 'sort',
+]);
 
 /**
  * Flatten a (possibly chained) inequality into its comparisons; comparison k
@@ -82,6 +88,9 @@ export const CONSTANTS: Record<string, number> = {
 
 /** User-defined function names for the parse in progress (set by parseExpr). */
 let activeUserFns: ReadonlySet<string> = new Set();
+
+/** Named-list names for the parse in progress: `L[2]` indexes, `x[2]` multiplies. */
+let activeListNames: ReadonlySet<string> = new Set();
 
 /**
  * Resolve a symbol to a built-in function name, folding case so `Sin`, `SIN`
@@ -191,10 +200,15 @@ const ops = operators<PNode>({
     if (!content) throw new Error('Empty parentheses.');
     return content.kind === 'series' ? seriesToVec(content.items) : content;
   }),
-  ']': closer('[', content => {
+  ']': closer('[', (content, call) => {
     if (!content) throw new Error('Empty list.');
     // A comma series is a data list; a single item keeps its grouping meaning.
     if (content.kind === 'series') return { kind: 'list', items: content.items.map(asExpr) };
+    // A lone range is a list too ([1..10] expands during resolution) — but
+    // not in a call bracket, where int[a..b] / sum[n=1..N] own the range.
+    if (!call && content.kind === 'call' && content.name === '[range]') {
+      return { kind: 'list', items: [content] };
+    }
     return content;
   }),
 
@@ -259,6 +273,22 @@ const ops = operators<PNode>({
     const items = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
     const args = items.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
     return { kind: 'call', name, args };
+  }),
+
+  // List indexing: `L[2]` for a known list name L (1-based; list.ts lowers
+  // it). Only named lists index — `x[2]` keeps meaning 2x, and a literal
+  // `[1,2,3][2]` stays implicit multiplication.
+  '[at]': BinaryInfix<PNode>((a, b): Expr =>
+    ({ kind: 'call', name: '[index]', args: [asExpr(a), asVecOrExpr(b)] })),
+
+  // Column access: `person.age` is one name, not a product. Binding tighter
+  // than everything else, it is purely a naming device — the dotted name
+  // reaches list lowering, which substitutes the column (see defs.ts).
+  '.': BinaryInfix<PNode>((a, b): Expr => {
+    if (a?.kind !== 'var' || b?.kind !== 'var') {
+      throw new Error('Write a column as table.column, like people.age.');
+    }
+    return { kind: 'var', name: `${a.name}.${b.name}` };
   }),
 });
 
@@ -325,7 +355,12 @@ const syntax: PatternDict = {
   whitespace: /\s$/,
   symbol: /^[A-Za-z_Σ∑Π∏∫∞][A-Za-z_0-9]*'*$/,
   operator: x => !!ops[x] || MULTI_CHAR_OPS.some(m => m.startsWith(x)),
-  invalid(x) { throw new Error(`Invalid character: ${JSON.stringify(x)}.`); },
+  invalid(x) {
+    if (x === '"' || x === "'") {
+      throw new Error('Quoted text only belongs in a data row, like people = open("people.csv").');
+    }
+    throw new Error(`Invalid character: ${JSON.stringify(x)}.`);
+  },
 };
 
 const tokenize = Tokenizer(syntax);
@@ -338,11 +373,19 @@ const SYMBOL_ALIASES: Record<string, string> =
   { 'Σ': 'sum', '∑': 'sum', 'Π': 'prod', '∏': 'prod', '∫': 'int', '∞': 'inf' };
 
 /**
- * Map Σ/Π glyphs to sum/prod, and repair `1..N`: the greedy number match
- * takes "1." leaving a lone "." operator, so rejoin the dot into "..".
+ * Map Σ/Π glyphs to sum/prod, and settle what a '.' means.
+ *
+ * The greedy number match takes "1." out of `1..N`, leaving a lone "."
+ * operator, so the dot rejoins into "..". A '.' with no value before it and a
+ * number after it is a leading-dot decimal (`.5`); every other '.' is the
+ * column-access operator (`person.age`).
  */
 function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
   let held: Token | null = null;
+  let dot: Token | null = null;
+  let afterValue = false;
+  const ends = (t: Token): boolean => t.type === 'number' || t.type === 'symbol'
+    || t.type === 'parenclose' || (t.type === 'operator' && t.str === '!');
   for (let token of bare) {
     if (token.type === 'symbol' && SYMBOL_ALIASES[token.str]) {
       token = { ...token, str: SYMBOL_ALIASES[token.str] };
@@ -354,15 +397,33 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
       } else {
         yield held;
       }
+      afterValue = true;
       held = null;
+    }
+    if (dot) {
+      if (!afterValue && token.type === 'number') {
+        yield { ...token, str: '0.' + token.str };
+        afterValue = true;
+        dot = null;
+        continue;
+      }
+      yield dot;
+      afterValue = false;
+      dot = null;
     }
     if (token.type === 'number' && token.str.endsWith('.')) {
       held = token;
       continue;
     }
+    if (token.type === 'operator' && token.str === '.') {
+      dot = token;
+      continue;
+    }
     yield token;
+    afterValue = ends(token);
   }
   if (held) yield held;
+  if (dot) yield dot;
 }
 
 /**
@@ -371,6 +432,8 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
  */
 function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   let last: Token | null = null;
+  /** The dotted name ending at `last` when it is a symbol: `person.age`. */
+  let path: string | null = null;
   let barDepth = 0;
   for (const token of bare) {
     if (token.type === 'whitespace') continue;
@@ -398,6 +461,7 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         yield open;
         last = open;
       }
+      path = null;
       continue;
     }
 
@@ -406,6 +470,7 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         // Unary sign: drop unary plus, rewrite minus as the [neg] prefix op.
         if (token.str !== '+') yield op('[neg]');
         last = token;
+        path = null;
         continue;
       }
     }
@@ -413,12 +478,19 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     let emit = token;
     if (afterValue && (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen')) {
       const isFnCall = token.type === 'parenopen' && last!.type === 'symbol' && isFnName(last!.str);
-      yield op(isFnCall ? '[apply]' : '[impl]');
+      // A column indexes under its full name: person.age[2].
+      const isIndex = !isFnCall && token.type === 'parenopen' && token.str === '['
+        && last!.type === 'symbol' && activeListNames.has(path ?? last!.str);
+      yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };
     }
 
+    const afterDot = last?.type === 'operator' && last.str === '.';
     yield emit;
     last = emit;
+    path = emit.type === 'symbol' ? (afterDot && path ? `${path}.${emit.str}` : emit.str)
+      : emit.type === 'operator' && emit.str === '.' ? path
+        : null;
   }
 }
 
@@ -436,8 +508,13 @@ function createLeaf(token: Token): PNode {
  * Parse an expression or equation, keeping free variables symbolic.
  * Names in userFns parse as function calls (`f(x+1)`) instead of products.
  */
-export function parseExpr(str: string, userFns: ReadonlySet<string> = new Set()): Expr {
+export function parseExpr(
+  str: string,
+  userFns: ReadonlySet<string> = new Set(),
+  listNames: ReadonlySet<string> = new Set(),
+): Expr {
   activeUserFns = userFns;
+  activeListNames = listNames;
   try {
     const tokens = addImplicitTokens(normalizeTokens(tokenize(str)));
     const stack: PNode[] = [];
@@ -455,6 +532,7 @@ export function parseExpr(str: string, userFns: ReadonlySet<string> = new Set())
     return asExpr(top);
   } finally {
     activeUserFns = new Set();
+    activeListNames = new Set();
   }
 }
 

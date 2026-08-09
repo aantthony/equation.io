@@ -7,10 +7,14 @@
  */
 import {
   animatedConstNames,
+  badTableName,
   buildDefs,
   compsOf,
   defKey,
   evalConstEnv,
+  listGetter,
+  listNamesOf,
+  MissingDataError,
   resolveExpr,
   scanDefinition,
   usesIntegral,
@@ -32,6 +36,7 @@ import {
 } from '../lib/dist.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom } from '../lib/geom.ts';
+import { lowerLists, usesListReduction } from '../lib/list.ts';
 import { type Classified, classify } from '../lib/plot.ts';
 import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
 import { buildStateSystem, initialState } from '../lib/state.ts';
@@ -54,6 +59,9 @@ export interface RowInfo {
   dist?: 'density' | 'probability' | 'expectation';
   /** Readout shown under the row in the app (the numeric value of a P(…) or E(…) row). */
   info?: string;
+  /** Set when the row reads a local data file (`open(…)`) that is not on this
+   *  machine: the row is valid, but nothing server-side can draw it. */
+  dataLocal?: string;
   error?: string;
 }
 
@@ -123,6 +131,8 @@ export function analyze(texts: string[]): Analysis {
   const constNames = new Set([...defs.consts.keys(), ...defs.states.keys()]);
   const fieldEnv = Object.fromEntries(defs.fields);
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
+  const listNames = listNamesOf(defs);
+  const getList = listGetter(defs);
   const getFn = (name: string) => {
     const fn = defs.fns.get(name);
     if (!fn && fnNames.has(name)) throw new Error(`${name} has an error in its definition.`);
@@ -144,8 +154,8 @@ export function analyze(texts: string[]): Analysis {
     getFn,
     ropts,
     constNames,
-    taken: n => defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n)
-      || defs.states.has(n) || defs.points.has(n) || defs.mats.has(n),
+    taken: n => defs.lists.has(n) || defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n)
+      || defs.states.has(n) || defs.points.has(n) || defs.mats.has(n) || defs.tables.has(n),
   });
   const rvNames = builtRVs.names;
   const densityCls = (name: string): Classified => {
@@ -182,6 +192,8 @@ export function analyze(texts: string[]): Analysis {
   for (const [ri, row] of rows.entries()) {
     if (row.def || row.comment || row.error || row.cls || !row.text) continue;
     try {
+      const badName = badTableName(row.text);
+      if (badName) throw new Error(badName);
       const view = parseViewRow(row.text, constEnv);
       if (view) {
         if (seenViewKinds.has(view.kind)) throw new Error(`${view.kind} is already set by another row.`);
@@ -286,7 +298,7 @@ export function analyze(texts: string[]): Analysis {
         row.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts);
         continue;
       }
-      const rawParsed = parseExpr(row.text, fnNames);
+      const rawParsed = parseExpr(row.text, fnNames, listNames);
       let parsed = resolveExpr(rawParsed, getFn, ropts);
       // A bare expression in random variables plots that derived density.
       const rvRefs = [...freeVars(parsed)].filter(n => rvNames.has(n));
@@ -314,19 +326,25 @@ export function analyze(texts: string[]): Analysis {
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
       parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
+      // Lists broadcast/reduce away (mirror of web/main.ts).
+      parsed = lowerLists(parsed, getList, ropts);
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       row.cls = classify(parsed, constNames);
       row.expr = parsed;
-      // A row that wrote an ∫ and resolved to a constant gets its value as a
-      // readout (mirror of web/main.ts).
-      if (usesIntegral(rawParsed)) {
+      // A row that wrote an ∫ or a list reduction and resolved to a constant
+      // gets its value as a readout (mirror of web/main.ts).
+      if (usesIntegral(rawParsed) || usesListReduction(rawParsed)) {
         try {
           const value = evaluate(parsed, constEnv);
           if (isFinite(value)) row.info = `≈ ${Number(value.toPrecision(6))}`;
         } catch { /* depends on plot coordinates: the curve is the answer */ }
       }
     } catch (e) {
-      row.error = e instanceof Error ? e.message : String(e);
+      // A row reading a dropped CSV is not broken here — the bytes simply
+      // live on the device that made the graph, and never travelled in the
+      // link. Report that as a gap in this render, not as a bad row.
+      if (e instanceof MissingDataError) row.dataLocal = e.message;
+      else row.error = e instanceof Error ? e.message : String(e);
     }
   }
 

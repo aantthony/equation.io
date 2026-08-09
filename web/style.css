@@ -421,11 +421,59 @@ html, body {
   font-family: ui-sans-serif, system-ui, sans-serif;
   padding: 0 6px 3px 28px;
 }
+/* A data row whose file is missing heals by supplying the file, so its error
+   doubles as the button that asks for one. */
+.eq-error-pick {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
 .eq-info {
   color: var(--info);
   font-size: 11px;
   font-family: ui-sans-serif, system-ui, sans-serif;
   padding: 0 6px 3px 28px;
+}
+
+/* Dragging a CSV over the window: the whole page is the drop target. */
+body.file-drag::after {
+  content: "Drop a .csv to plot it";
+  position: fixed;
+  inset: 12px;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--page-bg) 70%, transparent);
+  color: var(--accent);
+  font: 600 16px ui-sans-serif, system-ui, sans-serif;
+  pointer-events: none;
+}
+
+/* Transient message for events with no row to live on (an unreadable file). */
+.notice {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translate(-50%, 12px);
+  z-index: 70;
+  max-width: min(560px, 90vw);
+  padding: 8px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 4px 16px var(--panel-shadow);
+  color: var(--text);
+  font: 12px ui-sans-serif, system-ui, sans-serif;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.notice.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }
 /* Per-row display toggles (Σ partial sums on sequences, bars on data lists). */
 .eq-toggles {
@@ -464,6 +512,53 @@ html, body {
   padding: 4px;
   font-size: 12px;
 }
+/* Local data files: same shape as the examples tree, one row per file. */
+#data-files {
+  flex: none;
+  max-height: 30%;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  border-top: 1px solid var(--divider);
+  margin-top: 4px;
+  padding: 4px;
+  font-size: 12px;
+}
+#data-files > summary {
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px;
+}
+#data-files > summary:hover { color: var(--muted-hover); }
+.file-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 4px 2px 14px;
+  color: var(--ex-text);
+}
+.file-item span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-item code { color: var(--ex-code); font-size: 11px; }
+.file-del, .file-add {
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+.file-del:hover { color: var(--error); }
+.file-add {
+  display: block;
+  padding: 3px 4px 3px 14px;
+  text-align: left;
+}
+.file-add:hover { color: var(--muted-hover); }
+
 #panel-links {
   position: absolute;
   right: 14px;
