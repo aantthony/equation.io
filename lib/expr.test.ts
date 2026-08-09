@@ -398,6 +398,16 @@ describe('lists', () => {
   });
 });
 
+describe('leading-dot numbers', () => {
+  it('reads .5 as a bound of a range', () => {
+    // The number scan is greedy, so `.5..2` tokenizes as `.` `5.` `.` `2` —
+    // the range operator has to be reassembled from the two halves.
+    expect(parseExpr('[.5..2]')).toEqual(parseExpr('[0.5..2]'));
+    expect(evaluate(parseExpr('.5'), {})).toBe(0.5);
+    expect(evaluate(parseExpr('x + .25'), { x: 1 })).toBe(1.25);
+  });
+});
+
 describe('text', () => {
   it('reads quoted text', () => {
     expect(parseExpr('"New York"')).toEqual({ kind: 'str', value: 'New York' });

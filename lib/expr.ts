@@ -433,9 +433,18 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
     }
     if (dot) {
       if (!afterValue && token.type === 'number') {
-        yield { ...token, str: '0.' + token.str };
-        afterValue = true;
+        token = { ...token, str: '0.' + token.str };
         dot = null;
+        // `[.5..2]`: the number scan is greedy, so it already took the first
+        // dot of the range operator (`5.`). Yielding here would spend it and
+        // leave a lone `.`; hand it to `held` instead and let the merge above
+        // pair it with the next one.
+        if (token.str.endsWith('.')) {
+          held = token;
+          continue;
+        }
+        yield token;
+        afterValue = true;
         continue;
       }
       yield dot;

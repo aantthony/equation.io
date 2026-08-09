@@ -14,6 +14,7 @@ import {
   evalConstEnv,
   listGetter,
   listNamesOf,
+  isSliceIndex,
   MissingDataError,
   resolveExpr,
   scanDefinition,
@@ -149,7 +150,12 @@ export function analyze(texts: string[]): Analysis {
   const boundVals = { ...constEnv };
   for (const name of animatedConstNames(defs)) delete boundVals[name];
   for (const name of defs.states.keys()) delete boundVals[name];
-  const ropts = { consts: boundVals, boundConsts: built.sumBoundConsts, isList: (n: string) => listNames.has(n) };
+  const ropts = {
+    consts: boundVals,
+    boundConsts: built.sumBoundConsts,
+    isList: (n: string) => listNames.has(n),
+    isSlice: (idx: Expr) => isSliceIndex(idx, defs),
+  };
 
   // Random variables next, so P(…) and bare-expression rows can reference
   // them regardless of row order.

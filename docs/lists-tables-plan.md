@@ -403,6 +403,41 @@ is), so reloading that link still splits it. Prevention lives at ingest, where
 the app controls the name; for a hand-typed one the guarantee is only that you
 are told immediately, while the text is still on screen.
 
+### Seventh pass
+
+- **Single-quoted text was still invisible to the splitter.** Last round
+  tracked `"` and left `'` alone on the grounds that `f'(x)` is prime — but
+  `open('a b.csv')` is supported syntax too, so `open('a(b.csv');y = 2 x`
+  merged into one row. Both quotes are tracked now, with `'` opening text only
+  where a token could start: the tokenizer's own rule, which is what keeps
+  `f'(x)` and `a' = -a` whole. Half a fix is its own bug.
+- **A row could be valid in a link and broken for its author.**
+  `person.age[person.age]` is a slice, refused once the bytes are here — but
+  on a device without them the column threw `MissingDataError` first, so the
+  row was reported device-local and `valid: true`. Whether an index is a slice
+  is a question about shape, so `isSliceIndex` answers it before anything is
+  lowered, exactly as `checkFilterShape` already did for the other half of the
+  `[…]` syntax. This is the device-parity invariant the whole phase rests on,
+  and it had a hole in it.
+- **The filtered definition was the one row in the chain that said nothing.**
+  `adults = person[…]` over a missing file registered its null table and
+  returned quietly, so the source above it asked for the file and every use
+  below it did, while the cut itself showed no error and offered no file
+  picker. It now reports what its source reports. (Left deliberately silent in
+  the worker, matching the `open()` row it derives from: a table definition is
+  not a preview omission on either device.)
+- **Consistency now outranks count when sniffing a delimiter.** In
+  `notes, with, commas;value` the prose commas outnumber the `;` that
+  separates the fields but do not line up, and preferring them threw away
+  every data row as ragged — the file parsed to zero rows. Count decides only
+  among candidates that are equally (in)consistent.
+- **`[.5..2]` did not parse.** The number scan is greedy, so it took the first
+  dot of the range operator (`.` `5.` `.` `2`) and the repair that reassembles
+  `..` never saw a pair. Leading-dot decimals worked everywhere else, which is
+  what made it easy to miss.
+- **`count` over a list of points is 3, not an error.** The point guard ran
+  ahead of the reduction switch, but counting never looks inside an element.
+
 ## Testing
 
 - lib: parser (ranges, indexing, strings, member), broadcasting incl.

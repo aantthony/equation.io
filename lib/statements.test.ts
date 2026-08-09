@@ -40,6 +40,14 @@ describe('splitStatements', () => {
     expect(splitStatements('y = "\ny = x')).toEqual(['y = "', 'y = x']);
   });
 
+  it('tracks single-quoted text too, without eating the prime mark', () => {
+    // `open('a b.csv')` is supported syntax, so the same bracket problem
+    // applies — but `'` is also prime, so it opens text only where a token
+    // could start, which is the tokenizer's rule.
+    expect(splitStatements("t = open('a(b.csv');y = 2 x")).toEqual(["t = open('a(b.csv')", 'y = 2 x']);
+    expect(splitStatements("a' = -a;b = 1")).toEqual(["a' = -a", 'b = 1']);
+  });
+
   it('leaves the prime mark alone', () => {
     // `'` opens text in the grammar but is also prime notation; treating it as
     // a quote here would eat the rest of the line.

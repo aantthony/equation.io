@@ -7,6 +7,7 @@ import {
   buildDefs,
   evalConstEnv,
   formatTableRow,
+  isSliceIndex,
   listGetter,
   listNamesOf,
   rowSafeFileName,
@@ -37,12 +38,15 @@ function lowerRow(text: string, defRows: string[], tables: TableSource | null = 
   expect([...errors]).toEqual([]);
   const consts = evalConstEnv(defs, 0);
   const listNames = listNamesOf(defs);
-  const e = resolveExpr(
-    parseExpr(text, new Set(defs.fns.keys()), listNames),
-    n => defs.fns.get(n),
-    { consts, isList: n => listNames.has(n) },
-  );
-  return lowerLists(lowerGeom(e, () => null, () => null), listGetter(defs), { consts });
+  // The same options the app and the worker build, so a test cannot pass by
+  // skipping a check the real pipeline runs.
+  const ropts = {
+    consts,
+    isList: (n: string) => listNames.has(n),
+    isSlice: (idx: Expr) => isSliceIndex(idx, defs),
+  };
+  const e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), n => defs.fns.get(n), ropts);
+  return lowerLists(lowerGeom(e, () => null, () => null), listGetter(defs), ropts);
 }
 
 const values = (e: Expr): number[] => {
@@ -139,6 +143,16 @@ describe('open() rows', () => {
   it('reports a file this device does not have', () => {
     const { errors } = build([`person = open("nope.csv", ${HASH})`]);
     expect(errors.get('person')).toMatch(/nope\.csv \(a1b2c3d4e5f6\) is not on this device/);
+  });
+});
+
+describe('reductions over a list of points', () => {
+  it('counts them, since count never looks inside an element', () => {
+    expect(lowerRow('count([(1,2),(3,4),(5,6)])', [])).toEqual({ kind: 'num', value: 3 });
+  });
+
+  it('still refuses the reductions that would have to add them up', () => {
+    expect(() => lowerRow('mean([(1,2),(3,4)])', [])).toThrow(/list of points is not supported/);
   });
 });
 
@@ -498,6 +512,36 @@ describe('data that is not on this device', () => {
       .toEqual([['adults', 'A filter cannot depend on t — the list would change length every frame.']]);
     // And a well-formed one is still accepted, data or no data.
     expect([...build([...rows, 'adults = person[person.age >= 18]'], null).errors]).toEqual([]);
+  });
+
+  it('names the file on the filtered definition, not only on its source', () => {
+    // `adults` was the one row in the chain that said nothing: `person` asked
+    // for the file and every use of `adults` did too, but the cut itself
+    // showed no error and offered no file picker.
+    const missing = ['person = open("gone.csv", a1b2c3d4e5f6)', 'adults = person[person.age >= 18]'];
+    const { defs, errors, needsFile } = build(missing);
+    expect([...needsFile]).toEqual(['person', 'adults']);
+    expect(errors.get('adults')).toMatch(/gone\.csv \(a1b2c3d4e5f6\) is not on this device/);
+    // Still registered, so the rows below report the file rather than
+    // "unknown variable" — the reason the null table exists at all.
+    expect(defs.tables.has('adults')).toBe(true);
+  });
+
+  it('refuses a slice the same way with the file and without it', () => {
+    // Whether an index is a slice is a question about shape, so it must be
+    // answered identically on a device that has not got the bytes — otherwise
+    // a shared link reports valid and the author's device rejects the row.
+    const rows = [`person = open("people.csv", ${HASH})`];
+    expect(() => lowerRow('person.age[person.age]', rows)).toThrow(/Slicing/);
+    const away = ['person = open("people.csv", a1b2c3d4e5f6)'];
+    const { defs } = build(away, null);
+    const names = listNamesOf(defs);
+    const e = resolveExpr(parseExpr('person.age[person.age]', new Set(), names), () => undefined, {
+      isList: (n: string) => names.has(n),
+      isSlice: (idx: Expr) => isSliceIndex(idx, defs),
+    });
+    expect(() => lowerLists(e, listGetter(defs), { isSlice: idx => isSliceIndex(idx, defs) }))
+      .toThrow(/Slicing/);
   });
 
   it('carries through a NAMED list, so the row below still reports the file', () => {

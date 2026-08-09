@@ -82,16 +82,22 @@ export function sniffDelimiter(text: string): string {
   // left a two-line file judged on its header alone.
   const partial = i < text.length || text.endsWith('\n');
   let best = ',';
-  let bestScore = 0;
+  let bestCount = 0;
+  let bestEven = false;
   for (const d of DELIMITERS) {
     const seen = perLine.get(d)!;
     const full = partial && seen.length > 1 ? seen.slice(0, -1) : seen;
     if (!full[0]) continue;
-    // A real delimiter appears the same number of times in every record.
-    const score = full[0] * (full.every(n => n === full[0]) ? 2 : 1);
-    if (score > bestScore) {
-      bestScore = score;
+    // A real delimiter appears the same number of times in every record, and
+    // that outranks appearing often: in `notes, with, commas;value` the prose
+    // commas outnumber the ';' that actually separates the fields, but they
+    // do not line up, and choosing them throws every data row away as ragged.
+    // Count decides only among candidates that are equally (in)consistent.
+    const even = full.every(n => n === full[0]);
+    if (even === bestEven ? full[0] > bestCount : even) {
       best = d;
+      bestCount = full[0];
+      bestEven = even;
     }
   }
   return best;

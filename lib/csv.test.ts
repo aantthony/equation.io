@@ -62,6 +62,13 @@ describe('delimiter sniffing', () => {
   it('picks the delimiter that appears consistently', () => {
     expect(sniffDelimiter('a,b,c\n1,2,3\n')).toBe(',');
     expect(sniffDelimiter('a;b;c\n1;2;3\n')).toBe(';');
+    // Consistency outranks sheer count: the prose commas here outnumber the
+    // ';' that separates the fields, but they do not line up — and choosing
+    // them threw every data row away as ragged.
+    expect(sniffDelimiter('notes, with, commas;value\na;2')).toBe(';');
+    const t = parseCsv('notes, with, commas;value\na;2');
+    expect(t.rows).toBe(1);
+    expect(t.columns.map(c => c.name)).toEqual(['notes_with_commas', 'value']);
     expect(sniffDelimiter('a\tb\tc\n1\t2\t3\n')).toBe('\t');
   });
 

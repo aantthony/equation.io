@@ -388,12 +388,14 @@ function fold(items: readonly Expr[], join: (a: Expr, b: Expr) => Expr): Expr | 
 }
 
 function reduce(name: string, items: readonly Expr[], ctx: Ctx): Expr {
+  // `count` asks how many, not what they are — it never looks inside an
+  // element, so a list of points answers it as readily as a list of numbers.
+  if (name === 'count') return num(items.length);
   if (items.some(it => it.kind === 'vec')) {
     throw new Error(`${name}(…) over a list of points is not supported yet.`);
   }
   const n = items.length;
   switch (name) {
-    case 'count': return num(n);
     case 'total':
     case 'mean': {
       const acc = fold(items, add) ?? num(0);
@@ -492,8 +494,14 @@ function histogram(xs: Float64Array, bins: number | null, ctx: Ctx): Expr {
   return histBars(centers, counts, width, ctx);
 }
 
+const SLICE = 'Slicing L[a..b] is not supported yet — index one element, like L[1].';
+
 function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
+  // Before anything is lowered, because lowering a column whose file is not
+  // on this device throws first and would leave this row reported as merely
+  // device-local — valid in a shared link, rejected for the author.
+  if (ctx.opts.isSlice?.(idx)) throw new Error(SLICE);
   const low = lower(target, ctx);
   if (!isSeq(low)) {
     const name = target.kind === 'var' ? target.name : 'this';
@@ -517,9 +525,7 @@ function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
     if (isText(low)) return { kind: 'text', values: low.values.filter((_, k) => keep[k]) };
     return listOf(low.items.filter((_, k) => keep[k]), ctx);
   }
-  if (isSeq(idxLow)) {
-    throw new Error('Slicing L[a..b] is not supported yet — index one element, like L[1].');
-  }
+  if (isSeq(idxLow)) throw new Error(SLICE);
   const v = constVal(idxLow, ctx, 'A list index', true);
   const k = Math.round(v);
   if (Math.abs(v - k) > 1e-9) throw new Error('List indices must be whole numbers.');

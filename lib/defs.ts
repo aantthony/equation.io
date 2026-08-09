@@ -277,12 +277,24 @@ function staysList(e: Expr, defs: Defs): boolean {
  * those). The two answers must agree, or a shared link is valid only on the
  * device that has the bytes.
  */
+/** A mask is a list of comparisons, so a filter condition has to BE one:
+ *  `person[5]`, `person[person.age]`, `person[sin(person.age)]` are values. */
+const isComparison = (e: Expr): e is Expr & { kind: 'ineq' | 'call' } =>
+  e.kind === 'ineq' || (e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]'));
+
+/**
+ * Whether `L[idx]` is a slice rather than an element or a filter — the other
+ * half of the `[…]` syntax, and the same reasoning as checkFilterShape below.
+ * list.ts settles it by lowering, which needs the bytes; asked of the shape
+ * alone it is settled identically on a device that has not got the file, so
+ * `person.age[person.age]` is refused everywhere instead of passing as
+ * "device-local" in a shared link and failing for the author.
+ */
+export const isSliceIndex = (idx: Expr, defs: Defs): boolean =>
+  staysList(idx, defs) && !isComparison(idx);
+
 function checkFilterShape(cond: Expr, defs: Defs, shape: string): void {
-  // A mask is a list of comparisons, so the condition has to BE one:
-  // `person[5]`, `person[person.age]`, `person[sin(person.age)]` are values.
-  const comparison = cond.kind === 'ineq'
-    || (cond.kind === 'call' && (cond.name === '[eq]' || cond.name === '[ne]'));
-  if (!comparison) throw new Error(shape);
+  if (!isComparison(cond)) throw new Error(shape);
   // …and a list has to REACH it. Merely mentioning one is not enough:
   // `person[mean(person.age) > 0]` and `person[person.age[1] > 0]` reduce to a
   // single scalar, so they decide one answer for every row — `person[1 < 2]`
@@ -538,6 +550,12 @@ export interface ResolveOpts {
    * variable and quietly becomes 0.
    */
   isList?: (name: string) => boolean;
+  /**
+   * Whether `L[idx]` is a slice: an index that is a list and not a mask.
+   * A shape question, so list.ts asks it before it lowers anything — see
+   * isSliceIndex.
+   */
+  isSlice?: (idx: Expr) => boolean;
 }
 
 interface Ctx {
@@ -1031,6 +1049,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
     boundConsts: new Set(),
     // Live: list names accumulate as definitions are processed.
     isList: n => listNamesOf(defs).has(n),
+    isSlice: idx => isSliceIndex(idx, defs),
   };
 
   const parsed = new Map<string, Expr>();
@@ -1104,6 +1123,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
         const cut = filteredTable(e, defs, ropts);
         if (cut) {
           defs.tables.set(d.name, cut);
+          // Registered first, so rows below report the file rather than
+          // "unknown variable" — then the row says what is missing, exactly
+          // as the `open()` row it cuts does. Without this the derived table
+          // was the one row in the chain that said nothing: its source asked
+          // for the file and every use of it did too.
+          if (cut.missing && tables) throw new MissingDataError(cut.missing);
           continue;
         }
         if (e.kind === 'list') {
