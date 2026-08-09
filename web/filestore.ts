@@ -11,6 +11,7 @@
  * the compiler only ever reads that.
  */
 import { type Table, parseCsv } from '../lib/csv.ts';
+import { rowSafeFileName } from '../lib/defs.ts';
 import { sha256Hex } from '../lib/hash.ts';
 
 export interface LoadedFile {
@@ -23,19 +24,29 @@ export interface LoadedFile {
   addedAt: number;
 }
 
-/** Stored record; `bytes` is the source of truth, everything else is derived. */
+/**
+ * What a file is, without being the file. Reading a record clones it, so the
+ * bytes live in their own store: listing the menu at startup would otherwise
+ * copy every CSV in the browser to print its name.
+ */
 interface Stored {
   hash: string;
   name: string;
-  bytes: Uint8Array;
   size: number;
   addedAt: number;
   rows: number;
   columns: string[];
 }
 
+/** The bytes themselves, fetched only when a row actually opens the file. */
+interface StoredBytes {
+  hash: string;
+  bytes: Uint8Array;
+}
+
 const DB_NAME = 'equation-io';
 const STORE = 'files';
+const BLOBS = 'blobs';
 
 /** Parsed files available to the compiler right now, by full hash. */
 const memory = new Map<string, LoadedFile>();
@@ -46,16 +57,33 @@ function openDb(): Promise<IDBDatabase | null> {
   dbPromise ??= new Promise<IDBDatabase | null>(resolve => {
     let req: IDBOpenDBRequest;
     try {
-      req = indexedDB.open(DB_NAME, 1);
+      req = indexedDB.open(DB_NAME, 2);
     } catch {
       resolve(null); // storage disabled (some private-browsing modes)
       return;
     }
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = event => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
         const store = db.createObjectStore(STORE, { keyPath: 'hash' });
         store.createIndex('name', 'name');
+      }
+      if (!db.objectStoreNames.contains(BLOBS)) db.createObjectStore(BLOBS, { keyPath: 'hash' });
+      // v1 kept the bytes inside the metadata record; move them out so
+      // listing files stops reading them.
+      if (event.oldVersion === 1) {
+        const store = req.transaction!.objectStore(STORE);
+        const blobs = req.transaction!.objectStore(BLOBS);
+        store.openCursor().onsuccess = e => {
+          const cur = (e.target as IDBRequest<IDBCursorWithValue | null>).result;
+          if (!cur) return;
+          const { bytes, ...meta } = cur.value as Stored & { bytes?: Uint8Array };
+          if (bytes) {
+            blobs.put({ hash: meta.hash, bytes });
+            cur.update(meta);
+          }
+          cur.continue();
+        };
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -73,10 +101,14 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
 }
 
 async function withStore<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => Promise<T>): Promise<T | null> {
+  return withStores(mode, tx => fn(tx.objectStore(STORE)));
+}
+
+async function withStores<T>(mode: IDBTransactionMode, fn: (tx: IDBTransaction) => Promise<T>): Promise<T | null> {
   const db = await openDb();
   if (!db) return null;
   try {
-    return await fn(db.transaction(STORE, mode).objectStore(STORE));
+    return await fn(db.transaction([STORE, BLOBS], mode));
   } catch {
     return null;
   }
@@ -84,11 +116,11 @@ async function withStore<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) =>
 
 const decoder = new TextDecoder();
 
-function remember(rec: Stored): LoadedFile {
+function remember(rec: Stored, bytes: Uint8Array): LoadedFile {
   const loaded: LoadedFile = {
     hash: rec.hash,
     file: rec.name,
-    table: parseCsv(decoder.decode(rec.bytes)),
+    table: parseCsv(decoder.decode(bytes)),
     size: rec.size,
     addedAt: rec.addedAt,
   };
@@ -127,19 +159,26 @@ export async function loadRefs(refs: Array<{ file: string; hash: string }>): Pro
     const key = `${ref.hash}|${ref.file}`;
     if (attempted.has(key)) continue;
     attempted.add(key);
-    const rec = await withStore('readonly', async store => {
+    const hit = await withStores('readonly', async tx => {
+      const store = tx.objectStore(STORE);
+      let rec: Stored | null;
       if (ref.hash) {
         // Records are keyed by the full hash, so the 12-hex token in the row
         // is a prefix range over the primary key.
         const hits = await request<Stored[]>(store.getAll(IDBKeyRange.bound(ref.hash, ref.hash + '\uffff')));
-        return hits[0] ?? null;
+        rec = hits[0] ?? null;
+      } else {
+        const hits = await request<Stored[]>(store.index('name').getAll(IDBKeyRange.only(ref.file)));
+        rec = hits.sort((a, b) => b.addedAt - a.addedAt)[0] ?? null;
       }
-      const hits = await request<Stored[]>(store.index('name').getAll(IDBKeyRange.only(ref.file)));
-      return hits.sort((a, b) => b.addedAt - a.addedAt)[0] ?? null;
+      if (!rec) return null;
+      // Only now are the bytes worth reading.
+      const blob = await request<StoredBytes | undefined>(tx.objectStore(BLOBS).get(rec.hash));
+      return blob ? { rec, bytes: blob.bytes } : null;
     });
-    if (!rec) continue;
+    if (!hit) continue;
     try {
-      remember(rec);
+      remember(hit.rec, hit.bytes);
       added = true;
     } catch { /* stored bytes no longer parse: treat as missing */ }
   }
@@ -147,13 +186,15 @@ export async function loadRefs(refs: Array<{ file: string; hash: string }>): Pro
 }
 
 /** Parse, hash, and persist a dropped file; the result is usable immediately. */
-export async function ingest(fileName: string, bytes: Uint8Array): Promise<LoadedFile> {
+export async function ingest(rawName: string, bytes: Uint8Array): Promise<LoadedFile> {
   const table = parseCsv(decoder.decode(bytes)); // throws before anything is stored
+  // Stored under the name a row can quote, so the row and the record agree
+  // and re-dropping the same file finds it again.
+  const fileName = rowSafeFileName(rawName);
   const hash = await sha256Hex(bytes);
   const rec: Stored = {
     hash,
     name: fileName,
-    bytes,
     size: bytes.byteLength,
     addedAt: Date.now(),
     rows: table.rows,
@@ -164,7 +205,10 @@ export async function ingest(fileName: string, bytes: Uint8Array): Promise<Loade
   attempted.delete(`${hash}|${fileName}`);
   // Ask for durable storage the first time the user actually keeps data here.
   navigator.storage?.persist?.().catch(() => {});
-  await withStore('readwrite', s => request(s.put(rec)));
+  await withStores('readwrite', async tx => {
+    tx.objectStore(BLOBS).put({ hash, bytes } satisfies StoredBytes);
+    await request(tx.objectStore(STORE).put(rec));
+  });
   return loaded;
 }
 
@@ -177,15 +221,16 @@ export interface FileMeta {
   columns: string[];
 }
 
-/** Everything stored on this device, newest first. */
+/** Everything stored on this device, newest first — metadata only. */
 export async function listFiles(): Promise<FileMeta[]> {
   const all = await withStore('readonly', s => request<Stored[]>(s.getAll()));
-  return (all ?? [])
-    .map(({ hash, name, size, addedAt, rows, columns }) => ({ hash, name, size, addedAt, rows, columns }))
-    .sort((a, b) => b.addedAt - a.addedAt);
+  return (all ?? []).sort((a, b) => b.addedAt - a.addedAt);
 }
 
 export async function removeFile(hash: string): Promise<void> {
   memory.delete(hash);
-  await withStore('readwrite', s => request(s.delete(hash)));
+  await withStores('readwrite', async tx => {
+    tx.objectStore(BLOBS).delete(hash);
+    await request(tx.objectStore(STORE).delete(hash));
+  });
 }

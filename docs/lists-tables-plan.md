@@ -179,6 +179,52 @@ As planned:
 
 Text filters landed right after this phase — see phase 3.
 
+## Review pass
+
+Fifteen findings from the PR review, all real. The ones that changed
+behaviour rather than tightening an edge:
+
+- **A compact list is still a list.** `ages = person.age / 2` lowered to a
+  `data` node, which the definition branch did not recognize as a list, so it
+  landed among the scalar constants and was thrown out with "List in scalar
+  context". `Defs.lists` now holds the sequence node in whichever
+  representation it has, and naming a column no longer costs what reading it
+  saved. Naming a *text* column works too: text is a value to name, and only
+  drawing one has no meaning, so that check moved to plot rows alone.
+- **A missing cell fails `!=` as well as `==`.** `NaN != 18` is true in
+  JavaScript, so the one comparison written to exclude something was the one
+  that quietly kept the gaps — against the documented rule directly above it.
+- **A filter's shape is judged without the file.** `person[5]` and
+  `person[person.age > t]` were accepted wherever the bytes were absent (a
+  shared link, a server-side preview) and rejected on the author's own
+  device. Only the per-row answer waits for the data now.
+- **A 3D cloud says no instead of drawing a tenth of the file.** The draw
+  loop silently stopped at 10 000 points, so a sorted CSV rendered a
+  materially different cloud. The row now fails at compile time and names the
+  number. A gap in `z` is skipped like a gap in `x` or `y`, rather than
+  reaching projection and depth sorting as NaN.
+- **The hash pins on the ordinary compile path**, not only after a load from
+  storage — a row typed against a file already in memory was shared unpinned.
+  The row being typed is left alone, so the write-back never fights the
+  typist.
+- **Every row that wants the file offers it.** The picker was on the
+  `open(…)` row alone; the rows that read its columns said "drop the file
+  here" and did nothing. It is also a real button now — focusable, and
+  activated by Enter or Space.
+- **Bytes moved out of the metadata record** (IndexedDB v2, migrating v1 in
+  place). Listing the file menu at startup cloned every stored CSV to print
+  its name.
+- **A file name is stored as a row can quote it.** `sales "final".csv`
+  produced a row that could not be parsed back; names are sanitized at
+  ingest, so the record and the row agree.
+
+Also: an unterminated quoted field warns instead of swallowing the rest of
+the file into one cell; one-argument `min`/`max` get the readout the other
+reductions do; the "data files" section stays visible when empty, because it
+holds the only pointer-driven way to open a file; a value list's 1…n x
+coordinates are cached rather than rebuilt every animated frame; and a file
+named while an IndexedDB read is in flight is asked for when that read lands.
+
 ## Testing
 
 - lib: parser (ranges, indexing, strings, member), broadcasting incl.

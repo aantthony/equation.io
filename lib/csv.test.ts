@@ -27,6 +27,15 @@ describe('record grammar (RFC 4180)', () => {
   it('treats a quote inside a started field as data', () => {
     expect(parseRecords('size\n5" pipe\n', ',')).toEqual([['size'], ['5" pipe']]);
   });
+
+  it('warns when a quoted field never closes', () => {
+    // The rest of the file becomes one cell — nearly always a truncated
+    // download, and the one malformation the parse cannot show by itself.
+    const warnings: string[] = [];
+    expect(parseRecords('a,b\n1,"oops\n2,3\n', ',', warnings)).toEqual([['a', 'b'], ['1', 'oops\n2,3\n']]);
+    expect(warnings).toEqual(['a quoted field never closed — the rest of the file was read as one cell']);
+    expect(parseCsv('a,b\n1,"oops\n2,3\n').warnings).toContain(warnings[0]);
+  });
 });
 
 describe('delimiter sniffing', () => {

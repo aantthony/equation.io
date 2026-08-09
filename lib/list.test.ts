@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { buildDefs, evalConstEnv, listGetter, listNamesOf, resolveExpr, scanDefinition } from './defs.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
-import { lowerLists, usesListReduction } from './list.ts';
+import { type Seq, lowerLists, usesListReduction } from './list.ts';
 import { classify } from './plot.ts';
+
+/** A named list's elements. Every list defined in this file is symbolic; a
+ *  column keeps its typed array instead (see table.test.ts). */
+const items = (seq: Seq): readonly Expr[] => {
+  if (seq.kind !== 'list') throw new Error(`expected a symbolic list, got ${seq.kind}`);
+  return seq.items;
+};
 
 function defsOf(rows: string[]) {
   return buildDefs(rows.map(r => scanDefinition(r)!));
@@ -93,7 +100,7 @@ describe('named lists', () => {
     const { defs, errors } = defsOf(['L = [1,4,2]', 'M = L*2']);
     expect(errors.size).toBe(0);
     expect(defs.lists.has('L')).toBe(true);
-    expect(defs.lists.get('M')!.map(e => evaluate(e, {}))).toEqual([2, 8, 4]);
+    expect(items(defs.lists.get('M')!).map(e => evaluate(e, {}))).toEqual([2, 8, 4]);
   });
   it('keeps 2×2 tuple lists as matrices', () => {
     const { defs } = defsOf(['M = [(1,2),(3,4)]']);
@@ -102,7 +109,7 @@ describe('named lists', () => {
   });
   it('names a scatter of points when the shape is not a matrix', () => {
     const { defs } = defsOf(['P = [(1,2),(3,4),(5,6)]']);
-    expect(defs.lists.get('P')).toHaveLength(3);
+    expect(items(defs.lists.get('P')!)).toHaveLength(3);
     const c = classify(lowerRow('P', ['P = [(1,2),(3,4),(5,6)]']));
     expect(c.plot).toMatchObject({ type: 'plist', dim: 2 });
   });
@@ -118,7 +125,7 @@ describe('named lists', () => {
   });
   it('accepts range definitions', () => {
     const { defs } = defsOf(['L = [1..3]']);
-    expect(defs.lists.get('L')!.map(e => evaluate(e, {}))).toEqual([1, 2, 3]);
+    expect(items(defs.lists.get('L')!).map(e => evaluate(e, {}))).toEqual([1, 2, 3]);
   });
 });
 
@@ -152,6 +159,10 @@ describe('reductions', () => {
   it('flags rows for the readout', () => {
     expect(usesListReduction(parseExpr('mean([1,2])'))).toBe(true);
     expect(usesListReduction(parseExpr('sin(x)'))).toBe(false);
+    // One-argument min/max reduce a list too, so they earn the same readout.
+    expect(usesListReduction(parseExpr('min([1,2])'))).toBe(true);
+    expect(usesListReduction(parseExpr('max([1,2])'))).toBe(true);
+    expect(usesListReduction(parseExpr('min(x, 2)'))).toBe(false);
   });
 });
 

@@ -31,6 +31,13 @@ import { add, div, mul } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
 import { EVAL_FNS, type Expr, evaluate, freeVars, ineqComparisons, realPow } from './expr.ts';
 
+/**
+ * A list of values, in whichever representation it has: one expression per
+ * element, a typed array of numbers, or a column of text. They are
+ * interchangeable as values — the difference is only what they cost.
+ */
+export type Seq = Expr & { kind: 'list' | 'data' | 'text' };
+
 /** A named list's elements: a `list` node (symbolic) or a `data` node. */
 export type GetList = (name: string) => Expr | null;
 
@@ -69,9 +76,8 @@ const isList = (e: Expr): e is Expr & { kind: 'list' } => e.kind === 'list';
 const isData = (e: Expr): e is Expr & { kind: 'data' } => e.kind === 'data';
 const isText = (e: Expr): e is Expr & { kind: 'text' } => e.kind === 'text';
 /** Any representation of a list of values: expressions, numbers, or text. */
-const isSeq = (e: Expr): e is Expr & { kind: 'list' | 'data' | 'text' } =>
-  isList(e) || isData(e) || isText(e);
-const seqLength = (e: Expr & { kind: 'list' | 'data' | 'text' }): number =>
+export const isSeq = (e: Expr): e is Seq => isList(e) || isData(e) || isText(e);
+export const seqLength = (e: Seq): number =>
   (e.kind === 'list' ? e.items.length : e.values.length);
 const isRange = (e: Expr): e is Expr & { kind: 'call' } =>
   e.kind === 'call' && e.name === '[range]';
@@ -254,10 +260,17 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
     const [l, r] = cond.args;
     // Text compares as text and numbers as numbers; the two never match,
     // which is the honest answer for `person.city == 3`.
-    const same = l.kind === 'str' || r.kind === 'str'
-      ? l.kind === 'str' && r.kind === 'str' && l.value === r.value
-      : evaluate(l, env) === evaluate(r, env);
-    return cond.name === '[eq]' ? same : !same;
+    if (l.kind === 'str' || r.kind === 'str') {
+      const same = l.kind === 'str' && r.kind === 'str' && l.value === r.value;
+      return cond.name === '[eq]' ? same : !same;
+    }
+    const a = evaluate(l, env);
+    const b = evaluate(r, env);
+    // A missing cell (NaN) fails every test, `!=` included: it is the absence
+    // of a value, not a value that happens to differ. Otherwise the one
+    // comparison that kept gaps would be the one written to exclude something.
+    if (Number.isNaN(a) || Number.isNaN(b)) return false;
+    return cond.name === '[eq]' ? a === b : a !== b;
   }
   return ineqComparisons(cond as Expr & { kind: 'ineq' }).every(({ op, l, r }) => {
     const a = evaluate(l, env);
@@ -631,13 +644,21 @@ function lower(e: Expr, ctx: Ctx): Expr {
  * range bounds and indices (and collects boundConsts so their sliders snap
  * to integers), exactly as Σ/Π expansion does.
  */
-export function lowerLists(e: Expr, getList: GetList, opts: ResolveOpts = {}): Expr {
+export function lowerLists(
+  e: Expr,
+  getList: GetList,
+  opts: ResolveOpts = {},
+  /** A definition (`who = person.name`) rather than a row to draw. Text is a
+   *  value like any other to name; it is only drawing one that has no
+   *  meaning, so that check belongs to plot rows alone. */
+  named = false,
+): Expr {
   const ctx: Ctx = { getList, opts, items: 0, data: 0, hists: 0 };
   const out = lower(e, ctx);
   if (isMask(out)) {
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
   }
-  if (out.kind === 'text' || out.kind === 'str') {
+  if (!named && (out.kind === 'text' || out.kind === 'str')) {
     throw new Error('Text cannot be plotted — compare it inside a filter, like people[people.city == "NYC"].');
   }
   if (ctx.hists && !(out.kind === 'call' && out.name === '[hist]')) {
@@ -660,6 +681,11 @@ export function lowerMask(cond: Expr, getList: GetList, opts: ResolveOpts = {}):
  *  a numeric readout when they resolve to a constant, like ∫ rows. */
 export function usesListReduction(e: Expr): boolean {
   const REDUCTIONS = new Set([...SYMBOLIC_REDUCTIONS, ...NUMERIC_REDUCTIONS]);
+  // One-argument min/max reduce a list too (`min(person.age)`). The row is
+  // unresolved here, so whether the argument IS a list is not yet known —
+  // but a readout only appears if the row resolves to a number anyway.
+  const reduces = (name: string, args: readonly Expr[]): boolean =>
+    REDUCTIONS.has(name) || ((name === 'min' || name === 'max') && args.length === 1);
   switch (e.kind) {
     case 'num':
     case 'data':
@@ -668,7 +694,7 @@ export function usesListReduction(e: Expr): boolean {
     case 'var': return false;
     case 'neg': return usesListReduction(e.a);
     case 'bin': return usesListReduction(e.a) || usesListReduction(e.b);
-    case 'call': return REDUCTIONS.has(e.name) || e.args.some(usesListReduction);
+    case 'call': return reduces(e.name, e.args) || e.args.some(usesListReduction);
     case 'eq': return usesListReduction(e.l) || usesListReduction(e.r);
     case 'ineq': return usesListReduction(e.l) || usesListReduction(e.r);
     case 'vec':

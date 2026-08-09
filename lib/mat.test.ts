@@ -2,8 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { type Definition, buildDefs, compsOf, scanDefinition } from './defs.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
+import type { Seq } from './list.ts';
 import { classify } from './plot.ts';
 import { advanceState, buildStateSystem, initialState } from './state.ts';
+
+/** A named list's elements (always symbolic here — no data file in sight). */
+const items = (seq: Seq): readonly unknown[] => {
+  if (seq.kind !== 'list') throw new Error(`expected a symbolic list, got ${seq.kind}`);
+  return seq.items;
+};
 
 const rows = (...texts: string[]): Definition[] =>
   texts.map(t => scanDefinition(t)).filter((d): d is Definition => d !== null);
@@ -38,8 +45,8 @@ describe('matrix definitions', () => {
     expect(buildDefs(rows('M = [[1, 2], [3, 4], [5, 6]]')).errors.get('M')).toMatch(/2×2 or 3×3/);
     // Not matrices: a non-square tuple list is a named scatter, a flat list
     // is a named data list (list.ts).
-    expect(buildDefs(rows('M = [(1, 2), (3, 4), (5, 6)]')).defs.lists.get('M')).toHaveLength(3);
-    expect(buildDefs(rows('M = [1, 2, 3]')).defs.lists.get('M')).toHaveLength(3);
+    expect(items(buildDefs(rows('M = [(1, 2), (3, 4), (5, 6)]')).defs.lists.get('M')!)).toHaveLength(3);
+    expect(items(buildDefs(rows('M = [1, 2, 3]')).defs.lists.get('M')!)).toHaveLength(3);
   });
 
   it('rejects a bare matrix name in scalar context', () => {

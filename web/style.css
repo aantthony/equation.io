@@ -587,6 +587,7 @@ body.file-drag::after {
   white-space: nowrap;
 }
 .file-item code { color: var(--ex-code); font-size: 11px; }
+.file-empty { padding: 2px 4px 2px 14px; color: var(--muted); }
 .file-del, .file-add {
   border: none;
   background: none;

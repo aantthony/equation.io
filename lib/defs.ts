@@ -26,7 +26,7 @@ import { FUNCTIONS, SHADOWABLE_FNS, type Expr, evaluate, freeVars, parseExpr, su
 import { shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
-import { type GetList, lowerLists, lowerMask } from './list.ts';
+import { type GetList, type Seq, isSeq, lowerLists, lowerMask } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 
 export type Definition =
@@ -102,8 +102,13 @@ export interface Defs {
    * points, in constants/states/t. List lowering (list.ts) substitutes and
    * broadcasts them wherever rows use the name, so, like matrices, no list
    * name survives into anything downstream.
+   *
+   * The value keeps whichever representation the definition produced: a
+   * `list` of expressions, or the compact `data`/`text` of a column and
+   * constant arithmetic over one (`ages = person.age / 2`), which must not
+   * be expanded here or naming a column would cost what reading it saved.
    */
-  lists: Map<string, Expr[]>;
+  lists: Map<string, Seq>;
   /**
    * Data files opened by name: `person = open("people.csv", 3a7f…)`. Each
    * numeric column reads as a list under its dotted name (`person.age`), so
@@ -170,7 +175,7 @@ export function columnExprs(col: Column): Expr[] {
 export function listGetter(defs: Defs): GetList {
   return name => {
     const hit = defs.lists.get(name);
-    if (hit) return { kind: 'list', items: hit };
+    if (hit) return hit;
     const dot = name.indexOf('.');
     if (dot <= 0) {
       // A data file is not a value on its own: it is where columns live.
@@ -213,6 +218,20 @@ export function listNamesOf(defs: Defs): Set<string> {
 }
 
 /**
+ * What a filter can be judged without reading a single row: that it is a
+ * comparison at all, and that it could ever settle. Everything else — which
+ * rows it keeps, how many there are — needs the file (list.ts decides those).
+ */
+function checkFilterShape(cond: Expr, shape: string): void {
+  // A value where a comparison belongs. `person[5]`, `person[person.age]`:
+  // exactly the rows list.ts refuses once the bytes are here.
+  if (['num', 'str', 'data', 'text', 'vec', 'var'].includes(cond.kind)) throw new Error(shape);
+  if (freeVars(cond).has('t')) {
+    throw new Error('A filter cannot depend on t — the list would change length every frame.');
+  }
+}
+
+/**
  * A definition that filters a whole data file: `adults = person[cond]`.
  * Recognized before list lowering, which knows only about values — the
  * result is a new table, with every column cut to the rows the mask keeps.
@@ -222,13 +241,19 @@ function filteredTable(e: Expr, defs: Defs, opts: ResolveOpts): TableDef | null 
   if (e.kind !== 'call' || e.name !== '[index]' || e.args[0]?.kind !== 'var') return null;
   const src = defs.tables.get(e.args[0].name);
   if (!src) return null;
+  const name = e.args[0].name;
+  const shape = `${name}[…] needs a comparison, like ${name}[${name}.x > 0].`;
   // No bytes to cut (a shared link elsewhere, or a server-side preview): the
-  // cut is a table too, and reports the same reason its source does.
-  if (!src.data) return { file: src.file, hash: src.hash, data: null, missing: src.missing };
-  const keep = lowerMask(e.args[1], listGetter(defs), opts);
-  if (!keep) {
-    throw new Error(`${e.args[0].name}[…] needs a comparison, like ${e.args[0].name}[${e.args[0].name}.x > 0].`);
+  // cut is a table too, and reports the same reason its source does. Only the
+  // per-row answer waits for the data — whether the row is a filter at all,
+  // and whether it could ever settle, are answered here either way, or a
+  // shared link would call `person[5]` valid and the author's device would not.
+  if (!src.data) {
+    checkFilterShape(e.args[1], shape);
+    return { file: src.file, hash: src.hash, data: null, missing: src.missing };
   }
+  const keep = lowerMask(e.args[1], listGetter(defs), opts);
+  if (!keep) throw new Error(shape);
   if (keep.length !== src.data.rows) {
     throw new Error(`The filter tests ${keep.length} values but ${src.file} has ${src.data.rows} rows.`);
   }
@@ -252,9 +277,19 @@ const INIT_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$/;
  *  the app fills it in from the file it finds (like a slider's write-back). */
 const TABLE_RE = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{6,64})\s*)?\)\s*$/;
 
+/**
+ * The name a file is stored and written under. A row quotes the file name
+ * with no escape (`open("sales.csv")`), so a name holding a quote or a line
+ * break could not be read back — and a row that cannot be read back is worse
+ * than one whose title lost a character. Applied at ingest, so what is stored
+ * and what the row says are the same string, and re-dropping the file matches.
+ */
+export const rowSafeFileName = (name: string): string =>
+  name.replace(/["\r\n\t]+/g, '_').trim() || 'data.csv';
+
 /** How an `open(…)` row is written, for the app's write-back. */
 export const formatTableRow = (name: string, file: string, hash: string): string =>
-  `${name} = open("${file}"${hash ? `, ${shortHash(hash)}` : ''})`;
+  `${name} = open("${rowSafeFileName(file)}"${hash ? `, ${shortHash(hash)}` : ''})`;
 
 /**
  * A row that means to open a file but claims a name it may not have (`w`,
@@ -841,6 +876,9 @@ export interface BuiltDefs {
   defs: Defs;
   /** Per-definition errors by defKey; failed definitions are excluded from defs. */
   errors: Map<string, string>;
+  /** Of those, the ones that failed only because a data file is not on this
+   *  device — the app turns their message into a file picker. */
+  needsFile: Set<string>;
   /** Constants referenced by Σ/Π bounds (the UI snaps their sliders to integers). */
   sumBoundConsts: Set<string>;
 }
@@ -855,6 +893,7 @@ export type TableSource = (d: { file: string; hash: string }) => Table | null;
 /** Parse and resolve a set of uniquely named definitions. */
 export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   const errors = new Map<string, string>();
+  const needsFile = new Set<string>();
   const defs = emptyDefs();
   const byName = new Map(raw.map(d => [d.name, d]));
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
@@ -919,7 +958,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
           ? `${named} is not on this device — drop the file here to load it.`
           : `${named} is not on this device — its data does not travel in the link.`;
         defs.tables.set(d.name, { file: d.file, hash: d.hash, data, missing });
-        if (missing && tables) throw new Error(missing);
+        if (missing && tables) throw new MissingDataError(missing);
       } else if (d.kind === 'state') {
         derivs.set(d.name, resolveExpr(parse(d), getFn, ropts));
       } else if (d.kind === 'init') {
@@ -956,17 +995,21 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
             continue;
           }
         }
-        e = lowerLists(e, listGetter(defs), ropts);
-        if (e.kind === 'list') {
+        e = lowerLists(e, listGetter(defs), ropts, true);
+        if (isSeq(e)) {
           // A named data list: scalar elements, or points for a named scatter.
-          const vecs = e.items.filter((it): it is Expr & { kind: 'vec' } => it.kind === 'vec');
-          if (vecs.length && vecs.length !== e.items.length) {
-            throw new Error('Lists cannot mix numbers and points.');
+          // A `data`/`text` value is a list too — a column, or arithmetic over
+          // one — and is stored as it stands rather than expanded.
+          if (e.kind === 'list') {
+            const vecs = e.items.filter((it): it is Expr & { kind: 'vec' } => it.kind === 'vec');
+            if (vecs.length && vecs.length !== e.items.length) {
+              throw new Error('Lists cannot mix numbers and points.');
+            }
+            if (new Set(vecs.map(it => it.items.length)).size > 1) {
+              throw new Error('All points in a list need the same number of coordinates.');
+            }
           }
-          if (new Set(vecs.map(it => it.items.length)).size > 1) {
-            throw new Error('All points in a list need the same number of coordinates.');
-          }
-          defs.lists.set(d.name, e.items);
+          defs.lists.set(d.name, e);
           continue;
         }
         const store: Array<[string, Expr]> = [[d.name, e]];
@@ -1004,6 +1047,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       }
     } catch (e) {
       errors.set(defKey(d), msg(e));
+      if (e instanceof MissingDataError) needsFile.add(defKey(d));
     }
   }
 
@@ -1213,8 +1257,11 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   // (References to other lists never survive — lowering already inlined
   // any list defined above, and one defined below parses as a product and
   // lands in the constant check above.)
-  outer: for (const [name, items] of defs.lists) {
-    for (const item of items) {
+  // (A `data`/`text` list holds numbers and text, so it has no variables to
+  // check — only the symbolic representation can name one.)
+  outer: for (const [name, seq] of defs.lists) {
+    if (seq.kind !== 'list') continue;
+    for (const item of seq.items) {
       for (const fv of freeVars(item)) {
         if (fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
           errors.set(name, `${name} is a list, so its elements may only use constants and t (found ${fv}).`);
@@ -1299,7 +1346,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
     if (!vecStateComps(name, dim).every(c => defs.states.has(c))) defs.vecStates.delete(name);
   }
 
-  return { defs, errors, sumBoundConsts: ropts.boundConsts! };
+  return { defs, errors, needsFile, sumBoundConsts: ropts.boundConsts! };
 }
 
 /**

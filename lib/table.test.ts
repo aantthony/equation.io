@@ -9,6 +9,7 @@ import {
   formatTableRow,
   listGetter,
   listNamesOf,
+  rowSafeFileName,
   resolveExpr,
   scanDefinition,
 } from './defs.ts';
@@ -84,6 +85,18 @@ describe('open() rows', () => {
     const text = formatTableRow('person', 'people.csv', 'a1b2c3d4e5f6789');
     expect(text).toBe(`person = open("people.csv", ${HASH})`);
     expect(scanDefinition(text)).toMatchObject({ name: 'person', hash: HASH });
+  });
+
+  it('writes a file name a row can read back', () => {
+    // A row quotes the name with no escape, so a name holding a quote or a
+    // line break would produce a row that does not parse. Applied at ingest
+    // too, so the stored name and the row agree.
+    expect(rowSafeFileName('sales "final".csv')).toBe('sales _final_.csv');
+    expect(rowSafeFileName('two\nlines.csv')).toBe('two_lines.csv');
+    expect(rowSafeFileName('"')).toBe('_');
+    expect(rowSafeFileName('plain.csv')).toBe('plain.csv');
+    const text = formatTableRow('p', 'sales "final".csv', '');
+    expect(scanDefinition(text)).toMatchObject({ name: 'p', file: 'sales _final_.csv' });
   });
 
   it('registers the file and its columns', () => {
@@ -242,6 +255,16 @@ describe('filters', () => {
     expect(() => lowerRow('[1, 5][[1, 5] >= 5]', rows)).toThrow(/put it in brackets/);
   });
 
+  it('drops a missing cell from every test, including !=', () => {
+    // A gap is the absence of a value, not a value that differs — otherwise
+    // `!=` would be the one comparison that quietly keeps the gaps.
+    const src: TableSource = () => parseCsv('age,name\n30,ada\n,bob\n40,cy\n');
+    const rows = ['p = open("gaps.csv")'];
+    expect(values(lowerRow('p.age[p.age != 30]', rows, src))).toEqual([40]);
+    expect(values(lowerRow('p.age[p.age == 30]', rows, src))).toEqual([30]);
+    expect(values(lowerRow('p.age[p.age > 0]', rows, src))).toEqual([30, 40]);
+  });
+
   it('reads a chained comparison as one test', () => {
     expect(values(lowerRow('person.age[30 <= person.age < 40]', rows))).toEqual([36]);
   });
@@ -324,12 +347,49 @@ describe('data that is not on this device', () => {
     expect(() => listGetter(defs)('adults.age')).toThrow(MissingDataError);
   });
 
+  it('still judges what a filter looks like, so a link is not valid only here', () => {
+    // The rows it keeps need the file; whether it is a comparison at all does
+    // not. Without this a shared link calls `person[5]` fine and the author's
+    // own device rejects it the moment the data arrives.
+    expect([...build([...rows, 'adults = person[5]'], null).errors])
+      .toEqual([['adults', 'person[…] needs a comparison, like person[person.x > 0].']]);
+    expect([...build([...rows, 'adults = person[person.age > t]'], null).errors])
+      .toEqual([['adults', 'A filter cannot depend on t — the list would change length every frame.']]);
+    // And a well-formed one is still accepted, data or no data.
+    expect([...build([...rows, 'adults = person[person.age >= 18]'], null).errors]).toEqual([]);
+  });
+
   it('points a row that reads a missing file at the file, not at the name', () => {
     // The device has a store, but not this file: rows below must not degrade
     // into "unknown variable person.age".
     const { defs } = build([`person = open("gone.csv", ${HASH})`]);
     expect(() => listGetter(defs)('person.age'))
       .toThrow(/gone\.csv \(a1b2c3d4e5f6\) is not on this device — drop the file here/);
+  });
+});
+
+describe('naming a column, or arithmetic over one', () => {
+  const rows = [`person = open("people.csv", ${HASH})`];
+
+  it('is a list definition, and keeps the typed array', () => {
+    // A compact list is still a list: without this the row lands among the
+    // scalar constants and is thrown out as "List in scalar context".
+    const { defs, errors } = build([...rows, 'half = person.age / 2']);
+    expect([...errors]).toEqual([]);
+    expect(defs.lists.get('half')).toMatchObject({ kind: 'data' });
+    expect([...(defs.lists.get('half') as { values: Float64Array }).values]).toEqual([18, 20.5, 14.5]);
+  });
+
+  it('reads back as a list wherever it is used', () => {
+    expect(values(lowerRow('half', [...rows, 'half = person.age / 2']))).toEqual([18, 20.5, 14.5]);
+    expect(lowerRow('mean(half)', [...rows, 'half = person.age / 2']))
+      .toMatchObject({ kind: 'num' });
+  });
+
+  it('names a text column too', () => {
+    const { defs, errors } = build([...rows, 'who = person.name']);
+    expect([...errors]).toEqual([]);
+    expect(defs.lists.get('who')).toMatchObject({ kind: 'text' });
   });
 });
 

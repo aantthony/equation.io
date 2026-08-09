@@ -1,4 +1,5 @@
 import {
+  MissingDataError,
   animatedConstNames,
   badTableName,
   buildDefs,
@@ -85,6 +86,10 @@ interface Equation {
   /** The resolved expression behind cls (user functions/fields inlined). */
   parsed?: Expr;
   error?: string;
+  /** The error is only that a data file is not on this device, so the message
+   *  doubles as the file picker (any row that reads a column, not just the
+   *  `open(…)` row that names it). */
+  needsFile?: boolean;
   /** Extra readout under the line (e.g. the numeric value of a P(…) row). */
   info?: string;
   /** Set when the row is a definition (`a = 2`, `f(x) = …`) rather than a plot. */
@@ -178,7 +183,27 @@ const MAX_DROPS = 12;
 /** Above this many points, a typed-array list draws as a bulk cloud rather
  *  than as individual (outlined, hoverable) points. */
 const CLOUD_MIN = 400;
+/** Most points a 3D cloud may hold. render3d has no instanced path — every
+ *  point is a sprite it sorts and projects — so a 3-column scatter is capped
+ *  where a flat one is not, and says so rather than drawing part of the file. */
+const CLOUD_3D_MAX = 10_000;
 const TUBE_SEGMENTS = 24;
+
+/**
+ * The 1…n a value list is drawn against, kept per column. Drawing runs every
+ * frame while anything on the page animates, and a 200k-point column would
+ * otherwise allocate and fill 1.6 MB of the same numbers each time.
+ */
+const indexXs = new WeakMap<Float64Array, Float64Array>();
+function indexCoords(values: Float64Array): Float64Array {
+  let xs = indexXs.get(values);
+  if (!xs) {
+    xs = new Float64Array(values.length);
+    for (let k = 0; k < xs.length; k++) xs[k] = k + 1;
+    indexXs.set(values, xs);
+  }
+  return xs;
+}
 const COMB_STEP = 4;
 
 // --- state ---
@@ -571,13 +596,15 @@ function render() {
         case 'expect':
           break; // 2D-only plots (densities, flows, sequences, planar figures); skipped in 3D scenes
         case 'dscatter': {
-          // A 3D cloud still draws one sprite per point (render3d has no
-          // instanced path), so it stays capped where 2D does not.
+          // One sprite per point (see CLOUD_3D_MAX); the row is rejected at
+          // compile time if there are more than that, so nothing is dropped
+          // here. A gap in ANY coordinate skips the point — an unplaced z
+          // would otherwise reach projection and depth sorting as NaN.
           const [xs, ys, zs] = plot.coords;
-          const n = Math.min(xs.length, CLOUD_MIN * 25);
-          for (let k = 0; k < n; k++) {
-            if (isFinite(xs[k]) && isFinite(ys[k])) {
-              scene.points.push({ pos: [xs[k], ys[k], zs ? zs[k] : 0], color });
+          for (let k = 0; k < xs.length; k++) {
+            const z = zs ? zs[k] : 0;
+            if (isFinite(xs[k]) && isFinite(ys[k]) && isFinite(z)) {
+              scene.points.push({ pos: [xs[k], ys[k], z], color });
             }
           }
           break;
@@ -776,9 +803,7 @@ function render() {
             });
             break;
           }
-          const xs = new Float64Array(values.length);
-          for (let k = 0; k < xs.length; k++) xs[k] = k + 1;
-          extras.clouds!.push({ xs, ys: values, color: css });
+          extras.clouds!.push({ xs: indexCoords(values), ys: values, color: css });
           break;
         }
         case 'dscatter': {
@@ -1000,6 +1025,7 @@ function recompileAll() {
     eq.cls = undefined;
     eq.parsed = undefined;
     eq.error = undefined;
+    eq.needsFile = undefined;
     eq.info = undefined;
     eq.def = undefined;
     eq.viewSpec = undefined;
@@ -1038,7 +1064,9 @@ function recompileAll() {
   sumBoundNames = built.sumBoundConsts;
   for (const [name, message] of built.errors) {
     const row = defRows.get(name);
-    if (row) row.error = message;
+    if (!row) continue;
+    row.error = message;
+    row.needsFile = built.needsFile.has(name);
   }
 
   // A second row naming something already defined is a plot, not a
@@ -1312,6 +1340,16 @@ function recompileAll() {
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       eq.cls = classify(parsed, constNames);
+      // A 3-column scatter only ever draws in 3D, where every point is a
+      // sprite. Say so here rather than plotting the first CLOUD_3D_MAX of a
+      // sorted file, which looks like the whole thing.
+      if (eq.cls.plot.type === 'dscatter' && eq.cls.plot.dim === 3) {
+        const n = eq.cls.plot.coords[0].length;
+        if (n > CLOUD_3D_MAX) {
+          throw new Error(`A 3D cloud draws at most ${CLOUD_3D_MAX} points; that is ${n}.`
+            + ' Filter it first, or plot two of the columns.');
+        }
+      }
       eq.parsed = parsed;
       // A row that wrote an ∫ or a list reduction and resolved to a constant
       // gets its value as a readout (the plot is the horizontal line there).
@@ -1323,18 +1361,38 @@ function recompileAll() {
       }
     } catch (e) {
       eq.error = e instanceof Error ? e.message : String(e);
+      // "…is not on this device": the row is one file away from working, and
+      // saying so is only half an answer without a way to supply it.
+      eq.needsFile = e instanceof MissingDataError;
     }
   }
   rvSys.prune(); // sample caches of variables that no longer exist
   spGen++; // queued hover recomputes predate this compile: drop them
   spQueue.clear();
   setHover(null);
+  // A row that named a file with no hash and found it here gets pinned, on
+  // this path as much as after a load from storage — otherwise a row typed
+  // against a file already in memory would be shared unpinned, and open
+  // elsewhere against whatever bytes happen to share the name.
+  if (!pinning) {
+    pinning = true;
+    try {
+      pinTableHashes(); // recompiles once more, without re-entering here
+    } finally {
+      pinning = false;
+    }
+  }
 }
+
+/** Guards recompile → pin → recompile from recurring. */
+let pinning = false;
 
 // --- local data files (drag a CSV in) ---
 
 /** In flight: the IndexedDB read for files the document names. */
 let tableLoad: Promise<void> | null = null;
+/** A row named a file while that read was running: ask again when it lands. */
+let tableLoadAgain = false;
 
 /**
  * Fetch the files an `open(…)` row names out of local storage. Compiling is
@@ -1343,16 +1401,27 @@ let tableLoad: Promise<void> | null = null;
  * its error instead of spinning.
  */
 function ensureTables(raw: Definition[]) {
-  if (tableLoad) return;
   const refs = raw
     .filter((d): d is Definition & { kind: 'table' } => d.kind === 'table')
     .filter(d => !lookupFile(d.file, d.hash))
     .map(({ file, hash }) => ({ file, hash }));
   if (!refs.length) return;
+  // A read is already running: this row was typed while it was. Remember to
+  // come back, or a file named mid-read is never asked for. (When the running
+  // read DID find something it recompiles anyway, which lands here again.)
+  if (tableLoad) {
+    tableLoadAgain = true;
+    return;
+  }
+  tableLoadAgain = false; // this read asks for what is named right now
   tableLoad = loadRefs(refs)
     .then(added => {
       tableLoad = null;
       if (added) refreshRows();
+      else if (tableLoadAgain) {
+        tableLoadAgain = false;
+        refreshRows();
+      }
     })
     .catch(() => { tableLoad = null; });
 }
@@ -1374,17 +1443,27 @@ function refreshRows() {
  * Write the resolved hash back into a row that named a file without one, so
  * the link pins the exact data it was built against — the same two-way
  * binding sliders, point drags, and `view(…)` rows already have.
+ *
+ * The row being typed is left alone: rewriting `p = open("people.csv")` into
+ * `p = open("people.csv", 3a7f…)` under the caret, mid-keystroke, would fight
+ * the typist. It pins as soon as the caret leaves, so a hand-typed row that
+ * resolved straight out of memory still gets pinned before it is shared.
  */
 function pinTableHashes(): boolean {
   let changed = false;
-  for (const eq of equations) {
+  const editing = caretPos()?.line;
+  const lines = lineEls();
+  for (const [i, eq] of equations.entries()) {
     const d = eq.def;
-    if (d?.kind !== 'table' || d.hash || eq.error) continue;
+    if (d?.kind !== 'table' || d.hash || eq.error || i === editing) continue;
     const f = lookupFile(d.file, '');
     if (!f) continue;
     const text = formatTableRow(d.name, d.file, f.hash);
     if (text === eq.text.trim()) continue;
     eq.text = text;
+    // Write the line through the way a slider drag does, so the pin does not
+    // need a full re-render of the list to become visible.
+    if (lines[i]) lines[i].textContent = text;
     changed = true;
   }
   if (changed) {
@@ -1512,8 +1591,16 @@ async function refreshFileMenu() {
   const list = document.getElementById('data-files-list');
   if (!box || !list) return;
   const files = await listFiles();
-  box.hidden = !files.length;
   list.textContent = '';
+  // Shown even when empty: the "+ open a CSV…" button below is the only
+  // pointer-driven way in, and hiding the section hid it from anyone who had
+  // not already guessed that a file can be dropped on the canvas.
+  if (!files.length) {
+    const empty = document.createElement('div');
+    empty.className = 'file-empty';
+    empty.textContent = 'Drop a .csv here to plot its columns.';
+    list.append(empty);
+  }
   for (const f of files) {
     const item = document.createElement('div');
     item.className = 'file-item';
@@ -2047,12 +2134,29 @@ function reconcile() {
         return el;
       })();
       eq.errorEl.textContent = eq.error;
-      // A data row whose file is not here heals by supplying the file, so the
-      // error is also the button that asks for it.
-      const wantsFile = eq.def?.kind === 'table';
+      // A row whose file is not here heals by supplying the file, so the error
+      // is also the button that asks for it — for every row that reads the
+      // file, not only the `open(…)` row that names it. It is a real button
+      // when it is one: reachable by Tab, activated by Enter or Space, and
+      // announced as a control rather than as a sentence.
+      const wantsFile = !!eq.needsFile;
       eq.errorEl.classList.toggle('eq-error-pick', wantsFile);
       eq.errorEl.onclick = wantsFile ? pickDataFiles : null;
       eq.errorEl.title = wantsFile ? 'Choose the file' : '';
+      eq.errorEl.onkeydown = wantsFile
+        ? ev => {
+          if (ev.key !== 'Enter' && ev.key !== ' ') return;
+          ev.preventDefault();
+          pickDataFiles();
+        }
+        : null;
+      if (wantsFile) {
+        eq.errorEl.setAttribute('role', 'button');
+        eq.errorEl.tabIndex = 0;
+      } else {
+        eq.errorEl.removeAttribute('role');
+        eq.errorEl.removeAttribute('tabindex');
+      }
       wanted.push(eq.errorEl);
     }
     // Place widgets directly after their line, then drop anything stale
