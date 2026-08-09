@@ -210,9 +210,12 @@ describe('factorial and special functions', () => {
     for (const c of LANCZOS) expect(GLSL_PRELUDE).toContain(`+ ${c} / (z + `);
   });
 
-  it('rejects != instead of reading it as postfix factorial', () => {
-    expect(() => parseExpr('x != 2')).toThrow(/!=/);
-    expect(() => parseExpr('x!=2')).toThrow(/!=/);
+  it('reads != as a comparison, never as postfix factorial', () => {
+    // One token, so the '!' can never be read as a factorial with '=' after
+    // it — which would silently graph factorial(x) = 2.
+    expect(parseExpr('x != 2')).toMatchObject({ kind: 'call', name: '[ne]' });
+    expect(parseExpr('x!=2')).toMatchObject({ kind: 'call', name: '[ne]' });
+    expect(parseExpr('x == 2')).toMatchObject({ kind: 'call', name: '[eq]' });
     expect(ev('x! = 2', { x: 3 })).toBe(4); // spaced: the equation x! = 2, as l - r
   });
 

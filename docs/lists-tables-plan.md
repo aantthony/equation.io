@@ -138,10 +138,14 @@ As planned:
   opening it shows the first 8 rows as parsed, with missing cells as "—".
   Editable Desmos-style tables stay out (small literal data is already
   `[(1,2),(3,4)]`).
-- **Text is still out.** `person[person.city == "NYC"]` needs string
-  literals in the expression language (a new Expr kind through a dozen
-  exhaustive switches) and an `==` operator. Both now report themselves
-  instead of failing as a parse error, but neither is implemented.
+- **Text** *(built, after phase 4)*: `{kind: 'str'}` for a literal and
+  `{kind: 'text'}` for a text column — the counterpart of `data`. `==` and
+  `!=` parse to `[eq]`/`[ne]` call nodes rather than joining IneqOp, because
+  equality is not a relation the plane can shade; zipped over a list they
+  become mask elements, and anywhere else they say where they belong (`!=`
+  still rescuing the factorial reading of `x! = 2`). Text compares as text
+  and numbers as numbers, so `city == 3` matches nothing rather than
+  coercing. `count()` is the one reduction text answers.
 - **Columns are still ASTs.** The `{ kind: 'data' }` typed-array leaf moves
   to phase 4, where it belongs: what it buys is per-frame rendering cost,
   and only instanced rendering cashes that in.
@@ -173,10 +177,7 @@ As planned:
   has a single scale for both axes and counts in the thousands otherwise
   cannot share a view with values in the units.
 
-Still open, and the natural next step: **text**. `person[person.city ==
-"NYC"]` wants a string leaf through the same dozen exhaustive switches, an
-`==` that only means something inside a filter, and text columns readable by
-the mask machinery. `==` and quoted text currently explain themselves.
+Text filters landed right after this phase — see phase 3.
 
 ## Testing
 

@@ -34,6 +34,14 @@ export type Expr =
    * GLSL, diff, and the integrator never see it.
    */
   | { kind: 'data'; values: Float64Array }
+  /**
+   * A text literal, `"NYC"`. Text is not a value the plane can draw: it
+   * exists so a filter can compare a text column against it, and every
+   * numeric context refuses it.
+   */
+  | { kind: 'str'; value: string }
+  /** A text column, the counterpart of `data`. Same rule: only comparisons. */
+  | { kind: 'text'; values: readonly string[] }
   /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
   | { kind: 'piecewise'; cases: Array<{ cond: Expr; value: Expr }>; otherwise?: Expr };
 
@@ -233,18 +241,15 @@ const ops = operators<PNode>({
 
   ':': BinaryInfix<PNode>((a, b): PNode => ({ kind: 'pcase', cond: asExpr(a), value: asExpr(b) })),
 
-  // Recognized as one token so it never half-matches as postfix '!' followed
-  // by '=' — x != 2 would silently graph factorial(x) = 2. There is no ≠
-  // relation to plot, so it only explains itself.
-  '!=': BinaryInfix<PNode>((): PNode => {
-    throw new Error("'!=' is not supported — for a factorial equation, put a space before '=': x! = 2.");
-  }),
-
-  // Also one token, so `a == b` explains itself instead of arriving as two
-  // '=' operators and a parse error.
-  '==': BinaryInfix<PNode>((): PNode => {
-    throw new Error("'==' is not supported — an equation takes one '=' (x^2 = y), and a filter takes a comparison (L[L > 2]).");
-  }),
+  // Equality, for filters only: `people[people.city == "NYC"]`. Unlike <
+  // and >, it is not a relation the plane can shade, so it lowers to a mask
+  // (list.ts) and reports itself anywhere else. Recognized as one token each
+  // so '!=' never half-matches as postfix '!' followed by '=', which would
+  // silently graph factorial(x) = 2.
+  '==': BinaryInfix<PNode>((a, b): Expr =>
+    ({ kind: 'call', name: '[eq]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+  '!=': BinaryInfix<PNode>((a, b): Expr =>
+    ({ kind: 'call', name: '[ne]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
 
   '<': asIneq('<'),
   '<=': asIneq('<='),
@@ -368,14 +373,11 @@ const syntax: PatternDict = {
   bar: /^\|$/,
   whitespace: /\s$/,
   symbol: /^[A-Za-z_Σ∑Π∏∫∞][A-Za-z_0-9]*'*$/,
+  // A quote only opens text where a token can start, so `x'` (prime) and
+  // `f'(x)` still tokenize as symbols — the symbol match gets there first.
+  string: /^("[^"]*"?|'[^']*'?)$/,
   operator: x => !!ops[x] || MULTI_CHAR_OPS.some(m => m.startsWith(x)),
-  invalid(x) {
-    if (x === '"' || x === "'") {
-      throw new Error('Quoted text only belongs in a data row, like people = open("people.csv")'
-        + ' — filtering by text is not supported yet.');
-    }
-    throw new Error(`Invalid character: ${JSON.stringify(x)}.`);
-  },
+  invalid(x) { throw new Error(`Invalid character: ${JSON.stringify(x)}.`); },
 };
 
 const tokenize = Tokenizer(syntax);
@@ -511,6 +513,13 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
 
 function createLeaf(token: Token): PNode {
   if (token.type === 'number') return num(Number(token.str));
+  if (token.type === 'string') {
+    const q = token.str[0];
+    if (token.str.length < 2 || !token.str.endsWith(q)) {
+      throw new Error(`Unterminated text: ${token.str}`);
+    }
+    return { kind: 'str', value: token.str.slice(1, -1) };
+  }
   if (token.type === 'parenopen') return { kind: 'popen', bracket: token.str, call: !!token.call };
   if (token.type === 'symbol') {
     if (token.str in CONSTANTS) return num(CONSTANTS[token.str]);
@@ -563,7 +572,9 @@ export function substVars(e: Expr, env: Record<string, Expr>): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: substVars(e.l, env), r: substVars(e.r, env) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substVars(a, env)) };
     case 'list': return { kind: 'list', items: e.items.map(a => substVars(a, env)) };
-    case 'data': return e;
+    case 'data':
+    case 'str':
+    case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: substVars(c.cond, env), value: substVars(c.value, env) })),
@@ -754,6 +765,8 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
     case 'vec': throw new Error('Vector in scalar context.');
     case 'list':
     case 'data': throw new Error('List in scalar context.');
+    case 'str':
+    case 'text': throw new Error('Text has no numeric value — it can only be compared, inside a filter.');
     case 'piecewise': {
       for (const c of e.cases) {
         if (c.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities.');
@@ -781,6 +794,9 @@ export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
     case 'ineq': freeVars(e.l, out); freeVars(e.r, out); break;
     case 'vec': e.items.forEach(a => freeVars(a, out)); break;
     case 'list': e.items.forEach(a => freeVars(a, out)); break;
+    case 'data':
+    case 'str':
+    case 'text': break;
     case 'piecewise':
       e.cases.forEach(c => { freeVars(c.cond, out); freeVars(c.value, out); });
       if (e.otherwise) freeVars(e.otherwise, out);

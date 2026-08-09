@@ -311,6 +311,9 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
     return done({ type: 'polygon', pts: expr.args, closed: expr.name !== '[segment]' });
   }
 
+  if (expr.kind === 'text' || expr.kind === 'str') {
+    throw new Error('Text cannot be plotted — compare it inside a filter, like people[people.city == "NYC"].');
+  }
   // Typed-array lists: a column plots with nothing to evaluate at all.
   if (expr.kind === 'call' && expr.name === '[hist]') {
     const [centers, counts, width] = expr.args;

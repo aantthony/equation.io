@@ -67,10 +67,12 @@ const num = (value: number): Expr => ({ kind: 'num', value });
 
 const isList = (e: Expr): e is Expr & { kind: 'list' } => e.kind === 'list';
 const isData = (e: Expr): e is Expr & { kind: 'data' } => e.kind === 'data';
-/** Either representation of a list of values. */
-const isSeq = (e: Expr): e is Expr & { kind: 'list' | 'data' } => isList(e) || isData(e);
-const seqLength = (e: Expr & { kind: 'list' | 'data' }): number =>
-  (e.kind === 'data' ? e.values.length : e.items.length);
+const isText = (e: Expr): e is Expr & { kind: 'text' } => e.kind === 'text';
+/** Any representation of a list of values: expressions, numbers, or text. */
+const isSeq = (e: Expr): e is Expr & { kind: 'list' | 'data' | 'text' } =>
+  isList(e) || isData(e) || isText(e);
+const seqLength = (e: Expr & { kind: 'list' | 'data' | 'text' }): number =>
+  (e.kind === 'list' ? e.items.length : e.values.length);
 const isRange = (e: Expr): e is Expr & { kind: 'call' } =>
   e.kind === 'call' && e.name === '[range]';
 
@@ -96,11 +98,14 @@ function dataOf(values: Float64Array, ctx: Ctx): Expr {
  * uniform, or a comparison. This is where a big column meets ITEMS_MAX.
  */
 function expand(e: Expr, ctx: Ctx): Expr {
-  if (!isData(e)) return e;
-  if (e.values.length > ITEMS_MAX) {
-    throw new Error(`That is ${e.values.length} values; only ${ITEMS_MAX} can be combined with sliders, t, or comparisons.`);
+  if (!isData(e) && !isText(e)) return e;
+  const n = seqLength(e);
+  if (n > ITEMS_MAX) {
+    throw new Error(`That is ${n} values; only ${ITEMS_MAX} can be combined with sliders, t, or comparisons.`);
   }
-  return listOf([...e.values].map(num), ctx);
+  return listOf(isText(e)
+    ? e.values.map((value): Expr => ({ kind: 'str', value }))
+    : [...e.values].map(num), ctx);
 }
 
 /**
@@ -206,8 +211,11 @@ function zipN(parts: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
   }
   if (n === null) return build(parts);
   // A mask only ever grows into a longer comparison chain (18 <= a < 65);
-  // anything else built from one is arithmetic on a filter.
+  // anything else built from one is arithmetic on a filter. Text is the same
+  // shape of mistake: only a comparison may consume it. (Both lists are
+  // homogeneous, so the first element settles it.)
   const masked = parts.some(isMask);
+  const textual = parts.some(p => isList(p) && p.items[0]?.kind === 'str');
   const items: Expr[] = [];
   for (let k = 0; k < n; k++) {
     const comps = parts.map(p => (isList(p) ? p.items[k] : p));
@@ -220,6 +228,9 @@ function zipN(parts: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
     if (masked && built.kind !== 'ineq') {
       throw new Error('A comparison over a list is a filter, not a value — put it in brackets, like L[L > 2].');
     }
+    if (textual && !isEquality(built)) {
+      throw new Error('Text has no numeric value — it can only be compared, inside a filter.');
+    }
     items.push(built);
   }
   return listOf(items, ctx);
@@ -230,11 +241,24 @@ function zipN(parts: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
  * (`L[L > 2]`, `person[person.age >= 18]`). It is not a value: only
  * indexing consumes one, and any other use reports itself.
  */
+const isEquality = (e: Expr): e is Expr & { kind: 'call' } =>
+  e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]');
+
 const isMask = (e: Expr): e is Expr & { kind: 'list' } =>
-  isList(e) && e.items.length > 0 && e.items.every(it => it.kind === 'ineq');
+  isList(e) && e.items.length > 0
+  && e.items.every(it => it.kind === 'ineq' || isEquality(it));
 
 /** Whether one comparison (or a chain like 18 <= a < 65) holds. */
 function holds(cond: Expr, env: Record<string, number>): boolean {
+  if (isEquality(cond)) {
+    const [l, r] = cond.args;
+    // Text compares as text and numbers as numbers; the two never match,
+    // which is the honest answer for `person.city == 3`.
+    const same = l.kind === 'str' || r.kind === 'str'
+      ? l.kind === 'str' && r.kind === 'str' && l.value === r.value
+      : evaluate(l, env) === evaluate(r, env);
+    return cond.name === '[eq]' ? same : !same;
+  }
   return ineqComparisons(cond as Expr & { kind: 'ineq' }).every(({ op, l, r }) => {
     const a = evaluate(l, env);
     const b = evaluate(r, env);
@@ -439,6 +463,7 @@ function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
       for (let k = 0; k < n; k++) if (keep[k]) out[at++] = low.values[k];
       return dataOf(out, ctx);
     }
+    if (isText(low)) return { kind: 'text', values: low.values.filter((_, k) => keep[k]) };
     return listOf(low.items.filter((_, k) => keep[k]), ctx);
   }
   if (isSeq(idxLow)) {
@@ -451,13 +476,17 @@ function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   if (k < 1 || k > n) {
     throw new Error(`Index ${k} is out of range — the list has ${n} element${n === 1 ? '' : 's'}.`);
   }
-  return isData(low) ? num(low.values[k - 1]) : low.items[k - 1];
+  if (isData(low)) return num(low.values[k - 1]);
+  if (isText(low)) return { kind: 'str', value: low.values[k - 1] };
+  return low.items[k - 1];
 }
 
 function lower(e: Expr, ctx: Ctx): Expr {
   switch (e.kind) {
     case 'num':
     case 'data':
+    case 'str':
+    case 'text':
       return e;
     case 'var': {
       const hit = ctx.getList(e.name);
@@ -496,10 +525,24 @@ function lower(e: Expr, ctx: Ctx): Expr {
           throw new Error('hist(…) takes 2 to 500 bins.');
         }
         if (args.length > 2) throw new Error('hist(…) takes a list and, optionally, a number of bins.');
+        if (isText(arg)) throw new Error('hist(…) counts numbers; that column holds text.');
         const xs = isData(arg)
           ? arg.values
           : Float64Array.from(numericItems(arg.items, ctx, 'hist'));
         return histogram(xs, bins, ctx);
+      }
+      if (e.name === '[eq]' || e.name === '[ne]') {
+        // Equality is a filter test, not a relation to draw: zip it into a
+        // mask, which only `[ ]` will accept.
+        const parts = args.map(a => expand(a, ctx));
+        if (!parts.some(isList)) {
+          const op = e.name === '[eq]' ? '==' : '!=';
+          throw new Error(`'${op}' tests a list inside a filter, like people[people.city == "NYC"].`
+            + (e.name === '[ne]'
+              ? " For a factorial equation, put a space before '=': x! = 2."
+              : " An equation takes a single '=': x^2 = y."));
+        }
+        return zipN(parts, comps => ({ kind: 'call', name: e.name, args: comps }), ctx);
       }
       const isMinMax = e.name === 'min' || e.name === 'max';
       if (SYMBOLIC_REDUCTIONS.has(e.name) || NUMERIC_REDUCTIONS.has(e.name)
@@ -511,6 +554,11 @@ function lower(e: Expr, ctx: Ctx): Expr {
           throw new Error(`${e.name}(…) needs a list, like ${e.name}([1, 4, 2]).`);
         }
         const arg = args[0];
+        if (isText(arg)) {
+          // count is the only reduction text has an answer for.
+          if (e.name === 'count') return num(arg.values.length);
+          throw new Error(`${e.name}(…) needs numbers; that column holds text.`);
+        }
         return isData(arg)
           ? reduceData(e.name, arg.values, ctx)
           : reduce(e.name, (arg as Expr & { kind: 'list' }).items, ctx);
@@ -589,6 +637,9 @@ export function lowerLists(e: Expr, getList: GetList, opts: ResolveOpts = {}): E
   if (isMask(out)) {
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
   }
+  if (out.kind === 'text' || out.kind === 'str') {
+    throw new Error('Text cannot be plotted — compare it inside a filter, like people[people.city == "NYC"].');
+  }
   if (ctx.hists && !(out.kind === 'call' && out.name === '[hist]')) {
     throw new Error('hist(…) is a whole plot — give it its own row.');
   }
@@ -612,6 +663,8 @@ export function usesListReduction(e: Expr): boolean {
   switch (e.kind) {
     case 'num':
     case 'data':
+    case 'str':
+    case 'text':
     case 'var': return false;
     case 'neg': return usesListReduction(e.a);
     case 'bin': return usesListReduction(e.a) || usesListReduction(e.b);

@@ -150,12 +150,16 @@ demand instead of living in a tool description. No authentication required.
   name and hash, not its bytes.
 - Filters keep the elements a comparison selects: `L[L > 2]`,
   `person.height[person.age >= 18]` (one column chosen by another — rows stay
-  aligned), and chains, `person.age[30 <= person.age < 40]`. Filtering a
-  whole file names a new one, `adults = person[person.age >= 18]`, whose
-  columns work like any others (`(adults.age, adults.height)`). A filter
-  settles when the row compiles, so it may use constants and sliders but not
-  t; a comparison with a missing cell is false, so filtering also drops gaps.
-  Comparing text (`person.city == "NYC"`) is not supported yet.
+  aligned), chains, `person.age[30 <= person.age < 40]`, and text,
+  `person.height[person.city == "NYC"]` (`!=` too, and either quote).
+  Filtering a whole file names a new one,
+  `adults = person[person.age >= 18]`, whose columns work like any others
+  (`(adults.age, adults.height)`). A filter settles when the row compiles, so
+  it may use constants and sliders but not t; a comparison with a missing
+  cell is false, so filtering also drops gaps.
+- Text columns are lists of text. They are not plottable and have no
+  arithmetic — `count()` and the comparisons above are all they do. `==` and
+  `!=` exist only for filters: an equation still takes a single `=`.
 - Comments: a row starting with `#` (e.g. `# tangent lines`) plots nothing; in
   the app it renders as a heading whose group (the rows until the next `#` row)
   can be collapsed. Use them to label sections of longer documents.
@@ -295,8 +299,8 @@ demand instead of living in a tool description. No authentication required.
   scatter of its first two numeric columns) is written for you; the file is
   parsed once and kept in the browser's local storage, pinned by the SHA-256
   prefix in the row. Each numeric column reads as a list under its dotted
-  name (`person.age`), text columns are named but not yet plottable, and
-  missing cells become gaps the row's readout counts. Because the bytes never
+  name (`person.age`); text columns read as lists of text, which filters can
+  compare; missing cells become gaps the row's readout counts. Because the bytes never
   enter the URL, opening the link on another device (or rendering it
   server-side, as `create_graph` previews do) reports the data as
   device-local instead of drawing it; dropping the same file there restores

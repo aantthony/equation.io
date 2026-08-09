@@ -188,9 +188,9 @@ export function listGetter(defs: Defs): GetList {
     if (!found) {
       throw new Error(`${table.file} has no column "${col}" (columns: ${table.data.columns.map(c => c.name).join(', ')}).`);
     }
-    if (found.type !== 'num') {
-      throw new Error(`${name} holds text, not numbers — only number columns plot for now.`);
-    }
+    // A text column is a list too — of text. Only comparisons accept one
+    // (list.ts); everything numeric says so where it is used.
+    if (found.type !== 'num') return { kind: 'text', values: found.strs! };
     if (table.data.rows > TABLE_MAX_ROWS) {
       throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS}.`);
     }
@@ -550,7 +550,9 @@ function substIdx(e: Expr, idx: string, val: Expr): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substIdx(a, idx, val)) };
     case 'list': return { kind: 'list', items: e.items.map(a => substIdx(a, idx, val)) };
-    case 'data': return e;
+    case 'data':
+    case 'str':
+    case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: substIdx(c.cond, idx, val), value: substIdx(c.value, idx, val) })),
@@ -582,7 +584,9 @@ function foldNums(e: Expr): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: foldNums(e.l), r: foldNums(e.r) };
     case 'vec': return { kind: 'vec', items: e.items.map(foldNums) };
     case 'list': return { kind: 'list', items: e.items.map(foldNums) };
-    case 'data': return e;
+    case 'data':
+    case 'str':
+    case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: foldNums(c.cond), value: foldNums(c.value) })),
@@ -737,7 +741,9 @@ export function usesIntegral(e: Expr): boolean {
     case 'ineq': return usesIntegral(e.l) || usesIntegral(e.r);
     case 'vec': return e.items.some(usesIntegral);
     case 'list': return e.items.some(usesIntegral);
-    case 'data': return false;
+    case 'data':
+    case 'str':
+    case 'text': return false;
     case 'piecewise':
       return e.cases.some(c => usesIntegral(c.cond) || usesIntegral(c.value))
         || (e.otherwise ? usesIntegral(e.otherwise) : false);
@@ -820,7 +826,9 @@ function rx(e: Expr, ctx: Ctx): Expr {
         ? { kind: 'call', name: '[range]', args: x.args.map(a => rx(a, ctx)) }
         : rx(x, ctx))),
     };
-    case 'data': return e;
+    case 'data':
+    case 'str':
+    case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),

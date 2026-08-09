@@ -140,8 +140,12 @@ describe('columns as lists', () => {
       .toThrow(/no column "salary" \(columns: name, age, height\)/);
   });
 
-  it('refuses a text column, for now', () => {
-    expect(() => lowerRow('person.name', rows)).toThrow(/holds text, not numbers/);
+  it('reads a text column as text, which cannot be plotted', () => {
+    expect(() => lowerRow('person.name', rows)).toThrow(/Text cannot be plotted/);
+    expect(() => lowerRow('person.name / 2', rows)).toThrow(/Text has no numeric value/);
+    expect(evaluate(lowerRow('count(person.name)', rows), {})).toBe(3);
+    expect(() => lowerRow('mean(person.name)', rows)).toThrow(/that column holds text/);
+    expect(() => lowerRow('hist(person.name)', rows)).toThrow(/that column holds text/);
   });
 
   it('leaves a dot on anything else alone', () => {
@@ -277,10 +281,20 @@ describe('filters', () => {
     expect(() => lowerRow('person.age > 30', rows)).toThrow(/put it in brackets/);
   });
 
-  it('turns down a text filter in terms of what it would take', () => {
-    // Tokenizing comes first, so any quoted value reports the same way.
-    expect(() => parseExpr('person[person.city == "NYC"]')).toThrow(/filtering by text is not supported yet/);
-    expect(() => parseExpr('a == b')).toThrow(/'==' is not supported/);
+  it('compares text, and says where a comparison belongs', () => {
+    const cities = store({ 'c.csv': 'city,pop\nNYC,8\nOslo,1\nNYC,9\n' });
+    const defs = [`c = open("c.csv", ${HASH})`];
+    expect(values(lowerRow('c.pop[c.city == "NYC"]', defs, cities))).toEqual([8, 9]);
+    expect(values(lowerRow("c.pop[c.city != 'NYC']", defs, cities))).toEqual([1]);
+    // …and the filtered file keeps every column, text included.
+    const { defs: d2 } = build([...defs, 'ny = c[c.city == "NYC"]'], cities);
+    expect(d2.tables.get('ny')!.data!.columns[0].strs).toEqual(['NYC', 'NYC']);
+    // Text never matches a number, rather than coercing to one.
+    expect(() => lowerRow('c.pop[c.city == 3]', defs, cities)).toThrow(/keeps nothing/);
+    // A comparison outside brackets says where it belongs, and '!=' still
+    // rescues the factorial reading.
+    expect(() => lowerRow('c.city == "NYC"', defs, cities)).toThrow(/put it in brackets/);
+    expect(() => lowerRow('x != 2', defs, cities)).toThrow(/space before '=': x! = 2/);
   });
 
   it('says what a bare data-file name would have to be', () => {
