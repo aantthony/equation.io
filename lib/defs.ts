@@ -22,11 +22,11 @@
  */
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, SHADOWABLE_FNS, type Expr, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
+import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
-import { type GetList, type Seq, SCALAR_REDUCTIONS, isSeq, lowerLists, lowerMask } from './list.ts';
+import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 
 export type Definition =
@@ -104,11 +104,13 @@ export interface Defs {
    * name survives into anything downstream.
    *
    * The value keeps whichever representation the definition produced: a
-   * `list` of expressions, or the compact `data`/`text` of a column and
-   * constant arithmetic over one (`ages = person.age / 2`), which must not
-   * be expanded here or naming a column would cost what reading it saved.
+   * `list` of expressions, the compact `data`/`text` of a column and constant
+   * arithmetic over one (`ages = person.age / 2`), which must not be expanded
+   * here or naming a column would cost what reading it saved — or the `vec` of
+   * columns a scatter zips (`P = (person.age, person.height)`), for the same
+   * reason. Naming one must not change what it is.
    */
-  lists: Map<string, Seq>;
+  lists: Map<string, Seq | (Expr & { kind: 'vec' })>;
   /**
    * Definitions that needed a data file this device does not have
    * (`ages = person.age / 2`, `avg = mean(person.age)`): the reason, and
@@ -258,10 +260,17 @@ export const isListName = (names: ReadonlySet<string>, n: string): boolean => {
  * Of the names a document binds as values, the ones a late-addition builtin
  * would otherwise claim — what parseExpr needs to keep `total = 3` followed by
  * `total(x + 1)` the product it was before `total` became a reduction.
+ *
+ * Folded through `builtinFn`, because that is how a call is read: `Total = 3`
+ * is a legal definition and `Total(x + 1)` folds to the `total` builtin, so
+ * only the folded name says which builtin this document has taken.
  */
 export const shadowedFnNames = (names: Iterable<string>): Set<string> => {
   const out = new Set<string>();
-  for (const n of names) if (SHADOWABLE_FNS.has(n)) out.add(n);
+  for (const n of names) {
+    const b = builtinFn(n);
+    if (b && SHADOWABLE_FNS.has(b)) out.add(b);
+  }
   return out;
 };
 
@@ -335,8 +344,40 @@ const isComparison = (e: Expr): e is Expr & { kind: 'ineq' | 'call' } =>
 export const isSliceIndex = (idx: Expr, defs: Defs): boolean =>
   staysList(idx, defs) && !isComparison(idx);
 
+/**
+ * A whole-plot form with a list inside it — `domain(person.age)`, and the
+ * geometry statements — named as list.ts names it when the bytes are here.
+ * Answered from the shape alone, so `person[domain(person.age) > 0]` is
+ * refused on the device that cannot lower it as well as on the one that can.
+ */
+function wholePlotOverList(e: Expr, defs: Defs): string | null {
+  if (e.kind === 'call') {
+    if (NO_LIST_INSIDE.has(e.name) && e.args.some(a => staysList(a, defs))) {
+      return plainFnName(e.name);
+    }
+    for (const a of e.args) {
+      const hit = wholePlotOverList(a, defs);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const kids: Expr[] = e.kind === 'neg' ? [e.a]
+    : e.kind === 'bin' ? [e.a, e.b]
+      : e.kind === 'eq' ? [e.l, e.r]
+        : e.kind === 'ineq' ? [e.l, e.r]
+          : e.kind === 'vec' || e.kind === 'list' ? [...e.items]
+            : [];
+  for (const k of kids) {
+    const hit = wholePlotOverList(k, defs);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 function checkFilterShape(cond: Expr, defs: Defs, shape: string): void {
   if (!isComparison(cond)) throw new Error(shape);
+  const inside = wholePlotOverList(cond, defs);
+  if (inside) throw new Error(`Lists cannot appear inside ${inside}(…).`);
   // …and a list has to REACH it. Merely mentioning one is not enough:
   // `person[mean(person.age) > 0]` and `person[person.age[1] > 0]` reduce to a
   // single scalar, so they decide one answer for every row — `person[1 < 2]`
@@ -410,22 +451,22 @@ const INIT_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$/;
  * a row to the wrong bytes is the exact failure the pin exists to prevent.
  */
 const TABLE_RE = new RegExp(
-  // `;` is excluded from the name deliberately: it separates rows in the URL,
-  // so such a row cannot survive a reload. See rowSafeFileName.
-  String.raw`^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^";]*)"|'([^';]*)')\s*(?:,\s*([0-9a-fA-F]{${HASH_TOKEN_LEN},64})\s*)?\)\s*$`,
+  String.raw`^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{${HASH_TOKEN_LEN},64})\s*)?\)\s*$`,
 );
 
 /**
  * The name a file is stored and written under. A row quotes the file name
  * with no escape (`open("sales.csv")`), so a name holding a quote or a line
  * break could not be read back — and a row that cannot be read back is worse
- * than one whose title lost a character. `;` goes too: it separates rows in
- * the URL, so `sales;2026.csv` would come back as two broken rows. Applied at
- * ingest, so what is stored and what the row says are the same string, and
- * re-dropping the file matches.
+ * than one whose title lost a character. Applied at ingest, so what is stored
+ * and what the row says are the same string, and re-dropping the file matches.
+ *
+ * `;` used to go the same way, because the link codec could not tell a data
+ * semicolon from the separator between rows; now it can (lib/link.ts), so
+ * `sales;2026.csv` keeps its name.
  */
 export const rowSafeFileName = (name: string): string =>
-  name.replace(/[";\r\n\t]+/g, '_').trim() || 'data.csv';
+  name.replace(/["\r\n\t]+/g, '_').trim() || 'data.csv';
 
 /** A row that means to open a file, whether or not it succeeds at saying so. */
 const OPEN_HEAD_RE = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*["']/;
@@ -447,14 +488,6 @@ export function badTableRow(text: string): string | null {
     return `${m[1]} is a built-in name, so it cannot name a data file — try ${m[1]}_data = open(…).`;
   }
   if (TABLE_RE.test(text)) return null;
-  const quoted = /["']([^"']*)["']/.exec(text);
-  if (quoted?.[1].includes(';')) {
-    // The row works until it is reloaded: the payload joins rows with ';' and
-    // encodes the quotes, so the name comes back as two broken rows. Say so
-    // now, while the name is still on screen to be changed.
-    return `A data file's name cannot contain ';' — that character separates rows,`
-      + ' so the link would come back split. Rename the file and drop it again.';
-  }
   const short = /,\s*([0-9a-fA-F]+)\s*\)\s*$/.exec(text);
   if (short && short[1].length < HASH_TOKEN_LEN) {
     return `A data file's hash is ${HASH_TOKEN_LEN} hex digits; that is ${short[1].length}.`
@@ -1241,6 +1274,17 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
         }
         const store: Array<[string, Expr]> = [[d.name, e]];
         if (e.kind === 'vec') {
+          // `P = (person.age, person.height)` names a SCATTER, whose
+          // components are whole columns — not a point, whose components are
+          // two numbers. Read as a point it became two `data` components that
+          // then failed to evaluate ("List in scalar context"), so the one
+          // representation that makes a 200 000-row file plottable was also
+          // the one that could not be given a name. The symbolic equivalent
+          // `P = (L, M)` always could.
+          if (isDataScatter(e)) {
+            defs.lists.set(d.name, e);
+            continue;
+          }
           if (e.items.length !== 2) throw new Error('A named point needs exactly 2 components.');
           const comps = pointComps(d.name);
           for (const c of comps) {

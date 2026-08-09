@@ -15,6 +15,7 @@
  */
 import { SLIDER_NUM_RE, dragAxes } from '../lib/drag.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
+import { splitStatements } from '../lib/statements.ts';
 import { analyze } from './graph.ts';
 import { MAX_PLOTS, previewGap, renderOgPng } from './og.ts';
 
@@ -38,7 +39,7 @@ The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wire
         equations: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Every equation in the graph, in display order. One equation or definition per string; no semicolons.',
+          description: 'Every equation in the graph, in display order. One equation or definition per string — do not join rows with ";" (inside quoted text a ";" is data, and kept).',
         },
       },
       required: ['equations'],
@@ -97,7 +98,11 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
     );
   }
   const texts = (equations as string[]).map(t => t.trim()).filter(Boolean);
-  const bad = texts.find(t => t.includes(';'));
+  // Two equations in one string is a mistake worth naming — but a `;` inside
+  // quoted text (`p[p.city == "a;b"]`, a file named `sales;2026.csv`) is data,
+  // and the splitter is what tells them apart. It is also what the app and the
+  // link codec use, so all three agree on where a row ends.
+  const bad = texts.find(t => splitStatements(t).length > 1);
   if (bad) throw new Error(`Row "${bad}" contains ';' — send each equation as its own array item.`);
   const analysis = analyze(texts);
   const plotRows = analysis.rows.filter(r => r.cls);
@@ -180,8 +185,13 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
     // that draws) genuinely has nothing to plot on any device, and saying
     // "the graph itself is fine" would send the caller away satisfied with a
     // blank graph.
+    // …and the reassurance is about the ROWS, so it may only be given when
+    // every row is in fact fine: a document with a device-local plot AND a
+    // broken row is not "fine", and "rows" — which says so — is the verdict.
     preview = dataWouldPlot
-      ? 'none — every plot row reads a data file on the author\'s device (see preview_omits; the graph itself is fine)'
+      ? rows.every(r => r.status === 'ok')
+        ? 'none — every plot row reads a data file on the author\'s device (see preview_omits; the graph itself is fine)'
+        : 'none — every plot row reads a data file on the author\'s device (see preview_omits), and other rows have errors (see rows)'
       : 'none — no plot rows to draw';
   } else if (omitted.length === plotRows.length) {
     preview = 'none — the static preview cannot draw any of these rows (see preview_omits; this says nothing about whether the graph works)';

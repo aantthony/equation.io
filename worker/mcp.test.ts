@@ -179,6 +179,25 @@ describe('mcp endpoint', () => {
     expect(out.preview).toBe('attached');
   });
 
+  it('keeps a semicolon inside text, through the link and back', async () => {
+    // The row means the ';'. Refusing it did not save the graph — an invalid
+    // row is written to the URL like any other — so the link came back cut in
+    // half at the quote. The codec tells a row's own semicolon from the
+    // separator now (lib/link.ts), and read_graph proves the round trip.
+    const rows = ['p = open("sales;2026.csv", a1b2c3d4e5f6)', 'y = 2'];
+    const { body } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: rows },
+    });
+    const out = body.result.structuredContent;
+    expect(out.rows[0].status).not.toBe('error');
+    const { body: back } = await rpc('tools/call', {
+      name: 'read_graph',
+      arguments: { url: out.share_url },
+    });
+    expect(back.result.structuredContent.equations).toEqual(rows);
+  });
+
   it('reads a list inside P(…) and E(…), like every other row', async () => {
     // These two bodies were the last rows parsed without the document's list
     // names and never lowered, so a reduction over a list defined above them
@@ -212,6 +231,14 @@ describe('mcp endpoint', () => {
       arguments: { equations: ['L = [1, 4, 2]', 'total(L)'] },
     });
     expect(b2.result.structuredContent.rows[1].value).toBe('≈ 7');
+    // A call folds case, so the name a document bound has to fold with it:
+    // `Total = 3` is a legal old definition and `Total(x + 1)` was its product.
+    const { body: b3 } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['Total = 3', 'y = Total(x + 1)'] },
+    });
+    expect(b3.result.structuredContent.valid).toBe(true);
+    expect(b3.result.structuredContent.rows[1].kind).toBe('implicit2d');
   });
 
   it('validates E(…) rows: exact and sampled means', async () => {
@@ -467,6 +494,20 @@ describe('graph previews', () => {
     const out = body.result.structuredContent;
     expect(out.valid).toBe(false);
     expect(out.rows[1].error).toMatch(/Slicing/);
+  });
+
+  it('does not call a graph fine while another row is broken', async () => {
+    // The device-local plot is the only thing the preview can say nothing
+    // about; a row that fails to parse is broken everywhere. Saying "the
+    // graph itself is fine" over the top of it sends the caller away from an
+    // error that `rows` — and only `rows` — is reporting.
+    const { body } = await call([
+      'person = open("people.csv", 3a7f1b2c9d4e)', 'y = person.age', 'y = florb(x)',
+    ]);
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(false);
+    expect(out.preview).not.toContain('the graph itself is fine');
+    expect(out.preview).toContain('other rows have errors');
   });
 
   it('does not call a definition-only document fine', async () => {

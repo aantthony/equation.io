@@ -81,10 +81,9 @@ export function sniffDelimiter(text: string): string {
   // with no trailing newline ends on a REAL record, and dropping that one
   // left a two-line file judged on its header alone.
   const partial = i < text.length || text.endsWith('\n');
-  const pick = (skipFirst: boolean): string | null => {
-    let best: string | null = null;
+  const pick = (skipFirst: boolean): { d: string; even: boolean } | null => {
+    let best: { d: string; even: boolean } | null = null;
     let bestCount = 0;
-    let bestEven = false;
     for (const d of DELIMITERS) {
       const seen = perLine.get(d)!;
       const sampled = partial && seen.length > 1 ? seen.slice(0, -1) : seen;
@@ -96,22 +95,28 @@ export function sniffDelimiter(text: string): string {
       // do not line up, and choosing them throws every data row away as ragged.
       // Count decides only among candidates that are equally (in)consistent.
       const even = full.every(n => n === full[0]);
-      if (best === null || (even === bestEven ? full[0] > bestCount : even)) {
-        best = d;
+      if (best === null || (even === best.even ? full[0] > bestCount : even)) {
+        best = { d, even };
         bestCount = full[0];
-        bestEven = even;
       }
     }
     return best;
   };
-  // Nothing separates anything on line 1, but the lines below are a table:
-  // that line is a title, not a record ("Sales report" over a tab-separated
-  // export, as spreadsheets write). Judging the file by it threw the real
-  // delimiter away and fell back to ',', which made the whole file ONE text
-  // column — silently, since a single field per line is never ragged. Only a
-  // fallback, so a file whose header simply lacks the delimiter its rows use
-  // is still read by its rows, and a file that HAS an answer keeps it.
-  return pick(false) ?? pick(true) ?? ',';
+  // Line 1 is not always a record: spreadsheets export a title above the
+  // header ("Sales report" over a tab-separated file), and judging the file by
+  // it threw the real delimiter away — the whole file then arrived as ONE text
+  // column, silently, since a single field per line is never ragged.
+  //
+  // A delimiter that lines up across every sampled line is still the answer,
+  // title or no title, so that reading is tried first and kept when it is
+  // consistent. Only when it is not — `Sales, report` over a ';' table, where
+  // the title's own comma is the only comma in the file — is the same question
+  // asked of the records alone.
+  const all = pick(false);
+  if (all?.even) return all.d;
+  const body = pick(true);
+  if (body?.even) return body.d;
+  return all?.d ?? body?.d ?? ',';
 }
 
 /**

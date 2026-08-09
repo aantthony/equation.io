@@ -58,10 +58,16 @@ const SYMBOLIC_REDUCTIONS = new Set(['mean', 'total', 'count']);
 /** Reductions that need numeric elements (ordering), so a constant list. */
 const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
 
-/** Whole-plot forms a list can never appear inside. */
-const NO_LIST_INSIDE = new Set([
+/** Whole-plot forms a list can never appear inside. Exported because the
+ *  shape-only checks in defs.ts have to refuse the same ones without the
+ *  bytes, or a filter is valid exactly on the devices that cannot test it. */
+export const NO_LIST_INSIDE = new Set([
   'domain', 'conformal', 'iter', 'tube', '[polygon]', '[segment]', '[square]',
 ]);
+
+/** The name such a call wears in a message: `[polygon]` is written polygon. */
+export const plainFnName = (name: string): string =>
+  (name.startsWith('[') ? name.slice(1, -1) : name);
 
 interface Ctx {
   getList: GetList;
@@ -81,6 +87,14 @@ const isData = (e: Expr): e is Expr & { kind: 'data' } => e.kind === 'data';
 const isText = (e: Expr): e is Expr & { kind: 'text' } => e.kind === 'text';
 /** Any representation of a list of values: expressions, numbers, or text. */
 export const isSeq = (e: Expr): e is Seq => isList(e) || isData(e) || isText(e);
+/**
+ * A scatter of whole columns — `(person.age, person.height)` — kept as one
+ * `vec` of typed arrays rather than one point per row, which is how classify
+ * draws it and the only reason a 200 000-row file plots at all. A list of
+ * values it is not, so it is not a `Seq`; a value a row may NAME it is.
+ */
+export const isDataScatter = (e: Expr): boolean =>
+  e.kind === 'vec' && e.items.some(isData) && e.items.every(it => isData(it) || it.kind === 'num');
 export const seqLength = (e: Seq): number =>
   (e.kind === 'list' ? e.items.length : e.values.length);
 const isRange = (e: Expr): e is Expr & { kind: 'call' } =>
@@ -637,8 +651,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
       }
       if (!args.some(isSeq)) return { kind: 'call', name: e.name, args };
       if (NO_LIST_INSIDE.has(e.name)) {
-        const label = e.name.startsWith('[') ? e.name.slice(1, -1) : e.name;
-        throw new Error(`Lists cannot appear inside ${label}(…).`);
+        throw new Error(`Lists cannot appear inside ${plainFnName(e.name)}(…).`);
       }
       // Scalar builtins map elementwise: sin(L), atan2(L, M), min(L, 5).
       const fn = EVAL_FNS[e.name];

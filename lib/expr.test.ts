@@ -452,13 +452,14 @@ describe('text', () => {
       .toMatchObject({ name: '[index]' });
   });
 
-  it('refuses a ";" inside text', () => {
-    // The URL joins rows with ';' and percent-encodes the quotes, so nothing
-    // in the payload distinguishes this from a separator: the row would come
-    // back split. Refusing it here keeps the "a row never contains a bare ;"
-    // invariant that decodePayload relies on.
-    expect(() => parseExpr('p[p.city = "a;b"]')).toThrow(/separates rows/);
-    expect(() => parseExpr('t = open("sales;2026.csv")')).toThrow(/separates rows/);
+  it('keeps a ";" inside text, because the link codec now can', () => {
+    // This used to be refused: the payload joins rows with ';' and encodes the
+    // quotes, so nothing in it told a data semicolon from a separator and the
+    // row came back split. lib/link.ts encodes a row's own semicolons twice,
+    // so text is text — see the round-trip test in link.test.ts.
+    expect(parseExpr('"a;b"')).toMatchObject({ kind: 'str', value: 'a;b' });
+    expect(parseExpr('p[p.city == "a;b"]', undefined, new Set(['p'])))
+      .toMatchObject({ name: '[index]' });
   });
 });
 

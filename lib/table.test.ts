@@ -134,16 +134,19 @@ describe('open() rows', () => {
     expect(scanDefinition(text)).toMatchObject({ name: 'p', file: 'sales _final_.csv' });
   });
 
-  it('writes a file name a LINK can read back', () => {
-    // `;` separates rows in the payload, and the payload percent-encodes the
-    // quotes — so a `;` in the name is indistinguishable from the separator
-    // by the time the link comes back, and the row returns split in two.
-    expect(rowSafeFileName('sales;2026.csv')).toBe('sales_2026.csv');
+  it('writes a file name a LINK can read back, semicolon and all', () => {
+    // The name used to lose its `;` at ingest: the payload joins rows with
+    // that character and encodes the quotes, so the row came back split in
+    // two. The codec tells the two apart now (lib/link.ts), so the file keeps
+    // the name it was saved under — which is also the name the row must say,
+    // or re-dropping the same file would not match it.
+    expect(rowSafeFileName('sales;2026.csv')).toBe('sales;2026.csv');
     const text = formatTableRow('p', 'sales;2026.csv', '');
+    expect(text).toBe('p = open("sales;2026.csv")');
     expect(decodePayload(encodePayload([text, 'y = p.v']))).toEqual([text, 'y = p.v']);
-    // And a hand-typed one is refused rather than silently lost on reload.
-    expect(scanDefinition('p = open("a;b.csv")')).toBeNull();
-    expect(badTableRow('p = open("a;b.csv")')).toMatch(/separates rows/);
+    // …and a hand-typed one is a table row like any other.
+    expect(scanDefinition('p = open("a;b.csv")')).toMatchObject({ kind: 'table', file: 'a;b.csv' });
+    expect(badTableRow('p = open("a;b.csv")')).toBeNull();
   });
 
   it('needs a hash long enough to name one file', () => {
@@ -616,6 +619,20 @@ describe('data that is not on this device', () => {
     expect([...build([...rows, 'adults = person[person.age >= 18]'], null).errors]).toEqual([]);
   });
 
+  it('refuses a list inside a whole-plot call the same way on both devices', () => {
+    // `domain(…)`, `iter(…)`, `tube(…)` and the geometry statements take a
+    // whole plot, not a list, and list.ts says so the moment the bytes are
+    // here. Judged by shape alone the call looked like any other mapping
+    // over a list, so the filter was device-local (valid!) without the file
+    // and an error with it — the one thing this path exists to prevent.
+    for (const fn of ['domain', 'conformal', 'iter', 'tube']) {
+      const cut = [...rows, `adults = person[${fn}(person.age) > 0]`];
+      const message = `Lists cannot appear inside ${fn}(…).`;
+      expect([...build(cut, null).errors]).toEqual([['adults', message]]);
+      expect([...build(cut).errors]).toEqual([['adults', message]]);
+    }
+  });
+
   it('names the file on the filtered definition, not only on its source', () => {
     // `adults` was the one row in the chain that said nothing: `person` asked
     // for the file and every use of `adults` did too, but the cut itself
@@ -710,6 +727,28 @@ describe('naming a column, or arithmetic over one', () => {
     const { defs, errors } = build([...rows, 'who = person.name']);
     expect([...errors]).toEqual([]);
     expect(defs.lists.get('who')).toMatchObject({ kind: 'text' });
+  });
+
+  it('names a scatter of two columns, and it is still a scatter', () => {
+    // `P = (person.age, person.height)` was read as a named POINT — two
+    // scalars — so the columns were stored as its components and the row died
+    // with "List in scalar context". The typed-array zip is the whole reason a
+    // 200 000-row file draws, and naming it must not spend that.
+    const defRows = [...rows, 'P = (person.age, person.height)'];
+    const { defs, errors } = build(defRows);
+    expect([...errors]).toEqual([]);
+    expect(defs.points.has('P')).toBe(false);
+    expect(listNamesOf(defs).has('P')).toBe(true);
+    const plot = classify(lowerRow('P', defRows), new Set()).plot as
+      { type: string; dim: number; coords: Float64Array[] };
+    expect(plot.type).toBe('dscatter');
+    expect(plot.coords.map(c => [...c])).toEqual([[36, 41, 29], [1.7, 1.82, 1.65]]);
+    // An alias of one is one, and three columns still name a 3D cloud.
+    expect(classify(lowerRow('Q', [...defRows, 'Q = P']), new Set()).plot.type).toBe('dscatter');
+    const c3 = [...rows, 'C = (person.age, person.height, person.age)'];
+    expect(classify(lowerRow('C', c3), new Set()).plot).toMatchObject({ type: 'dscatter', dim: 3 });
+    // …while a pair of numbers is a named point, exactly as before.
+    expect(build(['A = (1, 2)']).defs.points.has('A')).toBe(true);
   });
 });
 

@@ -11,8 +11,21 @@ import { splitStatements } from './statements.ts';
 
 const LINK_UNSAFE = /[()!'*]/g;
 
+/**
+ * A `;` a row means — `people[people.city == "a;b"]`, a file named
+ * `sales;2026.csv` — encodes to the same three characters as the separator
+ * between rows, and the reader has to accept `%3B` as a separator because
+ * clients hand it back that way. Encoded once, the two were indistinguishable
+ * and the row came back split in half. So the one inside a row is encoded
+ * TWICE: `%3B` in a payload is always a separator, `%253B` is always data.
+ *
+ * (Text that literally reads `%3B` encodes the same way and comes back as
+ * `;`. Nothing else collides, and no graph has ever been written that way.)
+ */
 const encodeRow = (text: string): string =>
-  encodeURIComponent(text).replace(LINK_UNSAFE, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  encodeURIComponent(text)
+    .replace(LINK_UNSAFE, c => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+    .replace(/%3B/gi, '%253B');
 
 export function encodePayload(texts: string[]): string {
   return texts.filter(t => t.trim()).map(t => encodeRow(t.trim())).join(';');
@@ -24,16 +37,16 @@ export function encodePayload(texts: string[]): string {
  * The separator survives in either spelling. We emit a literal `;`, but a
  * round trip through the address bar, a copy, or a chat client can hand it
  * back as `%3B`, and a payload that no longer separates renders as one row
- * containing a `;` — which then fails to parse. Equations never contain a bare
- * `;` (it is only the row separator, as llms.txt states), so normalizing the
- * encoded form is unambiguous.
+ * containing a `;` — which then fails to parse. A row's own semicolons are
+ * encoded twice (see encodeRow), so `%3B` here can only be a separator.
  *
  * Rows are then decoded exactly once. Decoding the whole payload up front
  * instead would also un-escape any other `%`-sequence before the split, so a
- * row is decoded here and never again.
+ * row is decoded here and never again — and the second `%3B` a data semicolon
+ * was wrapped in survives that single decode, to be read back here.
  */
 export function decodePayload(payload: string): string[] {
   return splitStatements(payload.replace(/%3B/gi, ';'))
-    .map(s => decodeURIComponent(s))
+    .map(s => decodeURIComponent(s).replace(/%3B/gi, ';'))
     .filter(s => s.trim());
 }

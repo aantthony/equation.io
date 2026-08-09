@@ -89,6 +89,11 @@ describe('delimiter sniffing', () => {
     // Only a fallback: a file whose header IS a record keeps that answer,
     // even where the rows hold commas of their own.
     expect(sniffDelimiter('name;price\nada;1,500\nbob;2,250\n')).toBe(';');
+    // …and "is a record" means lines up with the others, not merely contains
+    // one. A title with a comma in it (`Sales, report`) is still a title, and
+    // trying the records is what finds the ';' underneath it.
+    expect(sniffDelimiter('Sales, report\nname;age\nada;3\nbob;4\n')).toBe(';');
+    expect(sniffDelimiter('Sales, report\nname\tage\nada\t3\nbob\t4\n')).toBe('\t');
   });
 });
 

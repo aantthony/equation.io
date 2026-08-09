@@ -391,6 +391,16 @@ that would break.**
   name, and `createLeaf` refuses it in any text literal. Copilot reported this
   only as an MCP-surface nuisance (`create_graph` rejects rows containing
   `;`); the link corruption underneath it was the real finding.
+
+  **Reversed 2026-08-09, tenth pass.** Refusing the character never stopped
+  the corruption: a row that fails to parse is still written to the URL, so
+  `p[p.city == "a;b"]` came back as two broken rows anyway — the guard only
+  moved the damage one step later. And the ambiguity was resolvable, just not
+  in the reader: a row's own semicolons are now encoded TWICE (`%253B`), so
+  `%3B` in a payload is always a separator and `%253B` is always data. With
+  the codec honest, all three guards are gone and text is text — a city, a
+  category, a file named `sales;2026.csv`. llms.txt states the double
+  encoding, since it is the spec other tools write links against.
 - **Brackets inside text skewed the editor's split.** `open("a(b.csv");y = 2
   x` merged into one row, because the `(` in the name left the scan at depth
   one and the separator never fired. `splitStatements` now tracks

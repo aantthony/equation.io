@@ -18,12 +18,13 @@ Format:
 - Percent-encode each equation (JavaScript `encodeURIComponent`), then
   additionally escape ( ) ! ' * as %28 %29 %21 %27 %2A — chat apps cut
   auto-linked URLs at bare parentheses, silently truncating the graph.
-- Encoded equations are joined with `;`. Never put a literal `;` inside an
-  equation; it is only the row separator. Quoted text is not an exception —
-  the payload encodes the quotes too, so a `;` in a file name or a compared
-  value is indistinguishable from a separator when the link is read back.
-  The app strips it from dropped file names, and rows containing one are
-  rejected.
+- Encoded equations are joined with `;`, and that literal `;` is only ever the
+  row separator (a reader also accepts `%3B` there, since clients re-encode
+  it). A `;` that belongs to an equation — inside quoted text, like
+  `p[p.city == "a;b"]` or `open("sales;2026.csv")` — is encoded TWICE, as
+  `%253B`, so the two can never be confused: the payload encodes the quotes
+  too, and a singly-encoded one comes back as a row separator, splitting the
+  equation in half.
 - Every equation gets its own row and color. Definitions (constants,
   functions, coordinate fields) are rows too — order does not matter.
 - `/g/` links unfurl with a rendered preview image (og:image) in chat apps
@@ -151,7 +152,9 @@ demand instead of living in a tool description. No authentication required.
 - Data columns: with `person = open("people.csv", 3a7f9c1d2e4b)` in a row
   above (see Definitions), `person.age` is a list of that column's numbers.
   Everything lists can do applies: `(person.age, person.height)` is a
-  scatter, `mean(person.age)` a readout, `person.age[2]` one value. Only the
+  scatter, `mean(person.age)` a readout, `person.age[2]` one value. Naming
+  works throughout — `half = person.age / 2`, `P = (person.age, person.height)`
+  — and a named scatter is still a scatter. Only the
   device that dropped the file has its data — the link carries the file's
   name and hash, not its bytes.
 - Filters keep the elements a comparison selects: `L[L > 2]`,
