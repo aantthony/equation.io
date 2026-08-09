@@ -309,7 +309,9 @@ demand instead of living in a tool description. No authentication required.
   Filters above). Size: a column and constant arithmetic over it (`col/2`,
   `sin(col)`, `(a, b)`, reductions, `hist`) stay a single array and plot to
   200 000 rows; combining a column with t, a slider, or a comparison needs
-  one expression per row and is capped at 100 000. A three-column scatter
+  one expression per row, and a row may build 100 000 of those in total —
+  so `col t` reaches 100 000 rows, and each further mapped operation over
+  the result spends its length again. A three-column scatter
   (`(p.x, p.y, p.z)`) draws in 3D, where each point is a sprite, so it is
   capped at 10 000 and says so rather than drawing part of the file — filter
   it first, or plot two of the columns.

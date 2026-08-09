@@ -110,20 +110,25 @@ export function parseRecords(text: string, delimiter: string): string[][] {
   let field = '';
   let quoted = false;
   let started = false; // this record has at least one field
+  let explicit = false; // …written as syntax: a quote or a delimiter
   const endField = () => {
     row.push(field);
     field = '';
     started = true;
+    explicit = true;
   };
   const endRow = () => {
     if (started) {
       row.push(field);
-      // A line of nothing but the delimiter's absence (one empty field) is blank.
-      if (!(row.length === 1 && row[0].trim() === '')) out.push(row);
+      // A line holding nothing is blank and dropped — but `""` is a record of
+      // one empty field, written deliberately, and so is anything with a
+      // delimiter in it. Only whitespace with no syntax at all is nothing.
+      if (explicit || !(row.length === 1 && row[0].trim() === '')) out.push(row);
     }
     row = [];
     field = '';
     started = false;
+    explicit = false;
   };
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
@@ -146,6 +151,7 @@ export function parseRecords(text: string, delimiter: string): string[][] {
       field = '';
       quoted = true;
       started = true;
+      explicit = true;
       continue;
     }
     if (c === delimiter) {

@@ -38,6 +38,16 @@ describe('record grammar (RFC 4180)', () => {
     expect(sniffDelimiter('a,b\n1,2\n')).toBe(',');
   });
 
+  it('keeps a record written as an empty quoted field', () => {
+    // `""` is a deliberate empty value; only a line with no syntax at all is
+    // a blank line. Dropping it lost a row and a missing value with it.
+    expect(parseRecords('v\n""\n1\n', ',')).toEqual([['v'], [''], ['1']]);
+    expect(parseCsv('v\n""\n1\n').rows).toBe(2);
+    // Truly blank lines are still dropped.
+    expect(parseRecords('a\n1\n\n2\n', ',')).toEqual([['a'], ['1'], ['2']]);
+    expect(parseRecords('a\n1\n   \n2\n', ',')).toEqual([['a'], ['1'], ['2']]);
+  });
+
   it('refuses a quoted field that never closes', () => {
     // The rest of the file would become one cell, so every row after the
     // stray quote is silently wrong — the file is nearly always truncated.

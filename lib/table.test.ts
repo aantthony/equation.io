@@ -15,7 +15,7 @@ import {
 } from './defs.ts';
 import { type Expr, evaluate, freeVars, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
-import { lowerLists } from './list.ts';
+import { type Seq, lowerLists, seqLength } from './list.ts';
 import { classify } from './plot.ts';
 
 const PEOPLE = 'name,age,height\nada,36,1.70\nbob,41,1.82\ncy,29,1.65\n';
@@ -35,10 +35,11 @@ function lowerRow(text: string, defRows: string[], tables: TableSource | null = 
   const { defs, errors } = build(defRows, tables);
   expect([...errors]).toEqual([]);
   const consts = evalConstEnv(defs, 0);
+  const listNames = listNamesOf(defs);
   const e = resolveExpr(
-    parseExpr(text, new Set(defs.fns.keys()), listNamesOf(defs)),
+    parseExpr(text, new Set(defs.fns.keys()), listNames),
     n => defs.fns.get(n),
-    { consts },
+    { consts, isList: n => listNames.has(n) },
   );
   return lowerLists(lowerGeom(e, () => null, () => null), listGetter(defs), { consts });
 }
@@ -242,6 +243,40 @@ describe('a scatter of three columns', () => {
     expect(c.plot).toMatchObject({ type: 'dscatter', dim: 3 });
     expect(c.needs3D).toBe(true);
     expect(classify(lowerRow('(person.age, person.height)', rows)).needs3D).toBe(false);
+  });
+});
+
+describe('the expression budget', () => {
+  const column = (n: number): TableSource =>
+    () => parseCsv('v\n' + Array.from({ length: n }, (_, i) => i + 1).join('\n') + '\n');
+  const rows = ['big = open("big.csv")'];
+
+  it('lets one mapped operation reach the documented 100 000', () => {
+    // Charging both the expansion and its result halved this: `col t` used
+    // to fail at 50 001 rows against a stated limit of 100 000.
+    expect(seqLength(lowerRow('big.v t', rows, column(100000)) as Seq)).toBe(100000);
+    expect(() => lowerRow('big.v t', rows, column(100001))).toThrow(/only 100000 can be combined/);
+  });
+
+  it('spends the budget again for each further mapped operation', () => {
+    // Documented in llms.txt as a per-row budget, not a row count.
+    expect(seqLength(lowerRow('big.v t + 1', rows, column(50000)) as Seq)).toBe(50000);
+    expect(() => lowerRow('big.v t + 1', rows, column(60000)))
+      .toThrow(/too many list elements/);
+  });
+});
+
+describe('differentiating a list', () => {
+  it('says it cannot, rather than answering 0', () => {
+    // Derivatives expand at resolve time, before list.ts substitutes, so the
+    // list is still a bare name and diff() reads it as a constant.
+    expect(() => lowerRow('d/dt L', ['L = [sin(t), t^2]'])).toThrow(/L is a list/);
+    expect(() => lowerRow('d/dx L', ['L = [sin(t), t^2]'])).toThrow(/cannot differentiate one/);
+    // A column is a list too.
+    expect(() => lowerRow('d/dx person.age', [`person = open("people.csv", ${HASH})`]))
+      .toThrow(/is a list/);
+    // Ordinary derivatives are untouched.
+    expect(evaluate(lowerRow('d/dx x^2', []), { x: 3 })).toBe(6);
   });
 });
 
@@ -475,6 +510,10 @@ describe('data that is not on this device', () => {
     expect(defs.missingData.get('avg')).toMatchObject({ list: false });
     expect(listNamesOf(defs).has('ages')).toBe(true);
     expect(listNamesOf(defs).has('avg')).toBe(false);
+    // Both still report the file wherever they are used: the flag decides how
+    // the name parses, not whether a row gets a straight answer.
+    expect(() => listGetter(defs)('avg')).toThrow(MissingDataError);
+    expect(() => listGetter(defs)('ages')).toThrow(MissingDataError);
     // So a filter over the scalar is refused here exactly as it is there.
     const shape = 'person[…] needs a comparison, like person[person.x > 0].';
     expect(build([...rows, 'avg = mean(person.age)', 'adults = person[avg > 30]'], null)

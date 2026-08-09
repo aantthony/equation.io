@@ -149,7 +149,7 @@ export function analyze(texts: string[]): Analysis {
   const boundVals = { ...constEnv };
   for (const name of animatedConstNames(defs)) delete boundVals[name];
   for (const name of defs.states.keys()) delete boundVals[name];
-  const ropts = { consts: boundVals, boundConsts: built.sumBoundConsts };
+  const ropts = { consts: boundVals, boundConsts: built.sumBoundConsts, isList: (n: string) => listNames.has(n) };
 
   // Random variables next, so P(…) and bare-expression rows can reference
   // them regardless of row order.

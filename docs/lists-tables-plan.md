@@ -98,9 +98,9 @@ As planned:
 - **Definition kind**: `person = open("people.csv", hash)` matches CONST_RE;
   `scanDefinition` recognizes the `open(` head and emits a new
   `{ kind: 'table' }` definition, resolved against the file store.
-- **Ingest**: drop anywhere (canvas or panel), paste CSV text, or file
-  picker. Read → parse → hash → persist → append `name = open(...)` row
-  named from the sanitized filename stem.
+- **Ingest**: drop anywhere (canvas or panel), or the file picker — pasting
+  CSV *text* was dropped, see above. Read → parse → hash → persist → append
+  `name = open(...)` row named from the sanitized filename stem.
 - **CSV parser** (lib, pure): RFC-4180 — quoted fields, escaped quotes,
   CRLF, embedded commas/newlines — plus delimiter sniffing (`,` `;` `\t`)
   and BOM stripping. Header row → column keys sanitized to identifiers
@@ -331,6 +331,35 @@ nothing is a dead end.
   file-delete button has a name beyond `✕`; and the MCP preview no longer
   reports "no plot rows to draw" for a graph whose every plot row reads a
   local file, which contradicted its own `preview_omits`.
+
+### Fifth pass
+
+- **`d/dx` over a list answered 0.** Derivatives expand at resolve time,
+  before list.ts substitutes, so `L = [sin(t), t^2]` then `d/dt L`
+  differentiated `L` as an opaque name and quietly became zero. `ResolveOpts`
+  carries an `isList` predicate now and the expansion refuses, naming the
+  list. (Elementwise differentiation would mean reordering the pipeline; the
+  wrong answer was the thing worth removing.)
+- **`durable` was reported before the transaction committed**, and the blob
+  write was never observed at all — so an abort after the metadata `put`
+  succeeded would still have claimed the file was saved. `withStores` waits
+  for `oncomplete`.
+- **`""` is a record, not a blank line.** `parseCsv('v\n""\n1\n')` reported
+  one row and lost a missing value; RFC CSV distinguishes an empty physical
+  line from a record holding an empty quoted field.
+- **A missing scalar keeps its provenance too.** Last round's `list` flag
+  gated the error as well as the parsing, so `avg = mean(person.age)` then
+  `avg + 1` said "unknown variable". The flag decides how a name parses;
+  every recorded name reports its file.
+- **`hist(L, 2.5)` is refused rather than rounded to 3** — an index in the
+  same position already refuses a fraction.
+- **The 100 000 budget was half that in practice.** `expand` charged for the
+  elements and the consumer charged again for the result, so `col t` failed
+  at 50 001 rows. Expansion is free now (it is separately bounded), so one
+  mapped operation reaches the documented number; llms.txt says plainly that
+  each further operation spends its length again.
+- The phase-2 notes claimed pasting CSV text was an ingest path, three
+  paragraphs after recording that it was dropped.
 
 ## Testing
 

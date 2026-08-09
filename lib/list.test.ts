@@ -21,7 +21,9 @@ function lowerRow(text: string, defRows: string[] = []): Expr {
   const { defs } = defsOf(defRows);
   const consts = evalConstEnv(defs, 0);
   const getFn = (n: string) => defs.fns.get(n);
-  let e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNamesOf(defs)), getFn, { consts });
+  const listNames = listNamesOf(defs);
+  let e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), getFn,
+    { consts, isList: n => listNames.has(n) });
   e = lowerGeom(e, () => null, n => defs.mats.get(n) ?? null);
   return lowerLists(e, listGetter(defs), { consts });
 }
@@ -172,6 +174,14 @@ describe('reductions build a balanced tree', () => {
     expect(evaluate(lowerRow('mean([1..4] t)'), { t: 2 })).toBe(5);
     expect(evaluate(lowerRow('min([3,1,2] t)'), { t: 1 })).toBe(1);
     expect(evaluate(lowerRow('max([3,1,2] t)'), { t: 1 })).toBe(3);
+  });
+});
+
+describe('hist bins', () => {
+  it('refuses a fraction rather than rounding it', () => {
+    expect(() => lowerRow('hist([1,2,3,4], 2.5)')).toThrow(/whole number of bins; that is 2.5/);
+    expect(() => lowerRow('hist([1,2,3,4], 1)')).toThrow(/2 to 500/);
+    expect(lowerRow('hist([1,2,3,4], 2)')).toMatchObject({ kind: 'call', name: '[hist]' });
   });
 });
 

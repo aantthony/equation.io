@@ -1119,7 +1119,7 @@ function recompileAll() {
   } catch { /* a broken definition; bounds using it will report the error */ }
   for (const name of animatedConstNames(defs)) delete constVals[name];
   for (const name of defs.states.keys()) delete constVals[name];
-  const ropts = { consts: constVals, boundConsts: sumBoundNames };
+  const ropts = { consts: constVals, boundConsts: sumBoundNames, isList: (n: string) => listNames.has(n) };
 
   // Random-variable rows resolve before plot rows so P(…) and bare
   // expressions can reference them regardless of row order.

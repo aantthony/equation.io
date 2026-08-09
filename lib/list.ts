@@ -113,9 +113,16 @@ function expand(e: Expr, ctx: Ctx): Expr {
   if (n > ITEMS_MAX) {
     throw new Error(`That is ${n} values; only ${ITEMS_MAX} can be combined with sliders, t, or comparisons.`);
   }
-  return listOf(isText(e)
-    ? e.values.map((value): Expr => ({ kind: 'str', value }))
-    : [...e.values].map(num), ctx);
+  // Bounded by the check above, and NOT charged against the row's budget:
+  // whatever consumes this list charges for the list it builds, and counting
+  // both halved the usable size of the one operation the docs quote
+  // (`col * t` failed at 50 001 rows against a stated limit of 100 000).
+  return {
+    kind: 'list',
+    items: isText(e)
+      ? e.values.map((value): Expr => ({ kind: 'str', value }))
+      : [...e.values].map(num),
+  };
 }
 
 /**
@@ -564,7 +571,12 @@ function lower(e: Expr, ctx: Ctx): Expr {
         const [arg, binsArg] = args;
         if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
         const bins = binsArg === undefined ? null
-          : Math.round(constVal(binsArg, ctx, 'The number of bins', true));
+          : constVal(binsArg, ctx, 'The number of bins', true);
+        if (bins !== null && !Number.isInteger(bins)) {
+          // Rounding would change what the row means without saying so, and
+          // an index in the same position refuses a fraction outright.
+          throw new Error(`hist(…) takes a whole number of bins; that is ${bins}.`);
+        }
         if (bins !== null && (bins < 2 || bins > 500)) {
           throw new Error('hist(…) takes 2 to 500 bins.');
         }

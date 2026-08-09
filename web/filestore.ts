@@ -107,11 +107,27 @@ async function withStore<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) =>
   return withStores(mode, tx => fn(tx.objectStore(STORE)));
 }
 
+/**
+ * Run `fn` against a transaction over both stores, resolving to null if
+ * anything goes wrong.
+ *
+ * A write waits for the transaction to COMMIT, not merely for its requests to
+ * report success: a later request in the same transaction can still abort it,
+ * and until oncomplete fires nothing is durable. Callers that promise the
+ * bytes will be there after a reload depend on that distinction.
+ */
 async function withStores<T>(mode: IDBTransactionMode, fn: (tx: IDBTransaction) => Promise<T>): Promise<T | null> {
   const db = await openDb();
   if (!db) return null;
   try {
-    return await fn(db.transaction([STORE, BLOBS], mode));
+    const tx = db.transaction([STORE, BLOBS], mode);
+    const committed = mode === 'readonly' ? Promise.resolve() : new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
+    });
+    const result = await fn(tx);
+    await committed;
+    return result;
   } catch {
     return null;
   }
@@ -209,7 +225,9 @@ export async function ingest(rawName: string, bytes: Uint8Array): Promise<Loaded
   // Ask for durable storage the first time the user actually keeps data here.
   navigator.storage?.persist?.().catch(() => {});
   const written = await withStores('readwrite', async tx => {
-    tx.objectStore(BLOBS).put({ hash, bytes } satisfies StoredBytes);
+    // Both awaited: an unobserved blob failure would abort the transaction
+    // after the metadata "succeeded", and the file would be reported durable.
+    await request(tx.objectStore(BLOBS).put({ hash, bytes } satisfies StoredBytes));
     await request(tx.objectStore(STORE).put(rec));
     return true;
   });

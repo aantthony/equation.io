@@ -189,8 +189,12 @@ export function listGetter(defs: Defs): GetList {
   return name => {
     const hit = defs.lists.get(name);
     if (hit) return hit;
+    // Any name whose definition wanted an absent file reports the file —
+    // being a list or not decides how the name PARSES (indexing, filters),
+    // not whether a row using it gets a straight answer. Without this
+    // `avg = mean(person.age)` then `avg + 1` says "unknown variable".
     const absent = defs.missingData.get(name);
-    if (absent?.list) throw new MissingDataError(absent.message);
+    if (absent) throw new MissingDataError(absent.message);
     const dot = name.indexOf('.');
     if (dot <= 0) {
       // A data file is not a value on its own: it is where columns live.
@@ -462,7 +466,15 @@ function numeratorWrap(n: Expr): { order: number; wrap: (x: Expr) => Expr } | nu
  *  float32 roundoff — plots evaluate the expanded expression on the GPU. */
 const FD_H = 1e-4;
 
-function applyDiff(e: Expr, v: string, order: number): Expr {
+function applyDiff(e: Expr, v: string, order: number, isList?: (n: string) => boolean): Expr {
+  // A list is still just a name at this point, and diff() treats an unknown
+  // name as a constant — so differentiating one would answer 0 for every
+  // element. Say it cannot be done rather than answer wrongly.
+  const list = isList && [...freeVars(e)].find(isList);
+  if (list) {
+    throw new Error(`${list} is a list, and d/d${v} cannot differentiate one`
+      + ` — write the derivative of its elements, like [d/d${v} f(${v}), …].`);
+  }
   for (let k = 0; k < order; k++) {
     try {
       e = diff(e, v);
@@ -485,7 +497,7 @@ function applyDiff(e: Expr, v: string, order: number): Expr {
  * multiplication binds tighter than '/', so `d/dx expr` parses as
  * d / (dx · expr): the operand is the tail of the denominator's product chain.
  */
-function matchDeriv(numr: Expr, den: Expr): Expr | null {
+function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts): Expr | null {
   const head = numeratorWrap(numr);
   if (!head) return null;
   const factors: Expr[] = [];
@@ -498,7 +510,7 @@ function matchDeriv(numr: Expr, den: Expr): Expr | null {
   if (!dx || dx.order !== head.order || factors.length === 0) return null;
   let operand = factors[0];
   for (let k = 1; k < factors.length; k++) operand = { kind: 'bin', op: '*', a: operand, b: factors[k] };
-  return head.wrap(applyDiff(operand, dx.v, head.order));
+  return head.wrap(applyDiff(operand, dx.v, head.order, opts?.isList));
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -508,6 +520,12 @@ export interface ResolveOpts {
   consts?: Record<string, number>;
   /** Out: constant names referenced by Σ/Π bounds (their sliders snap to integers). */
   boundConsts?: Set<string>;
+  /**
+   * Whether a name is a list. Derivatives expand HERE, before list.ts
+   * substitutes, so without this `d/dt L` differentiates `L` as an opaque
+   * variable and quietly becomes 0.
+   */
+  isList?: (name: string) => boolean;
 }
 
 interface Ctx {
@@ -907,14 +925,16 @@ function rx(e: Expr, ctx: Ctx): Expr {
       const a = rx(e.a, ctx);
       const b = rx(e.b, ctx);
       if (e.op === '/') {
-        const d = matchDeriv(a, b);
+        const d = matchDeriv(a, b, ctx.opts);
         if (d) return d;
       }
       if (e.op === '*' && a.kind === 'bin' && a.op === '/') {
         // The parenthesized form (d/dx)(expr): the quotient is bare.
         const head = numeratorWrap(a.a);
         const dx = dxOrder(a.b);
-        if (head && dx && head.order === dx.order) return head.wrap(applyDiff(b, dx.v, head.order));
+        if (head && dx && head.order === dx.order) {
+          return head.wrap(applyDiff(b, dx.v, head.order, ctx.opts.isList));
+        }
       }
       return { kind: 'bin', op: e.op, a, b };
     }
@@ -994,7 +1014,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   // Numeric values of constants resolved so far: Σ/Π bounds in later
   // definitions may use them (bounds need a value at expansion time).
   const numEnv: Record<string, number> = {};
-  const ropts: ResolveOpts = { consts: numEnv, boundConsts: new Set() };
+  const ropts: ResolveOpts = {
+    consts: numEnv,
+    boundConsts: new Set(),
+    // Live: list names accumulate as definitions are processed.
+    isList: n => listNamesOf(defs).has(n),
+  };
 
   const parsed = new Map<string, Expr>();
   // List names accumulate in definition order, so `L[2]` indexes only when
