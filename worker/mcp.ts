@@ -101,9 +101,14 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
   // Two equations in one string is a mistake worth naming — but a `;` inside
   // quoted text (`p[p.city == "a;b"]`, a file named `sales;2026.csv`) is data,
   // and the splitter is what tells them apart. It is also what the app and the
-  // link codec use, so all three agree on where a row ends.
+  // link codec use, so all three agree on where a row ends. It splits on line
+  // breaks too, so the message names what a row holds rather than a character
+  // that may not be in it.
   const bad = texts.find(t => splitStatements(t).length > 1);
-  if (bad) throw new Error(`Row "${bad}" contains ';' — send each equation as its own array item.`);
+  if (bad) {
+    throw new Error(`Row ${JSON.stringify(bad)} holds more than one equation`
+      + " (';' and line breaks each separate rows) — send each as its own array item.");
+  }
   const analysis = analyze(texts);
   const plotRows = analysis.rows.filter(r => r.cls);
   const needs3D = plotRows.some(r => r.cls!.needs3D);

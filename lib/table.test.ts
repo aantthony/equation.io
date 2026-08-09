@@ -9,7 +9,7 @@ import {
   formatTableRow,
   freeTableName,
   isListName,
-  isSliceIndex,
+  indexIssue,
   listGetter,
   listNamesOf,
   nameTaken,
@@ -47,7 +47,7 @@ function lowerRow(text: string, defRows: string[], tables: TableSource | null = 
   const ropts = {
     consts,
     isList: (n: string) => isListName(listNames, n),
-    isSlice: (idx: Expr) => isSliceIndex(idx, defs),
+    indexIssue: (idx: Expr) => indexIssue(idx, defs),
   };
   const e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), n => defs.fns.get(n), ropts);
   return lowerLists(lowerGeom(e, () => null, () => null), listGetter(defs), ropts);
@@ -403,6 +403,32 @@ describe('a reduction over a whole column', () => {
     expect(val('count(g.a)')).toBe(3);
   });
 
+  it('skips them on the symbolic path too, one slider along', () => {
+    // A column crossed with t or a slider stops being a typed array and
+    // becomes one expression per element — each gap now an expression holding
+    // NaN, which folded straight into the answer: `mean(g.a)` was 2 and
+    // `mean(g.a t)` was NaN, for the same column and the same rule. The
+    // representation a row happens to be in cannot decide what it means.
+    const src = store({ 'g.csv': 'a,b\n1,10\n,20\n3,30\n' });
+    const defs = [`g = open("g.csv", ${HASH})`, 'k = 2'];
+    const val = (text: string) => evaluate(lowerRow(text, defs, src), { t: 1 });
+    expect(val('mean(g.a t)')).toBe(2);
+    expect(val('total(g.a t)')).toBe(4);
+    expect(val('min(g.a t)')).toBe(1);
+    expect(val('max(g.a t)')).toBe(3);
+    expect(val('median(g.a k)')).toBe(4);
+    expect(val('stdev(g.a k)')).toBeCloseTo(2 * Math.SQRT2, 12);
+    expect(values(lowerRow('sort(g.a k)', defs, src))).toEqual([2, 6]);
+    expect(val('count(g.a t)')).toBe(3); // still how many rows there are
+    // hist told the same story: it drops non-finite values off a typed array,
+    // and refused the whole row ("not finite") one slider away.
+    const bars = (text: string) => lowerRow(text, defs, src) as Expr & { kind: 'call' };
+    const counts = (e: Expr & { kind: 'call' }) => [...(e.args[1] as Expr & { kind: 'data' }).values];
+    expect(counts(bars('hist(g.a k, 2)'))).toEqual(counts(bars('hist(g.a, 2)')));
+    // A list with no gaps in it is untouched by any of this.
+    expect(evaluate(lowerRow('mean(L t)', ['L = [1, 2, 3]']), { t: 2 })).toBe(4);
+  });
+
   it('says so when a filter has left it nothing to reduce', () => {
     const src = store({ 'g.csv': 'a,b\n1,1\n,2\n' });
     const defs = [`g = open("g.csv", ${HASH})`, 'late = g[g.b > 1]'];
@@ -484,6 +510,11 @@ describe('filters', () => {
     expect(values(lowerRow('p.age[p.age != 30]', rows, src))).toEqual([40]);
     expect(values(lowerRow('p.age[p.age == 30]', rows, src))).toEqual([30]);
     expect(values(lowerRow('p.age[p.age > 0]', rows, src))).toEqual([30, 40]);
+    // …including against text, where the mixed-type answer ("a number is not
+    // a string") was returned before either side was asked about gaps, so
+    // `!=` kept exactly the rows it was written to exclude.
+    expect(values(lowerRow('p.age[p.age != "unknown"]', rows, src))).toEqual([30, 40]);
+    expect(() => lowerRow('p.age[p.age == "unknown"]', rows, src)).toThrow(/keeps nothing/);
   });
 
   it('drops a missing TEXT cell from every test too', () => {
@@ -657,10 +688,34 @@ describe('data that is not on this device', () => {
     const names = listNamesOf(defs);
     const e = resolveExpr(parseExpr('person.age[person.age]', new Set(), names), () => undefined, {
       isList: (n: string) => names.has(n),
-      isSlice: (idx: Expr) => isSliceIndex(idx, defs),
+      indexIssue: (idx: Expr) => indexIssue(idx, defs),
     });
-    expect(() => lowerLists(e, listGetter(defs), { isSlice: idx => isSliceIndex(idx, defs) }))
+    expect(() => lowerLists(e, listGetter(defs), { indexIssue: idx => indexIssue(idx, defs) }))
       .toThrow(/Slicing/);
+  });
+
+  it('refuses a filter no list reaches, with the file and without it', () => {
+    // The other half of the same question. `person.age[1 < 2]` IS a
+    // comparison, so it was not a slice — but no list reaches it, so it
+    // decides one answer for every element. With the bytes it died deep in
+    // lowering ("Cannot evaluate an inequality"); without them the column
+    // threw for its file first and the row was reported merely device-local,
+    // which is the shared-link-valid / author-broken split all over again.
+    const rows = [`person = open("people.csv", ${HASH})`];
+    for (const idx of ['1 < 2', 'mean(person.age) > 0', 'person.age[1] > 0']) {
+      for (const tables of [store(), null]) {
+        expect(() => lowerRow(`person.age[${idx}]`, rows, tables), `${idx} ${!!tables}`)
+          .toThrow(/has to test the list itself/);
+      }
+    }
+    // A whole-plot call over a list is refused on both devices too, as it is
+    // for a whole-table filter, and the honest shapes still work.
+    for (const tables of [store(), null]) {
+      expect(() => lowerRow('person.age[domain(person.age) > 0]', rows, tables))
+        .toThrow(/Lists cannot appear inside domain/);
+    }
+    expect(values(lowerRow('person.age[person.age > 30]', rows))).toEqual([36, 41]);
+    expect(lowerRow('person.age[1]', rows)).toMatchObject({ kind: 'num', value: 36 });
   });
 
   it('carries through a NAMED list, so the row below still reports the file', () => {

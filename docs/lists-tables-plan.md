@@ -28,10 +28,14 @@ adults = person[person.age >= 18]  # derived table
 cannot live in the URL, but its identity can. `open("people.csv", a1b2c3d4e5f6)`
 names bytes by SHA-256 prefix; the bytes live in IndexedDB. On another device
 the row fails loud — *"people.csv (a1b2c3…) isn't on this device — drop the
-file here"* — and dropping a matching file heals it. Dropping a same-named
-file with a different hash offers to rewrite the hash in the row (precedent:
-sliders, drag write-back, `view(...)` rows are all two-way bound). A shared
-graph never silently renders against different data than its author saw.
+file here"* — and dropping a matching file heals it. A row with no hash yet
+gets one written back the moment its file is found (precedent: sliders, drag
+write-back, `view(...)` rows are all two-way bound); a row already pinned to a
+DIFFERENT hash keeps it, and the newly dropped bytes arrive as a row of their
+own (revised in the fifth pass — silently repointing an existing pin is the
+substitution the pin exists to prevent, and it would happen to whoever opened
+a shared graph and picked their own file of the same name). A shared graph
+never silently renders against different data than its author saw.
 
 **Zero runtime deps stays true.** Own RFC-4180 CSV parser, `crypto.subtle`
 for hashing, raw IndexedDB.
@@ -416,11 +420,11 @@ that would break.**
   something. Worth noting that neither branch of this message had a test; both
   do now.
 
-One thing the fix does not do: a `;` typed into text is refused with an error,
-but the row is still written to the URL verbatim (as every unparseable row
-is), so reloading that link still splits it. Prevention lives at ingest, where
-the app controls the name; for a hand-typed one the guarantee is only that you
-are told immediately, while the text is still on screen.
+One thing the fix did not do — and the reason it was replaced in the tenth
+pass: a `;` typed into text was refused with an error, but the row is still
+written to the URL verbatim (as every unparseable row is), so reloading that
+link split it anyway. Being told immediately, while the text is still on
+screen, was never the same as the link surviving.
 
 ### Seventh pass
 

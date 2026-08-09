@@ -26,7 +26,7 @@ import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, in
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
-import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
+import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 
 export type Definition =
@@ -333,16 +333,29 @@ function staysList(e: Expr, defs: Defs): boolean {
 const isComparison = (e: Expr): e is Expr & { kind: 'ineq' | 'call' } =>
   e.kind === 'ineq' || (e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]'));
 
+/** A comparison that decides the same answer for every element is not a
+ *  filter, whatever it mentions — `L[1 < 2]`, `L[mean(L) > 0]`, `L[L[1] > 0]`. */
+const DEAD_FILTER = 'A filter has to test the list itself, like L[L > 2]'
+  + ' — this one answers the same for every element.';
+
 /**
- * Whether `L[idx]` is a slice rather than an element or a filter — the other
- * half of the `[…]` syntax, and the same reasoning as checkFilterShape below.
- * list.ts settles it by lowering, which needs the bytes; asked of the shape
- * alone it is settled identically on a device that has not got the file, so
- * `person.age[person.age]` is refused everywhere instead of passing as
- * "device-local" in a shared link and failing for the author.
+ * What is wrong with the index in `L[idx]`, judged by shape alone — or null.
+ * The other half of the `[…]` syntax from checkFilterShape below, and the same
+ * reasoning: list.ts settles these by lowering, which needs the bytes, and a
+ * question answered only where the file is makes a link valid on one device
+ * and broken on the next. So `person.age[person.age]` is a slice everywhere,
+ * and `person.age[1 < 2]` is a dead filter everywhere, rather than reported as
+ * merely device-local in a shared link and refused for the author.
  */
-export const isSliceIndex = (idx: Expr, defs: Defs): boolean =>
-  staysList(idx, defs) && !isComparison(idx);
+export function indexIssue(idx: Expr, defs: Defs): string | null {
+  const inside = wholePlotOverList(idx, defs);
+  if (inside) return `Lists cannot appear inside ${inside}(…).`;
+  if (!isComparison(idx)) return staysList(idx, defs) ? SLICE : null;
+  const operands = idx.kind === 'ineq'
+    ? ineqComparisons(idx).flatMap(c => [c.l, c.r])
+    : idx.args;
+  return operands.some(a => staysList(a, defs)) ? null : DEAD_FILTER;
+}
 
 /**
  * A whole-plot form with a list inside it — `domain(person.age)`, and the
@@ -655,11 +668,12 @@ export interface ResolveOpts {
    */
   isList?: (name: string) => boolean;
   /**
-   * Whether `L[idx]` is a slice: an index that is a list and not a mask.
-   * A shape question, so list.ts asks it before it lowers anything — see
-   * isSliceIndex.
+   * What is wrong with `L[idx]` judged by SHAPE alone — a slice, a filter no
+   * list reaches, a whole-plot call over one — or null if nothing is. Asked
+   * before list.ts lowers anything, because lowering needs the bytes and the
+   * answer must not: see indexIssue.
    */
-  isSlice?: (idx: Expr) => boolean;
+  indexIssue?: (idx: Expr) => string | null;
 }
 
 interface Ctx {
@@ -1156,7 +1170,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
     boundConsts: new Set(),
     // Live: list names accumulate as definitions are processed.
     isList: n => isListName(listNamesOf(defs), n),
-    isSlice: idx => isSliceIndex(idx, defs),
+    indexIssue: idx => indexIssue(idx, defs),
   };
 
   const parsed = new Map<string, Expr>();

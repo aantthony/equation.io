@@ -15,7 +15,7 @@ import {
   listGetter,
   listNamesOf,
   isListName,
-  isSliceIndex,
+  indexIssue,
   MissingDataError,
   nameTaken,
   resolveExpr,
@@ -164,7 +164,7 @@ export function analyze(texts: string[]): Analysis {
     consts: boundVals,
     boundConsts: built.sumBoundConsts,
     isList: (n: string) => isListName(listNames, n),
-    isSlice: (idx: Expr) => isSliceIndex(idx, defs),
+    indexIssue: (idx: Expr) => indexIssue(idx, defs),
   };
 
   // Random variables next, so P(…) and bare-expression rows can reference

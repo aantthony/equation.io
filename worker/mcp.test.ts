@@ -179,6 +179,27 @@ describe('mcp endpoint', () => {
     expect(out.preview).toBe('attached');
   });
 
+  it('names what a joined row actually holds, semicolon or line break', async () => {
+    // Two equations in one string is worth catching, and `splitStatements` is
+    // what the app and the link codec use to decide where a row ends — but it
+    // splits on line breaks too, so the message may not blame a character the
+    // row does not contain.
+    for (const joined of ['y = x; y = 2', 'y = x\ny = 2']) {
+      const { body } = await rpc('tools/call', {
+        name: 'create_graph',
+        arguments: { equations: [joined] },
+      });
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0].text).toMatch(/holds more than one equation/);
+    }
+    // …and a row whose semicolon is inside text is one equation, not two.
+    const { body: ok } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['p = open("a;b.csv", a1b2c3d4e5f6)'] },
+    });
+    expect(ok.result.isError).toBeUndefined();
+  });
+
   it('keeps a semicolon inside text, through the link and back', async () => {
     // The row means the ';'. Refusing it did not save the graph — an invalid
     // row is written to the URL like any other — so the link came back cut in

@@ -13,7 +13,7 @@ import {
   listGetter,
   listNamesOf,
   isListName,
-  isSliceIndex,
+  indexIssue,
   nameTaken,
   shadowedFnNames,
   resolveExpr,
@@ -187,10 +187,17 @@ const MAX_DROPS = 12;
 /** Above this many points, a typed-array list draws as a bulk cloud rather
  *  than as individual (outlined, hoverable) points. */
 const CLOUD_MIN = 400;
-/** Most points a 3D cloud may hold. render3d has no instanced path — every
- *  point is a sprite it sorts and projects — so a 3-column scatter is capped
- *  where a flat one is not, and says so rather than drawing part of the file. */
+/** Most points a cloud may hold in a 3D scene. render3d has no instanced path
+ *  — every point is a sprite it sorts and projects — so a cloud is capped
+ *  there where a flat one is not, and says so rather than drawing part of the
+ *  file. The scene, not the row, is what decides: a 2-column scatter goes down
+ *  the same sprite path as soon as any row uses z. */
 const CLOUD_3D_MAX = 10_000;
+
+/** Points a row would put in a 3D scene, either representation: a typed-array
+ *  scatter, or the symbolic point list a slider or t expands one into. */
+const cloudPoints = (plot: Classified['plot']): number =>
+  (plot.type === 'dscatter' ? plot.coords[0].length : plot.type === 'plist' ? plot.pts.length : 0);
 const TUBE_SEGMENTS = 24;
 
 /**
@@ -600,10 +607,11 @@ function render() {
         case 'expect':
           break; // 2D-only plots (densities, flows, sequences, planar figures); skipped in 3D scenes
         case 'dscatter': {
-          // One sprite per point (see CLOUD_3D_MAX); the row is rejected at
-          // compile time if there are more than that, so nothing is dropped
-          // here. A gap in ANY coordinate skips the point — an unplaced z
-          // would otherwise reach projection and depth sorting as NaN.
+          // One sprite per point (see CLOUD_3D_MAX); any row with more than
+          // that is rejected at compile time — flat clouds included, since
+          // they reach this path too whenever the scene is 3D — so nothing is
+          // dropped here. A gap in ANY coordinate skips the point: an unplaced
+          // z would otherwise reach projection and depth sorting as NaN.
           const [xs, ys, zs] = plot.coords;
           for (let k = 0; k < xs.length; k++) {
             const z = zs ? zs[k] : 0;
@@ -1134,7 +1142,7 @@ function recompileAll() {
     consts: constVals,
     boundConsts: sumBoundNames,
     isList: (n: string) => isListName(listNames, n),
-    isSlice: (idx: Expr) => isSliceIndex(idx, defs),
+    indexIssue: (idx: Expr) => indexIssue(idx, defs),
   };
 
   // Random-variable rows resolve before plot rows so P(…) and bare
@@ -1372,11 +1380,11 @@ function recompileAll() {
       // count: crossing a column with a slider or t expands the same cloud
       // into a symbolic plist, which is if anything the more expensive one
       // (every point re-evaluated per frame).
-      const cloud3d = eq.cls.plot.type === 'dscatter' && eq.cls.plot.dim === 3
-        ? eq.cls.plot.coords[0].length
-        : eq.cls.plot.type === 'plist' && eq.cls.plot.dim === 3 ? eq.cls.plot.pts.length : 0;
-      if (cloud3d > CLOUD_3D_MAX) {
-        throw new Error(`A 3D cloud draws at most ${CLOUD_3D_MAX} points; that is ${cloud3d}.`
+      const plot = eq.cls.plot;
+      if ((plot.type === 'dscatter' || plot.type === 'plist') && plot.dim === 3
+        && cloudPoints(plot) > CLOUD_3D_MAX) {
+        throw new Error(`A 3D cloud draws at most ${CLOUD_3D_MAX} points;`
+          + ` that is ${cloudPoints(eq.cls.plot)}.`
           + ' Filter it first, or plot two of the columns.');
       }
       eq.parsed = parsed;
@@ -1393,6 +1401,21 @@ function recompileAll() {
       // "…is not on this device": the row is one file away from working, and
       // saying so is only half an answer without a way to supply it.
       eq.needsFile = e instanceof MissingDataError;
+    }
+  }
+  // …and a 2D cloud costs the same once ANYTHING makes the scene 3D: the
+  // renderer sends every scatter through the sprite path there, z = 0 and
+  // all, so a 200 000-point CSV beside one `z = …` row is 200 000 projected,
+  // depth-sorted sprites. Whether the scene is 3D is only known once every
+  // row has classified, which is why this waits for the loop to finish.
+  if (equations.some(eq => eq.cls && !eq.error && eq.cls.needs3D)) {
+    for (const eq of equations) {
+      if (!eq.cls || eq.error) continue;
+      const points = cloudPoints(eq.cls.plot);
+      if (points <= CLOUD_3D_MAX) continue;
+      eq.cls = undefined;
+      eq.error = `This graph is 3D, where every point is a sprite: at most ${CLOUD_3D_MAX},`
+        + ` and this row has ${points}. Filter it, or drop the row that uses z.`;
     }
   }
   rvSys.prune(); // sample caches of variables that no longer exist

@@ -294,6 +294,12 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
       // A blank cell is text's NaN (csv.ts stores it as ""), so it fails
       // every test including `!=` — the same rule the numeric side follows.
       if ((l.kind === 'str' && !l.value) || (r.kind === 'str' && !r.value)) return false;
+      // …and a numeric gap on the other side is still a gap: comparing a
+      // missing age against text kept the row precisely when the test was
+      // `!=`, which is the test written to exclude something.
+      for (const side of [l, r]) {
+        if (side.kind !== 'str' && Number.isNaN(evaluate(side, env))) return false;
+      }
       const same = l.kind === 'str' && r.kind === 'str' && l.value === r.value;
       return cond.name === '[eq]' ? same : !same;
     }
@@ -336,6 +342,32 @@ function maskValues(mask: Expr, opts: ResolveOpts): boolean[] | null {
     }
     return holds(cond, env);
   });
+}
+
+/**
+ * Whether an element carries a missing cell. A gap is stored as NaN, and NaN
+ * poisons every operation it reaches, so an expression holding one IS the
+ * gap however much arithmetic has been mapped over the column since — which
+ * is what lets the symbolic path drop the same elements the typed-array path
+ * never looked at. Nothing else puts a NaN literal in an expression: it
+ * cannot be typed.
+ */
+function holdsGap(e: Expr): boolean {
+  switch (e.kind) {
+    case 'num': return Number.isNaN(e.value);
+    case 'data': return e.values.some(Number.isNaN);
+    case 'neg': return holdsGap(e.a);
+    case 'bin': return holdsGap(e.a) || holdsGap(e.b);
+    case 'call': return e.args.some(holdsGap);
+    case 'vec':
+    case 'list': return e.items.some(holdsGap);
+    case 'eq': return holdsGap(e.l) || holdsGap(e.r);
+    case 'ineq': return holdsGap(e.l) || holdsGap(e.r);
+    case 'piecewise':
+      return e.cases.some(c => holdsGap(c.cond) || holdsGap(c.value))
+        || (e.otherwise ? holdsGap(e.otherwise) : false);
+    default: return false;
+  }
 }
 
 /** Numeric values of a constant list, for order-dependent reductions. */
@@ -411,14 +443,22 @@ function fold(items: readonly Expr[], join: (a: Expr, b: Expr) => Expr): Expr | 
   return level[0];
 }
 
-function reduce(name: string, items: readonly Expr[], ctx: Ctx): Expr {
+function reduce(name: string, all: readonly Expr[], ctx: Ctx): Expr {
   // `count` asks how many, not what they are — it never looks inside an
   // element, so a list of points answers it as readily as a list of numbers.
-  if (name === 'count') return num(items.length);
-  if (items.some(it => it.kind === 'vec')) {
+  if (name === 'count') return num(all.length);
+  if (all.some(it => it.kind === 'vec')) {
     throw new Error(`${name}(…) over a list of points is not supported yet.`);
   }
+  // Gaps leave the same way they leave a typed array (reduceData) — the rule
+  // cannot depend on which representation the column happens to be in.
+  // `mean(person.age)` skipped the missing cells; `mean(person.age t)`, one
+  // slider away, folded them in and answered NaN.
+  const items = all.filter(it => !holdsGap(it));
   const n = items.length;
+  if (!n) {
+    throw new Error(`${name}(…) has no values to work with — every cell there is missing.`);
+  }
   switch (name) {
     case 'total':
     case 'mean': {
@@ -518,14 +558,17 @@ function histogram(xs: Float64Array, bins: number | null, ctx: Ctx): Expr {
   return histBars(centers, counts, width, ctx);
 }
 
-const SLICE = 'Slicing L[a..b] is not supported yet — index one element, like L[1].';
+/** Exported because defs.ts answers the same question without the bytes
+ *  (indexIssue), and the two devices must say the same sentence. */
+export const SLICE = 'Slicing L[a..b] is not supported yet — index one element, like L[1].';
 
 function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
   // Before anything is lowered, because lowering a column whose file is not
   // on this device throws first and would leave this row reported as merely
   // device-local — valid in a shared link, rejected for the author.
-  if (ctx.opts.isSlice?.(idx)) throw new Error(SLICE);
+  const issue = ctx.opts.indexIssue?.(idx);
+  if (issue) throw new Error(issue);
   const low = lower(target, ctx);
   if (!isSeq(low)) {
     const name = target.kind === 'var' ? target.name : 'this';
@@ -612,9 +655,12 @@ function lower(e: Expr, ctx: Ctx): Expr {
         }
         if (args.length > 2) throw new Error('hist(…) takes a list and, optionally, a number of bins.');
         if (isText(arg)) throw new Error('hist(…) counts numbers; that column holds text.');
+        // Gaps go before the values are read, not after: `hist(person.age)`
+        // skips them (histogram drops non-finite values), and one slider
+        // later `hist(person.age k)` refused the whole row as "not finite".
         const xs = isData(arg)
           ? arg.values
-          : Float64Array.from(numericItems(arg.items, ctx, 'hist'));
+          : Float64Array.from(numericItems(arg.items.filter(it => !holdsGap(it)), ctx, 'hist'));
         return histogram(xs, bins, ctx);
       }
       if (e.name === '[eq]' || e.name === '[ne]') {
