@@ -95,12 +95,11 @@ export function sniffDelimiter(text: string): string {
 /**
  * Split text into records of fields (RFC 4180). Blank lines are dropped.
  *
- * `warnings` collects what the grammar had to paper over — today only a
- * quoted field that never closes, which swallows the rest of the file into
- * one cell. That is nearly always a truncated download, and it is the one
- * malformation the parser cannot make obvious by itself.
+ * A quoted field that never closes swallows the rest of the file into one
+ * cell, so it is refused rather than parsed: the file is nearly always
+ * truncated, and every row after the stray quote would be silently wrong.
  */
-export function parseRecords(text: string, delimiter: string, warnings?: string[]): string[][] {
+export function parseRecords(text: string, delimiter: string): string[][] {
   const out: string[][] = [];
   let row: string[] = [];
   let field = '';
@@ -157,7 +156,7 @@ export function parseRecords(text: string, delimiter: string, warnings?: string[
     started = true;
   }
   if (quoted) {
-    warnings?.push('a quoted field never closed — the rest of the file was read as one cell');
+    throw new Error('A quoted field never closed — the file looks truncated.');
   }
   endRow();
   return out;
@@ -198,10 +197,10 @@ export function cellNumber(s: string): number {
 export function parseCsv(text: string): Table {
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const delimiter = sniffDelimiter(text);
-  const warnings: string[] = [];
-  const records = parseRecords(text, delimiter, warnings);
+  const records = parseRecords(text, delimiter);
   if (!records.length) throw new Error('That file has no rows.');
   const header = records[0];
+  const warnings: string[] = [];
 
   const names: string[] = [];
   const used = new Set<string>();

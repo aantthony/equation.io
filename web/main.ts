@@ -1591,16 +1591,10 @@ async function refreshFileMenu() {
   const list = document.getElementById('data-files-list');
   if (!box || !list) return;
   const files = await listFiles();
+  // Nothing to manage until a file is here. Opening the first one is the
+  // "+ csv" link in the panel's bottom row, which is always present.
+  box.hidden = !files.length;
   list.textContent = '';
-  // Shown even when empty: the "+ open a CSV…" button below is the only
-  // pointer-driven way in, and hiding the section hid it from anyone who had
-  // not already guessed that a file can be dropped on the canvas.
-  if (!files.length) {
-    const empty = document.createElement('div');
-    empty.className = 'file-empty';
-    empty.textContent = 'Drop a .csv here to plot its columns.';
-    list.append(empty);
-  }
   for (const f of files) {
     const item = document.createElement('div');
     item.className = 'file-item';
@@ -1629,6 +1623,10 @@ async function refreshFileMenu() {
   add.addEventListener('click', pickDataFiles);
   list.append(add);
 }
+
+// "+ csv" beside github: the way in before any file has been dropped, when
+// the data-files section is not there to hold one.
+document.getElementById('open-csv')?.addEventListener('click', () => pickDataFiles());
 
 /** File picker, for the "drop the file here" row error and the menu. */
 function pickDataFiles() {

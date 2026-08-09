@@ -218,12 +218,16 @@ behaviour rather than tightening an edge:
   produced a row that could not be parsed back; names are sanitized at
   ingest, so the record and the row agree.
 
-Also: an unterminated quoted field warns instead of swallowing the rest of
-the file into one cell; one-argument `min`/`max` get the readout the other
-reductions do; the "data files" section stays visible when empty, because it
-holds the only pointer-driven way to open a file; a value list's 1…n x
-coordinates are cached rather than rebuilt every animated frame; and a file
-named while an IndexedDB read is in flight is asked for when that read lands.
+Also: an unterminated quoted field is refused rather than swallowing the
+rest of the file into one cell (`ingest` parses before it stores, so nothing
+malformed is kept); one-argument `min`/`max` get the readout the other
+reductions do; a value list's 1…n x coordinates are cached rather than
+rebuilt every animated frame; and a file named while an IndexedDB read is in
+flight is asked for when that read lands.
+
+The "data files" section stays hidden until there is a file to manage — what
+it was hiding was the way *in*, so that moved out to a **`+ csv`** link in
+the panel's bottom row beside `github`, which is always there.
 
 ## Testing
 

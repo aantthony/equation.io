@@ -28,13 +28,13 @@ describe('record grammar (RFC 4180)', () => {
     expect(parseRecords('size\n5" pipe\n', ',')).toEqual([['size'], ['5" pipe']]);
   });
 
-  it('warns when a quoted field never closes', () => {
-    // The rest of the file becomes one cell — nearly always a truncated
-    // download, and the one malformation the parse cannot show by itself.
-    const warnings: string[] = [];
-    expect(parseRecords('a,b\n1,"oops\n2,3\n', ',', warnings)).toEqual([['a', 'b'], ['1', 'oops\n2,3\n']]);
-    expect(warnings).toEqual(['a quoted field never closed — the rest of the file was read as one cell']);
-    expect(parseCsv('a,b\n1,"oops\n2,3\n').warnings).toContain(warnings[0]);
+  it('refuses a quoted field that never closes', () => {
+    // The rest of the file would become one cell, so every row after the
+    // stray quote is silently wrong — the file is nearly always truncated.
+    expect(() => parseRecords('a,b\n1,"oops\n2,3\n', ',')).toThrow(/never closed/);
+    expect(() => parseCsv('a,b\n1,"oops\n2,3\n')).toThrow(/looks truncated/);
+    // A quote that opens and closes is still ordinary data.
+    expect(parseRecords('a,b\n1,"ok\nthen"\n', ',')).toEqual([['a', 'b'], ['1', 'ok\nthen']]);
   });
 });
 

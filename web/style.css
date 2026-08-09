@@ -587,7 +587,6 @@ body.file-drag::after {
   white-space: nowrap;
 }
 .file-item code { color: var(--ex-code); font-size: 11px; }
-.file-empty { padding: 2px 4px 2px 14px; color: var(--muted); }
 .file-del, .file-add {
   border: none;
   background: none;
@@ -613,11 +612,20 @@ body.file-drag::after {
   display: flex;
   gap: 10px;
 }
-#panel-links a {
+#panel-links a,
+#panel-links button {
   color: var(--muted);
   text-decoration: none;
 }
-#panel-links a:hover { color: var(--muted-hover); text-decoration: underline; }
+#panel-links button {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+#panel-links a:hover,
+#panel-links button:hover { color: var(--muted-hover); text-decoration: underline; }
 #examples[open] ~ #panel-links { display: none; }
 #examples > summary {
   color: var(--muted);
