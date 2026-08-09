@@ -16,6 +16,7 @@ import {
   listNamesOf,
   isSliceIndex,
   MissingDataError,
+  nameTaken,
   resolveExpr,
   scanDefinition,
   usesIntegral,
@@ -165,8 +166,7 @@ export function analyze(texts: string[]): Analysis {
     getFn,
     ropts,
     constNames,
-    taken: n => defs.lists.has(n) || defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n)
-      || defs.states.has(n) || defs.points.has(n) || defs.mats.has(n) || defs.tables.has(n),
+    taken: n => nameTaken(defs, n),
   });
   const rvNames = builtRVs.names;
   const densityCls = (name: string): Classified => {

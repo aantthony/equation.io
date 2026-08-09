@@ -240,6 +240,22 @@ export function listNamesOf(defs: Defs): Set<string> {
 }
 
 /**
+ * Whether a name is already spoken for — what a `~` row asks before claiming
+ * one. Shared by the app and the worker because it drifted while it was
+ * written out twice, and because it must answer the same on both.
+ *
+ * `missingData` counts. A definition whose file is absent still claims its
+ * name — that is why rows below it report the file rather than "not defined"
+ * — so leaving it out would let `ages ~ Normal(0, 1)` stand next to
+ * `ages = person.age / 2` in a shared link and be rejected as "already
+ * defined" by the one person who has the CSV.
+ */
+export const nameTaken = (defs: Defs, n: string): boolean =>
+  defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n) || defs.states.has(n)
+  || defs.points.has(n) || defs.mats.has(n) || defs.lists.has(n) || defs.tables.has(n)
+  || defs.missingData.has(n);
+
+/**
  * Whether this side of a comparison is still a list by the time the
  * comparison sees it — the question list.ts answers by lowering, asked here
  * of the shape alone, because on a device without the bytes there is nothing

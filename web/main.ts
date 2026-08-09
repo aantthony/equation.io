@@ -12,6 +12,7 @@ import {
   listGetter,
   listNamesOf,
   isSliceIndex,
+  nameTaken,
   nameable,
   resolveExpr,
   scanDefinition,
@@ -1134,9 +1135,7 @@ function recompileAll() {
     getFn,
     ropts,
     constNames,
-    taken: n => defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n)
-      || defs.states.has(n) || defs.points.has(n) || defs.mats.has(n) || defs.lists.has(n)
-      || defs.tables.has(n),
+    taken: n => nameTaken(defs, n),
   });
   rvNames = builtRVs.names;
   const distRows = new Set<Equation>();
@@ -1542,8 +1541,13 @@ async function openDataFiles(files: File[]) {
       added.push(`${loaded.file}: ${pinnedElsewhere} row${pinnedElsewhere === 1 ? '' : 's'}`
         + ' pinned to other bytes kept — delete the hash there to use this file');
     }
+    // Whether the bytes survive a reload is the same news on either path, and
+    // it matters most on this one: a drop that answers "the file is not on
+    // this device" would have to answer it again after every reload.
+    const fragile = loaded.durable ? ''
+      : ' (this browser is not storing files — it will be gone on reload)';
     if (known) {
-      added.push(`${loaded.file} reloaded`);
+      added.push(`${loaded.file} reloaded${fragile}`);
       continue;
     }
     const name = freeTableName(tableNameFor(loaded.file));
@@ -1556,8 +1560,7 @@ async function openDataFiles(files: File[]) {
     if (nums.length >= 2 && loaded.table.rows <= TABLE_MAX_ROWS) {
       addEquation(`(${name}.${nums[0].name}, ${name}.${nums[1].name})`, at + 1);
     }
-    added.push(`${loaded.file}: ${loaded.table.rows} rows as ${name}`
-      + (loaded.durable ? '' : ' (this browser is not storing files — it will be gone on reload)'));
+    added.push(`${loaded.file}: ${loaded.table.rows} rows as ${name}${fragile}`);
   }
   if (!changed) return;
   recompileAll();

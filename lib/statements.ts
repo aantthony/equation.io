@@ -13,7 +13,12 @@
  * Quoted text — file names, column values — is the one token that can hold a
  * bracket, so the scan tracks it: `open("a)b.csv")` must not read as depth
  * zero halfway through. A newline always ends a string, so a half-typed
- * `y = "` cannot swallow the rows below it.
+ * `y = "` cannot swallow the rows below it — and it ends the statement's
+ * brackets with it. An unbalanced bracket at a newline is ambiguous (a
+ * formula wrapped across lines looks exactly like that), but an unclosed
+ * string is not: text never spans a line, so the statement is known broken
+ * and its depth is only open because it is broken. Leaving the depth stranded
+ * would half-recover — `p = open("foo.csv` would still eat every row below.
  *
  * Both quotes count, because both open text in the grammar. `'` is also the
  * prime mark, so it opens text only where a token could start — the same rule
@@ -33,7 +38,10 @@ export function splitStatements(text: string): string[] {
   for (const ch of text.replace(/\r\n?/g, '\n')) {
     const wasPrev = prev;
     prev = ch;
-    if (ch === '\n') quote = null;
+    if (ch === '\n') {
+      if (quote) depth = 0;
+      quote = null;
+    }
     else if (quote) { if (ch === quote) quote = null; cur += ch; continue; }
     else if (ch === '"' || (ch === "'" && !SYMBOL_CHAR.test(wasPrev))) quote = ch;
     else if (ch === '(' || ch === '[' || ch === '{') depth++;

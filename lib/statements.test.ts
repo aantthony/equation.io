@@ -38,6 +38,13 @@ describe('splitStatements', () => {
 
   it('ends a string at the newline so a half-typed quote cannot swallow rows', () => {
     expect(splitStatements('y = "\ny = x')).toEqual(['y = "', 'y = x']);
+    // …including the brackets the string was inside. An unbalanced bracket is
+    // ambiguous (a wrapped formula looks the same), but an unclosed string is
+    // not, so the statement ends whole rather than eating everything below.
+    expect(splitStatements('p = open("foo.csv\ny = x\ny = 2 x'))
+      .toEqual(['p = open("foo.csv', 'y = x', 'y = 2 x']);
+    // A bracket left open on its own still continues, which is the feature.
+    expect(splitStatements('p = open(\ny = x')).toEqual(['p = open( y = x']);
   });
 
   it('tracks single-quoted text too, without eating the prime mark', () => {

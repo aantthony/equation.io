@@ -10,6 +10,7 @@ import {
   isSliceIndex,
   listGetter,
   listNamesOf,
+  nameTaken,
   rowSafeFileName,
   resolveExpr,
   scanDefinition,
@@ -305,6 +306,15 @@ describe('differentiating a list', () => {
     // Ordinary derivatives are untouched.
     expect(evaluate(lowerRow('d/dx x^2', []), { x: 3 })).toBe(6);
   });
+
+  it('says the same about text, instead of the internal "Unreachable"', () => {
+    // A text literal is a leaf diff() had no case for, so it fell off the end
+    // of the switch. The name guard above cannot catch it: a literal has no
+    // free variable to look up.
+    expect(() => lowerRow('d/dx "NYC"', [])).toThrow(/Cannot differentiate text/);
+    expect(() => lowerRow('d/dx sin("NYC")', [])).toThrow(/Cannot differentiate text/);
+    expect(() => lowerRow('d/dx ["a", "b"]', [])).toThrow(/Cannot differentiate a list/);
+  });
 });
 
 describe('a reduction over a whole column', () => {
@@ -489,6 +499,22 @@ describe('data that is not on this device', () => {
     expect([...errors]).toEqual([]);
     expect(defs.tables.get('adults')!.data).toBeNull();
     expect(() => listGetter(defs)('adults.age')).toThrow(MissingDataError);
+  });
+
+  it('holds on to the name, so a random variable cannot take it on one device', () => {
+    // With the file, `ages` is a list and `avg` a constant; without it, both
+    // live only in `missingData`. A `~` row asking whether the name is free
+    // has to get the same answer either way, or the author is the only person
+    // the document is broken for.
+    for (const [name, rhs] of [['ages', 'person.age / 2'], ['avg', 'mean(person.age)']]) {
+      const rows = [`person = open("people.csv", ${HASH})`, `${name} = ${rhs}`];
+      for (const tables of [store(), null]) {
+        expect([nameTaken(build(rows, tables).defs, name), name, !!tables])
+          .toEqual([true, name, !!tables]);
+      }
+    }
+    expect(nameTaken(build([`person = open("people.csv", ${HASH})`], null).defs, 'ages'))
+      .toBe(false);
   });
 
   it('still judges what a filter looks like, so a link is not valid only here', () => {

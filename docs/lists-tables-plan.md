@@ -438,6 +438,40 @@ are told immediately, while the text is still on screen.
 - **`count` over a list of points is 3, not an error.** The point guard ran
   ahead of the reduction switch, but counting never looks inside an element.
 
+### Eighth pass
+
+- **The splitter's string recovery was half a recovery.** A newline ends an
+  unclosed string, but the brackets it was inside stayed open, so
+  `p = open("foo.csv` swallowed every row below it. The distinction that makes
+  the fix principled rather than arbitrary: an unbalanced *bracket* at a
+  newline is ambiguous — a formula wrapped across lines looks exactly like
+  that, and continuing is the feature — while an unclosed *string* is not, so
+  the statement is known broken and its depth is open only because it is. Both
+  now end together; a bare `p = open(` still continues.
+- **A `~` row could claim a name that was taken on the author's device.** The
+  collision predicate read seven maps and not `missingData`, so with the CSV
+  absent `ages = person.age / 2` left `ages` apparently free and
+  `ages ~ Normal(0, 1)` stood — then failed as "already defined" for the one
+  person holding the file. The predicate was also written out twice, in
+  `web/main.ts` and `worker/graph.ts`, in different orders; it is now
+  `nameTaken(defs, n)` in `lib/defs.ts`, one place that can be tested and
+  cannot drift. Third device-parity hole in three rounds, and the second found
+  by the same question: *does this row mean the same thing without the bytes?*
+- **`d/dx sin("NYC")` reported "Unreachable".** `diff()` grew a `list` case
+  when lists arrived and never got `str`/`text`/`data`, so a text leaf fell off
+  the end of the switch into the internal error. The name guard above it cannot
+  help — a literal has no free variable to look up.
+- **Text in arithmetic died as "Incomplete expression."** Found while
+  reproducing the one above: a string token did not end a value, so `"NYC" + 1`
+  read the `+` as a unary sign and left two things on the stack, and `2 "NYC"`
+  never got its implicit multiplication. Both now reach the real answer — text
+  has no numeric value. The right-hand side (`x + "NYC"`) always said so, which
+  is what hid it.
+- **A re-dropped file never mentioned that storage is off.** The `known` branch
+  said only "reloaded" and returned before the durability note. That is the
+  path the "drop the missing file here" message leads to, so the one flow where
+  the warning matters most was the one flow without it.
+
 ## Testing
 
 - lib: parser (ranges, indexing, strings, member), broadcasting incl.

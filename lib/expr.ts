@@ -416,7 +416,8 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
   let dot: Token | null = null;
   let afterValue = false;
   const ends = (t: Token): boolean => t.type === 'number' || t.type === 'symbol'
-    || t.type === 'parenclose' || (t.type === 'operator' && t.str === '!');
+    || t.type === 'parenclose' || t.type === 'string'
+    || (t.type === 'operator' && t.str === '!');
   for (let token of bare) {
     if (token.type === 'symbol' && SYMBOL_ALIASES[token.str]) {
       token = { ...token, str: SYMBOL_ALIASES[token.str] };
@@ -481,8 +482,12 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     // A postfix operator (per the ops table: '!') ends a value, so 5!x and
     // 3!(x+1) multiply implicitly.
     const afterPostfix = last?.type === 'operator' && ops[last.str]?.n === 1 && !ops[last.str].right;
+    // Text is a value like any other here: `2 "NYC"` multiplies and `"NYC" + 1`
+    // adds, so both reach the check that says text has no numeric value.
+    // Without this the '+' reads as a unary sign and the row dies as
+    // "Incomplete expression.", which sends the reader hunting for a typo.
     const afterValue = last !== null && (last.type === 'number' || last.type === 'symbol'
-      || last.type === 'parenclose' || afterPostfix);
+      || last.type === 'parenclose' || last.type === 'string' || afterPostfix);
 
     if (token.type === 'bar') {
       // |x| is abs(x): a bar after a value closes the innermost open bar;
@@ -516,7 +521,9 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     }
 
     let emit = token;
-    if (afterValue && (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen')) {
+    if (afterValue
+      && (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen'
+        || token.type === 'string')) {
       // A column or list indexes under its full name: person.age[2]. Decided
       // BEFORE the function reading and beating it, because a name can be
       // both: a CSV column headed `sin` gives `person.sin`, and `mean` is

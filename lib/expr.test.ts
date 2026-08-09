@@ -413,6 +413,20 @@ describe('text', () => {
     expect(parseExpr('"New York"')).toEqual({ kind: 'str', value: 'New York' });
   });
 
+  it('ends a value, so text in arithmetic parses and then says what is wrong', () => {
+    // Text was not one of the token types that end a value, so `"NYC" + 1`
+    // read the '+' as a unary sign and left two things on the stack. The row
+    // died as "Incomplete expression.", which reads as a typo rather than as
+    // the real answer — text has no numeric value.
+    const text = /Text has no numeric value/;
+    expect(() => evaluate(parseExpr('"NYC" + 1'), {})).toThrow(text);
+    expect(() => evaluate(parseExpr('2 "NYC"'), {})).toThrow(text);
+    expect(() => evaluate(parseExpr('x + "NYC"'), { x: 1 })).toThrow(text);
+    // Where text belongs, nothing changed.
+    expect(parseExpr('p[p.city == "NYC"]', undefined, new Set(['p'])))
+      .toMatchObject({ name: '[index]' });
+  });
+
   it('refuses a ";" inside text', () => {
     // The URL joins rows with ';' and percent-encodes the quotes, so nothing
     // in the payload distinguishes this from a separator: the row would come
