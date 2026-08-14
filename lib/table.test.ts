@@ -838,3 +838,45 @@ describe('tables and the rest of the definition system', () => {
       .toThrow(/120000 values; only 100000 can be combined/);
   });
 });
+
+describe('rules the file cannot change', () => {
+  const rows = [`person = open("people.csv", ${HASH})`];
+
+  // Whether a row is well formed must not depend on whether the bytes are
+  // here, or a shared link previews as valid and fails for its author. These
+  // are decided by the row alone, so they are settled before the column —
+  // which can be absent — is resolved. `null` for tables is the worker.
+  it.each([
+    ['hist(person.age, 1)', /2 to 500 bins/],
+    ['hist(person.age, 0)', /2 to 500 bins/],
+    ['hist(person.age, 501)', /2 to 500 bins/],
+    ['hist(person.age, 2.5)', /whole number of bins/],
+    ['hist(person.age, 4, 9)', /a list and, optionally, a number of bins/],
+  ])('refuses %s with and without the file', (row, message) => {
+    expect(() => lowerRow(row, rows)).toThrow(message);
+    expect(() => lowerRow(row, rows, null)).toThrow(message);
+  });
+
+  it('still draws a well-formed hist, and still defers to the file for it', () => {
+    expect(classify(lowerRow('hist(person.age, 3)', rows)).plot.type).toBe('histogram');
+    // Without the bytes the row is not wrong — it just cannot be drawn here.
+    expect(() => lowerRow('hist(person.age, 3)', rows, null)).toThrow(MissingDataError);
+  });
+});
+
+describe('text in arithmetic', () => {
+  const rows = [`person = open("people.csv", ${HASH})`];
+
+  // The text may be the scalar being broadcast rather than the list: asking
+  // only the lists let this build a list of number-plus-text elements that
+  // classified fine and then drew nothing.
+  it.each(['person.age + "NYC"', '"NYC" + person.age', 'person.age * "x"'])(
+    'refuses %s, as it does every other spelling',
+    row => expect(() => lowerRow(row, rows)).toThrow(/Text has no numeric value/),
+  );
+
+  it('leaves comparisons alone — that is what text is for', () => {
+    expect(values(lowerRow('person.age[person.name == "ada"]', rows))).toEqual([36]);
+    expect(values(lowerRow('person.age + 1', rows))).toEqual([37, 42, 30]);
+  });
+});

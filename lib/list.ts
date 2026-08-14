@@ -248,10 +248,14 @@ function zipN(parts: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
   if (n === null) return build(parts);
   // A mask only ever grows into a longer comparison chain (18 <= a < 65);
   // anything else built from one is arithmetic on a filter. Text is the same
-  // shape of mistake: only a comparison may consume it. (Both lists are
-  // homogeneous, so the first element settles it.)
+  // shape of mistake: only a comparison may consume it. A list is homogeneous
+  // so its first element settles it — but the text can equally be the scalar
+  // being broadcast, and asking only the lists let `person.age + "NYC"` build
+  // a whole list of number-plus-text elements. Nothing downstream can
+  // evaluate one, so the row classified and then drew nothing at all, where
+  // every other spelling of the same mistake says so.
   const masked = parts.some(isMask);
-  const textual = parts.some(p => isList(p) && p.items[0]?.kind === 'str');
+  const textual = parts.some(p => (isList(p) ? p.items[0]?.kind : p.kind) === 'str');
   const items: Expr[] = [];
   for (let k = 0; k < n; k++) {
     const comps = parts.map(p => (isList(p) ? p.items[k] : p));
@@ -639,10 +643,16 @@ function lower(e: Expr, ctx: Ctx): Expr {
     }
     case 'call': {
       if (e.name === '[index]') return lowerIndex(e, ctx);
-      const args = e.args.map(a => lower(a, ctx));
       if (e.name === 'hist') {
-        const [arg, binsArg] = args;
-        if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
+        // How many arguments there are, and what the bin count is, are
+        // questions about the row — not about the file. Asked after the list
+        // is lowered they are never reached on a device without the bytes,
+        // and `hist(person.age, 1)` reads as a valid row there while the
+        // author who has the file is told the bin count is out of range. The
+        // same reasoning as lowerIndex: settle everything the shape decides
+        // BEFORE resolving an operand that can be absent.
+        if (e.args.length > 2) throw new Error('hist(…) takes a list and, optionally, a number of bins.');
+        const binsArg = e.args[1] === undefined ? undefined : lower(e.args[1], ctx);
         const bins = binsArg === undefined ? null
           : constVal(binsArg, ctx, 'The number of bins', true);
         if (bins !== null && !Number.isInteger(bins)) {
@@ -653,7 +663,8 @@ function lower(e: Expr, ctx: Ctx): Expr {
         if (bins !== null && (bins < 2 || bins > 500)) {
           throw new Error('hist(…) takes 2 to 500 bins.');
         }
-        if (args.length > 2) throw new Error('hist(…) takes a list and, optionally, a number of bins.');
+        const arg = e.args[0] === undefined ? undefined : lower(e.args[0], ctx);
+        if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
         if (isText(arg)) throw new Error('hist(…) counts numbers; that column holds text.');
         // Gaps go before the values are read, not after: `hist(person.age)`
         // skips them (histogram drops non-finite values), and one slider
@@ -663,6 +674,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
           : Float64Array.from(numericItems(arg.items.filter(it => !holdsGap(it)), ctx, 'hist'));
         return histogram(xs, bins, ctx);
       }
+      const args = e.args.map(a => lower(a, ctx));
       if (e.name === '[eq]' || e.name === '[ne]') {
         // Equality is a filter test, not a relation to draw: zip it into a
         // mask, which only `[ ]` will accept.
