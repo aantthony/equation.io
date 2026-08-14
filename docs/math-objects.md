@@ -60,7 +60,7 @@ object must respect):
 | `f(x) = …` | function | inlined |
 | definition using x/y (`r = sqrt(x²+y²)`) | coordinate field | grid family (level sets) |
 | `X ~ Normal(m, s)` (also Uniform, Exponential) | random variable | its exact density curve |
-| `Y = X^2`, `S = X1 + X2`, bare `X + Y` (X random) | derived random variable | affine-in-normals: exact pdf (shader); 1–2 base variables: deterministic conditional-CDF curve (quadrature); otherwise sampled density estimate (KDE polyline); μ/σ readout |
+| `Y = X^2`, `S = X1 + X2`, bare `X + Y` (X random) | derived random variable | affine-in-normals: exact pdf (shader); 1–2 base variables: deterministic conditional-CDF curve (quadrature); otherwise sampled density estimate (KDE polyline); μ/σ readout, or median/IQR when the tails make those unstable |
 | `P(X < b)` | probability | shaded area + exact numeric readout |
 | `P(Y > 0.5)`, `P(Y > X)` (derived / joint) | probability | Monte Carlo readout (+ shaded density area when one-variable) |
 

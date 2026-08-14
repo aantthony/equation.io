@@ -841,3 +841,64 @@ describe('conditional-CDF curves (the quadrature tier)', () => {
     sys.resample(0);
   });
 });
+
+describe('atoms vs. the repeats a many-to-one transform makes', () => {
+  // A continuous g that is k-to-1 in the inner variable repeats values — the
+  // ±y pair of Y², the branches of any even function — but only k times per
+  // conditional column, however fine the grid. Pooling those O(1) runs across
+  // all 512 columns used to clear the mass threshold on arithmetic alone.
+  const curveOf = (rhs: string) =>
+    build(['X ~ Uniform(0, 1)', 'Y ~ Normal(0, 1)', `Z = ${rhs}`]).sys.curve('Z', {})!;
+
+  it.each([['max(Y^2, X)'], ['min(Y^2, X)'], ['max(abs(Y), X)'], ['Y^2 + 0X']])(
+    'draws %s as a curve, with no stems',
+    rhs => {
+      const c = curveOf(rhs);
+      expect(c.atoms).toBeUndefined();
+      expect(c.pts.length).toBeGreaterThan(64);
+      // The probability is in the curve, not stranded in stems. What the
+      // drawn area misses is the trimmed tail — the two-variable window keeps
+      // ~0.94 of a singular-peak law, against 0.57 and 0 when these were read
+      // as atoms.
+      let area = 0;
+      for (let i = 0; i + 3 < c.pts.length; i += 2) {
+        area += ((c.pts[i + 1] + c.pts[i + 3]) / 2) * (c.pts[i + 2] - c.pts[i]);
+      }
+      expect(area).toBeGreaterThan(0.9);
+    },
+  );
+
+  it('still finds the point masses a piecewise branch really makes', () => {
+    const c = curveOf('floor(Y) + 0X');
+    expect(c.atoms?.length).toBeGreaterThan(3);
+    expect(c.atoms!.reduce((s, a) => s + a.p, 0)).toBeCloseTo(1, 2);
+    // The atom at 0 is P(0 ≤ Y < 1) ≈ 0.341.
+    expect(c.atoms!.find(a => a.x === 0)!.p).toBeCloseTo(0.341, 2);
+  });
+});
+
+describe('robust readout judges the whole law', () => {
+  it('leaves a bounded mixed law to its exact μ/σ', () => {
+    // 50% at 100, the rest uniform on [0, 0.5]: both moments are exact, and
+    // the median of the continuous branch alone is not this law's median.
+    const { sys } = build(['X ~ Uniform(0, 1)', 'Z = {X > 0.5: 100, X}']);
+    const c = sys.curve('Z', {})!;
+    expect(c.atoms).toEqual([{ x: 100, p: 0.5 }]);
+    expect(c.mean).toBeCloseTo(50.125, 2);
+    expect(c.robust).toBeUndefined();
+  });
+
+  it('still reports median/IQR where the moments do not exist', () => {
+    const { sys } = build(['X ~ Normal(0, 1)', 'Z = 1/(1+X)']);
+    const c = sys.curve('Z', {})!;
+    expect(c.robust).toBeDefined();
+    expect(c.robust!.median).toBeCloseTo(0.71, 1);
+  });
+
+  it('does not call a two-point law unstable', () => {
+    // A rare distant atom collapses the trimmed spread to zero; the moments
+    // are finite all the same.
+    const { sys } = build(['X ~ Uniform(0, 1)', 'Z = {X > 0.999: 1000, 0}']);
+    expect(sys.curve('Z', {})!.robust).toBeUndefined();
+  });
+});

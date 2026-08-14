@@ -624,6 +624,13 @@ function estimateCurve(col: Float64Array): DensityCurve | null {
   for (const x of finite) ss += (x - mean) * (x - mean);
   const sd = Math.sqrt(ss / n);
   const mass = n / col.length;
+  // Whether the moments are trustworthy is a question about the WHOLE law, so
+  // it is asked of the same population `sd` was computed from — before the
+  // atom filter below narrows `finite` to the continuous remainder. Asked of
+  // that remainder instead, a distant atom reads as a collapsed tail: bounded
+  // {X > 0.5: 100, X} has an exact σ, yet would be reported unstable, with the
+  // median of its continuous branch standing in for the law's.
+  const robust = robustIfUnstable(decimate(finite), sd);
 
   // Atoms: exactly repeated values are point masses — a piecewise branch, a
   // floor, a constant — and smearing them into KDE bumps would read as
@@ -648,15 +655,14 @@ function estimateCurve(col: Float64Array): DensityCurve | null {
       finite = finite.filter(x => !atomValues.has(x));
     }
   }
-  if (finite.length < 16) return { pts: [], atoms, mean, sd, mass }; // purely discrete
+  if (finite.length < 16) return { pts: [], atoms, mean, sd, mass, robust }; // purely discrete
   // The continuous part's own count and spread size the estimate below.
   const cn = finite.length;
   // Quantiles from a decimated sort: plenty for a range and bandwidth.
   const sub = Float64Array.from(finite.filter((_, i) => i % Math.ceil(cn / 4096) === 0)).sort();
-  const q = (p: number) => sub[Math.min(sub.length - 1, Math.floor(p * sub.length))];
+  const q = quantileOf(sub);
   const spread = Math.min(sd, (q(0.75) - q(0.25)) / 1.349);
-  if (!(spread > 0)) return { pts: [], atoms, mean, sd, mass }; // no continuous spread to draw
-  const robust = robustIfUnstable(sub, q, sd);
+  if (!(spread > 0)) return { pts: [], atoms, mean, sd, mass, robust }; // no continuous spread
   // 1.4× Silverman's rule. His 0.9 factor is MISE-optimal for i.i.d. draws;
   // measured on these stratified columns, ~1.4× lowers BOTH the sup-error and
   // the curve's residual wobble (second-difference energy ÷2.4) — smoothness
@@ -770,14 +776,29 @@ function estimateCurve(col: Float64Array): DensityCurve | null {
   return { pts, atoms, mean, sd, mass, robust };
 }
 
+/** Quantiles of an already-sorted pool, by nearest rank. */
+const quantileOf = (sorted: ArrayLike<number>) => (p: number): number =>
+  sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+
+/** A sorted sample of at most ~4096 values: plenty for quantiles, and cheap
+ *  enough to take of a full sample column. */
+function decimate(xs: ArrayLike<number>): Float64Array {
+  const step = Math.ceil(xs.length / 4096);
+  const out = new Float64Array(Math.ceil(xs.length / step));
+  for (let i = 0, j = 0; i < xs.length; i += step) out[j++] = xs[i];
+  return out.sort();
+}
+
 /** Robust location/spread when the moments are truncation artifacts: a 1%
  *  trim collapsing the spread severalfold means the tails own the second
- *  moment (or it does not exist at all). Undefined while moments are sound. */
+ *  moment (or it does not exist at all). Undefined while moments are sound.
+ *  The pool must be the whole law, atoms included — the same population `sd`
+ *  came from — or a distant atom reads as a tail that trimming collapsed. */
 function robustIfUnstable(
   sortedPool: ArrayLike<number>,
-  q: (p: number) => number,
   sd: number,
 ): { median: number; iqr: number } | undefined {
+  const q = quantileOf(sortedPool);
   const tlo = q(0.005);
   const thi = q(0.995);
   let n = 0;
@@ -794,7 +815,10 @@ function robustIfUnstable(
   if (!n) return undefined;
   const m = s / n;
   const sdTrim = Math.sqrt(Math.max(s2 / n - m * m, 0));
-  if (sd <= 3 * sdTrim) return undefined;
+  // A trimmed spread of zero is a law concentrated on one value with rare
+  // company (a two-point discrete law, say) — finite moments, nothing to
+  // stabilize, and the ratio below would call every one of them unstable.
+  if (!(sdTrim > 0) || sd <= 3 * sdTrim) return undefined;
   return { median: q(0.5), iqr: q(0.75) - q(0.25) };
 }
 
@@ -822,6 +846,12 @@ const QC_INNER = 512; // inner-variable grid per node
 const QC_SINGLE = 8192; // inner grid for one-variable transforms
 const QC_BINS = 512; // density grid resolution (matches estimateCurve)
 const QC_ZOOM_MAX = 32; // deepest densification of a zoomed rasterization
+/** Share of a conditional column one value must hold before it counts as a
+ *  point mass rather than the repeats a many-to-one g makes (see the run
+ *  scan in conditionalBase). At M = 512 that is a run of 6, comfortably
+ *  above the branch counts real expressions produce and far below the
+ *  fraction any atom worth a stem holds. */
+const ATOM_RUN_FRAC = 0.01;
 
 /** The quantile function of a base distribution at these parameter values,
  *  or null while the parameters are invalid. */
@@ -898,17 +928,41 @@ function conditionalBase(
   const mean = sum / finCount;
   const sd = Math.sqrt(Math.max(sumsq / finCount - mean * mean, 0));
   const mass = finCount / cells;
+  // The robust readout judges the whole law, so its pool keeps the atoms the
+  // continuous pool below drops (see robustIfUnstable).
+  const allPool: number[] = [];
+  const allStride = Math.max(1, Math.floor(finCount / 8192));
+  let allSeen = 0;
+  for (const col of sorted) {
+    for (let j = 0; j < M; j++) {
+      const v = col[j];
+      if (isFinite(v) && allSeen++ % allStride === 0) allPool.push(v);
+    }
+  }
+  allPool.sort((a, b) => a - b);
+  const robust = robustIfUnstable(allPool, sd);
 
-  // Exactly repeated values are point masses (piecewise branches, floor,
-  // constants): pooled across columns, heavy values become stems, and the
-  // continuous CDF below must not carry their jumps.
+  // Repeated values are point masses (piecewise branches, floor, constants):
+  // pooled across columns, heavy values become stems, and the continuous CDF
+  // below must not carry their jumps.
+  //
+  // What makes a run an atom is that it does not thin out as the grid
+  // refines. A continuous many-to-one g repeats values too — the ±y pair of
+  // Y², the branches of any even function — but only ever as many times as it
+  // has branches, so its run is O(1) in M while an atom's run is a FRACTION
+  // of M. Counting every repeat instead pooled those O(1) runs across all 512
+  // columns and cleared the mass threshold on arithmetic alone: max(Y², X)
+  // came out as 121 stems holding 43% of the probability, and Y² + 0X as 256
+  // stems holding all of it, with no curve left to draw.
   const runMass = new Map<number, number>();
   for (const col of sorted) {
     for (let j = 0; j < M; ) {
       const v = col[j];
       let k = j + 1;
       while (k < M && col[k] === v) k++;
-      if (k - j > 1 && isFinite(v)) runMass.set(v, (runMass.get(v) ?? 0) + (k - j) / cells);
+      if ((k - j) / M >= ATOM_RUN_FRAC && isFinite(v)) {
+        runMass.set(v, (runMass.get(v) ?? 0) + (k - j) / cells);
+      }
       j = k;
     }
   }
@@ -938,7 +992,7 @@ function conditionalBase(
       }
     }
   }
-  const partial = { sorted, M, NX, atoms, atomValues, mean, sd, mass };
+  const partial = { sorted, M, NX, atoms, atomValues, mean, sd, mass, robust };
   if (contCount < 16 || !(cmax > cmin)) return { ...partial, window: null };
   const stride = Math.max(1, Math.floor(contCount / 8192));
   const pool: number[] = [];
@@ -950,18 +1004,16 @@ function conditionalBase(
     }
   }
   pool.sort((a, b) => a - b);
-  const q = (p: number) => pool[Math.min(pool.length - 1, Math.floor(p * pool.length))];
-  const robust = robustIfUnstable(pool, q, sd);
+  const q = quantileOf(pool);
   const [wlo, whi] = visualWindow(pool, cmin, cmax);
   const qlo = Math.max(q(0.005), wlo);
   const qhi = Math.min(q(0.995), whi);
   const span = qhi - qlo;
-  if (!(span > 0)) return { ...partial, robust, window: null };
+  if (!(span > 0)) return { ...partial, window: null };
   const hardLo = qlo - cmin <= 0.25 * span;
   const hardHi = cmax - qhi <= 0.25 * span;
   return {
     ...partial,
-    robust,
     window: { lo: hardLo ? cmin : qlo, hi: hardHi ? cmax : qhi, hardLo, hardHi },
   };
 }
@@ -1405,7 +1457,10 @@ export class RVSystem {
    * deterministic.
    */
   resample(salt: number = (Math.random() * 0x100000000) >>> 0): void {
-    if (salt === streamSalt) return;
+    // No early return on an unchanged salt: the salt is module-global (the
+    // streams are shared by name) while these caches are per-system, so a
+    // second system asking for a salt the first already set would keep
+    // columns drawn under the old pairing beside streams drawn under the new.
     streamSalt = salt;
     for (const e of this.cache.values()) {
       delete e.col;
