@@ -49,7 +49,7 @@ import { lowerLists, usesListReduction } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
 import { type Classified, classify } from '../lib/plot.ts';
-import { solveSystem } from '../lib/solve.ts';
+import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
 import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
 import { type StateSystem, advanceState, buildStateSystem, initialState } from '../lib/state.ts';
@@ -128,7 +128,7 @@ interface Equation {
   spCache?: { text: string; env: string; xlo: number; xhi: number; ylo: number; yhi: number; pts: SpecialPoint[] };
   toggleUI?: { box: HTMLElement; btn: HTMLButtonElement };
   /** Cached system solutions for the box and constants they were solved at. */
-  sysCache?: { text: string; env: string; lo: number[]; hi: number[]; pts: number[][] };
+  sysCache?: { residuals: Expr[]; text: string; env: string; lo: number[]; hi: number[]; pts: number[][] };
 }
 
 /**
@@ -561,17 +561,21 @@ function render() {
     const envKey = cls.params.map(p => `${p}=${constEnv[p] ?? 0}`).join(',')
       + (cls.animated ? `,t=${time}` : '');
     const c = eq.sysCache;
-    if (c && c.text === eq.text && c.env === envKey && c.lo.length === dim
+    if (c && c.residuals === residuals && c.text === eq.text && c.env === envKey && c.lo.length === dim
       && vlo.every((v, k) => c.lo[k] <= v && c.hi[k] >= vhi[k] && c.hi[k] - c.lo[k] <= 6 * (vhi[k] - v))) {
       return c.pts;
     }
     const pad = vhi.map((v, k) => 0.25 * (v - vlo[k]));
     const lo = vlo.map((v, k) => v - pad[k]);
     const hi = vhi.map((v, k) => v + pad[k]);
-    const pts = solveSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, {
+    const pts = cls.plot.type === 'system' && cls.plot.parametric
+      ? traceSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, { ...constEnv, t: time }, 256, cls.plot.angular)
+        .flatMap(path => [...path, Array(dim).fill(NaN)])
+      : solveSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, {
       env: { ...constEnv, t: time },
+      angular: cls.plot.type === 'system' ? cls.plot.angular : undefined,
     });
-    eq.sysCache = { text: eq.text, env: envKey, lo, hi, pts };
+    eq.sysCache = { residuals, text: eq.text, env: envKey, lo, hi, pts };
     return pts;
   };
 
@@ -689,6 +693,11 @@ function render() {
           break;
         }
         case 'system':
+          if (plot.parametric) {
+            const pts = solveFor(eq, plot.dim, plot.residuals).flatMap(p => [p[0], p[1], p[2] ?? 0]);
+            scene.curves.push({ pts: new Float32Array(pts), color });
+            break;
+          }
           for (const p of solveFor(eq, plot.dim, plot.residuals)) {
             scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
           }
@@ -944,9 +953,14 @@ function render() {
         case 'system':
           // A 3-unknown system forces the 3D view, so only 2D lands here.
           if (plot.dim === 2) {
-            for (const p of solveFor(eq, 2, plot.residuals)) {
-              extras.points.push({ x: p[0], y: p[1], color: cssColor(color) });
-            }
+            const points = solveFor(eq, 2, plot.residuals);
+            if (plot.parametric) { extras.polylines.push({ pts: points.flat(), color: css }); break; }
+            const set = coordinatePointWriter(eq, plot.coordinates, env);
+            points.forEach((p, i) => {
+              const key = `sys${eq.id}:${i}`;
+              extras.points.push({ x: p[0], y: p[1], color: css, hot: hotPoint === key });
+              if (set) grabs.push({ key, x: p[0], y: p[1], edits: true, set });
+            });
           }
           break;
       }
@@ -1372,8 +1386,8 @@ function recompileAll() {
       parsed = lowerLists(parsed, getList, ropts);
       // Coordinate fields substitute in as functions of the plane, so
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
+      eq.cls = classify(parsed, constNames, fieldEnv);
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
-      eq.cls = classify(parsed, constNames);
       // A 3-column scatter only ever draws in 3D, where every point is a
       // sprite. Say so here rather than plotting the first CLOUD_3D_MAX of a
       // sorted file, which looks like the whole thing. BOTH representations
@@ -2791,6 +2805,13 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       + 'R = midpoint(C, D) - perp(D - C)/2; S = midpoint(D, A) - perp(A - D)/2; '
       + 'polygon(P, Q, R, S)'],
   ]],
+  ['coordinates', [
+    ['polar point (drag it)', 'r = sqrt(x^2+y^2); theta = atan2(y,x); (r, theta) = (2, 0.8)'],
+    ['polar spiral', 'r = sqrt(x^2+y^2); theta = atan2(y,x); (r, theta) = (3u, 6pi u)'],
+    ['polar limit cycle', "r = sqrt(x^2+y^2); theta = atan2(y,x); (r', theta') = (r(1-r), 1)"],
+    ['hyperbolic pair', 'p = x y; q = (x^2-y^2)/2; (p, q) = (1, 0)'],
+    ['complex roots', 'w^3 = 1; 1+2i'],
+  ]],
   ['systems', [
     ['curve intersection', 'x^2 + y^2 = 4; x y = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0)'],
     ['three planes', '(x + y, x - y, z) = (1, 2, 3)'],
@@ -2897,6 +2918,22 @@ function makePairWriter(pairText: string, commit: (pair: string) => void): ((x: 
 }
 
 const pointWriter = (eq: Equation) => makePairWriter(eq.text, p => { eq.text = p; });
+
+/** Evaluate the named coordinates at the pointer before writing the RHS. */
+function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined, env: Record<string, number>) {
+  if (!coords) return null;
+  const at = eq.text.indexOf('=');
+  if (at < 0) return null;
+  const lhs = eq.text.slice(0, at).trim();
+  const write = makePairWriter(eq.text.slice(at + 1), p => { eq.text = `${lhs} = ${p}`; });
+  if (!write) return null;
+  return (x: number, y: number) => {
+    try {
+      const values = coords.map(c => evaluate(c, { ...env, x, y }));
+      if (values.every(Number.isFinite)) write(values[0], values[1]);
+    } catch { /* singular coordinate: keep the previous values */ }
+  };
+}
 
 /** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
 const defPointWriter = (eq: Equation) => {

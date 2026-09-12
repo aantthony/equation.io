@@ -1642,7 +1642,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   const stateRow = (n: string): string => vecOwnerKey.get(n) ?? n;
   for (const [name, deriv] of derivs) {
     try {
-      if (defs.consts.has(name) || defs.fields.has(name)) {
+      if (defs.fields.has(name)) throw new Error(`${name} is a coordinate field — use a tuple flow like (${name}', y') = (F, G).`);
+      if (defs.consts.has(name)) {
         throw new Error(`${name} is already defined as a constant.`);
       }
       const env: Record<string, number> = { t: 0 };

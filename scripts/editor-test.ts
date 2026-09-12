@@ -278,6 +278,21 @@ await scenario('Enter after a collapsed heading expands it', async () => {
   );
 });
 
+await scenario('coordinate point drag persists through the URL', async () => {
+  await load(page, ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
+    '(r, theta) = (2, 0)', 'view(x = -4..4, y = -3..3)']);
+  await page.mouse.move(733.33, 350);
+  await page.mouse.down();
+  await page.mouse.move(616.67, 233.33, { steps: 15 });
+  await page.mouse.up();
+  await page.waitForTimeout(700); // URL writes coalesce during a drag.
+  const rows = await rowTexts(page);
+  check('drag evaluates radius and angle at the pointer', /1\.4\d*, 0\.7\d*/.test(rows[2] ?? ''), String(rows[2]));
+  await page.reload();
+  await page.waitForSelector('.eq-line');
+  check('coordinate drag survives reload', (await rowTexts(page))[2] === rows[2]);
+});
+
 await browser.close();
 server.kill();
 

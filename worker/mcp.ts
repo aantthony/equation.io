@@ -119,7 +119,9 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
   const sliderRow = (name: string) => analysis.rows.find(r =>
     r.def?.kind === 'const' && r.def.name === name && !r.error && SLIDER_NUM_RE.test(r.def.rhs));
   const draggable = (row: (typeof analysis.rows)[number]): boolean | undefined => {
-    const pair = row.cls?.plot.type === 'point'
+    const pair = row.cls?.plot.type === 'system' && row.cls.plot.coordinates
+      ? row.text.slice(row.text.indexOf('=') + 1)
+      : row.cls?.plot.type === 'point'
       ? row.text
       : row.def?.kind === 'const' && analysis.defs.points.has(row.def.name)
         ? row.def.rhs

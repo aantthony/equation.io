@@ -1,5 +1,13 @@
 # Mathematical objects: what renders as what
 
+Implementation update (2026-09-12): coordinate points with angular residuals,
+parametric system continuation, chart flows, complex constants as Argand points,
+complex equations as real systems, and 2D coordinate-point drag writeback are
+implemented. Static previews include system points/curves and direction fields.
+The older inventory below records the original design context, not current
+feature availability. Solving/tracing remains numerical and bounded; exact
+complex-root labels and certified branch completeness are not implemented.
+
 A design survey and plan. It fixes the principle that decides how a row of
 notation becomes a rendered object, inventories the objects we have against
 what comparable tools (Desmos, Wolfram|Alpha) render, and designs the largest

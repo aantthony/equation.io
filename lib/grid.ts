@@ -26,7 +26,7 @@ export interface GridField {
   angular: boolean;
 }
 
-function hasAtan2(e: Expr): boolean {
+export function hasAtan2(e: Expr): boolean {
   switch (e.kind) {
     case 'num':
     case 'var':

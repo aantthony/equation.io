@@ -357,8 +357,8 @@ export function analyze(texts: string[]): Analysis {
       parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
       // Lists broadcast/reduce away (mirror of web/main.ts).
       parsed = lowerLists(parsed, getList, ropts);
+      row.cls = classify(parsed, constNames, fieldEnv);
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
-      row.cls = classify(parsed, constNames);
       row.expr = parsed;
       // A row that wrote an ∫ or a list reduction and resolved to a constant
       // gets its value as a readout (mirror of web/main.ts).

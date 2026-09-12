@@ -419,6 +419,14 @@ describe('draggable points', () => {
     expect(rows[2]).toMatchObject({ kind: 'point', draggable: true });
   });
 
+  it('reports coordinate RHS dragging without making intersection rows draggable', async () => {
+    const rows = await rowsFor(['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
+      '(r, theta) = (2, 0.8)', '(r, theta) = (sqrt(2), pi/4)', '(x, y) = (y, -sin(x))']);
+    expect(rows[2]).toMatchObject({ kind: 'system', draggable: true });
+    expect(rows[3]).toMatchObject({ kind: 'system', draggable: false });
+    expect(rows[4].draggable).toBeUndefined();
+  });
+
   it('marks fully computed points as not draggable', async () => {
     const rows = await rowsFor(['a = 1', '(a+1, 2cos(1))']);
     expect(rows[1]).toMatchObject({ kind: 'point', draggable: false });

@@ -128,6 +128,17 @@ pnpm deploy     # build and deploy to Cloudflare
   `r_2`(, `r_3`), and the bare name draws as a moving point and joins point
   arithmetic — an orbit in two rows
 
+**Custom coordinates and complex roots**
+
+- `r = sqrt(x^2+y^2); theta = atan2(y,x)` defines polar coordinates.
+  `(r, theta) = (2, 9pi/4)` draws their point, with angles wrapping modulo 2π.
+  Use literal or slider values on the right to drag the point in those coordinates.
+- `(r, theta) = (3u, 6pi u)` traces a three-turn spiral;
+  `(r', theta') = (r(1-r), 1)` draws a polar limit-cycle field.
+- `1+2i` draws an Argand point; `w^3 = 1` draws the three cube roots of unity.
+  Systems use a numerical search in the current view; small solution branches
+  may be missed. Coordinate examples are available in the examples menu.
+
 **Matrices**
 
 - `M = [(a, b), (c, d)]` — a 2×2 or 3×3 matrix; `det(M)`, `trace(M)`, the

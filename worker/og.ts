@@ -10,6 +10,7 @@
  */
 import { densityAt, pdfExpr, shadePolygon } from '../lib/dist.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
+import { solveSystem, traceSystem } from '../lib/solve.ts';
 import type { Plot } from '../lib/plot.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
@@ -420,9 +421,42 @@ function renderRow2D(
       shadeScalar(r, sampleField(r, v, compile(expr), env), color);
       return;
     case 'point': {
-      if (expr.kind !== 'vec' || cls.plot.dim !== 2) return;
-      const [px, py] = expr.items.map(c2 => run(compile(c2), env.vars, env.stack));
+      if (cls.plot.dim !== 2) return;
+      const [px, py] = cls.plot.coords.map(c2 => run(compile(c2), env.vars, env.stack));
       drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), 4.5, color);
+      return;
+    }
+    case 'system': {
+      const plot = cls.plot;
+      if (plot.dim !== 2) return;
+      const lo = [v.cx - r.w * v.upp / 2, v.cy - r.h * v.upp / 2];
+      const hi = [v.cx + r.w * v.upp / 2, v.cy + r.h * v.upp / 2];
+      if (plot.parametric) {
+        for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, analysis.constEnv, 256, plot.angular)) {
+          for (let i = 1; i < path.length; i++) {
+            const a = path[i - 1], b = path[i];
+            drawLine(r, toScreenX(r, v, a[0]), toScreenY(r, v, a[1]), toScreenX(r, v, b[0]), toScreenY(r, v, b[1]), color);
+          }
+        }
+      } else {
+        for (const p of solveSystem(plot.residuals, ['x', 'y'], lo, hi, { env: analysis.constEnv, angular: plot.angular })) {
+          drawDisc(r, toScreenX(r, v, p[0]), toScreenY(r, v, p[1]), 4.5, color);
+        }
+      }
+      return;
+    }
+    case 'vfield2d': {
+      const progs = cls.plot.comps.map(compile);
+      for (let sy = 12; sy < r.h; sy += 22) for (let sx = 12; sx < r.w; sx += 22) {
+        env.vars[env.slotX] = v.cx + (sx - r.w / 2) * v.upp;
+        env.vars[env.slotY] = v.cy - (sy - r.h / 2) * v.upp;
+        const dx = run(progs[0], env.vars, env.stack), dy = -run(progs[1], env.vars, env.stack);
+        const length = Math.hypot(dx, dy);
+        if (!(length > 0) || !Number.isFinite(length)) continue;
+        const ux = dx / length, uy = dy / length;
+        drawLine(r, sx - 6 * ux, sy - 6 * uy, sx + 6 * ux, sy + 6 * uy, color, 0.7);
+        drawLine(r, sx + 6 * ux, sy + 6 * uy, sx + 2 * ux - 3 * uy, sy + 2 * uy + 3 * ux, color, 0.7);
+      }
       return;
     }
     case 'pcurve': {
@@ -481,6 +515,25 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
           env.vars[slotU] = i / SEGS; env.vars[slotV] = a / LINES;
           return at();
         });
+      }
+      return;
+    }
+    case 'system': {
+      const p = cls.plot;
+      const radius = Math.max(r.w, r.h) / (2 * v.scale);
+      const vars = p.dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'];
+      const lo = v.target.slice(0, p.dim).map(c => c - radius);
+      const hi = v.target.slice(0, p.dim).map(c => c + radius);
+      const values = Object.fromEntries([...env.slots].map(([name, slot]) => [name, env.vars[slot]]));
+      if (p.parametric) {
+        for (const path of traceSystem(p.residuals, vars, lo, hi, values, 256, p.angular)) {
+          polyline3D(r, v, color, path.length - 1, i => [path[i][0], path[i][1], path[i][2] ?? 0]);
+        }
+      } else {
+        for (const point of solveSystem(p.residuals, vars, lo, hi, { env: values, angular: p.angular })) {
+          const [sx, sy] = project(v, [point[0], point[1], point[2] ?? 0]);
+          drawDisc(r, sx, sy, 4.5, color);
+        }
       }
       return;
     }
@@ -559,7 +612,7 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
   domain2d: 'fallback',
   conformal2d: 'fallback',
   fractal2d: 'fallback',
-  vfield2d: 'fallback',
+  vfield2d: 'draws',
   // The rest of the sequence family (term dots, orbit diagrams) and data
   // lists have no scanline path here yet; the site card beats a blank grid.
   vlist: 'fallback',
@@ -573,7 +626,7 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
   bifurcation: 'fallback',
   // Solution marks require running the numeric solver, which is not wired
   // into this backend yet.
-  system: 'fallback',
+  system: 'draws',
   // Sampled densities run the same lib/dist.ts estimator on the CPU: the
   // curve is a polyline, a shaded P(…) a filled polygon, an E(…) row a
   // vertical mean marker. A readout-only P(…) row (no shade) draws nothing,
@@ -619,6 +672,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
       return cls.plot.dim === 3
         ? null
         : 'the static preview skips 2D rows in a 3D scene; the live app draws them on the z = 0 plane';
+    case 'system':
+      return null;
     case 'implicit2d':
       return 'the static preview skips 2D curves in a 3D scene; the live app extrudes them as vertical sheets';
     default:

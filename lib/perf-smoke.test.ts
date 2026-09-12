@@ -12,6 +12,8 @@ import { describe, expect, test } from 'vitest';
 import { CORPUS, compileRows } from './perfcase.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { diff } from './diff.ts';
+import { traceSystem } from './solve.ts';
+import { classify } from './plot.ts';
 import { buildGridField } from './grid.ts';
 
 const timed = (fn: () => void): number => {
@@ -70,4 +72,16 @@ describe('symbolic paths', () => {
     });
     expect(ms).toBeLessThan(1000);
   });
+});
+
+
+test('polar continuation stays within a 1s smoke budget', () => {
+  const fields = { r: parseExpr('sqrt(x^2+y^2)'), theta: parseExpr('atan2(y,x)') };
+  const p = classify(parseExpr('(r, theta) = (3u, 6pi u)'), new Set(), fields).plot;
+  if (p.type !== 'system') throw new Error('expected system');
+  const ms = timed(() => {
+    const paths = traceSystem(p.residuals, ['x', 'y'], [-4, -4], [4, 4], {}, 256, p.angular);
+    expect(paths.some(p => p.length > 250)).toBe(true);
+  });
+  expect(ms).toBeLessThan(1000);
 });

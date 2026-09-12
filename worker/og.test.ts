@@ -231,3 +231,20 @@ describe('og raster renderer', () => {
     expect(new TextDecoder().decode(png.slice(png.length - 8, png.length - 4))).toBe('IEND');
   });
 });
+
+describe('coordinate and complex previews', () => {
+  const frame = 'view(x = -4..4, y = -4..4)';
+  it('draws an Argand constant at its complex coordinates', () => {
+    const r = renderRaster(['1+2i', frame], 160, 160);
+    expect(pixel(r, 100, 40)[0]).toBeLessThan(150);
+  });
+  it('draws all three roots of unity', () => {
+    const r = renderRaster(['w^3 = 1', frame], 160, 160);
+    for (const [x, y] of [[100, 80], [70, 63], [70, 97]]) expect(pixel(r, x, y)[0]).toBeLessThan(150);
+  });
+  it('draws the spiral across the atan2 branch cut', () => {
+    const r = renderRaster(['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)', '(r, theta) = (3u, 6pi u)', frame], 160, 160);
+    // Radius 2.5 at angle 5pi: (-2.5, 0).
+    expect(Math.min(...pixel(r, 30, 80))).toBeLessThan(150);
+  });
+});

@@ -21,7 +21,7 @@ import { diff } from './diff.ts';
 import { type Expr, evaluate } from './expr.ts';
 
 /** Newton iterations per seed. Converging seeds take well under 20. */
-const MAX_ITER = 24;
+const MAX_ITER = 64;
 /** Step halvings before a seed is abandoned. */
 const MAX_BACKTRACK = 24;
 /** Lattice divisions per axis; 2D can afford a finer net than 3D. */
@@ -34,6 +34,12 @@ export interface SolveOptions {
   env?: Record<string, number>;
   /** Fraction of the box width a solution may sit outside and still count. */
   margin?: number;
+  /** Warm starts, tried before the deterministic lattice. */
+  seeds?: number[][];
+  /** Disable the lattice while following already discovered branches. */
+  lattice?: boolean;
+  /** Coordinate residuals measured modulo 2pi; ordinary equations never wrap. */
+  angular?: boolean[];
 }
 
 /**
@@ -51,6 +57,8 @@ export function solveSystem(
   if (n !== vars.length || (n !== 2 && n !== 3)) return [];
   if (lo.some((v, k) => !(hi[k] > v) || !isFinite(v) || !isFinite(hi[k]))) return [];
 
+  const angular = opts.angular ?? [];
+  const wrap = (v: number) => Math.atan2(Math.sin(v), Math.cos(v));
   const env: Record<string, number> = { ...opts.env };
   const margin = opts.margin ?? 0.05;
 
@@ -79,7 +87,7 @@ export function solveSystem(
     for (let i = 0; i < n; i++) {
       const v = evalAt(residuals[i]);
       if (!isFinite(v)) return false;
-      out[i] = v;
+      out[i] = angular[i] ? wrap(v) : v;
     }
     return true;
   };
@@ -101,7 +109,7 @@ export function solveSystem(
           q[j] = p[j] - h;
           setPoint(q);
           const b = evalAt(residuals[i]);
-          v = (a - b) / (2 * h);
+          v = (angular[i] ? wrap(a - b) : a - b) / (2 * h);
         }
         if (!isFinite(v)) return false;
         out[i][j] = v;
@@ -139,8 +147,11 @@ export function solveSystem(
     for (let it = 0; it < MAX_ITER; it++) {
       if (!jacobianAt(p, J)) return null;
       // Test with J freshly evaluated at p, so the scale matches the point.
-      if (converged(p, r)) return p;
       const step = solveLinear(J, r, n);
+      // A tiny residual alone is misleading near a multiple root (w^3=0).
+      // Require positional convergence as well, otherwise one root becomes
+      // a cloud of apparently distinct solutions.
+      if (converged(p, r) && (!step || norm(step) <= 1e-9 * (1 + norm(p)))) return p;
       if (!step) return null;
       // Backtrack until the residual actually drops.
       let scale = 1;
@@ -160,7 +171,7 @@ export function solveSystem(
       }
       if (!accepted) break; // stalled: either converged or stuck
     }
-    return jacobianAt(p, J) && converged(p, r) ? p : null;
+    return null;
   };
 
   const found: number[][] = [];
@@ -168,18 +179,20 @@ export function solveSystem(
     a.every((v, k) => Math.abs(v - b[k]) <= 1e-7 * (1 + Math.max(Math.abs(v), Math.abs(b[k]))));
 
   const div = LATTICE[n as 2 | 3];
-  const total = div ** n;
-  for (let s = 0; s < total; s++) {
+  const total = opts.lattice === false ? 0 : div ** n;
+  const seeds = opts.seeds ?? [];
+  for (let s = 0; s < total + seeds.length; s++) {
     const seed: number[] = [];
-    let rest = s;
+    const index = s - seeds.length;
+    let rest = index;
     for (let k = 0; k < n; k++) {
       const cell = rest % div;
       rest = Math.floor(rest / div);
       // Cell centre, nudged by a hash of the seed index so seeds do not line
       // up with the symmetry axes that so many systems are built around.
-      seed.push(lo[k] + width[k] * (cell + 0.5 + 0.32 * (hash(s * 3 + k) - 0.5)) / div);
+      seed.push(lo[k] + width[k] * (cell + 0.5 + 0.32 * (hash(index * 3 + k) - 0.5)) / div);
     }
-    const sol = refine(seed);
+    const sol = refine(s < seeds.length ? seeds[s] : seed);
     if (!sol) continue;
     if (sol.some((v, k) => v < lo[k] - margin * width[k] || v > hi[k] + margin * width[k])) continue;
     if (found.some(f => same(f, sol))) continue;
@@ -226,4 +239,36 @@ function hash(i: number): number {
   h = Math.imul(h, 0xc2b2ae35);
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
+}
+
+/** Trace moving constraints with warm starts and periodic branch discovery.
+ * Unmatched or discontinuous branches start a new polyline, never a chord. */
+export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi: number[],
+  env: Record<string, number> = {}, samples = 256, angular: boolean[] = []): number[][][] {
+  const paths: number[][][] = [];
+  let active: number[][][] = [];
+  const scale = Math.hypot(...hi.map((v, k) => v - lo[k]));
+  for (let i = 0; i <= samples; i++) {
+    const seeds = active.map(p => p[p.length - 1]);
+    const discover = i % 32 === 0 || seeds.length === 0;
+    let points = solveSystem(residuals, vars, lo, hi, {
+      env: { ...env, u: i / samples }, angular, seeds, lattice: discover,
+    });
+    if (!discover && points.length < seeds.length) {
+      points = solveSystem(residuals, vars, lo, hi, { env: { ...env, u: i / samples }, angular, seeds: points });
+    }
+    const available = new Set(active);
+    active = points.map(point => {
+      let best: number[][] | undefined;
+      let distance = scale / 16;
+      for (const path of available) {
+        const last = path[path.length - 1];
+        const d = Math.hypot(...point.map((v, k) => v - last[k]));
+        if (d < distance) { distance = d; best = path; }
+      }
+      if (best) { available.delete(best); best.push(point); return best; }
+      const path = [point]; paths.push(path); return path;
+    });
+  }
+  return paths;
 }
