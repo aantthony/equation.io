@@ -33,20 +33,8 @@
   <!-- Root-relative: this page is also served at /g/<equations> share URLs,
        where a relative href would resolve against /g/ and 404. -->
   <link rel="stylesheet" href="/style.css">
-  <script>
-    // Set the theme before first paint so dark users never see a white flash.
-    // main.ts re-applies this (idempotent) and wires up the toggle + OS listener.
-    (function () {
-      try {
-        var s = localStorage.getItem('eq-theme');
-        var dark = s === 'dark' ||
-          (s !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-        document.getElementById('theme-color')
-          .setAttribute('content', dark ? '#171a1f' : '#ffffff');
-      } catch (e) {}
-    })();
-  </script>
+  <!-- Blocking script sets the theme before first paint. -->
+  <script src="/theme.js"></script>
 </head>
 <body>
   <canvas id="gl"></canvas>

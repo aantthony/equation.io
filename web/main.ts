@@ -195,7 +195,10 @@ const overlay = document.getElementById('overlay') as HTMLCanvasElement;
 // would be composited over the page as premultiplied, washing fills white.
 const glCtx = canvas.getContext('webgl2', { antialias: true, alpha: false });
 if (!glCtx) {
-  document.body.innerHTML = '<p style="padding:2em">WebGL2 is required.</p>';
+  const message = document.createElement('p');
+  message.textContent = 'WebGL2 is required.';
+  message.style.padding = '2em';
+  document.body.replaceChildren(message);
   throw new Error('WebGL2 unavailable');
 }
 const gl = glCtx;
