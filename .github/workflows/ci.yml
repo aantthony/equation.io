@@ -23,8 +23,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Security audit
+        run: pnpm audit
+
       - name: Typecheck
         run: pnpm run typecheck
 
       - name: Test
         run: pnpm vitest run
+
+      - name: Build
+        run: pnpm web:build
