@@ -23,6 +23,13 @@ try {
     const page = await context.newPage();
     const response = await page.goto(`http://localhost:5198${path}`);
     assert.ok(response?.headers()['content-security-policy'], `CSP missing on ${path}`);
+    const themeScript = page.locator('head script[src*="/assets/theme-"]');
+    assert.equal(await themeScript.count(), 1);
+    for (const attribute of ['type', 'async', 'defer']) {
+      assert.equal(await themeScript.getAttribute(attribute), null, `Theme must remain parser-blocking: ${attribute}`);
+    }
+    const themeResponse = await context.request.get(new URL((await themeScript.getAttribute('src'))!, page.url()).href);
+    assert.match(themeResponse.headers()['cache-control'], /max-age=31536000.*immutable/);
     await page.waitForSelector(path === '/about/' ? '#gallery img' : '.eq-line');
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
     if (path !== '/about/') await page.locator('#theme-toggle').click();
