@@ -33,7 +33,8 @@
   <!-- Root-relative: this page is also served at /g/<equations> share URLs,
        where a relative href would resolve against /g/ and 404. -->
   <link rel="stylesheet" href="/style.css">
-  <!-- theme-script: Vite inserts a blocking script here before first paint. -->
+  <!-- Classic script sets the theme before first paint; Vite hashes the asset. -->
+  <script src="/theme.js?no-inline"></script>
 </head>
 <body>
   <canvas id="gl"></canvas>
