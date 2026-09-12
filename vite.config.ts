@@ -4,6 +4,17 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   root: 'web',
+  html: {
+    additionalAssetSources: {
+      // Hash classic scripts as assets, preserving parser-blocking execution.
+      // Vite still warns that these cannot be bundled as modules; asset emission
+      // is intentional, and ?no-inline keeps the result compatible with CSP.
+      script: {
+        srcAttributes: ['src'],
+        filter: ({ attributes }) => attributes.type !== 'module',
+      },
+    },
+  },
   server: process.env.PORT ? { port: Number(process.env.PORT), strictPort: true } : undefined,
   build: {
     outDir: '../dist-web',

@@ -81,8 +81,11 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
   // env(safe-area-inset-*) is not readable from JS directly; a fixed probe
   // with the insets as padding resolves them to pixels on demand.
   const probe = document.createElement('div');
-  probe.style.cssText = 'position:fixed;inset:0;visibility:hidden;pointer-events:none;'
-    + 'padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+  probe.style.position = 'fixed';
+  probe.style.inset = '0';
+  probe.style.visibility = 'hidden';
+  probe.style.pointerEvents = 'none';
+  probe.style.padding = 'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
   document.body.append(probe);
 
   const margins = () => {
