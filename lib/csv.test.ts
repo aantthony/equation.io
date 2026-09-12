@@ -190,6 +190,19 @@ describe('parseCsv', () => {
     expect(nums(parseCsv('name,price\nada,"1,500"\n'), 'price')).toEqual([1500]);
   });
 
+  it.each(['\t', ';'])('preserves dot decimals in %s-separated files', delimiter => {
+    const t = parseCsv(['a,b', '1.234,2.345', '1.23,2.34'].join('\n').replaceAll(',', delimiter));
+    expect(nums(t, 'a')).toEqual([1.234, 1.23]);
+    expect(nums(t, 'b')).toEqual([2.345, 2.34]);
+    expect(t.warnings).toEqual([]);
+  });
+
+  it('infers comma decimals per column, retaining European grouped numbers', () => {
+    const t = parseCsv('price;measurement\n1.234,50;1.234\n2.345;2.345\n');
+    expect(nums(t, 'price')).toEqual([1234.5, 2345]);
+    expect(nums(t, 'measurement')).toEqual([1.234, 2.345]);
+  });
+
   it('drops a title line above the header', () => {
     const t = parseCsv('Sales report\nname\tage\nada\t3\nbob\t4\n');
     expect(t.columns.map(c => c.name)).toEqual(['name', 'age']);

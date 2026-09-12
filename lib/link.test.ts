@@ -50,6 +50,26 @@ describe('graph-link payload codec', () => {
     expect(decodePayload(encodePayload(['y = "a;b"']))).toEqual(['y = "a;b"']);
   });
 
+  it('preserves literal percent sequences alongside semicolons', () => {
+    const rows = [
+      'p[p.url == "https://example.com/a%3Bb"]',
+      'p = open("sales%3B2026.csv")',
+      'p[p.city == "a;b%3b%25%253B%2525%20%00%"]',
+      '# 100% complete; next',
+      'y = 2',
+    ];
+    const payload = encodePayload(rows);
+    expect(decodePayload(payload)).toEqual(rows);
+    expect(decodePayload(payload.replaceAll(';', '%3B'))).toEqual(rows);
+    expect(decodePayload(encodePayload(decodePayload(payload)))).toEqual(rows);
+  });
+
+  it('preserves the interpretation of unmarked legacy percent sequences', () => {
+    expect(decodePayload('p%5Bp.city%20%3D%3D%20%22a%253Bb%22%5D'))
+      .toEqual(['p[p.city == "a;b"]']);
+    expect(decodePayload('%23%20100%25')).toEqual(['# 100%']);
+  });
+
   it('round-trips comment rows (# group headings)', () => {
     const rows = ['# Lines', 'y=x', 'y=x^2', '# Another group'];
     expect(decodePayload(encodePayload(rows))).toEqual(rows);

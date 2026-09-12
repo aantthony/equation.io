@@ -864,6 +864,15 @@ describe('rules the file cannot change', () => {
   });
 });
 
+describe('columns named after functions', () => {
+  it.each(['sin', 'mean', 'Sin'])('multiplies the %s column before parentheses', name => {
+    const rows = ['p = open("p.csv")'];
+    const tables = store({ 'p.csv': `${name},a\n1,2\n3,4\n` });
+    expect(values(lowerRow(`p.${name}(2+1)`, rows, tables))).toEqual([3, 9]);
+    expect(lowerRow(`p.${name}[2]`, rows, tables)).toEqual({ kind: 'num', value: 3 });
+  });
+});
+
 describe('text in arithmetic', () => {
   const rows = [`person = open("people.csv", ${HASH})`];
 

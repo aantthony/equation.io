@@ -551,7 +551,8 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
       // shadowable, so `mean = [1, 4, 2]` then `mean[2]` is an index.
       const isIndex = token.type === 'parenopen' && token.str === '['
         && last!.type === 'symbol' && indexes(path ?? last!.str);
-      const isFnCall = !isIndex && token.type === 'parenopen' && last!.type === 'symbol' && isFnName(last!.str);
+      const isFnCall = !isIndex && !path?.includes('.') && token.type === 'parenopen'
+        && last!.type === 'symbol' && isFnName(last!.str);
       yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };
     }

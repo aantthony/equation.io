@@ -10,6 +10,7 @@
 import { splitStatements } from './statements.ts';
 
 const LINK_UNSAFE = /[()!'*]/g;
+const ESCAPED_PERCENT_VERSION = '~2~';
 
 /**
  * A `;` a row means — `people[people.city == "a;b"]`, a file named
@@ -19,16 +20,20 @@ const LINK_UNSAFE = /[()!'*]/g;
  * and the row came back split in half. So the one inside a row is encoded
  * TWICE: `%3B` in a payload is always a separator, `%253B` is always data.
  *
- * (Text that literally reads `%3B` encodes the same way and comes back as
- * `;`. Nothing else collides, and no graph has ever been written that way.)
+ * Payloads containing literal percent signs use a version marker and escape
+ * those signs too. This distinguishes `%3B` text from a semicolon without
+ * changing how existing, unmarked links are decoded.
  */
-const encodeRow = (text: string): string =>
-  encodeURIComponent(text)
+const encodeRow = (text: string, escapePercent = false): string =>
+  encodeURIComponent(escapePercent ? text.replace(/%/g, '%25') : text)
     .replace(LINK_UNSAFE, c => '%' + c.charCodeAt(0).toString(16).toUpperCase())
     .replace(/%3B/gi, '%253B');
 
 export function encodePayload(texts: string[]): string {
-  return texts.filter(t => t.trim()).map(t => encodeRow(t.trim())).join(';');
+  const rows = texts.map(t => t.trim()).filter(Boolean);
+  const escapePercent = rows.some(t => t.includes('%'));
+  return (escapePercent ? ESCAPED_PERCENT_VERSION : '')
+    + rows.map(t => encodeRow(t, escapePercent)).join(';');
 }
 
 /**
@@ -46,7 +51,15 @@ export function encodePayload(texts: string[]): string {
  * was wrapped in survives that single decode, to be read back here.
  */
 export function decodePayload(payload: string): string[] {
+  const escapePercent = payload.startsWith(ESCAPED_PERCENT_VERSION);
+  if (escapePercent) payload = payload.slice(ESCAPED_PERCENT_VERSION.length);
   return splitStatements(payload.replace(/%3B/gi, ';'))
-    .map(s => decodeURIComponent(s).replace(/%3B/gi, ';'))
+    .map(s => {
+      const decoded = decodeURIComponent(s);
+      // One pass: a restored literal %3B must not be decoded a second time.
+      return escapePercent
+        ? decoded.replace(/%25|%3B/gi, token => token.toUpperCase() === '%25' ? '%' : ';')
+        : decoded.replace(/%3B/gi, ';');
+    })
     .filter(s => s.trim());
 }

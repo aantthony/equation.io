@@ -211,12 +211,12 @@ const isBlankCell = (s: string): boolean => BLANKS.has(s.trim().toLowerCase());
  * Numeric reading of a cell, or NaN. Accepts a leading '+', thousands
  * separators, and a trailing '%' (scaled), which real exports are full of.
  *
- * `decimalComma` says the file writes 1,5 for one and a half: what a comma
- * means cannot be read off the cell, only off the file, and reading `1,500`
+ * `decimalComma` says the column writes 1,5 for one and a half: what a comma
+ * means is inferred across the column, and reading `1,500`
  * as fifteen hundred in a ';'-delimited European export made every value in
  * the column 1000× too large with nothing to show for it — no skipped cell,
- * no warning, just wrong numbers. A file that chose ';' or a tab over ','
- * usually did so because the comma was already spoken for (parseCsv decides).
+ * no warning, just wrong numbers. parseCsv requires comma-form numeric data
+ * in the column before enabling this reading for a ';' or tab export.
  */
 export function cellNumber(s: string, decimalComma = false): number {
   let t = s.trim();
@@ -258,9 +258,6 @@ export function parseCsv(text: string): Table {
   if (titled) warnings.push('1 title line above the header ignored');
   const first = titled ? 1 : 0;
   const header = records[first];
-  // What a comma means is a property of the file, not of a cell: only a file
-  // that kept ',' for itself can be using it to group thousands.
-  const decimalComma = delimiter !== ',';
 
   const names: string[] = [];
   const used = new Set<string>();
@@ -296,6 +293,13 @@ export function parseCsv(text: string): Table {
   let pointedByComma = 0;
   const columns: Column[] = names.map((name, c) => {
     const cells = body.map(row => row[c]);
+    // Tabs and semicolons do not imply a numeric locale. Require an actual
+    // comma-form number in this column before reading dots as grouping.
+    // In particular, an ordinary TSV's 1.234 must remain a decimal.
+    const decimalComma = delimiter !== ',' && cells.some(cell => {
+      const value = cell.trim().replace(/%$/, '').trim();
+      return /^[+-]?(?:\d+|\d{1,3}(?:\.\d{3})+),\d+$/.test(value);
+    });
     let numeric = cells.length > 0;
     let seen = 0;
     for (const cell of cells) {
