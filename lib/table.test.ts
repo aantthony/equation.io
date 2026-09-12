@@ -864,6 +864,51 @@ describe('rules the file cannot change', () => {
   });
 });
 
+describe('text column character counts', () => {
+  const rows = ['p = open("p.csv")'];
+  const tables = store({ 'p.csv': 'name,age,length\nAda,36,short\n😀é,41,longer\n,29,NA\n' });
+
+  it('plots one Unicode code-point count per row, preserving missing cells', () => {
+    const e = lowerRow('p.name.length', rows, tables);
+    expect(values(e)).toEqual([3, 2, NaN]);
+    expect(classify(e).plot.type).toBe('dlist');
+    expect(lowerRow('p.name.length[2]', rows, tables)).toEqual({ kind: 'num', value: 2 });
+    expect(values(lowerRow('p.length.length', rows, tables))).toEqual([5, 6, NaN]);
+  });
+
+  it('supports arithmetic, reductions, named lists, and histograms', () => {
+    expect(values(lowerRow('p.name.length * 2', rows, tables))).toEqual([6, 4, NaN]);
+    expect(lowerRow('mean(p.name.length)', rows, tables)).toEqual({ kind: 'num', value: 2.5 });
+    expect(values(lowerRow('sizes', [...rows, 'sizes = p.name.length'], tables))).toEqual([3, 2, NaN]);
+    const plot = classify(lowerRow('hist(p.name.length, 2)', rows, tables)).plot;
+    expect(plot.type).toBe('histogram');
+    if (plot.type === 'histogram') expect([...plot.counts]).toEqual([1, 1]);
+  });
+
+  it('filters columns and whole tables by character count', () => {
+    expect(values(lowerRow('p.age[p.name.length > 2]', rows, tables))).toEqual([36]);
+    const filtered = [...rows, 'long_names = p[p.name.length > 2]'];
+    expect(values(lowerRow('long_names.name.length', filtered, tables))).toEqual([3]);
+  });
+
+  it('reports missing files and rejects numeric column lengths', () => {
+    expect(() => lowerRow('p.name.length', rows, null)).toThrow(MissingDataError);
+    const missing = build([...rows, 'sizes = p.name.length'], null);
+    expect(missing.defs.missingData.get('sizes')?.list).toBe(true);
+    expect(() => lowerRow('p.age.length', rows, tables)).toThrow(/numeric column/);
+    expect(() => lowerRow('p.unknown.length', rows, tables)).toThrow(/no column "unknown"/);
+  });
+
+  it('reuses the derived array until the parsed column changes', () => {
+    const { defs } = build(rows, tables);
+    const get = listGetter(defs);
+    const first = get('p.name.length');
+    const second = get('p.name.length');
+    expect(first?.kind).toBe('data');
+    if (first?.kind === 'data' && second?.kind === 'data') expect(first.values).toBe(second.values);
+  });
+});
+
 describe('columns named after functions', () => {
   it.each(['sin', 'mean', 'Sin'])('multiplies the %s column before parentheses', name => {
     const rows = ['p = open("p.csv")'];

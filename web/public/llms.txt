@@ -167,8 +167,13 @@ demand instead of living in a tool description. No authentication required.
   it may use constants and sliders but not t; a comparison with a missing
   cell is false, so filtering also drops gaps.
 - Text columns are lists of text. They are not plottable and have no
-  arithmetic — `count()` and the comparisons above are all they do. `==` and
-  `!=` exist only for filters: an equation still takes a single `=`.
+  arithmetic directly. `person.name.length` returns a numeric list of character
+  counts (Unicode code points) and plots one count per row. Missing cells stay
+  gaps; counts use the parsed, trimmed text. Use it in arithmetic, reductions,
+  histograms, and filters: `hist(person.name.length)` or
+  `long_names = person[person.name.length > 10]`. `count(person.name)` still
+  counts rows. `==` and `!=` exist only for filters: an equation still takes
+  a single `=`.
 - Comments: a row starting with `#` (e.g. `# tangent lines`) plots nothing; in
   the app it renders as a heading whose group (the rows until the next `#` row)
   can be collapsed. Use them to label sections of longer documents.

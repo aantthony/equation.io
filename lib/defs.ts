@@ -172,6 +172,23 @@ export class MissingDataError extends Error {}
 
 /** Expression elements of a numeric column, built once per parsed column. */
 const colExprs = new WeakMap<Column, Expr[]>();
+/** Character counts are stable for a parsed column, including filtered copies. */
+const colLengths = new WeakMap<Column, Float64Array>();
+
+function textLengths(col: Column): Float64Array {
+  let values = colLengths.get(col);
+  if (!values) {
+    values = Float64Array.from(col.strs!, text => {
+      // CSV blanks are missing values, not empty strings to count as zero.
+      if (!text) return NaN;
+      let length = 0;
+      for (const _char of text) length++; // Unicode code points, not UTF-16 units
+      return length;
+    });
+    colLengths.set(col, values);
+  }
+  return values;
+}
 
 export function columnExprs(col: Column): Expr[] {
   let hit = colExprs.get(col);
@@ -208,11 +225,22 @@ export function listGetter(defs: Defs): GetList {
     }
     const table = defs.tables.get(name.slice(0, dot));
     if (!table) return null;
-    const col = name.slice(dot + 1);
+    const path = name.slice(dot + 1);
+    const length = path.endsWith('.length');
+    const col = length ? path.slice(0, -'.length'.length) : path;
     if (!table.data) throw new MissingDataError(table.missing ?? `${table.file} is not loaded.`);
     const found = table.data.columns.find(c => c.name === col);
     if (!found) {
       throw new Error(`${table.file} has no column "${col}" (columns: ${table.data.columns.map(c => c.name).join(', ')}).`);
+    }
+    if (length) {
+      if (found.type !== 'str') {
+        throw new Error(`${name} counts characters — ${name.slice(0, -'.length'.length)} is a numeric column.`);
+      }
+      if (table.data.rows > TABLE_MAX_ROWS) {
+        throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS}.`);
+      }
+      return { kind: 'data', values: textLengths(found) };
     }
     // A text column is a list too — of text. Only comparisons accept one
     // (list.ts); everything numeric says so where it is used.
