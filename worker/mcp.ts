@@ -15,6 +15,7 @@
  */
 import { SLIDER_NUM_RE, dragAxes } from '../lib/drag.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
+import { splitStatements } from '../lib/statements.ts';
 import { analyze } from './graph.ts';
 import { MAX_PLOTS, previewGap, renderOgPng } from './og.ts';
 
@@ -38,7 +39,7 @@ The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wire
         equations: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Every equation in the graph, in display order. One equation or definition per string; no semicolons.',
+          description: 'Every equation in the graph, in display order. One equation or definition per string — do not join rows with ";" (inside quoted text a ";" is data, and kept).',
         },
       },
       required: ['equations'],
@@ -97,8 +98,17 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
     );
   }
   const texts = (equations as string[]).map(t => t.trim()).filter(Boolean);
-  const bad = texts.find(t => t.includes(';'));
-  if (bad) throw new Error(`Row "${bad}" contains ';' — send each equation as its own array item.`);
+  // Two equations in one string is a mistake worth naming — but a `;` inside
+  // quoted text (`p[p.city == "a;b"]`, a file named `sales;2026.csv`) is data,
+  // and the splitter is what tells them apart. It is also what the app and the
+  // link codec use, so all three agree on where a row ends. It splits on line
+  // breaks too, so the message names what a row holds rather than a character
+  // that may not be in it.
+  const bad = texts.find(t => splitStatements(t).length > 1);
+  if (bad) {
+    throw new Error(`Row ${JSON.stringify(bad)} holds more than one equation`
+      + " (';' and line breaks each separate rows) — send each as its own array item.");
+  }
   const analysis = analyze(texts);
   const plotRows = analysis.rows.filter(r => r.cls);
   const needs3D = plotRows.some(r => r.cls!.needs3D);
@@ -129,7 +139,10 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
             kind: row.comment
               ? 'comment (group heading)'
               : row.def
-                ? `definition (${row.def.kind})`
+                // `adults = person[…]` scans as a constant, but what it
+                // defines is another data file.
+                ? `definition (${row.def.kind === 'const' && analysis.defs.tables.has(row.def.name)
+                  ? 'filtered data' : row.def.kind})`
                 : row.view
                   ? `viewport (${row.view.kind})`
                   : row.dist === 'density'
@@ -138,9 +151,12 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
                       ? 'probability (shaded area)'
                       : row.dist === 'expectation'
                         ? 'expectation (mean readout)'
-                        : row.cls!.plot.type,
+                        : row.dataLocal
+                          ? 'data (reads a file on the author\'s device)'
+                          : row.cls!.plot.type,
             ...(row.cls?.animated ? { animated: true } : {}),
             ...(row.info ? { value: row.info } : {}),
+            ...(row.dataLocal ? { note: row.dataLocal } : {}),
             ...(drag === undefined ? {} : { draggable: drag }),
           }),
     };
@@ -156,10 +172,32 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
   const omitted = plotRows
     .map(r => ({ row: r.text, why: previewGap(r, needs3D) }))
     .filter((g): g is { row: string; why: string } => g.why !== null);
+  // Rows reading a dropped CSV never reach the preview at all: the bytes are
+  // on the author's device, not in the link. Disclose them the same way.
+  const dataLocalRows = analysis.rows.filter(r => r.dataLocal);
+  const dataOmits = dataLocalRows.map(r => ({ row: r.text, why: r.dataLocal! }));
+  // A row that would have drawn something if the bytes were here — as opposed
+  // to a definition it feeds, which draws nothing anywhere.
+  const dataWouldPlot = dataLocalRows.some(r => !r.def && !r.comment && !r.view);
   let png: string | undefined;
   let preview: string;
   if (!plotRows.length) {
-    preview = 'none — no plot rows to draw';
+    // A row reading a local CSV never classifies, so it is not in plotRows —
+    // "no plot rows to draw" would tell the caller their graph is empty when
+    // it is only unrenderable HERE, and preview_omits says otherwise two
+    // lines down. Only a would-be plot row earns that reassurance though: a
+    // document of definitions alone (`ages = person.age / 2` and nothing
+    // that draws) genuinely has nothing to plot on any device, and saying
+    // "the graph itself is fine" would send the caller away satisfied with a
+    // blank graph.
+    // …and the reassurance is about the ROWS, so it may only be given when
+    // every row is in fact fine: a document with a device-local plot AND a
+    // broken row is not "fine", and "rows" — which says so — is the verdict.
+    preview = dataWouldPlot
+      ? rows.every(r => r.status === 'ok')
+        ? 'none — every plot row reads a data file on the author\'s device (see preview_omits; the graph itself is fine)'
+        : 'none — every plot row reads a data file on the author\'s device (see preview_omits), and other rows have errors (see rows)'
+      : 'none — no plot rows to draw';
   } else if (omitted.length === plotRows.length) {
     preview = 'none — the static preview cannot draw any of these rows (see preview_omits; this says nothing about whether the graph works)';
   } else {
@@ -183,7 +221,7 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
       url: `${origin}/#${payload}`,
       share_url: `${origin}/g/${payload}`,
       preview,
-      ...(omitted.length ? { preview_omits: omitted } : {}),
+      ...(omitted.length || dataOmits.length ? { preview_omits: [...omitted, ...dataOmits] } : {}),
       rows,
     },
   };

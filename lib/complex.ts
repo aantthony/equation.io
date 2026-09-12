@@ -32,6 +32,9 @@ export function usesComplex(e: Expr, extra?: ReadonlySet<string>): boolean {
     case 'ineq': return usesComplex(e.l, extra) || usesComplex(e.r, extra);
     case 'vec': return e.items.some(a => usesComplex(a, extra));
     case 'list': return e.items.some(a => usesComplex(a, extra));
+    case 'data':
+    case 'str':
+    case 'text': return false;
     case 'piecewise':
       return e.cases.some(c => usesComplex(c.cond, extra) || usesComplex(c.value, extra))
         || (e.otherwise ? usesComplex(e.otherwise, extra) : false);

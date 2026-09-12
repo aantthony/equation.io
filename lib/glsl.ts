@@ -194,7 +194,11 @@ export function toGLSL(e: Expr): string {
     case 'vec':
       throw new Error('Vector in scalar context.');
     case 'list':
+    case 'data':
       throw new Error('A list can only be plotted as its own row.');
+    case 'str':
+    case 'text':
+      throw new Error('Text cannot be plotted — it can only be compared, inside a filter.');
     case 'piecewise':
       return piecewiseGLSL(e, toGLSL);
   }

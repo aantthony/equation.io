@@ -564,6 +564,11 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
   // lists have no scanline path here yet; the site card beats a blank grid.
   vlist: 'fallback',
   plist: 'fallback',
+  // Typed-array lists reach the worker only from a data file, whose bytes
+  // never travel in the link — so there is nothing to draw here anyway.
+  dlist: 'fallback',
+  dscatter: 'fallback',
+  histogram: 'fallback',
   sequence: 'fallback',
   bifurcation: 'fallback',
   // Solution marks require running the numeric solver, which is not wired

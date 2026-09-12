@@ -26,6 +26,22 @@ export type Expr =
   | { kind: 'vec'; items: Expr[] }
   /** A data list [1, 4, 2] or [(1,2), (3,4)]. Plottable as its own row only. */
   | { kind: 'list'; items: Expr[] }
+  /**
+   * A list of numbers held as a typed array — a CSV column, or anything
+   * constant derived from one. Semantically a `list` of num nodes; the point
+   * is that a 100k-row column costs two objects instead of 100k. Only list
+   * lowering makes or reads one, and like `list` it never survives lowering:
+   * GLSL, diff, and the integrator never see it.
+   */
+  | { kind: 'data'; values: Float64Array }
+  /**
+   * A text literal, `"NYC"`. Text is not a value the plane can draw: it
+   * exists so a filter can compare a text column against it, and every
+   * numeric context refuses it.
+   */
+  | { kind: 'str'; value: string }
+  /** A text column, the counterpart of `data`. Same rule: only comparisons. */
+  | { kind: 'text'; values: readonly string[] }
   /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
   | { kind: 'piecewise'; cases: Array<{ cond: Expr; value: Expr }>; otherwise?: Expr };
 
@@ -38,6 +54,9 @@ export const FUNCTIONS = new Set([
   'erf', 'normalpdf', 'normalcdf',
   'gcd', 'isprime', 'gamma', 'factorial', 'sinc', 'coth',
   're', 'im', 'arg', 'conj',
+  // List reductions and transforms: lowered symbolically (or evaluated
+  // numerically) by list.ts, so nothing downstream ever sees them.
+  'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
   'dot', 'cross', 'perp', 'midpoint', 'unit',
@@ -57,7 +76,10 @@ export const FUNCTIONS = new Set([
  * variable may claim these names, shadowing the builtin, so a saved graph
  * that defines its own `gamma(x) = …` or `sinc = …` keeps its meaning.
  */
-export const SHADOWABLE_FNS: ReadonlySet<string> = new Set(['gamma', 'factorial', 'sinc', 'coth']);
+export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
+  'gamma', 'factorial', 'sinc', 'coth',
+  'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
+]);
 
 /**
  * Flatten a (possibly chained) inequality into its comparisons; comparison k
@@ -83,6 +105,33 @@ export const CONSTANTS: Record<string, number> = {
 /** User-defined function names for the parse in progress (set by parseExpr). */
 let activeUserFns: ReadonlySet<string> = new Set();
 
+/** Named-list names for the parse in progress: `L[2]` indexes, `x[2]` multiplies. */
+let activeListNames: ReadonlySet<string> = new Set();
+
+/**
+ * Names the document binds as values (set by parseExpr). A late-addition
+ * builtin is only a function while nothing else claims its name: a graph
+ * shared before `total` and `count` existed may hold `total = 3`, and there
+ * `total(x + 1)` is the product it has always been, not a reduction over a
+ * list that isn't there. SHADOWABLE_FNS says which names may be taken;
+ * this says which ones a particular document took.
+ */
+let activeValueNames: ReadonlySet<string> = new Set();
+
+/**
+ * Whether `name[…]` indexes rather than multiplies.
+ *
+ * A dotted path counts when its HEAD is known, not only the full path: a data
+ * file whose bytes are on another device cannot list its columns, and without
+ * this `person.age[2]` would parse as a product there and as an index on the
+ * author's machine — the same row meaning two things.
+ */
+const indexes = (name: string): boolean => {
+  if (activeListNames.has(name)) return true;
+  const dot = name.indexOf('.');
+  return dot > 0 && activeListNames.has(name.slice(0, dot));
+};
+
 /**
  * Resolve a symbol to a built-in function name, folding case so `Sin`, `SIN`
  * and `sin` all reach the same builtin. Returns null if it is not a builtin
@@ -98,7 +147,18 @@ export const builtinFn = (name: string): string | null => {
 const canonicalFn = (name: string): string =>
   activeUserFns.has(name) ? name : (builtinFn(name) ?? name);
 
-const isFnName = (name: string): boolean => activeUserFns.has(name) || builtinFn(name) !== null;
+/** Whether this document defines the builtin `name` would fold to, so the
+ *  name reads as a value. Folds case with builtinFn, so `Total(…)` does not
+ *  become a call either: every spelling means what it meant before the
+ *  builtin existed. */
+const shadowedFn = (name: string): boolean => {
+  if (!activeValueNames.size) return false;
+  const b = builtinFn(name);
+  return b !== null && SHADOWABLE_FNS.has(b) && activeValueNames.has(b);
+};
+
+const isFnName = (name: string): boolean =>
+  activeUserFns.has(name) || (builtinFn(name) !== null && !shadowedFn(name));
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const bin = (op: '+' | '-' | '*' | '/' | '^') => (a: Expr, b: Expr): Expr => ({ kind: 'bin', op, a, b });
@@ -191,10 +251,15 @@ const ops = operators<PNode>({
     if (!content) throw new Error('Empty parentheses.');
     return content.kind === 'series' ? seriesToVec(content.items) : content;
   }),
-  ']': closer('[', content => {
+  ']': closer('[', (content, call) => {
     if (!content) throw new Error('Empty list.');
     // A comma series is a data list; a single item keeps its grouping meaning.
     if (content.kind === 'series') return { kind: 'list', items: content.items.map(asExpr) };
+    // A lone range is a list too ([1..10] expands during resolution) — but
+    // not in a call bracket, where int[a..b] / sum[n=1..N] own the range.
+    if (!call && content.kind === 'call' && content.name === '[range]') {
+      return { kind: 'list', items: [content] };
+    }
     return content;
   }),
 
@@ -211,12 +276,15 @@ const ops = operators<PNode>({
 
   ':': BinaryInfix<PNode>((a, b): PNode => ({ kind: 'pcase', cond: asExpr(a), value: asExpr(b) })),
 
-  // Recognized as one token so it never half-matches as postfix '!' followed
-  // by '=' — x != 2 would silently graph factorial(x) = 2. There is no ≠
-  // relation to plot, so it only explains itself.
-  '!=': BinaryInfix<PNode>((): PNode => {
-    throw new Error("'!=' is not supported — for a factorial equation, put a space before '=': x! = 2.");
-  }),
+  // Equality, for filters only: `people[people.city == "NYC"]`. Unlike <
+  // and >, it is not a relation the plane can shade, so it lowers to a mask
+  // (list.ts) and reports itself anywhere else. Recognized as one token each
+  // so '!=' never half-matches as postfix '!' followed by '=', which would
+  // silently graph factorial(x) = 2.
+  '==': BinaryInfix<PNode>((a, b): Expr =>
+    ({ kind: 'call', name: '[eq]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+  '!=': BinaryInfix<PNode>((a, b): Expr =>
+    ({ kind: 'call', name: '[ne]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
 
   '<': asIneq('<'),
   '<=': asIneq('<='),
@@ -259,6 +327,22 @@ const ops = operators<PNode>({
     const items = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
     const args = items.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
     return { kind: 'call', name, args };
+  }),
+
+  // List indexing: `L[2]` for a known list name L (1-based; list.ts lowers
+  // it). Only named lists index — `x[2]` keeps meaning 2x, and a literal
+  // `[1,2,3][2]` stays implicit multiplication.
+  '[at]': BinaryInfix<PNode>((a, b): Expr =>
+    ({ kind: 'call', name: '[index]', args: [asExpr(a), asVecOrExpr(b)] })),
+
+  // Column access: `person.age` is one name, not a product. Binding tighter
+  // than everything else, it is purely a naming device — the dotted name
+  // reaches list lowering, which substitutes the column (see defs.ts).
+  '.': BinaryInfix<PNode>((a, b): Expr => {
+    if (a?.kind !== 'var' || b?.kind !== 'var') {
+      throw new Error('Write a column as table.column, like people.age.');
+    }
+    return { kind: 'var', name: `${a.name}.${b.name}` };
   }),
 });
 
@@ -324,6 +408,9 @@ const syntax: PatternDict = {
   bar: /^\|$/,
   whitespace: /\s$/,
   symbol: /^[A-Za-z_Σ∑Π∏∫∞][A-Za-z_0-9]*'*$/,
+  // A quote only opens text where a token can start, so `x'` (prime) and
+  // `f'(x)` still tokenize as symbols — the symbol match gets there first.
+  string: /^("[^"]*"?|'[^']*'?)$/,
   operator: x => !!ops[x] || MULTI_CHAR_OPS.some(m => m.startsWith(x)),
   invalid(x) { throw new Error(`Invalid character: ${JSON.stringify(x)}.`); },
 };
@@ -338,11 +425,20 @@ const SYMBOL_ALIASES: Record<string, string> =
   { 'Σ': 'sum', '∑': 'sum', 'Π': 'prod', '∏': 'prod', '∫': 'int', '∞': 'inf' };
 
 /**
- * Map Σ/Π glyphs to sum/prod, and repair `1..N`: the greedy number match
- * takes "1." leaving a lone "." operator, so rejoin the dot into "..".
+ * Map Σ/Π glyphs to sum/prod, and settle what a '.' means.
+ *
+ * The greedy number match takes "1." out of `1..N`, leaving a lone "."
+ * operator, so the dot rejoins into "..". A '.' with no value before it and a
+ * number after it is a leading-dot decimal (`.5`); every other '.' is the
+ * column-access operator (`person.age`).
  */
 function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
   let held: Token | null = null;
+  let dot: Token | null = null;
+  let afterValue = false;
+  const ends = (t: Token): boolean => t.type === 'number' || t.type === 'symbol'
+    || t.type === 'parenclose' || t.type === 'string'
+    || (t.type === 'operator' && t.str === '!');
   for (let token of bare) {
     if (token.type === 'symbol' && SYMBOL_ALIASES[token.str]) {
       token = { ...token, str: SYMBOL_ALIASES[token.str] };
@@ -354,15 +450,42 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
       } else {
         yield held;
       }
+      afterValue = true;
       held = null;
+    }
+    if (dot) {
+      if (!afterValue && token.type === 'number') {
+        token = { ...token, str: '0.' + token.str };
+        dot = null;
+        // `[.5..2]`: the number scan is greedy, so it already took the first
+        // dot of the range operator (`5.`). Yielding here would spend it and
+        // leave a lone `.`; hand it to `held` instead and let the merge above
+        // pair it with the next one.
+        if (token.str.endsWith('.')) {
+          held = token;
+          continue;
+        }
+        yield token;
+        afterValue = true;
+        continue;
+      }
+      yield dot;
+      afterValue = false;
+      dot = null;
     }
     if (token.type === 'number' && token.str.endsWith('.')) {
       held = token;
       continue;
     }
+    if (token.type === 'operator' && token.str === '.') {
+      dot = token;
+      continue;
+    }
     yield token;
+    afterValue = ends(token);
   }
   if (held) yield held;
+  if (dot) yield dot;
 }
 
 /**
@@ -371,6 +494,8 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
  */
 function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   let last: Token | null = null;
+  /** The dotted name ending at `last` when it is a symbol: `person.age`. */
+  let path: string | null = null;
   let barDepth = 0;
   for (const token of bare) {
     if (token.type === 'whitespace') continue;
@@ -378,8 +503,12 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     // A postfix operator (per the ops table: '!') ends a value, so 5!x and
     // 3!(x+1) multiply implicitly.
     const afterPostfix = last?.type === 'operator' && ops[last.str]?.n === 1 && !ops[last.str].right;
+    // Text is a value like any other here: `2 "NYC"` multiplies and `"NYC" + 1`
+    // adds, so both reach the check that says text has no numeric value.
+    // Without this the '+' reads as a unary sign and the row dies as
+    // "Incomplete expression.", which sends the reader hunting for a typo.
     const afterValue = last !== null && (last.type === 'number' || last.type === 'symbol'
-      || last.type === 'parenclose' || afterPostfix);
+      || last.type === 'parenclose' || last.type === 'string' || afterPostfix);
 
     if (token.type === 'bar') {
       // |x| is abs(x): a bar after a value closes the innermost open bar;
@@ -398,6 +527,7 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         yield open;
         last = open;
       }
+      path = null;
       continue;
     }
 
@@ -406,24 +536,50 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         // Unary sign: drop unary plus, rewrite minus as the [neg] prefix op.
         if (token.str !== '+') yield op('[neg]');
         last = token;
+        path = null;
         continue;
       }
     }
 
     let emit = token;
-    if (afterValue && (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen')) {
-      const isFnCall = token.type === 'parenopen' && last!.type === 'symbol' && isFnName(last!.str);
-      yield op(isFnCall ? '[apply]' : '[impl]');
+    if (afterValue
+      && (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen'
+        || token.type === 'string')) {
+      // A column or list indexes under its full name: person.age[2]. Decided
+      // BEFORE the function reading and beating it, because a name can be
+      // both: a CSV column headed `sin` gives `person.sin`, and `mean` is
+      // shadowable, so `mean = [1, 4, 2]` then `mean[2]` is an index.
+      const isIndex = token.type === 'parenopen' && token.str === '['
+        && last!.type === 'symbol' && indexes(path ?? last!.str);
+      const isFnCall = !isIndex && !path?.includes('.') && token.type === 'parenopen'
+        && last!.type === 'symbol' && isFnName(last!.str);
+      yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };
     }
 
+    const afterDot = last?.type === 'operator' && last.str === '.';
     yield emit;
     last = emit;
+    path = emit.type === 'symbol' ? (afterDot && path ? `${path}.${emit.str}` : emit.str)
+      : emit.type === 'operator' && emit.str === '.' ? path
+        : null;
   }
 }
 
 function createLeaf(token: Token): PNode {
   if (token.type === 'number') return num(Number(token.str));
+  if (token.type === 'string') {
+    const q = token.str[0];
+    if (token.str.length < 2 || !token.str.endsWith(q)) {
+      throw new Error(`Unterminated text: ${token.str}`);
+    }
+    // A `;` inside text used to be refused here, because the link codec could
+    // not tell it from the separator between rows and the row came back split.
+    // It can now (lib/link.ts encodes a row's own semicolons twice), and text
+    // is data — a city, a category — that has no business being narrowed to
+    // the characters a URL found convenient.
+    return { kind: 'str', value: token.str.slice(1, -1) };
+  }
   if (token.type === 'parenopen') return { kind: 'popen', bracket: token.str, call: !!token.call };
   if (token.type === 'symbol') {
     if (token.str in CONSTANTS) return num(CONSTANTS[token.str]);
@@ -434,10 +590,19 @@ function createLeaf(token: Token): PNode {
 
 /**
  * Parse an expression or equation, keeping free variables symbolic.
- * Names in userFns parse as function calls (`f(x+1)`) instead of products.
+ * Names in userFns parse as function calls (`f(x+1)`) instead of products;
+ * names in valueNames that a late-addition builtin would claim parse as
+ * variables, so an older graph keeps the meaning it was shared with.
  */
-export function parseExpr(str: string, userFns: ReadonlySet<string> = new Set()): Expr {
+export function parseExpr(
+  str: string,
+  userFns: ReadonlySet<string> = new Set(),
+  listNames: ReadonlySet<string> = new Set(),
+  valueNames: ReadonlySet<string> = new Set(),
+): Expr {
   activeUserFns = userFns;
+  activeListNames = listNames;
+  activeValueNames = valueNames;
   try {
     const tokens = addImplicitTokens(normalizeTokens(tokenize(str)));
     const stack: PNode[] = [];
@@ -455,6 +620,8 @@ export function parseExpr(str: string, userFns: ReadonlySet<string> = new Set())
     return asExpr(top);
   } finally {
     activeUserFns = new Set();
+    activeListNames = new Set();
+    activeValueNames = new Set();
   }
 }
 
@@ -470,6 +637,9 @@ export function substVars(e: Expr, env: Record<string, Expr>): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: substVars(e.l, env), r: substVars(e.r, env) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substVars(a, env)) };
     case 'list': return { kind: 'list', items: e.items.map(a => substVars(a, env)) };
+    case 'data':
+    case 'str':
+    case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: substVars(c.cond, env), value: substVars(c.value, env) })),
@@ -658,7 +828,10 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
     case 'eq': return evaluate(e.l, env) - evaluate(e.r, env);
     case 'ineq': throw new Error('Cannot evaluate an inequality.');
     case 'vec': throw new Error('Vector in scalar context.');
-    case 'list': throw new Error('List in scalar context.');
+    case 'list':
+    case 'data': throw new Error('List in scalar context.');
+    case 'str':
+    case 'text': throw new Error('Text has no numeric value — it can only be compared, inside a filter.');
     case 'piecewise': {
       for (const c of e.cases) {
         if (c.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities.');
@@ -686,6 +859,9 @@ export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
     case 'ineq': freeVars(e.l, out); freeVars(e.r, out); break;
     case 'vec': e.items.forEach(a => freeVars(a, out)); break;
     case 'list': e.items.forEach(a => freeVars(a, out)); break;
+    case 'data':
+    case 'str':
+    case 'text': break;
     case 'piecewise':
       e.cases.forEach(c => { freeVars(c.cond, out); freeVars(c.value, out); });
       if (e.otherwise) freeVars(e.otherwise, out);

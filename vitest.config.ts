@@ -5,8 +5,10 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['lib/**/*.test.ts', 'worker/**/*.test.ts'],
+    // Anchored the same way as include: the default benchmark glob is
+    // unanchored, so it also picked up the copies in .claude/worktrees/.
     benchmark: {
-      include: ['lib/**/*.bench.ts'],
+      include: ['lib/**/*.bench.ts', 'worker/**/*.bench.ts'],
     },
   },
 });

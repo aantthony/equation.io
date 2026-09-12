@@ -210,9 +210,12 @@ describe('factorial and special functions', () => {
     for (const c of LANCZOS) expect(GLSL_PRELUDE).toContain(`+ ${c} / (z + `);
   });
 
-  it('rejects != instead of reading it as postfix factorial', () => {
-    expect(() => parseExpr('x != 2')).toThrow(/!=/);
-    expect(() => parseExpr('x!=2')).toThrow(/!=/);
+  it('reads != as a comparison, never as postfix factorial', () => {
+    // One token, so the '!' can never be read as a factorial with '=' after
+    // it — which would silently graph factorial(x) = 2.
+    expect(parseExpr('x != 2')).toMatchObject({ kind: 'call', name: '[ne]' });
+    expect(parseExpr('x!=2')).toMatchObject({ kind: 'call', name: '[ne]' });
+    expect(parseExpr('x == 2')).toMatchObject({ kind: 'call', name: '[eq]' });
     expect(ev('x! = 2', { x: 3 })).toBe(4); // spaced: the equation x! = 2, as l - r
   });
 
@@ -332,6 +335,31 @@ describe('case-insensitive builtin functions', () => {
   });
 });
 
+describe('a name the document already bound', () => {
+  const NONE = new Set<string>();
+
+  it('reads as that value, not as the builtin added later', () => {
+    // `total`, `count` and `mean` became reductions long after graphs were
+    // shared using them as slider names, where `total(x + 1)` was a product.
+    // Nothing else in a saved link could tell those two readings apart.
+    expect(parseExpr('total(x + 1)')).toMatchObject({ kind: 'call', name: 'total' });
+    expect(parseExpr('total(x + 1)', NONE, NONE, new Set(['total'])))
+      .toMatchObject({ kind: 'bin', op: '*', a: { kind: 'var', name: 'total' } });
+    // Case folds with the builtin lookup, so no spelling sneaks back in.
+    expect(parseExpr('Count(x)', NONE, NONE, new Set(['count'])))
+      .toMatchObject({ kind: 'bin', op: '*' });
+  });
+
+  it('only shadows the builtins a graph was allowed to claim', () => {
+    // `sin` was never nameable, so a stray entry cannot turn sin(x) into a
+    // product — the shadow list and the naming rule answer the same question.
+    expect(parseExpr('sin(x)', NONE, NONE, new Set(['sin'])))
+      .toMatchObject({ kind: 'call', name: 'sin' });
+    // …and a document that binds nothing keeps every reduction a reduction.
+    expect(parseExpr('mean(L)', NONE, new Set(['L']))).toMatchObject({ kind: 'call', name: 'mean' });
+  });
+});
+
 describe('piecewise', () => {
   const ev = (s: string, env: Record<string, number> = {}) => evaluate(parseExpr(s), env);
 
@@ -392,6 +420,46 @@ describe('lists', () => {
   it('still parses parenthesized vectors and function arguments', () => {
     expect(parseExpr('(1, 2)').kind).toBe('vec');
     expect(evaluate(parseExpr('atan2(1, 1)'), {})).toBeCloseTo(Math.PI / 4);
+  });
+});
+
+describe('leading-dot numbers', () => {
+  it('reads .5 as a bound of a range', () => {
+    // The number scan is greedy, so `.5..2` tokenizes as `.` `5.` `.` `2` —
+    // the range operator has to be reassembled from the two halves.
+    expect(parseExpr('[.5..2]')).toEqual(parseExpr('[0.5..2]'));
+    expect(evaluate(parseExpr('.5'), {})).toBe(0.5);
+    expect(evaluate(parseExpr('x + .25'), { x: 1 })).toBe(1.25);
+  });
+});
+
+describe('text', () => {
+  it('reads quoted text', () => {
+    expect(parseExpr('"New York"')).toEqual({ kind: 'str', value: 'New York' });
+  });
+
+  it('ends a value, so text in arithmetic parses and then says what is wrong', () => {
+    // Text was not one of the token types that end a value, so `"NYC" + 1`
+    // read the '+' as a unary sign and left two things on the stack. The row
+    // died as "Incomplete expression.", which reads as a typo rather than as
+    // the real answer — text has no numeric value.
+    const text = /Text has no numeric value/;
+    expect(() => evaluate(parseExpr('"NYC" + 1'), {})).toThrow(text);
+    expect(() => evaluate(parseExpr('2 "NYC"'), {})).toThrow(text);
+    expect(() => evaluate(parseExpr('x + "NYC"'), { x: 1 })).toThrow(text);
+    // Where text belongs, nothing changed.
+    expect(parseExpr('p[p.city == "NYC"]', undefined, new Set(['p'])))
+      .toMatchObject({ name: '[index]' });
+  });
+
+  it('keeps a ";" inside text, because the link codec now can', () => {
+    // This used to be refused: the payload joins rows with ';' and encodes the
+    // quotes, so nothing in it told a data semicolon from a separator and the
+    // row came back split. lib/link.ts encodes a row's own semicolons twice,
+    // so text is text — see the round-trip test in link.test.ts.
+    expect(parseExpr('"a;b"')).toMatchObject({ kind: 'str', value: 'a;b' });
+    expect(parseExpr('p[p.city == "a;b"]', undefined, new Set(['p'])))
+      .toMatchObject({ name: '[index]' });
   });
 });
 

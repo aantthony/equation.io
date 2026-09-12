@@ -20,10 +20,13 @@
  *   otherwise by expanding a fixed Gauss–Legendre sum the same way Σ
  *   expands — so every downstream consumer still sees ordinary expressions.
  */
+import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, SHADOWABLE_FNS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
+import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
+import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 
 export type Definition =
@@ -32,7 +35,10 @@ export type Definition =
   /** `a' = …` — da/dt, integrated forward in time. */
   | { kind: 'state'; name: string; rhs: string }
   /** `a(0) = …` — where the state a starts. */
-  | { kind: 'init'; name: string; rhs: string };
+  | { kind: 'init'; name: string; rhs: string }
+  /** `person = open("people.csv", 3a7f…)` — a local data file, pinned by
+   *  content hash. The bytes live on the device, not in the link. */
+  | { kind: 'table'; name: string; file: string; hash: string };
 
 /**
  * Row identity for duplicate detection. `a = 1` and `a' = 2` share a key —
@@ -91,6 +97,48 @@ export interface Defs {
    * matrix survives into anything downstream (see mat.ts).
    */
   mats: Map<string, Mat>;
+  /**
+   * Named data lists: `L = [1, 4, 2]` or `[1..20]` — scalar elements or
+   * points, in constants/states/t. List lowering (list.ts) substitutes and
+   * broadcasts them wherever rows use the name, so, like matrices, no list
+   * name survives into anything downstream.
+   *
+   * The value keeps whichever representation the definition produced: a
+   * `list` of expressions, the compact `data`/`text` of a column and constant
+   * arithmetic over one (`ages = person.age / 2`), which must not be expanded
+   * here or naming a column would cost what reading it saved — or the `vec` of
+   * columns a scatter zips (`P = (person.age, person.height)`), for the same
+   * reason. Naming one must not change what it is.
+   */
+  lists: Map<string, Seq | (Expr & { kind: 'vec' })>;
+  /**
+   * Definitions that needed a data file this device does not have
+   * (`ages = person.age / 2`, `avg = mean(person.age)`): the reason, and
+   * whether the value would have been a list. Registered instead of the
+   * definition, so a row below reports the file rather than degrading into
+   * "ages is not defined" — the same courtesy `tables` does for a column.
+   *
+   * The `list` flag has to be right: it decides whether the name indexes and
+   * whether a filter over it is well formed, and getting it wrong makes a
+   * shared link valid on one device and not the other.
+   */
+  missingData: Map<string, { message: string; list: boolean }>;
+  /**
+   * Data files opened by name: `person = open("people.csv", 3a7f…)`. Each
+   * numeric column reads as a list under its dotted name (`person.age`), so
+   * everything lists can do — broadcasting, reductions, scatters — applies to
+   * columns unchanged. `data` is null when the bytes are not on this device
+   * (a shared link elsewhere, or a server-side preview).
+   */
+  tables: Map<string, TableDef>;
+}
+
+export interface TableDef {
+  file: string;
+  hash: string;
+  data: Table | null;
+  /** Why `data` is null, phrased for wherever this ran. */
+  missing?: string;
 }
 
 export const emptyDefs = (): Defs => ({
@@ -101,7 +149,317 @@ export const emptyDefs = (): Defs => ({
   states: new Map(),
   vecStates: new Map(),
   mats: new Map(),
+  lists: new Map(),
+  missingData: new Map(),
+  tables: new Map(),
 });
+
+/**
+ * Rows one data file may plot. A column reaches the renderer as its own
+ * Float64Array with nothing to evaluate per point, so this is now a drawing
+ * limit rather than an expression one — a much higher ceiling. Combining a
+ * column with t, a slider, or a comparison still expands it to one
+ * expression per row, and list.ts caps that separately (ITEMS_MAX).
+ */
+export const TABLE_MAX_ROWS = 200_000;
+
+/**
+ * Thrown when a row needs data this device does not have. The web app turns
+ * it into "drop the file here"; the server-side preview reports the row as
+ * device-local rather than broken, because it is not the graph that is wrong.
+ */
+export class MissingDataError extends Error {}
+
+/** Expression elements of a numeric column, built once per parsed column. */
+const colExprs = new WeakMap<Column, Expr[]>();
+/** Character counts are stable for a parsed column, including filtered copies. */
+const colLengths = new WeakMap<Column, Float64Array>();
+
+function textLengths(col: Column): Float64Array {
+  let values = colLengths.get(col);
+  if (!values) {
+    values = Float64Array.from(col.strs!, text => {
+      // CSV blanks are missing values, not empty strings to count as zero.
+      if (!text) return NaN;
+      let length = 0;
+      for (const _char of text) length++; // Unicode code points, not UTF-16 units
+      return length;
+    });
+    colLengths.set(col, values);
+  }
+  return values;
+}
+
+export function columnExprs(col: Column): Expr[] {
+  let hit = colExprs.get(col);
+  if (!hit) {
+    hit = [...col.nums!].map((value): Expr => ({ kind: 'num', value }));
+    colExprs.set(col, hit);
+  }
+  return hit;
+}
+
+/**
+ * Resolve a name to list elements: a named list, or a data column written
+ * `table.column`. Throws (rather than returning null) when the name clearly
+ * means a column but cannot produce one, so the row explains itself.
+ */
+export function listGetter(defs: Defs): GetList {
+  return name => {
+    const hit = defs.lists.get(name);
+    if (hit) return hit;
+    // Any name whose definition wanted an absent file reports the file —
+    // being a list or not decides how the name PARSES (indexing, filters),
+    // not whether a row using it gets a straight answer. Without this
+    // `avg = mean(person.age)` then `avg + 1` says "unknown variable".
+    const absent = defs.missingData.get(name);
+    if (absent) throw new MissingDataError(absent.message);
+    const dot = name.indexOf('.');
+    if (dot <= 0) {
+      // A data file is not a value on its own: it is where columns live.
+      const bare = defs.tables.get(name);
+      if (!bare) return null;
+      const col = bare.data?.columns.find(c => c.type === 'num')?.name;
+      throw new Error(`${name} is a data file — plot one of its columns${col ? `, like ${name}.${col}` : ''},`
+        + ` or name a filtered copy: adults = ${name}[…].`);
+    }
+    const table = defs.tables.get(name.slice(0, dot));
+    if (!table) return null;
+    const path = name.slice(dot + 1);
+    const length = path.endsWith('.length');
+    const col = length ? path.slice(0, -'.length'.length) : path;
+    if (!table.data) throw new MissingDataError(table.missing ?? `${table.file} is not loaded.`);
+    const found = table.data.columns.find(c => c.name === col);
+    if (!found) {
+      throw new Error(`${table.file} has no column "${col}" (columns: ${table.data.columns.map(c => c.name).join(', ')}).`);
+    }
+    if (length) {
+      if (found.type !== 'str') {
+        throw new Error(`${name} counts characters — ${name.slice(0, -'.length'.length)} is a numeric column.`);
+      }
+      if (table.data.rows > TABLE_MAX_ROWS) {
+        throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS}.`);
+      }
+      return { kind: 'data', values: textLengths(found) };
+    }
+    // A text column is a list too — of text. Only comparisons accept one
+    // (list.ts); everything numeric says so where it is used.
+    if (found.type !== 'num') return { kind: 'text', values: found.strs! };
+    if (table.data.rows > TABLE_MAX_ROWS) {
+      throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS}.`);
+    }
+    // The column's own array, never mutated downstream: every operation in
+    // list.ts allocates its result.
+    return { kind: 'data', values: found.nums! };
+  };
+}
+
+/** Every name that reads as a list, so `L[2]`, `person.age[2]` and
+ *  `person[…]` index instead of multiplying (parseExpr needs this before it
+ *  parses). Table names count: a data file is indexed by a filter. */
+export function listNamesOf(defs: Defs): Set<string> {
+  const out = new Set([...defs.lists.keys()]);
+  // A list whose file is elsewhere still indexes: the row must parse the same
+  // way on every device (see `indexes` in expr.ts).
+  for (const [name, m] of defs.missingData) if (m.list) out.add(name);
+  for (const [name, t] of defs.tables) {
+    out.add(name);
+    for (const c of t.data?.columns ?? []) out.add(`${name}.${c.name}`);
+  }
+  return out;
+}
+
+/**
+ * Whether a name reads as a list — what `d/dx L` asks before it differentiates.
+ *
+ * A dotted path counts when its HEAD is known, not only the full path: without
+ * the bytes there is no column list to enumerate, and answering "no" there
+ * made `d/dx person.age` refuse on the author's device and quietly answer 0
+ * in the same graph shared, previewed, or read through the MCP server. Same
+ * rule, and the same reason, as `indexes` in expr.ts.
+ */
+export const isListName = (names: ReadonlySet<string>, n: string): boolean => {
+  if (names.has(n)) return true;
+  const dot = n.indexOf('.');
+  return dot > 0 && names.has(n.slice(0, dot));
+};
+
+/**
+ * Of the names a document binds as values, the ones a late-addition builtin
+ * would otherwise claim — what parseExpr needs to keep `total = 3` followed by
+ * `total(x + 1)` the product it was before `total` became a reduction.
+ *
+ * Folded through `builtinFn`, because that is how a call is read: `Total = 3`
+ * is a legal definition and `Total(x + 1)` folds to the `total` builtin, so
+ * only the folded name says which builtin this document has taken.
+ */
+export const shadowedFnNames = (names: Iterable<string>): Set<string> => {
+  const out = new Set<string>();
+  for (const n of names) {
+    const b = builtinFn(n);
+    if (b && SHADOWABLE_FNS.has(b)) out.add(b);
+  }
+  return out;
+};
+
+/**
+ * Whether a name is already spoken for — what a `~` row asks before claiming
+ * one. Shared by the app and the worker because it drifted while it was
+ * written out twice, and because it must answer the same on both.
+ *
+ * `missingData` counts. A definition whose file is absent still claims its
+ * name — that is why rows below it report the file rather than "not defined"
+ * — so leaving it out would let `ages ~ Normal(0, 1)` stand next to
+ * `ages = person.age / 2` in a shared link and be rejected as "already
+ * defined" by the one person who has the CSV.
+ */
+export const nameTaken = (defs: Defs, n: string): boolean =>
+  defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n) || defs.states.has(n)
+  || defs.points.has(n) || defs.mats.has(n) || defs.lists.has(n) || defs.tables.has(n)
+  || defs.missingData.has(n);
+
+/**
+ * Whether this side of a comparison is still a list by the time the
+ * comparison sees it — the question list.ts answers by lowering, asked here
+ * of the shape alone, because on a device without the bytes there is nothing
+ * to lower. Arithmetic and scalar functions map over a list; a reduction or
+ * an index collapses one, and `[ ]` is itself a filter.
+ */
+function staysList(e: Expr, defs: Defs): boolean {
+  switch (e.kind) {
+    case 'var':
+      return defs.lists.has(e.name) || defs.missingData.get(e.name)?.list === true
+        || (e.name.includes('.') && defs.tables.has(e.name.slice(0, e.name.indexOf('.'))));
+    case 'list':
+    case 'data':
+    case 'text': return true;
+    case 'neg': return staysList(e.a, defs);
+    case 'bin': return staysList(e.a, defs) || staysList(e.b, defs);
+    case 'call':
+      // A reduction answers with one number however long its argument is,
+      // and `[at]`/`[index]` pick one element out.
+      if (SCALAR_REDUCTIONS.has(e.name) || e.name === '[at]' || e.name === '[index]') return false;
+      if ((e.name === 'min' || e.name === 'max') && e.args.length === 1) return false;
+      // hist is a whole plot, not a value — list.ts refuses it in a filter
+      // once the bytes are here, so it must not look list-shaped before then.
+      if (e.name === 'hist' || e.name === '[hist]') return false;
+      return e.args.some(a => staysList(a, defs));
+    case 'vec': return e.items.some(a => staysList(a, defs));
+    default: return false;
+  }
+}
+
+/**
+ * What a filter can be judged without reading a single row: that it is a
+ * comparison over a list, and that it could ever settle. Everything else —
+ * which rows it keeps, how many there are — needs the file (list.ts decides
+ * those). The two answers must agree, or a shared link is valid only on the
+ * device that has the bytes.
+ */
+/** A mask is a list of comparisons, so a filter condition has to BE one:
+ *  `person[5]`, `person[person.age]`, `person[sin(person.age)]` are values. */
+const isComparison = (e: Expr): e is Expr & { kind: 'ineq' | 'call' } =>
+  e.kind === 'ineq' || (e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]'));
+
+/** A comparison that decides the same answer for every element is not a
+ *  filter, whatever it mentions — `L[1 < 2]`, `L[mean(L) > 0]`, `L[L[1] > 0]`. */
+const DEAD_FILTER = 'A filter has to test the list itself, like L[L > 2]'
+  + ' — this one answers the same for every element.';
+
+/**
+ * What is wrong with the index in `L[idx]`, judged by shape alone — or null.
+ * The other half of the `[…]` syntax from checkFilterShape below, and the same
+ * reasoning: list.ts settles these by lowering, which needs the bytes, and a
+ * question answered only where the file is makes a link valid on one device
+ * and broken on the next. So `person.age[person.age]` is a slice everywhere,
+ * and `person.age[1 < 2]` is a dead filter everywhere, rather than reported as
+ * merely device-local in a shared link and refused for the author.
+ */
+export function indexIssue(idx: Expr, defs: Defs): string | null {
+  const inside = wholePlotOverList(idx, defs);
+  if (inside) return `Lists cannot appear inside ${inside}(…).`;
+  if (!isComparison(idx)) return staysList(idx, defs) ? SLICE : null;
+  const operands = idx.kind === 'ineq'
+    ? ineqComparisons(idx).flatMap(c => [c.l, c.r])
+    : idx.args;
+  return operands.some(a => staysList(a, defs)) ? null : DEAD_FILTER;
+}
+
+/**
+ * A whole-plot form with a list inside it — `domain(person.age)`, and the
+ * geometry statements — named as list.ts names it when the bytes are here.
+ * Answered from the shape alone, so `person[domain(person.age) > 0]` is
+ * refused on the device that cannot lower it as well as on the one that can.
+ */
+function wholePlotOverList(e: Expr, defs: Defs): string | null {
+  if (e.kind === 'call') {
+    if (NO_LIST_INSIDE.has(e.name) && e.args.some(a => staysList(a, defs))) {
+      return plainFnName(e.name);
+    }
+    for (const a of e.args) {
+      const hit = wholePlotOverList(a, defs);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const kids: Expr[] = e.kind === 'neg' ? [e.a]
+    : e.kind === 'bin' ? [e.a, e.b]
+      : e.kind === 'eq' ? [e.l, e.r]
+        : e.kind === 'ineq' ? [e.l, e.r]
+          : e.kind === 'vec' || e.kind === 'list' ? [...e.items]
+            : [];
+  for (const k of kids) {
+    const hit = wholePlotOverList(k, defs);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function checkFilterShape(cond: Expr, defs: Defs, shape: string): void {
+  if (!isComparison(cond)) throw new Error(shape);
+  const inside = wholePlotOverList(cond, defs);
+  if (inside) throw new Error(`Lists cannot appear inside ${inside}(…).`);
+  // …and a list has to REACH it. Merely mentioning one is not enough:
+  // `person[mean(person.age) > 0]` and `person[person.age[1] > 0]` reduce to a
+  // single scalar, so they decide one answer for every row — `person[1 < 2]`
+  // wearing a column's name. Only operations that map over a list keep it one.
+  const operands = cond.kind === 'ineq'
+    ? ineqComparisons(cond).flatMap(c => [c.l, c.r])
+    : cond.args;
+  if (!operands.some(a => staysList(a, defs))) throw new Error(shape);
+  if (freeVars(cond).has('t')) {
+    throw new Error('A filter cannot depend on t — the list would change length every frame.');
+  }
+}
+
+/**
+ * A definition that filters a whole data file: `adults = person[cond]`.
+ * Recognized before list lowering, which knows only about values — the
+ * result is a new table, with every column cut to the rows the mask keeps.
+ * Returns null when the row is not that shape.
+ */
+function filteredTable(e: Expr, defs: Defs, opts: ResolveOpts): TableDef | null {
+  if (e.kind !== 'call' || e.name !== '[index]' || e.args[0]?.kind !== 'var') return null;
+  const src = defs.tables.get(e.args[0].name);
+  if (!src) return null;
+  const name = e.args[0].name;
+  const shape = `${name}[…] needs a comparison, like ${name}[${name}.x > 0].`;
+  // No bytes to cut (a shared link elsewhere, or a server-side preview): the
+  // cut is a table too, and reports the same reason its source does. Only the
+  // per-row answer waits for the data — whether the row is a filter at all,
+  // and whether it could ever settle, are answered here either way, or a
+  // shared link would call `person[5]` valid and the author's device would not.
+  if (!src.data) {
+    checkFilterShape(e.args[1], defs, shape);
+    return { file: src.file, hash: src.hash, data: null, missing: src.missing };
+  }
+  const keep = lowerMask(e.args[1], listGetter(defs), opts);
+  if (!keep) throw new Error(shape);
+  if (keep.length !== src.data.rows) {
+    throw new Error(`The filter tests ${keep.length} values but ${src.file} has ${src.data.rows} rows.`);
+  }
+  return { file: src.file, hash: src.hash, data: filterTable(src.data, keep) };
+}
 
 /** Component names `name` expands to under geometry lowering, or null. */
 export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
@@ -109,18 +467,104 @@ export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
     : defs.vecStates.has(name) ? vecStateComps(name, defs.vecStates.get(name)!)
       : null;
 
-/** Names with built-in meaning that definitions may not shadow. */
+/**
+ * Names with built-in meaning that definitions may not shadow.
+ *
+ * `open` is deliberately NOT one of them, common as it is in data (a price
+ * series names a column that). A row is a data file because of its SHAPE —
+ * `name = open("file.csv")`, matched before the function and constant forms —
+ * so a graph that says `open = 3` keeps the slider it was shared with, and a
+ * graph that says `open(f) = f` keeps its function; only the quoted-file-name
+ * shape belongs to the data syntax.
+ */
 export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi', 'tau']);
 
 const FN_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\)\s*=(?!=)([\s\S]+)$/;
 const CONST_RE = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]+)$/;
 const STATE_RE = /^\s*([A-Za-z_]\w*)'\s*=(?!=)([\s\S]+)$/;
 const INIT_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$/;
+/**
+ * `person = open("people.csv", 3a7f9c…)` — the hash is optional as typed;
+ * the app fills it in from the file it finds (like a slider's write-back).
+ *
+ * At least `HASH_TOKEN_LEN` hex digits, because a row is resolved by hash
+ * *prefix*: a shorter token can match more than one stored file, and binding
+ * a row to the wrong bytes is the exact failure the pin exists to prevent.
+ */
+const TABLE_RE = new RegExp(
+  String.raw`^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{${HASH_TOKEN_LEN},64})\s*)?\)\s*$`,
+);
+
+/**
+ * The name a file is stored and written under. A row quotes the file name
+ * with no escape (`open("sales.csv")`), so a name holding a quote or a line
+ * break could not be read back — and a row that cannot be read back is worse
+ * than one whose title lost a character. Applied at ingest, so what is stored
+ * and what the row says are the same string, and re-dropping the file matches.
+ *
+ * `;` used to go the same way, because the link codec could not tell a data
+ * semicolon from the separator between rows; now it can (lib/link.ts), so
+ * `sales;2026.csv` keeps its name.
+ */
+export const rowSafeFileName = (name: string): string =>
+  name.replace(/["\r\n\t]+/g, '_').trim() || 'data.csv';
+
+/** A row that means to open a file, whether or not it succeeds at saying so. */
+const OPEN_HEAD_RE = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*["']/;
+
+/** How an `open(…)` row is written, for the app's write-back. */
+export const formatTableRow = (name: string, file: string, hash: string): string =>
+  `${name} = open("${rowSafeFileName(file)}"${hash ? `, ${shortHash(hash)}` : ''})`;
+
+/**
+ * A row that means to open a file but cannot: it claims a name it may not
+ * have (`w`, `e`, `open` itself), or pins a hash too short to identify one
+ * file. Without this it falls through to the expression parser, which only
+ * knows that quotes are not arithmetic.
+ */
+export function badTableRow(text: string): string | null {
+  const m = OPEN_HEAD_RE.exec(text);
+  if (!m) return null;
+  if (!nameable(m[1])) {
+    return `${m[1]} is a built-in name, so it cannot name a data file — try ${m[1]}_data = open(…).`;
+  }
+  if (TABLE_RE.test(text)) return null;
+  const short = /,\s*([0-9a-fA-F]+)\s*\)\s*$/.exec(text);
+  if (short && short[1].length < HASH_TOKEN_LEN) {
+    return `A data file's hash is ${HASH_TOKEN_LEN} hex digits; that is ${short[1].length}.`
+      + ' Delete it and the app will fill in the right one.';
+  }
+  // Something else malformed. scanDefinition hands every open-shaped row here
+  // rather than reading it as a constant, so this is the only explanation the
+  // row will get — the expression parser only knows quotes are not arithmetic.
+  return `A data file row reads ${m[1]} = open("file.csv")`
+    + `, with an optional ${HASH_TOKEN_LEN}-digit hash after the name.`;
+}
 
 /** A name a definition may claim: not a builtin (except the late-addition
  *  ones old graphs may define themselves), not reserved, not a uniform. */
 export const nameable = (n: string): boolean =>
   (!FUNCTIONS.has(n) || SHADOWABLE_FNS.has(n)) && !RESERVED.has(n) && !n.startsWith('u_');
+
+/**
+ * A definable name for a dropped file, starting from the one its file name
+ * suggests: the stem itself where a definition may claim it, `data_…` where it
+ * may not, then numbered until nothing else has taken it.
+ *
+ * Both halves matter, because numbering alone cannot rescue every stem: no
+ * `u_2`, `u_3`, … is nameable either (they all read as uniforms), so `u.csv`
+ * sent the search for a free name round forever and froze the tab — after the
+ * bytes were already stored. `data_u` is nameable, and so is every number
+ * after it.
+ */
+export function freeTableName(base: string, taken: ReadonlySet<string>): string {
+  const stem = nameable(base) ? base : `data_${base}`;
+  if (!taken.has(stem)) return stem;
+  for (let k = 2; ; k++) {
+    const name = `${stem}_${k}`;
+    if (!taken.has(name)) return name;
+  }
+}
 
 /** Detect a definition row before parsing (so calls to it parse everywhere). */
 export function scanDefinition(text: string): Definition | null {
@@ -130,6 +574,16 @@ export function scanDefinition(text: string): Definition | null {
   if (m && nameable(m[1])) return { kind: 'state', name: m[1], rhs: m[2] };
   m = INIT_RE.exec(text);
   if (m && nameable(m[1])) return { kind: 'init', name: m[1], rhs: m[2] };
+  // Before the function form: `open(…)` takes a file name, not parameters.
+  m = TABLE_RE.exec(text);
+  if (m && nameable(m[1])) {
+    return { kind: 'table', name: m[1], file: m[2] ?? m[3], hash: (m[4] ?? '').toLowerCase() };
+  }
+  // A row that plainly means to open a file but does not parse as one is NOT
+  // a constant: `p = open("a.csv", abc123)` would otherwise be scanned as a
+  // definition, and the row validator — the only thing that can explain the
+  // short hash — never runs on definition rows. Leave it to badTableRow.
+  if (OPEN_HEAD_RE.test(text)) return null;
   m = FN_RE.exec(text);
   if (m && nameable(m[1])) {
     return { kind: 'fn', name: m[1], params: m[2].split(/\s*,\s*/), rhs: m[3] };
@@ -181,7 +635,15 @@ function numeratorWrap(n: Expr): { order: number; wrap: (x: Expr) => Expr } | nu
  *  float32 roundoff — plots evaluate the expanded expression on the GPU. */
 const FD_H = 1e-4;
 
-function applyDiff(e: Expr, v: string, order: number): Expr {
+function applyDiff(e: Expr, v: string, order: number, isList?: (n: string) => boolean): Expr {
+  // A list is still just a name at this point, and diff() treats an unknown
+  // name as a constant — so differentiating one would answer 0 for every
+  // element. Say it cannot be done rather than answer wrongly.
+  const list = isList && [...freeVars(e)].find(isList);
+  if (list) {
+    throw new Error(`${list} is a list, and d/d${v} cannot differentiate one`
+      + ` — write the derivative of its elements, like [d/d${v} f(${v}), …].`);
+  }
   for (let k = 0; k < order; k++) {
     try {
       e = diff(e, v);
@@ -204,7 +666,7 @@ function applyDiff(e: Expr, v: string, order: number): Expr {
  * multiplication binds tighter than '/', so `d/dx expr` parses as
  * d / (dx · expr): the operand is the tail of the denominator's product chain.
  */
-function matchDeriv(numr: Expr, den: Expr): Expr | null {
+function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts): Expr | null {
   const head = numeratorWrap(numr);
   if (!head) return null;
   const factors: Expr[] = [];
@@ -217,7 +679,7 @@ function matchDeriv(numr: Expr, den: Expr): Expr | null {
   if (!dx || dx.order !== head.order || factors.length === 0) return null;
   let operand = factors[0];
   for (let k = 1; k < factors.length; k++) operand = { kind: 'bin', op: '*', a: operand, b: factors[k] };
-  return head.wrap(applyDiff(operand, dx.v, head.order));
+  return head.wrap(applyDiff(operand, dx.v, head.order, opts?.isList));
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -227,6 +689,19 @@ export interface ResolveOpts {
   consts?: Record<string, number>;
   /** Out: constant names referenced by Σ/Π bounds (their sliders snap to integers). */
   boundConsts?: Set<string>;
+  /**
+   * Whether a name is a list. Derivatives expand HERE, before list.ts
+   * substitutes, so without this `d/dt L` differentiates `L` as an opaque
+   * variable and quietly becomes 0.
+   */
+  isList?: (name: string) => boolean;
+  /**
+   * What is wrong with `L[idx]` judged by SHAPE alone — a slice, a filter no
+   * list reaches, a whole-plot call over one — or null if nothing is. Asked
+   * before list.ts lowers anything, because lowering needs the bytes and the
+   * answer must not: see indexIssue.
+   */
+  indexIssue?: (idx: Expr) => string | null;
 }
 
 interface Ctx {
@@ -395,6 +870,9 @@ function substIdx(e: Expr, idx: string, val: Expr): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substIdx(a, idx, val)) };
     case 'list': return { kind: 'list', items: e.items.map(a => substIdx(a, idx, val)) };
+    case 'data':
+    case 'str':
+    case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: substIdx(c.cond, idx, val), value: substIdx(c.value, idx, val) })),
@@ -426,6 +904,9 @@ function foldNums(e: Expr): Expr {
     case 'ineq': return { kind: 'ineq', op: e.op, l: foldNums(e.l), r: foldNums(e.r) };
     case 'vec': return { kind: 'vec', items: e.items.map(foldNums) };
     case 'list': return { kind: 'list', items: e.items.map(foldNums) };
+    case 'data':
+    case 'str':
+    case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: foldNums(c.cond), value: foldNums(c.value) })),
@@ -580,6 +1061,9 @@ export function usesIntegral(e: Expr): boolean {
     case 'ineq': return usesIntegral(e.l) || usesIntegral(e.r);
     case 'vec': return e.items.some(usesIntegral);
     case 'list': return e.items.some(usesIntegral);
+    case 'data':
+    case 'str':
+    case 'text': return false;
     case 'piecewise':
       return e.cases.some(c => usesIntegral(c.cond) || usesIntegral(c.value))
         || (e.otherwise ? usesIntegral(e.otherwise) : false);
@@ -617,14 +1101,16 @@ function rx(e: Expr, ctx: Ctx): Expr {
       const a = rx(e.a, ctx);
       const b = rx(e.b, ctx);
       if (e.op === '/') {
-        const d = matchDeriv(a, b);
+        const d = matchDeriv(a, b, ctx.opts);
         if (d) return d;
       }
       if (e.op === '*' && a.kind === 'bin' && a.op === '/') {
         // The parenthesized form (d/dx)(expr): the quotient is bare.
         const head = numeratorWrap(a.a);
         const dx = dxOrder(a.b);
-        if (head && dx && head.order === dx.order) return head.wrap(applyDiff(b, dx.v, head.order));
+        if (head && dx && head.order === dx.order) {
+          return head.wrap(applyDiff(b, dx.v, head.order, ctx.opts.isList));
+        }
       }
       return { kind: 'bin', op: e.op, a, b };
     }
@@ -640,7 +1126,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const body = e.args[e.args.length - 1];
         return expandInt(e.args.length === 3 ? [e.args[0], e.args[1]] : null, body, ctx);
       }
-      if (e.name === '[range]') throw new Error("'..' ranges only appear in sum(n=1..N, …), prod(…) or int[a..b].");
+      if (e.name === '[range]') throw new Error("'..' ranges only appear in sum(n=1..N, …), prod(…), int[a..b], or a list like [1..10].");
       const args = e.args.map(x => rx(x, ctx));
       const fn = getFn(e.name);
       if (fn) {
@@ -654,7 +1140,17 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'eq': return { kind: 'eq', l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'ineq': return { kind: 'ineq', op: e.op, l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'vec': return { kind: 'vec', items: e.items.map(x => rx(x, ctx)) };
-    case 'list': return { kind: 'list', items: e.items.map(x => rx(x, ctx)) };
+    case 'list': return {
+      kind: 'list',
+      // `[1..10]` ranges survive resolution intact (bounds resolve) and
+      // expand later in list lowering, where constant values are known.
+      items: e.items.map((x): Expr => (x.kind === 'call' && x.name === '[range]'
+        ? { kind: 'call', name: '[range]', args: x.args.map(a => rx(a, ctx)) }
+        : rx(x, ctx))),
+    };
+    case 'data':
+    case 'str':
+    case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
       cases: e.cases.map(c => ({ cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
@@ -667,29 +1163,52 @@ export interface BuiltDefs {
   defs: Defs;
   /** Per-definition errors by defKey; failed definitions are excluded from defs. */
   errors: Map<string, string>;
+  /** Of those, the ones that failed only because a data file is not on this
+   *  device — the app turns their message into a file picker. */
+  needsFile: Set<string>;
   /** Constants referenced by Σ/Π bounds (the UI snaps their sliders to integers). */
   sumBoundConsts: Set<string>;
 }
 
+/**
+ * Look up the bytes behind an `open(…)` row. Omitted (the worker, tests)
+ * means no device data at all: the row still defines a table, but one whose
+ * columns report themselves as device-local rather than missing.
+ */
+export type TableSource = (d: { file: string; hash: string }) => Table | null;
+
 /** Parse and resolve a set of uniquely named definitions. */
-export function buildDefs(raw: Definition[]): BuiltDefs {
+export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   const errors = new Map<string, string>();
+  const needsFile = new Set<string>();
   const defs = emptyDefs();
   const byName = new Map(raw.map(d => [d.name, d]));
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
   const stateNames = new Set(raw.filter(d => d.kind === 'state').map(d => d.name));
+  // Names this document binds as values shadow a late-addition builtin of the
+  // same name, so `total = 3` still reads `total(x + 1)` as a product.
+  const valueNames = shadowedFnNames(raw.filter(d => d.kind !== 'fn').map(d => d.name));
   const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   // Numeric values of constants resolved so far: Σ/Π bounds in later
   // definitions may use them (bounds need a value at expansion time).
   const numEnv: Record<string, number> = {};
-  const ropts: ResolveOpts = { consts: numEnv, boundConsts: new Set() };
+  const ropts: ResolveOpts = {
+    consts: numEnv,
+    boundConsts: new Set(),
+    // Live: list names accumulate as definitions are processed.
+    isList: n => isListName(listNamesOf(defs), n),
+    indexIssue: idx => indexIssue(idx, defs),
+  };
 
   const parsed = new Map<string, Expr>();
-  const parse = (d: Definition): Expr => {
+  // List names accumulate in definition order, so `L[2]` indexes only when
+  // L's list definition sits above (below, it parses as multiplication and
+  // is reported as a forward reference after the loop).
+  const parse = (d: Definition & { rhs: string }): Expr => {
     const key = defKey(d);
     let p = parsed.get(key);
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames)));
+    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, listNamesOf(defs), valueNames)));
     return p;
   };
 
@@ -724,6 +1243,18 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
       if (d.kind === 'fn') {
         if (new Set(d.params).size !== d.params.length) throw new Error('Duplicate parameter names.');
         getFn(d.name);
+      } else if (d.kind === 'table') {
+        // The data itself never comes from the document, so there is nothing
+        // to resolve: look the file up and register its columns as lists.
+        const data = tables ? tables(d) : null;
+        // Registered even when the bytes are missing, so the rows that read
+        // its columns report the file rather than "unknown variable".
+        const named = d.hash ? `${d.file} (${shortHash(d.hash)})` : d.file;
+        const missing = data ? undefined : tables
+          ? `${named} is not on this device — drop the file here to load it.`
+          : `${named} is not on this device — its data does not travel in the link.`;
+        defs.tables.set(d.name, { file: d.file, hash: d.hash, data, missing });
+        if (missing && tables) throw new MissingDataError(missing);
       } else if (d.kind === 'state') {
         derivs.set(d.name, resolveExpr(parse(d), getFn, ropts));
       } else if (d.kind === 'init') {
@@ -732,21 +1263,70 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
         // Lowering expands point arithmetic; a pair result names a point.
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
-        const e = lowerGeom(
+        let e = lowerGeom(
           resolveExpr(parse(d), getFn, ropts),
           n => (defs.points.has(n) ? pointComps(n) : null),
           n => defs.mats.get(n) ?? null,
         );
+        // `adults = person[person.age >= 18]` names a cut of a data file.
+        const cut = filteredTable(e, defs, ropts);
+        if (cut) {
+          defs.tables.set(d.name, cut);
+          // Registered first, so rows below report the file rather than
+          // "unknown variable" — then the row says what is missing, exactly
+          // as the `open()` row it cuts does. Without this the derived table
+          // was the one row in the chain that said nothing: its source asked
+          // for the file and every use of it did too.
+          if (cut.missing && tables) throw new MissingDataError(cut.missing);
+          continue;
+        }
         if (e.kind === 'list') {
-          // A named list of rows is a matrix; anything else a list could
-          // mean has no definition-side meaning yet.
-          const m = matrixFromList(e);
-          if (!m) throw new Error(`${d.name} = […] defines a matrix — write rows: ${d.name} = [(a, b), (c, d)].`);
-          defs.mats.set(d.name, m);
+          // A named list of 2–3 equal-length tuple/nested rows is a matrix
+          // (that syntax predates data lists); every other shape falls
+          // through to data-list handling below.
+          let mat: Mat | null = null;
+          try {
+            mat = matrixFromList(e);
+          } catch (err) {
+            // Nested-list rows ([[1,2],[3,4],…]) always spell a matrix, so
+            // a bad shape there keeps the matrix error.
+            if (e.items.some(it => it.kind === 'list')) throw err;
+          }
+          if (mat) {
+            defs.mats.set(d.name, mat);
+            continue;
+          }
+        }
+        e = lowerLists(e, listGetter(defs), ropts, true);
+        if (isSeq(e)) {
+          // A named data list: scalar elements, or points for a named scatter.
+          // A `data`/`text` value is a list too — a column, or arithmetic over
+          // one — and is stored as it stands rather than expanded.
+          if (e.kind === 'list') {
+            const vecs = e.items.filter((it): it is Expr & { kind: 'vec' } => it.kind === 'vec');
+            if (vecs.length && vecs.length !== e.items.length) {
+              throw new Error('Lists cannot mix numbers and points.');
+            }
+            if (new Set(vecs.map(it => it.items.length)).size > 1) {
+              throw new Error('All points in a list need the same number of coordinates.');
+            }
+          }
+          defs.lists.set(d.name, e);
           continue;
         }
         const store: Array<[string, Expr]> = [[d.name, e]];
         if (e.kind === 'vec') {
+          // `P = (person.age, person.height)` names a SCATTER, whose
+          // components are whole columns — not a point, whose components are
+          // two numbers. Read as a point it became two `data` components that
+          // then failed to evaluate ("List in scalar context"), so the one
+          // representation that makes a 200 000-row file plottable was also
+          // the one that could not be given a name. The symbolic equivalent
+          // `P = (L, M)` always could.
+          if (isDataScatter(e)) {
+            defs.lists.set(d.name, e);
+            continue;
+          }
           if (e.items.length !== 2) throw new Error('A named point needs exactly 2 components.');
           const comps = pointComps(d.name);
           for (const c of comps) {
@@ -780,6 +1360,24 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
       }
     } catch (e) {
       errors.set(defKey(d), msg(e));
+      if (e instanceof MissingDataError) {
+        needsFile.add(defKey(d));
+        // The name still means something — a value whose file is elsewhere.
+        // Registered so rows below report the file too, instead of "ages is
+        // not defined", which sends the reader looking for a typo.
+        //
+        // Whether it is a LIST is read off the shape, the same way a filter's
+        // is: `ages = person.age / 2` is one, `avg = mean(person.age)` is a
+        // number. Calling a scalar a list would make it index here and
+        // multiply on the device that has the bytes.
+        if (d.kind === 'const') {
+          const shape = parsed.get(defKey(d));
+          defs.missingData.set(d.name, {
+            message: e.message,
+            list: shape ? staysList(shape, defs) : false,
+          });
+        }
+      }
     }
   }
 
@@ -985,11 +1583,35 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
     }
   }
 
+  // A list holds data: its elements may only use constants, states, and t.
+  // (References to other lists never survive — lowering already inlined
+  // any list defined above, and one defined below parses as a product and
+  // lands in the constant check above.)
+  // (A `data`/`text` list holds numbers and text, so it has no variables to
+  // check — only the symbolic representation can name one.)
+  outer: for (const [name, seq] of defs.lists) {
+    if (seq.kind !== 'list') continue;
+    for (const item of seq.items) {
+      for (const fv of freeVars(item)) {
+        if (fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
+          errors.set(name, `${name} is a list, so its elements may only use constants and t (found ${fv}).`);
+          defs.lists.delete(name);
+          continue outer;
+        }
+      }
+    }
+  }
+
   // Trial-evaluate to surface cycles and unsupported calls at definition time.
   // States are leaves here: the integrator supplies their values, so they
   // stand in as 0 and never recurse.
   const check = (name: string, visiting: Set<string>): void => {
     const e = defs.consts.get(name);
+    // A surviving list (or matrix) name means it was defined below its use,
+    // so lowering saw it as a plain scalar.
+    if (!e && (defs.lists.has(name) || defs.mats.has(name))) {
+      throw new Error(`${name} is a ${defs.lists.has(name) ? 'list' : 'matrix'} — move its definition above where it is used.`);
+    }
     if (!e) throw new Error(`${name} is not defined.`);
     if (visiting.has(name)) throw new Error(`${name} is defined in terms of itself.`);
     visiting.add(name);
@@ -1054,7 +1676,7 @@ export function buildDefs(raw: Definition[]): BuiltDefs {
     if (!vecStateComps(name, dim).every(c => defs.states.has(c))) defs.vecStates.delete(name);
   }
 
-  return { defs, errors, sumBoundConsts: ropts.boundConsts! };
+  return { defs, errors, needsFile, sumBoundConsts: ropts.boundConsts! };
 }
 
 /**

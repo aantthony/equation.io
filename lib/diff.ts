@@ -152,7 +152,10 @@ export function diff(e: Expr, v: string): Expr {
     case 'eq': return sub(diff(e.l, v), diff(e.r, v));
     case 'ineq': throw new Error('Cannot differentiate an inequality.');
     case 'vec': throw new Error('Differentiate vector components individually.');
-    case 'list': throw new Error('Cannot differentiate a list.');
+    case 'list':
+    case 'data': throw new Error('Cannot differentiate a list.');
+    case 'str':
+    case 'text': throw new Error('Cannot differentiate text.');
     case 'piecewise':
       // Branchwise derivative (ignores the boundary points).
       return {

@@ -726,8 +726,14 @@ export class Renderer2D {
 export interface Overlay2D {
   /** hot: pointer is over it (or dragging it) — drawn with a grab halo.
    *  label: text drawn beside the point (a named point's name).
-   *  r: dot radius in CSS px (sequence/list dots draw slightly smaller). */
-  points: Array<{ x: number; y: number; color: string; hot?: boolean; label?: string; r?: number }>;
+   *  r: dot radius in CSS px (sequence/list dots draw slightly smaller).
+   *  bare: no outline — in a dense scatter the outlines of later dots paint
+   *  over the fill of earlier ones, turning the whole trace the outline
+   *  colour. */
+  points: Array<{ x: number; y: number; color: string; hot?: boolean; label?: string; r?: number; bare?: boolean }>;
+  /** Bulk scatters backed by typed arrays (CSV columns): drawn as plain
+   *  squares under everything else, since at these counts a dot is a pixel. */
+  clouds?: Array<{ xs: Float64Array; ys: Float64Array; color: string; r?: number }>;
   /** closed joins the last vertex back to the first; fill (a CSS color,
    *  usually translucent) paints the enclosed region when every vertex is
    *  finite. */
@@ -779,6 +785,24 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
   }
 
   if (extras) {
+    // Data clouds first and in bulk: one fillStyle, one rect per point, and
+    // off-screen points skipped. A CSV column can be 100k points, where the
+    // per-point beginPath/arc/fill/stroke of a named point would not survive
+    // a single frame — and at that density outlined dots would merge into a
+    // white smear anyway (see .points below).
+    for (const cloud of extras.clouds ?? []) {
+      ctx.fillStyle = cloud.color;
+      const r = cloud.r ?? 1.5;
+      const d = r * 2;
+      const { xs, ys } = cloud;
+      for (let i = 0; i < xs.length; i++) {
+        const sx = toScreenX(xs[i]);
+        const sy = toScreenY(ys[i]);
+        // NaN fails every comparison, so gaps in the data fall out here too.
+        if (!(sx > -d && sx < w + d && sy > -d && sy < h + d)) continue;
+        ctx.fillRect(sx - r, sy - r, d, d);
+      }
+    }
     for (const bar of extras.bars ?? []) {
       const sx = toScreenX(bar.x);
       const sy0 = toScreenY(0);
@@ -835,9 +859,11 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
       ctx.arc(sx, sy, r, 0, Math.PI * 2);
       ctx.fillStyle = pt.color;
       ctx.fill();
-      ctx.lineWidth = r < 4 ? 1.25 : 2;
-      ctx.strokeStyle = theme.pointOutline;
-      ctx.stroke();
+      if (!pt.bare) {
+        ctx.lineWidth = r < 4 ? 1.25 : 2;
+        ctx.strokeStyle = theme.pointOutline;
+        ctx.stroke();
+      }
       if (pt.label) {
         ctx.font = 'bold 12px ui-sans-serif, system-ui';
         ctx.fillStyle = pt.color;

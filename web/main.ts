@@ -1,14 +1,25 @@
 import {
+  MissingDataError,
   animatedConstNames,
+  badTableRow,
   buildDefs,
   compsOf,
   constsAnimated,
   defKey,
   emptyDefs,
   evalConstEnv,
+  formatTableRow,
+  freeTableName,
+  listGetter,
+  listNamesOf,
+  isListName,
+  indexIssue,
+  nameTaken,
+  shadowedFnNames,
   resolveExpr,
   scanDefinition,
   usesIntegral,
+  TABLE_MAX_ROWS,
   type Definition,
   type Defs,
 } from '../lib/defs.ts';
@@ -34,6 +45,7 @@ import {
 import { SLIDER_NUM_RE as NUM_RE, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
+import { lowerLists, usesListReduction } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
 import { type Classified, classify } from '../lib/plot.ts';
@@ -50,6 +62,9 @@ import {
   formatViewRow,
   parseViewRow,
 } from '../lib/view.ts';
+import { type Table, tableNameFor } from '../lib/csv.ts';
+import { shortHash } from '../lib/hash.ts';
+import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
 import { fullscreenQuad } from './gl.ts';
 import {
   type GridSpec,
@@ -75,6 +90,10 @@ interface Equation {
   /** The resolved expression behind cls (user functions/fields inlined). */
   parsed?: Expr;
   error?: string;
+  /** The error is only that a data file is not on this device, so the message
+   *  doubles as the file picker (any row that reads a column, not just the
+   *  `open(…)` row that names it). */
+  needsFile?: boolean;
   /** Extra readout under the line (e.g. the numeric value of a P(…) row). */
   info?: string;
   /** Set when the row is a definition (`a = 2`, `f(x) = …`) rather than a plot. */
@@ -103,6 +122,8 @@ interface Equation {
   curveUI?: CurveUI;
   errorEl?: HTMLElement;
   infoEl?: HTMLElement;
+  /** Data rows: the collapsible grid of the file's first rows. */
+  tableUI?: TableUI;
   /** Cached hover points (axis intercepts/roots) for the cached view range. */
   spCache?: { text: string; env: string; xlo: number; xhi: number; ylo: number; yhi: number; pts: SpecialPoint[] };
   toggleUI?: { box: HTMLElement; btn: HTMLButtonElement };
@@ -122,6 +143,17 @@ interface Grabbable {
   /** True when `set` rewrites row text (so the drag is undoable and re-saved). */
   edits: boolean;
   set: (x: number, y: number) => void;
+}
+
+/** Read-only preview of a data file, under its `open(…)` row. */
+interface TableUI {
+  box: HTMLDetailsElement;
+  summary: HTMLElement;
+  scroll: HTMLElement;
+  /** The parsed table the grid was built from. Identity is the test: a file
+   *  keeps one Table across recompiles, while a filtered copy is rebuilt
+   *  whenever anything it depends on moves — exactly when the grid is stale. */
+  data?: Table;
 }
 
 interface SliderUI {
@@ -152,7 +184,37 @@ const CURVE_SAMPLES = 400;
 const ODE_STEPS = 1400;
 /** Most integral-curve seeds kept at once; older seeds evict first. */
 const MAX_DROPS = 12;
+/** Above this many points, a typed-array list draws as a bulk cloud rather
+ *  than as individual (outlined, hoverable) points. */
+const CLOUD_MIN = 400;
+/** Most points a cloud may hold in a 3D scene. render3d has no instanced path
+ *  — every point is a sprite it sorts and projects — so a cloud is capped
+ *  there where a flat one is not, and says so rather than drawing part of the
+ *  file. The scene, not the row, is what decides: a 2-column scatter goes down
+ *  the same sprite path as soon as any row uses z. */
+const CLOUD_3D_MAX = 10_000;
+
+/** Points a row would put in a 3D scene, either representation: a typed-array
+ *  scatter, or the symbolic point list a slider or t expands one into. */
+const cloudPoints = (plot: Classified['plot']): number =>
+  (plot.type === 'dscatter' ? plot.coords[0].length : plot.type === 'plist' ? plot.pts.length : 0);
 const TUBE_SEGMENTS = 24;
+
+/**
+ * The 1…n a value list is drawn against, kept per column. Drawing runs every
+ * frame while anything on the page animates, and a 200k-point column would
+ * otherwise allocate and fill 1.6 MB of the same numbers each time.
+ */
+const indexXs = new WeakMap<Float64Array, Float64Array>();
+function indexCoords(values: Float64Array): Float64Array {
+  let xs = indexXs.get(values);
+  if (!xs) {
+    xs = new Float64Array(values.length);
+    for (let k = 0; k < xs.length; k++) xs[k] = k + 1;
+    indexXs.set(values, xs);
+  }
+  return xs;
+}
 const COMB_STEP = 4;
 
 // --- state ---
@@ -535,6 +597,8 @@ function render() {
         case 'vfield2d':
         case 'polygon':
         case 'vlist':
+        case 'dlist':
+        case 'histogram':
         case 'sequence':
         case 'cobweb':
         case 'bifurcation':
@@ -542,6 +606,21 @@ function render() {
         case 'prob':
         case 'expect':
           break; // 2D-only plots (densities, flows, sequences, planar figures); skipped in 3D scenes
+        case 'dscatter': {
+          // One sprite per point (see CLOUD_3D_MAX); any row with more than
+          // that is rejected at compile time — flat clouds included, since
+          // they reach this path too whenever the scene is 3D — so nothing is
+          // dropped here. A gap in ANY coordinate skips the point: an unplaced
+          // z would otherwise reach projection and depth sorting as NaN.
+          const [xs, ys, zs] = plot.coords;
+          for (let k = 0; k < xs.length; k++) {
+            const z = zs ? zs[k] : 0;
+            if (isFinite(xs[k]) && isFinite(ys[k]) && isFinite(z)) {
+              scene.points.push({ pos: [xs[k], ys[k], z], color });
+            }
+          }
+          break;
+        }
         case 'plist': {
           const env = { ...constEnv, t: time };
           for (const comps of plot.pts) {
@@ -623,7 +702,7 @@ function render() {
       levels: [], fractals: [], domains: [], conformals: [], vfields: [],
       ineqs: [], bifs: [], scalars: [], complexes: [], curves: [],
     };
-    const extras: Overlay2D = { points: [], polylines: [], bars: [] };
+    const extras: Overlay2D = { points: [], polylines: [], bars: [], clouds: [] };
     // Spacing for any level-set family (custom grids, contour stacks): sample
     // |∇c| around the view to convert the target pixel gap into coordinate
     // units (π-based for angles).
@@ -709,12 +788,54 @@ function render() {
           break;
         }
         case 'plist': {
+          // A handful of points read as points; a few thousand read as a
+          // cloud, where fat outlined dots would merge into one white smear.
+          const dense = plot.pts.length > 200;
+          const r = dense ? 2 : 4;
           for (const comps of plot.pts) {
             try {
               const px = evaluate(comps[0], env);
               const py = evaluate(comps[1], env);
-              if (isFinite(px) && isFinite(py)) extras.points.push({ x: px, y: py, color: css, r: 4 });
+              if (isFinite(px) && isFinite(py)) extras.points.push({ x: px, y: py, color: css, r, bare: dense });
             } catch { /* skip unevaluable points */ }
+          }
+          break;
+        }
+        // Typed-array lists: nothing to evaluate, so the only question is how
+        // to draw them. Few enough to read as individual points, and they go
+        // through the same path as any other point (outlines, bars); past
+        // that they are a cloud, drawn in bulk.
+        case 'dlist': {
+          const { values } = plot;
+          if (values.length <= CLOUD_MIN) {
+            values.forEach((v, k) => {
+              if (!isFinite(v)) return;
+              if (eq.barMode) extras.bars!.push({ x: k + 1, y: v, halfWidth: 0.35, color: css });
+              else extras.points.push({ x: k + 1, y: v, color: css, r: 4 });
+            });
+            break;
+          }
+          extras.clouds!.push({ xs: indexCoords(values), ys: values, color: css });
+          break;
+        }
+        case 'dscatter': {
+          if (plot.dim === 3) break; // drawn in the 3D pass
+          const [xs, ys] = plot.coords;
+          if (xs.length <= CLOUD_MIN) {
+            for (let k = 0; k < xs.length; k++) {
+              if (isFinite(xs[k]) && isFinite(ys[k])) {
+                extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
+              }
+            }
+            break;
+          }
+          extras.clouds!.push({ xs, ys, color: css });
+          break;
+        }
+        case 'histogram': {
+          const { centers, counts, width } = plot;
+          for (let k = 0; k < centers.length; k++) {
+            extras.bars!.push({ x: centers[k], y: counts[k], halfWidth: width / 2, color: css });
           }
           break;
         }
@@ -916,6 +1037,7 @@ function recompileAll() {
     eq.cls = undefined;
     eq.parsed = undefined;
     eq.error = undefined;
+    eq.needsFile = undefined;
     eq.info = undefined;
     eq.def = undefined;
     eq.viewSpec = undefined;
@@ -938,14 +1060,25 @@ function recompileAll() {
     raw.push(d);
   }
 
-  const built = buildDefs(raw);
+  // Data files resolve out of the local store, which is already in memory:
+  // this runs on every keystroke, so nothing here may await (see filestore.ts).
+  const built = buildDefs(raw, ref => lookupFile(ref.file, ref.hash)?.table ?? null);
   defs = built.defs;
+  ensureTables(raw);
+  for (const [name, table] of defs.tables) {
+    const row = defRows.get(name);
+    if (!row || row.error || !table.data) continue;
+    const cols = table.data.columns.map(c => (c.type === 'num' ? c.name : `${c.name} (text)`));
+    row.info = [`${table.data.rows} rows`, cols.join(', '), ...table.data.warnings].join(' · ');
+  }
   // A state moves every frame, so anything reading one is animated too.
   defsAnimated = constsAnimated(defs) || defs.states.size > 0;
   sumBoundNames = built.sumBoundConsts;
   for (const [name, message] of built.errors) {
     const row = defRows.get(name);
-    if (row) row.error = message;
+    if (!row) continue;
+    row.error = message;
+    row.needsFile = built.needsFile.has(name);
   }
 
   // A second row naming something already defined is a plot, not a
@@ -983,6 +1116,15 @@ function recompileAll() {
   }
   const fieldEnv = Object.fromEntries(defs.fields);
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
+  const listNames = listNamesOf(defs);
+  // Names bound by this document that a late-addition builtin would otherwise
+  // claim, so `total = 3` keeps `total(x + 1)` the product it was shared as.
+  const valueNames = shadowedFnNames([
+    ...raw.filter(d => d.kind !== 'fn').map(d => d.name),
+    ...[...rvScan.base.values()].map(s => s.name),
+    ...[...rvScan.derived.values()].map(s => s.name),
+  ]);
+  const getList = listGetter(defs);
   const getFn = (name: string) => {
     const fn = defs.fns.get(name);
     if (!fn && fnNames.has(name)) throw new Error(`${name} has an error in its definition.`);
@@ -996,7 +1138,12 @@ function recompileAll() {
   } catch { /* a broken definition; bounds using it will report the error */ }
   for (const name of animatedConstNames(defs)) delete constVals[name];
   for (const name of defs.states.keys()) delete constVals[name];
-  const ropts = { consts: constVals, boundConsts: sumBoundNames };
+  const ropts = {
+    consts: constVals,
+    boundConsts: sumBoundNames,
+    isList: (n: string) => isListName(listNames, n),
+    indexIssue: (idx: Expr) => indexIssue(idx, defs),
+  };
 
   // Random-variable rows resolve before plot rows so P(…) and bare
   // expressions can reference them regardless of row order.
@@ -1005,8 +1152,7 @@ function recompileAll() {
     getFn,
     ropts,
     constNames,
-    taken: n => defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n)
-      || defs.states.has(n) || defs.points.has(n) || defs.mats.has(n),
+    taken: n => nameTaken(defs, n),
   });
   rvNames = builtRVs.names;
   const distRows = new Set<Equation>();
@@ -1077,12 +1223,26 @@ function recompileAll() {
     }
   }
 
+  /**
+   * The body of a P(…)/E(…) row, read exactly as a plot row is read — lists
+   * and all. Without the list names, `P(X < mean(L))` reported `Unknown
+   * variable: L` about a list defined two rows above; without the lowering,
+   * the reduction never became the number the bound needs.
+   */
+  const parseRowBody = (body: string): Expr => lowerLists(
+    resolveExpr(parseExpr(body, fnNames, listNames, valueNames), getFn, ropts),
+    getList,
+    ropts,
+  );
+
   const seenViewport = new Set<string>();
   for (const eq of equations) {
     if (eq.def || eq.comment || distRows.has(eq)) continue;
     const text = eq.text.trim();
     if (!text) continue;
     try {
+      const badRow = badTableRow(text);
+      if (badRow) throw new Error(badRow);
       const vspec = parseViewRow(text, constVals);
       if (vspec) {
         if (seenViewport.has(vspec.kind)) throw new Error(`${vspec.kind} is already set by another row.`);
@@ -1093,7 +1253,7 @@ function recompileAll() {
       const probBody = defs.consts.has('P') || defs.fns.has('P') ? null : matchProbability(text);
       if (probBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-        const p = toProbability(resolveExpr(parseExpr(probBody, fnNames), getFn, ropts), rvNames);
+        const p = toProbability(parseRowBody(probBody), rvNames);
         for (const name of p.rvs) {
           if (!rvSys.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
@@ -1148,7 +1308,7 @@ function recompileAll() {
       const expectBody = defs.consts.has('E') || defs.fns.has('E') ? null : matchExpectation(text);
       if (expectBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-        const ex = toExpectation(resolveExpr(parseExpr(expectBody, fnNames), getFn, ropts), rvNames);
+        const ex = toExpectation(parseRowBody(expectBody), rvNames);
         for (const name of ex.rvs) {
           if (!rvSys.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
@@ -1186,7 +1346,7 @@ function recompileAll() {
         eq.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts);
         continue;
       }
-      const rawParsed = parseExpr(text, fnNames);
+      const rawParsed = parseExpr(text, fnNames, listNames, valueNames);
       let parsed = resolveExpr(rawParsed, getFn, ropts);
       // A bare expression in random variables (`X + Y`, `X^2`) plots the
       // density of that derived variable — distribution arithmetic in place.
@@ -1207,14 +1367,30 @@ function recompileAll() {
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
       parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
+      // Lists broadcast/reduce away: the row becomes a plain list literal
+      // (dots, bars, or a scatter) or a scalar expression (reductions).
+      parsed = lowerLists(parsed, getList, ropts);
       // Coordinate fields substitute in as functions of the plane, so
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       eq.cls = classify(parsed, constNames);
+      // A 3-column scatter only ever draws in 3D, where every point is a
+      // sprite. Say so here rather than plotting the first CLOUD_3D_MAX of a
+      // sorted file, which looks like the whole thing. BOTH representations
+      // count: crossing a column with a slider or t expands the same cloud
+      // into a symbolic plist, which is if anything the more expensive one
+      // (every point re-evaluated per frame).
+      const plot = eq.cls.plot;
+      if ((plot.type === 'dscatter' || plot.type === 'plist') && plot.dim === 3
+        && cloudPoints(plot) > CLOUD_3D_MAX) {
+        throw new Error(`A 3D cloud draws at most ${CLOUD_3D_MAX} points;`
+          + ` that is ${cloudPoints(eq.cls.plot)}.`
+          + ' Filter it first, or plot two of the columns.');
+      }
       eq.parsed = parsed;
-      // A row that wrote an ∫ and resolved to a constant gets its value as a
-      // readout (the plot is the horizontal line y = that value).
-      if (envT0 && usesIntegral(rawParsed)) {
+      // A row that wrote an ∫ or a list reduction and resolved to a constant
+      // gets its value as a readout (the plot is the horizontal line there).
+      if (envT0 && (usesIntegral(rawParsed) || usesListReduction(rawParsed))) {
         try {
           const value = evaluate(parsed, envT0);
           if (isFinite(value)) eq.info = `≈ ${Number(value.toPrecision(6))}`;
@@ -1222,12 +1398,330 @@ function recompileAll() {
       }
     } catch (e) {
       eq.error = e instanceof Error ? e.message : String(e);
+      // "…is not on this device": the row is one file away from working, and
+      // saying so is only half an answer without a way to supply it.
+      eq.needsFile = e instanceof MissingDataError;
+    }
+  }
+  // …and a 2D cloud costs the same once ANYTHING makes the scene 3D: the
+  // renderer sends every scatter through the sprite path there, z = 0 and
+  // all, so a 200 000-point CSV beside one `z = …` row is 200 000 projected,
+  // depth-sorted sprites. Whether the scene is 3D is only known once every
+  // row has classified, which is why this waits for the loop to finish.
+  if (equations.some(eq => eq.cls && !eq.error && eq.cls.needs3D)) {
+    for (const eq of equations) {
+      if (!eq.cls || eq.error) continue;
+      const points = cloudPoints(eq.cls.plot);
+      if (points <= CLOUD_3D_MAX) continue;
+      eq.cls = undefined;
+      eq.error = `This graph is 3D, where every point is a sprite: at most ${CLOUD_3D_MAX},`
+        + ` and this row has ${points}. Filter it, or drop the row that uses z.`;
     }
   }
   rvSys.prune(); // sample caches of variables that no longer exist
   spGen++; // queued hover recomputes predate this compile: drop them
   spQueue.clear();
   setHover(null);
+  // A row that named a file with no hash and found it here gets pinned, on
+  // this path as much as after a load from storage — otherwise a row typed
+  // against a file already in memory would be shared unpinned, and open
+  // elsewhere against whatever bytes happen to share the name.
+  if (!pinning) {
+    pinning = true;
+    try {
+      pinTableHashes(); // recompiles once more, without re-entering here
+    } finally {
+      pinning = false;
+    }
+  }
+}
+
+/** Guards recompile → pin → recompile from recurring. */
+let pinning = false;
+
+// --- local data files (drag a CSV in) ---
+
+/** In flight: the IndexedDB read for files the document names. */
+let tableLoad: Promise<void> | null = null;
+/** A row named a file while that read was running: ask again when it lands. */
+let tableLoadAgain = false;
+
+/**
+ * Fetch the files an `open(…)` row names out of local storage. Compiling is
+ * synchronous, so this runs beside it and recompiles once bytes arrive; each
+ * (hash, name) is asked for only once, so a genuinely missing file settles on
+ * its error instead of spinning.
+ */
+function ensureTables(raw: Definition[]) {
+  const refs = raw
+    .filter((d): d is Definition & { kind: 'table' } => d.kind === 'table')
+    .filter(d => !lookupFile(d.file, d.hash))
+    .map(({ file, hash }) => ({ file, hash }));
+  if (!refs.length) return;
+  // A read is already running: this row was typed while it was. Remember to
+  // come back, or a file named mid-read is never asked for. (When the running
+  // read DID find something it recompiles anyway, which lands here again.)
+  if (tableLoad) {
+    tableLoadAgain = true;
+    return;
+  }
+  tableLoadAgain = false; // this read asks for what is named right now
+  tableLoad = loadRefs(refs)
+    .then(added => {
+      tableLoad = null;
+      if (added) refreshRows();
+      else if (tableLoadAgain) {
+        tableLoadAgain = false;
+        refreshRows();
+      }
+    })
+    .catch(() => { tableLoad = null; });
+}
+
+/** Recompile and redraw after something outside the document changed (a file
+ *  arrived), keeping the caret where the user left it. */
+function refreshRows() {
+  const caret = caretPos();
+  recompileAll();
+  if (pinTableHashes()) renderAll();
+  else reconcile();
+  if (caret && caret.line < equations.length) {
+    setCaret(caret.line, Math.min(caret.offset, equations[caret.line].text.length));
+  }
+  requestRender();
+}
+
+/**
+ * Write the resolved hash back into a row that named a file without one, so
+ * the link pins the exact data it was built against — the same two-way
+ * binding sliders, point drags, and `view(…)` rows already have.
+ *
+ * The row being typed is left alone: rewriting `p = open("people.csv")` into
+ * `p = open("people.csv", 3a7f…)` under the caret, mid-keystroke, would fight
+ * the typist. It pins as soon as the caret leaves, so a hand-typed row that
+ * resolved straight out of memory still gets pinned before it is shared.
+ */
+function pinTableHashes(): boolean {
+  let changed = false;
+  const editing = caretPos()?.line;
+  const lines = lineEls();
+  for (const [i, eq] of equations.entries()) {
+    const d = eq.def;
+    if (d?.kind !== 'table' || d.hash || eq.error || i === editing) continue;
+    const f = lookupFile(d.file, '');
+    if (!f) continue;
+    const text = formatTableRow(d.name, d.file, f.hash);
+    if (text === eq.text.trim()) continue;
+    eq.text = text;
+    // Write the line through the way a slider drag does, so the pin does not
+    // need a full re-render of the list to become visible.
+    if (lines[i]) lines[i].textContent = text;
+    changed = true;
+  }
+  if (changed) {
+    recompileAll();
+    saveUrl();
+  }
+  return changed;
+}
+
+/** A row name for a dropped file that no definition has claimed. */
+function rowNameFor(base: string): string {
+  // Scanned from the row TEXT, not from `eq.def`: dropping several files at
+  // once appends a row per file and recompiles only at the end, so the rows
+  // added moments ago have no def yet. Reading the stale defs gave two files
+  // with the same stem (sales.csv, sales.tsv) the same name, and the second
+  // row then lost to the duplicate check.
+  return freeTableName(base, new Set(equations
+    .map(eq => eq.def?.name ?? scanDefinition(eq.text)?.name)
+    .filter((n): n is string => !!n)));
+}
+
+/**
+ * Read dropped/picked files into the local store and wire them into the
+ * document: an existing row naming the same file is re-pinned to the new
+ * bytes, otherwise a fresh `open(…)` row appears (with a scatter of the first
+ * two numeric columns, so the drop draws something immediately).
+ */
+async function openDataFiles(files: File[]) {
+  const added: string[] = [];
+  let changed = false;
+  for (const file of files) {
+    let loaded;
+    try {
+      loaded = await ingest(file.name, new Uint8Array(await file.arrayBuffer()));
+    } catch (e) {
+      showNotice(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
+    if (!changed) pushUndo(null);
+    changed = true;
+    // Re-dropping a file the document already names re-pins those rows,
+    // rather than adding a second copy under another name — but only rows
+    // that asked for it. A row pinned to a DIFFERENT hash named those exact
+    // bytes on purpose; silently repointing it is the substitution the pin
+    // exists to prevent, and it would happen to whoever opened a shared graph
+    // and picked their own file of the same name. Those rows keep their
+    // hash, and the new bytes arrive as a row of their own.
+    let known = false;
+    let pinnedElsewhere = 0;
+    for (const eq of equations) {
+      const d = eq.def;
+      if (d?.kind !== 'table' || d.file !== loaded.file) continue;
+      if (d.hash && !loaded.hash.startsWith(d.hash)) {
+        pinnedElsewhere++;
+        continue;
+      }
+      known = true;
+      const text = formatTableRow(d.name, d.file, loaded.hash);
+      if (text !== eq.text.trim()) eq.text = text;
+    }
+    if (pinnedElsewhere) {
+      added.push(`${loaded.file}: ${pinnedElsewhere} row${pinnedElsewhere === 1 ? '' : 's'}`
+        + ' pinned to other bytes kept — delete the hash there to use this file');
+    }
+    // Whether the bytes survive a reload is the same news on either path, and
+    // it matters most on this one: a drop that answers "the file is not on
+    // this device" would have to answer it again after every reload.
+    const fragile = loaded.durable ? ''
+      : ' (this browser is not storing files — it will be gone on reload)';
+    if (known) {
+      added.push(`${loaded.file} reloaded${fragile}`);
+      continue;
+    }
+    const name = rowNameFor(tableNameFor(loaded.file));
+    // Land on the trailing blank row if there is one, so dropping twice does
+    // not leave gaps.
+    const last = equations[equations.length - 1];
+    const at = last && !last.text.trim() ? equations.length - 1 : equations.length;
+    addEquation(formatTableRow(name, loaded.file, loaded.hash), at);
+    const nums = loaded.table.columns.filter(c => c.type === 'num');
+    if (nums.length >= 2 && loaded.table.rows <= TABLE_MAX_ROWS) {
+      addEquation(`(${name}.${nums[0].name}, ${name}.${nums[1].name})`, at + 1);
+    }
+    added.push(`${loaded.file}: ${loaded.table.rows} rows as ${name}${fragile}`);
+  }
+  if (!changed) return;
+  recompileAll();
+  renderAll();
+  saveUrl();
+  requestRender();
+  if (added.length) showNotice(added.join(' · '));
+  void refreshFileMenu();
+}
+
+const DATA_EXT = /\.(csv|tsv|txt)$/i;
+
+const dataFilesIn = (dt: DataTransfer | null): File[] =>
+  [...(dt?.files ?? [])].filter(f => DATA_EXT.test(f.name) || f.type.includes('csv'));
+
+/** Transient message for things with no row to live on (a file that would
+ *  not parse, a drop that landed). */
+let noticeEl: HTMLElement | null = null;
+let noticeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function showNotice(text: string) {
+  // A live region: this is the ONLY feedback that a file parsed, failed, or
+  // will not survive a reload, and it disappears after five seconds — with no
+  // announcement, a screen-reader user has nothing to go back and read.
+  noticeEl ??= document.body.appendChild(Object.assign(document.createElement('div'), {
+    className: 'notice',
+    role: 'status',
+  }));
+  noticeEl.setAttribute('aria-live', 'polite');
+  noticeEl.textContent = text;
+  noticeEl.classList.add('show');
+  if (noticeTimer !== null) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => noticeEl?.classList.remove('show'), 5000);
+}
+
+/** Depth counter: dragenter/dragleave fire for every element crossed, so a
+ *  single counter is what tells a real exit from a child boundary. */
+let dragDepth = 0;
+
+addEventListener('dragenter', e => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  if (++dragDepth === 1) document.body.classList.add('file-drag');
+});
+addEventListener('dragover', e => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+addEventListener('dragleave', () => {
+  if (dragDepth && --dragDepth === 0) document.body.classList.remove('file-drag');
+});
+addEventListener('drop', e => {
+  if (!e.dataTransfer?.types.includes('Files')) return;
+  e.preventDefault();
+  dragDepth = 0;
+  document.body.classList.remove('file-drag');
+  const files = dataFilesIn(e.dataTransfer);
+  if (files.length) void openDataFiles(files);
+  else if (e.dataTransfer.files.length) showNotice('Only .csv, .tsv, and .txt data files can be opened here.');
+});
+
+/**
+ * The panel's list of files this browser is holding: what a graph can open,
+ * and the only place to throw one away again.
+ */
+async function refreshFileMenu() {
+  const box = document.getElementById('data-files') as HTMLDetailsElement | null;
+  const list = document.getElementById('data-files-list');
+  if (!box || !list) return;
+  const files = await listFiles();
+  // Nothing to manage until a file is here. Opening the first one is the
+  // "+ csv" link in the panel's bottom row, which is always present.
+  box.hidden = !files.length;
+  list.textContent = '';
+  for (const f of files) {
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    const label = document.createElement('span');
+    label.textContent = `${f.name} — ${f.rows} rows`;
+    label.title = f.columns.join(', ');
+    const hash = document.createElement('code');
+    hash.textContent = shortHash(f.hash);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'file-del';
+    del.textContent = '✕';
+    del.title = `Forget ${f.name} (rows that open it will ask for it again)`;
+    // The glyph is the whole visible label, so the file name has to come from
+    // somewhere a screen reader reads — title is not that place.
+    del.setAttribute('aria-label', `Forget ${f.name}`);
+    del.addEventListener('click', async () => {
+      await removeFile(f.hash);
+      await refreshFileMenu();
+      refreshRows();
+    });
+    item.append(label, hash, del);
+    list.append(item);
+  }
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'file-add';
+  add.textContent = '+ open a CSV…';
+  add.addEventListener('click', pickDataFiles);
+  list.append(add);
+}
+
+// "+ csv" beside github: the way in before any file has been dropped, when
+// the data-files section is not there to hold one.
+document.getElementById('open-csv')?.addEventListener('click', () => pickDataFiles());
+
+/** File picker, for the "drop the file here" row error and the menu. */
+function pickDataFiles() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,.tsv,.txt,text/csv';
+  input.multiple = true;
+  input.addEventListener('change', () => {
+    const files = [...(input.files ?? [])];
+    if (files.length) void openDataFiles(files);
+  });
+  input.click();
 }
 
 // The address bar shows the /g/ share form: it survives chat-app URL
@@ -1540,6 +2034,15 @@ function rowToggle(eq: Equation): { label: string; title: string; on: boolean; f
         on: !!eq.barMode,
         flip: () => { eq.barMode = !eq.barMode; },
       };
+    case 'dlist':
+      // Bars only while the list is small enough to draw as shapes; past
+      // that it is a cloud and a bar per point would be a solid block.
+      return eq.cls.plot.values.length > CLOUD_MIN ? null : {
+        label: 'bars',
+        title: 'Draw the list as bars instead of dots',
+        on: !!eq.barMode,
+        flip: () => { eq.barMode = !eq.barMode; },
+      };
     default:
       return null;
   }
@@ -1560,6 +2063,63 @@ function makeToggle(eq: Equation): { box: HTMLElement; btn: HTMLButtonElement } 
   });
   box.append(btn);
   return { box, btn };
+}
+
+/** Data rows shown in the preview grid under an `open(…)` row. */
+const PREVIEW_ROWS = 8;
+
+function makeTablePreview(): TableUI {
+  const box = document.createElement('details');
+  box.className = 'eq-widget eq-table';
+  box.contentEditable = 'false';
+  const summary = document.createElement('summary');
+  const scroll = document.createElement('div');
+  scroll.className = 'eq-table-scroll';
+  box.append(summary, scroll);
+  return { box, summary, scroll };
+}
+
+/**
+ * Fill the preview: the readout as its summary, and — once opened — the head
+ * of the file as it was actually parsed, which is the only way to see that
+ * a column really did read as numbers.
+ */
+function fillTablePreview(ui: TableUI, info: string, data: Table) {
+  ui.summary.textContent = info;
+  if (ui.data === data) return;
+  ui.data = data;
+  const table = document.createElement('table');
+  const head = table.insertRow();
+  for (const col of data.columns) {
+    const th = document.createElement('th');
+    th.textContent = col.name;
+    th.title = col.label === col.name ? col.type : `${col.label} (${col.type})`;
+    th.className = col.type === 'num' ? 'num' : '';
+    head.append(th);
+  }
+  const shown = Math.min(data.rows, PREVIEW_ROWS);
+  for (let r = 0; r < shown; r++) {
+    const tr = table.insertRow();
+    for (const col of data.columns) {
+      const td = tr.insertCell();
+      if (col.type === 'num') {
+        const v = col.nums![r];
+        td.textContent = Number.isNaN(v) ? '—' : fmtNum(v);
+        td.className = 'num';
+      } else {
+        td.textContent = col.strs![r];
+      }
+    }
+  }
+  if (data.rows > shown) {
+    const tr = table.insertRow();
+    const td = tr.insertCell();
+    td.colSpan = data.columns.length;
+    td.className = 'more';
+    td.textContent = `${data.rows - shown} more row${data.rows - shown === 1 ? '' : 's'}`;
+  }
+  ui.scroll.textContent = '';
+  ui.scroll.append(table);
 }
 
 /**
@@ -1586,12 +2146,12 @@ function reconcile() {
     const wanted: HTMLElement[] = [];
     // Initial values get a slider too: dragging one relaunches the system
     // from there, which is the whole point of `a(0)` in a chaotic system.
-    const sliderable = (eq.def?.kind === 'const' || eq.def?.kind === 'init')
-      && !eq.error && NUM_RE.test(eq.def.rhs);
-    if (sliderable) {
+    const sliderDef = (eq.def?.kind === 'const' || eq.def?.kind === 'init')
+      && !eq.error && NUM_RE.test(eq.def.rhs) ? eq.def : null;
+    if (sliderDef) {
       eq.sliderUI ??= makeSlider(eq);
       const { min, range, max } = eq.sliderUI;
-      const v = Number(eq.def!.rhs);
+      const v = Number(sliderDef.rhs);
       if (eq.sliderMin === undefined || eq.sliderMax === undefined) {
         eq.sliderMin = Math.min(-10, Math.floor(v));
         eq.sliderMax = Math.max(10, Math.ceil(v));
@@ -1603,7 +2163,7 @@ function reconcile() {
       range.min = String(eq.sliderMin);
       range.max = String(eq.sliderMax);
       // Σ/Π bounds are integers, so their sliders step whole terms at a time.
-      range.step = sumBoundNames.has(eq.def!.name) ? '1' : String((eq.sliderMax - eq.sliderMin) / 400);
+      range.step = sumBoundNames.has(sliderDef.name) ? '1' : String((eq.sliderMax - eq.sliderMin) / 400);
       range.value = String(v);
       wanted.push(eq.sliderUI.box);
     }
@@ -1630,7 +2190,14 @@ function reconcile() {
       btn.classList.toggle('on', toggle.on);
       wanted.push(box);
     }
-    if (eq.info) {
+    // A data row's readout is the handle on a preview of the file itself:
+    // the summary says what was parsed, opening it shows the first rows.
+    const table = eq.def && !eq.error ? defs.tables.get(eq.def.name) : undefined;
+    if (table?.data && eq.info) {
+      eq.tableUI ??= makeTablePreview();
+      fillTablePreview(eq.tableUI, eq.info, table.data);
+      wanted.push(eq.tableUI.box);
+    } else if (eq.info) {
       eq.infoEl ??= (() => {
         const el = document.createElement('div');
         el.className = 'eq-widget eq-info';
@@ -1648,6 +2215,29 @@ function reconcile() {
         return el;
       })();
       eq.errorEl.textContent = eq.error;
+      // A row whose file is not here heals by supplying the file, so the error
+      // is also the button that asks for it — for every row that reads the
+      // file, not only the `open(…)` row that names it. It is a real button
+      // when it is one: reachable by Tab, activated by Enter or Space, and
+      // announced as a control rather than as a sentence.
+      const wantsFile = !!eq.needsFile;
+      eq.errorEl.classList.toggle('eq-error-pick', wantsFile);
+      eq.errorEl.onclick = wantsFile ? pickDataFiles : null;
+      eq.errorEl.title = wantsFile ? 'Choose the file' : '';
+      eq.errorEl.onkeydown = wantsFile
+        ? ev => {
+          if (ev.key !== 'Enter' && ev.key !== ' ') return;
+          ev.preventDefault();
+          pickDataFiles();
+        }
+        : null;
+      if (wantsFile) {
+        eq.errorEl.setAttribute('role', 'button');
+        eq.errorEl.tabIndex = 0;
+      } else {
+        eq.errorEl.removeAttribute('role');
+        eq.errorEl.removeAttribute('tabindex');
+      }
       wanted.push(eq.errorEl);
     }
     // Place widgets directly after their line, then drop anything stale
@@ -2042,9 +2632,16 @@ listEl.addEventListener('click', e => {
 });
 
 // Highlight the line holding the caret (no per-line focus to key off).
+let focusedLine: number | undefined;
 document.addEventListener('selectionchange', () => {
   const pos = caretPos();
   lineEls().forEach((line, i) => line.classList.toggle('focused', i === pos?.line));
+  // Leaving a row is when its hash gets pinned. pinTableHashes skips whatever
+  // line the caret is on, so without this the exception outlives the editing:
+  // type `open("people.csv")`, click away, share, and the link is unpinned.
+  if (pos?.line === focusedLine) return;
+  focusedLine = pos?.line;
+  if (pinTableHashes()) reconcile();
 });
 
 // --- examples menu ---
@@ -2302,8 +2899,10 @@ function makePairWriter(pairText: string, commit: (pair: string) => void): ((x: 
 const pointWriter = (eq: Equation) => makePairWriter(eq.text, p => { eq.text = p; });
 
 /** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
-const defPointWriter = (eq: Equation) =>
-  makePairWriter(eq.def!.rhs, p => { eq.text = `${eq.def!.name} = ${p}`; });
+const defPointWriter = (eq: Equation) => {
+  const def = eq.def as Definition & { kind: 'const' };
+  return makePairWriter(def.rhs, p => { eq.text = `${def.name} = ${p}`; });
+};
 
 /** Push text a drag rewrote back into the editor lines. */
 function syncLineTexts() {
@@ -2848,6 +3447,7 @@ addEventListener('hashchange', loadFromUrl);
 resize();
 renderAll();
 buildExamplesMenu();
+void refreshFileMenu();
 
 // Dev-only handle for driving/inspecting the view in automated tests.
 if (import.meta.env.DEV) (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback };

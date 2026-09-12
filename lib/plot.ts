@@ -69,6 +69,16 @@ export type Plot =
   | { type: 'vlist'; values: Expr[] }
   /** [(1,2), (3,4)]: a scatter of points. */
   | { type: 'plist'; dim: 2 | 3; pts: Expr[][] }
+  /**
+   * The same two shapes, but backed by typed arrays: a CSV column, or
+   * constant arithmetic over one. `dlist` is dots at (k, value); `dscatter`
+   * is a cloud with one array per coordinate. Nothing to evaluate per frame,
+   * which is what lets these run to hundreds of thousands of points.
+   */
+  | { type: 'dlist'; values: Float64Array }
+  | { type: 'dscatter'; dim: 2 | 3; coords: Float64Array[] }
+  /** hist(L): counts per bin, drawn as touching bars of one width. */
+  | { type: 'histogram'; centers: Float64Array; counts: Float64Array; width: number }
   /** a_n = f(n): dots at integer n ≥ 0; the UI can switch to partial sums. */
   | { type: 'sequence'; term: Expr; index: string }
   /**
@@ -287,7 +297,8 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
     // Vector-field streamlines drift continuously, so they always animate.
     animated: animated || plot.type === 'vfield2d',
     needs3D: plot.type === 'implicit3d' || plot.type === 'psurface'
-      || ((plot.type === 'point' || plot.type === 'pcurve' || plot.type === 'plist' || plot.type === 'system') && plot.dim === 3),
+      || ((plot.type === 'point' || plot.type === 'pcurve' || plot.type === 'plist'
+        || plot.type === 'dscatter' || plot.type === 'system') && plot.dim === 3),
     params,
   });
 
@@ -299,6 +310,35 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
       throw new Error(`${what} must be constant — they cannot use x, y, u, or v.`);
     }
     return done({ type: 'polygon', pts: expr.args, closed: expr.name !== '[segment]' });
+  }
+
+  if (expr.kind === 'text' || expr.kind === 'str') {
+    throw new Error('Text cannot be plotted — compare it inside a filter, like people[people.city == "NYC"].');
+  }
+  // Typed-array lists: a column plots with nothing to evaluate at all.
+  if (expr.kind === 'call' && expr.name === '[hist]') {
+    const [centers, counts, width] = expr.args;
+    return done({
+      type: 'histogram',
+      centers: (centers as Expr & { kind: 'data' }).values,
+      counts: (counts as Expr & { kind: 'data' }).values,
+      width: (width as Expr & { kind: 'num' }).value,
+    });
+  }
+  if (expr.kind === 'data') return done({ type: 'dlist', values: expr.values });
+  if (expr.kind === 'vec' && expr.items.some(it => it.kind === 'data')) {
+    const n = (expr.items.find(it => it.kind === 'data') as Expr & { kind: 'data' }).values.length;
+    if (expr.items.length !== 2 && expr.items.length !== 3) {
+      throw new Error('Expected 2 or 3 vector components.');
+    }
+    // A scalar coordinate rides along as a constant column: (col, 0) is a
+    // row of points on the axis.
+    const coords = expr.items.map(it => {
+      if (it.kind === 'data') return it.values;
+      if (it.kind !== 'num') throw new Error('A point mixing data with an expression is not supported yet.');
+      return new Float64Array(n).fill(it.value);
+    });
+    return done({ type: 'dscatter', dim: expr.items.length as 2 | 3, coords });
   }
 
   if (expr.kind === 'list') {

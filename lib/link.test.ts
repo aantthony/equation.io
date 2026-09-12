@@ -34,6 +34,42 @@ describe('graph-link payload codec', () => {
     expect(decodePayload('y%20=%20sin(x)%3by=x')).toEqual(expected); // lowercase %3b
   });
 
+  it("round-trips a row's own semicolon, and still splits on the separator", () => {
+    // The row means the ';' — a city, a category, a file name. Encoded once it
+    // was the separator's three characters exactly, and since the reader has
+    // to accept `%3B` as a separator (above), the row came back cut in half:
+    // `p[p.city == "a;b"]` decoded as `p[p.city == "a` and `b"]`. A row's own
+    // semicolons are encoded twice, so the two can never be confused.
+    const rows = ['p[p.city == "a;b"]', 't = open("sales;2026.csv")', 'y = 2'];
+    const payload = encodePayload(rows);
+    expect(payload).toContain('%253B');
+    expect(payload.split(';')).toHaveLength(rows.length); // separators, and only those
+    expect(decodePayload(payload)).toEqual(rows);
+    // One row on its own has no separator to be confused with, and survived
+    // neither before nor after by accident: it is the same escape.
+    expect(decodePayload(encodePayload(['y = "a;b"']))).toEqual(['y = "a;b"']);
+  });
+
+  it('preserves literal percent sequences alongside semicolons', () => {
+    const rows = [
+      'p[p.url == "https://example.com/a%3Bb"]',
+      'p = open("sales%3B2026.csv")',
+      'p[p.city == "a;b%3b%25%253B%2525%20%00%"]',
+      '# 100% complete; next',
+      'y = 2',
+    ];
+    const payload = encodePayload(rows);
+    expect(decodePayload(payload)).toEqual(rows);
+    expect(decodePayload(payload.replaceAll(';', '%3B'))).toEqual(rows);
+    expect(decodePayload(encodePayload(decodePayload(payload)))).toEqual(rows);
+  });
+
+  it('preserves the interpretation of unmarked legacy percent sequences', () => {
+    expect(decodePayload('p%5Bp.city%20%3D%3D%20%22a%253Bb%22%5D'))
+      .toEqual(['p[p.city == "a;b"]']);
+    expect(decodePayload('%23%20100%25')).toEqual(['# 100%']);
+  });
+
   it('round-trips comment rows (# group headings)', () => {
     const rows = ['# Lines', 'y=x', 'y=x^2', '# Another group'];
     expect(decodePayload(encodePayload(rows))).toEqual(rows);

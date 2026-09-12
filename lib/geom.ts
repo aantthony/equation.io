@@ -271,6 +271,12 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat): LV {
       if (flat.every((f, k) => f === e.items[k])) return sc(e);
       return sc({ kind: 'vec', items: flat });
     }
+    // Data and text lists hold no geometry: they pass straight through to
+    // list lowering, which is the pass that knows what to do with them.
+    case 'data':
+    case 'str':
+    case 'text':
+      return sc(e);
     case 'list': {
       // Items lower independently; a named point becomes its (A_x, A_y) vec,
       // so [A, B] scatters named points like [(1, 2), (3, 4)] does literals.

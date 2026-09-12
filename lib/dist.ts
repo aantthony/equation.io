@@ -554,7 +554,10 @@ function evalCols(
       return out;
     }
     case 'vec': throw new Error('Vector in scalar context.');
-    case 'list': throw new Error('List in scalar context.');
+    case 'list':
+    case 'data': throw new Error('List in scalar context.');
+    case 'str':
+    case 'text': throw new Error('Text has no numeric value.');
   }
 }
 

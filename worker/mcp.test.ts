@@ -179,6 +179,89 @@ describe('mcp endpoint', () => {
     expect(out.preview).toBe('attached');
   });
 
+  it('names what a joined row actually holds, semicolon or line break', async () => {
+    // Two equations in one string is worth catching, and `splitStatements` is
+    // what the app and the link codec use to decide where a row ends — but it
+    // splits on line breaks too, so the message may not blame a character the
+    // row does not contain.
+    for (const joined of ['y = x; y = 2', 'y = x\ny = 2']) {
+      const { body } = await rpc('tools/call', {
+        name: 'create_graph',
+        arguments: { equations: [joined] },
+      });
+      expect(body.result.isError).toBe(true);
+      expect(body.result.content[0].text).toMatch(/holds more than one equation/);
+    }
+    // …and a row whose semicolon is inside text is one equation, not two.
+    const { body: ok } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['p = open("a;b.csv", a1b2c3d4e5f6)'] },
+    });
+    expect(ok.result.isError).toBeUndefined();
+  });
+
+  it('keeps a semicolon inside text, through the link and back', async () => {
+    // The row means the ';'. Refusing it did not save the graph — an invalid
+    // row is written to the URL like any other — so the link came back cut in
+    // half at the quote. The codec tells a row's own semicolon from the
+    // separator now (lib/link.ts), and read_graph proves the round trip.
+    const rows = ['p = open("sales;2026.csv", a1b2c3d4e5f6)', 'y = 2'];
+    const { body } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: rows },
+    });
+    const out = body.result.structuredContent;
+    expect(out.rows[0].status).not.toBe('error');
+    const { body: back } = await rpc('tools/call', {
+      name: 'read_graph',
+      arguments: { url: out.share_url },
+    });
+    expect(back.result.structuredContent.equations).toEqual(rows);
+  });
+
+  it('reads a list inside P(…) and E(…), like every other row', async () => {
+    // These two bodies were the last rows parsed without the document's list
+    // names and never lowered, so a reduction over a list defined above them
+    // reported `Unknown variable: L` — about a name two rows up.
+    const { body } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['L = [1, 4, 2]', 'X ~ Normal(0, 1)', 'P(X < mean(L))', 'E(X + mean(L))'] },
+    });
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(true);
+    expect(out.rows[2].value).toBe('≈ 0.9902'); // Φ(7/3)
+    expect(out.rows[3].value).toBe('≈ 2.3333'); // E[X] + 7/3
+  });
+
+  it('keeps a graph shared before `total` and `open` had meanings of their own', async () => {
+    // Both names arrived with data files. A link written before that says
+    // `total = 3` and means the product `total (x + 1)`, or names a slider
+    // `open` — and the row it was shared as has to keep drawing.
+    const { body } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['total = 3', 'open = 2', 'y = total(x + 1)', 'y = open x'] },
+    });
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(true);
+    expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual([
+      'definition (const)', 'definition (const)', 'implicit2d', 'implicit2d',
+    ]);
+    // …while a document that binds neither still reduces and still opens.
+    const { body: b2 } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['L = [1, 4, 2]', 'total(L)'] },
+    });
+    expect(b2.result.structuredContent.rows[1].value).toBe('≈ 7');
+    // A call folds case, so the name a document bound has to fold with it:
+    // `Total = 3` is a legal old definition and `Total(x + 1)` was its product.
+    const { body: b3 } = await rpc('tools/call', {
+      name: 'create_graph',
+      arguments: { equations: ['Total = 3', 'y = Total(x + 1)'] },
+    });
+    expect(b3.result.structuredContent.valid).toBe(true);
+    expect(b3.result.structuredContent.rows[1].kind).toBe('implicit2d');
+  });
+
   it('validates E(…) rows: exact and sampled means', async () => {
     const { body } = await rpc('tools/call', {
       name: 'create_graph',
@@ -412,6 +495,49 @@ describe('graph previews', () => {
     const { body } = await call(['a = 2', 'f(x) = a x']);
     expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
     expect(body.result.structuredContent.preview).toContain('no plot rows');
+  });
+
+  it('says a graph is fine when only the CSV is missing', async () => {
+    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'y = person.age']);
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(true);
+    expect(out.preview).toContain('the graph itself is fine');
+    expect(out.preview_omits).toEqual([
+      { row: 'y = person.age', why: expect.stringContaining('not on this device') },
+    ]);
+  });
+
+  it('does not call a row valid just because the file is elsewhere', async () => {
+    // `person.age[person.age]` is a slice, which the app refuses once the
+    // bytes are here. Reporting it as merely device-local would make the same
+    // link valid in a preview and broken for its author.
+    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'person.age[person.age]']);
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(false);
+    expect(out.rows[1].error).toMatch(/Slicing/);
+  });
+
+  it('does not call a graph fine while another row is broken', async () => {
+    // The device-local plot is the only thing the preview can say nothing
+    // about; a row that fails to parse is broken everywhere. Saying "the
+    // graph itself is fine" over the top of it sends the caller away from an
+    // error that `rows` — and only `rows` — is reporting.
+    const { body } = await call([
+      'person = open("people.csv", 3a7f1b2c9d4e)', 'y = person.age', 'y = florb(x)',
+    ]);
+    const out = body.result.structuredContent;
+    expect(out.valid).toBe(false);
+    expect(out.preview).not.toContain('the graph itself is fine');
+    expect(out.preview).toContain('other rows have errors');
+  });
+
+  it('does not call a definition-only document fine', async () => {
+    // `ages` draws nothing on any device, so "every plot row is device-local"
+    // would send the caller away satisfied with a graph that is simply empty.
+    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'ages = person.age / 2']);
+    const out = body.result.structuredContent;
+    expect(out.preview).toContain('no plot rows');
+    expect(out.preview).not.toContain('the graph itself is fine');
   });
 
   it('still previews the working rows of a partly-broken graph', async () => {
