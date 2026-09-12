@@ -49,7 +49,8 @@ import { lowerLists, usesListReduction } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
 import { type Classified, classify } from '../lib/plot.ts';
-import { solveSystem, traceSystem } from '../lib/solve.ts';
+import { solveSystem } from '../lib/solve.ts';
+import { TraceQueue, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
 import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
 import { type StateSystem, advanceState, buildStateSystem, initialState } from '../lib/state.ts';
@@ -128,7 +129,8 @@ interface Equation {
   spCache?: { text: string; env: string; xlo: number; xhi: number; ylo: number; yhi: number; pts: SpecialPoint[] };
   toggleUI?: { box: HTMLElement; btn: HTMLButtonElement };
   /** Cached system solutions for the box and constants they were solved at. */
-  sysCache?: { residuals: Expr[]; text: string; env: string; lo: number[]; hi: number[]; pts: number[][] };
+  traceTarget?: string;
+  sysCache?: { key: string; text: string; env: string; lo: number[]; hi: number[]; pts: number[][] };
 }
 
 /**
@@ -415,6 +417,37 @@ function writebackViewport() {
   saveUrl();
 }
 
+// Classification produces new AST objects even when only view(...) changed.
+// Compare mathematical content, computed once per classification, not identity.
+const systemKeys = new WeakMap<Classified, string>();
+function systemKey(cls: Classified): string {
+  let key = systemKeys.get(cls);
+  if (key === undefined) { key = JSON.stringify(cls.plot); systemKeys.set(cls, key); }
+  return key;
+}
+let traceWorker: Worker | undefined;
+const traceQueue = new TraceQueue((message: TraceMessage) => {
+  const fail = (error: string) => {
+    traceWorker?.terminate();
+    traceWorker = undefined;
+    traceQueue.complete(message.token, { pts: [], error });
+  };
+  try {
+    traceWorker ??= new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
+    traceWorker.onmessage = (event: MessageEvent<{ token: number; result: TraceResult }>) => {
+      traceQueue.complete(event.data.token, event.data.result);
+    };
+    traceWorker.onerror = event => {
+      event.preventDefault();
+      fail('Could not trace this curve in the background: ' + event.message);
+    };
+    traceWorker.onmessageerror = () => fail('Could not read the background curve trace.');
+    traceWorker.postMessage(message);
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+});
+
 function render() {
   if (!syncCanvasSize()) return;
   applyViewportRows();
@@ -560,22 +593,46 @@ function render() {
     }
     const envKey = cls.params.map(p => `${p}=${constEnv[p] ?? 0}`).join(',')
       + (cls.animated ? `,t=${time}` : '');
+    const key = systemKey(cls);
     const c = eq.sysCache;
-    if (c && c.residuals === residuals && c.text === eq.text && c.env === envKey && c.lo.length === dim
+    if (c && c.key === key && c.text === eq.text && c.env === envKey && c.lo.length === dim
       && vlo.every((v, k) => c.lo[k] <= v && c.hi[k] >= vhi[k] && c.hi[k] - c.lo[k] <= 6 * (vhi[k] - v))) {
+      eq.traceTarget = undefined;
+      traceQueue.cancelPending(eq.id);
       return c.pts;
     }
     const pad = vhi.map((v, k) => 0.25 * (v - vlo[k]));
     const lo = vlo.map((v, k) => v - pad[k]);
     const hi = vhi.map((v, k) => v + pad[k]);
-    const pts = cls.plot.type === 'system' && cls.plot.parametric
-      ? traceSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, { ...constEnv, t: time }, 256, cls.plot.angular)
-        .flatMap(path => [...path, Array(dim).fill(NaN)])
-      : solveSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, {
-      env: { ...constEnv, t: time },
-      angular: cls.plot.type === 'system' ? cls.plot.angular : undefined,
+    if (cls.plot.type === 'system' && cls.plot.parametric) {
+      const jobKey = JSON.stringify([key, envKey, lo, hi]);
+      eq.traceTarget = jobKey;
+      traceQueue.request(eq.id, jobKey, {
+        residuals, dim, lo, hi, env: { ...constEnv, t: time }, angular: cls.plot.angular,
+      }, result => {
+        // A result for edited/deleted math must never restore an old curve.
+        if (!equations.includes(eq) || !eq.cls || systemKey(eq.cls) !== key) return;
+        // A trace from a briefly zoomed-in view must not replace the full
+        // curve after the user zooms back out. Animated rows may lag a frame.
+        if (!eq.cls.animated && eq.traceTarget !== jobKey) return;
+        if (result.error) {
+          eq.error = result.error;
+          reconcile();
+        } else {
+          eq.sysCache = { key, text: eq.text, env: envKey, lo, hi, pts: result.pts };
+        }
+        requestRender();
+      });
+      // Keep projecting existing world-space geometry during pan/zoom.
+      // Constants changing invalidate it; animated rows use the last completed
+      // frame while their next trace runs in the worker.
+      const sameEnv = c && (c.env === envKey || (cls.animated && c.env.split(',t=')[0] === envKey.split(',t=')[0]));
+      return c && c.key === key && sameEnv ? c.pts : [];
+    }
+    const pts = solveSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, {
+      env: { ...constEnv, t: time }, angular: cls.plot.type === 'system' ? cls.plot.angular : undefined,
     });
-    eq.sysCache = { residuals, text: eq.text, env: envKey, lo, hi, pts };
+    eq.sysCache = { key, text: eq.text, env: envKey, lo, hi, pts };
     return pts;
   };
 
