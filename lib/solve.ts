@@ -18,7 +18,7 @@
  * and the reason this lives behind a narrow interface.
  */
 import { diff } from './diff.ts';
-import { type Expr, evaluate } from './expr.ts';
+import { type Expr, evaluate, ineqComparisons } from './expr.ts';
 
 /** Newton iterations per seed. Converging seeds take well under 20. */
 const MAX_ITER = 64;
@@ -144,21 +144,48 @@ export function solveSystem(
     const p = seed.slice();
     if (!residualAt(p, r)) return null;
     let rn = norm(r);
+    let previous: number[] | null = null;
+    let older: number[] | null = null;
     for (let it = 0; it < MAX_ITER; it++) {
+      if (rn === 0) return p;
       if (!jacobianAt(p, J)) return null;
       // Test with J freshly evaluated at p, so the scale matches the point.
       const step = solveLinear(J, r, n);
       // A tiny residual alone is misleading near a multiple root (w^3=0).
       // Require positional convergence as well, otherwise one root becomes
       // a cloud of apparently distinct solutions.
-      if (converged(p, r) && (!step || norm(step) <= 1e-9 * (1 + norm(p)))) return p;
+      if (converged(p, r) && step && norm(step) <= 1e-9 * (1 + norm(p))) return p;
       if (!step) return null;
+      const earlier = older, prior = previous;
+      if (converged(p, r) && earlier && prior) {
+        // Multiple roots make Newton converge only linearly. Extrapolate the
+        // last three iterates to their common limit. Verify its Newton
+        // correction too: a small residual at a nearby stationary point can
+        // otherwise divert every seed from two distinct, close roots.
+        const limit = p.map((v, k) => {
+          const before = prior[k] - earlier[k];
+          const after = v - prior[k];
+          const bend = after - before;
+          return Math.abs(bend) > 1e-15 * Math.max(Math.abs(before), Math.abs(after))
+            ? v - after * after / bend : v;
+        });
+        if (limit.every(isFinite) && residualAt(limit, rTrial) && norm(rTrial) < rn) {
+          if (norm(rTrial) === 0) return limit;
+          if (jacobianAt(limit, J)) {
+            const correction = solveLinear(J, rTrial, n);
+            if (correction && converged(limit, rTrial) &&
+              norm(correction) <= 1e-9 * (1 + norm(limit))) return limit;
+          }
+        }
+      }
       // Backtrack until the residual actually drops.
       let scale = 1;
       let accepted = false;
       for (let k = 0; k < MAX_BACKTRACK; k++) {
         const q = p.map((v, i) => v - scale * step[i]);
         if (q.every(isFinite) && residualAt(q, rTrial) && norm(rTrial) < rn) {
+          older = previous;
+          previous = p.slice();
           for (let i = 0; i < n; i++) {
             p[i] = q[i];
             r[i] = rTrial[i];
@@ -250,25 +277,89 @@ export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi:
   const scale = Math.hypot(...hi.map((v, k) => v - lo[k]));
   const maxStep = scale / 16;
 
+  // A small step on a curved path can hide a still smaller jump. Retain the
+  // discrete operations so an interval crossing one receives extra continuity
+  // probes before curvature alone is allowed to certify the chord.
+  const discreteProbes: Array<Extract<Expr, { kind: 'call' | 'piecewise' }>> = [];
+  const collectDiscrete = (e: Expr): void => {
+    switch (e.kind) {
+      case 'call':
+        if (['floor', 'ceil', 'round', 'sign', 'fract', 'mod'].includes(e.name)) discreteProbes.push(e);
+        e.args.forEach(collectDiscrete);
+        break;
+      case 'bin': collectDiscrete(e.a); collectDiscrete(e.b); break;
+      case 'neg': collectDiscrete(e.a); break;
+      case 'eq': case 'ineq': collectDiscrete(e.l); collectDiscrete(e.r); break;
+      case 'vec': case 'list': e.items.forEach(collectDiscrete); break;
+      case 'piecewise':
+        discreteProbes.push(e);
+        e.cases.forEach(c => { collectDiscrete(c.cond); collectDiscrete(c.value); });
+        if (e.otherwise) collectDiscrete(e.otherwise);
+        break;
+    }
+  };
+  residuals.forEach(collectDiscrete);
+  const discreteValue = (probe: Extract<Expr, { kind: 'call' | 'piecewise' }>,
+    p: number[], u: number): number => {
+    const scope: Record<string, number> = { ...env, u };
+    vars.forEach((name, k) => { scope[name] = p[k]; });
+    const at = (e: Expr): number => {
+      try {
+        const v = evaluate(e, scope);
+        return typeof v === 'number' ? v : NaN;
+      } catch { return NaN; }
+    };
+    if (probe.kind === 'piecewise') {
+      try {
+        for (let i = 0; i < probe.cases.length; i++) {
+          const cond = probe.cases[i].cond;
+          if (cond.kind !== 'ineq') return NaN;
+          if (ineqComparisons(cond).every(({ op, l, r }) => {
+            const a = at(l), b = at(r);
+            return op === '<' ? a < b : op === '<=' ? a <= b : op === '>' ? a > b : a >= b;
+          })) return i;
+        }
+        return probe.cases.length;
+      } catch { return NaN; }
+    }
+    if (probe.name === 'fract') return Math.floor(at(probe.args[0]));
+    if (probe.name === 'mod') return Math.floor(at(probe.args[0]) / at(probe.args[1]));
+    return at(probe);
+  };
+
   // A large step can be ordinary motion in a zoomed-in view. Follow it at
   // intermediate parameter values before deciding the branch has jumped.
   const bridge = (a: number[], b: number[], u0: number, u1: number): number[][] | null => {
-    let remaining = 64; // bound work when several branches compete for a match
-    const subdivide = (start: number[], end: number[], t0: number, t1: number, depth: number): number[][] | null => {
-      if (Math.hypot(...start.map((v, k) => v - end[k])) < maxStep) return [];
-      if (depth === 12 || remaining-- <= 0) return null;
+    let remaining = 96; // bound work when several branches compete for a match
+    const minDepth = discreteProbes.some(probe => {
+      const before = discreteValue(probe, a, u0);
+      const after = discreteValue(probe, b, u1);
+      return isFinite(before) && isFinite(after) && before !== after;
+    }) ? 4 : 0;
+    const subdivide = (start: number[], end: number[], t0: number, t1: number,
+      depth: number, parentDeviation?: number): number[][] | null => {
+      if (remaining-- <= 0) return null;
       const t = (t0 + t1) / 2;
+      if (t === t0 || t === t1) return null;
       const center = start.map((v, k) => (v + end[k]) / 2);
+      const distance = Math.hypot(...start.map((v, k) => v - end[k]));
       const mids = solveSystem(residuals, vars, lo, hi, {
         env: { ...env, u: t }, angular, seeds: [center, start, end], lattice: false,
       });
       mids.sort((p, q) =>
         Math.hypot(...p.map((v, k) => v - center[k])) - Math.hypot(...q.map((v, k) => v - center[k])));
       for (const mid of mids) {
-        const left = subdivide(start, mid, t0, t, depth + 1);
+        // Smooth curvature shrinks under subdivision; a jump's deviation does
+        // not. Compare successive midpoints independently of the view-scaled
+        // step limit so jumps smaller than maxStep can still break the path.
+        const deviation = Math.hypot(...mid.map((v, k) => v - center[k]));
+        if (distance < maxStep && depth >= minDepth &&
+          (deviation <= 1e-12 * (1 + distance) ||
+            (parentDeviation !== undefined && deviation < 0.5 * parentDeviation))) return [];
+        const left = subdivide(start, mid, t0, t, depth + 1, deviation);
         if (!left) continue;
-        const right = subdivide(mid, end, t, t1, depth + 1);
-        if (right) return [...left, mid, ...right];
+        const right = subdivide(mid, end, t, t1, depth + 1, deviation);
+        if (right) return distance < maxStep ? [] : [...left, mid, ...right];
       }
       return null;
     };

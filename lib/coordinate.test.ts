@@ -118,6 +118,11 @@ describe('complex CPU objects', () => {
       expect(3*x*x*y - y*y*y).toBeCloseTo(0, 7);
     }
   });
+  it('retains a high-multiplicity complex root', () => {
+    const pts = solutions(['w^8 = 0']);
+    expect(pts).toHaveLength(1);
+    expect(Math.hypot(...pts[0])).toBeLessThan(1e-7);
+  });
   it('keeps integer powers and their derivatives compact', () => {
     const parts = complexParts(parseExpr('w^16'));
     expect(JSON.stringify(parts).length).toBeLessThan(10000);
@@ -217,5 +222,39 @@ describe('parametric system branches', () => {
     if (p.type !== 'system') throw new Error('expected system');
     const paths = traceSystem(p.residuals, ['x', 'y'], [-1, -1], [2, 2]);
     expect(paths.some(path => path.some(point => point[1] === 0) && path.some(point => point[1] === 1))).toBe(false);
+  });
+  it.each([0.1, 0.00001])('does not bridge a jump of size %s', jump => {
+    const p = last([`(x, y) = (u, ${jump} floor(2u))`]);
+    if (p.type !== 'system') throw new Error('expected system');
+    const paths = traceSystem(p.residuals, ['x', 'y'], [-1, -1], [2, 2]);
+    expect(paths.some(path => path.some(point => point[1] === 0) && path.some(point => point[1] === jump))).toBe(false);
+    expect(paths.some(path => path.some(point => point[1] === jump) && path.some(point => point[1] === 2 * jump))).toBe(false);
+  });
+  it('detects a small jump even when smooth curvature is larger', () => {
+    for (const y of [
+      '0.1u^2+0.0000001floor(u+0.25)',
+      '0.1u^2+{u<0.75:0,0.0000001}',
+    ]) {
+      const paths = traceSystem([parseExpr('x-u'), parseExpr(`y-(${y})`)],
+        ['x', 'y'], [-1, -1], [2, 2], {}, 256);
+      expect(paths.some(path => path.some(point => point[0] < 0.75) &&
+        path.some(point => point[0] >= 0.75))).toBe(false);
+    }
+  });
+  it('does not mistake evenly spaced jumps for a straight midpoint', () => {
+    const paths = traceSystem(
+      [parseExpr('x-u'), parseExpr('y-0.1floor(512u)')],
+      ['x', 'y'], [-1, -1], [2, 60], {}, 256,
+    );
+    expect(paths).toHaveLength(257);
+    expect(paths.every(path => path.length === 1)).toBe(true);
+  });
+  it('keeps a steep but continuous curve connected', () => {
+    const paths = traceSystem(
+      [parseExpr('x-u'), parseExpr('y-0.02atan(10000000(u-0.501))')],
+      ['x', 'y'], [-1, -1], [2, 2], {}, 256,
+    );
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).toHaveLength(257);
   });
 });
