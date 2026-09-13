@@ -431,15 +431,16 @@ function renderRow2D(
       if (plot.dim !== 2) return;
       const lo = [v.cx - r.w * v.upp / 2, v.cy - r.h * v.upp / 2];
       const hi = [v.cx + r.w * v.upp / 2, v.cy + r.h * v.upp / 2];
+      const systemEnv = { ...analysis.constEnv, t: 0 };
       if (plot.parametric) {
-        for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, analysis.constEnv, 256, plot.angular)) {
+        for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, systemEnv, 256, plot.angular)) {
           for (let i = 1; i < path.length; i++) {
             const a = path[i - 1], b = path[i];
             drawLine(r, toScreenX(r, v, a[0]), toScreenY(r, v, a[1]), toScreenX(r, v, b[0]), toScreenY(r, v, b[1]), color);
           }
         }
       } else {
-        for (const p of solveSystem(plot.residuals, ['x', 'y'], lo, hi, { env: analysis.constEnv, angular: plot.angular })) {
+        for (const p of solveSystem(plot.residuals, ['x', 'y'], lo, hi, { env: systemEnv, angular: plot.angular })) {
           drawDisc(r, toScreenX(r, v, p[0]), toScreenY(r, v, p[1]), 4.5, color);
         }
       }

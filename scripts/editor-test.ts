@@ -293,6 +293,18 @@ await scenario('coordinate point drag persists through the URL', async () => {
   check('coordinate drag survives reload', (await rowTexts(page))[2] === rows[2]);
 });
 
+await scenario('coordinate drag rounds the pointer before converting units', async () => {
+  await load(page, ['p = x/1000', '(p, y) = (0.002, 0)',
+    'view(x = -4..4, y = -3..3)']);
+  await page.mouse.move(733.33, 350);
+  await page.mouse.down();
+  await page.mouse.move(616.67, 233.33, { steps: 15 });
+  await page.mouse.up();
+  const rows = await rowTexts(page);
+  check('scaled coordinate follows the pointer without snapping to zero',
+    rows[1] === '(p, y) = (0.001, 1)', String(rows[1]));
+});
+
 await scenario('spiral zoom stays responsive while traces run', async () => {
   await load(page, ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
     '(r, theta) = (3u, 6pi u)', 'view(x = -4..4, y = -3..3)']);

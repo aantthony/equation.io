@@ -16,6 +16,15 @@ function pixel(r: { w: number; px: Uint8ClampedArray }, x: number, y: number) {
 }
 
 describe('og raster renderer', () => {
+  it.each([
+    ['(x,y)=(1+t,2)', '(x,y)=(1,2)'],
+    ['(x,y)=(1+u+t,2)', '(x,y)=(1+u,2)'],
+  ])('renders animated systems at time zero: %s', (animated, stationary) => {
+    const actual = renderRaster([animated], 100, 100);
+    expect(actual.px).toEqual(renderRaster([stationary], 100, 100).px);
+    expect(actual.px).not.toEqual(renderRaster([], 100, 100).px);
+  });
+
   it('draws an implicit curve where expected', () => {
     const r = renderRaster(['y = x'], 100, 100);
     // y = x passes through the center; screen y grows downward so the curve

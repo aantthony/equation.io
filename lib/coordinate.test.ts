@@ -3,6 +3,7 @@ import { evaluate, parseExpr } from './expr.ts';
 import { classify } from './plot.ts';
 import { solveSystem, traceSystem } from './solve.ts';
 import { complexParts } from './complex-parts.ts';
+import { diff } from './diff.ts';
 import { analyze } from '../worker/graph.ts';
 
 const polar = ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
@@ -23,6 +24,15 @@ describe('coordinate objects end to end', () => {
     expect(pts).toHaveLength(1);
     expect(pts[0][0]).toBeCloseTo(Math.SQRT2, 7);
     expect(pts[0][1]).toBeCloseTo(Math.SQRT2, 7);
+  });
+  it('does not wrap real expressions containing nested angle calculations', () => {
+    const p = last(['(x+sin(atan2(y,x)),y)=(10,0)']);
+    if (p.type !== 'system') throw new Error('expected system');
+    expect(p.angular).toEqual([false, false]);
+    const pts = solveSystem(p.residuals, ['x', 'y'], [-12, -12], [12, 12], { angular: p.angular });
+    expect(pts).toHaveLength(1);
+    expect(pts[0][0]).toBeCloseTo(10, 7);
+    expect(pts[0][1]).toBeCloseTo(0, 7);
   });
   it('finds every branch of the hyperbolic example', () => {
     const pts = solutions(['p = x y', 'q = (x^2-y^2)/2', '(p, q) = (1, 0)']);
@@ -92,6 +102,39 @@ describe('complex CPU objects', () => {
       expect(3*x*x*y - y*y*y).toBeCloseTo(0, 7);
     }
   });
+  it('keeps integer powers and their derivatives compact', () => {
+    const parts = complexParts(parseExpr('w^16'));
+    expect(JSON.stringify(parts).length).toBeLessThan(10000);
+    const derivatives = parts.map(e => diff(e, 'x'));
+    expect(JSON.stringify(derivatives).length).toBeLessThan(20000);
+    expect(parts.map(e => evaluate(e, { x: 0, y: 0 }))).toEqual([0, 0]);
+    expect(derivatives.map(e => evaluate(e, { x: 0, y: 0 }))).toEqual([0, 0]);
+    for (const n of [0, 1, 2, 3, 10, 16, -1, -10]) {
+      const angle = 0.3;
+      const values = complexParts(parseExpr(`w^(${n})`)).map(e => evaluate(e, { x: Math.cos(angle), y: Math.sin(angle) }));
+      expect(values[0]).toBeCloseTo(Math.cos(n * angle), 10);
+      expect(values[1]).toBeCloseTo(Math.sin(n * angle), 10);
+    }
+  });
+  it('finds all ten roots of unity', () => {
+    const pts = solutions(['w^10 = 1']);
+    expect(pts).toHaveLength(10);
+    for (const [x, y] of pts) {
+      expect(Math.hypot(x, y)).toBeCloseTo(1, 7);
+      expect(Math.cos(10 * Math.atan2(y, x))).toBeCloseTo(1, 7);
+    }
+  });
+  it('lowers projections in piecewise values, conditions, and fallbacks', () => {
+    for (const text of ['{t<1:re(2),3}+i', '{re(0)<im(t*i)<re(1):{t<0.5:re(2),im(2i)},re(3)}+i']) {
+      const p = classify(parseExpr(text)).plot;
+      if (p.type !== 'point') throw new Error('expected point');
+      expect(p.coords.map(e => evaluate(e, { t: 0.25 }))).toEqual([2, 1]);
+      expect(p.coords.map(e => evaluate(e, { t: 0.75 }))).toEqual([2, 1]);
+      expect(p.coords.map(e => evaluate(e, { t: 2 }))).toEqual([3, 1]);
+    }
+    const [re] = complexParts(parseExpr('{t<1:re(2)}+i'));
+    expect(evaluate(re, { t: 2 })).toBeNaN();
+  });
   it('does not wrap logarithm residuals as coordinate angles', () => {
     expect(solutions(['ln(w) = 9i'])).toHaveLength(0);
   });
@@ -99,6 +142,24 @@ describe('complex CPU objects', () => {
     expect(solutions(['w^3 = 0'])).toHaveLength(1);
     const z = complexParts(parseExpr('sqrt(-1+0i)')).map(e => evaluate(e, {}));
     expect(z).toEqual([0, 1]);
+  });
+  it.each([
+    ['1', 1, 0], ['i', -1, 0], ['1+i', 0, 2], ['1-i', 0, -2],
+  ] as const)('solves principal square roots equal to %s', (rhs, x, y) => {
+    const pts = solutions([`sqrt(w) = ${rhs}`]);
+    expect(pts).toHaveLength(1);
+    expect(pts[0][0]).toBeCloseTo(x, 7);
+    expect(pts[0][1]).toBeCloseTo(y, 7);
+  });
+  it('preserves small square-root components close to the real axis', () => {
+    const parts = complexParts(parseExpr('sqrt(w)'));
+    for (const x of [-1, 1]) for (const y of [-1e-12, 1e-12]) {
+      const [re, im] = parts.map(e => evaluate(e, { x, y }));
+      expect(Math.abs(2 * re * im / y - 1)).toBeLessThan(1e-12);
+      expect(re * re - im * im).toBeCloseTo(x, 14);
+    }
+    expect(parts.map(e => evaluate(e, { x: 0, y: 0 }))).toEqual([0, 0]);
+    expect(solutions(['sqrt(w) = -1'])).toEqual([]);
   });
   it('keeps real projections as implicit equations', () => {
     expect(classify(parseExpr('re(w^2) = 1')).plot.type).toBe('implicit2d');

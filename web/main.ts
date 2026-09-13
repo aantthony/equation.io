@@ -2954,7 +2954,7 @@ function snapToPixel(v: number): number {
  * place while a slider name moves through its own row. `commit` receives the
  * rewritten pair text.
  */
-function makePairWriter(pairText: string, commit: (pair: string) => void): ((x: number, y: number) => void) | null {
+function makePairWriter(pairText: string, commit: (pair: string) => void, round = snapToPixel): ((x: number, y: number) => void) | null {
   // A name moves only if it is a slider constant: a plain number in its own
   // row is the only right-hand side a drag knows how to rewrite.
   const drag = dragAxes(pairText, p => equations.find(r =>
@@ -2966,7 +2966,7 @@ function makePairWriter(pairText: string, commit: (pair: string) => void): ((x: 
     const text = [...parts];
     axes.forEach((axis, k) => {
       if (!axis) return;
-      const value = fmtNum(snapToPixel(coords[k]));
+      const value = fmtNum(round(coords[k]));
       if (axis === 'literal') text[k] = value;
       else axis.text = `${axis.def!.name} = ${value}`;
     });
@@ -2982,11 +2982,12 @@ function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined, env: Re
   const at = eq.text.indexOf('=');
   if (at < 0) return null;
   const lhs = eq.text.slice(0, at).trim();
-  const write = makePairWriter(eq.text.slice(at + 1), p => { eq.text = `${lhs} = ${p}`; });
+  const write = makePairWriter(eq.text.slice(at + 1), p => { eq.text = `${lhs} = ${p}`; }, v => v);
   if (!write) return null;
   return (x: number, y: number) => {
     try {
-      const values = coords.map(c => evaluate(c, { ...env, x, y }));
+      // Pixel precision belongs to Cartesian space, before changing units.
+      const values = coords.map(c => evaluate(c, { ...env, x: snapToPixel(x), y: snapToPixel(y) }));
       if (values.every(Number.isFinite)) write(values[0], values[1]);
     } catch { /* singular coordinate: keep the previous values */ }
   };
