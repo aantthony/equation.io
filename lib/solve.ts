@@ -248,6 +248,33 @@ export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi:
   const paths: number[][][] = [];
   let active: number[][][] = [];
   const scale = Math.hypot(...hi.map((v, k) => v - lo[k]));
+  const maxStep = scale / 16;
+
+  // A large step can be ordinary motion in a zoomed-in view. Follow it at
+  // intermediate parameter values before deciding the branch has jumped.
+  const bridge = (a: number[], b: number[], u0: number, u1: number): number[][] | null => {
+    let remaining = 64; // bound work when several branches compete for a match
+    const subdivide = (start: number[], end: number[], t0: number, t1: number, depth: number): number[][] | null => {
+      if (Math.hypot(...start.map((v, k) => v - end[k])) < maxStep) return [];
+      if (depth === 12 || remaining-- <= 0) return null;
+      const t = (t0 + t1) / 2;
+      const center = start.map((v, k) => (v + end[k]) / 2);
+      const mids = solveSystem(residuals, vars, lo, hi, {
+        env: { ...env, u: t }, angular, seeds: [center, start, end], lattice: false,
+      });
+      mids.sort((p, q) =>
+        Math.hypot(...p.map((v, k) => v - center[k])) - Math.hypot(...q.map((v, k) => v - center[k])));
+      for (const mid of mids) {
+        const left = subdivide(start, mid, t0, t, depth + 1);
+        if (!left) continue;
+        const right = subdivide(mid, end, t, t1, depth + 1);
+        if (right) return [...left, mid, ...right];
+      }
+      return null;
+    };
+    return subdivide(a, b, u0, u1, 0);
+  };
+
   for (let i = 0; i <= samples; i++) {
     const seeds = active.map(p => p[p.length - 1]);
     const discover = i % 32 === 0 || seeds.length === 0;
@@ -260,13 +287,16 @@ export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi:
     const available = new Set(active);
     active = points.map(point => {
       let best: number[][] | undefined;
-      let distance = scale / 16;
+      let bestBridge: number[][] = [];
+      let distance = Infinity;
       for (const path of available) {
         const last = path[path.length - 1];
         const d = Math.hypot(...point.map((v, k) => v - last[k]));
-        if (d < distance) { distance = d; best = path; }
+        if (d >= distance) continue;
+        const mids = bridge(last, point, (i - 1) / samples, i / samples);
+        if (mids) { distance = d; best = path; bestBridge = mids; }
       }
-      if (best) { available.delete(best); best.push(point); return best; }
+      if (best) { available.delete(best); best.push(...bestBridge, point); return best; }
       const path = [point]; paths.push(path); return path;
     });
   }

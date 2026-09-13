@@ -183,6 +183,18 @@ describe('complex CPU objects', () => {
 });
 
 describe('parametric system branches', () => {
+  it('draws a fast line in a narrow view', () => {
+    const p = last(['(x, y) = (100u, 0)']);
+    if (p.type !== 'system') throw new Error('expected system');
+    const paths = traceSystem(p.residuals, ['x', 'y'], [-1, -1], [1, 1]);
+    const visible = paths.find(path => path.length > 1 && path[0][0] < 0.01 && path.at(-1)![0] > 0.7);
+    expect(visible).toBeDefined();
+    for (const [x, y] of visible ?? []) {
+      expect(y).toBeCloseTo(0, 8);
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(x).toBeLessThanOrEqual(1.1);
+    }
+  });
   it('keeps disconnected preimages on separate paths', () => {
     const p = last(['(x^2, y) = (1+u, u)']);
     if (p.type !== 'system') throw new Error('expected system');
@@ -199,5 +211,11 @@ describe('parametric system branches', () => {
     const paths = traceSystem(p.residuals, ['x', 'y'], [-1, -1], [2, 2]);
     expect(paths.length).toBeGreaterThanOrEqual(2);
     for (const path of paths) expect(path.some(p => p[0] < 0.4) && path.some(p => p[0] > 0.6)).toBe(false);
+  });
+  it('does not bridge a finite jump', () => {
+    const p = last(['(x, y) = (u, floor(2u))']);
+    if (p.type !== 'system') throw new Error('expected system');
+    const paths = traceSystem(p.residuals, ['x', 'y'], [-1, -1], [2, 2]);
+    expect(paths.some(path => path.some(point => point[1] === 0) && path.some(point => point[1] === 1))).toBe(false);
   });
 });
