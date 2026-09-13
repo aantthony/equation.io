@@ -427,6 +427,12 @@ describe('draggable points', () => {
     expect(rows[4].draggable).toBeUndefined();
   });
 
+  it('pins sliders that also define the chart while allowing independent axes', async () => {
+    const rows = await rowsFor(['a=2', 'b=a^2', 'p=x/b', '(p,y)=(a,a)', '(p,y)=(a,0)']);
+    expect(rows[3]).toMatchObject({ kind: 'system', draggable: false });
+    expect(rows[4]).toMatchObject({ kind: 'system', draggable: true });
+  });
+
   it('marks fully computed points as not draggable', async () => {
     const rows = await rowsFor(['a = 1', '(a+1, 2cos(1))']);
     expect(rows[1]).toMatchObject({ kind: 'point', draggable: false });

@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest';
-import { TraceQueue, type TraceInput, type TraceMessage } from './trace-queue.ts';
+import { TraceQueue, traceEnvironment, type TraceInput, type TraceMessage } from './trace-queue.ts';
+import { evalConstEnv } from './defs.ts';
+import { analyze } from '../worker/graph.ts';
 const input: TraceInput = { residuals: [], dim: 2, lo: [-1, -1], hi: [1, 1], env: {} };
 const result = { pts: [[1, 2]] };
 
@@ -60,4 +62,58 @@ it('cancels a queued view when existing geometry covers it again', () => {
   q.cancelPending(1);
   q.complete(sent[0].token, result);
   expect(sent).toHaveLength(1);
+});
+
+const environmentFor = (rows: string[]) => {
+  const a = analyze(rows);
+  expect(a.rows.some(r => r.error)).toBe(false);
+  const cls = a.rows.at(-1)!.cls!;
+  const keys = traceEnvironment(cls.params, cls.animated, a.defs);
+  return (time: number, states: Record<string, number> = {}) => {
+    const seed = Object.fromEntries(Object.entries(states).filter(([n]) => a.defs.states.has(n)));
+    return keys(evalConstEnv(a.defs, time, seed), time);
+  };
+};
+
+it.each([
+  ['(x,y)=(u,sin(t))'],
+  ['a=sin(t)', '(x,y)=(u,a)'],
+  ['a=sin(t)', 'b=2a', '(x,y)=(u,b)'],
+  ["a'=1", '(x,y)=(u,a)'],
+  ["a'=1", 'b=2a', '(x,y)=(u,b)'],
+])('keeps completed traces visible while moving inputs advance: %j', (...rows) => {
+  const envAt = environmentFor(rows);
+  const sent: TraceMessage[] = [];
+  const q = new TraceQueue(m => sent.push(m));
+  let target = '';
+  let completed: { stableEnv: string; pts: number[][] } | undefined;
+  for (const t of [0, 0.1, 0.2]) {
+    const { env, stableEnv } = envAt(t, { a: t });
+    target = stableEnv;
+    q.request(1, env, input, result => {
+      if (target === stableEnv) completed = { stableEnv, pts: result.pts };
+    });
+  }
+  expect(sent).toHaveLength(1);
+  q.complete(sent[0].token, result);
+  expect(sent).toHaveLength(2);
+  expect(completed?.pts).toEqual(result.pts);
+  expect(completed?.stableEnv).toBe(envAt(0.3, { a: 0.3 }).stableEnv);
+});
+
+it('invalidates animated geometry when a fixed input or definition changes', () => {
+  const rows = ['k=2', 'a=k sin(t)', '(x,y)=(u,a)'];
+  const original = environmentFor(rows)(1);
+  expect(environmentFor(['k=3', ...rows.slice(1)])(1).stableEnv).not.toBe(original.stableEnv);
+  expect(environmentFor(['k=2', 'a=k cos(t)', rows[2]])(1).stableEnv).not.toBe(original.stableEnv);
+  const state = environmentFor(["a'=1", rows[2]])(1, { a: 1 });
+  expect(environmentFor(["a'=2", rows[2]])(1, { a: 1 }).stableEnv).not.toBe(state.stableEnv);
+});
+
+it('retains fixed-parameter invalidation alongside literal time animation', () => {
+  const a = analyze(['a=2', '(x,y)=(u,a+t)']);
+  const cls = a.rows.at(-1)!.cls!;
+  const keys = traceEnvironment(cls.params, cls.animated, a.defs);
+  expect(keys({ a: 2 }, 0).stableEnv).toBe(keys({ a: 2 }, 1).stableEnv);
+  expect(keys({ a: 2 }, 0).stableEnv).not.toBe(keys({ a: 3 }, 1).stableEnv);
 });

@@ -25,11 +25,11 @@ export function coordinateRow(expr: Expr, fields: Record<string, Expr>) {
   return { coords, flow, rhs: expr.r.items };
 }
 
-export function lowerCoordinateFlow(expr: Expr, fields: Record<string, Expr>): Expr {
+export function lowerCoordinateFlow(expr: Expr, fields: Record<string, Expr>, timeDerivative = (e: Expr) => diff(e, 't')): Expr {
   const row = coordinateRow(expr, fields);
   if (!row?.flow || (row.coords[0].kind === 'var' && row.coords[0].name === 'x' && row.coords[1].kind === 'var' && row.coords[1].name === 'y')) return Object.keys(fields).length ? substVars(expr, fields) : expr;
   const [a, b] = row.coords;
-  const [f, g] = row.rhs.map((e, k) => bin('-', substVars(e, fields), diff(row.coords[k], 't')));
+  const [f, g] = row.rhs.map((e, k) => bin('-', substVars(e, fields), timeDerivative(row.coords[k])));
   const ax = diff(a, 'x'), ay = diff(a, 'y'), bx = diff(b, 'x'), by = diff(b, 'y');
   const det = bin('-', bin('*', ax, by), bin('*', ay, bx));
   if (freeVars(det).size === 0 && evaluate(det, {}) === 0) {

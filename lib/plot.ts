@@ -238,9 +238,9 @@ function levelFamily(e: Expr, params: readonly string[], defined: ReadonlySet<st
   }
 }
 
-export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), fields: Record<string, Expr> = {}): Classified {
+export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), fields: Record<string, Expr> = {}, timeDerivative?: (e: Expr) => Expr): Classified {
   const coordinate = coordinateRow(expr, fields);
-  expr = lowerCoordinateFlow(expr, fields);
+  expr = lowerCoordinateFlow(expr, fields, timeDerivative);
   const ode = matchODE(expr);
   if (ode) expr = ode;
   const tube = matchTube(expr);

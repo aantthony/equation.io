@@ -4,6 +4,7 @@ import { classify } from './plot.ts';
 import { solveSystem, traceSystem } from './solve.ts';
 import { complexParts } from './complex-parts.ts';
 import { diff } from './diff.ts';
+import { evalConstEnv } from './defs.ts';
 import { analyze } from '../worker/graph.ts';
 
 const polar = ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
@@ -63,6 +64,21 @@ describe('coordinate objects end to end', () => {
     const p = last(['p = x+t', 'q = y', "(p', q') = (0, 0)"]);
     if (p.type !== 'vfield2d') throw new Error('expected field');
     expect(p.comps.map(e => evaluate(e, { x: 2, y: 0, t: 1 }))).toEqual([-1, 0]);
+  });
+  it.each([
+    { rows: ['a=t', 'p=x+a', 'q=y'], state: {}, velocity: [-1, 0] },
+    { rows: ['a=t', 'b=a^2', 'p=x+b', 'q=y'], state: {}, velocity: [-4, 0] },
+    { rows: ["a'=3", 'p=x+a', 'q=y'], state: { a: 6 }, velocity: [-3, 0] },
+    { rows: ["a'=a", 'b=a^2+t', 'p=x+b', 'q=y'], state: { a: 3 }, velocity: [-19, 0] },
+    { rows: ['a=t', 'p=a x', 'q=y+t'], state: {}, velocity: [-2, -1] },
+    { rows: ['a=floor(2.5)', 'p=x+a', 'q=y'], state: {}, velocity: [0, 0] },
+  ])('includes indirect chart time dependence: $rows', ({ rows, state, velocity }) => {
+    const a = analyze([...rows, "(p',q')=(0,0)"]);
+    expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
+    const p = a.rows.at(-1)!.cls!.plot;
+    if (p.type !== 'vfield2d') throw new Error('expected field');
+    const env = { ...evalConstEnv(a.defs, 2, state), x: 4, y: 1, t: 2 };
+    expect(p.comps.map(e => evaluate(e, env))).toEqual(velocity);
   });
   it('preserves constant Cartesian flows and state names', () => {
     expect(last(["(x', y') = (1, 0)"]).type).toBe('vfield2d');

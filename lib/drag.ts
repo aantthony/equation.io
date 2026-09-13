@@ -9,6 +9,8 @@
  * nothing to write back to and stay pinned on that axis.
  */
 
+import { type Expr, evaluate } from './expr.ts';
+
 const NUM_LITERAL_RE = /^-?(?:\d+\.?\d*|\.\d+)$/;
 const NAME_RE = /^[A-Za-z_]\w*$/;
 
@@ -50,14 +52,32 @@ export function splitPair(text: string): [string, string] | null {
 export function dragAxes<S>(
   pairText: string,
   slider: (name: string) => S | null | undefined,
+  pinned: ReadonlySet<string> = new Set(),
 ): { parts: [string, string]; axes: Array<'literal' | S | null> } | null {
   const parts = splitPair(pairText.trim());
   if (!parts) return null;
   const axes = parts.map(p => {
     if (NUM_LITERAL_RE.test(p)) return 'literal' as const;
-    if (!NAME_RE.test(p)) return null;
+    if (!NAME_RE.test(p) || pinned.has(p)) return null;
     return slider(p) ?? null;
   });
   if (!axes.some(a => a !== null)) return null;
   return { parts, axes };
+}
+
+/** Evaluate a chart with fresh time/parameters on every pointer movement. */
+export function coordinateDragWriter(
+  coords: Expr[],
+  getEnv: () => Record<string, number>,
+  write: (a: number, b: number) => void,
+  round: (v: number) => number = v => v,
+): (x: number, y: number) => void {
+  return (x, y) => {
+    try {
+      // Pixel precision belongs to Cartesian space, before changing units.
+      const env = { ...getEnv(), x: round(x), y: round(y) };
+      const values = coords.map(c => evaluate(c, env));
+      if (values.every(Number.isFinite)) write(values[0], values[1]);
+    } catch { /* singular coordinate: keep the previous values */ }
+  };
 }

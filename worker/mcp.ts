@@ -14,6 +14,8 @@
  * all these tools need and keeps the Worker stateless.
  */
 import { SLIDER_NUM_RE, dragAxes } from '../lib/drag.ts';
+import { definitionDependencies } from '../lib/defs.ts';
+import { freeVars } from '../lib/expr.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { splitStatements } from '../lib/statements.ts';
 import { analyze } from './graph.ts';
@@ -119,7 +121,8 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
   const sliderRow = (name: string) => analysis.rows.find(r =>
     r.def?.kind === 'const' && r.def.name === name && !r.error && SLIDER_NUM_RE.test(r.def.rhs));
   const draggable = (row: (typeof analysis.rows)[number]): boolean | undefined => {
-    const pair = row.cls?.plot.type === 'system' && row.cls.plot.coordinates
+    const coordinates = row.cls?.plot.type === 'system' ? row.cls.plot.coordinates : undefined;
+    const pair = coordinates
       ? row.text.slice(row.text.indexOf('=') + 1)
       : row.cls?.plot.type === 'point'
       ? row.text
@@ -127,7 +130,10 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
         ? row.def.rhs
         : null;
     if (pair === null) return undefined;
-    return !needs3D && dragAxes(pair, sliderRow) !== null;
+    const pinned = coordinates
+      ? definitionDependencies(coordinates.flatMap(c => [...freeVars(c)]), analysis.defs)
+      : undefined;
+    return !needs3D && dragAxes(pair, sliderRow, pinned) !== null;
   };
 
   const rows = analysis.rows.map(row => {

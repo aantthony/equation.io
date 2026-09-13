@@ -6,6 +6,7 @@ import {
   compsOf,
   constsAnimated,
   defKey,
+  definitionDependencies,
   emptyDefs,
   evalConstEnv,
   formatTableRow,
@@ -18,6 +19,7 @@ import {
   shadowedFnNames,
   resolveExpr,
   scanDefinition,
+  timeDifferentiator,
   usesIntegral,
   TABLE_MAX_ROWS,
   type Definition,
@@ -42,7 +44,7 @@ import {
   toExpectation,
   toProbability,
 } from '../lib/dist.ts';
-import { SLIDER_NUM_RE as NUM_RE, dragAxes } from '../lib/drag.ts';
+import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists, usesListReduction } from '../lib/list.ts';
@@ -50,7 +52,7 @@ import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
 import { type Classified, classify } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
-import { TraceQueue, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
+import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
 import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
 import { type StateSystem, advanceState, buildStateSystem, initialState } from '../lib/state.ts';
@@ -130,7 +132,7 @@ interface Equation {
   toggleUI?: { box: HTMLElement; btn: HTMLButtonElement };
   /** Cached system solutions for the box and constants they were solved at. */
   traceTarget?: string;
-  sysCache?: { key: string; text: string; env: string; lo: number[]; hi: number[]; pts: number[][] };
+  sysCache?: { key: string; text: string; env: string; stableEnv: string; lo: number[]; hi: number[]; pts: number[][] };
 }
 
 /**
@@ -329,6 +331,16 @@ const startTime = performance.now();
 /** Seconds since load: the value of `t` everywhere in a graph. */
 const graphTime = () => (performance.now() - startTime) / 1000;
 
+/** The same current state and constant values for rendering and drag updates. */
+function currentConstEnv(time: number): Record<string, number> {
+  if (stateSys) stateTime = advanceState(defs, stateSys, stateVals, stateTime, time);
+  try {
+    return evalConstEnv(defs, time, stateVals);
+  } catch {
+    return { ...stateVals };
+  }
+}
+
 /** Send the state system back to its `a(0)` values, starting from now. */
 function resetState() {
   stateVals = stateSys ? initialState(defs, stateSys) : {};
@@ -420,6 +432,7 @@ function writebackViewport() {
 // Classification produces new AST objects even when only view(...) changed.
 // Compare mathematical content, computed once per classification, not identity.
 const systemKeys = new WeakMap<Classified, string>();
+const traceEnvironments = new WeakMap<Classified, ReturnType<typeof traceEnvironment>>();
 function systemKey(cls: Classified): string {
   let key = systemKeys.get(cls);
   if (key === undefined) { key = JSON.stringify(cls.plot); systemKeys.set(cls, key); }
@@ -458,12 +471,7 @@ function render() {
 
   // States carry between frames, so they are integrated up to now before
   // anything reads them; the constants may then be formulas in those states.
-  if (stateSys) stateTime = advanceState(defs, stateSys, stateVals, stateTime, time);
-  try {
-    constEnv = evalConstEnv(defs, time, stateVals);
-  } catch {
-    constEnv = { ...stateVals };
-  }
+  constEnv = currentConstEnv(time);
 
   // Fresh joint sample every frame: estimated density curves shimmer with
   // their true sampling noise instead of freezing one pairing into wiggles
@@ -591,8 +599,12 @@ function render() {
       vlo = [view.cx - halfW, view.cy - halfH];
       vhi = [view.cx + halfW, view.cy + halfH];
     }
-    const envKey = cls.params.map(p => `${p}=${constEnv[p] ?? 0}`).join(',')
-      + (cls.animated ? `,t=${time}` : '');
+    let environment = traceEnvironments.get(cls);
+    if (!environment) {
+      environment = traceEnvironment(cls.params, cls.animated, defs);
+      traceEnvironments.set(cls, environment);
+    }
+    const { env: envKey, stableEnv } = environment(constEnv, time);
     const key = systemKey(cls);
     const c = eq.sysCache;
     if (c && c.key === key && c.text === eq.text && c.env === envKey && c.lo.length === dim
@@ -606,33 +618,34 @@ function render() {
     const hi = vhi.map((v, k) => v + pad[k]);
     if (cls.plot.type === 'system' && cls.plot.parametric) {
       const jobKey = JSON.stringify([key, envKey, lo, hi]);
-      eq.traceTarget = jobKey;
+      const target = JSON.stringify([key, stableEnv, lo, hi]);
+      eq.traceTarget = target;
       traceQueue.request(eq.id, jobKey, {
         residuals, dim, lo, hi, env: { ...constEnv, t: time }, angular: cls.plot.angular,
       }, result => {
         // A result for edited/deleted math must never restore an old curve.
         if (!equations.includes(eq) || !eq.cls || systemKey(eq.cls) !== key) return;
         // A trace from a briefly zoomed-in view must not replace the full
-        // curve after the user zooms back out. Animated rows may lag a frame.
-        if (!eq.cls.animated && eq.traceTarget !== jobKey) return;
+        // curve after the user zooms back out. Only moving values may lag.
+        if (eq.traceTarget !== target) return;
         if (result.error) {
           eq.error = result.error;
           reconcile();
         } else {
-          eq.sysCache = { key, text: eq.text, env: envKey, lo, hi, pts: result.pts };
+          eq.sysCache = { key, text: eq.text, env: envKey, stableEnv, lo, hi, pts: result.pts };
         }
         requestRender();
       });
       // Keep projecting existing world-space geometry during pan/zoom.
       // Constants changing invalidate it; animated rows use the last completed
       // frame while their next trace runs in the worker.
-      const sameEnv = c && (c.env === envKey || (cls.animated && c.env.split(',t=')[0] === envKey.split(',t=')[0]));
+      const sameEnv = c && c.stableEnv === stableEnv;
       return c && c.key === key && sameEnv ? c.pts : [];
     }
     const pts = solveSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, {
       env: { ...constEnv, t: time }, angular: cls.plot.type === 'system' ? cls.plot.angular : undefined,
     });
-    eq.sysCache = { key, text: eq.text, env: envKey, lo, hi, pts };
+    eq.sysCache = { key, text: eq.text, env: envKey, stableEnv, lo, hi, pts };
     return pts;
   };
 
@@ -1012,7 +1025,7 @@ function render() {
           if (plot.dim === 2) {
             const points = solveFor(eq, 2, plot.residuals);
             if (plot.parametric) { extras.polylines.push({ pts: points.flat(), color: css }); break; }
-            const set = coordinatePointWriter(eq, plot.coordinates, env);
+            const set = coordinatePointWriter(eq, plot.coordinates);
             points.forEach((p, i) => {
               const key = `sys${eq.id}:${i}`;
               extras.points.push({ x: p[0], y: p[1], color: css, hot: hotPoint === key });
@@ -1113,6 +1126,7 @@ function recompileAll() {
     eq.def = undefined;
     eq.viewSpec = undefined;
     eq.spCache = undefined;
+    eq.traceTarget = undefined;
     const text = eq.text.trim();
     eq.comment = text.startsWith('#');
     if (!eq.comment) eq.collapsed = undefined;
@@ -1443,7 +1457,7 @@ function recompileAll() {
       parsed = lowerLists(parsed, getList, ropts);
       // Coordinate fields substitute in as functions of the plane, so
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
-      eq.cls = classify(parsed, constNames, fieldEnv);
+      eq.cls = classify(parsed, constNames, fieldEnv, timeDifferentiator(defs));
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       // A 3-column scatter only ever draws in 3D, where every point is a
       // sprite. Say so here rather than plotting the first CLOUD_3D_MAX of a
@@ -2954,11 +2968,11 @@ function snapToPixel(v: number): number {
  * place while a slider name moves through its own row. `commit` receives the
  * rewritten pair text.
  */
-function makePairWriter(pairText: string, commit: (pair: string) => void, round = snapToPixel): ((x: number, y: number) => void) | null {
+function makePairWriter(pairText: string, commit: (pair: string) => void, round = snapToPixel, pinned?: ReadonlySet<string>): ((x: number, y: number) => void) | null {
   // A name moves only if it is a slider constant: a plain number in its own
   // row is the only right-hand side a drag knows how to rewrite.
   const drag = dragAxes(pairText, p => equations.find(r =>
-    r.def?.kind === 'const' && r.def.name === p && !r.error && NUM_RE.test(r.def.rhs)));
+    r.def?.kind === 'const' && r.def.name === p && !r.error && NUM_RE.test(r.def.rhs)), pinned);
   if (!drag) return null;
   const { parts, axes } = drag;
   return (x, y) => {
@@ -2977,20 +2991,20 @@ function makePairWriter(pairText: string, commit: (pair: string) => void, round 
 const pointWriter = (eq: Equation) => makePairWriter(eq.text, p => { eq.text = p; });
 
 /** Evaluate the named coordinates at the pointer before writing the RHS. */
-function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined, env: Record<string, number>) {
+function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
   if (!coords) return null;
   const at = eq.text.indexOf('=');
   if (at < 0) return null;
   const lhs = eq.text.slice(0, at).trim();
-  const write = makePairWriter(eq.text.slice(at + 1), p => { eq.text = `${lhs} = ${p}`; }, v => v);
+  // Writing a slider that defines either chart coordinate changes the map
+  // itself, so ordinary coordinate writeback cannot move that axis reliably.
+  const pinned = definitionDependencies(coords.flatMap(c => [...freeVars(c)]), defs);
+  const write = makePairWriter(eq.text.slice(at + 1), p => { eq.text = `${lhs} = ${p}`; }, v => v, pinned);
   if (!write) return null;
-  return (x: number, y: number) => {
-    try {
-      // Pixel precision belongs to Cartesian space, before changing units.
-      const values = coords.map(c => evaluate(c, { ...env, x: snapToPixel(x), y: snapToPixel(y) }));
-      if (values.every(Number.isFinite)) write(values[0], values[1]);
-    } catch { /* singular coordinate: keep the previous values */ }
-  };
+  return coordinateDragWriter(coords, () => {
+    const time = graphTime();
+    return { ...currentConstEnv(time), t: time };
+  }, write, snapToPixel);
 }
 
 /** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
