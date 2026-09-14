@@ -48,6 +48,57 @@ The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wire
       required: ['equations'],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        valid: { type: 'boolean' },
+        url: { type: 'string', description: 'Graph URL using a #-fragment.' },
+        share_url: { type: 'string', description: 'Shareable /g/ graph URL.' },
+        preview: { type: 'string', description: 'Static preview availability and limitations.' },
+        preview_omits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { row: { type: 'string' }, why: { type: 'string' } },
+            required: ['row', 'why'],
+            additionalProperties: false,
+          },
+        },
+        rows: {
+          type: 'array',
+          items: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  text: { type: 'string' },
+                  status: { type: 'string', enum: ['ok'] },
+                  kind: { type: 'string' },
+                  animated: { type: 'boolean' },
+                  value: { type: 'string' },
+                  note: { type: 'string' },
+                  draggable: { type: 'boolean' },
+                },
+                required: ['text', 'status', 'kind'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  text: { type: 'string' },
+                  status: { type: 'string', enum: ['error'] },
+                  error: { type: 'string' },
+                },
+                required: ['text', 'status', 'error'],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
+      },
+      required: ['valid', 'url', 'share_url', 'preview', 'rows'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'decode_graph_url',
@@ -60,6 +111,14 @@ The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wire
         url: { type: 'string', description: 'An equation.io graph URL.' },
       },
       required: ['url'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        equations: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['equations'],
+      additionalProperties: false,
     },
   },
 ];

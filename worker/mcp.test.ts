@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import Ajv from 'ajv';
 import { handleMcp } from './mcp.ts';
 
 const URL_BASE = 'https://equation.io/mcp';
+const ajv = new Ajv({ strict: true });
+const outputValidators = new Map<string, ReturnType<typeof ajv.compile>>();
 
 // The "syntax" resource serves the /llms.txt asset. The stub returns a
 // sentinel, proving resources/read plumbs ASSETS through untouched; that the
@@ -25,6 +28,22 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
   });
   const res = await handleMcp(request, new URL(URL_BASE), env);
   const body = (res.status === 202 ? null : await res.json()) as any;
+  // Validate real outputs throughout this suite, including invalid equations,
+  // device-local data, animation, preview omissions, and compatibility aliases.
+  if (method === 'tools/call' && body.result?.structuredContent) {
+    if (!outputValidators.size) {
+      const listed = await rpc('tools/list');
+      for (const tool of listed.body.result.tools) {
+        expect(tool.outputSchema).toBeDefined();
+        outputValidators.set(tool.name, ajv.compile(tool.outputSchema));
+      }
+    }
+    const name = (params as { name: string }).name;
+    const canonical = name === 'create_graph' ? 'encode_graph_url'
+      : name === 'read_graph' ? 'decode_graph_url' : name;
+    const validate = outputValidators.get(canonical)!;
+    expect(validate(body.result.structuredContent), JSON.stringify(validate.errors)).toBe(true);
+  }
   return { res, body };
 }
 
@@ -62,6 +81,11 @@ describe('mcp endpoint', () => {
   it('lists both tools', async () => {
     const { body } = await rpc('tools/list');
     expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual(['encode_graph_url', 'decode_graph_url']);
+    for (const tool of body.result.tools) {
+      expect(tool.annotations).toEqual({
+        readOnlyHint: true, openWorldHint: false, destructiveHint: false,
+      });
+    }
   });
 
   it.each([
