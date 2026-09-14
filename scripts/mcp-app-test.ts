@@ -167,6 +167,7 @@ try {
   await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready · validating…');
   await page.evaluate(() => (window as any).sendResult({ isError: true, content: [] }));
   await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Could not load this graph. Ask to try again.');
+  assert.equal(await frame.locator('.eq-line').count(), 0, 'Error results clear the previewed rows');
 
   const sphere = await rpc('tools/call', { name: 'show_graph', arguments: { equations: ['x^2+y^2+z^2=9'] } });
   await page.evaluate(value => (window as any).sendResult(value), sphere);

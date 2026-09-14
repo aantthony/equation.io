@@ -186,7 +186,9 @@ export async function connectGraphApp(editor: GraphEditor) {
     previewSource = undefined;
     hasResult = false;
     if (result.isError) {
-      hasResult = false;
+      // The rendered rows were only a preview of the failed input; leaving
+      // them live would invite edits that never publish (hasResult stays false).
+      showRows([]);
       inputSource = undefined;
       status.textContent = 'Could not load this graph. Ask to try again.';
       return;

@@ -3605,6 +3605,9 @@ if (embedded) {
       // Pending gestures belong to the old document, not the incoming rows.
       if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
       viewportWriteTimer = null;
+      // The dragged view was never written back, so an identical viewport
+      // row must still snap the live view rather than read as already applied.
+      appliedViewText = appliedCameraText = null;
       if (urlTimer !== null) clearTimeout(urlTimer);
       urlTimer = null;
       urlPending = false;
