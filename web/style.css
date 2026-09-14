@@ -719,3 +719,23 @@ body.file-drag::after {
 @media (prefers-reduced-motion: reduce) {
   #panel-chip { transition: opacity 0.15s ease-out; }
 }
+
+/* Equation assistance sits outside the editable document and its widgets. */
+#syntax-help {
+  position: fixed; z-index: 100; width: 340px; overflow: auto;
+  border: 1px solid var(--panel-border); border-radius: 10px;
+  background: var(--page-bg); color: var(--text);
+  box-shadow: 0 5px 24px var(--panel-shadow);
+  padding: 6px; font: 12px/1.45 system-ui, sans-serif;
+}
+#syntax-help[hidden], #syntax-help [hidden] { display: none; }
+.syntax-hint { padding: 7px 9px; color: var(--info); overflow-wrap: anywhere; }
+#syntax-suggestions button {
+  display: flex; flex-direction: column; align-items: flex-start; width: 100%;
+  border: 0; border-radius: 5px; padding: 7px 9px; text-align: left;
+  color: inherit; background: transparent; cursor: pointer;
+}
+#syntax-suggestions button:hover, #syntax-suggestions [aria-selected="true"] { background: var(--ex-hover-bg); }
+#syntax-suggestions strong { font: 13px ui-monospace, monospace; overflow-wrap: anywhere; }
+#syntax-suggestions span { color: var(--summary); font-size: 11px; margin-top: 2px; }
+.syntax-keys { padding: 6px 9px 3px; color: var(--muted); font-size: 10px; }

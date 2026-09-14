@@ -169,6 +169,30 @@ pnpm deploy     # build and deploy to Cloudflare
 - `[3, 1, 4, 1, 5]` — a data list: dots at (k, value), k = 1, 2, …; the row's
   bar toggle draws it as a bar chart. `[(1, 2), (3, 4)]` is a scatter of points
 
+**Regression**
+
+- `X = [0, 1, 2, 3]; Y = [1, 3, 5, 7]; Y ~ m X + b` fits a line.
+  Unbound names `m` and `b` become fitted constants; `y = m x + b` draws the
+  model and `(X, Y - (m X + b))` draws its residuals. A fit row reports the
+  coefficients, RMSE, R² (when defined), and observation count.
+- `Y ~ a X^2 + b X + c` fits a polynomial; `Y ~ a exp(b X)` fits a nonlinear
+  model. Already defined constants stay fixed and changing them refits the
+  other coefficients. Define data and fixed constants above the fit.
+- `data.height ~ m data.age + b` works with CSV columns. Missing/nonfinite
+  data pairs are skipped with a count; mismatched lengths and unidentifiable
+  coefficients are errors. Missing CSVs remain device-local in shared links.
+- Fits are static, with at most 8 coefficients and 10,000 observations
+  (2,000 for nonlinear models). Nonlinear fitting uses deterministic starts
+  and reports a local fit; it does not guarantee a global optimum.
+
+**Contextual syntax help**
+
+The equation editor suggests functions, defined names, and loaded CSV columns
+as you type, and shows signatures inside function calls. Tab or a click
+inserts a suggestion; arrow keys select one for Enter to insert. Enter
+otherwise creates an equation row, Escape dismisses help, and completion is
+one undoable text edit. Comments and quoted strings do not trigger suggestions.
+
 **Number theory and complex analysis**
 
 - `gcd(a, b)` / `isprime(n)` — number theory; try `a_n = isprime(n)`
