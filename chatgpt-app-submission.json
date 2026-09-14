@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "Equation.io",
     "subtitle": "Graph mathematical equations",
-    "description": "Equation.io turns mathematical equations into interactive 2D and 3D graphs inside ChatGPT or in your browser. Create curves, surfaces, inequalities, and graphs with adjustable parameters; inspect validation results; or edit an existing Equation.io graph link. Graph equations are encoded in shareable URLs, so anyone with a link can read them. Static previews are simplified and may omit features supported by the interactive graph. No account or API key is required.",
+    "description": "Equation.io turns mathematical equations into interactive 2D and 3D graphs inside compatible MCP apps or in your browser. Create curves, surfaces, inequalities, and graphs with adjustable parameters; inspect validation results; or edit an existing Equation.io graph link. Graph equations are encoded in shareable URLs, so anyone with a link can read them. Static previews are simplified and may omit features supported by the interactive graph. No account or API key is required.",
     "category": "EDUCATION"
   },
   "tools": {
