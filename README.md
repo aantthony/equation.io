@@ -50,8 +50,8 @@ Agent-facing surface:
   (expressions compile to a stack machine — no WebGL in Workers)
 - `/mcp` — stateless MCP server (Streamable HTTP) with `encode_graph_url`
   (validates rows, returns links), `decode_graph_url` (decodes links for editing),
-  and `show_graph` (renders the interactive grapher inside MCP Apps hosts,
-  including ChatGPT web). See [ChatGPT setup and testing](docs/mcp-app.md).
+  and `show_graph` (renders the interactive grapher inside MCP Apps hosts).
+  See [MCP Apps integration and testing](docs/mcp-app.md).
 
 ## Usage
 

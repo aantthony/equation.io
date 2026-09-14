@@ -1,4 +1,4 @@
-# Equation.io in ChatGPT web
+# Equation.io in MCP Apps hosts
 
 `show_graph` returns validated equations and share links with an MCP Apps UI
 resource (`ui://equation/graph-v1.html`). The UI reuses the website's editor and
@@ -58,31 +58,9 @@ pnpm typecheck
 
 The browser test loads the production MCP resource in a separate-origin,
 sandboxed iframe with CSP restrictions and exercises the bridge and graph UI.
-It is a host simulation; verify the actual ChatGPT integration separately.
+It is a host simulation; verify integration with supported hosts separately.
 
-## Connect in ChatGPT
+Hosts can cache resources. Bump the UI resource URI for breaking UI contract
+changes.
 
-Deploy the Worker and assets together with `pnpm deploy`, or expose the local
-server through a development HTTPS tunnel. A local loopback URL alone is not
-reachable by ChatGPT's remote MCP client. For a tunnel, ensure UI asset URLs
-are also reachable through its public origin.
-
-Following the [official connection guide](https://developers.openai.com/plugins/deploy/connect-chatgpt):
-
-1. Enable Developer mode in ChatGPT settings under Security and login (subject
-   to account and workspace policy).
-2. Add an MCP connection from ChatGPT Plugins using the deployed HTTPS `/mcp`
-   URL, e.g. `https://equation.io/mcp`, with no authentication.
-3. Refresh the connection if it already exists, and check that `show_graph`
-   appears. Start a new conversation with the connection enabled.
-4. Ask: “Show y = a sin(x), with a = 2 and an adjustable slider.”
-5. Move the slider, then ask to add a cosine curve while preserving your edits.
-   Check dark/light theme, Expand/Collapse, and Open in equation.io.
-6. Try “Show x² + y² + z² = 9”, and an invalid equation to check error display.
-
-Refresh metadata after deployment. Bump the UI resource URI for breaking UI
-contract changes because hosts can cache resources. Public directory submission
-is separate from testing an MCP connection in developer mode.
-
-References: [MCP Apps UI integration](https://developers.openai.com/plugins/build/chatgpt-ui),
-[MCP Apps overview](https://modelcontextprotocol.io/extensions/apps/overview).
+Reference: [MCP Apps overview](https://modelcontextprotocol.io/extensions/apps/overview).
