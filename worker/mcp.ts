@@ -30,6 +30,7 @@ const TOOLS = [
   {
     name: 'create_graph',
     title: 'Create a graph link',
+    annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     description: `Build a link that opens the equation.io grapher with the given equations already rendered, validating every row through the app's own parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see read_graph), include the unchanged rows too.
 
 Rows can be: equations and inequalities in x,y (curves, regions; z makes it 3D), bare expressions (scalar fields; complex plots via w), points (rows report "draggable"), parametric tuples in u,v — and definitions: "a = 2" (a draggable slider), "f(x) = x^3 - a x", coordinate fields like "r = sqrt(x^2+y^2)" for polar. t animates. Also derivatives d/dx, integrals int[a..b] f dx, sums sum[n=1..N], domain()/conformal()/iter() for complex plots, y' = … slope fields, random variables "X ~ Normal(m, s)"/"P(0<X<2)"/"E(X^2)", and "view(x = -5..5, y = -2..2)"/"camera(theta, phi)" framing rows. That is a menu, not the syntax: before your first non-trivial graph, read the "syntax" MCP resource (also at https://equation.io/llms.txt).
@@ -51,6 +52,7 @@ The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wire
   {
     name: 'read_graph',
     title: 'Read a graph link',
+    annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with create_graph.',
     inputSchema: {
       type: 'object',

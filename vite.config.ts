@@ -27,6 +27,8 @@ export default defineConfig({
           input: {
             main: fileURLToPath(new URL('web/index.html', import.meta.url)),
             about: fileURLToPath(new URL('web/about/index.html', import.meta.url)),
+            privacy: fileURLToPath(new URL('web/privacy/index.html', import.meta.url)),
+            terms: fileURLToPath(new URL('web/terms/index.html', import.meta.url)),
           },
         },
       },
