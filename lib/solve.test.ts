@@ -40,6 +40,28 @@ test('a repeated call returns identical points (no random seeding)', () => {
   expect(solveSystem(...args)).toEqual(solveSystem(...args));
 });
 
+test('a high-multiplicity system root is localized to one point', () => {
+  const sols = solveSystem(sys('x^8', 'y'), ['x', 'y'], [-4, -4], [4, 4]);
+  expect(sols).toHaveLength(1);
+  expect(near(sols[0], [0, 0], 1e-7)).toBe(true);
+});
+
+test('extrapolation retains a shifted multiple root without inventing near misses', () => {
+  const boxLo = [-4, -4], boxHi = [4, 4];
+  const sols = solveSystem(sys('(x-0.37)^8', 'y-0.42'), ['x', 'y'], boxLo, boxHi);
+  expect(sols).toHaveLength(1);
+  expect(near(sols[0], [0.37, 0.42], 1e-7)).toBe(true);
+  expect(solveSystem(sys('x^8 + 0.00000001', 'y'), ['x', 'y'], boxLo, boxHi)).toEqual([]);
+});
+
+test('extrapolation does not lose nearby roots of a perturbed multiple root', () => {
+  const sols = solveSystem(sys('x^8 - 0.00000000000001', 'y'), ['x', 'y'], [-4, -4], [4, 4]);
+  const root = Math.pow(1e-14, 1 / 8);
+  expect(sols).toHaveLength(2);
+  expect(has(sols, [-root, 0])).toBe(true);
+  expect(has(sols, [root, 0])).toBe(true);
+});
+
 // The Alpoge/Fable counterexample to the Jacobian conjecture: det JF = -2
 // everywhere, yet three distinct points share the fiber over (-1/4, 0, 0).
 const P = '(1+x y)^3 z + y^2 (1+x y)(4+3 x y)';

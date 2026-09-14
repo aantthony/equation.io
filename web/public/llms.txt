@@ -199,6 +199,11 @@ demand instead of living in a tool description. No authentication required.
 - Region: inequalities, including chains — `y < x/2 + 1`,
   `4 <= x^2 + y^2 <= 9`. Non-strict comparisons draw a solid boundary.
 - Scalar field: a bare expression in x, y — `sin(x)cos(y)` — shaded by value.
+- Complex point: a constant complex expression such as `1+2i` draws at (1, 2).
+  Constants and t may animate its real and imaginary components.
+- Complex roots: `w^3 = 1` draws three solution points; equations in w become
+  two real constraints. This is a numerical search over the visible window,
+  not a certified enumeration or a source of exact symbolic labels.
 - Complex plot: a complex expression in `w` — `w + 4/w`.
 - Domain coloring: `domain(f)` where f is complex — `domain(w^2 + 1)`. Hue is
   arg f, brightness |f|; zeros render black and poles white.
@@ -358,6 +363,25 @@ demand instead of living in a tool description. No authentication required.
   `r = sqrt(x^2+y^2); theta = atan2(y,x)`. Its level sets draw as a grid, and
   later rows may use it: adding `r = 2(1 + cos(theta))` plots a cardioid in
   polar coordinates.
+- Coordinate points: after defining r and theta above, `(r, theta) = (2, pi/4)`
+  draws the point satisfying both coordinates. Angles in atan2-valued left
+  components wrap modulo 2pi, so 9pi/4 and pi/4 name the same position.
+  Bare tuples remain Cartesian. Non-injective charts draw multiple points:
+  `p = x y; q = (x^2-y^2)/2; (p, q) = (1, 0)` draws two.
+  In 2D, RHS literals or slider names can be dragged; the pointer position
+  is evaluated in the named coordinates and written back to those values.
+- Parametric systems: `(r, theta) = (3u, 6pi u)` traces a three-turn spiral,
+  u in [0,1]. General square systems with u work too, including in 3D.
+  A bounded numerical continuation follows branches, periodically searches
+  for others, and breaks lines at missing/discontinuous solutions. Small
+  branches can be missed; this is not certified exhaustive tracing.
+- Coordinate flows: `(r', theta') = (r(1-r), 1)` draws a polar limit cycle.
+  Both distinct coordinate names must have primes. Velocities are transformed
+  through the coordinate Jacobian; singular chart locations are undefined.
+  Click to trace trajectories just as for Cartesian vector fields. A lone
+  prime on a field is invalid; an otherwise unbound name still defines a state.
+  Static previews draw direction arrows for vector fields and points/curves
+  for coordinate and complex-root systems.
 
 ## Viewport rows (framing)
 

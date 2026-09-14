@@ -14,13 +14,13 @@ import { analyze } from './graph.ts';
 
 describe('og renderer coverage', () => {
   it('draws the everyday 2D and 3D families', () => {
-    for (const t of ['implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'psurface', 'implicit3d', 'polygon', 'cobweb'] as const) {
+    for (const t of ['implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'psurface', 'implicit3d', 'polygon', 'cobweb', 'system', 'vfield2d'] as const) {
       expect(OG_COVERAGE[t], t).toBe('draws');
     }
   });
 
   it('falls back for every shader-only family', () => {
-    for (const t of ['complex2d', 'domain2d', 'conformal2d', 'fractal2d', 'vfield2d'] as const) {
+    for (const t of ['complex2d', 'domain2d', 'conformal2d', 'fractal2d'] as const) {
       expect(OG_COVERAGE[t], t).toBe('fallback');
     }
   });
@@ -53,7 +53,8 @@ describe('canRenderOg', () => {
     expect(canRenderOg(['domain((w^3 - 1)/w)'])).toBe(false);
     expect(canRenderOg(['iter(z^2 + w)'])).toBe(false);
     expect(canRenderOg(['conformal(w^2/4)'])).toBe(false);
-    expect(canRenderOg(['(-y, x)'])).toBe(false);
+    expect(canRenderOg(['(-y, x)'])).toBe(true);
+    expect(canRenderOg(['w^3 = 1', '1+2i'])).toBe(true);
     expect(canRenderOg(['ln(w-2) - ln(w+2)'])).toBe(false);
     // One unsupported row poisons the graph: a partial picture is still wrong.
     expect(canRenderOg(['y = sin(x)', 'iter(z^2 + w)'])).toBe(false);

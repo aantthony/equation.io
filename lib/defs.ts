@@ -1642,7 +1642,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   const stateRow = (n: string): string => vecOwnerKey.get(n) ?? n;
   for (const [name, deriv] of derivs) {
     try {
-      if (defs.consts.has(name) || defs.fields.has(name)) {
+      if (defs.fields.has(name)) throw new Error(`${name} is a coordinate field — use a tuple flow like (${name}', y') = (F, G).`);
+      if (defs.consts.has(name)) {
         throw new Error(`${name} is already defined as a constant.`);
       }
       const env: Record<string, number> = { t: 0 };
@@ -1700,6 +1701,52 @@ export function animatedConstNames(defs: Defs): Set<string> {
     }
   }
   return out;
+}
+
+/** Names read by a value, including indirect constant and state dependencies. */
+export function definitionDependencies(names: Iterable<string>, defs: Defs): Set<string> {
+  const out = new Set<string>();
+  const visit = (name: string) => {
+    if (out.has(name)) return;
+    out.add(name);
+    const constant = defs.consts.get(name);
+    const state = defs.states.get(name);
+    for (const e of constant ? [constant] : state ? [state.deriv, state.init] : []) {
+      for (const fv of freeVars(e)) visit(fv);
+    }
+  };
+  for (const name of names) visit(name);
+  return out;
+}
+
+/** Total time derivative, keeping constants symbolic and using state rates. */
+export function timeDifferentiator(defs: Defs): (e: Expr) => Expr {
+  const rates = new Map<string, Expr>();
+  const zero: Expr = { kind: 'num', value: 0 };
+  const rate = (name: string): Expr => {
+    if (name === 't') return { kind: 'num', value: 1 };
+    const state = defs.states.get(name);
+    if (state) return state.deriv;
+    const constant = defs.consts.get(name);
+    if (!constant) return zero;
+    let hit = rates.get(name);
+    if (!hit) {
+      hit = derivative(constant);
+      rates.set(name, hit);
+    }
+    return hit;
+  };
+  const derivative = (e: Expr): Expr => {
+    let out: Expr = zero;
+    for (const name of freeVars(e)) {
+      const dt = rate(name);
+      // Fixed parameters need no differentiation, even if their definitions
+      // use functions without symbolic derivatives, such as floor().
+      if (dt.kind !== 'num' || dt.value !== 0) out = add(out, mul(diff(e, name), dt));
+    }
+    return out;
+  };
+  return derivative;
 }
 
 /**

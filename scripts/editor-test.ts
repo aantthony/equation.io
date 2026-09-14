@@ -278,6 +278,67 @@ await scenario('Enter after a collapsed heading expands it', async () => {
   );
 });
 
+await scenario('coordinate point drag persists through the URL', async () => {
+  await load(page, ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
+    '(r, theta) = (2, 0)', 'view(x = -4..4, y = -3..3)']);
+  await page.mouse.move(733.33, 350);
+  await page.mouse.down();
+  await page.mouse.move(616.67, 233.33, { steps: 15 });
+  await page.mouse.up();
+  await page.waitForTimeout(700); // URL writes coalesce during a drag.
+  const rows = await rowTexts(page);
+  check('drag evaluates radius and angle at the pointer', /1\.4\d*, 0\.7\d*/.test(rows[2] ?? ''), String(rows[2]));
+  await page.reload();
+  await page.waitForSelector('.eq-line');
+  check('coordinate drag survives reload', (await rowTexts(page))[2] === rows[2]);
+});
+
+await scenario('coordinate drag rounds the pointer before converting units', async () => {
+  await load(page, ['p = x/1000', '(p, y) = (0.002, 0)',
+    'view(x = -4..4, y = -3..3)']);
+  await page.mouse.move(733.33, 350);
+  await page.mouse.down();
+  await page.mouse.move(616.67, 233.33, { steps: 15 });
+  await page.mouse.up();
+  const rows = await rowTexts(page);
+  check('scaled coordinate follows the pointer without snapping to zero',
+    rows[1] === '(p, y) = (0.001, 1)', String(rows[1]));
+});
+
+await scenario('spiral zoom stays responsive while traces run', async () => {
+  await load(page, ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
+    '(r, theta) = (3u, 6pi u)', 'view(x = -4..4, y = -3..3)']);
+  // Wait for actual green curve pixels, not merely an empty responsive grid.
+  const hasCurve = () => {
+    const c = document.querySelector<HTMLCanvasElement>('#overlay')!;
+    const pixels = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] > 100 && pixels[i + 1] > pixels[i] + 30 && pixels[i + 1] > pixels[i + 2] + 15) return true;
+    }
+    return false;
+  };
+  await page.waitForFunction(hasCurve, undefined, { timeout: 15000 });
+  const longest = await page.evaluate(async () => {
+    const durations: number[] = [];
+    const observer = new PerformanceObserver(list => durations.push(...list.getEntries().map(e => e.duration)));
+    observer.observe({ type: 'longtask' });
+    const canvas = document.querySelector('#gl')!;
+    for (let i = 0; i < 60; i++) {
+      canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: i < 30 ? -60 : 60,
+        clientX: 650, clientY: 350, bubbles: true, cancelable: true }));
+      await new Promise(r => setTimeout(r, 16));
+    }
+    await new Promise(r => setTimeout(r, 700));
+    observer.disconnect();
+    return Math.max(0, ...durations);
+  });
+  // Generous CI smoke threshold: the previous synchronous trace stalled for
+  // over a second. GPU scheduling noise should not fail this regression test.
+  check('spiral scrolling has no solver-sized main-thread stalls', longest < 250, `${longest}ms`);
+  await page.waitForFunction(hasCurve, undefined, { timeout: 15000 });
+  check('spiral remains drawn after scrolling', true);
+});
+
 await browser.close();
 server.kill();
 

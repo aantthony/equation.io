@@ -12,6 +12,8 @@
  *   (x', y') = (P, Q) plots the phase-plane field (P, Q) — all as vector fields
  * - t is always allowed and means "animated": bound to seconds since start
  */
+import { coordinateRow, lowerCoordinateFlow } from './coordinate.ts';
+import { complexParts } from './complex-parts.ts';
 import { SPECIAL_FORMS, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import { builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
@@ -54,7 +56,7 @@ export type Plot =
    * numerically: intersections of curves in 2D, the fiber of a map in 3D.
    * Residuals keep constants under their original names (CPU-evaluated).
    */
-  | { type: 'system'; dim: 2 | 3; residuals: Expr[] }
+  | { type: 'system'; dim: 2 | 3; residuals: Expr[]; parametric?: boolean; angular?: boolean[]; coordinates?: Expr[] }
   /** (Vx, Vy) as GLSL in x, y — rendered as animated line-integral convolution.
    *  comps keep the symbolic components for CPU integration (integral curves). */
   | { type: 'vfield2d'; fx: string; fy: string; comps: [Expr, Expr] }
@@ -236,7 +238,9 @@ function levelFamily(e: Expr, params: readonly string[], defined: ReadonlySet<st
   }
 }
 
-export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): Classified {
+export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), fields: Record<string, Expr> = {}, timeDerivative?: (e: Expr) => Expr): Classified {
+  const coordinate = coordinateRow(expr, fields);
+  expr = lowerCoordinateFlow(expr, fields, timeDerivative);
   const ode = matchODE(expr);
   if (ode) expr = ode;
   const tube = matchTube(expr);
@@ -287,7 +291,8 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
   const animated = vars.has('t');
   const hasParam = vars.has('u') || vars.has('v');
   const hasSpace = vars.has('x') || vars.has('y') || vars.has('z');
-  if (hasParam && hasSpace) throw new Error('Cannot mix u/v with x/y/z.');
+  const paramSystem = expr.kind === 'eq' && expr.l.kind === 'vec' && vars.has('u') && !vars.has('v');
+  if (hasParam && hasSpace && !paramSystem) throw new Error('Cannot mix u/v with x/y/z.');
   if (usesComplex(expr) && (vars.has('z') || hasParam)) {
     throw new Error('Complex expressions plot in 2D only (x, y, w).');
   }
@@ -439,7 +444,7 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
     return done({ type: 'point', dim, coords: expr.items });
   }
 
-  if (hasParam) throw new Error('u/v need a vector expression like (cos(u), sin(u), v).');
+  if (hasParam && !paramSystem) throw new Error('u/v need a vector expression like (cos(u), sin(u), v).');
 
   // A vector equation is a system, one residual per component: F(x,y,z) =
   // (a, b, c) is the fiber of a map, (f, g) = (0, 0) an intersection of
@@ -460,7 +465,15 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
       throw new Error(`${eqs} in ${dim} unknowns — a system needs one equation per unknown.`);
     }
     const residuals = l.items.map((a, k): Expr => ({ kind: 'bin', op: '-', a, b: r.items[k] }));
-    return done({ type: 'system', dim, residuals });
+    const positional = coordinate && !hasParam && !coordinate.rhs.some(e =>
+      [...freeVars(e)].some(v => ['x', 'y', 'z'].includes(v) || Object.hasOwn(fields, v)));
+    // Only a direct angle coordinate is periodic; nesting atan2 inside a
+    // real expression does not make that expression an angle.
+    return done({
+      type: 'system', dim, residuals, angular: l.items.map(e => e.kind === 'call' && (e.name === 'atan2' || (e.name === 'atan' && e.args.length === 2))),
+      ...(paramSystem ? { parametric: true } : {}),
+      ...(positional ? { coordinates: coordinate.coords } : {}),
+    });
   }
 
   if (g.kind === 'ineq') {
@@ -490,8 +503,14 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
   };
 
   if (g.kind === 'eq') {
-    // compileTyped rejects equations that are still complex-valued; re()/im()
-    // wrapped sides come out real and flow through the implicit paths.
+    // Complex equality supplies two real residuals. Real projections such as
+    // re(w) remain ordinary implicit equations.
+    if (compileTyped(g.l).type === 'complex' || compileTyped(g.r).type === 'complex') {
+      if (!hasSpace) throw new Error('A constant complex comparison has no isolated roots — use w as the unknown.');
+      const a = complexParts(expr.kind === 'eq' ? expr.l : expr);
+      const b = complexParts(expr.kind === 'eq' ? expr.r : expr);
+      return done({ type: 'system', dim: 2, residuals: a.map((c, k) => ({ kind: 'bin', op: '-', a: c, b: b[k] })) });
+    }
     const field = compileTyped(g).code;
     if (vars.has('z')) return done({ type: 'implicit3d', field, grad: gradOf(g) });
     return done({ type: 'implicit2d', field, levels: levelFamily(expr, params, defined) });
@@ -499,7 +518,10 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set()): 
 
   // Bare scalar expression.
   const compiled = compileTyped(g);
-  if (compiled.type === 'complex') return done({ type: 'complex2d', field: compiled.code });
+  if (compiled.type === 'complex') {
+    if (!hasSpace && !hasParam) return done({ type: 'point', dim: 2, coords: complexParts(expr) });
+    return done({ type: 'complex2d', field: compiled.code });
+  }
   if (vars.has('z')) return done({ type: 'implicit3d', field: compiled.code, grad: gradOf(g) });
   if (vars.has('y')) return done({ type: 'scalar2d', field: compiled.code });
   // Only x (or constants / t): plot as y = expr.
