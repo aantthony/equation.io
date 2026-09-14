@@ -687,6 +687,8 @@ function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts): Expr | null {
 const num = (value: number): Expr => ({ kind: 'num', value });
 
 export interface ResolveOpts {
+  /** Definition values cannot contain row-only motion trails. */
+  inDefinition?: boolean;
   /** Numeric constant values, used to evaluate Σ/Π bounds at expansion time. */
   consts?: Record<string, number>;
   /** Out: constant names referenced by Σ/Π bounds (their sliders snap to integers). */
@@ -1137,6 +1139,9 @@ function rx(e: Expr, ctx: Ctx): Expr {
         }
         return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
       }
+      if (ctx.opts.inDefinition && e.name === 'trail') {
+        throw new Error('trail(…) must be a whole row, not part of a definition.');
+      }
       return { kind: 'call', name: e.name, args };
     }
     case 'eq': return { kind: 'eq', l: rx(e.l, ctx), r: rx(e.r, ctx) };
@@ -1199,6 +1204,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   // definitions may use them (bounds need a value at expansion time).
   const numEnv: Record<string, number> = {};
   const ropts: ResolveOpts = {
+    inDefinition: true,
     consts: numEnv,
     boundConsts: new Set(),
     // Live: list names accumulate as definitions are processed.
