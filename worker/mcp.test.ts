@@ -403,6 +403,9 @@ describe('mcp endpoint', () => {
     expect(body.error.code).toBe(-32601);
     const res = await handleMcp(new Request(URL_BASE, { method: 'GET' }), new URL(URL_BASE), env);
     expect(res.status).toBe(405);
+    expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8');
+    expect(res.headers.get('Allow')).toBe('POST, OPTIONS');
+    expect(await res.text()).toContain('https://equation.io/mcp');
   });
 });
 
