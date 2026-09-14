@@ -76,14 +76,6 @@
       "expected_output_url": null
     },
     {
-      "description": "Explore an animated equation in the conversation.",
-      "user_prompt": "Use Equation.io to show an animated wave with y = sin(x - t).",
-      "file_attachment_urls": null,
-      "tools_triggered": "show_graph",
-      "expected_output": "Displays an interactive graph of y = sin(x - t), with the wave moving as time advances. The user can pan, zoom, edit the equation, and open the graph in the browser.",
-      "expected_output_url": null
-    },
-    {
       "description": "Open an existing graph, edit one curve, and explore the result.",
       "user_prompt": "Use Equation.io to open https://equation.io/g/y%3Dx%5E2;y%3Dsin%28x%29 and replace y = x^2 with y = x^3, keeping the sine curve. Show me the updated interactive graph.",
       "file_attachment_urls": null,
@@ -97,14 +89,6 @@
       "file_attachment_urls": null,
       "tools_triggered": "encode_graph_url",
       "expected_output": "Reports that y = x^2 is valid and y = ( fails validation, preserves the exact input, and identifies the failing row without presenting the complete graph as valid.",
-      "expected_output_url": null
-    },
-    {
-      "description": "Create a shareable graph link on request.",
-      "user_prompt": "Use Equation.io to create a link for y = x^2 and y = sin(x). I only need the link.",
-      "file_attachment_urls": null,
-      "tools_triggered": "encode_graph_url",
-      "expected_output": "Returns a shareable graph link containing both validated equations.",
       "expected_output_url": null
     }
   ],
