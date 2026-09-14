@@ -128,7 +128,7 @@ As planned:
   manager (list/delete) behind the menu.
 - **Server surfaces**: `/api/og` and MCP previews can't reach IndexedDB —
   data rows go through the existing `preview_omits` mechanism; MCP
-  `create_graph` validates `open()` rows syntactically and reports data as
+  `encode_graph_url` validates `open()` rows syntactically and reports data as
   device-local. Later option (not now): `open("https://…/x.csv", hash)`
   remote fetch with the same hash pin.
 
@@ -260,7 +260,7 @@ Four of these came out of the first round of fixes, three were older:
   `mean(ages)` reported "ages is not a list defined above this row". Now
   `defs.missingLists` registers the name with its reason, exactly as
   `defs.tables` does for a column, and the worker maps those definition
-  failures to `dataLocal` — so `create_graph` reports a device-local graph as
+  failures to `dataLocal` — so `encode_graph_url` reports a device-local graph as
   valid with `preview_omits` instead of broken.
 - **A hash prefix could be as short as 6 hex digits.** A row resolves by
   prefix, so 24 bits can match two stored files. `TABLE_RE` is built from
@@ -393,7 +393,7 @@ that would break.**
   an equation"). The fix keeps the promise instead of weakening the codec:
   `rowSafeFileName` strips `;` at ingest, `TABLE_RE` excludes it from a file
   name, and `createLeaf` refuses it in any text literal. Copilot reported this
-  only as an MCP-surface nuisance (`create_graph` rejects rows containing
+  only as an MCP-surface nuisance (`encode_graph_url` rejects rows containing
   `;`); the link corruption underneath it was the real finding.
 
   **Reversed 2026-08-09, tenth pass.** Refusing the character never stopped
