@@ -11,15 +11,17 @@
 </head>
 <body>
   <header><a class="brand" href="/">Equation<span>.io</span></a><a href="/about/">About the calculator</a></header>
-  <main><h1>Privacy Policy</h1><p class="date">Last updated: 14 September 2026</p>
-<p class="summary">Equation.io works without an account. Graphs are encoded in URLs, imported CSV files stay in your browser, and requests to our MCP server are processed on Cloudflare. A graph link is not private: anyone who has it can read its equations.</p>
+  <main><h1>Privacy Policy</h1><p class="date">Last updated: 15 September 2026</p>
+<p class="summary">Equation.io works without an account. Graphs are encoded in URLs, imported CSV files stay in your browser, and requests to our MCP server are processed on Cloudflare. Interacting with an Equation.io widget within an AI client may share graph content and edits with that client. A graph link is not private: anyone who has it can read its equations.</p>
+<p><strong>15 September 2026 update:</strong> This policy now covers interactive graphs within AI clients and the data that may be shared when you use them.</p>
 <h2>Who runs Equation.io</h2>
 <p>Equation.io is operated by Anthony Foster in Australia. This policy covers the graphing calculator at equation.io and its MCP server, including use through ChatGPT, Claude, and other clients. For privacy questions or requests, email <a href="mailto:support@equation.io">support@equation.io</a>.</p>
 <h2>Information we process</h2>
 <ul>
 <li><strong>Website requests.</strong> Cloudflare processes network and request information to deliver and protect the service, such as IP addresses, requested URLs, timestamps, browser information, and errors.</li>
 <li><strong>Graph content.</strong> Equations, definitions, labels, and values are encoded in graph URLs. Opening a <code>/g/</code> link or requesting a preview sends that content to the server. URL fragments (the part after <code>#</code>) are not sent in the initial HTTP request, but the app can convert graph state to a shareable URL path; do not treat fragment links as a confidentiality feature.</li>
-<li><strong>MCP requests.</strong> When an AI client calls <code>encode_graph_url</code>, it sends the selected equations to our server for validation and link creation. <code>decode_graph_url</code> receives a graph URL and decodes its equations. We return results to the calling client. The integration does not request your full chat history, contacts, account credentials, or access to files on your device.</li>
+<li><strong>MCP requests.</strong> Your AI client may send equations and graph links to our server to validate, create, display, or read graphs. We return results to the calling client. The integration does not request your full chat history, contacts, account credentials, or access to files on your device.</li>
+<li><strong>Interactive widgets.</strong> Interacting with an Equation.io widget within an AI client may share graph content, edits, and related settings with that client. The client may use this information to support the conversation and save or restore your graph.</li>
 <li><strong>Support.</strong> If you contact us, we receive your email address and the information you choose to send. GitHub issues and their attachments are public; use email for private requests.</li>
 </ul>
 <h2>Local files and browser storage</h2>
@@ -28,7 +30,7 @@
 <h2>How information is used and shared</h2>
 <p>We use information to provide graphing and previews, answer tool calls and support requests, diagnose errors, and protect the service against abuse. We do not sell personal information or use graph content to train AI models.</p>
 <p>Cloudflare provides hosting, network delivery, security, and operational telemetry. Request logs can include URLs and therefore equations in URL paths. We disabled Cloudflare Web Analytics on 14 September 2026. We continue to use Cloudflare's built-in Worker metrics to monitor request volume and service health. See <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare's privacy policy</a>.</p>
-<p>Your AI client, any MCP gateway you choose (such as Smithery or Glama), and any service where you share a graph may process and retain tool inputs, outputs, URLs, and preview images under their own policies. Direct connections and connections through a gateway have different recipients. Those services are not controlled by Equation.io.</p>
+<p>Your AI client, any MCP gateway you choose (such as Smithery or Glama), and any service where you share a graph may process and retain tool inputs, outputs, URLs, and preview images under their own policies. Your AI client may also process and retain information shared through your interactions with the widget. Direct connections and connections through a gateway have different recipients. Those services are not controlled by Equation.io.</p>
 <p>Information may also be disclosed when required by law or reasonably necessary to investigate abuse or protect legal rights. Hosting and other service providers may process information outside Australia, including in the United States and other countries where they operate.</p>
 <h2>Retention</h2>
 <ul>
@@ -36,11 +38,13 @@
 <li><strong>Operational logs:</strong> Cloudflare Workers Logs has a documented retention period of three days on its free plan and seven days on its paid plan. Other Cloudflare security and analytics products have separate retention periods. Data collected by Cloudflare Web Analytics before it was disabled may remain available under its retention policy, which provides access to the previous six months of data; disabling collection does not establish that historical data has been deleted. See <a href="https://developers.cloudflare.com/workers/observability/logs/workers-logs/">Workers Logs</a> and <a href="https://developers.cloudflare.com/web-analytics/faq/">Web Analytics retention</a>.</li>
 <li><strong>Previews:</strong> generated preview-image responses permit public caching for up to 24 hours. Browsers, messaging services, and other recipients can keep their own copies.</li>
 <li><strong>Local data:</strong> imported CSV files and preferences remain in your browser until removed, cleared, or evicted by the browser. History and synced bookmarks follow your browser's settings.</li>
+<li><strong>AI client data:</strong> information shared with your AI client is subject to its retention policy and available deletion controls. Equation.io does not control how long that client retains it.</li>
 <li><strong>Support:</strong> correspondence may be retained indefinitely, including after a request has been resolved. You can ask us to delete it.</li>
 </ul>
 <h2>Your choices and requests</h2>
 <p>Do not include passwords, confidential information, or sensitive personal data in graph URLs. Encoding is not encryption. Anyone with the link can recover its contents, and Equation.io cannot revoke a URL or erase copies held by others.</p>
 <p>You can clear local site data, delete your own browser history and bookmarks, stop using the service, and disconnect the MCP connector in your AI client. Contact the relevant AI service or gateway to manage data it holds.</p>
+<p>You can use the standalone calculator at equation.io without an AI client. Clearing Equation.io's browser storage or disconnecting the connector does not delete information already held by your AI client; use that client's available data controls.</p>
 <p>Email us to request access to, correction of, or deletion of personal information we hold, or to raise a privacy complaint. We may need enough information to verify your request, but please do not send identity documents or secrets unsolicited. We will respond within a reasonable time and explain any information we cannot locate or delete, including information retained to meet legal obligations. You may also contact the <a href="https://www.oaic.gov.au/privacy/privacy-complaints">Office of the Australian Information Commissioner</a> or your local privacy authority where applicable.</p>
 <h2>Changes to this policy</h2>
 <p>We will update this page and its date when our practices change. We will highlight material changes on the site.</p>
