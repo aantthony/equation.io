@@ -80,12 +80,12 @@ An MCP endpoint (Streamable HTTP) lives at:
 
     https://equation.io/mcp
 
-Tools: `create_graph` (validates each equation through the app's own parser,
+Tools: `encode_graph_url` (validates each equation through the app's own parser,
 returns url/share_url plus per-row classification or errors, and attaches a
 rendered PNG preview of the graph; rows the preview renderer cannot draw are
 listed in `preview_omits` with the reason — the live app renders more than
 the static preview, so an omission never means the row failed) and
-`read_graph` (decodes an existing link back into its equation rows so you can
+`decode_graph_url` (decodes an existing link back into its equation rows so you can
 edit a user's graph and build a new link). This document is also served as
 the server's `syntax` MCP resource, so the full reference can be pulled on
 demand instead of living in a tool description. No authentication required.
@@ -295,7 +295,7 @@ demand instead of living in a tool description. No authentication required.
   somewhere to write the new value: a coordinate that is a plain number
   (`(2, 3)`) or a bare slider name (`(a, 3)` with `a = 1` above) moves;
   computed coordinates (`C = B + D`, `(a+1, cos(t))`) are pinned, and 3D
-  graphs have no point dragging. The MCP create_graph result marks each
+  graphs have no point dragging. The MCP encode_graph_url result marks each
   point row with `"draggable"` — write coordinates as literals or sliders
   when the user is meant to move the point.
 - State (simulation): `th' = -sin(th)` defines the time-derivative of `th`,
@@ -326,7 +326,7 @@ demand instead of living in a tool description. No authentication required.
   (`1.234` is 1.234). The readout reports decimal-comma interpretation.
   Because the bytes never
   enter the URL, opening the link on another device (or rendering it
-  server-side, as `create_graph` previews do) reports the data as
+  server-side, as `encode_graph_url` previews do) reports the data as
   device-local instead of drawing it; dropping the same file there restores
   it. The row's readout opens a preview of the first rows as they parsed.
   `adults = person[person.age >= 18]` names a filtered copy of a file (see
@@ -395,7 +395,7 @@ demand instead of living in a tool description. No authentication required.
   names the exact picture on screen. Without a viewport row, interaction
   stays ephemeral and the default framing applies.
 - Bounds and angles may use `pi` and defined constants, evaluated at load.
-- The /g/ preview card and the MCP create_graph preview image honor these
+- The /g/ preview card and the MCP encode_graph_url preview image honor these
   rows, so they show the framing you chose.
 
 ## Guidance for assistants
@@ -403,7 +403,7 @@ demand instead of living in a tool description. No authentication required.
 - To show a user a graph, emit a single https://equation.io/g/... link built
   as above; the graph renders immediately on load, no interaction needed.
 - To edit a graph the user already has, decode their link (or call the MCP
-  `read_graph` tool), transform the rows, and emit a new link. Prefer
+  `decode_graph_url` tool), transform the rows, and emit a new link. Prefer
   restructuring into named definitions: e.g. given `y = x^2 - 2x`, "add a
   tangent line at x = 3" becomes
   `f(x) = x^2 - 2x; g(x) = d/dx f(x); a = 3; y = f(x); y = f(a) + g(a)(x - a)`

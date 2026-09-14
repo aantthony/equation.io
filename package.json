@@ -27,6 +27,7 @@
     "@cloudflare/vite-plugin": "^1.54.8",
     "@types/node": "^26.5.1",
     "@vitest/coverage-v8": "^5.0.0",
+    "ajv": "^8.20.0",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",

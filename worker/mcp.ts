@@ -1,10 +1,10 @@
 /**
  * Stateless MCP server (Streamable HTTP, JSON responses) at /mcp.
  *
- * Two tools: create_graph builds a shareable link from equation rows,
+ * Two tools: encode_graph_url builds a shareable link from equation rows,
  * validates every row through the app's own parser, and attaches a rendered
  * PNG of the result (the og.ts preview renderer) so the calling model can see
- * what it made, not just that it parsed; read_graph decodes an existing link
+ * what it made, not just that it parsed; decode_graph_url decodes an existing link
  * back into rows so an assistant can edit a user's graph. The full syntax
  * manual is the "syntax" resource — served from the same /llms.txt asset the
  * site publishes — because a manual inlined in the tool description gets
@@ -28,10 +28,10 @@ const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 // names every capability and defers the actual syntax to the resource below.
 const TOOLS = [
   {
-    name: 'create_graph',
+    name: 'encode_graph_url',
     title: 'Create a graph link',
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description: `Build a link that opens the equation.io grapher with the given equations already rendered, validating every row through the app's own parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see read_graph), include the unchanged rows too.
+    description: `Build a link that opens the equation.io grapher with the given equations already rendered, validating every row through the app's own parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see decode_graph_url), include the unchanged rows too.
 
 Rows can be: equations and inequalities in x,y (curves, regions; z makes it 3D), bare expressions (scalar fields; complex plots via w), points (rows report "draggable"), parametric tuples in u,v — and definitions: "a = 2" (a draggable slider), "f(x) = x^3 - a x", coordinate fields like "r = sqrt(x^2+y^2)" for polar. t animates. Also derivatives d/dx, integrals int[a..b] f dx, sums sum[n=1..N], domain()/conformal()/iter() for complex plots, y' = … slope fields, random variables "X ~ Normal(m, s)"/"P(0<X<2)"/"E(X^2)", and "view(x = -5..5, y = -2..2)"/"camera(theta, phi)" framing rows. That is a menu, not the syntax: before your first non-trivial graph, read the "syntax" MCP resource (also at https://equation.io/llms.txt).
 
@@ -48,18 +48,77 @@ The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wire
       required: ['equations'],
       additionalProperties: false,
     },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        valid: { type: 'boolean' },
+        url: { type: 'string', description: 'Graph URL using a #-fragment.' },
+        share_url: { type: 'string', description: 'Shareable /g/ graph URL.' },
+        preview: { type: 'string', description: 'Static preview availability and limitations.' },
+        preview_omits: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { row: { type: 'string' }, why: { type: 'string' } },
+            required: ['row', 'why'],
+            additionalProperties: false,
+          },
+        },
+        rows: {
+          type: 'array',
+          items: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  text: { type: 'string' },
+                  status: { type: 'string', enum: ['ok'] },
+                  kind: { type: 'string' },
+                  animated: { type: 'boolean' },
+                  value: { type: 'string' },
+                  note: { type: 'string' },
+                  draggable: { type: 'boolean' },
+                },
+                required: ['text', 'status', 'kind'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  text: { type: 'string' },
+                  status: { type: 'string', enum: ['error'] },
+                  error: { type: 'string' },
+                },
+                required: ['text', 'status', 'error'],
+                additionalProperties: false,
+              },
+            ],
+          },
+        },
+      },
+      required: ['valid', 'url', 'share_url', 'preview', 'rows'],
+      additionalProperties: false,
+    },
   },
   {
-    name: 'read_graph',
+    name: 'decode_graph_url',
     title: 'Read a graph link',
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with create_graph.',
+    description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url.',
     inputSchema: {
       type: 'object',
       properties: {
         url: { type: 'string', description: 'An equation.io graph URL.' },
       },
       required: ['url'],
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        equations: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['equations'],
+      additionalProperties: false,
     },
   },
 ];
@@ -88,7 +147,7 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-async function createGraph(origin: string, args: Record<string, unknown>) {
+async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   const equations = args.equations;
   if (!Array.isArray(equations) || !equations.every(e => typeof e === 'string')) {
     // Name what arrived, so a caller that guessed wrong fixes it in one retry
@@ -97,7 +156,7 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
     const got = Object.keys(args).filter(k => k !== 'equations');
     const hint = got.length ? ` Received ${got.map(k => `"${k}"`).join(', ')} instead.` : '';
     throw new Error(
-      `create_graph takes "equations": a flat array of strings, one per equation, e.g. `
+      `encode_graph_url takes "equations": a flat array of strings, one per equation, e.g. `
         + `{"equations": ["y = x^2", "y = sin(x)"]}.${hint}`,
     );
   }
@@ -237,7 +296,7 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
   };
 }
 
-function readGraph(args: Record<string, unknown>) {
+function decodeGraphUrl(args: Record<string, unknown>) {
   if (typeof args.url !== 'string') throw new Error('url must be a string');
   const url = new URL(args.url);
   const payload = url.hash.length > 1
@@ -282,7 +341,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         capabilities: { tools: {}, resources: {} },
         serverInfo: { name: 'equation', title: 'equation.io grapher', version: '1.0.0' },
         instructions:
-          'Graphing calculator whose entire state lives in the URL. create_graph turns a list of equations into a link that opens with them rendered — it validates every row and attaches a PNG preview so you can check the result. read_graph decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
+          'Graphing calculator whose entire state lives in the URL. encode_graph_url turns a list of equations into a link that opens with them rendered — it validates every row and attaches a PNG preview so you can check the result. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
           origin + '/llms.txt',
       });
     }
@@ -309,13 +368,14 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
       try {
         let value: object;
         const content: object[] = [];
-        if (name === 'create_graph') {
-          const made = await createGraph(origin, args);
+        // Accept former names for clients with cached tool definitions.
+        if (name === 'encode_graph_url' || name === 'create_graph') {
+          const made = await encodeGraphUrl(origin, args);
           value = made.value;
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
           if (made.png) content.push({ type: 'image', data: made.png, mimeType: 'image/png' });
-        } else if (name === 'read_graph') {
-          value = readGraph(args);
+        } else if (name === 'decode_graph_url' || name === 'read_graph') {
+          value = decodeGraphUrl(args);
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
         } else return error(-32602, `Unknown tool: ${name}`);
         return result({ content, structuredContent: value });

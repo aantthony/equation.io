@@ -8,7 +8,7 @@
     "category": "EDUCATION"
   },
   "tools": {
-    "create_graph": {
+    "encode_graph_url": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -20,7 +20,7 @@
         "destructive_justification": "Does not delete or overwrite existing graphs, send messages, or perform irreversible actions."
       }
     },
-    "read_graph": {
+    "decode_graph_url": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
@@ -38,7 +38,7 @@
       "description": "Create a graph containing two 2D curves.",
       "user_prompt": "Use Equation.io to plot y = x^2 and y = sin(x) together and give me the graph link.",
       "file_attachment_urls": null,
-      "tools_triggered": "create_graph",
+      "tools_triggered": "encode_graph_url",
       "expected_output": "Returns a shareable graph link containing both equations, successful row validation, and a PNG preview when available.",
       "expected_output_url": null
     },
@@ -46,7 +46,7 @@
       "description": "Create a 3D surface and explain its simplified preview.",
       "user_prompt": "Use Equation.io to graph x^2 + y^2 + z^2 = 9. Give me the interactive link and explain how the static preview differs.",
       "file_attachment_urls": null,
-      "tools_triggered": "create_graph",
+      "tools_triggered": "encode_graph_url",
       "expected_output": "Returns a validated sphere graph link and explains that the interactive graph is 3D while the static preview is a simplified wireframe.",
       "expected_output_url": null
     },
@@ -54,7 +54,7 @@
       "description": "Create a graph with an adjustable parameter.",
       "user_prompt": "Use Equation.io to graph y = a sin(x), with a starting at 2 and adjustable using a slider.",
       "file_attachment_urls": null,
-      "tools_triggered": "create_graph",
+      "tools_triggered": "encode_graph_url",
       "expected_output": "Returns a valid graph containing the definition a = 2 and the curve y = a sin(x); the link opens with an adjustable parameter in the browser.",
       "expected_output_url": null
     },
@@ -62,7 +62,7 @@
       "description": "Read an existing graph and preserve unchanged rows when editing.",
       "user_prompt": "Use Equation.io to edit https://equation.io/g/y%3Dx%5E2;y%3Dsin%28x%29: replace y = x^2 with y = x^3, keeping the sine curve. Give me the new link.",
       "file_attachment_urls": null,
-      "tools_triggered": "read_graph, create_graph",
+      "tools_triggered": "decode_graph_url, encode_graph_url",
       "expected_output": "Decodes both original rows, then returns a new validated link containing y = x^3 and y = sin(x); the original link remains unchanged.",
       "expected_output_url": null
     },
@@ -70,7 +70,7 @@
       "description": "Report an invalid equation without silently changing the user input.",
       "user_prompt": "Use Equation.io to validate these exact two rows: y = x^2 and y = (. Do not fix the second row; tell me which one fails.",
       "file_attachment_urls": null,
-      "tools_triggered": "create_graph",
+      "tools_triggered": "encode_graph_url",
       "expected_output": "Reports that y = x^2 is valid and y = ( fails validation; does not present the complete graph as valid or treat preview availability as proof of validity.",
       "expected_output_url": null
     }

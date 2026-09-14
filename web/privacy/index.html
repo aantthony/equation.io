@@ -19,7 +19,7 @@
 <ul>
 <li><strong>Website requests.</strong> Cloudflare processes network and request information to deliver and protect the service, such as IP addresses, requested URLs, timestamps, browser information, and errors.</li>
 <li><strong>Graph content.</strong> Equations, definitions, labels, and values are encoded in graph URLs. Opening a <code>/g/</code> link or requesting a preview sends that content to the server. URL fragments (the part after <code>#</code>) are not sent in the initial HTTP request, but the app can convert graph state to a shareable URL path; do not treat fragment links as a confidentiality feature.</li>
-<li><strong>MCP requests.</strong> When an AI client calls <code>create_graph</code>, it sends the selected equations to our server for validation, link creation, and a simplified preview. <code>read_graph</code> receives a graph URL and decodes its equations. We return results to the calling client. The integration does not request your full chat history, contacts, account credentials, or access to files on your device.</li>
+<li><strong>MCP requests.</strong> When an AI client calls <code>encode_graph_url</code>, it sends the selected equations to our server for validation, link creation, and a simplified preview. <code>decode_graph_url</code> receives a graph URL and decodes its equations. We return results to the calling client. The integration does not request your full chat history, contacts, account credentials, or access to files on your device.</li>
 <li><strong>Support.</strong> If you contact us, we receive your email address and the information you choose to send. GitHub issues and their attachments are public; use email for private requests.</li>
 </ul>
 <h2>Local files and browser storage</h2>

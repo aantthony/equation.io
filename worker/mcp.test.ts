@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import Ajv from 'ajv';
 import { handleMcp } from './mcp.ts';
 
 const URL_BASE = 'https://equation.io/mcp';
+const ajv = new Ajv({ strict: true });
+const outputValidators = new Map<string, ReturnType<typeof ajv.compile>>();
 
 // The "syntax" resource serves the /llms.txt asset. The stub returns a
 // sentinel, proving resources/read plumbs ASSETS through untouched; that the
@@ -25,6 +28,22 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
   });
   const res = await handleMcp(request, new URL(URL_BASE), env);
   const body = (res.status === 202 ? null : await res.json()) as any;
+  // Validate real outputs throughout this suite, including invalid equations,
+  // device-local data, animation, preview omissions, and compatibility aliases.
+  if (method === 'tools/call' && body.result?.structuredContent) {
+    if (!outputValidators.size) {
+      const listed = await rpc('tools/list');
+      for (const tool of listed.body.result.tools) {
+        expect(tool.outputSchema).toBeDefined();
+        outputValidators.set(tool.name, ajv.compile(tool.outputSchema));
+      }
+    }
+    const name = (params as { name: string }).name;
+    const canonical = name === 'create_graph' ? 'encode_graph_url'
+      : name === 'read_graph' ? 'decode_graph_url' : name;
+    const validate = outputValidators.get(canonical)!;
+    expect(validate(body.result.structuredContent), JSON.stringify(validate.errors)).toBe(true);
+  }
   return { res, body };
 }
 
@@ -61,12 +80,26 @@ describe('mcp endpoint', () => {
 
   it('lists both tools', async () => {
     const { body } = await rpc('tools/list');
-    expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual(['create_graph', 'read_graph']);
+    expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual(['encode_graph_url', 'decode_graph_url']);
+    for (const tool of body.result.tools) {
+      expect(tool.annotations).toEqual({
+        readOnlyHint: true, openWorldHint: false, destructiveHint: false,
+      });
+    }
+  });
+
+  it.each([
+    ['encode_graph_url', 'create_graph', { equations: ['y = x'] }],
+    ['decode_graph_url', 'read_graph', { url: 'https://equation.io/#y=x' }],
+  ])('keeps %s compatible with %s', async (name, legacyName, args) => {
+    const current = await rpc('tools/call', { name, arguments: args });
+    const legacy = await rpc('tools/call', { name: legacyName, arguments: args });
+    expect(legacy.body.result).toEqual(current.body.result);
   });
 
   it('creates a validated graph link (tangent-line editing example)', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: {
         equations: ['f(x) = x^2 - 2x', 'g(x) = d/dx f(x)', 'a = 3', 'y = f(x)', 'y = f(a) + g(a)(x - a)'],
       },
@@ -85,7 +118,7 @@ describe('mcp endpoint', () => {
 
   it('validates recurrence rows like the app does (logistic cobweb)', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: {
         equations: ['r = 1.9', 'a_0 = 0.265', 'a_{n+1} = r a_n (1 - a_n)', '(a_0, a_0)'],
       },
@@ -103,7 +136,7 @@ describe('mcp endpoint', () => {
 
   it('validates random-variable rows like the app does (normal probability)', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['m = 1', 's = 0.5', 'X ~ Normal(m, s)', 'P(0 < X < 2)'] },
     });
     const out = body.result.structuredContent;
@@ -119,7 +152,7 @@ describe('mcp endpoint', () => {
 
   it('expands slider-bounded sums like the app does (Fourier series)', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['N = 8', 'y = 2 sum[n=1..N] (-1)^(n+1) sin(n x)/n'] },
     });
     const out = body.result.structuredContent;
@@ -130,7 +163,7 @@ describe('mcp endpoint', () => {
 
   it('still rejects Σ bounds with no static value (animated constant)', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['a = 2 + sin(t)', 'y = sum[n=1..a] x^n'] },
     });
     const out = body.result.structuredContent;
@@ -141,7 +174,7 @@ describe('mcp endpoint', () => {
 
   it('rejects a P(…) row with no random variable declared', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['P(X < 2)'] },
     });
     const out = body.result.structuredContent;
@@ -152,7 +185,7 @@ describe('mcp endpoint', () => {
 
   it('validates random-variable rows: base, derived, and P(…) forms', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: {
         equations: ['X ~ Normal(0, 1)', 'Y = {X > 0: X^2, 1}', 'P(-1 < X < 1)', 'P(Y > X)', 'X + X',
           'P(X + X < 1)'],
@@ -186,7 +219,7 @@ describe('mcp endpoint', () => {
     // row does not contain.
     for (const joined of ['y = x; y = 2', 'y = x\ny = 2']) {
       const { body } = await rpc('tools/call', {
-        name: 'create_graph',
+        name: 'encode_graph_url',
         arguments: { equations: [joined] },
       });
       expect(body.result.isError).toBe(true);
@@ -194,7 +227,7 @@ describe('mcp endpoint', () => {
     }
     // …and a row whose semicolon is inside text is one equation, not two.
     const { body: ok } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['p = open("a;b.csv", a1b2c3d4e5f6)'] },
     });
     expect(ok.result.isError).toBeUndefined();
@@ -204,16 +237,16 @@ describe('mcp endpoint', () => {
     // The row means the ';'. Refusing it did not save the graph — an invalid
     // row is written to the URL like any other — so the link came back cut in
     // half at the quote. The codec tells a row's own semicolon from the
-    // separator now (lib/link.ts), and read_graph proves the round trip.
+    // separator now (lib/link.ts), and decode_graph_url proves the round trip.
     const rows = ['p = open("sales;2026.csv", a1b2c3d4e5f6)', 'y = 2'];
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: rows },
     });
     const out = body.result.structuredContent;
     expect(out.rows[0].status).not.toBe('error');
     const { body: back } = await rpc('tools/call', {
-      name: 'read_graph',
+      name: 'decode_graph_url',
       arguments: { url: out.share_url },
     });
     expect(back.result.structuredContent.equations).toEqual(rows);
@@ -224,7 +257,7 @@ describe('mcp endpoint', () => {
     // names and never lowered, so a reduction over a list defined above them
     // reported `Unknown variable: L` — about a name two rows up.
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['L = [1, 4, 2]', 'X ~ Normal(0, 1)', 'P(X < mean(L))', 'E(X + mean(L))'] },
     });
     const out = body.result.structuredContent;
@@ -238,7 +271,7 @@ describe('mcp endpoint', () => {
     // `total = 3` and means the product `total (x + 1)`, or names a slider
     // `open` — and the row it was shared as has to keep drawing.
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['total = 3', 'open = 2', 'y = total(x + 1)', 'y = open x'] },
     });
     const out = body.result.structuredContent;
@@ -248,14 +281,14 @@ describe('mcp endpoint', () => {
     ]);
     // …while a document that binds neither still reduces and still opens.
     const { body: b2 } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['L = [1, 4, 2]', 'total(L)'] },
     });
     expect(b2.result.structuredContent.rows[1].value).toBe('≈ 7');
     // A call folds case, so the name a document bound has to fold with it:
     // `Total = 3` is a legal old definition and `Total(x + 1)` was its product.
     const { body: b3 } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['Total = 3', 'y = Total(x + 1)'] },
     });
     expect(b3.result.structuredContent.valid).toBe(true);
@@ -264,7 +297,7 @@ describe('mcp endpoint', () => {
 
   it('validates E(…) rows: exact and sampled means', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['X ~ Normal(2, 1)', 'Y = X^2', 'E(X)', 'E(2X + 1)', 'E(Y)'] },
     });
     const out = body.result.structuredContent;
@@ -286,7 +319,7 @@ describe('mcp endpoint', () => {
 
   it('validates ∫ rows: exact readouts and non-elementary curves', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: {
         equations: ['int[0..1] exp(-x^2) dx', 'y = int[0..x] sin(t)/t dt', 'a = 2', 'y = int[0..a] t^2 dt + x'],
       },
@@ -303,7 +336,7 @@ describe('mcp endpoint', () => {
 
   it('rejects malformed ∫ rows with a usable message', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['int(x^2)'] },
     });
     const out = body.result.structuredContent;
@@ -313,7 +346,7 @@ describe('mcp endpoint', () => {
 
   it('leaves E(…) rows alone when the user defines E', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['E = 3', 'X ~ Normal(0, 1)', 'E(X)'] },
     });
     const out = body.result.structuredContent;
@@ -324,7 +357,7 @@ describe('mcp endpoint', () => {
 
   it('reports per-row errors without failing the call', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['y = x^2', 'y = florb(x)'] },
     });
     const out = body.result.structuredContent;
@@ -335,7 +368,7 @@ describe('mcp endpoint', () => {
 
   it('treats # rows as comments, not errors', async () => {
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['# Lines', 'y = x'] },
     });
     const out = body.result.structuredContent;
@@ -344,14 +377,14 @@ describe('mcp endpoint', () => {
     expect(out.rows[1].status).toBe('ok');
   });
 
-  it('round-trips a link through read_graph (both URL forms)', async () => {
+  it('round-trips a link through decode_graph_url (both URL forms)', async () => {
     const { body: created } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { equations: ['a = 2', 'y = sin(a x)/a'] },
     });
     for (const key of ['url', 'share_url'] as const) {
       const { body } = await rpc('tools/call', {
-        name: 'read_graph',
+        name: 'decode_graph_url',
         arguments: { url: created.result.structuredContent[key] },
       });
       expect(body.result.structuredContent.equations).toEqual(['a = 2', 'y = sin(a x)/a']);
@@ -362,7 +395,7 @@ describe('mcp endpoint', () => {
     // "rows" is the guess to expect: the tool's own result calls the
     // per-equation validation "rows", so a caller can reasonably reach for it.
     const { body } = await rpc('tools/call', {
-      name: 'create_graph',
+      name: 'encode_graph_url',
       arguments: { rows: ['y = x^2'] },
     });
     const text = body.result.content[0].text;
@@ -373,7 +406,7 @@ describe('mcp endpoint', () => {
 
   it('describes the argument it actually takes', async () => {
     const { body } = await rpc('tools/list');
-    const create = body.result.tools.find((t: { name: string }) => t.name === 'create_graph');
+    const create = body.result.tools.find((t: { name: string }) => t.name === 'encode_graph_url');
     expect(Object.keys(create.inputSchema.properties)).toEqual(['equations']);
     expect(create.inputSchema.required).toEqual(['equations']);
     // The prose must not tell a caller to send "rows:" — the schema says
@@ -382,12 +415,12 @@ describe('mcp endpoint', () => {
     expect(create.description).toContain('"equations"');
   });
 
-  it('feeds read_graph output straight back into create_graph', async () => {
+  it('feeds decode_graph_url output straight back into encode_graph_url', async () => {
     const rows = ['a = 2', 'y = sin(a x)'];
-    const made = await rpc('tools/call', { name: 'create_graph', arguments: { equations: rows } });
+    const made = await rpc('tools/call', { name: 'encode_graph_url', arguments: { equations: rows } });
     const url = JSON.parse(made.body.result.content[0].text).share_url;
-    const read = await rpc('tools/call', { name: 'read_graph', arguments: { url } });
-    // read_graph returns "equations", the exact key create_graph consumes.
+    const read = await rpc('tools/call', { name: 'decode_graph_url', arguments: { url } });
+    // decode_graph_url returns "equations", the exact key encode_graph_url consumes.
     expect(JSON.parse(read.body.result.content[0].text)).toEqual({ equations: rows });
   });
 
@@ -411,7 +444,7 @@ describe('mcp endpoint', () => {
 
 describe('draggable points', () => {
   const rowsFor = async (equations: string[]) => {
-    const { body } = await rpc('tools/call', { name: 'create_graph', arguments: { equations } });
+    const { body } = await rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
     return body.result.structuredContent.rows as Array<{ text: string; kind?: string; draggable?: boolean }>;
   };
 
@@ -460,7 +493,7 @@ describe('draggable points', () => {
 
 describe('graph previews', () => {
   const call = (equations: string[]) =>
-    rpc('tools/call', { name: 'create_graph', arguments: { equations } });
+    rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
 
   it('attaches a PNG the caller can actually look at', async () => {
     const { body } = await call(['y = sin(x)', 'y = x/2']);
@@ -567,7 +600,7 @@ describe('graph previews', () => {
 
 describe('viewport rows', () => {
   const call = (equations: string[]) =>
-    rpc('tools/call', { name: 'create_graph', arguments: { equations } });
+    rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
 
   it('classifies viewport rows and still attaches the (framed) preview', async () => {
     const { body } = await call(['view(x = 98..102)', 'y = (x - 100)^2']);
@@ -619,14 +652,15 @@ describe('syntax resource', () => {
   });
 
   it('keeps tool descriptions short enough to survive client truncation', async () => {
-    // The old inline syntax manual pushed create_graph past 2.5KB and a client
+    // The old inline syntax manual pushed encode_graph_url past 2.5KB and a client
     // truncated it mid-sentence, cutting exactly the differentiating features.
     // The manual lives in the resource now; the description must stay short.
     const { body } = await rpc('tools/list');
     for (const tool of body.result.tools) {
-      expect(tool.description.length).toBeLessThan(1600);
+      // Allow the longer tool names without changing the original descriptions.
+      expect(tool.description.length).toBeLessThan(1610);
     }
-    const create = body.result.tools.find((t: { name: string }) => t.name === 'create_graph');
+    const create = body.result.tools.find((t: { name: string }) => t.name === 'encode_graph_url');
     expect(create.description).toContain('llms.txt'); // points at the full reference
   });
 });
