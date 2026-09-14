@@ -47,6 +47,8 @@ export type Plot =
    *  seed 'pixel' otherwise (fixed map → Julia). */
   | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
+  /** Live bounded history of a point's observed positions. */
+  | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   /** CPU-evaluated straight-edged figure from segment()/polygon()/square():
    *  flat vertex expressions [x1, y1, x2, y2, …]. closed also fills. */
   | { type: 'polygon'; pts: Expr[]; closed: boolean }
@@ -157,7 +159,7 @@ function matchODE(e: Expr): (Expr & { kind: 'vec' }) | null {
 const DEFAULT_TUBE_RADIUS = 0.1;
 
 /** Calls that describe the whole plot and cannot appear as a subterm. */
-const WHOLE_EXPR_FORMS = new Set([...SPECIAL_FORMS, 'tube']);
+const WHOLE_EXPR_FORMS = new Set([...SPECIAL_FORMS, 'tube', '[trail]']);
 
 /**
  * tube(curve[, radius]): sweep a 3D parametric curve as a lit tube.
@@ -247,7 +249,7 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
   if (tube) expr = tube.inner;
   const special = expr.kind === 'call' && SPECIAL_FORMS.has(expr.name) ? expr.name : undefined;
   const nested = nestedSpecial(expr, true);
-  if (nested) throw new Error(`${nested}(…) must be the whole expression.`);
+  if (nested) throw new Error(`${nested === '[trail]' ? 'trail' : nested}(…) must be the whole expression.`);
   const vars = freeVars(expr);
   if (tube) {
     const r = tube.radius;
@@ -302,10 +304,17 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
     // Vector-field streamlines drift continuously, so they always animate.
     animated: animated || plot.type === 'vfield2d',
     needs3D: plot.type === 'implicit3d' || plot.type === 'psurface'
-      || ((plot.type === 'point' || plot.type === 'pcurve' || plot.type === 'plist'
+      || ((plot.type === 'point' || plot.type === 'trail' || plot.type === 'pcurve' || plot.type === 'plist'
         || plot.type === 'dscatter' || plot.type === 'system') && plot.dim === 3),
     params,
   });
+
+  if (expr.kind === 'call' && expr.name === '[trail]') {
+    if (hasSpace || hasParam || usesComplex(expr) || expr.args.some(c => c.kind === 'data' || c.kind === 'list')) {
+      throw new Error('trail needs a real point using constants, states, and t; use u for a parametric curve.');
+    }
+    return done({ type: 'trail', dim: expr.args.length as 2 | 3, coords: expr.args });
+  }
 
   // Desugared segment()/polygon()/square(): CPU-evaluated each frame with the
   // constants' original names, like points and parametric curves.

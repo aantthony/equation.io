@@ -461,3 +461,27 @@ left-hand name, `Z ~ exp(2)` declares an exponential random variable.
 Missing CSV data stays device-local in MCP and
 previews, including curves that depend on its fitted coefficients. Fits over
 literal data and their model curves work in shared links and static previews.
+
+## Motion trails
+
+`trail(A)` leaves a live trail of a point's observed positions, with a dot at
+its current position. Use it as a whole row. Examples:
+
+    A = (cos(t), sin(t))
+    trail(A)
+
+    trail((cos(t), sin(t), t/5))
+
+A named 2D point, point arithmetic such as `trail(2A)`, or a 2D/3D vector state
+can be traced. Components may use constants, sliders, states, and `t`; they
+cannot use free x/y/z or u/v. `trail(cos(t), sin(t))` is equivalent to the
+parenthesized tuple spelling. Matrix `trace(M)` keeps its existing meaning
+(the sum of the diagonal), including inside other expressions.
+
+The live browser retains at most 30 seconds and 2048 samples per trail,
+sampling at most 60 times a second. Undefined positions or pauses over half a
+second break the line instead of joining unobserved motion. Editing equations
+or restarting the simulation clears history; framing/comment edits preserve
+it. Trails start afresh on opening a graph and are not saved in shared URLs.
+The MCP classifies these rows as `trail`; static previews use the fallback
+card because a still image cannot reproduce accumulated live history.

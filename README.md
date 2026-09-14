@@ -129,6 +129,11 @@ pnpm deploy     # build and deploy to Cloudflare
   derivative that is a 2- or 3-vector integrates componentwise as `r_1`,
   `r_2`(, `r_3`), and the bare name draws as a moving point and joins point
   arithmetic — an orbit in two rows
+- `trail(A)` — leaves a live motion trail behind a 2D or 3D point.
+  For example, `A = (cos(t), sin(t)); trail(A)` draws an orbit as it runs;
+  `trail((cos(t), sin(t), t/5))` draws a rising helix. Vector states work too.
+  Trails retain up to 30 seconds / 2048 observed positions, reset when the
+  equations or simulation restart, and are local to the current session.
 
 **Custom coordinates and complex roots**
 
