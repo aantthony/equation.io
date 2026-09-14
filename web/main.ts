@@ -1,3 +1,5 @@
+import { initSyntaxHelp } from './syntax-help.ts';
+import { scanRegressions, formatFit } from '../lib/regression.ts';
 import {
   MissingDataError,
   animatedConstNames,
@@ -1141,9 +1143,10 @@ function recompileAll() {
   // never a definition, and `Y = X^2` with X random declares a *derived*
   // random variable, not a constant. The scan is transitive (`Z = Y + 1`
   // follows Y into the set), so it must see the whole document first.
-  const rvScan = scanRandomRows(equations.map(eq => {
+  const regressions = scanRegressions(equations.map(eq => eq.text));
+  const rvScan = scanRandomRows(equations.map((eq, i) => {
     const text = eq.text.trim();
-    return !text || text.startsWith('#') || scanSeqRec(text) ? null : text;
+    return regressions.has(i) || !text || text.startsWith('#') || scanSeqRec(text) ? null : text;
   }));
   const rvRowIdx = new Set([...rvScan.base.keys(), ...rvScan.derived.keys()]);
 
@@ -1167,7 +1170,7 @@ function recompileAll() {
     if (rvRowIdx.has(i)) continue;
     // Sequence/recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
     if (scanSeqRec(text)) continue;
-    const d = scanDefinition(text);
+    const d = regressions.get(i) ?? scanDefinition(text);
     if (!d) continue;
     eq.def = d;
     if (defRows.has(defKey(d))) {
@@ -1182,6 +1185,10 @@ function recompileAll() {
   // this runs on every keystroke, so nothing here may await (see filestore.ts).
   const built = buildDefs(raw, ref => lookupFile(ref.file, ref.hash)?.table ?? null);
   defs = built.defs;
+  for (const [key, fit] of built.fits) {
+    const row = defRows.get(key);
+    if (row) row.info = formatFit(fit);
+  }
   ensureTables(raw);
   for (const [name, table] of defs.tables) {
     const row = defRows.get(name);
@@ -2785,6 +2792,11 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['saddle', '(x, -y)'],
     ['shear + swirl', '(sin(y), sin(x))'],
   ]],
+  ['regression', [
+    ['line fit and residuals', 'X = [0,1,2,3,4]; Y = [1.1,2.9,5.2,6.8,9.1]; Y ~ m X + b; (X,Y); y = m x + b; # residuals; (X,Y-(m X+b))'],
+    ['quadratic fit', 'X = [-2,-1,0,1,2]; Y = [9,2,1,6,17]; Y ~ a X^2 + b X + c; (X,Y); y = a x^2 + b x + c'],
+    ['exponential fit', 'X = [0,0.5,1,1.5,2]; Y = [2,2.84,4.03,5.72,8.11]; Y ~ a exp(b X); (X,Y); y = a exp(b x)'],
+  ]],
   ['odes (click to trace)', [
     ['slope field', "y' = x - y"],
     ['logistic growth', "dy/dx = y(1 - y/4)"],
@@ -3657,3 +3669,24 @@ if (embedded) {
 
 // Dev-only handle for driving/inspecting the view in automated tests.
 if (import.meta.env.DEV) (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback };
+
+// Completion is an ordinary text edit, with the same undo and URL path as typing.
+initSyntaxHelp(listEl, {
+  context: () => {
+    const caret = caretPos();
+    const eq = caret && equations[caret.line];
+    return caret && eq ? { caret, text: eq.text, defs } : null;
+  },
+  replace: (caret, start, end, text, offset) => {
+    const eq = equations[caret.line];
+    if (!eq) return;
+    pushUndo(null, caret);
+    eq.text = eq.text.slice(0, start) + text + eq.text.slice(end);
+    recompileAll();
+    renderAll();
+    listEl.focus();
+    setCaret(caret.line, offset);
+    saveUrl();
+    requestRender();
+  },
+});

@@ -43,6 +43,7 @@ import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr
 import { lowerGeom } from '../lib/geom.ts';
 import { lowerLists, usesListReduction } from '../lib/list.ts';
 import { type Classified, classify } from '../lib/plot.ts';
+import { scanRegressions, formatFit } from '../lib/regression.ts';
 import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
 import { buildStateSystem, initialState } from '../lib/state.ts';
 import { type ViewSpec, parseViewRow } from '../lib/view.ts';
@@ -84,8 +85,9 @@ export function analyze(texts: string[]): Analysis {
 
   // Random-variable rows (`X ~ …`, and `Y = X^2` referencing one) resolve
   // outside the definition system — mirror of web/main.ts recompileAll.
-  const rvScan = scanRandomRows(rows.map(r =>
-    !r.text || r.text.startsWith('#') || scanSeqRec(r.text) ? null : r.text));
+  const regressions = scanRegressions(texts);
+  const rvScan = scanRandomRows(rows.map((r, i) =>
+    regressions.has(i) || !r.text || r.text.startsWith('#') || scanSeqRec(r.text) ? null : r.text));
   const rvRowIdx = new Set([...rvScan.base.keys(), ...rvScan.derived.keys()]);
 
   // Pass 1: definitions. A duplicate coordinate-field row (r = 1 + cos(theta)
@@ -100,7 +102,7 @@ export function analyze(texts: string[]): Analysis {
     if (rvRowIdx.has(i)) continue;
     // Sequence/recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
     if (scanSeqRec(row.text)) continue;
-    const d = scanDefinition(row.text);
+    const d = regressions.get(i) ?? scanDefinition(row.text);
     if (!d) continue;
     row.def = d;
     if (defNames.has(defKey(d))) { dupRows.push(row); continue; }
@@ -110,6 +112,10 @@ export function analyze(texts: string[]): Analysis {
 
   const built = buildDefs(raw);
   const defs = built.defs;
+  for (const [key, fit] of built.fits) {
+    const row = rows.find(r => r.def && defKey(r.def) === key);
+    if (row) row.info = formatFit(fit);
+  }
   for (const [key, message] of built.errors) {
     const row = rows.find(r => r.def && defKey(r.def) === key);
     if (!row) continue;

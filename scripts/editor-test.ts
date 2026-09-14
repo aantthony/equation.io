@@ -339,6 +339,58 @@ await scenario('spiral zoom stays responsive while traces run', async () => {
   check('spiral remains drawn after scrolling', true);
 });
 
+await scenario('regression readouts and slider-driven refitting', async () => {
+  await load(page, ['X=[0,1,2]', 'Y=[1,3,5]', 'c=0', 'Y ~ m X + c', 'y=m x+c']);
+  const info = page.locator('.eq-info').filter({ hasText: 'observations' });
+  await info.waitFor();
+  check('fit readout exposes coefficient', (await info.textContent())!.includes('m ≈ 2.6'));
+  const slider = page.locator('.eq-slider-range').first();
+  await slider.evaluate((el: HTMLInputElement) => { el.value = '1'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  check('fixed slider refits the model', (await info.textContent())!.includes('m ≈ 2 ·'));
+  check('regression curves have no row errors', await page.locator('.eq-line.invalid').count() === 0);
+});
+
+await scenario('contextual completion is a single undoable equation edit', async () => {
+  await load(page, ['amplitude = 2', 'y = sq']);
+  await caretTo(page, 1, 6);
+  await page.locator('#syntax-suggestions [role=option]').first().waitFor();
+  await page.keyboard.press('Tab');
+  check('Tab inserts the function and parentheses', (await rowTexts(page))[1] === 'y = sqrt()');
+  await page.keyboard.type('am');
+  await page.locator('#syntax-suggestions [role=option]').filter({ hasText: 'amplitude' }).click();
+  check('click inserts a defined name into the call', (await rowTexts(page))[1] === 'y = sqrt(amplitude)');
+  await page.keyboard.press('ControlOrMeta+z');
+  check('undo restores the prefix before completion', (await rowTexts(page))[1] === 'y = sqrt(am)');
+});
+
+await scenario('help preserves Enter and Escape and can select with arrows', async () => {
+  await load(page, ['y = sq']);
+  await caretTo(page, 0, 6);
+  await page.locator('#syntax-suggestions [role=option]').first().waitFor();
+  await page.keyboard.press('Escape');
+  check('Escape dismisses suggestions', await page.locator('#syntax-help').isHidden());
+  await page.keyboard.press('Enter');
+  check('Enter still inserts an equation row', (await rowTexts(page)).length === 2);
+  await page.keyboard.type('sq');
+  await page.locator('#syntax-suggestions [role=option]').first().waitFor();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  check('explicit arrow selection accepts with Enter', (await rowTexts(page))[1] === 'sqrt()');
+});
+
+await scenario('syntax help stays inside a resized mobile viewport', async () => {
+  await load(page, ['y=sq']);
+  await caretTo(page, 0, 4);
+  await page.locator('#syntax-suggestions [role=option]').first().waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => {
+    const box = document.querySelector<HTMLElement>('#syntax-help')!;
+    const r = box.getBoundingClientRect();
+    return !box.hidden && r.width > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
+  });
+  check('suggestions reposition after a mobile resize', true);
+});
+
 await browser.close();
 server.kill();
 

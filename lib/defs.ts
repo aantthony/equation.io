@@ -28,8 +28,10 @@ import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite 
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
 import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
+import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 export type Definition =
+  | RegressionRow
   | { kind: 'const'; name: string; rhs: string }
   | { kind: 'fn'; name: string; params: string[]; rhs: string }
   /** `a' = …` — da/dt, integrated forward in time. */
@@ -1161,6 +1163,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
 
 export interface BuiltDefs {
   defs: Defs;
+  fits: Map<string, FitResult>;
   /** Per-definition errors by defKey; failed definitions are excluded from defs. */
   errors: Map<string, string>;
   /** Of those, the ones that failed only because a data file is not on this
@@ -1179,6 +1182,8 @@ export type TableSource = (d: { file: string; hash: string }) => Table | null;
 
 /** Parse and resolve a set of uniquely named definitions. */
 export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
+  const fits = new Map<string, FitResult>();
+  const fittedNames = new Set<string>();
   const errors = new Map<string, string>();
   const needsFile = new Set<string>();
   const defs = emptyDefs();
@@ -1240,7 +1245,60 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
 
   for (const d of raw) {
     try {
-      if (d.kind === 'fn') {
+      if (d.kind === 'regression') {
+        const parseFit = (text: string) => resolveExpr(parseExpr(text, fnNames, listNamesOf(defs), valueNames), getFn, ropts);
+        const lhs = parseFit(d.lhs), rhs = parseFit(d.rhs);
+        const rhsVars = freeVars(rhs);
+        const parameters = [...rhsVars].filter(n => nameable(n) && !byName.has(n) && !nameTaken(defs, n) && !n.includes('.'));
+        if (!parameters.length) throw new Error('Regression needs an unbound coefficient, like Y ~ m X + b. Defined constants stay fixed.');
+        if (parameters.length > 8) throw new Error('Regression supports at most 8 fitted coefficients.');
+        for (const n of rhsVars) {
+          if (RESERVED.has(n) || stateNames.has(n)) throw new Error(`Regression models must be static; ${n} cannot vary during a fit.`);
+        }
+        const getList = listGetter(defs);
+        const numericList = (e: Expr): number[] => {
+          if (e.kind === 'data') return Array.from(e.values);
+          if (e.kind !== 'list') throw new Error('Regression observations must be a numeric list, like Y ~ m X + b.');
+          return e.items.map(it => {
+            for (const n of freeVars(it)) {
+              if (!(n in numEnv)) throw new Error(`Regression data must be static; define ${n} above the fit.`);
+            }
+            return evaluate(it, numEnv);
+          });
+        };
+        try {
+          const observed = numericList(lowerLists(lhs, getList, ropts));
+          if (observed.length > 10_000) throw new Error('Regression supports at most 10000 observations; filter the data first.');
+          // Keep model arithmetic symbolic even for typed CSV columns. The
+          // usual fast path folds ln(-1) into NaN; a fit must distinguish an
+          // invalid model from a missing input pair instead of dropping it.
+          const model = lowerLists(rhs, n => {
+            const value = getList(n);
+            if (value?.kind !== 'data') return value;
+            if (value.values.length > 10_000) throw new Error('Regression supports at most 10000 observations; filter the data first.');
+            return { kind: 'list', items: Array.from(value.values, (value): Expr => ({ kind: 'num', value })) };
+          }, ropts);
+          const models = model.kind === 'list' ? model.items
+            : model.kind === 'data' ? Array.from(model.values, (value): Expr => ({ kind: 'num', value }))
+              : Array.from({ length: observed.length }, () => model);
+          for (const f of models) for (const n of freeVars(f)) {
+            if (parameters.includes(n)) continue;
+            if (!(n in numEnv)) throw new Error(`Regression models must be static; define ${n} above the fit.`);
+          }
+          const fit = fitRegression(observed, models, parameters, numEnv);
+          fits.set(d.name, fit);
+          for (const [name, value] of Object.entries(fit.coefficients)) {
+            defs.consts.set(name, { kind: 'num', value });
+            numEnv[name] = value;
+            fittedNames.add(name);
+          }
+        } catch (err) {
+          if (err instanceof MissingDataError) {
+            for (const name of parameters) defs.missingData.set(name, { message: err.message, list: false });
+          }
+          throw err;
+        }
+      } else if (d.kind === 'fn') {
         if (new Set(d.params).size !== d.params.length) throw new Error('Duplicate parameter names.');
         getFn(d.name);
       } else if (d.kind === 'table') {
@@ -1513,6 +1571,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   }
 
   const constNames = new Set(raw.filter(d => d.kind === 'const' && !fieldNames.has(d.name)).map(d => d.name));
+  for (const name of fittedNames) constNames.add(name);
   // Point rows resolve to their component constants; dependencies see those.
   for (const p of defs.points) {
     constNames.delete(p);
@@ -1677,7 +1736,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
     if (!vecStateComps(name, dim).every(c => defs.states.has(c))) defs.vecStates.delete(name);
   }
 
-  return { defs, errors, needsFile, sumBoundConsts: ropts.boundConsts! };
+  return { defs, fits, errors, needsFile, sumBoundConsts: ropts.boundConsts! };
 }
 
 /**
