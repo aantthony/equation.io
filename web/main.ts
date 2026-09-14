@@ -425,10 +425,11 @@ function scheduleViewportWriteback() {
 }
 
 function flushViewportWriteback() {
-  if (viewportWriteTimer !== null) {
-    clearTimeout(viewportWriteTimer);
-    viewportWriteTimer = null;
-  }
+  // Rows can arrive while rendering is paused, before their viewport is live.
+  // Only an outstanding interaction authorizes writing the live view back.
+  if (viewportWriteTimer === null) return;
+  clearTimeout(viewportWriteTimer);
+  viewportWriteTimer = null;
   writebackViewport();
 }
 
@@ -3601,6 +3602,9 @@ if (embedded) {
     getRows: () => equations.map(e => e.text),
     setRows: rows => {
       // A new tool result replaces the document, including its undo history.
+      // Pending gestures belong to the old document, not the incoming rows.
+      if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
+      viewportWriteTimer = null;
       if (urlTimer !== null) clearTimeout(urlTimer);
       urlTimer = null;
       urlPending = false;

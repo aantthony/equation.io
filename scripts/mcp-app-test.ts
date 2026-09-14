@@ -198,12 +198,24 @@ try {
   assert.equal(await frame.evaluate(() => (window as any).renderFrames), pausedFrames, 'Offscreen widgets stop rendering, including the timer fallback');
   await page.evaluate(() => document.querySelector('iframe')!.style.marginTop = '0');
   await frame.waitForFunction(count => (window as any).renderFrames > count, pausedFrames);
+  await page.evaluate(() => document.querySelector('iframe')!.style.marginTop = '2000px');
+  await page.waitForTimeout(300);
+  const beforeViewport = await frame.evaluate(() => (window as any).renderFrames);
+  const viewportRows = ['a=2', 'y=a sin(x+t)', 'view(x = 100..120, y = 200..220)'];
+  const viewportResult = await rpc('tools/call', { name: 'show_graph', arguments: { equations: viewportRows } });
+  assert.equal(viewportResult.structuredContent.valid, true);
+  await page.evaluate(value => (window as any).sendResult(value), viewportResult);
+  await frame.waitForFunction(() => document.querySelectorAll('.eq-line').length === 3);
+  assert.equal(await frame.evaluate(() => (window as any).renderFrames), beforeViewport, 'Incoming viewport remains unapplied while offscreen');
   await frame.locator('.eq-slider input[type=range]').evaluate((input: HTMLInputElement) => {
     input.value = '9'; input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.evaluate(() => document.querySelector('iframe')!.contentWindow!.postMessage({ jsonrpc: '2.0', id: 'teardown-test', method: 'ui/resource-teardown', params: {} }, '*'));
   await page.waitForFunction(() => (window as any).messages.some((m: any) => m.id === 'teardown-test' && m.result));
   assert.ok(await frame.evaluate(() => (window as any).savedWidgetState.privateContent.equations[0].includes('9')), 'Teardown saves the last edit');
+  assert.equal(await frame.evaluate(() => (window as any).savedWidgetState.privateContent.equations[2]), viewportRows[2], 'Teardown preserves an unapplied viewport in widget state');
+  const publishedRows = await page.evaluate(() => (window as any).messages.filter((m: any) => m.method === 'ui/update-model-context').at(-1).params.structuredContent.equations);
+  assert.equal(publishedRows[2], viewportRows[2], 'Teardown preserves an unapplied viewport in model context');
   assert.ok(await frame.evaluate(() => (window as any).workersTerminated >= 1), 'Teardown terminates the curve worker');
   const disposedFrames = await frame.evaluate(() => (window as any).renderFrames);
   await page.evaluate(value => (window as any).sendResult(value), sphere);
@@ -211,7 +223,7 @@ try {
   await page.setViewportSize({ width: 500, height: 700 });
   await page.waitForTimeout(350);
   assert.equal(await frame.evaluate(() => (window as any).renderFrames), disposedFrames, 'No rendering restarts after teardown');
-  assert.equal(await frame.locator('.eq-line').count(), 2, 'Late tool results are ignored');
+  assert.equal(await frame.locator('.eq-line').count(), 3, 'Late tool results are ignored');
   assert.deepEqual(errors, []);
   console.log('PASS: production UI resource, cross-origin CSP, WebGL, worker tracing, early/partial tool input, cancellation, validation errors, sliders, context updates, state restoration, links, fullscreen negotiation, host styles, safe areas, narrow layout, visibility pause/resume, and teardown');
 } finally {
