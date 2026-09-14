@@ -19,7 +19,8 @@ export function graphResourceContents(html: string, origin: string) {
     _meta: {
       ui: {
         prefersBorder: true,
-        // Let each host choose its sandbox origin; ui.domain is host-specific.
+        // ChatGPT requires a unique widget origin for plugin submission.
+        domain: origin,
         csp: { resourceDomains: [origin, 'blob:'], connectDomains: [] },
       },
       'openai/widgetDescription': 'Interactive 2D and 3D graph with editable equations, parameter sliders, pan and zoom. Edits update the conversation context. Open in equation.io to share the current graph.',
