@@ -112,3 +112,6 @@ dist-web
 # Cloudflare
 .wrangler/
 worker-configuration.d.ts
+
+# Local MCP Registry signing keys
+/.mcp-registry/
