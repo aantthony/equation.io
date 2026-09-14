@@ -48,8 +48,8 @@ Agent-facing surface:
 - `/g/<eqs>` — share form of a graph link; the worker injects og:/twitter:
   meta tags and `/api/og/<eqs>` renders the preview PNG on the CPU
   (expressions compile to a stack machine — no WebGL in Workers)
-- `/mcp` — stateless MCP server (Streamable HTTP) with `create_graph`
-  (validates rows, returns links) and `read_graph` (decodes links for editing)
+- `/mcp` — stateless MCP server (Streamable HTTP) with `encode_graph_url`
+  (validates rows, returns links) and `decode_graph_url` (decodes links for editing)
 
 ## Usage
 

@@ -1,10 +1,10 @@
 /**
  * Stateless MCP server (Streamable HTTP, JSON responses) at /mcp.
  *
- * Two tools: create_graph builds a shareable link from equation rows,
+ * Two tools: encode_graph_url builds a shareable link from equation rows,
  * validates every row through the app's own parser, and attaches a rendered
  * PNG of the result (the og.ts preview renderer) so the calling model can see
- * what it made, not just that it parsed; read_graph decodes an existing link
+ * what it made, not just that it parsed; decode_graph_url decodes an existing link
  * back into rows so an assistant can edit a user's graph. The full syntax
  * manual is the "syntax" resource — served from the same /llms.txt asset the
  * site publishes — because a manual inlined in the tool description gets
@@ -28,14 +28,16 @@ const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 // names every capability and defers the actual syntax to the resource below.
 const TOOLS = [
   {
-    name: 'create_graph',
-    title: 'Create a graph link',
+    name: 'encode_graph_url',
+    title: 'Encode a graph URL',
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description: `Build a link that opens the equation.io grapher with the given equations already rendered, validating every row through the app's own parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see read_graph), include the unchanged rows too.
+    description: `Validate equations and encode an Equation.io graph URL. Return share_url to the user as a clickable Markdown link, such as [Open interactive graph](share_url). This tool does not open a browser, display an interactive graph in chat, or save a graph on the server.
 
-Rows can be: equations and inequalities in x,y (curves, regions; z makes it 3D), bare expressions (scalar fields; complex plots via w), points (rows report "draggable"), parametric tuples in u,v — and definitions: "a = 2" (a draggable slider), "f(x) = x^3 - a x", coordinate fields like "r = sqrt(x^2+y^2)" for polar. t animates. Also derivatives d/dx, integrals int[a..b] f dx, sums sum[n=1..N], domain()/conformal()/iter() for complex plots, y' = … slope fields, random variables "X ~ Normal(m, s)"/"P(0<X<2)"/"E(X^2)", and "view(x = -5..5, y = -2..2)"/"camera(theta, phi)" framing rows. That is a menu, not the syntax: before your first non-trivial graph, read the "syntax" MCP resource (also at https://equation.io/llms.txt).
+Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order. When editing a link decoded by decode_graph_url, include unchanged rows too.
 
-The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wireframes) for checking shape and framing. It draws LESS than the app: rows it cannot draw are listed in "preview_omits" with the reason, so a sparse or missing preview never means the equations failed — "rows" is the validation verdict. Look at it: are the interesting features visible? If a row fails validation, fix it and call again. Give users the share_url (it unfurls to a preview card in chat apps); url is the equivalent #-fragment form.`,
+Supports 2D/3D equations, inequalities, scalar/vector fields, points, parametric tuples, sliders, functions, derivatives, integrals, sums, complex plots, probability, and ODE simulations. t animates; view()/camera() control framing. Before writing non-trivial equations, read the "syntax" MCP resource (also https://equation.io/llms.txt) for supported syntax and examples.
+
+Check "valid" and "rows"; fix errors and call again before presenting the link as working. An attached PNG is only a simplified static preview (t = 0; 3D wireframes), not the interactive graph. "preview_omits" explains rows it cannot draw; a missing preview does not mean validation failed. share_url opens the full interactive graph; url is the equivalent #-fragment form.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -50,10 +52,10 @@ The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wire
     },
   },
   {
-    name: 'read_graph',
-    title: 'Read a graph link',
+    name: 'decode_graph_url',
+    title: 'Decode a graph URL',
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with create_graph.',
+    description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -88,7 +90,7 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(bin);
 }
 
-async function createGraph(origin: string, args: Record<string, unknown>) {
+async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   const equations = args.equations;
   if (!Array.isArray(equations) || !equations.every(e => typeof e === 'string')) {
     // Name what arrived, so a caller that guessed wrong fixes it in one retry
@@ -97,7 +99,7 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
     const got = Object.keys(args).filter(k => k !== 'equations');
     const hint = got.length ? ` Received ${got.map(k => `"${k}"`).join(', ')} instead.` : '';
     throw new Error(
-      `create_graph takes "equations": a flat array of strings, one per equation, e.g. `
+      `encode_graph_url takes "equations": a flat array of strings, one per equation, e.g. `
         + `{"equations": ["y = x^2", "y = sin(x)"]}.${hint}`,
     );
   }
@@ -237,7 +239,7 @@ async function createGraph(origin: string, args: Record<string, unknown>) {
   };
 }
 
-function readGraph(args: Record<string, unknown>) {
+function decodeGraphUrl(args: Record<string, unknown>) {
   if (typeof args.url !== 'string') throw new Error('url must be a string');
   const url = new URL(args.url);
   const payload = url.hash.length > 1
@@ -282,7 +284,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         capabilities: { tools: {}, resources: {} },
         serverInfo: { name: 'equation', title: 'equation.io grapher', version: '1.0.0' },
         instructions:
-          'Graphing calculator whose entire state lives in the URL. create_graph turns a list of equations into a link that opens with them rendered — it validates every row and attaches a PNG preview so you can check the result. read_graph decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
+          'Use encode_graph_url to validate equations and return a graph URL. Include share_url as a clickable Markdown link in your answer so the user can open the interactive graph. The tool does not open or save a graph; its PNG is a static preview only. decode_graph_url decodes an existing URL for editing. Before writing non-trivial equations, read the "syntax" resource, also served at ' +
           origin + '/llms.txt',
       });
     }
@@ -309,13 +311,20 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
       try {
         let value: object;
         const content: object[] = [];
-        if (name === 'create_graph') {
-          const made = await createGraph(origin, args);
+        // Accept the former name for clients with cached tool definitions.
+        if (name === 'encode_graph_url' || name === 'create_graph') {
+          const made = await encodeGraphUrl(origin, args);
           value = made.value;
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
+          content.push({
+            type: 'text',
+            text: made.value.valid
+              ? `URL encoded. Give the user this clickable link: [Open interactive graph](${made.value.share_url}). The graph has not been opened; any attached image is a static preview.`
+              : 'Some equations failed validation. Correct the errors in rows and encode again before presenting the link as working.',
+          });
           if (made.png) content.push({ type: 'image', data: made.png, mimeType: 'image/png' });
-        } else if (name === 'read_graph') {
-          value = readGraph(args);
+        } else if (name === 'decode_graph_url' || name === 'read_graph') {
+          value = decodeGraphUrl(args);
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
         } else return error(-32602, `Unknown tool: ${name}`);
         return result({ content, structuredContent: value });
