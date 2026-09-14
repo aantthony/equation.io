@@ -48,6 +48,25 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
 }
 
 describe('mcp endpoint', () => {
+  it('can omit image content for a text-only client comparison', async () => {
+    const args = { equations: ['y = sin(x)'] };
+    const normal = await rpc('tools/call', { name: 'encode_graph_url', arguments: args });
+    expect(normal.body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(true);
+    const url = new URL(`${URL_BASE}?preview=off`);
+    const response = await handleMcp(new Request(url, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'encode_graph_url', arguments: args } }),
+    }), url, env);
+    const body = await response.json() as any;
+    expect(body.result.content.map((c: { type: string }) => c.type)).toEqual(['text']);
+    expect(body.result.structuredContent).toEqual({
+      ...normal.body.result.structuredContent,
+      preview: 'not attached — text-only response requested',
+    });
+    expect(JSON.parse(body.result.content[0].text)).toEqual(body.result.structuredContent);
+  });
+
   it('initializes with a supported protocol version', async () => {
     const { body } = await rpc('initialize', {
       protocolVersion: '2025-06-18',

@@ -319,6 +319,8 @@ interface RpcRequest {
 
 interface RpcContext {
   origin: string;
+  /** Diagnostic opt-out for clients having trouble with image content. */
+  textOnly?: boolean;
   /** Reads the /llms.txt asset backing the "syntax" resource. */
   syntaxText: () => Promise<string>;
 }
@@ -371,9 +373,10 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         // Accept former names for clients with cached tool definitions.
         if (name === 'encode_graph_url' || name === 'create_graph') {
           const made = await encodeGraphUrl(origin, args);
+          if (ctx.textOnly && made.png) made.value.preview = 'not attached — text-only response requested';
           value = made.value;
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
-          if (made.png) content.push({ type: 'image', data: made.png, mimeType: 'image/png' });
+          if (made.png && !ctx.textOnly) content.push({ type: 'image', data: made.png, mimeType: 'image/png' });
         } else if (name === 'decode_graph_url' || name === 'read_graph') {
           value = decodeGraphUrl(args);
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
@@ -440,6 +443,7 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
 
   const ctx: RpcContext = {
     origin: url.origin,
+    textOnly: url.searchParams.get('preview') === 'off',
     syntaxText: async () => {
       const res = await env.ASSETS.fetch(new Request(new URL('/llms.txt', url)));
       if (!res.ok) throw new Error(`syntax reference unavailable (${res.status})`);
