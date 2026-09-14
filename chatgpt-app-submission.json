@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "Equation.io",
     "subtitle": "Graph mathematical equations",
-    "description": "Equation.io turns mathematical equations into interactive 2D and 3D graphs that open in your browser. Create curves, surfaces, inequalities, and graphs with adjustable parameters; inspect validation results; or edit an existing Equation.io graph link. Graph equations are encoded in shareable URLs, so anyone with a link can read them. Static previews are simplified and may omit features supported by the interactive graph. No account or API key is required.",
+    "description": "Equation.io turns mathematical equations into interactive 2D and 3D graphs inside compatible MCP apps or in your browser. Create curves, surfaces, inequalities, and graphs with adjustable parameters; inspect validation results; or edit an existing Equation.io graph link. Graph equations are encoded in shareable URLs, so anyone with a link can read them. Static previews are simplified and may omit features supported by the interactive graph. No account or API key is required.",
     "category": "EDUCATION"
   },
   "tools": {
@@ -31,6 +31,18 @@
         "open_world_justification": "Only parses the supplied URL and does not contact or change external systems.",
         "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
       }
+    },
+    "show_graph": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Validates supplied equations and returns an interactive graph UI and share links without changing external state.",
+        "open_world_justification": "Returns a shareable URL containing the supplied equations without uploading a saved graph or publishing content to another service.",
+        "destructive_justification": "Does not delete or overwrite existing graphs, send messages, or perform irreversible actions."
+      }
     }
   },
   "test_cases": [
@@ -54,8 +66,8 @@
       "description": "Create a graph with an adjustable parameter.",
       "user_prompt": "Use Equation.io to graph y = a sin(x), with a starting at 2 and adjustable using a slider.",
       "file_attachment_urls": null,
-      "tools_triggered": "encode_graph_url",
-      "expected_output": "Returns a valid graph containing the definition a = 2 and the curve y = a sin(x); the link opens with an adjustable parameter in the browser.",
+      "tools_triggered": "show_graph",
+      "expected_output": "Displays an interactive graph in the conversation containing a = 2 and y = a sin(x). Moving the slider updates the curve and model context. The share link opens the current graph in the browser.",
       "expected_output_url": null
     },
     {

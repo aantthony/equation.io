@@ -63,7 +63,9 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
 
   /** The panel's translation from its pinned rest position; (0,0) is home. */
   const offset: Vec2 = { x: 0, y: 0 };
-  let hidden = false;
+  // Embedded markup starts parked so the editor never flashes over the
+  // graph before initialization. Adopt that pose for chip tap/drag handling.
+  let hidden = panel.style.visibility === 'hidden';
   /** Unit direction the panel last left in; reopening retraces it. */
   let exitDir: Vec2 = { x: 0, y: -1 };
 
@@ -85,7 +87,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
   probe.style.inset = '0';
   probe.style.visibility = 'hidden';
   probe.style.pointerEvents = 'none';
-  probe.style.padding = 'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)';
+  probe.style.padding = 'var(--safe-area-top) var(--safe-area-right) var(--panel-bottom-inset) var(--safe-area-left)';
   document.body.append(probe);
 
   const margins = () => {

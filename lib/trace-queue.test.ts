@@ -117,3 +117,15 @@ it('retains fixed-parameter invalidation alongside literal time animation', () =
   expect(keys({ a: 2 }, 0).stableEnv).toBe(keys({ a: 2 }, 1).stableEnv);
   expect(keys({ a: 2 }, 0).stableEnv).not.toBe(keys({ a: 3 }, 1).stableEnv);
 });
+
+it('discards active and pending work on teardown, ignoring late replies', () => {
+  const sent: TraceMessage[] = [];
+  let received = 0;
+  const queue = new TraceQueue(message => sent.push(message));
+  queue.request(1, 'running', input, () => received++);
+  queue.request(2, 'pending', input, () => received++);
+  queue.clear();
+  queue.complete(sent[0].token, result);
+  expect(received).toBe(0);
+  expect(sent).toHaveLength(1);
+});

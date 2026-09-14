@@ -1,9 +1,10 @@
 /**
  * Stateless MCP server (Streamable HTTP, JSON responses) at /mcp.
  *
- * Two tools: encode_graph_url builds a shareable link from equation rows,
+ * encode_graph_url builds a shareable link from equation rows,
  * validates every row through the app's own parser; decode_graph_url decodes an existing link
- * back into rows so an assistant can edit a user's graph. The full syntax
+ * back into rows so an assistant can edit a user's graph. show_graph adds
+ * the interactive MCP Apps UI to the same validation/link result. The full syntax
  * manual is the "syntax" resource — served from the same /llms.txt asset the
  * site publishes — because a manual inlined in the tool description gets
  * truncated by clients, and truncation cuts exactly the advanced material
@@ -18,6 +19,7 @@ import { decodePayload, encodePayload } from '../lib/link.ts';
 import { splitStatements } from '../lib/statements.ts';
 import { analyze } from './graph.ts';
 import { MAX_PLOTS, previewGap } from './og.ts';
+import { GRAPH_UI_URI, graphResource, graphResourceContents } from './mcp-app.ts';
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
@@ -120,6 +122,15 @@ The result returns text and structured data only. "rows" is the validation verdi
     },
   },
 ];
+
+// Keep validation/link-only calls separate from rendering a new chat widget.
+const SHOW_GRAPH_TOOL = {
+  ...TOOLS[0],
+  name: 'show_graph',
+  title: 'Show an interactive graph',
+  description: 'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns the same validation and share links as encode_graph_url; fix invalid rows before presenting the graph as correct. Use encode_graph_url for validation or link-only requests. In clients without UI support, provide share_url.',
+  _meta: { ui: { resourceUri: GRAPH_UI_URI } },
+};
 
 /**
  * The syntax manual as an MCP resource. Its uri is the real /llms.txt URL on
@@ -298,6 +309,7 @@ interface RpcContext {
   origin: string;
   /** Reads the /llms.txt asset backing the "syntax" resource. */
   syntaxText: () => Promise<string>;
+  graphHtml: () => Promise<string>;
 }
 
 async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | null> {
@@ -318,22 +330,29 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         capabilities: { tools: {}, resources: {} },
         serverInfo: { name: 'equation', title: 'equation.io grapher', version: '1.0.0' },
         instructions:
-          'Graphing calculator whose entire state lives in the URL. encode_graph_url turns a list of equations into a link that opens with them rendered — it validates every row and returns validation results. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
+          'Graphing calculator whose entire state lives in the URL. show_graph displays an interactive graph in the conversation. encode_graph_url validates equations and creates a share link without displaying a widget. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
           origin + '/llms.txt',
       });
     }
     case 'ping':
       return result({});
     case 'tools/list':
-      return result({ tools: TOOLS });
+      return result({ tools: [...TOOLS, SHOW_GRAPH_TOOL] });
     case 'resources/list':
-      return result({ resources: [syntaxResource(origin)] });
+      return result({ resources: [syntaxResource(origin), graphResource] });
     case 'resources/templates/list':
       return result({ resourceTemplates: [] });
     case 'resources/read': {
       const uri = (params as { uri?: string }).uri;
+      if (uri === GRAPH_UI_URI) {
+        try {
+          return result({ contents: [graphResourceContents(await ctx.graphHtml(), origin)] });
+        } catch (e) {
+          return error(-32603, e instanceof Error ? e.message : String(e));
+        }
+      }
       const expected = syntaxResource(origin).uri;
-      if (uri !== expected) return error(-32002, `Unknown resource: ${uri}. The only resource is ${expected}.`);
+      if (uri !== expected) return error(-32002, `Unknown resource: ${uri}. Available resources: ${expected}, ${GRAPH_UI_URI}.`);
       try {
         return result({ contents: [{ uri: expected, mimeType: 'text/markdown', text: await ctx.syntaxText() }] });
       } catch (e) {
@@ -346,7 +365,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         let value: object;
         const content: object[] = [];
         // Accept former names for clients with cached tool definitions.
-        if (name === 'encode_graph_url' || name === 'create_graph') {
+        if (name === 'encode_graph_url' || name === 'create_graph' || name === 'show_graph') {
           const made = await encodeGraphUrl(origin, args);
           value = made.value;
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
@@ -416,6 +435,12 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
 
   const ctx: RpcContext = {
     origin: url.origin,
+    graphHtml: async () => {
+      const res = await env.ASSETS.fetch(new Request(new URL('/mcp-app/', url)));
+      const html = await res.text();
+      if (!res.ok || !html.includes('data-mcp-app')) throw new Error('Graph UI unavailable; rebuild the web assets.');
+      return html;
+    },
     syntaxText: async () => {
       const res = await env.ASSETS.fetch(new Request(new URL('/llms.txt', url)));
       if (!res.ok) throw new Error(`syntax reference unavailable (${res.status})`);

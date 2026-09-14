@@ -67,6 +67,7 @@ import {
 } from '../lib/view.ts';
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
+import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
 import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
 import { fullscreenQuad } from './gl.ts';
 import {
@@ -305,31 +306,57 @@ function syncCanvasSize(): boolean {
 }
 
 function resize() {
+  if (rendererDisposed) return;
   syncCanvasSize();
   requestRender();
 }
 
 let renderQueued = false;
+let renderFrame = 0;
+let renderTimer: ReturnType<typeof setTimeout> | null = null;
+let rendererDisposed = false;
+let pausedAt: number | null = null;
+let pausedMilliseconds = 0;
+function cancelRender() {
+  cancelAnimationFrame(renderFrame);
+  if (renderTimer !== null) clearTimeout(renderTimer);
+  renderFrame = 0;
+  renderTimer = null;
+  renderQueued = false;
+}
 function requestRender() {
-  if (renderQueued) return;
+  if (renderQueued || rendererDisposed || pausedAt !== null) return;
   renderQueued = true;
   let ran = false;
   const run = () => {
     if (ran) return;
     ran = true;
-    renderQueued = false;
+    cancelRender();
+    if (rendererDisposed || pausedAt !== null) return;
     render();
   };
-  requestAnimationFrame(run);
+  renderFrame = requestAnimationFrame(run);
   // rAF stalls entirely in hidden/occluded tabs (embedded previews,
   // screenshot tooling); a timer backstop keeps frames coming there.
-  setTimeout(run, 200);
+  renderTimer = setTimeout(run, 200);
 }
 
 const startTime = performance.now();
 
 /** Seconds since load: the value of `t` everywhere in a graph. */
-const graphTime = () => (performance.now() - startTime) / 1000;
+const graphTime = () => ((pausedAt ?? performance.now()) - startTime - pausedMilliseconds) / 1000;
+
+function setGraphVisible(visible: boolean) {
+  if (rendererDisposed) return;
+  if (!visible && pausedAt === null) {
+    pausedAt = performance.now();
+    cancelRender();
+  } else if (visible && pausedAt !== null) {
+    pausedMilliseconds += performance.now() - pausedAt;
+    pausedAt = null;
+    requestRender();
+  }
+}
 
 /** The same current state and constant values for rendering and drag updates. */
 function currentConstEnv(time: number): Record<string, number> {
@@ -398,10 +425,11 @@ function scheduleViewportWriteback() {
 }
 
 function flushViewportWriteback() {
-  if (viewportWriteTimer !== null) {
-    clearTimeout(viewportWriteTimer);
-    viewportWriteTimer = null;
-  }
+  // Rows can arrive while rendering is paused, before their viewport is live.
+  // Only an outstanding interaction authorizes writing the live view back.
+  if (viewportWriteTimer === null) return;
+  clearTimeout(viewportWriteTimer);
+  viewportWriteTimer = null;
   writebackViewport();
 }
 
@@ -438,15 +466,20 @@ function systemKey(cls: Classified): string {
   if (key === undefined) { key = JSON.stringify(cls.plot); systemKeys.set(cls, key); }
   return key;
 }
+const embedded = document.documentElement.hasAttribute('data-mcp-app');
+let graphChanged: ((rows: string[]) => void) | undefined;
 let traceWorker: Worker | undefined;
 const traceQueue = new TraceQueue((message: TraceMessage) => {
+  if (rendererDisposed) return;
   const fail = (error: string) => {
     traceWorker?.terminate();
     traceWorker = undefined;
     traceQueue.complete(message.token, { pts: [], error });
   };
   try {
-    traceWorker ??= new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
+    // The chat iframe is cross-origin; its worker must be created locally.
+    traceWorker ??= embedded ? new EmbeddedTraceWorker()
+      : new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
     traceWorker.onmessage = (event: MessageEvent<{ token: number; result: TraceResult }>) => {
       traceQueue.complete(event.data.token, event.data.result);
     };
@@ -1814,6 +1847,10 @@ function pickDataFiles() {
 // preview, so copying the URL is the share mechanism. /#payload links still
 // load (boot below) — they just normalize to /g/ on the next edit.
 function writeUrl() {
+  if (embedded) {
+    graphChanged?.(equations.map(e => e.text));
+    return;
+  }
   const payload = encodePayload(equations.map(e => e.text));
   history.replaceState(null, '', payload ? '/g/' + payload : '/');
 }
@@ -2926,7 +2963,8 @@ function openExample(text: string) {
 }
 
 function buildExamplesMenu() {
-  const list = document.getElementById('examples-list')!;
+  const list = document.getElementById('examples-list');
+  if (!list) return;
   for (const [category, items] of EXAMPLES) {
     const group = document.createElement('details');
     const label = document.createElement('summary');
@@ -3113,7 +3151,7 @@ function scheduleSpecialPoints(eq: Equation) {
 }
 
 function ensureSpSlot() {
-  if (spSlot !== null) return;
+  if (spSlot !== null || rendererDisposed) return;
   const gen = spGen;
   spSlot = idleSlot(() => {
     spSlot = null;
@@ -3454,7 +3492,8 @@ for (const type of ['gesturestart', 'gesturechange', 'gestureend']) {
 // so observe the element itself. The window listener stays for devicePixelRatio
 // changes, which move no box at all.
 window.addEventListener('resize', resize);
-new ResizeObserver(resize).observe(canvas);
+const canvasSizeObserver = new ResizeObserver(resize);
+canvasSizeObserver.observe(canvas);
 
 // --- simulation reset ---
 
@@ -3519,12 +3558,12 @@ const initialPayload = urlPayload();
 // reads both the /g/ form and legacy /#… links.
 const initialRows = decodePayload(initialPayload);
 if (initialRows.length) initialRows.forEach(t => addEquation(t));
-else addEquation('y = sin(x)');
+else if (!embedded) addEquation('y = sin(x)');
 recompileAll();
 // Canonicalize what we loaded (re-encoded /g/ form; stray paths back to /).
 // A fresh visit stays at / — the default row only enters the URL once edited.
 if (initialPayload) saveUrl();
-else if (location.pathname !== '/') history.replaceState(null, '', '/');
+else if (!embedded && location.pathname !== '/') history.replaceState(null, '', '/');
 
 /**
  * The URL is an input, not only an output.
@@ -3557,6 +3596,64 @@ resize();
 renderAll();
 buildExamplesMenu();
 void refreshFileMenu();
+
+if (embedded) {
+  void import('./mcp-app.ts').then(({ connectGraphApp }) => connectGraphApp({
+    getRows: () => equations.map(e => e.text),
+    setRows: rows => {
+      // A new tool result replaces the document, including its undo history.
+      // Pending gestures belong to the old document, not the incoming rows.
+      if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
+      viewportWriteTimer = null;
+      // The dragged view was never written back, so an identical viewport
+      // row must still snap the live view rather than read as already applied.
+      appliedViewText = appliedCameraText = null;
+      if (urlTimer !== null) clearTimeout(urlTimer);
+      urlTimer = null;
+      urlPending = false;
+      undoStack.length = redoStack.length = 0;
+      equations.length = 0;
+      rows.forEach(t => addEquation(t));
+      recompileAll();
+      renderAll();
+      requestRender();
+    },
+    onChange: cb => { graphChanged = cb; },
+    setVisible: setGraphVisible,
+    flush: flushViewportWriteback,
+    dispose: () => {
+      if (rendererDisposed) return;
+      rendererDisposed = true;
+      canvasSizeObserver.disconnect();
+      window.removeEventListener('resize', resize);
+      cancelRender();
+      graphChanged = undefined;
+      if (urlTimer !== null) clearTimeout(urlTimer);
+      if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
+      if (noticeTimer !== null) clearTimeout(noticeTimer);
+      urlTimer = viewportWriteTimer = noticeTimer = null;
+      urlPending = false;
+      spGen++;
+      spQueue.clear();
+      if (spSlot !== null) {
+        if (typeof cancelIdleCallback === 'function') cancelIdleCallback(spSlot);
+        else clearTimeout(spSlot);
+        spSlot = null;
+      }
+      traceQueue.clear();
+      if (traceWorker) {
+        traceWorker.onmessage = traceWorker.onerror = traceWorker.onmessageerror = null;
+        traceWorker.terminate();
+        traceWorker = undefined;
+      }
+      // Release cached GPU programs/buffers together; this renderer will
+      // never be resumed after the host has requested teardown.
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    },
+  })).catch(() => {
+    document.getElementById('app-status')!.textContent = 'Could not connect the graph. Try again.';
+  });
+}
 
 // Dev-only handle for driving/inspecting the view in automated tests.
 if (import.meta.env.DEV) (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback };

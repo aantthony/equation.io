@@ -1,0 +1,35 @@
+html[data-mcp-app] {
+  --safe-area-top: max(env(safe-area-inset-top), var(--host-safe-top, 0px));
+  --safe-area-right: max(env(safe-area-inset-right), var(--host-safe-right, 0px));
+  --safe-area-bottom: max(env(safe-area-inset-bottom), var(--host-safe-bottom, 0px));
+  --safe-area-left: max(env(safe-area-inset-left), var(--host-safe-left, 0px));
+  --panel-bottom-inset: var(--app-toolbar-height, 40px);
+}
+#app-toolbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  min-height: 40px;
+  padding: 8px max(12px, var(--safe-area-right)) calc(8px + var(--safe-area-bottom)) max(12px, var(--safe-area-left));
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel-bg);
+  border-top: 1px solid var(--panel-border);
+  color: var(--text);
+  font: 12px var(--font-sans, system-ui, sans-serif);
+}
+#app-status { flex: 1; color: var(--muted); }
+#app-toolbar a, #app-toolbar button { color: var(--accent); white-space: nowrap; }
+#app-toolbar button { font: inherit; background: none; border: 0; cursor: pointer; }
+html[data-mcp-app] #panel { max-height: calc(100% - 24px - var(--safe-area-top) - var(--panel-bottom-inset)); }
+html[data-mcp-app] #equations, html[data-mcp-app] #panel-chip { font-family: var(--font-mono, ui-monospace, monospace); }
+html[data-mcp-app] .eq-widget, html[data-mcp-app] #syntax-help { font-family: var(--font-sans, system-ui, sans-serif); }
+/* CSV bytes on the author's device are not available in a chat widget. */
+html[data-mcp-app] #panel-links { display: none; }
+@media (max-width: 440px) {
+  #app-toolbar { gap: 8px; padding-inline: max(8px, var(--safe-area-left)) max(8px, var(--safe-area-right)); }
+  #app-status { font-size: 11px; }
+}
