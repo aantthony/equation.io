@@ -1,0 +1,18 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.equation/equation",
+  "title": "Equation.io",
+  "description": "Create interactive 2D and 3D graphs with validated equations, shareable links, and PNG previews.",
+  "version": "1.0.0",
+  "websiteUrl": "https://equation.io",
+  "repository": {
+    "url": "https://github.com/aantthony/equation.io",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://equation.io/mcp"
+    }
+  ]
+}
