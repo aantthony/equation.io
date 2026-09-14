@@ -230,8 +230,7 @@ export async function connectGraphApp(editor: GraphEditor) {
       });
     }
   }, { signal: events.signal });
-  expand.addEventListener('click', async () => {
-    const mode = context.displayMode === 'fullscreen' ? 'inline' : 'fullscreen';
+  async function requestMode(mode: 'inline' | 'fullscreen') {
     if (closing || !connected || changingMode || !context.availableDisplayModes?.includes(mode)) return;
     changingMode = true;
     expand.disabled = true;
@@ -243,6 +242,14 @@ export async function connectGraphApp(editor: GraphEditor) {
     } finally {
       changingMode = false;
       expand.disabled = false;
+    }
+  }
+  expand.addEventListener('click', () => {
+    void requestMode(context.displayMode === 'fullscreen' ? 'inline' : 'fullscreen');
+  }, { signal: events.signal });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && context.displayMode === 'fullscreen') {
+      void requestMode('inline');
     }
   }, { signal: events.signal });
   app.onteardown = () => teardown ??= (async () => {

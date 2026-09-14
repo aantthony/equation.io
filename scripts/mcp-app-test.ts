@@ -139,9 +139,11 @@ try {
   await frame.locator('#app-expand').waitFor({ state: 'hidden' });
   const beforeRequests = await page.evaluate(() => (window as any).messages.filter((m: any) => m.method === 'ui/request-display-mode').length);
   await frame.locator('#app-expand').dispatchEvent('click');
+  await frame.locator('body').press('Escape');
   assert.equal(await page.evaluate(() => (window as any).messages.filter((m: any) => m.method === 'ui/request-display-mode').length), beforeRequests);
   await page.evaluate(() => (window as any).sendContext({ availableDisplayModes: ['inline'] }));
-  await frame.locator('#app-expand').click();
+  await frame.locator('#app-expand').waitFor({ state: 'visible' });
+  await frame.locator('body').press('Escape');
   await frame.waitForFunction(() => document.getElementById('app-expand')?.textContent === 'Expand');
   assert.ok(await frame.locator('#app-expand').isHidden(), 'Cannot expand when only inline is allowed');
   await page.evaluate(() => { (window as any).forcedMode = 'inline'; (window as any).sendContext({ availableDisplayModes: ['inline','fullscreen'], styles: { variables: { '--color-text-primary': '#ddeeff' } } }); });
