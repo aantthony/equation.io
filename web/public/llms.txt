@@ -80,9 +80,6 @@ An MCP endpoint (Streamable HTTP) lives at:
 
     https://equation.io/mcp
 
-Return the resulting `share_url` as a clickable link so the user can open the
-interactive graph. Encoding a URL does not open or save a graph.
-
 Tools: `encode_graph_url` (validates each equation through the app's own parser,
 returns url/share_url plus per-row classification or errors, and attaches a
 rendered PNG preview of the graph; rows the preview renderer cannot draw are

@@ -29,15 +29,13 @@ const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const TOOLS = [
   {
     name: 'encode_graph_url',
-    title: 'Encode a graph URL',
+    title: 'Create a graph link',
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description: `Validate equations and encode an Equation.io graph URL. Return share_url to the user as a clickable Markdown link, such as [Open interactive graph](share_url). This tool does not open a browser, display an interactive graph in chat, or save a graph on the server.
+    description: `Build a link that opens the equation.io grapher with the given equations already rendered, validating every row through the app's own parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see decode_graph_url), include the unchanged rows too.
 
-Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order. When editing a link decoded by decode_graph_url, include unchanged rows too.
+Rows can be: equations and inequalities in x,y (curves, regions; z makes it 3D), bare expressions (scalar fields; complex plots via w), points (rows report "draggable"), parametric tuples in u,v — and definitions: "a = 2" (a draggable slider), "f(x) = x^3 - a x", coordinate fields like "r = sqrt(x^2+y^2)" for polar. t animates. Also derivatives d/dx, integrals int[a..b] f dx, sums sum[n=1..N], domain()/conformal()/iter() for complex plots, y' = … slope fields, random variables "X ~ Normal(m, s)"/"P(0<X<2)"/"E(X^2)", and "view(x = -5..5, y = -2..2)"/"camera(theta, phi)" framing rows. That is a menu, not the syntax: before your first non-trivial graph, read the "syntax" MCP resource (also at https://equation.io/llms.txt).
 
-Supports 2D/3D equations, inequalities, scalar/vector fields, points, parametric tuples, sliders, functions, derivatives, integrals, sums, complex plots, probability, and ODE simulations. t animates; view()/camera() control framing. Before writing non-trivial equations, read the "syntax" MCP resource (also https://equation.io/llms.txt) for supported syntax and examples.
-
-Check "valid" and "rows"; fix errors and call again before presenting the link as working. An attached PNG is only a simplified static preview (t = 0; 3D wireframes), not the interactive graph. "preview_omits" explains rows it cannot draw; a missing preview does not mean validation failed. share_url opens the full interactive graph; url is the equivalent #-fragment form.`,
+The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wireframes) for checking shape and framing. It draws LESS than the app: rows it cannot draw are listed in "preview_omits" with the reason, so a sparse or missing preview never means the equations failed — "rows" is the validation verdict. Look at it: are the interesting features visible? If a row fails validation, fix it and call again. Give users the share_url (it unfurls to a preview card in chat apps); url is the equivalent #-fragment form.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -53,7 +51,7 @@ Check "valid" and "rows"; fix errors and call again before presenting the link a
   },
   {
     name: 'decode_graph_url',
-    title: 'Decode a graph URL',
+    title: 'Read a graph link',
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url.',
     inputSchema: {
@@ -284,7 +282,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         capabilities: { tools: {}, resources: {} },
         serverInfo: { name: 'equation', title: 'equation.io grapher', version: '1.0.0' },
         instructions:
-          'Use encode_graph_url to validate equations and return a graph URL. Include share_url as a clickable Markdown link in your answer so the user can open the interactive graph. The tool does not open or save a graph; its PNG is a static preview only. decode_graph_url decodes an existing URL for editing. Before writing non-trivial equations, read the "syntax" resource, also served at ' +
+          'Graphing calculator whose entire state lives in the URL. encode_graph_url turns a list of equations into a link that opens with them rendered — it validates every row and attaches a PNG preview so you can check the result. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
           origin + '/llms.txt',
       });
     }
@@ -311,17 +309,11 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
       try {
         let value: object;
         const content: object[] = [];
-        // Accept the former name for clients with cached tool definitions.
+        // Accept former names for clients with cached tool definitions.
         if (name === 'encode_graph_url' || name === 'create_graph') {
           const made = await encodeGraphUrl(origin, args);
           value = made.value;
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
-          content.push({
-            type: 'text',
-            text: made.value.valid
-              ? `URL encoded. Give the user this clickable link: [Open interactive graph](${made.value.share_url}). The graph has not been opened; any attached image is a static preview.`
-              : 'Some equations failed validation. Correct the errors in rows and encode again before presenting the link as working.',
-          });
           if (made.png) content.push({ type: 'image', data: made.png, mimeType: 'image/png' });
         } else if (name === 'decode_graph_url' || name === 'read_graph') {
           value = decodeGraphUrl(args);
