@@ -48,25 +48,6 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
 }
 
 describe('mcp endpoint', () => {
-  it('can omit image content for a text-only client comparison', async () => {
-    const args = { equations: ['y = sin(x)'] };
-    const normal = await rpc('tools/call', { name: 'encode_graph_url', arguments: args });
-    expect(normal.body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(true);
-    const url = new URL(`${URL_BASE}?preview=off`);
-    const response = await handleMcp(new Request(url, {
-      method: 'POST',
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call',
-        params: { name: 'encode_graph_url', arguments: args } }),
-    }), url, env);
-    const body = await response.json() as any;
-    expect(body.result.content.map((c: { type: string }) => c.type)).toEqual(['text']);
-    expect(body.result.structuredContent).toEqual({
-      ...normal.body.result.structuredContent,
-      preview: 'not attached — text-only response requested',
-    });
-    expect(JSON.parse(body.result.content[0].text)).toEqual(body.result.structuredContent);
-  });
-
   it('initializes with a supported protocol version', async () => {
     const { body } = await rpc('initialize', {
       protocolVersion: '2025-06-18',
@@ -150,7 +131,7 @@ describe('mcp endpoint', () => {
     // The static preview draws cobwebs, so nothing is omitted and the image
     // attaches with the recurrence included.
     expect(out.preview_omits).toBeUndefined();
-    expect(out.preview).toBe('attached');
+    expect(out.preview).toBe('not attached — available via share link');
   });
 
   it('validates random-variable rows like the app does (normal probability)', async () => {
@@ -228,7 +209,7 @@ describe('mcp endpoint', () => {
     expect(out.rows[3].value).toMatch(/^≈ 0\.\d{3}$/);
     // X + X ~ Normal(0, 2), so P(X + X < 1) = Φ(1/2) exactly.
     expect(out.rows[5].value).toBe('≈ 0.6915');
-    expect(out.preview).toBe('attached');
+    expect(out.preview).toBe('not attached — available via share link');
   });
 
   it('names what a joined row actually holds, semicolon or line break', async () => {
@@ -333,7 +314,7 @@ describe('mcp endpoint', () => {
     expect(out.rows[3].value).toBe('≈ 5.0000');
     // E[X²] = μ² + σ² = 5, by quadrature against the base pdf.
     expect(out.rows[4].value).toBe('≈ 5.0000');
-    expect(out.preview).toBe('attached');
+    expect(out.preview).toBe('not attached — available via share link');
   });
 
   it('validates ∫ rows: exact readouts and non-elementary curves', async () => {
@@ -350,7 +331,7 @@ describe('mcp endpoint', () => {
     // Si(x) has no elementary form — the quadrature expansion still plots.
     expect(out.rows[1].kind).toBe('implicit2d');
     expect(out.rows[3].kind).toBe('implicit2d'); // slider bound stays symbolic
-    expect(out.preview).toBe('attached');
+    expect(out.preview).toBe('not attached — available via share link');
   });
 
   it('rejects malformed ∫ rows with a usable message', async () => {
@@ -514,19 +495,16 @@ describe('graph previews', () => {
   const call = (equations: string[]) =>
     rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
 
-  it('attaches a PNG the caller can actually look at', async () => {
+  it('returns only text content for drawable graphs', async () => {
     const { body } = await call(['y = sin(x)', 'y = x/2']);
-    expect(body.result.structuredContent.preview).toBe('attached');
-    const image = body.result.content.find((c: { type: string }) => c.type === 'image');
-    expect(image.mimeType).toBe('image/png');
-    const bytes = Uint8Array.from(atob(image.data), ch => ch.charCodeAt(0));
-    expect([...bytes.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]); // PNG magic
+    expect(body.result.content.map((c: { type: string }) => c.type)).toEqual(['text']);
+    expect(JSON.parse(body.result.content[0].text)).toEqual(body.result.structuredContent);
   });
 
   it('notes that an animated graph is rendered at t = 0', async () => {
     const { body } = await call(['y = sin(x - 2t)']);
     expect(body.result.structuredContent.preview).toContain('t = 0');
-    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(true);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
   });
 
   it('says why shader-only plots get no image instead of sending a wrong one', async () => {
@@ -554,7 +532,7 @@ describe('graph previews', () => {
 
   it('discloses rows missing from a partial preview', async () => {
     const { body } = await call(['z = x^2 + y^2', 'y = sin(x)']);
-    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(true);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
     const out = body.result.structuredContent;
     expect(out.preview).toContain('1 of 2 plot rows missing');
     expect(out.preview_omits).toEqual([{ row: 'y = sin(x)', why: expect.stringContaining('vertical sheets') }]);
@@ -609,11 +587,11 @@ describe('graph previews', () => {
     expect(out.preview).not.toContain('the graph itself is fine');
   });
 
-  it('still previews the working rows of a partly-broken graph', async () => {
+  it('describes preview availability for working rows of a partly-broken graph', async () => {
     const { body } = await call(['y = x^2', 'y = florb(x)']);
     expect(body.result.structuredContent.valid).toBe(false);
-    expect(body.result.structuredContent.preview).toBe('attached');
-    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(true);
+    expect(body.result.structuredContent.preview).toBe('not attached — available via share link');
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
   });
 });
 
@@ -621,13 +599,13 @@ describe('viewport rows', () => {
   const call = (equations: string[]) =>
     rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
 
-  it('classifies viewport rows and still attaches the (framed) preview', async () => {
+  it('classifies viewport rows and describes the share-link preview', async () => {
     const { body } = await call(['view(x = 98..102)', 'y = (x - 100)^2']);
     const out = body.result.structuredContent;
     expect(out.valid).toBe(true);
     expect(out.rows[0]).toEqual({ text: 'view(x = 98..102)', status: 'ok', kind: 'viewport (view)' });
-    expect(out.preview).toBe('attached');
-    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(true);
+    expect(out.preview).toBe('not attached — available via share link');
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
   });
 
   it('accepts a camera row for 3D graphs', async () => {

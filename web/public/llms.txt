@@ -81,8 +81,7 @@ An MCP endpoint (Streamable HTTP) lives at:
     https://equation.io/mcp
 
 Tools: `encode_graph_url` (validates each equation through the app's own parser,
-returns url/share_url plus per-row classification or errors, and attaches a
-rendered PNG preview of the graph; rows the preview renderer cannot draw are
+returns url/share_url plus per-row classification or errors, with text-only MCP responses. Share links still provide a PNG preview; rows the preview renderer cannot draw are
 listed in `preview_omits` with the reason — the live app renders more than
 the static preview, so an omission never means the row failed) and
 `decode_graph_url` (decodes an existing link back into its equation rows so you can
@@ -326,7 +325,7 @@ demand instead of living in a tool description. No authentication required.
   (`1.234` is 1.234). The readout reports decimal-comma interpretation.
   Because the bytes never
   enter the URL, opening the link on another device (or rendering it
-  server-side, as `encode_graph_url` previews do) reports the data as
+  server-side, as share-link previews do) reports the data as
   device-local instead of drawing it; dropping the same file there restores
   it. The row's readout opens a preview of the first rows as they parsed.
   `adults = person[person.age >= 18]` names a filtered copy of a file (see
@@ -395,7 +394,7 @@ demand instead of living in a tool description. No authentication required.
   names the exact picture on screen. Without a viewport row, interaction
   stays ephemeral and the default framing applies.
 - Bounds and angles may use `pi` and defined constants, evaluated at load.
-- The /g/ preview card and the MCP encode_graph_url preview image honor these
+- The /g/ preview card honors these
   rows, so they show the framing you chose.
 
 ## Guidance for assistants

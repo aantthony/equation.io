@@ -2,9 +2,7 @@
  * Stateless MCP server (Streamable HTTP, JSON responses) at /mcp.
  *
  * Two tools: encode_graph_url builds a shareable link from equation rows,
- * validates every row through the app's own parser, and attaches a rendered
- * PNG of the result (the og.ts preview renderer) so the calling model can see
- * what it made, not just that it parsed; decode_graph_url decodes an existing link
+ * validates every row through the app's own parser; decode_graph_url decodes an existing link
  * back into rows so an assistant can edit a user's graph. The full syntax
  * manual is the "syntax" resource — served from the same /llms.txt asset the
  * site publishes — because a manual inlined in the tool description gets
@@ -19,7 +17,7 @@ import { freeVars } from '../lib/expr.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { splitStatements } from '../lib/statements.ts';
 import { analyze } from './graph.ts';
-import { MAX_PLOTS, previewGap, renderOgPng } from './og.ts';
+import { MAX_PLOTS, previewGap } from './og.ts';
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
@@ -35,7 +33,7 @@ const TOOLS = [
 
 Rows can be: equations and inequalities in x,y (curves, regions; z makes it 3D), bare expressions (scalar fields; complex plots via w), points (rows report "draggable"), parametric tuples in u,v — and definitions: "a = 2" (a draggable slider), "f(x) = x^3 - a x", coordinate fields like "r = sqrt(x^2+y^2)" for polar. t animates. Also derivatives d/dx, integrals int[a..b] f dx, sums sum[n=1..N], domain()/conformal()/iter() for complex plots, y' = … slope fields, random variables "X ~ Normal(m, s)"/"P(0<X<2)"/"E(X^2)", and "view(x = -5..5, y = -2..2)"/"camera(theta, phi)" framing rows. That is a menu, not the syntax: before your first non-trivial graph, read the "syntax" MCP resource (also at https://equation.io/llms.txt).
 
-The result attaches a PNG preview — a simplified CPU sketch (t = 0, 3D as wireframes) for checking shape and framing. It draws LESS than the app: rows it cannot draw are listed in "preview_omits" with the reason, so a sparse or missing preview never means the equations failed — "rows" is the validation verdict. Look at it: are the interesting features visible? If a row fails validation, fix it and call again. Give users the share_url (it unfurls to a preview card in chat apps); url is the equivalent #-fragment form.`,
+The result returns text and structured data only. "rows" is the validation verdict; if a row fails validation, fix it and call again. Give users the share_url (it unfurls to a preview card in chat apps); url is the equivalent #-fragment form. "preview" and "preview_omits" describe the share link's simplified static preview (t = 0, 3D as wireframes), which draws less than the interactive app. No image is attached to the tool response.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -138,15 +136,6 @@ const syntaxResource = (origin: string) => ({
   mimeType: 'text/markdown',
 });
 
-/** Chunked so String.fromCharCode never sees more arguments than V8 allows. */
-function toBase64(bytes: Uint8Array): string {
-  let bin = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(bin);
-}
-
 async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   const equations = args.equations;
   if (!Array.isArray(equations) || !equations.every(e => typeof e === 'string')) {
@@ -232,12 +221,7 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   });
   const payload = encodePayload(texts);
 
-  // Attach the same CPU-rendered PNG the /g/ link-preview uses, so the caller
-  // can SEE the graph it built rather than only that it parsed. The preview
-  // renderer draws less than the app (per-row gaps in previewGap), so any row
-  // missing from the image is disclosed in preview_omits with the reason —
-  // otherwise a sparse image reads as "the graph failed" when only the
-  // preview did, and the caller wrongly retreats to simpler equations.
+  // Describe limitations of the share-link preview without rendering an image.
   const omitted = plotRows
     .map(r => ({ row: r.text, why: previewGap(r, needs3D) }))
     .filter((g): g is { row: string; why: string } => g.why !== null);
@@ -248,7 +232,6 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   // A row that would have drawn something if the bytes were here — as opposed
   // to a definition it feeds, which draws nothing anywhere.
   const dataWouldPlot = dataLocalRows.some(r => !r.def && !r.comment && !r.view);
-  let png: string | undefined;
   let preview: string;
   if (!plotRows.length) {
     // A row reading a local CSV never classifies, so it is not in plotRows —
@@ -270,21 +253,15 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   } else if (omitted.length === plotRows.length) {
     preview = 'none — the static preview cannot draw any of these rows (see preview_omits; this says nothing about whether the graph works)';
   } else {
-    try {
-      png = toBase64(await renderOgPng(texts));
-      const notes = [
-        analysis.rows.some(r => r.cls?.animated) ? 'at t = 0; the live graph animates' : '',
-        omitted.length ? `${omitted.length} of ${plotRows.length} plot rows missing from this image — see preview_omits` : '',
-        plotRows.length > MAX_PLOTS ? `first ${MAX_PLOTS} plot rows only` : '',
-      ].filter(Boolean);
-      preview = notes.length ? `attached (${notes.join('; ')})` : 'attached';
-    } catch {
-      preview = 'none — preview renderer failed';
-    }
+    const notes = [
+      analysis.rows.some(r => r.cls?.animated) ? 'at t = 0; the live graph animates' : '',
+      omitted.length ? `${omitted.length} of ${plotRows.length} plot rows missing from the share-link preview — see preview_omits` : '',
+      plotRows.length > MAX_PLOTS ? `first ${MAX_PLOTS} plot rows only` : '',
+    ].filter(Boolean);
+    preview = 'not attached — available via share link' + (notes.length ? ` (${notes.join('; ')})` : '');
   }
 
   return {
-    png,
     value: {
       valid: rows.every(row => row.status === 'ok'),
       url: `${origin}/#${payload}`,
@@ -319,8 +296,6 @@ interface RpcRequest {
 
 interface RpcContext {
   origin: string;
-  /** Diagnostic opt-out for clients having trouble with image content. */
-  textOnly?: boolean;
   /** Reads the /llms.txt asset backing the "syntax" resource. */
   syntaxText: () => Promise<string>;
 }
@@ -343,7 +318,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         capabilities: { tools: {}, resources: {} },
         serverInfo: { name: 'equation', title: 'equation.io grapher', version: '1.0.0' },
         instructions:
-          'Graphing calculator whose entire state lives in the URL. encode_graph_url turns a list of equations into a link that opens with them rendered — it validates every row and attaches a PNG preview so you can check the result. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
+          'Graphing calculator whose entire state lives in the URL. encode_graph_url turns a list of equations into a link that opens with them rendered — it validates every row and returns validation results. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
           origin + '/llms.txt',
       });
     }
@@ -373,10 +348,8 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         // Accept former names for clients with cached tool definitions.
         if (name === 'encode_graph_url' || name === 'create_graph') {
           const made = await encodeGraphUrl(origin, args);
-          if (ctx.textOnly && made.png) made.value.preview = 'not attached — text-only response requested';
           value = made.value;
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
-          if (made.png && !ctx.textOnly) content.push({ type: 'image', data: made.png, mimeType: 'image/png' });
         } else if (name === 'decode_graph_url' || name === 'read_graph') {
           value = decodeGraphUrl(args);
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
@@ -443,7 +416,6 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
 
   const ctx: RpcContext = {
     origin: url.origin,
-    textOnly: url.searchParams.get('preview') === 'off',
     syntaxText: async () => {
       const res = await env.ASSETS.fetch(new Request(new URL('/llms.txt', url)));
       if (!res.ok) throw new Error(`syntax reference unavailable (${res.status})`);
