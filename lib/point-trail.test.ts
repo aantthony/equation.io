@@ -3,12 +3,13 @@ import { PointTrail } from './point-trail.ts';
 import { analyze } from '../worker/graph.ts';
 import { canRenderOg, previewGap } from '../worker/og.ts';
 
-describe('trace(point)', () => {
+describe('trail(point)', () => {
   it('accepts literals, named point arithmetic, and 3D state vectors', () => {
     for (const [text, dim] of [
-      ['trace((cos(t), sin(t)))', 2],
-      ['A = (cos(t), sin(t)); trace(2A)', 2],
-      ["p(0) = (1, 0, 0); p' = (-p_2, p_1, 1); trace(p)", 3],
+      ['trail((cos(t), sin(t)))', 2],
+      ['TRAIL(cos(t), sin(t))', 2],
+      ['A = (cos(t), sin(t)); trail(2A)', 2],
+      ["p(0) = (1, 0, 0); p' = (-p_2, p_1, 1); trail(p)", 3],
     ] as const) {
       const graph = analyze(text.split(';').map(s => s.trim()));
       expect(graph.rows.map(r => r.error)).toEqual(graph.rows.map(() => undefined));
@@ -22,14 +23,19 @@ describe('trace(point)', () => {
     expect(graph.constEnv.a).toBe(6);
   });
 
+  it('keeps point trails and matrix trace distinct', () => {
+    expect(analyze(['A = (1, 2)', 'trace(A)']).rows[1].error).toContain('takes a matrix');
+    expect(analyze(['M = [(1, 2), (3, 4)]', 'trail(M)']).rows[1].error).toBeTruthy();
+  });
+
   it('rejects scalar, spatial, parametric, and nested trail expressions', () => {
-    for (const text of ['trace(1)', 'trace(x, y)', 'trace(u, u)', '1 + trace(1, 2)', 'trace(i, 1)']) {
+    for (const text of ['trail(1)', 'trail(x, y)', 'trail(u, u)', '1 + trail(1, 2)', 'trail(i, 1)']) {
       expect(analyze([text]).rows[0].error, text).toBeTruthy();
     }
   });
 
   it('reports live history honestly to static preview consumers', () => {
-    const graph = analyze(['trace(cos(t), sin(t), t)']);
+    const graph = analyze(['trail(cos(t), sin(t), t)']);
     expect(canRenderOg(graph)).toBe(false);
     expect(previewGap(graph.rows[0], true)).toContain('live motion history');
   });

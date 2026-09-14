@@ -159,7 +159,7 @@ function matchODE(e: Expr): (Expr & { kind: 'vec' }) | null {
 const DEFAULT_TUBE_RADIUS = 0.1;
 
 /** Calls that describe the whole plot and cannot appear as a subterm. */
-const WHOLE_EXPR_FORMS = new Set([...SPECIAL_FORMS, 'tube', '[trace]']);
+const WHOLE_EXPR_FORMS = new Set([...SPECIAL_FORMS, 'tube', '[trail]']);
 
 /**
  * tube(curve[, radius]): sweep a 3D parametric curve as a lit tube.
@@ -249,7 +249,7 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
   if (tube) expr = tube.inner;
   const special = expr.kind === 'call' && SPECIAL_FORMS.has(expr.name) ? expr.name : undefined;
   const nested = nestedSpecial(expr, true);
-  if (nested) throw new Error(`${nested === '[trace]' ? 'trace' : nested}(…) must be the whole expression.`);
+  if (nested) throw new Error(`${nested === '[trail]' ? 'trail' : nested}(…) must be the whole expression.`);
   const vars = freeVars(expr);
   if (tube) {
     const r = tube.radius;
@@ -309,9 +309,9 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
     params,
   });
 
-  if (expr.kind === 'call' && expr.name === '[trace]') {
+  if (expr.kind === 'call' && expr.name === '[trail]') {
     if (hasSpace || hasParam || usesComplex(expr) || expr.args.some(c => c.kind === 'data' || c.kind === 'list')) {
-      throw new Error('trace needs a real point using constants, states, and t; use u for a parametric curve.');
+      throw new Error('trail needs a real point using constants, states, and t; use u for a parametric curve.');
     }
     return done({ type: 'trail', dim: expr.args.length as 2 | 3, coords: expr.args });
   }

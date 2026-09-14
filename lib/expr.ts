@@ -67,8 +67,8 @@ export const FUNCTIONS = new Set([
   // Not real functions: Σ/Π/∫ binders, expanded symbolically by resolveExpr.
   'sum', 'prod', 'int',
   // Whole-expression plot modes (see classify): domain coloring, conformal
-  // grids, escape-time iteration, and swept tubes.
-  'domain', 'conformal', 'iter', 'tube',
+  // grids, escape-time iteration, swept tubes, and motion trails.
+  'domain', 'conformal', 'iter', 'tube', 'trail',
 ]);
 
 /**

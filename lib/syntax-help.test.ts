@@ -12,6 +12,13 @@ describe('contextual syntax help', () => {
     expect(h.start).toBe(4); expect(h.end).toBe(10);
     expect(h.suggestions.some(s => s.name === 'sqrt')).toBe(true);
   });
+  it('distinguishes motion trails from matrix trace in suggestions and hints', () => {
+    const suggestions = syntaxHelp('tra', 3, defs()).suggestions;
+    expect(suggestions.map(s => s.signature)).toEqual(['trace(M)', 'trail(point)']);
+    expect(syntaxHelp('trail(', 6, defs()).hint).toContain('Draw a moving point’s path');
+    expect(syntaxHelp('TRAIL(', 6, defs()).hint).toContain('trail(point)');
+    expect(syntaxHelp('trace(', 6, defs()).hint).toContain('Matrix trace');
+  });
   it('suggests defined values, functions and CSV columns', () => {
     expect(syntaxHelp('a', 1, defs()).suggestions.find(s => s.name === 'amplitude')?.call).toBe(false);
     expect(syntaxHelp('wa', 2, defs()).suggestions.find(s => s.name === 'wave')?.signature).toBe('wave(x)');

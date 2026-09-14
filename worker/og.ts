@@ -657,7 +657,7 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   const { cls, expr } = row;
   if (!cls) return null;
   const type = cls.plot.type;
-  if (type === 'trail') return 'trace(point) accumulates live motion history; no static preview is available';
+  if (type === 'trail') return 'trail(point) accumulates live motion history; no static preview is available';
   if (!needs3D) {
     return OG_COVERAGE[type] === 'draws'
       ? null
