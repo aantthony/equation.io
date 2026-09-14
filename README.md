@@ -129,6 +129,11 @@ pnpm deploy     # build and deploy to Cloudflare
   derivative that is a 2- or 3-vector integrates componentwise as `r_1`,
   `r_2`(, `r_3`), and the bare name draws as a moving point and joins point
   arithmetic — an orbit in two rows
+- `trail(A)` — leaves a live motion trail behind a 2D or 3D point.
+  For example, `A = (cos(t), sin(t)); trail(A)` draws an orbit as it runs;
+  `trail((cos(t), sin(t), t/5))` draws a rising helix. Vector states work too.
+  Trails retain up to 30 seconds / 2048 observed positions, reset when the
+  equations or simulation restart, and are local to the current session.
 
 **Custom coordinates and complex roots**
 
@@ -143,12 +148,6 @@ pnpm deploy     # build and deploy to Cloudflare
 
 **Matrices**
 
-- `trace(A)` — leaves a live motion trail behind a 2D or 3D point.
-  For example, `A = (cos(t), sin(t)); trace(A)` draws an orbit as it runs;
-  `trace((cos(t), sin(t), t/5))` draws a rising helix. Vector states work too.
-  Trails retain up to 30 seconds / 2048 observed positions, reset when the
-  equations or simulation restart, and are local to the current session.
-  `trace(M)` on a matrix still means the sum of its diagonal entries.
 - `M = [(a, b), (c, d)]` — a 2×2 or 3×3 matrix; `det(M)`, `trace(M)`, the
   matvec `M v`, and `solve(M, v)` (Cramer's rule) expand symbolically at
   lowering time, see [`lib/mat.ts`](lib/mat.ts). So `(x', y') = A (x, y)` is a

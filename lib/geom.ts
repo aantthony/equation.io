@@ -149,6 +149,16 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat): LV {
     }
     case 'call': {
       if (GEOM_STATEMENTS.has(e.name)) throw new Error(`${e.name}(…) must be a whole statement.`);
+      if (e.name === 'trail') {
+        const args = e.args.map(lo);
+        const coords = args.length === 1 && args[0].vec
+          ? args[0].items
+          : args.every(a => !a.vec) ? args.map(a => (a as LV & { vec: false }).e) : [];
+        if (coords.length !== 2 && coords.length !== 3) {
+          throw new Error('trail takes a 2D or 3D point: trail(A) or trail((cos(t), sin(t))).');
+        }
+        return sc({ kind: 'call', name: '[trail]', args: coords });
+      }
       if (e.name === 'det' || e.name === 'trace' || e.name === 'solve') {
         const matArg = (raw: Expr | undefined): ReturnType<GetMat> => {
           if (!raw) return null;
@@ -160,16 +170,6 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat): LV {
           return null;
         };
         const m = matArg(e.args[0]);
-        if (!m && e.name === 'trace') {
-          const args = e.args.map(lo);
-          const coords = args.length === 1 && args[0].vec
-            ? args[0].items
-            : args.every(a => !a.vec) ? args.map(a => (a as LV & { vec: false }).e) : [];
-          if (coords.length !== 2 && coords.length !== 3) {
-            throw new Error('trace takes a 2D or 3D point, or a matrix: trace(A), trace((cos(t), sin(t))), or trace(M).');
-          }
-          return sc({ kind: 'call', name: '[trace]', args: coords });
-        }
         if (!m) {
           throw new Error(`${e.name} takes a matrix — define one with M = [(a, b), (c, d)].`);
         }

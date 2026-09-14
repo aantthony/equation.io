@@ -469,17 +469,17 @@ literal data and their model curves work in shared links and static previews.
 
 ## Motion trails
 
-`trace(A)` leaves a live trail of a point's observed positions, with a dot at
+`trail(A)` leaves a live trail of a point's observed positions, with a dot at
 its current position. Use it as a whole row. Examples:
 
     A = (cos(t), sin(t))
-    trace(A)
+    trail(A)
 
-    trace((cos(t), sin(t), t/5))
+    trail((cos(t), sin(t), t/5))
 
-A named 2D point, point arithmetic such as `trace(2A)`, or a 2D/3D vector state
+A named 2D point, point arithmetic such as `trail(2A)`, or a 2D/3D vector state
 can be traced. Components may use constants, sliders, states, and `t`; they
-cannot use free x/y/z or u/v. `trace(cos(t), sin(t))` is equivalent to the
+cannot use free x/y/z or u/v. `trail(cos(t), sin(t))` is equivalent to the
 parenthesized tuple spelling. Matrix `trace(M)` keeps its existing meaning
 (the sum of the diagonal), including inside other expressions.
 
