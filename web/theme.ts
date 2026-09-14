@@ -98,6 +98,11 @@ function set(mode: 'light' | 'dark'): void {
   for (const cb of listeners) cb();
 }
 
+/** Follow the chat host without persisting its preference to the website. */
+export function setHostTheme(mode: 'light' | 'dark'): void {
+  if (theme.dark !== (mode === 'dark')) set(mode);
+}
+
 /** Switch theme in response to a user click, and remember the choice. */
 export function toggleTheme(): void {
   const next = theme.dark ? 'light' : 'dark';

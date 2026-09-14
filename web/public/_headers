@@ -15,3 +15,4 @@
 # the files in public/ keep their stable names across deploys.
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
+  Access-Control-Allow-Origin: *

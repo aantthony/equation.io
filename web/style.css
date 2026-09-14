@@ -21,6 +21,11 @@ body {
    the JS theme switch flips data-theme on <html>, so every panel color moves
    with the WebGL background in one place. */
 :root {
+  --safe-area-top: env(safe-area-inset-top);
+  --safe-area-right: env(safe-area-inset-right);
+  --safe-area-bottom: env(safe-area-inset-bottom);
+  --safe-area-left: env(safe-area-inset-left);
+  --panel-bottom-inset: var(--safe-area-bottom);
   --page-bg: #fff;
   --panel-bg: rgba(255, 255, 255, 0.92);
   --panel-border: rgba(0, 0, 0, 0.1);
@@ -120,8 +125,8 @@ html, body {
   position: absolute;
   /* viewport-fit=cover lets the canvas fill the whole screen (under the iOS
      status bar and home indicator); keep the controls inside the safe area. */
-  top: calc(12px + env(safe-area-inset-top));
-  left: calc(12px + env(safe-area-inset-left));
+  top: calc(12px + var(--safe-area-top));
+  left: calc(12px + var(--safe-area-left));
   width: 300px;
   /* Tighter than the blanket pan-x pan-y: nothing in the panel scrolls
      sideways, so declaring pan-y keeps horizontal touchmoves cancelable and
@@ -130,9 +135,9 @@ html, body {
   touch-action: pan-y;
   /* Keep the panel on screen with many equations: cap it at the viewport
      (12px margin top and bottom) and let #equations scroll inside. */
-  max-height: calc(100% - 24px - env(safe-area-inset-bottom));
+  max-height: calc(100% - 24px - var(--panel-bottom-inset));
   /* A remembered width (panel-resize.ts) from a wider screen re-clamps here. */
-  max-width: calc(100% - 24px - env(safe-area-inset-left) - env(safe-area-inset-right));
+  max-width: calc(100% - 24px - var(--safe-area-left) - var(--safe-area-right));
   display: flex;
   flex-direction: column;
   background: var(--panel-bg);
@@ -149,12 +154,12 @@ html, body {
    upward as equations are added and rotations keep it glued to its corner. */
 #panel.pin-right {
   left: auto;
-  right: calc(12px + env(safe-area-inset-right));
+  right: calc(12px + var(--safe-area-right));
 }
 #panel.pin-bottom {
   top: auto;
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  max-height: calc(100% - 24px - env(safe-area-inset-top));
+  bottom: calc(12px + var(--panel-bottom-inset));
+  max-height: calc(100% - 24px - var(--safe-area-top));
 }
 
 /* The drag handle: a strip along the panel's top edge (under the corner
@@ -671,8 +676,8 @@ body.file-drag::after {
    panel back; dragging pulls it back in under the finger. */
 #panel-chip {
   position: absolute;
-  top: calc(12px + env(safe-area-inset-top));
-  left: calc(12px + env(safe-area-inset-left));
+  top: calc(12px + var(--safe-area-top));
+  left: calc(12px + var(--safe-area-left));
   width: 46px;
   height: 40px;
   padding: 0;
@@ -705,11 +710,11 @@ body.file-drag::after {
    the panel's pinning, applied together in panel-swipe.ts). */
 #panel-chip.pin-right {
   left: auto;
-  right: calc(12px + env(safe-area-inset-right));
+  right: calc(12px + var(--safe-area-right));
 }
 #panel-chip.pin-bottom {
   top: auto;
-  bottom: calc(12px + env(safe-area-inset-bottom));
+  bottom: calc(12px + var(--panel-bottom-inset));
 }
 @media (prefers-reduced-motion: reduce) {
   #panel-chip { transition: opacity 0.15s ease-out; }

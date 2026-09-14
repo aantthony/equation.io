@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-mcp-app>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="equation-origin" content="__EQUATION_ORIGIN__">
+  <title>Equation.io graph</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/mcp-app/style.css">
+</head>
+<body>
+  <canvas id="gl" aria-label="Interactive graph"></canvas>
+  <canvas id="overlay"></canvas>
+  <div id="panel" style="visibility: hidden">
+    <div id="panel-grip" aria-hidden="true"></div>
+    <div id="panel-resize" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize the equations panel"></div>
+    <button id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">☾</button>
+    <button id="state-reset" type="button" aria-label="Restart the simulation" title="Restart the simulation" hidden>↻</button>
+    <div id="equations" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Equations, one per line" spellcheck="false" autocapitalize="off" autocorrect="off"></div>
+    <details id="data-files" hidden><summary>data files</summary><div id="data-files-list"></div></details>
+    <details id="examples"><summary>examples</summary><div id="examples-list"></div></details>
+    <div id="panel-links"><button id="open-csv" type="button">+ csv</button></div>
+  </div>
+  <button id="panel-chip" class="shown" type="button" aria-label="Show the equations">y=</button>
+  <footer id="app-toolbar">
+    <span id="app-status" role="status">Waiting for graph…</span>
+    <button id="app-expand" type="button" hidden>Expand</button>
+    <a id="app-open" href="https://equation.io/" target="_blank" rel="noopener noreferrer">Open in equation.io ↗</a>
+  </footer>
+  <script type="module" src="/main.ts"></script>
+</body>
+</html>

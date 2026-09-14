@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import Ajv from 'ajv';
 import { handleMcp } from './mcp.ts';
+import { GRAPH_UI_URI } from './mcp-app.ts';
 
 const URL_BASE = 'https://equation.io/mcp';
 const ajv = new Ajv({ strict: true });
@@ -16,6 +17,8 @@ const env = {
     fetch: async (req: Request) =>
       new URL(req.url).pathname === '/llms.txt'
         ? new Response(SYNTAX_DOC)
+        : new URL(req.url).pathname === '/mcp-app/'
+        ? new Response('<html data-mcp-app><meta content="__EQUATION_ORIGIN__"><script type="module" src="/assets/graph.js"></script><link href="/assets/graph.css"></html>')
         : new Response('not found', { status: 404 }),
   },
 } as unknown as Env;
@@ -78,9 +81,9 @@ describe('mcp endpoint', () => {
     expect(res.status).toBe(202);
   });
 
-  it('lists both tools', async () => {
+  it('lists link tools and the interactive graph tool', async () => {
     const { body } = await rpc('tools/list');
-    expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual(['encode_graph_url', 'decode_graph_url']);
+    expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual(['encode_graph_url', 'decode_graph_url', 'show_graph']);
     for (const tool of body.result.tools) {
       expect(tool.annotations).toEqual({
         readOnlyHint: true, openWorldHint: false, destructiveHint: false,
@@ -629,7 +632,7 @@ describe('syntax resource', () => {
     const { body: init } = await rpc('initialize', { protocolVersion: '2025-06-18' });
     expect(init.result.capabilities.resources).toBeDefined();
     const { body } = await rpc('resources/list');
-    expect(body.result.resources).toHaveLength(1);
+    expect(body.result.resources).toHaveLength(2);
     expect(body.result.resources[0].name).toBe('syntax');
     expect(body.result.resources[0].uri).toBe('https://equation.io/llms.txt');
   });
@@ -640,6 +643,33 @@ describe('syntax resource', () => {
     expect(contents.uri).toBe('https://equation.io/llms.txt');
     expect(contents.mimeType).toBe('text/markdown');
     expect(contents.text).toBe(SYNTAX_DOC);
+  });
+
+  it('links only show_graph to a readable UI with cross-origin assets and scoped CSP', async () => {
+    const { body: listed } = await rpc('tools/list');
+    const show = listed.result.tools.find((t: { name: string }) => t.name === 'show_graph');
+    expect(show._meta.ui.resourceUri).toBe(GRAPH_UI_URI);
+    expect(listed.result.tools[0]._meta).toBeUndefined();
+    const { body } = await rpc('resources/read', { uri: show._meta.ui.resourceUri });
+    const [resource] = body.result.contents;
+    expect(resource.mimeType).toBe('text/html;profile=mcp-app');
+    expect(resource.text).toContain('src="https://equation.io/assets/graph.js"');
+    expect(resource.text).toContain('href="https://equation.io/assets/graph.css"');
+    expect(resource.text).not.toContain('__EQUATION_ORIGIN__');
+    expect(resource._meta.ui.csp).toEqual({ resourceDomains: ['https://equation.io', 'blob:'], connectDomains: [] });
+    const args = { equations: ['a = 2', 'y = a sin(x)'] };
+    const shown = await rpc('tools/call', { name: 'show_graph', arguments: args });
+    const encoded = await rpc('tools/call', { name: 'encode_graph_url', arguments: args });
+    expect(shown.body.result).toEqual(encoded.body.result);
+  });
+
+  it('reports missing UI assets instead of returning the website fallback as a widget', async () => {
+    const request = new Request(URL_BASE, { method: 'POST', body: JSON.stringify({
+      jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: GRAPH_UI_URI },
+    }) });
+    const missing = { ASSETS: { fetch: async () => new Response('<html>website fallback</html>') } } as unknown as Env;
+    const response = await handleMcp(request, new URL(URL_BASE), missing);
+    expect(await response.json()).toMatchObject({ error: { code: -32603, message: 'Graph UI unavailable; rebuild the web assets.' } });
   });
 
   it('names the valid uri when asked for an unknown one', async () => {

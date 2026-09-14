@@ -51,6 +51,12 @@ export class TraceQueue {
     this.pending.delete(row);
   }
 
+  /** Discard work during teardown; late worker replies cannot restart it. */
+  clear() {
+    this.pending.clear();
+    this.active = undefined;
+  }
+
   complete(token: number, result: TraceResult) {
     if (this.active?.token !== token) return;
     const job = this.active;
