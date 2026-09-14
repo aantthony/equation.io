@@ -82,9 +82,9 @@ export async function connectGraphApp(editor: GraphEditor) {
     } catch { /* Persistence may be unavailable; the live graph still works. */ }
     try {
       await app.updateModelContext({ structuredContent: { equations: rows, share_url: open.href } });
-      if (!closing && hasResult && source === publishedSource) status.textContent = 'Graph ready';
+      if (!closing && hasResult && source === publishedSource) status.textContent = '';
     } catch {
-      if (!closing && hasResult && source === publishedSource) status.textContent = 'Graph ready · edits could not sync';
+      if (!closing && hasResult && source === publishedSource) status.textContent = 'Edits could not sync';
     }
   }
 
@@ -170,15 +170,20 @@ export async function connectGraphApp(editor: GraphEditor) {
     cancelPreview();
     const rows = inputRows(params.arguments);
     if (!rows) return;
-    hasResult = false;
     const key = JSON.stringify(rows);
+    // Hosts can replay complete input after its result. Keep confirmation,
+    // validation feedback, and any user edits for that same graph.
+    if (hasResult && key === source) return;
+    hasResult = false;
     if (key !== inputSource) {
       const wanted = restored?.source === key && strings(restored.equations) ? restored.equations : rows;
       showRows(wanted);
     }
     inputSource = key;
     previewSource = undefined;
-    status.textContent = 'Graph ready · validating…';
+    // Rendering is ready now. Result delivery is host-controlled and may
+    // never happen, so it must not leave a permanent progress indicator.
+    status.textContent = '';
   };
   app.ontoolresult = result => {
     if (closing) return;
@@ -211,7 +216,7 @@ export async function connectGraphApp(editor: GraphEditor) {
     inputSource = undefined;
     hasResult = true;
     link(wanted);
-    status.textContent = data?.valid === false ? 'Check the highlighted equations' : 'Graph ready';
+    status.textContent = data?.valid === false ? 'Check the highlighted equations' : '';
     if (JSON.stringify(wanted) !== source) void publish(wanted);
   };
   app.ontoolcancelled = () => {

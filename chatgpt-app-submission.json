@@ -3,10 +3,15 @@
   "schema_version": 1,
   "app_info": {
     "display_name": "Equation.io",
-    "subtitle": "Graph mathematical equations",
-    "description": "Equation.io turns mathematical equations into interactive 2D and 3D graphs inside compatible MCP apps or in your browser. Create curves, surfaces, inequalities, and graphs with adjustable parameters; inspect validation results; or edit an existing Equation.io graph link. Graph equations are encoded in shareable URLs, so anyone with a link can read them. Static previews are simplified and may omit features supported by the interactive graph. No account or API key is required.",
+    "subtitle": "Interactive 2D and 3D graphs",
+    "description": "Equation.io brings interactive 2D and 3D graphing into your conversation. Plot curves, surfaces, and inequalities; edit equations directly in the graph; adjust parameter sliders; and pan, zoom, or rotate 3D views to explore the math. Animate graphs with time-dependent equations and expand the graph in hosts that support fullscreen. Equation and slider edits update the context available to the assistant for follow-up questions. Open or share the current graph in your browser, or bring an existing Equation.io graph link into the conversation to continue exploring. Graph equations are encoded in shareable URLs, so anyone with a link can read them. No account or API key is required.",
     "category": "EDUCATION"
   },
+  "example_prompts": [
+    "Show me a swinging pendulum and how its length affects its motion.",
+    "Graph x² + y² = 9 and explain why it makes a circle.",
+    "Show me a trefoil knot in 3D."
+  ],
   "tools": {
     "encode_graph_url": {
       "annotations": {
@@ -47,19 +52,19 @@
   },
   "test_cases": [
     {
-      "description": "Create a graph containing two 2D curves.",
-      "user_prompt": "Use Equation.io to plot y = x^2 and y = sin(x) together and give me the graph link.",
+      "description": "Explore and edit two 2D curves in the conversation.",
+      "user_prompt": "Use Equation.io to show y = x^2 and y = sin(x) together in an interactive graph so I can zoom in and edit the equations.",
       "file_attachment_urls": null,
-      "tools_triggered": "encode_graph_url",
-      "expected_output": "Returns a shareable graph link containing both equations, successful row validation, and text-only tool output.",
+      "tools_triggered": "show_graph",
+      "expected_output": "Displays an interactive graph in the conversation with both validated equations. The user can pan, zoom, and open the equation editor to change either curve. Edits update the graph and the context available to the assistant, and the share link opens the current graph in the browser.",
       "expected_output_url": null
     },
     {
-      "description": "Create a 3D surface and explain its simplified preview.",
-      "user_prompt": "Use Equation.io to graph x^2 + y^2 + z^2 = 9. Give me the interactive link and explain how the static preview differs.",
+      "description": "Explore a 3D surface in the conversation.",
+      "user_prompt": "Use Equation.io to show x^2 + y^2 + z^2 = 9 as an interactive 3D graph that I can rotate and zoom.",
       "file_attachment_urls": null,
-      "tools_triggered": "encode_graph_url",
-      "expected_output": "Returns a validated sphere graph link and explains that the interactive graph is 3D while the static preview is a simplified wireframe.",
+      "tools_triggered": "show_graph",
+      "expected_output": "Displays a validated sphere of radius 3 in an interactive 3D graph in the conversation. The user can rotate and zoom the surface, expand the graph when the host supports fullscreen, and open the current graph in the browser.",
       "expected_output_url": null
     },
     {
@@ -71,11 +76,19 @@
       "expected_output_url": null
     },
     {
-      "description": "Read an existing graph and preserve unchanged rows when editing.",
-      "user_prompt": "Use Equation.io to edit https://equation.io/g/y%3Dx%5E2;y%3Dsin%28x%29: replace y = x^2 with y = x^3, keeping the sine curve. Give me the new link.",
+      "description": "Explore an animated equation in the conversation.",
+      "user_prompt": "Use Equation.io to show an animated wave with y = sin(x - t).",
       "file_attachment_urls": null,
-      "tools_triggered": "decode_graph_url, encode_graph_url",
-      "expected_output": "Decodes both original rows, then returns a new validated link containing y = x^3 and y = sin(x); the original link remains unchanged.",
+      "tools_triggered": "show_graph",
+      "expected_output": "Displays an interactive graph of y = sin(x - t), with the wave moving as time advances. The user can pan, zoom, edit the equation, and open the graph in the browser.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Open an existing graph, edit one curve, and explore the result.",
+      "user_prompt": "Use Equation.io to open https://equation.io/g/y%3Dx%5E2;y%3Dsin%28x%29 and replace y = x^2 with y = x^3, keeping the sine curve. Show me the updated interactive graph.",
+      "file_attachment_urls": null,
+      "tools_triggered": "decode_graph_url, show_graph",
+      "expected_output": "Decodes both original rows, then displays an interactive graph containing validated y = x^3 and y = sin(x). The user can continue editing in the graph and share the updated graph; the original link remains unchanged.",
       "expected_output_url": null
     },
     {
@@ -83,7 +96,15 @@
       "user_prompt": "Use Equation.io to validate these exact two rows: y = x^2 and y = (. Do not fix the second row; tell me which one fails.",
       "file_attachment_urls": null,
       "tools_triggered": "encode_graph_url",
-      "expected_output": "Reports that y = x^2 is valid and y = ( fails validation; does not present the complete graph as valid or treat preview availability as proof of validity.",
+      "expected_output": "Reports that y = x^2 is valid and y = ( fails validation, preserves the exact input, and identifies the failing row without presenting the complete graph as valid.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Create a shareable graph link on request.",
+      "user_prompt": "Use Equation.io to create a link for y = x^2 and y = sin(x). I only need the link.",
+      "file_attachment_urls": null,
+      "tools_triggered": "encode_graph_url",
+      "expected_output": "Returns a shareable graph link containing both validated equations.",
       "expected_output_url": null
     }
   ],

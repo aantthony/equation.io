@@ -102,12 +102,12 @@ try {
   assert.ok((await frame.locator('.eq-line').last().textContent())?.includes('sin('), 'Partial arguments render before tool completion');
   assert.equal(await frame.locator('#app-status').textContent(), 'Drawing graph…');
   await page.evaluate(() => (window as any).sendInput({ equations: ['a = 2', 'y = a sin(x)'] }));
-  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready · validating…');
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === '');
   assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('1.5'), 'Complete input restores saved edits before the result');
   await frame.evaluate(() => (window as any).earlyRow = document.querySelector('.eq-line'));
   assert.equal(await page.evaluate(() => (window as any).messages.filter((m: any) => m.method === 'ui/update-model-context').length), 0, 'Unconfirmed input is not published');
   await page.evaluate(value => (window as any).sendResult(value), result);
-  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready');
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === '');
   assert.ok(await frame.evaluate(() => (window as any).earlyRow === document.querySelector('.eq-line')), 'Matching result does not rebuild the graph');
   assert.ok(await frame.locator('#panel').isHidden(), 'Embedded editor starts tucked away');
   assert.ok(await frame.locator('#panel-chip').isVisible(), 'Equation chip remains available');
@@ -123,13 +123,25 @@ try {
   assert.ok((await frame.locator('#equation-host-fonts').textContent())?.includes('TestHost'));
   assert.equal(await frame.locator('.eq-line').count(), 2);
   assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('1.5'), 'Restores edits for the original tool result');
-  assert.equal(await frame.locator('#app-status').textContent(), 'Graph ready');
+  assert.equal(await frame.locator('#app-status').textContent(), '');
   assert.ok(await frame.locator('#gl').evaluate((canvas: HTMLCanvasElement) => canvas.width > 0 && !!canvas.getContext('webgl2')));
   await frame.locator('.eq-slider input[type=range]').evaluate((input: HTMLInputElement) => {
     input.value = '3'; input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.waitForFunction(() => (window as any).messages.some((m: any) => m.method === 'ui/update-model-context' && m.params.structuredContent.equations[0].includes('3')));
   assert.ok(await frame.evaluate(() => (window as any).savedWidgetState.privateContent.equations[0].includes('3')));
+  // A host may replay the original input after completion. It must neither
+  // reset slider edits nor turn off publishing for subsequent edits.
+  await frame.evaluate(() => (window as any).confirmedRow = document.querySelector('.eq-line'));
+  await page.evaluate(() => (window as any).sendInput({ equations: ['a = 2', 'y = a sin(x)'] }));
+  await page.waitForTimeout(100);
+  assert.equal(await frame.locator('#app-status').textContent(), '');
+  assert.ok(await frame.evaluate(() => (window as any).confirmedRow === document.querySelector('.eq-line')), 'Replayed input preserves the editor');
+  assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('3'), 'Replayed input preserves edits');
+  await frame.locator('.eq-slider input[type=range]').evaluate((input: HTMLInputElement) => {
+    input.value = '4'; input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.waitForFunction(() => (window as any).messages.some((m: any) => m.method === 'ui/update-model-context' && m.params.structuredContent.equations[0].includes('4')));
   await frame.locator('#app-open').click();
   await page.waitForFunction(() => (window as any).messages.some((m: any) => m.method === 'ui/open-link'));
   await frame.locator('#app-expand').click();
@@ -164,7 +176,7 @@ try {
   await page.waitForTimeout(100);
   assert.ok(await frame.evaluate(() => (window as any).beforeCancelledPreview === document.querySelector('.eq-line')), 'Cancellation discards queued partial input');
   await page.evaluate(() => (window as any).sendInput({ equations: ['y=998'] }));
-  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready · validating…');
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === '');
   await page.evaluate(() => (window as any).sendResult({ isError: true, content: [] }));
   await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Could not load this graph. Ask to try again.');
   assert.equal(await frame.locator('.eq-line').count(), 0, 'Error results clear the previewed rows');
@@ -185,12 +197,12 @@ try {
   assert.equal(await frame.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   const animated = await rpc('tools/call', { name: 'show_graph', arguments: { equations: ['a=2', 'y=a sin(x+t)'] } });
   await page.evaluate(() => (window as any).sendInput({ equations: ['a=2', 'y=a sin(x+t)'] }));
-  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready · validating…');
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === '');
   await frame.locator('.eq-slider input[type=range]').evaluate((input: HTMLInputElement) => {
     input.value = '7'; input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.evaluate(value => (window as any).sendResult(value), animated);
-  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready');
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === '');
   assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('7'), 'Result preserves edits made during validation');
   await page.evaluate(() => document.querySelector('iframe')!.style.marginTop = '2000px');
   await page.waitForTimeout(300); // Allow the cross-frame intersection notification to settle.
