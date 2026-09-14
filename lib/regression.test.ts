@@ -62,6 +62,17 @@ describe('equation-native regression', () => {
     expect(scanRegressions(['X=[1,2]', 'Y=[2,4]', "Y ~ a f'(X)"]).size).toBe(1);
     expect(scanRegressions(['# Y ~ a X', 'L=["~"]']).size).toBe(0);
   });
+  it.each(['exp', 'EXP', 'Exp', 'eXp'])('preserves the bare %s distribution alias and name collisions', alias => {
+    expect(scanRegressions(['X=2', `X ~ ${alias}`]).size).toBe(0);
+    expect(analyze(['X=2', `X ~ ${alias}`]).rows[1].error).toBe('X is already defined.');
+    expect(analyze([`X ~ ${alias}`]).rows[0].dist).toBe('density');
+    expect(analyze([`X ~ ${alias}(2)`]).rows[0].dist).toBe('density');
+  });
+  it.each(['exp', 'EXP', 'Exp', 'eXp'])('fits a case-insensitive %s call over declared data', alias => {
+    const b = fit(['X=[0,1,2]', 'Y=exp(0.5 X)', `Y ~ ${alias}(a X)`]);
+    expect([...b.errors]).toEqual([]);
+    expect(evalConstEnv(b.defs, 0).a).toBeCloseTo(0.5, 5);
+  });
   it('does not reinterpret distribution rows', () => {
     expect(scanRegressions(['X ~ Normal(0,1)', 'Y ~ Uniform', 'Z ~ Exponential(2)']).size).toBe(0);
     const r = analyze(['X ~ Normal(0,1)', 'Y = X^2']);

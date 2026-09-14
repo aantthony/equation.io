@@ -27,9 +27,24 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('open("sq', 8, defs()).suggestions).toEqual([]);
     expect(syntaxHelp("q' = sq", 7, defs()).suggestions.some(s => s.name === 'sqrt')).toBe(true);
   });
+  it.each(['Sin(', 'SIN(', 'sin('])('shows the builtin signature for %s', text => {
+    expect(syntaxHelp(text, text.length, defs()).hint).toContain('sin(x)');
+  });
+  it.each(['normal(', 'NORMAL(', 'Normal('])('shows the distribution signature for %s', text => {
+    expect(syntaxHelp(text, text.length, defs()).hint).toContain('Normal(mean, sd)');
+  });
+  it('keeps user function names case-sensitive and gives exact definitions priority', () => {
+    const d = defs();
+    expect(syntaxHelp('wave(', 5, d).hint).toContain('wave(x)');
+    expect(syntaxHelp('Wave(', 5, d).hint).toBeUndefined();
+    d.fns.set('Normal', { params: ['q'], body: { kind: 'var', name: 'q' } });
+    expect(syntaxHelp('Normal(', 7, d).hint).toContain('Normal(q)');
+    expect(syntaxHelp('NORMAL(', 7, d).hint).toContain('Normal(mean, sd)');
+  });
   it('honors user shadowing of builtins', () => {
     const d = emptyDefs(); d.consts.set('mean', {kind:'num',value:3});
     expect(syntaxHelp('mea', 3, d).suggestions.find(s => s.name === 'mean')?.call).toBe(false);
     expect(syntaxHelp('mean(', 5, d).hint).toBeUndefined();
+    expect(syntaxHelp('Mean(', 5, d).hint).toBeUndefined();
   });
 });

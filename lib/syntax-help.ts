@@ -1,8 +1,8 @@
 /** Pure, tolerant editor assistance. Suggestions write ordinary equation
  * text; an incomplete expression never needs to pass through the parser.
  */
-import type { Defs } from './defs.ts';
-import { FUNCTIONS } from './expr.ts';
+import { type Defs, shadowedFnNames } from './defs.ts';
+import { FUNCTIONS, builtinFn } from './expr.ts';
 
 export interface Suggestion { name: string; signature: string; description: string; call: boolean }
 export interface SyntaxHelp { start: number; end: number; suggestions: Suggestion[]; hint?: string }
@@ -66,6 +66,12 @@ export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp
     const [signature, description] = signatures[name] ?? [`${name}(x)`, 'Built-in function'];
     candidates.set(name, { name, signature, description, call: true });
   }
+  // Only parser-defined case-insensitive names participate in fallback.
+  // Snapshot before user definitions overwrite candidates: those names are
+  // exact, and must not acquire new spellings just because help is open.
+  const foldedBuiltins = new Map([...candidates].filter(([name]) =>
+    FUNCTIONS.has(name) || ['Normal', 'Uniform', 'Exponential'].includes(name))
+    .map(([name, suggestion]) => [name.toLowerCase(), suggestion]));
   const values = (names: Iterable<string>, description: string) => {
     for (const name of names) candidates.set(name, { name, signature: name, description, call: false });
   };
@@ -83,7 +89,9 @@ export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp
   for (const [name, fn] of defs.fns) candidates.set(name,
     { name, signature: `${name}(${fn.params.join(', ')})`, description: 'Defined function', call: true });
   const call = [...stack].reverse().find(s => s.name)?.name;
-  const entry = call ? candidates.get(call) : undefined;
+  const shadowed = shadowedFnNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
+  const blocked = call && !defs.fns.has(call) && shadowed.has(builtinFn(call) ?? '');
+  const entry = call && !blocked ? candidates.get(call) ?? foldedBuiltins.get(call.toLowerCase()) : undefined;
   let hint = entry?.call ? `${entry.signature} — ${entry.description}` : undefined;
   if (!hint && before.includes('~')) hint = 'Y ~ m X + b fits data lists: unbound coefficients are fitted, defined constants stay fixed. X ~ Normal(mean, sd) declares a random variable.';
   const word = /[A-Za-z_][\w.]*(?:\.[\w]*)?$/.exec(before)?.[0] ?? '';

@@ -30,7 +30,10 @@ export function scanRegressions(texts: readonly string[]): Map<number, Regressio
     }
     if (tilde < 0) return;
     const lhs = text.slice(0, tilde).trim(), rhs = text.slice(tilde + 1).trim();
-    if (/^(?:Normal|N|Uniform|U|Exponential)\s*(?:\(|$)/i.test(rhs) || /^Exp\s*(?:\(|$)/.test(rhs)) return;
+    // Bare exp is the distribution alias in every case. An exp(...) call
+    // over declared data is the exponential regression model, also in every
+    // case; undeclared left-hand names still take the distribution path.
+    if (/^(?:Normal|N|Uniform|U|Exponential)\s*(?:\(|$)/i.test(rhs) || /^exp$/i.test(rhs)) return;
     if (declared.has(lhs) || /[.\[\](+*/-]/.test(lhs)) {
       out.set(i, { kind: 'regression', name: `~${i}`, lhs, rhs });
     }
