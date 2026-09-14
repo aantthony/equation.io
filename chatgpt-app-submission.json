@@ -1,0 +1,104 @@
+{
+  "$schema": "https://developers.openai.com/apps-sdk/schemas/chatgpt-app-submission.v1.json",
+  "schema_version": 1,
+  "app_info": {
+    "display_name": "Equation.io",
+    "subtitle": "Graph mathematical equations",
+    "description": "Equation.io turns mathematical equations into interactive 2D and 3D graphs that open in your browser. Create curves, surfaces, inequalities, and graphs with adjustable parameters; inspect validation results and available PNG previews; or edit an existing Equation.io graph link. Graph equations are encoded in shareable URLs, so anyone with a link can read them. Static previews are simplified and may omit features supported by the interactive graph. No account or API key is required.",
+    "category": "EDUCATION"
+  },
+  "tools": {
+    "create_graph": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Computes equation validation, URL-encoded graph links, and available PNG previews without saving records or changing external state.",
+        "open_world_justification": "Returns a shareable URL containing the supplied equations without uploading a saved graph or publishing content to another service.",
+        "destructive_justification": "Does not delete or overwrite existing graphs, send messages, or perform irreversible actions."
+      }
+    },
+    "read_graph": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Decodes equation rows embedded in the supplied graph URL without fetching the URL or modifying data.",
+        "open_world_justification": "Only parses the supplied URL and does not contact or change external systems.",
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+      }
+    }
+  },
+  "test_cases": [
+    {
+      "description": "Create a graph containing two 2D curves.",
+      "user_prompt": "Use Equation.io to plot y = x^2 and y = sin(x) together and give me the graph link.",
+      "file_attachment_urls": null,
+      "tools_triggered": "create_graph",
+      "expected_output": "Returns a shareable graph link containing both equations, successful row validation, and a PNG preview when available.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Create a 3D surface and explain its simplified preview.",
+      "user_prompt": "Use Equation.io to graph x^2 + y^2 + z^2 = 9. Give me the interactive link and explain how the static preview differs.",
+      "file_attachment_urls": null,
+      "tools_triggered": "create_graph",
+      "expected_output": "Returns a validated sphere graph link and explains that the interactive graph is 3D while the static preview is a simplified wireframe.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Create a graph with an adjustable parameter.",
+      "user_prompt": "Use Equation.io to graph y = a sin(x), with a starting at 2 and adjustable using a slider.",
+      "file_attachment_urls": null,
+      "tools_triggered": "create_graph",
+      "expected_output": "Returns a valid graph containing the definition a = 2 and the curve y = a sin(x); the link opens with an adjustable parameter in the browser.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Read an existing graph and preserve unchanged rows when editing.",
+      "user_prompt": "Use Equation.io to edit https://equation.io/g/y%3Dx%5E2;y%3Dsin%28x%29: replace y = x^2 with y = x^3, keeping the sine curve. Give me the new link.",
+      "file_attachment_urls": null,
+      "tools_triggered": "read_graph, create_graph",
+      "expected_output": "Decodes both original rows, then returns a new validated link containing y = x^3 and y = sin(x); the original link remains unchanged.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Report an invalid equation without silently changing the user input.",
+      "user_prompt": "Use Equation.io to validate these exact two rows: y = x^2 and y = (. Do not fix the second row; tell me which one fails.",
+      "file_attachment_urls": null,
+      "tools_triggered": "create_graph",
+      "expected_output": "Reports that y = x^2 is valid and y = ( fails validation; does not present the complete graph as valid or treat preview availability as proof of validity.",
+      "expected_output_url": null
+    }
+  ],
+  "negative_test_cases": [
+    {
+      "description": "Do not invoke the graphing app for a conceptual math explanation without a graph.",
+      "user_prompt": "Explain what a derivative means in words only. Do not create a graph.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "Explains the concept without invoking Equation.io.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not invoke the app to retrieve live market data.",
+      "user_prompt": "What is the current trading price of Apple stock? I only need the price, not a chart.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "Does not invoke Equation.io because its tools do not retrieve live market data.",
+      "expected_output_url": null
+    },
+    {
+      "description": "Do not claim account-management or graph-deletion capabilities.",
+      "user_prompt": "Delete every saved graph from my Equation.io account.",
+      "file_attachment_urls": null,
+      "tools_triggered": null,
+      "expected_output": "Does not invoke Equation.io; explains that these tools do not manage accounts or delete saved graphs.",
+      "expected_output_url": null
+    }
+  ]
+}
