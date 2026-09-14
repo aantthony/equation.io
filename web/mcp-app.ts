@@ -42,6 +42,10 @@ export async function connectGraphApp(editor: GraphEditor) {
   let source = '';
   let connected = false;
   let hasResult = false;
+  let inputSource: string | undefined;
+  let previewSource: string | undefined;
+  let previewTimer: ReturnType<typeof setTimeout> | undefined;
+  let pendingPreview: string[] | undefined;
   let context: McpUiHostContext = {};
   let closing = false;
   let changingMode = false;
@@ -72,14 +76,15 @@ export async function connectGraphApp(editor: GraphEditor) {
   async function publish(rows: string[]) {
     link(rows);
     if (!connected || !hasResult) return;
+    const publishedSource = source;
     try {
       openai?.setWidgetState?.({ privateContent: { source, equations: rows } });
     } catch { /* Persistence may be unavailable; the live graph still works. */ }
     try {
       await app.updateModelContext({ structuredContent: { equations: rows, share_url: open.href } });
-      status.textContent = 'Graph ready';
+      if (!closing && hasResult && source === publishedSource) status.textContent = 'Graph ready';
     } catch {
-      status.textContent = 'Graph ready · edits could not sync';
+      if (!closing && hasResult && source === publishedSource) status.textContent = 'Graph ready · edits could not sync';
     }
   }
 
@@ -130,9 +135,59 @@ export async function connectGraphApp(editor: GraphEditor) {
   }
 
   app.onhostcontextchanged = hostContext;
+  function cancelPreview() {
+    clearTimeout(previewTimer);
+    previewTimer = undefined;
+    pendingPreview = undefined;
+  }
+  function inputRows(args: Record<string, unknown> | undefined) {
+    return strings(args?.equations) ? args.equations.map(row => row.trim()).filter(Boolean) : undefined;
+  }
+  function showRows(rows: string[]) {
+    if (JSON.stringify(editor.getRows()) !== JSON.stringify(rows)) editor.setRows(rows);
+    link(rows);
+  }
+  app.ontoolinputpartial = params => {
+    if (closing) return;
+    const rows = inputRows(params.arguments);
+    if (!rows?.length) return;
+    hasResult = false; // Streamed previews must not be persisted as confirmed results.
+    inputSource = undefined;
+    pendingPreview = rows;
+    status.textContent = 'Drawing graph…';
+    // Coalesce token bursts. The editor already tolerates unfinished equations.
+    if (previewTimer !== undefined) return;
+    previewTimer = setTimeout(() => {
+      const latest = pendingPreview!;
+      cancelPreview();
+      const key = JSON.stringify(latest);
+      if (key !== previewSource) showRows(latest);
+      previewSource = key;
+    }, 32);
+  };
+  app.ontoolinput = params => {
+    if (closing) return;
+    cancelPreview();
+    const rows = inputRows(params.arguments);
+    if (!rows) return;
+    hasResult = false;
+    const key = JSON.stringify(rows);
+    if (key !== inputSource) {
+      const wanted = restored?.source === key && strings(restored.equations) ? restored.equations : rows;
+      showRows(wanted);
+    }
+    inputSource = key;
+    previewSource = undefined;
+    status.textContent = 'Graph ready · validating…';
+  };
   app.ontoolresult = result => {
     if (closing) return;
+    cancelPreview();
+    previewSource = undefined;
+    hasResult = false;
     if (result.isError) {
+      hasResult = false;
+      inputSource = undefined;
       status.textContent = 'Could not load this graph. Ask to try again.';
       return;
     }
@@ -141,18 +196,29 @@ export async function connectGraphApp(editor: GraphEditor) {
       ? data.rows.map((row: unknown) => row && typeof row === 'object' && 'text' in row ? row.text : null)
       : null;
     if (!strings(rows)) {
+      inputSource = undefined;
       status.textContent = 'No graph equations received.';
       return;
     }
     source = JSON.stringify(rows);
-    const wanted = restored?.source === source && strings(restored.equations) ? restored.equations : rows;
-    editor.setRows(wanted);
+    // Matching results confirm the already-rendered graph without resetting
+    // animation, undo history, or slider edits made while validation ran.
+    const wanted = inputSource === source ? editor.getRows()
+      : restored?.source === source && strings(restored.equations) ? restored.equations : rows;
+    showRows(wanted);
+    inputSource = undefined;
     hasResult = true;
     link(wanted);
     status.textContent = data?.valid === false ? 'Check the highlighted equations' : 'Graph ready';
-    if (wanted !== rows) void publish(wanted);
+    if (JSON.stringify(wanted) !== source) void publish(wanted);
   };
-  app.ontoolcancelled = () => { if (!closing) status.textContent = 'Graph request cancelled.'; };
+  app.ontoolcancelled = () => {
+    if (closing) return;
+    cancelPreview();
+    hasResult = false;
+    inputSource = previewSource = undefined;
+    status.textContent = 'Graph request cancelled.';
+  };
   editor.onChange(rows => { if (!closing) void publish(rows); });
 
   open.addEventListener('click', event => {
@@ -181,6 +247,7 @@ export async function connectGraphApp(editor: GraphEditor) {
   }, { signal: events.signal });
   app.onteardown = () => teardown ??= (async () => {
     closing = true;
+    cancelPreview();
     events.abort();
     observer.disconnect();
     toolbarSize.disconnect();

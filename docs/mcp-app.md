@@ -17,6 +17,14 @@ font variables style the controls, and host safe-area insets keep controls clear
 of overlays. Expand/Collapse is available only when the host supports the
 destination mode, and follows the mode the host actually grants.
 
+Tool arguments render immediately on `ontoolinput`, before server validation
+returns. `ontoolinputpartial` previews streamed equations, coalescing bursts
+every 32 ms; unfinished expressions use the editor's normal error handling.
+Matching tool results confirm the existing graph without resetting animations
+or slider edits. Preview rows are not persisted or published to model context
+until a successful tool result confirms them. Hosts that send only results
+continue to work.
+
 Following the official [Shadertoy example](https://github.com/modelcontextprotocol/ext-apps/tree/main/examples/shadertoy-server),
 graphs pause rendering when off-screen or when the document is hidden. The
 simulation clock also pauses, so animations resume without jumping ahead.

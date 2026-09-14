@@ -26,7 +26,7 @@ html[data-mcp-app] {
 #app-toolbar button { font: inherit; background: none; border: 0; cursor: pointer; }
 html[data-mcp-app] #panel { max-height: calc(100% - 24px - var(--safe-area-top) - var(--panel-bottom-inset)); }
 html[data-mcp-app] #equations, html[data-mcp-app] #panel-chip { font-family: var(--font-mono, ui-monospace, monospace); }
-html[data-mcp-app] .eq-widget, html[data-mcp-app] #examples, html[data-mcp-app] #syntax-help { font-family: var(--font-sans, system-ui, sans-serif); }
+html[data-mcp-app] .eq-widget, html[data-mcp-app] #syntax-help { font-family: var(--font-sans, system-ui, sans-serif); }
 /* CSV bytes on the author's device are not available in a chat widget. */
 html[data-mcp-app] #panel-links { display: none; }
 @media (max-width: 440px) {

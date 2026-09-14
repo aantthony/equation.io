@@ -2962,7 +2962,8 @@ function openExample(text: string) {
 }
 
 function buildExamplesMenu() {
-  const list = document.getElementById('examples-list')!;
+  const list = document.getElementById('examples-list');
+  if (!list) return;
   for (const [category, items] of EXAMPLES) {
     const group = document.createElement('details');
     const label = document.createElement('summary');

@@ -66,6 +66,7 @@ try {
     state.messages = [];
     state.sendResult = (value: unknown) => frame.contentWindow!.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/tool-result', params: value }, '*');
     state.sendContext = (value: unknown) => frame.contentWindow!.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/host-context-changed', params: value }, '*');
+    state.sendInput = (args: unknown, partial = false) => frame.contentWindow!.postMessage({ jsonrpc: '2.0', method: `ui/notifications/tool-input${partial ? '-partial' : ''}`, params: { arguments: args } }, '*');
     window.addEventListener('message', event => {
       if (event.source !== frame.contentWindow || event.data?.jsonrpc !== '2.0') return;
       const message = event.data;
@@ -83,7 +84,7 @@ try {
             css: { fonts: '@font-face { font-family: TestHost; src: local("Arial"); }' } },
         },
       };
-      if (message.method === 'ui/notifications/initialized') state.sendResult(result);
+      if (message.method === 'ui/notifications/initialized') state.sendInput({ equations: ['a = 2', 'y = a sin('] }, true);
       if (message.method === 'ui/notifications/size-changed') frame.style.height = `${message.params.height}px`;
       if (message.method === 'ui/request-display-mode') response = { mode: state.forcedMode ?? message.params.mode };
       if (message.id !== undefined) frame.contentWindow!.postMessage({ jsonrpc: '2.0', id: message.id, result: response }, '*');
@@ -97,6 +98,17 @@ try {
     console.error({ errors, messages: await page.evaluate(() => (window as any).messages), body: await frame.locator('body').innerText() });
     throw error;
   });
+  await frame.waitForFunction(() => document.querySelectorAll('.eq-line').length === 2);
+  assert.ok((await frame.locator('.eq-line').last().textContent())?.includes('sin('), 'Partial arguments render before tool completion');
+  assert.equal(await frame.locator('#app-status').textContent(), 'Drawing graph…');
+  await page.evaluate(() => (window as any).sendInput({ equations: ['a = 2', 'y = a sin(x)'] }));
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready · validating…');
+  assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('1.5'), 'Complete input restores saved edits before the result');
+  await frame.evaluate(() => (window as any).earlyRow = document.querySelector('.eq-line'));
+  assert.equal(await page.evaluate(() => (window as any).messages.filter((m: any) => m.method === 'ui/update-model-context').length), 0, 'Unconfirmed input is not published');
+  await page.evaluate(value => (window as any).sendResult(value), result);
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready');
+  assert.ok(await frame.evaluate(() => (window as any).earlyRow === document.querySelector('.eq-line')), 'Matching result does not rebuild the graph');
   assert.ok(await frame.locator('#panel').isHidden(), 'Embedded editor starts tucked away');
   assert.ok(await frame.locator('#panel-chip').isVisible(), 'Equation chip remains available');
   const chipBox = await frame.locator('#panel-chip').boundingBox();
@@ -141,6 +153,19 @@ try {
   await page.evaluate(() => (window as any).sendContext({ theme: 'light' }));
   await frame.waitForFunction(() => document.documentElement.dataset.theme === 'light');
 
+  await frame.evaluate(() => (window as any).beforeCancelledPreview = document.querySelector('.eq-line'));
+  await page.evaluate(() => {
+    (window as any).sendInput({ equations: ['y=999'] }, true);
+    document.querySelector('iframe')!.contentWindow!.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/tool-cancelled', params: {} }, '*');
+  });
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph request cancelled.');
+  await page.waitForTimeout(100);
+  assert.ok(await frame.evaluate(() => (window as any).beforeCancelledPreview === document.querySelector('.eq-line')), 'Cancellation discards queued partial input');
+  await page.evaluate(() => (window as any).sendInput({ equations: ['y=998'] }));
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready · validating…');
+  await page.evaluate(() => (window as any).sendResult({ isError: true, content: [] }));
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Could not load this graph. Ask to try again.');
+
   const sphere = await rpc('tools/call', { name: 'show_graph', arguments: { equations: ['x^2+y^2+z^2=9'] } });
   await page.evaluate(value => (window as any).sendResult(value), sphere);
   await frame.waitForFunction(() => document.querySelectorAll('.eq-line').length === 1);
@@ -156,8 +181,14 @@ try {
   await page.screenshot({ path: '/tmp/equation-mcp-app.png' });
   assert.equal(await frame.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   const animated = await rpc('tools/call', { name: 'show_graph', arguments: { equations: ['a=2', 'y=a sin(x+t)'] } });
+  await page.evaluate(() => (window as any).sendInput({ equations: ['a=2', 'y=a sin(x+t)'] }));
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready · validating…');
+  await frame.locator('.eq-slider input[type=range]').evaluate((input: HTMLInputElement) => {
+    input.value = '7'; input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   await page.evaluate(value => (window as any).sendResult(value), animated);
-  await frame.waitForFunction(() => document.querySelectorAll('.eq-line').length === 2);
+  await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Graph ready');
+  assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('7'), 'Result preserves edits made during validation');
   await page.evaluate(() => document.querySelector('iframe')!.style.marginTop = '2000px');
   await page.waitForTimeout(300); // Allow the cross-frame intersection notification to settle.
   const pausedFrames = await frame.evaluate(() => (window as any).renderFrames);
@@ -174,12 +205,13 @@ try {
   assert.ok(await frame.evaluate(() => (window as any).workersTerminated >= 1), 'Teardown terminates the curve worker');
   const disposedFrames = await frame.evaluate(() => (window as any).renderFrames);
   await page.evaluate(value => (window as any).sendResult(value), sphere);
+  await page.evaluate(() => { (window as any).sendInput({ equations: ['y=x'] }, true); (window as any).sendInput({ equations: ['y=x'] }); });
   await page.setViewportSize({ width: 500, height: 700 });
   await page.waitForTimeout(350);
   assert.equal(await frame.evaluate(() => (window as any).renderFrames), disposedFrames, 'No rendering restarts after teardown');
   assert.equal(await frame.locator('.eq-line').count(), 2, 'Late tool results are ignored');
   assert.deepEqual(errors, []);
-  console.log('PASS: production UI resource, cross-origin CSP, WebGL, worker tracing, sliders, context updates, state restoration, links, fullscreen negotiation, host styles, safe areas, narrow layout, visibility pause/resume, and teardown');
+  console.log('PASS: production UI resource, cross-origin CSP, WebGL, worker tracing, early/partial tool input, cancellation, validation errors, sliders, context updates, state restoration, links, fullscreen negotiation, host styles, safe areas, narrow layout, visibility pause/resume, and teardown');
 } finally {
   await browser.close();
 }
