@@ -11,6 +11,27 @@ const env = {
 
 const get = (path: string) => worker.fetch(new Request('https://equation.io' + path), env);
 
+describe('/.well-known files', () => {
+  it.each(['/.well-known', '/.well-known/', '/.well-known/missing'])('rejects the SPA fallback for %s', async (path) => {
+    const response = await get(path);
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('Not found');
+  });
+
+  it.each(['text/plain', 'application/json'])('preserves existing %s assets', async (contentType) => {
+    const assets = { ASSETS: { fetch: async () => new Response('verification', { headers: { 'content-type': contentType } }) } } as unknown as Env;
+    const response = await worker.fetch(new Request('https://equation.io/.well-known/openai-apps-challenge'), assets);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe('verification');
+  });
+
+  it('preserves the normal SPA fallback outside the namespace', async () => {
+    const response = await get('/some-app-path');
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(SHELL);
+  });
+});
+
 describe('share meta tags', () => {
   const keys = (rows: string[]) =>
     shareMeta(rows, encodePayload(rows), 'https://equation.io').meta.map(([k]) => k);

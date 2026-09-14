@@ -18,6 +18,8 @@
     // (cloudflare/workers-sdk#9599), which mangles the em dashes in llms.txt,
     // so the Worker puts it back.
     "run_worker_first": [
+      "/.well-known",
+      "/.well-known/*",
       "/api",
       "/api/*",
       "/mcp",
