@@ -352,7 +352,18 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
   }
   if (request.method !== 'POST') {
     // No server-initiated streams (GET) and no sessions to delete.
-    return new Response(null, { status: 405, headers: { ...CORS_HEADERS, Allow: 'POST, OPTIONS' } });
+    return new Response(
+      'Equation.io MCP server\n\n' +
+      'To create and edit graphs with an AI assistant, add https://equation.io/mcp ' +
+      'to your MCP client using Streamable HTTP. No API key is required.\n\n' +
+      'For the graphing calculator, visit https://equation.io/\n' +
+      'Expression syntax: https://equation.io/llms.txt\n\n' +
+      'MCP requests use HTTP POST. This endpoint does not offer a GET event stream.\n',
+      {
+        status: 405,
+        headers: { ...CORS_HEADERS, Allow: 'POST, OPTIONS', 'Content-Type': 'text/plain; charset=utf-8' },
+      },
+    );
   }
 
   let body: unknown;
