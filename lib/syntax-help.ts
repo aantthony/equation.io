@@ -8,6 +8,7 @@ export interface Suggestion { name: string; signature: string; description: stri
 export interface SyntaxHelp { start: number; end: number; suggestions: Suggestion[]; hint?: string }
 
 const signatures: Record<string, [string, string]> = {
+  view: ['view(x = lo..hi, y = lo..hi, ratio = 1)', 'Frame the graph; ratio is pixels per y unit / pixels per x unit'],
   sin: ['sin(x)', 'Sine; angles in radians'], cos: ['cos(x)', 'Cosine; angles in radians'],
   tan: ['tan(x)', 'Tangent; angles in radians'], sqrt: ['sqrt(x)', 'Square root'],
   ln: ['ln(x)', 'Natural logarithm'], log: ['log(x)', 'Base-10 logarithm'],

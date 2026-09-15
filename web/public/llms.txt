@@ -392,6 +392,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 
 ## Viewport rows (framing)
 
+- `view(x = -10..10, y = -1..1, ratio = 5)` uses five times as many pixels
+  per y unit as per x unit. `ratio` must be positive and defaults to 1;
+  bounds are fitted while preserving this ratio across screen sizes.
+  Option/Alt + drag scales axes independently and creates/updates this row.
+  Set `ratio = 1` to restore equal axis units.
 - `view(x = -5..5, y = -2..2)` sets the 2D window; either axis alone works
   (`view(x = 0..0.01)`), the other is centered at 0 and sized by the canvas
   aspect. The whole box is always visible (uniform scale).

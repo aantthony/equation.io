@@ -95,6 +95,7 @@ export function sampleGradMag(
   pts: ReadonlyArray<readonly [number, number]>,
   env: Record<string, number>,
   h: number,
+  ratio = 1,
 ): number {
   const mags: number[] = [];
   for (const [x, y] of pts) {
@@ -112,7 +113,7 @@ export function sampleGradMag(
     } catch {
       continue;
     }
-    const m = Math.hypot(gx, gy);
+    const m = Math.hypot(gx, gy / ratio);
     if (isFinite(m) && m > 0) mags.push(m);
   }
   if (!mags.length) return 1;

@@ -16,6 +16,16 @@ function pixel(r: { w: number; px: Uint8ClampedArray }, x: number, y: number) {
 }
 
 describe('og raster renderer', () => {
+  it('uses the same nonuniform scale for curves and points in link previews', () => {
+    const view = 'view(x=-5..5, y=-1..1, ratio=2)';
+    for (const equation of ['y=x', '(1,1)']) {
+      const scaled = renderRaster([equation, view], 100, 100);
+      // x=1 is 10 pixels right; y=1 is 20 pixels up.
+      expect(pixel(scaled, 60, 30)[0]).toBeLessThan(200);
+      expect(pixel(scaled, 60, 40)[0]).toBeGreaterThan(200);
+    }
+  });
+
   it.each([
     ['(x,y)=(1+t,2)', '(x,y)=(1,2)'],
     ['(x,y)=(1+u+t,2)', '(x,y)=(1+u,2)'],
