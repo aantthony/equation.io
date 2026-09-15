@@ -1,7 +1,7 @@
 # Equation.io in MCP Apps hosts
 
 `show_graph` returns validated equations and share links with an MCP Apps UI
-resource (`ui://equation/graph-v1.html`). The UI reuses the website's editor and
+resource (`ui://equation/graph-v2.html`). The UI reuses the website's editor and
 WebGL renderer. `encode_graph_url` and `decode_graph_url` remain data-only tools.
 No API key, account, or OpenAI API calls are needed by the server.
 
@@ -38,6 +38,10 @@ the website retains its existing CSP. The UI runs directly in the host's frame
 and does not embed another website. Its resource CSP allows only our assets
 and blob scripts for the background curve-tracing worker. It makes no API
 requests. CSV files stored on the author's device are not transferred to chat.
+
+Sandbox domain formats differ between hosts. We omit `ui.domain` so Claude
+uses its default sandbox, and provide `openai/widgetDomain` for ChatGPT's
+unique widget origin requirement using its supported compatibility alias.
 
 ## Known gaps
 
