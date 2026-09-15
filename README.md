@@ -219,3 +219,15 @@ pointer and leaves along the throw. The `y=` chip left behind brings it back
 MIT — see [LICENSE](LICENSE). The pre-2026 graph.tk code on the
 [`legacy`](../../tree/legacy) branch remains under its original LGPL-3.0
 terms; no code from it was reused in the current codebase.
+
+## Axis scaling
+
+Option/Alt + drag the 2D canvas to scale each axis independently: horizontal
+movement scales x and vertical movement scales y, anchored at the initial
+pointer position. Normal zoom preserves the ratio. Set `ratio = 1` in the
+viewport row to restore equal axis units.
+
+Scaling creates or updates a shareable viewport row:
+`view(x = -10..10, y = -1..1, ratio = 5)`. The positive `ratio` is pixels per
+y unit divided by pixels per x unit; omitted means 1. The bounds are fitted
+with that ratio preserved, including on different screen sizes.

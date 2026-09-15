@@ -62,6 +62,7 @@ import { splitStatements } from '../lib/statements.ts';
 import {
   type ViewSpec,
   clampPhi,
+  scaleViewAt,
   fitView2D,
   formatCameraRow,
   formatViewRow,
@@ -400,7 +401,7 @@ function applyViewportRows() {
   if (!vRow) appliedViewText = null;
   else if (vRow.text !== appliedViewText && vRow.viewSpec!.kind === 'view') {
     appliedViewText = vRow.text;
-    Object.assign(view, fitView2D(vRow.viewSpec!, canvas.width, canvas.height));
+    Object.assign(view, { ratio: 1 }, fitView2D(vRow.viewSpec!, canvas.width, canvas.height));
   }
   const cRow = viewportRow('camera');
   if (!cRow) appliedCameraText = null;
@@ -435,6 +436,19 @@ function flushViewportWriteback() {
   writebackViewport();
 }
 
+function ensureViewRow() {
+  if (viewportRow('view')) return;
+  const id = nextId;
+  pushUndo(`viewport:${id}`);
+  const hw = canvas.width * view.upp / 2;
+  const hh = canvas.height * view.upp / (view.ratio ?? 1) / 2;
+  const eq = addEquation(formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh, view.ratio));
+  appliedViewText = eq.text;
+  recompileAll();
+  renderAll();
+  saveUrl();
+}
+
 function writebackViewport() {
   const eq = viewportRow(mode === '2d' ? 'view' : 'camera');
   if (!eq) return;
@@ -442,8 +456,8 @@ function writebackViewport() {
   if (mode === '2d') {
     if (!canvas.width || !canvas.height) return;
     const hw = (canvas.width / 2) * view.upp;
-    const hh = (canvas.height / 2) * view.upp;
-    text = formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh);
+    const hh = (canvas.height / 2) * (view.upp / (view.ratio ?? 1));
+    text = formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh, view.ratio);
   } else {
     text = formatCameraRow(camera);
   }
@@ -547,13 +561,13 @@ function render() {
       } catch {
         return null;
       }
-      const m = Math.hypot(vx, vy);
+      const m = Math.hypot(vx, vy * (view.ratio ?? 1));
       if (!isFinite(m) || m < 1e-12) return null;
       return [vx / m, vy / m];
     };
     const h = 2.5 * view.upp; // ~2.5 px of arc per step
     const boundW = 1.5 * gl.drawingBufferWidth * view.upp;
-    const boundH = 1.5 * gl.drawingBufferHeight * view.upp;
+    const boundH = 1.5 * gl.drawingBufferHeight * (view.upp / (view.ratio ?? 1));
     const side = (sgn: number): number[] => {
       const out: number[] = [];
       let x = x0;
@@ -630,7 +644,7 @@ function render() {
     } else {
       const dpr = window.devicePixelRatio || 1;
       const halfW = ((canvas.clientWidth * dpr) / 2) * view.upp;
-      const halfH = ((canvas.clientHeight * dpr) / 2) * view.upp;
+      const halfH = ((canvas.clientHeight * dpr) / 2) * (view.upp / (view.ratio ?? 1));
       vlo = [view.cx - halfW, view.cy - halfH];
       vhi = [view.cx + halfW, view.cy + halfH];
     }
@@ -821,7 +835,7 @@ function render() {
     // |∇c| around the view to convert the target pixel gap into coordinate
     // units (π-based for angles).
     const halfW = (gl.drawingBufferWidth / 2) * view.upp;
-    const halfH = (gl.drawingBufferHeight / 2) * view.upp;
+    const halfH = (gl.drawingBufferHeight / 2) * (view.upp / (view.ratio ?? 1));
     const xmin = view.cx - halfW;
     const xmax = view.cx + halfW;
     const viewPts: Array<[number, number]> = [
@@ -832,7 +846,7 @@ function render() {
     const env: Record<string, number> = { ...constEnv, t: time };
     const seedOf = (a0Name?: string): number => (a0Name !== undefined ? constEnv[a0Name] : undefined) ?? 0.5;
     const levelSpacing = (f: GridField) => {
-      const cupp = sampleGradMag(f, viewPts, env, view.upp * 4) * view.upp;
+      const cupp = sampleGradMag(f, viewPts, env, view.upp * 4, view.ratio) * view.upp;
       return f.angular ? angularSpacing(cupp, 90) : niceSpacing(cupp, 90);
     };
     for (const eq of active) {
@@ -1957,6 +1971,7 @@ function setCaret(line: number, offset: number) {
 // whole-state snapshots beat operation diffing on simplicity.
 
 interface Snapshot {
+  view: View2D;
   eqs: Array<Pick<Equation, 'id' | 'text' | 'colorIndex' | 'sliderMin' | 'sliderMax' | 'showLevels'>>;
   caret: { line: number; offset: number } | null;
 }
@@ -1971,6 +1986,7 @@ let pendingCaret: { line: number; offset: number } | null = null;
 
 function takeSnapshot(caret: Snapshot['caret']): Snapshot {
   return {
+    view: { ...view },
     eqs: equations.map(e => ({
       id: e.id,
       text: e.text,
@@ -2002,6 +2018,8 @@ function pushUndo(key: string | null, caret: Snapshot['caret'] = caretPos()) {
 }
 
 function restoreSnapshot(s: Snapshot) {
+  Object.assign(view, { ratio: 1 }, s.view);
+  appliedViewText = null;
   // Reuse Equation objects by id so widget elements survive the round-trip.
   const byId = new Map(equations.map(e => [e.id, e]));
   equations.length = 0;
@@ -3007,8 +3025,9 @@ function buildExamplesMenu() {
 // so its "draggable" report matches what the app actually does.
 
 /** Round to roughly a pixel, so dragging writes short, readable numbers. */
-function snapToPixel(v: number): number {
-  const step = Math.pow(10, Math.floor(Math.log10(view.upp * 3)));
+function snapToPixel(v: number, axis = 0): number {
+  const upp = view.upp / (axis === 1 ? (view.ratio ?? 1) : 1);
+  const step = Math.pow(10, Math.floor(Math.log10(upp * 3)));
   return Math.round(v / step) * step;
 }
 
@@ -3030,7 +3049,7 @@ function makePairWriter(pairText: string, commit: (pair: string) => void, round 
     const text = [...parts];
     axes.forEach((axis, k) => {
       if (!axis) return;
-      const value = fmtNum(round(coords[k]));
+      const value = fmtNum(round(coords[k], k));
       if (axis === 'literal') text[k] = value;
       else axis.text = `${axis.def!.name} = ${value}`;
     });
@@ -3083,7 +3102,7 @@ function toMath(clientX: number, clientY: number): [number, number] {
   const rect = canvas.getBoundingClientRect();
   const px = (clientX - rect.left - rect.width / 2) * dpr;
   const py = (rect.height / 2 - (clientY - rect.top)) * dpr;
-  return [view.cx + px * view.upp, view.cy + py * view.upp];
+  return [view.cx + px * view.upp, view.cy + py * view.upp / (view.ratio ?? 1)];
 }
 
 /** The nearest grabbable point within GRAB_PX of a client position. */
@@ -3094,7 +3113,7 @@ function pointAt(clientX: number, clientY: number): Grabbable | null {
   let best: Grabbable | null = null;
   let bestDist = GRAB_PX * dpr * view.upp;
   for (const p of grabbable) {
-    const d = Math.hypot(p.x - mx, p.y - my);
+    const d = Math.hypot(p.x - mx, (p.y - my) * (view.ratio ?? 1));
     if (d <= bestDist) {
       bestDist = d;
       best = p;
@@ -3137,7 +3156,7 @@ function screenMap() {
   return {
     rect,
     toSx: (x: number) => (x - view.cx) / uppCss + rect.width / 2,
-    toSy: (y: number) => rect.height / 2 - (y - view.cy) / uppCss,
+    toSy: (y: number) => rect.height / 2 - (y - view.cy) * (view.ratio ?? 1) / uppCss,
   };
 }
 
@@ -3182,7 +3201,7 @@ function hoverHalfSpan() {
   const dpr = window.devicePixelRatio || 1;
   return {
     halfW: ((canvas.clientWidth * dpr) / 2) * view.upp,
-    halfH: ((canvas.clientHeight * dpr) / 2) * view.upp,
+    halfH: ((canvas.clientHeight * dpr) / 2) * (view.upp / (view.ratio ?? 1)),
   };
 }
 
@@ -3301,6 +3320,7 @@ let dragging = false;
 let lastX = 0;
 let lastY = 0;
 let panning = false;
+let scaling = false;
 const pointers = new Map<number, { x: number; y: number }>();
 let pinchDist = 0;
 let downX = 0;
@@ -3315,10 +3335,10 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
     const px = (clientX - rect.left - rect.width / 2) * dpr;
     const py = (rect.height / 2 - (clientY - rect.top)) * dpr;
     const mx = view.cx + px * view.upp;
-    const my = view.cy + py * view.upp;
+    const my = view.cy + py * (view.upp / (view.ratio ?? 1));
     view.upp *= factor;
     view.cx = mx - px * view.upp;
-    view.cy = my - py * view.upp;
+    view.cy = my - py * (view.upp / (view.ratio ?? 1));
   } else {
     camera.radius = Math.min(1e6, Math.max(1e-4, camera.radius * factor));
   }
@@ -3335,7 +3355,8 @@ canvas.addEventListener('pointerdown', e => {
   } catch {} // synthetic events have no active pointer to capture
   if (pointers.size === 1) {
     // Grabbing an on-screen point wins over panning the view.
-    const hit = e.button === 0 && !e.shiftKey ? pointAt(e.clientX, e.clientY) : null;
+    scaling = mode === '2d' && e.button === 0 && e.altKey;
+    const hit = e.button === 0 && !e.shiftKey && !scaling ? pointAt(e.clientX, e.clientY) : null;
     if (hit) {
       const [mx, my] = toMath(e.clientX, e.clientY);
       grab = { pt: hit, dx: hit.x - mx, dy: hit.y - my };
@@ -3350,6 +3371,7 @@ canvas.addEventListener('pointerdown', e => {
     downY = e.clientY;
     dragMoved = false;
   } else if (pointers.size === 2) {
+    scaling = false;
     // Second finger: switch from drag to pinch, anchored at the midpoint.
     dragging = false;
     grab = null;
@@ -3381,7 +3403,7 @@ canvas.addEventListener('pointermove', e => {
     const dpr = window.devicePixelRatio || 1;
     if (mode === '2d') {
       view.cx -= dx * dpr * view.upp;
-      view.cy += dy * dpr * view.upp;
+      view.cy += dy * dpr * (view.upp / (view.ratio ?? 1));
     }
     if (dist > 0 && pinchDist > 0) zoomAt(mx, my, pinchDist / dist);
     pinchDist = dist;
@@ -3411,9 +3433,17 @@ canvas.addEventListener('pointermove', e => {
   lastX = e.clientX;
   lastY = e.clientY;
   const dpr = window.devicePixelRatio || 1;
-  if (mode === '2d') {
+  if (mode === '2d' && scaling) {
+    if (!dragMoved) return;
+    ensureViewRow();
+    const rect = canvas.getBoundingClientRect();
+    const px = (downX - rect.left - rect.width / 2) * dpr;
+    const py = (rect.height / 2 - (downY - rect.top)) * dpr;
+    const next = scaleViewAt(view, px, py, Math.exp(-dx * 0.01), Math.exp(dy * 0.01));
+    Object.assign(view, next);
+  } else if (mode === '2d') {
     view.cx -= dx * dpr * view.upp;
-    view.cy += dy * dpr * view.upp;
+    view.cy += dy * dpr * (view.upp / (view.ratio ?? 1));
   } else if (panning) {
     // Pan the target in the camera's screen plane.
     const s = camera.radius * 0.0022;
@@ -3444,6 +3474,7 @@ const endPointer = (e: PointerEvent) => {
     dragging = false;
     // Settle the row/URL now and seal the gesture as one undo entry.
     flushViewportWriteback();
+    flushUrl();
     coalesce = null;
   }
 };
@@ -3457,7 +3488,7 @@ canvas.addEventListener('pointerup', e => {
   }
   // A motionless primary-button click in 2D drops an integral-curve seed on
   // vector fields; right/shift clicks are pan gestures, not seeds.
-  if (dragMoved || pointers.size || mode !== '2d' || e.button !== 0 || e.shiftKey) return;
+  if (scaling || e.altKey || dragMoved || pointers.size || mode !== '2d' || e.button !== 0 || e.shiftKey) return;
   if (!equations.some(q => !q.error && q.cls?.plot.type === 'vfield2d')) return;
   // Each seed costs an RK4 integration per field per frame; keep the newest.
   if (drops.length >= MAX_DROPS) drops.shift();

@@ -1,3 +1,4 @@
+import { scaleViewAt } from './view.ts';
 import { describe, expect, it } from 'vitest';
 import { fitView2D, formatCameraRow, formatViewRow, parseViewRow } from './view.ts';
 
@@ -70,5 +71,37 @@ describe('writeback round-trip', () => {
     expect(parse(noTarget)).toEqual({ kind: 'camera', theta: -1.0472, phi: 0.571199, radius: 14 });
     const withTarget = formatCameraRow({ theta: 0, phi: 1, radius: 7, target: [1.25, 0, -2] });
     expect(parse(withTarget)).toEqual({ kind: 'camera', theta: 0, phi: 1, radius: 7, target: [1.25, 0, -2] });
+  });
+});
+
+
+describe('independent axis scaling', () => {
+  it('parses positive ratios, including expressions, and rejects invalid settings', () => {
+    expect(parse('view(x=-10..10, ratio=a/2)', { a: 10 })).toEqual({ kind: 'view', x: [-10, 10], ratio: 5 });
+    for (const value of ['0', '-1', '1/0', 'q']) {
+      expect(() => parse(`view(x=-1..1, ratio=${value})`)).toThrow();
+    }
+    expect(() => parse('view(ratio=2)')).toThrow();
+    expect(() => parse('view(x=-1..1, ratio=2, ratio=3)')).toThrow(/twice/);
+  });
+
+  it('fits all bounds while preserving the ratio on different screens', () => {
+    for (const [w, h] of [[800, 400], [400, 800]]) {
+      const v = fitView2D({ kind: 'view', x: [-10, 10], y: [-1, 1], ratio: 5 }, w, h);
+      expect(w * v.upp).toBeGreaterThanOrEqual(20);
+      expect(h * v.upp / v.ratio!).toBeGreaterThanOrEqual(2);
+      expect(v.ratio).toBe(5);
+      const row = formatViewRow(-w*v.upp/2, w*v.upp/2, -h*v.upp/10, h*v.upp/10, v.ratio);
+      expect(fitView2D(parse(row) as import('./view.ts').View2DSpec, w, h)).toEqual(v);
+    }
+  });
+
+  it('anchors independent scaling and preserves proportions for uniform zoom', () => {
+    const v = { cx: 3, cy: -2, upp: 0.1, ratio: 5 };
+    const scaled = scaleViewAt(v, 100, -50, 2, 0.5);
+    expect(scaled.cx + 100 * scaled.upp).toBeCloseTo(13);
+    expect(scaled.cy - 50 * scaled.upp / scaled.ratio).toBeCloseTo(-3);
+    expect(scaled.ratio).toBe(20);
+    expect(scaleViewAt(v, 0, 0, 2, 2).ratio).toBe(5);
   });
 });
