@@ -60,7 +60,7 @@ export const FUNCTIONS = new Set([
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
   'dot', 'cross', 'perp', 'midpoint', 'unit',
-  'segment', 'line', 'polygon', 'square', 'circle',
+  'segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle',
   // Small-matrix helpers (det, trace, matvec, linear solve), also lowered
   // symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts).
   'det', 'trace', 'solve',

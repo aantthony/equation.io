@@ -62,7 +62,8 @@ const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
  *  shape-only checks in defs.ts have to refuse the same ones without the
  *  bytes, or a filter is valid exactly on the devices that cannot test it. */
 export const NO_LIST_INSIDE = new Set([
-  'domain', 'conformal', 'iter', 'tube', '[polygon]', '[segment]', '[square]',
+  'domain', 'conformal', 'iter', 'tube',
+  '[polygon]', '[segment]', '[polyline]', '[vector]', '[square]',
 ]);
 
 /** The name such a call wears in a message: `[polygon]` is written polygon. */

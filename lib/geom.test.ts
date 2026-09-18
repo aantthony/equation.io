@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type Definition, buildDefs, evalConstEnv, scanDefinition } from './defs.ts';
 import { evaluate, parseExpr } from './expr.ts';
-import { lowerGeom } from './geom.ts';
+import { arrowHead, lowerGeom } from './geom.ts';
 import { classify } from './plot.ts';
 
 const POINTS = new Set(['A', 'B', 'C']);
@@ -97,6 +97,51 @@ describe('geometry statements', () => {
     expect((poly.plot as { pts: never[] }).pts).toHaveLength(6);
   });
 
+  it('polyline is the open figure through any number of points', () => {
+    const c = classify(low('polyline((0, 0), (1, 1), (2, 0))'), new Set()).plot;
+    expect(c).toMatchObject({ type: 'polygon', closed: false });
+    expect(c).not.toHaveProperty('arrow');
+    expect((c as { pts: never[] }).pts.map(e => evaluate(e, {}))).toEqual([0, 0, 1, 1, 2, 0]);
+    // Named points and point arithmetic mix with literals; n = 2 is a segment.
+    const mixed = classify(low('polyline(A, (A + B)/2, (0, 0), C)'), new Set(Object.keys(env))).plot as { pts: never[] };
+    expect(mixed.pts.map(e => evaluate(e, env))).toEqual([1, 2, 2.5, 4, 0, 0, -1, 0]);
+    expect((classify(low('polyline(A, B)'), new Set(Object.keys(env))).plot as { pts: never[] }).pts).toHaveLength(4);
+  });
+
+  it('vector is an arrow from A to B, or from the origin', () => {
+    const ab = classify(low('vector(A, B)'), new Set(Object.keys(env))).plot;
+    expect(ab).toMatchObject({ type: 'polygon', closed: false, arrow: true });
+    expect((ab as { pts: never[] }).pts.map(e => evaluate(e, env))).toEqual([1, 2, 4, 6]);
+    const v = classify(low('vector((1, 2))'), new Set()).plot as { pts: never[] };
+    expect(v.pts.map(e => evaluate(e, {}))).toEqual([0, 0, 1, 2]);
+    const sum = classify(low('vector(A, A + 2B)'), new Set(Object.keys(env))).plot as { pts: never[] };
+    expect(sum.pts.map(e => evaluate(e, env))).toEqual([1, 2, 9, 14]);
+    // A pair of points is still not a value: the wrapper has to be asked for.
+    expect(() => low('(A, B)')).toThrow(/segment\(A, B\)/);
+  });
+
+  it('polyline and vector fail loudly on what they do not cover yet', () => {
+    expect(() => low('polyline(A)')).toThrow(/at least 2 points/);
+    expect(() => low('vector(A, B, C)')).toThrow(/one or two points/);
+    expect(() => low('polyline([(0, 0), (1, 1)])')).toThrow(/one by one.*polyline\(A, B, C\)/);
+    expect(() => low('vector([A, B])')).toThrow(/one by one.*vector\(A, B\)/);
+    expect(() => low('vector((1, 2, 3))')).toThrow(/2D points, not 3-component/);
+    expect(() => low('vector((0, 0), (1, 1), (2, 2))')).toThrow(/one or two points/);
+    expect(() => low('polyline(A, 3)')).toThrow(/write polyline\(A, B, C\)/);
+    expect(() => low('1 + vector(A, B)')).toThrow(/whole statement/);
+    expect(() => low('2 polyline(A, B)')).toThrow(/whole statement/);
+  });
+
+  it('arrowHead is a screen-space triangle behind the tip', () => {
+    // Shaft along +x: base 10px behind the tip, wings ±4px across it.
+    expect(arrowHead(0, 0, 100, 0, 10)).toEqual({ base: [90, 0], left: [90, 4], right: [90, -4] });
+    // A shaft shorter than the head shrinks the head to fit it.
+    expect(arrowHead(0, 0, 0, 5, 10)!.base).toEqual([0, 0]);
+    // No direction, no head.
+    expect(arrowHead(3, 3, 3, 3, 10)).toBeNull();
+    expect(arrowHead(0, 0, NaN, 0, 10)).toBeNull();
+  });
+
   it('square erects on the left of A→B', () => {
     const sq = classify(low('square((0, 0), (2, 0))'), new Set()).plot as { pts: never[] };
     expect(sq.pts.map(e => evaluate(e, {}))).toEqual([0, 0, 2, 0, 2, 2, 0, 2]);
@@ -134,6 +179,8 @@ describe('geometry statements', () => {
     expect(() => classify(low('segment((x, 0), (1, 1))'))).toThrow(/Segment endpoints must be constant/);
     expect(() => classify(low('square((x, 0), (1, 1))'))).toThrow(/Square vertices must be constant/);
     expect(() => classify(low('polygon((x, 0), (1, 1), (0, 2))'))).toThrow(/Polygon vertices must be constant/);
+    expect(() => classify(low('polyline((x, 0), (1, 1), (0, 2))'))).toThrow(/Polyline vertices must be constant/);
+    expect(() => classify(low('vector((u, 0), (1, 1))'))).toThrow(/Vector endpoints must be constant/);
   });
 
   it('animates vertices that use t', () => {

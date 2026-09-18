@@ -88,6 +88,33 @@ describe('og raster renderer', () => {
     expect(Math.min(...pixel(seg, 62, 62))).toBeGreaterThan(240);
   });
 
+  it('draws polylines open and vectors with a solid head at the tip', () => {
+    // The open path (-4,-4) → (0,4) → (4,-4) strokes both legs where the
+    // triangle test strokes its sides, but neither closes its base nor fills.
+    const path = renderRaster(['polyline((-4, -4), (0, 4), (4, -4))'], 100, 100);
+    expect(inkFraction(path)).toBeGreaterThan(inkFraction(renderRaster([], 100, 100)) + 0.01);
+    expect(Math.min(...pixel(path, 55, 83))).toBeGreaterThan(230);
+    expect(Math.min(...pixel(path, 62, 62))).toBeGreaterThan(240);
+    // vector(A, B) along y = 0.5 (off the gridlines; the fitted view puts the
+    // shaft on rows 46–47, tip near x = 83): the head widens the stroke just
+    // behind the tip, and the same offset mid-shaft stays bare.
+    const rows = ['A = (-4, 0.5)', 'B = (4, 0.5)', 'vector(A, B)'];
+    const arrow = renderRaster(rows, 100, 100);
+    expect(pixel(arrow, 60, 46)[0]).toBeLessThan(200);
+    expect(pixel(arrow, 77, 44)[0]).toBeLessThan(200);
+    expect(pixel(arrow, 76, 48)[0]).toBeLessThan(200);
+    expect(Math.min(...pixel(arrow, 60, 44))).toBeGreaterThan(230);
+    // No head at the tail, and segment() over the same points has none at all.
+    expect(Math.min(...pixel(arrow, 22, 44))).toBeGreaterThan(230);
+    const seg = renderRaster([...rows.slice(0, 2), 'segment(A, B)'], 100, 100);
+    expect(Math.min(...pixel(seg, 77, 44))).toBeGreaterThan(230);
+    // The head is sized in pixels, not world units: zoomed out (shaft on rows
+    // 48–49, tip near x = 69) it still stands 2 rows clear of the shaft.
+    const far = renderRaster([...rows, 'view(x = -10..10)'], 100, 100);
+    expect(pixel(far, 63, 46)[0]).toBeLessThan(200);
+    expect(Math.min(...pixel(far, 56, 46))).toBeGreaterThan(230);
+  });
+
   it('draws a cobweb: curve, diagonal, and iterated path', () => {
     const rows = ['view(x = 0..1, y = 0..1)', 'r = 2.9', 'a_0 = 0.15', 'a_{n+1} = r a_n (1 - a_n)'];
     const r = renderRaster(rows, 100, 100);

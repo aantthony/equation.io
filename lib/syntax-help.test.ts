@@ -19,6 +19,10 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('TRAIL(', 6, defs()).hint).toContain('trail(point)');
     expect(syntaxHelp('trace(', 6, defs()).hint).toContain('Matrix trace');
   });
+  it('describes the polyline and vector geometry statements', () => {
+    expect(syntaxHelp('polyl', 5, defs()).suggestions.map(s => s.signature)).toEqual(['polyline(A, B, C, …)']);
+    expect(syntaxHelp('vector(', 7, defs()).hint).toContain('from the origin to V');
+  });
   it('suggests defined values, functions and CSV columns', () => {
     expect(syntaxHelp('a', 1, defs()).suggestions.find(s => s.name === 'amplitude')?.call).toBe(false);
     expect(syntaxHelp('wa', 2, defs()).suggestions.find(s => s.name === 'wave')?.signature).toBe('wave(x)');

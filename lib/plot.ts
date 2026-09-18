@@ -17,6 +17,7 @@ import { complexParts } from './complex-parts.ts';
 import { SPECIAL_FORMS, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import { builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
+import type { FigureName } from './geom.ts';
 import { toGLSL } from './glsl.ts';
 import { type GridField, buildGridField } from './grid.ts';
 
@@ -53,9 +54,10 @@ export type Plot =
   | { type: 'value'; expr: Expr }
   /** Live bounded history of a point's observed positions. */
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
-  /** CPU-evaluated straight-edged figure from segment()/polygon()/square():
-   *  flat vertex expressions [x1, y1, x2, y2, …]. closed also fills. */
-  | { type: 'polygon'; pts: Expr[]; closed: boolean }
+  /** CPU-evaluated straight-edged figure from segment()/polyline()/vector()/
+   *  polygon()/square(): flat vertex expressions [x1, y1, x2, y2, …]. closed
+   *  also fills; arrow (vector) draws a screen-space head at the last vertex. */
+  | { type: 'polygon'; pts: Expr[]; closed: boolean; arrow?: boolean }
   /**
    * A vector equation L = R, one residual per component. With as many
    * equations as unknowns the solution set is isolated points, found
@@ -161,6 +163,16 @@ function matchODE(e: Expr): (Expr & { kind: 'vec' }) | null {
 
 /** Default sweep radius for tube(…) when no explicit radius is given. */
 const DEFAULT_TUBE_RADIUS = 0.1;
+
+/** lowerGeom's figure calls: whether each closes (and fills), and how its
+ *  vertices are named in an error, after the statement the user wrote. */
+const FIGURES: Partial<Record<string, { closed: boolean; what: string }>> = {
+  '[segment]': { closed: false, what: 'Segment endpoints' },
+  '[polyline]': { closed: false, what: 'Polyline vertices' },
+  '[vector]': { closed: false, what: 'Vector endpoints' },
+  '[polygon]': { closed: true, what: 'Polygon vertices' },
+  '[square]': { closed: true, what: 'Square vertices' },
+} satisfies Record<FigureName, unknown>;
 
 /** Calls that describe the whole plot and cannot appear as a subterm. */
 const WHOLE_EXPR_FORMS = new Set([...SPECIAL_FORMS, 'tube', '[trail]']);
@@ -331,14 +343,18 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
     return done({ type: 'trail', dim: expr.args.length as 2 | 3, coords: expr.args });
   }
 
-  // Desugared segment()/polygon()/square(): CPU-evaluated each frame with the
-  // constants' original names, like points and parametric curves.
-  if (expr.kind === 'call' && (expr.name === '[polygon]' || expr.name === '[segment]' || expr.name === '[square]')) {
+  // Desugared segment()/polyline()/vector()/polygon()/square(): CPU-evaluated
+  // each frame with the constants' original names, like points and parametric
+  // curves.
+  const figure = expr.kind === 'call' ? FIGURES[expr.name] : undefined;
+  if (expr.kind === 'call' && figure) {
     if (hasSpace || hasParam) {
-      const what = expr.name === '[segment]' ? 'Segment endpoints' : `${expr.name === '[square]' ? 'Square' : 'Polygon'} vertices`;
-      throw new Error(`${what} must be constant — they cannot use x, y, u, or v.`);
+      throw new Error(`${figure.what} must be constant — they cannot use x, y, u, or v.`);
     }
-    return done({ type: 'polygon', pts: expr.args, closed: expr.name !== '[segment]' });
+    return done({
+      type: 'polygon', pts: expr.args, closed: figure.closed,
+      ...(expr.name === '[vector]' ? { arrow: true } : {}),
+    });
   }
 
   if (expr.kind === 'text' || expr.kind === 'str') {
