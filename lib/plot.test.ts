@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluate, parseExpr } from './expr.ts';
-import { classify } from './plot.ts';
+import { classify, valueReadout } from './plot.ts';
 
 const cls = (s: string) => classify(parseExpr(s));
 
@@ -16,6 +16,25 @@ describe('classify', () => {
     expect(cls('sin(x)').plot.type).toBe('implicit2d'); // y = sin(x)
     expect(cls('sin(x)cos(y)').plot.type).toBe('scalar2d');
     expect(cls('x^2+y^2+z^2-9').plot.type).toBe('implicit3d');
+  });
+
+  it('reads a bare number out instead of plotting y = it', () => {
+    expect(cls('2+2').plot.type).toBe('value');
+    expect(cls('sin(t)')).toMatchObject({ plot: { type: 'value' }, animated: true, needs3D: false });
+    expect(classify(parseExpr('a^2'), new Set(['a']))).toMatchObject({ plot: { type: 'value' }, params: ['a'] });
+    // Anything with a plot coordinate is still a graph, and a complex
+    // constant is still a point on the Argand plane.
+    expect(cls('2x').plot.type).toBe('implicit2d');
+    expect(cls('y = 4').plot.type).toBe('implicit2d');
+    expect(cls('1+2i').plot.type).toBe('point');
+  });
+
+  it('formats value readouts', () => {
+    expect(valueReadout(4)).toBe('= 4');
+    expect(valueReadout(0.5)).toBe('= 0.5');
+    expect(valueReadout(Math.SQRT2)).toBe('≈ 1.41421');
+    expect(valueReadout(1 / 0)).toBe('= ∞');
+    expect(valueReadout(NaN)).toBe('undefined');
   });
 
   it('routes points', () => {

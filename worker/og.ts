@@ -598,6 +598,8 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
   ineq2d: 'draws',
   scalar2d: 'draws',
   point: 'draws',
+  // A readout-only row: nothing on the canvas in the app either.
+  value: 'draws',
   trail: 'fallback',
   pcurve: 'draws',
   psurface: 'draws',

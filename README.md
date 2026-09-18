@@ -78,6 +78,8 @@ pnpm deploy     # build and deploy to Cloudflare
 - `y = {0 < x < 2: x^2}` — a domain restriction: with no default, the value
   is undefined outside the conditions, so nothing is drawn there
 - `sin(x)cos(y)` — a bare expression in x, y is a 2D scalar/density field
+- `2+2`, `sqrt(a)`, `|A - B|` — a bare number draws nothing and reads out
+  `= 4` under the row, live with sliders and `t`; write `y = 4` for the line
 
 **Sliders and animation**
 

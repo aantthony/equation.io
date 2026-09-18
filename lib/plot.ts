@@ -47,6 +47,10 @@ export type Plot =
    *  seed 'pixel' otherwise (fixed map → Julia). */
   | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
+  /** A bare real expression with nothing to plot against (`2+2`, `a^2`,
+   *  `sin(t)`): it draws nothing and the row reads out `= value` instead.
+   *  CPU-evaluated per frame, so constants keep their original names. */
+  | { type: 'value'; expr: Expr }
   /** Live bounded history of a point's observed positions. */
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   /** CPU-evaluated straight-edged figure from segment()/polygon()/square():
@@ -238,6 +242,17 @@ function levelFamily(e: Expr, params: readonly string[], defined: ReadonlySet<st
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The readout of a `value` row: `= 4` when six significant figures say it
+ * all, `≈ 1.41421` when they round, `undefined` when there is no number.
+ */
+export function valueReadout(value: number): string {
+  if (Number.isNaN(value)) return 'undefined';
+  if (!isFinite(value)) return value > 0 ? '= ∞' : '= −∞';
+  const shown = Number(value.toPrecision(6));
+  return `${shown === value ? '=' : '≈'} ${shown}`;
 }
 
 export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), fields: Record<string, Expr> = {}, timeDerivative?: (e: Expr) => Expr): Classified {
@@ -533,7 +548,9 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
   }
   if (vars.has('z')) return done({ type: 'implicit3d', field: compiled.code, grad: gradOf(g) });
   if (vars.has('y')) return done({ type: 'scalar2d', field: compiled.code });
-  // Only x (or constants / t): plot as y = expr.
+  // A number is not a graph: `2+2` answers "= 4" rather than drawing y = 4.
+  if (!hasSpace && !hasParam) return done({ type: 'value', expr });
+  // Only x: plot as y = expr.
   const asY: Expr = { kind: 'eq', l: { kind: 'var', name: 'y' }, r: g };
   return done({ type: 'implicit2d', field: compileTyped(asY).code });
 }
