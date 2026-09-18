@@ -245,8 +245,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   under f. Supported: arithmetic, powers, exp ln log sqrt, sin cos tan sinh
   cosh tanh, re im abs arg conj, user functions. Branch cuts (`sqrt`, `ln`,
   fractional powers) break the curve where the value jumps. An equation,
-  inequality, vector, or a use of v is an error, as is a path whose split
-  into real and imaginary parts is too large (deeply nested products).
+  inequality, or a use of v is an error, as is a path whose split into real
+  and imaginary parts is too large (deeply nested products). An expression
+  that mentions i but is real for every u (`abs(exp(i u))`) is not a path
+  and says so.
 - Complex plot: a complex expression in `w` — `w + 4/w`.
 - Domain coloring: `domain(f)` where f is complex — `domain(w^2 + 1)`. Hue is
   arg f, brightness |f|; zeros render black and poles white.
@@ -300,6 +302,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   variables, shown as a readout under the row and marked on the density.
 - Parametric curve: components in u — `(2cos(2pi u), sin(4pi u))`; three
   components make a 3D curve — `(2cos(6pi u), 2sin(6pi u), 4u - 2)`.
+  A plane curve lifts the pen where it jumps (a step, a pole, a branch cut)
+  rather than bridging the gap: `(u, floor(3u))`, `(4u - 2, tan(12u - 6))`.
 - Parametric surface: three components in u and v —
   `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`.
 - 3D surface: any equation in x, y, z.

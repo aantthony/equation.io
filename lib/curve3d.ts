@@ -48,6 +48,27 @@ function fdDeriv(src: Float32Array, n: number): Float32Array {
 const finite3 = (a: Float32Array, i: number): boolean =>
   isFinite(a[i * 3]) && isFinite(a[i * 3 + 1]) && isFinite(a[i * 3 + 2]);
 
+/**
+ * The drawable runs of a 3D polyline, as [first vertex, vertex count]: a
+ * non-finite vertex (an undefined sample, a break at a jump) lifts the pen.
+ * A GL line strip has no such notion — what a NaN vertex draws is up to the
+ * driver — so the renderer draws one strip per run. Lone points draw nothing.
+ */
+export function finiteRuns(pts: Float32Array): Array<[number, number]> {
+  const runs: Array<[number, number]> = [];
+  const n = Math.floor(pts.length / 3);
+  let start = -1;
+  for (let i = 0; i <= n; i++) {
+    if (i < n && finite3(pts, i)) {
+      if (start < 0) start = i;
+      continue;
+    }
+    if (start >= 0 && i - start >= 2) runs.push([start, i - start]);
+    start = -1;
+  }
+  return runs;
+}
+
 /** Half the bounding-box diagonal of the finite samples; 0 if none. */
 export function curveExtent(pts: Float32Array): number {
   const n = pts.length / 3;

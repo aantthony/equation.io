@@ -538,31 +538,15 @@ function renderRow2D(
     }
     case 'pcurve': {
       if (cls.plot.dim !== 2) return;
-      // A complex path is not a vec row: its components are the split parts,
-      // sampled as the app does, pen up at the branch cuts.
-      if (cls.plot.cuts) {
-        const pts = pathSampler(cls.plot.comps)({ ...analysis.constEnv, t: 0 });
-        let last: [number, number] | null = null;
-        for (let i = 0; i + 1 < pts.length; i += 2) {
-          if (!Number.isFinite(pts[i]) || !Number.isFinite(pts[i + 1])) { last = null; continue; }
-          const s: [number, number] = [toScreenX(r, v, pts[i]), toScreenY(r, v, pts[i + 1])];
-          if (last) drawLine(r, last[0], last[1], s[0], s[1], color);
-          last = s;
-        }
-        return;
-      }
-      if (expr.kind !== 'vec') return;
-      const progs = expr.items.map(compile);
-      const slotU = env.slots.get('u')!;
-      let prev: [number, number] | null = null;
-      for (let i = 0; i <= 800; i++) {
-        env.vars[slotU] = i / 800;
-        const px = run(progs[0], env.vars, env.stack);
-        const py = run(progs[1], env.vars, env.stack);
-        if (!Number.isFinite(px) || !Number.isFinite(py)) { prev = null; continue; }
-        const s: [number, number] = [toScreenX(r, v, px), toScreenY(r, v, py)];
-        if (prev) drawLine(r, prev[0], prev[1], s[0], s[1], color);
-        prev = s;
+      // Sampled as the app samples it (lib/path.ts), pen up at the jumps. A
+      // complex path is not a vec row: its components are the split parts.
+      const pts = pathSampler(cls.plot.comps).sample({ ...analysis.constEnv, t: 0 });
+      let last: [number, number] | null = null;
+      for (let i = 0; i + 1 < pts.length; i += 2) {
+        if (!Number.isFinite(pts[i]) || !Number.isFinite(pts[i + 1])) { last = null; continue; }
+        const s: [number, number] = [toScreenX(r, v, pts[i]), toScreenY(r, v, pts[i + 1])];
+        if (last) drawLine(r, last[0], last[1], s[0], s[1], color);
+        last = s;
       }
       return;
     }

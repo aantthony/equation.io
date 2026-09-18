@@ -55,7 +55,7 @@ describe('classify', () => {
 
   it('reads a complex expression in u alone as a path in the Argand plane', () => {
     const circle = cls('exp(i 2 pi u)');
-    expect(circle.plot).toMatchObject({ type: 'pcurve', dim: 2, cuts: true });
+    expect(circle.plot).toMatchObject({ type: 'pcurve', dim: 2 });
     expect(circle.needs3D).toBe(false);
     const { comps } = circle.plot as { comps: Parameters<typeof evaluate>[0][] };
     expect(evaluate(comps[0], { u: 0.25 })).toBeCloseTo(0);
@@ -67,22 +67,24 @@ describe('classify', () => {
     // Complex-typed with a zero imaginary part is still a path (along the
     // real axis), as i^2 alone is still the Argand point -1.
     expect(cls('i^2 u').plot).toMatchObject({ type: 'pcurve', dim: 2 });
-    // A real vector curve is not a complex split: no cut handling.
-    expect((cls('(cos(2pi u), sin(2pi u))').plot as { cuts?: true }).cuts).toBeUndefined();
   });
 
   it('changes nothing else that mentions u or i', () => {
     // No free variable: still the Argand point.
     expect(cls('exp(i pi/3)').plot).toMatchObject({ type: 'point', dim: 2 });
-    // Real in u, with or without an i inside: as before, u needs a vector.
-    for (const s of ['sin(u)', 'abs(exp(i u))', 're(exp(i u))']) {
-      expect(() => cls(s), s).toThrow('u/v need a vector expression like (cos(u), sin(u), v).');
+    // Real in u: as before, u needs a vector.
+    expect(() => cls('sin(u)')).toThrow('u/v need a vector expression like (cos(u), sin(u), v).');
+    // Real for all its i: a number depending on u, which is no path — said so.
+    for (const s of ['abs(exp(i u))', 're(exp(i 2 pi u))']) {
+      expect(() => cls(s), s).toThrow('This is a real number for each u, not a path — a complex path needs an imaginary part, like exp(i 2 pi u); for a real curve write (u, …).');
     }
+    expect(() => cls('domain(exp(i u))')).toThrow('Cannot use u/v in domain(…).');
+    expect(() => cls('iter(z^2 + i u)')).toThrow('Cannot use u/v in iter(…).');
     for (const s of ['w = exp(i u)', 'z = exp(i u)', 'y = exp(i u)', 'u w', 'u + i x']) {
       expect(() => cls(s), s).toThrow('Cannot mix u/v with x/y/z.');
     }
     // Only the bare expression in u alone is a path.
-    for (const s of ['exp(i 2 pi u) = 1', 'exp(i u) v', 'exp(i u) < 1', 'domain(exp(i u))']) {
+    for (const s of ['exp(i 2 pi u) = 1', 'exp(i u) v', 'exp(i u) < 1']) {
       expect(() => cls(s), s).toThrow('A complex path is a bare expression in u alone, like exp(i 2 pi u).');
     }
     expect(() => cls('(exp(i u), 1)')).toThrow('Complex values are not supported in vectors.');

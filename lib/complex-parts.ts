@@ -3,6 +3,7 @@ import { type Expr } from './expr.ts';
 import { usesComplex, compileTyped } from './complex.ts';
 import { num, bin, call } from './coordinate.ts';
 import { add as realAdd, mul as realMul, pow } from './diff.ts';
+import { countNodes } from './size.ts';
 type Pair = [Expr, Expr];
 const add = (a: Pair, b: Pair): Pair => [bin('+', a[0], b[0]), bin('+', a[1], b[1])];
 const mul = (a: Pair, b: Pair): Pair => [bin('-', bin('*', a[0], b[0]), bin('*', a[1], b[1])), bin('+', bin('*', a[0], b[1]), bin('*', a[1], b[0]))];
@@ -21,7 +22,23 @@ function hasProjection(e: Expr): boolean {
   return false;
 }
 
-export function complexParts(e: Expr): Pair {
+/** Thrown when a split outgrows its budget; callers word it for their row. */
+export class SplitTooLarge extends Error {}
+
+/**
+ * The real and imaginary parts of `e`. Splitting duplicates subterms — every
+ * complex product uses both parts of both factors — so a nested product
+ * grows geometrically. With a `budget` (in nodes, shared subtrees counted per
+ * use) the split stops with SplitTooLarge at the first subterm past it,
+ * having built only that far.
+ */
+export function complexParts(e: Expr, budget = Infinity, sizes = new WeakMap<object, number>()): Pair {
+  const parts = splitParts(e, a => complexParts(a, budget, sizes));
+  if (budget < Infinity && countNodes(parts[0], sizes) + countNodes(parts[1], sizes) > budget) throw new SplitTooLarge();
+  return parts;
+}
+
+function splitParts(e: Expr, complexParts: (e: Expr) => Pair): Pair {
   if (!usesComplex(e) && !hasProjection(e)) return [e, num(0)];
   if (e.kind === 'var') return e.name === 'i' ? [num(0), num(1)] : [{ kind: 'var', name: 'x' }, { kind: 'var', name: 'y' }];
   if (e.kind === 'neg') return complexParts(e.a).map(neg) as Pair;

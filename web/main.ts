@@ -61,7 +61,7 @@ import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
-import { pathSampler } from '../lib/path.ts';
+import { CURVE_SAMPLES, type PathSampler, pathSampler } from '../lib/path.ts';
 import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
@@ -105,9 +105,10 @@ interface Equation {
    *  shade, and resampled only when the x-window or a value it reads (bounds,
    *  sliders, states, t) changes. */
   shadeCache?: { shade: IntShade; names: string[]; sampler: ShadeSampler; key: string; runs: ShadeRun[] };
-  /** A complex path's compiled sampler (lib/path.ts), rebuilt when the row
-   *  reclassifies. */
-  pathCache?: { comps: Expr[]; sample: (env: Record<string, number>) => number[] };
+  /** A 2D parametric curve's compiled sampler (lib/path.ts) and its last
+   *  polyline, resampled only when a value it reads (sliders, states, t)
+   *  changes — the shadeCache pattern. */
+  pathCache?: { comps: Expr[]; sampler: PathSampler; key: string; pts: number[] };
   id: number;
   text: string;
   colorIndex: number;
@@ -219,7 +220,6 @@ function cssColorA([r, g, b]: [number, number, number], a: number): string {
   return `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${a})`;
 }
 
-const CURVE_SAMPLES = 400;
 /** RK4 steps in each direction for a dropped integral curve. */
 const ODE_STEPS = 1400;
 /** Most integral-curve seeds kept at once; older seeds evict first. */
@@ -591,11 +591,19 @@ function render() {
 
   // CPU sampling of parametric curves / points, with t bound to seconds.
   const sampleCurve = (eq: Equation, dim: 2 | 3): number[] => {
-    const { comps, cuts } = eq.cls!.plot as { comps: Expr[]; cuts?: true };
-    // A complex path: compiled, and broken at its branch cuts.
-    if (cuts) {
-      if (eq.pathCache?.comps !== comps) eq.pathCache = { comps, sample: pathSampler(comps) };
-      return eq.pathCache.sample({ ...constEnv, t: time });
+    const { comps } = eq.cls!.plot as { comps: Expr[] };
+    // A plane curve (a complex path included): compiled, and broken at its
+    // jumps — branch cuts, steps, poles.
+    if (dim === 2) {
+      let c = eq.pathCache;
+      if (c?.comps !== comps) c = eq.pathCache = { comps, sampler: pathSampler(comps), key: '', pts: [] };
+      const env: Record<string, number> = { ...constEnv, t: time };
+      const key = c.sampler.names.map(n => env[n]).join();
+      if (key !== c.key || !c.pts.length) {
+        c.key = key;
+        c.pts = c.sampler.sample(env);
+      }
+      return c.pts;
     }
     const out: number[] = [];
     for (let k = 0; k < CURVE_SAMPLES; k++) {
