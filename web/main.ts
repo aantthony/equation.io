@@ -18,6 +18,7 @@ import {
   listNamesOf,
   isListName,
   indexIssue,
+  integralShade,
   nameTaken,
   shadowedFnNames,
   resolveExpr,
@@ -46,6 +47,7 @@ import {
   toExpectation,
   toProbability,
 } from '../lib/dist.ts';
+import { type IntShade, type ShadeAreas, minusTint, shadeAreas } from '../lib/intshade.ts';
 import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
@@ -91,6 +93,9 @@ import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
 
 interface Equation {
   trail?: PointTrail;
+  /** A definite-integral row's shaded area, resampled only when the window
+   *  or a value it reads (bounds, sliders, states, t) changes. */
+  shadeCache?: { shade: IntShade; names: string[]; key: string; areas: ShadeAreas };
   id: number;
   text: string;
   colorIndex: number;
@@ -1075,6 +1080,34 @@ function render() {
           }
           break;
         }
+        case 'value': {
+          // A definite-integral row: the number lives in the row's readout;
+          // the plot is the area it measures. Parts that add to the value
+          // take the row color, parts that subtract its complement.
+          if (!plot.shade) break;
+          let c = eq.shadeCache;
+          if (c?.shade !== plot.shade) {
+            const { body, lo, hi, v } = plot.shade;
+            const names = new Set([...freeVars(body), ...freeVars(lo), ...freeVars(hi)]);
+            names.delete(v);
+            c = eq.shadeCache = { shade: plot.shade, names: [...names], key: '', areas: { pos: [], neg: [] } };
+          }
+          const ymin = view.cy - halfH;
+          const ymax = view.cy + halfH;
+          const key = [xmin, xmax, ymin, ymax, ...c.names.map(n => env[n])].join();
+          if (key !== c.key) {
+            c.key = key;
+            c.areas = shadeAreas(plot.shade, env, { xmin, xmax, ymin, ymax });
+          }
+          const minus = minusTint(color);
+          for (const pts of c.areas.pos) {
+            extras.polylines.push({ pts, color: css, closed: true, fill: cssColorA(color, 0.16) });
+          }
+          for (const pts of c.areas.neg) {
+            extras.polylines.push({ pts, color: cssColor(minus), closed: true, fill: cssColorA(minus, 0.16) });
+          }
+          break;
+        }
         case 'prob': {
           // The estimate lives in the row's readout; the plot is the shaded
           // area under the variable's density, when the body has that shape.
@@ -1553,10 +1586,13 @@ function recompileAll() {
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
-      parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null);
-      // Lists broadcast/reduce away: the row becomes a plain list literal
+      // Lists then broadcast/reduce away: the row becomes a plain list literal
       // (dots, bars, or a scatter) or a scalar expression (reductions).
-      parsed = lowerLists(parsed, getList, ropts);
+      const lower = (e: Expr): Expr => lowerLists(
+        lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null),
+        getList, ropts,
+      );
+      parsed = lower(parsed);
       // Coordinate fields substitute in as functions of the plane, so
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
       eq.cls = classify(parsed, constNames, fieldEnv, timeDifferentiator(defs));
@@ -1578,6 +1614,9 @@ function recompileAll() {
       // A number is its own answer: the row reads out "= value" and draws
       // nothing. The frame loop keeps it current as sliders, states and t move.
       if (eq.cls.plot.type === 'value') {
+        // Exactly one definite integral also shades its area (lib/intshade.ts).
+        const shade = integralShade(rawParsed, getFn, ropts, lower, constNames);
+        if (shade) eq.cls.plot.shade = shade;
         try { eq.info = valueReadout(evaluate(parsed, { ...envT0, t: 0 })); }
         catch { eq.info = '= …'; } // resolves once the frame loop has an env
       }
@@ -2330,8 +2369,10 @@ function reconcile() {
     line.style.setProperty('--eq-color', cssColor(theme.palette[eq.colorIndex]));
     line.classList.toggle('invalid', !!eq.error);
     // No colour swatch for rows with nothing drawn in it: definitions, and
-    // value rows, whose whole output is the readout beneath them.
-    line.classList.toggle('is-def', !!eq.def || (!eq.error && eq.cls?.plot.type === 'value'));
+    // value rows, whose whole output is the readout beneath them — except a
+    // definite integral shading its area, which draws in that colour.
+    const drawn = eq.error ? undefined : eq.cls?.plot;
+    line.classList.toggle('is-def', !!eq.def || (drawn?.type === 'value' && !drawn.shade));
     line.classList.toggle('is-comment', !!eq.comment);
     line.classList.toggle('collapsed', !!(eq.comment && eq.collapsed));
     line.title = eq.error ?? (eq.comment ? 'Click the arrow to collapse or expand this group' : '');
@@ -2962,6 +3003,7 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['derivative', 'y = d/dx (x^3 - 3x)'],
     ['tangent line', 'f(x) = x^3 - 2x; g(x) = d/dx f(x); a = 1; y = f(x); y = f(a) + g(a)(x - a)'],
     ['running integral', 'view(x = -7..7, y = -1.5..4); f(x) = sin(x)^2; y = f(x); y = int[0..x] f(t) dt'],
+    ['signed area', 'view(x = -1..7, y = -1.5..1.5); b = 5; y = sin(x); int[0..b] sin(x) dx'],
     ['antiderivative', 'f(x) = x^2 - 1; y = f(x); y = int(f(x) dx)'],
     ['gaussian error fn', 'view(x = -4..4, y = -1.2..1.2); y = int[0..x] exp(-t^2) dt'],
     ['normal cdf', 'view(x = -4..4, y = -0.6..1.2); y = normalpdf(x, 0, 1); y = int[-inf..x] normalpdf(t, 0, 1) dt'],

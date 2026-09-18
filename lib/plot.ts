@@ -18,6 +18,7 @@ import { SPECIAL_FORMS, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import { ANGLE_FN, builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
+import type { IntShade } from './intshade.ts';
 import { toGLSL } from './glsl.ts';
 import { type GridField, buildGridField } from './grid.ts';
 
@@ -50,8 +51,11 @@ export type Plot =
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
   /** A bare real expression with nothing to plot against (`2+2`, `a^2`,
    *  `sin(t)`): it draws nothing and the row reads out `= value` instead.
-   *  CPU-evaluated per frame, so constants keep their original names. */
-  | { type: 'value'; expr: Expr }
+   *  CPU-evaluated per frame, so constants keep their original names.
+   *  With `shade` — the row is exactly one definite integral — the area
+   *  between the integrand and the axis is filled too (lib/intshade.ts); the
+   *  row's pipeline attaches it, since resolution expands the ∫ away. */
+  | { type: 'value'; expr: Expr; shade?: IntShade }
   /** Live bounded history of a point's observed positions. */
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   /** CPU-evaluated straight-edged figure from segment()/polyline()/vector()/

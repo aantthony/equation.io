@@ -22,11 +22,13 @@
  *   otherwise by expanding a fixed Gauss–Legendre sum the same way Σ
  *   expands — so every downstream consumer still sees ordinary expressions.
  */
+import { usesComplex } from './complex.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
+import type { IntShade } from './intshade.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
 import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
@@ -1073,6 +1075,56 @@ export function usesIntegral(e: Expr): boolean {
     case 'piecewise':
       return e.cases.some(c => usesIntegral(c.cond) || usesIntegral(c.value))
         || (e.otherwise ? usesIntegral(e.otherwise) : false);
+  }
+}
+
+/**
+ * The area a definite-integral row shades, or null when the row is anything
+ * but exactly one definite integral of a real integrand in one variable:
+ * `int[a..b] f dx` or `int(a..b, f dx)` standing alone. A coefficient, a sum
+ * of integrals, an iterated or nested ∫, an indefinite ∫, a complex integrand
+ * — all stay plain readouts, because no single region IS their value.
+ *
+ * Takes the PARSED row (resolution expands the ∫ away). `lower` is the row's
+ * own geometry/list lowering; `known` the names with a value per frame. The
+ * caller attaches the result only when the row classified as a `value`, which
+ * is what makes the bounds constant (sliders, states and t included).
+ */
+export function integralShade(
+  e: Expr, getFn: GetFn, opts: ResolveOpts, lower: (e: Expr) => Expr, known: ReadonlySet<string>,
+): IntShade | null {
+  let bounds: [Expr, Expr] | null = null;
+  let rawBody: Expr;
+  if (e.kind === 'call' && e.name === 'int' && e.args.length === 3) {
+    bounds = [e.args[0], e.args[1]];
+    rawBody = e.args[2];
+  } else {
+    const m = splitSumChain(e);
+    if (!m || m.coeff || !isIntHeader(m.header)) return null;
+    bounds = intBounds(m.header);
+    rawBody = m.body;
+  }
+  if (!bounds || usesIntegral(rawBody)) return null;
+  try {
+    const ctx: Ctx = { getFn, opts, terms: 0 };
+    const m = stripDx(rx(rawBody, ctx));
+    // A residual is an enclosing integral's measure: `int[0..1] x dx dy`.
+    if (!m || m.residual) return null;
+    // A name that already has a value may be a list or a point, which
+    // lowering would substitute away from under the integration variable.
+    if (known.has(m.v)) return null;
+    const infinite = (b: Expr) => infOf(b) !== 0;
+    const [lo, hi] = bounds.map(b => { const r = rx(b, ctx); return infinite(r) ? r : lower(r); });
+    const body = lower(m.integrand);
+    const scalar = (x: Expr) => x.kind !== 'vec' && x.kind !== 'list' && x.kind !== 'data'
+      && x.kind !== 'eq' && x.kind !== 'ineq' && !usesComplex(x);
+    if (![body, lo, hi].every(scalar)) return null;
+    const free = (x: Expr, bound?: string) =>
+      [...freeVars(x)].every(n => n === bound || n === 't' || n === 'inf' || known.has(n));
+    if (!free(body, m.v) || ![lo, hi].every(b => infinite(b) || free(b))) return null;
+    return { body, v: m.v, lo, hi };
+  } catch {
+    return null; // the row's own resolution reports whatever is wrong
   }
 }
 

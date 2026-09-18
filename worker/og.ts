@@ -9,6 +9,7 @@
  * with CompressionStream — no image library.
  */
 import { densityAt, pdfExpr, shadePolygon } from '../lib/dist.ts';
+import { minusTint, shadeAreas } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
@@ -312,6 +313,33 @@ function renderRow2D(
   const { cls, expr } = row;
   if (!cls) return;
   const compile = (e: Expr) => compileFor(env, e);
+  if (cls.plot.type === 'value') {
+    // A definite-integral row shades the area it measures (the app's case
+    // 'value'): parts adding to the value in the row color, parts subtracting
+    // in its complement. Any other readout draws nothing, as in the app.
+    if (!cls.plot.shade) return;
+    const halfW = (r.w / 2) * v.upp;
+    const halfH = (r.h / 2) * (v.upp / (v.ratio ?? 1));
+    const areas = shadeAreas(cls.plot.shade, { ...analysis.constEnv, t: 0 }, {
+      xmin: v.cx - halfW, xmax: v.cx + halfW, ymin: v.cy - halfH, ymax: v.cy + halfH,
+    });
+    const minus = minusTint(color);
+    for (const [polys, c] of [[areas.pos, color], [areas.neg, minus]] as const) {
+      for (const pts of polys) {
+        const sx: number[] = [], sy: number[] = [];
+        for (let i = 0; i + 1 < pts.length; i += 2) {
+          sx.push(toScreenX(r, v, pts[i]));
+          sy.push(toScreenY(r, v, pts[i + 1]));
+        }
+        fillPolygon(r, sx, sy, c, 0.16);
+        for (let i = 0; i < sx.length; i++) {
+          const j = (i + 1) % sx.length;
+          drawLine(r, sx[i], sy[i], sx[j], sy[j], c);
+        }
+      }
+    }
+    return;
+  }
   if (cls.plot.type === 'density' || cls.plot.type === 'prob') {
     // Sampled-density rows: the same estimator the app uses (lib/dist.ts),
     // drawn as a polyline (density) or a filled area under it (P(…)).
@@ -617,7 +645,8 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
   ineq2d: 'draws',
   scalar2d: 'draws',
   point: 'draws',
-  // A readout-only row: nothing on the canvas in the app either.
+  // A readout: nothing on the canvas in the app either — except a definite
+  // integral, whose shaded area is a CPU polygon here as there.
   value: 'draws',
   trail: 'fallback',
   pcurve: 'draws',

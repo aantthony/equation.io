@@ -138,7 +138,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Gaussians via erf — and falls back to Gauss–Legendre quadrature expanded
   in place otherwise, so non-elementary rows like `y = int[0..x] sin(t)/t dt`
   (Si) still plot. A row whose integral resolves to a constant shows the
-  numeric value as a readout. Classic notations work: `int[0..1] dx/(1+x^2)`,
+  numeric value as a readout — and when the row is exactly one definite
+  integral of a real integrand (`int[0..b] sin(x) dx`; bounds may be sliders,
+  states, t or `±inf`), it also shades the area between the integrand and the
+  axis over [a, b], in 2D: parts that add to the value in the row color,
+  parts that subtract in its complement (so reversed bounds swap the tints).
+  The dx variable runs along the horizontal axis whatever its letter; add
+  `y = sin(x)` as its own row to see the curve beyond [a, b]. A coefficient,
+  a sum of integrals, an iterated integral or a definition
+  (`A = int[0..1] x^2 dx`) stays a plain number. Classic notations work: `int[0..1] dx/(1+x^2)`,
   and iterated integrals pair inside-out: `int[0..1] int[0..y] x dx dy`.
   Bounds may be `±inf` (or `∞`): `int[-inf..x] exp(t) dt` is exp(x),
   `int[-inf..inf] exp(-x^2) dx` reads √π, and `int[-inf..x] normalpdf(t, 0, 1) dt`
@@ -218,7 +226,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Scalar field: a bare expression in x, y — `sin(x)cos(y)` — shaded by value.
 - Value: a bare expression with no plot coordinate — `2+2`, `sqrt(a)` with a
   slider a, `|A - B|` between named points, `int[0..1] x^2 dx`, `sin(t)` —
-  draws nothing and reads out `= 4` (or `≈ 1.41421`) under the row, live as
+  draws nothing (a lone definite integral shades its area) and reads out `= 4` (or `≈ 1.41421`) under the row, live as
   sliders, states and t move. The tool result reports it as kind `value`
   with the number in `value`. A number is not assumed to mean `y = number`:
   write `y = 4` for the horizontal line. (A bare expression in x alone,

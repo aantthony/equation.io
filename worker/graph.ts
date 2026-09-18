@@ -16,6 +16,7 @@ import {
   listNamesOf,
   isListName,
   indexIssue,
+  integralShade,
   MissingDataError,
   nameTaken,
   resolveExpr,
@@ -360,15 +361,21 @@ export function analyze(texts: string[]): Analysis {
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
-      parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null);
-      // Lists broadcast/reduce away (mirror of web/main.ts).
-      parsed = lowerLists(parsed, getList, ropts);
+      // Lists then broadcast/reduce away (mirror of web/main.ts).
+      const lower = (e: Expr): Expr => lowerLists(
+        lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null),
+        getList, ropts,
+      );
+      parsed = lower(parsed);
       row.cls = classify(parsed, constNames, fieldEnv, timeDifferentiator(defs));
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       row.expr = parsed;
       // A number is its own answer: the row reads out "= value" and draws
       // nothing (mirror of web/main.ts). Evaluated at t = 0 here.
       if (row.cls.plot.type === 'value') {
+        // Exactly one definite integral also shades its area (lib/intshade.ts).
+        const shade = integralShade(rawParsed, getFn, ropts, lower, constNames);
+        if (shade) row.cls.plot.shade = shade;
         try { row.info = valueReadout(evaluate(parsed, { ...constEnv, t: 0 })); }
         catch { /* not computable statically (a state, say): no readout */ }
       }
