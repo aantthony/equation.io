@@ -1,12 +1,21 @@
 # Mathematical objects: what renders as what
 
-Implementation update (2026-09-12): coordinate points with angular residuals,
-parametric system continuation, chart flows, complex constants as Argand points,
-complex equations as real systems, and 2D coordinate-point drag writeback are
-implemented. Static previews include system points/curves and direction fields.
-The older inventory below records the original design context, not current
-feature availability. Solving/tracing remains numerical and bounded; exact
-complex-root labels and certified branch completeness are not implemented.
+Status (refreshed 2026-09-18, main at 3c55dbd; row claims re-run through
+`analyze()` in worker/graph.ts, interaction claims read off the code): phases 1 and 1.5 are shipped — coordinate
+points with angular residuals, parametric system continuation, chart flows,
+complex constants as Argand points, complex equations as real systems, 2D
+coordinate-point drag writeback, "= value" readouts. So is most of phases 2–3
+and the seed of 5: named draggable points and vector arithmetic,
+`segment`/`line`/`polygon`/`square`/`circle`, `|A-B|` readouts, piecewise and
+restrictions, integrals (value, `int[0..x]` as a function, iterated),
+Normal/Uniform/Exponential with derived arithmetic, scalar list broadcasting,
+CSV tables, regression, and Lorenz via a 3-component state. Static previews
+include system points/curves and direction fields. **What remains, and the PR
+order for it, is in [objects-finish-plan.md](objects-finish-plan.md).**
+Solving/tracing remains numerical and bounded; exact complex-root labels and
+certified branch completeness are not implemented. §§3–6 below keep the
+original design context (the PRs they call "open" have since landed, except
+where marked); §2, the "Here" column of §4, and §7 are current.
 
 A design survey and plan. It fixes the principle that decides how a row of
 notation becomes a rendered object, inventories the objects we have against
@@ -31,8 +40,8 @@ object must respect):
 1. **An equation denotes its solution set; an inequality its region.** The
    solution set's dimension is ambient minus constraints, and the renderer
    follows the dimension: in 2D, one constraint → curve; in 3D, one → surface.
-   (This invariant is currently truncated at one constraint; PR #36 and §6
-   extend it — n constraints in n unknowns → a solved point set.)
+   (Square systems complete it: n constraints in n unknowns → a solved
+   point set, §6. Non-square systems — a space curve from 2 of 3 — remain.)
 2. **A tuple is positional.** With k parametric variables (u, v) it is a
    k-dimensional parametric object: 0 → point, 1 → curve, 2 → surface. As a
    function of position (x, y) it is a vector field.
@@ -48,7 +57,7 @@ object must respect):
    `re`/`im`/`arg`/`abs` bring it back to ℝ and the result flows through the
    real paths.
 
-## 2. Inventory: the objects we render today (master)
+## 2. Inventory: the objects we render today (main)
 
 | Notation (after resolution) | Object | Renderer |
 |---|---|---|
@@ -60,7 +69,23 @@ object must respect):
 | equation/bare scalar with z | implicit surface | raymarcher |
 | complex-valued expr in w | field lines + equipotentials | level-curve shader |
 | `domain(f)` / `conformal(f)` / `iter(step)` | domain coloring / conformal grid / escape-time fractal | dedicated shaders |
-| tuple, no free vars (t ok) | point (2D/3D) | overlay dot / billboard |
+| tuple, no free vars (t ok) | point (2D/3D) | overlay dot / billboard; draggable where its literals/constants can be written back |
+| `A = (1,2)`; `A + 2B`, `midpoint(A,B)`, `perp(A)` | named point (2 components) / point arithmetic | point; `A_x`, `A_y` are scalars |
+| `segment` / `polygon` / `square` (points) | polygon (open or closed) | CPU polyline / fill |
+| `line(A,B)`, `circle(A, r)` | lowered to an implicit curve | 2D distance-estimate shader |
+| tuple-equation, square (`(r, theta) = (2, pi/4)`, `F(x,y,z) = (a,b,c)`, RHS in u) | system: solved point set / traced curve | lib/solve.ts Newton + continuation; overlay dots / polyline |
+| complex equation `f(w) = c` | root point set (as a 2×2 real system) | same solver; numeric positions |
+| `(r', theta') = (F, G)` over coordinate fields | chart flow, lowered to a vector field | LIC + click-to-trace |
+| complex constant (`1+2i`) | Argand point | overlay dot |
+| bare expression with no plot coordinate (`2+2`, `\|A-B\|`, `dot(A,B)`, `int[0..1] x^2 dx`) | value readout | "= 4" on the row, nothing drawn |
+| `y = int[0..x] …` / `f(x) = int[0..x] …` | integral as a function | quadrature sum inlined into the ordinary paths |
+| `{cond: val, …}`; no default = restriction | piecewise value | flows through every renderer (NaN outside the cases) |
+| `a_n = …`; `a_{n+1} = …` | sequence dots (+ Σ toggle); cobweb / bifurcation | CPU overlay |
+| `[…]`, `[1..5]`, `L^2`; `(L, L^2)`; `hist(L)` | scalar list (dots/bars); zipped scatter; histogram | CPU overlay |
+| `data = open("file.csv")`, `data.col` | table; a numeric column is a list | definition |
+| `Y ~ m X + b` | regression: binds the fitted parameters | fit readout on the row |
+| `a' = f(…)`, `a(0) = …`; `r' = (…, …, …)` | time-integrated state (scalar or 2/3-vector) | RK4 between frames; a constant to every consumer |
+| `trail(point)` | motion trail | polyline (2D/3D) |
 | tuple in u (`tube(…)` opt-in) | parametric curve | polyline / tube + κ/τ combs |
 | 3-tuple in u, v | parametric surface | Newton raymarcher |
 | 2-tuple in x, y; `dy/dx =`, `y' =`, `(x', y') =` | vector field / slope field / phase portrait | LIC + click-to-trace RK4 |
@@ -83,6 +108,16 @@ of "what should render as what" in custom coordinates, and should stay:
   compose to; keep it.
 
 ## 3. In flight: the open PRs
+
+*Status, 2026-09-18:* the features of #1, #6, #17, #25, #31 (extended to
+vector states in #55), and #32 are on main, and #36's solve engine landed
+with the coordinate objects in #94. #35's decided comparisons are **not** on
+main: `e = 2` and `2+2=4` still classify as (empty or degenerate) implicit
+curves with no note. The prime dispatch below is implemented (a lone primed field errors, though
+its message does not yet point at the tuple form); the
+`[…]` collision is settled in direction (bare list of points = dots) but
+`polyline(…)` itself is finish-plan #1. The table is kept as written, for the
+reasoning about where each piece sits.
 
 Eight branches exist and render; none is merged. Adopting or rejecting any of
 them changes the roadmap below, not the principle. (#36 stacks on #1; #25
@@ -128,34 +163,35 @@ and coordinates always come from the text, so the hash stays the document.
 ## 4. What Desmos and Wolfram|Alpha render that we don't
 
 Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
-"Here" reflects master; open PRs appear as pending.
+"Here" reflects main as of 2026-09-18; "plan #n" is the PR number in
+[objects-finish-plan.md](objects-finish-plan.md).
 
 | Object / capability | Desmos | W\|A | Here | Disposition |
 |---|---|---|---|---|
-| points in polar / user coordinates | ~ (polar curves only) | ✓ | — | **adopt, §6** — #36 + field substitution already cover the base case; §6 adds the deltas |
-| solutions/roots marked, exact labels | ~ (click) | ✓ | PRs #1, #36 pending | pending PRs; §6 routes complex roots through the same engine |
-| intersection points of curves | ✓ | ✓ | PR #36 pending (as systems) | pending #36; §6 named-tuple form is sugar over it |
-| ODEs / flows in non-Cartesian coordinates | — | ✓ | — | **adopt, §6** (needs the prime dispatch of §3) |
-| time-integrated simulation (no closed form) | ~ (tickers) | — | PR #31 pending | its own decision track; composes with §6 (a simulated point in a chart) |
-| named points, vector arithmetic (`A = (1,2)`, `\|A-B\|`) | ✓ | ✓ | — (defs are scalar-only) | adopt, phase 2 |
-| draggable points | ✓ | — | PR #32 pending | pending #32; extend its writeback to solved points (§6) |
-| segments, polygons, circles, vectors-as-arrows | ✓ | ✓ | — | adopt, phase 2 (`polyline(…)` also resolves the `[…]` collision, §3) |
-| midpoint/distance/angle readouts | ✓ | ✓ | — | adopt, phase 2, via #35's PlotNote channel + #1's exact labels |
+| points in polar / user coordinates | ~ (polar curves only) | ✓ | ✓ | **shipped** (§6, phase 1): `(r, theta) = (2, 9pi/4)`, chart parametrics, non-injective preimages |
+| solutions/roots marked, exact labels | ~ (click) | ✓ | ✓ (hover roots with exact labels; systems marked numerically) | shipped; exact labels for *complex* roots remain (plan tail) |
+| intersection points of curves | ✓ | ✓ | ✓ (as systems) | shipped: `(x, y) = (y, -sin(x))` |
+| ODEs / flows in non-Cartesian coordinates | — | ✓ | ✓ | **shipped** (§6), with the prime dispatch of §3 |
+| time-integrated simulation (no closed form) | ~ (tickers) | — | ✓ (scalar and 2/3-vector states) | shipped; composes with §6 (a simulated point in a chart) |
+| named points, vector arithmetic (`A = (1,2)`, `\|A-B\|`) | ✓ | ✓ | ✓ (2 components only) | shipped; 3-component named points are plan #10 |
+| draggable points | ✓ | — | ✓ | shipped, including writeback for 2D coordinate points (§6) |
+| segments, polygons, circles, vectors-as-arrows | ✓ | ✓ | ✓ `segment`/`line`/`polygon`/`square`/`circle`; `polyline`, `vector` error | remaining: plan #1 (`polyline(…)` also resolves the `[…]` collision, §3) |
+| midpoint/distance/angle readouts | ✓ | ✓ | ✓ `midpoint`, `\|A-B\|`, `dot`, `cross`; `distance`, `angle` error | remaining: plan #2. Readouts ride the `value` row, not #35's PlotNote channel (which never landed) |
 | domain restrictions `{a < x < b}` | ✓ | ~ | ✓ (as piecewise) | **done, no new grammar**: a piecewise with no default is undefined outside its cases, so `y = {a < x < b: f(x)}` restricts any row kind. A Desmos-style trailing `f(x) {a < x < b}` suffix is not planned — it would collide with brace grouping (`2{x + 1}`) for nothing the case form lacks |
 | piecewise functions | ✓ | ✓ | ✓ (#6) | shipped |
-| definite integrals (value + `∫₀ˣ` as a function) | ✓ | ✓ | — | adopt, phase 3 |
-| distribution zoo (uniform, exponential, t, binomial, Poisson…) | ✓ | ✓ | Normal only | adopt, phase 3; #6's bar rendering is the seed of the discrete stem/bar renderer |
+| definite integrals (value + `∫₀ˣ` as a function) | ✓ | ✓ | ✓ (value, `int[0..x]` as a function, iterated) | shipped; area shading on the value row is plan #3 |
+| distribution zoo (uniform, exponential, t, binomial, Poisson…) | ✓ | ✓ | Normal, Uniform, Exponential (+ derived arithmetic) | remaining: plan #4 (continuous), #5–#6 (discrete; the list/histogram bar rendering is the seed of the stem renderer) |
 | value readout for constant rows (`2+2` → "= 4") | ✓ | ✓ | ✓ | **done**: a bare expression with no plot coordinate is a `value` row — it reads out "= 4" live and draws nothing (it no longer assumes `y =`). This is also the measurement readout: `\|A-B\|` reads the distance |
-| complex constants as Argand points (`1+2i`) | ✓ | ✓ | degenerate render | adopt, small (phase 1.5) |
-| complex root sets (`w³ = 1`) | ~ | ✓ | error | adopt, §6 (same solver; exact labels via #1 when polynomial) |
-| sequences (stem plots), recurrences, cobwebs, bifurcation | ~ | ✓ | PR #6 pending | pending #6 |
-| lists / families of objects | ✓ | ~ | PR #6 pending (literals only) | #6 covers literal scatter/bars; broadcasting families over any object remain phase 5 |
-| complex parametric curves (image of a path under f) | ~ | ✓ | rejected by classifier | adopt, phase 4 (needs a complex CPU evaluator) |
-| 3D vector fields / 3D ODE flows (Lorenz) | — | ✓ | 2D only (#31 states can already animate a 3D point row) | adopt, phase 4 (auto-seeded trajectories; click is ambiguous in 3D) |
-| spherical/cylindrical coordinate systems | — | ✓ | fields reject z | adopt, phase 4 (substitution already suffices for surfaces) |
-| surfaces of revolution | — | ✓ | — | adopt, phase 4 (`revolve(f)` desugars to an implicit) |
-| space curves as intersections of two surfaces | — | ✓ | — | later — the non-square (2-of-3) extension of #36's systems, which are square-only |
-| tables / data / regressions | ✓ | ✓ | — | **rejected for now** (no data model; #6's list literals edge toward it — revisit then) |
+| complex constants as Argand points (`1+2i`) | ✓ | ✓ | ✓ | shipped (phase 1.5) |
+| complex root sets (`w³ = 1`) | ~ | ✓ | ✓ (numeric positions) | shipped (§6); exact labels when polynomial remain (plan tail) |
+| sequences (stem plots), recurrences, cobwebs, bifurcation | ~ | ✓ | ✓ (#6) | shipped; sequence terms as values (`a_3`, `a_[1..10]`) are plan #15 |
+| lists / families of objects | ✓ | ~ | scalar list math, ranges, zipped scatters, `hist` only | a list inside an equation, geometry statement, or point arithmetic errors; families are plan #13–#14 |
+| complex parametric curves (image of a path under f) | ~ | ✓ | rejected by classifier | plan #8. Does *not* need a complex CPU evaluator, as this row once claimed: `complexParts` splits the expression into a real 2D `pcurve` |
+| 3D vector fields / 3D ODE flows (Lorenz) | — | ✓ | fields 2D only; Lorenz runs as one 3-component state (a 3D point + `trail`) | plan #11–#12 (auto-seeded trajectories; click is ambiguous in 3D) |
+| spherical/cylindrical coordinate systems | — | ✓ | fields reject z (a 2D field used in a z equation already works) | plan #9 (substitution already suffices for surfaces) |
+| surfaces of revolution | — | ✓ | — | plan #7 (`revolve(f)` desugars to an implicit) |
+| space curves as intersections of two surfaces | — | ✓ | — ("2 equations in 3 unknowns") | plan tail — the non-square (2-of-3) extension of systems, which are square-only |
+| tables / data / regressions | ✓ | ✓ | ✓ CSV via `open(…)`, columns as lists, `Y ~ m X + b` | **shipped** — the rejection was revisited once lists gave it a data model (docs/lists-tables-plan.md) |
 | actions, tickers, scripting | ✓ | — | — | **rejected**: #31 delivers the legitimate mathematical core (simulation) declaratively, without a scripting model |
 | a "polar mode" grid toggle | ✓ | ✓ | — | **rejected** (§7: coordinate systems are user-defined math, not app modes) |
 
@@ -178,8 +214,8 @@ shape before value type:
    restrictions).
 4. Tuples by free vars: none → point; u(,v) → parametric; x,y → vector field.
 5. Inequalities → regions; equations → implicit curve/surface; a comparison
-   with no free variables → decided note (#35); complex equations → root
-   point set (§6) instead of today's error.
+   with no free variables → decided note (#35, not shipped); complex
+   equations → root point set (§6, shipped).
 6. Bare scalars: x → graph; x,y → scalar field; complex → field lines;
    constant → a **"= value" readout, nothing drawn** (`y = 4` is the line); constant complex
    → Argand point.
@@ -189,6 +225,9 @@ Everything else keeps failing loudly with a suggestion.
 ## 6. Design: positional objects in user coordinate systems
 
 ### The gap
+
+*(Closed: everything in this section shipped in phase 1 except exact labels
+on complex roots. The text is kept as the design record.)*
 
 Coordinate fields make every *scalar* context chart-aware (§2), but tuples are
 axis-bound: with polar defined, `(2, pi/4)` is the Cartesian point x=2,
@@ -302,28 +341,32 @@ interface.
 
 ## 7. Roadmap
 
-Phases assume nothing about the open PRs; each line says what changes if the
-relevant PR is adopted first.
+Status as of 2026-09-18. Struck-through items are on main; what is left of
+phases 2–5 is ordered, PR by PR, in
+[objects-finish-plan.md](objects-finish-plan.md) ("plan #n" below).
 
 | Phase | Contents | Size |
 |---|---|---|
-| 1 — coordinate objects | position rows, chart parametrics, flow rows. On #36: the five deltas of §6. Without it: §6's standalone engine, named-tuple form only | M (S if #36 lands) |
-| 1.5 — coherence wins | complex roots `f(w) = c` (+ #1 labels); ~~Argand points for complex constants~~; ~~"= value" readouts on constant rows~~ — all shipped | S |
-| 2 — geometry | tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`), named draggable points (on #32's writeback), `polyline`/`segment`/`polygon`/`circle`/`vector` arrows (settling §3's `[…]` collision), measurement readouts | M–L |
-| 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (shipped with #6: a no-default piecewise *is* the restriction, see §4), definite integrals (value, `∫₀ˣ` via CPU LUT texture, area shading), distribution zoo with discrete stem/bar rendering (seeded by #6's bars) | L |
-| 4 — space | fields over z (spherical/cylindrical surfaces by substitution), 3D flows with auto-seeded trajectories (Lorenz), 3D arrow fields, `revolve()` | L |
-| 5 — families | lists broadcasting over any object kind (#6's literals are the seed); then sequences-as-lists interop, scatter/data | XL |
+| 1 — coordinate objects | ~~position rows, chart parametrics, flow rows~~ — **shipped** (the five deltas of §6 on the #36 engine) | done |
+| 1.5 — coherence wins | ~~complex roots `f(w) = c`~~ (numeric; exact labels → plan tail); ~~Argand points for complex constants~~; ~~"= value" readouts on constant rows~~ — **shipped** | done |
+| 2 — geometry | ~~tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`)~~, ~~named draggable points~~, ~~`segment`/`line`/`polygon`/`square`/`circle`~~, ~~`\|A-B\|`/`midpoint`/`dot`/`cross` readouts~~. Remaining: `polyline` and `vector` arrows (plan #1, settling §3's `[…]` collision), `distance`/`angle` (plan #2) | S + S left |
+| 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (a no-default piecewise *is* the restriction, see §4), ~~definite integrals: value, `int[0..x]` as a function, iterated~~, ~~Uniform/Exponential and derived-variable arithmetic~~. Remaining: area shading on a definite-integral row (plan #3), continuous zoo (plan #4), discrete distributions with a stem renderer (plan #5), discrete variables in derived arithmetic (plan #6). Dropped: "`∫₀ˣ` via CPU LUT texture" — `y = int[0..x] …` already plots through the quadrature sum; revisit only if a perf guard trips | S + M + M + M left |
+| 4 — space | ~~Lorenz~~ as a 3-component state with `trail` (one trajectory). Remaining: `revolve()` (plan #7), complex parametric curves (plan #8), fields over z + 3D coordinate points (plan #9), 3D named points and geometry (plan #10), 3D vector fields with auto-seeded trajectories (plan #11), 3D chart flows + arrow glyphs (plan #12) | L |
+| 5 — families | ~~scalar list math, ranges, zipped scatters, `hist`, CSV tables, regression~~. Remaining: lists broadcasting over any object kind (plan #13 CPU objects and point lists, #14 shader rows), sequences-as-lists interop (plan #15) | XL |
+| tail | exact complex-root labels; space curves from 2-of-3 systems; certified solving (plan #16+) | M each |
 
-Independent decision tracks, orthogonal to the phases: #31 (simulation
-states — a definition kind; decide the §3 prime dispatch with it), #35
-(decided comparisons — adopt early; later phases want its PlotNote channel),
-#1/#32 (readouts and dragging — phase 1.5/2 build on them but don't require
-them), #17/#25 (infrastructure and styling; #17 obliges new renderers to
-add an og-rasterizer path).
+The independent decision tracks have all resolved except one: #31 (states,
+with the §3 prime dispatch), #1/#32 (readouts and dragging), and #17/#25
+(infrastructure and styling) are on main — #17's obligation stands, every
+new renderer needs an og-rasterizer path or an explicit fallback. #35
+(decided comparisons and its PlotNote channel) is still open and nothing in
+the finish plan depends on it; the readouts it was wanted for shipped as
+`value` rows instead.
 
-Phase 1 first: it is the user-visible gap this document exists for, it
-*completes* invariant 1 rather than complicating the model, and — with #36
-in flight — it is the cheapest it will ever be.
+Phase 1 went first because it was the user-visible gap this document exists
+for and *completes* invariant 1. The remaining order — object kinds before
+families, so the family path is a one-time sweep — is argued in the finish
+plan.
 
 ## 8. Rejected designs
 
