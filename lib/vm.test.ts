@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluate, parseExpr } from '../lib/expr.ts';
+import { evaluate, parseExpr } from './expr.ts';
 import { compileProg, compileSampler, run } from './vm.ts';
 
 describe('expression stack machine', () => {

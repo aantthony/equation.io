@@ -48,7 +48,7 @@ import {
   toProbability,
 } from '../lib/dist.ts';
 import { type IntShade, type ShadeRun, type ShadeSampler, evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
-import { compileSampler } from '../worker/vm.ts';
+import { compileSampler } from '../lib/vm.ts';
 import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';

@@ -3,7 +3,7 @@ import { evaluate } from '../lib/expr.ts';
 import { boundValue } from '../lib/intshade.ts';
 import { toGLSL } from '../lib/glsl.ts';
 import { analyze } from './graph.ts';
-import { compileProg, run as runProg } from './vm.ts';
+import { compileProg, run as runProg } from '../lib/vm.ts';
 
 /** [error ?? plot type, readout] per row. */
 const out = (texts: string[]) => analyze(texts).rows.map(r => [r.error ?? r.cls?.plot.type ?? 'def', r.info]);

@@ -263,7 +263,7 @@ export function shadeNames(shade: IntShade): string[] {
 export type ShadeSampler = (env: Record<string, number>) => (x: number) => number;
 
 /** The tree-walking sampler; renderers pass the compiled one instead
- *  (worker/vm.ts compileSampler). The integration variable is bound per
+ *  (lib/vm.ts compileSampler). The integration variable is bound per
  *  sample, shadowing any constant or `t` of the same name. */
 export const evalSampler = (shade: IntShade): ShadeSampler => env => {
   const scope = { ...env };

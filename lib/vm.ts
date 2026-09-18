@@ -5,7 +5,7 @@
  * sample is too slow and Workers forbid dynamic codegen (`new Function`), so
  * expressions compile once to opcode arrays run by a small stack machine.
  */
-import { ANGLE_FN, ANGLE_RATE_FN, type Expr, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, plainFnName, realPow, sincFn } from '../lib/expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, type Expr, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, plainFnName, realPow, sincFn } from './expr.ts';
 
 const enum Op { Const, Var, Add, Sub, Mul, Div, Pow, Neg, Fn1, Fn2, Fn3, Lt, Le, Gt, Ge, Sel, Fn4 }
 

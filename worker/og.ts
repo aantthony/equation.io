@@ -2,7 +2,7 @@
  * CPU renderer for /g/ link-preview images (og:image).
  *
  * Workers have no WebGL, so this rasterizes directly: expressions compile to
- * stack programs (vm.ts) and 2D plots sample per pixel — implicit curves via
+ * stack programs (lib/vm.ts) and 2D plots sample per pixel — implicit curves via
  * the same |F|/|∇F| distance estimate the shader uses, regions as fills,
  * scalar fields as a colormap. 3D rows draw as projected wireframes
  * (parametric surfaces/curves, z = f(x,y) heightmaps). Output is a PNG built
@@ -16,7 +16,7 @@ import { solveSystem, traceSystem } from '../lib/solve.ts';
 import type { Plot } from '../lib/plot.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
-import { type Prog, compileProg, compileSampler, run } from './vm.ts';
+import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 
 // Matches web/main.ts PALETTE.
 const PALETTE: [number, number, number][] = [
