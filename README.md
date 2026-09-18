@@ -75,6 +75,8 @@ pnpm deploy     # build and deploy to Cloudflare
 - `y = {x < 0: -x, x >= 0: x^2}` — piecewise: `cond: value` cases tried in
   order, an optional last bare value is the default; conditions chain like
   `{0 < x < 1: 1, 0}`
+- `y = {0 < x < 2: x^2}` — a domain restriction: with no default, the value
+  is undefined outside the conditions, so nothing is drawn there
 - `sin(x)cos(y)` — a bare expression in x, y is a 2D scalar/density field
 
 **Sliders and animation**

@@ -385,6 +385,14 @@ describe('piecewise', () => {
     expect(g).toContain('?');
   });
 
+  it('compiles a missing default to a real NaN, not a foldable literal', () => {
+    // ANGLE constant-folds sqrt(-1.0) to 0.0, so {x > 3: 2} + 1 drew y = 1.
+    const g = toGLSL(parseExpr('{x > 3: 2}'));
+    expect(g).toContain('EQ_NAN');
+    expect(GLSL_PRELUDE).toContain('#define EQ_NAN uintBitsToFloat');
+    expect(GLSL_PRELUDE).not.toContain('sqrt(-1.0);');
+  });
+
   it('rejects non-inequality conditions', () => {
     expect(() => parseExpr('{x: 1, 2}')).toThrow(/inequalities/);
   });

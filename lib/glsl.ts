@@ -26,6 +26,9 @@ export const FN_GLSL: Record<string, string> = {
 
 /** Helper functions some expressions need; prepend once to the shader. */
 export const GLSL_PRELUDE = `
+// A real NaN. The literal sqrt(-1.0) is undefined in GLSL and ANGLE
+// constant-folds it to 0.0, which turned "undefined" into a plotted zero.
+#define EQ_NAN uintBitsToFloat(0x7fc00000u)
 float eq_log10(float x) { return log(x) * 0.4342944819032518; }
 float eq_round(float x) { return floor(x + 0.5); }
 float eq_sech(float x) { return 1.0 / cosh(x); }
@@ -58,7 +61,7 @@ float eq_isprime(float x) {
   // Trial division; floats are exact for integers below 2^24 (cap covers n < ~4.2M).
   // Beyond that the divisors run out before √n, so the answer is unknown, not
   // prime — report NaN, matching the CPU twin (both bounded by ISPRIME_MAX).
-  if (n > ${ISPRIME_MAX}.0) return sqrt(-1.0);
+  if (n > ${ISPRIME_MAX}.0) return EQ_NAN;
   for (int i = 2; i < 2048; i++) {
     float fi = float(i);
     if (fi * fi > n) break;
@@ -108,12 +111,12 @@ float eq_pow(float a, float b) {
     float pr = p / g;
     float qr = fq / g;
     if (abs(b - pr / qr) < 1e-6) {
-      if (mod(qr, 2.0) < 0.5) return sqrt(-1.0); // even root: undefined
+      if (mod(qr, 2.0) < 0.5) return EQ_NAN; // even root: undefined
       float sign = mod(abs(pr), 2.0) > 0.5 ? -1.0 : 1.0;
       return sign * pow(-a, b);
     }
   }
-  return sqrt(-1.0); // no small-denominator rational found
+  return EQ_NAN; // no small-denominator rational found
 }
 // Complex arithmetic on vec2(re, im).
 vec2 c_mul(vec2 a, vec2 b) { return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x); }
@@ -148,7 +151,7 @@ export function piecewiseGLSL(
   e: Expr & { kind: 'piecewise' },
   emit: (x: Expr) => string,
 ): string {
-  let out = e.otherwise ? emit(e.otherwise) : 'sqrt(-1.0)';
+  let out = e.otherwise ? emit(e.otherwise) : 'EQ_NAN';
   for (let k = e.cases.length - 1; k >= 0; k--) {
     const c = e.cases[k];
     out = `((${condGLSL(c.cond, emit)}) ? ${emit(c.value)} : ${out})`;
