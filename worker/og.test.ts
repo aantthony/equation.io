@@ -98,6 +98,13 @@ describe('og raster renderer', () => {
     const gap = renderRaster(['f(x) = {x < 1: 3}', 'int[-3..3] f(x) dx', view], 100, 100);
     expect(Math.min(...pixel(gap, 25, 35))).toBeLessThan(245);
     expect(Math.min(...pixel(gap, 75, 35))).toBeGreaterThan(230);
+    // A range wider than the view has no edge at the border: the fill runs
+    // off-canvas, and no vertical line is stroked where the view cut it.
+    const wide = renderRaster(['int[-100..inf] (2 + x/10) dx', view], 100, 100);
+    expect(pixel(wide, 0, 40)[2]).toBeGreaterThan(pixel(wide, 0, 40)[0] + 10); // filled…
+    for (const x of [0, 1, 98, 99]) expect(pixel(wide, x, 40)[0]).toBeGreaterThan(200); // …not stroked
+    // A bound inside the view keeps its vertical edge: world x = 3 is px 80.
+    expect(pixel(r, 80, 35)[0]).toBeLessThan(120);
     // Nothing in a 3D scene, like the app.
     const solo3d = renderRaster(['z = x + y'], 100, 100);
     expect(renderRaster(['z = x + y', 'int[-3..3] x dx'], 100, 100).px).toEqual(solo3d.px);

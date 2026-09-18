@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { parseExpr } from './expr.ts';
-import { SHADE_MAX_EVALS, SHADE_SAMPLES, boundValue, integralAreas, shadeAreas } from './intshade.ts';
+import {
+  SHADE_MAX_EVALS, SHADE_SAMPLES, type ShadeRun, boundValue, integralRuns, runPaths, shadeNames, shadeRuns,
+} from './intshade.ts';
 
 const WIN = { xmin: -10, xmax: 10, ymin: -5, ymax: 5 };
+type Win = typeof WIN;
+
+/** The runs as closed fill polygons under the window, split by tint. */
+function integralAreas(f: (x: number) => number, lo: number, hi: number, win: Win) {
+  const runs = integralRuns(f, lo, hi, win.xmin, win.xmax);
+  const fills = (sign: number) => runs.filter(r => r.sign === sign).map(r => runPaths(r, win.ymin, win.ymax).fill);
+  return { pos: fills(1), neg: fills(-1) };
+}
 
 /** Shoelace area of a closed [x0, y0, …] polygon (positive, whatever its winding). */
 function area(p: number[]): number {
@@ -126,6 +136,42 @@ describe('integralAreas', () => {
     expect(total(pos)).toBeCloseTo(1.4, 5);
   });
 
+  it('finds a sign change between values whose product underflows', () => {
+    // 1e-170 · 1e-170 is 0 in floating point; the signs still differ.
+    const { pos, neg } = integralAreas(x => x * 1e-170, -1, 1.003, WIN);
+    expect([pos.length, neg.length]).toEqual([1, 1]);
+    expect(Math.max(...xs(neg[0]))).toBeCloseTo(0, 6);
+    expect(Math.min(...xs(pos[0]))).toBeCloseTo(0, 6);
+  });
+
+  it('strokes only real edges: no vertical where the window clipped the range', () => {
+    const open = (r: ShadeRun) => runPaths(r, -5, 5).stroke;
+    // Bounds inside the view: verticals at a and b, down to the axis.
+    const [inside] = integralRuns(x => 2 + x / 10, -3, 3, -10, 10);
+    expect([inside.clipLo, inside.clipHi]).toEqual([false, false]);
+    expect(open(inside).slice(0, 2)).toEqual([-3, 0]);
+    expect(open(inside).slice(-2)).toEqual([3, 0]);
+    // Bounds far outside: the curve alone, ending ON the curve at the window.
+    const [clipped] = integralRuns(x => 2 + x / 10, -100, Infinity, -10, 10);
+    expect([clipped.clipLo, clipped.clipHi]).toEqual([true, true]);
+    expect(open(clipped).slice(0, 2)).toEqual([-10, 1]);
+    expect(open(clipped).slice(-2)).toEqual([10, 3]);
+    // The fill still closes down to the axis either way.
+    expect(runPaths(clipped, -5, 5).fill.slice(0, 2)).toEqual([-10, 0]);
+    // A gap is a real edge even at a clipped range; only the window cut is not.
+    const runs = integralRuns(x => (Math.abs(x) >= 1 ? 1 : NaN), -100, 100, -10, 10);
+    expect(runs.map(r => [r.clipLo, r.clipHi])).toEqual([[true, false], [false, true]]);
+    // A bound exactly on the window edge is a bound, not a clip.
+    expect(integralRuns(x => 1, -10, 10, -10, 10)[0]).toMatchObject({ clipLo: false, clipHi: false });
+  });
+
+  it('sampling ignores the vertical window: the clamp happens in runPaths', () => {
+    const [run] = integralRuns(x => 1 / x, 0.001, 1, -10, 10);
+    expect(Math.max(...ys(run.pts))).toBe(1000);
+    expect(Math.max(...ys(runPaths(run, -5, 5).fill))).toBe(15);
+    expect(Math.max(...ys(runPaths(run, -5, 5).stroke))).toBe(15);
+  });
+
   it('perf guard: evaluations are capped however wild the integrand', () => {
     let evals = 0;
     const f = (x: number) => { evals++; return Math.sin(61 * x); }; // flips sign between most samples
@@ -142,8 +188,17 @@ describe('integralAreas', () => {
 describe('shadeAreas / boundValue', () => {
   it('binds the integration variable per sample, shadowing t and constants', () => {
     const shade = { body: parseExpr('a t'), v: 't', lo: parseExpr('0'), hi: parseExpr('b') };
-    const { pos } = shadeAreas(shade, { a: 2, b: 1, t: 99 }, WIN);
-    expect(total(pos)).toBeCloseTo(1, 4);
+    const runs = shadeRuns(shade, { a: 2, b: 1, t: 99 }, -10, 10);
+    expect(total(runs.map(r => runPaths(r, -5, 5).fill))).toBeCloseTo(1, 4);
+  });
+
+  it('shadeNames: the dx variable is bound in the integrand only, not in the bounds', () => {
+    // int[0..t] t^2 dt: the bound's t is time, so the shade must follow it.
+    const timed = { body: parseExpr('t^2'), v: 't', lo: parseExpr('0'), hi: parseExpr('t') };
+    expect(shadeNames(timed)).toEqual(['t']);
+    const plain = { body: parseExpr('a x'), v: 'x', lo: parseExpr('-inf'), hi: parseExpr('b + c') };
+    expect(shadeNames(plain).sort()).toEqual(['a', 'b', 'c']);
+    expect(shadeNames({ ...plain, body: parseExpr('x') , hi: parseExpr('inf') })).toEqual([]);
   });
 
   it('reads ±inf bounds, and NaN for a bound with no value yet', () => {

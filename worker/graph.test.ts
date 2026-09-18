@@ -120,6 +120,11 @@ describe('definite-integral rows shade their area', () => {
     const f = shadeOf(['f(x) = {x < 1: x}', 'int[0..2] f(x) dx'])!;
     expect(evaluate(f.body, { x: 0.5 })).toBe(0.5);
     expect(evaluate(f.body, { x: 1.5 })).toBeNaN();
+    // A Σ inside the integrand, and a user function that is itself a
+    // quadrature, are still one integral of one real integrand.
+    expect(evaluate(shadeOf(['int[0..1] sum[n=1..2] x^n dx'])!.body, { x: 2 })).toBe(6);
+    const si = shadeOf(['F(x) = int[0..x] sin(s)/s ds', 'int[0..3] F(x) dx'])!;
+    expect(evaluate(si.body, { x: 1 })).toBeCloseTo(0.946083, 5);
     // Reductions and point arithmetic are lowered exactly as in the row itself.
     expect(evaluate(shadeOf(['L = [1, 2, 3]', 'int[0..1] total(L) x dx'])!.body, { x: 2 })).toBe(12);
     const p = shadeOf(['A = (3, 4)', 'int[0..1] |A| x dx'])!;
@@ -138,10 +143,26 @@ describe('definite-integral rows shade their area', () => {
       expect(analyze(texts).rows[0].cls!.plot).toMatchObject({ type: 'value' });
       expect(shadeOf(texts)).toBeUndefined();
     }
-    // A name the document already binds stays a plain readout: it may be a
-    // list or a point, which lowering would substitute from under the dx.
-    expect(analyze(['a = 2', 'int[0..1] a da']).rows[1].info).toBe('= 0.5');
-    expect(shadeOf(['a = 2', 'int[0..1] a da'])).toBeUndefined();
+  });
+
+  it('the dx variable shadows whatever else the document calls by that name', () => {
+    // A slider: the readout is 0.5, and the picture is y = k over [0, 1].
+    const k = shadeOf(['k = 3', 'int[0..1] k dk'])!;
+    expect(analyze(['k = 3', 'int[0..1] k dk']).rows[1].info).toBe('= 0.5');
+    expect(evaluate(k.body, { k: 0.25 })).toBe(0.25);
+    // A list or a point: lowering must not substitute it for the bound name…
+    for (const def of ['L = [1, 2, 3]', 'L = (1, 2)']) {
+      const rows = [def, 'int[0..1] L^2 dL'];
+      expect(analyze(rows).rows[1].info).toBe('≈ 0.333333');
+      expect(shadeOf(rows)!.body).toEqual(shadeOf(['int[0..1] L^2 dL'])!.body);
+      expect(evaluate(shadeOf(rows)!.body, { L: 3 })).toBe(9);
+    }
+    // …while in the BOUNDS the name keeps its document meaning.
+    const b = shadeOf(['k = 3', 'int[0..k] k dk'])!;
+    expect(evaluate(b.hi, { k: 3 })).toBe(3);
+    expect(analyze(['k = 3', 'int[0..k] k dk']).rows[1].info).toBe('= 4.5');
+    // And a list elsewhere in the integrand still lowers as usual.
+    expect(evaluate(shadeOf(['L = [1, 2, 3]', 'int[0..1] total(L) k dk'])!.body, { k: 2 })).toBe(12);
   });
 
   it('rows that are not a number never shade', () => {

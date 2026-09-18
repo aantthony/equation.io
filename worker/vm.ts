@@ -182,3 +182,27 @@ export function run(p: Prog, vars: ArrayLike<number>, stack: Float64Array): numb
   }
   return stack[sp - 1];
 }
+
+/**
+ * A one-variable sampler over a compiled program, for CPU paths that evaluate
+ * one expression hundreds of times a frame (a definite integral's shaded
+ * area): bind the frame's values once, then call per x. `names` are the other
+ * variables the expression reads; one without a value reads NaN, as an
+ * unbound name makes the tree-walking evaluator's result undefined. Null when
+ * the expression has a form the VM does not run — callers fall back to
+ * evaluate().
+ */
+export function compileSampler(
+  e: Expr, v: string, names: readonly string[],
+): ((env: Record<string, number>) => (x: number) => number) | null {
+  const others = names.filter(n => n !== v);
+  const slots = new Map<string, number>([[v, 0], ...others.map((n, k): [string, number] => [n, k + 1])]);
+  let prog: Prog;
+  try { prog = compileProg(e, slots); } catch { return null; }
+  const vars = new Float64Array(others.length + 1);
+  const stack = new Float64Array(Math.max(prog.depth, 1));
+  return env => {
+    others.forEach((n, k) => { vars[k + 1] = Object.hasOwn(env, n) ? env[n] : NaN; });
+    return x => { vars[0] = x; return run(prog, vars, stack); };
+  };
+}

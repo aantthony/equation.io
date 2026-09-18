@@ -16,10 +16,10 @@ import {
   listNamesOf,
   isListName,
   indexIssue,
-  integralShade,
   MissingDataError,
   nameTaken,
   resolveExpr,
+  resolveRow,
   shadowedFnNames,
   scanDefinition,
   timeDifferentiator,
@@ -42,7 +42,7 @@ import {
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
-import { type Classified, classify, valueReadout } from '../lib/plot.ts';
+import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
 import { scanRegressions, formatFit } from '../lib/regression.ts';
 import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
 import { buildStateSystem, initialState } from '../lib/state.ts';
@@ -335,7 +335,8 @@ export function analyze(texts: string[]): Analysis {
         continue;
       }
       const rawParsed = parseExpr(row.text, fnNames, listNames, valueNames);
-      let parsed = resolveExpr(rawParsed, getFn, ropts);
+      const resolved = resolveRow(rawParsed, getFn, ropts);
+      let parsed = resolved.expr;
       // A bare expression in random variables plots that derived density.
       const rvRefs = [...freeVars(parsed)].filter(n => rvNames.has(n));
       if (rvRefs.length) {
@@ -366,16 +367,12 @@ export function analyze(texts: string[]): Analysis {
         lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null),
         getList, ropts,
       );
-      parsed = lower(parsed);
-      row.cls = classify(parsed, constNames, fieldEnv, timeDifferentiator(defs));
+      ({ cls: row.cls, parsed } = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)));
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       row.expr = parsed;
       // A number is its own answer: the row reads out "= value" and draws
       // nothing (mirror of web/main.ts). Evaluated at t = 0 here.
       if (row.cls.plot.type === 'value') {
-        // Exactly one definite integral also shades its area (lib/intshade.ts).
-        const shade = integralShade(rawParsed, getFn, ropts, lower, constNames);
-        if (shade) row.cls.plot.shade = shade;
         try { row.info = valueReadout(evaluate(parsed, { ...constEnv, t: 0 })); }
         catch { /* not computable statically (a state, say): no readout */ }
       }

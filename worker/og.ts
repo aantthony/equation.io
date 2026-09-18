@@ -9,14 +9,14 @@
  * with CompressionStream — no image library.
  */
 import { densityAt, pdfExpr, shadePolygon } from '../lib/dist.ts';
-import { minusTint, shadeAreas } from '../lib/intshade.ts';
+import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import type { Plot } from '../lib/plot.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
-import { type Prog, compileProg, run } from './vm.ts';
+import { type Prog, compileProg, compileSampler, run } from './vm.ts';
 
 // Matches web/main.ts PALETTE.
 const PALETTE: [number, number, number][] = [
@@ -318,25 +318,28 @@ function renderRow2D(
     // 'value'): parts adding to the value in the row color, parts subtracting
     // in its complement. Any other readout draws nothing, as in the app.
     if (!cls.plot.shade) return;
+    const shade = cls.plot.shade;
     const halfW = (r.w / 2) * v.upp;
     const halfH = (r.h / 2) * (v.upp / (v.ratio ?? 1));
-    const areas = shadeAreas(cls.plot.shade, { ...analysis.constEnv, t: 0 }, {
-      xmin: v.cx - halfW, xmax: v.cx + halfW, ymin: v.cy - halfH, ymax: v.cy + halfH,
-    });
+    const sampler = compileSampler(shade.body, shade.v, shadeNames(shade)) ?? evalSampler(shade);
+    const runs = shadeRuns(shade, { ...analysis.constEnv, t: 0 }, v.cx - halfW, v.cx + halfW, sampler);
     const minus = minusTint(color);
-    for (const [polys, c] of [[areas.pos, color], [areas.neg, minus]] as const) {
-      for (const pts of polys) {
+    for (const run of runs) {
+      const c = run.sign > 0 ? color : minus;
+      const { fill, stroke } = runPaths(run, v.cy - halfH, v.cy + halfH);
+      const screen = (pts: number[]) => {
         const sx: number[] = [], sy: number[] = [];
         for (let i = 0; i + 1 < pts.length; i += 2) {
           sx.push(toScreenX(r, v, pts[i]));
           sy.push(toScreenY(r, v, pts[i + 1]));
         }
-        fillPolygon(r, sx, sy, c, 0.16);
-        for (let i = 0; i < sx.length; i++) {
-          const j = (i + 1) % sx.length;
-          drawLine(r, sx[i], sy[i], sx[j], sy[j], c);
-        }
-      }
+        return [sx, sy];
+      };
+      const [fx, fy] = screen(fill);
+      fillPolygon(r, fx, fy, c, 0.16);
+      // Only real edges are stroked: not where the view cut the range.
+      const [sx, sy] = screen(stroke);
+      for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], c);
     }
     return;
   }

@@ -18,10 +18,10 @@ import {
   listNamesOf,
   isListName,
   indexIssue,
-  integralShade,
   nameTaken,
   shadowedFnNames,
   resolveExpr,
+  resolveRow,
   scanDefinition,
   timeDifferentiator,
   TABLE_MAX_ROWS,
@@ -47,14 +47,15 @@ import {
   toExpectation,
   toProbability,
 } from '../lib/dist.ts';
-import { type IntShade, type ShadeAreas, minusTint, shadeAreas } from '../lib/intshade.ts';
+import { type IntShade, type ShadeRun, type ShadeSampler, evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
+import { compileSampler } from '../worker/vm.ts';
 import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
-import { type Classified, classify, valueReadout } from '../lib/plot.ts';
+import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
@@ -93,9 +94,10 @@ import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
 
 interface Equation {
   trail?: PointTrail;
-  /** A definite-integral row's shaded area, resampled only when the window
-   *  or a value it reads (bounds, sliders, states, t) changes. */
-  shadeCache?: { shade: IntShade; names: string[]; key: string; areas: ShadeAreas };
+  /** A definite-integral row's shaded area: the integrand compiled once per
+   *  shade, and resampled only when the x-window or a value it reads (bounds,
+   *  sliders, states, t) changes. */
+  shadeCache?: { shade: IntShade; names: string[]; sampler: ShadeSampler; key: string; runs: ShadeRun[] };
   id: number;
   text: string;
   colorIndex: number;
@@ -1087,24 +1089,22 @@ function render() {
           if (!plot.shade) break;
           let c = eq.shadeCache;
           if (c?.shade !== plot.shade) {
-            const { body, lo, hi, v } = plot.shade;
-            const names = new Set([...freeVars(body), ...freeVars(lo), ...freeVars(hi)]);
-            names.delete(v);
-            c = eq.shadeCache = { shade: plot.shade, names: [...names], key: '', areas: { pos: [], neg: [] } };
+            const names = shadeNames(plot.shade);
+            const sampler = compileSampler(plot.shade.body, plot.shade.v, names) ?? evalSampler(plot.shade);
+            c = eq.shadeCache = { shade: plot.shade, names, sampler, key: '', runs: [] };
           }
-          const ymin = view.cy - halfH;
-          const ymax = view.cy + halfH;
-          const key = [xmin, xmax, ymin, ymax, ...c.names.map(n => env[n])].join();
+          const key = [xmin, xmax, ...c.names.map(n => env[n])].join();
           if (key !== c.key) {
             c.key = key;
-            c.areas = shadeAreas(plot.shade, env, { xmin, xmax, ymin, ymax });
+            c.runs = shadeRuns(plot.shade, env, xmin, xmax, c.sampler);
           }
           const minus = minusTint(color);
-          for (const pts of c.areas.pos) {
-            extras.polylines.push({ pts, color: css, closed: true, fill: cssColorA(color, 0.16) });
-          }
-          for (const pts of c.areas.neg) {
-            extras.polylines.push({ pts, color: cssColor(minus), closed: true, fill: cssColorA(minus, 0.16) });
+          for (const run of c.runs) {
+            // Only real edges are stroked: not where the window cut the range.
+            const tint = run.sign > 0 ? color : minus;
+            const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH);
+            extras.polylines.push({ pts: fill, color: cssColor(tint), closed: true, fill: cssColorA(tint, 0.16), noStroke: true });
+            extras.polylines.push({ pts: stroke, color: cssColor(tint) });
           }
           break;
         }
@@ -1567,7 +1567,8 @@ function recompileAll() {
         continue;
       }
       const rawParsed = parseExpr(text, fnNames, listNames, valueNames);
-      let parsed = resolveExpr(rawParsed, getFn, ropts);
+      const resolved = resolveRow(rawParsed, getFn, ropts);
+      let parsed = resolved.expr;
       // A bare expression in random variables (`X + Y`, `X^2`) plots the
       // density of that derived variable — distribution arithmetic in place.
       const rvRefs = [...freeVars(parsed)].filter(n => rvNames.has(n));
@@ -1592,10 +1593,9 @@ function recompileAll() {
         lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null),
         getList, ropts,
       );
-      parsed = lower(parsed);
       // Coordinate fields substitute in as functions of the plane, so
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
-      eq.cls = classify(parsed, constNames, fieldEnv, timeDifferentiator(defs));
+      ({ cls: eq.cls, parsed } = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)));
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       // A 3-column scatter only ever draws in 3D, where every point is a
       // sprite. Say so here rather than plotting the first CLOUD_3D_MAX of a
@@ -1614,9 +1614,6 @@ function recompileAll() {
       // A number is its own answer: the row reads out "= value" and draws
       // nothing. The frame loop keeps it current as sliders, states and t move.
       if (eq.cls.plot.type === 'value') {
-        // Exactly one definite integral also shades its area (lib/intshade.ts).
-        const shade = integralShade(rawParsed, getFn, ropts, lower, constNames);
-        if (shade) eq.cls.plot.shade = shade;
         try { eq.info = valueReadout(evaluate(parsed, { ...envT0, t: 0 })); }
         catch { eq.info = '= …'; } // resolves once the frame loop has an env
       }

@@ -9,7 +9,7 @@
  * x-axis, exactly as if it had been written in x.
  */
 import type { Expr } from './expr.ts';
-import { evaluate } from './expr.ts';
+import { evaluate, freeVars } from './expr.ts';
 
 /** What a `value` row carries when it is exactly one definite integral. */
 export interface IntShade {
@@ -22,23 +22,27 @@ export interface IntShade {
   hi: Expr;
 }
 
-/**
- * Signed areas as closed polygons [x0, y0, x1, y1, …] in graph coordinates.
- * `pos` adds to the integral's VALUE and `neg` subtracts from it — so with
- * reversed bounds (`int[1..0]`, which negates the integral) the region above
- * the axis is `neg`. The tints follow the number the row reads out, not the
- * side of the axis.
- */
-export interface ShadeAreas {
-  pos: number[][];
-  neg: number[][];
+/** A resolved row plus the sole definite integral it consists of, if it is
+ *  exactly that (lib/defs.ts resolveRow) — its pieces not yet lowered. */
+export interface ResolvedRow {
+  expr: Expr;
+  integral: IntShade | null;
 }
 
-export interface ShadeWindow {
-  xmin: number;
-  xmax: number;
-  ymin: number;
-  ymax: number;
+/**
+ * One stretch of the integrand on one side of the axis: the curve's points
+ * [x0, y0, x1, y1, …], unclamped. `sign` is the run's contribution to the
+ * integral's VALUE — so with reversed bounds (`int[1..0]`, which negates the
+ * integral) a run above the axis is −1. The tints follow the number the row
+ * reads out, not the side of the axis.
+ */
+export interface ShadeRun {
+  sign: 1 | -1;
+  pts: number[];
+  /** The run starts / ends where the WINDOW cut the range, not at a bound, a
+   *  gap or a crossing: there is no edge of the region there to stroke. */
+  clipLo: boolean;
+  clipHi: boolean;
 }
 
 type RGB = [number, number, number];
@@ -73,29 +77,27 @@ export function boundValue(e: Expr, env: Record<string, number>): number {
   try { return evaluate(e, env); } catch { return NaN; }
 }
 
+
 /**
  * Sample the region between f and the axis over [lo, hi], clipped to the
- * window: bounds at infinity or far off-screen cost nothing and resolution
- * stays per-pixel when zoomed in. Polygons break — never bridge — where f is
- * undefined (a pole's NaN, outside a no-default piecewise, sqrt of a
- * negative), and split exactly at sign changes, each refined by bisection.
- * y is clamped to one window-height beyond the window, which cannot change
- * the visible fill but keeps a pole's spike (and a far-off axis) drawable.
+ * visible [xmin, xmax]: bounds at infinity or far off-screen cost nothing and
+ * resolution stays per-pixel when zoomed in. Runs break — never bridge —
+ * where f is undefined (a pole's NaN, outside a no-default piecewise, sqrt of
+ * a negative), and split exactly at sign changes, each refined by bisection.
+ * Nothing here depends on the vertical window: see runPaths.
  */
-export function integralAreas(
-  f: (x: number) => number, lo: number, hi: number, win: ShadeWindow, n = SHADE_SAMPLES,
-): ShadeAreas {
-  const out: ShadeAreas = { pos: [], neg: [] };
-  // NaN bounds compare false everywhere below and fall out here; lo == hi is
-  // an empty region (and a zero integral).
-  if (!(lo !== hi) || Number.isNaN(lo) || Number.isNaN(hi)) return out;
+export function integralRuns(
+  f: (x: number) => number, lo: number, hi: number, xmin: number, xmax: number, n = SHADE_SAMPLES,
+): ShadeRun[] {
+  const out: ShadeRun[] = [];
+  // lo == hi is an empty region (and a zero integral); a NaN bound has none.
+  if (lo === hi || Number.isNaN(lo) || Number.isNaN(hi)) return out;
   const reversed = hi < lo;
-  const a = Math.max(Math.min(lo, hi), win.xmin);
-  const b = Math.min(Math.max(lo, hi), win.xmax);
-  if (!(b > a) || !(win.ymax > win.ymin)) return out;
-  const pad = win.ymax - win.ymin;
-  const clampY = (y: number) => Math.min(Math.max(y, win.ymin - pad), win.ymax + pad);
-  const base = clampY(0);
+  const a = Math.max(Math.min(lo, hi), xmin);
+  const b = Math.min(Math.max(lo, hi), xmax);
+  if (!(b > a)) return out;
+  const clippedLo = Math.min(lo, hi) < xmin;
+  const clippedHi = Math.max(lo, hi) > xmax;
 
   let refineLeft = SHADE_MAX_EVALS - (n + 1);
   const at = (x: number): number => {
@@ -110,23 +112,31 @@ export function integralAreas(
     refineLeft -= REFINE_STEPS;
     return true;
   };
+  // Signs are compared, never multiplied: the product of two tiny values
+  // underflows to 0 and hides the crossing.
+  const opposite = (p: number, q: number) => p !== 0 && q !== 0 && p > 0 !== q > 0;
 
   let cur: number[] | null = null;
   let curSign = 0;
   const open = (x: number, y: number) => {
-    cur = [x, base, x, clampY(y)];
+    cur = [x, y];
     curSign = Math.sign(y);
   };
   const push = (x: number, y: number) => {
-    cur!.push(x, clampY(y));
+    cur!.push(x, y);
     if (curSign === 0) curSign = Math.sign(y);
   };
   const close = () => {
     if (!cur) return;
-    const x = cur[cur.length - 2];
-    cur.push(x, base);
-    // A run that never left the axis encloses nothing.
-    if (curSign !== 0 && cur.length >= 8) (curSign > 0 !== reversed ? out.pos : out.neg).push(cur);
+    // A run that never left the axis, or is a single point, encloses nothing.
+    if (curSign !== 0 && cur.length >= 4) {
+      out.push({
+        sign: curSign > 0 !== reversed ? 1 : -1,
+        pts: cur,
+        clipLo: clippedLo && cur[0] === a,
+        clipHi: clippedHi && cur[cur.length - 2] === b,
+      });
+    }
     cur = null;
     curSign = 0;
   };
@@ -160,10 +170,10 @@ export function integralAreas(
       open(ex, ey);
       if (ex !== x) push(x, y);
     } else if (was && is) {
-      if (py * y < 0) {
+      if (opposite(py, y)) {
         // A sign change: shrink the bracket to [xa, xb] and end one tint at
         // xa, start the other at xb. A continuous crossing has f ≈ 0 at both,
-        // so the polygons meet on the axis; a jump (or a pole) keeps its two
+        // so the runs meet on the axis; a jump (or a pole) keeps its two
         // one-sided values, and an undefined point inside splits the run.
         let xa = px, ya = py, xb = x, yb = y;
         if (canRefine()) {
@@ -173,7 +183,7 @@ export function integralAreas(
             const xm = (xa + xb) / 2;
             const ym = at(xm);
             if (Number.isNaN(ym) || ym === 0) { xz = xm; hole = ym !== 0; break; }
-            if (ym * ya > 0) { xa = xm; ya = ym; } else { xb = xm; yb = ym; }
+            if (ym > 0 === ya > 0) { xa = xm; ya = ym; } else { xb = xm; yb = ym; }
           }
           if (hole) {
             [xa, ya] = edge(xa, ya, xz);
@@ -187,7 +197,9 @@ export function integralAreas(
           open(xb, yb);
           if (xb !== x) push(x, y);
         } else {
-          const xc = px + ((x - px) * py) / (py - y);
+          // Budget spent: the chord's zero. The ratio of two same-scale
+          // values stays in [0, 1] however small they are.
+          const xc = px + (x - px) * (py / (py - y));
           push(xc, 0);
           close();
           open(xc, 0);
@@ -207,12 +219,61 @@ export function integralAreas(
   return out;
 }
 
-/** integralAreas for a row's shade under env (the integration variable is
- *  bound per sample, shadowing any constant or `t` of the same name). */
-export function shadeAreas(shade: IntShade, env: Record<string, number>, win: ShadeWindow): ShadeAreas {
+/**
+ * A run's drawable paths under the current vertical window. `fill` is the
+ * closed region down to the axis; `stroke` is the open outline of its REAL
+ * edges — the curve, plus the verticals at a bound, a gap or a jump, but not
+ * where the window clipped the range (a line on the canvas border would read
+ * as a bound) and not the axis. y (the axis included) is clamped to one
+ * window-height beyond the window, which cannot change what is visible but
+ * keeps a pole's spike, or a far-off axis, drawable. Cheap enough per frame,
+ * so a vertical pan never resamples the integrand.
+ */
+export function runPaths(run: ShadeRun, ymin: number, ymax: number): { fill: number[]; stroke: number[] } {
+  const pad = ymax - ymin;
+  const clampY = (y: number) => Math.min(Math.max(y, ymin - pad), ymax + pad);
+  const base = clampY(0);
+  const p = run.pts;
+  const curve: number[] = [];
+  for (let i = 0; i < p.length; i += 2) curve.push(p[i], clampY(p[i + 1]));
+  const x0 = p[0];
+  const x1 = p[p.length - 2];
+  return {
+    fill: [x0, base, ...curve, x1, base],
+    stroke: [...(run.clipLo ? [] : [x0, base]), ...curve, ...(run.clipHi ? [] : [x1, base])],
+  };
+}
+
+/**
+ * The names whose values the shade reads: everything free in the bounds,
+ * plus everything free in the integrand EXCEPT the integration variable,
+ * which is bound there only — in `int[0..t] t^2 dt` the bound's t is time.
+ * A resample is due exactly when one of these (or the x-window) changes.
+ */
+export function shadeNames(shade: IntShade): string[] {
+  const names = freeVars(shade.body);
+  names.delete(shade.v);
+  freeVars(shade.lo, names);
+  freeVars(shade.hi, names);
+  names.delete('inf');
+  return [...names];
+}
+
+/** An integrand ready to sample: bind the frame's values, then call per x. */
+export type ShadeSampler = (env: Record<string, number>) => (x: number) => number;
+
+/** The tree-walking sampler; renderers pass the compiled one instead
+ *  (worker/vm.ts compileSampler). The integration variable is bound per
+ *  sample, shadowing any constant or `t` of the same name. */
+export const evalSampler = (shade: IntShade): ShadeSampler => env => {
   const scope = { ...env };
-  return integralAreas(
-    x => { scope[shade.v] = x; return evaluate(shade.body, scope); },
-    boundValue(shade.lo, env), boundValue(shade.hi, env), win,
-  );
+  return x => { scope[shade.v] = x; return evaluate(shade.body, scope); };
+};
+
+/** integralRuns for a row's shade under env. */
+export function shadeRuns(
+  shade: IntShade, env: Record<string, number>, xmin: number, xmax: number,
+  sampler: ShadeSampler = evalSampler(shade),
+): ShadeRun[] {
+  return integralRuns(sampler(env), boundValue(shade.lo, env), boundValue(shade.hi, env), xmin, xmax);
 }
