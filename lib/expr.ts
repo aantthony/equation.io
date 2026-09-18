@@ -59,7 +59,7 @@ export const FUNCTIONS = new Set([
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
-  'dot', 'cross', 'perp', 'midpoint', 'unit',
+  'dot', 'cross', 'perp', 'midpoint', 'unit', 'distance', 'angle',
   'segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle',
   // Small-matrix helpers (det, trace, matvec, linear solve), also lowered
   // symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts).
@@ -80,7 +80,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'gamma', 'factorial', 'sinc', 'coth',
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   'grad',
-  'polyline', 'vector',
+  'polyline', 'vector', 'distance', 'angle',
 ]);
 
 /**

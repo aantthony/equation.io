@@ -54,6 +54,7 @@ Examples (paste-ready):
 - [Slope field](https://equation.io/#y'%20%3D%20x%20-%20y): `y' = x - y`
 - [Polar cardioid](https://equation.io/#r%3Dsqrt(x%5E2%2By%5E2);theta%3Datan2(y%2Cx);r%3D2(1%2Bcos(theta))): `r = sqrt(x^2+y^2); theta = atan2(y,x); r = 2(1 + cos(theta))`
 - [Circle through a draggable point](https://equation.io/#C%20%3D%20(0%2C%200);P%20%3D%20(2%2C%201);circle(C%2C%20%7CP%20-%20C%7C);segment(C%2C%20P)): `C = (0, 0); P = (2, 1); circle(C, |P - C|); segment(C, P)`
+- [Triangle: a side and its angles](https://equation.io/#A%20%3D%20(-2%2C%20-1);B%20%3D%20(3%2C%20-0.5);C%20%3D%20(0.5%2C%202.5);polygon(A%2C%20B%2C%20C);distance(A%2C%20B);angle(B%2C%20A%2C%20C)%20180%2Fpi;angle(B%2C%20A%2C%20C)%20%2B%20angle(C%2C%20B%2C%20A)%20%2B%20angle(A%2C%20C%2C%20B)): `A = (-2, -1); B = (3, -0.5); C = (0.5, 2.5); polygon(A, B, C); distance(A, B); angle(B, A, C) 180/pi; angle(B, A, C) + angle(C, B, A) + angle(A, C, B)` — distance() and angle() are numbers, so the bare rows read out "= value" and follow the points as you drag; the angle sum stays π (−π once the triangle turns clockwise: angles are signed)
 - [Vector sum (parallelogram rule)](https://equation.io/#A%20%3D%20(3%2C%201);B%20%3D%20(1%2C%202);vector(A);vector(B);vector(A%20%2B%20B);polyline(A%2C%20A%20%2B%20B%2C%20B)): `A = (3, 1); B = (1, 2); vector(A); vector(B); vector(A + B); polyline(A, A + B, B)` — vector() draws arrows (from the origin with one argument), polyline() the open path completing the parallelogram; drag A or B
 - [Thébault's theorem (squares on a parallelogram)](https://equation.io/#A%20%3D%20(0%2C%200);B%20%3D%20(4%2C%200.5);D%20%3D%20(1%2C%202.5);C%20%3D%20B%20%2B%20D%20-%20A;polygon(A%2C%20B%2C%20C%2C%20D);square(B%2C%20A);square(C%2C%20B);square(D%2C%20C);square(A%2C%20D);P%20%3D%20midpoint(A%2C%20B)%20-%20perp(B%20-%20A)%2F2;Q%20%3D%20midpoint(B%2C%20C)%20-%20perp(C%20-%20B)%2F2;R%20%3D%20midpoint(C%2C%20D)%20-%20perp(D%20-%20C)%2F2;S%20%3D%20midpoint(D%2C%20A)%20-%20perp(A%20-%20D)%2F2;polygon(P%2C%20Q%2C%20R%2C%20S)): `A = (0, 0); B = (4, 0.5); D = (1, 2.5); C = B + D - A; polygon(A, B, C, D); square(B, A); square(C, B); square(D, C); square(A, D); P = midpoint(A, B) - perp(B - A)/2; …; polygon(P, Q, R, S)` — drag A, B or D; the square centers stay a square
 - [Normal probability](https://equation.io/#m%20%3D%201;s%20%3D%200.5;X%20~%20Normal(m%2C%20s);P(0%20%3C%20X%20%3C%202)): `m = 1; s = 0.5; X ~ Normal(m, s); P(0 < X < 2)` — the density with the area between 0 and 2 shaded; drag m or s and the probability follows
@@ -251,7 +252,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A and B), `polygon(A, B, C, …)` (filled), `square(A, B)` (erected on side A→B, to the left of the direction
   A→B), and `circle(center, radius)` draw figures that follow their points. Point arithmetic works anywhere: `A + B`, `2A`,
   `(A + B)/2`, `midpoint(A, B)`, `perp(A)` (rotate 90° counterclockwise),
-  `unit(A)`, `dot(A, B)`, `cross(A, B)`, `|A - B|` (distance). A parametric
+  `unit(A)`, `dot(A, B)`, `cross(A, B)`, `|A - B|` (distance). Measurements:
+  `distance(A, B)` is `|A - B|`; `angle(A, B, C)` is the angle at B, turning
+  from B→A to B→C — signed, counterclockwise positive, in radians in (−π, π]
+  (`angle(A, B, C) 180/pi` for degrees; wrap it in `abs(…)` for the unsigned
+  angle) — and `angle(U, V)` is the same from vector U to vector V. Both are
+  plain numbers: a bare row reads out "= value" (nothing is drawn — no arc
+  marker), and they work inside any expression (`circle(A, distance(A, B))`).
+  An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
   point like `A + u(B - A)` traces the segment. Tuple literals work directly
   as arguments (`segment((0, 0), A)`) and as operands: `A + (1, 2)`,
   `((0, 0) + B)/2`, `|(3, 4)|`.

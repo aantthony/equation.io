@@ -3,7 +3,7 @@
  *
  * A constant whose right-hand side is a pair — `A = (0, 0)`, `C = B + D` —
  * is a named point. Point arithmetic (±, scalar ×/÷, dot, cross, perp,
- * midpoint, unit, |P|) is lowered here into componentwise scalar expressions,
+ * midpoint, unit, distance, angle, |P|) is lowered here into componentwise scalar expressions,
  * with a point name `A` expanding to the derived constants `A_x`, `A_y`.
  * Lowering runs after resolveExpr (functions inlined, Σ expanded) and before
  * classify, so everything downstream — GLSL, evaluate, diff — still sees only
@@ -46,6 +46,9 @@ const toExpr = (v: LV): Expr => (v.vec ? { kind: 'vec', items: v.items } : v.e);
  */
 export type GetComps = (name: string) => readonly string[] | null;
 
+/** Whether a name is a list (so a measurement or figure can say lists wait). */
+type IsList = (name: string) => boolean;
+
 /** Functions over points, by how many point arguments they take. */
 const POINT_FNS: Record<string, number> = { dot: 2, cross: 2, midpoint: 2, perp: 1, unit: 1 };
 
@@ -86,8 +89,89 @@ function pairPoints(name: string, args: LV[], usage: string): Array<[Expr, Expr]
   return out;
 }
 
-function lower(e: Expr, getComps: GetComps, getMat: GetMat): LV {
-  const lo = (n: Expr): LV => lower(n, getComps, getMat);
+/** Re-pair a lowered argument list into vectors of any dimension: vec args
+ *  pass through, adjacent scalars (a flattened tuple literal) join into a 2D
+ *  point. A scalar left without a partner throws `stray`. */
+function vecArgs(args: LV[], stray: string): Expr[][] {
+  const vs: Expr[][] = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a.vec) {
+      vs.push(a.items);
+      continue;
+    }
+    const b = args[i + 1];
+    if (!b || b.vec) throw new Error(stray);
+    vs.push([a.e, b.e]);
+    i++;
+  }
+  return vs;
+}
+
+/** Whether a list — literal, or named (a 2×2/3×3 one reads as a matrix) —
+ *  occurs anywhere inside e. */
+function hasList(e: Expr, getMat: GetMat, isList: IsList): boolean {
+  const any = (...es: Array<Expr | undefined>): boolean => es.some(x => !!x && hasList(x, getMat, isList));
+  switch (e.kind) {
+    case 'list': case 'data': return true;
+    case 'var': return isList(e.name) || getMat(e.name) !== null;
+    case 'bin': return any(e.a, e.b);
+    case 'neg': return any(e.a);
+    case 'call': return any(...e.args);
+    case 'eq': case 'ineq': return any(e.l, e.r);
+    case 'vec': return any(...e.items);
+    case 'piecewise': return any(e.otherwise, ...e.cases.flatMap(c => [c.cond, c.value]));
+    default: return false;
+  }
+}
+
+const DISTANCE_USAGE = 'distance takes two points: distance(A, B) with A = (0, 0) defined above, or distance((0, 0), (3, 4)).';
+const ANGLE_USAGE = 'angle takes three 2D points — angle(A, B, C), the angle at B — or two 2D vectors: angle(U, V).';
+
+/** The measurements distance(A, B) ≡ |A - B| and angle(A, B, C) / angle(U, V).
+ *  Scalars like dot and cross, so they work inside any expression and read
+ *  out as a bare row; neither draws anything (an arc marker would be its own
+ *  wrapper, not a side effect of the readout). */
+function lowerMeasure(name: 'distance' | 'angle', args: LV[]): Expr {
+  const usage = name === 'distance' ? DISTANCE_USAGE : ANGLE_USAGE;
+  // Tuple literals arrive flattened — (1, 2, 3) is three loose scalars — so
+  // every arity failure gets the one message that is true however they pair.
+  const vs = vecArgs(args, usage);
+  if (name === 'distance') {
+    if (vs.length !== 2) throw new Error(usage);
+    const [p, q] = vs;
+    if (p.length !== q.length) {
+      throw new Error(`distance needs points with the same number of components, not ${p.length} and ${q.length}.`);
+    }
+    return lenOfN(p.map((pk, k) => sub(pk, q[k])));
+  }
+  if (vs.length !== 2 && vs.length !== 3) throw new Error(usage);
+  if (vs.some(v => v.length !== 2)) {
+    throw new Error('angle measures 2D points and vectors only — 3-component vectors are not supported yet.');
+  }
+  // angle(A, B, C) is the angle at B, turning from B→A to B→C.
+  const [u, v] = vs.length === 3
+    ? [vs[0].map((c, k) => sub(c, vs[1][k])), vs[2].map((c, k) => sub(c, vs[1][k]))]
+    : vs;
+  const cross = sub(mul(u[0], v[1]), mul(u[1], v[0]));
+  const dot = add(mul(u[0], v[0]), mul(u[1], v[1]));
+  const zero: Expr = { kind: 'num', value: 0 };
+  // Signed, counterclockwise positive, in (−π, π]. The literal `+ 0` (built
+  // by hand: add() would fold it away) turns a −0 cross into +0, so a
+  // straight angle reads π from either side instead of −π from one. A
+  // zero-length arm has no direction: a piecewise with no default makes the
+  // angle undefined there, where atan2(0, 0) would claim a confident 0.
+  return {
+    kind: 'piecewise',
+    cases: [{
+      cond: { kind: 'ineq', op: '>', l: { kind: 'call', name: 'min', args: [add(sq(u[0]), sq(u[1])), add(sq(v[0]), sq(v[1]))] }, r: zero },
+      value: { kind: 'call', name: 'atan2', args: [{ kind: 'bin', op: '+', a: cross, b: zero }, dot] },
+    }],
+  };
+}
+
+function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV {
+  const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
   switch (e.kind) {
     case 'num': return sc(e);
     case 'var': {
@@ -193,25 +277,19 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat): LV {
         }
         return vc(...solveVec(m, v));
       }
+      if (e.name === 'distance' || e.name === 'angle') {
+        // Lists of points are plan #13's; until then say so, not "takes points".
+        if (e.args.some(a => hasList(a, getMat, isList))) {
+          throw new Error(`${e.name} measures single points for now, not lists — ${e.name === 'distance' ? 'distance(A, B)' : 'angle(A, B, C)'}.`);
+        }
+        return sc(lowerMeasure(e.name, e.args.map(lo)));
+      }
       const args = e.args.map(lo);
-      const nPts = POINT_FNS[e.name];
+      const nPts = Object.hasOwn(POINT_FNS, e.name) ? POINT_FNS[e.name] : undefined;
       if (nPts !== undefined) {
         // Vector args of any dim pass straight through; runs of flattened
         // scalars still pair into 2D points as before.
-        const vs: Expr[][] = [];
-        for (let i = 0; i < args.length; i++) {
-          const a = args[i];
-          if (a.vec) {
-            vs.push(a.items);
-            continue;
-          }
-          const b = args[i + 1];
-          if (!b || b.vec) {
-            throw new Error(`${e.name} takes points — write ${e.name}(${nPts === 1 ? 'A' : 'A, B'}), with A = (0, 0) defined above.`);
-          }
-          vs.push([a.e, b.e]);
-          i++;
-        }
+        const vs = vecArgs(args, `${e.name} takes points — write ${e.name}(${nPts === 1 ? 'A' : 'A, B'}), with A = (0, 0) defined above.`);
         if (vs.length !== nPts) {
           throw new Error(`${e.name} takes ${nPts} point${nPts === 1 ? '' : 's'}.`);
         }
@@ -329,7 +407,7 @@ const polyCall = (name: FigureName, pts: Array<[Expr, Expr]>): Expr =>
  * point arithmetic, and return an expression classify already understands.
  */
 export function lowerGeom(
-  e: Expr, getComps: GetComps, getMat: GetMat = () => null, isList: (name: string) => boolean = () => false,
+  e: Expr, getComps: GetComps, getMat: GetMat = () => null, isList: IsList = () => false,
 ): Expr {
   if (e.kind === 'call' && GEOM_STATEMENTS.has(e.name)) {
     // A list of points — literal, named, or a named 2×2/3×3 one that reads as
@@ -338,7 +416,7 @@ export function lowerGeom(
       && e.args.some(a => a.kind === 'list' || (a.kind === 'var' && (isList(a.name) || getMat(a.name) !== null)))) {
       throw new Error(`${e.name} takes its points one by one for now — ${e.name === 'polyline' ? 'polyline(A, B, C)' : 'vector(A, B)'} — not as a list.`);
     }
-    const args = e.args.map(a => lower(a, getComps, getMat));
+    const args = e.args.map(a => lower(a, getComps, getMat, isList));
     if (e.name === 'circle') {
       // circle(C, r): the trailing argument is the scalar radius.
       const r = args[args.length - 1];
@@ -404,7 +482,7 @@ export function lowerGeom(
     if (pts.length < 3) throw new Error('polygon needs at least 3 vertices.');
     return polyCall('[polygon]', pts);
   }
-  return toExpr(lower(e, getComps, getMat));
+  return toExpr(lower(e, getComps, getMat, isList));
 }
 
 /**

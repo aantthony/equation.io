@@ -32,6 +32,8 @@ const signatures: Record<string, [string, string]> = {
   polygon: ['polygon(A, B, C, …)', 'Polygon through points'],
   square: ['square(A, B)', 'Square erected to the left of side A → B'],
   midpoint: ['midpoint(A, B)', 'Midpoint of two points'],
+  distance: ['distance(A, B)', 'Distance between two points, |A - B|'],
+  angle: ['angle(A, B, C) or angle(U, V)', 'Signed angle at B from A to C, or from U to V, in radians (−π, π]'],
   dot: ['dot(A, B)', 'Vector dot product'], cross: ['cross(A, B)', 'Vector cross product'],
   det: ['det(M)', 'Matrix determinant'], trace: ['trace(M)', 'Matrix trace'],
   solve: ['solve(M, v)', 'Solve the linear system M x = v'],

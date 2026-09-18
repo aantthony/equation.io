@@ -6,8 +6,8 @@ points with angular residuals, parametric system continuation, chart flows,
 complex constants as Argand points, complex equations as real systems, 2D
 coordinate-point drag writeback, "= value" readouts. So is most of phases 2–3
 and the seed of 5: named draggable points and vector arithmetic,
-`segment`/`polyline`/`vector`/`line`/`polygon`/`square`/`circle`, `|A-B|`
-readouts, piecewise and restrictions, integrals (value, `int[0..x]` as a function, iterated),
+`segment`/`polyline`/`vector`/`line`/`polygon`/`square`/`circle`, `|A-B|`,
+`distance` and `angle` readouts, piecewise and restrictions, integrals (value, `int[0..x]` as a function, iterated),
 Normal/Uniform/Exponential with derived arithmetic, scalar list broadcasting,
 CSV tables, regression, and Lorenz via a 3-component state. Static previews
 include system points/curves and direction fields. **What remains, and the PR
@@ -78,7 +78,7 @@ object must respect):
 | complex equation `f(w) = c` | root point set (as a 2×2 real system) | same solver; numeric positions |
 | `(r', theta') = (F, G)` over coordinate fields | chart flow, lowered to a vector field | LIC + click-to-trace |
 | complex constant (`1+2i`) | Argand point | overlay dot |
-| bare expression with no plot coordinate (`2+2`, `\|A-B\|`, `dot(A,B)`, `int[0..1] x^2 dx`) | value readout | "= 4" on the row, nothing drawn |
+| bare expression with no plot coordinate (`2+2`, `\|A-B\|`, `dot(A,B)`, `distance(A,B)`, `angle(A,B,C)`, `int[0..1] x^2 dx`) | value readout | "= 4" on the row, nothing drawn |
 | `y = int[0..x] …` / `f(x) = int[0..x] …` | integral as a function | quadrature sum inlined into the ordinary paths |
 | `{cond: val, …}`; no default = restriction | piecewise value | flows through every renderer (NaN outside the cases) |
 | `a_n = …`; `a_{n+1} = …` | sequence dots (+ Σ toggle); cobweb / bifurcation | CPU overlay |
@@ -177,7 +177,7 @@ Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
 | named points, vector arithmetic (`A = (1,2)`, `\|A-B\|`) | ✓ | ✓ | ✓ (2 components only) | shipped; 3-component named points are plan #10 |
 | draggable points | ✓ | — | ✓ | shipped, including writeback for 2D coordinate points (§6) |
 | segments, polygons, circles, vectors-as-arrows | ✓ | ✓ | ✓ `segment`/`polyline`/`vector`/`line`/`polygon`/`square`/`circle` | done (plan #1; `polyline(…)` also resolved the `[…]` collision, §3). Lists of points inside them wait for plan #13, 3-component points for #10 |
-| midpoint/distance/angle readouts | ✓ | ✓ | ✓ `midpoint`, `\|A-B\|`, `dot`, `cross`; `distance`, `angle` error | remaining: plan #2. Readouts ride the `value` row, not #35's PlotNote channel (which never landed) |
+| midpoint/distance/angle readouts | ✓ | ✓ | ✓ `midpoint`, `\|A-B\|`, `dot`, `cross`, `distance(A, B)`, `angle(A, B, C)` / `angle(U, V)` | done (plan #2). `angle` is signed, in (−π, π], and undefined on a zero-length arm; no arc marker — if wanted it is a wrapper (`arc(A, B, C)`), not a side effect of the readout. Lists of points wait for plan #13; 3-component `angle` for #10. Readouts ride the `value` row, not #35's PlotNote channel (which never landed) |
 | domain restrictions `{a < x < b}` | ✓ | ~ | ✓ (as piecewise) | **done, no new grammar**: a piecewise with no default is undefined outside its cases, so `y = {a < x < b: f(x)}` restricts any row kind. A Desmos-style trailing `f(x) {a < x < b}` suffix is not planned — it would collide with brace grouping (`2{x + 1}`) for nothing the case form lacks |
 | piecewise functions | ✓ | ✓ | ✓ (#6) | shipped |
 | definite integrals (value + `∫₀ˣ` as a function) | ✓ | ✓ | ✓ (value, `int[0..x]` as a function, iterated) | shipped; area shading on the value row is plan #3 |
@@ -350,7 +350,7 @@ phases 2–5 is ordered, PR by PR, in
 |---|---|---|
 | 1 — coordinate objects | ~~position rows, chart parametrics, flow rows~~ — **shipped** (the five deltas of §6 on the #36 engine) | done |
 | 1.5 — coherence wins | ~~complex roots `f(w) = c`~~ (numeric; exact labels → plan tail); ~~Argand points for complex constants~~; ~~"= value" readouts on constant rows~~ — **shipped** | done |
-| 2 — geometry | ~~tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`)~~, ~~named draggable points~~, ~~`segment`/`line`/`polygon`/`square`/`circle`~~, ~~`\|A-B\|`/`midpoint`/`dot`/`cross` readouts~~, ~~`polyline` and `vector` arrows (plan #1, settling §3's `[…]` collision)~~. Remaining: `distance`/`angle` (plan #2) | S left |
+| 2 — geometry | ~~tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`)~~, ~~named draggable points~~, ~~`segment`/`line`/`polygon`/`square`/`circle`~~, ~~`\|A-B\|`/`midpoint`/`dot`/`cross` readouts~~, ~~`polyline` and `vector` arrows (plan #1, settling §3's `[…]` collision)~~, ~~`distance`/`angle` measurements (plan #2)~~ — **shipped** | done |
 | 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (a no-default piecewise *is* the restriction, see §4), ~~definite integrals: value, `int[0..x]` as a function, iterated~~, ~~Uniform/Exponential and derived-variable arithmetic~~. Remaining: area shading on a definite-integral row (plan #3), continuous zoo (plan #4), discrete distributions with a stem renderer (plan #5), discrete variables in derived arithmetic (plan #6). Dropped: "`∫₀ˣ` via CPU LUT texture" — `y = int[0..x] …` already plots through the quadrature sum; revisit only if a perf guard trips | S + M + M + M left |
 | 4 — space | ~~Lorenz~~ as a 3-component state with `trail` (one trajectory). Remaining: `revolve()` (plan #7), complex parametric curves (plan #8), fields over z + 3D coordinate points (plan #9), 3D named points and geometry (plan #10), 3D vector fields with auto-seeded trajectories (plan #11), 3D chart flows + arrow glyphs (plan #12) | L |
 | 5 — families | ~~scalar list math, ranges, zipped scatters, `hist`, CSV tables, regression~~. Remaining: lists broadcasting over any object kind (plan #13 CPU objects and point lists, #14 shader rows), sequences-as-lists interop (plan #15) | XL |
