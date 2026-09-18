@@ -141,8 +141,8 @@ Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
 | draggable points | ✓ | — | PR #32 pending | pending #32; extend its writeback to solved points (§6) |
 | segments, polygons, circles, vectors-as-arrows | ✓ | ✓ | — | adopt, phase 2 (`polyline(…)` also resolves the `[…]` collision, §3) |
 | midpoint/distance/angle readouts | ✓ | ✓ | — | adopt, phase 2, via #35's PlotNote channel + #1's exact labels |
-| domain restrictions `{a < x < b}` | ✓ | ~ | — | adopt, phase 3; grammar must be designed jointly with #6's `{cond: val}` braces |
-| piecewise functions | ✓ | ✓ | PR #6 pending | pending #6 |
+| domain restrictions `{a < x < b}` | ✓ | ~ | ✓ (as piecewise) | **done, no new grammar**: a piecewise with no default is undefined outside its cases, so `y = {a < x < b: f(x)}` restricts any row kind. A Desmos-style trailing `f(x) {a < x < b}` suffix is not planned — it would collide with brace grouping (`2{x + 1}`) for nothing the case form lacks |
+| piecewise functions | ✓ | ✓ | ✓ (#6) | shipped |
 | definite integrals (value + `∫₀ˣ` as a function) | ✓ | ✓ | — | adopt, phase 3 |
 | distribution zoo (uniform, exponential, t, binomial, Poisson…) | ✓ | ✓ | Normal only | adopt, phase 3; #6's bar rendering is the seed of the discrete stem/bar renderer |
 | value readout for constant rows (`2+2` → "= 4") | ✓ | ✓ | plots y = 4 silently | adopt, small; #35's decided-equation notes are the sibling and its channel |
@@ -310,7 +310,7 @@ relevant PR is adopted first.
 | 1 — coordinate objects | position rows, chart parametrics, flow rows. On #36: the five deltas of §6. Without it: §6's standalone engine, named-tuple form only | M (S if #36 lands) |
 | 1.5 — coherence wins | complex roots `f(w) = c` (+ #1 labels); Argand points for complex constants; "= value" readouts on constant rows through #35's PlotNote channel | S |
 | 2 — geometry | tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`), named draggable points (on #32's writeback), `polyline`/`segment`/`polygon`/`circle`/`vector` arrows (settling §3's `[…]` collision), measurement readouts | M–L |
-| 3 — analysis | restrictions `{a < x < b}` (grammar designed jointly with #6's piecewise braces), piecewise (or adopt #6's), definite integrals (value, `∫₀ˣ` via CPU LUT texture, area shading), distribution zoo with discrete stem/bar rendering (seeded by #6's bars) | L |
+| 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (shipped with #6: a no-default piecewise *is* the restriction, see §4), definite integrals (value, `∫₀ˣ` via CPU LUT texture, area shading), distribution zoo with discrete stem/bar rendering (seeded by #6's bars) | L |
 | 4 — space | fields over z (spherical/cylindrical surfaces by substitution), 3D flows with auto-seeded trajectories (Lorenz), 3D arrow fields, `revolve()` | L |
 | 5 — families | lists broadcasting over any object kind (#6's literals are the seed); then sequences-as-lists interop, scatter/data | XL |
 

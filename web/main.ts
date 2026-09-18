@@ -2939,6 +2939,7 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['data list', '[3, 1, 4, 1, 5, 9, 2, 6]'],
     ['scatter', '[(1, 2), (2, 3.5), (3, 3.1), (4, 5)]'],
     ['piecewise', 'y = {x < 0: -x, x >= 0: x^2}'],
+    ['domain restriction', 'y = {-2 < x < 2: x^2}'],
     ['coprime cells', '1 / gcd(floor(x), floor(y))'],
   ]],
   ['sliders + calculus', [

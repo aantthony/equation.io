@@ -111,6 +111,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   use parentheses for arguments — write `sin(x)`, not `sin x`.
 - Factorial: postfix `!` — `5!` is 120, `x!` plots as Γ(x+1), `2^3!` is 2^6.
   Non-integers use the Gamma function; negative integers are undefined.
+- Piecewise: `{x < 0: -x, x >= 0: x^2}` — `cond: value` cases tried in order,
+  with an optional last bare value as the default (`{0 < x < 1: 1, 0}`).
+  Conditions are inequalities and may chain. With no default the value is
+  undefined wherever no case holds and nothing is drawn there, which makes
+  one case a domain restriction: `y = {0 < x < 2: x^2}` plots the parabola
+  on (0, 2) only. It works in any row kind — `x^2 + y^2 = {x > 0: 16}` is a
+  half circle, `(2cos(u), {sin(u) > 0: 2sin(u)})` cuts a parametric curve.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
 - Sums and products: `sum(n=1..N, sin(n x)/n)` and `prod(k=1..N, k)`, also

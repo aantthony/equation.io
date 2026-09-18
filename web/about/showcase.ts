@@ -283,7 +283,7 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'piecewise',
     title: 'Piecewise definitions',
-    blurb: 'Cases with inequality conditions, tried in order; the last bare value is the default.',
+    blurb: 'Cases with inequality conditions, tried in order; the last bare value is the default. With no default the curve is undefined elsewhere, so {0 < x < 2: x^2} restricts a domain.',
     eqs: ['y = {x < 0: -x, x >= 0: x^2/4}'],
     group: 'Curves & regions',
     view: { cx: 0, cy: 2, span: 6.7 },
