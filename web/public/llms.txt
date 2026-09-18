@@ -238,6 +238,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Complex roots: `w^3 = 1` draws three solution points; equations in w become
   two real constraints. This is a numerical search over the visible window,
   not a certified enumeration or a source of exact symbolic labels.
+- Complex path: a complex-valued expression whose only variable is u (constants,
+  sliders and t aside) draws the path it traces over u in (0, 1), at
+  (re, im) — the same plane as complex points and roots. `exp(i 2 pi u)` is
+  the unit circle; with `f(w) = w^2 + w`, `f(exp(i 2 pi u))` is its image
+  under f. Supported: arithmetic, powers, exp ln log sqrt, sin cos tan sinh
+  cosh tanh, re im abs arg conj, user functions. Branch cuts (`sqrt`, `ln`,
+  fractional powers) break the curve where the value jumps. An equation,
+  inequality, vector, or a use of v is an error, as is a path whose split
+  into real and imaginary parts is too large (deeply nested products).
 - Complex plot: a complex expression in `w` — `w + 4/w`.
 - Domain coloring: `domain(f)` where f is complex — `domain(w^2 + 1)`. Hue is
   arg f, brightness |f|; zeros render black and poles white.

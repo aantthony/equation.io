@@ -20,6 +20,7 @@ import type { ProbBounds } from './dist.ts';
 import { ANGLE_FN, REVOLVE_AXES, builtinFn, revolveAxis, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
+import { PATH_NODE_BUDGET, exprSize } from './path.ts';
 import { toGLSL } from './glsl.ts';
 import { type GridField, buildGridField } from './grid.ts';
 
@@ -77,7 +78,10 @@ export type Plot =
    *  is this expression, evaluated per frame (constants, sliders, and t only)
    *  instead of a line strip. d1..d3: symbolic d/du of comps for framing
    *  (κ, τ, tubes); absent → finite differences. */
-  | { type: 'pcurve'; dim: 2 | 3; comps: Expr[]; tube?: Expr; d1?: Expr[]; d2?: Expr[]; d3?: Expr[] }
+  /** `cuts`: the components are the real and imaginary parts of a complex
+   *  path, whose branch cuts (sqrt, ln, fractional powers) are jumps — the
+   *  sampler breaks the polyline there (lib/path.ts) instead of bridging. */
+  | { type: 'pcurve'; dim: 2 | 3; comps: Expr[]; tube?: Expr; d1?: Expr[]; d2?: Expr[]; d3?: Expr[]; cuts?: true }
   /** du/dv: symbolic tangents ∂P/∂u, ∂P/∂v for lighting; absent → finite differences. */
   | { type: 'psurface'; comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] }
   /** [3, 1, 4]: dots at (k, value), k = 1, 2, …; the UI can switch to bars. */
@@ -386,7 +390,15 @@ function classifyLowered(
   const hasSpace = vars.has('x') || vars.has('y') || vars.has('z');
   const paramSystem = expr.kind === 'eq' && expr.l.kind === 'vec' && vars.has('u') && !vars.has('v');
   if (hasParam && hasSpace && !paramSystem) throw new Error('Cannot mix u/v with x/y/z.');
-  if (usesComplex(expr) && (vars.has('z') || hasParam)) {
+  // A bare complex expression in u alone is a path in the plane (below);
+  // every other complex use of u, v, or z has no 2D reading.
+  const scalar = expr.kind !== 'vec' && expr.kind !== 'list' && expr.kind !== 'eq' && expr.kind !== 'ineq';
+  const complexPath = usesComplex(expr) && scalar && !special && !tube && vars.has('u') && !vars.has('v');
+  // (Vectors and lists say below that they take no complex values at all.)
+  if (usesComplex(expr) && hasParam && !complexPath && expr.kind !== 'vec' && expr.kind !== 'list') {
+    throw new Error('A complex path is a bare expression in u alone, like exp(i 2 pi u).');
+  }
+  if (usesComplex(expr) && vars.has('z')) {
     throw new Error('Complex expressions plot in 2D only (x, y, w).');
   }
 
@@ -548,6 +560,18 @@ function classifyLowered(
     return done({ type: 'point', dim, coords: expr.items });
   }
 
+  // A complex-valued expression in u is the image of a path: its real and
+  // imaginary parts are an ordinary 2D parametric curve in the Argand plane
+  // (the plane of w = x + iy, where complex points and roots already sit).
+  // An expression that mentions i but is real (|exp(i u)|) is a real
+  // expression in u, which draws nothing — as without the i.
+  if (complexPath && compileTyped(g).type === 'complex') {
+    const comps = complexParts(expr);
+    if (exprSize(comps[0], PATH_NODE_BUDGET) + exprSize(comps[1], PATH_NODE_BUDGET) > PATH_NODE_BUDGET) {
+      throw new Error('This complex path is too large to sample once split into real and imaginary parts — reduce the nesting or the powers.');
+    }
+    return done({ type: 'pcurve', dim: 2, comps, cuts: true });
+  }
   if (hasParam && !paramSystem) throw new Error('u/v need a vector expression like (cos(u), sin(u), v).');
 
   // A vector equation is a system, one residual per component: F(x,y,z) =

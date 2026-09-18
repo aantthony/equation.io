@@ -102,6 +102,7 @@ describe('previewGap', () => {
     expect(gap(['y = sin(x)'])).toBeNull();
     expect(gap(['z = x^2 + y^2'])).toBeNull();
     expect(gap(['(cos(2pi u), sin(2pi u), u)'])).toBeNull();
+    expect(gap(['exp(i 2 pi u)'])).toBeNull();
   });
 
   it('is null for discrete distributions: stems, selected stems and the mean marker all draw', () => {

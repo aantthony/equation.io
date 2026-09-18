@@ -81,6 +81,7 @@ object must respect):
 | complex equation `f(w) = c` | root point set (as a 2×2 real system) | same solver; numeric positions |
 | `(r', theta') = (F, G)` over coordinate fields | chart flow, lowered to a vector field | LIC + click-to-trace |
 | complex constant (`1+2i`) | Argand point | overlay dot |
+| complex-valued expr in u alone (`exp(i 2 pi u)`, `f(exp(i 2 pi u))`) | path in the Argand plane | split by `complexParts` into a 2D parametric curve `(re, im)`; CPU polyline, pen up at branch cuts |
 | bare expression with no plot coordinate (`2+2`, `\|A-B\|`, `dot(A,B)`, `distance(A,B)`, `angle(A,B,C)`, `int[0..1] x^2 dx`) | value readout | "= 4" on the row, nothing drawn |
 | a row that is exactly one definite integral (`int[0..b] sin(x) dx`) | value readout + signed area | CPU-sampled polygons between the integrand and the axis, two tints by contribution to the value (lib/intshade.ts); a readout that shades, like `P(X < b)` |
 | `y = int[0..x] …` / `f(x) = int[0..x] …` | integral as a function | quadrature sum inlined into the ordinary paths |
@@ -195,7 +196,7 @@ Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
 | complex root sets (`w³ = 1`) | ~ | ✓ | ✓ (numeric positions) | shipped (§6); exact labels when polynomial remain (plan tail) |
 | sequences (stem plots), recurrences, cobwebs, bifurcation | ~ | ✓ | ✓ (#6) | shipped; sequence terms as values (`a_3`, `a_[1..10]`) are plan #15 |
 | lists / families of objects | ✓ | ~ | scalar list math, ranges, zipped scatters, `hist` only | a list inside an equation, geometry statement, or point arithmetic errors; families are plan #13–#14 |
-| complex parametric curves (image of a path under f) | ~ | ✓ | rejected by classifier | plan #8. Does *not* need a complex CPU evaluator, as this row once claimed: `complexParts` splits the expression into a real 2D `pcurve` |
+| complex parametric curves (image of a path under f) | ~ | ✓ | ✓ | shipped (plan #8): a bare complex expression in u alone is split by `complexParts` into a real 2D `pcurve` (no complex CPU evaluator needed); the sampler lifts the pen at branch-cut jumps |
 | 3D vector fields / 3D ODE flows (Lorenz) | — | ✓ | fields 2D only; Lorenz runs as one 3-component state (a 3D point + `trail`) | plan #11–#12 (auto-seeded trajectories; click is ambiguous in 3D) |
 | spherical/cylindrical coordinate systems | — | ✓ | fields reject z (a 2D field used in a z equation already works) | plan #9 (substitution already suffices for surfaces) |
 | surfaces of revolution | — | ✓ | ✓ `revolve(f)`, `revolve(f, y)` / `(f, z)` | done (plan #7): desugars at classify time to the implicit `y^2 + z^2 = f(x)^2`, so it costs no shader kind and a no-default piecewise f bounds the solid. A list of profiles waits for plan #14 |
@@ -360,7 +361,7 @@ phases 2–5 is ordered, PR by PR, in
 | 1.5 — coherence wins | ~~complex roots `f(w) = c`~~ (numeric; exact labels → plan tail); ~~Argand points for complex constants~~; ~~"= value" readouts on constant rows~~ — **shipped** | done |
 | 2 — geometry | ~~tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`)~~, ~~named draggable points~~, ~~`segment`/`line`/`polygon`/`square`/`circle`~~, ~~`\|A-B\|`/`midpoint`/`dot`/`cross` readouts~~, ~~`polyline` and `vector` arrows (plan #1, settling §3's `[…]` collision)~~, ~~`distance`/`angle` measurements (plan #2)~~ — **shipped** | done |
 | 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (a no-default piecewise *is* the restriction, see §4), ~~definite integrals: value, `int[0..x]` as a function, iterated~~, ~~Uniform/Exponential and derived-variable arithmetic~~. ~~area shading on a definite-integral row~~, ~~continuous distribution zoo~~, ~~discrete distributions with a stem renderer~~, ~~discrete variables in derived arithmetic (plan #6)~~ — **shipped**. Dropped: "`∫₀ˣ` via CPU LUT texture" — `y = int[0..x] …` already plots through the quadrature sum; revisit only if a perf guard trips | done |
-| 4 — space | ~~Lorenz~~ as a 3-component state with `trail` (one trajectory). ~~`revolve()`~~ (plan #7, shipped). Remaining: complex parametric curves (plan #8), fields over z + 3D coordinate points (plan #9), 3D named points and geometry (plan #10), 3D vector fields with auto-seeded trajectories (plan #11), 3D chart flows + arrow glyphs (plan #12) | L |
+| 4 — space | ~~Lorenz~~ as a 3-component state with `trail` (one trajectory). ~~`revolve()`~~ (plan #7, shipped). ~~complex parametric curves~~ (plan #8, shipped). Remaining: fields over z + 3D coordinate points (plan #9), 3D named points and geometry (plan #10), 3D vector fields with auto-seeded trajectories (plan #11), 3D chart flows + arrow glyphs (plan #12) | L |
 | 5 — families | ~~scalar list math, ranges, zipped scatters, `hist`, CSV tables, regression~~. Remaining: lists broadcasting over any object kind (plan #13 CPU objects and point lists, #14 shader rows), sequences-as-lists interop (plan #15) | XL |
 | tail | exact complex-root labels; space curves from 2-of-3 systems; certified solving (plan #16+) | M each |
 

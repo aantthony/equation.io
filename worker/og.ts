@@ -13,6 +13,7 @@ import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
+import { pathSampler } from '../lib/path.ts';
 import type { Plot } from '../lib/plot.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
@@ -536,7 +537,21 @@ function renderRow2D(
       return;
     }
     case 'pcurve': {
-      if (expr.kind !== 'vec' || cls.plot.dim !== 2) return;
+      if (cls.plot.dim !== 2) return;
+      // A complex path is not a vec row: its components are the split parts,
+      // sampled as the app does, pen up at the branch cuts.
+      if (cls.plot.cuts) {
+        const pts = pathSampler(cls.plot.comps)({ ...analysis.constEnv, t: 0 });
+        let last: [number, number] | null = null;
+        for (let i = 0; i + 1 < pts.length; i += 2) {
+          if (!Number.isFinite(pts[i]) || !Number.isFinite(pts[i + 1])) { last = null; continue; }
+          const s: [number, number] = [toScreenX(r, v, pts[i]), toScreenY(r, v, pts[i + 1])];
+          if (last) drawLine(r, last[0], last[1], s[0], s[1], color);
+          last = s;
+        }
+        return;
+      }
+      if (expr.kind !== 'vec') return;
       const progs = expr.items.map(compile);
       const slotU = env.slots.get('u')!;
       let prev: [number, number] | null = null;

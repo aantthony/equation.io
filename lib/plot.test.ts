@@ -53,6 +53,54 @@ describe('classify', () => {
     expect(() => cls('(u, v)')).toThrow(/3 components/);
   });
 
+  it('reads a complex expression in u alone as a path in the Argand plane', () => {
+    const circle = cls('exp(i 2 pi u)');
+    expect(circle.plot).toMatchObject({ type: 'pcurve', dim: 2, cuts: true });
+    expect(circle.needs3D).toBe(false);
+    const { comps } = circle.plot as { comps: Parameters<typeof evaluate>[0][] };
+    expect(evaluate(comps[0], { u: 0.25 })).toBeCloseTo(0);
+    expect(evaluate(comps[1], { u: 0.25 })).toBeCloseTo(1);
+    expect(cls('u + i u^2').plot).toMatchObject({ type: 'pcurve', dim: 2 });
+    expect(cls('(1+i)^u').plot).toMatchObject({ type: 'pcurve', dim: 2 });
+    // t is a constant per frame: an animated path.
+    expect(cls('exp(i (2 pi u + t))')).toMatchObject({ animated: true, plot: { type: 'pcurve' } });
+    // Complex-typed with a zero imaginary part is still a path (along the
+    // real axis), as i^2 alone is still the Argand point -1.
+    expect(cls('i^2 u').plot).toMatchObject({ type: 'pcurve', dim: 2 });
+    // A real vector curve is not a complex split: no cut handling.
+    expect((cls('(cos(2pi u), sin(2pi u))').plot as { cuts?: true }).cuts).toBeUndefined();
+  });
+
+  it('changes nothing else that mentions u or i', () => {
+    // No free variable: still the Argand point.
+    expect(cls('exp(i pi/3)').plot).toMatchObject({ type: 'point', dim: 2 });
+    // Real in u, with or without an i inside: as before, u needs a vector.
+    for (const s of ['sin(u)', 'abs(exp(i u))', 're(exp(i u))']) {
+      expect(() => cls(s), s).toThrow('u/v need a vector expression like (cos(u), sin(u), v).');
+    }
+    for (const s of ['w = exp(i u)', 'z = exp(i u)', 'y = exp(i u)', 'u w', 'u + i x']) {
+      expect(() => cls(s), s).toThrow('Cannot mix u/v with x/y/z.');
+    }
+    // Only the bare expression in u alone is a path.
+    for (const s of ['exp(i 2 pi u) = 1', 'exp(i u) v', 'exp(i u) < 1', 'domain(exp(i u))']) {
+      expect(() => cls(s), s).toThrow('A complex path is a bare expression in u alone, like exp(i 2 pi u).');
+    }
+    expect(() => cls('(exp(i u), 1)')).toThrow('Complex values are not supported in vectors.');
+    expect(() => cls('z + i')).toThrow('Complex expressions plot in 2D only (x, y, w).');
+  });
+
+  it('names what a complex path cannot split, and refuses one too large to sample', () => {
+    expect(() => cls('gamma(i u)')).toThrow('gamma is not supported for complex values.');
+    expect(() => cls('floor(exp(i u))')).toThrow('floor is not supported for complex values.');
+    expect(() => cls('{u < 0.5: exp(i u), i}')).toThrow('Complex piecewise: wrap values in re(…) or im(…).');
+    // Integer powers stay linear in the exponent…
+    expect(cls('(u + i)^16').plot.type).toBe('pcurve');
+    // …but every complex product uses both parts of both factors, so a
+    // chain doubles per factor: six deep of 1/(… + i) is past sampling.
+    expect(cls('1/(1/(1/(u + i) + i) + i)').plot.type).toBe('pcurve');
+    expect(() => cls('1/(1/(1/(1/(1/(1/(u + i) + i) + i) + i) + i) + i)')).toThrow(/too large to sample/);
+  });
+
   it('sweeps a tube only when tube(…) asks for one', () => {
     // A bare 3D curve stays a line strip, so it cannot swallow points or
     // other curves sharing the scene.

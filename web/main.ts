@@ -61,6 +61,7 @@ import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
+import { pathSampler } from '../lib/path.ts';
 import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
@@ -104,6 +105,9 @@ interface Equation {
    *  shade, and resampled only when the x-window or a value it reads (bounds,
    *  sliders, states, t) changes. */
   shadeCache?: { shade: IntShade; names: string[]; sampler: ShadeSampler; key: string; runs: ShadeRun[] };
+  /** A complex path's compiled sampler (lib/path.ts), rebuilt when the row
+   *  reclassifies. */
+  pathCache?: { comps: Expr[]; sample: (env: Record<string, number>) => number[] };
   id: number;
   text: string;
   colorIndex: number;
@@ -587,7 +591,12 @@ function render() {
 
   // CPU sampling of parametric curves / points, with t bound to seconds.
   const sampleCurve = (eq: Equation, dim: 2 | 3): number[] => {
-    const { comps } = eq.cls!.plot as { comps: import('../lib/expr.ts').Expr[] };
+    const { comps, cuts } = eq.cls!.plot as { comps: Expr[]; cuts?: true };
+    // A complex path: compiled, and broken at its branch cuts.
+    if (cuts) {
+      if (eq.pathCache?.comps !== comps) eq.pathCache = { comps, sample: pathSampler(comps) };
+      return eq.pathCache.sample({ ...constEnv, t: time });
+    }
     const out: number[] = [];
     for (let k = 0; k < CURVE_SAMPLES; k++) {
       const u = k / (CURVE_SAMPLES - 1);
@@ -821,8 +830,10 @@ function render() {
         }
         case 'pcurve': {
           const flat = sampleCurve(eq, plot.dim);
-          const pts = new Float32Array(CURVE_SAMPLES * 3);
-          for (let k = 0; k < CURVE_SAMPLES; k++) {
+          // A broken path carries extra (NaN) points at its jumps.
+          const count = flat.length / plot.dim;
+          const pts = new Float32Array(count * 3);
+          for (let k = 0; k < count; k++) {
             pts[k * 3] = flat[k * plot.dim];
             pts[k * 3 + 1] = flat[k * plot.dim + 1];
             pts[k * 3 + 2] = plot.dim === 3 ? flat[k * plot.dim + 2] : 0;
@@ -2957,6 +2968,8 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['domain coloring', 'domain((w^3 - 1)/w)'],
     ['conformal map', 'conformal(w^2/4)'],
     ['joukowski airfoil', 'conformal(w + 1/w)'],
+    ['unit circle path', 'exp(i 2 pi u)'],
+    ['image of a circle', 'f(w) = w^2 + w; exp(i 2 pi u); f(exp(i 2 pi u))'],
   ]],
   ['fractals', [
     ['mandelbrot set', 'iter(z^2 + w)'],
