@@ -204,7 +204,9 @@ export function analyze(texts: string[]): Analysis {
       row.error = message;
       continue;
     }
-    row.dist = 'density';
+    // Labelled from the family, before anything can fail: a discrete
+    // declaration whose parameter is bad is still a pmf row with an error.
+    row.dist = rvs.discreteDist(name) ? 'pmf' : 'density';
     const rv = rvs.get(name)!;
     // Parameters that are constants are judged at their values: a = -1 then
     // X ~ Gamma(a, 1) is no distribution (mirror of web/main.ts).
@@ -215,7 +217,6 @@ export function analyze(texts: string[]): Analysis {
     }
     // A discrete law draws its pmf as stems (CPU overlay; no shader field).
     if (rvs.discreteDist(name)) {
-      row.dist = 'pmf';
       row.cls = { ...densityCls(name), plot: { type: 'pmf', rv: name } };
       continue;
     }

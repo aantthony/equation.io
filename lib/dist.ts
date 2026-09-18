@@ -58,7 +58,7 @@ import {
 } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from './defs.ts';
-import { type BaseKind, DIST_FAMILIES, type DistFamily, distFamily, distUsage, familyOf } from './dist-families.ts';
+import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
 import { quadrature } from './integrate.ts';
 import {
   BETA_GAMMA_SIDE, BETA_LIMIT_SUM, GAMMA_UNIFORM_SHAPE, betaPQ, betaPdf, binomPmf, discreteUniformPmf, gammaPQ, gammaPdf, lbeta, lgamma,
@@ -93,10 +93,12 @@ export type { BaseKind };
 export interface BaseDist {
   kind: BaseKind;
   args: Expr[];
-  /** A law on the integers: it has a pmf (pmfExpr, stems), a step cdf whose
-   *  strict and non-strict bounds differ, and no density for a shader. */
-  discrete?: boolean;
 }
+
+/** A law on the whole numbers: it has a pmf (pmfExpr, stems), a step cdf whose
+ *  strict and non-strict bounds differ, and no density for a shader. Read off
+ *  the family table — the one place that says so — never stored on the value. */
+export const isDiscrete = (d: BaseDist): boolean => !!familyOf(d.kind).discrete;
 
 /** `${name} = ${value}` for a message, short enough to read. */
 const showParam = (name: string, val: number): string => `${name} = ${Number(val.toPrecision(6))}`;
@@ -160,7 +162,7 @@ export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): Ba
   // A bare name takes the standard parameters: `X ~ N` is Normal(0, 1).
   if (m[2] === undefined) {
     if (!spec.defaults) throw new Error(arityError);
-    return baseDist(spec, spec.defaults.map(value => ({ kind: 'num', value })));
+    return { kind: spec.kind, args: spec.defaults.map(value => ({ kind: 'num', value })) };
   }
   let args: Expr;
   try {
@@ -175,11 +177,8 @@ export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): Ba
   // known (RVSystem.paramProblem), and flattens the density to 0 meanwhile.
   const problem = paramProblem(spec.kind, items.map(numOf));
   if (problem) throw new Error(problem);
-  return baseDist(spec, items);
+  return { kind: spec.kind, args: items };
 }
-
-const baseDist = (family: DistFamily, args: Expr[]): BaseDist =>
-  (family.discrete ? { kind: family.kind, args, discrete: true } : { kind: family.kind, args });
 
 const v = (name: string): Expr => ({ kind: 'var', name });
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -202,19 +201,33 @@ const whereAll = (conds: Expr[], value: Expr): Expr => conds.reduceRight<Expr>(
  * drawn as stems). Null for a continuous law.
  */
 export function pmfExpr(d: BaseDist, k: Expr): Expr | null {
+  const c = canonicalDiscrete(d);
+  return c && call(c.fn, c.shift ? bin('-', k, num(c.shift)) : k, ...c.args);
+}
+
+/**
+ * The discrete families reduced to the four that have an implementation, ONCE:
+ * Bernoulli(p) is Binomial(1, p), and Geometric(p) — trials, from 1 — is
+ * 1 + NegativeBinomial(1, p). Everything downstream (pmfExpr, the cdf, the
+ * law's moments, quantile and stems, and plan #6's enumeration) reads this and
+ * applies `shift`; none of them names Bernoulli or Geometric again. Messages
+ * are not built from it: validation judges the family the user wrote.
+ */
+type CoreKind = 'binomial' | 'poisson' | 'negbinomial' | 'discreteuniform';
+function canonicalDiscrete(d: BaseDist): { kind: CoreKind; fn: string; args: Expr[]; shift: number } | null {
   switch (d.kind) {
     case 'binomial':
-      return call(BINOM_PMF_FN, k, d.args[0], d.args[1]);
+      return { kind: 'binomial', fn: BINOM_PMF_FN, args: d.args, shift: 0 };
     case 'bernoulli':
-      return call(BINOM_PMF_FN, k, num(1), d.args[0]);
+      return { kind: 'binomial', fn: BINOM_PMF_FN, args: [num(1), d.args[0]], shift: 0 };
     case 'poisson':
-      return call(POISSON_PMF_FN, k, d.args[0]);
-    case 'geometric': // trials, from 1: one more than the failures before the first success
-      return call(NEGBINOM_PMF_FN, bin('-', k, num(1)), num(1), d.args[0]);
+      return { kind: 'poisson', fn: POISSON_PMF_FN, args: d.args, shift: 0 };
+    case 'geometric':
+      return { kind: 'negbinomial', fn: NEGBINOM_PMF_FN, args: [num(1), d.args[0]], shift: 1 };
     case 'negbinomial':
-      return call(NEGBINOM_PMF_FN, k, d.args[0], d.args[1]);
+      return { kind: 'negbinomial', fn: NEGBINOM_PMF_FN, args: d.args, shift: 0 };
     case 'discreteuniform':
-      return call(DUNIFORM_PMF_FN, k, d.args[0], d.args[1]);
+      return { kind: 'discreteuniform', fn: DUNIFORM_PMF_FN, args: d.args, shift: 0 };
     default:
       return null;
   }
@@ -283,7 +296,7 @@ const NO_DENSITY = 'A discrete distribution has no density curve: it draws as st
 
 /** The density curve for a base random variable: y = pdf(x). */
 export function densityExpr(d: BaseDist): Expr {
-  if (d.discrete) throw new Error(NO_DENSITY);
+  if (isDiscrete(d)) throw new Error(NO_DENSITY);
   return { kind: 'eq', l: v('y'), r: pdfExpr(d, v('x')) };
 }
 
@@ -445,7 +458,7 @@ export function toExpectation(e: Expr, rvNames: ReadonlySet<string>): ExpectSpec
  * inequality chains; '<=' gives the region a drawn outline.
  */
 export function regionExpr(d: BaseDist, lo?: Expr, hi?: Expr): Expr {
-  if (d.discrete) throw new Error(NO_DENSITY);
+  if (isDiscrete(d)) throw new Error(NO_DENSITY);
   const x = v('x');
   const y = v('y');
   let f: Expr = bin('-', y, pdfExpr(d, x)); // y < pdf(x)
@@ -497,51 +510,8 @@ function cdfPQ(d: BaseDist, x: number, env: Record<string, number>): [number, nu
       const w = Math.pow(x / a[1], a[0]);
       return [-Math.expm1(-w), Math.exp(-w)];
     }
-    default:
-      return discretePQ(d.kind, a, x);
-  }
-}
-
-/**
- * [P(X ≤ x), P(X > x)] of a discrete law with valid parameters `a`: a step
- * function, so x is floored first. Closed forms through the regularized
- * incomplete beta and gamma functions — both tails formed directly, and no
- * sum over thousands of terms for Binomial(1e6, p) or Poisson(1e5).
- */
-function discretePQ(kind: BaseKind, a: number[], x: number): [number, number] {
-  const k = Math.floor(x);
-  const binomial = (n: number, p: number): [number, number] => {
-    if (k < 0) return [0, 1];
-    if (k >= n) return [1, 0];
-    return betaPQ(n - k, k + 1, 1 - p, p); // P(X ≤ k) = I_{1−p}(n − k, k + 1); p = 0 and 1 land on its edges
-  };
-  switch (kind) {
-    case 'binomial':
-      return binomial(wholeNumber(a[0]), a[1]);
-    case 'bernoulli':
-      return binomial(1, a[0]);
-    case 'poisson': {
-      if (k < 0) return [0, 1];
-      const [p, q] = gammaPQ(k + 1, a[0]); // P(X ≤ k) = Q(k + 1, mean)
-      return [q, p];
-    }
-    case 'geometric': {
-      if (k < 1) return [0, 1];
-      const lq = k * Math.log1p(-a[0]); // ln P(X > k) = k ln(1 − p); −∞ at p = 1
-      return [-Math.expm1(lq), Math.exp(lq)];
-    }
-    case 'negbinomial':
-      return k < 0 ? [0, 1] : betaPQ(a[0], k + 1, a[1], 1 - a[1]); // I_p(r, k + 1)
-    case 'discreteuniform': {
-      const lo = wholeNumber(a[0]);
-      const hi = wholeNumber(a[1]);
-      if (k < lo) return [0, 1];
-      if (k >= hi) return [1, 0];
-      const n = hi - lo + 1;
-      return [(k - lo + 1) / n, (hi - k) / n];
-    }
-    default:
-      return [NaN, NaN];
+    default: // discrete (probabilityValue answers those itself; kept total)
+      return discreteLaw(d, env)?.pq(x) ?? [NaN, NaN];
   }
 }
 
@@ -550,14 +520,24 @@ function discretePQ(kind: BaseKind, a: number[], x: number): [number, number] {
  *  This is where strictness lands: `X < 3` ends at 2, `X <= 3` at 3,
  *  `X < 2.5` and `X <= 2.5` both at 2. NaN bounds (a broken parameter) stay NaN. */
 export function integerBounds(b: ProbBounds, env: Record<string, number>): { kLo: number; kHi: number; not: boolean } {
-  const lo = b.lo ? evaluate(b.lo, env) : -Infinity;
-  const hi = b.hi ? evaluate(b.hi, env) : Infinity;
+  // A bound within rounding of a whole number IS that number, by the same
+  // tolerance the parameters get (wholeNumber): `a = 0.1·3·10` is 3, so
+  // `X < a` stops at 2 — floor(3.0000000000000004) + strictness would take 3.
+  const snap = (x: number): number => {
+    const w = wholeNumber(x);
+    return Number.isNaN(w) ? x : w;
+  };
+  const lo = snap(b.lo ? evaluate(b.lo, env) : -Infinity);
+  const hi = snap(b.hi ? evaluate(b.hi, env) : Infinity);
   return {
     kLo: b.loStrict ? Math.floor(lo) + 1 : Math.ceil(lo),
     kHi: b.hiStrict ? Math.ceil(hi) - 1 : Math.floor(hi),
     not: !!b.not,
   };
 }
+
+/** Runs of at most this many whole numbers are summed term by term. */
+const SUM_RUN = 64;
 
 /**
  * Exact value of P(lo < X < hi) under the given constant environment. For a
@@ -571,13 +551,19 @@ export function probabilityValue(
   env: Record<string, number>,
   edges?: Pick<ProbBounds, 'loStrict' | 'hiStrict' | 'not'>,
 ): number {
-  if (d.discrete) {
+  if (isDiscrete(d)) {
     const law = discreteLaw(d, env);
     const { kLo, kHi, not } = integerBounds({ lo, hi, ...edges }, env);
     if (!law || Number.isNaN(kLo) || Number.isNaN(kHi)) return NaN; // invalid parameters or bounds
     if (kLo > kHi) return not ? 1 : 0;
-    // One whole number: its mass, not a difference of two cdfs.
-    if (kLo === kHi && !not) return law.pmf(kLo);
+    // A short run is the sum of its masses, not a difference of two cdfs:
+    // three whole numbers of DiscreteUniform(-1e17, 1e17), or near the median
+    // of Binomial(1e6, p), difference to 0 or to a digit or two.
+    if (!not && kHi - kLo < SUM_RUN) {
+      let sum = 0;
+      for (let k = kLo; k <= kHi; k++) sum += law.pmf(k);
+      return sum;
+    }
     const L = kLo === -Infinity ? [0, 1] : law.pq(kLo - 1);
     const H = kHi === Infinity ? [1, 0] : law.pq(kHi);
     // The complement is below kLo plus above kHi, each from its own tail;
@@ -1842,6 +1828,8 @@ export interface DiscreteLaw {
   hi: number;
   mean: number;
   sd: number;
+  /** A whole number where the pmf peaks (the envelope always samples it). */
+  mode: number;
   /**
    * The quantile function, a step function: the smallest whole number k with
    * P(X ≤ k) ≥ u — or, with `upper`, with P(X > k) ≤ u, which addresses the
@@ -1855,53 +1843,79 @@ export interface DiscreteLaw {
 /** The law of a discrete base distribution at these parameter values, or null
  *  when the parameters declare none (or the distribution is continuous). */
 export function discreteLaw(d: BaseDist, env: Record<string, number>): DiscreteLaw | null {
-  if (!d.discrete) return null;
-  const a = d.args.map(e => evaluate(e, env));
-  if (!a.every(isFinite) || paramProblem(d.kind, a)) return null;
-  let pmf: (k: number) => number;
+  const c = canonicalDiscrete(d);
+  if (!c) return null;
+  // Judged as the family the user wrote (that is whose message a row shows)…
+  const written = d.args.map(e => evaluate(e, env));
+  if (!written.every(isFinite) || paramProblem(d.kind, written)) return null;
+  // …computed as the core law it reduces to, moved by `shift`.
+  const a = c.args.map(e => evaluate(e, env));
+  const { shift } = c;
+  let pmf0: (k: number) => number;
+  let pq0: (k: number) => [number, number]; // at a whole number k of the support's range
   let lo = 0;
   let hi = Infinity;
   let mean: number;
   let variance: number;
-  switch (d.kind) {
-    case 'binomial':
-    case 'bernoulli': {
-      const [n, p] = d.kind === 'binomial' ? [wholeNumber(a[0]), a[1]] : [1, a[0]];
-      pmf = k => binomPmf(k, n, p);
+  let mode: number;
+  switch (c.kind) {
+    case 'binomial': {
+      const [n, p] = [wholeNumber(a[0]), a[1]];
+      pmf0 = k => binomPmf(k, n, p);
+      // P(X ≤ k) = I_{1−p}(n − k, k + 1); p = 0 and 1 land on its edges.
+      pq0 = k => (k >= n ? [1, 0] : betaPQ(n - k, k + 1, 1 - p, p));
       hi = n;
       mean = n * p;
       variance = n * p * (1 - p);
+      mode = Math.min(n, Math.floor((n + 1) * p));
       break;
     }
     case 'poisson':
-      pmf = k => poissonPmf(k, a[0]);
+      pmf0 = k => poissonPmf(k, a[0]);
+      pq0 = k => {
+        const [p, q] = gammaPQ(k + 1, a[0]); // P(X ≤ k) = Q(k + 1, mean)
+        return [q, p];
+      };
       mean = variance = a[0];
+      mode = Math.floor(a[0]);
       break;
-    case 'geometric':
-      pmf = k => negBinomPmf(k - 1, 1, a[0]);
-      lo = 1;
-      mean = 1 / a[0];
-      variance = (1 - a[0]) / (a[0] * a[0]);
+    case 'negbinomial': {
+      const [r, p] = a;
+      pmf0 = k => negBinomPmf(k, r, p);
+      pq0 = k => {
+        if (r !== 1) return betaPQ(r, k + 1, p, 1 - p); // I_p(r, k + 1)
+        const lq = (k + 1) * Math.log1p(-p); // r = 1: ln P(X > k) = (k + 1) ln(1 − p), −∞ at p = 1
+        return [-Math.expm1(lq), Math.exp(lq)];
+      };
+      mean = (r * (1 - p)) / p;
+      variance = mean / p;
+      mode = r > 1 ? Math.floor(((r - 1) * (1 - p)) / p) : 0;
       break;
-    case 'negbinomial':
-      pmf = k => negBinomPmf(k, a[0], a[1]);
-      mean = (a[0] * (1 - a[1])) / a[1];
-      variance = mean / a[1];
-      break;
+    }
     case 'discreteuniform': {
       lo = wholeNumber(a[0]);
       hi = wholeNumber(a[1]);
-      pmf = k => discreteUniformPmf(k, lo, hi);
-      mean = (lo + hi) / 2;
-      const n = hi - lo + 1;
+      const [l, h] = [lo, hi];
+      const n = h - l + 1;
+      pmf0 = k => discreteUniformPmf(k, l, h);
+      pq0 = k => (k >= h ? [1, 0] : [(k - l + 1) / n, (h - k) / n]);
+      mean = (l + h) / 2;
       variance = ((n - 1) / 12) * (n + 1); // (n² − 1)/12 without squaring a huge n
+      mode = l;
       break;
     }
-    default:
-      return null;
   }
-  const kind = d.kind;
-  const pq = (x: number): [number, number] => discretePQ(kind, a, x);
+  const lo0 = lo;
+  lo += shift;
+  hi += shift;
+  mean += shift;
+  mode += shift;
+  const pmf = shift ? (k: number): number => pmf0(k - shift) : pmf0;
+  // A step function: floored first, and nothing below the support.
+  const pq = (x: number): [number, number] => {
+    const k = Math.floor(x) - shift;
+    return k < lo0 ? [0, 1] : pq0(k);
+  };
   const sd = Math.sqrt(variance);
   // P(X ≤ k) ≥ u, asked of whichever tail says it without rounding.
   const reached = (k: number, u: number, upper: boolean): boolean => (upper ? pq(k)[1] <= u : pq(k)[0] >= u);
@@ -1953,13 +1967,14 @@ export function discreteLaw(d: BaseDist, env: Record<string, number>): DiscreteL
     }
     return at;
   };
-  return { pmf, pq, lo, hi, mean, sd, quantile };
+  return { pmf, pq, lo, hi, mean, sd, mode, quantile };
 }
 
 /** At most this many stems are drawn; more whole numbers than that in view
  *  (Poisson(1e6) zoomed out, DiscreteUniform(-1e9, 1e9)) draw the pmf's
- *  ENVELOPE instead — the same heights at STEM_MAX evenly spaced whole
- *  numbers, joined — since stems closer than a pixel are a solid shape anyway. */
+ *  ENVELOPE instead — the same exact heights at up to STEM_MAX whole numbers on
+ *  a fixed lattice (buildEnvelope), joined — since stems closer than a pixel
+ *  are a solid shape anyway. */
 export const STEM_MAX = 1024;
 /** Mass each tail may hide beyond the drawn stems: far below a pixel. */
 const STEM_TAIL = 1e-12;
@@ -1976,25 +1991,104 @@ export interface PmfStems {
   envelope: boolean;
 }
 
-/** The stems of `law` at the whole numbers of [kLo, kHi] (finite), capped. */
+/** Every whole number of [kLo, kHi] (finite, at most STEM_MAX of them). */
 function buildStems(law: DiscreteLaw, kLo: number, kHi: number): PmfStems {
   STEM_STATS.builds++;
   const ks: number[] = [];
-  const count = kHi - kLo + 1;
-  if (count <= STEM_MAX) {
-    for (let k = kLo; k <= kHi; k++) ks.push(k);
-  } else {
-    // Evenly spaced whole numbers, both ends included. The spacing is a
-    // double (count may be 2e9); rounding keeps every sample ON the lattice,
-    // so each height is an exact pmf value, never an interpolated one.
-    const step = (kHi - kLo) / (STEM_MAX - 1);
-    for (let i = 0; i < STEM_MAX; i++) {
-      const k = i === STEM_MAX - 1 ? kHi : Math.round(kLo + i * step);
-      if (k !== ks[ks.length - 1]) ks.push(k);
-    }
-  }
+  for (let k = kLo; k <= kHi; k++) ks.push(k);
   STEM_STATS.pmfEvals += ks.length;
-  return { ks, ps: ks.map(law.pmf), envelope: count > STEM_MAX };
+  return { ks, ps: ks.map(law.pmf), envelope: false };
+}
+
+/**
+ * The envelope's samples: the multiples of `stride` from iLo·stride to
+ * iHi·stride, kept to the law's mass range [mLo, mHi], plus that range's ends
+ * and the mode wherever the lattice spans them. The lattice is the VIEW-
+ * INDEPENDENT part: a power-of-two stride (so i·stride is exact at any size)
+ * chosen from the window's width, and samples at its multiples — panning
+ * slides the window over fixed samples instead of re-anchoring them to its
+ * edge, so the outline neither shimmers nor misses the peak.
+ */
+function buildEnvelope(law: DiscreteLaw, mLo: number, mHi: number, stride: number, iLo: number, iHi: number): PmfStems {
+  STEM_STATS.builds++;
+  const from = iLo * stride;
+  const to = iHi * stride;
+  const set = new Set<number>();
+  // Counted by j, not by i: past 2^53 `i++` stops advancing (Poisson(1e300)).
+  const n = Math.min(STEM_MAX + 2, Math.round((to - from) / stride));
+  for (let j = 0; j <= n; j++) {
+    const k = from + j * stride;
+    if (k >= mLo && k <= mHi) set.add(k);
+  }
+  for (const k of [mLo, mHi, law.mode]) if (k >= from && k <= to && k >= mLo && k <= mHi) set.add(k);
+  const ks = [...set].sort((a, b) => a - b);
+  STEM_STATS.pmfEvals += ks.length;
+  return { ks, ps: ks.map(law.pmf), envelope: true };
+}
+
+/** How a run of stems is drawn — one spec, consumed by the app's canvas
+ *  overlay and by the og rasterizer, so the two cannot drift. Lengths are in
+ *  px of the target (CSS px in the app, raster px in og). */
+export interface StemGeometry {
+  /** Flat [x0, y0, x1, y1, …] in plot coordinates. Stems: one segment each,
+   *  NaN, NaN lifting the pen between them, so a thousand are one stroke. An
+   *  envelope: the closed outline, down to the axis at both ends. */
+  lines: number[];
+  /** Stroke width and opacity. A selection (`heavy`) is a wide translucent
+   *  band over the variable's own stems, so they — and other P(…) rows —
+   *  show through. */
+  width: number;
+  alpha: number;
+  /** A dot capping each stem, at (ks[i], ps[i]); null once they would merge
+   *  (stemDotRadius). `outlined`: ringed in the background color. */
+  dots: { r: number; outlined: boolean } | null;
+  /** Fill opacity of an envelope's outline; null for stems. */
+  fill: number | null;
+}
+
+export function stemGeometry(run: PmfStems, heavy: boolean, pxPerUnit: number): StemGeometry {
+  const { ks, ps } = run;
+  const lines: number[] = [];
+  if (run.envelope) {
+    if (ks.length) lines.push(ks[0], 0);
+    ks.forEach((k, i) => lines.push(k, ps[i]));
+    if (ks.length) lines.push(ks[ks.length - 1], 0);
+    return { lines, width: 1.5, alpha: 1, dots: null, fill: heavy ? 0.35 : 0.16 };
+  }
+  ks.forEach((k, i) => lines.push(k, 0, k, ps[i], NaN, NaN));
+  const r = stemDotRadius(pxPerUnit);
+  return {
+    lines,
+    width: heavy ? Math.min(9, Math.max(3, pxPerUnit * 0.6)) : r ? 2 : 1,
+    alpha: heavy ? 0.45 : 1,
+    dots: r ? { r: heavy ? r + 3 : r, outlined: !heavy && r >= 3 } : null,
+    fill: null,
+  };
+}
+
+/**
+ * Where an E(…) row's marker stands: x = the mean, reaching up to the law
+ * there. For a discrete variable that is the stem at the mean when the mean is
+ * a whole number — within rounding, by wholeNumber's tolerance: Binomial(100,
+ * 0.07) has mean 7.000000000000001, and pmf(that) is 0 — and the axis when it
+ * falls between stems. For a continuous one, the exact pdf or the drawn curve.
+ * Null when there is no mean to mark. Throws what evaluate throws (a missing
+ * parameter this frame).
+ */
+export function markerHeight(
+  sys: RVSystem, name: string, env: Record<string, number>, view?: { lo: number; hi: number },
+): { x: number; h: number } | null {
+  const m = sys.mean(name, env);
+  if (!isFinite(m)) return null;
+  const discrete = sys.discreteDist(name);
+  if (discrete) {
+    const k = wholeNumber(m);
+    return Number.isNaN(k) ? { x: m, h: 0 } : { x: k, h: discreteLaw(discrete, env)?.pmf(k) ?? 0 };
+  }
+  const exact = sys.exactDist(name);
+  let h = exact ? evaluate(pdfExpr(exact, num(m)), env) : (c => (c ? densityAt(c, m) : 0))(sys.curve(name, env, view));
+  if (!isFinite(h) || h < 0) h = 0;
+  return { x: m, h };
 }
 
 /** The dot capping each stem, in px, from the spacing of whole numbers on
@@ -2301,7 +2395,7 @@ export class RVSystem {
   /** The base distribution of a variable declared discrete, else null. */
   discreteDist(name: string): BaseDist | null {
     const rv = this.rvs.get(name);
-    return rv?.kind === 'base' && rv.dist.discrete ? rv.dist : null;
+    return rv?.kind === 'base' && isDiscrete(rv.dist) ? rv.dist : null;
   }
 
   /** Constants that ARE a whole-number parameter of a discrete law (the n of
@@ -2310,7 +2404,7 @@ export class RVSystem {
   wholeParamNames(): Set<string> {
     const out = new Set<string>();
     for (const rv of this.rvs.values()) {
-      if (rv.kind !== 'base' || !rv.dist.discrete) continue;
+      if (rv.kind !== 'base' || !isDiscrete(rv.dist)) continue;
       familyOf(rv.dist.kind).params.forEach((param, k) => {
         const arg = rv.dist.args[k];
         if (param.whole && arg.kind === 'var') out.add(arg.name);
@@ -2674,7 +2768,7 @@ export class RVSystem {
    *  never a discrete one (discreteDist), which has a pmf and draws as stems. */
   exactDist(name: string): BaseDist | null {
     const law = this.exactLaw(name);
-    return law?.kind === 'dist' && !law.dist.discrete ? law.dist : null;
+    return law?.kind === 'dist' && !isDiscrete(law.dist) ? law.dist : null;
   }
 
   /**
@@ -2682,13 +2776,14 @@ export class RVSystem {
    * number of the support in view, clipped to where the law has mass (all but
    * 1e-12 per tail, so an unbounded support or a view a billion wide costs
    * nothing) and capped at STEM_MAX (see PmfStems.envelope). Rebuilt only
-   * when the parameters or the whole-number window change: a still view costs
-   * a cache hit per frame. Null while the parameters declare no distribution
+   * when the parameters change or the window reaches a new whole number (a
+   * new lattice cell, for an envelope): a still view, or a second row reading
+   * the same variable, costs a cache hit. Null while the parameters declare no distribution
    * — a slider n at 2.5 draws nothing, because nothing is there to draw.
    */
   stems(name: string, env: Record<string, number>, view?: { lo: number; hi: number }): { stems: PmfStems; law: DiscreteLaw } | null {
     const rv = this.rvs.get(name);
-    if (rv?.kind !== 'base' || !rv.dist.discrete) return null;
+    if (rv?.kind !== 'base' || !isDiscrete(rv.dist)) return null;
     const slot = this.entry(name, this.sig(rv, env));
     if (slot.pmf === undefined) {
       const law = discreteLaw(rv.dist, env);
@@ -2696,12 +2791,32 @@ export class RVSystem {
     }
     const c = slot.pmf;
     if (!c || !isFinite(c.kLo) || !isFinite(c.kHi)) return null;
-    const kLo = Math.max(c.kLo, view ? Math.ceil(view.lo) : -Infinity);
-    const kHi = Math.min(c.kHi, view ? Math.floor(view.hi) : Infinity);
-    const key = `${kLo},${kHi}`;
+    // The window: the view clipped to the mass range. Its WIDTH decides
+    // between stems and envelope, and the envelope's stride — a pan leaves the
+    // width alone, so neither flips as ceil(view.lo) ticks over.
+    const lo = Math.max(c.kLo, view ? view.lo : -Infinity);
+    const hi = Math.min(c.kHi, view ? view.hi : Infinity);
+    let key: string;
+    let build: () => PmfStems;
+    if (!(lo <= hi)) {
+      key = 'none';
+      build = () => ({ ks: [], ps: [], envelope: false });
+    } else if (hi - lo < STEM_MAX) {
+      const [kLo, kHi] = [Math.ceil(lo), Math.floor(hi)];
+      key = `${kLo},${kHi}`;
+      build = () => buildStems(c.law, kLo, kHi);
+    } else {
+      // Keyed by the lattice cells the window touches: a pan shorter than a
+      // stride — every frame of a drag — is a cache hit, for the variable's
+      // row and for each P(…) row over it alike.
+      const stride = 2 ** Math.ceil(Math.log2((hi - lo) / STEM_MAX));
+      const [iLo, iHi] = [Math.floor(lo / stride), Math.ceil(hi / stride)];
+      key = `e${stride},${iLo},${iHi}`;
+      build = () => buildEnvelope(c.law, c.kLo, c.kHi, stride, iLo, iHi);
+    }
     if (!c.stems || c.key !== key) {
       c.key = key;
-      c.stems = kLo <= kHi ? buildStems(c.law, kLo, kHi) : { ks: [], ps: [], envelope: false };
+      c.stems = build();
     }
     return { stems: c.stems, law: c.law };
   }
@@ -2766,7 +2881,7 @@ export class RVSystem {
     if (rv.kind === 'base') {
       // Unreachable through a document (add() and probability() refuse first);
       // loud all the same, because a NaN column would read as "no data".
-      if (rv.dist.discrete) throw new Error(`${name} is discrete: sampling discrete random variables is not supported yet.`);
+      if (isDiscrete(rv.dist)) throw new Error(`${name} is discrete: sampling discrete random variables is not supported yet.`);
       const u = uniformStream(name);
       const a = rv.dist.args.map(e => evaluate(e, env));
       col = new Float64Array(SAMPLE_COUNT);
@@ -2866,7 +2981,7 @@ export class RVSystem {
     }
     const rv = this.rvs.get(name);
     if (!rv) throw new Error(`${name} has an error in its definition.`);
-    if (rv.kind === 'base' && rv.dist.discrete) return null; // no density: stems() draws it
+    if (rv.kind === 'base' && isDiscrete(rv.dist)) return null; // no density: stems() draws it
     const slot = this.entry(name, this.sig(rv, env));
     if (slot.qcb === undefined) slot.qcb = this.condBase(name, env);
     const base = slot.qcb;
@@ -2939,7 +3054,7 @@ export class RVSystem {
     const law = this.exactLaw(name);
     if (!law) return null;
     if (law.kind === 'dist') {
-      if (law.dist.discrete) {
+      if (isDiscrete(law.dist)) {
         const dl = discreteLaw(law.dist, env);
         return dl && { mean: dl.mean, sd: dl.sd };
       }

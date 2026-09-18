@@ -340,6 +340,38 @@ describe('og raster renderer', () => {
     expect(Math.max(...ink(['X ~ Binomial(6, 0.5)', 'P(X != 3)'], 30))).toBeLessThan(200);
   });
 
+  it('draws a selection as the app does: a band that widens with the zoom, capped by an enlarged dot', () => {
+    // lib's stemGeometry: width = clamp(0.6 · px per unit, 3, 9), dot r + 3.
+    const rows = ['X ~ Binomial(6, 0.5)', 'P(X = 3)'];
+    const band = (view: string, x: number, y: number) => {
+      const plain = renderRaster([view, rows[0]], 100, 100);
+      const sel = renderRaster([view, ...rows], 100, 100);
+      return Math.abs(pixel(sel, x, y)[0] - pixel(plain, x, y)[0]) + Math.abs(pixel(sel, x, y)[2] - pixel(plain, x, y)[2]);
+    };
+    const wide = 'view(x = 2..4.5, y = -0.05..0.45, ratio = 5)'; // 40 px per unit: x = 3 at px 40, band 9 px
+    const narrow = 'view(x = -1..9, y = -0.05..0.45, ratio = 20)'; // 10 px per unit: x = 3 at px 40, band 6 px
+    expect(band(wide, 44, 60)).toBeGreaterThan(20);
+    expect(band(wide, 37, 60)).toBeGreaterThan(20);
+    expect(band(narrow, 44, 60)).toBe(0);
+    expect(band(narrow, 42, 60)).toBeGreaterThan(20);
+    // The enlarged translucent dot (r = 6.5) reaches past the band at the stem's top (py ≈ 27.5).
+    expect(band(wide, 46, 28)).toBeGreaterThan(10);
+  });
+
+  it('stands the E(X) marker on the stem when the mean is a whole number only up to rounding', () => {
+    // Binomial(100, 0.07): mean 7.000000000000001, pmf(7) ≈ 0.1545. 10 px per
+    // unit, x = 7 at px 50; 400 px per unit of y, axis at py 90, stem top ≈ py 28.
+    const view = 'view(x = 2..12, y = -0.025..0.225, ratio = 40)';
+    const bare = renderRaster([view, 'E(X)'], 100, 100);
+    const r = renderRaster([view, 'X ~ Binomial(100, 0.07)', 'E(X)'], 100, 100);
+    const only = renderRaster([view, 'X ~ Binomial(100, 0.07)'], 100, 100);
+    expect(bare.px).toEqual(renderRaster([view], 100, 100).px);
+    // The marker's dot caps the stem (py ≈ 28) instead of sitting on the axis (py 90).
+    const diff = (x: number, y: number) => Math.abs(pixel(r, x, y)[0] - pixel(only, x, y)[0]);
+    expect(diff(50, 28) + diff(51, 28) + diff(50, 27) + diff(47, 28)).toBeGreaterThan(40);
+    expect(diff(47, 90) + diff(53, 92)).toBe(0);
+  });
+
   it('draws a huge discrete law zoomed out as its envelope, in bounded time', () => {
     const t0 = performance.now();
     const r = renderRaster(['view(x = 990000..1010000, y = -0.00005..0.00045, ratio = 40000000)', 'X ~ Poisson(1000000)'], 100, 100);

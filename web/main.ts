@@ -37,19 +37,18 @@ import {
   RVSystem,
   buildRVSystem,
   checkDerived,
-  densityAt,
   densityExpr,
   integerBounds,
   lowerProbBody,
+  markerHeight,
   matchExpectation,
   matchProbability,
-  pdfExpr,
   probabilityValue,
   regionExpr,
   scanRandomRows,
   selectStems,
   shadePolygon,
-  stemDotRadius,
+  stemGeometry,
   toExpectation,
   toProbability,
 } from '../lib/dist.ts';
@@ -197,34 +196,18 @@ function cssColor([r, g, b]: [number, number, number]): string {
   return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
 }
 
-/**
- * A discrete variable's stems (or the run of them a P(…) row selects, drawn
- * `heavy`: a wide translucent band) as overlay geometry: every stem in ONE polyline — NaN lifts the pen
- * — so a thousand stems are one stroke, plus a dot per stem while the whole
- * numbers stand far enough apart on screen (stemDotRadius). An envelope (more
- * whole numbers in view than lib's STEM_MAX) is the filled outline instead.
- */
+/** A run of a discrete variable's stems (or the run a P(…) row selects, drawn
+ *  `heavy`) as overlay geometry. What to draw is lib's (stemGeometry), shared
+ *  with the og rasterizer; this only hands it to the canvas overlay. */
 function pushStems(extras: Overlay2D, run: PmfStems, color: [number, number, number], heavy: boolean, pxPerUnit: number): void {
-  const css = cssColor(color);
-  const { ks, ps } = run;
-  if (!ks.length) return;
-  if (run.envelope) {
-    const pts = [ks[0], 0];
-    ks.forEach((k, i) => pts.push(k, ps[i]));
-    pts.push(ks[ks.length - 1], 0);
-    extras.polylines.push({ pts, color: css, closed: true, fill: cssColorA(color, heavy ? 0.35 : 0.16), width: 1.5 });
-    return;
-  }
-  const pts: number[] = [];
-  const r = stemDotRadius(pxPerUnit);
-  // A selection is a translucent band over the variable's own stems, so the
-  // stems stay visible and overlapping P(…) rows show through each other.
-  const ink = heavy ? cssColorA(color, 0.45) : css;
-  ks.forEach((k, i) => {
-    pts.push(k, 0, k, ps[i], NaN, NaN);
-    if (r) extras.points.push({ x: k, y: ps[i], color: ink, r: heavy ? r + 3 : r, bare: heavy || r < 3 });
-  });
-  extras.polylines.push({ pts, color: ink, width: heavy ? Math.min(9, Math.max(3, pxPerUnit * 0.6)) : r ? 2 : 1 });
+  if (!run.ks.length) return;
+  const g = stemGeometry(run, heavy, pxPerUnit);
+  const ink = g.alpha < 1 ? cssColorA(color, g.alpha) : cssColor(color);
+  extras.polylines.push(g.fill === null
+    ? { pts: g.lines, color: ink, width: g.width }
+    : { pts: g.lines, color: ink, width: g.width, closed: true, fill: cssColorA(color, g.fill) });
+  const dots = g.dots;
+  if (dots) run.ks.forEach((k, n) => extras.points.push({ x: k, y: run.ps[n], color: ink, r: dots.r, bare: !dots.outlined }));
 }
 
 function cssColorA([r, g, b]: [number, number, number], a: number): string {
@@ -1186,17 +1169,11 @@ function render() {
           // The value lives in the row's readout; the plot is a vertical
           // marker at x = E under the variable's density.
           try {
-            const m = rvSys.mean(plot.rv, env);
-            if (!isFinite(m)) break;
-            // (A discrete variable's marker reaches its pmf AT the mean: the
-            // stem's height at a whole-number mean, the axis otherwise.)
-            const exact = rvSys.exactDist(plot.rv) ?? rvSys.discreteDist(plot.rv);
-            let h = exact
-              ? evaluate(pdfExpr(exact, { kind: 'num', value: m }), env)
-              : (c => (c ? densityAt(c, m) : 0))(rvSys.curve(plot.rv, env, { lo: xmin, hi: xmax }));
-            if (!isFinite(h) || h < 0) h = 0;
-            if (h > 0) extras.polylines.push({ pts: [m, 0, m, h], color: css, width: 2 });
-            extras.points.push({ x: m, y: h, color: css, r: 4 });
+            // Where and how high is lib's rule (markerHeight), shared with og.
+            const mark = markerHeight(rvSys, plot.rv, env, { lo: xmin, hi: xmax });
+            if (!mark) break;
+            if (mark.h > 0) extras.polylines.push({ pts: [mark.x, 0, mark.x, mark.h], color: css, width: 2 });
+            extras.points.push({ x: mark.x, y: mark.h, color: css, r: 4 });
           } catch { /* not evaluable this frame */ }
           break;
         }
@@ -1498,7 +1475,7 @@ function recompileAll() {
       eq.error = problem;
       continue;
     }
-    if (rv.kind === 'base' && rv.dist.discrete) {
+    if (rv.kind === 'base' && rvSys.discreteDist(name)) {
       // A pmf draws as stems on the CPU overlay; there is no density to shade.
       eq.cls = { ...densityCls(name), plot: { type: 'pmf', rv: name } };
     } else if (rv.kind === 'base') {

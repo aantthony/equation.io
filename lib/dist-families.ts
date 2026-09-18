@@ -7,15 +7,11 @@
  * turn `X ~ NewName(…)` into a regression. No imports: everything may use it.
  */
 
-export type ContinuousKind =
+export type BaseKind =
   | 'normal' | 'uniform' | 'exponential'
-  | 'gamma' | 'beta' | 'chisquared' | 'studentt' | 'lognormal' | 'cauchy' | 'weibull';
-
-/** Laws on the integers: a pmf drawn as stems, never a density. */
-export type DiscreteKind =
+  | 'gamma' | 'beta' | 'chisquared' | 'studentt' | 'lognormal' | 'cauchy' | 'weibull'
+  // Laws on the whole numbers (`discrete` in the table): a pmf drawn as stems.
   | 'binomial' | 'poisson' | 'geometric' | 'negbinomial' | 'bernoulli' | 'discreteuniform';
-
-export type BaseKind = ContinuousKind | DiscreteKind;
 
 /** What a parameter's value must satisfy, beyond being a finite number. */
 export interface DistParam {
@@ -147,8 +143,6 @@ const BY_KIND = new Map<BaseKind, DistFamily>(DIST_FAMILIES.map(f => [f.kind, f]
 export const distFamily = (name: string): DistFamily | undefined => BY_NAME.get(name.toLowerCase());
 
 export const familyOf = (kind: BaseKind): DistFamily => BY_KIND.get(kind)!;
-
-export const isDiscreteKind = (kind: BaseKind): kind is DiscreteKind => !!familyOf(kind).discrete;
 
 /** `Gamma(shape, rate)`. */
 export const distUsage = (f: DistFamily): string => `${f.name}(${f.params.map(p => p.name).join(', ')})`;

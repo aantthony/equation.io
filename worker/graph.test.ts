@@ -307,5 +307,18 @@ describe('discrete distributions through analyze()', () => {
     const fit = analyze(['X1 = [1, 2, 3, 4]', 'Y1 = [2.1, 3.9, 6.2, 7.8]', 'Y1 ~ p X1 + n']);
     expect(fit.rows[2].error).toBeUndefined();
   });
-});
 
+  it('a bound that is a whole number up to rounding reads as that whole number', () => {
+    const rows = out(['a = 0.1*3*10', 'X ~ Binomial(10, 0.3)', 'P(X < a)', 'P(X <= a)', 'P(X = a)', 'P(X != a)',
+      'U ~ DiscreteUniform(-10^17, 10^17)', 'P(0 <= U <= 2)']);
+    expect(rows.slice(2, 6).map(r => r[1])).toEqual(['≈ 0.3828', '≈ 0.6496', '≈ 0.2668', '≈ 0.7332']);
+    expect(rows[7]).toEqual(['prob', '≈ 0.0000']); // 1.5e-17, not the 0 of two differenced cdfs (lib test has the digits)
+  });
+
+  it('labels a discrete declaration from its family even when its parameter is bad', () => {
+    const a = analyze(['m = 3', 'W ~ Poisson(m - 3)', 'G ~ Gamma(m - 3, 1)']);
+    expect(a.rows[1].error).toBe('Poisson(mean) needs mean > 0.');
+    expect(a.rows[1].dist).toBe('pmf');
+    expect(a.rows[2].dist).toBe('density');
+  });
+});

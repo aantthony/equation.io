@@ -11,6 +11,7 @@ import {
   densityExpr,
   discreteLaw,
   integerBounds,
+  isDiscrete,
   paramProblem,
   parseDistribution,
   pdfExpr,
@@ -63,8 +64,11 @@ describe('parsing the discrete families', () => {
       ['Geometric(0.2)', 'geometric'], ['Geom(0.2)', 'geometric'], ['NegativeBinomial(3, 0.4)', 'negbinomial'],
       ['NegBin(3, 0.4)', 'negbinomial'], ['Bernoulli(0.5)', 'bernoulli'], ['DiscreteUniform(1, 6)', 'discreteuniform'],
     ];
-    for (const [rhs, kind] of kinds) expect(dist(rhs)).toMatchObject({ kind, discrete: true });
-    expect(dist('Normal(0, 1)').discrete).toBeUndefined();
+    for (const [rhs, kind] of kinds) {
+      expect(dist(rhs).kind).toBe(kind);
+      expect(isDiscrete(dist(rhs))).toBe(true);
+    }
+    expect(isDiscrete(dist('Normal(0, 1)'))).toBe(false);
   });
 
   it('has no standard member: a bare name says what it takes', () => {

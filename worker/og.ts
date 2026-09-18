@@ -8,7 +8,7 @@
  * (parametric surfaces/curves, z = f(x,y) heightmaps). Output is a PNG built
  * with CompressionStream — no image library.
  */
-import { type PmfStems, densityAt, integerBounds, pdfExpr, selectStems, shadePolygon, stemDotRadius } from '../lib/dist.ts';
+import { type PmfStems, integerBounds, markerHeight, selectStems, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
@@ -62,11 +62,11 @@ function drawLine(r: Raster, x0: number, y0: number, x1: number, y1: number, c: 
   }
 }
 
-function drawDisc(r: Raster, cx: number, cy: number, rad: number, c: [number, number, number]) {
+function drawDisc(r: Raster, cx: number, cy: number, rad: number, c: [number, number, number], a = 1) {
   for (let y = Math.floor(cy - rad - 1); y <= cy + rad + 1; y++) {
     for (let x = Math.floor(cx - rad - 1); x <= cx + rad + 1; x++) {
       const d = Math.hypot(x - cx, y - cy);
-      blend(r, x, y, c, Math.max(0, Math.min(1, rad - d + 0.5)));
+      blend(r, x, y, c, a * Math.max(0, Math.min(1, rad - d + 0.5)));
     }
   }
 }
@@ -358,23 +358,30 @@ function renderRow2D(
     } catch {
       return; // a parameter with no value at t = 0
     }
-    const y0 = toScreenY(r, v, 0);
     const clampY = (y: number) => Math.min(r.h + 8, Math.max(-8, y));
-    const dot = stemDotRadius(1 / v.upp);
     for (const run of runs) {
-      const sx = run.ks.map(k => toScreenX(r, v, k));
-      const sy = run.ps.map(p => toScreenY(r, v, p));
-      if (run.envelope) {
-        const px = [sx[0], ...sx, sx[sx.length - 1]];
-        const py = [y0, ...sy, y0];
-        fillPolygon(r, px, py, color, shade ? 0.35 : 0.16);
-        for (let i = 0; i + 1 < px.length; i++) drawLine(r, px[i], clampY(py[i]), px[i + 1], clampY(py[i + 1]), color);
+      if (!run.ks.length) continue;
+      // What to draw is lib's (stemGeometry), exactly as in the app; a raster
+      // px stands for a CSS px.
+      const g = stemGeometry(run, !!shade, 1 / v.upp);
+      const sx: number[] = [], sy: number[] = [];
+      for (let i = 0; i + 1 < g.lines.length; i += 2) {
+        sx.push(toScreenX(r, v, g.lines[i]));
+        sy.push(clampY(toScreenY(r, v, g.lines[i + 1])));
+      }
+      if (g.fill !== null) {
+        fillPolygon(r, sx, sy, color, g.fill);
+        for (let i = 0; i < sx.length; i++) drawLine(r, sx[i], sy[i], sx[(i + 1) % sx.length], sy[(i + 1) % sx.length], color, g.alpha);
         continue;
       }
-      for (let i = 0; i < sx.length; i++) {
-        // A selection is a wide translucent band over the variable's own stem.
-        for (const dx of shade ? [-2, -1, 0, 1, 2] : [0]) drawLine(r, sx[i] + dx, clampY(y0), sx[i] + dx, clampY(sy[i]), color, shade ? 0.45 : 1);
-        if (dot && !shade) drawDisc(r, sx[i], sy[i], dot, color);
+      for (let i = 0; i + 1 < sx.length; i += 3) { // [foot, top, pen-up] per stem
+        // drawLine is the 2px stroke; a wider (selected) stem is a filled band.
+        if (g.width <= 2) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color, g.alpha);
+        else {
+          const [a, b] = [sx[i] - g.width / 2 + 0.5, sx[i] + g.width / 2 + 0.5];
+          fillPolygon(r, [a, b, b, a], [sy[i], sy[i], sy[i + 1], sy[i + 1]], color, g.alpha);
+        }
+        if (g.dots) drawDisc(r, sx[i + 1] + 0.5, sy[i + 1], g.dots.r, color, g.alpha);
       }
     }
     return;
@@ -418,23 +425,17 @@ function renderRow2D(
     // The mean marker the app draws: a stem from the axis to the density at
     // x = E, capped with a dot (web/main.ts case 'expect').
     const name = cls.plot.rv;
-    const m = analysis.rvs.mean(name, analysis.constEnv);
-    if (!Number.isFinite(m)) return;
-    // (A discrete variable's marker reaches its pmf AT the mean: the stem's
-    // height where the mean is a whole number, the axis where it is not.)
-    const exact = analysis.rvs.exactDist(name) ?? analysis.rvs.discreteDist(name);
-    let h: number;
+    // Where and how high is lib's rule (markerHeight), shared with the app.
+    let mark: ReturnType<typeof markerHeight>;
     try {
-      h = exact
-        ? evaluate(pdfExpr(exact, { kind: 'num', value: m }), analysis.constEnv)
-        : (c => (c ? densityAt(c, m) : 0))(analysis.rvs.curve(name, analysis.constEnv));
+      mark = markerHeight(analysis.rvs, name, analysis.constEnv);
     } catch {
       return;
     }
-    if (!Number.isFinite(h) || h < 0) h = 0;
-    const mx = toScreenX(r, v, m);
-    if (h > 0) drawLine(r, mx, toScreenY(r, v, 0), mx, toScreenY(r, v, h), color);
-    drawDisc(r, mx, toScreenY(r, v, h), 3.5, color);
+    if (!mark) return;
+    const mx = toScreenX(r, v, mark.x);
+    if (mark.h > 0) drawLine(r, mx, toScreenY(r, v, 0), mx, toScreenY(r, v, mark.h), color);
+    drawDisc(r, mx, toScreenY(r, v, mark.h), 3.5, color);
     return;
   }
   if (cls.plot.type === 'cobweb') {

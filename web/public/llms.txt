@@ -334,7 +334,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   cdf, any size of n or mean) and highlights the selected stems, and strict
   and non-strict bounds are different events: `P(X < 3)` stops at 2,
   `P(X <= 3)` includes 3, `P(2 < X <= 5)` is 3, 4, 5, `P(X < 2.5)` is
-  `P(X <= 2)`. Point events exist only here: `P(X = 3)` (also `==`) is that
+  `P(X <= 2)`. A bound within rounding of a whole number is that number
+  (`a = 0.1*3*10` is 3), as for the parameters. Point events exist only here: `P(X = 3)` (also `==`) is that
   stem's height and `P(X != 3)` its complement; over a continuous variable
   they are an error (the value would be 0). `E(X)` is the exact closed-form
   mean, marked on the axis. Zoomed out past 1024 whole numbers in view
