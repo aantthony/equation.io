@@ -13,6 +13,7 @@ export interface View2D {
   cy: number;
   /** Math units per device pixel. */
   upp: number;
+  ratio?: number;
 }
 
 export interface Curve2D {
@@ -133,7 +134,7 @@ function gridFrag(specs: GridSpec[]): string {
   {
     float c = coord${k}(p.x, p.y);
     if (!isnan(c) && !isinf(c)) {
-      float lg = ${s.gradGlsl ? `length(grad${k}(p.x, p.y)) * uUpp` : 'length(vec2(dFdx(c), dFdy(c)))'};
+      float lg = ${s.gradGlsl ? `length(grad${k}(p.x, p.y) * uUpp)` : 'length(vec2(dFdx(c), dFdy(c)))'};
       minorA = max(minorA, gridLine(c, lg, uMinor${k}, 0.5));
       majorA = max(majorA, gridLine(c, lg, uMajor${k}, 0.5));
       axisA = max(axisA, 1.0 - smoothstep(0.9, 1.9, abs(c) / max(lg, 1e-24)));
@@ -142,7 +143,7 @@ function gridFrag(specs: GridSpec[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform float t;
 ${paramDecls(params)}
@@ -177,7 +178,7 @@ function levelsFrag(spec: { glsl: string; gradGlsl?: [string, string]; params: s
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float uMajor;
@@ -192,7 +193,7 @@ void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
-  float lg = ${spec.gradGlsl ? 'length(gradF(p.x, p.y)) * uUpp' : 'length(vec2(dFdx(v), dFdy(v)))'};
+  float lg = ${spec.gradGlsl ? 'length(gradF(p.x, p.y) * uUpp)' : 'length(vec2(dFdx(v), dFdy(v)))'};
   float a = max(gridLine(v, lg, uMinor, 0.5) * 0.18, gridLine(v, lg, uMajor, 0.5) * 0.45);
   if (a < 0.004) discard;
   outColor = vec4(uColor, a);
@@ -204,7 +205,7 @@ function curveFrag(field: string, params?: string[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -221,13 +222,13 @@ void main() {
   // two step sizes. For a genuine zero crossing the two estimates agree; near
   // a pole (y=tan(x) asymptotes, y=1/x at x=0) the first-order estimate is a
   // lie that varies with step size, so disagreement rejects the fake line.
-  float h = uUpp;
-  vec2 g1 = vec2(F(p.x + h, p.y) - F(p.x - h, p.y),
-                 F(p.x, p.y + h) - F(p.x, p.y - h)) / (2.0 * h);
-  vec2 g2 = vec2(F(p.x + 0.5 * h, p.y) - F(p.x - 0.5 * h, p.y),
-                 F(p.x, p.y + 0.5 * h) - F(p.x, p.y - 0.5 * h)) / h;
-  float e1 = abs(v) / max(length(g1) * h, 1e-24);
-  float e2 = abs(v) / max(length(g2) * h, 1e-24);
+  vec2 h = uUpp;
+  vec2 g1 = vec2(F(p.x + h.x, p.y) - F(p.x - h.x, p.y),
+                 F(p.x, p.y + h.y) - F(p.x, p.y - h.y)) / (2.0 * h);
+  vec2 g2 = vec2(F(p.x + 0.5 * h.x, p.y) - F(p.x - 0.5 * h.x, p.y),
+                 F(p.x, p.y + 0.5 * h.y) - F(p.x, p.y - 0.5 * h.y)) / h;
+  float e1 = abs(v) / max(length(g1 * h), 1e-24);
+  float e2 = abs(v) / max(length(g2 * h), 1e-24);
 
   float distPx;
   if (isnan(e1) || isinf(e1) || isnan(e2) || isinf(e2)) {
@@ -251,7 +252,7 @@ function scalarFrag(field: string, params?: string[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -275,7 +276,7 @@ function complexFrag(field: string, params?: string[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -316,7 +317,7 @@ function vfieldFrag(fx: string, fy: string, params?: string[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -353,7 +354,7 @@ void main() {
   float sum = w0 * vfNoise(gl_FragCoord.xy);
   float wsum = w0;
   float travel = 0.0;
-  float h = STEP * uUpp;
+  float h = STEP;
 
   // Line integral convolution: midpoint-rule streamline integration forward
   // and backward from p, accumulating noise along the path.
@@ -362,12 +363,12 @@ void main() {
     vec2 q = p;
     for (int i = 1; i <= N; i++) {
       vec2 v = V(q.x, q.y);
-      float m = length(v);
+      float m = length(v / uUpp);
       if (isnan(m) || isinf(m) || m < 1e-24) break;
       vec2 d = (sgn / m) * v;
       vec2 qm = q + 0.5 * h * d;
       vec2 vm = V(qm.x, qm.y);
-      float mm = length(vm);
+      float mm = length(vm / uUpp);
       if (!isnan(mm) && !isinf(mm) && mm > 1e-24) d = (sgn / mm) * vm;
       q += h * d;
       float w = weight(sgn * float(i) * STEP);
@@ -392,7 +393,7 @@ function domainFrag(field: string, params?: string[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -428,7 +429,7 @@ function conformalFrag(field: string, params?: string[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -476,7 +477,7 @@ function fractalFrag(step: string, seed: 'pixel' | 'zero', maxIter: number, para
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -538,7 +539,7 @@ function bifFrag(field: string, params?: string[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -558,7 +559,7 @@ void main() {
   for (int k = 0; k < 200; k++) {
     a = f(a, p.x);
     if (isnan(a) || isinf(a) || abs(a) > 1e12) break;
-    float d = abs(a - p.y) / uUpp;
+    float d = abs(a - p.y) / uUpp.y;
     acc += 0.35 * (1.0 - smoothstep(0.6, 1.4, d));
   }
   float alpha = min(acc, 1.0) * 0.92;
@@ -576,12 +577,12 @@ function ineqFrag(field: string, edges: string[], params?: string[]): string {
   {
     float ev = E${i}(p.x, p.y);
     if (!isnan(ev) && !isinf(ev) && v < 2.5 * aa) {
-      vec2 g1 = vec2(E${i}(p.x + h, p.y) - E${i}(p.x - h, p.y),
-                     E${i}(p.x, p.y + h) - E${i}(p.x, p.y - h)) / (2.0 * h);
-      vec2 g2 = vec2(E${i}(p.x + 0.5 * h, p.y) - E${i}(p.x - 0.5 * h, p.y),
-                     E${i}(p.x, p.y + 0.5 * h) - E${i}(p.x, p.y - 0.5 * h)) / h;
-      float e1 = abs(ev) / max(length(g1) * h, 1e-24);
-      float e2 = abs(ev) / max(length(g2) * h, 1e-24);
+      vec2 g1 = vec2(E${i}(p.x + h.x, p.y) - E${i}(p.x - h.x, p.y),
+                     E${i}(p.x, p.y + h.y) - E${i}(p.x, p.y - h.y)) / (2.0 * h);
+      vec2 g2 = vec2(E${i}(p.x + 0.5 * h.x, p.y) - E${i}(p.x - 0.5 * h.x, p.y),
+                     E${i}(p.x, p.y + 0.5 * h.y) - E${i}(p.x, p.y - 0.5 * h.y)) / h;
+      float e1 = abs(ev) / max(length(g1 * h), 1e-24);
+      float e2 = abs(ev) / max(length(g2 * h), 1e-24);
       if (!(isnan(e1) || isinf(e1) || isnan(e2) || isinf(e2))
         && !(e2 > 1.6 * e1 || e1 > 1.6 * e2)) {
         edge = max(edge, 1.0 - smoothstep(1.1, 2.1, max(e1, e2)));
@@ -591,7 +592,7 @@ function ineqFrag(field: string, edges: string[], params?: string[]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
-uniform float uUpp;
+uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec3 uColor;
 uniform float t;
@@ -607,7 +608,7 @@ void main() {
   float aa = max(fwidth(v), 1e-24);
   float fill = (1.0 - smoothstep(-aa, aa, v)) * 0.22;
   float edge = 0.0;
-  float h = uUpp;
+  vec2 h = uUpp;
 ${edgeBlocks}
   float alpha = max(fill, edge * 0.9);
   if (alpha < 0.004) discard;
@@ -640,16 +641,17 @@ export class Renderer2D {
     let specs = gridSpecs;
     if (!specs?.length) {
       const spacing = niceSpacing(view.upp, 90);
+      const spacingY = niceSpacing(view.upp / (view.ratio ?? 1), 90);
       specs = [
         { glsl: 'x', gradGlsl: ['1.0', '0.0'], params: [], major: spacing.major, minor: spacing.minor },
-        { glsl: 'y', gradGlsl: ['0.0', '1.0'], params: [], major: spacing.major, minor: spacing.minor },
+        { glsl: 'y', gradGlsl: ['0.0', '1.0'], params: [], major: spacingY.major, minor: spacingY.minor },
       ];
     }
     try {
       const grid = this.cache.get(QUAD_VERT, gridFrag(specs));
       gl.useProgram(grid);
       gl.uniform2f(gl.getUniformLocation(grid, 'uCenter'), view.cx, view.cy);
-      gl.uniform1f(gl.getUniformLocation(grid, 'uUpp'), view.upp);
+      gl.uniform2f(gl.getUniformLocation(grid, 'uUpp'), view.upp, view.upp / (view.ratio ?? 1));
       gl.uniform2f(gl.getUniformLocation(grid, 'uRes'), w, h);
       const tLoc = gl.getUniformLocation(grid, 't');
       if (tLoc) gl.uniform1f(tLoc, time);
@@ -682,7 +684,7 @@ export class Renderer2D {
       }
       gl.useProgram(prog);
       gl.uniform2f(gl.getUniformLocation(prog, 'uCenter'), view.cx, view.cy);
-      gl.uniform1f(gl.getUniformLocation(prog, 'uUpp'), view.upp);
+      gl.uniform2f(gl.getUniformLocation(prog, 'uUpp'), view.upp, view.upp / (view.ratio ?? 1));
       gl.uniform2f(gl.getUniformLocation(prog, 'uRes'), w, h);
       gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...color);
       const tLoc = gl.getUniformLocation(prog, 't');
@@ -756,8 +758,10 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
 
   const upp = view.upp * dpr; // math units per CSS pixel
   const { major } = niceSpacing(view.upp, 90);
+  const uppY = upp / (view.ratio ?? 1);
+  const majorY = niceSpacing(view.upp / (view.ratio ?? 1), 90).major;
   const toScreenX = (x: number) => (x - view.cx) / upp + w / 2;
-  const toScreenY = (y: number) => h / 2 - (y - view.cy) / upp;
+  const toScreenY = (y: number) => h / 2 - (y - view.cy) / uppY;
 
   const fmt = (v: number) => {
     if (v === 0) return '0';
@@ -776,10 +780,10 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
       if (Math.abs(x) < major / 2) continue;
       ctx.fillText(fmt(x), toScreenX(x) + 2, axisY + 13 <= h ? axisY + 13 : axisY - 4);
     }
-    const y0 = Math.ceil((view.cy - (h / 2) * upp) / major) * major;
-    const y1 = view.cy + (h / 2) * upp;
-    for (let y = y0; y <= y1; y += major) {
-      if (Math.abs(y) < major / 2) continue;
+    const y0 = Math.ceil((view.cy - (h / 2) * uppY) / majorY) * majorY;
+    const y1 = view.cy + (h / 2) * uppY;
+    for (let y = y0; y <= y1; y += majorY) {
+      if (Math.abs(y) < majorY / 2) continue;
       ctx.fillText(fmt(y), axisX + 4, toScreenY(y) - 3);
     }
   }

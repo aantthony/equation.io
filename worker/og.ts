@@ -72,13 +72,14 @@ function drawDisc(r: Raster, cx: number, cy: number, rad: number, c: [number, nu
 // --- 2D view ---
 
 interface View2D {
+  ratio?: number;
   cx: number; cy: number;
   /** World units per pixel. */
   upp: number;
 }
 
 const toScreenX = (r: Raster, v: View2D, wx: number) => r.w / 2 + (wx - v.cx) / v.upp;
-const toScreenY = (r: Raster, v: View2D, wy: number) => r.h / 2 - (wy - v.cy) / v.upp;
+const toScreenY = (r: Raster, v: View2D, wy: number) => r.h / 2 - (wy - v.cy) / (v.upp / (v.ratio ?? 1));
 
 function drawGrid2D(r: Raster, v: View2D) {
   const minor: [number, number, number] = [0.92, 0.92, 0.92];
@@ -86,18 +87,17 @@ function drawGrid2D(r: Raster, v: View2D) {
   // With a viewport row the window is author-controlled: a zoomed-out view
   // would paint one gridline per pixel (or worse), so drop the unit grid once
   // it gets denser than ~3px and keep only the axes.
-  const drawMinor = 1 / v.upp >= 3;
   const x0 = v.cx - (r.w / 2) * v.upp, x1 = v.cx + (r.w / 2) * v.upp;
-  const y0 = v.cy - (r.h / 2) * v.upp, y1 = v.cy + (r.h / 2) * v.upp;
-  const lines = (lo: number, hi: number) => (drawMinor ? Array.from(
+  const y0 = v.cy - (r.h / 2) * (v.upp / (v.ratio ?? 1)), y1 = v.cy + (r.h / 2) * (v.upp / (v.ratio ?? 1));
+  const lines = (lo: number, hi: number, upp: number) => (1 / upp >= 3 ? Array.from(
     { length: Math.max(0, Math.floor(hi) - Math.ceil(lo) + 1) },
     (_, i) => Math.ceil(lo) + i,
   ) : [0]);
-  for (const wx of lines(x0, x1)) {
+  for (const wx of lines(x0, x1, v.upp)) {
     const sx = Math.round(toScreenX(r, v, wx));
     for (let y = 0; y < r.h; y++) blend(r, sx, y, wx === 0 ? axis : minor, 1);
   }
-  for (const wy of lines(y0, y1)) {
+  for (const wy of lines(y0, y1, v.upp / (v.ratio ?? 1))) {
     const sy = Math.round(toScreenY(r, v, wy));
     for (let x = 0; x < r.w; x++) blend(r, x, sy, wy === 0 ? axis : minor, 1);
   }
@@ -109,7 +109,7 @@ function sampleField(r: Raster, v: View2D, prog: Prog, env: EvalEnv): Float64Arr
   const grid = new Float64Array((w + 1) * (h + 1));
   const { vars, stack, slotX, slotY } = env;
   for (let j = 0; j <= h; j++) {
-    const wy = v.cy + (h / 2 - j) * v.upp;
+    const wy = v.cy + (h / 2 - j) * (v.upp / (v.ratio ?? 1));
     vars[slotY] = wy;
     for (let i = 0; i <= w; i++) {
       vars[slotX] = v.cx + (i - w / 2) * v.upp;
@@ -373,8 +373,8 @@ function renderRow2D(
     const fx = substVars(f, { [recVar]: { kind: 'var', name: 'x' } });
     strokeZeroSet(r, sampleField(r, v, compile({ kind: 'bin', op: '-', a: { kind: 'var', name: 'y' }, b: fx }), env), color);
     // y = x across the visible window, lighter than the axes.
-    const dLo = Math.max(v.cx - (r.w / 2) * v.upp, v.cy - (r.h / 2) * v.upp);
-    const dHi = Math.min(v.cx + (r.w / 2) * v.upp, v.cy + (r.h / 2) * v.upp);
+    const dLo = Math.max(v.cx - (r.w / 2) * v.upp, v.cy - (r.h / 2) * (v.upp / (v.ratio ?? 1)));
+    const dHi = Math.min(v.cx + (r.w / 2) * v.upp, v.cy + (r.h / 2) * (v.upp / (v.ratio ?? 1)));
     if (dHi > dLo) {
       drawLine(r, toScreenX(r, v, dLo), toScreenY(r, v, dLo), toScreenX(r, v, dHi), toScreenY(r, v, dHi), [0.65, 0.65, 0.65], 0.45);
     }
@@ -429,8 +429,8 @@ function renderRow2D(
     case 'system': {
       const plot = cls.plot;
       if (plot.dim !== 2) return;
-      const lo = [v.cx - r.w * v.upp / 2, v.cy - r.h * v.upp / 2];
-      const hi = [v.cx + r.w * v.upp / 2, v.cy + r.h * v.upp / 2];
+      const lo = [v.cx - r.w * v.upp / 2, v.cy - r.h * (v.upp / (v.ratio ?? 1)) / 2];
+      const hi = [v.cx + r.w * v.upp / 2, v.cy + r.h * (v.upp / (v.ratio ?? 1)) / 2];
       const systemEnv = { ...analysis.constEnv, t: 0 };
       if (plot.parametric) {
         for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, systemEnv, 256, plot.angular)) {
@@ -450,8 +450,8 @@ function renderRow2D(
       const progs = cls.plot.comps.map(compile);
       for (let sy = 12; sy < r.h; sy += 22) for (let sx = 12; sx < r.w; sx += 22) {
         env.vars[env.slotX] = v.cx + (sx - r.w / 2) * v.upp;
-        env.vars[env.slotY] = v.cy - (sy - r.h / 2) * v.upp;
-        const dx = run(progs[0], env.vars, env.stack), dy = -run(progs[1], env.vars, env.stack);
+        env.vars[env.slotY] = v.cy - (sy - r.h / 2) * (v.upp / (v.ratio ?? 1));
+        const dx = run(progs[0], env.vars, env.stack), dy = -run(progs[1], env.vars, env.stack) * (v.ratio ?? 1);
         const length = Math.hypot(dx, dy);
         if (!(length > 0) || !Number.isFinite(length)) continue;
         const ux = dx / length, uy = dy / length;

@@ -18,6 +18,8 @@ import { evaluate, parseExpr } from './expr.ts';
 
 export interface View2DSpec {
   kind: 'view';
+  /** Pixels per y unit divided by pixels per x unit; defaults to 1. */
+  ratio?: number;
   /** [lo, hi] of the axis, when given. At least one axis is always present. */
   x?: [number, number];
   y?: [number, number];
@@ -100,13 +102,19 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
   if (!m) return null;
   const args = splitArgs(m[2]);
   if (m[1] === 'view') {
-    const usage = 'Expected view(x = lo..hi, y = lo..hi) — either axis alone works.';
+    const usage = 'Expected view(x = lo..hi, y = lo..hi, ratio = 1) — either axis alone works.';
     const spec: View2DSpec = { kind: 'view' };
-    if (!args.length || args.length > 2) throw new Error(usage);
+    if (!args.length || args.length > 3) throw new Error(usage);
     for (const arg of args) {
       const named = /^([A-Za-z]\w*)\s*=\s*([\s\S]+)$/.exec(arg);
       if (!named) throw new Error(usage);
       const axis = named[1];
+      if (axis === 'ratio') {
+        if (spec.ratio !== undefined) throw new Error('view(...) sets ratio twice.');
+        spec.ratio = num(named[2], env, 'view ratio');
+        if (spec.ratio <= 0) throw new Error('The view ratio must be positive.');
+        continue;
+      }
       if (axis !== 'x' && axis !== 'y') throw new Error(`view(...) frames the x and y axes, not "${axis}".`);
       if (spec[axis]) throw new Error(`view(...) sets ${axis} twice.`);
       const range = splitRange(named[2]);
@@ -116,6 +124,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       if (lo >= hi) throw new Error(`view ${axis} range needs lo < hi (got ${lo}..${hi}).`);
       spec[axis] = [lo, hi];
     }
+    if (!spec.x && !spec.y) throw new Error(usage);
     return spec;
   }
   const usage = 'Expected camera(theta, phi, radius?, (x, y, z)?) — angles in radians.';
@@ -151,7 +160,7 @@ export const clampPhi = (phi: number): number =>
   Math.min(Math.PI / 2 - 0.01, Math.max(-Math.PI / 2 + 0.01, phi));
 
 /**
- * Fit the requested box into a w×h viewport: uniform scale, whole box
+ * Fit the requested box into a w×h viewport: specified axis ratio (default 1), whole box
  * visible, centered. A single-axis spec centers the other axis at 0 with its
  * span implied by the aspect ratio.
  */
@@ -159,14 +168,15 @@ export function fitView2D(
   spec: View2DSpec,
   w: number,
   h: number,
-): { cx: number; cy: number; upp: number } {
+): { cx: number; cy: number; upp: number; ratio?: number } {
   const sx = spec.x ? spec.x[1] - spec.x[0] : 0;
   const sy = spec.y ? spec.y[1] - spec.y[0] : 0;
-  const upp = Math.max(sx / w, sy / h);
+  const upp = Math.max(sx / w, sy * (spec.ratio ?? 1) / h);
   return {
     cx: spec.x ? (spec.x[0] + spec.x[1]) / 2 : 0,
     cy: spec.y ? (spec.y[0] + spec.y[1]) / 2 : 0,
     upp,
+    ...(spec.ratio !== undefined ? { ratio: spec.ratio } : {}),
   };
 }
 
@@ -174,8 +184,8 @@ export function fitView2D(
 const fmt = (v: number) => String(parseFloat(v.toPrecision(6)));
 
 /** Serialize the visible window back into row text (the writeback half). */
-export function formatViewRow(x0: number, x1: number, y0: number, y1: number): string {
-  return `view(x = ${fmt(x0)}..${fmt(x1)}, y = ${fmt(y0)}..${fmt(y1)})`;
+export function formatViewRow(x0: number, x1: number, y0: number, y1: number, ratio = 1): string {
+  return `view(x = ${fmt(x0)}..${fmt(x1)}, y = ${fmt(y0)}..${fmt(y1)}${ratio === 1 ? '' : `, ratio = ${fmt(ratio)}`})`;
 }
 
 export function formatCameraRow(c: {
@@ -189,4 +199,21 @@ export function formatCameraRow(c: {
     parts.push(`(${c.target.map(fmt).join(', ')})`);
   }
   return `camera(${parts.join(', ')})`;
+}
+
+/** Scale each axis around a fixed device-pixel offset from the view center. */
+export function scaleViewAt(
+  view: { cx: number; cy: number; upp: number; ratio?: number },
+  px: number, py: number, factorX: number, factorY: number,
+): { cx: number; cy: number; upp: number; ratio: number } {
+  const oldY = view.upp / (view.ratio ?? 1);
+  const clamp = (n: number) => Math.max(1e-12, Math.min(1e12, n));
+  const upp = clamp(view.upp * factorX);
+  const uppY = clamp(oldY * factorY);
+  return {
+    cx: view.cx + px * (view.upp - upp),
+    cy: view.cy + py * (oldY - uppY),
+    upp,
+    ratio: upp / uppY,
+  };
 }

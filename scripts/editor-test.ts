@@ -391,6 +391,43 @@ await scenario('syntax help stays inside a resized mobile viewport', async () =>
   check('suggestions reposition after a mobile resize', true);
 });
 
+await scenario('independent axis scaling persists', async () => {
+  await page.setViewportSize({ width: 1000, height: 700 });
+  const errors: string[] = [];
+  const onConsole = (msg: import('playwright').ConsoleMessage) => {
+    if (msg.type() === 'error') errors.push(msg.text());
+  };
+  page.on('console', onConsole);
+  await load(page, ['x^2+y^2=4', '(1,1)', 'y<=sin(x)', '(-y,x)']);
+  await page.mouse.move(750, 400);
+  await page.keyboard.down('Alt');
+  await page.mouse.down();
+  await page.mouse.move(820, 450, { steps: 10 });
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+  const rows = await rowTexts(page);
+  const view = rows.find(r => r?.startsWith('view('))!;
+  check('Alt-drag creates a viewport row with an independent ratio', !!view?.includes('ratio ='), String(rows));
+  const ratio = Number(/ratio = ([^)]+)/.exec(view)?.[1]);
+  check('axis drag applies both scale factors', Math.abs(ratio - Math.exp(-1.2)) < 1e-5, String(ratio));
+  await caretTo(page, 0, 0);
+  await page.keyboard.press('ControlOrMeta+z');
+  check('one undo removes the newly created viewport row', !(await rowTexts(page)).some(r => r?.startsWith('view(')));
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  check('redo restores scaling', (await rowTexts(page)).includes(view));
+  await page.mouse.move(800, 500);
+  await page.mouse.wheel(0, 40);
+  await page.waitForTimeout(350);
+  const zoomed = (await rowTexts(page)).find(r => r?.startsWith('view('))!;
+  check('wheel zoom preserves ratio', Number(/ratio = ([^)]+)/.exec(zoomed)?.[1]) === ratio);
+  await page.waitForFunction(row => decodeURIComponent(location.pathname).includes(row), zoomed);
+  await page.reload();
+  await page.waitForSelector('.eq-line');
+  check('scaled view survives URL reload', (await rowTexts(page)).includes(zoomed));
+  check('scaled shaders compile without errors', errors.length === 0, errors.join('\n'));
+  page.off('console', onConsole);
+});
+
 await browser.close();
 server.kill();
 
