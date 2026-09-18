@@ -282,19 +282,43 @@ describe('discrete distributions through analyze()', () => {
     expect(rows[13][0]).toBe('DiscreteUniform(a, b) needs a ≤ b.');
   });
 
-  it('says "not yet" — loudly, by name — for everything plan #6 owns', () => {
-    const rows = out(['X ~ Poisson(3)', 'N ~ Binomial(5, 0.5)', 'Z ~ Normal(0, 1)', 'S = X + N', 'Y = X^2', 'M = X + Z',
-      'P(X > N)', 'P(X > Z)', 'P(X + 1 < 3)', 'E(2 X)', 'E(X + Z)', 'X + Z', 'V = Y + 1', 'P(Z = 1)', 'P(Z < 1)', 'P(X + 1 = 3)']);
-    const notYet = /discrete: arithmetic and joint events over discrete random variables are not supported yet/;
-    for (const i of [3, 4, 5, 6, 7, 8, 9, 10, 11]) expect(rows[i][0], `row ${i}`).toMatch(notYet);
-    expect(rows[3][0]).toMatch(/^X, N are discrete/);
-    expect(rows[4][0]).toMatch(/^X is discrete.*take X on its own\.$/);
-    expect(rows[12][0]).toBe('Y has an error in its definition.');
-    expect(rows[13][0]).toMatch(/^P\(Z = …\) needs a discrete variable/);
-    expect(rows[14]).toEqual(['ineq2d', '≈ 0.8413']); // the continuous path is untouched
-    expect(rows[15][0]).toBe('P(… = …) takes a discrete random variable on its own, like P(X = 3).');
-    // No internal builtin name reaches a message.
-    for (const r of rows) expect(String(r[0])).not.toMatch(/\[|pmf\]/);
+  it('derived discrete rows are pmf rows with exact readouts; mixtures are densities', () => {
+    const rows = out(['X ~ DiscreteUniform(1, 6)', 'Y ~ DiscreteUniform(1, 6)', 'Z ~ Normal(0, 1)', 'S = X + Y', 'Q = X^2', 'H = X / 2',
+      'M = X + Z', 'P(X > Y)', 'P(X >= Y)', 'P(X = Y)', 'P(S <= 5)', 'P(S < 5)', 'P(X + Y = 7)', 'E(X Y)', 'E(X + Z)', 'X - X', 'X Z',
+      'P(X > Z)', 'P(H = 1.5)', 'I = 1 / (X - 3)']);
+    expect(rows.slice(3, 7)).toEqual([
+      ['pmf', 'μ = 7, σ = 2.41523'], ['pmf', 'μ = 15.1667, σ = 12.2122'], ['pmf', 'μ = 1.75, σ = 0.853913'], ['density', undefined],
+    ]);
+    expect(rows.slice(7, 13).map(r => r[1])).toEqual(['≈ 0.4167', '≈ 0.5833', '≈ 0.1667', '≈ 0.2778', '≈ 0.1667', '≈ 0.1667']);
+    expect(rows[13]).toEqual(['expect', '≈ 12.2500']);
+    expect(rows[14]).toEqual(['expect', '≈ 3.500']); // a mixture: the sampled-density tier, three places
+    expect(rows[15]).toEqual(['pmf', 'μ = 0, σ = 0']);
+    expect(rows[16][0]).toBe('density');
+    expect(rows[17][0]).toBe('prob');
+    expect(rows[17][1]).toMatch(/^≈ 0\.9[67]\d$/); // mean of Φ(k): 0.9695 — sampled, three places
+    expect(rows[18]).toEqual(['prob', '≈ 0.1667']);
+    expect(rows[19]).toEqual(['pmf', 'μ = 0.0666667, σ = 0.719568, P(defined) ≈ 0.833']);
+    const a = analyze(['X ~ DiscreteUniform(1, 6)', 'Y ~ DiscreteUniform(1, 6)', 'S = X + Y', 'P(3 < S <= 5)', 'X + Y']);
+    expect(a.rows[2].dist).toBe('pmf');
+    expect(a.rows[2].cls!.plot).toEqual({ type: 'pmf', rv: 'S' });
+    expect(a.rows[3].cls!.plot).toMatchObject({ type: 'prob', shade: { rv: 'S', loStrict: true, hiStrict: false } });
+    expect(a.rows[4].dist).toBe('pmf');
+  });
+
+  it('closure, the sampled fallback, and what is still refused — by the names the user wrote', () => {
+    const rows = out(['A ~ Poisson(1000000)', 'B ~ Poisson(1000000)', 'S = A + B', 'P(S > 2000000)', 'C ~ Poisson(30)', 'W = A B C',
+      'Z ~ Normal(0, 1)', 'P(A + Z = 3)', 'P(A = Z)', 'P(Z = 1)', 'P(Z < 1)', 'P((A, B) = 3)']);
+    expect(rows[2]).toEqual(['pmf', 'μ = 2000000, σ = 1414.21']);
+    expect(rows[3]).toEqual(['prob', '≈ 0.4998']);
+    expect(rows[5][0]).toBe('pmf');
+    expect(rows[5][1]).toMatch(/^μ ≈ 3\d{13}\.\d{3}, σ ≈ .* \(sampled\)$/);
+    expect(rows[7][0]).toBe('P(… = …) needs discrete variables, and Z is not: a continuous value equals any given one with probability 0. Ask about an interval, like P(a < … < b).');
+    expect(rows[8][0]).toMatch(/^P\(… = …\) needs discrete variables, and Z is not/);
+    expect(rows[9][0]).toMatch(/^P\(Z = …\) needs a discrete variable/);
+    expect(rows[10]).toEqual(['ineq2d', '≈ 0.8413']); // the continuous path is untouched
+    expect(rows[11][0]).toBe('P(… = …) compares single values, like P(X = 3) or P(X = Y).');
+    // No internal name reaches a message.
+    for (const r of rows) expect(String(r[0])).not.toMatch(/\[|pmf\]|@/);
   });
 
   it('keeps the names out of the document namespace, and regressions over declared data alone', () => {

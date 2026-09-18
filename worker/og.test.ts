@@ -340,6 +340,35 @@ describe('og raster renderer', () => {
     expect(Math.max(...ink(['X ~ Binomial(6, 0.5)', 'P(X != 3)'], 30))).toBeLessThan(200);
   });
 
+  it('draws a derived discrete variable as stems AT ITS ATOMS — between whole numbers, where they are', () => {
+    // 20 px per unit, x = 0 at px 10; y: 200 px per unit, axis at py 90.
+    const view = 'view(x = -0.5..4.5, y = -0.05..0.45, ratio = 10)';
+    const rows = ['X ~ DiscreteUniform(1, 6)', 'H = X / 2'];
+    const r = renderRaster([view, 'X ~ DiscreteUniform(1, 6)', 'H = X / 2'], 100, 100);
+    const only = renderRaster([view, 'X ~ DiscreteUniform(1, 6)'], 100, 100);
+    const inked = (a: typeof r, x: number, y: number) => Math.min(...pixel(a, x, y)) < 200;
+    // H has an atom of mass 1/6 (py ≈ 56.7) at 1.5 (px 40) and at 2.5 (px 60): X has none there.
+    for (const px of [40, 60]) {
+      expect(inked(r, px, 75)).toBe(true);
+      expect(inked(only, px, 75)).toBe(false);
+    }
+    expect(inked(r, 45, 75)).toBe(false); // 1.75: between atoms
+    // Never a curve: the row of pixels at half height is ink only at stems.
+    let columns = 0;
+    for (let x = 0; x < 100; x++) if (inked(r, x, 75) && !inked(only, x, 75)) columns++;
+    expect(columns).toBeLessThanOrEqual(8);
+    // P(H <= 1.5) thickens the stem at 1.5 and leaves 2's alone; P(H < 1.5) leaves both.
+    const band = (body: string, px: number) => inked(renderRaster([view, ...rows, body], 100, 100), px + 2, 75) && !inked(r, px + 2, 75);
+    expect(band('P(H <= 1.5)', 40)).toBe(true);
+    expect(band('P(H < 1.5)', 40)).toBe(false);
+    expect(band('P(H <= 1.5)', 50)).toBe(false);
+    expect(band('P(X / 2 = 1.5)', 40)).toBe(true); // an inline expression selects the same atom
+    // E(H) = 1.75 stands on the axis (no atom there); E(X + X) = 7 on its atom.
+    const mark = renderRaster([view, ...rows, 'E(H)'], 100, 100);
+    expect(inked(mark, 45, 90) || inked(mark, 46, 90)).toBe(true);
+    expect(inked(mark, 45, 75)).toBe(false);
+  });
+
   it('draws a selection as the app does: a band that widens with the zoom, capped by an enlarged dot', () => {
     // lib's stemGeometry: width = clamp(0.6 · px per unit, 3, 9), dot r + 3.
     const rows = ['X ~ Binomial(6, 0.5)', 'P(X = 3)'];

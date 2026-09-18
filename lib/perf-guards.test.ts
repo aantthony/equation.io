@@ -12,7 +12,7 @@ import { describe, expect, test } from 'vitest';
 import { CORPUS, SUM_CASE, compileRows, countNodes } from './perfcase.ts';
 import { parseExpr } from './expr.ts';
 import { diff } from './diff.ts';
-import { QUANTILE_STATS, RVSystem, buildRVSystem, scanRandomRows } from './dist.ts';
+import { ENUM_STATS, JOINT_MAX, QUANTILE_STATS, RVSystem, buildRVSystem, scanRandomRows, markerHeight, toProbability } from './dist.ts';
 import { toGLSL } from './glsl.ts';
 
 const MEASURE = !!process.env.PERF_MEASURE;
@@ -191,5 +191,60 @@ describe('distribution quantile tables (the per-frame CPU path of a derived dens
       if (MEASURE) console.log(`${decl}: ${evals} cdf evaluations`);
       expect(evals, decl).toBeLessThan(6200);
     }
+  });
+});
+
+describe('derived discrete variables (enumeration per parameter change, never per frame)', () => {
+  // `S = X Y` over discrete bases is exact by enumerating the joint of the
+  // bases: thousands of evaluations, fine once per slider tick and a frozen UI
+  // per frame. The app redraws stems, the E(…) marker and P(…) selections every
+  // frame and calls resample() every frame; none of that may re-enumerate.
+  const system = (rows: string[]) => {
+    const sys = new RVSystem();
+    buildRVSystem(sys, scanRandomRows(rows), {
+      fnNames: new Set(), getFn: () => undefined, constNames: new Set(['a']), taken: () => false,
+    });
+    return sys;
+  };
+  const bounds = (body: string) => toProbability(parseExpr(body), new Set(['S'])).single!;
+
+  test('a still or panning view, a P(…) row, a marker and a resample reuse one enumeration', () => {
+    const sys = system(['X ~ Poisson(a)', 'Y ~ Binomial(40, 0.5)', 'S = X Y']);
+    sys.pmfRuns('S', { a: 30 }, { lo: 0, hi: 50 });
+    const before = { ...ENUM_STATS };
+    for (let frame = 0; frame < 20; frame++) {
+      sys.resample(frame + 1);
+      sys.pmfRuns('S', { a: 30 }, { lo: frame, hi: 50 + frame });
+      sys.pmfRuns('S', { a: 30 }, { lo: frame, hi: 50 + frame }, bounds('S <= 600'));
+      sys.moments('S', { a: 30 });
+      markerHeight(sys, 'S', { a: 30 });
+      sys.eventProbability(parseExpr('S <= 600'), { rv: 'S', ...bounds('S <= 600') }, { a: 30 });
+    }
+    sys.resample(0);
+    expect(ENUM_STATS).toEqual(before);
+    // A slider tick re-enumerates once: X's support, then one product.
+    sys.pmfRuns('S', { a: 31 }, { lo: 0, hi: 50 });
+    sys.pmfRuns('S', { a: 31 }, { lo: 0, hi: 60 });
+    expect(ENUM_STATS.builds - before.builds).toBe(1);
+    const points = ENUM_STATS.points - before.points;
+    if (MEASURE) console.log(`X Y enumeration: ${points} joint points`);
+    expect(points).toBeLessThan(8000);
+  });
+
+  test('no step passes JOINT_MAX, and a sampled base tabulates its quantile once per parameter value', () => {
+    const sys = system(['X ~ Poisson(a)', 'Y ~ Poisson(a)', 'Z ~ Poisson(a)', 'S = X Y + Z']);
+    for (const a of [3, 30, 300, 3000]) {
+      const before = ENUM_STATS.points;
+      sys.pmfRuns('S', { a });
+      expect(ENUM_STATS.points - before, `a = ${a}`).toBeLessThanOrEqual(2 * JOINT_MAX);
+    }
+    expect(sys.pmfOf('S', { a: 3000 })!.exact).toBe(false);
+    const before = { ...ENUM_STATS };
+    for (let frame = 0; frame < 5; frame++) {
+      sys.resample(frame + 1);
+      sys.pmfRuns('S', { a: 3000 });
+    }
+    sys.resample(0);
+    expect(ENUM_STATS).toEqual(before); // the columns were re-read; nothing was re-tabulated
   });
 });

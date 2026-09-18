@@ -50,8 +50,8 @@ const signatures: Record<string, [string, string]> = {
   tube: ['tube((x(u), y(u), z(u)))', 'Tube along a parametric space curve'],
   open: ['data = open("file.csv")', 'Use a CSV file dropped onto the graph'],
   ...Object.fromEntries(DIST_FAMILIES.map(f => [f.name, [`X ~ ${distUsage(f)}`, `Declare ${f.help}`]])),
-  P: ['P(X < b)', 'Probability of a random-variable condition. Over a discrete variable < and <= differ, and P(X = k) is a stem’s height'],
-  E: ['E(X)', 'Expected value of a random variable'],
+  P: ['P(X < b)', 'Probability of a random-variable condition, joint ones included: P(X > Y). Over discrete variables < and <= differ, P(X = k) is a stem’s height, and P(X = Y) counts the ties'],
+  E: ['E(X)', 'Expected value of a random variable or of an expression in them: E(X Y) — exact over discrete ones'],
 };
 
 /** Distributions whose name folds case ANYWHERE in a row, not just at the

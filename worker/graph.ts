@@ -35,6 +35,7 @@ import {
   lowerProbBody,
   matchExpectation,
   matchProbability,
+  momentsReadout,
   probabilityValue,
   regionExpr,
   scanRandomRows,
@@ -196,6 +197,15 @@ export function analyze(texts: string[]): Analysis {
       params: [...ps].filter(p => p !== 't'),
     };
   };
+  const pmfCls = (name: string): Classified => ({ ...densityCls(name), plot: { type: 'pmf', rv: name } });
+  // A derived pmf row reads out as in the app — exact μ, σ where the joint
+  // was enumerated, "(sampled)" where it was too large to be.
+  const pmfInfo = (row: RowInfo, name: string): void => {
+    try {
+      const m = rvs.moments(name, constEnv);
+      if (m) row.info = momentsReadout(m);
+    } catch { /* not computable at t = 0 (animated): no readout */ }
+  };
   const movingConsts = new Set([...animatedConstNames(defs), ...Object.keys(stateVals)]);
   for (const [i, name] of builtRVs.rowRV) {
     const row = rows[i];
@@ -206,7 +216,7 @@ export function analyze(texts: string[]): Analysis {
     }
     // Labelled from the family, before anything can fail: a discrete
     // declaration whose parameter is bad is still a pmf row with an error.
-    row.dist = rvs.discreteDist(name) ? 'pmf' : 'density';
+    row.dist = rvs.isDiscreteVar(name) ? 'pmf' : 'density';
     const rv = rvs.get(name)!;
     // Parameters that are constants are judged at their values: a = -1 then
     // X ~ Gamma(a, 1) is no distribution (mirror of web/main.ts).
@@ -215,9 +225,11 @@ export function analyze(texts: string[]): Analysis {
       row.error = problem;
       continue;
     }
-    // A discrete law draws its pmf as stems (CPU overlay; no shader field).
-    if (rvs.discreteDist(name)) {
-      row.cls = { ...densityCls(name), plot: { type: 'pmf', rv: name } };
+    // A discrete variable — declared, or built on discrete bases alone —
+    // draws its pmf as stems (CPU overlay; no shader field).
+    if (rvs.isDiscreteVar(name)) {
+      row.cls = pmfCls(name);
+      if (rv.kind === 'derived') pmfInfo(row, name);
       continue;
     }
     // Base declarations and derived variables with a closed form (affine in
@@ -262,7 +274,7 @@ export function analyze(texts: string[]): Analysis {
         for (const name of p.rvs) {
           if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
-        // Point events only of a discrete variable; nothing sampled over one.
+        // Point events only of discrete variables.
         rvs.checkProbability(p);
         row.dist = 'probability';
         // Inline bounded expressions become anonymous derived variables, so
@@ -297,17 +309,11 @@ export function analyze(texts: string[]): Analysis {
             params: [...ps].filter(v => v !== 't'),
           };
           try {
-            // A uniform-sum law still gets its exact value (mirror of the
-            // app's readout); everything else estimates over joint samples.
-            const value = single
-              ? rvs.exactProbability(single.rv, single.lo, single.hi, constEnv, single)
-              : null;
-            if (value !== null) {
-              if (isFinite(value)) row.info = `≈ ${value.toFixed(4)}`;
-            } else {
-              const mc = rvs.probability(p.body, constEnv);
-              if (isFinite(mc)) row.info = `≈ ${mc.toFixed(3)}`;
-            }
+            // A uniform-sum law still gets its exact value, and an event over
+            // discrete variables is enumerated (mirror of the app's readout);
+            // everything else estimates over joint samples.
+            const { value, exact: settled } = rvs.eventProbability(p.body, single, constEnv);
+            if (isFinite(value)) row.info = `≈ ${value.toFixed(settled ? 4 : 3)}`;
           } catch { /* animated or broken: no readout */ }
         }
         continue;
@@ -367,11 +373,14 @@ export function analyze(texts: string[]): Analysis {
           throw new Error(`An inequality in random variables is a probability: try P(${row.text}).`);
         }
         checkDerived(parsed, rvNames, constNames);
-        row.dist = 'density';
         const name = `@${ri}`;
         rvs.add({ name, kind: 'derived', expr: parsed });
+        row.dist = rvs.isDiscreteVar(name) ? 'pmf' : 'density';
         const exactAnon = rvs.exactDist(name);
-        if (exactAnon) {
+        if (rvs.isDiscreteVar(name)) {
+          row.cls = pmfCls(name);
+          pmfInfo(row, name);
+        } else if (exactAnon) {
           const density = densityExpr(exactAnon);
           row.cls = classify(density, constNames);
           row.expr = density;

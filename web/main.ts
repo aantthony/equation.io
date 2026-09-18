@@ -38,15 +38,14 @@ import {
   buildRVSystem,
   checkDerived,
   densityExpr,
-  integerBounds,
   lowerProbBody,
   markerHeight,
+  momentsReadout,
   matchExpectation,
   matchProbability,
   probabilityValue,
   regionExpr,
   scanRandomRows,
-  selectStems,
   shadePolygon,
   stemGeometry,
   toExpectation,
@@ -1133,10 +1132,12 @@ function render() {
           break;
         }
         case 'pmf': {
-          // Stems at the whole numbers in view; lib caches them per window.
+          // Stems at the atoms in view — whole numbers for a declared law,
+          // wherever g put them for a derived one; lib caches them per window.
           try {
-            const drawn = rvSys.stems(plot.rv, env, { lo: xmin, hi: xmax });
-            if (drawn) pushStems(extras, drawn.stems, color, false, stemPx);
+            for (const run of rvSys.pmfRuns(plot.rv, env, { lo: xmin, hi: xmax }) ?? []) {
+              pushStems(extras, run, color, false, stemPx);
+            }
           } catch { /* a parameter is missing this frame */ }
           break;
         }
@@ -1147,11 +1148,9 @@ function render() {
           try {
             // Over a discrete variable: the selected stems, drawn heavier —
             // `X < 3` stops at 2 and `X <= 3` takes the stem at 3.
-            const drawn = rvSys.stems(plot.shade.rv, env, { lo: xmin, hi: xmax });
-            if (drawn) {
-              for (const run of selectStems(drawn.stems, drawn.law, integerBounds(plot.shade, env))) {
-                pushStems(extras, run, color, true, stemPx);
-              }
+            const selected = rvSys.pmfRuns(plot.shade.rv, env, { lo: xmin, hi: xmax }, plot.shade);
+            if (selected) {
+              for (const run of selected) pushStems(extras, run, color, true, stemPx);
               break;
             }
             const c = rvSys.curve(plot.shade.rv, env, { lo: xmin, hi: xmax });
@@ -1428,12 +1427,7 @@ function recompileAll() {
       // law, median/IQR where heavy tails make μ/σ truncation artifacts (1/W
       // through a pole has no finite moments), the ≈ estimate everywhere else.
       const m = rvSys.moments(name, envT0);
-      if (!m) return;
-      eq.info = (m.kind === 'exact' ? `μ = ${fmtNum(m.mean)}, σ = ${fmtNum(m.sd)}`
-        : m.kind === 'robust'
-          ? `median ≈ ${m.median.toFixed(3)}, IQR ≈ ${m.iqr.toFixed(3)} (heavy tails: ${m.meanOk ? 'σ' : 'μ, σ'} unstable)`
-          : `μ ≈ ${m.mean.toFixed(3)}, σ ${isFinite(m.sd) ? `≈ ${m.sd.toFixed(3)}` : '= ∞'}`)
-        + (m.mass < 0.9995 ? `, P(defined) ≈ ${m.mass.toFixed(3)}` : '');
+      if (m) eq.info = momentsReadout(m);
     } catch { /* not numerically computable right now (e.g. animated) */ }
   };
   // A derived variable whose law is a closed-form pdf (affine in normals, a
@@ -1443,7 +1437,10 @@ function recompileAll() {
   // the rest estimate from samples.
   const classifyDerived = (eq: Equation, name: string) => {
     const exact = rvSys.exactDist(name);
-    if (exact && rvSys.get(name)!.kind === 'derived') {
+    if (rvSys.isDiscreteVar(name)) {
+      // Built on discrete bases alone: a pmf, drawn as stems at its atoms.
+      eq.cls = pmfCls(name);
+    } else if (exact && rvSys.get(name)!.kind === 'derived') {
       eq.cls = classify(densityExpr(exact), constNames);
     } else {
       eq.cls = densityCls(name);
@@ -1459,6 +1456,7 @@ function recompileAll() {
       params: [...ps].filter(p => p !== 't'),
     };
   };
+  const pmfCls = (name: string): Classified => ({ ...densityCls(name), plot: { type: 'pmf', rv: name } });
   for (const [i, name] of builtRVs.rowRV) {
     const eq = equations[i];
     distRows.add(eq);
@@ -1475,9 +1473,9 @@ function recompileAll() {
       eq.error = problem;
       continue;
     }
-    if (rv.kind === 'base' && rvSys.discreteDist(name)) {
+    if (rv.kind === 'base' && rvSys.isDiscreteVar(name)) {
       // A pmf draws as stems on the CPU overlay; there is no density to shade.
-      eq.cls = { ...densityCls(name), plot: { type: 'pmf', rv: name } };
+      eq.cls = pmfCls(name);
     } else if (rv.kind === 'base') {
       eq.cls = classify(densityExpr(rv.dist), constNames);
     } else {
@@ -1518,7 +1516,7 @@ function recompileAll() {
         for (const name of p.rvs) {
           if (!rvSys.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
-        // Point events only of a discrete variable; nothing sampled over one.
+        // Point events only of discrete variables.
         rvSys.checkProbability(p);
         // Bounds around an inline expression (`P(0.5 < X + Y < 1.5)`) become
         // bounds on an anonymous derived variable, so exactness and shading
@@ -1545,7 +1543,8 @@ function recompileAll() {
         } else {
           // Everything else draws/estimates through the sampled channel —
           // but a uniform-sum law still gets its exact value (and its shade
-          // fills under the exact piecewise-polynomial curve).
+          // fills under the exact piecewise-polynomial curve), and an event
+          // over discrete variables is enumerated (lib: eventProbability).
           const ps = rvSys.bodyParams(p.body);
           eq.cls = {
             plot: { type: 'prob', body: p.body, shade: single },
@@ -1555,15 +1554,8 @@ function recompileAll() {
           };
           if (envT0) {
             try {
-              const value = single
-                ? rvSys.exactProbability(single.rv, single.lo, single.hi, envT0, single)
-                : null;
-              if (value !== null) {
-                if (isFinite(value)) eq.info = `≈ ${value.toFixed(4)}`;
-              } else {
-                const mc = rvSys.probability(p.body, envT0);
-                if (isFinite(mc)) eq.info = `≈ ${mc.toFixed(3)}`;
-              }
+              const { value, exact: settled } = rvSys.eventProbability(p.body, single, envT0);
+              if (isFinite(value)) eq.info = `≈ ${value.toFixed(settled ? 4 : 3)}`;
             } catch { /* animated or broken: no readout */ }
           }
         }
@@ -3030,6 +3022,14 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['waiting for a success', 'view(x = -1.5..21.5, y = -0.02..0.3, ratio = 40); p = 0.25; G ~ Geometric(p); '
       + 'W ~ NegativeBinomial(3, p); P(G > 4)'],
     ['a fair die', 'view(x = -0.5..7.5, y = -0.02..0.3, ratio = 16); D ~ DiscreteUniform(1, 6); P(2 < D <= 5); E(D)'],
+    ['two dice', 'view(x = 0.5..13.5, y = -0.02..0.22, ratio = 40); X ~ DiscreteUniform(1, 6); Y ~ DiscreteUniform(1, 6); '
+      + 'S = X + Y; P(S >= 10); P(X > Y); P(X >= Y); E(S)'],
+    ['a die, halved and squared', 'view(x = -1..38, y = -0.02..0.22, ratio = 120); D ~ DiscreteUniform(1, 6); D / 2; D^2; '
+      + 'P(D^2 <= 9); E(D^2)'],
+    ['Poisson counts add', 'view(x = -1.5..16.5, y = -0.02..0.3, ratio = 40); a = 2; b = 3; A ~ Poisson(a); B ~ Poisson(b); '
+      + 'S = A + B; P(S <= 4); P(A = B)'],
+    ['a count plus noise', 'view(x = -2..10, y = -0.03..0.33, ratio = 25); s = 0.25; N ~ Poisson(3); Z ~ Normal(0, s); Y = N + Z; '
+      + 'P(Y < 2.5)'],
     ['conditional variable', 'X ~ Normal(0, 1); Y = {X > 0: X^2, 1}; P(Y > 0.5); P(Y > X)'],
     ['expectation', 'X ~ Uniform(0, 1); Y = X^2; E(Y); E(X + Y)'],
   ]],

@@ -10,8 +10,12 @@
  *   DiscreteUniform) declares a DISCRETE variable: the row plots its pmf as
  *   stems, `P(…)` with constant bounds is the exact mass of the whole numbers
  *   it selects (so `<` and `<=` differ, and `P(X = 3)` is a number), `E(X)`
- *   the closed-form mean. Nothing below applies to them yet — every tier
- *   there assumes a density — so a derived row over one is refused by name.
+ *   the closed-form mean. Arithmetic over discrete variables (`S = X1 + X2`,
+ *   `X^2`, `X/2`, `P(X > Y)`, `P(X = Y)`, `E(g(X))`) is EXACT by enumerating
+ *   the joint of the independent bases while that joint is small (JOINT_MAX),
+ *   and sampled — still as a pmf, never a KDE — past it; see "derived discrete
+ *   variables" below. A discrete base mixed with a continuous one
+ *   (`N + Z`) is a continuous mixture and takes the sampled-density tier.
  * - `Y = g(X, …)` where the right side references random variables declares a
  *   *derived* random variable — arithmetic on distributions. `S = X1 + X2` is
  *   the convolution of independent summands, `X Y` the product distribution,
@@ -209,7 +213,7 @@ export function pmfExpr(d: BaseDist, k: Expr): Expr | null {
  * The discrete families reduced to the four that have an implementation, ONCE:
  * Bernoulli(p) is Binomial(1, p), and Geometric(p) — trials, from 1 — is
  * 1 + NegativeBinomial(1, p). Everything downstream (pmfExpr, the cdf, the
- * law's moments, quantile and stems, and plan #6's enumeration) reads this and
+ * law's moments, quantile and stems, and the enumeration of derived variables) reads this and
  * applies `shift`; none of them names Bernoulli or Geometric again. Messages
  * are not built from it: validation judges the family the user wrote.
  */
@@ -300,6 +304,21 @@ export function densityExpr(d: BaseDist): Expr {
   return { kind: 'eq', l: v('y'), r: pdfExpr(d, v('x')) };
 }
 
+/** A derived row's readout, from RVSystem.moments' verdict: `μ = …, σ = …`
+ *  under an exact law, `≈` for an estimate, median/IQR where the tails make
+ *  μ and σ truncation artifacts; then what part of the mass is defined, and
+ *  the verdict's note (a sampled pmf says so). One wording for the app and
+ *  analyze(). */
+export function momentsReadout(m: NonNullable<ReturnType<RVSystem['moments']>>): string {
+  const exactly = (x: number): string => String(parseFloat(x.toPrecision(6)));
+  return (m.kind === 'exact' ? `μ = ${exactly(m.mean)}, σ = ${exactly(m.sd)}`
+    : m.kind === 'robust'
+      ? `median ≈ ${m.median.toFixed(3)}, IQR ≈ ${m.iqr.toFixed(3)} (heavy tails: ${m.meanOk ? 'σ' : 'μ, σ'} unstable)`
+      : `μ ≈ ${m.mean.toFixed(3)}, σ ${isFinite(m.sd) ? `≈ ${m.sd.toFixed(3)}` : '= ∞'}`)
+    + (m.mass < 0.9995 ? `, P(defined) ≈ ${m.mass.toFixed(3)}` : '')
+    + (m.note ? ` (${m.note})` : '');
+}
+
 /** The readout of an `E(…)` row whose mean is not a number (RVSystem.meanUnstable). */
 export const NO_MEAN_INFO = 'no stable mean (heavy tails)';
 
@@ -340,6 +359,9 @@ export interface ProbSpec {
   body: Expr;
   /** Random variables the body references. */
   rvs: string[];
+  /** The body is a point event (`=`, `==`, `!=`): only discrete variables
+   *  have those (RVSystem.checkProbability). */
+  point?: boolean;
   /**
    * Present when the body is constant bounds around one bare variable
    * (`P(a < X < b)`): the shadeable — and for closed-form laws, exact — case.
@@ -366,7 +388,7 @@ export function lowerProbBody(e: Expr, lower: (e: Expr) => Expr): Expr {
   return lower(e);
 }
 
-const POINT_SHAPE = 'P(… = …) takes a discrete random variable on its own, like P(X = 3).';
+const POINT_SHAPE = 'P(… = …) compares single values, like P(X = 3) or P(X = Y).';
 
 /** Interpret a parsed P(…) body against the declared random variables. */
 export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
@@ -386,10 +408,14 @@ export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
   }
   const bearing = (t: Expr): boolean => [...freeVars(t)].some(n => rvNames.has(n));
   if (point) {
-    const [name, at] = point.l.kind === 'var' && rvNames.has(point.l.name) ? [point.l.name, point.r]
-      : point.r.kind === 'var' && rvNames.has(point.r.name) ? [point.r.name, point.l] : [null, null];
-    if (name === null || bearing(at) || at.kind === 'vec' || at.kind === 'ineq' || at.kind === 'eq') throw new Error(POINT_SHAPE);
-    return { body: e, rvs, single: { rv: name, lo: at, hi: at, point: true, ...(point.not ? { not: true } : {}) } };
+    const scalar = (t: Expr): boolean => t.kind !== 'vec' && t.kind !== 'ineq' && t.kind !== 'eq' && t.kind !== 'list';
+    if (!scalar(point.l) || !scalar(point.r)) throw new Error(POINT_SHAPE);
+    // Random on both sides (`P(X = Y)`): a joint event, like `P(X > Y)`.
+    if (bearing(point.l) && bearing(point.r)) return { body: e, rvs, point: true };
+    const [t, at] = bearing(point.l) ? [point.l, point.r] : [point.r, point.l];
+    const bounds: ProbBounds = { lo: at, hi: at, point: true, ...(point.not ? { not: true } : {}) };
+    return t.kind === 'var' ? { body: e, rvs, point: true, single: { rv: t.name, ...bounds } }
+      : { body: e, rvs, point: true, inline: { e: t, ...bounds } };
   }
   const comps = ineqComparisons(e as Expr & { kind: 'ineq' });
   if (new Set(comps.map(c => c.op[0])).size > 1) {
@@ -1764,6 +1790,21 @@ interface CacheEntry {
   /** A discrete base: its law, the whole numbers holding all but STEM_TAIL of
    *  each tail, and the stems last built, keyed by their window. */
   pmf?: { law: DiscreteLaw; kLo: number; kHi: number; key: string; stems: PmfStems | null } | null;
+  /** A discrete base: its atoms for enumeration ('cap': too wide), and its
+   *  exact quantile at every stratum (sortedQuantiles) — per parameter values,
+   *  so resample() leaves both alone. */
+  atoms?: AtomSet | 'cap' | null;
+  strata?: Float64Array;
+  /** A derived discrete variable: the enumerated pmf ('cap': sample instead;
+   *  null: a base declares no distribution)… */
+  dpmf?: DiscretePmf | 'cap' | null;
+  /** …the sampled one, dropped by resample() unless `spmfStill`… */
+  spmf?: DiscretePmf | null;
+  spmfStill?: boolean;
+  /** …whether a one-base transform's mean converges, for the sampled tier… */
+  sampledMeanOk?: boolean;
+  /** …and the windows last drawn, by view and selection. */
+  runs?: Map<string, PmfStems[]>;
 }
 
 /** The pdf and support of a base distribution at these parameter values, or
@@ -1811,7 +1852,7 @@ function pdfClosure(
     case 'weibull':
       return { pdf: x => weibullPdf(x, a[0], a[1]), lo: 0, hi: Infinity, mid: a[1] };
     default:
-      return null; // a discrete law has no pdf to integrate against (add() refuses its transforms)
+      return null; // a discrete law has no pdf to integrate against (its transforms enumerate: pmfOf)
   }
 }
 
@@ -1834,8 +1875,9 @@ export interface DiscreteLaw {
    * The quantile function, a step function: the smallest whole number k with
    * P(X ≤ k) ≥ u — or, with `upper`, with P(X > k) ≤ u, which addresses the
    * upper tail without forming 1 − u. Exact at the steps: quantile(cdf(k)) is
-   * k, and anything above cdf(k) is k + 1. (The sampling tier of plan #6 draws
-   * through this; here it bounds the stems worth drawing.)
+   * k, and anything above cdf(k) is k + 1. It bounds the stems worth drawing and
+   * the support worth enumerating, and the sampled tier draws through it
+   * (sortedQuantiles).
    */
   quantile: (u: number, upper?: boolean) => number;
 }
@@ -1983,12 +2025,17 @@ export const STEM_STATS = { builds: 0, pmfEvals: 0 };
 
 /** The drawn pmf of a discrete variable over a view. */
 export interface PmfStems {
-  /** Whole numbers, ascending, and P(X = k) at each. */
+  /** Where the stems stand, ascending — whole numbers for a base law, the
+   *  atoms' true values for a derived one — and the mass at each. */
   ks: number[];
   ps: number[];
   /** True when `ks` is a subsample (see STEM_MAX): draw the outline through
    *  the points, not one stem per point. */
   envelope: boolean;
+  /** The spacing the stems stand at, when it is not 1: the smallest gap
+   *  between a derived variable's atoms (X/2 stands every ½), which is what
+   *  decides whether dots fit. */
+  step?: number;
 }
 
 /** Every whole number of [kLo, kHi] (finite, at most STEM_MAX of them). */
@@ -2056,10 +2103,11 @@ export function stemGeometry(run: PmfStems, heavy: boolean, pxPerUnit: number): 
     return { lines, width: 1.5, alpha: 1, dots: null, fill: heavy ? 0.35 : 0.16 };
   }
   ks.forEach((k, i) => lines.push(k, 0, k, ps[i], NaN, NaN));
-  const r = stemDotRadius(pxPerUnit);
+  const pxPerStem = pxPerUnit * (run.step ?? 1);
+  const r = stemDotRadius(pxPerStem);
   return {
     lines,
-    width: heavy ? Math.min(9, Math.max(3, pxPerUnit * 0.6)) : r ? 2 : 1,
+    width: heavy ? Math.min(9, Math.max(3, pxPerStem * 0.6)) : r ? 2 : 1,
     alpha: heavy ? 0.45 : 1,
     dots: r ? { r: heavy ? r + 3 : r, outlined: !heavy && r >= 3 } : null,
     fill: null,
@@ -2071,7 +2119,7 @@ export function stemGeometry(run: PmfStems, heavy: boolean, pxPerUnit: number): 
  * there. For a discrete variable that is the stem at the mean when the mean is
  * a whole number — within rounding, by wholeNumber's tolerance: Binomial(100,
  * 0.07) has mean 7.000000000000001, and pmf(that) is 0 — and the axis when it
- * falls between stems. For a continuous one, the exact pdf or the drawn curve.
+ * falls between stems; for a derived one, the atom the mean lands on, if any. For a continuous one, the exact pdf or the drawn curve.
  * Null when there is no mean to mark. Throws what evaluate throws (a missing
  * parameter this frame).
  */
@@ -2080,11 +2128,7 @@ export function markerHeight(
 ): { x: number; h: number } | null {
   const m = sys.mean(name, env);
   if (!isFinite(m)) return null;
-  const discrete = sys.discreteDist(name);
-  if (discrete) {
-    const k = wholeNumber(m);
-    return Number.isNaN(k) ? { x: m, h: 0 } : { x: k, h: discreteLaw(discrete, env)?.pmf(k) ?? 0 };
-  }
+  if (sys.isDiscreteVar(name)) return sys.atomNear(name, m, env);
   const exact = sys.exactDist(name);
   let h = exact ? evaluate(pdfExpr(exact, num(m)), env) : (c => (c ? densityAt(c, m) : 0))(sys.curve(name, env, view));
   if (!isFinite(h) || h < 0) h = 0;
@@ -2130,6 +2174,608 @@ export function selectStems(
     if (ks.length) out.push({ ks, ps, envelope: stems.envelope });
   }
   return out;
+}
+
+// --- derived discrete variables: exact atoms by enumeration, else a sampled pmf ---
+//
+// A variable built only on discrete bases (`S = X1 + X2`, `X^2`, `X/2`,
+// `sin(X)`) is itself discrete: finitely many ATOMS carry all but a
+// negligible part of its mass. They sit wherever g puts them — X/2 on the
+// half-integers, X^2 on a sparse lattice, sin(X) nowhere regular — so nothing
+// below assumes whole numbers: atoms are (value, mass) pairs, drawn at their
+// true locations. Two joint points that differ only by rounding are ONE atom
+// (0.1 + 0.2 and 0.3; 0.1 X + 0.2 Y − 0.3 Z at X = Y = Z and 0), so every
+// computed value is made `canonical` — whole numbers trusted, a sum that
+// cancelled to within the rounding of its operands read as 0, the rest rounded
+// to 12 significant digits — and a P(…) bound is compared the same way.
+//
+// EXACT TIER. Each base is cut to the whole numbers holding all but ENUM_TAIL
+// of each tail (a bounded support of at most FULL_SUPPORT is kept whole), and
+// the expression is evaluated over the JOINT of the bases — never over derived
+// marginals, so `X - X` is the atom 0 and `A = X + Y; B = X - Y` stay as
+// dependent as they are. Subexpressions over DISJOINT bases are independent,
+// so they are enumerated on their own and combined (convolution, for a sum):
+// ten dice cost 10 × 51 × 6 evaluations, not 6^10. Any one product may hold at
+// most JOINT_MAX points — the cost of the sampling tier it would otherwise
+// fall back to, so a slider dragging a parameter past the cap degrades to
+// sampling instead of hanging. The mass ignored is at most 2·ENUM_TAIL per
+// base (AtomSet.lost).
+//
+// What truncation does to a MEAN is a separate question — E(2^X) over a
+// Geometric diverges, and its truncated sum is a confident wrong number — so
+// every atom also carries how much of its mass came from the outer slivers of
+// a truncated tail (tail probability ENUM_TAIL..1e-9, and 1e-9..1e-6): the
+// same test `diverges` makes for a density, read off the enumeration (see
+// momentVerdict).
+//
+// SAMPLED TIER. Past the cap the joint sample stands in: base columns are the
+// exact step-function quantile of the stratified streams, and the variable's
+// pmf is the frequency of each distinct sampled value — stems again. Only when
+// there are too many distinct values for a frequency to mean anything
+// (Poisson(1e6)·Bernoulli) is it a HISTOGRAM, and then on the variable's own
+// lattice (the common step of its values, whole numbers or not), with heavy
+// atoms kept apart; values on no lattice at all stay stems at the sampled
+// values, and the readout says the pmf is unresolved. Never a KDE.
+
+/** Most joint points one enumeration step may evaluate (see above). */
+export const JOINT_MAX = SAMPLE_COUNT;
+/** Mass each truncated tail of a base may hide from the enumeration. */
+const ENUM_TAIL = STEM_TAIL;
+/** A bounded support this small is enumerated whole: nothing is truncated, so
+ *  no moment of it can be in doubt (2^X over Binomial(1000, ½) lives 10σ out). */
+const FULL_SUPPORT = 1024;
+/** The inner edges of the two tail slivers the moment test compares. */
+const SLIVER_A = 1e-9;
+const SLIVER_B = 1e-6;
+/** Values closer than this, relatively, are one atom; a sum smaller than this
+ *  against the magnitude of its operands cancelled to 0. */
+const ATOM_REL = 2 ** -40;
+/** Whole numbers a sampled base column tabulates exactly (see sortedQuantiles). */
+const TABLE_MAX = 1 << 20;
+/** Counts enumeration work: joint points evaluated, and pmf evaluations spent
+ *  on base supports and sampling tables. The perf guard reads it. */
+export const ENUM_STATS = { builds: 0, points: 0, pmfEvals: 0 };
+
+const sameAtom = (a: number, b: number): boolean =>
+  a === b || (Number.isNaN(a) && Number.isNaN(b))
+  || (isFinite(a) && isFinite(b) && Math.abs(a - b) <= ATOM_REL * Math.max(Math.abs(a), Math.abs(b)));
+
+/** A computed value as the atom it names (see the section comment). `mag` is
+ *  the magnitude of what was added up to make it: |a| + |b| for a ± b. A whole
+ *  number is trusted as it stands — whole operands add exactly. */
+function canonical(x: number, mag: number): number {
+  if (!isFinite(x) || Number.isInteger(x)) return x;
+  const a = Math.abs(x);
+  if (a <= ATOM_REL * mag) return 0;
+  const e = 11 - Math.floor(Math.log10(a));
+  if (e < 0 || e > 22) return Number(x.toPrecision(12));
+  const s = 10 ** e; // exact up to 1e22, so the quotient is the correctly rounded decimal
+  return Math.round(x * s) / s;
+}
+
+/** An expression bounding the magnitude of what `e` adds up: |a| + |b| for
+ *  a ± b, through products; null when nothing in it can cancel. */
+function magnitude(e: Expr): Expr | null {
+  const cancels = (x: Expr): boolean => x.kind === 'bin'
+    ? ((x.op === '+' || x.op === '-') || cancels(x.a) || cancels(x.b))
+    : x.kind === 'neg' ? cancels(x.a)
+      : x.kind === 'call' ? x.args.some(cancels) : x.kind === 'piecewise';
+  const mag = (x: Expr): Expr => {
+    if (x.kind === 'neg') return mag(x.a);
+    if (x.kind === 'bin' && (x.op === '+' || x.op === '-')) return bin('+', mag(x.a), mag(x.b));
+    if (x.kind === 'bin' && x.op === '*') return bin('*', mag(x.a), mag(x.b));
+    return call('abs', x);
+  };
+  return cancels(e) ? mag(e) : null;
+}
+
+/** `e` over columns, as canonical values. (A bare variable is its column,
+ *  untouched: a base's whole numbers, or an enumerated part.) */
+function canonicalColumn(e: Expr, cols: ReadonlyMap<string, Float64Array>, env: Record<string, number>, count: number): Float64Array {
+  const vals = evalCols(e, cols, env, count);
+  if (e.kind === 'var') return vals;
+  const mag = magnitude(e);
+  return canonicalize(vals, mag ? evalCols(mag, cols, env, count) : undefined);
+}
+
+/** Make a column canonical in place, against its magnitude column (or itself). */
+function canonicalize(vals: Float64Array, mags?: ArrayLike<number>): Float64Array {
+  for (let i = 0; i < vals.length; i++) vals[i] = canonical(vals[i], mags ? mags[i] : 0);
+  return vals;
+}
+
+/** Atoms of an intermediate value: ascending, then ±∞ and NaN kept as atoms
+ *  of their own (atan(1/X) at X = 0 is π/2, exactly as the sampler has it). */
+interface AtomSet {
+  xs: Float64Array;
+  /** Mass of each atom… */
+  p: Float64Array;
+  /** …the part of it NOT from the outermost sliver of any truncated tail… */
+  n: Float64Array;
+  /** …and the part from neither sliver. */
+  c: Float64Array;
+  /** Mass the truncation ignored, at most. */
+  lost: number;
+}
+
+/** Merge joint points into atoms. `vals` are canonical, in any order. */
+function mergeAtoms(vals: ArrayLike<number>, wp: ArrayLike<number>, wn: ArrayLike<number>, wc: ArrayLike<number>, lost: number): AtomSet {
+  const count = vals.length;
+  const idx = new Uint32Array(count);
+  let sorted = true;
+  for (let i = 0; i < count; i++) {
+    idx[i] = i;
+    if (i && !(vals[i - 1] <= vals[i])) sorted = false;
+  }
+  // NaN last; a − b would be NaN between two infinities.
+  if (!sorted) {
+    idx.sort((i, j) => {
+      const [a, b] = [vals[i], vals[j]];
+      if (Number.isNaN(a) || Number.isNaN(b)) return Number.isNaN(a) ? (Number.isNaN(b) ? 0 : 1) : -1;
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+  }
+  const xs: number[] = [];
+  const p: number[] = [];
+  const n: number[] = [];
+  const c: number[] = [];
+  let first = NaN; // the value that opened the current atom: merging never chains
+  for (let k = 0; k < count; k++) {
+    const i = idx[k];
+    if (!(wp[i] > 0)) continue; // the pmf underflowed: no atom
+    const x = vals[i];
+    const last = xs.length - 1;
+    if (last >= 0 && sameAtom(first, x)) {
+      p[last] += wp[i];
+      n[last] += wn[i];
+      c[last] += wc[i];
+    } else {
+      xs.push(x);
+      p.push(wp[i]);
+      n.push(wn[i]);
+      c.push(wc[i]);
+      first = x;
+    }
+  }
+  return { xs: Float64Array.from(xs), p: Float64Array.from(p), n: Float64Array.from(n), c: Float64Array.from(c), lost };
+}
+
+/** The atoms of a base law: its mass range, or 'cap' when that is too wide to
+ *  enumerate (Poisson(1e9), Geometric(1e-6)). */
+function baseAtoms(law: DiscreteLaw): AtomSet | 'cap' {
+  const full = law.hi - law.lo < FULL_SUPPORT;
+  const kLo = full ? law.lo : law.quantile(ENUM_TAIL);
+  const kHi = full ? law.hi : law.quantile(ENUM_TAIL, true);
+  if (!isFinite(kLo) || !isFinite(kHi) || !(kHi - kLo < JOINT_MAX)) return 'cap';
+  // Slivers only on a side the truncation actually cut.
+  const cutLo = kLo > law.lo;
+  const cutHi = kHi < law.hi;
+  const aLo = cutLo ? law.quantile(SLIVER_A) : -Infinity;
+  const bLo = cutLo ? law.quantile(SLIVER_B) : -Infinity;
+  const aHi = cutHi ? law.quantile(SLIVER_A, true) : Infinity;
+  const bHi = cutHi ? law.quantile(SLIVER_B, true) : Infinity;
+  const size = kHi - kLo + 1;
+  const xs = new Float64Array(size);
+  const p = new Float64Array(size);
+  const n = new Float64Array(size);
+  const c = new Float64Array(size);
+  for (let j = 0; j < size; j++) {
+    const k = kLo + j;
+    xs[j] = k;
+    p[j] = law.pmf(k);
+    n[j] = k < aLo || k > aHi ? 0 : p[j];
+    c[j] = k < bLo || k > bHi ? 0 : p[j];
+  }
+  ENUM_STATS.pmfEvals += size;
+  const lost = (cutLo ? law.pq(kLo - 1)[0] : 0) + (cutHi ? law.pq(kHi)[1] : 0);
+  return mergeAtoms(xs, p, n, c, lost);
+}
+
+/** Independent parts laid out as the columns of their product: every
+ *  combination once, with the product of the weights. Null past JOINT_MAX. */
+function tensor(parts: AtomSet[]): { cols: Float64Array[]; wp: Float64Array; wn: Float64Array; wc: Float64Array; lost: number } | null {
+  let size = 1;
+  for (const part of parts) {
+    size *= part.xs.length;
+    if (size > JOINT_MAX) return null;
+  }
+  ENUM_STATS.builds++;
+  ENUM_STATS.points += size;
+  const wp = new Float64Array(size).fill(1);
+  const wn = new Float64Array(size).fill(1);
+  const wc = new Float64Array(size).fill(1);
+  const cols: Float64Array[] = [];
+  let period = 1;
+  let kept = 1;
+  for (const part of parts) {
+    const m = part.xs.length;
+    const col = new Float64Array(size);
+    for (let i = 0; i < size; i++) {
+      const j = Math.floor(i / period) % m;
+      col[i] = part.xs[j];
+      wp[i] *= part.p[j];
+      wn[i] *= part.n[j];
+      wc[i] *= part.c[j];
+    }
+    cols.push(col);
+    period *= m;
+    kept *= 1 - part.lost;
+  }
+  return { cols, wp, wn, wc, lost: 1 - kept };
+}
+
+/** The comparisons of a P(…) body as terms and the operators between them:
+ *  `a < X <= b` is [a, X, b] with ['<', '<=']; a point event is two terms. */
+function eventShape(body: Expr): { terms: Expr[]; ops: string[] } | null {
+  if (body.kind === 'eq') return { terms: [body.l, body.r], ops: ['='] };
+  if (body.kind === 'call' && (body.name === '[eq]' || body.name === '[ne]') && body.args.length === 2) {
+    return { terms: body.args, ops: [body.name === '[eq]' ? '=' : '!='] };
+  }
+  if (body.kind !== 'ineq') return null;
+  const comps = ineqComparisons(body);
+  return { terms: [comps[0].l, ...comps.map(c => c.r)], ops: comps.map(c => c.op) };
+}
+
+/**
+ * The event's mask over term columns: 1 where every comparison holds, 0 where
+ * one fails, NaN where a side is undefined. Discrete values TIE with positive
+ * probability, so strictness is the whole difference between P(X > Y) and
+ * P(X >= Y) — and a tie is judged as atoms are told apart (the columns are
+ * canonical), so 0.1 X + 0.2 Y at X = Y = 1 equals 0.3 here as in the drawn pmf.
+ */
+function eventMask(cols: ArrayLike<number>[], ops: string[], count: number): Float64Array {
+  const out = new Float64Array(count).fill(1);
+  ops.forEach((op, k) => {
+    const [a, b] = [cols[k], cols[k + 1]];
+    for (let i = 0; i < count; i++) {
+      if (Number.isNaN(out[i])) continue;
+      if (Number.isNaN(a[i]) || Number.isNaN(b[i])) {
+        out[i] = NaN;
+        continue;
+      }
+      const tie = sameAtom(a[i], b[i]);
+      const holds = op === '=' ? tie : op === '!=' ? !tie
+        : op === '<' ? !tie && a[i] < b[i] : op === '>' ? !tie && a[i] > b[i]
+          : op === '<=' ? tie || a[i] < b[i] : tie || a[i] > b[i];
+      if (!holds) out[i] = 0;
+    }
+  });
+  return out;
+}
+
+/** How a truncated sum of h over the atoms stands to the true E[h]. The
+ *  slivers A (tail probability ENUM_TAIL..1e-9) and B (1e-9..1e-6) play the
+ *  part of `diverges`'s: a convergent sum gains less from the deeper one, and
+ *  then the unseen tail beyond A is about A·r/(1 − r) with r = A/B. 'exact'
+ *  when that is invisible (1e-7 of the total: a readout shows six digits), 'estimate' up to 1e-3, and
+ *  'diverges' beyond — or when A does not fall short of B at all. */
+function momentVerdict(set: AtomSet, h: (x: number) => number): 'exact' | 'estimate' | 'diverges' {
+  let total = 0;
+  let a = 0;
+  let b = 0;
+  for (let i = 0; i < set.xs.length; i++) {
+    const w = h(set.xs[i]);
+    if (!isFinite(w)) continue;
+    total += w * set.p[i];
+    a += w * (set.p[i] - set.n[i]);
+    b += w * (set.n[i] - set.c[i]);
+  }
+  if (!(a > 0)) return 'exact'; // nothing truncated, or h vanishes out there
+  const r = a / b;
+  if (b > 0 && r >= 0.97) return 'diverges';
+  // (A lumpy law may leave sliver B empty; then A itself bounds the unseen.)
+  const unseen = (b > 0 ? (a * r) / (1 - r) : a) / total;
+  return unseen <= 1e-7 ? 'exact' : unseen <= 1e-3 ? 'estimate' : 'diverges';
+}
+
+/** The pmf of a derived discrete variable, by either tier. */
+export interface DiscretePmf {
+  /** Atoms with a finite value, ascending, and the mass of each. */
+  xs: Float64Array;
+  ps: Float64Array;
+  /** Enumerated (else: frequencies of the joint sample). */
+  exact: boolean;
+  /** P(defined): 1/X at X = 0, sqrt(X − 2) below 2 and an overflow are no
+   *  value, as in the density tiers. */
+  mass: number;
+  /** Mean and sd where defined. NaN/Infinity as `meanOk`/the second moment say. */
+  mean: number;
+  sd: number;
+  /** False when the mean's sum diverges, or truncation hides a visible part. */
+  meanOk: boolean;
+  /** Exact tier, and nothing the truncation hid could show in μ (`meanExact`)
+   *  or in μ and σ both (`certified`). */
+  meanExact: boolean;
+  certified: boolean;
+  /** Mass the truncation ignored, at most (0 for the sampled tier). */
+  lost: number;
+  /** The smallest gap between neighbouring atoms. */
+  step: number;
+  /** Sampled, with too many distinct values for frequencies to mean anything:
+   *  the histogram on the variable's lattice, heavy atoms apart — or, with no
+   *  lattice, null and `unresolved`. */
+  binned?: { bulk: PmfStems; heavy: PmfStems } | null;
+  unresolved?: boolean;
+}
+
+function finishPmf(xs: Float64Array, ps: Float64Array, fields: Omit<DiscretePmf, 'xs' | 'ps' | 'step'>): DiscretePmf {
+  let step = Infinity;
+  for (let i = 1; i < xs.length; i++) step = Math.min(step, xs[i] - xs[i - 1]);
+  return { xs, ps, step, ...fields };
+}
+
+/** Mean and sd of atoms, averaged where defined. */
+function atomMoments(xs: ArrayLike<number>, ps: ArrayLike<number>): { mean: number; sd: number; sum: number } {
+  let sum = 0;
+  let m1 = 0;
+  for (let i = 0; i < xs.length; i++) {
+    sum += ps[i];
+    m1 += xs[i] * ps[i];
+  }
+  const mean = m1 / sum;
+  let m2 = 0;
+  for (let i = 0; i < xs.length; i++) m2 += (xs[i] - mean) ** 2 * ps[i];
+  return { mean, sd: Math.sqrt(m2 / sum), sum };
+}
+
+function exactPmf(set: AtomSet): DiscretePmf | null {
+  let total = 0;
+  let from = 0;
+  let to = 0;
+  for (let i = 0; i < set.xs.length; i++) {
+    total += set.p[i];
+    if (set.xs[i] === -Infinity) from = i + 1;
+    if (isFinite(set.xs[i])) to = i + 1;
+  }
+  if (!(total > 0)) return null;
+  const xs = set.xs.slice(from, to);
+  // Of the mass enumerated (all but `lost`): P(D = 0) of D = X − X is 1.
+  const ps = set.p.slice(from, to).map(w => w / total);
+  const m = atomMoments(xs, ps);
+  const v1 = momentVerdict(set, Math.abs);
+  const v2 = momentVerdict(set, x => x * x);
+  const meanOk = v1 !== 'diverges' && isFinite(m.mean);
+  return finishPmf(xs, ps, {
+    exact: true,
+    mass: from === 0 && to === set.xs.length ? 1 : m.sum,
+    mean: meanOk ? m.mean : NaN,
+    sd: !meanOk ? NaN : v2 === 'diverges' ? Infinity : m.sd,
+    meanOk,
+    meanExact: meanOk && v1 === 'exact',
+    certified: meanOk && v1 === 'exact' && v2 === 'exact',
+    lost: set.lost,
+  });
+}
+
+/** Distinct sampled values above which frequencies stop meaning anything. */
+const SAMPLED_ATOMS_MAX = STEM_MAX;
+/** A sampled value this frequent is an atom in its own right, kept out of the
+ *  histogram's bins (the 0 of Poisson(1e6)·Bernoulli). */
+const HEAVY_ATOM = 0.01;
+const HIST_BINS = 256;
+
+/**
+ * The common step of ascending values, or 0 when they sit on no lattice.
+ * Whole numbers are exact, and so is Euclid on their gaps. Anything else
+ * (X/2 + 0.1, sqrt of a near-constant) carries rounding: Euclid stops at a
+ * remainder under `floor`, the step is refit over the whole range, and then
+ * every gap must be a whole multiple of it to 1e-3 — values on no lattice
+ * pass Euclid with a meaningless tiny step, and fail that at once.
+ */
+function latticeStep(xs: ArrayLike<number>): number {
+  const n = xs.length;
+  let whole = true;
+  for (let i = 0; i < n && whole; i++) whole = Number.isInteger(xs[i]);
+  const range = xs[n - 1] - xs[0];
+  const floor = whole ? 0.5 : Math.max(range, Math.abs(xs[0]), Math.abs(xs[n - 1])) / 2 ** 28;
+  let g = 0;
+  for (let i = 1; i < n; i++) {
+    let a = xs[i] - xs[i - 1];
+    let b = g;
+    while (b > floor) [a, b] = [b, a % b];
+    g = a;
+    if (!(g > floor)) return 0;
+  }
+  if (whole) return g;
+  g = range / Math.round(range / g);
+  for (let i = 1; i < n; i++) {
+    const m = (xs[i] - xs[i - 1]) / g;
+    if (Math.abs(m - Math.round(m)) > 1e-3) return 0;
+  }
+  return g;
+}
+
+/** The pmf the joint sample shows: the frequency of each distinct value of a
+ *  (canonical) sample column. */
+function sampledPmf(col: Float64Array, meanOk: boolean): DiscretePmf | null {
+  const finite = col.filter(isFinite).sort();
+  if (!finite.length) return null;
+  const xs: number[] = [];
+  const counts: number[] = [];
+  let first = NaN;
+  for (let i = 0; i < finite.length; i++) {
+    if (xs.length && sameAtom(first, finite[i])) counts[counts.length - 1]++;
+    else {
+      xs.push(first = finite[i]);
+      counts.push(1);
+    }
+  }
+  const ps = Float64Array.from(counts, k => k / col.length);
+  const m = atomMoments(xs, ps);
+  const pmf = finishPmf(Float64Array.from(xs), ps, {
+    exact: false,
+    mass: finite.length / col.length,
+    mean: meanOk ? m.mean : NaN,
+    sd: meanOk ? m.sd : NaN,
+    meanOk,
+    meanExact: false,
+    certified: false,
+    lost: 0,
+  });
+  if (xs.length <= SAMPLED_ATOMS_MAX) return pmf;
+  // Too many distinct values: a histogram on the values' own lattice.
+  const light = xs.filter((_, i) => ps[i] < HEAVY_ATOM);
+  const step = light.length > 1 ? latticeStep(light) : 0;
+  if (!step) return { ...pmf, binned: null, unresolved: true };
+  const heavy: PmfStems = { ks: [], ps: [], envelope: false, step: pmf.step };
+  const origin = light[0];
+  const cells = Math.round((light[light.length - 1] - origin) / step) + 1;
+  const per = 2 ** Math.max(0, Math.ceil(Math.log2(cells / HIST_BINS))); // lattice points per bin
+  const bins = new Float64Array(Math.ceil(cells / per));
+  xs.forEach((x, i) => {
+    if (ps[i] >= HEAVY_ATOM) {
+      heavy.ks.push(x);
+      heavy.ps.push(ps[i]);
+    } else bins[Math.floor(Math.round((x - origin) / step) / per)] += ps[i];
+  });
+  // Each bin at its centre, as the mass PER LATTICE POINT — a pmf height, so
+  // it sits on the same axis as the exact stems would. An empty stretch is
+  // drawn empty: the outline comes down to the axis at its ends.
+  const bulk: PmfStems = { ks: [], ps: [], envelope: true };
+  const width = per * step;
+  bins.forEach((mass, b) => {
+    if (!(mass > 0)) return;
+    const centre = origin + (b + 0.5) * width - step / 2;
+    if (b === 0 || !(bins[b - 1] > 0)) {
+      bulk.ks.push(centre - width / 2);
+      bulk.ps.push(0);
+    }
+    bulk.ks.push(centre);
+    bulk.ps.push(mass / per);
+    if (b === bins.length - 1 || !(bins[b + 1] > 0)) {
+      bulk.ks.push(centre + width / 2);
+      bulk.ps.push(0);
+    }
+  });
+  return { ...pmf, binned: { bulk, heavy } };
+}
+
+/**
+ * The exact quantile of a discrete law at every stratum of the sampling
+ * streams, ascending: out[j] = quantile((j + ½)/N). A column is this, read in
+ * the stream's shuffled order — so it is built once per parameter values, not
+ * per frame. Within TABLE_MAX whole numbers the cdf is walked once (one pmf
+ * evaluation per whole number of the sampled range). Past that (Poisson(1e12),
+ * sd ≥ 1e5) the quantile is solved exactly at every 64th stratum and
+ * interpolated between in the normal score, rounded: every value stays inside
+ * its own 64-strata cell, so the marginal is right to 5e-4 in probability,
+ * and the whole numbers there are 1e-5 of σ apart — nothing a sample resolves.
+ */
+function sortedQuantiles(law: DiscreteLaw): Float64Array {
+  const N = SAMPLE_COUNT;
+  const out = new Float64Array(N);
+  const kLo = law.quantile(0.5 / N);
+  const kHi = law.quantile(0.5 / N, true);
+  if (!isFinite(kLo) || !isFinite(kHi)) return out.fill(NaN);
+  if (kHi - kLo < TABLE_MAX) {
+    let k = kLo;
+    let cum = law.pq(k)[0];
+    let evals = 0;
+    for (let j = 0; j < N; j++) {
+      const u = (j + 0.5) / N;
+      while (cum < u && k < kHi) {
+        cum += law.pmf(++k);
+        evals++;
+      }
+      out[j] = k;
+    }
+    ENUM_STATS.pmfEvals += evals;
+    return out;
+  }
+  const at = (j: number): number => {
+    const u = (j + 0.5) / N;
+    return u < 0.5 ? law.quantile(u) : law.quantile(1 - u, true);
+  };
+  const STRIDE = 64;
+  for (let j0 = 0; j0 < N; j0 += STRIDE) {
+    const j1 = Math.min(N - 1, j0 + STRIDE);
+    const [k0, k1] = [at(j0), at(j1)];
+    const [z0, z1] = [normalQuantile((j0 + 0.5) / N), normalQuantile((j1 + 0.5) / N)];
+    for (let j = j0; j <= j1; j++) {
+      const s = (normalQuantile((j + 0.5) / N) - z0) / (z1 - z0);
+      out[j] = Math.min(k1, Math.max(k0, Math.round(k0 + (k1 - k0) * s)));
+    }
+  }
+  return out;
+}
+
+/** The first index of ascending `xs` whose value is above x (or, at least x). */
+function firstAbove(xs: ArrayLike<number>, x: number, orEqual: boolean): number {
+  let [a, z] = [0, xs.length];
+  while (a < z) {
+    const mid = (a + z) >> 1;
+    if (orEqual ? xs[mid] >= x : xs[mid] > x) z = mid;
+    else a = mid + 1;
+  }
+  return a;
+}
+
+/** The atoms of a drawn window: all of them while they are few, else the
+ *  TALLEST in each cell of a fixed lattice (multiples of a power-of-two
+ *  stride, so a pan slides over the same choice) — exact heights at true
+ *  locations, which is what a thousand stems per pixel column look like. */
+function windowAtoms(pmf: DiscretePmf, i0: number, i1: number, view?: { lo: number; hi: number }): PmfStems {
+  const { xs, ps } = pmf;
+  if (view) {
+    i0 = Math.max(i0, firstAbove(xs, view.lo, true));
+    i1 = Math.min(i1, firstAbove(xs, view.hi, false) - 1);
+  }
+  const out: PmfStems = { ks: [], ps: [], envelope: false, step: pmf.step };
+  if (i1 - i0 < STEM_MAX) {
+    for (let i = i0; i <= i1; i++) {
+      out.ks.push(xs[i]);
+      out.ps.push(ps[i]);
+    }
+    return out;
+  }
+  const stride = 2 ** Math.ceil(Math.log2((xs[i1] - xs[i0]) / STEM_MAX));
+  let cell = NaN;
+  for (let i = i0; i <= i1; i++) {
+    const at = Math.floor(xs[i] / stride);
+    if (at !== cell) {
+      cell = at;
+      out.ks.push(xs[i]);
+      out.ps.push(ps[i]);
+    } else if (ps[i] > out.ps[out.ps.length - 1]) {
+      out.ks[out.ks.length - 1] = xs[i];
+      out.ps[out.ps.length - 1] = ps[i];
+    }
+  }
+  out.step = stride;
+  return out;
+}
+
+/** The smallest atom with at least u of the defined mass at or below it. */
+function atomQuantile(pmf: DiscretePmf, u: number): number {
+  let total = 0;
+  for (let i = 0; i < pmf.ps.length; i++) total += pmf.ps[i];
+  let cum = 0;
+  for (let i = 0; i < pmf.xs.length; i++) {
+    cum += pmf.ps[i];
+    if (cum >= u * total) return pmf.xs[i];
+  }
+  return pmf.xs[pmf.xs.length - 1] ?? NaN;
+}
+
+/** The atoms a P(…) selects, as an index range of `xs` (with `not`: all the
+ *  rest); null while a bound is NaN. A bound within rounding of an atom IS
+ *  that atom, so strictness decides it: `S <= 0.3` takes the atom 0.1 + 0.2. */
+function atomRange(pmf: DiscretePmf, b: ProbBounds, env: Record<string, number>): { i0: number; i1: number } | null {
+  const at = (e: Expr): number => {
+    const mag = magnitude(e);
+    return canonical(evaluate(e, env), mag ? evaluate(mag, env) : 0);
+  };
+  const lo = b.lo ? at(b.lo) : -Infinity;
+  const hi = b.hi ? at(b.hi) : Infinity;
+  if (Number.isNaN(lo) || Number.isNaN(hi)) return null;
+  const { xs } = pmf;
+  let i0 = firstAbove(xs, lo, true);
+  if (i0 > 0 && sameAtom(xs[i0 - 1], lo)) i0--;
+  if (b.loStrict && i0 < xs.length && sameAtom(xs[i0], lo)) i0++;
+  let i1 = firstAbove(xs, hi, false) - 1;
+  if (i1 + 1 < xs.length && sameAtom(xs[i1 + 1], hi)) i1++;
+  if (b.hiStrict && i1 >= 0 && sameAtom(xs[i1], hi)) i1--;
+  return { i0, i1 };
 }
 
 /**
@@ -2368,6 +3014,7 @@ export class RVSystem {
   private affineMemo = new Map<string, Affine | null>();
   private lawMemo = new Map<string, Law | null>();
   private groundedMemo = new Map<string, Expr | null>();
+  private basesMemo = new Map<string, readonly string[]>();
 
   /** Start a recompile: drop declarations, keep sample caches. */
   reset(): void {
@@ -2377,25 +3024,59 @@ export class RVSystem {
     this.affineMemo.clear();
     this.lawMemo.clear();
     this.groundedMemo.clear();
+    this.basesMemo.clear();
   }
 
-  /**
-   * Declare a variable. A derived variable over a DISCRETE base is refused:
-   * every tier below (conditional-CDF quadrature, quantile tables, the KDE)
-   * assumes a density, and a KDE over atoms is a wrong picture, not a rough
-   * one. Exact pmfs by enumeration are plan #6. (Callers add bases first, and
-   * a derived variable over a refused one fails in turn, so checking the
-   * direct dependencies covers the transitive ones.)
-   */
+  /** Declare a variable. */
   add(rv: RV): void {
-    if (rv.kind === 'derived') this.refuseDiscrete(rv.expr);
     this.rvs.set(rv.name, rv);
   }
 
-  /** The base distribution of a variable declared discrete, else null. */
+  /**
+   * The law of a variable that IS one of the discrete families: a discrete
+   * declaration, or a derived variable a closure rule reduces to one (a sum of
+   * independent Poissons). Such a variable draws and answers through the law
+   * itself — incomplete beta/gamma functions, at any size — and never through
+   * enumeration.
+   */
   discreteDist(name: string): BaseDist | null {
-    const rv = this.rvs.get(name);
-    return rv?.kind === 'base' && isDiscrete(rv.dist) ? rv.dist : null;
+    const law = this.exactLaw(name);
+    return law?.kind === 'dist' && isDiscrete(law.dist) ? law.dist : null;
+  }
+
+  /** The base variables a variable is built on, through every derived one. */
+  private basesOf(name: string): readonly string[] {
+    const memo = this.basesMemo.get(name);
+    if (memo) return memo;
+    const out = new Set<string>();
+    const seen = new Set<string>();
+    const walk = (n: string): void => {
+      if (seen.has(n)) return;
+      seen.add(n);
+      const rv = this.rvs.get(n);
+      if (rv?.kind === 'base') out.add(n);
+      else if (rv) for (const dep of freeVars(rv.expr)) walk(dep);
+    };
+    walk(name);
+    const bases = [...out];
+    this.basesMemo.set(name, bases);
+    return bases;
+  }
+
+  /** Random variables of `e` that are not discrete (see isDiscreteVar). */
+  private continuousIn(e: Expr): string[] {
+    return [...freeVars(e)].filter(n => this.rvs.has(n) && !this.isDiscreteVar(n));
+  }
+
+  /**
+   * Whether a variable is discrete: built on discrete bases only. Decided by
+   * the declarations, never by parameter values, so a row is a pmf row or a
+   * density row for good. One continuous base makes it a continuous MIXTURE
+   * (`N + Z` with N Poisson, Z Normal has a density), which is not discrete.
+   */
+  isDiscreteVar(name: string): boolean {
+    const bases = this.basesOf(name);
+    return bases.length > 0 && bases.every(n => isDiscrete((this.rvs.get(n) as RV & { kind: 'base' }).dist));
   }
 
   /** Constants that ARE a whole-number parameter of a discrete law (the n of
@@ -2413,26 +3094,24 @@ export class RVSystem {
     return out;
   }
 
-  private refuseDiscrete(e: Expr): void {
-    const names = [...freeVars(e)].filter(n => this.discreteDist(n));
-    if (!names.length) return;
-    throw new Error(`${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} discrete: arithmetic and joint events over discrete`
-      + ` random variables are not supported yet. P(…) with constant bounds and E(…) take ${names[0]} on its own.`);
-  }
-
   /**
    * What a P(…) row may ask, judged against the declarations: a point event
-   * (`P(X = 3)`) only of a discrete variable — for a continuous one it is 0 by
-   * definition, and saying 0 would hide that the question was probably meant
-   * as an interval — and nothing sampled (`P(X > Y)`) over a discrete one.
+   * (`P(X = 3)`, `P(X + Y = 7)`, `P(X = Y)`) only of discrete variables. With
+   * a continuous one anywhere in it the event has probability 0 by definition
+   * — true of the mixture `N + Z` too — and saying 0 would hide that the
+   * question was probably meant as an interval.
    */
   checkProbability(spec: ProbSpec): void {
+    if (!spec.point) return;
+    const continuous = this.continuousIn(spec.body);
+    if (!continuous.length) return;
     const single = spec.single;
-    if (single?.point && !this.discreteDist(single.rv)) {
+    if (single) {
       throw new Error(`P(${single.rv} ${single.not ? '!=' : '='} …) needs a discrete variable: a continuous one`
         + ` takes any single value with probability 0. Ask about an interval, like P(a < ${single.rv} < b).`);
     }
-    if (!single || !this.discreteDist(single.rv)) this.refuseDiscrete(spec.body);
+    throw new Error(`P(… = …) needs discrete variables, and ${continuous.join(', ')} ${continuous.length > 1 ? 'are' : 'is'} not:`
+      + ' a continuous value equals any given one with probability 0. Ask about an interval, like P(a < … < b).');
   }
 
   delete(name: string): void {
@@ -2470,6 +3149,12 @@ export class RVSystem {
     for (const e of this.cache.values()) {
       delete e.col;
       delete e.est;
+      // (A sampled pmf over ONE base has no pairing to redraw: its strata are
+      // the exact marginal at any salt.)
+      if (e.spmf !== undefined && !e.spmfStill) {
+        delete e.spmf;
+        delete e.runs;
+      }
     }
   }
 
@@ -2683,6 +3368,8 @@ export class RVSystem {
     }
     const gammaSum = this.gammaSumLaw(bases, af.c);
     if (gammaSum) return gammaSum;
+    const discreteSum = this.discreteSumLaw(bases, af.c);
+    if (discreteSum) return discreteSum;
     if (bases.every(b => b.dist.kind === 'uniform')) {
       return {
         kind: 'usum',
@@ -2725,6 +3412,43 @@ export class RVSystem {
       shape = shape ? bin('+', shape, al) : al;
     }
     return shape && rate ? { kind: 'dist', dist: { kind: 'gamma', args: [shape, rate] } } : null;
+  }
+
+  /**
+   * A plain sum of independent discrete bases that stays in its family:
+   * Poissons (means add), Binomials — Bernoulli is Binomial(1, p) — sharing
+   * one p (the n add), NegativeBinomials sharing one p (the r add). The sum is
+   * then the law itself, exact at any size: Poisson(1e6) + Poisson(1e6) is
+   * Poisson(2e6), which no enumeration could reach. Independence is the affine
+   * form's: X + X arrived as 2·X, whose coefficient is not 1, so it is never
+   * Poisson(2λ) — it enumerates, onto the even numbers. Every coefficient must
+   * be the literal 1 and nothing added: 2X and X + 1 leave the family
+   * (Geometric, a shifted law, is never in it). p's are equal as the Gamma
+   * rule's rates are: the same number, or the same expression.
+   */
+  private discreteSumLaw(bases: Array<{ coef: Expr; dist: BaseDist }>, shift: Expr): Law | null {
+    if (numOf(shift) !== 0) return null;
+    let kind: 'poisson' | 'binomial' | 'negbinomial' | null = null;
+    let total: Expr | null = null;
+    let p: Expr | null = null;
+    let pKey: string | null = null;
+    for (const { coef, dist } of bases) {
+      if (numOf(coef) !== 1) return null;
+      const d = dist.kind === 'bernoulli' ? { kind: 'binomial' as const, args: [num(1), dist.args[0]] } : dist;
+      if (d.kind !== 'poisson' && d.kind !== 'binomial' && d.kind !== 'negbinomial') return null;
+      if (kind !== null && d.kind !== kind) return null;
+      kind = d.kind;
+      if (d.kind !== 'poisson') {
+        const value = numOf(d.args[1]);
+        const key = value !== null ? `#${value}` : JSON.stringify(d.args[1]);
+        if (pKey !== null && key !== pKey) return null;
+        pKey = key;
+        p ??= d.args[1];
+      }
+      total = total ? bin('+', total, d.args[0]) : d.args[0];
+    }
+    if (!kind || !total) return null;
+    return { kind: 'dist', dist: { kind, args: p ? [total, p] : [total] } };
   }
 
   /**
@@ -2783,10 +3507,10 @@ export class RVSystem {
    */
   stems(name: string, env: Record<string, number>, view?: { lo: number; hi: number }): { stems: PmfStems; law: DiscreteLaw } | null {
     const rv = this.rvs.get(name);
-    if (rv?.kind !== 'base' || !isDiscrete(rv.dist)) return null;
+    if (!rv || !this.discreteDist(name)) return null;
     const slot = this.entry(name, this.sig(rv, env));
     if (slot.pmf === undefined) {
-      const law = discreteLaw(rv.dist, env);
+      const law = this.lawOf(name, env);
       slot.pmf = law && { law, kLo: law.quantile(STEM_TAIL), kHi: law.quantile(STEM_TAIL, true), key: '', stems: null };
     }
     const c = slot.pmf;
@@ -2819,6 +3543,18 @@ export class RVSystem {
       c.stems = build();
     }
     return { stems: c.stems, law: c.law };
+  }
+
+  /** The law of a variable that is one of the discrete families (discreteDist)
+   *  at these parameter values; null while any base under it declares none — a
+   *  sum of two Binomials with n = 2.5 each is not Binomial(5, p). */
+  private lawOf(name: string, env: Record<string, number>): DiscreteLaw | null {
+    const d = this.discreteDist(name);
+    if (!d) return null;
+    for (const b of this.basesOf(name)) {
+      if (b !== name && !discreteLaw((this.rvs.get(b) as RV & { kind: 'base' }).dist, env)) return null;
+    }
+    return discreteLaw(d, env);
   }
 
   /** Non-random free names of a P(…) body, through the variables it references. */
@@ -2879,10 +3615,19 @@ export class RVSystem {
     if (slot.col) return slot.col;
     let col: Float64Array;
     if (rv.kind === 'base') {
-      // Unreachable through a document (add() and probability() refuse first);
-      // loud all the same, because a NaN column would read as "no data".
-      if (isDiscrete(rv.dist)) throw new Error(`${name} is discrete: sampling discrete random variables is not supported yet.`);
       const u = uniformStream(name);
+      if (isDiscrete(rv.dist)) {
+        // The exact step-function quantile of each stratum, tabulated once per
+        // parameter values (sortedQuantiles) and read in the stream's order.
+        const law = discreteLaw(rv.dist, env);
+        col = new Float64Array(SAMPLE_COUNT);
+        if (law) {
+          const strata = slot.strata ??= sortedQuantiles(law);
+          for (let i = 0; i < SAMPLE_COUNT; i++) col[i] = strata[Math.floor(u[i] * SAMPLE_COUNT)];
+        } else col.fill(NaN);
+        slot.col = col;
+        return col;
+      }
       const a = rv.dist.args.map(e => evaluate(e, env));
       col = new Float64Array(SAMPLE_COUNT);
       switch (rv.dist.kind) {
@@ -2981,7 +3726,7 @@ export class RVSystem {
     }
     const rv = this.rvs.get(name);
     if (!rv) throw new Error(`${name} has an error in its definition.`);
-    if (rv.kind === 'base' && isDiscrete(rv.dist)) return null; // no density: stems() draws it
+    if (this.isDiscreteVar(name)) return null; // no density: pmfRuns() draws it
     const slot = this.entry(name, this.sig(rv, env));
     if (slot.qcb === undefined) slot.qcb = this.condBase(name, env);
     const base = slot.qcb;
@@ -3038,6 +3783,9 @@ export class RVSystem {
     for (const n of bases) {
       const b = this.rvs.get(n)!;
       if (b.kind !== 'base') return null;
+      // The tier integrates over a quantile grid as over a density: a discrete
+      // base (the mixture N + Z) has steps there, and takes the sampled tier.
+      if (isDiscrete(b.dist)) return null;
       const quantile = quantileClosure(b.dist, env);
       if (!quantile) return null;
       vars.push({ name: n, quantile });
@@ -3055,7 +3803,7 @@ export class RVSystem {
     if (!law) return null;
     if (law.kind === 'dist') {
       if (isDiscrete(law.dist)) {
-        const dl = discreteLaw(law.dist, env);
+        const dl = this.lawOf(name, env);
         return dl && { mean: dl.mean, sd: dl.sd };
       }
       const a = law.dist.args.map(e => evaluate(e, env));
@@ -3125,11 +3873,20 @@ export class RVSystem {
     const memo = this.groundedMemo.get(name);
     if (memo !== undefined) return memo;
     const rv = this.rvs.get(name);
-    let e: Expr | null = rv?.kind === 'derived' ? rv.expr : null;
+    const e = rv?.kind === 'derived' ? this.ground(rv.expr) : null;
+    this.groundedMemo.set(name, e);
+    return e;
+  }
+
+  /** `e` with every derived variable inlined (see grounded). */
+  private ground(expr: Expr): Expr | null {
+    let e: Expr | null = expr;
     // Dependencies are acyclic (validate() dropped cycles); the guard bounds
     // pathological chains and substitution blowup all the same.
     for (let guard = 0; e && guard < 32; guard++) {
-      const sub: Record<string, Expr> = {};
+      // No prototype: substVars looks names up, and a variable may be called
+      // `constructor` or `toString`.
+      const sub: Record<string, Expr> = Object.create(null);
       for (const n of freeVars(e)) {
         const dep = this.rvs.get(n);
         if (dep?.kind === 'derived') sub[n] = dep.expr;
@@ -3138,7 +3895,6 @@ export class RVSystem {
       e = substVars(e, sub);
       if (JSON.stringify(e).length > 200_000) e = null;
     }
-    this.groundedMemo.set(name, e);
     return e;
   }
 
@@ -3158,6 +3914,12 @@ export class RVSystem {
     const slot = this.entry(name, this.sig(rv, env));
     if (slot.qm !== undefined) return slot.qm;
     const compute = (): { mean: number; sd: number; mass: number } | null => {
+      if (this.isDiscreteVar(name)) {
+        // The discrete twin: the sum against the base pmfs, where enumeration
+        // reached and truncation is certified invisible in the mean.
+        const pmf = this.pmfOf(name, env);
+        return pmf?.meanExact ? { mean: pmf.mean, sd: pmf.sd, mass: pmf.mass } : null;
+      }
       const g = this.grounded(name);
       if (!g) return null;
       const bases = [...freeVars(g)].filter(n => this.rvs.has(n));
@@ -3219,7 +3981,12 @@ export class RVSystem {
   mean(name: string, env: Record<string, number>): number {
     const m = this.exactMoments(name, env) ?? this.quadMoments(name, env);
     if (m) return m.mean;
-    if (this.discreteDist(name)) return NaN; // invalid parameters; there is no sample to fall back on
+    if (this.isDiscreteVar(name)) {
+      // Uncertified enumeration, or the sample; NaN while parameters are
+      // invalid or the mean's sum diverges (meanUnstable says which).
+      const pmf = this.pmfOf(name, env);
+      return pmf?.meanOk ? pmf.mean : NaN;
+    }
     const c = this.curve(name, env);
     // Heavy tails (E(X^2) of a Cauchy): the sample mean is whatever the
     // largest draw happened to be. NaN, and meanUnstable() says why.
@@ -3243,11 +4010,25 @@ export class RVSystem {
    * it settled, the curve's moments elsewhere. Null when nothing computes.
    */
   moments(name: string, env: Record<string, number>):
-    | { kind: 'exact' | 'estimate'; mean: number; sd: number; mass: number }
-    | { kind: 'robust'; median: number; iqr: number; meanOk: boolean; mass: number }
+    | { kind: 'exact' | 'estimate'; mean: number; sd: number; mass: number; note?: string }
+    | { kind: 'robust'; median: number; iqr: number; meanOk: boolean; mass: number; note?: string }
     | null {
     const m = this.exactMoments(name, env);
     if (m && isFinite(m.mean) && isFinite(m.sd)) return { kind: 'exact', ...m, mass: 1 };
+    if (this.isDiscreteVar(name)) {
+      // Never the Hill estimate: that reads a sample's tail, and a bounded law
+      // with a far atom looks like one. Whether a discrete mean exists is
+      // read off the enumeration itself (momentVerdict).
+      const pmf = this.pmfOf(name, env);
+      if (!pmf) return null;
+      // A sampled pmf is said to be one — loudly where it could not be resolved.
+      const note = pmf.exact ? undefined : pmf.unresolved ? 'sampled: too many distinct values to resolve the pmf' : 'sampled';
+      if (!pmf.meanOk) {
+        const q = (u: number): number => atomQuantile(pmf, u);
+        return { kind: 'robust', median: q(0.5), iqr: q(0.75) - q(0.25), meanOk: false, mass: pmf.mass, note };
+      }
+      return { kind: pmf.certified ? 'exact' : 'estimate', mean: pmf.mean, sd: pmf.sd, mass: pmf.mass, note };
+    }
     const qm = this.quadMoments(name, env);
     if (qm && isFinite(qm.sd)) return { kind: 'estimate', ...qm };
     const c = this.curve(name, env);
@@ -3263,6 +4044,7 @@ export class RVSystem {
     const m = this.exactMoments(name, env);
     if (m) return Number.isNaN(m.mean);
     if (this.quadMoments(name, env)) return false;
+    if (this.isDiscreteVar(name)) return this.pmfOf(name, env)?.meanOk === false;
     const r = this.curve(name, env)?.robust;
     return !!r && !r.meanOk;
   }
@@ -3297,8 +4079,9 @@ export class RVSystem {
     return level;
   }
 
-  /** Exact P(lo < name < hi) under the variable's law, or null when sampled.
-   *  `edges` matters to a discrete law only (see probabilityValue). */
+  /** Exact P(lo < name < hi) under the variable's law, or null when sampled
+   *  (or enumerated: eventProbability). `edges` matters to a discrete law only
+   *  (see probabilityValue). */
   exactProbability(
     name: string,
     lo: Expr | undefined,
@@ -3308,7 +4091,10 @@ export class RVSystem {
   ): number | null {
     const law = this.exactLaw(name);
     if (!law) return null;
-    if (law.kind === 'dist') return probabilityValue(law.dist, lo, hi, env, edges);
+    if (law.kind === 'dist') {
+      if (isDiscrete(law.dist) && !this.lawOf(name, env)) return NaN; // a base under a closed sum is invalid
+      return probabilityValue(law.dist, lo, hi, env, edges);
+    }
     const pp = this.usumPP(law, env);
     if (!pp) return NaN;
     const total = cdfPP(pp, pp.breaks[pp.breaks.length - 1]);
@@ -3316,12 +4102,73 @@ export class RVSystem {
   }
 
   /**
+   * The value of a P(…) row, and whether it is exact (shown to 4 places) or a
+   * joint-sample estimate (3). Constant bounds on one variable go through its
+   * law or its atoms; any other event over discrete variables alone is
+   * enumerated over the joint of their bases (so `P(X > X)` is 0, and
+   * `A = X + Y; B = X - Y; P(A > B)` sees the X they share), and sampled past
+   * JOINT_MAX. Either way a discrete event keeps its strictness — ties have
+   * mass — by eventMask. Everything else is the Monte Carlo fraction it
+   * always was. `single` is the row's bounded variable, when it has that shape.
+   */
+  eventProbability(
+    body: Expr, single: ({ rv: string } & ProbBounds) | undefined, env: Record<string, number>,
+  ): { value: number; exact: boolean } {
+    if (single) {
+      const value = this.exactProbability(single.rv, single.lo, single.hi, env, single);
+      if (value !== null) return { value, exact: true };
+      if (this.isDiscreteVar(single.rv)) {
+        const pmf = this.pmfOf(single.rv, env);
+        const range = pmf && atomRange(pmf, single, env);
+        if (!pmf || !range) return { value: NaN, exact: true };
+        let inside = 0;
+        for (let i = range.i0; i <= range.i1; i++) inside += pmf.ps[i];
+        // Where the variable is undefined the event did not happen — nor did
+        // its complement: `not` is the rest of the DEFINED mass.
+        let defined = 0;
+        for (let i = 0; i < pmf.ps.length; i++) defined += pmf.ps[i];
+        return { value: single.not ? Math.max(0, defined - inside) : inside, exact: pmf.exact };
+      }
+    }
+    const shape = this.continuousIn(body).length ? null : eventShape(body);
+    if (!shape) return { value: this.sampleFraction(body, env), exact: false };
+    const terms = shape.terms.map(t => this.ground(t));
+    const joint = terms.every((t): t is Expr => t !== null) ? this.enumerateTerms(terms, env) : 'cap';
+    if (joint === null) return { value: NaN, exact: true };
+    if (joint !== 'cap') {
+      const mask = eventMask(joint.cols, shape.ops, joint.wp.length);
+      // Of the mass enumerated (all but `lost`), so a certain event is 1.
+      let value = 0;
+      let total = 0;
+      for (let i = 0; i < mask.length; i++) {
+        total += joint.wp[i];
+        if (mask[i] === 1) value += joint.wp[i];
+      }
+      return { value: Math.min(1, value / total), exact: true };
+    }
+    // Past the cap: the same event, with the same tie rule, over the sample.
+    const mask = eventMask(shape.terms.map((t, k) => this.sampledColumn(terms[k] ?? t, env)), shape.ops, SAMPLE_COUNT);
+    let count = 0;
+    let defined = 0;
+    for (let i = 0; i < SAMPLE_COUNT; i++) {
+      if (Number.isNaN(mask[i])) continue;
+      defined++;
+      if (mask[i] === 1) count++;
+    }
+    return { value: defined ? count / SAMPLE_COUNT : NaN, exact: false };
+  }
+
+  /** The number alone (see eventProbability). */
+  probability(body: Expr, env: Record<string, number>): number {
+    return this.eventProbability(body, undefined, env).value;
+  }
+
+  /**
    * Monte Carlo estimate of P(body): the fraction of joint samples where the
    * inequality holds. Samples where it is undefined count as "not the event";
    * NaN when it is undefined everywhere (broken parameters).
    */
-  probability(body: Expr, env: Record<string, number>): number {
-    this.refuseDiscrete(body);
+  private sampleFraction(body: Expr, env: Record<string, number>): number {
     const cols = new Map<string, Float64Array>();
     for (const f of freeVars(body)) {
       if (this.rvs.has(f)) cols.set(f, this.columns(f, env));
@@ -3336,6 +4183,213 @@ export class RVSystem {
       }
     }
     return defined ? count / SAMPLE_COUNT : NaN;
+  }
+
+  // --- derived discrete variables (see the section above RVSystem) ---
+
+  /** A discrete base's atoms at these parameter values, cached with them. */
+  private baseAtomsOf(name: string, env: Record<string, number>): AtomSet | 'cap' | null {
+    const rv = this.rvs.get(name);
+    if (rv?.kind !== 'base') return null;
+    const slot = this.entry(name, this.sig(rv, env));
+    if (slot.atoms === undefined) {
+      const law = discreteLaw(rv.dist, env);
+      slot.atoms = law && baseAtoms(law);
+    }
+    return slot.atoms;
+  }
+
+  /** The random names of a grounded expression (bases, all of them). */
+  private randomIn(e: Expr): string[] {
+    return [...freeVars(e)].filter(n => this.rvs.has(n));
+  }
+
+  /**
+   * The joint of several grounded terms, as columns over one product: each
+   * term enumerated on its own when no base is shared between them (they are
+   * independent, and their atoms are far fewer than their joint points), else
+   * all of them over the joint of their bases (`whole`: that, regardless).
+   * 'cap' past JOINT_MAX; null while a base declares no distribution.
+   */
+  private enumerateTerms(terms: Expr[], env: Record<string, number>, whole = false):
+    { cols: Float64Array[]; wp: Float64Array; wn: Float64Array; wc: Float64Array; lost: number } | 'cap' | null {
+    const random = terms.map(t => this.randomIn(t));
+    const all = random.flat();
+    const shared = whole || new Set(all).size < all.length;
+    // The parts of the product, and how each term reads its column off them.
+    const parts: AtomSet[] = [];
+    const partNames: string[] = [];
+    if (shared) {
+      for (const n of new Set(all)) {
+        const atoms = this.baseAtomsOf(n, env);
+        if (!atoms || atoms === 'cap') return atoms;
+        parts.push(atoms);
+        partNames.push(n);
+      }
+    } else {
+      for (let k = 0; k < terms.length; k++) {
+        if (!random[k].length) continue;
+        const atoms = this.enumerate(terms[k], env);
+        if (!atoms || atoms === 'cap') return atoms;
+        parts.push(atoms);
+        partNames.push(`\u0000${k}`); // no identifier: cannot collide with a user's name
+      }
+    }
+    const joint = tensor(parts);
+    if (!joint) return 'cap';
+    const byName = new Map(partNames.map((n, j) => [n, joint.cols[j]]));
+    const cols = terms.map((t, k) => (
+      !shared && random[k].length ? byName.get(`\u0000${k}`)! : canonicalColumn(t, byName, env, joint.wp.length)
+    ));
+    return { ...joint, cols };
+  }
+
+  /** The atoms of a grounded expression over discrete bases (see above). */
+  private enumerate(e: Expr, env: Record<string, number>): AtomSet | 'cap' | null {
+    if (e.kind === 'var' && this.rvs.has(e.name)) return this.baseAtomsOf(e.name, env);
+    // An operator or call over INDEPENDENT operands combines their atoms.
+    const kids = e.kind === 'neg' ? [e.a] : e.kind === 'bin' ? [e.a, e.b] : e.kind === 'call' ? e.args : null;
+    // (Anything else — a piecewise, a comparison — reads the joint of its bases.)
+    const joint = kids ? this.enumerateTerms(kids, env) : this.enumerateTerms([e], env, true);
+    if (!joint || joint === 'cap') return joint;
+    const size = joint.wp.length;
+    let vals: Float64Array;
+    if (!kids) vals = joint.cols[0];
+    else {
+      const names = kids.map((_, k) => `\u0000${k}`);
+      const at = (k: number): Expr => v(names[k]);
+      const node: Expr = e.kind === 'neg' ? { kind: 'neg', a: at(0) }
+        : e.kind === 'bin' ? { kind: 'bin', op: e.op, a: at(0), b: at(1) }
+          : { kind: 'call', name: (e as Expr & { kind: 'call' }).name, args: kids.map((_, k) => at(k)) };
+      vals = evalCols(node, new Map(names.map((n, k) => [n, joint.cols[k]])), env, size);
+      // The operands are canonical already, so only this node's own sum can
+      // have cancelled: against |a| + |b|.
+      const sum = e.kind === 'bin' && (e.op === '+' || e.op === '-');
+      const [a, b] = joint.cols;
+      canonicalize(vals, sum ? vals.map((_, i) => Math.abs(a[i]) + Math.abs(b[i])) : undefined);
+    }
+    return mergeAtoms(vals, joint.wp, joint.wn, joint.wc, joint.lost);
+  }
+
+  /**
+   * The pmf of a derived discrete variable at these parameter values — exact
+   * where the enumeration fits, sampled where it does not — or null: not such
+   * a variable (a law of its own answers through discreteDist), or a base
+   * declares no distribution. Enumerated once per parameter values; the
+   * sampled one is redrawn with the sample (resample).
+   */
+  pmfOf(name: string, env: Record<string, number>): DiscretePmf | null {
+    const rv = this.rvs.get(name);
+    if (rv?.kind !== 'derived' || !this.isDiscreteVar(name) || this.discreteDist(name)) return null;
+    const slot = this.entry(name, this.sig(rv, env));
+    if (slot.dpmf === undefined) {
+      const g = this.grounded(name);
+      const atoms = g ? this.enumerate(g, env) : 'cap';
+      slot.dpmf = atoms === 'cap' ? 'cap' : atoms && exactPmf(atoms);
+    }
+    if (slot.dpmf !== 'cap') return slot.dpmf;
+    if (slot.spmf === undefined) {
+      if (slot.sampledMeanOk === undefined) slot.sampledMeanOk = this.sampledMeanOk(name, env);
+      slot.spmfStill = this.basesOf(name).length === 1;
+      slot.spmf = sampledPmf(this.sampledColumn(this.grounded(name) ?? rv.expr, env), slot.sampledMeanOk);
+    }
+    return slot.spmf;
+  }
+
+  /** An expression over the joint sample, as canonical values (the sampled
+   *  tier's twin of an enumerated column). */
+  private sampledColumn(e: Expr, env: Record<string, number>): Float64Array {
+    const cols = new Map<string, Float64Array>();
+    for (const f of freeVars(e)) {
+      if (this.rvs.has(f)) cols.set(f, this.columns(f, env));
+    }
+    return canonicalColumn(e, cols, env, SAMPLE_COUNT);
+  }
+
+  /** Whether the sample mean of a sampled-tier variable means anything. The
+   *  discrete families' own tails are all exponentially light, so only g can
+   *  make a mean diverge (1.00001^X over Geometric(1e-6)) — tested exactly as
+   *  for a density (`diverges`), where there is one base to test along. */
+  private sampledMeanOk(name: string, env: Record<string, number>): boolean {
+    const g = this.grounded(name);
+    const bases = this.basesOf(name);
+    if (!g || bases.length !== 1) return true;
+    const law = discreteLaw((this.rvs.get(bases[0]) as RV & { kind: 'base' }).dist, env);
+    if (!law || law.hi !== Infinity) return true;
+    const gAt = (x: number): number => {
+      try {
+        return Math.abs(evaluate(g, { ...env, [bases[0]]: x }));
+      } catch {
+        return NaN;
+      }
+    };
+    return !diverges(gAt, u => (u < 0.5 ? law.quantile(u) : law.quantile(1 - u, true)));
+  }
+
+  /**
+   * What a discrete variable draws over the visible x-range, as runs of stems:
+   * a law of its own through stems() (whole numbers, the envelope when there
+   * are too many), a derived one at its atoms' TRUE locations (windowAtoms),
+   * or as the sampled histogram. With `select` — a P(…) row's bounds — only
+   * the part it selects, strictness and all. Null for a variable that is not
+   * discrete, or while its parameters declare no distribution. Cached per
+   * parameter values, window and selection.
+   */
+  pmfRuns(name: string, env: Record<string, number>, view?: { lo: number; hi: number }, select?: ProbBounds): PmfStems[] | null {
+    if (this.discreteDist(name)) {
+      const drawn = this.stems(name, env, view);
+      if (!drawn) return null;
+      return select ? selectStems(drawn.stems, drawn.law, integerBounds(select, env)) : [drawn.stems];
+    }
+    const pmf = this.pmfOf(name, env);
+    if (!pmf) return null;
+    const range = select ? atomRange(pmf, select, env) : { i0: 0, i1: pmf.xs.length - 1 };
+    if (!range) return [];
+    const ranges = select?.not ? [{ i0: 0, i1: range.i0 - 1 }, { i0: range.i1 + 1, i1: pmf.xs.length - 1 }] : [range];
+    if (pmf.binned) {
+      // The histogram is one shape whatever the window; a selection keeps the
+      // bins (and heavy atoms) whose centres it covers.
+      const [from, to] = [pmf.xs[range.i0] ?? Infinity, pmf.xs[range.i1] ?? -Infinity];
+      const keep = (x: number): boolean => !select || (x >= from && x <= to) !== !!select.not;
+      return [pmf.binned.bulk, pmf.binned.heavy].map(run => {
+        const ks = run.ks.filter(keep);
+        return { ...run, ks, ps: run.ps.filter((_, i) => keep(run.ks[i])) };
+      }).filter(run => run.ks.length);
+    }
+    // Keyed by the atoms in view: a pan that brings none in or out is a hit.
+    const slot = this.cache.get(name)!;
+    const key = ranges.map(r => {
+      const i0 = view ? Math.max(r.i0, firstAbove(pmf.xs, view.lo, true)) : r.i0;
+      const i1 = view ? Math.min(r.i1, firstAbove(pmf.xs, view.hi, false) - 1) : r.i1;
+      // Past STEM_MAX the choice of stems depends on the window's width too.
+      return i1 - i0 < STEM_MAX ? `${i0},${i1}` : `${i0},${i1},${pmf.xs[i1] - pmf.xs[i0]}`;
+    }).join(';');
+    slot.runs ??= new Map();
+    let runs = slot.runs.get(key);
+    if (!runs) {
+      if (slot.runs.size >= 16) slot.runs.clear();
+      runs = ranges.map(r => windowAtoms(pmf, r.i0, r.i1, view)).filter(run => run.ks.length);
+      slot.runs.set(key, runs);
+    }
+    return runs;
+  }
+
+  /** The stem an E(…) marker stands on: the atom at x, within rounding, and
+   *  its mass — else x itself, on the axis. */
+  atomNear(name: string, x: number, env: Record<string, number>): { x: number; h: number } {
+    const law = this.lawOf(name, env);
+    if (law) {
+      const k = wholeNumber(x);
+      return Number.isNaN(k) ? { x, h: 0 } : { x: k, h: law.pmf(k) };
+    }
+    const pmf = this.pmfOf(name, env);
+    if (pmf) {
+      const i = firstAbove(pmf.xs, x, true);
+      for (const j of [i - 1, i]) {
+        if (j >= 0 && j < pmf.xs.length && sameAtom(pmf.xs[j], x)) return { x: pmf.xs[j], h: pmf.ps[j] };
+      }
+    }
+    return { x, h: 0 };
   }
 }
 
