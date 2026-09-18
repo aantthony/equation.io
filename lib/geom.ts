@@ -21,6 +21,7 @@
  */
 import { add, div, mul, neg, sub } from './diff.ts';
 import { ANGLE_FN, type Expr } from './expr.ts';
+import { SCALAR_REDUCTIONS } from './list.ts';
 import { type GetMat, detOf, matVec, matrixFromList, solveVec, traceOf } from './mat.ts';
 
 /** Whole-statement geometry forms (like SPECIAL_FORMS, they never nest). */
@@ -69,8 +70,9 @@ function sameDims(op: string, a: LV, b: LV): asserts a is LV & { vec: true } {
 
 /** Re-pair a lowered argument list into vectors of any dimension: vec args
  *  pass through, adjacent scalars (a flattened tuple literal) join into a 2D
- *  point. A scalar left without a partner throws `stray`. */
-function vecArgs(args: LV[], stray: string): Expr[][] {
+ *  point. A scalar left without a partner throws `stray` — a message, or one
+ *  made from that argument's index. */
+function vecArgs(args: LV[], stray: string | ((index: number) => string)): Expr[][] {
   const vs: Expr[][] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -79,7 +81,7 @@ function vecArgs(args: LV[], stray: string): Expr[][] {
       continue;
     }
     const b = args[i + 1];
-    if (!b || b.vec) throw new Error(stray);
+    if (!b || b.vec) throw new Error(typeof stray === 'string' ? stray : stray(i));
     vs.push([a.e, b.e]);
     i++;
   }
@@ -101,14 +103,31 @@ function pairPoints(name: string, args: LV[], usage: string): Array<[Expr, Expr]
 const isListArg = (a: Expr, getMat: GetMat, isList: IsList): boolean =>
   a.kind === 'list' || a.kind === 'data' || (a.kind === 'var' && (isList(a.name) || getMat(a.name) !== null));
 
+/** Why an argument that failed to be a point is list-shaped, if it is: a
+ *  'list' value (L, 2L, -P, sort(L), sin(L)) or one 'element' of a list
+ *  (P[1]). A reduction is one number, so total(L) is neither. */
+function listShape(a: Expr, getMat: GetMat, isList: IsList): 'list' | 'element' | null {
+  if (isListArg(a, getMat, isList)) return 'list';
+  const first = (es: Expr[]) => es.map(x => listShape(x, getMat, isList)).find(s => s !== null) ?? null;
+  switch (a.kind) {
+    case 'neg': return first([a.a]);
+    case 'bin': return first([a.a, a.b]);
+    case 'call':
+      if (a.name === '[index]') return 'element';
+      if (SCALAR_REDUCTIONS.has(a.name) || ((a.name === 'min' || a.name === 'max') && a.args.length === 1)) return null;
+      return first(a.args);
+    default: return null;
+  }
+}
+
 const DISTANCE_USAGE = 'distance takes two points: distance(A, B) with A = (0, 0) defined above, or distance((0, 0), (3, 4)).';
 const ANGLE_USAGE = 'angle takes three 2D points — angle(A, B, C), the angle at B — or two 2D vectors: angle(U, V).';
 
 /** distance(A, B) ≡ |A - B|, in any dimension |A - B| has. `usage` is thrown
  *  for every arity failure: tuple literals arrive flattened — (1, 2, 3) is
  *  three loose scalars — so it is the one message true however they pair. */
-function lowerDistance(args: LV[], usage: string): Expr {
-  const vs = vecArgs(args, usage);
+function lowerDistance(args: LV[], usage: string, stray: (index: number) => string): Expr {
+  const vs = vecArgs(args, stray);
   if (vs.length !== 2) throw new Error(usage);
   const [p, q] = vs;
   if (p.length !== q.length) {
@@ -121,8 +140,8 @@ function lowerDistance(args: LV[], usage: string): Expr {
  *  signed, counterclockwise positive, in (−π, π]. It lowers to one internal
  *  call over the two arms' components (see angleFn), so each component
  *  appears once however large it is. */
-function lowerAngle(args: LV[], usage: string): Expr {
-  const vs = vecArgs(args, usage);
+function lowerAngle(args: LV[], usage: string, stray: (index: number) => string): Expr {
+  const vs = vecArgs(args, stray);
   if (vs.length !== 2 && vs.length !== 3) throw new Error(usage);
   if (vs.some(v => v.length !== 2)) {
     throw new Error('angle measures 2D points and vectors only — 3-component vectors are not supported yet.');
@@ -246,13 +265,24 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         // wrapper, not a side effect of the readout). Lists inside a component
         // broadcast later like any scalar's; a list *as* an argument would be
         // a list of points, which is plan #13's.
-        const usage = e.args.some(a => isListArg(a, getMat, isList))
-          ? `${e.name} takes points, and a list cannot stand for a point yet — ${e.name === 'distance' ? 'distance(A, B)' : 'angle(A, B, C)'}, one point each.`
-          : e.name === 'distance' ? DISTANCE_USAGE : ANGLE_USAGE;
+        const usage = e.name === 'distance' ? DISTANCE_USAGE : ANGLE_USAGE;
+        const form = e.name === 'distance' ? 'distance(A, B)' : 'angle(A, B, C)';
+        const listy = `${e.name} takes points, and a list cannot stand for a point yet — ${form}, one point each.`;
+        // The argument left without a partner says what went wrong: a list,
+        // an element of one (a point on its own row, but not yet a point
+        // *value* — P[1] + A fails the same way; plan #13), or a plain number.
+        const stray = (index: number): string => {
+          const shape = listShape(e.args[index], getMat, isList);
+          if (shape === 'list') return listy;
+          if (shape === 'element') {
+            return `${e.name} takes points, and an element of a list cannot stand for a point yet — name the point (Q = (1, 1)) and write ${form}.`;
+          }
+          return usage;
+        };
         // (A named 2×2 list reads as a matrix, which lowering would reject first.)
-        if (e.args.some(a => a.kind === 'var' && getMat(a.name) !== null)) throw new Error(usage);
+        if (e.args.some(a => a.kind === 'var' && getMat(a.name) !== null)) throw new Error(listy);
         const args = e.args.map(lo);
-        return sc(e.name === 'distance' ? lowerDistance(args, usage) : lowerAngle(args, usage));
+        return sc(e.name === 'distance' ? lowerDistance(args, usage, stray) : lowerAngle(args, usage, stray));
       }
       const args = e.args.map(lo);
       const nPts = Object.hasOwn(POINT_FNS, e.name) ? POINT_FNS[e.name] : undefined;

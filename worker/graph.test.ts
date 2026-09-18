@@ -34,6 +34,30 @@ describe('distance / angle through analyze()', () => {
     for (const [msg] of rows.slice(3)) expect(msg).toMatch(/a list cannot stand for a point yet/);
   });
 
+  it('names the list whenever one is why the points do not pair up', () => {
+    const rows = out(['P = [(0, 0), (1, 1), (2, 2)]', 'L = [1, 2, 3]', 'A = (1, 2)', 'B = (3, 1)',
+      'distance(2L, A)', 'distance(-P, A)', 'distance(sort(L), A)', 'distance([1..3] + 1, A)',
+      'angle(A, P[1], B)', 'distance(A, P[2])',
+      'distance(A, total(L))', 'distance(P, L, A)', 'angle(P, L, A, B)']);
+    for (const [msg] of rows.slice(4, 8)) expect(msg).toMatch(/a list cannot stand for a point yet/);
+    // An element of a point list is a point on its own row, but not yet a
+    // point *value* (P[2] + A fails the same way): that is plan #13's.
+    for (const [msg] of rows.slice(8, 10)) expect(msg).toMatch(/an element of a list cannot stand for a point yet.*name it first|name the point/);
+    // A reduction is one number, so no list is to blame here...
+    expect(rows[10][0]).toMatch(/^distance takes two points/);
+    // ...and a list of points that does pair up (as a "component") is refused
+    // by list lowering, in its own true words.
+    expect(rows[11][0]).toMatch(/list of points is not supported yet/);
+    expect(rows[12][0]).toMatch(/list of points is not supported yet/);
+  });
+
+  it('never shows the internal [angle] name', () => {
+    const rows = out(['B = (3, 1)', 'angle((i, 0), B)']);
+    expect(rows[1][0]).toBe('angle is not supported for complex values.');
+    const bad = { kind: 'call' as const, name: '[angle]', args: [{ kind: 'num' as const, value: 1 }] };
+    expect(() => compileProg(bad, new Map())).toThrow(/^Cannot evaluate angle\(\) here\.$/);
+  });
+
   it('tiny arms still have a direction; only a zero arm is undefined', () => {
     const rows = out(['k = 10^(-200)', 'angle((k, 0), (0, k))', 'angle((k, 0), (0, 0), (0, 1))', 'angle((0, 0), (0, k))']);
     expect(rows.slice(1)).toEqual([['value', '≈ 1.5708'], ['value', '≈ 1.5708'], ['value', 'undefined']]);

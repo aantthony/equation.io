@@ -26,6 +26,29 @@ describe('coordinate objects end to end', () => {
     expect(pts[0][0]).toBeCloseTo(Math.SQRT2, 7);
     expect(pts[0][1]).toBeCloseTo(Math.SQRT2, 7);
   });
+  it('treats an angle(…) coordinate as periodic, like atan2', () => {
+    const chart = ['r = sqrt(x^2+y^2)', 'theta = angle((1, 0), (x, y))'];
+    const p = last([...chart, '(r, theta) = (2, 9pi/4)']);
+    if (p.type !== 'system') throw new Error('expected system');
+    expect(p.angular).toEqual([false, true]);
+    const pts = solutions([...chart, '(r, theta) = (2, 9pi/4)']);
+    expect(pts).toHaveLength(1);
+    expect(pts[0][0]).toBeCloseTo(Math.SQRT2, 7);
+    expect(pts[0][1]).toBeCloseTo(Math.SQRT2, 7);
+    // Written directly, with no field: the angle at (x, y) subtended by A and B.
+    const q = last(['A = (-1, 0)', 'B = (1, 0)', '(angle(A, (x, y), B), |(x, y)|) = (3.1, 2)']);
+    if (q.type !== 'system') throw new Error('expected system');
+    expect(q.angular).toEqual([true, false]);
+    // A traced spiral crosses the ±π cut three times without a chord or a break.
+    const s = last([...chart, '(r, theta) = (3u, 6pi u)']);
+    if (s.type !== 'system') throw new Error('expected system');
+    const paths = traceSystem(s.residuals, ['x', 'y'], [-4, -4], [4, 4], {}, 256, s.angular);
+    const longest = paths.reduce((a, b) => a.length > b.length ? a : b);
+    expect(longest.length).toBeGreaterThan(250);
+    for (let k = 1; k < longest.length; k++) {
+      expect(Math.hypot(longest[k][0] - longest[k - 1][0], longest[k][1] - longest[k - 1][1])).toBeLessThan(0.3);
+    }
+  });
   it('does not wrap real expressions containing nested angle calculations', () => {
     const p = last(['(x+sin(atan2(y,x)),y)=(10,0)']);
     if (p.type !== 'system') throw new Error('expected system');

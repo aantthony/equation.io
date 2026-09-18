@@ -766,6 +766,14 @@ export function factorialFn(x: number): number {
 /** The internal call angle(…) lowers to (lib/geom.ts): [angle](u0, u1, v0, v1).
  *  Unwritable, like '[trail]', so it can never collide with a user's name. */
 export const ANGLE_FN = '[angle]';
+/** d/dp of [angle] is a difference of two of these, one per arm (lib/diff.ts):
+ *  [angle′](v0, v1, w0, w1) is the turning rate of arm v moving with velocity w. */
+export const ANGLE_RATE_FN = '[angle′]';
+
+/** The name an internal call wears in a message: `[polygon]` is written
+ *  polygon, and both angle helpers are the user's angle. */
+export const plainFnName = (name: string): string =>
+  (name === ANGLE_RATE_FN ? 'angle' : name.startsWith('[') ? name.slice(1, -1) : name);
 
 /**
  * The signed angle turning from arm u to arm v, counterclockwise positive, in
@@ -779,12 +787,25 @@ export const ANGLE_FN = '[angle]';
 export function angleFn(u0: number, u1: number, v0: number, v1: number): number {
   const su = Math.max(Math.abs(u0), Math.abs(u1));
   const sv = Math.max(Math.abs(v0), Math.abs(v1));
-  if (!(su > 0 && sv > 0)) return NaN;
+  if (!(su > 0 && sv > 0)) return NaN; // a zero arm, or a NaN component
   const a0 = u0 / su, a1 = u1 / su, b0 = v0 / sv, b1 = v1 / sv;
   const cross = a0 * b1 - a1 * b0;
   const dot = a0 * b0 + a1 * b1;
   if (cross === 0) return dot < 0 ? Math.PI : dot > 0 ? 0 : NaN; // −0 === 0: no −π
   return Math.atan2(cross, dot);
+}
+
+/**
+ * (v × w)/|v|²: how fast the direction of arm v turns when v moves with
+ * velocity w. Scaled by v's largest component like angleFn, so an arm of
+ * length 1e-200 (or 1e-20 in a float32 shader) has the derivative its
+ * direction has, not 0/0. The GLSL twin is eq_angle_rate.
+ */
+export function angleRateFn(v0: number, v1: number, w0: number, w1: number): number {
+  const s = Math.max(Math.abs(v0), Math.abs(v1));
+  if (!(s > 0)) return NaN;
+  const a0 = v0 / s, a1 = v1 / s;
+  return (a0 * (w1 / s) - a1 * (w0 / s)) / (a0 * a0 + a1 * a1);
 }
 
 /** sin(x)/x with the removable hole filled: sinc(0) = 1. */
@@ -824,6 +845,7 @@ export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
   factorial: factorialFn,
   sinc: sincFn,
   [ANGLE_FN]: angleFn,
+  [ANGLE_RATE_FN]: angleRateFn,
   coth: cothFn,
 };
 

@@ -4,7 +4,7 @@
  * An equation l = r compiles to the scalar field F = l - r; the graph is the
  * zero set of F, which the renderers extract in a fragment shader.
  */
-import { ANGLE_FN, type Expr, ISPRIME_MAX, LANCZOS, ineqComparisons } from './expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, type Expr, ISPRIME_MAX, LANCZOS, ineqComparisons } from './expr.ts';
 
 export const FN_GLSL: Record<string, string> = {
   ln: 'log',
@@ -23,6 +23,7 @@ export const FN_GLSL: Record<string, string> = {
   sinc: 'eq_sinc',
   coth: 'eq_coth',
   [ANGLE_FN]: 'eq_angle',
+  [ANGLE_RATE_FN]: 'eq_angle_rate',
 };
 
 /** Helper functions some expressions need; prepend once to the shader. */
@@ -97,6 +98,8 @@ float eq_coth(float x) { return 1.0 / tanh(x); }
 // float32 products cannot underflow near the vertex, and the straight angle
 // is a branch, not a signed zero a compiler is free to fold away.
 float eq_angle(float u0, float u1, float v0, float v1) {
+  // GLSL max() may return either operand when one is NaN; Math.max does not.
+  if (isnan(u0) || isnan(u1) || isnan(v0) || isnan(v1)) return EQ_NAN;
   float su = max(abs(u0), abs(u1));
   float sv = max(abs(v0), abs(v1));
   if (!(su > 0.0 && sv > 0.0)) return EQ_NAN;
@@ -104,8 +107,17 @@ float eq_angle(float u0, float u1, float v0, float v1) {
   vec2 b = vec2(v0, v1) / sv;
   float c = a.x * b.y - a.y * b.x;
   float d = dot(a, b);
-  if (c == 0.0) return d < 0.0 ? 3.141592653589793 : 0.0;
+  if (c == 0.0) return d < 0.0 ? 3.141592653589793 : (d > 0.0 ? 0.0 : EQ_NAN);
   return atan(c, d);
+}
+// angleRateFn in lib/expr.ts: (v x w)/|v|^2 with v scaled by its largest
+// component, the per-arm term of eq_angle's derivative.
+float eq_angle_rate(float v0, float v1, float w0, float w1) {
+  if (isnan(v0) || isnan(v1)) return EQ_NAN;
+  float s = max(abs(v0), abs(v1));
+  if (!(s > 0.0)) return EQ_NAN;
+  vec2 a = vec2(v0, v1) / s;
+  return (a.x * (w1 / s) - a.y * (w0 / s)) / dot(a, a);
 }
 float eq_pow(float a, float b) {
   // Support negative bases via the "real odd root" convention, e.g.

@@ -7,7 +7,7 @@
  * unaffected; re()/im()/arg()/abs() take a complex value back to a real one,
  * which lets equations like im(ln(w)) = 1 flow through the implicit-curve path.
  */
-import type { Expr } from './expr.ts';
+import { type Expr, plainFnName } from './expr.ts';
 import { FN_GLSL, piecewiseGLSL, toGLSL } from './glsl.ts';
 
 export type Typed = { type: 'real'; code: string } | { type: 'complex'; code: string };
@@ -144,7 +144,7 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
         return { type: 'real', code: `${name}(${args.map(a => a.code).join(', ')})` };
       }
       const fn = C_FNS[e.name];
-      if (!fn) throw new Error(`${e.name} is not supported for complex values.`);
+      if (!fn) throw new Error(`${plainFnName(e.name)} is not supported for complex values.`);
       if (args.length !== 1) throw new Error(`${e.name} takes one argument.`);
       return { type: 'complex', code: `${fn}(${promote(args[0])})` };
     }

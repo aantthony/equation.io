@@ -16,7 +16,7 @@ import { coordinateRow, lowerCoordinateFlow } from './coordinate.ts';
 import { complexParts } from './complex-parts.ts';
 import { SPECIAL_FORMS, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
-import { builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
+import { ANGLE_FN, builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import { toGLSL } from './glsl.ts';
 import { type GridField, buildGridField } from './grid.ts';
@@ -507,10 +507,11 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
     const residuals = l.items.map((a, k): Expr => ({ kind: 'bin', op: '-', a, b: r.items[k] }));
     const positional = coordinate && !hasParam && !coordinate.rhs.some(e =>
       [...freeVars(e)].some(v => ['x', 'y', 'z'].includes(v) || Object.hasOwn(fields, v)));
-    // Only a direct angle coordinate is periodic; nesting atan2 inside a
-    // real expression does not make that expression an angle.
+    // Only a direct angle coordinate — atan2, or the angle(…) measurement —
+    // is periodic; nesting one inside a real expression does not make that
+    // expression an angle.
     return done({
-      type: 'system', dim, residuals, angular: l.items.map(e => e.kind === 'call' && (e.name === 'atan2' || (e.name === 'atan' && e.args.length === 2))),
+      type: 'system', dim, residuals, angular: l.items.map(e => e.kind === 'call' && (e.name === 'atan2' || e.name === ANGLE_FN || (e.name === 'atan' && e.args.length === 2))),
       ...(paramSystem ? { parametric: true } : {}),
       ...(positional ? { coordinates: coordinate.coords } : {}),
     });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type Definition, buildDefs, evalConstEnv, scanDefinition } from './defs.ts';
 import { diff } from './diff.ts';
-import { evaluate, parseExpr } from './expr.ts';
+import { angleFn, evaluate, parseExpr } from './expr.ts';
 import { arrowHead, lowerGeom } from './geom.ts';
 import { GLSL_PRELUDE, toGLSL } from './glsl.ts';
 import { classify } from './plot.ts';
@@ -152,6 +152,45 @@ describe('distance and angle measurements', () => {
     const h = 1e-6;
     const numeric = (evaluate(e, { x: 0.7 + h }) - evaluate(e, { x: 0.7 - h })) / (2 * h);
     expect(evaluate(diff(e, 'x'), at)).toBeCloseTo(numeric, 6);
+  });
+
+  it('differentiates tiny and huge arms without under- or overflow', () => {
+    // The angle does not depend on the arms' lengths, so neither may its derivative.
+    const at1 = evaluate(diff(low('angle((1, 2), (x, 3 - x^2))'), 'x'), { x: 0.7 });
+    for (const k of [1e-200, 1e-30, 1e30, 1e150]) {
+      const d = diff(low('angle((k, 2k), (k x, k (3 - x^2)))'), 'x');
+      expect(evaluate(d, { x: 0.7, k }), String(k)).toBeCloseTo(at1, 9);
+    }
+    // Both arms moving, and the second derivative still exists.
+    const both = low('angle((x, 1), (1, x^2))');
+    const h = 1e-5;
+    const num1 = (evaluate(both, { x: 0.4 + h }) - evaluate(both, { x: 0.4 - h })) / (2 * h);
+    expect(evaluate(diff(both, 'x'), { x: 0.4 })).toBeCloseTo(num1, 6);
+    const d1 = diff(both, 'x');
+    const num2 = (evaluate(d1, { x: 0.4 + h }) - evaluate(d1, { x: 0.4 - h })) / (2 * h);
+    expect(evaluate(diff(d1, 'x'), { x: 0.4 })).toBeCloseTo(num2, 5);
+    // A fixed arm contributes nothing, so it is not emitted at all.
+    expect(toGLSL(diff(low('angle((1, 0), (x, y))'), 'x'))).toBe("eq_angle_rate(x, y, 1.0, 0.0)");
+  });
+
+  it('angleFn and its GLSL twin agree on every edge', () => {
+    expect(angleFn(1, 0, 0, 1)).toBeCloseTo(Math.PI / 2, 15);
+    expect(angleFn(-1, 0, 1, 0)).toBe(Math.PI);
+    expect(angleFn(0, 0, 1, 0)).toBeNaN();
+    expect(angleFn(NaN, 1, 1, 0)).toBeNaN();
+    expect(angleFn(1, NaN, 1, 0)).toBeNaN();
+    expect(angleFn(1, 0, NaN, 5)).toBeNaN();
+    expect(angleFn(Infinity, 0, 1, 0)).toBeNaN();
+    // GLSL max() may drop a NaN that Math.max propagates, and the c == 0
+    // branch must not invent a 0 where the CPU says NaN: mirror both.
+    const body = GLSL_PRELUDE.slice(GLSL_PRELUDE.indexOf('float eq_angle('));
+    expect(body).toContain('isnan(u0) || isnan(u1) || isnan(v0) || isnan(v1)');
+    expect(body).toContain('d > 0.0 ? 0.0 : EQ_NAN');
+  });
+
+  it('never shows the internal name in an error', () => {
+    const internal: ReturnType<typeof parseExpr> = { kind: 'call', name: '[angle]', args: [parseExpr('x')] };
+    expect(() => diff(internal, 'x')).toThrow(/^Cannot differentiate angle\.$/);
   });
 
   it('are scalars: they compose inside larger expressions and plots', () => {
