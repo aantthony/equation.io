@@ -78,6 +78,8 @@ pnpm deploy     # build and deploy to Cloudflare
 - `y = {0 < x < 2: x^2}` — a domain restriction: with no default, the value
   is undefined outside the conditions, so nothing is drawn there
 - `sin(x)cos(y)` — a bare expression in x, y is a 2D scalar/density field
+- `2+2`, `sqrt(a)`, `|A - B|` — a bare number draws nothing and reads out
+  `= 4` under the row, live with sliders and `t`; write `y = 4` for the line
 
 **Sliders and animation**
 
@@ -110,6 +112,8 @@ pnpm deploy     # build and deploy to Cloudflare
 - `(-y, x)` — a tuple depending on x, y is a vector field, rendered as
   animated streamlines via GPU line-integral convolution; `t` works too:
   `(cos(t)-y, x)`
+- `grad(x^2 + y^2)` (or `∇(…)`) — the symbolic gradient as a tuple, so it
+  plots as a vector field and works in `dot(grad(f), (1, 0))`
 - `dy/dx = x y` / `y' = sin(x) - y` — ODEs plot the slope/direction field
   `(1, f)`; click the canvas to drop an RK4 integral curve through that point,
   double-click to clear

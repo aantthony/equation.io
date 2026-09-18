@@ -213,6 +213,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Region: inequalities, including chains — `y < x/2 + 1`,
   `4 <= x^2 + y^2 <= 9`. Non-strict comparisons draw a solid boundary.
 - Scalar field: a bare expression in x, y — `sin(x)cos(y)` — shaded by value.
+- Value: a bare expression with no plot coordinate — `2+2`, `sqrt(a)` with a
+  slider a, `|A - B|` between named points, `int[0..1] x^2 dx`, `sin(t)` —
+  draws nothing and reads out `= 4` (or `≈ 1.41421`) under the row, live as
+  sliders, states and t move. The tool result reports it as kind `value`
+  with the number in `value`. A number is not assumed to mean `y = number`:
+  write `y = 4` for the horizontal line. (A bare expression in x alone,
+  like `sin(x)`, still plots as y = sin(x).)
 - Complex point: a constant complex expression such as `1+2i` draws at (1, 2).
   Constants and t may animate its real and imaginary components.
 - Complex roots: `w^3 = 1` draws three solution points; equations in w become

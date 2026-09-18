@@ -145,7 +145,7 @@ Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
 | piecewise functions | ✓ | ✓ | ✓ (#6) | shipped |
 | definite integrals (value + `∫₀ˣ` as a function) | ✓ | ✓ | — | adopt, phase 3 |
 | distribution zoo (uniform, exponential, t, binomial, Poisson…) | ✓ | ✓ | Normal only | adopt, phase 3; #6's bar rendering is the seed of the discrete stem/bar renderer |
-| value readout for constant rows (`2+2` → "= 4") | ✓ | ✓ | plots y = 4 silently | adopt, small; #35's decided-equation notes are the sibling and its channel |
+| value readout for constant rows (`2+2` → "= 4") | ✓ | ✓ | ✓ | **done**: a bare expression with no plot coordinate is a `value` row — it reads out "= 4" live and draws nothing (it no longer assumes `y =`). This is also the measurement readout: `\|A-B\|` reads the distance |
 | complex constants as Argand points (`1+2i`) | ✓ | ✓ | degenerate render | adopt, small (phase 1.5) |
 | complex root sets (`w³ = 1`) | ~ | ✓ | error | adopt, §6 (same solver; exact labels via #1 when polynomial) |
 | sequences (stem plots), recurrences, cobwebs, bifurcation | ~ | ✓ | PR #6 pending | pending #6 |
@@ -181,7 +181,7 @@ shape before value type:
    with no free variables → decided note (#35); complex equations → root
    point set (§6) instead of today's error.
 6. Bare scalars: x → graph; x,y → scalar field; complex → field lines;
-   constant → horizontal line **plus a "= value" readout**; constant complex
+   constant → a **"= value" readout, nothing drawn** (`y = 4` is the line); constant complex
    → Argand point.
 
 Everything else keeps failing loudly with a suggestion.
@@ -308,7 +308,7 @@ relevant PR is adopted first.
 | Phase | Contents | Size |
 |---|---|---|
 | 1 — coordinate objects | position rows, chart parametrics, flow rows. On #36: the five deltas of §6. Without it: §6's standalone engine, named-tuple form only | M (S if #36 lands) |
-| 1.5 — coherence wins | complex roots `f(w) = c` (+ #1 labels); Argand points for complex constants; "= value" readouts on constant rows through #35's PlotNote channel | S |
+| 1.5 — coherence wins | complex roots `f(w) = c` (+ #1 labels); ~~Argand points for complex constants~~; ~~"= value" readouts on constant rows~~ — all shipped | S |
 | 2 — geometry | tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`), named draggable points (on #32's writeback), `polyline`/`segment`/`polygon`/`circle`/`vector` arrows (settling §3's `[…]` collision), measurement readouts | M–L |
 | 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (shipped with #6: a no-default piecewise *is* the restriction, see §4), definite integrals (value, `∫₀ˣ` via CPU LUT texture, area shading), distribution zoo with discrete stem/bar rendering (seeded by #6's bars) | L |
 | 4 — space | fields over z (spherical/cylindrical surfaces by substitution), 3D flows with auto-seeded trajectories (Lorenz), 3D arrow fields, `revolve()` | L |

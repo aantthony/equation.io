@@ -23,7 +23,6 @@ import {
   resolveExpr,
   scanDefinition,
   timeDifferentiator,
-  usesIntegral,
   TABLE_MAX_ROWS,
   type Definition,
   type Defs,
@@ -50,10 +49,10 @@ import {
 import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
-import { lowerLists, usesListReduction } from '../lib/list.ts';
+import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
-import { type Classified, classify } from '../lib/plot.ts';
+import { type Classified, classify, valueReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
@@ -524,6 +523,19 @@ function render() {
   // States carry between frames, so they are integrated up to now before
   // anything reads them; the constants may then be formulas in those states.
   constEnv = currentConstEnv(time);
+
+  // Value rows draw nothing; their readout follows sliders, states and t.
+  for (const eq of active) {
+    const plot = eq.cls!.plot;
+    if (plot.type !== 'value') continue;
+    let text: string;
+    try { text = valueReadout(evaluate(plot.expr, { ...constEnv, t: time })); }
+    catch { continue; }
+    if (text !== eq.info) {
+      eq.info = text;
+      if (eq.infoEl) eq.infoEl.textContent = text;
+    }
+  }
 
   for (const eq of active) {
     if (eq.cls!.plot.type !== 'trail') continue;
@@ -1562,13 +1574,11 @@ function recompileAll() {
           + ' Filter it first, or plot two of the columns.');
       }
       eq.parsed = parsed;
-      // A row that wrote an ∫ or a list reduction and resolved to a constant
-      // gets its value as a readout (the plot is the horizontal line there).
-      if (envT0 && (usesIntegral(rawParsed) || usesListReduction(rawParsed))) {
-        try {
-          const value = evaluate(parsed, envT0);
-          if (isFinite(value)) eq.info = `≈ ${Number(value.toPrecision(6))}`;
-        } catch { /* depends on plot coordinates: the curve is the answer */ }
+      // A number is its own answer: the row reads out "= value" and draws
+      // nothing. The frame loop keeps it current as sliders, states and t move.
+      if (eq.cls.plot.type === 'value') {
+        try { eq.info = valueReadout(evaluate(parsed, { ...envT0, t: 0 })); }
+        catch { eq.info = '= …'; } // resolves once the frame loop has an env
       }
     } catch (e) {
       eq.error = e instanceof Error ? e.message : String(e);
@@ -2318,7 +2328,9 @@ function reconcile() {
     line.dataset.id = String(eq.id);
     line.style.setProperty('--eq-color', cssColor(theme.palette[eq.colorIndex]));
     line.classList.toggle('invalid', !!eq.error);
-    line.classList.toggle('is-def', !!eq.def);
+    // No colour swatch for rows with nothing drawn in it: definitions, and
+    // value rows, whose whole output is the readout beneath them.
+    line.classList.toggle('is-def', !!eq.def || (!eq.error && eq.cls?.plot.type === 'value'));
     line.classList.toggle('is-comment', !!eq.comment);
     line.classList.toggle('collapsed', !!(eq.comment && eq.collapsed));
     line.title = eq.error ?? (eq.comment ? 'Click the arrow to collapse or expand this group' : '');

@@ -287,7 +287,16 @@ describe('mcp endpoint', () => {
       name: 'encode_graph_url',
       arguments: { equations: ['L = [1, 4, 2]', 'total(L)'] },
     });
-    expect(b2.result.structuredContent.rows[1].value).toBe('≈ 7');
+    expect(b2.result.structuredContent.rows[1].value).toBe('= 7');
+    // A bare number is a value row — a readout, not the line y = 7.
+    expect(b2.result.structuredContent.rows[1].kind).toBe('value');
+    const { body: bv } = await rpc('tools/call', {
+      name: 'encode_graph_url',
+      arguments: { equations: ['2+2', 'a = 2', 'sqrt(a)', '2x'] },
+    });
+    expect(bv.result.structuredContent.rows.map((r: { kind?: string; value?: string }) => [r.kind, r.value])).toEqual([
+      ['value', '= 4'], ['definition (const)', undefined], ['value', '≈ 1.41421'], ['implicit2d', undefined],
+    ]);
     // A call folds case, so the name a document bound has to fold with it:
     // `Total = 3` is a legal old definition and `Total(x + 1)` was its product.
     const { body: b3 } = await rpc('tools/call', {

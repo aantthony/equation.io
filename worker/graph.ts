@@ -22,7 +22,6 @@ import {
   shadowedFnNames,
   scanDefinition,
   timeDifferentiator,
-  usesIntegral,
   type Definition,
   type Defs,
 } from '../lib/defs.ts';
@@ -41,8 +40,8 @@ import {
 } from '../lib/dist.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom } from '../lib/geom.ts';
-import { lowerLists, usesListReduction } from '../lib/list.ts';
-import { type Classified, classify } from '../lib/plot.ts';
+import { lowerLists } from '../lib/list.ts';
+import { type Classified, classify, valueReadout } from '../lib/plot.ts';
 import { scanRegressions, formatFit } from '../lib/regression.ts';
 import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
 import { buildStateSystem, initialState } from '../lib/state.ts';
@@ -367,13 +366,11 @@ export function analyze(texts: string[]): Analysis {
       row.cls = classify(parsed, constNames, fieldEnv, timeDifferentiator(defs));
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       row.expr = parsed;
-      // A row that wrote an ∫ or a list reduction and resolved to a constant
-      // gets its value as a readout (mirror of web/main.ts).
-      if (usesIntegral(rawParsed) || usesListReduction(rawParsed)) {
-        try {
-          const value = evaluate(parsed, constEnv);
-          if (isFinite(value)) row.info = `≈ ${Number(value.toPrecision(6))}`;
-        } catch { /* depends on plot coordinates: the curve is the answer */ }
+      // A number is its own answer: the row reads out "= value" and draws
+      // nothing (mirror of web/main.ts). Evaluated at t = 0 here.
+      if (row.cls.plot.type === 'value') {
+        try { row.info = valueReadout(evaluate(parsed, { ...constEnv, t: 0 })); }
+        catch { /* not computable statically (a state, say): no readout */ }
       }
     } catch (e) {
       // A row reading a dropped CSV is not broken here — the bytes simply

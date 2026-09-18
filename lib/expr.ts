@@ -64,8 +64,8 @@ export const FUNCTIONS = new Set([
   // Small-matrix helpers (det, trace, matvec, linear solve), also lowered
   // symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts).
   'det', 'trace', 'solve',
-  // Not real functions: Σ/Π/∫ binders, expanded symbolically by resolveExpr.
-  'sum', 'prod', 'int',
+  // Not real functions: Σ/Π/∫ binders and ∇, expanded symbolically by resolveExpr.
+  'sum', 'prod', 'int', 'grad',
   // Whole-expression plot modes (see classify): domain coloring, conformal
   // grids, escape-time iteration, swept tubes, and motion trails.
   'domain', 'conformal', 'iter', 'tube', 'trail',
@@ -79,6 +79,7 @@ export const FUNCTIONS = new Set([
 export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'gamma', 'factorial', 'sinc', 'coth',
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
+  'grad',
 ]);
 
 /**
@@ -407,7 +408,7 @@ const syntax: PatternDict = {
   number: /^\d+\.?\d*$/,
   bar: /^\|$/,
   whitespace: /\s$/,
-  symbol: /^[A-Za-z_Σ∑Π∏∫∞][A-Za-z_0-9]*'*$/,
+  symbol: /^[A-Za-z_Σ∑Π∏∫∞∇][A-Za-z_0-9]*'*$/,
   // A quote only opens text where a token can start, so `x'` (prime) and
   // `f'(x)` still tokenize as symbols — the symbol match gets there first.
   string: /^("[^"]*"?|'[^']*'?)$/,
@@ -422,7 +423,7 @@ function op(str: string): Token {
 }
 
 const SYMBOL_ALIASES: Record<string, string> =
-  { 'Σ': 'sum', '∑': 'sum', 'Π': 'prod', '∏': 'prod', '∫': 'int', '∞': 'inf' };
+  { 'Σ': 'sum', '∑': 'sum', 'Π': 'prod', '∏': 'prod', '∫': 'int', '∞': 'inf', '∇': 'grad' };
 
 /**
  * Map Σ/Π glyphs to sum/prod, and settle what a '.' means.
