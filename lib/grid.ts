@@ -7,7 +7,7 @@
  * pair (x, y) going through the same path; polar is (sqrt(x²+y²), atan2(y,x)).
  */
 import { diff } from './diff.ts';
-import { type Expr, evaluate, freeVars, substVars } from './expr.ts';
+import { ANGLE_FN, type Expr, evaluate, freeVars, substVars } from './expr.ts';
 import { toGLSL } from './glsl.ts';
 
 export interface GridField {
@@ -34,7 +34,7 @@ export function hasAtan2(e: Expr): boolean {
     case 'neg': return hasAtan2(e.a);
     case 'bin': return hasAtan2(e.a) || hasAtan2(e.b);
     case 'call':
-      return e.name === 'atan2' || (e.name === 'atan' && e.args.length === 2) || e.args.some(hasAtan2);
+      return e.name === 'atan2' || e.name === ANGLE_FN || (e.name === 'atan' && e.args.length === 2) || e.args.some(hasAtan2);
     case 'eq': return hasAtan2(e.l) || hasAtan2(e.r);
     case 'ineq': return hasAtan2(e.l) || hasAtan2(e.r);
     case 'vec': return e.items.some(hasAtan2);

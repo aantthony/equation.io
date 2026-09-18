@@ -4,7 +4,7 @@
  * An equation l = r compiles to the scalar field F = l - r; the graph is the
  * zero set of F, which the renderers extract in a fragment shader.
  */
-import { type Expr, ISPRIME_MAX, LANCZOS, ineqComparisons } from './expr.ts';
+import { ANGLE_FN, type Expr, ISPRIME_MAX, LANCZOS, ineqComparisons } from './expr.ts';
 
 export const FN_GLSL: Record<string, string> = {
   ln: 'log',
@@ -22,6 +22,7 @@ export const FN_GLSL: Record<string, string> = {
   factorial: 'eq_factorial',
   sinc: 'eq_sinc',
   coth: 'eq_coth',
+  [ANGLE_FN]: 'eq_angle',
 };
 
 /** Helper functions some expressions need; prepend once to the shader. */
@@ -91,6 +92,21 @@ float eq_sinc(float x) { return x == 0.0 ? 1.0 : sin(x) / x; }
 // 1/tanh, not cosh/sinh: the latter is Inf/Inf = NaN for |x| > ~89 where
 // coth is ±1 (and the cothFn() CPU twin says so).
 float eq_coth(float x) { return 1.0 / tanh(x); }
+// angleFn in lib/expr.ts: the signed angle from arm u to arm v in (-pi, pi],
+// NaN for a zero-length arm. Arms are scaled by their largest component so
+// float32 products cannot underflow near the vertex, and the straight angle
+// is a branch, not a signed zero a compiler is free to fold away.
+float eq_angle(float u0, float u1, float v0, float v1) {
+  float su = max(abs(u0), abs(u1));
+  float sv = max(abs(v0), abs(v1));
+  if (!(su > 0.0 && sv > 0.0)) return EQ_NAN;
+  vec2 a = vec2(u0, u1) / su;
+  vec2 b = vec2(v0, v1) / sv;
+  float c = a.x * b.y - a.y * b.x;
+  float d = dot(a, b);
+  if (c == 0.0) return d < 0.0 ? 3.141592653589793 : 0.0;
+  return atan(c, d);
+}
 float eq_pow(float a, float b) {
   // Support negative bases via the "real odd root" convention, e.g.
   // (-8)^(1/3) = -2, matching graphing calculators like Desmos. For a < 0,

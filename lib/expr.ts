@@ -763,6 +763,30 @@ export function factorialFn(x: number): number {
   return gammaFn(x + 1);
 }
 
+/** The internal call angle(…) lowers to (lib/geom.ts): [angle](u0, u1, v0, v1).
+ *  Unwritable, like '[trail]', so it can never collide with a user's name. */
+export const ANGLE_FN = '[angle]';
+
+/**
+ * The signed angle turning from arm u to arm v, counterclockwise positive, in
+ * (−π, π]. One function rather than atan2(cross, dot) spelled out, because
+ * the spelled-out form is wrong at both edges: a zero-length arm has no
+ * direction (NaN here, where atan2(0, 0) claims a confident 0), and a
+ * straight angle must read π from either side (atan2(−0, −1) is −π). Arms
+ * are scaled by their largest component first, so tiny or huge arms neither
+ * underflow to "zero length" nor overflow. The GLSL twin is eq_angle.
+ */
+export function angleFn(u0: number, u1: number, v0: number, v1: number): number {
+  const su = Math.max(Math.abs(u0), Math.abs(u1));
+  const sv = Math.max(Math.abs(v0), Math.abs(v1));
+  if (!(su > 0 && sv > 0)) return NaN;
+  const a0 = u0 / su, a1 = u1 / su, b0 = v0 / sv, b1 = v1 / sv;
+  const cross = a0 * b1 - a1 * b0;
+  const dot = a0 * b0 + a1 * b1;
+  if (cross === 0) return dot < 0 ? Math.PI : dot > 0 ? 0 : NaN; // −0 === 0: no −π
+  return Math.atan2(cross, dot);
+}
+
 /** sin(x)/x with the removable hole filled: sinc(0) = 1. */
 export const sincFn = (x: number): number => (x === 0 ? 1 : Math.sin(x) / x);
 
@@ -799,6 +823,7 @@ export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
   gamma: gammaFn,
   factorial: factorialFn,
   sinc: sincFn,
+  [ANGLE_FN]: angleFn,
   coth: cothFn,
 };
 

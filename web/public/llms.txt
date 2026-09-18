@@ -259,7 +259,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   angle) — and `angle(U, V)` is the same from vector U to vector V. Both are
   plain numbers: a bare row reads out "= value" (nothing is drawn — no arc
   marker), and they work inside any expression (`circle(A, distance(A, B))`).
-  An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
+  A scalar list inside a point broadcasts as in any scalar math
+  (`distance(A, (L, 0))` is a list of distances); a list of points as an
+  argument is not supported yet. An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
   point like `A + u(B - A)` traces the segment. Tuple literals work directly
   as arguments (`segment((0, 0), A)`) and as operands: `A + (1, 2)`,
   `((0, 0) + B)/2`, `|(3, 4)|`.

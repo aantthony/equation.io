@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { type Definition, buildDefs, evalConstEnv, scanDefinition } from './defs.ts';
+import { diff } from './diff.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { arrowHead, lowerGeom } from './geom.ts';
+import { GLSL_PRELUDE, toGLSL } from './glsl.ts';
 import { classify } from './plot.ts';
 
 const POINTS = new Set(['A', 'B', 'C']);
@@ -126,8 +128,30 @@ describe('distance and angle measurements', () => {
     expect(evalAt('angle(A, A, C)')).toBeNaN();
     expect(evalAt('angle(A, C, C)')).toBeNaN();
     expect(evalAt('angle((0, 0), B)')).toBeNaN();
-    expect(evalAt('angle((1e-200, 0), (0, 1e-200))')).toBeCloseTo(Math.PI / 2, 12); // tiny is not zero
+    // Tiny is not zero (there is no 1e-200 literal: that parses as 1 e − 200),
+    // and huge does not overflow: arms are scaled before they are multiplied.
+    expect(evaluate(parseExpr('10^(-200)'), {})).toBe(1e-200);
+    expect(evalAt('angle((10^(-200), 0), (0, 10^(-200)))')).toBeCloseTo(Math.PI / 2, 12);
+    expect(evalAt('angle((10^(-200), 0), (0, 0), (0, 10^200))')).toBeCloseTo(Math.PI / 2, 12);
+    expect(evalAt('angle((10^200, 10^200), (0, 10^200))')).toBeCloseTo(Math.PI / 4, 12);
     expect(evalAt('distance(A, A)')).toBe(0); // ...while a zero distance is a fine number
+  });
+
+  it('lowers angle to one internal call: each arm component appears once', () => {
+    expect(low('angle(A, B, C)')).toEqual({
+      kind: 'call', name: '[angle]', args: [low('A_x - B_x'), low('A_y - B_y'), low('C_x - B_x'), low('C_y - B_y')],
+    });
+    const glsl = toGLSL(low('angle((1, 0), (x, y))'));
+    expect(glsl).toBe('eq_angle(1.0, 0.0, x, y)');
+    expect(GLSL_PRELUDE).toContain('float eq_angle(float u0, float u1, float v0, float v1)');
+  });
+
+  it('differentiates like atan2(cross, dot)', () => {
+    const e = low('angle((1, 2), (x, 3 - x^2))');
+    const at = { x: 0.7 };
+    const h = 1e-6;
+    const numeric = (evaluate(e, { x: 0.7 + h }) - evaluate(e, { x: 0.7 - h })) / (2 * h);
+    expect(evaluate(diff(e, 'x'), at)).toBeCloseTo(numeric, 6);
   });
 
   it('are scalars: they compose inside larger expressions and plots', () => {
@@ -162,13 +186,16 @@ describe('distance and angle measurements', () => {
       'angle((1, 2, 3), (4, 5, 6), (7, 8, 9))', 'angle(a)', 'angle(A, B, 0.5)']) {
       expect(() => low(row), row).toThrow(/^angle takes three 2D points — angle\(A, B, C\), the angle at B — or two 2D vectors/);
     }
-    // Lists of points wait for families (plan #13), wherever they hide.
-    expect(() => low('distance([(0, 0), (1, 1)], A)')).toThrow(/distance measures single points for now, not lists — distance\(A, B\)/);
-    expect(() => low('angle(A, [A, B], C)')).toThrow(/angle measures single points for now, not lists — angle\(A, B, C\)/);
-    expect(() => lowL('distance(L, A)')).toThrow(/single points for now, not lists/);
-    expect(() => lowL('distance((L, 1), A)')).toThrow(/single points for now, not lists/);
-    expect(() => lowL('angle(A, 2L, B)')).toThrow(/single points for now, not lists/);
-    expect(() => lowL('distance(M, A)')).toThrow(/single points for now, not lists/);
+    // A list *as* an argument would be a list of points: families (plan #13).
+    const listy = /a list cannot stand for a point yet/;
+    expect(() => low('distance([(0, 0), (1, 1)], A)')).toThrow(/^distance takes points, and a list cannot stand for a point yet — distance\(A, B\)/);
+    expect(() => low('angle(A, [A, B], C)')).toThrow(/^angle takes points, and a list cannot stand for a point yet — angle\(A, B, C\)/);
+    expect(() => lowL('distance(L, A)')).toThrow(listy);
+    expect(() => lowL('distance(M, A)')).toThrow(listy);
+    // ...but a list inside a component is an ordinary scalar list: it stays
+    // in the lowered expression and broadcasts later, as in |A - (L, 1)|.
+    expect(lowL('distance((L, 1), A)')).toEqual(lowL('|(L, 1) - A|'));
+    expect(() => lowL('angle(A, (2L, 0), B)')).not.toThrow();
     // A measurement is a number, so it is no vertex.
     expect(() => low('segment(A, distance(A, B))')).toThrow(/write segment\(A, B\)/);
   });

@@ -4,7 +4,7 @@
  * readable and cheap. Non-smooth functions (min, max, floor, …) throw;
  * callers fall back to finite differences.
  */
-import type { Expr } from './expr.ts';
+import { ANGLE_FN, type Expr } from './expr.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const ZERO = num(0);
@@ -95,6 +95,14 @@ export function diff(e: Expr, v: string): Expr {
         const [y, x] = e.args;
         const n = sub(mul(diff(y, v), x), mul(y, diff(x, v)));
         return div(n, add(pow(x, num(2)), pow(y, num(2))));
+      }
+      if (e.name === ANGLE_FN && e.args.length === 4) {
+        // atan2(cross, dot) of the two arms, away from its edge cases.
+        const [u0, u1, v0, v1] = e.args;
+        const c = sub(mul(u0, v1), mul(u1, v0));
+        const d = add(mul(u0, v0), mul(u1, v1));
+        const n = sub(mul(diff(c, v), d), mul(c, diff(d, v)));
+        return div(n, add(pow(d, num(2)), pow(c, num(2))));
       }
       if ((e.name === 'normalpdf' || e.name === 'normalcdf') && e.args.length === 3) {
         // Full chain rule in all three arguments (x, mean, sd may all move).
