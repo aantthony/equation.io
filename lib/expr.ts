@@ -68,8 +68,9 @@ export const FUNCTIONS = new Set([
   // Not real functions: Σ/Π/∫ binders and ∇, expanded symbolically by resolveExpr.
   'sum', 'prod', 'int', 'grad',
   // Whole-expression plot modes (see classify): domain coloring, conformal
-  // grids, escape-time iteration, swept tubes, and motion trails.
-  'domain', 'conformal', 'iter', 'tube', 'trail',
+  // grids, escape-time iteration, swept tubes, motion trails, and surfaces
+  // of revolution.
+  'domain', 'conformal', 'iter', 'tube', 'trail', 'revolve',
 ]);
 
 /**
@@ -82,7 +83,11 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   'grad',
   'polyline', 'vector', 'distance', 'angle',
+  'revolve',
 ]);
+
+/** The axes revolve(f, axis) turns a profile about; x when none is named. */
+export const REVOLVE_AXES: ReadonlySet<string> = new Set(['x', 'y', 'z']);
 
 /**
  * Flatten a (possibly chained) inequality into its comparisons; comparison k

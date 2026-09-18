@@ -24,7 +24,7 @@
  */
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
+import { FUNCTIONS, REVOLVE_AXES, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -1176,8 +1176,22 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const vars = freeVars(f).has('z') ? ['x', 'y', 'z'] : ['x', 'y'];
         return { kind: 'vec', items: vars.map(v => applyDiff(f, v, 1, ctx.opts.isList)) };
       }
-      if (ctx.opts.inDefinition && e.name === 'trail') {
-        throw new Error('trail(…) must be a whole row, not part of a definition.');
+      if (ctx.opts.inDefinition && (e.name === 'trail' || e.name === 'revolve')) {
+        throw new Error(`${e.name}(…) must be a whole row, not part of a definition.`);
+      }
+      if (e.name === 'revolve' && args[0]?.kind === 'var') {
+        // revolve(f) names the profile by its function: f stands for f(x), or
+        // f(y) / f(z) about the axis asked for. classify (lib/plot.ts) checks
+        // the rest — it sees only the ordinary expression.
+        const profile = getFn(args[0].name);
+        if (profile) {
+          if (profile.params.length !== 1) {
+            throw new Error(`revolve(${args[0].name}) needs a function of one variable; ${args[0].name} takes ${profile.params.length}.`);
+          }
+          const axis = args[1]?.kind === 'var' && REVOLVE_AXES.has(args[1].name) ? args[1].name : 'x';
+          const body = substVars(profile.body, { [profile.params[0]]: { kind: 'var', name: axis } });
+          return { kind: 'call', name: e.name, args: [body, ...args.slice(1)] };
+        }
       }
       return { kind: 'call', name: e.name, args };
     }

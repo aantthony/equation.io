@@ -707,6 +707,9 @@ function lower(e: Expr, ctx: Ctx): Expr {
           : reduce(e.name, (arg as Expr & { kind: 'list' }).items, ctx);
       }
       if (!args.some(isSeq)) return { kind: 'call', name: e.name, args };
+      if (e.name === 'revolve') {
+        throw new Error('revolve of a list is not supported yet — write one revolve(…) row per profile.');
+      }
       if (NO_LIST_INSIDE.has(e.name)) {
         throw new Error(`Lists cannot appear inside ${plainFnName(e.name)}(…).`);
       }

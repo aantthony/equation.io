@@ -80,6 +80,8 @@ float depthOf(vec3 p) {
 
 const STEPS = 220;
 const BISECT = 24;
+/** Bisections onto the edge of a field's domain (where it turns NaN). */
+const EDGE_BISECT = 12;
 /** Coarsest step, as a fraction of the ray's span through the box. */
 const MIN_SAMPLES = 48;
 /** Finest step: STEPS × FINEST of them cover the span, so a ray that grinds
@@ -147,10 +149,26 @@ void main() {
   for (int i = 0; i < ${STEPS}; i++) {
     float t = min(tPrev + dt, t1);
     float v = F(ro + rd * t);
-    bool finite = !isnan(v) && !isinf(v) && !isnan(vPrev) && !isinf(vPrev);
-    if (finite && sign(v) != sign(vPrev)) {
+    // The step straddles the edge of F's domain — a no-default piecewise like
+    // {0 < x < 2: sqrt(x)} is NaN outside its conditions. Close in on the edge
+    // from the defined side and test the crossing against that sample, or the
+    // surface within a step of the edge is lost ray by ray and a restricted
+    // surface ends in a ragged rim.
+    float tc = t, vc = v;
+    if (isnan(v) != isnan(vPrev)) {
+      bool entering = isnan(vPrev);
+      float a = entering ? t : tPrev, b = entering ? tPrev : t, va = entering ? v : vPrev;
+      for (int j = 0; j < ${EDGE_BISECT}; j++) {
+        float m = 0.5 * (a + b);
+        float vm = F(ro + rd * m);
+        if (isnan(vm)) { b = m; } else { a = m; va = vm; }
+      }
+      if (entering) { tPrev = a; vPrev = va; } else { tc = a; vc = va; }
+    }
+    bool finite = !isnan(vc) && !isinf(vc) && !isnan(vPrev) && !isinf(vPrev);
+    if (finite && sign(vc) != sign(vPrev)) {
       // Bisect to the crossing.
-      float a = tPrev, b = t, va = vPrev;
+      float a = tPrev, b = tc, va = vPrev;
       for (int j = 0; j < ${BISECT}; j++) {
         float m = 0.5 * (a + b);
         float vm = F(ro + rd * m);
@@ -161,6 +179,7 @@ void main() {
       break;
     }
     // |dF/dt| from the secant; a flat or non-finite stretch steps at dtMax.
+    finite = finite && !isnan(v) && !isinf(v);
     float slope = finite ? abs(v - vPrev) / max(t - tPrev, 1e-20) : 0.0;
     dt = clamp(slope > 0.0 ? ${SAFETY} * abs(v) / slope : dtMax, dtMin, dtMax);
     tPrev = t;

@@ -346,3 +346,97 @@ describe('discrete distributions through analyze()', () => {
     expect(a.rows[2].dist).toBe('density');
   });
 });
+
+describe('revolve(f) through analyze()', () => {
+  const plot = (texts: string[], at = texts.length - 1) => {
+    const row = analyze(texts).rows[at];
+    expect(row.error).toBeUndefined();
+    return row.cls!.plot;
+  };
+
+  it('is exactly the hand-written implicit surface: same field, same gradient, so the same shader', () => {
+    expect(plot(['revolve(sqrt(x))'])).toEqual(plot(['y^2 + z^2 = sqrt(x)^2']));
+    expect(plot(['revolve(sin(x) + 2)'])).toEqual(plot(['y^2 + z^2 = (sin(x) + 2)^2']));
+    expect(plot(['revolve(y^2, y)'])).toEqual(plot(['x^2 + z^2 = (y^2)^2']));
+    expect(plot(['revolve(1 + z/2, z)'])).toEqual(plot(['x^2 + y^2 = (1 + z/2)^2']));
+    expect(plot(['revolve(2)'])).toEqual(plot(['y^2 + z^2 = 2^2'])); // no axis variable: a cylinder
+    const a = analyze(['revolve(sqrt(x))']).rows[0];
+    expect(a.cls).toMatchObject({ plot: { type: 'implicit3d' }, needs3D: true, animated: false });
+    expect((a.cls!.plot as { grad?: unknown }).grad).toBeDefined();
+  });
+
+  it('takes the profile as an expression, a call, or a function by name', () => {
+    const want = plot(['y^2 + z^2 = (x^3 - x)^2']);
+    expect(plot(['f(x) = x^3 - x', 'revolve(f)'])).toEqual(want);
+    expect(plot(['f(x) = x^3 - x', 'revolve(f(x))'])).toEqual(want);
+    expect(plot(['f(q) = q^3 - q', 'revolve(f)'])).toEqual(want); // whatever the parameter is called
+    expect(plot(['f(x) = x^3 - x', 'revolve(f, y)'])).toEqual(plot(['x^2 + z^2 = (y^3 - y)^2']));
+    expect(plot(['f(x) = x^3 - x', 'revolve(f(y), y)'])).toEqual(plot(['x^2 + z^2 = (y^3 - y)^2']));
+  });
+
+  it('keeps sliders as uniforms and t as animation', () => {
+    const row = analyze(['a = 1', 'revolve(a sin(x) + 2 + sin(t))']).rows[1];
+    expect(row.cls).toMatchObject({ plot: { type: 'implicit3d' }, params: ['a'], animated: true });
+    expect((row.cls!.plot as { field: string }).field).toContain('u_a');
+  });
+
+  it('a no-default piecewise profile bounds the solid: the field is NaN outside it', () => {
+    const row = analyze(['revolve({0 < x < 2: sqrt(x)})']).rows[0];
+    expect(row.error).toBeUndefined();
+    expect((row.cls!.plot as { field: string }).field).toContain('EQ_NAN');
+    // The row's expression is the surface itself, so the CPU agrees.
+    const e = row.expr as { kind: 'eq'; l: never; r: never };
+    expect(e.kind).toBe('eq');
+    const residual = (x: number) => evaluate({ kind: 'bin', op: '-', a: e.l, b: e.r }, { x, y: 1, z: 0 });
+    expect(residual(1)).toBeCloseTo(0);
+    expect(residual(-1)).toBeNaN();
+    expect(residual(3)).toBeNaN();
+  });
+
+  it('stays shadowable by a document that already uses the name', () => {
+    expect(out(['revolve = 3', 'revolve(x)'])[1][0]).toBe('implicit2d'); // the product 3x
+    expect(out(['revolve = 3', '2 revolve'])[1]).toEqual(['value', '= 6']);
+    const fn = analyze(['revolve(x) = 2x', 'y = revolve(x) + 1', 'revolve(4)']);
+    expect(fn.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
+    expect(fn.rows[1].cls!.plot.type).toBe('implicit2d');
+    expect(fn.rows[2].info).toBe('= 8');
+  });
+
+  it('refuses what it cannot revolve, truthfully', () => {
+    const err = (texts: string[]) => analyze(texts).rows[texts.length - 1].error;
+    expect(err(['revolve(x + y)'])).toBe('revolve(f) takes an expression in x only.');
+    expect(err(['revolve(x z)'])).toBe('revolve(f) takes an expression in x only.');
+    expect(err(['revolve(u)'])).toBe('revolve(f) takes an expression in x only.');
+    expect(err(['revolve(x, y)'])).toBe('revolve(f, y) takes an expression in y only.');
+    expect(err(['h(a) = a + y', 'revolve(h)'])).toBe('revolve(f) takes an expression in x only.');
+    expect(err(['revolve(x, 2)'])).toBe('The revolve axis must be x, y, or z: revolve(y^2, y).');
+    expect(err(['a = 1', 'revolve(x, a)'])).toBe('The revolve axis must be x, y, or z: revolve(y^2, y).');
+    expect(err(['revolve(x, w)'])).toBe('The revolve axis must be x, y, or z: revolve(y^2, y).');
+    expect(err(['revolve(x, y, z)'])).toMatch(/^revolve takes a profile and an optional axis/);
+    expect(err(['revolve(i x)'])).toMatch(/complex values cannot be revolved/);
+    expect(err(['revolve(w)'])).toMatch(/complex values cannot be revolved/);
+    expect(err(['revolve([1, 2])'])).toMatch(/^revolve of a list is not supported yet/);
+    expect(err(['L = [1, 2]', 'revolve(L x)'])).toMatch(/^revolve of a list is not supported yet/);
+    expect(err(['L = [1, 2]', 'revolve(L)'])).toMatch(/^revolve of a list is not supported yet/);
+    expect(err(['revolve(x = 1)'])).toMatch(/single real expression in x/);
+    expect(err(['revolve(x < 1, y)'])).toMatch(/single real expression in y/);
+    expect(err(['A = (1, 2)', 'revolve(A)'])).toBe('revolve is not defined for points.');
+    expect(err(['g(x, y) = x y', 'revolve(g)'])).toBe('revolve(g) needs a function of one variable; g takes 2.');
+    expect(err(['revolve(q)'])).toMatch(/^Unknown variable: q/);
+  });
+
+  it('must be the whole row', () => {
+    const err = (texts: string[]) => analyze(texts).rows[texts.length - 1].error;
+    for (const t of ['2 revolve(x)', 'y = revolve(x)', 'revolve(revolve(x))', 'revolve(x) + 1', '(revolve(x), 1)', 'revolve(iter(z^2 + x))']) {
+      expect(err([t]), t).toMatch(/\(…\) must be the whole expression\.$/);
+    }
+    expect(err(['s = revolve(x)'])).toBe('revolve(…) must be a whole row, not part of a definition.');
+    expect(err(['s(x) = 2 revolve(x)'])).toBe('revolve(…) must be a whole row, not part of a definition.');
+  });
+
+  it('never reads a user name through a prototype', () => {
+    const err = (texts: string[]) => analyze(texts).rows[texts.length - 1].error;
+    expect(err(['revolve(constructor)'])).toMatch(/^Unknown variable: constructor/);
+    expect(err(['revolve(x, toString)'])).toBe('The revolve axis must be x, y, or z: revolve(y^2, y).');
+  });
+});

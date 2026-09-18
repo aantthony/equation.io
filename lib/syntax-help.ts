@@ -48,6 +48,7 @@ const signatures: Record<string, [string, string]> = {
   grad: ['grad(f)', 'Gradient (∂f/∂x, ∂f/∂y), plotted as a vector field'],
   trail: ['trail(point)', 'Draw a moving point’s path'],
   tube: ['tube((x(u), y(u), z(u)))', 'Tube along a parametric space curve'],
+  revolve: ['revolve(f(x))', 'Surface of revolution of y = f(x) about the x-axis; revolve(f(y), y) about the y-axis'],
   open: ['data = open("file.csv")', 'Use a CSV file dropped onto the graph'],
   ...Object.fromEntries(DIST_FAMILIES.map(f => [f.name, [`X ~ ${distUsage(f)}`, `Declare ${f.help}`]])),
   P: ['P(X < b)', 'Probability of a random-variable condition, joint ones included: P(X > Y). Over discrete variables < and <= differ, P(X = k) is a stem’s height, and P(X = Y) counts the ties'],

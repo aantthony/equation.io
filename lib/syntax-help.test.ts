@@ -23,6 +23,10 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('polyl', 5, defs()).suggestions.map(s => s.signature)).toEqual(['polyline(A, B, C, …)']);
     expect(syntaxHelp('vector(', 7, defs()).hint).toContain('from the origin to V');
   });
+  it('describes revolve', () => {
+    expect(syntaxHelp('revo', 4, defs()).suggestions.map(s => s.signature)).toEqual(['revolve(f(x))']);
+    expect(syntaxHelp('revolve(', 8, defs()).hint).toContain('about the x-axis');
+  });
   it('describes the distance and angle measurements', () => {
     expect(syntaxHelp('dista', 5, defs()).suggestions.map(s => s.signature)).toEqual(['distance(A, B)']);
     expect(syntaxHelp('angle(', 6, defs()).hint).toContain('angle(A, B, C) or angle(U, V)');

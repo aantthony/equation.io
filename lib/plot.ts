@@ -17,7 +17,7 @@ import { complexParts } from './complex-parts.ts';
 import { SPECIAL_FORMS, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
-import { ANGLE_FN, builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
+import { ANGLE_FN, REVOLVE_AXES, builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { toGLSL } from './glsl.ts';
@@ -186,7 +186,7 @@ const FIGURES: Partial<Record<string, { closed: boolean; what: string }>> = {
 } satisfies Record<FigureName, unknown>;
 
 /** Calls that describe the whole plot and cannot appear as a subterm. */
-const WHOLE_EXPR_FORMS = new Set([...SPECIAL_FORMS, 'tube', '[trail]']);
+const WHOLE_EXPR_FORMS = new Set([...SPECIAL_FORMS, 'tube', 'revolve', '[trail]']);
 
 /**
  * tube(curve[, radius]): sweep a 3D parametric curve as a lit tube.
@@ -210,6 +210,51 @@ function matchTube(e: Expr): { inner: Expr; radius: Expr } | null {
     radius = r;
   }
   return { inner: { kind: 'vec', items: e.args.slice(0, 3) }, radius };
+}
+
+const REVOLVE_USAGE = 'revolve takes a profile and an optional axis: revolve(sqrt(x)), or revolve(y^2, y) about the y-axis.';
+
+/**
+ * revolve(f[, axis]): the surface swept by turning the curve y = f(x) about
+ * the x-axis — or a profile in y or z about that axis. It is nothing but the
+ * implicit surface y^2 + z^2 = f(x)^2, so the raymarcher and the symbolic
+ * gradient render it as they would the hand-written equation. Squaring
+ * revolves |f|, which is the same surface: where f is negative the curve has
+ * merely swung to the far side of the axis. A no-default piecewise f is NaN
+ * outside its conditions, and no surface is drawn there.
+ */
+function matchRevolve(e: Expr): Expr | null {
+  if (e.kind !== 'call' || e.name !== 'revolve') return null;
+  if (e.args.length !== 1 && e.args.length !== 2) throw new Error(REVOLVE_USAGE);
+  const [f, ax] = e.args;
+  if (ax && !(ax.kind === 'var' && REVOLVE_AXES.has(ax.name))) {
+    throw new Error('The revolve axis must be x, y, or z: revolve(y^2, y).');
+  }
+  const axis = ax ? (ax as Expr & { kind: 'var' }).name : 'x';
+  const form = ax ? `revolve(f, ${axis})` : 'revolve(f)';
+  if (f.kind === 'list' || f.kind === 'data') {
+    throw new Error('revolve of a list is not supported yet — write one revolve(…) row per profile.');
+  }
+  if (f.kind === 'vec' || f.kind === 'eq' || f.kind === 'ineq' || f.kind === 'str' || f.kind === 'text') {
+    throw new Error(`${form} takes a single real expression in ${axis}, like revolve(sqrt(x)).`);
+  }
+  // The profile was split off before the root-only check in classify, so a
+  // whole-expression form hiding inside it needs its own rejection.
+  const nested = nestedSpecial(f);
+  if (nested) throw new Error(`${nested === '[trail]' ? 'trail' : nested}(…) must be the whole expression.`);
+  if (usesComplex(f)) throw new Error(`${form} takes a real expression in ${axis}; complex values cannot be revolved.`);
+  for (const v of freeVars(f)) {
+    if (v !== axis && (SPACE_VARS.has(v) || PARAM_VARS.has(v))) {
+      throw new Error(`${form} takes an expression in ${axis} only.`);
+    }
+  }
+  const sq = (a: Expr): Expr => ({ kind: 'bin', op: '^', a, b: { kind: 'num', value: 2 } });
+  const [p, q] = [...REVOLVE_AXES].filter(v => v !== axis);
+  return {
+    kind: 'eq',
+    l: { kind: 'bin', op: '+', a: sq({ kind: 'var', name: p }), b: sq({ kind: 'var', name: q }) },
+    r: sq(f),
+  };
 }
 
 /** First special-form call at any position other than the root itself. */
@@ -285,6 +330,7 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
   if (ode) expr = ode;
   const tube = matchTube(expr);
   if (tube) expr = tube.inner;
+  expr = matchRevolve(expr) ?? expr;
   const special = expr.kind === 'call' && SPECIAL_FORMS.has(expr.name) ? expr.name : undefined;
   const nested = nestedSpecial(expr, true);
   if (nested) throw new Error(`${nested === '[trail]' ? 'trail' : nested}(…) must be the whole expression.`);
@@ -601,7 +647,10 @@ export function classifyRow(
   row: ResolvedRow, lower: (e: Expr) => Expr, known: ReadonlySet<string>,
   fields: Record<string, Expr> = {}, timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified; parsed: Expr } {
-  const parsed = lower(row.expr);
+  // revolve(…) desugars here as well as in classify, so the expression handed
+  // back is the surface the row draws rather than a call nothing evaluates.
+  const lowered = lower(row.expr);
+  const parsed = matchRevolve(lowered) ?? lowered;
   const cls = classify(parsed, known, fields, timeDerivative);
   if (cls.plot.type === 'value' && row.integral) {
     const shade = lowerShade(row.integral, lower, known);

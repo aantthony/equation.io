@@ -294,6 +294,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Parametric surface: three components in u and v —
   `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`.
 - 3D surface: any equation in x, y, z.
+- Surface of revolution: `revolve(f)` turns the curve y = f(x) about the
+  x-axis — `revolve(sqrt(x))`, `revolve(sin(x) + 2)`, or `revolve(f)` with
+  `f(x) = …` defined above. A second argument names another axis:
+  `revolve(y^2, y)` revolves a profile in y about the y-axis (`z` likewise).
+  The profile may use only its axis variable, plus sliders and t. It is
+  exactly the implicit surface `y^2 + z^2 = f(x)^2`, so a negative f draws
+  the same surface as |f|, and a piecewise f with no default bounds the
+  solid: `revolve({0 < x < 3: sqrt(x)})`. It must be the whole row.
 - Random variable: `X ~ Normal(mean, sd)` — also `Uniform(lo, hi)` and
   `Exponential(rate)`, with short aliases `N`, `U`, `Exp`; a bare name means
   the standard parameters (`X ~ N` is Normal(0, 1)). The row plots the exact

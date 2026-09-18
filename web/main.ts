@@ -3087,6 +3087,7 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['sphere', 'x^2 + y^2 + z^2 = 9'],
     ['saddle', 'z = (x^2 - y^2)/4'],
     ['gyroid', 'sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x) = 0'],
+    ['vase (revolve)', 'a = 1; revolve({-3 < y < 3: 1.5 + a sin(y) / 2}, y)'],
   ]],
   ['parametric 3d', [
     ['helix', '(2cos(6pi u), 2sin(6pi u), 4u - 2)'],
