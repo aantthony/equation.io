@@ -39,6 +39,33 @@ describe('scanDefinition', () => {
   });
 });
 
+describe('grad', () => {
+  const comps = (s: string, env: Record<string, number>) => {
+    const e = resolve(s);
+    if (e.kind !== 'vec') throw new Error('not a tuple');
+    return e.items.map(c => evaluate(c, env));
+  };
+
+  it('expands to the tuple of partial derivatives', () => {
+    expect(comps('grad(x^2 + y^2)', { x: 3, y: -2 })).toEqual([6, -4]);
+    expect(comps('∇(x y)', { x: 3, y: 5 })).toEqual([5, 3]);
+    expect(comps('grad(x y z)', { x: 2, y: 3, z: 4 })).toEqual([12, 8, 6]);
+  });
+
+  it('plots as a vector field and feeds point helpers', () => {
+    expect(classify(resolve('grad(x^2 + y^2)')).plot.type).toBe('vfield2d');
+    expect(() => classify(resolve('grad(x y z)'))).toThrow(/2D only/);
+    const f = { params: ['x', 'y'], body: parseExpr('sin(x) y') };
+    const e = resolveExpr(parseExpr('grad(f(x, y))', new Set(['f'])), n => (n === 'f' ? f : undefined));
+    expect(classify(e).plot.type).toBe('vfield2d');
+  });
+
+  it('rejects non-scalar or missing arguments', () => {
+    expect(() => resolve('grad([x, y])')).toThrow(/scalar/);
+    expect(() => resolve('grad(x, y)')).toThrow(/one expression/);
+  });
+});
+
 describe('d/dx derivative syntax', () => {
   const at = (s: string, env: Record<string, number>) => evaluate(resolve(s), env);
 

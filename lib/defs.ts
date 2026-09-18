@@ -12,6 +12,8 @@
  * - `f(x) = x^3 - a x` defines a function; calls are inlined symbolically.
  * - `d/dx (…)` (also `d^2/dx^2`, any single-letter variable) differentiates
  *   symbolically at resolve time via diff().
+ * - `grad(f)` (also ∇) expands to the tuple (∂f/∂x, ∂f/∂y) the same way, so
+ *   it plots as a vector field.
  * - `sum(n=1..N, …)` / `prod(…)` (also Σ/Π, and `sum[n=1..N] …` binding the
  *   trailing product like d/dx) expand symbolically at resolve time, so the
  *   bounds must be numbers or already-known constants.
@@ -1138,6 +1140,17 @@ function rx(e: Expr, ctx: Ctx): Expr {
           throw new Error(`${e.name} takes ${fn.params.length} argument${fn.params.length === 1 ? '' : 's'}.`);
         }
         return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
+      }
+      if (e.name === 'grad') {
+        if (args.length !== 1) throw new Error('grad takes one expression: grad(x^2 + y^2).');
+        const f = args[0];
+        if (f.kind === 'vec' || f.kind === 'list' || f.kind === 'eq' || f.kind === 'ineq') {
+          throw new Error('grad needs a scalar expression in x and y, like grad(x^2 + y^2).');
+        }
+        // ∇f as a tuple, so it plots as a vector field and feeds dot(…) like
+        // any other; z joins only when f uses it.
+        const vars = freeVars(f).has('z') ? ['x', 'y', 'z'] : ['x', 'y'];
+        return { kind: 'vec', items: vars.map(v => applyDiff(f, v, 1, ctx.opts.isList)) };
       }
       if (ctx.opts.inDefinition && e.name === 'trail') {
         throw new Error('trail(…) must be a whole row, not part of a definition.');

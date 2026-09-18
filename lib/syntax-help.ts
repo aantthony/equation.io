@@ -39,6 +39,7 @@ const signatures: Record<string, [string, string]> = {
   domain: ['domain(f(w))', 'Complex domain coloring'],
   conformal: ['conformal(f(w))', 'Image of a complex coordinate grid'],
   iter: ['iter(w^2 + c)', 'Complex escape-time iteration'],
+  grad: ['grad(f)', 'Gradient (∂f/∂x, ∂f/∂y), plotted as a vector field'],
   trail: ['trail(point)', 'Draw a moving point’s path'],
   tube: ['tube((x(u), y(u), z(u)))', 'Tube along a parametric space curve'],
   open: ['data = open("file.csv")', 'Use a CSV file dropped onto the graph'],
