@@ -80,8 +80,11 @@ float depthOf(vec3 p) {
 
 const STEPS = 220;
 const BISECT = 24;
-/** Bisections onto the edge of a field's domain (where it turns NaN). */
-const EDGE_BISECT = 12;
+/** March samples spent bisecting onto an edge of a field's domain (where it
+ *  turns NaN). */
+const EDGE_BISECT = 6;
+/** Domain edges refined per ray: into the domain and out of it again. */
+const EDGE_BUDGET = 2;
 /** Coarsest step, as a fraction of the ray's span through the box. */
 const MIN_SAMPLES = 48;
 /** Finest step: STEPS × FINEST of them cover the span, so a ray that grinds
@@ -145,30 +148,46 @@ void main() {
   float vPrev = F(ro + rd * t0);
   bool hit = false;
   float tHit = 0.0;
+  // Domain edges. A no-default piecewise like {0 < x < 2: sqrt(x)} is NaN
+  // outside its conditions, and a step that straddles that edge cannot be
+  // tested for a crossing — so the surface within a step of the edge would be
+  // lost ray by ray, and a restricted surface end in a ragged rim. Instead the
+  // next EDGE_BISECT samples bisect onto the edge: leaving the domain, each
+  // defined midpoint is an ordinary (short) step forward; entering it, the
+  // march resumes from the first defined point. They are samples of this same
+  // loop, so the common ray pays nothing, and they are budgeted per ray: a
+  // field whose domain is shredded (sqrt(sin(20 x y))) flips on most steps,
+  // and past the budget a straddling step is skipped as it always was.
+  int edges = 0, refine = 0;
+  bool entering = false;
+  float tEdge = 0.0, tIn = 0.0, vIn = 0.0;
 
   for (int i = 0; i < ${STEPS}; i++) {
-    float t = min(tPrev + dt, t1);
+    bool refining = refine > 0;
+    float t = refining ? 0.5 * (tEdge + (entering ? tIn : tPrev)) : min(tPrev + dt, t1);
     float v = F(ro + rd * t);
-    // The step straddles the edge of F's domain — a no-default piecewise like
-    // {0 < x < 2: sqrt(x)} is NaN outside its conditions. Close in on the edge
-    // from the defined side and test the crossing against that sample, or the
-    // surface within a step of the edge is lost ray by ray and a restricted
-    // surface ends in a ragged rim.
-    float tc = t, vc = v;
-    if (isnan(v) != isnan(vPrev)) {
-      bool entering = isnan(vPrev);
-      float a = entering ? t : tPrev, b = entering ? tPrev : t, va = entering ? v : vPrev;
-      for (int j = 0; j < ${EDGE_BISECT}; j++) {
-        float m = 0.5 * (a + b);
-        float vm = F(ro + rd * m);
-        if (isnan(vm)) { b = m; } else { a = m; va = vm; }
+    bool undef = isnan(v);
+    if (refining) {
+      refine--;
+      if (undef) tEdge = t;
+      else if (entering) { tIn = t; vIn = v; }
+      if (entering || undef) {
+        if (refine == 0) {
+          if (entering) { tPrev = tIn; vPrev = vIn; dt = dtMin; } else { tPrev = tEdge; vPrev = v; dt = dtMax; }
+        }
+        continue;
       }
-      if (entering) { tPrev = a; vPrev = va; } else { tc = a; vc = va; }
+    } else if (undef != isnan(vPrev) && edges < ${EDGE_BUDGET}) {
+      edges++;
+      refine = ${EDGE_BISECT};
+      entering = !undef;
+      if (entering) { tEdge = tPrev; tIn = t; vIn = v; } else { tEdge = t; }
+      continue;
     }
-    bool finite = !isnan(vc) && !isinf(vc) && !isnan(vPrev) && !isinf(vPrev);
-    if (finite && sign(vc) != sign(vPrev)) {
+    bool finite = !isnan(v) && !isinf(v) && !isnan(vPrev) && !isinf(vPrev);
+    if (finite && sign(v) != sign(vPrev)) {
       // Bisect to the crossing.
-      float a = tPrev, b = tc, va = vPrev;
+      float a = tPrev, b = t, va = vPrev;
       for (int j = 0; j < ${BISECT}; j++) {
         float m = 0.5 * (a + b);
         float vm = F(ro + rd * m);
@@ -179,11 +198,11 @@ void main() {
       break;
     }
     // |dF/dt| from the secant; a flat or non-finite stretch steps at dtMax.
-    finite = finite && !isnan(v) && !isinf(v);
     float slope = finite ? abs(v - vPrev) / max(t - tPrev, 1e-20) : 0.0;
     dt = clamp(slope > 0.0 ? ${SAFETY} * abs(v) / slope : dtMax, dtMin, dtMax);
     tPrev = t;
     vPrev = v;
+    if (refining && refine == 0) { tPrev = tEdge; vPrev = EQ_NAN; dt = dtMax; }
     if (t >= t1) break;
   }
   if (!hit) discard;

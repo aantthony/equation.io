@@ -14,10 +14,10 @@
  */
 import { coordinateRow, lowerCoordinateFlow } from './coordinate.ts';
 import { complexParts } from './complex-parts.ts';
-import { SPECIAL_FORMS, compileTyped, usesComplex } from './complex.ts';
+import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
-import { ANGLE_FN, REVOLVE_AXES, builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
+import { ANGLE_FN, REVOLVE_AXES, builtinFn, revolveAxis, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { toGLSL } from './glsl.ts';
@@ -186,7 +186,7 @@ const FIGURES: Partial<Record<string, { closed: boolean; what: string }>> = {
 } satisfies Record<FigureName, unknown>;
 
 /** Calls that describe the whole plot and cannot appear as a subterm. */
-const WHOLE_EXPR_FORMS = new Set([...SPECIAL_FORMS, 'tube', 'revolve', '[trail]']);
+const WHOLE_EXPR_FORMS = new Set([...WHOLE_EXPR_NAMES].map(n => (n === 'trail' ? '[trail]' : n))); // trail arrives lowered
 
 /**
  * tube(curve[, radius]): sweep a 3D parametric curve as a lit tube.
@@ -227,10 +227,7 @@ function matchRevolve(e: Expr): Expr | null {
   if (e.kind !== 'call' || e.name !== 'revolve') return null;
   if (e.args.length !== 1 && e.args.length !== 2) throw new Error(REVOLVE_USAGE);
   const [f, ax] = e.args;
-  if (ax && !(ax.kind === 'var' && REVOLVE_AXES.has(ax.name))) {
-    throw new Error('The revolve axis must be x, y, or z: revolve(y^2, y).');
-  }
-  const axis = ax ? (ax as Expr & { kind: 'var' }).name : 'x';
+  const axis = revolveAxis(ax);
   const form = ax ? `revolve(f, ${axis})` : 'revolve(f)';
   if (f.kind === 'list' || f.kind === 'data') {
     throw new Error('revolve of a list is not supported yet — write one revolve(…) row per profile.');
@@ -324,13 +321,23 @@ export function valueReadout(value: number): string {
 }
 
 export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), fields: Record<string, Expr> = {}, timeDerivative?: (e: Expr) => Expr): Classified {
+  return classifyLowered(expr, defined, fields, timeDerivative).cls;
+}
+
+/** classify, also handing back the equation a revolve(…) row desugared to
+ *  (`surface`) — the one place that desugaring happens, after coordinate
+ *  fields have expanded, so a field hiding y or z is seen for what it is. */
+function classifyLowered(
+  expr: Expr, defined: ReadonlySet<string>, fields: Record<string, Expr>, timeDerivative?: (e: Expr) => Expr,
+): { cls: Classified; surface?: Expr } {
   const coordinate = coordinateRow(expr, fields);
   expr = lowerCoordinateFlow(expr, fields, timeDerivative);
   const ode = matchODE(expr);
   if (ode) expr = ode;
   const tube = matchTube(expr);
   if (tube) expr = tube.inner;
-  expr = matchRevolve(expr) ?? expr;
+  const surface = matchRevolve(expr) ?? undefined;
+  if (surface) expr = surface;
   const special = expr.kind === 'call' && SPECIAL_FORMS.has(expr.name) ? expr.name : undefined;
   const nested = nestedSpecial(expr, true);
   if (nested) throw new Error(`${nested === '[trail]' ? 'trail' : nested}(…) must be the whole expression.`);
@@ -383,7 +390,7 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
     throw new Error('Complex expressions plot in 2D only (x, y, w).');
   }
 
-  const done = (plot: Plot): Classified => ({
+  const done = (plot: Plot): { cls: Classified; surface?: Expr } => ({ surface, cls: {
     plot,
     // Vector-field streamlines drift continuously, so they always animate.
     animated: animated || plot.type === 'vfield2d',
@@ -391,7 +398,7 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
       || ((plot.type === 'point' || plot.type === 'trail' || plot.type === 'pcurve' || plot.type === 'plist'
         || plot.type === 'dscatter' || plot.type === 'system') && plot.dim === 3),
     params,
-  });
+  } });
 
   if (expr.kind === 'call' && expr.name === '[trail]') {
     if (hasSpace || hasParam || usesComplex(expr) || expr.args.some(c => c.kind === 'data' || c.kind === 'list')) {
@@ -647,11 +654,11 @@ export function classifyRow(
   row: ResolvedRow, lower: (e: Expr) => Expr, known: ReadonlySet<string>,
   fields: Record<string, Expr> = {}, timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified; parsed: Expr } {
-  // revolve(…) desugars here as well as in classify, so the expression handed
-  // back is the surface the row draws rather than a call nothing evaluates.
   const lowered = lower(row.expr);
-  const parsed = matchRevolve(lowered) ?? lowered;
-  const cls = classify(parsed, known, fields, timeDerivative);
+  // A revolve(…) row hands back the surface it draws, not a call nothing
+  // evaluates.
+  const { cls, surface } = classifyLowered(lowered, known, fields, timeDerivative);
+  const parsed = surface ?? lowered;
   if (cls.plot.type === 'value' && row.integral) {
     const shade = lowerShade(row.integral, lower, known);
     if (shade) cls.plot.shade = shade;

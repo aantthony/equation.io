@@ -86,8 +86,16 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'revolve',
 ]);
 
-/** The axes revolve(f, axis) turns a profile about; x when none is named. */
+/** The axes revolve(f, axis) turns a profile about. */
 export const REVOLVE_AXES: ReadonlySet<string> = new Set(['x', 'y', 'z']);
+
+/** The axis revolve's optional second argument names: x when there is none,
+ *  and an error for anything that is not x, y or z itself. */
+export function revolveAxis(ax: Expr | undefined): string {
+  if (!ax) return 'x';
+  if (ax.kind === 'var' && REVOLVE_AXES.has(ax.name)) return ax.name;
+  throw new Error('The revolve axis must be x, y, or z: revolve(y^2, y).');
+}
 
 /**
  * Flatten a (possibly chained) inequality into its comparisons; comparison k

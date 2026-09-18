@@ -200,6 +200,12 @@ float eq_angle_rate(float v0, float v1, float w0, float w1) {
   vec2 a = vec2(v0, v1) / s;
   return (a.x * (w1 / s) - a.y * (w0 / s)) / dot(a, a);
 }
+float eq_sq(float a) { return a * a; }
+float eq_ipow(float a, int n) {
+  float r = a;
+  for (int k = 1; k < n; k++) r *= a;
+  return r;
+}
 float eq_pow(float a, float b) {
   // Support negative bases via the "real odd root" convention, e.g.
   // (-8)^(1/3) = -2, matching graphing calculators like Desmos. For a < 0,
@@ -288,8 +294,14 @@ export function toGLSL(e: Expr): string {
       const b = toGLSL(e.b);
       if (e.op === '^') {
         if (e.b.kind === 'num' && Number.isInteger(e.b.value) && e.b.value >= 1 && e.b.value <= 8) {
-          // Small integer powers: expand to products (fast, exact for negative bases).
-          return `(${Array.from({ length: e.b.value }, () => a).join('*')})`;
+          // Small integer powers: expand to products (fast, exact for negative
+          // bases). Only a name or a number is repeated, though: a compound
+          // base goes through a helper, so (Σ 40 terms)^2 evaluates — and
+          // spells out — its base once, not once per factor.
+          if (e.a.kind === 'var' || e.a.kind === 'num' || e.b.value === 1) {
+            return `(${Array.from({ length: e.b.value }, () => a).join('*')})`;
+          }
+          return e.b.value === 2 ? `eq_sq(${a})` : `eq_ipow(${a}, ${e.b.value})`;
         }
         return `eq_pow(${a}, ${b})`;
       }

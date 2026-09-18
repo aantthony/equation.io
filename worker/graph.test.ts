@@ -439,4 +439,58 @@ describe('revolve(f) through analyze()', () => {
     expect(err(['revolve(constructor)'])).toMatch(/^Unknown variable: constructor/);
     expect(err(['revolve(x, toString)'])).toBe('The revolve axis must be x, y, or z: revolve(y^2, y).');
   });
+
+  it('checks the profile after coordinate fields expand, at one stage for every entry point', () => {
+    const err = (texts: string[]) => analyze(texts).rows[texts.length - 1].error;
+    const polar = ['r = sqrt(x^2 + y^2)'];
+    expect(err([...polar, 'revolve(r)'])).toBe('revolve(f) takes an expression in x only.');
+    expect(err([...polar, 'revolve(x r)'])).toBe('revolve(f) takes an expression in x only.');
+    expect(err([...polar, 'revolve(r, z)'])).toBe('revolve(f, z) takes an expression in z only.');
+    // A field of the axis variable alone is an honest profile.
+    expect(plot(['s = x^2 + 1', 'revolve(s)'])).toEqual(plot(['y^2 + z^2 = (x^2 + 1)^2']));
+  });
+
+  it('names a function used without parentheses inside the profile', () => {
+    const err = (texts: string[]) => analyze(texts).rows[texts.length - 1].error;
+    for (const t of ['revolve(-f)', 'revolve(2f)', 'revolve(f + 1, y)', 'revolve(sqrt(f))']) {
+      expect(err(['f(x) = x', t]), t).toBe('f is a function — write it with parentheses, e.g. f(x).');
+    }
+    expect(err(['f(x) = x', 'revolve(2f(x))'])).toBeUndefined();
+  });
+
+  it('blames the axis, not the profile, for a bad axis of any kind', () => {
+    const err = (texts: string[]) => analyze(texts).rows[texts.length - 1].error;
+    const AXIS = 'The revolve axis must be x, y, or z: revolve(y^2, y).';
+    expect(err(['L = [1, 2]', 'revolve(x, L)'])).toBe(AXIS);
+    expect(err(['revolve(x, [1, 2])'])).toBe(AXIS);
+    expect(err(['f(x) = x', 'revolve(f, 2)'])).toBe(AXIS);
+    expect(err(['f(x) = x', 'L = [1, 2]', 'revolve(f, L)'])).toBe(AXIS);
+    expect(err(['g(x, y) = x y', 'revolve(g, 2)'])).toBe(AXIS);
+  });
+
+  it('emits a big profile once in the field, as the hand-written square does', () => {
+    const big = 'sum[n=1..40] sin(n x)/n';
+    const field = (plot([`revolve(${big})`]) as { field: string }).field;
+    expect(plot([`revolve(${big})`])).toEqual(plot([`y^2 + z^2 = (${big})^2`]));
+    expect(field.match(/sin\(\(40\.0 \* x\)\)/g)).toHaveLength(1);
+  });
+});
+
+describe('whole-row forms over a random variable', () => {
+  it('are refused by name instead of becoming a derived density', () => {
+    const forms = ['revolve(X)', 'tube(X, X, X)', 'tube((X, 1, 2))', 'domain(X)', 'conformal(X)', 'iter(X)', 'trail((X, 1))',
+      'segment((0, 0), (X, 1))', 'polyline((0, 0), (X, 1), (2, 2))', 'vector((X, 1))', 'line((0, 0), (X, 1))',
+      'polygon((0, 0), (X, 1), (2, 0))', 'square((0, 0), (X, 1))', 'circle((0, 0), X)'];
+    for (const t of forms) {
+      const name = t.slice(0, t.indexOf('('));
+      const row = analyze(['X ~ Normal(0, 1)', t]).rows[1];
+      expect(row.error, t).toBe(`${name}(…) cannot take a random variable.`);
+      expect(row.cls, t).toBeUndefined();
+    }
+    // Nested too, and inside P and E.
+    expect(analyze(['X ~ Normal(0, 1)', '2 revolve(X)']).rows[1].error).toBe('revolve(…) cannot take a random variable.');
+    expect(analyze(['X ~ Normal(0, 1)', 'E(domain(X))']).rows[1].error).toBe('domain(…) cannot take a random variable.');
+    // Ordinary derived variables are untouched.
+    expect(analyze(['X ~ Normal(0, 1)', 'X^2 + 1']).rows[1].cls?.plot.type).toBe('density');
+  });
 });

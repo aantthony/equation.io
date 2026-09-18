@@ -24,7 +24,7 @@
  */
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, REVOLVE_AXES, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
+import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -1179,18 +1179,24 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (ctx.opts.inDefinition && (e.name === 'trail' || e.name === 'revolve')) {
         throw new Error(`${e.name}(…) must be a whole row, not part of a definition.`);
       }
-      if (e.name === 'revolve' && args[0]?.kind === 'var') {
+      if (e.name === 'revolve' && args.length >= 1 && args.length <= 2) {
         // revolve(f) names the profile by its function: f stands for f(x), or
         // f(y) / f(z) about the axis asked for. classify (lib/plot.ts) checks
         // the rest — it sees only the ordinary expression.
-        const profile = getFn(args[0].name);
-        if (profile) {
+        const [f, ax] = args;
+        const profile = f.kind === 'var' ? getFn(f.name) : undefined;
+        if (f.kind === 'var' && profile) {
+          const axis = revolveAxis(ax);
           if (profile.params.length !== 1) {
-            throw new Error(`revolve(${args[0].name}) needs a function of one variable; ${args[0].name} takes ${profile.params.length}.`);
+            throw new Error(`revolve(${f.name}) needs a function of one variable; ${f.name} takes ${profile.params.length}.`);
           }
-          const axis = args[1]?.kind === 'var' && REVOLVE_AXES.has(args[1].name) ? args[1].name : 'x';
           const body = substVars(profile.body, { [profile.params[0]]: { kind: 'var', name: axis } });
           return { kind: 'call', name: e.name, args: [body, ...args.slice(1)] };
+        }
+        // Only the bare name stands for its function; inside a larger profile
+        // (-f, 2f) it has to be called.
+        for (const v of freeVars(f)) {
+          if (getFn(v)) throw new Error(`${v} is a function — write it with parentheses, e.g. ${v}(x).`);
         }
       }
       return { kind: 'call', name: e.name, args };
