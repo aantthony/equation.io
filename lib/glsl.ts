@@ -5,7 +5,7 @@
  * zero set of F, which the renderers extract in a fragment shader.
  */
 import {
-  ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, type Expr, GAMMA_PDF_FN, ISPRIME_MAX, LANCZOS, T_PDF_FN,
+  ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, type Expr, GAMMA_PDF_FN, ISPRIME_MAX, LANCZOS, PMF_FNS, T_PDF_FN,
   WEIBULL_PDF_FN, ineqComparisons,
 } from './expr.ts';
 
@@ -296,6 +296,9 @@ export function toGLSL(e: Expr): string {
       return `(${a} ${e.op} ${b})`;
     }
     case 'call': {
+      // No float32 twin, on purpose: a pmf is nonzero only AT the integers, a
+      // set of measure zero no fragment ever lands on. Rows draw it as stems.
+      if (PMF_FNS.has(e.name)) throw new Error('A probability mass function is drawn as stems, not as a curve.');
       const name = FN_GLSL[e.name] ?? e.name;
       return `${name}(${e.args.map(toGLSL).join(', ')})`;
     }

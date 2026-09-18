@@ -62,6 +62,7 @@ Examples (paste-ready):
 - [Double pendulum](https://equation.io/#g%20%3D%209.8;L1%20%3D%201;L2%20%3D%201;m1%20%3D%201;m2%20%3D%201;M%20%3D%20%5B((m1%2Bm2)%20L1%2C%20m2%20L2%20cos(th_1%20-%20th_2))%2C%20(L1%20cos(th_1%20-%20th_2)%2C%20L2)%5D;f%20%3D%20(-m2%20L2%20om_2%5E2%20sin(th_1%20-%20th_2)%20-%20(m1%2Bm2)%20g%20sin(th_1)%2C%20L1%20om_1%5E2%20sin(th_1%20-%20th_2)%20-%20g%20sin(th_2));th'%20%3D%20om;om'%20%3D%20solve(M%2C%20f);th(0)%20%3D%20(2.5%2C%202.4);b1%20%3D%20(L1%20sin(th_1)%2C%20-L1%20cos(th_1));b2%20%3D%20b1%20%2B%20(L2%20sin(th_2)%2C%20-L2%20cos(th_2));segment((0%2C%200)%2C%20b1);segment(b1%2C%20b2);b1;b2): `M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]; f = (…); th' = om; om' = solve(M, f); th(0) = (2.5, 2.4); …` — the Lagrangian form M(θ)ω′ = f: th and om are 2-vector states with components th_1, th_2; solve() is Cramer's rule; segment()s between named bob points draw the linkage
 - [Orbit (vector gravity)](https://equation.io/#r'%20%3D%20vel;vel'%20%3D%20-9%20r%2F%7Cr%7C%5E3;r(0)%20%3D%20(2%2C%200);vel(0)%20%3D%20(0%2C%201.5);segment((0%2C%200)%2C%20r);r;(0%2C%200)): `r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); segment((0, 0), r); r; (0, 0)` — vector states with point arithmetic; the bare state name draws as a moving point
 - [Matrix phase portrait](https://equation.io/#a%20%3D%20-1;b%20%3D%20-1%2F4;A%20%3D%20%5B(0%2C%201)%2C%20(a%2C%20b)%5D;(x'%2C%20y')%20%3D%20A%20(x%2C%20y)): `a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y)` — a linear system as its literal matrix, sliders in the entries
+- [Poisson: strict versus non-strict](https://equation.io/#m%20%3D%204;X%20~%20Poisson(m);P(X%20%3C%203);P(X%20%3C%3D%203);P(X%20%3D%203)): `m = 4; X ~ Poisson(m); P(X < 3); P(X <= 3); P(X = 3)` — a discrete variable draws its pmf as stems; each P(…) row highlights exactly the stems it counts, so `<` stops at 2, `<=` takes the stem at 3, and `P(X = 3)` is that one stem
 - [Central limit theorem](https://equation.io/#X1%20~%20Uniform%280%2C%201%29;X2%20~%20Uniform%280%2C%201%29;X3%20~%20Uniform%280%2C%201%29;X4%20~%20Uniform%280%2C%201%29;S%20%3D%20X1%20%2B%20X2%20%2B%20X3%20%2B%20X4;Z%20~%20Normal%282%2C%20sqrt%281%2F3%29%29;P%28S%20%3E%203%29): `X1 ~ Uniform(0, 1); X2 ~ Uniform(0, 1); X3 ~ Uniform(0, 1); X4 ~ Uniform(0, 1); S = X1 + X2 + X3 + X4; Z ~ Normal(2, sqrt(1/3)); P(S > 3)` — the sum of four uniforms hugs the matching normal
 - [Conditional random variable](https://equation.io/#X%20~%20Normal%280%2C%201%29;Y%20%3D%20%7BX%20%3E%200%3A%20X%5E2%2C%201%7D;P%28Y%20%3E%200.5%29;P%28Y%20%3E%20X%29): `X ~ Normal(0, 1); Y = {X > 0: X^2, 1}; P(Y > 0.5); P(Y > X)` — a piecewise transform of X, with probabilities of derived and joint events
 
@@ -311,6 +312,38 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   parameter (`Gamma(shape, rate) needs shape > 0.`). Densities with a pole at
   the support edge (`Gamma` with shape < 1, `ChiSquared(1)`, `Beta` with
   a or b < 1, `Weibull` with shape < 1) draw and shade up to the pole.
+- Discrete random variable: `X ~ Binomial(n, p)`, `Poisson(mean)`,
+  `Geometric(p)`, `NegativeBinomial(r, p)`, `Bernoulli(p)`,
+  `DiscreteUniform(a, b)` (aliases `Binom`, `Pois`, `Geom`, `NegBin`;
+  case-insensitive, no bare standard form). The row draws the pmf as stems —
+  a dot at (k, P(X = k)) on a thin line from the axis — at the whole numbers
+  in view. Conventions, fixed: `Geometric(p)` is the TRIAL of the first
+  success, support 1, 2, 3, … (mean 1/p); `NegativeBinomial(r, p)` counts
+  FAILURES before the r-th success, support 0, 1, 2, … (mean r(1 − p)/p), and
+  r > 0 need not be whole — so `NegativeBinomial(1, p)` is `Geometric(p)`
+  shifted down by 1; `DiscreteUniform(a, b)` includes both whole-number ends,
+  a ≤ b; `Bernoulli(p)` is `Binomial(1, p)`. Valid parameters: `n` a whole
+  number ≥ 0; 0 ≤ p ≤ 1 for Binomial/Bernoulli (p = 0, p = 1 and n = 0 are a
+  single stem of height 1, not errors); 0 < p ≤ 1 for Geometric and
+  NegativeBinomial; `mean` > 0 (`Poisson(0)` is an error). A bad value —
+  written out or held by a slider, e.g. n = 2.5 — is an error on the row
+  naming the parameter (`Binomial(n, p) needs a whole number n ≥ 0 (n = 2.5).`);
+  use `round(n)` for a slider with fractional steps. A parameter animated
+  with t is not judged: at instants where it is invalid nothing is drawn.
+  `P(…)` over one discrete variable with constant bounds is exact (closed-form
+  cdf, any size of n or mean) and highlights the selected stems, and strict
+  and non-strict bounds are different events: `P(X < 3)` stops at 2,
+  `P(X <= 3)` includes 3, `P(2 < X <= 5)` is 3, 4, 5, `P(X < 2.5)` is
+  `P(X <= 2)`. Point events exist only here: `P(X = 3)` (also `==`) is that
+  stem's height and `P(X != 3)` its complement; over a continuous variable
+  they are an error (the value would be 0). `E(X)` is the exact closed-form
+  mean, marked on the axis. Zoomed out past 1024 whole numbers in view
+  (`Poisson(1000000)`, `DiscreteUniform(-1000000, 1000000)`) the stems merge
+  into the filled outline of the same exact heights. NOT supported yet, each
+  an explicit error on the row: arithmetic on a discrete variable (`Y = X^2`,
+  `S = X1 + X2`, `E(2X)`, `P(X + 1 < 3)`, a bare `X + Z`) and joint events
+  (`P(X > Y)`) — a smoothed density over whole-number atoms would be a wrong
+  picture, so none is drawn.
 - Derived random variable: `Y = X^2`, `S = X1 + X2` — arithmetic over
   declared random variables declares a new one, including piecewise
   conditionals: `Y = {X > 0: X^2, 1}`. Distinct names are independent, so

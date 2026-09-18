@@ -8,7 +8,7 @@
  * (parametric surfaces/curves, z = f(x,y) heightmaps). Output is a PNG built
  * with CompressionStream — no image library.
  */
-import { densityAt, pdfExpr, shadePolygon } from '../lib/dist.ts';
+import { type PmfStems, densityAt, integerBounds, pdfExpr, selectStems, shadePolygon, stemDotRadius } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
@@ -343,6 +343,42 @@ function renderRow2D(
     }
     return;
   }
+  if (cls.plot.type === 'pmf' || (cls.plot.type === 'prob' && cls.plot.shade && analysis.rvs.discreteDist(cls.plot.shade.rv))) {
+    // A discrete variable's stems, or the ones a P(…) row selects (a band
+    // in the row's color) — the app's cases 'pmf' and 'prob'.
+    const shade = cls.plot.type === 'prob' ? cls.plot.shade! : undefined;
+    const name = cls.plot.type === 'pmf' ? cls.plot.rv : shade!.rv;
+    const halfW = (r.w / 2) * v.upp;
+    let drawn: ReturnType<typeof analysis.rvs.stems>;
+    let runs: PmfStems[];
+    try {
+      drawn = analysis.rvs.stems(name, analysis.constEnv, { lo: v.cx - halfW, hi: v.cx + halfW });
+      if (!drawn) return;
+      runs = shade ? selectStems(drawn.stems, drawn.law, integerBounds(shade, analysis.constEnv)) : [drawn.stems];
+    } catch {
+      return; // a parameter with no value at t = 0
+    }
+    const y0 = toScreenY(r, v, 0);
+    const clampY = (y: number) => Math.min(r.h + 8, Math.max(-8, y));
+    const dot = stemDotRadius(1 / v.upp);
+    for (const run of runs) {
+      const sx = run.ks.map(k => toScreenX(r, v, k));
+      const sy = run.ps.map(p => toScreenY(r, v, p));
+      if (run.envelope) {
+        const px = [sx[0], ...sx, sx[sx.length - 1]];
+        const py = [y0, ...sy, y0];
+        fillPolygon(r, px, py, color, shade ? 0.35 : 0.16);
+        for (let i = 0; i + 1 < px.length; i++) drawLine(r, px[i], clampY(py[i]), px[i + 1], clampY(py[i + 1]), color);
+        continue;
+      }
+      for (let i = 0; i < sx.length; i++) {
+        // A selection is a wide translucent band over the variable's own stem.
+        for (const dx of shade ? [-2, -1, 0, 1, 2] : [0]) drawLine(r, sx[i] + dx, clampY(y0), sx[i] + dx, clampY(sy[i]), color, shade ? 0.45 : 1);
+        if (dot && !shade) drawDisc(r, sx[i], sy[i], dot, color);
+      }
+    }
+    return;
+  }
   if (cls.plot.type === 'density' || cls.plot.type === 'prob') {
     // Sampled-density rows: the same estimator the app uses (lib/dist.ts),
     // drawn as a polyline (density) or a filled area under it (P(…)).
@@ -384,7 +420,9 @@ function renderRow2D(
     const name = cls.plot.rv;
     const m = analysis.rvs.mean(name, analysis.constEnv);
     if (!Number.isFinite(m)) return;
-    const exact = analysis.rvs.exactDist(name);
+    // (A discrete variable's marker reaches its pmf AT the mean: the stem's
+    // height where the mean is a whole number, the axis where it is not.)
+    const exact = analysis.rvs.exactDist(name) ?? analysis.rvs.discreteDist(name);
     let h: number;
     try {
       h = exact
@@ -678,6 +716,8 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
   dscatter: 'fallback',
   histogram: 'fallback',
   sequence: 'fallback',
+  // Stems are lines and discs, like a sampled density's atoms.
+  pmf: 'draws',
   bifurcation: 'fallback',
   // Solution marks require running the numeric solver, which is not wired
   // into this backend yet.

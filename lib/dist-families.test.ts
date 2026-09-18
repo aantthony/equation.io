@@ -7,7 +7,7 @@ import { syntaxHelp } from './syntax-help.ts';
 
 /** Every spelling of every family, with enough literal arguments to parse. */
 const spellings = DIST_FAMILIES.flatMap(f => [f.name, ...f.aliases].flatMap(n => [n, n.toLowerCase(), n.toUpperCase()])
-  .map(n => ({ f, n, call: `${n}(${f.params.map((_, k) => k + 1).join(', ')})` })));
+  .map(n => ({ f, n, call: `${n}(${f.params.map((p, k) => (p.unit ? 0.5 : k + 1)).join(', ')})` })));
 
 describe('one table of families, every consumer', () => {
   it.each(spellings)('$n: parses, declares, and shows its signature', ({ f, n, call }) => {

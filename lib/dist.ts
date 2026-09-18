@@ -6,6 +6,12 @@
  *   declares a random variable; the row plots its exact density. Parameters
  *   may reference constants (sliders) and t, so `X ~ Normal(0, a)` responds
  *   to the slider.
+ * - `X ~ Binomial(n, p)` (also Poisson, Geometric, NegativeBinomial, Bernoulli,
+ *   DiscreteUniform) declares a DISCRETE variable: the row plots its pmf as
+ *   stems, `P(…)` with constant bounds is the exact mass of the whole numbers
+ *   it selects (so `<` and `<=` differ, and `P(X = 3)` is a number), `E(X)`
+ *   the closed-form mean. Nothing below applies to them yet — every tier
+ *   there assumes a density — so a derived row over one is refused by name.
  * - `Y = g(X, …)` where the right side references random variables declares a
  *   *derived* random variable — arithmetic on distributions. `S = X1 + X2` is
  *   the convolution of independent summands, `X Y` the product distribution,
@@ -31,9 +37,13 @@
  */
 import {
   BETA_PDF_FN,
+  BINOM_PMF_FN,
+  DUNIFORM_PMF_FN,
   EVAL_FNS,
   type Expr,
   GAMMA_PDF_FN,
+  NEGBINOM_PMF_FN,
+  POISSON_PMF_FN,
   SHADOWABLE_FNS,
   T_PDF_FN,
   WEIBULL_PDF_FN,
@@ -48,10 +58,11 @@ import {
 } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from './defs.ts';
-import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
+import { type BaseKind, DIST_FAMILIES, type DistFamily, distFamily, distUsage, familyOf } from './dist-families.ts';
 import { quadrature } from './integrate.ts';
 import {
-  BETA_GAMMA_SIDE, BETA_LIMIT_SUM, GAMMA_UNIFORM_SHAPE, betaPQ, betaPdf, gammaPQ, gammaPdf, lbeta, lgamma, normalPQ, studentTPQ, studentTPdf, weibullPdf,
+  BETA_GAMMA_SIDE, BETA_LIMIT_SUM, GAMMA_UNIFORM_SHAPE, betaPQ, betaPdf, binomPmf, discreteUniformPmf, gammaPQ, gammaPdf, lbeta, lgamma,
+  negBinomPmf, normalPQ, poissonPmf, studentTPQ, studentTPdf, weibullPdf, wholeNumber,
 } from './specfn.ts';
 
 // --- base distributions ---
@@ -67,11 +78,28 @@ export type { BaseKind };
  * - beta: [a, b] on [0, 1]; chisquared: [df]; studentt: [df];
  * - lognormal: [mu, sigma] of the underlying normal, ln X ~ Normal(mu, sigma);
  * - cauchy: [location, scale]; weibull: [shape k, scale λ].
+ *
+ * The discrete laws (scipy's conventions, the contested two in capitals):
+ *
+ * - binomial: [n, p], n a whole number ≥ 0, 0 ≤ p ≤ 1 (p = 0, p = 1 and n = 0
+ *   are atoms, not errors); bernoulli: [p] is Binomial(1, p);
+ * - poisson: [mean] > 0 (Poisson(0) is refused like Exponential(0): a slider
+ *   reaching 0 says so on the row);
+ * - geometric: [p], 0 < p ≤ 1, the TRIAL of the first success — support 1, 2, …;
+ * - negbinomial: [r, p], the FAILURES before the r-th success — support
+ *   0, 1, …; r > 0 need not be whole. So NegativeBinomial(1, p) is Geometric(p) − 1;
+ * - discreteuniform: [a, b], whole numbers a ≤ b, both included.
  */
 export interface BaseDist {
   kind: BaseKind;
   args: Expr[];
+  /** A law on the integers: it has a pmf (pmfExpr, stems), a step cdf whose
+   *  strict and non-strict bounds differ, and no density for a shader. */
+  discrete?: boolean;
 }
+
+/** `${name} = ${value}` for a message, short enough to read. */
+const showParam = (name: string, val: number): string => `${name} = ${Number(val.toPrecision(6))}`;
 
 /**
  * Why these parameter values declare no distribution, or null when they do.
@@ -82,11 +110,19 @@ export function paramProblem(kind: BaseKind, a: ReadonlyArray<number | null | un
   const family = familyOf(kind);
   for (const [k, param] of family.params.entries()) {
     const val = a[k];
-    if (param.positive && typeof val === 'number' && val <= 0) return `${distUsage(family)} needs ${param.name} > 0.`;
+    if (typeof val !== 'number' || Number.isNaN(val)) continue;
+    const usage = distUsage(family);
+    if (param.positive && val <= 0) return `${usage} needs ${param.name} > 0.`;
+    if (param.whole && (Number.isNaN(wholeNumber(val)) || (param.whole === 'count' && val < 0))) {
+      return `${usage} needs a whole number ${param.name}${param.whole === 'count' ? ' ≥ 0' : ''} (${showParam(param.name, val)}).`;
+    }
+    if (param.unit && !(val <= 1 && (param.unit === '[0,1]' ? val >= 0 : val > 0))) {
+      return `${usage} needs ${param.unit === '[0,1]' ? '0 ≤' : '0 <'} ${param.name} ≤ 1.`;
+    }
   }
-  if (kind === 'uniform' && typeof a[0] === 'number' && typeof a[1] === 'number' && a[1] <= a[0]) {
-    return 'Uniform(lo, hi) needs lo < hi.';
-  }
+  const both = typeof a[0] === 'number' && typeof a[1] === 'number';
+  if (kind === 'uniform' && both && a[1]! <= a[0]!) return 'Uniform(lo, hi) needs lo < hi.';
+  if (kind === 'discreteuniform' && both && a[1]! < a[0]!) return 'DiscreteUniform(a, b) needs a ≤ b.';
   return null;
 }
 
@@ -124,7 +160,7 @@ export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): Ba
   // A bare name takes the standard parameters: `X ~ N` is Normal(0, 1).
   if (m[2] === undefined) {
     if (!spec.defaults) throw new Error(arityError);
-    return { kind: spec.kind, args: spec.defaults.map(value => ({ kind: 'num', value })) };
+    return baseDist(spec, spec.defaults.map(value => ({ kind: 'num', value })));
   }
   let args: Expr;
   try {
@@ -139,8 +175,11 @@ export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): Ba
   // known (RVSystem.paramProblem), and flattens the density to 0 meanwhile.
   const problem = paramProblem(spec.kind, items.map(numOf));
   if (problem) throw new Error(problem);
-  return { kind: spec.kind, args: items };
+  return baseDist(spec, items);
 }
+
+const baseDist = (family: DistFamily, args: Expr[]): BaseDist =>
+  (family.discrete ? { kind: family.kind, args, discrete: true } : { kind: family.kind, args });
 
 const v = (name: string): Expr => ({ kind: 'var', name });
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -155,8 +194,39 @@ const whereAll = (conds: Expr[], value: Expr): Expr => conds.reduceRight<Expr>(
   value,
 );
 
-/** The exact pdf of a base distribution at `x` (piecewise where the support ends). */
+/**
+ * The pmf of a discrete law at `k`: P(X = k). Exactly 0 — not NaN — off the
+ * support, at a k that is not a whole number, and while a parameter is
+ * invalid, in every evaluator (evaluate and the stack VM share the specfn.ts
+ * implementations; a shader refuses the builtins by name, since a pmf is
+ * drawn as stems). Null for a continuous law.
+ */
+export function pmfExpr(d: BaseDist, k: Expr): Expr | null {
+  switch (d.kind) {
+    case 'binomial':
+      return call(BINOM_PMF_FN, k, d.args[0], d.args[1]);
+    case 'bernoulli':
+      return call(BINOM_PMF_FN, k, num(1), d.args[0]);
+    case 'poisson':
+      return call(POISSON_PMF_FN, k, d.args[0]);
+    case 'geometric': // trials, from 1: one more than the failures before the first success
+      return call(NEGBINOM_PMF_FN, bin('-', k, num(1)), num(1), d.args[0]);
+    case 'negbinomial':
+      return call(NEGBINOM_PMF_FN, k, d.args[0], d.args[1]);
+    case 'discreteuniform':
+      return call(DUNIFORM_PMF_FN, k, d.args[0], d.args[1]);
+    default:
+      return null;
+  }
+}
+
+/** The exact pdf of a base distribution at `x` (piecewise where the support
+ *  ends). For a discrete law this is its pmf — a mass, 0 between the integers
+ *  — which evaluates anywhere a pdf does but must never be handed to a shader
+ *  as a curve (densityExpr and regionExpr refuse). */
 export function pdfExpr(d: BaseDist, x: Expr): Expr {
+  const pmf = pmfExpr(d, x);
+  if (pmf) return pmf;
   switch (d.kind) {
     case 'normal':
       return { kind: 'call', name: 'normalpdf', args: [x, d.args[0], d.args[1]] };
@@ -204,11 +274,16 @@ export function pdfExpr(d: BaseDist, x: Expr): Expr {
       return whereAll([positive(d.args[1])],
         bin('/', num(1), bin('*', bin('*', num(Math.PI), d.args[1]), bin('+', num(1), bin('*', z, z)))));
     }
+    default:
+      throw new Error(`${familyOf(d.kind).name} has no density.`); // discrete: answered by pmfExpr above
   }
 }
 
+const NO_DENSITY = 'A discrete distribution has no density curve: it draws as stems.';
+
 /** The density curve for a base random variable: y = pdf(x). */
 export function densityExpr(d: BaseDist): Expr {
+  if (d.discrete) throw new Error(NO_DENSITY);
   return { kind: 'eq', l: v('y'), r: pdfExpr(d, v('x')) };
 }
 
@@ -229,27 +304,65 @@ export function matchExpectation(text: string): string | null {
 
 // --- probability specs ---
 
+/**
+ * Constant bounds around one variable. Whether a bound is strict is kept
+ * because a discrete law cares: P(X < 3) and P(X <= 3) differ by P(X = 3). (A
+ * continuous law does not, and ignores the flags.)
+ */
+export interface ProbBounds {
+  lo?: Expr;
+  hi?: Expr;
+  /** The bound is `<`/`>`, not `<=`/`>=`: its endpoint is excluded. */
+  loStrict?: boolean;
+  hiStrict?: boolean;
+  /** A point event, `P(X = c)` (lo = hi = c, both included) or, with `not`,
+   *  its complement `P(X != c)`. Only a discrete variable has these. */
+  point?: boolean;
+  not?: boolean;
+}
+
 export interface ProbSpec {
-  /** The inequality (chain) to estimate, resolved. */
-  body: Expr & { kind: 'ineq' };
+  /** The event to estimate, resolved: an inequality (chain), or the equation
+   *  of a point event. */
+  body: Expr;
   /** Random variables the body references. */
   rvs: string[];
   /**
    * Present when the body is constant bounds around one bare variable
    * (`P(a < X < b)`): the shadeable — and for closed-form laws, exact — case.
    */
-  single?: { rv: string; lo?: Expr; hi?: Expr };
+  single?: { rv: string } & ProbBounds;
   /**
    * Bounds around one variable-bearing *expression* (`P(0.5 < X + Y < 1.5)`):
    * the same case once the caller registers the expression as an anonymous
    * derived variable.
    */
-  inline?: { e: Expr; lo?: Expr; hi?: Expr };
+  inline?: { e: Expr } & ProbBounds;
 }
+
+/**
+ * Apply `lower` (the caller's list lowering) to a parsed P(…) body. `==` and
+ * `!=` are the filter comparisons, which list lowering rightly refuses outside
+ * a filter — but at the top of a P(…) they are a point event, so there the
+ * two sides lower on their own and the comparison is kept for toProbability.
+ */
+export function lowerProbBody(e: Expr, lower: (e: Expr) => Expr): Expr {
+  if (e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]') && e.args.length === 2) {
+    return { ...e, args: e.args.map(lower) };
+  }
+  return lower(e);
+}
+
+const POINT_SHAPE = 'P(… = …) takes a discrete random variable on its own, like P(X = 3).';
 
 /** Interpret a parsed P(…) body against the declared random variables. */
 export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
-  if (e.kind !== 'ineq') throw new Error('P(…) expects an inequality like P(X < 2).');
+  // `=` parses as an equation, `==` and `!=` as the filter comparisons.
+  const point = e.kind === 'eq' ? { l: e.l, r: e.r, not: false }
+    : e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]') && e.args.length === 2
+      ? { l: e.args[0], r: e.args[1], not: e.name === '[ne]' }
+      : null;
+  if (e.kind !== 'ineq' && !point) throw new Error('P(…) expects an inequality like P(X < 2).');
   const frees = freeVars(e);
   const rvs = [...frees].filter(n => rvNames.has(n));
   if (!rvs.length) {
@@ -258,12 +371,20 @@ export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
   for (const n of frees) {
     if (/^[xyzuvw]$/.test(n)) throw new Error(`P(…) cannot use the plot coordinate ${n}.`);
   }
-  const comps = ineqComparisons(e);
+  const bearing = (t: Expr): boolean => [...freeVars(t)].some(n => rvNames.has(n));
+  if (point) {
+    const [name, at] = point.l.kind === 'var' && rvNames.has(point.l.name) ? [point.l.name, point.r]
+      : point.r.kind === 'var' && rvNames.has(point.r.name) ? [point.r.name, point.l] : [null, null];
+    if (name === null || bearing(at) || at.kind === 'vec' || at.kind === 'ineq' || at.kind === 'eq') throw new Error(POINT_SHAPE);
+    return { body: e, rvs, single: { rv: name, lo: at, hi: at, point: true, ...(point.not ? { not: true } : {}) } };
+  }
+  const comps = ineqComparisons(e as Expr & { kind: 'ineq' });
   if (new Set(comps.map(c => c.op[0])).size > 1) {
     throw new Error('Chained inequalities must point the same way.');
   }
-  // Normalize to ascending order so the terms read lo … X … hi.
-  const asc = comps.map(c => (c.op[0] === '<' ? { l: c.l, r: c.r } : { l: c.r, r: c.l }));
+  // Normalize to ascending order so the terms read lo … X … hi; each
+  // comparison keeps whether it was strict.
+  const asc = comps.map(c => ({ ...(c.op[0] === '<' ? { l: c.l, r: c.r } : { l: c.r, r: c.l }), strict: c.op.length === 1 }));
   if (comps[0].op[0] === '>') asc.reverse();
   const terms = [asc[0].l, ...asc.map(c => c.r)];
   const spec: ProbSpec = { body: e, rvs };
@@ -272,15 +393,21 @@ export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
   // bounds on its immediate sides shades (and computes exactly when a law is
   // derivable): a bare name yields `single`, an expression `inline`. Anything
   // else — P(Y > X), extra constraints beyond the bounds — samples.
-  const idx = terms.findIndex(t => [...freeVars(t)].some(n => rvNames.has(n)));
+  const idx = terms.findIndex(bearing);
   const others = terms.filter((_, k) => k !== idx);
-  if (idx >= 0 && terms.length <= 3 && idx <= 1 && idx >= terms.length - 2
-    && others.every(t => [...freeVars(t)].every(n => !rvNames.has(n)))) {
+  if (idx >= 0 && terms.length <= 3 && idx <= 1 && idx >= terms.length - 2 && !others.some(bearing)) {
     const t = terms[idx];
-    const lo = idx > 0 ? terms[idx - 1] : undefined;
-    const hi = idx < terms.length - 1 ? terms[idx + 1] : undefined;
-    if (t.kind === 'var' && rvNames.has(t.name)) spec.single = { rv: t.name, lo, hi };
-    else spec.inline = { e: t, lo, hi };
+    const bounds: ProbBounds = {};
+    if (idx > 0) {
+      bounds.lo = terms[idx - 1];
+      bounds.loStrict = asc[idx - 1].strict;
+    }
+    if (idx < terms.length - 1) {
+      bounds.hi = terms[idx + 1];
+      bounds.hiStrict = asc[idx].strict;
+    }
+    if (t.kind === 'var' && rvNames.has(t.name)) spec.single = { rv: t.name, ...bounds };
+    else spec.inline = { e: t, ...bounds };
   }
   return spec;
 }
@@ -318,6 +445,7 @@ export function toExpectation(e: Expr, rvNames: ReadonlySet<string>): ExpectSpec
  * inequality chains; '<=' gives the region a drawn outline.
  */
 export function regionExpr(d: BaseDist, lo?: Expr, hi?: Expr): Expr {
+  if (d.discrete) throw new Error(NO_DENSITY);
   const x = v('x');
   const y = v('y');
   let f: Expr = bin('-', y, pdfExpr(d, x)); // y < pdf(x)
@@ -369,16 +497,94 @@ function cdfPQ(d: BaseDist, x: number, env: Record<string, number>): [number, nu
       const w = Math.pow(x / a[1], a[0]);
       return [-Math.expm1(-w), Math.exp(-w)];
     }
+    default:
+      return discretePQ(d.kind, a, x);
   }
 }
 
-/** Exact value of P(lo < X < hi) under the given constant environment. */
+/**
+ * [P(X ≤ x), P(X > x)] of a discrete law with valid parameters `a`: a step
+ * function, so x is floored first. Closed forms through the regularized
+ * incomplete beta and gamma functions — both tails formed directly, and no
+ * sum over thousands of terms for Binomial(1e6, p) or Poisson(1e5).
+ */
+function discretePQ(kind: BaseKind, a: number[], x: number): [number, number] {
+  const k = Math.floor(x);
+  const binomial = (n: number, p: number): [number, number] => {
+    if (k < 0) return [0, 1];
+    if (k >= n) return [1, 0];
+    return betaPQ(n - k, k + 1, 1 - p, p); // P(X ≤ k) = I_{1−p}(n − k, k + 1); p = 0 and 1 land on its edges
+  };
+  switch (kind) {
+    case 'binomial':
+      return binomial(wholeNumber(a[0]), a[1]);
+    case 'bernoulli':
+      return binomial(1, a[0]);
+    case 'poisson': {
+      if (k < 0) return [0, 1];
+      const [p, q] = gammaPQ(k + 1, a[0]); // P(X ≤ k) = Q(k + 1, mean)
+      return [q, p];
+    }
+    case 'geometric': {
+      if (k < 1) return [0, 1];
+      const lq = k * Math.log1p(-a[0]); // ln P(X > k) = k ln(1 − p); −∞ at p = 1
+      return [-Math.expm1(lq), Math.exp(lq)];
+    }
+    case 'negbinomial':
+      return k < 0 ? [0, 1] : betaPQ(a[0], k + 1, a[1], 1 - a[1]); // I_p(r, k + 1)
+    case 'discreteuniform': {
+      const lo = wholeNumber(a[0]);
+      const hi = wholeNumber(a[1]);
+      if (k < lo) return [0, 1];
+      if (k >= hi) return [1, 0];
+      const n = hi - lo + 1;
+      return [(k - lo + 1) / n, (hi - k) / n];
+    }
+    default:
+      return [NaN, NaN];
+  }
+}
+
+/** The whole numbers a P(…) over a discrete variable selects: kLo ≤ X ≤ kHi
+ *  (either may be infinite; empty when kLo > kHi), or with `not` all the rest.
+ *  This is where strictness lands: `X < 3` ends at 2, `X <= 3` at 3,
+ *  `X < 2.5` and `X <= 2.5` both at 2. NaN bounds (a broken parameter) stay NaN. */
+export function integerBounds(b: ProbBounds, env: Record<string, number>): { kLo: number; kHi: number; not: boolean } {
+  const lo = b.lo ? evaluate(b.lo, env) : -Infinity;
+  const hi = b.hi ? evaluate(b.hi, env) : Infinity;
+  return {
+    kLo: b.loStrict ? Math.floor(lo) + 1 : Math.ceil(lo),
+    kHi: b.hiStrict ? Math.ceil(hi) - 1 : Math.floor(hi),
+    not: !!b.not,
+  };
+}
+
+/**
+ * Exact value of P(lo < X < hi) under the given constant environment. For a
+ * discrete law `edges` says which bounds are strict (and whether the event is
+ * a complement): the value is the exact mass of the selected whole numbers.
+ */
 export function probabilityValue(
   d: BaseDist,
   lo: Expr | undefined,
   hi: Expr | undefined,
   env: Record<string, number>,
+  edges?: Pick<ProbBounds, 'loStrict' | 'hiStrict' | 'not'>,
 ): number {
+  if (d.discrete) {
+    const law = discreteLaw(d, env);
+    const { kLo, kHi, not } = integerBounds({ lo, hi, ...edges }, env);
+    if (!law || Number.isNaN(kLo) || Number.isNaN(kHi)) return NaN; // invalid parameters or bounds
+    if (kLo > kHi) return not ? 1 : 0;
+    // One whole number: its mass, not a difference of two cdfs.
+    if (kLo === kHi && !not) return law.pmf(kLo);
+    const L = kLo === -Infinity ? [0, 1] : law.pq(kLo - 1);
+    const H = kHi === Infinity ? [1, 0] : law.pq(kHi);
+    // The complement is below kLo plus above kHi, each from its own tail;
+    // the event itself differences whichever side is the small one.
+    if (not) return L[0] + H[1];
+    return L[0] > 0.5 ? L[1] - H[1] : H[0] - L[0];
+  }
   const L = lo ? cdfPQ(d, evaluate(lo, env), env) : null;
   const H = hi ? cdfPQ(d, evaluate(hi, env), env) : null;
   if (!L) return H ? H[0] : 1;
@@ -1569,6 +1775,9 @@ interface CacheEntry {
   certified?: { from: DensityCurve; curve: DensityCurve };
   /** Quadrature moments (present once quadMoments ran for this sig). */
   qm?: { mean: number; sd: number; mass: number } | null;
+  /** A discrete base: its law, the whole numbers holding all but STEM_TAIL of
+   *  each tail, and the stems last built, keyed by their window. */
+  pmf?: { law: DiscreteLaw; kLo: number; kHi: number; key: string; stems: PmfStems | null } | null;
 }
 
 /** The pdf and support of a base distribution at these parameter values, or
@@ -1615,7 +1824,218 @@ function pdfClosure(
       };
     case 'weibull':
       return { pdf: x => weibullPdf(x, a[0], a[1]), lo: 0, hi: Infinity, mid: a[1] };
+    default:
+      return null; // a discrete law has no pdf to integrate against (add() refuses its transforms)
   }
+}
+
+// --- discrete laws: pmf, support, quantile, stems ---
+
+/** A discrete law at fixed parameter values. */
+export interface DiscreteLaw {
+  /** P(X = k); 0 off the support and at any k that is not a whole number. */
+  pmf: (k: number) => number;
+  /** [P(X ≤ x), P(X > x)], each tail formed directly. */
+  pq: (x: number) => [number, number];
+  /** The support's ends (hi may be Infinity). */
+  lo: number;
+  hi: number;
+  mean: number;
+  sd: number;
+  /**
+   * The quantile function, a step function: the smallest whole number k with
+   * P(X ≤ k) ≥ u — or, with `upper`, with P(X > k) ≤ u, which addresses the
+   * upper tail without forming 1 − u. Exact at the steps: quantile(cdf(k)) is
+   * k, and anything above cdf(k) is k + 1. (The sampling tier of plan #6 draws
+   * through this; here it bounds the stems worth drawing.)
+   */
+  quantile: (u: number, upper?: boolean) => number;
+}
+
+/** The law of a discrete base distribution at these parameter values, or null
+ *  when the parameters declare none (or the distribution is continuous). */
+export function discreteLaw(d: BaseDist, env: Record<string, number>): DiscreteLaw | null {
+  if (!d.discrete) return null;
+  const a = d.args.map(e => evaluate(e, env));
+  if (!a.every(isFinite) || paramProblem(d.kind, a)) return null;
+  let pmf: (k: number) => number;
+  let lo = 0;
+  let hi = Infinity;
+  let mean: number;
+  let variance: number;
+  switch (d.kind) {
+    case 'binomial':
+    case 'bernoulli': {
+      const [n, p] = d.kind === 'binomial' ? [wholeNumber(a[0]), a[1]] : [1, a[0]];
+      pmf = k => binomPmf(k, n, p);
+      hi = n;
+      mean = n * p;
+      variance = n * p * (1 - p);
+      break;
+    }
+    case 'poisson':
+      pmf = k => poissonPmf(k, a[0]);
+      mean = variance = a[0];
+      break;
+    case 'geometric':
+      pmf = k => negBinomPmf(k - 1, 1, a[0]);
+      lo = 1;
+      mean = 1 / a[0];
+      variance = (1 - a[0]) / (a[0] * a[0]);
+      break;
+    case 'negbinomial':
+      pmf = k => negBinomPmf(k, a[0], a[1]);
+      mean = (a[0] * (1 - a[1])) / a[1];
+      variance = mean / a[1];
+      break;
+    case 'discreteuniform': {
+      lo = wholeNumber(a[0]);
+      hi = wholeNumber(a[1]);
+      pmf = k => discreteUniformPmf(k, lo, hi);
+      mean = (lo + hi) / 2;
+      const n = hi - lo + 1;
+      variance = ((n - 1) / 12) * (n + 1); // (n² − 1)/12 without squaring a huge n
+      break;
+    }
+    default:
+      return null;
+  }
+  const kind = d.kind;
+  const pq = (x: number): [number, number] => discretePQ(kind, a, x);
+  const sd = Math.sqrt(variance);
+  // P(X ≤ k) ≥ u, asked of whichever tail says it without rounding.
+  const reached = (k: number, u: number, upper: boolean): boolean => (upper ? pq(k)[1] <= u : pq(k)[0] >= u);
+  const quantile = (u: number, upper = false): number => {
+    if (Number.isNaN(u) || u < 0 || u > 1) return NaN;
+    if (reached(lo, u, upper)) return lo; // u = 0, or an atom holding it all
+    // All the mass, of a support with no end. (A finite one is searched: its
+    // answer is where the cdf reaches 1, which may be short of hi.)
+    if ((upper ? u <= 0 : u >= 1) && hi === Infinity) return Infinity;
+    // Bracket outward from the normal guess in doubling steps, then bisect
+    // on the whole numbers: ~2 log₂(distance) cdf calls, whatever the law.
+    const z = normalQuantile(upper ? 1 - u : u);
+    const clamp = (x: number): number => Math.min(hi, Math.max(lo, Math.round(x)));
+    let k = clamp(mean + sd * (isFinite(z) ? z : 0));
+    if (!isFinite(k)) k = clamp(mean); // σ past double range: start from the mean
+    if (!isFinite(k)) return NaN; // …and the mean too (Geometric(1e-320))
+    let below: number; // a k that is NOT reached (or lo − 1)
+    let at: number; // a k that IS reached
+    if (reached(k, u, upper)) {
+      at = k;
+      below = lo - 1;
+      for (let step = 1; at - step > lo - 1; step *= 2) {
+        if (!reached(at - step, u, upper)) {
+          below = at - step;
+          break;
+        }
+        at -= step;
+      }
+    } else {
+      below = k;
+      at = hi;
+      for (let step = 1; ; step *= 2) {
+        const probe = below + step;
+        if (probe >= hi) break; // hi itself is always reached
+        if (!isFinite(probe)) return NaN;
+        if (reached(probe, u, upper)) {
+          at = probe;
+          break;
+        }
+        below = probe;
+      }
+      if (at === Infinity) return NaN;
+    }
+    while (at - below > 1) {
+      const mid = below + Math.floor((at - below) / 2);
+      if (!(mid > below && mid < at)) break; // past 2^53 the whole numbers are coarser than 1
+      if (reached(mid, u, upper)) at = mid;
+      else below = mid;
+    }
+    return at;
+  };
+  return { pmf, pq, lo, hi, mean, sd, quantile };
+}
+
+/** At most this many stems are drawn; more whole numbers than that in view
+ *  (Poisson(1e6) zoomed out, DiscreteUniform(-1e9, 1e9)) draw the pmf's
+ *  ENVELOPE instead — the same heights at STEM_MAX evenly spaced whole
+ *  numbers, joined — since stems closer than a pixel are a solid shape anyway. */
+export const STEM_MAX = 1024;
+/** Mass each tail may hide beyond the drawn stems: far below a pixel. */
+const STEM_TAIL = 1e-12;
+/** Counts pmf evaluations for the per-frame stem path: the perf guard reads it. */
+export const STEM_STATS = { builds: 0, pmfEvals: 0 };
+
+/** The drawn pmf of a discrete variable over a view. */
+export interface PmfStems {
+  /** Whole numbers, ascending, and P(X = k) at each. */
+  ks: number[];
+  ps: number[];
+  /** True when `ks` is a subsample (see STEM_MAX): draw the outline through
+   *  the points, not one stem per point. */
+  envelope: boolean;
+}
+
+/** The stems of `law` at the whole numbers of [kLo, kHi] (finite), capped. */
+function buildStems(law: DiscreteLaw, kLo: number, kHi: number): PmfStems {
+  STEM_STATS.builds++;
+  const ks: number[] = [];
+  const count = kHi - kLo + 1;
+  if (count <= STEM_MAX) {
+    for (let k = kLo; k <= kHi; k++) ks.push(k);
+  } else {
+    // Evenly spaced whole numbers, both ends included. The spacing is a
+    // double (count may be 2e9); rounding keeps every sample ON the lattice,
+    // so each height is an exact pmf value, never an interpolated one.
+    const step = (kHi - kLo) / (STEM_MAX - 1);
+    for (let i = 0; i < STEM_MAX; i++) {
+      const k = i === STEM_MAX - 1 ? kHi : Math.round(kLo + i * step);
+      if (k !== ks[ks.length - 1]) ks.push(k);
+    }
+  }
+  STEM_STATS.pmfEvals += ks.length;
+  return { ks, ps: ks.map(law.pmf), envelope: count > STEM_MAX };
+}
+
+/** The dot capping each stem, in px, from the spacing of whole numbers on
+ *  screen: full size while stems stand apart, small as they crowd, none once
+ *  the dots would merge into a band (the lines alone carry the shape). One
+ *  rule for the app and the og rasterizer. */
+export const stemDotRadius = (pxPerUnit: number): number => (pxPerUnit >= 9 ? 3.5 : pxPerUnit >= 4 ? 2 : 0);
+
+/** The part of drawn stems a P(…) row selects, as runs (two for a
+ *  complement). In envelope mode each run gains its exact end points, so the
+ *  shaded outline stops at the bound and not at the nearest sample. */
+export function selectStems(
+  stems: PmfStems, law: DiscreteLaw, sel: { kLo: number; kHi: number; not: boolean },
+): PmfStems[] {
+  if (Number.isNaN(sel.kLo) || Number.isNaN(sel.kHi)) return [];
+  const ranges: Array<[number, number]> = sel.not
+    ? (sel.kLo > sel.kHi ? [[-Infinity, Infinity]] : [[-Infinity, sel.kLo - 1], [sel.kHi + 1, Infinity]])
+    : [[sel.kLo, sel.kHi]];
+  const first = stems.ks[0];
+  const last = stems.ks[stems.ks.length - 1];
+  const out: PmfStems[] = [];
+  for (const [a, b] of ranges) {
+    const lo = Math.max(a, first);
+    const hi = Math.min(b, last);
+    if (!(lo <= hi)) continue;
+    const ks: number[] = [];
+    const ps: number[] = [];
+    const push = (k: number, p: number): void => {
+      if (k !== ks[ks.length - 1]) {
+        ks.push(k);
+        ps.push(p);
+      }
+    };
+    if (stems.envelope) push(lo, law.pmf(lo));
+    stems.ks.forEach((k, i) => {
+      if (k >= lo && k <= hi) push(k, stems.ps[i]);
+    });
+    if (stems.envelope) push(hi, law.pmf(hi));
+    if (ks.length) out.push({ ks, ps, envelope: stems.envelope });
+  }
+  return out;
 }
 
 /**
@@ -1865,8 +2285,60 @@ export class RVSystem {
     this.groundedMemo.clear();
   }
 
+  /**
+   * Declare a variable. A derived variable over a DISCRETE base is refused:
+   * every tier below (conditional-CDF quadrature, quantile tables, the KDE)
+   * assumes a density, and a KDE over atoms is a wrong picture, not a rough
+   * one. Exact pmfs by enumeration are plan #6. (Callers add bases first, and
+   * a derived variable over a refused one fails in turn, so checking the
+   * direct dependencies covers the transitive ones.)
+   */
   add(rv: RV): void {
+    if (rv.kind === 'derived') this.refuseDiscrete(rv.expr);
     this.rvs.set(rv.name, rv);
+  }
+
+  /** The base distribution of a variable declared discrete, else null. */
+  discreteDist(name: string): BaseDist | null {
+    const rv = this.rvs.get(name);
+    return rv?.kind === 'base' && rv.dist.discrete ? rv.dist : null;
+  }
+
+  /** Constants that ARE a whole-number parameter of a discrete law (the n of
+   *  `X ~ Binomial(n, p)`, written as the bare name): the app steps their
+   *  sliders by 1, as it does Σ bounds, so a drag never lands on n = 2.5. */
+  wholeParamNames(): Set<string> {
+    const out = new Set<string>();
+    for (const rv of this.rvs.values()) {
+      if (rv.kind !== 'base' || !rv.dist.discrete) continue;
+      familyOf(rv.dist.kind).params.forEach((param, k) => {
+        const arg = rv.dist.args[k];
+        if (param.whole && arg.kind === 'var') out.add(arg.name);
+      });
+    }
+    return out;
+  }
+
+  private refuseDiscrete(e: Expr): void {
+    const names = [...freeVars(e)].filter(n => this.discreteDist(n));
+    if (!names.length) return;
+    throw new Error(`${names.join(', ')} ${names.length > 1 ? 'are' : 'is'} discrete: arithmetic and joint events over discrete`
+      + ` random variables are not supported yet. P(…) with constant bounds and E(…) take ${names[0]} on its own.`);
+  }
+
+  /**
+   * What a P(…) row may ask, judged against the declarations: a point event
+   * (`P(X = 3)`) only of a discrete variable — for a continuous one it is 0 by
+   * definition, and saying 0 would hide that the question was probably meant
+   * as an interval — and nothing sampled (`P(X > Y)`) over a discrete one.
+   */
+  checkProbability(spec: ProbSpec): void {
+    const single = spec.single;
+    if (single?.point && !this.discreteDist(single.rv)) {
+      throw new Error(`P(${single.rv} ${single.not ? '!=' : '='} …) needs a discrete variable: a continuous one`
+        + ` takes any single value with probability 0. Ask about an interval, like P(a < ${single.rv} < b).`);
+    }
+    if (!single || !this.discreteDist(single.rv)) this.refuseDiscrete(spec.body);
   }
 
   delete(name: string): void {
@@ -2198,10 +2670,40 @@ export class RVSystem {
     }
   }
 
-  /** The exact law when it is a closed-form pdf the shader can draw. */
+  /** The exact law when it is a closed-form pdf the shader can draw — so
+   *  never a discrete one (discreteDist), which has a pmf and draws as stems. */
   exactDist(name: string): BaseDist | null {
     const law = this.exactLaw(name);
-    return law?.kind === 'dist' ? law.dist : null;
+    return law?.kind === 'dist' && !law.dist.discrete ? law.dist : null;
+  }
+
+  /**
+   * The stems of a discrete variable over the visible x-range: one per whole
+   * number of the support in view, clipped to where the law has mass (all but
+   * 1e-12 per tail, so an unbounded support or a view a billion wide costs
+   * nothing) and capped at STEM_MAX (see PmfStems.envelope). Rebuilt only
+   * when the parameters or the whole-number window change: a still view costs
+   * a cache hit per frame. Null while the parameters declare no distribution
+   * — a slider n at 2.5 draws nothing, because nothing is there to draw.
+   */
+  stems(name: string, env: Record<string, number>, view?: { lo: number; hi: number }): { stems: PmfStems; law: DiscreteLaw } | null {
+    const rv = this.rvs.get(name);
+    if (rv?.kind !== 'base' || !rv.dist.discrete) return null;
+    const slot = this.entry(name, this.sig(rv, env));
+    if (slot.pmf === undefined) {
+      const law = discreteLaw(rv.dist, env);
+      slot.pmf = law && { law, kLo: law.quantile(STEM_TAIL), kHi: law.quantile(STEM_TAIL, true), key: '', stems: null };
+    }
+    const c = slot.pmf;
+    if (!c || !isFinite(c.kLo) || !isFinite(c.kHi)) return null;
+    const kLo = Math.max(c.kLo, view ? Math.ceil(view.lo) : -Infinity);
+    const kHi = Math.min(c.kHi, view ? Math.floor(view.hi) : Infinity);
+    const key = `${kLo},${kHi}`;
+    if (!c.stems || c.key !== key) {
+      c.key = key;
+      c.stems = kLo <= kHi ? buildStems(c.law, kLo, kHi) : { ks: [], ps: [], envelope: false };
+    }
+    return { stems: c.stems, law: c.law };
   }
 
   /** Non-random free names of a P(…) body, through the variables it references. */
@@ -2262,6 +2764,9 @@ export class RVSystem {
     if (slot.col) return slot.col;
     let col: Float64Array;
     if (rv.kind === 'base') {
+      // Unreachable through a document (add() and probability() refuse first);
+      // loud all the same, because a NaN column would read as "no data".
+      if (rv.dist.discrete) throw new Error(`${name} is discrete: sampling discrete random variables is not supported yet.`);
       const u = uniformStream(name);
       const a = rv.dist.args.map(e => evaluate(e, env));
       col = new Float64Array(SAMPLE_COUNT);
@@ -2361,6 +2866,7 @@ export class RVSystem {
     }
     const rv = this.rvs.get(name);
     if (!rv) throw new Error(`${name} has an error in its definition.`);
+    if (rv.kind === 'base' && rv.dist.discrete) return null; // no density: stems() draws it
     const slot = this.entry(name, this.sig(rv, env));
     if (slot.qcb === undefined) slot.qcb = this.condBase(name, env);
     const base = slot.qcb;
@@ -2433,6 +2939,10 @@ export class RVSystem {
     const law = this.exactLaw(name);
     if (!law) return null;
     if (law.kind === 'dist') {
+      if (law.dist.discrete) {
+        const dl = discreteLaw(law.dist, env);
+        return dl && { mean: dl.mean, sd: dl.sd };
+      }
       const a = law.dist.args.map(e => evaluate(e, env));
       switch (law.dist.kind) {
         case 'normal':
@@ -2476,6 +2986,8 @@ export class RVSystem {
             sd: a[1] * Math.exp(l2 / 2) * Math.sqrt(Math.max(-Math.expm1(2 * l1 - l2), 0)),
           };
         }
+        default:
+          return null;
       }
     }
     let mean = evaluate(law.d, env);
@@ -2592,6 +3104,7 @@ export class RVSystem {
   mean(name: string, env: Record<string, number>): number {
     const m = this.exactMoments(name, env) ?? this.quadMoments(name, env);
     if (m) return m.mean;
+    if (this.discreteDist(name)) return NaN; // invalid parameters; there is no sample to fall back on
     const c = this.curve(name, env);
     // Heavy tails (E(X^2) of a Cauchy): the sample mean is whatever the
     // largest draw happened to be. NaN, and meanUnstable() says why.
@@ -2669,16 +3182,18 @@ export class RVSystem {
     return level;
   }
 
-  /** Exact P(lo < name < hi) under the variable's law, or null when sampled. */
+  /** Exact P(lo < name < hi) under the variable's law, or null when sampled.
+   *  `edges` matters to a discrete law only (see probabilityValue). */
   exactProbability(
     name: string,
     lo: Expr | undefined,
     hi: Expr | undefined,
     env: Record<string, number>,
+    edges?: Pick<ProbBounds, 'loStrict' | 'hiStrict' | 'not'>,
   ): number | null {
     const law = this.exactLaw(name);
     if (!law) return null;
-    if (law.kind === 'dist') return probabilityValue(law.dist, lo, hi, env);
+    if (law.kind === 'dist') return probabilityValue(law.dist, lo, hi, env, edges);
     const pp = this.usumPP(law, env);
     if (!pp) return NaN;
     const total = cdfPP(pp, pp.breaks[pp.breaks.length - 1]);
@@ -2691,6 +3206,7 @@ export class RVSystem {
    * NaN when it is undefined everywhere (broken parameters).
    */
   probability(body: Expr, env: Record<string, number>): number {
+    this.refuseDiscrete(body);
     const cols = new Map<string, Float64Array>();
     for (const f of freeVars(body)) {
       if (this.rvs.has(f)) cols.set(f, this.columns(f, env));

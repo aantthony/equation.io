@@ -50,7 +50,7 @@ const signatures: Record<string, [string, string]> = {
   tube: ['tube((x(u), y(u), z(u)))', 'Tube along a parametric space curve'],
   open: ['data = open("file.csv")', 'Use a CSV file dropped onto the graph'],
   ...Object.fromEntries(DIST_FAMILIES.map(f => [f.name, [`X ~ ${distUsage(f)}`, `Declare ${f.help}`]])),
-  P: ['P(X < b)', 'Probability of a random-variable condition'],
+  P: ['P(X < b)', 'Probability of a random-variable condition. Over a discrete variable < and <= differ, and P(X = k) is a stem’s height'],
   E: ['E(X)', 'Expected value of a random variable'],
 };
 

@@ -8,7 +8,7 @@
 import { BinaryInfix, BinaryRightInfix, operators, Postfix, Prefix, shunting } from './lang/parser.ts';
 import Tokenizer, { type PatternDict, type Token } from './lang/tokenizer.ts';
 import { walk } from './lang/ast.ts';
-import { betaPdf, gammaPdf, lgamma, studentTPdf, weibullPdf } from './specfn.ts';
+import { betaPdf, binomPmf, discreteUniformPmf, gammaPdf, lgamma, negBinomPmf, poissonPmf, studentTPdf, weibullPdf } from './specfn.ts';
 
 export type IneqOp = '<' | '<=' | '>' | '>=';
 
@@ -773,6 +773,16 @@ export const BETA_PDF_FN = '[betapdf]';
 export const T_PDF_FN = '[tpdf]';
 export const WEIBULL_PDF_FN = '[weibullpdf]';
 
+/** The probability mass functions of the discrete laws (lib/dist.ts pmfExpr
+ *  emits them; lib/specfn.ts implements them). First argument k; exactly 0 off
+ *  the support and at any k that is not a whole number. CPU only — a pmf is
+ *  drawn as stems, never by a shader (lib/glsl.ts refuses them by name). */
+export const BINOM_PMF_FN = '[binomialpmf]';
+export const POISSON_PMF_FN = '[poissonpmf]';
+export const NEGBINOM_PMF_FN = '[negativebinomialpmf]';
+export const DUNIFORM_PMF_FN = '[discreteuniformpmf]';
+export const PMF_FNS: ReadonlySet<string> = new Set([BINOM_PMF_FN, POISSON_PMF_FN, NEGBINOM_PMF_FN, DUNIFORM_PMF_FN]);
+
 /** The name an internal call wears in a message: `[polygon]` is written
  *  polygon, and both angle helpers are the user's angle. */
 export const plainFnName = (name: string): string =>
@@ -854,6 +864,10 @@ export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
   [BETA_PDF_FN]: betaPdf,
   [T_PDF_FN]: studentTPdf,
   [WEIBULL_PDF_FN]: weibullPdf,
+  [BINOM_PMF_FN]: binomPmf,
+  [POISSON_PMF_FN]: poissonPmf,
+  [NEGBINOM_PMF_FN]: negBinomPmf,
+  [DUNIFORM_PMF_FN]: discreteUniformPmf,
 };
 
 /** Numerically evaluate a scalar expression with the given variable bindings. */

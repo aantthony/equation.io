@@ -32,19 +32,24 @@ import { buildComb, buildTube, combScale, curveExtent, curveFrames } from '../li
 import {
   type BaseDist,
   type DensityCurve,
+  type PmfStems,
   NO_MEAN_INFO,
   RVSystem,
   buildRVSystem,
   checkDerived,
   densityAt,
   densityExpr,
+  integerBounds,
+  lowerProbBody,
   matchExpectation,
   matchProbability,
   pdfExpr,
   probabilityValue,
   regionExpr,
   scanRandomRows,
+  selectStems,
   shadePolygon,
+  stemDotRadius,
   toExpectation,
   toProbability,
 } from '../lib/dist.ts';
@@ -192,6 +197,36 @@ function cssColor([r, g, b]: [number, number, number]): string {
   return `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
 }
 
+/**
+ * A discrete variable's stems (or the run of them a P(…) row selects, drawn
+ * `heavy`: a wide translucent band) as overlay geometry: every stem in ONE polyline — NaN lifts the pen
+ * — so a thousand stems are one stroke, plus a dot per stem while the whole
+ * numbers stand far enough apart on screen (stemDotRadius). An envelope (more
+ * whole numbers in view than lib's STEM_MAX) is the filled outline instead.
+ */
+function pushStems(extras: Overlay2D, run: PmfStems, color: [number, number, number], heavy: boolean, pxPerUnit: number): void {
+  const css = cssColor(color);
+  const { ks, ps } = run;
+  if (!ks.length) return;
+  if (run.envelope) {
+    const pts = [ks[0], 0];
+    ks.forEach((k, i) => pts.push(k, ps[i]));
+    pts.push(ks[ks.length - 1], 0);
+    extras.polylines.push({ pts, color: css, closed: true, fill: cssColorA(color, heavy ? 0.35 : 0.16), width: 1.5 });
+    return;
+  }
+  const pts: number[] = [];
+  const r = stemDotRadius(pxPerUnit);
+  // A selection is a translucent band over the variable's own stems, so the
+  // stems stay visible and overlapping P(…) rows show through each other.
+  const ink = heavy ? cssColorA(color, 0.45) : css;
+  ks.forEach((k, i) => {
+    pts.push(k, 0, k, ps[i], NaN, NaN);
+    if (r) extras.points.push({ x: k, y: ps[i], color: ink, r: heavy ? r + 3 : r, bare: heavy || r < 3 });
+  });
+  extras.polylines.push({ pts, color: ink, width: heavy ? Math.min(9, Math.max(3, pxPerUnit * 0.6)) : r ? 2 : 1 });
+}
+
 function cssColorA([r, g, b]: [number, number, number], a: number): string {
   return `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${a})`;
 }
@@ -244,6 +279,9 @@ let defsAnimated = false;
 let constEnv: Record<string, number> = {};
 /** Constants used as Σ/Π bounds; their sliders snap to integer steps. */
 let sumBoundNames = new Set<string>();
+/** Constants that are a whole-number distribution parameter (the n of
+ *  Binomial(n, p)); their sliders snap to integer steps too. */
+let wholeParamNames = new Set<string>();
 /** The `a' = …` system being integrated, its current values, and the graph
  *  time they have been carried to. Null when no row defines a state. */
 let stateSys: StateSystem | null = null;
@@ -759,6 +797,7 @@ function render() {
         case 'cobweb':
         case 'bifurcation':
         case 'density':
+        case 'pmf':
         case 'prob':
         case 'expect':
           break; // 2D-only plots (densities, flows, sequences, planar figures); skipped in 3D scenes
@@ -877,6 +916,7 @@ function render() {
     const halfH = (gl.drawingBufferHeight / 2) * (view.upp / (view.ratio ?? 1));
     const xmin = view.cx - halfW;
     const xmax = view.cx + halfW;
+    const stemPx = 1 / (view.upp * dpr); // CSS px between consecutive whole numbers
     const viewPts: Array<[number, number]> = [
       [view.cx, view.cy],
       [view.cx - halfW / 2, view.cy], [view.cx + halfW / 2, view.cy],
@@ -1109,11 +1149,28 @@ function render() {
           }
           break;
         }
+        case 'pmf': {
+          // Stems at the whole numbers in view; lib caches them per window.
+          try {
+            const drawn = rvSys.stems(plot.rv, env, { lo: xmin, hi: xmax });
+            if (drawn) pushStems(extras, drawn.stems, color, false, stemPx);
+          } catch { /* a parameter is missing this frame */ }
+          break;
+        }
         case 'prob': {
           // The estimate lives in the row's readout; the plot is the shaded
           // area under the variable's density, when the body has that shape.
           if (!plot.shade) break;
           try {
+            // Over a discrete variable: the selected stems, drawn heavier —
+            // `X < 3` stops at 2 and `X <= 3` takes the stem at 3.
+            const drawn = rvSys.stems(plot.shade.rv, env, { lo: xmin, hi: xmax });
+            if (drawn) {
+              for (const run of selectStems(drawn.stems, drawn.law, integerBounds(plot.shade, env))) {
+                pushStems(extras, run, color, true, stemPx);
+              }
+              break;
+            }
             const c = rvSys.curve(plot.shade.rv, env, { lo: xmin, hi: xmax });
             if (!c) break;
             const lo = plot.shade.lo ? evaluate(plot.shade.lo, env) : undefined;
@@ -1131,7 +1188,9 @@ function render() {
           try {
             const m = rvSys.mean(plot.rv, env);
             if (!isFinite(m)) break;
-            const exact = rvSys.exactDist(plot.rv);
+            // (A discrete variable's marker reaches its pmf AT the mean: the
+            // stem's height at a whole-number mean, the axis otherwise.)
+            const exact = rvSys.exactDist(plot.rv) ?? rvSys.discreteDist(plot.rv);
             let h = exact
               ? evaluate(pdfExpr(exact, { kind: 'num', value: m }), env)
               : (c => (c ? densityAt(c, m) : 0))(rvSys.curve(plot.rv, env, { lo: xmin, hi: xmax }));
@@ -1376,6 +1435,7 @@ function recompileAll() {
     taken: n => nameTaken(defs, n),
   });
   rvNames = builtRVs.names;
+  wholeParamNames = rvSys.wholeParamNames();
   const distRows = new Set<Equation>();
   const movingConsts = animatedConstNames(defs);
   // Readout environment: constants at t = 0. Animated or state-fed variables
@@ -1438,7 +1498,10 @@ function recompileAll() {
       eq.error = problem;
       continue;
     }
-    if (rv.kind === 'base') {
+    if (rv.kind === 'base' && rv.dist.discrete) {
+      // A pmf draws as stems on the CPU overlay; there is no density to shade.
+      eq.cls = { ...densityCls(name), plot: { type: 'pmf', rv: name } };
+    } else if (rv.kind === 'base') {
       eq.cls = classify(densityExpr(rv.dist), constNames);
     } else {
       classifyDerived(eq, name);
@@ -1451,10 +1514,9 @@ function recompileAll() {
    * variable: L` about a list defined two rows above; without the lowering,
    * the reduction never became the number the bound needs.
    */
-  const parseRowBody = (body: string): Expr => lowerLists(
+  const parseRowBody = (body: string, top: (e: Expr, lower: (e: Expr) => Expr) => Expr = (e, lower) => lower(e)): Expr => top(
     resolveExpr(parseExpr(body, fnNames, listNames, valueNames), getFn, ropts),
-    getList,
-    ropts,
+    e => lowerLists(e, getList, ropts),
   );
 
   const seenViewport = new Set<string>();
@@ -1475,10 +1537,12 @@ function recompileAll() {
       const probBody = defs.consts.has('P') || defs.fns.has('P') ? null : matchProbability(text);
       if (probBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-        const p = toProbability(parseRowBody(probBody), rvNames);
+        const p = toProbability(parseRowBody(probBody, lowerProbBody), rvNames);
         for (const name of p.rvs) {
           if (!rvSys.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
+        // Point events only of a discrete variable; nothing sampled over one.
+        rvSys.checkProbability(p);
         // Bounds around an inline expression (`P(0.5 < X + Y < 1.5)`) become
         // bounds on an anonymous derived variable, so exactness and shading
         // work exactly as for a named one.
@@ -1487,7 +1551,8 @@ function recompileAll() {
           checkDerived(p.inline.e, rvNames, constNames);
           const anon = `@P${eq.id}`;
           rvSys.add({ name: anon, kind: 'derived', expr: p.inline.e });
-          single = { rv: anon, lo: p.inline.lo, hi: p.inline.hi };
+          const { e: _body, ...bounds } = p.inline;
+          single = { rv: anon, ...bounds };
         }
         // Constant bounds on one variable whose law is a closed-form pdf get
         // the exact CDF and the shader-drawn region.
@@ -1514,7 +1579,7 @@ function recompileAll() {
           if (envT0) {
             try {
               const value = single
-                ? rvSys.exactProbability(single.rv, single.lo, single.hi, envT0)
+                ? rvSys.exactProbability(single.rv, single.lo, single.hi, envT0, single)
                 : null;
               if (value !== null) {
                 if (isFinite(value)) eq.info = `≈ ${value.toFixed(4)}`;
@@ -2398,8 +2463,9 @@ function reconcile() {
       max.value = fmtNum(eq.sliderMax);
       range.min = String(eq.sliderMin);
       range.max = String(eq.sliderMax);
-      // Σ/Π bounds are integers, so their sliders step whole terms at a time.
-      range.step = sumBoundNames.has(sliderDef.name) ? '1' : String((eq.sliderMax - eq.sliderMin) / 400);
+      // Σ/Π bounds are integers, so their sliders step whole terms at a time;
+      // likewise the n of Binomial(n, p), which no fraction is valid for.
+      range.step = sumBoundNames.has(sliderDef.name) || wholeParamNames.has(sliderDef.name) ? '1' : String((eq.sliderMax - eq.sliderMin) / 400);
       range.value = String(v);
       wanted.push(eq.sliderUI.box);
     }
@@ -2980,6 +3046,13 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       + 'P(Q > 3.84)'],
     ['heavy tails: t and Cauchy', 'view(x = -6..6, y = -0.05..0.45, ratio = 15); k = 2; Z ~ Normal(0, 1); X ~ T(k); '
       + 'C ~ Cauchy(0, 1); P(X > 2); E(C)'],
+    ['binomial stems', 'view(x = -1.5..21.5, y = -0.02..0.24, ratio = 50); n = 20; p = 0.3; X ~ Binomial(n, p); '
+      + 'P(X <= 4); E(X)'],
+    ['Poisson: < versus <=', 'view(x = -1.5..13.5, y = -0.02..0.28, ratio = 30); m = 4; X ~ Poisson(m); '
+      + 'P(X < 3); P(X <= 3); P(X = 3)'],
+    ['waiting for a success', 'view(x = -1.5..21.5, y = -0.02..0.3, ratio = 40); p = 0.25; G ~ Geometric(p); '
+      + 'W ~ NegativeBinomial(3, p); P(G > 4)'],
+    ['a fair die', 'view(x = -0.5..7.5, y = -0.02..0.3, ratio = 16); D ~ DiscreteUniform(1, 6); P(2 < D <= 5); E(D)'],
     ['conditional variable', 'X ~ Normal(0, 1); Y = {X > 0: X^2, 1}; P(Y > 0.5); P(Y > X)'],
     ['expectation', 'X ~ Uniform(0, 1); Y = X^2; E(Y); E(X + Y)'],
   ]],

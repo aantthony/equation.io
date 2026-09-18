@@ -7,17 +7,37 @@
  * turn `X ~ NewName(…)` into a regression. No imports: everything may use it.
  */
 
-export type BaseKind =
+export type ContinuousKind =
   | 'normal' | 'uniform' | 'exponential'
   | 'gamma' | 'beta' | 'chisquared' | 'studentt' | 'lognormal' | 'cauchy' | 'weibull';
+
+/** Laws on the integers: a pmf drawn as stems, never a density. */
+export type DiscreteKind =
+  | 'binomial' | 'poisson' | 'geometric' | 'negbinomial' | 'bernoulli' | 'discreteuniform';
+
+export type BaseKind = ContinuousKind | DiscreteKind;
+
+/** What a parameter's value must satisfy, beyond being a finite number. */
+export interface DistParam {
+  name: string;
+  /** Must be > 0. */
+  positive?: boolean;
+  /** Must be a whole number (`count`: and ≥ 0). A value within rounding of a
+   *  whole number is one — `n = 0.1 * 30` is 3 — see wholeNumber in specfn.ts. */
+  whole?: boolean | 'count';
+  /** A probability: '[0,1]' may be degenerate (an atom), '(0,1]' may not be 0. */
+  unit?: '[0,1]' | '(0,1]';
+}
 
 export interface DistFamily {
   kind: BaseKind;
   /** The canonical spelling; matching is case-insensitive. */
   name: string;
   aliases: string[];
-  /** Parameters in order; `positive` ones must be > 0. */
-  params: Array<{ name: string; positive?: boolean }>;
+  /** True for a law on the integers (a pmf, drawn as stems). */
+  discrete?: boolean;
+  /** Parameters in order, each with what its value must satisfy. */
+  params: DistParam[];
   /** Standard parameters a bare name takes (`X ~ N`); absent where the
    *  family has no standard member (`X ~ Gamma` must say which). */
   defaults?: number[];
@@ -80,6 +100,42 @@ export const DIST_FAMILIES: readonly DistFamily[] = [
     params: [{ name: 'shape', positive: true }, { name: 'scale', positive: true }],
     help: 'a Weibull random variable',
   },
+  // --- discrete: laws on the integers. The conventions below are the ones
+  // scipy uses, and each `help` says so, because two are genuinely contested
+  // (Geometric counts TRIALS, from 1; NegativeBinomial counts FAILURES, from
+  // 0 — so NegativeBinomial(1, p) is Geometric(p) − 1). None of these
+  // spellings is a builtin function or an everyday coefficient name, so none
+  // is a modelName: `Y ~ Poisson(3)` declares whatever is on the left.
+  {
+    kind: 'binomial', name: 'Binomial', aliases: ['Binom'], discrete: true,
+    params: [{ name: 'n', whole: 'count' }, { name: 'p', unit: '[0,1]' }],
+    help: 'a binomial random variable: successes in n trials (alias Binom)',
+  },
+  {
+    kind: 'poisson', name: 'Poisson', aliases: ['Pois'], discrete: true,
+    params: [{ name: 'mean', positive: true }],
+    help: 'a Poisson random variable (alias Pois)',
+  },
+  {
+    kind: 'geometric', name: 'Geometric', aliases: ['Geom'], discrete: true,
+    params: [{ name: 'p', unit: '(0,1]' }],
+    help: 'a geometric random variable: the TRIAL of the first success, 1, 2, 3, … (alias Geom)',
+  },
+  {
+    kind: 'negbinomial', name: 'NegativeBinomial', aliases: ['NegBin'], discrete: true,
+    params: [{ name: 'r', positive: true }, { name: 'p', unit: '(0,1]' }],
+    help: 'a negative binomial random variable: FAILURES before the r-th success, 0, 1, 2, …; r > 0 need not be whole (alias NegBin)',
+  },
+  {
+    kind: 'bernoulli', name: 'Bernoulli', aliases: [], discrete: true,
+    params: [{ name: 'p', unit: '[0,1]' }],
+    help: 'a Bernoulli random variable: 1 with probability p, else 0',
+  },
+  {
+    kind: 'discreteuniform', name: 'DiscreteUniform', aliases: [], discrete: true,
+    params: [{ name: 'a', whole: true }, { name: 'b', whole: true }],
+    help: 'a uniform random variable on the whole numbers a, a + 1, …, b (both included)',
+  },
 ];
 
 const BY_NAME = new Map<string, DistFamily>(
@@ -91,6 +147,8 @@ const BY_KIND = new Map<BaseKind, DistFamily>(DIST_FAMILIES.map(f => [f.kind, f]
 export const distFamily = (name: string): DistFamily | undefined => BY_NAME.get(name.toLowerCase());
 
 export const familyOf = (kind: BaseKind): DistFamily => BY_KIND.get(kind)!;
+
+export const isDiscreteKind = (kind: BaseKind): kind is DiscreteKind => !!familyOf(kind).discrete;
 
 /** `Gamma(shape, rate)`. */
 export const distUsage = (f: DistFamily): string => `${f.name}(${f.params.map(p => p.name).join(', ')})`;

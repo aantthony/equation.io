@@ -1,7 +1,8 @@
 /**
- * Special functions behind the continuous distributions (lib/dist.ts): ln Γ,
- * the regularized incomplete gamma and beta functions, and the densities
- * that need them. Everything here is plain double arithmetic with no imports,
+ * Special functions behind the distributions (lib/dist.ts): ln Γ, the
+ * regularized incomplete gamma and beta functions (the cdfs of the continuous
+ * zoo AND of Binomial, Poisson and NegativeBinomial), the densities that need
+ * them, and the discrete laws' mass functions. Everything here is plain double arithmetic with no imports,
  * so expr.ts can register the densities as builtins.
  *
  * The incomplete functions return BOTH tails, `[lower, upper]`, each computed
@@ -351,4 +352,76 @@ export function weibullPdf(x: number, shape: number, scale: number): number {
   const w = Math.exp(shape * lr); // (x/λ)^k
   if (w === Infinity) return 0;
   return (shape / scale) * Math.exp((shape - 1) * lr - w);
+}
+
+// --- probability mass functions (lib/dist.ts pmfExpr emits them) ---
+//
+// Same conventions as the densities: exactly 0 — never NaN — off the support,
+// at a k that is not a whole number, and while a parameter is invalid (a
+// slider n passing through 2.5 draws nothing, since no Binomial(2.5, p)
+// exists). Everything is formed in log space from Loader's saddle-point
+// pieces, so Binomial(1000, 0.3) and Poisson(1e9) neither overflow nor lose
+// their digits to ln Γ differences of order n ln n.
+
+/**
+ * x as a whole number, or NaN when it is not one. Within rounding counts:
+ * a slider value 0.1·30 = 3.0000000000000004 is 3.
+ */
+export function wholeNumber(x: number): number {
+  const r = Math.round(x);
+  return isFinite(r) && Math.abs(x - r) <= Math.min(1e-6, 1e-9 * Math.max(1, Math.abs(r))) ? r : NaN;
+}
+
+/** ln n! − [½ln(2πn) + n ln n − n]: the error of Stirling's formula, n > 0. */
+function stirlerr(n: number): number {
+  if (n >= 20) return stirlingCorr(n);
+  return lgamma(n + 1) - (0.5 * Math.log(2 * Math.PI * n) + n * (Math.log(n) - 1));
+}
+
+/** x ln(x/m) + m − x ≥ 0, the deviance part, without cancellation near x = m. */
+const bd0 = (x: number, m: number): number => -x * log1pmx((m - x) / x);
+
+/** Loader's binomial kernel, C(n, x) p^x q^(n−x) for REAL 0 ≤ x ≤ n (the
+ *  negative binomial calls it off the integers), 0 < p < 1, q = 1 − p. */
+function binomRaw(x: number, n: number, p: number, q: number): number {
+  if (n === 0) return 1;
+  if (x === 0) return Math.exp(n * (p < 0.1 ? Math.log1p(-p) : Math.log(q)));
+  if (x === n) return Math.exp(n * (q < 0.1 ? Math.log1p(-q) : Math.log(p)));
+  const lc = stirlerr(n) - stirlerr(x) - stirlerr(n - x) - bd0(x, n * p) - bd0(n - x, n * q);
+  return Math.exp(lc + 0.5 * Math.log(n / (2 * Math.PI * x * (n - x))));
+}
+
+/** Binomial(n, p) at k: n a whole number ≥ 0, 0 ≤ p ≤ 1 (0 and 1 are atoms). */
+export function binomPmf(k: number, n: number, p: number): number {
+  n = wholeNumber(n);
+  if (!(n >= 0 && p >= 0 && p <= 1) || !Number.isInteger(k) || k < 0 || k > n) return 0;
+  if (p === 0) return k === 0 ? 1 : 0;
+  if (p === 1) return k === n ? 1 : 0;
+  return binomRaw(k, n, p, 1 - p);
+}
+
+/** Poisson(mean) at k, mean > 0. */
+export function poissonPmf(k: number, mean: number): number {
+  if (!(mean > 0 && mean < Infinity) || !Number.isInteger(k) || k < 0) return 0;
+  if (k === 0) return Math.exp(-mean);
+  return Math.exp(-stirlerr(k) - bd0(k, mean)) / Math.sqrt(2 * Math.PI * k);
+}
+
+/** NegativeBinomial(r, p) at k FAILURES before the r-th success: r > 0 real,
+ *  0 < p ≤ 1 (p = 1 is the atom at 0). Γ(k + r)/(k! Γ(r)) p^r (1 − p)^k. */
+export function negBinomPmf(k: number, r: number, p: number): number {
+  if (!(r > 0 && r < Infinity && p > 0 && p <= 1) || !Number.isInteger(k) || k < 0) return 0;
+  if (p === 1) return k === 0 ? 1 : 0;
+  if (k === 0) return Math.exp(r * Math.log(p));
+  // r/(r + k) · binom(r; r + k, p): the kernel symmetric in (r, k), so huge r
+  // or huge k costs nothing.
+  return (r / (r + k)) * binomRaw(r, r + k, p, 1 - p);
+}
+
+/** DiscreteUniform(a, b) at k: whole numbers a ≤ b, both included. */
+export function discreteUniformPmf(k: number, a: number, b: number): number {
+  a = wholeNumber(a);
+  b = wholeNumber(b);
+  if (!(a <= b) || !Number.isInteger(k) || k < a || k > b) return 0;
+  return 1 / (b - a + 1);
 }

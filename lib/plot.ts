@@ -16,6 +16,7 @@ import { coordinateRow, lowerCoordinateFlow } from './coordinate.ts';
 import { complexParts } from './complex-parts.ts';
 import { SPECIAL_FORMS, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
+import type { ProbBounds } from './dist.ts';
 import { ANGLE_FN, builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -106,9 +107,15 @@ export type Plot =
   /** A derived random variable (`S = X + Y`, or a bare expression in random
    *  variables): the sampled density estimate of the named variable. */
   | { type: 'density'; rv: string }
+  /** A discrete random variable (`X ~ Binomial(10, 0.3)`): its pmf as stems —
+   *  a dot at (k, P(X = k)) on a thin line from the axis — at the whole
+   *  numbers of the support in view (RVSystem.stems; CPU overlay). */
+  | { type: 'pmf'; rv: string }
   /** A `P(…)` row estimated from samples. With `shade`, the area under rv's
-   *  density between the bounds fills in (single-variable bodies only). */
-  | { type: 'prob'; body: Expr; shade?: { rv: string; lo?: Expr; hi?: Expr } }
+   *  density between the bounds fills in (single-variable bodies only); over
+   *  a discrete rv the value is exact and the selected STEMS highlight, which
+   *  is where the bounds' strictness shows. */
+  | { type: 'prob'; body: Expr; shade?: { rv: string } & ProbBounds }
   /** An `E(…)` row: the mean lives in the row's readout; the plot is a
    *  vertical marker at x = E under the density of rv (the body itself,
    *  registered as an anonymous derived variable when not a bare name). */
