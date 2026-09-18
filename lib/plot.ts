@@ -608,7 +608,9 @@ function classifyLowered(
       throw new Error(`${eqs} in ${dim} unknowns — a system needs one equation per unknown.`);
     }
     const residuals = l.items.map((a, k): Expr => ({ kind: 'bin', op: '-', a, b: r.items[k] }));
-    const positional = coordinate && !hasParam && !coordinate.rhs.some(e =>
+    // (Dragging writes the pointer's chart coordinates back, and a pointer
+    // ray does not determine a point in space: planar rows only.)
+    const positional = coordinate && dim === 2 && !hasParam && !coordinate.rhs.some(e =>
       [...freeVars(e)].some(v => ['x', 'y', 'z'].includes(v) || Object.hasOwn(fields, v)));
     // Only a direct angle coordinate — atan2, or the angle(…) measurement —
     // is periodic; nesting one inside a real expression does not make that

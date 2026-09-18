@@ -20,7 +20,7 @@ import { buildStateSystem, initialState } from './state.ts';
 import { parseExpr, substVars } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import { type Classified, classify } from './plot.ts';
-import { buildGridField, type GridField } from './grid.ts';
+import { buildGridField, planarField, type GridField } from './grid.ts';
 import { classifySeqRec, scanSeqRec } from './seq.ts';
 
 export interface CompiledRows {
@@ -57,7 +57,7 @@ export function compileRows(rows: string[]): CompiledRows {
   const constNames = new Set([...built.defs.consts.keys(), ...built.defs.states.keys()]);
   const gridFields: GridField[] = [];
   for (const [name, e] of built.defs.fields) {
-    gridFields.push(buildGridField(name, e, constNames));
+    if (planarField(e)) gridFields.push(buildGridField(name, e, constNames));
   }
   const fieldEnv = Object.fromEntries(built.defs.fields);
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));

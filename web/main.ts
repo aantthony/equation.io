@@ -60,7 +60,7 @@ import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr
 import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
-import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
+import { type GridField, angularSpacing, buildGridField, planarField, sampleGradMag } from '../lib/grid.ts';
 import { CURVE_SAMPLES, type PathSampler, pathSampler } from '../lib/path.ts';
 import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
@@ -1384,6 +1384,7 @@ function recompileAll() {
 
   gridFields = [];
   for (const [name, e] of defs.fields) {
+    if (!planarField(e)) continue;
     try {
       gridFields.push(buildGridField(name, e, constNames));
     } catch (e) {
@@ -2992,6 +2993,12 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['log-polar', 'rho = ln(x^2 + y^2)/2; theta = atan2(y, x)'],
     ['hyperbolic grid', 'p = x y; q = (x^2 - y^2)/2'],
     ['spinning polar', 'r = sqrt(x^2 + y^2); theta = atan2(y, x) + t/4'],
+    ['spherical chart', 'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); '
+      + 'rho = 2; (rho, theta, phi) = (2, pi/4, pi/3)'],
+    ['spherical flower', 'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); rho = 2 + cos(3 theta) sin(phi)^2'],
+    ['spherical spiral', 'rho = sqrt(x^2 + y^2 + z^2); theta = atan2(y, x); phi = acos(z/rho); '
+      + 'rho = 2; (rho, theta, phi) = (2, 12 pi u, pi u)'],
+    ['cylindrical chart', 'r = sqrt(x^2 + y^2); theta = atan2(y, x); r = 1.5 + sin(2 z)/2; (r, theta, z) = (2.5, 6 pi u, 6 u - 3)'],
   ]],
   ['probability', [
     ['normal density', 'X ~ Normal(0, 1)'],

@@ -138,6 +138,13 @@ const SCENARIOS: Scenario[] = [
     action: page => dragOnCanvas(page, 220, 120, 40),
   },
   {
+    // Coordinate fields substitute in, so the chart's expressions repeat
+    // through the field: rho inside phi inside the equation, per march step.
+    name: 'orbit-3d-spherical-chart',
+    rows: ['rho = sqrt(x^2+y^2+z^2)', 'theta = atan2(y,x)', 'phi = acos(z/rho)', 'rho = 1 + cos(3 theta) sin(2 phi)'],
+    action: page => dragOnCanvas(page, 220, 120, 40),
+  },
+  {
     name: 'animated-t',
     rows: ['y = sin(x - t)', 'x^2 + y^2 = 4 + sin(t)'],
     action: page => settle(page, 60),

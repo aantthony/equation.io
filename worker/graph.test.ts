@@ -544,3 +544,28 @@ describe('whole-row forms over a random variable', () => {
     expect(analyze(['X ~ Normal(0, 1)', 'X^2 + 1']).rows[1].cls?.plot.type).toBe('density');
   });
 });
+
+describe('coordinate fields over z through analyze()', () => {
+  const types = (rows: string[]) => analyze(rows).rows.map(r => r.error ?? r.cls?.plot.type ?? 'def');
+  const polar = ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
+
+  it('leaves every planar chart row what it was', () => {
+    expect(types([...polar, 'r = 1 + cos(theta)', '(r, theta) = (2, pi/4)', '(r, theta) = (3u, 6 pi u)',
+      "(r', theta') = (r(1-r), 1)", 'theta = pi', 'theta = 3 + 2 pi']))
+      .toEqual(['def', 'def', 'implicit2d', 'system', 'system', 'vfield2d', 'implicit2d', 'implicit2d']);
+    const point = analyze([...polar, '(r, theta) = (2, pi/4)']).rows.at(-1)!.cls!.plot;
+    expect(point.type === 'system' && point.dim === 2 && point.coordinates?.length === 2).toBe(true);
+    // A planar field in a z equation was a surface before fields could use z.
+    expect(types(['s = sqrt(x^2+y^2)', 's = 1 + z^2'])).toEqual(['def', 'implicit3d']);
+  });
+
+  it('mixes a planar chart with a spherical one built on it', () => {
+    const rows = [...polar, 'rho = sqrt(r^2 + z^2)', 'phi = atan2(r, z)', 'rho = 2', 'r = 1',
+      '(rho, theta, phi) = (2, pi/4, pi/3)', '(r, theta, z) = (1, 6 pi u, u)'];
+    expect(types(rows)).toEqual(['def', 'def', 'def', 'def', 'implicit3d', 'implicit2d', 'system', 'system']);
+    const a = analyze(rows);
+    // The chart alone is planar; its rows in space are what make the scene 3D.
+    expect(analyze(rows.slice(0, 4)).rows.some(r => r.cls?.needs3D)).toBe(false);
+    expect(a.rows.map(r => !!r.cls?.needs3D)).toEqual([false, false, false, false, true, false, true, true]);
+  });
+});

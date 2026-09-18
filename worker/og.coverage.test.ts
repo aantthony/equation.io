@@ -127,6 +127,22 @@ describe('previewGap', () => {
     expect(why).toContain('live app renders');
   });
 
+  it('falls back for surfaces and draws points and curves in a spherical chart', () => {
+    const chart = ['rho = sqrt(x^2+y^2+z^2)', 'theta = atan2(y,x)', 'phi = acos(z/rho)'];
+    for (const row of ['rho = 2', 'phi = pi/4', 'rho = 1 + cos(3 theta)']) {
+      expect(gap([...chart, row])).toContain('z = f(x, y)');
+      expect(canRenderOg([...chart, row])).toBe(false);
+    }
+    // `z = rho cos(phi)` has z on both sides once the fields substitute in:
+    // an implicit surface, not the heightmap its left side suggests.
+    expect(gap([...chart, 'z = rho cos(phi)'])).toContain('z = f(x, y)');
+    expect(gap(['z = z^2 + x'])).toContain('z = f(x, y)');
+    expect(canRenderOg([...chart, '(rho, theta, phi) = (2, pi/4, pi/3)'])).toBe(true);
+    expect(canRenderOg([...chart, '(rho, theta, phi) = (2, 6 pi u, pi u)'])).toBe(true);
+    // Definitions alone draw nothing, in space as in the plane.
+    expect(canRenderOg(chart)).toBe(false);
+  });
+
   it('explains revolve(f) as the implicit surface it is', () => {
     expect(gap(['revolve(sin(x) + 2)'])).toBe(gap(['y^2 + z^2 = (sin(x) + 2)^2']));
     expect(gap(['revolve(sqrt(y), y)'])).toContain('live app renders');

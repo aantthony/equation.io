@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { type Definition, buildDefs } from './defs.ts';
 import { evaluate } from './expr.ts';
-import { angularSpacing, buildGridField, sampleGradMag } from './grid.ts';
+import { angularSpacing, buildGridField, planarField, sampleGradMag } from './grid.ts';
 
 const consts = (...pairs: Array<[string, string]>): Definition[] =>
   pairs.map(([name, rhs]) => ({ kind: 'const', name, rhs }));
@@ -42,10 +42,12 @@ describe('coordinate fields in buildDefs', () => {
     expect(errors.get('s')).toMatch(/defined in terms of itself/);
   });
 
-  it('rejects fields using variables beyond x, y, t, constants', () => {
-    const { defs, errors } = buildDefs(consts(['q', 'x + z']));
+  it('rejects fields using variables beyond x, y, z, t, constants', () => {
+    const { defs, errors } = buildDefs(consts(['q', 'x + w']));
     expect(defs.fields.size).toBe(0);
-    expect(errors.get('q')).toMatch(/found z/);
+    expect(errors.get('q')).toMatch(/found w/);
+    // z is a coordinate of space, so a field may use it.
+    expect(buildDefs(consts(['q', 'x + z'])).defs.fields.has('q')).toBe(true);
   });
 
   it('rejects fields with non-evaluable calls', () => {
@@ -122,5 +124,16 @@ describe('sampleGradMag', () => {
     const f = buildGridField('s', defs.fields.get('s')!, new Set());
     // Away from integer x, ∇(floor(x)+2y) ≈ (0, 2).
     expect(sampleGradMag(f, [[0.5, 0]], {}, 0.05)).toBeCloseTo(2);
+  });
+});
+
+describe('planarField', () => {
+  it('draws a grid family for fields over the plane only', () => {
+    const { defs } = buildDefs(consts(
+      ['r', 'sqrt(x^2 + y^2)'],
+      ['rho', 'sqrt(r^2 + z^2)'],
+      ['theta', 'atan2(y, x)'],
+    ));
+    expect([...defs.fields].filter(([, e]) => planarField(e)).map(([name]) => name)).toEqual(['r', 'theta']);
   });
 });

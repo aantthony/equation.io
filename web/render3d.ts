@@ -93,6 +93,15 @@ const MIN_SAMPLES = 48;
 const FINEST = 4;
 /** Fraction of the estimated distance-to-zero actually stepped. */
 const SAFETY = 0.6;
+/** Sign changes per ray that may be refused as jumps (see JUMP_RATIO); past
+ *  the budget a field that jumps on most steps (floor(20 x) - z) is marched
+ *  without further refusals, as it always was. */
+const JUMP_BUDGET = 4;
+/** A sign change is a root only if its bracket closes: bisecting a continuous
+ *  crossing shrinks |F(b) - F(a)| with the bracket, while across a jump — the
+ *  ±π cut of atan2 in theta = pi/4, a floor step, a pole — it stays the size
+ *  it started. Refused when the bisected gap is still this fraction of it. */
+const JUMP_RATIO = 0.25;
 
 function surfaceFrag(field: string, grad?: [string, string, string], params?: string[]): string {
   const gradFn = grad
@@ -159,7 +168,7 @@ void main() {
   // loop, so the common ray pays nothing, and they are budgeted per ray: a
   // field whose domain is shredded (sqrt(sin(20 x y))) flips on most steps,
   // and past the budget a straddling step is skipped as it always was.
-  int edges = 0, refine = 0;
+  int edges = 0, refine = 0, jumps = 0;
   bool entering = false;
   float tEdge = 0.0, tIn = 0.0, vIn = 0.0;
 
@@ -188,15 +197,26 @@ void main() {
     bool finite = !isnan(v) && !isinf(v) && !isnan(vPrev) && !isinf(vPrev);
     if (finite && sign(v) != sign(vPrev)) {
       // Bisect to the crossing.
-      float a = tPrev, b = t, va = vPrev;
+      float a = tPrev, b = t, va = vPrev, vb = v;
       for (int j = 0; j < ${BISECT}; j++) {
         float m = 0.5 * (a + b);
         float vm = F(ro + rd * m);
-        if (sign(vm) == sign(va)) { a = m; va = vm; } else { b = m; }
+        if (sign(vm) == sign(va)) { a = m; va = vm; } else { b = m; vb = vm; }
       }
-      tHit = 0.5 * (a + b);
-      hit = true;
-      break;
+      // A bracket that did not close is a jump, not a root: step over it and
+      // keep marching, since the real surface may lie beyond.
+      bool jump = !(abs(vb - va) < ${JUMP_RATIO} * abs(v - vPrev));
+      if (!jump || jumps >= ${JUMP_BUDGET}) {
+        tHit = 0.5 * (a + b);
+        hit = true;
+        break;
+      }
+      jumps++;
+      tPrev = b;
+      vPrev = vb;
+      dt = dtMin;
+      if (b >= t1) break;
+      continue;
     }
     // |dF/dt| from the secant; a flat or non-finite stretch steps at dtMax.
     float slope = finite ? abs(v - vPrev) / max(t - tPrev, 1e-20) : 0.0;

@@ -534,6 +534,21 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `r = sqrt(x^2+y^2); theta = atan2(y,x)`. Its level sets draw as a grid, and
   later rows may use it: adding `r = 2(1 + cos(theta))` plots a cardioid in
   polar coordinates.
+- Coordinate fields in space: a field may use z, e.g. spherical
+  `rho = sqrt(x^2+y^2+z^2); theta = atan2(y,x); phi = acos(z/rho)`. A z-using
+  field only defines — it draws no grid and does not by itself make the graph
+  3D; rows using it do: `rho = 2` is a sphere, `phi = pi/4` a cone,
+  `rho = 1 + cos(3 theta)` a surface. Fields may be built from fields
+  (`rho = sqrt(r^2 + z^2)`). Cylindrical needs no new field: r, theta and z.
+  Angle surfaces cut at the branch of atan2: `theta = pi/4` is a half-plane,
+  and a surface lying exactly on the cut (`theta = pi`) does not draw in 3D.
+  `(rho, theta, phi) = (2, pi/4, pi/3)` is the point with those three
+  coordinates (three coordinates in space, two in the plane; with a z-using
+  field, two are "2 equations in 3 unknowns"). Only atan2-valued coordinates
+  wrap modulo 2pi — an acos-valued polar angle lives in [0, pi] and does not.
+  Where a chart is singular (theta on the z-axis) no point is reported.
+  `(rho, theta, phi) = (2, 6 pi u, pi u)` traces a space curve in the chart.
+  Points in space are not draggable, and coordinate flows are 2D only.
 - Coordinate points: after defining r and theta above, `(r, theta) = (2, pi/4)`
   draws the point satisfying both coordinates. Angles in atan2-valued left
   components wrap modulo 2pi, so 9pi/4 and pi/4 name the same position.

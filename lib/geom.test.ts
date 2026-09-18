@@ -406,8 +406,9 @@ describe('point definitions', () => {
 
   it('rejects component-name collisions and plane-dependent points', () => {
     expect(defsOf(['A = (1, 2)', 'A_x = 5']).errors.get('A')).toMatch(/A_x is already defined/);
-    expect(defsOf(['A = (x, 0)']).errors.get('A')).toMatch(/cannot depend on x or y/);
-    expect(defsOf(['s = x + y', 'A = (s, 0)']).errors.get('A')).toMatch(/cannot depend on x or y/);
+    expect(defsOf(['A = (x, 0)']).errors.get('A')).toMatch(/cannot depend on x, y, or z/);
+    expect(defsOf(['A = (z, 0)']).errors.get('A')).toMatch(/cannot depend on x, y, or z/);
+    expect(defsOf(['s = x + y', 'A = (s, 0)']).errors.get('A')).toMatch(/cannot depend on x, y, or z/);
   });
 
   it('keeps coordinate fields working alongside points', () => {

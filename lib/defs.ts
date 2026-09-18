@@ -33,6 +33,9 @@ import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDat
 import { type Mat, matrixFromList } from './mat.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
+/** The axis variables: a definition reaching one is a coordinate field. */
+const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
+
 export type Definition =
   | RegressionRow
   | { kind: 'const'; name: string; rhs: string }
@@ -69,10 +72,11 @@ export interface Defs {
   fns: Map<string, FnDef>;
   /**
    * Coordinate fields: definitions like `r = sqrt(x^2+y^2)` whose value
-   * depends on the plane. Fully resolved to free vars in {x, y, t, consts}.
-   * Each field is a grid family (its level sets) and substitutes into plots,
-   * so `theta = atan2(y,x); r = 1 + cos(theta)` draws a polar grid and a
-   * cardioid.
+   * depends on position. Fully resolved to free vars in {x, y, z, t, consts}.
+   * Each field substitutes into plots, and a planar one (no z) is a grid
+   * family too (its level sets; see planarField in grid.ts), so `theta = atan2(y,x);
+   * r = 1 + cos(theta)` draws a polar grid and a cardioid, while
+   * `rho = sqrt(x^2+y^2+z^2); rho = 2` only draws the sphere.
    */
   fields: Map<string, Expr>;
   /**
@@ -1457,7 +1461,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
           }
           for (const item of e.items) {
             for (const fv of freeVars(item)) {
-              if (fv === 'x' || fv === 'y') throw new Error('A point cannot depend on x or y.');
+              if (SPACE.has(fv)) throw new Error('A point cannot depend on x, y, or z.');
             }
           }
           defs.points.add(d.name);
@@ -1604,15 +1608,15 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
     for (const k of derivs.keys()) stateNames.add(k);
   }
 
-  // A definition whose value depends on the plane — x or y, directly or via
-  // another such definition — is a coordinate field, not a constant.
+  // A definition whose value depends on position — x, y, or z, directly or
+  // via another such definition — is a coordinate field, not a constant.
   const fieldNames = new Set<string>();
   for (let changed = true; changed;) {
     changed = false;
     for (const [name, e] of defs.consts) {
       if (fieldNames.has(name)) continue;
       for (const fv of freeVars(e)) {
-        if (fv === 'x' || fv === 'y' || fieldNames.has(fv)) {
+        if (SPACE.has(fv) || fieldNames.has(fv)) {
           fieldNames.add(name);
           changed = true;
           break;
@@ -1620,12 +1624,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       }
     }
   }
-  // A point component that reaches x/y through another definition would
+  // A point component that reaches x/y/z through another definition would
   // otherwise become a grid field; a point is a constant, so reject it.
   for (const name of [...fieldNames]) {
     const owner = compOwner.get(name);
     if (!owner || !defs.points.has(owner)) continue;
-    errors.set(owner, 'A point cannot depend on x or y.');
+    errors.set(owner, 'A point cannot depend on x, y, or z.');
     defs.points.delete(owner);
     for (const c of pointComps(owner)) {
       defs.consts.delete(c);
@@ -1648,7 +1652,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   for (const name of pendingFields.keys()) defs.consts.delete(name);
 
   // Resolve field-to-field references so each field is a closed expression
-  // in x, y, t, and constants.
+  // in x, y, z, t, and constants.
   const fieldVisiting = new Set<string>();
   const resolveField = (name: string): Expr => {
     const hit = defs.fields.get(name);
@@ -1663,12 +1667,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       }
       if (Object.keys(sub).length) e = substVars(e, sub);
       for (const fv of freeVars(e)) {
-        if (fv !== 'x' && fv !== 'y' && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
-          throw new Error(`${name} defines a coordinate (it uses x/y), so it may only use x, y, t, and constants (found ${fv}).`);
+        if (!SPACE.has(fv) && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
+          throw new Error(`${name} defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found ${fv}).`);
         }
       }
       // Trial-evaluate to surface unsupported calls (re, im, …) now.
-      const env: Record<string, number> = { x: 0.7, y: 0.4, t: 0 };
+      const env: Record<string, number> = { x: 0.7, y: 0.4, z: 0.3, t: 0 };
       for (const fv of freeVars(e)) env[fv] ??= 1;
       evaluate(e, env);
       defs.fields.set(name, e);

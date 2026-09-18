@@ -261,9 +261,11 @@ describe('buildDefs', () => {
   });
 
   it('rejects constants that depend on other plot variables', () => {
-    const { errors, defs } = buildDefs([cdef('a', 'z + 1')]);
-    expect(errors.get('a')).toMatch(/found z/);
+    const { errors, defs } = buildDefs([cdef('a', 'u + 1')]);
+    expect(errors.get('a')).toMatch(/found u/);
     expect(defs.consts.size).toBe(0);
+    // z is a coordinate of space: a definition reaching it is a field.
+    expect(buildDefs([cdef('a', 'z + 1')]).defs.fields.has('a')).toBe(true);
   });
 
   it('checks arity when inlining', () => {

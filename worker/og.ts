@@ -10,7 +10,7 @@
  */
 import { type PmfStems, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
-import { type Expr, evaluate, substVars } from '../lib/expr.ts';
+import { type Expr, evaluate, freeVars, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler } from '../lib/path.ts';
@@ -305,7 +305,10 @@ const zVar = (e: Expr) => e.kind === 'var' && e.name === 'z';
 /** The g of a z = g(x, y) equation (either side), or null when not that form. */
 function heightmapExpr(expr: Expr): Expr | null {
   if (expr.kind !== 'eq') return null;
-  return zVar(expr.l) ? expr.r : zVar(expr.r) ? expr.l : null;
+  const g = zVar(expr.l) ? expr.r : zVar(expr.r) ? expr.l : null;
+  // A height that itself uses z — `z = rho cos(phi)` once the spherical
+  // fields substitute in — is a general implicit surface, not a heightmap.
+  return g && !freeVars(g).has('z') ? g : null;
 }
 
 function renderRow2D(

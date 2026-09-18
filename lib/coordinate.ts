@@ -6,22 +6,39 @@ export const num = (value: number): Expr => ({ kind: 'num', value });
 export const bin = (op: '+' | '-' | '*' | '/' | '^', a: Expr, b: Expr): Expr => ({ kind: 'bin', op, a, b });
 export const call = (name: string, ...args: Expr[]): Expr => ({ kind: 'call', name, args });
 
+const AXES: ReadonlySet<string> = new Set(['x', 'y', 'z']);
+
+/** A row naming coordinates in a tuple on the left: a position `(r, theta) =
+ *  (2, pi/4)` — two coordinates in the plane, three in space — or a planar
+ *  flow `(r', theta') = (F, G)`. Null for any other row. */
 export function coordinateRow(expr: Expr, fields: Record<string, Expr>) {
   if (expr.kind !== 'eq' || expr.l.kind !== 'vec') return null;
   if (!expr.l.items.every(e => e.kind === 'var')) return null;
   const names = expr.l.items.map(e => (e as Expr & { kind: 'var' }).name);
   const flow = names.some(n => n.endsWith("'"));
-  if (!flow && !names.every(n => n === 'x' || n === 'y' || Object.hasOwn(fields, n))) return null;
+  if (!flow && !names.every(n => AXES.has(n) || Object.hasOwn(fields, n))) return null;
   if (flow && !names.every(n => n.endsWith("'"))) throw new Error('A coordinate flow needs a prime on every coordinate.');
   const bases = names.map(n => flow ? n.slice(0, -1) : n);
-  if (bases.length !== 2 || new Set(bases).size !== 2) throw new Error('Use two distinct coordinates to determine a point or flow.');
+  const shown = `(${names.join(', ')})`;
+  if (new Set(bases).size !== bases.length) throw new Error(`${shown} repeats a coordinate — use distinct coordinates to determine a point or flow.`);
+  if (flow ? bases.length !== 2 : bases.length !== 2 && bases.length !== 3) {
+    throw new Error(flow
+      ? 'A coordinate flow needs two coordinates — flows are 2D only.'
+      : 'Use two coordinates to determine a point in the plane, or three in space.');
+  }
   const coords = bases.map(n => {
-    if (n === 'x' || n === 'y') return { kind: 'var', name: n } as Expr;
+    if (AXES.has(n)) return { kind: 'var', name: n } as Expr;
     if (Object.hasOwn(fields, n)) return fields[n];
     throw new Error(`${n} is not a coordinate — define ${n} as a function of x and y first.`);
   });
+  if (flow) {
+    const spatial = bases.find((_, k) => freeVars(coords[k]).has('z'));
+    if (spatial === 'z') throw new Error('Coordinate flows are 2D only — z cannot be a flow coordinate.');
+    if (spatial) throw new Error(`${spatial} uses z, and coordinate flows are 2D only.`);
+  }
+  const n = bases.length;
   if (expr.r.kind !== 'vec') throw new Error(flow ? 'A coordinate flow needs two components on the right.' : 'A vector equation needs components on both sides.');
-  if (expr.r.items.length !== 2) throw new Error(`Mismatched components: 2 on the left, ${expr.r.items.length} on the right.`);
+  if (expr.r.items.length !== n) throw new Error(`Mismatched components: ${n} on the left, ${expr.r.items.length} on the right.`);
   return { coords, flow, rhs: expr.r.items };
 }
 

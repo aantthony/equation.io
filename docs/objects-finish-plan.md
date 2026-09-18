@@ -175,7 +175,7 @@ Today: `exp(i 2 pi u)` → "Complex expressions plot in 2D only (x, y, w)."
 - `f(path(u))` with f a user function works by inlining before the split.
   Expressions `complexParts` can't split keep a loud error.
 
-### 9. Coordinate fields over z + 3D coordinate points
+### 9. Coordinate fields over z + 3D coordinate points (shipped)
 
 Today: `rho = sqrt(x^2+y^2+z^2)` → "rho defines a coordinate … may only use
 x, y, t, and constants (found z)". (A 2D field used in a z equation already
@@ -191,6 +191,20 @@ works: `s = sqrt(x^2+y^2); s = 1 + z^2` → `implicit3d`.)
   `system` already has `dim: 3`. Extend the `angular` wrap test to 3
   components; RHS in u gives a space curve in the chart via `traceSystem`.
 - Examples: spherical and cylindrical charts under *coordinates*.
+
+Shipped notes. `(r, theta, z) = (…)` and the 3-component `angular` test
+already worked (the wrap test maps over the left tuple, keyed on a top-level
+atan2 / `[angle]`, so an acos-valued polar angle is never wrapped); the work
+was the definition side, `coordinateRow` taking three names, and one thing
+the plan did not foresee: the raymarcher treats any sign change as a root,
+so `theta = pi/4` in a 3D scene drew a second sheet along the ±π cut of
+atan2. A sign change whose bisected bracket does not close is now refused
+as a jump (budgeted per ray). That is general, not chart-specific: it also
+opens the risers of `z = floor(x)` — only the first few a ray meets, within
+the budget, so far risers still draw — and should treat a pole's sign flip
+the same way (not checked in a render). Still open: a surface lying exactly on the cut (`theta = pi`)
+has no sign change and does not draw in 3D; 3D chart flows are #12 and say
+so; atan2(0, 0) is 0 on the CPU, as it always was in 2D.
 
 ### 10. 3D named points and 3D geometry
 
