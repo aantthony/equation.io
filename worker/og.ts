@@ -788,7 +788,7 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
 export function canRenderOg(texts: string[]): boolean {
   let analysis: Analysis;
   try {
-    analysis = analyze(texts);
+    analysis = analyze(texts, { readouts: false }); // drawn, not read out: see AnalyzeOpts
   } catch {
     return false;
   }
@@ -803,7 +803,7 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
   const raster: Raster = { w, h, px: new Uint8ClampedArray(w * h * 3).fill(255) };
   let analysis: Analysis;
   try {
-    analysis = analyze(texts);
+    analysis = analyze(texts, { readouts: false }); // drawn, not read out: see AnalyzeOpts
   } catch {
     return raster;
   }

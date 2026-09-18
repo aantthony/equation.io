@@ -41,6 +41,7 @@ import {
   lowerProbBody,
   markerHeight,
   momentsReadout,
+  readoutNumber,
   matchExpectation,
   matchProbability,
   probabilityValue,
@@ -50,6 +51,7 @@ import {
   stemGeometry,
   toExpectation,
   toProbability,
+  variableRow,
 } from '../lib/dist.ts';
 import { type IntShade, type ShadeRun, type ShadeSampler, evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { compileSampler } from '../lib/vm.ts';
@@ -1430,33 +1432,12 @@ function recompileAll() {
       if (m) eq.info = momentsReadout(m);
     } catch { /* not numerically computable right now (e.g. animated) */ }
   };
-  // A derived variable whose law is a closed-form pdf (affine in normals, a
-  // single scaled uniform/exponential, a Gamma-family sum, the square of a
-  // standard normal) plots exactly through the shader; a
-  // uniform-sum law plots its exact piecewise polynomial via curve(); only
-  // the rest estimate from samples.
-  const classifyDerived = (eq: Equation, name: string) => {
-    const exact = rvSys.exactDist(name);
-    if (rvSys.isDiscreteVar(name)) {
-      // Built on discrete bases alone: a pmf, drawn as stems at its atoms.
-      eq.cls = pmfCls(name);
-    } else if (exact && rvSys.get(name)!.kind === 'derived') {
-      eq.cls = classify(densityExpr(exact), constNames);
-    } else {
-      eq.cls = densityCls(name);
-    }
-    rvInfo(eq, name);
+  // How a variable's row draws is lib's (variableRow), shared with analyze().
+  const classifyVariable = (eq: Equation, name: string) => {
+    const shape = variableRow(rvSys, name);
+    eq.cls = shape.kind === 'exact' ? classify(shape.density, constNames) : shape.cls;
+    if (rvSys.get(name)!.kind === 'derived') rvInfo(eq, name);
   };
-  const densityCls = (name: string): Classified => {
-    const ps = rvSys.paramsOf(name);
-    return {
-      plot: { type: 'density', rv: name },
-      animated: ps.has('t'),
-      needs3D: false,
-      params: [...ps].filter(p => p !== 't'),
-    };
-  };
-  const pmfCls = (name: string): Classified => ({ ...densityCls(name), plot: { type: 'pmf', rv: name } });
   for (const [i, name] of builtRVs.rowRV) {
     const eq = equations[i];
     distRows.add(eq);
@@ -1465,7 +1446,6 @@ function recompileAll() {
       eq.error = message;
       continue;
     }
-    const rv = rvSys.get(name)!;
     // A slider dragged to sd = 0 or a negative shape declares no distribution:
     // say so on the row rather than drawing the flat 0 the pdf degrades to.
     const problem = envT0 && rvSys.paramProblem(name, envT0, movingConsts);
@@ -1473,14 +1453,7 @@ function recompileAll() {
       eq.error = problem;
       continue;
     }
-    if (rv.kind === 'base' && rvSys.isDiscreteVar(name)) {
-      // A pmf draws as stems on the CPU overlay; there is no density to shade.
-      eq.cls = pmfCls(name);
-    } else if (rv.kind === 'base') {
-      eq.cls = classify(densityExpr(rv.dist), constNames);
-    } else {
-      classifyDerived(eq, name);
-    }
+    classifyVariable(eq, name);
   }
 
   /**
@@ -1592,7 +1565,7 @@ function recompileAll() {
             // only the Monte Carlo fallback rounds to its noise floor.
             const m = rvSys.exactMoments(name, envT0) ?? rvSys.quadMoments(name, envT0);
             const value = m ? m.mean : rvSys.mean(name, envT0);
-            if (isFinite(value)) eq.info = `≈ ${value.toFixed(m ? 4 : 3)}`;
+            if (isFinite(value)) eq.info = `≈ ${readoutNumber(value, m ? 4 : 3)}`;
             else if (rvSys.meanUnstable(name, envT0)) eq.info = NO_MEAN_INFO;
           } catch { /* animated or broken: no readout */ }
         }
@@ -1619,7 +1592,7 @@ function recompileAll() {
         checkDerived(parsed, rvNames, constNames);
         const name = `@${eq.id}`;
         rvSys.add({ name, kind: 'derived', expr: parsed });
-        classifyDerived(eq, name);
+        classifyVariable(eq, name);
         continue;
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)

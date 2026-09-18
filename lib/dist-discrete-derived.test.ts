@@ -55,7 +55,7 @@ describe('exact pmfs by enumeration', () => {
     const pmf = sys.pmfOf('S', {})!;
     expect([...pmf.xs]).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     [1, 2, 3, 4, 5, 6, 5, 4, 3, 2, 1].forEach((k, i) => expect(pmf.ps[i]).toBeCloseTo(k / 36, 14));
-    expect(pmf).toMatchObject({ exact: true, certified: true, lost: 0, mass: 1, step: 1 });
+    expect(pmf).toMatchObject({ exact: true, certified: true, lost: 0, mass: 1 });
     expect(sys.moments('S', {})).toMatchObject({ kind: 'exact', mass: 1 });
     expect(sys.mean('S', {})).toBeCloseTo(7, 13);
     expect(sys.moments('S', {})).toMatchObject({ sd: expect.closeTo(Math.sqrt(35 / 6), 13) });
@@ -80,7 +80,6 @@ describe('exact pmfs by enumeration', () => {
   it('a derived variable is not whole-number valued: atoms stand where g puts them', () => {
     const { sys } = build([...DICE, 'H = X / 2', 'T = 0.1 X', 'Q = X^2', 'R = sqrt(X)', 'F = sin(X)', 'N ~ Poisson(2)', 'I = 1 / N', 'J = 1 / (X - 3)']);
     expect([...sys.pmfOf('H', {})!.xs]).toEqual([0.5, 1, 1.5, 2, 2.5, 3]);
-    expect(sys.pmfOf('H', {})!.step).toBe(0.5);
     // 0.1·3 is 0.30000000000000004 and 0.1·6 is 0.6000000000000001: canonical atoms.
     expect([...sys.pmfOf('T', {})!.xs]).toEqual([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
     expect([...sys.pmfOf('Q', {})!.xs]).toEqual([1, 4, 9, 16, 25, 36]); // a sparse lattice
@@ -479,7 +478,7 @@ describe('drawing: windows, selections, markers', () => {
     // Zoomed in, every atom is its own stem.
     const [near] = sys.pmfRuns('R', {}, { lo: 1000, hi: 1000.05 })!;
     expect(near.ks.length).toBeGreaterThan(50);
-    expect(near.step).toBe(pmf.step);
+    expect(near.step!).toBeLessThan(0.001); // the spacing of the atoms on screen
   });
 
   it('a P(…) row selects atoms with its strictness, complements as two runs', () => {

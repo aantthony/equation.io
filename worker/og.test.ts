@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { OG_HEIGHT, OG_WIDTH, encodePng, renderRaster } from './og.ts';
+import { ENUM_STATS } from '../lib/dist.ts';
+import { analyze } from './graph.ts';
+import { OG_HEIGHT, OG_WIDTH, canRenderOg, encodePng, renderRaster } from './og.ts';
 
 /** Fraction of pixels in a raster that differ from the white background. */
 function inkFraction(r: { w: number; h: number; px: Uint8ClampedArray }): number {
@@ -367,6 +369,22 @@ describe('og raster renderer', () => {
     const mark = renderRaster([view, ...rows, 'E(H)'], 100, 100);
     expect(inked(mark, 45, 90) || inked(mark, 46, 90)).toBe(true);
     expect(inked(mark, 45, 75)).toBe(false);
+  });
+
+  it('does not pay for readouts it never shows: nothing is enumerated until a row is drawn', () => {
+    const rows = ['X ~ Poisson(30)', 'Y ~ Poisson(30)', 'S = X Y', 'P(X > Y)', 'E(X Y)', 'P(X Y + X > 900)'];
+    const before = { ...ENUM_STATS };
+    expect(canRenderOg(rows)).toBe(true);
+    const a = analyze(rows, { readouts: false });
+    expect(a.rows.map(r => r.info)).toEqual(rows.map(() => undefined));
+    expect(a.rows.map(r => r.cls?.plot.type)).toEqual(['pmf', 'pmf', 'pmf', 'prob', 'expect', 'prob']);
+    expect(ENUM_STATS).toEqual(before);
+    // MCP validation asks for them, and gets them.
+    expect(analyze(rows).rows.map(r => r.info)).toEqual([undefined, undefined, 'μ = 900, σ = 234.307', '≈ 0.4742', '≈ 900.0000', '≈ 0.5032']);
+    // Drawing enumerates what is drawn — S, the marker's variable, the selection — and not the joint event.
+    const mid = { ...ENUM_STATS };
+    renderRaster(['X ~ Poisson(30)', 'Y ~ Poisson(30)', 'P(X > Y)'], 100, 100);
+    expect(ENUM_STATS.points).toBe(mid.points);
   });
 
   it('draws a selection as the app does: a band that widens with the zoom, capped by an enlarged dot', () => {

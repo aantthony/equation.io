@@ -367,7 +367,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   are not — they enumerate). When the joint is too large to enumerate (more
   than 131072 points in one step: `A B C` over three `Poisson(30)`, anything
   over `Geometric(0.00001)`) the row falls back to the joint sample, says so —
-  `μ ≈ …, σ ≈ … (sampled)`, `P(…)` to 3 places — and still draws a pmf: the
+  `μ ≈ …, σ ≈ … (sampled)`, `P(…)` to 3 places; a sampled moment whose tail
+  cannot be certified is not printed (`σ unstable`, `σ = ∞`, or median and
+  IQR with `no stable mean`) — and still draws a pmf: the
   frequency of each sampled value as stems, or past 1024 distinct values a
   histogram on the values' own lattice with heavy atoms (the 0 of
   `L B`, B Bernoulli) kept as stems; values on no lattice read `(sampled: too

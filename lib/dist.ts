@@ -61,6 +61,7 @@ import {
   substVars,
 } from './expr.ts';
 import { usesComplex } from './complex.ts';
+import type { Classified } from './plot.ts';
 import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from './defs.ts';
 import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
 import { quadrature } from './integrate.ts';
@@ -304,19 +305,47 @@ export function densityExpr(d: BaseDist): Expr {
   return { kind: 'eq', l: v('y'), r: pdfExpr(d, v('x')) };
 }
 
+/**
+ * How the row of a variable — declared, derived, or the anonymous one of a
+ * bare `X + Y` — draws, decided once for the app and analyze(): a pmf as stems
+ * when it is built on discrete bases alone; the exact density `y = pdf(x)`
+ * (the caller classifies it for the shader) when its law is a closed-form pdf
+ * — a continuous declaration, or a derived variable a closure rule reduces
+ * (affine in normals, a scaled uniform/exponential, a Gamma-family sum, the
+ * square of a standard normal); else a density drawn on the CPU (a uniform
+ * sum's exact piecewise polynomial, the quadrature curve, the sample estimate).
+ */
+export function variableRow(sys: RVSystem, name: string):
+  | { kind: 'pmf' | 'density'; cls: Classified }
+  | { kind: 'exact'; density: Expr } {
+  const discrete = sys.isDiscreteVar(name);
+  const exact = discrete ? null : sys.exactDist(name);
+  if (exact) return { kind: 'exact', density: densityExpr(exact) };
+  const ps = sys.paramsOf(name);
+  const kind = discrete ? 'pmf' : 'density';
+  return { kind, cls: { plot: { type: kind, rv: name }, animated: ps.has('t'), needs3D: false, params: [...ps].filter(p => p !== 't') } };
+}
+
 /** A derived row's readout, from RVSystem.moments' verdict: `μ = …, σ = …`
  *  under an exact law, `≈` for an estimate, median/IQR where the tails make
  *  μ and σ truncation artifacts; then what part of the mass is defined, and
  *  the verdict's note (a sampled pmf says so). One wording for the app and
  *  analyze(). */
 export function momentsReadout(m: NonNullable<ReturnType<RVSystem['moments']>>): string {
-  const exactly = (x: number): string => String(parseFloat(x.toPrecision(6)));
-  return (m.kind === 'exact' ? `μ = ${exactly(m.mean)}, σ = ${exactly(m.sd)}`
+  const about = (x: number): string => readoutNumber(x, 3);
+  return (m.kind === 'exact' ? `μ = ${readoutNumber(m.mean)}, σ = ${readoutNumber(m.sd)}`
     : m.kind === 'robust'
-      ? `median ≈ ${m.median.toFixed(3)}, IQR ≈ ${m.iqr.toFixed(3)} (heavy tails: ${m.meanOk ? 'σ' : 'μ, σ'} unstable)`
-      : `μ ≈ ${m.mean.toFixed(3)}, σ ${isFinite(m.sd) ? `≈ ${m.sd.toFixed(3)}` : '= ∞'}`)
+      ? `median ≈ ${about(m.median)}, IQR ≈ ${about(m.iqr)} (heavy tails: ${m.meanOk ? 'σ' : 'μ, σ'} unstable)`
+      : `μ ≈ ${about(m.mean)}, σ ${isFinite(m.sd) ? `≈ ${about(m.sd)}` : m.sd === Infinity ? '= ∞' : 'unstable'}`)
     + (m.mass < 0.9995 ? `, P(defined) ≈ ${m.mass.toFixed(3)}` : '')
     + (m.note ? ` (${m.note})` : '');
+}
+
+/** A readout's number: to `places` decimals while that is a number a reader
+ *  can take in, else (and without `places`) six significant digits — toFixed
+ *  of 1.17e49 is forty-nine digits, and past 1e21 a raw exponent string. */
+export function readoutNumber(x: number, places?: number): string {
+  return places !== undefined && Math.abs(x) < 1e15 ? x.toFixed(places) : String(parseFloat(x.toPrecision(6)));
 }
 
 /** The readout of an `E(…)` row whose mean is not a number (RVSystem.meanUnstable). */
@@ -1801,8 +1830,8 @@ interface CacheEntry {
   /** …the sampled one, dropped by resample() unless `spmfStill`… */
   spmf?: DiscretePmf | null;
   spmfStill?: boolean;
-  /** …whether a one-base transform's mean converges, for the sampled tier… */
-  sampledMeanOk?: boolean;
+  /** …what the bases' tails say of its first two moments, for the sampled tier… */
+  tails?: { mean: Tail; second: Tail };
   /** …and the windows last drawn, by view and selection. */
   runs?: Map<string, PmfStems[]>;
 }
@@ -2185,9 +2214,11 @@ export function selectStems(
 // below assumes whole numbers: atoms are (value, mass) pairs, drawn at their
 // true locations. Two joint points that differ only by rounding are ONE atom
 // (0.1 + 0.2 and 0.3; 0.1 X + 0.2 Y − 0.3 Z at X = Y = Z and 0), so every
-// computed value is made `canonical` — whole numbers trusted, a sum that
+// FINISHED value is made `canonical` — whole numbers trusted, a sum that
 // cancelled to within the rounding of its operands read as 0, the rest rounded
-// to 12 significant digits — and a P(…) bound is compared the same way.
+// to 12 significant digits — and a P(…) bound is compared the same way. Only
+// finished values: a variable's atoms, an event's terms. Intermediate ones
+// stay the floats they are (X/3 rounded and then tripled is 0.999999999999).
 //
 // EXACT TIER. Each base is cut to the whole numbers holding all but ENUM_TAIL
 // of each tail (a bounded support of at most FULL_SUPPORT is kept whole), and
@@ -2195,10 +2226,12 @@ export function selectStems(
 // marginals, so `X - X` is the atom 0 and `A = X + Y; B = X - Y` stay as
 // dependent as they are. Subexpressions over DISJOINT bases are independent,
 // so they are enumerated on their own and combined (convolution, for a sum):
-// ten dice cost 10 × 51 × 6 evaluations, not 6^10. Any one product may hold at
-// most JOINT_MAX points — the cost of the sampling tier it would otherwise
-// fall back to, so a slider dragging a parameter past the cap degrades to
-// sampling instead of hanging. The mass ignored is at most 2·ENUM_TAIL per
+// ten dice cost 10 × 51 × 6 evaluations, not 6^10. Operands that DO share
+// bases are conditioned on the shared ones (T + D0, T the ten dice: six cheap
+// enumerations, one per value of D0). Any one product may hold at most
+// JOINT_MAX points, and one enumeration 2·JOINT_MAX in all — the cost of the
+// sampling tier it would otherwise fall back to, so a slider dragging a
+// parameter past the cap degrades to sampling instead of hanging. The mass ignored is at most 2·ENUM_TAIL per
 // base (AtomSet.lost).
 //
 // What truncation does to a MEAN is a separate question — E(2^X) over a
@@ -2224,31 +2257,51 @@ const ENUM_TAIL = STEM_TAIL;
 /** A bounded support this small is enumerated whole: nothing is truncated, so
  *  no moment of it can be in doubt (2^X over Binomial(1000, ½) lives 10σ out). */
 const FULL_SUPPORT = 1024;
+/** Most joint values of shared bases an enumeration conditions on (jointBlock). */
+const CONDITION_MAX = 4096;
 /** The inner edges of the two tail slivers the moment test compares. */
 const SLIVER_A = 1e-9;
 const SLIVER_B = 1e-6;
-/** Values closer than this, relatively, are one atom; a sum smaller than this
- *  against the magnitude of its operands cancelled to 0. */
-const ATOM_REL = 2 ** -40;
+/** An atom is a value to this many significant digits (`canonical`), and ONE
+ *  tolerance follows from it: canonical values a grid step apart — two float
+ *  results that straddled a rounding boundary — are the same atom, and a sum
+ *  this small against the magnitude of its operands cancelled to 0. */
+const ATOM_DIGITS = 12;
+const ATOM_REL = 1.5 * 10 ** (1 - ATOM_DIGITS);
+/** INTERMEDIATE values are never rounded (rounding at every node compounds:
+ *  X/3 rounded, then ×3, is 0.999999999999, an atom of its own). They merge
+ *  only when they are the same float, or differ by less than this against
+ *  their magnitude — float variants of one value (0.1 + 0.2 + 0.3 in two
+ *  orders), so a long sum's atom count stays the lattice's. */
+const FLOAT_REL = 2 ** -50;
 /** Whole numbers a sampled base column tabulates exactly (see sortedQuantiles). */
 const TABLE_MAX = 1 << 20;
 /** Counts enumeration work: joint points evaluated, and pmf evaluations spent
  *  on base supports and sampling tables. The perf guard reads it. */
 export const ENUM_STATS = { builds: 0, points: 0, pmfEvals: 0 };
 
+/** Whether two CANONICAL values are one atom. Whole numbers are exact, and
+ *  never merge with each other. */
 const sameAtom = (a: number, b: number): boolean =>
   a === b || (Number.isNaN(a) && Number.isNaN(b))
-  || (isFinite(a) && isFinite(b) && Math.abs(a - b) <= ATOM_REL * Math.max(Math.abs(a), Math.abs(b)));
+  || (isFinite(a) && isFinite(b) && !(Number.isInteger(a) && Number.isInteger(b))
+    && Math.abs(a - b) <= ATOM_REL * Math.max(Math.abs(a), Math.abs(b)));
 
-/** A computed value as the atom it names (see the section comment). `mag` is
- *  the magnitude of what was added up to make it: |a| + |b| for a ± b. A whole
- *  number is trusted as it stands — whole operands add exactly. */
+/** Whether a sum of magnitude `mag` that came to x cancelled: its operands'
+ *  rounding is all that is left. (Whole operands add exactly: 0 is then 0.) */
+const cancelled = (x: number, mag: number): boolean => x !== 0 && Math.abs(x) <= ATOM_REL * mag;
+
+/** A computed value as the atom it names (see the section comment): rounded
+ *  to ATOM_DIGITS of `mag`, the magnitude of what was added up to make it —
+ *  |a| + |b| for a ± b, so (X + 0.1) − X is 0.1 to the digits X left it, and
+ *  |x| itself where nothing cancelled. A whole number is trusted as it stands.
+ *  Applied ONCE, to a finished value: see FLOAT_REL. */
 function canonical(x: number, mag: number): number {
   if (!isFinite(x) || Number.isInteger(x)) return x;
-  const a = Math.abs(x);
-  if (a <= ATOM_REL * mag) return 0;
-  const e = 11 - Math.floor(Math.log10(a));
-  if (e < 0 || e > 22) return Number(x.toPrecision(12));
+  const m = Math.max(Math.abs(x), isFinite(mag) ? mag : 0);
+  if (cancelled(x, m)) return 0;
+  const e = ATOM_DIGITS - 1 - Math.floor(Math.log10(m));
+  if (e < 0 || e > 22) return m > Math.abs(x) ? x : Number(x.toPrecision(ATOM_DIGITS));
   const s = 10 ** e; // exact up to 1e22, so the quotient is the correctly rounded decimal
   return Math.round(x * s) / s;
 }
@@ -2269,18 +2322,29 @@ function magnitude(e: Expr): Expr | null {
   return cancels(e) ? mag(e) : null;
 }
 
-/** `e` over columns, as canonical values. (A bare variable is its column,
- *  untouched: a base's whole numbers, or an enumerated part.) */
-function canonicalColumn(e: Expr, cols: ReadonlyMap<string, Float64Array>, env: Record<string, number>, count: number): Float64Array {
+/** `e` over columns, unrounded, with the magnitude of each value (see
+ *  `canonical`); a sum that cancelled is already 0. (A bare variable is its
+ *  column, untouched.) */
+function columnOf(e: Expr, cols: ReadonlyMap<string, Float64Array>, env: Record<string, number>, count: number): { vals: Float64Array; mags: Float64Array } {
   const vals = evalCols(e, cols, env, count);
-  if (e.kind === 'var') return vals;
   const mag = magnitude(e);
-  return canonicalize(vals, mag ? evalCols(mag, cols, env, count) : undefined);
+  if (!mag) return { vals, mags: vals.map(Math.abs) };
+  const mags = evalCols(mag, cols, env, count);
+  for (let i = 0; i < count; i++) if (cancelled(vals[i], mags[i])) vals[i] = 0;
+  return { vals, mags };
 }
 
-/** Make a column canonical in place, against its magnitude column (or itself). */
-function canonicalize(vals: Float64Array, mags?: ArrayLike<number>): Float64Array {
-  for (let i = 0; i < vals.length; i++) vals[i] = canonical(vals[i], mags ? mags[i] : 0);
+/** `e` over columns, as canonical values: a finished column — an event's
+ *  term, a sampled variable. */
+function canonicalColumn(e: Expr, cols: ReadonlyMap<string, Float64Array>, env: Record<string, number>, count: number): Float64Array {
+  if (e.kind === 'var') return evalCols(e, cols, env, count);
+  const { vals, mags } = columnOf(e, cols, env, count);
+  return canonicalize(vals, mags);
+}
+
+/** Make a column canonical in place, against its magnitude column. */
+function canonicalize(vals: Float64Array, mags: ArrayLike<number>): Float64Array {
+  for (let i = 0; i < vals.length; i++) vals[i] = canonical(vals[i], mags[i]);
   return vals;
 }
 
@@ -2288,6 +2352,8 @@ function canonicalize(vals: Float64Array, mags?: ArrayLike<number>): Float64Arra
  *  of their own (atan(1/X) at X = 0 is π/2, exactly as the sampler has it). */
 interface AtomSet {
   xs: Float64Array;
+  /** The magnitude of what was added up to make each value (see `canonical`). */
+  mag: Float64Array;
   /** Mass of each atom… */
   p: Float64Array;
   /** …the part of it NOT from the outermost sliver of any truncated tail… */
@@ -2298,8 +2364,15 @@ interface AtomSet {
   lost: number;
 }
 
-/** Merge joint points into atoms. `vals` are canonical, in any order. */
-function mergeAtoms(vals: ArrayLike<number>, wp: ArrayLike<number>, wn: ArrayLike<number>, wc: ArrayLike<number>, lost: number): AtomSet {
+/** Merge joint points into atoms; `vals` in any order. With `finished` the
+ *  values are made canonical first and merge as atoms do (sameAtom, or a grid
+ *  step of their magnitude apart); without, they stay the floats they are and
+ *  only float variants of one value merge (FLOAT_REL). */
+function mergeAtoms(
+  vals: Float64Array, mags: ArrayLike<number>, wp: ArrayLike<number>, wn: ArrayLike<number>, wc: ArrayLike<number>,
+  lost: number, finished: boolean,
+): AtomSet {
+  if (finished) canonicalize(vals, mags);
   const count = vals.length;
   const idx = new Uint32Array(count);
   let sorted = true;
@@ -2315,29 +2388,42 @@ function mergeAtoms(vals: ArrayLike<number>, wp: ArrayLike<number>, wn: ArrayLik
       return a < b ? -1 : a > b ? 1 : 0;
     });
   }
+  const same = (a: number, ma: number, b: number, mb: number): boolean => {
+    if (a === b || (Number.isNaN(a) && Number.isNaN(b))) return true;
+    if (!isFinite(a) || !isFinite(b) || (Number.isInteger(a) && Number.isInteger(b))) return false;
+    return Math.abs(a - b) <= (finished ? ATOM_REL : FLOAT_REL) * Math.max(ma, mb);
+  };
   const xs: number[] = [];
+  const mag: number[] = [];
   const p: number[] = [];
   const n: number[] = [];
   const c: number[] = [];
   let first = NaN; // the value that opened the current atom: merging never chains
+  let firstMag = 0;
   for (let k = 0; k < count; k++) {
     const i = idx[k];
     if (!(wp[i] > 0)) continue; // the pmf underflowed: no atom
     const x = vals[i];
     const last = xs.length - 1;
-    if (last >= 0 && sameAtom(first, x)) {
+    if (last >= 0 && same(first, firstMag, x, mags[i])) {
       p[last] += wp[i];
       n[last] += wn[i];
       c[last] += wc[i];
+      if (mags[i] > mag[last]) mag[last] = mags[i];
     } else {
       xs.push(x);
+      mag.push(mags[i]);
       p.push(wp[i]);
       n.push(wn[i]);
       c.push(wc[i]);
       first = x;
+      firstMag = mags[i];
     }
   }
-  return { xs: Float64Array.from(xs), p: Float64Array.from(p), n: Float64Array.from(n), c: Float64Array.from(c), lost };
+  return {
+    xs: Float64Array.from(xs), mag: Float64Array.from(mag),
+    p: Float64Array.from(p), n: Float64Array.from(n), c: Float64Array.from(c), lost,
+  };
 }
 
 /** The atoms of a base law: its mass range, or 'cap' when that is too wide to
@@ -2368,15 +2454,41 @@ function baseAtoms(law: DiscreteLaw): AtomSet | 'cap' {
   }
   ENUM_STATS.pmfEvals += size;
   const lost = (cutLo ? law.pq(kLo - 1)[0] : 0) + (cutHi ? law.pq(kHi)[1] : 0);
-  return mergeAtoms(xs, p, n, c, lost);
+  return { xs, mag: xs.map(Math.abs), p, n, c, lost };
 }
 
-/** Independent parts laid out as the columns of their product: every
- *  combination once, with the product of the weights. Null past JOINT_MAX. */
-function tensor(parts: AtomSet[]): { cols: Float64Array[]; wp: Float64Array; wn: Float64Array; wc: Float64Array; lost: number } | null {
+/** Jointly enumerated values of some terms: one row per joint point, with
+ *  its weights (as AtomSet's p, n, c). `terms` says whose columns these are. */
+interface Block {
+  terms: number[];
+  cols: Float64Array[];
+  mags: Float64Array[];
+  p: Float64Array;
+  n: Float64Array;
+  c: Float64Array;
+  lost: number;
+}
+
+/** Columns for every term over one product of joint points. */
+interface Joint {
+  cols: Float64Array[];
+  mags: Float64Array[];
+  wp: Float64Array;
+  wn: Float64Array;
+  wc: Float64Array;
+  lost: number;
+}
+
+const blockOf = (term: number, atoms: AtomSet): Block =>
+  ({ terms: [term], cols: [atoms.xs], mags: [atoms.mag], p: atoms.p, n: atoms.n, c: atoms.c, lost: atoms.lost });
+
+/** INDEPENDENT blocks laid out over their product: every combination once,
+ *  with the product of the weights. Null past JOINT_MAX. Columns of terms no
+ *  block holds (constants) are left for the caller. */
+function tensor(blocks: Block[], termCount: number): Joint | null {
   let size = 1;
-  for (const part of parts) {
-    size *= part.xs.length;
+  for (const block of blocks) {
+    size *= block.p.length;
     if (size > JOINT_MAX) return null;
   }
   ENUM_STATS.builds++;
@@ -2384,24 +2496,33 @@ function tensor(parts: AtomSet[]): { cols: Float64Array[]; wp: Float64Array; wn:
   const wp = new Float64Array(size).fill(1);
   const wn = new Float64Array(size).fill(1);
   const wc = new Float64Array(size).fill(1);
-  const cols: Float64Array[] = [];
+  const cols: Float64Array[] = new Array(termCount);
+  const mags: Float64Array[] = new Array(termCount);
   let period = 1;
   let kept = 1;
-  for (const part of parts) {
-    const m = part.xs.length;
-    const col = new Float64Array(size);
+  for (const block of blocks) {
+    const m = block.p.length;
+    const at = new Uint32Array(size);
     for (let i = 0; i < size; i++) {
       const j = Math.floor(i / period) % m;
-      col[i] = part.xs[j];
-      wp[i] *= part.p[j];
-      wn[i] *= part.n[j];
-      wc[i] *= part.c[j];
+      at[i] = j;
+      wp[i] *= block.p[j];
+      wn[i] *= block.n[j];
+      wc[i] *= block.c[j];
     }
-    cols.push(col);
+    block.terms.forEach((term, k) => {
+      const [col, mag] = [new Float64Array(size), new Float64Array(size)];
+      for (let i = 0; i < size; i++) {
+        col[i] = block.cols[k][at[i]];
+        mag[i] = block.mags[k][at[i]];
+      }
+      cols[term] = col;
+      mags[term] = mag;
+    });
     period *= m;
-    kept *= 1 - part.lost;
+    kept *= 1 - block.lost;
   }
-  return { cols, wp, wn, wc, lost: 1 - kept };
+  return { cols, mags, wp, wn, wc, lost: 1 - kept };
 }
 
 /** The comparisons of a P(…) body as terms and the operators between them:
@@ -2478,7 +2599,9 @@ export interface DiscretePmf {
   /** P(defined): 1/X at X = 0, sqrt(X − 2) below 2 and an overflow are no
    *  value, as in the density tiers. */
   mass: number;
-  /** Mean and sd where defined. NaN/Infinity as `meanOk`/the second moment say. */
+  /** Mean and sd where defined. The mean is NaN unless `meanOk`; sd is
+   *  Infinity where the second moment diverges, NaN where (sampled tier) its
+   *  tail could not be certified either way. */
   mean: number;
   sd: number;
   /** False when the mean's sum diverges, or truncation hides a visible part. */
@@ -2489,8 +2612,6 @@ export interface DiscretePmf {
   certified: boolean;
   /** Mass the truncation ignored, at most (0 for the sampled tier). */
   lost: number;
-  /** The smallest gap between neighbouring atoms. */
-  step: number;
   /** Sampled, with too many distinct values for frequencies to mean anything:
    *  the histogram on the variable's lattice, heavy atoms apart — or, with no
    *  lattice, null and `unresolved`. */
@@ -2498,10 +2619,12 @@ export interface DiscretePmf {
   unresolved?: boolean;
 }
 
-function finishPmf(xs: Float64Array, ps: Float64Array, fields: Omit<DiscretePmf, 'xs' | 'ps' | 'step'>): DiscretePmf {
+/** The smallest gap between neighbouring stems (Infinity for a lone one):
+ *  the spacing that decides whether THESE stems have room for dots. */
+function minGap(ks: ArrayLike<number>): number {
   let step = Infinity;
-  for (let i = 1; i < xs.length; i++) step = Math.min(step, xs[i] - xs[i - 1]);
-  return { xs, ps, step, ...fields };
+  for (let i = 1; i < ks.length; i++) step = Math.min(step, ks[i] - ks[i - 1]);
+  return step;
 }
 
 /** Mean and sd of atoms, averaged where defined. */
@@ -2535,7 +2658,9 @@ function exactPmf(set: AtomSet): DiscretePmf | null {
   const v1 = momentVerdict(set, Math.abs);
   const v2 = momentVerdict(set, x => x * x);
   const meanOk = v1 !== 'diverges' && isFinite(m.mean);
-  return finishPmf(xs, ps, {
+  return {
+    xs,
+    ps,
     exact: true,
     mass: from === 0 && to === set.xs.length ? 1 : m.sum,
     mean: meanOk ? m.mean : NaN,
@@ -2544,7 +2669,41 @@ function exactPmf(set: AtomSet): DiscretePmf | null {
     meanExact: meanOk && v1 === 'exact',
     certified: meanOk && v1 === 'exact' && v2 === 'exact',
     lost: set.lost,
-  });
+  };
+}
+
+/** What a tail says of a moment's sum: it converges, it diverges, or the test
+ *  could not tell — which certifies nothing, and is said as such. */
+type Tail = 'ok' | 'diverges' | 'unknown';
+
+/** The two tail slivers compared (`deep`: tail probability 1e-12..1e-9 or
+ *  1e-9..1e-6, `shallow`: the 1000× likelier one inside it). A sum that
+ *  converges comfortably gains far less from the deeper one (u^-a: 1000^(a−1));
+ *  within a factor 2 of equal it is at the boundary, where no finite look
+ *  decides — E K² of K = 1.0000005^G over Geometric(1e-6) converges, barely. */
+function tailOf(deep: number, shallow: number): Tail {
+  if (!isFinite(deep) || !isFinite(shallow)) return 'unknown';
+  if (!(deep > 0)) return 'ok';
+  if (!(shallow > 0)) return 'unknown';
+  const r = deep / shallow;
+  return r < 0.5 ? 'ok' : r > 2 ? 'diverges' : 'unknown';
+}
+
+/** Divergence along ANY path settles it (the path has positive probability);
+ *  short of that, one 'unknown' leaves the moment uncertified. */
+const worseTail = (a: Tail, b: Tail): Tail =>
+  (a === 'diverges' || b === 'diverges' ? 'diverges' : a === 'unknown' || b === 'unknown' ? 'unknown' : 'ok');
+
+/** The upper tail of E[h(X)] for a law too wide to enumerate, by quadrature in
+ *  ln u over the slivers u ∈ [1e-9, 1e-6] and [1e-6, 1e-3] (as `diverges`
+ *  does for a density). An integral that does not settle, or an h that
+ *  overflows out there, is 'unknown' — never "fine". */
+function quantileTail(h: (x: number) => number, upperQuantile: (u: number) => number): Tail {
+  const sliver = (lo: number, hi: number): number => quadrature(s => {
+    const u = Math.exp(s);
+    return h(upperQuantile(u)) * u;
+  }, Math.log(lo), Math.log(hi));
+  return tailOf(sliver(1e-9, 1e-6), sliver(1e-6, 1e-3));
 }
 
 /** Distinct sampled values above which frequencies stop meaning anything. */
@@ -2587,7 +2746,7 @@ function latticeStep(xs: ArrayLike<number>): number {
 
 /** The pmf the joint sample shows: the frequency of each distinct value of a
  *  (canonical) sample column. */
-function sampledPmf(col: Float64Array, meanOk: boolean): DiscretePmf | null {
+function sampledPmf(col: Float64Array, tails: { mean: Tail; second: Tail }): DiscretePmf | null {
   const finite = col.filter(isFinite).sort();
   if (!finite.length) return null;
   const xs: number[] = [];
@@ -2602,22 +2761,27 @@ function sampledPmf(col: Float64Array, meanOk: boolean): DiscretePmf | null {
   }
   const ps = Float64Array.from(counts, k => k / col.length);
   const m = atomMoments(xs, ps);
-  const pmf = finishPmf(Float64Array.from(xs), ps, {
+  // A sample's moments are finite whatever the law's are: each is reported
+  // only as far as its tail was certified (RVSystem.sampledTails).
+  const meanOk = tails.mean === 'ok';
+  const pmf: DiscretePmf = {
+    xs: Float64Array.from(xs),
+    ps,
     exact: false,
     mass: finite.length / col.length,
     mean: meanOk ? m.mean : NaN,
-    sd: meanOk ? m.sd : NaN,
+    sd: !meanOk ? NaN : tails.second === 'ok' ? m.sd : tails.second === 'diverges' ? Infinity : NaN,
     meanOk,
     meanExact: false,
     certified: false,
     lost: 0,
-  });
+  };
   if (xs.length <= SAMPLED_ATOMS_MAX) return pmf;
   // Too many distinct values: a histogram on the values' own lattice.
   const light = xs.filter((_, i) => ps[i] < HEAVY_ATOM);
   const step = light.length > 1 ? latticeStep(light) : 0;
   if (!step) return { ...pmf, binned: null, unresolved: true };
-  const heavy: PmfStems = { ks: [], ps: [], envelope: false, step: pmf.step };
+  const heavy: PmfStems = { ks: [], ps: [], envelope: false };
   const origin = light[0];
   const cells = Math.round((light[light.length - 1] - origin) / step) + 1;
   const per = 2 ** Math.max(0, Math.ceil(Math.log2(cells / HIST_BINS))); // lattice points per bin
@@ -2647,6 +2811,7 @@ function sampledPmf(col: Float64Array, meanOk: boolean): DiscretePmf | null {
       bulk.ps.push(0);
     }
   });
+  heavy.step = minGap(heavy.ks);
   return { ...pmf, binned: { bulk, heavy } };
 }
 
@@ -2710,22 +2875,26 @@ function firstAbove(xs: ArrayLike<number>, x: number, orEqual: boolean): number 
   return a;
 }
 
-/** The atoms of a drawn window: all of them while they are few, else the
+/** The atoms [i0, i1] of a drawn window: all of them while they are few, else the
  *  TALLEST in each cell of a fixed lattice (multiples of a power-of-two
  *  stride, so a pan slides over the same choice) — exact heights at true
  *  locations, which is what a thousand stems per pixel column look like. */
 function windowAtoms(pmf: DiscretePmf, i0: number, i1: number, view?: { lo: number; hi: number }): PmfStems {
   const { xs, ps } = pmf;
-  if (view) {
-    i0 = Math.max(i0, firstAbove(xs, view.lo, true));
-    i1 = Math.min(i1, firstAbove(xs, view.hi, false) - 1);
-  }
-  const out: PmfStems = { ks: [], ps: [], envelope: false, step: pmf.step };
+  const v0 = view ? firstAbove(xs, view.lo, true) : 0;
+  const v1 = view ? firstAbove(xs, view.hi, false) - 1 : xs.length - 1;
+  i0 = Math.max(i0, v0);
+  i1 = Math.min(i1, v1);
+  const out: PmfStems = { ks: [], ps: [], envelope: false };
   if (i1 - i0 < STEM_MAX) {
     for (let i = i0; i <= i1; i++) {
       out.ks.push(xs[i]);
       out.ps.push(ps[i]);
     }
+    // Room for dots is a matter of the atoms ON SCREEN — all of them, so a
+    // selected stem is drawn to its neighbours' measure — not of the closest
+    // pair anywhere: 1/N crowds toward 0 and stands well apart at 1, ½, ⅓.
+    out.step = v1 - v0 < STEM_MAX ? minGap(xs.subarray(v0, v1 + 1)) : 0;
     return out;
   }
   const stride = 2 ** Math.ceil(Math.log2((xs[i1] - xs[i0]) / STEM_MAX));
@@ -4133,10 +4302,13 @@ export class RVSystem {
     const shape = this.continuousIn(body).length ? null : eventShape(body);
     if (!shape) return { value: this.sampleFraction(body, env), exact: false };
     const terms = shape.terms.map(t => this.ground(t));
+    this.budget = 2 * JOINT_MAX;
     const joint = terms.every((t): t is Expr => t !== null) ? this.enumerateTerms(terms, env) : 'cap';
     if (joint === null) return { value: NaN, exact: true };
     if (joint !== 'cap') {
-      const mask = eventMask(joint.cols, shape.ops, joint.wp.length);
+      // The terms are finished values: canonical, as atoms are (mergeAtoms).
+      const cols = joint.cols.map((col, k) => canonicalize(col, joint.mags[k]));
+      const mask = eventMask(cols, shape.ops, joint.wp.length);
       // Of the mass enumerated (all but `lost`), so a certain event is 1.
       let value = 0;
       let total = 0;
@@ -4205,47 +4377,128 @@ export class RVSystem {
   }
 
   /**
-   * The joint of several grounded terms, as columns over one product: each
-   * term enumerated on its own when no base is shared between them (they are
-   * independent, and their atoms are far fewer than their joint points), else
-   * all of them over the joint of their bases (`whole`: that, regardless).
-   * 'cap' past JOINT_MAX; null while a base declares no distribution.
+   * The joint of several grounded terms, as columns over one product. Terms
+   * are grouped by the bases they share (transitively). A term that shares
+   * none is independent of the rest: it is enumerated on its own, and its
+   * atoms — far fewer than its joint points — enter the product. Terms that do
+   * share are enumerated together (jointBlock), group by group. `whole`: all
+   * of them as one group, over the joint of their bases. 'cap' past JOINT_MAX
+   * (or the work budget); null while a base declares no distribution.
    */
-  private enumerateTerms(terms: Expr[], env: Record<string, number>, whole = false):
-    { cols: Float64Array[]; wp: Float64Array; wn: Float64Array; wc: Float64Array; lost: number } | 'cap' | null {
+  private enumerateTerms(terms: Expr[], env: Record<string, number>, whole = false): Joint | 'cap' | null {
     const random = terms.map(t => this.randomIn(t));
-    const all = random.flat();
-    const shared = whole || new Set(all).size < all.length;
-    // The parts of the product, and how each term reads its column off them.
-    const parts: AtomSet[] = [];
-    const partNames: string[] = [];
-    if (shared) {
-      for (const n of new Set(all)) {
-        const atoms = this.baseAtomsOf(n, env);
-        if (!atoms || atoms === 'cap') return atoms;
-        parts.push(atoms);
-        partNames.push(n);
+    const group = terms.map((_, k) => k);
+    const find = (k: number): number => (group[k] === k ? k : (group[k] = find(group[k])));
+    const owner = new Map<string, number>();
+    random.forEach((names, k) => {
+      for (const n of names) {
+        const other = whole ? owner.values().next().value : owner.get(n);
+        if (other !== undefined) group[find(k)] = find(other);
+        owner.set(n, k);
       }
-    } else {
-      for (let k = 0; k < terms.length; k++) {
-        if (!random[k].length) continue;
-        const atoms = this.enumerate(terms[k], env);
-        if (!atoms || atoms === 'cap') return atoms;
-        parts.push(atoms);
-        partNames.push(`\u0000${k}`); // no identifier: cannot collide with a user's name
-      }
+    });
+    const blocks: Block[] = [];
+    for (let root = 0; root < terms.length; root++) {
+      if (find(root) !== root || !random[root].length) continue;
+      const members = terms.map((_, k) => k).filter(k => random[k].length && find(k) === root);
+      let block: Block | 'cap' | null;
+      if (members.length === 1 && !whole) {
+        const atoms = this.enumerate(terms[root], env);
+        block = atoms && atoms !== 'cap' ? blockOf(root, atoms) : atoms;
+      } else block = this.jointBlock(members.map(k => terms[k]), members, env, whole);
+      if (!block || block === 'cap') return block;
+      blocks.push(block);
     }
-    const joint = tensor(parts);
+    if (!this.charge(blocks.reduce((size, b) => size * b.p.length, 1))) return 'cap';
+    const joint = tensor(blocks, terms.length);
     if (!joint) return 'cap';
-    const byName = new Map(partNames.map((n, j) => [n, joint.cols[j]]));
-    const cols = terms.map((t, k) => (
-      !shared && random[k].length ? byName.get(`\u0000${k}`)! : canonicalColumn(t, byName, env, joint.wp.length)
-    ));
-    return { ...joint, cols };
+    terms.forEach((t, k) => {
+      if (!random[k].length) ({ vals: joint.cols[k], mags: joint.mags[k] } = columnOf(t, new Map(), env, joint.wp.length));
+    });
+    return joint;
   }
 
-  /** The atoms of a grounded expression over discrete bases (see above). */
-  private enumerate(e: Expr, env: Record<string, number>): AtomSet | 'cap' | null {
+  /** Work left to the enumeration in progress: no chain of steps, each under
+   *  the cap, may add up to a stall (conditioning nests). */
+  private budget = 0;
+  private charge(points: number): boolean {
+    this.budget -= points + 64; // a step costs something however small it is
+    return this.budget >= 0;
+  }
+
+  /**
+   * Terms that share bases, enumerated together. Conditioned on the SHARED
+   * bases where that leaves something independent: given D0, `T = D0 + … + D9`
+   * and `D0` share nothing, so each value of D0 costs one cheap enumeration of
+   * T — 6 of them, not the 6^10 joint points of all ten dice. Otherwise
+   * (nothing left over, too many shared values, or `whole`) the joint of the
+   * bases, each term evaluated over it.
+   */
+  private jointBlock(terms: Expr[], ids: number[], env: Record<string, number>, whole: boolean): Block | 'cap' | null {
+    const counts = new Map<string, number>();
+    for (const t of terms) for (const n of this.randomIn(t)) counts.set(n, (counts.get(n) ?? 0) + 1);
+    const atomsOf = (names: string[]): Block[] | 'cap' | null => {
+      const out: Block[] = [];
+      for (const [k, n] of names.entries()) {
+        const atoms = this.baseAtomsOf(n, env);
+        if (!atoms || atoms === 'cap') return atoms;
+        out.push(blockOf(k, atoms));
+      }
+      return out;
+    };
+    const all = [...counts.keys()];
+    const shared = all.filter(n => counts.get(n)! > 1);
+    const given = whole || shared.length === all.length ? null : atomsOf(shared);
+    if (given === 'cap') return 'cap';
+    if (given && given.reduce((size, b) => size * b.p.length, 1) <= CONDITION_MAX) {
+      const over = tensor(given, shared.length)!;
+      const rows = over.wp.length;
+      if (!this.charge(rows)) return 'cap';
+      const parts: Joint[] = [];
+      let size = 0;
+      for (let i = 0; i < rows; i++) {
+        // A computed key is an own property whatever the name (`__proto__`).
+        const at: Record<string, Expr> = {};
+        shared.forEach((n, k) => { at[n] = num(over.cols[k][i]); });
+        const part = this.enumerateTerms(terms.map(t => substVars(t, at)), env);
+        if (!part || part === 'cap') return part;
+        size += part.wp.length;
+        if (size > JOINT_MAX) return 'cap';
+        parts.push(part);
+      }
+      const block: Block = {
+        terms: ids, cols: ids.map(() => new Float64Array(size)), mags: ids.map(() => new Float64Array(size)),
+        p: new Float64Array(size), n: new Float64Array(size), c: new Float64Array(size),
+        lost: 1 - (1 - over.lost) * (1 - Math.max(0, ...parts.map(part => part.lost))),
+      };
+      let at = 0;
+      parts.forEach((part, i) => {
+        ids.forEach((_, k) => {
+          block.cols[k].set(part.cols[k], at);
+          block.mags[k].set(part.mags[k], at);
+        });
+        for (let j = 0; j < part.wp.length; j++) {
+          block.p[at + j] = over.wp[i] * part.wp[j];
+          block.n[at + j] = over.wn[i] * part.wn[j];
+          block.c[at + j] = over.wc[i] * part.wc[j];
+        }
+        at += part.wp.length;
+      });
+      return block;
+    }
+    const bases = atomsOf(all);
+    if (!bases || bases === 'cap') return bases;
+    if (!this.charge(bases.reduce((size, b) => size * b.p.length, 1))) return 'cap';
+    const joint = tensor(bases, all.length);
+    if (!joint) return 'cap';
+    const byName = new Map(all.map((n, k) => [n, joint.cols[k]]));
+    const columns = terms.map(t => columnOf(t, byName, env, joint.wp.length));
+    return { terms: ids, cols: columns.map(col => col.vals), mags: columns.map(col => col.mags), p: joint.wp, n: joint.wn, c: joint.wc, lost: joint.lost };
+  }
+
+  /** The atoms of a grounded expression over discrete bases (see above):
+   *  unrounded, unless `finished` (the root: see mergeAtoms). */
+  private enumerate(e: Expr, env: Record<string, number>, finished = false): AtomSet | 'cap' | null {
     if (e.kind === 'var' && this.rvs.has(e.name)) return this.baseAtomsOf(e.name, env);
     // An operator or call over INDEPENDENT operands combines their atoms.
     const kids = e.kind === 'neg' ? [e.a] : e.kind === 'bin' ? [e.a, e.b] : e.kind === 'call' ? e.args : null;
@@ -4253,22 +4506,35 @@ export class RVSystem {
     const joint = kids ? this.enumerateTerms(kids, env) : this.enumerateTerms([e], env, true);
     if (!joint || joint === 'cap') return joint;
     const size = joint.wp.length;
-    let vals: Float64Array;
-    if (!kids) vals = joint.cols[0];
-    else {
-      const names = kids.map((_, k) => `\u0000${k}`);
+    let vals = joint.cols[0];
+    let mags = joint.mags[0];
+    if (kids) {
+      const names = kids.map((_, k) => `\u0000${k}`); // no identifier: cannot collide with a user's name
       const at = (k: number): Expr => v(names[k]);
       const node: Expr = e.kind === 'neg' ? { kind: 'neg', a: at(0) }
         : e.kind === 'bin' ? { kind: 'bin', op: e.op, a: at(0), b: at(1) }
           : { kind: 'call', name: (e as Expr & { kind: 'call' }).name, args: kids.map((_, k) => at(k)) };
       vals = evalCols(node, new Map(names.map((n, k) => [n, joint.cols[k]])), env, size);
-      // The operands are canonical already, so only this node's own sum can
-      // have cancelled: against |a| + |b|.
-      const sum = e.kind === 'bin' && (e.op === '+' || e.op === '-');
-      const [a, b] = joint.cols;
-      canonicalize(vals, sum ? vals.map((_, i) => Math.abs(a[i]) + Math.abs(b[i])) : undefined);
+      // What this node added up: |a| + |b| for a sum (which may have cancelled
+      // to 0), carried through a product or quotient, else the value's own.
+      const b = joint.cols[1];
+      const [ma, mb] = joint.mags;
+      const op = e.kind === 'bin' ? e.op : e.kind;
+      if (op === 'neg') mags = ma;
+      else if (op === '+' || op === '-') {
+        mags = ma.map((m, i) => m + mb[i]);
+        for (let i = 0; i < size; i++) if (cancelled(vals[i], mags[i])) vals[i] = 0;
+      } else if (op === '*') mags = ma.map((m, i) => m * mb[i]);
+      else if (op === '/') mags = ma.map((m, i) => Math.max(Math.abs(vals[i]), m / Math.abs(b[i])));
+      else mags = vals.map(Math.abs);
     }
-    return mergeAtoms(vals, joint.wp, joint.wn, joint.wc, joint.lost);
+    return mergeAtoms(vals, mags, joint.wp, joint.wn, joint.wc, joint.lost, finished);
+  }
+
+  /** `enumerate` at the root, within a fresh work budget. */
+  private enumerateRoot(e: Expr, env: Record<string, number>): AtomSet | 'cap' | null {
+    this.budget = 2 * JOINT_MAX;
+    return this.enumerate(e, env, true);
   }
 
   /**
@@ -4284,14 +4550,14 @@ export class RVSystem {
     const slot = this.entry(name, this.sig(rv, env));
     if (slot.dpmf === undefined) {
       const g = this.grounded(name);
-      const atoms = g ? this.enumerate(g, env) : 'cap';
+      const atoms = g ? this.enumerateRoot(g, env) : 'cap';
       slot.dpmf = atoms === 'cap' ? 'cap' : atoms && exactPmf(atoms);
     }
     if (slot.dpmf !== 'cap') return slot.dpmf;
     if (slot.spmf === undefined) {
-      if (slot.sampledMeanOk === undefined) slot.sampledMeanOk = this.sampledMeanOk(name, env);
+      slot.tails ??= this.sampledTails(name, env);
       slot.spmfStill = this.basesOf(name).length === 1;
-      slot.spmf = sampledPmf(this.sampledColumn(this.grounded(name) ?? rv.expr, env), slot.sampledMeanOk);
+      slot.spmf = sampledPmf(this.sampledColumn(this.grounded(name) ?? rv.expr, env), slot.tails);
     }
     return slot.spmf;
   }
@@ -4306,24 +4572,65 @@ export class RVSystem {
     return canonicalColumn(e, cols, env, SAMPLE_COUNT);
   }
 
-  /** Whether the sample mean of a sampled-tier variable means anything. The
-   *  discrete families' own tails are all exponentially light, so only g can
-   *  make a mean diverge (1.00001^X over Geometric(1e-6)) — tested exactly as
-   *  for a density (`diverges`), where there is one base to test along. */
-  private sampledMeanOk(name: string, env: Record<string, number>): boolean {
+  /**
+   * Whether the first two moments of a sampled-tier variable exist — a sample
+   * mean is finite either way, and 1.00001^G over Geometric(1e-6) prints as a
+   * confident 1e49. The discrete families' own tails are exponentially light,
+   * so only g can make a sum diverge, and only along a base with no upper end.
+   * Each such base is walked out its tail with the others held at their median
+   * and at both their 1e-6 quantiles (so a g that grows through a product is
+   * seen): exactly, by the base's own sliver masses, where its support
+   * enumerates (momentVerdict's test); by quadrature over its exact quantile
+   * where it does not. Conservative: what cannot be certified is 'unknown'.
+   */
+  private sampledTails(name: string, env: Record<string, number>): { mean: Tail; second: Tail } {
+    const out: { mean: Tail; second: Tail } = { mean: 'ok', second: 'ok' };
     const g = this.grounded(name);
-    const bases = this.basesOf(name);
-    if (!g || bases.length !== 1) return true;
-    const law = discreteLaw((this.rvs.get(bases[0]) as RV & { kind: 'base' }).dist, env);
-    if (!law || law.hi !== Infinity) return true;
-    const gAt = (x: number): number => {
-      try {
-        return Math.abs(evaluate(g, { ...env, [bases[0]]: x }));
-      } catch {
-        return NaN;
+    if (!g) return { mean: 'unknown', second: 'unknown' };
+    const laws = new Map<string, DiscreteLaw>();
+    for (const b of this.basesOf(name)) {
+      const law = discreteLaw((this.rvs.get(b) as RV & { kind: 'base' }).dist, env);
+      if (!law) return out; // no distribution: nothing is sampled either
+      laws.set(b, law);
+    }
+    for (const [b, law] of laws) {
+      if (law.hi !== Infinity) continue;
+      const atoms = this.baseAtomsOf(b, env);
+      const memo = new Map<number, number>();
+      const upper = (u: number): number => {
+        let k = memo.get(u);
+        if (k === undefined) memo.set(u, k = law.quantile(u, true));
+        return k;
+      };
+      for (const others of [(l: DiscreteLaw) => l.quantile(0.5), (l: DiscreteLaw) => l.quantile(1e-6, true), (l: DiscreteLaw) => l.quantile(1e-6)]) {
+        const at: Record<string, number> = { ...env };
+        for (const [n, l] of laws) at[n] = others(l);
+        const gAt = (x: number): number => {
+          at[b] = x;
+          try {
+            return Math.abs(evaluate(g, at));
+          } catch {
+            return NaN;
+          }
+        };
+        for (const [key, h] of [['mean', gAt], ['second', (x: number) => gAt(x) ** 2]] as const) {
+          let tail: Tail;
+          if (atoms && atoms !== 'cap') {
+            let deep = 0;
+            let shallow = 0;
+            for (let i = 0; i < atoms.xs.length; i++) {
+              if (atoms.p[i] === atoms.c[i]) continue; // not in a sliver
+              const w = h(atoms.xs[i]);
+              deep += w * (atoms.p[i] - atoms.n[i]);
+              shallow += w * (atoms.n[i] - atoms.c[i]);
+            }
+            tail = tailOf(deep, shallow);
+          } else tail = quantileTail(h, upper);
+          out[key] = worseTail(out[key], tail);
+        }
       }
-    };
-    return !diverges(gAt, u => (u < 0.5 ? law.quantile(u) : law.quantile(1 - u, true)));
+    }
+    return out;
   }
 
   /**
@@ -4356,14 +4663,13 @@ export class RVSystem {
         return { ...run, ks, ps: run.ps.filter((_, i) => keep(run.ks[i])) };
       }).filter(run => run.ks.length);
     }
-    // Keyed by the atoms in view: a pan that brings none in or out is a hit.
+    // Keyed by the atoms in view — which decide everything drawn, the stride
+    // past STEM_MAX included — and the atoms selected: a pan that brings none
+    // in or out is a hit.
     const slot = this.cache.get(name)!;
-    const key = ranges.map(r => {
-      const i0 = view ? Math.max(r.i0, firstAbove(pmf.xs, view.lo, true)) : r.i0;
-      const i1 = view ? Math.min(r.i1, firstAbove(pmf.xs, view.hi, false) - 1) : r.i1;
-      // Past STEM_MAX the choice of stems depends on the window's width too.
-      return i1 - i0 < STEM_MAX ? `${i0},${i1}` : `${i0},${i1},${pmf.xs[i1] - pmf.xs[i0]}`;
-    }).join(';');
+    const v0 = view ? firstAbove(pmf.xs, view.lo, true) : 0;
+    const v1 = view ? firstAbove(pmf.xs, view.hi, false) - 1 : pmf.xs.length - 1;
+    const key = `${v0},${v1};${ranges.map(r => `${r.i0},${r.i1}`).join(';')}`;
     slot.runs ??= new Map();
     let runs = slot.runs.get(key);
     if (!runs) {
