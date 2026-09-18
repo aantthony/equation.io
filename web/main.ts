@@ -1,5 +1,6 @@
 import { initSyntaxHelp } from './syntax-help.ts';
 import { scanRegressions, formatFit } from '../lib/regression.ts';
+import { PointTrail } from '../lib/point-trail.ts';
 import {
   MissingDataError,
   animatedConstNames,
@@ -90,6 +91,7 @@ import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
 
 interface Equation {
+  trail?: PointTrail;
   id: number;
   text: string;
   colorIndex: number;
@@ -373,6 +375,7 @@ function currentConstEnv(time: number): Record<string, number> {
 
 /** Send the state system back to its `a(0)` values, starting from now. */
 function resetState() {
+  for (const eq of equations) eq.trail = undefined;
   stateVals = stateSys ? initialState(defs, stateSys) : {};
   stateTime = graphTime();
 }
@@ -521,6 +524,16 @@ function render() {
   // States carry between frames, so they are integrated up to now before
   // anything reads them; the constants may then be formulas in those states.
   constEnv = currentConstEnv(time);
+
+  for (const eq of active) {
+    if (eq.cls!.plot.type !== 'trail') continue;
+    const plot = eq.cls!.plot;
+    eq.trail ??= new PointTrail(plot.dim);
+    let point: number[];
+    try { point = plot.coords.map(c => evaluate(c, { ...constEnv, t: time })); }
+    catch { point = Array(plot.dim).fill(NaN); }
+    eq.trail.sample(time, point);
+  }
 
   // Fresh joint sample every frame: estimated density curves shimmer with
   // their true sampling noise instead of freezing one pairing into wiggles
@@ -757,6 +770,12 @@ function render() {
         case 'psurface':
           scene.psurfaces.push({ comps: plot.comps, du: plot.du, dv: plot.dv, color, params });
           break;
+        case 'trail': {
+          scene.curves.push({ pts: new Float32Array(eq.trail!.coordinates(3)), color });
+          const p = eq.trail!.head;
+          if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+          break;
+        }
         case 'pcurve': {
           const flat = sampleCurve(eq, plot.dim);
           const pts = new Float32Array(CURVE_SAMPLES * 3);
@@ -877,6 +896,12 @@ function render() {
             extras.polylines.push({ pts: integralCurve(plot.comps, d.x, d.y, time), color: css });
             extras.points.push({ x: d.x, y: d.y, color: css, hot: hotPoint === `drop${i}` });
           });
+          break;
+        }
+        case 'trail': {
+          extras.polylines.push({ pts: eq.trail!.coordinates(2), color: css });
+          const p = eq.trail!.head;
+          if (p) extras.points.push({ x: p[0], y: p[1], color: css });
           break;
         }
         case 'pcurve': extras.polylines.push({ pts: sampleCurve(eq, 2), color: css }); break;
@@ -1147,12 +1172,22 @@ const listEl = document.getElementById('equations')!;
 /** Shown only while a state system exists; sends it back to its `a(0)`s. */
 const stateResetBtn = document.getElementById('state-reset') as HTMLButtonElement | null;
 
+let trailDocument = '';
+
 /**
  * Recompile every row: scan definitions first (they affect how every other
  * row parses), then classify the plot rows against them. Cheap enough to run
  * on every keystroke.
  */
 function recompileAll() {
+  // Framing and comment edits preserve trails; changing the math starts a
+  // fresh observation so unrelated runs never get joined by a false segment.
+  const mathText = equations.map(eq => eq.text.trim()).filter(text =>
+    text && !text.startsWith('#') && !/^(view|camera)\s*\(/i.test(text)).join('\n');
+  if (mathText !== trailDocument) {
+    for (const eq of equations) eq.trail = undefined;
+    trailDocument = mathText;
+  }
   // Random-variable rows resolve outside the definition system: `X ~ …` is
   // never a definition, and `Y = X^2` with X random declares a *derived*
   // random variable, not a constant. The scan is transitive (`Z = Y + 1`

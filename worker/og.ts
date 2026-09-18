@@ -598,6 +598,7 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
   ineq2d: 'draws',
   scalar2d: 'draws',
   point: 'draws',
+  trail: 'fallback',
   pcurve: 'draws',
   psurface: 'draws',
   implicit3d: 'draws',
@@ -656,6 +657,7 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   const { cls, expr } = row;
   if (!cls) return null;
   const type = cls.plot.type;
+  if (type === 'trail') return 'trail(point) accumulates live motion history; no static preview is available';
   if (!needs3D) {
     return OG_COVERAGE[type] === 'draws'
       ? null
