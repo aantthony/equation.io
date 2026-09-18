@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type BaseDist,
+  QUANTILE_STATS,
   RVSystem,
   SAMPLE_COUNT,
   buildRVSystem,
@@ -357,7 +358,7 @@ describe('moments and the readout branch', () => {
       expect(sys.quadMoments('Y', {}), decl).toBeNull();
       const r = sys.curve('Y', {})!.robust!;
       expect(r, decl).toBeDefined();
-      expect(r.meanOk, decl).toBeUndefined();
+      expect(r.meanOk, decl).toBe(false);
       expect(r.median, decl).toBeCloseTo(1, 2);
       expect(sys.mean('Y', {}), decl).toBeNaN();
       expect(sys.meanUnstable('Y', {}), decl).toBe(true);
@@ -372,7 +373,7 @@ describe('moments and the readout branch', () => {
     // that would print as fact. The mean, 1, exists and is kept for E(…).
     for (const df of [1.5, 2]) {
       const { sys } = build([`X ~ StudentT(${df})`, 'Y = X + 1', 'Z ~ Normal(0, 1)', 'S = X + Z']);
-      expect(sys.quadMoments('Y', {})).toBeNull();
+      expect(sys.quadMoments('Y', {})).toEqual({ mean: expect.closeTo(1, 9), sd: Infinity, mass: expect.closeTo(1, 9) });
       const r = sys.curve('Y', {})!.robust!;
       expect(r, `df ${df}`).toBeDefined();
       expect(r.meanOk).toBe(true);
@@ -473,5 +474,109 @@ describe('exact closure rules', () => {
     const d = sys.exactDist('S')!;
     expect(sys.probability(parseExpr('S < 1'), {})).toBeCloseTo(cdf(d, 1), 2);
     expect(sys.probability(parseExpr('Q < 1'), {})).toBeCloseTo(cdf(sys.exactDist('Q')!, 1), 2);
+  });
+});
+
+describe('review follow-ups', () => {
+  const analyzeLike = (rows: string[]) => build(rows).sys;
+
+  it('#1 a mean that does not exist is not printed just because the base law has one', () => {
+    // E(X²) = ∞ for StudentT(2); the + Y changes nothing about that.
+    const sys = analyzeLike(['X ~ T(2)', 'Y ~ Normal(0, 1)', 'W = X^2 + Y']);
+    expect(sys.mean('W', {})).toBeNaN();
+    expect(sys.meanUnstable('W', {})).toBe(true);
+    expect(sys.curve('W', {})!.robust!.meanOk).toBe(false);
+  });
+
+  it('#2 a mean that exists is still printed when only the variance is unstable', () => {
+    const ln = analyzeLike(['X ~ LogNormal(0, 1.5)', 'Y ~ LogNormal(0, 1.5)', 'W = X Y']);
+    expect(ln.curve('W', {})!.robust).toBeDefined();
+    expect(ln.meanUnstable('W', {})).toBe(false);
+    expect(ln.mean('W', {})).toBeGreaterThan(8.5); // true e^2.25 = 9.49; the grid reads ≈ 9.15
+    expect(ln.mean('W', {})).toBeLessThan(10);
+    const c = analyzeLike(['X ~ Cauchy', 'Z ~ Normal(0, 1)', 'W = sqrt(abs(X)) + 0 Z']);
+    expect(c.meanUnstable('W', {})).toBe(false);
+    expect(c.mean('W', {})).toBeCloseTo(Math.SQRT2, 1);
+    // Pre-existing families: rows that printed a mean on main keep printing it.
+    const u = analyzeLike(['X ~ Uniform(0, 1)', 'Z ~ Uniform(0, 1)', 'W = X^(-0.6) + 0 Z']);
+    expect(u.mean('W', {})).toBeCloseTo(2.5, 0);
+    const e = analyzeLike(['X ~ Exponential(1)', 'Z ~ Normal(0, 1)', 'W = exp(0.6 X) + 0 Z']);
+    expect(e.mean('W', {})).toBeCloseTo(2.5, 0);
+    const n = analyzeLike(['X ~ Normal(0, 1)', 'Z ~ Normal(0, 1)', 'W = exp(0.5 X Z)']);
+    expect(n.mean('W', {})).toBeCloseTo(1 / Math.sqrt(0.75), 1); // tail index 2: σ = ∞, mean fine
+    // …and an index-1 tail (no mean) is declined whatever the family.
+    const r = analyzeLike(['X ~ Normal(0, 1)', 'Y ~ Normal(0, 1)', 'W = X/Y']);
+    expect(r.mean('W', {})).toBeNaN();
+  });
+
+  it('#3 quadrature keeps a converged mean when only the second moment diverges', () => {
+    const sys = analyzeLike(['X ~ T(3)', 'Y = X^2']);
+    const qm = sys.quadMoments('Y', {})!;
+    expect(qm.mean).toBeCloseTo(3, 6);
+    expect(qm.sd).toBe(Infinity);
+    expect(sys.mean('Y', {})).toBeCloseTo(3, 6);
+    expect(sys.meanUnstable('Y', {})).toBe(false);
+    // An odd integrand cancels to 0 by symmetry without converging absolutely.
+    const c = analyzeLike(['X ~ T(1)', 'Y = X^3']);
+    expect(c.quadMoments('Y', {})).toBeNull();
+  });
+
+  it('#5 location–scale closure: Cauchy sums and shifts, scaled LogNormal', () => {
+    const law = (rows: string[], name: string) => build(rows).sys.exactDist(name);
+    const vals = (d: BaseDist, env: Record<string, number> = {}) => d.args.map(a => evaluate(a, env));
+    expect(vals(law(['X ~ Cauchy(0, 1)', 'Y = X + 1'], 'Y')!)).toEqual([1, 1]);
+    expect(law(['X ~ Cauchy(0, 1)', 'Y = X + 1'], 'Y')!.kind).toBe('cauchy');
+    expect(vals(law(['X ~ Cauchy(0, 1)', 'Y = 2X'], 'Y')!)).toEqual([0, 2]);
+    expect(vals(law(['X ~ Cauchy(1, 2)', 'Y = -3X + 1'], 'Y')!)).toEqual([-2, 6]);
+    expect(vals(law(['X ~ Cauchy(1, 2)', 'C ~ Cauchy(3, 0.5)', 'Y = X + C'], 'Y')!)).toEqual([4, 2.5]);
+    expect(vals(law(['X ~ Cauchy(1, 2)', 'Y = X + X'], 'Y')!)).toEqual([2, 4]); // 2X, not two copies
+    expect(vals(law(['X ~ Cauchy(1, 2)', 'Y = a X'], 'Y')!, { a: -2 })).toEqual([-2, 4]);
+    expect(law(['X ~ Cauchy(1, 2)', 'Z ~ Normal(0, 1)', 'Y = X + Z'], 'Y')).toBeNull();
+    const ln = law(['X ~ LogNormal(0.5, 0.75)', 'Y = 4X'], 'Y')!;
+    expect(ln.kind).toBe('lognormal');
+    expect(vals(ln)[0]).toBeCloseTo(0.5 + Math.log(4), 12);
+    expect(vals(ln)[1]).toBe(0.75);
+    expect(law(['X ~ LogNormal(0, 1)', 'Y = -X'], 'Y')).toBeNull();
+    expect(law(['X ~ LogNormal(0, 1)', 'Y = X + 1'], 'Y')).toBeNull();
+    expect(law(['X ~ LogNormal(0, 1)', 'Y = a X'], 'Y')).toBeNull();
+  });
+
+  it('#8 Weibull moments survive tiny shapes: log space, Infinity past double range', () => {
+    const m = (decl: string) => build([`X ~ ${decl}`]).sys.exactMoments('X', {})!;
+    const w = m('Weibull(0.05, 1)'); // mean Γ(21) = 20!, sd √(Γ(41) − Γ(21)²)
+    expect(w.mean / 2432902008176640000).toBeCloseTo(1, 10);
+    expect(w.sd / Math.sqrt(8.159152832419786e47)).toBeCloseTo(1, 8);
+    const huge = m('Weibull(0.01, 1)');
+    expect(huge.mean / 9.332621544394415e157).toBeCloseTo(1, 8); // 100!
+    expect(huge.sd / 2.8083053027846e187).toBeCloseTo(1, 8); // √200!, though 200! itself overflows
+    expect(m('Weibull(0.004, 1)')).toEqual({ mean: Infinity, sd: Infinity }); // finite in truth, never NaN
+    // A finite-variance law is not a heavy-tailed base, whatever its moments overflow to.
+    const sys = analyzeLike(['X ~ Weibull(0.004, 1)', 'Z ~ Normal(0, 1)', 'S = min(X, 1) + Z']);
+    expect(sys.curve('S', {})!.robust).toBeUndefined();
+  });
+
+  it('#9 exact probabilities stay exact-grade at astronomically large parameters', () => {
+    expect(cdf(dist('Beta(1000000000000, 1000000000000)'), 0.5)).toBeCloseTo(0.5, 9);
+    expect(cdf(dist('Gamma(10000000000000, 1)'), 1e13)).toBeCloseTo(0.5 + 1 / (3 * Math.sqrt(2 * Math.PI * 1e13)), 9);
+    expect(cdf(dist('Gamma(10000000000000, 1)'), 1e13 + 2e6 * Math.sqrt(10))).toBeCloseTo(0.9772, 3);
+    expect(cdf(dist('Beta(3, 1000000000000)'), 2.6740603137235617e-12)).toBeCloseTo(0.5, 6); // → Gamma(3)/b
+    expect(sf(dist('ChiSquared(40000000000000)'), 4e13)).toBeCloseTo(0.5, 6);
+    const { sys } = build(['X ~ Beta(30000000, 50000000)']);
+    const col = sys.columns('X', {}).slice().sort();
+    expect(col.every(Number.isFinite)).toBe(true);
+    expect(col[SAMPLE_COUNT >> 1]).toBeCloseTo(0.375, 6);
+  });
+
+  it('#10 the quantile-table cache is LRU: a table read every frame outlives a slider trail', () => {
+    const fixed = build(['X ~ Gamma(7.0625, 1)']).sys;
+    fixed.columns('X', {});
+    const before = QUANTILE_STATS.builds;
+    for (let k = 0; k < 150; k++) {
+      build([`S ~ Gamma(${9 + k / 1024}, 1)`]).sys.columns('S', {}); // the dragged shape
+      fixed.resample(k + 1);
+      fixed.columns('X', {}); // the fixed variable, every frame
+    }
+    fixed.resample(0);
+    expect(QUANTILE_STATS.builds - before).toBe(150);
   });
 });

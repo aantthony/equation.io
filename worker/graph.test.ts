@@ -207,12 +207,16 @@ describe('the continuous distribution zoo through analyze()', () => {
   });
 
   it('declines a mean that does not exist instead of printing the sample mean', () => {
-    const rows = out(['X ~ Cauchy', 'E(X)', 'E(X^2)', 'E(atan(X))', 'T2 ~ StudentT(2)', 'E(T2 + 1)', 'T1 ~ T(1)', 'E(3 T1)']);
+    const rows = out(['X ~ Cauchy', 'E(X)', 'E(X^2)', 'E(atan(X))', 'T2 ~ StudentT(2)', 'E(T2 + 1)', 'T1 ~ T(1)', 'E(3 T1)',
+      'T3 ~ T(3)', 'E(T3^2)', 'N1 ~ N', 'E(T2^2 + N1)', 'E(2X + 1)']);
     expect(rows[1]).toEqual(['expect', 'no stable mean (heavy tails)']);
     expect(rows[2]).toEqual(['expect', 'no stable mean (heavy tails)']);
     expect(rows[3]).toEqual(['expect', '≈ 0.0000']); // bounded transform: a real mean
-    expect(rows[5]).toEqual(['expect', '≈ 1.000']); // σ = ∞ but the mean exists
+    expect(rows[5]).toEqual(['expect', '≈ 1.0000']); // σ = ∞ but the mean exists: quadrature keeps it
     expect(rows[7]).toEqual(['expect', 'no stable mean (heavy tails)']);
+    expect(rows[9]).toEqual(['expect', '≈ 3.0000']); // E(X²) = 3 although Var(X²) = ∞
+    expect(rows[11]).toEqual(['expect', 'no stable mean (heavy tails)']); // E(T2²) = ∞
+    expect(rows[12]).toEqual(['expect', 'no stable mean (heavy tails)']); // the exact Cauchy(1, 2)
   });
 
   it('reports bad parameters on the row: written out, or a constant at its value', () => {

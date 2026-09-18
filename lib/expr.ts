@@ -8,7 +8,7 @@
 import { BinaryInfix, BinaryRightInfix, operators, Postfix, Prefix, shunting } from './lang/parser.ts';
 import Tokenizer, { type PatternDict, type Token } from './lang/tokenizer.ts';
 import { walk } from './lang/ast.ts';
-import { betaPdf, gammaPdf, studentTPdf, weibullPdf } from './specfn.ts';
+import { betaPdf, gammaPdf, lgamma, studentTPdf, weibullPdf } from './specfn.ts';
 
 export type IneqOp = '<' | '<=' | '>' | '>=';
 
@@ -723,9 +723,10 @@ export function realPow(a: number, b: number): number {
   return NaN; // no small-denominator rational found: irrational-looking exponent
 }
 
-/** Lanczos coefficients (g = 5, n = 6): relative error < 2e-10 over the
- *  reals. Interpolated into the eq_gamma() GLSL twin (glsl.ts) too, so both
- *  implementations share this one array. */
+/** Lanczos coefficients (g = 5, n = 6) of the float32 shader twins eq_gamma /
+ *  eq_lgamma (glsl.ts interpolates this array): relative error < 2e-10, far
+ *  below what a float carries. The CPU side is lgamma() in specfn.ts (g = 7,
+ *  ~1e-15) — one ln Γ for gamma(x) and for the distributions alike. */
 export const LANCZOS = [
   76.18009172947146, -86.50532032941677, 24.01409824083091,
   -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5,
@@ -734,23 +735,15 @@ export const LANCZOS = [
 /**
  * Real Γ(x). Poles at 0, −1, −2, … evaluate to NaN; other negative reals go
  * through the reflection formula Γ(x)Γ(1−x) = π/sin(πx). Overflows to
- * Infinity above x ≈ 171.62, like the rest of double arithmetic.
- *
- * Kept in sync with the eq_gamma() GLSL twin in glsl.ts (same Lanczos
- * coefficients and reflection, minus the exact-pole check float32 can't do).
+ * Infinity above x ≈ 171.62, like the rest of double arithmetic. exp(ln Γ):
+ * assembling Γ in log space is what keeps it finite up to there.
  */
 export function gammaFn(x: number): number {
   if (x < 0.5) {
     if (Number.isInteger(x)) return NaN; // pole
     return Math.PI / (Math.sin(Math.PI * x) * gammaFn(1 - x));
   }
-  const z = x - 1;
-  let ser = 1.000000000190015;
-  for (let i = 0; i < LANCZOS.length; i++) ser += LANCZOS[i] / (z + i + 1);
-  const t = z + 5.5;
-  // Assembled in log space: a bare pow(t, z + 0.5) factor overflows a double
-  // from x ≈ 143, well before Γ itself does.
-  return Math.exp((z + 0.5) * Math.log(t) - t + Math.log(2.5066282746310002 * ser));
+  return Math.exp(lgamma(x));
 }
 
 /** k! for k = 0..170, every factorial a double can hold. */

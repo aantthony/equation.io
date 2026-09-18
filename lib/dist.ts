@@ -2,7 +2,7 @@
  * Probability distribution rows.
  *
  * - `X ~ Normal(mean, sd)` (also Uniform, Exponential, Gamma, Beta,
- *   ChiSquared, StudentT, LogNormal, Cauchy, Weibull — see DIST_SPECS)
+ *   ChiSquared, StudentT, LogNormal, Cauchy, Weibull — lib/dist-families.ts)
  *   declares a random variable; the row plots its exact density. Parameters
  *   may reference constants (sliders) and t, so `X ~ Normal(0, a)` responds
  *   to the slider.
@@ -48,16 +48,15 @@ import {
 } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from './defs.ts';
+import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
 import { quadrature } from './integrate.ts';
 import {
-  betaPQ, betaPdf, gammaPQ, gammaPdf, lbeta, lgamma, normalPQ, studentTPQ, studentTPdf, weibullPdf,
+  GAMMA_UNIFORM_SHAPE, betaPQ, betaPdf, gammaPQ, gammaPdf, lbeta, lgamma, normalPQ, studentTPQ, studentTPdf, weibullPdf,
 } from './specfn.ts';
 
 // --- base distributions ---
 
-export type BaseKind =
-  | 'normal' | 'uniform' | 'exponential'
-  | 'gamma' | 'beta' | 'chisquared' | 'studentt' | 'lognormal' | 'cauchy' | 'weibull';
+export type { BaseKind };
 
 /**
  * Argument meaning by kind — the conventions are the textbook ones, stated
@@ -74,33 +73,16 @@ export interface BaseDist {
   args: Expr[];
 }
 
-/** What each kind's parameters must satisfy, by position: the name of a
- *  parameter that must be > 0, or null for any real. (Uniform's lo < hi is
- *  the one relation between parameters; paramProblem spells it out.) */
-const KIND_PARAMS: Record<BaseKind, { usage: string; positive: Array<string | null> }> = {
-  normal: { usage: 'Normal(mean, sd)', positive: [null, 'sd'] },
-  uniform: { usage: 'Uniform(lo, hi)', positive: [null, null] },
-  exponential: { usage: 'Exponential(rate)', positive: ['rate'] },
-  gamma: { usage: 'Gamma(shape, rate)', positive: ['shape', 'rate'] },
-  beta: { usage: 'Beta(a, b)', positive: ['a', 'b'] },
-  chisquared: { usage: 'ChiSquared(df)', positive: ['df'] },
-  studentt: { usage: 'StudentT(df)', positive: ['df'] },
-  lognormal: { usage: 'LogNormal(mu, sigma)', positive: [null, 'sigma'] },
-  cauchy: { usage: 'Cauchy(location, scale)', positive: [null, 'scale'] },
-  weibull: { usage: 'Weibull(shape, scale)', positive: ['shape', 'scale'] },
-};
-
 /**
  * Why these parameter values declare no distribution, or null when they do.
  * `a[k]` may be undefined/NaN for a parameter not known yet (a slider at
  * parse time): only what is known is judged.
  */
 export function paramProblem(kind: BaseKind, a: ReadonlyArray<number | null | undefined>): string | null {
-  const { usage, positive } = KIND_PARAMS[kind];
-  for (let k = 0; k < positive.length; k++) {
-    const name = positive[k];
+  const family = familyOf(kind);
+  for (const [k, param] of family.params.entries()) {
     const val = a[k];
-    if (name && typeof val === 'number' && val <= 0) return `${usage} needs ${name} > 0.`;
+    if (param.positive && typeof val === 'number' && val <= 0) return `${distUsage(family)} needs ${param.name} > 0.`;
   }
   if (kind === 'uniform' && typeof a[0] === 'number' && typeof a[1] === 'number' && a[1] <= a[0]) {
     return 'Uniform(lo, hi) needs lo < hi.';
@@ -120,49 +102,25 @@ export function scanDistribution(text: string): { name: string; rhs: string } | 
   return m ? { name: m[1], rhs: m[2] } : null;
 }
 
-interface DistSpec {
-  kind: BaseKind;
-  /** Standard parameters a bare name takes (`X ~ N`); absent where the
-   *  family has no standard member (`X ~ Gamma` must say which). */
-  defaults?: number[];
-}
-
 /**
- * Names are matched case-insensitively and live in their own namespace (the
- * right side of `~`), so they collide with nothing a document defines: a
- * constant T or a function gamma(x) leaves `X ~ T(5)` and `X ~ Gamma(2, 1)`
- * alone. (With a declared data list on the left, `Y ~ gamma(a X)` and
- * `Y ~ t(…)` are regression models, like `Y ~ exp(a X)` — lib/regression.ts.)
+ * Names (lib/dist-families.ts) are matched case-insensitively and live in
+ * their own namespace, the right side of `~`, so they collide with nothing a
+ * document defines: a constant T or a function gamma(x) leaves `X ~ T(5)` and
+ * `X ~ Gamma(2, 1)` alone.
  */
-const DIST_SPECS = new Map<string, DistSpec>(([
-  [['normal', 'n'], { kind: 'normal', defaults: [0, 1] }],
-  [['uniform', 'u'], { kind: 'uniform', defaults: [0, 1] }],
-  [['exponential', 'exp'], { kind: 'exponential', defaults: [1] }],
-  [['gamma'], { kind: 'gamma' }],
-  [['beta'], { kind: 'beta' }],
-  [['chisquared', 'chisq', 'chi2'], { kind: 'chisquared' }],
-  [['studentt', 't'], { kind: 'studentt' }],
-  [['lognormal'], { kind: 'lognormal', defaults: [0, 1] }],
-  [['cauchy'], { kind: 'cauchy', defaults: [0, 1] }],
-  [['weibull'], { kind: 'weibull' }],
-] as Array<[string[], DistSpec]>).flatMap(([names, spec]) => names.map((n): [string, DistSpec] => [n, spec])));
-
-const DIST_HINT = 'Try Normal(mean, sd), Uniform(lo, hi), Exponential(rate), Gamma(shape, rate), '
-  + 'Beta(a, b), ChiSquared(df), StudentT(df), LogNormal(mu, sigma), Cauchy(location, scale), '
-  + 'or Weibull(shape, scale).';
+const DIST_HINT = `Try ${DIST_FAMILIES.map((f, k, all) => (k === all.length - 1 ? 'or ' : '') + distUsage(f)).join(', ')}.`;
 
 /** Parse the right side of `name ~ …`. Throws with a row-friendly message. */
 export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): BaseDist {
   const m = DIST_RE.exec(rhs);
-  const spec = m && DIST_SPECS.get(m[1].toLowerCase());
+  const spec = m && distFamily(m[1]);
   if (!m || !spec) {
-    throw new Error(m && !DIST_SPECS.has(m[1].toLowerCase())
+    throw new Error(m && !distFamily(m[1])
       ? `Unknown distribution: ${m[1]}. ${DIST_HINT}`
       : 'Expected a distribution like Normal(0, 1).');
   }
-  const { usage, positive } = KIND_PARAMS[spec.kind];
-  const arity = positive.length;
-  const arityError = `${usage} takes ${arity} argument${arity > 1 ? 's' : ''}.`;
+  const arity = spec.params.length;
+  const arityError = `${distUsage(spec)} takes ${arity} argument${arity > 1 ? 's' : ''}.`;
   // A bare name takes the standard parameters: `X ~ N` is Normal(0, 1).
   if (m[2] === undefined) {
     if (!spec.defaults) throw new Error(arityError);
@@ -523,18 +481,14 @@ export interface DensityCurve {
    *  artifacts (a 1% trim collapses the spread severalfold — 1/W through a
    *  pole has no finite moments at all): robust location/spread for the
    *  readout to show instead. `meanOk` marks the milder case — the spread is
-   *  infinite but the mean exists and the estimate of it is sound (a shifted
-   *  StudentT(2)) — so an E(…) row may still print its number. */
+   *  unstable but the tails are lighter than 1/x, so the mean exists (a
+   *  shifted StudentT(2), a product of log-normals) — and an E(…) row may
+   *  still print its number. */
   robust?: Robust;
 }
 
-export interface Robust { median: number; iqr: number; meanOk?: boolean }
+export interface Robust { median: number; iqr: number; meanOk: boolean }
 
-/** What a variable's base laws say about its tails before any sample is
- *  looked at: 0 — every base has a finite variance; 1 — some base has an
- *  infinite variance but a mean (StudentT, 1 < df ≤ 2); 2 — some base has no
- *  mean at all (Cauchy, StudentT df ≤ 1). */
-type HeavyLevel = 0 | 1 | 2;
 
 const fnv1a = (s: string): number => {
   let h = 0x811c9dc5;
@@ -763,7 +717,7 @@ function visualWindow(pool: ArrayLike<number>, lo0: number, hi0: number): [numbe
   return [wlo, whi];
 }
 
-function estimateCurve(col: Float64Array, heavy: HeavyLevel = 0): DensityCurve | null {
+function estimateCurve(col: Float64Array, heavy = false): DensityCurve | null {
   let finite: number[] = [];
   let sum = 0;
   for (let i = 0; i < col.length; i++) {
@@ -953,7 +907,8 @@ function decimate(xs: ArrayLike<number>): Float64Array {
 function robustIfUnstable(
   sortedPool: ArrayLike<number>,
   sd: number,
-  heavy: HeavyLevel = 0,
+  heavy = false,
+  tailPool?: () => ArrayLike<number>,
 ): Robust | undefined {
   const q = quantileOf(sortedPool);
   const tlo = q(0.005);
@@ -976,7 +931,20 @@ function robustIfUnstable(
   // company (a two-point discrete law, say) — finite moments, nothing to
   // stabilize, and the ratio below would call every one of them unstable.
   if (!(sdTrim > 0)) return undefined;
-  if (sd > 3 * sdTrim) return { median: q(0.5), iqr: q(0.75) - q(0.25) };
+  // Whether the MEAN exists is its own question, asked of the tails and of
+  // nothing else: it does exactly when both decay faster than 1/x (tail index
+  // above 1). Not of the base laws — X² + Y over StudentT(2) has a base with a
+  // mean and none itself — and not of the σ collapse, which a product of
+  // log-normals or √|Cauchy| shows while having a perfectly good mean.
+  const collapsed = sd > 3 * sdTrim;
+  if (!collapsed && !heavy) return undefined;
+  // The tails are read off `tailPool` where the caller has a better one: the
+  // two-variable tensor grid resolves a pole-driven tail (X/Y) only down to
+  // its innermost node, and flattens the outer 2% the index is measured on.
+  const tails = tailPool?.() ?? sortedPool;
+  const index = Math.min(hillIndex(tails, q(0.5), 1), hillIndex(tails, q(0.5), -1));
+  const robust: Robust = { median: q(0.5), iqr: q(0.75) - q(0.25), meanOk: index > MEAN_INDEX };
+  if (collapsed) return robust;
   // Under a base law KNOWN to have no variance the bar is far lower. The
   // 3× collapse above only catches tails as wild as a Cauchy's: X + 1 over
   // StudentT(2) has σ = ∞, yet its grid σ (≈ 3, growing like √ln N) survives
@@ -984,11 +952,13 @@ function robustIfUnstable(
   // whether the transform let the tail through (X + 1, X + Z, √|X| of a
   // Cauchy) or tamed it (sin X, ln|X|, |X|^0.3), and the tail index answers
   // it: a variance exists only above index 2.
-  if (heavy && Math.min(hillIndex(sortedPool, q(0.5), 1), hillIndex(sortedPool, q(0.5), -1)) < HEAVY_INDEX) {
-    return { median: q(0.5), iqr: q(0.75) - q(0.25), ...(heavy === 1 ? { meanOk: true } : {}) };
-  }
-  return undefined;
+  return heavy && index < HEAVY_INDEX ? robust : undefined;
 }
+
+/** Above this estimated tail index the mean exists. The boundary is 1; index-1
+ *  laws (a Cauchy, a ratio of normals, 1/U) estimate at 0.95–1.03 on these
+ *  pools and index 1.1 at 1.09, so the margin is what the estimate resolves. */
+const MEAN_INDEX = 1.06;
 
 /** Below this estimated tail index a law fed by an infinite-variance base is
  *  reported by median/IQR. The boundary is 2; the margin covers the Hill
@@ -1157,18 +1127,23 @@ function cachedQuantile(key: string, make: () => WarpedLaw | null): ((u: number)
     const law = make();
     q = law && buildQuantile(law);
     if (quantileTables.size >= 64) quantileTables.delete(quantileTables.keys().next().value!);
-    quantileTables.set(key, q);
+  } else {
+    // Least RECENTLY USED goes first (a Map iterates in insertion order, so a
+    // hit re-inserts): a dragged shape slider leaves a trail of dead tables,
+    // and must not push out the one a fixed variable reads every frame.
+    quantileTables.delete(key);
   }
+  quantileTables.set(key, q);
   return q;
 }
 
-/** Past these the table's O(√shape)-term cdf evaluations stop being
- *  interactive; the law is a normal to many digits by then anyway. */
-const GAMMA_WH_SHAPE = 1e6;
+/** Past this a + b a Beta table's O(√n)-term cdf evaluations stop being
+ *  interactive, and the limit laws betaPQ itself ends in are already good to
+ *  ~1e-5. (Gamma switches at GAMMA_UNIFORM_SHAPE, with its cdf.) */
 const BETA_TABLE_MAX = 1e7;
 
 function gammaQuantile(shape: number): ((u: number) => number) | null {
-  if (shape > GAMMA_WH_SHAPE) {
+  if (shape > GAMMA_UNIFORM_SHAPE) {
     // Wilson–Hilferty: relative error O(shape^−2) in the body.
     const c = 1 / (9 * shape);
     return u => shape * Math.max(0, 1 - c + Math.sqrt(c) * normalQuantile(u)) ** 3;
@@ -1180,6 +1155,27 @@ function gammaQuantile(shape: number): ((u: number) => number) | null {
     dens: y => Math.exp(shape * y - Math.exp(y) - lg),
     unwarp: Math.exp,
   }));
+}
+
+/** Beta(a, b) quantiles for a + b > BETA_TABLE_MAX, by the same two limits as
+ *  specfn's betaLimit: a Gamma law on a modest parameter's side (X/(1 − X) →
+ *  G_a/b), otherwise the normal with its first skewness correction. */
+function betaLimitQuantile(al: number, be: number): ((u: number) => number) | null {
+  if (al < 1e5 || be < 1e5) {
+    const small = Math.min(al, be);
+    const g = gammaQuantile(small);
+    if (!g) return null;
+    const big = Math.max(al, be);
+    return al <= be ? u => g(u) / (big + g(u)) : u => big / (big + g(1 - u));
+  }
+  const n = al + be;
+  const mean = al / n;
+  const sd = Math.sqrt((al * be) / (n + 1)) / n;
+  const skew = (2 * (be - al) * Math.sqrt(n + 1)) / ((n + 2) * Math.sqrt(al * be));
+  return u => {
+    const z = normalQuantile(u);
+    return Math.min(1, Math.max(0, mean + sd * (z + (skew * (z * z - 1)) / 6)));
+  };
 }
 
 /** Quantile functions of the kinds quantileClosure has no formula for. */
@@ -1194,7 +1190,7 @@ function zooQuantile(kind: BaseKind, a: number[]): ((u: number) => number) | nul
     }
     case 'beta': {
       const [al, be] = a;
-      if (al + be > BETA_TABLE_MAX) return null;
+      if (al + be > BETA_TABLE_MAX) return betaLimitQuantile(al, be);
       const lb = lbeta(al, be);
       // y = logit x, so x and 1 − x are both formed without cancellation.
       return cachedQuantile(`b${al},${be}`, () => ({
@@ -1246,7 +1242,8 @@ function conditionalBase(
   g: Expr,
   vars: Array<{ name: string; quantile: (u: number) => number }>,
   env: Record<string, number>,
-  heavy: HeavyLevel = 0,
+  heavy = false,
+  tailPool?: () => ArrayLike<number>,
 ): QCBase | null {
   const outer = vars.length === 2 ? vars[0] : null;
   const inner = vars[vars.length - 1];
@@ -1293,7 +1290,7 @@ function conditionalBase(
     }
   }
   allPool.sort((a, b) => a - b);
-  const robust = robustIfUnstable(allPool, sd, heavy);
+  const robust = robustIfUnstable(allPool, sd, heavy, outer ? tailPool : undefined);
 
   // Repeated values are point masses (piecewise branches, floor, constants):
   // pooled across columns, heavy values become stems, and the continuous CDF
@@ -1970,6 +1967,8 @@ export class RVSystem {
    * - Gamma-family terms sharing one scaled rate → Gamma (gammaSumLaw), which
    *   covers the scaled Gamma, Erlang sums of exponentials, and χ² sums;
    * - the square of a standard normal → ChiSquared(1) (squareLaw);
+   * - all Cauchy → Cauchy (locations and |c|-scaled scales add); c·LogNormal
+   *   with a positive literal c → LogNormal(mu + ln c, sigma);
    * - several uniform terms → 'usum', an exact piecewise-polynomial
    *   convolution (the triangle, Irwin–Hall, trapezoids) evaluated per
    *   parameter values.
@@ -2007,6 +2006,19 @@ export class RVSystem {
       const sd: Expr = { kind: 'call', name: 'sqrt', args: [variance!] };
       return { kind: 'dist', dist: { kind: 'normal', args: [mean, sd] } };
     }
+    if (bases.every(b => b.dist.kind === 'cauchy')) {
+      // Stable with index 1: locations add like means, and SCALES add (not
+      // their squares), each through |c| so a flip or a negative slider stays
+      // a scale. Independence is the affine form's — X + X arrived as 2·X.
+      let location = af.c;
+      let scale: Expr | null = null;
+      for (const { coef, dist } of bases) {
+        location = bin('+', location, bin('*', coef, dist.args[0]));
+        const term = bin('*', call('abs', coef), dist.args[1]);
+        scale = scale ? bin('+', scale, term) : term;
+      }
+      return { kind: 'dist', dist: { kind: 'cauchy', args: [location, scale!] } };
+    }
     if (bases.length === 1) {
       const { coef, dist } = bases[0];
       if (dist.kind === 'uniform') {
@@ -2017,6 +2029,16 @@ export class RVSystem {
           { kind: 'call', name: 'max', args: [e1, e2] },
         ];
         return { kind: 'dist', dist: { kind: 'uniform', args } };
+      }
+      if (dist.kind === 'lognormal') {
+        // c·X with a positive literal c shifts mu by ln c; a shift, a flip
+        // or a slider that could flip leaves the family, as for exponential.
+        const c = numOf(coef);
+        if (c !== null && c > 0 && numOf(af.c) === 0) {
+          const mu = c === 1 ? dist.args[0] : bin('+', dist.args[0], num(Math.log(c)));
+          return { kind: 'dist', dist: { kind: 'lognormal', args: [mu, dist.args[1]] } };
+        }
+        return null;
       }
       if (dist.kind === 'exponential') {
         // Only c·X with a positive literal c stays exponential (rate λ/c);
@@ -2299,7 +2321,7 @@ export class RVSystem {
     }
     const col = this.columns(name, env);
     const entry = this.cache.get(name)!;
-    if (entry.est === undefined) entry.est = estimateCurve(col, this.heavyLevel(name, env));
+    if (entry.est === undefined) entry.est = estimateCurve(col, this.heavyBase(name, env));
     return entry.est;
   }
 
@@ -2321,7 +2343,10 @@ export class RVSystem {
       vars.push({ name: n, quantile });
     }
     try {
-      return conditionalBase(g, vars, env, this.heavyLevel(name, env));
+      return conditionalBase(g, vars, env, this.heavyBase(name, env), () => {
+        const col = this.columns(name, env);
+        return Float64Array.from(col).filter(Number.isFinite).sort();
+      });
     } catch {
       return null; // unbound parameter or broken expression: the sampled tier reports it
     }
@@ -2365,9 +2390,15 @@ export class RVSystem {
         case 'cauchy':
           return { mean: NaN, sd: NaN };
         case 'weibull': {
-          const g1 = Math.exp(lgamma(1 + 1 / a[0]));
-          const g2 = Math.exp(lgamma(1 + 2 / a[0]));
-          return { mean: a[1] * g1, sd: a[1] * Math.sqrt(Math.max(g2 - g1 * g1, 0)) };
+          // σ² = λ²(Γ₂ − Γ₁²) = λ²Γ₂(1 − Γ₁²/Γ₂), in logs: for a small shape
+          // Γ(1 + 2/k) overflows long before σ does, and ∞ − ∞ is NaN. What is
+          // left to overflow is the true value passing double range: Infinity.
+          const l1 = lgamma(1 + 1 / a[0]);
+          const l2 = lgamma(1 + 2 / a[0]);
+          return {
+            mean: a[1] * Math.exp(l1),
+            sd: a[1] * Math.exp(l2 / 2) * Math.sqrt(Math.max(-Math.expm1(2 * l1 - l2), 0)),
+          };
         }
       }
     }
@@ -2413,7 +2444,8 @@ export class RVSystem {
    * single base dependency, E[g(X)] = ∫ g(x)·pdf(x) dx by adaptive
    * quadrature (integrate.ts) — ~9 significant digits where the sample mean
    * gives ~3. Undefined regions of g drop out of both the numerator and the
-   * mass, matching the sampler's "average where defined" convention. Null
+   * mass, matching the sampler's "average where defined" convention. sd is
+   * Infinity when the mean settles but the second moment does not. Null
    * for joint dependence (E[X·Y] still samples), broken parameters, or
    * integrals that fail to settle (heavy tails).
    */
@@ -2443,11 +2475,12 @@ export class RVSystem {
         }
       };
       const { pdf, lo, hi, mid } = pc;
-      const moment = (k: 0 | 1 | 2): number => {
+      // k = 'abs' is E|g|: the test that a mean exists at all.
+      const moment = (k: 0 | 1 | 2 | 'abs'): number => {
         const f = (x: number): number => {
           const v = gAt(x);
           if (!isFinite(v)) return 0;
-          return (k === 0 ? 1 : k === 1 ? v : v * v) * pdf(x);
+          return (k === 0 ? 1 : k === 1 ? v : k === 2 ? v * v : Math.abs(v)) * pdf(x);
         };
         return mid !== undefined && mid > lo && mid < hi && isFinite(mid)
           ? quadrature(f, lo, mid) + quadrature(f, mid, hi)
@@ -2457,9 +2490,13 @@ export class RVSystem {
       if (!(mass > 1e-9)) return null;
       const m1 = moment(1);
       const m2 = moment(2);
-      if (!isFinite(m1) || !isFinite(m2)) return null;
+      if (!isFinite(m1)) return null;
       const mean = m1 / mass;
-      return { mean, sd: Math.sqrt(Math.max(m2 / mass - mean * mean, 0)), mass };
+      if (isFinite(m2)) return { mean, sd: Math.sqrt(Math.max(m2 / mass - mean * mean, 0)), mass };
+      // Only the second moment failed to settle (X² over StudentT(3): E = 3,
+      // σ = ∞). The mean stands — provided it converged ABSOLUTELY: X³ over a
+      // Cauchy integrates to a clean 0 by symmetry and has no mean at all.
+      return isFinite(moment('abs')) ? { mean, sd: Infinity, mass } : null;
     };
     slot.qm = compute();
     return slot.qm;
@@ -2500,29 +2537,27 @@ export class RVSystem {
     return !!r && !r.meanOk;
   }
 
-  /** The heaviest tail among the base laws a variable is built from. */
-  private heavyLevel(name: string, env: Record<string, number>): HeavyLevel {
-    let level: HeavyLevel = 0;
+  /** Whether some base law a variable is built from has no variance (Cauchy,
+   *  StudentT with df ≤ 2) — known before any sample is looked at, and what
+   *  lowers robustIfUnstable's bar. The law's ANALYTIC tail, never a computed
+   *  moment: Weibull(0.004, 1) has every moment, yet its σ overflows a double. */
+  private heavyBase(name: string, env: Record<string, number>): boolean {
     const seen = new Set<string>();
-    const walk = (n: string): void => {
-      if (seen.has(n)) return;
+    const walk = (n: string): boolean => {
+      if (seen.has(n)) return false;
       seen.add(n);
       const rv = this.rvs.get(n);
-      if (!rv) return;
-      if (rv.kind === 'derived') {
-        for (const dep of freeVars(rv.expr)) walk(dep);
-        return;
-      }
-      let m: { mean: number; sd: number } | null = null;
+      if (!rv) return false;
+      if (rv.kind === 'derived') return [...freeVars(rv.expr)].some(walk);
+      if (rv.dist.kind === 'cauchy') return true;
+      if (rv.dist.kind !== 'studentt') return false;
       try {
-        m = this.exactMoments(n, env);
-      } catch { /* unbound parameter: the caller reports it */ }
-      if (!m) return;
-      if (Number.isNaN(m.mean)) level = 2;
-      else if (!isFinite(m.sd) && level < 1) level = 1;
+        return evaluate(rv.dist.args[0], env) <= 2;
+      } catch {
+        return false; // unbound parameter: the caller reports it
+      }
     };
-    walk(name);
-    return level;
+    return walk(name);
   }
 
   /** Exact P(lo < name < hi) under the variable's law, or null when sampled. */

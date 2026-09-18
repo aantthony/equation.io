@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  T_NORMAL_DF, betaPQ, betaPdf, gammaPQ, gammaPdf, lgamma, lgammaHalfDiff, log1pmx, normalPQ,
+  BETA_LIMIT_SUM, T_NORMAL_DF, betaPQ, betaPdf, gammaPQ, gammaPdf, lgamma, lgammaHalfDiff, log1pmx, normalPQ,
   studentTPQ, studentTPdf, weibullPdf,
 } from './specfn.ts';
 
@@ -237,5 +237,44 @@ describe('densities', () => {
     // Just inside a pole the density is large and finite.
     expect(gammaPdf(1e-12, 0.5, 1)).toBeGreaterThan(1e5);
     expect(Number.isFinite(gammaPdf(1e-12, 0.5, 1))).toBe(true);
+  });
+});
+
+describe('astronomically large parameters', () => {
+  it('gammaPQ switches to the uniform expansion continuously', () => {
+    for (const d of [-3, -0.5, 0, 0.7, 4]) {
+      const a = 1e6;
+      const below = gammaPQ(a, a + d * 1e3);
+      const above = gammaPQ(a * (1 + 1e-12), a + d * 1e3);
+      close(above[0], below[0], 1e-6);
+      close(above[1], below[1], 1e-6);
+    }
+    const [p, q] = gammaPQ(1e13, 1e13);
+    close(p, 0.5 + 1 / (3 * Math.sqrt(2 * Math.PI * 1e13)), 1e-9);
+    close(p + q, 1, 1e-12);
+    close(gammaPQ(1e9, 1e9 + 5e4)[1], 0.05692495616701592, 1e-6); // scipy gammaincc
+  });
+
+  it('betaPQ stays accurate where ln B would cancel, and past the fraction\'s reach', () => {
+    close(betaPQ(1e12, 1e12, 0.5)[0], 0.5, 1e-9);
+    close(betaPQ(1e8, 3e8, 0.25)[0], 0.5000076776477685, 1e-8);
+    close(betaPQ(1e8, 3e8, 0.25005)[0], 0.9895370208077992, 1e-8); // scipy betainc
+    close(betaPQ(3, 1e13, 2.6740603137235617e-13)[0], 0.5, 1e-6);
+    close(betaPQ(1e13, 3, 1 - 2.6740603137235617e-13, 2.6740603137235617e-13)[1], 0.5, 1e-6);
+    // Continuous across the switch to the limit laws, in each of their regimes:
+    // both huge (skew-corrected normal), and one side modest (a Gamma law).
+    for (const [a, b, xs] of [
+      [5e9, 5e9 - 1, [0.49999, 0.5, 0.500012]], [8e9, 2e9 - 1, [0.79999, 0.8, 0.800009]],
+      [3, 1e10 - 4, [5e-11, 2.674e-10, 9e-10]], [4e4, 1e10 - 5e4, [3.98e-6, 4e-6, 4.03e-6]],
+    ] as Array<[number, number, number[]]>) {
+      for (const x of xs) {
+        const below = betaPQ(a, b, x);
+        const above = betaPQ(a, b + 2, x);
+        expect(a + b).toBeLessThan(BETA_LIMIT_SUM);
+        expect(Math.abs(above[0] - below[0]), `${a}, ${b} at ${x}`).toBeLessThan(2e-5);
+        expect(Math.abs(above[1] - below[1]), `${a}, ${b} at ${x}`).toBeLessThan(2e-5);
+        close(above[0] + above[1], 1, 1e-12);
+      }
+    }
   });
 });

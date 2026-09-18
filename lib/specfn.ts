@@ -86,6 +86,7 @@ export function gammaPQ(a: number, x: number): [number, number] {
   if (!(a > 0) || Number.isNaN(x) || a === Infinity) return [NaN, NaN];
   if (x <= 0) return [0, 1];
   if (x === Infinity) return [1, 0];
+  if (a > GAMMA_UNIFORM_SHAPE) return gammaUniform(a, x);
   const pre = Math.exp(lnGammaKernel(a, x));
   if (x < a + 1) {
     let ap = a;
@@ -120,6 +121,36 @@ export function gammaPQ(a: number, x: number): [number, number] {
   }
   const q = Math.min(1, pre * h);
   return [1 - q, q];
+}
+
+/** Past this shape both expansions need thousands of terms (O(√a)) and then
+ *  run out altogether; Temme's uniform expansion takes over. dist.ts switches
+ *  its Gamma quantiles to a closed form at the same point. */
+export const GAMMA_UNIFORM_SHAPE = 1e6;
+
+/**
+ * Temme's uniform asymptotic expansion for large a, first two orders:
+ * Q(a, x) = Φ̄(η√a) + e^(−aη²/2)/√(2πa) · (c₀(η) + c₁(η)/a), where
+ * η²/2 = λ − 1 − ln λ and λ = x/a. Error O(a⁻²) relative to the correction,
+ * below 1e-12 absolute from a = 1e6, uniformly in x — the bulk and both tails.
+ */
+function gammaUniform(a: number, x: number): [number, number] {
+  const mu = (x - a) / a;
+  const half = -log1pmx(mu); // η²/2 ≥ 0
+  const eta = Math.sign(mu) * Math.sqrt(2 * half);
+  let c0: number;
+  let c1: number;
+  if (Math.abs(eta) < 0.05) {
+    // The closed forms below are differences of two poles at η = 0.
+    c0 = -1 / 3 + eta * (1 / 12 + eta * (-2 / 135 + eta * (1 / 864 + eta / 2835)));
+    c1 = -1 / 540 + eta * (-1 / 288 + eta / 378);
+  } else {
+    c0 = 1 / mu - 1 / eta;
+    c1 = 1 / (eta * eta * eta) - 1 / (mu * mu * mu) - 1 / (mu * mu) - 1 / (12 * mu);
+  }
+  const r = (Math.exp(-a * half) / Math.sqrt(2 * Math.PI * a)) * (c0 + c1 / a);
+  const [pn, qn] = normalPQ(eta * Math.sqrt(a));
+  return [Math.min(1, Math.max(0, pn - r)), Math.min(1, Math.max(0, qn + r))];
 }
 
 /** The continued fraction of the incomplete beta function (modified Lentz). */
@@ -166,6 +197,47 @@ export function lbeta(a: number, b: number): number {
   return lgamma(a) + lgamma(b) - lgamma(a + b);
 }
 
+/** ln of x^a y^b / B(a, b). For large a and b the naive three-way sum is a
+ *  difference of terms ~n ln n; about the mean x₀ = a/n the first-order parts
+ *  cancel identically (a·d₁ + b·d₂ = n(x + y − 1) = 0) and Stirling supplies
+ *  the constant, leaving only O(1) pieces. */
+function lnBetaKernel(a: number, b: number, x: number, y: number): number {
+  if (a < 20 || b < 20) return a * Math.log(x) + b * Math.log(y) - lbeta(a, b);
+  const n = a + b;
+  const x0 = a / n;
+  const y0 = b / n;
+  return a * log1pmx((x - x0) / x0) + b * log1pmx((y - y0) / y0)
+    + 0.5 * Math.log((a * b) / n) - LN_SQRT_2PI - stirlingCorr(a) - stirlingCorr(b) + stirlingCorr(n);
+}
+
+/** Past this a + b the continued fraction (O(√n) terms) is out of reach and
+ *  the law is one of its limits to more digits than a readout shows. */
+export const BETA_LIMIT_SUM = 1e10;
+/** Below this, the smaller parameter's side is a Gamma law, not a normal. */
+const BETA_GAMMA_SIDE = 1e5;
+
+/**
+ * Beta(a, b) for a + b > BETA_LIMIT_SUM. With one parameter modest,
+ * X/(1 − X) = G_a/G_b → G_a/b: a Gamma cdf, error O(a/b) ≤ 1e-5. With both
+ * huge, the normal limit with its skewness correction (Edgeworth, first
+ * order): error O(1/min(a, b)) ≤ 1e-5.
+ */
+function betaLimit(a: number, b: number, x: number, y: number): [number, number] {
+  if (a < BETA_GAMMA_SIDE) return gammaPQ(a, (b * x) / y);
+  if (b < BETA_GAMMA_SIDE) {
+    const [p, q] = gammaPQ(b, (a * y) / x);
+    return [q, p];
+  }
+  const n = a + b;
+  const sd = Math.sqrt((a * b) / (n + 1)) / n;
+  // x − a/n formed from whichever of x, y is small, so neither side cancels.
+  const z = (x < y ? x - a / n : b / n - y) / sd;
+  const skew = (2 * (b - a) * Math.sqrt(n + 1)) / ((n + 2) * Math.sqrt(a * b));
+  const corr = (skew * (z * z - 1) * Math.exp(-0.5 * z * z)) / (6 * Math.sqrt(2 * Math.PI));
+  const [p, q] = normalPQ(z);
+  return [Math.min(1, Math.max(0, p - corr)), Math.min(1, Math.max(0, q + corr))];
+}
+
 /**
  * Regularized incomplete beta: [I_x(a, b), 1 − I_x(a, b)], a, b > 0. Takes
  * y = 1 − x as well, so a caller that knows the complement exactly (the
@@ -177,7 +249,8 @@ export function betaPQ(a: number, b: number, x: number, y: number = 1 - x): [num
   if (!(a > 0 && b > 0) || Number.isNaN(x) || a === Infinity || b === Infinity) return [NaN, NaN];
   if (x <= 0) return [0, 1];
   if (y <= 0) return [1, 0];
-  const bt = Math.exp(a * Math.log(x) + b * Math.log(y) - lbeta(a, b));
+  if (a + b > BETA_LIMIT_SUM) return betaLimit(a, b, x, y);
+  const bt = Math.exp(lnBetaKernel(a, b, x, y));
   if (x < (a + 1) / (a + b + 2)) {
     const p = Math.min(1, (bt * betaCF(a, b, x)) / a);
     return [p, 1 - p];

@@ -1,7 +1,8 @@
 /** Pure, tolerant editor assistance. Suggestions write ordinary equation
  * text; an incomplete expression never needs to pass through the parser.
  */
-import { type Defs, shadowedFnNames } from './defs.ts';
+import { type Defs, nameTaken, shadowedFnNames } from './defs.ts';
+import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { FUNCTIONS, builtinFn } from './expr.ts';
 
 export interface Suggestion { name: string; signature: string; description: string; call: boolean }
@@ -47,41 +48,27 @@ const signatures: Record<string, [string, string]> = {
   trail: ['trail(point)', 'Draw a moving point’s path'],
   tube: ['tube((x(u), y(u), z(u)))', 'Tube along a parametric space curve'],
   open: ['data = open("file.csv")', 'Use a CSV file dropped onto the graph'],
-  Normal: ['X ~ Normal(mean, sd)', 'Declare a normal random variable'],
-  Uniform: ['X ~ Uniform(lo, hi)', 'Declare a uniform random variable'],
-  Exponential: ['X ~ Exponential(rate)', 'Declare an exponential random variable'],
-  Gamma: ['X ~ Gamma(shape, rate)', 'Declare a gamma random variable (rate, not scale: mean = shape/rate)'],
-  Beta: ['X ~ Beta(a, b)', 'Declare a beta random variable on [0, 1]'],
-  ChiSquared: ['X ~ ChiSquared(df)', 'Declare a chi-squared random variable (alias ChiSq)'],
-  StudentT: ['X ~ StudentT(df)', 'Declare a Student t random variable (alias T)'],
-  LogNormal: ['X ~ LogNormal(mu, sigma)', 'Declare a log-normal random variable: ln X ~ Normal(mu, sigma)'],
-  Cauchy: ['X ~ Cauchy(location, scale)', 'Declare a Cauchy random variable (no mean: readouts use median/IQR)'],
-  Weibull: ['X ~ Weibull(shape, scale)', 'Declare a Weibull random variable'],
+  ...Object.fromEntries(DIST_FAMILIES.map(f => [f.name, [`X ~ ${distUsage(f)}`, `Declare ${f.help}`]])),
   P: ['P(X < b)', 'Probability of a random-variable condition'],
   E: ['E(X)', 'Expected value of a random variable'],
 };
 
-/** Distributions whose name folds case anywhere. Gamma is absent: lowercased
- *  it is the gamma function, which keeps `GAMMA(` outside a ~ row. */
-const FOLDED_DISTS = ['Normal', 'Uniform', 'Exponential', 'Beta', 'ChiSquared', 'StudentT', 'LogNormal', 'Cauchy', 'Weibull'];
-
-/** Every spelling lib/dist.ts accepts right of a ~, to its signature's key. */
-const DIST_NAMES = new Map<string, string>([
-  ...[...FOLDED_DISTS, 'Gamma'].map((n): [string, string] => [n.toLowerCase(), n]),
-  ['chisq', 'ChiSquared'], ['chi2', 'ChiSquared'], ['t', 'StudentT'],
-]);
+/** Distributions whose name folds case ANYWHERE in a row, not just at the
+ *  head of a ~: all but the spellings that also mean something else (Gamma →
+ *  the gamma function, Beta → a coefficient), which are laws only at the head. */
+const FOLDED_DISTS = DIST_FAMILIES.map(f => f.name).filter(n => !isModelName(n));
 
 export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp {
   const before = text.slice(0, offset);
   const empty: SyntaxHelp = { start: offset, end: offset, suggestions: [] };
   if (text.trimStart().startsWith('#')) return empty;
   // Primes after identifiers/values are derivatives, not string delimiters.
-  let quote = '', stack: Array<{ name?: string }> = [];
+  let quote = '', stack: Array<{ name?: string; at: number }> = [];
   for (let i = 0; i < before.length; i++) {
     const c = before[i];
     if (quote) { if (c === quote) quote = ''; continue; }
     if (c === '"' || (c === "'" && !/[\w)\]}']/.test(before[i - 1] ?? ''))) { quote = c; continue; }
-    if ('([{'.includes(c)) stack.push({ name: c === '(' ? /([A-Za-z_]\w*)\s*$/.exec(before.slice(0, i))?.[1] : undefined });
+    if ('([{'.includes(c)) stack.push({ name: c === '(' ? /([A-Za-z_]\w*)\s*$/.exec(before.slice(0, i))?.[1] : undefined, at: i });
     else if (')]}'.includes(c)) stack.pop();
   }
   if (quote) return empty;
@@ -115,9 +102,19 @@ export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp
   const call = [...stack].reverse().find(s => s.name)?.name;
   const shadowed = shadowedFnNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
   const blocked = call && !defs.fns.has(call) && shadowed.has(builtinFn(call) ?? '');
-  // Right of a ~ a distribution name wins in any spelling, aliases included:
-  // `X ~ gamma(` is the Gamma law there, not the function it is elsewhere.
-  const distName = call && before.includes('~') && !defs.fns.has(call) ? DIST_NAMES.get(call.toLowerCase()) : undefined;
+  // The HEAD of a ~ row — the first token right of the ~, its paren the
+  // outermost one open — is a distribution name in any spelling, aliases
+  // included: `X ~ gamma(` is the Gamma law there. Anywhere deeper
+  // (`X ~ Normal(gamma(`, `Y ~ a gamma(`) a name means what it always does.
+  // Over declared data the model spellings (exp, gamma, beta, t) are models,
+  // exactly as lib/regression.ts will read the row.
+  const tilde = before.indexOf('~');
+  const head = tilde >= 0 ? /^\s*([A-Za-z_]\w*)\s*\($/.exec(before.slice(tilde + 1, (stack[0]?.at ?? -1) + 1)) : null;
+  const lhs = before.slice(0, Math.max(tilde, 0)).trim();
+  const overData = nameTaken(defs, lhs) || /[.\[\](+*/-]/.test(lhs);
+  const family = head && stack[0].at > tilde && call === head[1] && stack.filter(f => f.name).length === 1
+    && !defs.fns.has(call) && !(isModelName(call) && overData) ? distFamily(call) : undefined;
+  const distName = family?.name;
   const entry = distName ? candidates.get(distName)
     : call && !blocked ? candidates.get(call) ?? foldedBuiltins.get(call.toLowerCase()) : undefined;
   let hint = entry?.call ? `${entry.signature} — ${entry.description}` : undefined;

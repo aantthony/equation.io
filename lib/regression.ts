@@ -3,7 +3,8 @@
  * Fits never change an equation's text or introduce hidden slider values.
  */
 import { diff } from './diff.ts';
-import { type Expr, evaluate, freeVars } from './expr.ts';
+import { distFamily, isModelName } from './dist-families.ts';
+import { type Expr, FUNCTIONS, evaluate, freeVars } from './expr.ts';
 
 export interface RegressionRow { kind: 'regression'; name: string; lhs: string; rhs: string }
 
@@ -30,14 +31,16 @@ export function scanRegressions(texts: readonly string[]): Map<number, Regressio
     }
     if (tilde < 0) return;
     const lhs = text.slice(0, tilde).trim(), rhs = text.slice(tilde + 1).trim();
-    // Bare exp is the distribution alias in every case. An exp(...) call
-    // over declared data is the exponential regression model, also in every
-    // case; undeclared left-hand names still take the distribution path.
-    // Gamma, Beta and T get the same treatment as exp: each is also a function
-    // or an everyday coefficient name (`Y ~ beta (X - 1)`, `Y ~ gamma(a X)`),
-    // so over declared data they are models, and declare a variable otherwise.
-    if (/^(?:Normal|N|Uniform|U|Exponential|ChiSquared|ChiSq|Chi2|StudentT|LogNormal|Cauchy|Weibull)\s*(?:\(|$)/i.test(rhs)
-      || /^exp$/i.test(rhs)) return;
+    // A distribution name (lib/dist-families.ts) keeps its meaning, and its
+    // collision diagnostics, whatever is on the left. The exceptions are the
+    // spellings that are also a function or an everyday coefficient name —
+    // exp, gamma, beta, t: over declared data `Y ~ exp(a X)`, `Y ~ gamma(a X)`
+    // and `Y ~ beta (X - 1)` are models, and with an undeclared left side they
+    // declare. Bare, a FUNCTION name cannot be a model (`Y ~ exp`), so it is
+    // the distribution in every case; a bare `beta` or `T` may be a coefficient.
+    const head = /^([A-Za-z_]\w*)\s*(\(|$)/.exec(rhs);
+    if (head && distFamily(head[1])
+      && (!isModelName(head[1]) || (!head[2] && FUNCTIONS.has(head[1].toLowerCase())))) return;
     if (declared.has(lhs) || /[.\[\](+*/-]/.test(lhs)) {
       out.set(i, { kind: 'regression', name: `~${i}`, lhs, rhs });
     }

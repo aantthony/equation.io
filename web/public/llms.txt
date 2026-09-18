@@ -324,14 +324,20 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (Gamma, ChiSquared, Exponential) with positive number coefficients whose
   scaled rates agree sum to the exact Gamma (`X1 + X2` of two `Gamma(·, 3)`,
   `2X`, a sum of chi-squareds), and the square of a standard normal
-  (`Z ~ Normal(0, 1); Z^2`) is the exact `ChiSquared(1)`. These rows report
-  exact μ and σ.
+  (`Z ~ Normal(0, 1); Z^2`) is the exact `ChiSquared(1)`. Any affine
+  combination of independent Cauchys is the exact Cauchy (locations add,
+  scales add through |c|: `X + 1`, `-3X`, `X + C`), and a LogNormal times a
+  positive number is the LogNormal with mu + ln c. These rows report exact
+  μ and σ where those exist.
   Everything else (products, nonlinear or piecewise transforms, mixed
   families) is estimated from 131072 joint samples and reports μ, σ as `≈`.
   A variable with heavy tails — anything that passes the tail of a `Cauchy`
   or a `StudentT` with df ≤ 2 through, like `X + 1` — reports
   `median ≈ …, IQR ≈ …` instead: its σ (and for df ≤ 1 its mean) does not
-  exist, and a sample estimate of it would be noise.
+  exist, and a sample estimate of it would be noise. Whether the mean
+  exists is read off the tails (it does when they decay faster than 1/x), so
+  `E(X^2)` over `StudentT(3)` is 3 although its σ is infinite, while
+  `E(X^2 + Y)` over `StudentT(2)` has no value.
   Point masses are detected and drawn as probability stems (height = mass):
   `Y = {X > 0: 1, 2}` is two stems, `floor(4X)` four, and a mixed result
   like `{X > 0: X^2, 1}` draws its stem plus the continuous density.

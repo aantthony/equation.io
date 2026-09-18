@@ -79,21 +79,22 @@ float eq_isprime(float x) {
   }
   return 1.0;
 }
-float eq_gamma(float x) {
-  // Lanczos g=5 — the coefficients interpolate from LANCZOS in expr.ts, the
-  // gammaFn() twin — with the x < 0.5 reflection inlined (GLSL has no
-  // recursion). float32 can't hit the negative-integer poles exactly, so
-  // they render as the divergence they neighbor.
-  float z = x < 0.5 ? 1.0 - x : x;
-  z -= 1.0;
+// ln Gamma(x) for x >= 0.5: Lanczos g=5, the coefficients interpolated from
+// LANCZOS in expr.ts. Kept in log space throughout — a bare pow(t, z + 0.5)
+// factor overflows float32 from x ≈ 27, well before Gamma itself does (~35).
+float eq_lgamma_upper(float x) {
+  float z = x - 1.0;
   float ser = 1.000000000190015
 ${LANCZOS.map((c, i) => `    + ${c} / (z + ${i + 1}.0)`).join('\n')};
   float t = z + 5.5;
-  // Assembled in log space: a bare pow(t, z + 0.5) factor overflows float32
-  // from x ≈ 27, well before Γ itself does (~35).
-  float g = exp((z + 0.5) * log(t) - t + log(2.5066282746310002 * ser));
-  if (x >= 0.5) return g;
-  return 3.141592653589793 / (sin(3.141592653589793 * x) * g);
+  return (z + 0.5) * log(t) - t + log(2.5066282746310002 * ser);
+}
+float eq_gamma(float x) {
+  // gammaFn() twin, with the x < 0.5 reflection inlined (GLSL has no
+  // recursion). float32 can't hit the negative-integer poles exactly, so
+  // they render as the divergence they neighbor.
+  if (x >= 0.5) return exp(eq_lgamma_upper(x));
+  return 3.141592653589793 / (sin(3.141592653589793 * x) * exp(eq_lgamma_upper(1.0 - x)));
 }
 float eq_factorial(float x) { return eq_gamma(x + 1.0); }
 // --- the distribution densities: twins of gammaPdf & co. in lib/specfn.ts ---
@@ -104,15 +105,10 @@ float eq_factorial(float x) { return eq_gamma(x + 1.0); }
 // (Gamma(200, 1) naively is 860 − 1055 + … ; t with df = 1e6 subtracts two
 // lgammas of 6e6 whose ulp is 0.5).
 #define EQ_BIG 3.0e38
-// ln Gamma(x) for x > 0 (the log of eq_gamma's Lanczos sum, never exponentiated).
+// ln Gamma(x) for x > 0 (the distributions' shapes; reflection below 1/2).
 float eq_lgamma(float x) {
-  float z = (x < 0.5 ? 1.0 - x : x) - 1.0;
-  float ser = 1.000000000190015
-${LANCZOS.map((c, i) => `    + ${c} / (z + ${i + 1}.0)`).join('\n')};
-  float t = z + 5.5;
-  float g = (z + 0.5) * log(t) - t + log(2.5066282746310002 * ser);
-  if (x >= 0.5) return g;
-  return log(3.141592653589793 / sin(3.141592653589793 * x)) - g;
+  if (x >= 0.5) return eq_lgamma_upper(x);
+  return log(3.141592653589793 / sin(3.141592653589793 * x)) - eq_lgamma_upper(1.0 - x);
 }
 float eq_log1p(float v) {
   if (abs(v) < 0.01) return v * (1.0 - v * (0.5 - v * (0.3333333333 - v * 0.25)));

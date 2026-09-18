@@ -1396,13 +1396,17 @@ function recompileAll() {
       }
       // One-variable transforms integrate against the base pdf (quadrature):
       // still ≈, but good to display precision rather than sampling noise.
-      const s = rvSys.quadMoments(name, envT0) ?? rvSys.curve(name, envT0);
+      // A quadrature mean whose σ is infinite (X² over StudentT(3)) defers to
+      // the curve, whose robust branch reports such laws by median/IQR.
+      const qm = rvSys.quadMoments(name, envT0);
+      const s = qm && isFinite(qm.sd) ? qm : rvSys.curve(name, envT0) ?? qm;
       if (!s) return;
       // Heavy tails make μ/σ truncation artifacts (1/W through a pole has
       // no finite moments): show robust location/spread instead of noise.
       const r = (s as Partial<DensityCurve>).robust;
       eq.info = (r
         ? `median ≈ ${r.median.toFixed(3)}, IQR ≈ ${r.iqr.toFixed(3)} (heavy tails: ${r.meanOk ? 'σ' : 'μ, σ'} unstable)`
+        : qm && !isFinite(qm.sd) ? `μ ≈ ${qm.mean.toFixed(3)}, σ = ∞`
         : `μ ≈ ${s.mean.toFixed(3)}, σ ≈ ${s.sd.toFixed(3)}`)
         + (s.mass < 0.9995 ? `, P(defined) ≈ ${s.mass.toFixed(3)}` : '');
     } catch { /* not numerically computable right now (e.g. animated) */ }
