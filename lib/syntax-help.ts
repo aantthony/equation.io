@@ -1,8 +1,9 @@
 /** Pure, tolerant editor assistance. Suggestions write ordinary equation
  * text; an incomplete expression never needs to pass through the parser.
  */
-import { type Defs, nameTaken, shadowedFnNames } from './defs.ts';
+import { type Defs, shadowedFnNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
+import { tildeRow } from './regression.ts';
 import { FUNCTIONS, builtinFn } from './expr.ts';
 
 export interface Suggestion { name: string; signature: string; description: string; call: boolean }
@@ -58,7 +59,17 @@ const signatures: Record<string, [string, string]> = {
  *  the gamma function, Beta → a coefficient), which are laws only at the head. */
 const FOLDED_DISTS = DIST_FAMILIES.map(f => f.name).filter(n => !isModelName(n));
 
-export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp {
+/** Every name the definitions claim — the stand-in for declaredNames(texts)
+ *  when the caller has only the built Defs. */
+const definedNames = (defs: Defs): ReadonlySet<string> => new Set([
+  ...defs.consts.keys(), ...defs.fns.keys(), ...defs.fields.keys(), ...defs.states.keys(), ...defs.points,
+  ...defs.mats.keys(), ...defs.lists.keys(), ...defs.tables.keys(), ...defs.missingData.keys(),
+]);
+
+/** `declared`: the document's `name = …` names (regression.ts declaredNames),
+ *  which decide whether `Y ~ gamma(` is a model or a law exactly as the row
+ *  itself will be read; without it the built definitions stand in. */
+export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: ReadonlySet<string>): SyntaxHelp {
   const before = text.slice(0, offset);
   const empty: SyntaxHelp = { start: offset, end: offset, suggestions: [] };
   if (text.trimStart().startsWith('#')) return empty;
@@ -106,14 +117,13 @@ export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp
   // outermost one open — is a distribution name in any spelling, aliases
   // included: `X ~ gamma(` is the Gamma law there. Anywhere deeper
   // (`X ~ Normal(gamma(`, `Y ~ a gamma(`) a name means what it always does.
-  // Over declared data the model spellings (exp, gamma, beta, t) are models,
-  // exactly as lib/regression.ts will read the row.
-  const tilde = before.indexOf('~');
-  const head = tilde >= 0 ? /^\s*([A-Za-z_]\w*)\s*\($/.exec(before.slice(tilde + 1, (stack[0]?.at ?? -1) + 1)) : null;
-  const lhs = before.slice(0, Math.max(tilde, 0)).trim();
-  const overData = nameTaken(defs, lhs) || /[.\[\](+*/-]/.test(lhs);
-  const family = head && stack[0].at > tilde && call === head[1] && stack.filter(f => f.name).length === 1
-    && !defs.fns.has(call) && !(isModelName(call) && overData) ? distFamily(call) : undefined;
+  // Whether the row is a declaration at all is regression.ts's call (tildeRow,
+  // the predicate scanRegressions runs), so help and behaviour cannot differ.
+  const row = tildeRow(before, declared ?? definedNames(defs));
+  const head = row && !row.regression
+    ? /^\s*([A-Za-z_]\w*)\s*\($/.exec(before.slice(row.tilde + 1, (stack[0]?.at ?? -1) + 1)) : null;
+  const family = head && row && stack[0].at > row.tilde && call === head[1] && stack.filter(f => f.name).length === 1
+    && !defs.fns.has(call) ? distFamily(call) : undefined;
   const distName = family?.name;
   const entry = distName ? candidates.get(distName)
     : call && !blocked ? candidates.get(call) ?? foldedBuiltins.get(call.toLowerCase()) : undefined;

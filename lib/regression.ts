@@ -4,7 +4,7 @@
  */
 import { diff } from './diff.ts';
 import { distFamily, isModelName } from './dist-families.ts';
-import { type Expr, FUNCTIONS, evaluate, freeVars } from './expr.ts';
+import { type Expr, evaluate, freeVars } from './expr.ts';
 
 export interface RegressionRow { kind: 'regression'; name: string; lhs: string; rhs: string }
 
@@ -13,39 +13,58 @@ export interface RegressionRow { kind: 'regression'; name: string; lhs: string; 
  * Distribution syntax keeps its existing meaning (and collision diagnostics).
  */
 export function scanRegressions(texts: readonly string[]): Map<number, RegressionRow> {
-  const declared = new Set(texts.flatMap(t => {
+  const declared = declaredNames(texts);
+  const out = new Map<number, RegressionRow>();
+  texts.forEach((text, i) => {
+    const row = tildeRow(text, declared);
+    if (row?.regression) out.set(i, { kind: 'regression', name: `~${i}`, lhs: row.lhs, rhs: row.rhs });
+  });
+  return out;
+}
+
+/** Names some row of the document defines (`name = …`), by text alone: a
+ *  definition that fails to parse still makes `name ~ …` a fit, not a law. */
+export function declaredNames(texts: readonly string[]): Set<string> {
+  return new Set(texts.flatMap(t => {
     const m = /^\s*([A-Za-z_]\w*)\s*=(?!=)/.exec(t);
     return m ? [m[1]] : [];
   }));
-  const out = new Map<number, RegressionRow>();
-  texts.forEach((text, i) => {
-    if (text.trim().startsWith('#')) return;
-    let quote = '', depth = 0, tilde = -1;
-    for (let k = 0; k < text.length; k++) {
-      const c = text[k];
-      if (quote) { if (c === quote) quote = ''; continue; }
-      if (c === '"' || (c === "'" && !/[\w)\]}']/.test(text[k - 1] ?? ''))) { quote = c; continue; }
-      if ('([{'.includes(c)) depth++;
-      else if (')]}'.includes(c)) depth--;
-      else if (c === '~' && depth === 0) { if (tilde >= 0) return; tilde = k; }
-    }
-    if (tilde < 0) return;
-    const lhs = text.slice(0, tilde).trim(), rhs = text.slice(tilde + 1).trim();
-    // A distribution name (lib/dist-families.ts) keeps its meaning, and its
-    // collision diagnostics, whatever is on the left. The exceptions are the
-    // spellings that are also a function or an everyday coefficient name —
-    // exp, gamma, beta, t: over declared data `Y ~ exp(a X)`, `Y ~ gamma(a X)`
-    // and `Y ~ beta (X - 1)` are models, and with an undeclared left side they
-    // declare. Bare, a FUNCTION name cannot be a model (`Y ~ exp`), so it is
-    // the distribution in every case; a bare `beta` or `T` may be a coefficient.
-    const head = /^([A-Za-z_]\w*)\s*(\(|$)/.exec(rhs);
-    if (head && distFamily(head[1])
-      && (!isModelName(head[1]) || (!head[2] && FUNCTIONS.has(head[1].toLowerCase())))) return;
-    if (declared.has(lhs) || /[.\[\](+*/-]/.test(lhs)) {
-      out.set(i, { kind: 'regression', name: `~${i}`, lhs, rhs });
-    }
-  });
-  return out;
+}
+
+/**
+ * How a row with a `~` reads — THE predicate, shared with syntax help so the
+ * hint can never disagree with what the row then does. Null without exactly
+ * one `~` at depth 0 outside quotes (or in a comment). `tilde` is its offset;
+ * `regression` false means the row is left to the distribution path.
+ *
+ * A distribution name (lib/dist-families.ts) at the head of the right side
+ * keeps its meaning, and its collision diagnostics, whatever is on the left.
+ * The exceptions are the spellings that are also a function or an everyday
+ * coefficient name — exp, gamma, beta, t: over declared data they are models
+ * in every form (`Y ~ gamma(a X)`, `Y ~ beta (X - 1)`, `Y ~ gamma`, mid-typing
+ * `Y ~ gamma x`), as they were before those families existed. The one
+ * carve-out is older than that: a bare `exp` is the Exponential alias.
+ */
+export function tildeRow(
+  text: string,
+  declared: ReadonlySet<string>,
+): { lhs: string; rhs: string; tilde: number; regression: boolean } | null {
+  if (text.trim().startsWith('#')) return null;
+  let quote = '', depth = 0, tilde = -1;
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k];
+    if (quote) { if (c === quote) quote = ''; continue; }
+    if (c === '"' || (c === "'" && !/[\w)\]}']/.test(text[k - 1] ?? ''))) { quote = c; continue; }
+    if ('([{'.includes(c)) depth++;
+    else if (')]}'.includes(c)) depth--;
+    else if (c === '~' && depth === 0) { if (tilde >= 0) return null; tilde = k; }
+  }
+  if (tilde < 0) return null;
+  const lhs = text.slice(0, tilde).trim(), rhs = text.slice(tilde + 1).trim();
+  const head = /^([A-Za-z_]\w*)\s*(?:\(|$)/.exec(rhs);
+  const law = !!head && !!distFamily(head[1]) && !isModelName(head[1]);
+  const regression = !law && !/^exp$/i.test(rhs) && (declared.has(lhs) || /[.\[\](+*/-]/.test(lhs));
+  return { lhs, rhs, tilde, regression };
 }
 
 export interface FitResult {

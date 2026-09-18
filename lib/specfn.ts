@@ -206,7 +206,14 @@ function lnBetaKernel(a: number, b: number, x: number, y: number): number {
   const n = a + b;
   const x0 = a / n;
   const y0 = b / n;
-  return a * log1pmx((x - x0) / x0) + b * log1pmx((y - y0) / y0)
+  // Each side is w·(ln(v/v₀) − d) with d = v/v₀ − 1. Near the mean that is
+  // log1pmx(d); far from it the logarithm is taken of v itself, so a tiny x —
+  // or a tiny y handed in exactly — keeps every digit it came with.
+  const side = (w: number, v: number, v0: number): number => {
+    const d = (v - v0) / v0;
+    return w * (Math.abs(d) < 0.5 ? log1pmx(d) : Math.log(v / v0) - d);
+  };
+  return side(a, x, x0) + side(b, y, y0)
     + 0.5 * Math.log((a * b) / n) - LN_SQRT_2PI - stirlingCorr(a) - stirlingCorr(b) + stirlingCorr(n);
 }
 
@@ -214,7 +221,7 @@ function lnBetaKernel(a: number, b: number, x: number, y: number): number {
  *  the law is one of its limits to more digits than a readout shows. */
 export const BETA_LIMIT_SUM = 1e10;
 /** Below this, the smaller parameter's side is a Gamma law, not a normal. */
-const BETA_GAMMA_SIDE = 1e5;
+export const BETA_GAMMA_SIDE = 1e5;
 
 /**
  * Beta(a, b) for a + b > BETA_LIMIT_SUM. With one parameter modest,

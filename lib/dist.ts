@@ -51,7 +51,7 @@ import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from '.
 import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
 import { quadrature } from './integrate.ts';
 import {
-  GAMMA_UNIFORM_SHAPE, betaPQ, betaPdf, gammaPQ, gammaPdf, lbeta, lgamma, normalPQ, studentTPQ, studentTPdf, weibullPdf,
+  BETA_GAMMA_SIDE, BETA_LIMIT_SUM, GAMMA_UNIFORM_SHAPE, betaPQ, betaPdf, gammaPQ, gammaPdf, lbeta, lgamma, normalPQ, studentTPQ, studentTPdf, weibullPdf,
 } from './specfn.ts';
 
 // --- base distributions ---
@@ -487,6 +487,10 @@ export interface DensityCurve {
   robust?: Robust;
 }
 
+/** 0 — every base law has a variance; 1 — some base has none but has a mean
+ *  (StudentT, 1 < df ≤ 2); 2 — some base has no mean (Cauchy, StudentT df ≤ 1). */
+type HeavyBase = 0 | 1 | 2;
+
 export interface Robust { median: number; iqr: number; meanOk: boolean }
 
 
@@ -717,7 +721,7 @@ function visualWindow(pool: ArrayLike<number>, lo0: number, hi0: number): [numbe
   return [wlo, whi];
 }
 
-function estimateCurve(col: Float64Array, heavy = false): DensityCurve | null {
+function estimateCurve(col: Float64Array, heavy: HeavyBase = 0): DensityCurve | null {
   let finite: number[] = [];
   let sum = 0;
   for (let i = 0; i < col.length; i++) {
@@ -907,7 +911,7 @@ function decimate(xs: ArrayLike<number>): Float64Array {
 function robustIfUnstable(
   sortedPool: ArrayLike<number>,
   sd: number,
-  heavy = false,
+  heavy: HeavyBase = 0,
   tailPool?: () => ArrayLike<number>,
 ): Robust | undefined {
   const q = quantileOf(sortedPool);
@@ -942,8 +946,21 @@ function robustIfUnstable(
   // two-variable tensor grid resolves a pole-driven tail (X/Y) only down to
   // its innermost node, and flattens the outer 2% the index is measured on.
   const tails = tailPool?.() ?? sortedPool;
-  const index = Math.min(hillIndex(tails, q(0.5), 1), hillIndex(tails, q(0.5), -1));
-  const robust: Robust = { median: q(0.5), iqr: q(0.75) - q(0.25), meanOk: index > MEAN_INDEX };
+  const up = hillIndex(tails, q(0.5), 1);
+  const down = hillIndex(tails, q(0.5), -1);
+  // A mean is reported only when the index clears its bar by two standard
+  // errors (Hill's se is index/√k: 8% on an 8192 pool, 5.5% on the tail
+  // pool). The bar is 1 — and 1.4 when a base law has no mean at all: there
+  // the analytic knowledge leads, and only a transform that visibly tames
+  // the tail (atan X, |X|^¼; not X·Z + Z, whose index IS 1 and estimates
+  // anywhere in 0.9–1.1) earns a mean. The price, accepted: a mean that
+  // exists only just — StudentT(1.05), |Cauchy|^0.8 — reads as unstable.
+  const bar = heavy === 2 ? NO_MEAN_BASE_INDEX : 1;
+  const robust: Robust = {
+    median: q(0.5),
+    iqr: q(0.75) - q(0.25),
+    meanOk: Math.min(up.index * (1 - 2 / Math.sqrt(up.k)), down.index * (1 - 2 / Math.sqrt(down.k))) > bar,
+  };
   if (collapsed) return robust;
   // Under a base law KNOWN to have no variance the bar is far lower. The
   // 3× collapse above only catches tails as wild as a Cauchy's: X + 1 over
@@ -952,13 +969,12 @@ function robustIfUnstable(
   // whether the transform let the tail through (X + 1, X + Z, √|X| of a
   // Cauchy) or tamed it (sin X, ln|X|, |X|^0.3), and the tail index answers
   // it: a variance exists only above index 2.
-  return heavy && index < HEAVY_INDEX ? robust : undefined;
+  return heavy && Math.min(up.index, down.index) < HEAVY_INDEX ? robust : undefined;
 }
 
-/** Above this estimated tail index the mean exists. The boundary is 1; index-1
- *  laws (a Cauchy, a ratio of normals, 1/U) estimate at 0.95–1.03 on these
- *  pools and index 1.1 at 1.09, so the margin is what the estimate resolves. */
-const MEAN_INDEX = 1.06;
+/** The tail index a variable built on a no-mean base (Cauchy, StudentT with
+ *  df ≤ 1) must clear, two standard errors included, before it reports a mean. */
+const NO_MEAN_BASE_INDEX = 1.4;
 
 /** Below this estimated tail index a law fed by an infinite-variance base is
  *  reported by median/IQR. The boundary is 2; the margin covers the Hill
@@ -966,20 +982,28 @@ const MEAN_INDEX = 1.06;
 const HEAVY_INDEX = 2.25;
 
 /** Hill's estimate of the tail index on one side (`side` ±1) of a sorted
- *  pool, from the outer 2% measured off `centre`: the mean log-excess over
- *  the threshold is 1/index for a power tail, and ~0 (index → ∞) for a
- *  bounded or exponential one. */
-function hillIndex(sortedPool: ArrayLike<number>, centre: number, side: 1 | -1): number {
+ *  pool, from the outer 2% (k points) measured off `centre`: the mean
+ *  log-excess over the threshold is 1/index for a power tail, and ~0 (index →
+ *  ∞) for a bounded or exponential one. */
+function hillIndex(sortedPool: ArrayLike<number>, centre: number, side: 1 | -1): { index: number; k: number } {
   const n = sortedPool.length;
   const k = Math.max(16, Math.floor(n * 0.02));
-  if (n < 4 * k) return Infinity;
+  if (n < 4 * k) return { index: Infinity, k };
   const at = (i: number): number => side * ((side > 0 ? sortedPool[n - 1 - i] : sortedPool[i]) - centre);
   const threshold = at(k);
-  if (!(threshold > 0)) return Infinity;
+  if (!(threshold > 0)) return { index: Infinity, k };
   let sum = 0;
   for (let i = 0; i < k; i++) sum += Math.log(at(i) / threshold);
-  return sum > 0 ? k / sum : Infinity;
+  return { index: sum > 0 ? k / sum : Infinity, k };
 }
+
+/** Joint draws behind a two-variable tail estimate: k = 327 tail points a
+ *  side, a Hill standard error of 5.5% — and ~3 ms, against the ~40 ms of
+ *  sorting a full SAMPLE_COUNT column on every slider frame. */
+export const TAIL_POOL_SIZE = 1 << 14;
+/** Work counters for the perf guard: pools are built once per parameter
+ *  values, and only for rows whose moments are in question. */
+export const TAIL_POOL_STATS = { builds: 0, samples: 0 };
 
 // --- deterministic conditional-CDF curves (the quadrature tier) ---
 //
@@ -1137,11 +1161,6 @@ function cachedQuantile(key: string, make: () => WarpedLaw | null): ((u: number)
   return q;
 }
 
-/** Past this a + b a Beta table's O(√n)-term cdf evaluations stop being
- *  interactive, and the limit laws betaPQ itself ends in are already good to
- *  ~1e-5. (Gamma switches at GAMMA_UNIFORM_SHAPE, with its cdf.) */
-const BETA_TABLE_MAX = 1e7;
-
 function gammaQuantile(shape: number): ((u: number) => number) | null {
   if (shape > GAMMA_UNIFORM_SHAPE) {
     // Wilson–Hilferty: relative error O(shape^−2) in the body.
@@ -1157,11 +1176,11 @@ function gammaQuantile(shape: number): ((u: number) => number) | null {
   }));
 }
 
-/** Beta(a, b) quantiles for a + b > BETA_TABLE_MAX, by the same two limits as
+/** Beta(a, b) quantiles for a + b > BETA_LIMIT_SUM, by the same two limits as
  *  specfn's betaLimit: a Gamma law on a modest parameter's side (X/(1 − X) →
  *  G_a/b), otherwise the normal with its first skewness correction. */
 function betaLimitQuantile(al: number, be: number): ((u: number) => number) | null {
-  if (al < 1e5 || be < 1e5) {
+  if (al < BETA_GAMMA_SIDE || be < BETA_GAMMA_SIDE) {
     const small = Math.min(al, be);
     const g = gammaQuantile(small);
     if (!g) return null;
@@ -1190,7 +1209,9 @@ function zooQuantile(kind: BaseKind, a: number[]): ((u: number) => number) | nul
     }
     case 'beta': {
       const [al, be] = a;
-      if (al + be > BETA_TABLE_MAX) return betaLimitQuantile(al, be);
+      // The table inverts the exact cdf for as long as there is one (~0.2 s to
+      // build at a + b = 1e10, once per shape); past it, the cdf's own limits.
+      if (al + be > BETA_LIMIT_SUM) return betaLimitQuantile(al, be);
       const lb = lbeta(al, be);
       // y = logit x, so x and 1 − x are both formed without cancellation.
       return cachedQuantile(`b${al},${be}`, () => ({
@@ -1242,8 +1263,7 @@ function conditionalBase(
   g: Expr,
   vars: Array<{ name: string; quantile: (u: number) => number }>,
   env: Record<string, number>,
-  heavy = false,
-  tailPool?: () => ArrayLike<number>,
+  heavy: HeavyBase = 0,
 ): QCBase | null {
   const outer = vars.length === 2 ? vars[0] : null;
   const inner = vars[vars.length - 1];
@@ -1290,7 +1310,20 @@ function conditionalBase(
     }
   }
   allPool.sort((a, b) => a - b);
-  const robust = robustIfUnstable(allPool, sd, heavy, outer ? tailPool : undefined);
+  // The two-variable tensor grid resolves a pole-driven tail (X/Y) only down
+  // to its innermost node and flattens the outer 2% a tail index is measured
+  // on, so that tier reads its tails off a modest joint draw instead: the
+  // head of each variable's own stream (a uniform random subsample, the two
+  // independently shuffled), through the same quantile functions.
+  const tailPool = outer && ((): Float64Array => {
+    TAIL_POOL_STATS.builds++;
+    TAIL_POOL_STATS.samples += TAIL_POOL_SIZE;
+    const draw = (v: { name: string; quantile: (u: number) => number }): Float64Array =>
+      uniformStream(v.name).subarray(0, TAIL_POOL_SIZE).map(v.quantile);
+    const joint = evalCols(g, new Map([[outer.name, draw(outer)], [inner.name, draw(inner)]]), env, TAIL_POOL_SIZE);
+    return joint.filter(Number.isFinite).sort();
+  });
+  const robust = robustIfUnstable(allPool, sd, heavy, tailPool || undefined);
 
   // Repeated values are point masses (piecewise branches, floor, constants):
   // pooled across columns, heavy values become stems, and the continuous CDF
@@ -1532,6 +1565,8 @@ interface CacheEntry {
   qcz?: { lo: number; hi: number; curve: DensityCurve };
   /** Sampled KDE estimate — the last-resort tier, dropped by resample(). */
   est?: DensityCurve | null;
+  /** The last curve re-issued with a quadrature-certified mean (see curve()). */
+  certified?: { from: DensityCurve; curve: DensityCurve };
   /** Quadrature moments (present once quadMoments ran for this sig). */
   qm?: { mean: number; sd: number; mass: number } | null;
 }
@@ -1581,6 +1616,31 @@ function pdfClosure(
     case 'weibull':
       return { pdf: x => weibullPdf(x, a[0], a[1]), lo: 0, hi: Infinity, mid: a[1] };
   }
+}
+
+/**
+ * Whether E[h(X)] diverges, by truncation in probability space, where it is
+ * ∫₀¹ h(q(u)) du: the mass the integral gains from the two outer slivers
+ * u ∈ [1e-6, 1e-3] and then [1e-9, 1e-6] (and their mirrors at 1), each
+ * integrated in ln u so a power-law end is smooth. A convergent integral
+ * gains less from each deeper sliver; a divergent one does not — a power
+ * tail gains more, and at the logarithmic boundary (tail index exactly 2)
+ * the two are equal, hence the 3% tolerance. A sliver that fails to settle
+ * is "unknown", never "divergent".
+ */
+function diverges(h: (x: number) => number, quantile: (u: number) => number): boolean {
+  const sliver = (lo: number, hi: number): number => {
+    const f = (s: number): number => {
+      const u = Math.exp(s);
+      const a = h(quantile(u));
+      const b = h(quantile(1 - u));
+      return ((isFinite(a) ? a : 0) + (isFinite(b) ? b : 0)) * u;
+    };
+    return quadrature(f, Math.log(lo), Math.log(hi));
+  };
+  const d1 = sliver(1e-6, 1e-3);
+  const d2 = sliver(1e-9, 1e-6);
+  return isFinite(d1) && isFinite(d2) && d1 > 0 && d2 >= 0.97 * d1;
 }
 
 /** An expression decomposed as Σ terms[name]·name + c, coefficients free of
@@ -2006,10 +2066,14 @@ export class RVSystem {
       const sd: Expr = { kind: 'call', name: 'sqrt', args: [variance!] };
       return { kind: 'dist', dist: { kind: 'normal', args: [mean, sd] } };
     }
-    if (bases.every(b => b.dist.kind === 'cauchy')) {
+    if (bases.every(b => b.dist.kind === 'cauchy' && (numOf(b.coef) ?? 0) !== 0)) {
       // Stable with index 1: locations add like means, and SCALES add (not
-      // their squares), each through |c| so a flip or a negative slider stays
-      // a scale. Independence is the affine form's — X + X arrived as 2·X.
+      // their squares), each through |c| so a flip stays a scale.
+      // Independence is the affine form's — X + X arrived as 2·X. Coefficients
+      // are nonzero LITERALS, as in the Gamma and LogNormal rules: a slider at
+      // 0 would make this Cauchy(d, 0), no distribution, where the variable is
+      // really the constant d — which the quadrature tier draws as the atom
+      // it is. (The older Normal rule does take sliders, and flattens at 0.)
       let location = af.c;
       let scale: Expr | null = null;
       for (const { coef, dist } of bases) {
@@ -2269,6 +2333,21 @@ export class RVSystem {
     env: Record<string, number>,
     view?: { lo: number; hi: number },
   ): DensityCurve | null {
+    const c = this.rawCurve(name, env, view);
+    // One verdict per variable: a mean that quadrature certified (absolutely
+    // convergent, see quadMoments) exists, whatever a tail-index estimate
+    // near its bar made of it.
+    if (!c?.robust || c.robust.meanOk || !this.quadMoments(name, env)) return c;
+    const slot = this.cache.get(name)!;
+    if (slot.certified?.from !== c) slot.certified = { from: c, curve: { ...c, robust: { ...c.robust, meanOk: true } } };
+    return slot.certified.curve;
+  }
+
+  private rawCurve(
+    name: string,
+    env: Record<string, number>,
+    view?: { lo: number; hi: number },
+  ): DensityCurve | null {
     const law = this.exactLaw(name);
     if (law?.kind === 'usum') {
       const rv = this.rvs.get(name)!;
@@ -2343,10 +2422,7 @@ export class RVSystem {
       vars.push({ name: n, quantile });
     }
     try {
-      return conditionalBase(g, vars, env, this.heavyBase(name, env), () => {
-        const col = this.columns(name, env);
-        return Float64Array.from(col).filter(Number.isFinite).sort();
-      });
+      return conditionalBase(g, vars, env, this.heavyBase(name, env));
     } catch {
       return null; // unbound parameter or broken expression: the sampled tier reports it
     }
@@ -2493,9 +2569,15 @@ export class RVSystem {
       if (!isFinite(m1)) return null;
       const mean = m1 / mass;
       if (isFinite(m2)) return { mean, sd: Math.sqrt(Math.max(m2 / mass - mean * mean, 0)), mass };
-      // Only the second moment failed to settle (X² over StudentT(3): E = 3,
-      // σ = ∞). The mean stands — provided it converged ABSOLUTELY: X³ over a
-      // Cauchy integrates to a clean 0 by symmetry and has no mean at all.
+      // The second moment did not settle. That is σ = ∞ (X² over StudentT(3):
+      // E = 3) only if it DIVERGES — quadrature says NaN just the same for a
+      // finite integral it ran out of budget on (X^-0.45 over a uniform, a g
+      // with a hundred jumps), and those keep the old answer: no quadrature
+      // moments, the curve's estimate instead. And the mean stands only if
+      // it converged ABSOLUTELY: X³ over a Cauchy integrates to a clean 0 by
+      // symmetry and has no mean at all.
+      const q = quantileClosure(base.dist, env);
+      if (!q || !diverges(x => gAt(x) ** 2, q)) return null;
       return isFinite(moment('abs')) ? { mean, sd: Infinity, mass } : null;
     };
     slot.qm = compute();
@@ -2526,6 +2608,26 @@ export class RVSystem {
     return n ? sum / n : NaN;
   }
 
+  /**
+   * What a derived row's readout says, decided in one place: exact μ, σ under
+   * a closed law; median/IQR where the tails make σ (and, unless `meanOk`,
+   * μ) a truncation artifact; otherwise the best estimate — quadrature where
+   * it settled, the curve's moments elsewhere. Null when nothing computes.
+   */
+  moments(name: string, env: Record<string, number>):
+    | { kind: 'exact' | 'estimate'; mean: number; sd: number; mass: number }
+    | { kind: 'robust'; median: number; iqr: number; meanOk: boolean; mass: number }
+    | null {
+    const m = this.exactMoments(name, env);
+    if (m && isFinite(m.mean) && isFinite(m.sd)) return { kind: 'exact', ...m, mass: 1 };
+    const qm = this.quadMoments(name, env);
+    if (qm && isFinite(qm.sd)) return { kind: 'estimate', ...qm };
+    const c = this.curve(name, env);
+    if (c?.robust) return { kind: 'robust', ...c.robust, mass: c.mass };
+    if (qm) return { kind: 'estimate', ...qm }; // a certified mean, σ = ∞
+    return c && { kind: 'estimate', mean: c.mean, sd: c.sd, mass: c.mass };
+  }
+
   /** Why mean() is NaN, when the reason is the law and not the parameters:
    *  the mean does not exist (Cauchy, StudentT with df ≤ 1), or the tails are
    *  heavy enough that any estimate of it is a truncation artifact. */
@@ -2537,27 +2639,34 @@ export class RVSystem {
     return !!r && !r.meanOk;
   }
 
-  /** Whether some base law a variable is built from has no variance (Cauchy,
-   *  StudentT with df ≤ 2) — known before any sample is looked at, and what
-   *  lowers robustIfUnstable's bar. The law's ANALYTIC tail, never a computed
-   *  moment: Weibull(0.004, 1) has every moment, yet its σ overflows a double. */
-  private heavyBase(name: string, env: Record<string, number>): boolean {
+  /** What the base laws a variable is built from say about its tails, known
+   *  before any sample is looked at (see HeavyBase). The law's ANALYTIC tail,
+   *  never a computed moment: Weibull(0.004, 1) has every moment, yet its σ
+   *  overflows a double. */
+  private heavyBase(name: string, env: Record<string, number>): HeavyBase {
+    let level: HeavyBase = 0;
     const seen = new Set<string>();
-    const walk = (n: string): boolean => {
-      if (seen.has(n)) return false;
+    const walk = (n: string): void => {
+      if (seen.has(n)) return;
       seen.add(n);
       const rv = this.rvs.get(n);
-      if (!rv) return false;
-      if (rv.kind === 'derived') return [...freeVars(rv.expr)].some(walk);
-      if (rv.dist.kind === 'cauchy') return true;
-      if (rv.dist.kind !== 'studentt') return false;
-      try {
-        return evaluate(rv.dist.args[0], env) <= 2;
-      } catch {
-        return false; // unbound parameter: the caller reports it
+      if (!rv) return;
+      if (rv.kind === 'derived') {
+        for (const dep of freeVars(rv.expr)) walk(dep);
+        return;
       }
+      let df = Infinity;
+      if (rv.dist.kind === 'cauchy') df = 1;
+      else if (rv.dist.kind === 'studentt') {
+        try {
+          df = evaluate(rv.dist.args[0], env);
+        } catch { /* unbound parameter: the caller reports it */ }
+      }
+      const tail: HeavyBase = df <= 1 ? 2 : df <= 2 ? 1 : 0;
+      if (tail > level) level = tail;
     };
-    return walk(name);
+    walk(name);
+    return level;
   }
 
   /** Exact P(lo < name < hi) under the variable's law, or null when sampled. */

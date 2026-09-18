@@ -278,3 +278,19 @@ describe('astronomically large parameters', () => {
     }
   });
 });
+
+describe('far tails keep the digits of a tiny x or an exactly supplied y', () => {
+  it('betaPQ through the mode-centred kernel (a, b ≥ 20)', () => {
+    close(betaPQ(30, 25, 1e-6)[0], 1.402626984044898e-165, 1e-12); // scipy betainc
+    close(betaPQ(25, 30, 1 - 1e-6, 1e-6)[1], 1.402626984044898e-165, 1e-12);
+    close(betaPQ(40, 60, 1e-3)[0], 7.786186344728064e-93, 1e-12);
+    close(betaPQ(60, 40, 0.999, 1e-3)[1], 7.786186344728064e-93, 1e-12);
+    close(betaPQ(80, 120, 0.4)[0], 0.5038417015242476, 1e-11); // and the bulk is unchanged
+  });
+
+  it('the Student t tail, which hands betaPQ its small side exactly', () => {
+    close(studentTPQ(60, 40)[1], 2.8777402433136914e-45, 1e-10);
+    close(studentTPQ(60, -40)[0], 2.8777402433136914e-45, 1e-10);
+    close(studentTPQ(7, 1e6)[1], 1.3205206763259189e-40, 1e-9);
+  });
+});

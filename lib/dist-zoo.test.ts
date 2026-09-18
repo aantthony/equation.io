@@ -6,6 +6,8 @@ import {
   QUANTILE_STATS,
   RVSystem,
   SAMPLE_COUNT,
+  TAIL_POOL_SIZE,
+  TAIL_POOL_STATS,
   buildRVSystem,
   densityExpr,
   paramProblem,
@@ -530,7 +532,7 @@ describe('review follow-ups', () => {
     expect(vals(law(['X ~ Cauchy(1, 2)', 'Y = -3X + 1'], 'Y')!)).toEqual([-2, 6]);
     expect(vals(law(['X ~ Cauchy(1, 2)', 'C ~ Cauchy(3, 0.5)', 'Y = X + C'], 'Y')!)).toEqual([4, 2.5]);
     expect(vals(law(['X ~ Cauchy(1, 2)', 'Y = X + X'], 'Y')!)).toEqual([2, 4]); // 2X, not two copies
-    expect(vals(law(['X ~ Cauchy(1, 2)', 'Y = a X'], 'Y')!, { a: -2 })).toEqual([-2, 4]);
+    expect(law(['X ~ Cauchy(1, 2)', 'Y = a X'], 'Y')).toBeNull(); // a slider may reach 0: see the second review's #5
     expect(law(['X ~ Cauchy(1, 2)', 'Z ~ Normal(0, 1)', 'Y = X + Z'], 'Y')).toBeNull();
     const ln = law(['X ~ LogNormal(0.5, 0.75)', 'Y = 4X'], 'Y')!;
     expect(ln.kind).toBe('lognormal');
@@ -578,5 +580,108 @@ describe('review follow-ups', () => {
     }
     fixed.resample(0);
     expect(QUANTILE_STATS.builds - before).toBe(150);
+  });
+});
+
+describe('second review follow-ups', () => {
+  const sysOf = (rows: string[], salt?: number) => {
+    const { sys } = build(rows);
+    if (salt !== undefined) sys.resample(salt);
+    return sys;
+  };
+
+  it('#1 a second moment that merely failed to settle is not reported as σ = ∞', () => {
+    // E[g²] = ∫x^-0.9 = 10: finite, behind an endpoint singularity.
+    const u = sysOf(['X ~ Uniform(0, 1)', 'Y = X^(-0.45)']).quadMoments('Y', {});
+    if (u) expect(u.sd).toBeCloseTo(Math.sqrt(10 - (1 / 0.55) ** 2), 3);
+    // Many jumps: whatever quadrature makes of it, never an infinite σ.
+    for (const rows of [['X ~ Normal(0, 1)', 'Y = floor(37 X) + mod(91 X, 1)'], ['X ~ Exponential(1)', 'Y = floor(53 X)^2'],
+      ['X ~ Uniform(0, 1)', 'Y = mod(977 X, 1)^(-0.4)']]) {
+      const qm = sysOf(rows).quadMoments('Y', {});
+      if (qm) expect(Number.isFinite(qm.sd), rows[1]).toBe(true);
+    }
+    // Genuine divergence is still said: power tails, and the log-divergent boundary.
+    expect(sysOf(['X ~ T(3)', 'Y = X^2']).quadMoments('Y', {})!.sd).toBe(Infinity);
+    expect(sysOf(['X ~ T(2)', 'Y = X + 1']).quadMoments('Y', {})!.sd).toBe(Infinity);
+    expect(sysOf(['X ~ Uniform(0, 1)', 'Y = X^(-0.5)']).quadMoments('Y', {})!.sd).toBe(Infinity);
+  });
+
+  it('#2 a variable that passes a no-mean base through never reports a mean, whatever the draw', () => {
+    for (const salt of [1, 2, 3, 5, 8, 13, 21, 34]) {
+      for (const [base, g] of [['Cauchy(0, 1)', 'X Z + Z'], ['Cauchy(2, 0.3)', 'X + Z^2'], ['T(1)', 'X Z'], ['T(0.9)', 'abs(X) + Z'],
+        ['Cauchy(0, 5)', 'X/(1 + Z^2)']]) {
+        const sys = sysOf([`X ~ ${base}`, 'Z ~ Normal(0, 1)', `W = ${g}`], salt);
+        expect(sys.mean('W', {}), `${base}: ${g} @${salt}`).toBeNaN();
+        expect(sys.meanUnstable('W', {}), `${base}: ${g} @${salt}`).toBe(true);
+      }
+      // The other direction: means that exist keep printing on every draw.
+      for (const [rows, want] of [
+        [['X ~ LogNormal(0, 1.5)', 'Z ~ LogNormal(0, 1.5)', 'W = X Z'], 9.49],
+        [['X ~ T(2)', 'Z ~ Normal(0, 1)', 'W = X + Z + 1'], 1],
+        [['X ~ Cauchy(0, 1)', 'Z ~ Normal(0, 1)', 'W = atan(X) + Z + 2'], 2],
+        [['X ~ Cauchy(0, 1)', 'Z ~ Normal(0, 1)', 'W = abs(X)^0.25 + 0 Z'], 1.0824],
+      ] as Array<[string[], number]>) {
+        const m = sysOf(rows, salt).mean('W', {});
+        expect(Math.abs(m / want - 1), `${rows[2]} @${salt}`).toBeLessThan(0.06);
+      }
+    }
+    // The stated conservative choice: a mean that exists only just (index
+    // 1.05) is reported as unstable rather than estimated.
+    expect(sysOf(['X ~ T(1.05)', 'Z ~ Normal(0, 1)', 'W = X + Z']).meanUnstable('W', {})).toBe(true);
+  });
+
+  it('#3 one verdict per variable: a mean quadrature certified is a mean the curve has', () => {
+    for (const rows of [['X ~ Cauchy(0, 1)', 'Y = sqrt(abs(X))'], ['X ~ T(3)', 'Y = X^2'], ['X ~ T(1.5)', 'Y = abs(X) + 1']]) {
+      const sys = sysOf(rows);
+      const qm = sys.quadMoments('Y', {})!;
+      expect(qm.sd, rows[1]).toBe(Infinity);
+      const c = sys.curve('Y', {})!;
+      expect(c.robust, rows[1]).toBeDefined();
+      expect(c.robust!.meanOk, rows[1]).toBe(true);
+      expect(sys.meanUnstable('Y', {}), rows[1]).toBe(false);
+      expect(sys.moments('Y', {}), rows[1]).toMatchObject({ kind: 'robust', meanOk: true });
+    }
+    // And the readout's verdicts, in one place.
+    expect(sysOf(['X ~ Gamma(2, 3)', 'Y = 2X']).moments('Y', {})).toMatchObject({ kind: 'exact', mean: expect.closeTo(4 / 3, 9) });
+    expect(sysOf(['X ~ Gamma(2, 3)', 'Y = X^2']).moments('Y', {})).toMatchObject({ kind: 'estimate', mean: expect.closeTo(2 / 3, 6) });
+    expect(sysOf(['X ~ Cauchy(0, 1)', 'Y = 2X + 1']).moments('Y', {})).toMatchObject({ kind: 'robust', meanOk: false, median: expect.closeTo(1, 2) });
+  });
+
+  it('#4 Beta quantiles follow the exact cdf all the way to where the cdf itself switches', () => {
+    const d = dist('Beta(90000, 10000000)');
+    const col = sysOf(['X ~ Beta(90000, 10000000)']).columns('X', {}).slice().sort();
+    for (const i of [100, SAMPLE_COUNT >> 3, SAMPLE_COUNT >> 1, SAMPLE_COUNT - 100]) {
+      const u = (i + 0.5) / SAMPLE_COUNT;
+      expect(Math.abs(cdf(d, col[i]) - u) / Math.min(u, 1 - u)).toBeLessThan(1e-7);
+    }
+    // A derived probability agrees with the exact one.
+    const sys = sysOf(['X ~ Beta(90000, 10000000)', 'Y = 1000 X']);
+    expect(sys.probability(parseExpr('Y > 8.95'), {})).toBeCloseTo(sf(d, 0.00895), 2);
+  });
+
+  it('#5 a slider coefficient does not close a Cauchy law it could collapse', () => {
+    const { sys } = build(['X ~ Cauchy(0, 1)', 'Y = a X + 1', 'W = 0 X + 1', 'V = -2X + 1']);
+    expect(sys.exactDist('Y')).toBeNull();
+    expect(sys.exactDist('W')).toBeNull();
+    expect(sys.exactDist('V')!.kind).toBe('cauchy');
+    // a = 0: the constant 1, drawn as the atom it is — not an invalid Cauchy(1, 0).
+    expect(sys.curve('Y', { a: 0 })!.atoms).toEqual([{ x: 1, p: 1 }]);
+    expect(sys.curve('Y', { a: 2 })!.robust!.median).toBeCloseTo(1, 2);
+  });
+
+  it('#9 the tail pool is a bounded subsample, built once per parameter values', () => {
+    const before = { ...TAIL_POOL_STATS };
+    const sys = sysOf(['X ~ Cauchy(0, a)', 'Z ~ Normal(0, 1)', 'W = X + Z', 'V = sin(X) + Z', 'U1 ~ Uniform(0, 1)', 'S = U1 + Z']);
+    for (let frame = 0; frame < 6; frame++) {
+      sys.resample(frame + 1);
+      for (let k = 1; k <= 3; k++) sys.curve('W', { a: k });
+      sys.curve('S', { a: 1 }); // sound moments, no heavy base: never asks
+    }
+    expect(TAIL_POOL_STATS.builds - before.builds).toBe(18); // one per change of a: the slot follows the values
+    expect(TAIL_POOL_STATS.samples - before.samples).toBe(18 * TAIL_POOL_SIZE);
+    expect(TAIL_POOL_SIZE).toBeLessThanOrEqual(1 << 14);
+    const mid = { ...TAIL_POOL_STATS };
+    for (let k = 0; k < 5; k++) sys.curve('W', { a: 3 }); // same values: cached
+    expect(TAIL_POOL_STATS.builds).toBe(mid.builds);
   });
 });
