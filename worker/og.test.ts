@@ -115,6 +115,62 @@ describe('og raster renderer', () => {
     expect(Math.min(...pixel(far, 56, 46))).toBeGreaterThan(230);
   });
 
+  it.each([
+    ['right', -4, 0.5, 4, 0.5],
+    ['up', 0.5, -4, 0.5, 4],
+    ['left', 4, 0.5, -4, 0.5],
+    ['down', 0.5, 4, 0.5, -4],
+    ['up-left', 3.5, -3.5, -3.5, 3.5],
+    ['down-right', -3.5, 3.2, 3.5, -3.7],
+    ['shallow', -4, -1.3, 4, 1.2],
+  ])('joins a vector head to its shaft with no gap, pointing %s', (_, ax, ay, bx, by) => {
+    // 10 px per unit about (50, 50). Around where the head meets the shaft,
+    // every pixel whose center lies within 1 px of the stroke's axis is
+    // inked (the 2px stroke's footprint is centered ~0.75 px right and below
+    // its coordinates): no notch between the shaft's end and the head's base.
+    const r = renderRaster([`vector((${ax}, ${ay}), (${bx}, ${by}))`, 'view(x = -5..5, y = -5..5)'], 100, 100);
+    const [x0, y0, x1, y1] = [50.75 + 10 * ax, 50.75 - 10 * ay, 50.75 + 10 * bx, 50.75 - 10 * by];
+    const len = Math.hypot(x1 - x0, y1 - y0);
+    const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+    const holes: string[] = [];
+    for (let y = 0; y < 100; y++) {
+      for (let x = 0; x < 100; x++) {
+        const along = (x + 0.5 - x0) * ux + (y + 0.5 - y0) * uy;
+        const across = Math.abs((x + 0.5 - x0) * uy - (y + 0.5 - y0) * ux);
+        if (along < len - 11 || along > len - 3 || across > 1.0) continue;
+        if (Math.min(...pixel(r, x, y)) > 200) holes.push(`${x},${y}`);
+      }
+    }
+    expect(holes).toEqual([]);
+  });
+
+  it.each([
+    ['right', -4, 1.5, 4, 1.5],
+    ['left', 4, 1.33, -4, 1.33],
+    ['up', 1.5, -4, 1.5, 4],
+    ['down', 1.27, 4, 1.27, -4],
+  ])('centers a vector head on its 2px shaft, pointing %s', (dir, ax, ay, bx, by) => {
+    // Across the head, 7 px behind the tip, the inked run is centered on the
+    // 2px run the bare shaft inks further back (the axis, 13+ px away, aside).
+    const r = renderRaster([`vector((${ax}, ${ay}), (${bx}, ${by}))`, 'view(x = -5..5, y = -5..5)'], 100, 100);
+    const horizontal = dir === 'right' || dir === 'left';
+    const run = (at: number): [number, number] => {
+      const dark: number[] = [];
+      for (let k = 0; k < 100; k++) {
+        if (k === 50) continue; // the axis
+        if (Math.min(...(horizontal ? pixel(r, at, k) : pixel(r, k, at))) < 200) dark.push(k);
+      }
+      return [dark[0], dark[dark.length - 1]];
+    };
+    const tip = horizontal ? 50 + 10 * bx : 50 - 10 * by;
+    const sign = Math.sign(tip - 50);
+    const [s0, s1] = run(tip - sign * 30);
+    const [h0, h1] = run(Math.round(tip - sign * 7));
+    expect(s1 - s0).toBe(1);
+    expect(h1 - h0).toBeGreaterThan(3);
+    expect(h0 + h1).toBe(s0 + s1);
+  });
+
   it('draws a cobweb: curve, diagonal, and iterated path', () => {
     const rows = ['view(x = 0..1, y = 0..1)', 'r = 2.9', 'a_0 = 0.15', 'a_{n+1} = r a_n (1 - a_n)'];
     const r = renderRaster(rows, 100, 100);

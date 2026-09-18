@@ -80,6 +80,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'gamma', 'factorial', 'sinc', 'coth',
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   'grad',
+  'polyline', 'vector',
 ]);
 
 /**

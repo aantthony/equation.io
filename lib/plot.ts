@@ -346,7 +346,7 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
   // Desugared segment()/polyline()/vector()/polygon()/square(): CPU-evaluated
   // each frame with the constants' original names, like points and parametric
   // curves.
-  const figure = expr.kind === 'call' ? FIGURES[expr.name] : undefined;
+  const figure = expr.kind === 'call' && Object.hasOwn(FIGURES, expr.name) ? FIGURES[expr.name] : undefined;
   if (expr.kind === 'call' && figure) {
     if (hasSpace || hasParam) {
       throw new Error(`${figure.what} must be constant — they cannot use x, y, u, or v.`);

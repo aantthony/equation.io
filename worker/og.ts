@@ -494,16 +494,18 @@ function renderRow2D(
       const { closed, arrow } = cls.plot;
       if (closed) fillPolygon(r, sx, sy, color, 0.16);
       // vector(): a solid head at the last vertex, fixed in pixels like the
-      // app's; the shaft stops at its base so the tip stays sharp.
+      // app's; the shaft stops inside it so the tip stays sharp.
       const n = sx.length;
       const head = arrow ? arrowHead(sx[n - 2], sy[n - 2], sx[n - 1], sy[n - 1], ARROW_HEAD_PX) : null;
       if (head) {
-        // drawLine's 2px footprint sits right and below its coordinate, while
-        // fillPolygon samples pixel centers: nudge the head onto the stroke.
-        const o = 0.75;
-        fillPolygon(r, [sx[n - 1] + o, head.left[0] + o, head.right[0] + o],
-          [sy[n - 1] + o, head.left[1] + o, head.right[1] + o], color, 1);
-        [sx[n - 1], sy[n - 1]] = head.base;
+        // drawLine inks pixels round(c) and round(c) + 1, so in fillPolygon's
+        // pixel-center coordinates the stroke's axis runs through round(c) + 1:
+        // shift the head by that much, snapped at the tip, to sit on the shaft.
+        const ox = Math.round(head.tip[0]) + 1 - head.tip[0];
+        const oy = Math.round(head.tip[1]) + 1 - head.tip[1];
+        const tri = [head.tip, head.left, head.right];
+        fillPolygon(r, tri.map(p => p[0] + ox), tri.map(p => p[1] + oy), color, 1);
+        [sx[n - 1], sy[n - 1]] = head.shaftEnd;
       }
       for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color);
       if (closed) drawLine(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);

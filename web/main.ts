@@ -1553,7 +1553,7 @@ function recompileAll() {
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
-      parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
+      parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null);
       // Lists broadcast/reduce away: the row becomes a plain list literal
       // (dots, bars, or a scatter) or a scalar expression (reductions).
       parsed = lowerLists(parsed, getList, ropts);

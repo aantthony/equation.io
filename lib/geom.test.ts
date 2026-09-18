@@ -122,21 +122,39 @@ describe('geometry statements', () => {
 
   it('polyline and vector fail loudly on what they do not cover yet', () => {
     expect(() => low('polyline(A)')).toThrow(/at least 2 points/);
-    expect(() => low('vector(A, B, C)')).toThrow(/one or two points/);
+    expect(() => low('vector(A, B, C)')).toThrow(/one or two 2D points/);
     expect(() => low('polyline([(0, 0), (1, 1)])')).toThrow(/one by one.*polyline\(A, B, C\)/);
     expect(() => low('vector([A, B])')).toThrow(/one by one.*vector\(A, B\)/);
-    expect(() => low('vector((1, 2, 3))')).toThrow(/2D points, not 3-component/);
-    expect(() => low('vector((0, 0), (1, 1), (2, 2))')).toThrow(/one or two points/);
+    // Tuples flatten, so (1, 2, 3), ((1, 2), 3) and (a, b, c) are one input:
+    // the message has to be true of all three, and of 3 points or 2 3-tuples.
+    for (const row of ['vector((1, 2, 3))', 'vector((1, 2), 3)', 'vector(a, b, c)',
+      'vector((0, 0), (1, 1), (2, 2))', 'vector((1, 2, 3), (4, 5, 6))']) {
+      expect(() => low(row)).toThrow(/^vector takes one or two 2D points.*3-component vectors are not drawn yet/);
+    }
+    // A named list of points (or a 2×2 one, which reads as a matrix) is a list too.
+    const lowL = (s: string) => lowerGeom(parseExpr(s), isPt, n => (n === 'M' ? [[parseExpr('1')]] : null) as never, n => n === 'L');
+    expect(() => lowL('polyline(L)')).toThrow(/one by one for now.*not as a list/);
+    expect(() => lowL('vector(A, L)')).toThrow(/one by one for now.*not as a list/);
+    expect(() => lowL('polyline(M)')).toThrow(/one by one for now.*not as a list/);
     expect(() => low('polyline(A, 3)')).toThrow(/write polyline\(A, B, C\)/);
     expect(() => low('1 + vector(A, B)')).toThrow(/whole statement/);
     expect(() => low('2 polyline(A, B)')).toThrow(/whole statement/);
   });
 
+  it('figure lookup ignores Object.prototype names', () => {
+    // A call that merely shares a name with an inherited property is not a figure.
+    for (const name of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+      const c = classify({ kind: 'call', name, args: [{ kind: 'num', value: 2 }] });
+      expect(c.plot.type).not.toBe('polygon');
+    }
+  });
+
   it('arrowHead is a screen-space triangle behind the tip', () => {
     // Shaft along +x: base 10px behind the tip, wings ±4px across it.
-    expect(arrowHead(0, 0, 100, 0, 10)).toEqual({ base: [90, 0], left: [90, 4], right: [90, -4] });
+    // The stroke stops a quarter of the way into the head.
+    expect(arrowHead(0, 0, 100, 0, 10)).toEqual({ tip: [100, 0], left: [90, 4], right: [90, -4], shaftEnd: [92.5, 0] });
     // A shaft shorter than the head shrinks the head to fit it.
-    expect(arrowHead(0, 0, 0, 5, 10)!.base).toEqual([0, 0]);
+    expect(arrowHead(0, 0, 0, 5, 10)).toMatchObject({ left: [-2, 0], right: [2, 0] });
     // No direction, no head.
     expect(arrowHead(3, 3, 3, 3, 10)).toBeNull();
     expect(arrowHead(0, 0, NaN, 0, 10)).toBeNull();

@@ -312,6 +312,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat): LV {
 }
 
 const num2: Expr = { kind: 'num', value: 2 };
+const VECTOR_USAGE = 'vector takes one or two 2D points: vector(A, B) from A to B, or vector(V) from the origin. 3-component vectors are not drawn yet.';
 const spaceVar = (name: 'x' | 'y'): Expr => ({ kind: 'var', name });
 
 /** Internal figure calls with flat scalar vertices: '[segment]' and
@@ -327,10 +328,15 @@ const polyCall = (name: FigureName, pts: Array<[Expr, Expr]>): Expr =>
  * Lower a whole statement: desugar a root-level geometry form, expand all
  * point arithmetic, and return an expression classify already understands.
  */
-export function lowerGeom(e: Expr, getComps: GetComps, getMat: GetMat = () => null): Expr {
+export function lowerGeom(
+  e: Expr, getComps: GetComps, getMat: GetMat = () => null, isList: (name: string) => boolean = () => false,
+): Expr {
   if (e.kind === 'call' && GEOM_STATEMENTS.has(e.name)) {
-    if ((e.name === 'polyline' || e.name === 'vector') && e.args.some(a => a.kind === 'list')) {
-      throw new Error(`${e.name} takes its points one by one — ${e.name === 'polyline' ? 'polyline(A, B, C)' : 'vector(A, B)'} — not as a list.`);
+    // A list of points — literal, named, or a named 2×2/3×3 one that reads as
+    // a matrix — is plan #13's; until then say so rather than "takes points".
+    if ((e.name === 'polyline' || e.name === 'vector')
+      && e.args.some(a => a.kind === 'list' || (a.kind === 'var' && (isList(a.name) || getMat(a.name) !== null)))) {
+      throw new Error(`${e.name} takes its points one by one for now — ${e.name === 'polyline' ? 'polyline(A, B, C)' : 'vector(A, B)'} — not as a list.`);
     }
     const args = e.args.map(a => lower(a, getComps, getMat));
     if (e.name === 'circle') {
@@ -346,10 +352,9 @@ export function lowerGeom(e: Expr, getComps: GetComps, getMat: GetMat = () => nu
         r: sq(r.e),
       };
     }
-    if (e.name === 'vector' && args.every(a => !a.vec) && args.length === 3) {
-      // A flattened 3-tuple literal: say so, rather than mis-pairing it.
-      throw new Error('vector takes 2D points, not 3-component vectors.');
-    }
+    // Tuple literals arrive flattened, so (1, 2, 3) cannot be told from
+    // (1, 2), 3: an odd run of scalars gets the one message true of both.
+    if (e.name === 'vector' && args.every(a => !a.vec) && args.length % 2 === 1) throw new Error(VECTOR_USAGE);
     const pts = pairPoints(e.name, args, e.name === 'polygon' || e.name === 'polyline' ? 'A, B, C' : 'A, B');
     if (e.name === 'line') {
       if (pts.length !== 2) {
@@ -379,9 +384,7 @@ export function lowerGeom(e: Expr, getComps: GetComps, getMat: GetMat = () => nu
     }
     if (e.name === 'vector') {
       // vector(A, B) is the arrow from A to B; vector(V) starts at the origin.
-      if (pts.length !== 1 && pts.length !== 2) {
-        throw new Error('vector takes one or two points: vector(A, B) from A to B, or vector(V) from the origin.');
-      }
+      if (pts.length !== 1 && pts.length !== 2) throw new Error(VECTOR_USAGE);
       const zero: Expr = { kind: 'num', value: 0 };
       return polyCall('[vector]', pts.length === 1 ? [[zero, zero], pts[0]] : pts);
     }
@@ -406,21 +409,31 @@ export function lowerGeom(e: Expr, getComps: GetComps, getMat: GetMat = () => nu
 
 /**
  * The head of an arrow whose shaft runs (x0, y0) → (x1, y1) in screen pixels:
- * a triangle with its tip at (x1, y1), plus the point on the shaft where the
- * head begins (stop the stroke there so its blunt end never pokes through the
- * tip). `size` is the head length in pixels — fixed on screen, so the head
- * does not scale with zoom — shrinking only when the shaft itself is shorter.
- * Null for a zero-length (or non-finite) shaft, which has no direction.
- * Shared by render2d and the og rasterizer so both draw the same arrow.
+ * the triangle tip/left/right with its tip at (x1, y1), plus shaftEnd, where
+ * the stroke should stop instead of at the tip — a little inside the head, so
+ * its blunt end never pokes through the point and no seam opens at the base.
+ * `size` is the head length in pixels — fixed on screen, so the head does not
+ * scale with zoom — shrinking only when the shaft itself is shorter. Null for
+ * a zero-length (or non-finite) shaft, which has no direction. Shared by
+ * render2d and the og rasterizer so both draw the same arrow.
  */
-export function arrowHead(
-  x0: number, y0: number, x1: number, y1: number, size: number,
-): { base: [number, number]; left: [number, number]; right: [number, number] } | null {
+export interface ArrowHead {
+  tip: [number, number];
+  left: [number, number];
+  right: [number, number];
+  shaftEnd: [number, number];
+}
+export function arrowHead(x0: number, y0: number, x1: number, y1: number, size: number): ArrowHead | null {
   const len = Math.hypot(x1 - x0, y1 - y0);
   if (!(len > 0) || !Number.isFinite(len)) return null;
   const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
   const h = Math.min(size, len);
   const w = h * 0.4; // half-width: a 2.5:2 head, slim enough to read as a direction
   const bx = x1 - ux * h, by = y1 - uy * h;
-  return { base: [bx, by], left: [bx - uy * w, by + ux * w], right: [bx + uy * w, by - ux * w] };
+  return {
+    tip: [x1, y1],
+    left: [bx - uy * w, by + ux * w],
+    right: [bx + uy * w, by - ux * w],
+    shaftEnd: [bx + ux * h * 0.25, by + uy * h * 0.25],
+  };
 }

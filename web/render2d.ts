@@ -839,10 +839,10 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
           toScreenX(line.pts[n - 2]), toScreenY(line.pts[n - 1]), ARROW_HEAD_PX)
         : null;
       for (let i = 0; i + 1 < n; i += 2) {
-        // The shaft stops where the head begins, so the tip stays sharp.
+        // The shaft stops inside the head, so the tip stays sharp.
         const last = head && i + 2 >= n;
-        const sx = last ? head.base[0] : toScreenX(line.pts[i]);
-        const sy = last ? head.base[1] : toScreenY(line.pts[i + 1]);
+        const sx = last ? head.shaftEnd[0] : toScreenX(line.pts[i]);
+        const sy = last ? head.shaftEnd[1] : toScreenY(line.pts[i + 1]);
         if (!isFinite(sx) || !isFinite(sy)) { pen = false; broken = true; continue; }
         if (pen) ctx.lineTo(sx, sy);
         else { ctx.moveTo(sx, sy); pen = true; }
@@ -855,7 +855,7 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
       ctx.stroke();
       if (head) {
         ctx.beginPath();
-        ctx.moveTo(toScreenX(line.pts[n - 2]), toScreenY(line.pts[n - 1]));
+        ctx.moveTo(head.tip[0], head.tip[1]);
         ctx.lineTo(head.left[0], head.left[1]);
         ctx.lineTo(head.right[0], head.right[1]);
         ctx.closePath();
