@@ -8,6 +8,7 @@
 import { BinaryInfix, BinaryRightInfix, operators, Postfix, Prefix, shunting } from './lang/parser.ts';
 import Tokenizer, { type PatternDict, type Token } from './lang/tokenizer.ts';
 import { walk } from './lang/ast.ts';
+import { betaPdf, gammaPdf, studentTPdf, weibullPdf } from './specfn.ts';
 
 export type IneqOp = '<' | '<=' | '>' | '>=';
 
@@ -770,6 +771,15 @@ export const ANGLE_FN = '[angle]';
  *  [angle′](v0, v1, w0, w1) is the turning rate of arm v moving with velocity w. */
 export const ANGLE_RATE_FN = '[angle′]';
 
+/** The densities of the distributions that have no elementary closed form a
+ *  float32 shader survives (lib/dist.ts pdfExpr emits them; lib/specfn.ts and
+ *  the eq_*pdf GLSL twins implement them). Unwritable, like '[angle]', so a
+ *  document's own `gammapdf` or `tpdf` is never shadowed or shadowing. */
+export const GAMMA_PDF_FN = '[gammapdf]';
+export const BETA_PDF_FN = '[betapdf]';
+export const T_PDF_FN = '[tpdf]';
+export const WEIBULL_PDF_FN = '[weibullpdf]';
+
 /** The name an internal call wears in a message: `[polygon]` is written
  *  polygon, and both angle helpers are the user's angle. */
 export const plainFnName = (name: string): string =>
@@ -847,6 +857,10 @@ export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
   [ANGLE_FN]: angleFn,
   [ANGLE_RATE_FN]: angleRateFn,
   coth: cothFn,
+  [GAMMA_PDF_FN]: gammaPdf,
+  [BETA_PDF_FN]: betaPdf,
+  [T_PDF_FN]: studentTPdf,
+  [WEIBULL_PDF_FN]: weibullPdf,
 };
 
 /** Numerically evaluate a scalar expression with the given variable bindings. */

@@ -32,6 +32,7 @@ import { buildComb, buildTube, combScale, curveExtent, curveFrames } from '../li
 import {
   type BaseDist,
   type DensityCurve,
+  NO_MEAN_INFO,
   RVSystem,
   buildRVSystem,
   checkDerived,
@@ -1376,6 +1377,7 @@ function recompileAll() {
   });
   rvNames = builtRVs.names;
   const distRows = new Set<Equation>();
+  const movingConsts = animatedConstNames(defs);
   // Readout environment: constants at t = 0. Animated or state-fed variables
   // simply skip their readout (the sampler throws on the missing name).
   let envT0: Record<string, number> | null = null;
@@ -1400,13 +1402,14 @@ function recompileAll() {
       // no finite moments): show robust location/spread instead of noise.
       const r = (s as Partial<DensityCurve>).robust;
       eq.info = (r
-        ? `median ≈ ${r.median.toFixed(3)}, IQR ≈ ${r.iqr.toFixed(3)} (heavy tails: μ, σ unstable)`
+        ? `median ≈ ${r.median.toFixed(3)}, IQR ≈ ${r.iqr.toFixed(3)} (heavy tails: ${r.meanOk ? 'σ' : 'μ, σ'} unstable)`
         : `μ ≈ ${s.mean.toFixed(3)}, σ ≈ ${s.sd.toFixed(3)}`)
         + (s.mass < 0.9995 ? `, P(defined) ≈ ${s.mass.toFixed(3)}` : '');
     } catch { /* not numerically computable right now (e.g. animated) */ }
   };
-  // A derived variable whose law is a closed-form pdf (affine in normals, or
-  // a single scaled uniform/exponential) plots exactly through the shader; a
+  // A derived variable whose law is a closed-form pdf (affine in normals, a
+  // single scaled uniform/exponential, a Gamma-family sum, the square of a
+  // standard normal) plots exactly through the shader; a
   // uniform-sum law plots its exact piecewise polynomial via curve(); only
   // the rest estimate from samples.
   const classifyDerived = (eq: Equation, name: string) => {
@@ -1436,6 +1439,13 @@ function recompileAll() {
       continue;
     }
     const rv = rvSys.get(name)!;
+    // A slider dragged to sd = 0 or a negative shape declares no distribution:
+    // say so on the row rather than drawing the flat 0 the pdf degrades to.
+    const problem = envT0 && rvSys.paramProblem(name, envT0, movingConsts);
+    if (problem) {
+      eq.error = problem;
+      continue;
+    }
     if (rv.kind === 'base') {
       eq.cls = classify(densityExpr(rv.dist), constNames);
     } else {
@@ -1557,6 +1567,7 @@ function recompileAll() {
             const m = rvSys.exactMoments(name, envT0) ?? rvSys.quadMoments(name, envT0);
             const value = m ? m.mean : rvSys.mean(name, envT0);
             if (isFinite(value)) eq.info = `≈ ${value.toFixed(m ? 4 : 3)}`;
+            else if (rvSys.meanUnstable(name, envT0)) eq.info = NO_MEAN_INFO;
           } catch { /* animated or broken: no readout */ }
         }
         continue;
@@ -2970,6 +2981,13 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['central limit theorem', 'view(x = -0.5..4.5, y = -0.15..1.35); '
       + 'X1 ~ Uniform(0, 1); X2 ~ Uniform(0, 1); X3 ~ Uniform(0, 1); X4 ~ Uniform(0, 1); '
       + 'S = X1 + X2 + X3 + X4; Z ~ Normal(2, sqrt(1/3)); P(S > 3)'],
+    ['gamma waiting times', 'view(x = -1..9, y = -0.1..0.9, ratio = 6); a = 2; b = 1; X ~ Gamma(a, b); Y ~ Exponential(b); '
+      + 'P(X > 4); S = X + Y'],
+    ['beta shapes', 'view(x = -0.2..1.2, y = -0.3..3.5, ratio = 0.25); a = 0.5; b = 0.5; X ~ Beta(a, b); P(X < 0.2)'],
+    ['chi-squared from normals', 'view(x = -1..7, y = -0.1..1.1, ratio = 4); Z ~ Normal(0, 1); Q = Z^2; C ~ ChiSquared(3); '
+      + 'P(Q > 3.84)'],
+    ['heavy tails: t and Cauchy', 'view(x = -6..6, y = -0.05..0.45, ratio = 15); k = 2; Z ~ Normal(0, 1); X ~ T(k); '
+      + 'C ~ Cauchy(0, 1); P(X > 2); E(C)'],
     ['conditional variable', 'X ~ Normal(0, 1); Y = {X > 0: X^2, 1}; P(Y > 0.5); P(Y > X)'],
     ['expectation', 'X ~ Uniform(0, 1); Y = X^2; E(Y); E(X + Y)'],
   ]],

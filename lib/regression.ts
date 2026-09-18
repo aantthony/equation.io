@@ -33,7 +33,11 @@ export function scanRegressions(texts: readonly string[]): Map<number, Regressio
     // Bare exp is the distribution alias in every case. An exp(...) call
     // over declared data is the exponential regression model, also in every
     // case; undeclared left-hand names still take the distribution path.
-    if (/^(?:Normal|N|Uniform|U|Exponential)\s*(?:\(|$)/i.test(rhs) || /^exp$/i.test(rhs)) return;
+    // Gamma, Beta and T get the same treatment as exp: each is also a function
+    // or an everyday coefficient name (`Y ~ beta (X - 1)`, `Y ~ gamma(a X)`),
+    // so over declared data they are models, and declare a variable otherwise.
+    if (/^(?:Normal|N|Uniform|U|Exponential|ChiSquared|ChiSq|Chi2|StudentT|LogNormal|Cauchy|Weibull)\s*(?:\(|$)/i.test(rhs)
+      || /^exp$/i.test(rhs)) return;
     if (declared.has(lhs) || /[.\[\](+*/-]/.test(lhs)) {
       out.set(i, { kind: 'regression', name: `~${i}`, lhs, rhs });
     }

@@ -4,7 +4,10 @@
  * An equation l = r compiles to the scalar field F = l - r; the graph is the
  * zero set of F, which the renderers extract in a fragment shader.
  */
-import { ANGLE_FN, ANGLE_RATE_FN, type Expr, ISPRIME_MAX, LANCZOS, ineqComparisons } from './expr.ts';
+import {
+  ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, type Expr, GAMMA_PDF_FN, ISPRIME_MAX, LANCZOS, T_PDF_FN,
+  WEIBULL_PDF_FN, ineqComparisons,
+} from './expr.ts';
 
 export const FN_GLSL: Record<string, string> = {
   ln: 'log',
@@ -24,6 +27,10 @@ export const FN_GLSL: Record<string, string> = {
   coth: 'eq_coth',
   [ANGLE_FN]: 'eq_angle',
   [ANGLE_RATE_FN]: 'eq_angle_rate',
+  [GAMMA_PDF_FN]: 'eq_gammapdf',
+  [BETA_PDF_FN]: 'eq_betapdf',
+  [T_PDF_FN]: 'eq_tpdf',
+  [WEIBULL_PDF_FN]: 'eq_weibullpdf',
 };
 
 /** Helper functions some expressions need; prepend once to the shader. */
@@ -89,6 +96,84 @@ ${LANCZOS.map((c, i) => `    + ${c} / (z + ${i + 1}.0)`).join('\n')};
   return 3.141592653589793 / (sin(3.141592653589793 * x) * g);
 }
 float eq_factorial(float x) { return eq_gamma(x + 1.0); }
+// --- the distribution densities: twins of gammaPdf & co. in lib/specfn.ts ---
+// Same conventions: 0 outside the support and under an invalid parameter,
+// never NaN; a pole is EQ_BIG rather than an Inf a driver may mishandle.
+// float32 changes HOW they are computed: every form below keeps its exponent
+// O(1) term by term, because a sum of ±1e4-sized logs has no digits left
+// (Gamma(200, 1) naively is 860 − 1055 + … ; t with df = 1e6 subtracts two
+// lgammas of 6e6 whose ulp is 0.5).
+#define EQ_BIG 3.0e38
+// ln Gamma(x) for x > 0 (the log of eq_gamma's Lanczos sum, never exponentiated).
+float eq_lgamma(float x) {
+  float z = (x < 0.5 ? 1.0 - x : x) - 1.0;
+  float ser = 1.000000000190015
+${LANCZOS.map((c, i) => `    + ${c} / (z + ${i + 1}.0)`).join('\n')};
+  float t = z + 5.5;
+  float g = (z + 0.5) * log(t) - t + log(2.5066282746310002 * ser);
+  if (x >= 0.5) return g;
+  return log(3.141592653589793 / sin(3.141592653589793 * x)) - g;
+}
+float eq_log1p(float v) {
+  if (abs(v) < 0.01) return v * (1.0 - v * (0.5 - v * (0.3333333333 - v * 0.25)));
+  return log(1.0 + v);
+}
+// ln(1 + d) - d, which is -d*d/2 near 0 where the subtraction would cancel.
+float eq_log1pmx(float d) {
+  if (abs(d) < 0.1) {
+    return d * d * (-0.5 + d * (0.3333333333 + d * (-0.25 + d * (0.2 + d * (-0.1666666667 + d * 0.1428571429)))));
+  }
+  return log(1.0 + d) - d;
+}
+// ln of v^a e^-v / Gamma(a): Stirling about the mode from a = 20 (lnGammaKernel).
+float eq_lngammakernel(float a, float v) {
+  if (a < 20.0) return a * log(v) - v - eq_lgamma(a);
+  float r = 1.0 / (a * a);
+  float corr = (0.08333333333 - r * (0.002777777778 - r * 0.0007936507937)) / a;
+  return a * eq_log1pmx((v - a) / a) + 0.5 * log(a) - 0.9189385332046727 - corr;
+}
+float eq_gammapdf(float x, float shape, float rate) {
+  if (!(shape > 0.0 && rate > 0.0) || !(x >= 0.0)) return 0.0;
+  if (x == 0.0) return shape < 1.0 ? EQ_BIG : (shape == 1.0 ? rate : 0.0);
+  return min(exp(eq_lngammakernel(shape, rate * x)) / x, EQ_BIG);
+}
+float eq_betapdf(float x, float a, float b) {
+  if (!(a > 0.0 && b > 0.0) || !(x >= 0.0 && x <= 1.0)) return 0.0;
+  if (x == 0.0) return a < 1.0 ? EQ_BIG : (a == 1.0 ? b : 0.0);
+  if (x == 1.0) return b < 1.0 ? EQ_BIG : (b == 1.0 ? a : 0.0);
+  float p = a - 1.0;
+  float q = b - 1.0;
+  float k;
+  if (p > 30.0 && q > 30.0) {
+    // About the mode x0 = p/n, where Stirling gives the peak height directly:
+    // ln pdf(x0) = ln(n + 1) + ln(n/(2 pi p q))/2 + (1/n - 1/p - 1/q)/12.
+    float n = p + q;
+    float x0 = p / n;
+    k = p * log(x / x0) + q * log((1.0 - x) / (1.0 - x0))
+      + log(n + 1.0) + 0.5 * log(n / (6.283185307179586 * p * q))
+      + (1.0 / n - 1.0 / p - 1.0 / q) / 12.0;
+  } else {
+    k = p * log(x) + q * log(1.0 - x) + eq_lgamma(a + b) - eq_lgamma(a) - eq_lgamma(b);
+  }
+  return min(exp(k), EQ_BIG);
+}
+float eq_tpdf(float x, float df) {
+  if (!(df > 0.0) || isnan(x) || isinf(x)) return 0.0;
+  float z = 0.5 * df;
+  // lgamma(z + 1/2) - lgamma(z): its own series once the two would cancel.
+  float c = z < 30.0
+    ? eq_lgamma(z + 0.5) - eq_lgamma(z)
+    : 0.5 * log(z) - (0.125 - 0.005208333333 / (z * z)) / z;
+  return exp(-(z + 0.5) * eq_log1p(x * x / df) + c - 0.5 * log(df * 3.141592653589793));
+}
+float eq_weibullpdf(float x, float shape, float scale) {
+  if (!(shape > 0.0 && scale > 0.0) || !(x >= 0.0)) return 0.0;
+  if (x == 0.0) return shape < 1.0 ? EQ_BIG : (shape == 1.0 ? 1.0 / scale : 0.0);
+  float lr = log(x / scale);
+  float e = shape * lr; // ln (x/scale)^shape
+  if (e > 80.0) return 0.0; // exp(-exp(e)) is 0 long before exp(e) overflows
+  return min((shape / scale) * exp((shape - 1.0) * lr - exp(e)), EQ_BIG);
+}
 float eq_sinc(float x) { return x == 0.0 ? 1.0 : sin(x) / x; }
 // 1/tanh, not cosh/sinh: the latter is Inf/Inf = NaN for |x| > ~89 where
 // coth is ±1 (and the cothFn() CPU twin says so).

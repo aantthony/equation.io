@@ -27,6 +27,7 @@ import {
   type Defs,
 } from '../lib/defs.ts';
 import {
+  NO_MEAN_INFO,
   RVSystem,
   buildRVSystem,
   checkDerived,
@@ -194,6 +195,7 @@ export function analyze(texts: string[]): Analysis {
       params: [...ps].filter(p => p !== 't'),
     };
   };
+  const movingConsts = new Set([...animatedConstNames(defs), ...Object.keys(stateVals)]);
   for (const [i, name] of builtRVs.rowRV) {
     const row = rows[i];
     const message = builtRVs.errors.get(i);
@@ -203,6 +205,13 @@ export function analyze(texts: string[]): Analysis {
     }
     row.dist = 'density';
     const rv = rvs.get(name)!;
+    // Parameters that are constants are judged at their values: a = -1 then
+    // X ~ Gamma(a, 1) is no distribution (mirror of web/main.ts).
+    const problem = rvs.paramProblem(name, constEnv, movingConsts);
+    if (problem) {
+      row.error = problem;
+      continue;
+    }
     // Base declarations and derived variables with a closed form (affine in
     // normal bases) draw the exact pdf; the rest estimate from samples.
     const exact = rv.kind === 'base' ? rv.dist : rvs.exactDist(name);
@@ -326,6 +335,7 @@ export function analyze(texts: string[]): Analysis {
           const m = rvs.exactMoments(name, constEnv) ?? rvs.quadMoments(name, constEnv);
           const value = m ? m.mean : rvs.mean(name, constEnv);
           if (isFinite(value)) row.info = `≈ ${value.toFixed(m ? 4 : 3)}`;
+          else if (rvs.meanUnstable(name, constEnv)) row.info = NO_MEAN_INFO;
         } catch { /* animated or broken: no readout */ }
         continue;
       }

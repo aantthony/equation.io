@@ -50,9 +50,26 @@ const signatures: Record<string, [string, string]> = {
   Normal: ['X ~ Normal(mean, sd)', 'Declare a normal random variable'],
   Uniform: ['X ~ Uniform(lo, hi)', 'Declare a uniform random variable'],
   Exponential: ['X ~ Exponential(rate)', 'Declare an exponential random variable'],
+  Gamma: ['X ~ Gamma(shape, rate)', 'Declare a gamma random variable (rate, not scale: mean = shape/rate)'],
+  Beta: ['X ~ Beta(a, b)', 'Declare a beta random variable on [0, 1]'],
+  ChiSquared: ['X ~ ChiSquared(df)', 'Declare a chi-squared random variable (alias ChiSq)'],
+  StudentT: ['X ~ StudentT(df)', 'Declare a Student t random variable (alias T)'],
+  LogNormal: ['X ~ LogNormal(mu, sigma)', 'Declare a log-normal random variable: ln X ~ Normal(mu, sigma)'],
+  Cauchy: ['X ~ Cauchy(location, scale)', 'Declare a Cauchy random variable (no mean: readouts use median/IQR)'],
+  Weibull: ['X ~ Weibull(shape, scale)', 'Declare a Weibull random variable'],
   P: ['P(X < b)', 'Probability of a random-variable condition'],
   E: ['E(X)', 'Expected value of a random variable'],
 };
+
+/** Distributions whose name folds case anywhere. Gamma is absent: lowercased
+ *  it is the gamma function, which keeps `GAMMA(` outside a ~ row. */
+const FOLDED_DISTS = ['Normal', 'Uniform', 'Exponential', 'Beta', 'ChiSquared', 'StudentT', 'LogNormal', 'Cauchy', 'Weibull'];
+
+/** Every spelling lib/dist.ts accepts right of a ~, to its signature's key. */
+const DIST_NAMES = new Map<string, string>([
+  ...[...FOLDED_DISTS, 'Gamma'].map((n): [string, string] => [n.toLowerCase(), n]),
+  ['chisq', 'ChiSquared'], ['chi2', 'ChiSquared'], ['t', 'StudentT'],
+]);
 
 export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp {
   const before = text.slice(0, offset);
@@ -77,7 +94,7 @@ export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp
   // Snapshot before user definitions overwrite candidates: those names are
   // exact, and must not acquire new spellings just because help is open.
   const foldedBuiltins = new Map([...candidates].filter(([name]) =>
-    FUNCTIONS.has(name) || ['Normal', 'Uniform', 'Exponential'].includes(name))
+    FUNCTIONS.has(name) || FOLDED_DISTS.includes(name))
     .map(([name, suggestion]) => [name.toLowerCase(), suggestion]));
   const values = (names: Iterable<string>, description: string) => {
     for (const name of names) candidates.set(name, { name, signature: name, description, call: false });
@@ -98,7 +115,11 @@ export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp
   const call = [...stack].reverse().find(s => s.name)?.name;
   const shadowed = shadowedFnNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
   const blocked = call && !defs.fns.has(call) && shadowed.has(builtinFn(call) ?? '');
-  const entry = call && !blocked ? candidates.get(call) ?? foldedBuiltins.get(call.toLowerCase()) : undefined;
+  // Right of a ~ a distribution name wins in any spelling, aliases included:
+  // `X ~ gamma(` is the Gamma law there, not the function it is elsewhere.
+  const distName = call && before.includes('~') && !defs.fns.has(call) ? DIST_NAMES.get(call.toLowerCase()) : undefined;
+  const entry = distName ? candidates.get(distName)
+    : call && !blocked ? candidates.get(call) ?? foldedBuiltins.get(call.toLowerCase()) : undefined;
   let hint = entry?.call ? `${entry.signature} — ${entry.description}` : undefined;
   if (!hint && before.includes('~')) hint = 'Y ~ m X + b fits data lists: unbound coefficients are fitted, defined constants stay fixed. X ~ Normal(mean, sd) declares a random variable.';
   const word = /[A-Za-z_][\w.]*(?:\.[\w]*)?$/.exec(before)?.[0] ?? '';

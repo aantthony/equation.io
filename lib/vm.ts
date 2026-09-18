@@ -5,7 +5,8 @@
  * sample is too slow and Workers forbid dynamic codegen (`new Function`), so
  * expressions compile once to opcode arrays run by a small stack machine.
  */
-import { ANGLE_FN, ANGLE_RATE_FN, type Expr, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, plainFnName, realPow, sincFn } from './expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, type Expr, GAMMA_PDF_FN, T_PDF_FN, WEIBULL_PDF_FN, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, plainFnName, realPow, sincFn } from './expr.ts';
+import { betaPdf, gammaPdf, studentTPdf, weibullPdf } from './specfn.ts';
 
 const enum Op { Const, Var, Add, Sub, Mul, Div, Pow, Neg, Fn1, Fn2, Fn3, Lt, Le, Gt, Ge, Sel, Fn4 }
 
@@ -26,11 +27,13 @@ const FN1: Record<string, (x: number) => number> = {
 const FN2: Record<string, (a: number, b: number) => number> = {
   atan2: Math.atan2, min: Math.min, max: Math.max,
   mod: (a, b) => a - Math.floor(a / b) * b,
+  [T_PDF_FN]: studentTPdf,
 };
 
 // The probability builtins (lib/dist.ts rows compile to these).
 const FN3: Record<string, (a: number, b: number, c: number) => number> = {
   normalpdf, normalcdf,
+  [GAMMA_PDF_FN]: gammaPdf, [BETA_PDF_FN]: betaPdf, [WEIBULL_PDF_FN]: weibullPdf,
 };
 
 // The angle measurement and its derivative (lib/geom.ts lowers angle(…) to these).

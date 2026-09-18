@@ -243,6 +243,40 @@ describe('og raster renderer', () => {
     expect(Math.min(...pixel(r, 10, 10))).toBeGreaterThan(240);
   });
 
+  it('draws the zoo densities through the VM builtins: Gamma curve + shaded tail', () => {
+    // 0.08 units/px centred on (3, 0.2). The mode (1, 1/e) is screen (25, ~48),
+    // where the curve runs level — off every gridline.
+    const rows = ['view(x = -1..7, y = -0.05..0.45)', 'X ~ Gamma(2, 1)', 'P(X > 3)'];
+    const r = renderRaster(rows, 100, 100);
+    const near: number[] = [];
+    for (const x of [24, 25, 26]) for (const y of [47, 48, 49]) near.push(Math.min(...pixel(r, x, y)));
+    expect(Math.min(...near)).toBeLessThan(200);
+    // Inside the shaded tail, world (4, 0.03) under pdf(4) = 0.073.
+    expect(Math.min(...pixel(r, 62, 52))).toBeLessThan(245);
+    // Left of the support, at the same height, nothing is tinted or drawn.
+    expect(Math.min(...pixel(r, 6, 45))).toBeGreaterThan(240);
+    expect(Math.min(...pixel(r, 10, 10))).toBeGreaterThan(240);
+  });
+
+  it('shades up to a pole at the support edge: ChiSquared(1) and a U-shaped Beta', () => {
+    // 0.04 units/px centred on (1, 0.55). World (0.3, 0.2) lies under the
+    // density (0.63 there, infinite at 0); (-0.5, 0.2) is off the support.
+    const chi = renderRaster(['view(x = -1..3, y = -0.1..1.2)', 'X ~ ChiSquared(1)', 'P(X < 1)'], 100, 100);
+    expect(Math.min(...pixel(chi, 32, 58))).toBeLessThan(Math.min(...pixel(chi, 12, 58)) - 5);
+    // Beta(0.5, 0.5) has a pole at BOTH ends; P(X < 0.3) fills the left horn only.
+    // 0.02 units/px centred on (0.5, 0.95): world (0.15, 0.5) → (32, 72), (0.7, 0.5) → (60, 72).
+    const beta = renderRaster(['view(x = -0.5..1.5, y = -0.1..2)', 'X ~ Beta(0.5, 0.5)', 'P(X < 0.3)'], 100, 100);
+    expect(Math.min(...pixel(beta, 32, 72))).toBeLessThan(Math.min(...pixel(beta, 60, 72)) - 5);
+  });
+
+  it('draws every zoo family without falling back to a blank plot', () => {
+    const view = 'view(x = -3..5, y = -0.1..1)';
+    const grid = inkFraction(renderRaster([view], 100, 100));
+    for (const decl of ['Gamma(0.5, 1)', 'Beta(2, 3)', 'ChiSquared(3)', 'StudentT(2)', 'LogNormal(0, 0.5)', 'Cauchy(1, 0.5)', 'Weibull(1.5, 2)', 'Gamma(50, 25)']) {
+      expect(inkFraction(renderRaster([view, `X ~ ${decl}`], 100, 100)), decl).toBeGreaterThan(grid + 0.003);
+    }
+  });
+
   it('draws the piecewise uniform pdf and its region through the VM', () => {
     const rows = ['view(x = -1..3, y = -0.1..1.2)', 'X ~ Uniform(0, 2)', 'P(0.5 < X < 1.5)'];
     const r = renderRaster(rows, 100, 100);
