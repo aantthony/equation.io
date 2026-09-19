@@ -232,7 +232,9 @@ html, body {
 #panel-resize:focus-visible::after { background: var(--accent); }
 
 #theme-toggle,
-#state-reset {
+#state-reset,
+#shot,
+#rec {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -248,12 +250,26 @@ html, body {
   line-height: 24px;
   text-align: center;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
+#shot { right: 34px; }
+#rec { right: 62px; }
 /* Only present while a row defines a state (`a' = …`). */
-#state-reset { right: 34px; font-size: 14px; }
+#state-reset { right: 90px; font-size: 14px; }
+#rec[hidden] ~ #state-reset { right: 62px; }
 #state-reset[hidden] { display: none; }
+#rec[hidden] { display: none; }
+#rec.recording { color: #e24; }
+#rec .rec-stop { display: none; }
+#rec.recording .rec-dot { display: none; }
+#rec.recording .rec-stop { display: block; }
 #theme-toggle:hover,
-#state-reset:hover { background: var(--eq-focus); color: var(--muted-hover); }
+#state-reset:hover,
+#shot:hover,
+#rec:hover { background: var(--eq-focus); color: var(--muted-hover); }
+#rec.recording:hover { color: #c12; }
 
 #equations {
   /* Scrolls when the list outgrows the panel's max-height. `none` (not
@@ -547,6 +563,21 @@ body.file-drag::after {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
+#try-another {
+  flex: none;
+  align-self: stretch;
+  margin-top: 4px;
+  padding: 6px 4px 2px;
+  border: none;
+  border-top: 1px solid var(--divider);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+#try-another:hover { color: var(--muted-hover); text-decoration: underline; }
 #examples {
   /* Never shrinks (the summary row stays visible), but caps itself and scrolls
      internally so an open example tree can't push the panel past its max.
@@ -556,8 +587,7 @@ body.file-drag::after {
   max-height: 40%;
   overflow-y: auto;
   overscroll-behavior: none;
-  border-top: 1px solid var(--divider);
-  margin-top: 4px;
+  margin-top: 0;
   padding: 4px;
   font-size: 12px;
 }

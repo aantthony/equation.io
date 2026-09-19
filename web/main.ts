@@ -1,6 +1,8 @@
 import { complexRootLabel } from '../lib/complex-label.ts';
 import { lowerObjects } from '../lib/object-lists.ts';
 import { initSyntaxHelp } from './syntax-help.ts';
+import { attachCapture } from './capture.ts';
+import { nextFeatured } from '../lib/featured.ts';
 import { declaredNames, scanRegressions, formatFit } from '../lib/regression.ts';
 import { PointTrail } from '../lib/point-trail.ts';
 import {
@@ -319,6 +321,7 @@ const quad = fullscreenQuad(gl);
 const r2d = new Renderer2D(gl, quad);
 const r3d = new Renderer3D(gl, quad);
 const overlayCtx = overlay.getContext('2d')!;
+let capture: ReturnType<typeof attachCapture> | undefined;
 
 /** True until the canvas has been measured once and the opening zoom picked. */
 let awaitingFirstSize = true;
@@ -1272,6 +1275,7 @@ function render() {
     || active.some(e => e.cls!.animated || (defsAnimated && e.cls!.params.length > 0))) {
     requestRender();
   }
+  capture?.afterFrame();
 }
 
 // --- equation list UI ---
@@ -3164,17 +3168,31 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   ]],
 ];
 
-function openExample(text: string) {
+/** Rows shown when the URL names no graph. Rotates on each empty visit. */
+let emptyDefault = ['y = sin(x)'];
+
+function replaceDocument(rows: string[], share: boolean) {
   pushUndo(null);
+  equations.length = 0;
+  for (const t of rows) if (t.trim()) addEquation(t.trim());
+  if (!equations.length) addEquation('');
+  recompileAll();
+  renderAll();
+  // A whole-document replace is one navigation, not a slider drag: write the
+  // URL now. saveUrl() would wait out the coalescing window when the page
+  // itself is still under a second old (urlLastWrite starts at 0).
+  if (share) {
+    urlPending = true;
+    flushUrl();
+  }
+  requestRender();
+}
+
+function openExample(text: string) {
   // An example is a fresh start: it replaces the whole document (undo brings
   // the old one back). Multi-row examples separate rows with ';' (the same
   // separator as the hash).
-  equations.length = 0;
-  for (const part of splitStatements(text)) addEquation(part.trim());
-  recompileAll();
-  saveUrl();
-  renderAll();
-  requestRender();
+  replaceDocument(splitStatements(text).map(s => s.trim()).filter(Boolean), true);
 }
 
 function buildExamplesMenu() {
@@ -3786,10 +3804,15 @@ const initialPayload = urlPayload();
 // reads both the /g/ form and legacy /#… links.
 const initialRows = decodePayload(initialPayload);
 if (initialRows.length) initialRows.forEach(t => addEquation(t));
-else if (!embedded) addEquation('y = sin(x)');
+else if (!embedded) {
+  try { emptyDefault = nextFeatured(localStorage).eqs; }
+  catch { emptyDefault = nextFeatured(null).eqs; }
+  emptyDefault.forEach(t => addEquation(t));
+}
 recompileAll();
 // Canonicalize what we loaded (re-encoded /g/ form; stray paths back to /).
-// A fresh visit stays at / — the default row only enters the URL once edited.
+// A fresh visit stays at / — the featured graph only enters the URL once
+// edited, or when the visitor clicks try another / an example.
 if (initialPayload) saveUrl();
 else if (!embedded && location.pathname !== '/') history.replaceState(null, '', '/');
 
@@ -3807,7 +3830,7 @@ else if (!embedded && location.pathname !== '/') history.replaceState(null, '', 
  */
 function loadFromUrl() {
   const rows = decodePayload(urlPayload());
-  const wanted = rows.length ? rows : ['y = sin(x)'];
+  const wanted = rows.length ? rows : emptyDefault;
   const current = equations.map(e => e.text);
   if (wanted.length === current.length && wanted.every((t, i) => t === current[i])) return;
   equations.length = 0;
@@ -3824,6 +3847,35 @@ resize();
 renderAll();
 buildExamplesMenu();
 void refreshFileMenu();
+
+document.getElementById('try-another')?.addEventListener('click', () => {
+  const store = typeof localStorage === 'undefined' ? null : localStorage;
+  emptyDefault = nextFeatured(store, equations.map(e => e.text)).eqs;
+  replaceDocument(emptyDefault, true);
+});
+
+const shotBtn = document.getElementById('shot') as HTMLButtonElement | null;
+const recBtn = document.getElementById('rec') as HTMLButtonElement | null;
+capture = attachCapture({
+  gl: canvas,
+  overlay,
+  render,
+  requestRender,
+  notice: showNotice,
+  onRecording(on) {
+    recBtn?.classList.toggle('recording', on);
+    recBtn?.setAttribute('aria-pressed', on ? 'true' : 'false');
+    recBtn?.setAttribute('title', on
+      ? 'Stop recording'
+      : 'Record the graph as video (up to 8 seconds)');
+  },
+});
+shotBtn?.addEventListener('click', e => { void capture?.snapshot(e.shiftKey); });
+if (!capture.mime && recBtn) recBtn.hidden = true;
+else recBtn?.addEventListener('click', () => {
+  if (capture?.isRecording()) capture.stopRecording();
+  else capture?.startRecording();
+});
 
 if (embedded) {
   void import('./mcp-app.ts').then(({ connectGraphApp }) => connectGraphApp({
@@ -3884,7 +3936,7 @@ if (embedded) {
 }
 
 // Dev-only handle for driving/inspecting the view in automated tests.
-if (import.meta.env.DEV) (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback };
+if (import.meta.env.DEV) (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback, capture };
 
 // Completion is an ordinary text edit, with the same undo and URL path as typing.
 initSyntaxHelp(listEl, {
