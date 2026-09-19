@@ -48,6 +48,10 @@ export function hasAtan2(e: Expr): boolean {
   }
 }
 
+/** A field over the plane draws its level sets as a grid family; one that
+ *  uses z has no planar level sets to draw, so it only defines. */
+export const planarField = (expr: Expr): boolean => !freeVars(expr).has('z');
+
 export function buildGridField(name: string, expr: Expr, constNames: ReadonlySet<string>): GridField {
   const params = [...freeVars(expr)].filter(v => constNames.has(v)).sort();
   const uMap = Object.fromEntries(params.map(p => [p, { kind: 'var', name: 'u_' + p } as Expr]));

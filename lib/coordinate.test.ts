@@ -281,3 +281,116 @@ describe('parametric system branches', () => {
     expect(paths[0]).toHaveLength(257);
   });
 });
+
+describe('coordinate fields over z', () => {
+  const spherical = ['rho = sqrt(x^2+y^2+z^2)', 'theta = atan2(y,x)', 'phi = acos(z/rho)'];
+  const box = { lo: [-6, -6, -6], hi: [6, 6, 6] };
+  const errorsOf = (rows: string[]) => analyze(rows).rows.map(r => r.error);
+
+  it('lets a field use z, and only defines: no plot row, no 3D scene', () => {
+    const a = analyze(spherical);
+    expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
+    expect([...a.defs.fields.keys()]).toEqual(['rho', 'theta', 'phi']);
+    expect(a.rows.some(r => r.cls)).toBe(false);
+    // z alone reaches space too, so `h = z` is a field rather than an error.
+    expect([...analyze(['h = z', 'h = 2']).defs.fields.keys()]).toEqual(['h']);
+    expect(last(['h = z', 'h = 2']).type).toBe('implicit3d');
+  });
+
+  it('plots a second row over a z-using field as a surface', () => {
+    for (const row of ['rho = 2', 'phi = pi/4', 'rho = 1 + cos(3 theta)', 'z = rho cos(phi)']) {
+      expect(last([...spherical, row]).type).toBe('implicit3d');
+    }
+    // A planar field in the same document keeps its planar reading.
+    const a = analyze([...spherical, 'theta = pi/4']);
+    expect(a.rows.at(-1)!.cls!.plot.type).toBe('implicit2d');
+    expect(a.rows.at(-1)!.cls!.needs3D).toBe(false);
+  });
+
+  it('leaves slider constants with chart-like names alone', () => {
+    const a = analyze(['r = 2', 'theta = 1', 'rho = 3', 'phi = 0.5', 'y = r x + theta + rho + phi']);
+    expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
+    expect(a.defs.fields.size).toBe(0);
+    expect(a.rows.at(-1)!.cls!.plot.type).toBe('implicit2d');
+    expect(a.rows.at(-1)!.cls!.params).toEqual(['phi', 'r', 'rho', 'theta']);
+  });
+
+  it('resolves fields built from fields, in either order, and reports cycles', () => {
+    const viaPolar = ['rho = sqrt(r^2 + z^2)', 'phi = atan2(r, z)', 'r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
+    const a = analyze([...viaPolar, 'rho = 2']);
+    expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
+    expect(a.rows.at(-1)!.cls!.plot.type).toBe('implicit3d');
+    expect(evaluate(a.defs.fields.get('rho')!, { x: 1, y: 2, z: 2 })).toBeCloseTo(3, 12);
+    expect(errorsOf(['a = b + z', 'b = a + x'])).toEqual([
+      'a is defined in terms of itself.', 'b is defined in terms of itself.',
+    ]);
+    expect(errorsOf(['rho = sqrt(x^2+y^2+w)'])[0])
+      .toBe('rho defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found w).');
+    expect(errorsOf(['A = (z, 0)'])[0]).toBe('A point cannot depend on x, y, or z.');
+  });
+
+  it('solves a spherical point, wrapping only the atan2-valued coordinate', () => {
+    const p = last([...spherical, '(rho, theta, phi) = (2, 9pi/4, pi/3)']);
+    if (p.type !== 'system') throw new Error('expected system');
+    expect(p.dim).toBe(3);
+    expect(p.angular).toEqual([false, true, false]);
+    expect(p.coordinates).toBeUndefined(); // no drag in space
+    const pts = solveSystem(p.residuals, ['x', 'y', 'z'], box.lo, box.hi, { angular: p.angular });
+    expect(pts).toHaveLength(1);
+    expect(pts[0][0]).toBeCloseTo(Math.sqrt(1.5), 7);
+    expect(pts[0][1]).toBeCloseTo(Math.sqrt(1.5), 7);
+    expect(pts[0][2]).toBeCloseTo(1, 7);
+    // acos ranges over [0, π]: a polar angle past it names no point.
+    const q = last([...spherical, '(rho, theta, phi) = (2, pi/4, pi/3 + 2pi)']);
+    if (q.type !== 'system') throw new Error('expected system');
+    expect(solveSystem(q.residuals, ['x', 'y', 'z'], box.lo, box.hi, { angular: q.angular })).toEqual([]);
+  });
+
+  it('reports no point where the chart is singular', () => {
+    // theta is undefined on the z-axis, so the pole is not a solution of it.
+    const p = last([...spherical, '(rho, theta, phi) = (2, 0, 0)']);
+    if (p.type !== 'system') throw new Error('expected system');
+    expect(solveSystem(p.residuals, ['x', 'y', 'z'], box.lo, box.hi, { angular: p.angular })).toEqual([]);
+  });
+
+  it('keeps cylindrical and Cartesian triples working', () => {
+    const p = last([...polar, '(r, theta, z) = (1, 2, 3)']);
+    if (p.type !== 'system') throw new Error('expected system');
+    expect(p.dim).toBe(3);
+    expect(p.angular).toEqual([false, true, false]);
+    const pts = solveSystem(p.residuals, ['x', 'y', 'z'], box.lo, box.hi, { angular: p.angular });
+    expect(pts).toHaveLength(1);
+    expect(pts[0][0]).toBeCloseTo(Math.cos(2), 7);
+    expect(pts[0][2]).toBeCloseTo(3, 7);
+  });
+
+  it('traces a space curve in the chart through every wrap of theta', () => {
+    const p = last([...spherical, '(rho, theta, phi) = (2, 6 pi u, pi u)']);
+    if (p.type !== 'system') throw new Error('expected system');
+    expect(p.parametric).toBe(true);
+    const paths = traceSystem(p.residuals, ['x', 'y', 'z'], box.lo, box.hi, {}, 256, p.angular);
+    const longest = paths.reduce((a, b) => a.length > b.length ? a : b);
+    expect(longest.length).toBeGreaterThan(250);
+    for (let k = 1; k < longest.length; k++) {
+      expect(Math.hypot(...longest[k].map((v, i) => v - longest[k - 1][i]))).toBeLessThan(0.3);
+      expect(Math.hypot(...longest[k])).toBeCloseTo(2, 5);
+    }
+  });
+
+  it('says truthfully what it does not cover', () => {
+    expect(errorsOf([...spherical, '(rho, theta) = (2, pi/4)']).at(-1))
+      .toBeUndefined();
+    expect(errorsOf([...polar, '(r, theta, x) = (1, 2, 3)']).at(-1))
+      .toBe('3 equations in 2 unknowns — a system needs one equation per unknown.');
+    expect(errorsOf([...spherical, '(rho, rho, phi) = (1, 2, 3)']).at(-1))
+      .toBe('(rho, rho, phi) repeats a coordinate — use distinct coordinates to determine a point or flow.');
+    expect(errorsOf([...spherical, "(rho', theta') = (1, 1)"]).at(-1))
+      .toBe('rho uses z, and coordinate flows are 2D only.');
+    expect(errorsOf([...spherical, "(rho', theta', phi') = (1, 1, 1)"]).at(-1))
+      .toBeUndefined();
+    expect(errorsOf(["(x', z') = (1, 2)"]).at(-1))
+      .toBe('Coordinate flows are 2D only — z cannot be a flow coordinate.');
+    expect(errorsOf([...spherical, '(rho, theta, phi) = (1, 2)']).at(-1))
+      .toBe('Mismatched components: 3 on the left, 2 on the right.');
+  });
+});

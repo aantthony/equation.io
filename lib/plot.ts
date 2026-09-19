@@ -26,6 +26,7 @@ import { toGLSL } from './glsl.ts';
 import { type GridField, buildGridField } from './grid.ts';
 
 export type Plot =
+  | { type: 'family'; members: Array<{ cls: Classified; expr: Expr }> }
   /**
    * levels: set when the equation is `f(x,y) = c` with c a defined constant
    * (a slider). The renderer can then draw the whole family of level sets of
@@ -58,22 +59,25 @@ export type Plot =
    *  With `shade` — the row is exactly one definite integral — the area
    *  between the integrand and the axis is filled too (lib/intshade.ts).
    *  classifyRow attaches it, since resolution expands the ∫ away. */
+  | { type: 'note'; expr: Expr; variable: boolean }
   | { type: 'value'; expr: Expr; shade?: IntShade }
   /** Live bounded history of a point's observed positions. */
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   /** CPU-evaluated straight-edged figure from segment()/polyline()/vector()/
    *  polygon()/square(): flat vertex expressions [x1, y1, x2, y2, …]. closed
    *  also fills; arrow (vector) draws a screen-space head at the last vertex. */
-  | { type: 'polygon'; pts: Expr[]; closed: boolean; arrow?: boolean }
+  | { type: 'polygon'; dim?: 2 | 3; pts: Expr[]; closed: boolean; arrow?: boolean }
   /**
    * A vector equation L = R, one residual per component. With as many
    * equations as unknowns the solution set is isolated points, found
    * numerically: intersections of curves in 2D, the fiber of a map in 3D.
    * Residuals keep constants under their original names (CPU-evaluated).
    */
-  | { type: 'system'; dim: 2 | 3; residuals: Expr[]; parametric?: boolean; angular?: boolean[]; coordinates?: Expr[] }
+  | { type: 'spacecurve'; residuals: Expr[] }
+  | { type: 'system'; dim: 2 | 3; residuals: Expr[]; complexEquation?: Expr; parametric?: boolean; angular?: boolean[]; coordinates?: Expr[] }
   /** (Vx, Vy) as GLSL in x, y — rendered as animated line-integral convolution.
    *  comps keep the symbolic components for CPU integration (integral curves). */
+  | { type: 'vfield3d'; comps: Expr[] }
   | { type: 'vfield2d'; fx: string; fy: string; comps: [Expr, Expr] }
   /** tube: set by the explicit tube(…) form — sweep a lit tube whose radius
    *  is this expression, evaluated per frame (constants, sliders, and t only)
@@ -134,6 +138,7 @@ function tryGrad(exprs: Expr[], v: string): [string, string, string] | undefined
 }
 
 export interface Classified {
+  uniforms?: Record<string, number>;
   plot: Plot;
   animated: boolean;
   needs3D: boolean;
@@ -164,6 +169,10 @@ function matchODE(e: Expr): (Expr & { kind: 'vec' }) | null {
     if (isVarNamed(l.a, 'dx') && isVarNamed(l.b, 'dy')) return vec([r, one]);
   }
   if (isVarNamed(l, "y'")) return vec([one, r]);
+  if (l.kind === 'vec' && l.items.length === 3 && l.items.every((e, k) => isVarNamed(e, ["x'", "y'", "z'"][k]))) {
+    if (r.kind !== 'vec' || r.items.length !== 3) throw new Error('A 3D flow needs three velocity components.');
+    return r;
+  }
   if (l.kind === 'vec' && l.items.length === 2
     && isVarNamed(l.items[0], "x'") && isVarNamed(l.items[1], "y'")) {
     if (r.kind !== 'vec' || r.items.length !== 2) {
@@ -341,12 +350,70 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
   return classifyLowered(expr, defined, fields, timeDerivative).cls;
 }
 
+/** Merge scalar differences into one uniform-selected expression. Structural
+ * nodes (equations, vectors and figure calls) retain their shape. */
+function familyTemplate(es: Expr[], index: string): Expr {
+  if (es.every(e => JSON.stringify(e) === JSON.stringify(es[0]))) return es[0];
+  const first = es[0];
+  if (es.every(e => e.kind === first.kind)) {
+    if (first.kind === 'eq' || first.kind === 'ineq') {
+      const rows = es as Array<Expr & { kind: 'eq' | 'ineq' }>;
+      if (first.kind === 'eq' || rows.every(r => r.kind === 'ineq' && r.op === first.op))
+        return { ...first, l: familyTemplate(rows.map(r => r.l), index), r: familyTemplate(rows.map(r => r.r), index) };
+    }
+    if (first.kind === 'vec') {
+      const vs = es as Array<Expr & { kind: 'vec' }>;
+      if (vs.every(v => v.items.length === first.items.length)) return { kind: 'vec', items: first.items.map((_, k) => familyTemplate(vs.map(v => v.items[k]), index)) };
+    }
+    if (first.kind === 'call') {
+      const cs = es as Array<Expr & { kind: 'call' }>;
+      if (cs.every(c => c.name === first.name && c.args.length === first.args.length)) return { ...first, args: first.args.map((_, k) => familyTemplate(cs.map(c => c.args[k]), index)) };
+    }
+    if (first.kind === 'bin') {
+      const bs = es as Array<Expr & { kind: 'bin' }>;
+      if (bs.every(b => b.op === first.op)) return { ...first, a: familyTemplate(bs.map(b => b.a), index), b: familyTemplate(bs.map(b => b.b), index) };
+    }
+  }
+  if (es.some(e => e.kind === 'eq' || e.kind === 'ineq' || e.kind === 'vec')) throw new Error('Family members need matching object shapes.');
+  return { kind: 'piecewise', cases: es.slice(0, -1).map((value, k) => ({
+    cond: { kind: 'ineq', op: '<', l: { kind: 'var', name: index }, r: { kind: 'num', value: k + .5 } }, value,
+  })), otherwise: es[es.length - 1] };
+}
+
 /** classify, also handing back the equation a revolve(…) row desugared to
  *  (`surface`) — the one place that desugaring happens, after coordinate
  *  fields have expanded, so a field hiding y or z is seen for what it is. */
 function classifyLowered(
   expr: Expr, defined: ReadonlySet<string>, fields: Record<string, Expr>, timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified; surface?: Expr } {
+  if (expr.kind === 'call' && expr.name === '[family]') {
+    if (!expr.args.length || expr.args.length > 32) throw new Error('An object family needs 1–32 members.');
+    if (expr.args.some(e => exceedsNodes(e, 8192))) throw new Error('A family element is too large to render (8192 nodes).');
+    const members = expr.args.map((e, i) => {
+      try { const result = classifyLowered(e, defined, fields, timeDerivative); return { cls: result.cls, expr: result.surface ?? substVars(e, fields) }; }
+      catch (err) { throw new Error(`Family element ${i + 1}: ${err instanceof Error ? err.message : err}`); }
+    });
+    const first = members[0].cls.plot;
+    const unsupported = new Set(['family', 'scalar2d', 'domain2d', 'complex2d', 'conformal2d', 'fractal2d', 'density', 'pmf', 'prob', 'expect', 'trail']);
+    if (unsupported.has(first.type)) throw new Error(`Families of ${first.type} do not superimpose meaningfully — select a list element L[k] instead.`);
+    const dimension = (plot: Plot) => plot.type === 'polygon' ? plot.dim ?? 2 : 'dim' in plot ? plot.dim : undefined;
+    const odd = members.findIndex(m => m.cls.plot.type !== first.type || dimension(m.cls.plot) !== dimension(first));
+    if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
+    if (members.some(m => m.cls.needs3D) && members.length > 8) throw new Error('A 3D object family has at most 8 members.');
+    const shaders = new Set(['implicit2d', 'ineq2d', 'implicit3d', 'psurface', 'vfield2d']);
+    if (shaders.has(first.type)) {
+      let index = 'eqioFamilyIndex';
+      while (defined.has(index) || expr.args.some(e => freeVars(e).has(index))) index += 'X';
+      const merged = familyTemplate(expr.args, index);
+      if (exceedsNodes(merged, 32768)) throw new Error('The shared family program is too large (32768 nodes).');
+      const shared = classifyLowered(merged, new Set([...defined, index]), fields, timeDerivative);
+      for (let k = 0; k < members.length; k++) members[k] = {
+        cls: { ...shared.cls, uniforms: { [index]: k } }, expr: shared.surface ?? substVars(merged, fields),
+      };
+    }
+    return { cls: { plot: { type: 'family', members }, animated: members.some(m => m.cls.animated),
+      needs3D: members.some(m => m.cls.needs3D), params: [...new Set(members.flatMap(m => m.cls.params))].filter(n => !Object.hasOwn(members[0].cls.uniforms ?? {}, n)) } };
+  }
   const coordinate = coordinateRow(expr, fields);
   expr = lowerCoordinateFlow(expr, fields, timeDerivative);
   const ode = matchODE(expr);
@@ -419,11 +486,13 @@ function classifyLowered(
     plot,
     // Vector-field streamlines drift continuously, so they always animate.
     animated: animated || plot.type === 'vfield2d',
-    needs3D: plot.type === 'implicit3d' || plot.type === 'psurface'
+    needs3D: plot.type === 'spacecurve' || plot.type === 'vfield3d' || plot.type === 'implicit3d' || plot.type === 'psurface'
       || ((plot.type === 'point' || plot.type === 'trail' || plot.type === 'pcurve' || plot.type === 'plist'
-        || plot.type === 'dscatter' || plot.type === 'system') && plot.dim === 3),
+        || plot.type === 'dscatter' || plot.type === 'system' || plot.type === 'polygon') && plot.dim === 3),
     params,
   } });
+
+  if ((expr.kind === 'eq' || expr.kind === 'ineq') && expr.l.kind !== 'vec' && expr.r.kind !== 'vec' && !hasSpace && !hasParam) return done({ type: 'note', expr, variable: animated || params.length > 0 });
 
   if (expr.kind === 'call' && expr.name === '[trail]') {
     if (hasSpace || hasParam || usesComplex(expr) || expr.args.some(c => c.kind === 'data' || c.kind === 'list')) {
@@ -435,14 +504,16 @@ function classifyLowered(
   // Desugared segment()/polyline()/vector()/polygon()/square(): CPU-evaluated
   // each frame with the constants' original names, like points and parametric
   // curves.
-  const figure = expr.kind === 'call' && Object.hasOwn(FIGURES, expr.name) ? FIGURES[expr.name] : undefined;
+  const figureName = expr.kind === 'call' ? expr.name.replace('3]', ']') : '';
+  const figure = Object.hasOwn(FIGURES, figureName) ? FIGURES[figureName] : undefined;
   if (expr.kind === 'call' && figure) {
     if (hasSpace || hasParam) {
       throw new Error(`${figure.what} must be constant — they cannot use x, y, u, or v.`);
     }
     return done({
       type: 'polygon', pts: expr.args, closed: figure.closed,
-      ...(expr.name === '[vector]' ? { arrow: true } : {}),
+      ...(expr.name.endsWith('3]') ? { dim: 3 as const } : {}),
+      ...(figureName === '[vector]' ? { arrow: true } : {}),
     });
   }
 
@@ -533,7 +604,8 @@ function classifyLowered(
     const dim = expr.items.length as 2 | 3;
     if (hasSpace || ode) {
       if (hasParam) throw new Error('Vector fields cannot use u or v.');
-      if (vars.has('z')) throw new Error('Vector fields are 2D only (components in x, y).');
+      if (dim === 3) return done({ type: 'vfield3d', comps: expr.items });
+      if (vars.has('z')) throw new Error('A field using z needs three components.');
       if (dim !== 2) throw new Error('A vector field needs exactly 2 components.');
       const [a, b] = (g as Expr & { kind: 'vec' }).items;
       return done({
@@ -603,12 +675,19 @@ function classifyLowered(
     }
     if (usesComplex(expr)) throw new Error('Complex values are not supported in systems.');
     const dim = vars.has('z') ? 3 : 2;
+    if (l.items.length === 2 && dim === 3 && !hasParam) return done({ type: 'spacecurve', residuals: l.items.map((a, k): Expr => {
+      const residual: Expr = { kind: 'bin', op: '-', a, b: r.items[k] };
+      return a.kind === 'call' && (a.name === 'atan2' || a.name === ANGLE_FN || (a.name === 'atan' && a.args.length === 2))
+        ? { kind: 'call', name: 'atan2', args: [{ kind: 'call', name: 'sin', args: [residual] }, { kind: 'call', name: 'cos', args: [residual] }] } : residual;
+    }) });
     if (l.items.length !== dim) {
       const eqs = `${l.items.length} equation${l.items.length === 1 ? '' : 's'}`;
       throw new Error(`${eqs} in ${dim} unknowns — a system needs one equation per unknown.`);
     }
     const residuals = l.items.map((a, k): Expr => ({ kind: 'bin', op: '-', a, b: r.items[k] }));
-    const positional = coordinate && !hasParam && !coordinate.rhs.some(e =>
+    // (Dragging writes the pointer's chart coordinates back, and a pointer
+    // ray does not determine a point in space: planar rows only.)
+    const positional = coordinate && dim === 2 && !hasParam && !coordinate.rhs.some(e =>
       [...freeVars(e)].some(v => ['x', 'y', 'z'].includes(v) || Object.hasOwn(fields, v)));
     // Only a direct angle coordinate — atan2, or the angle(…) measurement —
     // is periodic; nesting one inside a real expression does not make that
@@ -653,7 +732,7 @@ function classifyLowered(
       if (!hasSpace) throw new Error('A constant complex comparison has no isolated roots — use w as the unknown.');
       const a = splitWithin(expr.kind === 'eq' ? expr.l : expr, 'equation', 'solve');
       const b = splitWithin(expr.kind === 'eq' ? expr.r : expr, 'equation', 'solve');
-      return done({ type: 'system', dim: 2, residuals: a.map((c, k) => ({ kind: 'bin', op: '-', a: c, b: b[k] })) });
+      return done({ type: 'system', dim: 2, complexEquation: expr, residuals: a.map((c, k) => ({ kind: 'bin', op: '-', a: c, b: b[k] })) });
     }
     const field = compileTyped(g).code;
     if (vars.has('z')) return done({ type: 'implicit3d', field, grad: gradOf(g) });
@@ -725,4 +804,43 @@ function lowerShade(int: IntShade, lower: (e: Expr) => Expr, known: ReadonlySet<
   } catch {
     return null; // not drawable; the readout is unaffected
   }
+}
+
+/** A decided comparison is a note, independent of the view and render mode. */
+export function comparisonReadout(plot: Extract<Plot, { type: 'note' }>, env: Record<string, number>): string {
+  const e = plot.expr;
+  if (e.kind !== 'eq' && e.kind !== 'ineq') return '';
+  let truth: boolean;
+  let values: string;
+  if (e.kind === 'eq') {
+    const parts = (x: Expr) => usesComplex(x) ? complexParts(x).map(c => evaluate(c, env)) : [evaluate(x, env), 0];
+    const a = parts(e.l), b = parts(e.r);
+    if (![...a, ...b].every(Number.isFinite)) return 'Undefined comparison';
+    truth = a.every((v, k) => v === b[k]);
+    const fmt = (p: number[]) => p[1] === 0 ? String(Number(p[0].toPrecision(6))) : `${Number(p[0].toPrecision(6))}${p[1] < 0 ? '' : '+'}${Number(p[1].toPrecision(6))}i`;
+    values = `${fmt(a)} ${truth ? '=' : '≠'} ${fmt(b)}`;
+  } else {
+    const comparisons = ineqComparisons(e);
+    const vals = comparisons.map(c => [evaluate(c.l, env), evaluate(c.r, env)]);
+    if (!vals.flat().every(Number.isFinite)) return 'Undefined comparison';
+    truth = comparisons.every((c, k) => { const [a, b] = vals[k]; return c.op === '<' ? a < b : c.op === '<=' ? a <= b : c.op === '>' ? a > b : a >= b; });
+    values = comparisons.map((c, k) => `${Number(vals[k][0].toPrecision(6))} ${c.op} ${Number(vals[k][1].toPrecision(6))}`).join(', ');
+  }
+  return `${plot.variable ? (truth ? 'True now' : 'False now') : (truth ? 'Always true' : 'Never true')} (${values})`;
+}
+
+/** One readout per source row, including lists and families of readouts. */
+export function plotReadout(plot: Plot, env: Record<string, number>): string | null {
+  if (plot.type === 'value') return valueReadout(evaluate(plot.expr, env));
+  if (plot.type === 'note') return comparisonReadout(plot, env);
+  if (plot.type === 'vlist') {
+    const values = plot.values.slice(0, 8).map(e => valueReadout(evaluate(e, env)));
+    const prefix = values.some(v => v.startsWith('≈')) ? '≈' : '=';
+    return `${prefix} [${values.map(v => v.replace(/^[=≈] /, '')).join(', ')}${plot.values.length > 8 ? ', …' : ''}]`;
+  }
+  if (plot.type === 'family') {
+    const parts = plot.members.map(m => plotReadout(m.cls.plot, { ...env, ...m.cls.uniforms }));
+    if (parts.every(p => p !== null)) return `[${parts.slice(0, 8).join('; ')}${parts.length > 8 ? '; …' : ''}]`;
+  }
+  return null;
 }

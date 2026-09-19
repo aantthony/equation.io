@@ -236,7 +236,7 @@ export function solveSystem(
 }
 
 /** Gaussian elimination with partial pivoting; null when J is singular. */
-function solveLinear(J: number[][], b: number[], n: number): number[] | null {
+export function solveLinear(J: number[][], b: number[], n: number): number[] | null {
   const m = J.map((row, i) => [...row, b[i]]);
   for (let i = 0; i < n; i++) {
     let piv = i;

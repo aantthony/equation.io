@@ -11,6 +11,7 @@
     "icons": "node scripts/icons.ts",
     "deploy": "wrangler types && vite build && wrangler deploy",
     "typecheck": "wrangler types && tsc --noEmit && tsc -p web --noEmit && tsc -p worker --noEmit",
+    "test:objects": "node scripts/objects-test.ts",
     "test:editor": "node scripts/editor-test.ts",
     "test:swipe": "node scripts/swipe-test.ts",
     "bench": "vitest bench --run",

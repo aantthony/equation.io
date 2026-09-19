@@ -34,6 +34,13 @@
     "p95FrameMs": 123.4,
     "longFrames": 40
   },
+  "orbit-3d-spherical-chart": {
+    "compilesAfterLoad": 6,
+    "compilesDuringAction": 0,
+    "avgFrameMs": 37.2,
+    "p95FrameMs": 83.4,
+    "longFrames": 40
+  },
   "animated-t": {
     "compilesAfterLoad": 6,
     "compilesDuringAction": 0,

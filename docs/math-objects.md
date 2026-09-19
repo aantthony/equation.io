@@ -1,23 +1,19 @@
 # Mathematical objects: what renders as what
 
-Status (refreshed 2026-09-18, main at 3c55dbd; row claims re-run through
-`analyze()` in worker/graph.ts, interaction claims read off the code): phases 1 and 1.5 are shipped — coordinate
-points with angular residuals, parametric system continuation, chart flows,
-complex constants as Argand points, complex equations as real systems, 2D
-coordinate-point drag writeback, "= value" readouts. So is most of phases 2–3
-and the seed of 5: named draggable points and vector arithmetic,
-`segment`/`polyline`/`vector`/`line`/`polygon`/`square`/`circle`, `|A-B|`,
-`distance` and `angle` readouts, piecewise and restrictions, integrals (value, `int[0..x]` as a function, iterated),
-Normal/Uniform/Exponential and the continuous zoo (Gamma, Beta, ChiSquared,
-StudentT, LogNormal, Cauchy, Weibull) with derived arithmetic, scalar list broadcasting,
-CSV tables, regression, Lorenz via a 3-component state, and `revolve(f)`
-surfaces of revolution. Static previews
-include system points/curves and direction fields. **What remains, and the PR
-order for it, is in [objects-finish-plan.md](objects-finish-plan.md).**
-Solving/tracing remains numerical and bounded; exact complex-root labels and
-certified branch completeness are not implemented. §§3–6 below keep the
-original design context (the PRs they call "open" have since landed, except
-where marked); §2, the "Here" column of §4, and §7 are current.
+Status (2026-09-19): phases 1–5 and the finish-plan tail have implementations
+in the working tree; this does not imply deployment. The latest additions are
+3D named points/geometry, 3D fields and chart flows, object families, sequence
+values, complex polynomial labels, two-surface intersection curves, and
+bounded point-solver certification. Decided comparisons now read out notes.
+
+Numerical tracing remains bounded. Certification is opt-in and proves only
+what interval arithmetic can settle in the finite search box: arithmetic and
+integer powers are supported; unsupported functions, singular roots and
+budget exhaustion remain explicitly unresolved. Exact root labeling also has
+a bounded factoring path and retains a defining-polynomial fallback.
+See [objects-finish-plan.md](objects-finish-plan.md) for implementation status
+and limits. §3, §5 and §6 preserve historical design discussion; §2, §4 and §7 describe
+the current implementation.
 
 A design survey and plan. It fixes the principle that decides how a row of
 notation becomes a rendered object, inventories the objects we have against
@@ -43,7 +39,7 @@ object must respect):
    solution set's dimension is ambient minus constraints, and the renderer
    follows the dimension: in 2D, one constraint → curve; in 3D, one → surface.
    (Square systems complete it: n constraints in n unknowns → a solved
-   point set, §6. Non-square systems — a space curve from 2 of 3 — remain.)
+   point set, §6. Two constraints in 3D trace a numerical space curve.)
 2. **A tuple is positional.** With k parametric variables (u, v) it is a
    k-dimensional parametric object: 0 → point, 1 → curve, 2 → surface. As a
    function of position (x, y) it is a vector field.
@@ -73,7 +69,7 @@ object must respect):
 | complex-valued expr in w | field lines + equipotentials | level-curve shader |
 | `domain(f)` / `conformal(f)` / `iter(step)` | domain coloring / conformal grid / escape-time fractal | dedicated shaders |
 | tuple, no free vars (t ok) | point (2D/3D) | overlay dot / billboard; draggable where its literals/constants can be written back |
-| `A = (1,2)`; `A + 2B`, `midpoint(A,B)`, `perp(A)` | named point (2 components) / point arithmetic | point; `A_x`, `A_y` are scalars |
+| `A = (1,2)`; `A + 2B`, `midpoint(A,B)`, `perp(A)` | named point (2 or 3 components) / point arithmetic | point; `A_x`, `A_y` (and `A_z` in 3D) are scalars |
 | `segment` / `polyline` / `polygon` / `square` (points) | polygon (open or closed) | CPU polyline / fill |
 | `vector(A, B)`, `vector(V)` | arrow (an open polygon with a head) | CPU polyline + screen-space arrowhead |
 | `line(A,B)`, `circle(A, r)` | lowered to an implicit curve | 2D distance-estimate shader |
@@ -98,6 +94,7 @@ object must respect):
 | `a = 2`, `b = a² + t` | constant (slider / computed) | widget; uniform |
 | `f(x) = …` | function | inlined |
 | definition using x/y (`r = sqrt(x²+y²)`) | coordinate field | grid family (level sets) |
+| definition using z (`rho = sqrt(x²+y²+z²)`) | coordinate field over space | nothing of its own — it only defines; `rho = 2`, `phi = pi/4` are implicit surfaces, `(rho, theta, phi) = (2, pi/4, pi/3)` a solved point, RHS in u a space curve |
 | `X ~ Normal(m, s)` (also Uniform, Exponential, Gamma, Beta, ChiSquared, StudentT, LogNormal, Cauchy, Weibull) | random variable | its exact density curve |
 | `X ~ Binomial(n, p)` (also Poisson, Geometric, NegativeBinomial, Bernoulli, DiscreteUniform) | discrete random variable | its pmf as stems at the whole numbers in view (CPU overlay; past 1024 in view, the envelope of the same exact heights) |
 | `Y = X^2`, `S = X1 + X2`, bare `X + Y` (X random) | derived random variable | affine-in-normals: exact pdf (shader); 1–2 base variables: deterministic conditional-CDF curve (quadrature); otherwise sampled density estimate (KDE polyline); μ/σ readout, or median/IQR when the tails make those unstable |
@@ -106,6 +103,21 @@ object must respect):
 | `P(X <= 3)`, `P(2 < X <= 5)`, `P(X = 3)`, `P(X != 3)` (X discrete) | probability | the selected stems highlighted + exact readout; strictness decides the boundary stem |
 | `P(Y > 0.5)`, `P(Y > X)` (derived / joint) | probability | Monte Carlo readout (+ shaded density area when one-variable) |
 | `P(S <= 5)`, `P(X > Y)`, `P(X >= Y)`, `P(X = Y)` (all discrete) | probability | exact by enumeration, ties counted by strictness (+ the selected stems when one-variable); sampled to 3 places past the joint cap |
+
+New rows and extensions (2026-09-19):
+
+| Notation | Object / rendering |
+|---|---|
+| `A=(1,2,3)`; `segment(A,B)`; `vector(A)` | 3D point/geometry, GPU line strips and screen-size heads; triangles fill |
+| `(x',y',z')=(P,Q,R)`; `(rho',theta',phi')=(F,G,H)` | 3D flow, bounded background trajectories or arrow lattice |
+| `y=[1,2,3]x`; `circle((0,0),[1,2,3])` | zipped family; shared shader source and per-draw uniforms |
+| `Q=P+(1,0)`; `polyline(P)` | point-list arithmetic; a connected path through the whole list |
+| `a_3`; `a_[1..10]` | sequence scalar/list values; recurrence terms compute as a bounded constant chain |
+| `(x^2+y^2+z^2,z)=(9,1)` | numerical space intersection curve |
+| `2+2=4`; `e=2` | decided-comparison note, nothing drawn |
+
+Square-system rows offer an optional search-box certificate. Complex
+polynomial root markers use exact rational/quadratic labels where available.
 
 Two consequences of invariant 4 worth naming because they already answer part
 of "what should render as what" in custom coordinates, and should stay:
@@ -173,34 +185,34 @@ and coordinates always come from the text, so the hash stays the document.
 ## 4. What Desmos and Wolfram|Alpha render that we don't
 
 Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
-"Here" reflects main as of 2026-09-18; "plan #n" is the PR number in
+"Here" reflects the implementation as of 2026-09-19; "plan #n" is the PR number in
 [objects-finish-plan.md](objects-finish-plan.md).
 
 | Object / capability | Desmos | W\|A | Here | Disposition |
 |---|---|---|---|---|
 | points in polar / user coordinates | ~ (polar curves only) | ✓ | ✓ | **shipped** (§6, phase 1): `(r, theta) = (2, 9pi/4)`, chart parametrics, non-injective preimages |
-| solutions/roots marked, exact labels | ~ (click) | ✓ | ✓ (hover roots with exact labels; systems marked numerically) | shipped; exact labels for *complex* roots remain (plan tail) |
+| solutions/roots marked, exact labels | ~ (click) | ✓ | ✓ (hover roots with exact labels; systems marked numerically) | implemented, including complex polynomial labels with bounded factorization |
 | intersection points of curves | ✓ | ✓ | ✓ (as systems) | shipped: `(x, y) = (y, -sin(x))` |
 | ODEs / flows in non-Cartesian coordinates | — | ✓ | ✓ | **shipped** (§6), with the prime dispatch of §3 |
 | time-integrated simulation (no closed form) | ~ (tickers) | — | ✓ (scalar and 2/3-vector states) | shipped; composes with §6 (a simulated point in a chart) |
-| named points, vector arithmetic (`A = (1,2)`, `\|A-B\|`) | ✓ | ✓ | ✓ (2 components only) | shipped; 3-component named points are plan #10 |
+| named points, vector arithmetic (`A = (1,2)`, `\|A-B\|`) | ✓ | ✓ | ✓ (2 or 3 components) | implemented through 3D (plan #10) |
 | draggable points | ✓ | — | ✓ | shipped, including writeback for 2D coordinate points (§6) |
-| segments, polygons, circles, vectors-as-arrows | ✓ | ✓ | ✓ `segment`/`polyline`/`vector`/`line`/`polygon`/`square`/`circle` | done (plan #1; `polyline(…)` also resolved the `[…]` collision, §3). Lists of points inside them wait for plan #13, 3-component points for #10 |
-| midpoint/distance/angle readouts | ✓ | ✓ | ✓ `midpoint`, `\|A-B\|`, `dot`, `cross`, `distance(A, B)`, `angle(A, B, C)` / `angle(U, V)` | done (plan #2). `angle` is signed, in (−π, π], and undefined on a zero-length arm; no arc marker — if wanted it is a wrapper (`arc(A, B, C)`), not a side effect of the readout. Lists of points wait for plan #13; 3-component `angle` for #10. Readouts ride the `value` row, not #35's PlotNote channel (which never landed) |
+| segments, polygons, circles, vectors-as-arrows | ✓ | ✓ | ✓ `segment`/`polyline`/`vector`/`line`/`polygon`/`square`/`circle` | done (plan #1; `polyline(…)` also resolved the `[…]` collision, §3). Point lists and 3-component geometry are implemented (plans #10/#13); line, square and circle remain planar |
+| midpoint/distance/angle readouts | ✓ | ✓ | ✓ `midpoint`, `\|A-B\|`, `dot`, `cross`, `distance(A, B)`, `angle(A, B, C)` / `angle(U, V)` | done (plan #2). `angle` is signed, in (−π, π], and undefined on a zero-length arm; no arc marker — if wanted it is a wrapper (`arc(A, B, C)`), not a side effect of the readout. Point-list measurements and unsigned 3D angles are implemented. Readouts ride the `value` row, with decided comparisons using a separate `note` row |
 | domain restrictions `{a < x < b}` | ✓ | ~ | ✓ (as piecewise) | **done, no new grammar**: a piecewise with no default is undefined outside its cases, so `y = {a < x < b: f(x)}` restricts any row kind. A Desmos-style trailing `f(x) {a < x < b}` suffix is not planned — it would collide with brace grouping (`2{x + 1}`) for nothing the case form lacks |
 | piecewise functions | ✓ | ✓ | ✓ (#6) | shipped |
 | definite integrals (value + `∫₀ˣ` as a function) | ✓ | ✓ | ✓ (value, `int[0..x]` as a function, iterated) | shipped, incl. signed-area shading when the row is exactly one definite integral (`value.shade`, CPU polygon in both renderers) |
 | distribution zoo (uniform, exponential, t, binomial, Poisson…) | ✓ | ✓ | Normal, Uniform, Exponential, Gamma, Beta, ChiSquared, StudentT, LogNormal, Cauchy, Weibull (+ derived arithmetic; median/IQR readouts where σ does not exist); discrete: Binomial, Poisson, Geometric, NegativeBinomial, Bernoulli, DiscreteUniform as stems with exact `P(…)`/`E(X)`; discrete variables in derived arithmetic (exact pmfs by enumeration, closure rules, a sampled pmf past the joint cap, discrete × continuous as a sampled mixture density) | — |
 | value readout for constant rows (`2+2` → "= 4") | ✓ | ✓ | ✓ | **done**: a bare expression with no plot coordinate is a `value` row — it reads out "= 4" live and draws nothing (it no longer assumes `y =`). This is also the measurement readout: `\|A-B\|` reads the distance |
 | complex constants as Argand points (`1+2i`) | ✓ | ✓ | ✓ | shipped (phase 1.5) |
-| complex root sets (`w³ = 1`) | ~ | ✓ | ✓ (numeric positions) | shipped (§6); exact labels when polynomial remain (plan tail) |
-| sequences (stem plots), recurrences, cobwebs, bifurcation | ~ | ✓ | ✓ (#6) | shipped; sequence terms as values (`a_3`, `a_[1..10]`) are plan #15 |
-| lists / families of objects | ✓ | ~ | scalar list math, ranges, zipped scatters, `hist` only | a list inside an equation, geometry statement, or point arithmetic errors; families are plan #13–#14 |
+| complex root sets (`w³ = 1`) | ~ | ✓ | ✓ (numeric positions) | implemented: numeric positions with exact rational/quadratic or defining-polynomial labels |
+| sequences (stem plots), recurrences, cobwebs, bifurcation | ~ | ✓ | ✓ (#6) | implemented, including `a_3` and `a_[1..10]` (plan #15) |
+| lists / families of objects | ✓ | ~ | scalar lists plus zipped CPU/shader object families and point-list arithmetic | implemented (plan #13–#14); 32 members / 8 in 3D; incompatible overlays refuse |
 | complex parametric curves (image of a path under f) | ~ | ✓ | ✓ | shipped (plan #8): a bare complex expression in u alone is split by `complexParts` into a real 2D `pcurve` (no complex CPU evaluator needed); every 2D parametric curve shares one sampler (lib/path.ts) that lifts the pen at jumps — branch cuts, steps, poles |
-| 3D vector fields / 3D ODE flows (Lorenz) | — | ✓ | fields 2D only; Lorenz runs as one 3-component state (a 3D point + `trail`) | plan #11–#12 (auto-seeded trajectories; click is ambiguous in 3D) |
-| spherical/cylindrical coordinate systems | — | ✓ | fields reject z (a 2D field used in a z equation already works) | plan #9 (substitution already suffices for surfaces) |
-| surfaces of revolution | — | ✓ | ✓ `revolve(f)`, `revolve(f, y)` / `(f, z)` | done (plan #7): desugars at classify time to the implicit `y^2 + z^2 = f(x)^2`, so it costs no shader kind and a no-default piecewise f bounds the solid. A list of profiles waits for plan #14 |
-| space curves as intersections of two surfaces | — | ✓ | — ("2 equations in 3 unknowns") | plan tail — the non-square (2-of-3) extension of systems, which are square-only |
+| 3D vector fields / 3D ODE flows (Lorenz) | — | ✓ | 3D auto-seeded trajectories, chart flows, arrow glyphs; Lorenz also runs as a state | implemented (plans #11–#12); automatically seeded because clicks are ambiguous in 3D |
+| spherical/cylindrical coordinate systems | — | ✓ | fields over x/y/z, coordinate point sets and chart curves | implemented (plan #9; substitution supplies surfaces) |
+| surfaces of revolution | — | ✓ | ✓ `revolve(f)`, `revolve(f, y)` / `(f, z)` | done (plan #7): desugars at classify time to the implicit `y^2 + z^2 = f(x)^2`, so it costs no shader kind and a no-default piecewise f bounds the solid. Lists of profiles are implemented in plan #14 |
+| space curves as intersections of two surfaces | — | ✓ | ✓ bounded numerical continuation | implemented; singularities stop traces and completeness is not certified |
 | tables / data / regressions | ✓ | ✓ | ✓ CSV via `open(…)`, columns as lists, `Y ~ m X + b` | **shipped** — the rejection was revisited once lists gave it a data model (docs/lists-tables-plan.md) |
 | actions, tickers, scripting | ✓ | — | — | **rejected**: #31 delivers the legitimate mathematical core (simulation) declaratively, without a scripting model |
 | a "polar mode" grid toggle | ✓ | ✓ | — | **rejected** (§7: coordinate systems are user-defined math, not app modes) |
@@ -351,8 +363,8 @@ interface.
 
 ## 7. Roadmap
 
-Status as of 2026-09-18. Struck-through items are on main; what is left of
-phases 2–5 is ordered, PR by PR, in
+Status as of 2026-09-19. Earlier struck-through items are already on main;
+the remaining implementation and its limits are recorded in
 [objects-finish-plan.md](objects-finish-plan.md) ("plan #n" below).
 
 | Phase | Contents | Size |
@@ -361,22 +373,19 @@ phases 2–5 is ordered, PR by PR, in
 | 1.5 — coherence wins | ~~complex roots `f(w) = c`~~ (numeric; exact labels → plan tail); ~~Argand points for complex constants~~; ~~"= value" readouts on constant rows~~ — **shipped** | done |
 | 2 — geometry | ~~tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`)~~, ~~named draggable points~~, ~~`segment`/`line`/`polygon`/`square`/`circle`~~, ~~`\|A-B\|`/`midpoint`/`dot`/`cross` readouts~~, ~~`polyline` and `vector` arrows (plan #1, settling §3's `[…]` collision)~~, ~~`distance`/`angle` measurements (plan #2)~~ — **shipped** | done |
 | 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (a no-default piecewise *is* the restriction, see §4), ~~definite integrals: value, `int[0..x]` as a function, iterated~~, ~~Uniform/Exponential and derived-variable arithmetic~~. ~~area shading on a definite-integral row~~, ~~continuous distribution zoo~~, ~~discrete distributions with a stem renderer~~, ~~discrete variables in derived arithmetic (plan #6)~~ — **shipped**. Dropped: "`∫₀ˣ` via CPU LUT texture" — `y = int[0..x] …` already plots through the quadrature sum; revisit only if a perf guard trips | done |
-| 4 — space | ~~Lorenz~~ as a 3-component state with `trail` (one trajectory). ~~`revolve()`~~ (plan #7, shipped). ~~complex parametric curves~~ (plan #8, shipped). Remaining: fields over z + 3D coordinate points (plan #9), 3D named points and geometry (plan #10), 3D vector fields with auto-seeded trajectories (plan #11), 3D chart flows + arrow glyphs (plan #12) | L |
-| 5 — families | ~~scalar list math, ranges, zipped scatters, `hist`, CSV tables, regression~~. Remaining: lists broadcasting over any object kind (plan #13 CPU objects and point lists, #14 shader rows), sequences-as-lists interop (plan #15) | XL |
-| tail | exact complex-root labels; space curves from 2-of-3 systems; certified solving (plan #16+) | M each |
+| 4 — space | Lorenz states, revolution surfaces, complex paths, coordinate fields over z, 3D named points/geometry, 3D vector fields, chart flows and arrow glyphs | implemented |
+| 5 — families | Scalar lists, CSV/regression, zipped CPU/shader object families, point-list arithmetic/paths, sequence terms as scalars/lists | implemented |
+| tail | Complex-root labels (bounded factorization and algebraic fallback); numerical 2-of-3 surface intersections; bounded interval/Krawczyk certificates | implemented with the limits above |
 
-The independent decision tracks have all resolved except one: #31 (states,
-with the §3 prime dispatch), #1/#32 (readouts and dragging), and #17/#25
-(infrastructure and styling) are on main — #17's obligation stands, every
-new renderer needs an og-rasterizer path or an explicit fallback. #35
-(decided comparisons and its PlotNote channel) is still open and nothing in
-the finish plan depends on it; the readouts it was wanted for shipped as
-`value` rows instead.
+The separate #35 comparison work is implemented: decided equations and
+inequalities use `note` rows, with “True now” / “False now” for live parameters.
+Unsupported or unresolved mathematics continues to report its limits. In
+particular, a certificate never implies completeness outside its search box,
+and numerical surface/parametric tracing is not certified exhaustive.
 
 Phase 1 went first because it was the user-visible gap this document exists
-for and *completes* invariant 1. The remaining order — object kinds before
-families, so the family path is a one-time sweep — is argued in the finish
-plan.
+for and *completes* invariant 1. The implementation order — object kinds before families — is documented in
+the finish plan.
 
 ## 8. Rejected designs
 

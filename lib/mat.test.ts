@@ -51,7 +51,7 @@ describe('matrix definitions', () => {
 
   it('rejects a bare matrix name in scalar context', () => {
     const { errors } = buildDefs(rows('M = [(1, 2), (3, 4)]', 'c = M + 1'));
-    expect(errors.get('c')).toMatch(/M is a matrix/);
+    expect(errors.get('c')).toMatch(/Cannot add a point and a number/);
   });
 });
 

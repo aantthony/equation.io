@@ -1,5 +1,28 @@
 # Finishing geometry, analysis, space, and families
 
+**Implementation status — 2026-09-19:** items #0–#15 and the tail now have
+implementations in the working tree. This is a code status, not a deployment
+claim. The “Today” paragraphs below preserve the original starting point.
+
+- #10: named 3D points, vector arithmetic/measurements, segments, paths,
+  arrows, and polygons (triangles fill; larger 3D polygons outline).
+- #11–#12: background 3D flow tracing, symbolic 3D chart conversion, direction
+  fade and an arrow-lattice control. Fixed budgets; moving traces throttle.
+- #13–#14: zipped object families, point-list values and paths, one shared
+  shader program per family; limits 32 members / 8 in 3D.
+- #15: scalar/list sequence indexing and a bounded recurrence-constant chain,
+  including statistics and regression inputs; indices 0–1000.
+- Tail: exact rational/quadratic complex-root labels with algebraic fallback;
+  numerical two-surface continuation; opt-in interval/Krawczyk certificates
+  for a finite box. Certification supports arithmetic and bounded integer
+  powers; unsupported functions, singularities and exhausted budgets remain
+  explicitly unresolved. It never certifies arbitrary branch completeness.
+- The separate decided-comparison work (#35) is implemented as `note` rows.
+
+Validation lives in `lib/objects-finish.test.ts` and `scripts/objects-test.ts`,
+with existing classifier, geometry, coordinate and preview tests updated for
+newly supported forms. Examples and `llms.txt` document the same limits.
+
 A PR order for what remains of `math-objects.md` §7 (phases 2–5). Written
 2026-09-18 against main at 3c55dbd. Every "today" below was verified by
 running the rows through `analyze()` (worker/graph.ts), not read off the docs.
@@ -175,7 +198,7 @@ Today: `exp(i 2 pi u)` → "Complex expressions plot in 2D only (x, y, w)."
 - `f(path(u))` with f a user function works by inlining before the split.
   Expressions `complexParts` can't split keep a loud error.
 
-### 9. Coordinate fields over z + 3D coordinate points
+### 9. Coordinate fields over z + 3D coordinate points (shipped)
 
 Today: `rho = sqrt(x^2+y^2+z^2)` → "rho defines a coordinate … may only use
 x, y, t, and constants (found z)". (A 2D field used in a z equation already
@@ -192,7 +215,21 @@ works: `s = sqrt(x^2+y^2); s = 1 + z^2` → `implicit3d`.)
   components; RHS in u gives a space curve in the chart via `traceSystem`.
 - Examples: spherical and cylindrical charts under *coordinates*.
 
-### 10. 3D named points and 3D geometry
+Shipped notes. `(r, theta, z) = (…)` and the 3-component `angular` test
+already worked (the wrap test maps over the left tuple, keyed on a top-level
+atan2 / `[angle]`, so an acos-valued polar angle is never wrapped); the work
+was the definition side, `coordinateRow` taking three names, and one thing
+the plan did not foresee: the raymarcher treats any sign change as a root,
+so `theta = pi/4` in a 3D scene drew a second sheet along the ±π cut of
+atan2. A sign change whose bisected bracket does not close is now refused
+as a jump (budgeted per ray). That is general, not chart-specific: it also
+opens the risers of `z = floor(x)` — only the first few a ray meets, within
+the budget, so far risers still draw — and should treat a pole's sign flip
+the same way (not checked in a render). Still open: a surface lying exactly on the cut (`theta = pi`)
+has no sign change and does not draw in 3D; 3D chart flows are #12 and say
+so; atan2(0, 0) is 0 on the CPU, as it always was in 2D.
+
+### 10. 3D named points and 3D geometry (implemented)
 
 Today: `A = (1, 2, 3)` → "A named point needs exactly 2 components."
 
@@ -207,7 +244,7 @@ Today: `A = (1, 2, 3)` → "A named point needs exactly 2 components."
 - No 3D drag in this PR — a pointer ray doesn't determine a point. Named
   3-points move via sliders/states.
 
-### 11. 3D vector fields and flows
+### 11. 3D vector fields and flows (implemented)
 
 Today: `(y-x, x(3-z)-y, x y - z)` → "Vector fields are 2D only";
 `(x', y', z') = (…)` → "Use two distinct coordinates…".
@@ -228,7 +265,7 @@ Today: `(y-x, x(3-z)-y, x y - z)` → "Vector fields are 2D only";
 - The Lorenz example gains a one-row form next to the state-based one —
   the Eulerian/Lagrangian duality §6 describes, now in 3D.
 
-### 12. 3D chart flows + arrow glyphs
+### 12. 3D chart flows + arrow glyphs (implemented)
 
 - `(rho', theta', phi') = (F, G, H)`: v = J⁻¹(F, G, H) with the symbolic
   3×3 Jacobian — reuse lib/mat.ts's small-matrix solve rather than
@@ -250,7 +287,7 @@ object per element.** Lists in several positions zip (equal lengths, as
 list math already requires) — no cross products. The family is one row,
 one colour ramp, one legend entry.
 
-### 13. Families I — the family plot, CPU objects, point lists
+### 13. Families I — the family plot, CPU objects, point lists (implemented)
 
 - New plot `{ type: 'family'; members: Plot[] }`. In lib/list.ts, replace
   the throws at :712 and :753 with element-wise expansion of the *row*: N
@@ -267,7 +304,7 @@ one colour ramp, one legend entry.
   are re-expanded on bound change, not per frame.
 - og.ts and `analyze()` iterate members.
 
-### 14. Families II — shader rows
+### 14. Families II — shader rows (implemented)
 
 - `implicit2d`, `ineq2d`, `implicit3d`, `psurface`, `vfield2d` members.
   Strategy, in order of preference: (a) when the list occurs only as
@@ -279,7 +316,7 @@ one colour ramp, one legend entry.
 - `scalar2d`/`domain2d`/fractals don't superimpose meaningfully: error
   suggesting an index (`L[k]` with a slider k).
 
-### 15. Sequences as lists
+### 15. Sequences as lists (implemented)
 
 Today: `a_n = 1/n; [a_1, a_2, a_3]` → "Unknown variable: a_1".
 

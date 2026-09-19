@@ -22,6 +22,8 @@
  *   otherwise by expanding a fixed Gauss–Legendre sum the same way Σ
  *   expands — so every downstream consumer still sees ordinary expressions.
  */
+import { type SeqScan, sequenceResolver } from './seq.ts';
+import { lowerObjects } from './object-lists.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, substVars } from './expr.ts';
@@ -32,6 +34,9 @@ import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
 import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
+
+/** The axis variables: a definition reaching one is a coordinate field. */
+const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
 
 export type Definition =
   | RegressionRow
@@ -65,14 +70,17 @@ export interface StateDef {
 }
 
 export interface Defs {
+  sequences: Map<string, SeqScan>;
+  sequencePrefix: string;
   consts: Map<string, Expr>;
   fns: Map<string, FnDef>;
   /**
    * Coordinate fields: definitions like `r = sqrt(x^2+y^2)` whose value
-   * depends on the plane. Fully resolved to free vars in {x, y, t, consts}.
-   * Each field is a grid family (its level sets) and substitutes into plots,
-   * so `theta = atan2(y,x); r = 1 + cos(theta)` draws a polar grid and a
-   * cardioid.
+   * depends on position. Fully resolved to free vars in {x, y, z, t, consts}.
+   * Each field substitutes into plots, and a planar one (no z) is a grid
+   * family too (its level sets; see planarField in grid.ts), so `theta = atan2(y,x);
+   * r = 1 + cos(theta)` draws a polar grid and a cardioid, while
+   * `rho = sqrt(x^2+y^2+z^2); rho = 2` only draws the sphere.
    */
   fields: Map<string, Expr>;
   /**
@@ -82,6 +90,7 @@ export interface Defs {
    * never appears in resolved expressions.
    */
   points: Set<string>;
+  pointDims: Map<string, number>;
   /**
    * Time-integrated states: `a' = …` with `a(0) = …`. Downstream they behave
    * exactly like constants (uniforms in GLSL, entries in the constant
@@ -150,7 +159,10 @@ export const emptyDefs = (): Defs => ({
   consts: new Map(),
   fns: new Map(),
   fields: new Map(),
+  sequences: new Map(),
+  sequencePrefix: 'eqioSeq',
   points: new Set(),
+  pointDims: new Map(),
   states: new Map(),
   vecStates: new Map(),
   mats: new Map(),
@@ -263,7 +275,7 @@ export function listGetter(defs: Defs): GetList {
  *  `person[…]` index instead of multiplying (parseExpr needs this before it
  *  parses). Table names count: a data file is indexed by a filter. */
 export function listNamesOf(defs: Defs): Set<string> {
-  const out = new Set([...defs.lists.keys()]);
+  const out = new Set([...defs.mats.keys(), ...defs.lists.keys(), ...[...defs.sequences.keys()].map(n => n + '_')]);
   // A list whose file is elsewhere still indexes: the row must parse the same
   // way on every device (see `indexes` in expr.ts).
   for (const [name, m] of defs.missingData) if (m.list) out.add(name);
@@ -468,7 +480,7 @@ function filteredTable(e: Expr, defs: Defs, opts: ResolveOpts): TableDef | null 
 
 /** Component names `name` expands to under geometry lowering, or null. */
 export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
-  defs.points.has(name) ? pointComps(name)
+  defs.points.has(name) ? pointComps(name, defs.pointDims.get(name))
     : defs.vecStates.has(name) ? vecStateComps(name, defs.vecStates.get(name)!)
       : null;
 
@@ -690,6 +702,7 @@ function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts): Expr | null {
 const num = (value: number): Expr => ({ kind: 'num', value });
 
 export interface ResolveOpts {
+  sequenceTerm?: (name: string, index?: Expr) => Expr | null;
   /** Definition values cannot contain row-only motion trails. */
   inDefinition?: boolean;
   /** Numeric constant values, used to evaluate Σ/Π bounds at expansion time. */
@@ -1111,9 +1124,8 @@ export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr
 function rx(e: Expr, ctx: Ctx): Expr {
   const { getFn } = ctx;
   switch (e.kind) {
-    case 'num':
-    case 'var':
-      return e;
+    case 'num': return e;
+    case 'var': return ctx.opts.sequenceTerm?.(e.name) ?? e;
     case 'neg': return { kind: 'neg', a: rx(e.a, ctx) };
     case 'bin': {
       if (e.op === '*' || e.op === '/') {
@@ -1145,6 +1157,10 @@ function rx(e: Expr, ctx: Ctx): Expr {
       return { kind: 'bin', op: e.op, a, b };
     }
     case 'call': {
+      if (e.name === '[index]' && e.args[0]?.kind === 'var') {
+        const term = ctx.opts.sequenceTerm?.(e.args[0].name, e.args[1]);
+        if (term) return term;
+      }
       if (e.name === 'sum' || e.name === 'prod') {
         if (e.args.length !== 4) {
           throw new Error(`${e.name === 'sum' ? 'Σ' : 'Π'} needs a body: write ${e.name}(n=1..N, …) or ${e.name}[n=1..N] (…).`);
@@ -1243,12 +1259,14 @@ export interface BuiltDefs {
 export type TableSource = (d: { file: string; hash: string }) => Table | null;
 
 /** Parse and resolve a set of uniquely named definitions. */
-export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
+export function buildDefs(raw: Definition[], tables?: TableSource, sequences: SeqScan[] = []): BuiltDefs {
   const fits = new Map<string, FitResult>();
   const fittedNames = new Set<string>();
   const errors = new Map<string, string>();
   const needsFile = new Set<string>();
   const defs = emptyDefs();
+  for (const scan of sequences) defs.sequences.set(scan.name, scan);
+  while (raw.some(d => d.name.startsWith(defs.sequencePrefix + '_'))) defs.sequencePrefix += 'X';
   const byName = new Map(raw.map(d => [d.name, d]));
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
   const stateNames = new Set(raw.filter(d => d.kind === 'state').map(d => d.name));
@@ -1300,6 +1318,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       resolving.delete(name);
     }
   };
+  ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, new Set(raw.map(d => d.name)), new Set(raw.map(d => d.name)));
 
   // Resolved right-hand sides of `a' = …` and `a(0) = …`, validated below
   // once the constant/field split is known.
@@ -1384,11 +1403,10 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
         // Lowering expands point arithmetic; a pair result names a point.
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
-        let e = lowerGeom(
-          resolveExpr(parse(d), getFn, ropts),
-          n => (defs.points.has(n) ? pointComps(n) : null),
-          n => defs.mats.get(n) ?? null,
-        );
+        const resolved = resolveExpr(parse(d), getFn, ropts);
+        let e: Expr;
+        try { e = lowerGeom(resolved, n => compsOf(defs, n), n => defs.mats.get(n) ?? null); }
+        catch { e = lowerObjects(resolved, defs, ropts, true); }
         // `adults = person[person.age >= 18]` names a cut of a data file.
         const cut = filteredTable(e, defs, ropts);
         if (cut) {
@@ -1448,8 +1466,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
             defs.lists.set(d.name, e);
             continue;
           }
-          if (e.items.length !== 2) throw new Error('A named point needs exactly 2 components.');
-          const comps = pointComps(d.name);
+          if (e.items.length !== 2 && e.items.length !== 3) throw new Error('A named point needs 2 or 3 components.');
+          const comps = pointComps(d.name, e.items.length);
           for (const c of comps) {
             if (byName.has(c)) {
               throw new Error(`Cannot name a point ${d.name}: ${c} is already defined.`);
@@ -1457,14 +1475,13 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
           }
           for (const item of e.items) {
             for (const fv of freeVars(item)) {
-              if (fv === 'x' || fv === 'y') throw new Error('A point cannot depend on x or y.');
+              if (SPACE.has(fv)) throw new Error('A point cannot depend on x, y, or z.');
             }
           }
           defs.points.add(d.name);
-          compOwner.set(comps[0], d.name);
-          compOwner.set(comps[1], d.name);
+          defs.pointDims.set(d.name, e.items.length);
           store.length = 0;
-          store.push([comps[0], e.items[0]], [comps[1], e.items[1]]);
+          comps.forEach((c, k) => { compOwner.set(c, d.name); store.push([c, e.items[k]]); });
         }
         for (const [name, expr] of store) {
           defs.consts.set(name, expr);
@@ -1511,7 +1528,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       errors.set(owner, `${fv} is a point — move its definition above ${owner}.`);
       if (defs.points.has(owner)) {
         defs.points.delete(owner);
-        for (const c of pointComps(owner)) defs.consts.delete(c);
+        for (const c of pointComps(owner, defs.pointDims.get(owner))) defs.consts.delete(c);
       } else {
         defs.consts.delete(owner);
       }
@@ -1604,15 +1621,15 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
     for (const k of derivs.keys()) stateNames.add(k);
   }
 
-  // A definition whose value depends on the plane — x or y, directly or via
-  // another such definition — is a coordinate field, not a constant.
+  // A definition whose value depends on position — x, y, or z, directly or
+  // via another such definition — is a coordinate field, not a constant.
   const fieldNames = new Set<string>();
   for (let changed = true; changed;) {
     changed = false;
     for (const [name, e] of defs.consts) {
       if (fieldNames.has(name)) continue;
       for (const fv of freeVars(e)) {
-        if (fv === 'x' || fv === 'y' || fieldNames.has(fv)) {
+        if (SPACE.has(fv) || fieldNames.has(fv)) {
           fieldNames.add(name);
           changed = true;
           break;
@@ -1620,14 +1637,14 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       }
     }
   }
-  // A point component that reaches x/y through another definition would
+  // A point component that reaches x/y/z through another definition would
   // otherwise become a grid field; a point is a constant, so reject it.
   for (const name of [...fieldNames]) {
     const owner = compOwner.get(name);
     if (!owner || !defs.points.has(owner)) continue;
-    errors.set(owner, 'A point cannot depend on x or y.');
+    errors.set(owner, 'A point cannot depend on x, y, or z.');
     defs.points.delete(owner);
-    for (const c of pointComps(owner)) {
+    for (const c of pointComps(owner, defs.pointDims.get(owner))) {
       defs.consts.delete(c);
       fieldNames.delete(c);
     }
@@ -1635,10 +1652,11 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
 
   const constNames = new Set(raw.filter(d => d.kind === 'const' && !fieldNames.has(d.name)).map(d => d.name));
   for (const name of fittedNames) constNames.add(name);
+  for (const name of defs.consts.keys()) if (name.startsWith(defs.sequencePrefix + '_')) constNames.add(name);
   // Point rows resolve to their component constants; dependencies see those.
   for (const p of defs.points) {
     constNames.delete(p);
-    for (const c of pointComps(p)) constNames.add(c);
+    for (const c of pointComps(p, defs.pointDims.get(p))) constNames.add(c);
   }
 
   const pendingFields = new Map<string, Expr>();
@@ -1648,7 +1666,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
   for (const name of pendingFields.keys()) defs.consts.delete(name);
 
   // Resolve field-to-field references so each field is a closed expression
-  // in x, y, t, and constants.
+  // in x, y, z, t, and constants.
   const fieldVisiting = new Set<string>();
   const resolveField = (name: string): Expr => {
     const hit = defs.fields.get(name);
@@ -1663,12 +1681,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource): BuiltDefs {
       }
       if (Object.keys(sub).length) e = substVars(e, sub);
       for (const fv of freeVars(e)) {
-        if (fv !== 'x' && fv !== 'y' && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
-          throw new Error(`${name} defines a coordinate (it uses x/y), so it may only use x, y, t, and constants (found ${fv}).`);
+        if (!SPACE.has(fv) && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
+          throw new Error(`${name} defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found ${fv}).`);
         }
       }
       // Trial-evaluate to surface unsupported calls (re, im, …) now.
-      const env: Record<string, number> = { x: 0.7, y: 0.4, t: 0 };
+      const env: Record<string, number> = { x: 0.7, y: 0.4, z: 0.3, t: 0 };
       for (const fv of freeVars(e)) env[fv] ??= 1;
       evaluate(e, env);
       defs.fields.set(name, e);
