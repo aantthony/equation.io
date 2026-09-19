@@ -14,6 +14,7 @@ import {
   parseDistribution,
   pdfExpr,
   probabilityValue,
+  quantileClosure,
   regionExpr,
   scanRandomRows,
 } from './dist.ts';
@@ -570,16 +571,20 @@ describe('review follow-ups', () => {
   });
 
   it('#10 the quantile-table cache is LRU: a table read every frame outlives a slider trail', () => {
-    const fixed = build(['X ~ Gamma(7.0625, 1)']).sys;
-    fixed.columns('X', {});
+    // Exercise table lookups directly: drawing two full sample columns per
+    // iteration tests the sampler's throughput rather than cache eviction.
+    const fixed = dist('Gamma(7.0625, 1)');
+    const median = quantileClosure(fixed, {})!(0.5);
+    const cold = dist('Gamma(8.0625, 1)');
+    quantileClosure(cold, {});
     const before = QUANTILE_STATS.builds;
     for (let k = 0; k < 150; k++) {
-      build([`S ~ Gamma(${9 + k / 1024}, 1)`]).sys.columns('S', {}); // the dragged shape
-      fixed.resample(k + 1);
-      fixed.columns('X', {}); // the fixed variable, every frame
+      quantileClosure(dist(`Gamma(${9 + k / 1024}, 1)`), {}); // the dragged shape
+      expect(quantileClosure(fixed, {})!(0.5)).toBe(median); // the fixed variable, every frame
     }
-    fixed.resample(0);
     expect(QUANTILE_STATS.builds - before).toBe(150);
+    quantileClosure(cold, {});
+    expect(QUANTILE_STATS.builds - before).toBe(151); // an untouched table was evicted
   });
 });
 
