@@ -85,8 +85,11 @@ describe('mcp endpoint', () => {
     const { body } = await rpc('tools/list');
     expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual(['encode_graph_url', 'decode_graph_url', 'show_graph']);
     for (const tool of body.result.tools) {
+      // Both the top-level title (current MCP spec) and annotations.title
+      // (older spec field) are set: the connector directory reads the latter.
+      expect(tool.title).toEqual(expect.any(String));
       expect(tool.annotations).toEqual({
-        readOnlyHint: true, openWorldHint: false, destructiveHint: false,
+        title: tool.title, readOnlyHint: true, openWorldHint: false, destructiveHint: false,
       });
     }
   });

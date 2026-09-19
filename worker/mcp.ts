@@ -30,12 +30,12 @@ const TOOLS = [
   {
     name: 'encode_graph_url',
     title: 'Create a graph link',
-    annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    annotations: { title: 'Create a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     description: `Build a link that opens the equation.io grapher with the given equations already rendered, validating every row through the app's own parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see decode_graph_url), include the unchanged rows too.
 
 Rows can be: equations and inequalities in x,y (curves, regions; z makes it 3D), bare expressions (scalar fields; complex plots via w), points (rows report "draggable"), parametric tuples in u,v — and definitions: "a = 2" (a draggable slider), "f(x) = x^3 - a x", coordinate fields like "r = sqrt(x^2+y^2)" for polar. t animates. Also derivatives d/dx, integrals int[a..b] f dx, sums sum[n=1..N], domain()/conformal()/iter() for complex plots, y' = … slope fields, random variables "X ~ Normal(m, s)"/"P(0<X<2)"/"E(X^2)", and "view(x = -5..5, y = -2..2)"/"camera(theta, phi)" framing rows. That is a menu, not the syntax: before your first non-trivial graph, read the "syntax" MCP resource (also at https://equation.io/llms.txt).
 
-The result returns text and structured data only. "rows" is the validation verdict; if a row fails validation, fix it and call again. Give users the share_url (it unfurls to a preview card in chat apps); url is the equivalent #-fragment form. "preview" and "preview_omits" describe the share link's simplified static preview (t = 0, 3D as wireframes), which draws less than the interactive app. No image is attached to the tool response.`,
+The result returns text and structured data only. "rows" gives each equation's validation result: status "ok" with its kind, or "error" with the parser message. The link is usable only once every row is "ok". Give users the share_url (it unfurls to a preview card in chat apps); url is the equivalent #-fragment form. "preview" and "preview_omits" describe the share link's simplified static preview (t = 0, 3D as wireframes), which draws less than the interactive app. No image is attached to the tool response.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -103,8 +103,8 @@ The result returns text and structured data only. "rows" is the validation verdi
   {
     name: 'decode_graph_url',
     title: 'Read a graph link',
-    annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url.',
+    annotations: { title: 'Read a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url. The rows use the equation.io syntax documented in the "syntax" MCP resource (also at https://equation.io/llms.txt).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -128,7 +128,8 @@ const SHOW_GRAPH_TOOL = {
   ...TOOLS[0],
   name: 'show_graph',
   title: 'Show an interactive graph',
-  description: 'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns the same validation and share links as encode_graph_url; fix invalid rows before presenting the graph as correct. Use encode_graph_url for validation or link-only requests. In clients without UI support, provide share_url.',
+  annotations: { title: 'Show an interactive graph', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  description: 'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns the same per-row validation and share links as encode_graph_url; a row with status "error" is not drawn until its text is corrected and the graph resubmitted. Use encode_graph_url for validation or link-only requests. In clients without UI support, provide share_url.',
   _meta: { ui: { resourceUri: GRAPH_UI_URI } },
 };
 
