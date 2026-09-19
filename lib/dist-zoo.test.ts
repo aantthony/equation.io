@@ -611,25 +611,26 @@ describe('second review follow-ups', () => {
     expect(sysOf(['X ~ Uniform(0, 1)', 'Y = X^(-0.5)']).quadMoments('Y', {})!.sd).toBe(Infinity);
   });
 
-  it('#2 a variable that passes a no-mean base through never reports a mean, whatever the draw', () => {
-    for (const salt of [1, 2, 3, 5, 8, 13, 21, 34]) {
-      for (const [base, g] of [['Cauchy(0, 1)', 'X Z + Z'], ['Cauchy(2, 0.3)', 'X + Z^2'], ['T(1)', 'X Z'], ['T(0.9)', 'abs(X) + Z'],
-        ['Cauchy(0, 5)', 'X/(1 + Z^2)']]) {
-        const sys = sysOf([`X ~ ${base}`, 'Z ~ Normal(0, 1)', `W = ${g}`], salt);
-        expect(sys.mean('W', {}), `${base}: ${g} @${salt}`).toBeNaN();
-        expect(sys.meanUnstable('W', {}), `${base}: ${g} @${salt}`).toBe(true);
-      }
-      // The other direction: means that exist keep printing on every draw.
-      for (const [rows, want] of [
-        [['X ~ LogNormal(0, 1.5)', 'Z ~ LogNormal(0, 1.5)', 'W = X Z'], 9.49],
-        [['X ~ T(2)', 'Z ~ Normal(0, 1)', 'W = X + Z + 1'], 1],
-        [['X ~ Cauchy(0, 1)', 'Z ~ Normal(0, 1)', 'W = atan(X) + Z + 2'], 2],
-        [['X ~ Cauchy(0, 1)', 'Z ~ Normal(0, 1)', 'W = abs(X)^0.25 + 0 Z'], 1.0824],
-      ] as Array<[string[], number]>) {
-        const m = sysOf(rows, salt).mean('W', {});
-        expect(Math.abs(m / want - 1), `${rows[2]} @${salt}`).toBeLessThan(0.06);
-      }
+  it.each([1, 2, 3, 5, 8, 13, 21, 34])('#2 no-mean transforms and finite means keep their verdict at seed %i', salt => {
+    for (const [base, g] of [['Cauchy(0, 1)', 'X Z + Z'], ['Cauchy(2, 0.3)', 'X + Z^2'], ['T(1)', 'X Z'], ['T(0.9)', 'abs(X) + Z'],
+      ['Cauchy(0, 5)', 'X/(1 + Z^2)']]) {
+      const sys = sysOf([`X ~ ${base}`, 'Z ~ Normal(0, 1)', `W = ${g}`], salt);
+      expect(sys.mean('W', {}), `${base}: ${g} @${salt}`).toBeNaN();
+      expect(sys.meanUnstable('W', {}), `${base}: ${g} @${salt}`).toBe(true);
     }
+    // The other direction: means that exist keep printing on every draw.
+    for (const [rows, want] of [
+      [['X ~ LogNormal(0, 1.5)', 'Z ~ LogNormal(0, 1.5)', 'W = X Z'], 9.49],
+      [['X ~ T(2)', 'Z ~ Normal(0, 1)', 'W = X + Z + 1'], 1],
+      [['X ~ Cauchy(0, 1)', 'Z ~ Normal(0, 1)', 'W = atan(X) + Z + 2'], 2],
+      [['X ~ Cauchy(0, 1)', 'Z ~ Normal(0, 1)', 'W = abs(X)^0.25 + 0 Z'], 1.0824],
+    ] as Array<[string[], number]>) {
+      const m = sysOf(rows, salt).mean('W', {});
+      expect(Math.abs(m / want - 1), `${rows[2]} @${salt}`).toBeLessThan(0.06);
+    }
+  });
+
+  it('#2 a barely existing mean stays conservatively unstable', () => {
     // The stated conservative choice: a mean that exists only just (index
     // 1.05) is reported as unstable rather than estimated.
     expect(sysOf(['X ~ T(1.05)', 'Z ~ Normal(0, 1)', 'W = X + Z']).meanUnstable('W', {})).toBe(true);
