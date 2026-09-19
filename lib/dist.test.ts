@@ -79,7 +79,7 @@ describe('scanDistribution / parseDistribution', () => {
   });
 
   it('rejects unknown distributions and wrong arity', () => {
-    expect(() => dist('Poisson(3)')).toThrow(/Unknown distribution/);
+    expect(() => dist('Zipf(3)')).toThrow(/Unknown distribution/);
     expect(() => dist('Normal(1)')).toThrow(/2 arguments/);
     expect(() => dist('Normal(1, 2, 3)')).toThrow(/2 arguments/);
     expect(() => dist('Exponential(1, 2)')).toThrow(/1 argument/);
@@ -144,8 +144,8 @@ describe('scanRandomRows', () => {
 
 describe('toProbability', () => {
   it('reads bounds around one variable, both directions', () => {
-    expect(prob('X < 2').single).toEqual({ rv: 'X', lo: undefined, hi: { kind: 'num', value: 2 } });
-    expect(prob('X > 2').single).toEqual({ rv: 'X', lo: { kind: 'num', value: 2 }, hi: undefined });
+    expect(prob('X < 2').single).toEqual({ rv: 'X', hi: { kind: 'num', value: 2 }, hiStrict: true });
+    expect(prob('X > 2').single).toEqual({ rv: 'X', lo: { kind: 'num', value: 2 }, loStrict: true });
     const asc = prob('-1 < X <= 2').single!;
     expect(asc.lo).toEqual({ kind: 'neg', a: { kind: 'num', value: 1 } });
     expect(asc.hi).toEqual({ kind: 'num', value: 2 });
@@ -322,7 +322,7 @@ describe('E(…) rows', () => {
 
 describe('buildRVSystem', () => {
   it('claims base and derived rows and reports row errors', () => {
-    const { sys, built } = build(['X ~ Normal(0, 1)', 'Y = X^2', 'W ~ Poisson(3)']);
+    const { sys, built } = build(['X ~ Normal(0, 1)', 'Y = X^2', 'W ~ Zipf(3)']);
     expect(built.rowRV.get(0)).toBe('X');
     expect(built.rowRV.get(1)).toBe('Y');
     expect(sys.get('Y')?.kind).toBe('derived');

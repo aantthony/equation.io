@@ -102,6 +102,12 @@ describe('previewGap', () => {
     expect(gap(['(cos(2pi u), sin(2pi u), u)'])).toBeNull();
   });
 
+  it('is null for discrete distributions: stems, selected stems and the mean marker all draw', () => {
+    const rows = ['X ~ Binomial(10, 0.3)', 'P(X <= 3)', 'E(X)'];
+    for (let i = 0; i < rows.length; i++) expect(gap(rows, i)).toBeNull();
+    expect(canRenderOg(rows)).toBe(true);
+  });
+
   it('is null for a cobweb, which now draws', () => {
     expect(gap(['r = 1.9', 'a_{n+1} = r a_n (1 - a_n)'])).toBeNull();
   });

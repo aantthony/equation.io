@@ -246,3 +246,79 @@ describe('the continuous distribution zoo through analyze()', () => {
     expect(runProg(prog, [79 / 198, 11.5], new Float64Array(prog.depth))).toBeCloseTo(11.5 - 11.506129392, 6);
   });
 });
+
+describe('discrete distributions through analyze()', () => {
+  it('every family is a pmf row with an exact P(…) that keeps its strictness', () => {
+    const rows = out([
+      'X ~ Binomial(10, 0.3)', 'P(X < 3)', 'P(X <= 3)', 'P(X = 3)', 'P(X != 3)', 'P(2 < X <= 5)', 'P(X < 2.5)', 'E(X)',
+      'K ~ Pois(3)', 'P(K >= 2)', 'G ~ Geometric(0.2)', 'P(G = 1)', 'W ~ NegBin(3, 0.4)', 'P(W = 0)', 'E(W)',
+      'B ~ Bernoulli(0.3)', 'P(B > 0)', 'D ~ DiscreteUniform(1, 6)', 'P(1 < D < 6)', 'E(D)',
+    ]);
+    expect(rows).toEqual([
+      ['pmf', undefined], ['prob', '≈ 0.3828'], ['prob', '≈ 0.6496'], ['prob', '≈ 0.2668'], ['prob', '≈ 0.7332'],
+      ['prob', '≈ 0.5699'], ['prob', '≈ 0.3828'], ['expect', '≈ 3.0000'],
+      ['pmf', undefined], ['prob', '≈ 0.8009'], ['pmf', undefined], ['prob', '≈ 0.2000'],
+      ['pmf', undefined], ['prob', '≈ 0.0640'], ['expect', '≈ 4.5000'],
+      ['pmf', undefined], ['prob', '≈ 0.3000'], ['pmf', undefined], ['prob', '≈ 0.6667'], ['expect', '≈ 3.5000'],
+    ]);
+    const a = analyze(['X ~ Binomial(10, 0.3)', 'P(2 < X <= 5)']);
+    expect(a.rows[0].dist).toBe('pmf');
+    expect(a.rows[1].cls!.plot).toMatchObject({ type: 'prob', shade: { rv: 'X', loStrict: true, hiStrict: false } });
+  });
+
+  it('follows constants, and reports bad parameters on the row at their values', () => {
+    const rows = out(['n = 20', 'p = 0.3', 'X ~ Binomial(n, p)', 'P(X <= 4)', 'h = 2.5', 'Y ~ Binomial(h, p)', 'q = 1.5',
+      'Z ~ Bernoulli(q)', 'W ~ Poisson(0)', 's = 3 + sin(t)', 'V ~ Binomial(s, 0.5)', 'P(V < 2)', 'U ~ Binomial(10)',
+      'A ~ DiscreteUniform(4, 1)']);
+    expect(rows[2]).toEqual(['pmf', undefined]);
+    expect(rows[3]).toEqual(['prob', '≈ 0.2375']);
+    expect(rows[5][0]).toBe('Binomial(n, p) needs a whole number n ≥ 0 (n = 2.5).');
+    expect(rows[7][0]).toBe('Bernoulli(p) needs 0 ≤ p ≤ 1.');
+    expect(rows[8][0]).toBe('Poisson(mean) needs mean > 0.');
+    expect(rows[10][0]).toBe('pmf'); // n = 3 + sin(t): not judged while it moves
+    expect(analyze(['s = 3 + sin(t)', 'V ~ Binomial(s, 0.5)']).rows[1].cls!.params).toEqual(['s']); // redrawn as s moves
+    expect(analyze(['V ~ Binomial(3, 0.5 + sin(t)/4)']).rows[0].cls!.animated).toBe(true);
+    expect(rows[12][0]).toBe('Binomial(n, p) takes 2 arguments.');
+    expect(rows[13][0]).toBe('DiscreteUniform(a, b) needs a ≤ b.');
+  });
+
+  it('says "not yet" — loudly, by name — for everything plan #6 owns', () => {
+    const rows = out(['X ~ Poisson(3)', 'N ~ Binomial(5, 0.5)', 'Z ~ Normal(0, 1)', 'S = X + N', 'Y = X^2', 'M = X + Z',
+      'P(X > N)', 'P(X > Z)', 'P(X + 1 < 3)', 'E(2 X)', 'E(X + Z)', 'X + Z', 'V = Y + 1', 'P(Z = 1)', 'P(Z < 1)', 'P(X + 1 = 3)']);
+    const notYet = /discrete: arithmetic and joint events over discrete random variables are not supported yet/;
+    for (const i of [3, 4, 5, 6, 7, 8, 9, 10, 11]) expect(rows[i][0], `row ${i}`).toMatch(notYet);
+    expect(rows[3][0]).toMatch(/^X, N are discrete/);
+    expect(rows[4][0]).toMatch(/^X is discrete.*take X on its own\.$/);
+    expect(rows[12][0]).toBe('Y has an error in its definition.');
+    expect(rows[13][0]).toMatch(/^P\(Z = …\) needs a discrete variable/);
+    expect(rows[14]).toEqual(['ineq2d', '≈ 0.8413']); // the continuous path is untouched
+    expect(rows[15][0]).toBe('P(… = …) takes a discrete random variable on its own, like P(X = 3).');
+    // No internal builtin name reaches a message.
+    for (const r of rows) expect(String(r[0])).not.toMatch(/\[|pmf\]/);
+  });
+
+  it('keeps the names out of the document namespace, and regressions over declared data alone', () => {
+    const rows = out(['Poisson = 3', 'binom(q) = q^2', 'Geom = 0.5', 'X ~ Poisson(Poisson)', 'Y ~ Binom(binom(2), Geom)', 'P(Y = 2)']);
+    expect(rows.map(r => r[0])).toEqual(['def', 'def', 'def', 'pmf', 'pmf', 'prob']);
+    expect(rows[5][1]).toBe('≈ 0.3750');
+    // A declared list on the left does not turn a law's name into a model…
+    expect(out(['L = [1, 2, 3]', 'L ~ Poisson(3)'])[1][0]).toBe('L is already defined.');
+    // …and an ordinary fit whose coefficients happen to be p and n is still a fit.
+    const fit = analyze(['X1 = [1, 2, 3, 4]', 'Y1 = [2.1, 3.9, 6.2, 7.8]', 'Y1 ~ p X1 + n']);
+    expect(fit.rows[2].error).toBeUndefined();
+  });
+
+  it('a bound that is a whole number up to rounding reads as that whole number', () => {
+    const rows = out(['a = 0.1*3*10', 'X ~ Binomial(10, 0.3)', 'P(X < a)', 'P(X <= a)', 'P(X = a)', 'P(X != a)',
+      'U ~ DiscreteUniform(-10^17, 10^17)', 'P(0 <= U <= 2)']);
+    expect(rows.slice(2, 6).map(r => r[1])).toEqual(['≈ 0.3828', '≈ 0.6496', '≈ 0.2668', '≈ 0.7332']);
+    expect(rows[7]).toEqual(['prob', '≈ 0.0000']); // 1.5e-17, not the 0 of two differenced cdfs (lib test has the digits)
+  });
+
+  it('labels a discrete declaration from its family even when its parameter is bad', () => {
+    const a = analyze(['m = 3', 'W ~ Poisson(m - 3)', 'G ~ Gamma(m - 3, 1)']);
+    expect(a.rows[1].error).toBe('Poisson(mean) needs mean > 0.');
+    expect(a.rows[1].dist).toBe('pmf');
+    expect(a.rows[2].dist).toBe('density');
+  });
+});

@@ -32,6 +32,7 @@ import {
   buildRVSystem,
   checkDerived,
   densityExpr,
+  lowerProbBody,
   matchExpectation,
   matchProbability,
   probabilityValue,
@@ -63,7 +64,7 @@ export interface RowInfo {
   comment?: boolean;
   /** Set for probability rows: `X ~ …` plots a density, `P(…)` a shaded
    *  area, `E(…)` a mean marker. */
-  dist?: 'density' | 'probability' | 'expectation';
+  dist?: 'density' | 'pmf' | 'probability' | 'expectation';
   /** Readout shown under the row in the app (the numeric value of a P(…) or E(…) row). */
   info?: string;
   /** Set when the row reads a local data file (`open(…)`) that is not on this
@@ -203,13 +204,20 @@ export function analyze(texts: string[]): Analysis {
       row.error = message;
       continue;
     }
-    row.dist = 'density';
+    // Labelled from the family, before anything can fail: a discrete
+    // declaration whose parameter is bad is still a pmf row with an error.
+    row.dist = rvs.discreteDist(name) ? 'pmf' : 'density';
     const rv = rvs.get(name)!;
     // Parameters that are constants are judged at their values: a = -1 then
     // X ~ Gamma(a, 1) is no distribution (mirror of web/main.ts).
     const problem = rvs.paramProblem(name, constEnv, movingConsts);
     if (problem) {
       row.error = problem;
+      continue;
+    }
+    // A discrete law draws its pmf as stems (CPU overlay; no shader field).
+    if (rvs.discreteDist(name)) {
+      row.cls = { ...densityCls(name), plot: { type: 'pmf', rv: name } };
       continue;
     }
     // Base declarations and derived variables with a closed form (affine in
@@ -227,10 +235,9 @@ export function analyze(texts: string[]): Analysis {
   // The body of a P(…)/E(…) row, read exactly as a plot row is read — with the
   // list names, and lowered — so `P(X < mean(L))` sees the list two rows above
   // rather than reporting it unknown (mirror of web/main.ts).
-  const parseRowBody = (body: string): Expr => lowerLists(
+  const parseRowBody = (body: string, top: (e: Expr, lower: (e: Expr) => Expr) => Expr = (e, lower) => lower(e)): Expr => top(
     resolveExpr(parseExpr(body, fnNames, listNames, valueNames), getFn, ropts),
-    getList,
-    ropts,
+    e => lowerLists(e, getList, ropts),
   );
 
   const seenViewKinds = new Set<string>();
@@ -251,10 +258,12 @@ export function analyze(texts: string[]): Analysis {
       const probBody = defs.consts.has('P') || defs.fns.has('P') ? null : matchProbability(row.text);
       if (probBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-        const p = toProbability(parseRowBody(probBody), rvNames);
+        const p = toProbability(parseRowBody(probBody, lowerProbBody), rvNames);
         for (const name of p.rvs) {
           if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
+        // Point events only of a discrete variable; nothing sampled over one.
+        rvs.checkProbability(p);
         row.dist = 'probability';
         // Inline bounded expressions become anonymous derived variables, so
         // shading and exact laws apply — mirror of web/main.ts.
@@ -263,7 +272,8 @@ export function analyze(texts: string[]): Analysis {
           checkDerived(p.inline.e, rvNames, constNames);
           const anon = `@P${ri}`;
           rvs.add({ name: anon, kind: 'derived', expr: p.inline.e });
-          single = { rv: anon, lo: p.inline.lo, hi: p.inline.hi };
+          const { e: _body, ...bounds } = p.inline;
+          single = { rv: anon, ...bounds };
         }
         // Constant bounds on one variable with a closed form get the exact
         // CDF and the shader-drawn region; the rest estimate over samples.
@@ -290,7 +300,7 @@ export function analyze(texts: string[]): Analysis {
             // A uniform-sum law still gets its exact value (mirror of the
             // app's readout); everything else estimates over joint samples.
             const value = single
-              ? rvs.exactProbability(single.rv, single.lo, single.hi, constEnv)
+              ? rvs.exactProbability(single.rv, single.lo, single.hi, constEnv, single)
               : null;
             if (value !== null) {
               if (isFinite(value)) row.info = `≈ ${value.toFixed(4)}`;

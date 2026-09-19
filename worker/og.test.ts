@@ -313,6 +313,74 @@ describe('og raster renderer', () => {
     expect(Math.min(...pixel(r, 30, 55))).toBeGreaterThan(230);
   });
 
+  it('draws a discrete variable as stems, and a P(…) row over it as the heavier selected stems', () => {
+    // 10 px per unit, x = 0 at px 10; y: 200 px per unit, axis at py 90.
+    const view = 'view(x = -1..9, y = -0.05..0.45, ratio = 20)';
+    const r = renderRaster([view, 'X ~ Binomial(6, 0.5)'], 100, 100);
+    // The stem at k = 3 (px 40) runs from the axis up to 0.3125 (py ≈ 27.5).
+    expect(Math.min(...pixel(r, 40, 60))).toBeLessThan(200);
+    expect(Math.min(...pixel(r, 40, 15))).toBeGreaterThan(230); // above its top
+    // Between the whole numbers there is nothing: a pmf is not a curve.
+    expect(Math.min(...pixel(r, 45, 60))).toBeGreaterThan(230);
+    expect(Math.min(...pixel(r, 35, 60))).toBeGreaterThan(230);
+    // k = 7 is off the support.
+    expect(Math.min(...pixel(r, 80, 85))).toBeGreaterThan(230);
+    // Strictness is visible: P(X < 3) leaves the stem at 3 alone, P(X <= 3) thickens it.
+    // (A plain stem inks the two columns x and x + 1; a selected one the four from x − 1 to x + 2.)
+    const ink = (rows: string[], x: number) => [x - 1, x + 2].map(px => Math.min(...pixel(renderRaster([view, ...rows], 100, 100), px, 60)));
+    const strict = ink(['X ~ Binomial(6, 0.5)', 'P(X < 3)'], 40);
+    const closed = ink(['X ~ Binomial(6, 0.5)', 'P(X <= 3)'], 40);
+    expect(Math.min(...strict)).toBeGreaterThan(230);
+    expect(Math.max(...closed)).toBeLessThan(200);
+    expect(Math.max(...ink(['X ~ Binomial(6, 0.5)', 'P(X < 3)'], 30))).toBeLessThan(200); // k = 2 is in both
+    // A point event is its one stem; its complement every other.
+    expect(Math.max(...ink(['X ~ Binomial(6, 0.5)', 'P(X = 3)'], 40))).toBeLessThan(200);
+    expect(Math.min(...ink(['X ~ Binomial(6, 0.5)', 'P(X = 3)'], 30))).toBeGreaterThan(230);
+    expect(Math.min(...ink(['X ~ Binomial(6, 0.5)', 'P(X != 3)'], 40))).toBeGreaterThan(230);
+    expect(Math.max(...ink(['X ~ Binomial(6, 0.5)', 'P(X != 3)'], 30))).toBeLessThan(200);
+  });
+
+  it('draws a selection as the app does: a band that widens with the zoom, capped by an enlarged dot', () => {
+    // lib's stemGeometry: width = clamp(0.6 · px per unit, 3, 9), dot r + 3.
+    const rows = ['X ~ Binomial(6, 0.5)', 'P(X = 3)'];
+    const band = (view: string, x: number, y: number) => {
+      const plain = renderRaster([view, rows[0]], 100, 100);
+      const sel = renderRaster([view, ...rows], 100, 100);
+      return Math.abs(pixel(sel, x, y)[0] - pixel(plain, x, y)[0]) + Math.abs(pixel(sel, x, y)[2] - pixel(plain, x, y)[2]);
+    };
+    const wide = 'view(x = 2..4.5, y = -0.05..0.45, ratio = 5)'; // 40 px per unit: x = 3 at px 40, band 9 px
+    const narrow = 'view(x = -1..9, y = -0.05..0.45, ratio = 20)'; // 10 px per unit: x = 3 at px 40, band 6 px
+    expect(band(wide, 44, 60)).toBeGreaterThan(20);
+    expect(band(wide, 37, 60)).toBeGreaterThan(20);
+    expect(band(narrow, 44, 60)).toBe(0);
+    expect(band(narrow, 42, 60)).toBeGreaterThan(20);
+    // The enlarged translucent dot (r = 6.5) reaches past the band at the stem's top (py ≈ 27.5).
+    expect(band(wide, 46, 28)).toBeGreaterThan(10);
+  });
+
+  it('stands the E(X) marker on the stem when the mean is a whole number only up to rounding', () => {
+    // Binomial(100, 0.07): mean 7.000000000000001, pmf(7) ≈ 0.1545. 10 px per
+    // unit, x = 7 at px 50; 400 px per unit of y, axis at py 90, stem top ≈ py 28.
+    const view = 'view(x = 2..12, y = -0.025..0.225, ratio = 40)';
+    const bare = renderRaster([view, 'E(X)'], 100, 100);
+    const r = renderRaster([view, 'X ~ Binomial(100, 0.07)', 'E(X)'], 100, 100);
+    const only = renderRaster([view, 'X ~ Binomial(100, 0.07)'], 100, 100);
+    expect(bare.px).toEqual(renderRaster([view], 100, 100).px);
+    // The marker's dot caps the stem (py ≈ 28) instead of sitting on the axis (py 90).
+    const diff = (x: number, y: number) => Math.abs(pixel(r, x, y)[0] - pixel(only, x, y)[0]);
+    expect(diff(50, 28) + diff(51, 28) + diff(50, 27) + diff(47, 28)).toBeGreaterThan(40);
+    expect(diff(47, 90) + diff(53, 92)).toBe(0);
+  });
+
+  it('draws a huge discrete law zoomed out as its envelope, in bounded time', () => {
+    const t0 = performance.now();
+    const r = renderRaster(['view(x = 990000..1010000, y = -0.00005..0.00045, ratio = 40000000)', 'X ~ Poisson(1000000)'], 100, 100);
+    expect(performance.now() - t0).toBeLessThan(2000);
+    // Under the peak (px 50; pmf ≈ 0.0004 → py ≈ 10) the outline is filled.
+    expect(Math.min(...pixel(r, 50, 50))).toBeLessThan(245);
+    expect(Math.min(...pixel(r, 10, 50))).toBeGreaterThan(230);
+  });
+
   it('draws point masses as probability stems', () => {
     const rows = ['view(x = 0..3, y = -0.2..1.2)', 'X ~ Normal(0, 1)', 'Y = {X > 0: 1.3, 2.6}'];
     const r = renderRaster(rows, 100, 100);

@@ -63,7 +63,7 @@ describe('parsing the zoo', () => {
     expect(() => dist('T')).toThrow('StudentT(df) takes 1 argument.');
     expect(() => dist('Beta(2)')).toThrow('Beta(a, b) takes 2 arguments.');
     expect(() => dist('Weibull(1, 2, 3)')).toThrow('Weibull(shape, scale) takes 2 arguments.');
-    expect(() => dist('Poisson(3)')).toThrow(/Unknown distribution: Poisson\. Try .*Gamma\(shape, rate\)/);
+    expect(() => dist('Zipf(3)')).toThrow(/Unknown distribution: Zipf\. Try .*Gamma\(shape, rate\)/);
   });
 
   it('refuses written-out parameters that declare no distribution, naming the one at fault', () => {

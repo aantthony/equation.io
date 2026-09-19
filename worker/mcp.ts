@@ -216,6 +216,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
                   ? `viewport (${row.view.kind})`
                   : row.dist === 'density'
                     ? 'random variable (density curve)'
+                    : row.dist === 'pmf'
+                      ? 'discrete random variable (pmf stems)'
                     : row.dist === 'probability'
                       ? 'probability (shaded area)'
                       : row.dist === 'expectation'

@@ -5,8 +5,8 @@
  * sample is too slow and Workers forbid dynamic codegen (`new Function`), so
  * expressions compile once to opcode arrays run by a small stack machine.
  */
-import { ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, type Expr, GAMMA_PDF_FN, T_PDF_FN, WEIBULL_PDF_FN, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, plainFnName, realPow, sincFn } from './expr.ts';
-import { betaPdf, gammaPdf, studentTPdf, weibullPdf } from './specfn.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, BINOM_PMF_FN, DUNIFORM_PMF_FN, type Expr, GAMMA_PDF_FN, NEGBINOM_PMF_FN, POISSON_PMF_FN, T_PDF_FN, WEIBULL_PDF_FN, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, plainFnName, realPow, sincFn } from './expr.ts';
+import { betaPdf, binomPmf, discreteUniformPmf, gammaPdf, negBinomPmf, poissonPmf, studentTPdf, weibullPdf } from './specfn.ts';
 
 const enum Op { Const, Var, Add, Sub, Mul, Div, Pow, Neg, Fn1, Fn2, Fn3, Lt, Le, Gt, Ge, Sel, Fn4 }
 
@@ -27,13 +27,14 @@ const FN1: Record<string, (x: number) => number> = {
 const FN2: Record<string, (a: number, b: number) => number> = {
   atan2: Math.atan2, min: Math.min, max: Math.max,
   mod: (a, b) => a - Math.floor(a / b) * b,
-  [T_PDF_FN]: studentTPdf,
+  [T_PDF_FN]: studentTPdf, [POISSON_PMF_FN]: poissonPmf,
 };
 
 // The probability builtins (lib/dist.ts rows compile to these).
 const FN3: Record<string, (a: number, b: number, c: number) => number> = {
   normalpdf, normalcdf,
   [GAMMA_PDF_FN]: gammaPdf, [BETA_PDF_FN]: betaPdf, [WEIBULL_PDF_FN]: weibullPdf,
+  [BINOM_PMF_FN]: binomPmf, [NEGBINOM_PMF_FN]: negBinomPmf, [DUNIFORM_PMF_FN]: discreteUniformPmf,
 };
 
 // The angle measurement and its derivative (lib/geom.ts lowers angle(…) to these).
@@ -92,12 +93,12 @@ export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
       }
       case 'call': {
         for (const a of node.args) emit(a);
-        if (node.args.length === 1 && node.name in FN1) {
+        if (node.args.length === 1 && Object.hasOwn(FN1, node.name)) {
           code.push(Op.Fn1, FN1_NAMES.indexOf(node.name));
-        } else if (node.args.length === 2 && node.name in FN2) {
+        } else if (node.args.length === 2 && Object.hasOwn(FN2, node.name)) {
           code.push(Op.Fn2, FN2_NAMES.indexOf(node.name));
           push(-1);
-        } else if (node.args.length === 3 && node.name in FN3) {
+        } else if (node.args.length === 3 && Object.hasOwn(FN3, node.name)) {
           code.push(Op.Fn3, FN3_NAMES.indexOf(node.name));
           push(-2);
         } else if (node.args.length === 4 && Object.hasOwn(FN4, node.name)) {
