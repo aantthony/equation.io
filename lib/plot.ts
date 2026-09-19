@@ -18,6 +18,7 @@ import { SPECIAL_FORMS, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import { ANGLE_FN, builtinFn, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
+import type { IntShade, ResolvedRow } from './intshade.ts';
 import { toGLSL } from './glsl.ts';
 import { type GridField, buildGridField } from './grid.ts';
 
@@ -50,8 +51,11 @@ export type Plot =
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
   /** A bare real expression with nothing to plot against (`2+2`, `a^2`,
    *  `sin(t)`): it draws nothing and the row reads out `= value` instead.
-   *  CPU-evaluated per frame, so constants keep their original names. */
-  | { type: 'value'; expr: Expr }
+   *  CPU-evaluated per frame, so constants keep their original names.
+   *  With `shade` — the row is exactly one definite integral — the area
+   *  between the integrand and the axis is filled too (lib/intshade.ts).
+   *  classifyRow attaches it, since resolution expands the ∫ away. */
+  | { type: 'value'; expr: Expr; shade?: IntShade }
   /** Live bounded history of a point's observed positions. */
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   /** CPU-evaluated straight-edged figure from segment()/polyline()/vector()/
@@ -570,4 +574,53 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
   // Only x: plot as y = expr.
   const asY: Expr = { kind: 'eq', l: { kind: 'var', name: 'y' }, r: g };
   return done({ type: 'implicit2d', field: compileTyped(asY).code });
+}
+
+/** A stand-in for the integration variable while the integrand is lowered:
+ *  no document name can collide with it (it is not an identifier). */
+const INT_VAR = '[dx]';
+
+/**
+ * Lower and classify a resolved row (lib/defs.ts resolveRow) — THE way a
+ * plain row is classified, in the app and in analyze() alike, so neither can
+ * miss what rides along: a `value` row that is exactly one definite integral
+ * of a real integrand also carries the area it shades.
+ *
+ * `lower` is the row's geometry/list lowering; `known` the names that have a
+ * value each frame. Being a `value` is what makes the bounds constant
+ * (sliders, states and t included).
+ */
+export function classifyRow(
+  row: ResolvedRow, lower: (e: Expr) => Expr, known: ReadonlySet<string>,
+  fields: Record<string, Expr> = {}, timeDerivative?: (e: Expr) => Expr,
+): { cls: Classified; parsed: Expr } {
+  const parsed = lower(row.expr);
+  const cls = classify(parsed, known, fields, timeDerivative);
+  if (cls.plot.type === 'value' && row.integral) {
+    const shade = lowerShade(row.integral, lower, known);
+    if (shade) cls.plot.shade = shade;
+  }
+  return { cls, parsed };
+}
+
+function lowerShade(int: IntShade, lower: (e: Expr) => Expr, known: ReadonlySet<string>): IntShade | null {
+  const { v } = int;
+  const isInf = (b: Expr) => { const a = b.kind === 'neg' ? b.a : b; return a.kind === 'var' && a.name === 'inf'; };
+  try {
+    // Inside the integrand v is the bound variable, whatever else the
+    // document calls by that name: a slider it merely shadows, but a list or
+    // a point would be substituted in by lowering — so it lowers under a
+    // stand-in name. In the bounds the name keeps its document meaning.
+    const hidden = lower(substVars(int.body, { [v]: { kind: 'var', name: INT_VAR } }));
+    const body = substVars(hidden, { [INT_VAR]: { kind: 'var', name: v } });
+    const [lo, hi] = [int.lo, int.hi].map(b => (isInf(b) ? b : lower(b)));
+    const scalar = (e: Expr) => e.kind !== 'vec' && e.kind !== 'list' && e.kind !== 'data'
+      && e.kind !== 'eq' && e.kind !== 'ineq' && !usesComplex(e);
+    if (![body, lo, hi].every(scalar)) return null;
+    const free = (e: Expr, bound?: string) => [...freeVars(e)].every(n => n === bound || n === 't' || known.has(n));
+    if (!free(body, v) || ![lo, hi].every(b => isInf(b) || free(b))) return null;
+    return { body, v, lo, hi };
+  } catch {
+    return null; // not drawable; the readout is unaffected
+  }
 }

@@ -743,8 +743,8 @@ export interface Overlay2D {
   /** closed joins the last vertex back to the first; fill (a CSS color,
    *  usually translucent) paints the enclosed region when every vertex is
    *  finite. arrow puts a head at the last vertex, sized in CSS px so it does
-   *  not scale with zoom. */
-  polylines: Array<{ pts: number[]; color: string; closed?: boolean; fill?: string; width?: number; arrow?: boolean }>;
+   *  not scale with zoom. noStroke fills only (the outline is its own entry). */
+  polylines: Array<{ pts: number[]; color: string; closed?: boolean; fill?: string; width?: number; arrow?: boolean; noStroke?: boolean }>;
   /** Vertical bars from y = 0, halfWidth in math units (data-list bar mode). */
   bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
 }
@@ -852,7 +852,7 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
         ctx.fillStyle = line.fill;
         ctx.fill();
       }
-      ctx.stroke();
+      if (!line.noStroke) ctx.stroke();
       if (head) {
         ctx.beginPath();
         ctx.moveTo(head.tip[0], head.tip[1]);

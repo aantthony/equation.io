@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { evaluate, parseExpr } from '../lib/expr.ts';
-import { compileProg, run } from './vm.ts';
+import { evaluate, parseExpr } from './expr.ts';
+import { compileProg, compileSampler, run } from './vm.ts';
 
 describe('expression stack machine', () => {
   it('matches the AST evaluator on a typical field', () => {
@@ -51,5 +51,25 @@ describe('expression stack machine', () => {
     expect(prog.depth).toBeGreaterThan(64);
     const stack = new Float64Array(prog.depth);
     expect(run(prog, [2], stack)).toBe(82);
+  });
+});
+
+describe('compileSampler', () => {
+  it('samples one variable like evaluate(), rebinding the rest per frame', () => {
+    const e = parseExpr('{x < a: sin(a x) + b}');
+    const sampler = compileSampler(e, 'x', ['a', 'b', 'x'])!;
+    for (const env of [{ a: 2, b: 1 }, { a: -1, b: 0.5 }]) {
+      const f = sampler(env);
+      for (const x of [-3, 0.5, 1.5, 4]) expect(f(x)).toBe(evaluate(e, { ...env, x }));
+    }
+    // Outside a no-default piecewise, and with a value missing: undefined.
+    expect(sampler({ a: 2, b: 1 })(5)).toBeNaN();
+    expect(sampler({ a: 2 })(0)).toBeNaN();
+    // The sampled variable shadows an env entry of the same name.
+    expect(compileSampler(parseExpr('t^2'), 't', ['t'])!({ t: 99 })(3)).toBe(9);
+  });
+
+  it('is null for a form the VM does not run, so callers can fall back', () => {
+    expect(compileSampler({ kind: 'call', name: 'nosuchfn', args: [parseExpr('x')] }, 'x', [])).toBeNull();
   });
 });

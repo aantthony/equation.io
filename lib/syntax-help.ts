@@ -39,7 +39,7 @@ const signatures: Record<string, [string, string]> = {
   solve: ['solve(M, v)', 'Solve the linear system M x = v'],
   sum: ['sum(n=1..N, expression)', 'Finite sum'],
   prod: ['prod(n=1..N, expression)', 'Finite product'],
-  int: ['int[a..b] f(x) dx', 'Definite integral; bounds may be omitted'],
+  int: ['int[a..b] f(x) dx', 'Definite integral; bounds may be omitted. Alone on a row it shades its signed area'],
   domain: ['domain(f(w))', 'Complex domain coloring'],
   conformal: ['conformal(f(w))', 'Image of a complex coordinate grid'],
   iter: ['iter(w^2 + c)', 'Complex escape-time iteration'],

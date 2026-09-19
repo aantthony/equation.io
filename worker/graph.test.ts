@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { evaluate } from '../lib/expr.ts';
+import { boundValue } from '../lib/intshade.ts';
 import { toGLSL } from '../lib/glsl.ts';
 import { analyze } from './graph.ts';
-import { compileProg, run as runProg } from './vm.ts';
+import { compileProg, run as runProg } from '../lib/vm.ts';
 
 /** [error ?? plot type, readout] per row. */
 const out = (texts: string[]) => analyze(texts).rows.map(r => [r.error ?? r.cls?.plot.type ?? 'def', r.info]);
@@ -76,5 +77,101 @@ describe('distance / angle through analyze()', () => {
     const glsl = toGLSL(rows[4].expr!);
     expect(glsl).not.toContain('+ 0.0');
     expect(glsl).toContain('eq_angle(');
+  });
+});
+
+describe('definite-integral rows shade their area', () => {
+  const shadeOf = (texts: string[], at = texts.length - 1) => {
+    const row = analyze(texts).rows[at];
+    expect(row.error).toBeUndefined();
+    const plot = row.cls!.plot;
+    return plot.type === 'value' ? plot.shade : undefined;
+  };
+
+  it('exactly one definite integral carries { body, v, lo, hi }; the row stays a readout', () => {
+    for (const text of ['int[0..1] x^2 dx', 'int(0..1, x^2 dx)', '∫[0..1] x^2 dx']) {
+      const row = analyze([text]).rows[0];
+      expect([row.cls!.plot.type, row.info]).toEqual(['value', '≈ 0.333333']);
+      const shade = shadeOf([text])!;
+      expect(shade.v).toBe('x');
+      expect([evaluate(shade.lo, {}), evaluate(shade.hi, {})]).toEqual([0, 1]);
+      expect(evaluate(shade.body, { x: 3 })).toBe(9);
+    }
+  });
+
+  it('the variable is whatever the dx names, t included; bounds keep their order and ±inf', () => {
+    expect(shadeOf(['int[0..1] u^2 du'])!.v).toBe('u');
+    expect(shadeOf(['int[0..1] t^2 dt'])!.v).toBe('t');
+    expect(analyze(['int[0..1] t^2 dt']).rows[0].cls!.animated).toBe(false);
+    const rev = shadeOf(['int[1..0] x^2 dx'])!;
+    expect([evaluate(rev.lo, {}), evaluate(rev.hi, {})]).toEqual([1, 0]);
+    const inf = shadeOf(['int[-inf..inf] e^(-x^2) dx'])!;
+    expect([boundValue(inf.lo, {}), boundValue(inf.hi, {})]).toEqual([-Infinity, Infinity]);
+    // A measure written inside the quotient still strips cleanly.
+    expect(evaluate(shadeOf(['int[0..1] dx/(1+x^2)'])!.body, { x: 1 })).toBe(0.5);
+  });
+
+  it('sliders, states, user functions, lists and points flow into the integrand and bounds', () => {
+    const s = shadeOf(['a = 2', 'int[0..a] sin(a x) dx'])!;
+    expect(evaluate(s.hi, { a: 2 })).toBe(2);
+    expect(evaluate(s.body, { a: 2, x: 1 })).toBeCloseTo(Math.sin(2));
+    expect(shadeOf(["s' = 1", 's(0) = 0', 'int[0..s] x dx'])).toBeDefined();
+    // A no-default piecewise integrand: undefined past 1, so the fill breaks there.
+    const f = shadeOf(['f(x) = {x < 1: x}', 'int[0..2] f(x) dx'])!;
+    expect(evaluate(f.body, { x: 0.5 })).toBe(0.5);
+    expect(evaluate(f.body, { x: 1.5 })).toBeNaN();
+    // A Σ inside the integrand, and a user function that is itself a
+    // quadrature, are still one integral of one real integrand.
+    expect(evaluate(shadeOf(['int[0..1] sum[n=1..2] x^n dx'])!.body, { x: 2 })).toBe(6);
+    const si = shadeOf(['F(x) = int[0..x] sin(s)/s ds', 'int[0..3] F(x) dx'])!;
+    expect(evaluate(si.body, { x: 1 })).toBeCloseTo(0.946083, 5);
+    // Reductions and point arithmetic are lowered exactly as in the row itself.
+    expect(evaluate(shadeOf(['L = [1, 2, 3]', 'int[0..1] total(L) x dx'])!.body, { x: 2 })).toBe(12);
+    const p = shadeOf(['A = (3, 4)', 'int[0..1] |A| x dx'])!;
+    expect(evaluate(p.body, { x: 2, A_x: 3, A_y: 4 })).toBe(10);
+  });
+
+  it('anything more than one integral is a plain readout', () => {
+    for (const texts of [
+      ['2 int[0..1] x^2 dx'],
+      ['int[0..1] x^2 dx + 1'],
+      ['int[0..1] x dx + int[1..2] x dx'],
+      ['int[0..1] int[0..y] x dx dy'],
+      ['int[0..1] (int[0..x] t dt) dx'],
+      ['2 + 2'],
+    ]) {
+      expect(analyze(texts).rows[0].cls!.plot).toMatchObject({ type: 'value' });
+      expect(shadeOf(texts)).toBeUndefined();
+    }
+  });
+
+  it('the dx variable shadows whatever else the document calls by that name', () => {
+    // A slider: the readout is 0.5, and the picture is y = k over [0, 1].
+    const k = shadeOf(['k = 3', 'int[0..1] k dk'])!;
+    expect(analyze(['k = 3', 'int[0..1] k dk']).rows[1].info).toBe('= 0.5');
+    expect(evaluate(k.body, { k: 0.25 })).toBe(0.25);
+    // A list or a point: lowering must not substitute it for the bound name…
+    for (const def of ['L = [1, 2, 3]', 'L = (1, 2)']) {
+      const rows = [def, 'int[0..1] L^2 dL'];
+      expect(analyze(rows).rows[1].info).toBe('≈ 0.333333');
+      expect(shadeOf(rows)!.body).toEqual(shadeOf(['int[0..1] L^2 dL'])!.body);
+      expect(evaluate(shadeOf(rows)!.body, { L: 3 })).toBe(9);
+    }
+    // …while in the BOUNDS the name keeps its document meaning.
+    const b = shadeOf(['k = 3', 'int[0..k] k dk'])!;
+    expect(evaluate(b.hi, { k: 3 })).toBe(3);
+    expect(analyze(['k = 3', 'int[0..k] k dk']).rows[1].info).toBe('= 4.5');
+    // And a list elsewhere in the integrand still lowers as usual.
+    expect(evaluate(shadeOf(['L = [1, 2, 3]', 'int[0..1] total(L) k dk'])!.body, { k: 2 })).toBe(12);
+  });
+
+  it('rows that are not a number never shade', () => {
+    const types = (texts: string[]) => analyze(texts).rows.map(r => r.error ?? r.cls?.plot.type ?? 'def');
+    // A definition names the number (nothing draws); non-constant bounds are a
+    // curve; a complex integrand a point; a list integrand a list.
+    expect(types(['a = int[0..1] x^2 dx'])).toEqual(['def']);
+    expect(types(['int[0..x] t^2 dt'])).toEqual(['implicit2d']);
+    expect(types(['int[0..1] i x dx'])).toEqual(['point']);
+    expect(types(['L = [1, 2]', 'int[0..1] L x dx'])).toEqual(['def', 'vlist']);
   });
 });

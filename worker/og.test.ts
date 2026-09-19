@@ -71,6 +71,45 @@ describe('og raster renderer', () => {
     expect(curve).toBeGreaterThan(grid + 0.005);
   });
 
+  it('shades a definite integral: two tints by sign, clipped, broken at gaps', () => {
+    // 100×100 at view(x = -5..5): 10 px per unit, origin at (50, 50).
+    const view = 'view(x = -5..5)';
+    const r = renderRaster(['int[-3..3] x dx', view], 100, 100);
+    // Under y = x right of 0 — world (2.5, 1.5) — the row color (blue):
+    const [pr, , pb] = pixel(r, 75, 35);
+    expect(pb).toBeGreaterThan(pr + 10);
+    // Left of 0 — world (-2.5, -1.5) — the complement (orange): it SUBTRACTS.
+    const [nr, , nb] = pixel(r, 25, 65);
+    expect(nr).toBeGreaterThan(nb + 10);
+    // Outside [a, b] and above the integrand: untouched.
+    expect(Math.min(...pixel(r, 93, 47))).toBeGreaterThan(230);
+    expect(Math.min(...pixel(r, 75, 15))).toBeGreaterThan(230);
+    // Reversed bounds negate the value, so the tints swap.
+    const rev = renderRaster(['int[3..-3] x dx', view], 100, 100);
+    const [rr, , rb] = pixel(rev, 75, 35);
+    expect(rr).toBeGreaterThan(rb + 10);
+    // An infinite range is clipped to the view; a bare number draws nothing.
+    const inf = renderRaster(['int[-inf..inf] 3 e^(-x^2) dx', view], 100, 100);
+    expect(pixel(inf, 53, 35)[2]).toBeGreaterThan(pixel(inf, 53, 35)[0] + 10);
+    const grid = renderRaster([view], 100, 100);
+    expect(renderRaster(['2 int[0..1] x^2 dx', view], 100, 100).px).toEqual(grid.px);
+    expect(renderRaster(['int[2..2] x dx', view], 100, 100).px).toEqual(grid.px);
+    // A no-default piecewise integrand fills only where it is defined.
+    const gap = renderRaster(['f(x) = {x < 1: 3}', 'int[-3..3] f(x) dx', view], 100, 100);
+    expect(Math.min(...pixel(gap, 25, 35))).toBeLessThan(245);
+    expect(Math.min(...pixel(gap, 75, 35))).toBeGreaterThan(230);
+    // A range wider than the view has no edge at the border: the fill runs
+    // off-canvas, and no vertical line is stroked where the view cut it.
+    const wide = renderRaster(['int[-100..inf] (2 + x/10) dx', view], 100, 100);
+    expect(pixel(wide, 0, 40)[2]).toBeGreaterThan(pixel(wide, 0, 40)[0] + 10); // filled…
+    for (const x of [0, 1, 98, 99]) expect(pixel(wide, x, 40)[0]).toBeGreaterThan(200); // …not stroked
+    // A bound inside the view keeps its vertical edge: world x = 3 is px 80.
+    expect(pixel(r, 80, 35)[0]).toBeLessThan(120);
+    // Nothing in a 3D scene, like the app.
+    const solo3d = renderRaster(['z = x + y'], 100, 100);
+    expect(renderRaster(['z = x + y', 'int[-3..3] x dx'], 100, 100).px).toEqual(solo3d.px);
+  });
+
   it('strokes and fills polygon figures, leaving open segments unfilled', () => {
     const tri = renderRaster(['A = (-4, -4)', 'B = (4, -4)', 'C = (0, 4)', 'polygon(A, B, C)'], 100, 100);
     // Interior (world ~(1.4, -1.4), off the unit gridlines): tinted by the

@@ -2,20 +2,21 @@
  * CPU renderer for /g/ link-preview images (og:image).
  *
  * Workers have no WebGL, so this rasterizes directly: expressions compile to
- * stack programs (vm.ts) and 2D plots sample per pixel — implicit curves via
+ * stack programs (lib/vm.ts) and 2D plots sample per pixel — implicit curves via
  * the same |F|/|∇F| distance estimate the shader uses, regions as fills,
  * scalar fields as a colormap. 3D rows draw as projected wireframes
  * (parametric surfaces/curves, z = f(x,y) heightmaps). Output is a PNG built
  * with CompressionStream — no image library.
  */
 import { densityAt, pdfExpr, shadePolygon } from '../lib/dist.ts';
+import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import type { Plot } from '../lib/plot.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
-import { type Prog, compileProg, run } from './vm.ts';
+import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 
 // Matches web/main.ts PALETTE.
 const PALETTE: [number, number, number][] = [
@@ -312,6 +313,36 @@ function renderRow2D(
   const { cls, expr } = row;
   if (!cls) return;
   const compile = (e: Expr) => compileFor(env, e);
+  if (cls.plot.type === 'value') {
+    // A definite-integral row shades the area it measures (the app's case
+    // 'value'): parts adding to the value in the row color, parts subtracting
+    // in its complement. Any other readout draws nothing, as in the app.
+    if (!cls.plot.shade) return;
+    const shade = cls.plot.shade;
+    const halfW = (r.w / 2) * v.upp;
+    const halfH = (r.h / 2) * (v.upp / (v.ratio ?? 1));
+    const sampler = compileSampler(shade.body, shade.v, shadeNames(shade)) ?? evalSampler(shade);
+    const runs = shadeRuns(shade, { ...analysis.constEnv, t: 0 }, v.cx - halfW, v.cx + halfW, sampler);
+    const minus = minusTint(color);
+    for (const run of runs) {
+      const c = run.sign > 0 ? color : minus;
+      const { fill, stroke } = runPaths(run, v.cy - halfH, v.cy + halfH);
+      const screen = (pts: number[]) => {
+        const sx: number[] = [], sy: number[] = [];
+        for (let i = 0; i + 1 < pts.length; i += 2) {
+          sx.push(toScreenX(r, v, pts[i]));
+          sy.push(toScreenY(r, v, pts[i + 1]));
+        }
+        return [sx, sy];
+      };
+      const [fx, fy] = screen(fill);
+      fillPolygon(r, fx, fy, c, 0.16);
+      // Only real edges are stroked: not where the view cut the range.
+      const [sx, sy] = screen(stroke);
+      for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], c);
+    }
+    return;
+  }
   if (cls.plot.type === 'density' || cls.plot.type === 'prob') {
     // Sampled-density rows: the same estimator the app uses (lib/dist.ts),
     // drawn as a polyline (density) or a filled area under it (P(…)).
@@ -617,7 +648,8 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
   ineq2d: 'draws',
   scalar2d: 'draws',
   point: 'draws',
-  // A readout-only row: nothing on the canvas in the app either.
+  // A readout: nothing on the canvas in the app either — except a definite
+  // integral, whose shaded area is a CPU polygon here as there.
   value: 'draws',
   trail: 'fallback',
   pcurve: 'draws',

@@ -27,6 +27,7 @@ import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
+import type { IntShade, ResolvedRow } from './intshade.ts';
 import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
 import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
@@ -715,6 +716,10 @@ interface Ctx {
   opts: ResolveOpts;
   /** Terms expanded so far across every Σ/Π in this resolve (nesting multiplies). */
   terms: number;
+  /** Out (resolveRow): every ∫ this resolve expanded — its resolved pieces
+   *  when it is a plain definite integral, null otherwise (indefinite, or
+   *  carrying an enclosing integral's measure). */
+  ints?: Array<IntShade | null>;
 }
 
 /** A Σ/Π call: args [index, lo, hi] (header awaiting a body) or [index, lo, hi, body]. */
@@ -1004,6 +1009,7 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
   const integrand = m.integrand;
   let lo = bounds && rx(bounds[0], ctx);
   let hi = bounds && rx(bounds[1], ctx);
+  ctx.ints?.push(lo && hi && !m.residual ? { body: integrand, v, lo, hi } : null);
   let loI = infOf(lo);
   let hiI = infOf(hi);
   // Normalize a downhill infinite range (int[inf..0]) to the negated uphill one.
@@ -1074,6 +1080,24 @@ export function usesIntegral(e: Expr): boolean {
       return e.cases.some(c => usesIntegral(c.cond) || usesIntegral(c.value))
         || (e.otherwise ? usesIntegral(e.otherwise) : false);
   }
+}
+
+/**
+ * Resolve a whole row, also reporting the ∫ it consists of: `integral` is set
+ * when the parsed row is exactly one definite integral — `int[a..b] f dx` or
+ * `int(a..b, f dx)` standing alone — and that was the ONLY ∫ the resolution
+ * expanded. A coefficient, a sum of integrals, an iterated or nested ∫ and an
+ * indefinite ∫ all report null, because no single region IS their value. The
+ * pieces are the ones expandInt itself resolved, not a second resolution.
+ * classifyRow (lib/plot.ts) turns them into the area a value row shades.
+ */
+export function resolveRow(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): ResolvedRow {
+  const ctx: Ctx = { getFn, opts, terms: 0, ints: [] };
+  const expr = rx(e, ctx);
+  const m = splitSumChain(e);
+  const call = !m ? e : !m.coeff && isIntHeader(m.header) ? intCallOf(m.header, m.body) : null;
+  const sole = call?.kind === 'call' && call.name === 'int' && call.args.length === 3 && ctx.ints!.length === 1;
+  return { expr, integral: sole ? ctx.ints![0] : null };
 }
 
 /**

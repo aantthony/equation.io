@@ -21,6 +21,7 @@ import {
   nameTaken,
   shadowedFnNames,
   resolveExpr,
+  resolveRow,
   scanDefinition,
   timeDifferentiator,
   TABLE_MAX_ROWS,
@@ -46,13 +47,15 @@ import {
   toExpectation,
   toProbability,
 } from '../lib/dist.ts';
+import { type IntShade, type ShadeRun, type ShadeSampler, evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
+import { compileSampler } from '../lib/vm.ts';
 import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
-import { type Classified, classify, valueReadout } from '../lib/plot.ts';
+import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
@@ -91,6 +94,10 @@ import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
 
 interface Equation {
   trail?: PointTrail;
+  /** A definite-integral row's shaded area: the integrand compiled once per
+   *  shade, and resampled only when the x-window or a value it reads (bounds,
+   *  sliders, states, t) changes. */
+  shadeCache?: { shade: IntShade; names: string[]; sampler: ShadeSampler; key: string; runs: ShadeRun[] };
   id: number;
   text: string;
   colorIndex: number;
@@ -1075,6 +1082,32 @@ function render() {
           }
           break;
         }
+        case 'value': {
+          // A definite-integral row: the number lives in the row's readout;
+          // the plot is the area it measures. Parts that add to the value
+          // take the row color, parts that subtract its complement.
+          if (!plot.shade) break;
+          let c = eq.shadeCache;
+          if (c?.shade !== plot.shade) {
+            const names = shadeNames(plot.shade);
+            const sampler = compileSampler(plot.shade.body, plot.shade.v, names) ?? evalSampler(plot.shade);
+            c = eq.shadeCache = { shade: plot.shade, names, sampler, key: '', runs: [] };
+          }
+          const key = [xmin, xmax, ...c.names.map(n => env[n])].join();
+          if (key !== c.key) {
+            c.key = key;
+            c.runs = shadeRuns(plot.shade, env, xmin, xmax, c.sampler);
+          }
+          const minus = minusTint(color);
+          for (const run of c.runs) {
+            // Only real edges are stroked: not where the window cut the range.
+            const tint = run.sign > 0 ? color : minus;
+            const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH);
+            extras.polylines.push({ pts: fill, color: cssColor(tint), closed: true, fill: cssColorA(tint, 0.16), noStroke: true });
+            extras.polylines.push({ pts: stroke, color: cssColor(tint) });
+          }
+          break;
+        }
         case 'prob': {
           // The estimate lives in the row's readout; the plot is the shaded
           // area under the variable's density, when the body has that shape.
@@ -1534,7 +1567,8 @@ function recompileAll() {
         continue;
       }
       const rawParsed = parseExpr(text, fnNames, listNames, valueNames);
-      let parsed = resolveExpr(rawParsed, getFn, ropts);
+      const resolved = resolveRow(rawParsed, getFn, ropts);
+      let parsed = resolved.expr;
       // A bare expression in random variables (`X + Y`, `X^2`) plots the
       // density of that derived variable — distribution arithmetic in place.
       const rvRefs = [...freeVars(parsed)].filter(n => rvNames.has(n));
@@ -1553,13 +1587,15 @@ function recompileAll() {
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
-      parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null);
-      // Lists broadcast/reduce away: the row becomes a plain list literal
+      // Lists then broadcast/reduce away: the row becomes a plain list literal
       // (dots, bars, or a scatter) or a scalar expression (reductions).
-      parsed = lowerLists(parsed, getList, ropts);
+      const lower = (e: Expr): Expr => lowerLists(
+        lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null),
+        getList, ropts,
+      );
       // Coordinate fields substitute in as functions of the plane, so
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
-      eq.cls = classify(parsed, constNames, fieldEnv, timeDifferentiator(defs));
+      ({ cls: eq.cls, parsed } = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)));
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       // A 3-column scatter only ever draws in 3D, where every point is a
       // sprite. Say so here rather than plotting the first CLOUD_3D_MAX of a
@@ -2330,8 +2366,10 @@ function reconcile() {
     line.style.setProperty('--eq-color', cssColor(theme.palette[eq.colorIndex]));
     line.classList.toggle('invalid', !!eq.error);
     // No colour swatch for rows with nothing drawn in it: definitions, and
-    // value rows, whose whole output is the readout beneath them.
-    line.classList.toggle('is-def', !!eq.def || (!eq.error && eq.cls?.plot.type === 'value'));
+    // value rows, whose whole output is the readout beneath them — except a
+    // definite integral shading its area, which draws in that colour.
+    const drawn = eq.error ? undefined : eq.cls?.plot;
+    line.classList.toggle('is-def', !!eq.def || (drawn?.type === 'value' && !drawn.shade));
     line.classList.toggle('is-comment', !!eq.comment);
     line.classList.toggle('collapsed', !!(eq.comment && eq.collapsed));
     line.title = eq.error ?? (eq.comment ? 'Click the arrow to collapse or expand this group' : '');
@@ -2962,6 +3000,7 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['derivative', 'y = d/dx (x^3 - 3x)'],
     ['tangent line', 'f(x) = x^3 - 2x; g(x) = d/dx f(x); a = 1; y = f(x); y = f(a) + g(a)(x - a)'],
     ['running integral', 'view(x = -7..7, y = -1.5..4); f(x) = sin(x)^2; y = f(x); y = int[0..x] f(t) dt'],
+    ['signed area', 'view(x = -1..7, y = -1.5..1.5); b = 5; y = sin(x); int[0..b] sin(x) dx'],
     ['antiderivative', 'f(x) = x^2 - 1; y = f(x); y = int(f(x) dx)'],
     ['gaussian error fn', 'view(x = -4..4, y = -1.2..1.2); y = int[0..x] exp(-t^2) dt'],
     ['normal cdf', 'view(x = -4..4, y = -0.6..1.2); y = normalpdf(x, 0, 1); y = int[-inf..x] normalpdf(t, 0, 1) dt'],
