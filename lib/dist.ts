@@ -60,7 +60,8 @@ import {
   parseExpr,
   substVars,
 } from './expr.ts';
-import { usesComplex } from './complex.ts';
+import { WHOLE_EXPR_NAMES, usesComplex } from './complex.ts';
+import { GEOM_STATEMENTS } from './geom.ts';
 import type { Classified } from './plot.ts';
 import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from './defs.ts';
 import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
@@ -684,6 +685,28 @@ export function scanRandomRows(texts: readonly (string | null)[]): {
 }
 
 /**
+ * A whole-row form or geometry statement is a picture, never a value, so an
+ * expression holding one is not a derived random variable. Refused here, for
+ * every form at once, because rows that mention a random variable turn off
+ * toward the sampler before classify could refuse them.
+ */
+function wholeRowForm(e: Expr, rvNames: ReadonlySet<string>): void {
+  const kids: Expr[] = e.kind === 'neg' ? [e.a]
+    : e.kind === 'bin' ? [e.a, e.b]
+    : e.kind === 'call' ? e.args
+    : e.kind === 'piecewise' ? [...e.cases.flatMap(c => [c.cond, c.value]), ...(e.otherwise ? [e.otherwise] : [])]
+    : e.kind === 'ineq' || e.kind === 'eq' ? [e.l, e.r]
+    : e.kind === 'vec' || e.kind === 'list' ? e.items
+    : [];
+  if (e.kind === 'call' && rvNames.size && (WHOLE_EXPR_NAMES.has(e.name) || GEOM_STATEMENTS.has(e.name))) {
+    throw new Error([...freeVars(e)].some(n => rvNames.has(n))
+      ? `${e.name}(…) cannot take a random variable.`
+      : `${e.name}(…) must be the whole expression.`);
+  }
+  for (const k of kids) wholeRowForm(k, rvNames);
+}
+
+/**
  * Validate a resolved right-hand side as a derived random variable: a real
  * scalar in random variables, constants, and t.
  */
@@ -691,6 +714,7 @@ export function checkDerived(e: Expr, rvNames: ReadonlySet<string>, constNames: 
   if (e.kind === 'eq' || e.kind === 'ineq' || e.kind === 'vec' || e.kind === 'list') {
     throw new Error('A random variable must be a single value.');
   }
+  wholeRowForm(e, rvNames);
   if (usesComplex(e)) throw new Error('Random variables are real-valued.');
   for (const n of freeVars(e)) {
     if (rvNames.has(n) || constNames.has(n) || n === 't') continue;

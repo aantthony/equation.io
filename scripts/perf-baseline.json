@@ -27,6 +27,13 @@
     "p95FrameMs": 92.5,
     "longFrames": 40
   },
+  "orbit-3d-shredded-domain": {
+    "compilesAfterLoad": 5,
+    "compilesDuringAction": 0,
+    "avgFrameMs": 49.9,
+    "p95FrameMs": 123.4,
+    "longFrames": 40
+  },
   "animated-t": {
     "compilesAfterLoad": 6,
     "compilesDuringAction": 0,

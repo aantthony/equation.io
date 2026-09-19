@@ -130,6 +130,14 @@ const SCENARIOS: Scenario[] = [
     action: page => dragOnCanvas(page, 220, 120, 40),
   },
   {
+    // A field whose domain is shredded turns NaN on most march steps. The
+    // raymarcher refines domain edges on a per-ray budget; unbudgeted, this
+    // row cost 4–5x its frame time.
+    name: 'orbit-3d-shredded-domain',
+    rows: ['z = sqrt(sin(20 x y))'],
+    action: page => dragOnCanvas(page, 220, 120, 40),
+  },
+  {
     name: 'animated-t',
     rows: ['y = sin(x - t)', 'x^2 + y^2 = 4 + sin(t)'],
     action: page => settle(page, 60),

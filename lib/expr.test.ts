@@ -152,6 +152,15 @@ describe('toGLSL', () => {
     expect(toGLSL(parseExpr('x^y'))).toBe('eq_pow(x, y)');
   });
 
+  it('spells a compound base once, through a helper, instead of once per factor', () => {
+    expect(toGLSL(parseExpr('(sin(x) + 1)^2'))).toBe('eq_sq((sin(x) + 1.0))');
+    expect(toGLSL(parseExpr('(sin(x) + 1)^5'))).toBe('eq_ipow((sin(x) + 1.0), 5)');
+    expect(toGLSL(parseExpr('(sin(x) + 1)^1'))).toBe('((sin(x) + 1.0))');
+    expect(toGLSL(parseExpr('2^3'))).toBe('(2.0*2.0*2.0)');
+    expect(GLSL_PRELUDE).toContain('float eq_sq(float a)');
+    expect(GLSL_PRELUDE).toContain('float eq_ipow(float a, int n)');
+  });
+
   it('maps function names', () => {
     expect(toGLSL(parseExpr('ln(x)'))).toBe('log(x)');
     expect(toGLSL(parseExpr('sin(x)'))).toBe('sin(x)');

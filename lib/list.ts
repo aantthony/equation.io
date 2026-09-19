@@ -707,6 +707,12 @@ function lower(e: Expr, ctx: Ctx): Expr {
           : reduce(e.name, (arg as Expr & { kind: 'list' }).items, ctx);
       }
       if (!args.some(isSeq)) return { kind: 'call', name: e.name, args };
+      if (e.name === 'revolve') {
+        // Only a list PROFILE is a family waiting for its plan; a list in the
+        // axis position is just not an axis.
+        if (!isSeq(args[0])) return { kind: 'call', name: e.name, args }; // classify refuses the axis
+        throw new Error('revolve of a list is not supported yet — write one revolve(…) row per profile.');
+      }
       if (NO_LIST_INSIDE.has(e.name)) {
         throw new Error(`Lists cannot appear inside ${plainFnName(e.name)}(…).`);
       }

@@ -68,6 +68,8 @@ describe('canRenderOg', () => {
     // implicit3d is a 'draws' type, but only the z = f(x, y) form draws:
     // a sphere would preview as an EMPTY grid, the worst possible card.
     expect(canRenderOg(['x^2 + y^2 + z^2 = 9'])).toBe(false);
+    // revolve(f) IS such a surface, so it takes the same site-card fallback.
+    expect(canRenderOg(['revolve(sqrt(x))'])).toBe(false);
     // 2D rows are skipped in a 3D scene, so a mixed graph drops rows.
     expect(canRenderOg(['z = x^2 + y^2', 'y = sin(x)'])).toBe(false);
     expect(canRenderOg(['z = x^2 + y^2', '(2cos(2pi u), 2sin(2pi u))'])).toBe(false);
@@ -122,6 +124,11 @@ describe('previewGap', () => {
     const why = gap(['x^2 + y^2 + z^2 = 9'])!;
     expect(why).toContain('z = f(x, y)');
     expect(why).toContain('live app renders');
+  });
+
+  it('explains revolve(f) as the implicit surface it is', () => {
+    expect(gap(['revolve(sin(x) + 2)'])).toBe(gap(['y^2 + z^2 = (sin(x) + 2)^2']));
+    expect(gap(['revolve(sqrt(y), y)'])).toContain('live app renders');
   });
 
   it('says what the app does with 2D rows in a 3D scene', () => {

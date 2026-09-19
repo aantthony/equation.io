@@ -20,6 +20,7 @@ describe('llms.txt', () => {
       'domain(', // domain coloring
       'conformal(', // conformal grid maps
       'iter(', // escape-time fractals
+      'revolve(', // surfaces of revolution
       'sum[n=1..N]', // symbolically expanded sums, slider bounds
       "(x', y')", // ODE systems / phase portraits
       'd/dx', // symbolic derivatives

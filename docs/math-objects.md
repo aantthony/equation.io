@@ -10,7 +10,8 @@ and the seed of 5: named draggable points and vector arithmetic,
 `distance` and `angle` readouts, piecewise and restrictions, integrals (value, `int[0..x]` as a function, iterated),
 Normal/Uniform/Exponential and the continuous zoo (Gamma, Beta, ChiSquared,
 StudentT, LogNormal, Cauchy, Weibull) with derived arithmetic, scalar list broadcasting,
-CSV tables, regression, and Lorenz via a 3-component state. Static previews
+CSV tables, regression, Lorenz via a 3-component state, and `revolve(f)`
+surfaces of revolution. Static previews
 include system points/curves and direction fields. **What remains, and the PR
 order for it, is in [objects-finish-plan.md](objects-finish-plan.md).**
 Solving/tracing remains numerical and bounded; exact complex-root labels and
@@ -68,6 +69,7 @@ object must respect):
 | bare scalar in x only | graph `y = expr` | implicit curve |
 | bare scalar in x, y | scalar field | density shader |
 | equation/bare scalar with z | implicit surface | raymarcher |
+| `revolve(f)`, `revolve(f, y)` | surface of revolution, lowered to the implicit surface `y^2 + z^2 = f(x)^2` | raymarcher |
 | complex-valued expr in w | field lines + equipotentials | level-curve shader |
 | `domain(f)` / `conformal(f)` / `iter(step)` | domain coloring / conformal grid / escape-time fractal | dedicated shaders |
 | tuple, no free vars (t ok) | point (2D/3D) | overlay dot / billboard; draggable where its literals/constants can be written back |
@@ -196,7 +198,7 @@ Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
 | complex parametric curves (image of a path under f) | ~ | ✓ | rejected by classifier | plan #8. Does *not* need a complex CPU evaluator, as this row once claimed: `complexParts` splits the expression into a real 2D `pcurve` |
 | 3D vector fields / 3D ODE flows (Lorenz) | — | ✓ | fields 2D only; Lorenz runs as one 3-component state (a 3D point + `trail`) | plan #11–#12 (auto-seeded trajectories; click is ambiguous in 3D) |
 | spherical/cylindrical coordinate systems | — | ✓ | fields reject z (a 2D field used in a z equation already works) | plan #9 (substitution already suffices for surfaces) |
-| surfaces of revolution | — | ✓ | — | plan #7 (`revolve(f)` desugars to an implicit) |
+| surfaces of revolution | — | ✓ | ✓ `revolve(f)`, `revolve(f, y)` / `(f, z)` | done (plan #7): desugars at classify time to the implicit `y^2 + z^2 = f(x)^2`, so it costs no shader kind and a no-default piecewise f bounds the solid. A list of profiles waits for plan #14 |
 | space curves as intersections of two surfaces | — | ✓ | — ("2 equations in 3 unknowns") | plan tail — the non-square (2-of-3) extension of systems, which are square-only |
 | tables / data / regressions | ✓ | ✓ | ✓ CSV via `open(…)`, columns as lists, `Y ~ m X + b` | **shipped** — the rejection was revisited once lists gave it a data model (docs/lists-tables-plan.md) |
 | actions, tickers, scripting | ✓ | — | — | **rejected**: #31 delivers the legitimate mathematical core (simulation) declaratively, without a scripting model |
@@ -216,7 +218,7 @@ shape before value type:
    the left are the readable special case, arbitrary components the general
    one. RHS constant → solved point set; RHS in u → parametric solution
    curve (§6).
-3. Whole-expression forms: `domain` / `conformal` / `iter` / `tube` (and the
+3. Whole-expression forms: `domain` / `conformal` / `iter` / `tube` / `revolve` (and the
    phase-2/3 wrappers: `polyline`, `segment`, `polygon`, `circle`,
    restrictions).
 4. Tuples by free vars: none → point; u(,v) → parametric; x,y → vector field.
@@ -358,7 +360,7 @@ phases 2–5 is ordered, PR by PR, in
 | 1.5 — coherence wins | ~~complex roots `f(w) = c`~~ (numeric; exact labels → plan tail); ~~Argand points for complex constants~~; ~~"= value" readouts on constant rows~~ — **shipped** | done |
 | 2 — geometry | ~~tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`)~~, ~~named draggable points~~, ~~`segment`/`line`/`polygon`/`square`/`circle`~~, ~~`\|A-B\|`/`midpoint`/`dot`/`cross` readouts~~, ~~`polyline` and `vector` arrows (plan #1, settling §3's `[…]` collision)~~, ~~`distance`/`angle` measurements (plan #2)~~ — **shipped** | done |
 | 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (a no-default piecewise *is* the restriction, see §4), ~~definite integrals: value, `int[0..x]` as a function, iterated~~, ~~Uniform/Exponential and derived-variable arithmetic~~. ~~area shading on a definite-integral row~~, ~~continuous distribution zoo~~, ~~discrete distributions with a stem renderer~~, ~~discrete variables in derived arithmetic (plan #6)~~ — **shipped**. Dropped: "`∫₀ˣ` via CPU LUT texture" — `y = int[0..x] …` already plots through the quadrature sum; revisit only if a perf guard trips | done |
-| 4 — space | ~~Lorenz~~ as a 3-component state with `trail` (one trajectory). Remaining: `revolve()` (plan #7), complex parametric curves (plan #8), fields over z + 3D coordinate points (plan #9), 3D named points and geometry (plan #10), 3D vector fields with auto-seeded trajectories (plan #11), 3D chart flows + arrow glyphs (plan #12) | L |
+| 4 — space | ~~Lorenz~~ as a 3-component state with `trail` (one trajectory). ~~`revolve()`~~ (plan #7, shipped). Remaining: complex parametric curves (plan #8), fields over z + 3D coordinate points (plan #9), 3D named points and geometry (plan #10), 3D vector fields with auto-seeded trajectories (plan #11), 3D chart flows + arrow glyphs (plan #12) | L |
 | 5 — families | ~~scalar list math, ranges, zipped scatters, `hist`, CSV tables, regression~~. Remaining: lists broadcasting over any object kind (plan #13 CPU objects and point lists, #14 shader rows), sequences-as-lists interop (plan #15) | XL |
 | tail | exact complex-root labels; space curves from 2-of-3 systems; certified solving (plan #16+) | M each |
 
