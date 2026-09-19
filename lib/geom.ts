@@ -10,9 +10,10 @@
  * scalars, and points stay symbolic all the way to uniforms (dragging a point
  * never recompiles a shader).
  *
- * The statement forms segment/polygon/square desugar to an internal
- * '[polygon]' call holding a flat scalar vertex list (classify turns it into
- * a CPU-drawn polygon plot); circle desugars to an ordinary implicit equation.
+ * The statement forms segment/polyline/vector/polygon/square desugar to an
+ * internal '[polygon]'-style call holding a flat scalar vertex list (classify
+ * turns it into a CPU-drawn polygon plot); line and circle desugar to ordinary
+ * implicit equations.
  *
  * Tuple literals inside a call arrive flattened (the parser folds commas into
  * one argument list), so `polygon((0,0), A)` reaches us as [0, 0, A]; adjacent
@@ -23,7 +24,7 @@ import type { Expr } from './expr.ts';
 import { type GetMat, detOf, matVec, matrixFromList, solveVec, traceOf } from './mat.ts';
 
 /** Whole-statement geometry forms (like SPECIAL_FORMS, they never nest). */
-export const GEOM_STATEMENTS = new Set(['segment', 'line', 'polygon', 'square', 'circle']);
+export const GEOM_STATEMENTS = new Set(['segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle']);
 
 /** The derived scalar constants a point named `name` expands to. */
 export const pointComps = (name: string): [string, string] => [name + '_x', name + '_y'];
@@ -311,12 +312,15 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat): LV {
 }
 
 const num2: Expr = { kind: 'num', value: 2 };
+const VECTOR_USAGE = 'vector takes one or two 2D points: vector(A, B) from A to B, or vector(V) from the origin. 3-component vectors are not drawn yet.';
 const spaceVar = (name: 'x' | 'y'): Expr => ({ kind: 'var', name });
 
-/** Internal figure calls with flat scalar vertices: '[segment]' is open,
- *  '[polygon]' and '[square]' close and fill (the name only differs so
- *  classify can word its errors after the statement the user wrote). */
-export type FigureName = '[polygon]' | '[segment]' | '[square]';
+/** Internal figure calls with flat scalar vertices: '[segment]' and
+ *  '[polyline]' are open, '[vector]' is open with an arrowhead at its last
+ *  vertex, '[polygon]' and '[square]' close and fill (otherwise the name only
+ *  differs so classify can word its errors after the statement the user
+ *  wrote). */
+export type FigureName = '[polygon]' | '[segment]' | '[polyline]' | '[vector]' | '[square]';
 const polyCall = (name: FigureName, pts: Array<[Expr, Expr]>): Expr =>
   ({ kind: 'call', name, args: pts.flat() });
 
@@ -324,8 +328,16 @@ const polyCall = (name: FigureName, pts: Array<[Expr, Expr]>): Expr =>
  * Lower a whole statement: desugar a root-level geometry form, expand all
  * point arithmetic, and return an expression classify already understands.
  */
-export function lowerGeom(e: Expr, getComps: GetComps, getMat: GetMat = () => null): Expr {
+export function lowerGeom(
+  e: Expr, getComps: GetComps, getMat: GetMat = () => null, isList: (name: string) => boolean = () => false,
+): Expr {
   if (e.kind === 'call' && GEOM_STATEMENTS.has(e.name)) {
+    // A list of points — literal, named, or a named 2×2/3×3 one that reads as
+    // a matrix — is plan #13's; until then say so rather than "takes points".
+    if ((e.name === 'polyline' || e.name === 'vector')
+      && e.args.some(a => a.kind === 'list' || (a.kind === 'var' && (isList(a.name) || getMat(a.name) !== null)))) {
+      throw new Error(`${e.name} takes its points one by one for now — ${e.name === 'polyline' ? 'polyline(A, B, C)' : 'vector(A, B)'} — not as a list.`);
+    }
     const args = e.args.map(a => lower(a, getComps, getMat));
     if (e.name === 'circle') {
       // circle(C, r): the trailing argument is the scalar radius.
@@ -340,7 +352,10 @@ export function lowerGeom(e: Expr, getComps: GetComps, getMat: GetMat = () => nu
         r: sq(r.e),
       };
     }
-    const pts = pairPoints(e.name, args, e.name === 'polygon' ? 'A, B, C' : 'A, B');
+    // Tuple literals arrive flattened, so (1, 2, 3) cannot be told from
+    // (1, 2), 3: an odd run of scalars gets the one message true of both.
+    if (e.name === 'vector' && args.every(a => !a.vec) && args.length % 2 === 1) throw new Error(VECTOR_USAGE);
+    const pts = pairPoints(e.name, args, e.name === 'polygon' || e.name === 'polyline' ? 'A, B, C' : 'A, B');
     if (e.name === 'line') {
       if (pts.length !== 2) {
         throw new Error('line takes two points: line(A, B), with A = (0, 0) defined above.');
@@ -363,6 +378,16 @@ export function lowerGeom(e: Expr, getComps: GetComps, getMat: GetMat = () => nu
       }
       return polyCall('[segment]', pts);
     }
+    if (e.name === 'polyline') {
+      if (pts.length < 2) throw new Error('polyline needs at least 2 points: polyline(A, B, C).');
+      return polyCall('[polyline]', pts);
+    }
+    if (e.name === 'vector') {
+      // vector(A, B) is the arrow from A to B; vector(V) starts at the origin.
+      if (pts.length !== 1 && pts.length !== 2) throw new Error(VECTOR_USAGE);
+      const zero: Expr = { kind: 'num', value: 0 };
+      return polyCall('[vector]', pts.length === 1 ? [[zero, zero], pts[0]] : pts);
+    }
     if (e.name === 'square') {
       if (pts.length !== 2) throw new Error('square takes two points: square(A, B).');
       // The square erected on side A→B, on the left of the direction A→B.
@@ -380,4 +405,35 @@ export function lowerGeom(e: Expr, getComps: GetComps, getMat: GetMat = () => nu
     return polyCall('[polygon]', pts);
   }
   return toExpr(lower(e, getComps, getMat));
+}
+
+/**
+ * The head of an arrow whose shaft runs (x0, y0) → (x1, y1) in screen pixels:
+ * the triangle tip/left/right with its tip at (x1, y1), plus shaftEnd, where
+ * the stroke should stop instead of at the tip — a little inside the head, so
+ * its blunt end never pokes through the point and no seam opens at the base.
+ * `size` is the head length in pixels — fixed on screen, so the head does not
+ * scale with zoom — shrinking only when the shaft itself is shorter. Null for
+ * a zero-length (or non-finite) shaft, which has no direction. Shared by
+ * render2d and the og rasterizer so both draw the same arrow.
+ */
+export interface ArrowHead {
+  tip: [number, number];
+  left: [number, number];
+  right: [number, number];
+  shaftEnd: [number, number];
+}
+export function arrowHead(x0: number, y0: number, x1: number, y1: number, size: number): ArrowHead | null {
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  if (!(len > 0) || !Number.isFinite(len)) return null;
+  const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+  const h = Math.min(size, len);
+  const w = h * 0.4; // half-width: a 2.5:2 head, slim enough to read as a direction
+  const bx = x1 - ux * h, by = y1 - uy * h;
+  return {
+    tip: [x1, y1],
+    left: [bx - uy * w, by + ux * w],
+    right: [bx + uy * w, by - ux * w],
+    shaftEnd: [bx + ux * h * 0.25, by + uy * h * 0.25],
+  };
 }

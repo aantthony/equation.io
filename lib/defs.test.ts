@@ -32,6 +32,8 @@ describe('scanDefinition', () => {
     // Graphs saved before gamma/sinc/… existed may define these names.
     expect(scanDefinition('gamma(x) = 1/sqrt(1-x^2)')).toMatchObject({ kind: 'fn', name: 'gamma' });
     expect(scanDefinition('sinc = 0.5')).toMatchObject({ kind: 'const', name: 'sinc' });
+    expect(scanDefinition('vector = (1, 2)')).toMatchObject({ kind: 'const', name: 'vector' });
+    expect(scanDefinition('polyline(x) = 2x')).toMatchObject({ kind: 'fn', name: 'polyline' });
     const { defs, errors } = buildDefs([{ kind: 'fn', name: 'gamma', params: ['x'], rhs: '2x' }]);
     expect(errors.size).toBe(0);
     const e = resolveExpr(parseExpr('gamma(3) + 1', new Set(['gamma'])), n => defs.fns.get(n));

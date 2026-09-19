@@ -10,6 +10,7 @@
  */
 import { densityAt, pdfExpr, shadePolygon } from '../lib/dist.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
+import { arrowHead } from '../lib/geom.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import type { Plot } from '../lib/plot.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
@@ -144,6 +145,10 @@ function fillNegative(r: Raster, grid: Float64Array, c: [number, number, number]
     }
   }
 }
+
+/** Arrowhead length for vector(…) rows, in raster pixels (the og canvas is
+ *  about half the app's size, so this is smaller than render2d's 12). */
+const ARROW_HEAD_PX = 9;
 
 /**
  * Scanline fill of a closed polygon given in screen coordinates, using the
@@ -486,8 +491,22 @@ function renderRow2D(
         sx.push(toScreenX(r, v, vals[i]));
         sy.push(toScreenY(r, v, vals[i + 1]));
       }
-      const { closed } = cls.plot;
+      const { closed, arrow } = cls.plot;
       if (closed) fillPolygon(r, sx, sy, color, 0.16);
+      // vector(): a solid head at the last vertex, fixed in pixels like the
+      // app's; the shaft stops inside it so the tip stays sharp.
+      const n = sx.length;
+      const head = arrow ? arrowHead(sx[n - 2], sy[n - 2], sx[n - 1], sy[n - 1], ARROW_HEAD_PX) : null;
+      if (head) {
+        // drawLine inks pixels round(c) and round(c) + 1, so in fillPolygon's
+        // pixel-center coordinates the stroke's axis runs through round(c) + 1:
+        // shift the head by that much, snapped at the tip, to sit on the shaft.
+        const ox = Math.round(head.tip[0]) + 1 - head.tip[0];
+        const oy = Math.round(head.tip[1]) + 1 - head.tip[1];
+        const tri = [head.tip, head.left, head.right];
+        fillPolygon(r, tri.map(p => p[0] + ox), tri.map(p => p[1] + oy), color, 1);
+        [sx[n - 1], sy[n - 1]] = head.shaftEnd;
+      }
       for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color);
       if (closed) drawLine(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);
       return;

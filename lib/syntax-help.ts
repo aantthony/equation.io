@@ -25,6 +25,8 @@ const signatures: Record<string, [string, string]> = {
   min: ['min(a, b) or min(L)', 'Minimum'], max: ['max(a, b) or max(L)', 'Maximum'],
   mod: ['mod(a, b)', 'Remainder modulo b'], gcd: ['gcd(a, b)', 'Greatest common divisor'],
   segment: ['segment(A, B)', 'Segment joining two points'],
+  polyline: ['polyline(A, B, C, …)', 'Open path through points'],
+  vector: ['vector(A, B) or vector(V)', 'Arrow from A to B, or from the origin to V'],
   line: ['line(A, B)', 'Line through two points'],
   circle: ['circle(A, r)', 'Circle with center A and radius r'],
   polygon: ['polygon(A, B, C, …)', 'Polygon through points'],

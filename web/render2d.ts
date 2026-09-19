@@ -4,6 +4,7 @@
  * F(x,y) is evaluated per pixel, and the curve F=0 is drawn where the
  * screen-space distance estimate |F| / |∇F| is under the line width.
  */
+import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE } from '../lib/glsl.ts';
 import { ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
@@ -725,6 +726,9 @@ export class Renderer2D {
   }
 }
 
+/** Arrowhead length for vector(…) rows, in CSS px. */
+const ARROW_HEAD_PX = 12;
+
 export interface Overlay2D {
   /** hot: pointer is over it (or dragging it) — drawn with a grab halo.
    *  label: text drawn beside the point (a named point's name).
@@ -738,8 +742,9 @@ export interface Overlay2D {
   clouds?: Array<{ xs: Float64Array; ys: Float64Array; color: string; r?: number }>;
   /** closed joins the last vertex back to the first; fill (a CSS color,
    *  usually translucent) paints the enclosed region when every vertex is
-   *  finite. */
-  polylines: Array<{ pts: number[]; color: string; closed?: boolean; fill?: string; width?: number }>;
+   *  finite. arrow puts a head at the last vertex, sized in CSS px so it does
+   *  not scale with zoom. */
+  polylines: Array<{ pts: number[]; color: string; closed?: boolean; fill?: string; width?: number; arrow?: boolean }>;
   /** Vertical bars from y = 0, halfWidth in math units (data-list bar mode). */
   bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
 }
@@ -828,9 +833,16 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
       ctx.beginPath();
       let pen = false;
       let broken = false;
-      for (let i = 0; i + 1 < line.pts.length; i += 2) {
-        const sx = toScreenX(line.pts[i]);
-        const sy = toScreenY(line.pts[i + 1]);
+      const n = line.pts.length;
+      const head = line.arrow && n >= 4
+        ? arrowHead(toScreenX(line.pts[n - 4]), toScreenY(line.pts[n - 3]),
+          toScreenX(line.pts[n - 2]), toScreenY(line.pts[n - 1]), ARROW_HEAD_PX)
+        : null;
+      for (let i = 0; i + 1 < n; i += 2) {
+        // The shaft stops inside the head, so the tip stays sharp.
+        const last = head && i + 2 >= n;
+        const sx = last ? head.shaftEnd[0] : toScreenX(line.pts[i]);
+        const sy = last ? head.shaftEnd[1] : toScreenY(line.pts[i + 1]);
         if (!isFinite(sx) || !isFinite(sy)) { pen = false; broken = true; continue; }
         if (pen) ctx.lineTo(sx, sy);
         else { ctx.moveTo(sx, sy); pen = true; }
@@ -841,6 +853,15 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
         ctx.fill();
       }
       ctx.stroke();
+      if (head) {
+        ctx.beginPath();
+        ctx.moveTo(head.tip[0], head.tip[1]);
+        ctx.lineTo(head.left[0], head.left[1]);
+        ctx.lineTo(head.right[0], head.right[1]);
+        ctx.closePath();
+        ctx.fillStyle = line.color;
+        ctx.fill();
+      }
     }
     for (const pt of extras.points) {
       const sx = toScreenX(pt.x);

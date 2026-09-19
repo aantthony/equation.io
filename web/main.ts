@@ -930,6 +930,7 @@ function render() {
             color: css,
             closed: plot.closed,
             fill: plot.closed ? cssColorA(color, 0.16) : undefined,
+            arrow: plot.arrow,
           });
           break;
         }
@@ -1552,7 +1553,7 @@ function recompileAll() {
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
-      parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
+      parsed = lowerGeom(parsed, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null);
       // Lists broadcast/reduce away: the row becomes a plain list literal
       // (dots, bars, or a scatter) or a scalar expression (reductions).
       parsed = lowerLists(parsed, getList, ropts);
@@ -2985,6 +2986,7 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['perpendicular bisector', 'A = (-2, -1); B = (2, 1.5); segment(A, B); M = midpoint(A, B); line(M, M + perp(B - A))'],
     ['circle through a point', 'C = (0, 0); P = (2, 1); circle(C, |P - C|); segment(C, P)'],
     ['square on a segment', 'A = (-1, 0); B = (2, 1); square(A, B)'],
+    ['vector sum (parallelogram rule)', 'A = (3, 1); B = (1, 2); vector(A); vector(B); vector(A + B); polyline(A, A + B, B)'],
     ['thébault’s theorem', 'A = (0, 0); B = (4, 0.5); D = (1, 2.5); C = B + D - A; '
       + 'polygon(A, B, C, D); square(B, A); square(C, B); square(D, C); square(A, D); '
       + 'P = midpoint(A, B) - perp(B - A)/2; Q = midpoint(B, C) - perp(C - B)/2; '
