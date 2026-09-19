@@ -162,8 +162,8 @@ describe('classify', () => {
     expect(f.animated).toBe(true); // streamlines drift continuously
     expect(cls('(y, -sin(x))').plot.type).toBe('vfield2d');
     expect(cls('(cos(t) - y, x)').plot.type).toBe('vfield2d');
-    expect(() => cls('(x, y, z)')).toThrow(/2D only/);
-    expect(() => cls('(x, y, 1)')).toThrow(/2 components/);
+    expect(cls('(x, y, z)').plot.type).toBe('vfield3d');
+    expect(cls('(x, y, 1)').plot.type).toBe('vfield3d');
   });
 
   it('routes ODE notation to vector fields', () => {
@@ -300,7 +300,7 @@ describe('systems', () => {
 
   it('rejects a system that is not square', () => {
     expect(() => cls('(x, y) = (1, 2, 3)')).toThrow(/Mismatched components/);
-    expect(() => cls('(x + z, y) = (0, 0)')).toThrow(/2 equations in 3 unknowns/);
+    expect(cls('(x + z, y) = (0, 0)').plot.type).toBe('spacecurve');
     expect(() => cls('(x, y, x - y) = (0, 0, 0)')).toThrow(/3 equations in 2 unknowns/);
   });
 

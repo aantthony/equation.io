@@ -758,3 +758,63 @@ export function polynomialRoots(e: Expr, v: string): PolyRoot[] | null | 'zero' 
   out.sort((a, b) => a.x - b.x);
   return out;
 }
+
+export interface ComplexRootLabel { re: number; im: number; label: string }
+/** Rational linear and quadratic factors, with exact division checking every
+ * candidate. Factoring work is bounded; a remaining factor keeps its exact
+ * defining-polynomial label instead of inventing a radical approximation. */
+export function complexRootLabels(e: Expr): { roots: ComplexRootLabel[]; rootOf?: string } | null {
+  const p = exprToPoly(e, 'w');
+  if (!p || p.length < 2 || p.length > 17) return null;
+  const roots: ComplexRootLabel[] = [];
+  const rationalLabel = (p: bigint, q: bigint) => { const [a, b] = ratNorm(p, q); return b === 1n ? String(a) : fmtRat(a, b); };
+  const real = polynomialRoots(e, 'w');
+  if (real && real !== 'zero') for (const r of real) if (r.sym || (Number.isInteger(r.x) && isRationalRoot(primitive(p).map(c => c.n), BigInt(r.x), 1n))) roots.push({ re: r.x, im: 0, label: r.sym ?? String(r.x) });
+  let budget = 16000;
+  const divisors = (v: bigint): bigint[] => {
+    v = v < 0n ? -v : v;
+    if (v > 10000n || !v) return [];
+    const out: bigint[] = [];
+    for (let k = 1n; k * k <= v; k++) if (v % k === 0n) { out.push(k); if (k * k !== v) out.push(v / k); }
+    return out;
+  };
+  const quadratic = (f: ZPoly) => {
+    const [c, b, a] = f, disc = b * b - 4n * a * c;
+    if (disc >= 0n) return;
+    const { t, s } = squarePart(-disc);
+    const re = Number(-b) / Number(2n * a), im = Math.abs(Number(t) * Math.sqrt(Number(s)) / Number(2n * a));
+    const reLabel = rationalLabel(-b, 2n * a);
+    const imag = s === 1n ? rationalLabel(t, 2n * (a < 0n ? -a : a)) : fmtQuadVal(0n, t, 2n * (a < 0n ? -a : a), s);
+    if (!imag || (b !== 0n && !reLabel)) return;
+    for (const sign of [-1, 1]) {
+      const part = imag === '1' ? 'i' : `${imag} i`;
+      roots.push({ re, im: sign * im, label: b === 0n ? (sign < 0 ? '-' : '') + part : `${reLabel} ${sign < 0 ? '−' : '+'} ${part}` });
+    }
+  };
+  for (const { p: factor } of squareFree(primitive(p))) {
+    let rem = factor;
+    while (rem.length > 1 && rem[0].n === 0n) { roots.push({ re: 0, im: 0, label: '0' }); rem = rem.slice(1); }
+    // Remove rational real factors before looking for quadratic factors.
+    const rs = realRootsSquareFree(primitive(rem).map(c => c.n));
+    for (const root of rs) {
+      const rat = ratApprox(root, 1000000);
+      if (!rat || rem.length < 2) continue;
+      const divisor = [{ n: -rat[0], d: 1n }, { n: rat[1], d: 1n }];
+      const qr = fpdivmod(rem, divisor);
+      if (!qr.r.length) rem = primitive(qr.q);
+    }
+    while (rem.length > 3 && budget > 0) {
+      let found = false;
+      const z = primitive(rem).map(c => c.n);
+      search: for (const a of divisors(z[z.length - 1])) for (const c0 of divisors(z[0])) for (const sign of [-1n, 1n]) for (let b = -32n; b <= 32n; b++) {
+        if (--budget <= 0) break search;
+        const f = [sign * c0, b, a];
+        const qr = fpdivmod(rem, f.map(n => ({ n, d: 1n })));
+        if (!qr.r.length) { quadratic(f); rem = primitive(qr.q); found = true; break search; }
+      }
+      if (!found) break;
+    }
+    if (rem.length === 3) quadratic(primitive(rem).map(c => c.n));
+  }
+  return { roots, rootOf: fmtPoly(primitive(p).map(c => c.n))?.replaceAll('x', 'w') };
+}

@@ -64,6 +64,7 @@ const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
 export const NO_LIST_INSIDE = new Set([
   'domain', 'conformal', 'iter', 'tube',
   '[polygon]', '[segment]', '[polyline]', '[vector]', '[square]',
+  '[polygon3]', '[segment3]', '[polyline3]', '[vector3]',
 ]);
 
 export { plainFnName };

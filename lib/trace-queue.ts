@@ -15,6 +15,8 @@ export function traceEnvironment(params: readonly string[], animated: boolean, d
 }
 
 export interface TraceInput {
+  kind?: 'system' | 'field' | 'intersection' | 'certify';
+  glyphs?: boolean;
   residuals: Expr[];
   dim: 2 | 3;
   lo: number[];
@@ -22,7 +24,7 @@ export interface TraceInput {
   env: Record<string, number>;
   angular?: boolean[];
 }
-export type TraceResult = { pts: number[][]; error?: string };
+export type TraceResult = { pts: number[][]; info?: string; error?: string };
 export type TraceMessage = { token: number; input: TraceInput };
 interface Job extends TraceMessage {
   row: number;

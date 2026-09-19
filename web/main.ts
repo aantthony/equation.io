@@ -1,3 +1,5 @@
+import { complexRootLabel } from '../lib/complex-label.ts';
+import { lowerObjects } from '../lib/object-lists.ts';
 import { initSyntaxHelp } from './syntax-help.ts';
 import { declaredNames, scanRegressions, formatFit } from '../lib/regression.ts';
 import { PointTrail } from '../lib/point-trail.ts';
@@ -57,16 +59,17 @@ import { type IntShade, type ShadeRun, type ShadeSampler, evalSampler, minusTint
 import { compileSampler } from '../lib/vm.ts';
 import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
+import { fieldEvaluator, streamline } from '../lib/flow.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, planarField, sampleGradMag } from '../lib/grid.ts';
 import { CURVE_SAMPLES, type PathSampler, pathSampler } from '../lib/path.ts';
-import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
+import { type Classified, classify, classifyRow, plotReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
-import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
+import { classifySeqRec, scanSeqRec, sequenceResolver } from '../lib/seq.ts';
 import { type StateSystem, advanceState, buildStateSystem, initialState } from '../lib/state.ts';
 import { splitStatements } from '../lib/statements.ts';
 import {
@@ -100,6 +103,10 @@ import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
 
 interface Equation {
+  familyParent?: Equation;
+  familyShade?: number;
+  showArrows?: boolean;
+  certify?: boolean;
   trail?: PointTrail;
   /** A definite-integral row's shaded area: the integrand compiled once per
    *  shade, and resampled only when the x-window or a value it reads (bounds,
@@ -155,6 +162,7 @@ interface Equation {
   toggleUI?: { box: HTMLElement; btn: HTMLButtonElement };
   /** Cached system solutions for the box and constants they were solved at. */
   traceTarget?: string;
+  traceClock?: number;
   sysCache?: { key: string; text: string; env: string; stableEnv: string; lo: number[]; hi: number[]; pts: number[][] };
 }
 
@@ -546,29 +554,42 @@ const traceQueue = new TraceQueue((message: TraceMessage) => {
   }
 });
 
+const familyRows = new WeakMap<Classified, Equation[]>();
+let familyId = -100000;
+function renderMembers(eq: Equation): Equation[] {
+  const cls = eq.cls!;
+  if (cls.plot.type !== 'family') return [eq];
+  let children = familyRows.get(cls);
+  if (!children) {
+    children = cls.plot.members.map((m, k) => ({ ...eq, id: familyId--, cls: m.cls, parsed: m.expr,
+      familyParent: eq, familyShade: cls.plot.type === 'family' ? .45 * k / Math.max(1, cls.plot.members.length - 1) : 0,
+      sysCache: undefined, pathCache: undefined, traceTarget: undefined }));
+    familyRows.set(cls, children);
+  }
+  return children;
+}
+const rowColor = (eq: Equation): [number, number, number] => theme.palette[eq.colorIndex].map(c => c + (1 - c) * (eq.familyShade ?? 0)) as [number, number, number];
+const liveRow = (eq: Equation) => equations.includes(eq.familyParent ?? eq) && (!eq.familyParent || (!!eq.familyParent.cls && renderMembers(eq.familyParent).includes(eq)));
+
 function render() {
   if (!syncCanvasSize()) return;
   applyViewportRows();
   const dpr = window.devicePixelRatio || 1;
   const time = graphTime();
-  const active = equations.filter(e => e.cls && !e.error);
+  const active = equations.filter(e => e.cls && !e.error).flatMap(renderMembers);
   mode = active.some(e => e.cls!.needs3D) ? '3d' : '2d';
 
   // States carry between frames, so they are integrated up to now before
   // anything reads them; the constants may then be formulas in those states.
   constEnv = currentConstEnv(time);
 
-  // Value rows draw nothing; their readout follows sliders, states and t.
-  for (const eq of active) {
-    const plot = eq.cls!.plot;
-    if (plot.type !== 'value') continue;
-    let text: string;
-    try { text = valueReadout(evaluate(plot.expr, { ...constEnv, t: time })); }
-    catch { continue; }
-    if (text !== eq.info) {
-      eq.info = text;
-      if (eq.infoEl) eq.infoEl.textContent = text;
-    }
+  // Readouts belong to the source row, even when its family has many draws.
+  for (const eq of equations) {
+    if (!eq.cls || eq.error) continue;
+    try {
+      const text = plotReadout(eq.cls.plot, { ...constEnv, t: time });
+      if (text !== null && text !== eq.info) { eq.info = text; if (eq.infoEl) eq.infoEl.textContent = text; }
+    } catch { /* incomplete values while editing */ }
   }
 
   for (const eq of active) {
@@ -621,52 +642,11 @@ function render() {
   // RK4 streamline of the normalized field through (x0, y0), both directions.
   // Normalizing makes it a direction field: uniform arc-length steps, and the
   // same trajectories (dy/dx = f slope fields integrate as (1, f) normalized).
-  const integralCurve = (comps: [Expr, Expr], x0: number, y0: number, time: number): number[] => {
-    const env: Record<string, number> = { ...constEnv, t: time, x: 0, y: 0 };
-    const f = (x: number, y: number): [number, number] | null => {
-      env.x = x;
-      env.y = y;
-      let vx: number, vy: number;
-      try {
-        vx = evaluate(comps[0], env);
-        vy = evaluate(comps[1], env);
-      } catch {
-        return null;
-      }
-      const m = Math.hypot(vx, vy * (view.ratio ?? 1));
-      if (!isFinite(m) || m < 1e-12) return null;
-      return [vx / m, vy / m];
-    };
-    const h = 2.5 * view.upp; // ~2.5 px of arc per step
-    const boundW = 1.5 * gl.drawingBufferWidth * view.upp;
-    const boundH = 1.5 * gl.drawingBufferHeight * (view.upp / (view.ratio ?? 1));
-    const side = (sgn: number): number[] => {
-      const out: number[] = [];
-      let x = x0;
-      let y = y0;
-      for (let i = 0; i < ODE_STEPS; i++) {
-        const k1 = f(x, y);
-        if (!k1) break;
-        const k2 = f(x + sgn * (h / 2) * k1[0], y + sgn * (h / 2) * k1[1]);
-        if (!k2) break;
-        const k3 = f(x + sgn * (h / 2) * k2[0], y + sgn * (h / 2) * k2[1]);
-        if (!k3) break;
-        const k4 = f(x + sgn * h * k3[0], y + sgn * h * k3[1]);
-        if (!k4) break;
-        x += sgn * (h / 6) * (k1[0] + 2 * k2[0] + 2 * k3[0] + k4[0]);
-        y += sgn * (h / 6) * (k1[1] + 2 * k2[1] + 2 * k3[1] + k4[1]);
-        if (!isFinite(x) || !isFinite(y)) break;
-        out.push(x, y);
-        if (Math.abs(x - view.cx) > boundW || Math.abs(y - view.cy) > boundH) break;
-      }
-      return out;
-    };
-    const back = side(-1);
-    const pts: number[] = [];
-    for (let i = back.length - 2; i >= 0; i -= 2) pts.push(back[i], back[i + 1]);
-    pts.push(x0, y0);
-    pts.push(...side(1));
-    return pts;
+  const integralCurve = (comps: [Expr, Expr], x0: number, y0: number, time: number, uniforms: Record<string, number> = {}): number[] => {
+    const w = 1.5 * gl.drawingBufferWidth * view.upp;
+    const h = 1.5 * gl.drawingBufferHeight * view.upp / (view.ratio ?? 1);
+    return streamline(fieldEvaluator(comps, { ...constEnv, ...uniforms, t: time }), [x0, y0], 2.5 * view.upp,
+      [view.cx - w, view.cy - h], [view.cx + w, view.cy + h], ODE_STEPS, [1, view.ratio ?? 1]).flat();
   };
 
   const samplePoint = (eq: Equation): number[] | null => {
@@ -725,8 +705,9 @@ function render() {
       environment = traceEnvironment(cls.params, cls.animated, defs);
       traceEnvironments.set(cls, environment);
     }
-    const { env: envKey, stableEnv } = environment(constEnv, time);
-    const key = systemKey(cls);
+    const traceTime = cls.plot.type === 'vfield3d' ? Math.floor(time * 4) / 4 : time;
+    const { env: envKey, stableEnv } = environment(constEnv, traceTime);
+    const key = systemKey(cls) + ':' + !!eq.showArrows + ':' + !!eq.certify;
     const c = eq.sysCache;
     if (c && c.key === key && c.text === eq.text && c.env === envKey && c.lo.length === dim
       && vlo.every((v, k) => c.lo[k] <= v && c.hi[k] >= vhi[k] && c.hi[k] - c.lo[k] <= 6 * (vhi[k] - v))) {
@@ -737,23 +718,28 @@ function render() {
     const pad = vhi.map((v, k) => 0.25 * (v - vlo[k]));
     const lo = vlo.map((v, k) => v - pad[k]);
     const hi = vhi.map((v, k) => v + pad[k]);
-    if (cls.plot.type === 'system' && cls.plot.parametric) {
+    if ((cls.plot.type === 'system' && cls.plot.parametric) || cls.plot.type === 'vfield3d' || cls.plot.type === 'spacecurve' || (cls.plot.type === 'system' && eq.certify)) {
       const jobKey = JSON.stringify([key, envKey, lo, hi]);
       const target = JSON.stringify([key, stableEnv, lo, hi]);
-      eq.traceTarget = target;
+      if ((cls.plot.type === 'vfield3d' || eq.certify) && eq.traceTarget === target && performance.now() - (eq.traceClock ?? -Infinity) < 250) return c && c.stableEnv === stableEnv ? c.pts : [];
+      eq.traceTarget = target; eq.traceClock = performance.now();
+      if (eq.certify && eq.info !== 'Certifying search box…') { eq.info = 'Certifying search box…'; reconcile(); }
       traceQueue.request(eq.id, jobKey, {
-        residuals, dim, lo, hi, env: { ...constEnv, t: time }, angular: cls.plot.angular,
+        residuals, dim, lo, hi, env: { ...constEnv, t: traceTime },
+        kind: eq.certify ? 'certify' : cls.plot.type === 'spacecurve' ? 'intersection' : cls.plot.type === 'vfield3d' ? 'field' : 'system', glyphs: eq.showArrows,
+        angular: cls.plot.type === 'system' ? cls.plot.angular : undefined,
       }, result => {
         // A result for edited/deleted math must never restore an old curve.
-        if (!equations.includes(eq) || !eq.cls || systemKey(eq.cls) !== key) return;
+        if (!liveRow(eq) || !eq.cls || systemKey(eq.cls) + ':' + !!eq.showArrows + ':' + !!eq.certify !== key) return;
         // A trace from a briefly zoomed-in view must not replace the full
         // curve after the user zooms back out. Only moving values may lag.
         if (eq.traceTarget !== target) return;
         if (result.error) {
-          eq.error = result.error;
+          (eq.familyParent ?? eq).error = result.error;
           reconcile();
         } else {
           eq.sysCache = { key, text: eq.text, env: envKey, stableEnv, lo, hi, pts: result.pts };
+          if (result.info) { eq.info = result.info; reconcile(); }
         }
         requestRender();
       });
@@ -773,15 +759,16 @@ function render() {
   if (mode === '3d') {
     const scene: Scene3D = { implicits: [], psurfaces: [], curves: [], segments: [], tubes: [], points: [] };
     for (const eq of active) {
-      const color = theme.palette[eq.colorIndex];
+      const color = rowColor(eq);
       const plot = eq.cls!.plot;
       const params = eq.cls!.params;
+      const uniforms = Object.fromEntries(Object.entries(eq.cls!.uniforms ?? {}).map(([k, v]) => ['u_' + k, v]));
       switch (plot.type) {
         case 'implicit2d': // extrudes to its true locus (a vertical sheet)
-          scene.implicits.push({ field: plot.field, color, params });
+          scene.implicits.push({ field: plot.field, color, params, uniforms });
           break;
         case 'implicit3d':
-          scene.implicits.push({ field: plot.field, grad: plot.grad, color, params });
+          scene.implicits.push({ field: plot.field, grad: plot.grad, color, params, uniforms });
           break;
         case 'scalar2d':
         case 'complex2d':
@@ -790,7 +777,6 @@ function render() {
         case 'fractal2d':
         case 'ineq2d':
         case 'vfield2d':
-        case 'polygon':
         case 'vlist':
         case 'dlist':
         case 'histogram':
@@ -802,6 +788,30 @@ function render() {
         case 'prob':
         case 'expect':
           break; // 2D-only plots (densities, flows, sequences, planar figures); skipped in 3D scenes
+        case 'spacecurve': {
+          const pts = solveFor(eq, 3, plot.residuals);
+          scene.curves.push({ pts: new Float32Array(pts.flat()), color });
+          break;
+        }
+        case 'vfield3d': {
+          const pts = solveFor(eq, 3, plot.comps);
+          let path: number[] = [];
+          const flush = () => { if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color, arrow: eq.showArrows, fade: !eq.showArrows }); path = []; };
+          for (const p of pts) { if (p.every(Number.isFinite)) path.push(...p); else flush(); }
+          flush();
+          break;
+        }
+        case 'polygon': {
+          const dim = plot.dim ?? 2;
+          const vals = plot.pts.map(p => evaluate(p, { ...constEnv, t: time }));
+          if (!vals.every(Number.isFinite)) break;
+          const pts: number[] = [];
+          for (let k = 0; k < vals.length; k += dim) pts.push(vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0);
+          const triangle = plot.closed && pts.length === 9;
+          if (plot.closed) pts.push(...pts.slice(0, 3));
+          scene.curves.push({ pts: new Float32Array(pts), color, arrow: plot.arrow, triangle });
+          break;
+        }
         case 'dscatter': {
           // One sprite per point (see CLOUD_3D_MAX); any row with more than
           // that is rejected at compile time — flat clouds included, since
@@ -828,7 +838,7 @@ function render() {
           break;
         }
         case 'psurface':
-          scene.psurfaces.push({ comps: plot.comps, du: plot.du, dv: plot.dv, color, params });
+          scene.psurfaces.push({ comps: plot.comps, du: plot.du, dv: plot.dv, color, params, uniforms });
           break;
         case 'trail': {
           scene.curves.push({ pts: new Float32Array(eq.trail!.coordinates(3)), color });
@@ -889,7 +899,7 @@ function render() {
         }
         case 'point': {
           const p = samplePoint(eq);
-          if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+          if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name });
           break;
         }
         case 'system':
@@ -905,7 +915,7 @@ function render() {
       }
     }
     r3d.render(camera, scene, time, constEnv);
-    drawLabels3D(overlayCtx, camera, dpr);
+    drawLabels3D(overlayCtx, camera, dpr, scene.points);
   } else {
     const layers: Required<Layers2D> = {
       levels: [], fractals: [], domains: [], conformals: [], vfields: [],
@@ -932,31 +942,32 @@ function render() {
       return f.angular ? angularSpacing(cupp, 90) : niceSpacing(cupp, 90);
     };
     for (const eq of active) {
-      const color = theme.palette[eq.colorIndex];
+      const color = rowColor(eq);
       const css = cssColor(color);
       const plot = eq.cls!.plot;
       const params = eq.cls!.params;
+      const uniforms = Object.fromEntries(Object.entries(eq.cls!.uniforms ?? {}).map(([k, v]) => ['u_' + k, v]));
       switch (plot.type) {
         case 'implicit2d':
-          layers.curves.push({ field: plot.field, color, params });
+          layers.curves.push({ field: plot.field, color, params, uniforms });
           if (eq.showLevels && plot.levels) {
             const f = plot.levels;
             const sp = levelSpacing(f);
             layers.levels.push({ glsl: f.glsl, gradGlsl: f.gradGlsl, params: f.params, major: sp.major, minor: sp.minor, color });
           }
           break;
-        case 'ineq2d': layers.ineqs.push({ field: plot.field, edges: plot.edges, color, params }); break;
-        case 'scalar2d': layers.scalars.push({ field: plot.field, color, params }); break;
-        case 'complex2d': layers.complexes.push({ field: plot.field, color, params }); break;
-        case 'domain2d': layers.domains.push({ field: plot.field, color, params }); break;
-        case 'conformal2d': layers.conformals.push({ field: plot.field, color, params }); break;
+        case 'ineq2d': layers.ineqs.push({ field: plot.field, edges: plot.edges, color, params, uniforms }); break;
+        case 'scalar2d': layers.scalars.push({ field: plot.field, color, params, uniforms }); break;
+        case 'complex2d': layers.complexes.push({ field: plot.field, color, params, uniforms }); break;
+        case 'domain2d': layers.domains.push({ field: plot.field, color, params, uniforms }); break;
+        case 'conformal2d': layers.conformals.push({ field: plot.field, color, params, uniforms }); break;
         case 'fractal2d':
-          layers.fractals.push({ step: plot.step, seed: plot.seed, maxIter: plot.maxIter, color, params });
+          layers.fractals.push({ step: plot.step, seed: plot.seed, maxIter: plot.maxIter, color, params, uniforms });
           break;
         case 'vfield2d': {
-          layers.vfields.push({ fx: plot.fx, fy: plot.fy, color, params });
+          layers.vfields.push({ fx: plot.fx, fy: plot.fy, color, params, uniforms });
           drops.forEach((d, i) => {
-            extras.polylines.push({ pts: integralCurve(plot.comps, d.x, d.y, time), color: css });
+            extras.polylines.push({ pts: integralCurve(plot.comps, d.x, d.y, time, eq.cls!.uniforms), color: css });
             extras.points.push({ x: d.x, y: d.y, color: css, hot: hotPoint === `drop${i}` });
           });
           break;
@@ -1086,7 +1097,7 @@ function render() {
           break;
         }
         case 'cobweb': {
-          layers.curves.push({ field: plot.curveField, color, params });
+          layers.curves.push({ field: plot.curveField, color, params, uniforms });
           const seed = seedOf(plot.a0Name);
           const dLo = Math.max(xmin, view.cy - halfH);
           const dHi = Math.min(xmax, view.cy + halfH);
@@ -1205,7 +1216,7 @@ function render() {
             const set = coordinatePointWriter(eq, plot.coordinates);
             points.forEach((p, i) => {
               const key = `sys${eq.id}:${i}`;
-              extras.points.push({ x: p[0], y: p[1], color: css, hot: hotPoint === key });
+              extras.points.push({ x: p[0], y: p[1], color: css, hot: hotPoint === key, label: complexRootLabel(plot.complexEquation, p, env) });
               if (set) grabs.push({ key, x: p[0], y: p[1], edits: true, set });
             });
           }
@@ -1335,7 +1346,7 @@ function recompileAll() {
 
   // Data files resolve out of the local store, which is already in memory:
   // this runs on every keystroke, so nothing here may await (see filestore.ts).
-  const built = buildDefs(raw, ref => lookupFile(ref.file, ref.hash)?.table ?? null);
+  const built = buildDefs(raw, ref => lookupFile(ref.file, ref.hash)?.table ?? null, equations.map(eq => scanSeqRec(eq.text)).filter(s => s !== null));
   defs = built.defs;
   for (const [key, fit] of built.fits) {
     const row = defRows.get(key);
@@ -1416,12 +1427,13 @@ function recompileAll() {
   } catch { /* a broken definition; bounds using it will report the error */ }
   for (const name of animatedConstNames(defs)) delete constVals[name];
   for (const name of defs.states.keys()) delete constVals[name];
-  const ropts = {
+  const ropts: import('../lib/defs.ts').ResolveOpts = {
     consts: constVals,
     boundConsts: sumBoundNames,
     isList: (n: string) => isListName(listNames, n),
     indexIssue: (idx: Expr) => indexIssue(idx, defs),
   };
+  ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
 
   // Random-variable rows resolve before plot rows so P(…) and bare
   // expressions can reference them regardless of row order.
@@ -1489,6 +1501,10 @@ function recompileAll() {
 
   const seenViewport = new Set<string>();
   for (const eq of equations) {
+    if (eq.def && !eq.error && defs.pointDims.get(eq.def.name) === 3) {
+      const expr: Expr = { kind: 'vec', items: compsOf(defs, eq.def.name)!.map(name => ({ kind: 'var', name })) };
+      eq.cls = classify(expr, constNames);
+    }
     if (eq.def || eq.comment || distRows.has(eq)) continue;
     const text = eq.text.trim();
     if (!text) continue;
@@ -1619,10 +1635,7 @@ function recompileAll() {
       // into scalar expressions; a point name A becomes (A_x, A_y).
       // Lists then broadcast/reduce away: the row becomes a plain list literal
       // (dots, bars, or a scatter) or a scalar expression (reductions).
-      const lower = (e: Expr): Expr => lowerLists(
-        lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null),
-        getList, ropts,
-      );
+      const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       // Coordinate fields substitute in as functions of the plane, so
       // `r = 1 + cos(theta)` classifies as an implicit curve in x, y.
       ({ cls: eq.cls, parsed } = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)));
@@ -1643,10 +1656,9 @@ function recompileAll() {
       eq.parsed = parsed;
       // A number is its own answer: the row reads out "= value" and draws
       // nothing. The frame loop keeps it current as sliders, states and t move.
-      if (eq.cls.plot.type === 'value') {
-        try { eq.info = valueReadout(evaluate(parsed, { ...envT0, t: 0 })); }
-        catch { eq.info = '= …'; } // resolves once the frame loop has an env
-      }
+      try { const info = plotReadout(eq.cls.plot, { ...envT0, ...ropts.consts, t: 0 }); if (info !== null) eq.info = info; }
+      catch { if (eq.cls.plot.type === 'value') eq.info = '= …'; }
+
     } catch (e) {
       eq.error = e instanceof Error ? e.message : String(e);
       // "…is not on this device": the row is one file away from working, and
@@ -1654,6 +1666,7 @@ function recompileAll() {
       eq.needsFile = e instanceof MissingDataError;
     }
   }
+  defsAnimated = constsAnimated(defs) || defs.states.size > 0;
   // …and a 2D cloud costs the same once ANYTHING makes the scene 3D: the
   // renderer sends every scatter through the sprite path there, z = 0 and
   // all, so a 200 000-point CSV beside one `z = …` row is 200 000 projected,
@@ -2278,6 +2291,14 @@ function makeCurveUI(eq: Equation): CurveUI {
  * reconcile, so one button element follows the row as its plot type changes.
  */
 function rowToggle(eq: Equation): { label: string; title: string; on: boolean; flip: () => void } | null {
+  if (eq.cls?.plot.type === 'system' && !eq.cls.plot.parametric && !eq.cls.plot.angular?.some(Boolean)) return {
+    label: 'certify search box', title: 'Prove roots and completeness in the bounded search box; unsupported functions remain unresolved', on: !!eq.certify,
+    flip: () => { eq.certify = !eq.certify; eq.info = eq.certify ? 'Certifying search box…' : undefined; eq.sysCache = undefined; eq.traceTarget = undefined; traceQueue.cancelPending(eq.id); },
+  };
+  if (eq.cls?.plot.type === 'vfield3d') return {
+    label: 'arrows', title: 'Show a lattice of direction arrows', on: !!eq.showArrows,
+    flip: () => { eq.showArrows = !eq.showArrows; eq.sysCache = undefined; eq.traceTarget = undefined; traceQueue.cancelPending(eq.id); },
+  };
   switch (eq.cls?.plot.type) {
     case 'sequence':
       return {
@@ -2399,7 +2420,7 @@ function reconcile() {
     // value rows, whose whole output is the readout beneath them — except a
     // definite integral shading its area, which draws in that colour.
     const drawn = eq.error ? undefined : eq.cls?.plot;
-    line.classList.toggle('is-def', !!eq.def || (drawn?.type === 'value' && !drawn.shade));
+    line.classList.toggle('is-def', !!eq.def || (drawn?.type === 'value' && !drawn.shade) || drawn?.type === 'note');
     line.classList.toggle('is-comment', !!eq.comment);
     line.classList.toggle('collapsed', !!(eq.comment && eq.collapsed));
     line.title = eq.error ?? (eq.comment ? 'Click the arrow to collapse or expand this group' : '');
@@ -3109,6 +3130,18 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     // three points the solver marks. Drag c above 0 and two of them leave —
     // they escape to infinity, which is how an étale map gets to be 3-to-1.
     ['jacobian counterexample', 'c = -0.25; F(x,y,z) = ((1+x y)^3 z + y^2 (1+x y)(4+3 x y), y + 3 x (1+x y)^2 z + 3 x y^2 (4+3 x y), 2 x - 3 x^2 y - x^3 z); F(x,y,z) = (c, 0, 0)'],
+  ]],
+  ['space, families and sequence values', [
+    ['3D triangle and normal', 'A=(0,0,0); B=(3,0,1); C=(0,2,2); polygon(A,B,C); vector(A,cross(B-A,C-A)/3); angle(B-A,C-A)'],
+    ['Lorenz field', "camera(-pi/3,0.5,55,(0,0,25)); (x',y',z')=(10(y-x),x(28-z)-y,x y-8z/3)"],
+    ['cylindrical flow', "r=sqrt(x^2+y^2); theta=atan2(y,x); (r',theta',z')=(0,1,0.5)"],
+    ['family of lines', 'y=[-2,-1,0,1,2]x'],
+    ['concentric circles', 'circle((0,0),[1,2,3,4])'],
+    ['point-list path', 'P=[(-2,0),(0,2),(2,0),(0,-2)]; Q=P+(1,0); polygon(P); polyline(Q)'],
+    ['sequence statistics', 'a_n=1/n; L=a_[1..20]; L; mean(L); hist(L)'],
+    ['surface intersection', '(x^2+y^2+z^2,z)=(9,1)'],
+    ['certifiable roots', '(x^2,y)=(1,0)'],
+    ['decided comparisons', '2+2=4; e=2'],
   ]],
   ['3d surfaces', [
     ['waves', 'z = sin(x)cos(y)'],

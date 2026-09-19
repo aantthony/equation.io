@@ -8,6 +8,8 @@
  * (parametric surfaces/curves, z = f(x,y) heightmaps). Output is a PNG built
  * with CompressionStream — no image library.
  */
+import { traceIntersection } from '../lib/intersection.ts';
+import { traceField } from '../lib/flow.ts';
 import { type PmfStems, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, freeVars, substVars } from '../lib/expr.ts';
@@ -629,6 +631,31 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       }
       return;
     }
+    case 'spacecurve':
+    case 'vfield3d': {
+      const radius = Math.max(r.w, r.h) / (2 * v.scale);
+      const lo = v.target.map(c => c - radius), hi = v.target.map(c => c + radius);
+      const values = Object.fromEntries([...env.slots].map(([name, slot]) => [name, env.vars[slot]]));
+      for (const path of (cls.plot.type === 'spacecurve' ? traceIntersection(cls.plot.residuals, lo, hi, values) : traceField(cls.plot.comps, lo, hi, values))) {
+        polyline3D(r, v, color, path.length - 1, i => path[i] as [number, number, number]);
+      }
+      return;
+    }
+    case 'polygon': {
+      const p = cls.plot, dim = p.dim ?? 2;
+      const vals = p.pts.map(e => run(compile(e), env.vars, env.stack));
+      if (!vals.every(Number.isFinite)) return;
+      const pts: Array<[number, number]> = [];
+      for (let k = 0; k < vals.length; k += dim) pts.push(project(v, [vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0]));
+      if (p.closed && pts.length === 3) fillPolygon(r, pts.map(p => p[0]), pts.map(p => p[1]), color, 0.16);
+      if (p.closed) pts.push(pts[0]);
+      for (let k = 1; k < pts.length; k++) drawLine(r, ...pts[k - 1], ...pts[k], color);
+      if (p.arrow && pts.length >= 2) {
+        const head = arrowHead(...pts[pts.length - 2], ...pts[pts.length - 1], ARROW_HEAD_PX);
+        if (head) { const tri = [head.tip, head.left, head.right]; fillPolygon(r, tri.map(p => p[0]), tri.map(p => p[1]), color, 1); }
+      }
+      return;
+    }
     case 'pcurve': {
       if (expr.kind !== 'vec' || cls.plot.dim !== 3) return;
       const progs = expr.items.map(compile);
@@ -685,6 +712,10 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
  * canRenderOg() and fall back to the site's static card instead.
  */
 export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
+  spacecurve: 'draws',
+  note: 'draws',
+  family: 'draws',
+  vfield3d: 'draws',
   implicit2d: 'draws',
   ineq2d: 'draws',
   scalar2d: 'draws',
@@ -752,6 +783,10 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   // type alone; only the implicit3d heightmap probe below needs the expr.
   const { cls, expr } = row;
   if (!cls) return null;
+  if (cls.plot.type === 'family') {
+    for (const m of cls.plot.members) { const gap = previewGap({ ...row, cls: m.cls, expr: m.expr }, needs3D); if (gap) return gap; }
+    return null;
+  }
   const type = cls.plot.type;
   if (type === 'trail') return 'trail(point) accumulates live motion history; no static preview is available';
   if (!needs3D) {
@@ -760,7 +795,11 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
       : `no static preview for ${type} rows; the live app renders them (WebGL)`;
   }
   switch (type) {
+    case 'note':
+    case 'value':
     case 'psurface':
+    case 'vfield3d':
+    case 'spacecurve':
       return null;
     case 'implicit3d':
       return expr && heightmapExpr(expr)
@@ -772,6 +811,7 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
         ? null
         : 'the static preview skips 2D rows in a 3D scene; the live app draws them on the z = 0 plane';
     case 'system':
+    case 'polygon':
       return null;
     case 'implicit2d':
       return 'the static preview skips 2D curves in a 3D scene; the live app extrudes them as vertical sheets';
@@ -810,7 +850,12 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
     return raster;
   }
   const env = makeEnv(analysis.constEnv);
-  const plotRows = analysis.rows.filter(r => r.cls).slice(0, MAX_PLOTS);
+  const parents = new Map<RowInfo, RowInfo>();
+  const plotRows = analysis.rows.filter(r => r.cls).slice(0, MAX_PLOTS).flatMap(row => {
+    if (row.cls!.plot.type !== 'family') return [row];
+    return row.cls!.plot.members.map(m => { const child = { ...row, cls: m.cls, expr: m.expr }; parents.set(child, row); return child; });
+  });
+  const envOf = (row: RowInfo) => row.cls?.uniforms ? makeEnv({ ...analysis.constEnv, ...row.cls.uniforms }) : env;
   const needs3D = plotRows.some(r => r.cls!.needs3D);
 
   // Honor viewport rows: the author's framing is document state, so the
@@ -819,7 +864,7 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
 
   // Row colors follow creation order across ALL rows (defs consume a color
   // slot in the app too, since colorIndex comes from row id).
-  const colorOf = (row: RowInfo) => PALETTE[analysis.rows.indexOf(row) % PALETTE.length];
+  const colorOf = (row: RowInfo) => PALETTE[analysis.rows.indexOf(parents.get(row) ?? row) % PALETTE.length];
 
   if (needs3D) {
     const cam = spec('camera');
@@ -835,14 +880,14 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
       : { scale: h / RADIUS, ox: w / 2, oy: h / 2 + h / RADIUS, theta: THETA, phi: PHI, target: [0, 0, 0] };
     drawGrid3D(raster, view);
     for (const row of plotRows) {
-      try { renderRow3D(raster, view, row, env, colorOf(row)); } catch { /* skip row */ }
+      try { renderRow3D(raster, view, row, envOf(row), colorOf(row)); } catch { /* skip row */ }
     }
   } else {
     const box = spec('view');
     const view: View2D = box?.kind === 'view' ? fitView2D(box, w, h) : { cx: 0, cy: 0, upp: 12 / h };
     drawGrid2D(raster, view);
     for (const row of plotRows) {
-      try { renderRow2D(raster, view, row, env, colorOf(row), analysis); } catch { /* skip row */ }
+      try { renderRow2D(raster, view, row, envOf(row), colorOf(row), analysis); } catch { /* skip row */ }
     }
   }
   return raster;

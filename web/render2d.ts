@@ -36,6 +36,7 @@ export interface Ineq2D extends Curve2D {
 }
 
 export interface VField2D {
+  uniforms?: Record<string, number>;
   /** GLSL expressions for the components (Vx, Vy) in terms of floats x, y. */
   fx: string;
   fy: string;
@@ -44,6 +45,7 @@ export interface VField2D {
 }
 
 export interface Fractal2D {
+  uniforms?: Record<string, number>;
   /** GLSL vec2 expression for one iteration step, in terms of vec2 zc and floats x, y. */
   step: string;
   seed: 'pixel' | 'zero';
@@ -717,7 +719,7 @@ export class Renderer2D {
     }
     for (const d of layers.domains ?? []) drawField(d, domainFrag);
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
-    for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params);
+    for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
     for (const b of layers.bifs ?? []) drawField(b, bifFrag);
     for (const s of layers.scalars ?? []) drawField(s, scalarFrag);

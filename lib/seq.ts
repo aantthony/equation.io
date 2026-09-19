@@ -16,7 +16,9 @@
  */
 import { compileTyped, usesComplex } from './complex.ts';
 import { type GetFn, RESERVED, type ResolveOpts, resolveExpr } from './defs.ts';
-import { type Expr, freeVars, parseExpr, substVars } from './expr.ts';
+import { lowerLists } from './list.ts';
+import { listGetter } from './defs.ts';
+import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import type { Classified } from './plot.ts';
 
 export interface SeqScan {
@@ -129,5 +131,55 @@ export function classifySeqRec(
     animated,
     needs3D: false,
     params,
+  };
+}
+
+/** Sequence values share the same scalar/list pipeline as CSV columns.
+ * Recurrences form a linear chain of computed constants rather than an
+ * exponentially duplicated expression. Those constants become uniforms. */
+export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, opts: ResolveOpts,
+  known: Set<string>, protectedNames: ReadonlySet<string> = new Set()) {
+  const resolving = new Set<string>();
+  const term = (name: string, k: number): Expr => {
+    if (!Number.isInteger(k) || k < 0 || k > 1000) throw new Error('Sequence indices must be whole numbers from 0 to 1000.');
+    const scan = defs.sequences.get(name)!;
+    const key = `${name}_${k}`;
+    if (protectedNames.has(key) || defs.consts.has(key)) return { kind: 'var', name: key };
+    if (resolving.has(name)) throw new Error(`Sequence ${name} depends on itself outside its recurrence.`);
+    resolving.add(name);
+    try {
+      const body = resolveExpr(parseExpr(scan.rhs, new Set(defs.fns.keys()), new Set([...defs.sequences.keys()].map(n => n + '_'))), getFn, opts);
+      if (!scan.rec) return substVars(body, { [scan.index]: { kind: 'num', value: k } });
+      for (const v of freeVars(body)) {
+        if (v !== `${name}_${scan.index}` && v !== 't' && !known.has(v) && !defs.consts.has(v)) throw new Error(`Sequence ${name} terms need constant parameters (found ${v}).`);
+      }
+      for (let i = 0; i <= k; i++) {
+        const internal = `${defs.sequencePrefix}_${name}_${i}`;
+        if (defs.consts.has(internal)) continue;
+        const value: Expr = i === 0
+          ? (protectedNames.has(`${name}_0`) || defs.consts.has(`${name}_0`) ? { kind: 'var', name: `${name}_0` } : { kind: 'num', value: .5 })
+          : substVars(body, { [`${name}_${scan.index}`]: { kind: 'var', name: `${defs.sequencePrefix}_${name}_${i - 1}` } });
+        defs.consts.set(internal, value); known.add(internal);
+        try { if (opts.consts) opts.consts[internal] = evaluate(value, opts.consts); } catch { /* resolved at frame time */ }
+      }
+      return { kind: 'var', name: `${defs.sequencePrefix}_${name}_${k}` };
+    } finally { resolving.delete(name); }
+  };
+  return (symbol: string, index?: Expr): Expr | null => {
+    if (index === undefined) {
+      const hit = /^([A-Za-z])_(\d+)$/.exec(symbol);
+      return hit && defs.sequences.has(hit[1]) ? term(hit[1], Number(hit[2])) : null;
+    }
+    const name = symbol.slice(0, -1);
+    if (!symbol.endsWith('_') || !defs.sequences.has(name)) return null;
+    const input: Expr = index.kind === 'call' && index.name === '[range]' ? { kind: 'list', items: [index] } : index;
+    const indices = lowerLists(input, listGetter(defs), opts);
+    const one = (e: Expr) => {
+      for (const n of freeVars(e)) opts.boundConsts?.add(n);
+      return term(name, evaluate(e, opts.consts ?? {}));
+    };
+    if (indices.kind === 'list') return { kind: 'list', items: indices.items.map(one) };
+    if (indices.kind === 'data') return { kind: 'list', items: Array.from(indices.values, k => term(name, k)) };
+    return one(indices);
   };
 }

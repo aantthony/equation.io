@@ -29,27 +29,13 @@ describe('distance / angle through analyze()', () => {
     expect(rows[7].info).toBe(`≈ ${Number((1.5 * Math.PI).toPrecision(6))}`);
   });
 
-  it('say so when a list stands where a point should', () => {
+  it('measures point lists and their selected elements, rejecting scalar points', () => {
     const rows = out(['P = [(0, 0), (1, 1)]', 'L = [1, 2, 3]', 'A = (1, 2)',
-      'distance(P, A)', 'distance(A, L)', 'angle(A, [A, A], A)']);
-    for (const [msg] of rows.slice(3)) expect(msg).toMatch(/a list cannot stand for a point yet/);
-  });
-
-  it('names the list whenever one is why the points do not pair up', () => {
-    const rows = out(['P = [(0, 0), (1, 1), (2, 2)]', 'L = [1, 2, 3]', 'A = (1, 2)', 'B = (3, 1)',
-      'distance(2L, A)', 'distance(-P, A)', 'distance(sort(L), A)', 'distance([1..3] + 1, A)',
-      'angle(A, P[1], B)', 'distance(A, P[2])',
-      'distance(A, total(L))', 'distance(P, L, A)', 'angle(P, L, A, B)']);
-    for (const [msg] of rows.slice(4, 8)) expect(msg).toMatch(/a list cannot stand for a point yet/);
-    // An element of a point list is a point on its own row, but not yet a
-    // point *value* (P[2] + A fails the same way): that is plan #13's.
-    for (const [msg] of rows.slice(8, 10)) expect(msg).toMatch(/an element of a list cannot stand for a point yet.*name it first|name the point/);
-    // A reduction is one number, so no list is to blame here...
-    expect(rows[10][0]).toMatch(/^distance takes two points/);
-    // ...and a list of points that does pair up (as a "component") is refused
-    // by list lowering, in its own true words.
-    expect(rows[11][0]).toMatch(/list of points is not supported yet/);
-    expect(rows[12][0]).toMatch(/list of points is not supported yet/);
+      'distance(P, A)', 'distance(A, L)', 'angle(A, [A, A], A)', 'distance(P[1], P[2])']);
+    expect(rows[3][0]).toBe('vlist');
+    expect(rows[4][0]).toMatch(/distance takes two points/);
+    expect(rows[5][0]).toBe('vlist');
+    expect(rows[6]).toEqual(['value', '≈ 1.41421']);
   });
 
   it('never shows the internal [angle] name', () => {
@@ -465,9 +451,9 @@ describe('revolve(f) through analyze()', () => {
     expect(err(['revolve(x, y, z)'])).toMatch(/^revolve takes a profile and an optional axis/);
     expect(err(['revolve(i x)'])).toMatch(/complex values cannot be revolved/);
     expect(err(['revolve(w)'])).toMatch(/complex values cannot be revolved/);
-    expect(err(['revolve([1, 2])'])).toMatch(/^revolve of a list is not supported yet/);
-    expect(err(['L = [1, 2]', 'revolve(L x)'])).toMatch(/^revolve of a list is not supported yet/);
-    expect(err(['L = [1, 2]', 'revolve(L)'])).toMatch(/^revolve of a list is not supported yet/);
+    expect(analyze(['revolve([1, 2])']).rows[0].cls?.plot.type).toBe('family');
+    expect(analyze(['L = [1, 2]', 'revolve(L x)']).rows[1].cls?.plot.type).toBe('family');
+    expect(analyze(['L = [1, 2]', 'revolve(L)']).rows[1].cls?.plot.type).toBe('family');
     expect(err(['revolve(x = 1)'])).toMatch(/single real expression in x/);
     expect(err(['revolve(x < 1, y)'])).toMatch(/single real expression in y/);
     expect(err(['A = (1, 2)', 'revolve(A)'])).toBe('revolve is not defined for points.');

@@ -1,5 +1,6 @@
 /** Coordinate notation lowers to the same Cartesian objects as ordinary rows. */
 import { type Expr, substVars, evaluate, freeVars } from './expr.ts';
+import { detOf, solveVec } from './mat.ts';
 import { diff } from './diff.ts';
 
 export const num = (value: number): Expr => ({ kind: 'num', value });
@@ -21,7 +22,7 @@ export function coordinateRow(expr: Expr, fields: Record<string, Expr>) {
   const bases = names.map(n => flow ? n.slice(0, -1) : n);
   const shown = `(${names.join(', ')})`;
   if (new Set(bases).size !== bases.length) throw new Error(`${shown} repeats a coordinate — use distinct coordinates to determine a point or flow.`);
-  if (flow ? bases.length !== 2 : bases.length !== 2 && bases.length !== 3) {
+  if (bases.length !== 2 && bases.length !== 3) {
     throw new Error(flow
       ? 'A coordinate flow needs two coordinates — flows are 2D only.'
       : 'Use two coordinates to determine a point in the plane, or three in space.');
@@ -31,7 +32,7 @@ export function coordinateRow(expr: Expr, fields: Record<string, Expr>) {
     if (Object.hasOwn(fields, n)) return fields[n];
     throw new Error(`${n} is not a coordinate — define ${n} as a function of x and y first.`);
   });
-  if (flow) {
+  if (flow && bases.length === 2) {
     const spatial = bases.find((_, k) => freeVars(coords[k]).has('z'));
     if (spatial === 'z') throw new Error('Coordinate flows are 2D only — z cannot be a flow coordinate.');
     if (spatial) throw new Error(`${spatial} uses z, and coordinate flows are 2D only.`);
@@ -44,7 +45,15 @@ export function coordinateRow(expr: Expr, fields: Record<string, Expr>) {
 
 export function lowerCoordinateFlow(expr: Expr, fields: Record<string, Expr>, timeDerivative = (e: Expr) => diff(e, 't')): Expr {
   const row = coordinateRow(expr, fields);
-  if (!row?.flow || (row.coords[0].kind === 'var' && row.coords[0].name === 'x' && row.coords[1].kind === 'var' && row.coords[1].name === 'y')) return Object.keys(fields).length ? substVars(expr, fields) : expr;
+  if (!row?.flow || (row.coords.length === 2 && row.coords[0].kind === 'var' && row.coords[0].name === 'x' && row.coords[1].kind === 'var' && row.coords[1].name === 'y')) return Object.keys(fields).length ? substVars(expr, fields) : expr;
+  if (row.coords.length === 3) {
+    const jac = row.coords.map(c => ['x', 'y', 'z'].map(axis => diff(c, axis)));
+    const determinant = detOf(jac);
+    if (freeVars(determinant).size === 0 && evaluate(determinant, {}) === 0) throw new Error('These coordinates have a singular Jacobian and do not determine a flow.');
+    const rhs = row.rhs.map((c, k) => bin('-', substVars(c, fields), timeDerivative(row.coords[k])));
+    return { kind: 'eq', l: { kind: 'vec', items: ["x'", "y'", "z'"].map(name => ({ kind: 'var', name })) },
+      r: { kind: 'vec', items: solveVec(jac, rhs) } };
+  }
   const [a, b] = row.coords;
   const [f, g] = row.rhs.map((e, k) => bin('-', substVars(e, fields), timeDerivative(row.coords[k])));
   const ax = diff(a, 'x'), ay = diff(a, 'y'), bx = diff(b, 'x'), by = diff(b, 'y');

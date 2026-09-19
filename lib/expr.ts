@@ -339,9 +339,10 @@ const ops = operators<PNode>({
     if (name === 'int') return intCall(b);
     // Tuple literals inside a call flatten into the argument list, so
     // tube((a, b, c)) === tube(a, b, c) and |(3, 4)| reaches abs as (3, 4);
-    // geometry statements re-pair adjacent scalars into points (lib/geom.ts).
+    // geometry/measurement calls preserve grouped vectors and their dimensions.
     const items = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
-    const args = items.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
+    const pointCalls = new Set(['segment', 'polyline', 'polygon', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit']);
+    const args = pointCalls.has(name) ? items : items.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
     return { kind: 'call', name, args };
   }),
 

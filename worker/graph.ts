@@ -5,6 +5,7 @@
  * rows, build defs, then parse/resolve/classify each plot row. Kept in sync
  * by using the exact same lib functions.
  */
+import { lowerObjects } from '../lib/object-lists.ts';
 import {
   animatedConstNames,
   badTableRow,
@@ -47,9 +48,9 @@ import {
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
-import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
+import { type Classified, classify, classifyRow, plotReadout } from '../lib/plot.ts';
 import { scanRegressions, formatFit } from '../lib/regression.ts';
-import { classifySeqRec, scanSeqRec } from '../lib/seq.ts';
+import { classifySeqRec, scanSeqRec, sequenceResolver } from '../lib/seq.ts';
 import { buildStateSystem, initialState } from '../lib/state.ts';
 import { type ViewSpec, parseViewRow } from '../lib/view.ts';
 
@@ -123,7 +124,7 @@ export function analyze(texts: string[], { readouts = true }: AnalyzeOpts = {}):
     raw.push(d);
   }
 
-  const built = buildDefs(raw);
+  const built = buildDefs(raw, undefined, texts.map(scanSeqRec).filter(s => s !== null));
   const defs = built.defs;
   for (const [key, fit] of built.fits) {
     const row = rows.find(r => r.def && defKey(r.def) === key);
@@ -180,12 +181,13 @@ export function analyze(texts: string[], { readouts = true }: AnalyzeOpts = {}):
   const boundVals = { ...constEnv };
   for (const name of animatedConstNames(defs)) delete boundVals[name];
   for (const name of defs.states.keys()) delete boundVals[name];
-  const ropts = {
+  const ropts: import('../lib/defs.ts').ResolveOpts = {
     consts: boundVals,
     boundConsts: built.sumBoundConsts,
     isList: (n: string) => isListName(listNames, n),
     indexIssue: (idx: Expr) => indexIssue(idx, defs),
   };
+  ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
 
   // Random variables next, so P(…) and bare-expression rows can reference
   // them regardless of row order.
@@ -248,6 +250,11 @@ export function analyze(texts: string[], { readouts = true }: AnalyzeOpts = {}):
 
   const seenViewKinds = new Set<string>();
   for (const [ri, row] of rows.entries()) {
+    if (row.def && !row.error && defs.pointDims.get(row.def.name) === 3) {
+      const expr: Expr = { kind: 'vec', items: compsOf(defs, row.def.name)!.map(name => ({ kind: 'var', name })) };
+      row.cls = classify(expr, constNames);
+      row.expr = expr;
+    }
     if (row.def || row.comment || row.error || row.cls || !row.text) continue;
     try {
       const badRow = badTableRow(row.text);
@@ -375,19 +382,17 @@ export function analyze(texts: string[], { readouts = true }: AnalyzeOpts = {}):
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
       // Lists then broadcast/reduce away (mirror of web/main.ts).
-      const lower = (e: Expr): Expr => lowerLists(
-        lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null),
-        getList, ropts,
-      );
+      const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       ({ cls: row.cls, parsed } = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)));
       if (defs.fields.size) parsed = substVars(parsed, fieldEnv);
       row.expr = parsed;
       // A number is its own answer: the row reads out "= value" and draws
       // nothing (mirror of web/main.ts). Evaluated at t = 0 here.
-      if (row.cls.plot.type === 'value') {
-        try { row.info = valueReadout(evaluate(parsed, { ...constEnv, t: 0 })); }
-        catch { /* not computable statically (a state, say): no readout */ }
-      }
+      if (readouts) try {
+        const info = plotReadout(row.cls.plot, { ...constEnv, ...ropts.consts, t: 0 });
+        if (info !== null) row.info = info;
+      } catch { /* values unavailable in this static environment */ }
+
     } catch (e) {
       // A row reading a dropped CSV is not broken here — the bytes simply
       // live on the device that made the graph, and never travelled in the
@@ -397,5 +402,6 @@ export function analyze(texts: string[], { readouts = true }: AnalyzeOpts = {}):
     }
   }
 
+  try { constEnv = evalConstEnv(defs, 0, stateVals); } catch { /* row errors already reported */ }
   return { rows, defs, constEnv, rvs };
 }

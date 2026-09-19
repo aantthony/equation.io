@@ -153,7 +153,6 @@ describe('previewGap', () => {
     expect(gap(['z = x^2 + y^2', '(2, 3)'], 1)).toContain('z = 0 plane');
     // ...except the families the app itself skips in 3D — no false promises.
     expect(gap(['z = x^2 + y^2', 'sin(x)cos(y)'], 1)).toContain('skips them there too');
-    expect(gap(['z = x^2 + y^2', 'A = (0, 0)', 'B = (4, 0)', 'C = (0, 4)', 'polygon(A, B, C)'], 1))
-      .toContain('skips them there too');
+    expect(gap(['z = x^2 + y^2', 'A = (0, 0)', 'B = (4, 0)', 'C = (0, 4)', 'polygon(A, B, C)'], 1)).toBeNull();
   });
 });

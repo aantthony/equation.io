@@ -207,23 +207,23 @@ describe('distance and angle measurements', () => {
     expect(classify(low('distance((cos(t), sin(t)), A)'), new Set(Object.keys(env))).animated).toBe(true);
   });
 
-  it('distance follows |A - B| to 3-component vectors; angle stays 2D', () => {
+  it('distance and unsigned angle support 3-component vectors', () => {
     const is3 = (n: string) => (n === 'p' || n === 'q' ? [n + '_1', n + '_2', n + '_3'] : isPt(n));
     const e3 = { p_1: 1, p_2: 2, p_3: 3, q_1: 3, q_2: 5, q_3: 9 };
     expect(evaluate(lowerGeom(parseExpr('distance(p, q)'), is3), e3)).toBe(7);
     expect(() => lowerGeom(parseExpr('distance(p, A)'), is3)).toThrow(/same number of components, not 3 and 2/);
-    expect(() => lowerGeom(parseExpr('angle(p, q)'), is3)).toThrow(/2D points and vectors only — 3-component vectors are not supported yet/);
-    expect(() => lowerGeom(parseExpr('angle(A, p, B)'), is3)).toThrow(/3-component vectors are not supported yet/);
+    expect(evaluate(lowerGeom(parseExpr('angle(p, q)'), is3), e3)).toBeCloseTo(Math.acos(40 / Math.sqrt(14 * 115)));
+    expect(() => lowerGeom(parseExpr('angle(A, p, B)'), is3)).toThrow(/matching dimensions/);
   });
 
   it('fail loudly, with messages true however the tuples flattened', () => {
     for (const row of ['distance(A)', 'distance(A, B, C)', 'distance(A, 3)', 'distance(3, A)',
-      'distance(1, 2, 3)', 'distance((1, 2, 3), (4, 5, 6))', 'distance(a)']) {
+      'distance(1, 2, 3)', 'distance(a)']) {
       expect(() => low(row), row).toThrow(/^distance takes two points: distance\(A, B\)/);
     }
     for (const row of ['angle(A)', 'angle(A, B, C, A)', 'angle(A, 3)', 'angle(1, 2, 3)',
-      'angle((1, 2, 3), (4, 5, 6), (7, 8, 9))', 'angle(a)', 'angle(A, B, 0.5)']) {
-      expect(() => low(row), row).toThrow(/^angle takes three 2D points — angle\(A, B, C\), the angle at B — or two 2D vectors/);
+      'angle(a)', 'angle(A, B, 0.5)']) {
+      expect(() => low(row), row).toThrow(/^angle takes three matching points — angle\(A, B, C\), the angle at B — or two vectors/);
     }
     // A list *as* an argument would be a list of points: families (plan #13).
     const listy = /a list cannot stand for a point yet/;
@@ -236,7 +236,7 @@ describe('distance and angle measurements', () => {
     expect(lowL('distance((L, 1), A)')).toEqual(lowL('|(L, 1) - A|'));
     expect(() => lowL('angle(A, (2L, 0), B)')).not.toThrow();
     // A measurement is a number, so it is no vertex.
-    expect(() => low('segment(A, distance(A, B))')).toThrow(/write segment\(A, B\)/);
+    expect(() => low('segment(A, distance(A, B))')).toThrow(/segment takes points/);
   });
 
   it('point-function lookup ignores Object.prototype names', () => {
@@ -283,21 +283,20 @@ describe('geometry statements', () => {
 
   it('polyline and vector fail loudly on what they do not cover yet', () => {
     expect(() => low('polyline(A)')).toThrow(/at least 2 points/);
-    expect(() => low('vector(A, B, C)')).toThrow(/one or two 2D points/);
+    expect(() => low('vector(A, B, C)')).toThrow(/one or two points/);
     expect(() => low('polyline([(0, 0), (1, 1)])')).toThrow(/one by one.*polyline\(A, B, C\)/);
     expect(() => low('vector([A, B])')).toThrow(/one by one.*vector\(A, B\)/);
-    // Tuples flatten, so (1, 2, 3), ((1, 2), 3) and (a, b, c) are one input:
-    // the message has to be true of all three, and of 3 points or 2 3-tuples.
-    for (const row of ['vector((1, 2, 3))', 'vector((1, 2), 3)', 'vector(a, b, c)',
-      'vector((0, 0), (1, 1), (2, 2))', 'vector((1, 2, 3), (4, 5, 6))']) {
-      expect(() => low(row)).toThrow(/^vector takes one or two 2D points.*3-component vectors are not drawn yet/);
+    for (const row of ['vector((1, 2), 3)', 'vector(a, b, c)', 'vector((0, 0), (1, 1), (2, 2))']) {
+      expect(() => low(row)).toThrow(/vector takes/);
     }
+    expect(classify(low('vector((1, 2, 3))')).needs3D).toBe(true);
+    expect(classify(low('vector((1, 2, 3), (4, 5, 6))')).plot.type).toBe('polygon');
     // A named list of points (or a 2×2 one, which reads as a matrix) is a list too.
     const lowL = (s: string) => lowerGeom(parseExpr(s), isPt, n => (n === 'M' ? [[parseExpr('1')]] : null) as never, n => n === 'L');
     expect(() => lowL('polyline(L)')).toThrow(/one by one for now.*not as a list/);
     expect(() => lowL('vector(A, L)')).toThrow(/one by one for now.*not as a list/);
     expect(() => lowL('polyline(M)')).toThrow(/one by one for now.*not as a list/);
-    expect(() => low('polyline(A, 3)')).toThrow(/write polyline\(A, B, C\)/);
+    expect(() => low('polyline(A, 3)')).toThrow(/polyline takes points/);
     expect(() => low('1 + vector(A, B)')).toThrow(/whole statement/);
     expect(() => low('2 polyline(A, B)')).toThrow(/whole statement/);
   });

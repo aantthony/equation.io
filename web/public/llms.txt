@@ -237,7 +237,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Constants and t may animate its real and imaginary components.
 - Complex roots: `w^3 = 1` draws three solution points; equations in w become
   two real constraints. This is a numerical search over the visible window,
-  not a certified enumeration or a source of exact symbolic labels.
+  with exact labels for rational/quadratic polynomial factors and a defining-
+  polynomial label for remaining algebraic roots. The optional certification
+  control proves completeness only when every region in its search box is settled.
 - Complex path: a complex-valued expression whose only variable is u (constants,
   sliders and t aside) draws the path it traces over u in (0, 1), at
   (re, im) — the same plane as complex points and roots. `exp(i 2 pi u)` is
@@ -282,12 +284,41 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   marker), and they work inside any expression (`circle(A, distance(A, B))`).
   A scalar list inside a point broadcasts as in any scalar math
   (`distance(A, (L, 0))` is a list of distances); a list of points as an
-  argument is not supported yet. An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
+  argument broadcasts too, and P[1] selects a point value. An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
   point like `A + u(B - A)` traces the segment. Tuple literals work directly
   as arguments (`segment((0, 0), A)`) and as operands: `A + (1, 2)`,
   `((0, 0) + B)/2`, `|(3, 4)|`.
+- Geometry in space: `A = (1, 2, 3)` defines a 3D point with scalar
+  components `A_x`, `A_y`, `A_z`. `segment`, `polyline`, `polygon`, and
+  `vector` accept matching 2D or 3D points, including tuple literals. 3D
+  triangles fill; larger 3D polygons draw their outline. `cross` returns a
+  vector in 3D. 3D `angle` is unsigned in [0, pi]; zero arms are undefined.
+  `perp`, `line`, `square`, and `circle` remain planar; 3D dragging is not defined.
+- Object families: a list in a scalar position draws one object per element:
+  `y = [1,2,3] x`, `circle((0,0), [1,2,3])`, `(cos(u),sin(u),[1,2,3])`.
+  Multiple lists zip and must have equal lengths. Limit 32 objects, or 8
+  when the family is 3D. Shader members share one program with per-draw
+  uniforms. Scalar fields/domain coloring/fractals cannot superimpose as
+  families; use a selected list element. Point-list arithmetic works:
+  `Q = P + (1,0)`, `2P`, `P[2]`; `polyline(P)` / `polygon(P)` consume an
+  entire point list, including a CSV scatter `polyline((data.x, data.y))`.
+  Range bounds may use sliders, but not t; families re-expand on bound changes.
+- Sequence values: `a_n = 1/n` defines `a_3` as a scalar and `a_[1..10]`
+  as a list, usable in sums, scatters, histograms and regression. Indices
+  must be whole numbers from 0 to 1000. Recurrences use their `a_0` seed
+  (default 0.5); terms compute as a bounded chain of scalar constants, so
+  sliders and t remain live. A recurrence using x as a bifurcation parameter
+  cannot also supply constant terms without binding that parameter.
+- Decided comparisons: `2+2=4` reads “Always true (4 = 4)”; `e=2` reads
+  “Never true (2.71828 ≠ 2)”. Comparisons involving sliders/time say
+  “True now” or “False now”. They draw no degenerate implicit curve.
 - Vector field: a 2-tuple in x, y — `(-y, x)` — drawn as animated streamlines
   (line-integral convolution); clicking the canvas traces integral curves.
+  A 3-tuple in x/y/z, or `(x',y',z') = (10(y-x), x(28-z)-y, x y-8z/3)`,
+  draws 32 deterministic auto-seeded trajectories in space. Traces run in a
+  worker with bounded RK4 steps and a directional fade. Moving fields are
+  retraced at most four times per second. The arrows control switches to a
+  5×5×5 lattice of direction glyphs; there is no ambiguous 3D click-to-seed.
 - ODE / slope field: `dy/dx = x y` or `y' = sin(x) - y` plots the direction
   field (1, f); a system `(x', y') = (y, -sin(x))` plots its phase portrait.
   (Primes on x/y/z mean this. A prime on a name of your own is a state — see
@@ -544,11 +575,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   and a surface lying exactly on the cut (`theta = pi`) does not draw in 3D.
   `(rho, theta, phi) = (2, pi/4, pi/3)` is the point with those three
   coordinates (three coordinates in space, two in the plane; with a z-using
-  field, two are "2 equations in 3 unknowns"). Only atan2-valued coordinates
+  field, two constraints trace a space curve). Only atan2-valued coordinates
   wrap modulo 2pi — an acos-valued polar angle lives in [0, pi] and does not.
   Where a chart is singular (theta on the z-axis) no point is reported.
   `(rho, theta, phi) = (2, 6 pi u, pi u)` traces a space curve in the chart.
-  Points in space are not draggable, and coordinate flows are 2D only.
+  Points in space are not draggable. Three primed coordinates define a 3D
+  chart flow, e.g. `(rho',theta',phi') = (0,1,0)`, transformed by the
+  symbolic 3×3 Jacobian and drawn with trajectories or arrow glyphs.
 - Coordinate points: after defining r and theta above, `(r, theta) = (2, pi/4)`
   draws the point satisfying both coordinates. Angles in atan2-valued left
   components wrap modulo 2pi, so 9pi/4 and pi/4 name the same position.
@@ -564,10 +597,25 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Coordinate flows: `(r', theta') = (r(1-r), 1)` draws a polar limit cycle.
   Both distinct coordinate names must have primes. Velocities are transformed
   through the coordinate Jacobian; singular chart locations are undefined.
-  Click to trace trajectories just as for Cartesian vector fields. A lone
+  In 2D, click to trace trajectories just as for Cartesian vector fields. A lone
   prime on a field is invalid; an otherwise unbound name still defines a state.
   Static previews draw direction arrows for vector fields and points/curves
   for coordinate and complex-root systems.
+
+- Surface intersections: `(x^2+y^2+z^2,z) = (9,1)` traces the circle where
+  the sphere meets the plane. Bounded predictor–corrector continuation
+  follows the Jacobian null space, with at most 24 branches and 512 steps
+  per direction. Singularities stop a trace; tiny or isolated branches may
+  be missed. This numerical tracing does not certify branch completeness.
+- Certified point solving: a square system's “certify search box” control
+  runs outward-rounded interval subdivision and Krawczyk tests in the worker.
+  Its readout distinguishes proved roots, unresolved regions, and completeness
+  of that finite search box. Existing numeric points remain visible.
+  Certification currently supports finite constants, +, −, ×, / away from
+  zero denominators, and integer powers up to 32; other functions, singular
+  roots and exhausted budgets remain unresolved. Wrapped angular systems
+  are excluded. Proofs concern real arithmetic on the input binary64 literals
+  and parameter values, not a claim of completeness over all space.
 
 ## Viewport rows (framing)
 

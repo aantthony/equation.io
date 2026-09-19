@@ -379,7 +379,7 @@ describe('coordinate fields over z', () => {
 
   it('says truthfully what it does not cover', () => {
     expect(errorsOf([...spherical, '(rho, theta) = (2, pi/4)']).at(-1))
-      .toBe('2 equations in 3 unknowns — a system needs one equation per unknown.');
+      .toBeUndefined();
     expect(errorsOf([...polar, '(r, theta, x) = (1, 2, 3)']).at(-1))
       .toBe('3 equations in 2 unknowns — a system needs one equation per unknown.');
     expect(errorsOf([...spherical, '(rho, rho, phi) = (1, 2, 3)']).at(-1))
@@ -387,7 +387,7 @@ describe('coordinate fields over z', () => {
     expect(errorsOf([...spherical, "(rho', theta') = (1, 1)"]).at(-1))
       .toBe('rho uses z, and coordinate flows are 2D only.');
     expect(errorsOf([...spherical, "(rho', theta', phi') = (1, 1, 1)"]).at(-1))
-      .toBe('A coordinate flow needs two coordinates — flows are 2D only.');
+      .toBeUndefined();
     expect(errorsOf(["(x', z') = (1, 2)"]).at(-1))
       .toBe('Coordinate flows are 2D only — z cannot be a flow coordinate.');
     expect(errorsOf([...spherical, '(rho, theta, phi) = (1, 2)']).at(-1))

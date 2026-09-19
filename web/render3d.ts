@@ -7,6 +7,7 @@
  * 2D-only equations (no z) still work here: F(x,y) extrudes to a vertical
  * sheet, which is exactly its locus in R^3.
  */
+import { arrowHead } from '../lib/geom.ts';
 import { finiteRuns } from '../lib/curve3d.ts';
 import { GLSL_PRELUDE } from '../lib/glsl.ts';
 import { ProgramCache, QUAD_VERT, compileProgram } from './gl.ts';
@@ -24,6 +25,7 @@ export interface Camera3D {
 }
 
 export interface Surface3D {
+  uniforms?: Record<string, number>;
   /** GLSL expression for F(x,y,z) in terms of floats x, y, z. */
   field: string;
   color: [number, number, number];
@@ -393,14 +395,19 @@ void main() {
 const LINE_VERT = `#version 300 es
 layout(location=0) in vec3 aPos;
 uniform mat4 uVP;
-void main() { gl_Position = uVP * vec4(aPos, 1.0); }
+uniform float uCount;
+out float vProgress;
+void main() { gl_Position = uVP * vec4(aPos, 1.0); vProgress = float(gl_VertexID) / max(1.0, uCount - 1.0); }
 `;
 
 const LINE_FRAG = `#version 300 es
 precision highp float;
 uniform vec3 uColor;
 out vec4 outColor;
-void main() { outColor = vec4(uColor, 1.0); }
+uniform float uAlpha;
+uniform float uFade;
+in float vProgress;
+void main() { outColor = vec4(uColor, uAlpha * mix(1.0, 0.15 + 0.85 * vProgress, uFade)); }
 `;
 
 const POINT_VERT = `#version 300 es
@@ -485,13 +492,14 @@ void main() { outColor = vec4(vColor, 0.9); }
 export interface Scene3D {
   implicits: Array<Surface3D & { grad?: [string, string, string] }>;
   psurfaces: Array<{
+    uniforms?: Record<string, number>;
     comps: [string, string, string];
     du?: [string, string, string];
     dv?: [string, string, string];
     color: [number, number, number];
     params?: string[];
   }>;
-  curves: Array<{ pts: Float32Array; color: [number, number, number] }>;
+  curves: Array<{ pts: Float32Array; color: [number, number, number]; arrow?: boolean; triangle?: boolean; fade?: boolean }>;
   /** Disconnected segments (comb teeth), drawn as gl.LINES vertex pairs. */
   segments: Array<{ pts: Float32Array; color: [number, number, number] }>;
   /** Indexed position+normal meshes (curve tubes) with material UVs. */
@@ -505,7 +513,7 @@ export interface Scene3D {
     cells: [number, number];
     color: [number, number, number];
   }>;
-  points: Array<{ pos: [number, number, number]; color: [number, number, number] }>;
+  points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string }>;
 }
 
 const GRID_N = 160;
@@ -636,10 +644,10 @@ export class Renderer3D {
       const tLoc = gl.getUniformLocation(prog, 't');
       if (tLoc) gl.uniform1f(tLoc, time);
     };
-    const setParams = (prog: WebGLProgram, params?: string[]) => {
+    const setParams = (prog: WebGLProgram, params?: string[], uniforms?: Record<string, number>) => {
       for (const p of params ?? []) {
         const loc = gl.getUniformLocation(prog, 'u_' + p);
-        if (loc) gl.uniform1f(loc, env[p] ?? 0);
+        if (loc) gl.uniform1f(loc, uniforms?.['u_' + p] ?? env[p] ?? 0);
       }
     };
 
@@ -658,7 +666,7 @@ export class Renderer3D {
         continue;
       }
       setCommon(prog);
-      setParams(prog, s.params);
+      setParams(prog, s.params, s.uniforms);
       gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
       gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
       this.quad.draw();
@@ -673,7 +681,7 @@ export class Renderer3D {
         continue;
       }
       setCommon(prog);
-      setParams(prog, s.params);
+      setParams(prog, s.params, s.uniforms);
       gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
       gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
       gl.bindVertexArray(this.gridVao);
@@ -706,12 +714,38 @@ export class Renderer3D {
       setCommon(this.lineProgram);
       gl.uniform3f(gl.getUniformLocation(this.lineProgram, 'uColor'), ...c.color);
       gl.bufferData(gl.ARRAY_BUFFER, c.pts, gl.DYNAMIC_DRAW);
+      gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 1);
+      gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uFade'), c.fade ? 1 : 0);
+      gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uCount'), c.pts.length / 3);
+      if (c.triangle) {
+        gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), .18);
+        gl.depthMask(false);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.depthMask(true);
+        gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 1);
+      }
       // One strip per finite run: a NaN vertex inside a strip is undefined
       // behaviour in GL, not a pen lift.
       for (const [first, count] of finiteRuns(c.pts)) gl.drawArrays(gl.LINE_STRIP, first, count);
+      if (c.arrow && c.pts.length >= 6) {
+        const transform = (m: Mat4, p: number[]) => {
+          const q = [0, 1, 2, 3].map(i => m[i] * p[0] + m[i + 4] * p[1] + m[i + 8] * p[2] + m[i + 12]);
+          return q.map(v => v / q[3]);
+        };
+        const a = transform(vp, Array.from(c.pts.slice(-6, -3)));
+        const b = transform(vp, Array.from(c.pts.slice(-3)));
+        const head = arrowHead(a[0] * w / 2, a[1] * h / 2, b[0] * w / 2, b[1] * h / 2, 12 * (window.devicePixelRatio || 1));
+        if (head && b[2] >= -1 && b[2] <= 1) {
+          const tri = [head.tip, head.left, head.right].flatMap(p => transform(invVp, [2 * p[0] / w, 2 * p[1] / h, b[2]]).slice(0, 3));
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tri), gl.DYNAMIC_DRAW);
+          gl.drawArrays(gl.TRIANGLES, 0, 3);
+        }
+      }
     }
     for (const s of scene.segments) {
       setCommon(this.lineProgram);
+      gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 1);
+      gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uFade'), 0);
       gl.uniform3f(gl.getUniformLocation(this.lineProgram, 'uColor'), ...s.color);
       gl.bufferData(gl.ARRAY_BUFFER, s.pts, gl.DYNAMIC_DRAW);
       gl.drawArrays(gl.LINES, 0, s.pts.length / 3);
@@ -738,7 +772,7 @@ export class Renderer3D {
 }
 
 /** Project axis-end labels (x, y, z) onto the overlay canvas. */
-export function drawLabels3D(ctx: CanvasRenderingContext2D, cam: Camera3D, dpr: number): void {
+export function drawLabels3D(ctx: CanvasRenderingContext2D, cam: Camera3D, dpr: number, points: Scene3D['points'] = []): void {
   const w = ctx.canvas.width / dpr;
   const h = ctx.canvas.height / dpr;
   ctx.save();
@@ -751,6 +785,7 @@ export function drawLabels3D(ctx: CanvasRenderingContext2D, cam: Camera3D, dpr: 
     ['x', [boxR * 1.04, 0, 0], '#a44'],
     ['y', [0, boxR * 1.04, 0], '#4a4'],
     ['z', [0, 0, boxR * 1.04], '#46a'],
+    ...points.filter(p => p.label).map(p => [p.label!, p.pos, `rgb(${p.color.map(c => Math.round(c * 255)).join(',')})`] as [string, number[], string]),
   ];
   for (const [text, p, color] of labels) {
     const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
@@ -758,7 +793,7 @@ export function drawLabels3D(ctx: CanvasRenderingContext2D, cam: Camera3D, dpr: 
     const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
     if (cw <= 0) continue;
     ctx.fillStyle = color;
-    ctx.fillText(text, (cx / cw * 0.5 + 0.5) * w, (0.5 - cy / cw * 0.5) * h);
+    ctx.fillText(text, (cx / cw * 0.5 + 0.5) * w + 7, (0.5 - cy / cw * 0.5) * h - 7);
   }
   ctx.restore();
 }

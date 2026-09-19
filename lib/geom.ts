@@ -1,10 +1,10 @@
 /**
- * Point (2D vector) values and geometry statements.
+ * Point (2D and 3D vector) values and geometry statements.
  *
- * A constant whose right-hand side is a pair — `A = (0, 0)`, `C = B + D` —
+ * A constant whose right-hand side is a pair or triple — `A = (0, 0)`, `C = B + D` —
  * is a named point. Point arithmetic (±, scalar ×/÷, dot, cross, perp,
  * midpoint, unit, distance, angle, |P|) is lowered here into componentwise scalar expressions,
- * with a point name `A` expanding to the derived constants `A_x`, `A_y`.
+ * with a point name `A` expanding to the derived constants `A_x`, `A_y` (and `A_z` in space).
  * Lowering runs after resolveExpr (functions inlined, Σ expanded) and before
  * classify, so everything downstream — GLSL, evaluate, diff — still sees only
  * scalars, and points stay symbolic all the way to uniforms (dragging a point
@@ -15,9 +15,9 @@
  * turns it into a CPU-drawn polygon plot); line and circle desugar to ordinary
  * implicit equations.
  *
- * Tuple literals inside a call arrive flattened (the parser folds commas into
- * one argument list), so `polygon((0,0), A)` reaches us as [0, 0, A]; adjacent
- * scalar arguments re-pair into points.
+ * Geometry calls preserve grouped tuple literals, so 2D and 3D arguments
+ * retain their dimensions. Adjacent ungrouped scalar arguments still pair
+ * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
 import { ANGLE_FN, type Expr } from './expr.ts';
@@ -28,7 +28,7 @@ import { type GetMat, detOf, matVec, matrixFromList, solveVec, traceOf } from '.
 export const GEOM_STATEMENTS = new Set(['segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle']);
 
 /** The derived scalar constants a point named `name` expands to. */
-export const pointComps = (name: string): [string, string] => [name + '_x', name + '_y'];
+export const pointComps = (name: string, dim = 2): string[] => ['x', 'y', 'z'].slice(0, dim).map(axis => name + '_' + axis);
 
 /** The derived scalar states an n-vector state expands to: om_1, om_2(, om_3). */
 export const vecStateComps = (name: string, dim: number): string[] =>
@@ -121,7 +121,7 @@ function listShape(a: Expr, getMat: GetMat, isList: IsList): 'list' | 'element' 
 }
 
 const DISTANCE_USAGE = 'distance takes two points: distance(A, B) with A = (0, 0) defined above, or distance((0, 0), (3, 4)).';
-const ANGLE_USAGE = 'angle takes three 2D points — angle(A, B, C), the angle at B — or two 2D vectors: angle(U, V).';
+const ANGLE_USAGE = 'angle takes three matching points — angle(A, B, C), the angle at B — or two vectors: angle(U, V). Points may be 2D or 3D.';
 
 /** distance(A, B) ≡ |A - B|, in any dimension |A - B| has. `usage` is thrown
  *  for every arity failure: tuple literals arrive flattened — (1, 2, 3) is
@@ -143,12 +143,17 @@ function lowerDistance(args: LV[], usage: string, stray: (index: number) => stri
 function lowerAngle(args: LV[], usage: string, stray: (index: number) => string): Expr {
   const vs = vecArgs(args, stray);
   if (vs.length !== 2 && vs.length !== 3) throw new Error(usage);
-  if (vs.some(v => v.length !== 2)) {
-    throw new Error('angle measures 2D points and vectors only — 3-component vectors are not supported yet.');
-  }
+  const dim = vs[0].length;
+  if ((dim !== 2 && dim !== 3) || vs.some(v => v.length !== dim)) throw new Error('angle needs points with matching dimensions.');
   const [u, v] = vs.length === 3
     ? [vs[0].map((c, k) => sub(c, vs[1][k])), vs[2].map((c, k) => sub(c, vs[1][k]))]
     : vs;
+  if (dim === 3) {
+    const cross = u.map((_, k) => sub(mul(u[(k + 1) % 3], v[(k + 2) % 3]), mul(u[(k + 2) % 3], v[(k + 1) % 3])));
+    const dot = u.map((c, k) => mul(c, v[k])).reduce(add);
+    const valid = { kind: 'ineq', op: '>', l: mul(lenOfN(u), lenOfN(v)), r: { kind: 'num', value: 0 } } as Expr;
+    return { kind: 'piecewise', cases: [{ cond: valid, value: { kind: 'call', name: 'atan2', args: [lenOfN(cross), dot] } }] };
+  }
   return { kind: 'call', name: ANGLE_FN, args: [...u, ...v] };
 }
 
@@ -308,7 +313,9 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
             for (let k = 1; k < dim; k++) s = add(s, mul(p[k], q[k]));
             return sc(s);
           }
-          case 'cross': twoOnly(); return sc(sub(mul(p[0], q[1]), mul(p[1], q[0])));
+          case 'cross':
+            if (dim === 3) return vc(...p.map((_, k) => sub(mul(p[(k + 1) % 3], q[(k + 2) % 3]), mul(p[(k + 2) % 3], q[(k + 1) % 3]))));
+            twoOnly(); return sc(sub(mul(p[0], q[1]), mul(p[1], q[0])));
           case 'midpoint': return vc(...p.map((pk, k) => div(add(pk, q[k]), num2)));
           case 'perp': twoOnly(); return vc(neg(p[1]), p[0]);
           case 'unit': return vc(...p.map(pk => div(pk, lenOfN(p))));
@@ -390,7 +397,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
 }
 
 const num2: Expr = { kind: 'num', value: 2 };
-const VECTOR_USAGE = 'vector takes one or two 2D points: vector(A, B) from A to B, or vector(V) from the origin. 3-component vectors are not drawn yet.';
+const VECTOR_USAGE = 'vector takes one or two points: vector(A, B) from A to B, or vector(V) from the origin.';
 const spaceVar = (name: 'x' | 'y'): Expr => ({ kind: 'var', name });
 
 /** Internal figure calls with flat scalar vertices: '[segment]' and
@@ -399,8 +406,8 @@ const spaceVar = (name: 'x' | 'y'): Expr => ({ kind: 'var', name });
  *  differs so classify can word its errors after the statement the user
  *  wrote). */
 export type FigureName = '[polygon]' | '[segment]' | '[polyline]' | '[vector]' | '[square]';
-const polyCall = (name: FigureName, pts: Array<[Expr, Expr]>): Expr =>
-  ({ kind: 'call', name, args: pts.flat() });
+const polyCall = (name: FigureName, pts: Expr[][]): Expr =>
+  ({ kind: 'call', name: pts[0].length === 3 ? name.replace(']', '3]') : name, args: pts.flat() });
 
 /**
  * Lower a whole statement: desugar a root-level geometry form, expand all
@@ -432,7 +439,9 @@ export function lowerGeom(
     // Tuple literals arrive flattened, so (1, 2, 3) cannot be told from
     // (1, 2), 3: an odd run of scalars gets the one message true of both.
     if (e.name === 'vector' && args.every(a => !a.vec) && args.length % 2 === 1) throw new Error(VECTOR_USAGE);
-    const pts = pairPoints(e.name, args, e.name === 'polygon' || e.name === 'polyline' ? 'A, B, C' : 'A, B');
+    const pts = vecArgs(args, `${e.name} takes points with matching dimensions.`);
+    if (!pts.length || ![2, 3].includes(pts[0].length) || pts.some(p => p.length !== pts[0].length)) throw new Error(`${e.name} needs points with matching dimensions.`);
+    if (pts[0].length === 3 && (e.name === 'line' || e.name === 'square')) throw new Error(`${e.name} is only defined for 2D points.`);
     if (e.name === 'line') {
       if (pts.length !== 2) {
         throw new Error('line takes two points: line(A, B), with A = (0, 0) defined above.');
@@ -463,7 +472,7 @@ export function lowerGeom(
       // vector(A, B) is the arrow from A to B; vector(V) starts at the origin.
       if (pts.length !== 1 && pts.length !== 2) throw new Error(VECTOR_USAGE);
       const zero: Expr = { kind: 'num', value: 0 };
-      return polyCall('[vector]', pts.length === 1 ? [[zero, zero], pts[0]] : pts);
+      return polyCall('[vector]', pts.length === 1 ? [pts[0].map(() => zero), pts[0]] : pts);
     }
     if (e.name === 'square') {
       if (pts.length !== 2) throw new Error('square takes two points: square(A, B).');

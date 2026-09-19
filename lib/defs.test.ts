@@ -60,7 +60,7 @@ describe('grad', () => {
 
   it('plots as a vector field and feeds point helpers', () => {
     expect(classify(resolve('grad(x^2 + y^2)')).plot.type).toBe('vfield2d');
-    expect(() => classify(resolve('grad(x y z)'))).toThrow(/2D only/);
+    expect(classify(resolve('grad(x y z)')).plot.type).toBe('vfield3d');
     const f = { params: ['x', 'y'], body: parseExpr('sin(x) y') };
     const e = resolveExpr(parseExpr('grad(f(x, y))', new Set(['f'])), n => (n === 'f' ? f : undefined));
     expect(classify(e).plot.type).toBe('vfield2d');
