@@ -78,6 +78,16 @@ describe('equation-native regression', () => {
     const r = analyze(['X ~ Normal(0,1)', 'Y = X^2']);
     expect(r.rows.map(r => r.error)).toEqual([undefined, undefined]);
   });
+  it('keeps the zoo names that are also functions or coefficients as models over data', () => {
+    // gamma is a function and beta/T everyday names: like exp, declared data
+    // on the left makes the row a model; an undeclared left side declares.
+    const rows = ['X=[1,2,3]', 'Y=[2,4,6]', 'beta=2', 'Y ~ beta (X - 1) + c', 'Y ~ gamma(a X)', 'W ~ Gamma(2, 1)', 'V ~ T(5)'];
+    expect([...scanRegressions(rows).keys()]).toEqual([3, 4]);
+    // The unambiguous names declare whatever is on the left.
+    expect(scanRegressions(['Y=[1,2]', 'Y ~ Weibull(2, 1)', 'Y ~ chisq(3)', 'Y ~ Cauchy']).size).toBe(0);
+    const r = analyze(['X=[1,2,3]', 'W ~ Gamma(2, 1)', 'V ~ T(5)', 'B ~ Beta(2, 3)']);
+    expect(r.rows.map(row => row.error)).toEqual([undefined, undefined, undefined, undefined]);
+  });
   it.each([
     [['X=[1,2]', 'Y=[1,2,3]', 'Y ~ a X'], /same length|different lengths|length/i],
     [['X=[1,1,1]', 'Y=[1,2,3]', 'Y ~ a X + b'], /rank deficient/],

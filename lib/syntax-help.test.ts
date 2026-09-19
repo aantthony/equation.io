@@ -48,6 +48,42 @@ describe('contextual syntax help', () => {
   it.each(['normal(', 'NORMAL(', 'Normal('])('shows the distribution signature for %s', text => {
     expect(syntaxHelp(text, text.length, defs()).hint).toContain('Normal(mean, sd)');
   });
+  it('shows the zoo signatures, parameterisation included', () => {
+    expect(syntaxHelp('X ~ Gamma(', 10, defs()).hint).toContain('Gamma(shape, rate)');
+    expect(syntaxHelp('X ~ Gamma(', 10, defs()).hint).toContain('rate, not scale');
+    expect(syntaxHelp('X ~ weibull(', 12, defs()).hint).toContain('Weibull(shape, scale)');
+    expect(syntaxHelp('X ~ LOGNORMAL(', 14, defs()).hint).toContain('LogNormal(mu, sigma)');
+    expect(syntaxHelp('Ca', 2, defs()).suggestions.some(s => s.name === 'Cauchy')).toBe(true);
+  });
+  it('reads gamma and T as distributions only right of a ~', () => {
+    expect(syntaxHelp('X ~ gamma(', 10, defs()).hint).toContain('Gamma(shape, rate)');
+    expect(syntaxHelp('X ~ T(', 6, defs()).hint).toContain('StudentT(df)');
+    expect(syntaxHelp('X ~ chisq(', 10, defs()).hint).toContain('ChiSquared(df)');
+    expect(syntaxHelp('y = gamma(', 10, defs()).hint).toContain('gamma(x)');
+    expect(syntaxHelp('GAMMA(', 6, defs()).hint).toContain('gamma(x)');
+    expect(syntaxHelp('T(', 2, defs()).hint).toBeUndefined();
+    // A user's own T(…) keeps its signature even there.
+    const d = defs();
+    d.fns.set('T', { params: ['q'], body: { kind: 'var', name: 'q' } });
+    expect(syntaxHelp('X ~ T(', 6, d).hint).toContain('T(q)');
+  });
+  it('reads a distribution name only at the head of a ~ row, not inside its arguments', () => {
+    const hint = (text: string) => syntaxHelp(text, text.length, defs()).hint ?? '';
+    expect(hint('X ~ Normal(gamma(')).toContain('gamma(x)');
+    expect(hint('Y ~ a gamma(')).toContain('gamma(x)');
+    expect(hint('W ~ Normal(0, t(')).not.toContain('StudentT');
+    expect(hint('Z ~ Normal(0, beta(')).not.toContain('Beta(a, b)');
+    expect(hint('Z ~ Normal(0, (2 + chisq(')).not.toContain('ChiSquared');
+    expect(hint('f(q) = gamma(')).toContain('gamma(x)');
+    // Inside the head call's own arguments the head's signature still shows.
+    expect(hint('X ~ Gamma(2, (1 + ')).toContain('Gamma(shape, rate)');
+    expect(hint('X ~  gamma (')).toContain('Gamma(shape, rate)');
+    // Over declared data these names are models, as the row itself will be read.
+    const d = defs();
+    d.lists.set('Y', { kind: 'list', items: [] } as never);
+    expect(syntaxHelp('Y ~ gamma(', 10, d).hint).toContain('gamma(x)');
+    expect(syntaxHelp('Y ~ Weibull(', 12, d).hint).toContain('Weibull(shape, scale)');
+  });
   it('keeps user function names case-sensitive and gives exact definitions priority', () => {
     const d = defs();
     expect(syntaxHelp('wave(', 5, d).hint).toContain('wave(x)');

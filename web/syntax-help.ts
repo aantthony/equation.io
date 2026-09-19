@@ -4,7 +4,7 @@ import { syntaxHelp, type SyntaxHelp } from '../lib/syntax-help.ts';
 interface Caret { line: number; offset: number }
 
 export function initSyntaxHelp(editor: HTMLElement, options: {
-  context: () => { caret: Caret; text: string; defs: Defs } | null;
+  context: () => { caret: Caret; text: string; defs: Defs; declared?: ReadonlySet<string> } | null;
   replace: (caret: Caret, start: number, end: number, text: string, offset: number) => void;
 }) {
   const box = document.createElement('div');
@@ -53,7 +53,7 @@ export function initSyntaxHelp(editor: HTMLElement, options: {
     if (key === dismissed) { hide(); return; }
     if (key !== currentKey) selected = -1;
     currentKey = key;
-    help = syntaxHelp(context.text, context.caret.offset, context.defs);
+    help = syntaxHelp(context.text, context.caret.offset, context.defs, context.declared);
     if (!help.suggestions.length && !help.hint) { hide(); return; }
     hint.textContent = help.hint ?? ''; hint.hidden = !help.hint;
     if (help.hint) editor.setAttribute('aria-describedby', hint.id);

@@ -104,6 +104,10 @@ pnpm deploy     # build and deploy to Cloudflare
 - `X ~ Normal(0, a)` — a random variable; the row plots its density, and
   parameters may use sliders. Then `P(X < b)`, `P(X > b)`, or `P(-1 < X < 2)`
   shades that area under the density and shows the numeric probability
+- Also `Uniform(lo, hi)`, `Exponential(rate)`, `Gamma(shape, rate)`, `Beta(a, b)`,
+  `ChiSquared(df)`, `StudentT(df)` (or `T(5)`), `LogNormal(mu, sigma)`,
+  `Cauchy(location, scale)`, `Weibull(shape, scale)` — exact densities, exact
+  `P(…)`, and median/IQR readouts where heavy tails leave no σ to report
 - `erf`, `normalpdf(x, mean, sd)`, and `normalcdf(x, mean, sd)` are also plain
   functions, so `y = normalcdf(x, 0, 1)` graphs the CDF
 

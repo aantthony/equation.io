@@ -175,3 +175,74 @@ describe('definite-integral rows shade their area', () => {
     expect(types(['L = [1, 2]', 'int[0..1] L x dx'])).toEqual(['def', 'vlist']);
   });
 });
+
+describe('the continuous distribution zoo through analyze()', () => {
+  it('every family is a drawn density with an exact, shaded P(…)', () => {
+    const rows = out([
+      'X ~ Gamma(2, 1)', 'P(X < 1)', 'B ~ Beta(2, 3)', 'P(B > 0.4)', 'C ~ ChiSquared(3)', 'P(1 < C < 4)',
+      'S ~ T(5)', 'P(-1 < S < 1)', 'L ~ LogNormal(0, 0.5)', 'P(L > 2)', 'K ~ Cauchy', 'P(K > 3)',
+      'W ~ Weibull(0.7, 2)', 'P(W > 2)',
+    ]);
+    expect(rows).toEqual([
+      ['implicit2d', undefined], ['ineq2d', '≈ 0.2642'], ['implicit2d', undefined], ['ineq2d', '≈ 0.4752'],
+      ['implicit2d', undefined], ['ineq2d', '≈ 0.5398'], ['implicit2d', undefined], ['ineq2d', '≈ 0.6368'],
+      ['implicit2d', undefined], ['ineq2d', '≈ 0.0828'], ['implicit2d', undefined], ['ineq2d', '≈ 0.1024'],
+      ['implicit2d', undefined], ['ineq2d', '≈ 0.3679'],
+    ]);
+  });
+
+  it('draws closed laws exactly: Gamma sums, the scaled Gamma, the square of a standard normal', () => {
+    const a = analyze(['X ~ Gamma(2, 3)', 'Y ~ Gamma(1.5, 3)', 'S = X + Y', 'D = X + X', 'V = X + 1',
+      'Z ~ N', 'Q = Z^2', 'P(Z^2 < 3.8414588)', 'P(X + Y < 1)', 'E(S)', 'E(Q)']);
+    expect(a.rows.map(r => r.error)).toEqual(Array(11).fill(undefined));
+    const types = a.rows.map(r => r.cls!.plot.type);
+    // S, D and Q go to the shader as pdfs; the shifted V has no closed family.
+    expect(types.slice(2, 5)).toEqual(['implicit2d', 'implicit2d', 'density']);
+    expect(types[6]).toBe('implicit2d');
+    expect(toGLSL(a.rows[2].expr!)).toContain('eq_gammapdf(');
+    expect(a.rows[7].info).toBe('≈ 0.9500');
+    expect(a.rows[8].info).toBe('≈ 0.4603'); // Gamma(3.5, 3) at 1
+    expect(a.rows[9].info).toBe('≈ 1.1667');
+    expect(a.rows[10].info).toBe('≈ 1.0000');
+  });
+
+  it('declines a mean that does not exist instead of printing the sample mean', () => {
+    const rows = out(['X ~ Cauchy', 'E(X)', 'E(X^2)', 'E(atan(X))', 'T2 ~ StudentT(2)', 'E(T2 + 1)', 'T1 ~ T(1)', 'E(3 T1)',
+      'T3 ~ T(3)', 'E(T3^2)', 'N1 ~ N', 'E(T2^2 + N1)', 'E(2X + 1)']);
+    expect(rows[1]).toEqual(['expect', 'no stable mean (heavy tails)']);
+    expect(rows[2]).toEqual(['expect', 'no stable mean (heavy tails)']);
+    expect(rows[3]).toEqual(['expect', '≈ 0.0000']); // bounded transform: a real mean
+    expect(rows[5]).toEqual(['expect', '≈ 1.0000']); // σ = ∞ but the mean exists: quadrature keeps it
+    expect(rows[7]).toEqual(['expect', 'no stable mean (heavy tails)']);
+    expect(rows[9]).toEqual(['expect', '≈ 3.0000']); // E(X²) = 3 although Var(X²) = ∞
+    expect(rows[11]).toEqual(['expect', 'no stable mean (heavy tails)']); // E(T2²) = ∞
+    expect(rows[12]).toEqual(['expect', 'no stable mean (heavy tails)']); // the exact Cauchy(1, 2)
+  });
+
+  it('reports bad parameters on the row: written out, or a constant at its value', () => {
+    const rows = out(['X ~ Gamma(-1, 1)', 'a = -2', 'Y ~ Beta(2, a)', 'W ~ Weibull(a + 3, 1)', 'N1 ~ Normal(0, a)',
+      's = sin(t)', 'M ~ Normal(0, s)', 'G ~ Gamma', 'F ~ Fisher(2, 3)']);
+    expect(rows[0][0]).toBe('Gamma(shape, rate) needs shape > 0.');
+    expect(rows[2][0]).toBe('Beta(a, b) needs b > 0.');
+    expect(rows[3][0]).toBe('implicit2d');
+    expect(rows[4][0]).toBe('Normal(mean, sd) needs sd > 0.');
+    expect(rows[6][0]).toBe('implicit2d'); // sd = sin(t) is 0 only at this instant
+    expect(rows[7][0]).toBe('Gamma(shape, rate) takes 2 arguments.');
+    expect(rows[8][0]).toMatch(/^Unknown distribution: Fisher\. Try Normal/);
+  });
+
+  it('keeps distribution names out of the document namespace', () => {
+    // T, gamma and beta are everyday names; the right side of ~ is its own namespace.
+    const rows = out(['T = 3', 'gamma(q) = q^2', 'beta = 0.5', 'X ~ T(T)', 'Y ~ Gamma(gamma(2), beta)', 'P(Y < 2)']);
+    expect(rows.map(r => r[0])).toEqual(['def', 'def', 'def', 'implicit2d', 'implicit2d', 'ineq2d']);
+    expect(rows[5][1]).toBe('≈ 0.0190'); // Gamma(4, 0.5) at 2
+  });
+
+  it('compiles the pdf builtins for the og VM', () => {
+    const row = analyze(['X ~ Beta(80, 120)']).rows[0].expr!;
+    if (row.kind !== 'eq') throw new Error('a density row is y = pdf(x)');
+    const prog = compileProg({ kind: 'bin', op: '-', a: row.l, b: row.r }, new Map([['x', 0], ['y', 1]]));
+    // y − pdf(x) at the mode x = 79/198, where the pdf is 11.5061.
+    expect(runProg(prog, [79 / 198, 11.5], new Float64Array(prog.depth))).toBeCloseTo(11.5 - 11.506129392, 6);
+  });
+});

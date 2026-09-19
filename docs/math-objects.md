@@ -8,7 +8,8 @@ coordinate-point drag writeback, "= value" readouts. So is most of phases 2–3
 and the seed of 5: named draggable points and vector arithmetic,
 `segment`/`polyline`/`vector`/`line`/`polygon`/`square`/`circle`, `|A-B|`,
 `distance` and `angle` readouts, piecewise and restrictions, integrals (value, `int[0..x]` as a function, iterated),
-Normal/Uniform/Exponential with derived arithmetic, scalar list broadcasting,
+Normal/Uniform/Exponential and the continuous zoo (Gamma, Beta, ChiSquared,
+StudentT, LogNormal, Cauchy, Weibull) with derived arithmetic, scalar list broadcasting,
 CSV tables, regression, and Lorenz via a 3-component state. Static previews
 include system points/curves and direction fields. **What remains, and the PR
 order for it, is in [objects-finish-plan.md](objects-finish-plan.md).**
@@ -94,7 +95,7 @@ object must respect):
 | `a = 2`, `b = a² + t` | constant (slider / computed) | widget; uniform |
 | `f(x) = …` | function | inlined |
 | definition using x/y (`r = sqrt(x²+y²)`) | coordinate field | grid family (level sets) |
-| `X ~ Normal(m, s)` (also Uniform, Exponential) | random variable | its exact density curve |
+| `X ~ Normal(m, s)` (also Uniform, Exponential, Gamma, Beta, ChiSquared, StudentT, LogNormal, Cauchy, Weibull) | random variable | its exact density curve |
 | `Y = X^2`, `S = X1 + X2`, bare `X + Y` (X random) | derived random variable | affine-in-normals: exact pdf (shader); 1–2 base variables: deterministic conditional-CDF curve (quadrature); otherwise sampled density estimate (KDE polyline); μ/σ readout, or median/IQR when the tails make those unstable |
 | `P(X < b)` | probability | shaded area + exact numeric readout |
 | `P(Y > 0.5)`, `P(Y > X)` (derived / joint) | probability | Monte Carlo readout (+ shaded density area when one-variable) |
@@ -182,7 +183,7 @@ Feature classes, not product snapshots. ✓ = has it, ~ = partial/indirect.
 | domain restrictions `{a < x < b}` | ✓ | ~ | ✓ (as piecewise) | **done, no new grammar**: a piecewise with no default is undefined outside its cases, so `y = {a < x < b: f(x)}` restricts any row kind. A Desmos-style trailing `f(x) {a < x < b}` suffix is not planned — it would collide with brace grouping (`2{x + 1}`) for nothing the case form lacks |
 | piecewise functions | ✓ | ✓ | ✓ (#6) | shipped |
 | definite integrals (value + `∫₀ˣ` as a function) | ✓ | ✓ | ✓ (value, `int[0..x]` as a function, iterated) | shipped, incl. signed-area shading when the row is exactly one definite integral (`value.shade`, CPU polygon in both renderers) |
-| distribution zoo (uniform, exponential, t, binomial, Poisson…) | ✓ | ✓ | Normal, Uniform, Exponential (+ derived arithmetic) | remaining: plan #4 (continuous), #5–#6 (discrete; the list/histogram bar rendering is the seed of the stem renderer) |
+| distribution zoo (uniform, exponential, t, binomial, Poisson…) | ✓ | ✓ | Normal, Uniform, Exponential, Gamma, Beta, ChiSquared, StudentT, LogNormal, Cauchy, Weibull (+ derived arithmetic; median/IQR readouts where σ does not exist) | remaining: plan #5–#6 (discrete; the list/histogram bar rendering is the seed of the stem renderer) |
 | value readout for constant rows (`2+2` → "= 4") | ✓ | ✓ | ✓ | **done**: a bare expression with no plot coordinate is a `value` row — it reads out "= 4" live and draws nothing (it no longer assumes `y =`). This is also the measurement readout: `\|A-B\|` reads the distance |
 | complex constants as Argand points (`1+2i`) | ✓ | ✓ | ✓ | shipped (phase 1.5) |
 | complex root sets (`w³ = 1`) | ~ | ✓ | ✓ (numeric positions) | shipped (§6); exact labels when polynomial remain (plan tail) |
@@ -352,7 +353,7 @@ phases 2–5 is ordered, PR by PR, in
 | 1 — coordinate objects | ~~position rows, chart parametrics, flow rows~~ — **shipped** (the five deltas of §6 on the #36 engine) | done |
 | 1.5 — coherence wins | ~~complex roots `f(w) = c`~~ (numeric; exact labels → plan tail); ~~Argand points for complex constants~~; ~~"= value" readouts on constant rows~~ — **shipped** | done |
 | 2 — geometry | ~~tuple-valued constants + vector arithmetic (`A = (1,2)`, `\|A-B\|`)~~, ~~named draggable points~~, ~~`segment`/`line`/`polygon`/`square`/`circle`~~, ~~`\|A-B\|`/`midpoint`/`dot`/`cross` readouts~~, ~~`polyline` and `vector` arrows (plan #1, settling §3's `[…]` collision)~~, ~~`distance`/`angle` measurements (plan #2)~~ — **shipped** | done |
-| 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (a no-default piecewise *is* the restriction, see §4), ~~definite integrals: value, `int[0..x]` as a function, iterated~~, ~~Uniform/Exponential and derived-variable arithmetic~~. ~~area shading on a definite-integral row~~. Remaining: continuous zoo (plan #4), discrete distributions with a stem renderer (plan #5), discrete variables in derived arithmetic (plan #6). Dropped: "`∫₀ˣ` via CPU LUT texture" — `y = int[0..x] …` already plots through the quadrature sum; revisit only if a perf guard trips | M + M + M left |
+| 3 — analysis | ~~restrictions~~ and ~~piecewise~~ (a no-default piecewise *is* the restriction, see §4), ~~definite integrals: value, `int[0..x]` as a function, iterated~~, ~~Uniform/Exponential and derived-variable arithmetic~~. ~~area shading on a definite-integral row~~, ~~continuous distribution zoo~~. Remaining: discrete distributions with a stem renderer (plan #5), discrete variables in derived arithmetic (plan #6). Dropped: "`∫₀ˣ` via CPU LUT texture" — `y = int[0..x] …` already plots through the quadrature sum; revisit only if a perf guard trips | M + M left |
 | 4 — space | ~~Lorenz~~ as a 3-component state with `trail` (one trajectory). Remaining: `revolve()` (plan #7), complex parametric curves (plan #8), fields over z + 3D coordinate points (plan #9), 3D named points and geometry (plan #10), 3D vector fields with auto-seeded trajectories (plan #11), 3D chart flows + arrow glyphs (plan #12) | L |
 | 5 — families | ~~scalar list math, ranges, zipped scatters, `hist`, CSV tables, regression~~. Remaining: lists broadcasting over any object kind (plan #13 CPU objects and point lists, #14 shader rows), sequences-as-lists interop (plan #15) | XL |
 | tail | exact complex-root labels; space curves from 2-of-3 systems; certified solving (plan #16+) | M each |

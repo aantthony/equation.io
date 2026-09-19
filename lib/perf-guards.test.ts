@@ -12,6 +12,7 @@ import { describe, expect, test } from 'vitest';
 import { CORPUS, SUM_CASE, compileRows, countNodes } from './perfcase.ts';
 import { parseExpr } from './expr.ts';
 import { diff } from './diff.ts';
+import { QUANTILE_STATS, RVSystem, buildRVSystem, scanRandomRows } from './dist.ts';
 import { toGLSL } from './glsl.ts';
 
 const MEASURE = !!process.env.PERF_MEASURE;
@@ -149,4 +150,46 @@ describe('symbolic derivative swell budgets', () => {
       expect(n).toBeLessThanOrEqual(c.budget);
     });
   }
+});
+
+describe('distribution quantile tables (the per-frame CPU path of a derived density)', () => {
+  // A base column is SAMPLE_COUNT quantile calls, redrawn every frame while a
+  // sampled density is on screen (RVSystem.resample). Gamma, Beta and StudentT
+  // have no closed-form quantile, so they read a table built by inverting the
+  // cdf — ~600 safeguarded Newton solves, each an incomplete gamma/beta
+  // evaluation. That build must happen once per SHAPE, never per frame and
+  // never per rate/scale slider tick; a regression here is a frozen UI.
+  const system = (rows: string[]) => {
+    const sys = new RVSystem();
+    buildRVSystem(sys, scanRandomRows(rows), {
+      fnNames: new Set(), getFn: () => undefined, constNames: new Set(['b']), taken: () => false,
+    });
+    return sys;
+  };
+
+  test('one build per shape: resampling and rate sliders reuse it', () => {
+    const sys = system(['X ~ Gamma(2.125, b)', 'Y ~ ChiSquared(4.25)', 'W = X + Y']);
+    const before = { ...QUANTILE_STATS };
+    for (let frame = 0; frame < 5; frame++) {
+      sys.resample(frame + 1);
+      sys.columns('W', { b: 1 + frame });
+    }
+    sys.resample(0);
+    // Gamma(2.125, b) and ChiSquared(4.25) = Gamma(2.125, ½) share ONE table.
+    expect(QUANTILE_STATS.builds - before.builds).toBe(1);
+    const evals = QUANTILE_STATS.cdfEvals - before.cdfEvals;
+    if (MEASURE) console.log(`gamma table: ${evals} cdf evaluations`);
+    expect(evals).toBeLessThan(4500);
+  });
+
+  test('table builds stay bounded across the hard shapes', () => {
+    // Poles, power tails and near-normal bulks, each a fresh table.
+    for (const decl of ['Gamma(0.0625, 1)', 'Gamma(4321, 1)', 'Beta(0.0625, 0.375)', 'Beta(321, 123)', 'StudentT(0.4375)', 'StudentT(54321)']) {
+      const before = QUANTILE_STATS.cdfEvals;
+      system([`X ~ ${decl}`]).columns('X', {});
+      const evals = QUANTILE_STATS.cdfEvals - before;
+      if (MEASURE) console.log(`${decl}: ${evals} cdf evaluations`);
+      expect(evals, decl).toBeLessThan(6200);
+    }
+  });
 });

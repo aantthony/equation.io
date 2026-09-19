@@ -2,6 +2,8 @@
  * text; an incomplete expression never needs to pass through the parser.
  */
 import { type Defs, shadowedFnNames } from './defs.ts';
+import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
+import { tildeRow } from './regression.ts';
 import { FUNCTIONS, builtinFn } from './expr.ts';
 
 export interface Suggestion { name: string; signature: string; description: string; call: boolean }
@@ -47,24 +49,37 @@ const signatures: Record<string, [string, string]> = {
   trail: ['trail(point)', 'Draw a moving point’s path'],
   tube: ['tube((x(u), y(u), z(u)))', 'Tube along a parametric space curve'],
   open: ['data = open("file.csv")', 'Use a CSV file dropped onto the graph'],
-  Normal: ['X ~ Normal(mean, sd)', 'Declare a normal random variable'],
-  Uniform: ['X ~ Uniform(lo, hi)', 'Declare a uniform random variable'],
-  Exponential: ['X ~ Exponential(rate)', 'Declare an exponential random variable'],
+  ...Object.fromEntries(DIST_FAMILIES.map(f => [f.name, [`X ~ ${distUsage(f)}`, `Declare ${f.help}`]])),
   P: ['P(X < b)', 'Probability of a random-variable condition'],
   E: ['E(X)', 'Expected value of a random variable'],
 };
 
-export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp {
+/** Distributions whose name folds case ANYWHERE in a row, not just at the
+ *  head of a ~: all but the spellings that also mean something else (Gamma →
+ *  the gamma function, Beta → a coefficient), which are laws only at the head. */
+const FOLDED_DISTS = DIST_FAMILIES.map(f => f.name).filter(n => !isModelName(n));
+
+/** Every name the definitions claim — the stand-in for declaredNames(texts)
+ *  when the caller has only the built Defs. */
+const definedNames = (defs: Defs): ReadonlySet<string> => new Set([
+  ...defs.consts.keys(), ...defs.fns.keys(), ...defs.fields.keys(), ...defs.states.keys(), ...defs.points,
+  ...defs.mats.keys(), ...defs.lists.keys(), ...defs.tables.keys(), ...defs.missingData.keys(),
+]);
+
+/** `declared`: the document's `name = …` names (regression.ts declaredNames),
+ *  which decide whether `Y ~ gamma(` is a model or a law exactly as the row
+ *  itself will be read; without it the built definitions stand in. */
+export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: ReadonlySet<string>): SyntaxHelp {
   const before = text.slice(0, offset);
   const empty: SyntaxHelp = { start: offset, end: offset, suggestions: [] };
   if (text.trimStart().startsWith('#')) return empty;
   // Primes after identifiers/values are derivatives, not string delimiters.
-  let quote = '', stack: Array<{ name?: string }> = [];
+  let quote = '', stack: Array<{ name?: string; at: number }> = [];
   for (let i = 0; i < before.length; i++) {
     const c = before[i];
     if (quote) { if (c === quote) quote = ''; continue; }
     if (c === '"' || (c === "'" && !/[\w)\]}']/.test(before[i - 1] ?? ''))) { quote = c; continue; }
-    if ('([{'.includes(c)) stack.push({ name: c === '(' ? /([A-Za-z_]\w*)\s*$/.exec(before.slice(0, i))?.[1] : undefined });
+    if ('([{'.includes(c)) stack.push({ name: c === '(' ? /([A-Za-z_]\w*)\s*$/.exec(before.slice(0, i))?.[1] : undefined, at: i });
     else if (')]}'.includes(c)) stack.pop();
   }
   if (quote) return empty;
@@ -77,7 +92,7 @@ export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp
   // Snapshot before user definitions overwrite candidates: those names are
   // exact, and must not acquire new spellings just because help is open.
   const foldedBuiltins = new Map([...candidates].filter(([name]) =>
-    FUNCTIONS.has(name) || ['Normal', 'Uniform', 'Exponential'].includes(name))
+    FUNCTIONS.has(name) || FOLDED_DISTS.includes(name))
     .map(([name, suggestion]) => [name.toLowerCase(), suggestion]));
   const values = (names: Iterable<string>, description: string) => {
     for (const name of names) candidates.set(name, { name, signature: name, description, call: false });
@@ -98,7 +113,20 @@ export function syntaxHelp(text: string, offset: number, defs: Defs): SyntaxHelp
   const call = [...stack].reverse().find(s => s.name)?.name;
   const shadowed = shadowedFnNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
   const blocked = call && !defs.fns.has(call) && shadowed.has(builtinFn(call) ?? '');
-  const entry = call && !blocked ? candidates.get(call) ?? foldedBuiltins.get(call.toLowerCase()) : undefined;
+  // The HEAD of a ~ row — the first token right of the ~, its paren the
+  // outermost one open — is a distribution name in any spelling, aliases
+  // included: `X ~ gamma(` is the Gamma law there. Anywhere deeper
+  // (`X ~ Normal(gamma(`, `Y ~ a gamma(`) a name means what it always does.
+  // Whether the row is a declaration at all is regression.ts's call (tildeRow,
+  // the predicate scanRegressions runs), so help and behaviour cannot differ.
+  const row = tildeRow(before, declared ?? definedNames(defs));
+  const head = row && !row.regression
+    ? /^\s*([A-Za-z_]\w*)\s*\($/.exec(before.slice(row.tilde + 1, (stack[0]?.at ?? -1) + 1)) : null;
+  const family = head && row && stack[0].at > row.tilde && call === head[1] && stack.filter(f => f.name).length === 1
+    && !defs.fns.has(call) ? distFamily(call) : undefined;
+  const distName = family?.name;
+  const entry = distName ? candidates.get(distName)
+    : call && !blocked ? candidates.get(call) ?? foldedBuiltins.get(call.toLowerCase()) : undefined;
   let hint = entry?.call ? `${entry.signature} — ${entry.description}` : undefined;
   if (!hint && before.includes('~')) hint = 'Y ~ m X + b fits data lists: unbound coefficients are fitted, defined constants stay fixed. X ~ Normal(mean, sd) declares a random variable.';
   const word = /[A-Za-z_][\w.]*(?:\.[\w]*)?$/.exec(before)?.[0] ?? '';

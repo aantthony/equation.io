@@ -109,10 +109,11 @@ describe('densityExpr', () => {
   });
 
   it('degrades invalid parameters to a flat 0 instead of a negative density', () => {
-    const uni = densityExpr(dist('Uniform(3, 1)'));
-    expect(evaluate(uni, { x: 2, y: 0 })).toBeCloseTo(0, 9);
-    const exp = densityExpr(dist('Exponential(-1)'));
-    expect(evaluate(exp, { x: 2, y: 0 })).toBeCloseTo(0, 9);
+    // Slider-valued: written-out bad numbers are refused at parse time.
+    const uni = densityExpr(dist('Uniform(3, b)'));
+    expect(evaluate(uni, { x: 2, y: 0, b: 1 })).toBeCloseTo(0, 9);
+    const exp = densityExpr(dist('Exponential(a)'));
+    expect(evaluate(exp, { x: 2, y: 0, a: -1 })).toBeCloseTo(0, 9);
   });
 });
 
@@ -230,8 +231,8 @@ describe('probabilityValue (exact)', () => {
 
   it('is NaN while parameters are invalid', () => {
     expect(value('Normal(0, s)', 'X < 1', { s: 0 })).toBeNaN();
-    expect(value('Uniform(3, 1)', 'X < 1')).toBeNaN();
-    expect(value('Exponential(-2)', 'X < 1')).toBeNaN();
+    expect(value('Uniform(3, b)', 'X < 1', { b: 1 })).toBeNaN();
+    expect(value('Exponential(a)', 'X < 1', { a: -2 })).toBeNaN();
   });
 });
 
@@ -273,12 +274,13 @@ describe('E(…) rows', () => {
   });
 
   it('integrates one-variable transforms against the base pdf (quadrature)', () => {
-    const { sys } = build(['X ~ Normal(0, 1)', 'Y = X^2']);
+    // (Not the standard normal: its square is the exact ChiSquared(1).)
+    const { sys } = build(['X ~ Normal(0, 2)', 'Y = X^2']);
     expect(sys.exactMoments('Y', {})).toBeNull();
     const qm = sys.quadMoments('Y', {})!;
-    expect(qm.mean).toBeCloseTo(1, 8); // E[X²] = Var(X) = 1, to quadrature digits
-    expect(qm.sd).toBeCloseTo(Math.SQRT2, 7); // Var(X²) = 2
-    expect(sys.mean('Y', {})).toBeCloseTo(1, 8);
+    expect(qm.mean).toBeCloseTo(4, 7); // E[X²] = Var(X) = 4, to quadrature digits
+    expect(qm.sd).toBeCloseTo(4 * Math.SQRT2, 6); // Var(X²) = 2σ⁴
+    expect(sys.mean('Y', {})).toBeCloseTo(4, 7);
     const { sys: r } = build(['X ~ Normal(0, 1)', 'R = sqrt(X)']);
     // Partial support averages where defined: E[√X | X > 0] =
     // 2^(-1/4)·Γ(3/4)/√(2π) / P(X > 0) ≈ 0.8222.
@@ -490,7 +492,7 @@ describe('exact normal propagation (affine in normal bases)', () => {
   it('declines everything without a closed form', () => {
     const { sys } = build([
       'X ~ Normal(0, 1)', 'Y ~ Normal(0, 1)', 'U1 ~ Uniform(0, 1)',
-      'Q = X^2', 'M = X Y', 'C = {X > 0: X^2, 1}', 'S = X + U1',
+      'Q = X^3', 'M = X Y', 'C = {X > 0: X^2, 1}', 'S = X + U1',
     ]);
     for (const name of ['Q', 'M', 'C', 'S']) expect(sys.exactDist(name)).toBeNull();
     expect(sys.exactDist('U1')!.kind).toBe('uniform'); // bases pass through
