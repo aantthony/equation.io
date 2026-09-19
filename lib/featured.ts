@@ -1,14 +1,14 @@
 /**
- * Graphs shown on a cold visit to `/` (no payload) and by "try another".
+ * Graphs shown on a cold visit to `/` (no payload) and by the random control.
  *
  * The homepage URL stays `/` until the visitor edits, picks an example, or
- * clicks try another — same contract as the old `y = sin(x)` default, so a
+ * clicks random — same contract as the old `y = sin(x)` default, so a
  * reload of the marketing URL is not a random `/g/…` link. Each empty load
  * advances a small cursor in localStorage so repeat visits rotate.
  */
 
 export interface FeaturedGraph {
-  /** Short label for the try-another control. */
+  /** Short label for the random control. */
   title: string;
   eqs: string[];
 }
@@ -98,7 +98,7 @@ export function sameRows(a: string[], b: string[]): boolean {
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
 
 /** Next featured graph, advancing the stored cursor. Skips `current` if it
- *  already matches, so "try another" never no-ops. */
+ *  already matches, so random never no-ops. */
 export function nextFeatured(store: Store | null, current?: string[]): FeaturedGraph {
   const n = FEATURED.length;
   let i = 0;

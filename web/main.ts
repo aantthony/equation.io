@@ -3812,7 +3812,7 @@ else if (!embedded) {
 recompileAll();
 // Canonicalize what we loaded (re-encoded /g/ form; stray paths back to /).
 // A fresh visit stays at / — the featured graph only enters the URL once
-// edited, or when the visitor clicks try another / an example.
+// edited, or when the visitor clicks random / an example.
 if (initialPayload) saveUrl();
 else if (!embedded && location.pathname !== '/') history.replaceState(null, '', '/');
 

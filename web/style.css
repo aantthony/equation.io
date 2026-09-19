@@ -563,21 +563,6 @@ body.file-drag::after {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-#try-another {
-  flex: none;
-  align-self: stretch;
-  margin-top: 4px;
-  padding: 6px 4px 2px;
-  border: none;
-  border-top: 1px solid var(--divider);
-  background: none;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-#try-another:hover { color: var(--muted-hover); text-decoration: underline; }
 #examples {
   /* Never shrinks (the summary row stays visible), but caps itself and scrolls
      internally so an open example tree can't push the panel past its max.
@@ -587,7 +572,8 @@ body.file-drag::after {
   max-height: 40%;
   overflow-y: auto;
   overscroll-behavior: none;
-  margin-top: 0;
+  border-top: 1px solid var(--divider);
+  margin-top: 4px;
   padding: 4px;
   font-size: 12px;
 }

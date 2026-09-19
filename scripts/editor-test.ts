@@ -439,7 +439,7 @@ await scenario('first visit loads a featured graph, not a lone sine', async () =
   check('empty / stays at / until edited', new URL(page.url()).pathname === '/', page.url());
 });
 
-await scenario('try another replaces the document and writes a share URL', async () => {
+await scenario('random replaces the document and writes a share URL', async () => {
   await page.goto('about:blank');
   await page.goto(ORIGIN + '/');
   await page.waitForSelector('#try-another');
@@ -450,9 +450,9 @@ await scenario('try another replaces the document and writes a share URL', async
     return JSON.stringify(now) !== JSON.stringify(prev);
   }, before);
   const after = await rowTexts(page);
-  check('try another loads a different featured graph', FEATURED.some(g => sameRows(g.eqs, after.filter((r): r is string => r !== null))), JSON.stringify(after));
+  check('random loads a different featured graph', FEATURED.some(g => sameRows(g.eqs, after.filter((r): r is string => r !== null))), JSON.stringify(after));
   await page.waitForFunction(() => location.pathname.startsWith('/g/'));
-  check('try another writes /g/', new URL(page.url()).pathname.startsWith('/g/'), page.url());
+  check('random writes /g/', new URL(page.url()).pathname.startsWith('/g/'), page.url());
 });
 
 await scenario('png button downloads a screenshot', async () => {
