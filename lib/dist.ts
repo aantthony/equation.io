@@ -1858,6 +1858,7 @@ export function discreteLaw(d: BaseDist, env: Record<string, number>): DiscreteL
   let mean: number;
   let variance: number;
   let mode: number;
+  let quantileGuess: ((u: number, upper: boolean) => number) | undefined;
   switch (c.kind) {
     case 'binomial': {
       const [n, p] = [wholeNumber(a[0]), a[1]];
@@ -1881,12 +1882,17 @@ export function discreteLaw(d: BaseDist, env: Record<string, number>): DiscreteL
       break;
     case 'negbinomial': {
       const [r, p] = a;
+      const logq = Math.log1p(-p);
       pmf0 = k => negBinomPmf(k, r, p);
       pq0 = k => {
         if (r !== 1) return betaPQ(r, k + 1, p, 1 - p); // I_p(r, k + 1)
-        const lq = (k + 1) * Math.log1p(-p); // r = 1: ln P(X > k) = (k + 1) ln(1 − p), −∞ at p = 1
+        const lq = (k + 1) * logq; // r = 1: ln P(X > k) = (k + 1) ln(1 − p), −∞ at p = 1
         return [-Math.expm1(lq), Math.exp(lq)];
       };
+      // Geometric (and NegativeBinomial with r = 1) has a logarithmic
+      // inverse. The shared search below checks neighbouring integers against
+      // the actual CDF, preserving exact steps despite rounding in log/exp.
+      if (r === 1) quantileGuess = (u, upper) => (upper ? Math.log(u) : Math.log1p(-u)) / logq - 1 + shift;
       mean = (r * (1 - p)) / p;
       variance = mean / p;
       mode = r > 1 ? Math.floor(((r - 1) * (1 - p)) / p) : 0;
@@ -1925,11 +1931,15 @@ export function discreteLaw(d: BaseDist, env: Record<string, number>): DiscreteL
     // All the mass, of a support with no end. (A finite one is searched: its
     // answer is where the cdf reaches 1, which may be short of hi.)
     if ((upper ? u <= 0 : u >= 1) && hi === Infinity) return Infinity;
-    // Bracket outward from the normal guess in doubling steps, then bisect
-    // on the whole numbers: ~2 log₂(distance) cdf calls, whatever the law.
-    const z = normalQuantile(upper ? 1 - u : u);
+    // Start at a closed-form inverse where available, otherwise a normal
+    // guess. Bracket and bisect to correct rounding at the CDF's steps.
     const clamp = (x: number): number => Math.min(hi, Math.max(lo, Math.round(x)));
-    let k = clamp(mean + sd * (isFinite(z) ? z : 0));
+    let k: number;
+    if (quantileGuess) k = clamp(quantileGuess(u, upper));
+    else {
+      const z = normalQuantile(upper ? 1 - u : u);
+      k = clamp(mean + sd * (isFinite(z) ? z : 0));
+    }
     if (!isFinite(k)) k = clamp(mean); // σ past double range: start from the mean
     if (!isFinite(k)) return NaN; // …and the mean too (Geometric(1e-320))
     let below: number; // a k that is NOT reached (or lo − 1)
