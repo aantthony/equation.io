@@ -53,6 +53,19 @@
          aria-label="Resize the equations panel"
          title="Drag to resize the panel; double-click to reset"></div>
     <button id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">☾</button>
+    <button id="shot" type="button" aria-label="Download screenshot" title="Download a PNG of the graph. Shift-click to copy.">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+        <path fill="currentColor" d="M4.5 3.5h1.2l.6-1h3.4l.6 1h1.2A1.5 1.5 0 0 1 13 5v6.5A1.5 1.5 0 0 1 11.5 13h-7A1.5 1.5 0 0 1 3 11.5V5A1.5 1.5 0 0 1 4.5 3.5zM8 11a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+      </svg>
+    </button>
+    <button id="rec" type="button" aria-label="Record animation" title="Record the graph as video (up to 8 seconds)" aria-pressed="false">
+      <svg class="rec-dot" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+        <circle cx="8" cy="8" r="4.5" fill="currentColor"/>
+      </svg>
+      <svg class="rec-stop" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
+        <rect x="4.5" y="4.5" width="7" height="7" rx="1.2" fill="currentColor"/>
+      </svg>
+    </button>
     <button id="state-reset" type="button" aria-label="Restart the simulation" title="Restart the simulation" hidden>↻</button>
     <div id="equations" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Equations, one per line" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="enter"></div>
     <!-- CSV files dropped onto the app, kept in this browser (filestore.ts).
@@ -68,6 +81,7 @@
     <div id="examples-list"></div>
   </details>
     <div id="panel-links">
+      <button type="button" id="try-another" title="Load another featured graph">random</button>
       <button id="open-csv" type="button" title="Plot the columns of a CSV file (you can also drop one anywhere)">+ csv</button>
       <a href="https://github.com/aantthony/equation.io" title="Source code on GitHub" rel="noopener">github</a>
       <a id="about-link" href="/about/">about</a>
