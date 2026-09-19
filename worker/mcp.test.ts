@@ -680,6 +680,8 @@ describe('syntax resource', () => {
     expect(resource.text).toContain('href="https://equation.io/assets/graph.css"');
     expect(resource.text).not.toContain('__EQUATION_ORIGIN__');
     expect(resource._meta.ui.csp).toEqual({ resourceDomains: ['https://equation.io', 'blob:'], connectDomains: [] });
+    expect(resource._meta.ui).not.toHaveProperty('domain');
+    expect(resource._meta['openai/widgetDomain']).toBe('https://equation.io');
     const args = { equations: ['a = 2', 'y = a sin(x)'] };
     const shown = await rpc('tools/call', { name: 'show_graph', arguments: args });
     const encoded = await rpc('tools/call', { name: 'encode_graph_url', arguments: args });
