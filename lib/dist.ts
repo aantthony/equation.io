@@ -1230,7 +1230,7 @@ const ATOM_RUN_FRAC = 0.01;
 
 /** The quantile function of a base distribution at these parameter values,
  *  or null while the parameters are invalid. */
-function quantileClosure(
+export function quantileClosure(
   d: BaseDist,
   env: Record<string, number>,
 ): ((u: number) => number) | null {
