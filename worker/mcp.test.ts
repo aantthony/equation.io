@@ -297,6 +297,20 @@ describe('mcp endpoint', () => {
     expect(bv.result.structuredContent.rows.map((r: { kind?: string; value?: string }) => [r.kind, r.value])).toEqual([
       ['value', '= 4'], ['definition (const)', undefined], ['value', '≈ 1.41421'], ['implicit2d', undefined],
     ]);
+    // Measurements are numbers too: distance/angle rows read out, a zero-length
+    // arm is undefined, and a document's own `angle` still wins over the builtin.
+    const { body: bm } = await rpc('tools/call', {
+      name: 'encode_graph_url',
+      arguments: { equations: ['A = (0, 0)', 'B = (3, 4)', 'distance(A, B)', 'angle((1, 0), A, (0, 2)) 180/pi', 'angle(B, B, A)'] },
+    });
+    expect(bm.result.structuredContent.rows.slice(2).map((r: { kind?: string; value?: string }) => [r.kind, r.value])).toEqual([
+      ['value', '= 5'], ['value', '= 90'], ['value', 'undefined'],
+    ]);
+    const { body: bs } = await rpc('tools/call', {
+      name: 'encode_graph_url',
+      arguments: { equations: ['angle = 0.5', 'distance(x) = 2x', 'distance(angle)'] },
+    });
+    expect(bs.result.structuredContent.rows[2]).toMatchObject({ kind: 'value', value: '= 1' });
     // A call folds case, so the name a document bound has to fold with it:
     // `Total = 3` is a legal old definition and `Total(x + 1)` was its product.
     const { body: b3 } = await rpc('tools/call', {

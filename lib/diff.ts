@@ -4,7 +4,7 @@
  * readable and cheap. Non-smooth functions (min, max, floor, …) throw;
  * callers fall back to finite differences.
  */
-import type { Expr } from './expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, type Expr, plainFnName } from './expr.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const ZERO = num(0);
@@ -96,6 +96,23 @@ export function diff(e: Expr, v: string): Expr {
         const n = sub(mul(diff(y, v), x), mul(y, diff(x, v)));
         return div(n, add(pow(x, num(2)), pow(y, num(2))));
       }
+      if (e.name === ANGLE_FN && e.args.length === 4) {
+        // The angle turns as fast as arm v does, less how fast arm u does.
+        // Each rate is its own scaled builtin: spelled out as
+        // (cross′ dot − cross dot′)/(cross² + dot²) it is 0/0 in float32 long
+        // before the angle itself stops being well defined near the vertex.
+        const [u0, u1, v0, v1] = e.args;
+        const rate = (a: Expr, b: Expr): Expr => {
+          const da = diff(a, v), db = diff(b, v);
+          return isNumVal(da, 0) && isNumVal(db, 0) ? ZERO : call(ANGLE_RATE_FN, a, b, da, db);
+        };
+        return sub(rate(v0, v1), rate(u0, u1));
+      }
+      if (e.name === ANGLE_RATE_FN && e.args.length === 4) {
+        // Rare (a second derivative): differentiate the unscaled quotient.
+        const [a, b, da, db] = e.args;
+        return diff(div(sub(mul(a, db), mul(b, da)), add(mul(a, a), mul(b, b))), v);
+      }
       if ((e.name === 'normalpdf' || e.name === 'normalcdf') && e.args.length === 3) {
         // Full chain rule in all three arguments (x, mean, sd may all move).
         const [x, m, s] = e.args;
@@ -106,7 +123,7 @@ export function diff(e: Expr, v: string): Expr {
         // φ′ = φ·(−z·z′ − s′/s): the −z z′ from the exponent, −s′/s from 1/s.
         return mul(pdf, sub(mul(neg(z), dz), div(diff(s, v), s)));
       }
-      if (e.args.length !== 1) throw new NonSmoothError(`Cannot differentiate ${e.name}.`);
+      if (e.args.length !== 1) throw new NonSmoothError(`Cannot differentiate ${plainFnName(e.name)}.`);
       const a = e.args[0];
       const da = diff(a, v);
       const chain = (outer: Expr) => mul(outer, da);
@@ -146,7 +163,7 @@ export function diff(e: Expr, v: string): Expr {
         default:
           // min/max/floor/mod/… (and gamma: digamma isn't in the language):
           // no smooth derivative; caller falls back to FD.
-          throw new NonSmoothError(`Cannot differentiate ${e.name}.`);
+          throw new NonSmoothError(`Cannot differentiate ${plainFnName(e.name)}.`);
       }
     }
     case 'eq': return sub(diff(e.l, v), diff(e.r, v));

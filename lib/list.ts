@@ -29,7 +29,7 @@
  */
 import { add, div, mul } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
-import { EVAL_FNS, type Expr, evaluate, freeVars, ineqComparisons, realPow } from './expr.ts';
+import { EVAL_FNS, type Expr, evaluate, freeVars, ineqComparisons, plainFnName, realPow } from './expr.ts';
 
 /**
  * A list of values, in whichever representation it has: one expression per
@@ -66,9 +66,7 @@ export const NO_LIST_INSIDE = new Set([
   '[polygon]', '[segment]', '[polyline]', '[vector]', '[square]',
 ]);
 
-/** The name such a call wears in a message: `[polygon]` is written polygon. */
-export const plainFnName = (name: string): string =>
-  (name.startsWith('[') ? name.slice(1, -1) : name);
+export { plainFnName };
 
 interface Ctx {
   getList: GetList;

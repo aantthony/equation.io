@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { type Definition, buildDefs, evalConstEnv, scanDefinition } from './defs.ts';
-import { evaluate, parseExpr } from './expr.ts';
+import { diff } from './diff.ts';
+import { angleFn, evaluate, parseExpr } from './expr.ts';
 import { arrowHead, lowerGeom } from './geom.ts';
+import { GLSL_PRELUDE, toGLSL } from './glsl.ts';
 import { classify } from './plot.ts';
 
 const POINTS = new Set(['A', 'B', 'C']);
@@ -83,6 +85,165 @@ describe('point arithmetic lowering', () => {
     expect(() => low('A < B')).toThrow(/compared/);
     expect(() => low('y = A')).toThrow(/One side is a point/);
     expect(() => low('(A, B)')).toThrow(/segment\(A, B\)/);
+  });
+});
+
+describe('distance and angle measurements', () => {
+  const lowL = (s: string) => lowerGeom(parseExpr(s), isPt, n => (n === 'M' ? [[parseExpr('1')]] : null) as never, n => n === 'L');
+
+  it('distance(A, B) is |A - B|', () => {
+    expect(evalAt('distance(A, B)')).toBe(5);
+    expect(evalAt('distance(B, A)')).toBe(5);
+    expect(evalAt('distance(A, A)')).toBe(0);
+    expect(evalAt('distance((0, 0), (3, 4))')).toBe(5);
+    expect(evalAt('distance(A, (1, 0))')).toBe(2);
+    expect(evalAt('distance(midpoint(A, B), A + (B - A)/2)')).toBe(0);
+    expect(low('distance(A, B)')).toEqual(low('|A - B|'));
+  });
+
+  it('angle(A, B, C) is the signed angle at B, counterclockwise from B→A to B→C', () => {
+    expect(evalAt('angle((1, 0), (0, 0), (0, 1))')).toBeCloseTo(Math.PI / 2, 12);
+    expect(evalAt('angle((0, 1), (0, 0), (1, 0))')).toBeCloseTo(-Math.PI / 2, 12);
+    expect(evalAt('angle((3, 2), (2, 2), (3, 3))')).toBeCloseTo(Math.PI / 4, 12); // the vertex is B, not the origin
+    expect(evalAt('angle(A, B, C)')).toBeCloseTo(Math.atan2(-3 * -6 - -4 * -5, -3 * -5 + -4 * -6), 12);
+    expect(evalAt('angle(A, B, C) + angle(C, B, A)')).toBeCloseTo(0, 12);
+  });
+
+  it('angle(U, V) is the angle between two vectors', () => {
+    expect(evalAt('angle((1, 0), (1, 1))')).toBeCloseTo(Math.PI / 4, 12);
+    expect(evalAt('angle((1, 1), (1, 0))')).toBeCloseTo(-Math.PI / 4, 12);
+    expect(evalAt('angle(B - A, perp(B - A))')).toBeCloseTo(Math.PI / 2, 12);
+    expect(evalAt('angle(A, B)')).toBeCloseTo(Math.atan2(6, 4) - Math.atan2(2, 1), 12);
+  });
+
+  it('a straight angle is π from either side: the range is (−π, π]', () => {
+    expect(evalAt('angle((1, 0), (0, 0), (-1, 0))')).toBe(Math.PI);
+    expect(evalAt('angle((-1, 0), (0, 0), (1, 0))')).toBe(Math.PI); // cross is −0 here
+    expect(evalAt('angle((0, -2), (0, 0), (0, 3))')).toBe(Math.PI);
+    expect(evalAt('angle((-1, 0), (1, 0))')).toBe(Math.PI);
+    expect(evalAt('angle((2, 0), (0, 0), (5, 0))')).toBe(0);
+  });
+
+  it('a zero-length arm has no direction: undefined, not a confident 0', () => {
+    expect(evalAt('angle(A, A, C)')).toBeNaN();
+    expect(evalAt('angle(A, C, C)')).toBeNaN();
+    expect(evalAt('angle((0, 0), B)')).toBeNaN();
+    // Tiny is not zero (there is no 1e-200 literal: that parses as 1 e − 200),
+    // and huge does not overflow: arms are scaled before they are multiplied.
+    expect(evaluate(parseExpr('10^(-200)'), {})).toBe(1e-200);
+    expect(evalAt('angle((10^(-200), 0), (0, 10^(-200)))')).toBeCloseTo(Math.PI / 2, 12);
+    expect(evalAt('angle((10^(-200), 0), (0, 0), (0, 10^200))')).toBeCloseTo(Math.PI / 2, 12);
+    expect(evalAt('angle((10^200, 10^200), (0, 10^200))')).toBeCloseTo(Math.PI / 4, 12);
+    expect(evalAt('distance(A, A)')).toBe(0); // ...while a zero distance is a fine number
+  });
+
+  it('lowers angle to one internal call: each arm component appears once', () => {
+    expect(low('angle(A, B, C)')).toEqual({
+      kind: 'call', name: '[angle]', args: [low('A_x - B_x'), low('A_y - B_y'), low('C_x - B_x'), low('C_y - B_y')],
+    });
+    const glsl = toGLSL(low('angle((1, 0), (x, y))'));
+    expect(glsl).toBe('eq_angle(1.0, 0.0, x, y)');
+    expect(GLSL_PRELUDE).toContain('float eq_angle(float u0, float u1, float v0, float v1)');
+  });
+
+  it('differentiates like atan2(cross, dot)', () => {
+    const e = low('angle((1, 2), (x, 3 - x^2))');
+    const at = { x: 0.7 };
+    const h = 1e-6;
+    const numeric = (evaluate(e, { x: 0.7 + h }) - evaluate(e, { x: 0.7 - h })) / (2 * h);
+    expect(evaluate(diff(e, 'x'), at)).toBeCloseTo(numeric, 6);
+  });
+
+  it('differentiates tiny and huge arms without under- or overflow', () => {
+    // The angle does not depend on the arms' lengths, so neither may its derivative.
+    const at1 = evaluate(diff(low('angle((1, 2), (x, 3 - x^2))'), 'x'), { x: 0.7 });
+    for (const k of [1e-200, 1e-30, 1e30, 1e150]) {
+      const d = diff(low('angle((k, 2k), (k x, k (3 - x^2)))'), 'x');
+      expect(evaluate(d, { x: 0.7, k }), String(k)).toBeCloseTo(at1, 9);
+    }
+    // Both arms moving, and the second derivative still exists.
+    const both = low('angle((x, 1), (1, x^2))');
+    const h = 1e-5;
+    const num1 = (evaluate(both, { x: 0.4 + h }) - evaluate(both, { x: 0.4 - h })) / (2 * h);
+    expect(evaluate(diff(both, 'x'), { x: 0.4 })).toBeCloseTo(num1, 6);
+    const d1 = diff(both, 'x');
+    const num2 = (evaluate(d1, { x: 0.4 + h }) - evaluate(d1, { x: 0.4 - h })) / (2 * h);
+    expect(evaluate(diff(d1, 'x'), { x: 0.4 })).toBeCloseTo(num2, 5);
+    // A fixed arm contributes nothing, so it is not emitted at all.
+    expect(toGLSL(diff(low('angle((1, 0), (x, y))'), 'x'))).toBe("eq_angle_rate(x, y, 1.0, 0.0)");
+  });
+
+  it('angleFn and its GLSL twin agree on every edge', () => {
+    expect(angleFn(1, 0, 0, 1)).toBeCloseTo(Math.PI / 2, 15);
+    expect(angleFn(-1, 0, 1, 0)).toBe(Math.PI);
+    expect(angleFn(0, 0, 1, 0)).toBeNaN();
+    expect(angleFn(NaN, 1, 1, 0)).toBeNaN();
+    expect(angleFn(1, NaN, 1, 0)).toBeNaN();
+    expect(angleFn(1, 0, NaN, 5)).toBeNaN();
+    expect(angleFn(Infinity, 0, 1, 0)).toBeNaN();
+    // GLSL max() may drop a NaN that Math.max propagates, and the c == 0
+    // branch must not invent a 0 where the CPU says NaN: mirror both.
+    const body = GLSL_PRELUDE.slice(GLSL_PRELUDE.indexOf('float eq_angle('));
+    expect(body).toContain('isnan(u0) || isnan(u1) || isnan(v0) || isnan(v1)');
+    expect(body).toContain('d > 0.0 ? 0.0 : EQ_NAN');
+  });
+
+  it('never shows the internal name in an error', () => {
+    const internal: ReturnType<typeof parseExpr> = { kind: 'call', name: '[angle]', args: [parseExpr('x')] };
+    expect(() => diff(internal, 'x')).toThrow(/^Cannot differentiate angle\.$/);
+  });
+
+  it('are scalars: they compose inside larger expressions and plots', () => {
+    expect(evalAt('2 distance(A, B)')).toBe(10);
+    expect(evalAt('angle((1, 0), (0, 0), (0, 1)) 180/pi')).toBeCloseTo(90, 10);
+    expect(evalAt('distance(A, B)^2 + sin(angle((1, 0), (0, 1)))')).toBeCloseTo(26, 12);
+    const at = (s: string) => (low(s) as { items: [never, never] }).items.map(e => evaluate(e, env));
+    expect(at('A + distance(A, B) unit(B - A)')).toEqual([4, 6]);
+    expect(classify(low('distance(A, B)'), new Set(Object.keys(env))).plot.type).toBe('value');
+    expect(classify(low('angle(A, B, C)'), new Set(Object.keys(env))).plot.type).toBe('value');
+    expect(classify(low('y = distance(A, B) sin(x + angle(A, B, C))'), new Set(Object.keys(env))).plot.type).toBe('implicit2d');
+    expect(classify(low('circle(A, distance(A, B))'), new Set(Object.keys(env))).plot.type).toBe('implicit2d');
+    expect(classify(low('distance((x, y), A) + distance((x, y), B) = 6'), new Set(Object.keys(env))).plot.type).toBe('implicit2d');
+    expect(classify(low('distance((cos(t), sin(t)), A)'), new Set(Object.keys(env))).animated).toBe(true);
+  });
+
+  it('distance follows |A - B| to 3-component vectors; angle stays 2D', () => {
+    const is3 = (n: string) => (n === 'p' || n === 'q' ? [n + '_1', n + '_2', n + '_3'] : isPt(n));
+    const e3 = { p_1: 1, p_2: 2, p_3: 3, q_1: 3, q_2: 5, q_3: 9 };
+    expect(evaluate(lowerGeom(parseExpr('distance(p, q)'), is3), e3)).toBe(7);
+    expect(() => lowerGeom(parseExpr('distance(p, A)'), is3)).toThrow(/same number of components, not 3 and 2/);
+    expect(() => lowerGeom(parseExpr('angle(p, q)'), is3)).toThrow(/2D points and vectors only — 3-component vectors are not supported yet/);
+    expect(() => lowerGeom(parseExpr('angle(A, p, B)'), is3)).toThrow(/3-component vectors are not supported yet/);
+  });
+
+  it('fail loudly, with messages true however the tuples flattened', () => {
+    for (const row of ['distance(A)', 'distance(A, B, C)', 'distance(A, 3)', 'distance(3, A)',
+      'distance(1, 2, 3)', 'distance((1, 2, 3), (4, 5, 6))', 'distance(a)']) {
+      expect(() => low(row), row).toThrow(/^distance takes two points: distance\(A, B\)/);
+    }
+    for (const row of ['angle(A)', 'angle(A, B, C, A)', 'angle(A, 3)', 'angle(1, 2, 3)',
+      'angle((1, 2, 3), (4, 5, 6), (7, 8, 9))', 'angle(a)', 'angle(A, B, 0.5)']) {
+      expect(() => low(row), row).toThrow(/^angle takes three 2D points — angle\(A, B, C\), the angle at B — or two 2D vectors/);
+    }
+    // A list *as* an argument would be a list of points: families (plan #13).
+    const listy = /a list cannot stand for a point yet/;
+    expect(() => low('distance([(0, 0), (1, 1)], A)')).toThrow(/^distance takes points, and a list cannot stand for a point yet — distance\(A, B\)/);
+    expect(() => low('angle(A, [A, B], C)')).toThrow(/^angle takes points, and a list cannot stand for a point yet — angle\(A, B, C\)/);
+    expect(() => lowL('distance(L, A)')).toThrow(listy);
+    expect(() => lowL('distance(M, A)')).toThrow(listy);
+    // ...but a list inside a component is an ordinary scalar list: it stays
+    // in the lowered expression and broadcasts later, as in |A - (L, 1)|.
+    expect(lowL('distance((L, 1), A)')).toEqual(lowL('|(L, 1) - A|'));
+    expect(() => lowL('angle(A, (2L, 0), B)')).not.toThrow();
+    // A measurement is a number, so it is no vertex.
+    expect(() => low('segment(A, distance(A, B))')).toThrow(/write segment\(A, B\)/);
+  });
+
+  it('point-function lookup ignores Object.prototype names', () => {
+    for (const name of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
+      const e: ReturnType<typeof parseExpr> = { kind: 'call', name, args: [{ kind: 'var', name: 'x' }] };
+      expect(lowerGeom(e, isPt)).toBe(e);
+    }
   });
 });
 

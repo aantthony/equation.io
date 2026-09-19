@@ -2986,6 +2986,7 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['perpendicular bisector', 'A = (-2, -1); B = (2, 1.5); segment(A, B); M = midpoint(A, B); line(M, M + perp(B - A))'],
     ['circle through a point', 'C = (0, 0); P = (2, 1); circle(C, |P - C|); segment(C, P)'],
     ['square on a segment', 'A = (-1, 0); B = (2, 1); square(A, B)'],
+    ['triangle: a side and its angles', 'A = (-2, -1); B = (3, -0.5); C = (0.5, 2.5); polygon(A, B, C); distance(A, B); angle(B, A, C) 180/pi; angle(B, A, C) + angle(C, B, A) + angle(A, C, B)'],
     ['vector sum (parallelogram rule)', 'A = (3, 1); B = (1, 2); vector(A); vector(B); vector(A + B); polyline(A, A + B, B)'],
     ['thébault’s theorem', 'A = (0, 0); B = (4, 0.5); D = (1, 2.5); C = B + D - A; '
       + 'polygon(A, B, C, D); square(B, A); square(C, B); square(D, C); square(A, D); '

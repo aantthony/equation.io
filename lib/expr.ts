@@ -59,7 +59,7 @@ export const FUNCTIONS = new Set([
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
-  'dot', 'cross', 'perp', 'midpoint', 'unit',
+  'dot', 'cross', 'perp', 'midpoint', 'unit', 'distance', 'angle',
   'segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle',
   // Small-matrix helpers (det, trace, matvec, linear solve), also lowered
   // symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts).
@@ -80,7 +80,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'gamma', 'factorial', 'sinc', 'coth',
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   'grad',
-  'polyline', 'vector',
+  'polyline', 'vector', 'distance', 'angle',
 ]);
 
 /**
@@ -763,6 +763,51 @@ export function factorialFn(x: number): number {
   return gammaFn(x + 1);
 }
 
+/** The internal call angle(…) lowers to (lib/geom.ts): [angle](u0, u1, v0, v1).
+ *  Unwritable, like '[trail]', so it can never collide with a user's name. */
+export const ANGLE_FN = '[angle]';
+/** d/dp of [angle] is a difference of two of these, one per arm (lib/diff.ts):
+ *  [angle′](v0, v1, w0, w1) is the turning rate of arm v moving with velocity w. */
+export const ANGLE_RATE_FN = '[angle′]';
+
+/** The name an internal call wears in a message: `[polygon]` is written
+ *  polygon, and both angle helpers are the user's angle. */
+export const plainFnName = (name: string): string =>
+  (name === ANGLE_RATE_FN ? 'angle' : name.startsWith('[') ? name.slice(1, -1) : name);
+
+/**
+ * The signed angle turning from arm u to arm v, counterclockwise positive, in
+ * (−π, π]. One function rather than atan2(cross, dot) spelled out, because
+ * the spelled-out form is wrong at both edges: a zero-length arm has no
+ * direction (NaN here, where atan2(0, 0) claims a confident 0), and a
+ * straight angle must read π from either side (atan2(−0, −1) is −π). Arms
+ * are scaled by their largest component first, so tiny or huge arms neither
+ * underflow to "zero length" nor overflow. The GLSL twin is eq_angle.
+ */
+export function angleFn(u0: number, u1: number, v0: number, v1: number): number {
+  const su = Math.max(Math.abs(u0), Math.abs(u1));
+  const sv = Math.max(Math.abs(v0), Math.abs(v1));
+  if (!(su > 0 && sv > 0)) return NaN; // a zero arm, or a NaN component
+  const a0 = u0 / su, a1 = u1 / su, b0 = v0 / sv, b1 = v1 / sv;
+  const cross = a0 * b1 - a1 * b0;
+  const dot = a0 * b0 + a1 * b1;
+  if (cross === 0) return dot < 0 ? Math.PI : dot > 0 ? 0 : NaN; // −0 === 0: no −π
+  return Math.atan2(cross, dot);
+}
+
+/**
+ * (v × w)/|v|²: how fast the direction of arm v turns when v moves with
+ * velocity w. Scaled by v's largest component like angleFn, so an arm of
+ * length 1e-200 (or 1e-20 in a float32 shader) has the derivative its
+ * direction has, not 0/0. The GLSL twin is eq_angle_rate.
+ */
+export function angleRateFn(v0: number, v1: number, w0: number, w1: number): number {
+  const s = Math.max(Math.abs(v0), Math.abs(v1));
+  if (!(s > 0)) return NaN;
+  const a0 = v0 / s, a1 = v1 / s;
+  return (a0 * (w1 / s) - a1 * (w0 / s)) / (a0 * a0 + a1 * a1);
+}
+
 /** sin(x)/x with the removable hole filled: sinc(0) = 1. */
 export const sincFn = (x: number): number => (x === 0 ? 1 : Math.sin(x) / x);
 
@@ -799,6 +844,8 @@ export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
   gamma: gammaFn,
   factorial: factorialFn,
   sinc: sincFn,
+  [ANGLE_FN]: angleFn,
+  [ANGLE_RATE_FN]: angleRateFn,
   coth: cothFn,
 };
 

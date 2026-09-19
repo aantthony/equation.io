@@ -5,9 +5,9 @@
  * sample is too slow and Workers forbid dynamic codegen (`new Function`), so
  * expressions compile once to opcode arrays run by a small stack machine.
  */
-import { type Expr, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, realPow, sincFn } from '../lib/expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, type Expr, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, plainFnName, realPow, sincFn } from '../lib/expr.ts';
 
-const enum Op { Const, Var, Add, Sub, Mul, Div, Pow, Neg, Fn1, Fn2, Fn3, Lt, Le, Gt, Ge, Sel }
+const enum Op { Const, Var, Add, Sub, Mul, Div, Pow, Neg, Fn1, Fn2, Fn3, Lt, Le, Gt, Ge, Sel, Fn4 }
 
 const FN1: Record<string, (x: number) => number> = {
   sin: Math.sin, cos: Math.cos, tan: Math.tan,
@@ -33,9 +33,15 @@ const FN3: Record<string, (a: number, b: number, c: number) => number> = {
   normalpdf, normalcdf,
 };
 
+// The angle measurement and its derivative (lib/geom.ts lowers angle(…) to these).
+const FN4: Record<string, (a: number, b: number, c: number, d: number) => number> = {
+  [ANGLE_FN]: angleFn, [ANGLE_RATE_FN]: angleRateFn,
+};
+
 const FN1_NAMES = Object.keys(FN1);
 const FN2_NAMES = Object.keys(FN2);
 const FN3_NAMES = Object.keys(FN3);
+const FN4_NAMES = Object.keys(FN4);
 
 export interface Prog {
   code: number[];
@@ -91,8 +97,11 @@ export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
         } else if (node.args.length === 3 && node.name in FN3) {
           code.push(Op.Fn3, FN3_NAMES.indexOf(node.name));
           push(-2);
+        } else if (node.args.length === 4 && Object.hasOwn(FN4, node.name)) {
+          code.push(Op.Fn4, FN4_NAMES.indexOf(node.name));
+          push(-3);
         } else {
-          throw new Error(`Cannot evaluate ${node.name}() here.`);
+          throw new Error(`Cannot evaluate ${plainFnName(node.name)}() here.`);
         }
         return;
       }
@@ -142,6 +151,7 @@ export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
 const FN1_TABLE = FN1_NAMES.map(n => FN1[n]);
 const FN2_TABLE = FN2_NAMES.map(n => FN2[n]);
 const FN3_TABLE = FN3_NAMES.map(n => FN3[n]);
+const FN4_TABLE = FN4_NAMES.map(n => FN4[n]);
 
 export function run(p: Prog, vars: ArrayLike<number>, stack: Float64Array): number {
   const { code, consts } = p;
@@ -160,6 +170,7 @@ export function run(p: Prog, vars: ArrayLike<number>, stack: Float64Array): numb
       case Op.Fn1: stack[sp - 1] = FN1_TABLE[arg](stack[sp - 1]); break;
       case Op.Fn2: sp--; stack[sp - 1] = FN2_TABLE[arg](stack[sp - 1], stack[sp]); break;
       case Op.Fn3: sp -= 2; stack[sp - 1] = FN3_TABLE[arg](stack[sp - 1], stack[sp], stack[sp + 1]); break;
+      case Op.Fn4: sp -= 3; stack[sp - 1] = FN4_TABLE[arg](stack[sp - 1], stack[sp], stack[sp + 1], stack[sp + 2]); break;
       // Comparisons yield 1/0 masks (0 for NaN operands, like a false branch).
       case Op.Lt: sp--; stack[sp - 1] = stack[sp - 1] < stack[sp] ? 1 : 0; break;
       case Op.Le: sp--; stack[sp - 1] = stack[sp - 1] <= stack[sp] ? 1 : 0; break;
