@@ -443,7 +443,7 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
     || t.type === 'parenclose' || t.type === 'string'
     || (t.type === 'operator' && t.str === '!');
   for (let token of bare) {
-    if (token.type === 'symbol' && SYMBOL_ALIASES[token.str]) {
+    if (token.type === 'symbol' && Object.hasOwn(SYMBOL_ALIASES, token.str)) {
       token = { ...token, str: SYMBOL_ALIASES[token.str] };
     }
     if (held) {
@@ -585,7 +585,7 @@ function createLeaf(token: Token): PNode {
   }
   if (token.type === 'parenopen') return { kind: 'popen', bracket: token.str, call: !!token.call };
   if (token.type === 'symbol') {
-    if (token.str in CONSTANTS) return num(CONSTANTS[token.str]);
+    if (Object.hasOwn(CONSTANTS, token.str)) return num(CONSTANTS[token.str]);
     return { kind: 'var', name: token.str };
   }
   throw new Error(`Invalid token: ${token.type} ${JSON.stringify(token.str)}`);
@@ -632,7 +632,7 @@ export function parseExpr(
 export function substVars(e: Expr, env: Record<string, Expr>): Expr {
   switch (e.kind) {
     case 'num': return e;
-    case 'var': return env[e.name] ?? e;
+    case 'var': return Object.hasOwn(env, e.name) ? env[e.name] : e;
     case 'neg': return { kind: 'neg', a: substVars(e.a, env) };
     case 'bin': return { kind: 'bin', op: e.op, a: substVars(e.a, env), b: substVars(e.b, env) };
     case 'call': return { kind: 'call', name: e.name, args: e.args.map(a => substVars(a, env)) };

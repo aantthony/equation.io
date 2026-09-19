@@ -301,9 +301,13 @@ describe('P(…): strict and non-strict bounds are different events', () => {
 
   it('refuses shapes it cannot mean', () => {
     const names = new Set(['X', 'Y']);
-    expect(() => toProbability(parseExpr('X + 1 = 3', none), names)).toThrow('takes a discrete random variable on its own');
-    expect(() => toProbability(parseExpr('X = Y', none), names)).toThrow('takes a discrete random variable on its own');
+    expect(() => toProbability(parseExpr('(X, Y) = 3', none), names)).toThrow('P(… = …) compares single values, like P(X = 3) or P(X = Y).');
     expect(() => toProbability(parseExpr('a = 3', none), names)).toThrow('must reference a random variable');
+    // A point event of an expression, or between two variables, is a shape of its own (plan #6).
+    expect(toProbability(parseExpr('X + 1 = 3', none), names)).toMatchObject({ point: true, inline: { point: true } });
+    const joint = toProbability(parseExpr('X != Y', none), names);
+    expect(joint.point).toBe(true);
+    expect(joint.single ?? joint.inline).toBeUndefined();
   });
 });
 
@@ -438,25 +442,30 @@ describe('RVSystem over discrete variables', () => {
     expect(sys.curve('X', {})).toBeNull();
     expect(sys.quadMoments('X', {})).toBeNull();
     expect(sys.meanUnstable('X', {})).toBe(false);
-    expect(() => sys.columns('X', {})).toThrow('X is discrete: sampling discrete random variables is not supported yet.');
-    expect(() => sys.probability(parseExpr('X > Z', none), {})).toThrow('X is discrete');
+    expect(sys.pmfOf('X', {})).toBeNull(); // a law of its own: nothing to enumerate
     expect(sys.stems('Z', {})).toBeNull();
+    expect(sys.pmfRuns('Z', {})).toBeNull();
+    // It samples through its exact quantile (plan #6): whole numbers, the law's mean.
+    const col = sys.columns('X', {});
+    expect(col.every(Number.isInteger)).toBe(true);
+    expect(col.reduce((s, x) => s + x, 0) / col.length).toBeCloseTo(3, 4);
+    expect(sys.probability(parseExpr('X > Z', none), {})).toBeGreaterThan(0.9);
   });
 
-  it('refuses derived arithmetic with a specific "not yet", never a KDE', () => {
+  it('derived arithmetic is a pmf, never a KDE; a mixture with a continuous base is a density', () => {
     const { sys, built } = build(['X ~ Poisson(3)', 'N ~ Binomial(5, 0.5)', 'Z ~ Normal(0, 1)', 'S = X + N', 'Y = X^2',
       'M = N + Z', 'V = Y + 1', 'W = Z + 1']);
-    expect(built.errors.get(3)).toMatch(/^X, N are discrete: arithmetic and joint events over discrete random variables are not supported yet\./);
-    expect(built.errors.get(4)).toMatch(/^X is discrete: .* P\(…\) with constant bounds and E\(…\) take X on its own\.$/);
-    expect(built.errors.get(5)).toMatch(/^N is discrete/);
-    expect(built.errors.get(6)).toBe('Y has an error in its definition.');
-    expect(built.errors.has(7)).toBe(false);
-    expect(sys.has('S') || sys.has('Y') || sys.has('M') || sys.has('V')).toBe(false);
-    // The anonymous variables of `E(2 X)`, `P(X + 1 < 3)` and a bare `X + Z` take the same door.
-    expect(() => sys.add({ name: '@E1', kind: 'derived', expr: parseExpr('2 X', none) })).toThrow('X is discrete');
+    expect(built.errors.size).toBe(0);
+    for (const n of ['S', 'Y', 'V']) {
+      expect(sys.isDiscreteVar(n), n).toBe(true);
+      expect(sys.curve(n, {}), n).toBeNull();
+      expect(sys.pmfOf(n, {})!.exact, n).toBe(true);
+    }
+    for (const n of ['M', 'W', 'Z']) expect(sys.isDiscreteVar(n), n).toBe(false);
+    expect(sys.curve('M', {})!.pts.length).toBeGreaterThan(100);
   });
 
-  it('checkProbability: point events need a discrete variable; joint events a continuous one', () => {
+  it('checkProbability: point events need discrete variables; joint events take either', () => {
     const { sys } = build(['X ~ Poisson(3)', 'Z ~ Normal(0, 1)', 'W ~ Normal(0, 1)']);
     const names = new Set(['X', 'Z', 'W']);
     const check = (body: string) => sys.checkProbability(toProbability(parseExpr(body, none), names));
@@ -464,11 +473,12 @@ describe('RVSystem over discrete variables', () => {
     expect(() => check('X != 3')).not.toThrow();
     expect(() => check('2 < X <= 5')).not.toThrow();
     expect(() => check('Z > W')).not.toThrow();
+    expect(() => check('X > Z')).not.toThrow();
+    expect(() => check('X + Z < 2')).not.toThrow();
+    expect(() => check('0 < X < Z')).not.toThrow();
     expect(() => check('Z = 3')).toThrow('P(Z = …) needs a discrete variable: a continuous one takes any single value with probability 0.');
     expect(() => check('Z != 3')).toThrow('P(Z != …) needs a discrete variable');
-    expect(() => check('X > Z')).toThrow('X is discrete');
-    expect(() => check('X + Z < 2')).toThrow('X is discrete');
-    expect(() => check('0 < X < Z')).toThrow('X is discrete');
+    expect(() => check('X = Z')).toThrow('P(… = …) needs discrete variables, and Z is not: a continuous value equals any given one with probability 0.');
   });
 
   it('judges a slider at its value, skips a moving one, and draws nothing while invalid', () => {

@@ -196,6 +196,9 @@ describe('8. discreteness has one source of truth: the family', () => {
     sys.add({ name: 'X', kind: 'base', dist: d });
     expect(sys.discreteDist('X')).toBe(d);
     expect(sys.exactDist('X')).toBeNull();
-    expect(() => sys.add({ name: 'Y', kind: 'derived', expr: parseExpr('X + 1', none) })).toThrow('X is discrete');
+    // …and so is what is built on it (plan #6): X + 1 is a pmf, shifted.
+    sys.add({ name: 'Y', kind: 'derived', expr: parseExpr('X + 1', none) });
+    expect(sys.isDiscreteVar('Y')).toBe(true);
+    expect(sys.pmfOf('Y', {})!.xs[0]).toBe(1);
   });
 });

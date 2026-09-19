@@ -63,6 +63,7 @@ Examples (paste-ready):
 - [Orbit (vector gravity)](https://equation.io/#r'%20%3D%20vel;vel'%20%3D%20-9%20r%2F%7Cr%7C%5E3;r(0)%20%3D%20(2%2C%200);vel(0)%20%3D%20(0%2C%201.5);segment((0%2C%200)%2C%20r);r;(0%2C%200)): `r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); segment((0, 0), r); r; (0, 0)` — vector states with point arithmetic; the bare state name draws as a moving point
 - [Matrix phase portrait](https://equation.io/#a%20%3D%20-1;b%20%3D%20-1%2F4;A%20%3D%20%5B(0%2C%201)%2C%20(a%2C%20b)%5D;(x'%2C%20y')%20%3D%20A%20(x%2C%20y)): `a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y)` — a linear system as its literal matrix, sliders in the entries
 - [Poisson: strict versus non-strict](https://equation.io/#m%20%3D%204;X%20~%20Poisson(m);P(X%20%3C%203);P(X%20%3C%3D%203);P(X%20%3D%203)): `m = 4; X ~ Poisson(m); P(X < 3); P(X <= 3); P(X = 3)` — a discrete variable draws its pmf as stems; each P(…) row highlights exactly the stems it counts, so `<` stops at 2, `<=` takes the stem at 3, and `P(X = 3)` is that one stem
+- [Two dice](https://equation.io/#X%20~%20DiscreteUniform(1%2C%206);Y%20~%20DiscreteUniform(1%2C%206);S%20%3D%20X%20%2B%20Y;P(S%20%3E%3D%2010);P(X%20%3E%20Y);P(X%20%3E%3D%20Y);E(S)): `X ~ DiscreteUniform(1, 6); Y ~ DiscreteUniform(1, 6); S = X + Y; P(S >= 10); P(X > Y); P(X >= Y); E(S)` — arithmetic over discrete variables is exact: the sum's pmf is the triangle on 2…12, drawn as stems; `P(X > Y)` = 15/36 and `P(X >= Y)` = 21/36 differ by the ties, `P(X = Y)`
 - [Central limit theorem](https://equation.io/#X1%20~%20Uniform%280%2C%201%29;X2%20~%20Uniform%280%2C%201%29;X3%20~%20Uniform%280%2C%201%29;X4%20~%20Uniform%280%2C%201%29;S%20%3D%20X1%20%2B%20X2%20%2B%20X3%20%2B%20X4;Z%20~%20Normal%282%2C%20sqrt%281%2F3%29%29;P%28S%20%3E%203%29): `X1 ~ Uniform(0, 1); X2 ~ Uniform(0, 1); X3 ~ Uniform(0, 1); X4 ~ Uniform(0, 1); S = X1 + X2 + X3 + X4; Z ~ Normal(2, sqrt(1/3)); P(S > 3)` — the sum of four uniforms hugs the matching normal
 - [Conditional random variable](https://equation.io/#X%20~%20Normal%280%2C%201%29;Y%20%3D%20%7BX%20%3E%200%3A%20X%5E2%2C%201%7D;P%28Y%20%3E%200.5%29;P%28Y%20%3E%20X%29): `X ~ Normal(0, 1); Y = {X > 0: X^2, 1}; P(Y > 0.5); P(Y > X)` — a piecewise transform of X, with probabilities of derived and joint events
 
@@ -340,11 +341,45 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   they are an error (the value would be 0). `E(X)` is the exact closed-form
   mean, marked on the axis. Zoomed out past 1024 whole numbers in view
   (`Poisson(1000000)`, `DiscreteUniform(-1000000, 1000000)`) the stems merge
-  into the filled outline of the same exact heights. NOT supported yet, each
-  an explicit error on the row: arithmetic on a discrete variable (`Y = X^2`,
-  `S = X1 + X2`, `E(2X)`, `P(X + 1 < 3)`, a bare `X + Z`) and joint events
-  (`P(X > Y)`) — a smoothed density over whole-number atoms would be a wrong
-  picture, so none is drawn.
+  into the filled outline of the same exact heights.
+- Arithmetic over discrete variables: `S = X + Y`, `D^2`, `D / 2`, `1 / N`,
+  `{X > Y: X, Y}`, a bare `X + Y` row, `E(X Y)`, `P(X + Y = 7)`, `P(X > Y)`,
+  `P(X = Y)`. A variable built ONLY on discrete bases is discrete: its row
+  draws a pmf as stems — never a smoothed curve — at its atoms' true
+  locations, which need not be whole numbers (`D / 2` stands on the halves,
+  `D^2` on the squares, `sin(D)` wherever it lands); values equal up to
+  rounding are one atom (`0.1 X + 0.2 Y` at X = Y = 1 is the atom 0.3). It is
+  EXACT: the joint of the independent bases is enumerated (each unbounded base
+  cut where its tails hold < 1e-12; independent parts convolve, so ten dice are
+  cheap), the readout is `μ = …, σ = …`, and `E(…)` prints 4 places. The joint
+  is over the BASES, so dependence is kept: `X + X` is 2X (even numbers only),
+  `X - X` is the atom 0, `P(X > X)` is 0, and with `A = X + Y; B = X - Y`,
+  `P(A > B)` is `P(Y > 0)`. Every `P(…)` keeps its strictness, joint events
+  included — ties have mass: `P(X > Y)` + `P(X = Y)` = `P(X >= Y)` — and a
+  bound is matched to an atom up to rounding (`P(S <= 0.1 + 0.2)` includes the
+  atom 0.3). Where g is undefined or infinite (`1 / N` at N = 0) that mass is
+  no value: the readout adds `P(defined) ≈ …`, as for densities. A mean whose
+  sum diverges (`2^G` over `Geometric(0.3)`) reads `no stable mean (heavy
+  tails)` / median and IQR instead of a truncated sum. Closed families answer
+  through the law itself, at any size: a plain sum of independent Poissons is
+  Poisson, of Binomials/Bernoullis sharing one p is Binomial, of
+  NegativeBinomials sharing one p is NegativeBinomial (`X + X`, `2X`, `X + 1`
+  are not — they enumerate). When the joint is too large to enumerate (more
+  than 131072 points in one step: `A B C` over three `Poisson(30)`, anything
+  over `Geometric(0.00001)`) the row falls back to the joint sample, says so —
+  `μ ≈ …, σ ≈ … (sampled)`, `P(…)` to 3 places; a sampled moment whose tail
+  cannot be certified is not printed (`σ unstable`, `σ = ∞`, or median and
+  IQR with `no stable mean`) — and still draws a pmf: the
+  frequency of each sampled value as stems, or past 1024 distinct values a
+  histogram on the values' own lattice with heavy atoms (the 0 of
+  `L B`, B Bernoulli) kept as stems; values on no lattice read `(sampled: too
+  many distinct values to resolve the pmf)`.
+- Discrete mixed with continuous (`N ~ Poisson(3); Z ~ Normal(0, 1);
+  Y = N + Z`, `N Z`, `P(N > Z)`, `E(N + Z)`) is a continuous MIXTURE: a density
+  row, estimated from the joint sample like any other sampled density (an
+  atom such as `N Z = 0` stays a stem). A point event needs discrete
+  variables throughout: `P(Y = 3)`, `P(N = Z)`, `P(Z = 1)` are errors naming
+  the continuous variable (the value would be 0).
 - Derived random variable: `Y = X^2`, `S = X1 + X2` — arithmetic over
   declared random variables declares a new one, including piecewise
   conditionals: `Y = {X > 0: X^2, 1}`. Distinct names are independent, so

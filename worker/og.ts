@@ -8,7 +8,7 @@
  * (parametric surfaces/curves, z = f(x,y) heightmaps). Output is a PNG built
  * with CompressionStream — no image library.
  */
-import { type PmfStems, integerBounds, markerHeight, selectStems, shadePolygon, stemGeometry } from '../lib/dist.ts';
+import { type PmfStems, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
@@ -343,18 +343,18 @@ function renderRow2D(
     }
     return;
   }
-  if (cls.plot.type === 'pmf' || (cls.plot.type === 'prob' && cls.plot.shade && analysis.rvs.discreteDist(cls.plot.shade.rv))) {
+  if (cls.plot.type === 'pmf' || (cls.plot.type === 'prob' && cls.plot.shade && analysis.rvs.isDiscreteVar(cls.plot.shade.rv))) {
     // A discrete variable's stems, or the ones a P(…) row selects (a band
     // in the row's color) — the app's cases 'pmf' and 'prob'.
     const shade = cls.plot.type === 'prob' ? cls.plot.shade! : undefined;
     const name = cls.plot.type === 'pmf' ? cls.plot.rv : shade!.rv;
     const halfW = (r.w / 2) * v.upp;
-    let drawn: ReturnType<typeof analysis.rvs.stems>;
-    let runs: PmfStems[];
+    let runs: PmfStems[] | null;
     try {
-      drawn = analysis.rvs.stems(name, analysis.constEnv, { lo: v.cx - halfW, hi: v.cx + halfW });
-      if (!drawn) return;
-      runs = shade ? selectStems(drawn.stems, drawn.law, integerBounds(shade, analysis.constEnv)) : [drawn.stems];
+      // The same runs the app draws (lib: pmfRuns) — a derived variable's
+      // atoms stand where they are, not at whole numbers.
+      runs = analysis.rvs.pmfRuns(name, analysis.constEnv, { lo: v.cx - halfW, hi: v.cx + halfW }, shade);
+      if (!runs) return;
     } catch {
       return; // a parameter with no value at t = 0
     }
@@ -788,7 +788,7 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
 export function canRenderOg(texts: string[]): boolean {
   let analysis: Analysis;
   try {
-    analysis = analyze(texts);
+    analysis = analyze(texts, { readouts: false }); // drawn, not read out: see AnalyzeOpts
   } catch {
     return false;
   }
@@ -803,7 +803,7 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
   const raster: Raster = { w, h, px: new Uint8ClampedArray(w * h * 3).fill(255) };
   let analysis: Analysis;
   try {
-    analysis = analyze(texts);
+    analysis = analyze(texts, { readouts: false }); // drawn, not read out: see AnalyzeOpts
   } catch {
     return raster;
   }

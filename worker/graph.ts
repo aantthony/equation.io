@@ -35,11 +35,14 @@ import {
   lowerProbBody,
   matchExpectation,
   matchProbability,
+  momentsReadout,
+  readoutNumber,
   probabilityValue,
   regionExpr,
   scanRandomRows,
   toExpectation,
   toProbability,
+  variableRow,
 } from '../lib/dist.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { lowerGeom } from '../lib/geom.ts';
@@ -73,6 +76,14 @@ export interface RowInfo {
   error?: string;
 }
 
+export interface AnalyzeOpts {
+  /** Compute the rows' numeric readouts (`info`): P(…) and E(…) values, a
+   *  derived pmf's μ and σ. They are what MCP validation reports, and they are
+   *  the expensive part — a joint enumeration, or a 131072-point sample, per
+   *  row — so a caller that only draws (the og image) says false. */
+  readouts?: boolean;
+}
+
 export interface Analysis {
   rows: RowInfo[];
   defs: Defs;
@@ -82,7 +93,7 @@ export interface Analysis {
   rvs: RVSystem;
 }
 
-export function analyze(texts: string[]): Analysis {
+export function analyze(texts: string[], { readouts = true }: AnalyzeOpts = {}): Analysis {
   const rows: RowInfo[] = texts.map(text => ({ text: text.trim() }));
 
   // Random-variable rows (`X ~ …`, and `Y = X^2` referencing one) resolve
@@ -187,14 +198,24 @@ export function analyze(texts: string[]): Analysis {
     taken: n => nameTaken(defs, n),
   });
   const rvNames = builtRVs.names;
-  const densityCls = (name: string): Classified => {
-    const ps = rvs.paramsOf(name);
-    return {
-      plot: { type: 'density', rv: name },
-      animated: ps.has('t'),
-      needs3D: false,
-      params: [...ps].filter(p => p !== 't'),
-    };
+  // How a variable's row draws is lib's (variableRow), shared with the app.
+  const classifyVariable = (row: RowInfo, name: string): void => {
+    const shape = variableRow(rvs, name);
+    row.dist = shape.kind === 'pmf' ? 'pmf' : 'density';
+    if (shape.kind === 'exact') {
+      row.cls = classify(shape.density, constNames);
+      row.expr = shape.density;
+    } else row.cls = shape.cls;
+    if (shape.kind === 'pmf' && rvs.get(name)?.kind === 'derived') pmfInfo(row, name);
+  };
+  // A derived pmf row reads out as in the app — exact μ, σ where the joint
+  // was enumerated, "(sampled)" where it was too large to be.
+  const pmfInfo = (row: RowInfo, name: string): void => {
+    if (!readouts) return;
+    try {
+      const m = rvs.moments(name, constEnv);
+      if (m) row.info = momentsReadout(m);
+    } catch { /* not computable at t = 0 (animated): no readout */ }
   };
   const movingConsts = new Set([...animatedConstNames(defs), ...Object.keys(stateVals)]);
   for (const [i, name] of builtRVs.rowRV) {
@@ -206,8 +227,7 @@ export function analyze(texts: string[]): Analysis {
     }
     // Labelled from the family, before anything can fail: a discrete
     // declaration whose parameter is bad is still a pmf row with an error.
-    row.dist = rvs.discreteDist(name) ? 'pmf' : 'density';
-    const rv = rvs.get(name)!;
+    row.dist = rvs.isDiscreteVar(name) ? 'pmf' : 'density';
     // Parameters that are constants are judged at their values: a = -1 then
     // X ~ Gamma(a, 1) is no distribution (mirror of web/main.ts).
     const problem = rvs.paramProblem(name, constEnv, movingConsts);
@@ -215,21 +235,7 @@ export function analyze(texts: string[]): Analysis {
       row.error = problem;
       continue;
     }
-    // A discrete law draws its pmf as stems (CPU overlay; no shader field).
-    if (rvs.discreteDist(name)) {
-      row.cls = { ...densityCls(name), plot: { type: 'pmf', rv: name } };
-      continue;
-    }
-    // Base declarations and derived variables with a closed form (affine in
-    // normal bases) draw the exact pdf; the rest estimate from samples.
-    const exact = rv.kind === 'base' ? rv.dist : rvs.exactDist(name);
-    if (exact) {
-      const density = densityExpr(exact);
-      row.cls = classify(density, constNames);
-      row.expr = density;
-    } else {
-      row.cls = densityCls(name);
-    }
+    classifyVariable(row, name);
   }
 
   // The body of a P(…)/E(…) row, read exactly as a plot row is read — with the
@@ -262,7 +268,7 @@ export function analyze(texts: string[]): Analysis {
         for (const name of p.rvs) {
           if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
         }
-        // Point events only of a discrete variable; nothing sampled over one.
+        // Point events only of discrete variables.
         rvs.checkProbability(p);
         row.dist = 'probability';
         // Inline bounded expressions become anonymous derived variables, so
@@ -282,7 +288,7 @@ export function analyze(texts: string[]): Analysis {
           const region = regionExpr(exact, single.lo, single.hi);
           row.cls = classify(region, constNames);
           row.expr = region;
-          try {
+          if (readouts) try {
             const value = probabilityValue(exact, single.lo, single.hi, constEnv);
             if (isFinite(value)) row.info = `≈ ${value.toFixed(4)}`;
           } catch {
@@ -296,18 +302,12 @@ export function analyze(texts: string[]): Analysis {
             needs3D: false,
             params: [...ps].filter(v => v !== 't'),
           };
-          try {
-            // A uniform-sum law still gets its exact value (mirror of the
-            // app's readout); everything else estimates over joint samples.
-            const value = single
-              ? rvs.exactProbability(single.rv, single.lo, single.hi, constEnv, single)
-              : null;
-            if (value !== null) {
-              if (isFinite(value)) row.info = `≈ ${value.toFixed(4)}`;
-            } else {
-              const mc = rvs.probability(p.body, constEnv);
-              if (isFinite(mc)) row.info = `≈ ${mc.toFixed(3)}`;
-            }
+          if (readouts) try {
+            // A uniform-sum law still gets its exact value, and an event over
+            // discrete variables is enumerated (mirror of the app's readout);
+            // everything else estimates over joint samples.
+            const { value, exact: settled } = rvs.eventProbability(p.body, single, constEnv);
+            if (isFinite(value)) row.info = `≈ ${value.toFixed(settled ? 4 : 3)}`;
           } catch { /* animated or broken: no readout */ }
         }
         continue;
@@ -339,12 +339,12 @@ export function analyze(texts: string[]): Analysis {
           needs3D: false,
           params: [...ps].filter(p => p !== 't'),
         };
-        try {
+        if (readouts) try {
           // Closed form and quadrature both earn full display precision;
           // only the Monte Carlo fallback rounds to its noise floor.
           const m = rvs.exactMoments(name, constEnv) ?? rvs.quadMoments(name, constEnv);
           const value = m ? m.mean : rvs.mean(name, constEnv);
-          if (isFinite(value)) row.info = `≈ ${value.toFixed(m ? 4 : 3)}`;
+          if (isFinite(value)) row.info = `≈ ${readoutNumber(value, m ? 4 : 3)}`;
           else if (rvs.meanUnstable(name, constEnv)) row.info = NO_MEAN_INFO;
         } catch { /* animated or broken: no readout */ }
         continue;
@@ -367,17 +367,9 @@ export function analyze(texts: string[]): Analysis {
           throw new Error(`An inequality in random variables is a probability: try P(${row.text}).`);
         }
         checkDerived(parsed, rvNames, constNames);
-        row.dist = 'density';
         const name = `@${ri}`;
         rvs.add({ name, kind: 'derived', expr: parsed });
-        const exactAnon = rvs.exactDist(name);
-        if (exactAnon) {
-          const density = densityExpr(exactAnon);
-          row.cls = classify(density, constNames);
-          row.expr = density;
-        } else {
-          row.cls = densityCls(name);
-        }
+        classifyVariable(row, name);
         continue;
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)
