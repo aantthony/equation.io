@@ -1,6 +1,6 @@
 /** The discrete distributions: Binomial, Poisson, Geometric, NegativeBinomial,
  *  Bernoulli, DiscreteUniform. Reference values are scipy.stats (1.17). */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   type BaseDist,
   type ProbBounds,
@@ -312,6 +312,59 @@ describe('P(…): strict and non-strict bounds are different events', () => {
 });
 
 describe('quantile: a step function, exact at the steps', () => {
+  it('the geometric inverse preserves CDF boundaries and their adjacent doubles', () => {
+    const bits = new DataView(new ArrayBuffer(8));
+    const adjacent = (x: number, direction: bigint): number => {
+      bits.setFloat64(0, x);
+      bits.setBigUint64(0, bits.getBigUint64(0) + direction);
+      return bits.getFloat64(0);
+    };
+    for (const p of [0.000001, 0.2, 0.5, 0.999999]) {
+      for (const rhs of [`Geometric(${p})`, `NegativeBinomial(1, ${p})`]) {
+        const law = discreteLaw(dist(rhs), {})!;
+        for (const k of [law.lo, law.lo + 1, law.lo + 7, Math.floor(1 / p), Math.floor(20 / p)]) {
+          const [cdf, sf] = law.pq(k);
+          const [prevCdf, prevSf] = law.pq(k - 1);
+          if (cdf > prevCdf && cdf < 1) {
+            expect(law.quantile(cdf), `${rhs} lower step ${k}`).toBe(k);
+            expect(law.quantile(adjacent(cdf, 1n))).toBeGreaterThan(k);
+          }
+          if (sf > 0 && sf < prevSf) {
+            expect(law.quantile(sf, true), `${rhs} upper step ${k}`).toBe(k);
+            expect(law.quantile(adjacent(sf, -1n), true)).toBeGreaterThan(k);
+          }
+        }
+        expect(law.quantile(1)).toBe(Infinity);
+        expect(law.quantile(0, true)).toBe(Infinity);
+        expect(law.quantile(-0.1)).toBeNaN();
+        expect(law.quantile(1.1, true)).toBeNaN();
+      }
+    }
+    const certain = discreteLaw(dist('Geometric(1)'), {})!;
+    expect(certain.quantile(1)).toBe(1);
+    expect(certain.quantile(0, true)).toBe(1);
+  });
+
+  it('wide geometric quantiles need only neighbouring CDF checks', () => {
+    const law = discreteLaw(dist('Geometric(0.000001)'), {})!;
+    // Count actual CDF work instead of depending on the CI runner's speed.
+    const cdf = vi.spyOn(Math, 'expm1');
+    try {
+      for (const upper of [false, true]) {
+        for (const u of [1e-12, 0.1, 0.5, 0.9]) {
+          cdf.mockClear();
+          const k = law.quantile(u, upper);
+          expect(Number.isFinite(k)).toBe(true);
+          expect(cdf.mock.calls.length).toBeLessThanOrEqual(4);
+          expect(upper ? law.pq(k)[1] <= u : law.pq(k)[0] >= u).toBe(true);
+          if (k > law.lo) expect(upper ? law.pq(k - 1)[1] > u : law.pq(k - 1)[0] < u).toBe(true);
+        }
+      }
+    } finally {
+      cdf.mockRestore();
+    }
+  });
+
   it.each(LAWS)('%s', rhs => {
     const law = discreteLaw(dist(rhs), {})!;
     const hi = Math.min(law.hi, law.quantile(1e-9, true));
