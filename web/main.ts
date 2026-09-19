@@ -2941,6 +2941,7 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['circle', 'x^2 + y^2 = 4'],
     ['tangent', 'y = tan(x)'],
     ['lemniscate', '(x^2+y^2)^2 = 8(x^2-y^2)'],
+    ['moire', 'sin(x^2 + y^2) = cos(x y)'],
     ['traveling wave', 'y = sin(x - 2t)'],
   ]],
   ['fields', [
