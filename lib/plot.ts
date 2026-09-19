@@ -396,7 +396,8 @@ function classifyLowered(
     const first = members[0].cls.plot;
     const unsupported = new Set(['family', 'scalar2d', 'domain2d', 'complex2d', 'conformal2d', 'fractal2d', 'density', 'pmf', 'prob', 'expect', 'trail']);
     if (unsupported.has(first.type)) throw new Error(`Families of ${first.type} do not superimpose meaningfully — select a list element L[k] instead.`);
-    const odd = members.findIndex(m => m.cls.plot.type !== first.type || ('dim' in m.cls.plot && 'dim' in first && m.cls.plot.dim !== first.dim));
+    const dimension = (plot: Plot) => plot.type === 'polygon' ? plot.dim ?? 2 : 'dim' in plot ? plot.dim : undefined;
+    const odd = members.findIndex(m => m.cls.plot.type !== first.type || dimension(m.cls.plot) !== dimension(first));
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
     if (members.some(m => m.cls.needs3D) && members.length > 8) throw new Error('A 3D object family has at most 8 members.');
     const shaders = new Set(['implicit2d', 'ineq2d', 'implicit3d', 'psurface', 'vfield2d']);
