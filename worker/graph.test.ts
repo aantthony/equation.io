@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluate } from '../lib/expr.ts';
+import { type Expr, evaluate } from '../lib/expr.ts';
 import { boundValue } from '../lib/intshade.ts';
 import { toGLSL } from '../lib/glsl.ts';
 import { analyze } from './graph.ts';
@@ -344,6 +344,56 @@ describe('discrete distributions through analyze()', () => {
     expect(a.rows[1].error).toBe('Poisson(mean) needs mean > 0.');
     expect(a.rows[1].dist).toBe('pmf');
     expect(a.rows[2].dist).toBe('density');
+  });
+});
+
+describe('complex paths through analyze()', () => {
+  const last = (texts: string[]) => analyze(texts).rows[texts.length - 1];
+
+  it('inlines a user function before splitting: f(path) is the image of the path', () => {
+    const row = last(['f(w) = w^2 + w', 'f(exp(i 2 pi u))']);
+    expect(row.error).toBeUndefined();
+    expect(row.cls!.plot).toMatchObject({ type: 'pcurve', dim: 2 });
+    const { comps } = row.cls!.plot as { comps: Expr[] };
+    // u = 1/4: w = i, f(i) = -1 + i.
+    expect(evaluate(comps[0], { u: 0.25 })).toBeCloseTo(-1);
+    expect(evaluate(comps[1], { u: 0.25 })).toBeCloseTo(1);
+    expect(last(['g(s) = exp(i s)', 'g(u)']).cls!.plot.type).toBe('pcurve');
+  });
+
+  it('takes sliders as parameters of the path', () => {
+    const row = last(['a = 2', 'a exp(i 2 pi u)']);
+    expect(row.cls).toMatchObject({ params: ['a'], plot: { type: 'pcurve' } });
+  });
+
+  it('refuses a huge composition without first splitting it', () => {
+    const nest = (n: number, inner: string) => { let s = inner; for (let k = 0; k < n; k++) s = `f(${s})`; return s; };
+    // The shared pipeline (inlining, lowering) is what a non-path row of the
+    // same size costs; the path may not add a split of the whole tree on top.
+    const time = (row: string) => {
+      const t0 = performance.now();
+      const r = last(['f(w) = w*w + w', row]);
+      return { ms: performance.now() - t0, error: r.error };
+    };
+    const field = time(nest(12, 'w'));
+    expect(field.error).toBeUndefined();
+    const path = time(nest(12, 'exp(i 2 pi u)'));
+    expect(path.error).toMatch(/too large to sample/);
+    expect(path.ms).toBeLessThan(2 * field.ms + 100);
+  }, 60000);
+
+  it('protects the other users of the split the same way: root systems and Argand points', () => {
+    const nest = (n: number, inner: string) => { let s = inner; for (let k = 0; k < n; k++) s = `f(${s})`; return s; };
+    expect(last(['f(w) = w*w + w', `${nest(2, 'w')} = 1`]).cls!.plot.type).toBe('system');
+    expect(last(['f(w) = w*w + w', `${nest(10, 'w')} = 1`]).error)
+      .toBe('This complex equation is too large to solve once split into real and imaginary parts — reduce the nesting or the powers.');
+    expect(last(['f(w) = w*w + w', nest(2, 'i')]).cls!.plot.type).toBe('point');
+    expect(last(['f(w) = w*w + w', nest(10, 'i')]).error).toMatch(/^This complex point is too large to evaluate/);
+  }, 60000);
+
+  it('refuses a composition whose split is too large, rather than stalling every frame', () => {
+    expect(last(['f(w) = w^2 + w', 'f(f(f(exp(i 2 pi u))))']).error).toBeUndefined();
+    expect(last(['f(w) = w^2 + w', 'f(f(f(f(f(exp(i 2 pi u))))))']).error).toMatch(/too large to sample/);
   });
 });
 

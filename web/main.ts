@@ -61,6 +61,7 @@ import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, sampleGradMag } from '../lib/grid.ts';
+import { CURVE_SAMPLES, type PathSampler, pathSampler } from '../lib/path.ts';
 import { type Classified, classify, classifyRow, valueReadout } from '../lib/plot.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
@@ -104,6 +105,10 @@ interface Equation {
    *  shade, and resampled only when the x-window or a value it reads (bounds,
    *  sliders, states, t) changes. */
   shadeCache?: { shade: IntShade; names: string[]; sampler: ShadeSampler; key: string; runs: ShadeRun[] };
+  /** A 2D parametric curve's compiled sampler (lib/path.ts) and its last
+   *  polyline, resampled only when a value it reads (sliders, states, t)
+   *  changes — the shadeCache pattern. */
+  pathCache?: { comps: Expr[]; sampler: PathSampler; key: string; pts: number[] };
   id: number;
   text: string;
   colorIndex: number;
@@ -215,7 +220,6 @@ function cssColorA([r, g, b]: [number, number, number], a: number): string {
   return `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${a})`;
 }
 
-const CURVE_SAMPLES = 400;
 /** RK4 steps in each direction for a dropped integral curve. */
 const ODE_STEPS = 1400;
 /** Most integral-curve seeds kept at once; older seeds evict first. */
@@ -587,7 +591,20 @@ function render() {
 
   // CPU sampling of parametric curves / points, with t bound to seconds.
   const sampleCurve = (eq: Equation, dim: 2 | 3): number[] => {
-    const { comps } = eq.cls!.plot as { comps: import('../lib/expr.ts').Expr[] };
+    const { comps } = eq.cls!.plot as { comps: Expr[] };
+    // A plane curve (a complex path included): compiled, and broken at its
+    // jumps — branch cuts, steps, poles.
+    if (dim === 2) {
+      let c = eq.pathCache;
+      if (c?.comps !== comps) c = eq.pathCache = { comps, sampler: pathSampler(comps), key: '', pts: [] };
+      const env: Record<string, number> = { ...constEnv, t: time };
+      const key = c.sampler.names.map(n => env[n]).join();
+      if (key !== c.key || !c.pts.length) {
+        c.key = key;
+        c.pts = c.sampler.sample(env);
+      }
+      return c.pts;
+    }
     const out: number[] = [];
     for (let k = 0; k < CURVE_SAMPLES; k++) {
       const u = k / (CURVE_SAMPLES - 1);
@@ -821,8 +838,10 @@ function render() {
         }
         case 'pcurve': {
           const flat = sampleCurve(eq, plot.dim);
-          const pts = new Float32Array(CURVE_SAMPLES * 3);
-          for (let k = 0; k < CURVE_SAMPLES; k++) {
+          // A broken path carries extra (NaN) points at its jumps.
+          const count = flat.length / plot.dim;
+          const pts = new Float32Array(count * 3);
+          for (let k = 0; k < count; k++) {
             pts[k * 3] = flat[k * plot.dim];
             pts[k * 3 + 1] = flat[k * plot.dim + 1];
             pts[k * 3 + 2] = plot.dim === 3 ? flat[k * plot.dim + 2] : 0;
@@ -2957,6 +2976,8 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['domain coloring', 'domain((w^3 - 1)/w)'],
     ['conformal map', 'conformal(w^2/4)'],
     ['joukowski airfoil', 'conformal(w + 1/w)'],
+    ['unit circle path', 'exp(i 2 pi u)'],
+    ['image of a circle', 'f(w) = w^2 + w; exp(i 2 pi u); f(exp(i 2 pi u))'],
   ]],
   ['fractals', [
     ['mandelbrot set', 'iter(z^2 + w)'],

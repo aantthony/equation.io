@@ -13,13 +13,15 @@
  * - t is always allowed and means "animated": bound to seconds since start
  */
 import { coordinateRow, lowerCoordinateFlow } from './coordinate.ts';
-import { complexParts } from './complex-parts.ts';
+import { SplitTooLarge, complexParts } from './complex-parts.ts';
 import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, compileTyped, usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
 import { ANGLE_FN, REVOLVE_AXES, builtinFn, revolveAxis, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
+import { PATH_NODE_BUDGET } from './path.ts';
+import { exceedsNodes } from './size.ts';
 import { toGLSL } from './glsl.ts';
 import { type GridField, buildGridField } from './grid.ts';
 
@@ -320,6 +322,21 @@ export function valueReadout(value: number): string {
   return `${shown === value ? '=' : '≈'} ${shown}`;
 }
 
+const tooLarge = (what: string, verb: string) =>
+  `This complex ${what} is too large to ${verb} once split into real and imaginary parts — reduce the nesting or the powers.`;
+
+/** complexParts within the node budget every CPU consumer of a split shares
+ *  (a path sampled per frame, a root system solved from many seeds): the
+ *  split stops as soon as a subterm outgrows it, so refusing is cheap. */
+function splitWithin(e: Expr, what: string, verb: string): [Expr, Expr] {
+  try {
+    return complexParts(e, PATH_NODE_BUDGET);
+  } catch (err) {
+    if (err instanceof SplitTooLarge) throw new Error(tooLarge(what, verb));
+    throw err;
+  }
+}
+
 export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), fields: Record<string, Expr> = {}, timeDerivative?: (e: Expr) => Expr): Classified {
   return classifyLowered(expr, defined, fields, timeDerivative).cls;
 }
@@ -386,7 +403,15 @@ function classifyLowered(
   const hasSpace = vars.has('x') || vars.has('y') || vars.has('z');
   const paramSystem = expr.kind === 'eq' && expr.l.kind === 'vec' && vars.has('u') && !vars.has('v');
   if (hasParam && hasSpace && !paramSystem) throw new Error('Cannot mix u/v with x/y/z.');
-  if (usesComplex(expr) && (vars.has('z') || hasParam)) {
+  // A bare complex expression in u alone is a path in the plane (below);
+  // every other complex use of u, v, or z has no 2D reading.
+  const scalar = expr.kind !== 'vec' && expr.kind !== 'list' && expr.kind !== 'eq' && expr.kind !== 'ineq';
+  const complexPath = usesComplex(expr) && scalar && !special && !tube && vars.has('u') && !vars.has('v');
+  // (Vectors, lists, and domain(…)-style forms each say below what they take.)
+  if (usesComplex(expr) && hasParam && !complexPath && !special && expr.kind !== 'vec' && expr.kind !== 'list') {
+    throw new Error('A complex path is a bare expression in u alone, like exp(i 2 pi u).');
+  }
+  if (usesComplex(expr) && vars.has('z')) {
     throw new Error('Complex expressions plot in 2D only (x, y, w).');
   }
 
@@ -548,6 +573,20 @@ function classifyLowered(
     return done({ type: 'point', dim, coords: expr.items });
   }
 
+  // A complex-valued expression in u is the image of a path: its real and
+  // imaginary parts are an ordinary 2D parametric curve in the Argand plane
+  // (the plane of w = x + iy, where complex points and roots already sit).
+  if (complexPath) {
+    // Sized before anything walks it: typing and splitting a huge inlined
+    // composition would cost seconds just to learn it cannot be sampled.
+    if (exceedsNodes(expr, PATH_NODE_BUDGET)) throw new Error(tooLarge('path', 'sample'));
+    // An expression that mentions i but is real (|exp(i u)|) traces nothing
+    // in the plane: it is a number for each u, and the row says so.
+    if (compileTyped(g).type !== 'complex') {
+      throw new Error('This is a real number for each u, not a path — a complex path needs an imaginary part, like exp(i 2 pi u); for a real curve write (u, …).');
+    }
+    return done({ type: 'pcurve', dim: 2, comps: splitWithin(expr, 'path', 'sample') });
+  }
   if (hasParam && !paramSystem) throw new Error('u/v need a vector expression like (cos(u), sin(u), v).');
 
   // A vector equation is a system, one residual per component: F(x,y,z) =
@@ -612,8 +651,8 @@ function classifyLowered(
     // re(w) remain ordinary implicit equations.
     if (compileTyped(g.l).type === 'complex' || compileTyped(g.r).type === 'complex') {
       if (!hasSpace) throw new Error('A constant complex comparison has no isolated roots — use w as the unknown.');
-      const a = complexParts(expr.kind === 'eq' ? expr.l : expr);
-      const b = complexParts(expr.kind === 'eq' ? expr.r : expr);
+      const a = splitWithin(expr.kind === 'eq' ? expr.l : expr, 'equation', 'solve');
+      const b = splitWithin(expr.kind === 'eq' ? expr.r : expr, 'equation', 'solve');
       return done({ type: 'system', dim: 2, residuals: a.map((c, k) => ({ kind: 'bin', op: '-', a: c, b: b[k] })) });
     }
     const field = compileTyped(g).code;
@@ -624,7 +663,7 @@ function classifyLowered(
   // Bare scalar expression.
   const compiled = compileTyped(g);
   if (compiled.type === 'complex') {
-    if (!hasSpace && !hasParam) return done({ type: 'point', dim: 2, coords: complexParts(expr) });
+    if (!hasSpace && !hasParam) return done({ type: 'point', dim: 2, coords: splitWithin(expr, 'point', 'evaluate') });
     return done({ type: 'complex2d', field: compiled.code });
   }
   if (vars.has('z')) return done({ type: 'implicit3d', field: compiled.code, grad: gradOf(g) });

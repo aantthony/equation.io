@@ -60,7 +60,8 @@ describe('classify (complex)', () => {
 
   it('rejects complex in 3D or parametric contexts', () => {
     expect(() => classify(parseExpr('z + i'))).toThrow(/2D only/);
-    expect(() => classify(parseExpr('(i u, 1, 1)'))).toThrow(/2D only/);
+    expect(() => classify(parseExpr('(i u, 1, 1)'))).toThrow(/not supported in vectors/);
+    expect(() => classify(parseExpr('i u v'))).toThrow(/bare expression in u alone/);
     expect(() => classify(parseExpr('(i x, 1, 1)'))).toThrow(/vector/i);
   });
 });

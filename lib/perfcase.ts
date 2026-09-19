@@ -144,12 +144,4 @@ export const CORPUS: { name: string; rows: (c: number) => string[] }[] = [
 export const SUM_CASE = (n: number) => [`N = ${n}`, 'y = (4/pi) sum(k=1..N, sin((2k-1)x)/(2k-1))'];
 
 /** Structural size of an expression tree (perf proxy for symbolic swell). */
-export function countNodes(e: unknown): number {
-  if (e === null || typeof e !== 'object') return 0;
-  let n = 1;
-  for (const v of Object.values(e)) {
-    if (Array.isArray(v)) for (const item of v) n += countNodes(item);
-    else if (typeof v === 'object') n += countNodes(v);
-  }
-  return n;
-}
+export { countNodes } from './size.ts';

@@ -163,7 +163,7 @@ Today: "Unknown variable: revolve".
   `tube`/`domain` (§5 step 3). The raymarcher and symbolic gradient need
   nothing. A no-default piecewise f restricts the extent for free.
 
-### 8. Complex parametric curves
+### 8. Complex parametric curves (shipped)
 
 Today: `exp(i 2 pi u)` → "Complex expressions plot in 2D only (x, y, w)."
 

@@ -532,6 +532,31 @@ describe('coordinate and complex previews', () => {
     const r = renderRaster(['w^3 = 1', frame], 160, 160);
     for (const [x, y] of [[100, 80], [70, 63], [70, 97]]) expect(pixel(r, x, y)[0]).toBeLessThan(150);
   });
+  it('draws a complex path in the same plane as Argand points and roots', () => {
+    // The unit circle passes through all three roots of unity and through i.
+    const r = renderRaster(['exp(i 2 pi u)', frame], 160, 160);
+    for (const [x, y] of [[100, 80], [70, 63], [70, 97], [80, 60], [60, 80]]) {
+      expect(Math.min(...pixel(r, x, y)), `${x},${y}`).toBeLessThan(150);
+    }
+    expect(Math.min(...pixel(r, 85, 85))).toBeGreaterThan(200);
+  });
+  it('draws the image of a path under a user function', () => {
+    // f(1) = 2 and f(-1) = 0 lie on the image of the unit circle.
+    const r = renderRaster(['f(w) = w^2 + w', 'f(exp(i 2 pi u))', frame], 160, 160);
+    expect(Math.min(...pixel(r, 120, 80))).toBeLessThan(150);
+  });
+  it('leaves a branch-cut jump undrawn instead of bridging it', () => {
+    // sqrt of the circle is the right half circle, jumping i → -i: no chord
+    // down the imaginary axis.
+    const r = renderRaster(['sqrt(exp(i 2 pi u))', frame], 160, 160);
+    expect(Math.min(...pixel(r, 100, 80))).toBeLessThan(150);
+    // …where only the grey axis shows, not the curve's colour.
+    for (const y of [70, 75, 85, 90]) {
+      const [red, , blue] = pixel(r, 80, y);
+      expect(blue - red, `y=${y}`).toBeLessThan(10);
+    }
+    expect(pixel(r, 100, 80)[2] - pixel(r, 100, 80)[0]).toBeGreaterThan(50);
+  });
   it('draws the spiral across the atan2 branch cut', () => {
     const r = renderRaster(['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)', '(r, theta) = (3u, 6pi u)', frame], 160, 160);
     // Radius 2.5 at angle 5pi: (-2.5, 0).

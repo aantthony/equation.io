@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildComb, buildTube, combScale, curveExtent, curveFrames } from './curve3d.ts';
+import { buildComb, buildTube, combScale, curveExtent, curveFrames, finiteRuns } from './curve3d.ts';
 
 const N = 400;
 
@@ -197,5 +197,21 @@ describe('combs', () => {
     const ext = curveExtent(helix.pts);
     const noise = new Float64Array(N).fill(1e-6);
     expect(combScale(noise, ext)).toBe(0);
+  });
+});
+
+describe('finiteRuns', () => {
+  const N = NaN;
+  it('is the whole strip when every vertex is finite', () => {
+    expect(finiteRuns(new Float32Array([0, 0, 0, 1, 0, 0, 2, 0, 0]))).toEqual([[0, 3]]);
+  });
+  it('splits at a non-finite vertex, so no strip contains one', () => {
+    const pts = new Float32Array([0, 0, 0, 1, 0, 0, N, N, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0]);
+    expect(finiteRuns(pts)).toEqual([[0, 2], [3, 3]]);
+  });
+  it('drops lone points and handles gaps at the ends', () => {
+    const pts = new Float32Array([N, 0, 0, 1, 0, 0, 0, Infinity, 0, 2, 0, 0, 3, 0, 0, 0, 0, N]);
+    expect(finiteRuns(pts)).toEqual([[3, 2]]);
+    expect(finiteRuns(new Float32Array(0))).toEqual([]);
   });
 });
