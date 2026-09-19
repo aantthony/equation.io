@@ -116,6 +116,9 @@ try {
   await frame.locator('#panel-chip').click();
   await frame.locator('.eq-slider input[type=range]').waitFor();
   assert.ok(await frame.locator('#panel-chip').isHidden(), 'Opening the editor hides its chip');
+  assert.equal(await frame.locator('#shot').count(), 0, 'screenshot control is site-only');
+  assert.equal(await frame.locator('#rec').count(), 0, 'record control is site-only');
+  assert.equal(await frame.locator('#try-another').count(), 0, 'try another is site-only');
   assert.equal(await frame.locator('html').getAttribute('data-theme'), 'dark');
   assert.equal(await frame.locator('#panel').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(32, 37, 43)');
   assert.match(await frame.locator('#equations').evaluate(el => getComputedStyle(el).fontFamily), /Courier New/);

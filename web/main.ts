@@ -3848,34 +3848,36 @@ renderAll();
 buildExamplesMenu();
 void refreshFileMenu();
 
-document.getElementById('try-another')?.addEventListener('click', () => {
-  const store = typeof localStorage === 'undefined' ? null : localStorage;
-  emptyDefault = nextFeatured(store, equations.map(e => e.text)).eqs;
-  replaceDocument(emptyDefault, true);
-});
+if (!embedded) {
+  document.getElementById('try-another')?.addEventListener('click', () => {
+    const store = typeof localStorage === 'undefined' ? null : localStorage;
+    emptyDefault = nextFeatured(store, equations.map(e => e.text)).eqs;
+    replaceDocument(emptyDefault, true);
+  });
 
-const shotBtn = document.getElementById('shot') as HTMLButtonElement | null;
-const recBtn = document.getElementById('rec') as HTMLButtonElement | null;
-capture = attachCapture({
-  gl: canvas,
-  overlay,
-  render,
-  requestRender,
-  notice: showNotice,
-  onRecording(on) {
-    recBtn?.classList.toggle('recording', on);
-    recBtn?.setAttribute('aria-pressed', on ? 'true' : 'false');
-    recBtn?.setAttribute('title', on
-      ? 'Stop recording'
-      : 'Record the graph as video (up to 8 seconds)');
-  },
-});
-shotBtn?.addEventListener('click', e => { void capture?.snapshot(e.shiftKey); });
-if (!capture.mime && recBtn) recBtn.hidden = true;
-else recBtn?.addEventListener('click', () => {
-  if (capture?.isRecording()) capture.stopRecording();
-  else capture?.startRecording();
-});
+  const shotBtn = document.getElementById('shot') as HTMLButtonElement | null;
+  const recBtn = document.getElementById('rec') as HTMLButtonElement | null;
+  capture = attachCapture({
+    gl: canvas,
+    overlay,
+    render,
+    requestRender,
+    notice: showNotice,
+    onRecording(on) {
+      recBtn?.classList.toggle('recording', on);
+      recBtn?.setAttribute('aria-pressed', on ? 'true' : 'false');
+      recBtn?.setAttribute('title', on
+        ? 'Stop recording'
+        : 'Record the graph as video (up to 8 seconds)');
+    },
+  });
+  shotBtn?.addEventListener('click', e => { void capture?.snapshot(e.shiftKey); });
+  if (!capture.mime && recBtn) recBtn.hidden = true;
+  else recBtn?.addEventListener('click', () => {
+    if (capture?.isRecording()) capture.stopRecording();
+    else capture?.startRecording();
+  });
+}
 
 if (embedded) {
   void import('./mcp-app.ts').then(({ connectGraphApp }) => connectGraphApp({
