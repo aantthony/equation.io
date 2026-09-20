@@ -2098,22 +2098,34 @@ function caretPos(): { line: number; offset: number } | null {
   return { line, offset: r.toString().length };
 }
 
-function setCaret(line: number, offset: number) {
+/** The DOM position of a character offset in a line (end of line when past it). */
+function nodeAt(line: number, offset: number): { node: Node; offset: number } | null {
   const el = lineEls()[line];
-  if (!el) return;
-  const sel = getSelection()!;
+  if (!el) return null;
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
   let remaining = offset;
   let t: Node | null;
   while ((t = walker.nextNode())) {
     const len = t.textContent!.length;
-    if (remaining <= len) {
-      sel.setBaseAndExtent(t, remaining, t, remaining);
-      return;
-    }
+    if (remaining <= len) return { node: t, offset: remaining };
     remaining -= len;
   }
-  sel.setBaseAndExtent(el, el.childNodes.length, el, el.childNodes.length);
+  return { node: el, offset: el.childNodes.length };
+}
+
+function setCaret(line: number, offset: number) {
+  const p = nodeAt(line, offset);
+  if (p) getSelection()!.setBaseAndExtent(p.node, p.offset, p.node, p.offset);
+}
+
+/** Restore a (possibly multi-line) selection by character positions. */
+function setSelectionSpan(
+  start: { line: number; offset: number },
+  end: { line: number; offset: number },
+) {
+  const a = nodeAt(start.line, start.offset);
+  const b = nodeAt(end.line, end.offset);
+  if (a && b) getSelection()!.setBaseAndExtent(a.node, a.offset, b.node, b.offset);
 }
 
 // --- undo/redo ---
@@ -2661,44 +2673,71 @@ function syncFromDOM() {
 }
 
 /**
+ * Map a DOM position to (line, character offset). Handles container-level
+ * boundaries (select-all) and positions inside widgets or stray nodes, which
+ * attach to the nearest line above.
+ */
+function posOf(node: Node, off: number): { line: number; offset: number } {
+  const lines = lineEls();
+  const atEndOf = (from: Node | null): { line: number; offset: number } => {
+    // Nearest line at or before `from` (walking previous siblings).
+    for (let p = from; p; p = p.previousSibling) {
+      if (p instanceof HTMLElement && p.classList.contains('eq-line')) {
+        return { line: lines.indexOf(p), offset: lineText(p).length };
+      }
+    }
+    return { line: 0, offset: 0 };
+  };
+  let el: Node | null = node;
+  while (el && el !== listEl && el.parentNode !== listEl) el = el.parentNode;
+  if (!el) return { line: 0, offset: 0 };
+  // Container-level boundary (e.g. select-all): position sits between children.
+  if (el === listEl) return atEndOf(listEl.childNodes[Math.min(off, listEl.childNodes.length) - 1] ?? null);
+  if (el instanceof HTMLElement && el.classList.contains('eq-line')) {
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    r.setEnd(node, off);
+    return { line: lines.indexOf(el), offset: r.toString().length };
+  }
+  return atEndOf(el); // widget or stray node: attach to the line above it
+}
+
+/** The selection's endpoints in document order, or null when it lies outside the editor. */
+function selectionSpan(): { start: { line: number; offset: number }; end: { line: number; offset: number } } | null {
+  const sel = getSelection();
+  if (!sel?.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  if (!listEl.contains(range.commonAncestorContainer)) return null;
+  const a = posOf(range.startContainer, range.startOffset);
+  const b = posOf(range.endContainer, range.endOffset);
+  return a.line < b.line || (a.line === b.line && a.offset <= b.offset)
+    ? { start: a, end: b }
+    : { start: b, end: a };
+}
+
+/**
+ * The rows a line-level command acts on, as [first, last] indices. A
+ * multi-line selection ending at the start of a line doesn't include that
+ * line — the convention code editors use for line commands.
+ */
+function selectedRows(span: NonNullable<ReturnType<typeof selectionSpan>>): [number, number] {
+  const first = span.start.line;
+  let last = span.end.line;
+  if (last > first && span.end.offset === 0) last--;
+  return [first, Math.min(last, equations.length - 1)];
+}
+
+/**
  * Replace the current selection with pasted/typed multi-statement text,
  * entirely in state space. Statements separate on newlines or ';' (the same
  * separator the examples menu and the URL hash use, so pasted lists and
  * copied blocks both just work).
  */
 function insertStatements(text: string) {
-  const sel = getSelection();
-  if (!sel?.rangeCount) return;
+  const span = selectionSpan();
+  if (!span) return;
   pushUndo(null);
-  // Map both selection endpoints to (line, offset) before touching anything.
-  const posOf = (node: Node, off: number): { line: number; offset: number } => {
-    const lines = lineEls();
-    const atEndOf = (from: Node | null): { line: number; offset: number } => {
-      // Nearest line at or before `from` (walking previous siblings).
-      for (let p = from; p; p = p.previousSibling) {
-        if (p instanceof HTMLElement && p.classList.contains('eq-line')) {
-          return { line: lines.indexOf(p), offset: lineText(p).length };
-        }
-      }
-      return { line: 0, offset: 0 };
-    };
-    let el: Node | null = node;
-    while (el && el !== listEl && el.parentNode !== listEl) el = el.parentNode;
-    if (!el) return { line: 0, offset: 0 };
-    // Container-level boundary (e.g. select-all): position sits between children.
-    if (el === listEl) return atEndOf(listEl.childNodes[Math.min(off, listEl.childNodes.length) - 1] ?? null);
-    if (el instanceof HTMLElement && el.classList.contains('eq-line')) {
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      r.setEnd(node, off);
-      return { line: lines.indexOf(el), offset: r.toString().length };
-    }
-    return atEndOf(el); // widget or stray node: attach to the line above it
-  };
-  const range = sel.getRangeAt(0);
-  const a = posOf(range.startContainer, range.startOffset);
-  const b = posOf(range.endContainer, range.endOffset);
-  const [start, end] = a.line < b.line || (a.line === b.line && a.offset <= b.offset) ? [a, b] : [b, a];
+  const { start, end } = span;
 
   const parts = splitStatements(text);
   const before = equations[start.line]?.text.slice(0, start.offset) ?? '';
@@ -2734,6 +2773,165 @@ function expandAt(lineIdx: number) {
       eq.collapsed = undefined;
       reconcile();
     }
+    return;
+  }
+}
+
+// --- line-level keyboard commands (the code-editor vocabulary) ---
+
+/**
+ * Cmd+/: toggle `# ` comments on the selected rows. Uncomments only when
+ * every selected non-blank row is already a comment; otherwise comments the
+ * rows that aren't yet. Blank rows stay untouched unless one is alone —
+ * commenting it starts a group heading.
+ */
+function toggleComment() {
+  const span = selectionSpan();
+  if (!span) return;
+  const [first, last] = selectedRows(span);
+  const rows = equations.slice(first, last + 1);
+  const active = rows.filter(eq => eq.text.trim() || rows.length === 1);
+  if (!active.length) return;
+  const uncomment = active.every(eq => eq.text.trimStart().startsWith('#'));
+  pushUndo(null);
+  const deltas = new Map<Equation, number>();
+  for (const eq of active) {
+    if (uncomment) {
+      const h = eq.text.indexOf('#');
+      const n = eq.text[h + 1] === ' ' ? 2 : 1;
+      eq.text = eq.text.slice(0, h) + eq.text.slice(h + n);
+      deltas.set(eq, -n);
+    } else if (!eq.text.trimStart().startsWith('#')) {
+      eq.text = '# ' + eq.text;
+      deltas.set(eq, 2);
+    }
+  }
+  recompileAll();
+  renderAll();
+  // Uncommenting a heading can drop its rows into a previous collapsed group.
+  for (let i = first; i <= last; i++) expandAt(i);
+  const shift = (p: { line: number; offset: number }) => ({
+    line: p.line,
+    offset: Math.max(0, p.offset + (deltas.get(equations[p.line]) ?? 0)),
+  });
+  setSelectionSpan(shift(span.start), shift(span.end));
+  saveUrl();
+  requestRender();
+}
+
+/**
+ * Alt+Up/Down: move the selected rows one step. Collapsed groups the swap
+ * would touch are expanded first, so a move never drags rows invisibly and
+ * never strands the caret in a hidden row.
+ */
+function moveLines(dir: -1 | 1) {
+  const span = selectionSpan();
+  if (!span) return;
+  const [first, last] = selectedRows(span);
+  if (dir < 0 ? first === 0 : last >= equations.length - 1) return;
+  // One undo entry per held-key run, keyed to the block being moved.
+  pushUndo(`move:${equations[first].id}`);
+  for (let i = Math.max(0, first - 1); i <= Math.min(last + 1, equations.length - 1); i++) {
+    for (let j = i; j >= 0; j--) {
+      const eq = equations[j];
+      if (!eq.comment) continue;
+      eq.collapsed = undefined;
+      break;
+    }
+  }
+  const [swapped] = equations.splice(dir < 0 ? first - 1 : last + 1, 1);
+  equations.splice(dir < 0 ? last : first, 0, swapped);
+  recompileAll();
+  renderAll();
+  const move = (p: { line: number; offset: number }) =>
+    p.line + dir >= equations.length
+      ? { line: equations.length - 1, offset: equations[equations.length - 1].text.length }
+      : { line: Math.max(0, p.line + dir), offset: p.offset };
+  setSelectionSpan(move(span.start), move(span.end));
+  saveUrl();
+  requestRender();
+}
+
+/**
+ * Shift+Alt+Up/Down: duplicate the selected rows, the selection following
+ * the copy in the pressed direction (upper block for Up, lower for Down).
+ * Copies keep slider bounds but take fresh colors, like any new row.
+ */
+function duplicateLines(dir: -1 | 1) {
+  const span = selectionSpan();
+  if (!span) return;
+  const [first, last] = selectedRows(span);
+  if (last < first) return;
+  pushUndo(null);
+  const copies = equations.slice(first, last + 1).map(eq => ({
+    id: nextId++,
+    text: eq.text,
+    colorIndex: (nextId - 2) % theme.palette.length,
+    sliderMin: eq.sliderMin,
+    sliderMax: eq.sliderMax,
+    showLevels: eq.showLevels,
+  }));
+  equations.splice(last + 1, 0, ...copies);
+  recompileAll();
+  renderAll();
+  const count = dir > 0 ? copies.length : 0;
+  for (let i = first + count; i <= last + count; i++) expandAt(i);
+  setSelectionSpan(
+    { line: span.start.line + count, offset: span.start.offset },
+    { line: span.end.line + count, offset: span.end.offset },
+  );
+  saveUrl();
+  requestRender();
+}
+
+/** Cmd+Shift+K: delete the selected rows outright, keeping the caret column. */
+function deleteLines() {
+  const span = selectionSpan();
+  if (!span) return;
+  const [first, last] = selectedRows(span);
+  if (last < first) return;
+  pushUndo(null);
+  equations.splice(first, last - first + 1);
+  if (!equations.length) addEquation('');
+  recompileAll();
+  renderAll();
+  const line = Math.min(first, equations.length - 1);
+  expandAt(line);
+  setCaret(line, span.start.offset);
+  saveUrl();
+  requestRender();
+}
+
+/** Cmd+Enter / Cmd+Shift+Enter: start a fresh row below/above the caret's,
+ *  wherever the caret sits in the line. */
+function insertLine(below: boolean) {
+  const span = selectionSpan();
+  if (!span) return;
+  const [first, last] = selectedRows(span);
+  pushUndo(null);
+  const at = below ? last + 1 : first;
+  addEquation('', at);
+  recompileAll();
+  renderAll();
+  expandAt(at);
+  setCaret(at, 0);
+  saveUrl();
+  requestRender();
+}
+
+/** Cmd+Alt+[ / ]: collapse or expand the `#` group holding the caret — the
+ *  keyboard for the gutter chevron. View state only (like the chevron): no
+ *  undo entry, and the URL doesn't carry it. */
+function foldGroup(collapse: boolean) {
+  const pos = caretPos();
+  if (!pos) return;
+  for (let i = Math.min(pos.line, equations.length - 1); i >= 0; i--) {
+    const eq = equations[i];
+    if (!eq.comment) continue;
+    eq.collapsed = collapse || undefined;
+    reconcile();
+    // Folding hides the caret's row: park the caret on the heading instead.
+    if (collapse && i !== pos.line) setCaret(i, equations[i].text.length);
     return;
   }
 }
@@ -2839,6 +3037,9 @@ listEl.addEventListener('input', e => {
 // DOM shape for the new paragraph (div vs br varies across engines). Undo
 // shortcuts are handled here too — keydown wins over beforeinput, and some
 // engines skip the historyUndo beforeinput when their native stack is empty.
+// Alongside them, the code-editor vocabulary: Cmd+/ toggles comments,
+// Alt+arrows move rows (with Shift: duplicate), Cmd+Shift+K deletes rows,
+// Cmd+(Shift+)Enter opens a row below/above, Cmd+Alt+brackets fold groups.
 listEl.addEventListener('keydown', e => {
   if (fromWidget(e)) return; // let bound inputs handle their own keys natively
   const mod = e.metaKey || e.ctrlKey;
@@ -2853,9 +3054,36 @@ listEl.addEventListener('keydown', e => {
     doRedo();
     return;
   }
+  // Shift stays unchecked: layouts like German type `/` as Shift+7.
+  if (mod && !e.altKey && e.key === '/') {
+    e.preventDefault();
+    toggleComment();
+    return;
+  }
+  if (mod && !e.altKey && e.shiftKey && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    deleteLines();
+    return;
+  }
+  // Physical bracket keys by e.code (with Alt held, e.key is layout soup on
+  // macOS), plus e.key for layouts that type brackets via a modifier and for
+  // synthetic events that omit the code.
+  if (mod && e.altKey && (e.code === 'BracketLeft' || e.code === 'BracketRight' || e.key === '[' || e.key === ']')) {
+    e.preventDefault();
+    foldGroup(e.code === 'BracketLeft' || e.key === '[');
+    return;
+  }
+  if (!mod && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    e.preventDefault();
+    const dir = e.key === 'ArrowUp' ? -1 : 1;
+    if (e.shiftKey) duplicateLines(dir);
+    else moveLines(dir);
+    return;
+  }
   if (e.key !== 'Enter' || e.isComposing) return;
   e.preventDefault();
-  insertStatements('\n');
+  if (mod) insertLine(!e.shiftKey);
+  else insertStatements('\n');
 });
 
 // Structural edits the browser would get wrong on its own: newlines that
