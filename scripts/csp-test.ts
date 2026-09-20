@@ -28,7 +28,7 @@ try {
     if (path === '/implicit/') {
       assert.match(csp, /frame-src 'self'/);
       assert.match(csp, /frame-ancestors 'none'/);
-    } else if (path.startsWith('/embed/')) {
+    } else if (path.startsWith('/embed/') || path.startsWith('/g/')) {
       assert.match(csp, /frame-ancestors \*/);
       assert.equal(csp.includes("frame-ancestors 'none'"), false, csp);
     } else {
@@ -42,7 +42,7 @@ try {
     const themeResponse = await context.request.get(new URL((await themeScript.getAttribute('src'))!, page.url()).href);
     assert.match(themeResponse.headers()['cache-control'], /max-age=31536000.*immutable/);
     const ready = path === '/about/' ? '#gallery img'
-      : path === '/implicit/' ? 'iframe#graph[src*="/embed/"]'
+      : path === '/implicit/' ? 'iframe#graph[src*="/g/"]'
       : '.eq-line';
     await page.waitForSelector(ready);
     if (path === '/implicit/') {

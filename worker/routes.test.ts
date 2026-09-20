@@ -1,13 +1,12 @@
 /** End-to-end route behaviour for /g/, /embed/, landings, and /api/og. */
 import { describe, expect, it } from 'vitest';
-import { APP_CSP, EMBED_CSP, LANDING_CSP } from '../lib/csp.ts';
+import { APP_CSP, GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { LANDINGS } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import worker, { landingMeta, shareMeta } from './index.ts';
 import { canRenderOg } from './og.ts';
 
 const APP = '<!doctype html><html><head><title>Equation.io</title></head><body></body></html>';
-const EMBED = '<!doctype html><html data-embed><head><title>Equation.io graph</title></head><body></body></html>';
 const LANDING = `<!doctype html><html><head>
 <title>Equation.io</title>
 <meta name="description" content="x">
@@ -30,7 +29,6 @@ const env = {
   ASSETS: {
     fetch: async (request: Request) => {
       const path = new URL(request.url).pathname;
-      if (path.startsWith('/embed')) return html(EMBED, EMBED_CSP);
       if (path.startsWith('/landing')) return html(LANDING, LANDING_CSP);
       return html(APP);
     },
@@ -153,20 +151,25 @@ describe('intent landings', () => {
   });
 });
 
-describe('/embed/', () => {
-  it('serves the embed shell for a graph payload', async () => {
-    const res = await get('/embed/' + encodePayload(['y = x^2']));
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain('data-embed');
+describe('frameable graph links', () => {
+  it('redirects legacy embeds without losing the payload or query', async () => {
+    const suffix = encodePayload(['y = x^2']) + '?theme=dark';
+    const res = await get('/embed/' + suffix);
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('https://equation.io/g/' + suffix);
   });
 
-  it('replaces a joined catch-all CSP with a single frameable policy', async () => {
-    const res = await get('/embed/' + encodePayload(['y = x^2']));
-    const csp = res.headers.get('content-security-policy');
-    expect(csp).toBe(EMBED_CSP);
-    expect(csp).toContain('frame-ancestors *');
-    expect(csp).not.toContain("frame-ancestors 'none'");
-    expect(csp?.match(/default-src/g)?.length).toBe(1);
+  it.each(['/g/', '/g/%E0%A4%A'])('makes even empty or invalid graphs frameable: %s', async path => {
+    const res = await get(path);
+    expect(await res.text()).toBe(APP);
+    expect(res.headers.get('content-security-policy')).toBe(GRAPH_CSP);
+  });
+
+  const hasRewriter = typeof HTMLRewriter !== 'undefined';
+  (hasRewriter ? it : it.skip)('preserves the frameable policy after adding share metadata', async () => {
+    const res = await get('/g/' + encodePayload(['y = x^2']));
+    expect(res.headers.get('content-security-policy')).toBe(GRAPH_CSP);
+    expect(await res.text()).toContain('og:title');
   });
 });
 

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { SHOWCASE } from '../web/about/showcase.ts';
 import {
   LANDINGS,
-  embedUrl,
   graphUrl,
   landingForGroup,
   landingFromPath,
@@ -55,11 +54,9 @@ describe('intent landings', () => {
     }
   });
 
-  it('emits /g/ and /embed/ URLs from the same payload', () => {
+  it('emits shareable graph URLs', () => {
     const eqs = ['y = x^2'];
     expect(graphUrl(eqs)).toMatch(/^\/g\//);
-    expect(embedUrl(eqs)).toMatch(/^\/embed\//);
-    expect(embedUrl(eqs).slice('/embed'.length)).toBe(graphUrl(eqs).slice('/g'.length));
   });
 
   it('builds FAQ JSON-LD', () => {

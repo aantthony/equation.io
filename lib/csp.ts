@@ -1,6 +1,6 @@
 /**
  * Content-Security-Policy values for the static _headers file and for the
- * Worker, which must set a *single* policy on /landing/ and /embed/ responses.
+ * Worker, which must set a *single* policy on /landing/ and /g/ responses.
  *
  * Cloudflare applies every matching _headers block and joins duplicate
  * Content-Security-Policy names with a comma. Browsers then AND every policy,
@@ -15,5 +15,5 @@ export const APP_CSP =
 export const LANDING_CSP =
   `${BASE}; frame-src 'self'; frame-ancestors 'none'; upgrade-insecure-requests`;
 
-export const EMBED_CSP =
+export const GRAPH_CSP =
   `${BASE}; frame-ancestors *; upgrade-insecure-requests`;

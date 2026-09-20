@@ -172,10 +172,6 @@ export function graphUrl(eqs: string[]): string {
   return '/g/' + encodePayload(eqs);
 }
 
-export function embedUrl(eqs: string[]): string {
-  return '/embed/' + encodePayload(eqs);
-}
-
 export function landingJsonLd(page: Landing, origin: string): object {
   const url = origin + page.path;
   return {

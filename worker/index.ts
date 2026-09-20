@@ -1,4 +1,4 @@
-import { EMBED_CSP, LANDING_CSP } from '../lib/csp.ts';
+import { GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { landingFromPath, graphUrl, type Landing } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { handleMcp } from './mcp.ts';
@@ -96,7 +96,10 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
   } catch {
     // Undecodable payload — serve the plain app.
   }
-  const shell = await env.ASSETS.fetch(new Request(new URL('/', url), request));
+  const shell = withCsp(
+    withCharset(await env.ASSETS.fetch(new Request(new URL('/', url), request))),
+    GRAPH_CSP,
+  );
   if (!equations.length || !shell.headers.get('content-type')?.includes('text/html')) return shell;
 
   const { title, meta } = shareMeta(equations, payload, url.origin);
@@ -115,18 +118,6 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
       },
     })
     .transform(shell);
-}
-
-/**
- * /embed/<payload>: the grapher with the editor collapsed, for same-origin
- * iframes on landing pages (and, later, other sites). The document is the
- * embed shell; the client reads the payload from the path the way /g/ does.
- */
-async function handleEmbed(request: Request, url: URL, env: Env): Promise<Response> {
-  return withCsp(
-    withCharset(await env.ASSETS.fetch(new Request(new URL('/embed/', url), request))),
-    EMBED_CSP,
-  );
 }
 
 /**
@@ -268,7 +259,8 @@ export default {
       return handleShare(request, url, env);
     }
     if (url.pathname.startsWith('/embed/')) {
-      return handleEmbed(request, url, env);
+      url.pathname = '/g/' + url.pathname.slice('/embed/'.length);
+      return Response.redirect(url.toString(), 301);
     }
     const landing = landingFromPath(url.pathname);
     if (landing) return handleLanding(request, url, env, landing);

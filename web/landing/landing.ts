@@ -1,7 +1,6 @@
 import { SHOWCASE, type ShowcaseItem } from '../about/showcase.ts';
 import {
   LANDINGS,
-  embedUrl,
   graphUrl,
   landingFromPath,
   landingJsonLd,
@@ -83,7 +82,7 @@ const share = $('share');
 const related = $('related');
 
 function show(item: ShowcaseItem, opts: { scroll?: boolean } = {}) {
-  iframe.src = embedUrl(item.eqs);
+  iframe.src = graphUrl(item.eqs);
   iframe.title = `Live graph: ${item.title}`;
   const href = graphUrl(item.eqs);
   edit.href = href;

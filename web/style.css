@@ -757,3 +757,17 @@ body.file-drag::after {
 #syntax-suggestions strong { font: 13px ui-monospace, monospace; overflow-wrap: anywhere; }
 #syntax-suggestions span { color: var(--summary); font-size: 11px; margin-top: 2px; }
 .syntax-keys { padding: 6px 9px 3px; color: var(--muted); font-size: 10px; }
+
+/* Framed graphs start with the editor collapsed; hide chrome that belongs
+   to the full site. The y= chip and theme toggle stay. */
+html[data-embed] #panel-links,
+html[data-embed] #examples,
+html[data-embed] #data-files,
+html[data-embed] #shot,
+html[data-embed] #rec,
+html[data-embed] #try-another,
+html[data-embed] #open-csv { display: none; }
+html[data-embed] #state-reset { right: 34px; }
+
+/* Hide the editor before main.ts initializes the panel's collapsed state. */
+html[data-embed][data-embed-boot] #panel { visibility: hidden; }
