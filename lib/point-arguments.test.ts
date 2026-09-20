@@ -129,10 +129,68 @@ describe('families over f(P)', () => {
     expect(run('polyline(f(Q))').row.cls!.plot.type).toBe('polygon');
     expect(run('hull(f(Q) + (1, 0))').row.cls!.plot.type).toBe('polygon');
   });
+  it('draws a lattice of arrows through a deep composition over a computed list', () => {
+    const lattice = ['f(x,y) = (x + y/2, y - x/2)', 'a = [-1, -0.9..1]', 'b = [-1, -0.9..1]', 'P = (a, b)'];
+    const p = run('vector(P, f(f(f(f(f(f(P + (1, 0))))))))', lattice).row.cls!.plot;
+    expect(p.type === 'family' && p.members.length).toBe(441);
+  });
   it('draws the whole lattice of arrows', () => {
     const lattice = ['f(x,y) = (x + y/2, y)', 'a = [-1, -0.9..1]', 'b = [-1, -0.9..1]', 'P = (a, b)'];
     const p = run('vector(P, f(P))', lattice).row.cls!.plot;
     expect(p.type === 'family' && p.members.length).toBe(441);
+  });
+});
+
+describe('the argument stays one list, however the row copies it', () => {
+  it('zips an anonymous literal through point-list arithmetic', () => {
+    expect(values('g(2 [A, B])').flat()).toEqual([8, 48]);
+    expect(values('g(-[A, B])').flat()).toEqual([2, 12]);
+    expect(values('f(2 [A, B])')).toEqual([[4, 4], [10, 8]]);
+    const p = run('vector([A, B], f(2 [A, B]))').row.cls!.plot;
+    // (The two literals are independent, so 2 × 2 — not 2 × 2 × 2 × 2.)
+    expect(p.type === 'family' && p.members.length).toBe(4);
+  });
+  it('zips through the clones Σ and a finite difference make', () => {
+    expect(values('sum(n=1..2, g([(1,2),(3,4)]))').flat()).toEqual([4, 24]);
+    expect(values('sum(n=1..2, g(n [(1,2),(3,4)]))').flat()).toEqual([10, 60]);
+    const d = values('d/dc g([(1,2),(3,4)] + (c, floor(c)))', [...PRE, 'c = 1.5']) // (floor forces the finite difference).flat();
+    expect(d).toHaveLength(2);
+    expect(d[0]).toBeCloseTo(3); expect(d[1]).toBeCloseTo(5);
+  });
+  it('reduces over a computed point list', () => {
+    expect(run('mean(g(2 Q))').row.info).toBe('= 1');
+    expect(run('total(g(Q + (1, 1)))').row.info).toBe('= 9');
+    expect(run('mean(g(2 [A, B]))').row.info).toBe('= 28');
+  });
+  it('differentiates through f(P) symbolically', () => {
+    const pre = [...PRE, 'G(x,y) = x^2 y', 's = 1'];
+    expect(run('d/ds G(s A)', pre).row.info).toBe('= 6');
+    expect(run('d/ds G(s A_x, s A_y)', pre).row.info).toBe('= 6');
+    // A tuple inside arithmetic is beyond diff(): the finite difference still answers.
+    expect(run('d/ds G((s, s) + A)', pre).row.info).toMatch(/^≈ 16/);
+  });
+  it('never shows its internal name', () => {
+    const an = analyze(['g(x,y) = x y', "s' = g([(1,2),(3,4)]) - s", 's(0) = 1']);
+    for (const r of an.rows) expect(String(r.error ?? '')).not.toMatch(/\[comp\]/);
+    expect(an.rows.some(r => r.error === 'g takes 2 arguments.')).toBe(true);
+    expect(error('f(2 J)')).toBe('f takes 2 arguments.');
+  });
+  it('reads a point inside P(…) and a regression', () => {
+    const an = analyze([...PRE, 'X ~ Normal(0, 1)', 'P(X < g(A))']);
+    expect(an.rows.at(-1)!.error).toBeUndefined();
+    expect(an.rows.at(-1)!.info).toBe('≈ 0.9772');
+    const fit = analyze([...PRE, 'X1 = [1, 2, 3]', 'Y1 = [2, 4, 6]', 'Y1 ~ m g(A) X1 + c']);
+    expect(fit.rows.at(-1)!.error).toBeUndefined();
+  });
+});
+
+describe('what the same rule changes outside f(P)', () => {
+  it('a computed point list moves with the list it came from', () => {
+    const p = run('segment(P, Q1)', [...PRE, 'Q1 = P + (1, 0)']).row.cls!.plot;
+    expect(p.type === 'family' && p.members.length).toBe(9);
+  });
+  it('a literal in a Σ body is one list in every term', () => {
+    expect(values('sum(n=1..2, [1, 2] n)').flat()).toEqual([3, 6]);
   });
 });
 

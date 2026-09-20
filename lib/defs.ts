@@ -26,7 +26,7 @@ import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { COMP_FN, FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, compDims, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
+import { COMP_FN, FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, compDims, evaluate, markOrigins, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -951,6 +951,9 @@ const SUM_MAX_TOTAL = 2000;
 /** Expand a Σ/Π into an explicit sum/product of per-index terms. */
 function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
   const sym = header.name === 'sum' ? 'Σ' : 'Π';
+  // A literal in the body is written once: every term's copy is that one
+  // list, so the terms pair up element by element rather than crossing.
+  markOrigins(body);
   const [idxE, loE, hiE] = header.args;
   if (idxE.kind !== 'var') throw new Error(`Expected ${header.name}(n=1..N, …).`);
   const idx = idxE.name;
@@ -1191,6 +1194,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
           // asks for its component of the SAME node — which is what keeps a
           // list argument's components moving together.
           const [arg] = args;
+          markOrigins(arg);
           if (arg.kind === 'vec' && arg.items.length !== n) throw new Error(compDims(e.name, n, arg, arg.items.length));
           const comp = (k: number): Expr => (arg.kind === 'vec' ? arg.items[k]
             : { kind: 'call', name: COMP_FN, args: [arg, { kind: 'num', value: k }, { kind: 'num', value: n }, { kind: 'str', value: e.name }] });
@@ -1351,6 +1355,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         const parseFit = (text: string) => resolveExpr(parseExpr(text, fnNames, listNamesOf(defs), valueNames), getFn, ropts);
         const lhs = parseFit(d.lhs), rhs = parseFit(d.rhs);
         const rhsVars = freeVars(rhs);
+        // Points first, as in a plot row: `Y ~ g(A) X + b` reads g at the point A.
+        const points = (e: Expr): Expr => lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null);
         const parameters = [...rhsVars].filter(n => nameable(n) && !byName.has(n) && !nameTaken(defs, n) && !n.includes('.'));
         if (!parameters.length) throw new Error('Regression needs an unbound coefficient, like Y ~ m X + b. Defined constants stay fixed.');
         if (parameters.length > 8) throw new Error('Regression supports at most 8 fitted coefficients.');
@@ -1369,12 +1375,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           });
         };
         try {
-          const observed = numericList(lowerLists(lhs, getList, ropts));
+          const observed = numericList(lowerLists(points(lhs), getList, ropts));
           if (observed.length > 10_000) throw new Error('Regression supports at most 10000 observations; filter the data first.');
           // Keep model arithmetic symbolic even for typed CSV columns. The
           // usual fast path folds ln(-1) into NaN; a fit must distinguish an
           // invalid model from a missing input pair instead of dropping it.
-          const model = lowerLists(rhs, n => {
+          const model = lowerLists(points(rhs), n => {
             const value = getList(n);
             if (value?.kind !== 'data') return value;
             if (value.values.length > 10_000) throw new Error('Regression supports at most 10000 observations; filter the data first.');

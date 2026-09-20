@@ -29,7 +29,7 @@
  */
 import { add, div, mul } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
-import { COMP_FN, EVAL_FNS, LIST_AXES, type Expr, compArity, compDims, evaluate, freeVars, ineqComparisons, plainFnName, realPow } from './expr.ts';
+import { COMP_FN, EVAL_FNS, LIST_AXES, type Expr, compArity, compDims, evaluate, originOf, freeVars, ineqComparisons, plainFnName, realPow } from './expr.ts';
 
 /**
  * A list of values, in whichever representation it has: one expression per
@@ -868,8 +868,12 @@ function lower(e: Expr, ctx: Ctx): Expr {
       // M (0, [-1,1]) writes the same literal into every output component,
       // and those are one list, not several.
       const out = listOf(expandItems(e.items, ctx), ctx) as Seq;
+      // (…nor this COPY of it: a literal marked with its origin is one list
+      // in every clone Σ expansion or a finite difference made of it.)
       const known = AXES.get(e);
-      const axes = known && known.reduce((size, a) => size * a.n, 1) === seqLength(out) ? known : axesOf(out);
+      const origin = originOf(e);
+      const axes = known && known.reduce((size, a) => size * a.n, 1) === seqLength(out) ? known
+        : origin !== undefined ? [{ id: `#o${origin}`, n: seqLength(out) }] : axesOf(out);
       AXES.set(e, axes);
       return withAxes(out, axes);
     }

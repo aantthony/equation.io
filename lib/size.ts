@@ -27,13 +27,14 @@ export function countNodes(e: unknown, memo?: WeakMap<object, number>): number {
 }
 
 /** Whether `e` has more than `limit` nodes, walking no further than it takes
- *  to know — so a huge unshared tree is refused in time bounded by the limit. */
-export function exceedsNodes(e: unknown, limit: number): boolean {
+ *  to know — so a huge unshared tree is refused in time bounded by the limit.
+ *  `leaf` names nodes that count as one whatever they hold. */
+export function exceedsNodes(e: unknown, limit: number, leaf?: (x: object) => boolean): boolean {
   let n = 0;
   const walk = (x: unknown): boolean => {
     if (x === null || typeof x !== 'object') return false;
     if (++n > limit) return true;
-    if (ArrayBuffer.isView(x)) return false;
+    if (ArrayBuffer.isView(x) || leaf?.(x)) return false;
     for (const v of Object.values(x)) {
       if (Array.isArray(v) ? v.some(walk) : walk(v)) return true;
     }

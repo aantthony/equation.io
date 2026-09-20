@@ -332,8 +332,9 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         const k = (kArg as Expr & { kind: 'num' }).value;
         const n = (nArg as Expr & { kind: 'num' }).value;
         const fn = (fnArg as Expr & { kind: 'str' }).value;
-        // A matrix is not a point, nor (here) a list of its rows.
-        if (value.kind === 'var' && getMat(value.name)) throw new Error(compArity(fn, n));
+        // A matrix (a name, or algebra over one: 2 J) is not a point, nor
+        // (here) a list of its rows.
+        if ((value.kind === 'var' && getMat(value.name)) || matOf(value)) throw new Error(compArity(fn, n));
         let v = compSeen.get(value);
         if (!v) {
           const listy = (): boolean => listShape(value, getMat, isList) !== null;

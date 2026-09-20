@@ -5,7 +5,7 @@ import { type Defs, type ResolveOpts, compsOf, listGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
 import { COMP_FN, type Expr, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
-import { type Axis, axesOf, isDataScatter, lowerLists } from './list.ts';
+import { type Axis, axesOf, isDataScatter, lowerLists, withAxes } from './list.ts';
 
 export const FAMILY_MAX = 32;
 export const FAMILY_3D_MAX = 8;
@@ -95,7 +95,17 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
   const ordinary = (e: Expr) => lowerLists(lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null,
     n => get(n) !== null), get, opts, named);
   // A list's elements, with the instances it runs over (see Axis in list.ts).
-  const listValue = (e: Expr): { items: Expr[]; axes: readonly Axis[] } | null => {
+  type ListValue = { items: Expr[]; axes: readonly Axis[] };
+  // Coordinate lists settleComps wrote in: values already, one node each to
+  // the expansion's size limit — not a tree it would have to walk.
+  const settledLists = new WeakSet<object>();
+  const listValues = new WeakMap<Expr, ListValue | null>();
+  const listValue = (e: Expr): ListValue | null => {
+    let hit = listValues.get(e);
+    if (hit === undefined) listValues.set(e, hit = listValueOf(e));
+    return hit;
+  };
+  const listValueOf = (e: Expr): ListValue | null => {
     let value: Expr;
     if (e.kind === 'var' && defs.mats.has(e.name)) {
       const items = defs.mats.get(e.name)!.map((items): Expr => ({ kind: 'vec', items }));
@@ -141,12 +151,21 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
     }
   }
   let originalError: unknown;
-  try {
-    const value = ordinary(e);
-    // Lists of functions/parametrics become families; constant lists retain
-    // their existing dot/scatter representation and unbounded data path.
-    if (value.kind !== 'list' || !value.items.some(it => [...freeVars(it)].some(plotVariable))) return value;
-  } catch (err) { originalError = err; }
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const value = ordinary(e);
+      // Lists of functions/parametrics become families; constant lists retain
+      // their existing dot/scatter representation and unbounded data path.
+      if (value.kind !== 'list' || !value.items.some(it => [...freeVars(it)].some(plotVariable))) return value;
+      break;
+    } catch (err) { originalError ??= err; }
+    // f(R P), f(P + (1, 0)): the argument is a point list only this pass can
+    // compute. Settle it ONCE, as the lists of its coordinates, and the row
+    // is ordinary again — mean(g(2 P)) included, which no family could be.
+    const settled = attempt === 0 && !exceedsNodes(e, 32768) ? settleComps(e) : e;
+    if (settled === e) break;
+    e = settled;
+  }
   try { return expand(e, false)!; } catch (err) {
     // A matrix error is about the matrix: the expansion's own complaint, made
     // while reading things as lists of points, would only bury it.
@@ -154,11 +173,61 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
       ? originalError : err;
   }
 
+  /** Every `[comp]` whose value is a computed point list, replaced by the list
+   *  of that coordinate — over the value's own instances, so they still zip. */
+  function settleComps(root: Expr): Expr {
+    const done = new WeakMap<Expr, Expr>();
+    const points = new WeakMap<Expr, Expr | null>();
+    const walk = (n: Expr): Expr => {
+      let out = done.get(n);
+      if (!out) done.set(n, out = walkOf(n));
+      return out;
+    };
+    const all = (ns: Expr[]): Expr[] => {
+      const out = ns.map(walk);
+      return out.every((o, k) => o === ns[k]) ? ns : out;
+    };
+    const walkOf = (n: Expr): Expr => {
+      switch (n.kind) {
+        case 'neg': { const a = walk(n.a); return a === n.a ? n : { ...n, a }; }
+        case 'bin': { const a = walk(n.a), b = walk(n.b); return a === n.a && b === n.b ? n : { ...n, a, b }; }
+        case 'eq': case 'ineq': { const l = walk(n.l), r = walk(n.r); return l === n.l && r === n.r ? n : { ...n, l, r }; }
+        case 'vec': case 'list': { const items = all(n.items); return items === n.items ? n : sameList(n, { ...n, items }); }
+        case 'piecewise': {
+          const cases = n.cases.map(c => ({ cond: walk(c.cond), value: walk(c.value) }));
+          const otherwise = n.otherwise && walk(n.otherwise);
+          return otherwise === n.otherwise && cases.every((c, k) => c.cond === n.cases[k].cond && c.value === n.cases[k].value)
+            ? n : { ...n, cases, otherwise };
+        }
+        case 'call': {
+          const args = all(n.args);
+          const call = args === n.args ? n : { ...n, args };
+          if (n.name !== COMP_FN) return call;
+          const [value, kArg, nArg] = args;
+          let pts = points.get(value);
+          if (pts === undefined) {
+            try { pts = lowerObjects(value, defs, opts, true); } catch { pts = null; }
+            points.set(value, pts);
+          }
+          const dim = (nArg as Expr & { kind: 'num' }).value;
+          // (Anything else — one point, a wrong dimension — is the ordinary path's to judge.)
+          if (pts?.kind !== 'list' || !pts.items.length || !pts.items.every(p => p.kind === 'vec' && p.items.length === dim)) return call;
+          const k = (kArg as Expr & { kind: 'num' }).value;
+          const coords = withAxes<Expr>({ kind: 'list', items: pts.items.map(p => (p as Expr & { kind: 'vec' }).items[k]) }, axesOf(pts));
+          settledLists.add(coords);
+          return coords;
+        }
+        default: return n;
+      }
+    };
+    return walk(root);
+  }
+
   /** One member per combination of the lists in `source`. `outside`: only the
    *  lists around a figure, each member a figure lowered in its own right;
    *  null when there are none. */
   function expand(source: Expr, outside: boolean): Expr | null {
-    if (exceedsNodes(source, 32768)) throw new Error('This object family is too large to expand (32768 nodes).');
+    if (exceedsNodes(source, 32768, n => settledLists.has(n))) throw new Error('This object family is too large to expand (32768 nodes).');
     const lists: Array<{ items: Expr[]; axes: readonly Axis[] }> = [];
     const markers = new Map<Expr, number>();
     // A matrix name is the matrix, not a list of row-points, along the row's
@@ -234,7 +303,8 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
     const members = Array.from({ length: n }, (_, k) => (outside ? lowerObjects(instantiate(template, k), defs, opts) : ordinary(instantiate(template, k))));
     const valuesOnly = members.every(m => ![...freeVars(m)].some(plotVariable)
       && m.kind !== 'eq' && m.kind !== 'ineq' && !(m.kind === 'call' && (/^\[(polygon|segment|polyline|vector|square|hull|trail|hist)/.test(m.name) || (GEOM_STATEMENTS.has(m.name) || WHOLE_EXPR_NAMES.has(m.name)))));
-    if (valuesOnly) return { kind: 'list', items: members };
+    // (Over the instances it was expanded along: Q = P + (1, 0) moves with P.)
+    if (valuesOnly) return withAxes({ kind: 'list', items: members }, axes);
     if (n > limit) throw new Error(`An object family has at most ${limit} members.`);
     if (named) throw new Error('An object family is a whole row; give it a row of its own.');
     return { kind: 'call', name: '[family]', args: members };
