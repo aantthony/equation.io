@@ -550,7 +550,10 @@ function systemKey(cls: Classified): string {
   if (key === undefined) { key = JSON.stringify(cls.plot); systemKeys.set(cls, key); }
   return key;
 }
-const embedded = document.documentElement.hasAttribute('data-mcp-app');
+const mcpApp = document.documentElement.hasAttribute('data-mcp-app');
+const framed = document.documentElement.hasAttribute('data-embed');
+/** MCP widget or a framed graph: no address-bar writes, no featured default. */
+const embedded = mcpApp || framed;
 let graphChanged: ((rows: string[]) => void) | undefined;
 let traceWorker: Worker | undefined;
 const traceQueue = new TraceQueue((message: TraceMessage) => {
@@ -562,7 +565,8 @@ const traceQueue = new TraceQueue((message: TraceMessage) => {
   };
   try {
     // The chat iframe is cross-origin; its worker must be created locally.
-    traceWorker ??= embedded ? new EmbeddedTraceWorker()
+    // Framed /g/ pages load their worker from their own origin.
+    traceWorker ??= mcpApp ? new EmbeddedTraceWorker()
       : new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
     traceWorker.onmessage = (event: MessageEvent<{ token: number; result: TraceResult }>) => {
       traceQueue.complete(event.data.token, event.data.result);
@@ -3812,6 +3816,12 @@ themeToggle?.addEventListener('click', toggleTheme);
 // edge to dismiss it — the y= chip it leaves behind brings it back. The
 // equation list is passed in so text gestures (iOS caret and selection-
 // handle drags) are never mistaken for throws.
+if (framed) {
+  document.getElementById('panel')!.classList.add('is-parked');
+  document.getElementById('panel-chip')!.hidden = false;
+  document.getElementById('panel-chip')!.classList.add('shown');
+  document.documentElement.removeAttribute('data-embed-boot');
+}
 initPanelSwipe(
   document.getElementById('panel')!,
   document.getElementById('panel-chip')!,
@@ -3833,7 +3843,9 @@ initPanelResize(
 function urlPayload(): string {
   const hash = location.hash.slice(1);
   if (hash) return hash;
-  return location.pathname.startsWith('/g/') ? location.pathname.slice('/g/'.length) : '';
+  const path = location.pathname;
+  if (path.startsWith('/g/')) return path.slice('/g/'.length);
+  return '';
 }
 
 const initialPayload = urlPayload();
@@ -3917,7 +3929,7 @@ if (!embedded) {
   });
 }
 
-if (embedded) {
+if (mcpApp) {
   void import('./mcp-app.ts').then(({ connectGraphApp }) => connectGraphApp({
     getRows: () => equations.map(e => e.text),
     setRows: rows => {

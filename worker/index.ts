@@ -1,4 +1,6 @@
-import { decodePayload } from '../lib/link.ts';
+import { GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
+import { landingFromPath, graphUrl, type Landing } from '../lib/landings.ts';
+import { decodePayload, encodePayload } from '../lib/link.ts';
 import { handleMcp } from './mcp.ts';
 import { OG_HEIGHT, OG_WIDTH, canRenderOg, renderOgPng } from './og.ts';
 
@@ -47,6 +49,40 @@ export function shareMeta(
 }
 
 /**
+ * Title and og:/twitter: pairs for an intent landing page.
+ *
+ * `preview` pages advertise the CPU-rendered /api/og/ of the hero graph.
+ * `shot` pages use a stable PNG in /shots/ — the preview renderer cannot
+ * draw those heroes (complex potentials, domain coloring), and a generic
+ * site card would be a lie.
+ */
+export function landingMeta(
+  page: Landing,
+  origin: string,
+): { title: string; description: string; canonical: string; meta: string[][] } {
+  const title = `${page.title} — Equation.io`;
+  const description = page.lead;
+  const canonical = `${origin}${page.path}`;
+  const image = page.og === 'preview'
+    ? `${origin}/api/og/${encodePayload(page.heroEqs)}`
+    : `${origin}/shots/${page.slug}.png`;
+  const width = page.og === 'preview' ? String(OG_WIDTH) : '900';
+  const height = page.og === 'preview' ? String(OG_HEIGHT) : '600';
+  const meta: string[][] = [
+    ['og:title', title],
+    ['og:description', description],
+    ['og:type', 'website'],
+    ['og:url', canonical],
+    ['og:image', image],
+    ['og:image:width', width],
+    ['og:image:height', height],
+    ['twitter:card', 'summary_large_image'],
+    ['twitter:image', image],
+  ];
+  return { title, description, canonical, meta };
+}
+
+/**
  * /g/<payload>: the share form of a graph link. Serves the app shell with
  * og:/twitter: meta tags injected so the link unfurls with a rendered preview
  * (crawlers never see URL fragments, which is why this form exists). The web
@@ -60,7 +96,10 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
   } catch {
     // Undecodable payload — serve the plain app.
   }
-  const shell = await env.ASSETS.fetch(new Request(new URL('/', url), request));
+  const shell = withCsp(
+    withCharset(await env.ASSETS.fetch(new Request(new URL('/', url), request))),
+    GRAPH_CSP,
+  );
   if (!equations.length || !shell.headers.get('content-type')?.includes('text/html')) return shell;
 
   const { title, meta } = shareMeta(equations, payload, url.origin);
@@ -79,6 +118,71 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
       },
     })
     .transform(shell);
+}
+
+/**
+ * /implicit/, /slope-field/, /complex/, … — intent pages. The shell is the
+ * shared /landing/ template; title, description, canonical, and og: tags
+ * are injected here so crawlers see them without running JS.
+ */
+async function handleLanding(request: Request, url: URL, env: Env, page: Landing): Promise<Response> {
+  if (url.pathname !== page.path) {
+    return Response.redirect(new URL(page.path, url).toString(), 301);
+  }
+  const shell = await env.ASSETS.fetch(new Request(new URL('/landing/', url), request));
+  if (!shell.headers.get('content-type')?.includes('text/html')) return shell;
+
+  const { title, description, canonical, meta } = landingMeta(page, url.origin);
+  const share = `${url.origin}${graphUrl(page.heroEqs)}`;
+  const extra = meta
+    .filter(([k]) => k === 'twitter:card' || k === 'twitter:image' || k === 'og:image:width' || k === 'og:image:height')
+    .map(([p, c]) => `<meta ${p.startsWith('twitter:') ? 'name' : 'property'}="${p}" content="${escapeAttr(c)}">`)
+    .join('\n  ');
+  return withCsp(new HTMLRewriter()
+    .on('head', {
+      element(el) {
+        el.append(`${extra}\n  `, { html: true });
+      },
+    })
+    .on('title', {
+      element(el) { el.setInnerContent(title); },
+    })
+    .on('meta[name="description"]', {
+      element(el) { el.setAttribute('content', description); },
+    })
+    .on('link[rel="canonical"]', {
+      element(el) { el.setAttribute('href', canonical); },
+    })
+    .on('meta[property="og:title"]', {
+      element(el) { el.setAttribute('content', title); },
+    })
+    .on('meta[property="og:description"]', {
+      element(el) { el.setAttribute('content', description); },
+    })
+    .on('meta[property="og:url"]', {
+      element(el) { el.setAttribute('content', canonical); },
+    })
+    .on('meta[property="og:image"]', {
+      element(el) {
+        const image = meta.find(([k]) => k === 'og:image')![1];
+        el.setAttribute('content', image);
+      },
+    })
+    .on('h1#h1', {
+      element(el) { el.setInnerContent(page.h1); },
+    })
+    .on('p#lead', {
+      element(el) { el.setInnerContent(page.lead); },
+    })
+    .on('noscript', {
+      element(el) {
+        el.prepend(
+          `<p>${escapeAttr(page.lead)}</p><p><a href="${escapeAttr(share)}">${escapeAttr(share)}</a></p>`,
+          { html: true },
+        );
+      },
+    })
+    .transform(shell), LANDING_CSP);
 }
 
 async function handleOgImage(url: URL): Promise<Response> {
@@ -126,6 +230,13 @@ function withCharset(response: Response): Response {
   return patched;
 }
 
+/** Replace the asset response's CSP with the route-specific policy. */
+function withCsp(response: Response, policy: string): Response {
+  const patched = new Response(response.body, response);
+  patched.headers.set('Content-Security-Policy', policy);
+  return patched;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -146,6 +257,8 @@ export default {
     if (url.pathname.startsWith('/g/')) {
       return handleShare(request, url, env);
     }
+    const landing = landingFromPath(url.pathname);
+    if (landing) return handleLanding(request, url, env, landing);
     return withCharset(await env.ASSETS.fetch(request));
   },
 } satisfies ExportedHandler<Env>;

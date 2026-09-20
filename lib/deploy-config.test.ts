@@ -7,6 +7,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { landingWorkerPaths } from './landings.ts';
 
 /**
  * Every path worker/index.ts handles must appear in the assets
@@ -31,7 +32,15 @@ describe('wrangler run_worker_first covers the worker routes', () => {
 
   // One representative path per branch of the handler's dispatch, plus the
   // two text assets the Worker re-tags with a charset.
-  it.each([['/mcp'], ['/api/health'], ['/api/og/abc'], ['/g/y%20%3D%20x'], ['/llms.txt'], ['/robots.txt']])(
+  it.each([
+    ['/mcp'],
+    ['/api/health'],
+    ['/api/og/abc'],
+    ['/g/y%20%3D%20x'],
+    ...landingWorkerPaths().map(p => [p]),
+    ['/llms.txt'],
+    ['/robots.txt'],
+  ])(
     '%s reaches the worker',
     path => {
       expect(covered(path), `${path} would be served by the asset server, not the worker`).toBe(true);
@@ -40,7 +49,7 @@ describe('wrangler run_worker_first covers the worker routes', () => {
 
   it('leaves the app shell and its assets to the asset server', () => {
     // Marking these worker-first would make every page load pay for the worker.
-    for (const path of ['/', '/index.html', '/style.css', '/about/']) {
+    for (const path of ['/', '/index.html', '/style.css', '/about/', '/landing/']) {
       expect(covered(path), `${path} should be served directly by the asset server`).toBe(false);
     }
   });

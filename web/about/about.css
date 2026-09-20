@@ -140,11 +140,26 @@ a { color: var(--accent); }
 }
 
 .group { margin-top: 40px; }
-.group h2 {
-  font-size: 22px;
-  letter-spacing: -0.02em;
+.group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px 18px;
+  flex-wrap: wrap;
   margin: 0 0 14px 4px;
 }
+.group-head h2 {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.group-head a {
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.group-head a:hover { text-decoration: underline; }
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

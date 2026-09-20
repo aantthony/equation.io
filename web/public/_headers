@@ -1,6 +1,6 @@
 # Deny resources by default. Only the app may execute scripts;
 # no inline scripts, event handlers, styles, or eval.
-# Keep this on asset responses so /g/ HTMLRewriter responses inherit it too.
+# The Worker replaces this policy for /g/ and intent landing responses.
 /*
   Content-Security-Policy: default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests
 
