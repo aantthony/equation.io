@@ -164,6 +164,26 @@ const isE = (e: Expr): boolean => (e.kind === 'var' && e.name === 'e') || (e.kin
 /** Matrix-valued subexpressions met during one lowerGeom, so a long scalar
  *  chain asks "is this a matrix?" once per node rather than once per level. */
 let matSeen = new WeakMap<Expr, MatValue | null>();
+/**
+ * Whether matrix algebra is live for this lowering. Nearly every row has no
+ * matrix in it, and asking "is this a matrix?" at every node of a huge one is
+ * real time — so lowering starts with the question switched off and costs
+ * nothing. The only ways a matrix can enter are a matrix NAME and the
+ * generator cross(n); meeting either throws MatrixSeen, and the expression is
+ * lowered again with the question switched on.
+ */
+let matsPossible = false;
+class MatrixSeen extends Error {}
+function withMatrices<T>(run: () => T): T {
+  matSeen = new WeakMap();
+  matsPossible = false;
+  try { return run(); } catch (err) {
+    if (!(err instanceof MatrixSeen)) throw err;
+    matSeen = new WeakMap();
+    matsPossible = true;
+    return run();
+  }
+}
 
 /**
  * A matrix-valued expression — a named matrix, or algebra over them: `s M`,
@@ -171,6 +191,7 @@ let matSeen = new WeakMap<Expr, MatValue | null>();
  * generator `cross(n)` — or null for anything else.
  */
 function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null {
+  if (!matsPossible) return null;
   if (matSeen.has(e)) return matSeen.get(e)!;
   const of = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
   const scalar = (n: Expr, what: string): Expr => {
@@ -236,6 +257,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     case 'num': return sc(e);
     case 'var': {
       if (getMat(e.name)) {
+        if (!matsPossible) throw new MatrixSeen();
         throw new Error(`${e.name} is a matrix — use ${e.name} v, solve(${e.name}, v), det(${e.name}), or trace(${e.name}).`);
       }
       const comps = getComps(e.name);
@@ -307,6 +329,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         }
         return sc({ kind: 'call', name: '[trail]', args: coords });
       }
+      if (!matsPossible && e.name === 'cross' && e.args.length === 1) throw new MatrixSeen();
       if (matOf(e)) throw new Error(NOT_A_VALUE);
       if (e.name === 'rotate') {
         // rotate(P, a[, center]) ≡ C + e^(a J) (P − C); rotate(P, a, axis) ≡
@@ -326,6 +349,8 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       if (e.name === 'det' || e.name === 'trace' || e.name === 'solve') {
         const matArg = (raw: Expr | undefined): ReturnType<GetMat> => {
           if (!raw) return null;
+          // Anything but an inline literal here is matrix algebra — switch it on.
+          if (!matsPossible && raw.kind !== 'list') throw new MatrixSeen();
           const value = matOf(raw);
           if (value) return value.m;
           if (raw.kind === 'list') {
@@ -508,14 +533,29 @@ const polyCall = (name: FigureName, pts: Expr[][]): Expr =>
  */
 /** A definition whose value is a matrix (`R = e^(a J)`, `N = 2 M`), or null. */
 export function lowerMatrix(e: Expr, getComps: GetComps, getMat: GetMat): Mat | null {
+  // Only the matrix-algebra spine can make a matrix: look along it for one.
+  const spine = (n: Expr): boolean => {
+    switch (n.kind) {
+      case 'var': return getMat(n.name) !== null;
+      case 'neg': return spine(n.a);
+      case 'bin': return spine(n.a) || spine(n.b);
+      case 'call': return (n.name === 'cross' && n.args.length === 1) || (n.name === 'exp' && n.args.length === 1 && spine(n.args[0]));
+      default: return false;
+    }
+  };
+  if (!spine(e)) return null;
   matSeen = new WeakMap();
+  matsPossible = true;
   return lowerMat(e, n => lower(n, getComps, getMat, () => false), getMat)?.m ?? null;
 }
 
 export function lowerGeom(
   e: Expr, getComps: GetComps, getMat: GetMat = () => null, isList: IsList = () => false,
 ): Expr {
-  matSeen = new WeakMap();
+  return withMatrices(() => lowerStatement(e, getComps, getMat, isList));
+}
+
+function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): Expr {
   if (e.kind === 'call' && GEOM_STATEMENTS.has(e.name)) {
     // A list of points — literal, named, or a named 2×2/3×3 one that reads as
     // a matrix — is plan #13's; until then say so rather than "takes points".

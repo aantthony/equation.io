@@ -109,7 +109,8 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
   // A transformed figure. A list in the TRANSFORM is one figure per element —
   // e^(th J) hull(P) is a rosette of hulls, not the hull of every copy — so
   // those expand first, around the figure; then the transform moves inside.
-  if (!(e.kind === 'call' && POINT_FIGURES.has(e.name)) && holdsFigure(e)) {
+  // (Sized first: the size walk stops at its limit, a figure hunt would not.)
+  if (!(e.kind === 'call' && POINT_FIGURES.has(e.name)) && !exceedsNodes(e, 32768) && holdsFigure(e)) {
     const family = expand(e, true);
     if (family) return family;
     e = pushTransforms(e);

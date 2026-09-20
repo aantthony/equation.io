@@ -226,7 +226,7 @@ function expand(e: Expr, ctx: Ctx): Expr {
  * so those keep the symbolic path and shaders keep their uniforms.
  */
 function fastMap(raw: Expr[], f: (xs: number[]) => number, ctx: Ctx): Expr | null {
-  if (!raw.every(p => isData(p) || p.kind === 'num')) return null;
+  for (const p of raw) if (!isData(p) && p.kind !== 'num') return null;
   let n: number | null = null;
   const { parts, axes } = align(raw);
   for (const p of parts) {
@@ -320,6 +320,10 @@ function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
 /** Combine lowered operands elementwise: lists zip (equal lengths only),
  *  scalars broadcast. */
 function zipN(raw: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
+  // Nearly every node of nearly every row: no list in sight, nothing to align.
+  let listy = false;
+  for (const p of raw) if (isSeq(p)) { listy = true; break; }
+  if (!listy) return build(raw);
   let n: number | null = null;
   const { parts, axes } = align(raw);
   for (const p of parts) {
