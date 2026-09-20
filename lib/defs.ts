@@ -26,7 +26,7 @@ import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, SHADOWABLE_FNS, type Expr, builtinFn, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, substVars } from './expr.ts';
+import { FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -496,10 +496,10 @@ export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
  */
 export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi', 'tau']);
 
-const FN_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*([A-Za-z_]\w*(?:\s*,\s*[A-Za-z_]\w*)*)\s*\)\s*=(?!=)([\s\S]+)$/;
-const CONST_RE = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]+)$/;
-const STATE_RE = /^\s*([A-Za-z_]\w*)'\s*=(?!=)([\s\S]+)$/;
-const INIT_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$/;
+const FN_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*\(\s*(${NAME_SRC}(?:\s*,\s*${NAME_SRC})*)\s*\)\s*=(?!=)([\s\S]+)$`);
+const CONST_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`);
+const STATE_RE = new RegExp(String.raw`^\s*(${NAME_SRC})'\s*=(?!=)([\s\S]+)$`);
+const INIT_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$`);
 /**
  * `person = open("people.csv", 3a7f9c…)` — the hash is optional as typed;
  * the app fills it in from the file it finds (like a slider's write-back).
@@ -509,7 +509,7 @@ const INIT_RE = /^\s*([A-Za-z_]\w*)\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$/;
  * a row to the wrong bytes is the exact failure the pin exists to prevent.
  */
 const TABLE_RE = new RegExp(
-  String.raw`^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{${HASH_TOKEN_LEN},64})\s*)?\)\s*$`,
+  String.raw`^\s*(${NAME_SRC})\s*=\s*open\s*\(\s*(?:"([^"]*)"|'([^']*)')\s*(?:,\s*([0-9a-fA-F]{${HASH_TOKEN_LEN},64})\s*)?\)\s*$`,
 );
 
 /**
@@ -527,7 +527,7 @@ export const rowSafeFileName = (name: string): string =>
   name.replace(/["\r\n\t]+/g, '_').trim() || 'data.csv';
 
 /** A row that means to open a file, whether or not it succeeds at saying so. */
-const OPEN_HEAD_RE = /^\s*([A-Za-z_]\w*)\s*=\s*open\s*\(\s*["']/;
+const OPEN_HEAD_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=\s*open\s*\(\s*["']`);
 
 /** How an `open(…)` row is written, for the app's write-back. */
 export const formatTableRow = (name: string, file: string, hash: string): string =>
@@ -585,16 +585,19 @@ export function freeTableName(base: string, taken: ReadonlySet<string>): string 
 
 /** Detect a definition row before parsing (so calls to it parse everywhere). */
 export function scanDefinition(text: string): Definition | null {
+  // Captured names canonicalize (T₀ → T_0) so a definition binds the same
+  // name the tokenizer reads in expressions.
+  const name = (m: RegExpExecArray): string => canonicalName(m[1]);
   // Primes first: `a' = …` is a state, but the reserved coordinate names keep
   // their ODE meaning, so `y' = x - y` stays a slope field (see plot.ts).
   let m = STATE_RE.exec(text);
-  if (m && nameable(m[1])) return { kind: 'state', name: m[1], rhs: m[2] };
+  if (m && nameable(name(m))) return { kind: 'state', name: name(m), rhs: m[2] };
   m = INIT_RE.exec(text);
-  if (m && nameable(m[1])) return { kind: 'init', name: m[1], rhs: m[2] };
+  if (m && nameable(name(m))) return { kind: 'init', name: name(m), rhs: m[2] };
   // Before the function form: `open(…)` takes a file name, not parameters.
   m = TABLE_RE.exec(text);
-  if (m && nameable(m[1])) {
-    return { kind: 'table', name: m[1], file: m[2] ?? m[3], hash: (m[4] ?? '').toLowerCase() };
+  if (m && nameable(name(m))) {
+    return { kind: 'table', name: name(m), file: m[2] ?? m[3], hash: (m[4] ?? '').toLowerCase() };
   }
   // A row that plainly means to open a file but does not parse as one is NOT
   // a constant: `p = open("a.csv", abc123)` would otherwise be scanned as a
@@ -602,11 +605,11 @@ export function scanDefinition(text: string): Definition | null {
   // short hash — never runs on definition rows. Leave it to badTableRow.
   if (OPEN_HEAD_RE.test(text)) return null;
   m = FN_RE.exec(text);
-  if (m && nameable(m[1])) {
-    return { kind: 'fn', name: m[1], params: m[2].split(/\s*,\s*/), rhs: m[3] };
+  if (m && nameable(name(m))) {
+    return { kind: 'fn', name: name(m), params: m[2].split(/\s*,\s*/).map(canonicalName), rhs: m[3] };
   }
   m = CONST_RE.exec(text);
-  if (m && nameable(m[1])) return { kind: 'const', name: m[1], rhs: m[2] };
+  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2] };
   return null;
 }
 

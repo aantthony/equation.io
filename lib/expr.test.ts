@@ -513,3 +513,59 @@ describe('number theory', () => {
     expect(toGLSL(parseExpr('isprime(x)'))).toBe('eq_isprime(x)');
   });
 });
+
+describe('unicode input', () => {
+  it('reads π and τ as the constants, standing alone in a product', () => {
+    expect(evl('π')).toBeCloseTo(Math.PI, 12);
+    expect(evl('2π')).toBeCloseTo(2 * Math.PI, 12);
+    expect(evl('πr', { r: 3 })).toBeCloseTo(3 * Math.PI, 12); // π never glues to a name
+    expect(evl('τ')).toBeCloseTo(2 * Math.PI, 12);
+    expect(evl('sin(π/2)')).toBe(1);
+  });
+
+  it('reads superscript digits as exponents', () => {
+    expect(evl('x³', { x: 2 })).toBe(8);
+    expect(evl('2³')).toBe(8);
+    expect(evl('x²³', { x: 2 })).toBe(2 ** 23);
+    expect(evl('(x+1)²', { x: 2 })).toBe(9);
+    expect(evl('x⁻²', { x: 2 })).toBe(0.25);
+    expect(evl('2x²', { x: 3 })).toBe(18); // binds like ^: 2(x²), not (2x)²
+    expect(evl('x²y', { x: 2, y: 3 })).toBe(12);
+    expect(() => evl('x⁻')).toThrow(/exponent/);
+  });
+
+  it('treats Greek letters as name characters and subscripts as _ subscripts', () => {
+    expect(evl('θ + 1', { 'θ': 2 })).toBe(3);
+    expect(evl('α β', { 'α': 2, 'β': 3 })).toBe(6);
+    expect(evl("2µ", { 'µ': 5 })).toBe(10); // micro sign, the Mac keyboard's mu
+    // A subscript digit is the `_` subscript in its unicode spelling, not a
+    // character of its own: T₀ IS T_0, so components and terms line up.
+    expect(parseExpr('T₀ + a₃')).toEqual(parseExpr('T_0 + a_3'));
+    expect(evl('θ₁₂ + 1', { 'θ_12': 2 })).toBe(3);
+    expect([...freeVars(parseExpr('Δx + θ₁ + θ2'))].sort()).toEqual(['Δx', 'θ2', 'θ_1']);
+  });
+
+  it('accepts · ⋅ × ÷ and ≠', () => {
+    expect(evl('x·y', { x: 2, y: 3 })).toBe(6);
+    expect(evl('x⋅y', { x: 2, y: 3 })).toBe(6);
+    expect(evl('3×4÷6')).toBe(2);
+    expect(parseExpr('a ≠ b')).toEqual(parseExpr('a != b'));
+  });
+
+  it('associates mixed ASCII/unicode operator spellings left', () => {
+    expect(evl('5 - 3 − 1')).toBe(1);
+    expect(evl('5 − 3 - 1')).toBe(1);
+    expect(evl('12 / 3 × 2')).toBe(8);
+    expect(evl('12 ÷ 3 * 2')).toBe(8);
+  });
+
+  it('keeps Σ Π ∫ ∞ ∇ working as single glyphs', () => {
+    // Σn no longer lexes as a variable named "Σn": the glyph stands alone.
+    expect([...freeVars(parseExpr('∇f'))]).toEqual(['grad', 'f']);
+    expect(freeVars(parseExpr('[1..∞]')).has('inf')).toBe(true);
+  });
+
+  it('points a backslash at the editor escapes', () => {
+    expect(() => parseExpr('\\nabla')).toThrow(/\\pi/);
+  });
+});

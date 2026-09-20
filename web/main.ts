@@ -61,6 +61,8 @@ import { type IntShade, type ShadeRun, type ShadeSampler, evalSampler, minusTint
 import { compileSampler } from '../lib/vm.ts';
 import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
+import { uniformName } from '../lib/glsl.ts';
+import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline } from '../lib/flow.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { lowerLists } from '../lib/list.ts';
@@ -784,7 +786,7 @@ function render() {
       const color = rowColor(eq);
       const plot = eq.cls!.plot;
       const params = eq.cls!.params;
-      const uniforms = Object.fromEntries(Object.entries(eq.cls!.uniforms ?? {}).map(([k, v]) => ['u_' + k, v]));
+      const uniforms = Object.fromEntries(Object.entries(eq.cls!.uniforms ?? {}).map(([k, v]) => [uniformName(k), v]));
       switch (plot.type) {
         case 'implicit2d': // extrudes to its true locus (a vertical sheet)
           scene.implicits.push({ field: plot.field, color, params, uniforms });
@@ -968,7 +970,7 @@ function render() {
       const css = cssColor(color);
       const plot = eq.cls!.plot;
       const params = eq.cls!.params;
-      const uniforms = Object.fromEntries(Object.entries(eq.cls!.uniforms ?? {}).map(([k, v]) => ['u_' + k, v]));
+      const uniforms = Object.fromEntries(Object.entries(eq.cls!.uniforms ?? {}).map(([k, v]) => [uniformName(k), v]));
       switch (plot.type) {
         case 'implicit2d':
           layers.curves.push({ field: plot.field, color, params, uniforms });
@@ -2786,6 +2788,20 @@ listEl.addEventListener('input', e => {
   if (e.target !== listEl) return; // slider/bound inputs bubble their 'input' here
   pushUndo(`edit:${pendingCaret?.line ?? -1}`, pendingCaret ?? caretPos());
   syncFromDOM();
+  // LaTeX-style escapes: the keystroke that completes \pi (or delimits \sin)
+  // rewrites it to the symbol in place — same effect as accepting it from
+  // the suggestions, but hands-free (lib/escapes.ts says when).
+  if (e instanceof InputEvent && !e.isComposing && e.inputType === 'insertText' && e.data?.length === 1) {
+    const caret = caretPos();
+    const eq = caret && equations[caret.line];
+    const edit = caret && eq ? typedEscape(eq.text, caret.offset, e.data) : null;
+    if (edit && eq && caret) {
+      eq.text = eq.text.slice(0, edit.start) + edit.text + eq.text.slice(edit.end);
+      recompileAll();
+      renderAll();
+      setCaret(caret.line, edit.caret);
+    }
+  }
   // Typing ';' splits the line into rows, matching the old per-input behavior.
   if (equations.some(eq => eq.text.includes(';'))) {
     const caret = caretPos();

@@ -68,6 +68,11 @@ pnpm deploy     # build and deploy to Cloudflare
 **Basics**
 
 - `y = x^2` · `x^2+y^2=4` · `y = tan(x)` — 2D curves
+- `y = sin(2πx)` · `θ = 1; r = θ x` · `y = x³` — unicode input: π and τ,
+  Greek-letter names, superscript exponents, subscripts (`T₀` ≡ `T_0`, so
+  `a₃` is a sequence term), and `·`/`×`/`÷`/`≤`/`≥`/`≠`;
+  in the editor, typing `\pi`, `\theta`, `\nabla`, … inserts the symbol, and
+  `\` before any function name just drops (`\trail` → `trail`)
 - `z = sin(x)cos(y)` · `x^2+y^2+z^2=9` — 3D surfaces (automatic when `z` appears)
 - `y < x/2 + 1` — inequalities shade their region; strict `<`/`>` have no
   border, `<=`/`>=` draw the boundary line, and chains like

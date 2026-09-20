@@ -102,4 +102,40 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('mean(', 5, d).hint).toBeUndefined();
     expect(syntaxHelp('Mean(', 5, d).hint).toBeUndefined();
   });
+  it('suggests symbol escapes for a \\word, replacing the backslash too', () => {
+    const h = syntaxHelp('y = \\pi', 7, defs());
+    expect(h.start).toBe(4); // covers the backslash
+    const pi = h.suggestions.find(s => s.name === '\\pi');
+    expect(pi).toMatchObject({ insert: 'π', call: false });
+    expect(syntaxHelp('\\', 1, defs()).suggestions.length).toBe(6);
+    expect(syntaxHelp('\\nab', 4, defs()).suggestions.map(s => s.insert)).toEqual(['∇']);
+    // Unknown names hint at the feature instead of listing functions.
+    const unknown = syntaxHelp('\\zz', 3, defs());
+    expect(unknown.suggestions).toEqual([]);
+    expect(unknown.hint).toContain('\\pi');
+    // An escaped backslash is a literal one: no symbol suggestions for \\pi.
+    expect(syntaxHelp('\\\\pi', 4, defs()).suggestions.some(s => s.insert)).toBe(false);
+  });
+  it('lists built-in functions for a \\word with their real signatures', () => {
+    const h = syntaxHelp('\\tra', 4, defs());
+    expect(h.suggestions.map(s => s.name)).toEqual(['trace', 'trail']);
+    const trail = h.suggestions.find(s => s.name === 'trail')!;
+    expect(trail.call).toBe(true); // accept adds parens, like plain completion
+    expect(trail.insert).toBeUndefined();
+    expect(trail.signature).toContain('trail(point)');
+    expect(trail.signature).toContain('\\trail');
+    // One typed letter is enough here, where the plain path needs two.
+    expect(syntaxHelp('\\v', 2, defs()).suggestions.some(s => s.name === 'vector')).toBe(true);
+  });
+  it('completes user definitions with Greek names', () => {
+    const d = emptyDefs(); d.consts.set('θmax', {kind:'num',value:3});
+    expect(syntaxHelp('θ', 1, d).suggestions.map(s => s.name)).toEqual(['θmax']);
+  });
+  it('reads a subscript spelling as its canonical name', () => {
+    const d = emptyDefs();
+    d.fns.set('f_1', { params: ['x'], body: { kind: 'num', value: 0 } });
+    d.fns.set('a_12', { params: ['x'], body: { kind: 'num', value: 0 } });
+    expect(syntaxHelp('f₁(', 3, d).hint).toContain('f_1(x)'); // call hint via f₁(
+    expect(syntaxHelp('a₁', 2, d).suggestions.map(s => s.name)).toEqual(['a_12']);
+  });
 });

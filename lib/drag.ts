@@ -9,10 +9,10 @@
  * nothing to write back to and stay pinned on that axis.
  */
 
-import { type Expr, evaluate } from './expr.ts';
+import { NAME_SRC, type Expr, canonicalName, evaluate } from './expr.ts';
 
 const NUM_LITERAL_RE = /^-?(?:\d+\.?\d*|\.\d+)$/;
-const NAME_RE = /^[A-Za-z_]\w*$/;
+const NAME_RE = new RegExp(`^${NAME_SRC}$`);
 
 /**
  * A slider appears when a constant's right-hand side is a plain number.
@@ -58,8 +58,9 @@ export function dragAxes<S>(
   if (!parts) return null;
   const axes = parts.map(p => {
     if (NUM_LITERAL_RE.test(p)) return 'literal' as const;
-    if (!NAME_RE.test(p) || pinned.has(p)) return null;
-    return slider(p) ?? null;
+    // Sliders and pins live under canonical names: (r₁, 2) drags r_1's row.
+    if (!NAME_RE.test(p) || pinned.has(canonicalName(p))) return null;
+    return slider(canonicalName(p)) ?? null;
   });
   if (!axes.some(a => a !== null)) return null;
   return { parts, axes };

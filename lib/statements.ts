@@ -30,8 +30,13 @@
  * whole row; tokenizing wrongly costs one row its message.
  * A closing quote always closes, wherever it falls.
  */
-/** Characters a value can end with, so a following `'` is a prime mark. */
-const VALUE_END = /[A-Za-z_0-9Σ∑Π∏∫∞')\]}!]/;
+import { GLYPH_CHARS, SUPERSCRIPT_CHARS, WRITTEN_NAME_CHARS } from './expr.ts';
+
+/** Characters a value can end with, so a following `'` is a prime mark:
+ *  written name characters (Greek and subscript spellings included),
+ *  constant/operator glyphs, superscript exponents, and everything that
+ *  closes or ends a value. */
+export const VALUE_END = new RegExp(`[${WRITTEN_NAME_CHARS}${GLYPH_CHARS}${SUPERSCRIPT_CHARS}')\\]}!]`);
 
 export function splitStatements(text: string): string[] {
   const parts: string[] = [];

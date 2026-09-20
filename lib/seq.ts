@@ -18,7 +18,8 @@ import { compileTyped, usesComplex } from './complex.ts';
 import { type GetFn, RESERVED, type ResolveOpts, resolveExpr } from './defs.ts';
 import { lowerLists } from './list.ts';
 import { listGetter } from './defs.ts';
-import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { GREEK_NAME_CHARS, WRITTEN_NAME_CHARS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { uniformName } from './glsl.ts';
 import type { Classified } from './plot.ts';
 
 export interface SeqScan {
@@ -29,8 +30,12 @@ export interface SeqScan {
   rhs: string;
 }
 
-const SEQ_RE = /^\s*([A-Za-z])_([A-Za-z])\s*=(?!=)([\s\S]+)$/;
-const REC_RE = /^\s*([A-Za-z])_(?:\{\s*([A-Za-z])\s*\+\s*1\s*\}|\(\s*([A-Za-z])\s*\+\s*1\s*\))\s*=(?!=)([\s\S]+)$/;
+/** A sequence letter: one Latin or Greek letter (a_n, θ_n). */
+const L = `[A-Za-z${GREEK_NAME_CHARS}]`;
+/** A term reference by literal index: a_3 (or a₃, canonicalized), θ_2. */
+const TERM_RE = new RegExp(`^(${L})_(\\d+)$`);
+const SEQ_RE = new RegExp(String.raw`^\s*(${L})_(${L})\s*=(?!=)([\s\S]+)$`);
+const REC_RE = new RegExp(String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*=(?!=)([\s\S]+)$`);
 
 /** Indices that read as a sequence on sight, so `a_n = 5` is the constant
  *  sequence rather than a constant named a_n. */
@@ -39,7 +44,9 @@ const SEQ_INDICES = new Set(['n', 'k', 'm']);
 /** The index as a standalone identifier in the term: `a_j = 1/j^2` is a
  *  sequence, but `T_c = 300` and `k_B = 1.38` are subscripted constants. */
 const usesIndex = (rhs: string, index: string): boolean =>
-  new RegExp(`(?<![A-Za-z0-9_])${index}(?![A-Za-z0-9_])`).test(rhs);
+  // Written classes on purpose: in `c₁n` the n is part of a name (c_1n),
+  // not the standalone index, and only the written class can see that.
+  new RegExp(`(?<![${WRITTEN_NAME_CHARS}])${index}(?![${WRITTEN_NAME_CHARS}])`).test(rhs);
 
 /** Detect a sequence/recurrence row before definition scanning. */
 export function scanSeqRec(text: string): SeqScan | null {
@@ -113,7 +120,7 @@ export function classifySeqRec(
 
   // GLSL sees constants as u_<name> uniforms, like classify() does.
   const g = params.length
-    ? substVars(parsed, Object.fromEntries(params.map(p => [p, { kind: 'var', name: 'u_' + p } as Expr])))
+    ? substVars(parsed, Object.fromEntries(params.map(p => [p, { kind: 'var', name: uniformName(p) } as Expr])))
     : parsed;
 
   if (bifurcation) {
@@ -167,7 +174,7 @@ export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, o
   };
   return (symbol: string, index?: Expr): Expr | null => {
     if (index === undefined) {
-      const hit = /^([A-Za-z])_(\d+)$/.exec(symbol);
+      const hit = TERM_RE.exec(symbol);
       return hit && defs.sequences.has(hit[1]) ? term(hit[1], Number(hit[2])) : null;
     }
     const name = symbol.slice(0, -1);

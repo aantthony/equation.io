@@ -8,7 +8,7 @@
  */
 import { diff } from './diff.ts';
 import { ANGLE_FN, type Expr, evaluate, freeVars, substVars } from './expr.ts';
-import { toGLSL } from './glsl.ts';
+import { toGLSL, uniformName } from './glsl.ts';
 
 export interface GridField {
   name: string;
@@ -54,7 +54,7 @@ export const planarField = (expr: Expr): boolean => !freeVars(expr).has('z');
 
 export function buildGridField(name: string, expr: Expr, constNames: ReadonlySet<string>): GridField {
   const params = [...freeVars(expr)].filter(v => constNames.has(v)).sort();
-  const uMap = Object.fromEntries(params.map(p => [p, { kind: 'var', name: 'u_' + p } as Expr]));
+  const uMap = Object.fromEntries(params.map(p => [p, { kind: 'var', name: uniformName(p) } as Expr]));
   const sub = (e: Expr) => (params.length ? substVars(e, uMap) : e);
   let grad: [Expr, Expr] | undefined;
   let gradGlsl: [string, string] | undefined;

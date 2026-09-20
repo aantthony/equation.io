@@ -9,7 +9,7 @@
  */
 import { arrowHead } from '../lib/geom.ts';
 import { finiteRuns } from '../lib/curve3d.ts';
-import { GLSL_PRELUDE } from '../lib/glsl.ts';
+import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { ProgramCache, QUAD_VERT, compileProgram } from './gl.ts';
 import { type Mat4, invert, lookAt, multiply, perspective } from './mat4.ts';
 import { niceSpacing, paramDecls } from './render2d.ts';
@@ -646,8 +646,8 @@ export class Renderer3D {
     };
     const setParams = (prog: WebGLProgram, params?: string[], uniforms?: Record<string, number>) => {
       for (const p of params ?? []) {
-        const loc = gl.getUniformLocation(prog, 'u_' + p);
-        if (loc) gl.uniform1f(loc, uniforms?.['u_' + p] ?? env[p] ?? 0);
+        const loc = gl.getUniformLocation(prog, uniformName(p));
+        if (loc) gl.uniform1f(loc, uniforms?.[uniformName(p)] ?? env[p] ?? 0);
       }
     };
 

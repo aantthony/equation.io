@@ -107,7 +107,18 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Operators: `+ - * / ^`, parentheses, unary minus. Multiplication is
   implicit: `2x`, `x y`, `2cos(t)`, `a(x-1)` all work.
 - Absolute value bars: `|x|`, including nested/multiplied forms like `2|x-1|`.
-- Constants: `pi`, `tau`, `e`. Imaginary unit `i` in complex expressions.
+- Unicode: Greek letters are ordinary names (`θ = 1` makes a θ slider; `Δx`
+  is a name like `dx`), superscript digits are exponents (`x³` is `x^3`,
+  `x⁻²` is `x^(-2)`), and subscript digits are the `_` subscript syntax in
+  its unicode spelling — `T₀` IS `T_0`, so `r₁` reads a vector state's `r_1`
+  component and `a₃` a sequence's third term. `·`, `⋅`, `×`, `÷`, `−`, `≤`,
+  `≥`, `≠` mean their ASCII counterparts. π and τ never join a longer name,
+  so `2πr` is 2·π·r. In the editor, typing `\pi`, `\theta`, `\nabla`, …
+  inserts the symbol itself, and a `\` before any built-in function name
+  simply drops (`\sin(x)` → `sin(x)`, `\trail` → `trail`), so `\` also works
+  as a function search.
+- Constants: `pi`, `tau`, `e` (π and τ also parse directly). Imaginary unit
+  `i` in complex expressions.
 - Functions: sin cos tan asin acos atan atan2(y,x) sinh cosh tanh sech coth
   asinh acosh atanh sqrt abs exp ln (natural) log (base 10) floor ceil round
   min max mod sign fract sinc gamma factorial, complex helpers re im arg conj,

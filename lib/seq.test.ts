@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { evaluate, type Expr } from './expr.ts';
-import { classifySeqRec, scanSeqRec } from './seq.ts';
+import { classifySeqRec, scanSeqRec, sequenceResolver } from './seq.ts';
+import { emptyDefs } from './defs.ts';
 
 const none = new Set<string>();
 const cls = (text: string, consts: ReadonlySet<string> = none) => {
@@ -13,6 +14,7 @@ describe('scanSeqRec', () => {
   it('detects explicit sequences', () => {
     expect(scanSeqRec('a_n = 1/n^2')).toMatchObject({ rec: false, name: 'a', index: 'n' });
     expect(scanSeqRec('b_k = 2^k')).toMatchObject({ rec: false, name: 'b', index: 'k' });
+    expect(scanSeqRec('θ_n = n θ')).toMatchObject({ rec: false, name: 'θ', index: 'n' });
   });
 
   it('detects recurrences in brace and paren forms', () => {
@@ -122,5 +124,16 @@ describe('sequences with sums', () => {
     const c = classifySeqRec(scan, none, () => undefined, new Set(['N']), { consts: { N: 3 } });
     const plot = c.plot as { term: Expr };
     expect(evaluate(plot.term, { n: 2 })).toBe(12); // (1+2+3)·2
+  });
+});
+
+describe('sequence term references', () => {
+  it('resolves Greek-named terms, matching the Greek row shapes', () => {
+    const defs = emptyDefs();
+    defs.sequences.set('θ', scanSeqRec('θ_n = n^2')!);
+    const resolve = sequenceResolver(defs, () => undefined, {}, new Set<string>());
+    // θ₂ reaches here as θ_2 (subscripts canonicalize in the tokenizer).
+    expect(evaluate(resolve('θ_2')!, {})).toBe(4);
+    expect(resolve('θ_x')).toBeNull(); // not a literal index
   });
 });

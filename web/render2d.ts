@@ -5,7 +5,7 @@
  * screen-space distance estimate |F| / |∇F| is under the line width.
  */
 import { arrowHead } from '../lib/geom.ts';
-import { GLSL_PRELUDE } from '../lib/glsl.ts';
+import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
 
@@ -28,7 +28,7 @@ export interface Curve2D {
 }
 
 export const paramDecls = (params: string[] = []): string =>
-  params.map(p => `uniform float u_${p};`).join('\n');
+  params.map(p => `uniform float ${uniformName(p)};`).join('\n');
 
 export interface Ineq2D extends Curve2D {
   /** Fields whose zero sets get a solid boundary line (the <= / >= parts). */
@@ -662,7 +662,7 @@ export class Renderer2D {
         gl.uniform1f(gl.getUniformLocation(grid, `uMajor${k}`), s.major);
         gl.uniform1f(gl.getUniformLocation(grid, `uMinor${k}`), s.minor);
         for (const p of s.params) {
-          const loc = gl.getUniformLocation(grid, 'u_' + p);
+          const loc = gl.getUniformLocation(grid, uniformName(p));
           if (loc) gl.uniform1f(loc, env[p] ?? 0);
         }
       });
@@ -693,7 +693,7 @@ export class Renderer2D {
       const tLoc = gl.getUniformLocation(prog, 't');
       if (tLoc) gl.uniform1f(tLoc, time);
       for (const p of params ?? []) {
-        const loc = gl.getUniformLocation(prog, 'u_' + p);
+        const loc = gl.getUniformLocation(prog, uniformName(p));
         if (loc) gl.uniform1f(loc, env[p] ?? 0);
       }
       for (const [name, value] of Object.entries(uniforms ?? {})) {

@@ -37,8 +37,9 @@ export function initSyntaxHelp(editor: HTMLElement, options: {
     if (!context || !help) return;
     const suggestion = help.suggestions[index];
     if (!suggestion) return;
-    const needsParens = suggestion.call && !/^\s*\(/.test(context.text.slice(help.end)) && suggestion.name !== 'int';
-    const text = suggestion.name + (needsParens ? '()' : '');
+    const needsParens = !suggestion.insert && suggestion.call
+      && !/^\s*\(/.test(context.text.slice(help.end)) && suggestion.name !== 'int';
+    const text = suggestion.insert ?? (suggestion.name + (needsParens ? '()' : ''));
     const pos = { ...context.caret };
     const start = help.start, end = help.end;
     hide();

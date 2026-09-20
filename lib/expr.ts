@@ -301,6 +301,8 @@ const ops = operators<PNode>({
     ({ kind: 'call', name: '[eq]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
   '!=': BinaryInfix<PNode>((a, b): Expr =>
     ({ kind: 'call', name: '[ne]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+  '≠': BinaryInfix<PNode>((a, b): Expr =>
+    ({ kind: 'call', name: '[ne]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
 
   '<': asIneq('<'),
   '<=': asIneq('<='),
@@ -318,6 +320,8 @@ const ops = operators<PNode>({
 
   '*': asBin('*'),
   '×': asBin('*'),
+  '·': asBin('*'),
+  '⋅': asBin('*'),
   '/': asBin('/'),
   '÷': asBin('/'),
 
@@ -416,33 +420,132 @@ ops['[neg]'].prec = ops['^'].prec;
 // associate left: ((0 <= y) < x), the shape classify flattens.
 for (const k of ['<=', '≤', '>', '>=', '≥']) ops[k].prec = ops['<'].prec;
 
+// Unicode spellings share their operator's level (each key otherwise gets its
+// own), so 5 − 3 - 1 and 5 - 3 − 1 both associate left: ((5 − 3) - 1).
+ops['−'].prec = ops['-'].prec;
+for (const k of ['×', '·', '⋅']) ops[k].prec = ops['*'].prec;
+ops['÷'].prec = ops['/'].prec;
+ops['≠'].prec = ops['!='].prec;
+
 const MULTI_CHAR_OPS = Object.keys(ops).filter(o => o.length > 1);
+
+/**
+ * Unicode in names. Greek letters are ordinary name characters: θ, φ1 and Δx
+ * are variables exactly like a, b1 and dx, and adjacent letters glue into
+ * one name the way `xy` always has. Subscript digits may be WRITTEN wherever
+ * a name is, but only as the unicode spelling of the `_` subscript the
+ * language already has (see canonicalName): T₀ is T_0, never a name of its
+ * own. Excluded are the glyphs that stand for
+ * something by themselves — π and τ (constants) and the operator-like
+ * Σ Π ∫ ∞ ∇ — which tokenize as standalone glyph tokens so πr means π·r
+ * (see GLYPH_ALIASES). µ is the micro sign Mac keyboards type for mu; it is
+ * just a name character of its own.
+ */
+export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςσυφχψω'
+  + 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩ'
+  + 'ϑϕϖϱϵµ';
+/** Regex character-class fragment for a name's first character. */
+export const NAME_START_CHARS = `A-Za-z_${GREEK_NAME_CHARS}`;
+/**
+ * Regex character-class fragment for a name's later characters AS WRITTEN
+ * in row text. Subscript digits are matched here because a written name may
+ * carry them, but they are not name characters — they are the unicode
+ * spelling of the `_` subscript, and canonicalName() rewrites every name
+ * the tokenizer or a row scanner captures (T₀ → T_0), so no canonical name
+ * (a defs key, a free variable, a suggestion) ever contains one. Everything
+ * that READS row text — the symbol pattern, the row-shape regexes, prime
+ * detection, the typeahead's word — matches the written form.
+ */
+export const WRITTEN_NAME_CHARS = `${NAME_START_CHARS}0-9₀₁₂₃₄₅₆₇₈₉`;
+/** Regex source for a whole name as written — the app's row-shape regexes
+ *  build on it and canonicalize what they capture, so a definition binds
+ *  exactly the name the tokenizer produces. */
+export const NAME_SRC = `[${NAME_START_CHARS}][${WRITTEN_NAME_CHARS}]*`;
+
+/**
+ * Standalone glyphs and the names they mean. Single characters only: a glyph
+ * never absorbs a following letter, so πr is π·r and ∇f is grad f — where a
+ * plain symbol like xy is one name.
+ */
+const GLYPH_ALIASES: Record<string, string> = {
+  'Σ': 'sum', '∑': 'sum', 'Π': 'prod', '∏': 'prod', '∫': 'int', '∞': 'inf', '∇': 'grad',
+  'π': 'pi', 'τ': 'tau',
+};
+export const GLYPH_CHARS = Object.keys(GLYPH_ALIASES).join('');
+
+const SUPERSCRIPTS: Record<string, string> = {
+  '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
+  '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁻': '-',
+};
+export const SUPERSCRIPT_CHARS = Object.keys(SUPERSCRIPTS).join('');
+
+const SUBSCRIPT_RE = /[₀-₉]/;
+
+/**
+ * The canonical spelling of a name: subscript digits are the `_` subscript
+ * syntax the language already reads, not their own characters — T₀ is T_0
+ * and θ₁₂ is θ_12. One rule for every reader of a name: the tokenizer
+ * (below) and the raw-text row scanners (definitions, ~ declarations,
+ * regressions, drag) all pass captured names through here, so r₁ reaches a
+ * vector state's r_1 component and a₃ the third term of a sequence.
+ */
+export const canonicalName = (name: string): string =>
+  name.replace(/[₀-₉]+/g, run => '_' + [...run].map(c => String(c.codePointAt(0)! - 0x2080)).join(''));
 
 const syntax: PatternDict = {
   parenopen: /^[\(\{\[]$/,
   parenclose: /^[\)\}\]]$/,
   number: /^\d+\.?\d*$/,
+  superscript: new RegExp(`^[${SUPERSCRIPT_CHARS}]+$`),
   bar: /^\|$/,
   whitespace: /\s$/,
-  symbol: /^[A-Za-z_Σ∑Π∏∫∞∇][A-Za-z_0-9]*'*$/,
+  glyph: new RegExp(`^[${GLYPH_CHARS}]$`),
+  symbol: new RegExp(`^[${NAME_START_CHARS}][${WRITTEN_NAME_CHARS}]*'*$`),
   // A quote only opens text where a token can start, so `x'` (prime) and
   // `f'(x)` still tokenize as symbols — the symbol match gets there first.
   string: /^("[^"]*"?|'[^']*'?)$/,
   operator: x => !!ops[x] || MULTI_CHAR_OPS.some(m => m.startsWith(x)),
-  invalid(x) { throw new Error(`Invalid character: ${JSON.stringify(x)}.`); },
+  invalid(x) {
+    if (x === '\\') {
+      throw new Error('Invalid character: "\\". Write the symbol itself (π, θ, ∇, …)'
+        + ' — in the editor, typing \\pi, \\theta or \\nabla inserts it.');
+    }
+    throw new Error(`Invalid character: ${JSON.stringify(x)}.`);
+  },
 };
 
 const tokenize = Tokenizer(syntax);
+
+/**
+ * Lower unicode sugar to plain tokens: glyphs to the names they stand for
+ * (π → pi, Σ → sum), superscript runs to an exponent — x³ is x ^ 3 and
+ * x⁻² is x ^ - 2, whose '-' becomes the [neg] prefix downstream and shares
+ * ^'s precedence, so it binds as x^(-2).
+ */
+function *desugarUnicode(bare: Iterable<Token>): Iterable<Token> {
+  for (const token of bare) {
+    if (token.type === 'glyph') {
+      yield { ...token, type: 'symbol', str: GLYPH_ALIASES[token.str] };
+    } else if (token.type === 'symbol' && SUBSCRIPT_RE.test(token.str)) {
+      yield { ...token, str: canonicalName(token.str) };
+    } else if (token.type === 'superscript') {
+      const digits = [...token.str].map(c => SUPERSCRIPTS[c]).join('');
+      if (!/^-?\d+$/.test(digits)) throw new Error(`Cannot read the exponent ${token.str}.`);
+      yield { ...token, type: 'operator', str: '^' };
+      if (digits[0] === '-') yield { ...token, type: 'operator', str: '-' };
+      yield { ...token, type: 'number', str: digits.replace('-', '') };
+    } else {
+      yield token;
+    }
+  }
+}
 
 function op(str: string): Token {
   return { type: 'operator', str, line: -1, loc: [-1, -1] };
 }
 
-const SYMBOL_ALIASES: Record<string, string> =
-  { 'Σ': 'sum', '∑': 'sum', 'Π': 'prod', '∏': 'prod', '∫': 'int', '∞': 'inf', '∇': 'grad' };
-
 /**
- * Map Σ/Π glyphs to sum/prod, and settle what a '.' means.
+ * Settle what a '.' means.
  *
  * The greedy number match takes "1." out of `1..N`, leaving a lone "."
  * operator, so the dot rejoins into "..". A '.' with no value before it and a
@@ -457,9 +560,6 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
     || t.type === 'parenclose' || t.type === 'string'
     || (t.type === 'operator' && t.str === '!');
   for (let token of bare) {
-    if (token.type === 'symbol' && Object.hasOwn(SYMBOL_ALIASES, token.str)) {
-      token = { ...token, str: SYMBOL_ALIASES[token.str] };
-    }
     if (held) {
       if (token.type === 'operator' && token.str.startsWith('.')) {
         yield { ...held, str: held.str.slice(0, -1) };
@@ -621,7 +721,7 @@ export function parseExpr(
   activeListNames = listNames;
   activeValueNames = valueNames;
   try {
-    const tokens = addImplicitTokens(normalizeTokens(tokenize(str)));
+    const tokens = addImplicitTokens(normalizeTokens(desugarUnicode(tokenize(str))));
     const stack: PNode[] = [];
     walk(
       ops,

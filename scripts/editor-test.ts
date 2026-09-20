@@ -392,6 +392,36 @@ await scenario('syntax help stays inside a resized mobile viewport', async () =>
   check('suggestions reposition after a mobile resize', true);
 });
 
+await scenario('\\name escapes convert while typing', async () => {
+  await load(page, ['y = ']);
+  await caretTo(page, 0, 4);
+  await page.keyboard.type('2\\pi x');
+  check('\\pi becomes π the moment it completes', (await rowTexts(page))[0] === 'y = 2π x');
+  await page.keyboard.type(' + \\sin(x)');
+  check('\\sin converts on its delimiter', (await rowTexts(page))[0] === 'y = 2π x + sin(x)');
+});
+
+await scenario('escape suggestions insert the symbol with Tab', async () => {
+  await load(page, ['k = 1', 'g = ']);
+  await caretTo(page, 1, 4);
+  await page.keyboard.type('\\nab');
+  await page.locator('#syntax-suggestions [role=option]').first().waitFor();
+  await page.keyboard.press('Tab');
+  check('Tab inserts ∇ for \\nab', (await rowTexts(page))[1] === 'g = ∇');
+  await page.keyboard.type('(x y)');
+  check('the inserted glyph composes into a call', (await rowTexts(page))[1] === 'g = ∇(x y)');
+  await page.keyboard.type(' + \\tra');
+  await page.locator('#syntax-suggestions [role=option]').filter({ hasText: 'trail' }).click();
+  check('a function escape completes with parens', (await rowTexts(page))[1] === 'g = ∇(x y) + trail()');
+});
+
+await scenario('\\\\ types a literal backslash', async () => {
+  await load(page, ['y = ']);
+  await caretTo(page, 0, 4);
+  await page.keyboard.type('\\\\');
+  check('double backslash collapses to one', (await rowTexts(page))[0] === 'y = \\');
+});
+
 await scenario('independent axis scaling persists', async () => {
   await page.setViewportSize({ width: 1000, height: 700 });
   const errors: string[] = [];

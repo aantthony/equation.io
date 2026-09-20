@@ -79,4 +79,12 @@ describe('splitStatements', () => {
     expect(splitStatements('y = sin(x)')).toEqual(['y = sin(x)']);
     expect(splitStatements(';')).toEqual(['', '']);
   });
+
+  it('reads a prime after unicode names, glyphs and superscripts', () => {
+    // θ ends a value, so the ' is a prime, not a quote that would eat the ';'.
+    expect(splitStatements("θ' = -θ; y = 2")).toEqual(["θ' = -θ", ' y = 2']);
+    expect(splitStatements("T₀' = 1; y = 2")).toEqual(["T₀' = 1", ' y = 2']);
+    expect(splitStatements("y = x²'; z = 3")).toEqual(["y = x²'", ' z = 3']);
+    expect(splitStatements("y = ∇'; z = 3")).toEqual(["y = ∇'", ' z = 3']);
+  });
 });
