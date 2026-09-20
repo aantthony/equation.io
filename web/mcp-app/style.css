@@ -29,6 +29,11 @@ html[data-mcp-app] #equations, html[data-mcp-app] #panel-chip { font-family: var
 html[data-mcp-app] .eq-widget, html[data-mcp-app] #syntax-help { font-family: var(--font-sans, system-ui, sans-serif); }
 /* CSV bytes on the author's device are not available in a chat widget. */
 html[data-mcp-app] #panel-links { display: none; }
+/* Site-only: featured rotation and image/video export don't belong in chat. */
+html[data-mcp-app] #shot,
+html[data-mcp-app] #rec,
+html[data-mcp-app] #try-another { display: none; }
+html[data-mcp-app] #state-reset { right: 34px; }
 @media (max-width: 440px) {
   #app-toolbar { gap: 8px; padding-inline: max(8px, var(--safe-area-left)) max(8px, var(--safe-area-right)); }
   #app-status { font-size: 11px; }

@@ -14,6 +14,7 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Page } from 'playwright';
+import { FEATURED, sameRows } from '../lib/featured.ts';
 
 const PORT = 5197;
 const ORIGIN = `http://localhost:${PORT}`;
@@ -426,6 +427,78 @@ await scenario('independent axis scaling persists', async () => {
   check('scaled view survives URL reload', (await rowTexts(page)).includes(zoomed));
   check('scaled shaders compile without errors', errors.length === 0, errors.join('\n'));
   page.off('console', onConsole);
+});
+
+await scenario('first visit loads a featured graph, not a lone sine', async () => {
+  await page.goto('about:blank');
+  await page.goto(ORIGIN + '/');
+  await page.waitForSelector('.eq-line');
+  const rows = (await rowTexts(page)).filter((r): r is string => r !== null);
+  const match = FEATURED.some(g => sameRows(g.eqs, rows));
+  check('empty / loads a featured graph', match, JSON.stringify(rows));
+  check('empty / stays at / until edited', new URL(page.url()).pathname === '/', page.url());
+});
+
+await scenario('random replaces the document and writes a share URL', async () => {
+  await page.goto('about:blank');
+  await page.goto(ORIGIN + '/');
+  await page.waitForSelector('#try-another');
+  const before = await rowTexts(page);
+  await page.click('#try-another');
+  await page.waitForFunction(prev => {
+    const now = [...document.querySelectorAll('.eq-line')].map(l => l.textContent);
+    return JSON.stringify(now) !== JSON.stringify(prev);
+  }, before);
+  const after = await rowTexts(page);
+  check('random loads a different featured graph', FEATURED.some(g => sameRows(g.eqs, after.filter((r): r is string => r !== null))), JSON.stringify(after));
+  await page.waitForFunction(() => location.pathname.startsWith('/g/'));
+  check('random writes /g/', new URL(page.url()).pathname.startsWith('/g/'), page.url());
+});
+
+await scenario('replacing the document resets the live view', async () => {
+  await load(page, ['y = x^2', 'view(x = -0.5..0.5, y = -0.5..0.5)']);
+  await page.waitForFunction(() => !!(window as unknown as { __eq?: { view: { upp: number } } }).__eq);
+  const tight = await page.evaluate(() => (window as unknown as { __eq: { view: { upp: number } } }).__eq.view.upp);
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.ex-item')].find(el => el.childNodes[0]?.textContent === 'parabola');
+    (item as HTMLElement | undefined)?.click();
+  });
+  await page.waitForFunction(() => !decodeURIComponent(location.pathname).includes('view('));
+  const open = await page.evaluate(() => (window as unknown as { __eq: { view: { upp: number } } }).__eq.view.upp);
+  check('unframed example is not stuck in the previous window', open > tight * 2, `tight=${tight} open=${open}`);
+});
+
+await scenario('png button downloads a screenshot', async () => {
+  await load(page, ['y = x']);
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 8000 }),
+    page.click('#shot'),
+  ]);
+  check('screenshot filename is png', download.suggestedFilename().endsWith('.png'), download.suggestedFilename());
+  const path = await download.path();
+  const { statSync } = await import('node:fs');
+  check('screenshot file is non-empty', !!path && statSync(path).size > 100, String(path && statSync(path).size));
+});
+
+await scenario('record button captures a short webm', async () => {
+  await load(page, ['y = sin(x - 2t)']);
+  const rec = page.locator('#rec');
+  if (await rec.isHidden()) {
+    check('record control hidden when MediaRecorder is unavailable', true);
+    return;
+  }
+  await rec.click();
+  check('recording state is pressed', await rec.getAttribute('aria-pressed') === 'true');
+  await page.waitForTimeout(800);
+  const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 12000 }),
+    rec.click(),
+  ]);
+  const name = download.suggestedFilename();
+  check('recording filename is video', /\.(webm|mp4)$/.test(name), name);
+  const path = await download.path();
+  const { statSync } = await import('node:fs');
+  check('recording file is non-empty', !!path && statSync(path).size > 100, String(path && statSync(path).size));
 });
 
 await browser.close();

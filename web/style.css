@@ -232,7 +232,9 @@ html, body {
 #panel-resize:focus-visible::after { background: var(--accent); }
 
 #theme-toggle,
-#state-reset {
+#state-reset,
+#shot,
+#rec {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -248,12 +250,26 @@ html, body {
   line-height: 24px;
   text-align: center;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
+#shot { right: 34px; }
+#rec { right: 62px; }
 /* Only present while a row defines a state (`a' = …`). */
-#state-reset { right: 34px; font-size: 14px; }
+#state-reset { right: 90px; font-size: 14px; }
+#rec[hidden] ~ #state-reset { right: 62px; }
 #state-reset[hidden] { display: none; }
+#rec[hidden] { display: none; }
+#rec.recording { color: #e24; }
+#rec .rec-stop { display: none; }
+#rec.recording .rec-dot { display: none; }
+#rec.recording .rec-stop { display: block; }
 #theme-toggle:hover,
-#state-reset:hover { background: var(--eq-focus); color: var(--muted-hover); }
+#state-reset:hover,
+#shot:hover,
+#rec:hover { background: var(--eq-focus); color: var(--muted-hover); }
+#rec.recording:hover { color: #c12; }
 
 #equations {
   /* Scrolls when the list outgrows the panel's max-height. `none` (not
