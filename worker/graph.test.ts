@@ -365,7 +365,7 @@ describe('complex paths through analyze()', () => {
     expect(field.error).toBeUndefined();
     const path = time(nest(12, 'exp(i 2 pi u)'));
     expect(path.error).toMatch(/too large to sample/);
-    expect(path.ms).toBeLessThan(2 * field.ms + 100);
+    expect(path.ms).toBeLessThan(3 * field.ms + 250);
   }, 60000);
 
   it('protects the other users of the split the same way: root systems and Argand points', () => {

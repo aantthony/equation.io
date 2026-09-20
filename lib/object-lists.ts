@@ -153,10 +153,12 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
     if (exceedsNodes(source, 32768)) throw new Error('This object family is too large to expand (32768 nodes).');
     const lists: Array<{ items: Expr[]; axes: readonly Axis[] }> = [];
     const markers = new Map<Expr, number>();
-    // A matrix name is the matrix, not a list of row-points. Those rows are a
-    // list only where a figure asks for points — hull(M).
-    const visit = (node: Expr): Expr => {
-      if (node.kind === 'var' && defs.mats.has(node.name)) return node;
+    // A matrix name is the matrix, not a list of row-points, along the row's
+    // own algebra (2 M, M v). Those rows are a list only where a call asks for
+    // points — hull(M), distance(P, A) — and there still not as the matrix
+    // factor of a product.
+    const visit = (node: Expr, asMatrix = true): Expr => {
+      if (asMatrix && node.kind === 'var' && defs.mats.has(node.name)) return node;
       // Around a figure, only the transform's lists count: the figure keeps its own.
       if (outside && node.kind === 'call' && POINT_FIGURES.has(node.name)) return node;
       const values = listValue(node);
@@ -166,13 +168,13 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
         markers.set(marker, lists.length); lists.push(values);
         return marker;
       }
-      const map = (nodes: Expr[]) => nodes.map(visit);
+      const map = (nodes: Expr[]) => nodes.map(n => visit(n, asMatrix));
       switch (node.kind) {
-        case 'bin': return { ...node, a: visit(node.a), b: visit(node.b) };
-        case 'neg': return { ...node, a: visit(node.a) };
+        case 'bin': return { ...node, a: visit(node.a, asMatrix || node.op === '*'), b: visit(node.b, asMatrix) };
+        case 'neg': return { ...node, a: visit(node.a, asMatrix) };
         case 'eq': case 'ineq': return { ...node, l: visit(node.l), r: visit(node.r) };
         case 'vec': return { ...node, items: map(node.items) };
-        case 'call': return { ...node, args: map(node.args) };
+        case 'call': return { ...node, args: node.args.map(n => visit(n, false)) };
         case 'piecewise': return { ...node, cases: node.cases.map(c => ({ cond: visit(c.cond), value: visit(c.value) })), otherwise: node.otherwise && visit(node.otherwise) };
         default: return node;
       }
