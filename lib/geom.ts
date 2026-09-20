@@ -20,12 +20,12 @@
  * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import { ANGLE_FN, type Expr } from './expr.ts';
+import { ANGLE_FN, type Expr, sameList } from './expr.ts';
 import { SCALAR_REDUCTIONS } from './list.ts';
-import { type GetMat, detOf, matVec, matrixFromList, solveVec, traceOf } from './mat.ts';
+import { type GetMat, type Mat, type MatValue, detOf, expOf, hatOf, matAdd, matMul, matNeg, matPow, matScale, matVec, matrixFromList, solveVec, traceOf } from './mat.ts';
 
 /** Whole-statement geometry forms (like SPECIAL_FORMS, they never nest). */
-export const GEOM_STATEMENTS = new Set(['segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle']);
+export const GEOM_STATEMENTS = new Set(['segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle', 'hull']);
 
 /** The derived scalar constants a point named `name` expands to. */
 export const pointComps = (name: string, dim = 2): string[] => ['x', 'y', 'z'].slice(0, dim).map(axis => name + '_' + axis);
@@ -52,6 +52,7 @@ type IsList = (name: string) => boolean;
 
 /** Functions over points, by how many point arguments they take. */
 const POINT_FNS: Record<string, number> = { dot: 2, cross: 2, midpoint: 2, perp: 1, unit: 1 };
+const ROTATE_USAGE = 'rotate takes rotate(P, angle), rotate(P, angle, center) in 2D, or rotate(P, angle, axis) in 3D.';
 
 const sq = (e: Expr): Expr => mul(e, e);
 const lenOfN = (items: Expr[]): Expr => {
@@ -157,12 +158,106 @@ function lowerAngle(args: LV[], usage: string, stray: (index: number) => string)
   return { kind: 'call', name: ANGLE_FN, args: [...u, ...v] };
 }
 
+const NOT_A_VALUE = 'A matrix is not a value on its own — apply it to a vector, like M (x, y), or name it: R = e^(a J).';
+const isE = (e: Expr): boolean => (e.kind === 'var' && e.name === 'e') || (e.kind === 'num' && e.value === Math.E);
+
+/** Matrix-valued subexpressions met during one lowerGeom, so a long scalar
+ *  chain asks "is this a matrix?" once per node rather than once per level. */
+let matSeen = new WeakMap<Expr, MatValue | null>();
+/**
+ * Whether matrix algebra is live for this lowering. Nearly every row has no
+ * matrix in it, and asking "is this a matrix?" at every node of a huge one is
+ * real time — so lowering starts with the question switched off and costs
+ * nothing. The only ways a matrix can enter are a matrix NAME and the
+ * generator cross(n); meeting either throws MatrixSeen, and the expression is
+ * lowered again with the question switched on.
+ */
+let matsPossible = false;
+class MatrixSeen extends Error {}
+function withMatrices<T>(run: () => T): T {
+  matSeen = new WeakMap();
+  matsPossible = false;
+  try { return run(); } catch (err) {
+    if (!(err instanceof MatrixSeen)) throw err;
+    matSeen = new WeakMap();
+    matsPossible = true;
+    return run();
+  }
+}
+
+/**
+ * A matrix-valued expression — a named matrix, or algebra over them: `s M`,
+ * `M / s`, `-M`, `M + N`, `M N`, `M^n`, `e^M` / `exp(M)`, and the rotation
+ * generator `cross(n)` — or null for anything else.
+ */
+function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null {
+  if (!matsPossible) return null;
+  if (matSeen.has(e)) return matSeen.get(e)!;
+  const of = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
+  const scalar = (n: Expr, what: string): Expr => {
+    const v = lo(n);
+    if (v.vec) throw new Error(`Cannot ${what} a matrix by a point — M v applies it.`);
+    return v.e;
+  };
+  const found = ((): MatValue | null => {
+    switch (e.kind) {
+      case 'var': { const m = getMat(e.name); return m && { m }; }
+      case 'neg': { const a = of(e.a); return a && matNeg(a); }
+      case 'bin': {
+        if (e.op === '^') {
+          const power = of(e.b);
+          if (power) {
+            if (!isE(e.a)) throw new Error('Only e takes a matrix power: e^(a J) is the rotation by a.');
+            return { m: expOf(power) };
+          }
+          const a = of(e.a);
+          if (!a) return null;
+          const n = e.b.kind === 'neg' && e.b.a.kind === 'num' ? -e.b.a.value : e.b.kind === 'num' ? e.b.value : NaN;
+          return { m: matPow(a.m, n) };
+        }
+        const a = of(e.a);
+        const b = of(e.b);
+        if (!a && !b) return null;
+        switch (e.op) {
+          case '+': case '-':
+            if (!a || !b) throw new Error(`Cannot ${e.op === '+' ? 'add' : 'subtract'} a matrix and a number — use a multiple of the identity.`);
+            return { m: matAdd(a.m, b.m, e.op === '-') };
+          case '*':
+            if (a && b) return { m: matMul(a.m, b.m) };
+            // M v is a vector, not a matrix: the caller applies it.
+            if (a) { const v = lo(e.b); return v.vec ? null : matScale(a, v.e); }
+            return matScale(b!, scalar(e.a, 'multiply'));
+          case '/':
+            if (!a || b) throw new Error('Cannot divide by a matrix — multiply by M^-1. (a/2 J reads as a/(2 J): write (a/2) J.)');
+            return matScale(a, div({ kind: 'num', value: 1 }, scalar(e.b, 'divide')));
+        }
+        return null;
+      }
+      case 'call': {
+        if (e.name === 'exp' && e.args.length === 1) { const a = of(e.args[0]); return a && { m: expOf(a) }; }
+        // cross(n, v) with its v left off: the matrix of v ↦ n × v.
+        if (e.name === 'cross' && e.args.length === 1) {
+          const n = lo(e.args[0]);
+          if (!n.vec || n.items.length !== 3) throw new Error('cross(n) is the rotation generator about a 3D axis: e^(a cross((0, 0, 1))) v.');
+          return { m: hatOf(n.items) };
+        }
+        return null;
+      }
+      default: return null;
+    }
+  })();
+  matSeen.set(e, found);
+  return found;
+}
+
 function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV {
   const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
+  const matOf = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
   switch (e.kind) {
     case 'num': return sc(e);
     case 'var': {
       if (getMat(e.name)) {
+        if (!matsPossible) throw new MatrixSeen();
         throw new Error(`${e.name} is a matrix — use ${e.name} v, solve(${e.name}, v), det(${e.name}), or trace(${e.name}).`);
       }
       const comps = getComps(e.name);
@@ -170,6 +265,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       return vc(...comps.map((name): Expr => ({ kind: 'var', name })));
     }
     case 'neg': {
+      if (matOf(e)) throw new Error(NOT_A_VALUE);
       const a = lo(e.a);
       if (a.vec) return vc(...a.items.map(neg));
       return a.e === e.a ? sc(e) : sc({ kind: 'neg', a: a.e });
@@ -177,18 +273,20 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     case 'bin': {
       // The matvec M v: a matrix name as the direct left factor of a product.
       if (e.op === '*') {
-        const m = e.a.kind === 'var' ? getMat(e.a.name) : null;
-        if (m) {
-          const v = lo(e.b);
-          if (!v.vec || v.items.length !== m.length) {
-            throw new Error(`${(e.a as Expr & { kind: 'var' }).name} is ${m.length}×${m.length}, so it multiplies a ${m.length}-component vector: ${(e.a as Expr & { kind: 'var' }).name} (x, y${m.length === 3 ? ', z' : ''}).`);
+        const m = matOf(e.a)?.m;
+        const v = m && !matOf(e.b) ? lo(e.b) : null;
+        if (m && v?.vec) {
+          if (v.items.length !== m.length) {
+            const name = e.a.kind === 'var' ? e.a.name : 'That matrix';
+            throw new Error(`${name} is ${m.length}×${m.length}, so it multiplies a ${m.length}-component vector: ${e.a.kind === 'var' ? e.a.name : 'M'} (x, y${m.length === 3 ? ', z' : ''}).`);
           }
           return vc(...matVec(m, v.items));
         }
-        if (e.b.kind === 'var' && getMat(e.b.name)) {
-          throw new Error(`Matrices multiply on the left — write ${e.b.name} v.`);
+        if (!m && matOf(e.b) && lo(e.a).vec) {
+          throw new Error(`Matrices multiply on the left — write ${e.b.kind === 'var' ? e.b.name : 'M'} v.`);
         }
       }
+      if (matOf(e)) throw new Error(NOT_A_VALUE);
       const a = lo(e.a);
       const b = lo(e.b);
       if (!a.vec && !b.vec) {
@@ -231,10 +329,30 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         }
         return sc({ kind: 'call', name: '[trail]', args: coords });
       }
+      if (!matsPossible && e.name === 'cross' && e.args.length === 1) throw new MatrixSeen();
+      if (matOf(e)) throw new Error(NOT_A_VALUE);
+      if (e.name === 'rotate') {
+        // rotate(P, a[, center]) ≡ C + e^(a J) (P − C); rotate(P, a, axis) ≡
+        // e^(a cross(axis/|axis|)) P. Flattened tuples are told apart by count.
+        const flat = e.args.map(lo).flatMap(a => (a.vec ? a.items : [a.e]));
+        if (flat.length === 7) {
+          const axis = flat.slice(4);
+          const turn = expOf(matScale({ m: hatOf(axis) }, div(flat[3], lenOfN(axis))));
+          return vc(...matVec(turn, flat.slice(0, 3)));
+        }
+        if (flat.length !== 3 && flat.length !== 5) throw new Error(ROTATE_USAGE);
+        const num0: Expr = { kind: 'num', value: 0 };
+        const c = flat.length === 5 ? flat.slice(3) : [num0, num0];
+        const turn = expOf(matScale({ m: [[num0, { kind: 'num', value: -1 }], [{ kind: 'num', value: 1 }, num0]] }, flat[2]));
+        return vc(...matVec(turn, [sub(flat[0], c[0]), sub(flat[1], c[1])]).map((p, k) => add(c[k], p)));
+      }
       if (e.name === 'det' || e.name === 'trace' || e.name === 'solve') {
         const matArg = (raw: Expr | undefined): ReturnType<GetMat> => {
           if (!raw) return null;
-          if (raw.kind === 'var') return getMat(raw.name);
+          // Anything but an inline literal here is matrix algebra — switch it on.
+          if (!matsPossible && raw.kind !== 'list') throw new MatrixSeen();
+          const value = matOf(raw);
+          if (value) return value.m;
           if (raw.kind === 'list') {
             // Inline literal: lower the rows, then read the shape.
             return matrixFromList(toExpr(lo(raw)));
@@ -378,7 +496,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       // so [A, B] scatters named points like [(1, 2), (3, 4)] does literals.
       const items = e.items.map(a => toExpr(lo(a)));
       if (items.every((it, k) => it === e.items[k])) return sc(e);
-      return sc({ kind: 'list', items });
+      return sc(sameList(e, { kind: 'list', items }));
     }
     case 'piecewise': {
       const one = (n: Expr): Expr => {
@@ -405,17 +523,37 @@ const spaceVar = (name: 'x' | 'y'): Expr => ({ kind: 'var', name });
  *  vertex, '[polygon]' and '[square]' close and fill (otherwise the name only
  *  differs so classify can word its errors after the statement the user
  *  wrote). */
-export type FigureName = '[polygon]' | '[segment]' | '[polyline]' | '[vector]' | '[square]';
+export type FigureName = '[polygon]' | '[segment]' | '[polyline]' | '[vector]' | '[square]' | '[hull]';
 const polyCall = (name: FigureName, pts: Expr[][]): Expr =>
   ({ kind: 'call', name: pts[0].length === 3 ? name.replace(']', '3]') : name, args: pts.flat() });
 
-/**
- * Lower a whole statement: desugar a root-level geometry form, expand all
- * point arithmetic, and return an expression classify already understands.
- */
+/** A definition whose value is a matrix (`R = e^(a J)`, `N = 2 M`), or null. */
+export function lowerMatrix(e: Expr, getComps: GetComps, getMat: GetMat): Mat | null {
+  // Only the matrix-algebra spine can make a matrix: look along it for one.
+  const spine = (n: Expr): boolean => {
+    switch (n.kind) {
+      case 'var': return getMat(n.name) !== null;
+      case 'neg': return spine(n.a);
+      case 'bin': return spine(n.a) || spine(n.b);
+      case 'call': return (n.name === 'cross' && n.args.length === 1) || (n.name === 'exp' && n.args.length === 1 && spine(n.args[0]));
+      default: return false;
+    }
+  };
+  if (!spine(e)) return null;
+  matSeen = new WeakMap();
+  matsPossible = true;
+  return lowerMat(e, n => lower(n, getComps, getMat, () => false), getMat)?.m ?? null;
+}
+
+/** Lower a whole statement: desugar a root-level geometry form, expand all
+ *  point arithmetic, and return an expression classify already understands. */
 export function lowerGeom(
   e: Expr, getComps: GetComps, getMat: GetMat = () => null, isList: IsList = () => false,
 ): Expr {
+  return withMatrices(() => lowerStatement(e, getComps, getMat, isList));
+}
+
+function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): Expr {
   if (e.kind === 'call' && GEOM_STATEMENTS.has(e.name)) {
     // A list of points — literal, named, or a named 2×2/3×3 one that reads as
     // a matrix — is plan #13's; until then say so rather than "takes points".
@@ -463,6 +601,12 @@ export function lowerGeom(
         throw new Error('segment takes two points: segment(A, B), with A = (0, 0) defined above.');
       }
       return polyCall('[segment]', pts);
+    }
+    if (e.name === 'hull') {
+      // The convex hull: a filled polygon in the plane, a solid in space.
+      // Which vertices are extreme is settled per frame, from their values.
+      if (pts.length < 3) throw new Error('hull needs at least 3 points: hull(A, B, C, D), or hull(P) for a list of points.');
+      return polyCall('[hull]', pts);
     }
     if (e.name === 'polyline') {
       if (pts.length < 2) throw new Error('polyline needs at least 2 points: polyline(A, B, C).');

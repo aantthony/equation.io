@@ -71,9 +71,11 @@ describe('broadcasting', () => {
     expect(values(lowerRow('2[1,2,3]'))).toEqual([2, 4, 6]);
     expect(values(lowerRow('sin([0, 1])'))).toEqual([0, Math.sin(1)]);
   });
-  it('zips equal-length lists and rejects mismatches', () => {
-    expect(values(lowerRow('[1,2]+[3,4]'))).toEqual([4, 6]);
-    expect(() => lowerRow('[1,2]+[1,2,3]')).toThrow(/different lengths \(2 vs 3\)/);
+  it('zips uses of one list and crosses independent ones', () => {
+    expect(values(lowerRow('L+L^2', ['L = [1,2]']))).toEqual([2, 6]);
+    expect(values(lowerRow('[1,2]+[3,4]'))).toEqual([4, 5, 5, 6]);
+    expect(values(lowerRow('[1,2]+[10,20,30]'))).toEqual([11, 21, 31, 12, 22, 32]);
+    expect(values(lowerRow('M+L', ['L = [1,2]', 'M = [10,20,30] + L']))).toEqual([12, 14, 22, 24, 32, 34]);
   });
   it('zips lists into points for a scatter', () => {
     const c = classify(lowerRow('([1,2,3], [4,5,6])'));

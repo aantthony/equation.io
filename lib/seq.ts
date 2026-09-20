@@ -16,7 +16,7 @@
  */
 import { compileTyped, usesComplex } from './complex.ts';
 import { type GetFn, RESERVED, type ResolveOpts, resolveExpr } from './defs.ts';
-import { lowerLists } from './list.ts';
+import { axesOf, lowerLists, withAxes } from './list.ts';
 import { listGetter } from './defs.ts';
 import { GREEK_NAME_CHARS, WRITTEN_NAME_CHARS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { uniformName } from './glsl.ts';
@@ -185,8 +185,9 @@ export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, o
       for (const n of freeVars(e)) opts.boundConsts?.add(n);
       return term(name, evaluate(e, opts.consts ?? {}));
     };
-    if (indices.kind === 'list') return { kind: 'list', items: indices.items.map(one) };
-    if (indices.kind === 'data') return { kind: 'list', items: Array.from(indices.values, k => term(name, k)) };
+    // One term per index, so a_[n] runs over the same instances n does.
+    if (indices.kind === 'list') return withAxes({ kind: 'list', items: indices.items.map(one) }, axesOf(indices));
+    if (indices.kind === 'data') return withAxes({ kind: 'list', items: Array.from(indices.values, k => term(name, k)) }, axesOf(indices));
     return one(indices);
   };
 }

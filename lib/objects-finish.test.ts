@@ -74,9 +74,55 @@ describe('object families and sequence values', () => {
     expect(last(['P=([1..100],0)', 'P+(1,1)']).plot.type).toBe('plist');
     expect(last(['s=x^2', '[1,2]s']).plot.type).toBe('family');
   });
-  it('enforces member, dimension and zip limits before rendering', () => {
+  it('crosses independent lists and zips every use of the same one', () => {
+    const pts = (rows: string[]) => {
+      const p = last(rows).plot;
+      if (p.type !== 'plist') throw new Error(p.type);
+      return p.pts.map(pt => pt.map(c => evaluate(c, {})).join());
+    };
+    expect(pts(['([0,1],[0,1],[0,1])'])).toEqual(['0,0,0', '0,0,1', '0,1,0', '0,1,1', '1,0,0', '1,0,1', '1,1,0', '1,1,1']);
+    expect(pts(['a=[0,1]', '(a,a,a)'])).toEqual(['0,0,0', '1,1,1']);
+    expect(pts(['s=[1..3]', 'q=s^2', '(s,q)'])).toEqual(['1,1', '2,4', '3,9']);
+    expect(pts(['a=[0,1]', 'b=[5,6,7]', '(a,b)'])).toHaveLength(6);
+    expect(pts(['a=[1..4]', '(a[a>2],a[a>2]^2)'])).toEqual(['3,9', '4,16']);
+    expect(pts(['a_n=2n', 'n=[1..3]', '(n,a_[n])'])).toEqual(['1,2', '2,4', '3,6']);
+    const family = (rows: string[]) => {
+      const p = last(rows).plot;
+      return p.type === 'family' ? p.members.length : 0;
+    };
+    expect(family(['y=[1,2]x+[1,2,3]'])).toBe(6);
+    expect(family(['m=[1,2]', 'y=m x+m'])).toBe(2);
+    expect(family(['(cos(u),sin(u),[1,2,3])'])).toBe(3);
+    expect(family(['circle(([0,1],[0,1]),[1,2])'])).toBe(8);
+  });
+  it('builds regular figures from a list of turns', () => {
+    const pts = (rows: string[]) => {
+      const a = runRows(rows); const p = a.rows.at(-1)!.cls!.plot;
+      if (p.type !== 'plist') throw new Error(p.type);
+      return p.pts.map(pt => pt.map(c => +evaluate(c, a.constEnv).toFixed(3)).join());
+    };
+    expect(pts(['J=[(0,-1),(1,0)]', 'th=2pi [0..3]/4', 'e^(th J) (1,0)'])).toEqual(['1,0', '0,1', '-1,0', '0,-1']);
+    // One literal written into every output component is still one list: the
+    // icosahedron is 3 turns × 2 × 2 = 12 vertices, all at the same radius.
+    const ico = pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'e^(k cross((1,1,1)/sqrt(3))) (0,[-1,1],[-phi,phi])']);
+    expect(new Set(ico).size).toBe(12);
+    expect(ico).toEqual(pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'rotate((0,[-1,1],[-phi,phi]),k,(1,1,1))']));
+    expect(last(['th=2pi [0..4]/5', 'polygon(rotate((1,0),th))']).plot).toMatchObject({ type: 'polygon' });
+    const spokes = last(['th=2pi [0..4]/5', 'segment((0,0),rotate((1,0),th))']).plot;
+    expect(spokes.type === 'family' && spokes.members.length).toBe(5);
+  });
+  it('draws a whole lattice of arrows: figure families are CPU-cheap, so their cap is 1024', () => {
+    const arrows = last(['a=[0..20]', 'b=[0..20]', 'f(x,y)=(x+y/2,y+sin(x)/2)', 'vector((a,b),f(a,b))']).plot;
+    expect(arrows.type === 'family' && arrows.members.length).toBe(441);
+    expect(arrows.type === 'family' && arrows.members[0].cls.plot).toMatchObject({ type: 'polygon', arrow: true });
+    const space = last(['a=[0..3]', 'b=[0..3]', 'segment((a,b,0),(a,b,1+a b/4))']).plot;
+    expect(space.type === 'family' && space.members.length).toBe(16);
+    expect(analyze(['a=[0..40]', 'b=[0..40]', 'segment((a,b),(a+1,b))']).rows[2].error).toMatch(/1–1024 members \(got 1681\)/);
+  });
+  it('enforces member and dimension limits before rendering', () => {
     for (const [row, pattern] of [
-      ['y=[1..33]x', /32/], ['revolve([1..9]x)', /8/], ['y=[1,2]x+[1,2,3]', /different lengths/],
+      ['y=[1..33]x', /32/], ['revolve([1..9]x)', /8/], ['y=[1..6]x+[1..6]', /32/],
+      ['total([1..1000]+[1..1000])', /1000000 combinations/],
       ['domain([w,w^2])', /select a list element/], ['y=[1,(2,3)]', /point|number|mix/],
     ] as const) expect(analyze([row]).rows[0].error, row).toMatch(pattern);
   });

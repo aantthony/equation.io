@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { analyze } from '../worker/graph.ts';
 import { type Definition, buildDefs, compsOf, scanDefinition } from './defs.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
@@ -51,7 +52,7 @@ describe('matrix definitions', () => {
 
   it('rejects a bare matrix name in scalar context', () => {
     const { errors } = buildDefs(rows('M = [(1, 2), (3, 4)]', 'c = M + 1'));
-    expect(errors.get('c')).toMatch(/Cannot add a point and a number/);
+    expect(errors.get('c')).toMatch(/Cannot add a matrix and a number/);
   });
 });
 
@@ -166,5 +167,81 @@ describe('matrices with states', () => {
     for (let f = 1; f <= 120; f++) now = advanceState(defs, sys, values, now, f / 60);
     expect(values.r_1).toBeCloseTo(Math.cos(2), 5);
     expect(values.r_2).toBeCloseTo(-Math.sin(2), 5);
+  });
+});
+
+describe('matrix algebra and the exponential', () => {
+  const J = 'J = [(0, -1), (1, 0)]';
+  const point = (defRows: string[], text: string, env: Record<string, number> = {}): number[] => {
+    const { lowered } = lowRow(defRows, text);
+    if (lowered.kind !== 'vec') throw new Error(`expected a point, got ${lowered.kind}`);
+    return lowered.items.map(c => at(c, { e: Math.E, pi: Math.PI, ...env }));
+  };
+  const close = (got: number[], want: number[]) => got.forEach((g, k) => expect(g).toBeCloseTo(want[k], 9));
+
+  it('rotates by e^(a J), exactly cos and sin of the angle kept apart', () => {
+    close(point([J], 'e^(a J) (1, 0)', { a: Math.PI / 2 }), [0, 1]);
+    close(point([J], 'exp(-a J) (1, 0)', { a: Math.PI / 2 }), [0, -1]);
+    close(point([J], 'e^(a J) (1, 0)', { a: 0 }), [1, 0]);
+    // No square roots or guards: the angle is the scalar factor itself.
+    expect(JSON.stringify(lowRow([J], 'e^(a J) (1, 0)').lowered)).not.toMatch(/sqrt|piecewise/);
+  });
+  it('exponentiates any 2×2: spirals, saddles and the defective case', () => {
+    // Against the power series, on both sides of δ = 0 and at it.
+    const series = (m: number[][]): number[][] => {
+      let term = [[1, 0], [0, 1]]; let sum = [[1, 0], [0, 1]];
+      for (let k = 1; k < 40; k++) {
+        term = term.map(r => [0, 1].map(c => (r[0] * m[0][c] + r[1] * m[1][c]) / k));
+        sum = sum.map((r, i) => r.map((v, c) => v + term[i][c]));
+      }
+      return sum;
+    };
+    for (const m of [[[0.1, -1], [1, 0.3]], [[0, 1], [1, 0]], [[1, 1], [0, 1]], [[2, 0], [0, -1]], [[0, 0], [0, 0]]]) {
+      const want = series(m);
+      const def = `A = [(${m[0].join(', ')}), (${m[1].join(', ')})]`;
+      close(point([def], 'e^(1 A) (1, 0)'), [want[0][0], want[1][0]]);
+      close(point([def], 'exp(A) (0, 1)'), [want[0][1], want[1][1]]);
+    }
+  });
+  it('rotates about an axis with cross(n), including a zero axis and zero angle', () => {
+    close(point([], 'e^(a cross((0, 0, 1))) (1, 0, 0)', { a: Math.PI / 2 }), [0, 1, 0]);
+    close(point([], 'e^(a cross((0, 0, 2))) (1, 0, 0)', { a: Math.PI / 4 }), [0, 1, 0]);
+    close(point([], 'e^(a cross((1, 1, 1)/sqrt(3))) (1, 0, 0)', { a: 2 * Math.PI / 3 }), [0, 1, 0]);
+    close(point(['n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 1, n_x: 0, n_y: 0, n_z: 0 }), [1, 0, 0]);
+    close(point(['n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 0, n_x: 0, n_y: 0, n_z: 1 }), [1, 0, 0]);
+    expect(() => lowRow(['S = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]'], 'e^(a S) (1, 0, 0)')).toThrow(/rotation generator/);
+  });
+  it('combines matrices: scale, sum, product, powers and the inverse', () => {
+    const M = 'M = [(1, 2), (3, 4)]';
+    close(point([M, J], '(2 M) (1, 0)'), [2, 6]);
+    close(point([M, J], '(M + J) (1, 0)'), [1, 4]);
+    close(point([M, J], '(M - M/2) (1, 0)'), [0.5, 1.5]);
+    close(point([M, J], 'M J (1, 0)'), [2, 4]);
+    close(point([M], 'M^2 (1, 0)'), [7, 15]);
+    close(point([M], 'M^0 (5, 6)'), [5, 6]);
+    close(point([M], 'M^-1 (M (5, 6))'), [5, 6]);
+    close(point(['N = [(2, 0, 1), (1, 3, 0), (0, 1, 4)]'], 'N^-1 (N (5, 6, 7))'), [5, 6, 7]);
+    expect(at(lowRow([M], 'det(M^2)').lowered, {})).toBe(4);
+    expect(() => lowRow([M], 'M^9 (1, 0)')).toThrow(/0 to 8/);
+    expect(() => lowRow([M], 'M^0.5 (1, 0)')).toThrow(/e\^\(th J\)/);
+    expect(() => lowRow([M], 'M + 1')).toThrow(/matrix and a number/);
+    expect(() => lowRow([M], '2^M (1, 0)')).toThrow(/Only e/);
+    expect(() => lowRow([M], 'e^(a/2 M) (1, 0)')).toThrow(/\(a\/2\) J/);
+    expect(() => lowRow([M], '2 M')).toThrow(/not a value on its own/);
+    expect(analyze([M, '2 M']).rows[1].error).toMatch(/not a value on its own/);
+    expect(() => lowRow([M], '(1, 0) M')).toThrow(/on the left/);
+  });
+  it('names a computed matrix', () => {
+    const { defs, errors } = buildDefs(rows(J, 'a = 1', 'R = e^(a J)', 'Q = R R^-1'));
+    expect(errors.size).toBe(0);
+    expect(defs.mats.has('R')).toBe(true);
+    close(point([J, 'a = 1', 'R = e^(a J)'], 'R (1, 0)', { a: Math.PI }), [-1, 0]);
+  });
+  it('rotate is the same turn, about a centre or an axis', () => {
+    close(point([], 'rotate((1, 0), a)', { a: Math.PI / 2 }), [0, 1]);
+    close(point([], 'rotate((1, 0), a, (1, 1))', { a: Math.PI }), [1, 2]);
+    close(point(['P = (1, 0)', 'C = (1, 1)'], 'rotate(P, a, C)', { a: Math.PI, P_x: 1, P_y: 0, C_x: 1, C_y: 1 }), [1, 2]);
+    close(point([], 'rotate((1, 0, 0), a, (0, 0, 5))', { a: Math.PI / 2 }), [0, 1, 0]);
+    expect(() => lowRow([], 'rotate((1, 0))')).toThrow(/rotate takes/);
   });
 });

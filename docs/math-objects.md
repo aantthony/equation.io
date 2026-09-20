@@ -83,7 +83,7 @@ object must respect):
 | `y = int[0..x] …` / `f(x) = int[0..x] …` | integral as a function | quadrature sum inlined into the ordinary paths |
 | `{cond: val, …}`; no default = restriction | piecewise value | flows through every renderer (NaN outside the cases) |
 | `a_n = …`; `a_{n+1} = …` | sequence dots (+ Σ toggle); cobweb / bifurcation | CPU overlay |
-| `[…]`, `[1..5]`, `L^2`; `(L, L^2)`; `hist(L)` | scalar list (dots/bars); zipped scatter; histogram | CPU overlay |
+| `[…]`, `[1..5]`, `L^2`; `(L, L^2)`; `hist(L)` | scalar list (dots/bars); scatter (same list zips, independent lists cross: `([0,1],[0,1],[0,1])` is a cube's corners); histogram | CPU overlay |
 | `data = open("file.csv")`, `data.col` | table; a numeric column is a list | definition |
 | `Y ~ m X + b` | regression: binds the fitted parameters | fit readout on the row |
 | `a' = f(…)`, `a(0) = …`; `r' = (…, …, …)` | time-integrated state (scalar or 2/3-vector) | RK4 between frames; a constant to every consumer |
@@ -110,7 +110,10 @@ New rows and extensions (2026-09-19):
 |---|---|
 | `A=(1,2,3)`; `segment(A,B)`; `vector(A)` | 3D point/geometry, GPU line strips and screen-size heads; triangles fill |
 | `(x',y',z')=(P,Q,R)`; `(rho',theta',phi')=(F,G,H)` | 3D flow, bounded background trajectories or arrow lattice |
-| `y=[1,2,3]x`; `circle((0,0),[1,2,3])` | zipped family; shared shader source and per-draw uniforms |
+| `e^(a J) P`, `e^(a cross(n)) P`, `rotate(P, a[, center\|axis])`; `s M`, `M + N`, `M N`, `M^n`, `M^-1` | matrix algebra and closed-form exponential (2×2 any, 3×3 rotation generators), lowered to scalars in geom/mat |
+| `y=[1,2,3]x`; `circle((0,0),[1,2,3])` | family (same list zips, independent lists cross); shared shader source and per-draw uniforms |
+| `hull(A,B,C,…)`; `hull(P)`; `hull(([0,1],[0,1],[0,1]))` | convex hull evaluated per frame (lib/hull.ts): filled polygon in 2D, merged flat faces, flat-shaded through the lit-mesh pipeline (and lit front faces in the static preview) in 3D |
+| `R hull(P)`; `rotate(polygon(A,B,C), th)`; `2 segment(A,B) + v` | affine transforms of a point figure push down onto its points (object-lists.ts); a list in the transform is a family of figures |
 | `Q=P+(1,0)`; `polyline(P)` | point-list arithmetic; a connected path through the whole list |
 | `a_3`; `a_[1..10]` | sequence scalar/list values; recurrence terms compute as a bounded constant chain |
 | `(x^2+y^2+z^2,z)=(9,1)` | numerical space intersection curve |

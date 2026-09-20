@@ -26,12 +26,12 @@ import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, substVars } from './expr.ts';
+import { FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
-import { lowerGeom, pointComps, vecStateComps } from './geom.ts';
-import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName } from './list.ts';
+import { lowerGeom, lowerMatrix, pointComps, vecStateComps } from './geom.ts';
+import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, axesOf, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName, withAxes } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
@@ -250,6 +250,9 @@ export function listGetter(defs: Defs): GetList {
     if (!found) {
       throw new Error(`${table.file} has no column "${col}" (columns: ${table.data.columns.map(c => c.name).join(', ')}).`);
     }
+    // Every column of one file runs over the same instances — its rows — so
+    // (person.age, person.height) pairs up however the columns are combined.
+    const rows = [{ id: `${name.slice(0, dot)}.`, n: table.data.rows }];
     if (length) {
       if (found.type !== 'str') {
         throw new Error(`${name} counts characters — ${name.slice(0, -'.length'.length)} is a numeric column.`);
@@ -257,17 +260,17 @@ export function listGetter(defs: Defs): GetList {
       if (table.data.rows > TABLE_MAX_ROWS) {
         throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS}.`);
       }
-      return { kind: 'data', values: textLengths(found) };
+      return withAxes({ kind: 'data', values: textLengths(found) }, rows);
     }
     // A text column is a list too — of text. Only comparisons accept one
     // (list.ts); everything numeric says so where it is used.
-    if (found.type !== 'num') return { kind: 'text', values: found.strs! };
+    if (found.type !== 'num') return withAxes({ kind: 'text', values: found.strs! }, rows);
     if (table.data.rows > TABLE_MAX_ROWS) {
       throw new Error(`${table.file} has ${table.data.rows} rows; plotting is limited to ${TABLE_MAX_ROWS}.`);
     }
     // The column's own array, never mutated downstream: every operation in
     // list.ts allocates its result.
-    return { kind: 'data', values: found.nums! };
+    return withAxes({ kind: 'data', values: found.nums! }, rows);
   };
 }
 
@@ -896,7 +899,7 @@ function substIdx(e: Expr, idx: string, val: Expr): Expr {
     case 'eq': return { kind: 'eq', l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'ineq': return { kind: 'ineq', op: e.op, l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substIdx(a, idx, val)) };
-    case 'list': return { kind: 'list', items: e.items.map(a => substIdx(a, idx, val)) };
+    case 'list': return sameList(e, { kind: 'list', items: e.items.map(a => substIdx(a, idx, val)) });
     case 'data':
     case 'str':
     case 'text': return e;
@@ -930,7 +933,7 @@ function foldNums(e: Expr): Expr {
     case 'eq': return { kind: 'eq', l: foldNums(e.l), r: foldNums(e.r) };
     case 'ineq': return { kind: 'ineq', op: e.op, l: foldNums(e.l), r: foldNums(e.r) };
     case 'vec': return { kind: 'vec', items: e.items.map(foldNums) };
-    case 'list': return { kind: 'list', items: e.items.map(foldNums) };
+    case 'list': return sameList(e, { kind: 'list', items: e.items.map(foldNums) });
     case 'data':
     case 'str':
     case 'text': return e;
@@ -1223,14 +1226,14 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'eq': return { kind: 'eq', l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'ineq': return { kind: 'ineq', op: e.op, l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'vec': return { kind: 'vec', items: e.items.map(x => rx(x, ctx)) };
-    case 'list': return {
+    case 'list': return sameList(e, {
       kind: 'list',
       // `[1..10]` ranges survive resolution intact (bounds resolve) and
       // expand later in list lowering, where constant values are known.
       items: e.items.map((x): Expr => (x.kind === 'call' && x.name === '[range]'
         ? { kind: 'call', name: '[range]', args: x.args.map(a => rx(a, ctx)) }
         : rx(x, ctx))),
-    };
+    });
     case 'data':
     case 'str':
     case 'text': return e;
@@ -1361,7 +1364,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
             const value = getList(n);
             if (value?.kind !== 'data') return value;
             if (value.values.length > 10_000) throw new Error('Regression supports at most 10000 observations; filter the data first.');
-            return { kind: 'list', items: Array.from(value.values, (value): Expr => ({ kind: 'num', value })) };
+            return withAxes({ kind: 'list', items: Array.from(value.values, v => ({ kind: 'num', value: v })) }, axesOf(value));
           }, ropts);
           const models = model.kind === 'list' ? model.items
             : model.kind === 'data' ? Array.from(model.values, (value): Expr => ({ kind: 'num', value }))
@@ -1407,6 +1410,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
         const resolved = resolveExpr(parse(d), getFn, ropts);
+        // `R = e^(a J)`, `N = 2 M`: matrix algebra names a matrix.
+        const computed = lowerMatrix(resolved, n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
+        if (computed) {
+          defs.mats.set(d.name, computed);
+          continue;
+        }
         let e: Expr;
         try { e = lowerGeom(resolved, n => compsOf(defs, n), n => defs.mats.get(n) ?? null); }
         catch { e = lowerObjects(resolved, defs, ropts, true); }

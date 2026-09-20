@@ -42,6 +42,14 @@ describe('equation-native regression', () => {
     expect(b.fits.get(reg.name)?.skipped).toBe(1);
     expect(evalConstEnv(b.defs, 0).m).toBeCloseTo(2, 10);
   });
+  it('zips columns of one CSV so a two-predictor fit pairs rows', () => {
+    const rows = ['data = open("a.csv")', 'data.y ~ m data.x + n data.z'];
+    const reg = scanRegressions(rows).get(1)!;
+    const b = buildDefs([scanDefinition(rows[0])!, reg], () => parseCsv('x,y,z\n0,3,1\n1,2,0\n1,5,1\n2,7,1\n'));
+    expect([...b.errors]).toEqual([]);
+    expect(evalConstEnv(b.defs, 0).m).toBeCloseTo(2, 10);
+    expect(evalConstEnv(b.defs, 0).n).toBeCloseTo(3, 10);
+  });
   it('keeps missing CSV fits and dependent curves device-local in server analysis', () => {
     const r = analyze(['data = open("a.csv")', 'data.y ~ m data.x + b', 'y = m x + b']);
     expect(r.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);

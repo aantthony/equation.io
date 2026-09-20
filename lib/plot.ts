@@ -19,6 +19,7 @@ import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
 import { ANGLE_FN, REVOLVE_AXES, builtinFn, revolveAxis, type Expr, evaluate, freeVars, ineqComparisons, substVars } from './expr.ts';
 import type { FigureName } from './geom.ts';
+import { HULL_3D_MAX } from './hull.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
@@ -66,7 +67,9 @@ export type Plot =
   /** CPU-evaluated straight-edged figure from segment()/polyline()/vector()/
    *  polygon()/square(): flat vertex expressions [x1, y1, x2, y2, …]. closed
    *  also fills; arrow (vector) draws a screen-space head at the last vertex. */
-  | { type: 'polygon'; dim?: 2 | 3; pts: Expr[]; closed: boolean; arrow?: boolean }
+  /** hull: the vertices are a point set, and the figure is its convex hull —
+   *  worked out from their values each frame (lib/hull.ts). */
+  | { type: 'polygon'; dim?: 2 | 3; pts: Expr[]; closed: boolean; arrow?: boolean; hull?: boolean }
   /**
    * A vector equation L = R, one residual per component. With as many
    * equations as unknowns the solution set is isolated points, found
@@ -194,6 +197,7 @@ const FIGURES: Partial<Record<string, { closed: boolean; what: string }>> = {
   '[vector]': { closed: false, what: 'Vector endpoints' },
   '[polygon]': { closed: true, what: 'Polygon vertices' },
   '[square]': { closed: true, what: 'Square vertices' },
+  '[hull]': { closed: true, what: 'Hull points' },
 } satisfies Record<FigureName, unknown>;
 
 /** Calls that describe the whole plot and cannot appear as a subterm. */
@@ -387,7 +391,11 @@ function classifyLowered(
   expr: Expr, defined: ReadonlySet<string>, fields: Record<string, Expr>, timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified; surface?: Expr } {
   if (expr.kind === 'call' && expr.name === '[family]') {
-    if (!expr.args.length || expr.args.length > 32) throw new Error('An object family needs 1–32 members.');
+    // Figures are CPU-drawn from a few numbers each; everything else is a draw
+    // call (or a shader pass) per member.
+    const figures = expr.args.every(e => e.kind === 'call' && Object.hasOwn(FIGURES, e.name.replace('3]', ']')));
+    const limit = figures ? 1024 : 32;
+    if (!expr.args.length || expr.args.length > limit) throw new Error(`An object family needs 1–${limit} members.`);
     if (expr.args.some(e => exceedsNodes(e, 8192))) throw new Error('A family element is too large to render (8192 nodes).');
     const members = expr.args.map((e, i) => {
       try { const result = classifyLowered(e, defined, fields, timeDerivative); return { cls: result.cls, expr: result.surface ?? substVars(e, fields) }; }
@@ -399,7 +407,7 @@ function classifyLowered(
     const dimension = (plot: Plot) => plot.type === 'polygon' ? plot.dim ?? 2 : 'dim' in plot ? plot.dim : undefined;
     const odd = members.findIndex(m => m.cls.plot.type !== first.type || dimension(m.cls.plot) !== dimension(first));
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
-    if (members.some(m => m.cls.needs3D) && members.length > 8) throw new Error('A 3D object family has at most 8 members.');
+    if (!figures && members.some(m => m.cls.needs3D) && members.length > 8) throw new Error('A 3D object family has at most 8 members.');
     const shaders = new Set(['implicit2d', 'ineq2d', 'implicit3d', 'psurface', 'vfield2d']);
     if (shaders.has(first.type)) {
       let index = 'eqioFamilyIndex';
@@ -510,10 +518,14 @@ function classifyLowered(
     if (hasSpace || hasParam) {
       throw new Error(`${figure.what} must be constant — they cannot use x, y, u, or v.`);
     }
+    if (expr.name === '[hull3]' && expr.args.length / 3 > HULL_3D_MAX) {
+      throw new Error(`A 3D hull takes at most ${HULL_3D_MAX} points (got ${expr.args.length / 3}).`);
+    }
     return done({
       type: 'polygon', pts: expr.args, closed: figure.closed,
       ...(expr.name.endsWith('3]') ? { dim: 3 as const } : {}),
       ...(figureName === '[vector]' ? { arrow: true } : {}),
+      ...(figureName === '[hull]' ? { hull: true } : {}),
     });
   }
 

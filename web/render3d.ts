@@ -502,7 +502,7 @@ export interface Scene3D {
   curves: Array<{ pts: Float32Array; color: [number, number, number]; arrow?: boolean; triangle?: boolean; fade?: boolean }>;
   /** Disconnected segments (comb teeth), drawn as gl.LINES vertex pairs. */
   segments: Array<{ pts: Float32Array; color: [number, number, number] }>;
-  /** Indexed position+normal meshes (curve tubes) with material UVs. */
+  /** Indexed position+normal meshes (curve tubes, hull solids) with material UVs. */
   tubes: Array<{
     positions: Float32Array;
     normals: Float32Array;
@@ -689,7 +689,10 @@ export class Renderer3D {
       gl.bindVertexArray(null);
     }
 
-    // CPU-built tube meshes.
+    // CPU-built lit meshes: tubes and hull solids. Pushed a hair back so a
+    // hull's edge lines, which lie exactly in its faces, stay on top of them.
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(1, 1);
     for (const tube of scene.tubes) {
       setCommon(this.tubeProgram);
       gl.uniform3f(gl.getUniformLocation(this.tubeProgram, 'uColor'), ...tube.color);
@@ -706,6 +709,7 @@ export class Renderer3D {
       gl.drawElements(gl.TRIANGLES, tube.indices.length, gl.UNSIGNED_INT, 0);
       gl.bindVertexArray(null);
     }
+    gl.disable(gl.POLYGON_OFFSET_FILL);
 
     // CPU-sampled parametric curves and points.
     gl.bindVertexArray(this.dynVao);

@@ -168,10 +168,16 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Lists: `[3, 1, 4]`, or ranges `[1..20]`, `[0, 0.5..10]` (the first two
   elements set the step), `[10..1]` (counts down). Range bounds are numbers
   or constants defined in another row, like Σ bounds. List math broadcasts
-  elementwise — `2L + 1`, `sin(L)`, `L^2` — and two lists combine
-  positionwise (they must have equal lengths). `(xs, ys)` with list
-  components zips into a list of points: `([1..50]/5, sin([1..50]/5))` is a
-  scatter of samples.
+  elementwise — `2L + 1`, `sin(L)`, `L^2`. A list is a variable that ranges
+  over its values: the row is evaluated once per instance, so every use of
+  the SAME list moves together (zips) — `s = [1..50]/5` then `(s, sin(s))`
+  is a scatter of samples, and lists derived from `s` (`q = s^2`,
+  `s[s > 2]`, `a_[s]`) stay paired with it. Lists with DIFFERENT origins are
+  independent and cross: each `[…]` literal is its own origin, so
+  `([0,1],[0,1],[0,1])` is the 8 corners of a cube, `[1,2] + [10,20,30]` has
+  6 elements, and two separately defined lists `(a, b)` make a grid. Columns
+  of one data file share its rows, so `(data.x, data.y)` pairs up. To pair
+  literal values write the points out: `[(1,4), (2,5), (3,6)]`.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
   `stdev(L)` (sample), `median(L)`, `sort(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
@@ -286,6 +292,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A and B), `polygon(A, B, C, …)` (filled), `square(A, B)` (erected on side A→B, to the left of the direction
   A→B), and `circle(center, radius)` draw figures that follow their points. Point arithmetic works anywhere: `A + B`, `2A`,
   `(A + B)/2`, `midpoint(A, B)`, `perp(A)` (rotate 90° counterclockwise),
+  `rotate(P, a)` (turn by a about the origin; `rotate(P, a, C)` about C; in
+  3D `rotate(P, a, axis)`),
   `unit(A)`, `dot(A, B)`, `cross(A, B)`, `|A - B|` (distance). Measurements:
   `distance(A, B)` is `|A - B|`; `angle(A, B, C)` is the angle at B, turning
   from B→A to B→C — signed, counterclockwise positive, in radians in (−π, π]
@@ -305,10 +313,32 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   triangles fill; larger 3D polygons draw their outline. `cross` returns a
   vector in 3D. 3D `angle` is unsigned in [0, pi]; zero arms are undefined.
   `perp`, `line`, `square`, and `circle` remain planar; 3D dragging is not defined.
+- Convex hulls: `hull(A, B, C, …)` or `hull(P)` for a whole point list draws
+  the convex hull — a filled polygon in 2D, a lit opaque solid with flat-shaded faces and outlined edges in 3D
+  (coplanar facets merge, so a cube shows six squares). Interior and repeated
+  points are ignored, the points may move with sliders or t (the hull is
+  rebuilt each frame), and flat 3D input degrades to a polygon. Up to 2000
+  points in 3D. Point figures transform as a whole — `R hull(P)`,
+  `2 polygon(A, B, C) + (1, 0)`, `-segment(A, B)`, `rotate(hull(P), a)`,
+  `e^(t cross(n)) hull(P)` — meaning the figure of the transformed points
+  (the same as `hull(R P)`; works for segment, polyline, polygon, vector and
+  hull). A LIST in the transform draws one figure per element:
+  `th = 2pi [0..4]/5; rotate(hull(P), th)` is a rosette of 5 hulls, while
+  `hull(rotate(P, th))` is the single hull of all 5 copies. Point lists also
+  transform on their own: `R P`, `P + (1, 0)`, `rotate(P, a)`.
+  It composes with crossing lists and rotations:
+  `hull(([0,1],[0,1],[0,1]))` is a solid cube, `hull(([-1,1],[-2,2]))` a
+  rectangle, and `phi = (1+sqrt(5))/2; k = 2pi [0..2]/3;
+  hull(rotate((0, [-1,1], [-phi,phi]), k, (1,1,1)))` a solid icosahedron.
 - Object families: a list in a scalar position draws one object per element:
   `y = [1,2,3] x`, `circle((0,0), [1,2,3])`, `(cos(u),sin(u),[1,2,3])`.
-  Multiple lists zip and must have equal lengths. Limit 32 objects, or 8
-  when the family is 3D. Shader members share one program with per-draw
+  Uses of the same named list move together (`m = [1,2]`, `y = m x + m` is 2
+  lines); independent lists cross (`y = [1,2] x + [0,1]` is 4 lines,
+  `circle(([0,1],[0,1]), 1)` is 4 circles). Limit 32 objects, or 8
+  when the family is 3D — except point figures (segment, vector, polyline,
+  polygon, hull), which are cheap and allow 1024: a deformation drawn as
+  arrows is `a = [0..20]; b = [0..20]; f(x,y) = (x + y/2, y + sin(x)/2);
+  vector((a, b), f(a, b))`. Shader members share one program with per-draw
   uniforms. Scalar fields/domain coloring/fractals cannot superimpose as
   families; use a selected list element. Point-list arithmetic works:
   `Q = P + (1,0)`, `2P`, `P[2]`; `polyline(P)` / `polygon(P)` consume an
@@ -567,7 +597,24 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   may hold sliders, t, x/y, or states, and results work anywhere:
   `(x', y') = A (x, y)` is a linear phase portrait, and
   `th' = om; om' = solve(M, f)` integrates a system written in the
-  Lagrangian form M(θ)ω′ = f — the natural shape for a double pendulum. Name states for what they are (`th`/`om` for angle and angular
+  Lagrangian form M(θ)ω′ = f — the natural shape for a double pendulum.
+  Matrices combine — `2 M`, `M / 2`, `M + N`, `M N`, `M^2` (whole powers 0–8),
+  `M^-1` — and a row may name the result (`R = M N`), but a matrix is never
+  plotted on its own: apply it to a vector. Note `a/2 J` reads as `a/(2 J)`;
+  write `(a/2) J`.
+- Rotations are matrix exponentials: with `J = [(0, -1), (1, 0)]`,
+  `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
+  turns P by a about the axis n — `cross(n)` alone is the matrix of
+  `v -> n × v`, scaled so |n| multiplies the angle (`rotate(P, a, n)`
+  normalizes n for you). Both expand to exact cos/sin closed forms, so a may
+  be a slider, t, or a LIST: `th = 2pi [0..4]/5; polygon(e^(th J) (1, 0))` is
+  a regular pentagon, `segment((0,0), rotate((1,0), th))` its 5 spokes, and
+  `phi = (1+sqrt(5))/2; k = 2pi [0..2]/3;
+  rotate((0, [-1,1], [-phi,phi]), k, (1,1,1))` the 12 vertices of an
+  icosahedron (independent lists cross, the named turn list zips). `e^M` works
+  for ANY 2×2 — `e^(t A) (x0, y0)` is the exact solution of
+  `(x', y') = A (x, y)`, spiral, saddle or node — but a 3×3 must be a rotation
+  generator (skew-symmetric). Name states for what they are (`th`/`om` for angle and angular
   velocity, `pos`/`vel` for a spring — the plane's own x/y/z are reserved). A
   derivative may use t, constants and other states (not x/y); an initial
   value must be constant, and gets a slider that relaunches the run when
