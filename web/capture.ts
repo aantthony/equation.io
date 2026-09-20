@@ -71,43 +71,58 @@ export function attachCapture(host: CaptureHost): {
 
   const composite = document.createElement('canvas');
   let recorder: MediaRecorder | null = null;
+  let stream: MediaStream | null = null;
   let chunks: Blob[] = [];
   let until = 0;
+  let recW = 1;
+  let recH = 1;
   let track: (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
 
   const isRecording = () => recorder !== null && recorder.state !== 'inactive';
 
+  const releaseStream = () => {
+    for (const t of stream?.getTracks() ?? []) t.stop();
+    stream = null;
+    track = undefined;
+  };
+
   const afterFrame = () => {
     if (!isRecording()) return;
-    const { w, h } = captureSize(host.gl.width, host.gl.height, VIDEO_MAX_EDGE);
-    blit(composite, host.gl, host.overlay, w, h);
+    blit(composite, host.gl, host.overlay, recW, recH);
     track?.requestFrame?.();
     if (performance.now() >= until) stopRecording();
     else host.requestRender();
   };
 
   function stopRecording() {
-    if (!recorder || recorder.state === 'inactive') return;
-    try { recorder.stop(); } catch { /* already stopped */ }
+    if (!recorder || recorder.state === 'inactive') {
+      releaseStream();
+      return;
+    }
+    try { recorder.stop(); } catch { releaseStream(); }
   }
 
   function startRecording() {
     if (!mime || isRecording()) return;
-    const { w, h } = captureSize(host.gl.width, host.gl.height, VIDEO_MAX_EDGE);
-    blit(composite, host.gl, host.overlay, w, h);
-    const stream = composite.captureStream(30);
+    host.render();
+    const size = captureSize(host.gl.width, host.gl.height, VIDEO_MAX_EDGE);
+    recW = size.w;
+    recH = size.h;
+    blit(composite, host.gl, host.overlay, recW, recH);
+    stream = composite.captureStream(30);
     track = stream.getVideoTracks()[0] as (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
     chunks = [];
     const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
     rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
     rec.onerror = () => {
       recorder = null;
+      releaseStream();
       host.onRecording?.(false);
       host.notice('Recording failed in this browser.');
     };
     rec.onstop = () => {
       recorder = null;
-      track = undefined;
+      releaseStream();
       host.onRecording?.(false);
       const blob = new Blob(chunks, { type: mime });
       chunks = [];
@@ -121,7 +136,7 @@ export function attachCapture(host: CaptureHost): {
     until = performance.now() + CAPTURE_SECONDS * 1000;
     rec.start(200);
     host.onRecording?.(true);
-    host.render();
+    host.requestRender();
   }
 
   async function snapshot(copy: boolean): Promise<void> {

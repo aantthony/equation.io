@@ -455,6 +455,19 @@ await scenario('random replaces the document and writes a share URL', async () =
   check('random writes /g/', new URL(page.url()).pathname.startsWith('/g/'), page.url());
 });
 
+await scenario('replacing the document resets the live view', async () => {
+  await load(page, ['y = x^2', 'view(x = -0.5..0.5, y = -0.5..0.5)']);
+  await page.waitForFunction(() => !!(window as unknown as { __eq?: { view: { upp: number } } }).__eq);
+  const tight = await page.evaluate(() => (window as unknown as { __eq: { view: { upp: number } } }).__eq.view.upp);
+  await page.evaluate(() => {
+    const item = [...document.querySelectorAll('.ex-item')].find(el => el.childNodes[0]?.textContent === 'parabola');
+    (item as HTMLElement | undefined)?.click();
+  });
+  await page.waitForFunction(() => !decodeURIComponent(location.pathname).includes('view('));
+  const open = await page.evaluate(() => (window as unknown as { __eq: { view: { upp: number } } }).__eq.view.upp);
+  check('unframed example is not stuck in the previous window', open > tight * 2, `tight=${tight} open=${open}`);
+});
+
 await scenario('png button downloads a screenshot', async () => {
   await load(page, ['y = x']);
   const [download] = await Promise.all([

@@ -1,11 +1,4 @@
-/**
- * Graphs shown on a cold visit to `/` (no payload) and by the random control.
- *
- * The homepage URL stays `/` until the visitor edits, picks an example, or
- * clicks random — same contract as the old `y = sin(x)` default, so a
- * reload of the marketing URL is not a random `/g/…` link. Each empty load
- * advances a small cursor in localStorage so repeat visits rotate.
- */
+/** Graphs for empty `/` and the random control. Cursor in FEATURED_KEY; `/` stays until edit/example/random. */
 
 export interface FeaturedGraph {
   /** Short label for the random control. */
@@ -23,10 +16,6 @@ function viewBox(cx: number, cy: number, span: number): string {
   return `view(x = ${fmt(cx - hx)}..${fmt(cx + hx)}, y = ${fmt(cy - hy)}..${fmt(cy + hy)})`;
 }
 
-/**
- * One graph from each of the product's distinct surfaces, framed so a first
- * paint looks like the about gallery rather than the default 12-unit window.
- */
 export const FEATURED: FeaturedGraph[] = [
   {
     title: 'traveling wave',

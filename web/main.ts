@@ -483,6 +483,25 @@ function flushViewportWriteback() {
   writebackViewport();
 }
 
+/** Drop a pending pan and the live window so a new document isn't framed as the old one. */
+function resetViewport() {
+  if (viewportWriteTimer !== null) {
+    clearTimeout(viewportWriteTimer);
+    viewportWriteTimer = null;
+  }
+  appliedViewText = appliedCameraText = null;
+  view.cx = 0;
+  view.cy = 0;
+  delete view.ratio;
+  const w = canvas.width;
+  const h = canvas.height;
+  view.upp = w && h ? 12 / Math.min(w, h) : 0.01;
+  camera.target = [0, 0, 0];
+  camera.radius = 14;
+  camera.theta = -Math.PI / 3;
+  camera.phi = Math.PI / 5.5;
+}
+
 function ensureViewRow() {
   if (viewportRow('view')) return;
   const id = nextId;
@@ -3174,6 +3193,7 @@ let emptyDefault = ['y = sin(x)'];
 
 function replaceDocument(rows: string[], share: boolean) {
   pushUndo(null);
+  resetViewport();
   equations.length = 0;
   for (const t of rows) if (t.trim()) addEquation(t.trim());
   if (!equations.length) addEquation('');
@@ -3834,6 +3854,7 @@ function loadFromUrl() {
   const wanted = rows.length ? rows : emptyDefault;
   const current = equations.map(e => e.text);
   if (wanted.length === current.length && wanted.every((t, i) => t === current[i])) return;
+  resetViewport();
   equations.length = 0;
   wanted.forEach(t => addEquation(t));
   recompileAll();
@@ -3886,11 +3907,7 @@ if (embedded) {
     setRows: rows => {
       // A new tool result replaces the document, including its undo history.
       // Pending gestures belong to the old document, not the incoming rows.
-      if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
-      viewportWriteTimer = null;
-      // The dragged view was never written back, so an identical viewport
-      // row must still snap the live view rather than read as already applied.
-      appliedViewText = appliedCameraText = null;
+      resetViewport();
       if (urlTimer !== null) clearTimeout(urlTimer);
       urlTimer = null;
       urlPending = false;
