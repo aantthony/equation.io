@@ -258,10 +258,6 @@ export default {
     if (url.pathname.startsWith('/g/')) {
       return handleShare(request, url, env);
     }
-    if (url.pathname.startsWith('/embed/')) {
-      url.pathname = '/g/' + url.pathname.slice('/embed/'.length);
-      return Response.redirect(url.toString(), 301);
-    }
     const landing = landingFromPath(url.pathname);
     if (landing) return handleLanding(request, url, env, landing);
     return withCharset(await env.ASSETS.fetch(request));

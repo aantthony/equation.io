@@ -50,11 +50,7 @@ try {
   await page.waitForTimeout(500);
   assert.equal(child.url(), before, 'Editing an embedded graph must not rewrite its URL');
 
-  await page.goto(origin + '/embed/y%3Dx%5E2');
-  await page.locator('.eq-line').first().waitFor();
-  assert.match(page.url(), /\/g\//);
-  assert.equal(await page.locator('html').getAttribute('data-embed'), null);
-  console.log('PASS: direct graph, landing iframe, cross-origin iframe, editor reopening, stable embedded URL, legacy redirect');
+  console.log('PASS: direct graph, landing iframe, cross-origin iframe, editor reopening, stable embedded URL');
 } finally {
   await browser.close();
 }

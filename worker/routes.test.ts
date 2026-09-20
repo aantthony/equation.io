@@ -1,4 +1,4 @@
-/** End-to-end route behaviour for /g/, /embed/, landings, and /api/og. */
+/** End-to-end route behaviour for /g/, landings, and /api/og. */
 import { describe, expect, it } from 'vitest';
 import { APP_CSP, GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { LANDINGS } from '../lib/landings.ts';
@@ -152,13 +152,6 @@ describe('intent landings', () => {
 });
 
 describe('frameable graph links', () => {
-  it('redirects legacy embeds without losing the payload or query', async () => {
-    const suffix = encodePayload(['y = x^2']) + '?theme=dark';
-    const res = await get('/embed/' + suffix);
-    expect(res.status).toBe(301);
-    expect(res.headers.get('location')).toBe('https://equation.io/g/' + suffix);
-  });
-
   it.each(['/g/', '/g/%E0%A4%A'])('makes even empty or invalid graphs frameable: %s', async path => {
     const res = await get(path);
     expect(await res.text()).toBe(APP);

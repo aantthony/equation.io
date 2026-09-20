@@ -19,7 +19,7 @@ try {
   await context.route('https://cloudflareinsights.com/**', route => route.fulfill({
     headers: { 'Access-Control-Allow-Origin': '*' }, body: 'ok',
   }));
-  for (const path of ['/', '/about/', '/g/y%3Dx%5E2', '/implicit/', '/embed/y%3Dx%5E2']) {
+  for (const path of ['/', '/about/', '/g/y%3Dx%5E2', '/implicit/']) {
     const page = await context.newPage();
     const response = await page.goto(`http://localhost:5198${path}`);
     const csp = response?.headers()['content-security-policy'] ?? '';
@@ -28,7 +28,7 @@ try {
     if (path === '/implicit/') {
       assert.match(csp, /frame-src 'self'/);
       assert.match(csp, /frame-ancestors 'none'/);
-    } else if (path.startsWith('/embed/') || path.startsWith('/g/')) {
+    } else if (path.startsWith('/g/')) {
       assert.match(csp, /frame-ancestors \*/);
       assert.equal(csp.includes("frame-ancestors 'none'"), false, csp);
     } else {

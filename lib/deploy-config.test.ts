@@ -37,7 +37,6 @@ describe('wrangler run_worker_first covers the worker routes', () => {
     ['/api/health'],
     ['/api/og/abc'],
     ['/g/y%20%3D%20x'],
-    ['/embed/y%20%3D%20x'],
     ...landingWorkerPaths().map(p => [p]),
     ['/llms.txt'],
     ['/robots.txt'],

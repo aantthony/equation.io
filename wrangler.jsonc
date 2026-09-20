@@ -25,7 +25,6 @@
       "/api/*",
       "/mcp",
       "/g/*",
-      "/embed/*",
       "/implicit",
       "/implicit/",
       "/slope-field",
