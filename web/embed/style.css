@@ -1,0 +1,10 @@
+/* Framed graphs start with the editor collapsed; hide chrome that belongs
+   to the full site. The y= chip and theme toggle stay. */
+html[data-embed] #panel-links,
+html[data-embed] #examples,
+html[data-embed] #data-files,
+html[data-embed] #shot,
+html[data-embed] #rec,
+html[data-embed] #try-another,
+html[data-embed] #open-csv { display: none; }
+html[data-embed] #state-reset { right: 34px; }

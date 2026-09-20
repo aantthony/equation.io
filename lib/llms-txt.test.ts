@@ -30,6 +30,9 @@ describe('llms.txt', () => {
       'camera(', // 3D orbit-camera row
       '## Row types',
       '## Definitions',
+      'https://equation.io/implicit/',
+      'https://equation.io/slope-field/',
+      'https://equation.io/complex/',
     ]) {
       expect(llms).toContain(marker);
     }

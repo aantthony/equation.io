@@ -1,3 +1,4 @@
+import { landingForGroup } from '../../lib/landings.ts';
 import { SHOWCASE, hashUrl } from './showcase.ts';
 
 // Bundle the shots through Vite so each ships as assets/<slug>-<hash>.png:
@@ -22,8 +23,19 @@ for (const item of SHOWCASE) if (!groups.includes(item.group)) groups.push(item.
 for (const group of groups) {
   const section = document.createElement('section');
   section.className = 'group';
+  const head = document.createElement('div');
+  head.className = 'group-head';
   const h = document.createElement('h2');
   h.textContent = group;
+  head.append(h);
+  const landing = landingForGroup(group);
+  if (landing) {
+    const a = document.createElement('a');
+    a.href = landing.path;
+    a.textContent = landing.nav + ' →';
+    a.title = landing.title;
+    head.append(a);
+  }
   const grid = document.createElement('div');
   grid.className = 'grid';
   for (const item of SHOWCASE.filter(i => i.group === group)) {
@@ -52,6 +64,6 @@ for (const group of groups) {
     card.append(img, body);
     grid.append(card);
   }
-  section.append(h, grid);
+  section.append(head, grid);
   gallery.append(section);
 }

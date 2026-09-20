@@ -6,7 +6,8 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    // EVERY path worker/index.ts handles has to be listed here. Anything not
+    // EVERY path worker/index.ts handles has to be listed here, including
+    // each intent landing (lib/landings.ts landingWorkerPaths). Anything not
     // listed is served by the asset server alone: with
     // not_found_handling=single-page-application a GET then returns the app
     // shell (HTTP 200!) and a POST returns 405, so a missing entry looks like
@@ -24,6 +25,13 @@
       "/api/*",
       "/mcp",
       "/g/*",
+      "/embed/*",
+      "/implicit",
+      "/implicit/",
+      "/slope-field",
+      "/slope-field/",
+      "/complex",
+      "/complex/",
       "/llms.txt",
       "/robots.txt"
     ]

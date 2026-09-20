@@ -1,12 +1,30 @@
-/** End-to-end route behaviour for /g/ and /api/og, exercised through fetch(). */
+/** End-to-end route behaviour for /g/, /embed/, landings, and /api/og. */
 import { describe, expect, it } from 'vitest';
-import worker, { shareMeta } from './index.ts';
+import { LANDINGS } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
+import worker, { landingMeta, shareMeta } from './index.ts';
+import { canRenderOg } from './og.ts';
 
-const SHELL = '<!doctype html><html><head><title>Equation.io</title></head><body></body></html>';
+const APP = '<!doctype html><html><head><title>Equation.io</title></head><body></body></html>';
+const EMBED = '<!doctype html><html data-embed><head><title>Equation.io graph</title></head><body></body></html>';
+const LANDING = `<!doctype html><html><head>
+<title>Equation.io</title>
+<meta name="description" content="x">
+<link rel="canonical" href="https://equation.io/landing/">
+<meta property="og:title" content="Equation.io">
+<meta property="og:description" content="x">
+<meta property="og:url" content="https://equation.io/landing/">
+<meta property="og:image" content="https://equation.io/shots/hero.png">
+</head><body><h1 id="h1"></h1><p class="lead" id="lead"></p><noscript></noscript></body></html>`;
 
 const env = {
-  ASSETS: { fetch: async () => new Response(SHELL, { headers: { 'content-type': 'text/html' } }) },
+  ASSETS: {
+    fetch: async (request: Request) => {
+      const path = new URL(request.url).pathname;
+      const html = path.startsWith('/embed') ? EMBED : path.startsWith('/landing') ? LANDING : APP;
+      return new Response(html, { headers: { 'content-type': 'text/html' } });
+    },
+  },
 } as unknown as Env;
 
 const get = (path: string) => worker.fetch(new Request('https://equation.io' + path), env);
@@ -28,7 +46,7 @@ describe('/.well-known files', () => {
   it('preserves the normal SPA fallback outside the namespace', async () => {
     const response = await get('/some-app-path');
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe(SHELL);
+    expect(await response.text()).toBe(APP);
   });
 });
 
@@ -80,6 +98,48 @@ describe('/api/og images', () => {
 
   it('rejects an undecodable payload', async () => {
     expect((await get('/api/og/%E0%A4%A')).status).toBe(400);
+  });
+});
+
+describe('intent landings', () => {
+  it('redirects a missing trailing slash to the canonical path', async () => {
+    const res = await get('/implicit');
+    expect(res.status).toBe(301);
+    expect(res.headers.get('location')).toBe('https://equation.io/implicit/');
+  });
+
+  it('titles preview landings with a drawable /api/og/ image', () => {
+    const page = LANDINGS.find(l => l.slug === 'implicit')!;
+    const { title, canonical, meta } = landingMeta(page, 'https://equation.io');
+    const keys = Object.fromEntries(meta);
+    expect(title).toBe('Implicit equation grapher — Equation.io');
+    expect(canonical).toBe('https://equation.io/implicit/');
+    expect(keys['og:image']).toContain('/api/og/');
+    expect(canRenderOg(page.heroEqs)).toBe(true);
+  });
+
+  it('uses a stable PNG when the preview renderer cannot draw the hero', () => {
+    const page = LANDINGS.find(l => l.slug === 'complex')!;
+    const keys = Object.fromEntries(landingMeta(page, 'https://equation.io').meta);
+    expect(keys['og:image']).toBe('https://equation.io/shots/complex.png');
+    expect(canRenderOg(page.heroEqs)).toBe(false);
+  });
+
+  const hasRewriter = typeof HTMLRewriter !== 'undefined';
+  (hasRewriter ? it : it.skip)('injects the landing title into the shared shell', async () => {
+    const res = await get('/implicit/');
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('Implicit equation grapher — Equation.io');
+    expect(html).toContain('Graph an equation without solving for y');
+  });
+});
+
+describe('/embed/', () => {
+  it('serves the embed shell for a graph payload', async () => {
+    const res = await get('/embed/' + encodePayload(['y = x^2']));
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain('data-embed');
   });
 });
 

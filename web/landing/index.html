@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Equation.io</title>
+  <meta name="description" content="Free in-browser graphing calculator. Graphs live in the URL.">
+  <link rel="canonical" href="https://equation.io/landing/">
+  <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM instructions">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Equation.io">
+  <meta property="og:description" content="Free in-browser graphing calculator. Graphs live in the URL.">
+  <meta property="og:url" content="https://equation.io/landing/">
+  <meta property="og:image" content="https://equation.io/shots/hero.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="stylesheet" href="/landing/landing.css">
+  <script src="/theme.js?no-inline"></script>
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/about/">Equation<span>.io</span></a>
+    <a class="cta" href="/">Start graphing</a>
+  </header>
+
+  <main id="landing">
+    <h1 id="h1"></h1>
+    <p class="lead" id="lead"></p>
+    <figure class="graph-frame">
+      <iframe id="graph" title="Live graph" loading="eager"></iframe>
+    </figure>
+    <p class="caption">
+      <a class="cta" id="edit" href="/">Edit this graph</a>
+    </p>
+    <section>
+      <h2>What to type</h2>
+      <ul id="syntax"></ul>
+    </section>
+    <p class="contrast" id="contrast"></p>
+    <section>
+      <h2>Paste into notes</h2>
+      <p class="muted">The graph is the URL. Copy it into a lesson, a chat, or a problem set.</p>
+      <pre><code id="share"></code></pre>
+    </section>
+    <section>
+      <h2>More like this</h2>
+      <p class="hint">Click a card to load it here. Open in a new tab for the full editor.</p>
+      <div class="grid" id="related"></div>
+    </section>
+    <section>
+      <h2>Ask an assistant</h2>
+      <p class="muted">If you are an AI assistant, fetch <a href="/llms.txt">equation.io/llms.txt</a> and reply with a single <code>/g/</code> link — or call <code>show_graph</code>.</p>
+      <ul id="prompts"></ul>
+    </section>
+    <section>
+      <h2>FAQ</h2>
+      <dl id="faq"></dl>
+    </section>
+    <nav class="also" id="also"></nav>
+  </main>
+
+  <footer>
+    <p>Runs entirely in your browser. Your graphs live in the URL — share a link, share the graph.</p>
+    <p class="fine">Equation.io &copy; 2026 &middot; <a href="/about/">gallery</a> &middot; <a href="https://github.com/aantthony/equation.io" rel="noopener">open source (MIT)</a> &middot; <a href="/llms.txt">llms.txt</a> &middot; <a href="/privacy/">Privacy</a> &middot; <a href="/terms/">Terms</a></p>
+  </footer>
+
+  <noscript>
+    <p>JavaScript is required for the live graph. Open
+      <a href="/">equation.io</a> or use the <code>/g/</code> share link.</p>
+  </noscript>
+
+  <script type="module" src="/landing/landing.ts"></script>
+</body>
+</html>

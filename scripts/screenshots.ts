@@ -7,9 +7,10 @@
  * (panel hidden for cards, visible for the hero).
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { copyFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { LANDINGS } from '../lib/landings.ts';
 import { HERO, SHOWCASE, type ShowcaseItem, hashUrl } from '../web/about/showcase.ts';
 
 const PORT = 5199;
@@ -106,6 +107,15 @@ try {
   if (wanted(HERO.slug)) await shoot(HERO, { width: 1440, height: 900, panel: true, dir: HERO_DIR });
   for (const item of SHOWCASE) {
     if (wanted(item.slug)) await shoot(item, { width: 900, height: 600, panel: false, dir: SHOTS_DIR });
+  }
+
+  // Landing pages whose hero the OG renderer cannot draw need a stable PNG
+  // at /shots/<slug>.png (the gallery file is content-hashed by Vite).
+  for (const page of LANDINGS) {
+    if (page.og !== 'shot') continue;
+    if (!wanted(page.hero) && !wanted(page.slug)) continue;
+    copyFileSync(`${SHOTS_DIR}${page.hero}.png`, `${HERO_DIR}${page.slug}.png`);
+    console.log(`✓ ${page.slug} og shot ← ${page.hero}`);
   }
 
   await browser.close();

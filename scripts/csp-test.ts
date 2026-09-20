@@ -19,7 +19,7 @@ try {
   await context.route('https://cloudflareinsights.com/**', route => route.fulfill({
     headers: { 'Access-Control-Allow-Origin': '*' }, body: 'ok',
   }));
-  for (const path of ['/', '/about/', '/g/y%3Dx%5E2']) {
+  for (const path of ['/', '/about/', '/g/y%3Dx%5E2', '/implicit/', '/embed/y%3Dx%5E2']) {
     const page = await context.newPage();
     const response = await page.goto(`http://localhost:5198${path}`);
     assert.ok(response?.headers()['content-security-policy'], `CSP missing on ${path}`);
@@ -30,9 +30,12 @@ try {
     }
     const themeResponse = await context.request.get(new URL((await themeScript.getAttribute('src'))!, page.url()).href);
     assert.match(themeResponse.headers()['cache-control'], /max-age=31536000.*immutable/);
-    await page.waitForSelector(path === '/about/' ? '#gallery img' : '.eq-line');
+    const ready = path === '/about/' ? '#gallery img'
+      : path === '/implicit/' ? 'iframe#graph[src*="/embed/"]'
+      : '.eq-line';
+    await page.waitForSelector(ready);
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
-    if (path !== '/about/') await page.locator('#theme-toggle').click();
+    if (path !== '/about/' && path !== '/implicit/') await page.locator('#theme-toggle').click();
     assert.deepEqual(await page.evaluate(() => (window as any).violations), []);
     await page.evaluate(async () => {
       await new Promise<void>((resolve, reject) => {
