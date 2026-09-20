@@ -230,10 +230,9 @@ function withCharset(response: Response): Response {
   return patched;
 }
 
-/** Drop every CSP (/* may have been joined onto this path) and set one. */
+/** Replace the asset response's CSP with the route-specific policy. */
 function withCsp(response: Response, policy: string): Response {
   const patched = new Response(response.body, response);
-  patched.headers.delete('Content-Security-Policy');
   patched.headers.set('Content-Security-Policy', policy);
   return patched;
 }

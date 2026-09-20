@@ -1,19 +1,8 @@
 # Deny resources by default. Only the app may execute scripts;
 # no inline scripts, event handlers, styles, or eval.
-# The Worker replaces this policy for frameable /g/ responses.
+# The Worker replaces this policy for /g/ and intent landing responses.
 /*
   Content-Security-Policy: default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests
-
-# Landing pages iframe /g/; they must be allowed to frame same-origin.
-# Matched on the /landing/ asset path — the Worker serves that shell at
-# /implicit/, /slope-field/, /complex/, …
-# /* also matches these paths. Cloudflare joins duplicate CSP headers and
-# browsers AND every policy, so detach the inherited one before replacing.
-/landing
-/landing/
-/landing/*
-  ! Content-Security-Policy
-  Content-Security-Policy: default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'self'; frame-ancestors 'none'; upgrade-insecure-requests
 
 # Cloudflare Workers assets header rules. Everything is otherwise served
 # `max-age=0, must-revalidate`, so each hashed bundle costs a revalidation

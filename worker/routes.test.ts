@@ -17,11 +17,10 @@ const LANDING = `<!doctype html><html><head>
 <meta property="og:image" content="https://equation.io/shots/hero.png">
 </head><body><h1 id="h1"></h1><p class="lead" id="lead"></p><noscript></noscript></body></html>`;
 
-function html(body: string, extraCsp?: string): Response {
+function html(body: string): Response {
   const headers = new Headers({ 'content-type': 'text/html' });
-  // Simulate Cloudflare joining /* with a more specific _headers block.
+  // Asset fetches inherit the catch-all _headers policy.
   headers.append('content-security-policy', APP_CSP);
-  if (extraCsp) headers.append('content-security-policy', extraCsp);
   return new Response(body, { headers });
 }
 
@@ -29,7 +28,7 @@ const env = {
   ASSETS: {
     fetch: async (request: Request) => {
       const path = new URL(request.url).pathname;
-      if (path.startsWith('/landing')) return html(LANDING, LANDING_CSP);
+      if (path.startsWith('/landing')) return html(LANDING);
       return html(APP);
     },
   },
@@ -142,7 +141,7 @@ describe('intent landings', () => {
     expect(html).toContain('Graph an equation without solving for y');
   });
 
-  (hasRewriter ? it : it.skip)('replaces a joined catch-all CSP with a single frame-src policy', async () => {
+  (hasRewriter ? it : it.skip)('replaces the inherited asset CSP with a single frame-src policy', async () => {
     const res = await get('/implicit/');
     const csp = res.headers.get('content-security-policy');
     expect(csp).toBe(LANDING_CSP);
