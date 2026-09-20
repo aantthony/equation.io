@@ -30,12 +30,13 @@
  * whole row; tokenizing wrongly costs one row its message.
  * A closing quote always closes, wherever it falls.
  */
-import { GLYPH_CHARS, NAME_CHARS, SUPERSCRIPT_CHARS } from './expr.ts';
+import { GLYPH_CHARS, SUPERSCRIPT_CHARS, WRITTEN_NAME_CHARS } from './expr.ts';
 
 /** Characters a value can end with, so a following `'` is a prime mark:
- *  name characters (Greek and subscripts included), constant/operator glyphs,
- *  superscript exponents, and everything that closes or ends a value. */
-export const VALUE_END = new RegExp(`[${NAME_CHARS}${GLYPH_CHARS}${SUPERSCRIPT_CHARS}')\\]}!]`);
+ *  written name characters (Greek and subscript spellings included),
+ *  constant/operator glyphs, superscript exponents, and everything that
+ *  closes or ends a value. */
+export const VALUE_END = new RegExp(`[${WRITTEN_NAME_CHARS}${GLYPH_CHARS}${SUPERSCRIPT_CHARS}')\\]}!]`);
 
 export function splitStatements(text: string): string[] {
   const parts: string[] = [];

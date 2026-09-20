@@ -432,9 +432,10 @@ const MULTI_CHAR_OPS = Object.keys(ops).filter(o => o.length > 1);
 /**
  * Unicode in names. Greek letters are ordinary name characters: θ, φ1 and Δx
  * are variables exactly like a, b1 and dx, and adjacent letters glue into
- * one name the way `xy` always has. Subscript digits are accepted wherever a
- * digit is and mean the `_` subscript the language already has (see
- * canonicalName): T₀ is T_0. Excluded are the glyphs that stand for
+ * one name the way `xy` always has. Subscript digits may be WRITTEN wherever
+ * a name is, but only as the unicode spelling of the `_` subscript the
+ * language already has (see canonicalName): T₀ is T_0, never a name of its
+ * own. Excluded are the glyphs that stand for
  * something by themselves — π and τ (constants) and the operator-like
  * Σ Π ∫ ∞ ∇ — which tokenize as standalone glyph tokens so πr means π·r
  * (see GLYPH_ALIASES). µ is the micro sign Mac keyboards type for mu; it is
@@ -445,11 +446,21 @@ export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςσυφχψω'
   + 'ϑϕϖϱϵµ';
 /** Regex character-class fragment for a name's first character. */
 export const NAME_START_CHARS = `A-Za-z_${GREEK_NAME_CHARS}`;
-/** Regex character-class fragment for a name's later characters. */
-export const NAME_CHARS = `${NAME_START_CHARS}0-9₀₁₂₃₄₅₆₇₈₉`;
-/** Regex source for a whole name — the app's row-shape regexes build on it,
- *  so a definition accepts exactly the names the tokenizer produces. */
-export const NAME_SRC = `[${NAME_START_CHARS}][${NAME_CHARS}]*`;
+/**
+ * Regex character-class fragment for a name's later characters AS WRITTEN
+ * in row text. Subscript digits are matched here because a written name may
+ * carry them, but they are not name characters — they are the unicode
+ * spelling of the `_` subscript, and canonicalName() rewrites every name
+ * the tokenizer or a row scanner captures (T₀ → T_0), so no canonical name
+ * (a defs key, a free variable, a suggestion) ever contains one. Everything
+ * that READS row text — the symbol pattern, the row-shape regexes, prime
+ * detection, the typeahead's word — matches the written form.
+ */
+export const WRITTEN_NAME_CHARS = `${NAME_START_CHARS}0-9₀₁₂₃₄₅₆₇₈₉`;
+/** Regex source for a whole name as written — the app's row-shape regexes
+ *  build on it and canonicalize what they capture, so a definition binds
+ *  exactly the name the tokenizer produces. */
+export const NAME_SRC = `[${NAME_START_CHARS}][${WRITTEN_NAME_CHARS}]*`;
 
 /**
  * Standalone glyphs and the names they mean. Single characters only: a glyph
@@ -489,7 +500,7 @@ const syntax: PatternDict = {
   bar: /^\|$/,
   whitespace: /\s$/,
   glyph: new RegExp(`^[${GLYPH_CHARS}]$`),
-  symbol: new RegExp(`^[${NAME_START_CHARS}][${NAME_CHARS}]*'*$`),
+  symbol: new RegExp(`^[${NAME_START_CHARS}][${WRITTEN_NAME_CHARS}]*'*$`),
   // A quote only opens text where a token can start, so `x'` (prime) and
   // `f'(x)` still tokenize as symbols — the symbol match gets there first.
   string: /^("[^"]*"?|'[^']*'?)$/,

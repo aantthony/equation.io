@@ -4,7 +4,7 @@
 import { type Defs, shadowedFnNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { tildeRow } from './regression.ts';
-import { FUNCTIONS, NAME_CHARS, NAME_SRC, NAME_START_CHARS, builtinFn, canonicalName } from './expr.ts';
+import { FUNCTIONS, NAME_SRC, NAME_START_CHARS, WRITTEN_NAME_CHARS, builtinFn, canonicalName } from './expr.ts';
 import { ESCAPES } from './escapes.ts';
 import { VALUE_END } from './statements.ts';
 
@@ -21,9 +21,9 @@ export interface Suggestion {
 const CALL_NAME_RE = new RegExp(String.raw`(${NAME_SRC})\s*$`);
 /** The head of a ~ row's right side. */
 const HEAD_NAME_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*\($`);
-/** The (possibly dotted) name under the caret. */
-const WORD_RE = new RegExp(`[${NAME_START_CHARS}][${NAME_CHARS}.]*(?:\\.[${NAME_CHARS}]*)?$`);
-const WORD_END_RE = new RegExp(`^[${NAME_CHARS}.]*`);
+/** The (possibly dotted) name under the caret, as written. */
+const WORD_RE = new RegExp(`[${NAME_START_CHARS}][${WRITTEN_NAME_CHARS}.]*(?:\\.[${WRITTEN_NAME_CHARS}]*)?$`);
+const WORD_END_RE = new RegExp(`^[${WRITTEN_NAME_CHARS}.]*`);
 export interface SyntaxHelp { start: number; end: number; suggestions: Suggestion[]; hint?: string }
 
 const signatures: Record<string, [string, string]> = {
@@ -97,8 +97,11 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
     const c = before[i];
     if (quote) { if (c === quote) quote = ''; continue; }
     if (c === '"' || (c === "'" && !VALUE_END.test(before[i - 1] ?? ''))) { quote = c; continue; }
-    if ('([{'.includes(c)) stack.push({ name: c === '(' ? CALL_NAME_RE.exec(before.slice(0, i))?.[1] : undefined, at: i });
-    else if (')]}'.includes(c)) stack.pop();
+    if ('([{'.includes(c)) {
+      // Canonicalize the captured call name so f₁( finds the f_1 signature.
+      const name = c === '(' ? CALL_NAME_RE.exec(before.slice(0, i))?.[1] : undefined;
+      stack.push({ name: name && canonicalName(name), at: i });
+    } else if (')]}'.includes(c)) stack.pop();
   }
   if (quote) return empty;
   const candidates = new Map<string, Suggestion>();
@@ -160,7 +163,7 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
   const row = tildeRow(before, declared ?? definedNames(defs));
   const head = row && !row.regression
     ? HEAD_NAME_RE.exec(before.slice(row.tilde + 1, (stack[0]?.at ?? -1) + 1)) : null;
-  const family = head && row && stack[0].at > row.tilde && call === head[1] && stack.filter(f => f.name).length === 1
+  const family = head && row && stack[0].at > row.tilde && call === canonicalName(head[1]) && stack.filter(f => f.name).length === 1
     && !defs.fns.has(call) ? distFamily(call) : undefined;
   const distName = family?.name;
   const entry = distName ? candidates.get(distName)

@@ -18,7 +18,7 @@ import { compileTyped, usesComplex } from './complex.ts';
 import { type GetFn, RESERVED, type ResolveOpts, resolveExpr } from './defs.ts';
 import { lowerLists } from './list.ts';
 import { listGetter } from './defs.ts';
-import { GREEK_NAME_CHARS, NAME_CHARS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { GREEK_NAME_CHARS, WRITTEN_NAME_CHARS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { uniformName } from './glsl.ts';
 import type { Classified } from './plot.ts';
 
@@ -44,7 +44,9 @@ const SEQ_INDICES = new Set(['n', 'k', 'm']);
 /** The index as a standalone identifier in the term: `a_j = 1/j^2` is a
  *  sequence, but `T_c = 300` and `k_B = 1.38` are subscripted constants. */
 const usesIndex = (rhs: string, index: string): boolean =>
-  new RegExp(`(?<![${NAME_CHARS}])${index}(?![${NAME_CHARS}])`).test(rhs);
+  // Written classes on purpose: in `c₁n` the n is part of a name (c_1n),
+  // not the standalone index, and only the written class can see that.
+  new RegExp(`(?<![${WRITTEN_NAME_CHARS}])${index}(?![${WRITTEN_NAME_CHARS}])`).test(rhs);
 
 /** Detect a sequence/recurrence row before definition scanning. */
 export function scanSeqRec(text: string): SeqScan | null {

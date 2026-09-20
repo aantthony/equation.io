@@ -131,4 +131,11 @@ describe('contextual syntax help', () => {
     const d = emptyDefs(); d.consts.set('θmax', {kind:'num',value:3});
     expect(syntaxHelp('θ', 1, d).suggestions.map(s => s.name)).toEqual(['θmax']);
   });
+  it('reads a subscript spelling as its canonical name', () => {
+    const d = emptyDefs();
+    d.fns.set('f_1', { params: ['x'], body: { kind: 'num', value: 0 } });
+    d.fns.set('a_12', { params: ['x'], body: { kind: 'num', value: 0 } });
+    expect(syntaxHelp('f₁(', 3, d).hint).toContain('f_1(x)'); // call hint via f₁(
+    expect(syntaxHelp('a₁', 2, d).suggestions.map(s => s.name)).toEqual(['a_12']);
+  });
 });
