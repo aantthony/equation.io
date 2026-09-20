@@ -335,7 +335,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Uses of the same named list move together (`m = [1,2]`, `y = m x + m` is 2
   lines); independent lists cross (`y = [1,2] x + [0,1]` is 4 lines,
   `circle(([0,1],[0,1]), 1)` is 4 circles). Limit 32 objects, or 8
-  when the family is 3D. Shader members share one program with per-draw
+  when the family is 3D — except point figures (segment, vector, polyline,
+  polygon, hull), which are cheap and allow 1024: a deformation drawn as
+  arrows is `a = [0..20]; b = [0..20]; f(x,y) = (x + y/2, y + sin(x)/2);
+  vector((a, b), f(a, b))`. Shader members share one program with per-draw
   uniforms. Scalar fields/domain coloring/fractals cannot superimpose as
   families; use a selected list element. Point-list arithmetic works:
   `Q = P + (1,0)`, `2P`, `P[2]`; `polyline(P)` / `polygon(P)` consume an

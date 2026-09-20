@@ -9,6 +9,9 @@ import { type Axis, axesOf, isDataScatter, lowerLists } from './list.ts';
 
 export const FAMILY_MAX = 32;
 export const FAMILY_3D_MAX = 8;
+/** Point figures are a handful of numbers each, evaluated on the CPU — not a
+ *  shader draw — so a family of them can be a whole lattice of arrows. */
+export const FIGURE_FAMILY_MAX = 1024;
 const num = (value: number): Expr => ({ kind: 'num', value });
 
 /** Figures that are just their points: moving the points moves the figure. */
@@ -217,12 +220,13 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
     const objects = outside || source.kind === 'eq' || source.kind === 'ineq' || [...freeVars(source)].some(plotVariable)
       || lists.some(l => l.items.some(e => [...freeVars(e)].some(plotVariable)))
       || (source.kind === 'call' && (GEOM_STATEMENTS.has(source.name) || WHOLE_EXPR_NAMES.has(source.name)));
-    if (objects && n > FAMILY_MAX) throw new Error(`An object family needs 1–${FAMILY_MAX} members (got ${n}).`);
+    const limit = outside || (source.kind === 'call' && POINT_FIGURES.has(source.name)) ? FIGURE_FAMILY_MAX : FAMILY_MAX;
+    if (objects && n > limit) throw new Error(`An object family needs 1–${limit} members (got ${n}).`);
     const members = Array.from({ length: n }, (_, k) => (outside ? lowerObjects(instantiate(template, k), defs, opts) : ordinary(instantiate(template, k))));
     const valuesOnly = members.every(m => ![...freeVars(m)].some(plotVariable)
       && m.kind !== 'eq' && m.kind !== 'ineq' && !(m.kind === 'call' && (/^\[(polygon|segment|polyline|vector|square|hull|trail|hist)/.test(m.name) || (GEOM_STATEMENTS.has(m.name) || WHOLE_EXPR_NAMES.has(m.name)))));
     if (valuesOnly) return { kind: 'list', items: members };
-    if (n > FAMILY_MAX) throw new Error(`An object family has at most ${FAMILY_MAX} members.`);
+    if (n > limit) throw new Error(`An object family has at most ${limit} members.`);
     if (named) throw new Error('An object family is a whole row; give it a row of its own.');
     return { kind: 'call', name: '[family]', args: members };
   }

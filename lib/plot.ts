@@ -391,7 +391,11 @@ function classifyLowered(
   expr: Expr, defined: ReadonlySet<string>, fields: Record<string, Expr>, timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified; surface?: Expr } {
   if (expr.kind === 'call' && expr.name === '[family]') {
-    if (!expr.args.length || expr.args.length > 32) throw new Error('An object family needs 1–32 members.');
+    // Figures are CPU-drawn from a few numbers each; everything else is a draw
+    // call (or a shader pass) per member.
+    const figures = expr.args.every(e => e.kind === 'call' && Object.hasOwn(FIGURES, e.name.replace('3]', ']')));
+    const limit = figures ? 1024 : 32;
+    if (!expr.args.length || expr.args.length > limit) throw new Error(`An object family needs 1–${limit} members.`);
     if (expr.args.some(e => exceedsNodes(e, 8192))) throw new Error('A family element is too large to render (8192 nodes).');
     const members = expr.args.map((e, i) => {
       try { const result = classifyLowered(e, defined, fields, timeDerivative); return { cls: result.cls, expr: result.surface ?? substVars(e, fields) }; }
@@ -403,7 +407,7 @@ function classifyLowered(
     const dimension = (plot: Plot) => plot.type === 'polygon' ? plot.dim ?? 2 : 'dim' in plot ? plot.dim : undefined;
     const odd = members.findIndex(m => m.cls.plot.type !== first.type || dimension(m.cls.plot) !== dimension(first));
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
-    if (members.some(m => m.cls.needs3D) && members.length > 8) throw new Error('A 3D object family has at most 8 members.');
+    if (!figures && members.some(m => m.cls.needs3D) && members.length > 8) throw new Error('A 3D object family has at most 8 members.');
     const shaders = new Set(['implicit2d', 'ineq2d', 'implicit3d', 'psurface', 'vfield2d']);
     if (shaders.has(first.type)) {
       let index = 'eqioFamilyIndex';

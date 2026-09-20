@@ -111,6 +111,14 @@ describe('object families and sequence values', () => {
     const spokes = last(['th=2pi [0..4]/5', 'segment((0,0),rotate((1,0),th))']).plot;
     expect(spokes.type === 'family' && spokes.members.length).toBe(5);
   });
+  it('draws a whole lattice of arrows: figure families are CPU-cheap, so their cap is 1024', () => {
+    const arrows = last(['a=[0..20]', 'b=[0..20]', 'f(x,y)=(x+y/2,y+sin(x)/2)', 'vector((a,b),f(a,b))']).plot;
+    expect(arrows.type === 'family' && arrows.members.length).toBe(441);
+    expect(arrows.type === 'family' && arrows.members[0].cls.plot).toMatchObject({ type: 'polygon', arrow: true });
+    const space = last(['a=[0..3]', 'b=[0..3]', 'segment((a,b,0),(a,b,1+a b/4))']).plot;
+    expect(space.type === 'family' && space.members.length).toBe(16);
+    expect(analyze(['a=[0..40]', 'b=[0..40]', 'segment((a,b),(a+1,b))']).rows[2].error).toMatch(/1–1024 members \(got 1681\)/);
+  });
   it('enforces member and dimension limits before rendering', () => {
     for (const [row, pattern] of [
       ['y=[1..33]x', /32/], ['revolve([1..9]x)', /8/], ['y=[1..6]x+[1..6]', /32/],
