@@ -312,6 +312,24 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
     animateTo({ x: 0, y: 0 }, { x: 0, y: 0 }, 0.42, 0.6, idle);
   }
 
+  /** A handle tap parks the panel beyond its pinned horizontal edge. */
+  function dismiss() {
+    if (hidden || gesture) return;
+    stopAnim();
+    if (panel.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
+    geo = measure();
+    exitDir = { x: corner % 2 === 1 ? 1 : -1, y: 0 };
+    const pos = { x: geo.rest.x + offset.x, y: geo.rest.y + offset.y };
+    const exit = exitRay(pos, exitDir, geo.w, geo.h, geo.vw, geo.vh, EXIT_PAD);
+    const target = { x: exit.x - geo.rest.x, y: exit.y - geo.rest.y };
+    if (reduceMotion.matches) {
+      finishDismiss(exit);
+      return;
+    }
+    panel.style.willChange = 'transform, opacity';
+    animateTo(target, { x: 0, y: 0 }, 0.32, 1, () => finishDismiss(exit), [6, 60]);
+  }
+
   // --- gestures ---
 
   interface Gesture {
@@ -336,6 +354,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
   }
 
   let gesture: Gesture | null = null;
+  let suppressGripClick = false;
 
   /**
    * The scrollable under the touch (the equation list or the examples tree)
@@ -412,6 +431,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
     'touchstart',
     e => {
       if (hidden || gesture || e.touches.length > 1) return;
+      suppressGripClick = false;
       const t = e.changedTouches[0];
       if (!(t.target instanceof Element)) return;
       // Range sliders and bound inputs own their drags outright. Buttons,
@@ -469,6 +489,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
     if (!g || g.pull || g.mouse) return;
     if (!trackedTouch(e)) return;
     gesture = null;
+    suppressGripClick = g.claimed || g.dead || e.type === 'touchcancel';
     if (!g.claimed || g.dead) {
       idle();
       return;
@@ -487,6 +508,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
 
   grip.addEventListener('pointerdown', e => {
     if (e.pointerType === 'touch' || hidden || gesture || e.button !== 0) return;
+    suppressGripClick = false;
     e.preventDefault(); // a drag, not a text-selection start
     startPanelGesture(e.pointerId, e.clientX, e.clientY, e.timeStamp, {
       claimed: true, // grabbing the handle is intent enough
@@ -502,6 +524,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
   grip.addEventListener('pointermove', e => {
     const g = gesture;
     if (!g?.mouse || g.pull || e.pointerId !== g.id) return;
+    if (Math.hypot(e.clientX - g.x0, e.clientY - g.y0) >= SLOP) suppressGripClick = true;
     g.samples.push({ t: e.timeStamp, x: e.clientX, y: e.clientY });
     if (g.samples.length > 32) g.samples.shift();
     offset.x = g.base.x + (e.clientX - g.x0);
@@ -513,11 +536,23 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
     const g = gesture;
     if (!g?.mouse || g.pull || e.pointerId !== g.id) return;
     gesture = null;
+    if (e.type === 'pointercancel') suppressGripClick = true;
+    if (!suppressGripClick) {
+      idle();
+      return; // the following click hides the panel
+    }
     const v = e.type === 'pointercancel' ? { x: 0, y: 0 } : releaseVelocity(g.samples, e.timeStamp);
     releasePanel(v, g.startOffset);
   };
   grip.addEventListener('pointerup', endGrip);
   grip.addEventListener('pointercancel', endGrip);
+  grip.addEventListener('click', () => {
+    if (suppressGripClick) {
+      suppressGripClick = false;
+      return;
+    }
+    dismiss();
+  });
 
   // --- the chip: tap to bring the panel back, or drag to pull it in ---
 

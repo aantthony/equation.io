@@ -147,6 +147,15 @@ const cdp = await page.context().newCDPSession(page);
 
 // --- touch: dismissal ---
 
+await scenario('tapping the grip hides the panel and the chip restores it', async () => {
+  await load(page, ['y = sin(x)']);
+  await page.tap('#panel-grip');
+  await waitState(page, 'hidden');
+  await page.tap('#panel-chip');
+  await waitState(page, 'home');
+  check('touch grip tap hides and chip tap restores', true);
+});
+
 await scenario('flick up dismisses', async () => {
   await load(page, ['y = sin(x)']);
   const from = await panelBody(page, 0.5, 0.6);
@@ -354,6 +363,15 @@ await scenario('the pinned corner persists across a reload', async () => {
 // --- mouse: the grip is the drag surface ---
 
 const desk = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+
+await scenario('clicking the grip hides the panel and the chip restores it', async () => {
+  await load(desk, ['y = sin(x)']);
+  await desk.click('#panel-grip');
+  await waitState(desk, 'hidden');
+  await desk.click('#panel-chip');
+  await waitState(desk, 'home');
+  check('mouse grip click hides and chip click restores', true);
+});
 
 await scenario('mouse-dragging the grip moves the panel to another corner', async () => {
   await load(desk, ['y = sin(x)']);
