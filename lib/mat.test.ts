@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { analyze } from '../worker/graph.ts';
 import { type Definition, buildDefs, compsOf, scanDefinition } from './defs.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
@@ -227,6 +228,7 @@ describe('matrix algebra and the exponential', () => {
     expect(() => lowRow([M], '2^M (1, 0)')).toThrow(/Only e/);
     expect(() => lowRow([M], 'e^(a/2 M) (1, 0)')).toThrow(/\(a\/2\) J/);
     expect(() => lowRow([M], '2 M')).toThrow(/not a value on its own/);
+    expect(analyze([M, '2 M']).rows[1].error).toMatch(/not a value on its own/);
     expect(() => lowRow([M], '(1, 0) M')).toThrow(/on the left/);
   });
   it('names a computed matrix', () => {

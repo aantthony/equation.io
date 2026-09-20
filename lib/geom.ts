@@ -527,10 +527,6 @@ export type FigureName = '[polygon]' | '[segment]' | '[polyline]' | '[vector]' |
 const polyCall = (name: FigureName, pts: Expr[][]): Expr =>
   ({ kind: 'call', name: pts[0].length === 3 ? name.replace(']', '3]') : name, args: pts.flat() });
 
-/**
- * Lower a whole statement: desugar a root-level geometry form, expand all
- * point arithmetic, and return an expression classify already understands.
- */
 /** A definition whose value is a matrix (`R = e^(a J)`, `N = 2 M`), or null. */
 export function lowerMatrix(e: Expr, getComps: GetComps, getMat: GetMat): Mat | null {
   // Only the matrix-algebra spine can make a matrix: look along it for one.
@@ -549,6 +545,8 @@ export function lowerMatrix(e: Expr, getComps: GetComps, getMat: GetMat): Mat | 
   return lowerMat(e, n => lower(n, getComps, getMat, () => false), getMat)?.m ?? null;
 }
 
+/** Lower a whole statement: desugar a root-level geometry form, expand all
+ *  point arithmetic, and return an expression classify already understands. */
 export function lowerGeom(
   e: Expr, getComps: GetComps, getMat: GetMat = () => null, isList: IsList = () => false,
 ): Expr {

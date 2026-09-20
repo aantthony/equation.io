@@ -4,7 +4,7 @@ import { exceedsNodes } from './size.ts';
 import { type Defs, type ResolveOpts, compsOf, listGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
 import { type Expr, freeVars, sameList } from './expr.ts';
-import { GEOM_STATEMENTS, lowerGeom, lowerMatrix } from './geom.ts';
+import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists } from './list.ts';
 
 export const FAMILY_MAX = 32;
@@ -153,13 +153,10 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
     if (exceedsNodes(source, 32768)) throw new Error('This object family is too large to expand (32768 nodes).');
     const lists: Array<{ items: Expr[]; axes: readonly Axis[] }> = [];
     const markers = new Map<Expr, number>();
-    const matrixValued = (node: Expr): boolean => {
-      try { return lowerMatrix(node, n => compsOf(defs, n), n => defs.mats.get(n) ?? null) !== null; } catch { return false; }
-    };
-    // inMatrix: inside the matrix factor of M v, where a matrix name is the
-    // matrix — not the list of its rows as points that it is anywhere else.
-    const visit = (node: Expr, inMatrix = false): Expr => {
-      if (inMatrix && node.kind === 'var' && defs.mats.has(node.name)) return node;
+    // A matrix name is the matrix, not a list of row-points. Those rows are a
+    // list only where a figure asks for points — hull(M).
+    const visit = (node: Expr): Expr => {
+      if (node.kind === 'var' && defs.mats.has(node.name)) return node;
       // Around a figure, only the transform's lists count: the figure keeps its own.
       if (outside && node.kind === 'call' && POINT_FIGURES.has(node.name)) return node;
       const values = listValue(node);
@@ -169,10 +166,10 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
         markers.set(marker, lists.length); lists.push(values);
         return marker;
       }
-      const map = (nodes: Expr[]) => nodes.map(n => visit(n, inMatrix));
+      const map = (nodes: Expr[]) => nodes.map(visit);
       switch (node.kind) {
-        case 'bin': return { ...node, a: visit(node.a, inMatrix || (node.op === '*' && matrixValued(node.a))), b: visit(node.b, inMatrix) };
-        case 'neg': return { ...node, a: visit(node.a, inMatrix) };
+        case 'bin': return { ...node, a: visit(node.a), b: visit(node.b) };
+        case 'neg': return { ...node, a: visit(node.a) };
         case 'eq': case 'ineq': return { ...node, l: visit(node.l), r: visit(node.r) };
         case 'vec': return { ...node, items: map(node.items) };
         case 'call': return { ...node, args: map(node.args) };

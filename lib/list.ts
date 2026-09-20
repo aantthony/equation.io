@@ -317,8 +317,8 @@ function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
   return out;
 }
 
-/** Combine lowered operands elementwise: lists zip (equal lengths only),
- *  scalars broadcast. */
+/** Combine lowered operands elementwise: same-axis lists zip, independent
+ *  lists cross, scalars broadcast. */
 function zipN(raw: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
   // Nearly every node of nearly every row: no list in sight, nothing to align.
   let listy = false;

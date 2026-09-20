@@ -31,7 +31,7 @@ import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { lowerGeom, lowerMatrix, pointComps, vecStateComps } from './geom.ts';
-import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName, withAxes } from './list.ts';
+import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, axesOf, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName, withAxes } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
@@ -1364,7 +1364,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
             const value = getList(n);
             if (value?.kind !== 'data') return value;
             if (value.values.length > 10_000) throw new Error('Regression supports at most 10000 observations; filter the data first.');
-            return { kind: 'list', items: Array.from(value.values, (value): Expr => ({ kind: 'num', value })) };
+            return withAxes({ kind: 'list', items: Array.from(value.values, v => ({ kind: 'num', value: v })) }, axesOf(value));
           }, ropts);
           const models = model.kind === 'list' ? model.items
             : model.kind === 'data' ? Array.from(model.values, (value): Expr => ({ kind: 'num', value }))
