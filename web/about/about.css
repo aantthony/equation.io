@@ -40,6 +40,9 @@ a { color: var(--accent); }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* Sub-340px phones: brand + links don't fit one line; wrap instead of colliding. */
+  flex-wrap: wrap;
+  row-gap: 4px;
   max-width: 1080px;
   margin: 0 auto;
   /* Clear the translucent status bar when opened from the installed app; the
@@ -67,6 +70,14 @@ a { color: var(--accent); }
 }
 .cta:hover { filter: brightness(0.9); }
 .cta.big { font-size: 17px; padding: 12px 26px; border-radius: 10px; }
+
+.nav-links { display: flex; align-items: center; gap: 18px; margin-left: auto; }
+.nav-link {
+  color: var(--muted);
+  font-weight: 500;
+  text-decoration: none;
+}
+.nav-link:hover { color: var(--ink); }
 
 .hero {
   max-width: 1080px;
