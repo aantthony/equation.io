@@ -750,9 +750,42 @@ export function parseExpr(
  * across, or two uses of one list stop moving together.
  */
 export const LIST_AXES = new WeakMap<Expr, ReadonlyArray<{ id: string; n: number }>>();
+/**
+ * Literals that are ONE list however many copies of them a pass goes on to
+ * make. The argument of f(P) is read once per parameter, and Σ expansion or a
+ * finite difference clones it before any axis exists to carry across — so the
+ * literal is given its origin up front, and list lowering names its axis
+ * after that.
+ */
+const LIST_ORIGIN = new WeakMap<Expr, number>();
+let origins = 0;
+export const originOf = (e: Expr): number | undefined => LIST_ORIGIN.get(e);
+export function markOrigins(root: Expr): void {
+  const seen = new WeakSet<Expr>();
+  const walk = (e: Expr): void => {
+    if (seen.has(e)) return;
+    seen.add(e);
+    switch (e.kind) {
+      case 'neg': return walk(e.a);
+      case 'bin': walk(e.a); return walk(e.b);
+      case 'call': return e.args.forEach(walk);
+      case 'eq': case 'ineq': walk(e.l); return walk(e.r);
+      case 'vec': return e.items.forEach(walk);
+      case 'list':
+        if (!LIST_ORIGIN.has(e)) LIST_ORIGIN.set(e, ++origins);
+        return e.items.forEach(walk);
+      case 'piecewise':
+        for (const c of e.cases) { walk(c.cond); walk(c.value); }
+        if (e.otherwise) walk(e.otherwise);
+    }
+  };
+  walk(root);
+}
 export function sameList<T extends Expr>(from: Expr, to: T): T {
   const axes = LIST_AXES.get(from);
   if (axes) LIST_AXES.set(to, axes);
+  const origin = LIST_ORIGIN.get(from);
+  if (origin !== undefined) LIST_ORIGIN.set(to, origin);
   return to;
 }
 
@@ -888,6 +921,22 @@ export function factorialFn(x: number): number {
 /** The internal call angle(…) lowers to (lib/geom.ts): [angle](u0, u1, v0, v1).
  *  Unwritable, like '[trail]', so it can never collide with a user's name. */
 export const ANGLE_FN = '[angle]';
+
+/**
+ * `[comp](value, k, n, "f")`: component k (0-based) of `value`, which must be
+ * a point of n components — how `f(P)` hands a point to an n-parameter user
+ * function. The resolver emits it (it cannot know yet what is a point);
+ * geometry lowering settles a single point, list lowering a list of them.
+ */
+export const COMP_FN = '[comp]';
+/** The messages of a `[comp]` whose value is not an n-component point. */
+export const compArity = (fn: string, n: number): string => `${fn} takes ${n} arguments.`;
+/** A `[comp]` that outlived lowering (a list of points where no list can go:
+ *  an ODE, a sampled body) — said in the user's terms, not the node's. */
+export const strayComp = (e: Expr & { kind: 'call' }): string | null => (e.name === COMP_FN
+  ? compArity((e.args[3] as Expr & { kind: 'str' }).value, (e.args[2] as Expr & { kind: 'num' }).value) : null);
+export const compDims = (fn: string, n: number, value: Expr, got: number): string =>
+  `${fn} takes ${n} arguments, and ${value.kind === 'var' ? value.name : 'that point'} has ${got} components.`;
 /** d/dp of [angle] is a difference of two of these, one per arm (lib/diff.ts):
  *  [angle′](v0, v1, w0, w1) is the turning rate of arm v moving with velocity w. */
 export const ANGLE_RATE_FN = '[angle′]';
@@ -1020,7 +1069,7 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
     }
     case 'call': {
       const fn = EVAL_FNS[e.name];
-      if (!fn) throw new Error(`Unknown function: ${e.name}`);
+      if (!fn) throw new Error(strayComp(e) ?? `Unknown function: ${e.name}`);
       return fn(...e.args.map(a => evaluate(a, env)));
     }
     case 'eq': return evaluate(e.l, env) - evaluate(e.r, env);

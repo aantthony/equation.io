@@ -60,6 +60,7 @@ import {
   normalcdf,
   normalpdf,
   parseExpr,
+  strayComp,
   substVars,
 } from './expr.ts';
 import { WHOLE_EXPR_NAMES, usesComplex } from './complex.ts';
@@ -884,7 +885,7 @@ function evalCols(
     }
     case 'call': {
       const fn = EVAL_FNS[e.name];
-      if (!fn) throw new Error(`Unknown function: ${e.name}`);
+      if (!fn) throw new Error(strayComp(e) ?? `Unknown function: ${e.name}`);
       const args = e.args.map(a => evalCols(a, cols, env, n));
       const out = alloc();
       if (args.length === 1) {

@@ -29,7 +29,7 @@
  */
 import { add, div, mul } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
-import { EVAL_FNS, LIST_AXES, type Expr, evaluate, freeVars, ineqComparisons, plainFnName, realPow } from './expr.ts';
+import { COMP_FN, EVAL_FNS, LIST_AXES, type Expr, compArity, compDims, evaluate, originOf, freeVars, ineqComparisons, plainFnName, realPow } from './expr.ts';
 
 /**
  * A list of values, in whichever representation it has: one expression per
@@ -78,6 +78,8 @@ interface Ctx {
   data: number;
   /** hist(…) nodes built: they are whole rows, not values. */
   hists: number;
+  /** Point lists `[comp]` nodes pick from, lowered once however many ask. */
+  comps: WeakMap<Expr, Expr>;
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -702,6 +704,31 @@ function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   return low.items[k - 1];
 }
 
+/**
+ * f(P) for a list of points: the list of their k-th coordinates, over the
+ * instances P itself runs over. All n components come from the one value, so
+ * they zip back together — f(P) on a 21×21 lattice is 441 points, not 441².
+ */
+function lowerComp(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
+  const [value, kArg, nArg, fnArg] = e.args;
+  const k = (kArg as Expr & { kind: 'num' }).value;
+  const n = (nArg as Expr & { kind: 'num' }).value;
+  const fn = (fnArg as Expr & { kind: 'str' }).value;
+  let low = ctx.comps.get(value);
+  if (!low) ctx.comps.set(value, low = lower(value, ctx));
+  const dims = (got: number): void => {
+    if (got !== n) throw new Error(compDims(fn, n, value, got));
+  };
+  // A scatter of columns: its k-th component is just its k-th column.
+  if (low.kind === 'vec' && isDataScatter(low)) {
+    dims(low.items.length);
+    return low.items[k];
+  }
+  if (!isList(low) || !low.items.length || !low.items.every(it => it.kind === 'vec')) throw new Error(compArity(fn, n));
+  for (const it of low.items) dims((it as Expr & { kind: 'vec' }).items.length);
+  return withAxes(listOf(low.items.map(it => (it as Expr & { kind: 'vec' }).items[k]), ctx), axesOf(low));
+}
+
 function lower(e: Expr, ctx: Ctx): Expr {
   switch (e.kind) {
     case 'num':
@@ -738,6 +765,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
     }
     case 'call': {
       if (e.name === '[index]') return lowerIndex(e, ctx);
+      if (e.name === COMP_FN) return lowerComp(e, ctx);
       if (e.name === 'hist') {
         // How many arguments there are, and what the bin count is, are
         // questions about the row — not about the file. Asked after the list
@@ -840,8 +868,12 @@ function lower(e: Expr, ctx: Ctx): Expr {
       // M (0, [-1,1]) writes the same literal into every output component,
       // and those are one list, not several.
       const out = listOf(expandItems(e.items, ctx), ctx) as Seq;
+      // (…nor this COPY of it: a literal marked with its origin is one list
+      // in every clone Σ expansion or a finite difference made of it.)
       const known = AXES.get(e);
-      const axes = known && known.reduce((size, a) => size * a.n, 1) === seqLength(out) ? known : axesOf(out);
+      const origin = originOf(e);
+      const axes = known && known.reduce((size, a) => size * a.n, 1) === seqLength(out) ? known
+        : origin !== undefined ? [{ id: `#o${origin}`, n: seqLength(out) }] : axesOf(out);
       AXES.set(e, axes);
       return withAxes(out, axes);
     }
@@ -890,7 +922,7 @@ export function lowerLists(
    *  meaning, so that check belongs to plot rows alone. */
   named = false,
 ): Expr {
-  const ctx: Ctx = { getList, opts, items: 0, data: 0, hists: 0 };
+  const ctx: Ctx = { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap() };
   const out = lower(e, ctx);
   if (isMask(out)) {
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
@@ -917,7 +949,7 @@ export function lowerLists(
  * over a list.
  */
 export function lowerMask(cond: Expr, getList: GetList, opts: ResolveOpts = {}): boolean[] | null {
-  return maskValues(lower(cond, { getList, opts, items: 0, data: 0, hists: 0 }), opts);
+  return maskValues(lower(cond, { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap() }), opts);
 }
 
 /** Whether a parsed (unresolved) row calls a list reduction — such rows get

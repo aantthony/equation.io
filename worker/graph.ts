@@ -245,7 +245,12 @@ export function analyze(texts: string[], { readouts = true }: AnalyzeOpts = {}):
   // rather than reporting it unknown (mirror of web/main.ts).
   const parseRowBody = (body: string, top: (e: Expr, lower: (e: Expr) => Expr) => Expr = (e, lower) => lower(e)): Expr => top(
     resolveExpr(parseExpr(body, fnNames, listNames, valueNames), getFn, ropts),
-    e => lowerLists(e, getList, ropts),
+    // Points first, as in a plot row: `P(X < g(A))` reads g at the point A.
+    // (What geometry refuses keeps the message this body always gave.)
+    e => {
+      try { e = lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null); } catch { /* as written */ }
+      return lowerLists(e, getList, ropts);
+    },
   );
 
   const seenViewKinds = new Set<string>();

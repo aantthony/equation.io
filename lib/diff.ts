@@ -4,7 +4,7 @@
  * readable and cheap. Non-smooth functions (min, max, floor, …) throw;
  * callers fall back to finite differences.
  */
-import { ANGLE_FN, ANGLE_RATE_FN, type Expr, plainFnName } from './expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, COMP_FN, type Expr, plainFnName } from './expr.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const ZERO = num(0);
@@ -95,6 +95,15 @@ export function diff(e: Expr, v: string): Expr {
         const [y, x] = e.args;
         const n = sub(mul(diff(y, v), x), mul(y, diff(x, v)));
         return div(n, add(pow(x, num(2)), pow(y, num(2))));
+      }
+      if (e.name === COMP_FN) {
+        // f(P): a component of the derivative is the derivative of the
+        // component. A value diff() cannot carry (a tuple inside arithmetic)
+        // leaves the whole call to the finite-difference fallback.
+        const [value, ...rest] = e.args;
+        let dv: Expr;
+        try { dv = diff(value, v); } catch { throw new NonSmoothError('Cannot differentiate this point.'); }
+        return isNumVal(dv, 0) ? ZERO : call(COMP_FN, dv, ...rest);
       }
       if (e.name === ANGLE_FN && e.args.length === 4) {
         // The angle turns as fast as arm v does, less how fast arm u does.

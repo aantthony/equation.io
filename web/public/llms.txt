@@ -337,9 +337,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `circle(([0,1],[0,1]), 1)` is 4 circles). Limit 32 objects, or 8
   when the family is 3D — except point figures (segment, vector, polyline,
   polygon, hull), which are cheap and allow 1024: a deformation drawn as
-  arrows is `a = [0..20]; b = [0..20]; f(x,y) = (x + y/2, y + sin(x)/2);
-  vector((a, b), f(a, b))`. Shader members share one program with per-draw
-  uniforms. Scalar fields/domain coloring/fractals cannot superimpose as
+  arrows is `a = [0..20]; b = [0..20]; P = (a, b);
+  f(x,y) = (x + y/2, y + sin(x)/2); vector(P, f(P))`. Shader members share
+  one program with per-draw uniforms. Scalar fields/domain coloring/fractals cannot superimpose as
   families; use a selected list element. Point-list arithmetic works:
   `Q = P + (1,0)`, `2P`, `P[2]`; `polyline(P)` / `polygon(P)` consume an
   entire point list, including a CSV scatter `polyline((data.x, data.y))`.
@@ -528,7 +528,18 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Constant: `a = 2` — the UI shows a draggable slider for it. Computed
   constants allowed: `b = a^2 + t`.
 - Function: `f(x) = x^3 - a x` — call it from other rows; calls inline
-  symbolically, so `d/dx f(x)` works.
+  symbolically, so `d/dx f(x)` works. A function of several variables also
+  takes ONE point in their place: with `f(x,y) = (x + y/2, y)` and
+  `A = (1, 2)`, `f(A)` is `f(A_x, A_y)`, and so is any computed point —
+  `f(R A)`, `f(A + B)`, `f(rotate(A, 1))`, `f(f(A))`. A list of points maps:
+  `P = (a, b); f(P)` is the image of the whole lattice (one point per point
+  of P), so `vector(P, f(P))`, `hull(f(Q))`, `f(R P)` and `f(P + (1, 0))`
+  all work; a scalar `g(x,y) = x y` gives `g(A)` a number (`y = g(A) x`) and
+  `g(P)` a value list. The point must have exactly as many components as the
+  function has parameters (3D: `F(x,y,z)` takes `F(B)`). A matrix argument
+  is read as the list of its rows (a named list of 2 points in 2D is a 2×2
+  matrix, and `g(S)` maps it like any other point list). A point does not
+  spread among other arguments, and built-ins (`atan2(A)`) do not take one.
 - Point: `A = (0, 0)` — a named, labeled point drawn on the canvas; the user
   can drag it and every row using it follows. Points may be computed from
   other points defined above: `C = B + D`, `M = midpoint(A, B)`,
