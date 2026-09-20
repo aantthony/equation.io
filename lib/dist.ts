@@ -52,6 +52,7 @@ import {
   T_PDF_FN,
   WEIBULL_PDF_FN,
   builtinFn,
+  canonicalName,
   evaluate,
   freeVars,
   ineqComparisons,
@@ -147,7 +148,7 @@ const CONST_ROW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`
 /** Detect a `name ~ rhs` row before parsing ('~' is not an expression token). */
 export function scanDistribution(text: string): { name: string; rhs: string } | null {
   const m = TILDE_RE.exec(text);
-  return m ? { name: m[1], rhs: m[2] } : null;
+  return m ? { name: canonicalName(m[1]), rhs: m[2] } : null;
 }
 
 /**
@@ -670,15 +671,15 @@ export function scanRandomRows(texts: readonly (string | null)[]): {
     }
     const m = CONST_ROW_RE.exec(text);
     // The name must be claimable as a definition (`e = X` stays an equation).
-    if (m && nameable(m[1])) {
-      candidates.set(i, { name: m[1], rhs: m[2] });
+    if (m && nameable(canonicalName(m[1]))) {
+      candidates.set(i, { name: canonicalName(m[1]), rhs: m[2] });
     }
   });
   let changed = names.size > 0;
   while (changed) {
     changed = false;
     for (const [i, c] of candidates) {
-      if (!(c.rhs.match(NAME_SCAN_RE) ?? []).some(t => names.has(t))) continue;
+      if (!(c.rhs.match(NAME_SCAN_RE) ?? []).some(t => names.has(canonicalName(t)))) continue;
       candidates.delete(i);
       derived.set(i, c);
       names.add(c.name);

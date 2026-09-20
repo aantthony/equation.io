@@ -4,7 +4,7 @@
  */
 import { diff } from './diff.ts';
 import { distFamily, isModelName } from './dist-families.ts';
-import { NAME_SRC, type Expr, evaluate, freeVars } from './expr.ts';
+import { NAME_SRC, type Expr, canonicalName, evaluate, freeVars } from './expr.ts';
 import { VALUE_END } from './statements.ts';
 
 export interface RegressionRow { kind: 'regression'; name: string; lhs: string; rhs: string }
@@ -33,7 +33,7 @@ export function scanRegressions(texts: readonly string[]): Map<number, Regressio
 export function declaredNames(texts: readonly string[]): Set<string> {
   return new Set(texts.flatMap(t => {
     const m = DECLARED_RE.exec(t);
-    return m ? [m[1]] : [];
+    return m ? [canonicalName(m[1])] : [];
   }));
 }
 
@@ -69,7 +69,7 @@ export function tildeRow(
   const lhs = text.slice(0, tilde).trim(), rhs = text.slice(tilde + 1).trim();
   const head = HEAD_RE.exec(rhs);
   const law = !!head && !!distFamily(head[1]) && !isModelName(head[1]);
-  const regression = !law && !/^exp$/i.test(rhs) && (declared.has(lhs) || /[.\[\](+*/-]/.test(lhs));
+  const regression = !law && !/^exp$/i.test(rhs) && (declared.has(canonicalName(lhs)) || /[.\[\](+*/-]/.test(lhs));
   return { lhs, rhs, tilde, regression };
 }
 

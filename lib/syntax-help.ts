@@ -4,7 +4,7 @@
 import { type Defs, shadowedFnNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { tildeRow } from './regression.ts';
-import { FUNCTIONS, NAME_CHARS, NAME_SRC, NAME_START_CHARS, builtinFn } from './expr.ts';
+import { FUNCTIONS, NAME_CHARS, NAME_SRC, NAME_START_CHARS, builtinFn, canonicalName } from './expr.ts';
 import { ESCAPES } from './escapes.ts';
 import { VALUE_END } from './statements.ts';
 
@@ -171,8 +171,10 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
   if (!word) return { ...empty, hint };
   const start = offset - word.length;
   const end = offset + (WORD_END_RE.exec(text.slice(offset))?.[0].length ?? 0);
+  // Candidates live under canonical names, so T₀ matches (and becomes) T_0.
+  const canon = canonicalName(word);
   const suggestions = [...candidates.values()].filter(s =>
-    s.name.toLowerCase().startsWith(word.toLowerCase()) && s.name !== text.slice(start, end)
+    s.name.toLowerCase().startsWith(canon.toLowerCase()) && s.name !== canonicalName(text.slice(start, end))
     && (word.length >= 2 || !s.call || defs.fns.has(s.name)))
     .sort((a, b) => Number(a.call) - Number(b.call) || a.name.localeCompare(b.name)).slice(0, 6);
   return { start, end, suggestions, hint };

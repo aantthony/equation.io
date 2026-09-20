@@ -430,13 +430,15 @@ ops['≠'].prec = ops['!='].prec;
 const MULTI_CHAR_OPS = Object.keys(ops).filter(o => o.length > 1);
 
 /**
- * Unicode in names. Greek letters (and subscript digits) are ordinary name
- * characters: θ, φ1, Δx and T₀ are variables exactly like a, b1, dx and T0,
- * and adjacent letters glue into one name the way `xy` always has.
- * Excluded are the glyphs that stand for something by themselves — π and τ
- * (constants) and the operator-like Σ Π ∫ ∞ ∇ — which tokenize as standalone
- * glyph tokens so πr means π·r (see GLYPH_ALIASES). µ is the micro sign Mac
- * keyboards type for mu; it is just a name character of its own.
+ * Unicode in names. Greek letters are ordinary name characters: θ, φ1 and Δx
+ * are variables exactly like a, b1 and dx, and adjacent letters glue into
+ * one name the way `xy` always has. Subscript digits are accepted wherever a
+ * digit is and mean the `_` subscript the language already has (see
+ * canonicalName): T₀ is T_0. Excluded are the glyphs that stand for
+ * something by themselves — π and τ (constants) and the operator-like
+ * Σ Π ∫ ∞ ∇ — which tokenize as standalone glyph tokens so πr means π·r
+ * (see GLYPH_ALIASES). µ is the micro sign Mac keyboards type for mu; it is
+ * just a name character of its own.
  */
 export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςσυφχψω'
   + 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩ'
@@ -465,6 +467,19 @@ const SUPERSCRIPTS: Record<string, string> = {
   '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁻': '-',
 };
 export const SUPERSCRIPT_CHARS = Object.keys(SUPERSCRIPTS).join('');
+
+const SUBSCRIPT_RE = /[₀-₉]/;
+
+/**
+ * The canonical spelling of a name: subscript digits are the `_` subscript
+ * syntax the language already reads, not their own characters — T₀ is T_0
+ * and θ₁₂ is θ_12. One rule for every reader of a name: the tokenizer
+ * (below) and the raw-text row scanners (definitions, ~ declarations,
+ * regressions, drag) all pass captured names through here, so r₁ reaches a
+ * vector state's r_1 component and a₃ the third term of a sequence.
+ */
+export const canonicalName = (name: string): string =>
+  name.replace(/[₀-₉]+/g, run => '_' + [...run].map(c => String(c.codePointAt(0)! - 0x2080)).join(''));
 
 const syntax: PatternDict = {
   parenopen: /^[\(\{\[]$/,
@@ -500,6 +515,8 @@ function *desugarUnicode(bare: Iterable<Token>): Iterable<Token> {
   for (const token of bare) {
     if (token.type === 'glyph') {
       yield { ...token, type: 'symbol', str: GLYPH_ALIASES[token.str] };
+    } else if (token.type === 'symbol' && SUBSCRIPT_RE.test(token.str)) {
+      yield { ...token, str: canonicalName(token.str) };
     } else if (token.type === 'superscript') {
       const digits = [...token.str].map(c => SUPERSCRIPTS[c]).join('');
       if (!/^-?\d+$/.test(digits)) throw new Error(`Cannot read the exponent ${token.str}.`);

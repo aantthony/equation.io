@@ -243,6 +243,9 @@ describe('vector states', () => {
     // Pickoff: y = r_1 is an ordinary scalar plot in the component state.
     const pick = classify(lowerGeom(parseExpr('y = r_1'), n => compsOf(defs, n)), new Set(defs.states.keys()));
     expect((pick.plot as { field: string }).field).toContain(uniformName('r_1'));
+    // The subscript spelling is the same name: y = r₁ picks off the same way.
+    const sub = classify(lowerGeom(parseExpr('y = r₁'), n => compsOf(defs, n)), new Set(defs.states.keys()));
+    expect((sub.plot as { field: string }).field).toContain(uniformName('r_1'));
   });
 
   it('lowers point arithmetic in derivatives of scalar states', () => {

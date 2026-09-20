@@ -534,11 +534,15 @@ describe('unicode input', () => {
     expect(() => evl('x⁻')).toThrow(/exponent/);
   });
 
-  it('treats Greek letters and subscript digits as name characters', () => {
+  it('treats Greek letters as name characters and subscripts as _ subscripts', () => {
     expect(evl('θ + 1', { 'θ': 2 })).toBe(3);
     expect(evl('α β', { 'α': 2, 'β': 3 })).toBe(6);
-    expect([...freeVars(parseExpr('Δx + θ₁ + θ2'))].sort()).toEqual(['Δx', 'θ2', 'θ₁']);
     expect(evl("2µ", { 'µ': 5 })).toBe(10); // micro sign, the Mac keyboard's mu
+    // A subscript digit is the `_` subscript in its unicode spelling, not a
+    // character of its own: T₀ IS T_0, so components and terms line up.
+    expect(parseExpr('T₀ + a₃')).toEqual(parseExpr('T_0 + a_3'));
+    expect(evl('θ₁₂ + 1', { 'θ_12': 2 })).toBe(3);
+    expect([...freeVars(parseExpr('Δx + θ₁ + θ2'))].sort()).toEqual(['Δx', 'θ2', 'θ_1']);
   });
 
   it('accepts · ⋅ × ÷ and ≠', () => {

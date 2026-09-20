@@ -32,6 +32,8 @@ export interface SeqScan {
 
 /** A sequence letter: one Latin or Greek letter (a_n, θ_n). */
 const L = `[A-Za-z${GREEK_NAME_CHARS}]`;
+/** A term reference by literal index: a_3 (or a₃, canonicalized), θ_2. */
+const TERM_RE = new RegExp(`^(${L})_(\\d+)$`);
 const SEQ_RE = new RegExp(String.raw`^\s*(${L})_(${L})\s*=(?!=)([\s\S]+)$`);
 const REC_RE = new RegExp(String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*=(?!=)([\s\S]+)$`);
 
@@ -170,7 +172,7 @@ export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, o
   };
   return (symbol: string, index?: Expr): Expr | null => {
     if (index === undefined) {
-      const hit = /^([A-Za-z])_(\d+)$/.exec(symbol);
+      const hit = TERM_RE.exec(symbol);
       return hit && defs.sequences.has(hit[1]) ? term(hit[1], Number(hit[2])) : null;
     }
     const name = symbol.slice(0, -1);

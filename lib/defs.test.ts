@@ -303,7 +303,16 @@ describe('unicode names in definitions', () => {
     expect(scanDefinition('f(φ) = φ²')).toEqual({ kind: 'fn', name: 'f', params: ['φ'], rhs: ' φ²' });
     expect(scanDefinition("ω' = -ω")).toEqual({ kind: 'state', name: 'ω', rhs: ' -ω' });
     expect(scanDefinition('Δx = 0.1')).toEqual({ kind: 'const', name: 'Δx', rhs: ' 0.1' });
-    expect(scanDefinition('T₀ = 300')).toEqual({ kind: 'const', name: 'T₀', rhs: ' 300' });
+  });
+
+  it('canonicalizes subscript digits to the _ subscript in captured names', () => {
+    expect(scanDefinition('T₀ = 300')).toEqual({ kind: 'const', name: 'T_0', rhs: ' 300' });
+    expect(scanDefinition('f(x₁) = x₁²')).toEqual({ kind: 'fn', name: 'f', params: ['x_1'], rhs: ' x₁²' });
+    // Both spellings resolve to the one definition.
+    const { defs } = buildDefs([scanDefinition('T₀ = 300')].filter((d): d is Definition => !!d));
+    expect(evaluate(resolveExpr(parseExpr('T₀ + T_0'), noFns), evalConstEnv(defs))).toBe(600);
+    // u₂ is u_2, a uniform-reserved name, so it stays undefinable.
+    expect(scanDefinition('u₂ = 3')).toBeNull();
   });
 
   it('π and τ stay constants: their rows are equations, not definitions', () => {
