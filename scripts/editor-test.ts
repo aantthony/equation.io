@@ -410,6 +410,9 @@ await scenario('escape suggestions insert the symbol with Tab', async () => {
   check('Tab inserts ∇ for \\nab', (await rowTexts(page))[1] === 'g = ∇');
   await page.keyboard.type('(x y)');
   check('the inserted glyph composes into a call', (await rowTexts(page))[1] === 'g = ∇(x y)');
+  await page.keyboard.type(' + \\tra');
+  await page.locator('#syntax-suggestions [role=option]').filter({ hasText: 'trail' }).click();
+  check('a function escape completes with parens', (await rowTexts(page))[1] === 'g = ∇(x y) + trail()');
 });
 
 await scenario('\\\\ types a literal backslash', async () => {

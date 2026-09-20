@@ -14,6 +14,7 @@
  * `\\` collapses to a literal backslash, and inside quoted text ("C:\data")
  * a backslash is always literal — no escape fires there.
  */
+import { FUNCTIONS } from './expr.ts';
 import { VALUE_END } from './statements.ts';
 
 export interface Escape {
@@ -26,7 +27,7 @@ export interface Escape {
 }
 
 /** In display order: a bare `\` suggests the head of this list. */
-export const ESCAPES: readonly Escape[] = [
+const SYMBOL_ESCAPES: readonly Escape[] = [
   { name: 'pi', text: 'π', description: 'The constant π' },
   { name: 'theta', text: 'θ', description: 'Greek letter' },
   { name: 'tau', text: 'τ', description: 'The constant τ = 2π' },
@@ -80,24 +81,25 @@ export const ESCAPES: readonly Escape[] = [
   { name: 'Phi', text: 'Φ', description: 'Greek letter' },
   { name: 'Psi', text: 'Ψ', description: 'Greek letter' },
   { name: 'Omega', text: 'Ω', description: 'Greek letter' },
-  { name: 'sqrt', text: 'sqrt', description: 'Function name' },
-  { name: 'sin', text: 'sin', description: 'Function name' },
-  { name: 'cos', text: 'cos', description: 'Function name' },
-  { name: 'tan', text: 'tan', description: 'Function name' },
   { name: 'arcsin', text: 'asin', description: 'Function name' },
   { name: 'arccos', text: 'acos', description: 'Function name' },
   { name: 'arctan', text: 'atan', description: 'Function name' },
-  { name: 'sinh', text: 'sinh', description: 'Function name' },
-  { name: 'cosh', text: 'cosh', description: 'Function name' },
-  { name: 'tanh', text: 'tanh', description: 'Function name' },
-  { name: 'coth', text: 'coth', description: 'Function name' },
-  { name: 'exp', text: 'exp', description: 'Function name' },
-  { name: 'ln', text: 'ln', description: 'Function name' },
-  { name: 'log', text: 'log', description: 'Function name' },
-  { name: 'min', text: 'min', description: 'Function name' },
-  { name: 'max', text: 'max', description: 'Function name' },
-  { name: 'gcd', text: 'gcd', description: 'Function name' },
 ];
+
+/**
+ * Every built-in function name is also an escape that simply writes itself:
+ * \trail → trail. The regular typeahead only surfaces built-in calls once
+ * two characters are typed, so `\` doubles as a function search that works
+ * from the first letter. A curated spelling above wins — \sum stays Σ
+ * (which is sum) and \gamma stays the letter γ, LaTeX-style; the gamma
+ * function is reached by typing its name plainly.
+ */
+const FUNCTION_ESCAPES: readonly Escape[] = [...FUNCTIONS, 'view', 'open']
+  .filter(name => !SYMBOL_ESCAPES.some(e => e.name === name))
+  .sort()
+  .map(name => ({ name, text: name, description: 'Function name' }));
+
+export const ESCAPES: readonly Escape[] = [...SYMBOL_ESCAPES, ...FUNCTION_ESCAPES];
 
 const BY_NAME = new Map(ESCAPES.map(e => [e.name, e]));
 

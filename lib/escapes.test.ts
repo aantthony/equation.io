@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ESCAPES, typedEscape } from './escapes.ts';
+import { FUNCTIONS } from './expr.ts';
 
 /** Feed a whole string as keystrokes onto `text`, applying each rewrite. */
 const type = (text: string, keys: string) => {
@@ -58,12 +59,30 @@ describe('typedEscape', () => {
     expect(type('', '\\ln(x)').text).toBe('ln(x)');
   });
 
-  it('has no name that is also its own replacement prefix trap', () => {
-    // Every escape's replacement parses on its own terms; sanity-check the
-    // table shape: names are ASCII letters, replacements are non-empty.
+  it('keeps the table well-shaped', () => {
+    // Names are plain ASCII words, replacements non-empty, no duplicates.
+    const seen = new Set<string>();
     for (const { name, text } of ESCAPES) {
-      expect(name).toMatch(/^[A-Za-z]+$/);
+      expect(name).toMatch(/^[A-Za-z][A-Za-z0-9]*$/);
       expect(text.length).toBeGreaterThan(0);
+      expect(seen.has(name), name).toBe(false);
+      seen.add(name);
     }
+  });
+
+  it('enumerates every built-in function name', () => {
+    for (const name of FUNCTIONS) {
+      expect(ESCAPES.some(e => e.name === name), name).toBe(true);
+    }
+    expect(ESCAPES.some(e => e.name === 'view')).toBe(true);
+    expect(ESCAPES.some(e => e.name === 'open')).toBe(true);
+    // A function escape simply writes the name…
+    expect(type('', '\\trail(P)').text).toBe('trail(P)');
+    expect(type('', '\\mean(L)').text).toBe('mean(L)');
+    // …a digit delimits like anything else, so \atan2 lands whole…
+    expect(type('', '\\atan2(1, 1)').text).toBe('atan2(1, 1)');
+    // …and curated spellings win: \sum is Σ (which IS sum), \gamma the letter.
+    expect(type('', '\\sum(n=1..3, n)').text).toBe('Σ(n=1..3, n)');
+    expect(type('', '\\gamma ').text).toBe('γ ');
   });
 });

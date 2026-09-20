@@ -116,6 +116,17 @@ describe('contextual syntax help', () => {
     // An escaped backslash is a literal one: no symbol suggestions for \\pi.
     expect(syntaxHelp('\\\\pi', 4, defs()).suggestions.some(s => s.insert)).toBe(false);
   });
+  it('lists built-in functions for a \\word with their real signatures', () => {
+    const h = syntaxHelp('\\tra', 4, defs());
+    expect(h.suggestions.map(s => s.name)).toEqual(['trace', 'trail']);
+    const trail = h.suggestions.find(s => s.name === 'trail')!;
+    expect(trail.call).toBe(true); // accept adds parens, like plain completion
+    expect(trail.insert).toBeUndefined();
+    expect(trail.signature).toContain('trail(point)');
+    expect(trail.signature).toContain('\\trail');
+    // One typed letter is enough here, where the plain path needs two.
+    expect(syntaxHelp('\\v', 2, defs()).suggestions.some(s => s.name === 'vector')).toBe(true);
+  });
   it('completes user definitions with Greek names', () => {
     const d = emptyDefs(); d.consts.set('θmax', {kind:'num',value:3});
     expect(syntaxHelp('θ', 1, d).suggestions.map(s => s.name)).toEqual(['θmax']);

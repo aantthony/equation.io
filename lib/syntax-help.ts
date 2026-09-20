@@ -101,25 +101,6 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
     else if (')]}'.includes(c)) stack.pop();
   }
   if (quote) return empty;
-  // \pi, \nabla, …: LaTeX-style escapes suggest from their own table and
-  // insert the symbol itself (`insert` replaces the whole \word, backslash
-  // included — `start` already covers it).
-  const esc = /\\([A-Za-z]*)$/.exec(before);
-  if (esc && before[before.length - esc[0].length - 1] !== '\\') {
-    const start = offset - esc[0].length;
-    const end = offset + (/^[A-Za-z]*/.exec(text.slice(offset))?.[0].length ?? 0);
-    const suggestions = ESCAPES.filter(s => s.name.startsWith(esc[1])).slice(0, 6)
-      .map(({ name, text: sym, description }): Suggestion => ({
-        name: `\\${name}`,
-        signature: `${sym}   \\${name}`,
-        description,
-        call: false,
-        insert: sym,
-      }));
-    const hint = suggestions.length ? undefined
-      : '\\name inserts a symbol: \\pi → π, \\theta → θ, \\nabla → ∇ (\\\\ for a backslash)';
-    return { start, end, suggestions, hint };
-  }
   const candidates = new Map<string, Suggestion>();
   for (const name of new Set([...FUNCTIONS, ...Object.keys(signatures)])) {
     const [signature, description] = signatures[name] ?? [`${name}(x)`, 'Built-in function'];
@@ -147,6 +128,26 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
   }
   for (const [name, fn] of defs.fns) candidates.set(name,
     { name, signature: `${name}(${fn.params.join(', ')})`, description: 'Defined function', call: true });
+  // \pi, \nabla, \trail, …: a \word suggests from the escape table instead
+  // (`start` covers the backslash). A function-name escape completes like
+  // the function itself — real signature, parens on accept — which makes a
+  // bare `\` a function search that works from the first letter, where the
+  // plain word path holds built-in calls back until two characters. A symbol
+  // escape carries `insert`, the replacement text for the whole \word.
+  const esc = /\\([A-Za-z]*)$/.exec(before);
+  if (esc && before[before.length - esc[0].length - 1] !== '\\') {
+    const start = offset - esc[0].length;
+    const end = offset + (/^[A-Za-z0-9]*/.exec(text.slice(offset))?.[0].length ?? 0);
+    const suggestions = ESCAPES.filter(s => s.name.startsWith(esc[1])).slice(0, 6)
+      .map(({ name, text: replacement, description }): Suggestion => {
+        const fn = candidates.get(replacement);
+        if (fn?.call) return { ...fn, signature: `${fn.signature}   \\${name}` };
+        return { name: `\\${name}`, signature: `${replacement}   \\${name}`, description, call: false, insert: replacement };
+      });
+    const hint = suggestions.length ? undefined
+      : '\\name inserts a symbol or function: \\pi → π, \\theta → θ, \\nabla → ∇ (\\\\ for a backslash)';
+    return { start, end, suggestions, hint };
+  }
   const call = [...stack].reverse().find(s => s.name)?.name;
   const shadowed = shadowedFnNames([...candidates.values()].filter(s => !s.call).map(s => s.name));
   const blocked = call && !defs.fns.has(call) && shadowed.has(builtinFn(call) ?? '');

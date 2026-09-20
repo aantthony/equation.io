@@ -112,7 +112,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (`x³` is `x^3`, `x⁻²` is `x^(-2)`), and `·`, `⋅`, `×`, `÷`, `−`, `≤`, `≥`,
   `≠` mean their ASCII counterparts. π and τ never join a longer name, so
   `2πr` is 2·π·r. In the editor, typing `\pi`, `\theta`, `\nabla`, … inserts
-  the symbol itself.
+  the symbol itself, and a `\` before any built-in function name simply
+  drops (`\sin(x)` → `sin(x)`, `\trail` → `trail`), so `\` also works as a
+  function search.
 - Constants: `pi`, `tau`, `e` (π and τ also parse directly). Imaginary unit
   `i` in complex expressions.
 - Functions: sin cos tan asin acos atan atan2(y,x) sinh cosh tanh sech coth
