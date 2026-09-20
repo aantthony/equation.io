@@ -251,8 +251,7 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
         case 'neg': return { ...node, a: visit(node.a, asMatrix) };
         case 'eq': case 'ineq': return { ...node, l: visit(node.l), r: visit(node.r) };
         case 'vec': return { ...node, items: map(node.items) };
-        // (f(M) hands f a matrix, not its rows: not a point, so not an argument.)
-        case 'call': return { ...node, args: node.args.map(n => visit(n, node.name === COMP_FN)) };
+        case 'call': return { ...node, args: node.args.map(n => visit(n, false)) };
         case 'piecewise': return { ...node, cases: node.cases.map(c => ({ cond: visit(c.cond), value: visit(c.value) })), otherwise: node.otherwise && visit(node.otherwise) };
         default: return node;
       }

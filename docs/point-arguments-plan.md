@@ -37,8 +37,11 @@ n-parameter function handed ONE argument that is an n-dimensional point.
   rule turns one error into one reading.
 - Dimension must equal n exactly. `f(B)` with a 3D `B` and 2-parameter `f`
   says `f takes 2 arguments, and B has 3 components.`
-- Anything that is not a point in the end (a number, a matrix, a scalar list)
-  keeps today's `f takes 2 arguments.`
+- Anything that is not a point in the end (a number, a scalar list) keeps
+  today's `f takes 2 arguments.`
+- A matrix is read as the list of its rows, as `hull(S)` and `distance(S, A)`
+  read it (decided in review of PR #121: a named list of 2 points in 2D IS a
+  2×2 matrix, and a function of scalars has no matrix reading to compete).
 - No spreading among several arguments (`F(A, 3)` for a 3-parameter F stays
   an error). It is easy to add later and hard to take back.
 - Built-in functions are untouched (`atan2(A)` stays an error); the geometry

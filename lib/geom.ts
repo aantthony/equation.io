@@ -21,7 +21,7 @@
  */
 import { add, div, mul, neg, sub } from './diff.ts';
 import { ANGLE_FN, COMP_FN, type Expr, compArity, compDims, sameList } from './expr.ts';
-import { SCALAR_REDUCTIONS } from './list.ts';
+import { SCALAR_REDUCTIONS, withAxes } from './list.ts';
 import { type GetMat, type Mat, type MatValue, detOf, expOf, hatOf, matAdd, matMul, matNeg, matPow, matScale, matVec, matrixFromList, solveVec, traceOf } from './mat.ts';
 
 /** Whole-statement geometry forms (like SPECIAL_FORMS, they never nest). */
@@ -332,10 +332,18 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         const k = (kArg as Expr & { kind: 'num' }).value;
         const n = (nArg as Expr & { kind: 'num' }).value;
         const fn = (fnArg as Expr & { kind: 'str' }).value;
-        // A matrix (a name, or algebra over one: 2 J) is not a point, nor
-        // (here) a list of its rows.
-        if ((value.kind === 'var' && getMat(value.name)) || matOf(value)) throw new Error(compArity(fn, n));
         let v = compSeen.get(value);
+        // A matrix (a name, or algebra over one: 2 S) has no meaning of its own
+        // to a function of scalars, so it is what it is wherever a call asks
+        // for points — hull(S), distance(S, A): the list of its rows. (A named
+        // list of 2 points IS a 2×2 matrix; f must not refuse it for that.)
+        const m = !v && ((value.kind === 'var' ? getMat(value.name) : null) ?? matOf(value)?.m);
+        if (m) {
+          if (m.length !== n) throw new Error(compDims(fn, n, value, m.length));
+          const rows: Expr = { kind: 'list', items: m.map((items): Expr => ({ kind: 'vec', items })) };
+          if (value.kind === 'var') withAxes(rows, [{ id: `${value.name}#0`, n: m.length }]);
+          compSeen.set(value, v = { wait: rows });
+        }
         if (!v) {
           const listy = (): boolean => listShape(value, getMat, isList) !== null;
           try {

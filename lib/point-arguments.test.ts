@@ -62,7 +62,7 @@ describe('a single point as the argument', () => {
     expect(error('f(C)')).toBe('f takes 2 arguments, and C has 3 components.');
     expect(error('f(F(C))')).toBe('f takes 2 arguments, and that point has 3 components.');
     expect(error('F(A)')).toBe('F takes 3 arguments, and A has 2 components.');
-    for (const row of ['f(3)', 'f(L)', 'f(J)', 'f(total(L))']) expect(error(row), row).toBe('f takes 2 arguments.');
+    for (const row of ['f(3)', 'f(L)', 'f(total(L))']) expect(error(row), row).toBe('f takes 2 arguments.');
     expect(error('F(A, 3)')).toBe('F takes 3 arguments.');
     expect(error('atan2(A)')).toBe('atan2 is not defined for points.');
   });
@@ -86,6 +86,20 @@ describe('a list of points as the argument', () => {
     expect(values('f(P + (1, 0))')).toEqual(values('f(a + 1, b)'));
     expect(values('J f(Q)')).toEqual([[0, 0], [0, 1], [-1, 1.5], [-1, 0.5]]);
     expect(values('k(P)', [...PRE, 'k(p) = f(p)'])).toEqual(values('f(P)'));
+  });
+  it('reads a matrix as its rows, like every call that asks for points — a named list of 2 points is one', () => {
+    const pre = [...PRE, 'S = [(1,2),(3,4)]', 'T = [(1,2,0),(3,4,0),(0,0,1)]'];
+    expect(values('g(S)', pre).flat()).toEqual([2, 12]);
+    expect(values('g(S)', pre)).toEqual(values('g([(1,2),(3,4)])', pre));
+    expect(values('f(J)')).toEqual([[-0.5, -1], [1, 0]]);
+    expect(values('f(2 J)')).toEqual([[-1, -2], [2, 0]]);
+    expect(values('F(T)', pre)).toEqual([[1, 2, 0], [3, 4, 0], [1, 0, 1]]);
+    expect(run('hull(F(T))', pre).row.cls!.plot.type).toBe('polygon');
+    const arrows = run('vector(S, f(S))', pre).row.cls!.plot;
+    expect(arrows.type === 'family' && arrows.members.length).toBe(2);
+    expect(error('F(S)', pre)).toBe('F takes 3 arguments, and that point has 2 components.');
+    // One-parameter functions substitute textually: still matrix algebra.
+    expect(values('h(S) A', [...pre, 'h(p) = 2p'])).toEqual([[10, 22]]);
   });
   it('gives a scalar function a value list', () => {
     expect(run('g(P)').row.cls!.plot.type).toBe('vlist');
@@ -173,7 +187,6 @@ describe('the argument stays one list, however the row copies it', () => {
     const an = analyze(['g(x,y) = x y', "s' = g([(1,2),(3,4)]) - s", 's(0) = 1']);
     for (const r of an.rows) expect(String(r.error ?? '')).not.toMatch(/\[comp\]/);
     expect(an.rows.some(r => r.error === 'g takes 2 arguments.')).toBe(true);
-    expect(error('f(2 J)')).toBe('f takes 2 arguments.');
   });
   it('reads a point inside P(…) and a regression', () => {
     const an = analyze([...PRE, 'X ~ Normal(0, 1)', 'P(X < g(A))']);

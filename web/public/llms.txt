@@ -536,7 +536,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   of P), so `vector(P, f(P))`, `hull(f(Q))`, `f(R P)` and `f(P + (1, 0))`
   all work; a scalar `g(x,y) = x y` gives `g(A)` a number (`y = g(A) x`) and
   `g(P)` a value list. The point must have exactly as many components as the
-  function has parameters (3D: `F(x,y,z)` takes `F(B)`); a point does not
+  function has parameters (3D: `F(x,y,z)` takes `F(B)`). A matrix argument
+  is read as the list of its rows (a named list of 2 points in 2D is a 2×2
+  matrix, and `g(S)` maps it like any other point list). A point does not
   spread among other arguments, and built-ins (`atan2(A)`) do not take one.
 - Point: `A = (0, 0)` — a named, labeled point drawn on the canvas; the user
   can drag it and every row using it follows. Points may be computed from
