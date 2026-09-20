@@ -279,6 +279,179 @@ await scenario('Enter after a collapsed heading expands it', async () => {
   );
 });
 
+// --- code-editor keyboard shortcuts ---
+
+await scenario('Cmd+/ toggles a line comment', async () => {
+  await load(page, ['y = x', 'y = x^2']);
+  await caretTo(page, 0, 3);
+  await page.keyboard.press('ControlOrMeta+/');
+  let rows = await rowTexts(page);
+  const classed = await page.evaluate(() => document.querySelector('.eq-line')!.classList.contains('is-comment'));
+  check(
+    'Cmd+/ comments the caret line only',
+    rows[0] === '# y = x' && rows[1] === 'y = x^2' && classed,
+    `rows=${JSON.stringify(rows)} is-comment=${classed}`,
+  );
+  await page.keyboard.press('ControlOrMeta+/');
+  rows = await rowTexts(page);
+  check('Cmd+/ again uncomments it', rows[0] === 'y = x', JSON.stringify(rows));
+  await page.keyboard.type('!');
+  rows = await rowTexts(page);
+  check('caret keeps its character through both toggles', rows[0] === 'y =! x', JSON.stringify(rows));
+});
+
+await scenario('comment toggle is one undo step', async () => {
+  await load(page, ['y = sin(x)']);
+  await caretTo(page, 0, 4);
+  await page.keyboard.press('ControlOrMeta+/');
+  check('toggle applied', (await rowTexts(page))[0] === '# y = sin(x)');
+  await page.keyboard.press('ControlOrMeta+z');
+  check('one undo reverts the toggle', (await rowTexts(page))[0] === 'y = sin(x)');
+});
+
+await scenario('multi-line Cmd+/ follows editor conventions', async () => {
+  await load(page, ['# a', 'y = x', 'y = x^2']);
+  await caretTo(page, 0, 0); // focus the editor so select-all stays inside it
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('ControlOrMeta+/');
+  let rows = await rowTexts(page);
+  check(
+    'mixed selection comments only the uncommented rows',
+    JSON.stringify(rows) === JSON.stringify(['# a', '# y = x', '# y = x^2']),
+    JSON.stringify(rows),
+  );
+  await page.keyboard.press('ControlOrMeta+/');
+  rows = await rowTexts(page);
+  check(
+    'fully commented selection uncomments every row',
+    JSON.stringify(rows) === JSON.stringify(['a', 'y = x', 'y = x^2']),
+    JSON.stringify(rows),
+  );
+});
+
+await scenario('Alt+arrows move rows', async () => {
+  await load(page, ['a = 1', 'y = sin(a x)']);
+  await caretTo(page, 0, 2);
+  await page.keyboard.press('Alt+ArrowDown');
+  let rows = await rowTexts(page);
+  check(
+    'Alt+Down moves the row past the next (and its slider widget)',
+    JSON.stringify(rows) === JSON.stringify(['y = sin(a x)', 'a = 1']),
+    JSON.stringify(rows),
+  );
+  await page.keyboard.press('Alt+ArrowUp');
+  rows = await rowTexts(page);
+  check('Alt+Up moves it back', JSON.stringify(rows) === JSON.stringify(['a = 1', 'y = sin(a x)']), JSON.stringify(rows));
+  await page.keyboard.type('9');
+  rows = await rowTexts(page);
+  check('the caret rode along with the row', rows[0] === 'a 9= 1', JSON.stringify(rows));
+});
+
+await scenario('Alt+Down moves a multi-row selection as a block', async () => {
+  await load(page, ['a = 1', 'b = 2', 'y = a x + b']);
+  await page.evaluate(() => {
+    const lines = [...document.querySelectorAll<HTMLElement>('.eq-line')];
+    (document.querySelector('#equations') as HTMLElement).focus();
+    getSelection()!.setBaseAndExtent(lines[0].firstChild!, 0, lines[1].firstChild!, 2);
+  });
+  await page.keyboard.press('Alt+ArrowDown');
+  const rows = await rowTexts(page);
+  check(
+    'the block moves below the next row',
+    JSON.stringify(rows) === JSON.stringify(['y = a x + b', 'a = 1', 'b = 2']),
+    JSON.stringify(rows),
+  );
+  await page.keyboard.press('Alt+ArrowDown'); // already at the bottom
+  check(
+    'moving stops at the document edge',
+    JSON.stringify(await rowTexts(page)) === JSON.stringify(['y = a x + b', 'a = 1', 'b = 2']),
+  );
+});
+
+await scenario('Shift+Alt+Down duplicates the row', async () => {
+  await load(page, ['y = x']);
+  await caretTo(page, 0, 5);
+  await page.keyboard.press('Shift+Alt+ArrowDown');
+  const rows = await rowTexts(page);
+  check('the row is duplicated', JSON.stringify(rows) === JSON.stringify(['y = x', 'y = x']), JSON.stringify(rows));
+  await page.keyboard.type('^2');
+  check(
+    'the caret moved to the lower copy',
+    JSON.stringify(await rowTexts(page)) === JSON.stringify(['y = x', 'y = x^2']),
+    JSON.stringify(await rowTexts(page)),
+  );
+});
+
+await scenario('Cmd+Shift+K deletes rows', async () => {
+  await load(page, ['a = 1', 'b = 2', 'y = a x + b']);
+  await caretTo(page, 1, 0);
+  await page.keyboard.press('ControlOrMeta+Shift+K');
+  let rows = await rowTexts(page);
+  check(
+    'deletes the caret row',
+    JSON.stringify(rows) === JSON.stringify(['a = 1', 'y = a x + b']),
+    JSON.stringify(rows),
+  );
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('ControlOrMeta+Shift+K');
+  rows = await rowTexts(page);
+  check('deleting every row leaves one empty row', rows.length === 1 && rows[0] === '', JSON.stringify(rows));
+});
+
+await scenario('Cmd+Enter opens a row below without splitting', async () => {
+  await load(page, ['y = sin(x)']);
+  await caretTo(page, 0, 4); // mid-line
+  await page.keyboard.press('ControlOrMeta+Enter');
+  let rows = await rowTexts(page);
+  check(
+    'the line stays whole and a row opens below',
+    rows.length === 2 && rows[0] === 'y = sin(x)' && rows[1] === '',
+    JSON.stringify(rows),
+  );
+  await page.keyboard.type('y = cos(x)');
+  check('the caret starts in the new row', (await rowTexts(page))[1] === 'y = cos(x)');
+  await page.keyboard.press('ControlOrMeta+Shift+Enter');
+  rows = await rowTexts(page);
+  check(
+    'Cmd+Shift+Enter opens a row above',
+    rows.length === 3 && rows[1] === '' && rows[2] === 'y = cos(x)',
+    JSON.stringify(rows),
+  );
+});
+
+await scenario('Cmd+Alt+brackets fold and unfold the caret group', async () => {
+  await load(page, ['# trig', 'y = sin(x)', 'y = cos(x)']);
+  await caretTo(page, 1, 0);
+  await page.keyboard.press('ControlOrMeta+Alt+BracketLeft');
+  const folded = await visibleRows(page);
+  check('fold collapses the group holding the caret', JSON.stringify(folded) === JSON.stringify(['# trig']), JSON.stringify(folded));
+  await page.keyboard.press('ControlOrMeta+Alt+BracketRight');
+  const open = await visibleRows(page);
+  check('unfold restores it', open.length === 3, JSON.stringify(open));
+});
+
+await scenario('shortcut keys inside slider widgets stay native', async () => {
+  await load(page, ['a = 1', 'y = sin(a x)']);
+  const before = await rowTexts(page);
+  await page.evaluate(() => {
+    const min = document.querySelector<HTMLInputElement>('.eq-slider input[type=number]')!;
+    min.focus();
+    for (const init of [
+      { key: '/', metaKey: true, ctrlKey: true },
+      { key: 'ArrowDown', altKey: true },
+      { key: 'K', shiftKey: true, metaKey: true, ctrlKey: true },
+    ]) {
+      min.dispatchEvent(new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true }));
+    }
+  });
+  const after = await rowTexts(page);
+  check(
+    'widget-origin shortcuts leave the document alone',
+    JSON.stringify(before) === JSON.stringify(after),
+    `after=${JSON.stringify(after)}`,
+  );
+});
+
 await scenario('coordinate point drag persists through the URL', async () => {
   await load(page, ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
     '(r, theta) = (2, 0)', 'view(x = -4..4, y = -3..3)']);
