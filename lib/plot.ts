@@ -22,7 +22,7 @@ import type { FigureName } from './geom.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
-import { toGLSL } from './glsl.ts';
+import { toGLSL, uniformName } from './glsl.ts';
 import { type GridField, buildGridField } from './grid.ts';
 
 export type Plot =
@@ -562,7 +562,7 @@ function classifyLowered(
   // GLSL compilation sees constants as u_<name> uniforms; CPU evaluation
   // (points, parametric curves) keeps the original names.
   const g = params.length
-    ? substVars(expr, Object.fromEntries(params.map(p => [p, { kind: 'var', name: 'u_' + p } as Expr])))
+    ? substVars(expr, Object.fromEntries(params.map(p => [p, { kind: 'var', name: uniformName(p) } as Expr])))
     : expr;
 
   if (special) {

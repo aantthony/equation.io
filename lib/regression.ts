@@ -4,9 +4,15 @@
  */
 import { diff } from './diff.ts';
 import { distFamily, isModelName } from './dist-families.ts';
-import { type Expr, evaluate, freeVars } from './expr.ts';
+import { NAME_SRC, type Expr, evaluate, freeVars } from './expr.ts';
+import { VALUE_END } from './statements.ts';
 
 export interface RegressionRow { kind: 'regression'; name: string; lhs: string; rhs: string }
+
+/** `name = …` at the head of a row (see declaredNames). */
+const DECLARED_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)`);
+/** The first name of a ~ row's right side, possibly a distribution's. */
+const HEAD_RE = new RegExp(String.raw`^(${NAME_SRC})\s*(?:\(|$)`);
 
 /** A declared data name on the left disambiguates regression from a random
  * variable declaration. Explicit lists/columns also unambiguously mean data.
@@ -26,7 +32,7 @@ export function scanRegressions(texts: readonly string[]): Map<number, Regressio
  *  definition that fails to parse still makes `name ~ …` a fit, not a law. */
 export function declaredNames(texts: readonly string[]): Set<string> {
   return new Set(texts.flatMap(t => {
-    const m = /^\s*([A-Za-z_]\w*)\s*=(?!=)/.exec(t);
+    const m = DECLARED_RE.exec(t);
     return m ? [m[1]] : [];
   }));
 }
@@ -54,14 +60,14 @@ export function tildeRow(
   for (let k = 0; k < text.length; k++) {
     const c = text[k];
     if (quote) { if (c === quote) quote = ''; continue; }
-    if (c === '"' || (c === "'" && !/[\w)\]}']/.test(text[k - 1] ?? ''))) { quote = c; continue; }
+    if (c === '"' || (c === "'" && !VALUE_END.test(text[k - 1] ?? ''))) { quote = c; continue; }
     if ('([{'.includes(c)) depth++;
     else if (')]}'.includes(c)) depth--;
     else if (c === '~' && depth === 0) { if (tilde >= 0) return null; tilde = k; }
   }
   if (tilde < 0) return null;
   const lhs = text.slice(0, tilde).trim(), rhs = text.slice(tilde + 1).trim();
-  const head = /^([A-Za-z_]\w*)\s*(?:\(|$)/.exec(rhs);
+  const head = HEAD_RE.exec(rhs);
   const law = !!head && !!distFamily(head[1]) && !isModelName(head[1]);
   const regression = !law && !/^exp$/i.test(rhs) && (declared.has(lhs) || /[.\[\](+*/-]/.test(lhs));
   return { lhs, rhs, tilde, regression };

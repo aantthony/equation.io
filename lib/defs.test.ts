@@ -296,3 +296,35 @@ describe('classify with defined constants', () => {
     expect(evaluate(plot.coords[1], { a: 3 })).toBe(6);
   });
 });
+
+describe('unicode names in definitions', () => {
+  it('defines Greek constants, functions and ODE states', () => {
+    expect(scanDefinition('θ = 2')).toEqual({ kind: 'const', name: 'θ', rhs: ' 2' });
+    expect(scanDefinition('f(φ) = φ²')).toEqual({ kind: 'fn', name: 'f', params: ['φ'], rhs: ' φ²' });
+    expect(scanDefinition("ω' = -ω")).toEqual({ kind: 'state', name: 'ω', rhs: ' -ω' });
+    expect(scanDefinition('Δx = 0.1')).toEqual({ kind: 'const', name: 'Δx', rhs: ' 0.1' });
+    expect(scanDefinition('T₀ = 300')).toEqual({ kind: 'const', name: 'T₀', rhs: ' 300' });
+  });
+
+  it('π and τ stay constants: their rows are equations, not definitions', () => {
+    expect(scanDefinition('π = 3')).toBeNull();
+    expect(scanDefinition('τ = 6')).toBeNull();
+  });
+
+  it('resolves a Greek definition wherever the name appears', () => {
+    const { defs, errors } = buildDefs([
+      scanDefinition('θmax = 4'), scanDefinition('g(θ) = θ² + θmax'),
+    ].filter((d): d is Definition => !!d));
+    expect(errors.size).toBe(0);
+    const e = resolveExpr(parseExpr('g(3)', new Set(['g'])), n => defs.fns.get(n));
+    expect(evaluate(e, evalConstEnv(defs))).toBe(13);
+  });
+
+  it('compiles Greek slider names to valid GLSL uniforms', () => {
+    const cls = classify(resolve('y = θ x'), new Set(['θ']));
+    expect(cls.params).toEqual(['θ']);
+    const field = (cls.plot as { field: string }).field;
+    expect(field).not.toContain('θ');
+    expect(field).toContain('u_zz3b8');
+  });
+});

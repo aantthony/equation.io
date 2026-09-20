@@ -281,6 +281,21 @@ function fmt(value: number): string {
 }
 
 /**
+ * The GLSL identifier for the uniform carrying the constant `p`. Plain names
+ * keep their readable u_<name> form; a name GLSL cannot hold — θ or T₀
+ * (non-ASCII), `_a` or `a__b` (a leading `_` here or a doubled `_` anywhere
+ * makes a reserved GLSL identifier) — becomes u_zz<hex codepoints joined by
+ * z>. `z` is not a hex digit, so that spelling is unambiguous, and a plain
+ * name starting with `zz` is encoded too, so distinct names never share a
+ * uniform. Every site that names a uniform — substitution, shader
+ * declaration, and getUniformLocation — must go through this one function.
+ */
+export const uniformName = (p: string): string =>
+  /^[A-Za-z0-9_]+$/.test(p) && !p.startsWith('_') && !p.startsWith('zz') && !p.includes('__')
+    ? `u_${p}`
+    : `u_zz${[...p].map(c => c.codePointAt(0)!.toString(16)).join('z')}`;
+
+/**
  * Emit a GLSL float expression. Free variables compile to their own names,
  * so the caller must declare/provide them (e.g. as function parameters).
  */

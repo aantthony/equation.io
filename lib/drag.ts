@@ -9,10 +9,10 @@
  * nothing to write back to and stay pinned on that axis.
  */
 
-import { type Expr, evaluate } from './expr.ts';
+import { NAME_SRC, type Expr, evaluate } from './expr.ts';
 
 const NUM_LITERAL_RE = /^-?(?:\d+\.?\d*|\.\d+)$/;
-const NAME_RE = /^[A-Za-z_]\w*$/;
+const NAME_RE = new RegExp(`^${NAME_SRC}$`);
 
 /**
  * A slider appears when a constant's right-hand side is a plain number.

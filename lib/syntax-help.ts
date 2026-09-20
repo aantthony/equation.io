@@ -4,9 +4,26 @@
 import { type Defs, shadowedFnNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { tildeRow } from './regression.ts';
-import { FUNCTIONS, builtinFn } from './expr.ts';
+import { FUNCTIONS, NAME_CHARS, NAME_SRC, NAME_START_CHARS, builtinFn } from './expr.ts';
+import { ESCAPES } from './escapes.ts';
+import { VALUE_END } from './statements.ts';
 
-export interface Suggestion { name: string; signature: string; description: string; call: boolean }
+export interface Suggestion {
+  name: string;
+  signature: string;
+  description: string;
+  call: boolean;
+  /** Replacement text when it differs from `name`: \pi inserts π. */
+  insert?: string;
+}
+
+/** The name a '(' follows, for call signatures. */
+const CALL_NAME_RE = new RegExp(String.raw`(${NAME_SRC})\s*$`);
+/** The head of a ~ row's right side. */
+const HEAD_NAME_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*\($`);
+/** The (possibly dotted) name under the caret. */
+const WORD_RE = new RegExp(`[${NAME_START_CHARS}][${NAME_CHARS}.]*(?:\\.[${NAME_CHARS}]*)?$`);
+const WORD_END_RE = new RegExp(`^[${NAME_CHARS}.]*`);
 export interface SyntaxHelp { start: number; end: number; suggestions: Suggestion[]; hint?: string }
 
 const signatures: Record<string, [string, string]> = {
@@ -79,11 +96,30 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
   for (let i = 0; i < before.length; i++) {
     const c = before[i];
     if (quote) { if (c === quote) quote = ''; continue; }
-    if (c === '"' || (c === "'" && !/[\w)\]}']/.test(before[i - 1] ?? ''))) { quote = c; continue; }
-    if ('([{'.includes(c)) stack.push({ name: c === '(' ? /([A-Za-z_]\w*)\s*$/.exec(before.slice(0, i))?.[1] : undefined, at: i });
+    if (c === '"' || (c === "'" && !VALUE_END.test(before[i - 1] ?? ''))) { quote = c; continue; }
+    if ('([{'.includes(c)) stack.push({ name: c === '(' ? CALL_NAME_RE.exec(before.slice(0, i))?.[1] : undefined, at: i });
     else if (')]}'.includes(c)) stack.pop();
   }
   if (quote) return empty;
+  // \pi, \nabla, …: LaTeX-style escapes suggest from their own table and
+  // insert the symbol itself (`insert` replaces the whole \word, backslash
+  // included — `start` already covers it).
+  const esc = /\\([A-Za-z]*)$/.exec(before);
+  if (esc && before[before.length - esc[0].length - 1] !== '\\') {
+    const start = offset - esc[0].length;
+    const end = offset + (/^[A-Za-z]*/.exec(text.slice(offset))?.[0].length ?? 0);
+    const suggestions = ESCAPES.filter(s => s.name.startsWith(esc[1])).slice(0, 6)
+      .map(({ name, text: sym, description }): Suggestion => ({
+        name: `\\${name}`,
+        signature: `${sym}   \\${name}`,
+        description,
+        call: false,
+        insert: sym,
+      }));
+    const hint = suggestions.length ? undefined
+      : '\\name inserts a symbol: \\pi → π, \\theta → θ, \\nabla → ∇ (\\\\ for a backslash)';
+    return { start, end, suggestions, hint };
+  }
   const candidates = new Map<string, Suggestion>();
   for (const name of new Set([...FUNCTIONS, ...Object.keys(signatures)])) {
     const [signature, description] = signatures[name] ?? [`${name}(x)`, 'Built-in function'];
@@ -122,7 +158,7 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
   // the predicate scanRegressions runs), so help and behaviour cannot differ.
   const row = tildeRow(before, declared ?? definedNames(defs));
   const head = row && !row.regression
-    ? /^\s*([A-Za-z_]\w*)\s*\($/.exec(before.slice(row.tilde + 1, (stack[0]?.at ?? -1) + 1)) : null;
+    ? HEAD_NAME_RE.exec(before.slice(row.tilde + 1, (stack[0]?.at ?? -1) + 1)) : null;
   const family = head && row && stack[0].at > row.tilde && call === head[1] && stack.filter(f => f.name).length === 1
     && !defs.fns.has(call) ? distFamily(call) : undefined;
   const distName = family?.name;
@@ -130,10 +166,10 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
     : call && !blocked ? candidates.get(call) ?? foldedBuiltins.get(call.toLowerCase()) : undefined;
   let hint = entry?.call ? `${entry.signature} — ${entry.description}` : undefined;
   if (!hint && before.includes('~')) hint = 'Y ~ m X + b fits data lists: unbound coefficients are fitted, defined constants stay fixed. X ~ Normal(mean, sd) declares a random variable.';
-  const word = /[A-Za-z_][\w.]*(?:\.[\w]*)?$/.exec(before)?.[0] ?? '';
+  const word = WORD_RE.exec(before)?.[0] ?? '';
   if (!word) return { ...empty, hint };
   const start = offset - word.length;
-  const end = offset + (/^[\w.]*/.exec(text.slice(offset))?.[0].length ?? 0);
+  const end = offset + (WORD_END_RE.exec(text.slice(offset))?.[0].length ?? 0);
   const suggestions = [...candidates.values()].filter(s =>
     s.name.toLowerCase().startsWith(word.toLowerCase()) && s.name !== text.slice(start, end)
     && (word.length >= 2 || !s.call || defs.fns.has(s.name)))

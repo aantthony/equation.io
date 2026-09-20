@@ -55,6 +55,7 @@ import {
   evaluate,
   freeVars,
   ineqComparisons,
+  NAME_SRC,
   normalcdf,
   normalpdf,
   parseExpr,
@@ -134,11 +135,14 @@ export function paramProblem(kind: BaseKind, a: ReadonlyArray<number | null | un
   return null;
 }
 
-const TILDE_RE = /^\s*([A-Za-z_]\w*)\s*~\s*([\s\S]+)$/;
-const DIST_RE = /^\s*([A-Za-z_]\w*)\s*(?:\(([\s\S]*)\))?\s*$/;
+/** Every name in a row's text, for reference scanning. */
+const NAME_SCAN_RE = new RegExp(NAME_SRC, 'g');
+
+const TILDE_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*~\s*([\s\S]+)$`);
+const DIST_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*(?:\(([\s\S]*)\))?\s*$`);
 const PROB_RE = /^\s*P\s*\(([\s\S]+)\)\s*$/;
 const EXPECT_RE = /^\s*E\s*\(([\s\S]+)\)\s*$/;
-const CONST_ROW_RE = /^\s*([A-Za-z_]\w*)\s*=(?!=)([\s\S]+)$/;
+const CONST_ROW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`);
 
 /** Detect a `name ~ rhs` row before parsing ('~' is not an expression token). */
 export function scanDistribution(text: string): { name: string; rhs: string } | null {
@@ -674,7 +678,7 @@ export function scanRandomRows(texts: readonly (string | null)[]): {
   while (changed) {
     changed = false;
     for (const [i, c] of candidates) {
-      if (!(c.rhs.match(/[A-Za-z_]\w*/g) ?? []).some(t => names.has(t))) continue;
+      if (!(c.rhs.match(NAME_SCAN_RE) ?? []).some(t => names.has(t))) continue;
       candidates.delete(i);
       derived.set(i, c);
       names.add(c.name);

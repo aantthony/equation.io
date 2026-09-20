@@ -102,4 +102,22 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('mean(', 5, d).hint).toBeUndefined();
     expect(syntaxHelp('Mean(', 5, d).hint).toBeUndefined();
   });
+  it('suggests symbol escapes for a \\word, replacing the backslash too', () => {
+    const h = syntaxHelp('y = \\pi', 7, defs());
+    expect(h.start).toBe(4); // covers the backslash
+    const pi = h.suggestions.find(s => s.name === '\\pi');
+    expect(pi).toMatchObject({ insert: 'π', call: false });
+    expect(syntaxHelp('\\', 1, defs()).suggestions.length).toBe(6);
+    expect(syntaxHelp('\\nab', 4, defs()).suggestions.map(s => s.insert)).toEqual(['∇']);
+    // Unknown names hint at the feature instead of listing functions.
+    const unknown = syntaxHelp('\\zz', 3, defs());
+    expect(unknown.suggestions).toEqual([]);
+    expect(unknown.hint).toContain('\\pi');
+    // An escaped backslash is a literal one: no symbol suggestions for \\pi.
+    expect(syntaxHelp('\\\\pi', 4, defs()).suggestions.some(s => s.insert)).toBe(false);
+  });
+  it('completes user definitions with Greek names', () => {
+    const d = emptyDefs(); d.consts.set('θmax', {kind:'num',value:3});
+    expect(syntaxHelp('θ', 1, d).suggestions.map(s => s.name)).toEqual(['θmax']);
+  });
 });
