@@ -114,6 +114,7 @@ New rows and extensions (2026-09-19):
 | `y=[1,2,3]x`; `circle((0,0),[1,2,3])` | family (same list zips, independent lists cross); shared shader source and per-draw uniforms |
 | `hull(A,B,C,…)`; `hull(P)`; `hull(([0,1],[0,1],[0,1]))` | convex hull evaluated per frame (lib/hull.ts): filled polygon in 2D, merged flat faces, flat-shaded through the lit-mesh pipeline (and lit front faces in the static preview) in 3D |
 | `R hull(P)`; `rotate(polygon(A,B,C), th)`; `2 segment(A,B) + v` | affine transforms of a point figure push down onto its points (object-lists.ts); a list in the transform is a family of figures |
+| `f(A)`, `f(R A)`, `f(f(A))`; `f(P)`, `vector(P, f(P))`, `hull(f(Q))` for `f(x,y)` | a point (or point list) as the one argument of an n-parameter function: the resolver emits `[comp](value, k, n, "f")`, settled by geom (a point) or list lowering (a point list, keeping its axes so components zip) — docs/point-arguments-plan.md |
 | `Q=P+(1,0)`; `polyline(P)` | point-list arithmetic; a connected path through the whole list |
 | `a_3`; `a_[1..10]` | sequence scalar/list values; recurrence terms compute as a bounded constant chain |
 | `(x^2+y^2+z^2,z)=(9,1)` | numerical space intersection curve |

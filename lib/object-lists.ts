@@ -3,7 +3,7 @@ import { exceedsNodes } from './size.ts';
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
 import { type Defs, type ResolveOpts, compsOf, listGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
-import { type Expr, freeVars, sameList } from './expr.ts';
+import { COMP_FN, type Expr, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists } from './list.ts';
 
@@ -71,7 +71,15 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
   const baseGet = listGetter(defs);
   const get = (name: string): Expr | null => baseGet(name) ?? (defs.mats.has(name)
     ? { kind: 'list', items: defs.mats.get(name)!.map(items => ({ kind: 'vec', items })) } : null);
+  // One answer per node: the argument of f(P) is shared by every component
+  // that reads it, and has to stay one node to be lowered once.
+  const indexed = new WeakMap<Expr, Expr>();
   const indices = (n: Expr): Expr => {
+    let out = indexed.get(n);
+    if (!out) indexed.set(n, out = indicesOf(n));
+    return out;
+  };
+  const indicesOf = (n: Expr): Expr => {
     if (n.kind === 'call' && n.name === '[index]') return lowerLists(n, get, opts, true);
     switch (n.kind) {
       case 'call': return { ...n, args: n.args.map(indices) };
@@ -174,7 +182,8 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
         case 'neg': return { ...node, a: visit(node.a, asMatrix) };
         case 'eq': case 'ineq': return { ...node, l: visit(node.l), r: visit(node.r) };
         case 'vec': return { ...node, items: map(node.items) };
-        case 'call': return { ...node, args: node.args.map(n => visit(n, false)) };
+        // (f(M) hands f a matrix, not its rows: not a point, so not an argument.)
+        case 'call': return { ...node, args: node.args.map(n => visit(n, node.name === COMP_FN)) };
         case 'piecewise': return { ...node, cases: node.cases.map(c => ({ cond: visit(c.cond), value: visit(c.value) })), otherwise: node.otherwise && visit(node.otherwise) };
         default: return node;
       }

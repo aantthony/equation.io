@@ -20,7 +20,7 @@
  * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import { ANGLE_FN, type Expr, sameList } from './expr.ts';
+import { ANGLE_FN, COMP_FN, type Expr, compArity, compDims, sameList } from './expr.ts';
 import { SCALAR_REDUCTIONS } from './list.ts';
 import { type GetMat, type Mat, type MatValue, detOf, expOf, hatOf, matAdd, matMul, matNeg, matPow, matScale, matVec, matrixFromList, solveVec, traceOf } from './mat.ts';
 
@@ -173,13 +173,20 @@ let matSeen = new WeakMap<Expr, MatValue | null>();
  * lowered again with the question switched on.
  */
 let matsPossible = false;
+/** The values `[comp]` nodes pick from, lowered once per lowerGeom however
+ *  many components ask: f(f(f(A))) shares its argument n^depth times over.
+ *  `wait` is a value that is no point yet but may be a list of them, left
+ *  (as `wait`) for list lowering. */
+let compSeen = new WeakMap<Expr, LV | { wait: Expr }>();
 class MatrixSeen extends Error {}
 function withMatrices<T>(run: () => T): T {
   matSeen = new WeakMap();
+  compSeen = new WeakMap();
   matsPossible = false;
   try { return run(); } catch (err) {
     if (!(err instanceof MatrixSeen)) throw err;
     matSeen = new WeakMap();
+    compSeen = new WeakMap();
     matsPossible = true;
     return run();
   }
@@ -319,6 +326,33 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     }
     case 'call': {
       if (GEOM_STATEMENTS.has(e.name)) throw new Error(`${e.name}(…) must be a whole statement.`);
+      if (e.name === COMP_FN) {
+        // f(P): component k of the one argument, once it is known to be a point.
+        const [value, kArg, nArg, fnArg] = e.args;
+        const k = (kArg as Expr & { kind: 'num' }).value;
+        const n = (nArg as Expr & { kind: 'num' }).value;
+        const fn = (fnArg as Expr & { kind: 'str' }).value;
+        // A matrix is not a point, nor (here) a list of its rows.
+        if (value.kind === 'var' && getMat(value.name)) throw new Error(compArity(fn, n));
+        let v = compSeen.get(value);
+        if (!v) {
+          const listy = (): boolean => listShape(value, getMat, isList) !== null;
+          try {
+            const low = lo(value);
+            v = low.vec || !listy() ? low : { wait: low.e };
+          } catch (err) {
+            // Point-list arithmetic (P + (1, 0), R P) is no point here either:
+            // it is the object expansion's, which finds the list inside.
+            if (err instanceof MatrixSeen || !listy()) throw err;
+            v = { wait: value };
+          }
+          compSeen.set(value, v);
+        }
+        if ('wait' in v) return sc({ kind: 'call', name: COMP_FN, args: [v.wait, kArg, nArg, fnArg] });
+        if (!v.vec) throw new Error(compArity(fn, n));
+        if (v.items.length !== n) throw new Error(compDims(fn, n, value, v.items.length));
+        return sc(v.items[k]);
+      }
       if (e.name === 'trail') {
         const args = e.args.map(lo);
         const coords = args.length === 1 && args[0].vec
@@ -541,6 +575,7 @@ export function lowerMatrix(e: Expr, getComps: GetComps, getMat: GetMat): Mat | 
   };
   if (!spine(e)) return null;
   matSeen = new WeakMap();
+  compSeen = new WeakMap();
   matsPossible = true;
   return lowerMat(e, n => lower(n, getComps, getMat, () => false), getMat)?.m ?? null;
 }

@@ -3440,7 +3440,7 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['rosette of hulls', 'th = 2pi [0..5]/6; P = [(1, 0), (3, 0.6), (3, -0.6)]; rotate(hull(P), th + t/3)'],
     ['convex hull of moving points', 'P = [(-3, -1), (-1, 2), (0.5, -2), (2, 1.5), (3, -0.5), (0, 0.3), (1, 0.5 + 2sin(t))]; hull(P); P'],
     ['exact linear flow: e^(tA)', "A = [(-0.2, -1), (1, -0.2)]; s = [0..60]/5; (x', y') = A (x, y); e^(s A) (3, 0); e^(t A) (3, 0)"],
-    ['deform a lattice (arrows)', 'a = [-10..10]/2; b = [-10..10]/2; f(x,y) = (x + sin(y + t)/3, y + sin(x)/3); vector((a, b), f(a, b)); f(a, b)'],
+    ['deform a lattice (arrows)', 'a = [-10..10]/2; b = [-10..10]/2; P = (a, b); f(x,y) = (x + sin(y + t)/3, y + sin(x)/3); vector(P, f(P)); f(P)'],
     ['corners of a cube', '([0,1], [0,1], [0,1])'],
     ['tumbling cube', 'e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1]))'],
     ['octahedron', 'k = 2pi [0..2]/3; hull(rotate(([-2,2], 0, 0), k, (1, 1, 1)))'],

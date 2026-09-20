@@ -888,6 +888,18 @@ export function factorialFn(x: number): number {
 /** The internal call angle(…) lowers to (lib/geom.ts): [angle](u0, u1, v0, v1).
  *  Unwritable, like '[trail]', so it can never collide with a user's name. */
 export const ANGLE_FN = '[angle]';
+
+/**
+ * `[comp](value, k, n, "f")`: component k (0-based) of `value`, which must be
+ * a point of n components — how `f(P)` hands a point to an n-parameter user
+ * function. The resolver emits it (it cannot know yet what is a point);
+ * geometry lowering settles a single point, list lowering a list of them.
+ */
+export const COMP_FN = '[comp]';
+/** The messages of a `[comp]` whose value is not an n-component point. */
+export const compArity = (fn: string, n: number): string => `${fn} takes ${n} arguments.`;
+export const compDims = (fn: string, n: number, value: Expr, got: number): string =>
+  `${fn} takes ${n} arguments, and ${value.kind === 'var' ? value.name : 'that point'} has ${got} components.`;
 /** d/dp of [angle] is a difference of two of these, one per arm (lib/diff.ts):
  *  [angle′](v0, v1, w0, w1) is the turning rate of arm v moving with velocity w. */
 export const ANGLE_RATE_FN = '[angle′]';

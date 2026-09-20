@@ -26,7 +26,7 @@ import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
+import { COMP_FN, FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, compDims, evaluate, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -1182,8 +1182,22 @@ function rx(e: Expr, ctx: Ctx): Expr {
       const args = e.args.map(x => rx(x, ctx));
       const fn = getFn(e.name);
       if (fn) {
-        if (args.length !== fn.params.length) {
-          throw new Error(`${e.name} takes ${fn.params.length} argument${fn.params.length === 1 ? '' : 's'}.`);
+        const n = fn.params.length;
+        if (args.length === 1 && n >= 2 && args[0].kind !== 'num') {
+          // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point
+          // (or a list of them; a plain number is neither, and falls through to
+          // the arity error). A tuple in hand gives up its items; anything
+          // else is not known to be a point until it lowers, so each parameter
+          // asks for its component of the SAME node — which is what keeps a
+          // list argument's components moving together.
+          const [arg] = args;
+          if (arg.kind === 'vec' && arg.items.length !== n) throw new Error(compDims(e.name, n, arg, arg.items.length));
+          const comp = (k: number): Expr => (arg.kind === 'vec' ? arg.items[k]
+            : { kind: 'call', name: COMP_FN, args: [arg, { kind: 'num', value: k }, { kind: 'num', value: n }, { kind: 'str', value: e.name }] });
+          return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, comp(k)])));
+        }
+        if (args.length !== n) {
+          throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
         }
         return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
       }
