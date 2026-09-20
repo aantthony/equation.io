@@ -352,8 +352,8 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'matrix-exponential',
     title: 'Rotations are matrix exponentials',
-    blurb: 'e^(tA) is the exact flow of (x′, y′) = A(x, y): with A = J it is a rotation, and with any other 2×2 a spiral, saddle or node. The dots are e^(sA) applied to one point for a list of times s.',
-    eqs: ['A = [(-0.2, -1), (1, -0.2)]', 's = [0..60]/5', "(x', y') = A (x, y)", 'e^(s A) (3, 0)'],
+    blurb: 'e^(tA) solves (x′, y′) = A(x, y) exactly: with A = J it is a rotation, and with any other 2×2 a spiral, saddle or node. The dots are e^(sA) applied to one point for a list of times s; the last row rides along them with t.',
+    eqs: ['A = [(-0.2, -1), (1, -0.2)]', 's = [0..60]/5', 'e^(s A) (3, 0)', 'e^(t A) (3, 0)'],
     group: 'Geometry',
     view: { span: 8 },
   },
