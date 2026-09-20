@@ -14,6 +14,7 @@ import { type PmfStems, markerHeight, shadePolygon, stemGeometry } from '../lib/
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, freeVars, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
+import { hullFaces } from '../lib/hull.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler } from '../lib/path.ts';
 import type { Plot } from '../lib/plot.ts';
@@ -558,8 +559,9 @@ function renderRow2D(
     case 'polygon': {
       // Flat scalar vertex list [x0, y0, x1, y1, …], constant by
       // classification; like the app, a single non-finite vertex drops the row.
-      const vals = cls.plot.pts.map(p => run(compile(p), env.vars, env.stack));
-      if (vals.length < 4 || !vals.every(Number.isFinite)) return;
+      const given = cls.plot.pts.map(p => run(compile(p), env.vars, env.stack));
+      if (given.length < 4 || !given.every(Number.isFinite)) return;
+      const vals = cls.plot.hull ? hullFaces(given, 2)[0].outline.flatMap(p => [p[0], p[1]]) : given;
       const sx: number[] = [], sy: number[] = [];
       for (let i = 0; i + 1 < vals.length; i += 2) {
         sx.push(toScreenX(r, v, vals[i]));
@@ -645,6 +647,31 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       const p = cls.plot, dim = p.dim ?? 2;
       const vals = p.pts.map(e => run(compile(e), env.vars, env.stack));
       if (!vals.every(Number.isFinite)) return;
+      if (p.hull) {
+        // A convex solid needs no depth sort: the faces turned toward the
+        // (orthographic) camera are exactly the visible ones. Lit like the
+        // app's solids — same light, same ambient/sky/diffuse mix.
+        const faces = hullFaces(vals, dim);
+        const toCamera = [Math.cos(v.theta) * Math.cos(v.phi), Math.sin(v.theta) * Math.cos(v.phi), Math.sin(v.phi)];
+        const light = [0.4, 0.55, 0.9].map(c => c / Math.hypot(0.4, 0.55, 0.9));
+        const dot3 = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        for (const face of faces) {
+          const at = face.outline.map(q => project(v, q));
+          if (face.triangles.length) {
+            const [o, a, b] = face.outline;
+            const u = [a[0] - o[0], a[1] - o[1], a[2] - o[2]], w = [b[0] - o[0], b[1] - o[1], b[2] - o[2]];
+            let n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+            const len = Math.hypot(n[0], n[1], n[2]) || 1;
+            n = n.map(c => c / len);
+            // A flat figure has one face and no inside: show whichever side faces us.
+            if (dot3(n, toCamera) < 0) { if (faces.length > 1) continue; n = n.map(c => -c); }
+            const lit = 0.88 * (0.26 + 0.22 * (0.5 + 0.5 * n[2]) + 0.46 * Math.max(0, dot3(n, light)));
+            fillPolygon(r, at.map(q => q[0]), at.map(q => q[1]), color.map(c => c * lit) as [number, number, number], 1);
+          }
+          for (let k = 0; k < at.length; k++) drawLine(r, ...at[k], ...at[(k + 1) % at.length], color);
+        }
+        return;
+      }
       const pts: Array<[number, number]> = [];
       for (let k = 0; k < vals.length; k += dim) pts.push(project(v, [vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0]));
       if (p.closed && pts.length === 3) fillPolygon(r, pts.map(p => p[0]), pts.map(p => p[1]), color, 0.16);

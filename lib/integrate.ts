@@ -24,7 +24,7 @@
  * same way Σ expands — so shaders, the worker VM and every other consumer
  * evaluate it with no new machinery.
  */
-import { type Expr, evaluate, freeVars } from './expr.ts';
+import { type Expr, evaluate, freeVars, sameList } from './expr.ts';
 import { add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import {
   type FPoly,
@@ -665,7 +665,7 @@ function substAll(e: Expr, v: string, val: Expr): Expr {
     case 'eq': return { kind: 'eq', l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
     case 'ineq': return { kind: 'ineq', op: e.op, l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substAll(a, v, val)) };
-    case 'list': return { kind: 'list', items: e.items.map(a => substAll(a, v, val)) };
+    case 'list': return sameList(e, { kind: 'list', items: e.items.map(a => substAll(a, v, val)) });
     case 'data':
     case 'str':
     case 'text': return e;

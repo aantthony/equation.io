@@ -65,6 +65,7 @@ import { uniformName } from '../lib/glsl.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline } from '../lib/flow.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
+import { hullFaces, hullMesh } from '../lib/hull.ts';
 import { lowerLists } from '../lib/list.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, buildGridField, planarField, sampleGradMag } from '../lib/grid.ts';
@@ -227,6 +228,11 @@ function pushStems(extras: Overlay2D, run: PmfStems, color: [number, number, num
   const dots = g.dots;
   if (dots) run.ks.forEach((k, n) => extras.points.push({ x: k, y: run.ps[n], color: ink, r: dots.r, bare: !dots.outlined }));
 }
+
+/** A solid's edges: its own colour pulled toward white, so they still read
+ *  against faces lit in that colour. */
+const edgeShade = ([r, g, b]: [number, number, number]): [number, number, number] =>
+  [r + (1 - r) * .55, g + (1 - g) * .55, b + (1 - b) * .55];
 
 function cssColorA([r, g, b]: [number, number, number], a: number): string {
   return `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${a})`;
@@ -833,6 +839,17 @@ function render() {
           const dim = plot.dim ?? 2;
           const vals = plot.pts.map(p => evaluate(p, { ...constEnv, t: time }));
           if (!vals.every(Number.isFinite)) break;
+          if (plot.hull) {
+            // A lit solid (flat-shaded: one normal per face), its edges drawn
+            // over it as one closed outline per face.
+            const faces = hullFaces(vals, dim);
+            const mesh = hullMesh(faces);
+            if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color });
+            for (const face of faces) {
+              scene.curves.push({ pts: new Float32Array([...face.outline, face.outline[0]].flat()), color: mesh.indices.length ? edgeShade(color) : color });
+            }
+            break;
+          }
           const pts: number[] = [];
           for (let k = 0; k < vals.length; k += dim) pts.push(vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0);
           const triangle = plot.closed && pts.length === 9;
@@ -1016,7 +1033,7 @@ function render() {
           }
           if (!pts.every(isFinite)) break;
           extras.polylines.push({
-            pts,
+            pts: plot.hull ? hullFaces(pts, 2)[0].outline.flatMap(p => [p[0], p[1]]) : pts,
             color: css,
             closed: plot.closed,
             fill: plot.closed ? cssColorA(color, 0.16) : undefined,
@@ -3186,6 +3203,20 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['surface intersection', '(x^2+y^2+z^2,z)=(9,1)'],
     ['certifiable roots', '(x^2,y)=(1,0)'],
     ['decided comparisons', '2+2=4; e=2'],
+  ]],
+  ['rotations, hulls and solids', [
+    // A list is a variable: every use of `th` moves together, while separate
+    // [..] literals are independent and cross — the corners of a cube.
+    ['regular polygon', 'n = 7; th = 2pi [0..n-1]/n; polygon(rotate((2, 0), th + t/4))'],
+    ['rotate a shape (matrix exponential)', 'J = [(0, -1), (1, 0)]; a = 0.7; R = e^(a J); P = [(0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)]; polygon(P); polygon(R P)'],
+    ['rosette of hulls', 'th = 2pi [0..5]/6; P = [(1, 0), (3, 0.6), (3, -0.6)]; rotate(hull(P), th + t/3)'],
+    ['convex hull of moving points', 'P = [(-3, -1), (-1, 2), (0.5, -2), (2, 1.5), (3, -0.5), (0, 0.3), (1, 0.5 + 2sin(t))]; hull(P); P'],
+    ['exact linear flow: e^(tA)', "A = [(-0.2, -1), (1, -0.2)]; s = [0..60]/5; (x', y') = A (x, y); e^(s A) (3, 0); e^(t A) (3, 0)"],
+    ['corners of a cube', '([0,1], [0,1], [0,1])'],
+    ['tumbling cube', 'e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1]))'],
+    ['octahedron', 'k = 2pi [0..2]/3; hull(rotate(([-2,2], 0, 0), k, (1, 1, 1)))'],
+    ['icosahedron', 'phi = (1+sqrt(5))/2; k = 2pi [0..2]/3; hull(rotate((0, [-1,1], [-phi,phi]), k, (1, 1, 1)))'],
+    ['prism (slide n)', 'n = 5; th = 2pi [0..n-1]/n; hull(rotate((2, 0, [-1,1]), th, (0, 0, 1)))'],
   ]],
   ['3d surfaces', [
     ['waves', 'z = sin(x)cos(y)'],

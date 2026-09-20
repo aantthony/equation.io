@@ -341,6 +341,23 @@ export const SHOWCASE: ShowcaseItem[] = [
     view: { cy: 0.5, span: 8 },
   },
   {
+    slug: 'rosette',
+    title: 'Rotate, repeat, take the hull',
+    blurb: 'A list is a variable: rotate a shape by a list of angles and you get one copy per angle. hull(…) wraps any points — even moving ones — in their convex hull.',
+    eqs: ['th = 2pi [0..5]/6', 'P = [(1, 0), (3, 0.6), (3, -0.6)]', 'rotate(hull(P), th + t/3)', 'n = 7', 'polygon(rotate((0.8, 0), 2pi [0..n-1]/n - t/3))'],
+    group: 'Geometry',
+    view: { span: 8 },
+    settle: 0.6,
+  },
+  {
+    slug: 'matrix-exponential',
+    title: 'Rotations are matrix exponentials',
+    blurb: 'e^(tA) is the exact flow of (x′, y′) = A(x, y): with A = J it is a rotation, and with any other 2×2 a spiral, saddle or node. The dots are e^(sA) applied to one point for a list of times s.',
+    eqs: ['A = [(-0.2, -1), (1, -0.2)]', 's = [0..60]/5', "(x', y') = A (x, y)", 'e^(s A) (3, 0)'],
+    group: 'Geometry',
+    view: { span: 8 },
+  },
+  {
     slug: 'thebault',
     title: 'Theorems you can drag',
     blurb: "Squares on a parallelogram: Thébault's theorem says their centers form a square. Drag a corner — it keeps being true.",
@@ -406,6 +423,18 @@ export const SHOWCASE: ShowcaseItem[] = [
     blurb: 'Surfaces, curves and points share one scene.',
     eqs: ['x^2 + y^2 + z^2 = 4', '(2cos(6pi u), 2sin(6pi u), 4u - 2)'],
     group: 'The third dimension',
+  },
+  {
+    slug: 'icosahedron',
+    title: 'Solids from a few points',
+    blurb: 'Independent lists cross — (0, [-1,1], [-φ,φ]) is four points — three turns about (1,1,1) make twelve, and hull(…) wraps them in a shaded icosahedron. The cube beside it is hull(([-1,1],[-1,1],[-1,1])), tumbling by e^(t cross(n)).',
+    eqs: [
+      'phi = (1+sqrt(5))/2', 'k = 2pi [0..2]/3',
+      'hull(rotate((0, [-1,1], [-phi,phi]), k, (1, 1, 1)))',
+      'e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1])) + (4, 0, 0)',
+    ],
+    group: 'The third dimension',
+    settle: 0.8,
   },
   {
     slug: 'trefoil',

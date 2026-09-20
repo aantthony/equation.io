@@ -217,9 +217,9 @@ describe('columns as lists', () => {
     expect(evaluate(lowerRow('median(person.height)', rows), {})).toBe(1.7);
   });
 
-  it('mixes a column with a plain list of the same length', () => {
-    expect(values(lowerRow('person.age + [1, 2, 3]', rows))).toEqual([37, 43, 32]);
-    expect(() => lowerRow('person.age + [1, 2]', rows)).toThrow(/different lengths/);
+  it('crosses a column with an independent list, and zips columns of one file', () => {
+    expect(values(lowerRow('person.age + [1, 2]', rows))).toEqual([37, 38, 42, 43, 30, 31]);
+    expect(values(lowerRow('person.age + 0 person.height', rows))).toEqual([36, 41, 29]);
   });
 
   it('names the columns when one is missing', () => {

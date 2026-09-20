@@ -60,8 +60,8 @@ export const FUNCTIONS = new Set([
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
-  'dot', 'cross', 'perp', 'midpoint', 'unit', 'distance', 'angle',
-  'segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle',
+  'dot', 'cross', 'perp', 'midpoint', 'unit', 'rotate', 'distance', 'angle',
+  'segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle', 'hull',
   // Small-matrix helpers (det, trace, matvec, linear solve), also lowered
   // symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts).
   'det', 'trace', 'solve',
@@ -345,7 +345,7 @@ const ops = operators<PNode>({
     // tube((a, b, c)) === tube(a, b, c) and |(3, 4)| reaches abs as (3, 4);
     // geometry/measurement calls preserve grouped vectors and their dimensions.
     const items = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
-    const pointCalls = new Set(['segment', 'polyline', 'polygon', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit']);
+    const pointCalls = new Set(['segment', 'polyline', 'polygon', 'hull', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit', 'rotate']);
     const args = pointCalls.has(name) ? items : items.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
     return { kind: 'call', name, args };
   }),
@@ -742,6 +742,20 @@ export function parseExpr(
   }
 }
 
+
+/**
+ * The instances a lowered list runs over (list.ts reads and writes these).
+ * Kept beside the nodes, not on them, so no consumer of an Expr ever sees an
+ * axis — which means a pass that REBUILDS a list node must carry the entry
+ * across, or two uses of one list stop moving together.
+ */
+export const LIST_AXES = new WeakMap<Expr, ReadonlyArray<{ id: string; n: number }>>();
+export function sameList<T extends Expr>(from: Expr, to: T): T {
+  const axes = LIST_AXES.get(from);
+  if (axes) LIST_AXES.set(to, axes);
+  return to;
+}
+
 /** Replace free variables by expressions. There are no binders, so no capture. */
 export function substVars(e: Expr, env: Record<string, Expr>): Expr {
   switch (e.kind) {
@@ -753,7 +767,7 @@ export function substVars(e: Expr, env: Record<string, Expr>): Expr {
     case 'eq': return { kind: 'eq', l: substVars(e.l, env), r: substVars(e.r, env) };
     case 'ineq': return { kind: 'ineq', op: e.op, l: substVars(e.l, env), r: substVars(e.r, env) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substVars(a, env)) };
-    case 'list': return { kind: 'list', items: e.items.map(a => substVars(a, env)) };
+    case 'list': return sameList(e, { kind: 'list', items: e.items.map(a => substVars(a, env)) });
     case 'data':
     case 'str':
     case 'text': return e;

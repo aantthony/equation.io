@@ -9,9 +9,9 @@
  * integrator never see a list.
  *
  * Semantics (see docs/lists-tables-plan.md):
- * - scalar ⊕ list maps elementwise; list ⊕ list zips, and mismatched
- *   lengths are an error — never a silent truncation.
- * - `(A, B)` with list components zips into a list of points.
+ * - scalar ⊕ list maps elementwise; list ⊕ list zips when both run over
+ *   the same instances and crosses when they are independent (see Axis).
+ * - `(A, B)` with list components becomes a list of points the same way.
  * - ranges [1..20] / [0, 0.5..10] / [10..1] expand here, where constant
  *   values are known (bounds behave like Σ bounds: constants and sliders).
  * - indexing is 1-based: L[1] is the first element.
@@ -29,7 +29,7 @@
  */
 import { add, div, mul } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
-import { EVAL_FNS, type Expr, evaluate, freeVars, ineqComparisons, plainFnName, realPow } from './expr.ts';
+import { EVAL_FNS, LIST_AXES, type Expr, evaluate, freeVars, ineqComparisons, plainFnName, realPow } from './expr.ts';
 
 /**
  * A list of values, in whichever representation it has: one expression per
@@ -63,8 +63,8 @@ const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
  *  bytes, or a filter is valid exactly on the devices that cannot test it. */
 export const NO_LIST_INSIDE = new Set([
   'domain', 'conformal', 'iter', 'tube',
-  '[polygon]', '[segment]', '[polyline]', '[vector]', '[square]',
-  '[polygon3]', '[segment3]', '[polyline3]', '[vector3]',
+  '[polygon]', '[segment]', '[polyline]', '[vector]', '[square]', '[hull]',
+  '[polygon3]', '[segment3]', '[polyline3]', '[vector3]', '[hull3]',
 ]);
 
 export { plainFnName };
@@ -100,6 +100,87 @@ export const seqLength = (e: Seq): number =>
 const isRange = (e: Expr): e is Expr & { kind: 'call' } =>
   e.kind === 'call' && e.name === '[range]';
 
+/**
+ * Which instances a list runs over. A list is a variable ranging over its
+ * values: every use of the SAME list (a name, anything derived from it, the
+ * columns of one data file) moves together, so they zip — the row is evaluated
+ * once per instance. Lists with different origins are independent, so they
+ * cross: `([0,1],[0,1],[0,1])` is the 8 corners of a cube while `a = [0,1]`,
+ * `(a,a,a)` is its diagonal. Each list literal is its own origin.
+ *
+ * A value over several axes is stored flat, row-major, first axis slowest.
+ * Kept beside the nodes rather than on them: nothing downstream of lowering
+ * ever sees an axis.
+ */
+export interface Axis { id: string; n: number }
+const AXES = LIST_AXES;
+let anonymous = 0;
+export function axesOf(e: Seq): readonly Axis[] {
+  const n = seqLength(e);
+  let hit = AXES.get(e);
+  if (!hit || hit.reduce((size, a) => size * a.n, 1) !== n) {
+    hit = [{ id: `#${++anonymous}`, n }];
+    AXES.set(e, hit);
+  }
+  return hit;
+}
+export function withAxes<T extends Expr>(e: T, axes: readonly Axis[] | null): T {
+  if (axes) AXES.set(e, axes);
+  return e;
+}
+/** The axes of a list reached through `name`: an origin nobody has named yet
+ *  (a literal, a range) takes the name, so every later use of it agrees. */
+export const namedAxes = (name: string, e: Seq): readonly Axis[] =>
+  axesOf(e).map((a, i) => (a.id.startsWith('#') ? { id: `${name}#${i}`, n: a.n } : a));
+
+/**
+ * Bring operands onto one shared set of axes, so that combining them
+ * elementwise is a plain zip again: a list already over every axis is left
+ * alone, and one that is missing some repeats along them.
+ */
+function align(parts: Expr[]): { parts: Expr[]; axes: readonly Axis[] | null } {
+  const union: Axis[] = [];
+  for (const p of parts) {
+    if (!isSeq(p)) continue;
+    for (const a of axesOf(p)) {
+      const seen = union.find(u => u.id === a.id);
+      if (!seen) union.push(a);
+      else if (seen.n !== a.n) throw new Error(`Lists have different lengths (${seen.n} vs ${a.n}).`);
+    }
+  }
+  if (!union.length) return { parts, axes: null };
+  const total = union.reduce((size, a) => size * a.n, 1);
+  const out = parts.map(p => {
+    if (!isSeq(p)) return p;
+    const own = axesOf(p);
+    if (own.length === union.length && own.every((a, i) => a.id === union[i].id)) return p;
+    if (total > (isData(p) ? DATA_MAX : ITEMS_MAX)) {
+      throw new Error(`Independent lists combine every value with every other — that is ${total} combinations (limit ${isData(p) ? DATA_MAX : ITEMS_MAX}). Name one list and reuse it to pair values up instead.`);
+    }
+    // Where each shared axis steps inside this operand (0: it does not vary).
+    const strides = union.map(u => {
+      const at = own.findIndex(a => a.id === u.id);
+      return at < 0 ? 0 : own.slice(at + 1).reduce((size, a) => size * a.n, 1);
+    });
+    const index = new Int32Array(total);
+    const counter = union.map(() => 0);
+    for (let k = 0, from = 0; k < total; k++) {
+      index[k] = from;
+      for (let d = union.length - 1; d >= 0; d--) {
+        from += strides[d];
+        if (++counter[d] < union[d].n) break;
+        from -= strides[d] * counter[d];
+        counter[d] = 0;
+      }
+    }
+    const spread: Expr = isData(p) ? { kind: 'data', values: Float64Array.from(index, i => p.values[i]) }
+      : isText(p) ? { kind: 'text', values: Array.from(index, i => p.values[i]) }
+        : { kind: 'list', items: Array.from(index, i => p.items[i]) };
+    return withAxes(spread, union);
+  });
+  return { parts: out, axes: union };
+}
+
 function listOf(items: Expr[], ctx: Ctx): Expr {
   ctx.items += items.length;
   if (ctx.items > ITEMS_MAX) {
@@ -131,12 +212,12 @@ function expand(e: Expr, ctx: Ctx): Expr {
   // whatever consumes this list charges for the list it builds, and counting
   // both halved the usable size of the one operation the docs quote
   // (`col * t` failed at 50 001 rows against a stated limit of 100 000).
-  return {
+  return withAxes({
     kind: 'list',
     items: isText(e)
       ? e.values.map((value): Expr => ({ kind: 'str', value }))
       : [...e.values].map(num),
-  };
+  }, axesOf(e));
 }
 
 /**
@@ -144,8 +225,10 @@ function expand(e: Expr, ctx: Ctx): Expr {
  * arrays and literals only. A slider or an unresolved variable returns null,
  * so those keep the symbolic path and shaders keep their uniforms.
  */
-function fastMap(parts: Expr[], f: (xs: number[]) => number, ctx: Ctx): Expr | null {
+function fastMap(raw: Expr[], f: (xs: number[]) => number, ctx: Ctx): Expr | null {
+  if (!raw.every(p => isData(p) || p.kind === 'num')) return null;
   let n: number | null = null;
+  const { parts, axes } = align(raw);
   for (const p of parts) {
     if (isData(p)) {
       if (n !== null && p.values.length !== n) {
@@ -166,7 +249,7 @@ function fastMap(parts: Expr[], f: (xs: number[]) => number, ctx: Ctx): Expr | n
     }
     out[k] = f(xs);
   }
-  return dataOf(out, ctx);
+  return withAxes(dataOf(out, ctx), axes);
 }
 
 const BIN_OPS: Record<string, (a: number, b: number) => number> = {
@@ -236,8 +319,9 @@ function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
 
 /** Combine lowered operands elementwise: lists zip (equal lengths only),
  *  scalars broadcast. */
-function zipN(parts: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
+function zipN(raw: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
   let n: number | null = null;
+  const { parts, axes } = align(raw);
   for (const p of parts) {
     if (!isList(p)) continue;
     if (n !== null && p.items.length !== n) {
@@ -273,7 +357,7 @@ function zipN(parts: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
     }
     items.push(built);
   }
-  return listOf(items, ctx);
+  return withAxes(listOf(items, ctx), axes);
 }
 
 /**
@@ -587,14 +671,19 @@ function lowerIndex(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
     }
     const kept = keep.reduce((c, k) => c + (k ? 1 : 0), 0);
     if (!kept) throw new Error(`That filter keeps nothing (0 of ${keep.length}).`);
+    // The same cut of the same list is the same instances, however many
+    // times it is written: (L[L > 2], L[L > 2]^2) still pairs up.
+    const test = JSON.stringify(idx, (_, v) => (ArrayBuffer.isView(v) ? undefined : v));
+    const cut: Axis[] | null = test.length > 4096 ? null
+      : [{ id: `${axesOf(low).map(a => a.id).join('×')}[${test}]`, n: kept }];
     if (isData(low)) {
       const out = new Float64Array(kept);
       let at = 0;
       for (let k = 0; k < n; k++) if (keep[k]) out[at++] = low.values[k];
-      return dataOf(out, ctx);
+      return withAxes(dataOf(out, ctx), cut);
     }
-    if (isText(low)) return { kind: 'text', values: low.values.filter((_, k) => keep[k]) };
-    return listOf(low.items.filter((_, k) => keep[k]), ctx);
+    if (isText(low)) return withAxes({ kind: 'text', values: low.values.filter((_, k) => keep[k]) }, cut);
+    return withAxes(listOf(low.items.filter((_, k) => keep[k]), ctx), cut);
   }
   if (isSeq(idxLow)) throw new Error(SLICE);
   const v = constVal(idxLow, ctx, 'A list index', true);
@@ -621,7 +710,9 @@ function lower(e: Expr, ctx: Ctx): Expr {
       if (!hit) return e;
       // A `list` node's items belong to the definition: copy before anything
       // downstream can hold on to the array.
-      return isList(hit) ? listOf([...hit.items], ctx) : hit;
+      // (A scatter of columns is a `vec`: a value to name, not a list.)
+      if (!isSeq(hit)) return hit;
+      return withAxes(isList(hit) ? listOf([...hit.items], ctx) : { ...hit }, namedAxes(e.name, hit));
     }
     case 'neg': {
       const a = lower(e.a, ctx);
@@ -703,9 +794,11 @@ function lower(e: Expr, ctx: Ctx): Expr {
           if (e.name === 'count') return num(arg.values.length);
           throw new Error(`${e.name}(…) needs numbers; that column holds text.`);
         }
-        return isData(arg)
+        const reduced = isData(arg)
           ? reduceData(e.name, arg.values, ctx)
           : reduce(e.name, (arg as Expr & { kind: 'list' }).items, ctx);
+        // sort reorders the instances it was given; it does not make new ones.
+        return isSeq(reduced) && seqLength(reduced) === seqLength(arg) ? withAxes(reduced, axesOf(arg)) : reduced;
       }
       if (!args.some(isSeq)) return { kind: 'call', name: e.name, args };
       if (e.name === 'revolve') {
@@ -728,13 +821,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
       // A scatter of columns stays two typed arrays rather than N points:
       // classify reads the coordinates straight out of them.
       if (items.some(isData) && items.every(it => isData(it) || it.kind === 'num')) {
-        const n = seqLength(items.find(isData)!);
-        for (const it of items) {
-          if (isData(it) && it.values.length !== n) {
-            throw new Error(`Lists have different lengths (${n} vs ${it.values.length}).`);
-          }
-        }
-        return { kind: 'vec', items };
+        return { kind: 'vec', items: align(items).parts };
       }
       return zipN(
         items.map(it => expand(it, ctx)),
@@ -742,8 +829,18 @@ function lower(e: Expr, ctx: Ctx): Expr {
         ctx,
       );
     }
-    case 'list':
-      return listOf(expandItems(e.items, ctx), ctx);
+    case 'list': {
+      // A literal is a new origin; a list lowered earlier (an index the
+      // object pass settled first) keeps the instances it already had.
+      // The origin is the literal itself, not this visit to it: expanding
+      // M (0, [-1,1]) writes the same literal into every output component,
+      // and those are one list, not several.
+      const out = listOf(expandItems(e.items, ctx), ctx) as Seq;
+      const known = AXES.get(e);
+      const axes = known && known.reduce((size, a) => size * a.n, 1) === seqLength(out) ? known : axesOf(out);
+      AXES.set(e, axes);
+      return withAxes(out, axes);
+    }
     case 'eq':
     case 'ineq': {
       // Comparisons are the symbolic path: a mask is per-element structure
