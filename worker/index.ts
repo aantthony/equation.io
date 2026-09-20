@@ -1,3 +1,4 @@
+import { EMBED_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { landingFromPath, graphUrl, type Landing } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { handleMcp } from './mcp.ts';
@@ -122,7 +123,10 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
  * embed shell; the client reads the payload from the path the way /g/ does.
  */
 async function handleEmbed(request: Request, url: URL, env: Env): Promise<Response> {
-  return withCharset(await env.ASSETS.fetch(new Request(new URL('/embed/', url), request)));
+  return withCsp(
+    withCharset(await env.ASSETS.fetch(new Request(new URL('/embed/', url), request))),
+    EMBED_CSP,
+  );
 }
 
 /**
@@ -143,7 +147,7 @@ async function handleLanding(request: Request, url: URL, env: Env, page: Landing
     .filter(([k]) => k === 'twitter:card' || k === 'twitter:image' || k === 'og:image:width' || k === 'og:image:height')
     .map(([p, c]) => `<meta ${p.startsWith('twitter:') ? 'name' : 'property'}="${p}" content="${escapeAttr(c)}">`)
     .join('\n  ');
-  return new HTMLRewriter()
+  return withCsp(new HTMLRewriter()
     .on('head', {
       element(el) {
         el.append(`${extra}\n  `, { html: true });
@@ -187,7 +191,7 @@ async function handleLanding(request: Request, url: URL, env: Env, page: Landing
         );
       },
     })
-    .transform(shell);
+    .transform(shell), LANDING_CSP);
 }
 
 async function handleOgImage(url: URL): Promise<Response> {
@@ -232,6 +236,14 @@ function withCharset(response: Response): Response {
   }
   const patched = new Response(response.body, response);
   patched.headers.set('content-type', `${type}; charset=utf-8`);
+  return patched;
+}
+
+/** Drop every CSP (/* may have been joined onto this path) and set one. */
+function withCsp(response: Response, policy: string): Response {
+  const patched = new Response(response.body, response);
+  patched.headers.delete('Content-Security-Policy');
+  patched.headers.set('Content-Security-Policy', policy);
   return patched;
 }
 

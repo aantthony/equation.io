@@ -7,15 +7,19 @@
 # Landing pages iframe /embed/; they must be allowed to frame same-origin.
 # Matched on the /landing/ asset path — the Worker serves that shell at
 # /implicit/, /slope-field/, /complex/, …
+# /* also matches these paths. Cloudflare joins duplicate CSP headers and
+# browsers AND every policy, so detach the inherited one before replacing.
 /landing
 /landing/
 /landing/*
+  ! Content-Security-Policy
   Content-Security-Policy: default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'self'; frame-ancestors 'none'; upgrade-insecure-requests
 
 # /embed/<payload> is the iframe target (landing pages, and later other sites).
 /embed
 /embed/
 /embed/*
+  ! Content-Security-Policy
   Content-Security-Policy: default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors *; upgrade-insecure-requests
 
 # Cloudflare Workers assets header rules. Everything is otherwise served

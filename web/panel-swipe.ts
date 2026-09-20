@@ -65,7 +65,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
   const offset: Vec2 = { x: 0, y: 0 };
   // Embedded markup starts parked so the editor never flashes over the
   // graph before initialization. Adopt that pose for chip tap/drag handling.
-  let hidden = panel.style.visibility === 'hidden';
+  let hidden = panel.classList.contains('is-parked') || panel.style.visibility === 'hidden';
   /** Unit direction the panel last left in; reopening retraces it. */
   let exitDir: Vec2 = { x: 0, y: -1 };
 
@@ -242,6 +242,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
     // where it will come back to.
     setCorner(nearestCorner(exitPos, geo.corners));
     hidden = true;
+    panel.classList.add('is-parked');
     panel.style.visibility = 'hidden';
     panel.style.willChange = '';
     showChip();
@@ -296,6 +297,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
     if (!hidden) return;
     hideChip();
     hidden = false;
+    panel.classList.remove('is-parked');
     panel.style.visibility = '';
     geo = measure(); // offset is (0,0) while parked, so this reads the rest box
     const parked = exitRay(geo.rest, exitDir, geo.w, geo.h, geo.vw, geo.vh, EXIT_PAD);
@@ -559,6 +561,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
   /** The drag becomes the panel: park it under the pointer and let it pull. */
   function beginPull(g: Gesture) {
     hidden = false;
+    panel.classList.remove('is-parked');
     panel.style.visibility = '';
     hideChip();
     geo = measure(); // offset is (0,0) while parked, so this reads the rest box

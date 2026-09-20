@@ -121,6 +121,8 @@ html, body {
   font-size: 11px;
 }
 
+#panel.is-parked { visibility: hidden; }
+
 #panel {
   position: absolute;
   /* viewport-fit=cover lets the canvas fill the whole screen (under the iOS

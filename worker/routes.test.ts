@@ -1,5 +1,6 @@
 /** End-to-end route behaviour for /g/, /embed/, landings, and /api/og. */
 import { describe, expect, it } from 'vitest';
+import { APP_CSP, EMBED_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { LANDINGS } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import worker, { landingMeta, shareMeta } from './index.ts';
@@ -17,12 +18,21 @@ const LANDING = `<!doctype html><html><head>
 <meta property="og:image" content="https://equation.io/shots/hero.png">
 </head><body><h1 id="h1"></h1><p class="lead" id="lead"></p><noscript></noscript></body></html>`;
 
+function html(body: string, extraCsp?: string): Response {
+  const headers = new Headers({ 'content-type': 'text/html' });
+  // Simulate Cloudflare joining /* with a more specific _headers block.
+  headers.append('content-security-policy', APP_CSP);
+  if (extraCsp) headers.append('content-security-policy', extraCsp);
+  return new Response(body, { headers });
+}
+
 const env = {
   ASSETS: {
     fetch: async (request: Request) => {
       const path = new URL(request.url).pathname;
-      const html = path.startsWith('/embed') ? EMBED : path.startsWith('/landing') ? LANDING : APP;
-      return new Response(html, { headers: { 'content-type': 'text/html' } });
+      if (path.startsWith('/embed')) return html(EMBED, EMBED_CSP);
+      if (path.startsWith('/landing')) return html(LANDING, LANDING_CSP);
+      return html(APP);
     },
   },
 } as unknown as Env;
@@ -133,6 +143,14 @@ describe('intent landings', () => {
     expect(html).toContain('Implicit equation grapher — Equation.io');
     expect(html).toContain('Graph an equation without solving for y');
   });
+
+  (hasRewriter ? it : it.skip)('replaces a joined catch-all CSP with a single frame-src policy', async () => {
+    const res = await get('/implicit/');
+    const csp = res.headers.get('content-security-policy');
+    expect(csp).toBe(LANDING_CSP);
+    expect(csp).toContain("frame-src 'self'");
+    expect(csp?.match(/default-src/g)?.length).toBe(1);
+  });
 });
 
 describe('/embed/', () => {
@@ -140,6 +158,15 @@ describe('/embed/', () => {
     const res = await get('/embed/' + encodePayload(['y = x^2']));
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('data-embed');
+  });
+
+  it('replaces a joined catch-all CSP with a single frameable policy', async () => {
+    const res = await get('/embed/' + encodePayload(['y = x^2']));
+    const csp = res.headers.get('content-security-policy');
+    expect(csp).toBe(EMBED_CSP);
+    expect(csp).toContain('frame-ancestors *');
+    expect(csp).not.toContain("frame-ancestors 'none'");
+    expect(csp?.match(/default-src/g)?.length).toBe(1);
   });
 });
 

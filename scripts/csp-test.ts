@@ -22,7 +22,18 @@ try {
   for (const path of ['/', '/about/', '/g/y%3Dx%5E2', '/implicit/', '/embed/y%3Dx%5E2']) {
     const page = await context.newPage();
     const response = await page.goto(`http://localhost:5198${path}`);
-    assert.ok(response?.headers()['content-security-policy'], `CSP missing on ${path}`);
+    const csp = response?.headers()['content-security-policy'] ?? '';
+    assert.ok(csp, `CSP missing on ${path}`);
+    assert.equal((csp.match(/default-src/g) ?? []).length, 1, `duplicate CSP on ${path}: ${csp}`);
+    if (path === '/implicit/') {
+      assert.match(csp, /frame-src 'self'/);
+      assert.match(csp, /frame-ancestors 'none'/);
+    } else if (path.startsWith('/embed/')) {
+      assert.match(csp, /frame-ancestors \*/);
+      assert.equal(csp.includes("frame-ancestors 'none'"), false, csp);
+    } else {
+      assert.match(csp, /frame-ancestors 'none'/);
+    }
     const themeScript = page.locator('head script[src*="/assets/theme-"]');
     assert.equal(await themeScript.count(), 1);
     for (const attribute of ['type', 'async', 'defer']) {
@@ -34,6 +45,12 @@ try {
       : path === '/implicit/' ? 'iframe#graph[src*="/embed/"]'
       : '.eq-line';
     await page.waitForSelector(ready);
+    if (path === '/implicit/') {
+      await page.waitForFunction(() => {
+        const iframe = document.querySelector<HTMLIFrameElement>('iframe#graph');
+        return !!iframe?.contentDocument?.getElementById('gl');
+      });
+    }
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'dark');
     if (path !== '/about/' && path !== '/implicit/') await page.locator('#theme-toggle').click();
     assert.deepEqual(await page.evaluate(() => (window as any).violations), []);
