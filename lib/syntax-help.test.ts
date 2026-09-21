@@ -36,6 +36,13 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('wa', 2, defs()).suggestions.find(s => s.name === 'wave')?.signature).toBe('wave(x)');
     expect(syntaxHelp('data.', 5, defs()).suggestions.map(s => s.name)).toEqual(['data.age', 'data.height']);
   });
+  it('does not suggest a vector field’s synthetic components', () => {
+    const d = buildDefs([scanDefinition('s = (x, y)')!]).defs;
+    expect(d.points.has('s')).toBe(true);
+    const names = (text: string) => syntaxHelp(text, text.length, d).suggestions.map(s => s.name);
+    expect(names('s')).not.toContain('s_x');
+    expect(names('s_')).not.toContain('s_x');
+  });
   it('shows nested call signatures and falls back to the enclosing function', () => {
     expect(syntaxHelp('f(sin(', 6, defs()).hint).toContain('sin(x)');
     expect(syntaxHelp('f(sin(x), ', 10, defs()).hint).toContain('f(x, q)');

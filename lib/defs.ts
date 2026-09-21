@@ -81,13 +81,20 @@ export interface Defs {
    * family too (its level sets; see planarField in grid.ts), so `theta = atan2(y,x);
    * r = 1 + cos(theta)` draws a polar grid and a cardioid, while
    * `rho = sqrt(x^2+y^2+z^2); rho = 2` only draws the sphere.
+   *
+   * A named vector that depends on position (`s = (x, y)`) stores its
+   * components here too (s_x, s_y). Those substitute like any field so
+   * `dot(s, s) = 1` is the unit circle, but they are not grid families —
+   * see pointComponentNames.
    */
   fields: Map<string, Expr>;
   /**
-   * Named points: constants whose right-hand side is a pair, like
-   * `A = (0, 0)` or `C = B + D`. A point named A lives in `consts` as the
-   * derived scalar components A_x, A_y (see pointComps); the name itself
-   * never appears in resolved expressions.
+   * Named points: a pair or triple on the right-hand side, like `A = (0, 0)`
+   * or `C = B + D`. A constant point named A lives in `consts` as the derived
+   * scalar components A_x, A_y (see pointComps). A point that depends on
+   * x, y, or z (`s = (x, y)`) is a vector field: the same name still expands
+   * under geometry lowering, and the components live in `fields` instead.
+   * The name itself never appears in resolved expressions.
    */
   points: Set<string>;
   pointDims: Map<string, number>;
@@ -486,6 +493,16 @@ export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
   defs.points.has(name) ? pointComps(name, defs.pointDims.get(name))
     : defs.vecStates.has(name) ? vecStateComps(name, defs.vecStates.get(name)!)
       : null;
+
+/** Synthetic field names of named vectors (`s_x`, `s_y` for `s = (x, y)`).
+ *  They substitute like coordinate fields but are not user-written grids. */
+export const pointComponentNames = (defs: Defs): Set<string> => {
+  const out = new Set<string>();
+  for (const p of defs.points) {
+    for (const c of pointComps(p, defs.pointDims.get(p))) out.add(c);
+  }
+  return out;
+};
 
 /**
  * Names with built-in meaning that definitions may not shadow.
@@ -1505,11 +1522,6 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
               throw new Error(`Cannot name a point ${d.name}: ${c} is already defined.`);
             }
           }
-          for (const item of e.items) {
-            for (const fv of freeVars(item)) {
-              if (SPACE.has(fv)) throw new Error('A point cannot depend on x, y, or z.');
-            }
-          }
           defs.points.add(d.name);
           defs.pointDims.set(d.name, e.items.length);
           store.length = 0;
@@ -1669,26 +1681,26 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       }
     }
   }
-  // A point component that reaches x/y/z through another definition would
-  // otherwise become a grid field; a point is a constant, so reject it.
-  for (const name of [...fieldNames]) {
-    const owner = compOwner.get(name);
-    if (!owner || !defs.points.has(owner)) continue;
-    errors.set(owner, 'A point cannot depend on x, y, or z.');
-    defs.points.delete(owner);
-    for (const c of pointComps(owner, defs.pointDims.get(owner))) {
-      defs.consts.delete(c);
-      fieldNames.delete(c);
-    }
+  // A named vector that depends on position is a vector field: every
+  // component becomes a coordinate field (`s = (x, y)` is the position
+  // vector). Constant siblings (`A = (x, 0)`) join them so the name stays
+  // one object; they are skipped when drawing grid families.
+  for (const p of [...defs.points]) {
+    const comps = pointComps(p, defs.pointDims.get(p));
+    if (!comps.some(c => fieldNames.has(c))) continue;
+    for (const c of comps) fieldNames.add(c);
   }
 
   const constNames = new Set(raw.filter(d => d.kind === 'const' && !fieldNames.has(d.name)).map(d => d.name));
   for (const name of fittedNames) constNames.add(name);
   for (const name of defs.consts.keys()) if (name.startsWith(defs.sequencePrefix + '_')) constNames.add(name);
-  // Point rows resolve to their component constants; dependencies see those.
+  // Constant point rows resolve to their component constants; a vector
+  // field's components are fields, not uniforms.
   for (const p of defs.points) {
     constNames.delete(p);
-    for (const c of pointComps(p, defs.pointDims.get(p))) constNames.add(c);
+    for (const c of pointComps(p, defs.pointDims.get(p))) {
+      if (!fieldNames.has(c)) constNames.add(c);
+    }
   }
 
   const pendingFields = new Map<string, Expr>();
@@ -1703,7 +1715,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const resolveField = (name: string): Expr => {
     const hit = defs.fields.get(name);
     if (hit) return hit;
-    if (fieldVisiting.has(name)) throw new Error(`${name} is defined in terms of itself.`);
+    const shown = compOwner.get(name) ?? name;
+    if (fieldVisiting.has(name)) throw new Error(`${shown} is defined in terms of itself.`);
     fieldVisiting.add(name);
     try {
       let e = pendingFields.get(name)!;
@@ -1714,7 +1727,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       if (Object.keys(sub).length) e = substVars(e, sub);
       for (const fv of freeVars(e)) {
         if (!SPACE.has(fv) && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
-          throw new Error(`${name} defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found ${fv}).`);
+          throw new Error(`${shown} defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found ${fv}).`);
         }
       }
       // Trial-evaluate to surface unsupported calls (re, im, …) now.
@@ -1727,11 +1740,20 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       fieldVisiting.delete(name);
     }
   };
+  const droppedPoints = new Set<string>();
   for (const name of pendingFields.keys()) {
+    const owner = compOwner.get(name);
+    if (owner && droppedPoints.has(owner)) continue;
     try {
       resolveField(name);
     } catch (e) {
-      errors.set(name, msg(e));
+      const shown = owner ?? name;
+      errors.set(shown, msg(e));
+      if (owner && defs.points.has(owner)) {
+        defs.points.delete(owner);
+        droppedPoints.add(owner);
+        for (const c of pointComps(owner, defs.pointDims.get(owner))) defs.fields.delete(c);
+      }
     }
   }
   // Grid families draw in definition order, not dependency-resolution order.

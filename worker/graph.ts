@@ -256,9 +256,12 @@ export function analyze(texts: string[], { readouts = true }: AnalyzeOpts = {}):
   const seenViewKinds = new Set<string>();
   for (const [ri, row] of rows.entries()) {
     if (row.def && !row.error && defs.pointDims.get(row.def.name) === 3) {
-      const expr: Expr = { kind: 'vec', items: compsOf(defs, row.def.name)!.map(name => ({ kind: 'var', name })) };
-      row.cls = classify(expr, constNames);
-      row.expr = expr;
+      const comps = compsOf(defs, row.def.name)!;
+      if (comps.every(c => constNames.has(c))) {
+        const expr: Expr = { kind: 'vec', items: comps.map(name => ({ kind: 'var', name })) };
+        row.cls = classify(expr, constNames);
+        row.expr = expr;
+      }
     }
     if (row.def || row.comment || row.error || row.cls || !row.text) continue;
     try {

@@ -1,7 +1,7 @@
 /** Pure, tolerant editor assistance. Suggestions write ordinary equation
  * text; an incomplete expression never needs to pass through the parser.
  */
-import { type Defs, shadowedFnNames } from './defs.ts';
+import { type Defs, pointComponentNames, shadowedFnNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { tildeRow } from './regression.ts';
 import { FUNCTIONS, NAME_SRC, NAME_START_CHARS, WRITTEN_NAME_CHARS, builtinFn, canonicalName } from './expr.ts';
@@ -123,7 +123,7 @@ export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: 
   values(defs.consts.keys(), 'Defined constant');
   values(defs.states.keys(), 'Simulation state');
   values(defs.vecStates.keys(), 'Vector state');
-  values(defs.fields.keys(), 'Coordinate field');
+  values([...defs.fields.keys()].filter(n => !pointComponentNames(defs).has(n)), 'Coordinate field');
   values(defs.points, 'Defined point');
   values(defs.mats.keys(), 'Defined matrix');
   values(defs.lists.keys(), 'Defined list');
