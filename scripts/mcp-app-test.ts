@@ -128,7 +128,7 @@ try {
   assert.equal(await frame.locator('.eq-line').count(), 2);
   assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('1.5'), 'Restores edits for the original tool result');
   assert.equal(await frame.locator('#app-status').textContent(), '');
-  assert.ok(await frame.locator('#app-reset').isVisible(), 'Reset is available after a confirmed graph');
+  assert.ok(await frame.locator('#app-reset').isVisible(), 'Reset appears when restored edits differ from the original');
   assert.ok(await frame.locator('#gl').evaluate((canvas: HTMLCanvasElement) => canvas.width > 0 && !!canvas.getContext('webgl2')));
   await frame.locator('.eq-slider input[type=range]').evaluate((input: HTMLInputElement) => {
     input.value = '3'; input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -150,6 +150,7 @@ try {
   await frame.locator('#app-reset').click();
   await frame.waitForFunction(() => document.querySelector('.eq-line')?.textContent?.includes('a = 2'));
   assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('a = 2'), 'Reset restores the original tool-result equations');
+  assert.ok(await frame.locator('#app-reset').isHidden(), 'Reset hides once the graph matches the original');
   await page.waitForFunction(() => (window as any).messages.some((m: any) =>
     m.method === 'ui/update-model-context' && m.params.structuredContent.equations[0].includes('a = 2')));
   await frame.locator('#app-open').click();
@@ -195,6 +196,7 @@ try {
   const sphere = await rpc('tools/call', { name: 'show_graph', arguments: { equations: ['x^2+y^2+z^2=9'] } });
   await page.evaluate(value => (window as any).sendResult(value), sphere);
   await frame.waitForFunction(() => document.querySelectorAll('.eq-line').length === 1);
+  assert.ok(await frame.locator('#app-reset').isHidden(), 'Reset stays hidden when the graph matches the original');
   // Worker-backed coordinate curve: proves blob worker creation works from
   // the foreign sandbox origin, not only ordinary 2D/3D shader rendering.
   const workerCreated = page.waitForEvent('worker');

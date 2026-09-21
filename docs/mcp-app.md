@@ -14,8 +14,9 @@ for the matching original result. Graphs still have shareable URLs.
 
 Embedded graphs start with the equation editor collapsed. Host theme, color and
 font variables style the controls, and host safe-area insets keep controls clear
-of overlays. Reset restores the confirmed tool-result equations, viewport, and
-simulation clock after slider, pan, or equation edits. Expand/Collapse is
+of overlays. Reset appears when the equations differ from the confirmed tool
+result and restores those original rows, the viewport, and the simulation
+clock. Expand/Collapse is
 available only when the host supports the destination mode, and follows the
 mode the host actually grants. Escape requests a return to inline mode when
 fullscreen, using the same capability checks.

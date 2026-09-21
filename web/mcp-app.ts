@@ -6,6 +6,7 @@ interface GraphEditor {
   getRows(): string[];
   setRows(rows: string[]): void;
   onChange(callback: (rows: string[]) => void): void;
+  onEdit(callback: () => void): void;
   setVisible(visible: boolean): void;
   flush(): void;
   dispose(): void;
@@ -74,10 +75,6 @@ export async function connectGraphApp(editor: GraphEditor) {
     open.href = `${origin}/g/${encodePayload(rows)}`;
   }
 
-  function syncReset() {
-    reset.hidden = !hasResult;
-  }
-
   function originalRows(): string[] | undefined {
     if (!hasResult || !source) return;
     try {
@@ -88,12 +85,18 @@ export async function connectGraphApp(editor: GraphEditor) {
     }
   }
 
+  function syncReset() {
+    const original = originalRows();
+    reset.hidden = !original || JSON.stringify(editor.getRows()) === source;
+  }
+
   function resetGraph() {
     const rows = originalRows();
     if (closing || !rows) return;
     // Always rebuild so pan, zoom, and the animation clock return with the rows.
     editor.setRows(rows);
     link(rows);
+    syncReset();
     void publish(rows);
   }
 
@@ -256,6 +259,7 @@ export async function connectGraphApp(editor: GraphEditor) {
     syncReset();
     status.textContent = 'Graph request cancelled.';
   };
+  editor.onEdit(() => { if (!closing) syncReset(); });
   editor.onChange(rows => { if (!closing) void publish(rows); });
 
   reset.addEventListener('click', resetGraph, { signal: events.signal });
