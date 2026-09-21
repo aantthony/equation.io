@@ -688,7 +688,16 @@ describe('syntax resource', () => {
     const args = { equations: ['a = 2', 'y = a sin(x)'] };
     const shown = await rpc('tools/call', { name: 'show_graph', arguments: args });
     const encoded = await rpc('tools/call', { name: 'encode_graph_url', arguments: args });
-    expect(shown.body.result).toEqual(encoded.body.result);
+    const { preview, preview_omits, ...encodedValue } = encoded.body.result.structuredContent;
+    expect(preview).toEqual(expect.any(String));
+    expect(preview_omits).toBeUndefined();
+    expect(shown.body.result.structuredContent).toEqual(encodedValue);
+    expect(shown.body.result.structuredContent).not.toHaveProperty('preview');
+    expect(shown.body.result.structuredContent).not.toHaveProperty('preview_omits');
+    expect(JSON.parse(shown.body.result.content[0].text)).toEqual(shown.body.result.structuredContent);
+    expect(show.outputSchema.required).toEqual(['valid', 'url', 'share_url', 'rows']);
+    expect(show.outputSchema.properties).not.toHaveProperty('preview');
+    expect(show.outputSchema.properties).not.toHaveProperty('preview_omits');
   });
 
   it('reports missing UI assets instead of returning the website fallback as a widget', async () => {

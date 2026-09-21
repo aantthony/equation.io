@@ -398,10 +398,17 @@ function requestRender() {
   renderTimer = setTimeout(run, 200);
 }
 
-const startTime = performance.now();
+let startTime = performance.now();
 
 /** Seconds since load: the value of `t` everywhere in a graph. */
 const graphTime = () => ((pausedAt ?? performance.now()) - startTime - pausedMilliseconds) / 1000;
+
+function restartGraphClock() {
+  const now = performance.now();
+  startTime = now;
+  pausedMilliseconds = 0;
+  if (pausedAt !== null) pausedAt = now;
+}
 
 function setGraphVisible(visible: boolean) {
   if (rendererDisposed) return;
@@ -4201,6 +4208,7 @@ if (mcpApp) {
       // A new tool result replaces the document, including its undo history.
       // Pending gestures belong to the old document, not the incoming rows.
       resetViewport();
+      restartGraphClock();
       if (urlTimer !== null) clearTimeout(urlTimer);
       urlTimer = null;
       urlPending = false;
@@ -4208,6 +4216,7 @@ if (mcpApp) {
       equations.length = 0;
       rows.forEach(t => addEquation(t));
       recompileAll();
+      resetState();
       renderAll();
       requestRender();
     },

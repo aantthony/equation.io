@@ -31,6 +31,7 @@ export async function connectGraphApp(editor: GraphEditor) {
   const status = document.getElementById('app-status')!;
   const open = document.getElementById('app-open') as HTMLAnchorElement;
   const expand = document.getElementById('app-expand') as HTMLButtonElement;
+  const reset = document.getElementById('app-reset') as HTMLButtonElement;
   const configuredOrigin = document.querySelector<HTMLMetaElement>('meta[name="equation-origin"]')!.content;
   const origin = configuredOrigin === '__EQUATION_ORIGIN__' ? location.origin : new URL(configuredOrigin).origin;
   // Optional ChatGPT persistence; all communication uses the standard bridge.
@@ -71,6 +72,29 @@ export async function connectGraphApp(editor: GraphEditor) {
 
   function link(rows: string[]) {
     open.href = `${origin}/g/${encodePayload(rows)}`;
+  }
+
+  function syncReset() {
+    reset.hidden = !hasResult;
+  }
+
+  function originalRows(): string[] | undefined {
+    if (!hasResult || !source) return;
+    try {
+      const rows = JSON.parse(source);
+      return strings(rows) ? rows : undefined;
+    } catch {
+      return;
+    }
+  }
+
+  function resetGraph() {
+    const rows = originalRows();
+    if (closing || !rows) return;
+    // Always rebuild so pan, zoom, and the animation clock return with the rows.
+    editor.setRows(rows);
+    link(rows);
+    void publish(rows);
   }
 
   async function publish(rows: string[]) {
@@ -154,6 +178,7 @@ export async function connectGraphApp(editor: GraphEditor) {
     hasResult = false; // Streamed previews must not be persisted as confirmed results.
     inputSource = undefined;
     pendingPreview = rows;
+    syncReset();
     status.textContent = 'Drawing graph…';
     // Coalesce token bursts. The editor already tolerates unfinished equations.
     if (previewTimer !== undefined) return;
@@ -175,6 +200,7 @@ export async function connectGraphApp(editor: GraphEditor) {
     // validation feedback, and any user edits for that same graph.
     if (hasResult && key === source) return;
     hasResult = false;
+    syncReset();
     if (key !== inputSource) {
       const wanted = restored?.source === key && strings(restored.equations) ? restored.equations : rows;
       showRows(wanted);
@@ -195,6 +221,7 @@ export async function connectGraphApp(editor: GraphEditor) {
       // them live would invite edits that never publish (hasResult stays false).
       showRows([]);
       inputSource = undefined;
+      syncReset();
       status.textContent = 'Could not load this graph. Ask to try again.';
       return;
     }
@@ -204,6 +231,7 @@ export async function connectGraphApp(editor: GraphEditor) {
       : null;
     if (!strings(rows)) {
       inputSource = undefined;
+      syncReset();
       status.textContent = 'No graph equations received.';
       return;
     }
@@ -215,6 +243,7 @@ export async function connectGraphApp(editor: GraphEditor) {
     showRows(wanted);
     inputSource = undefined;
     hasResult = true;
+    syncReset();
     link(wanted);
     status.textContent = data?.valid === false ? 'Check the highlighted equations' : '';
     if (JSON.stringify(wanted) !== source) void publish(wanted);
@@ -224,10 +253,12 @@ export async function connectGraphApp(editor: GraphEditor) {
     cancelPreview();
     hasResult = false;
     inputSource = previewSource = undefined;
+    syncReset();
     status.textContent = 'Graph request cancelled.';
   };
   editor.onChange(rows => { if (!closing) void publish(rows); });
 
+  reset.addEventListener('click', resetGraph, { signal: events.signal });
   open.addEventListener('click', event => {
     link(editor.getRows()); // Include edits still waiting for the throttled callback.
     if (connected && app.getHostCapabilities()?.openLinks) {

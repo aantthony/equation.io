@@ -124,12 +124,22 @@ The result returns text and structured data only. "rows" gives each equation's v
 ];
 
 // Keep validation/link-only calls separate from rendering a new chat widget.
+// Static share-card fields (`preview`, `preview_omits`) stay on encode_graph_url:
+// the widget is the picture, and "not attached" reads as a missing graph.
+const showGraphOutputProperties = Object.fromEntries(
+  Object.entries(TOOLS[0].outputSchema.properties).filter(([key]) => key !== 'preview' && key !== 'preview_omits'),
+);
 const SHOW_GRAPH_TOOL = {
   ...TOOLS[0],
   name: 'show_graph',
   title: 'Show an interactive graph',
   annotations: { title: 'Show an interactive graph', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-  description: 'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns the same per-row validation and share links as encode_graph_url; a row with status "error" is not drawn until its text is corrected and the graph resubmitted. Use encode_graph_url for validation or link-only requests. In clients without UI support, provide share_url.',
+  description: 'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns per-row validation and share links; a row with status "error" is not drawn until its text is corrected and the graph resubmitted. Use encode_graph_url for validation or link-only requests (including share-link preview notes). In clients without UI support, provide share_url.',
+  outputSchema: {
+    ...TOOLS[0].outputSchema,
+    properties: showGraphOutputProperties,
+    required: ['valid', 'url', 'share_url', 'rows'],
+  },
   _meta: { ui: { resourceUri: GRAPH_UI_URI } },
 };
 
@@ -370,7 +380,12 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         // Accept former names for clients with cached tool definitions.
         if (name === 'encode_graph_url' || name === 'create_graph' || name === 'show_graph') {
           const made = await encodeGraphUrl(origin, args);
-          value = made.value;
+          if (name === 'show_graph') {
+            const { preview: _preview, preview_omits: _omits, ...shown } = made.value;
+            value = shown;
+          } else {
+            value = made.value;
+          }
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
         } else if (name === 'decode_graph_url' || name === 'read_graph') {
           value = decodeGraphUrl(args);

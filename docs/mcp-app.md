@@ -14,9 +14,11 @@ for the matching original result. Graphs still have shareable URLs.
 
 Embedded graphs start with the equation editor collapsed. Host theme, color and
 font variables style the controls, and host safe-area insets keep controls clear
-of overlays. Expand/Collapse is available only when the host supports the
-destination mode, and follows the mode the host actually grants. Escape requests
-a return to inline mode when fullscreen, using the same capability checks.
+of overlays. Reset restores the confirmed tool-result equations, viewport, and
+simulation clock after slider, pan, or equation edits. Expand/Collapse is
+available only when the host supports the destination mode, and follows the
+mode the host actually grants. Escape requests a return to inline mode when
+fullscreen, using the same capability checks.
 
 Tool arguments render immediately on `ontoolinput`, before server validation
 returns. `ontoolinputpartial` previews streamed equations, coalescing bursts

@@ -95,8 +95,10 @@ the server's `syntax` MCP resource, so the full reference can be pulled on
 demand instead of living in a tool description. No authentication required.
 
 Use `show_graph` to display the interactive graph directly in an MCP Apps host
-such as ChatGPT web. It accepts the same `equations` array and returns the same
-validation and links as `encode_graph_url`, plus an associated UI resource.
+such as ChatGPT web. It accepts the same `equations` array and returns per-row
+validation and share links plus an associated UI resource. It does not include
+`preview` / `preview_omits` — those describe the share-link card on
+`encode_graph_url`, not the widget.
 The widget supports editing, sliders, zoom, and 3D rotation; edits update the
 model's context with the complete current equations and share_url. Preserve
 those edited rows on follow-up requests. Use `encode_graph_url` for validation
