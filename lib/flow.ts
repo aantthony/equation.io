@@ -21,11 +21,9 @@ export function fieldEvaluator(comps: Expr[], env: Record<string, number> = {}) 
   for (const [n, i] of slots) values[i] = env[n] ?? 0;
   const programs: Prog[] = comps.map(c => compileProg(c, slots));
   const axes = ['x', 'y', 'z'].map(n => slots.get(n)!);
-  const out = new Array<number>(programs.length);
   return (p: number[]): number[] => {
     for (let k = 0; k < p.length; k++) values[axes[k]] = p[k];
-    for (let i = 0; i < programs.length; i++) out[i] = run(programs[i], values, EVAL_STACK);
-    return out;
+    return programs.map(prog => run(prog, values, EVAL_STACK));
   };
 }
 

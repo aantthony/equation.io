@@ -7,7 +7,6 @@ const cross = (a: number[], b: number[]) => [
   a[2] * b[0] - a[0] * b[2],
   a[0] * b[1] - a[1] * b[0],
 ];
-const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a: number[], b: number[]) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const vert = (pos: Float32Array, i: number) => [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]];
 

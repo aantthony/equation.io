@@ -51,6 +51,9 @@ try {
   await load(['(x^2+y^2+z^2,z)=(9,1)']);
   await page.waitForFunction(()=>(window as any).objectTest.strips>0);
   assert.deepEqual(errors,[]);console.log('PASS surface intersection continuation');
+  await load(['(min(x^2+y^2+z^2,100),z)=(9,1)']);
+  await page.waitForFunction(()=>(window as any).objectTest.strips>0);
+  assert.deepEqual(errors,[]);console.log('PASS finite-difference space curve');
   await load(['(x^2,y)=(1,0)']);
   await page.getByRole('button',{name:'certify search box',exact:true}).click();
   await page.getByText(/2 certified roots; complete/).waitFor({timeout:15000});

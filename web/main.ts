@@ -746,12 +746,17 @@ function render() {
     const pad = vhi.map((v, k) => 0.25 * (v - vlo[k]));
     const lo = vlo.map((v, k) => v - pad[k]);
     const hi = vhi.map((v, k) => v + pad[k]);
-    // Arrow glyphs are one eval per lattice point (~1ms) — sample t live so a
-    // driving term like sin(t) does not crawl at the worker's 4 Hz snapshot.
+    // Arrow glyphs sample live t so an animated field stays smooth.
     if (cls.plot.type === 'vfield3d' && eq.showArrows) {
       traceQueue.cancelPending(eq.id);
-      return traceField(residuals, lo, hi, { ...constEnv, t: time }, true)
-        .flatMap(path => [...path, Array(dim).fill(NaN)]);
+      try {
+        return traceField(residuals, lo, hi, { ...constEnv, t: time }, true)
+          .flatMap(path => [...path, Array(dim).fill(NaN)]);
+      } catch (e) {
+        (eq.familyParent ?? eq).error = e instanceof Error ? e.message : String(e);
+        reconcile();
+        return [];
+      }
     }
     let environment = traceEnvironments.get(cls);
     if (!environment) {

@@ -35,6 +35,12 @@ describe('3D objects across definition, analysis and rendering', () => {
     if (p.type === 'vfield3d') expect(fieldEvaluator(p.comps)([2,0,0])).toEqual([0,2,2]);
     const moving = last(['q=x+t', "(q',y',z')=(0,0,0)"]).plot;
     if (moving.type === 'vfield3d') expect(fieldEvaluator(moving.comps, { t: 4 })([2,0,0])).toEqual([-1,0,0]);
+    const f = fieldEvaluator(exprs(['x', 'y']));
+    const u = f([1, 2]), v = f([3, 4]);
+    expect(u).toEqual([1, 2]);
+    expect(v).toEqual([3, 4]);
+    const h = 1e-6, fa = f([2 + h, 0]), fb = f([2 - h, 0]);
+    expect((fa[0] - fb[0]) / (2 * h)).toBeCloseTo(1);
   });
   it('traces normalized fields in either dimension with deterministic work bounds', () => {
     const p = streamline(v => [-v[1], v[0]], [1,0], .01, [-2,-2],[2,2], 100);
@@ -147,6 +153,10 @@ describe('solver extensions and comparison notes', () => {
     expect(paths.every(p => p.length <= 2*INTERSECTION_STEPS+1)).toBe(true);
     for (const p of paths.flat()) { expect(p[2]).toBeCloseTo(1,8); expect(p[0]**2+p[1]**2+p[2]**2).toBeCloseTo(9,7); }
     expect(paths.some(p => Math.hypot(...p[0].map((v,k)=>v-p.at(-1)![k])) < .1)).toBe(true);
+    // min has no symbolic Jacobian, so this is the finite-difference fallback.
+    const fd = traceIntersection(exprs(['min(x^2+y^2+z^2,100)-9','z-1']),[-4,-4,-4],[4,4,4]);
+    expect(fd.length).toBeGreaterThan(0);
+    for (const p of fd.flat()) { expect(p[2]).toBeCloseTo(1,5); expect(p[0]**2+p[1]**2+p[2]**2).toBeCloseTo(9,4); }
   });
   it('labels rational and quadratic complex roots exactly and keeps an algebraic fallback', () => {
     expect(complexRootLabel(parseExpr('w^3=1'),[-.5,Math.sqrt(3)/2],{})).toBe('-1/2 + √3/2 i');
