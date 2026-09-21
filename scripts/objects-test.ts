@@ -19,7 +19,9 @@ try {
     (window as unknown as {objectTest:typeof state}).objectTest=state;
     const proto=WebGL2RenderingContext.prototype;
     const draw=proto.drawArrays;
-    proto.drawArrays=function(mode,first,count){if(mode===this.LINE_STRIP && count>2) state.strips++; if(mode===this.TRIANGLES && count===3) state.triangles++; return draw.call(this,mode,first,count);};
+    proto.drawArrays=function(mode,first,count){if(mode===this.LINE_STRIP && count>2) state.strips++; if(mode===this.TRIANGLES) state.triangles += count/3; return draw.call(this,mode,first,count);};
+    const drawEI=proto.drawElementsInstanced;
+    proto.drawElementsInstanced=function(mode,count,type,offset,primcount){if(mode===this.TRIANGLES) state.triangles += count/3*primcount; return drawEI.call(this,mode,count,type,offset,primcount);};
     const locations=new WeakMap<WebGLUniformLocation,string>();
     const loc=proto.getUniformLocation;
     proto.getUniformLocation=function(program,name){const l=loc.call(this,program,name);if(l)locations.set(l,name);return l;};
@@ -49,6 +51,9 @@ try {
   await load(['(x^2+y^2+z^2,z)=(9,1)']);
   await page.waitForFunction(()=>(window as any).objectTest.strips>0);
   assert.deepEqual(errors,[]);console.log('PASS surface intersection continuation');
+  await load(['(min(x^2+y^2+z^2,100),z)=(9,1)']);
+  await page.waitForFunction(()=>(window as any).objectTest.strips>0);
+  assert.deepEqual(errors,[]);console.log('PASS finite-difference space curve');
   await load(['(x^2,y)=(1,0)']);
   await page.getByRole('button',{name:'certify search box',exact:true}).click();
   await page.getByText(/2 certified roots; complete/).waitFor({timeout:15000});

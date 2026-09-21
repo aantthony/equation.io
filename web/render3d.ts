@@ -7,7 +7,7 @@
  * 2D-only equations (no z) still work here: F(x,y) extrudes to a vertical
  * sheet, which is exactly its locus in R^3.
  */
-import { arrowHead } from '../lib/geom.ts';
+import { arrowConeInstances, buildUnitCone } from '../lib/cone.ts';
 import { finiteRuns } from '../lib/curve3d.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { ProgramCache, QUAD_VERT, compileProgram } from './gl.ts';
@@ -392,6 +392,76 @@ void main() {
 }
 `;
 
+/** Instanced unit cone: local +z along the shaft, tip at the origin.
+ *  Lighting uses the analytic radial normal (from interpolated local xy),
+ *  so a coarse tessellation still shades as a smooth cone. aNormal.z < 0
+ *  marks the base cap, whose normal is just −local z. */
+const CONE_VERT = `#version 300 es
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=2) in vec3 aTip;
+layout(location=3) in vec3 aDir;
+layout(location=4) in vec2 aScale;
+uniform mat4 uVP;
+out vec3 vPos;
+out vec3 vLocal;
+out vec3 vX;
+out vec3 vY;
+out vec3 vZ;
+out vec2 vScale;
+out float vCap;
+void main() {
+  vec3 z = aDir;
+  vec3 h = abs(z.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+  vec3 x = normalize(cross(h, z));
+  vec3 y = cross(z, x);
+  vec3 p = aTip + x * aPos.x * aScale.x + y * aPos.y * aScale.x + z * aPos.z * aScale.y;
+  vPos = p;
+  vLocal = aPos;
+  vX = x; vY = y; vZ = z;
+  vScale = aScale;
+  vCap = aNormal.z < 0.0 ? 1.0 : 0.0;
+  gl_Position = uVP * vec4(p, 1.0);
+}
+`;
+
+const CONE_FRAG = `#version 300 es
+precision highp float;
+uniform vec3 uColor;
+uniform vec3 uEye;
+in vec3 vPos;
+in vec3 vLocal;
+in vec3 vX;
+in vec3 vY;
+in vec3 vZ;
+in vec2 vScale;
+in float vCap;
+out vec4 outColor;
+void main() {
+  vec3 localN;
+  if (vCap > 0.5) {
+    localN = vec3(0.0, 0.0, -1.0);
+  } else {
+    float rl = length(vLocal.xy);
+    localN = rl > 1e-8 ? normalize(vec3(vLocal.xy / rl, 1.0)) : vec3(0.0, 0.0, 1.0);
+  }
+  vec3 n = normalize(vX * localN.x / vScale.x + vY * localN.y / vScale.x + vZ * localN.z / vScale.y);
+  vec3 rd = normalize(vPos - uEye);
+  if (any(isnan(n))) n = -rd;
+  if (dot(n, rd) > 0.0) n = -n;
+  vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
+  float diffuse = max(dot(n, lightDir), 0.0);
+  float sky = 0.5 + 0.5 * n.z;
+  vec3 halfway = normalize(lightDir - rd);
+  float spec = pow(max(dot(n, halfway), 0.0), 96.0);
+  float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
+  vec3 col = uColor * (0.26 + 0.22 * sky + 0.46 * diffuse)
+           + vec3(1.0) * spec * 0.7
+           + vec3(0.35, 0.4, 0.5) * fresnel * 0.3;
+  outColor = vec4(col, 1.0);
+}
+`;
+
 const LINE_VERT = `#version 300 es
 layout(location=0) in vec3 aPos;
 uniform mat4 uVP;
@@ -532,6 +602,10 @@ export class Renderer3D {
   private tubeNrmBuf: WebGLBuffer;
   private tubeUvBuf: WebGLBuffer;
   private tubeIdxBuf: WebGLBuffer;
+  private coneProgram: WebGLProgram;
+  private coneVao: WebGLVertexArrayObject;
+  private coneInstBuf: WebGLBuffer;
+  private coneIndexCount: number;
   private gridVao: WebGLVertexArrayObject;
   private gridIndexCount: number;
 
@@ -566,6 +640,37 @@ export class Renderer3D {
     gl.enableVertexAttribArray(2);
     gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.tubeIdxBuf);
+    gl.bindVertexArray(null);
+
+    const cone = buildUnitCone();
+    this.coneProgram = compileProgram(gl, CONE_VERT, CONE_FRAG);
+    this.coneVao = gl.createVertexArray()!;
+    this.coneInstBuf = gl.createBuffer()!;
+    this.coneIndexCount = cone.indices.length;
+    gl.bindVertexArray(this.coneVao);
+    const conePos = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, conePos);
+    gl.bufferData(gl.ARRAY_BUFFER, cone.positions, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    const coneNrm = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, coneNrm);
+    gl.bufferData(gl.ARRAY_BUFFER, cone.normals, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.coneInstBuf);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 3, gl.FLOAT, false, 32, 0);
+    gl.vertexAttribDivisor(2, 1);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 3, gl.FLOAT, false, 32, 12);
+    gl.vertexAttribDivisor(3, 1);
+    gl.enableVertexAttribArray(4);
+    gl.vertexAttribPointer(4, 2, gl.FLOAT, false, 32, 24);
+    gl.vertexAttribDivisor(4, 1);
+    const coneIdx = gl.createBuffer()!;
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, coneIdx);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cone.indices, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
 
     // Static (u,v) unit-square grid, displaced per-surface in the vertex shader.
@@ -717,10 +822,12 @@ export class Renderer3D {
     for (const c of scene.curves) {
       setCommon(this.lineProgram);
       gl.uniform3f(gl.getUniformLocation(this.lineProgram, 'uColor'), ...c.color);
-      gl.bufferData(gl.ARRAY_BUFFER, c.pts, gl.DYNAMIC_DRAW);
+      const cones = c.arrow ? arrowConeInstances(c.pts, finiteRuns(c.pts), boxR) : null;
+      const pts = cones ? cones.shafts : c.pts;
+      gl.bufferData(gl.ARRAY_BUFFER, pts, gl.DYNAMIC_DRAW);
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 1);
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uFade'), c.fade ? 1 : 0);
-      gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uCount'), c.pts.length / 3);
+      gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uCount'), pts.length / 3);
       if (c.triangle) {
         gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), .18);
         gl.depthMask(false);
@@ -729,21 +836,33 @@ export class Renderer3D {
         gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 1);
       }
       // One strip per finite run: a NaN vertex inside a strip is undefined
-      // behaviour in GL, not a pen lift.
-      for (const [first, count] of finiteRuns(c.pts)) gl.drawArrays(gl.LINE_STRIP, first, count);
-      if (c.arrow && c.pts.length >= 6) {
-        const transform = (m: Mat4, p: number[]) => {
-          const q = [0, 1, 2, 3].map(i => m[i] * p[0] + m[i + 4] * p[1] + m[i + 8] * p[2] + m[i + 12]);
-          return q.map(v => v / q[3]);
-        };
-        const a = transform(vp, Array.from(c.pts.slice(-6, -3)));
-        const b = transform(vp, Array.from(c.pts.slice(-3)));
-        const head = arrowHead(a[0] * w / 2, a[1] * h / 2, b[0] * w / 2, b[1] * h / 2, 12 * (window.devicePixelRatio || 1));
-        if (head && b[2] >= -1 && b[2] <= 1) {
-          const tri = [head.tip, head.left, head.right].flatMap(p => transform(invVp, [2 * p[0] / w, 2 * p[1] / h, b[2]]).slice(0, 3));
-          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tri), gl.DYNAMIC_DRAW);
-          gl.drawArrays(gl.TRIANGLES, 0, 3);
+      // behaviour in GL, not a pen lift. A lattice of 2-point glyphs packs
+      // as LINES so hundreds of arrows are one draw.
+      const runs = finiteRuns(pts);
+      const glyphLattice = c.arrow && runs.length > 1 && runs.every(([, n]) => n === 2);
+      if (glyphLattice) {
+        const packed = new Float32Array(runs.length * 6);
+        let o = 0;
+        for (const [first] of runs) {
+          const i = first * 3;
+          packed[o++] = pts[i]; packed[o++] = pts[i + 1]; packed[o++] = pts[i + 2];
+          packed[o++] = pts[i + 3]; packed[o++] = pts[i + 4]; packed[o++] = pts[i + 5];
         }
+        gl.bufferData(gl.ARRAY_BUFFER, packed, gl.DYNAMIC_DRAW);
+        gl.drawArrays(gl.LINES, 0, runs.length * 2);
+      } else {
+        for (const [first, count] of runs) gl.drawArrays(gl.LINE_STRIP, first, count);
+      }
+      if (cones && cones.count) {
+        setCommon(this.coneProgram);
+        gl.uniform3f(gl.getUniformLocation(this.coneProgram, 'uColor'), ...c.color);
+        gl.uniform3f(gl.getUniformLocation(this.coneProgram, 'uEye'), ...eye);
+        gl.bindVertexArray(this.coneVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.coneInstBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, cones.instances, gl.DYNAMIC_DRAW);
+        gl.drawElementsInstanced(gl.TRIANGLES, this.coneIndexCount, gl.UNSIGNED_SHORT, 0, cones.count);
+        gl.bindVertexArray(this.dynVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.dynBuf);
       }
     }
     for (const s of scene.segments) {
