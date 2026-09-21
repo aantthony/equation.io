@@ -101,6 +101,7 @@ try {
   await frame.waitForFunction(() => document.querySelectorAll('.eq-line').length === 2);
   assert.ok((await frame.locator('.eq-line').last().textContent())?.includes('sin('), 'Partial arguments render before tool completion');
   assert.equal(await frame.locator('#app-status').textContent(), 'Drawing graph…');
+  assert.ok(await frame.locator('#app-reset').isHidden(), 'Reset waits for a confirmed graph');
   await page.evaluate(() => (window as any).sendInput({ equations: ['a = 2', 'y = a sin(x)'] }));
   await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === '');
   assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('1.5'), 'Complete input restores saved edits before the result');
@@ -127,6 +128,7 @@ try {
   assert.equal(await frame.locator('.eq-line').count(), 2);
   assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('1.5'), 'Restores edits for the original tool result');
   assert.equal(await frame.locator('#app-status').textContent(), '');
+  assert.ok(await frame.locator('#app-reset').isVisible(), 'Reset appears when restored edits differ from the original');
   assert.ok(await frame.locator('#gl').evaluate((canvas: HTMLCanvasElement) => canvas.width > 0 && !!canvas.getContext('webgl2')));
   await frame.locator('.eq-slider input[type=range]').evaluate((input: HTMLInputElement) => {
     input.value = '3'; input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -145,6 +147,12 @@ try {
     input.value = '4'; input.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await page.waitForFunction(() => (window as any).messages.some((m: any) => m.method === 'ui/update-model-context' && m.params.structuredContent.equations[0].includes('4')));
+  await frame.locator('#app-reset').click();
+  await frame.waitForFunction(() => document.querySelector('.eq-line')?.textContent?.includes('a = 2'));
+  assert.ok((await frame.locator('.eq-line').first().textContent())?.includes('a = 2'), 'Reset restores the original tool-result equations');
+  assert.ok(await frame.locator('#app-reset').isHidden(), 'Reset hides once the graph matches the original');
+  await page.waitForFunction(() => (window as any).messages.some((m: any) =>
+    m.method === 'ui/update-model-context' && m.params.structuredContent.equations[0].includes('a = 2')));
   await frame.locator('#app-open').click();
   await page.waitForFunction(() => (window as any).messages.some((m: any) => m.method === 'ui/open-link'));
   await frame.locator('#app-expand').click();
@@ -183,10 +191,12 @@ try {
   await page.evaluate(() => (window as any).sendResult({ isError: true, content: [] }));
   await frame.waitForFunction(() => document.getElementById('app-status')?.textContent === 'Could not load this graph. Ask to try again.');
   assert.equal(await frame.locator('.eq-line').count(), 0, 'Error results clear the previewed rows');
+  assert.ok(await frame.locator('#app-reset').isHidden(), 'Reset hides when the graph is cleared');
 
   const sphere = await rpc('tools/call', { name: 'show_graph', arguments: { equations: ['x^2+y^2+z^2=9'] } });
   await page.evaluate(value => (window as any).sendResult(value), sphere);
   await frame.waitForFunction(() => document.querySelectorAll('.eq-line').length === 1);
+  assert.ok(await frame.locator('#app-reset').isHidden(), 'Reset stays hidden when the graph matches the original');
   // Worker-backed coordinate curve: proves blob worker creation works from
   // the foreign sandbox origin, not only ordinary 2D/3D shader rendering.
   const workerCreated = page.waitForEvent('worker');
@@ -241,7 +251,7 @@ try {
   assert.equal(await frame.evaluate(() => (window as any).renderFrames), disposedFrames, 'No rendering restarts after teardown');
   assert.equal(await frame.locator('.eq-line').count(), 3, 'Late tool results are ignored');
   assert.deepEqual(errors, []);
-  console.log('PASS: production UI resource, cross-origin CSP, WebGL, worker tracing, early/partial tool input, cancellation, validation errors, sliders, context updates, state restoration, links, fullscreen negotiation, host styles, safe areas, narrow layout, visibility pause/resume, and teardown');
+  console.log('PASS: production UI resource, cross-origin CSP, WebGL, worker tracing, early/partial tool input, cancellation, validation errors, sliders, reset, context updates, state restoration, links, fullscreen negotiation, host styles, safe areas, narrow layout, visibility pause/resume, and teardown');
 } finally {
   await browser.close();
 }

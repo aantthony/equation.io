@@ -398,10 +398,17 @@ function requestRender() {
   renderTimer = setTimeout(run, 200);
 }
 
-const startTime = performance.now();
+let startTime = performance.now();
 
 /** Seconds since load: the value of `t` everywhere in a graph. */
 const graphTime = () => ((pausedAt ?? performance.now()) - startTime - pausedMilliseconds) / 1000;
+
+function restartGraphClock() {
+  const now = performance.now();
+  startTime = now;
+  pausedMilliseconds = 0;
+  if (pausedAt !== null) pausedAt = now;
+}
 
 function setGraphVisible(visible: boolean) {
   if (rendererDisposed) return;
@@ -561,6 +568,7 @@ const framed = document.documentElement.hasAttribute('data-embed');
 /** MCP widget or a framed graph: no address-bar writes, no featured default. */
 const embedded = mcpApp || framed;
 let graphChanged: ((rows: string[]) => void) | undefined;
+let graphEdited: (() => void) | undefined;
 let traceWorker: Worker | undefined;
 const traceQueue = new TraceQueue((message: TraceMessage) => {
   if (rendererDisposed) return;
@@ -2062,6 +2070,7 @@ let urlPending = false;
 let urlLastWrite = 0;
 
 function saveUrl() {
+  graphEdited?.();
   urlPending = true;
   const wait = URL_INTERVAL - (performance.now() - urlLastWrite);
   if (wait <= 0) {
@@ -4201,6 +4210,7 @@ if (mcpApp) {
       // A new tool result replaces the document, including its undo history.
       // Pending gestures belong to the old document, not the incoming rows.
       resetViewport();
+      restartGraphClock();
       if (urlTimer !== null) clearTimeout(urlTimer);
       urlTimer = null;
       urlPending = false;
@@ -4208,10 +4218,12 @@ if (mcpApp) {
       equations.length = 0;
       rows.forEach(t => addEquation(t));
       recompileAll();
+      resetState();
       renderAll();
       requestRender();
     },
     onChange: cb => { graphChanged = cb; },
+    onEdit: cb => { graphEdited = cb; },
     setVisible: setGraphVisible,
     flush: flushViewportWriteback,
     dispose: () => {
@@ -4221,6 +4233,7 @@ if (mcpApp) {
       window.removeEventListener('resize', resize);
       cancelRender();
       graphChanged = undefined;
+      graphEdited = undefined;
       if (urlTimer !== null) clearTimeout(urlTimer);
       if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
       if (noticeTimer !== null) clearTimeout(noticeTimer);
