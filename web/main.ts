@@ -733,8 +733,9 @@ function render() {
     let vhi: number[];
     if (dim === 3) {
       const r = cameraBoxR(camera);
-      vlo = [-r, -r, -r];
-      vhi = [r, r, r];
+      const [tx, ty, tz] = camera.target;
+      vlo = [tx - r, ty - r, tz - r];
+      vhi = [tx + r, ty + r, tz + r];
     } else {
       const dpr = window.devicePixelRatio || 1;
       const halfW = ((canvas.clientWidth * dpr) / 2) * view.upp;
