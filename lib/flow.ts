@@ -7,6 +7,10 @@ import { exceedsNodes } from './size.ts';
 export const FLOW_SEEDS = 32;
 export const FLOW_STEPS = 256;
 export const FLOW_NODE_LIMIT = 8192;
+/** Arrow glyphs per axis; a 3-vector field is an N×N×N lattice. */
+export const FLOW_GLYPH_N = 9;
+
+const EVAL_STACK = new Float64Array(32768);
 
 export function fieldEvaluator(comps: Expr[], env: Record<string, number> = {}) {
   if (comps.some(c => exceedsNodes(c, FLOW_NODE_LIMIT))) throw new Error('This field is too large to trace (8192 nodes per component).');
@@ -16,10 +20,12 @@ export function fieldEvaluator(comps: Expr[], env: Record<string, number> = {}) 
   const values = new Float64Array(slots.size);
   for (const [n, i] of slots) values[i] = env[n] ?? 0;
   const programs: Prog[] = comps.map(c => compileProg(c, slots));
-  const stack = new Float64Array(32768);
+  const axes = ['x', 'y', 'z'].map(n => slots.get(n)!);
+  const out = new Array<number>(programs.length);
   return (p: number[]): number[] => {
-    p.forEach((v, k) => values[slots.get(['x', 'y', 'z'][k])!] = v);
-    return programs.map(prog => run(prog, values, stack));
+    for (let k = 0; k < p.length; k++) values[axes[k]] = p[k];
+    for (let i = 0; i < programs.length; i++) out[i] = run(programs[i], values, EVAL_STACK);
+    return out;
   };
 }
 
@@ -57,10 +63,13 @@ export function traceField(comps: Expr[], lo: number[], hi: number[], env: Recor
   if (!(span > 0) || !Number.isFinite(span)) return [];
   const paths: number[][][] = [];
   if (glyphs) {
-    for (let i = 0; i < 125; i++) {
-      const seed = lo.map((v, k) => v + (hi[k] - v) * ((Math.floor(i / 5 ** k) % 5 + .5) / 5));
+    const n = FLOW_GLYPH_N;
+    const count = n ** comps.length;
+    const glyphLen = span * .28 / n;
+    for (let i = 0; i < count; i++) {
+      const seed = lo.map((v, k) => v + (hi[k] - v) * ((Math.floor(i / n ** k) % n + .5) / n));
       const v = f(seed), len = Math.hypot(...v);
-      if (len > 1e-12 && Number.isFinite(len)) paths.push([seed, seed.map((c, k) => c + span * .09 * v[k] / len)]);
+      if (len > 1e-12 && Number.isFinite(len)) paths.push([seed, seed.map((c, k) => c + glyphLen * v[k] / len)]);
     }
   } else {
     let hash = 0x12345678;

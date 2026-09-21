@@ -63,7 +63,7 @@ import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { uniformName } from '../lib/glsl.ts';
 import { typedEscape } from '../lib/escapes.ts';
-import { fieldEvaluator, streamline } from '../lib/flow.ts';
+import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
 import { lowerGeom, pointComps } from '../lib/geom.ts';
 import { hullFaces, hullMesh } from '../lib/hull.ts';
 import { lowerLists } from '../lib/list.ts';
@@ -742,12 +742,22 @@ function render() {
       vlo = [view.cx - halfW, view.cy - halfH];
       vhi = [view.cx + halfW, view.cy + halfH];
     }
+    const pad = vhi.map((v, k) => 0.25 * (v - vlo[k]));
+    const lo = vlo.map((v, k) => v - pad[k]);
+    const hi = vhi.map((v, k) => v + pad[k]);
+    // Arrow glyphs are one eval per lattice point (~1ms) — sample t live so a
+    // driving term like sin(t) does not crawl at the worker's 4 Hz snapshot.
+    if (cls.plot.type === 'vfield3d' && eq.showArrows) {
+      traceQueue.cancelPending(eq.id);
+      return traceField(residuals, lo, hi, { ...constEnv, t: time }, true)
+        .flatMap(path => [...path, Array(dim).fill(NaN)]);
+    }
     let environment = traceEnvironments.get(cls);
     if (!environment) {
       environment = traceEnvironment(cls.params, cls.animated, defs);
       traceEnvironments.set(cls, environment);
     }
-    const traceTime = cls.plot.type === 'vfield3d' ? Math.floor(time * 4) / 4 : time;
+    const traceTime = cls.plot.type === 'vfield3d' ? Math.floor(time * 20) / 20 : time;
     const { env: envKey, stableEnv } = environment(constEnv, traceTime);
     const key = systemKey(cls) + ':' + !!eq.showArrows + ':' + !!eq.certify;
     const c = eq.sysCache;
@@ -757,13 +767,11 @@ function render() {
       traceQueue.cancelPending(eq.id);
       return c.pts;
     }
-    const pad = vhi.map((v, k) => 0.25 * (v - vlo[k]));
-    const lo = vlo.map((v, k) => v - pad[k]);
-    const hi = vhi.map((v, k) => v + pad[k]);
     if ((cls.plot.type === 'system' && cls.plot.parametric) || cls.plot.type === 'vfield3d' || cls.plot.type === 'spacecurve' || (cls.plot.type === 'system' && eq.certify)) {
       const jobKey = JSON.stringify([key, envKey, lo, hi]);
       const target = JSON.stringify([key, stableEnv, lo, hi]);
-      if ((cls.plot.type === 'vfield3d' || eq.certify) && eq.traceTarget === target && performance.now() - (eq.traceClock ?? -Infinity) < 250) return c && c.stableEnv === stableEnv ? c.pts : [];
+      const retraceMs = cls.plot.type === 'vfield3d' ? 50 : 250;
+      if ((cls.plot.type === 'vfield3d' || eq.certify) && eq.traceTarget === target && performance.now() - (eq.traceClock ?? -Infinity) < retraceMs) return c && c.stableEnv === stableEnv ? c.pts : [];
       eq.traceTarget = target; eq.traceClock = performance.now();
       if (eq.certify && eq.info !== 'Certifying search box…') { eq.info = 'Certifying search box…'; reconcile(); }
       traceQueue.request(eq.id, jobKey, {
@@ -837,10 +845,15 @@ function render() {
         }
         case 'vfield3d': {
           const pts = solveFor(eq, 3, plot.comps);
-          let path: number[] = [];
-          const flush = () => { if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color, arrow: eq.showArrows, fade: !eq.showArrows }); path = []; };
-          for (const p of pts) { if (p.every(Number.isFinite)) path.push(...p); else flush(); }
-          flush();
+          if (eq.showArrows) {
+            const flat = pts.flat();
+            if (flat.length >= 6) scene.curves.push({ pts: new Float32Array(flat), color, arrow: true });
+          } else {
+            let path: number[] = [];
+            const flush = () => { if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color, fade: true }); path = []; };
+            for (const p of pts) { if (p.every(Number.isFinite)) path.push(...p); else flush(); }
+            flush();
+          }
           break;
         }
         case 'polygon': {
