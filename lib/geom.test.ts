@@ -403,11 +403,37 @@ describe('point definitions', () => {
     expect(errors.get('C')).toMatch(/move its definition above/);
   });
 
-  it('rejects component-name collisions and plane-dependent points', () => {
+  it('rejects component-name collisions', () => {
     expect(defsOf(['A = (1, 2)', 'A_x = 5']).errors.get('A')).toMatch(/A_x is already defined/);
-    expect(defsOf(['A = (x, 0)']).errors.get('A')).toMatch(/cannot depend on x, y, or z/);
-    expect(defsOf(['A = (z, 0)']).errors.get('A')).toMatch(/cannot depend on x, y, or z/);
-    expect(defsOf(['s = x + y', 'A = (s, 0)']).errors.get('A')).toMatch(/cannot depend on x, y, or z/);
+  });
+
+  it('treats a named vector that depends on x, y, or z as a vector field', () => {
+    const { defs, errors } = defsOf(['s = (x, y)']);
+    expect(errors.size).toBe(0);
+    expect(defs.points.has('s')).toBe(true);
+    expect(defs.fields.has('s_x')).toBe(true);
+    expect(defs.fields.has('s_y')).toBe(true);
+    expect(defs.consts.has('s_x')).toBe(false);
+    expect(evaluate(defs.fields.get('s_x')!, { x: 3, y: 4 })).toBe(3);
+    expect(evaluate(defs.fields.get('s_y')!, { x: 3, y: 4 })).toBe(4);
+
+    const viaField = defsOf(['q = x + y', 'A = (q, 0)']);
+    expect(viaField.errors.size).toBe(0);
+    expect(viaField.defs.points.has('A')).toBe(true);
+    expect(evaluate(viaField.defs.fields.get('A_x')!, { x: 3, y: 4 })).toBe(7);
+
+    const space = defsOf(['A = (z, 0)']);
+    expect(space.errors.size).toBe(0);
+    expect(evaluate(space.defs.fields.get('A_x')!, { z: 2 })).toBe(2);
+
+    const scaled = defsOf(['s = (x, y)', 'q = 2 s']);
+    expect(scaled.errors.size).toBe(0);
+    expect(evaluate(scaled.defs.fields.get('q_x')!, { x: 3, y: 4 })).toBe(6);
+    expect(evaluate(scaled.defs.fields.get('q_y')!, { x: 3, y: 4 })).toBe(8);
+  });
+
+  it('reports a vector field that uses an unknown name on the point row', () => {
+    expect(defsOf(['s = (x, u)']).errors.get('s')).toMatch(/found u/);
   });
 
   it('keeps coordinate fields working alongside points', () => {

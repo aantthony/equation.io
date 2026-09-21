@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Definition, buildDefs } from './defs.ts';
+import { type Definition, buildDefs, pointComponentNames } from './defs.ts';
 import { evaluate } from './expr.ts';
 import { angularSpacing, buildGridField, planarField, sampleGradMag } from './grid.ts';
 
@@ -135,5 +135,17 @@ describe('planarField', () => {
       ['theta', 'atan2(y, x)'],
     ));
     expect([...defs.fields].filter(([, e]) => planarField(e)).map(([name]) => name)).toEqual(['r', 'theta']);
+  });
+
+  it('does not treat a named vector field as a grid family', () => {
+    const { defs, errors } = buildDefs(consts(
+      ['s', '(x, y)'],
+      ['r', 'sqrt(x^2 + y^2)'],
+    ));
+    expect(errors.size).toBe(0);
+    const skip = pointComponentNames(defs);
+    expect([...skip].sort()).toEqual(['s_x', 's_y']);
+    expect([...defs.fields].filter(([name, e]) => !skip.has(name) && planarField(e)).map(([name]) => name))
+      .toEqual(['r']);
   });
 });

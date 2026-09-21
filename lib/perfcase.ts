@@ -11,6 +11,7 @@ import {
   buildDefs,
   compsOf,
   defKey,
+  pointComponentNames,
   evalConstEnv,
   resolveExpr,
   scanDefinition,
@@ -56,8 +57,9 @@ export function compileRows(rows: string[]): CompiledRows {
   // recompileAll folds them into the same name set.
   const constNames = new Set([...built.defs.consts.keys(), ...built.defs.states.keys()]);
   const gridFields: GridField[] = [];
+  const skipGrid = pointComponentNames(built.defs);
   for (const [name, e] of built.defs.fields) {
-    if (planarField(e)) gridFields.push(buildGridField(name, e, constNames));
+    if (!skipGrid.has(name) && planarField(e)) gridFields.push(buildGridField(name, e, constNames));
   }
   const fieldEnv = Object.fromEntries(built.defs.fields);
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));

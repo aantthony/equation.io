@@ -2,7 +2,9 @@
  * Point (2D and 3D vector) values and geometry statements.
  *
  * A constant whose right-hand side is a pair or triple — `A = (0, 0)`, `C = B + D` —
- * is a named point. Point arithmetic (±, scalar ×/÷, dot, cross, perp,
+ * is a named point. A pair that depends on x, y, or z (`s = (x, y)`) is a
+ * vector field: the same name still expands here, and `dot(s, s) = 1` is the
+ * unit circle. Point arithmetic (±, scalar ×/÷, dot, cross, perp,
  * midpoint, unit, distance, angle, |P|) is lowered here into componentwise scalar expressions,
  * with a point name `A` expanding to the derived constants `A_x`, `A_y` (and `A_z` in space).
  * Lowering runs after resolveExpr (functions inlined, Σ expanded) and before

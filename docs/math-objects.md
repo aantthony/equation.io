@@ -94,6 +94,7 @@ object must respect):
 | `a = 2`, `b = a² + t` | constant (slider / computed) | widget; uniform |
 | `f(x) = …` | function | inlined |
 | definition using x/y (`r = sqrt(x²+y²)`) | coordinate field | grid family (level sets) |
+| `s = (x, y)`; `dot(s, s) = 1` / `|s| = 1` | named vector field (position vector); implicit curve after substitution | definition is silent; the equation is the ordinary 2D distance-estimate shader |
 | definition using z (`rho = sqrt(x²+y²+z²)`) | coordinate field over space | nothing of its own — it only defines; `rho = 2`, `phi = pi/4` are implicit surfaces, `(rho, theta, phi) = (2, pi/4, pi/3)` a solved point, RHS in u a space curve |
 | `X ~ Normal(m, s)` (also Uniform, Exponential, Gamma, Beta, ChiSquared, StudentT, LogNormal, Cauchy, Weibull) | random variable | its exact density curve |
 | `X ~ Binomial(n, p)` (also Poisson, Geometric, NegativeBinomial, Bernoulli, DiscreteUniform) | discrete random variable | its pmf as stems at the whole numbers in view (CPU overlay; past 1024 in view, the envelope of the same exact heights) |

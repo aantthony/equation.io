@@ -326,7 +326,40 @@ describe('coordinate fields over z', () => {
     ]);
     expect(errorsOf(['rho = sqrt(x^2+y^2+w)'])[0])
       .toBe('rho defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found w).');
-    expect(errorsOf(['A = (z, 0)'])[0]).toBe('A point cannot depend on x, y, or z.');
+    expect(errorsOf(['s = (x, u)'])[0]).toMatch(/found u/);
+  });
+
+  it('draws the unit circle from the position vector', () => {
+    const a = analyze(['s = (x, y)', 'dot(s, s) = 1']);
+    expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
+    expect(a.rows[0]!.def?.name).toBe('s');
+    expect(a.rows[1]!.cls!.plot.type).toBe('implicit2d');
+    expect(evaluate(a.rows[1]!.expr!, { x: 1, y: 0 })).toBe(0);
+    expect(evaluate(a.rows[1]!.expr!, { x: 0, y: 0 })).toBe(-1);
+  });
+
+  it('accepts |s| = 1 and |s| < 1 as the same circle and disk', () => {
+    expect(last(['s = (x, y)', '|s| = 1']).type).toBe('implicit2d');
+    expect(last(['s = (x, y)', '|s| < 1']).type).toBe('ineq2d');
+  });
+
+  it('scales, rotates, and lifts the same construction', () => {
+    const half = analyze(['s = (x, y)', 'q = 2 s', 'dot(q, q) = 1']);
+    expect(half.rows.map(r => r.error).filter(Boolean)).toEqual([]);
+    expect(half.rows.at(-1)!.cls!.plot.type).toBe('implicit2d');
+    expect(evaluate(half.rows.at(-1)!.expr!, { x: 0.5, y: 0 })).toBe(0);
+
+    expect(last(['F = (y, -x)', 'dot(F, F) = 1']).type).toBe('implicit2d');
+
+    const sphere = last(['s = (x, y, z)', 'dot(s, s) = 1']);
+    expect(sphere.type).toBe('implicit3d');
+  });
+
+  it('plots a bare vector-field name as a vector field, and does not grid it', () => {
+    expect(last(['s = (x, y)', 's']).type).toBe('vfield2d');
+    const a = analyze(['s = (x, y)', 'r = sqrt(x^2 + y^2)']);
+    expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
+    expect([...a.defs.fields.keys()].sort()).toEqual(['r', 's_x', 's_y']);
   });
 
   it('solves a spherical point, wrapping only the atan2-valued coordinate', () => {

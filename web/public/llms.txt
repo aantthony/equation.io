@@ -546,7 +546,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   can drag it and every row using it follows. Points may be computed from
   other points defined above: `C = B + D`, `M = midpoint(A, B)`,
   `P = midpoint(A, B) - perp(B - A)/2`. Scalars over points work too:
-  `n = cross(B, D)`, `L = |B - A|`.
+  `n = cross(B, D)`, `L = |B - A|`. A named vector that uses x, y, or z is
+  a vector field, not a pinned point: `s = (x, y)` is the position vector
+  and draws nothing of its own; later rows treat it as a point, so
+  `dot(s, s) = 1` and `|s| = 1` are the unit circle, `|s| < 1` the unit
+  disk. `F = (y, -x)` is any field of the plane. In space,
+  `s = (x, y, z); dot(s, s) = 1` is the unit sphere.
 - Dragging: a point (named or bare) is draggable only where the drag has
   somewhere to write the new value: a coordinate that is a plain number
   (`(2, 3)`) or a bare slider name (`(a, 3)` with `a = 1` above) moves;
@@ -635,7 +640,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Coordinate field: a definition that depends on the plane, e.g.
   `r = sqrt(x^2+y^2); theta = atan2(y,x)`. Its level sets draw as a grid, and
   later rows may use it: adding `r = 2(1 + cos(theta))` plots a cardioid in
-  polar coordinates.
+  polar coordinates. A named pair or triple that uses x, y, or z is a
+  vector field (see Point), not a grid.
 - Coordinate fields in space: a field may use z, e.g. spherical
   `rho = sqrt(x^2+y^2+z^2); theta = atan2(y,x); phi = acos(z/rho)`. A z-using
   field only defines — it draws no grid and does not by itself make the graph

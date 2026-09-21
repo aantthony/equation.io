@@ -23,6 +23,7 @@ import {
   isListName,
   indexIssue,
   nameTaken,
+  pointComponentNames,
   shadowedFnNames,
   resolveExpr,
   resolveRow,
@@ -1467,8 +1468,9 @@ function recompileAll() {
   if (stateSys?.key !== wasKey) resetState();
 
   gridFields = [];
+  const skipGrid = pointComponentNames(defs);
   for (const [name, e] of defs.fields) {
-    if (!planarField(e)) continue;
+    if (skipGrid.has(name) || !planarField(e)) continue;
     try {
       gridFields.push(buildGridField(name, e, constNames));
     } catch (e) {
@@ -1580,8 +1582,11 @@ function recompileAll() {
   const seenViewport = new Set<string>();
   for (const eq of equations) {
     if (eq.def && !eq.error && defs.pointDims.get(eq.def.name) === 3) {
-      const expr: Expr = { kind: 'vec', items: compsOf(defs, eq.def.name)!.map(name => ({ kind: 'var', name })) };
-      eq.cls = classify(expr, constNames);
+      const comps = compsOf(defs, eq.def.name)!;
+      if (comps.every(c => constNames.has(c))) {
+        const expr: Expr = { kind: 'vec', items: comps.map(name => ({ kind: 'var', name })) };
+        eq.cls = classify(expr, constNames);
+      }
     }
     if (eq.def || eq.comment || distRows.has(eq)) continue;
     const text = eq.text.trim();
