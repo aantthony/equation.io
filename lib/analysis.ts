@@ -113,6 +113,8 @@ export interface PreparedDocument {
   getFn: (name: string) => ReturnType<Env['fns']['get']>;
   getList: ReturnType<typeof listGetter>;
   boundVals: Record<string, number>;
+  /** Numeric values read while resolving plot structure (not runtime readouts). */
+  structuralConsts: Set<string>;
   ropts: import('./defs.ts').ResolveOpts;
   gridFields: LevelSetSpec[];
 }
@@ -239,8 +241,14 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
   const boundVals = { ...constEnv };
   for (const name of animatedConstNames(defs)) delete boundVals[name];
   for (const name of defs.states.keys()) delete boundVals[name];
+  const structuralConsts = new Set<string>();
   const ropts: import('./defs.ts').ResolveOpts = {
-    consts: boundVals,
+    consts: new Proxy(boundVals, {
+      get(target, name, receiver) {
+        if (typeof name === 'string' && Object.hasOwn(target, name)) structuralConsts.add(name);
+        return Reflect.get(target, name, receiver);
+      },
+    }),
     boundConsts: built.sumBoundConsts,
     isList: (n: string) => isListName(listNames, n),
     indexIssue: (idx: Expr) => indexIssue(idx, defs),
@@ -264,7 +272,7 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
   }
   return { rows, statements, raw, built, defs, rvScan, builtRVs, stateSystem,
     sumBoundConsts: built.sumBoundConsts, constNames, fieldEnv, fnNames,
-    listNames, valueNames, getFn, getList, boundVals, ropts, gridFields };
+    listNames, valueNames, getFn, getList, boundVals, structuralConsts, ropts, gridFields };
 }
 
 /** Resolve/classify with caller-owned runtime; preparation diagnostics stay reusable. */
@@ -351,7 +359,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     try {
       const badRow = badTableRow(row.text);
       if (badRow) throw new Error(badRow);
-      const view = parseViewRow(row.text, document.boundVals);
+      const view = parseViewRow(row.text, ropts.consts!);
       if (view) {
         if (seenViewKinds.has(view.kind)) throw new Error(`${view.kind} is already set by another row.`);
         seenViewKinds.add(view.kind);
@@ -494,7 +502,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (backend !== 'cpu') row.gpu = compileGpu(row.cls);
       if (readouts && row.cpu) {
         try {
-          const info = plotReadout(row.cpu, { ...readoutEnv, ...ropts.consts, t: readoutPolicy === 'static' ? 0 : time });
+          const info = plotReadout(row.cpu, { ...readoutEnv, ...document.boundVals, t: readoutPolicy === 'static' ? 0 : time });
           if (info !== null) row.info = info;
         } catch { if (readoutPolicy === 'static' && row.cpu.type === 'value') row.info = '= …'; }
       }

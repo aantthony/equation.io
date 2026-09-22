@@ -1,6 +1,7 @@
 import { type Env, emptyEnv, evaluateFrame } from '../lib/env.ts';
 import { type CpuGrid, type CpuPlan, type GpuPlan, compileGridCpu, compileGridGpu, cpuStructureKey } from '../lib/compiler.ts';
 import { analyzePrepared, prepareDocument } from '../lib/analysis.ts';
+import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
 import { complexRootLabel } from '../lib/complex-label.ts';
 
 import { initSyntaxHelp } from './syntax-help.ts';
@@ -34,7 +35,8 @@ import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
 import { pointComps } from '../lib/geom.ts';
-import { hullFaces, hullMesh } from '../lib/hull.ts';
+import { hullFaces } from '../lib/hull.ts';
+import { hullGeometrySampler } from '../lib/hull-geometry.ts';
 
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
@@ -53,6 +55,7 @@ import {
   fitView2D,
   formatCameraRow,
   formatViewRow,
+  parseViewRow,
 } from '../lib/view.ts';
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
@@ -251,6 +254,7 @@ let defsAnimated = false;
 let constEnv: Record<string, number> = {};
 /** Constants used as Σ/Π bounds; their sliders snap to integer steps. */
 let sumBoundNames = new Set<string>();
+let runtimeSliders = new Set<string>();
 /** Constants that are a whole-number distribution parameter (the n of
  *  Binomial(n, p)); their sliders snap to integer steps too. */
 let wholeParamNames = new Set<string>();
@@ -511,9 +515,11 @@ function writebackViewport() {
   if (mode === '2d') appliedViewText = text;
   else appliedCameraText = text;
   eq.text = text;
+  // Only the framing changed. Reclassifying the math here discards geometry
+  // caches and can block every camera gesture for hundreds of milliseconds.
+  eq.viewSpec = parseViewRow(text, {})!;
   const line = lineEls()[equations.indexOf(eq)];
   if (line) line.textContent = text;
-  recompileAll();
   reconcile();
   saveUrl();
 }
@@ -561,6 +567,7 @@ const traceQueue = new TraceQueue((message: TraceMessage) => {
 });
 
 const familyRows = new WeakMap<Classified, Equation[]>();
+const hullSamplers = new WeakMap<CpuPlan, ReturnType<typeof hullGeometrySampler>>();
 let familyId = -100000;
 function renderMembers(eq: Equation): Equation[] {
   const cls = eq.cls!, cpu = eq.cpu!;
@@ -829,19 +836,18 @@ function render() {
         }
         case 'polygon': {
           const dim = plot.dim ?? 2;
-          const vals = plot.pts.map(p => evaluate(p, { ...constEnv, t: time }));
-          if (!vals.every(Number.isFinite)) break;
           if (plot.hull) {
-            // A lit solid (flat-shaded: one normal per face), its edges drawn
-            // over it as one closed outline per face.
-            const faces = hullFaces(vals, dim);
-            const mesh = hullMesh(faces);
-            if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color });
-            for (const face of faces) {
-              scene.curves.push({ pts: new Float32Array([...face.outline, face.outline[0]].flat()), color: mesh.indices.length ? edgeShade(color) : color });
-            }
+            let sample = hullSamplers.get(plot);
+            if (!sample) { sample = hullGeometrySampler(plot.pts, dim); hullSamplers.set(plot, sample); }
+            const geometry = sample({ ...constEnv, t: time });
+            if (!geometry) break;
+            const { mesh, edges } = geometry;
+            if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
+            scene.segments.push({ pts: edges, color: mesh.indices.length ? edgeShade(color) : color, retained: true });
             break;
           }
+          const vals = plot.pts.map(p => evaluate(p, { ...constEnv, t: time }));
+          if (!vals.every(Number.isFinite)) break;
           const pts: number[] = [];
           for (let k = 0; k < vals.length; k += dim) pts.push(vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0);
           const triangle = plot.closed && pts.length === 9;
@@ -954,6 +960,7 @@ function render() {
     r3d.render(camera, scene, time, constEnv);
     drawLabels3D(overlayCtx, camera, dpr, scene.points);
   } else {
+    r3d.clearGeometry();
     const layers: Required<Layers2D> = {
       levels: [], fractals: [], domains: [], conformals: [], vfields: [],
       ineqs: [], bifs: [], scalars: [], complexes: [], curves: [],
@@ -1329,12 +1336,7 @@ const stateResetBtn = document.getElementById('state-reset') as HTMLButtonElemen
 
 let trailDocument = '';
 
-/**
- * Recompile every row: scan definitions first (they affect how every other
- * row parses), then classify the plot rows against them. Cheap enough to run
- * on every keystroke.
- */
-function recompileAll() {
+function resetEditedTrails() {
   // Framing and comment edits preserve trails; changing the math starts a
   // fresh observation so unrelated runs never get joined by a false segment.
   const mathText = equations.map(eq => eq.text.trim()).filter(text =>
@@ -1343,6 +1345,11 @@ function recompileAll() {
     for (const eq of equations) eq.trail = undefined;
     trailDocument = mathText;
   }
+}
+
+/** Rebuild definitions and plots after edits that may change their structure. */
+function recompileAll() {
+  resetEditedTrails();
   // Preparation is independent of the running simulation and sampler. Keep
   // their caller-owned state across edits whose state-system key is unchanged.
   const prepared = prepareDocument(equations.map(({ id, text }) => ({ id, text })), {
@@ -1361,6 +1368,7 @@ function recompileAll() {
     readoutPolicy: 'static',
     backend: 'both',
   });
+  runtimeSliders = runtimeSliderNames(analysis);
   gridFields = analysis.gridFields.map(spec => ({ ...compileGridCpu(spec), ...compileGridGpu(spec) }));
   wholeParamNames = rvSys.wholeParamNames();
   for (let i = 0; i < equations.length; i++) {
@@ -1939,7 +1947,19 @@ function makeSlider(eq: Equation): SliderUI {
     eq.text = `${lhs} = ${fmtNum(Number(range.value))}`;
     const line = lineEls()[equations.indexOf(eq)];
     if (line) line.textContent = eq.text;
-    recompileAll();
+    if (kind === 'const' && runtimeSliders.has(lhs) && !equations.some(row => row.error || row.needsFile)) {
+      const rhs = fmtNum(Number(range.value));
+      defs.drop(lhs);
+      defs.bind(lhs, { tag: 'scalar', role: 'const', expr: { kind: 'num', value: Number(rhs) } });
+      eq.def = { kind: 'const', name: lhs, rhs };
+      // Match a math edit's trail and hover invalidation without discarding
+      // compiled plots, their samplers, or GPU buffers.
+      resetEditedTrails();
+      for (const row of equations) row.spCache = undefined;
+      spGen++;
+      spQueue.clear();
+      setHover(null);
+    } else recompileAll();
     reconcile();
     saveUrl();
     requestRender();
@@ -3891,6 +3911,7 @@ if (mcpApp) {
     dispose: () => {
       if (rendererDisposed) return;
       rendererDisposed = true;
+      r3d.clearGeometry();
       canvasSizeObserver.disconnect();
       window.removeEventListener('resize', resize);
       cancelRender();

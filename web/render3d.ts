@@ -14,6 +14,7 @@ import { ProgramCache, QUAD_VERT, compileProgram } from './gl.ts';
 import { type Mat4, invert, lookAt, multiply, perspective } from './mat4.ts';
 import { niceSpacing, paramDecls } from './render2d.ts';
 import { glslVec3, theme } from './theme.ts';
+import { RetainedGeometry } from './retained-geometry.ts';
 
 export interface Camera3D {
   target: [number, number, number];
@@ -570,8 +571,9 @@ export interface Scene3D {
     params?: string[];
   }>;
   curves: Array<{ pts: Float32Array; color: [number, number, number]; arrow?: boolean; triangle?: boolean; fade?: boolean }>;
-  /** Disconnected segments (comb teeth), drawn as gl.LINES vertex pairs. */
-  segments: Array<{ pts: Float32Array; color: [number, number, number] }>;
+  /** Disconnected segments (comb teeth, hull edges), drawn as vertex pairs.
+   * Retained arrays are immutable and can keep their GPU buffers. */
+  segments: Array<{ pts: Float32Array; color: [number, number, number]; retained?: boolean }>;
   /** Indexed position+normal meshes (curve tubes, hull solids) with material UVs. */
   tubes: Array<{
     positions: Float32Array;
@@ -582,6 +584,8 @@ export interface Scene3D {
     /** Checker cell counts along (length, circumference). */
     cells: [number, number];
     color: [number, number, number];
+    /** All four geometry arrays are immutable and can keep their GPU buffers. */
+    retained?: boolean;
   }>;
   points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string }>;
 }
@@ -589,6 +593,7 @@ export interface Scene3D {
 const GRID_N = 160;
 
 export class Renderer3D {
+  private geometry: RetainedGeometry;
   private cache: ProgramCache;
   private axesProgram: WebGLProgram;
   private axesVao: WebGLVertexArrayObject;
@@ -610,6 +615,7 @@ export class Renderer3D {
   private gridIndexCount: number;
 
   constructor(private gl: WebGL2RenderingContext, private quad: { draw(): void }) {
+    this.geometry = new RetainedGeometry(gl);
     this.cache = new ProgramCache(gl);
     this.axesProgram = compileProgram(gl, AXES_VERT, AXES_FRAG);
     this.lineProgram = compileProgram(gl, LINE_VERT, LINE_FRAG);
@@ -722,6 +728,8 @@ export class Renderer3D {
     gl.bindVertexArray(null);
   }
 
+  clearGeometry() { this.geometry.clear(); }
+
   render(cam: Camera3D, scene: Scene3D, time = 0, env: Record<string, number> = {}): void {
     const surfaces = scene.implicits;
     const { gl } = this;
@@ -803,14 +811,20 @@ export class Renderer3D {
       gl.uniform3f(gl.getUniformLocation(this.tubeProgram, 'uColor'), ...tube.color);
       gl.uniform3f(gl.getUniformLocation(this.tubeProgram, 'uEye'), ...eye);
       gl.uniform2f(gl.getUniformLocation(this.tubeProgram, 'uCells'), ...tube.cells);
-      gl.bindVertexArray(this.tubeVao);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.tubePosBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, tube.positions, gl.DYNAMIC_DRAW);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.tubeNrmBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, tube.normals, gl.DYNAMIC_DRAW);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.tubeUvBuf);
-      gl.bufferData(gl.ARRAY_BUFFER, tube.uvs, gl.DYNAMIC_DRAW);
-      gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, tube.indices, gl.DYNAMIC_DRAW);
+      if (tube.retained) {
+        this.geometry.bind(tube.positions, [
+          { data: tube.positions, size: 3 }, { data: tube.normals, size: 3 }, { data: tube.uvs, size: 2 },
+        ], tube.indices);
+      } else {
+        gl.bindVertexArray(this.tubeVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.tubePosBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, tube.positions, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.tubeNrmBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, tube.normals, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.tubeUvBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, tube.uvs, gl.DYNAMIC_DRAW);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, tube.indices, gl.DYNAMIC_DRAW);
+      }
       gl.drawElements(gl.TRIANGLES, tube.indices.length, gl.UNSIGNED_INT, 0);
       gl.bindVertexArray(null);
     }
@@ -870,9 +884,16 @@ export class Renderer3D {
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 1);
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uFade'), 0);
       gl.uniform3f(gl.getUniformLocation(this.lineProgram, 'uColor'), ...s.color);
-      gl.bufferData(gl.ARRAY_BUFFER, s.pts, gl.DYNAMIC_DRAW);
+      if (s.retained) this.geometry.bind(s.pts, [{ data: s.pts, size: 3 }]);
+      else {
+        gl.bindVertexArray(this.dynVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.dynBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, s.pts, gl.DYNAMIC_DRAW);
+      }
       gl.drawArrays(gl.LINES, 0, s.pts.length / 3);
     }
+    gl.bindVertexArray(this.dynVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.dynBuf);
     for (const p of scene.points) {
       setCommon(this.pointProgram);
       gl.uniform3f(gl.getUniformLocation(this.pointProgram, 'uColor'), ...p.color);
@@ -891,6 +912,7 @@ export class Renderer3D {
     gl.depthMask(false);
     this.quad.draw();
     gl.depthMask(true);
+    this.geometry.endFrame();
   }
 }
 
