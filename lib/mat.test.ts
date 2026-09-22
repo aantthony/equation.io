@@ -1,3 +1,4 @@
+import { compileGpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
 import { type Definition, buildDefs, compsOf, scanDefinition } from './defs.ts';
@@ -95,7 +96,7 @@ describe('det, trace, matvec, solve', () => {
     const { defs, lowered } = lowRow(['a = 2', 'M = [(a, 0), (0, a)]'], 'y = det(M) x');
     const cls = classify(lowered, new Set(defs.consts.keys()));
     expect(cls.params).toEqual(['a']);
-    expect((cls.plot as { field: string }).field).toContain('u_a');
+    expect((compileGpu(cls) as { field: string }).field).toContain('u_a');
   });
 
   it('errors name the mismatch', () => {
@@ -110,7 +111,7 @@ describe('matrices with states', () => {
   it('drives a linear phase portrait: (x\', y\') = A (x, y)', () => {
     const { defs, lowered } = lowRow(["A = [(0, 1), (-1, -0.2)]"], "(x', y') = A (x, y)");
     const cls = classify(lowered, new Set(defs.consts.keys()));
-    expect(cls.plot).toMatchObject({ type: 'vfield2d' });
+    expect(compileGpu(cls)).toMatchObject({ type: 'vfield2d' });
   });
 
   it("om' = solve(M, f) matches the hand-derived double pendulum", () => {
@@ -207,8 +208,8 @@ describe('matrix algebra and the exponential', () => {
     close(point([], 'e^(a cross((0, 0, 1))) (1, 0, 0)', { a: Math.PI / 2 }), [0, 1, 0]);
     close(point([], 'e^(a cross((0, 0, 2))) (1, 0, 0)', { a: Math.PI / 4 }), [0, 1, 0]);
     close(point([], 'e^(a cross((1, 1, 1)/sqrt(3))) (1, 0, 0)', { a: 2 * Math.PI / 3 }), [0, 1, 0]);
-    close(point(['n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 1, n_x: 0, n_y: 0, n_z: 0 }), [1, 0, 0]);
-    close(point(['n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 0, n_x: 0, n_y: 0, n_z: 1 }), [1, 0, 0]);
+    close(point(['b = 0', 'n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 1, n_x: 0, n_y: 0, n_z: 0 }), [1, 0, 0]);
+    close(point(['b = 0', 'n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 0, n_x: 0, n_y: 0, n_z: 1 }), [1, 0, 0]);
     expect(() => lowRow(['S = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]'], 'e^(a S) (1, 0, 0)')).toThrow(/rotation generator/);
   });
   it('combines matrices: scale, sum, product, powers and the inverse', () => {

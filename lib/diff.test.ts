@@ -1,3 +1,4 @@
+import { compileGpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { diff } from './diff.ts';
 import { evaluate, parseExpr } from './expr.ts';
@@ -54,22 +55,22 @@ describe('diff', () => {
 describe('symbolic derivatives in classification', () => {
   it('provides tangents for smooth parametric surfaces', () => {
     const c = classify(parseExpr('(cos(2pi u), sin(2pi u), v)'));
-    if (c.plot.type !== 'psurface') throw new Error('expected psurface');
-    expect(c.plot.du).toBeDefined();
-    expect(c.plot.dv).toBeDefined();
-    expect(c.plot.dv![2]).toBe('1.0');
+    if (compileGpu(c).type !== 'psurface') throw new Error('expected psurface');
+    expect(compileGpu(c).du).toBeDefined();
+    expect(compileGpu(c).dv).toBeDefined();
+    expect(compileGpu(c).dv![2]).toBe('1.0');
   });
 
   it('falls back to undefined tangents for non-smooth components', () => {
     const c = classify(parseExpr('(u, v, floor(4u))'));
-    if (c.plot.type !== 'psurface') throw new Error('expected psurface');
-    expect(c.plot.du).toBeUndefined();
+    if (compileGpu(c).type !== 'psurface') throw new Error('expected psurface');
+    expect(compileGpu(c).du).toBeUndefined();
   });
 
   it('provides gradients for smooth implicit surfaces', () => {
     const c = classify(parseExpr('x^2+y^2+z^2=9'));
-    if (c.plot.type !== 'implicit3d') throw new Error('expected implicit3d');
-    expect(c.plot.grad).toBeDefined();
+    if (compileGpu(c).type !== 'implicit3d') throw new Error('expected implicit3d');
+    expect(compileGpu(c).grad).toBeDefined();
     expect(evaluate(diff(parseExpr('x^2+y^2+z^2-9'), 'z'), { x: 0, y: 0, z: 2 })).toBe(4);
   });
 });

@@ -20,8 +20,15 @@ const run = (row: string, pre = PRE) => {
 const values = (row: string, pre = PRE): number[][] => {
   const { row: r, env } = run(row, pre);
   expect(r.error, row).toBeUndefined();
-  const at = (e: Expr): number[] => (e.kind === 'vec' ? e.items : [e]).map(c => evaluate(c, env) + 0);
-  return r.expr!.kind === 'list' ? r.expr!.items.map(at) : [at(r.expr!)];
+  const cpu = r.cpu!;
+  const at = (coordinates: Expr[]) => coordinates.map(c => evaluate(c, env) + 0);
+  switch (cpu.type) {
+    case 'point': return [at(cpu.coords)];
+    case 'plist': return cpu.pts.map(at);
+    case 'vlist': return cpu.values.map(value => at([value]));
+    case 'value': return [at([cpu.expr])];
+    default: throw new Error(`Expected points or scalar values, got ${cpu.type}`);
+  }
 };
 const error = (row: string, pre = PRE) => run(row, pre).row.error;
 
@@ -44,7 +51,7 @@ describe('a single point as the argument', () => {
   it('feeds scalar functions, in values and in plots', () => {
     expect(run('g(A)').row.info).toBe('= 2');
     expect(run('g(A) + g(B)').row.info).toBe('= 14');
-    expect(run('y = g(A) x').row.cls!.plot.type).toBe('implicit2d');
+    expect(run('y = g(A) x').row.cpu!.type).toBe('implicit2d');
   });
   it('names a point: D = f(A)', () => {
     const an = analyze([...PRE, 'D = f(A)', 'D']);
@@ -94,15 +101,15 @@ describe('a list of points as the argument', () => {
     expect(values('f(J)')).toEqual([[-0.5, -1], [1, 0]]);
     expect(values('f(2 J)')).toEqual([[-1, -2], [2, 0]]);
     expect(values('F(T)', pre)).toEqual([[1, 2, 0], [3, 4, 0], [1, 0, 1]]);
-    expect(run('hull(F(T))', pre).row.cls!.plot.type).toBe('polygon');
-    const arrows = run('vector(S, f(S))', pre).row.cls!.plot;
+    expect(run('hull(F(T))', pre).row.cpu!.type).toBe('polygon');
+    const arrows = run('vector(S, f(S))', pre).row.cpu!;
     expect(arrows.type === 'family' && arrows.members.length).toBe(2);
     expect(error('F(S)', pre)).toBe('F takes 3 arguments, and that point has 2 components.');
     // One-parameter functions substitute textually: still matrix algebra.
     expect(values('h(S) A', [...pre, 'h(p) = 2p'])).toEqual([[10, 22]]);
   });
   it('gives a scalar function a value list', () => {
-    expect(run('g(P)').row.cls!.plot.type).toBe('vlist');
+    expect(run('g(P)').row.cpu!.type).toBe('vlist');
     expect(values('g(P)').flat()).toEqual([0, 0, 0, 0, 1, 2, 0, 2, 4]);
   });
   it('still crosses with an independent list, and a filtered list keeps its pairing', () => {
@@ -131,26 +138,26 @@ describe('a list of points as the argument', () => {
 describe('families over f(P)', () => {
   it('draws one figure per point', () => {
     for (const row of ['vector(P, f(P))', 'segment(P, f(P))']) {
-      const p = run(row).row.cls!.plot;
+      const p = run(row).row.cpu!;
       expect(p.type, row).toBe('family');
       if (p.type === 'family') expect(p.members).toHaveLength(9);
     }
-    const lines = run('y = g(Q) x').row.cls!.plot;
+    const lines = run('y = g(Q) x').row.cpu!;
     expect(lines.type).toBe('family');
   });
   it('takes the image of a shape whole', () => {
-    expect(run('hull(f(Q))').row.cls!.plot.type).toBe('polygon');
-    expect(run('polyline(f(Q))').row.cls!.plot.type).toBe('polygon');
-    expect(run('hull(f(Q) + (1, 0))').row.cls!.plot.type).toBe('polygon');
+    expect(run('hull(f(Q))').row.cpu!.type).toBe('polygon');
+    expect(run('polyline(f(Q))').row.cpu!.type).toBe('polygon');
+    expect(run('hull(f(Q) + (1, 0))').row.cpu!.type).toBe('polygon');
   });
   it('draws a lattice of arrows through a deep composition over a computed list', () => {
     const lattice = ['f(x,y) = (x + y/2, y - x/2)', 'a = [-1, -0.9..1]', 'b = [-1, -0.9..1]', 'P = (a, b)'];
-    const p = run('vector(P, f(f(f(f(f(f(P + (1, 0))))))))', lattice).row.cls!.plot;
+    const p = run('vector(P, f(f(f(f(f(f(P + (1, 0))))))))', lattice).row.cpu!;
     expect(p.type === 'family' && p.members.length).toBe(441);
   });
   it('draws the whole lattice of arrows', () => {
     const lattice = ['f(x,y) = (x + y/2, y)', 'a = [-1, -0.9..1]', 'b = [-1, -0.9..1]', 'P = (a, b)'];
-    const p = run('vector(P, f(P))', lattice).row.cls!.plot;
+    const p = run('vector(P, f(P))', lattice).row.cpu!;
     expect(p.type === 'family' && p.members.length).toBe(441);
   });
 });
@@ -160,7 +167,7 @@ describe('the argument stays one list, however the row copies it', () => {
     expect(values('g(2 [A, B])').flat()).toEqual([8, 48]);
     expect(values('g(-[A, B])').flat()).toEqual([2, 12]);
     expect(values('f(2 [A, B])')).toEqual([[4, 4], [10, 8]]);
-    const p = run('vector([A, B], f(2 [A, B]))').row.cls!.plot;
+    const p = run('vector([A, B], f(2 [A, B]))').row.cpu!;
     // (The two literals are independent, so 2 × 2 — not 2 × 2 × 2 × 2.)
     expect(p.type === 'family' && p.members.length).toBe(4);
   });
@@ -199,7 +206,7 @@ describe('the argument stays one list, however the row copies it', () => {
 
 describe('what the same rule changes outside f(P)', () => {
   it('a computed point list moves with the list it came from', () => {
-    const p = run('segment(P, Q1)', [...PRE, 'Q1 = P + (1, 0)']).row.cls!.plot;
+    const p = run('segment(P, Q1)', [...PRE, 'Q1 = P + (1, 0)']).row.cpu!;
     expect(p.type === 'family' && p.members.length).toBe(9);
   });
   it('a literal in a Σ body is one list in every term', () => {
@@ -211,10 +218,10 @@ describe('the documented example', () => {
   it('deforms a lattice with one name for the points', () => {
     const an = analyze('a = [-10..10]/2; b = [-10..10]/2; P = (a, b); f(x,y) = (x + sin(y + t)/3, y + sin(x)/3); vector(P, f(P)); f(P)'.split('; '));
     expect(an.rows.map(r => r.error).filter(Boolean)).toEqual([]);
-    const [arrows, dots] = an.rows.slice(-2).map(r => r.cls!);
-    expect(arrows.plot.type === 'family' && arrows.plot.members.length).toBe(441);
+    const [arrows, dots] = an.rows.slice(-2).map(r => ({ ...r.cls!, cpu: r.cpu! }));
+    expect(arrows.cpu.type === 'family' && arrows.cpu.members.length).toBe(441);
     expect(arrows.animated).toBe(true);
-    expect(dots.plot.type).toBe('plist');
+    expect(dots.cpu.type).toBe('plist');
   });
 });
 

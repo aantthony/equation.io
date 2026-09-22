@@ -1,6 +1,6 @@
 /** Real expression components for CPU solving and point rendering. */
 import { type Expr } from './expr.ts';
-import { usesComplex, compileTyped } from './complex.ts';
+import { usesComplex, inferScalarType } from './complex.ts';
 import { num, bin, call } from './coordinate.ts';
 import { add as realAdd, mul as realMul, pow } from './diff.ts';
 import { countNodes } from './size.ts';
@@ -44,13 +44,13 @@ function splitParts(e: Expr, complexParts: (e: Expr) => Pair): Pair {
   if (e.kind === 'neg') return complexParts(e.a).map(neg) as Pair;
   if (e.kind === 'eq' || e.kind === 'ineq') return [{ ...e, l: complexParts(e.l)[0], r: complexParts(e.r)[0] }, num(0)];
   if (e.kind === 'piecewise') {
-    compileTyped(e); // Preserve the shader's real-only piecewise semantics.
+    inferScalarType(e); // Preserve the shader's real-only piecewise semantics.
     return [{ ...e, cases: e.cases.map(c => ({ cond: complexParts(c.cond)[0], value: complexParts(c.value)[0] })),
       ...(e.otherwise ? { otherwise: complexParts(e.otherwise)[0] } : {}) }, num(0)];
   }
   if (e.kind === 'bin') {
     const a = complexParts(e.a), b = complexParts(e.b);
-    if (compileTyped(e).type === 'real') return [bin(e.op, a[0], b[0]), num(0)];
+    if (inferScalarType(e) === 'real') return [bin(e.op, a[0], b[0]), num(0)];
     switch (e.op) {
       case '+': return add(a, b);
       case '-': return add(a, b.map(neg) as Pair);
@@ -76,7 +76,7 @@ function splitParts(e: Expr, complexParts: (e: Expr) => Pair): Pair {
     }
   }
   if (e.kind === 'call') {
-    const type = compileTyped(e).type; // Keep function support and arity consistent with the shader.
+    const type = inferScalarType(e); // Keep function support and arity consistent with the shader.
     if (type === 'real' && !['re', 'im', 'arg', 'abs'].includes(e.name)) {
       return [call(e.name, ...e.args.map(a => complexParts(a)[0])), num(0)];
     }

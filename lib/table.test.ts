@@ -1,23 +1,23 @@
+import { compileCpu } from './compiler.ts';
+import { evaluateFrame, nameTaken } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { parseCsv } from './csv.ts';
-import {
-  MissingDataError,
+import { MissingDataError,
   badTableRow,
   type TableSource,
   buildDefs,
-  evalConstEnv,
+
   formatTableRow,
   freeTableName,
   isListName,
   indexIssue,
   listGetter,
   listNamesOf,
-  nameTaken,
+
   nameable,
   rowSafeFileName,
   resolveExpr,
-  scanDefinition,
-} from './defs.ts';
+  scanDefinition } from './defs.ts';
 import { type Expr, evaluate, freeVars, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import { decodePayload, encodePayload } from './link.ts';
@@ -40,7 +40,7 @@ function build(rows: string[], tables: TableSource | null = store()) {
 function lowerRow(text: string, defRows: string[], tables: TableSource | null = store()) {
   const { defs, errors } = build(defRows, tables);
   expect([...errors]).toEqual([]);
-  const consts = evalConstEnv(defs, 0);
+  const consts = evaluateFrame(defs, 0);
   const listNames = listNamesOf(defs);
   // The same options the app and the worker build, so a test cannot pass by
   // skipping a check the real pipeline runs.
@@ -198,14 +198,14 @@ describe('columns as lists', () => {
   it('broadcasts and zips columns into a scatter', () => {
     expect(values(lowerRow('person.age / 2', rows))).toEqual([18, 20.5, 14.5]);
     // Two columns stay two typed arrays — the scatter never becomes N points.
-    const plot = classify(lowerRow('(person.age, person.height)', rows), new Set()).plot;
+    const plot = compileCpu(classify(lowerRow('(person.age, person.height)', rows), new Set()));
     expect(plot).toMatchObject({ type: 'dscatter', dim: 2 });
     expect((plot as { coords: Float64Array[] }).coords.map(c => [...c]))
       .toEqual([[36, 41, 29], [1.7, 1.82, 1.65]]);
   });
 
   it('rides a constant along as the other coordinate', () => {
-    const plot = classify(lowerRow('(person.age, 0)', rows), new Set()).plot;
+    const plot = compileCpu(classify(lowerRow('(person.age, 0)', rows), new Set()));
     expect(plot).toMatchObject({ type: 'dscatter', dim: 2 });
     expect([...(plot as { coords: Float64Array[] }).coords[1]]).toEqual([0, 0, 0]);
   });
@@ -299,7 +299,7 @@ describe('a scatter of three columns', () => {
     // The 2D pass deliberately skips dim-3 clouds, so without this the row
     // renders only when some unrelated row happens to turn 3D on.
     const c = classify(lowerRow('(person.age, person.height, person.age)', rows));
-    expect(c.plot).toMatchObject({ type: 'dscatter', dim: 3 });
+    expect(compileCpu(c)).toMatchObject({ type: 'dscatter', dim: 3 });
     expect(c.needs3D).toBe(true);
     expect(classify(lowerRow('(person.age, person.height)', rows)).needs3D).toBe(false);
   });
@@ -422,8 +422,8 @@ describe('a reduction over a whole column', () => {
     expect(val('count(g.a t)')).toBe(3); // still how many rows there are
     // hist told the same story: it drops non-finite values off a typed array,
     // and refused the whole row ("not finite") one slider away.
-    const bars = (text: string) => lowerRow(text, defs, src) as Expr & { kind: 'call' };
-    const counts = (e: Expr & { kind: 'call' }) => [...(e.args[1] as Expr & { kind: 'data' }).values];
+    const bars = (text: string) => lowerRow(text, defs, src) as Expr & { kind: 'hist' };
+    const counts = (e: Expr & { kind: 'hist' }) => [...e.counts];
     expect(counts(bars('hist(g.a k, 2)'))).toEqual(counts(bars('hist(g.a, 2)')));
     // A list with no gaps in it is untouched by any of this.
     expect(evaluate(lowerRow('mean(L t)', ['L = [1, 2, 3]']), { t: 2 })).toBe(4);
@@ -439,7 +439,7 @@ describe('a reduction over a whole column', () => {
 describe('hist', () => {
   const rows = [`person = open("people.csv", ${HASH})`];
   const histOf = (text: string, defs = rows, tables?: TableSource) =>
-    classify(lowerRow(text, defs, tables ?? store()), new Set()).plot as
+    compileCpu(classify(lowerRow(text, defs, tables ?? store()), new Set())) as
       { type: string; centers: Float64Array; counts: Float64Array; width: number };
 
   it('bins a list into touching bars', () => {
@@ -794,14 +794,14 @@ describe('naming a column, or arithmetic over one', () => {
     expect([...errors]).toEqual([]);
     expect(defs.points.has('P')).toBe(false);
     expect(listNamesOf(defs).has('P')).toBe(true);
-    const plot = classify(lowerRow('P', defRows), new Set()).plot as
+    const plot = compileCpu(classify(lowerRow('P', defRows), new Set())) as
       { type: string; dim: number; coords: Float64Array[] };
     expect(plot.type).toBe('dscatter');
     expect(plot.coords.map(c => [...c])).toEqual([[36, 41, 29], [1.7, 1.82, 1.65]]);
     // An alias of one is one, and three columns still name a 3D cloud.
-    expect(classify(lowerRow('Q', [...defRows, 'Q = P']), new Set()).plot.type).toBe('dscatter');
+    expect(compileCpu(classify(lowerRow('Q', [...defRows, 'Q = P']), new Set())).type).toBe('dscatter');
     const c3 = [...rows, 'C = (person.age, person.height, person.age)'];
-    expect(classify(lowerRow('C', c3), new Set()).plot).toMatchObject({ type: 'dscatter', dim: 3 });
+    expect(compileCpu(classify(lowerRow('C', c3), new Set()))).toMatchObject({ type: 'dscatter', dim: 3 });
     // …while a pair of numbers is a named point, exactly as before.
     expect(build(['A = (1, 2)']).defs.points.has('A')).toBe(true);
   });
@@ -814,7 +814,7 @@ describe('tables and the rest of the definition system', () => {
       'avg = mean(person.age)',
     ]);
     expect([...errors]).toEqual([]);
-    expect(evalConstEnv(defs, 0).avg).toBeCloseTo(35.3333, 4);
+    expect(evaluateFrame(defs, 0).avg).toBeCloseTo(35.3333, 4);
   });
 
   it('needs the data row above the rows that use it', () => {
@@ -832,7 +832,7 @@ describe('tables and the rest of the definition system', () => {
     expect(build(rows, tables).errors.size).toBe(0);
     // Constant arithmetic stays a typed array however long the column is…
     const col = lowerRow('(big.v, big.v / 2)', rows, tables);
-    expect(classify(col, new Set()).plot).toMatchObject({ type: 'dscatter' });
+    expect(compileCpu(classify(col, new Set()))).toMatchObject({ type: 'dscatter' });
     // …but a slider or t needs one expression per row, and that has a limit.
     expect(() => lowerRow('big.v sin(t)', rows, tables))
       .toThrow(/120000 values; only 100000 can be combined/);
@@ -858,7 +858,7 @@ describe('rules the file cannot change', () => {
   });
 
   it('still draws a well-formed hist, and still defers to the file for it', () => {
-    expect(classify(lowerRow('hist(person.age, 3)', rows)).plot.type).toBe('histogram');
+    expect(compileCpu(classify(lowerRow('hist(person.age, 3)', rows))).type).toBe('histogram');
     // Without the bytes the row is not wrong — it just cannot be drawn here.
     expect(() => lowerRow('hist(person.age, 3)', rows, null)).toThrow(MissingDataError);
   });
@@ -871,7 +871,7 @@ describe('text column character counts', () => {
   it('plots one Unicode code-point count per row, preserving missing cells', () => {
     const e = lowerRow('p.name.length', rows, tables);
     expect(values(e)).toEqual([3, 2, NaN]);
-    expect(classify(e).plot.type).toBe('dlist');
+    expect(compileCpu(classify(e)).type).toBe('dlist');
     expect(lowerRow('p.name.length[2]', rows, tables)).toEqual({ kind: 'num', value: 2 });
     expect(values(lowerRow('p.length.length', rows, tables))).toEqual([5, 6, NaN]);
   });
@@ -880,7 +880,7 @@ describe('text column character counts', () => {
     expect(values(lowerRow('p.name.length * 2', rows, tables))).toEqual([6, 4, NaN]);
     expect(lowerRow('mean(p.name.length)', rows, tables)).toEqual({ kind: 'num', value: 2.5 });
     expect(values(lowerRow('sizes', [...rows, 'sizes = p.name.length'], tables))).toEqual([3, 2, NaN]);
-    const plot = classify(lowerRow('hist(p.name.length, 2)', rows, tables)).plot;
+    const plot = compileCpu(classify(lowerRow('hist(p.name.length, 2)', rows, tables)));
     expect(plot.type).toBe('histogram');
     if (plot.type === 'histogram') expect([...plot.counts]).toEqual([1, 1]);
   });

@@ -1,5 +1,7 @@
+import { compileCpu } from './compiler.ts';
+import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { buildDefs, evalConstEnv, listGetter, listNamesOf, resolveExpr, scanDefinition } from './defs.ts';
+import { buildDefs,  listGetter, listNamesOf, resolveExpr, scanDefinition } from './defs.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import { type Seq, lowerLists, usesListReduction } from './list.ts';
@@ -19,7 +21,7 @@ function defsOf(rows: string[]) {
 /** Run a plot row through the full pipeline: parse → resolve → lower. */
 function lowerRow(text: string, defRows: string[] = []): Expr {
   const { defs } = defsOf(defRows);
-  const consts = evalConstEnv(defs, 0);
+  const consts = evaluateFrame(defs, 0);
   const getFn = (n: string) => defs.fns.get(n);
   const listNames = listNamesOf(defs);
   let e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), getFn,
@@ -79,13 +81,13 @@ describe('broadcasting', () => {
   });
   it('zips lists into points for a scatter', () => {
     const c = classify(lowerRow('([1,2,3], [4,5,6])'));
-    expect(c.plot).toMatchObject({ type: 'plist', dim: 2 });
+    expect(compileCpu(c)).toMatchObject({ type: 'plist', dim: 2 });
     const c2 = classify(lowerRow('([1,2,3], 0)'));
-    expect(c2.plot).toMatchObject({ type: 'plist', dim: 2 });
+    expect(compileCpu(c2)).toMatchObject({ type: 'plist', dim: 2 });
   });
   it('classifies a broadcast list as a value list', () => {
     const c = classify(lowerRow('L^2 + 1', ['L = [1,2,3]']));
-    expect(c.plot.type).toBe('vlist');
+    expect(compileCpu(c).type).toBe('vlist');
   });
   it('keeps t animating elementwise', () => {
     expect(values(lowerRow('[1,2] + t'), { t: 10 })).toEqual([11, 12]);
@@ -115,7 +117,7 @@ describe('named lists', () => {
     const { defs } = defsOf(['P = [(1,2),(3,4),(5,6)]']);
     expect(items(defs.lists.get('P')!)).toHaveLength(3);
     const c = classify(lowerRow('P', ['P = [(1,2),(3,4),(5,6)]']));
-    expect(c.plot).toMatchObject({ type: 'plist', dim: 2 });
+    expect(compileCpu(c)).toMatchObject({ type: 'plist', dim: 2 });
   });
   it('reports a list used above its definition', () => {
     const { errors } = defsOf(['a = mean(L)', 'L = [1,2,3]']);
@@ -183,7 +185,7 @@ describe('hist bins', () => {
   it('refuses a fraction rather than rounding it', () => {
     expect(() => lowerRow('hist([1,2,3,4], 2.5)')).toThrow(/whole number of bins; that is 2.5/);
     expect(() => lowerRow('hist([1,2,3,4], 1)')).toThrow(/2 to 500/);
-    expect(lowerRow('hist([1,2,3,4], 2)')).toMatchObject({ kind: 'call', name: '[hist]' });
+    expect(lowerRow('hist([1,2,3,4], 2)')).toMatchObject({ kind: 'hist' });
   });
 });
 

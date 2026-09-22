@@ -1,3 +1,4 @@
+import { compileGpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import {
   type BaseDist,
@@ -90,9 +91,9 @@ describe('scanDistribution / parseDistribution', () => {
 describe('densityExpr', () => {
   it('classifies as an implicit curve with slider params', () => {
     const c = classify(densityExpr(dist('Normal(0, a)')), new Set(['a']));
-    expect(c.plot.type).toBe('implicit2d');
+    expect(compileGpu(c).type).toBe('implicit2d');
     expect(c.params).toEqual(['a']);
-    const field = (c.plot as { field: string }).field;
+    const field = (compileGpu(c) as { field: string }).field;
     expect(field).toContain('eq_normalpdf');
     expect(field).toContain('u_a');
   });
@@ -104,8 +105,8 @@ describe('densityExpr', () => {
   });
 
   it('classifies the uniform and exponential densities as curves', () => {
-    expect(classify(densityExpr(dist('Uniform(0, 1)'))).plot.type).toBe('implicit2d');
-    expect(classify(densityExpr(dist('Exponential(2)'))).plot.type).toBe('implicit2d');
+    expect(compileGpu(classify(densityExpr(dist('Uniform(0, 1)')))).type).toBe('implicit2d');
+    expect(compileGpu(classify(densityExpr(dist('Exponential(2)')))).type).toBe('implicit2d');
   });
 
   it('degrades invalid parameters to a flat 0 instead of a negative density', () => {
@@ -187,8 +188,8 @@ describe('regionExpr', () => {
   it('classifies as a shaded region with an outline', () => {
     const p = prob('X < b').single!;
     const c = classify(regionExpr(dist('Normal(0, 1)'), p.lo, p.hi), new Set(['b']));
-    expect(c.plot.type).toBe('ineq2d');
-    const plot = c.plot as { field: string; edges: string[] };
+    expect(compileGpu(c).type).toBe('ineq2d');
+    const plot = compileGpu(c) as { field: string; edges: string[] };
     expect(plot.field).toContain('eq_normalpdf');
     expect(plot.field).toContain('u_b');
     expect(plot.edges).toHaveLength(1);

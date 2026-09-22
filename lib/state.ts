@@ -1,3 +1,4 @@
+import { type Env, evaluateFrame, scalarDefinitions } from './env.ts';
 /**
  * Time integration for state definitions (`a' = …`, `a(0) = …`).
  *
@@ -12,8 +13,8 @@
  * system integrated at whatever dt the display happened to deliver is not
  * reproducible even on the same machine.
  */
-import { type Defs, evalConstEnv } from './defs.ts';
-import { type Expr, evaluate, freeVars } from './expr.ts';
+
+import { type Expr, evaluate, freeVars, exprKey } from './expr.ts';
 
 export interface StateSystem {
   names: string[];
@@ -31,45 +32,26 @@ const STEP = 1 / 240;
  *  freezing the page (a backgrounded tab can hand back a gap of minutes). */
 const MAX_STEPS = 60;
 
-/** A stable structural key for an expression, used for change detection. */
-function exprKey(e: Expr): string {
-  switch (e.kind) {
-    case 'num': return String(e.value);
-    case 'var': return e.name;
-    case 'neg': return `-(${exprKey(e.a)})`;
-    case 'bin': return `(${exprKey(e.a)}${e.op}${exprKey(e.b)})`;
-    case 'call': return `${e.name}(${e.args.map(exprKey).join(',')})`;
-    case 'eq': return `(${exprKey(e.l)}=${exprKey(e.r)})`;
-    case 'ineq': return `(${exprKey(e.l)}${e.op}${exprKey(e.r)})`;
-    case 'vec': return `(${e.items.map(exprKey).join(',')})`;
-    case 'list': return `[${e.items.map(exprKey).join(',')}]`;
-    case 'data': return `#${e.values.length}`;
-    case 'str': return JSON.stringify(e.value);
-    case 'text': return `#s${e.values.length}`;
-    case 'piecewise':
-      return `{${e.cases.map(c => `${exprKey(c.cond)}:${exprKey(c.value)}`).join(',')}${e.otherwise ? `,${exprKey(e.otherwise)}` : ''}}`;
-  }
-}
-
 /** The system to integrate, or null when the graph defines no states. */
-export function buildStateSystem(defs: Defs): StateSystem | null {
-  if (!defs.states.size) return null;
-  const names = [...defs.states.keys()];
-  const derivs = names.map(n => defs.states.get(n)!.deriv);
-  const key = names
-    .map(n => `${n}'=${exprKey(defs.states.get(n)!.deriv)};${n}(0)=${exprKey(defs.states.get(n)!.init)}`)
+export function buildStateSystem(defs: Env): StateSystem | null {
+  const states = [...scalarDefinitions(defs)].filter((entry): entry is [string, Extract<typeof entry[1], { role: 'state' }>] => entry[1].role === 'state');
+  if (!states.length) return null;
+  const names = states.map(([name]) => name);
+  const derivs = states.map(([, state]) => state.deriv);
+  const key = states
+    .map(([name, state]) => `${name}'=${exprKey(state.deriv)};${name}(0)=${exprKey(state.init)}`)
     .join('\n');
   return { names, derivs, key };
 }
 
 /** Starting values, read from the `a(0)` expressions against the constants. */
-export function initialState(defs: Defs, sys: StateSystem): Record<string, number> {
+export function initialState(defs: Env, sys: StateSystem): Record<string, number> {
   const out: Record<string, number> = {};
   let env: Record<string, number> = {};
   try {
     // Constants that read a state cannot be resolved before there is one;
     // initial values may not use states, so those failures don't matter here.
-    env = evalConstEnv(defs, 0, Object.fromEntries(sys.names.map(n => [n, 0])));
+    env = evaluateFrame(defs, 0, Object.fromEntries(sys.names.map(n => [n, 0])));
   } catch { /* leave env empty: an init using a broken constant lands on 0 */ }
   for (const name of sys.names) {
     let v = 0;
@@ -83,7 +65,7 @@ export function initialState(defs: Defs, sys: StateSystem): Record<string, numbe
 
 /** Constants whose value moves under the integrator, so the derivative sees a
  *  fresh environment at every RK4 stage rather than one per frame. */
-function dynamicConsts(defs: Defs): boolean {
+function dynamicConsts(defs: Env): boolean {
   for (const e of defs.consts.values()) {
     for (const fv of freeVars(e)) {
       if (fv === 't' || defs.states.has(fv)) return true;
@@ -107,7 +89,7 @@ function dynamicConsts(defs: Defs): boolean {
  * stops: a blown-up system holds its last good frame instead of vanishing.
  */
 export function advanceState(
-  defs: Defs,
+  defs: Env,
   sys: StateSystem,
   values: Record<string, number>,
   from: number,
@@ -130,7 +112,7 @@ export function advanceState(
   let base: Record<string, number> = {};
   if (!perStage) {
     try {
-      base = evalConstEnv(defs, to, values);
+      base = evaluateFrame(defs, to, values);
     } catch {
       // A half-typed definition: hold the state where it is and stay glued to
       // the clock, so finishing the edit resumes rather than fast-forwards.
@@ -153,7 +135,7 @@ export function advanceState(
       if (perStage) {
         const seed: Record<string, number> = {};
         for (let i = 0; i < n; i++) seed[sys.names[i]] = at[i];
-        env = evalConstEnv(defs, time, seed);
+        env = evaluateFrame(defs, time, seed);
       } else {
         env = { ...base };
         for (let i = 0; i < n; i++) env[sys.names[i]] = at[i];

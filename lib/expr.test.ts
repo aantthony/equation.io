@@ -222,9 +222,9 @@ describe('factorial and special functions', () => {
   it('reads != as a comparison, never as postfix factorial', () => {
     // One token, so the '!' can never be read as a factorial with '=' after
     // it — which would silently graph factorial(x) = 2.
-    expect(parseExpr('x != 2')).toMatchObject({ kind: 'call', name: '[ne]' });
-    expect(parseExpr('x!=2')).toMatchObject({ kind: 'call', name: '[ne]' });
-    expect(parseExpr('x == 2')).toMatchObject({ kind: 'call', name: '[eq]' });
+    expect(parseExpr('x != 2')).toMatchObject({ kind: 'eqtest', op: '!=' });
+    expect(parseExpr('x!=2')).toMatchObject({ kind: 'eqtest', op: '!=' });
+    expect(parseExpr('x == 2')).toMatchObject({ kind: 'eqtest', op: '==' });
     expect(ev('x! = 2', { x: 3 })).toBe(4); // spaced: the equation x! = 2, as l - r
   });
 
@@ -466,7 +466,7 @@ describe('text', () => {
     expect(() => evaluate(parseExpr('x + "NYC"'), { x: 1 })).toThrow(text);
     // Where text belongs, nothing changed.
     expect(parseExpr('p[p.city == "NYC"]', undefined, new Set(['p'])))
-      .toMatchObject({ name: '[index]' });
+      .toMatchObject({ kind: 'index' });
   });
 
   it('keeps a ";" inside text, because the link codec now can', () => {
@@ -476,7 +476,7 @@ describe('text', () => {
     // so text is text — see the round-trip test in link.test.ts.
     expect(parseExpr('"a;b"')).toMatchObject({ kind: 'str', value: 'a;b' });
     expect(parseExpr('p[p.city == "a;b"]', undefined, new Set(['p'])))
-      .toMatchObject({ name: '[index]' });
+      .toMatchObject({ kind: 'index' });
   });
 });
 

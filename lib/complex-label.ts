@@ -1,10 +1,11 @@
+import { exprKey } from './expr.ts';
 import { type Expr, freeVars, substVars } from './expr.ts';
 import { complexRootLabels } from './poly.ts';
 const cache = new Map<string, ReturnType<typeof complexRootLabels>>();
 export function complexRootLabel(expr: Expr | undefined, p: number[], env: Record<string, number>): string | undefined {
   if (!expr) return undefined;
   const values = Object.fromEntries([...freeVars(expr)].filter(n => n !== 'w' && Number.isFinite(env[n])).map(n => [n, { kind: 'num' as const, value: env[n] }]));
-  const resolved = substVars(expr, values), key = JSON.stringify(resolved);
+  const resolved = substVars(expr, values), key = exprKey(resolved);
   let labels = cache.get(key);
   if (labels === undefined) {
     labels = complexRootLabels(resolved); if (cache.size >= 32) cache.delete(cache.keys().next().value!); cache.set(key, labels);

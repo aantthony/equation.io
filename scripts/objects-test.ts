@@ -61,4 +61,6 @@ try {
   await load(['a_n=1/n','a_[1..10]','a_3','2+2=4','e=2']);
   await page.getByText('Always true (4 = 4)',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);console.log('PASS sequence values and comparison notes');
+  await load(['iter({re(z)<0:re(z),im(z)})']);
+  assert.deepEqual(errors,[]);console.log('PASS piecewise iteration shader');
 } finally {await browser?.close();server.kill();}

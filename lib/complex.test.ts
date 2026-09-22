@@ -1,3 +1,4 @@
+import { compileGpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { compileTyped, usesComplex } from './complex.ts';
 import { parseExpr } from './expr.ts';
@@ -49,13 +50,13 @@ describe('compileTyped', () => {
 describe('classify (complex)', () => {
   it('routes complex-valued expressions to complex2d', () => {
     const c = classify(parseExpr('ln(w-1) - ln(w+1)'));
-    expect(c.plot.type).toBe('complex2d');
+    expect(compileGpu(c).type).toBe('complex2d');
     expect(c.needs3D).toBe(false);
   });
 
   it('routes re/im equations to implicit curves', () => {
-    expect(classify(parseExpr('im(ln(w)) = 1')).plot.type).toBe('implicit2d');
-    expect(classify(parseExpr('abs(w) = 2')).plot.type).toBe('implicit2d');
+    expect(compileGpu(classify(parseExpr('im(ln(w)) = 1'))).type).toBe('implicit2d');
+    expect(compileGpu(classify(parseExpr('abs(w) = 2'))).type).toBe('implicit2d');
   });
 
   it('rejects complex in 3D or parametric contexts', () => {
@@ -69,9 +70,9 @@ describe('classify (complex)', () => {
 describe('classify (special forms)', () => {
   it('routes domain coloring and conformal grids', () => {
     const d = classify(parseExpr('domain(w^2 + 1)'));
-    expect(d.plot.type).toBe('domain2d');
+    expect(compileGpu(d).type).toBe('domain2d');
     expect(d.needs3D).toBe(false);
-    expect(classify(parseExpr('conformal(w^2)')).plot.type).toBe('conformal2d');
+    expect(compileGpu(classify(parseExpr('conformal(w^2)'))).type).toBe('conformal2d');
   });
 
   it('rejects real-valued domain/conformal arguments', () => {
@@ -81,15 +82,15 @@ describe('classify (special forms)', () => {
 
   it('iter binds z and seeds by whether the step sees the pixel', () => {
     const m = classify(parseExpr('iter(z^2 + w)'));
-    expect(m.plot).toMatchObject({ type: 'fractal2d', seed: 'zero' });
+    expect(compileGpu(m)).toMatchObject({ type: 'fractal2d', seed: 'zero' });
     expect(m.needs3D).toBe(false);
-    expect((m.plot as { step: string }).step).toContain('c_mul(zc, zc)');
+    expect((compileGpu(m) as { step: string }).step).toContain('c_mul(zc, zc)');
     const j = classify(parseExpr('iter(z^2 - 0.7269 + 0.1889i)'));
-    expect(j.plot).toMatchObject({ type: 'fractal2d', seed: 'pixel' });
+    expect(compileGpu(j)).toMatchObject({ type: 'fractal2d', seed: 'pixel' });
   });
 
   it('iter takes an optional plain-number count', () => {
-    expect(classify(parseExpr('iter(z^2 + w, 500)')).plot).toMatchObject({ maxIter: 500 });
+    expect(compileGpu(classify(parseExpr('iter(z^2 + w, 500)')))).toMatchObject({ maxIter: 500 });
     expect(() => classify(parseExpr('iter(z^2 + w, x)'))).toThrow(/plain number/);
   });
 
@@ -102,12 +103,12 @@ describe('classify (special forms)', () => {
   it('flags t-animated julia sets', () => {
     const c = classify(parseExpr('iter(z^2 + e^(i t/8))'));
     expect(c.animated).toBe(true);
-    expect(c.plot).toMatchObject({ type: 'fractal2d', seed: 'pixel' });
+    expect(compileGpu(c)).toMatchObject({ type: 'fractal2d', seed: 'pixel' });
   });
 
   it('threads slider constants through iter as uniforms', () => {
     const c = classify(parseExpr('iter(z^2 + a + b i)'), new Set(['a', 'b']));
     expect(c.params).toEqual(['a', 'b']);
-    expect((c.plot as { step: string }).step).toContain('u_a');
+    expect((compileGpu(c) as { step: string }).step).toContain('u_a');
   });
 });

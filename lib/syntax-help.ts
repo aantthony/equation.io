@@ -1,7 +1,8 @@
+import { type Env } from './env.ts';
 /** Pure, tolerant editor assistance. Suggestions write ordinary equation
  * text; an incomplete expression never needs to pass through the parser.
  */
-import { type Defs, pointComponentNames, shadowedFnNames } from './defs.ts';
+import { pointComponentNames, shadowedFnNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { tildeRow } from './regression.ts';
 import { FUNCTIONS, NAME_SRC, NAME_START_CHARS, WRITTEN_NAME_CHARS, builtinFn, canonicalName } from './expr.ts';
@@ -80,8 +81,8 @@ const signatures: Record<string, [string, string]> = {
 const FOLDED_DISTS = DIST_FAMILIES.map(f => f.name).filter(n => !isModelName(n));
 
 /** Every name the definitions claim — the stand-in for declaredNames(texts)
- *  when the caller has only the built Defs. */
-const definedNames = (defs: Defs): ReadonlySet<string> => new Set([
+ *  when the caller has only the built Env. */
+const definedNames = (defs: Env): ReadonlySet<string> => new Set([
   ...defs.consts.keys(), ...defs.fns.keys(), ...defs.fields.keys(), ...defs.states.keys(), ...defs.points,
   ...defs.mats.keys(), ...defs.lists.keys(), ...defs.tables.keys(), ...defs.missingData.keys(),
 ]);
@@ -89,7 +90,7 @@ const definedNames = (defs: Defs): ReadonlySet<string> => new Set([
 /** `declared`: the document's `name = …` names (regression.ts declaredNames),
  *  which decide whether `Y ~ gamma(` is a model or a law exactly as the row
  *  itself will be read; without it the built definitions stand in. */
-export function syntaxHelp(text: string, offset: number, defs: Defs, declared?: ReadonlySet<string>): SyntaxHelp {
+export function syntaxHelp(text: string, offset: number, defs: Env, declared?: ReadonlySet<string>): SyntaxHelp {
   const before = text.slice(0, offset);
   const empty: SyntaxHelp = { start: offset, end: offset, suggestions: [] };
   if (text.trimStart().startsWith('#')) return empty;

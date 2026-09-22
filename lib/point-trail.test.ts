@@ -13,7 +13,8 @@ describe('trail(point)', () => {
     ] as const) {
       const graph = analyze(text.split(';').map(s => s.trim()));
       expect(graph.rows.map(r => r.error)).toEqual(graph.rows.map(() => undefined));
-      expect(graph.rows.at(-1)?.cls).toMatchObject({ plot: { type: 'trail', dim }, needs3D: dim === 3 });
+      expect(graph.rows.at(-1)?.cpu).toMatchObject({ type: 'trail', dim });
+      expect(graph.rows.at(-1)?.cls?.needs3D).toBe(dim === 3);
     }
   });
 

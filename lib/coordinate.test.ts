@@ -1,17 +1,19 @@
+import { compileCpu } from './compiler.ts';
+import { evaluateFrame } from './env.ts';
 import { describe, it, expect } from 'vitest';
 import { evaluate, parseExpr } from './expr.ts';
 import { classify } from './plot.ts';
 import { solveSystem, traceSystem } from './solve.ts';
 import { complexParts } from './complex-parts.ts';
 import { diff } from './diff.ts';
-import { evalConstEnv } from './defs.ts';
+
 import { analyze } from '../worker/graph.ts';
 
 const polar = ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
 const last = (rows: string[]) => {
   const a = analyze(rows);
   expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
-  return a.rows.at(-1)!.cls!.plot;
+  return a.rows.at(-1)!.cpu!;
 };
 const solutions = (rows: string[]) => {
   const p = last(rows);
@@ -98,9 +100,9 @@ describe('coordinate objects end to end', () => {
   ])('includes indirect chart time dependence: $rows', ({ rows, state, velocity }) => {
     const a = analyze([...rows, "(p',q')=(0,0)"]);
     expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
-    const p = a.rows.at(-1)!.cls!.plot;
+    const p = a.rows.at(-1)!.cpu!;
     if (p.type !== 'vfield2d') throw new Error('expected field');
-    const env = { ...evalConstEnv(a.defs, 2, state), x: 4, y: 1, t: 2 };
+    const env = { ...evaluateFrame(a.defs, 2, state), x: 4, y: 1, t: 2 };
     expect(p.comps.map(e => evaluate(e, env))).toEqual(velocity);
   });
   it('preserves constant Cartesian flows and state names', () => {
@@ -122,13 +124,13 @@ describe('coordinate objects end to end', () => {
 
 describe('complex CPU objects', () => {
   it('renders constants as Argand points', () => {
-    const p = classify(parseExpr('1+2i')).plot;
+    const p = compileCpu(classify(parseExpr('1+2i')));
     if (p.type !== 'point') throw new Error('expected point');
     expect(p.coords.map(e => evaluate(e, {}))).toEqual([1, 2]);
   });
   it('lowers real projections inside complex arithmetic', () => {
     for (const text of ['re(2)+i', '(re(2)-10)^(1/3)+i']) {
-      const p = classify(parseExpr(text)).plot;
+      const p = compileCpu(classify(parseExpr(text)));
       if (p.type !== 'point') throw new Error('expected point');
       expect(p.coords.map(e => evaluate(e, {}))).toEqual([text.startsWith('re') ? 2 : -2, 1]);
     }
@@ -170,7 +172,7 @@ describe('complex CPU objects', () => {
   });
   it('lowers projections in piecewise values, conditions, and fallbacks', () => {
     for (const text of ['{t<1:re(2),3}+i', '{re(0)<im(t*i)<re(1):{t<0.5:re(2),im(2i)},re(3)}+i']) {
-      const p = classify(parseExpr(text)).plot;
+      const p = compileCpu(classify(parseExpr(text)));
       if (p.type !== 'point') throw new Error('expected point');
       expect(p.coords.map(e => evaluate(e, { t: 0.25 }))).toEqual([2, 1]);
       expect(p.coords.map(e => evaluate(e, { t: 0.75 }))).toEqual([2, 1]);
@@ -206,7 +208,7 @@ describe('complex CPU objects', () => {
     expect(solutions(['sqrt(w) = -1'])).toEqual([]);
   });
   it('keeps real projections as implicit equations', () => {
-    expect(classify(parseExpr('re(w^2) = 1')).plot.type).toBe('implicit2d');
+    expect(compileCpu(classify(parseExpr('re(w^2) = 1'))).type).toBe('implicit2d');
   });
 });
 
@@ -303,7 +305,7 @@ describe('coordinate fields over z', () => {
     }
     // A planar field in the same document keeps its planar reading.
     const a = analyze([...spherical, 'theta = pi/4']);
-    expect(a.rows.at(-1)!.cls!.plot.type).toBe('implicit2d');
+    expect(a.rows.at(-1)!.cpu!.type).toBe('implicit2d');
     expect(a.rows.at(-1)!.cls!.needs3D).toBe(false);
   });
 
@@ -311,7 +313,7 @@ describe('coordinate fields over z', () => {
     const a = analyze(['r = 2', 'theta = 1', 'rho = 3', 'phi = 0.5', 'y = r x + theta + rho + phi']);
     expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
     expect(a.defs.fields.size).toBe(0);
-    expect(a.rows.at(-1)!.cls!.plot.type).toBe('implicit2d');
+    expect(a.rows.at(-1)!.cpu!.type).toBe('implicit2d');
     expect(a.rows.at(-1)!.cls!.params).toEqual(['phi', 'r', 'rho', 'theta']);
   });
 
@@ -319,7 +321,7 @@ describe('coordinate fields over z', () => {
     const viaPolar = ['rho = sqrt(r^2 + z^2)', 'phi = atan2(r, z)', 'r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
     const a = analyze([...viaPolar, 'rho = 2']);
     expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
-    expect(a.rows.at(-1)!.cls!.plot.type).toBe('implicit3d');
+    expect(a.rows.at(-1)!.cpu!.type).toBe('implicit3d');
     expect(evaluate(a.defs.fields.get('rho')!, { x: 1, y: 2, z: 2 })).toBeCloseTo(3, 12);
     expect(errorsOf(['a = b + z', 'b = a + x'])).toEqual([
       'a is defined in terms of itself.', 'b is defined in terms of itself.',
@@ -333,9 +335,9 @@ describe('coordinate fields over z', () => {
     const a = analyze(['s = (x, y)', 'dot(s, s) = 1']);
     expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
     expect(a.rows[0]!.def?.name).toBe('s');
-    expect(a.rows[1]!.cls!.plot.type).toBe('implicit2d');
-    expect(evaluate(a.rows[1]!.expr!, { x: 1, y: 0 })).toBe(0);
-    expect(evaluate(a.rows[1]!.expr!, { x: 0, y: 0 })).toBe(-1);
+    expect(a.rows[1]!.cpu!.type).toBe('implicit2d');
+    expect(evaluate((a.rows[1]!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, { x: 1, y: 0 })).toBe(0);
+    expect(evaluate((a.rows[1]!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, { x: 0, y: 0 })).toBe(-1);
   });
 
   it('accepts |s| = 1 and |s| < 1 as the same circle and disk', () => {
@@ -346,8 +348,8 @@ describe('coordinate fields over z', () => {
   it('scales, rotates, and lifts the same construction', () => {
     const half = analyze(['s = (x, y)', 'q = 2 s', 'dot(q, q) = 1']);
     expect(half.rows.map(r => r.error).filter(Boolean)).toEqual([]);
-    expect(half.rows.at(-1)!.cls!.plot.type).toBe('implicit2d');
-    expect(evaluate(half.rows.at(-1)!.expr!, { x: 0.5, y: 0 })).toBe(0);
+    expect(half.rows.at(-1)!.cpu!.type).toBe('implicit2d');
+    expect(evaluate((half.rows.at(-1)!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, { x: 0.5, y: 0 })).toBe(0);
 
     expect(last(['F = (y, -x)', 'dot(F, F) = 1']).type).toBe('implicit2d');
 

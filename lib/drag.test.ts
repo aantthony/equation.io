@@ -42,7 +42,7 @@ describe('dragAxes', () => {
   it.each(['p=x/a; q=y', 'b=a^2; p=x/b; q=y', 'p=x; q=y/a'])('pins sliders defining either chart coordinate: %s', chart => {
     const a = analyze(['a=2', ...chart.split(';'), '(p,q)=(a,0)']);
     expect(a.rows.some(r => r.error)).toBe(false);
-    const plot = a.rows.at(-1)!.cls!.plot;
+    const plot = a.rows.at(-1)!.cpu!;
     if (plot.type !== 'system' || !plot.coordinates) throw new Error('expected coordinate point');
     const coords = plot.coordinates;
     const pinned = definitionDependencies(coords.flatMap(c => [...freeVars(c)]), a.defs);

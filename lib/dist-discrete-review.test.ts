@@ -193,11 +193,13 @@ describe('8. discreteness has one source of truth: the family', () => {
     expect(discreteLaw(d, {})!.mean).toBe(3);
     expect(probabilityValue(d, undefined, { kind: 'num', value: 2 }, {}, { hiStrict: false })).toBeCloseTo(0.42319008112684353, 12);
     const sys = new RVSystem();
-    sys.add({ name: 'X', kind: 'base', dist: d });
+    const declarations = new Map<string, import('./dist.ts').RV>([['X', { name: 'X', kind: 'base', dist: d }]]);
+    sys.useDeclarations(declarations);
     expect(sys.discreteDist('X')).toBe(d);
     expect(sys.exactDist('X')).toBeNull();
     // …and so is what is built on it (plan #6): X + 1 is a pmf, shifted.
-    sys.add({ name: 'Y', kind: 'derived', expr: parseExpr('X + 1', none) });
+    declarations.set('Y', { name: 'Y', kind: 'derived', expr: parseExpr('X + 1', none) });
+    sys.useDeclarations(declarations);
     expect(sys.isDiscreteVar('Y')).toBe(true);
     expect(sys.pmfOf('Y', {})!.xs[0]).toBe(1);
   });

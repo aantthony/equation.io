@@ -93,24 +93,24 @@ describe('hull(…) rows', () => {
   const plot = (rows: string[]) => {
     const a = analyze(rows);
     expect(a.rows.map(r => r.error)).toEqual(rows.map(() => undefined));
-    return { plot: a.rows.at(-1)!.cls!.plot, env: a.constEnv, needs3D: a.rows.at(-1)!.cls!.needs3D };
+    return { cpu: a.rows.at(-1)!.cpu!, env: a.constEnv, needs3D: a.rows.at(-1)!.cls!.needs3D };
   };
   it('takes points one by one, or a whole list — literal, crossed, or rotated', () => {
-    expect(plot(['hull((0,0),(2,0),(1,1),(2,2),(0,2))']).plot).toMatchObject({ type: 'polygon', hull: true, closed: true });
+    expect(plot(['hull((0,0),(2,0),(1,1),(2,2),(0,2))']).cpu).toMatchObject({ type: 'polygon', hull: true, closed: true });
     const cubeRow = plot(['hull(([0,1],[0,1],[0,1]))']);
-    expect(cubeRow.plot).toMatchObject({ type: 'polygon', hull: true, dim: 3 });
+    expect(cubeRow.cpu).toMatchObject({ type: 'polygon', hull: true, dim: 3 });
     expect(cubeRow.needs3D).toBe(true);
     const ico = plot(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'hull(rotate((0,[-1,1],[-phi,phi]),k,(1,1,1)))']);
-    if (ico.plot.type !== 'polygon') throw new Error(ico.plot.type);
-    expect(hullFaces(ico.plot.pts.map(e => evaluate(e, ico.env)), 3)).toHaveLength(20);
-    expect(plot(['P=[(0,0),(3,0),(1,1),(0,3)]', 'hull(P)']).plot).toMatchObject({ hull: true });
+    if (ico.cpu.type !== 'polygon') throw new Error(ico.cpu.type);
+    expect(hullFaces(ico.cpu.pts.map(e => evaluate(e, ico.env)), 3)).toHaveLength(20);
+    expect(plot(['P=[(0,0),(3,0),(1,1),(0,3)]', 'hull(P)']).cpu).toMatchObject({ hull: true });
     // Vertices may move: which are extreme is settled per frame.
-    expect(plot(['hull((0,0),(2,0),(1,sin(t)),(1,2))']).plot).toMatchObject({ hull: true });
+    expect(plot(['hull((0,0),(2,0),(1,sin(t)),(1,2))']).cpu).toMatchObject({ hull: true });
   });
   it('transforms as a whole: the figure of the transformed points', () => {
     const P = 'P=[(0,0),(2,0),(1,1),(1,0.2)]';
     const verts = (rows: string[]) => {
-      const { plot: p, env } = plot(rows);
+      const { cpu: p, env } = plot(rows);
       if (p.type !== 'polygon') throw new Error(p.type);
       return hullFaces(p.pts.map(e => evaluate(e, { ...env, t: 0 })), p.dim ?? 2)[0].outline.map(q => q.slice(0, p.dim ?? 2).map(c => +c.toFixed(6) + 0).join());
     };
@@ -121,14 +121,14 @@ describe('hull(…) rows', () => {
     expect(verts([P, '2 hull(P) + (1,1)']).sort()).toEqual(['1,1', '3,3', '5,1']);
     expect(verts([P, '-hull(P)/2']).sort()).toEqual(['-0.5,-0.5', '-1,0', '0,0']);
     // Other point figures move the same way, point by point.
-    expect(plot(['2 segment((0,0),(1,1)) + (1,0)']).plot).toMatchObject({ type: 'polygon', closed: false });
-    expect(plot(['rotate(polygon((1,0),(2,0),(2,1)), t, (1,1))']).plot).toMatchObject({ type: 'polygon', closed: true });
-    expect(plot(['rotate(hull(([0,1],[0,1],[0,1])), t, (1,1,1)) + (2,0,0)']).plot).toMatchObject({ hull: true, dim: 3 });
+    expect(plot(['2 segment((0,0),(1,1)) + (1,0)']).cpu).toMatchObject({ type: 'polygon', closed: false });
+    expect(plot(['rotate(polygon((1,0),(2,0),(2,1)), t, (1,1))']).cpu).toMatchObject({ type: 'polygon', closed: true });
+    expect(plot(['rotate(hull(([0,1],[0,1],[0,1])), t, (1,1,1)) + (2,0,0)']).cpu).toMatchObject({ hull: true, dim: 3 });
   });
   it('a list in the transform is one figure per element, not one figure of every copy', () => {
     const members = (rows: string[]) => {
-      const p = plot(rows).plot;
-      return p.type === 'family' ? p.members.map(m => m.cls.plot.type) : [p.type];
+      const p = plot(rows).cpu;
+      return p.type === 'family' ? p.members.map(m => m.cpu.type) : [p.type];
     };
     const P = 'P=[(1,0),(2,0),(2,1)]';
     expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'e^(th J) hull(P)'])).toEqual(['polygon', 'polygon', 'polygon']);

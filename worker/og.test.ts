@@ -18,6 +18,17 @@ function pixel(r: { w: number; px: Uint8ClampedArray }, x: number, y: number) {
 }
 
 describe('og raster renderer', () => {
+  it.each([
+    ['re(w)=0', 'x=0'],
+    ['im(w)', 'y'],
+    ['1+2i', '(1,2)'],
+    ['exp(i 2pi u)', '(cos(2pi u),sin(2pi u))'],
+  ])('shares CPU projections with the browser: %s', (complex, real) => {
+    const actual = renderRaster([complex], 100, 100);
+    expect(actual.px).toEqual(renderRaster([real], 100, 100).px);
+    expect(actual.px).not.toEqual(renderRaster([], 100, 100).px);
+  });
+
   it('uses the same nonuniform scale for curves and points in link previews', () => {
     const view = 'view(x=-5..5, y=-1..1, ratio=2)';
     for (const equation of ['y=x', '(1,1)']) {
@@ -377,7 +388,7 @@ describe('og raster renderer', () => {
     expect(canRenderOg(rows)).toBe(true);
     const a = analyze(rows, { readouts: false });
     expect(a.rows.map(r => r.info)).toEqual(rows.map(() => undefined));
-    expect(a.rows.map(r => r.cls?.plot.type)).toEqual(['pmf', 'pmf', 'pmf', 'prob', 'expect', 'prob']);
+    expect(a.rows.map(r => r.cpu?.type)).toEqual(['pmf', 'pmf', 'pmf', 'prob', 'expect', 'prob']);
     expect(ENUM_STATS).toEqual(before);
     // MCP validation asks for them, and gets them.
     expect(analyze(rows).rows.map(r => r.info)).toEqual([undefined, undefined, 'μ = 900, σ = 234.307', '≈ 0.4742', '≈ 900.0000', '≈ 0.5032']);

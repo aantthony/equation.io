@@ -1,3 +1,5 @@
+import { mapChildren } from './expr.ts';
+import { exprKey } from './expr.ts';
 /**
  * Symbolic integration with a numeric safety net.
  *
@@ -50,7 +52,7 @@ const lnAbs = (x: Expr): Expr => call('ln', call('abs', x));
 
 const isNum = (e: Expr): e is Expr & { kind: 'num' } => e.kind === 'num';
 
-const key = (e: Expr): string => JSON.stringify(e);
+const key = (e: Expr): string => exprKey(e);
 
 const isConstIn = (e: Expr, v: string): boolean => !freeVars(e).has(v);
 
@@ -657,6 +659,7 @@ export function improperSum(body: Expr, v: string, lo: Expr | null, hi: Expr | n
  *  the bound variable is eliminated in the same pass). */
 function substAll(e: Expr, v: string, val: Expr): Expr {
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substAll(x, v, val));
     case 'num': return e;
     case 'var': return e.name === v ? val : e;
     case 'neg': return neg(substAll(e.a, v, val));

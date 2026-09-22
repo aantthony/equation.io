@@ -1,3 +1,4 @@
+import { childrenOf } from './expr.ts';
 /**
  * Grid families from coordinate fields.
  *
@@ -6,28 +7,15 @@
  * antialiasing as curves. The default Cartesian grid is just the identity
  * pair (x, y) going through the same path; polar is (sqrt(x²+y²), atan2(y,x)).
  */
-import { diff } from './diff.ts';
-import { ANGLE_FN, type Expr, evaluate, freeVars, substVars } from './expr.ts';
-import { toGLSL, uniformName } from './glsl.ts';
+import { ANGLE_FN, type Expr, evaluate, freeVars } from './expr.ts';
 
-export interface GridField {
-  name: string;
-  /** Resolved expression: free vars in {x, y, t} ∪ constants. */
-  expr: Expr;
-  /** GLSL for c(x, y); user constants appear as u_<name>. */
-  glsl: string;
-  /** GLSL for ∇c in math units; absent → the shader uses screen derivatives. */
-  gradGlsl?: [string, string];
-  /** ∇c as CPU-evaluable exprs (original constant names), for spacing. */
-  grad?: [Expr, Expr];
-  /** User constants the field references. */
-  params: string[];
-  /** Angle-valued (contains atan2): spacing snaps to divisors of 2π. */
-  angular: boolean;
-}
+/** Compiled grid product used only at the drawing boundary. */
+export type GridField = import('./compiler.ts').CpuGrid & import('./compiler.ts').GpuGrid;
+import { compileGridCpu, compileGridGpu } from './compiler.ts';
 
 export function hasAtan2(e: Expr): boolean {
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return childrenOf(e).some(hasAtan2);
     case 'num':
     case 'var':
       return false;
@@ -52,23 +40,10 @@ export function hasAtan2(e: Expr): boolean {
  *  uses z has no planar level sets to draw, so it only defines. */
 export const planarField = (expr: Expr): boolean => !freeVars(expr).has('z');
 
+/** Convenience compilation of a named coordinate grid through shared backends. */
 export function buildGridField(name: string, expr: Expr, constNames: ReadonlySet<string>): GridField {
-  const params = [...freeVars(expr)].filter(v => constNames.has(v)).sort();
-  const uMap = Object.fromEntries(params.map(p => [p, { kind: 'var', name: uniformName(p) } as Expr]));
-  const sub = (e: Expr) => (params.length ? substVars(e, uMap) : e);
-  let grad: [Expr, Expr] | undefined;
-  let gradGlsl: [string, string] | undefined;
-  try {
-    const gx = diff(expr, 'x');
-    const gy = diff(expr, 'y');
-    gradGlsl = [toGLSL(sub(gx)), toGLSL(sub(gy))];
-    grad = [gx, gy];
-  } catch {
-    // Non-smooth (floor, mod, …): the shader falls back to dFdx/dFdy. The
-    // analytic gradient matters most for atan2, whose screen derivatives
-    // explode across the branch cut, and those always differentiate.
-  }
-  return { name, expr, glsl: toGLSL(sub(expr)), gradGlsl, grad, params, angular: hasAtan2(expr) };
+  const spec = { name, expr, params: [...freeVars(expr)].filter(v => constNames.has(v)).sort() };
+  return { ...compileGridCpu(spec), ...compileGridGpu(spec) };
 }
 
 /**
@@ -95,7 +70,7 @@ export function angularSpacing(cupp: number, minPx: number): { major: number; mi
  * finite-difference step for fields with no symbolic gradient.
  */
 export function sampleGradMag(
-  f: GridField,
+  f: Pick<GridField, 'expr' | 'grad'>,
   pts: ReadonlyArray<readonly [number, number]>,
   env: Record<string, number>,
   h: number,

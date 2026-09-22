@@ -1,32 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import { evaluate, parseExpr } from './expr.ts';
-import { classify, valueReadout } from './plot.ts';
+import { classify as classifyObject, valueReadout } from './plot.ts';
 
+import { compileCpu, compileGpu } from './compiler.ts';
+
+const classify = (...args: Parameters<typeof classifyObject>) => {
+  const classified = classifyObject(...args);
+  return { ...classified, cpu: compileCpu(classified), gpu: compileGpu(classified) };
+};
 const cls = (s: string) => classify(parseExpr(s));
 
 describe('classify', () => {
   it('routes equations to implicit curves and surfaces', () => {
-    expect(cls('y = x^2').plot.type).toBe('implicit2d');
-    expect(cls('x^2+y^2=4').plot.type).toBe('implicit2d');
-    expect(cls('x^2+y^2+z^2=9').plot.type).toBe('implicit3d');
-    expect(cls('z = sin(x)cos(y)').plot.type).toBe('implicit3d');
+    expect(cls('y = x^2').cpu.type).toBe('implicit2d');
+    expect(cls('x^2+y^2=4').cpu.type).toBe('implicit2d');
+    expect(cls('x^2+y^2+z^2=9').cpu.type).toBe('implicit3d');
+    expect(cls('z = sin(x)cos(y)').cpu.type).toBe('implicit3d');
   });
 
   it('routes bare scalars', () => {
-    expect(cls('sin(x)').plot.type).toBe('implicit2d'); // y = sin(x)
-    expect(cls('sin(x)cos(y)').plot.type).toBe('scalar2d');
-    expect(cls('x^2+y^2+z^2-9').plot.type).toBe('implicit3d');
+    expect(cls('sin(x)').cpu.type).toBe('implicit2d'); // y = sin(x)
+    expect(cls('sin(x)cos(y)').cpu.type).toBe('scalar2d');
+    expect(cls('x^2+y^2+z^2-9').cpu.type).toBe('implicit3d');
   });
 
   it('reads a bare number out instead of plotting y = it', () => {
-    expect(cls('2+2').plot.type).toBe('value');
-    expect(cls('sin(t)')).toMatchObject({ plot: { type: 'value' }, animated: true, needs3D: false });
-    expect(classify(parseExpr('a^2'), new Set(['a']))).toMatchObject({ plot: { type: 'value' }, params: ['a'] });
+    expect(cls('2+2').cpu.type).toBe('value');
+    expect(cls('sin(t)')).toMatchObject({ cpu: { type: 'value' }, animated: true, needs3D: false });
+    expect(classify(parseExpr('a^2'), new Set(['a']))).toMatchObject({ cpu: { type: 'value' }, params: ['a'] });
     // Anything with a plot coordinate is still a graph, and a complex
     // constant is still a point on the Argand plane.
-    expect(cls('2x').plot.type).toBe('implicit2d');
-    expect(cls('y = 4').plot.type).toBe('implicit2d');
-    expect(cls('1+2i').plot.type).toBe('point');
+    expect(cls('2x').cpu.type).toBe('implicit2d');
+    expect(cls('y = 4').cpu.type).toBe('implicit2d');
+    expect(cls('1+2i').cpu.type).toBe('point');
   });
 
   it('formats value readouts', () => {
@@ -39,39 +45,39 @@ describe('classify', () => {
 
   it('routes points', () => {
     const p2 = cls('(2, 3)');
-    expect(p2.plot).toMatchObject({ type: 'point', dim: 2 });
+    expect(p2.cpu).toMatchObject({ type: 'point', dim: 2 });
     expect(p2.needs3D).toBe(false);
     const p3 = cls('(3, 12, 0)');
-    expect(p3.plot).toMatchObject({ type: 'point', dim: 3 });
+    expect(p3.cpu).toMatchObject({ type: 'point', dim: 3 });
     expect(p3.needs3D).toBe(true);
   });
 
   it('routes parametric curves and surfaces', () => {
-    expect(cls('(cos(2pi u), sin(2pi u))').plot).toMatchObject({ type: 'pcurve', dim: 2 });
-    expect(cls('(cos(2pi u), sin(2pi u), u)').plot).toMatchObject({ type: 'pcurve', dim: 3 });
-    expect(cls('(u, v, sin(2pi u))').plot.type).toBe('psurface');
+    expect(cls('(cos(2pi u), sin(2pi u))').cpu).toMatchObject({ type: 'pcurve', dim: 2 });
+    expect(cls('(cos(2pi u), sin(2pi u), u)').cpu).toMatchObject({ type: 'pcurve', dim: 3 });
+    expect(cls('(u, v, sin(2pi u))').cpu.type).toBe('psurface');
     expect(() => cls('(u, v)')).toThrow(/3 components/);
   });
 
   it('reads a complex expression in u alone as a path in the Argand plane', () => {
     const circle = cls('exp(i 2 pi u)');
-    expect(circle.plot).toMatchObject({ type: 'pcurve', dim: 2 });
+    expect(circle.cpu).toMatchObject({ type: 'pcurve', dim: 2 });
     expect(circle.needs3D).toBe(false);
-    const { comps } = circle.plot as { comps: Parameters<typeof evaluate>[0][] };
+    const { comps } = circle.cpu as { comps: Parameters<typeof evaluate>[0][] };
     expect(evaluate(comps[0], { u: 0.25 })).toBeCloseTo(0);
     expect(evaluate(comps[1], { u: 0.25 })).toBeCloseTo(1);
-    expect(cls('u + i u^2').plot).toMatchObject({ type: 'pcurve', dim: 2 });
-    expect(cls('(1+i)^u').plot).toMatchObject({ type: 'pcurve', dim: 2 });
+    expect(cls('u + i u^2').cpu).toMatchObject({ type: 'pcurve', dim: 2 });
+    expect(cls('(1+i)^u').cpu).toMatchObject({ type: 'pcurve', dim: 2 });
     // t is a constant per frame: an animated path.
-    expect(cls('exp(i (2 pi u + t))')).toMatchObject({ animated: true, plot: { type: 'pcurve' } });
+    expect(cls('exp(i (2 pi u + t))')).toMatchObject({ animated: true, cpu: { type: 'pcurve' } });
     // Complex-typed with a zero imaginary part is still a path (along the
     // real axis), as i^2 alone is still the Argand point -1.
-    expect(cls('i^2 u').plot).toMatchObject({ type: 'pcurve', dim: 2 });
+    expect(cls('i^2 u').cpu).toMatchObject({ type: 'pcurve', dim: 2 });
   });
 
   it('changes nothing else that mentions u or i', () => {
     // No free variable: still the Argand point.
-    expect(cls('exp(i pi/3)').plot).toMatchObject({ type: 'point', dim: 2 });
+    expect(cls('exp(i pi/3)').cpu).toMatchObject({ type: 'point', dim: 2 });
     // Real in u: as before, u needs a vector.
     expect(() => cls('sin(u)')).toThrow('u/v need a vector expression like (cos(u), sin(u), v).');
     // Real for all its i: a number depending on u, which is no path — said so.
@@ -96,35 +102,35 @@ describe('classify', () => {
     expect(() => cls('floor(exp(i u))')).toThrow('floor is not supported for complex values.');
     expect(() => cls('{u < 0.5: exp(i u), i}')).toThrow('Complex piecewise: wrap values in re(…) or im(…).');
     // Integer powers stay linear in the exponent…
-    expect(cls('(u + i)^16').plot.type).toBe('pcurve');
+    expect(cls('(u + i)^16').cpu.type).toBe('pcurve');
     // …but every complex product uses both parts of both factors, so a
     // chain doubles per factor: six deep of 1/(… + i) is past sampling.
-    expect(cls('1/(1/(1/(u + i) + i) + i)').plot.type).toBe('pcurve');
+    expect(cls('1/(1/(1/(u + i) + i) + i)').cpu.type).toBe('pcurve');
     expect(() => cls('1/(1/(1/(1/(1/(1/(u + i) + i) + i) + i) + i) + i)')).toThrow(/too large to sample/);
   });
 
   it('sweeps a tube only when tube(…) asks for one', () => {
     // A bare 3D curve stays a line strip, so it cannot swallow points or
     // other curves sharing the scene.
-    const bare = cls('(cos(2pi u), sin(2pi u), u)').plot as { tube?: unknown };
+    const bare = cls('(cos(2pi u), sin(2pi u), u)').cpu as { tube?: unknown };
     expect(bare.tube).toBeUndefined();
 
-    const tubed = cls('tube((cos(2pi u), sin(2pi u), u))').plot;
+    const tubed = cls('tube((cos(2pi u), sin(2pi u), u))').cpu;
     expect(tubed).toMatchObject({ type: 'pcurve', dim: 3, tube: { kind: 'num', value: 0.1 } });
     // Framing derivatives still come through the wrapper.
     expect((tubed as { d1?: unknown[] }).d1).toHaveLength(3);
 
-    expect(cls('tube((cos(2pi u), sin(2pi u), u), 0.03)').plot).toMatchObject({ tube: { kind: 'num', value: 0.03 } });
+    expect(cls('tube((cos(2pi u), sin(2pi u), u), 0.03)').cpu).toMatchObject({ tube: { kind: 'num', value: 0.03 } });
     // A parenthesized vector flattens into the argument list, so the
     // unparenthesized spelling is the same plot.
-    expect(cls('tube(cos(2pi u), sin(2pi u), u)').plot).toMatchObject({ tube: { kind: 'num', value: 0.1 } });
+    expect(cls('tube(cos(2pi u), sin(2pi u), u)').cpu).toMatchObject({ tube: { kind: 'num', value: 0.1 } });
     // Builtin names fold case, so Tube(…) works too.
-    expect(cls('Tube((cos(2pi u), sin(2pi u), u))').plot).toMatchObject({ tube: { kind: 'num', value: 0.1 } });
+    expect(cls('Tube((cos(2pi u), sin(2pi u), u))').cpu).toMatchObject({ tube: { kind: 'num', value: 0.1 } });
   });
 
   it('carries expression radii and their variables through tube(…)', () => {
     // A constant expression stays symbolic; the renderer evaluates per frame.
-    const half = cls('tube((cos(2pi u), sin(2pi u), u), 1/8)').plot as { tube?: unknown };
+    const half = cls('tube((cos(2pi u), sin(2pi u), u), 1/8)').cpu as { tube?: unknown };
     expect(evaluate(half.tube as never, {})).toBeCloseTo(0.125);
 
     // t in the radius animates the plot even when the curve itself is static.
@@ -157,28 +163,28 @@ describe('classify', () => {
 
   it('routes (x,y)-dependent vectors to vector fields', () => {
     const f = cls('(-y, x)');
-    expect(f.plot.type).toBe('vfield2d');
+    expect(f.cpu.type).toBe('vfield2d');
     expect(f.needs3D).toBe(false);
     expect(f.animated).toBe(true); // streamlines drift continuously
-    expect(cls('(y, -sin(x))').plot.type).toBe('vfield2d');
-    expect(cls('(cos(t) - y, x)').plot.type).toBe('vfield2d');
-    expect(cls('(x, y, z)').plot.type).toBe('vfield3d');
-    expect(cls('(x, y, 1)').plot.type).toBe('vfield3d');
+    expect(cls('(y, -sin(x))').cpu.type).toBe('vfield2d');
+    expect(cls('(cos(t) - y, x)').cpu.type).toBe('vfield2d');
+    expect(cls('(x, y, z)').cpu.type).toBe('vfield3d');
+    expect(cls('(x, y, 1)').cpu.type).toBe('vfield3d');
   });
 
   it('routes ODE notation to vector fields', () => {
     const slope = cls("y' = sin(x) - y");
-    expect(slope.plot).toMatchObject({ type: 'vfield2d', fx: '1.0' });
+    expect(slope.gpu).toMatchObject({ type: 'vfield2d', fx: '1.0' });
 
     const leib = cls('dy/dx = x y');
-    expect(leib.plot).toMatchObject({ type: 'vfield2d', fx: '1.0', fy: '(x * y)' });
-    expect(cls('dx/dy = x y').plot).toMatchObject({ type: 'vfield2d', fy: '1.0' });
+    expect(leib.gpu).toMatchObject({ type: 'vfield2d', fx: '1.0', fy: '(x * y)' });
+    expect(cls('dx/dy = x y').gpu).toMatchObject({ type: 'vfield2d', fy: '1.0' });
 
     const sys = cls("(x', y') = (y, -sin(x))");
-    expect(sys.plot).toMatchObject({ type: 'vfield2d', fx: 'y' });
+    expect(sys.gpu).toMatchObject({ type: 'vfield2d', fx: 'y' });
 
     // Constant right sides still make a (uniform) field, not a point.
-    expect(cls("y' = 2").plot.type).toBe('vfield2d');
+    expect(cls("y' = 2").gpu.type).toBe('vfield2d');
 
     expect(() => cls("(x', y') = 3")).toThrow(/two components/);
     expect(() => cls("y = y'")).toThrow(/left of an ODE/);
@@ -193,27 +199,27 @@ describe('classify', () => {
 
   it('routes inequalities to shaded regions', () => {
     const strict = cls('y < x^2');
-    expect(strict.plot).toMatchObject({ type: 'ineq2d', edges: [] });
+    expect(strict.gpu).toMatchObject({ type: 'ineq2d', edges: [] });
 
     const closed = cls('x^2 + y^2 <= 4');
-    expect(closed.plot.type).toBe('ineq2d');
-    expect((closed.plot as { edges: string[] }).edges).toHaveLength(1);
+    expect(closed.gpu.type).toBe('ineq2d');
+    expect((closed.gpu as { edges: string[] }).edges).toHaveLength(1);
 
     // > normalizes to F < 0 by flipping sides.
-    expect(cls('y > x').plot).toMatchObject({ type: 'ineq2d', edges: [] });
-    expect((cls('y ≥ x').plot as { edges: string[] }).edges).toHaveLength(1);
+    expect(cls('y > x').gpu).toMatchObject({ type: 'ineq2d', edges: [] });
+    expect((cls('y ≥ x').gpu as { edges: string[] }).edges).toHaveLength(1);
   });
 
   it('flattens chained inequalities into max() with per-bound edges', () => {
     const c = cls('4 <= x^2 + y^2 <= 9');
-    const plot = c.plot as { type: string; field: string; edges: string[] };
+    const plot = c.gpu as { type: string; field: string; edges: string[] };
     expect(plot.type).toBe('ineq2d');
     expect(plot.field).toContain('max(');
     expect(plot.edges).toHaveLength(2);
 
     // Mixed strictness keeps only the non-strict bound's edge.
     const mixed = cls('-1 <= y - sin(x) < 1');
-    expect((mixed.plot as { edges: string[] }).edges).toHaveLength(1);
+    expect((mixed.gpu as { edges: string[] }).edges).toHaveLength(1);
   });
 
   it('rejects malformed inequalities', () => {
@@ -237,12 +243,13 @@ describe('classify', () => {
 describe('level families', () => {
   const clsWith = (s: string, consts: string[]) => classify(parseExpr(s), new Set(consts));
   const levelsOf = (c: ReturnType<typeof classify>) =>
-    (c.plot as { levels?: { glsl: string; params: string[]; angular: boolean } }).levels;
+    c.cpu.type === 'implicit2d' && c.cpu.levels && c.gpu.type === 'implicit2d'
+      ? { ...c.cpu.levels, ...c.gpu.levels } : undefined;
 
   it('detects f(x,y) = c with a slider constant, either way around', () => {
     for (const s of ['x^2 + y^2 = c', 'c = x^2 + y^2']) {
       const c = clsWith(s, ['c']);
-      expect(c.plot.type).toBe('implicit2d');
+      expect(c.cpu.type).toBe('implicit2d');
       expect(c.params).toEqual(['c']);
       const lv = levelsOf(c);
       expect(lv).toBeDefined();
@@ -269,7 +276,7 @@ describe('level families', () => {
   });
 
   it('offers no family for 3D, complex, or plane-free sides', () => {
-    expect(clsWith('x^2 + y^2 + z^2 = c', ['c']).plot.type).toBe('implicit3d');
+    expect(clsWith('x^2 + y^2 + z^2 = c', ['c']).cpu.type).toBe('implicit3d');
     expect(levelsOf(clsWith('re(w^2) = c', ['c']))).toBeUndefined();
     expect(levelsOf(clsWith('sin(t) = c', ['c']))).toBeUndefined();
   });
@@ -277,7 +284,7 @@ describe('level families', () => {
 
 describe('systems', () => {
   it('reads a vector equation as a square system', () => {
-    const p = cls('(x^2 + y^2 - 4, x y - 1) = (0, 0)').plot;
+    const p = cls('(x^2 + y^2 - 4, x y - 1) = (0, 0)').cpu;
     expect(p.type).toBe('system');
     if (p.type !== 'system') throw new Error('expected system');
     expect(p.dim).toBe(2);
@@ -285,7 +292,7 @@ describe('systems', () => {
   });
 
   it('takes a non-zero right-hand side as the fiber over that point', () => {
-    const p = cls('(x + y, x - y, z) = (1, 2, 3)').plot;
+    const p = cls('(x + y, x - y, z) = (1, 2, 3)').cpu;
     expect(p.type).toBe('system');
     if (p.type !== 'system') throw new Error('expected system');
     expect(p.dim).toBe(3);
@@ -300,12 +307,12 @@ describe('systems', () => {
 
   it('rejects a system that is not square', () => {
     expect(() => cls('(x, y) = (1, 2, 3)')).toThrow(/Mismatched components/);
-    expect(cls('(x + z, y) = (0, 0)').plot.type).toBe('spacecurve');
+    expect(cls('(x + z, y) = (0, 0)').cpu.type).toBe('spacecurve');
     expect(() => cls('(x, y, x - y) = (0, 0, 0)')).toThrow(/3 equations in 2 unknowns/);
   });
 
   it('still reads an ODE system as a direction field, not a system of equations', () => {
-    expect(cls("(x', y') = (y, -x)").plot.type).toBe('vfield2d');
+    expect(cls("(x', y') = (y, -x)").cpu.type).toBe('vfield2d');
   });
 });
 
@@ -320,11 +327,11 @@ describe('vector evaluate', () => {
 
 describe('lists and piecewise plots', () => {
   it('routes numeric lists to vlist', () => {
-    expect(cls('[1, 4, 2, 8]').plot.type).toBe('vlist');
+    expect(cls('[1, 4, 2, 8]').cpu.type).toBe('vlist');
   });
 
   it('routes point lists to plist with the right dimension', () => {
-    expect(cls('[(1, 2), (3, 4)]').plot).toMatchObject({ type: 'plist', dim: 2 });
+    expect(cls('[(1, 2), (3, 4)]').cpu).toMatchObject({ type: 'plist', dim: 2 });
     expect(cls('[(1, 2, 3), (4, 5, 6)]').needs3D).toBe(true);
   });
 
@@ -340,7 +347,7 @@ describe('lists and piecewise plots', () => {
   });
 
   it('routes piecewise equations through implicit curves', () => {
-    expect(cls('y = {x < 0: -x, x >= 0: x^2}').plot.type).toBe('implicit2d');
-    expect(cls('{x < 0: -x, x^2}').plot.type).toBe('implicit2d'); // bare → y = expr
+    expect(cls('y = {x < 0: -x, x >= 0: x^2}').cpu.type).toBe('implicit2d');
+    expect(cls('{x < 0: -x, x^2}').cpu.type).toBe('implicit2d'); // bare → y = expr
   });
 });

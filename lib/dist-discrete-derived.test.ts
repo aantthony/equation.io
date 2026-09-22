@@ -35,7 +35,7 @@ function P(sys: RVSystem, names: string[], body: string, env: Record<string, num
   if (!single && spec.inline) {
     const { e, ...bounds } = spec.inline;
     const name = `@P${anon++}`; // one per row, as in the app
-    sys.add({ name, kind: 'derived', expr: e });
+    sys.addAnonymous({ name, kind: 'derived', expr: e });
     single = { rv: name, ...bounds };
   }
   return sys.eventProbability(spec.body, single, env);
@@ -214,7 +214,7 @@ describe('moments of derived discrete variables', () => {
     // As the app registers an E(…) row.
     const ex = toExpectation(parseExpr('(X - 3)^2', none), new Set(['X']));
     checkDerived(ex.body, new Set(['X']), none);
-    sys.add({ name: '@E1', kind: 'derived', expr: ex.body });
+    sys.addAnonymous({ name: '@E1', kind: 'derived', expr: ex.body });
     expect(sys.quadMoments('@E1', {})!.mean).toBeCloseTo(3, 9);
     expect(markerHeight(sys, '@E1', {})).toMatchObject({ x: expect.closeTo(3, 9), h: 0 }); // 3 is no atom of (X − 3)²
   });
@@ -531,7 +531,7 @@ describe('names', () => {
   it('anonymous variables never reach an error message', () => {
     const { sys } = build(['N ~ Poisson(3)', 'Z ~ Normal(0, 1)']);
     const spec = toProbability(parseExpr('N + Z = 3', none), new Set(['N', 'Z']));
-    sys.add({ name: '@P7', kind: 'derived', expr: spec.inline!.e });
+    sys.addAnonymous({ name: '@P7', kind: 'derived', expr: spec.inline!.e });
     let message = '';
     try { sys.checkProbability({ ...spec, single: undefined }); } catch (e) { message = (e as Error).message; }
     expect(message).toContain('Z is not');

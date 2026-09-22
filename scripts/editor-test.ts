@@ -513,6 +513,32 @@ await scenario('spiral zoom stays responsive while traces run', async () => {
   check('spiral remains drawn after scrolling', true);
 });
 
+await scenario('shared analysis preserves the running state across unrelated edits', async () => {
+  await load(page, ['c=1', "a'=c", 'a(0)=2', 'a', '# notes']);
+  const readState = () => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, ''));
+  await page.waitForFunction(() => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) > 2.2);
+  const before = await page.evaluate(readState);
+  const replaceRow = async (index: number, text: string) => {
+    await page.locator('.eq-line').nth(index).evaluate((line, text) => {
+      line.textContent = text;
+      line.parentElement!.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    }, text);
+  };
+  await replaceRow(4, '# edited notes');
+  await page.waitForFunction(before => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) >= before, before);
+  check('a comment edit retains the integrated value', await page.evaluate(readState) >= before);
+  await replaceRow(0, 'c=2');
+  await page.waitForFunction(before => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) >= before, before);
+  check('a constant edit retains the integrated value', await page.evaluate(readState) >= before);
+  await replaceRow(1, "a'=0");
+  await page.waitForFunction(() => document.querySelector('.eq-info')?.textContent === '= 2');
+  check('a derivative edit restarts from the seed', await page.evaluate(readState) === 2);
+  await replaceRow(2, 'a(0)=4');
+  await page.waitForFunction(() => document.querySelector('.eq-info')?.textContent === '= 4');
+  check('an initial-value edit restarts from the new seed', await page.evaluate(readState) === 4);
+  check('state edits have no row errors', await page.locator('.eq-line.invalid').count() === 0);
+});
+
 await scenario('regression readouts and slider-driven refitting', async () => {
   await load(page, ['X=[0,1,2]', 'Y=[1,3,5]', 'c=0', 'Y ~ m X + c', 'y=m x+c']);
   const info = page.locator('.eq-info').filter({ hasText: 'observations' });

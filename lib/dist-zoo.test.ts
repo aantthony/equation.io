@@ -1,3 +1,4 @@
+import { compileCpu } from './compiler.ts';
 /** The continuous distribution zoo: Gamma, Beta, ChiSquared, StudentT,
  *  LogNormal, Cauchy, Weibull. Reference values are scipy.stats (1.17). */
 import { describe, expect, it } from 'vitest';
@@ -199,8 +200,8 @@ describe('densities', () => {
   it('classify as curves and regions, with slider parameters as uniforms', () => {
     for (const decl of ['Gamma(a, b)', 'Beta(a, b)', 'ChiSquared(k)', 'T(k)', 'LogNormal(a, b)', 'Cauchy(a, b)', 'Weibull(a, b)']) {
       const consts = new Set(['a', 'b', 'k']);
-      expect(classify(densityExpr(dist(decl)), consts).plot.type, decl).toBe('implicit2d');
-      expect(classify(regionExpr(dist(decl), num(0.2), num(0.6)), consts).plot.type, decl).toBe('ineq2d');
+      expect(compileCpu(classify(densityExpr(dist(decl)), consts)).type, decl).toBe('implicit2d');
+      expect(compileCpu(classify(regionExpr(dist(decl), num(0.2), num(0.6)), consts)).type, decl).toBe('ineq2d');
     }
   });
 });

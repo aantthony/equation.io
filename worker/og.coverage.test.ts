@@ -4,7 +4,7 @@
  * reads as a broken graph.
  *
  * Coverage itself is enforced by the compiler — OG_COVERAGE is a total Record
- * over Plot['type'], so a new plot family fails `pnpm typecheck` until it is
+ * over PublicKind, so a new plot family fails `pnpm typecheck` until it is
  * classified. These tests cover what types cannot: that the classification is
  * honest, and that callers act on it.
  */

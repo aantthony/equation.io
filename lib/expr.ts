@@ -12,12 +12,26 @@ import { betaPdf, binomPmf, discreteUniformPmf, gammaPdf, lgamma, negBinomPmf, p
 
 export type IneqOp = '<' | '<=' | '>' | '>=';
 
-export type Expr =
+export type FigureForm = 'polygon' | 'segment' | 'polyline' | 'vector' | 'square' | 'hull';
+
+export interface Axis { id: string; n: number }
+
+export type Expr = ExprNode & { axes?: readonly Axis[]; origin?: number };
+
+type ExprNode =
   | { kind: 'num'; value: number }
   | { kind: 'var'; name: string }
   | { kind: 'bin'; op: '+' | '-' | '*' | '/' | '^'; a: Expr; b: Expr }
   | { kind: 'neg'; a: Expr }
   | { kind: 'call'; name: string; args: Expr[] }
+  | { kind: 'index'; args: [Expr, Expr] }
+  | { kind: 'range'; args: [Expr, Expr] }
+  | { kind: 'eqtest'; op: '==' | '!='; args: [Expr, Expr] }
+  | { kind: 'comp'; value: Expr; index: number; arity: number; functionName: string }
+  | { kind: 'figure'; form: FigureForm; dimension: 2 | 3; vertices: Expr[] }
+  | { kind: 'trail'; coordinates: Expr[] }
+  | { kind: 'hist'; centers: Float64Array; counts: Float64Array; width: number }
+  | { kind: 'family'; members: Expr[] }
   | { kind: 'eq'; l: Expr; r: Expr }
   /** An inequality; chains like 0 < y < x nest left: ((0 < y) < x). */
   | { kind: 'ineq'; op: IneqOp; l: Expr; r: Expr }
@@ -45,6 +59,13 @@ export type Expr =
   | { kind: 'text'; values: readonly string[] }
   /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
   | { kind: 'piecewise'; cases: Array<{ cond: Expr; value: Expr }>; otherwise?: Expr };
+
+/** Historical tuple-call spelling, applied before resolving argument values.
+ * Only syntax vectors flatten: a named or computed vector is never splatted. */
+export function legacyCallArgs(name: string, args: Expr[]): Expr[] {
+  const grouped = new Set(['segment', 'polyline', 'polygon', 'hull', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit', 'rotate']);
+  return grouped.has(name) ? args : args.flatMap(x => x.kind === 'vec' ? x.items : [x]);
+}
 
 /** Functions available in expressions (all map to GLSL builtins or helpers). */
 export const FUNCTIONS = new Set([
@@ -273,7 +294,7 @@ const ops = operators<PNode>({
     if (content.kind === 'series') return { kind: 'list', items: content.items.map(asExpr) };
     // A lone range is a list too ([1..10] expands during resolution) — but
     // not in a call bracket, where int[a..b] / sum[n=1..N] own the range.
-    if (!call && content.kind === 'call' && content.name === '[range]') {
+    if (!call && content.kind === 'range') {
       return { kind: 'list', items: [content] };
     }
     return content;
@@ -298,11 +319,11 @@ const ops = operators<PNode>({
   // so '!=' never half-matches as postfix '!' followed by '=', which would
   // silently graph factorial(x) = 2.
   '==': BinaryInfix<PNode>((a, b): Expr =>
-    ({ kind: 'call', name: '[eq]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+    ({ kind: 'eqtest', op: '==', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
   '!=': BinaryInfix<PNode>((a, b): Expr =>
-    ({ kind: 'call', name: '[ne]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+    ({ kind: 'eqtest', op: '!=', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
   '≠': BinaryInfix<PNode>((a, b): Expr =>
-    ({ kind: 'call', name: '[ne]', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+    ({ kind: 'eqtest', op: '!=', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
 
   '<': asIneq('<'),
   '<=': asIneq('<='),
@@ -312,7 +333,7 @@ const ops = operators<PNode>({
   '≥': asIneq('>='),
 
   // Σ/Π index ranges: `1..N` (only meaningful inside sum()/prod()).
-  '..': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'call', name: '[range]', args: [asExpr(a), asExpr(b)] })),
+  '..': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'range', args: [asExpr(a), asExpr(b)] })),
 
   '+': asBin('+'),
   '-': asBin('-'),
@@ -341,12 +362,7 @@ const ops = operators<PNode>({
     const name = canonicalFn(a.name);
     if (name === 'sum' || name === 'prod') return sumCall(name, b);
     if (name === 'int') return intCall(b);
-    // Tuple literals inside a call flatten into the argument list, so
-    // tube((a, b, c)) === tube(a, b, c) and |(3, 4)| reaches abs as (3, 4);
-    // geometry/measurement calls preserve grouped vectors and their dimensions.
-    const items = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
-    const pointCalls = new Set(['segment', 'polyline', 'polygon', 'hull', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit', 'rotate']);
-    const args = pointCalls.has(name) ? items : items.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
+    const args = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
     return { kind: 'call', name, args };
   }),
 
@@ -354,7 +370,7 @@ const ops = operators<PNode>({
   // it). Only named lists index — `x[2]` keeps meaning 2x, and a literal
   // `[1,2,3][2]` stays implicit multiplication.
   '[at]': BinaryInfix<PNode>((a, b): Expr =>
-    ({ kind: 'call', name: '[index]', args: [asExpr(a), asVecOrExpr(b)] })),
+    ({ kind: 'index', args: [asExpr(a), asVecOrExpr(b)] })),
 
   // Column access: `person.age` is one name, not a product. Binding tighter
   // than everything else, it is purely a naming device — the dotted name
@@ -367,7 +383,7 @@ const ops = operators<PNode>({
   }),
 });
 
-const isRange = (e: Expr): e is Expr & { kind: 'call' } => e.kind === 'call' && e.name === '[range]';
+const isRange = (e: Expr): e is Expr & { kind: 'range' } => e.kind === 'range';
 
 /**
  * Shape an ∫ into a call node: args are [lo, hi] for the header form
@@ -743,86 +759,74 @@ export function parseExpr(
 }
 
 
-/**
- * The instances a lowered list runs over (list.ts reads and writes these).
- * Kept beside the nodes, not on them, so no consumer of an Expr ever sees an
- * axis — which means a pass that REBUILDS a list node must carry the entry
- * across, or two uses of one list stop moving together.
- */
-export const LIST_AXES = new WeakMap<Expr, ReadonlyArray<{ id: string; n: number }>>();
-/**
- * Literals that are ONE list however many copies of them a pass goes on to
- * make. The argument of f(P) is read once per parameter, and Σ expansion or a
- * finite difference clones it before any axis exists to carry across — so the
- * literal is given its origin up front, and list lowering names its axis
- * after that.
- */
-const LIST_ORIGIN = new WeakMap<Expr, number>();
+/** Immediate expression children. Packed numeric and text columns are leaves. */
+export function childrenOf(e: Expr): readonly Expr[] {
+  switch (e.kind) {
+    case 'neg': return [e.a];
+    case 'bin': return [e.a, e.b];
+    case 'index': case 'range': case 'eqtest': case 'call': return e.args;
+    case 'comp': return [e.value];
+    case 'figure': return e.vertices;
+    case 'trail': return e.coordinates;
+    case 'family': return e.members;
+    case 'eq': case 'ineq': return [e.l, e.r];
+    case 'vec': case 'list': return e.items;
+    case 'piecewise': return e.cases.flatMap(c => [c.cond, c.value]).concat(e.otherwise ? [e.otherwise] : []);
+    default: return [];
+  }
+}
+
+/** Map one child level, preserving metadata and reusing unchanged nodes. */
+export function mapChildren(e: Expr, map: (child: Expr) => Expr): Expr {
+  const old = childrenOf(e), next = old.map(map);
+  if (next.every((child, i) => child === old[i])) return e;
+  switch (e.kind) {
+    case 'neg': return { ...e, a: next[0] };
+    case 'bin': return { ...e, a: next[0], b: next[1] };
+    case 'index': case 'range': case 'eqtest': return { ...e, args: [next[0], next[1]] };
+    case 'call': return { ...e, args: next };
+    case 'comp': return { ...e, value: next[0] };
+    case 'figure': return { ...e, vertices: next };
+    case 'trail': return { ...e, coordinates: next };
+    case 'family': return { ...e, members: next };
+    case 'eq': case 'ineq': return { ...e, l: next[0], r: next[1] };
+    case 'vec': case 'list': return { ...e, items: next };
+    case 'piecewise': return { ...e, cases: e.cases.map((_, i) => ({ cond: next[2 * i], value: next[2 * i + 1] })), otherwise: e.otherwise ? next[next.length - 1] : undefined };
+    default: return e;
+  }
+}
+
+/** Stable mathematical serialization excludes transient list identity. */
+export const exprReplacer = (key: string, value: unknown): unknown => key === 'axes' || key === 'origin' ? undefined : value;
+export const exprKey = (value: unknown): string => JSON.stringify(value, exprReplacer);
 let origins = 0;
-export const originOf = (e: Expr): number | undefined => LIST_ORIGIN.get(e);
+export const originOf = (e: Expr): number | undefined => e.origin;
 export function markOrigins(root: Expr): void {
   const seen = new WeakSet<Expr>();
   const walk = (e: Expr): void => {
     if (seen.has(e)) return;
     seen.add(e);
-    switch (e.kind) {
-      case 'neg': return walk(e.a);
-      case 'bin': walk(e.a); return walk(e.b);
-      case 'call': return e.args.forEach(walk);
-      case 'eq': case 'ineq': walk(e.l); return walk(e.r);
-      case 'vec': return e.items.forEach(walk);
-      case 'list':
-        if (!LIST_ORIGIN.has(e)) LIST_ORIGIN.set(e, ++origins);
-        return e.items.forEach(walk);
-      case 'piecewise':
-        for (const c of e.cases) { walk(c.cond); walk(c.value); }
-        if (e.otherwise) walk(e.otherwise);
-    }
+    if (e.kind === 'list' && e.origin === undefined) e.origin = ++origins;
+    childrenOf(e).forEach(walk);
   };
   walk(root);
 }
 export function sameList<T extends Expr>(from: Expr, to: T): T {
-  const axes = LIST_AXES.get(from);
-  if (axes) LIST_AXES.set(to, axes);
-  const origin = LIST_ORIGIN.get(from);
-  if (origin !== undefined) LIST_ORIGIN.set(to, origin);
+  if (from.axes !== undefined) to.axes = from.axes;
+  if (from.origin !== undefined) to.origin = from.origin;
   return to;
 }
 
 /** Replace free variables by expressions. A surviving Σ/Π binds its index. */
 export function substVars(e: Expr, env: Record<string, Expr>): Expr {
-  switch (e.kind) {
-    case 'num': return e;
-    case 'var': return Object.hasOwn(env, e.name) ? env[e.name] : e;
-    case 'neg': return { kind: 'neg', a: substVars(e.a, env) };
-    case 'bin': return { kind: 'bin', op: e.op, a: substVars(e.a, env), b: substVars(e.b, env) };
-    case 'call': {
-      const idx = e.args[0];
-      if (isBoundSum(e) && idx?.kind === 'var' && Object.hasOwn(env, idx.name)) {
-        // The index shadows the name in the body: Σ(n=1..n, n) pins the bound
-        // and leaves the term's n as the summation index.
-        const bodyEnv = { ...env };
-        delete bodyEnv[idx.name];
-        return {
-          kind: 'call', name: e.name,
-          args: e.args.map((a, k) => substVars(a, k === 0 || k === 3 ? bodyEnv : env)),
-        };
-      }
-      return { kind: 'call', name: e.name, args: e.args.map(a => substVars(a, env)) };
-    }
-    case 'eq': return { kind: 'eq', l: substVars(e.l, env), r: substVars(e.r, env) };
-    case 'ineq': return { kind: 'ineq', op: e.op, l: substVars(e.l, env), r: substVars(e.r, env) };
-    case 'vec': return { kind: 'vec', items: e.items.map(a => substVars(a, env)) };
-    case 'list': return sameList(e, { kind: 'list', items: e.items.map(a => substVars(a, env)) });
-    case 'data':
-    case 'str':
-    case 'text': return e;
-    case 'piecewise': return {
-      kind: 'piecewise',
-      cases: e.cases.map(c => ({ cond: substVars(c.cond, env), value: substVars(c.value, env) })),
-      otherwise: e.otherwise && substVars(e.otherwise, env),
-    };
+  if (e.kind === 'var') return Object.hasOwn(env, e.name) ? env[e.name] : e;
+  if (isBoundSum(e) && e.args[0]?.kind === 'var' && Object.hasOwn(env, e.args[0].name)) {
+    const bodyEnv = { ...env };
+    delete bodyEnv[e.args[0].name];
+    const args = e.args.map((a, k) => substVars(a, k === 0 || k === 3 ? bodyEnv : env));
+    return args.every((a, k) => a === e.args[k]) ? e : { ...e, args };
   }
+  return mapChildren(e, child => substVars(child, env));
 }
 
 /** Abramowitz & Stegun 7.1.26; max absolute error ~1.5e-7. */
@@ -941,13 +945,19 @@ export const ANGLE_FN = '[angle]';
  * function. The resolver emits it (it cannot know yet what is a point);
  * geometry lowering settles a single point, list lowering a list of them.
  */
-export const COMP_FN = '[comp]';
+export function structuralDiagnostic(e: Expr): string {
+  if (e.kind === 'comp') return compArity(e.functionName, e.arity);
+  if (e.kind === 'range') return "'..' ranges only appear in sum(n=1..N, …), prod(…), int[a..b], or a list like [1..10].";
+  if (e.kind === 'index') return 'List indexing must resolve before scalar evaluation.';
+  if (e.kind === 'eqtest') return `'${e.op}' tests a list inside a filter.`;
+  return `${e.kind === 'figure' ? e.form : e.kind}(…) must be the whole expression.`;
+}
 /** The messages of a `[comp]` whose value is not an n-component point. */
 export const compArity = (fn: string, n: number): string => `${fn} takes ${n} arguments.`;
 /** A `[comp]` that outlived lowering (a list of points where no list can go:
  *  an ODE, a sampled body) — said in the user's terms, not the node's. */
-export const strayComp = (e: Expr & { kind: 'call' }): string | null => (e.name === COMP_FN
-  ? compArity((e.args[3] as Expr & { kind: 'str' }).value, (e.args[2] as Expr & { kind: 'num' }).value) : null);
+export const strayComp = (e: Expr): string | null => (e.kind === 'comp'
+  ? compArity(e.functionName, e.arity) : null);
 export const compDims = (fn: string, n: number, value: Expr, got: number): string =>
   `${fn} takes ${n} arguments, and ${value.kind === 'var' ? value.name : 'that point'} has ${got} components.`;
 /** d/dp of [angle] is a difference of two of these, one per arm (lib/diff.ts):
@@ -1126,6 +1136,7 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
       return fn(...e.args.map(a => evaluate(a, env)));
     }
     case 'eq': return evaluate(e.l, env) - evaluate(e.r, env);
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
     case 'ineq': throw new Error('Cannot evaluate an inequality.');
     case 'vec': throw new Error('Vector in scalar context.');
     case 'list':
@@ -1167,6 +1178,7 @@ export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
       e.args.forEach(a => freeVars(a, out));
       break;
     }
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': childrenOf(e).forEach(a => freeVars(a, out)); break;
     case 'eq': freeVars(e.l, out); freeVars(e.r, out); break;
     case 'ineq': freeVars(e.l, out); freeVars(e.r, out); break;
     case 'vec': e.items.forEach(a => freeVars(a, out)); break;

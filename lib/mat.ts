@@ -1,3 +1,4 @@
+import { exprKey } from './expr.ts';
 /**
  * Small matrices — 2×2 and 3×3 — as definition-time symbolic objects.
  *
@@ -162,7 +163,7 @@ export const hatOf = (n: Expr[]): Mat => [
   [neg(n[1]), n[0], num(0)],
 ];
 
-const same = (a: Expr, b: Expr): boolean => JSON.stringify(a) === JSON.stringify(b);
+const same = (a: Expr, b: Expr): boolean => exprKey(a) === exprKey(b);
 const opposite = (a: Expr, b: Expr): boolean =>
   (isNum(a) && isNum(b) ? a.value === -b.value : same(neg(a), b) || same(a, neg(b)));
 

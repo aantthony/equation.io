@@ -1,95 +1,27 @@
-/**
- * Shared corpus + row-compilation pipeline for the performance guard tests
- * (perf-guards.test.ts, perf-smoke.test.ts, perf.bench.ts).
- *
- * compileRows mirrors web/main.ts recompileAll: scan definition rows, build
- * defs, then resolve + classify the plot rows against them. Kept in sync by
- * hand; if recompileAll gains steps that affect compile output, add them here.
- */
-import {
-  animatedConstNames,
-  buildDefs,
-  compsOf,
-  defKey,
-  pointComponentNames,
-  evalConstEnv,
-  resolveExpr,
-  scanDefinition,
-  type Definition,
-} from './defs.ts';
-import { buildStateSystem, initialState } from './state.ts';
-import { parseExpr, substVars } from './expr.ts';
-import { lowerGeom } from './geom.ts';
-import { type Classified, classify } from './plot.ts';
-import { buildGridField, planarField, type GridField } from './grid.ts';
-import { classifySeqRec, scanSeqRec } from './seq.ts';
+/** Performance corpus compiled through the same document pipeline as web/worker. */
+import { analyzeRows } from './analysis.ts';
+import type { Classified } from './plot.ts';
+import { type CpuPlan, type GpuPlan, type GpuGrid, compileGridGpu } from './compiler.ts';
 
 export interface CompiledRows {
   classified: Classified[];
-  gridFields: GridField[];
+  gridFields: GpuGrid[];
+  cpu: CpuPlan[];
+  gpu: GpuPlan[];
   errors: string[];
 }
 
 export function compileRows(rows: string[]): CompiledRows {
-  const raw: Definition[] = [];
-  const seen = new Set<string>();
-  const plotTexts: string[] = [];
-  for (const text0 of rows) {
-    const text = text0.trim();
-    if (!text) continue;
-    // Sequence/recurrence rows (a_n = …, a_{n+1} = …) are plots, not
-    // definitions, exactly as recompileAll skips them before scanDefinition.
-    if (scanSeqRec(text)) {
-      plotTexts.push(text);
-      continue;
-    }
-    const d = scanDefinition(text);
-    if (d && !seen.has(defKey(d))) {
-      seen.add(defKey(d));
-      raw.push(d);
-      continue;
-    }
-    plotTexts.push(text);
-  }
-  const built = buildDefs(raw);
-  const errors = [...built.errors.values()];
-  // States are constants to every consumer (uniforms in GLSL), exactly as
-  // recompileAll folds them into the same name set.
-  const constNames = new Set([...built.defs.consts.keys(), ...built.defs.states.keys()]);
-  const gridFields: GridField[] = [];
-  const skipGrid = pointComponentNames(built.defs);
-  for (const [name, e] of built.defs.fields) {
-    if (!skipGrid.has(name) && planarField(e)) gridFields.push(buildGridField(name, e, constNames));
-  }
-  const fieldEnv = Object.fromEntries(built.defs.fields);
-  const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
-  const getFn = (name: string) => built.defs.fns.get(name);
-  // Σ/Π bounds expand against constant *values*, so they need the same env
-  // recompileAll builds (animated constants excluded).
-  let constVals: Record<string, number> = {};
-  try {
-    const sys = buildStateSystem(built.defs);
-    constVals = evalConstEnv(built.defs, 0, sys ? initialState(built.defs, sys) : {});
-  } catch {}
-  for (const name of animatedConstNames(built.defs)) delete constVals[name];
-  for (const name of built.defs.states.keys()) delete constVals[name];
-  const ropts = { consts: constVals, boundConsts: built.sumBoundConsts };
-  const classified: Classified[] = [];
-  for (const text of plotTexts) {
-    // Sequences/recurrences classify through their own path (lib/seq.ts),
-    // same as recompileAll; lists and piecewise ride the ordinary parse.
-    const seq = scanSeqRec(text);
-    if (seq) {
-      classified.push(classifySeqRec(seq, fnNames, getFn, constNames, ropts));
-      continue;
-    }
-    let parsed = resolveExpr(parseExpr(text, fnNames), getFn, ropts);
-    // Expand point arithmetic and geometry statements like the app does.
-    parsed = lowerGeom(parsed, n => compsOf(built.defs, n), n => built.defs.mats.get(n) ?? null);
-    if (built.defs.fields.size) parsed = substVars(parsed, fieldEnv);
-    classified.push(classify(parsed, constNames));
-  }
-  return { classified, gridFields, errors };
+  const analysis = analyzeRows(rows, { readouts: false });
+  const failedPlot = analysis.rows.find(row => row.error && !row.def);
+  if (failedPlot) throw new Error(failedPlot.error);
+  return {
+    classified: analysis.rows.flatMap(row => row.cls ? [row.cls] : []),
+    gridFields: analysis.gridFields.map(compileGridGpu),
+    cpu: analysis.rows.flatMap(row => row.cpu ? [row.cpu] : []),
+    gpu: analysis.rows.flatMap(row => row.gpu ? [row.gpu] : []),
+    errors: analysis.rows.flatMap(row => row.error ? [row.error] : []),
+  };
 }
 
 /**

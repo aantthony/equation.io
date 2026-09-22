@@ -1,7 +1,9 @@
+import { compileCpu, compileGpu } from './compiler.ts';
+import { Env } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { evaluate, type Expr } from './expr.ts';
 import { classifySeqRec, scanSeqRec, sequenceResolver } from './seq.ts';
-import { emptyDefs } from './defs.ts';
+
 
 const none = new Set<string>();
 const cls = (text: string, consts: ReadonlySet<string> = none) => {
@@ -49,8 +51,8 @@ describe('scanSeqRec', () => {
 describe('classifySeqRec', () => {
   it('classifies explicit sequences and evaluates terms', () => {
     const c = cls('a_n = 1/n^2');
-    expect(c.plot.type).toBe('sequence');
-    const plot = c.plot as { term: Expr; index: string };
+    expect(compileCpu(c).type).toBe('sequence');
+    const plot = compileCpu(c) as { term: Expr; index: string };
     expect(plot.index).toBe('n');
     expect(evaluate(plot.term, { n: 2 })).toBeCloseTo(0.25);
     expect(evaluate(plot.term, { n: 0 })).toBe(Infinity); // skipped by the renderer
@@ -74,25 +76,26 @@ describe('classifySeqRec', () => {
 
   it('classifies autonomous recurrences as cobwebs', () => {
     const c = cls('a_{n+1} = a_n/2 + 1');
-    expect(c.plot.type).toBe('cobweb');
-    const plot = c.plot as { f: Expr; recVar: string; curveField: string };
+    expect(compileCpu(c).type).toBe('cobweb');
+    const plot = compileCpu(c) as { f: Expr; recVar: string };
+    const gpu = compileGpu(c) as { curveField: string };
     expect(plot.recVar).toBe('a_n');
     expect(evaluate(plot.f, { a_n: 2 })).toBeCloseTo(2); // fixed point of x/2 + 1
-    expect(plot.curveField).toContain('x');
+    expect(gpu.curveField).toContain('x');
   });
 
   it('uses a defined a_0 seed and lists it in params', () => {
     const c = cls('a_{n+1} = r a_n (1 - a_n)', new Set(['r', 'a_0']));
-    expect(c.plot).toMatchObject({ type: 'cobweb', a0Name: 'a_0' });
+    expect(compileCpu(c)).toMatchObject({ type: 'cobweb', a0Name: 'a_0' });
     expect(c.params).toEqual(['a_0', 'r']);
-    const plot = c.plot as { curveField: string };
+    const plot = compileGpu(c) as { curveField: string };
     expect(plot.curveField).toContain('u_r'); // constants compile to uniforms
   });
 
   it('routes x-parameterized recurrences to bifurcation diagrams', () => {
     const c = cls('a_{n+1} = x a_n (1 - a_n)');
-    expect(c.plot.type).toBe('bifurcation');
-    const plot = c.plot as { field: string };
+    expect(compileCpu(c).type).toBe('bifurcation');
+    const plot = compileGpu(c) as { field: string };
     expect(plot.field).toContain('a');
     expect(plot.field).toContain('x');
   });
@@ -114,7 +117,7 @@ describe('sequences with sums', () => {
   it('expands Σ inside a sequence term', () => {
     const scan = scanSeqRec('a_n = sum(k=1..3, k^n)')!;
     const c = classifySeqRec(scan, none, () => undefined, new Set(), {});
-    const plot = c.plot as { term: Expr };
+    const plot = compileCpu(c) as { term: Expr };
     expect(evaluate(plot.term, { n: 1 })).toBe(6);  // 1+2+3
     expect(evaluate(plot.term, { n: 2 })).toBe(14); // 1+4+9
   });
@@ -122,14 +125,14 @@ describe('sequences with sums', () => {
   it('expands Σ bounds that reference a constant', () => {
     const scan = scanSeqRec('a_n = sum(k=1..N, k n)')!;
     const c = classifySeqRec(scan, none, () => undefined, new Set(['N']), { consts: { N: 3 } });
-    const plot = c.plot as { term: Expr };
+    const plot = compileCpu(c) as { term: Expr };
     expect(evaluate(plot.term, { n: 2 })).toBe(12); // (1+2+3)·2
   });
 
   it('sums up to the sequence index', () => {
     const c = cls('a_n=Σ(s=1..n, s)');
-    expect(c.plot.type).toBe('sequence');
-    const plot = c.plot as { term: Expr; index: string };
+    expect(compileCpu(c).type).toBe('sequence');
+    const plot = compileCpu(c) as { term: Expr; index: string };
     expect(plot.index).toBe('n');
     expect(evaluate(plot.term, { n: 0 })).toBe(0); // empty sum
     expect(evaluate(plot.term, { n: 1 })).toBe(1);
@@ -137,12 +140,12 @@ describe('sequences with sums', () => {
     expect(evaluate(plot.term, { n: 10 })).toBe(55);
     // The same letter may name both the index and the summation variable.
     const shadowed = cls('a_n = Σ(n=1..n, n)');
-    expect(evaluate((shadowed.plot as { term: Expr }).term, { n: 4 })).toBe(10);
+    expect(evaluate((compileCpu(shadowed) as { term: Expr }).term, { n: 4 })).toBe(10);
     // Bracket form, nested sums, and products.
-    expect(evaluate((cls('a_n = Σ[s=1..n] s').plot as { term: Expr }).term, { n: 4 })).toBe(10);
-    expect(evaluate((cls('a_n = Σ(s=1..n, Σ(k=1..s, k))').plot as { term: Expr }).term, { n: 3 })).toBe(10);
-    expect(evaluate((cls('a_n = Π(s=1..n, s)').plot as { term: Expr }).term, { n: 5 })).toBe(120);
-    expect(evaluate((cls('a_n = Π(s=1..n, s)').plot as { term: Expr }).term, { n: 0 })).toBe(1);
+    expect(evaluate((compileCpu(cls('a_n = Σ[s=1..n] s')) as { term: Expr }).term, { n: 4 })).toBe(10);
+    expect(evaluate((compileCpu(cls('a_n = Σ(s=1..n, Σ(k=1..s, k))')) as { term: Expr }).term, { n: 3 })).toBe(10);
+    expect(evaluate((compileCpu(cls('a_n = Π(s=1..n, s)')) as { term: Expr }).term, { n: 5 })).toBe(120);
+    expect(evaluate((compileCpu(cls('a_n = Π(s=1..n, s)')) as { term: Expr }).term, { n: 0 })).toBe(1);
   });
 
   it('lets a slider share the bound with the index, and still rejects other variables', () => {
@@ -152,18 +155,17 @@ describe('sequences with sums', () => {
     });
     expect([...boundConsts]).toEqual(['N']);
     expect(c.params).toEqual(['N']);
-    expect(evaluate((c.plot as { term: Expr }).term, { n: 2, N: 2 })).toBe(10); // 1+2+3+4
+    expect(evaluate((compileCpu(c) as { term: Expr }).term, { n: 2, N: 2 })).toBe(10); // 1+2+3+4
     expect(() => cls('a_n = Σ(s=1..m, s)')).toThrow(/constant/);
     expect(() => cls('a_n = Σ(s=1..x, s)')).toThrow(/cannot depend on x/);
     expect(() => cls('a_n = Σ(s=1..t, s)')).toThrow(/cannot depend on t/);
-    expect(() => evaluate((cls('a_n = Σ(s=1..n, s)').plot as { term: Expr }).term, { n: 501 })).toThrow(/terms/);
+    expect(() => evaluate((compileCpu(cls('a_n = Σ(s=1..n, s)')) as { term: Expr }).term, { n: 501 })).toThrow(/terms/);
   });
 });
 
 describe('sequence term references', () => {
   it('resolves Greek-named terms, matching the Greek row shapes', () => {
-    const defs = emptyDefs();
-    defs.sequences.set('θ', scanSeqRec('θ_n = n^2')!);
+    const defs = new Env([['θ', scanSeqRec('θ_n = n^2')!]]);
     const resolve = sequenceResolver(defs, () => undefined, {}, new Set<string>());
     // θ₂ reaches here as θ_2 (subscripts canonicalize in the tokenizer).
     expect(evaluate(resolve('θ_2')!, {})).toBe(4);
