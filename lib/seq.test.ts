@@ -125,6 +125,39 @@ describe('sequences with sums', () => {
     const plot = c.plot as { term: Expr };
     expect(evaluate(plot.term, { n: 2 })).toBe(12); // (1+2+3)·2
   });
+
+  it('sums up to the sequence index', () => {
+    const c = cls('a_n=Σ(s=1..n, s)');
+    expect(c.plot.type).toBe('sequence');
+    const plot = c.plot as { term: Expr; index: string };
+    expect(plot.index).toBe('n');
+    expect(evaluate(plot.term, { n: 0 })).toBe(0); // empty sum
+    expect(evaluate(plot.term, { n: 1 })).toBe(1);
+    expect(evaluate(plot.term, { n: 5 })).toBe(15); // 1+2+3+4+5
+    expect(evaluate(plot.term, { n: 10 })).toBe(55);
+    // The same letter may name both the index and the summation variable.
+    const shadowed = cls('a_n = Σ(n=1..n, n)');
+    expect(evaluate((shadowed.plot as { term: Expr }).term, { n: 4 })).toBe(10);
+    // Bracket form, nested sums, and products.
+    expect(evaluate((cls('a_n = Σ[s=1..n] s').plot as { term: Expr }).term, { n: 4 })).toBe(10);
+    expect(evaluate((cls('a_n = Σ(s=1..n, Σ(k=1..s, k))').plot as { term: Expr }).term, { n: 3 })).toBe(10);
+    expect(evaluate((cls('a_n = Π(s=1..n, s)').plot as { term: Expr }).term, { n: 5 })).toBe(120);
+    expect(evaluate((cls('a_n = Π(s=1..n, s)').plot as { term: Expr }).term, { n: 0 })).toBe(1);
+  });
+
+  it('lets a slider share the bound with the index, and still rejects other variables', () => {
+    const boundConsts = new Set<string>();
+    const c = classifySeqRec(scanSeqRec('a_n = Σ(s=1..n+N, s)')!, none, () => undefined, new Set(['N']), {
+      consts: { N: 2 }, boundConsts,
+    });
+    expect([...boundConsts]).toEqual(['N']);
+    expect(c.params).toEqual(['N']);
+    expect(evaluate((c.plot as { term: Expr }).term, { n: 2, N: 2 })).toBe(10); // 1+2+3+4
+    expect(() => cls('a_n = Σ(s=1..m, s)')).toThrow(/constant/);
+    expect(() => cls('a_n = Σ(s=1..x, s)')).toThrow(/cannot depend on x/);
+    expect(() => cls('a_n = Σ(s=1..t, s)')).toThrow(/cannot depend on t/);
+    expect(() => evaluate((cls('a_n = Σ(s=1..n, s)').plot as { term: Expr }).term, { n: 501 })).toThrow(/terms/);
+  });
 });
 
 describe('sequence term references', () => {

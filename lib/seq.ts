@@ -76,9 +76,11 @@ export function classifySeqRec(
   if (RESERVED.has(index)) {
     throw new Error(`"${index}" is reserved; index sequences with n, k, or m.`);
   }
-  // Σ/Π in the term expand here like anywhere else, so a_n = sum(k=1..N, k^n)
-  // works — the bounds must still be constants, since expansion is static.
-  const parsed = resolveExpr(parseExpr(rhs, fnNames), getFn, ropts);
+  // Σ/Π with constant bounds expand here, as anywhere else. A bound that uses
+  // the index (a_n = Σ(s=1..n, s)) stays a sum; evaluate() runs it at each n.
+  const openVars = new Set(ropts.openVars);
+  openVars.add(index);
+  const parsed = resolveExpr(parseExpr(rhs, fnNames), getFn, { ...ropts, openVars });
   if (usesComplex(parsed)) throw new Error('Sequences are real-valued; use re(…) or im(…).');
 
   const recVar = `${name}_${index}`;
@@ -155,8 +157,16 @@ export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, o
     if (resolving.has(name)) throw new Error(`Sequence ${name} depends on itself outside its recurrence.`);
     resolving.add(name);
     try {
-      const body = resolveExpr(parseExpr(scan.rhs, new Set(defs.fns.keys()), new Set([...defs.sequences.keys()].map(n => n + '_'))), getFn, opts);
-      if (!scan.rec) return substVars(body, { [scan.index]: { kind: 'num', value: k } });
+      const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), new Set([...defs.sequences.keys()].map(n => n + '_')));
+      if (!scan.rec) {
+        // Leave a Σ up to the index unevaluated, pin the index, then expand
+        // it — so a_5 of a_n = Σ(s=1..n, s) is the number 15, not a sum node.
+        const openVars = new Set(opts.openVars);
+        openVars.add(scan.index);
+        const body = resolveExpr(parsed, getFn, { ...opts, openVars });
+        return resolveExpr(substVars(body, { [scan.index]: { kind: 'num', value: k } }), getFn, opts);
+      }
+      const body = resolveExpr(parsed, getFn, opts);
       for (const v of freeVars(body)) {
         if (v !== `${name}_${scan.index}` && v !== 't' && !known.has(v) && !defs.consts.has(v)) throw new Error(`Sequence ${name} terms need constant parameters (found ${v}).`);
       }

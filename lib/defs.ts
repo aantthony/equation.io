@@ -16,7 +16,9 @@
  *   it plots as a vector field.
  * - `sum(n=1..N, …)` / `prod(…)` (also Σ/Π, and `sum[n=1..N] …` binding the
  *   trailing product like d/dx) expand symbolically at resolve time, so the
- *   bounds must be numbers or already-known constants.
+ *   bounds must be numbers or already-known constants. A bound that uses a
+ *   sequence index (`a_n = Σ(s=1..n, s)`) is left as a sum and evaluated
+ *   per term instead.
  * - `int(f dx)` / `int[a..b] f dx` (also ∫) integrate at resolve time:
  *   symbolically when integrate.ts finds a verified antiderivative, and
  *   otherwise by expanding a fixed Gauss–Legendre sum the same way Σ
@@ -26,7 +28,7 @@ import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { COMP_FN, FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, compDims, evaluate, markOrigins, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
+import { COMP_FN, FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, SUM_MAX_TERMS, type Expr, builtinFn, canonicalName, compDims, evaluate, markOrigins, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -733,6 +735,12 @@ export interface ResolveOpts {
   /** Out: constant names referenced by Σ/Π bounds (their sliders snap to integers). */
   boundConsts?: Set<string>;
   /**
+   * Names a Σ/Π bound may use without a static value — the sequence index,
+   * and the index of a sum that itself could not expand yet. The sum stays
+   * a call and evaluate() runs it.
+   */
+  openVars?: ReadonlySet<string>;
+  /**
    * Whether a name is a list. Derivatives expand HERE, before list.ts
    * substitutes, so without this `d/dt L` differentiates `L` as an opaque
    * variable and quietly becomes 0.
@@ -962,7 +970,6 @@ function foldNums(e: Expr): Expr {
   }
 }
 
-const SUM_MAX_TERMS = 500;
 const SUM_MAX_TOTAL = 2000;
 
 /** Expand a Σ/Π into an explicit sum/product of per-index terms. */
@@ -975,24 +982,43 @@ function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
   if (idxE.kind !== 'var') throw new Error(`Expected ${header.name}(n=1..N, …).`);
   const idx = idxE.name;
   if (RESERVED.has(idx)) throw new Error(`Cannot use "${idx}" as a ${sym} index (it is reserved).`);
-  const bound = (b: Expr): number => {
+  // A bound that uses an open name (the sequence index) cannot be expanded
+  // here: the sum stays a call and evaluate() runs it once that name is a number.
+  const bound = (b: Expr): { expr: Expr; value?: number } => {
     const r = rx(b, ctx);
     const env: Record<string, number> = {};
+    let open = false;
     for (const fv of freeVars(r)) {
       const v = ctx.opts.consts?.[fv];
-      if (v === undefined) {
-        if (fv === 't' || RESERVED.has(fv)) throw new Error(`${sym} bounds cannot depend on ${fv}.`);
-        throw new Error(`${sym} bounds must be constant — add "${fv} = 5" in a row above.`);
+      if (v !== undefined) {
+        ctx.opts.boundConsts?.add(fv);
+        env[fv] = v;
+        continue;
       }
-      ctx.opts.boundConsts?.add(fv);
-      env[fv] = v;
+      if (ctx.opts.openVars?.has(fv)) { open = true; continue; }
+      if (fv === 't' || RESERVED.has(fv)) throw new Error(`${sym} bounds cannot depend on ${fv}.`);
+      throw new Error(`${sym} bounds must be constant — add "${fv} = 5" in a row above.`);
     }
+    if (open) return { expr: r };
     const v = evaluate(r, env);
     if (!isFinite(v)) throw new Error(`${sym} bound is not finite.`);
-    return v;
+    return { expr: r, value: v };
   };
-  const start = Math.ceil(bound(loE) - 1e-9);
-  const end = Math.floor(bound(hiE) + 1e-9);
+  const lo = bound(loE);
+  const hi = bound(hiE);
+  if (lo.value === undefined || hi.value === undefined) {
+    const saved = ctx.opts;
+    const openVars = new Set(saved.openVars);
+    openVars.add(idx);
+    ctx.opts = { ...saved, openVars };
+    try {
+      return { kind: 'call', name: header.name, args: [{ kind: 'var', name: idx }, lo.expr, hi.expr, rx(body, ctx)] };
+    } finally {
+      ctx.opts = saved;
+    }
+  }
+  const start = Math.ceil(lo.value - 1e-9);
+  const end = Math.floor(hi.value + 1e-9);
   const count = end - start + 1;
   if (count > SUM_MAX_TERMS) throw new Error(`${sym} expands to ${count} terms (limit ${SUM_MAX_TERMS}).`);
   ctx.terms += Math.max(count, 0);

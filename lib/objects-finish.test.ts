@@ -143,6 +143,12 @@ describe('object families and sequence values', () => {
     expect([...r.defs.consts].filter(([k]) => k.startsWith('eqioSeq_')).length).toBe(6);
     expect(last(['a_{n+1}=a_n+t', 'a_3']).plot.type).toBe('value');
     expect(analyze(['a_n=n','a_[1001]']).rows[1].error).toMatch(/0 to 1000/);
+    // A sum up to the index is a number once a concrete term is named.
+    const tri = runRows(['a_n=Σ(s=1..n, s)', 'a_5', 'y=a_4']);
+    expect(tri.rows[1].info).toBe('= 15');
+    const curve = tri.rows[2].cls!.plot;
+    expect(curve.type).toBe('implicit2d');
+    if (curve.type === 'implicit2d') expect(curve.field).toContain('10');
   });
 });
 

@@ -789,14 +789,27 @@ export function sameList<T extends Expr>(from: Expr, to: T): T {
   return to;
 }
 
-/** Replace free variables by expressions. There are no binders, so no capture. */
+/** Replace free variables by expressions. A surviving Σ/Π binds its index. */
 export function substVars(e: Expr, env: Record<string, Expr>): Expr {
   switch (e.kind) {
     case 'num': return e;
     case 'var': return Object.hasOwn(env, e.name) ? env[e.name] : e;
     case 'neg': return { kind: 'neg', a: substVars(e.a, env) };
     case 'bin': return { kind: 'bin', op: e.op, a: substVars(e.a, env), b: substVars(e.b, env) };
-    case 'call': return { kind: 'call', name: e.name, args: e.args.map(a => substVars(a, env)) };
+    case 'call': {
+      const idx = e.args[0];
+      if (isBoundSum(e) && idx?.kind === 'var' && Object.hasOwn(env, idx.name)) {
+        // The index shadows the name in the body: Σ(n=1..n, n) pins the bound
+        // and leaves the term's n as the summation index.
+        const bodyEnv = { ...env };
+        delete bodyEnv[idx.name];
+        return {
+          kind: 'call', name: e.name,
+          args: e.args.map((a, k) => substVars(a, k === 0 || k === 3 ? bodyEnv : env)),
+        };
+      }
+      return { kind: 'call', name: e.name, args: e.args.map(a => substVars(a, env)) };
+    }
     case 'eq': return { kind: 'eq', l: substVars(e.l, env), r: substVars(e.r, env) };
     case 'ineq': return { kind: 'ineq', op: e.op, l: substVars(e.l, env), r: substVars(e.r, env) };
     case 'vec': return { kind: 'vec', items: e.items.map(a => substVars(a, env)) };
@@ -1047,6 +1060,45 @@ export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
   [DUNIFORM_PMF_FN]: discreteUniformPmf,
 };
 
+/**
+ * How many terms one Σ/Π may run. Symbolic expansion (defs.ts) and a sum
+ * whose bound is a sequence index share this cap.
+ */
+export const SUM_MAX_TERMS = 500;
+
+/** A Σ/Π that survived resolve: args are [index, lo, hi, body]. Its index is bound. */
+const isBoundSum = (e: Expr): e is Expr & { kind: 'call'; name: 'sum' | 'prod' } =>
+  e.kind === 'call' && (e.name === 'sum' || e.name === 'prod') && e.args.length >= 4 && e.args[0]?.kind === 'var';
+
+/** Σ/Π left for evaluate() because a bound uses a sequence index. */
+function evalReduce(e: Expr & { kind: 'call' }, env: Record<string, number>): number {
+  const idxE = e.args[0];
+  if (idxE?.kind !== 'var') throw new Error(`Expected ${e.name}(n=1..N, …).`);
+  const sym = e.name === 'sum' ? 'Σ' : 'Π';
+  const lo = evaluate(e.args[1], env);
+  const hi = evaluate(e.args[2], env);
+  if (!isFinite(lo) || !isFinite(hi)) throw new Error(`${sym} bound is not finite.`);
+  const start = Math.ceil(lo - 1e-9);
+  const end = Math.floor(hi + 1e-9);
+  const count = end - start + 1;
+  if (count > SUM_MAX_TERMS) throw new Error(`${sym} expands to ${count} terms (limit ${SUM_MAX_TERMS}).`);
+  const idx = idxE.name;
+  const prev = env[idx];
+  const had = Object.hasOwn(env, idx);
+  try {
+    let acc = e.name === 'sum' ? 0 : 1;
+    for (let k = start; k <= end; k++) {
+      env[idx] = k;
+      const term = evaluate(e.args[3], env);
+      acc = e.name === 'sum' ? acc + term : acc * term;
+    }
+    return acc;
+  } finally {
+    if (had) env[idx] = prev;
+    else delete env[idx];
+  }
+}
+
 /** Numerically evaluate a scalar expression with the given variable bindings. */
 export function evaluate(e: Expr, env: Record<string, number>): number {
   switch (e.kind) {
@@ -1068,6 +1120,7 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
       }
     }
     case 'call': {
+      if (isBoundSum(e)) return evalReduce(e, env);
       const fn = EVAL_FNS[e.name];
       if (!fn) throw new Error(strayComp(e) ?? `Unknown function: ${e.name}`);
       return fn(...e.args.map(a => evaluate(a, env)));
@@ -1101,7 +1154,19 @@ export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
     case 'var': out.add(e.name); break;
     case 'bin': freeVars(e.a, out); freeVars(e.b, out); break;
     case 'neg': freeVars(e.a, out); break;
-    case 'call': e.args.forEach(a => freeVars(a, out)); break;
+    case 'call': {
+      const idx = e.args[0];
+      if (isBoundSum(e) && idx?.kind === 'var') {
+        freeVars(e.args[1], out);
+        freeVars(e.args[2], out);
+        const inner = freeVars(e.args[3]);
+        inner.delete(idx.name);
+        for (const v of inner) out.add(v);
+        break;
+      }
+      e.args.forEach(a => freeVars(a, out));
+      break;
+    }
     case 'eq': freeVars(e.l, out); freeVars(e.r, out); break;
     case 'ineq': freeVars(e.l, out); freeVars(e.r, out); break;
     case 'vec': e.items.forEach(a => freeVars(a, out)); break;

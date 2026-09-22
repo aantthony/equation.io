@@ -1142,10 +1142,12 @@ function render() {
         }
         case 'sequence': {
           // Dots at integer n in view; partial-sum mode accumulates from n = 0
-          // (terms that are not finite, like 1/0², are skipped).
-          const termAt = (n: number): number => {
+          // (terms that are not finite, like 1/0², are skipped). A term that
+          // throws — a Σ(s=1..n, …) past its term limit — is skipped, and a
+          // partial sum stops there so the running total does not freeze.
+          const termAt = (n: number): number | undefined => {
             env[plot.index] = n;
-            try { return evaluate(plot.term, env); } catch { return NaN; }
+            try { return evaluate(plot.term, env); } catch { return undefined; }
           };
           const nEnd = Math.min(Math.floor(xmax), eq.partialSum ? 20000 : 100000);
           const n0 = Math.max(0, Math.ceil(xmin));
@@ -1155,6 +1157,7 @@ function render() {
             let started = false;
             for (let n = 0; n <= nEnd; n++) {
               const v = termAt(n);
+              if (v === undefined) break;
               if (isFinite(v)) { sum += v; started = true; }
               if (started && n >= n0 && (n - n0) % step === 0) {
                 extras.points.push({ x: n, y: sum, color: css, r: 3.5 });
@@ -1163,7 +1166,7 @@ function render() {
           } else {
             for (let n = n0; n <= nEnd; n += step) {
               const v = termAt(n);
-              if (isFinite(v)) extras.points.push({ x: n, y: v, color: css, r: 3.5 });
+              if (v !== undefined && isFinite(v)) extras.points.push({ x: n, y: v, color: css, r: 3.5 });
             }
           }
           delete env[plot.index];

@@ -7,7 +7,7 @@ import {
   resolveExpr,
   scanDefinition,
 } from './defs.ts';
-import { evaluate, gammaFn, parseExpr } from './expr.ts';
+import { evaluate, freeVars, gammaFn, parseExpr, substVars } from './expr.ts';
 import { toGLSL } from './glsl.ts';
 import { classify } from './plot.ts';
 
@@ -199,6 +199,18 @@ describe('Σ sums and Π products', () => {
     const e = resolveExpr(parseExpr('sum(n=1..2, (-1)^n x)'), noFns);
     expect(toGLSL(e)).not.toContain('eq_pow');
     expect(evaluate(e, { x: 7 })).toBe(0);
+  });
+
+  it('leaves a sum open when its bound is an open variable', () => {
+    const e = resolveExpr(parseExpr('Σ(s=1..n, s)'), noFns, { openVars: new Set(['n']) });
+    expect(e).toMatchObject({ kind: 'call', name: 'sum' });
+    expect(evaluate(e, { n: 4 })).toBe(10);
+    expect([...freeVars(e)]).toEqual(['n']);
+    // Pinning the index expands it, and the summation index stays bound.
+    const pinned = resolveExpr(substVars(e, { n: { kind: 'num', value: 4 } }), noFns);
+    expect(pinned).toEqual({ kind: 'num', value: 10 });
+    expect(() => resolveExpr(parseExpr('sum(k=1..m, k)'), noFns)).toThrow(/constant/);
+    expect(() => resolveExpr(parseExpr('sum(k=1..x, k)'), noFns)).toThrow(/cannot depend on x/);
   });
 
   it('rejects bad bounds and bodyless headers', () => {
