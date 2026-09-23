@@ -427,8 +427,8 @@ function classifyLowered(
     if (vars.has('u') || vars.has('v')) throw new Error(`Cannot use u/v in ${special}(…).`);
     const call = g as Expr & { kind: 'call' };
     if (special === 'rgb' || special === 'hsl' || special === 'oklch') {
-      const usage = special === 'rgb' ? 'rgb(red, green, blue), each from 0 to 255'
-        : special === 'hsl' ? 'hsl(hue in radians, saturation 0–100, lightness 0–100)'
+      const usage = special === 'rgb' ? 'rgb(red, green, blue), each from 0 to 1'
+        : special === 'hsl' ? 'hsl(hue in radians, saturation 0–1, lightness 0–1)'
         : 'oklch(lightness 0–1, chroma, hue in radians)';
       if (call.args.length !== 3) throw new Error(`${special} takes three channels: ${usage}.`);
       for (const channel of call.args) {

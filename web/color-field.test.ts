@@ -41,14 +41,14 @@ else {
     catch (error) { failed++; results.textContent += `FAIL ${label}: ${String(error)}\n`; }
   };
   const swatches: Array<[string, number[]]> = [
-    ['rgb(300,-10,128)', [255,0,128]],
-    ['hsl(0,100,50)', [255,0,0]], ['hsl(pi/3,100,50)', [255,255,0]],
-    ['hsl(2pi/3,100,50)', [0,255,0]], ['hsl(pi,100,50)', [0,255,255]],
-    ['hsl(4pi/3,100,50)', [0,0,255]], ['hsl(5pi/3,100,50)', [255,0,255]],
-    ['hsl(-2pi/3,100,50)', [0,0,255]], ['hsl(8pi/3,100,50)', [0,255,0]],
-    ['hsl(2pi/9,0,50)', [128,128,128]], ['hsl(0,200,50)', [255,0,0]],
-    ['hsl(2pi/3,-1,50)', [128,128,128]], ['hsl(0,100,-1)', [0,0,0]],
-    ['hsl(0,100,101)', [255,255,255]],
+    ['rgb(1.2,-0.1,0.5)', [255,0,128]],
+    ['hsl(0,1,0.5)', [255,0,0]], ['hsl(pi/3,1,0.5)', [255,255,0]],
+    ['hsl(2pi/3,1,0.5)', [0,255,0]], ['hsl(pi,1,0.5)', [0,255,255]],
+    ['hsl(4pi/3,1,0.5)', [0,0,255]], ['hsl(5pi/3,1,0.5)', [255,0,255]],
+    ['hsl(-2pi/3,1,0.5)', [0,0,255]], ['hsl(8pi/3,1,0.5)', [0,255,0]],
+    ['hsl(2pi/9,0,0.5)', [128,128,128]], ['hsl(0,2,0.5)', [255,0,0]],
+    ['hsl(2pi/3,-1,0.5)', [128,128,128]], ['hsl(0,1,-1)', [0,0,0]],
+    ['hsl(0,1,1.01)', [255,255,255]],
     // Independent sRGB primary reference coordinates in OKLCH.
     ['oklch(0.62795536,0.25768331,0.510227546)', [255,0,0]],
     ['oklch(0.86643961,0.29482724,2.487012834)', [0,255,0]],
@@ -58,21 +58,21 @@ else {
   ];
   for (const [row, expected] of swatches) check(row, () => { render([row]); near(pixel(), expected); });
   check('mixed color spaces keep row order and transparent pixels', () => {
-    render(['rgb(255,0,0)', 'hsl({x>0:2pi/3},100,50)', 'oklch({y>0:0.5},0,0)']);
+    render(['rgb(1,0,0)', 'hsl({x>0:2pi/3},1,0.5)', 'oklch({y>0:0.5},0,0)']);
     near(pixel(16,16), [255,0,0]); near(pixel(48,16), [0,255,0]);
     near(pixel(16,48), [99,99,99]); near(pixel(48,48), [99,99,99]);
   });
   check('nonfinite channels are transparent before clamping', () => {
-    render(['rgb(255,0,0)', 'hsl(1/0,100,50)', 'oklch(0.5,0/0,2pi/3)']);
+    render(['rgb(1,0,0)', 'hsl(1/0,1,0.5)', 'oklch(0.5,0/0,2pi/3)']);
     near(pixel(), [255,0,0]);
   });
   check('HSL responds to time', () => {
-    render(['hsl(t,100,50)'], 0); near(pixel(), [255,0,0]);
-    render(['hsl(t,100,50)'], 2*Math.PI/3); near(pixel(), [0,255,0]);
+    render(['hsl(t,1,0.5)'], 0); near(pixel(), [255,0,0]);
+    render(['hsl(t,1,0.5)'], 2*Math.PI/3); near(pixel(), [0,255,0]);
   });
   check('sliders reuse a color shader', () => {
-    render(['hue=0', 'hsl(hue,100,50)']); const count = glStats.compiles;
-    render(['hue=2pi/3', 'hsl(hue,100,50)']); near(pixel(), [0,255,0]);
+    render(['hue=0', 'hsl(hue,1,0.5)']); const count = glStats.compiles;
+    render(['hue=2pi/3', 'hsl(hue,1,0.5)']); near(pixel(), [0,255,0]);
     assert(glStats.compiles === count, 'Recompiled on slider change');
   });
   check('OKLCH wraps negative and multiple-turn hue', () => {

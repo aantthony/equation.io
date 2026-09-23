@@ -1,21 +1,23 @@
 import type { ColorSpace } from '../lib/math-object.ts';
 
 /** Convert channel values to encoded sRGB, the canvas's output color space.
- * HSL convention: hue in radians, 0–100 saturation, 0–100 lightness.
+ * RGB convention: 0–1 channels.
+ * HSL convention: hue in radians, 0–1 saturation, 0–1 lightness.
  * OKLCH convention: 0–1 lightness, nonnegative chroma, hue in radians.
- * Hue is in radians, like every other angle in the language (trig, arg, angle).
+ * Every channel is a unit interval except hue (radians, like trig, arg and
+ * angle) and chroma. This is a math tool, not CSS: no 0–255 or percent scales.
  * Sources: https://www.w3.org/TR/css-color-4/#hsl-to-rgb and the public-domain
  * Oklab matrices at https://bottosson.github.io/posts/oklab/ .
  */
 export function colorConversionGLSL(space: ColorSpace): string {
   if (space === 'rgb') return `
-vec3 eqColorToSRGB(vec3 c) { return clamp(c / 255.0, 0.0, 1.0); }
+vec3 eqColorToSRGB(vec3 c) { return clamp(c, 0.0, 1.0); }
 `;
   if (space === 'hsl') return `
 vec3 eqColorToSRGB(vec3 c) {
   float h = mod(c.x * (6.0 / 3.141592653589793), 12.0);
-  float s = clamp(c.y / 100.0, 0.0, 1.0);
-  float l = clamp(c.z / 100.0, 0.0, 1.0);
+  float s = clamp(c.y, 0.0, 1.0);
+  float l = clamp(c.z, 0.0, 1.0);
   vec3 k = mod(h + vec3(0.0, 8.0, 4.0), 12.0);
   vec3 wave = clamp(min(k - 3.0, 9.0 - k), -1.0, 1.0);
   return clamp(l - s * min(l, 1.0 - l) * wave, 0.0, 1.0);
