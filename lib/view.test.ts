@@ -65,6 +65,19 @@ describe('writeback round-trip', () => {
     expect(parse(text)).toEqual({ kind: 'view', x: [-4.13333, 5.87], y: [-2.4, 2.4] });
   });
 
+  it('keeps a window zoomed deep at a large offset open', () => {
+    // Six significant digits round 99.99995 and 100.00005 to the same number,
+    // which the parser rejects; the formatter must add digits until lo < hi.
+    const text = formatViewRow(100 - 5e-5, 100 + 5e-5, -3e-6, 3e-6);
+    expect(text).toBe('view(x = 99.99995..100.00005, y = -0.000003..0.000003)');
+    const spec = parse(text);
+    expect(spec).toEqual({ kind: 'view', x: [99.99995, 100.00005], y: [-3e-6, 3e-6] });
+    // Ordinary windows still use the six-digit trim.
+    expect(formatViewRow(-4.133333, 5.87, -2.4, 2.4)).toBe('view(x = -4.13333..5.87, y = -2.4..2.4)');
+    // A genuinely collapsed window is not rescued: the caller sees the error.
+    expect(() => parse(formatViewRow(1, 1, 0, 1))).toThrow(/lo < hi/);
+  });
+
   it('camera row text survives format -> parse, dropping an origin target', () => {
     const noTarget = formatCameraRow({ theta: -1.0471975, phi: 0.5711986, radius: 14, target: [0, 0, 0] });
     expect(noTarget).toBe('camera(-1.0472, 0.571199, 14)');

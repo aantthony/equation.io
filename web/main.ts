@@ -515,11 +515,17 @@ function writebackViewport() {
   if (mode === '2d') appliedViewText = text;
   else appliedCameraText = text;
   eq.text = text;
-  // Only the framing changed. Reclassifying the math here discards geometry
-  // caches and can block every camera gesture for hundreds of milliseconds.
-  eq.viewSpec = parseViewRow(text, {})!;
   const line = lineEls()[equations.indexOf(eq)];
   if (line) line.textContent = text;
+  // Only the framing changed. Reclassifying the math here discards geometry
+  // caches and can block every camera gesture for hundreds of milliseconds.
+  // Text the formatter cannot round-trip (a non-finite window) still lands
+  // as this row's error, the way a typed view(...) does.
+  try {
+    eq.viewSpec = parseViewRow(text, {}) ?? undefined;
+  } catch {
+    recompileAll();
+  }
   reconcile();
   saveUrl();
 }
@@ -839,7 +845,7 @@ function render() {
           if (plot.hull) {
             let sample = hullSamplers.get(plot);
             if (!sample) { sample = hullGeometrySampler(plot.pts, dim); hullSamplers.set(plot, sample); }
-            const geometry = sample({ ...constEnv, t: time });
+            const geometry = sample(constEnv, time);
             if (!geometry) break;
             const { mesh, edges } = geometry;
             if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
@@ -1347,6 +1353,20 @@ function resetEditedTrails() {
   }
 }
 
+/**
+ * Drop work derived from the previous constants: hover points and pending
+ * traces read them, so a recompile and a direct slider rebind both end here.
+ */
+function invalidateDerivedState() {
+  for (const eq of equations) {
+    eq.spCache = undefined;
+    eq.traceTarget = undefined;
+  }
+  spGen++; // queued hover recomputes predate this change: drop them
+  spQueue.clear();
+  setHover(null);
+}
+
 /** Rebuild definitions and plots after edits that may change their structure. */
 function recompileAll() {
   resetEditedTrails();
@@ -1383,8 +1403,6 @@ function recompileAll() {
     eq.viewSpec = row.view;
     eq.comment = row.comment;
     if (!eq.comment) eq.collapsed = undefined;
-    eq.spCache = undefined;
-    eq.traceTarget = undefined;
 
     // Cloud capacity is a browser renderer limit, independent of analysis.
     const plot = eq.cpu;
@@ -1412,9 +1430,7 @@ function recompileAll() {
     }
   }
   rvSys.prune(); // sample caches of variables that no longer exist
-  spGen++; // queued hover recomputes predate this compile: drop them
-  spQueue.clear();
-  setHover(null);
+  invalidateDerivedState();
   // A row that named a file with no hash and found it here gets pinned, on
   // this path as much as after a load from storage — otherwise a row typed
   // against a file already in memory would be shared unpinned, and open
@@ -1944,21 +1960,18 @@ function makeSlider(eq: Equation): SliderUI {
     if (kind !== 'const' && kind !== 'init') return;
     pushUndo(`slider:${eq.id}`);
     const lhs = kind === 'init' ? `${eq.def!.name}(0)` : eq.def!.name;
-    eq.text = `${lhs} = ${fmtNum(Number(range.value))}`;
+    const rhs = fmtNum(Number(range.value));
+    eq.text = `${lhs} = ${rhs}`;
     const line = lineEls()[equations.indexOf(eq)];
     if (line) line.textContent = eq.text;
     if (kind === 'const' && runtimeSliders.has(lhs) && !equations.some(row => row.error || row.needsFile)) {
-      const rhs = fmtNum(Number(range.value));
       defs.drop(lhs);
       defs.bind(lhs, { tag: 'scalar', role: 'const', expr: { kind: 'num', value: Number(rhs) } });
       eq.def = { kind: 'const', name: lhs, rhs };
-      // Match a math edit's trail and hover invalidation without discarding
-      // compiled plots, their samplers, or GPU buffers.
+      // Match a math edit's invalidation without discarding compiled plots,
+      // their samplers, or GPU buffers.
       resetEditedTrails();
-      for (const row of equations) row.spCache = undefined;
-      spGen++;
-      spQueue.clear();
-      setHover(null);
+      invalidateDerivedState();
     } else recompileAll();
     reconcile();
     saveUrl();
@@ -3536,7 +3549,7 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
     const py = (rect.height / 2 - (clientY - rect.top)) * dpr;
     const mx = view.cx + px * view.upp;
     const my = view.cy + py * (view.upp / (view.ratio ?? 1));
-    view.upp *= factor;
+    view.upp = Math.max(1e-12, view.upp * factor);
     view.cx = mx - px * view.upp;
     view.cy = my - py * (view.upp / (view.ratio ?? 1));
   } else {

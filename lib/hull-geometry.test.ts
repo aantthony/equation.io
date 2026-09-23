@@ -26,6 +26,27 @@ describe('cached hull geometry', () => {
     expect(sample({ t: 1 })).toEqual(first);
   });
 
+  it('takes the time as its own argument so the constants need no copy', () => {
+    const consts = { s: 2 };
+    const sample = hullGeometrySampler(['0', '0', 's', '0', '0', 'sqrt(t)'].map(s => parseExpr(s)), 2);
+    const first = sample(consts, 1)!;
+    expect(sample(consts, 1)).toBe(first);
+    expect(sample(consts, 4)).not.toBe(first);
+    expect(consts).toEqual({ s: 2 });
+    expect(sample(consts, 1)).toEqual(sample({ s: 2, t: 1 }));
+  });
+
+  it('folds fixed angles once and still matches the interpreter', () => {
+    // cos(pi/3) and friends fold to numbers before compiling; a call the VM
+    // cannot compile falls back to the interpreter with the same time.
+    const points = ['0', '0', 's*cos(pi/3)', 's*sin(pi/3)', 'floor(t)*cos(pi/3)', 'sin(pi/3)'].map(s => parseExpr(s));
+    const sample = hullGeometrySampler(points, 2);
+    for (const [s, t] of [[1, 0.5], [2, 1.5], [-1, 2.9]]) {
+      const expected = hullMesh(hullFaces(points.map(p => evaluate(p, { s, t })), 2));
+      expect(sample({ s }, t)!.mesh).toEqual(expected);
+    }
+  });
+
   it('keeps degenerate line hulls and empty hulls drawable', () => {
     const line = hullGeometrySampler(['0', '0', '0', '1', '1', '1'].map(s => parseExpr(s)), 3)({})!;
     expect(line.mesh.indices.length).toBe(0);
