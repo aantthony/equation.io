@@ -7,7 +7,7 @@ import { type Expr, exprKey, freeVars, mapChildren, substVars } from './expr.ts'
 import { toGLSL, uniformName } from './glsl.ts';
 import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
-import type { Classified, LevelSetSpec, PointSource } from './math-object.ts';
+import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 
 export interface CpuGrid { name: string; expr: Expr; grad?: [Expr, Expr]; params: string[]; angular: boolean; level?: string }
@@ -18,9 +18,7 @@ export type CpuPlan =
   | { type: 'implicit3d'; residual: Expr; equation: Expr; heightmap?: Expr }
   | { type: 'ineq2d'; constraints: Array<{ residual: Expr; strict: boolean }> }
   | { type: 'scalar2d'; expr: Expr }
-  | { type: 'rgb2d'; channels: Expr[] }
-  | { type: 'hsl2d'; channels: Expr[] }
-  | { type: 'oklch2d'; channels: Expr[] }
+  | { type: `${ColorSpace}2d`; channels: Expr[] }
   | { type: 'complex2d'; expr: Expr }
   | { type: 'domain2d'; expr: Expr }
   | { type: 'conformal2d'; expr: Expr }
@@ -56,9 +54,7 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'implicit3d'; field: string; grad?: [string, string, string] }
   | { type: 'ineq2d'; field: string; edges: string[] }
   | { type: 'scalar2d'; field: string }
-  | { type: 'rgb2d'; field: string; locals: string }
-  | { type: 'hsl2d'; field: string; locals: string }
-  | { type: 'oklch2d'; field: string; locals: string }
+  | { type: `${ColorSpace}2d`; space: ColorSpace; field: string; locals: string }
   | { type: 'complex2d'; field: string }
   | { type: 'domain2d'; field: string }
   | { type: 'conformal2d'; field: string }
@@ -129,7 +125,7 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'region': return { type: 'ineq2d', constraints: object.constraints.map(c => ({ ...c, residual: real(c.residual) })) };
     case 'scalar-field': return { type: 'scalar2d', expr: real(object.expr) };
     // Like domain coloring, these expressions are rendered per pixel on the GPU.
-    case 'color-field': return { type: object.space === 'rgb' ? 'rgb2d' : object.space === 'hsl' ? 'hsl2d' : 'oklch2d', channels: [...object.channels] };
+    case 'color-field': return { type: `${object.space}2d`, channels: [...object.channels] };
     case 'vector-field': return object.components.length === 2
       ? { type: 'vfield2d', comps: object.components.map(real) as [Expr, Expr] }
       : { type: 'vfield3d', comps: object.components.map(real) };
@@ -167,6 +163,14 @@ function uniformSub(params: readonly string[]): (expr: Expr) => Expr {
   return expr => params.length ? substVars(expr, map) : expr;
 }
 
+/** Node kinds whose children all live in the enclosing scope, so a child may
+ * be emitted as a shader local ahead of its parent. Anything that binds a
+ * variable (a Σ/Π, or any future binder) compiles as one unit instead.
+ */
+const HOISTABLE = new Set<Expr['kind']>(['num', 'var', 'bin', 'neg', 'call', 'piecewise', 'ineq', 'eq']);
+const bindsVariable = (e: Expr): boolean =>
+  !HOISTABLE.has(e.kind) || (e.kind === 'call' && (e.name === 'sum' || e.name === 'prod') && e.args.length >= 4);
+
 /** Emit shared channel calculations once. Inlining a nested complex map into
  * three colors otherwise duplicates it at every re/im/arg use and can leave
  * the browser compiling megabytes of GLSL. Intern shallow lowered nodes too:
@@ -175,18 +179,18 @@ function uniformSub(params: readonly string[]): (expr: Expr) => Expr {
  * stay in that arm's temporary and do not affect the selected result.
  */
 function colorProgram(channels: readonly Expr[], params: readonly string[]): { field: string; locals: string } {
-  const parameters = new Set(params);
+  const sub = uniformSub(params);
   const memo = new WeakMap<Expr, Expr>();
   const shared = new Map<string, Expr>();
   const bindings: Record<string, Typed> = {};
+  const complexLocals = new Set<string>();
   const lines: string[] = [];
   const visit = (expr: Expr): Expr => {
     const known = memo.get(expr);
     if (known) return known;
     let result: Expr;
     if (expr.kind === 'num') result = expr;
-    else if (expr.kind === 'var') result = parameters.has(expr.name)
-      ? { kind: 'var', name: uniformName(expr.name) } : expr;
+    else if (expr.kind === 'var' || bindsVariable(expr)) result = sub(expr);
     else {
       const lowered = mapChildren(expr, visit);
       // Inequalities retain their boolean shape for piecewiseGLSL.
@@ -196,10 +200,10 @@ function colorProgram(channels: readonly Expr[], params: readonly string[]): { f
         const reused = shared.get(key);
         if (reused) result = reused;
         else {
-          const value = compileTyped(lowered, bindings);
+          const value = compileTyped(lowered, bindings, complexLocals);
           const name = `eqColor${lines.length}`;
           lines.push(`${value.type === 'complex' ? 'vec2' : 'float'} ${name} = ${value.code};`);
-          if (value.type === 'complex') bindings[name] = { type: 'complex', code: name };
+          if (value.type === 'complex') { bindings[name] = { type: 'complex', code: name }; complexLocals.add(name); }
           result = { kind: 'var', name };
           shared.set(key, result);
         }
@@ -208,7 +212,7 @@ function colorProgram(channels: readonly Expr[], params: readonly string[]): { f
     memo.set(expr, result);
     return result;
   };
-  const colors = channels.map(channel => compileTyped(visit(channel), bindings).code);
+  const colors = channels.map(channel => compileTyped(visit(channel), bindings, complexLocals).code);
   return { field: `vec3(${colors.join(', ')})`, locals: lines.join('\n') };
 }
 
@@ -238,7 +242,7 @@ export function compileGpu(classified: Classified): GpuPlan {
       return { type: 'ineq2d', params, field, edges: fields.filter(f => f.edge).map(f => f.code) };
     }
     case 'scalar-field': return { type: 'scalar2d', params, field: scalar(object.expr) };
-    case 'color-field': return { type: object.space === 'rgb' ? 'rgb2d' : object.space === 'hsl' ? 'hsl2d' : 'oklch2d', params, ...colorProgram(object.channels, params) };
+    case 'color-field': return { type: `${object.space}2d`, space: object.space, params, ...colorProgram(object.channels, params) };
     case 'vector-field':
       if (object.components.length === 2) return { type: 'vfield2d', params, fx: toGLSL(sub(object.components[0])), fy: toGLSL(sub(object.components[1])) };
       break;

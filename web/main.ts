@@ -1014,7 +1014,7 @@ function render() {
         case 'complex2d': layers.complexes.push({ ...gpuFor(eq, 'complex2d'), color, params, uniforms }); break;
         case 'domain2d': layers.domains.push({ ...gpuFor(eq, 'domain2d'), color, params, uniforms }); break;
         case 'rgb2d': case 'hsl2d': case 'oklch2d':
-          layers.colors.push({ ...gpuFor(eq, plot.type), space: plot.type === 'rgb2d' ? 'rgb' : plot.type === 'hsl2d' ? 'hsl' : 'oklch', color, params, uniforms }); break;
+          layers.colors.push({ ...gpuFor(eq, plot.type), color, params, uniforms }); break;
         case 'conformal2d': layers.conformals.push({ ...gpuFor(eq, 'conformal2d'), color, params, uniforms }); break;
         case 'fractal2d':
           layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });

@@ -5,17 +5,17 @@ import { emptyEnv } from './env.ts';
 import { publicKind } from './math-object.ts';
 import { syntaxHelp } from './syntax-help.ts';
 
-describe.each(['hsl', 'oklch'] as const)('%s color fields', name => {
+describe.each(['rgb', 'hsl', 'oklch'] as const)('%s color fields', name => {
   it('preserves its color space through semantic, CPU and GPU plans', () => {
     const row = analyzeRows([`${name}(1,2,3)`]).rows[0];
     expect(row.error).toBeUndefined();
-    expect(row.cls).toMatchObject({ object: { kind: 'color-field', space: name }, needs3D: false });
+    expect(row.cls).toMatchObject({ object: { kind: 'color-field', space: name }, animated: false, needs3D: false });
     expect(publicKind(row.cls!.object)).toBe(`${name}2d`);
     expect(row.cpu!.type).toBe(`${name}2d`);
-    expect(row.gpu!.type).toBe(`${name}2d`);
-    const rgb = analyzeRows(['rgb(1,2,3)']).rows[0];
-    expect(shaderKey(row.gpu!)).not.toBe(shaderKey(rgb.gpu!));
-    expect(cpuStructureKey(row.cpu!)).not.toBe(cpuStructureKey(rgb.cpu!));
+    expect(row.gpu).toMatchObject({ type: `${name}2d`, space: name });
+    const other = analyzeRows([`${name === 'rgb' ? 'hsl' : 'rgb'}(1,2,3)`]).rows[0];
+    expect(shaderKey(row.gpu!)).not.toBe(shaderKey(other.gpu!));
+    expect(cpuStructureKey(row.cpu!)).not.toBe(cpuStructureKey(other.cpu!));
   });
 
   it('supports complex projections, partial channels, sliders and time', () => {
@@ -27,16 +27,19 @@ describe.each(['hsl', 'oklch'] as const)('%s color fields', name => {
     expect(first.constEnv.a).toBeCloseTo(2);
     expect(later.constEnv.a).toBeCloseTo(3);
     expect(shaderKey(first.rows[1].gpu!)).toBe(shaderKey(later.rows[1].gpu!));
+    expect(cpuStructureKey(first.rows[1].cpu!)).toBe(cpuStructureKey(later.rows[1].cpu!));
   });
 
   it.each([
     ['(1,2)', /three channels/],
     ['(1,2,3,4)', /three channels/],
     ['(w,0,0)', /real numbers/],
+    ['(0<x<1,0,0)', /real numbers, not comparisons/],
     ['(u,0,0)', /Cannot use u\/v/],
+    ['(0,v,0)', /Cannot use u\/v/],
     ['(0,0,z)', /3D axis/],
     ['([1,2],0,0)', /superimpose|list/],
-    ['(rgb(1,2,3),0,0)', /whole expression/],
+    [`(${name}(1,2,3),0,0)`, /whole expression/],
   ])('rejects invalid channels %s', (args, error) => {
     expect(analyzeRows([name+args]).rows[0].error).toMatch(error);
   });
@@ -54,7 +57,7 @@ describe.each(['hsl', 'oklch'] as const)('%s color fields', name => {
     }
   });
 
-  it('explains hue units in editor help', () => {
-    expect(syntaxHelp(`${name}(`, name.length+1, emptyEnv()).hint).toContain('degrees');
+  it('explains the channel scale in editor help', () => {
+    expect(syntaxHelp(`${name}(`, name.length+1, emptyEnv()).hint).toContain(name === 'rgb' ? '0 to 255' : 'degrees');
   });
 });

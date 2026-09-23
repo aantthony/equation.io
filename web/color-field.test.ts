@@ -23,7 +23,7 @@ else {
       assert(!row.error, row.error ?? '');
       const gpu = row.gpu;
       if (gpu && (gpu.type === 'rgb2d' || gpu.type === 'hsl2d' || gpu.type === 'oklch2d')) {
-        colors.push({ ...gpu, color: [0, 0, 0], space: gpu.type === 'rgb2d' ? 'rgb' : gpu.type === 'hsl2d' ? 'hsl' : 'oklch' });
+        colors.push({ ...gpu, color: [0, 0, 0] });
       }
     }
     renderer.render({ cx: 0, cy: 0, upp: 0.1 }, { colors }, time, analysis.constEnv);

@@ -432,6 +432,7 @@ function classifyLowered(
         : 'oklch(lightness 0–1, chroma, hue in degrees)';
       if (call.args.length !== 3) throw new Error(`${special} takes three channels: ${usage}.`);
       for (const channel of call.args) {
+        if (channel.kind === 'ineq' || channel.kind === 'eq') throw new Error(`${special} channels must be real numbers, not comparisons: ${usage}.`);
         if (inferScalarType(channel) !== 'real') throw new Error(`${special} channels must be real numbers; use re, im, abs, or arg for complex values.`);
       }
       return done({ kind: 'color-field', space: special, channels: call.args as [Expr, Expr, Expr] });

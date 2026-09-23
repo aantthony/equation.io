@@ -68,7 +68,7 @@ export function publicKind(object: MathObject) {
     case 'intersection': return 'spacecurve';
     case 'region': return 'ineq2d';
     case 'scalar-field': return 'scalar2d';
-    case 'color-field': return object.space === 'rgb' ? 'rgb2d' : object.space === 'hsl' ? 'hsl2d' : 'oklch2d';
+    case 'color-field': return `${object.space}2d` as const;
     case 'vector-field': return object.components.length === 3 ? 'vfield3d' : 'vfield2d';
     case 'complex-field':
       switch (object.form) {

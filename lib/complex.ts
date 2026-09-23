@@ -88,8 +88,10 @@ function promote(v: Typed): string {
  * env binds variable names to pre-typed values (e.g. iter's iterate z ↦ a
  * complex GLSL local), overriding the default treatment of that name.
  */
-export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
-  const envComplex = new Set(Object.keys(env).filter(k => env[k].type === 'complex'));
+export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNames?: ReadonlySet<string>): Typed {
+  // A caller compiling many nodes against one growing env passes the complex
+  // names it already knows so each call does not rescan the whole env.
+  const envComplex = complexNames ?? new Set(Object.keys(env).filter(k => env[k].type === 'complex'));
   if (!usesComplex(e, envComplex)) {
     // re/im/arg/conj of a real value still need complex handling below.
     const touchesComplexFns = (function scan(n: Expr): boolean {
@@ -119,12 +121,12 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
       if (e.name === 'w') return { type: 'complex', code: 'vec2(x, y)' };
       return { type: 'real', code: e.name };
     case 'neg': {
-      const a = compileTyped(e.a, env);
+      const a = compileTyped(e.a, env, envComplex);
       return { type: a.type, code: `(-${a.code})` };
     }
     case 'bin': {
-      const a = compileTyped(e.a, env);
-      const b = compileTyped(e.b, env);
+      const a = compileTyped(e.a, env, envComplex);
+      const b = compileTyped(e.b, env, envComplex);
       if (a.type === 'real' && b.type === 'real') {
         if (e.op === '^') return { type: 'real', code: `eq_pow(${a.code}, ${b.code})` };
         return { type: 'real', code: `(${a.code} ${e.op} ${b.code})` };
@@ -153,7 +155,7 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
       if (SPECIAL_FORMS.has(e.name)) {
         throw new Error(`${e.name}(…) must be the whole expression.`);
       }
-      const args = e.args.map(a => compileTyped(a, env));
+      const args = e.args.map(a => compileTyped(a, env, envComplex));
       inferCallType(e.name, args.map(a => a.type));
       const anyComplex = args.some(a => a.type === 'complex');
       if (e.name === 'conj') {
@@ -171,8 +173,8 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
       return { type: 'complex', code: `${fn}(${promote(args[0])})` };
     }
     case 'eq': {
-      const l = compileTyped(e.l, env);
-      const r = compileTyped(e.r, env);
+      const l = compileTyped(e.l, env, envComplex);
+      const r = compileTyped(e.r, env, envComplex);
       if (l.type === 'complex' || r.type === 'complex') {
         throw new Error('Complex equation: compare re(…) or im(…) instead.');
       }
@@ -188,7 +190,7 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
       throw new Error('A list can only be plotted as its own row.');
     case 'piecewise': {
       const emit = (x: Expr): string => {
-        const c = compileTyped(x, env);
+        const c = compileTyped(x, env, envComplex);
         if (c.type === 'complex') throw new Error('Complex piecewise: wrap values in re(…) or im(…).');
         return c.code;
       };
