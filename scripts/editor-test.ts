@@ -658,6 +658,74 @@ await scenario('independent axis scaling persists', async () => {
   page.off('console', onConsole);
 });
 
+await scenario('runtime scale sliders update geometry and preserve undo', async () => {
+  const rows = ['s=1', 's hull(([-1,1],[-1,1],[-1,1]))', 'camera(-pi/3,0.45,8,(0,0,0))'];
+  await load(page, rows);
+  await page.evaluate(async () => {
+    await new Promise(requestAnimationFrame);
+    (window as any).hullVertices = [];
+    const upload = WebGL2RenderingContext.prototype.bufferData;
+    WebGL2RenderingContext.prototype.bufferData = function (...args: any[]) {
+      if (args[1] instanceof Float32Array && args[1].length === 72) {
+        (window as any).hullVertices.push([...args[1]]);
+      }
+      return (upload as any).apply(this, args);
+    };
+    const slider = document.querySelector<HTMLInputElement>('.eq-slider input[type=range]')!;
+    for (const value of ['1.5', '2']) {
+      slider.value = value;
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(requestAnimationFrame);
+    }
+    slider.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  check('scale slider updates row text', (await rowTexts(page))[0] === 's = 2');
+  const vertices = await page.evaluate(() => (window as any).hullVertices as number[][]);
+  check('scale slider updates hull vertex buffers', vertices.some(v => v.every(c => Math.abs(c) === 2)));
+  await caretTo(page, 0, 0);
+  await page.keyboard.press('ControlOrMeta+z');
+  check('one undo restores the original scale', (await rowTexts(page))[0] === rows[0]);
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  check('redo restores the new scale', (await rowTexts(page))[0] === 's = 2');
+});
+
+await scenario('camera writeback preserves hull buffers and undo', async () => {
+  const camera = 'camera(-pi/3,0.45,8,(0,0,0))';
+  await load(page, ['hull(([-1,1],[-1,1],[-1,1]))', camera]);
+  await page.evaluate(async () => {
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    (window as any).hullUploads = 0;
+    const upload = WebGL2RenderingContext.prototype.bufferData;
+    WebGL2RenderingContext.prototype.bufferData = function (...args: any[]) {
+      (window as any).hullUploads++;
+      return (upload as any).apply(this, args);
+    };
+  });
+  const box = (await page.locator('#gl').boundingBox())!;
+  const x = box.x + box.width * .7, y = box.y + box.height * .5;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 50, y + 20, { steps: 5 });
+  await page.waitForTimeout(250); // Exercise the timer writeback while held.
+  await page.mouse.move(x + 80, y + 30, { steps: 5 });
+  await page.mouse.up(); // Also exercise release's final writeback.
+  const moved = (await rowTexts(page))[1]!;
+  check('orbit updates the camera row', moved !== camera && moved.startsWith('camera('), moved);
+  const uploads = await page.evaluate(() => (window as any).hullUploads);
+  check('orbit reuses hull GPU buffers across camera writebacks', uploads === 0, String(uploads));
+  await page.waitForFunction(row => decodeURIComponent(location.pathname).includes(row), moved);
+  await caretTo(page, 0, 0);
+  await page.keyboard.press('ControlOrMeta+z');
+  check('one undo restores the camera before the gesture', (await rowTexts(page))[1] === camera);
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  check('redo restores the orbited camera', (await rowTexts(page))[1] === moved);
+  await page.waitForFunction(row => decodeURIComponent(location.pathname).includes(row), moved);
+  await page.reload();
+  await page.waitForSelector('.eq-line');
+  check('orbited camera survives URL reload', (await rowTexts(page))[1] === moved);
+});
+
 await scenario('first visit loads a featured graph, not a lone sine', async () => {
   await page.goto('about:blank');
   await page.goto(ORIGIN + '/');

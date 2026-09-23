@@ -875,35 +875,49 @@ export function substIdx(e: Expr, idx: string, val: Expr): Expr {
 
 const FOLD_BUILD = { '+': add, '-': sub, '*': mul, '/': div, '^': pow } as const;
 
-/** Fold numeric subtrees ((2·3-1) → 5) so expanded Σ terms compile to compact GLSL. */
-function foldNums(e: Expr): Expr {
+/**
+ * Fold numeric subtrees ((2·3-1) → 5) so expanded Σ terms compile to compact
+ * GLSL. With `calls`, a call whose arguments all folded (cos(1/3)) folds too,
+ * for consumers that evaluate the tree on the CPU rather than emit it.
+ */
+export function foldNums(e: Expr, calls = false): Expr {
+  const fold = (x: Expr) => foldNums(x, calls);
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, foldNums);
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, fold);
     case 'num':
     case 'var':
       return e;
-    case 'neg': return neg(foldNums(e.a));
+    case 'neg': return neg(fold(e.a));
     case 'bin': {
-      const a = foldNums(e.a);
-      const b = foldNums(e.b);
+      const a = fold(e.a);
+      const b = fold(e.b);
       if (a.kind === 'num' && b.kind === 'num') {
         const v = evaluate({ kind: 'bin', op: e.op, a, b }, {});
         if (isFinite(v)) return num(v);
       }
       return FOLD_BUILD[e.op](a, b);
     }
-    case 'call': return { kind: 'call', name: e.name, args: e.args.map(foldNums) };
-    case 'eq': return { kind: 'eq', l: foldNums(e.l), r: foldNums(e.r) };
-    case 'ineq': return { kind: 'ineq', op: e.op, l: foldNums(e.l), r: foldNums(e.r) };
-    case 'vec': return { kind: 'vec', items: e.items.map(foldNums) };
-    case 'list': return sameList(e, { kind: 'list', items: e.items.map(foldNums) });
+    case 'call': {
+      const out: Expr = { kind: 'call', name: e.name, args: e.args.map(fold) };
+      if (calls && out.args.length && out.args.every(a => a.kind === 'num')) {
+        try {
+          const v = evaluate(out, {});
+          if (isFinite(v)) return num(v);
+        } catch { /* not a scalar builtin: the interpreter keeps it */ }
+      }
+      return out;
+    }
+    case 'eq': return { kind: 'eq', l: fold(e.l), r: fold(e.r) };
+    case 'ineq': return { kind: 'ineq', op: e.op, l: fold(e.l), r: fold(e.r) };
+    case 'vec': return { kind: 'vec', items: e.items.map(fold) };
+    case 'list': return sameList(e, { kind: 'list', items: e.items.map(fold) });
     case 'data':
     case 'str':
     case 'text': return e;
     case 'piecewise': return {
       kind: 'piecewise',
-      cases: e.cases.map(c => ({ cond: foldNums(c.cond), value: foldNums(c.value) })),
-      otherwise: e.otherwise && foldNums(e.otherwise),
+      cases: e.cases.map(c => ({ cond: fold(c.cond), value: fold(c.value) })),
+      otherwise: e.otherwise && fold(e.otherwise),
     };
   }
 }

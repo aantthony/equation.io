@@ -181,11 +181,26 @@ export function fitView2D(
 }
 
 /** Same 6-significant-digit trim sliders use, so rewritten rows stay tidy. */
-const fmt = (v: number) => String(parseFloat(v.toPrecision(6)));
+const fmt = (v: number, digits = 6) => String(parseFloat(v.toPrecision(digits)));
+
+/**
+ * A range's ends at the fewest digits that reproduce it. Six read well, but a
+ * window zoomed deep at a large offset (99.99995..100.00005) needs more: at
+ * six its ends round to one number, which parseViewRow rejects, and just short
+ * of that the round-off shifts the window by its own width. Digits grow until
+ * the rounding quantum is under 1% of the span.
+ */
+function fmtRange(lo: number, hi: number): string {
+  const span = hi - lo;
+  const scale = Math.max(Math.abs(lo), Math.abs(hi));
+  let digits = 6;
+  while (digits < 17 && scale * 10 ** (1 - digits) > span / 100) digits++;
+  return `${fmt(lo, digits)}..${fmt(hi, digits)}`;
+}
 
 /** Serialize the visible window back into row text (the writeback half). */
 export function formatViewRow(x0: number, x1: number, y0: number, y1: number, ratio = 1): string {
-  return `view(x = ${fmt(x0)}..${fmt(x1)}, y = ${fmt(y0)}..${fmt(y1)}${ratio === 1 ? '' : `, ratio = ${fmt(ratio)}`})`;
+  return `view(x = ${fmtRange(x0, x1)}, y = ${fmtRange(y0, y1)}${ratio === 1 ? '' : `, ratio = ${fmt(ratio)}`})`;
 }
 
 export function formatCameraRow(c: {
@@ -196,7 +211,7 @@ export function formatCameraRow(c: {
 }): string {
   const parts = [fmt(c.theta), fmt(c.phi), fmt(c.radius)];
   if (c.target.some(v => Math.abs(v) > 1e-9)) {
-    parts.push(`(${c.target.map(fmt).join(', ')})`);
+    parts.push(`(${c.target.map(v => fmt(v)).join(', ')})`);
   }
   return `camera(${parts.join(', ')})`;
 }
