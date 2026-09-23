@@ -924,6 +924,7 @@ function evalCols(
       }
       return out;
     }
+    case 'loop': throw new Error('A recursive function cannot be applied to a data column or random variable yet.');
     case 'piecewise': {
       const out = alloc();
       out.fill(NaN);

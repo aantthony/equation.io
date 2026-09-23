@@ -553,6 +553,11 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         && cases.every((c, k) => c.cond === e.cases[k].cond && c.value === e.cases[k].value)) return sc(e);
       return sc({ kind: 'piecewise', cases, otherwise });
     }
+    case 'loop': return sc(mapChildren(e, n => {
+      const v = lo(n);
+      if (v.vec) throw new Error('Points cannot pass through a recursive function.');
+      return v.e;
+    }));
   }
   throw new Error('Unreachable');
 }

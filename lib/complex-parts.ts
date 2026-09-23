@@ -1,6 +1,6 @@
 /** Real expression components for CPU solving and point rendering. */
-import { type Expr } from './expr.ts';
-import { usesComplex, inferScalarType } from './complex.ts';
+import { type Expr, RECUR, childrenOf, isRecur } from './expr.ts';
+import { usesComplex, inferScalarType, loopTypes, type ScalarType } from './complex.ts';
 import { num, bin, call } from './coordinate.ts';
 import { add as realAdd, mul as realMul, pow } from './diff.ts';
 import { countNodes } from './size.ts';
@@ -19,8 +19,13 @@ function hasProjection(e: Expr): boolean {
   if (e.kind === 'neg') return hasProjection(e.a);
   if (e.kind === 'eq' || e.kind === 'ineq') return hasProjection(e.l) || hasProjection(e.r);
   if (e.kind === 'piecewise') return e.cases.some(c => hasProjection(c.cond) || hasProjection(c.value)) || !!e.otherwise && hasProjection(e.otherwise);
+  if (e.kind === 'loop') return childrenOf(e).some(hasProjection);
   return false;
 }
+
+/** Complex variables bound by an enclosing loop, as their two real parts. */
+type ComplexVars = ReadonlyMap<string, Pair>;
+const typesOf = (vars: ComplexVars): Record<string, ScalarType> => Object.fromEntries([...vars.keys()].map(k => [k, 'complex']));
 
 /** Thrown when a split outgrows its budget; callers word it for their row. */
 export class SplitTooLarge extends Error {}
@@ -32,25 +37,29 @@ export class SplitTooLarge extends Error {}
  * use) the split stops with SplitTooLarge at the first subterm past it,
  * having built only that far.
  */
-export function complexParts(e: Expr, budget = Infinity, sizes = new WeakMap<object, number>()): Pair {
-  const parts = splitParts(e, a => complexParts(a, budget, sizes));
+export function complexParts(e: Expr, budget = Infinity, sizes = new WeakMap<object, number>(), vars: ComplexVars = new Map()): Pair {
+  const parts = splitParts(e, a => complexParts(a, budget, sizes, vars), vars);
   if (budget < Infinity && countNodes(parts[0], sizes) + countNodes(parts[1], sizes) > budget) throw new SplitTooLarge();
   return parts;
 }
 
-function splitParts(e: Expr, complexParts: (e: Expr) => Pair): Pair {
-  if (!usesComplex(e) && !hasProjection(e)) return [e, num(0)];
-  if (e.kind === 'var') return e.name === 'i' ? [num(0), num(1)] : [{ kind: 'var', name: 'x' }, { kind: 'var', name: 'y' }];
+function splitParts(e: Expr, complexParts: (e: Expr) => Pair, vars: ComplexVars): Pair {
+  const complexNames = new Set(vars.keys());
+  if (!usesComplex(e, complexNames) && !hasProjection(e)) return [e, num(0)];
+  if (e.kind === 'var') return vars.get(e.name) ?? (e.name === 'i' ? [num(0), num(1)] : [{ kind: 'var', name: 'x' }, { kind: 'var', name: 'y' }]);
   if (e.kind === 'neg') return complexParts(e.a).map(neg) as Pair;
   if (e.kind === 'eq' || e.kind === 'ineq') return [{ ...e, l: complexParts(e.l)[0], r: complexParts(e.r)[0] }, num(0)];
   if (e.kind === 'piecewise') {
-    inferScalarType(e); // Preserve the shader's real-only piecewise semantics.
-    return [{ ...e, cases: e.cases.map(c => ({ cond: complexParts(c.cond)[0], value: complexParts(c.value)[0] })),
-      ...(e.otherwise ? { otherwise: complexParts(e.otherwise)[0] } : {}) }, num(0)];
+    const type = inferScalarType(e, typesOf(vars)); // Keep the shader's typing rules (real conditions).
+    const cases = e.cases.map(c => ({ cond: complexParts(c.cond)[0], value: complexParts(c.value) }));
+    const otherwise = e.otherwise && complexParts(e.otherwise);
+    const part = (k: 0 | 1): Expr => ({ ...e, cases: cases.map(c => ({ cond: c.cond, value: c.value[k] })), ...(otherwise ? { otherwise: otherwise[k] } : {}) });
+    return [part(0), type === 'complex' ? part(1) : num(0)];
   }
+  if (e.kind === 'loop') return splitLoop(e, vars);
   if (e.kind === 'bin') {
     const a = complexParts(e.a), b = complexParts(e.b);
-    if (inferScalarType(e) === 'real') return [bin(e.op, a[0], b[0]), num(0)];
+    if (inferScalarType(e, typesOf(vars)) === 'real') return [bin(e.op, a[0], b[0]), num(0)];
     switch (e.op) {
       case '+': return add(a, b);
       case '-': return add(a, b.map(neg) as Pair);
@@ -76,7 +85,7 @@ function splitParts(e: Expr, complexParts: (e: Expr) => Pair): Pair {
     }
   }
   if (e.kind === 'call') {
-    const type = inferScalarType(e); // Keep function support and arity consistent with the shader.
+    const type = inferScalarType(e, typesOf(vars)); // Keep function support and arity consistent with the shader.
     if (type === 'real' && !['re', 'im', 'arg', 'abs'].includes(e.name)) {
       return [call(e.name, ...e.args.map(a => complexParts(a)[0])), num(0)];
     }
@@ -118,4 +127,36 @@ function splitParts(e: Expr, complexParts: (e: Expr) => Pair): Pair {
     }
   }
   throw new Error('This complex expression cannot be evaluated as a point or root system.');
+}
+
+/**
+ * A loop over complex state becomes a loop over twice as many real params:
+ * each complex param `p` is carried as `p.re` and `p.im` (names no row can
+ * spell), bound to that pair while its body splits. A complex result is two
+ * loops, one per part, which run the same passes.
+ */
+function splitLoop(e: Expr & { kind: 'loop' }, vars: ComplexVars): Pair {
+  const { params: types, result } = loopTypes(e, typesOf(vars));
+  const inner = new Map(vars);
+  const params: string[] = [];
+  e.params.forEach((p, k) => {
+    if (types[k] === 'real') { inner.delete(p); params.push(p); return; }
+    inner.set(p, [{ kind: 'var', name: `${p}.re` }, { kind: 'var', name: `${p}.im` }]);
+    params.push(`${p}.re`, `${p}.im`);
+  });
+  const flatten = (args: Expr[], scope: ComplexVars): Expr[] => args.flatMap((a, k) => {
+    const parts = complexParts(a, Infinity, undefined, scope);
+    return types[k] === 'real' ? [parts[0]] : parts;
+  });
+  const seeds = flatten(e.seeds, vars);
+  const body = (part: 0 | 1): Expr => {
+    const rebuild = (node: Expr): Expr => {
+      if (isRecur(node)) return { kind: 'call', name: RECUR, args: flatten(node.args, inner) };
+      if (node.kind !== 'piecewise') return complexParts(node, Infinity, undefined, inner)[part];
+      return { ...node, cases: node.cases.map(c => ({ cond: complexParts(c.cond, Infinity, undefined, inner)[0], value: rebuild(c.value) })),
+        ...(node.otherwise ? { otherwise: rebuild(node.otherwise) } : {}) };
+    };
+    return { kind: 'loop', params, seeds, body: rebuild(e.body), limit: e.limit };
+  };
+  return [body(0), result === 'complex' ? body(1) : num(0)];
 }

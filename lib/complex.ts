@@ -1,4 +1,4 @@
-import { childrenOf, structuralDiagnostic } from './expr.ts';
+import { childrenOf, freeVars, isRecur, loopLeaves, structuralDiagnostic, substVars } from './expr.ts';
 /**
  * Complex-typed GLSL compilation.
  *
@@ -9,7 +9,7 @@ import { childrenOf, structuralDiagnostic } from './expr.ts';
  * which lets equations like im(ln(w)) = 1 flow through the implicit-curve path.
  */
 import { type Expr, plainFnName } from './expr.ts';
-import { FN_GLSL, piecewiseGLSL, toGLSL } from './glsl.ts';
+import { FN_GLSL, HELPER_SELF, condGLSL, declareHelper, piecewiseGLSL, toGLSL } from './glsl.ts';
 
 export type Typed = { type: 'real'; code: string } | { type: 'complex'; code: string };
 
@@ -44,6 +44,9 @@ export function usesComplex(e: Expr, extra?: ReadonlySet<string>): boolean {
     case 'piecewise':
       return e.cases.some(c => usesComplex(c.cond, extra) || usesComplex(c.value, extra))
         || (e.otherwise ? usesComplex(e.otherwise, extra) : false);
+    // A param is complex only through its seed, and a seed that is complex
+    // already answers; the body then only matters for i and w of its own.
+    case 'loop': return childrenOf(e).some(c => usesComplex(c, extra));
   }
 }
 
@@ -106,6 +109,7 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNa
         case 'piecewise':
           return n.cases.some(c => scan(c.cond) || scan(c.value))
             || (n.otherwise ? scan(n.otherwise) : false);
+        case 'loop': return true; // emitted here, whatever its types
         default: return false;
       }
     })(e);
@@ -189,15 +193,116 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNa
     case 'list':
       throw new Error('A list can only be plotted as its own row.');
     case 'piecewise': {
-      const emit = (x: Expr): string => {
-        const c = compileTyped(x, env, envComplex);
-        if (c.type === 'complex') throw new Error('Complex piecewise: wrap values in re(…) or im(…).');
-        return c.code;
-      };
-      return { type: 'real', code: piecewiseGLSL(e, emit) };
+      const type = inferScalarType(e, typesOf(env));
+      const emitCond = (x: Expr): string => compileTyped(x, env, envComplex).code;
+      const emitValue = (x: Expr): string => cast(compileTyped(x, env, envComplex), type);
+      return { type, code: piecewiseGLSL(e, emitCond, emitValue, nanOf(type)) };
     }
+    case 'loop': return compileLoop(e, env);
   }
   throw new Error('Unreachable');
+}
+
+const typesOf = (env: Record<string, Typed>): Record<string, ScalarType> =>
+  Object.fromEntries(Object.entries(env).map(([k, v]) => [k, v.type]));
+const cast = (v: Typed, type: ScalarType): string => (type === 'complex' ? promote(v) : v.code);
+const glType = (type: ScalarType): string => (type === 'complex' ? 'vec2' : 'float');
+const nanOf = (type: ScalarType): string => (type === 'complex' ? 'vec2(EQ_NAN)' : 'EQ_NAN');
+
+/**
+ * A loop is a GLSL function: expressions cannot hold statements. It takes
+ * the params, then every free variable of the body (x and y are locals of
+ * the caller; passing the uniforms too keeps one rule), so it depends on
+ * nothing declared around it, and it is declared once by content (see
+ * declareHelper). Each pass tests the params for finiteness — a state that
+ * blew up will not terminate and reads as undefined — then walks the body's
+ * cases as if/else: an exit leaf returns, a self-call assigns and continues.
+ */
+function compileLoop(e: Expr & { kind: 'loop' }, env: Record<string, Typed>): Typed {
+  const { params: ptypes, result } = loopTypes(e, typesOf(env));
+  const free = new Set<string>();
+  for (const v of freeVars(e.body)) {
+    if (e.params.includes(v) || v === 'i') continue;
+    if (v === 'w' && !(v in env)) { free.add('x'); free.add('y'); } else free.add(v);
+  }
+  // The params become the locals p0, p1, … by substitution, not only by
+  // binding: a real subtree compiles through toGLSL, which spells variables
+  // by name. (No user name can clash: sliders arrive as u_… uniforms.)
+  const locals = Object.fromEntries(e.params.map((p, k): [string, Expr] => [p, { kind: 'var', name: `p${k}` }]));
+  const body = substVars(e.body, locals);
+  const inner: Record<string, Typed> = { ...env };
+  const args: string[] = [];
+  const decls: string[] = [];
+  e.params.forEach((_, k) => {
+    inner[`p${k}`] = { type: ptypes[k], code: `p${k}` };
+    decls.push(`${glType(ptypes[k])} p${k}`);
+    args.push(cast(compileTyped(e.seeds[k], env), ptypes[k]));
+  });
+  for (const v of free) {
+    const type = env[v]?.type ?? 'real';
+    inner[v] = { type, code: v };
+    decls.push(`${glType(type)} ${v}`);
+    args.push(env[v]?.code ?? v);
+  }
+  const emitCond = (x: Expr): string => compileTyped(x, inner).code;
+  const emitLeaf = (leaf: Expr): string => {
+    if (!isRecur(leaf)) return `return ${cast(compileTyped(leaf, inner), result)};`;
+    const next = leaf.args.map((a, k) => `${glType(ptypes[k])} n${k} = ${cast(compileTyped(a, inner), ptypes[k])};`);
+    return `${next.join(' ')} ${e.params.map((_, k) => `p${k} = n${k};`).join(' ')} continue;`;
+  };
+  const emitBody = (body: Expr): string => {
+    if (body.kind !== 'piecewise') return emitLeaf(body);
+    const cases = body.cases.map(c => `if (${condGLSL(c.cond, emitCond)}) { ${emitBody(c.value)} }`);
+    return `${cases.join(' else ')} else { ${body.otherwise ? emitBody(body.otherwise) : `return ${nanOf(result)};`} }`;
+  };
+  const finite = e.params.map((_, k) => (ptypes[k] === 'complex'
+    ? `any(isnan(p${k})) || any(isinf(p${k}))` : `isnan(p${k}) || isinf(p${k})`)).join(' || ');
+  const name = declareHelper(`${glType(result)} ${HELPER_SELF}(${decls.join(', ')}) {
+  for (int k = 0; k < ${e.limit}; k++) {
+    if (${finite}) return ${nanOf(result)};
+    ${emitBody(body)}
+  }
+  return ${nanOf(result)};
+}`);
+  return { type: result, code: `${name}(${args.join(', ')})` };
+}
+
+/**
+ * The types a loop's params settle to, and its result's. A param starts as
+ * its seed's type and becomes complex once any self-call passes it a
+ * complex value (which may depend on the other params: iterate to a fixed
+ * point; complex is absorbing, so it needs at most one round per param).
+ * The result is complex if any exit leaf is.
+ */
+export function loopTypes(e: Expr & { kind: 'loop' }, env: Record<string, ScalarType>): { params: ScalarType[]; result: ScalarType } {
+  const params = e.seeds.map(s => inferScalarType(s, env));
+  const leaves = loopLeaves(e.body);
+  const bound = (): Record<string, ScalarType> => ({ ...env, ...Object.fromEntries(e.params.map((p, k) => [p, params[k]])) });
+  for (let changed = true; changed;) {
+    changed = false;
+    const inner = bound();
+    for (const leaf of leaves) {
+      if (!isRecur(leaf)) continue;
+      leaf.args.forEach((a, k) => {
+        if (params[k] === 'real' && inferScalarType(a, inner) === 'complex') { params[k] = 'complex'; changed = true; }
+      });
+    }
+  }
+  const inner = bound();
+  checkConditions(e.body, inner);
+  const result = leaves.some(leaf => !isRecur(leaf) && inferScalarType(leaf, inner) === 'complex') ? 'complex' : 'real';
+  return { params, result };
+}
+
+/** Every comparison in a loop body's cases compares real values. */
+function checkConditions(body: Expr, env: Record<string, ScalarType>): void {
+  if (body.kind !== 'piecewise') return;
+  for (const c of body.cases) { realCondition(c.cond, env); checkConditions(c.value, env); }
+  if (body.otherwise) checkConditions(body.otherwise, env);
+}
+function realCondition(cond: Expr, env: Record<string, ScalarType>): void {
+  if (cond.kind === 'ineq') { realCondition(cond.l, env); realCondition(cond.r, env); return; }
+  if (inferScalarType(cond, env) === 'complex') throw new Error('Complex condition: compare re(…), im(…), or abs(…).');
 }
 
 export type ScalarType = 'real' | 'complex';
@@ -217,14 +322,11 @@ export function inferScalarType(e: Expr, env: Record<string, ScalarType> = {}): 
     case 'vec': throw new Error('Vector in scalar context.');
     case 'list': throw new Error('A list can only be plotted as its own row.');
     case 'piecewise': {
-      const visit = (value: Expr): void => {
-        if (value.kind === 'ineq') { visit(value.l); visit(value.r); return; }
-        if (infer(value) === 'complex') throw new Error('Complex piecewise: wrap values in re(…) or im(…).');
-      };
-      for (const c of e.cases) { visit(c.cond); visit(c.value); }
-      if (e.otherwise) visit(e.otherwise);
-      return 'real';
+      const values = e.cases.map(c => { realCondition(c.cond, env); return infer(c.value); });
+      if (e.otherwise) values.push(infer(e.otherwise));
+      return values.includes('complex') ? 'complex' : 'real';
     }
+    case 'loop': return loopTypes(e, env).result;
     case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family':
       throw new Error('This object must be lowered before scalar type inference.');
     case 'data': case 'str': case 'text': throw new Error('Expected a scalar expression.');

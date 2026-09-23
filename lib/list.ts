@@ -902,6 +902,11 @@ function lower(e: Expr, ctx: Ctx): Expr {
       }
       return { kind: 'piecewise', cases, otherwise };
     }
+    case 'loop': {
+      const lowered = mapChildren(e, n => lower(n, ctx));
+      if (childrenOf(lowered).some(isSeq)) throw new Error('Lists are not supported in a recursive function yet.');
+      return lowered;
+    }
   }
 }
 
@@ -977,5 +982,6 @@ export function usesListReduction(e: Expr): boolean {
     case 'piecewise':
       return e.cases.some(c => usesListReduction(c.cond) || usesListReduction(c.value))
         || (e.otherwise ? usesListReduction(e.otherwise) : false);
+    case 'loop': return childrenOf(e).some(usesListReduction);
   }
 }

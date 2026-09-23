@@ -79,7 +79,7 @@ pnpm deploy     # build and deploy to Cloudflare
   `4 <= x^2 + y^2 <= 9` intersect with an edge per non-strict bound
 - `y = {x < 0: -x, x >= 0: x^2}` — piecewise: `cond: value` cases tried in
   order, an optional last bare value is the default; conditions chain like
-  `{0 < x < 1: 1, 0}`
+  `{0 < x < 1: 1, 0}`, and a bare condition counts 1 (`{x > 0, 5}`)
 - `y = {0 < x < 2: x^2}` — a domain restriction: with no default, the value
   is undefined outside the conditions, so nothing is drawn there
 - `sin(x)cos(y)` — a bare expression in x, y is a 2D scalar/density field
@@ -100,6 +100,9 @@ pnpm deploy     # build and deploy to Cloudflare
 **Calculus**
 
 - `f(x) = x^3 - a x` — user-defined functions, inlined symbolically
+- `f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}` then `f(x i - |y|) >= 0` —
+  a tail-recursive function (every self-call a whole case of its `{…}`)
+  runs as a bounded loop per pixel; this one shades the Koch snowflake
 - `y = d/dx f(x)` / `d^2/dx^2 (x^4)` — symbolic Leibniz derivatives; works for
   any single-letter variable, nests, and flows through function definitions:
   `g(x) = d/dx f(x)` then `y = f(a) + g(a)(x - a)` is a live tangent line

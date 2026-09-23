@@ -33,6 +33,7 @@ export function hasAtan2(e: Expr): boolean {
     case 'piecewise':
       return e.cases.some(c => hasAtan2(c.cond) || hasAtan2(c.value))
         || (e.otherwise ? hasAtan2(e.otherwise) : false);
+    case 'loop': return childrenOf(e).some(hasAtan2);
   }
 }
 

@@ -58,7 +58,31 @@ type ExprNode =
   /** A text column, the counterpart of `data`. Same rule: only comparisons. */
   | { kind: 'text'; values: readonly string[] }
   /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
-  | { kind: 'piecewise'; cases: Array<{ cond: Expr; value: Expr }>; otherwise?: Expr };
+  | { kind: 'piecewise'; cases: Array<{ cond: Expr; value: Expr }>; otherwise?: Expr }
+  /**
+   * A tail-recursive function call run as a bounded loop: `params` start at
+   * `seeds`; each pass evaluates `body`, a piecewise whose leaves either give
+   * the result or, as a `RECUR` call, the params for the next pass. The
+   * params are bound inside body only (a binder, like a Σ index): seeds and
+   * everything else in body resolve in the enclosing scope. Undefined (NaN)
+   * once `limit` passes run out, a param leaves the finite range, or no
+   * case holds and there is no default.
+   */
+  | { kind: 'loop'; params: string[]; seeds: Expr[]; body: Expr; limit: number };
+
+/** The self-call inside a `loop` body: its args are the next pass's params. */
+export const RECUR = '@recur';
+/** Passes a tail-recursive function may take before it is undefined. Enough
+ *  for every self-similar construction (each pass rescales) and a fold over
+ *  a few hundred items; bounded so a pixel that never terminates costs about
+ *  what an escape-time iteration does. */
+export const LOOP_LIMIT = 250;
+/** The leaves of a loop body's piecewise tree, in order. */
+export function loopLeaves(body: Expr): Expr[] {
+  if (body.kind !== 'piecewise') return [body];
+  return body.cases.flatMap(c => loopLeaves(c.value)).concat(body.otherwise ? loopLeaves(body.otherwise) : []);
+}
+export const isRecur = (e: Expr): e is Expr & { kind: 'call' } => e.kind === 'call' && e.name === RECUR;
 
 /** Historical tuple-call spelling, applied before resolving argument values.
  * Only syntax vectors flatten: a named or computed vector is never splatted. */
@@ -241,12 +265,20 @@ function seriesToVec(items: Array<Expr | PCase>): Expr {
 /** Assemble {…} content into a piecewise if it contains `cond: value` parts. */
 function bracePiecewise(content: PNode): PNode {
   const items = content.kind === 'series' ? content.items : [content];
-  if (!items.some(n => n.kind === 'pcase')) {
+  // A bare condition among several parts is Desmos's `{cond, else}`: 1 where
+  // it holds. Alone, {x > 0} keeps meaning the inequality itself.
+  const bare = items.length > 1 && items.some(n => n.kind === 'ineq');
+  if (!items.some(n => n.kind === 'pcase') && !bare) {
     return content.kind === 'series' ? seriesToVec(content.items) : content;
   }
   const cases: Array<{ cond: Expr; value: Expr }> = [];
   let otherwise: Expr | undefined;
   items.forEach((n, k) => {
+    if (n.kind === 'ineq' && (k < items.length - 1 || items.every(m => m.kind === 'ineq'))) {
+      if (otherwise) throw new Error('The default value must come last in {…}.');
+      cases.push({ cond: n, value: num(1) });
+      return;
+    }
     if (n.kind === 'pcase') {
       if (n.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities, like x < 0.');
       if (otherwise) throw new Error('The default value must come last in {…}.');
@@ -772,6 +804,7 @@ export function childrenOf(e: Expr): readonly Expr[] {
     case 'eq': case 'ineq': return [e.l, e.r];
     case 'vec': case 'list': return e.items;
     case 'piecewise': return e.cases.flatMap(c => [c.cond, c.value]).concat(e.otherwise ? [e.otherwise] : []);
+    case 'loop': return [...e.seeds, e.body];
     default: return [];
   }
 }
@@ -792,6 +825,7 @@ export function mapChildren(e: Expr, map: (child: Expr) => Expr): Expr {
     case 'eq': case 'ineq': return { ...e, l: next[0], r: next[1] };
     case 'vec': case 'list': return { ...e, items: next };
     case 'piecewise': return { ...e, cases: e.cases.map((_, i) => ({ cond: next[2 * i], value: next[2 * i + 1] })), otherwise: e.otherwise ? next[next.length - 1] : undefined };
+    case 'loop': return { ...e, seeds: next.slice(0, e.seeds.length), body: next[e.seeds.length] };
     default: return e;
   }
 }
@@ -825,6 +859,13 @@ export function substVars(e: Expr, env: Record<string, Expr>): Expr {
     delete bodyEnv[e.args[0].name];
     const args = e.args.map((a, k) => substVars(a, k === 0 || k === 3 ? bodyEnv : env));
     return args.every((a, k) => a === e.args[k]) ? e : { ...e, args };
+  }
+  if (e.kind === 'loop' && e.params.some(p => Object.hasOwn(env, p))) {
+    const bodyEnv = { ...env };
+    for (const p of e.params) delete bodyEnv[p];
+    const seeds = e.seeds.map(a => substVars(a, env));
+    const body = substVars(e.body, bodyEnv);
+    return body === e.body && seeds.every((a, k) => a === e.seeds[k]) ? e : { ...e, seeds, body };
   }
   return mapChildren(e, child => substVars(child, env));
 }
@@ -1155,7 +1196,42 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
       }
       return e.otherwise ? evaluate(e.otherwise, env) : NaN;
     }
+    case 'loop': return evalLoop(e, env);
   }
+}
+
+/** Run a loop: like Σ, the params shadow env entries for the duration. */
+function evalLoop(e: Expr & { kind: 'loop' }, env: Record<string, number>): number {
+  const saved = e.params.map(p => [Object.hasOwn(env, p), env[p]] as const);
+  let state = e.seeds.map(a => evaluate(a, env));
+  try {
+    for (let pass = 0; pass < e.limit; pass++) {
+      if (!state.every(isFinite)) return NaN;
+      e.params.forEach((p, k) => { env[p] = state[k]; });
+      // The taken leaf: the piecewise selects it; a NaN pick is "no case".
+      const leaf = pickLeaf(e.body, env);
+      if (!leaf) return NaN;
+      if (!isRecur(leaf)) return evaluate(leaf, env);
+      state = leaf.args.map(a => evaluate(a, env));
+    }
+    return NaN;
+  } finally {
+    saved.forEach(([had, value], k) => { if (had) env[e.params[k]] = value; else delete env[e.params[k]]; });
+  }
+}
+
+function pickLeaf(body: Expr, env: Record<string, number>): Expr | null {
+  if (body.kind !== 'piecewise') return body;
+  for (const c of body.cases) {
+    if (c.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities.');
+    const holds = ineqComparisons(c.cond).every(({ op, l, r }) => {
+      const a = evaluate(l, env);
+      const b = evaluate(r, env);
+      return op === '<' ? a < b : op === '<=' ? a <= b : op === '>' ? a > b : a >= b;
+    });
+    if (holds) return pickLeaf(c.value, env);
+  }
+  return body.otherwise ? pickLeaf(body.otherwise, env) : null;
 }
 
 /** Collect free variable names (excluding function names and constants). */
@@ -1190,6 +1266,13 @@ export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
       e.cases.forEach(c => { freeVars(c.cond, out); freeVars(c.value, out); });
       if (e.otherwise) freeVars(e.otherwise, out);
       break;
+    case 'loop': {
+      e.seeds.forEach(a => freeVars(a, out));
+      const inner = freeVars(e.body);
+      for (const p of e.params) inner.delete(p);
+      for (const v of inner) out.add(v);
+      break;
+    }
   }
   return out;
 }

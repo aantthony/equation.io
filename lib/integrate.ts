@@ -677,6 +677,8 @@ function substAll(e: Expr, v: string, val: Expr): Expr {
       cases: e.cases.map(c => ({ cond: substAll(c.cond, v, val), value: substAll(c.value, v, val) })),
       otherwise: e.otherwise && substAll(e.otherwise, v, val),
     };
+    // The loop's params rebind inside its body; its seeds are open.
+    case 'loop': return { ...e, seeds: e.seeds.map(a => substAll(a, v, val)), body: e.params.includes(v) ? e.body : substAll(e.body, v, val) };
   }
 }
 

@@ -180,6 +180,7 @@ function nestedSpecial(e: Expr, isRoot = false): string | undefined {
       }
       return e.otherwise ? nestedSpecial(e.otherwise) : undefined;
     }
+    case 'loop': return childrenOf(e).map(c => nestedSpecial(c)).find(Boolean);
   }
 }
 

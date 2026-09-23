@@ -191,6 +191,7 @@ export function diff(e: Expr, v: string): Expr {
         cases: e.cases.map(c => ({ cond: c.cond, value: diff(c.value, v) })),
         otherwise: e.otherwise && diff(e.otherwise, v),
       };
+    case 'loop': throw new Error('Cannot differentiate a recursive function.');
   }
   throw new Error('Unreachable');
 }

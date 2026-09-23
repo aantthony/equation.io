@@ -1,4 +1,5 @@
 /** Minimal WebGL2 helpers: program compilation with cache, fullscreen quad. */
+import { withHelpers } from '../lib/glsl.ts';
 
 /**
  * Shader-compile counter, read by the perf harness (scripts/perf.ts) to
@@ -22,7 +23,7 @@ export function compileProgram(gl: WebGL2RenderingContext, vert: string, frag: s
     return sh;
   };
   const vs = compile(gl.VERTEX_SHADER, vert);
-  const fs = compile(gl.FRAGMENT_SHADER, frag);
+  const fs = compile(gl.FRAGMENT_SHADER, withHelpers(frag));
   const prog = gl.createProgram()!;
   gl.attachShader(prog, vs);
   gl.attachShader(prog, fs);

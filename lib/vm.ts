@@ -5,10 +5,10 @@
  * sample is too slow and Workers forbid dynamic codegen (`new Function`), so
  * expressions compile once to opcode arrays run by a small stack machine.
  */
-import { ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, BINOM_PMF_FN, DUNIFORM_PMF_FN, type Expr, GAMMA_PDF_FN, NEGBINOM_PMF_FN, POISSON_PMF_FN, T_PDF_FN, WEIBULL_PDF_FN, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, normalcdf, normalpdf, plainFnName, realPow, sincFn } from './expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, BINOM_PMF_FN, DUNIFORM_PMF_FN, type Expr, GAMMA_PDF_FN, NEGBINOM_PMF_FN, POISSON_PMF_FN, T_PDF_FN, WEIBULL_PDF_FN, angleFn, angleRateFn, cothFn, erf, factorialFn, gammaFn, ineqComparisons, isRecur, normalcdf, normalpdf, plainFnName, realPow, sincFn } from './expr.ts';
 import { betaPdf, binomPmf, discreteUniformPmf, gammaPdf, negBinomPmf, poissonPmf, studentTPdf, weibullPdf } from './specfn.ts';
 
-const enum Op { Const, Var, Add, Sub, Mul, Div, Pow, Neg, Fn1, Fn2, Fn3, Lt, Le, Gt, Ge, Sel, Fn4 }
+const enum Op { Const, Var, Add, Sub, Mul, Div, Pow, Neg, Fn1, Fn2, Fn3, Lt, Le, Gt, Ge, Sel, Fn4, Loop }
 
 const FN1: Record<string, (x: number) => number> = {
   sin: Math.sin, cos: Math.cos, tan: Math.tan,
@@ -52,6 +52,27 @@ export interface Prog {
   consts: number[];
   /** Stack slots needed at runtime. */
   depth: number;
+  /** The loops this program runs (Op.Loop's argument indexes them). */
+  loops?: LoopProg[];
+}
+
+/**
+ * A `loop` node compiled against its own variable layout: the params in
+ * slots 0..n-1, then the enclosing program's variables shifted by n. Each
+ * pass `select` picks the leaf the body's cases reach — the piecewise tree
+ * with its leaves numbered — and that branch either computes the result or
+ * the next params.
+ */
+interface LoopProg {
+  n: number;
+  limit: number;
+  select: Prog;
+  branches: Array<{ value: Prog } | { next: Prog[] }>;
+  /** Scratch reused across passes: the stack sub-programs run on, the next
+   *  params, and the variable array (sized on first use). */
+  stack: Float64Array;
+  next: Float64Array;
+  vars: Float64Array;
 }
 
 /**
@@ -62,6 +83,7 @@ export interface Prog {
 export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
   const code: number[] = [];
   const consts: number[] = [];
+  const loops: LoopProg[] = [];
   let depth = 0;
   let maxDepth = 0;
   const push = (n: number) => { depth += n; if (depth > maxDepth) maxDepth = depth; };
@@ -144,12 +166,52 @@ export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
         emitCases(0);
         return;
       }
+      case 'loop': {
+        for (const seed of node.seeds) emit(seed);
+        const n = node.params.length;
+        const inner = new Map<string, number>([...slots].map(([name, slot]): [string, number] => [name, slot + n]));
+        node.params.forEach((p, k) => inner.set(p, k));
+        // Number the leaves; the selector returns the number of the one taken.
+        const branches: LoopProg['branches'] = [];
+        const numbered = (body: Expr): Expr => {
+          if (body.kind === 'piecewise') {
+            return { ...body, cases: body.cases.map(c => ({ cond: c.cond, value: numbered(c.value) })), ...(body.otherwise ? { otherwise: numbered(body.otherwise) } : {}) };
+          }
+          branches.push(isRecur(body) ? { next: body.args.map(a => compileProg(a, inner)) } : { value: compileProg(body, inner) });
+          return { kind: 'num', value: branches.length - 1 };
+        };
+        const select = compileProg(numbered(node.body), inner);
+        const progs = [select, ...branches.flatMap(b => ('next' in b ? b.next : [b.value]))];
+        const stack = new Float64Array(Math.max(1, ...progs.map(p => p.depth)));
+        code.push(Op.Loop, loops.length);
+        loops.push({ n, limit: node.limit, select, branches, stack, next: new Float64Array(n), vars: new Float64Array(0) });
+        push(1 - n);
+        return;
+      }
       default:
         throw new Error(`Cannot evaluate a ${node.kind} node numerically.`);
     }
   };
   emit(e);
-  return { code, consts, depth: maxDepth };
+  return { code, consts, depth: maxDepth, ...(loops.length ? { loops } : {}) };
+}
+
+function runLoop(loop: LoopProg, seeds: Float64Array, at: number, outer: ArrayLike<number>): number {
+  const { n } = loop;
+  if (loop.vars.length !== n + outer.length) loop.vars = new Float64Array(n + outer.length);
+  const vars = loop.vars;
+  vars.set(outer, n);
+  for (let k = 0; k < n; k++) vars[k] = seeds[at + k];
+  for (let pass = 0; pass < loop.limit; pass++) {
+    for (let k = 0; k < n; k++) if (!isFinite(vars[k])) return NaN;
+    const which = run(loop.select, vars, loop.stack);
+    if (!(which >= 0)) return NaN; // no case held, no default
+    const branch = loop.branches[which];
+    if ('value' in branch) return run(branch.value, vars, loop.stack);
+    for (let k = 0; k < n; k++) loop.next[k] = run(branch.next[k], vars, loop.stack);
+    for (let k = 0; k < n; k++) vars[k] = loop.next[k];
+  }
+  return NaN;
 }
 
 const FN1_TABLE = FN1_NAMES.map(n => FN1[n]);
@@ -182,6 +244,7 @@ export function run(p: Prog, vars: ArrayLike<number>, stack: Float64Array): numb
       case Op.Ge: sp--; stack[sp - 1] = stack[sp - 1] >= stack[sp] ? 1 : 0; break;
       // [cond, then, else] → the first matching case wins.
       case Op.Sel: sp -= 2; stack[sp - 1] = stack[sp - 1] === 1 ? stack[sp] : stack[sp + 1]; break;
+      case Op.Loop: { const loop = p.loops![arg]; sp -= loop.n; const result = runLoop(loop, stack, sp, vars); stack[sp++] = result; break; }
     }
   }
   return stack[sp - 1];
