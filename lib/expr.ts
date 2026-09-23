@@ -274,7 +274,7 @@ function bracePiecewise(content: PNode): PNode {
   const cases: Array<{ cond: Expr; value: Expr }> = [];
   let otherwise: Expr | undefined;
   items.forEach((n, k) => {
-    if (n.kind === 'ineq' && (k < items.length - 1 || items.every(m => m.kind === 'ineq'))) {
+    if (n.kind === 'ineq' && items.length > 1) {
       if (otherwise) throw new Error('The default value must come last in {…}.');
       cases.push({ cond: n, value: num(1) });
       return;
@@ -860,12 +860,25 @@ export function substVars(e: Expr, env: Record<string, Expr>): Expr {
     const args = e.args.map((a, k) => substVars(a, k === 0 || k === 3 ? bodyEnv : env));
     return args.every((a, k) => a === e.args[k]) ? e : { ...e, args };
   }
-  if (e.kind === 'loop' && e.params.some(p => Object.hasOwn(env, p))) {
+  if (e.kind === 'loop') {
     const bodyEnv = { ...env };
     for (const p of e.params) delete bodyEnv[p];
     const seeds = e.seeds.map(a => substVars(a, env));
-    const body = substVars(e.body, bodyEnv);
-    return body === e.body && seeds.every((a, k) => a === e.seeds[k]) ? e : { ...e, seeds, body };
+    // A replacement that mentions a param's name must not be captured by
+    // it: rename that param to a name no row can spell before substituting.
+    const incoming = new Set<string>();
+    for (const x of Object.values(bodyEnv)) for (const v of freeVars(x)) incoming.add(v);
+    const renames: Record<string, Expr> = {};
+    const params = e.params.map(p => {
+      if (!incoming.has(p)) return p;
+      let fresh = `${p}.1`;
+      for (let k = 2; incoming.has(fresh) || e.params.includes(fresh); k++) fresh = `${p}.${k}`;
+      renames[p] = { kind: 'var', name: fresh };
+      return fresh;
+    });
+    const renamed = Object.keys(renames).length ? substVars(e.body, renames) : e.body;
+    const body = substVars(renamed, bodyEnv);
+    return body === e.body && seeds.every((a, k) => a === e.seeds[k]) ? e : { ...e, params, seeds, body };
   }
   return mapChildren(e, child => substVars(child, env));
 }

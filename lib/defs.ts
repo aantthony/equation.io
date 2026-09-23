@@ -89,13 +89,19 @@ function wrapRecursion(name: string, params: string[], body: Expr): Expr {
       if (e.otherwise) check(e.otherwise, true);
       return;
     }
+    // A loop already inlined here (a call to another recursive function)
+    // owns the markers in its body; only its seeds are this function's.
+    if (e.kind === 'loop') { for (const seed of e.seeds) check(seed, false); return; }
     for (const child of childrenOf(e)) check(child, false);
   };
   check(body, true);
   return { kind: 'loop', params, seeds: params.map(name => ({ kind: 'var', name })), body, limit: LOOP_LIMIT };
 }
 
-const containsRecur = (e: Expr): boolean => isRecur(e) || childrenOf(e).some(containsRecur);
+/** Whether `e` calls the function being defined. Markers inside an inlined
+ * loop's body belong to that loop, so only its seeds count. */
+const containsRecur = (e: Expr): boolean => isRecur(e)
+  || (e.kind === 'loop' ? e.seeds.some(containsRecur) : childrenOf(e).some(containsRecur));
 
 export interface StateDef {
   /** da/dt, resolved. Free vars in {t, constants, states}. */
@@ -1270,8 +1276,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (fn) {
         const n = fn.params.length;
         if (fn.recursive) {
-          if (args.length !== n) throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
-          return { kind: 'call', name: RECUR, args };
+          // f((a, b)) ≡ f(a, b), as for any other call with a tuple in hand.
+          const splat = args.length === 1 && n >= 2 && args[0].kind === 'vec' ? args[0].items : args;
+          if (args.length === 1 && n >= 2 && args[0].kind === 'vec' && splat.length !== n) throw new Error(compDims(e.name, n, args[0], splat.length));
+          if (splat.length !== n) throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
+          return { kind: 'call', name: RECUR, args: splat };
         }
         if (args.length === 1 && n >= 2 && args[0].kind !== 'num') {
           // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point

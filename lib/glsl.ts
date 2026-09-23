@@ -287,13 +287,19 @@ export function piecewiseGLSL(
  * after the prelude with withHelpers(); nothing else needs to carry them.
  */
 const helpers = new Map<string, string>();
+/** Each edit of a recursive function declares a fresh helper; keep the most
+ * recently declared or spliced, well beyond the 64 programs a renderer
+ * caches, so a live shader's helpers are still here when it recompiles. */
+const HELPER_LIMIT = 512;
 const HELPER_NAME = /\beq_loop_[0-9a-f]+\b/g;
 export function declareHelper(source: string): string {
   // FNV-1a over the source with its own name blanked out.
   let hash = 0x811c9dc5;
   for (let k = 0; k < source.length; k++) hash = Math.imul(hash ^ source.charCodeAt(k), 0x01000193);
   const name = `eq_loop_${(hash >>> 0).toString(16)}`;
+  helpers.delete(name); // re-insert at the recent end
   helpers.set(name, source.replaceAll(HELPER_SELF, name));
+  while (helpers.size > HELPER_LIMIT) helpers.delete(helpers.keys().next().value!);
   return name;
 }
 export const HELPER_SELF = '@self';
@@ -307,6 +313,7 @@ export function withHelpers(shader: string): string {
       seen.add(name);
       const source = helpers.get(name);
       if (!source) throw new Error(`Shader refers to an undeclared helper ${name}.`);
+      helpers.delete(name); helpers.set(name, source); // still in use: keep
       visit(source); // dependencies (an inner loop) declare first
       order.push(name);
     }

@@ -38,12 +38,12 @@ export class SplitTooLarge extends Error {}
  * having built only that far.
  */
 export function complexParts(e: Expr, budget = Infinity, sizes = new WeakMap<object, number>(), vars: ComplexVars = new Map()): Pair {
-  const parts = splitParts(e, a => complexParts(a, budget, sizes, vars), vars);
+  const parts = splitParts(e, (a, scope = vars) => complexParts(a, budget, sizes, scope), vars);
   if (budget < Infinity && countNodes(parts[0], sizes) + countNodes(parts[1], sizes) > budget) throw new SplitTooLarge();
   return parts;
 }
 
-function splitParts(e: Expr, complexParts: (e: Expr) => Pair, vars: ComplexVars): Pair {
+function splitParts(e: Expr, complexParts: (e: Expr, vars?: ComplexVars) => Pair, vars: ComplexVars): Pair {
   const complexNames = new Set(vars.keys());
   if (!usesComplex(e, complexNames) && !hasProjection(e)) return [e, num(0)];
   if (e.kind === 'var') return vars.get(e.name) ?? (e.name === 'i' ? [num(0), num(1)] : [{ kind: 'var', name: 'x' }, { kind: 'var', name: 'y' }]);
@@ -56,7 +56,7 @@ function splitParts(e: Expr, complexParts: (e: Expr) => Pair, vars: ComplexVars)
     const part = (k: 0 | 1): Expr => ({ ...e, cases: cases.map(c => ({ cond: c.cond, value: c.value[k] })), ...(otherwise ? { otherwise: otherwise[k] } : {}) });
     return [part(0), type === 'complex' ? part(1) : num(0)];
   }
-  if (e.kind === 'loop') return splitLoop(e, vars);
+  if (e.kind === 'loop') return splitLoop(e, complexParts, vars);
   if (e.kind === 'bin') {
     const a = complexParts(e.a), b = complexParts(e.b);
     if (inferScalarType(e, typesOf(vars)) === 'real') return [bin(e.op, a[0], b[0]), num(0)];
@@ -135,7 +135,7 @@ function splitParts(e: Expr, complexParts: (e: Expr) => Pair, vars: ComplexVars)
  * spell), bound to that pair while its body splits. A complex result is two
  * loops, one per part, which run the same passes.
  */
-function splitLoop(e: Expr & { kind: 'loop' }, vars: ComplexVars): Pair {
+function splitLoop(e: Expr & { kind: 'loop' }, split: (e: Expr, vars: ComplexVars) => Pair, vars: ComplexVars): Pair {
   const { params: types, result } = loopTypes(e, typesOf(vars));
   const inner = new Map(vars);
   const params: string[] = [];
@@ -145,15 +145,15 @@ function splitLoop(e: Expr & { kind: 'loop' }, vars: ComplexVars): Pair {
     params.push(`${p}.re`, `${p}.im`);
   });
   const flatten = (args: Expr[], scope: ComplexVars): Expr[] => args.flatMap((a, k) => {
-    const parts = complexParts(a, Infinity, undefined, scope);
+    const parts = split(a, scope);
     return types[k] === 'real' ? [parts[0]] : parts;
   });
   const seeds = flatten(e.seeds, vars);
   const body = (part: 0 | 1): Expr => {
     const rebuild = (node: Expr): Expr => {
       if (isRecur(node)) return { kind: 'call', name: RECUR, args: flatten(node.args, inner) };
-      if (node.kind !== 'piecewise') return complexParts(node, Infinity, undefined, inner)[part];
-      return { ...node, cases: node.cases.map(c => ({ cond: complexParts(c.cond, Infinity, undefined, inner)[0], value: rebuild(c.value) })),
+      if (node.kind !== 'piecewise') return split(node, inner)[part];
+      return { ...node, cases: node.cases.map(c => ({ cond: split(c.cond, inner)[0], value: rebuild(c.value) })),
         ...(node.otherwise ? { otherwise: rebuild(node.otherwise) } : {}) };
     };
     return { kind: 'loop', params, seeds, body: rebuild(e.body), limit: e.limit };

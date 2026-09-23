@@ -225,17 +225,22 @@ function compileLoop(e: Expr & { kind: 'loop' }, env: Record<string, Typed>): Ty
     if (e.params.includes(v) || v === 'i') continue;
     if (v === 'w' && !(v in env)) { free.add('x'); free.add('y'); } else free.add(v);
   }
-  // The params become the locals p0, p1, … by substitution, not only by
-  // binding: a real subtree compiles through toGLSL, which spells variables
-  // by name. (No user name can clash: sliders arrive as u_… uniforms.)
-  const locals = Object.fromEntries(e.params.map((p, k): [string, Expr] => [p, { kind: 'var', name: `p${k}` }]));
+  // The params become the locals p<d>_0, p<d>_1, … by substitution, not only
+  // by binding: a real subtree compiles through toGLSL, which spells
+  // variables by name. (No user name can clash: sliders arrive as u_…
+  // uniforms.) d is the nesting depth: a loop in an outer loop's exit leaf
+  // sees the outer locals as free variables and must not redeclare them.
+  let depth = 0;
+  while (Object.keys(env).some(v => v.startsWith(`p${depth}_`))) depth++;
+  const local = (k: number): string => `p${depth}_${k}`;
+  const locals = Object.fromEntries(e.params.map((p, k): [string, Expr] => [p, { kind: 'var', name: local(k) }]));
   const body = substVars(e.body, locals);
   const inner: Record<string, Typed> = { ...env };
   const args: string[] = [];
   const decls: string[] = [];
   e.params.forEach((_, k) => {
-    inner[`p${k}`] = { type: ptypes[k], code: `p${k}` };
-    decls.push(`${glType(ptypes[k])} p${k}`);
+    inner[local(k)] = { type: ptypes[k], code: local(k) };
+    decls.push(`${glType(ptypes[k])} ${local(k)}`);
     args.push(cast(compileTyped(e.seeds[k], env), ptypes[k]));
   });
   for (const v of free) {
@@ -248,7 +253,7 @@ function compileLoop(e: Expr & { kind: 'loop' }, env: Record<string, Typed>): Ty
   const emitLeaf = (leaf: Expr): string => {
     if (!isRecur(leaf)) return `return ${cast(compileTyped(leaf, inner), result)};`;
     const next = leaf.args.map((a, k) => `${glType(ptypes[k])} n${k} = ${cast(compileTyped(a, inner), ptypes[k])};`);
-    return `${next.join(' ')} ${e.params.map((_, k) => `p${k} = n${k};`).join(' ')} continue;`;
+    return `${next.join(' ')} ${e.params.map((_, k) => `${local(k)} = n${k};`).join(' ')} continue;`;
   };
   const emitBody = (body: Expr): string => {
     if (body.kind !== 'piecewise') return emitLeaf(body);
@@ -256,7 +261,7 @@ function compileLoop(e: Expr & { kind: 'loop' }, env: Record<string, Typed>): Ty
     return `${cases.join(' else ')} else { ${body.otherwise ? emitBody(body.otherwise) : `return ${nanOf(result)};`} }`;
   };
   const finite = e.params.map((_, k) => (ptypes[k] === 'complex'
-    ? `any(isnan(p${k})) || any(isinf(p${k}))` : `isnan(p${k}) || isinf(p${k})`)).join(' || ');
+    ? `any(isnan(${local(k)})) || any(isinf(${local(k)}))` : `isnan(${local(k)}) || isinf(${local(k)})`)).join(' || ');
   const name = declareHelper(`${glType(result)} ${HELPER_SELF}(${decls.join(', ')}) {
   for (int k = 0; k < ${e.limit}; k++) {
     if (${finite}) return ${nanOf(result)};

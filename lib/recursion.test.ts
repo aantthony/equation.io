@@ -48,6 +48,43 @@ describe('tail-recursive functions', () => {
     expect(parse('{x > 0, 5}')).toEqual(parse('{x > 0: 1, 5}'));
     expect(parse('{x > 0, y > 0}')).toEqual(parse('{x > 0: 1, y > 0: 1}'));
     expect(parse('{x > 0}')).toEqual(parse('x > 0'));
+    // A trailing bare condition is a case too, never an inequality as a value.
+    expect(parse('{x > 0: 2, y > 0}')).toEqual(parse('{x > 0: 2, y > 0: 1}'));
+  });
+
+  it('lets other functions call a recursive one, and recursive ones call each other in exit leaves', () => {
+    expect(valueOf(['f(n) = {n <= 0: 0, f(n - 1)}', 'g(x) = f(x) + 1', 'g(3)'])).toBe(1);
+    expect(valueOf(['f(n) = {n <= 0: 0, f(n - 1)}', 'g(x) = f(f(x))', 'g(3)'])).toBe(0);
+    // g's own call is in a seed of the inlined f loop: not a tail call of g.
+    expect(analyzeRows(['f(n) = {n <= 0: 0, f(n - 1)}', 'g(x) = {x <= 0: 1, f(g(x - 1))}']).rows[1].error).toMatch(/whole case/);
+    const nested = analyzeRows(['g(k) = {k <= 0: x, g(k - 1)}', 'f(x) = {x <= 0: g(3), f(x - 1)}', 'f(x) + y > 0']).rows;
+    expect(nested[2].error).toBeUndefined();
+    const field = (nested[2].gpu as { field: string }).field;
+    const shader = withHelpers(`${GLSL_PRELUDE}\nfloat F(float x, float y) { return ${field}; }`);
+    // Each nesting depth names its own locals: the inner helper takes the outer's p0_0 as a free variable.
+    expect(shader).toMatch(/\(float p1_0, float p0_0\)/);
+    expect(shader).not.toMatch(/float p0_0, float p0_0/);
+  });
+
+  it('differentiates a recursive function by central difference', () => {
+    const rows = analyzeRows(['f(x) = {x <= 0: 1, f(x - 1)}', 'y = d/dx f(x)']).rows;
+    expect(rows[1].error).toBeUndefined();
+    const rows2 = analyzeRows(['f(x, a) = {x <= 0: a, f(x - 1, a + 1)}', 'd/dx f(x, x^2)']).rows;
+    expect(rows2[1].error).toBeUndefined();
+  });
+
+  it('splats a point argument into the self-call', () => {
+    expect(valueOf(['f(a, b) = {a <= 0: b, f((a - 1, b + 1))}', 'f(3, 0)'])).toBe(3);
+    expect(analyzeRows(['f(a, b) = {a <= 0: b, f((a - 1, b + 1, 0))}']).rows[0].error).toMatch(/2 arguments|components/);
+  });
+
+  it('does not capture a substituted name that matches a loop param', () => {
+    // g(c) = f(2) inlines c → the slider n inside a loop whose param is also n.
+    const row = analyzeRows(['f(n) = {n <= 0: c, f(n - 1)}', 'g(c) = f(2)', 'n = 7', 'g(n)']).rows[3];
+    expect(row.error).toBeUndefined();
+    const expr = (row.cpu as { expr: import('./expr.ts').Expr }).expr;
+    expect(evaluate(expr, { n: 7 })).toBe(7);
+    expect(run(compileProg(expr, new Map([['n', 0]])), [7], new Float64Array(64))).toBe(7);
   });
 
   it('rejects calls outside tail position and mutual recursion', () => {
@@ -87,7 +124,7 @@ describe('the Koch snowflake', () => {
     expect(field).toMatch(/eq_loop_[0-9a-f]+\(\(c_mul/);
     const shader = withHelpers(`${GLSL_PRELUDE}\nfloat F(float x, float y) { return ${field}; }`);
     expect(shader).toContain(`for (int k = 0; k < ${LOOP_LIMIT}; k++)`);
-    expect(shader).toMatch(/float eq_loop_[0-9a-f]+\(vec2 p0\)/);
+    expect(shader).toMatch(/float eq_loop_[0-9a-f]+\(vec2 p0_0\)/);
     expect(shader.indexOf('eq_loop_')).toBeLessThan(shader.indexOf('float F('));
   });
 
@@ -112,7 +149,7 @@ describe('the Koch snowflake', () => {
     expect(rows[2].cls!.params).toEqual(['a']);
     const field = (rows[2].gpu as { field: string }).field;
     expect(field).toMatch(/eq_loop_[0-9a-f]+\(.*, u_a\)\)$/);
-    expect(withHelpers(`${GLSL_PRELUDE}\n${field}`)).toMatch(/\(vec2 p0, float u_a\)/);
+    expect(withHelpers(`${GLSL_PRELUDE}\n${field}`)).toMatch(/\(vec2 p0_0, float u_a\)/);
   });
 
   it('feeds a colour field without hoisting the loop body into shared locals', () => {
@@ -120,7 +157,9 @@ describe('the Koch snowflake', () => {
     expect(rows[2].error).toBeUndefined();
     const gpu = rows[2].gpu as { type: string; field: string; locals: string };
     expect(gpu.type).toBe('hsl2d');
-    expect(gpu.locals).toMatch(/float eqColor\d+ = eq_loop_[0-9a-f]+\(vec2\(0\.0, 0\.0\), vec2\(x, y\), 0\.0, u_a\);/);
+    // The loop is one call inside a local; none of its body reaches a local.
+    expect(gpu.locals).toMatch(/eq_loop_[0-9a-f]+\(vec2\(0\.0, 0\.0\), vec2\(x, y\), 0\.0, u_a\)/);
+    expect(gpu.locals).not.toMatch(/p0_0/);
     const julia = analyzeRows(['j(z, n) = {abs(z) > 2: n, n >= 60: 60, j(z^2 - 0.8 + 0.156i, n + 1)}', 'hsl(8 j(w, 0) + 200, 90, 50)']).rows;
     expect(julia[1].error).toBeUndefined();
   });
