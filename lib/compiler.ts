@@ -1,9 +1,9 @@
 /** Independent CPU projection and GPU compilation of immutable mathematical objects. */
 import { complexParts, SplitTooLarge } from './complex-parts.ts';
-import { compileTyped, usesComplex } from './complex.ts';
+import { compileTyped, usesComplex, type Typed } from './complex.ts';
 import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
-import { type Expr, exprKey, freeVars, substVars } from './expr.ts';
+import { type Expr, exprKey, freeVars, mapChildren, substVars } from './expr.ts';
 import { toGLSL, uniformName } from './glsl.ts';
 import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
@@ -18,6 +18,9 @@ export type CpuPlan =
   | { type: 'implicit3d'; residual: Expr; equation: Expr; heightmap?: Expr }
   | { type: 'ineq2d'; constraints: Array<{ residual: Expr; strict: boolean }> }
   | { type: 'scalar2d'; expr: Expr }
+  | { type: 'rgb2d'; channels: Expr[] }
+  | { type: 'hsl2d'; channels: Expr[] }
+  | { type: 'oklch2d'; channels: Expr[] }
   | { type: 'complex2d'; expr: Expr }
   | { type: 'domain2d'; expr: Expr }
   | { type: 'conformal2d'; expr: Expr }
@@ -53,6 +56,9 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'implicit3d'; field: string; grad?: [string, string, string] }
   | { type: 'ineq2d'; field: string; edges: string[] }
   | { type: 'scalar2d'; field: string }
+  | { type: 'rgb2d'; field: string; locals: string }
+  | { type: 'hsl2d'; field: string; locals: string }
+  | { type: 'oklch2d'; field: string; locals: string }
   | { type: 'complex2d'; field: string }
   | { type: 'domain2d'; field: string }
   | { type: 'conformal2d'; field: string }
@@ -122,6 +128,8 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'intersection': return { type: 'spacecurve', residuals: object.residuals.map(real) };
     case 'region': return { type: 'ineq2d', constraints: object.constraints.map(c => ({ ...c, residual: real(c.residual) })) };
     case 'scalar-field': return { type: 'scalar2d', expr: real(object.expr) };
+    // Like domain coloring, these expressions are rendered per pixel on the GPU.
+    case 'color-field': return { type: object.space === 'rgb' ? 'rgb2d' : object.space === 'hsl' ? 'hsl2d' : 'oklch2d', channels: [...object.channels] };
     case 'vector-field': return object.components.length === 2
       ? { type: 'vfield2d', comps: object.components.map(real) as [Expr, Expr] }
       : { type: 'vfield3d', comps: object.components.map(real) };
@@ -158,6 +166,52 @@ function uniformSub(params: readonly string[]): (expr: Expr) => Expr {
   const map = Object.fromEntries(params.map(name => [name, { kind: 'var', name: uniformName(name) } as Expr]));
   return expr => params.length ? substVars(expr, map) : expr;
 }
+
+/** Emit shared channel calculations once. Inlining a nested complex map into
+ * three colors otherwise duplicates it at every re/im/arg use and can leave
+ * the browser compiling megabytes of GLSL. Intern shallow lowered nodes too:
+ * separate channel expressions may contain identical but unshared trees.
+ * All expressions are pure; undefined values in an unselected piecewise arm
+ * stay in that arm's temporary and do not affect the selected result.
+ */
+function colorProgram(channels: readonly Expr[], params: readonly string[]): { field: string; locals: string } {
+  const parameters = new Set(params);
+  const memo = new WeakMap<Expr, Expr>();
+  const shared = new Map<string, Expr>();
+  const bindings: Record<string, Typed> = {};
+  const lines: string[] = [];
+  const visit = (expr: Expr): Expr => {
+    const known = memo.get(expr);
+    if (known) return known;
+    let result: Expr;
+    if (expr.kind === 'num') result = expr;
+    else if (expr.kind === 'var') result = parameters.has(expr.name)
+      ? { kind: 'var', name: uniformName(expr.name) } : expr;
+    else {
+      const lowered = mapChildren(expr, visit);
+      // Inequalities retain their boolean shape for piecewiseGLSL.
+      if (expr.kind === 'ineq') result = lowered;
+      else {
+        const key = exprKey(lowered);
+        const reused = shared.get(key);
+        if (reused) result = reused;
+        else {
+          const value = compileTyped(lowered, bindings);
+          const name = `eqColor${lines.length}`;
+          lines.push(`${value.type === 'complex' ? 'vec2' : 'float'} ${name} = ${value.code};`);
+          if (value.type === 'complex') bindings[name] = { type: 'complex', code: name };
+          result = { kind: 'var', name };
+          shared.set(key, result);
+        }
+      }
+    }
+    memo.set(expr, result);
+    return result;
+  };
+  const colors = channels.map(channel => compileTyped(visit(channel), bindings).code);
+  return { field: `vec3(${colors.join(', ')})`, locals: lines.join('\n') };
+}
+
 export function compileGpu(classified: Classified): GpuPlan {
   const { object } = classified;
   const params = [...classified.params];
@@ -184,6 +238,7 @@ export function compileGpu(classified: Classified): GpuPlan {
       return { type: 'ineq2d', params, field, edges: fields.filter(f => f.edge).map(f => f.code) };
     }
     case 'scalar-field': return { type: 'scalar2d', params, field: scalar(object.expr) };
+    case 'color-field': return { type: object.space === 'rgb' ? 'rgb2d' : object.space === 'hsl' ? 'hsl2d' : 'oklch2d', params, ...colorProgram(object.channels, params) };
     case 'vector-field':
       if (object.components.length === 2) return { type: 'vfield2d', params, fx: toGLSL(sub(object.components[0])), fy: toGLSL(sub(object.components[1])) };
       break;
@@ -219,6 +274,7 @@ export function shaderKey(plan: GpuPlan): string {
     case 'implicit2d': return JSON.stringify([plan.type, plan.params, plan.field, plan.levels?.glsl, plan.levels?.gradGlsl, plan.levels?.params]);
     case 'implicit3d': return JSON.stringify([plan.type, plan.params, plan.field, plan.grad]);
     case 'ineq2d': return JSON.stringify([plan.type, plan.params, plan.field, plan.edges]);
+    case 'rgb2d': case 'hsl2d': case 'oklch2d': return JSON.stringify([plan.type, plan.params, plan.field, plan.locals]);
     case 'scalar2d': case 'complex2d': case 'domain2d': case 'conformal2d': return JSON.stringify([plan.type, plan.params, plan.field]);
     case 'fractal2d': return JSON.stringify([plan.type, plan.params, plan.step, plan.seed, plan.maxIter]);
     case 'vfield2d': return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy]);
@@ -239,6 +295,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'family': structure = plan.members.map(member => cpuStructureKey(member.cpu)); break;
     case 'implicit2d': case 'implicit3d': structure = exprKey(plan.residual); break;
     case 'ineq2d': structure = plan.constraints.map(c => [exprKey(c.residual), c.strict]); break;
+    case 'rgb2d': case 'hsl2d': case 'oklch2d': structure = expressions(plan.channels); break;
     case 'scalar2d': case 'complex2d': case 'domain2d': case 'conformal2d': case 'value': case 'note': structure = exprKey(plan.expr); break;
     case 'fractal2d': structure = [exprKey(plan.step), plan.seed, plan.maxIter]; break;
     case 'point': case 'trail': structure = expressions(plan.coords); break;

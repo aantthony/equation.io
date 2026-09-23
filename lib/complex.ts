@@ -17,7 +17,7 @@ export type Typed = { type: 'real'; code: string } | { type: 'complex'; code: st
  * Special forms handled by classify() as whole-expression plot modes; they
  * never compile inline (iter needs a shader loop, the others pick a renderer).
  */
-export const SPECIAL_FORMS = new Set(['domain', 'conformal', 'iter']);
+export const SPECIAL_FORMS = new Set(['domain', 'conformal', 'iter', 'rgb', 'hsl', 'oklch']);
 
 /** Every call that is a whole row rather than a value, by the name the user
  *  writes (the geometry statements, lib/geom.ts GEOM_STATEMENTS, are the rest). */

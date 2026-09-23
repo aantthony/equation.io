@@ -1266,7 +1266,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const vars = freeVars(f).has('z') ? ['x', 'y', 'z'] : ['x', 'y'];
         return { kind: 'vec', items: vars.map(v => applyDiff(f, v, 1, ctx.opts.isList)) };
       }
-      if (ctx.opts.inDefinition && (e.name === 'trail' || e.name === 'revolve')) {
+      if (ctx.opts.inDefinition && (e.name === 'trail' || e.name === 'revolve' || e.name === 'rgb' || e.name === 'hsl' || e.name === 'oklch')) {
         throw new Error(`${e.name}(…) must be a whole row, not part of a definition.`);
       }
       if (e.name === 'revolve' && args.length >= 1 && args.length <= 2) {

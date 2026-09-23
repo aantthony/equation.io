@@ -269,7 +269,7 @@ function classifyLowered(
       catch (err) { throw new Error(`Family element ${i + 1}: ${err instanceof Error ? err.message : err}`); }
     });
     const first = publicKind(members[0].object);
-    const unsupported = new Set(['family', 'scalar2d', 'domain2d', 'complex2d', 'conformal2d', 'fractal2d', 'density', 'pmf', 'prob', 'expect', 'trail']);
+    const unsupported = new Set(['family', 'scalar2d', 'rgb2d', 'hsl2d', 'oklch2d', 'domain2d', 'complex2d', 'conformal2d', 'fractal2d', 'density', 'pmf', 'prob', 'expect', 'trail']);
     if (unsupported.has(first)) throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
@@ -426,6 +426,16 @@ function classifyLowered(
     if (vars.has('z')) throw new Error(`Use w (= x + iy) in ${special}(…); z is the 3D axis.`);
     if (vars.has('u') || vars.has('v')) throw new Error(`Cannot use u/v in ${special}(…).`);
     const call = g as Expr & { kind: 'call' };
+    if (special === 'rgb' || special === 'hsl' || special === 'oklch') {
+      const usage = special === 'rgb' ? 'rgb(red, green, blue), each from 0 to 255'
+        : special === 'hsl' ? 'hsl(hue in degrees, saturation 0–100, lightness 0–100)'
+        : 'oklch(lightness 0–1, chroma, hue in degrees)';
+      if (call.args.length !== 3) throw new Error(`${special} takes three channels: ${usage}.`);
+      for (const channel of call.args) {
+        if (inferScalarType(channel) !== 'real') throw new Error(`${special} channels must be real numbers; use re, im, abs, or arg for complex values.`);
+      }
+      return done({ kind: 'color-field', space: special, channels: call.args as [Expr, Expr, Expr] });
+    }
     if (special === 'iter') {
       if (call.args.length < 1 || call.args.length > 2) {
         throw new Error('iter takes iter(step) or iter(step, count).');

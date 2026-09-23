@@ -18,6 +18,7 @@ describe('llms.txt', () => {
   it('documents every advanced feature the MCP tool description points here for', () => {
     for (const marker of [
       'domain(', // domain coloring
+      'rgb(', 'hsl(', 'oklch(', // custom per-pixel color
       'conformal(', // conformal grid maps
       'iter(', // escape-time fractals
       'revolve(', // surfaces of revolution

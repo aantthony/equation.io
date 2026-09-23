@@ -4,6 +4,8 @@
  * F(x,y) is evaluated per pixel, and the curve F=0 is drawn where the
  * screen-space distance estimate |F| / |∇F| is under the line width.
  */
+import { colorConversionGLSL } from './color-field.ts';
+import type { ColorSpace } from '../lib/math-object.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { ProgramCache, QUAD_VERT } from './gl.ts';
@@ -35,6 +37,12 @@ export interface Ineq2D extends Curve2D {
   edges: string[];
 }
 
+export interface ColorField2D extends Curve2D {
+  space: ColorSpace;
+  /** Shared per-pixel calculations, evaluated before the vec3 field. */
+  locals: string;
+}
+
 export interface VField2D {
   uniforms?: Record<string, number>;
   /** GLSL expressions for the components (Vx, Vy) in terms of floats x, y. */
@@ -63,6 +71,7 @@ export interface Layers2D {
   levels?: LevelSpec[];
   fractals?: Fractal2D[];
   domains?: Curve2D[];
+  colors?: ColorField2D[];
   conformals?: Curve2D[];
   vfields?: VField2D[];
   ineqs?: Ineq2D[];
@@ -476,6 +485,30 @@ void main() {
 `;
 }
 
+function colorFrag(field: string, params: string[] | undefined, locals: string, space: ColorSpace): string {
+  return `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform float t;
+${paramDecls(params)}
+out vec4 outColor;
+${GLSL_PRELUDE}
+${colorConversionGLSL(space)}
+vec3 F(float x, float y) {
+${locals}
+return ${field};
+}
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec3 channels = F(p.x, p.y);
+  if (any(isnan(channels)) || any(isinf(channels))) discard;
+  outColor = vec4(eqColorToSRGB(channels), 1.0);
+}
+`;
+}
+
 function fractalFrag(step: string, seed: 'pixel' | 'zero', maxIter: number, params?: string[]): string {
   return `#version 300 es
 precision highp float;
@@ -718,6 +751,7 @@ export class Renderer2D {
       drawProgram(fractalFrag(f.step, f.seed, f.maxIter, f.params), f.color, f.params);
     }
     for (const d of layers.domains ?? []) drawField(d, domainFrag);
+    for (const c of layers.colors ?? []) drawField(c, (field, params) => colorFrag(field, params, c.locals, c.space));
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
     for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));

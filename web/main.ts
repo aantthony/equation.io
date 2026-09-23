@@ -807,6 +807,9 @@ function render() {
         case 'scalar2d':
         case 'complex2d':
         case 'domain2d':
+        case 'rgb2d':
+        case 'hsl2d':
+        case 'oklch2d':
         case 'conformal2d':
         case 'fractal2d':
         case 'ineq2d':
@@ -968,7 +971,7 @@ function render() {
   } else {
     r3d.clearGeometry();
     const layers: Required<Layers2D> = {
-      levels: [], fractals: [], domains: [], conformals: [], vfields: [],
+      levels: [], fractals: [], domains: [], colors: [], conformals: [], vfields: [],
       ineqs: [], bifs: [], scalars: [], complexes: [], curves: [],
     };
     const extras: Overlay2D = { points: [], polylines: [], bars: [], clouds: [] };
@@ -1010,6 +1013,8 @@ function render() {
         case 'scalar2d': layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms }); break;
         case 'complex2d': layers.complexes.push({ ...gpuFor(eq, 'complex2d'), color, params, uniforms }); break;
         case 'domain2d': layers.domains.push({ ...gpuFor(eq, 'domain2d'), color, params, uniforms }); break;
+        case 'rgb2d': case 'hsl2d': case 'oklch2d':
+          layers.colors.push({ ...gpuFor(eq, plot.type), space: plot.type === 'rgb2d' ? 'rgb' : plot.type === 'hsl2d' ? 'hsl' : 'oklch', color, params, uniforms }); break;
         case 'conformal2d': layers.conformals.push({ ...gpuFor(eq, 'conformal2d'), color, params, uniforms }); break;
         case 'fractal2d':
           layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
@@ -2994,6 +2999,9 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['flow past cylinder', 'w + 4/w'],
     ['orbiting charge', 'ln(w-2) - ln(w + 2e^(i t))'],
     ['domain coloring', 'domain((w^3 - 1)/w)'],
+    ['RGB color field', 'rgb(127.5(1+sin(x-t)), 127.5(1+sin(y-t)), 127.5(1+sin(x+y+t)))'],
+    ['HSL color wheel', 'hsl(180arg(w)/pi+20t, 100, 50)'],
+    ['OKLCH color wheel', 'oklch(0.72, 0.16, 180arg(w)/pi+20t)'],
     ['conformal map', 'conformal(w^2/4)'],
     ['joukowski airfoil', 'conformal(w + 1/w)'],
     ['unit circle path', 'exp(i 2 pi u)'],
