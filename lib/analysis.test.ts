@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { analyzePrepared, analyzeRows, prepareDocument } from './analysis.ts';
 import { parseCsv } from './csv.ts';
 import { RVSystem } from './dist.ts';
-import { evaluate } from './expr.ts';
+import { type Expr, evaluate } from './expr.ts';
 
 describe('shared document analysis', () => {
   it('preserves source identity, blanks and partial success', () => {
@@ -72,5 +72,37 @@ describe('shared document analysis', () => {
     expect(result.gridFields.map(g => g.name)).toEqual(['r']);
     expect(evaluate(result.gridFields[0].expr, { x: 3, y: 4 })).toBe(5);
     expect(result.rows[3].error).toBeUndefined();
+  });
+});
+
+describe('dependency retention after a failed definition', () => {
+  it('drops a definition that references the failed name', () => {
+    const { rows } = analyzeRows(['n = w', 'S = n + 1', 'S + x']);
+    expect(rows[0].error).toBeDefined();
+    expect(rows[1].error).toMatch(/\bn\b/);
+    expect(rows[2].error).toBeDefined();
+  });
+
+  it('reads a sequence term exactly as its plot row: a computed vector is never splatted', () => {
+    const { rows } = analyzeRows(['g(u) = (u, 2u)', 'a_n = atan(g(n))', 'a_3']);
+    const term = (rows[1].cpu as { term: Expr }).term;
+    expect(() => evaluate(term, { n: 3 })).toThrow(/Vector in scalar context/);
+    // Not quietly atan(3, 6).
+    expect(rows[2].info).toBeUndefined();
+    expect(rows[2].error).toMatch(/Vector in scalar context|atan is not defined for points/);
+  });
+
+  it('keeps a definition whose Σ index or ∫ measure merely shares the letter', () => {
+    for (const source of ['S = sum[n=1..5] n', 'S = sum(n=1..5, n)', 'S = 2 sum[n=1..5] n / n']) {
+      const { rows } = analyzeRows(['n = w', source, 'S + x']);
+      expect(rows[0].error).toBeDefined();
+      expect(rows[1].error, source).toBeUndefined();
+      expect(rows[2].error, source).toBeUndefined();
+      expect(rows[2].cpu?.type, source).toBe('implicit2d');
+    }
+    const integral = analyzeRows(['k = w', 'I = int[0..1] k^2 dk', 'I + y']);
+    expect(integral.rows[1].error).toBeUndefined();
+    expect(integral.rows[2].error).toBeUndefined();
+    expect(integral.rows[2].cpu?.type).toBe('scalar2d');
   });
 });

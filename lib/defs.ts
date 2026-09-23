@@ -815,7 +815,7 @@ function stripDx(body: Expr): StripDx | null {
 }
 
 /** substVars for a Σ/Π index, stopping at nested Σ/Π that rebind the same name. */
-function substIdx(e: Expr, idx: string, val: Expr): Expr {
+export function substIdx(e: Expr, idx: string, val: Expr): Expr {
   switch (e.kind) {
     case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substIdx(x, idx, val));
     case 'num': return e;
@@ -906,6 +906,56 @@ function foldNums(e: Expr): Expr {
       otherwise: e.otherwise && foldNums(e.otherwise),
     };
   }
+}
+
+/**
+ * freeVars of an UNRESOLVED source. A Σ/Π index or an ∫'s measure variable
+ * is the binder's own name, not a reference — including in the chain forms
+ * (`sum[n=1..5] n`, `int[0..1] w^2 dw`), where the body is still a sibling
+ * factor that plain freeVars would read as free.
+ */
+function sourceFreeVars(e: Expr, out = new Set<string>()): Set<string> {
+  switch (e.kind) {
+    case 'var': out.add(e.name); return out;
+    case 'bin': {
+      if (e.op === '*' || e.op === '/') {
+        const m = splitSumChain(e);
+        if (m) {
+          if (m.coeff) sourceFreeVars(m.coeff, out);
+          const canonical: Expr = isSumHeader(m.header)
+            ? { kind: 'call', name: m.header.name, args: [...m.header.args, m.body] }
+            : intCallOf(m.header, m.body);
+          return sourceFreeVars(canonical, out);
+        }
+      }
+      sourceFreeVars(e.a, out);
+      return sourceFreeVars(e.b, out);
+    }
+    case 'call': {
+      if ((e.name === 'sum' || e.name === 'prod') && e.args.length === 4 && e.args[0].kind === 'var') {
+        sourceFreeVars(e.args[1], out);
+        sourceFreeVars(e.args[2], out);
+        const inner = sourceFreeVars(e.args[3]);
+        inner.delete(e.args[0].name);
+        for (const v of inner) out.add(v);
+        return out;
+      }
+      if (e.name === 'int' && (e.args.length === 1 || e.args.length === 3)) {
+        const bodyAt = e.args.length - 1;
+        for (let k = 0; k < bodyAt; k++) sourceFreeVars(e.args[k], out);
+        let dx: StripDx | null = null;
+        try { dx = stripDx(e.args[bodyAt]); } catch { /* expansion reports it */ }
+        const inner = sourceFreeVars(e.args[bodyAt]);
+        if (dx) { inner.delete(dx.v); inner.delete(`d${dx.v}`); }
+        for (const v of inner) out.add(v);
+        return out;
+      }
+      break;
+    }
+    default: break;
+  }
+  for (const child of childrenOf(e)) sourceFreeVars(child, out);
+  return out;
 }
 
 const SUM_MAX_TOTAL = 2000;
@@ -1876,7 +1926,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       || defs.fns.has(name) || defs.mats.has(name) || defs.lists.has(name)
       || defs.tables.has(name) || defs.missingData.has(name);
     const references = (expr: Expr): Set<string> => {
-      const names = freeVars(expr);
+      const names = sourceFreeVars(expr);
       const calls = (node: Expr): void => {
         if (node.kind === 'call' && fnNames.has(node.name)) names.add(node.name);
         for (const child of childrenOf(node)) calls(child);

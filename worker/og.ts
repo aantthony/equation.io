@@ -825,7 +825,10 @@ export function canRenderOg(texts: string[]): boolean {
   } catch {
     return false;
   }
-  const plots = analysis.rows.filter(r => r.cls);
+  // A row whose CPU plan failed to compile keeps its object with an error
+  // and no plan: it is not a plot this renderer can draw (nor one whose
+  // dimension should pick the scene), exactly as an unclassifiable row.
+  const plots = analysis.rows.filter(r => r.cls && r.cpu);
   if (!plots.length) return false;
   const needs3D = plots.some(r => r.cls!.needs3D);
   return plots.every(r => previewGap(r, needs3D) === null);
@@ -842,7 +845,7 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
   }
   const env = makeEnv(analysis.constEnv);
   const parents = new Map<RowInfo, RowInfo>();
-  const plotRows = analysis.rows.filter(r => r.cls).slice(0, MAX_PLOTS).flatMap(row => {
+  const plotRows = analysis.rows.filter(r => r.cls && r.cpu).slice(0, MAX_PLOTS).flatMap(row => {
     if (row.cpu!.type !== 'family') return [row];
     return row.cpu!.members.map(m => { const child = { ...row, cls: m.cls, cpu: m.cpu }; parents.set(child, row); return child; });
   });

@@ -16,7 +16,7 @@ import { Env, type ValueDefinitions } from './env.ts';
  * recognized by regex before definition scanning, like defs.ts does.
  */
 import { usesComplex } from './complex.ts';
-import { type GetFn, RESERVED, type ResolveOpts, resolveExpr } from './defs.ts';
+import { type GetFn, RESERVED, type ResolveOpts, resolveExpr, substIdx } from './defs.ts';
 import { axesOf, lowerLists, withAxes } from './list.ts';
 import { listGetter } from './defs.ts';
 import { GREEK_NAME_CHARS, WRITTEN_NAME_CHARS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
@@ -146,12 +146,12 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
     try {
       const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), new Set([...defs.sequences.keys()].map(n => n + '_')));
       if (!scan.rec) {
-        // Leave a Σ up to the index unevaluated, pin the index, then expand
-        // it — so a_5 of a_n = Σ(s=1..n, s) is the number 15, not a sum node.
-        const openVars = new Set(opts.openVars);
-        openVars.add(scan.index);
-        const body = resolveExpr(parsed, getFn, { ...opts, openVars });
-        return resolveExpr(substVars(body, { [scan.index]: { kind: 'num', value: k } }), getFn, opts);
+        // Pin the index in the source (a Σ/∫ that rebinds it keeps its own),
+        // then resolve ONCE — so a_5 of a_n = Σ(s=1..n, s) is the number 15,
+        // not a sum node, and the term sees exactly what the plot row sees: a
+        // second pass over an already-resolved body would re-apply the
+        // tuple-call splat to vectors that functions computed.
+        return resolveExpr(substIdx(parsed, scan.index, { kind: 'num', value: k }), getFn, opts);
       }
       const body = resolveExpr(parsed, getFn, opts);
       for (const v of freeVars(body)) {

@@ -574,3 +574,22 @@ describe('coordinate and complex previews', () => {
     expect(Math.min(...pixel(r, 30, 80))).toBeLessThan(150);
   });
 });
+
+describe('rows whose plan fails to compile', () => {
+  const nest = (n: number, inner: string) => { let s = inner; for (let k = 0; k < n; k++) s = `f(${s})`; return s; };
+  const rows = ['f(w) = w*w + w', nest(10, 'i')];
+
+  it('are not previewable: the object exists, the CPU plan does not', () => {
+    const { rows: analyzed } = analyze(rows, { readouts: false, backend: 'cpu' });
+    expect(analyzed[1].error).toMatch(/too large to evaluate/);
+    expect(analyzed[1].cls).toBeDefined();
+    expect(analyzed[1].cpu).toBeUndefined();
+    expect(canRenderOg(rows)).toBe(false);
+    expect(canRenderOg([...rows, 'y = x'])).toBe(true);
+  });
+
+  it('are skipped by the raster rather than drawn blank or thrown on', () => {
+    // The failed row comes last so the drawn row keeps its palette slot.
+    expect(renderRaster([rows[0], 'y = x', rows[1]], 100, 100).px).toEqual(renderRaster([rows[0], 'y = x'], 100, 100).px);
+  });
+});

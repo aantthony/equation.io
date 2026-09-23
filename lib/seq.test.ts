@@ -171,4 +171,11 @@ describe('sequence term references', () => {
     expect(evaluate(resolve('θ_2')!, {})).toBe(4);
     expect(resolve('θ_x')).toBeNull(); // not a literal index
   });
+
+  it('pins the index in the source and resolves once, so Σ up to the index is a number', () => {
+    const sums = new Env([['s', scanSeqRec('s_n = Σ(s=1..n, s)')!], ['b', scanSeqRec('b_n = Σ[n=1..n] n')!]]);
+    const resolveSums = sequenceResolver(sums, () => undefined, {}, new Set<string>());
+    expect(resolveSums('s_5')).toEqual({ kind: 'num', value: 15 });
+    expect(resolveSums('b_4')).toEqual({ kind: 'num', value: 10 });
+  });
 });
