@@ -49,6 +49,7 @@ Examples (paste-ready):
 - [Conformal grid image](https://equation.io/#conformal(w%5E2%2F4)): `conformal(w^2/4)`
 - [Mandelbrot set](https://equation.io/#iter(z%5E2%20%2B%20w)): `iter(z^2 + w)`
 - [Julia set](https://equation.io/#iter(z%5E2%20-%200.7269%20%2B%200.1889i)): `iter(z^2 - 0.7269 + 0.1889i)`
+- [Koch snowflake (recursive function)](https://equation.io/#f(z)%20%3D%20%7Bre(z)%20%3E%3D%201%3A%201%2C%20f(4%20-%203(z%5E6)%5E(1%2F6))%7D;f(x%20i%20-%20%7Cy%7C)%20%3E%3D%200): `f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}; f(x i - |y|) >= 0` — a tail-recursive function shades where its recursion terminates
 - [Vector field](https://equation.io/#(-y%2C%20x)): `(-y, x)` — drawn as animated streamlines
 - [Pendulum phase portrait](https://equation.io/#(x'%2C%20y')%20%3D%20(y%2C%20-sin(x))): `(x', y') = (y, -sin(x))`
 - [Slope field](https://equation.io/#y'%20%3D%20x%20-%20y): `y' = x - y`
@@ -136,6 +137,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   one case a domain restriction: `y = {0 < x < 2: x^2}` plots the parabola
   on (0, 2) only. It works in any row kind — `x^2 + y^2 = {x > 0: 16}` is a
   half circle, `(2cos(u), {sin(u) > 0: 2sin(u)})` cuts a parametric curve.
+  A bare condition is a case worth 1, as in Desmos: `{x > 0, 5}` is
+  `{x > 0: 1, 5}`. Values may be complex (`{x > 0: w, conj(w)}`); the
+  conditions themselves compare real values (`re(w) > 0`, `|w| < 1`).
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
 - Sums and products: `sum(n=1..N, sin(n x)/n)` and `prod(k=1..N, k)`, also
@@ -573,6 +577,16 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   is read as the list of its rows (a named list of 2 points in 2D is a 2×2
   matrix, and `g(S)` maps it like any other point list). A point does not
   spread among other arguments, and built-ins (`atan2(A)`) do not take one.
+- Recursive function: a function may call itself when every self-call is a
+  whole case of its `{…}` (tail position), so the call runs as a loop —
+  per pixel on the GPU, like `iter`. `f(n, a) = {n <= 0: a, f(n - 1, a + n)}`
+  sums 1..n; `f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}` with
+  `f(x i - |y|) >= 0` shades the Koch snowflake. At most 250 passes run;
+  past that, or once a value leaves the finite range, the result is
+  undefined and nothing is drawn — a region shades exactly where the
+  recursion terminates. `n f(n - 1)`, a call inside a condition, and two
+  functions defined through each other are errors (they would need a
+  stack), as is `d/dx` of a recursive function.
 - Point: `A = (0, 0)` — a named, labeled point drawn on the canvas; the user
   can drag it and every row using it follows. Points may be computed from
   other points defined above: `C = B + D`, `M = midpoint(A, B)`,

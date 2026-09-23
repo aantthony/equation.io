@@ -262,17 +262,64 @@ export function condGLSL(cond: Expr, emit: (x: Expr) => string): string {
   return ineqComparisons(cond).map(c => `(${emit(c.l)} ${c.op} ${emit(c.r)})`).join(' && ');
 }
 
-/** Nested-ternary GLSL for a piecewise; NaN outside all cases when no default. */
+/** Nested-ternary GLSL for a piecewise; NaN outside all cases when no default.
+ *  `emitValue` compiles the case values when they are typed differently from
+ *  the (real) condition sides, with `nan` the undefined value of that type. */
 export function piecewiseGLSL(
   e: Expr & { kind: 'piecewise' },
   emit: (x: Expr) => string,
+  emitValue: (x: Expr) => string = emit,
+  nan = 'EQ_NAN',
 ): string {
-  let out = e.otherwise ? emit(e.otherwise) : 'EQ_NAN';
+  let out = e.otherwise ? emitValue(e.otherwise) : nan;
   for (let k = e.cases.length - 1; k >= 0; k--) {
     const c = e.cases[k];
-    out = `((${condGLSL(c.cond, emit)}) ? ${emit(c.value)} : ${out})`;
+    out = `((${condGLSL(c.cond, emit)}) ? ${emitValue(c.value)} : ${out})`;
   }
   return out;
+}
+
+/**
+ * Functions a compiled expression refers to beyond the prelude — a recursive
+ * function's loop — by name. Names hash their own source, so equal loops
+ * share a declaration and a shader's source alone identifies its program.
+ * compileProgram (web/gl.ts) splices the declarations a shader refers to in
+ * after the prelude with withHelpers(); nothing else needs to carry them.
+ */
+const helpers = new Map<string, string>();
+/** Each edit of a recursive function declares a fresh helper; keep the most
+ * recently declared or spliced, well beyond the 64 programs a renderer
+ * caches, so a live shader's helpers are still here when it recompiles. */
+const HELPER_LIMIT = 512;
+const HELPER_NAME = /\beq_loop_[0-9a-f]+\b/g;
+export function declareHelper(source: string): string {
+  // FNV-1a over the source with its own name blanked out.
+  let hash = 0x811c9dc5;
+  for (let k = 0; k < source.length; k++) hash = Math.imul(hash ^ source.charCodeAt(k), 0x01000193);
+  const name = `eq_loop_${(hash >>> 0).toString(16)}`;
+  helpers.delete(name); // re-insert at the recent end
+  helpers.set(name, source.replaceAll(HELPER_SELF, name));
+  while (helpers.size > HELPER_LIMIT) helpers.delete(helpers.keys().next().value!);
+  return name;
+}
+export const HELPER_SELF = '@self';
+export function withHelpers(shader: string): string {
+  if (!shader.includes('eq_loop_')) return shader;
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const visit = (text: string): void => {
+    for (const [name] of text.matchAll(HELPER_NAME)) {
+      if (seen.has(name)) continue;
+      seen.add(name);
+      const source = helpers.get(name);
+      if (!source) throw new Error(`Shader refers to an undeclared helper ${name}.`);
+      helpers.delete(name); helpers.set(name, source); // still in use: keep
+      visit(source); // dependencies (an inner loop) declare first
+      order.push(name);
+    }
+  };
+  visit(shader);
+  return shader.replace(GLSL_PRELUDE, `${GLSL_PRELUDE}\n${order.map(name => helpers.get(name)).join('\n')}\n`);
 }
 
 function fmt(value: number): string {
@@ -350,5 +397,8 @@ export function toGLSL(e: Expr): string {
       throw new Error('Text cannot be plotted — it can only be compared, inside a filter.');
     case 'piecewise':
       return piecewiseGLSL(e, toGLSL);
+    case 'loop':
+      // compileTyped (lib/complex.ts) emits loops; it types the params.
+      throw new Error('A recursive function cannot be used here yet.');
   }
 }

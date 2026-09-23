@@ -1,5 +1,5 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
-import { childrenOf } from './expr.ts';
+import { childrenOf, LOOP_LIMIT, RECUR, isRecur } from './expr.ts';
 import { mapChildren, structuralDiagnostic, legacyCallArgs } from './expr.ts';
 import { exprKey } from './expr.ts';
 /**
@@ -66,7 +66,42 @@ export interface FnDef {
   params: string[];
   /** Fully resolved: no user-function calls or derivative nodes remain. */
   body: Expr;
+  /** The function now being resolved, seen from inside its own body: a call
+   *  becomes a RECUR marker, and the finished body wraps into a loop. */
+  recursive?: boolean;
 }
+
+/**
+ * A body that calls its own function runs as a bounded loop, provided every
+ * self-call is a whole case of the body's {…} (tail position): the call's
+ * arguments are then simply the next pass's parameters. Anything else —
+ * `n f(n - 1)`, a call inside a condition — would need a stack per pixel.
+ */
+function wrapRecursion(name: string, params: string[], body: Expr): Expr {
+  const p = params[0] ?? 'n';
+  const check = (e: Expr, tail: boolean): void => {
+    if (isRecur(e)) {
+      if (!tail) throw new Error(`${name} can only call itself as a whole case of {…}, like ${name}(${p}) = {${p} <= 1: 1, ${name}(${p} - 1)}.`);
+      return;
+    }
+    if (e.kind === 'piecewise' && tail) {
+      for (const c of e.cases) { check(c.cond, false); check(c.value, true); }
+      if (e.otherwise) check(e.otherwise, true);
+      return;
+    }
+    // A loop already inlined here (a call to another recursive function)
+    // owns the markers in its body; only its seeds are this function's.
+    if (e.kind === 'loop') { for (const seed of e.seeds) check(seed, false); return; }
+    for (const child of childrenOf(e)) check(child, false);
+  };
+  check(body, true);
+  return { kind: 'loop', params, seeds: params.map(name => ({ kind: 'var', name })), body, limit: LOOP_LIMIT };
+}
+
+/** Whether `e` calls the function being defined. Markers inside an inlined
+ * loop's body belong to that loop, so only its seeds count. */
+const containsRecur = (e: Expr): boolean => isRecur(e)
+  || (e.kind === 'loop' ? e.seeds.some(containsRecur) : childrenOf(e).some(containsRecur));
 
 export interface StateDef {
   /** da/dt, resolved. Free vars in {t, constants, states}. */
@@ -870,6 +905,8 @@ export function substIdx(e: Expr, idx: string, val: Expr): Expr {
       cases: e.cases.map(c => ({ cond: substIdx(c.cond, idx, val), value: substIdx(c.value, idx, val) })),
       otherwise: e.otherwise && substIdx(e.otherwise, idx, val),
     };
+    // A loop's params rebind inside its body: substitute in the seeds only.
+    case 'loop': return { ...e, seeds: e.seeds.map(a => substIdx(a, idx, val)), body: e.params.includes(idx) ? e.body : substIdx(e.body, idx, val) };
   }
 }
 
@@ -919,6 +956,7 @@ export function foldNums(e: Expr, calls = false): Expr {
       cases: e.cases.map(c => ({ cond: fold(c.cond), value: fold(c.value) })),
       otherwise: e.otherwise && fold(e.otherwise),
     };
+    case 'loop': return mapChildren(e, foldNums);
   }
 }
 
@@ -1147,6 +1185,7 @@ export function usesIntegral(e: Expr): boolean {
     case 'piecewise':
       return e.cases.some(c => usesIntegral(c.cond) || usesIntegral(c.value))
         || (e.otherwise ? usesIntegral(e.otherwise) : false);
+    case 'loop': return childrenOf(e).some(usesIntegral);
   }
 }
 
@@ -1236,6 +1275,13 @@ function rx(e: Expr, ctx: Ctx): Expr {
       const fn = getFn(e.name);
       if (fn) {
         const n = fn.params.length;
+        if (fn.recursive) {
+          // f((a, b)) ≡ f(a, b), as for any other call with a tuple in hand.
+          const splat = args.length === 1 && n >= 2 && args[0].kind === 'vec' ? args[0].items : args;
+          if (args.length === 1 && n >= 2 && args[0].kind === 'vec' && splat.length !== n) throw new Error(compDims(e.name, n, args[0], splat.length));
+          if (splat.length !== n) throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
+          return { kind: 'call', name: RECUR, args: splat };
+        }
         if (args.length === 1 && n >= 2 && args[0].kind !== 'num') {
           // f(P) ≡ f(P_1, …, P_n): one argument that is an n-component point
           // (or a list of them; a plain number is neither, and falls through to
@@ -1310,6 +1356,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
       cases: e.cases.map(c => ({ cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
       otherwise: e.otherwise && rx(e.otherwise, ctx),
     };
+    case 'loop': return mapChildren(e, x => rx(x, ctx));
   }
 }
 
@@ -1376,21 +1423,26 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   /** Derived point component → the point row it belongs to (A_x → A). */
   const compOwner = new Map<string, string>();
 
-  const resolving = new Set<string>();
+  const resolving: string[] = [];
   const getFn: GetFn = name => {
     const hit = defs.fns.get(name);
     if (hit) return hit;
     if (!fnNames.has(name)) return undefined;
     if (errors.has(name)) throw new Error(`${name} has an error in its definition.`);
-    if (resolving.has(name)) throw new Error(`${name} is defined in terms of itself.`);
     const d = byName.get(name) as Definition & { kind: 'fn' };
-    resolving.add(name);
+    if (resolving.includes(name)) {
+      if (resolving[resolving.length - 1] !== name) throw new Error(`${name} and ${resolving[resolving.length - 1]} are defined in terms of each other.`);
+      return { params: d.params, body: { kind: 'call', name: RECUR, args: [] }, recursive: true };
+    }
+    resolving.push(name);
     try {
-      const fn: FnDef = { params: d.params, body: resolveExpr(parse(d), getFn, ropts) };
+      let body = resolveExpr(parse(d), getFn, ropts);
+      if (containsRecur(body)) body = wrapRecursion(name, d.params, body);
+      const fn: FnDef = { params: d.params, body };
       defs.fns.set(name, fn);
       return fn;
     } finally {
-      resolving.delete(name);
+      resolving.pop();
     }
   };
   ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, new Set(raw.map(d => d.name)), new Set(raw.map(d => d.name)), (name, expr) => defs.consts.set(name, expr));

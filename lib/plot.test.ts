@@ -100,7 +100,8 @@ describe('classify', () => {
   it('names what a complex path cannot split, and refuses one too large to sample', () => {
     expect(() => cls('gamma(i u)')).toThrow('gamma is not supported for complex values.');
     expect(() => cls('floor(exp(i u))')).toThrow('floor is not supported for complex values.');
-    expect(() => cls('{u < 0.5: exp(i u), i}')).toThrow('Complex piecewise: wrap values in re(…) or im(…).');
+    expect(cls('{u < 0.5: exp(i u), i}').cpu.type).toBe('pcurve');
+    expect(() => cls('{exp(i u) < 0.5: 1, i}')).toThrow('Complex condition: compare re(…), im(…), or abs(…).');
     // Integer powers stay linear in the exponent…
     expect(cls('(u + i)^16').cpu.type).toBe('pcurve');
     // …but every complex product uses both parts of both factors, so a

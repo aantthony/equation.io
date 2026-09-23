@@ -296,6 +296,7 @@ export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi:
         e.cases.forEach(c => { collectDiscrete(c.cond); collectDiscrete(c.value); });
         if (e.otherwise) collectDiscrete(e.otherwise);
         break;
+      case 'loop': e.seeds.forEach(collectDiscrete); break;
     }
   };
   residuals.forEach(collectDiscrete);
