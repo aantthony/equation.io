@@ -1,13 +1,13 @@
+import { compileCpu, compileGpu } from './compiler.ts';
+import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import {
-  type Definition,
+import { type Definition,
   buildDefs,
   constsAnimated,
-  evalConstEnv,
+
   resolveExpr,
-  scanDefinition,
-} from './defs.ts';
-import { evaluate, gammaFn, parseExpr } from './expr.ts';
+  scanDefinition } from './defs.ts';
+import { evaluate, freeVars, gammaFn, parseExpr, substVars } from './expr.ts';
 import { toGLSL } from './glsl.ts';
 import { classify } from './plot.ts';
 
@@ -59,11 +59,11 @@ describe('grad', () => {
   });
 
   it('plots as a vector field and feeds point helpers', () => {
-    expect(classify(resolve('grad(x^2 + y^2)')).plot.type).toBe('vfield2d');
-    expect(classify(resolve('grad(x y z)')).plot.type).toBe('vfield3d');
+    expect(compileCpu(classify(resolve('grad(x^2 + y^2)'))).type).toBe('vfield2d');
+    expect(compileCpu(classify(resolve('grad(x y z)'))).type).toBe('vfield3d');
     const f = { params: ['x', 'y'], body: parseExpr('sin(x) y') };
     const e = resolveExpr(parseExpr('grad(f(x, y))', new Set(['f'])), n => (n === 'f' ? f : undefined));
-    expect(classify(e).plot.type).toBe('vfield2d');
+    expect(compileCpu(classify(e)).type).toBe('vfield2d');
   });
 
   it('rejects non-scalar or missing arguments', () => {
@@ -191,7 +191,7 @@ describe('Σ sums and Π products', () => {
       { kind: 'const', name: 'S', rhs: 'sum(n=1..N, n)' },
     ]);
     expect(errors.size).toBe(0);
-    expect(evalConstEnv(defs, 0).S).toBe(6);
+    expect(evaluateFrame(defs, 0).S).toBe(6);
     expect([...sumBoundConsts]).toEqual(['N']);
   });
 
@@ -199,6 +199,18 @@ describe('Σ sums and Π products', () => {
     const e = resolveExpr(parseExpr('sum(n=1..2, (-1)^n x)'), noFns);
     expect(toGLSL(e)).not.toContain('eq_pow');
     expect(evaluate(e, { x: 7 })).toBe(0);
+  });
+
+  it('leaves a sum open when its bound is an open variable', () => {
+    const e = resolveExpr(parseExpr('Σ(s=1..n, s)'), noFns, { openVars: new Set(['n']) });
+    expect(e).toMatchObject({ kind: 'call', name: 'sum' });
+    expect(evaluate(e, { n: 4 })).toBe(10);
+    expect([...freeVars(e)]).toEqual(['n']);
+    // Pinning the index expands it, and the summation index stays bound.
+    const pinned = resolveExpr(substVars(e, { n: { kind: 'num', value: 4 } }), noFns);
+    expect(pinned).toEqual({ kind: 'num', value: 10 });
+    expect(() => resolveExpr(parseExpr('sum(k=1..m, k)'), noFns)).toThrow(/constant/);
+    expect(() => resolveExpr(parseExpr('sum(k=1..x, k)'), noFns)).toThrow(/cannot depend on x/);
   });
 
   it('rejects bad bounds and bodyless headers', () => {
@@ -218,7 +230,7 @@ describe('buildDefs', () => {
   it('resolves constants that depend on each other and t', () => {
     const { defs, errors } = buildDefs([cdef('a', '2'), cdef('b', 'a^2 + t')]);
     expect(errors.size).toBe(0);
-    expect(evalConstEnv(defs, 3)).toEqual({ a: 2, b: 7 });
+    expect(evaluateFrame(defs, 3)).toEqual({ a: 2, b: 7 });
     expect(constsAnimated(defs)).toBe(true);
   });
 
@@ -279,8 +291,8 @@ describe('classify with defined constants', () => {
   it('turns constants into u_ uniforms and reports them as params', () => {
     const cls = classify(resolve('y = a x^2'), new Set(['a']));
     expect(cls.params).toEqual(['a']);
-    expect(cls.plot).toMatchObject({ type: 'implicit2d' });
-    expect((cls.plot as { field: string }).field).toContain('u_a');
+    expect(compileCpu(cls)).toMatchObject({ type: 'implicit2d' });
+    expect((compileGpu(cls) as { field: string }).field).toContain('u_a');
   });
 
   it('suggests a slider for unknown single names', () => {
@@ -291,7 +303,7 @@ describe('classify with defined constants', () => {
   it('keeps original names for CPU-evaluated plots', () => {
     const cls = classify(resolve('(a, 2a)'), new Set(['a']));
     expect(cls.params).toEqual(['a']);
-    const plot = cls.plot as { type: 'point'; coords: import('./expr.ts').Expr[] };
+    const plot = compileCpu(cls) as { type: 'point'; coords: import('./expr.ts').Expr[] };
     expect(plot.type).toBe('point');
     expect(evaluate(plot.coords[1], { a: 3 })).toBe(6);
   });
@@ -310,7 +322,7 @@ describe('unicode names in definitions', () => {
     expect(scanDefinition('f(x₁) = x₁²')).toEqual({ kind: 'fn', name: 'f', params: ['x_1'], rhs: ' x₁²' });
     // Both spellings resolve to the one definition.
     const { defs } = buildDefs([scanDefinition('T₀ = 300')].filter((d): d is Definition => !!d));
-    expect(evaluate(resolveExpr(parseExpr('T₀ + T_0'), noFns), evalConstEnv(defs))).toBe(600);
+    expect(evaluate(resolveExpr(parseExpr('T₀ + T_0'), noFns), evaluateFrame(defs))).toBe(600);
     // u₂ is u_2, a uniform-reserved name, so it stays undefinable.
     expect(scanDefinition('u₂ = 3')).toBeNull();
   });
@@ -326,13 +338,13 @@ describe('unicode names in definitions', () => {
     ].filter((d): d is Definition => !!d));
     expect(errors.size).toBe(0);
     const e = resolveExpr(parseExpr('g(3)', new Set(['g'])), n => defs.fns.get(n));
-    expect(evaluate(e, evalConstEnv(defs))).toBe(13);
+    expect(evaluate(e, evaluateFrame(defs))).toBe(13);
   });
 
   it('compiles Greek slider names to valid GLSL uniforms', () => {
     const cls = classify(resolve('y = θ x'), new Set(['θ']));
     expect(cls.params).toEqual(['θ']);
-    const field = (cls.plot as { field: string }).field;
+    const field = (compileGpu(cls) as { field: string }).field;
     expect(field).not.toContain('θ');
     expect(field).toContain('u_zz3b8');
   });

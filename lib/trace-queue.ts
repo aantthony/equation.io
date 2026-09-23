@@ -1,16 +1,18 @@
+import { type Env } from './env.ts';
+import { exprKey } from './expr.ts';
 import type { Expr } from './expr.ts';
-import { type Defs, animatedConstNames, definitionDependencies } from './defs.ts';
+import { animatedConstNames, definitionDependencies } from './defs.ts';
 
 /** Separate moving values from the definitions and fixed inputs of a trace.
  * Completed geometry may lag time/state changes, but never edits or sliders. */
-export function traceEnvironment(params: readonly string[], animated: boolean, defs: Defs) {
+export function traceEnvironment(params: readonly string[], animated: boolean, defs: Env) {
   const moving = new Set([...animatedConstNames(defs), ...defs.states.keys(), 't']);
   const names = [...definitionDependencies(params, defs)];
   const fixed = names.filter(n => !moving.has(n));
-  const definitions = JSON.stringify(names.map(n => [n, defs.consts.get(n), defs.states.get(n)]));
+  const definitions = exprKey(names.map(n => [n, defs.consts.get(n), defs.states.get(n)]));
   return (env: Record<string, number>, time: number) => ({
-    env: JSON.stringify([definitions, params.map(n => env[n] ?? 0), animated ? time : null]),
-    stableEnv: JSON.stringify([definitions, fixed.map(n => env[n] ?? 0)]),
+    env: exprKey([definitions, params.map(n => env[n] ?? 0), animated ? time : null]),
+    stableEnv: exprKey([definitions, fixed.map(n => env[n] ?? 0)]),
   });
 }
 

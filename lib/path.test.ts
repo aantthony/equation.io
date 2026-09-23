@@ -1,3 +1,4 @@
+import { compileCpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { evaluate, parseExpr } from './expr.ts';
 import { CURVE_SAMPLES, PATH_NODE_BUDGET, pathSampler, samplePath } from './path.ts';
@@ -6,8 +7,8 @@ import { classify } from './plot.ts';
 
 const comps = (s: string) => {
   const plot = classify(parseExpr(s), new Set(['a']));
-  if (plot.plot.type !== 'pcurve') throw new Error(`not a path: ${plot.plot.type}`);
-  return plot.plot.comps;
+  if (compileCpu(plot).type !== 'pcurve') throw new Error(`not a path: ${compileCpu(plot).type}`);
+  return compileCpu(plot).comps;
 };
 const breaks = (pts: number[]) => pts.filter(Number.isNaN).length / 2;
 
@@ -87,7 +88,7 @@ describe('samplePath', () => {
 
 describe('pathSampler', () => {
   const real = (s: string) => {
-    const plot = classify(parseExpr(s)).plot;
+    const plot = compileCpu(classify(parseExpr(s)));
     if (plot.type !== 'pcurve') throw new Error('not a curve');
     return pathSampler(plot.comps).sample({});
   };

@@ -27,7 +27,7 @@ function P(sys: RVSystem, names: string[], body: string) {
   if (!single && spec.inline) {
     const { e, ...bounds } = spec.inline;
     const name = `@R${anon++}`;
-    sys.add({ name, kind: 'derived', expr: e });
+    sys.addAnonymous({ name, kind: 'derived', expr: e });
     single = { rv: name, ...bounds };
   }
   return sys.eventProbability(spec.body, single, {});

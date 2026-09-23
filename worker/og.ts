@@ -12,12 +12,12 @@ import { traceIntersection } from '../lib/intersection.ts';
 import { traceField } from '../lib/flow.ts';
 import { type PmfStems, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
-import { type Expr, evaluate, freeVars, substVars } from '../lib/expr.ts';
+import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { hullFaces } from '../lib/hull.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler } from '../lib/path.ts';
-import type { Plot } from '../lib/plot.ts';
+import type { PublicKind } from '../lib/math-object.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
@@ -227,22 +227,6 @@ function compileFor(env: EvalEnv, e: Expr): Prog {
   return p;
 }
 
-const ineqDiff = (op: string, l: Expr, r: Expr): Expr =>
-  op[0] === '<'
-    ? { kind: 'bin', op: '-', a: l, b: r }
-    : { kind: 'bin', op: '-', a: r, b: l };
-
-/** Flatten a left-nested inequality chain into normalized F<0 parts. */
-function ineqParts(e: Expr & { kind: 'ineq' }): { field: Expr; edge: boolean }[] {
-  const chain: Array<Expr & { kind: 'ineq' }> = [];
-  let node: Expr = e;
-  while (node.kind === 'ineq') { chain.unshift(node); node = node.l; }
-  return chain.map((c, k) => ({
-    field: ineqDiff(c.op, k === 0 ? c.l : chain[k - 1].r, c.r),
-    edge: c.op.length === 2,
-  }));
-}
-
 // --- 3D projection ---
 
 // Matches the app's default camera (web/main.ts): angles, and radius 14
@@ -303,29 +287,18 @@ function polyline3D(
 
 // --- per-row renderers ---
 
-const zVar = (e: Expr) => e.kind === 'var' && e.name === 'z';
-
-/** The g of a z = g(x, y) equation (either side), or null when not that form. */
-function heightmapExpr(expr: Expr): Expr | null {
-  if (expr.kind !== 'eq') return null;
-  const g = zVar(expr.l) ? expr.r : zVar(expr.r) ? expr.l : null;
-  // A height that itself uses z — `z = rho cos(phi)` once the spherical
-  // fields substitute in — is a general implicit surface, not a heightmap.
-  return g && !freeVars(g).has('z') ? g : null;
-}
-
 function renderRow2D(
   r: Raster, v: View2D, row: RowInfo, env: EvalEnv, color: [number, number, number], analysis: Analysis,
 ) {
-  const { cls, expr } = row;
-  if (!cls) return;
+  const { cls, cpu } = row;
+  if (!cls || !cpu) return;
   const compile = (e: Expr) => compileFor(env, e);
-  if (cls.plot.type === 'value') {
+  if (cpu.type === 'value') {
     // A definite-integral row shades the area it measures (the app's case
     // 'value'): parts adding to the value in the row color, parts subtracting
     // in its complement. Any other readout draws nothing, as in the app.
-    if (!cls.plot.shade) return;
-    const shade = cls.plot.shade;
+    if (!cpu.shade) return;
+    const shade = cpu.shade;
     const halfW = (r.w / 2) * v.upp;
     const halfH = (r.h / 2) * (v.upp / (v.ratio ?? 1));
     const sampler = compileSampler(shade.body, shade.v, shadeNames(shade)) ?? evalSampler(shade);
@@ -350,11 +323,11 @@ function renderRow2D(
     }
     return;
   }
-  if (cls.plot.type === 'pmf' || (cls.plot.type === 'prob' && cls.plot.shade && analysis.rvs.isDiscreteVar(cls.plot.shade.rv))) {
+  if (cpu.type === 'pmf' || (cpu.type === 'prob' && cpu.shade && analysis.rvs.isDiscreteVar(cpu.shade.rv))) {
     // A discrete variable's stems, or the ones a P(…) row selects (a band
     // in the row's color) — the app's cases 'pmf' and 'prob'.
-    const shade = cls.plot.type === 'prob' ? cls.plot.shade! : undefined;
-    const name = cls.plot.type === 'pmf' ? cls.plot.rv : shade!.rv;
+    const shade = cpu.type === 'prob' ? cpu.shade! : undefined;
+    const name = cpu.type === 'pmf' ? cpu.rv : shade!.rv;
     const halfW = (r.w / 2) * v.upp;
     let runs: PmfStems[] | null;
     try {
@@ -393,15 +366,15 @@ function renderRow2D(
     }
     return;
   }
-  if (cls.plot.type === 'density' || cls.plot.type === 'prob') {
+  if (cpu.type === 'density' || cpu.type === 'prob') {
     // Sampled-density rows: the same estimator the app uses (lib/dist.ts),
     // drawn as a polyline (density) or a filled area under it (P(…)).
-    const shade = cls.plot.type === 'prob' ? cls.plot.shade : undefined;
-    if (cls.plot.type === 'prob' && !shade) return; // readout-only row
-    const name = cls.plot.type === 'density' ? cls.plot.rv : shade!.rv;
+    const shade = cpu.type === 'prob' ? cpu.shade : undefined;
+    if (cpu.type === 'prob' && !shade) return; // readout-only row
+    const name = cpu.type === 'density' ? cpu.rv : shade!.rv;
     const curve = analysis.rvs.curve(name, analysis.constEnv);
     if (!curve) return;
-    if (cls.plot.type === 'density') {
+    if (cpu.type === 'density') {
       // Point masses draw as probability stems (height = mass, not density).
       for (const a of curve.atoms ?? []) {
         const ax = toScreenX(r, v, a.x);
@@ -428,10 +401,10 @@ function renderRow2D(
     if (shade) drawLine(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);
     return;
   }
-  if (cls.plot.type === 'expect') {
+  if (cpu.type === 'expect') {
     // The mean marker the app draws: a stem from the axis to the density at
     // x = E, capped with a dot (web/main.ts case 'expect').
-    const name = cls.plot.rv;
+    const name = cpu.rv;
     // Where and how high is lib's rule (markerHeight), shared with the app.
     let mark: ReturnType<typeof markerHeight>;
     try {
@@ -445,13 +418,11 @@ function renderRow2D(
     drawDisc(r, mx, toScreenY(r, v, mark.h), 3.5, color);
     return;
   }
-  if (cls.plot.type === 'cobweb') {
+  if (cpu.type === 'cobweb') {
     // A recurrence a_{n+1} = f(a_n) draws the same three pieces as the app
     // (web/main.ts): the map's curve y = f(x), the y = x diagonal the orbit
-    // reflects off, and the iterated path from the seed. Classification
-    // leaves row.expr unset for sequence-family rows — the recurrence lives
-    // in cls.plot.f — so this runs before the expr guard below.
-    const { f, recVar, a0Name } = cls.plot;
+    // reflects off, and the iterated path from the CPU recurrence plan.
+    const { f, recVar, a0Name } = cpu;
     const fx = substVars(f, { [recVar]: { kind: 'var', name: 'x' } });
     strokeZeroSet(r, sampleField(r, v, compile({ kind: 'bin', op: '-', a: { kind: 'var', name: 'y' }, b: fx }), env), color);
     // y = x across the visible window, lighter than the axes.
@@ -477,18 +448,13 @@ function renderRow2D(
     drawDisc(r, toScreenX(r, v, seed), toScreenY(r, v, seed), 3.5, color);
     return;
   }
-  if (!expr) return;
-  switch (cls.plot.type) {
+  switch (cpu.type) {
     case 'implicit2d': {
-      const f: Expr = expr.kind === 'eq'
-        ? { kind: 'bin', op: '-', a: expr.l, b: expr.r }
-        : { kind: 'bin', op: '-', a: { kind: 'var', name: 'y' }, b: expr };
-      strokeZeroSet(r, sampleField(r, v, compile(f), env), color);
+      strokeZeroSet(r, sampleField(r, v, compile(cpu.residual), env), color);
       return;
     }
     case 'ineq2d': {
-      if (expr.kind !== 'ineq') return;
-      const parts = ineqParts(expr);
+      const parts = cpu.constraints.map(c => ({ field: c.residual, edge: !c.strict }));
       let combined = parts[0].field;
       for (let k = 1; k < parts.length; k++) {
         combined = { kind: 'call', name: 'max', args: [combined, parts[k].field] };
@@ -500,16 +466,16 @@ function renderRow2D(
       return;
     }
     case 'scalar2d':
-      shadeScalar(r, sampleField(r, v, compile(expr), env), color);
+      shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color);
       return;
     case 'point': {
-      if (cls.plot.dim !== 2) return;
-      const [px, py] = cls.plot.coords.map(c2 => run(compile(c2), env.vars, env.stack));
+      if (cpu.dim !== 2) return;
+      const [px, py] = cpu.coords.map(c2 => run(compile(c2), env.vars, env.stack));
       drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), 4.5, color);
       return;
     }
     case 'system': {
-      const plot = cls.plot;
+      const plot = cpu;
       if (plot.dim !== 2) return;
       const lo = [v.cx - r.w * v.upp / 2, v.cy - r.h * (v.upp / (v.ratio ?? 1)) / 2];
       const hi = [v.cx + r.w * v.upp / 2, v.cy + r.h * (v.upp / (v.ratio ?? 1)) / 2];
@@ -529,7 +495,7 @@ function renderRow2D(
       return;
     }
     case 'vfield2d': {
-      const progs = cls.plot.comps.map(compile);
+      const progs = cpu.comps.map(compile);
       for (let sy = 12; sy < r.h; sy += 22) for (let sx = 12; sx < r.w; sx += 22) {
         env.vars[env.slotX] = v.cx + (sx - r.w / 2) * v.upp;
         env.vars[env.slotY] = v.cy - (sy - r.h / 2) * (v.upp / (v.ratio ?? 1));
@@ -543,10 +509,10 @@ function renderRow2D(
       return;
     }
     case 'pcurve': {
-      if (cls.plot.dim !== 2) return;
+      if (cpu.dim !== 2) return;
       // Sampled as the app samples it (lib/path.ts), pen up at the jumps. A
       // complex path is not a vec row: its components are the split parts.
-      const pts = pathSampler(cls.plot.comps).sample({ ...analysis.constEnv, t: 0 });
+      const pts = pathSampler(cpu.comps).sample({ ...analysis.constEnv, t: 0 });
       let last: [number, number] | null = null;
       for (let i = 0; i + 1 < pts.length; i += 2) {
         if (!Number.isFinite(pts[i]) || !Number.isFinite(pts[i + 1])) { last = null; continue; }
@@ -559,15 +525,15 @@ function renderRow2D(
     case 'polygon': {
       // Flat scalar vertex list [x0, y0, x1, y1, …], constant by
       // classification; like the app, a single non-finite vertex drops the row.
-      const given = cls.plot.pts.map(p => run(compile(p), env.vars, env.stack));
+      const given = cpu.pts.map(p => run(compile(p), env.vars, env.stack));
       if (given.length < 4 || !given.every(Number.isFinite)) return;
-      const vals = cls.plot.hull ? hullFaces(given, 2)[0].outline.flatMap(p => [p[0], p[1]]) : given;
+      const vals = cpu.hull ? hullFaces(given, 2)[0].outline.flatMap(p => [p[0], p[1]]) : given;
       const sx: number[] = [], sy: number[] = [];
       for (let i = 0; i + 1 < vals.length; i += 2) {
         sx.push(toScreenX(r, v, vals[i]));
         sy.push(toScreenY(r, v, vals[i + 1]));
       }
-      const { closed, arrow } = cls.plot;
+      const { closed, arrow } = cpu;
       if (closed) fillPolygon(r, sx, sy, color, 0.16);
       // vector(): a solid head at the last vertex, fixed in pixels like the
       // app's; the shaft stops inside it so the tip stays sharp.
@@ -591,14 +557,13 @@ function renderRow2D(
 }
 
 function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [number, number, number]) {
-  const { cls, expr } = row;
-  if (!cls || !expr) return;
+  const { cls, cpu } = row;
+  if (!cls || !cpu) return;
   const compile = (e: Expr) => compileFor(env, e);
   const slotU = env.slots.get('u')!, slotV = env.slots.get('v')!;
-  switch (cls.plot.type) {
+  switch (cpu.type) {
     case 'psurface': {
-      if (expr.kind !== 'vec') return;
-      const progs = expr.items.map(compile);
+      const progs = cpu.comps.map(compile);
       const at = (): [number, number, number] =>
         [run(progs[0], env.vars, env.stack), run(progs[1], env.vars, env.stack), run(progs[2], env.vars, env.stack)];
       const LINES = 16, SEGS = 64;
@@ -615,7 +580,7 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       return;
     }
     case 'system': {
-      const p = cls.plot;
+      const p = cpu;
       const radius = Math.max(r.w, r.h) / (2 * v.scale);
       const vars = p.dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'];
       const lo = v.target.slice(0, p.dim).map(c => c - radius);
@@ -638,13 +603,13 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       const radius = Math.max(r.w, r.h) / (2 * v.scale);
       const lo = v.target.map(c => c - radius), hi = v.target.map(c => c + radius);
       const values = Object.fromEntries([...env.slots].map(([name, slot]) => [name, env.vars[slot]]));
-      for (const path of (cls.plot.type === 'spacecurve' ? traceIntersection(cls.plot.residuals, lo, hi, values) : traceField(cls.plot.comps, lo, hi, values))) {
+      for (const path of (cpu.type === 'spacecurve' ? traceIntersection(cpu.residuals, lo, hi, values) : traceField(cpu.comps, lo, hi, values))) {
         polyline3D(r, v, color, path.length - 1, i => path[i] as [number, number, number]);
       }
       return;
     }
     case 'polygon': {
-      const p = cls.plot, dim = p.dim ?? 2;
+      const p = cpu, dim = p.dim ?? 2;
       const vals = p.pts.map(e => run(compile(e), env.vars, env.stack));
       if (!vals.every(Number.isFinite)) return;
       if (p.hull) {
@@ -684,8 +649,8 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       return;
     }
     case 'pcurve': {
-      if (expr.kind !== 'vec' || cls.plot.dim !== 3) return;
-      const progs = expr.items.map(compile);
+      if (cpu.dim !== 3) return;
+      const progs = cpu.comps.map(compile);
       polyline3D(r, v, color, 800, i => {
         env.vars[slotU] = i / 800;
         return [run(progs[0], env.vars, env.stack), run(progs[1], env.vars, env.stack), run(progs[2], env.vars, env.stack)];
@@ -693,8 +658,8 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       return;
     }
     case 'point': {
-      if (expr.kind !== 'vec') return;
-      const p = expr.items.map(c2 => run(compile(c2), env.vars, env.stack)) as [number, number, number];
+      if (cpu.dim !== 3) return;
+      const p = cpu.coords.map(c2 => run(compile(c2), env.vars, env.stack)) as [number, number, number];
       const [sx, sy] = project(v, p);
       drawDisc(r, sx, sy, 4.5, color);
       return;
@@ -703,7 +668,7 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       // Only the z = f(x, y) heightmap form draws (as a wireframe); general
       // implicit surfaces would need a raymarcher, too slow on CPU here.
       // previewGap() reports this gap to callers — keep them in sync.
-      const g = heightmapExpr(expr);
+      const g = cpu.heightmap;
       if (!g) return;
       let prog: Prog;
       try { prog = compile(g); } catch { return; }
@@ -730,7 +695,7 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
  *
  * It is a second, CPU-only backend for the same lib/ classifier the GPU app
  * uses, so it necessarily lags. Typing this as a total Record over
- * Plot['type'] means adding a plot family to lib/plot.ts FAILS TO COMPILE
+ * PublicKind means adding a plot family to lib/plot.ts FAILS TO COMPILE
  * until it is classified here — the drift cannot be silent, and tsc catches a
  * stale entry too.
  *
@@ -738,7 +703,7 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
  * as "this graph is broken" — worse than no preview at all. Callers use
  * canRenderOg() and fall back to the site's static card instead.
  */
-export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
+export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   spacecurve: 'draws',
   note: 'draws',
   family: 'draws',
@@ -806,15 +771,14 @@ export const OG_COVERAGE: Record<Plot['type'], 'draws' | 'fallback'> = {
  * does with the row, and never implies the row itself is broken.
  */
 export function previewGap(row: RowInfo, needs3D: boolean): string | null {
-  // Sequence-family rows classify without a resolved expr — judge them by
-  // type alone; only the implicit3d heightmap probe below needs the expr.
-  const { cls, expr } = row;
-  if (!cls) return null;
-  if (cls.plot.type === 'family') {
-    for (const m of cls.plot.members) { const gap = previewGap({ ...row, cls: m.cls, expr: m.expr }, needs3D); if (gap) return gap; }
+  // Preview coverage is determined by the CPU plan, without shader compilation.
+  const { cls, cpu } = row;
+  if (!cls || !cpu) return null;
+  if (cpu.type === 'family') {
+    for (const m of cpu.members) { const gap = previewGap({ ...row, cls: m.cls, cpu: m.cpu }, needs3D); if (gap) return gap; }
     return null;
   }
-  const type = cls.plot.type;
+  const type = cpu.type;
   if (type === 'trail') return 'trail(point) accumulates live motion history; no static preview is available';
   if (!needs3D) {
     return OG_COVERAGE[type] === 'draws'
@@ -829,12 +793,12 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
     case 'spacecurve':
       return null;
     case 'implicit3d':
-      return expr && heightmapExpr(expr)
+      return cpu.type === 'implicit3d' && cpu.heightmap
         ? null
         : 'the static preview draws only z = f(x, y) surfaces; the live app renders general implicit surfaces in full';
     case 'pcurve':
     case 'point':
-      return cls.plot.dim === 3
+      return cpu.dim === 3
         ? null
         : 'the static preview skips 2D rows in a 3D scene; the live app draws them on the z = 0 plane';
     case 'system':
@@ -857,11 +821,14 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
 export function canRenderOg(texts: string[]): boolean {
   let analysis: Analysis;
   try {
-    analysis = analyze(texts, { readouts: false }); // drawn, not read out: see AnalyzeOpts
+    analysis = analyze(texts, { readouts: false, backend: 'cpu' }); // drawn, not read out: see AnalyzeOpts
   } catch {
     return false;
   }
-  const plots = analysis.rows.filter(r => r.cls);
+  // A row whose CPU plan failed to compile keeps its object with an error
+  // and no plan: it is not a plot this renderer can draw (nor one whose
+  // dimension should pick the scene), exactly as an unclassifiable row.
+  const plots = analysis.rows.filter(r => r.cls && r.cpu);
   if (!plots.length) return false;
   const needs3D = plots.some(r => r.cls!.needs3D);
   return plots.every(r => previewGap(r, needs3D) === null);
@@ -872,17 +839,16 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
   const raster: Raster = { w, h, px: new Uint8ClampedArray(w * h * 3).fill(255) };
   let analysis: Analysis;
   try {
-    analysis = analyze(texts, { readouts: false }); // drawn, not read out: see AnalyzeOpts
+    analysis = analyze(texts, { readouts: false, backend: 'cpu' }); // drawn, not read out: see AnalyzeOpts
   } catch {
     return raster;
   }
   const env = makeEnv(analysis.constEnv);
   const parents = new Map<RowInfo, RowInfo>();
-  const plotRows = analysis.rows.filter(r => r.cls).slice(0, MAX_PLOTS).flatMap(row => {
-    if (row.cls!.plot.type !== 'family') return [row];
-    return row.cls!.plot.members.map(m => { const child = { ...row, cls: m.cls, expr: m.expr }; parents.set(child, row); return child; });
+  const plotRows = analysis.rows.filter(r => r.cls && r.cpu).slice(0, MAX_PLOTS).flatMap(row => {
+    if (row.cpu!.type !== 'family') return [row];
+    return row.cpu!.members.map(m => { const child = { ...row, cls: m.cls, cpu: m.cpu }; parents.set(child, row); return child; });
   });
-  const envOf = (row: RowInfo) => row.cls?.uniforms ? makeEnv({ ...analysis.constEnv, ...row.cls.uniforms }) : env;
   const needs3D = plotRows.some(r => r.cls!.needs3D);
 
   // Honor viewport rows: the author's framing is document state, so the
@@ -907,14 +873,14 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
       : { scale: h / RADIUS, ox: w / 2, oy: h / 2 + h / RADIUS, theta: THETA, phi: PHI, target: [0, 0, 0] };
     drawGrid3D(raster, view);
     for (const row of plotRows) {
-      try { renderRow3D(raster, view, row, envOf(row), colorOf(row)); } catch { /* skip row */ }
+      try { renderRow3D(raster, view, row, env, colorOf(row)); } catch { /* skip row */ }
     }
   } else {
     const box = spec('view');
     const view: View2D = box?.kind === 'view' ? fitView2D(box, w, h) : { cx: 0, cy: 0, upp: 12 / h };
     drawGrid2D(raster, view);
     for (const row of plotRows) {
-      try { renderRow2D(raster, view, row, envOf(row), colorOf(row), analysis); } catch { /* skip row */ }
+      try { renderRow2D(raster, view, row, env, colorOf(row), analysis); } catch { /* skip row */ }
     }
   }
   return raster;

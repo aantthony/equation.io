@@ -28,7 +28,8 @@ describe('uniform parameterization (slider moves must not change compiled output
       const a = compileRows(item.rows(1.25));
       const b = compileRows(item.rows(2.5));
       expect(a.errors).toEqual([]);
-      expect(JSON.stringify(a.classified)).toBe(JSON.stringify(b.classified));
+      expect(JSON.stringify(a.gpu)).toBe(JSON.stringify(b.gpu));
+      expect(JSON.stringify(a.cpu)).toBe(JSON.stringify(b.cpu));
       expect(JSON.stringify(a.gridFields.map(g => ({ ...g, expr: null, grad: null }))))
         .toBe(JSON.stringify(b.gridFields.map(g => ({ ...g, expr: null, grad: null }))));
     });
@@ -107,11 +108,11 @@ describe('compiled size budgets', () => {
   };
 
   const glslOf = (rows: string[]): string => {
-    const { classified, gridFields } = compileRows(rows);
+    const { gpu, gridFields } = compileRows(rows);
     const parts: string[] = [];
-    for (const c of classified) {
+    for (const c of gpu) {
       // Collect every string field of the plot — they are all GLSL or labels.
-      for (const v of Object.values(c.plot)) {
+      for (const v of Object.values(c)) {
         if (typeof v === 'string') parts.push(v);
         if (Array.isArray(v)) for (const s of v) if (typeof s === 'string') parts.push(s);
       }

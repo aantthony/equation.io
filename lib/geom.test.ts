@@ -1,5 +1,7 @@
+import { compileCpu } from './compiler.ts';
+import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { type Definition, buildDefs, evalConstEnv, scanDefinition } from './defs.ts';
+import { type Definition, buildDefs,  scanDefinition } from './defs.ts';
 import { diff } from './diff.ts';
 import { angleFn, evaluate, parseExpr } from './expr.ts';
 import { arrowHead, lowerGeom } from './geom.ts';
@@ -70,8 +72,8 @@ describe('point arithmetic lowering', () => {
   });
 
   it('leaves vector fields and ODE systems untouched', () => {
-    expect(classify(low('(-y, x)')).plot.type).toBe('vfield2d');
-    expect(classify(low("(x', y') = (y, -sin(x))")).plot.type).toBe('vfield2d');
+    expect(compileCpu(classify(low('(-y, x)'))).type).toBe('vfield2d');
+    expect(compileCpu(classify(low("(x', y') = (y, -sin(x))"))).type).toBe('vfield2d');
   });
 
   it('rejects invalid point algebra with clear errors', () => {
@@ -199,11 +201,11 @@ describe('distance and angle measurements', () => {
     expect(evalAt('distance(A, B)^2 + sin(angle((1, 0), (0, 1)))')).toBeCloseTo(26, 12);
     const at = (s: string) => (low(s) as { items: [never, never] }).items.map(e => evaluate(e, env));
     expect(at('A + distance(A, B) unit(B - A)')).toEqual([4, 6]);
-    expect(classify(low('distance(A, B)'), new Set(Object.keys(env))).plot.type).toBe('value');
-    expect(classify(low('angle(A, B, C)'), new Set(Object.keys(env))).plot.type).toBe('value');
-    expect(classify(low('y = distance(A, B) sin(x + angle(A, B, C))'), new Set(Object.keys(env))).plot.type).toBe('implicit2d');
-    expect(classify(low('circle(A, distance(A, B))'), new Set(Object.keys(env))).plot.type).toBe('implicit2d');
-    expect(classify(low('distance((x, y), A) + distance((x, y), B) = 6'), new Set(Object.keys(env))).plot.type).toBe('implicit2d');
+    expect(compileCpu(classify(low('distance(A, B)'), new Set(Object.keys(env)))).type).toBe('value');
+    expect(compileCpu(classify(low('angle(A, B, C)'), new Set(Object.keys(env)))).type).toBe('value');
+    expect(compileCpu(classify(low('y = distance(A, B) sin(x + angle(A, B, C))'), new Set(Object.keys(env)))).type).toBe('implicit2d');
+    expect(compileCpu(classify(low('circle(A, distance(A, B))'), new Set(Object.keys(env)))).type).toBe('implicit2d');
+    expect(compileCpu(classify(low('distance((x, y), A) + distance((x, y), B) = 6'), new Set(Object.keys(env)))).type).toBe('implicit2d');
     expect(classify(low('distance((cos(t), sin(t)), A)'), new Set(Object.keys(env))).animated).toBe(true);
   });
 
@@ -250,32 +252,32 @@ describe('distance and angle measurements', () => {
 describe('geometry statements', () => {
   it('segment and polygon desugar to CPU polygon plots', () => {
     const seg = classify(low('segment(A, B)'), new Set(Object.keys(env)));
-    expect(seg.plot).toMatchObject({ type: 'polygon', closed: false });
-    expect((seg.plot as { pts: never[] }).pts).toHaveLength(4);
+    expect(compileCpu(seg)).toMatchObject({ type: 'polygon', closed: false });
+    expect((compileCpu(seg) as { pts: never[] }).pts).toHaveLength(4);
 
     const poly = classify(low('polygon(A, B, C)'), new Set(Object.keys(env)));
-    expect(poly.plot).toMatchObject({ type: 'polygon', closed: true });
-    expect((poly.plot as { pts: never[] }).pts).toHaveLength(6);
+    expect(compileCpu(poly)).toMatchObject({ type: 'polygon', closed: true });
+    expect((compileCpu(poly) as { pts: never[] }).pts).toHaveLength(6);
   });
 
   it('polyline is the open figure through any number of points', () => {
-    const c = classify(low('polyline((0, 0), (1, 1), (2, 0))'), new Set()).plot;
+    const c = compileCpu(classify(low('polyline((0, 0), (1, 1), (2, 0))'), new Set()));
     expect(c).toMatchObject({ type: 'polygon', closed: false });
     expect(c).not.toHaveProperty('arrow');
     expect((c as { pts: never[] }).pts.map(e => evaluate(e, {}))).toEqual([0, 0, 1, 1, 2, 0]);
     // Named points and point arithmetic mix with literals; n = 2 is a segment.
-    const mixed = classify(low('polyline(A, (A + B)/2, (0, 0), C)'), new Set(Object.keys(env))).plot as { pts: never[] };
+    const mixed = compileCpu(classify(low('polyline(A, (A + B)/2, (0, 0), C)'), new Set(Object.keys(env)))) as { pts: never[] };
     expect(mixed.pts.map(e => evaluate(e, env))).toEqual([1, 2, 2.5, 4, 0, 0, -1, 0]);
-    expect((classify(low('polyline(A, B)'), new Set(Object.keys(env))).plot as { pts: never[] }).pts).toHaveLength(4);
+    expect((compileCpu(classify(low('polyline(A, B)'), new Set(Object.keys(env)))) as { pts: never[] }).pts).toHaveLength(4);
   });
 
   it('vector is an arrow from A to B, or from the origin', () => {
-    const ab = classify(low('vector(A, B)'), new Set(Object.keys(env))).plot;
+    const ab = compileCpu(classify(low('vector(A, B)'), new Set(Object.keys(env))));
     expect(ab).toMatchObject({ type: 'polygon', closed: false, arrow: true });
     expect((ab as { pts: never[] }).pts.map(e => evaluate(e, env))).toEqual([1, 2, 4, 6]);
-    const v = classify(low('vector((1, 2))'), new Set()).plot as { pts: never[] };
+    const v = compileCpu(classify(low('vector((1, 2))'), new Set())) as { pts: never[] };
     expect(v.pts.map(e => evaluate(e, {}))).toEqual([0, 0, 1, 2]);
-    const sum = classify(low('vector(A, A + 2B)'), new Set(Object.keys(env))).plot as { pts: never[] };
+    const sum = compileCpu(classify(low('vector(A, A + 2B)'), new Set(Object.keys(env)))) as { pts: never[] };
     expect(sum.pts.map(e => evaluate(e, env))).toEqual([1, 2, 9, 14]);
     // A pair of points is still not a value: the wrapper has to be asked for.
     expect(() => low('(A, B)')).toThrow(/segment\(A, B\)/);
@@ -290,7 +292,7 @@ describe('geometry statements', () => {
       expect(() => low(row)).toThrow(/vector takes/);
     }
     expect(classify(low('vector((1, 2, 3))')).needs3D).toBe(true);
-    expect(classify(low('vector((1, 2, 3), (4, 5, 6))')).plot.type).toBe('polygon');
+    expect(compileCpu(classify(low('vector((1, 2, 3), (4, 5, 6))'))).type).toBe('polygon');
     // A named list of points (or a 2×2 one, which reads as a matrix) is a list too.
     const lowL = (s: string) => lowerGeom(parseExpr(s), isPt, n => (n === 'M' ? [[parseExpr('1')]] : null) as never, n => n === 'L');
     expect(() => lowL('polyline(L)')).toThrow(/one by one for now.*not as a list/);
@@ -305,7 +307,7 @@ describe('geometry statements', () => {
     // A call that merely shares a name with an inherited property is not a figure.
     for (const name of ['constructor', 'toString', 'valueOf', 'hasOwnProperty']) {
       const c = classify({ kind: 'call', name, args: [{ kind: 'num', value: 2 }] });
-      expect(c.plot.type).not.toBe('polygon');
+      expect(compileCpu(c).type).not.toBe('polygon');
     }
   });
 
@@ -321,12 +323,12 @@ describe('geometry statements', () => {
   });
 
   it('square erects on the left of A→B', () => {
-    const sq = classify(low('square((0, 0), (2, 0))'), new Set()).plot as { pts: never[] };
+    const sq = compileCpu(classify(low('square((0, 0), (2, 0))'), new Set())) as { pts: never[] };
     expect(sq.pts.map(e => evaluate(e, {}))).toEqual([0, 0, 2, 0, 2, 2, 0, 2]);
   });
 
   it('line desugars to an implicit equation through both points', () => {
-    expect(classify(low('line((0, 0), (1, 2))')).plot.type).toBe('implicit2d');
+    expect(compileCpu(classify(low('line((0, 0), (1, 2))'))).type).toBe('implicit2d');
     const e = low('line((0, 0), (1, 2))') as Extract<ReturnType<typeof low>, { kind: 'eq' }>;
     // On-line points zero the field (including beyond the segment); off-line
     // points do not.
@@ -338,7 +340,7 @@ describe('geometry statements', () => {
 
   it('circle desugars to an implicit equation', () => {
     const c = classify(low('circle((1, 2), 3)'));
-    expect(c.plot.type).toBe('implicit2d');
+    expect(compileCpu(c).type).toBe('implicit2d');
     // On-circle point (4, 2) zeroes the field: (x-1)^2 + (y-2)^2 - 9.
     const e = low('circle((1, 2), 3)') as { kind: 'eq'; l: never; r: never };
     expect(evaluate(e.l, { x: 4, y: 2 }) - evaluate(e.r, {})).toBe(0);
@@ -372,21 +374,21 @@ describe('point definitions', () => {
     const { defs, errors } = defsOf(['A = (1, 2)', 'B = A + (0, 0)']);
     expect(errors.size).toBe(0);
     expect([...defs.points]).toEqual(['A', 'B']);
-    const values = evalConstEnv(defs, 0);
+    const values = evaluateFrame(defs, 0);
     expect([values.A_x, values.A_y, values.B_x, values.B_y]).toEqual([1, 2, 1, 2]);
   });
 
   it('derives points from point arithmetic', () => {
     const { defs, errors } = defsOf(['B = (4, 0.5)', 'D = (1, 2.5)', 'C = B + D', 'M = midpoint(B, D)']);
     expect(errors.size).toBe(0);
-    const values = evalConstEnv(defs, 0);
+    const values = evaluateFrame(defs, 0);
     expect([values.C_x, values.C_y]).toEqual([5, 3]);
     expect([values.M_x, values.M_y]).toEqual([2.5, 1.5]);
   });
 
   it('supports scalar constants over points', () => {
     const { defs } = defsOf(['B = (4, 0)', 'D = (0, 3)', 'n = cross(B, D)', 'L = |B|']);
-    const values = evalConstEnv(defs, 0);
+    const values = evaluateFrame(defs, 0);
     expect(values.n).toBe(12);
     expect(values.L).toBe(4);
   });
@@ -394,7 +396,7 @@ describe('point definitions', () => {
   it('inlines user functions over points', () => {
     const { defs, errors } = defsOf(['refl(P, Q) = 2Q - P', 'A = (1, 0)', 'O = (0, 0)', 'R = refl(A, O)']);
     expect(errors.size).toBe(0);
-    const values = evalConstEnv(defs, 0);
+    const values = evaluateFrame(defs, 0);
     expect([values.R_x, values.R_y]).toEqual([-1, 0]);
   });
 
@@ -445,7 +447,7 @@ describe('point definitions', () => {
 
   it('animates points through t', () => {
     const { defs } = defsOf(['A = (cos(t), sin(t))']);
-    const values = evalConstEnv(defs, Math.PI);
+    const values = evaluateFrame(defs, Math.PI);
     expect(values.A_x).toBeCloseTo(-1);
     expect(values.A_y).toBeCloseTo(0);
   });

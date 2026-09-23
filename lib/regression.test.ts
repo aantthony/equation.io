@@ -1,6 +1,7 @@
+import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
-import { buildDefs, evalConstEnv, scanDefinition, type Definition } from './defs.ts';
+import { buildDefs,  scanDefinition, type Definition } from './defs.ts';
 import { parseCsv } from './csv.ts';
 import { scanRegressions } from './regression.ts';
 
@@ -16,12 +17,12 @@ describe('equation-native regression', () => {
     expect(result.constEnv.m).toBeCloseTo(2, 10);
     expect(result.constEnv.b).toBeCloseTo(1, 10);
     expect(result.rows[2].info).toContain('R² ≈ 1');
-    expect(result.rows[4].cls?.plot.type).toBe('implicit2d');
+    expect(result.rows[4].cpu?.type).toBe('implicit2d');
   });
   it('fits a polynomial and fixed constants are not refitted', () => {
     const b = fit(['X = [-2,-1,0,1,2]', 'Y = [9,2,1,6,17]', 'c = 1', 'Y ~ a X^2 + b X + c']);
     expect([...b.errors]).toEqual([]);
-    const env = evalConstEnv(b.defs, 0);
+    const env = evaluateFrame(b.defs, 0);
     expect(env.a).toBeCloseTo(3, 10);
     expect(env.b).toBeCloseTo(2, 10);
     expect(env.c).toBe(1);
@@ -30,8 +31,8 @@ describe('equation-native regression', () => {
     const rows = ['X = [0,0.5,1,1.5,2]', 'Y = 2 exp(0.7 X)', 'Y ~ a exp(b X)'];
     const one = fit(rows), two = fit(rows);
     expect([...one.errors]).toEqual([]);
-    expect(evalConstEnv(one.defs, 0).a).toBeCloseTo(2, 5);
-    expect(evalConstEnv(one.defs, 0).b).toBeCloseTo(0.7, 5);
+    expect(evaluateFrame(one.defs, 0).a).toBeCloseTo(2, 5);
+    expect(evaluateFrame(one.defs, 0).b).toBeCloseTo(0.7, 5);
     expect([...one.fits]).toEqual([...two.fits]);
   });
   it('handles CSV missing pairs with an explicit skipped count', () => {
@@ -40,15 +41,15 @@ describe('equation-native regression', () => {
     const b = buildDefs([scanDefinition(rows[0])!, reg], () => parseCsv('x,y\n0,1\n1,3\n,4\n3,7\n'));
     expect([...b.errors]).toEqual([]);
     expect(b.fits.get(reg.name)?.skipped).toBe(1);
-    expect(evalConstEnv(b.defs, 0).m).toBeCloseTo(2, 10);
+    expect(evaluateFrame(b.defs, 0).m).toBeCloseTo(2, 10);
   });
   it('zips columns of one CSV so a two-predictor fit pairs rows', () => {
     const rows = ['data = open("a.csv")', 'data.y ~ m data.x + n data.z'];
     const reg = scanRegressions(rows).get(1)!;
     const b = buildDefs([scanDefinition(rows[0])!, reg], () => parseCsv('x,y,z\n0,3,1\n1,2,0\n1,5,1\n2,7,1\n'));
     expect([...b.errors]).toEqual([]);
-    expect(evalConstEnv(b.defs, 0).m).toBeCloseTo(2, 10);
-    expect(evalConstEnv(b.defs, 0).n).toBeCloseTo(3, 10);
+    expect(evaluateFrame(b.defs, 0).m).toBeCloseTo(2, 10);
+    expect(evaluateFrame(b.defs, 0).n).toBeCloseTo(3, 10);
   });
   it('keeps missing CSV fits and dependent curves device-local in server analysis', () => {
     const r = analyze(['data = open("a.csv")', 'data.y ~ m data.x + b', 'y = m x + b']);
@@ -66,7 +67,7 @@ describe('equation-native regression', () => {
   it('fits an exponential without an amplitude and allows derivative models', () => {
     const b = fit(['X=[0,1,2]', 'Y=exp(0.5 X)', 'Y ~ exp(a X)']);
     expect([...b.errors]).toEqual([]);
-    expect(evalConstEnv(b.defs, 0).a).toBeCloseTo(0.5, 5);
+    expect(evaluateFrame(b.defs, 0).a).toBeCloseTo(0.5, 5);
     expect(scanRegressions(['X=[1,2]', 'Y=[2,4]', "Y ~ a f'(X)"]).size).toBe(1);
     expect(scanRegressions(['# Y ~ a X', 'L=["~"]']).size).toBe(0);
   });
@@ -79,7 +80,7 @@ describe('equation-native regression', () => {
   it.each(['exp', 'EXP', 'Exp', 'eXp'])('fits a case-insensitive %s call over declared data', alias => {
     const b = fit(['X=[0,1,2]', 'Y=exp(0.5 X)', `Y ~ ${alias}(a X)`]);
     expect([...b.errors]).toEqual([]);
-    expect(evalConstEnv(b.defs, 0).a).toBeCloseTo(0.5, 5);
+    expect(evaluateFrame(b.defs, 0).a).toBeCloseTo(0.5, 5);
   });
   it('does not reinterpret distribution rows', () => {
     expect(scanRegressions(['X ~ Normal(0,1)', 'Y ~ Uniform', 'Z ~ Exponential(2)']).size).toBe(0);

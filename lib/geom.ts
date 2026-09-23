@@ -1,3 +1,4 @@
+import { type FigureForm, mapChildren } from './expr.ts';
 /**
  * Point (2D and 3D vector) values and geometry statements.
  *
@@ -22,7 +23,7 @@
  * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import { ANGLE_FN, COMP_FN, type Expr, compArity, compDims, sameList } from './expr.ts';
+import { ANGLE_FN, type Expr, compArity, compDims, sameList } from './expr.ts';
 import { SCALAR_REDUCTIONS, withAxes } from './list.ts';
 import { type GetMat, type Mat, type MatValue, detOf, expOf, hatOf, matAdd, matMul, matNeg, matPow, matScale, matVec, matrixFromList, solveVec, traceOf } from './mat.ts';
 
@@ -75,7 +76,7 @@ function sameDims(op: string, a: LV, b: LV): asserts a is LV & { vec: true } {
  *  pass through, adjacent scalars (a flattened tuple literal) join into a 2D
  *  point. A scalar left without a partner throws `stray` — a message, or one
  *  made from that argument's index. */
-function vecArgs(args: LV[], stray: string | ((index: number) => string)): Expr[][] {
+function legacyPointArgs(args: LV[], stray: string | ((index: number) => string)): Expr[][] {
   const vs: Expr[][] = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -91,10 +92,10 @@ function vecArgs(args: LV[], stray: string | ((index: number) => string)): Expr[
   return vs;
 }
 
-/** vecArgs for the figures, which are 2D only. `usage` is the argument list
+/** legacyPointArgs for the figures, which are 2D only. `usage` is the argument list
  *  shown in the error, e.g. 'A' or 'A, B'. */
 function pairPoints(name: string, args: LV[], usage: string): Array<[Expr, Expr]> {
-  const vs = vecArgs(args, `${name} takes points — write ${name}(${usage}), with A = (0, 0) defined above.`);
+  const vs = legacyPointArgs(args, `${name} takes points — write ${name}(${usage}), with A = (0, 0) defined above.`);
   const big = vs.find(v => v.length !== 2);
   if (big) throw new Error(`${name} takes 2D points, not ${big.length}-component vectors.`);
   return vs as Array<[Expr, Expr]>;
@@ -115,8 +116,8 @@ function listShape(a: Expr, getMat: GetMat, isList: IsList): 'list' | 'element' 
   switch (a.kind) {
     case 'neg': return first([a.a]);
     case 'bin': return first([a.a, a.b]);
+    case 'index': return 'element';
     case 'call':
-      if (a.name === '[index]') return 'element';
       if (SCALAR_REDUCTIONS.has(a.name) || ((a.name === 'min' || a.name === 'max') && a.args.length === 1)) return null;
       return first(a.args);
     default: return null;
@@ -130,7 +131,7 @@ const ANGLE_USAGE = 'angle takes three matching points — angle(A, B, C), the a
  *  for every arity failure: tuple literals arrive flattened — (1, 2, 3) is
  *  three loose scalars — so it is the one message true however they pair. */
 function lowerDistance(args: LV[], usage: string, stray: (index: number) => string): Expr {
-  const vs = vecArgs(args, stray);
+  const vs = legacyPointArgs(args, stray);
   if (vs.length !== 2) throw new Error(usage);
   const [p, q] = vs;
   if (p.length !== q.length) {
@@ -144,7 +145,7 @@ function lowerDistance(args: LV[], usage: string, stray: (index: number) => stri
  *  call over the two arms' components (see angleFn), so each component
  *  appears once however large it is. */
 function lowerAngle(args: LV[], usage: string, stray: (index: number) => string): Expr {
-  const vs = vecArgs(args, stray);
+  const vs = legacyPointArgs(args, stray);
   if (vs.length !== 2 && vs.length !== 3) throw new Error(usage);
   const dim = vs[0].length;
   if ((dim !== 2 && dim !== 3) || vs.some(v => v.length !== dim)) throw new Error('angle needs points with matching dimensions.');
@@ -263,6 +264,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
   const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
   const matOf = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'figure': case 'trail': case 'hist': case 'family': return sc(mapChildren(e, n => { const v = lo(n); return v.vec ? { kind: 'vec', items: v.items } : v.e; }));
     case 'num': return sc(e);
     case 'var': {
       if (getMat(e.name)) {
@@ -326,14 +328,9 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       }
       break;
     }
-    case 'call': {
-      if (GEOM_STATEMENTS.has(e.name)) throw new Error(`${e.name}(…) must be a whole statement.`);
-      if (e.name === COMP_FN) {
+    case 'comp': {
         // f(P): component k of the one argument, once it is known to be a point.
-        const [value, kArg, nArg, fnArg] = e.args;
-        const k = (kArg as Expr & { kind: 'num' }).value;
-        const n = (nArg as Expr & { kind: 'num' }).value;
-        const fn = (fnArg as Expr & { kind: 'str' }).value;
+        const { value, index: k, arity: n, functionName: fn } = e;
         let v = compSeen.get(value);
         // A matrix (a name, or algebra over one: 2 S) has no meaning of its own
         // to a function of scalars, so it is what it is wherever a call asks
@@ -342,8 +339,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         const m = !v && ((value.kind === 'var' ? getMat(value.name) : null) ?? matOf(value)?.m);
         if (m) {
           if (m.length !== n) throw new Error(compDims(fn, n, value, m.length));
-          const rows: Expr = { kind: 'list', items: m.map((items): Expr => ({ kind: 'vec', items })) };
-          if (value.kind === 'var') withAxes(rows, [{ id: `${value.name}#0`, n: m.length }]);
+          const rows = rowsAsPoints(m, value.kind === 'var' ? value.name : undefined);
           compSeen.set(value, v = { wait: rows });
         }
         if (!v) {
@@ -359,11 +355,13 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
           }
           compSeen.set(value, v);
         }
-        if ('wait' in v) return sc({ kind: 'call', name: COMP_FN, args: [v.wait, kArg, nArg, fnArg] });
+        if ('wait' in v) return sc({ ...e, value: v.wait });
         if (!v.vec) throw new Error(compArity(fn, n));
         if (v.items.length !== n) throw new Error(compDims(fn, n, value, v.items.length));
         return sc(v.items[k]);
       }
+    case 'call': {
+      if (GEOM_STATEMENTS.has(e.name)) throw new Error(`${e.name}(…) must be a whole statement.`);
       if (e.name === 'trail') {
         const args = e.args.map(lo);
         const coords = args.length === 1 && args[0].vec
@@ -372,7 +370,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         if (coords.length !== 2 && coords.length !== 3) {
           throw new Error('trail takes a 2D or 3D point: trail(A) or trail((cos(t), sin(t))).');
         }
-        return sc({ kind: 'call', name: '[trail]', args: coords });
+        return sc({ kind: 'trail', coordinates: coords });
       }
       if (!matsPossible && e.name === 'cross' && e.args.length === 1) throw new MatrixSeen();
       if (matOf(e)) throw new Error(NOT_A_VALUE);
@@ -457,7 +455,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       if (nPts !== undefined) {
         // Vector args of any dim pass straight through; runs of flattened
         // scalars still pair into 2D points as before.
-        const vs = vecArgs(args, `${e.name} takes points — write ${e.name}(${nPts === 1 ? 'A' : 'A, B'}), with A = (0, 0) defined above.`);
+        const vs = legacyPointArgs(args, `${e.name} takes points — write ${e.name}(${nPts === 1 ? 'A' : 'A, B'}), with A = (0, 0) defined above.`);
         if (vs.length !== nPts) {
           throw new Error(`${e.name} takes ${nPts} point${nPts === 1 ? '' : 's'}.`);
         }
@@ -570,7 +568,13 @@ const spaceVar = (name: 'x' | 'y'): Expr => ({ kind: 'var', name });
  *  wrote). */
 export type FigureName = '[polygon]' | '[segment]' | '[polyline]' | '[vector]' | '[square]' | '[hull]';
 const polyCall = (name: FigureName, pts: Expr[][]): Expr =>
-  ({ kind: 'call', name: pts[0].length === 3 ? name.replace(']', '3]') : name, args: pts.flat() });
+  ({ kind: 'figure', form: name.slice(1, -1) as FigureForm, dimension: pts[0].length as 2 | 3, vertices: pts.flat() });
+
+/** A matrix consumed as a point set. Named rows share axes across all calls. */
+export function rowsAsPoints(matrix: Mat, name?: string): Expr & { kind: 'list' } {
+  const rows: Expr & { kind: 'list' } = { kind: 'list', items: matrix.map(items => ({ kind: 'vec', items })) };
+  return name ? withAxes(rows, [{ id: `${name}#0`, n: matrix.length }]) : rows;
+}
 
 /** A definition whose value is a matrix (`R = e^(a J)`, `N = 2 M`), or null. */
 export function lowerMatrix(e: Expr, getComps: GetComps, getMat: GetMat): Mat | null {
@@ -623,7 +627,7 @@ function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsL
     // Tuple literals arrive flattened, so (1, 2, 3) cannot be told from
     // (1, 2), 3: an odd run of scalars gets the one message true of both.
     if (e.name === 'vector' && args.every(a => !a.vec) && args.length % 2 === 1) throw new Error(VECTOR_USAGE);
-    const pts = vecArgs(args, `${e.name} takes points with matching dimensions.`);
+    const pts = legacyPointArgs(args, `${e.name} takes points with matching dimensions.`);
     if (!pts.length || ![2, 3].includes(pts[0].length) || pts.some(p => p.length !== pts[0].length)) throw new Error(`${e.name} needs points with matching dimensions.`);
     if (pts[0].length === 3 && (e.name === 'line' || e.name === 'square')) throw new Error(`${e.name} is only defined for 2D points.`);
     if (e.name === 'line') {

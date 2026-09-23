@@ -1,5 +1,6 @@
+import { emptyEnv } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { emptyDefs } from './defs.ts';
+
 import { parseDistribution, scanDistribution } from './dist.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { scanRegressions, tildeRow } from './regression.ts';
@@ -19,7 +20,7 @@ describe('one table of families, every consumer', () => {
     // Declared data on the left: a model only for the spellings marked as one.
     expect(scanRegressions(['Y = [1, 2, 3]', `Y ~ ${call}`]).size).toBe(isModelName(n) ? 1 : 0);
     const text = `X ~ ${n}(`;
-    expect(syntaxHelp(text, text.length, emptyDefs()).hint).toContain(distUsage(f));
+    expect(syntaxHelp(text, text.length, emptyEnv()).hint).toContain(distUsage(f));
   });
 
   it('the unknown-distribution hint lists every family', () => {
@@ -44,7 +45,7 @@ describe('one table of families, every consumer', () => {
 
   it('help asks the same predicate the row is read by', () => {
     const hint = (text: string, declared: string[]) =>
-      syntaxHelp(text, text.length, emptyDefs(), new Set(declared)).hint ?? '';
+      syntaxHelp(text, text.length, emptyEnv(), new Set(declared)).hint ?? '';
     for (const [text, declared] of [
       ['Y ~ gamma(', ['Y']], ['Y ~ gamma(', []], ['Y ~ Weibull(', ['Y']], ['d.col ~ gamma(', []],
       ['f("a~b") ~ gamma(', []], ['Y ~ T(', ['Y']], ['Y ~ T(', ['Z']], ['[1, 2] ~ beta(', []],

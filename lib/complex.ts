@@ -1,3 +1,4 @@
+import { childrenOf, structuralDiagnostic } from './expr.ts';
 /**
  * Complex-typed GLSL compilation.
  *
@@ -27,6 +28,7 @@ export const WHOLE_EXPR_NAMES: ReadonlySet<string> = new Set([...SPECIAL_FORMS, 
  *  iteration variable bound by an enclosing special form). */
 export function usesComplex(e: Expr, extra?: ReadonlySet<string>): boolean {
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return childrenOf(e).some(c => usesComplex(c, extra));
     case 'num': return false;
     case 'var': return e.name === 'i' || e.name === 'w' || !!extra?.has(e.name);
     case 'neg': return usesComplex(e.a, extra);
@@ -58,6 +60,24 @@ const C_TO_REAL: Record<string, (z: string) => string> = {
   im: z => `(${z}).y`,
   arg: z => `atan((${z}).y, (${z}).x)`,
 };
+
+/** Shared builtin return/arity rules for inference and shader compilation. */
+function inferCallType(name: string, args: ScalarType[]): ScalarType {
+  if (SPECIAL_FORMS.has(name)) throw new Error(`${name}(…) must be the whole expression.`);
+  const complex = args.includes('complex');
+  if (name === 'conj') {
+    if (args.length !== 1) throw new Error('conj takes one argument.');
+    return 'complex';
+  }
+  if (name in C_TO_REAL && (complex || ['re', 'im', 'arg'].includes(name))) {
+    if (args.length !== 1) throw new Error(`${name} takes one argument.`);
+    return 'real';
+  }
+  if (!complex) return 'real';
+  if (!(name in C_FNS)) throw new Error(`${plainFnName(name)} is not supported for complex values.`);
+  if (args.length !== 1) throw new Error(`${name} takes one argument.`);
+  return 'complex';
+}
 
 function promote(v: Typed): string {
   return v.type === 'complex' ? v.code : `vec2(${v.code}, 0.0)`;
@@ -91,6 +111,7 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
   }
 
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
     case 'num': return { type: 'real', code: toGLSL(e) };
     case 'var':
       if (e.name in env) return env[e.name];
@@ -133,14 +154,13 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
         throw new Error(`${e.name}(…) must be the whole expression.`);
       }
       const args = e.args.map(a => compileTyped(a, env));
+      inferCallType(e.name, args.map(a => a.type));
       const anyComplex = args.some(a => a.type === 'complex');
       if (e.name === 'conj') {
-        if (args.length !== 1) throw new Error('conj takes one argument.');
         const z = promote(args[0]);
         return { type: 'complex', code: `(${z} * vec2(1.0, -1.0))` };
       }
       if (e.name in C_TO_REAL && (anyComplex || e.name === 're' || e.name === 'im' || e.name === 'arg')) {
-        if (args.length !== 1) throw new Error(`${e.name} takes one argument.`);
         return { type: 'real', code: C_TO_REAL[e.name](promote(args[0])) };
       }
       if (!anyComplex) {
@@ -148,8 +168,6 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
         return { type: 'real', code: `${name}(${args.map(a => a.code).join(', ')})` };
       }
       const fn = C_FNS[e.name];
-      if (!fn) throw new Error(`${plainFnName(e.name)} is not supported for complex values.`);
-      if (args.length !== 1) throw new Error(`${e.name} takes one argument.`);
       return { type: 'complex', code: `${fn}(${promote(args[0])})` };
     }
     case 'eq': {
@@ -170,7 +188,7 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
       throw new Error('A list can only be plotted as its own row.');
     case 'piecewise': {
       const emit = (x: Expr): string => {
-        const c = compileTyped(x);
+        const c = compileTyped(x, env);
         if (c.type === 'complex') throw new Error('Complex piecewise: wrap values in re(…) or im(…).');
         return c.code;
       };
@@ -178,4 +196,35 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}): Typed {
     }
   }
   throw new Error('Unreachable');
+}
+
+export type ScalarType = 'real' | 'complex';
+/** Result typing, independent of code generation and structural complex involvement. */
+export function inferScalarType(e: Expr, env: Record<string, ScalarType> = {}): ScalarType {
+  const infer = (value: Expr) => inferScalarType(value, env);
+  switch (e.kind) {
+    case 'num': return 'real';
+    case 'var': return env[e.name] ?? (e.name === 'i' || e.name === 'w' ? 'complex' : 'real');
+    case 'neg': return infer(e.a);
+    case 'bin': { const a = infer(e.a); const b = infer(e.b); return a === 'complex' || b === 'complex' ? 'complex' : 'real'; }
+    case 'call': return inferCallType(e.name, e.args.map(infer));
+    case 'eq':
+      if (infer(e.l) === 'complex' || infer(e.r) === 'complex') throw new Error('Complex equation: compare re(…) or im(…) instead.');
+      return 'real';
+    case 'ineq': throw new Error('Unexpected inequality.');
+    case 'vec': throw new Error('Vector in scalar context.');
+    case 'list': throw new Error('A list can only be plotted as its own row.');
+    case 'piecewise': {
+      const visit = (value: Expr): void => {
+        if (value.kind === 'ineq') { visit(value.l); visit(value.r); return; }
+        if (infer(value) === 'complex') throw new Error('Complex piecewise: wrap values in re(…) or im(…).');
+      };
+      for (const c of e.cases) { visit(c.cond); visit(c.value); }
+      if (e.otherwise) visit(e.otherwise);
+      return 'real';
+    }
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family':
+      throw new Error('This object must be lowered before scalar type inference.');
+    case 'data': case 'str': case 'text': throw new Error('Expected a scalar expression.');
+  }
 }

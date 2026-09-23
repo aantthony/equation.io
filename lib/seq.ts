@@ -1,3 +1,4 @@
+import { Env, type ValueDefinitions } from './env.ts';
 /**
  * Sequences and recurrences.
  *
@@ -14,13 +15,12 @@
  * The whole subscripted symbol (`a_n`) is one token, so these rows are
  * recognized by regex before definition scanning, like defs.ts does.
  */
-import { compileTyped, usesComplex } from './complex.ts';
-import { type GetFn, RESERVED, type ResolveOpts, resolveExpr } from './defs.ts';
+import { usesComplex } from './complex.ts';
+import { type GetFn, RESERVED, type ResolveOpts, resolveExpr, substIdx } from './defs.ts';
 import { axesOf, lowerLists, withAxes } from './list.ts';
 import { listGetter } from './defs.ts';
 import { GREEK_NAME_CHARS, WRITTEN_NAME_CHARS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
-import { uniformName } from './glsl.ts';
-import type { Classified } from './plot.ts';
+import { freezeClassified, type Classified } from './math-object.ts';
 
 export interface SeqScan {
   /** True for a_{n+1} = … (recurrence); false for a_n = … (explicit term). */
@@ -76,9 +76,11 @@ export function classifySeqRec(
   if (RESERVED.has(index)) {
     throw new Error(`"${index}" is reserved; index sequences with n, k, or m.`);
   }
-  // Σ/Π in the term expand here like anywhere else, so a_n = sum(k=1..N, k^n)
-  // works — the bounds must still be constants, since expansion is static.
-  const parsed = resolveExpr(parseExpr(rhs, fnNames), getFn, ropts);
+  // Σ/Π with constant bounds expand here, as anywhere else. A bound that uses
+  // the index (a_n = Σ(s=1..n, s)) stays a sum; evaluate() runs it at each n.
+  const openVars = new Set(ropts.openVars);
+  openVars.add(index);
+  const parsed = resolveExpr(parseExpr(rhs, fnNames), getFn, { ...ropts, openVars });
   if (usesComplex(parsed)) throw new Error('Sequences are real-valued; use re(…) or im(…).');
 
   const recVar = `${name}_${index}`;
@@ -103,7 +105,7 @@ export function classifySeqRec(
       throw new Error(`A sequence term may only use ${index}, t, and constants (found ${v}).`);
     }
     params.sort();
-    return { plot: { type: 'sequence', term: parsed, index }, animated, needs3D: false, params };
+    return freezeClassified({ object: { kind: 'sequence', form: 'explicit', term: parsed, index }, animated, needs3D: false, params });
   }
 
   const bifurcation = vars.delete('x');
@@ -118,34 +120,21 @@ export function classifySeqRec(
   if (a0Name) params.push(a0Name);
   params.sort();
 
-  // GLSL sees constants as u_<name> uniforms, like classify() does.
-  const g = params.length
-    ? substVars(parsed, Object.fromEntries(params.map(p => [p, { kind: 'var', name: uniformName(p) } as Expr])))
-    : parsed;
-
-  if (bifurcation) {
-    const field = compileTyped(substVars(g, { [recVar]: { kind: 'var', name: 'a' } })).code;
-    return { plot: { type: 'bifurcation', field, a0Name }, animated, needs3D: false, params };
-  }
-
-  const curve: Expr = {
-    kind: 'eq',
-    l: { kind: 'var', name: 'y' },
-    r: substVars(g, { [recVar]: { kind: 'var', name: 'x' } }),
-  };
-  return {
-    plot: { type: 'cobweb', f: parsed, recVar, curveField: compileTyped(curve).code, a0Name },
-    animated,
-    needs3D: false,
-    params,
-  };
+  return freezeClassified({
+    object: { kind: 'sequence', form: bifurcation ? 'bifurcation' : 'cobweb', expr: parsed, variable: recVar, seedName: a0Name },
+    animated, needs3D: false, params,
+  });
 }
 
 /** Sequence values share the same scalar/list pipeline as CSV columns.
  * Recurrences form a linear chain of computed constants rather than an
  * exponentially duplicated expression. Those constants become uniforms. */
-export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, opts: ResolveOpts,
-  known: Set<string>, protectedNames: ReadonlySet<string> = new Set()) {
+export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: ResolveOpts,
+  known: Set<string>, protectedNames: ReadonlySet<string> = new Set(),
+  defineConstant: (name: string, expr: Expr) => void = (name, expr) => {
+    if (!(defs instanceof Env)) throw new Error('Sequence construction needs a binding writer.');
+    defs.bind(name, { tag: 'scalar', role: 'const', expr });
+  }) {
   const resolving = new Set<string>();
   const term = (name: string, k: number): Expr => {
     if (!Number.isInteger(k) || k < 0 || k > 1000) throw new Error('Sequence indices must be whole numbers from 0 to 1000.');
@@ -155,8 +144,16 @@ export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, o
     if (resolving.has(name)) throw new Error(`Sequence ${name} depends on itself outside its recurrence.`);
     resolving.add(name);
     try {
-      const body = resolveExpr(parseExpr(scan.rhs, new Set(defs.fns.keys()), new Set([...defs.sequences.keys()].map(n => n + '_'))), getFn, opts);
-      if (!scan.rec) return substVars(body, { [scan.index]: { kind: 'num', value: k } });
+      const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), new Set([...defs.sequences.keys()].map(n => n + '_')));
+      if (!scan.rec) {
+        // Pin the index in the source (a Σ/∫ that rebinds it keeps its own),
+        // then resolve ONCE — so a_5 of a_n = Σ(s=1..n, s) is the number 15,
+        // not a sum node, and the term sees exactly what the plot row sees: a
+        // second pass over an already-resolved body would re-apply the
+        // tuple-call splat to vectors that functions computed.
+        return resolveExpr(substIdx(parsed, scan.index, { kind: 'num', value: k }), getFn, opts);
+      }
+      const body = resolveExpr(parsed, getFn, opts);
       for (const v of freeVars(body)) {
         if (v !== `${name}_${scan.index}` && v !== 't' && !known.has(v) && !defs.consts.has(v)) throw new Error(`Sequence ${name} terms need constant parameters (found ${v}).`);
       }
@@ -166,7 +163,7 @@ export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, o
         const value: Expr = i === 0
           ? (protectedNames.has(`${name}_0`) || defs.consts.has(`${name}_0`) ? { kind: 'var', name: `${name}_0` } : { kind: 'num', value: .5 })
           : substVars(body, { [`${name}_${scan.index}`]: { kind: 'var', name: `${defs.sequencePrefix}_${name}_${i - 1}` } });
-        defs.consts.set(internal, value); known.add(internal);
+        defineConstant(internal, value); known.add(internal);
         try { if (opts.consts) opts.consts[internal] = evaluate(value, opts.consts); } catch { /* resolved at frame time */ }
       }
       return { kind: 'var', name: `${defs.sequencePrefix}_${name}_${k}` };
@@ -179,7 +176,7 @@ export function sequenceResolver(defs: import('./defs.ts').Defs, getFn: GetFn, o
     }
     const name = symbol.slice(0, -1);
     if (!symbol.endsWith('_') || !defs.sequences.has(name)) return null;
-    const input: Expr = index.kind === 'call' && index.name === '[range]' ? { kind: 'list', items: [index] } : index;
+    const input: Expr = index.kind === 'range' ? { kind: 'list', items: [index] } : index;
     const indices = lowerLists(input, listGetter(defs), opts);
     const one = (e: Expr) => {
       for (const n of freeVars(e)) opts.boundConsts?.add(n);

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import Ajv from 'ajv';
 import { handleMcp } from './mcp.ts';
 import { GRAPH_UI_URI } from './mcp-app.ts';
+import { DISTRIBUTION_MCP_KINDS, PUBLIC_KIND_ROWS } from './typed-values.fixtures.ts';
 
 const URL_BASE = 'https://equation.io/mcp';
 const ajv = new Ajv({ strict: true });
@@ -51,6 +52,16 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
 }
 
 describe('mcp endpoint', () => {
+  it.each(Object.entries(PUBLIC_KIND_ROWS))('preserves the %s kind at the MCP boundary', async (kind, equations) => {
+    const { body } = await rpc('tools/call', {
+      name: 'encode_graph_url', arguments: { equations },
+    });
+    const rows = body.result.structuredContent.rows;
+    expect(rows.every((r: { status: string }) => r.status === 'ok')).toBe(true);
+    const expected = DISTRIBUTION_MCP_KINDS[kind as keyof typeof DISTRIBUTION_MCP_KINDS] ?? kind;
+    expect(rows.at(-1).kind).toBe(expected);
+  });
+
   it('initializes with a supported protocol version', async () => {
     const { body } = await rpc('initialize', {
       protocolVersion: '2025-06-18',

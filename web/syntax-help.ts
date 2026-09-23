@@ -1,10 +1,10 @@
-import type { Defs } from '../lib/defs.ts';
+import type { Env } from '../lib/env.ts';
 import { syntaxHelp, type SyntaxHelp } from '../lib/syntax-help.ts';
 
 interface Caret { line: number; offset: number }
 
 export function initSyntaxHelp(editor: HTMLElement, options: {
-  context: () => { caret: Caret; text: string; defs: Defs; declared?: ReadonlySet<string> } | null;
+  context: () => { caret: Caret; text: string; defs: Env; declared?: ReadonlySet<string> } | null;
   replace: (caret: Caret, start: number, end: number, text: string, offset: number) => void;
 }) {
   const box = document.createElement('div');

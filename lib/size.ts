@@ -18,7 +18,8 @@ export function countNodes(e: unknown, memo?: WeakMap<object, number>): number {
   const known = memo?.get(e);
   if (known !== undefined) return known;
   let n = 1;
-  for (const v of Object.values(e)) {
+  for (const [key, v] of Object.entries(e)) {
+    if (key === 'axes' || key === 'origin') continue;
     if (Array.isArray(v)) for (const item of v) n += countNodes(item, memo);
     else if (typeof v === 'object') n += countNodes(v, memo);
   }
@@ -35,7 +36,8 @@ export function exceedsNodes(e: unknown, limit: number, leaf?: (x: object) => bo
     if (x === null || typeof x !== 'object') return false;
     if (++n > limit) return true;
     if (ArrayBuffer.isView(x) || leaf?.(x)) return false;
-    for (const v of Object.values(x)) {
+    for (const [key, v] of Object.entries(x)) {
+      if (key === 'axes' || key === 'origin') continue;
       if (Array.isArray(v) ? v.some(walk) : walk(v)) return true;
     }
     return false;

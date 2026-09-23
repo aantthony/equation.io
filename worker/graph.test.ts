@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { type Expr, evaluate } from '../lib/expr.ts';
 import { boundValue } from '../lib/intshade.ts';
-import { toGLSL } from '../lib/glsl.ts';
 import { analyze } from './graph.ts';
 import { compileProg, run as runProg } from '../lib/vm.ts';
 
 /** [error ?? plot type, readout] per row. */
-const out = (texts: string[]) => analyze(texts).rows.map(r => [r.error ?? r.cls?.plot.type ?? 'def', r.info]);
+const out = (texts: string[]) => analyze(texts).rows.map(r => [r.error ?? r.cpu?.type ?? 'def', r.info]);
 
 describe('distance / angle through analyze()', () => {
   it('take any single point, however it was computed', () => {
@@ -23,9 +22,9 @@ describe('distance / angle through analyze()', () => {
     const rows = analyze(['L = [1, 2, 3]', 'A = (0, 0)', '|A - (L, 0)|', 'distance(A, (L, 0))',
       'f(k) = distance(A, (k, 0))', 'f(L)', 'angle((1, 0), A, (L, L))', 'total(angle((1, 0), (0, L)))']).rows;
     expect(rows.map(r => r.error)).toEqual(Array(8).fill(undefined));
-    expect(rows[3].cls!.plot).toEqual(rows[2].cls!.plot);
-    expect(rows[5].cls!.plot).toEqual(rows[2].cls!.plot);
-    expect(rows[6].cls!.plot.type).toBe(rows[2].cls!.plot.type);
+    expect(rows[3].cpu!).toEqual(rows[2].cpu!);
+    expect(rows[5].cpu!).toEqual(rows[2].cpu!);
+    expect(rows[6].cpu!.type).toBe(rows[2].cpu!.type);
     expect(rows[7].info).toBe(`≈ ${Number((1.5 * Math.PI).toPrecision(6))}`);
   });
 
@@ -56,11 +55,13 @@ describe('distance / angle through analyze()', () => {
     expect(rows[3].info).toBe('≈ 3.14159');
     for (const r of [rows[2], rows[3]]) {
       const names = Object.keys(constEnv);
-      const prog = compileProg(r.expr!, new Map(names.map((n, i) => [n, i])));
+      if (r.cpu?.type !== 'value') throw new Error('Expected scalar readout');
+      const prog = compileProg(r.cpu.expr, new Map(names.map((n, i) => [n, i])));
       expect(runProg(prog, names.map(n => constEnv[n]), new Float64Array(prog.depth))).toBe(Math.PI);
-      expect(evaluate(r.expr!, constEnv)).toBe(Math.PI);
+      expect(evaluate(r.cpu.expr, constEnv)).toBe(Math.PI);
     }
-    const glsl = toGLSL(rows[4].expr!);
+    if (rows[4].gpu?.type !== 'implicit2d') throw new Error('Expected curve shader');
+    const glsl = rows[4].gpu.field;
     expect(glsl).not.toContain('+ 0.0');
     expect(glsl).toContain('eq_angle(');
   });
@@ -70,14 +71,14 @@ describe('definite-integral rows shade their area', () => {
   const shadeOf = (texts: string[], at = texts.length - 1) => {
     const row = analyze(texts).rows[at];
     expect(row.error).toBeUndefined();
-    const plot = row.cls!.plot;
+    const plot = row.cpu!;
     return plot.type === 'value' ? plot.shade : undefined;
   };
 
   it('exactly one definite integral carries { body, v, lo, hi }; the row stays a readout', () => {
     for (const text of ['int[0..1] x^2 dx', 'int(0..1, x^2 dx)', '∫[0..1] x^2 dx']) {
       const row = analyze([text]).rows[0];
-      expect([row.cls!.plot.type, row.info]).toEqual(['value', '≈ 0.333333']);
+      expect([row.cpu!.type, row.info]).toEqual(['value', '≈ 0.333333']);
       const shade = shadeOf([text])!;
       expect(shade.v).toBe('x');
       expect([evaluate(shade.lo, {}), evaluate(shade.hi, {})]).toEqual([0, 1]);
@@ -126,7 +127,7 @@ describe('definite-integral rows shade their area', () => {
       ['int[0..1] (int[0..x] t dt) dx'],
       ['2 + 2'],
     ]) {
-      expect(analyze(texts).rows[0].cls!.plot).toMatchObject({ type: 'value' });
+      expect(analyze(texts).rows[0].cpu!).toMatchObject({ type: 'value' });
       expect(shadeOf(texts)).toBeUndefined();
     }
   });
@@ -152,7 +153,7 @@ describe('definite-integral rows shade their area', () => {
   });
 
   it('rows that are not a number never shade', () => {
-    const types = (texts: string[]) => analyze(texts).rows.map(r => r.error ?? r.cls?.plot.type ?? 'def');
+    const types = (texts: string[]) => analyze(texts).rows.map(r => r.error ?? r.cpu?.type ?? 'def');
     // A definition names the number (nothing draws); non-constant bounds are a
     // curve; a complex integrand a point; a list integrand a list.
     expect(types(['a = int[0..1] x^2 dx'])).toEqual(['def']);
@@ -181,11 +182,11 @@ describe('the continuous distribution zoo through analyze()', () => {
     const a = analyze(['X ~ Gamma(2, 3)', 'Y ~ Gamma(1.5, 3)', 'S = X + Y', 'D = X + X', 'V = X + 1',
       'Z ~ N', 'Q = Z^2', 'P(Z^2 < 3.8414588)', 'P(X + Y < 1)', 'E(S)', 'E(Q)']);
     expect(a.rows.map(r => r.error)).toEqual(Array(11).fill(undefined));
-    const types = a.rows.map(r => r.cls!.plot.type);
+    const types = a.rows.map(r => r.cpu!.type);
     // S, D and Q go to the shader as pdfs; the shifted V has no closed family.
     expect(types.slice(2, 5)).toEqual(['implicit2d', 'implicit2d', 'density']);
     expect(types[6]).toBe('implicit2d');
-    expect(toGLSL(a.rows[2].expr!)).toContain('eq_gammapdf(');
+    expect(a.rows[2].gpu?.type === 'implicit2d' && a.rows[2].gpu.field).toContain('eq_gammapdf(');
     expect(a.rows[7].info).toBe('≈ 0.9500');
     expect(a.rows[8].info).toBe('≈ 0.4603'); // Gamma(3.5, 3) at 1
     expect(a.rows[9].info).toBe('≈ 1.1667');
@@ -225,7 +226,9 @@ describe('the continuous distribution zoo through analyze()', () => {
   });
 
   it('compiles the pdf builtins for the og VM', () => {
-    const row = analyze(['X ~ Beta(80, 120)']).rows[0].expr!;
+    const cpu = analyze(['X ~ Beta(80, 120)']).rows[0].cpu!;
+    if (cpu.type !== 'implicit2d') throw new Error('Expected density curve');
+    const row = cpu.equation;
     if (row.kind !== 'eq') throw new Error('a density row is y = pdf(x)');
     const prog = compileProg({ kind: 'bin', op: '-', a: row.l, b: row.r }, new Map([['x', 0], ['y', 1]]));
     // y − pdf(x) at the mode x = 79/198, where the pdf is 11.5061.
@@ -249,7 +252,7 @@ describe('discrete distributions through analyze()', () => {
     ]);
     const a = analyze(['X ~ Binomial(10, 0.3)', 'P(2 < X <= 5)']);
     expect(a.rows[0].dist).toBe('pmf');
-    expect(a.rows[1].cls!.plot).toMatchObject({ type: 'prob', shade: { rv: 'X', loStrict: true, hiStrict: false } });
+    expect(a.rows[1].cpu!).toMatchObject({ type: 'prob', shade: { rv: 'X', loStrict: true, hiStrict: false } });
   });
 
   it('follows constants, and reports bad parameters on the row at their values', () => {
@@ -286,8 +289,8 @@ describe('discrete distributions through analyze()', () => {
     expect(rows[19]).toEqual(['pmf', 'μ = 0.0666667, σ = 0.719568, P(defined) ≈ 0.833']);
     const a = analyze(['X ~ DiscreteUniform(1, 6)', 'Y ~ DiscreteUniform(1, 6)', 'S = X + Y', 'P(3 < S <= 5)', 'X + Y']);
     expect(a.rows[2].dist).toBe('pmf');
-    expect(a.rows[2].cls!.plot).toEqual({ type: 'pmf', rv: 'S' });
-    expect(a.rows[3].cls!.plot).toMatchObject({ type: 'prob', shade: { rv: 'S', loStrict: true, hiStrict: false } });
+    expect(a.rows[2].cpu!).toEqual({ type: 'pmf', rv: 'S' });
+    expect(a.rows[3].cpu!).toMatchObject({ type: 'prob', shade: { rv: 'S', loStrict: true, hiStrict: false } });
     expect(a.rows[4].dist).toBe('pmf');
   });
 
@@ -339,17 +342,17 @@ describe('complex paths through analyze()', () => {
   it('inlines a user function before splitting: f(path) is the image of the path', () => {
     const row = last(['f(w) = w^2 + w', 'f(exp(i 2 pi u))']);
     expect(row.error).toBeUndefined();
-    expect(row.cls!.plot).toMatchObject({ type: 'pcurve', dim: 2 });
-    const { comps } = row.cls!.plot as { comps: Expr[] };
+    expect(row.cpu!).toMatchObject({ type: 'pcurve', dim: 2 });
+    const { comps } = row.cpu! as { comps: Expr[] };
     // u = 1/4: w = i, f(i) = -1 + i.
     expect(evaluate(comps[0], { u: 0.25 })).toBeCloseTo(-1);
     expect(evaluate(comps[1], { u: 0.25 })).toBeCloseTo(1);
-    expect(last(['g(s) = exp(i s)', 'g(u)']).cls!.plot.type).toBe('pcurve');
+    expect(last(['g(s) = exp(i s)', 'g(u)']).cpu!.type).toBe('pcurve');
   });
 
   it('takes sliders as parameters of the path', () => {
     const row = last(['a = 2', 'a exp(i 2 pi u)']);
-    expect(row.cls).toMatchObject({ params: ['a'], plot: { type: 'pcurve' } });
+    expect(row.cls).toMatchObject({ params: ['a'], object: { kind: 'curve', form: 'parametric' } });
   });
 
   it('refuses a huge composition without first splitting it', () => {
@@ -370,10 +373,10 @@ describe('complex paths through analyze()', () => {
 
   it('protects the other users of the split the same way: root systems and Argand points', () => {
     const nest = (n: number, inner: string) => { let s = inner; for (let k = 0; k < n; k++) s = `f(${s})`; return s; };
-    expect(last(['f(w) = w*w + w', `${nest(2, 'w')} = 1`]).cls!.plot.type).toBe('system');
+    expect(last(['f(w) = w*w + w', `${nest(2, 'w')} = 1`]).cpu!.type).toBe('system');
     expect(last(['f(w) = w*w + w', `${nest(10, 'w')} = 1`]).error)
       .toBe('This complex equation is too large to solve once split into real and imaginary parts — reduce the nesting or the powers.');
-    expect(last(['f(w) = w*w + w', nest(2, 'i')]).cls!.plot.type).toBe('point');
+    expect(last(['f(w) = w*w + w', nest(2, 'i')]).cpu!.type).toBe('point');
     expect(last(['f(w) = w*w + w', nest(10, 'i')]).error).toMatch(/^This complex point is too large to evaluate/);
   }, 60000);
 
@@ -387,7 +390,7 @@ describe('revolve(f) through analyze()', () => {
   const plot = (texts: string[], at = texts.length - 1) => {
     const row = analyze(texts).rows[at];
     expect(row.error).toBeUndefined();
-    return row.cls!.plot;
+    return row.gpu!;
   };
 
   it('is exactly the hand-written implicit surface: same field, same gradient, so the same shader', () => {
@@ -397,8 +400,8 @@ describe('revolve(f) through analyze()', () => {
     expect(plot(['revolve(1 + z/2, z)'])).toEqual(plot(['x^2 + y^2 = (1 + z/2)^2']));
     expect(plot(['revolve(2)'])).toEqual(plot(['y^2 + z^2 = 2^2'])); // no axis variable: a cylinder
     const a = analyze(['revolve(sqrt(x))']).rows[0];
-    expect(a.cls).toMatchObject({ plot: { type: 'implicit3d' }, needs3D: true, animated: false });
-    expect((a.cls!.plot as { grad?: unknown }).grad).toBeDefined();
+    expect(a.cls).toMatchObject({ object: { kind: 'surface', form: 'implicit' }, needs3D: true, animated: false });
+    expect((a.gpu! as { grad?: unknown }).grad).toBeDefined();
   });
 
   it('takes the profile as an expression, a call, or a function by name', () => {
@@ -412,16 +415,18 @@ describe('revolve(f) through analyze()', () => {
 
   it('keeps sliders as uniforms and t as animation', () => {
     const row = analyze(['a = 1', 'revolve(a sin(x) + 2 + sin(t))']).rows[1];
-    expect(row.cls).toMatchObject({ plot: { type: 'implicit3d' }, params: ['a'], animated: true });
-    expect((row.cls!.plot as { field: string }).field).toContain('u_a');
+    expect(row.cls).toMatchObject({ object: { kind: 'surface', form: 'implicit' }, params: ['a'], animated: true });
+    expect((row.gpu! as { field: string }).field).toContain('u_a');
   });
 
   it('a no-default piecewise profile bounds the solid: the field is NaN outside it', () => {
     const row = analyze(['revolve({0 < x < 2: sqrt(x)})']).rows[0];
     expect(row.error).toBeUndefined();
-    expect((row.cls!.plot as { field: string }).field).toContain('EQ_NAN');
+    expect((row.gpu! as { field: string }).field).toContain('EQ_NAN');
     // The row's expression is the surface itself, so the CPU agrees.
-    const e = row.expr as { kind: 'eq'; l: never; r: never };
+    if (row.cpu?.type !== 'implicit3d') throw new Error('Expected surface');
+    const e = row.cpu.equation;
+    if (e.kind !== 'eq') throw new Error('Expected equation');
     expect(e.kind).toBe('eq');
     const residual = (x: number) => evaluate({ kind: 'bin', op: '-', a: e.l, b: e.r }, { x, y: 1, z: 0 });
     expect(residual(1)).toBeCloseTo(0);
@@ -434,7 +439,7 @@ describe('revolve(f) through analyze()', () => {
     expect(out(['revolve = 3', '2 revolve'])[1]).toEqual(['value', '= 6']);
     const fn = analyze(['revolve(x) = 2x', 'y = revolve(x) + 1', 'revolve(4)']);
     expect(fn.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
-    expect(fn.rows[1].cls!.plot.type).toBe('implicit2d');
+    expect(fn.rows[1].cpu!.type).toBe('implicit2d');
     expect(fn.rows[2].info).toBe('= 8');
   });
 
@@ -451,9 +456,9 @@ describe('revolve(f) through analyze()', () => {
     expect(err(['revolve(x, y, z)'])).toMatch(/^revolve takes a profile and an optional axis/);
     expect(err(['revolve(i x)'])).toMatch(/complex values cannot be revolved/);
     expect(err(['revolve(w)'])).toMatch(/complex values cannot be revolved/);
-    expect(analyze(['revolve([1, 2])']).rows[0].cls?.plot.type).toBe('family');
-    expect(analyze(['L = [1, 2]', 'revolve(L x)']).rows[1].cls?.plot.type).toBe('family');
-    expect(analyze(['L = [1, 2]', 'revolve(L)']).rows[1].cls?.plot.type).toBe('family');
+    expect(analyze(['revolve([1, 2])']).rows[0].cpu?.type).toBe('family');
+    expect(analyze(['L = [1, 2]', 'revolve(L x)']).rows[1].cpu?.type).toBe('family');
+    expect(analyze(['L = [1, 2]', 'revolve(L)']).rows[1].cpu?.type).toBe('family');
     expect(err(['revolve(x = 1)'])).toMatch(/single real expression in x/);
     expect(err(['revolve(x < 1, y)'])).toMatch(/single real expression in y/);
     expect(err(['A = (1, 2)', 'revolve(A)'])).toBe('revolve is not defined for points.');
@@ -527,19 +532,19 @@ describe('whole-row forms over a random variable', () => {
     expect(analyze(['X ~ Normal(0, 1)', '2 revolve(X)']).rows[1].error).toBe('revolve(…) cannot take a random variable.');
     expect(analyze(['X ~ Normal(0, 1)', 'E(domain(X))']).rows[1].error).toBe('domain(…) cannot take a random variable.');
     // Ordinary derived variables are untouched.
-    expect(analyze(['X ~ Normal(0, 1)', 'X^2 + 1']).rows[1].cls?.plot.type).toBe('density');
+    expect(analyze(['X ~ Normal(0, 1)', 'X^2 + 1']).rows[1].cpu?.type).toBe('density');
   });
 });
 
 describe('coordinate fields over z through analyze()', () => {
-  const types = (rows: string[]) => analyze(rows).rows.map(r => r.error ?? r.cls?.plot.type ?? 'def');
+  const types = (rows: string[]) => analyze(rows).rows.map(r => r.error ?? r.cpu?.type ?? 'def');
   const polar = ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
 
   it('leaves every planar chart row what it was', () => {
     expect(types([...polar, 'r = 1 + cos(theta)', '(r, theta) = (2, pi/4)', '(r, theta) = (3u, 6 pi u)',
       "(r', theta') = (r(1-r), 1)", 'theta = pi', 'theta = 3 + 2 pi']))
       .toEqual(['def', 'def', 'implicit2d', 'system', 'system', 'vfield2d', 'implicit2d', 'implicit2d']);
-    const point = analyze([...polar, '(r, theta) = (2, pi/4)']).rows.at(-1)!.cls!.plot;
+    const point = analyze([...polar, '(r, theta) = (2, pi/4)']).rows.at(-1)!.cpu!;
     expect(point.type === 'system' && point.dim === 2 && point.coordinates?.length === 2).toBe(true);
     // A planar field in a z equation was a surface before fields could use z.
     expect(types(['s = sqrt(x^2+y^2)', 's = 1 + z^2'])).toEqual(['def', 'implicit3d']);

@@ -1,3 +1,4 @@
+import { structuralDiagnostic } from './expr.ts';
 /**
  * Compile a symbolic Expr to a GLSL expression (float-valued).
  *
@@ -301,6 +302,7 @@ export const uniformName = (p: string): string =>
  */
 export function toGLSL(e: Expr): string {
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
     case 'num': return fmt(e.value);
     case 'var': return e.name;
     case 'neg': return `(-${toGLSL(e.a)})`;
@@ -326,6 +328,11 @@ export function toGLSL(e: Expr): string {
       // No float32 twin, on purpose: a pmf is nonzero only AT the integers, a
       // set of measure zero no fragment ever lands on. Rows draw it as stems.
       if (PMF_FNS.has(e.name)) throw new Error('A probability mass function is drawn as stems, not as a curve.');
+      // A Σ/Π is either expanded away or evaluated on the CPU (a sequence
+      // term). It has no shader form.
+      if (e.name === 'sum' || e.name === 'prod') {
+        throw new Error(`${e.name === 'sum' ? 'Σ' : 'Π'} must be expanded before it can be drawn as a curve.`);
+      }
       const name = FN_GLSL[e.name] ?? e.name;
       return `${name}(${e.args.map(toGLSL).join(', ')})`;
     }

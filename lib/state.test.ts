@@ -1,5 +1,7 @@
+import { compileCpu, compileGpu } from './compiler.ts';
+import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { type Definition, buildDefs, compsOf, evalConstEnv, scanDefinition } from './defs.ts';
+import { type Definition, buildDefs, compsOf,  scanDefinition } from './defs.ts';
 import { parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import { classify } from './plot.ts';
@@ -33,7 +35,7 @@ describe('scanDefinition', () => {
     // are the reserved coordinates.
     expect(scanDefinition("y' = x - y")).toBeNull();
     expect(scanDefinition('dy/dx = y')).toBeNull();
-    expect(classify({ kind: 'eq', l: { kind: 'var', name: "y'" }, r: { kind: 'var', name: 'x' } }).plot)
+    expect(compileCpu(classify({ kind: 'eq', l: { kind: 'var', name: "y'" }, r: { kind: 'var', name: 'x' } })))
       .toMatchObject({ type: 'vfield2d' });
   });
 });
@@ -101,7 +103,7 @@ describe('integration', () => {
 describe('states and constants', () => {
   it('lets constants read a state', () => {
     const { defs, values } = run(['E = a^2 + p^2', "a' = p", "p' = -a", 'a(0) = 1'], 1);
-    expect(evalConstEnv(defs, 1, values).E).toBeCloseTo(1, 5);
+    expect(evaluateFrame(defs, 1, values).E).toBeCloseTo(1, 5);
   });
 
   it('feeds a constant back into a derivative', () => {
@@ -115,7 +117,7 @@ describe('states and constants', () => {
     const cls = classify({ kind: 'eq', l: { kind: 'var', name: 'y' }, r: { kind: 'var', name: 'a' } },
       new Set(defs.states.keys()));
     expect(cls.params).toEqual(['a']);
-    expect((cls.plot as { field: string }).field).toContain('u_a');
+    expect((compileGpu(cls) as { field: string }).field).toContain('u_a');
   });
 });
 
@@ -238,14 +240,14 @@ describe('vector states', () => {
     // coordinates are the component states (uniform-backed like constants).
     const lowered = lowerGeom(parseExpr('r'), n => compsOf(defs, n));
     const cls = classify(lowered, new Set(defs.states.keys()));
-    expect(cls.plot).toMatchObject({ type: 'point', dim: 2 });
-    expect(cls.params.sort()).toEqual(['r_1', 'r_2']);
+    expect(compileCpu(cls)).toMatchObject({ type: 'point', dim: 2 });
+    expect([...cls.params].sort()).toEqual(['r_1', 'r_2']);
     // Pickoff: y = r_1 is an ordinary scalar plot in the component state.
     const pick = classify(lowerGeom(parseExpr('y = r_1'), n => compsOf(defs, n)), new Set(defs.states.keys()));
-    expect((pick.plot as { field: string }).field).toContain(uniformName('r_1'));
+    expect((compileGpu(pick) as { field: string }).field).toContain(uniformName('r_1'));
     // The subscript spelling is the same name: y = r₁ picks off the same way.
     const sub = classify(lowerGeom(parseExpr('y = r₁'), n => compsOf(defs, n)), new Set(defs.states.keys()));
-    expect((sub.plot as { field: string }).field).toContain(uniformName('r_1'));
+    expect((compileGpu(sub) as { field: string }).field).toContain(uniformName('r_1'));
   });
 
   it('lowers point arithmetic in derivatives of scalar states', () => {

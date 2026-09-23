@@ -1,3 +1,5 @@
+import { structuralDiagnostic } from './expr.ts';
+import { exprKey } from './expr.ts';
 /**
  * Probability distribution rows.
  *
@@ -65,7 +67,7 @@ import {
 } from './expr.ts';
 import { WHOLE_EXPR_NAMES, usesComplex } from './complex.ts';
 import { GEOM_STATEMENTS } from './geom.ts';
-import type { Classified } from './plot.ts';
+import { freezeClassified, type Classified } from './math-object.ts';
 import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from './defs.ts';
 import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
 import { quadrature } from './integrate.ts';
@@ -330,7 +332,7 @@ export function variableRow(sys: RVSystem, name: string):
   if (exact) return { kind: 'exact', density: densityExpr(exact) };
   const ps = sys.paramsOf(name);
   const kind = discrete ? 'pmf' : 'density';
-  return { kind, cls: { plot: { type: kind, rv: name }, animated: ps.has('t'), needs3D: false, params: [...ps].filter(p => p !== 't') } };
+  return { kind, cls: freezeClassified({ object: { kind: 'distribution', form: kind, rv: name }, animated: ps.has('t'), needs3D: false, params: [...ps].filter(p => p !== 't') }) };
 }
 
 /** A derived row's readout, from RVSystem.moments' verdict: `μ = …, σ = …`
@@ -418,8 +420,8 @@ export interface ProbSpec {
  * two sides lower on their own and the comparison is kept for toProbability.
  */
 export function lowerProbBody(e: Expr, lower: (e: Expr) => Expr): Expr {
-  if (e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]') && e.args.length === 2) {
-    return { ...e, args: e.args.map(lower) };
+  if (e.kind === 'eqtest' && e.args.length === 2) {
+    return { ...e, args: [lower(e.args[0]), lower(e.args[1])] };
   }
   return lower(e);
 }
@@ -430,8 +432,8 @@ const POINT_SHAPE = 'P(… = …) compares single values, like P(X = 3) or P(X =
 export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
   // `=` parses as an equation, `==` and `!=` as the filter comparisons.
   const point = e.kind === 'eq' ? { l: e.l, r: e.r, not: false }
-    : e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]') && e.args.length === 2
-      ? { l: e.args[0], r: e.args[1], not: e.name === '[ne]' }
+    : e.kind === 'eqtest' && e.args.length === 2
+      ? { l: e.args[0], r: e.args[1], not: e.op === '!=' }
       : null;
   if (e.kind !== 'ineq' && !point) throw new Error('P(…) expects an inequality like P(X < 2).');
   const frees = freeVars(e);
@@ -851,6 +853,7 @@ function evalCols(
 ): Float64Array {
   const alloc = () => new Float64Array(n);
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
     case 'num': {
       const out = alloc();
       out.fill(e.value);
@@ -2569,8 +2572,8 @@ function tensor(blocks: Block[], termCount: number): Joint | null {
  *  `a < X <= b` is [a, X, b] with ['<', '<=']; a point event is two terms. */
 function eventShape(body: Expr): { terms: Expr[]; ops: string[] } | null {
   if (body.kind === 'eq') return { terms: [body.l, body.r], ops: ['='] };
-  if (body.kind === 'call' && (body.name === '[eq]' || body.name === '[ne]') && body.args.length === 2) {
-    return { terms: body.args, ops: [body.name === '[eq]' ? '=' : '!='] };
+  if (body.kind === 'eqtest' && body.args.length === 2) {
+    return { terms: body.args, ops: [body.op === '==' ? '=' : '!='] };
   }
   if (body.kind !== 'ineq') return null;
   const comps = ineqComparisons(body);
@@ -3216,7 +3219,10 @@ function curvePP(p: PPoly): number[] {
  * and an edited definition can never serve stale samples.
  */
 export class RVSystem {
-  private rvs = new Map<string, RV>();
+  private declarations: ReadonlyMap<string, RV> = new Map();
+  private readonly anonymous = new Map<string, RV>();
+  /** Derived index only; named declarations remain owned by the provider. */
+  private rvs: ReadonlyMap<string, RV> = this.declarations;
   private cache = new Map<string, CacheEntry>();
   private paramsMemo = new Map<string, ReadonlySet<string>>();
   private defSigMemo = new Map<string, string>();
@@ -3227,7 +3233,9 @@ export class RVSystem {
 
   /** Start a recompile: drop declarations, keep sample caches. */
   reset(): void {
-    this.rvs.clear();
+    this.declarations = new Map();
+    this.anonymous.clear();
+    this.rvs = this.declarations;
     this.paramsMemo.clear();
     this.defSigMemo.clear();
     this.affineMemo.clear();
@@ -3236,9 +3244,19 @@ export class RVSystem {
     this.basesMemo.clear();
   }
 
-  /** Declare a variable. */
-  add(rv: RV): void {
-    this.rvs.set(rv.name, rv);
+  /** Attach canonical declarations without discarding numerical sample caches. */
+  useDeclarations(declarations: ReadonlyMap<string, RV>): void {
+    this.reset();
+    this.declarations = declarations;
+    this.rvs = declarations;
+  }
+
+  /** Expression rows have engine-owned names outside the user namespace. */
+  addAnonymous(rv: RV): void {
+    if (!rv.name.startsWith('@')) throw new Error('Anonymous random variables need an internal name.');
+    if (this.declarations.has(rv.name)) throw new Error(`${rv.name} is already defined.`);
+    this.anonymous.set(rv.name, rv);
+    this.rvs = new Map([...this.declarations, ...this.anonymous]);
   }
 
   /**
@@ -3323,10 +3341,6 @@ export class RVSystem {
       + ' a continuous value equals any given one with probability 0. Ask about an interval, like P(a < … < b).');
   }
 
-  delete(name: string): void {
-    this.rvs.delete(name);
-  }
-
   has(name: string): boolean {
     return this.rvs.has(name);
   }
@@ -3375,28 +3389,7 @@ export class RVSystem {
   }
 
   /** Detect definition cycles; returns per-variable errors. */
-  validate(): Map<string, string> {
-    const broken = new Map<string, string>();
-    const state = new Map<string, 'visiting' | 'done'>();
-    const visit = (name: string, path: string[]): void => {
-      const rv = this.rvs.get(name);
-      if (!rv || state.get(name) === 'done') return;
-      if (state.get(name) === 'visiting') {
-        const cycle = path.slice(path.indexOf(name)).concat(name);
-        for (const cn of cycle) broken.set(cn, `${cycle.join(' → ')} is circular.`);
-        return;
-      }
-      state.set(name, 'visiting');
-      if (rv.kind === 'derived') {
-        for (const dep of freeVars(rv.expr)) {
-          if (this.rvs.has(dep)) visit(dep, [...path, name]);
-        }
-      }
-      state.set(name, 'done');
-    };
-    for (const name of this.rvs.keys()) visit(name, []);
-    return broken;
-  }
+  validate(): Map<string, string> { return validateDeclarations(this.rvs); }
 
   /** Non-random free names the variable depends on, transitively (may include 't'). */
   paramsOf(name: string): ReadonlySet<string> {
@@ -3614,7 +3607,7 @@ export class RVSystem {
       else if (dist.kind === 'exponential') [al, be] = [num(1), dist.args[0]];
       else return null;
       const b = numOf(be);
-      const key = b !== null ? `#${b / c}` : `${JSON.stringify(be)}/${c}`;
+      const key = b !== null ? `#${b / c}` : `${exprKey(be)}/${c}`;
       if (rateKey !== null && key !== rateKey) return null;
       rateKey = key;
       rate ??= b !== null ? num(b / c) : c === 1 ? be : bin('/', be, num(c));
@@ -3649,7 +3642,7 @@ export class RVSystem {
       kind = d.kind;
       if (d.kind !== 'poisson') {
         const value = numOf(d.args[1]);
-        const key = value !== null ? `#${value}` : JSON.stringify(d.args[1]);
+        const key = value !== null ? `#${value}` : exprKey(d.args[1]);
         if (pKey !== null && key !== pKey) return null;
         pKey = key;
         p ??= d.args[1];
@@ -3786,9 +3779,9 @@ export class RVSystem {
     const rv = this.rvs.get(name);
     let s: string;
     if (!rv) s = '@missing';
-    else if (rv.kind === 'base') s = rv.dist.kind + JSON.stringify(rv.dist.args);
+    else if (rv.kind === 'base') s = rv.dist.kind + exprKey(rv.dist.args);
     else {
-      s = JSON.stringify(rv.expr);
+      s = exprKey(rv.expr);
       for (const dep of [...freeVars(rv.expr)].sort()) {
         if (this.rvs.has(dep)) s += `|${dep}:${this.defSig(dep, seen)}`;
       }
@@ -4102,7 +4095,7 @@ export class RVSystem {
       }
       if (!Object.keys(sub).length) break;
       e = substVars(e, sub);
-      if (JSON.stringify(e).length > 200_000) e = null;
+      if (exprKey(e).length > 200_000) e = null;
     }
     return e;
   }
@@ -4739,6 +4732,29 @@ export class RVSystem {
   }
 }
 
+function validateDeclarations(declarations: ReadonlyMap<string, RV>): Map<string, string> {
+    const broken = new Map<string, string>();
+    const state = new Map<string, 'visiting' | 'done'>();
+    const visit = (name: string, path: string[]): void => {
+      const rv = declarations.get(name);
+      if (!rv || state.get(name) === 'done') return;
+      if (state.get(name) === 'visiting') {
+        const cycle = path.slice(path.indexOf(name)).concat(name);
+        for (const cn of cycle) broken.set(cn, `${cycle.join(' → ')} is circular.`);
+        return;
+      }
+      state.set(name, 'visiting');
+      if (rv.kind === 'derived') {
+        for (const dep of freeVars(rv.expr)) {
+          if (declarations.has(dep)) visit(dep, [...path, name]);
+        }
+      }
+      state.set(name, 'done');
+    };
+    for (const name of declarations.keys()) visit(name, []);
+    return broken;
+}
+
 // --- building the system from scanned rows ---
 
 export interface BuildRVOpts {
@@ -4751,6 +4767,8 @@ export interface BuildRVOpts {
 }
 
 export interface BuiltRVs {
+  /** Prepared declarations; callers transfer ownership to their Env. */
+  declarations: ReadonlyMap<string, RV>;
   /** Every declared name, healthy or not — the set P(…) and bare rows resolve against. */
   names: ReadonlySet<string>;
   /** Row index → the variable it declares. */
@@ -4765,8 +4783,8 @@ export interface BuiltRVs {
  * depends on a failed variable, reporting per-row errors. Shared by the app
  * and the worker so both accept exactly the same documents.
  */
-export function buildRVSystem(sys: RVSystem, scan: ReturnType<typeof scanRandomRows>, opts: BuildRVOpts): BuiltRVs {
-  sys.reset();
+export function buildRVDeclarations(scan: ReturnType<typeof scanRandomRows>, opts: BuildRVOpts): BuiltRVs {
+  const declarations = new Map<string, RV>();
   const names = new Set([...scan.base.values(), ...scan.derived.values()].map(d => d.name));
   const rowRV = new Map<number, string>();
   const errors = new Map<number, string>();
@@ -4779,7 +4797,7 @@ export function buildRVSystem(sys: RVSystem, scan: ReturnType<typeof scanRandomR
     const builtin = builtinFn(name);
     if (RESERVED.has(name) || (builtin && !SHADOWABLE_FNS.has(builtin))) {
       errors.set(i, `Cannot use ${name} as a random variable name.`);
-    } else if (sys.has(name) || opts.taken(name)) {
+    } else if (declarations.has(name) || opts.taken(name)) {
       errors.set(i, `${name} is already defined.`);
     } else {
       rowOf.set(name, i);
@@ -4799,7 +4817,7 @@ export function buildRVSystem(sys: RVSystem, scan: ReturnType<typeof scanRandomR
         }
         checkDerived(a, new Set(), opts.constNames);
       }
-      sys.add({ name, kind: 'base', dist: d });
+      declarations.set(name, { name, kind: 'base', dist: d });
     } catch (e) {
       errors.set(i, e instanceof Error ? e.message : String(e));
     }
@@ -4809,25 +4827,25 @@ export function buildRVSystem(sys: RVSystem, scan: ReturnType<typeof scanRandomR
     try {
       const expr = resolveExpr(parseExpr(rhs, opts.fnNames), opts.getFn, opts.ropts);
       checkDerived(expr, names, opts.constNames);
-      sys.add({ name, kind: 'derived', expr });
+      declarations.set(name, { name, kind: 'derived', expr });
     } catch (e) {
       errors.set(i, e instanceof Error ? e.message : String(e));
     }
   }
 
   // Cycles, then the ripple: a variable whose dependency failed fails too.
-  const failed = sys.validate();
-  for (const name of failed.keys()) sys.delete(name);
+  const failed = validateDeclarations(declarations);
+  for (const name of failed.keys()) declarations.delete(name);
   let changed = true;
   while (changed) {
     changed = false;
     for (const name of rowOf.keys()) {
-      const rv = sys.get(name);
+      const rv = declarations.get(name);
       if (rv?.kind !== 'derived') continue;
       for (const dep of freeVars(rv.expr)) {
-        if (names.has(dep) && !sys.has(dep)) {
+        if (names.has(dep) && !declarations.has(dep)) {
           failed.set(name, `${dep} has an error in its definition.`);
-          sys.delete(name);
+          declarations.delete(name);
           changed = true;
           break;
         }
@@ -4838,5 +4856,13 @@ export function buildRVSystem(sys: RVSystem, scan: ReturnType<typeof scanRandomR
     const row = rowOf.get(name);
     if (row !== undefined && !errors.has(row)) errors.set(row, message);
   }
-  return { names, rowRV, errors };
+  return { names, rowRV, errors, declarations };
+}
+
+/** Convenience for standalone probability clients; document analysis attaches
+ * its Env declaration provider directly. */
+export function buildRVSystem(sys: RVSystem, scan: ReturnType<typeof scanRandomRows>, opts: BuildRVOpts): BuiltRVs {
+  const built = buildRVDeclarations(scan, opts);
+  sys.useDeclarations(built.declarations);
+  return built;
 }

@@ -1,5 +1,6 @@
+import { emptyEnv } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { buildDefs, emptyDefs, scanDefinition, type Definition } from './defs.ts';
+import { buildDefs,  scanDefinition, type Definition } from './defs.ts';
 import { parseCsv } from './csv.ts';
 import { syntaxHelp } from './syntax-help.ts';
 
@@ -75,7 +76,7 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('T(', 2, defs()).hint).toBeUndefined();
     // A user's own T(…) keeps its signature even there.
     const d = defs();
-    d.fns.set('T', { params: ['q'], body: { kind: 'var', name: 'q' } });
+    d.bind('T', { tag: 'fn', fn: { params: ['q'], body: { kind: 'var', name: 'q' } } });
     expect(syntaxHelp('X ~ T(', 6, d).hint).toContain('T(q)');
   });
   it('reads a distribution name only at the head of a ~ row, not inside its arguments', () => {
@@ -91,7 +92,7 @@ describe('contextual syntax help', () => {
     expect(hint('X ~  gamma (')).toContain('Gamma(shape, rate)');
     // Over declared data these names are models, as the row itself will be read.
     const d = defs();
-    d.lists.set('Y', { kind: 'list', items: [] } as never);
+    d.bind('Y', { tag: 'seq', value: { representation: 'sequence', sequence: { kind: 'list', items: [] } } });
     expect(syntaxHelp('Y ~ gamma(', 10, d).hint).toContain('gamma(x)');
     expect(syntaxHelp('Y ~ Weibull(', 12, d).hint).toContain('Weibull(shape, scale)');
   });
@@ -99,12 +100,12 @@ describe('contextual syntax help', () => {
     const d = defs();
     expect(syntaxHelp('wave(', 5, d).hint).toContain('wave(x)');
     expect(syntaxHelp('Wave(', 5, d).hint).toBeUndefined();
-    d.fns.set('Normal', { params: ['q'], body: { kind: 'var', name: 'q' } });
+    d.bind('Normal', { tag: 'fn', fn: { params: ['q'], body: { kind: 'var', name: 'q' } } });
     expect(syntaxHelp('Normal(', 7, d).hint).toContain('Normal(q)');
     expect(syntaxHelp('NORMAL(', 7, d).hint).toContain('Normal(mean, sd)');
   });
   it('honors user shadowing of builtins', () => {
-    const d = emptyDefs(); d.consts.set('mean', {kind:'num',value:3});
+    const d = emptyEnv(); d.bind('mean', { tag: 'scalar', role: 'const', expr: {kind:'num',value:3} });
     expect(syntaxHelp('mea', 3, d).suggestions.find(s => s.name === 'mean')?.call).toBe(false);
     expect(syntaxHelp('mean(', 5, d).hint).toBeUndefined();
     expect(syntaxHelp('Mean(', 5, d).hint).toBeUndefined();
@@ -135,13 +136,13 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('\\v', 2, defs()).suggestions.some(s => s.name === 'vector')).toBe(true);
   });
   it('completes user definitions with Greek names', () => {
-    const d = emptyDefs(); d.consts.set('θmax', {kind:'num',value:3});
+    const d = emptyEnv(); d.bind('θmax', { tag: 'scalar', role: 'const', expr: {kind:'num',value:3} });
     expect(syntaxHelp('θ', 1, d).suggestions.map(s => s.name)).toEqual(['θmax']);
   });
   it('reads a subscript spelling as its canonical name', () => {
-    const d = emptyDefs();
-    d.fns.set('f_1', { params: ['x'], body: { kind: 'num', value: 0 } });
-    d.fns.set('a_12', { params: ['x'], body: { kind: 'num', value: 0 } });
+    const d = emptyEnv();
+    d.bind('f_1', { tag: 'fn', fn: { params: ['x'], body: { kind: 'num', value: 0 } } });
+    d.bind('a_12', { tag: 'fn', fn: { params: ['x'], body: { kind: 'num', value: 0 } } });
     expect(syntaxHelp('f₁(', 3, d).hint).toContain('f_1(x)'); // call hint via f₁(
     expect(syntaxHelp('a₁', 2, d).suggestions.map(s => s.name)).toEqual(['a_12']);
   });

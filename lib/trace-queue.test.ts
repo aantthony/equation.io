@@ -1,6 +1,7 @@
+import { evaluateFrame } from './env.ts';
 import { expect, it } from 'vitest';
 import { TraceQueue, traceEnvironment, type TraceInput, type TraceMessage } from './trace-queue.ts';
-import { evalConstEnv } from './defs.ts';
+
 import { analyze } from '../worker/graph.ts';
 const input: TraceInput = { residuals: [], dim: 2, lo: [-1, -1], hi: [1, 1], env: {} };
 const result = { pts: [[1, 2]] };
@@ -71,7 +72,7 @@ const environmentFor = (rows: string[]) => {
   const keys = traceEnvironment(cls.params, cls.animated, a.defs);
   return (time: number, states: Record<string, number> = {}) => {
     const seed = Object.fromEntries(Object.entries(states).filter(([n]) => a.defs.states.has(n)));
-    return keys(evalConstEnv(a.defs, time, seed), time);
+    return keys(evaluateFrame(a.defs, time, seed), time);
   };
 };
 

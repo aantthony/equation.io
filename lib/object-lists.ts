@@ -1,9 +1,12 @@
+import type { ValueDefinitions } from './env.ts';
+import { rowsAsPoints } from './geom.ts';
+import { mapChildren } from './expr.ts';
 import { exceedsNodes } from './size.ts';
 /** Lift lists in object positions before scalar geometry lowering. Existing
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
-import { type Defs, type ResolveOpts, compsOf, listGetter } from './defs.ts';
+import { type ResolveOpts, compsOf, listGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
-import { COMP_FN, type Expr, freeVars, sameList } from './expr.ts';
+import { type Expr, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists, withAxes } from './list.ts';
 
@@ -66,11 +69,11 @@ const holdsFigure = (e: Expr): boolean => {
   }
 };
 
-export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named = false): Expr {
+export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts = {}, named = false): Expr {
   const plotVariable = (v: string) => ['x', 'y', 'z', 'u', 'v'].includes(v) || defs.fields.has(v);
   const baseGet = listGetter(defs);
   const get = (name: string): Expr | null => baseGet(name) ?? (defs.mats.has(name)
-    ? { kind: 'list', items: defs.mats.get(name)!.map(items => ({ kind: 'vec', items })) } : null);
+    ? rowsAsPoints(defs.mats.get(name)!, name) : null);
   // One answer per node: the argument of f(P) is shared by every component
   // that reads it, and has to stay one node to be lowered once.
   const indexed = new WeakMap<Expr, Expr>();
@@ -80,7 +83,7 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
     return out;
   };
   const indicesOf = (n: Expr): Expr => {
-    if (n.kind === 'call' && n.name === '[index]') return lowerLists(n, get, opts, true);
+    if (n.kind === 'index') return lowerLists(n, get, opts, true);
     switch (n.kind) {
       case 'call': return { ...n, args: n.args.map(indices) };
       case 'bin': return { ...n, a: indices(n.a), b: indices(n.b) };
@@ -88,7 +91,7 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
       case 'eq': case 'ineq': return { ...n, l: indices(n.l), r: indices(n.r) };
       case 'vec': case 'list': return sameList(n, { ...n, items: n.items.map(indices) });
       case 'piecewise': return { ...n, cases: n.cases.map(c => ({ cond: indices(c.cond), value: indices(c.value) })), otherwise: n.otherwise && indices(n.otherwise) };
-      default: return n;
+      default: return mapChildren(n, indices);
     }
   };
   if (!exceedsNodes(e, 32768)) e = indices(e);
@@ -108,8 +111,8 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
   const listValueOf = (e: Expr): ListValue | null => {
     let value: Expr;
     if (e.kind === 'var' && defs.mats.has(e.name)) {
-      const items = defs.mats.get(e.name)!.map((items): Expr => ({ kind: 'vec', items }));
-      return { items, axes: [{ id: `${e.name}#0`, n: items.length }] };
+      const rows = rowsAsPoints(defs.mats.get(e.name)!, e.name);
+      return { items: rows.items, axes: axesOf(rows) };
     }
     try { value = ordinary(e); } catch { return null; }
     if (value.kind === 'list') return { items: value.items, axes: axesOf(value) };
@@ -199,25 +202,24 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
           return otherwise === n.otherwise && cases.every((c, k) => c.cond === n.cases[k].cond && c.value === n.cases[k].value)
             ? n : { ...n, cases, otherwise };
         }
-        case 'call': {
-          const args = all(n.args);
-          const call = args === n.args ? n : { ...n, args };
-          if (n.name !== COMP_FN) return call;
-          const [value, kArg, nArg] = args;
+        case 'comp': {
+          const value = walk(n.value);
+          const call = value === n.value ? n : { ...n, value };
           let pts = points.get(value);
           if (pts === undefined) {
             try { pts = lowerObjects(value, defs, opts, true); } catch { pts = null; }
             points.set(value, pts);
           }
-          const dim = (nArg as Expr & { kind: 'num' }).value;
+          const dim = n.arity;
           // (Anything else — one point, a wrong dimension — is the ordinary path's to judge.)
           if (pts?.kind !== 'list' || !pts.items.length || !pts.items.every(p => p.kind === 'vec' && p.items.length === dim)) return call;
-          const k = (kArg as Expr & { kind: 'num' }).value;
+          const k = n.index;
           const coords = withAxes<Expr>({ kind: 'list', items: pts.items.map(p => (p as Expr & { kind: 'vec' }).items[k]) }, axesOf(pts));
           settledLists.add(coords);
           return coords;
         }
-        default: return n;
+        case 'call': return mapChildren(n, walk);
+        default: return mapChildren(n, walk);
       }
     };
     return walk(root);
@@ -252,8 +254,9 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
         case 'eq': case 'ineq': return { ...node, l: visit(node.l), r: visit(node.r) };
         case 'vec': return { ...node, items: map(node.items) };
         case 'call': return { ...node, args: node.args.map(n => visit(n, false)) };
+        case 'comp': return { ...node, value: visit(node.value, false) };
         case 'piecewise': return { ...node, cases: node.cases.map(c => ({ cond: visit(c.cond), value: visit(c.value) })), otherwise: node.otherwise && visit(node.otherwise) };
-        default: return node;
+        default: return mapChildren(node, n => visit(n, asMatrix));
       }
     };
     const template = visit(source);
@@ -291,7 +294,7 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
         case 'vec': return { ...node, items: map(node.items) };
         case 'call': return { ...node, args: map(node.args) };
         case 'piecewise': return { ...node, cases: node.cases.map(c => ({ cond: instantiate(c.cond, k), value: instantiate(c.value, k) })), otherwise: node.otherwise && instantiate(node.otherwise, k) };
-        default: return node;
+        default: return mapChildren(node, n => instantiate(n, k));
       }
     };
     const objects = outside || source.kind === 'eq' || source.kind === 'ineq' || [...freeVars(source)].some(plotVariable)
@@ -301,11 +304,11 @@ export function lowerObjects(e: Expr, defs: Defs, opts: ResolveOpts = {}, named 
     if (objects && n > limit) throw new Error(`An object family needs 1–${limit} members (got ${n}).`);
     const members = Array.from({ length: n }, (_, k) => (outside ? lowerObjects(instantiate(template, k), defs, opts) : ordinary(instantiate(template, k))));
     const valuesOnly = members.every(m => ![...freeVars(m)].some(plotVariable)
-      && m.kind !== 'eq' && m.kind !== 'ineq' && !(m.kind === 'call' && (/^\[(polygon|segment|polyline|vector|square|hull|trail|hist)/.test(m.name) || (GEOM_STATEMENTS.has(m.name) || WHOLE_EXPR_NAMES.has(m.name)))));
+      && !['figure', 'trail', 'hist', 'family'].includes(m.kind) && m.kind !== 'eq' && m.kind !== 'ineq' && !(m.kind === 'call' && (/^\[(polygon|segment|polyline|vector|square|hull|trail|hist)/.test(m.name) || (GEOM_STATEMENTS.has(m.name) || WHOLE_EXPR_NAMES.has(m.name)))));
     // (Over the instances it was expanded along: Q = P + (1, 0) moves with P.)
     if (valuesOnly) return withAxes({ kind: 'list', items: members }, axes);
     if (n > limit) throw new Error(`An object family has at most ${limit} members.`);
     if (named) throw new Error('An object family is a whole row; give it a row of its own.');
-    return { kind: 'call', name: '[family]', args: members };
+    return { kind: 'family', members };
   }
 }

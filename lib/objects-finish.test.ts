@@ -1,8 +1,9 @@
+import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
 import { canRenderOg, renderRaster } from '../worker/og.ts';
 import { evaluate, parseExpr } from './expr.ts';
-import { evalConstEnv } from './defs.ts';
+
 import { fieldEvaluator, FLOW_GLYPH_N, FLOW_SEEDS, FLOW_STEPS, streamline, traceField } from './flow.ts';
 import { traceIntersection, INTERSECTION_BRANCHES, INTERSECTION_STEPS } from './intersection.ts';
 import { certifySystem, nextFloat, iadd, imul } from './certify.ts';
@@ -13,7 +14,7 @@ const runRows = (rows: string[]) => {
   expect(a.rows.map(r => r.error)).toEqual(rows.map(() => undefined));
   return a;
 };
-const last = (rows: string[]) => runRows(rows).rows.at(-1)!.cls!;
+const last = (rows: string[]) => runRows(rows).rows.at(-1)!;
 const exprs = (s: string[]) => s.map(e => parseExpr(e));
 
 describe('3D objects across definition, analysis and rendering', () => {
@@ -22,18 +23,18 @@ describe('3D objects across definition, analysis and rendering', () => {
     expect(a.constEnv.C_x).toBe(-3); expect(a.constEnv.C_z).toBe(1);
     expect(a.constEnv.D_z).toBe(1.5);
     expect(a.rows[5].info).toBe('= 3'); expect(a.rows[6].info).toBe('≈ 1.5708');
-    for (const r of a.rows.slice(7)) expect(r.cls).toMatchObject({ needs3D: true, plot: { type: 'polygon', dim: 3 } });
+    for (const r of a.rows.slice(7)) expect({ cls: r.cls, cpu: r.cpu }).toMatchObject({ cls: { needs3D: true }, cpu: { type: 'polygon', dim: 3 } });
     const bad = analyze(['A=(1,2,3)', 'perp(A)', 'angle(A,(1,2))']);
     expect(bad.rows[1].error).toMatch(/2D/); expect(bad.rows[2].error).toMatch(/matching dimensions/);
-    const zero = runRows(['angle((0,0,0),(1,0,0))']).rows[0].cls!.plot;
+    const zero = runRows(['angle((0,0,0),(1,0,0))']).rows[0].cpu!;
     expect(zero.type).toBe('value'); if (zero.type === 'value') expect(evaluate(zero.expr, {})).toBeNaN();
   });
   it('lowers a 3D chart by its Jacobian, including time-dependent chart drift', () => {
     const a = runRows(['r=sqrt(x^2+y^2)', 'theta=atan2(y,x)', "(r',theta',z')=(0,1,2)"]);
-    const p = a.rows.at(-1)!.cls!.plot;
+    const p = a.rows.at(-1)!.cpu!;
     expect(p.type).toBe('vfield3d');
     if (p.type === 'vfield3d') expect(fieldEvaluator(p.comps)([2,0,0])).toEqual([0,2,2]);
-    const moving = last(['q=x+t', "(q',y',z')=(0,0,0)"]).plot;
+    const moving = last(['q=x+t', "(q',y',z')=(0,0,0)"]).cpu!;
     if (moving.type === 'vfield3d') expect(fieldEvaluator(moving.comps, { t: 4 })([2,0,0])).toEqual([-1,0,0]);
     const f = fieldEvaluator(exprs(['x', 'y']));
     const u = f([1, 2]), v = f([3, 4]);
@@ -63,28 +64,28 @@ describe('3D objects across definition, analysis and rendering', () => {
 describe('object families and sequence values', () => {
   it('shares shader source across zipped members and uses per-draw uniforms', () => {
     for (const row of ['y=[1,2,3]x', 'x^2+y^2=[1,4,9]', 'circle((0,0),[1,2,3])', 'x<[1,2,3]', 'revolve([1,2,3]x)', '(u,v,[1,2,3]u v)', '([1,2,3]y,-x)']) {
-      const p = last([row]).plot;
+      const p = last([row]).gpu!;
       expect(p.type, row).toBe('family');
       if (p.type !== 'family') continue;
       expect(p.members.length).toBe(3);
-      expect(new Set(p.members.map(m => JSON.stringify(m.cls.plot))).size, row).toBe(1);
-      expect(p.members.map(m => Object.values(m.cls.uniforms!)[0])).toEqual([0,1,2]);
-      expect(p.members[0].cls.params.every(n => !('u_' + n).includes('__'))).toBe(true);
+      expect(new Set(p.members.map(m => JSON.stringify({ ...m, uniforms: undefined }))).size, row).toBe(1);
+      expect(p.members.map(m => Object.values(m.uniforms!)[0])).toEqual([0,1,2]);
+      expect(p.members[0].params.every(n => !('u_' + n).includes('__'))).toBe(true);
     }
   });
   it('supports point lists, named arithmetic, paths and CPU families', () => {
     const a = runRows(['P=[(0,0),(1,1),(2,0)]', 'Q=P+(2,3)', 'Q', 'polyline(Q)', 'polygon(P)', 'distance(P[1],P[2])', 'segment((0,0),([1,2,3],1))', '(cos(u),sin(u),[1,2,3])']);
-    expect(a.rows[2].cls!.plot.type).toBe('plist');
-    expect(a.rows[3].cls!.plot.type).toBe('polygon');
+    expect(a.rows[2].cpu!.type).toBe('plist');
+    expect(a.rows[3].cpu!.type).toBe('polygon');
     expect(a.rows[5].info).toBe('≈ 1.41421');
-    expect(a.rows[6].cls!.plot.type).toBe('family');
+    expect(a.rows[6].cpu!.type).toBe('family');
     expect(a.rows[7].cls!.needs3D).toBe(true);
-    expect(last(['P=([1..100],0)', 'P+(1,1)']).plot.type).toBe('plist');
-    expect(last(['s=x^2', '[1,2]s']).plot.type).toBe('family');
+    expect(last(['P=([1..100],0)', 'P+(1,1)']).cpu!.type).toBe('plist');
+    expect(last(['s=x^2', '[1,2]s']).cpu!.type).toBe('family');
   });
   it('crosses independent lists and zips every use of the same one', () => {
     const pts = (rows: string[]) => {
-      const p = last(rows).plot;
+      const p = last(rows).cpu!;
       if (p.type !== 'plist') throw new Error(p.type);
       return p.pts.map(pt => pt.map(c => evaluate(c, {})).join());
     };
@@ -95,7 +96,7 @@ describe('object families and sequence values', () => {
     expect(pts(['a=[1..4]', '(a[a>2],a[a>2]^2)'])).toEqual(['3,9', '4,16']);
     expect(pts(['a_n=2n', 'n=[1..3]', '(n,a_[n])'])).toEqual(['1,2', '2,4', '3,6']);
     const family = (rows: string[]) => {
-      const p = last(rows).plot;
+      const p = last(rows).cpu!;
       return p.type === 'family' ? p.members.length : 0;
     };
     expect(family(['y=[1,2]x+[1,2,3]'])).toBe(6);
@@ -105,7 +106,7 @@ describe('object families and sequence values', () => {
   });
   it('builds regular figures from a list of turns', () => {
     const pts = (rows: string[]) => {
-      const a = runRows(rows); const p = a.rows.at(-1)!.cls!.plot;
+      const a = runRows(rows); const p = a.rows.at(-1)!.cpu!;
       if (p.type !== 'plist') throw new Error(p.type);
       return p.pts.map(pt => pt.map(c => +evaluate(c, a.constEnv).toFixed(3)).join());
     };
@@ -115,15 +116,15 @@ describe('object families and sequence values', () => {
     const ico = pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'e^(k cross((1,1,1)/sqrt(3))) (0,[-1,1],[-phi,phi])']);
     expect(new Set(ico).size).toBe(12);
     expect(ico).toEqual(pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'rotate((0,[-1,1],[-phi,phi]),k,(1,1,1))']));
-    expect(last(['th=2pi [0..4]/5', 'polygon(rotate((1,0),th))']).plot).toMatchObject({ type: 'polygon' });
-    const spokes = last(['th=2pi [0..4]/5', 'segment((0,0),rotate((1,0),th))']).plot;
+    expect(last(['th=2pi [0..4]/5', 'polygon(rotate((1,0),th))']).cpu!).toMatchObject({ type: 'polygon' });
+    const spokes = last(['th=2pi [0..4]/5', 'segment((0,0),rotate((1,0),th))']).cpu!;
     expect(spokes.type === 'family' && spokes.members.length).toBe(5);
   });
   it('draws a whole lattice of arrows: figure families are CPU-cheap, so their cap is 1024', () => {
-    const arrows = last(['a=[0..20]', 'b=[0..20]', 'f(x,y)=(x+y/2,y+sin(x)/2)', 'vector((a,b),f(a,b))']).plot;
+    const arrows = last(['a=[0..20]', 'b=[0..20]', 'f(x,y)=(x+y/2,y+sin(x)/2)', 'vector((a,b),f(a,b))']).cpu!;
     expect(arrows.type === 'family' && arrows.members.length).toBe(441);
-    expect(arrows.type === 'family' && arrows.members[0].cls.plot).toMatchObject({ type: 'polygon', arrow: true });
-    const space = last(['a=[0..3]', 'b=[0..3]', 'segment((a,b,0),(a,b,1+a b/4))']).plot;
+    expect(arrows.type === 'family' && arrows.members[0].cpu).toMatchObject({ type: 'polygon', arrow: true });
+    const space = last(['a=[0..3]', 'b=[0..3]', 'segment((a,b,0),(a,b,1+a b/4))']).cpu!;
     expect(space.type === 'family' && space.members.length).toBe(16);
     expect(analyze(['a=[0..40]', 'b=[0..40]', 'segment((a,b),(a+1,b))']).rows[2].error).toMatch(/1–1024 members \(got 1681\)/);
   });
@@ -139,10 +140,16 @@ describe('object families and sequence values', () => {
     expect(a.constEnv.m).toBeCloseTo(2); expect(a.constEnv.b).toBeCloseTo(1); expect(a.rows[4].info).toBe('= 6');
     const r = runRows(['r=2', 'a_0=.2', 'a_{n+1}=r a_n', 'a_3', 'a_[0..5]', 'y=a_3 x']);
     expect(r.rows[3].info).toBe('= 1.6');
-    const env = evalConstEnv(r.defs,0); expect(env.eqioSeq_a_5).toBeCloseTo(6.4);
+    const env = evaluateFrame(r.defs,0); expect(env.eqioSeq_a_5).toBeCloseTo(6.4);
     expect([...r.defs.consts].filter(([k]) => k.startsWith('eqioSeq_')).length).toBe(6);
-    expect(last(['a_{n+1}=a_n+t', 'a_3']).plot.type).toBe('value');
+    expect(last(['a_{n+1}=a_n+t', 'a_3']).cpu!.type).toBe('value');
     expect(analyze(['a_n=n','a_[1001]']).rows[1].error).toMatch(/0 to 1000/);
+    // A sum up to the index is a number once a concrete term is named.
+    const tri = runRows(['a_n=Σ(s=1..n, s)', 'a_5', 'y=a_4']);
+    expect(tri.rows[1].info).toBe('= 15');
+    const curve = tri.rows[2].gpu!;
+    expect(curve.type).toBe('implicit2d');
+    if (curve.type === 'implicit2d') expect(curve.field).toContain('10');
   });
 });
 

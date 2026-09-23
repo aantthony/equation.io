@@ -1,3 +1,7 @@
+import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
+import { childrenOf } from './expr.ts';
+import { mapChildren, structuralDiagnostic, legacyCallArgs } from './expr.ts';
+import { exprKey } from './expr.ts';
 /**
  * User definitions and derivative syntax.
  *
@@ -16,7 +20,9 @@
  *   it plots as a vector field.
  * - `sum(n=1..N, …)` / `prod(…)` (also Σ/Π, and `sum[n=1..N] …` binding the
  *   trailing product like d/dx) expand symbolically at resolve time, so the
- *   bounds must be numbers or already-known constants.
+ *   bounds must be numbers or already-known constants. A bound that uses a
+ *   sequence index (`a_n = Σ(s=1..n, s)`) is left as a sum and evaluated
+ *   per term instead.
  * - `int(f dx)` / `int[a..b] f dx` (also ∫) integrate at resolve time:
  *   symbolically when integrate.ts finds a verified antiderivative, and
  *   otherwise by expanding a fixed Gauss–Legendre sum the same way Σ
@@ -26,7 +32,7 @@ import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { COMP_FN, FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, type Expr, builtinFn, canonicalName, compDims, evaluate, markOrigins, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
+import { FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, SUM_MAX_TERMS, type Expr, builtinFn, canonicalName, compDims, evaluate, markOrigins, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -69,88 +75,21 @@ export interface StateDef {
   init: Expr;
 }
 
-export interface Defs {
+/** Temporary construction scratch: never returned, retained, or used at runtime.
+ * Only complete validated owners are committed to Env below. */
+interface BindingDraft {
   sequences: Map<string, SeqScan>;
   sequencePrefix: string;
   consts: Map<string, Expr>;
-  fns: Map<string, FnDef>;
-  /**
-   * Coordinate fields: definitions like `r = sqrt(x^2+y^2)` whose value
-   * depends on position. Fully resolved to free vars in {x, y, z, t, consts}.
-   * Each field substitutes into plots, and a planar one (no z) is a grid
-   * family too (its level sets; see planarField in grid.ts), so `theta = atan2(y,x);
-   * r = 1 + cos(theta)` draws a polar grid and a cardioid, while
-   * `rho = sqrt(x^2+y^2+z^2); rho = 2` only draws the sphere.
-   *
-   * A named vector that depends on position (`s = (x, y)`) stores its
-   * components here too (s_x, s_y). Those substitute like any field so
-   * `dot(s, s) = 1` is the unit circle, but they are not grid families —
-   * see pointComponentNames.
-   */
   fields: Map<string, Expr>;
-  /**
-   * Named points: a pair or triple on the right-hand side, like `A = (0, 0)`
-   * or `C = B + D`. A constant point named A lives in `consts` as the derived
-   * scalar components A_x, A_y (see pointComps). A point that depends on
-   * x, y, or z (`s = (x, y)`) is a vector field: the same name still expands
-   * under geometry lowering, and the components live in `fields` instead.
-   * The name itself never appears in resolved expressions.
-   */
+  fns: Map<string, FnDef>;
   points: Set<string>;
   pointDims: Map<string, number>;
-  /**
-   * Time-integrated states: `a' = …` with `a(0) = …`. Downstream they behave
-   * exactly like constants (uniforms in GLSL, entries in the constant
-   * environment on the CPU); only their value comes from the integrator in
-   * state.ts rather than from a formula.
-   */
   states: Map<string, StateDef>;
-  /**
-   * Vector states by component count: `om' = …` whose derivative (or `om(0)`)
-   * is a 2- or 3-vector. The scalar states om_1, om_2(, om_3) do the
-   * integrating; the base name expands to them wherever expressions lower,
-   * exactly as a point name expands to A_x, A_y.
-   */
   vecStates: Map<string, number>;
-  /**
-   * Named matrices: `M = [(a, b), (c, d)]`. Symbolic row-major entries;
-   * det/trace/matvec/solve expand against them during lowering, so no
-   * matrix survives into anything downstream (see mat.ts).
-   */
   mats: Map<string, Mat>;
-  /**
-   * Named data lists: `L = [1, 4, 2]` or `[1..20]` — scalar elements or
-   * points, in constants/states/t. List lowering (list.ts) substitutes and
-   * broadcasts them wherever rows use the name, so, like matrices, no list
-   * name survives into anything downstream.
-   *
-   * The value keeps whichever representation the definition produced: a
-   * `list` of expressions, the compact `data`/`text` of a column and constant
-   * arithmetic over one (`ages = person.age / 2`), which must not be expanded
-   * here or naming a column would cost what reading it saved — or the `vec` of
-   * columns a scatter zips (`P = (person.age, person.height)`), for the same
-   * reason. Naming one must not change what it is.
-   */
   lists: Map<string, Seq | (Expr & { kind: 'vec' })>;
-  /**
-   * Definitions that needed a data file this device does not have
-   * (`ages = person.age / 2`, `avg = mean(person.age)`): the reason, and
-   * whether the value would have been a list. Registered instead of the
-   * definition, so a row below reports the file rather than degrading into
-   * "ages is not defined" — the same courtesy `tables` does for a column.
-   *
-   * The `list` flag has to be right: it decides whether the name indexes and
-   * whether a filter over it is well formed, and getting it wrong makes a
-   * shared link valid on one device and not the other.
-   */
   missingData: Map<string, { message: string; list: boolean }>;
-  /**
-   * Data files opened by name: `person = open("people.csv", 3a7f…)`. Each
-   * numeric column reads as a list under its dotted name (`person.age`), so
-   * everything lists can do — broadcasting, reductions, scatters — applies to
-   * columns unchanged. `data` is null when the bytes are not on this device
-   * (a shared link elsewhere, or a server-side preview).
-   */
   tables: Map<string, TableDef>;
 }
 
@@ -162,7 +101,7 @@ export interface TableDef {
   missing?: string;
 }
 
-export const emptyDefs = (): Defs => ({
+const emptyDraft = (): BindingDraft => ({
   consts: new Map(),
   fns: new Map(),
   fields: new Map(),
@@ -228,7 +167,7 @@ export function columnExprs(col: Column): Expr[] {
  * `table.column`. Throws (rather than returning null) when the name clearly
  * means a column but cannot produce one, so the row explains itself.
  */
-export function listGetter(defs: Defs): GetList {
+export function listGetter(defs: ValueDefinitions): GetList {
   return name => {
     const hit = defs.lists.get(name);
     if (hit) return hit;
@@ -284,7 +223,7 @@ export function listGetter(defs: Defs): GetList {
 /** Every name that reads as a list, so `L[2]`, `person.age[2]` and
  *  `person[…]` index instead of multiplying (parseExpr needs this before it
  *  parses). Table names count: a data file is indexed by a filter. */
-export function listNamesOf(defs: Defs): Set<string> {
+export function listNamesOf(defs: ValueDefinitions): Set<string> {
   const out = new Set([...defs.mats.keys(), ...defs.lists.keys(), ...[...defs.sequences.keys()].map(n => n + '_')]);
   // A list whose file is elsewhere still indexes: the row must parse the same
   // way on every device (see `indexes` in expr.ts).
@@ -340,7 +279,7 @@ export const shadowedFnNames = (names: Iterable<string>): Set<string> => {
  * `ages = person.age / 2` in a shared link and be rejected as "already
  * defined" by the one person who has the CSV.
  */
-export const nameTaken = (defs: Defs, n: string): boolean =>
+const draftNameTaken = (defs: ValueDefinitions, n: string): boolean =>
   defs.consts.has(n) || defs.fns.has(n) || defs.fields.has(n) || defs.states.has(n)
   || defs.points.has(n) || defs.mats.has(n) || defs.lists.has(n) || defs.tables.has(n)
   || defs.missingData.has(n);
@@ -352,7 +291,7 @@ export const nameTaken = (defs: Defs, n: string): boolean =>
  * to lower. Arithmetic and scalar functions map over a list; a reduction or
  * an index collapses one, and `[ ]` is itself a filter.
  */
-function staysList(e: Expr, defs: Defs): boolean {
+function staysList(e: Expr, defs: ValueDefinitions): boolean {
   switch (e.kind) {
     case 'var':
       return defs.lists.has(e.name) || defs.missingData.get(e.name)?.list === true
@@ -365,11 +304,11 @@ function staysList(e: Expr, defs: Defs): boolean {
     case 'call':
       // A reduction answers with one number however long its argument is,
       // and `[at]`/`[index]` pick one element out.
-      if (SCALAR_REDUCTIONS.has(e.name) || e.name === '[at]' || e.name === '[index]') return false;
+      if (SCALAR_REDUCTIONS.has(e.name)) return false;
       if ((e.name === 'min' || e.name === 'max') && e.args.length === 1) return false;
       // hist is a whole plot, not a value — list.ts refuses it in a filter
       // once the bytes are here, so it must not look list-shaped before then.
-      if (e.name === 'hist' || e.name === '[hist]') return false;
+      if (e.name === 'hist') return false;
       return e.args.some(a => staysList(a, defs));
     case 'vec': return e.items.some(a => staysList(a, defs));
     default: return false;
@@ -385,8 +324,8 @@ function staysList(e: Expr, defs: Defs): boolean {
  */
 /** A mask is a list of comparisons, so a filter condition has to BE one:
  *  `person[5]`, `person[person.age]`, `person[sin(person.age)]` are values. */
-const isComparison = (e: Expr): e is Expr & { kind: 'ineq' | 'call' } =>
-  e.kind === 'ineq' || (e.kind === 'call' && (e.name === '[eq]' || e.name === '[ne]'));
+const isComparison = (e: Expr): e is Expr & { kind: 'ineq' | 'eqtest' } =>
+  e.kind === 'ineq' || (e.kind === 'eqtest');
 
 /** A comparison that decides the same answer for every element is not a
  *  filter, whatever it mentions — `L[1 < 2]`, `L[mean(L) > 0]`, `L[L[1] > 0]`. */
@@ -402,7 +341,7 @@ const DEAD_FILTER = 'A filter has to test the list itself, like L[L > 2]'
  * and `person.age[1 < 2]` is a dead filter everywhere, rather than reported as
  * merely device-local in a shared link and refused for the author.
  */
-export function indexIssue(idx: Expr, defs: Defs): string | null {
+export function indexIssue(idx: Expr, defs: ValueDefinitions): string | null {
   const inside = wholePlotOverList(idx, defs);
   if (inside) return `Lists cannot appear inside ${inside}(…).`;
   if (!isComparison(idx)) return staysList(idx, defs) ? SLICE : null;
@@ -418,7 +357,7 @@ export function indexIssue(idx: Expr, defs: Defs): string | null {
  * Answered from the shape alone, so `person[domain(person.age) > 0]` is
  * refused on the device that cannot lower it as well as on the one that can.
  */
-function wholePlotOverList(e: Expr, defs: Defs): string | null {
+function wholePlotOverList(e: Expr, defs: ValueDefinitions): string | null {
   if (e.kind === 'call') {
     if (NO_LIST_INSIDE.has(e.name) && e.args.some(a => staysList(a, defs))) {
       return plainFnName(e.name);
@@ -429,12 +368,7 @@ function wholePlotOverList(e: Expr, defs: Defs): string | null {
     }
     return null;
   }
-  const kids: Expr[] = e.kind === 'neg' ? [e.a]
-    : e.kind === 'bin' ? [e.a, e.b]
-      : e.kind === 'eq' ? [e.l, e.r]
-        : e.kind === 'ineq' ? [e.l, e.r]
-          : e.kind === 'vec' || e.kind === 'list' ? [...e.items]
-            : [];
+  const kids = childrenOf(e);
   for (const k of kids) {
     const hit = wholePlotOverList(k, defs);
     if (hit) return hit;
@@ -442,7 +376,7 @@ function wholePlotOverList(e: Expr, defs: Defs): string | null {
   return null;
 }
 
-function checkFilterShape(cond: Expr, defs: Defs, shape: string): void {
+function checkFilterShape(cond: Expr, defs: ValueDefinitions, shape: string): void {
   if (!isComparison(cond)) throw new Error(shape);
   const inside = wholePlotOverList(cond, defs);
   if (inside) throw new Error(`Lists cannot appear inside ${inside}(…).`);
@@ -465,8 +399,8 @@ function checkFilterShape(cond: Expr, defs: Defs, shape: string): void {
  * result is a new table, with every column cut to the rows the mask keeps.
  * Returns null when the row is not that shape.
  */
-function filteredTable(e: Expr, defs: Defs, opts: ResolveOpts): TableDef | null {
-  if (e.kind !== 'call' || e.name !== '[index]' || e.args[0]?.kind !== 'var') return null;
+function filteredTable(e: Expr, defs: ValueDefinitions, opts: ResolveOpts): TableDef | null {
+  if (e.kind !== 'index' || e.args[0]?.kind !== 'var') return null;
   const src = defs.tables.get(e.args[0].name);
   if (!src) return null;
   const name = e.args[0].name;
@@ -489,14 +423,18 @@ function filteredTable(e: Expr, defs: Defs, opts: ResolveOpts): TableDef | null 
 }
 
 /** Component names `name` expands to under geometry lowering, or null. */
-export const compsOf = (defs: Defs, name: string): readonly string[] | null =>
-  defs.points.has(name) ? pointComps(name, defs.pointDims.get(name))
-    : defs.vecStates.has(name) ? vecStateComps(name, defs.vecStates.get(name)!)
-      : null;
+export const compsOf = (defs: ValueDefinitions, name: string): readonly string[] | null => {
+  if (defs instanceof Env) {
+    const value = lowerValueRef(defs, name);
+    return value.kind === 'vec' ? value.items.map(e => (e as Expr & { kind: 'var' }).name) : null;
+  }
+  return defs.points.has(name) ? pointComps(name, defs.pointDims.get(name))
+    : defs.vecStates.has(name) ? vecStateComps(name, defs.vecStates.get(name)!) : null;
+};
 
 /** Synthetic field names of named vectors (`s_x`, `s_y` for `s = (x, y)`).
  *  They substitute like coordinate fields but are not user-written grids. */
-export const pointComponentNames = (defs: Defs): Set<string> => {
+export const pointComponentNames = (defs: ValueDefinitions): Set<string> => {
   const out = new Set<string>();
   for (const p of defs.points) {
     for (const c of pointComps(p, defs.pointDims.get(p))) out.add(c);
@@ -733,6 +671,12 @@ export interface ResolveOpts {
   /** Out: constant names referenced by Σ/Π bounds (their sliders snap to integers). */
   boundConsts?: Set<string>;
   /**
+   * Names a Σ/Π bound may use without a static value — the sequence index,
+   * and the index of a sum that itself could not expand yet. The sum stays
+   * a call and evaluate() runs it.
+   */
+  openVars?: ReadonlySet<string>;
+  /**
    * Whether a name is a list. Derivatives expand HERE, before list.ts
    * substitutes, so without this `d/dt L` differentiates `L` as an opaque
    * variable and quietly becomes 0.
@@ -871,8 +815,9 @@ function stripDx(body: Expr): StripDx | null {
 }
 
 /** substVars for a Σ/Π index, stopping at nested Σ/Π that rebind the same name. */
-function substIdx(e: Expr, idx: string, val: Expr): Expr {
+export function substIdx(e: Expr, idx: string, val: Expr): Expr {
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substIdx(x, idx, val));
     case 'num': return e;
     case 'var': return e.name === idx ? val : e;
     case 'neg': return { kind: 'neg', a: substIdx(e.a, idx, val) };
@@ -933,6 +878,7 @@ const FOLD_BUILD = { '+': add, '-': sub, '*': mul, '/': div, '^': pow } as const
 /** Fold numeric subtrees ((2·3-1) → 5) so expanded Σ terms compile to compact GLSL. */
 function foldNums(e: Expr): Expr {
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, foldNums);
     case 'num':
     case 'var':
       return e;
@@ -962,7 +908,56 @@ function foldNums(e: Expr): Expr {
   }
 }
 
-const SUM_MAX_TERMS = 500;
+/**
+ * freeVars of an UNRESOLVED source. A Σ/Π index or an ∫'s measure variable
+ * is the binder's own name, not a reference — including in the chain forms
+ * (`sum[n=1..5] n`, `int[0..1] w^2 dw`), where the body is still a sibling
+ * factor that plain freeVars would read as free.
+ */
+function sourceFreeVars(e: Expr, out = new Set<string>()): Set<string> {
+  switch (e.kind) {
+    case 'var': out.add(e.name); return out;
+    case 'bin': {
+      if (e.op === '*' || e.op === '/') {
+        const m = splitSumChain(e);
+        if (m) {
+          if (m.coeff) sourceFreeVars(m.coeff, out);
+          const canonical: Expr = isSumHeader(m.header)
+            ? { kind: 'call', name: m.header.name, args: [...m.header.args, m.body] }
+            : intCallOf(m.header, m.body);
+          return sourceFreeVars(canonical, out);
+        }
+      }
+      sourceFreeVars(e.a, out);
+      return sourceFreeVars(e.b, out);
+    }
+    case 'call': {
+      if ((e.name === 'sum' || e.name === 'prod') && e.args.length === 4 && e.args[0].kind === 'var') {
+        sourceFreeVars(e.args[1], out);
+        sourceFreeVars(e.args[2], out);
+        const inner = sourceFreeVars(e.args[3]);
+        inner.delete(e.args[0].name);
+        for (const v of inner) out.add(v);
+        return out;
+      }
+      if (e.name === 'int' && (e.args.length === 1 || e.args.length === 3)) {
+        const bodyAt = e.args.length - 1;
+        for (let k = 0; k < bodyAt; k++) sourceFreeVars(e.args[k], out);
+        let dx: StripDx | null = null;
+        try { dx = stripDx(e.args[bodyAt]); } catch { /* expansion reports it */ }
+        const inner = sourceFreeVars(e.args[bodyAt]);
+        if (dx) { inner.delete(dx.v); inner.delete(`d${dx.v}`); }
+        for (const v of inner) out.add(v);
+        return out;
+      }
+      break;
+    }
+    default: break;
+  }
+  for (const child of childrenOf(e)) sourceFreeVars(child, out);
+  return out;
+}
+
 const SUM_MAX_TOTAL = 2000;
 
 /** Expand a Σ/Π into an explicit sum/product of per-index terms. */
@@ -975,24 +970,43 @@ function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
   if (idxE.kind !== 'var') throw new Error(`Expected ${header.name}(n=1..N, …).`);
   const idx = idxE.name;
   if (RESERVED.has(idx)) throw new Error(`Cannot use "${idx}" as a ${sym} index (it is reserved).`);
-  const bound = (b: Expr): number => {
+  // A bound that uses an open name (the sequence index) cannot be expanded
+  // here: the sum stays a call and evaluate() runs it once that name is a number.
+  const bound = (b: Expr): { expr: Expr; value?: number } => {
     const r = rx(b, ctx);
     const env: Record<string, number> = {};
+    let open = false;
     for (const fv of freeVars(r)) {
       const v = ctx.opts.consts?.[fv];
-      if (v === undefined) {
-        if (fv === 't' || RESERVED.has(fv)) throw new Error(`${sym} bounds cannot depend on ${fv}.`);
-        throw new Error(`${sym} bounds must be constant — add "${fv} = 5" in a row above.`);
+      if (v !== undefined) {
+        ctx.opts.boundConsts?.add(fv);
+        env[fv] = v;
+        continue;
       }
-      ctx.opts.boundConsts?.add(fv);
-      env[fv] = v;
+      if (ctx.opts.openVars?.has(fv)) { open = true; continue; }
+      if (fv === 't' || RESERVED.has(fv)) throw new Error(`${sym} bounds cannot depend on ${fv}.`);
+      throw new Error(`${sym} bounds must be constant — add "${fv} = 5" in a row above.`);
     }
+    if (open) return { expr: r };
     const v = evaluate(r, env);
     if (!isFinite(v)) throw new Error(`${sym} bound is not finite.`);
-    return v;
+    return { expr: r, value: v };
   };
-  const start = Math.ceil(bound(loE) - 1e-9);
-  const end = Math.floor(bound(hiE) + 1e-9);
+  const lo = bound(loE);
+  const hi = bound(hiE);
+  if (lo.value === undefined || hi.value === undefined) {
+    const saved = ctx.opts;
+    const openVars = new Set(saved.openVars);
+    openVars.add(idx);
+    ctx.opts = { ...saved, openVars };
+    try {
+      return { kind: 'call', name: header.name, args: [{ kind: 'var', name: idx }, lo.expr, hi.expr, rx(body, ctx)] };
+    } finally {
+      ctx.opts = saved;
+    }
+  }
+  const start = Math.ceil(lo.value - 1e-9);
+  const end = Math.floor(hi.value + 1e-9);
   const count = end - start + 1;
   if (count > SUM_MAX_TERMS) throw new Error(`${sym} expands to ${count} terms (limit ${SUM_MAX_TERMS}).`);
   ctx.terms += Math.max(count, 0);
@@ -1059,7 +1073,7 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
     flip = true;
     if (loI === 1 || hiI === -1) return num(0); // int[inf..inf]: equal bounds
   }
-  const memoKey = JSON.stringify([v, integrand, lo, hi]);
+  const memoKey = exprKey([v, integrand, lo, hi]);
   const done = (out: Expr): Expr => {
     const signed = flip ? neg(out) : out;
     // An enclosing integral's measure rides along: (∫ inner) · residual.
@@ -1090,7 +1104,7 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
     out = foldNums(loI || hiI
       ? improperSum(integrand, v, loI ? null : lo, hiI ? null : hi)
       : quadratureSum(integrand, v, lo ?? num(0), hi ?? { kind: 'var', name: v }));
-    if (JSON.stringify(out).length > 400_000) {
+    if (exprKey(out).length > 400_000) {
       throw new Error('∫ has no closed form here and its numeric expansion is too large.');
     }
   }
@@ -1103,6 +1117,7 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
  *  resolution the integral is gone, so row readouts test the parse. */
 export function usesIntegral(e: Expr): boolean {
   switch (e.kind) {
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return childrenOf(e).some(usesIntegral);
     case 'num': return false;
     case 'var': return e.name === 'int';
     case 'neg': return usesIntegral(e.a);
@@ -1182,11 +1197,16 @@ function rx(e: Expr, ctx: Ctx): Expr {
       }
       return { kind: 'bin', op: e.op, a, b };
     }
-    case 'call': {
-      if (e.name === '[index]' && e.args[0]?.kind === 'var') {
+    case 'index': {
+      if (e.args[0]?.kind === 'var') {
         const term = ctx.opts.sequenceTerm?.(e.args[0].name, e.args[1]);
         if (term) return term;
       }
+      return mapChildren(e, x => rx(x, ctx));
+    }
+    case 'range': throw new Error(structuralDiagnostic(e));
+    case 'comp': case 'eqtest': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, x => rx(x, ctx));
+    case 'call': {
       if (e.name === 'sum' || e.name === 'prod') {
         if (e.args.length !== 4) {
           throw new Error(`${e.name === 'sum' ? 'Σ' : 'Π'} needs a body: write ${e.name}(n=1..N, …) or ${e.name}[n=1..N] (…).`);
@@ -1198,8 +1218,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const body = e.args[e.args.length - 1];
         return expandInt(e.args.length === 3 ? [e.args[0], e.args[1]] : null, body, ctx);
       }
-      if (e.name === '[range]') throw new Error("'..' ranges only appear in sum(n=1..N, …), prod(…), int[a..b], or a list like [1..10].");
-      const args = e.args.map(x => rx(x, ctx));
+      const args = legacyCallArgs(e.name, e.args).map(x => rx(x, ctx));
       const fn = getFn(e.name);
       if (fn) {
         const n = fn.params.length;
@@ -1214,7 +1233,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
           markOrigins(arg);
           if (arg.kind === 'vec' && arg.items.length !== n) throw new Error(compDims(e.name, n, arg, arg.items.length));
           const comp = (k: number): Expr => (arg.kind === 'vec' ? arg.items[k]
-            : { kind: 'call', name: COMP_FN, args: [arg, { kind: 'num', value: k }, { kind: 'num', value: n }, { kind: 'str', value: e.name }] });
+            : { kind: 'comp', value: arg, index: k, arity: n, functionName: e.name });
           return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, comp(k)])));
         }
         if (args.length !== n) {
@@ -1265,8 +1284,8 @@ function rx(e: Expr, ctx: Ctx): Expr {
       kind: 'list',
       // `[1..10]` ranges survive resolution intact (bounds resolve) and
       // expand later in list lowering, where constant values are known.
-      items: e.items.map((x): Expr => (x.kind === 'call' && x.name === '[range]'
-        ? { kind: 'call', name: '[range]', args: x.args.map(a => rx(a, ctx)) }
+      items: e.items.map((x): Expr => (x.kind === 'range'
+        ? { kind: 'range', args: [rx(x.args[0], ctx), rx(x.args[1], ctx)] }
         : rx(x, ctx))),
     });
     case 'data':
@@ -1281,7 +1300,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
 }
 
 export interface BuiltDefs {
-  defs: Defs;
+  defs: Env;
   fits: Map<string, FitResult>;
   /** Per-definition errors by defKey; failed definitions are excluded from defs. */
   errors: Map<string, string>;
@@ -1303,9 +1322,10 @@ export type TableSource = (d: { file: string; hash: string }) => Table | null;
 export function buildDefs(raw: Definition[], tables?: TableSource, sequences: SeqScan[] = []): BuiltDefs {
   const fits = new Map<string, FitResult>();
   const fittedNames = new Set<string>();
+  const fitOwner = new Map<string, string>();
   const errors = new Map<string, string>();
   const needsFile = new Set<string>();
-  const defs = emptyDefs();
+  const defs = emptyDraft();
   for (const scan of sequences) defs.sequences.set(scan.name, scan);
   while (raw.some(d => d.name.startsWith(defs.sequencePrefix + '_'))) defs.sequencePrefix += 'X';
   const byName = new Map(raw.map(d => [d.name, d]));
@@ -1359,7 +1379,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       resolving.delete(name);
     }
   };
-  ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, new Set(raw.map(d => d.name)), new Set(raw.map(d => d.name)));
+  ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, new Set(raw.map(d => d.name)), new Set(raw.map(d => d.name)), (name, expr) => defs.consts.set(name, expr));
 
   // Resolved right-hand sides of `a' = …` and `a(0) = …`, validated below
   // once the constant/field split is known.
@@ -1369,12 +1389,14 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   for (const d of raw) {
     try {
       if (d.kind === 'regression') {
-        const parseFit = (text: string) => resolveExpr(parseExpr(text, fnNames, listNamesOf(defs), valueNames), getFn, ropts);
-        const lhs = parseFit(d.lhs), rhs = parseFit(d.rhs);
+        const lhsSource = parseExpr(d.lhs, fnNames, listNamesOf(defs), valueNames);
+        const rhsSource = parseExpr(d.rhs, fnNames, listNamesOf(defs), valueNames);
+        parsed.set(defKey(d), { kind: 'eq', l: lhsSource, r: rhsSource });
+        const lhs = resolveExpr(lhsSource, getFn, ropts), rhs = resolveExpr(rhsSource, getFn, ropts);
         const rhsVars = freeVars(rhs);
         // Points first, as in a plot row: `Y ~ g(A) X + b` reads g at the point A.
         const points = (e: Expr): Expr => lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null);
-        const parameters = [...rhsVars].filter(n => nameable(n) && !byName.has(n) && !nameTaken(defs, n) && !n.includes('.'));
+        const parameters = [...rhsVars].filter(n => nameable(n) && !byName.has(n) && !draftNameTaken(defs, n) && !n.includes('.'));
         if (!parameters.length) throw new Error('Regression needs an unbound coefficient, like Y ~ m X + b. Defined constants stay fixed.');
         if (parameters.length > 8) throw new Error('Regression supports at most 8 fitted coefficients.');
         for (const n of rhsVars) {
@@ -1416,6 +1438,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
             defs.consts.set(name, { kind: 'num', value });
             numEnv[name] = value;
             fittedNames.add(name);
+            fitOwner.set(name, d.name);
           }
         } catch (err) {
           if (err instanceof MissingDataError) {
@@ -1871,7 +1894,164 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (!vecStateComps(name, dim).every(c => defs.states.has(c))) defs.vecStates.delete(name);
   }
 
-  return { defs, fits, errors, needsFile, sumBoundConsts: ropts.boundConsts! };
+  // Component validation is atomic at the owner boundary: a failed vector
+  // cannot leave usable scalar aliases behind, or hide its error on an alias.
+  for (const [component, owner] of compOwner) {
+    const error = errors.get(component);
+    if (error) { errors.set(owner, error); errors.delete(component); }
+  }
+  for (const [owner, dimension] of defs.pointDims) {
+    const components = pointComps(owner, dimension);
+    const store = components.some(c => defs.fields.has(c)) ? defs.fields : defs.consts;
+    if (defs.points.has(owner) && components.every(c => store.has(c)) && !errors.has(owner)) continue;
+    defs.points.delete(owner);
+    for (const c of components) {
+      defs.consts.delete(c);
+      defs.fields.delete(c);
+    }
+  }
+  for (const [component, owner] of vecOwnerKey) {
+    if (!defs.vecStates.has(owner) || errors.has(owner)) defs.states.delete(component);
+  }
+
+  // A successful sibling may already have been inlined, folded into a
+  // number, or used to build a table before another component failed. Retain
+  // source dependencies until publication, so no binding can outlive a
+  // failed owner merely because its lowered expression hid that reference.
+  if (errors.size) {
+    const ownerOf = (name: string) => compOwner.get(name) ?? vecOwnerKey.get(name) ?? fitOwner.get(name) ?? name;
+    const known = new Set([...byName.keys(), ...compOwner.keys(), ...vecOwnerKey.keys(), ...fittedNames, ...defs.consts.keys()]);
+    const present = (name: string): boolean => defs.consts.has(name) || defs.fields.has(name)
+      || defs.states.has(name) || defs.points.has(name) || defs.vecStates.has(name)
+      || defs.fns.has(name) || defs.mats.has(name) || defs.lists.has(name)
+      || defs.tables.has(name) || defs.missingData.has(name);
+    const references = (expr: Expr): Set<string> => {
+      const names = sourceFreeVars(expr);
+      const calls = (node: Expr): void => {
+        if (node.kind === 'call' && fnNames.has(node.name)) names.add(node.name);
+        for (const child of childrenOf(node)) calls(child);
+      };
+      calls(expr);
+      return names;
+    };
+    const sourceMemo = new Map<string, ReadonlySet<string>>();
+    const sourceRefs = (name: string): ReadonlySet<string> => {
+      const owner = ownerOf(name);
+      let refs = sourceMemo.get(owner);
+      if (!refs) {
+        const source = parsed.get(owner);
+        const names = source ? references(source) : new Set<string>();
+        const row = byName.get(owner);
+        if (row?.kind === 'fn') for (const param of row.params) names.delete(param);
+        if (row?.kind === 'regression') for (const [parameter, fit] of fitOwner) if (fit === owner) names.delete(parameter);
+        sourceMemo.set(owner, refs = names);
+      }
+      return refs;
+    };
+    const failedRef = (refs: Iterable<string>): string | undefined => {
+      for (const name of refs) {
+        const head = name.includes('.') ? name.slice(0, name.indexOf('.')) : name;
+        if (known.has(head) && !present(head)) return ownerOf(head);
+      }
+    };
+    const remove = (name: string): void => {
+      const owner = ownerOf(name);
+      if (compOwner.has(name)) {
+        defs.points.delete(owner);
+        for (const alias of pointComps(owner, defs.pointDims.get(owner))) {
+          defs.consts.delete(alias); defs.fields.delete(alias);
+        }
+      } else if (vecOwnerKey.has(name)) {
+        // The dimension map may have been removed by earlier validation.
+        for (const [alias, state] of vecOwnerKey) if (state === owner) defs.states.delete(alias);
+        defs.vecStates.delete(owner);
+      } else if (fitOwner.has(name)) {
+        for (const [parameter, fit] of fitOwner) if (fit === owner) defs.consts.delete(parameter);
+        fits.delete(owner);
+      } else {
+        defs.consts.delete(name); defs.fields.delete(name); defs.states.delete(name);
+        defs.fns.delete(name); defs.mats.delete(name); defs.lists.delete(name); defs.tables.delete(name);
+        defs.missingData.delete(name);
+      }
+    };
+    // Runtime formulas and original sources both matter: generated sequence
+    // constants have no source row; inlined fields may have no free names.
+    for (let changed = true; changed;) {
+      changed = false;
+      const candidates: Array<[string, readonly Expr[], readonly string[]]> = [
+        ...[...defs.consts].map(([name, expr]): [string, Expr[], string[]] => [name, [expr], []]),
+        ...[...defs.fields].map(([name, expr]): [string, Expr[], string[]] => [name, [expr], []]),
+        ...[...defs.states].map(([name, state]): [string, Expr[], string[]] => [name, [state.deriv], []]),
+        ...[...defs.fns].map(([name, fn]): [string, Expr[], string[]] => [name, [fn.body], fn.params]),
+        ...[...defs.mats].map(([name, matrix]): [string, Expr[], string[]] => [name, matrix.flat(), []]),
+        ...[...defs.lists].map(([name, value]): [string, Expr[], string[]] => [name, [value], []]),
+        ...[...defs.tables.keys()].map((name): [string, Expr[], string[]] => [name, [], []]),
+      ];
+      for (const [name, expressions, parameters] of candidates) {
+        if (!present(name)) continue;
+        const refs = new Set(sourceRefs(name));
+        for (const expr of expressions) for (const ref of references(expr)) refs.add(ref);
+        for (const param of parameters) refs.delete(param);
+        const failed = failedRef(refs);
+        if (!failed) continue;
+        const owner = ownerOf(name);
+        if (!errors.has(owner)) errors.set(owner, `${failed} has an error in its definition.`);
+        remove(name);
+        changed = true;
+      }
+    }
+    // Initial conditions retain their established recoverable behavior: an
+    // invalid component gets the zero seed, while its state and valid sibling
+    // seeds survive. Direct tuple sources preserve per-component provenance.
+    for (const [name, state] of defs.states) {
+      const owner = ownerOf(name);
+      let source = parsed.get(`${owner}(0)`);
+      if (source?.kind === 'vec' && vecOwnerKey.has(name)) {
+        source = source.items[vecStateComps(owner, defs.vecStates.get(owner)!).indexOf(name)];
+      }
+      const refs = references(state.init);
+      if (source) for (const ref of references(source)) refs.add(ref);
+      const failed = failedRef(refs);
+      if (!failed) continue;
+      const row = `${owner}(0)`;
+      if (!errors.has(row)) errors.set(row, `${failed} has an error in its definition.`);
+      defs.states.set(name, { deriv: state.deriv, init: num(0) });
+    }
+  }
+
+  const env = new Env(defs.sequences, defs.sequencePrefix);
+  const components = (values: Expr[]): Components => {
+    if (values.length !== 2 && values.length !== 3) throw new Error('A vector needs 2 or 3 components.');
+    return values as unknown as Components;
+  };
+  for (const [role, store] of [['const', defs.consts], ['field', defs.fields]] as const) {
+    for (const [name, expr] of store) {
+      const owner = compOwner.get(name);
+      if (!owner) env.bind(name, { tag: 'scalar', role, expr });
+      else if (!env.names.has(owner)) {
+        env.bind(owner, { tag: 'vector', role,
+          components: components(pointComps(owner, defs.pointDims.get(owner)).map(c => store.get(c)!)) });
+      }
+    }
+  }
+  for (const [name, state] of defs.states) {
+    const owner = vecOwnerKey.get(name);
+    if (!owner) env.bind(name, { tag: 'scalar', role: 'state', ...state });
+    else if (!env.names.has(owner)) {
+      const values = vecStateComps(owner, defs.vecStates.get(owner)!).map(c => defs.states.get(c)!);
+      env.bind(owner, { tag: 'vector', role: 'state',
+        deriv: components(values.map(s => s.deriv)), init: components(values.map(s => s.init)) });
+    }
+  }
+  for (const [name, fn] of defs.fns) env.bind(name, { tag: 'fn', fn });
+  for (const [name, matrix] of defs.mats) env.bind(name, { tag: 'matrix', matrix });
+  for (const [name, table] of defs.tables) env.bind(name, { tag: 'table', table, unavailable: defs.missingData.get(name) });
+  for (const [name, value] of defs.lists) env.bind(name, { tag: 'seq', value: value.kind === 'vec'
+    ? { representation: 'scatter', vector: value } : { representation: 'sequence', sequence: value } });
+  for (const [name, missing] of defs.missingData) {
+    if (!defs.tables.has(name)) env.bind(name, { tag: 'missing', ...missing });
+  }
+  return { defs: env, fits, errors, needsFile, sumBoundConsts: ropts.boundConsts! };
 }
 
 /**
@@ -1879,7 +2059,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
  * or through other constants. (Σ/Π bounds may not use them — expansion is
  * static.)
  */
-export function animatedConstNames(defs: Defs): Set<string> {
+export function animatedConstNames(defs: Env): Set<string> {
   const out = new Set<string>();
   for (let changed = true; changed;) {
     changed = false;
@@ -1898,7 +2078,7 @@ export function animatedConstNames(defs: Defs): Set<string> {
 }
 
 /** Names read by a value, including indirect constant and state dependencies. */
-export function definitionDependencies(names: Iterable<string>, defs: Defs): Set<string> {
+export function definitionDependencies(names: Iterable<string>, defs: Env): Set<string> {
   const out = new Set<string>();
   const visit = (name: string) => {
     if (out.has(name)) return;
@@ -1914,7 +2094,7 @@ export function definitionDependencies(names: Iterable<string>, defs: Defs): Set
 }
 
 /** Total time derivative, keeping constants symbolic and using state rates. */
-export function timeDifferentiator(defs: Defs): (e: Expr) => Expr {
+export function timeDifferentiator(defs: Env): (e: Expr) => Expr {
   const rates = new Map<string, Expr>();
   const zero: Expr = { kind: 'num', value: 0 };
   const rate = (name: string): Expr => {
@@ -1943,34 +2123,8 @@ export function timeDifferentiator(defs: Defs): (e: Expr) => Expr {
   return derivative;
 }
 
-/**
- * Evaluate every constant at the given time (t may appear in definitions).
- * `seed` supplies values the definitions may read but not compute — the
- * integrator's current state — and is returned alongside them.
- */
-export function evalConstEnv(defs: Defs, time: number, seed: Record<string, number> = {}): Record<string, number> {
-  const out: Record<string, number> = { ...seed };
-  const visiting = new Set<string>();
-  const get = (name: string): number => {
-    if (name in out) return out[name];
-    const e = defs.consts.get(name);
-    if (!e) throw new Error(`${name} is not defined.`);
-    if (visiting.has(name)) throw new Error(`${name} is defined in terms of itself.`);
-    visiting.add(name);
-    try {
-      const env: Record<string, number> = { t: time };
-      for (const fv of freeVars(e)) if (fv !== 't') env[fv] = get(fv);
-      return (out[name] = evaluate(e, env));
-    } finally {
-      visiting.delete(name);
-    }
-  };
-  for (const name of defs.consts.keys()) get(name);
-  return out;
-}
-
 /** True when any constant depends on time and so must be re-evaluated per frame. */
-export function constsAnimated(defs: Defs): boolean {
+export function constsAnimated(defs: Env): boolean {
   for (const e of defs.consts.values()) if (freeVars(e).has('t')) return true;
   return false;
 }
