@@ -52,8 +52,8 @@ describe('canRenderOg', () => {
   it('rejects graphs whose preview would be misleading', () => {
     expect(canRenderOg(['domain((w^3 - 1)/w)'])).toBe(false);
     expect(canRenderOg(['rgb(255, 0, 0)'])).toBe(false);
-    expect(canRenderOg(['hsl(120, 100, 50)'])).toBe(false);
-    expect(canRenderOg(['oklch(0.7, 0.15, 120)'])).toBe(false);
+    expect(canRenderOg(['hsl(2pi/3, 100, 50)'])).toBe(false);
+    expect(canRenderOg(['oklch(0.7, 0.15, 2pi/3)'])).toBe(false);
     expect(canRenderOg(['iter(z^2 + w)'])).toBe(false);
     expect(canRenderOg(['conformal(w^2/4)'])).toBe(false);
     expect(canRenderOg(['(-y, x)'])).toBe(true);

@@ -42,42 +42,42 @@ else {
   };
   const swatches: Array<[string, number[]]> = [
     ['rgb(300,-10,128)', [255,0,128]],
-    ['hsl(0,100,50)', [255,0,0]], ['hsl(60,100,50)', [255,255,0]],
-    ['hsl(120,100,50)', [0,255,0]], ['hsl(180,100,50)', [0,255,255]],
-    ['hsl(240,100,50)', [0,0,255]], ['hsl(300,100,50)', [255,0,255]],
-    ['hsl(-120,100,50)', [0,0,255]], ['hsl(480,100,50)', [0,255,0]],
-    ['hsl(40,0,50)', [128,128,128]], ['hsl(0,200,50)', [255,0,0]],
-    ['hsl(120,-1,50)', [128,128,128]], ['hsl(0,100,-1)', [0,0,0]],
+    ['hsl(0,100,50)', [255,0,0]], ['hsl(pi/3,100,50)', [255,255,0]],
+    ['hsl(2pi/3,100,50)', [0,255,0]], ['hsl(pi,100,50)', [0,255,255]],
+    ['hsl(4pi/3,100,50)', [0,0,255]], ['hsl(5pi/3,100,50)', [255,0,255]],
+    ['hsl(-2pi/3,100,50)', [0,0,255]], ['hsl(8pi/3,100,50)', [0,255,0]],
+    ['hsl(2pi/9,0,50)', [128,128,128]], ['hsl(0,200,50)', [255,0,0]],
+    ['hsl(2pi/3,-1,50)', [128,128,128]], ['hsl(0,100,-1)', [0,0,0]],
     ['hsl(0,100,101)', [255,255,255]],
     // Independent sRGB primary reference coordinates in OKLCH.
-    ['oklch(0.62795536,0.25768331,29.233885)', [255,0,0]],
-    ['oklch(0.86643961,0.29482724,142.495339)', [0,255,0]],
-    ['oklch(0.45201372,0.31321437,264.052021)', [0,0,255]],
-    ['oklch(0.5,0,120)', [99,99,99]], ['oklch(0.5,-2,120)', [99,99,99]],
-    ['oklch(-1,0.4,50)', [0,0,0]], ['oklch(2,0.4,50)', [255,255,255]],
+    ['oklch(0.62795536,0.25768331,0.510227546)', [255,0,0]],
+    ['oklch(0.86643961,0.29482724,2.487012834)', [0,255,0]],
+    ['oklch(0.45201372,0.31321437,4.608577163)', [0,0,255]],
+    ['oklch(0.5,0,2pi/3)', [99,99,99]], ['oklch(0.5,-2,2pi/3)', [99,99,99]],
+    ['oklch(-1,0.4,5pi/18)', [0,0,0]], ['oklch(2,0.4,5pi/18)', [255,255,255]],
   ];
   for (const [row, expected] of swatches) check(row, () => { render([row]); near(pixel(), expected); });
   check('mixed color spaces keep row order and transparent pixels', () => {
-    render(['rgb(255,0,0)', 'hsl({x>0:120},100,50)', 'oklch({y>0:0.5},0,0)']);
+    render(['rgb(255,0,0)', 'hsl({x>0:2pi/3},100,50)', 'oklch({y>0:0.5},0,0)']);
     near(pixel(16,16), [255,0,0]); near(pixel(48,16), [0,255,0]);
     near(pixel(16,48), [99,99,99]); near(pixel(48,48), [99,99,99]);
   });
   check('nonfinite channels are transparent before clamping', () => {
-    render(['rgb(255,0,0)', 'hsl(1/0,100,50)', 'oklch(0.5,0/0,120)']);
+    render(['rgb(255,0,0)', 'hsl(1/0,100,50)', 'oklch(0.5,0/0,2pi/3)']);
     near(pixel(), [255,0,0]);
   });
   check('HSL responds to time', () => {
     render(['hsl(t,100,50)'], 0); near(pixel(), [255,0,0]);
-    render(['hsl(t,100,50)'], 120); near(pixel(), [0,255,0]);
+    render(['hsl(t,100,50)'], 2*Math.PI/3); near(pixel(), [0,255,0]);
   });
   check('sliders reuse a color shader', () => {
     render(['hue=0', 'hsl(hue,100,50)']); const count = glStats.compiles;
-    render(['hue=120', 'hsl(hue,100,50)']); near(pixel(), [0,255,0]);
+    render(['hue=2pi/3', 'hsl(hue,100,50)']); near(pixel(), [0,255,0]);
     assert(glStats.compiles === count, 'Recompiled on slider change');
   });
   check('OKLCH wraps negative and multiple-turn hue', () => {
-    render(['oklch(0.7,0.1,-120)']); const reference = pixel();
-    render(['oklch(0.7,0.1,600)']); near(pixel(), reference);
+    render(['oklch(0.7,0.1,-2pi/3)']); const reference = pixel();
+    render(['oklch(0.7,0.1,10pi/3)']); near(pixel(), reference);
   });
   // Decode output pixels independently to test perceptual invariants after
   // gamut reduction, rather than repeating the forward conversion under test.
@@ -91,7 +91,7 @@ else {
       0.0259040371*l+0.7827717662*m-0.808675766*s];
   };
   for (const hue of [0,60,120,180,240,300]) check(`out-of-gamut OKLCH preserves L and hue at ${hue}°`, () => {
-    render([`oklch(0.7,0.8,${hue})`]);
+    render([`oklch(0.7,0.8,${hue}pi/180)`]);
     const [l,a,b] = toLab(pixel());
     const angle = (Math.atan2(b,a)*180/Math.PI+360)%360;
     const difference = Math.abs((angle-hue+540)%360-180);
@@ -100,8 +100,8 @@ else {
     assert(Math.hypot(a,b)<0.8, 'Chroma was not reduced');
   });
   check('very large finite chroma remains a visible mapped color', () => {
-    render(['oklch(0.7,1,30)']); const reference = pixel();
-    render(['oklch(0.7,10^20,30)']); near(pixel(), reference);
+    render(['oklch(0.7,1,pi/6)']); const reference = pixel();
+    render(['oklch(0.7,10^20,pi/6)']); near(pixel(), reference);
   });
   status.textContent = `${passed} passed, ${failed} failed`;
   document.title = `${failed ? 'FAIL' : 'PASS'} — Color field GPU checks`;

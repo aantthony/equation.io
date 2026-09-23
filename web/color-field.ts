@@ -1,8 +1,9 @@
 import type { ColorSpace } from '../lib/math-object.ts';
 
 /** Convert channel values to encoded sRGB, the canvas's output color space.
- * HSL convention: degrees, 0–100 saturation, 0–100 lightness.
- * OKLCH convention: 0–1 lightness, nonnegative chroma, degrees.
+ * HSL convention: hue in radians, 0–100 saturation, 0–100 lightness.
+ * OKLCH convention: 0–1 lightness, nonnegative chroma, hue in radians.
+ * Hue is in radians, like every other angle in the language (trig, arg, angle).
  * Sources: https://www.w3.org/TR/css-color-4/#hsl-to-rgb and the public-domain
  * Oklab matrices at https://bottosson.github.io/posts/oklab/ .
  */
@@ -12,7 +13,7 @@ vec3 eqColorToSRGB(vec3 c) { return clamp(c / 255.0, 0.0, 1.0); }
 `;
   if (space === 'hsl') return `
 vec3 eqColorToSRGB(vec3 c) {
-  float h = mod(c.x, 360.0) / 30.0;
+  float h = mod(c.x * (6.0 / 3.141592653589793), 12.0);
   float s = clamp(c.y / 100.0, 0.0, 1.0);
   float l = clamp(c.z / 100.0, 0.0, 1.0);
   vec3 k = mod(h + vec3(0.0, 8.0, 4.0), 12.0);
@@ -43,7 +44,7 @@ vec3 eqColorToSRGB(vec3 c) {
   float l = clamp(c.x, 0.0, 1.0);
   if (l <= 0.0) return vec3(0.0);
   if (l >= 1.0) return vec3(1.0);
-  float h = radians(mod(c.z, 360.0));
+  float h = mod(c.z, 6.283185307179586);
   vec2 direction = vec2(cos(h), sin(h));
   // sRGB's maximum Oklab chroma is below 1; bounding the search also keeps
   // arbitrary finite inputs from overflowing the cubic matrix conversion.

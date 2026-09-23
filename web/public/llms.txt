@@ -284,21 +284,21 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   RGB, HSL and OKLCH rows share the same layer and draw in row order;
   curves and regions draw over them.
   Static share-card previews use the site card; the live graph renders the field.
-- HSL color field: `hsl(hue, saturation, lightness)` uses hue in degrees and
+- HSL color field: `hsl(hue, saturation, lightness)` uses hue in radians and
   saturation/lightness on a 0–100 scale (write plain numbers, without `%`).
-  Hue wraps around 360; saturation/lightness are clamped. `hsl(120, 100, 50)`
-  is green. An animated wheel is `hsl(180arg(w)/pi+20t, 100, 50)`.
+  Hue wraps around 2pi; saturation/lightness are clamped. `hsl(2pi/3, 100, 50)`
+  is green. An animated wheel is `hsl(arg(w)+t/3, 100, 50)`.
 - OKLCH color field: `oklch(lightness, chroma, hue)` uses lightness 0–1,
-  nonnegative chroma (typically 0–0.4), and hue in degrees. Lightness is
-  clamped, negative chroma becomes zero and hue wraps around 360. Zero chroma
+  nonnegative chroma (typically 0–0.4), and hue in radians. Lightness is
+  clamped, negative chroma becomes zero and hue wraps around 2pi. Zero chroma
   is neutral gray; lightness 0 and 1 give black and white. Colors outside
   sRGB are mapped by reducing chroma at fixed lightness and hue, then encoded
   as sRGB. This is strict chroma reduction, not CSS's local-MINDE algorithm
-  or wide-gamut output. Try `oklch(0.72, 0.16, 180arg(w)/pi+20t)` for a wheel
+  or wide-gamut output. Try `oklch(0.72, 0.16, arg(w)+t/3)` for a wheel
   with more even perceived lightness than HSL. HSL and OKLCH have the same
   real-channel, whole-row and transparency rules as RGB; all three accept
-  equations, sliders and time. Their hue unit is degrees even though trig
-  functions and `arg` use radians (multiply by `180/pi` to convert).
+  equations, sliders and time. Hue is in radians, like trig functions and
+  `arg`, so `arg(w)` is a hue directly; a CSS hue in degrees is `h pi/180`.
 - Domain coloring: `domain(f)` where f is complex — `domain(w^2 + 1)`. Hue is
   arg f, brightness |f|; zeros render black and poles white.
 - Conformal map: `conformal(f)` — `conformal(w^2/4)` — draws the image of the

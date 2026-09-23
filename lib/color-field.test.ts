@@ -58,6 +58,6 @@ describe.each(['rgb', 'hsl', 'oklch'] as const)('%s color fields', name => {
   });
 
   it('explains the channel scale in editor help', () => {
-    expect(syntaxHelp(`${name}(`, name.length+1, emptyEnv()).hint).toContain(name === 'rgb' ? '0 to 255' : 'degrees');
+    expect(syntaxHelp(`${name}(`, name.length+1, emptyEnv()).hint).toContain(name === 'rgb' ? '0 to 255' : 'radians');
   });
 });
