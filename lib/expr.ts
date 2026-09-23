@@ -91,7 +91,7 @@ export const FUNCTIONS = new Set([
   // Whole-expression plot modes (see classify): domain coloring, conformal
   // grids, escape-time iteration, swept tubes, motion trails, and surfaces
   // of revolution.
-  'domain', 'conformal', 'iter', 'tube', 'trail', 'revolve',
+  'domain', 'conformal', 'iter', 'rgb', 'hsl', 'oklch', 'tube', 'trail', 'revolve',
 ]);
 
 /**
@@ -104,7 +104,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   'grad',
   'polyline', 'vector', 'distance', 'angle',
-  'revolve',
+  'revolve', 'rgb', 'hsl', 'oklch',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */

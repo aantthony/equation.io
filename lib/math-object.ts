@@ -7,6 +7,8 @@ import type { Expr } from './expr.ts';
 import type { ProbBounds } from './dist.ts';
 import type { IntShade } from './intshade.ts';
 
+export type ColorSpace = 'rgb' | 'hsl' | 'oklch';
+
 export type Components = readonly [Expr, Expr] | readonly [Expr, Expr, Expr];
 export type PointSource =
   | { readonly representation: 'real'; readonly coordinates: Components }
@@ -29,6 +31,7 @@ export type MathObject =
   | { readonly kind: 'intersection'; readonly residuals: readonly [Expr, Expr] }
   | { readonly kind: 'region'; readonly constraints: ReadonlyArray<{ readonly residual: Expr; readonly strict: boolean }> }
   | { readonly kind: 'scalar-field'; readonly expr: Expr }
+  | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly [Expr, Expr, Expr] }
   | { readonly kind: 'vector-field'; readonly components: Components }
   | { readonly kind: 'complex-field'; readonly form: 'potential' | 'domain' | 'conformal'; readonly expr: Expr }
   | { readonly kind: 'complex-field'; readonly form: 'fractal'; readonly step: Expr; readonly seed: 'pixel' | 'zero'; readonly maxIter: number }
@@ -65,6 +68,7 @@ export function publicKind(object: MathObject) {
     case 'intersection': return 'spacecurve';
     case 'region': return 'ineq2d';
     case 'scalar-field': return 'scalar2d';
+    case 'color-field': return `${object.space}2d` as const;
     case 'vector-field': return object.components.length === 3 ? 'vfield3d' : 'vfield2d';
     case 'complex-field':
       switch (object.form) {
@@ -100,7 +104,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'system': return object.source.representation === 'real' && object.source.residuals.length === 3;
     case 'list': return object.element === 'point' && object.dimension === 3;
     case 'family': return object.members.some(member => member.needs3D);
-    case 'region': case 'scalar-field': case 'complex-field': case 'sequence': case 'histogram': case 'distribution': case 'value': case 'note': return false;
+    case 'region': case 'scalar-field': case 'color-field': case 'complex-field': case 'sequence': case 'histogram': case 'distribution': case 'value': case 'note': return false;
   }
 }
 

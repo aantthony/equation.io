@@ -729,6 +729,9 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // static site card instead of a wrong picture.
   complex2d: 'fallback',
   domain2d: 'fallback',
+  rgb2d: 'fallback',
+  hsl2d: 'fallback',
+  oklch2d: 'fallback',
   conformal2d: 'fallback',
   fractal2d: 'fallback',
   vfield2d: 'draws',
