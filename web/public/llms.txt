@@ -408,6 +408,19 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (default 0.5); terms compute as a bounded chain of scalar constants, so
   sliders and t remain live. A recurrence using x as a bifurcation parameter
   cannot also supply constant terms without binding that parameter.
+- Cellular automaton (1D): `c_{n+1}[i] = …` is a rule for a row of cells,
+  reading the previous row at fixed offsets — `c_n[i-1]`, `c_n[i]`,
+  `c_n[i+2]` — plus n, t and constants (not i itself). `c_0[i] = …` is the
+  starting row as any expression in i; without it the start is a single 1
+  at i = 0 on a background of 0s. The rule row draws the space-time diagram:
+  cell i of row n is the unit square centred on (i, -n), time running down,
+  for 1000 steps. The lattice is unbounded: each side's background steps by
+  the rule too, so rule 1 (000 → 1) flips the whole background every row.
+  Values shade the row's colour from 0 (empty) to the largest value
+  (solid), so k-state rules work too. Every elementary rule on one slider:
+  `r = 30; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2)`
+  (frame it with `view(x = -60..60, y = -80..2)`). Piecewise conditions are
+  inequalities, so write a seed like `{i < 0: 1, 0}`.
 - Decided comparisons: `2+2=4` reads “Always true (4 = 4)”; `e=2` reads
   “Never true (2.71828 ≠ 2)”. Comparisons involving sliders/time say
   “True now” or “False now”. They draw no degenerate implicit curve.

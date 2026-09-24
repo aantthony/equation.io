@@ -83,6 +83,7 @@ object must respect):
 | `y = int[0..x] …` / `f(x) = int[0..x] …` | integral as a function | quadrature sum inlined into the ordinary paths |
 | `{cond: val, …}`; no default = restriction | piecewise value | flows through every renderer (NaN outside the cases) |
 | `a_n = …`; `a_{n+1} = …` | sequence dots (+ Σ toggle); cobweb / bifurcation | CPU overlay |
+| `c_{n+1}[i] = …` (rule reading `c_n[i±k]`), optional `c_0[i] = …` seed | 1D cellular automaton: space-time diagram, cell (i, n) at (i, −n), 1000 steps, exact background on each side | CPU-stepped cells as an R8 texture layer |
 | `[…]`, `[1..5]`, `L^2`; `(L, L^2)`; `hist(L)` | scalar list (dots/bars); scatter (same list zips, independent lists cross: `([0,1],[0,1],[0,1])` is a cube's corners); histogram | CPU overlay |
 | `data = open("file.csv")`, `data.col` | table; a numeric column is a list | definition |
 | `Y ~ m X + b` | regression: binds the fitted parameters | fit readout on the row |

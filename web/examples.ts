@@ -145,6 +145,8 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['logistic bifurcation', 'a_{n+1} = x a_n (1 - a_n)'],
     ['alternating sum → ln 2', 'a_n = (-1)^(n+1)/n; s_n = sum(k=1..n, a_k); y = ln(2)'],
     ['differences of squares', 'b_n = n^2; a_n = b_[n+1] - b_n'],
+    ['rule 30', 'r = 30; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -60..60, y = -80..2)'],
+    ['rule 110 from a random row', 'r = 110; c_0[i] = {i < 0: mod(floor(i i 0.618), 2), 0}; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -120..20, y = -100..2)'],
   ]],
   ['data + piecewise', [
     ['data list', '[3, 1, 4, 1, 5, 9, 2, 6]'],

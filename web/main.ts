@@ -1,4 +1,5 @@
 import { type Env, emptyEnv, evaluateFrame } from '../lib/env.ts';
+import { cellShades, runAutomaton } from '../lib/automaton.ts';
 import { type CpuGrid, type CpuPlan, type GpuPlan, compileGridCpu, compileGridGpu, cpuStructureKey } from '../lib/compiler.ts';
 import { analyzePrepared, prepareDocument } from '../lib/analysis.ts';
 import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
@@ -66,6 +67,7 @@ import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
 import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
 import { fullscreenQuad } from './gl.ts';
 import {
+  type Cells2D,
   type GridSpec,
   type Layers2D,
   type Overlay2D,
@@ -93,6 +95,9 @@ interface Equation {
    *  polyline, resampled only when a value it reads (sliders, states, t)
    *  changes — the shadeCache pattern. */
   pathCache?: { comps: Expr[]; sampler: PathSampler; key: string; pts: number[] };
+  /** An automaton's cells (lib/automaton.ts), rerun only when its plan or a
+   *  value it reads (sliders, t) changes — the shadeCache pattern. */
+  cellCache?: { plan: CpuPlan; key: string; cells: Cells2D };
   id: number;
   text: string;
   colorIndex: number;
@@ -884,6 +889,7 @@ function render() {
         case 'sequence':
         case 'cobweb':
         case 'bifurcation':
+        case 'automaton':
         case 'density':
         case 'pmf':
         case 'prob':
@@ -1042,7 +1048,7 @@ function render() {
   } else {
     r3d.clearGeometry();
     const layers: Required<Layers2D> = {
-      levels: [], fractals: [], domains: [], colors: [], conformals: [], vfields: [],
+      levels: [], cells: [], fractals: [], domains: [], colors: [], conformals: [], vfields: [],
       ineqs: [], bifs: [], scalars: [], complexes: [], curves: [],
     };
     const extras: Overlay2D = { points: [], polylines: [], bars: [], clouds: [] };
@@ -1099,6 +1105,15 @@ function render() {
           break;
         }
         case 'orbit': extras.polylines.push({ pts: orbitFor(eq).flat(), color: css }); break;
+        case 'automaton': {
+          const key = JSON.stringify([...(eq.cls?.params ?? []).map(p => env[p]), eq.cls?.animated ? time : 0]);
+          if (eq.cellCache?.plan !== plot || eq.cellCache.key !== key) {
+            const grid = runAutomaton(plot, env);
+            eq.cellCache = { plan: plot, key, cells: { shades: cellShades(grid), width: grid.width, rows: grid.rows, x0: grid.x0, color } };
+          }
+          layers.cells.push({ ...eq.cellCache.cells, color });
+          break;
+        }
         case 'trail': {
           extras.polylines.push({ pts: eq.trail!.coordinates(2), color: css });
           const p = eq.trail!.head;

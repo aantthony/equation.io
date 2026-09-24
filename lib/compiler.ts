@@ -42,6 +42,7 @@ export type CpuPlan =
   | { type: 'sequence'; term: Expr; index: string }
   | { type: 'cobweb'; f: Expr; recVar: string; a0Name?: string }
   | { type: 'bifurcation'; expr: Expr; recVar: string; a0Name?: string }
+  | { type: 'automaton'; rule: Expr; radius: number; seed?: Expr }
   | { type: 'density'; rv: string }
   | { type: 'pmf'; rv: string }
   | { type: 'expect'; rv: string }
@@ -150,6 +151,7 @@ export function compileCpu(classified: Classified): CpuPlan {
       if (object.form === 'explicit') return { type: 'sequence', term: object.term, index: object.index };
       return object.form === 'cobweb' ? { type: 'cobweb', f: object.expr, recVar: object.variable, a0Name: object.seedName }
         : { type: 'bifurcation', expr: object.expr, recVar: object.variable, a0Name: object.seedName };
+    case 'automaton': return { type: 'automaton', rule: object.rule, radius: object.radius, ...(object.seed ? { seed: object.seed } : {}) };
     case 'list':
       if (object.element === 'scalar') return object.storage === 'packed' ? { type: 'dlist', values: object.values } : { type: 'vlist', values: object.values.map(real) };
       return object.storage === 'packed' ? { type: 'dscatter', dim: object.dimension, coords: [...object.coordinates] } : { type: 'plist', dim: object.dimension, pts: object.values.map(row => row.map(real)) };
@@ -268,7 +270,7 @@ export function compileGpu(classified: Classified): GpuPlan {
         return { type: 'family', params, members: object.members.map((_, k) => ({ ...shared, uniforms: { [object.shared!.index]: k } })) };
       }
       return { type: 'family', params, members: object.members.map(compileGpu) };
-    case 'intersection': case 'point': case 'trail': case 'orbit': case 'figure': case 'system': case 'list': case 'histogram': case 'distribution': case 'value': case 'note': break;
+    case 'intersection': case 'point': case 'trail': case 'orbit': case 'figure': case 'system': case 'list': case 'histogram': case 'distribution': case 'value': case 'note': case 'automaton': break;
   }
   return { type: 'none', params };
 }
@@ -320,6 +322,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'sequence': structure = [exprKey(plan.term), plan.index]; break;
     case 'cobweb': structure = [exprKey(plan.f), plan.recVar, plan.a0Name]; break;
     case 'bifurcation': structure = [exprKey(plan.expr), plan.recVar, plan.a0Name]; break;
+    case 'automaton': structure = [exprKey(plan.rule), plan.radius, plan.seed && exprKey(plan.seed)]; break;
     case 'density': case 'pmf': case 'expect': structure = plan.rv; break;
     case 'prob': structure = [exprKey(plan.body), plan.shade && exprKey(plan.shade)]; break;
   }
