@@ -250,6 +250,20 @@ pointer and leaves along the throw. The `y=` chip left behind brings it back
 `worker/` — the Cloudflare Worker entry: serves the built app and handles
 `/api/*` routes.
 
+## Contributing
+
+You need Node 24 and pnpm. Run `pnpm install`, then `pnpm web` for the dev server.
+Before opening a PR, run the same checks CI runs:
+
+```sh
+pnpm typecheck    # tsc over lib, web and worker
+pnpm lint         # Oxlint, including type-aware rules
+pnpm vitest run   # unit tests
+```
+
+`pnpm lint:fix` applies the fixes Oxlint can make automatically. In VS Code,
+install the recommended Oxc extension to see lint errors as you type.
+
 ## License
 
 MIT — see [LICENSE](LICENSE). The pre-2026 graph.tk code on the
