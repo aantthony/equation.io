@@ -1039,6 +1039,16 @@ export function factorialFn(x: number): number {
   return gammaFn(x + 1);
 }
 
+/**
+ * `[term]("eqioSeq_a_", k, …inputs)`: term k of a recurrence, read from the
+ * chain of constants that computes it (lib/seq.ts) — how an explicit sequence
+ * reads a recurrence at its own changing index (d_n = a_{n+1} - a_n). The
+ * trailing arguments are the recurrence's inputs (sliders, t, its seed): not
+ * evaluated, only there so the row depends on what the chain does. NaN past
+ * the chain or off the whole numbers.
+ */
+export const TERM_AT_FN = '[term]';
+
 /** The internal call angle(…) lowers to (lib/geom.ts): [angle](u0, u1, v0, v1).
  *  Unwritable, like '[trail]', so it can never collide with a user's name. */
 export const ANGLE_FN = '[angle]';
@@ -1235,6 +1245,12 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
     }
     case 'call': {
       if (isBoundSum(e)) return evalReduce(e, env);
+      if (e.name === TERM_AT_FN) {
+        const [chain, at] = e.args;
+        const k = evaluate(at, env);
+        const v = chain.kind === 'str' && Number.isInteger(k) ? env[`${chain.value}${k}`] : undefined;
+        return v ?? NaN;
+      }
       const fn = EVAL_FNS[e.name];
       if (!fn) throw new Error(strayComp(e) ?? `Unknown function: ${e.name}`);
       return fn(...e.args.map(a => evaluate(a, env)));
