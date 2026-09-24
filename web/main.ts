@@ -1882,13 +1882,19 @@ function sliderOf(eq: Equation): { def: NonNullable<Equation['def']>; rhs: strin
   return form ? { def, rhs, form } : null;
 }
 
+/** The constants now, for a slider range whose ends use them: render()'s
+ *  constEnv may not have run yet, and must not advance the states here. */
+function sliderEnv(): Record<string, number> {
+  try { return evaluateFrame(defs, graphTime(), stateVals); } catch { return { ...stateVals }; }
+}
+
 /** The row text with the slider moved to `v`: held to its range and step,
  *  written into its literal. Returns the value it holds. */
 function moveSlider(eq: Equation, v: number): { text: string; rhs: string; value: number } | null {
   const slider = sliderOf(eq);
   if (!slider) return null;
   const { def, form } = slider;
-  const value = sliderValue(form, v, sliderBounds(form, constEnv, new Set(defs.fns.keys())));
+  const value = sliderValue(form, v, sliderBounds(form, sliderEnv(), new Set(defs.fns.keys())));
   const rhs = writeSlider(slider.rhs, form, fmtNum(value));
   const lhs = def.kind === 'init' ? `${def.name}(0)` : def.name;
   return { text: `${lhs} = ${rhs}`, rhs, value: Number(fmtNum(value)) };
@@ -2337,7 +2343,7 @@ function reconcile() {
       const { def: sliderDef, form } = slider;
       eq.sliderUI ??= makeSlider(eq);
       const { min, range, max } = eq.sliderUI;
-      const bounds = sliderBounds(form, constEnv, new Set(defs.fns.keys()));
+      const bounds = sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()));
       let v = form.literal;
       let lo: number, hi: number;
       if (bounds) {
@@ -2360,7 +2366,8 @@ function reconcile() {
       // Σ/Π bounds are integers, so their sliders step whole terms at a time;
       // likewise the n of Binomial(n, p), which no fraction is valid for, and
       // any constant written round(…).
-      range.step = form.whole || sumBoundNames.has(sliderDef.name) || wholeParamNames.has(sliderDef.name) ? '1' : String((hi - lo) / 400);
+      // Otherwise a round step (1, 2 or 5 × 10^k), so round values sit on it.
+      range.step = form.whole || sumBoundNames.has(sliderDef.name) || wholeParamNames.has(sliderDef.name) ? '1' : String(niceSpacing((hi - lo) / 400, 1).major);
       range.value = String(v);
       wanted.push(eq.sliderUI.box);
     }
