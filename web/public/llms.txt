@@ -128,7 +128,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Functions: sin cos tan asin acos atan atan2(y,x) sinh cosh tanh sech coth
   asinh acosh atanh sqrt abs exp ln (natural) log (base 10) floor ceil round
   min max mod sign fract sinc gamma factorial, complex helpers re im arg conj,
-  and point helpers dot cross perp midpoint unit. Function names are
+  and point helpers dot cross perp midpoint unit. Also `erf(x)`,
+  `normalpdf(x, mean, sd)` and `normalcdf(x, mean, sd)`; `gcd(a, b)` (the
+  arguments round to whole numbers first, so `1/gcd(floor(x), floor(y))`
+  shades coprime cells); and `isprime(n)`, 1 for a prime and 0 otherwise
+  (`a_n = isprime(n)`), which gives no value past 2048² − 1 rather than
+  guess. Function names are
   case-insensitive: `Sin(x)`, `SQRT(x)` and `sin(x)` are the same call. Always
   use parentheses for arguments — write `sin(x)`, not `sin x`.
 - Factorial: postfix `!` — `5!` is 120, `x!` plots as Γ(x+1), `2^3!` is 2^6.
@@ -143,6 +148,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A bare condition is a case worth 1, as in Desmos: `{x > 0, 5}` is
   `{x > 0: 1, 5}`. Values may be complex (`{x > 0: w, conj(w)}`); the
   conditions themselves compare real values (`re(w) > 0`, `|w| < 1`).
+- Gradient: `grad(f)` (also `∇f`, typed `\nabla`) is the tuple of partial
+  derivatives, (∂f/∂x, ∂f/∂y), plus ∂f/∂z when f uses z, so
+  `grad(x^2 - y^2)` plots as a vector field and `dot(grad(x^2 - y^2), (1, 0))`
+  is a directional derivative. f must be a scalar expression.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   Along x, y, or z it works through lists too: with `N = [1..4]`,
@@ -451,6 +460,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   components make a 3D curve — `(2cos(6pi u), 2sin(6pi u), 4u - 2)`.
   A plane curve lifts the pen where it jumps (a step, a pole, a branch cut)
   rather than bridging the gap: `(u, floor(3u))`, `(4u - 2, tan(12u - 6))`.
+- Tube: `tube((x(u), y(u), z(u)))` sweeps a 3D parametric curve into a lit
+  solid tube — `tube((sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u),
+  -sin(6pi u)))` is a trefoil knot. An optional last argument sets the radius
+  (default 0.1): `tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)`. It
+  must be the whole row; without it a 3D curve stays a thin line.
 - Parametric surface: three components in u and v —
   `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`.
 - 3D surface: any equation in x, y, z.

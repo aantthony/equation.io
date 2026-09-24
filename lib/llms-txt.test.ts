@@ -11,6 +11,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { analyzeRows } from './analysis.ts';
+import { FUNCTIONS } from './expr.ts';
 
 const llms = readFileSync(new URL('../web/public/llms.txt', import.meta.url), 'utf8');
 
@@ -42,6 +44,23 @@ describe('llms.txt', () => {
   it('describes the MCP server its resource is served from', () => {
     for (const marker of ['encode_graph_url', 'decode_graph_url', '`syntax` MCP resource', 'PNG preview']) {
       expect(llms).toContain(marker);
+    }
+  });
+
+  // Assistants learn the language from this file alone, so a builtin it
+  // never names is one they will never write.
+  it('names every builtin function', () => {
+    const missing = [...FUNCTIONS].filter(name => !new RegExp(`\\b${name}\\b`).test(llms));
+    expect(missing).toEqual([]);
+  });
+
+  it('gives builtin examples that compile', () => {
+    for (const row of [
+      'y = erf(x)', 'y = normalcdf(x, 0, 1)', '1/gcd(floor(x), floor(y))', 'a_n = isprime(n)',
+      'grad(x^2 - y^2)', '∇(x^2 - y^2)', 'dot(grad(x^2 - y^2), (1, 0))',
+      'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)',
+    ]) {
+      expect(analyzeRows([row]).rows[0].error, row).toBeUndefined();
     }
   });
 });
