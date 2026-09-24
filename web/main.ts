@@ -1426,7 +1426,7 @@ function render() {
     && gridFields.some(f => freeVars(f.expr).has('t') || (defsAnimated && f.params.length > 0));
   // A state system is never at rest: keep frames coming so it keeps stepping.
   // Streamlines drift downstream even through a field that holds still.
-  const streamlinesAnimated = mode === '3d' && active.some(e => e.cpu!.type === 'vfield3d' && e.showStreamlines);
+  const streamlinesAnimated = mode === '3d' && active.some(e => e.cpu!.type === 'vfield3d' && e.gpu?.type === 'vfield3d' && e.showStreamlines);
   if (stateSys || gridAnimated || streamlinesAnimated
     || active.some(e => e.cls!.animated || (defsAnimated && e.cls!.params.length > 0))) {
     requestRender();
