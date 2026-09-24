@@ -14,19 +14,30 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['tan(x)', 'y = tan(x)'],
     ['lemniscate', '(x^2+y^2)^2 = 8(x^2-y^2)'],
     ['moiré', 'sin(x^2 + y^2) = cos(x y)'],
+    ['beats', 'y = sin(5x) + sin(5.5x)'],
     ['traveling wave', 'y = sin(x - 2t)'],
+    ['standing wave = two traveling', 'y = sin(x - 2t)/2; y = sin(x + 2t)/2; y = sin(x - 2t)/2 + sin(x + 2t)/2'],
+    ['factorial', 'y = x!'],
     ['piecewise', 'y = {x < 0: -x, x >= 0: x^2}'],
     ['domain restriction', 'y = {-2 < x < 2: x^2}'],
+    ['half a circle', 'x^2 + y^2 = {x > 0: 4}'],
   ]],
   ['regions', [
     ['open half-plane', 'y < x/2 + 1'],
     ['closed disc', 'x^2 + y^2 <= 4'],
     ['annulus', '4 <= x^2 + y^2 <= 9'],
     ['band under a wave', '-1 <= y - sin(x) < 1'],
+    // A recursive function runs as a loop per pixel; the region is where it
+    // terminates with f >= 0.
+    ['Koch snowflake (recursion)', 'view(y = -2.2..2.2); f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}; f(x i - |y|) >= 0'],
   ]],
   ['parametric curves', [
     ['lissajous', '(2cos(2pi u), sin(4pi u))'],
     ['spiral', '(u cos(6pi u) 3, u sin(6pi u) 3)'],
+    ['rose (slide k)', 'k = 4; (2cos(2pi k u)cos(2pi u), 2cos(2pi k u)sin(2pi u))'],
+    ['nephroid', '(3cos(2pi u) - cos(6pi u), 3sin(2pi u) - sin(6pi u))'],
+    // The pen lifts at each pole rather than drawing a vertical asymptote.
+    ['tangent, lifted at poles', '(4u - 2, tan(12u - 6))'],
   ]],
   ['fields + color', [
     ['egg crate', 'sin(x)cos(y)'],
@@ -41,11 +52,18 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['slider', 'a = 2; y = sin(a x)/a'],
     ['function', 'f(x) = x^3 - 3x; y = f(x)'],
     ['derivative', 'y = d/dx (x^3 - 3x)'],
+    ['second derivative', 'f(x) = x^4 - 3x^2; y = f(x); y = d/dx f(x); y = d^2/dx^2 f(x)'],
     ['power rule family', 'N = [1..4]; y = x^N; y = d/dx x^N'],
+    ['secant → tangent (slide h)', 'f(x) = x^3 - 2x; a = 1; h = 1; y = f(x); y = f(a) + (f(a + h) - f(a))/h (x - a); (a, f(a)); (a + h, f(a + h))'],
     ['tangent line', 'f(x) = x^3 - 2x; g(x) = d/dx f(x); a = 1; y = f(x); y = f(a) + g(a)(x - a)'],
     ['running integral', 'view(x = -7..7, y = -1.5..4); f(x) = sin(x)^2; y = f(x); y = int[0..x] f(t) dt'],
     ['signed area', 'view(x = -1..7, y = -1.5..1.5); b = 5; y = sin(x); int[0..b] sin(x) dx'],
+    // One rectangle per element of k; the sum beside the exact integral.
+    ['Riemann sum (slide n)', 'view(x = -1..7, y = -0.5..3); f(x) = sin(x) + 1.5; n = 8; a = 0; b = 6; h = (b - a)/n; k = [0..n-1]; y = f(x); '
+      + 'polygon((a + k h, 0), (a + k h + h, 0), (a + k h + h, f(a + k h)), (a + k h, f(a + k h))); '
+      + 'sum(j=0..n-1, f(a + j h) h); int[a..b] f(x) dx'],
     ['antiderivative', 'f(x) = x^2 - 1; y = f(x); y = int(f(x) dx)'],
+    ['Gaussian integral = √π', 'y = exp(-x^2); int[-inf..inf] exp(-x^2) dx'],
     ['Gaussian error fn', 'view(x = -4..4, y = -1.2..1.2); y = int[0..x] exp(-t^2) dt'],
     ['normal cdf', 'view(x = -4..4, y = -0.6..1.2); y = normalpdf(x, 0, 1); y = int[-inf..x] normalpdf(t, 0, 1) dt'],
     ['sine integral Si(x)', 'view(x = -20..20, y = -2.2..2.2); y = int[0..x] sin(t)/t dt'],
@@ -61,6 +79,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['logistic bifurcation', 'a_{n+1} = x a_n (1 - a_n)'],
     ['rule 30', 'r = 30; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -60..60, y = -80..2)'],
     ['rule 110 from a random row', 'r = 110; c_0[i] = {i < 0: mod(floor(i i 0.618), 2), 0}; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -120..20, y = -100..2)'],
+    ['Newton’s method for √2', 'a_0 = 3; a_{n+1} = a_n - (a_n^2 - 2)/(2 a_n); y = sqrt(2)'],
     ['Fourier square wave', 'N = 3; y = (4/pi) sum(n=1..N, sin((2n-1)x)/(2n-1))'],
     ['Fourier sawtooth', 'N = 5; y = 2 sum[n=1..N] (-1)^(n+1) sin(n x)/n'],
     // A list bound draws every partial sum at once: one curve per element.
@@ -71,6 +90,9 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   ['lists + data', [
     ['data list', '[3, 1, 4, 1, 5, 9, 2, 6]'],
     ['scatter', '[(1, 2), (2, 3.5), (3, 3.1), (4, 5)]'],
+    // A list is a variable: both uses of s move together, one point each.
+    ['sampled curve', 's = [0..50]/5; (s, sin(s))'],
+    ['filters + summaries', 'L = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]; L; L[L > 3]; mean(L); median(L); stdev(L)'],
     ['family of lines', 'y = [-2, -1, 0, 1, 2] x'],
     ['concentric circles', 'circle((0, 0), [1, 2, 3, 4])'],
   ]],
@@ -84,6 +106,8 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['point on sliders', 'a = 1; b = 2; (a, b)'],
     ['point on a curve', 'a = 1; f(x) = x^3 - 3x; y = f(x); (a, f(a))'],
     ['orbiting point', '(2cos(t), 2sin(t))'],
+    ['sine as a projection', 'P = (cos(t), sin(t)); circle((0, 0), 1); segment((0, 0), P); segment(P, (P_x, 0)); P'],
+    ['motion trail', 'A = (2cos(3t), 2sin(2t)); trail(A)'],
   ]],
   ['geometry (drag the points)', [
     ['segment + midpoint', 'A = (-2, -1); B = (2, 1.5); segment(A, B); midpoint(A, B)'],
@@ -97,9 +121,14 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       + '# their centres make a square; P = midpoint(A, B) - perp(B - A)/2; Q = midpoint(B, C) - perp(C - B)/2; '
       + 'R = midpoint(C, D) - perp(D - C)/2; S = midpoint(D, A) - perp(A - D)/2; '
       + 'polygon(P, Q, R, S)'],
+    ['Bézier curve', 'A = (-3, -1); B = (-1, 2); C = (1, 2); D = (3, -1); polyline(A, B, C, D); '
+      + '(1-u)^3 A + 3(1-u)^2 u B + 3(1-u) u^2 C + u^3 D'],
     ['3D triangle and its normal', 'A = (0, 0, 0); B = (3, 0, 1); C = (0, 2, 2); polygon(A, B, C); vector(A, cross(B - A, C - A)/3); angle(B - A, C - A)'],
   ]],
   ['matrices, rotations + hulls', [
+    ['determinant = area', 'A = (2, 0.5); B = (0.5, 1.5); polygon((0, 0), A, A + B, B); det([A, B])'],
+    ['a matrix maps a circle', 'p = 2; q = 1; r = 1; s = 1; M = [(p, q), (r, s)]; (cos(2pi u), sin(2pi u)); '
+      + 'M (cos(2pi u), sin(2pi u)); det(M)'],
     // A list is a variable: every use of `th` moves together, while separate
     // [..] literals are independent and cross — the corners of a cube.
     ['regular polygon', 'n = 7; th = 2pi [0..n-1]/n; polygon(rotate((2, 0), th + t/4))'],
@@ -116,6 +145,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['slope field', "y' = x - y"],
     ['logistic growth', "dy/dx = y(1 - y/4)"],
     ['pendulum phase portrait', "(x', y') = (y, -sin(x))"],
+    ['Lotka–Volterra', "(x', y') = (x - x y/2, x y/4 - y)"],
     ['Van der Pol', "(x', y') = (y, (1 - x^2)y - x)"],
     // A linear system as its literal matrix; drag the entries' sliders.
     ['matrix phase portrait', "a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y)"],
@@ -127,6 +157,10 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     // naming the point on its own row.
     ['swinging pendulum',
       "th' = om; om' = -sin(th) - om/8; th(0) = 3; bob = (sin(th), -cos(th)); segment((0, 0), bob); bob"],
+    // th(0..30) is the orbit ahead of time, (t, th) the pendulum riding it.
+    ['pendulum over time', "view(x = -1..31, y = -3.5..3.5, ratio = 3); th' = om; om' = -sin(th) - om/8; th(0) = 3; th(0..30); (t, th)"],
+    // A list of starting values runs the system once per element.
+    ['a dozen pendulums', "(x', y') = (y, -sin(x)); th' = om; om' = -sin(th); th(0) = [1..12]/4; (th, om)"],
     // The Lagrangian form M(th) om' = f(th, om): th and om are 2-vector
     // states (components th_1, th_2), M the mass matrix, solve() Cramer.
     ['double pendulum',
@@ -139,17 +173,22 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       + '# drawing; '
       + 'b1 = (L1 sin(th_1), -L1 cos(th_1)); '
       + 'b2 = b1 + (L2 sin(th_2), -L2 cos(th_2)); '
-      + 'segment((0, 0), b1); segment(b1, b2); b1; b2'],
+      + 'segment((0, 0), b1); segment(b1, b2); b1; b2; trail(b2)'],
     // r'' = -mu r/|r|^3, written as the vectors it is. The state r draws as
     // a point; below escape velocity the orbit is an ellipse.
     ['orbit (vector gravity)',
       "r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); segment((0, 0), r); r; (0, 0)"],
     // pos = displacement, vel = velocity: a phase portrait in (pos, vel).
     ['driven oscillator', "pos' = vel; vel' = sin(2t) - pos - vel/5; (pos, vel)"],
+    ['SIR epidemic', "view(x = -45..105, y = -0.1..1.1, ratio = 50); b = 0.3; g = 0.1; "
+      + "S' = -b S sick; sick' = b S sick - g sick; S(0) = 0.99; sick(0) = 0.01; S(0..100); sick(0..100)"],
     // One 3-component state; the plot row projects onto the x–z plane.
     ['Lorenz attractor',
       "r' = (10(r_2 - r_1), r_1(28 - r_3) - r_2, r_1 r_2 - 8 r_3/3); "
       + 'r(0) = (1, 1, 20); (r_1/4, r_3/4 - 6)'],
+    // 100 runs from nearby starts spread over the attractor one run traces.
+    ['Lorenz attractor in 3D', "camera(-pi/3, 0.5, 55, (0, 0, 25)); p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3); "
+      + 'p(0) = ([0..99]/10, 1, 20); p[1](5..40); p'],
   ]],
   ['probability: continuous', [
     ['normal density', 'X ~ Normal(0, 1)'],
@@ -169,6 +208,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       + 'P(Q > 3.84)'],
     ['heavy tails: t and Cauchy', 'view(x = -6..6, y = -0.05..0.45, ratio = 15); k = 2; Z ~ Normal(0, 1); X ~ T(k); '
       + 'C ~ Cauchy(0, 1); P(X > 2); E(C)'],
+    ['lognormal + Weibull', 'view(x = -0.5..4, y = -0.1..1, ratio = 2); X ~ LogNormal(0, 0.5); Y ~ Weibull(2, 1); P(X > 2)'],
   ]],
   ['probability: discrete', [
     ['a fair die', 'view(x = -0.5..7.5, y = -0.02..0.3, ratio = 16); D ~ DiscreteUniform(1, 6); P(2 < D <= 5); E(D)'],
@@ -209,6 +249,8 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   ['polar + plane coordinates', [
     ['polar grid', 'r = sqrt(x^2 + y^2); theta = atan2(y, x)'],
     ['polar point (drag it)', 'r = sqrt(x^2 + y^2); theta = atan2(y, x); (r, theta) = (2, 0.8)'],
+    // Not `e`: that is the constant, so `e = 0.6` would read as a false claim.
+    ['conics by eccentricity', 'r = sqrt(x^2 + y^2); theta = atan2(y, x); ecc = 0.6; r = 2/(1 + ecc cos(theta))'],
     ['cardioid in polar', 'r = sqrt(x^2 + y^2); theta = atan2(y, x); r = 2(1 + cos(theta))'],
     ['Archimedean spiral', 'r = sqrt(x^2 + y^2); theta = atan2(y, x); r = theta + pi'],
     ['spiral traced in (r, θ)', 'r = sqrt(x^2 + y^2); theta = atan2(y, x); (r, theta) = (3u, 6pi u)'],
@@ -256,6 +298,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   ]],
   ['3D curves + knots', [
     ['helix', '(2cos(6pi u), 2sin(6pi u), 4u - 2)'],
+    ['stacked circles (a list)', '(2cos(2pi u), 2sin(2pi u), [-1, 0, 1])'],
     ['trefoil', 'tube((sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u), -sin(6pi u)))'],
     ['torus knot (2,5)', 'tube(((2+cos(10pi u))cos(4pi u), (2+cos(10pi u))sin(4pi u), sin(10pi u)))'],
     ['figure eight', 'tube(((2+cos(4pi u))cos(6pi u), (2+cos(4pi u))sin(6pi u), sin(8pi u)))'],
