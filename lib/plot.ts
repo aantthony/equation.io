@@ -64,6 +64,9 @@ function matchODE(e: Expr): (Expr & { kind: 'vec' }) | null {
 
 /** Default sweep radius for tube(…) when no explicit radius is given. */
 const DEFAULT_TUBE_RADIUS = 0.1;
+/** Nodes across every member of a figure family: 1024 cubes turning about a
+ *  fixed axis, or about a hundred turning about a slider-dependent one. */
+const FIGURE_FAMILY_NODES = 1 << 21;
 
 /** lowerGeom's figure calls: whether each closes (and fills), and how its
  *  vertices are named in an error, after the statement the user wrote. */
@@ -264,7 +267,14 @@ function classifyLowered(
     const figures = expr.members.every(e => e.kind === 'figure');
     const limit = figures ? 1024 : 32;
     if (!expr.members.length || expr.members.length > limit) throw new Error(`An object family needs 1–${limit} members.`);
-    if (expr.members.some(e => exceedsNodes(e, 8192))) throw new Error('A family element is too large to render (8192 nodes).');
+    // A figure is drawn from its vertices however large they are, so a figure
+    // family is limited by its size in all: a turn about a slider-dependent
+    // axis stays symbolic, and a hundred such cubes still draw.
+    if (figures ? exceedsNodes(expr.members, FIGURE_FAMILY_NODES) : expr.members.some(e => exceedsNodes(e, 8192))) {
+      throw new Error(figures
+        ? `This object family is too large to render (${FIGURE_FAMILY_NODES} nodes in all) — draw fewer members.`
+        : 'A family element is too large to render (8192 nodes).');
+    }
     const members = expr.members.map((e, i) => {
       try { return classifyLowered(e, defined, fields, timeDerivative).cls; }
       catch (err) { throw new Error(`Family element ${i + 1}: ${err instanceof Error ? err.message : err}`); }

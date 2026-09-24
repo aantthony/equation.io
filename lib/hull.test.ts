@@ -135,6 +135,14 @@ describe('hull(…) rows', () => {
     expect(members(['th=2pi [0..4]/5', P, 'rotate(hull(P), th)'])).toHaveLength(5);
     expect(members([P, 'hull(P) + ([0,3],0)'])).toHaveLength(2);
     expect(members(['th=2pi [0..2]/3', 'rotate(polygon((1,0),(2,0),(2,1)), th)'])).toHaveLength(3);
+    // A constant axis written as arithmetic is its numbers, so each tumbling
+    // cube stays small enough to draw hundreds of.
+    expect(members(['e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1])) + (0, 0, 3[1..200])'])).toHaveLength(200);
+    // A slider-dependent axis stays symbolic, and large, but a few dozen draw;
+    // past the family's budget in all, it says so.
+    const turning = (n: number) => ['a = 1', `e^(t cross((1, 1, a)/sqrt(2+a^2))) hull(([-1,1], [-1,1], [-1,1])) + (0, 0, 3[1..${n}])`];
+    expect(members(turning(30))).toHaveLength(30);
+    expect(analyze(turning(200)).rows[1].error).toMatch(/too large to render .* in all/);
     // …while a list INSIDE the figure is its points.
     expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'hull(e^(th J) P)'])).toEqual(['polygon']);
   });
