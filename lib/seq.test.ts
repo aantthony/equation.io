@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { evaluate, type Expr } from './expr.ts';
 import { classifySeqRec, scanSeqRec, scanSequences, sequenceResolver } from './seq.ts';
 import { analyzeRows } from './analysis.ts';
-import { resolveExpr } from './defs.ts';
+import { resolveExpr, scanDefinition } from './defs.ts';
 import { parseExpr } from './expr.ts';
 
 
@@ -258,5 +258,40 @@ describe('one sequence per letter', () => {
   it('refuses a second definition of the same sequence', () => {
     expect(analyzeRows(['a_n = 1/n', 'a_k = k^2']).rows[1].error).toBe('Sequence a is already defined.');
     expect(analyzeRows(['a_n = 1/n', 'a_{n+1} = a_n / 2']).rows[1].error).toBe('Sequence a is already defined.');
+  });
+});
+
+describe('subscripts in braces and parens', () => {
+  const values = (rows: string[]) => {
+    const { rows: out, constEnv } = analyzeRows(rows);
+    expect(out.map(r => r.error)).toEqual(rows.map(() => undefined));
+    return constEnv;
+  };
+
+  it('reads a single name or number in braces as one name, anywhere', () => {
+    expect(parseExpr('T_{c} x')).toEqual(parseExpr('T_c x'));
+    expect(parseExpr('a_{ 10 }^2')).toEqual(parseExpr('a_10^2'));
+    expect(values(['T_{c} = 300', 'c = T_{c} + T_c']).c).toBe(600);
+  });
+
+  it('defines seeds and sequences written as the recurrence row is', () => {
+    expect(scanDefinition('a_{0} = 1')).toMatchObject({ kind: 'const', name: 'a_0' });
+    expect(scanDefinition('a_(0) = 1')).toMatchObject({ kind: 'const', name: 'a_0' });
+    expect(scanDefinition('f_(x) = x^2')).toMatchObject({ kind: 'fn', name: 'f_' }); // parens around a name: a function
+    expect(scanSeqRec('a_{n} = 1/n')).toMatchObject({ rec: false, name: 'a', index: 'n' });
+    expect(scanSeqRec('b_(k) = k^2')).toMatchObject({ rec: false, name: 'b', index: 'k' });
+    // The seed used to be dropped: a_{0} = 1 was not a definition at all.
+    expect(values(['a_{0} = 1', 'a_{n+1} = 2 a_{n}', 'c = a_{3}']).c).toBe(8);
+    expect(values(['a_(0) = 1', 'a_{n+1} = a_(n) + 1', 'c = a_(3)']).c).toBe(4);
+  });
+
+  it('indexes a sequence by an expression in braces or parens', () => {
+    const b = ['b_n = n^2'];
+    expect(evaluate(resolveExpr(parseExpr('b_{n+1} - b_(n)', new Set(), new Set(['b_'])), () => undefined, {
+      sequenceTerm: sequenceResolver(new Env([['b', scanSeqRec(b[0])!]]), () => undefined, {}, new Set<string>()),
+      openVars: new Set(['n']), // as in a sequence row, whose own index is open
+    }), { n: 3 })).toBe(7);
+    expect(values([...b, 'a_n = b_{n+1} - b_n', 'c = a_{3}', 'k = 2', 'p = b_{k}']))
+      .toMatchObject({ c: 7, p: 4 });
   });
 });

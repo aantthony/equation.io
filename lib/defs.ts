@@ -607,7 +607,13 @@ export function freeTableName(base: string, taken: ReadonlySet<string>): string 
 }
 
 /** Detect a definition row before parsing (so calls to it parse everywhere). */
+/** A subscript written in braces, as a recurrence row is: `a_{0} = 1` defines
+ *  a_0 (the seed), `T_{c} = 300` defines T_c. Parens only around a number:
+ *  `f_(x) = …` is a function. */
+const BRACED_TERM_RE = new RegExp(`^(\\s*[A-Za-z${GREEK_NAME_CHARS}])_(?:\\{\\s*(\\d+|[A-Za-z${GREEK_NAME_CHARS}]\\w*)\\s*\\}|\\(\\s*(\\d+)\\s*\\))(?=\\s*=(?!=))`);
+
 export function scanDefinition(text: string): Definition | null {
+  text = text.replace(BRACED_TERM_RE, (_, head: string, braced?: string, paren?: string) => `${head}_${braced ?? paren}`);
   // Captured names canonicalize (T₀ → T_0) so a definition binds the same
   // name the tokenizer reads in expressions.
   const name = (m: RegExpExecArray): string => canonicalName(m[1]);

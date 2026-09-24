@@ -115,7 +115,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   is a name like `dx`), superscript digits are exponents (`x³` is `x^3`,
   `x⁻²` is `x^(-2)`), and subscript digits are the `_` subscript syntax in
   its unicode spelling — `T₀` IS `T_0`, so `r₁` reads a vector state's `r_1`
-  component and `a₃` a sequence's third term. `·`, `⋅`, `×`, `÷`, `−`, `≤`,
+  component and `a₃` a sequence's third term. A single name or number in
+  braces is the same subscript: `T_{c}` is `T_c`, `a_{10}` is `a_10`.
+  `·`, `⋅`, `×`, `÷`, `−`, `≤`,
   `≥`, `≠` mean their ASCII counterparts. π and τ never join a longer name,
   so `2πr` is 2·π·r. In the editor, typing `\pi`, `\theta`, `\nabla`, …
   inserts the symbol itself, and a `\` before any built-in function name
@@ -397,7 +399,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   reads the term at a slider `k`, and `a_N` one term per element of a list
   `N`. A term may use another explicit sequence at its own index —
   `a_n = b_n + 1`, `b_[n+1] - b_n`, `sum(k=1..n, b_k)` — but a recurrence's
-  terms only at fixed indices (`b_3`). Each letter is one sequence: beside
+  terms only at fixed indices (`b_3`). A sequence's index may also go in
+  braces or parens, as its recurrence row is written: `b_{n+1}`, `a_(n-1)`,
+  and the rows `a_{n} = 1/n` and `a_{0} = 1`. Each letter is one sequence: beside
   `a_n = 1/n`, `a_k = 7` is a constant named a_k. Indices
   must be whole numbers from 0 to 1000. Recurrences use their `a_0` seed
   (default 0.5); terms compute as a bounded chain of scalar constants, so

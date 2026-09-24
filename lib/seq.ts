@@ -36,7 +36,8 @@ const L = `[A-Za-z${GREEK_NAME_CHARS}]`;
 const TERM_RE = new RegExp(`^(${L})_(\\d+)$`);
 /** A term reference by a named index: a_k (a slider) or a_N (a list). */
 const NAMED_RE = new RegExp(`^(${L})_([A-Za-z${GREEK_NAME_CHARS}]\\w*)$`);
-const SEQ_RE = new RegExp(String.raw`^\s*(${L})_(${L})\s*=(?!=)([\s\S]+)$`);
+/** a_n = …, also written a_{n} = … or a_(n) = …. */
+const SEQ_RE = new RegExp(String.raw`^\s*(${L})_(?:(${L})|\{\s*(${L})\s*\}|\(\s*(${L})\s*\))\s*=(?!=)([\s\S]+)$`);
 const REC_RE = new RegExp(String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*=(?!=)([\s\S]+)$`);
 
 /** Indices that read as a sequence on sight, so `a_n = 5` is the constant
@@ -59,7 +60,8 @@ export function scanSeqRec(text: string): SeqScan | null {
     // Every letter_letter row used to be a sequence, which stole the
     // subscripted constants physics and chemistry are written with (T_c,
     // k_B, v_x). Require a conventional index or one the term actually uses.
-    const [, name, index, rhs] = m;
+    const [, name, plain, braced, paren, rhs] = m;
+    const index = plain ?? braced ?? paren;
     if (SEQ_INDICES.has(index) || (!RESERVED.has(index) && usesIndex(rhs, index))) {
       return { rec: false, name, index, rhs };
     }
@@ -236,6 +238,10 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
     }
     const name = symbol.slice(0, -1);
     if (!symbol.endsWith('_') || !defs.sequences.has(name)) return null;
+    // A recurrence's own previous term, written a_{n} or a_(n): its variable
+    // a_n, as when written plainly.
+    const scan = defs.sequences.get(name)!;
+    if (scan.rec && index.kind === 'var' && index.name === scan.index) return { kind: 'var', name: `${name}_${scan.index}` };
     if (open && [...freeVars(index)].some(v => open.has(v))) return inline(name, index, open);
     const input: Expr = index.kind === 'range' ? { kind: 'list', items: [index] } : index;
     const indices = lowerLists(input, listGetter(defs), opts);
