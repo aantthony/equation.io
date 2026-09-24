@@ -263,8 +263,15 @@ describe('indexing', () => {
   it('takes the index from a slider', () => {
     expect(evaluate(lowerRow('L[k]', [...L, 'k = 3']), {})).toBe(7);
   });
-  it('rejects slicing for now', () => {
-    expect(() => lowerRow('L[1..2]', L)).toThrow(/Slicing/);
+  it('slices with a range', () => {
+    expect(values(lowerRow('L[2..3]', L))).toEqual([6, 7]);
+    expect(values(lowerRow('L[3..1]', L))).toEqual([7, 6, 5]);
+  });
+  it('picks by a list of indices, over the index list', () => {
+    expect(values(lowerRow('L[[3, 1]]', L))).toEqual([7, 5]);
+    expect(values(lowerRow('L[N] + N', [...L, 'N = [1, 3]']))).toEqual([6, 10]);
+    expect(values(lowerRow('L[[1, k]]', [...L, 'k = 3']))).toEqual([5, 7]);
+    expect(() => lowerRow('L[[1, 4]]', L)).toThrow(/out of range/);
   });
   it('leaves non-list brackets as multiplication', () => {
     expect(evaluate(lowerRow('x[2]'), { x: 3 })).toBe(6);
