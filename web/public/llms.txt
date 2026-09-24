@@ -589,6 +589,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 
 - Constant: `a = 2` — the UI shows a draggable slider for it. Computed
   constants allowed: `b = a^2 + t`.
+- Slider range and step: `a = clamp(0.4, 0, 1)` is a slider over [0, 1],
+  and `n = round(5)` (or floor/ceil) steps by whole numbers; they combine,
+  `r = round(clamp(30, 0, 255))`. The value is what the expression says —
+  `clamp(5, 0, 1)` is 1 — and the range is part of the row, so it travels
+  in the link. The ends may use other constants (`clamp(a, 0, b)`), not t.
+  Dragging rewrites only the number; editing the slider's end boxes writes
+  the clamp. `clamp(x, lo, hi)` is also an ordinary function anywhere.
 - Function: `f(x) = x^3 - a x` — call it from other rows; calls inline
   symbolically, so `d/dx f(x)` works. A function of several variables also
   takes ONE point in their place: with `f(x,y) = (x + y/2, y)` and

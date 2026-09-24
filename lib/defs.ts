@@ -1427,6 +1427,12 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const vars = freeVars(f).has('z') ? ['x', 'y', 'z'] : ['x', 'y'];
         return { kind: 'vec', items: vars.map(v => applyDiff(f, v, 1, ctx.opts.isList)) };
       }
+      if (e.name === 'clamp') {
+        // clamp(x, lo, hi) ≡ min(max(x, lo), hi): every backend already runs those.
+        if (args.length !== 3) throw new Error('clamp takes three arguments: clamp(x, lo, hi).');
+        const [x, lo, hi] = args;
+        return { kind: 'call', name: 'min', args: [{ kind: 'call', name: 'max', args: [x, lo] }, hi] };
+      }
       if (ctx.opts.inDefinition && (e.name === 'trail' || e.name === 'revolve' || e.name === 'rgb' || e.name === 'hsl' || e.name === 'oklch')) {
         throw new Error(`${e.name}(…) must be a whole row, not part of a definition.`);
       }

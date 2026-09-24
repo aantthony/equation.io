@@ -116,7 +116,7 @@ export const FUNCTIONS = new Set([
   'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2',
   'sinh', 'cosh', 'tanh', 'sech', 'asinh', 'acosh', 'atanh',
   'sqrt', 'abs', 'exp', 'ln', 'log', 'floor', 'ceil', 'round',
-  'min', 'max', 'mod', 'sign', 'fract',
+  'min', 'max', 'clamp', 'mod', 'sign', 'fract',
   'erf', 'normalpdf', 'normalcdf',
   'gcd', 'isprime', 'gamma', 'factorial', 'sinc', 'coth',
   're', 'im', 'arg', 'conj',
@@ -144,7 +144,7 @@ export const FUNCTIONS = new Set([
  * that defines its own `gamma(x) = …` or `sinc = …` keeps its meaning.
  */
 export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
-  'gamma', 'factorial', 'sinc', 'coth',
+  'gamma', 'factorial', 'sinc', 'coth', 'clamp',
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
   'grad',
   'polyline', 'vector', 'distance', 'angle',

@@ -1,6 +1,6 @@
 import type { Analysis } from './analysis.ts';
-import { SLIDER_NUM_RE } from './drag.ts';
 import { freeVars, parseExpr } from './expr.ts';
+import { sliderForm } from './slider.ts';
 
 /** Numeric sliders whose values are consumed only at runtime. Be conservative:
  * definitions, fitting, state seeds and data can bake values into their output,
@@ -21,7 +21,7 @@ export function runtimeSliderNames(analysis: Analysis): Set<string> {
   }
   return new Set(rows.flatMap(row => {
     const d = row.def;
-    return d?.kind === 'const' && SLIDER_NUM_RE.test(d.rhs) && !blocked.has(d.name)
+    return d?.kind === 'const' && sliderForm(d.rhs, document.fnNames) && !blocked.has(d.name)
       && defs.consts.has(d.name) ? [d.name] : [];
   }));
 }

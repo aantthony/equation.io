@@ -12,7 +12,8 @@
  * No sessions, no SSE — each POST is a complete JSON-RPC exchange, which is
  * all these tools need and keeps the Worker stateless.
  */
-import { SLIDER_NUM_RE, dragAxes } from '../lib/drag.ts';
+import { dragAxes } from '../lib/drag.ts';
+import { sliderForm } from '../lib/slider.ts';
 import { definitionDependencies } from '../lib/defs.ts';
 import { freeVars } from '../lib/expr.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
@@ -192,7 +193,7 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   // "draggable" reports what the app will actually let the user grab: 2D
   // graphs only, and only coordinates that are plain numbers or slider names.
   const sliderRow = (name: string) => analysis.rows.find(r =>
-    r.def?.kind === 'const' && r.def.name === name && !r.error && SLIDER_NUM_RE.test(r.def.rhs));
+    r.def?.kind === 'const' && r.def.name === name && !r.error && sliderForm(r.def.rhs, analysis.document.fnNames));
   const draggable = (row: (typeof analysis.rows)[number]): boolean | undefined => {
     const coordinates = row.cpu?.type === 'system' ? row.cpu.coordinates : undefined;
     const pair = coordinates
