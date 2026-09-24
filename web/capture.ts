@@ -4,13 +4,7 @@
  * The WebGL buffer is not preserved across frames, so every capture path
  * draws a fresh frame first, then blits both canvases in the same turn.
  */
-import {
-  CAPTURE_SECONDS,
-  VIDEO_MAX_EDGE,
-  captureSize,
-  extensionForMime,
-  pickRecorderMime,
-} from '../lib/capture.ts';
+import { CAPTURE_SECONDS, VIDEO_MAX_EDGE, captureSize, extensionForMime, pickRecorderMime } from '../lib/capture.ts';
 
 export { CAPTURE_SECONDS };
 
@@ -65,9 +59,7 @@ export function attachCapture(host: CaptureHost): {
   afterFrame: () => void;
   mime: string | null;
 } {
-  const mime = typeof MediaRecorder === 'undefined'
-    ? null
-    : pickRecorderMime(t => MediaRecorder.isTypeSupported(t));
+  const mime = typeof MediaRecorder === 'undefined' ? null : pickRecorderMime(t => MediaRecorder.isTypeSupported(t));
 
   const composite = document.createElement('canvas');
   let recorder: MediaRecorder | null = null;
@@ -99,7 +91,11 @@ export function attachCapture(host: CaptureHost): {
       releaseStream();
       return;
     }
-    try { recorder.stop(); } catch { releaseStream(); }
+    try {
+      recorder.stop();
+    } catch {
+      releaseStream();
+    }
   }
 
   function startRecording() {
@@ -113,7 +109,9 @@ export function attachCapture(host: CaptureHost): {
     track = stream.getVideoTracks()[0] as (MediaStreamTrack & { requestFrame?: () => void }) | undefined;
     chunks = [];
     const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 6_000_000 });
-    rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    rec.ondataavailable = e => {
+      if (e.data.size) chunks.push(e.data);
+    };
     rec.onerror = () => {
       recorder = null;
       releaseStream();
@@ -149,7 +147,9 @@ export function attachCapture(host: CaptureHost): {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })]);
         host.notice('Copied graph image.');
         return;
-      } catch { /* fall through to download */ }
+      } catch {
+        /* fall through to download */
+      }
     }
     downloadBlob(await blobPromise, 'equation.png');
     if (copy) host.notice('Saved equation.png (clipboard unavailable).');

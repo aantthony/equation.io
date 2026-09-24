@@ -29,7 +29,7 @@ const POINT_FIGURES = new Set(['segment', 'polyline', 'polygon', 'vector', 'hull
  */
 function pushTransforms(e: Expr): Expr {
   const figure = (n: Expr): (Expr & { kind: 'call' }) | null =>
-    (n.kind === 'call' && POINT_FIGURES.has(n.name) ? n : null);
+    n.kind === 'call' && POINT_FIGURES.has(n.name) ? n : null;
   const onto = (fig: Expr & { kind: 'call' }, move: (point: Expr) => Expr, shifts = false): Expr => {
     // vector(V) starts at the origin, which a shift would have to move too.
     if (shifts && fig.name === 'vector' && fig.args.length === 1) {
@@ -43,8 +43,10 @@ function pushTransforms(e: Expr): Expr {
       return a ? onto(a, p => ({ kind: 'neg', a: p })) : e;
     }
     case 'bin': {
-      const l = pushTransforms(e.a), r = pushTransforms(e.b);
-      const a = figure(l), b = figure(r);
+      const l = pushTransforms(e.a),
+        r = pushTransforms(e.b);
+      const a = figure(l),
+        b = figure(r);
       if (a && b) throw new Error('Two figures do not combine — transform one figure at a time.');
       const shifts = e.op === '+' || e.op === '-';
       if (a && e.op !== '^') return onto(a, p => ({ ...e, a: p, b: r }), shifts);
@@ -56,47 +58,76 @@ function pushTransforms(e: Expr): Expr {
       const a = figure(pushTransforms(e.args[0]));
       return a ? onto(a, p => ({ ...e, args: [p, ...e.args.slice(1)] })) : e;
     }
-    default: return e;
+    default:
+      return e;
   }
 }
 
 const holdsFigure = (e: Expr): boolean => {
   switch (e.kind) {
-    case 'call': return POINT_FIGURES.has(e.name) || e.args.some(holdsFigure);
-    case 'bin': return holdsFigure(e.a) || holdsFigure(e.b);
-    case 'neg': return holdsFigure(e.a);
-    default: return false;
+    case 'call':
+      return POINT_FIGURES.has(e.name) || e.args.some(holdsFigure);
+    case 'bin':
+      return holdsFigure(e.a) || holdsFigure(e.b);
+    case 'neg':
+      return holdsFigure(e.a);
+    default:
+      return false;
   }
 };
 
 export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts = {}, named = false): Expr {
   const plotVariable = (v: string) => ['x', 'y', 'z', 'u', 'v'].includes(v) || defs.fields.has(v);
   const baseGet = listGetter(defs);
-  const get = (name: string): Expr | null => baseGet(name) ?? (defs.mats.has(name)
-    ? rowsAsPoints(defs.mats.get(name)!, name) : null);
+  const get = (name: string): Expr | null =>
+    baseGet(name) ?? (defs.mats.has(name) ? rowsAsPoints(defs.mats.get(name)!, name) : null);
   // One answer per node: the argument of f(P) is shared by every component
   // that reads it, and has to stay one node to be lowered once.
   const indexed = new WeakMap<Expr, Expr>();
   const indices = (n: Expr): Expr => {
     let out = indexed.get(n);
-    if (!out) indexed.set(n, out = indicesOf(n));
+    if (!out) indexed.set(n, (out = indicesOf(n)));
     return out;
   };
   const indicesOf = (n: Expr): Expr => {
     if (n.kind === 'index') return lowerLists(n, get, opts, true);
     switch (n.kind) {
-      case 'call': return { ...n, args: n.args.map(indices) };
-      case 'bin': return { ...n, a: indices(n.a), b: indices(n.b) };
-      case 'neg': return { ...n, a: indices(n.a) };
-      case 'eq': case 'ineq': return { ...n, l: indices(n.l), r: indices(n.r) };
-      case 'vec': case 'list': return sameList(n, { ...n, items: n.items.map(indices) });
-      case 'piecewise': return { ...n, cases: n.cases.map(c => ({ cond: indices(c.cond), value: indices(c.value) })), otherwise: n.otherwise && indices(n.otherwise) };
-      default: return mapChildren(n, indices);
+      case 'call':
+        return { ...n, args: n.args.map(indices) };
+      case 'bin':
+        return { ...n, a: indices(n.a), b: indices(n.b) };
+      case 'neg':
+        return { ...n, a: indices(n.a) };
+      case 'eq':
+      case 'ineq':
+        return { ...n, l: indices(n.l), r: indices(n.r) };
+      case 'vec':
+      case 'list':
+        return sameList(n, { ...n, items: n.items.map(indices) });
+      case 'piecewise':
+        return {
+          ...n,
+          cases: n.cases.map(c => ({ cond: indices(c.cond), value: indices(c.value) })),
+          otherwise: n.otherwise && indices(n.otherwise),
+        };
+      default:
+        return mapChildren(n, indices);
     }
   };
   if (!exceedsNodes(e, 32768)) e = indices(e);
-  const ordinary = (e: Expr, packed = false) => lowerLists(lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null,
-    n => get(n) !== null), get, opts, named, packed);
+  const ordinary = (e: Expr, packed = false) =>
+    lowerLists(
+      lowerGeom(
+        e,
+        n => compsOf(defs, n),
+        n => defs.mats.get(n) ?? null,
+        n => get(n) !== null,
+      ),
+      get,
+      opts,
+      named,
+      packed,
+    );
   // A list's elements, with the instances it runs over (see Axis in list.ts).
   type ListValue = { items: readonly Expr[]; axes: readonly Axis[] };
   // Coordinate lists settleComps wrote in: values already, one node each to
@@ -105,7 +136,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   const listValues = new WeakMap<Expr, ListValue | null>();
   const listValue = (e: Expr): ListValue | null => {
     let hit = listValues.get(e);
-    if (hit === undefined) listValues.set(e, hit = listValueOf(e));
+    if (hit === undefined) listValues.set(e, (hit = listValueOf(e)));
     return hit;
   };
   const listValueOf = (e: Expr): ListValue | null => {
@@ -114,7 +145,11 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       const rows = rowsAsPoints(defs.mats.get(e.name)!, e.name);
       return { items: rows.items, axes: axesOf(rows) };
     }
-    try { value = ordinary(e); } catch { return null; }
+    try {
+      value = ordinary(e);
+    } catch {
+      return null;
+    }
     if (value.kind === 'list') return { items: value.items, axes: axesOf(value) };
     if (value.kind === 'data') {
       if (value.values.length > 100000) throw new Error('A point path accepts at most 100000 vertices.');
@@ -123,7 +158,13 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     if (isDataScatter(value) && value.kind === 'vec') {
       const n = value.items.find(c => c.kind === 'data')! as Expr & { kind: 'data' };
       if (n.values.length > 100000) throw new Error('A point path accepts at most 100000 vertices.');
-      return { items: Array.from(n.values, (_, k) => ({ kind: 'vec', items: value.items.map(c => c.kind === 'data' ? num(c.values[k]) : c) })), axes: axesOf(n) };
+      return {
+        items: Array.from(n.values, (_, k) => ({
+          kind: 'vec',
+          items: value.items.map(c => (c.kind === 'data' ? num(c.values[k]) : c)),
+        })),
+        axes: axesOf(n),
+      };
     }
     return null;
   };
@@ -144,7 +185,11 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     const arg = e.args[0];
     if (!(arg.kind === 'var' && defs.mats.has(arg.name))) {
       let value: Expr | null = null;
-      try { value = ordinary(arg, true); } catch { /* the paths below report it */ }
+      try {
+        value = ordinary(arg, true);
+      } catch {
+        /* the paths below report it */
+      }
       if (value?.kind === 'lazy') return packedFigure(e.name as 'polyline' | 'polygon' | 'hull', value);
     }
     // A point list may itself be computed — R P, P + (1, 0), rotate(P, a) —
@@ -153,7 +198,9 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       try {
         const value = lowerObjects(arg, defs, opts, true);
         return value.kind === 'list' ? value.items : null;
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     };
     const pts = listValue(e.args[0])?.items ?? computed(e.args[0]);
     if (pts) {
@@ -169,7 +216,9 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       // their existing dot/scatter representation and unbounded data path.
       if (value.kind !== 'list' || !value.items.some(it => [...freeVars(it)].some(plotVariable))) return value;
       break;
-    } catch (err) { originalError ??= err; }
+    } catch (err) {
+      originalError ??= err;
+    }
     // f(R P), f(P + (1, 0)): the argument is a point list only this pass can
     // compute. Settle it ONCE, as the lists of its coordinates, and the row
     // is ordinary again — mean(g(2 P)) included, which no family could be.
@@ -177,27 +226,43 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     if (settled === e) break;
     e = settled;
   }
-  try { return expand(e, false)!; } catch (err) {
+  try {
+    return expand(e, false)!;
+  } catch (err) {
     // A matrix error is about the matrix: the expansion's own complaint, made
     // while reading things as lists of points, would only bury it.
-    throw originalError instanceof Error && /matri/i.test(originalError.message) && !/not a value on its own/.test(originalError.message)
-      ? originalError : err;
+    throw originalError instanceof Error &&
+      /matri/i.test(originalError.message) &&
+      !/not a value on its own/.test(originalError.message)
+      ? originalError
+      : err;
   }
 
   /** A connected figure through a template of points: the template is its one
    *  vertex, evaluated once per element of the columns (see `over`). */
   function packedFigure(form: 'polyline' | 'polygon' | 'hull', points: Expr & { kind: 'lazy' }): Expr {
     const vertex = points.body;
-    if (vertex.kind !== 'vec' || (vertex.items.length !== 2 && vertex.items.length !== 3)) throw new Error(`${form} needs a list of points.`);
+    if (vertex.kind !== 'vec' || (vertex.items.length !== 2 && vertex.items.length !== 3))
+      throw new Error(`${form} needs a list of points.`);
     const n = points.cols[0].values.length;
     if (n > 100000) throw new Error('A point path accepts at most 100000 vertices.');
     const least = form === 'polyline' ? 2 : 3;
     if (n < least) {
-      throw new Error(form === 'polyline' ? 'polyline needs at least 2 points: polyline(A, B, C).'
-        : form === 'hull' ? 'hull needs at least 3 points: hull(A, B, C, D), or hull(P) for a list of points.'
-          : 'polygon needs at least 3 vertices.');
+      throw new Error(
+        form === 'polyline'
+          ? 'polyline needs at least 2 points: polyline(A, B, C).'
+          : form === 'hull'
+            ? 'hull needs at least 3 points: hull(A, B, C, D), or hull(P) for a list of points.'
+            : 'polygon needs at least 3 vertices.',
+      );
     }
-    return { kind: 'figure', form: form as FigureForm, dimension: vertex.items.length as 2 | 3, vertices: vertex.items, over: points.cols };
+    return {
+      kind: 'figure',
+      form: form as FigureForm,
+      dimension: vertex.items.length as 2 | 3,
+      vertices: vertex.items,
+      over: points.cols,
+    };
   }
 
   /** Every `[comp]` whose value is a computed point list, replaced by the list
@@ -207,7 +272,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     const points = new WeakMap<Expr, Expr | null>();
     const walk = (n: Expr): Expr => {
       let out = done.get(n);
-      if (!out) done.set(n, out = walkOf(n));
+      if (!out) done.set(n, (out = walkOf(n)));
       return out;
     };
     const all = (ns: readonly Expr[]): readonly Expr[] => {
@@ -216,34 +281,66 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     };
     const walkOf = (n: Expr): Expr => {
       switch (n.kind) {
-        case 'neg': { const a = walk(n.a); return a === n.a ? n : { ...n, a }; }
-        case 'bin': { const a = walk(n.a), b = walk(n.b); return a === n.a && b === n.b ? n : { ...n, a, b }; }
-        case 'eq': case 'ineq': { const l = walk(n.l), r = walk(n.r); return l === n.l && r === n.r ? n : { ...n, l, r }; }
-        case 'vec': case 'list': { const items = all(n.items); return items === n.items ? n : sameList(n, { ...n, items }); }
+        case 'neg': {
+          const a = walk(n.a);
+          return a === n.a ? n : { ...n, a };
+        }
+        case 'bin': {
+          const a = walk(n.a),
+            b = walk(n.b);
+          return a === n.a && b === n.b ? n : { ...n, a, b };
+        }
+        case 'eq':
+        case 'ineq': {
+          const l = walk(n.l),
+            r = walk(n.r);
+          return l === n.l && r === n.r ? n : { ...n, l, r };
+        }
+        case 'vec':
+        case 'list': {
+          const items = all(n.items);
+          return items === n.items ? n : sameList(n, { ...n, items });
+        }
         case 'piecewise': {
           const cases = n.cases.map(c => ({ cond: walk(c.cond), value: walk(c.value) }));
           const otherwise = n.otherwise && walk(n.otherwise);
-          return otherwise === n.otherwise && cases.every((c, k) => c.cond === n.cases[k].cond && c.value === n.cases[k].value)
-            ? n : { ...n, cases, otherwise };
+          return otherwise === n.otherwise &&
+            cases.every((c, k) => c.cond === n.cases[k].cond && c.value === n.cases[k].value)
+            ? n
+            : { ...n, cases, otherwise };
         }
         case 'comp': {
           const value = walk(n.value);
           const call = value === n.value ? n : { ...n, value };
           let pts = points.get(value);
           if (pts === undefined) {
-            try { pts = lowerObjects(value, defs, opts, true); } catch { pts = null; }
+            try {
+              pts = lowerObjects(value, defs, opts, true);
+            } catch {
+              pts = null;
+            }
             points.set(value, pts);
           }
           const dim = n.arity;
           // (Anything else — one point, a wrong dimension — is the ordinary path's to judge.)
-          if (pts?.kind !== 'list' || !pts.items.length || !pts.items.every(p => p.kind === 'vec' && p.items.length === dim)) return call;
+          if (
+            pts?.kind !== 'list' ||
+            !pts.items.length ||
+            !pts.items.every(p => p.kind === 'vec' && p.items.length === dim)
+          )
+            return call;
           const k = n.index;
-          const coords = withAxes<Expr>({ kind: 'list', items: pts.items.map(p => (p as Expr & { kind: 'vec' }).items[k]) }, axesOf(pts));
+          const coords = withAxes<Expr>(
+            { kind: 'list', items: pts.items.map(p => (p as Expr & { kind: 'vec' }).items[k]) },
+            axesOf(pts),
+          );
           settledLists.add(coords);
           return coords;
         }
-        case 'call': return mapChildren(n, walk);
-        default: return mapChildren(n, walk);
+        case 'call':
+          return mapChildren(n, walk);
+        default:
+          return mapChildren(n, walk);
       }
     };
     return walk(root);
@@ -253,7 +350,8 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
    *  lists around a figure, each member a figure lowered in its own right;
    *  null when there are none. */
   function expand(source: Expr, outside: boolean): Expr | null {
-    if (exceedsNodes(source, 32768, n => settledLists.has(n))) throw new Error('This object family is too large to expand (32768 nodes).');
+    if (exceedsNodes(source, 32768, n => settledLists.has(n)))
+      throw new Error('This object family is too large to expand (32768 nodes).');
     const lists: ListValue[] = [];
     const markers = new Map<Expr, number>();
     // A matrix name is the matrix, not a list of row-points, along the row's
@@ -266,21 +364,36 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       if (outside && node.kind === 'call' && POINT_FIGURES.has(node.name)) return node;
       const values = listValue(node);
       if (values) {
-        if (!values.items.length || values.items.length > 100000) throw new Error('Point-list arithmetic needs 1–100000 values.');
+        if (!values.items.length || values.items.length > 100000)
+          throw new Error('Point-list arithmetic needs 1–100000 values.');
         const marker = num(0);
-        markers.set(marker, lists.length); lists.push(values);
+        markers.set(marker, lists.length);
+        lists.push(values);
         return marker;
       }
       const map = (nodes: readonly Expr[]) => nodes.map(n => visit(n, asMatrix));
       switch (node.kind) {
-        case 'bin': return { ...node, a: visit(node.a, asMatrix || node.op === '*'), b: visit(node.b, asMatrix) };
-        case 'neg': return { ...node, a: visit(node.a, asMatrix) };
-        case 'eq': case 'ineq': return { ...node, l: visit(node.l), r: visit(node.r) };
-        case 'vec': return { ...node, items: map(node.items) };
-        case 'call': return { ...node, args: node.args.map(n => visit(n, false)) };
-        case 'comp': return { ...node, value: visit(node.value, false) };
-        case 'piecewise': return { ...node, cases: node.cases.map(c => ({ cond: visit(c.cond), value: visit(c.value) })), otherwise: node.otherwise && visit(node.otherwise) };
-        default: return mapChildren(node, n => visit(n, asMatrix));
+        case 'bin':
+          return { ...node, a: visit(node.a, asMatrix || node.op === '*'), b: visit(node.b, asMatrix) };
+        case 'neg':
+          return { ...node, a: visit(node.a, asMatrix) };
+        case 'eq':
+        case 'ineq':
+          return { ...node, l: visit(node.l), r: visit(node.r) };
+        case 'vec':
+          return { ...node, items: map(node.items) };
+        case 'call':
+          return { ...node, args: node.args.map(n => visit(n, false)) };
+        case 'comp':
+          return { ...node, value: visit(node.value, false) };
+        case 'piecewise':
+          return {
+            ...node,
+            cases: node.cases.map(c => ({ cond: visit(c.cond), value: visit(c.value) })),
+            otherwise: node.otherwise && visit(node.otherwise),
+          };
+        default:
+          return mapChildren(node, n => visit(n, asMatrix));
       }
     };
     const template = visit(source);
@@ -297,7 +410,10 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       else if (seen.n !== a.n) throw new Error(`Lists have different lengths (${seen.n} vs ${a.n}).`);
     }
     const n = axes.reduce((size, a) => size * a.n, 1);
-    if (n > 100000) throw new Error(`Independent lists combine every value with every other — that is ${n} combinations. Name one list and reuse it to pair values up instead.`);
+    if (n > 100000)
+      throw new Error(
+        `Independent lists combine every value with every other — that is ${n} combinations. Name one list and reuse it to pair values up instead.`,
+      );
     // Where member k sits in each list: its own axes, row-major like the rest.
     const at = (list: { axes: readonly Axis[] }, k: number): number => {
       let index = 0;
@@ -309,26 +425,57 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       return index;
     };
     const instantiate = (node: Expr, k: number): Expr => {
-      const hit = markers.get(node); if (hit !== undefined) return lists[hit].items[at(lists[hit], k)];
+      const hit = markers.get(node);
+      if (hit !== undefined) return lists[hit].items[at(lists[hit], k)];
       const map = (ns: readonly Expr[]) => ns.map(n => instantiate(n, k));
       switch (node.kind) {
-        case 'bin': return { ...node, a: instantiate(node.a, k), b: instantiate(node.b, k) };
-        case 'neg': return { ...node, a: instantiate(node.a, k) };
-        case 'eq': case 'ineq': return { ...node, l: instantiate(node.l, k), r: instantiate(node.r, k) };
-        case 'vec': return { ...node, items: map(node.items) };
-        case 'call': return { ...node, args: map(node.args) };
-        case 'piecewise': return { ...node, cases: node.cases.map(c => ({ cond: instantiate(c.cond, k), value: instantiate(c.value, k) })), otherwise: node.otherwise && instantiate(node.otherwise, k) };
-        default: return mapChildren(node, n => instantiate(n, k));
+        case 'bin':
+          return { ...node, a: instantiate(node.a, k), b: instantiate(node.b, k) };
+        case 'neg':
+          return { ...node, a: instantiate(node.a, k) };
+        case 'eq':
+        case 'ineq':
+          return { ...node, l: instantiate(node.l, k), r: instantiate(node.r, k) };
+        case 'vec':
+          return { ...node, items: map(node.items) };
+        case 'call':
+          return { ...node, args: map(node.args) };
+        case 'piecewise':
+          return {
+            ...node,
+            cases: node.cases.map(c => ({ cond: instantiate(c.cond, k), value: instantiate(c.value, k) })),
+            otherwise: node.otherwise && instantiate(node.otherwise, k),
+          };
+        default:
+          return mapChildren(node, n => instantiate(n, k));
       }
     };
-    const objects = outside || source.kind === 'eq' || source.kind === 'ineq' || [...freeVars(source)].some(plotVariable)
-      || lists.some(l => l.items.some(e => [...freeVars(e)].some(plotVariable)))
-      || (source.kind === 'call' && (GEOM_STATEMENTS.has(source.name) || WHOLE_EXPR_NAMES.has(source.name)));
-    const limit = outside || (source.kind === 'call' && POINT_FIGURES.has(source.name)) ? FIGURE_FAMILY_MAX : FAMILY_MAX;
+    const objects =
+      outside ||
+      source.kind === 'eq' ||
+      source.kind === 'ineq' ||
+      [...freeVars(source)].some(plotVariable) ||
+      lists.some(l => l.items.some(e => [...freeVars(e)].some(plotVariable))) ||
+      (source.kind === 'call' && (GEOM_STATEMENTS.has(source.name) || WHOLE_EXPR_NAMES.has(source.name)));
+    const limit =
+      outside || (source.kind === 'call' && POINT_FIGURES.has(source.name)) ? FIGURE_FAMILY_MAX : FAMILY_MAX;
     if (objects && n > limit) throw new Error(`An object family needs 1–${limit} members (got ${n}).`);
-    const members = Array.from({ length: n }, (_, k) => (outside ? lowerObjects(instantiate(template, k), defs, opts) : ordinary(instantiate(template, k))));
-    const valuesOnly = members.every(m => ![...freeVars(m)].some(plotVariable)
-      && !['figure', 'trail', 'hist', 'family'].includes(m.kind) && m.kind !== 'eq' && m.kind !== 'ineq' && !(m.kind === 'call' && (/^\[(polygon|segment|polyline|vector|square|hull|trail|hist)/.test(m.name) || (GEOM_STATEMENTS.has(m.name) || WHOLE_EXPR_NAMES.has(m.name)))));
+    const members = Array.from({ length: n }, (_, k) =>
+      outside ? lowerObjects(instantiate(template, k), defs, opts) : ordinary(instantiate(template, k)),
+    );
+    const valuesOnly = members.every(
+      m =>
+        ![...freeVars(m)].some(plotVariable) &&
+        !['figure', 'trail', 'hist', 'family'].includes(m.kind) &&
+        m.kind !== 'eq' &&
+        m.kind !== 'ineq' &&
+        !(
+          m.kind === 'call' &&
+          (/^\[(polygon|segment|polyline|vector|square|hull|trail|hist)/.test(m.name) ||
+            GEOM_STATEMENTS.has(m.name) ||
+            WHOLE_EXPR_NAMES.has(m.name))
+        ),
+    );
     // (Over the instances it was expanded along: Q = P + (1, 0) moves with P.)
     if (valuesOnly) return withAxes({ kind: 'list', items: members }, axes);
     if (n > limit) throw new Error(`An object family has at most ${limit} members.`);

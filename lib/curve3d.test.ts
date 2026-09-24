@@ -24,7 +24,9 @@ function sample(
 }
 
 // Helix (a cos ωu, a sin ωu, b ωu): κ = a/(a²+b²), τ = b/(a²+b²).
-const a = 2, b = 1, w = 4 * Math.PI;
+const a = 2,
+  b = 1,
+  w = 4 * Math.PI;
 const helix = sample(
   u => [a * Math.cos(w * u), a * Math.sin(w * u), b * w * u],
   u => [-a * w * Math.sin(w * u), a * w * Math.cos(w * u), b * w],
@@ -52,16 +54,14 @@ describe('curveFrames', () => {
     const fr = curveFrames(helix.pts, helix.d1, helix.d2, helix.d3);
     for (let i = 0; i < N; i++) {
       const j = i * 3;
-      const dot = (p: Float32Array, q: Float32Array) =>
-        p[j] * q[j] + p[j + 1] * q[j + 1] + p[j + 2] * q[j + 2];
+      const dot = (p: Float32Array, q: Float32Array) => p[j] * q[j] + p[j + 1] * q[j + 1] + p[j + 2] * q[j + 2];
       expect(dot(fr.tangent, fr.tangent)).toBeCloseTo(1, 5);
       expect(dot(fr.normal, fr.normal)).toBeCloseTo(1, 5);
       expect(dot(fr.tangent, fr.normal)).toBeCloseTo(0, 5);
       if (i) {
         const k = j - 3;
-        const cont = fr.normal[j] * fr.normal[k]
-          + fr.normal[j + 1] * fr.normal[k + 1]
-          + fr.normal[j + 2] * fr.normal[k + 2];
+        const cont =
+          fr.normal[j] * fr.normal[k] + fr.normal[j + 1] * fr.normal[k + 1] + fr.normal[j + 2] * fr.normal[k + 2];
         expect(cont).toBeGreaterThan(0.99);
       }
     }
@@ -69,7 +69,8 @@ describe('curveFrames', () => {
 
   it('points the Frenet normal toward the helix axis', () => {
     const fr = curveFrames(helix.pts, helix.d1, helix.d2, helix.d3);
-    const i = 137, j = i * 3;
+    const i = 137,
+      j = i * 3;
     // For a helix the principal normal is exactly -(cos ωu, sin ωu, 0).
     const u = i / (N - 1);
     expect(fr.frenetNormal[j]).toBeCloseTo(-Math.cos(w * u), 4);
@@ -78,9 +79,7 @@ describe('curveFrames', () => {
   });
 
   it('closes the frame seam on a circle', () => {
-    const circle = sample(
-      u => [3 * Math.cos(2 * Math.PI * u), 3 * Math.sin(2 * Math.PI * u), 0],
-    );
+    const circle = sample(u => [3 * Math.cos(2 * Math.PI * u), 3 * Math.sin(2 * Math.PI * u), 0]);
     const fr = curveFrames(circle.pts);
     expect(fr.closed).toBe(true);
     expect(fr.kappa[200]).toBeCloseTo(1 / 3, 3);
@@ -136,21 +135,19 @@ describe('buildTube', () => {
     const stride = 17;
     // Constant-speed helix: arclength fraction u is linear in the parameter.
     for (const i of [0, 100, 399]) {
-      expect(tube.uvs[(i * stride) * 2]).toBeCloseTo(i / (N - 1), 3);
+      expect(tube.uvs[i * stride * 2]).toBeCloseTo(i / (N - 1), 3);
     }
     // Ring seam duplicates position but carries v = 1 instead of 0.
     const i = 100;
-    expect(tube.uvs[(i * stride) * 2 + 1]).toBe(0);
+    expect(tube.uvs[i * stride * 2 + 1]).toBe(0);
     expect(tube.uvs[(i * stride + 16) * 2 + 1]).toBeCloseTo(1, 6);
     for (let c = 0; c < 3; c++) {
-      expect(tube.positions[(i * stride + 16) * 3 + c]).toBeCloseTo(tube.positions[(i * stride) * 3 + c], 5);
+      expect(tube.positions[(i * stride + 16) * 3 + c]).toBeCloseTo(tube.positions[i * stride * 3 + c], 5);
     }
   });
 
   it('sizes checker cells to be square-ish and even around closed loops', () => {
-    const circle = sample(
-      u => [3 * Math.cos(2 * Math.PI * u), 3 * Math.sin(2 * Math.PI * u), 0],
-    );
+    const circle = sample(u => [3 * Math.cos(2 * Math.PI * u), 3 * Math.sin(2 * Math.PI * u), 0]);
     const fr = curveFrames(circle.pts);
     const tube = buildTube(circle.pts, fr, 0.25, 16);
     const [lenCells, angCells] = tube.cells;
@@ -173,8 +170,7 @@ describe('combs', () => {
     const dz = comb.teeth[5] - comb.teeth[2];
     expect(Math.hypot(dx, dy, dz)).toBeCloseTo(0.4 * 1.5, 4);
     // -scale flips teeth away from the center of curvature.
-    expect(dx * fr.frenetNormal[0] + dy * fr.frenetNormal[1] + dz * fr.frenetNormal[2])
-      .toBeLessThan(0);
+    expect(dx * fr.frenetNormal[0] + dy * fr.frenetNormal[1] + dz * fr.frenetNormal[2]).toBeLessThan(0);
   });
 
   it('breaks the tip envelope at invalid samples', () => {
@@ -207,7 +203,10 @@ describe('finiteRuns', () => {
   });
   it('splits at a non-finite vertex, so no strip contains one', () => {
     const pts = new Float32Array([0, 0, 0, 1, 0, 0, N, N, 0, 2, 0, 0, 3, 0, 0, 4, 0, 0]);
-    expect(finiteRuns(pts)).toEqual([[0, 2], [3, 3]]);
+    expect(finiteRuns(pts)).toEqual([
+      [0, 2],
+      [3, 3],
+    ]);
   });
   it('drops lone points and handles gaps at the ends', () => {
     const pts = new Float32Array([N, 0, 0, 1, 0, 0, 0, Infinity, 0, 2, 0, 0, 3, 0, 0, 0, 0, N]);

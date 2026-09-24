@@ -22,8 +22,14 @@ function orbitOf(rows: string[], row: number) {
   const { object } = analysis.rows[row].cls!;
   if (object.kind !== 'orbit') throw new Error(`row ${row} is ${object.kind}`);
   const env = analysis.constEnv;
-  const input = orbitInput(prepareDocument(rows).defs, object.paths, object.series,
-    evaluate(object.from, env), evaluate(object.to, env), env);
+  const input = orbitInput(
+    prepareDocument(rows).defs,
+    object.paths,
+    object.series,
+    evaluate(object.from, env),
+    evaluate(object.to, env),
+    env,
+  );
   return { input, pts: traceOrbit(input) };
 }
 
@@ -39,7 +45,9 @@ describe('state families', () => {
   it('integrates each run exactly as a system of its own', () => {
     const family = integrate([...ROSSLER, 'p(0) = ([1, 2], 0, 0)'], 2).values;
     const solo = integrate([...ROSSLER, 'p(0) = (2, 0, 0)'], 2).values;
-    const second = Object.entries(family).filter(([n]) => n.endsWith('_1')).map(([, v]) => v);
+    const second = Object.entries(family)
+      .filter(([n]) => n.endsWith('_1'))
+      .map(([, v]) => v);
     expect(second).toEqual([solo.p_1, solo.p_2, solo.p_3]);
   });
 
@@ -53,11 +61,16 @@ describe('state families', () => {
   });
 
   it('carries coupled states along with the family, through constants and matrices', () => {
-    const rows = ['g = 9.8',
+    const rows = [
+      'g = 9.8',
       'M = [(2, cos(th_1 - th_2)), (cos(th_1 - th_2), 1)]',
       'f = (-om_2^2 sin(th_1 - th_2) - 2g sin(th_1), om_1^2 sin(th_1 - th_2) - g sin(th_2))',
-      "th' = om", "om' = solve(M, f)", 'th(0) = (2.5 + [0..2]/100, 2.4)',
-      'b1 = (sin(th_1), -cos(th_1))', 'segment((0, 0), b1)'];
+      "th' = om",
+      "om' = solve(M, f)",
+      'th(0) = (2.5 + [0..2]/100, 2.4)',
+      'b1 = (sin(th_1), -cos(th_1))',
+      'segment((0, 0), b1)',
+    ];
     const { sys, values } = integrate(rows, 5);
     expect(sys.names).toHaveLength(12); // th and om, 2 components, 3 runs
     const angles = sys.names.filter(n => n.includes('th_1')).map(n => values[n]);

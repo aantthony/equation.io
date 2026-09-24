@@ -1,14 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { SHOWCASE } from '../web/about/showcase.ts';
-import {
-  LANDINGS,
-  graphUrl,
-  landingForGroup,
-  landingFromPath,
-  landingJsonLd,
-  landingWorkerPaths,
-} from './landings.ts';
+import { LANDINGS, graphUrl, landingForGroup, landingFromPath, landingJsonLd, landingWorkerPaths } from './landings.ts';
 
 describe('intent landings', () => {
   it('have unique slugs, paths, and groups', () => {
@@ -85,9 +78,12 @@ describe('intent landings', () => {
 
   it('covers every landing path in run_worker_first via landingWorkerPaths', () => {
     expect(landingWorkerPaths()).toEqual([
-      '/implicit', '/implicit/',
-      '/slope-field', '/slope-field/',
-      '/complex', '/complex/',
+      '/implicit',
+      '/implicit/',
+      '/slope-field',
+      '/slope-field/',
+      '/complex',
+      '/complex/',
     ]);
   });
 });

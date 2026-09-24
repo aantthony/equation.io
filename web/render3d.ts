@@ -46,7 +46,10 @@ export function cameraEye(cam: Camera3D): [number, number, number] {
   ];
 }
 
-export function cameraMatrices(cam: Camera3D, aspect: number): { vp: Mat4; invVp: Mat4; eye: [number, number, number] } {
+export function cameraMatrices(
+  cam: Camera3D,
+  aspect: number,
+): { vp: Mat4; invVp: Mat4; eye: [number, number, number] } {
   const eye = cameraEye(cam);
   const view = lookAt(eye, cam.target, [0, 0, 1]);
   const proj = perspective(Math.PI / 4, aspect, cam.radius * 0.01, cam.radius * 100);
@@ -290,11 +293,12 @@ function psurfFrag(
   dv?: [string, string, string],
   params?: string[],
 ): string {
-  const tangents = du && dv
-    ? `
+  const tangents =
+    du && dv
+      ? `
 vec3 Pu(float u, float v) { return vec3(${du[0]}, ${du[1]}, ${du[2]}); }
 vec3 Pv(float u, float v) { return vec3(${dv[0]}, ${dv[1]}, ${dv[2]}); }`
-    : `
+      : `
 vec3 P(float u, float v) { return vec3(${comps[0]}, ${comps[1]}, ${comps[2]}); }
 vec3 Pu(float u, float v) { return (P(u + 1e-3, v) - P(u - 1e-3, v)) * 500.0; }
 vec3 Pv(float u, float v) { return (P(u, v + 1e-3) - P(u, v - 1e-3)) * 500.0; }`;
@@ -646,7 +650,13 @@ export interface Scene3D {
     color: [number, number, number];
     params?: string[];
   }>;
-  curves: Array<{ pts: Float32Array; color: [number, number, number]; arrow?: boolean; triangle?: boolean; fade?: boolean }>;
+  curves: Array<{
+    pts: Float32Array;
+    color: [number, number, number];
+    arrow?: boolean;
+    triangle?: boolean;
+    fade?: boolean;
+  }>;
   /** Disconnected segments (comb teeth, hull edges), drawn as vertex pairs.
    * Retained arrays are immutable and can keep their GPU buffers. */
   segments: Array<{ pts: Float32Array; color: [number, number, number]; retained?: boolean }>;
@@ -665,7 +675,12 @@ export interface Scene3D {
   }>;
   points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string }>;
   /** 3D vector fields drawn as animated streamlines (see streamlineVert). */
-  streamlines?: Array<{ comps: [string, string, string]; color: [number, number, number]; params?: string[]; uniforms?: Record<string, number> }>;
+  streamlines?: Array<{
+    comps: [string, string, string];
+    color: [number, number, number];
+    params?: string[];
+    uniforms?: Record<string, number>;
+  }>;
 }
 
 const GRID_N = 160;
@@ -694,7 +709,10 @@ export class Renderer3D {
   private streamlineVao!: WebGLVertexArrayObject;
   private streamlineSeeds = 0;
 
-  constructor(private gl: WebGL2RenderingContext, private quad: { draw(): void }) {
+  constructor(
+    private gl: WebGL2RenderingContext,
+    private quad: { draw(): void },
+  ) {
     this.geometry = new RetainedGeometry(gl);
     this.cache = new ProgramCache(gl);
     this.axesProgram = compileProgram(gl, AXES_VERT, AXES_FRAG);
@@ -772,8 +790,12 @@ export class Renderer3D {
     for (let j = 0; j < GRID_N - 1; j++) {
       for (let i = 0; i < GRID_N - 1; i++) {
         const a = j * GRID_N + i;
-        indices[k++] = a; indices[k++] = a + 1; indices[k++] = a + GRID_N;
-        indices[k++] = a + 1; indices[k++] = a + GRID_N + 1; indices[k++] = a + GRID_N;
+        indices[k++] = a;
+        indices[k++] = a + 1;
+        indices[k++] = a + GRID_N;
+        indices[k++] = a + 1;
+        indices[k++] = a + GRID_N + 1;
+        indices[k++] = a + GRID_N;
       }
     }
     this.gridIndexCount = indices.length;
@@ -792,11 +814,11 @@ export class Renderer3D {
     this.axesVao = gl.createVertexArray()!;
     const axes = new Float32Array([
       // x axis: red-ish
-      -1, 0, 0, 0.75, 0.30, 0.30, 1, 0, 0, 0.75, 0.30, 0.30,
+      -1, 0, 0, 0.75, 0.3, 0.3, 1, 0, 0, 0.75, 0.3, 0.3,
       // y axis: green-ish
-      0, -1, 0, 0.30, 0.65, 0.30, 0, 1, 0, 0.30, 0.65, 0.30,
+      0, -1, 0, 0.3, 0.65, 0.3, 0, 1, 0, 0.3, 0.65, 0.3,
       // z axis: blue-ish
-      0, 0, -1, 0.30, 0.40, 0.80, 0, 0, 1, 0.30, 0.40, 0.80,
+      0, 0, -1, 0.3, 0.4, 0.8, 0, 0, 1, 0.3, 0.4, 0.8,
     ]);
     gl.bindVertexArray(this.axesVao);
     const buf = gl.createBuffer()!;
@@ -809,7 +831,9 @@ export class Renderer3D {
     gl.bindVertexArray(null);
   }
 
-  clearGeometry() { this.geometry.clear(); }
+  clearGeometry() {
+    this.geometry.clear();
+  }
 
   /** Jittered lattice seeds in the unit box, each with a wave phase. */
   private initStreamlineSeeds(): void {
@@ -817,14 +841,22 @@ export class Renderer3D {
     const n = STREAMLINE_CELLS_N;
     const seeds = new Float32Array(n * n * n * STREAMLINES_PER_CELL * 4);
     let hash = 0x2545f491;
-    const random = () => { hash ^= hash << 13; hash ^= hash >>> 17; hash ^= hash << 5; return (hash >>> 0) / 4294967296; };
+    const random = () => {
+      hash ^= hash << 13;
+      hash ^= hash >>> 17;
+      hash ^= hash << 5;
+      return (hash >>> 0) / 4294967296;
+    };
     let o = 0;
-    for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) for (let c = 0; c < STREAMLINES_PER_CELL; c++) {
-      seeds[o++] = -1 + 2 * (i + random()) / n;
-      seeds[o++] = -1 + 2 * (j + random()) / n;
-      seeds[o++] = -1 + 2 * (k + random()) / n;
-      seeds[o++] = 2 * Math.PI * random();
-    }
+    for (let k = 0; k < n; k++)
+      for (let j = 0; j < n; j++)
+        for (let i = 0; i < n; i++)
+          for (let c = 0; c < STREAMLINES_PER_CELL; c++) {
+            seeds[o++] = -1 + (2 * (i + random())) / n;
+            seeds[o++] = -1 + (2 * (j + random())) / n;
+            seeds[o++] = -1 + (2 * (k + random())) / n;
+            seeds[o++] = 2 * Math.PI * random();
+          }
     this.streamlineSeeds = n * n * n * STREAMLINES_PER_CELL;
     this.streamlineVao = gl.createVertexArray()!;
     gl.bindVertexArray(this.streamlineVao);
@@ -919,9 +951,15 @@ export class Renderer3D {
       gl.uniform3f(gl.getUniformLocation(this.tubeProgram, 'uEye'), ...eye);
       gl.uniform2f(gl.getUniformLocation(this.tubeProgram, 'uCells'), ...tube.cells);
       if (tube.retained) {
-        this.geometry.bind(tube.positions, [
-          { data: tube.positions, size: 3 }, { data: tube.normals, size: 3 }, { data: tube.uvs, size: 2 },
-        ], tube.indices);
+        this.geometry.bind(
+          tube.positions,
+          [
+            { data: tube.positions, size: 3 },
+            { data: tube.normals, size: 3 },
+            { data: tube.uvs, size: 2 },
+          ],
+          tube.indices,
+        );
       } else {
         gl.bindVertexArray(this.tubeVao);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.tubePosBuf);
@@ -950,7 +988,7 @@ export class Renderer3D {
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uFade'), c.fade ? 1 : 0);
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uCount'), pts.length / 3);
       if (c.triangle) {
-        gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), .18);
+        gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 0.18);
         gl.depthMask(false);
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         gl.depthMask(true);
@@ -966,8 +1004,12 @@ export class Renderer3D {
         let o = 0;
         for (const [first] of runs) {
           const i = first * 3;
-          packed[o++] = pts[i]; packed[o++] = pts[i + 1]; packed[o++] = pts[i + 2];
-          packed[o++] = pts[i + 3]; packed[o++] = pts[i + 4]; packed[o++] = pts[i + 5];
+          packed[o++] = pts[i];
+          packed[o++] = pts[i + 1];
+          packed[o++] = pts[i + 2];
+          packed[o++] = pts[i + 3];
+          packed[o++] = pts[i + 4];
+          packed[o++] = pts[i + 5];
         }
         gl.bufferData(gl.ARRAY_BUFFER, packed, gl.DYNAMIC_DRAW);
         gl.drawArrays(gl.LINES, 0, runs.length * 2);
@@ -1046,7 +1088,12 @@ export class Renderer3D {
 }
 
 /** Project axis-end labels (x, y, z) onto the overlay canvas. */
-export function drawLabels3D(ctx: CanvasRenderingContext2D, cam: Camera3D, dpr: number, points: Scene3D['points'] = []): void {
+export function drawLabels3D(
+  ctx: CanvasRenderingContext2D,
+  cam: Camera3D,
+  dpr: number,
+  points: Scene3D['points'] = [],
+): void {
   const w = ctx.canvas.width / dpr;
   const h = ctx.canvas.height / dpr;
   ctx.save();
@@ -1059,7 +1106,11 @@ export function drawLabels3D(ctx: CanvasRenderingContext2D, cam: Camera3D, dpr: 
     ['x', [boxR * 1.04, 0, 0], '#a44'],
     ['y', [0, boxR * 1.04, 0], '#4a4'],
     ['z', [0, 0, boxR * 1.04], '#46a'],
-    ...points.filter(p => p.label).map(p => [p.label!, p.pos, `rgb(${p.color.map(c => Math.round(c * 255)).join(',')})`] as [string, number[], string]),
+    ...points
+      .filter(p => p.label)
+      .map(
+        p => [p.label!, p.pos, `rgb(${p.color.map(c => Math.round(c * 255)).join(',')})`] as [string, number[], string],
+      ),
   ];
   for (const [text, p, color] of labels) {
     const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
@@ -1067,7 +1118,7 @@ export function drawLabels3D(ctx: CanvasRenderingContext2D, cam: Camera3D, dpr: 
     const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
     if (cw <= 0) continue;
     ctx.fillStyle = color;
-    ctx.fillText(text, (cx / cw * 0.5 + 0.5) * w + 7, (0.5 - cy / cw * 0.5) * h - 7);
+    ctx.fillText(text, ((cx / cw) * 0.5 + 0.5) * w + 7, (0.5 - (cy / cw) * 0.5) * h - 7);
   }
   ctx.restore();
 }

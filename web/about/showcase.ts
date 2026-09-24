@@ -176,11 +176,14 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'pendulum-phase',
     title: 'ODEs and phase portraits',
-    blurb: "Write (x′, y′) = (P, Q) and the flow appears — click to trace an orbit.",
+    blurb: 'Write (x′, y′) = (P, Q) and the flow appears — click to trace an orbit.',
     eqs: ["(x', y') = (y, -sin(x))"],
     group: 'Vector fields & ODEs',
     settle: 0.8,
-    clicks: [[0.55, 0.40], [0.50, 0.14]],
+    clicks: [
+      [0.55, 0.4],
+      [0.5, 0.14],
+    ],
   },
   {
     slug: 'slope-field',
@@ -189,7 +192,10 @@ export const SHOWCASE: ShowcaseItem[] = [
     eqs: ["y' = x - y"],
     group: 'Vector fields & ODEs',
     settle: 0.8,
-    clicks: [[0.42, 0.25], [0.56, 0.78]],
+    clicks: [
+      [0.42, 0.25],
+      [0.56, 0.78],
+    ],
   },
   {
     slug: 'vector-swirl',
@@ -204,7 +210,11 @@ export const SHOWCASE: ShowcaseItem[] = [
     title: 'Simulations that have no formula',
     blurb: 'The double pendulum as it is derived: M(θ) ω′ = f, a vector state solved by Cramer each step.',
     eqs: [
-      'g = 9.8', 'L1 = 1', 'L2 = 1', 'm1 = 1', 'm2 = 1',
+      'g = 9.8',
+      'L1 = 1',
+      'L2 = 1',
+      'm1 = 1',
+      'm2 = 1',
       'M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]',
       'f = (-m2 L2 om_2^2 sin(th_1 - th_2) - (m1+m2) g sin(th_1), L1 om_1^2 sin(th_1 - th_2) - g sin(th_2))',
       "th' = om",
@@ -259,7 +269,8 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'running-integral',
     title: 'Integrals too',
-    blurb: '∫ is symbolic where a closed form exists — a running integral plots like any other curve, and definite ones report their value.',
+    blurb:
+      '∫ is symbolic where a closed form exists — a running integral plots like any other curve, and definite ones report their value.',
     eqs: ['f(x) = sin(x)^2', 'y = f(x)', 'y = int[0..x] f(t) dt'],
     group: 'Calculus & sliders',
     view: { cy: 0.85, span: 4 },
@@ -267,7 +278,8 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'sine-integral',
     title: 'Beyond closed forms',
-    blurb: 'Si(x) has no elementary antiderivative — a quadrature sum expands instead, so it still compiles to the GPU.',
+    blurb:
+      'Si(x) has no elementary antiderivative — a quadrature sum expands instead, so it still compiles to the GPU.',
     eqs: ['y = int[0..x] sin(t)/t dt'],
     group: 'Calculus & sliders',
     view: { span: 5.5 },
@@ -283,7 +295,8 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'piecewise',
     title: 'Piecewise definitions',
-    blurb: 'Cases with inequality conditions, tried in order; the last bare value is the default. With no default the curve is undefined elsewhere, so {0 < x < 2: x^2} restricts a domain.',
+    blurb:
+      'Cases with inequality conditions, tried in order; the last bare value is the default. With no default the curve is undefined elsewhere, so {0 < x < 2: x^2} restricts a domain.',
     eqs: ['y = {x < 0: -x, x >= 0: x^2/4}'],
     group: 'Curves & regions',
     view: { cx: 0, cy: 2, span: 6.7 },
@@ -333,7 +346,10 @@ export const SHOWCASE: ShowcaseItem[] = [
     title: 'Point arithmetic',
     blurb: 'midpoint, perp, and |A − B| work on points — the midpoints of any quadrilateral make a parallelogram.',
     eqs: [
-      'A = (-3, -1)', 'B = (2, -2)', 'C = (3, 2)', 'D = (-2, 3)',
+      'A = (-3, -1)',
+      'B = (2, -2)',
+      'C = (3, 2)',
+      'D = (-2, 3)',
       'polygon(A, B, C, D)',
       'polygon(midpoint(A, B), midpoint(B, C), midpoint(C, D), midpoint(D, A))',
     ],
@@ -343,8 +359,15 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'rosette',
     title: 'Rotate, repeat, take the hull',
-    blurb: 'A list is a variable: rotate a shape by a list of angles and you get one copy per angle. hull(…) wraps any points — even moving ones — in their convex hull.',
-    eqs: ['th = 2pi [0..5]/6', 'P = [(1, 0), (3, 0.6), (3, -0.6)]', 'rotate(hull(P), th + t/3)', 'n = 7', 'polygon(rotate((0.8, 0), 2pi [0..n-1]/n - t/3))'],
+    blurb:
+      'A list is a variable: rotate a shape by a list of angles and you get one copy per angle. hull(…) wraps any points — even moving ones — in their convex hull.',
+    eqs: [
+      'th = 2pi [0..5]/6',
+      'P = [(1, 0), (3, 0.6), (3, -0.6)]',
+      'rotate(hull(P), th + t/3)',
+      'n = 7',
+      'polygon(rotate((0.8, 0), 2pi [0..n-1]/n - t/3))',
+    ],
     group: 'Geometry',
     view: { span: 8 },
     settle: 0.6,
@@ -352,7 +375,8 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'matrix-exponential',
     title: 'Rotations are matrix exponentials',
-    blurb: 'e^(tA) solves (x′, y′) = A(x, y) exactly: with A = J it is a rotation, and with any other 2×2 a spiral, saddle or node. The dots are e^(sA) applied to one point for a list of times s; the last row rides along them with t.',
+    blurb:
+      'e^(tA) solves (x′, y′) = A(x, y) exactly: with A = J it is a rotation, and with any other 2×2 a spiral, saddle or node. The dots are e^(sA) applied to one point for a list of times s; the last row rides along them with t.',
     eqs: ['A = [(-0.2, -1), (1, -0.2)]', 's = [0..60]/5', 'e^(s A) (3, 0)', 'e^(t A) (3, 0)'],
     group: 'Geometry',
     view: { span: 8 },
@@ -360,11 +384,18 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'thebault',
     title: 'Theorems you can drag',
-    blurb: "Squares on a parallelogram: Thébault's theorem says their centers form a square. Drag a corner — it keeps being true.",
+    blurb:
+      "Squares on a parallelogram: Thébault's theorem says their centers form a square. Drag a corner — it keeps being true.",
     eqs: [
-      'A = (0, 0)', 'B = (4, 0.5)', 'D = (1, 2.5)', 'C = B + D - A',
+      'A = (0, 0)',
+      'B = (4, 0.5)',
+      'D = (1, 2.5)',
+      'C = B + D - A',
       'polygon(A, B, C, D)',
-      'square(B, A)', 'square(C, B)', 'square(D, C)', 'square(A, D)',
+      'square(B, A)',
+      'square(C, B)',
+      'square(D, C)',
+      'square(A, D)',
       'P = midpoint(A, B) - perp(B - A)/2',
       'Q = midpoint(B, C) - perp(C - B)/2',
       'R = midpoint(C, D) - perp(D - C)/2',
@@ -385,10 +416,15 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'clt',
     title: 'Sums are convolutions',
-    blurb: 'Distinct variables are independent, so the density of S is a real convolution — four uniforms already hug the matching normal.',
+    blurb:
+      'Distinct variables are independent, so the density of S is a real convolution — four uniforms already hug the matching normal.',
     eqs: [
-      'X1 ~ Uniform(0, 1)', 'X2 ~ Uniform(0, 1)', 'X3 ~ Uniform(0, 1)', 'X4 ~ Uniform(0, 1)',
-      'S = X1 + X2 + X3 + X4', 'Z ~ Normal(2, sqrt(1/3))',
+      'X1 ~ Uniform(0, 1)',
+      'X2 ~ Uniform(0, 1)',
+      'X3 ~ Uniform(0, 1)',
+      'X4 ~ Uniform(0, 1)',
+      'S = X1 + X2 + X3 + X4',
+      'Z ~ Normal(2, sqrt(1/3))',
     ],
     group: 'Probability',
     // Crops just under y = 1 and right of x = 1, so the four unit-box base
@@ -398,7 +434,8 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'conditional-rv',
     title: 'Compute with random variables',
-    blurb: 'Derived variables get densities of their own — the stem is Y’s point mass — and P works on any event, even P(Y > X).',
+    blurb:
+      'Derived variables get densities of their own — the stem is Y’s point mass — and P works on any event, even P(Y > X).',
     eqs: ['X ~ Normal(0, 1)', 'Y = {X > 0: X^2, 1}', 'P(Y > 0.5)'],
     group: 'Probability',
     view: { cx: 0.3, cy: 0.4, span: 1.7 },
@@ -427,9 +464,11 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'icosahedron',
     title: 'Solids from a few points',
-    blurb: 'Independent lists cross — (0, [-1,1], [-φ,φ]) is four points — three turns about (1,1,1) make twelve, and hull(…) wraps them in a shaded icosahedron. The cube beside it is hull(([-1,1],[-1,1],[-1,1])), tumbling by e^(t cross(n)).',
+    blurb:
+      'Independent lists cross — (0, [-1,1], [-φ,φ]) is four points — three turns about (1,1,1) make twelve, and hull(…) wraps them in a shaded icosahedron. The cube beside it is hull(([-1,1],[-1,1],[-1,1])), tumbling by e^(t cross(n)).',
     eqs: [
-      'phi = (1+sqrt(5))/2', 'k = 2pi [0..2]/3',
+      'phi = (1+sqrt(5))/2',
+      'k = 2pi [0..2]/3',
       'hull(rotate((0, [-1,1], [-phi,phi]), k, (1, 1, 1)))',
       'e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1])) + (4, 0, 0)',
     ],
@@ -439,7 +478,8 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'trefoil',
     title: 'Knots as solid tubes',
-    blurb: 'Wrap a space curve in tube(…) and it sweeps a shaded solid — knots read at a glance, with curvature and torsion combs a click away.',
+    blurb:
+      'Wrap a space curve in tube(…) and it sweeps a shaded solid — knots read at a glance, with curvature and torsion combs a click away.',
     eqs: ['tube((sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u), -sin(6pi u)))'],
     group: 'The third dimension',
   },

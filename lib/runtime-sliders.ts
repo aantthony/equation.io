@@ -7,8 +7,15 @@ import { sliderForm } from './slider.ts';
  * and diagnostics must be rechecked when an invalid document changes. */
 export function runtimeSliderNames(analysis: Analysis): Set<string> {
   const { document, rows, defs } = analysis;
-  if (rows.some(row => row.error || row.dataLocal) || defs.states.size || defs.rvs.size
-    || defs.tables.size || defs.sequences.size || document.raw.some(d => d.kind === 'regression')) return new Set();
+  if (
+    rows.some(row => row.error || row.dataLocal) ||
+    defs.states.size ||
+    defs.rvs.size ||
+    defs.tables.size ||
+    defs.sequences.size ||
+    document.raw.some(d => d.kind === 'regression')
+  )
+    return new Set();
   const blocked = new Set(document.structuralConsts);
   for (const definition of document.raw) {
     if (!('rhs' in definition)) return new Set();
@@ -17,11 +24,19 @@ export function runtimeSliderNames(analysis: Analysis): Set<string> {
       // or constant. Let the normal compiler settle all such dependencies.
       const expr = parseExpr(definition.rhs, document.fnNames, document.listNames, document.valueNames);
       for (const name of freeVars(expr)) blocked.add(name);
-    } catch { return new Set(); }
+    } catch {
+      return new Set();
+    }
   }
-  return new Set(rows.flatMap(row => {
-    const d = row.def;
-    return d?.kind === 'const' && sliderForm(d.rhs, document.fnNames) && !blocked.has(d.name)
-      && defs.consts.has(d.name) ? [d.name] : [];
-  }));
+  return new Set(
+    rows.flatMap(row => {
+      const d = row.def;
+      return d?.kind === 'const' &&
+        sliderForm(d.rhs, document.fnNames) &&
+        !blocked.has(d.name) &&
+        defs.consts.has(d.name)
+        ? [d.name]
+        : [];
+    }),
+  );
 }

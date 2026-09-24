@@ -16,11 +16,11 @@ export function compileRows(rows: string[]): CompiledRows {
   const failedPlot = analysis.rows.find(row => row.error && !row.def);
   if (failedPlot) throw new Error(failedPlot.error);
   return {
-    classified: analysis.rows.flatMap(row => row.cls ? [row.cls] : []),
+    classified: analysis.rows.flatMap(row => (row.cls ? [row.cls] : [])),
     gridFields: analysis.gridFields.map(compileGridGpu),
-    cpu: analysis.rows.flatMap(row => row.cpu ? [row.cpu] : []),
-    gpu: analysis.rows.flatMap(row => row.gpu ? [row.gpu] : []),
-    errors: analysis.rows.flatMap(row => row.error ? [row.error] : []),
+    cpu: analysis.rows.flatMap(row => (row.cpu ? [row.cpu] : [])),
+    gpu: analysis.rows.flatMap(row => (row.gpu ? [row.gpu] : [])),
+    errors: analysis.rows.flatMap(row => (row.error ? [row.error] : [])),
   };
 }
 

@@ -1,4 +1,6 @@
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 /* The graph owns every gesture: one finger pans it, two pinch it (see the
    pointer handlers in main.ts), so no touch should reach the viewport's own
@@ -6,7 +8,9 @@
    Blanket rather than per-element so a pinch that happens to start on the
    equation text can't leak through; `pan-x pan-y` rather than `none` leaves
    the caret, text selection, and the panel's internal scrolling alone. */
-* { touch-action: pan-x pan-y; }
+* {
+  touch-action: pan-x pan-y;
+}
 
 /* The page is an app, not a document: chrome, buttons and the graph never
    select (no blue sweep on select-all, no long-press selection on labels).
@@ -51,7 +55,7 @@ body {
   --ex-code-hover: #667;
 }
 
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   --page-bg: #171a1f;
   --panel-bg: rgba(24, 27, 33, 0.92);
   --panel-border: rgba(255, 255, 255, 0.12);
@@ -77,15 +81,22 @@ body {
   --ex-code-hover: #97a3b8;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
   background: var(--page-bg);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
 }
-#gl, #overlay {
+#gl,
+#overlay {
   position: absolute;
   top: 0;
   left: 0;
@@ -98,8 +109,12 @@ html, body {
      is plain 100%. */
   height: calc(100% + env(safe-area-inset-top));
 }
-#gl { touch-action: none; }
-#overlay { pointer-events: none; }
+#gl {
+  touch-action: none;
+}
+#overlay {
+  pointer-events: none;
+}
 
 #tooltip {
   position: fixed;
@@ -121,7 +136,9 @@ html, body {
   font-size: 11px;
 }
 
-#panel.is-parked { visibility: hidden; }
+#panel.is-parked {
+  visibility: hidden;
+}
 
 #panel {
   position: absolute;
@@ -182,7 +199,9 @@ html, body {
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
 }
-#panel-grip:active { cursor: grabbing; }
+#panel-grip:active {
+  cursor: grabbing;
+}
 #panel-grip::after {
   content: '';
   position: absolute;
@@ -194,7 +213,9 @@ html, body {
   border-radius: 2px;
   background: var(--panel-border);
 }
-#panel-grip:hover::after { background: var(--muted); }
+#panel-grip:hover::after {
+  background: var(--muted);
+}
 
 /* The resize strip (panel-resize.ts): straddles the panel's outer vertical
    edge — the one away from the pinned corner — below the grip. A grabber
@@ -227,11 +248,17 @@ html, body {
   border-radius: 2px;
 }
 #panel-resize:hover::after,
-#panel-resize:active::after { background: var(--panel-border); }
+#panel-resize:active::after {
+  background: var(--panel-border);
+}
 /* Keyboard focus shows the pill in the accent color instead of the default
    outline, which would trace the whole off-edge strip. */
-#panel-resize { outline: none; }
-#panel-resize:focus-visible::after { background: var(--accent); }
+#panel-resize {
+  outline: none;
+}
+#panel-resize:focus-visible::after {
+  background: var(--accent);
+}
 
 #theme-toggle,
 #state-reset,
@@ -256,22 +283,48 @@ html, body {
   align-items: center;
   justify-content: center;
 }
-#shot { right: 34px; }
-#rec { right: 62px; }
+#shot {
+  right: 34px;
+}
+#rec {
+  right: 62px;
+}
 /* Only present while a row defines a state (`a' = …`). */
-#state-reset { right: 90px; font-size: 14px; }
-#rec[hidden] ~ #state-reset { right: 62px; }
-#state-reset[hidden] { display: none; }
-#rec[hidden] { display: none; }
-#rec.recording { color: #e24; }
-#rec .rec-stop { display: none; }
-#rec.recording .rec-dot { display: none; }
-#rec.recording .rec-stop { display: block; }
+#state-reset {
+  right: 90px;
+  font-size: 14px;
+}
+#rec[hidden] ~ #state-reset {
+  right: 62px;
+}
+#state-reset[hidden] {
+  display: none;
+}
+#rec[hidden] {
+  display: none;
+}
+#rec.recording {
+  color: #e24;
+}
+#rec .rec-stop {
+  display: none;
+}
+#rec.recording .rec-dot {
+  display: none;
+}
+#rec.recording .rec-stop {
+  display: block;
+}
 #theme-toggle:hover,
 #state-reset:hover,
 #shot:hover,
-#rec:hover { background: var(--eq-focus); color: var(--muted-hover); }
-#rec.recording:hover { color: #c12; }
+#rec:hover {
+  background: var(--eq-focus);
+  color: var(--muted-hover);
+}
+#rec.recording:hover {
+  color: #c12;
+}
 
 #equations {
   /* Scrolls when the list outgrows the panel's max-height. `none` (not
@@ -286,7 +339,11 @@ html, body {
   overscroll-behavior: none;
   outline: none;
   color: var(--text);
-  font: 15px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  font:
+    15px/1.5 ui-monospace,
+    'SF Mono',
+    Menlo,
+    monospace;
   padding: 2px 0;
   caret-color: var(--text);
   /* Opt back out of the body's user-select: none — explicitly, because on
@@ -315,13 +372,20 @@ html, body {
   border: 1px solid var(--dot-border);
   cursor: pointer;
 }
-.eq-line.is-def::before { visibility: hidden; }
+.eq-line.is-def::before {
+  visibility: hidden;
+}
 /* A trailing `# note` (lib/statements.ts noteStart) reads as a caption: on
    its own line under the math, in a smaller prose face. */
 .eq-note {
   display: block;
   color: var(--muted);
-  font: 12.5px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font:
+    12.5px/1.45 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
 }
 /* `# label` comment rows head a collapsible group; the gutter chevron
    (replacing the color dot) toggles it. */
@@ -344,17 +408,28 @@ html, body {
   transform: rotate(90deg);
   transition: transform 0.12s;
 }
-.eq-line.is-comment.collapsed::before { transform: none; }
+.eq-line.is-comment.collapsed::before {
+  transform: none;
+}
 .eq-line.is-comment.collapsed::after {
   content: attr(data-hidden);
   margin-left: 10px;
   color: var(--placeholder);
-  font: 11px ui-sans-serif, system-ui, sans-serif;
+  font:
+    11px ui-sans-serif,
+    system-ui,
+    sans-serif;
 }
 /* Rows inside a collapsed group; they stay in the DOM (copy/undo/share). */
-#equations .eq-hidden { display: none; }
-.eq-line.focused { background: var(--eq-focus); }
-.eq-line.invalid { box-shadow: inset 0 -1px var(--error-line); }
+#equations .eq-hidden {
+  display: none;
+}
+.eq-line.focused {
+  background: var(--eq-focus);
+}
+.eq-line.invalid {
+  box-shadow: inset 0 -1px var(--error-line);
+}
 .eq-line[data-ph]::after {
   /* Overlay the empty line: in-flow it would land after the line's <br>,
      rendering on a second visual line and doubling the row height. */
@@ -389,7 +464,11 @@ html, body {
   border: none;
   outline: none;
   background: none;
-  font: 11px ui-monospace, "SF Mono", Menlo, monospace;
+  font:
+    11px ui-monospace,
+    'SF Mono',
+    Menlo,
+    monospace;
   color: var(--bound);
   text-align: center;
   appearance: textfield;
@@ -398,7 +477,9 @@ html, body {
   user-select: text;
   -webkit-user-select: text;
 }
-.eq-slider-bound:focus { color: var(--bound-focus); }
+.eq-slider-bound:focus {
+  color: var(--bound-focus);
+}
 .eq-slider-bound::-webkit-outer-spin-button,
 .eq-slider-bound::-webkit-inner-spin-button {
   -webkit-appearance: none;
@@ -412,13 +493,23 @@ html, body {
   border-radius: 9px;
   background: none;
   color: var(--muted);
-  font: 10.5px ui-sans-serif, system-ui, sans-serif;
+  font:
+    10.5px ui-sans-serif,
+    system-ui,
+    sans-serif;
   padding: 1px 8px;
   cursor: pointer;
 }
-.eq-levels:hover { color: var(--muted-hover); border-color: var(--panel-border); }
+.eq-levels:hover {
+  color: var(--muted-hover);
+  border-color: var(--panel-border);
+}
 /* "on" inverts against the page so it reads in both themes. */
-.eq-levels.on { background: var(--accent); border-color: var(--accent); color: var(--page-bg); }
+.eq-levels.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--page-bg);
+}
 .eq-curve {
   display: flex;
   align-items: center;
@@ -427,7 +518,11 @@ html, body {
 }
 .eq-curve-label {
   flex: none;
-  font: 11px ui-monospace, "SF Mono", Menlo, monospace;
+  font:
+    11px ui-monospace,
+    'SF Mono',
+    Menlo,
+    monospace;
   color: var(--bound);
 }
 .eq-curve-toggle {
@@ -435,7 +530,9 @@ html, body {
   display: flex;
   align-items: center;
   gap: 3px;
-  font: italic 12px ui-sans-serif, system-ui;
+  font:
+    italic 12px ui-sans-serif,
+    system-ui;
   color: var(--summary);
   cursor: pointer;
 }
@@ -475,7 +572,9 @@ html, body {
   color: var(--info);
   cursor: pointer;
 }
-.eq-table > summary:hover { color: var(--summary-hover); }
+.eq-table > summary:hover {
+  color: var(--summary-hover);
+}
 .eq-table-scroll {
   max-height: 180px;
   overflow: auto;
@@ -486,10 +585,15 @@ html, body {
 }
 .eq-table table {
   border-collapse: collapse;
-  font: 11px ui-monospace, "SF Mono", Menlo, monospace;
+  font:
+    11px ui-monospace,
+    'SF Mono',
+    Menlo,
+    monospace;
   color: var(--ex-text);
 }
-.eq-table th, .eq-table td {
+.eq-table th,
+.eq-table td {
   padding: 2px 8px;
   text-align: left;
   white-space: nowrap;
@@ -502,7 +606,9 @@ html, body {
   color: var(--summary);
   font-weight: 500;
 }
-.eq-table .num { text-align: right; }
+.eq-table .num {
+  text-align: right;
+}
 .eq-table .more {
   color: var(--muted);
   text-align: center;
@@ -511,7 +617,7 @@ html, body {
 
 /* Dragging a CSV over the window: the whole page is the drop target. */
 body.file-drag::after {
-  content: "Drop a .csv to plot it";
+  content: 'Drop a .csv to plot it';
   position: fixed;
   inset: 12px;
   z-index: 60;
@@ -522,7 +628,10 @@ body.file-drag::after {
   border-radius: 12px;
   background: color-mix(in srgb, var(--page-bg) 70%, transparent);
   color: var(--accent);
-  font: 600 16px ui-sans-serif, system-ui, sans-serif;
+  font:
+    600 16px ui-sans-serif,
+    system-ui,
+    sans-serif;
   pointer-events: none;
 }
 
@@ -540,10 +649,15 @@ body.file-drag::after {
   background: var(--panel-bg);
   box-shadow: 0 4px 16px var(--panel-shadow);
   color: var(--text);
-  font: 12px ui-sans-serif, system-ui, sans-serif;
+  font:
+    12px ui-sans-serif,
+    system-ui,
+    sans-serif;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s, transform 0.15s;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
 }
 .notice.show {
   opacity: 1;
@@ -560,12 +674,17 @@ body.file-drag::after {
   border-radius: 999px;
   background: none;
   color: var(--muted);
-  font: 11px ui-sans-serif, system-ui, sans-serif;
+  font:
+    11px ui-sans-serif,
+    system-ui,
+    sans-serif;
   line-height: 1;
   cursor: pointer;
   padding: 3px 8px;
 }
-.eq-toggle:hover { color: var(--muted-hover); }
+.eq-toggle:hover {
+  color: var(--muted-hover);
+}
 .eq-toggle.on {
   color: var(--accent);
   border-color: color-mix(in srgb, var(--accent) 45%, transparent);
@@ -602,7 +721,9 @@ body.file-drag::after {
   cursor: pointer;
   padding: 2px;
 }
-#data-files > summary:hover { color: var(--muted-hover); }
+#data-files > summary:hover {
+  color: var(--muted-hover);
+}
 .file-item {
   display: flex;
   align-items: baseline;
@@ -616,8 +737,12 @@ body.file-drag::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.file-item code { color: var(--ex-code); font-size: 11px; }
-.file-del, .file-add {
+.file-item code {
+  color: var(--ex-code);
+  font-size: 11px;
+}
+.file-del,
+.file-add {
   border: none;
   background: none;
   color: var(--muted);
@@ -625,13 +750,17 @@ body.file-drag::after {
   font-size: 12px;
   padding: 0 2px;
 }
-.file-del:hover { color: var(--error); }
+.file-del:hover {
+  color: var(--error);
+}
 .file-add {
   display: block;
   padding: 3px 4px 3px 14px;
   text-align: left;
 }
-.file-add:hover { color: var(--muted-hover); }
+.file-add:hover {
+  color: var(--muted-hover);
+}
 
 #panel-links {
   position: absolute;
@@ -655,14 +784,21 @@ body.file-drag::after {
   cursor: pointer;
 }
 #panel-links a:hover,
-#panel-links button:hover { color: var(--muted-hover); text-decoration: underline; }
-#examples[open] ~ #panel-links { display: none; }
+#panel-links button:hover {
+  color: var(--muted-hover);
+  text-decoration: underline;
+}
+#examples[open] ~ #panel-links {
+  display: none;
+}
 #examples > summary {
   color: var(--muted);
   cursor: pointer;
   padding: 2px;
 }
-#examples > summary:hover { color: var(--muted-hover); }
+#examples > summary:hover {
+  color: var(--muted-hover);
+}
 #examples details {
   margin: 2px 0 2px 8px;
 }
@@ -672,7 +808,9 @@ body.file-drag::after {
   padding: 2px;
   font-weight: 500;
 }
-#examples details > summary:hover { color: var(--summary-hover); }
+#examples details > summary:hover {
+  color: var(--summary-hover);
+}
 .ex-item {
   display: block;
   width: 100%;
@@ -685,16 +823,23 @@ body.file-drag::after {
   color: var(--ex-text);
   font-size: 12px;
 }
-.ex-item:hover { background: var(--ex-hover-bg); }
+.ex-item:hover {
+  background: var(--ex-hover-bg);
+}
 .ex-item code {
   display: block;
   color: var(--ex-code);
-  font: 10.5px ui-monospace, Menlo, monospace;
+  font:
+    10.5px ui-monospace,
+    Menlo,
+    monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ex-item:hover code { color: var(--ex-code-hover); }
+.ex-item:hover code {
+  color: var(--ex-code-hover);
+}
 
 /* The panel's collapsed form: after a swipe dismisses the panel
    (panel-swipe.ts), this chip pops into its corner. Tapping springs the
@@ -712,7 +857,11 @@ body.file-drag::after {
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 20px var(--panel-shadow);
   color: var(--text);
-  font: 15px/1 ui-monospace, "SF Mono", Menlo, monospace;
+  font:
+    15px/1 ui-monospace,
+    'SF Mono',
+    Menlo,
+    monospace;
   cursor: pointer;
   /* A drag handle as much as a button: no browser pan may start on it, so
      its touchmoves stay cancelable for the pull-open gesture. */
@@ -742,28 +891,69 @@ body.file-drag::after {
   bottom: calc(12px + var(--panel-bottom-inset));
 }
 @media (prefers-reduced-motion: reduce) {
-  #panel-chip { transition: opacity 0.15s ease-out; }
+  #panel-chip {
+    transition: opacity 0.15s ease-out;
+  }
 }
 
 /* Equation assistance sits outside the editable document and its widgets. */
 #syntax-help {
-  position: fixed; z-index: 100; width: 340px; overflow: auto;
-  border: 1px solid var(--panel-border); border-radius: 10px;
-  background: var(--page-bg); color: var(--text);
+  position: fixed;
+  z-index: 100;
+  width: 340px;
+  overflow: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: 10px;
+  background: var(--page-bg);
+  color: var(--text);
   box-shadow: 0 5px 24px var(--panel-shadow);
-  padding: 6px; font: 12px/1.45 system-ui, sans-serif;
+  padding: 6px;
+  font:
+    12px/1.45 system-ui,
+    sans-serif;
 }
-#syntax-help[hidden], #syntax-help [hidden] { display: none; }
-.syntax-hint { padding: 7px 9px; color: var(--info); overflow-wrap: anywhere; }
+#syntax-help[hidden],
+#syntax-help [hidden] {
+  display: none;
+}
+.syntax-hint {
+  padding: 7px 9px;
+  color: var(--info);
+  overflow-wrap: anywhere;
+}
 #syntax-suggestions button {
-  display: flex; flex-direction: column; align-items: flex-start; width: 100%;
-  border: 0; border-radius: 5px; padding: 7px 9px; text-align: left;
-  color: inherit; background: transparent; cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  padding: 7px 9px;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
 }
-#syntax-suggestions button:hover, #syntax-suggestions [aria-selected="true"] { background: var(--ex-hover-bg); }
-#syntax-suggestions strong { font: 13px ui-monospace, monospace; overflow-wrap: anywhere; }
-#syntax-suggestions span { color: var(--summary); font-size: 11px; margin-top: 2px; }
-.syntax-keys { padding: 6px 9px 3px; color: var(--muted); font-size: 10px; }
+#syntax-suggestions button:hover,
+#syntax-suggestions [aria-selected='true'] {
+  background: var(--ex-hover-bg);
+}
+#syntax-suggestions strong {
+  font:
+    13px ui-monospace,
+    monospace;
+  overflow-wrap: anywhere;
+}
+#syntax-suggestions span {
+  color: var(--summary);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.syntax-keys {
+  padding: 6px 9px 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
 
 /* Framed graphs start with the editor collapsed; hide chrome that belongs
    to the full site. The y= chip and theme toggle stay. */
@@ -773,8 +963,14 @@ html[data-embed] #data-files,
 html[data-embed] #shot,
 html[data-embed] #rec,
 html[data-embed] #try-another,
-html[data-embed] #open-csv { display: none; }
-html[data-embed] #state-reset { right: 34px; }
+html[data-embed] #open-csv {
+  display: none;
+}
+html[data-embed] #state-reset {
+  right: 34px;
+}
 
 /* Hide the editor before main.ts initializes the panel's collapsed state. */
-html[data-embed][data-embed-boot] #panel { visibility: hidden; }
+html[data-embed][data-embed-boot] #panel {
+  visibility: hidden;
+}

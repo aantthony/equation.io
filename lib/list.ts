@@ -38,7 +38,22 @@ import { childrenOf, mapChildren, structuralDiagnostic } from './expr.ts';
  */
 import { add, div } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
-import { EVAL_FNS, type Axis, type Column, exprReplacer, type Expr, compArity, compDims, evaluate, originOf, freeVars, ineqComparisons, plainFnName, realPow, substVars } from './expr.ts';
+import {
+  EVAL_FNS,
+  type Axis,
+  type Column,
+  exprReplacer,
+  type Expr,
+  compArity,
+  compDims,
+  evaluate,
+  originOf,
+  freeVars,
+  ineqComparisons,
+  plainFnName,
+  realPow,
+  substVars,
+} from './expr.ts';
 
 /**
  * A list of values, in whichever representation it has: one expression per
@@ -71,9 +86,24 @@ const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
  *  shape-only checks in defs.ts have to refuse the same ones without the
  *  bytes, or a filter is valid exactly on the devices that cannot test it. */
 export const NO_LIST_INSIDE = new Set([
-  'domain', 'conformal', 'iter', 'rgb', 'hsl', 'oklch', 'tube',
-  '[polygon]', '[segment]', '[polyline]', '[vector]', '[square]', '[hull]',
-  '[polygon3]', '[segment3]', '[polyline3]', '[vector3]', '[hull3]',
+  'domain',
+  'conformal',
+  'iter',
+  'rgb',
+  'hsl',
+  'oklch',
+  'tube',
+  '[polygon]',
+  '[segment]',
+  '[polyline]',
+  '[vector]',
+  '[square]',
+  '[hull]',
+  '[polygon3]',
+  '[segment3]',
+  '[polyline3]',
+  '[vector3]',
+  '[hull3]',
 ]);
 
 export { plainFnName };
@@ -112,9 +142,8 @@ export const isSeq = (e: Expr): e is Seq => isList(e) || isData(e) || isText(e) 
 export const isDataScatter = (e: Expr): boolean =>
   e.kind === 'vec' && e.items.some(isData) && e.items.every(it => isData(it) || it.kind === 'num');
 export const seqLength = (e: Seq): number =>
-  (e.kind === 'list' ? e.items.length : e.kind === 'lazy' ? e.cols[0].values.length : e.values.length);
-const isRange = (e: Expr): e is Expr & { kind: 'range' } =>
-  e.kind === 'range';
+  e.kind === 'list' ? e.items.length : e.kind === 'lazy' ? e.cols[0].values.length : e.values.length;
+const isRange = (e: Expr): e is Expr & { kind: 'range' } => e.kind === 'range';
 
 /**
  * Which instances a list runs over. A list is a variable ranging over its
@@ -170,7 +199,9 @@ function align(parts: Expr[]): { parts: Expr[]; axes: readonly Axis[] | null } {
     const own = axesOf(p);
     if (own.length === union.length && own.every((a, i) => a.id === union[i].id)) return p;
     if (total > (isData(p) ? DATA_MAX : ITEMS_MAX)) {
-      throw new Error(`Independent lists combine every value with every other — that is ${total} combinations (limit ${isData(p) ? DATA_MAX : ITEMS_MAX}). Name one list and reuse it to pair values up instead.`);
+      throw new Error(
+        `Independent lists combine every value with every other — that is ${total} combinations (limit ${isData(p) ? DATA_MAX : ITEMS_MAX}). Name one list and reuse it to pair values up instead.`,
+      );
     }
     // Where each shared axis steps inside this operand (0: it does not vary).
     const strides = union.map(u => {
@@ -188,9 +219,16 @@ function align(parts: Expr[]): { parts: Expr[]; axes: readonly Axis[] | null } {
         counter[d] = 0;
       }
     }
-    const spread: Expr = isData(p) ? { kind: 'data', values: Float64Array.from(index, i => p.values[i]) }
-      : isText(p) ? { kind: 'text', values: Array.from(index, i => p.values[i]) }
-        : isLazy(p) ? { kind: 'lazy', body: p.body, cols: p.cols.map(c => ({ name: c.name, values: Float64Array.from(index, i => c.values[i]) })) }
+    const spread: Expr = isData(p)
+      ? { kind: 'data', values: Float64Array.from(index, i => p.values[i]) }
+      : isText(p)
+        ? { kind: 'text', values: Array.from(index, i => p.values[i]) }
+        : isLazy(p)
+          ? {
+              kind: 'lazy',
+              body: p.body,
+              cols: p.cols.map(c => ({ name: c.name, values: Float64Array.from(index, i => c.values[i]) })),
+            }
           : { kind: 'list', items: Array.from(index, i => p.items[i]) };
     return withAxes(spread, union);
   });
@@ -229,12 +267,13 @@ function expand(e: Expr, _ctx: Ctx): Expr {
   // whatever consumes this list charges for the list it builds, and counting
   // both halved the usable size of the one operation the docs quote
   // (`col * t` failed at 50 001 rows against a stated limit of 100 000).
-  return withAxes({
-    kind: 'list',
-    items: isText(e)
-      ? e.values.map((value): Expr => ({ kind: 'str', value }))
-      : [...e.values].map(num),
-  }, axesOf(e));
+  return withAxes(
+    {
+      kind: 'list',
+      items: isText(e) ? e.values.map((value): Expr => ({ kind: 'str', value })) : [...e.values].map(num),
+    },
+    axesOf(e),
+  );
 }
 
 /** A lazy list's elements, one tree each: the template per instance. */
@@ -251,8 +290,10 @@ function instances(e: Expr & { kind: 'lazy' }): Expr[] {
 
 /** A list's values as numbers, when that is all it holds. */
 const numbersOf = (p: Seq): Float64Array | null =>
-  isData(p) ? p.values
-    : isList(p) && p.items.every(it => it.kind === 'num') ? Float64Array.from(p.items, it => (it as Expr & { kind: 'num' }).value)
+  isData(p)
+    ? p.values
+    : isList(p) && p.items.every(it => it.kind === 'num')
+      ? Float64Array.from(p.items, it => (it as Expr & { kind: 'num' }).value)
       : null;
 
 /**
@@ -268,7 +309,10 @@ function lazyMap(raw: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr | 
   for (const p of raw) {
     // Text only ever compares: zipN refuses it in arithmetic, in its words.
     if (p.kind === 'str') return null;
-    if (!isSeq(p)) { packed.push(p); continue; }
+    if (!isSeq(p)) {
+      packed.push(p);
+      continue;
+    }
     listy = true;
     if (isLazy(p)) {
       // Arithmetic over a list of points is zipN's to refuse, in its words.
@@ -416,7 +460,11 @@ function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
 function zipN(raw: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
   // Nearly every node of nearly every row: no list in sight, nothing to align.
   let listy = false;
-  for (const p of raw) if (isSeq(p)) { listy = true; break; }
+  for (const p of raw)
+    if (isSeq(p)) {
+      listy = true;
+      break;
+    }
   if (!listy) return build(raw);
   let n: number | null = null;
   const { parts, axes } = align(raw);
@@ -463,12 +511,10 @@ function zipN(raw: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr {
  * (`L[L > 2]`, `person[person.age >= 18]`). It is not a value: only
  * indexing consumes one, and any other use reports itself.
  */
-const isEquality = (e: Expr): e is Expr & { kind: 'eqtest' } =>
-  e.kind === 'eqtest';
+const isEquality = (e: Expr): e is Expr & { kind: 'eqtest' } => e.kind === 'eqtest';
 
 const isMask = (e: Expr): e is Expr & { kind: 'list' } =>
-  isList(e) && e.items.length > 0
-  && e.items.every(it => it.kind === 'ineq' || isEquality(it));
+  isList(e) && e.items.length > 0 && e.items.every(it => it.kind === 'ineq' || isEquality(it));
 
 /** Whether one comparison (or a chain like 18 <= a < 65) holds. */
 function holds(cond: Expr, env: Record<string, number>): boolean {
@@ -520,9 +566,11 @@ function maskValues(mask: Expr, opts: ResolveOpts): boolean[] | null {
     for (const fv of freeVars(cond)) {
       const v = opts.consts?.[fv];
       if (v === undefined) {
-        throw new Error(fv === 't'
-          ? 'A filter cannot depend on t — the list would change length every frame.'
-          : `A filter must be constant — add "${fv} = 5" in a row above.`);
+        throw new Error(
+          fv === 't'
+            ? 'A filter cannot depend on t — the list would change length every frame.'
+            : `A filter must be constant — add "${fv} = 5" in a row above.`,
+        );
       }
       env[fv] = v;
     }
@@ -540,19 +588,27 @@ function maskValues(mask: Expr, opts: ResolveOpts): boolean[] | null {
  */
 function holdsGap(e: Expr): boolean {
   switch (e.kind) {
-    case 'num': return Number.isNaN(e.value);
-    case 'data': return e.values.some(Number.isNaN);
-    case 'neg': return holdsGap(e.a);
-    case 'bin': return holdsGap(e.a) || holdsGap(e.b);
-    case 'call': return e.args.some(holdsGap);
+    case 'num':
+      return Number.isNaN(e.value);
+    case 'data':
+      return e.values.some(Number.isNaN);
+    case 'neg':
+      return holdsGap(e.a);
+    case 'bin':
+      return holdsGap(e.a) || holdsGap(e.b);
+    case 'call':
+      return e.args.some(holdsGap);
     case 'vec':
-    case 'list': return e.items.some(holdsGap);
-    case 'eq': return holdsGap(e.l) || holdsGap(e.r);
-    case 'ineq': return holdsGap(e.l) || holdsGap(e.r);
+    case 'list':
+      return e.items.some(holdsGap);
+    case 'eq':
+      return holdsGap(e.l) || holdsGap(e.r);
+    case 'ineq':
+      return holdsGap(e.l) || holdsGap(e.r);
     case 'piecewise':
-      return e.cases.some(c => holdsGap(c.cond) || holdsGap(c.value))
-        || (e.otherwise ? holdsGap(e.otherwise) : false);
-    default: return false;
+      return e.cases.some(c => holdsGap(c.cond) || holdsGap(c.value)) || (e.otherwise ? holdsGap(e.otherwise) : false);
+    default:
+      return false;
   }
 }
 
@@ -586,8 +642,10 @@ function reduceData(name: string, all: Float64Array, ctx: Ctx): Expr {
       for (const x of xs) sum += x;
       return num(name === 'total' ? sum : sum / n);
     }
-    case 'min': return num(xs.reduce((a, b) => Math.min(a, b)));
-    case 'max': return num(xs.reduce((a, b) => Math.max(a, b)));
+    case 'min':
+      return num(xs.reduce((a, b) => Math.min(a, b)));
+    case 'max':
+      return num(xs.reduce((a, b) => Math.max(a, b)));
     case 'stdev': {
       if (n < 2) throw new Error('stdev needs at least 2 elements.');
       let sum = 0;
@@ -601,7 +659,8 @@ function reduceData(name: string, all: Float64Array, ctx: Ctx): Expr {
       const s = Float64Array.from(xs).sort();
       return num(n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2);
     }
-    case 'sort': return dataOf(Float64Array.from(xs).sort(), ctx);
+    case 'sort':
+      return dataOf(Float64Array.from(xs).sort(), ctx);
   }
   throw new Error(`Unknown reduction: ${name}.`);
 }
@@ -665,7 +724,12 @@ function reduce(name: string, all: readonly Expr[], ctx: Ctx): Expr {
       return num(n % 2 ? xs[(n - 1) / 2] : (xs[n / 2 - 1] + xs[n / 2]) / 2);
     }
     case 'sort':
-      return listOf(numericItems(items, ctx, name).sort((a, b) => a - b).map(num), ctx);
+      return listOf(
+        numericItems(items, ctx, name)
+          .sort((a, b) => a - b)
+          .map(num),
+        ctx,
+      );
   }
   throw new Error(`Unknown reduction: ${name}.`);
 }
@@ -682,15 +746,17 @@ const binCount = (n: number): number => Math.min(60, Math.max(5, Math.round(Math
 function histBars(centers: Float64Array, counts: Float64Array, width: number, ctx: Ctx): Expr {
   ctx.hists++;
   return {
-    kind: 'hist', centers: (dataOf(centers, ctx) as Expr & { kind: 'data' }).values, counts: (dataOf(counts, ctx) as Expr & { kind: 'data' }).values, width,
+    kind: 'hist',
+    centers: (dataOf(centers, ctx) as Expr & { kind: 'data' }).values,
+    counts: (dataOf(counts, ctx) as Expr & { kind: 'data' }).values,
+    width,
   };
 }
 
 const oneBin = (at: number, count: number, ctx: Ctx): Expr =>
   histBars(Float64Array.of(at), Float64Array.of(count), 1, ctx);
 
-const isHist = (e: Expr): e is Expr & { kind: 'hist' } =>
-  e.kind === 'hist';
+const isHist = (e: Expr): e is Expr & { kind: 'hist' } => e.kind === 'hist';
 
 /**
  * `hist(L) / 1000`, `0.001 hist(L)` — scale the bars.
@@ -713,8 +779,7 @@ function scaleHist(op: string, a: Expr, b: Expr, ctx: Ctx): Expr | null {
   for (let k = 0; k < counts.length; k++) scaled[k] = counts[k] * factor;
   // The original bars were counted once; only their heights change.
   ctx.hists--;
-  return histBars(hist.centers, scaled,
-    hist.width, ctx);
+  return histBars(hist.centers, scaled, hist.width, ctx);
 }
 
 function histogram(xs: Float64Array, bins: number | null, ctx: Ctx): Expr {
@@ -766,8 +831,17 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
     // The same cut of the same list is the same instances, however many
     // times it is written: (L[L > 2], L[L > 2]^2) still pairs up.
     const test = JSON.stringify(idx, (key, v) => (ArrayBuffer.isView(v) ? undefined : exprReplacer(key, v)));
-    const cut: Axis[] | null = test.length > 4096 ? null
-      : [{ id: `${axesOf(low).map(a => a.id).join('×')}[${test}]`, n: kept }];
+    const cut: Axis[] | null =
+      test.length > 4096
+        ? null
+        : [
+            {
+              id: `${axesOf(low)
+                .map(a => a.id)
+                .join('×')}[${test}]`,
+              n: kept,
+            },
+          ];
     if (isData(low)) {
       const out = new Float64Array(kept);
       let at = 0;
@@ -775,7 +849,13 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
       return withAxes(dataOf(out, ctx), cut);
     }
     if (isText(low)) return withAxes({ kind: 'text', values: low.values.filter((_, k) => keep[k]) }, cut);
-    return withAxes(listOf(low.items.filter((_, k) => keep[k]), ctx), cut);
+    return withAxes(
+      listOf(
+        low.items.filter((_, k) => keep[k]),
+        ctx,
+      ),
+      cut,
+    );
   }
   const position = (v: number): number => {
     const k = Math.round(v);
@@ -789,12 +869,28 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   // A list of indices picks one element each, over the index list's own
   // instances: `L[N]` zips with every other use of N.
   if (isSeq(idxLow)) {
-    const at = Array.from(numbersOf(isLazy(idxLow) ? settle(idxLow, ctx) as Seq : idxLow)
-      ?? (expand(idxLow, ctx) as Expr & { kind: 'list' }).items.map(it => constVal(it, ctx, 'A list index', true)), position);
+    const at = Array.from(
+      numbersOf(isLazy(idxLow) ? (settle(idxLow, ctx) as Seq) : idxLow) ??
+        (expand(idxLow, ctx) as Expr & { kind: 'list' }).items.map(it => constVal(it, ctx, 'A list index', true)),
+      position,
+    );
     const axes = axesOf(idxLow);
-    if (isData(low)) return withAxes(dataOf(Float64Array.from(at, k => low.values[k]), ctx), axes);
+    if (isData(low))
+      return withAxes(
+        dataOf(
+          Float64Array.from(at, k => low.values[k]),
+          ctx,
+        ),
+        axes,
+      );
     if (isText(low)) return withAxes({ kind: 'text', values: at.map(k => low.values[k]) }, axes);
-    return withAxes(listOf(at.map(k => low.items[k]), ctx), axes);
+    return withAxes(
+      listOf(
+        at.map(k => low.items[k]),
+        ctx,
+      ),
+      axes,
+    );
   }
   const k = position(constVal(idxLow, ctx, 'A list index', true));
   if (isData(low)) return num(low.values[k]);
@@ -810,7 +906,7 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
 function lowerComp(e: Expr & { kind: 'comp' }, ctx: Ctx): Expr {
   const { value, index: k, arity: n, functionName: fn } = e;
   let low = ctx.comps.get(value);
-  if (!low) ctx.comps.set(value, low = lower(value, ctx));
+  if (!low) ctx.comps.set(value, (low = lower(value, ctx)));
   const dims = (got: number): void => {
     if (got !== n) throw new Error(compDims(fn, n, value, got));
   };
@@ -827,14 +923,29 @@ function lowerComp(e: Expr & { kind: 'comp' }, ctx: Ctx): Expr {
   }
   if (!isList(low) || !low.items.length || !low.items.every(it => it.kind === 'vec')) throw new Error(compArity(fn, n));
   for (const it of low.items) dims((it as Expr & { kind: 'vec' }).items.length);
-  return withAxes(listOf(low.items.map(it => (it as Expr & { kind: 'vec' }).items[k]), ctx), axesOf(low));
+  return withAxes(
+    listOf(
+      low.items.map(it => (it as Expr & { kind: 'vec' }).items[k]),
+      ctx,
+    ),
+    axesOf(low),
+  );
 }
 
 function lower(e: Expr, ctx: Ctx): Expr {
   switch (e.kind) {
-    case 'range': throw new Error(structuralDiagnostic(e));
-    case 'hist': return e;
-    case 'figure': case 'trail': case 'family': return mapChildren(e, n => { const child = lower(n, ctx); if (isSeq(child)) throw new Error(`Lists cannot appear inside ${e.kind === 'figure' ? e.form : e.kind}(…).`); return child; });
+    case 'range':
+      throw new Error(structuralDiagnostic(e));
+    case 'hist':
+      return e;
+    case 'figure':
+    case 'trail':
+    case 'family':
+      return mapChildren(e, n => {
+        const child = lower(n, ctx);
+        if (isSeq(child)) throw new Error(`Lists cannot appear inside ${e.kind === 'figure' ? e.form : e.kind}(…).`);
+        return child;
+      });
     case 'num':
     case 'data':
     case 'str':
@@ -852,9 +963,11 @@ function lower(e: Expr, ctx: Ctx): Expr {
     }
     case 'neg': {
       const a = lower(e.a, ctx);
-      return fastMap([a], xs => -xs[0], ctx)
-        ?? lazyMap([a], ([x]) => ({ kind: 'neg', a: x }), ctx)
-        ?? zipN([expand(a, ctx)], ([x]) => ({ kind: 'neg', a: x }), ctx);
+      return (
+        fastMap([a], xs => -xs[0], ctx) ??
+        lazyMap([a], ([x]) => ({ kind: 'neg', a: x }), ctx) ??
+        zipN([expand(a, ctx)], ([x]) => ({ kind: 'neg', a: x }), ctx)
+      );
     }
     case 'bin': {
       const a = lower(e.a, ctx);
@@ -862,30 +975,32 @@ function lower(e: Expr, ctx: Ctx): Expr {
       const scaled = scaleHist(e.op, a, b, ctx);
       if (scaled) return scaled;
       const op = BIN_OPS[e.op];
-      return fastMap([a, b], xs => op(xs[0], xs[1]), ctx)
-        ?? lazyMap([a, b], ([x, y]) => ({ kind: 'bin', op: e.op, a: x, b: y }), ctx)
-        ?? zipN(
-          [expand(a, ctx), expand(b, ctx)],
-          ([x, y]) => ({ kind: 'bin', op: e.op, a: x, b: y }),
-          ctx,
-        );
+      return (
+        fastMap([a, b], xs => op(xs[0], xs[1]), ctx) ??
+        lazyMap([a, b], ([x, y]) => ({ kind: 'bin', op: e.op, a: x, b: y }), ctx) ??
+        zipN([expand(a, ctx), expand(b, ctx)], ([x, y]) => ({ kind: 'bin', op: e.op, a: x, b: y }), ctx)
+      );
     }
     case 'eqtest': {
       const args = e.args.map(a => lower(a, ctx));
-        // Equality is a filter test, not a relation to draw: zip it into a
-        // mask, which only `[ ]` will accept.
-        const parts = args.map(a => expand(a, ctx));
-        if (!parts.some(isList)) {
-          const op = e.op;
-          throw new Error(`'${op}' tests a list inside a filter, like people[people.city == "NYC"].`
-            + (e.op === '!='
+      // Equality is a filter test, not a relation to draw: zip it into a
+      // mask, which only `[ ]` will accept.
+      const parts = args.map(a => expand(a, ctx));
+      if (!parts.some(isList)) {
+        const op = e.op;
+        throw new Error(
+          `'${op}' tests a list inside a filter, like people[people.city == "NYC"].` +
+            (e.op === '!='
               ? " For a factorial equation, put a space before '=': x! = 2."
-              : " An equation takes a single '=': x^2 = y."));
-        }
-        return zipN(parts, comps => ({ ...e, args: [comps[0], comps[1]] }), ctx);
+              : " An equation takes a single '=': x^2 = y."),
+        );
       }
-    case 'index': return lowerIndex(e, ctx);
-    case 'comp': return lowerComp(e, ctx);
+      return zipN(parts, comps => ({ ...e, args: [comps[0], comps[1]] }), ctx);
+    }
+    case 'index':
+      return lowerIndex(e, ctx);
+    case 'comp':
+      return lowerComp(e, ctx);
     case 'call': {
       if (e.name === 'hist') {
         // How many arguments there are, and what the bin count is, are
@@ -897,8 +1012,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
         // BEFORE resolving an operand that can be absent.
         if (e.args.length > 2) throw new Error('hist(…) takes a list and, optionally, a number of bins.');
         const binsArg = e.args[1] === undefined ? undefined : lower(e.args[1], ctx);
-        const bins = binsArg === undefined ? null
-          : constVal(binsArg, ctx, 'The number of bins', true);
+        const bins = binsArg === undefined ? null : constVal(binsArg, ctx, 'The number of bins', true);
         if (bins !== null && !Number.isInteger(bins)) {
           // Rounding would change what the row means without saying so, and
           // an index in the same position refuses a fraction outright.
@@ -915,13 +1029,22 @@ function lower(e: Expr, ctx: Ctx): Expr {
         // later `hist(person.age k)` refused the whole row as "not finite".
         const xs = isData(arg)
           ? arg.values
-          : Float64Array.from(numericItems(arg.items.filter(it => !holdsGap(it)), ctx, 'hist'));
+          : Float64Array.from(
+              numericItems(
+                arg.items.filter(it => !holdsGap(it)),
+                ctx,
+                'hist',
+              ),
+            );
         return histogram(xs, bins, ctx);
       }
       const args = e.args.map(a => lower(a, ctx));
       const isMinMax = e.name === 'min' || e.name === 'max';
-      if (SYMBOLIC_REDUCTIONS.has(e.name) || NUMERIC_REDUCTIONS.has(e.name)
-        || (isMinMax && args.length === 1 && isSeq(args[0]))) {
+      if (
+        SYMBOLIC_REDUCTIONS.has(e.name) ||
+        NUMERIC_REDUCTIONS.has(e.name) ||
+        (isMinMax && args.length === 1 && isSeq(args[0]))
+      ) {
         if (args.length !== 1 || !isSeq(args[0])) {
           if (args.length === 1 && args[0].kind === 'var') {
             throw new Error(`${e.name}(${args[0].name}) needs ${args[0].name} to be a list defined above this row.`);
@@ -953,9 +1076,15 @@ function lower(e: Expr, ctx: Ctx): Expr {
       // Scalar builtins map elementwise: sin(L), atan2(L, M), min(L, 5).
       const fn = EVAL_FNS[e.name];
       const fast = fn && fastMap(args, xs => fn(...xs), ctx);
-      return fast
-        ?? lazyMap(args, comps => ({ kind: 'call', name: e.name, args: comps }), ctx)
-        ?? zipN(args.map(a => expand(a, ctx)), comps => ({ kind: 'call', name: e.name, args: comps }), ctx);
+      return (
+        fast ??
+        lazyMap(args, comps => ({ kind: 'call', name: e.name, args: comps }), ctx) ??
+        zipN(
+          args.map(a => expand(a, ctx)),
+          comps => ({ kind: 'call', name: e.name, args: comps }),
+          ctx,
+        )
+      );
     }
     case 'vec': {
       const items = e.items.map(it => lower(it, ctx));
@@ -964,10 +1093,13 @@ function lower(e: Expr, ctx: Ctx): Expr {
       if (items.some(isData) && items.every(it => isData(it) || it.kind === 'num')) {
         return { kind: 'vec', items: align(items).parts };
       }
-      return lazyMap(items, comps => ({ kind: 'vec', items: comps }), ctx) ?? zipN(
-        items.map(it => expand(it, ctx)),
-        comps => ({ kind: 'vec', items: comps }),
-        ctx,
+      return (
+        lazyMap(items, comps => ({ kind: 'vec', items: comps }), ctx) ??
+        zipN(
+          items.map(it => expand(it, ctx)),
+          comps => ({ kind: 'vec', items: comps }),
+          ctx,
+        )
       );
     }
     case 'list': {
@@ -981,8 +1113,12 @@ function lower(e: Expr, ctx: Ctx): Expr {
       // in every clone Σ expansion or a finite difference made of it.)
       const known = e.axes;
       const origin = originOf(e);
-      const axes = known && known.reduce((size, a) => size * a.n, 1) === seqLength(out) ? known
-        : origin !== undefined ? [{ id: `#o${origin}`, n: seqLength(out) }] : axesOf(out);
+      const axes =
+        known && known.reduce((size, a) => size * a.n, 1) === seqLength(out)
+          ? known
+          : origin !== undefined
+            ? [{ id: `#o${origin}`, n: seqLength(out) }]
+            : axesOf(out);
       e.axes = axes;
       return withAxes(out, axes);
     }
@@ -1000,9 +1136,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
       if (isList(l) || isList(r)) {
         throw new Error('Cannot put a list in an equation — plot the list on its own row.');
       }
-      return e.kind === 'eq'
-        ? { kind: 'eq', l, r }
-        : { kind: 'ineq', op: e.op, l, r };
+      return e.kind === 'eq' ? { kind: 'eq', l, r } : { kind: 'ineq', op: e.op, l, r };
     }
     case 'piecewise': {
       const cases = e.cases.map(c => ({ cond: lower(c.cond, ctx), value: lower(c.value, ctx) }));
@@ -1053,9 +1187,11 @@ export function lowerLists(
   // row touching it would report "Unknown function: [hist]", a token no user
   // ever typed.
   if (ctx.hists && !(!named && isHist(out))) {
-    throw new Error(named
-      ? 'hist(…) is a whole plot, not a value — write it on a row of its own, with no name.'
-      : 'hist(…) is a whole plot — give it its own row.');
+    throw new Error(
+      named
+        ? 'hist(…) is a whole plot, not a value — write it on a row of its own, with no name.'
+        : 'hist(…) is a whole plot — give it its own row.',
+    );
   }
   return out;
 }
@@ -1067,7 +1203,10 @@ export function lowerLists(
  * over a list.
  */
 export function lowerMask(cond: Expr, getList: GetList, opts: ResolveOpts = {}): boolean[] | null {
-  return maskValues(lower(cond, { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap(), columns: 0 }), opts);
+  return maskValues(
+    lower(cond, { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap(), columns: 0 }),
+    opts,
+  );
 }
 
 /** Whether a parsed (unresolved) row calls a list reduction — such rows get
@@ -1080,22 +1219,41 @@ export function usesListReduction(e: Expr): boolean {
   const reduces = (name: string, args: readonly Expr[]): boolean =>
     REDUCTIONS.has(name) || ((name === 'min' || name === 'max') && args.length === 1);
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return childrenOf(e).some(usesListReduction);
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      return childrenOf(e).some(usesListReduction);
     case 'num':
     case 'data':
     case 'str':
     case 'text':
-    case 'var': return false;
-    case 'neg': return usesListReduction(e.a);
-    case 'bin': return usesListReduction(e.a) || usesListReduction(e.b);
-    case 'call': return reduces(e.name, e.args) || e.args.some(usesListReduction);
-    case 'eq': return usesListReduction(e.l) || usesListReduction(e.r);
-    case 'ineq': return usesListReduction(e.l) || usesListReduction(e.r);
+    case 'var':
+      return false;
+    case 'neg':
+      return usesListReduction(e.a);
+    case 'bin':
+      return usesListReduction(e.a) || usesListReduction(e.b);
+    case 'call':
+      return reduces(e.name, e.args) || e.args.some(usesListReduction);
+    case 'eq':
+      return usesListReduction(e.l) || usesListReduction(e.r);
+    case 'ineq':
+      return usesListReduction(e.l) || usesListReduction(e.r);
     case 'vec':
-    case 'list': return e.items.some(usesListReduction);
+    case 'list':
+      return e.items.some(usesListReduction);
     case 'piecewise':
-      return e.cases.some(c => usesListReduction(c.cond) || usesListReduction(c.value))
-        || (e.otherwise ? usesListReduction(e.otherwise) : false);
-    case 'loop': return childrenOf(e).some(usesListReduction);
+      return (
+        e.cases.some(c => usesListReduction(c.cond) || usesListReduction(c.value)) ||
+        (e.otherwise ? usesListReduction(e.otherwise) : false)
+      );
+    case 'loop':
+      return childrenOf(e).some(usesListReduction);
   }
 }

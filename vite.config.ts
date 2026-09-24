@@ -36,7 +36,5 @@ export default defineConfig({
       },
     },
   },
-  plugins: [
-    cloudflare({ configPath: '../wrangler.jsonc' }),
-  ],
+  plugins: [cloudflare({ configPath: '../wrangler.jsonc' })],
 });

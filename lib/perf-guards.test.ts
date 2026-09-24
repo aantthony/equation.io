@@ -12,7 +12,16 @@ import { describe, expect, test } from 'vitest';
 import { CORPUS, SUM_CASE, compileRows, countNodes } from './perfcase.ts';
 import { parseExpr } from './expr.ts';
 import { diff } from './diff.ts';
-import { ENUM_STATS, JOINT_MAX, QUANTILE_STATS, RVSystem, buildRVSystem, scanRandomRows, markerHeight, toProbability } from './dist.ts';
+import {
+  ENUM_STATS,
+  JOINT_MAX,
+  QUANTILE_STATS,
+  RVSystem,
+  buildRVSystem,
+  scanRandomRows,
+  markerHeight,
+  toProbability,
+} from './dist.ts';
 import { toGLSL } from './glsl.ts';
 
 const MEASURE = !!process.env.PERF_MEASURE;
@@ -30,8 +39,9 @@ describe('uniform parameterization (slider moves must not change compiled output
       expect(a.errors).toEqual([]);
       expect(JSON.stringify(a.gpu)).toBe(JSON.stringify(b.gpu));
       expect(JSON.stringify(a.cpu)).toBe(JSON.stringify(b.cpu));
-      expect(JSON.stringify(a.gridFields.map(g => ({ ...g, expr: null, grad: null }))))
-        .toBe(JSON.stringify(b.gridFields.map(g => ({ ...g, expr: null, grad: null }))));
+      expect(JSON.stringify(a.gridFields.map(g => ({ ...g, expr: null, grad: null })))).toBe(
+        JSON.stringify(b.gridFields.map(g => ({ ...g, expr: null, grad: null }))),
+      );
     });
   }
 });
@@ -163,7 +173,10 @@ describe('distribution quantile tables (the per-frame CPU path of a derived dens
   const system = (rows: string[]) => {
     const sys = new RVSystem();
     buildRVSystem(sys, scanRandomRows(rows), {
-      fnNames: new Set(), getFn: () => undefined, constNames: new Set(['b']), taken: () => false,
+      fnNames: new Set(),
+      getFn: () => undefined,
+      constNames: new Set(['b']),
+      taken: () => false,
     });
     return sys;
   };
@@ -185,7 +198,14 @@ describe('distribution quantile tables (the per-frame CPU path of a derived dens
 
   test('table builds stay bounded across the hard shapes', () => {
     // Poles, power tails and near-normal bulks, each a fresh table.
-    for (const decl of ['Gamma(0.0625, 1)', 'Gamma(4321, 1)', 'Beta(0.0625, 0.375)', 'Beta(321, 123)', 'StudentT(0.4375)', 'StudentT(54321)']) {
+    for (const decl of [
+      'Gamma(0.0625, 1)',
+      'Gamma(4321, 1)',
+      'Beta(0.0625, 0.375)',
+      'Beta(321, 123)',
+      'StudentT(0.4375)',
+      'StudentT(54321)',
+    ]) {
       const before = QUANTILE_STATS.cdfEvals;
       system([`X ~ ${decl}`]).columns('X', {});
       const evals = QUANTILE_STATS.cdfEvals - before;
@@ -203,7 +223,10 @@ describe('derived discrete variables (enumeration per parameter change, never pe
   const system = (rows: string[]) => {
     const sys = new RVSystem();
     buildRVSystem(sys, scanRandomRows(rows), {
-      fnNames: new Set(), getFn: () => undefined, constNames: new Set(['a']), taken: () => false,
+      fnNames: new Set(),
+      getFn: () => undefined,
+      constNames: new Set(['a']),
+      taken: () => false,
     });
     return sys;
   };

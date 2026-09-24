@@ -7,7 +7,6 @@ import { analyzeRows } from './analysis.ts';
 import { resolveExpr, scanDefinition } from './defs.ts';
 import { parseExpr } from './expr.ts';
 
-
 const none = new Set<string>();
 const cls = (text: string, consts: ReadonlySet<string> = none) => {
   const scan = scanSeqRec(text);
@@ -121,7 +120,7 @@ describe('sequences with sums', () => {
     const scan = scanSeqRec('a_n = sum(k=1..3, k^n)')!;
     const c = classifySeqRec(scan, none, () => undefined, new Set(), {});
     const plot = compileCpu(c) as { term: Expr };
-    expect(evaluate(plot.term, { n: 1 })).toBe(6);  // 1+2+3
+    expect(evaluate(plot.term, { n: 1 })).toBe(6); // 1+2+3
     expect(evaluate(plot.term, { n: 2 })).toBe(14); // 1+4+9
   });
 
@@ -154,7 +153,8 @@ describe('sequences with sums', () => {
   it('lets a slider share the bound with the index, and still rejects other variables', () => {
     const boundConsts = new Set<string>();
     const c = classifySeqRec(scanSeqRec('a_n = Σ(s=1..n+N, s)')!, none, () => undefined, new Set(['N']), {
-      consts: { N: 2 }, boundConsts,
+      consts: { N: 2 },
+      boundConsts,
     });
     expect([...boundConsts]).toEqual(['N']);
     expect(c.params).toEqual(['N']);
@@ -176,7 +176,10 @@ describe('sequence term references', () => {
   });
 
   it('pins the index in the source and resolves once, so Σ up to the index is a number', () => {
-    const sums = new Env([['s', scanSeqRec('s_n = Σ(s=1..n, s)')!], ['b', scanSeqRec('b_n = Σ[n=1..n] n')!]]);
+    const sums = new Env([
+      ['s', scanSeqRec('s_n = Σ(s=1..n, s)')!],
+      ['b', scanSeqRec('b_n = Σ[n=1..n] n')!],
+    ]);
     const resolveSums = sequenceResolver(sums, () => undefined, {}, new Set<string>());
     expect(resolveSums('s_5')).toEqual({ kind: 'num', value: 15 });
     expect(resolveSums('b_4')).toEqual({ kind: 'num', value: 10 });
@@ -193,8 +196,18 @@ describe('sequence term references', () => {
   it('reads a_n inside a Σ over n as each term', () => {
     const defs = new Env([['a', scanSeqRec('a_n = n^2')!]]);
     const resolve = sequenceResolver(defs, () => undefined, {}, new Set<string>());
-    expect(evaluate(resolveExpr(parseExpr('sum(n=1..3, a_n)'), () => undefined, { sequenceTerm: resolve }), {})).toBe(14);
-    expect(evaluate(resolveExpr(parseExpr('sum(m=1..3, a_m)'), () => undefined, { sequenceTerm: resolve }), {})).toBe(14);
+    expect(
+      evaluate(
+        resolveExpr(parseExpr('sum(n=1..3, a_n)'), () => undefined, { sequenceTerm: resolve }),
+        {},
+      ),
+    ).toBe(14);
+    expect(
+      evaluate(
+        resolveExpr(parseExpr('sum(m=1..3, a_m)'), () => undefined, { sequenceTerm: resolve }),
+        {},
+      ),
+    ).toBe(14);
   });
 
   it('reads a_N once per element of a list, in rows and in list-bounded sums', () => {
@@ -208,7 +221,12 @@ describe('sequence term references', () => {
 describe('sequences built from other sequences', () => {
   /** The plotted term of `row`, with the explicit sequences in `others` defined. */
   const termOf = (others: string[], row: string) => {
-    const defs = new Env(others.map(r => { const scan = scanSeqRec(r)!; return [scan.name, scan] as const; }));
+    const defs = new Env(
+      others.map(r => {
+        const scan = scanSeqRec(r)!;
+        return [scan.name, scan] as const;
+      }),
+    );
     const sequenceTerm = sequenceResolver(defs, () => undefined, {}, new Set<string>());
     const names = new Set([...defs.sequences.keys(), scanSeqRec(row)!.name]);
     const c = classifySeqRec(scanSeqRec(row)!, none, () => undefined, new Set(), { sequenceTerm }, names);
@@ -216,7 +234,7 @@ describe('sequences built from other sequences', () => {
   };
   const errorsOf = (rows: string[]) => analyzeRows(rows).rows.map(r => r.error);
 
-  it('reads another explicit sequence at the row\'s own index', () => {
+  it("reads another explicit sequence at the row's own index", () => {
     expect(evaluate(termOf(['b_n = n^2'], 'a_n = b_n + 1'), { n: 3 })).toBe(10);
     expect(evaluate(termOf(['b_k = k^2'], 'a_n = b_n + 1'), { n: 3 })).toBe(10); // its own letter
     expect(evaluate(termOf(['b_n = n^2'], 'a_n = b_[n+1] - b_n'), { n: 3 })).toBe(7);
@@ -302,11 +320,15 @@ describe('subscripts in braces and parens', () => {
 
   it('indexes a sequence by an expression in braces or parens', () => {
     const b = ['b_n = n^2'];
-    expect(evaluate(resolveExpr(parseExpr('b_{n+1} - b_(n)', new Set(), new Set(['b_'])), () => undefined, {
-      sequenceTerm: sequenceResolver(new Env([['b', scanSeqRec(b[0])!]]), () => undefined, {}, new Set<string>()),
-      openVars: new Set(['n']), // as in a sequence row, whose own index is open
-    }), { n: 3 })).toBe(7);
-    expect(values([...b, 'a_n = b_{n+1} - b_n', 'c = a_{3}', 'k = 2', 'p = b_{k}']))
-      .toMatchObject({ c: 7, p: 4 });
+    expect(
+      evaluate(
+        resolveExpr(parseExpr('b_{n+1} - b_(n)', new Set(), new Set(['b_'])), () => undefined, {
+          sequenceTerm: sequenceResolver(new Env([['b', scanSeqRec(b[0])!]]), () => undefined, {}, new Set<string>()),
+          openVars: new Set(['n']), // as in a sequence row, whose own index is open
+        }),
+        { n: 3 },
+      ),
+    ).toBe(7);
+    expect(values([...b, 'a_n = b_{n+1} - b_n', 'c = a_{3}', 'k = 2', 'p = b_{k}'])).toMatchObject({ c: 7, p: 4 });
   });
 });

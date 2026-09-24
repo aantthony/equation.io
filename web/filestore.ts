@@ -121,10 +121,13 @@ async function withStores<T>(mode: IDBTransactionMode, fn: (tx: IDBTransaction) 
   if (!db) return null;
   try {
     const tx = db.transaction([STORE, BLOBS], mode);
-    const committed = mode === 'readonly' ? Promise.resolve() : new Promise<void>((resolve, reject) => {
-      tx.oncomplete = () => resolve();
-      tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
-    });
+    const committed =
+      mode === 'readonly'
+        ? Promise.resolve()
+        : new Promise<void>((resolve, reject) => {
+            tx.oncomplete = () => resolve();
+            tx.onabort = tx.onerror = () => reject(tx.error ?? new Error('IndexedDB transaction aborted'));
+          });
     const result = await fn(tx);
     await committed;
     return result;
@@ -199,7 +202,9 @@ export async function loadRefs(refs: Array<{ file: string; hash: string }>): Pro
     try {
       remember(hit.rec, hit.bytes);
       added = true;
-    } catch { /* stored bytes no longer parse: treat as missing */ }
+    } catch {
+      /* stored bytes no longer parse: treat as missing */
+    }
   }
   return added;
 }

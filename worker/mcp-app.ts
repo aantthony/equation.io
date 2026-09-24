@@ -13,9 +13,7 @@ export function graphResourceContents(html: string, origin: string) {
   const escaped = origin.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   return {
     ...graphResource,
-    text: html
-      .replace('__EQUATION_ORIGIN__', escaped)
-      .replace(/\b(src|href)="\/(?!\/)/g, `$1="${escaped}/`),
+    text: html.replace('__EQUATION_ORIGIN__', escaped).replace(/\b(src|href)="\/(?!\/)/g, `$1="${escaped}/`),
     _meta: {
       ui: {
         prefersBorder: true,
@@ -25,7 +23,8 @@ export function graphResourceContents(html: string, origin: string) {
       // ChatGPT's supported alias preserves its unique submission origin
       // without imposing a ChatGPT domain format on Claude's sandbox.
       'openai/widgetDomain': origin,
-      'openai/widgetDescription': 'Interactive 2D and 3D graph with editable equations, parameter sliders, pan and zoom. Edits update the conversation context. Open in equation.io to share the current graph.',
+      'openai/widgetDescription':
+        'Interactive 2D and 3D graph with editable equations, parameter sliders, pan and zoom. Edits update the conversation context. Open in equation.io to share the current graph.',
     },
   };
 }

@@ -20,7 +20,9 @@ describe('llms.txt', () => {
   it('documents every advanced feature the MCP tool description points here for', () => {
     for (const marker of [
       'domain(', // domain coloring
-      'rgb(', 'hsl(', 'oklch(', // custom per-pixel color
+      'rgb(',
+      'hsl(',
+      'oklch(', // custom per-pixel color
       'conformal(', // conformal grid maps
       'iter(', // escape-time fractals
       'revolve(', // surfaces of revolution
@@ -55,8 +57,9 @@ describe('llms.txt', () => {
     const entry = /^- Functions:([\s\S]*?)(?=^- )/m.exec(llms)?.[1] ?? '';
     const listed = new Set(entry.split(/[\s,.;:`()]+/));
     const escape = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const missing = [...FUNCTIONS].filter(name => !listed.has(name)
-      && !new RegExp(`(?<![\\w.])${escape(name)}[([]`).test(llms));
+    const missing = [...FUNCTIONS].filter(
+      name => !listed.has(name) && !new RegExp(`(?<![\\w.])${escape(name)}[([]`).test(llms),
+    );
     expect(missing).toEqual([]);
   });
 
@@ -87,7 +90,11 @@ describe('llms.txt', () => {
       [[], 'sin(x)^2 + cos(x)^2 = 1', 'note'],
       [[], 'sin(x)^2 + cos(x)^2 = 1.0001', 'curve'],
       [['c = 1', 'g(s) = exp(-s^2)', 'f(x, t) = (g(x - c t) + g(x + c t))/2'], 'y = f(x, t)', 'curve'],
-      [['c = 1', 'g(s) = exp(-s^2)', 'f(x, t) = (g(x - c t) + g(x + c t))/2'], 'd^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)', 'note'],
+      [
+        ['c = 1', 'g(s) = exp(-s^2)', 'f(x, t) = (g(x - c t) + g(x + c t))/2'],
+        'd^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)',
+        'note',
+      ],
       [[], 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', 'curve'],
     ];
     for (const [defs, row, kind] of cases) {

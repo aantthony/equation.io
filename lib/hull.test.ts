@@ -10,23 +10,60 @@ for (const x of [0, 1]) for (const y of [0, 1]) for (const z of [0, 1]) cube.pus
 
 /** Volume from the outward-wound faces (divergence theorem): wrong winding or
  *  a missing face shows up here before it shows up on screen. */
-const volume = (faces: ReturnType<typeof hull3>): number => faces.reduce((sum, f) =>
-  sum + f.triangles.reduce((s, [a, b, c]) => {
-    const [p, q, r] = [f.outline[a], f.outline[b], f.outline[c]];
-    return s + (p[0] * (q[1] * r[2] - q[2] * r[1]) - p[1] * (q[0] * r[2] - q[2] * r[0]) + p[2] * (q[0] * r[1] - q[1] * r[0])) / 6;
-  }, 0), 0);
+const volume = (faces: ReturnType<typeof hull3>): number =>
+  faces.reduce(
+    (sum, f) =>
+      sum +
+      f.triangles.reduce((s, [a, b, c]) => {
+        const [p, q, r] = [f.outline[a], f.outline[b], f.outline[c]];
+        return (
+          s +
+          (p[0] * (q[1] * r[2] - q[2] * r[1]) -
+            p[1] * (q[0] * r[2] - q[2] * r[0]) +
+            p[2] * (q[0] * r[1] - q[1] * r[0])) /
+            6
+        );
+      }, 0),
+    0,
+  );
 
 describe('hull2', () => {
   it('keeps the extreme points, counterclockwise, dropping interior, collinear and repeated ones', () => {
-    expect(hull2([[0, 0], [2, 0], [1, 0], [2, 2], [0, 2], [1, 1], [0, 0]])).toEqual([[0, 0], [2, 0], [2, 2], [0, 2]]);
-    expect(hull2([[0, 0], [1, 1]])).toHaveLength(2);
-    expect(hull2([[0, 0], [1, 1], [2, 2]])).toHaveLength(2);
+    expect(
+      hull2([
+        [0, 0],
+        [2, 0],
+        [1, 0],
+        [2, 2],
+        [0, 2],
+        [1, 1],
+        [0, 0],
+      ]),
+    ).toEqual([
+      [0, 0],
+      [2, 0],
+      [2, 2],
+      [0, 2],
+    ]);
+    expect(
+      hull2([
+        [0, 0],
+        [1, 1],
+      ]),
+    ).toHaveLength(2);
+    expect(
+      hull2([
+        [0, 0],
+        [1, 1],
+        [2, 2],
+      ]),
+    ).toHaveLength(2);
   });
 });
 
 describe('hull3', () => {
   it('merges coplanar triangles: a cube has six square faces', () => {
-    const faces = hull3([...cube, [.5, .5, .5], [1, .5, .5], [0, 0, 0]]);
+    const faces = hull3([...cube, [0.5, 0.5, 0.5], [1, 0.5, 0.5], [0, 0, 0]]);
     expect(faces.map(f => f.outline.length).sort()).toEqual([4, 4, 4, 4, 4, 4]);
     expect(volume(faces)).toBeCloseTo(1, 12);
   });
@@ -37,21 +74,49 @@ describe('hull3', () => {
     const faces = hull3(pts);
     expect(faces).toHaveLength(20);
     expect(faces.every(f => f.outline.length === 3)).toBe(true);
-    expect(volume(faces)).toBeCloseTo(5 * (3 + Math.sqrt(5)) / 12 * 8, 9);
+    expect(volume(faces)).toBeCloseTo(((5 * (3 + Math.sqrt(5))) / 12) * 8, 9);
   });
   it('is the same solid whatever order the points arrive in', () => {
-    const pts: P3[] = Array.from({ length: 200 }, (_, k): P3 => [Math.sin(k * 12.9898) * 3, Math.sin(k * 78.233) * 2, Math.sin(k * 37.719)]);
+    const pts: P3[] = Array.from({ length: 200 }, (_, k): P3 => [
+      Math.sin(k * 12.9898) * 3,
+      Math.sin(k * 78.233) * 2,
+      Math.sin(k * 37.719),
+    ]);
     const v = volume(hull3(pts));
     expect(v).toBeGreaterThan(0);
     expect(volume(hull3([...pts].reverse()))).toBeCloseTo(v, 9);
   });
   it('degrades to a flat polygon, a segment, or a point', () => {
-    const square = hull3([[0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1], [.5, .5, 1]]);
+    const square = hull3([
+      [0, 0, 1],
+      [1, 0, 1],
+      [1, 1, 1],
+      [0, 1, 1],
+      [0.5, 0.5, 1],
+    ]);
     expect(square).toHaveLength(1);
     expect(square[0].outline).toHaveLength(4);
-    expect(hull3([[0, 0, 0], [1, 1, 1], [2, 2, 2]])[0].outline).toEqual([[0, 0, 0], [2, 2, 2]]);
-    expect(hull3([[1, 2, 3], [1, 2, 3]])[0].outline).toEqual([[1, 2, 3]]);
-    expect(hullFaces([0, 0, 4, 0, 4, 4, 2, 1], 2)[0].outline).toEqual([[0, 0, 0], [4, 0, 0], [4, 4, 0]]);
+    expect(
+      hull3([
+        [0, 0, 0],
+        [1, 1, 1],
+        [2, 2, 2],
+      ])[0].outline,
+    ).toEqual([
+      [0, 0, 0],
+      [2, 2, 2],
+    ]);
+    expect(
+      hull3([
+        [1, 2, 3],
+        [1, 2, 3],
+      ])[0].outline,
+    ).toEqual([[1, 2, 3]]);
+    expect(hullFaces([0, 0, 4, 0, 4, 4, 2, 1], 2)[0].outline).toEqual([
+      [0, 0, 0],
+      [4, 0, 0],
+      [4, 4, 0],
+    ]);
   });
 });
 
@@ -68,7 +133,14 @@ describe('shading', () => {
       normals.add(n.map(c => Math.round(c) + 0).join());
     }
     expect([...normals].sort()).toEqual(['-1,0,0', '0,-1,0', '0,0,-1', '0,0,1', '0,1,0', '1,0,0']);
-    expect(hullMesh(hull3([[0, 0, 0], [1, 1, 1]])).indices).toHaveLength(0);
+    expect(
+      hullMesh(
+        hull3([
+          [0, 0, 0],
+          [1, 1, 1],
+        ]),
+      ).indices,
+    ).toHaveLength(0);
   });
   it('lights the static preview: faces are filled in shades of the row colour, darker than its edges', () => {
     const rows = ['hull(([-2,2],[-2,2],[-2,2]))'];
@@ -96,13 +168,22 @@ describe('hull(…) rows', () => {
     return { cpu: a.rows.at(-1)!.cpu!, env: a.constEnv, needs3D: a.rows.at(-1)!.cls!.needs3D };
   };
   it('takes points one by one, or a whole list — literal, crossed, or rotated', () => {
-    expect(plot(['hull((0,0),(2,0),(1,1),(2,2),(0,2))']).cpu).toMatchObject({ type: 'polygon', hull: true, closed: true });
+    expect(plot(['hull((0,0),(2,0),(1,1),(2,2),(0,2))']).cpu).toMatchObject({
+      type: 'polygon',
+      hull: true,
+      closed: true,
+    });
     const cubeRow = plot(['hull(([0,1],[0,1],[0,1]))']);
     expect(cubeRow.cpu).toMatchObject({ type: 'polygon', hull: true, dim: 3 });
     expect(cubeRow.needs3D).toBe(true);
     const ico = plot(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'hull(rotate((0,[-1,1],[-phi,phi]),k,(1,1,1)))']);
     if (ico.cpu.type !== 'polygon') throw new Error(ico.cpu.type);
-    expect(hullFaces(ico.cpu.pts.map(e => evaluate(e, ico.env)), 3)).toHaveLength(20);
+    expect(
+      hullFaces(
+        ico.cpu.pts.map(e => evaluate(e, ico.env)),
+        3,
+      ),
+    ).toHaveLength(20);
     expect(plot(['P=[(0,0),(3,0),(1,1),(0,3)]', 'hull(P)']).cpu).toMatchObject({ hull: true });
     // Vertices may move: which are extreme is settled per frame.
     expect(plot(['hull((0,0),(2,0),(1,sin(t)),(1,2))']).cpu).toMatchObject({ hull: true });
@@ -112,7 +193,15 @@ describe('hull(…) rows', () => {
     const verts = (rows: string[]) => {
       const { cpu: p, env } = plot(rows);
       if (p.type !== 'polygon') throw new Error(p.type);
-      return hullFaces(p.pts.map(e => evaluate(e, { ...env, t: 0 })), p.dim ?? 2)[0].outline.map(q => q.slice(0, p.dim ?? 2).map(c => +c.toFixed(6) + 0).join());
+      return hullFaces(
+        p.pts.map(e => evaluate(e, { ...env, t: 0 })),
+        p.dim ?? 2,
+      )[0].outline.map(q =>
+        q
+          .slice(0, p.dim ?? 2)
+          .map(c => +c.toFixed(6) + 0)
+          .join(),
+      );
     };
     const quarter = ['0,0', '0,2', '-1,1'];
     expect(verts(['J=[(0,-1),(1,0)]', 'R=e^((pi/2) J)', P, 'R hull(P)']).sort()).toEqual([...quarter].sort());
@@ -131,16 +220,25 @@ describe('hull(…) rows', () => {
       return p.type === 'family' ? p.members.map(m => m.cpu.type) : [p.type];
     };
     const P = 'P=[(1,0),(2,0),(2,1)]';
-    expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'e^(th J) hull(P)'])).toEqual(['polygon', 'polygon', 'polygon']);
+    expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'e^(th J) hull(P)'])).toEqual([
+      'polygon',
+      'polygon',
+      'polygon',
+    ]);
     expect(members(['th=2pi [0..4]/5', P, 'rotate(hull(P), th)'])).toHaveLength(5);
     expect(members([P, 'hull(P) + ([0,3],0)'])).toHaveLength(2);
     expect(members(['th=2pi [0..2]/3', 'rotate(polygon((1,0),(2,0),(2,1)), th)'])).toHaveLength(3);
     // A constant axis written as arithmetic is its numbers, so each tumbling
     // cube stays small enough to draw hundreds of.
-    expect(members(['e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1])) + (0, 0, 3[1..200])'])).toHaveLength(200);
+    expect(members(['e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1])) + (0, 0, 3[1..200])'])).toHaveLength(
+      200,
+    );
     // A slider-dependent axis stays symbolic, and large, but a few dozen draw;
     // past the family's budget in all, it says so.
-    const turning = (n: number) => ['a = 1', `e^(t cross((1, 1, a)/sqrt(2+a^2))) hull(([-1,1], [-1,1], [-1,1])) + (0, 0, 3[1..${n}])`];
+    const turning = (n: number) => [
+      'a = 1',
+      `e^(t cross((1, 1, a)/sqrt(2+a^2))) hull(([-1,1], [-1,1], [-1,1])) + (0, 0, 3[1..${n}])`,
+    ];
     expect(members(turning(30))).toHaveLength(30);
     expect(analyze(turning(200)).rows[1].error).toMatch(/too large to render .* in all/);
     // …while a list INSIDE the figure is its points.

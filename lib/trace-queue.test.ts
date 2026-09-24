@@ -54,7 +54,6 @@ it('ignores duplicate or unexpected replies', () => {
   expect(received).toBe(1);
 });
 
-
 it('cancels a queued view when existing geometry covers it again', () => {
   const sent: TraceMessage[] = [];
   const q = new TraceQueue(m => sent.push(m));

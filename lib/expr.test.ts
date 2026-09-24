@@ -4,33 +4,50 @@ import { GLSL_PRELUDE, toGLSL } from './glsl.ts';
 
 function evalExpr(e: Expr, env: Record<string, number>): number {
   switch (e.kind) {
-    case 'num': return e.value;
+    case 'num':
+      return e.value;
     case 'var': {
       if (!(e.name in env)) throw new Error(`Unbound: ${e.name}`);
       return env[e.name];
     }
-    case 'neg': return -evalExpr(e.a, env);
+    case 'neg':
+      return -evalExpr(e.a, env);
     case 'bin': {
       const a = evalExpr(e.a, env);
       const b = evalExpr(e.b, env);
       switch (e.op) {
-        case '+': return a + b;
-        case '-': return a - b;
-        case '*': return a * b;
-        case '/': return a / b;
-        case '^': return Math.pow(a, b);
+        case '+':
+          return a + b;
+        case '-':
+          return a - b;
+        case '*':
+          return a * b;
+        case '/':
+          return a / b;
+        case '^':
+          return Math.pow(a, b);
       }
     }
     case 'call': {
       const args = e.args.map(a => evalExpr(a, env));
       const fns: Record<string, (...xs: number[]) => number> = {
-        sin: Math.sin, cos: Math.cos, tan: Math.tan, sqrt: Math.sqrt,
-        abs: Math.abs, exp: Math.exp, ln: Math.log, log: Math.log10,
-        min: Math.min, max: Math.max, atan: Math.atan, floor: Math.floor,
+        sin: Math.sin,
+        cos: Math.cos,
+        tan: Math.tan,
+        sqrt: Math.sqrt,
+        abs: Math.abs,
+        exp: Math.exp,
+        ln: Math.log,
+        log: Math.log10,
+        min: Math.min,
+        max: Math.max,
+        atan: Math.atan,
+        floor: Math.floor,
       };
       return fns[e.name](...args);
     }
-    case 'eq': return evalExpr(e.l, env) - evalExpr(e.r, env);
+    case 'eq':
+      return evalExpr(e.l, env) - evalExpr(e.r, env);
   }
 }
 
@@ -129,7 +146,10 @@ describe('parseExpr', () => {
 
   it('tokenizes .. after integers and decimals', () => {
     const range = (s: string) => parseExpr(`sum(n=${s}, n)`) as Expr & { kind: 'call' };
-    expect(range('1..3').args.slice(1, 3)).toEqual([{ kind: 'num', value: 1 }, { kind: 'num', value: 3 }]);
+    expect(range('1..3').args.slice(1, 3)).toEqual([
+      { kind: 'num', value: 1 },
+      { kind: 'num', value: 3 },
+    ]);
     expect(range('1.5..N').args[1]).toEqual({ kind: 'num', value: 1.5 });
   });
 
@@ -352,18 +372,19 @@ describe('a name the document already bound', () => {
     // shared using them as slider names, where `total(x + 1)` was a product.
     // Nothing else in a saved link could tell those two readings apart.
     expect(parseExpr('total(x + 1)')).toMatchObject({ kind: 'call', name: 'total' });
-    expect(parseExpr('total(x + 1)', NONE, NONE, new Set(['total'])))
-      .toMatchObject({ kind: 'bin', op: '*', a: { kind: 'var', name: 'total' } });
+    expect(parseExpr('total(x + 1)', NONE, NONE, new Set(['total']))).toMatchObject({
+      kind: 'bin',
+      op: '*',
+      a: { kind: 'var', name: 'total' },
+    });
     // Case folds with the builtin lookup, so no spelling sneaks back in.
-    expect(parseExpr('Count(x)', NONE, NONE, new Set(['count'])))
-      .toMatchObject({ kind: 'bin', op: '*' });
+    expect(parseExpr('Count(x)', NONE, NONE, new Set(['count']))).toMatchObject({ kind: 'bin', op: '*' });
   });
 
   it('only shadows the builtins a graph was allowed to claim', () => {
     // `sin` was never nameable, so a stray entry cannot turn sin(x) into a
     // product — the shadow list and the naming rule answer the same question.
-    expect(parseExpr('sin(x)', NONE, NONE, new Set(['sin'])))
-      .toMatchObject({ kind: 'call', name: 'sin' });
+    expect(parseExpr('sin(x)', NONE, NONE, new Set(['sin']))).toMatchObject({ kind: 'call', name: 'sin' });
     // …and a document that binds nothing keeps every reduction a reduction.
     expect(parseExpr('mean(L)', NONE, new Set(['L']))).toMatchObject({ kind: 'call', name: 'mean' });
   });
@@ -465,8 +486,7 @@ describe('text', () => {
     expect(() => evaluate(parseExpr('2 "NYC"'), {})).toThrow(text);
     expect(() => evaluate(parseExpr('x + "NYC"'), { x: 1 })).toThrow(text);
     // Where text belongs, nothing changed.
-    expect(parseExpr('p[p.city == "NYC"]', undefined, new Set(['p'])))
-      .toMatchObject({ kind: 'index' });
+    expect(parseExpr('p[p.city == "NYC"]', undefined, new Set(['p']))).toMatchObject({ kind: 'index' });
   });
 
   it('keeps a ";" inside text, because the link codec now can', () => {
@@ -475,8 +495,7 @@ describe('text', () => {
     // row came back split. lib/link.ts encodes a row's own semicolons twice,
     // so text is text — see the round-trip test in link.test.ts.
     expect(parseExpr('"a;b"')).toMatchObject({ kind: 'str', value: 'a;b' });
-    expect(parseExpr('p[p.city == "a;b"]', undefined, new Set(['p'])))
-      .toMatchObject({ kind: 'index' });
+    expect(parseExpr('p[p.city == "a;b"]', undefined, new Set(['p']))).toMatchObject({ kind: 'index' });
   });
 });
 
@@ -535,13 +554,13 @@ describe('unicode input', () => {
   });
 
   it('treats Greek letters as name characters and subscripts as _ subscripts', () => {
-    expect(evl('θ + 1', { 'θ': 2 })).toBe(3);
-    expect(evl('α β', { 'α': 2, 'β': 3 })).toBe(6);
-    expect(evl("2µ", { 'µ': 5 })).toBe(10); // micro sign, the Mac keyboard's mu
+    expect(evl('θ + 1', { θ: 2 })).toBe(3);
+    expect(evl('α β', { α: 2, β: 3 })).toBe(6);
+    expect(evl('2µ', { µ: 5 })).toBe(10); // micro sign, the Mac keyboard's mu
     // A subscript digit is the `_` subscript in its unicode spelling, not a
     // character of its own: T₀ IS T_0, so components and terms line up.
     expect(parseExpr('T₀ + a₃')).toEqual(parseExpr('T_0 + a_3'));
-    expect(evl('θ₁₂ + 1', { 'θ_12': 2 })).toBe(3);
+    expect(evl('θ₁₂ + 1', { θ_12: 2 })).toBe(3);
     expect([...freeVars(parseExpr('Δx + θ₁ + θ2'))].sort()).toEqual(['Δx', 'θ2', 'θ_1']);
   });
 

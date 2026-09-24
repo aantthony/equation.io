@@ -62,14 +62,17 @@ describe('samplePath', () => {
   });
 
   it('sees two jumps in neighbouring intervals: they do not vouch for each other', () => {
-    const pts = samplePath(u => [u, (u > 0.5 && u < 0.5024) ? 5 : 0], 400);
+    const pts = samplePath(u => [u, u > 0.5 && u < 0.5024 ? 5 : 0], 400);
     expect(breaks(pts)).toBe(2);
   });
 
   it('ignores rounding noise on a path that barely moves', () => {
     expect(breaks(pathSampler(comps('exp(i u)/exp(i u) + 0 i')).sample({}))).toBe(0);
     let calls = 0;
-    const noisy = samplePath(u => { calls++; return [1 + (Math.round(u * 399) % 3 === 0 ? 2e-16 : 0), 0]; }, 400);
+    const noisy = samplePath(u => {
+      calls++;
+      return [1 + (Math.round(u * 399) % 3 === 0 ? 2e-16 : 0), 0];
+    }, 400);
     expect(breaks(noisy)).toBe(0);
     expect(calls).toBe(400);
   });
@@ -81,7 +84,10 @@ describe('samplePath', () => {
 
   it('bounds the refinement work on a path that is all jumps', () => {
     let calls = 0;
-    samplePath(u => { calls++; return [u, Math.floor(200 * u) % 7 === 0 ? 5 : 0]; }, 400);
+    samplePath(u => {
+      calls++;
+      return [u, Math.floor(200 * u) % 7 === 0 ? 5 : 0];
+    }, 400);
     expect(calls).toBeLessThanOrEqual(400 + 32 * 12);
   });
 });
@@ -112,7 +118,7 @@ describe('pathSampler', () => {
     // A no-default piecewise component is undefined off its condition.
     const half = real('(2cos(2pi u), {sin(2pi u) > 0: 2sin(2pi u)})');
     expect(half).toHaveLength(2 * CURVE_SAMPLES);
-    expect(half[2 * 100 + 1]).toBeCloseTo(2 * Math.sin(2 * Math.PI * 100 / (CURVE_SAMPLES - 1)));
+    expect(half[2 * 100 + 1]).toBeCloseTo(2 * Math.sin((2 * Math.PI * 100) / (CURVE_SAMPLES - 1)));
     expect(half[2 * 300 + 1]).toBeNaN();
   });
 

@@ -92,7 +92,11 @@ function set(mode: 'light' | 'dark'): void {
   // toggle means a media-scoped <meta> wouldn't be enough — it has to move here.
   const meta = document.getElementById('theme-color');
   if (meta) {
-    const hex = theme.bg.map(c => Math.round(c * 255).toString(16).padStart(2, '0'));
+    const hex = theme.bg.map(c =>
+      Math.round(c * 255)
+        .toString(16)
+        .padStart(2, '0'),
+    );
     meta.setAttribute('content', `#${hex.join('')}`);
   }
   for (const cb of listeners) cb();

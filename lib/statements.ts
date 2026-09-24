@@ -50,9 +50,11 @@ export function splitStatements(text: string): string[] {
     if (ch === '\n') {
       if (quote) depth = 0;
       quote = null;
-    }
-    else if (quote) { if (ch === quote) quote = null; cur += ch; continue; }
-    else if (ch === '"' || (ch === "'" && !VALUE_END.test(wasPrev))) quote = ch;
+    } else if (quote) {
+      if (ch === quote) quote = null;
+      cur += ch;
+      continue;
+    } else if (ch === '"' || (ch === "'" && !VALUE_END.test(wasPrev))) quote = ch;
     else if (ch === '(' || ch === '[' || ch === '{') depth++;
     else if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
     if ((ch === '\n' || ch === ';') && depth === 0) {
@@ -79,7 +81,10 @@ export function noteStart(text: string): number {
   let quote = '';
   for (let k = 0; k < text.length; k++) {
     const c = text[k];
-    if (quote) { if (c === quote) quote = ''; continue; }
+    if (quote) {
+      if (c === quote) quote = '';
+      continue;
+    }
     if (c === '"' || (c === "'" && !VALUE_END.test(text[k - 1] ?? ''))) quote = c;
     else if (c === '#') return k;
   }

@@ -60,10 +60,7 @@ export function detOf(m: Mat): Expr {
   if (m.length === 2) return sub(mul(m[0][0], m[1][1]), mul(m[0][1], m[1][0]));
   const minor = (r0: number, r1: number, c0: number, c1: number): Expr =>
     sub(mul(m[r0][c0], m[r1][c1]), mul(m[r0][c1], m[r1][c0]));
-  return add(
-    sub(mul(m[0][0], minor(1, 2, 1, 2)), mul(m[0][1], minor(1, 2, 0, 2))),
-    mul(m[0][2], minor(1, 2, 0, 1)),
-  );
+  return add(sub(mul(m[0][0], minor(1, 2, 1, 2)), mul(m[0][1], minor(1, 2, 0, 2))), mul(m[0][2], minor(1, 2, 0, 1)));
 }
 
 export function traceOf(m: Mat): Expr {
@@ -101,7 +98,12 @@ const isNum = (e: Expr): e is Expr & { kind: 'num' } => e.kind === 'num';
  *  not three copies of 1/sqrt(3) in every entry of the rotation. */
 const settle = (e: Expr): Expr => {
   if (isNum(e) || freeVars(e).size) return e;
-  try { const v = evaluate(e, {}); return Number.isFinite(v) ? num(v) : e; } catch { return e; }
+  try {
+    const v = evaluate(e, {});
+    return Number.isFinite(v) ? num(v) : e;
+  } catch {
+    return e;
+  }
 };
 
 /**
@@ -110,21 +112,29 @@ const settle = (e: Expr): Expr => {
  * is exactly that factor, and reading it back out of the products would cost
  * a square root and a division by zero at th = 0.
  */
-export interface MatValue { m: Mat; scale?: Expr; base?: Mat }
+export interface MatValue {
+  m: Mat;
+  scale?: Expr;
+  base?: Mat;
+}
 
 export const identity = (n: number): Mat =>
   Array.from({ length: n }, (_, r) => Array.from({ length: n }, (_, c) => num(r === c ? 1 : 0)));
 const mapMat = (m: Mat, f: (entry: Expr, r: number, c: number) => Expr): Mat =>
   m.map((row, r) => row.map((entry, c) => f(entry, r, c)));
 function sameSide(op: string, a: Mat, b: Mat): void {
-  if (a.length !== b.length) throw new Error(`Cannot ${op} a ${a.length}×${a.length} and a ${b.length}×${b.length} matrix.`);
+  if (a.length !== b.length)
+    throw new Error(`Cannot ${op} a ${a.length}×${a.length} and a ${b.length}×${b.length} matrix.`);
 }
 
 export function matScale(v: MatValue, s: Expr): MatValue {
   return { m: mapMat(v.m, entry => mul(s, entry)), scale: v.scale ? mul(s, v.scale) : s, base: v.base ?? v.m };
 }
-export const matNeg = (v: MatValue): MatValue =>
-  ({ m: mapMat(v.m, neg), scale: v.scale ? neg(v.scale) : num(-1), base: v.base ?? v.m });
+export const matNeg = (v: MatValue): MatValue => ({
+  m: mapMat(v.m, neg),
+  scale: v.scale ? neg(v.scale) : num(-1),
+  base: v.base ?? v.m,
+});
 export function matAdd(a: Mat, b: Mat, minus = false): Mat {
   sameSide(minus ? 'subtract' : 'add', a, b);
   return mapMat(a, (entry, r, c) => (minus ? sub : add)(entry, b[r][c]));
@@ -139,7 +149,10 @@ export function matMul(a: Mat, b: Mat): Mat {
 export function inverseOf(m: Mat): Mat {
   const d = detOf(m);
   if (m.length === 2) {
-    return [[div(m[1][1], d), div(neg(m[0][1]), d)], [div(neg(m[1][0]), d), div(m[0][0], d)]];
+    return [
+      [div(m[1][1], d), div(neg(m[0][1]), d)],
+      [div(neg(m[1][0]), d), div(m[0][0], d)],
+    ];
   }
   const cof = (r: number, c: number): Expr => {
     const [r0, r1] = [0, 1, 2].filter(k => k !== r);
@@ -155,7 +168,9 @@ export const MAT_POWER_MAX = 8;
 export function matPow(m: Mat, n: number): Mat {
   if (n === -1) return inverseOf(m);
   if (!Number.isInteger(n) || n < 0 || n > MAT_POWER_MAX) {
-    throw new Error(`A matrix power is a whole number from 0 to ${MAT_POWER_MAX}, or -1 for the inverse — for a rotation by any angle write e^(th J).`);
+    throw new Error(
+      `A matrix power is a whole number from 0 to ${MAT_POWER_MAX}, or -1 for the inverse — for a rotation by any angle write e^(th J).`,
+    );
   }
   let out = identity(m.length);
   for (let k = 0; k < n; k++) out = matMul(out, m);
@@ -171,7 +186,7 @@ export const hatOf = (n: Expr[]): Mat => [
 
 const same = (a: Expr, b: Expr): boolean => exprKey(a) === exprKey(b);
 const opposite = (a: Expr, b: Expr): boolean =>
-  (isNum(a) && isNum(b) ? a.value === -b.value : same(neg(a), b) || same(a, neg(b)));
+  isNum(a) && isNum(b) ? a.value === -b.value : same(neg(a), b) || same(a, neg(b));
 
 /**
  * e^M in closed form.
@@ -198,7 +213,10 @@ export function expOf(v: MatValue): Mat {
       const grow = isNum(a) && a.value === 0 ? num(1) : fn('exp', mul(scale, a));
       const cos = mul(grow, fn('cos', angle));
       const sin = mul(grow, fn('sin', angle));
-      return [[cos, neg(sin)], [sin, cos]];
+      return [
+        [cos, neg(sin)],
+        [sin, cos],
+      ];
     }
     const m = v.m;
     const s = div(traceOf(m), num(2));
@@ -212,15 +230,18 @@ export function expOf(v: MatValue): Mat {
     const C: Expr = { kind: 'piecewise', cases: [{ cond: real, value: fn('cosh', q) }], otherwise: fn('cos', q) };
     const S: Expr = {
       kind: 'piecewise',
-      cases: [{ cond: tiny, value: add(num(1), div(delta, num(6))) }, { cond: real, value: div(fn('sinh', qs), qs) }],
+      cases: [
+        { cond: tiny, value: add(num(1), div(delta, num(6))) },
+        { cond: real, value: div(fn('sinh', qs), qs) },
+      ],
       otherwise: div(fn('sin', qs), qs),
     };
     const es = fn('exp', s);
-    return mapMat(m, (entry, r, col) =>
-      mul(es, add(mul(C, eye[r][col]), mul(S, sub(entry, mul(s, eye[r][col]))))));
+    return mapMat(m, (entry, r, col) => mul(es, add(mul(C, eye[r][col]), mul(S, sub(entry, mul(s, eye[r][col]))))));
   }
-  const skew = base.every((row, r) => row.every((entry, c) =>
-    (r === c ? isNum(entry) && entry.value === 0 : opposite(entry, base[c][r]))));
+  const skew = base.every((row, r) =>
+    row.every((entry, c) => (r === c ? isNum(entry) && entry.value === 0 : opposite(entry, base[c][r]))),
+  );
   if (!skew) {
     throw new Error('e^M for a 3×3 matrix needs a rotation generator: e^(th cross(n)) turns by th about the axis n.');
   }

@@ -7,12 +7,21 @@ import { type Expr, evaluate } from './expr.ts';
 describe('shared document analysis', () => {
   it('preserves source identity, blanks and partial success', () => {
     const document = prepareDocument([
-      { id: 'blank', text: ' ' }, { id: 2, text: '# heading' },
-      { id: 3, text: 'a=2' }, { id: 4, text: 'a=3' }, { id: 5, text: 'a+1' },
+      { id: 'blank', text: ' ' },
+      { id: 2, text: '# heading' },
+      { id: 3, text: 'a=2' },
+      { id: 4, text: 'a=3' },
+      { id: 5, text: 'a+1' },
     ]);
     const result = analyzePrepared(document);
     expect(result.rows.map(r => r.id)).toEqual(['blank', 2, 3, 4, 5]);
-    expect(document.statements.map(s => s.kind)).toEqual(['blank', 'comment', 'definition', 'definition', 'expression']);
+    expect(document.statements.map(s => s.kind)).toEqual([
+      'blank',
+      'comment',
+      'definition',
+      'definition',
+      'expression',
+    ]);
     expect(result.rows[3].error).toBe('a is already defined.');
     expect(result.rows[4].info).toBe('= 3');
     expect(document.rows[4].cls).toBeUndefined();
@@ -45,10 +54,16 @@ describe('shared document analysis', () => {
 
   it('reuses RV numerical caches and source IDs across inserted rows', () => {
     const rvs = new RVSystem();
-    const rows = [{ id: 'base', text: 'X ~ Normal(0,1)' }, { id: 'derived', text: 'X^3' }];
+    const rows = [
+      { id: 'base', text: 'X ~ Normal(0,1)' },
+      { id: 'derived', text: 'X^3' },
+    ];
     const first = analyzePrepared(prepareDocument(rows), { rvs, readouts: false });
     const col = rvs.columns('@derived', {});
-    const second = analyzePrepared(prepareDocument([{ id: 'comment', text: '# edit' }, ...rows]), { rvs, readouts: false });
+    const second = analyzePrepared(prepareDocument([{ id: 'comment', text: '# edit' }, ...rows]), {
+      rvs,
+      readouts: false,
+    });
     expect(first.rvs).toBe(rvs);
     expect(second.rvs).toBe(rvs);
     expect(rvs.columns('@derived', {})).toBe(col);

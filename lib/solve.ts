@@ -63,13 +63,15 @@ export function solveSystem(
   const margin = opts.margin ?? 0.05;
 
   // Symbolic Jacobian where it exists; null entries fall back to differences.
-  const jac: Array<Array<Expr | null>> = residuals.map(r => vars.map(v => {
-    try {
-      return diff(r, v);
-    } catch {
-      return null;
-    }
-  }));
+  const jac: Array<Array<Expr | null>> = residuals.map(r =>
+    vars.map(v => {
+      try {
+        return diff(r, v);
+      } catch {
+        return null;
+      }
+    }),
+  );
 
   const evalAt = (e: Expr): number => {
     try {
@@ -156,7 +158,8 @@ export function solveSystem(
       // a cloud of apparently distinct solutions.
       if (converged(p, r) && step && norm(step) <= 1e-9 * (1 + norm(p))) return p;
       if (!step) return null;
-      const earlier = older, prior = previous;
+      const earlier = older,
+        prior = previous;
       if (converged(p, r) && earlier && prior) {
         // Multiple roots make Newton converge only linearly. Extrapolate the
         // last three iterates to their common limit. Verify its Newton
@@ -166,15 +169,13 @@ export function solveSystem(
           const before = prior[k] - earlier[k];
           const after = v - prior[k];
           const bend = after - before;
-          return Math.abs(bend) > 1e-15 * Math.max(Math.abs(before), Math.abs(after))
-            ? v - after * after / bend : v;
+          return Math.abs(bend) > 1e-15 * Math.max(Math.abs(before), Math.abs(after)) ? v - (after * after) / bend : v;
         });
         if (limit.every(isFinite) && residualAt(limit, rTrial) && norm(rTrial) < rn) {
           if (norm(rTrial) === 0) return limit;
           if (jacobianAt(limit, J)) {
             const correction = solveLinear(J, rTrial, n);
-            if (correction && converged(limit, rTrial) &&
-              norm(correction) <= 1e-9 * (1 + norm(limit))) return limit;
+            if (correction && converged(limit, rTrial) && norm(correction) <= 1e-9 * (1 + norm(limit))) return limit;
           }
         }
       }
@@ -217,7 +218,7 @@ export function solveSystem(
       rest = Math.floor(rest / div);
       // Cell centre, nudged by a hash of the seed index so seeds do not line
       // up with the symmetry axes that so many systems are built around.
-      seed.push(lo[k] + width[k] * (cell + 0.5 + 0.32 * (hash(index * 3 + k) - 0.5)) / div);
+      seed.push(lo[k] + (width[k] * (cell + 0.5 + 0.32 * (hash(index * 3 + k) - 0.5))) / div);
     }
     const sol = refine(s < seeds.length ? seeds[s] : seed);
     if (!sol) continue;
@@ -270,8 +271,15 @@ function hash(i: number): number {
 
 /** Trace moving constraints with warm starts and periodic branch discovery.
  * Unmatched or discontinuous branches start a new polyline, never a chord. */
-export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi: number[],
-  env: Record<string, number> = {}, samples = 256, angular: boolean[] = []): number[][][] {
+export function traceSystem(
+  residuals: Expr[],
+  vars: string[],
+  lo: number[],
+  hi: number[],
+  env: Record<string, number> = {},
+  samples = 256,
+  angular: boolean[] = [],
+): number[][][] {
   const paths: number[][][] = [];
   let active: number[][][] = [];
   const scale = Math.hypot(...hi.map((v, k) => v - lo[k]));
@@ -287,41 +295,67 @@ export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi:
         if (['floor', 'ceil', 'round', 'sign', 'fract', 'mod'].includes(e.name)) discreteProbes.push(e);
         e.args.forEach(collectDiscrete);
         break;
-      case 'bin': collectDiscrete(e.a); collectDiscrete(e.b); break;
-      case 'neg': collectDiscrete(e.a); break;
-      case 'eq': case 'ineq': collectDiscrete(e.l); collectDiscrete(e.r); break;
-      case 'vec': case 'list': e.items.forEach(collectDiscrete); break;
+      case 'bin':
+        collectDiscrete(e.a);
+        collectDiscrete(e.b);
+        break;
+      case 'neg':
+        collectDiscrete(e.a);
+        break;
+      case 'eq':
+      case 'ineq':
+        collectDiscrete(e.l);
+        collectDiscrete(e.r);
+        break;
+      case 'vec':
+      case 'list':
+        e.items.forEach(collectDiscrete);
+        break;
       case 'piecewise':
         discreteProbes.push(e);
-        e.cases.forEach(c => { collectDiscrete(c.cond); collectDiscrete(c.value); });
+        e.cases.forEach(c => {
+          collectDiscrete(c.cond);
+          collectDiscrete(c.value);
+        });
         if (e.otherwise) collectDiscrete(e.otherwise);
         break;
-      case 'loop': e.seeds.forEach(collectDiscrete); break;
+      case 'loop':
+        e.seeds.forEach(collectDiscrete);
+        break;
     }
   };
   residuals.forEach(collectDiscrete);
-  const discreteValue = (probe: Extract<Expr, { kind: 'call' | 'piecewise' }>,
-    p: number[], u: number): number => {
+  const discreteValue = (probe: Extract<Expr, { kind: 'call' | 'piecewise' }>, p: number[], u: number): number => {
     const scope: Record<string, number> = { ...env, u };
-    vars.forEach((name, k) => { scope[name] = p[k]; });
+    vars.forEach((name, k) => {
+      scope[name] = p[k];
+    });
     const at = (e: Expr): number => {
       try {
         const v = evaluate(e, scope);
         return typeof v === 'number' ? v : NaN;
-      } catch { return NaN; }
+      } catch {
+        return NaN;
+      }
     };
     if (probe.kind === 'piecewise') {
       try {
         for (let i = 0; i < probe.cases.length; i++) {
           const cond = probe.cases[i].cond;
           if (cond.kind !== 'ineq') return NaN;
-          if (ineqComparisons(cond).every(({ op, l, r }) => {
-            const a = at(l), b = at(r);
-            return op === '<' ? a < b : op === '<=' ? a <= b : op === '>' ? a > b : a >= b;
-          })) return i;
+          if (
+            ineqComparisons(cond).every(({ op, l, r }) => {
+              const a = at(l),
+                b = at(r);
+              return op === '<' ? a < b : op === '<=' ? a <= b : op === '>' ? a > b : a >= b;
+            })
+          )
+            return i;
         }
         return probe.cases.length;
-      } catch { return NaN; }
+      } catch {
+        return NaN;
+      }
     }
     if (probe.name === 'fract') return Math.floor(at(probe.args[0]));
     if (probe.name === 'mod') return Math.floor(at(probe.args[0]) / at(probe.args[1]));
@@ -336,27 +370,42 @@ export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi:
       const before = discreteValue(probe, a, u0);
       const after = discreteValue(probe, b, u1);
       return isFinite(before) && isFinite(after) && before !== after;
-    }) ? 4 : 0;
-    const subdivide = (start: number[], end: number[], t0: number, t1: number,
-      depth: number, parentDeviation?: number): number[][] | null => {
+    })
+      ? 4
+      : 0;
+    const subdivide = (
+      start: number[],
+      end: number[],
+      t0: number,
+      t1: number,
+      depth: number,
+      parentDeviation?: number,
+    ): number[][] | null => {
       if (remaining-- <= 0) return null;
       const t = (t0 + t1) / 2;
       if (t === t0 || t === t1) return null;
       const center = start.map((v, k) => (v + end[k]) / 2);
       const distance = Math.hypot(...start.map((v, k) => v - end[k]));
       const mids = solveSystem(residuals, vars, lo, hi, {
-        env: { ...env, u: t }, angular, seeds: [center, start, end], lattice: false,
+        env: { ...env, u: t },
+        angular,
+        seeds: [center, start, end],
+        lattice: false,
       });
-      mids.sort((p, q) =>
-        Math.hypot(...p.map((v, k) => v - center[k])) - Math.hypot(...q.map((v, k) => v - center[k])));
+      mids.sort(
+        (p, q) => Math.hypot(...p.map((v, k) => v - center[k])) - Math.hypot(...q.map((v, k) => v - center[k])),
+      );
       for (const mid of mids) {
         // Smooth curvature shrinks under subdivision; a jump's deviation does
         // not. Compare successive midpoints independently of the view-scaled
         // step limit so jumps smaller than maxStep can still break the path.
         const deviation = Math.hypot(...mid.map((v, k) => v - center[k]));
-        if (distance < maxStep && depth >= minDepth &&
-          (deviation <= 1e-12 * (1 + distance) ||
-            (parentDeviation !== undefined && deviation < 0.5 * parentDeviation))) return [];
+        if (
+          distance < maxStep &&
+          depth >= minDepth &&
+          (deviation <= 1e-12 * (1 + distance) || (parentDeviation !== undefined && deviation < 0.5 * parentDeviation))
+        )
+          return [];
         const left = subdivide(start, mid, t0, t, depth + 1, deviation);
         if (!left) continue;
         const right = subdivide(mid, end, t, t1, depth + 1, deviation);
@@ -371,7 +420,10 @@ export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi:
     const seeds = active.map(p => p[p.length - 1]);
     const discover = i % 32 === 0 || seeds.length === 0;
     let points = solveSystem(residuals, vars, lo, hi, {
-      env: { ...env, u: i / samples }, angular, seeds, lattice: discover,
+      env: { ...env, u: i / samples },
+      angular,
+      seeds,
+      lattice: discover,
     });
     if (!discover && points.length < seeds.length) {
       points = solveSystem(residuals, vars, lo, hi, { env: { ...env, u: i / samples }, angular, seeds: points });
@@ -386,10 +438,20 @@ export function traceSystem(residuals: Expr[], vars: string[], lo: number[], hi:
         const d = Math.hypot(...point.map((v, k) => v - last[k]));
         if (d >= distance) continue;
         const mids = bridge(last, point, (i - 1) / samples, i / samples);
-        if (mids) { distance = d; best = path; bestBridge = mids; }
+        if (mids) {
+          distance = d;
+          best = path;
+          bestBridge = mids;
+        }
       }
-      if (best) { available.delete(best); best.push(...bestBridge, point); return best; }
-      const path = [point]; paths.push(path); return path;
+      if (best) {
+        available.delete(best);
+        best.push(...bestBridge, point);
+        return best;
+      }
+      const path = [point];
+      paths.push(path);
+      return path;
     });
   }
   return paths;

@@ -105,9 +105,9 @@ const BY_NAME = new Map(ESCAPES.map(e => [e.name, e]));
 
 /** Names some longer command extends (\inf → \infty, \sin → \sinh): typing
  *  their last letter cannot commit them; a delimiter or the suggestions can. */
-const PREFIX_OF_LONGER = new Set(ESCAPES
-  .filter(a => ESCAPES.some(b => b.name !== a.name && b.name.startsWith(a.name)))
-  .map(a => a.name));
+const PREFIX_OF_LONGER = new Set(
+  ESCAPES.filter(a => ESCAPES.some(b => b.name !== a.name && b.name.startsWith(a.name))).map(a => a.name),
+);
 
 export interface EscapeEdit {
   /** Replace text[start..end) … */
@@ -125,8 +125,9 @@ const inQuote = (text: string, at: number): boolean => {
   let quote = '';
   for (let i = 0; i < at; i++) {
     const c = text[i];
-    if (quote) { if (c === quote) quote = ''; }
-    else if (c === '"' || (c === "'" && !VALUE_END.test(text[i - 1] ?? ''))) quote = c;
+    if (quote) {
+      if (c === quote) quote = '';
+    } else if (c === '"' || (c === "'" && !VALUE_END.test(text[i - 1] ?? ''))) quote = c;
   }
   return quote !== '';
 };

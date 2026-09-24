@@ -1,8 +1,8 @@
 export type PatternDict = {
-  [type: string]: (RegExp | ((val: string) => boolean));
-}
+  [type: string]: RegExp | ((val: string) => boolean);
+};
 
-export interface Token<TokenType=string> {
+export interface Token<TokenType = string> {
   type: TokenType;
   str: string;
   line: number;
@@ -19,7 +19,7 @@ export default function Tokenizer(patternDict: PatternDict) {
     return val;
   });
 
-  return function *write(string: string): Generator<Token, void, void> {
+  return function* write(string: string): Generator<Token, void, void> {
     let s = string[0];
     let si = 0;
     let t = fns.findIndex(p => p(s));
@@ -35,7 +35,7 @@ export default function Tokenizer(patternDict: PatternDict) {
           type: names[t],
           str: s,
           line,
-          loc: [si, i]
+          loc: [si, i],
         };
         const nt = fns.findIndex(p => p(ds));
         t = nt;
@@ -52,5 +52,5 @@ export default function Tokenizer(patternDict: PatternDict) {
         loc: [si, string.length],
       };
     }
-  }
+  };
 }

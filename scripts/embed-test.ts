@@ -5,13 +5,17 @@ import { chromium } from 'playwright';
 const origin = 'http://localhost:5198';
 const path = '/g/y%3Dx%5E2';
 // Allow the cross-origin localhost fixture through Chromium's local-network check.
-const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader', '--disable-features=LocalNetworkAccessChecks'] });
+const browser = await chromium.launch({
+  args: ['--enable-unsafe-swiftshader', '--disable-features=LocalNetworkAccessChecks'],
+});
 try {
   const context = await browser.newContext();
   const page = await context.newPage();
   page.on('requestfailed', request => console.error(request.url(), request.failure()));
   page.on('pageerror', error => console.error(error.message));
-  page.on('console', message => { if (message.type() === 'error') console.error(message.text()); });
+  page.on('console', message => {
+    if (message.type() === 'error') console.error(message.text());
+  });
   const response = await page.goto(origin + path);
   assert.equal(response?.status(), 200);
   const csp = response!.headers()['content-security-policy'];
@@ -31,10 +35,12 @@ try {
   assert.equal(await landingFrame.locator('#panel').evaluate(el => el.classList.contains('is-parked')), true);
 
   // A different host verifies frame-ancestors and cross-origin detection.
-  await context.route('http://127.0.0.1:5198/embed-test-parent', route => route.fulfill({
-    contentType: 'text/html',
-    body: `<iframe src="${origin}${path}" width="800" height="600"></iframe>`,
-  }));
+  await context.route('http://127.0.0.1:5198/embed-test-parent', route =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: `<iframe src="${origin}${path}" width="800" height="600"></iframe>`,
+    }),
+  );
   await page.goto('http://127.0.0.1:5198/embed-test-parent');
   const frame = page.frameLocator('iframe');
   await frame.locator('#panel-chip.shown').waitFor();

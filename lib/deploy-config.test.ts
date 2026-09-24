@@ -40,12 +40,9 @@ describe('wrangler run_worker_first covers the worker routes', () => {
     ...landingWorkerPaths().map(p => [p]),
     ['/llms.txt'],
     ['/robots.txt'],
-  ])(
-    '%s reaches the worker',
-    path => {
-      expect(covered(path), `${path} would be served by the asset server, not the worker`).toBe(true);
-    },
-  );
+  ])('%s reaches the worker', path => {
+    expect(covered(path), `${path} would be served by the asset server, not the worker`).toBe(true);
+  });
 
   it('leaves the app shell and its assets to the asset server', () => {
     // Marking these worker-first would make every page load pay for the worker.

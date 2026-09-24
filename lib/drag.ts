@@ -79,6 +79,8 @@ export function coordinateDragWriter(
       const env = { ...getEnv(), x: round(x), y: round(y) };
       const values = coords.map(c => evaluate(c, env));
       if (values.every(Number.isFinite)) write(values[0], values[1]);
-    } catch { /* singular coordinate: keep the previous values */ }
+    } catch {
+      /* singular coordinate: keep the previous values */
+    }
   };
 }

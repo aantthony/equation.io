@@ -47,7 +47,8 @@ test('a high-multiplicity system root is localized to one point', () => {
 });
 
 test('extrapolation retains a shifted multiple root without inventing near misses', () => {
-  const boxLo = [-4, -4], boxHi = [4, 4];
+  const boxLo = [-4, -4],
+    boxHi = [4, 4];
   const sols = solveSystem(sys('(x-0.37)^8', 'y-0.42'), ['x', 'y'], boxLo, boxHi);
   expect(sols).toHaveLength(1);
   expect(near(sols[0], [0.37, 0.42], 1e-7)).toBe(true);
@@ -69,12 +70,7 @@ const Q = 'y + 3 x (1+x y)^2 z + 3 x y^2 (4+3 x y)';
 const R = '2 x - 3 x^2 y - x^3 z';
 
 test('the Jacobian counterexample fiber has its three points', () => {
-  const sols = solveSystem(
-    sys(`${P} + 1/4`, Q, R),
-    ['x', 'y', 'z'],
-    [-4, -4, -4],
-    [4, 4, 12],
-  );
+  const sols = solveSystem(sys(`${P} + 1/4`, Q, R), ['x', 'y', 'z'], [-4, -4, -4], [4, 4, 12]);
   expect(sols).toHaveLength(3);
   expect(has(sols, [0, 0, -0.25], 1e-5)).toBe(true);
   expect(has(sols, [1, -1.5, 6.5], 1e-5)).toBe(true);

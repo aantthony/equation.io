@@ -8,7 +8,7 @@ describe('graph-link payload codec', () => {
   });
 
   it('emits no characters that break chat-app URL linkification', () => {
-    const payload = encodePayload(["y = sin(x)*|x|!", "f(x) = 'x'"]);
+    const payload = encodePayload(['y = sin(x)*|x|!', "f(x) = 'x'"]);
     expect(payload).not.toMatch(/[()!'* ]/);
   });
 
@@ -65,8 +65,7 @@ describe('graph-link payload codec', () => {
   });
 
   it('preserves the interpretation of unmarked legacy percent sequences', () => {
-    expect(decodePayload('p%5Bp.city%20%3D%3D%20%22a%253Bb%22%5D'))
-      .toEqual(['p[p.city == "a;b"]']);
+    expect(decodePayload('p%5Bp.city%20%3D%3D%20%22a%253Bb%22%5D')).toEqual(['p[p.city == "a;b"]']);
     expect(decodePayload('%23%20100%25')).toEqual(['# 100%']);
   });
 

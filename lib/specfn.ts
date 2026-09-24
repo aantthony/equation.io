@@ -14,9 +14,8 @@ const LN_SQRT_2PI = 0.9189385332046727;
 
 /** Lanczos g = 7, n = 9: ln Γ to ~1e-15 relative over the positive reals. */
 const LG = [
-  0.99999999999980993, 676.5203681218851, -1259.1392167224028,
-  771.32342877765313, -176.61502916214059, 12.507343278686905,
-  -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
+  0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313, -176.61502916214059,
+  12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7,
 ];
 
 /** ln|Γ(x)|. Poles (0, −1, −2, …) are +Infinity. */
@@ -61,7 +60,7 @@ export function log1pmx(d: number): number {
 export function lgammaHalfDiff(z: number): number {
   if (z < 1e4) return lgamma(z + 0.5) - lgamma(z);
   const r = 1 / z;
-  return 0.5 * Math.log(z) - r * (1 / 8 - r * r * (1 / 192 - r * r / 640));
+  return 0.5 * Math.log(z) - r * (1 / 8 - r * r * (1 / 192 - (r * r) / 640));
 }
 
 /** ln of x^a e^−x / Γ(a). Large a goes through the mode-centred form: the
@@ -214,8 +213,15 @@ function lnBetaKernel(a: number, b: number, x: number, y: number): number {
     const d = (v - v0) / v0;
     return w * (Math.abs(d) < 0.5 ? log1pmx(d) : Math.log(v / v0) - d);
   };
-  return side(a, x, x0) + side(b, y, y0)
-    + 0.5 * Math.log((a * b) / n) - LN_SQRT_2PI - stirlingCorr(a) - stirlingCorr(b) + stirlingCorr(n);
+  return (
+    side(a, x, x0) +
+    side(b, y, y0) +
+    0.5 * Math.log((a * b) / n) -
+    LN_SQRT_2PI -
+    stirlingCorr(a) -
+    stirlingCorr(b) +
+    stirlingCorr(n)
+  );
 }
 
 /** Past this a + b the continued fraction (O(√n) terms) is out of reach and

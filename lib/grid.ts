@@ -15,25 +15,43 @@ import { compileGridCpu, compileGridGpu } from './compiler.ts';
 
 export function hasAtan2(e: Expr): boolean {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return childrenOf(e).some(hasAtan2);
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      return childrenOf(e).some(hasAtan2);
     case 'num':
     case 'var':
       return false;
-    case 'neg': return hasAtan2(e.a);
-    case 'bin': return hasAtan2(e.a) || hasAtan2(e.b);
+    case 'neg':
+      return hasAtan2(e.a);
+    case 'bin':
+      return hasAtan2(e.a) || hasAtan2(e.b);
     case 'call':
-      return e.name === 'atan2' || e.name === ANGLE_FN || (e.name === 'atan' && e.args.length === 2) || e.args.some(hasAtan2);
-    case 'eq': return hasAtan2(e.l) || hasAtan2(e.r);
-    case 'ineq': return hasAtan2(e.l) || hasAtan2(e.r);
-    case 'vec': return e.items.some(hasAtan2);
-    case 'list': return e.items.some(hasAtan2);
+      return (
+        e.name === 'atan2' || e.name === ANGLE_FN || (e.name === 'atan' && e.args.length === 2) || e.args.some(hasAtan2)
+      );
+    case 'eq':
+      return hasAtan2(e.l) || hasAtan2(e.r);
+    case 'ineq':
+      return hasAtan2(e.l) || hasAtan2(e.r);
+    case 'vec':
+      return e.items.some(hasAtan2);
+    case 'list':
+      return e.items.some(hasAtan2);
     case 'data':
     case 'str':
-    case 'text': return false;
+    case 'text':
+      return false;
     case 'piecewise':
-      return e.cases.some(c => hasAtan2(c.cond) || hasAtan2(c.value))
-        || (e.otherwise ? hasAtan2(e.otherwise) : false);
-    case 'loop': return childrenOf(e).some(hasAtan2);
+      return e.cases.some(c => hasAtan2(c.cond) || hasAtan2(c.value)) || (e.otherwise ? hasAtan2(e.otherwise) : false);
+    case 'loop':
+      return childrenOf(e).some(hasAtan2);
   }
 }
 
@@ -59,8 +77,15 @@ export function buildGridField(name: string, expr: Expr, constNames: ReadonlySet
  * exactly on the atan2 branch cut instead of straddling it.
  */
 const ANGULAR_MAJORS = [
-  Math.PI / 96, Math.PI / 48, Math.PI / 24, Math.PI / 12, Math.PI / 6,
-  Math.PI / 4, Math.PI / 2, Math.PI, 2 * Math.PI,
+  Math.PI / 96,
+  Math.PI / 48,
+  Math.PI / 24,
+  Math.PI / 12,
+  Math.PI / 6,
+  Math.PI / 4,
+  Math.PI / 2,
+  Math.PI,
+  2 * Math.PI,
 ];
 
 /** Angular analogue of niceSpacing: cupp is coordinate units per pixel. */

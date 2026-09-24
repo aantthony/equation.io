@@ -1,10 +1,5 @@
 import { SHOWCASE, type ShowcaseItem } from '../about/showcase.ts';
-import {
-  LANDINGS,
-  graphUrl,
-  landingFromPath,
-  landingJsonLd,
-} from '../../lib/landings.ts';
+import { LANDINGS, graphUrl, landingFromPath, landingJsonLd } from '../../lib/landings.ts';
 
 const shots = import.meta.glob<string>('../shots/*.png', {
   eager: true,

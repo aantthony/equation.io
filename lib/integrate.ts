@@ -111,7 +111,7 @@ export function exprPolyCoeffs(e: Expr, v: string): Expr[] | null {
         }
         return out;
       }
-      if ((a.length - 1) + (b.length - 1) > SYM_DEG_MAX) return null;
+      if (a.length - 1 + (b.length - 1) > SYM_DEG_MAX) return null;
       return convolve(a, b);
     }
     default:
@@ -137,7 +137,10 @@ function linearIn(e: Expr, v: string): { a: Expr; b: Expr } | null {
 
 // --- multiplicative structure ---
 
-interface Factor { base: Expr; exp: number }
+interface Factor {
+  base: Expr;
+  exp: number;
+}
 
 /** Flatten products/quotients/negations/integer powers into factors and a sign. */
 function factorsOf(e: Expr, sign: 1 | -1, out: Factor[], flip: { neg: boolean }): void {
@@ -157,8 +160,7 @@ function factorsOf(e: Expr, sign: 1 | -1, out: Factor[], flip: { neg: boolean })
         factorsOf(e.b, -sign as 1 | -1, out, flip);
         return;
       }
-      if (e.op === '^' && isNum(e.b) && Number.isInteger(e.b.value)
-        && Math.abs(e.b.value) <= 16 && e.b.value !== 0) {
+      if (e.op === '^' && isNum(e.b) && Number.isInteger(e.b.value) && Math.abs(e.b.value) <= 16 && e.b.value !== 0) {
         out.push({ base: e.a, exp: sign * e.b.value });
         return;
       }
@@ -226,7 +228,10 @@ function solveLinear(A: Frac[][], b: Frac[]): Frac[] | null {
   for (let col = 0; col < n; col++) {
     let piv = -1;
     for (let r = col; r < n; r++) {
-      if (M[r][col].n !== 0n) { piv = r; break; }
+      if (M[r][col].n !== 0n) {
+        piv = r;
+        break;
+      }
     }
     if (piv < 0) return null;
     [M[col], M[piv]] = [M[piv], M[col]];
@@ -260,7 +265,9 @@ function integrateRational(P: FPoly, Q: FPoly, v: string): Expr | null {
   const { q: polyPart, r } = fpdivmod(P, Q);
   if (polyPart.length) {
     const F: FPoly = [{ n: 0n, d: 1n }];
-    polyPart.forEach((c, i) => { F[i + 1] = fmulF(c, frac(1n, BigInt(i + 1))); });
+    polyPart.forEach((c, i) => {
+      F[i + 1] = fmulF(c, frac(1n, BigInt(i + 1)));
+    });
     terms.push(fpToExpr(F, v));
   }
   if (r.length) {
@@ -282,7 +289,7 @@ function integrateRational(P: FPoly, Q: FPoly, v: string): Expr | null {
       const n = d1 + d2;
       const rows: Frac[][] = Array.from({ length: n }, () => Array.from({ length: n }, () => ({ n: 0n, d: 1n })));
       const rhs: Frac[] = Array.from({ length: n }, (_, i) => A[i] ?? { n: 0n, d: 1n });
-      if ((A.length - 1) >= n) return null; // not proper: cannot happen, be safe
+      if (A.length - 1 >= n) return null; // not proper: cannot happen, be safe
       const put = (colIdx: number, p: FPoly) => {
         p.forEach((c, deg) => {
           if (deg < n) rows[deg][colIdx] = fpadd([rows[deg][colIdx]], [c])[0] ?? { n: 0n, d: 1n };
@@ -290,8 +297,14 @@ function integrateRational(P: FPoly, Q: FPoly, v: string): Expr | null {
       };
       for (let j = 0; j < d1; j++) {
         // P₁ = v^j: P₁′·D₂ − v^j·H
-        const dTerm = j > 0 ? fpmul([...Array.from({ length: j - 1 }, () => ({ n: 0n, d: 1n }) as Frac), frac(BigInt(j), 1n)], D2) : [];
-        const hTerm = fpscale(fpmul([...Array.from({ length: j }, () => ({ n: 0n, d: 1n }) as Frac), F1], H), { n: -1n, d: 1n });
+        const dTerm =
+          j > 0
+            ? fpmul([...Array.from({ length: j - 1 }, () => ({ n: 0n, d: 1n }) as Frac), frac(BigInt(j), 1n)], D2)
+            : [];
+        const hTerm = fpscale(fpmul([...Array.from({ length: j }, () => ({ n: 0n, d: 1n }) as Frac), F1], H), {
+          n: -1n,
+          d: 1n,
+        });
         put(j, fpadd(dTerm, hTerm));
       }
       for (let j = 0; j < d2; j++) {
@@ -321,7 +334,7 @@ function integrateRational(P: FPoly, Q: FPoly, v: string): Expr | null {
 function integrateLogPart(A: FPoly, D: FPoly, v: string): Expr | null {
   const zp = primitive(D).map(c => c.n);
   const roots = realRootsSquareFree(zp);
-  const degLeft = (D.length - 1) - roots.length;
+  const degLeft = D.length - 1 - roots.length;
   if (degLeft !== 0 && degLeft !== 2) return null;
   const dD = fpderiv(D);
   const terms: Expr[] = [];
@@ -377,27 +390,48 @@ function integrateLogPart(A: FPoly, D: FPoly, v: string): Expr | null {
 /** ∫ f(u) du for one call family; the caller divides by a. Null = no entry. */
 function tableCall(name: string, u: Expr): Expr | null {
   switch (name) {
-    case 'sin': return neg(call('cos', u));
-    case 'cos': return call('sin', u);
-    case 'tan': return neg(lnAbs(call('cos', u)));
-    case 'exp': return call('exp', u);
-    case 'sinh': return call('cosh', u);
-    case 'cosh': return call('sinh', u);
-    case 'tanh': return ln(call('cosh', u));
-    case 'sech': return call('atan', call('sinh', u));
-    case 'sqrt': return mul(num(2 / 3), pow(u, num(1.5)));
-    case 'ln': return sub(mul(u, ln(u)), u);
-    case 'log': return div(sub(mul(u, ln(u)), u), num(Math.LN10));
-    case 'abs': return div(mul(u, call('abs', u)), num(2));
-    case 'sign': return call('abs', u);
-    case 'asin': return add(mul(u, call('asin', u)), call('sqrt', sub(num(1), pow(u, num(2)))));
-    case 'acos': return sub(mul(u, call('acos', u)), call('sqrt', sub(num(1), pow(u, num(2)))));
-    case 'atan': return sub(mul(u, call('atan', u)), div(ln(add(num(1), pow(u, num(2)))), num(2)));
-    case 'asinh': return sub(mul(u, call('asinh', u)), call('sqrt', add(pow(u, num(2)), num(1))));
-    case 'acosh': return sub(mul(u, call('acosh', u)), call('sqrt', sub(pow(u, num(2)), num(1))));
-    case 'atanh': return add(mul(u, call('atanh', u)), div(ln(sub(num(1), pow(u, num(2)))), num(2)));
-    case 'erf': return add(mul(u, call('erf', u)), div(call('exp', neg(pow(u, num(2)))), num(Math.sqrt(Math.PI))));
-    default: return null;
+    case 'sin':
+      return neg(call('cos', u));
+    case 'cos':
+      return call('sin', u);
+    case 'tan':
+      return neg(lnAbs(call('cos', u)));
+    case 'exp':
+      return call('exp', u);
+    case 'sinh':
+      return call('cosh', u);
+    case 'cosh':
+      return call('sinh', u);
+    case 'tanh':
+      return ln(call('cosh', u));
+    case 'sech':
+      return call('atan', call('sinh', u));
+    case 'sqrt':
+      return mul(num(2 / 3), pow(u, num(1.5)));
+    case 'ln':
+      return sub(mul(u, ln(u)), u);
+    case 'log':
+      return div(sub(mul(u, ln(u)), u), num(Math.LN10));
+    case 'abs':
+      return div(mul(u, call('abs', u)), num(2));
+    case 'sign':
+      return call('abs', u);
+    case 'asin':
+      return add(mul(u, call('asin', u)), call('sqrt', sub(num(1), pow(u, num(2)))));
+    case 'acos':
+      return sub(mul(u, call('acos', u)), call('sqrt', sub(num(1), pow(u, num(2)))));
+    case 'atan':
+      return sub(mul(u, call('atan', u)), div(ln(add(num(1), pow(u, num(2)))), num(2)));
+    case 'asinh':
+      return sub(mul(u, call('asinh', u)), call('sqrt', add(pow(u, num(2)), num(1))));
+    case 'acosh':
+      return sub(mul(u, call('acosh', u)), call('sqrt', sub(pow(u, num(2)), num(1))));
+    case 'atanh':
+      return add(mul(u, call('atanh', u)), div(ln(sub(num(1), pow(u, num(2)))), num(2)));
+    case 'erf':
+      return add(mul(u, call('erf', u)), div(call('exp', neg(pow(u, num(2)))), num(Math.sqrt(Math.PI))));
+    default:
+      return null;
   }
 }
 
@@ -411,7 +445,9 @@ function probeEnvs(frees: Iterable<string>): Array<Record<string, number>> {
   const names = [...frees];
   const mk = (offset: number): Record<string, number> => {
     const env: Record<string, number> = {};
-    names.forEach((n, i) => { env[n] = PARAM_PROBES[(i + offset) % PARAM_PROBES.length]; });
+    names.forEach((n, i) => {
+      env[n] = PARAM_PROBES[(i + offset) % PARAM_PROBES.length];
+    });
     return env;
   };
   return names.length ? [mk(0), mk(1)] : [{}];
@@ -469,10 +505,14 @@ export function verifyAntiderivative(F: Expr, f: Expr, v: string): boolean {
 
 // --- adaptive quadrature (Gauss–Kronrod 7–15) ---
 
-const K15_X = [0, 0.2077849550078985, 0.4058451513773972, 0.5860872354676911,
-  0.7415311855993945, 0.8648644233597691, 0.9491079123427585, 0.9914553711208126];
-const K15_W = [0.2094821410847278, 0.2044329400752989, 0.1903505780647854, 0.1690047266392679,
-  0.1406532597155259, 0.1047900103222502, 0.0630920926299786, 0.0229353220105292];
+const K15_X = [
+  0, 0.2077849550078985, 0.4058451513773972, 0.5860872354676911, 0.7415311855993945, 0.8648644233597691,
+  0.9491079123427585, 0.9914553711208126,
+];
+const K15_W = [
+  0.2094821410847278, 0.2044329400752989, 0.1903505780647854, 0.1690047266392679, 0.1406532597155259,
+  0.1047900103222502, 0.0630920926299786, 0.0229353220105292,
+];
 const G7_W = [0.4179591836734694, 0.3818300505051189, 0.2797053914892767, 0.1294849661688697];
 
 /**
@@ -488,23 +528,35 @@ export function quadrature(f: (x: number) => number, lo: number, hi: number): nu
     if (lo > hi) return -quadrature(f, hi, lo);
     if (lo === -Infinity && hi === Infinity) {
       // x = u/(1−u²) maps (−1, 1) onto ℝ; dx = (1+u²)/(1−u²)² du.
-      return quadrature(u => {
-        const d = 1 - u * u;
-        return (f(u / d) * (1 + u * u)) / (d * d);
-      }, -1, 1);
+      return quadrature(
+        u => {
+          const d = 1 - u * u;
+          return (f(u / d) * (1 + u * u)) / (d * d);
+        },
+        -1,
+        1,
+      );
     }
     if (hi === Infinity) {
       // x = lo + u/(1−u) maps (0, 1) onto (lo, ∞); dx = du/(1−u)².
-      return quadrature(u => {
-        const d = 1 - u;
-        return f(lo + u / d) / (d * d);
-      }, 0, 1);
+      return quadrature(
+        u => {
+          const d = 1 - u;
+          return f(lo + u / d) / (d * d);
+        },
+        0,
+        1,
+      );
     }
     // (−∞, hi): the mirror map.
-    return quadrature(u => {
-      const d = 1 - u;
-      return f(hi - u / d) / (d * d);
-    }, 0, 1);
+    return quadrature(
+      u => {
+        const d = 1 - u;
+        return f(hi - u / d) / (d * d);
+      },
+      0,
+      1,
+    );
   }
   const sign = lo < hi ? 1 : -1;
   const a = Math.min(lo, hi);
@@ -582,13 +634,17 @@ export function verifyDefinite(value: Expr, body: Expr, v: string, lo: Expr, hi:
     if (Number.isNaN(a) || Number.isNaN(b)) continue;
     if ((isFinite(a) && Math.abs(a) > 1e6) || (isFinite(b) && Math.abs(b) > 1e6)) continue;
     if (!isFinite(want)) continue;
-    const got = quadrature(x => {
-      try {
-        return evaluate(body, { ...env, [v]: x });
-      } catch {
-        return NaN;
-      }
-    }, a, b);
+    const got = quadrature(
+      x => {
+        try {
+          return evaluate(body, { ...env, [v]: x });
+        } catch {
+          return NaN;
+        }
+      },
+      a,
+      b,
+    );
     if (!isFinite(got)) continue;
     if (Math.abs(got - want) > 1e-6 * (1 + Math.abs(got))) return false;
     judged++;
@@ -598,8 +654,8 @@ export function verifyDefinite(value: Expr, body: Expr, v: string, lo: Expr, hi:
 
 // --- the numeric fallback as an ordinary expression ---
 
-const GL8_X = [0.1834346424956498, 0.5255324099163290, 0.7966664774136267, 0.9602898564975363];
-const GL8_W = [0.3626837833783620, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763];
+const GL8_X = [0.1834346424956498, 0.525532409916329, 0.7966664774136267, 0.9602898564975363];
+const GL8_W = [0.362683783378362, 0.3137066458778873, 0.2223810344533745, 0.1012285362903763];
 const QUAD_PANELS = 5;
 
 /** Terms one quadratureSum expands to (for resolve-time term budgets). */
@@ -659,26 +715,51 @@ export function improperSum(body: Expr, v: string, lo: Expr | null, hi: Expr | n
  *  the bound variable is eliminated in the same pass). */
 function substAll(e: Expr, v: string, val: Expr): Expr {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substAll(x, v, val));
-    case 'num': return e;
-    case 'var': return e.name === v ? val : e;
-    case 'neg': return neg(substAll(e.a, v, val));
-    case 'bin': return { kind: 'bin', op: e.op, a: substAll(e.a, v, val), b: substAll(e.b, v, val) };
-    case 'call': return { kind: 'call', name: e.name, args: e.args.map(a => substAll(a, v, val)) };
-    case 'eq': return { kind: 'eq', l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
-    case 'ineq': return { kind: 'ineq', op: e.op, l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
-    case 'vec': return { kind: 'vec', items: e.items.map(a => substAll(a, v, val)) };
-    case 'list': return sameList(e, { kind: 'list', items: e.items.map(a => substAll(a, v, val)) });
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      return mapChildren(e, x => substAll(x, v, val));
+    case 'num':
+      return e;
+    case 'var':
+      return e.name === v ? val : e;
+    case 'neg':
+      return neg(substAll(e.a, v, val));
+    case 'bin':
+      return { kind: 'bin', op: e.op, a: substAll(e.a, v, val), b: substAll(e.b, v, val) };
+    case 'call':
+      return { kind: 'call', name: e.name, args: e.args.map(a => substAll(a, v, val)) };
+    case 'eq':
+      return { kind: 'eq', l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
+    case 'ineq':
+      return { kind: 'ineq', op: e.op, l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
+    case 'vec':
+      return { kind: 'vec', items: e.items.map(a => substAll(a, v, val)) };
+    case 'list':
+      return sameList(e, { kind: 'list', items: e.items.map(a => substAll(a, v, val)) });
     case 'data':
     case 'str':
-    case 'text': return e;
-    case 'piecewise': return {
-      kind: 'piecewise',
-      cases: e.cases.map(c => ({ cond: substAll(c.cond, v, val), value: substAll(c.value, v, val) })),
-      otherwise: e.otherwise && substAll(e.otherwise, v, val),
-    };
+    case 'text':
+      return e;
+    case 'piecewise':
+      return {
+        kind: 'piecewise',
+        cases: e.cases.map(c => ({ cond: substAll(c.cond, v, val), value: substAll(c.value, v, val) })),
+        otherwise: e.otherwise && substAll(e.otherwise, v, val),
+      };
     // The loop's params rebind inside its body; its seeds are open.
-    case 'loop': return { ...e, seeds: e.seeds.map(a => substAll(a, v, val)), body: e.params.includes(v) ? e.body : substAll(e.body, v, val) };
+    case 'loop':
+      return {
+        ...e,
+        seeds: e.seeds.map(a => substAll(a, v, val)),
+        body: e.params.includes(v) ? e.body : substAll(e.body, v, val),
+      };
   }
 }
 
@@ -744,10 +825,12 @@ function anti(e: Expr, v: string, depth: number): Expr | null {
 
   // A sum inside a product distributes: (A ± B)·rest splits into two
   // integrals (each strictly smaller in sum-factors, so this cannot cycle).
-  const sumF = varFs.find(f => f.exp === 1 && f.base.kind === 'bin'
-    && (f.base.op === '+' || f.base.op === '-'));
+  const sumF = varFs.find(f => f.exp === 1 && f.base.kind === 'bin' && (f.base.op === '+' || f.base.op === '-'));
   if (sumF && varFs.length > 1) {
-    const rest = rebuild(varFs.filter(f => f !== sumF), false);
+    const rest = rebuild(
+      varFs.filter(f => f !== sumF),
+      false,
+    );
     const b = sumF.base as Expr & { kind: 'bin' };
     const A = anti(mul(b.a, rest), v, depth);
     if (A) {
@@ -757,8 +840,14 @@ function anti(e: Expr, v: string, depth: number): Expr | null {
   }
 
   // Exact numeric-coefficient polynomials and rational functions.
-  const numExpr = rebuild(varFs.filter(f => f.exp > 0), false);
-  const denExpr = rebuild(varFs.filter(f => f.exp < 0).map(f => ({ base: f.base, exp: -f.exp })), false);
+  const numExpr = rebuild(
+    varFs.filter(f => f.exp > 0),
+    false,
+  );
+  const denExpr = rebuild(
+    varFs.filter(f => f.exp < 0).map(f => ({ base: f.base, exp: -f.exp })),
+    false,
+  );
   const P = exprToPoly(numExpr, v);
   const Q = exprToPoly(denExpr, v);
   if (P && Q) {
@@ -789,15 +878,19 @@ function anti(e: Expr, v: string, depth: number): Expr | null {
       }
     }
     // normalpdf/normalcdf in their first argument (mean and sd v-free).
-    if ((c.name === 'normalpdf' || c.name === 'normalcdf') && c.args.length === 3
-      && isConstIn(c.args[1], v) && isConstIn(c.args[2], v)) {
+    if (
+      (c.name === 'normalpdf' || c.name === 'normalcdf') &&
+      c.args.length === 3 &&
+      isConstIn(c.args[1], v) &&
+      isConstIn(c.args[2], v)
+    ) {
       const lin = linearIn(c.args[0], v);
       if (lin) {
         const [x, m, s] = c.args;
-        const T = c.name === 'normalpdf'
-          ? call('normalcdf', x, m, s)
-          : add(mul(sub(x, m), call('normalcdf', x, m, s)),
-              mul(pow(s, num(2)), call('normalpdf', x, m, s)));
+        const T =
+          c.name === 'normalpdf'
+            ? call('normalcdf', x, m, s)
+            : add(mul(sub(x, m), call('normalcdf', x, m, s)), mul(pow(s, num(2)), call('normalpdf', x, m, s)));
         return div(T, lin.a);
       }
     }
@@ -834,8 +927,13 @@ function anti(e: Expr, v: string, depth: number): Expr | null {
   }
 
   // Gaussian integrals: exp(quadratic with negative leading coefficient) → erf.
-  if (single && single.exp === 1 && single.base.kind === 'call'
-    && single.base.name === 'exp' && single.base.args.length === 1) {
+  if (
+    single &&
+    single.exp === 1 &&
+    single.base.kind === 'call' &&
+    single.base.name === 'exp' &&
+    single.base.args.length === 1
+  ) {
     const q = exprPolyCoeffs(single.base.args[0], v);
     if (q && q.length === 3) {
       const c2 = constVal(q[2]);
@@ -872,9 +970,17 @@ function anti(e: Expr, v: string, depth: number): Expr | null {
  *  complementary substitution, even ones by power reduction / product-to-sum). */
 function trigRule(factors: Factor[], v: string, depth: number): Expr | null {
   if (!factors.length) return null;
-  if (!factors.every(f =>
-    f.exp >= 1 && f.base.kind === 'call' && (f.base.name === 'sin' || f.base.name === 'cos')
-    && f.base.args.length === 1 && linearIn(f.base.args[0], v) !== null)) return null;
+  if (
+    !factors.every(
+      f =>
+        f.exp >= 1 &&
+        f.base.kind === 'call' &&
+        (f.base.name === 'sin' || f.base.name === 'cos') &&
+        f.base.args.length === 1 &&
+        linearIn(f.base.args[0], v) !== null,
+    )
+  )
+    return null;
   const sins = factors.filter(f => (f.base as Expr & { kind: 'call' }).name === 'sin');
   const coss = factors.filter(f => (f.base as Expr & { kind: 'call' }).name === 'cos');
   const argOf = (f: Factor): Expr => (f.base as Expr & { kind: 'call' }).args[0];
@@ -984,8 +1090,9 @@ function oddTrigPoly(oddPow: number, evenPow: number, tFn: 'sin' | 'cos', u: Exp
 function expTrigRule(factors: Factor[], v: string): Expr | null {
   if (factors.length !== 2) return null;
   const ex = factors.find(f => f.exp === 1 && f.base.kind === 'call' && f.base.name === 'exp');
-  const tr = factors.find(f => f.exp === 1 && f.base.kind === 'call'
-    && (f.base.name === 'sin' || f.base.name === 'cos'));
+  const tr = factors.find(
+    f => f.exp === 1 && f.base.kind === 'call' && (f.base.name === 'sin' || f.base.name === 'cos'),
+  );
   if (!ex || !tr) return null;
   const eArg = (ex.base as Expr & { kind: 'call' }).args[0];
   const tArg = (tr.base as Expr & { kind: 'call' }).args[0];
@@ -997,9 +1104,10 @@ function expTrigRule(factors: Factor[], v: string): Expr | null {
   const den = add(pow(a, num(2)), pow(c, num(2)));
   const sinT = call('sin', tArg);
   const cosT = call('cos', tArg);
-  const numTerm = (tr.base as Expr & { kind: 'call' }).name === 'sin'
-    ? sub(mul(a, sinT), mul(c, cosT))
-    : add(mul(a, cosT), mul(c, sinT));
+  const numTerm =
+    (tr.base as Expr & { kind: 'call' }).name === 'sin'
+      ? sub(mul(a, sinT), mul(c, cosT))
+      : add(mul(a, cosT), mul(c, sinT));
   return div(mul(ex.base, numTerm), den);
 }
 
@@ -1090,9 +1198,12 @@ function replaceExpr(e: Expr, target: string, s: Expr): Expr {
     case 'num':
     case 'var':
       return e;
-    case 'neg': return neg(replaceExpr(e.a, target, s));
-    case 'bin': return { kind: 'bin', op: e.op, a: replaceExpr(e.a, target, s), b: replaceExpr(e.b, target, s) };
-    case 'call': return { kind: 'call', name: e.name, args: e.args.map(a => replaceExpr(a, target, s)) };
+    case 'neg':
+      return neg(replaceExpr(e.a, target, s));
+    case 'bin':
+      return { kind: 'bin', op: e.op, a: replaceExpr(e.a, target, s), b: replaceExpr(e.b, target, s) };
+    case 'call':
+      return { kind: 'call', name: e.name, args: e.args.map(a => replaceExpr(a, target, s)) };
     default:
       return e;
   }

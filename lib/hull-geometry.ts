@@ -15,7 +15,7 @@ export function hullGeometrySampler(points: readonly Expr[], dim: 2 | 3, over?: 
   let geometry: HullGeometry | null = null;
   /** `time` stands in for `t`, so a caller can pass its constants uncopied. */
   return (env: Record<string, number>, time?: number): HullGeometry | null => {
-    const values = dependencies.map(name => name === 't' && time !== undefined ? time : env[name]);
+    const values = dependencies.map(name => (name === 't' && time !== undefined ? time : env[name]));
     if (previous && values.every((value, i) => Object.is(value, previous![i]))) return geometry;
     const coordinates = sample(env, time);
     let next: HullGeometry | null = null;

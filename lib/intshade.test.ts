@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { parseExpr } from './expr.ts';
 import {
-  SHADE_MAX_EVALS, SHADE_SAMPLES, type ShadeRun, boundValue, integralRuns, runPaths, shadeNames, shadeRuns,
+  SHADE_MAX_EVALS,
+  SHADE_SAMPLES,
+  type ShadeRun,
+  boundValue,
+  integralRuns,
+  runPaths,
+  shadeNames,
+  shadeRuns,
 } from './intshade.ts';
 
 const WIN = { xmin: -10, xmax: 10, ymin: -5, ymax: 5 };
@@ -62,7 +69,10 @@ describe('integralAreas', () => {
 
   it('clips infinite and far-off bounds to the window, never sampling beyond it', () => {
     const seen: number[] = [];
-    const f = (x: number) => { seen.push(x); return Math.exp(-x * x); };
+    const f = (x: number) => {
+      seen.push(x);
+      return Math.exp(-x * x);
+    };
     const { pos } = integralAreas(f, -Infinity, Infinity, WIN);
     expect(Math.min(...seen)).toBe(-10);
     expect(Math.max(...seen)).toBe(10);
@@ -111,7 +121,16 @@ describe('integralAreas', () => {
     expect(s.pos).toHaveLength(1);
     expect(xs(s.pos[0])[0]).toBeCloseTo(0, 6);
     // A throwing integrand is undefined, not an exception.
-    expect(integralAreas(() => { throw new Error('unbound'); }, 0, 1, WIN)).toEqual({ pos: [], neg: [] });
+    expect(
+      integralAreas(
+        () => {
+          throw new Error('unbound');
+        },
+        0,
+        1,
+        WIN,
+      ),
+    ).toEqual({ pos: [], neg: [] });
   });
 
   it('keeps a pole two one-sided spikes, clamped near the window', () => {
@@ -160,7 +179,10 @@ describe('integralAreas', () => {
     expect(runPaths(clipped, -5, 5).fill.slice(0, 2)).toEqual([-10, 0]);
     // A gap is a real edge even at a clipped range; only the window cut is not.
     const runs = integralRuns(x => (Math.abs(x) >= 1 ? 1 : NaN), -100, 100, -10, 10);
-    expect(runs.map(r => [r.clipLo, r.clipHi])).toEqual([[true, false], [false, true]]);
+    expect(runs.map(r => [r.clipLo, r.clipHi])).toEqual([
+      [true, false],
+      [false, true],
+    ]);
     // A bound exactly on the window edge is a bound, not a clip.
     expect(integralRuns(() => 1, -10, 10, -10, 10)[0]).toMatchObject({ clipLo: false, clipHi: false });
   });
@@ -174,13 +196,24 @@ describe('integralAreas', () => {
 
   it('perf guard: evaluations are capped however wild the integrand', () => {
     let evals = 0;
-    const f = (x: number) => { evals++; return Math.sin(61 * x); }; // flips sign between most samples
+    const f = (x: number) => {
+      evals++;
+      return Math.sin(61 * x);
+    }; // flips sign between most samples
     const { pos, neg } = integralAreas(f, -10, 10, WIN);
     expect(evals).toBeLessThanOrEqual(SHADE_MAX_EVALS);
     expect(pos.length + neg.length).toBeGreaterThan(100);
     // A tame integrand costs the samples plus one refinement per crossing.
     evals = 0;
-    integralAreas(x => { evals++; return x - 1 / 3; }, 0, 1, WIN);
+    integralAreas(
+      x => {
+        evals++;
+        return x - 1 / 3;
+      },
+      0,
+      1,
+      WIN,
+    );
     expect(evals).toBeLessThanOrEqual(SHADE_SAMPLES + 1 + 20);
   });
 });
@@ -198,7 +231,7 @@ describe('shadeAreas / boundValue', () => {
     expect(shadeNames(timed)).toEqual(['t']);
     const plain = { body: parseExpr('a x'), v: 'x', lo: parseExpr('-inf'), hi: parseExpr('b + c') };
     expect(shadeNames(plain).sort()).toEqual(['a', 'b', 'c']);
-    expect(shadeNames({ ...plain, body: parseExpr('x') , hi: parseExpr('inf') })).toEqual([]);
+    expect(shadeNames({ ...plain, body: parseExpr('x'), hi: parseExpr('inf') })).toEqual([]);
   });
 
   it('reads ±inf bounds, and NaN for a bound with no value yet', () => {

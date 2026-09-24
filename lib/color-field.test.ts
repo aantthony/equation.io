@@ -21,7 +21,7 @@ describe.each(['rgb', 'hsl', 'oklch'] as const)('%s color fields', name => {
   it('supports complex projections, partial channels, sliders and time', () => {
     const doc = prepareDocument(['a = 2+sin(t)', `${name}(a, {x>0:abs(w)}, arg(w)*180/pi+t)`]);
     const first = analyzePrepared(doc, { time: 0 });
-    const later = analyzePrepared(doc, { time: Math.PI/2 });
+    const later = analyzePrepared(doc, { time: Math.PI / 2 });
     expect(first.rows[1].error).toBeUndefined();
     expect(first.rows[1].cls!.animated).toBe(true);
     expect(first.constEnv.a).toBeCloseTo(2);
@@ -41,7 +41,7 @@ describe.each(['rgb', 'hsl', 'oklch'] as const)('%s color fields', name => {
     ['([1,2],0,0)', /superimpose|list/],
     [`(${name}(1,2,3),0,0)`, /whole expression/],
   ])('rejects invalid channels %s', (args, error) => {
-    expect(analyzeRows([name+args]).rows[0].error).toMatch(error);
+    expect(analyzeRows([name + args]).rows[0].error).toMatch(error);
   });
 
   it('rejects nesting and color-value definitions', () => {
@@ -50,7 +50,10 @@ describe.each(['rgb', 'hsl', 'oklch'] as const)('%s color fields', name => {
   });
 
   it('preserves user-defined functions and constants with this name', () => {
-    for (const rows of [[`${name}(q)=q^2`, `${name}(x)`], [`${name}=2`, `${name} x`]]) {
+    for (const rows of [
+      [`${name}(q)=q^2`, `${name}(x)`],
+      [`${name}=2`, `${name} x`],
+    ]) {
       const result = analyzeRows(rows).rows;
       expect(result.map(r => r.error)).toEqual([undefined, undefined]);
       expect(result[1].cpu!.type).toBe('implicit2d');
@@ -58,6 +61,6 @@ describe.each(['rgb', 'hsl', 'oklch'] as const)('%s color fields', name => {
   });
 
   it('explains the channel scale in editor help', () => {
-    expect(syntaxHelp(`${name}(`, name.length+1, emptyEnv()).hint).toContain(name === 'rgb' ? '0 to 1' : 'radians');
+    expect(syntaxHelp(`${name}(`, name.length + 1, emptyEnv()).hint).toContain(name === 'rgb' ? '0 to 1' : 'radians');
   });
 });

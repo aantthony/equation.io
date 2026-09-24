@@ -80,13 +80,21 @@ export function sliderForm(rhs: string, userFns: ReadonlySet<string> = new Set()
     }
     for (const fn of ROUNDING) {
       const inner = !whole && !userFns.has(fn) ? call(rhs, from, to, fn) : null;
-      if (inner) { whole = true; return read(...inner); }
+      if (inner) {
+        whole = true;
+        return read(...inner);
+      }
     }
     const inner = !bounds && !userFns.has('clamp') ? call(rhs, from, to, 'clamp') : null;
     if (!inner) return null;
     const at = commas(rhs, ...inner);
     if (at.length !== 2) return null;
-    bounds = { lo: rhs.slice(at[0] + 1, at[1]).trim(), hi: rhs.slice(at[1] + 1, inner[1]).trim(), start: at[0] + 1, end: inner[1] };
+    bounds = {
+      lo: rhs.slice(at[0] + 1, at[1]).trim(),
+      hi: rhs.slice(at[1] + 1, inner[1]).trim(),
+      start: at[0] + 1,
+      end: inner[1],
+    };
     if (!bounds.lo || !bounds.hi) return null;
     return read(inner[0], at[0]);
   };
@@ -109,13 +117,19 @@ export function withBounds(rhs: string, form: SliderForm, lo: string, hi: string
 
 /** The range's ends at these values, or null when either end is not a
  *  number or they are out of order. */
-export function sliderBounds(form: SliderForm, env: Record<string, number>, userFns: ReadonlySet<string> = new Set()): [number, number] | null {
+export function sliderBounds(
+  form: SliderForm,
+  env: Record<string, number>,
+  userFns: ReadonlySet<string> = new Set(),
+): [number, number] | null {
   if (!form.bounds) return null;
   try {
     const lo = evaluate(parseExpr(form.bounds.lo, userFns), env);
     const hi = evaluate(parseExpr(form.bounds.hi, userFns), env);
     return Number.isFinite(lo) && Number.isFinite(hi) && lo < hi ? [lo, hi] : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** `v` as this slider can hold it: within its range, and whole if it steps so. */

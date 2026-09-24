@@ -14,10 +14,12 @@ function run(rows: string[], env: Record<string, number> = {}) {
   if (row?.cpu?.type !== 'automaton') throw new Error('no automaton row');
   return runAutomaton(row.cpu, { ...analysis.constEnv, ...env });
 }
-const cell = (g: CellGrid, n: number, i: number) => g.values[n * g.width + Math.max(0, Math.min(g.width - 1, i - g.x0))];
+const cell = (g: CellGrid, n: number, i: number) =>
+  g.values[n * g.width + Math.max(0, Math.min(g.width - 1, i - g.x0))];
 const picture = (g: CellGrid, rows: number, half: number) =>
   Array.from({ length: rows }, (_, n) =>
-    Array.from({ length: 2 * half + 1 }, (_, k) => (cell(g, n, k - half) ? '#' : '.')).join(''));
+    Array.from({ length: 2 * half + 1 }, (_, k) => (cell(g, n, k - half) ? '#' : '.')).join(''),
+  );
 
 /** Rule `r` on an infinite zero background from a single 1, by definition:
  *  cells within n of the seed, and one background value beyond them. */
@@ -39,7 +41,13 @@ function reference(r: number, rows: number, half: number): string[] {
 
 describe('scanning', () => {
   it('reads rule and seed rows', () => {
-    expect(scanSeqRec('c_{n+1}[i] = c_n[i-1]')).toMatchObject({ rec: true, name: 'c', index: 'n', cell: 'i', rhs: ' c_n[i-1]' });
+    expect(scanSeqRec('c_{n+1}[i] = c_n[i-1]')).toMatchObject({
+      rec: true,
+      name: 'c',
+      index: 'n',
+      cell: 'i',
+      rhs: ' c_n[i-1]',
+    });
     expect(scanSeqRec('c_(n+1)[j] = c_n[j]')).toMatchObject({ rec: true, name: 'c', index: 'n', cell: 'j' });
     expect(scanSeqRec('c_0[i] = mod(i, 2)')).toMatchObject({ seed: true, name: 'c', cell: 'i', rhs: ' mod(i, 2)' });
     expect(scanSeqRec('c_{0}[i] = 1')).toMatchObject({ seed: true, name: 'c' });
@@ -49,13 +57,7 @@ describe('scanning', () => {
 describe('elementary rules', () => {
   it('rule 30 from a single cell', () => {
     const g = run(['r = 30', RULE]);
-    expect(picture(g, 5, 5)).toEqual([
-      '.....#.....',
-      '....###....',
-      '...##..#...',
-      '..##.####..',
-      '.##..#...#.',
-    ]);
+    expect(picture(g, 5, 5)).toEqual(['.....#.....', '....###....', '...##..#...', '..##.####..', '.##..#...#.']);
     expect(picture(g, 60, 70)).toEqual(reference(30, 60, 70));
   });
 
@@ -126,7 +128,10 @@ describe('diagnostics', () => {
   });
   it('a seed without a rule, and duplicates', () => {
     expect(errors(['c_0[i] = 1'])[0]).toMatch(/starts an automaton/);
-    expect(errors(['c_{n+1}[i] = c_n[i]', 'c_{n+1}[i] = c_n[i-1]'])).toEqual([null, expect.stringMatching(/already defined/)]);
+    expect(errors(['c_{n+1}[i] = c_n[i]', 'c_{n+1}[i] = c_n[i-1]'])).toEqual([
+      null,
+      expect.stringMatching(/already defined/),
+    ]);
     expect(errors(['c_n = 1/n', 'c_{n+1}[i] = c_n[i]'])[1]).toMatch(/already a sequence/);
   });
   it('the seed row draws nothing and reports its own errors', () => {

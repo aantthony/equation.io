@@ -6,7 +6,12 @@ const kinds = (rows: string[]) => analyzeRows(rows).rows.map(r => r.error ?? r.c
 describe('named curves and surfaces', () => {
   it('inline a named parametric vector into later rows', () => {
     // Before, c_y failed: "can only depend on other constants and t (found u)".
-    expect(kinds(['c = (cos(2pi u), sin(2pi u))', 'c', '2c', 'c + (1, 0)'])).toEqual(['const', 'curve', 'curve', 'curve']);
+    expect(kinds(['c = (cos(2pi u), sin(2pi u))', 'c', '2c', 'c + (1, 0)'])).toEqual([
+      'const',
+      'curve',
+      'curve',
+      'curve',
+    ]);
     expect(kinds(['A = [(2, 1), (1, 1)]', 'c = (cos(2pi u), sin(2pi u))', 'A c'])).toEqual(['const', 'const', 'curve']);
     expect(kinds(['S = (sin(pi v)cos(2pi u), sin(pi v)sin(2pi u), cos(pi v))', '2S'])).toEqual(['const', 'surface']);
     expect(kinds(['k = u^2', '(u, k)'])).toEqual(['const', 'curve']);

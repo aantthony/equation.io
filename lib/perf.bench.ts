@@ -52,7 +52,11 @@ describe('symbolic', () => {
       for (let k = 0; k < 3; k++) d = diff(d, 'x');
     }).run();
   });
-  const d3 = (() => { let d = e; for (let k = 0; k < 3; k++) d = diff(d, 'x'); return d; })();
+  const d3 = (() => {
+    let d = e;
+    for (let k = 0; k < 3; k++) d = diff(d, 'x');
+    return d;
+  })();
   test('toGLSL of diff^3', async ({ bench }) => {
     await bench('toGLSL of diff^3', () => {
       toGLSL(d3);

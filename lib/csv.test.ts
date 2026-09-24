@@ -15,12 +15,17 @@ describe('record grammar (RFC 4180)', () => {
   });
 
   it('handles CRLF and a trailing newline', () => {
-    expect(parseRecords('a,b\r\n1,2\r\n', ',')).toEqual([['a', 'b'], ['1', '2']]);
+    expect(parseRecords('a,b\r\n1,2\r\n', ',')).toEqual([
+      ['a', 'b'],
+      ['1', '2'],
+    ]);
   });
 
   it('keeps empty fields and drops blank lines', () => {
     expect(parseRecords('a,b,c\n1,,3\n\n4,5,6\n', ',')).toEqual([
-      ['a', 'b', 'c'], ['1', '', '3'], ['4', '5', '6'],
+      ['a', 'b', 'c'],
+      ['1', '', '3'],
+      ['4', '5', '6'],
     ]);
   });
 
@@ -54,7 +59,10 @@ describe('record grammar (RFC 4180)', () => {
     expect(() => parseRecords('a,b\n1,"oops\n2,3\n', ',')).toThrow(/never closed/);
     expect(() => parseCsv('a,b\n1,"oops\n2,3\n')).toThrow(/looks truncated/);
     // A quote that opens and closes is still ordinary data.
-    expect(parseRecords('a,b\n1,"ok\nthen"\n', ',')).toEqual([['a', 'b'], ['1', 'ok\nthen']]);
+    expect(parseRecords('a,b\n1,"ok\nthen"\n', ',')).toEqual([
+      ['a', 'b'],
+      ['1', 'ok\nthen'],
+    ]);
   });
 });
 
@@ -132,7 +140,9 @@ describe('parseCsv', () => {
     const t = parseCsv(people);
     expect(t.rows).toBe(3);
     expect(t.columns.map(c => [c.name, c.type])).toEqual([
-      ['name', 'str'], ['age', 'num'], ['height', 'num'],
+      ['name', 'str'],
+      ['age', 'num'],
+      ['height', 'num'],
     ]);
     expect(nums(t, 'age')).toEqual([36, 41, 29]);
     expect(col(t, 'name').strs).toEqual(['ada', 'bob', 'cy']);

@@ -33,7 +33,10 @@
   font-size: 15px;
   line-height: 1.6;
 }
-.muted { color: var(--muted); font-size: 15px; }
+.muted {
+  color: var(--muted);
+  font-size: 15px;
+}
 .hint {
   text-align: left;
   margin: 0 0 14px;
@@ -45,7 +48,9 @@
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--line);
-  box-shadow: 0 24px 70px rgba(20, 40, 80, 0.16), 0 4px 14px rgba(20, 40, 80, 0.08);
+  box-shadow:
+    0 24px 70px rgba(20, 40, 80, 0.16),
+    0 4px 14px rgba(20, 40, 80, 0.08);
   background: var(--surface);
   aspect-ratio: 3 / 2;
 }
@@ -72,7 +77,11 @@
   overflow-x: auto;
 }
 #landing pre code {
-  font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace;
+  font:
+    13px/1.5 ui-monospace,
+    'SF Mono',
+    Menlo,
+    monospace;
   color: var(--ink);
 }
 
@@ -85,20 +94,30 @@
   font-size: 16px;
 }
 
-#syntax, #prompts {
+#syntax,
+#prompts {
   margin: 0;
   padding-left: 22px;
 }
-#syntax li, #prompts li { margin: 6px 0; }
-#prompts li { overflow-wrap: anywhere; }
+#syntax li,
+#prompts li {
+  margin: 6px 0;
+}
+#prompts li {
+  overflow-wrap: anywhere;
+}
 
-#faq { margin: 0; }
+#faq {
+  margin: 0;
+}
 #faq dt {
   font-weight: 650;
   margin: 14px 0 4px;
   color: var(--ink);
 }
-#faq dd { margin: 0; }
+#faq dd {
+  margin: 0;
+}
 
 .also {
   display: flex;
@@ -108,8 +127,12 @@
   font-size: 15px;
   font-weight: 600;
 }
-.also a { text-decoration: none; }
-.also a:hover { text-decoration: underline; }
+.also a {
+  text-decoration: none;
+}
+.also a:hover {
+  text-decoration: underline;
+}
 
 .grid .card.active {
   outline: 2px solid var(--accent);
@@ -117,5 +140,7 @@
 }
 
 @media (max-width: 640px) {
-  .graph-frame { aspect-ratio: 1 / 1; }
+  .graph-frame {
+    aspect-ratio: 1 / 1;
+  }
 }

@@ -72,7 +72,10 @@ describe('typedEscape', () => {
 
   it('enumerates every built-in function name', () => {
     for (const name of FUNCTIONS) {
-      expect(ESCAPES.some(e => e.name === name), name).toBe(true);
+      expect(
+        ESCAPES.some(e => e.name === name),
+        name,
+      ).toBe(true);
     }
     expect(ESCAPES.some(e => e.name === 'view')).toBe(true);
     expect(ESCAPES.some(e => e.name === 'open')).toBe(true);

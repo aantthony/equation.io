@@ -1,7 +1,7 @@
 import { compileCpu } from './compiler.ts';
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { buildDefs,  listGetter, listNamesOf, resolveExpr, scanDefinition } from './defs.ts';
+import { buildDefs, listGetter, listNamesOf, resolveExpr, scanDefinition } from './defs.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import { type Seq, lowerLists, usesListReduction } from './list.ts';
@@ -24,9 +24,16 @@ function lowerRow(text: string, defRows: string[] = []): Expr {
   const consts = evaluateFrame(defs, 0);
   const getFn = (n: string) => defs.fns.get(n);
   const listNames = listNamesOf(defs);
-  let e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), getFn,
-    { consts, isList: n => listNames.has(n), getList: listGetter(defs) });
-  e = lowerGeom(e, () => null, n => defs.mats.get(n) ?? null);
+  let e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), getFn, {
+    consts,
+    isList: n => listNames.has(n),
+    getList: listGetter(defs),
+  });
+  e = lowerGeom(
+    e,
+    () => null,
+    n => defs.mats.get(n) ?? null,
+  );
   return lowerLists(e, listGetter(defs), { consts });
 }
 
@@ -230,8 +237,7 @@ describe('range steps', () => {
     const { errors } = defsOf(['a = 0', 'b = 0.5', 'L = [a, b..2]']);
     expect([...errors]).toEqual([]);
     // `a` stays symbolic (only the range expands), so read it with a in scope.
-    expect(values(lowerRow('[a, b..2]', ['a = 0', 'b = 0.5']), { a: 0 }))
-      .toEqual([0, 0.5, 1, 1.5, 2]);
+    expect(values(lowerRow('[a, b..2]', ['a = 0', 'b = 0.5']), { a: 0 })).toEqual([0, 0.5, 1, 1.5, 2]);
   });
 
   it('does not snap the step slider to whole numbers', () => {

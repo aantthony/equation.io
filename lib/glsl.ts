@@ -6,8 +6,17 @@ import { structuralDiagnostic } from './expr.ts';
  * zero set of F, which the renderers extract in a fragment shader.
  */
 import {
-  ANGLE_FN, ANGLE_RATE_FN, BETA_PDF_FN, type Expr, GAMMA_PDF_FN, ISPRIME_MAX, LANCZOS, PMF_FNS, T_PDF_FN,
-  WEIBULL_PDF_FN, ineqComparisons,
+  ANGLE_FN,
+  ANGLE_RATE_FN,
+  BETA_PDF_FN,
+  type Expr,
+  GAMMA_PDF_FN,
+  ISPRIME_MAX,
+  LANCZOS,
+  PMF_FNS,
+  T_PDF_FN,
+  WEIBULL_PDF_FN,
+  ineqComparisons,
 } from './expr.ts';
 
 export const FN_GLSL: Record<string, string> = {
@@ -259,7 +268,9 @@ vec2 c_tanh(vec2 z) { return c_div(c_sinh(z), c_cosh(z)); }
  */
 export function condGLSL(cond: Expr, emit: (x: Expr) => string): string {
   if (cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities, like x < 0.');
-  return ineqComparisons(cond).map(c => `(${emit(c.l)} ${c.op} ${emit(c.r)})`).join(' && ');
+  return ineqComparisons(cond)
+    .map(c => `(${emit(c.l)} ${c.op} ${emit(c.r)})`)
+    .join(' && ');
 }
 
 /** Nested-ternary GLSL for a piecewise; NaN outside all cases when no default.
@@ -313,7 +324,8 @@ export function withHelpers(shader: string): string {
       seen.add(name);
       const source = helpers.get(name);
       if (!source) throw new Error(`Shader refers to an undeclared helper ${name}.`);
-      helpers.delete(name); helpers.set(name, source); // still in use: keep
+      helpers.delete(name);
+      helpers.set(name, source); // still in use: keep
       visit(source); // dependencies (an inner loop) declare first
       order.push(name);
     }
@@ -349,10 +361,22 @@ export const uniformName = (p: string): string =>
  */
 export function toGLSL(e: Expr): string {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
-    case 'num': return fmt(e.value);
-    case 'var': return e.name;
-    case 'neg': return `(-${toGLSL(e.a)})`;
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      throw new Error(structuralDiagnostic(e));
+    case 'num':
+      return fmt(e.value);
+    case 'var':
+      return e.name;
+    case 'neg':
+      return `(-${toGLSL(e.a)})`;
     case 'bin': {
       const a = toGLSL(e.a);
       const b = toGLSL(e.b);

@@ -45,7 +45,7 @@ describe('coordinate objects end to end', () => {
     const s = last([...chart, '(r, theta) = (3u, 6pi u)']);
     if (s.type !== 'system') throw new Error('expected system');
     const paths = traceSystem(s.residuals, ['x', 'y'], [-4, -4], [4, 4], {}, 256, s.angular);
-    const longest = paths.reduce((a, b) => a.length > b.length ? a : b);
+    const longest = paths.reduce((a, b) => (a.length > b.length ? a : b));
     expect(longest.length).toBeGreaterThan(250);
     for (let k = 1; k < longest.length; k++) {
       expect(Math.hypot(longest[k][0] - longest[k - 1][0], longest[k][1] - longest[k - 1][1])).toBeLessThan(0.3);
@@ -71,7 +71,7 @@ describe('coordinate objects end to end', () => {
     if (p.type !== 'system') throw new Error('expected system');
     expect(p.parametric).toBe(true);
     const paths = traceSystem(p.residuals, ['x', 'y'], [-4, -4], [4, 4], {}, 256, p.angular);
-    const longest = paths.reduce((a, b) => a.length > b.length ? a : b);
+    const longest = paths.reduce((a, b) => (a.length > b.length ? a : b));
     expect(longest.length).toBeGreaterThan(250);
     for (const [x, y] of longest) {
       const radius = Math.hypot(x, y);
@@ -139,8 +139,8 @@ describe('complex CPU objects', () => {
     const pts = solutions(['w^3 = 1']);
     expect(pts).toHaveLength(3);
     for (const [x, y] of pts) {
-      expect(x*x*x - 3*x*y*y).toBeCloseTo(1, 7);
-      expect(3*x*x*y - y*y*y).toBeCloseTo(0, 7);
+      expect(x * x * x - 3 * x * y * y).toBeCloseTo(1, 7);
+      expect(3 * x * x * y - y * y * y).toBeCloseTo(0, 7);
     }
   });
   it('retains a high-multiplicity complex root', () => {
@@ -157,7 +157,9 @@ describe('complex CPU objects', () => {
     expect(derivatives.map(e => evaluate(e, { x: 0, y: 0 }))).toEqual([0, 0]);
     for (const n of [0, 1, 2, 3, 10, 16, -1, -10]) {
       const angle = 0.3;
-      const values = complexParts(parseExpr(`w^(${n})`)).map(e => evaluate(e, { x: Math.cos(angle), y: Math.sin(angle) }));
+      const values = complexParts(parseExpr(`w^(${n})`)).map(e =>
+        evaluate(e, { x: Math.cos(angle), y: Math.sin(angle) }),
+      );
       expect(values[0]).toBeCloseTo(Math.cos(n * angle), 10);
       expect(values[1]).toBeCloseTo(Math.sin(n * angle), 10);
     }
@@ -190,7 +192,10 @@ describe('complex CPU objects', () => {
     expect(z).toEqual([0, 1]);
   });
   it.each([
-    ['1', 1, 0], ['i', -1, 0], ['1+i', 0, 2], ['1-i', 0, -2],
+    ['1', 1, 0],
+    ['i', -1, 0],
+    ['1+i', 0, 2],
+    ['1-i', 0, -2],
   ] as const)('solves principal square roots equal to %s', (rhs, x, y) => {
     const pts = solutions([`sqrt(w) = ${rhs}`]);
     expect(pts).toHaveLength(1);
@@ -199,11 +204,12 @@ describe('complex CPU objects', () => {
   });
   it('preserves small square-root components close to the real axis', () => {
     const parts = complexParts(parseExpr('sqrt(w)'));
-    for (const x of [-1, 1]) for (const y of [-1e-12, 1e-12]) {
-      const [re, im] = parts.map(e => evaluate(e, { x, y }));
-      expect(Math.abs(2 * re * im / y - 1)).toBeLessThan(1e-12);
-      expect(re * re - im * im).toBeCloseTo(x, 14);
-    }
+    for (const x of [-1, 1])
+      for (const y of [-1e-12, 1e-12]) {
+        const [re, im] = parts.map(e => evaluate(e, { x, y }));
+        expect(Math.abs((2 * re * im) / y - 1)).toBeLessThan(1e-12);
+        expect(re * re - im * im).toBeCloseTo(x, 14);
+      }
     expect(parts.map(e => evaluate(e, { x: 0, y: 0 }))).toEqual([0, 0]);
     expect(solutions(['sqrt(w) = -1'])).toEqual([]);
   });
@@ -253,23 +259,26 @@ describe('parametric system branches', () => {
     if (p.type !== 'system') throw new Error('expected system');
     const paths = traceSystem(p.residuals, ['x', 'y'], [-1, -1], [2, 2]);
     expect(paths.some(path => path.some(point => point[1] === 0) && path.some(point => point[1] === jump))).toBe(false);
-    expect(paths.some(path => path.some(point => point[1] === jump) && path.some(point => point[1] === 2 * jump))).toBe(false);
+    expect(paths.some(path => path.some(point => point[1] === jump) && path.some(point => point[1] === 2 * jump))).toBe(
+      false,
+    );
   });
   it('detects a small jump even when smooth curvature is larger', () => {
-    for (const y of [
-      '0.1u^2+0.0000001floor(u+0.25)',
-      '0.1u^2+{u<0.75:0,0.0000001}',
-    ]) {
-      const paths = traceSystem([parseExpr('x-u'), parseExpr(`y-(${y})`)],
-        ['x', 'y'], [-1, -1], [2, 2], {}, 256);
-      expect(paths.some(path => path.some(point => point[0] < 0.75) &&
-        path.some(point => point[0] >= 0.75))).toBe(false);
+    for (const y of ['0.1u^2+0.0000001floor(u+0.25)', '0.1u^2+{u<0.75:0,0.0000001}']) {
+      const paths = traceSystem([parseExpr('x-u'), parseExpr(`y-(${y})`)], ['x', 'y'], [-1, -1], [2, 2], {}, 256);
+      expect(paths.some(path => path.some(point => point[0] < 0.75) && path.some(point => point[0] >= 0.75))).toBe(
+        false,
+      );
     }
   });
   it('does not mistake evenly spaced jumps for a straight midpoint', () => {
     const paths = traceSystem(
       [parseExpr('x-u'), parseExpr('y-0.1floor(512u)')],
-      ['x', 'y'], [-1, -1], [2, 60], {}, 256,
+      ['x', 'y'],
+      [-1, -1],
+      [2, 60],
+      {},
+      256,
     );
     expect(paths).toHaveLength(257);
     expect(paths.every(path => path.length === 1)).toBe(true);
@@ -277,7 +286,11 @@ describe('parametric system branches', () => {
   it('keeps a steep but continuous curve connected', () => {
     const paths = traceSystem(
       [parseExpr('x-u'), parseExpr('y-0.02atan(10000000(u-0.501))')],
-      ['x', 'y'], [-1, -1], [2, 2], {}, 256,
+      ['x', 'y'],
+      [-1, -1],
+      [2, 2],
+      {},
+      256,
     );
     expect(paths).toHaveLength(1);
     expect(paths[0]).toHaveLength(257);
@@ -326,10 +339,12 @@ describe('coordinate fields over z', () => {
     expect(a.rows.at(-1)!.cpu!.type).toBe('implicit3d');
     expect(evaluate(a.defs.fields.get('rho')!, { x: 1, y: 2, z: 2 })).toBeCloseTo(3, 12);
     expect(errorsOf(['a = b + z', 'b = a + x'])).toEqual([
-      'a is defined in terms of itself.', 'b is defined in terms of itself.',
+      'a is defined in terms of itself.',
+      'b is defined in terms of itself.',
     ]);
-    expect(errorsOf(['rho = sqrt(x^2+y^2+w)'])[0])
-      .toBe('rho defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found w).');
+    expect(errorsOf(['rho = sqrt(x^2+y^2+w)'])[0]).toBe(
+      'rho defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found w).',
+    );
     expect(errorsOf(['s = (x, u)'])[0]).toMatch(/found u/);
   });
 
@@ -338,8 +353,18 @@ describe('coordinate fields over z', () => {
     expect(a.rows.map(r => r.error).filter(Boolean)).toEqual([]);
     expect(a.rows[0]!.def?.name).toBe('s');
     expect(a.rows[1]!.cpu!.type).toBe('implicit2d');
-    expect(evaluate((a.rows[1]!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, { x: 1, y: 0 })).toBe(0);
-    expect(evaluate((a.rows[1]!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, { x: 0, y: 0 })).toBe(-1);
+    expect(
+      evaluate((a.rows[1]!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, {
+        x: 1,
+        y: 0,
+      }),
+    ).toBe(0);
+    expect(
+      evaluate((a.rows[1]!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, {
+        x: 0,
+        y: 0,
+      }),
+    ).toBe(-1);
   });
 
   it('accepts |s| = 1 and |s| < 1 as the same circle and disk', () => {
@@ -351,7 +376,12 @@ describe('coordinate fields over z', () => {
     const half = analyze(['s = (x, y)', 'q = 2 s', 'dot(q, q) = 1']);
     expect(half.rows.map(r => r.error).filter(Boolean)).toEqual([]);
     expect(half.rows.at(-1)!.cpu!.type).toBe('implicit2d');
-    expect(evaluate((half.rows.at(-1)!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, { x: 0.5, y: 0 })).toBe(0);
+    expect(
+      evaluate((half.rows.at(-1)!.cpu! as Extract<import('./compiler.ts').CpuPlan, { type: 'implicit2d' }>).residual, {
+        x: 0.5,
+        y: 0,
+      }),
+    ).toBe(0);
 
     expect(last(['F = (y, -x)', 'dot(F, F) = 1']).type).toBe('implicit2d');
 
@@ -406,7 +436,7 @@ describe('coordinate fields over z', () => {
     if (p.type !== 'system') throw new Error('expected system');
     expect(p.parametric).toBe(true);
     const paths = traceSystem(p.residuals, ['x', 'y', 'z'], box.lo, box.hi, {}, 256, p.angular);
-    const longest = paths.reduce((a, b) => a.length > b.length ? a : b);
+    const longest = paths.reduce((a, b) => (a.length > b.length ? a : b));
     expect(longest.length).toBeGreaterThan(250);
     for (let k = 1; k < longest.length; k++) {
       expect(Math.hypot(...longest[k].map((v, i) => v - longest[k - 1][i]))).toBeLessThan(0.3);
@@ -415,19 +445,22 @@ describe('coordinate fields over z', () => {
   });
 
   it('says truthfully what it does not cover', () => {
-    expect(errorsOf([...spherical, '(rho, theta) = (2, pi/4)']).at(-1))
-      .toBeUndefined();
-    expect(errorsOf([...polar, '(r, theta, x) = (1, 2, 3)']).at(-1))
-      .toBe('3 equations in 2 unknowns — a system needs one equation per unknown.');
-    expect(errorsOf([...spherical, '(rho, rho, phi) = (1, 2, 3)']).at(-1))
-      .toBe('(rho, rho, phi) repeats a coordinate — use distinct coordinates to determine a point or flow.');
-    expect(errorsOf([...spherical, "(rho', theta') = (1, 1)"]).at(-1))
-      .toBe('rho uses z, and coordinate flows are 2D only.');
-    expect(errorsOf([...spherical, "(rho', theta', phi') = (1, 1, 1)"]).at(-1))
-      .toBeUndefined();
-    expect(errorsOf(["(x', z') = (1, 2)"]).at(-1))
-      .toBe('Coordinate flows are 2D only — z cannot be a flow coordinate.');
-    expect(errorsOf([...spherical, '(rho, theta, phi) = (1, 2)']).at(-1))
-      .toBe('Mismatched components: 3 on the left, 2 on the right.');
+    expect(errorsOf([...spherical, '(rho, theta) = (2, pi/4)']).at(-1)).toBeUndefined();
+    expect(errorsOf([...polar, '(r, theta, x) = (1, 2, 3)']).at(-1)).toBe(
+      '3 equations in 2 unknowns — a system needs one equation per unknown.',
+    );
+    expect(errorsOf([...spherical, '(rho, rho, phi) = (1, 2, 3)']).at(-1)).toBe(
+      '(rho, rho, phi) repeats a coordinate — use distinct coordinates to determine a point or flow.',
+    );
+    expect(errorsOf([...spherical, "(rho', theta') = (1, 1)"]).at(-1)).toBe(
+      'rho uses z, and coordinate flows are 2D only.',
+    );
+    expect(errorsOf([...spherical, "(rho', theta', phi') = (1, 1, 1)"]).at(-1)).toBeUndefined();
+    expect(errorsOf(["(x', z') = (1, 2)"]).at(-1)).toBe(
+      'Coordinate flows are 2D only — z cannot be a flow coordinate.',
+    );
+    expect(errorsOf([...spherical, '(rho, theta, phi) = (1, 2)']).at(-1)).toBe(
+      'Mismatched components: 3 on the left, 2 on the right.',
+    );
   });
 });

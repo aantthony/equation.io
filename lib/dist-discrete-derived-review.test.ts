@@ -15,7 +15,12 @@ import { parseExpr } from './expr.ts';
 const none = new Set<string>();
 function build(rows: string[]) {
   const sys = new RVSystem();
-  const built = buildRVSystem(sys, scanRandomRows(rows), { fnNames: none, getFn: () => undefined, constNames: none, taken: () => false });
+  const built = buildRVSystem(sys, scanRandomRows(rows), {
+    fnNames: none,
+    getFn: () => undefined,
+    constNames: none,
+    taken: () => false,
+  });
   expect([...built.errors]).toEqual([]);
   return sys;
 }
@@ -50,7 +55,12 @@ describe('1. rounding happens once, at the root — never at every node', () => 
   });
 
   it('values that straddle a rounding boundary are still one atom; whole numbers never merge', () => {
-    const sys = build([...dice, 'U ~ DiscreteUniform(100000000000, 100000000003)', 'V = U + 0.5 - 0.5', 'W = X / 7 * 7 / 3']);
+    const sys = build([
+      ...dice,
+      'U ~ DiscreteUniform(100000000000, 100000000003)',
+      'V = U + 0.5 - 0.5',
+      'W = X / 7 * 7 / 3',
+    ]);
     expect(sys.pmfOf('V', {})!.xs.length).toBe(4);
     expect(sys.pmfOf('W', {})!.xs.length).toBe(6);
   });
@@ -58,12 +68,22 @@ describe('1. rounding happens once, at the root — never at every node', () => 
 
 describe('2–3. the sampled tier certifies its moments, or says it cannot', () => {
   it('a divergent mean is not a number, one base or several', () => {
-    const sys = build(['G ~ Geometric(0.000001)', 'H ~ Geometric(0.000001)', 'K = 1.00001^G', 'L = exp(G / 100000)', 'M = 1.00001^G + H', 'Q = G^2', 'R = G H']);
+    const sys = build([
+      'G ~ Geometric(0.000001)',
+      'H ~ Geometric(0.000001)',
+      'K = 1.00001^G',
+      'L = exp(G / 100000)',
+      'M = 1.00001^G + H',
+      'Q = G^2',
+      'R = G H',
+    ]);
     for (const n of ['K', 'L', 'M']) {
       expect(sys.pmfOf(n, {})!.exact, n).toBe(false);
       expect(sys.meanUnstable(n, {}), n).toBe(true);
       expect(sys.mean(n, {}), n).toBeNaN();
-      expect(momentsReadout(sys.moments(n, {})!), n).toMatch(/^median ≈ .* \(heavy tails: μ, σ unstable\) \(sampled.*\)$/);
+      expect(momentsReadout(sys.moments(n, {})!), n).toMatch(
+        /^median ≈ .* \(heavy tails: μ, σ unstable\) \(sampled.*\)$/,
+      );
     }
     // …and light tails stay certified: no false alarm on a polynomial.
     for (const n of ['Q', 'R']) {
@@ -97,7 +117,9 @@ describe('2–3. the sampled tier certifies its moments, or says it cannot', () 
   });
 
   it('a huge estimate prints through the number formatter, not as a raw exponent string', () => {
-    expect(momentsReadout({ kind: 'estimate', mean: 1.1712345678e49, sd: 3.2e50, mass: 1 })).toBe('μ ≈ 1.17123e+49, σ ≈ 3.2e+50');
+    expect(momentsReadout({ kind: 'estimate', mean: 1.1712345678e49, sd: 3.2e50, mass: 1 })).toBe(
+      'μ ≈ 1.17123e+49, σ ≈ 3.2e+50',
+    );
     expect(momentsReadout({ kind: 'estimate', mean: 1234.5678, sd: 0.25, mass: 1 })).toBe('μ ≈ 1234.568, σ ≈ 0.250');
   });
 });
@@ -106,7 +128,14 @@ describe('4. shared bases are conditioned on, not multiplied out', () => {
   const dice = Array.from({ length: 10 }, (_, k) => `D${k} ~ DiscreteUniform(1, 6)`);
   const sum = dice.map((_, k) => `D${k}`).join(' + ');
   it('T + D0 over ten dice is exact, and so are events between T and a die it contains', () => {
-    const sys = build([...dice, `T = ${sum}`, 'U = T + D0', 'E ~ DiscreteUniform(1, 6)', 'F ~ DiscreteUniform(1, 6)', 'V = E F + E']);
+    const sys = build([
+      ...dice,
+      `T = ${sum}`,
+      'U = T + D0',
+      'E ~ DiscreteUniform(1, 6)',
+      'F ~ DiscreteUniform(1, 6)',
+      'V = E F + E',
+    ]);
     const before = ENUM_STATS.points;
     const u = sys.pmfOf('U', {})!;
     expect(u.exact).toBe(true);

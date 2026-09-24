@@ -75,7 +75,6 @@ describe('symbolic paths', () => {
   });
 });
 
-
 test('polar continuation stays within a 1s smoke budget', () => {
   const fields = { r: parseExpr('sqrt(x^2+y^2)'), theta: parseExpr('atan2(y,x)') };
   const p = compileCpu(classify(parseExpr('(r, theta) = (3u, 6pi u)'), new Set(), fields));

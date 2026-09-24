@@ -8,10 +8,23 @@
  */
 
 export type BaseKind =
-  | 'normal' | 'uniform' | 'exponential'
-  | 'gamma' | 'beta' | 'chisquared' | 'studentt' | 'lognormal' | 'cauchy' | 'weibull'
+  | 'normal'
+  | 'uniform'
+  | 'exponential'
+  | 'gamma'
+  | 'beta'
+  | 'chisquared'
+  | 'studentt'
+  | 'lognormal'
+  | 'cauchy'
+  | 'weibull'
   // Laws on the whole numbers (`discrete` in the table): a pmf drawn as stems.
-  | 'binomial' | 'poisson' | 'geometric' | 'negbinomial' | 'bernoulli' | 'discreteuniform';
+  | 'binomial'
+  | 'poisson'
+  | 'geometric'
+  | 'negbinomial'
+  | 'bernoulli'
+  | 'discreteuniform';
 
 /** What a parameter's value must satisfy, beyond being a finite number. */
 export interface DistParam {
@@ -47,53 +60,91 @@ export interface DistFamily {
 
 export const DIST_FAMILIES: readonly DistFamily[] = [
   {
-    kind: 'normal', name: 'Normal', aliases: ['N'], defaults: [0, 1],
+    kind: 'normal',
+    name: 'Normal',
+    aliases: ['N'],
+    defaults: [0, 1],
     params: [{ name: 'mean' }, { name: 'sd', positive: true }],
     help: 'a normal random variable',
   },
   {
-    kind: 'uniform', name: 'Uniform', aliases: ['U'], defaults: [0, 1],
+    kind: 'uniform',
+    name: 'Uniform',
+    aliases: ['U'],
+    defaults: [0, 1],
     params: [{ name: 'lo' }, { name: 'hi' }],
     help: 'a uniform random variable',
   },
   {
-    kind: 'exponential', name: 'Exponential', aliases: ['Exp'], defaults: [1], modelNames: ['exp'],
+    kind: 'exponential',
+    name: 'Exponential',
+    aliases: ['Exp'],
+    defaults: [1],
+    modelNames: ['exp'],
     params: [{ name: 'rate', positive: true }],
     help: 'an exponential random variable',
   },
   {
-    kind: 'gamma', name: 'Gamma', aliases: [], modelNames: ['gamma'],
-    params: [{ name: 'shape', positive: true }, { name: 'rate', positive: true }],
+    kind: 'gamma',
+    name: 'Gamma',
+    aliases: [],
+    modelNames: ['gamma'],
+    params: [
+      { name: 'shape', positive: true },
+      { name: 'rate', positive: true },
+    ],
     help: 'a gamma random variable (rate, not scale: mean = shape/rate)',
   },
   {
-    kind: 'beta', name: 'Beta', aliases: [], modelNames: ['beta'],
-    params: [{ name: 'a', positive: true }, { name: 'b', positive: true }],
+    kind: 'beta',
+    name: 'Beta',
+    aliases: [],
+    modelNames: ['beta'],
+    params: [
+      { name: 'a', positive: true },
+      { name: 'b', positive: true },
+    ],
     help: 'a beta random variable on [0, 1]',
   },
   {
-    kind: 'chisquared', name: 'ChiSquared', aliases: ['ChiSq', 'Chi2'],
+    kind: 'chisquared',
+    name: 'ChiSquared',
+    aliases: ['ChiSq', 'Chi2'],
     params: [{ name: 'df', positive: true }],
     help: 'a chi-squared random variable (alias ChiSq)',
   },
   {
-    kind: 'studentt', name: 'StudentT', aliases: ['T'], modelNames: ['t'],
+    kind: 'studentt',
+    name: 'StudentT',
+    aliases: ['T'],
+    modelNames: ['t'],
     params: [{ name: 'df', positive: true }],
     help: 'a Student t random variable (alias T)',
   },
   {
-    kind: 'lognormal', name: 'LogNormal', aliases: [], defaults: [0, 1],
+    kind: 'lognormal',
+    name: 'LogNormal',
+    aliases: [],
+    defaults: [0, 1],
     params: [{ name: 'mu' }, { name: 'sigma', positive: true }],
     help: 'a log-normal random variable: ln X ~ Normal(mu, sigma)',
   },
   {
-    kind: 'cauchy', name: 'Cauchy', aliases: [], defaults: [0, 1],
+    kind: 'cauchy',
+    name: 'Cauchy',
+    aliases: [],
+    defaults: [0, 1],
     params: [{ name: 'location' }, { name: 'scale', positive: true }],
     help: 'a Cauchy random variable (no mean: readouts use median/IQR)',
   },
   {
-    kind: 'weibull', name: 'Weibull', aliases: [],
-    params: [{ name: 'shape', positive: true }, { name: 'scale', positive: true }],
+    kind: 'weibull',
+    name: 'Weibull',
+    aliases: [],
+    params: [
+      { name: 'shape', positive: true },
+      { name: 'scale', positive: true },
+    ],
     help: 'a Weibull random variable',
   },
   // --- discrete: laws on the integers. The conventions below are the ones
@@ -103,33 +154,60 @@ export const DIST_FAMILIES: readonly DistFamily[] = [
   // spellings is a builtin function or an everyday coefficient name, so none
   // is a modelName: `Y ~ Poisson(3)` declares whatever is on the left.
   {
-    kind: 'binomial', name: 'Binomial', aliases: ['Binom'], discrete: true,
-    params: [{ name: 'n', whole: 'count' }, { name: 'p', unit: '[0,1]' }],
+    kind: 'binomial',
+    name: 'Binomial',
+    aliases: ['Binom'],
+    discrete: true,
+    params: [
+      { name: 'n', whole: 'count' },
+      { name: 'p', unit: '[0,1]' },
+    ],
     help: 'a binomial random variable: successes in n trials (alias Binom)',
   },
   {
-    kind: 'poisson', name: 'Poisson', aliases: ['Pois'], discrete: true,
+    kind: 'poisson',
+    name: 'Poisson',
+    aliases: ['Pois'],
+    discrete: true,
     params: [{ name: 'mean', positive: true }],
     help: 'a Poisson random variable (alias Pois)',
   },
   {
-    kind: 'geometric', name: 'Geometric', aliases: ['Geom'], discrete: true,
+    kind: 'geometric',
+    name: 'Geometric',
+    aliases: ['Geom'],
+    discrete: true,
     params: [{ name: 'p', unit: '(0,1]' }],
     help: 'a geometric random variable: the TRIAL of the first success, 1, 2, 3, … (alias Geom)',
   },
   {
-    kind: 'negbinomial', name: 'NegativeBinomial', aliases: ['NegBin'], discrete: true,
-    params: [{ name: 'r', positive: true }, { name: 'p', unit: '(0,1]' }],
+    kind: 'negbinomial',
+    name: 'NegativeBinomial',
+    aliases: ['NegBin'],
+    discrete: true,
+    params: [
+      { name: 'r', positive: true },
+      { name: 'p', unit: '(0,1]' },
+    ],
     help: 'a negative binomial random variable: FAILURES before the r-th success, 0, 1, 2, …; r > 0 need not be whole (alias NegBin)',
   },
   {
-    kind: 'bernoulli', name: 'Bernoulli', aliases: [], discrete: true,
+    kind: 'bernoulli',
+    name: 'Bernoulli',
+    aliases: [],
+    discrete: true,
     params: [{ name: 'p', unit: '[0,1]' }],
     help: 'a Bernoulli random variable: 1 with probability p, else 0',
   },
   {
-    kind: 'discreteuniform', name: 'DiscreteUniform', aliases: [], discrete: true,
-    params: [{ name: 'a', whole: true }, { name: 'b', whole: true }],
+    kind: 'discreteuniform',
+    name: 'DiscreteUniform',
+    aliases: [],
+    discrete: true,
+    params: [
+      { name: 'a', whole: true },
+      { name: 'b', whole: true },
+    ],
     help: 'a uniform random variable on the whole numbers a, a + 1, …, b (both included)',
   },
 ];
@@ -148,5 +226,4 @@ export const familyOf = (kind: BaseKind): DistFamily => BY_KIND.get(kind)!;
 export const distUsage = (f: DistFamily): string => `${f.name}(${f.params.map(p => p.name).join(', ')})`;
 
 /** True when this spelling doubles as a regression model over declared data. */
-export const isModelName = (name: string): boolean =>
-  !!distFamily(name)?.modelNames?.includes(name.toLowerCase());
+export const isModelName = (name: string): boolean => !!distFamily(name)?.modelNames?.includes(name.toLowerCase());

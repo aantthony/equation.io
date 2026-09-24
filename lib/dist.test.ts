@@ -41,8 +41,7 @@ const build = (rows: string[], constNames = names('a', 'b', 'm', 's')) => {
   return { sys, built };
 };
 
-const P = (sys: RVSystem, body: string, env: Record<string, number> = {}) =>
-  sys.probability(parseExpr(body), env);
+const P = (sys: RVSystem, body: string, env: Record<string, number> = {}) => sys.probability(parseExpr(body), env);
 
 describe('erf / normal built-ins', () => {
   it('evaluates erf accurately', () => {
@@ -335,7 +334,10 @@ describe('buildRVSystem', () => {
     expect(built.errors.get(1)).toBe('X is already defined.');
     expect(build(['pi ~ N']).built.errors.get(0)).toMatch(/Cannot use pi/);
     const taken = buildRVSystem(new RVSystem(), scanRandomRows(['X ~ N']), {
-      fnNames: none, getFn: () => undefined, constNames: none, taken: () => true,
+      fnNames: none,
+      getFn: () => undefined,
+      constNames: none,
+      taken: () => true,
     });
     expect(taken.errors.get(0)).toBe('X is already defined.');
   });
@@ -492,8 +494,13 @@ describe('exact normal propagation (affine in normal bases)', () => {
 
   it('declines everything without a closed form', () => {
     const { sys } = build([
-      'X ~ Normal(0, 1)', 'Y ~ Normal(0, 1)', 'U1 ~ Uniform(0, 1)',
-      'Q = X^3', 'M = X Y', 'C = {X > 0: X^2, 1}', 'S = X + U1',
+      'X ~ Normal(0, 1)',
+      'Y ~ Normal(0, 1)',
+      'U1 ~ Uniform(0, 1)',
+      'Q = X^3',
+      'M = X Y',
+      'C = {X > 0: X^2, 1}',
+      'S = X + U1',
     ]);
     for (const name of ['Q', 'M', 'C', 'S']) expect(sys.exactDist(name)).toBeNull();
     expect(sys.exactDist('U1')!.kind).toBe('uniform'); // bases pass through
@@ -550,8 +557,13 @@ describe('exact laws (law propagation + uniform convolution)', () => {
   });
 
   it('matches Irwin–Hall for the four-fold sum', () => {
-    const rows = ['X1 ~ Uniform(0, 1)', 'X2 ~ Uniform(0, 1)', 'X3 ~ Uniform(0, 1)', 'X4 ~ Uniform(0, 1)',
-      'S = X1 + X2 + X3 + X4'];
+    const rows = [
+      'X1 ~ Uniform(0, 1)',
+      'X2 ~ Uniform(0, 1)',
+      'X3 ~ Uniform(0, 1)',
+      'X4 ~ Uniform(0, 1)',
+      'S = X1 + X2 + X3 + X4',
+    ];
     const { sys } = build(rows);
     const c = sys.curve('S', {})!;
     const mid = c.pts.findIndex((v, i) => i % 2 === 0 && v === 2);
@@ -597,7 +609,10 @@ describe('point masses (atoms)', () => {
     const { sys } = build(['X ~ Normal(0, 1)', 'Y = {X > 0: 1, 2}']);
     const c = sys.curve('Y', {})!;
     expect(c.pts).toEqual([]);
-    expect(c.atoms).toEqual([{ x: 1, p: 0.5 }, { x: 2, p: 0.5 }]);
+    expect(c.atoms).toEqual([
+      { x: 1, p: 0.5 },
+      { x: 2, p: 0.5 },
+    ]);
     expect(c.mean).toBeCloseTo(1.5, 12);
     expect(c.sd).toBeCloseTo(0.5, 12);
   });
@@ -605,7 +620,10 @@ describe('point masses (atoms)', () => {
   it('finds the masses of a discretized uniform exactly', () => {
     const { sys } = build(['X ~ Uniform(0, 1)', 'F = floor(4X)']);
     expect(sys.curve('F', {})!.atoms).toEqual([
-      { x: 0, p: 0.25 }, { x: 1, p: 0.25 }, { x: 2, p: 0.25 }, { x: 3, p: 0.25 },
+      { x: 0, p: 0.25 },
+      { x: 1, p: 0.25 },
+      { x: 2, p: 0.25 },
+      { x: 3, p: 0.25 },
     ]);
   });
 
@@ -771,7 +789,10 @@ describe('conditional-CDF curves (the quadrature tier)', () => {
     const { sys } = build(['X ~ Uniform(0, 1)', 'Z = floor(2X)']);
     const c = sys.curve('Z', {})!;
     expect(c.pts.length).toBe(0);
-    expect(c.atoms).toEqual([{ x: 0, p: 0.5 }, { x: 1, p: 0.5 }]);
+    expect(c.atoms).toEqual([
+      { x: 0, p: 0.5 },
+      { x: 1, p: 0.5 },
+    ]);
   });
 
   it('responds to slider constants through the environment', () => {
@@ -800,8 +821,7 @@ describe('conditional-CDF curves (the quadrature tier)', () => {
     const c = sys.curve('Z', {})!;
     expect(c.pts[0]).toBeGreaterThan(-20);
     expect(c.pts[c.pts.length - 2]).toBeLessThan(20);
-    const exact = (z: number) =>
-      Math.exp(-((1 / z - 1) ** 2) / 2) / (Math.sqrt(2 * Math.PI) * z * z);
+    const exact = (z: number) => Math.exp(-((1 / z - 1) ** 2) / 2) / (Math.sqrt(2 * Math.PI) * z * z);
     expect(densityAt(c, 0.5)).toBeCloseTo(exact(0.5), 1);
     expect(densityAt(c, 1)).toBeCloseTo(exact(1), 2);
     // No finite moments (1+X crosses its pole): μ/σ are truncation
@@ -818,8 +838,7 @@ describe('conditional-CDF curves (the quadrature tier)', () => {
 
   it('re-rasterizes the visible stretch on deep zoom, at full accuracy', () => {
     const { sys } = build(['X ~ Normal(0, 1)', 'Z = 1/(1+X)']);
-    const exact = (z: number) =>
-      Math.exp(-((1 / z - 1) ** 2) / 2) / (Math.sqrt(2 * Math.PI) * z * z);
+    const exact = (z: number) => Math.exp(-((1 / z - 1) ** 2) / 2) / (Math.sqrt(2 * Math.PI) * z * z);
     const full = sys.curve('Z', {})!;
     const zoomed = sys.curve('Z', {}, { lo: 0.35, hi: 0.59 })!;
     // The full-window curve's grid is too coarse to land the peak; the
@@ -850,8 +869,7 @@ describe('atoms vs. the repeats a many-to-one transform makes', () => {
   // ±y pair of Y², the branches of any even function — but only k times per
   // conditional column, however fine the grid. Pooling those O(1) runs across
   // all 512 columns used to clear the mass threshold on arithmetic alone.
-  const curveOf = (rhs: string) =>
-    build(['X ~ Uniform(0, 1)', 'Y ~ Normal(0, 1)', `Z = ${rhs}`]).sys.curve('Z', {})!;
+  const curveOf = (rhs: string) => build(['X ~ Uniform(0, 1)', 'Y ~ Normal(0, 1)', `Z = ${rhs}`]).sys.curve('Z', {})!;
 
   it.each([['max(Y^2, X)'], ['min(Y^2, X)'], ['max(abs(Y), X)'], ['Y^2 + 0X']])(
     'draws %s as a curve, with no stems',

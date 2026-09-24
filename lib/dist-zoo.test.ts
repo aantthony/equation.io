@@ -28,8 +28,7 @@ import { compileProg, run } from './vm.ts';
 const none = new Set<string>();
 const dist = (rhs: string): BaseDist => parseDistribution(rhs, none);
 const num = (value: number): Expr => ({ kind: 'num', value });
-const pdfAt = (d: BaseDist, x: number, env: Record<string, number> = {}): number =>
-  evaluate(pdfExpr(d, num(x)), env);
+const pdfAt = (d: BaseDist, x: number, env: Record<string, number> = {}): number => evaluate(pdfExpr(d, num(x)), env);
 const cdf = (d: BaseDist, x: number, env: Record<string, number> = {}): number =>
   probabilityValue(d, undefined, num(x), env);
 const sf = (d: BaseDist, x: number, env: Record<string, number> = {}): number =>
@@ -49,10 +48,18 @@ const build = (rows: string[], constNames = new Set(['a', 'b', 'k'])) => {
 describe('parsing the zoo', () => {
   it('reads every family, its aliases, and any capitalization', () => {
     const kinds: Array<[string, string]> = [
-      ['Gamma(2, 1)', 'gamma'], ['gamma(2, 1)', 'gamma'], ['Beta(2, 3)', 'beta'],
-      ['ChiSquared(3)', 'chisquared'], ['chisq(3)', 'chisquared'], ['Chi2(3)', 'chisquared'],
-      ['StudentT(5)', 'studentt'], ['T(5)', 'studentt'], ['t(5)', 'studentt'],
-      ['LogNormal(0, 1)', 'lognormal'], ['Cauchy(0, 1)', 'cauchy'], ['Weibull(1.5, 2)', 'weibull'],
+      ['Gamma(2, 1)', 'gamma'],
+      ['gamma(2, 1)', 'gamma'],
+      ['Beta(2, 3)', 'beta'],
+      ['ChiSquared(3)', 'chisquared'],
+      ['chisq(3)', 'chisquared'],
+      ['Chi2(3)', 'chisquared'],
+      ['StudentT(5)', 'studentt'],
+      ['T(5)', 'studentt'],
+      ['t(5)', 'studentt'],
+      ['LogNormal(0, 1)', 'lognormal'],
+      ['Cauchy(0, 1)', 'cauchy'],
+      ['Weibull(1.5, 2)', 'weibull'],
     ];
     for (const [rhs, kind] of kinds) expect(dist(rhs).kind).toBe(kind);
   });
@@ -124,15 +131,30 @@ describe('densities', () => {
 
   it('integrate to 1 — through a pole at the support edge too', () => {
     const decls = [
-      'Gamma(2, 1)', 'Gamma(0.5, 3)', 'Gamma(50, 1)', 'ChiSquared(1)', 'ChiSquared(200)',
-      'Beta(2, 3)', 'Beta(0.5, 0.5)', 'Beta(80, 120)', 'Beta(0.6, 4)',
-      'StudentT(0.7)', 'StudentT(5)', 'LogNormal(0, 1)', 'Cauchy(1, 2)',
-      'Weibull(0.6, 2)', 'Weibull(3, 1)',
+      'Gamma(2, 1)',
+      'Gamma(0.5, 3)',
+      'Gamma(50, 1)',
+      'ChiSquared(1)',
+      'ChiSquared(200)',
+      'Beta(2, 3)',
+      'Beta(0.5, 0.5)',
+      'Beta(80, 120)',
+      'Beta(0.6, 4)',
+      'StudentT(0.7)',
+      'StudentT(5)',
+      'LogNormal(0, 1)',
+      'Cauchy(1, 2)',
+      'Weibull(0.6, 2)',
+      'Weibull(3, 1)',
     ];
     for (const decl of decls) {
       const d = dist(decl);
-      const [lo, hi] = d.kind === 'beta' ? [0, 1]
-        : d.kind === 'studentt' || d.kind === 'cauchy' ? [-Infinity, Infinity] : [0, Infinity];
+      const [lo, hi] =
+        d.kind === 'beta'
+          ? [0, 1]
+          : d.kind === 'studentt' || d.kind === 'cauchy'
+            ? [-Infinity, Infinity]
+            : [0, Infinity];
       // Split at the bulk, as quadMoments does: the [0, ∞) change of variables
       // alone squeezes ChiSquared(200)'s peak between two Kronrod nodes.
       const mid = build([`X ~ ${decl}`]).sys.exactMoments('X', {})!.mean || 1;
@@ -147,7 +169,10 @@ describe('densities', () => {
       for (const x of [-3, -1e-9]) expect(pdfAt(d, x), `${decl} at ${x}`).toBe(0);
       const region = regionExpr(d, num(-1), num(0.5));
       for (const x of [-0.5, 0, 1e-12, 0.25]) {
-        expect(Number.isNaN(evaluate(region.kind === 'ineq' ? region.l : region, { x, y: 0.1 })), `${decl} region at ${x}`).toBe(false);
+        expect(
+          Number.isNaN(evaluate(region.kind === 'ineq' ? region.l : region, { x, y: 0.1 })),
+          `${decl} region at ${x}`,
+        ).toBe(false);
       }
     }
     expect(pdfAt(dist('Beta(2, 3)'), 1.5)).toBe(0);
@@ -169,9 +194,15 @@ describe('densities', () => {
 
   it('flatten to 0 while a slider holds an invalid parameter', () => {
     const cases: Array<[string, Record<string, number>, number]> = [
-      ['Gamma(a, 1)', { a: -1 }, 1], ['Gamma(2, b)', { b: 0 }, 1], ['Beta(a, b)', { a: 2, b: -3 }, 0.5],
-      ['ChiSquared(k)', { k: 0 }, 1], ['StudentT(k)', { k: -1 }, 0.3], ['LogNormal(0, b)', { b: -1 }, 1],
-      ['LogNormal(0, b)', { b: 0 }, 1], ['Cauchy(0, b)', { b: -2 }, 1], ['Cauchy(0, b)', { b: 0 }, 1],
+      ['Gamma(a, 1)', { a: -1 }, 1],
+      ['Gamma(2, b)', { b: 0 }, 1],
+      ['Beta(a, b)', { a: 2, b: -3 }, 0.5],
+      ['ChiSquared(k)', { k: 0 }, 1],
+      ['StudentT(k)', { k: -1 }, 0.3],
+      ['LogNormal(0, b)', { b: -1 }, 1],
+      ['LogNormal(0, b)', { b: 0 }, 1],
+      ['Cauchy(0, b)', { b: -2 }, 1],
+      ['Cauchy(0, b)', { b: 0 }, 1],
       ['Weibull(a, b)', { a: 1, b: -1 }, 1],
     ];
     for (const [decl, env, x] of cases) expect(pdfAt(dist(decl), x, env), decl).toBe(0);
@@ -198,7 +229,15 @@ describe('densities', () => {
   });
 
   it('classify as curves and regions, with slider parameters as uniforms', () => {
-    for (const decl of ['Gamma(a, b)', 'Beta(a, b)', 'ChiSquared(k)', 'T(k)', 'LogNormal(a, b)', 'Cauchy(a, b)', 'Weibull(a, b)']) {
+    for (const decl of [
+      'Gamma(a, b)',
+      'Beta(a, b)',
+      'ChiSquared(k)',
+      'T(k)',
+      'LogNormal(a, b)',
+      'Cauchy(a, b)',
+      'Weibull(a, b)',
+    ]) {
       const consts = new Set(['a', 'b', 'k']);
       expect(compileCpu(classify(densityExpr(dist(decl)), consts)).type, decl).toBe('implicit2d');
       expect(compileCpu(classify(regionExpr(dist(decl), num(0.2), num(0.6)), consts)).type, decl).toBe('ineq2d');
@@ -218,8 +257,10 @@ describe('exact probabilities', () => {
     expect(cdf(dist('LogNormal(0.5, 0.75)'), 2)).toBeCloseTo(0.6016150059161275, 10);
     expect(cdf(dist('Cauchy(1, 2)'), 4)).toBeCloseTo(0.5 + Math.atan(1.5) / Math.PI, 12);
     expect(cdf(dist('Weibull(2.5, 2)'), 1.3)).toBeCloseTo(1 - Math.exp(-((1.3 / 2) ** 2.5)), 12);
-    expect(probabilityValue(dist('Gamma(2, 1)'), num(1), num(3), {}))
-      .toBeCloseTo(2 * Math.exp(-1) - 4 * Math.exp(-3), 12);
+    expect(probabilityValue(dist('Gamma(2, 1)'), num(1), num(3), {})).toBeCloseTo(
+      2 * Math.exp(-1) - 4 * Math.exp(-3),
+      12,
+    );
   });
 
   it('are 0 and 1 off the support, NaN under invalid sliders', () => {
@@ -250,12 +291,18 @@ describe('exact probabilities', () => {
 
   it('are the integral of the density', () => {
     for (const [decl, lo, hi] of [
-      ['Gamma(0.5, 3)', 0, 0.8], ['Beta(0.6, 4)', 0, 0.3], ['StudentT(2)', -1, 3],
-      ['Weibull(0.6, 2)', 0, 5], ['LogNormal(0, 1)', 0.5, 4], ['ChiSquared(7)', 2, 9],
+      ['Gamma(0.5, 3)', 0, 0.8],
+      ['Beta(0.6, 4)', 0, 0.3],
+      ['StudentT(2)', -1, 3],
+      ['Weibull(0.6, 2)', 0, 5],
+      ['LogNormal(0, 1)', 0.5, 4],
+      ['ChiSquared(7)', 2, 9],
     ] as const) {
       const d = dist(decl);
-      expect(probabilityValue(d, num(lo), num(hi), {}), decl)
-        .toBeCloseTo(quadrature(x => pdfAt(d, x), lo, hi), 7);
+      expect(probabilityValue(d, num(lo), num(hi), {}), decl).toBeCloseTo(
+        quadrature(x => pdfAt(d, x), lo, hi),
+        7,
+      );
     }
   });
 });
@@ -272,7 +319,7 @@ describe('sampling: every column is the quantile transform of a stratified strea
     // The upper half is compared on the survival side, where the digits are.
     for (let i = 0; i < SAMPLE_COUNT; i += 97) {
       const u = (i + 0.5) / SAMPLE_COUNT;
-      const err = u < 0.5 ? cdf(d, col[i]) - u : (1 - u) - sf(d, col[i]);
+      const err = u < 0.5 ? cdf(d, col[i]) - u : 1 - u - sf(d, col[i]);
       ks = Math.max(ks, Math.abs(err) / Math.min(u, 1 - u));
     }
     return { ks, col, d };
@@ -280,10 +327,29 @@ describe('sampling: every column is the quantile transform of a stratified strea
 
   it('inverts the cdf to ~1e-8 RELATIVE to the tail mass, poles and power tails included', () => {
     for (const decl of [
-      'Gamma(2, 1)', 'Gamma(0.3, 2)', 'Gamma(1.5, 1)', 'Gamma(50, 1)', 'Gamma(100000, 1)', 'ChiSquared(1)', 'ChiSquared(200)',
-      'Beta(2, 3)', 'Beta(0.5, 0.5)', 'Beta(1.5, 1.2)', 'Beta(80, 120)', 'Beta(0.05, 5)', 'Beta(3000, 9000)',
-      'StudentT(0.7)', 'StudentT(1)', 'StudentT(2)', 'StudentT(30)', 'StudentT(1000000)', 'StudentT(5000000)',
-      'LogNormal(0.5, 0.75)', 'Cauchy(1, 2)', 'Weibull(0.5, 2)', 'Weibull(3, 1)',
+      'Gamma(2, 1)',
+      'Gamma(0.3, 2)',
+      'Gamma(1.5, 1)',
+      'Gamma(50, 1)',
+      'Gamma(100000, 1)',
+      'ChiSquared(1)',
+      'ChiSquared(200)',
+      'Beta(2, 3)',
+      'Beta(0.5, 0.5)',
+      'Beta(1.5, 1.2)',
+      'Beta(80, 120)',
+      'Beta(0.05, 5)',
+      'Beta(3000, 9000)',
+      'StudentT(0.7)',
+      'StudentT(1)',
+      'StudentT(2)',
+      'StudentT(30)',
+      'StudentT(1000000)',
+      'StudentT(5000000)',
+      'LogNormal(0.5, 0.75)',
+      'Cauchy(1, 2)',
+      'Weibull(0.5, 2)',
+      'Weibull(3, 1)',
     ]) {
       const { ks, col } = ksOf(decl);
       // LogNormal rides on the 1e-9 normalQuantile shared with Normal.
@@ -297,13 +363,23 @@ describe('sampling: every column is the quantile transform of a stratified strea
   });
 
   it('reproduces the exact moments where they exist', () => {
-    for (const decl of ['Gamma(2.5, 0.5)', 'ChiSquared(6)', 'Beta(2, 5)', 'StudentT(8)', 'LogNormal(0, 0.4)', 'Weibull(1.7, 3)']) {
+    for (const decl of [
+      'Gamma(2.5, 0.5)',
+      'ChiSquared(6)',
+      'Beta(2, 5)',
+      'StudentT(8)',
+      'LogNormal(0, 0.4)',
+      'Weibull(1.7, 3)',
+    ]) {
       const { sys } = build([`X ~ ${decl}`]);
       const col = sys.columns('X', {});
       const m = sys.exactMoments('X', {})!;
       let s = 0;
       let s2 = 0;
-      for (const x of col) { s += x; s2 += x * x; }
+      for (const x of col) {
+        s += x;
+        s2 += x * x;
+      }
       const mean = s / col.length;
       expect(mean, decl).toBeCloseTo(m.mean, 4);
       expect(Math.sqrt(s2 / col.length - mean * mean), decl).toBeCloseTo(m.sd, 2);
@@ -377,7 +453,11 @@ describe('moments and the readout branch', () => {
     // that would print as fact. The mean, 1, exists and is kept for E(…).
     for (const df of [1.5, 2]) {
       const { sys } = build([`X ~ StudentT(${df})`, 'Y = X + 1', 'Z ~ Normal(0, 1)', 'S = X + Z']);
-      expect(sys.quadMoments('Y', {})).toEqual({ mean: expect.closeTo(1, 9), sd: Infinity, mass: expect.closeTo(1, 9) });
+      expect(sys.quadMoments('Y', {})).toEqual({
+        mean: expect.closeTo(1, 9),
+        sd: Infinity,
+        mass: expect.closeTo(1, 9),
+      });
       const r = sys.curve('Y', {})!.robust!;
       expect(r, `df ${df}`).toBeDefined();
       expect(r.meanOk).toBe(true);
@@ -389,8 +469,16 @@ describe('moments and the readout branch', () => {
 
   it('keeps μ, σ where the transform tames the tail or the variance exists', () => {
     const { sys } = build([
-      'X ~ StudentT(2)', 'C ~ Cauchy(0, 1)', 'A = sin(X)', 'B = ln(abs(X))', 'D = atan(C)', 'F = abs(C)^0.3',
-      'T3 ~ StudentT(3)', 'G = T3 + 1', 'L ~ LogNormal(0, 1)', 'H = 2L + 1',
+      'X ~ StudentT(2)',
+      'C ~ Cauchy(0, 1)',
+      'A = sin(X)',
+      'B = ln(abs(X))',
+      'D = atan(C)',
+      'F = abs(C)^0.3',
+      'T3 ~ StudentT(3)',
+      'G = T3 + 1',
+      'L ~ LogNormal(0, 1)',
+      'H = 2L + 1',
     ]);
     for (const name of ['A', 'B', 'D', 'F']) expect(sys.curve(name, {})!.robust, name).toBeUndefined();
     expect(sys.quadMoments('G', {})!.sd).toBeCloseTo(Math.sqrt(3), 6);
@@ -439,7 +527,7 @@ describe('exact closure rules', () => {
     const mixed = law(['X ~ Gamma(2, 3)', 'Y ~ Gamma(1, 1.5)', 'S = X + Y + X'], 'S')!;
     expect(mixed.args.map(a => val(a))).toEqual([3, 1.5]);
     const { sys } = build(['X ~ Gamma(2, 3)', 'S = X + X']);
-    expect(sys.exactMoments('S', {})!.sd).toBeCloseTo(2 * Math.sqrt(2) / 3, 12);
+    expect(sys.exactMoments('S', {})!.sd).toBeCloseTo((2 * Math.sqrt(2)) / 3, 12);
   });
 
   it('treats ChiSquared and Exponential as the Gammas they are', () => {
@@ -601,8 +689,11 @@ describe('second review follow-ups', () => {
     const u = sysOf(['X ~ Uniform(0, 1)', 'Y = X^(-0.45)']).quadMoments('Y', {});
     if (u) expect(u.sd).toBeCloseTo(Math.sqrt(10 - (1 / 0.55) ** 2), 3);
     // Many jumps: whatever quadrature makes of it, never an infinite σ.
-    for (const rows of [['X ~ Normal(0, 1)', 'Y = floor(37 X) + mod(91 X, 1)'], ['X ~ Exponential(1)', 'Y = floor(53 X)^2'],
-      ['X ~ Uniform(0, 1)', 'Y = mod(977 X, 1)^(-0.4)']]) {
+    for (const rows of [
+      ['X ~ Normal(0, 1)', 'Y = floor(37 X) + mod(91 X, 1)'],
+      ['X ~ Exponential(1)', 'Y = floor(53 X)^2'],
+      ['X ~ Uniform(0, 1)', 'Y = mod(977 X, 1)^(-0.4)'],
+    ]) {
       const qm = sysOf(rows).quadMoments('Y', {});
       if (qm) expect(Number.isFinite(qm.sd), rows[1]).toBe(true);
     }
@@ -613,8 +704,13 @@ describe('second review follow-ups', () => {
   });
 
   it.each([1, 2, 3, 5, 8, 13, 21, 34])('#2 no-mean transforms and finite means keep their verdict at seed %i', salt => {
-    for (const [base, g] of [['Cauchy(0, 1)', 'X Z + Z'], ['Cauchy(2, 0.3)', 'X + Z^2'], ['T(1)', 'X Z'], ['T(0.9)', 'abs(X) + Z'],
-      ['Cauchy(0, 5)', 'X/(1 + Z^2)']]) {
+    for (const [base, g] of [
+      ['Cauchy(0, 1)', 'X Z + Z'],
+      ['Cauchy(2, 0.3)', 'X + Z^2'],
+      ['T(1)', 'X Z'],
+      ['T(0.9)', 'abs(X) + Z'],
+      ['Cauchy(0, 5)', 'X/(1 + Z^2)'],
+    ]) {
       const sys = sysOf([`X ~ ${base}`, 'Z ~ Normal(0, 1)', `W = ${g}`], salt);
       expect(sys.mean('W', {}), `${base}: ${g} @${salt}`).toBeNaN();
       expect(sys.meanUnstable('W', {}), `${base}: ${g} @${salt}`).toBe(true);
@@ -638,7 +734,11 @@ describe('second review follow-ups', () => {
   });
 
   it('#3 one verdict per variable: a mean quadrature certified is a mean the curve has', () => {
-    for (const rows of [['X ~ Cauchy(0, 1)', 'Y = sqrt(abs(X))'], ['X ~ T(3)', 'Y = X^2'], ['X ~ T(1.5)', 'Y = abs(X) + 1']]) {
+    for (const rows of [
+      ['X ~ Cauchy(0, 1)', 'Y = sqrt(abs(X))'],
+      ['X ~ T(3)', 'Y = X^2'],
+      ['X ~ T(1.5)', 'Y = abs(X) + 1'],
+    ]) {
       const sys = sysOf(rows);
       const qm = sys.quadMoments('Y', {})!;
       expect(qm.sd, rows[1]).toBe(Infinity);
@@ -649,9 +749,19 @@ describe('second review follow-ups', () => {
       expect(sys.moments('Y', {}), rows[1]).toMatchObject({ kind: 'robust', meanOk: true });
     }
     // And the readout's verdicts, in one place.
-    expect(sysOf(['X ~ Gamma(2, 3)', 'Y = 2X']).moments('Y', {})).toMatchObject({ kind: 'exact', mean: expect.closeTo(4 / 3, 9) });
-    expect(sysOf(['X ~ Gamma(2, 3)', 'Y = X^2']).moments('Y', {})).toMatchObject({ kind: 'estimate', mean: expect.closeTo(2 / 3, 6) });
-    expect(sysOf(['X ~ Cauchy(0, 1)', 'Y = 2X + 1']).moments('Y', {})).toMatchObject({ kind: 'robust', meanOk: false, median: expect.closeTo(1, 2) });
+    expect(sysOf(['X ~ Gamma(2, 3)', 'Y = 2X']).moments('Y', {})).toMatchObject({
+      kind: 'exact',
+      mean: expect.closeTo(4 / 3, 9),
+    });
+    expect(sysOf(['X ~ Gamma(2, 3)', 'Y = X^2']).moments('Y', {})).toMatchObject({
+      kind: 'estimate',
+      mean: expect.closeTo(2 / 3, 6),
+    });
+    expect(sysOf(['X ~ Cauchy(0, 1)', 'Y = 2X + 1']).moments('Y', {})).toMatchObject({
+      kind: 'robust',
+      meanOk: false,
+      median: expect.closeTo(1, 2),
+    });
   });
 
   it('#4 Beta quantiles follow the exact cdf all the way to where the cdf itself switches', () => {
@@ -678,7 +788,14 @@ describe('second review follow-ups', () => {
 
   it('#9 the tail pool is a bounded subsample, built once per parameter values', () => {
     const before = { ...TAIL_POOL_STATS };
-    const sys = sysOf(['X ~ Cauchy(0, a)', 'Z ~ Normal(0, 1)', 'W = X + Z', 'V = sin(X) + Z', 'U1 ~ Uniform(0, 1)', 'S = U1 + Z']);
+    const sys = sysOf([
+      'X ~ Cauchy(0, a)',
+      'Z ~ Normal(0, 1)',
+      'W = X + Z',
+      'V = sin(X) + Z',
+      'U1 ~ Uniform(0, 1)',
+      'S = U1 + Z',
+    ]);
     for (let frame = 0; frame < 6; frame++) {
       sys.resample(frame + 1);
       for (let k = 1; k <= 3; k++) sys.curve('W', { a: k });

@@ -1,6 +1,13 @@
 import { type Env, emptyEnv, evaluateFrame } from '../lib/env.ts';
 import { cellShades, runAutomaton } from '../lib/automaton.ts';
-import { type CpuGrid, type CpuPlan, type GpuPlan, compileGridCpu, compileGridGpu, cpuStructureKey } from '../lib/compiler.ts';
+import {
+  type CpuGrid,
+  type CpuPlan,
+  type GpuPlan,
+  compileGridCpu,
+  compileGridGpu,
+  cpuStructureKey,
+} from '../lib/compiler.ts';
 import { analyzePrepared, prepareDocument } from '../lib/analysis.ts';
 import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
 import { complexRootLabel } from '../lib/complex-label.ts';
@@ -21,15 +28,17 @@ import {
   type Definition,
 } from '../lib/defs.ts';
 import { buildComb, buildTube, combScale, curveExtent, curveFrames } from '../lib/curve3d.ts';
+import { type DensityCurve, type PmfStems, RVSystem, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import {
-  type DensityCurve,
-  type PmfStems,
-  RVSystem,
-  markerHeight,
-  shadePolygon,
-  stemGeometry,
-} from '../lib/dist.ts';
-import { type IntShade, type ShadeRun, type ShadeSampler, evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
+  type IntShade,
+  type ShadeRun,
+  type ShadeSampler,
+  evalSampler,
+  minusTint,
+  runPaths,
+  shadeNames,
+  shadeRuns,
+} from '../lib/intshade.ts';
 import { compileSampler } from '../lib/vm.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
@@ -81,7 +90,6 @@ import { type Camera3D, Renderer3D, type Scene3D, cameraBoxR, drawLabels3D } fro
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
-
 
 interface Equation {
   familyParent?: Equation;
@@ -202,21 +210,33 @@ function cssColor([r, g, b]: [number, number, number]): string {
 /** A run of a discrete variable's stems (or the run a P(…) row selects, drawn
  *  `heavy`) as overlay geometry. What to draw is lib's (stemGeometry), shared
  *  with the og rasterizer; this only hands it to the canvas overlay. */
-function pushStems(extras: Overlay2D, run: PmfStems, color: [number, number, number], heavy: boolean, pxPerUnit: number): void {
+function pushStems(
+  extras: Overlay2D,
+  run: PmfStems,
+  color: [number, number, number],
+  heavy: boolean,
+  pxPerUnit: number,
+): void {
   if (!run.ks.length) return;
   const g = stemGeometry(run, heavy, pxPerUnit);
   const ink = g.alpha < 1 ? cssColorA(color, g.alpha) : cssColor(color);
-  extras.polylines.push(g.fill === null
-    ? { pts: g.lines, color: ink, width: g.width }
-    : { pts: g.lines, color: ink, width: g.width, closed: true, fill: cssColorA(color, g.fill) });
+  extras.polylines.push(
+    g.fill === null
+      ? { pts: g.lines, color: ink, width: g.width }
+      : { pts: g.lines, color: ink, width: g.width, closed: true, fill: cssColorA(color, g.fill) },
+  );
   const dots = g.dots;
-  if (dots) run.ks.forEach((k, n) => extras.points.push({ x: k, y: run.ps[n], color: ink, r: dots.r, bare: !dots.outlined }));
+  if (dots)
+    run.ks.forEach((k, n) => extras.points.push({ x: k, y: run.ps[n], color: ink, r: dots.r, bare: !dots.outlined }));
 }
 
 /** A solid's edges: its own colour pulled toward white, so they still read
  *  against faces lit in that colour. */
-const edgeShade = ([r, g, b]: [number, number, number]): [number, number, number] =>
-  [r + (1 - r) * .55, g + (1 - g) * .55, b + (1 - b) * .55];
+const edgeShade = ([r, g, b]: [number, number, number]): [number, number, number] => [
+  r + (1 - r) * 0.55,
+  g + (1 - g) * 0.55,
+  b + (1 - b) * 0.55,
+];
 
 function cssColorA([r, g, b]: [number, number, number], a: number): string {
   return `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${a})`;
@@ -239,7 +259,7 @@ const CLOUD_3D_MAX = 10_000;
 /** Points a row would put in a 3D scene, either representation: a typed-array
  *  scatter, or the symbolic point list a slider or t expands one into. */
 const cloudPoints = (plot: CpuPlan): number =>
-  (plot.type === 'dscatter' ? plot.coords[0].length : plot.type === 'plist' ? plot.pts.length : 0);
+  plot.type === 'dscatter' ? plot.coords[0].length : plot.type === 'plist' ? plot.pts.length : 0;
 const TUBE_SEGMENTS = 24;
 
 /**
@@ -504,8 +524,8 @@ function ensureViewRow() {
   if (viewportRow('view')) return;
   const id = nextId;
   pushUndo(`viewport:${id}`);
-  const hw = canvas.width * view.upp / 2;
-  const hh = canvas.height * view.upp / (view.ratio ?? 1) / 2;
+  const hw = (canvas.width * view.upp) / 2;
+  const hh = (canvas.height * view.upp) / (view.ratio ?? 1) / 2;
   const eq = addEquation(formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh, view.ratio));
   appliedViewText = eq.text;
   recompileAll();
@@ -552,7 +572,10 @@ const systemKeys = new WeakMap<CpuPlan, string>();
 const traceEnvironments = new WeakMap<Classified, ReturnType<typeof traceEnvironment>>();
 function systemKey(cpu: CpuPlan): string {
   let key = systemKeys.get(cpu);
-  if (key === undefined) { key = cpuStructureKey(cpu); systemKeys.set(cpu, key); }
+  if (key === undefined) {
+    key = cpuStructureKey(cpu);
+    systemKeys.set(cpu, key);
+  }
   return key;
 }
 const mcpApp = document.documentElement.hasAttribute('data-mcp-app');
@@ -572,7 +595,8 @@ const traceQueue = new TraceQueue((message: TraceMessage) => {
   try {
     // The chat iframe is cross-origin; its worker must be created locally.
     // Framed /g/ pages load their worker from their own origin.
-    traceWorker ??= mcpApp ? new EmbeddedTraceWorker()
+    traceWorker ??= mcpApp
+      ? new EmbeddedTraceWorker()
       : new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
     traceWorker.onmessage = (event: MessageEvent<{ token: number; result: TraceResult }>) => {
       traceQueue.complete(event.data.token, event.data.result);
@@ -594,19 +618,31 @@ const hullSamplers = new WeakMap<CpuPlan, ReturnType<typeof hullGeometrySampler>
 const vertexSamplers = new WeakMap<CpuPlan, VertexSampler>();
 const verticesOf = (plot: CpuPlan & { type: 'polygon' }): VertexSampler => {
   let sample = vertexSamplers.get(plot);
-  if (!sample) vertexSamplers.set(plot, sample = vertexSampler(plot.pts, plot.over));
+  if (!sample) vertexSamplers.set(plot, (sample = vertexSampler(plot.pts, plot.over)));
   return sample;
 };
 let familyId = -100000;
 function renderMembers(eq: Equation): Equation[] {
-  const cls = eq.cls!, cpu = eq.cpu!;
+  const cls = eq.cls!,
+    cpu = eq.cpu!;
   if (cpu.type !== 'family') return [eq];
   let children = familyRows.get(cls);
   if (!children) {
     const gpuMembers = eq.gpu?.type === 'family' ? eq.gpu.members : [];
-    children = cpu.members.map((m, k) => ({ ...eq, id: familyId--, cls: m.cls, cpu: m.cpu, gpu: gpuMembers[k],
-      familyParent: eq, familyShade: .45 * k / Math.max(1, cpu.members.length - 1),
-      sysCache: undefined, pathCache: undefined, traceTarget: undefined, orbitCache: undefined, orbitPending: undefined }));
+    children = cpu.members.map((m, k) => ({
+      ...eq,
+      id: familyId--,
+      cls: m.cls,
+      cpu: m.cpu,
+      gpu: gpuMembers[k],
+      familyParent: eq,
+      familyShade: (0.45 * k) / Math.max(1, cpu.members.length - 1),
+      sysCache: undefined,
+      pathCache: undefined,
+      traceTarget: undefined,
+      orbitCache: undefined,
+      orbitPending: undefined,
+    }));
     familyRows.set(cls, children);
   }
   // The row's own display choices (colour, toggles) change without a new
@@ -621,11 +657,23 @@ function renderMembers(eq: Equation): Equation[] {
   }
   return children;
 }
-const familyShared = ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum, barMode }: Equation) =>
-  ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum, barMode });
+const familyShared = ({
+  colorIndex,
+  showArrows,
+  showStreamlines,
+  certify,
+  showLevels,
+  combK,
+  combT,
+  partialSum,
+  barMode,
+}: Equation) => ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum, barMode });
 
-const rowColor = (eq: Equation): [number, number, number] => theme.palette[eq.colorIndex].map(c => c + (1 - c) * (eq.familyShade ?? 0)) as [number, number, number];
-const liveRow = (eq: Equation) => equations.includes(eq.familyParent ?? eq) && (!eq.familyParent || (!!eq.familyParent.cls && renderMembers(eq.familyParent).includes(eq)));
+const rowColor = (eq: Equation): [number, number, number] =>
+  theme.palette[eq.colorIndex].map(c => c + (1 - c) * (eq.familyShade ?? 0)) as [number, number, number];
+const liveRow = (eq: Equation) =>
+  equations.includes(eq.familyParent ?? eq) &&
+  (!eq.familyParent || (!!eq.familyParent.cls && renderMembers(eq.familyParent).includes(eq)));
 
 function render() {
   if (!syncCanvasSize()) return;
@@ -644,8 +692,13 @@ function render() {
     if (!eq.cls || eq.error) continue;
     try {
       const text = plotReadout(eq.cpu!, { ...constEnv, t: time });
-      if (text !== null && text !== eq.info) { eq.info = text; if (eq.infoEl) eq.infoEl.textContent = text; }
-    } catch { /* incomplete values while editing */ }
+      if (text !== null && text !== eq.info) {
+        eq.info = text;
+        if (eq.infoEl) eq.infoEl.textContent = text;
+      }
+    } catch {
+      /* incomplete values while editing */
+    }
   }
 
   for (const eq of active) {
@@ -653,8 +706,11 @@ function render() {
     const plot = eq.cpu!;
     eq.trail ??= new PointTrail(plot.dim);
     let point: number[];
-    try { point = plot.coords.map(c => evaluate(c, { ...constEnv, t: time })); }
-    catch { point = Array(plot.dim).fill(NaN); }
+    try {
+      point = plot.coords.map(c => evaluate(c, { ...constEnv, t: time }));
+    } catch {
+      point = Array(plot.dim).fill(NaN);
+    }
     eq.trail.sample(time, point);
   }
 
@@ -698,11 +754,24 @@ function render() {
   // RK4 streamline of the normalized field through (x0, y0), both directions.
   // Normalizing makes it a direction field: uniform arc-length steps, and the
   // same trajectories (dy/dx = f slope fields integrate as (1, f) normalized).
-  const integralCurve = (comps: [Expr, Expr], x0: number, y0: number, time: number, uniforms: Record<string, number> = {}): number[] => {
+  const integralCurve = (
+    comps: [Expr, Expr],
+    x0: number,
+    y0: number,
+    time: number,
+    uniforms: Record<string, number> = {},
+  ): number[] => {
     const w = 1.5 * gl.drawingBufferWidth * view.upp;
-    const h = 1.5 * gl.drawingBufferHeight * view.upp / (view.ratio ?? 1);
-    return streamline(fieldEvaluator(comps, { ...constEnv, ...uniforms, t: time }), [x0, y0], 2.5 * view.upp,
-      [view.cx - w, view.cy - h], [view.cx + w, view.cy + h], ODE_STEPS, [1, view.ratio ?? 1]).flat();
+    const h = (1.5 * gl.drawingBufferHeight * view.upp) / (view.ratio ?? 1);
+    return streamline(
+      fieldEvaluator(comps, { ...constEnv, ...uniforms, t: time }),
+      [x0, y0],
+      2.5 * view.upp,
+      [view.cx - w, view.cy - h],
+      [view.cx + w, view.cy + h],
+      ODE_STEPS,
+      [1, view.ratio ?? 1],
+    ).flat();
   };
 
   const samplePoint = (eq: Equation): number[] | null => {
@@ -754,21 +823,33 @@ function render() {
       eq.orbitPending = key;
       let orbit: OrbitInput;
       try {
-        orbit = orbitInput(defs, plot.paths, plot.series, evaluate(plot.from, constEnv), evaluate(plot.to, constEnv), constEnv);
+        orbit = orbitInput(
+          defs,
+          plot.paths,
+          plot.series,
+          evaluate(plot.from, constEnv),
+          evaluate(plot.to, constEnv),
+          constEnv,
+        );
       } catch (e) {
         (eq.familyParent ?? eq).error = e instanceof Error ? e.message : String(e);
         reconcile();
         return [];
       }
-      traceQueue.request(eq.id, key, { kind: 'orbit', orbit, residuals: [], dim: plot.dim, lo: [], hi: [], env: {} }, result => {
-        if (!liveRow(eq) || eq.orbitPending !== key) return;
-        eq.orbitPending = undefined;
-        if (result.error) {
-          (eq.familyParent ?? eq).error = result.error;
-          reconcile();
-        } else eq.orbitCache = { key, pts: result.pts };
-        requestRender();
-      });
+      traceQueue.request(
+        eq.id,
+        key,
+        { kind: 'orbit', orbit, residuals: [], dim: plot.dim, lo: [], hi: [], env: {} },
+        result => {
+          if (!liveRow(eq) || eq.orbitPending !== key) return;
+          eq.orbitPending = undefined;
+          if (result.error) {
+            (eq.familyParent ?? eq).error = result.error;
+            reconcile();
+          } else eq.orbitCache = { key, pts: result.pts };
+          requestRender();
+        },
+      );
     }
     return c?.pts ?? [];
   };
@@ -803,8 +884,10 @@ function render() {
     if (eq.cpu!.type === 'vfield3d' && eq.showArrows) {
       traceQueue.cancelPending(eq.id);
       try {
-        return traceField(residuals, lo, hi, { ...constEnv, t: time }, true)
-          .flatMap(path => [...path, Array(dim).fill(NaN)]);
+        return traceField(residuals, lo, hi, { ...constEnv, t: time }, true).flatMap(path => [
+          ...path,
+          Array(dim).fill(NaN),
+        ]);
       } catch (e) {
         (eq.familyParent ?? eq).error = e instanceof Error ? e.message : String(e);
         reconcile();
@@ -820,38 +903,78 @@ function render() {
     const { env: envKey, stableEnv } = environment(constEnv, traceTime);
     const key = systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + !!eq.certify;
     const c = eq.sysCache;
-    if (c && c.key === key && c.text === eq.text && c.env === envKey && c.lo.length === dim
-      && vlo.every((v, k) => c.lo[k] <= v && c.hi[k] >= vhi[k] && c.hi[k] - c.lo[k] <= 6 * (vhi[k] - v))) {
+    if (
+      c &&
+      c.key === key &&
+      c.text === eq.text &&
+      c.env === envKey &&
+      c.lo.length === dim &&
+      vlo.every((v, k) => c.lo[k] <= v && c.hi[k] >= vhi[k] && c.hi[k] - c.lo[k] <= 6 * (vhi[k] - v))
+    ) {
       eq.traceTarget = undefined;
       traceQueue.cancelPending(eq.id);
       return c.pts;
     }
-    if ((eq.cpu!.type === 'system' && eq.cpu!.parametric) || eq.cpu!.type === 'vfield3d' || eq.cpu!.type === 'spacecurve' || (eq.cpu!.type === 'system' && eq.certify)) {
+    if (
+      (eq.cpu!.type === 'system' && eq.cpu!.parametric) ||
+      eq.cpu!.type === 'vfield3d' ||
+      eq.cpu!.type === 'spacecurve' ||
+      (eq.cpu!.type === 'system' && eq.certify)
+    ) {
       const jobKey = JSON.stringify([key, envKey, lo, hi]);
       const target = JSON.stringify([key, stableEnv, lo, hi]);
       const retraceMs = eq.cpu!.type === 'vfield3d' ? 50 : 250;
-      if ((eq.cpu!.type === 'vfield3d' || eq.certify) && eq.traceTarget === target && performance.now() - (eq.traceClock ?? -Infinity) < retraceMs) return c && c.stableEnv === stableEnv ? c.pts : [];
-      eq.traceTarget = target; eq.traceClock = performance.now();
-      if (eq.certify && eq.info !== 'Certifying search box…') { eq.info = 'Certifying search box…'; reconcile(); }
-      traceQueue.request(eq.id, jobKey, {
-        residuals, dim, lo, hi, env: { ...constEnv, t: traceTime },
-        kind: eq.certify ? 'certify' : eq.cpu!.type === 'spacecurve' ? 'intersection' : eq.cpu!.type === 'vfield3d' ? 'field' : 'system', glyphs: eq.showArrows,
-        angular: eq.cpu!.type === 'system' ? eq.cpu!.angular : undefined,
-      }, result => {
-        // A result for edited/deleted math must never restore an old curve.
-        if (!liveRow(eq) || !eq.cls || systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + !!eq.certify !== key) return;
-        // A trace from a briefly zoomed-in view must not replace the full
-        // curve after the user zooms back out. Only moving values may lag.
-        if (eq.traceTarget !== target) return;
-        if (result.error) {
-          (eq.familyParent ?? eq).error = result.error;
-          reconcile();
-        } else {
-          eq.sysCache = { key, text: eq.text, env: envKey, stableEnv, lo, hi, pts: result.pts };
-          if (result.info) { eq.info = result.info; reconcile(); }
-        }
-        requestRender();
-      });
+      if (
+        (eq.cpu!.type === 'vfield3d' || eq.certify) &&
+        eq.traceTarget === target &&
+        performance.now() - (eq.traceClock ?? -Infinity) < retraceMs
+      )
+        return c && c.stableEnv === stableEnv ? c.pts : [];
+      eq.traceTarget = target;
+      eq.traceClock = performance.now();
+      if (eq.certify && eq.info !== 'Certifying search box…') {
+        eq.info = 'Certifying search box…';
+        reconcile();
+      }
+      traceQueue.request(
+        eq.id,
+        jobKey,
+        {
+          residuals,
+          dim,
+          lo,
+          hi,
+          env: { ...constEnv, t: traceTime },
+          kind: eq.certify
+            ? 'certify'
+            : eq.cpu!.type === 'spacecurve'
+              ? 'intersection'
+              : eq.cpu!.type === 'vfield3d'
+                ? 'field'
+                : 'system',
+          glyphs: eq.showArrows,
+          angular: eq.cpu!.type === 'system' ? eq.cpu!.angular : undefined,
+        },
+        result => {
+          // A result for edited/deleted math must never restore an old curve.
+          if (!liveRow(eq) || !eq.cls || systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + !!eq.certify !== key)
+            return;
+          // A trace from a briefly zoomed-in view must not replace the full
+          // curve after the user zooms back out. Only moving values may lag.
+          if (eq.traceTarget !== target) return;
+          if (result.error) {
+            (eq.familyParent ?? eq).error = result.error;
+            reconcile();
+          } else {
+            eq.sysCache = { key, text: eq.text, env: envKey, stableEnv, lo, hi, pts: result.pts };
+            if (result.info) {
+              eq.info = result.info;
+              reconcile();
+            }
+          }
+          requestRender();
+        },
+      );
       // Keep projecting existing world-space geometry during pan/zoom.
       // Constants changing invalidate it; animated rows use the last completed
       // frame while their next trace runs in the worker.
@@ -859,7 +982,8 @@ function render() {
       return c && c.key === key && sameEnv ? c.pts : [];
     }
     const pts = solveSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, {
-      env: { ...constEnv, t: time }, angular: eq.cpu!.type === 'system' ? eq.cpu!.angular : undefined,
+      env: { ...constEnv, t: time },
+      angular: eq.cpu!.type === 'system' ? eq.cpu!.angular : undefined,
     });
     eq.sysCache = { key, text: eq.text, env: envKey, stableEnv, lo, hi, pts };
     return pts;
@@ -916,8 +1040,14 @@ function render() {
             if (flat.length >= 6) scene.curves.push({ pts: new Float32Array(flat), color, arrow: true });
           } else {
             let path: number[] = [];
-            const flush = () => { if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color, fade: true }); path = []; };
-            for (const p of pts) { if (p.every(Number.isFinite)) path.push(...p); else flush(); }
+            const flush = () => {
+              if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color, fade: true });
+              path = [];
+            };
+            for (const p of pts) {
+              if (p.every(Number.isFinite)) path.push(...p);
+              else flush();
+            }
             flush();
           }
           break;
@@ -926,7 +1056,10 @@ function render() {
           const dim = plot.dim ?? 2;
           if (plot.hull) {
             let sample = hullSamplers.get(plot);
-            if (!sample) { sample = hullGeometrySampler(plot.pts, dim, plot.over); hullSamplers.set(plot, sample); }
+            if (!sample) {
+              sample = hullGeometrySampler(plot.pts, dim, plot.over);
+              hullSamplers.set(plot, sample);
+            }
             const geometry = sample(constEnv, time);
             if (!geometry) break;
             const { mesh, edges } = geometry;
@@ -964,7 +1097,9 @@ function render() {
             try {
               const p = comps.map(c => evaluate(c, env));
               if (p.every(isFinite)) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
-            } catch { /* skip unevaluable points */ }
+            } catch {
+              /* skip unevaluable points */
+            }
           }
           break;
         }
@@ -973,8 +1108,14 @@ function render() {
           break;
         case 'orbit': {
           let path: number[] = [];
-          const flush = () => { if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color }); path = []; };
-          for (const p of orbitFor(eq)) { if (p.every(Number.isFinite)) path.push(p[0], p[1], p[2] ?? 0); else flush(); }
+          const flush = () => {
+            if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color });
+            path = [];
+          };
+          for (const p of orbitFor(eq)) {
+            if (p.every(Number.isFinite)) path.push(p[0], p[1], p[2] ?? 0);
+            else flush();
+          }
           flush();
           break;
         }
@@ -1003,7 +1144,9 @@ function render() {
             try {
               const r = evaluate(plot.tube, { ...constEnv, t: time });
               if (isFinite(r) && r > 0) radius = r;
-            } catch { /* unevaluable this frame: draw the bare curve */ }
+            } catch {
+              /* unevaluable this frame: draw the bare curve */
+            }
           }
           const combs = plot.dim === 3 && (eq.combK || eq.combT);
           if (radius <= 0 && !combs) {
@@ -1027,7 +1170,9 @@ function render() {
           if (eq.combT) {
             // Signed teeth along ±B expose where torsion changes hand.
             const tColor: [number, number, number] = [
-              color[0] * 0.45 + 0.25, color[1] * 0.45 + 0.25, color[2] * 0.45 + 0.25,
+              color[0] * 0.45 + 0.25,
+              color[1] * 0.45 + 0.25,
+              color[2] * 0.45 + 0.25,
             ];
             const comb = buildComb(pts, fr.frenetBinormal, fr.tau, combScale(fr.tau, extent), COMB_STEP);
             scene.segments.push({ pts: comb.teeth, color: tColor });
@@ -1057,8 +1202,18 @@ function render() {
   } else {
     r3d.clearGeometry();
     const layers: Required<Layers2D> = {
-      levels: [], cells: [], fractals: [], domains: [], colors: [], conformals: [], vfields: [],
-      ineqs: [], bifs: [], scalars: [], complexes: [], curves: [],
+      levels: [],
+      cells: [],
+      fractals: [],
+      domains: [],
+      colors: [],
+      conformals: [],
+      vfields: [],
+      ineqs: [],
+      bifs: [],
+      scalars: [],
+      complexes: [],
+      curves: [],
     };
     const extras: Overlay2D = { points: [], polylines: [], bars: [], clouds: [] };
     // Spacing for any level-set family (custom grids, contour stacks): sample
@@ -1071,8 +1226,10 @@ function render() {
     const stemPx = 1 / (view.upp * dpr); // CSS px between consecutive whole numbers
     const viewPts: Array<[number, number]> = [
       [view.cx, view.cy],
-      [view.cx - halfW / 2, view.cy], [view.cx + halfW / 2, view.cy],
-      [view.cx, view.cy - halfH / 2], [view.cx, view.cy + halfH / 2],
+      [view.cx - halfW / 2, view.cy],
+      [view.cx + halfW / 2, view.cy],
+      [view.cx, view.cy - halfH / 2],
+      [view.cx, view.cy + halfH / 2],
     ];
     const env: Record<string, number> = { ...constEnv, t: time };
     const seedOf = (a0Name?: string): number => (a0Name !== undefined ? constEnv[a0Name] : undefined) ?? 0.5;
@@ -1092,16 +1249,36 @@ function render() {
             const f = plot.levels;
             const shader = gpuFor(eq, 'implicit2d').levels!;
             const sp = levelSpacing(f);
-            layers.levels.push({ glsl: shader.glsl, gradGlsl: shader.gradGlsl, params: f.params, major: sp.major, minor: sp.minor, color });
+            layers.levels.push({
+              glsl: shader.glsl,
+              gradGlsl: shader.gradGlsl,
+              params: f.params,
+              major: sp.major,
+              minor: sp.minor,
+              color,
+            });
           }
           break;
-        case 'ineq2d': layers.ineqs.push({ ...gpuFor(eq, 'ineq2d'), color, params, uniforms }); break;
-        case 'scalar2d': layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms }); break;
-        case 'complex2d': layers.complexes.push({ ...gpuFor(eq, 'complex2d'), color, params, uniforms }); break;
-        case 'domain2d': layers.domains.push({ ...gpuFor(eq, 'domain2d'), color, params, uniforms }); break;
-        case 'rgb2d': case 'hsl2d': case 'oklch2d':
-          layers.colors.push({ ...gpuFor(eq, plot.type), color, params, uniforms }); break;
-        case 'conformal2d': layers.conformals.push({ ...gpuFor(eq, 'conformal2d'), color, params, uniforms }); break;
+        case 'ineq2d':
+          layers.ineqs.push({ ...gpuFor(eq, 'ineq2d'), color, params, uniforms });
+          break;
+        case 'scalar2d':
+          layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms });
+          break;
+        case 'complex2d':
+          layers.complexes.push({ ...gpuFor(eq, 'complex2d'), color, params, uniforms });
+          break;
+        case 'domain2d':
+          layers.domains.push({ ...gpuFor(eq, 'domain2d'), color, params, uniforms });
+          break;
+        case 'rgb2d':
+        case 'hsl2d':
+        case 'oklch2d':
+          layers.colors.push({ ...gpuFor(eq, plot.type), color, params, uniforms });
+          break;
+        case 'conformal2d':
+          layers.conformals.push({ ...gpuFor(eq, 'conformal2d'), color, params, uniforms });
+          break;
         case 'fractal2d':
           layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
           break;
@@ -1113,12 +1290,18 @@ function render() {
           });
           break;
         }
-        case 'orbit': extras.polylines.push({ pts: orbitFor(eq).flat(), color: css }); break;
+        case 'orbit':
+          extras.polylines.push({ pts: orbitFor(eq).flat(), color: css });
+          break;
         case 'automaton': {
           const key = JSON.stringify([...(eq.cls?.params ?? []).map(p => env[p]), eq.cls?.animated ? time : 0]);
           if (eq.cellCache?.plan !== plot || eq.cellCache.key !== key) {
             const grid = runAutomaton(plot, env);
-            eq.cellCache = { plan: plot, key, cells: { shades: cellShades(grid), width: grid.width, rows: grid.rows, x0: grid.x0, color } };
+            eq.cellCache = {
+              plan: plot,
+              key,
+              cells: { shades: cellShades(grid), width: grid.width, rows: grid.rows, x0: grid.x0, color },
+            };
           }
           layers.cells.push({ ...eq.cellCache.cells, color });
           break;
@@ -1129,7 +1312,9 @@ function render() {
           if (p) extras.points.push({ x: p[0], y: p[1], color: css });
           break;
         }
-        case 'pcurve': extras.polylines.push({ pts: sampleCurve(eq, 2), color: css }); break;
+        case 'pcurve':
+          extras.polylines.push({ pts: sampleCurve(eq, 2), color: css });
+          break;
         case 'polygon': {
           let pts: number[];
           try {
@@ -1159,7 +1344,11 @@ function render() {
         case 'vlist': {
           plot.values.forEach((expr, k) => {
             let v: number;
-            try { v = evaluate(expr, env); } catch { return; }
+            try {
+              v = evaluate(expr, env);
+            } catch {
+              return;
+            }
             if (!isFinite(v)) return;
             if (eq.barMode) extras.bars!.push({ x: k + 1, y: v, halfWidth: 0.35, color: css });
             else extras.points.push({ x: k + 1, y: v, color: css, r: 4 });
@@ -1176,7 +1365,9 @@ function render() {
               const px = evaluate(comps[0], env);
               const py = evaluate(comps[1], env);
               if (isFinite(px) && isFinite(py)) extras.points.push({ x: px, y: py, color: css, r, bare: dense });
-            } catch { /* skip unevaluable points */ }
+            } catch {
+              /* skip unevaluable points */
+            }
           }
           break;
         }
@@ -1225,7 +1416,11 @@ function render() {
           // partial sum stops there so the running total does not freeze.
           const termAt = (n: number): number | undefined => {
             env[plot.index] = n;
-            try { return evaluate(plot.term, env); } catch { return undefined; }
+            try {
+              return evaluate(plot.term, env);
+            } catch {
+              return undefined;
+            }
           };
           const nEnd = Math.min(Math.floor(xmax), eq.partialSum ? 20000 : 100000);
           const n0 = Math.max(0, Math.ceil(xmin));
@@ -1236,7 +1431,10 @@ function render() {
             for (let n = 0; n <= nEnd; n++) {
               const v = termAt(n);
               if (v === undefined) break;
-              if (isFinite(v)) { sum += v; started = true; }
+              if (isFinite(v)) {
+                sum += v;
+                started = true;
+              }
               if (started && n >= n0 && (n - n0) % step === 0) {
                 extras.points.push({ x: n, y: sum, color: css, r: 3.5 });
               }
@@ -1264,7 +1462,11 @@ function render() {
           for (let k = 0; k < 80; k++) {
             env[plot.recVar] = a;
             let b: number;
-            try { b = evaluate(plot.f, env); } catch { break; }
+            try {
+              b = evaluate(plot.f, env);
+            } catch {
+              break;
+            }
             if (!isFinite(b) || Math.abs(b) > 1e9) break;
             pts.push(a, b, b, b);
             a = b;
@@ -1275,13 +1477,20 @@ function render() {
           break;
         }
         case 'bifurcation':
-          layers.bifs.push({ field: gpuFor(eq, 'bifurcation').field, color, params, uniforms: { uSeed: seedOf(plot.a0Name) } });
+          layers.bifs.push({
+            field: gpuFor(eq, 'bifurcation').field,
+            color,
+            params,
+            uniforms: { uSeed: seedOf(plot.a0Name) },
+          });
           break;
         case 'density': {
           let c: DensityCurve | null = null;
           try {
             c = rvSys.curve(plot.rv, env, { lo: xmin, hi: xmax });
-          } catch { break; /* a parameter is missing this frame */ }
+          } catch {
+            break; /* a parameter is missing this frame */
+          }
           if (!c) break;
           if (c.pts.length >= 4) extras.polylines.push({ pts: c.pts, color: css, width: 2 });
           // Point masses draw as probability stems (height = mass, not density).
@@ -1312,7 +1521,13 @@ function render() {
             // Only real edges are stroked: not where the window cut the range.
             const tint = run.sign > 0 ? color : minus;
             const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH);
-            extras.polylines.push({ pts: fill, color: cssColor(tint), closed: true, fill: cssColorA(tint, 0.16), noStroke: true });
+            extras.polylines.push({
+              pts: fill,
+              color: cssColor(tint),
+              closed: true,
+              fill: cssColorA(tint, 0.16),
+              noStroke: true,
+            });
             extras.polylines.push({ pts: stroke, color: cssColor(tint) });
           }
           break;
@@ -1324,7 +1539,9 @@ function render() {
             for (const run of rvSys.pmfRuns(plot.rv, env, { lo: xmin, hi: xmax }) ?? []) {
               pushStems(extras, run, color, false, stemPx);
             }
-          } catch { /* a parameter is missing this frame */ }
+          } catch {
+            /* a parameter is missing this frame */
+          }
           break;
         }
         case 'prob': {
@@ -1347,7 +1564,9 @@ function render() {
             if (poly) {
               extras.polylines.push({ pts: poly, color: css, closed: true, fill: cssColorA(color, 0.16) });
             }
-          } catch { /* not evaluable this frame */ }
+          } catch {
+            /* not evaluable this frame */
+          }
           break;
         }
         case 'expect': {
@@ -1359,18 +1578,29 @@ function render() {
             if (!mark) break;
             if (mark.h > 0) extras.polylines.push({ pts: [mark.x, 0, mark.x, mark.h], color: css, width: 2 });
             extras.points.push({ x: mark.x, y: mark.h, color: css, r: 4 });
-          } catch { /* not evaluable this frame */ }
+          } catch {
+            /* not evaluable this frame */
+          }
           break;
         }
         case 'system':
           // A 3-unknown system forces the 3D view, so only 2D lands here.
           if (plot.dim === 2) {
             const points = solveFor(eq, 2, plot.residuals);
-            if (plot.parametric) { extras.polylines.push({ pts: points.flat(), color: css }); break; }
+            if (plot.parametric) {
+              extras.polylines.push({ pts: points.flat(), color: css });
+              break;
+            }
             const set = coordinatePointWriter(eq, plot.coordinates);
             points.forEach((p, i) => {
               const key = `sys${eq.id}:${i}`;
-              extras.points.push({ x: p[0], y: p[1], color: css, hot: hotPoint === key, label: complexRootLabel(plot.complexEquation, p, env) });
+              extras.points.push({
+                x: p[0],
+                y: p[1],
+                color: css,
+                hot: hotPoint === key,
+                label: complexRootLabel(plot.complexEquation, p, env),
+              });
               if (set) grabs.push({ key, x: p[0], y: p[1], edits: true, set });
             });
           }
@@ -1398,13 +1628,18 @@ function render() {
     }
     // A seed is one grabbable point however many fields trace a curve from it.
     if (layers.vfields.length) {
-      drops.forEach((d, i) => grabs.push({
-        key: `drop${i}`,
-        x: d.x,
-        y: d.y,
-        edits: false,
-        set: (x, y) => { d.x = x; d.y = y; },
-      }));
+      drops.forEach((d, i) =>
+        grabs.push({
+          key: `drop${i}`,
+          x: d.x,
+          y: d.y,
+          edits: false,
+          set: (x, y) => {
+            d.x = x;
+            d.y = y;
+          },
+        }),
+      );
     }
     let gridSpecs: GridSpec[] | undefined;
     if (gridFields.length) {
@@ -1419,13 +1654,18 @@ function render() {
   }
   grabbable = grabs;
 
-  const gridAnimated = mode === '2d'
-    && gridFields.some(f => freeVars(f.expr).has('t') || (defsAnimated && f.params.length > 0));
+  const gridAnimated =
+    mode === '2d' && gridFields.some(f => freeVars(f.expr).has('t') || (defsAnimated && f.params.length > 0));
   // A state system is never at rest: keep frames coming so it keeps stepping.
   // Streamlines drift downstream even through a field that holds still.
-  const streamlinesAnimated = mode === '3d' && active.some(e => e.cpu!.type === 'vfield3d' && e.gpu?.type === 'vfield3d' && e.showStreamlines);
-  if (stateSys || gridAnimated || streamlinesAnimated
-    || active.some(e => e.cls!.animated || (defsAnimated && e.cls!.params.length > 0))) {
+  const streamlinesAnimated =
+    mode === '3d' && active.some(e => e.cpu!.type === 'vfield3d' && e.gpu?.type === 'vfield3d' && e.showStreamlines);
+  if (
+    stateSys ||
+    gridAnimated ||
+    streamlinesAnimated ||
+    active.some(e => e.cls!.animated || (defsAnimated && e.cls!.params.length > 0))
+  ) {
     requestRender();
   }
   capture?.afterFrame();
@@ -1448,8 +1688,10 @@ let trailDocument = '';
 function resetEditedTrails() {
   // Framing and comment edits preserve trails; changing the math starts a
   // fresh observation so unrelated runs never get joined by a false segment.
-  const mathText = equations.map(eq => stripNote(eq.text).trim()).filter(text =>
-    text && !text.startsWith('#') && !/^(view|camera)\s*\(/i.test(text)).join('\n');
+  const mathText = equations
+    .map(eq => stripNote(eq.text).trim())
+    .filter(text => text && !text.startsWith('#') && !/^(view|camera)\s*\(/i.test(text))
+    .join('\n');
   if (mathText !== trailDocument) {
     for (const eq of equations) eq.trail = undefined;
     trailDocument = mathText;
@@ -1475,9 +1717,12 @@ function recompileAll() {
   resetEditedTrails();
   // Preparation is independent of the running simulation and sampler. Keep
   // their caller-owned state across edits whose state-system key is unchanged.
-  const prepared = prepareDocument(equations.map(({ id, text }) => ({ id, text })), {
-    tables: ref => lookupFile(ref.file, ref.hash)?.table ?? null,
-  });
+  const prepared = prepareDocument(
+    equations.map(({ id, text }) => ({ id, text })),
+    {
+      tables: ref => lookupFile(ref.file, ref.hash)?.table ?? null,
+    },
+  );
   defs = prepared.defs;
   ensureTables(prepared.raw);
   sumBoundNames = prepared.sumBoundConsts;
@@ -1495,7 +1740,8 @@ function recompileAll() {
   gridFields = analysis.gridFields.map(spec => ({ ...compileGridCpu(spec), ...compileGridGpu(spec) }));
   wholeParamNames = rvSys.wholeParamNames();
   for (let i = 0; i < equations.length; i++) {
-    const eq = equations[i], row = analysis.rows[i];
+    const eq = equations[i],
+      row = analysis.rows[i];
     eq.cls = row.cls;
     eq.cpu = row.cpu;
     eq.gpu = row.gpu;
@@ -1509,11 +1755,17 @@ function recompileAll() {
 
     // Cloud capacity is a browser renderer limit, independent of analysis.
     const plot = eq.cpu;
-    if (!eq.error && plot && (plot.type === 'dscatter' || plot.type === 'plist')
-      && plot.dim === 3 && cloudPoints(plot) > CLOUD_3D_MAX) {
-      eq.error = `A 3D cloud draws at most ${CLOUD_3D_MAX} points;`
-        + ` that is ${cloudPoints(plot)}.`
-        + ' Filter it first, or plot two of the columns.';
+    if (
+      !eq.error &&
+      plot &&
+      (plot.type === 'dscatter' || plot.type === 'plist') &&
+      plot.dim === 3 &&
+      cloudPoints(plot) > CLOUD_3D_MAX
+    ) {
+      eq.error =
+        `A 3D cloud draws at most ${CLOUD_3D_MAX} points;` +
+        ` that is ${cloudPoints(plot)}.` +
+        ' Filter it first, or plot two of the columns.';
     }
   }
   defsAnimated = constsAnimated(defs) || defs.states.size > 0;
@@ -1528,8 +1780,9 @@ function recompileAll() {
       const points = cloudPoints(eq.cpu!);
       if (points <= CLOUD_3D_MAX) continue;
       eq.cls = undefined;
-      eq.error = `This graph is 3D, where every point is a sprite: at most ${CLOUD_3D_MAX},`
-        + ` and this row has ${points}. Filter it, or drop the row that uses z.`;
+      eq.error =
+        `This graph is 3D, where every point is a sprite: at most ${CLOUD_3D_MAX},` +
+        ` and this row has ${points}. Filter it, or drop the row that uses z.`;
     }
   }
   rvSys.prune(); // sample caches of variables that no longer exist
@@ -1587,7 +1840,9 @@ function ensureTables(raw: Definition[]) {
         refreshRows();
       }
     })
-    .catch(() => { tableLoad = null; });
+    .catch(() => {
+      tableLoad = null;
+    });
 }
 
 /** Recompile and redraw after something outside the document changed (a file
@@ -1644,9 +1899,12 @@ function rowNameFor(base: string): string {
   // added moments ago have no def yet. Reading the stale defs gave two files
   // with the same stem (sales.csv, sales.tsv) the same name, and the second
   // row then lost to the duplicate check.
-  return freeTableName(base, new Set(equations
-    .map(eq => eq.def?.name ?? scanDefinition(stripNote(eq.text))?.name)
-    .filter((n): n is string => !!n)));
+  return freeTableName(
+    base,
+    new Set(
+      equations.map(eq => eq.def?.name ?? scanDefinition(stripNote(eq.text))?.name).filter((n): n is string => !!n),
+    ),
+  );
 }
 
 /**
@@ -1689,14 +1947,15 @@ async function openDataFiles(files: File[]) {
       if (text !== eq.text.trim()) eq.text = text;
     }
     if (pinnedElsewhere) {
-      added.push(`${loaded.file}: ${pinnedElsewhere} row${pinnedElsewhere === 1 ? '' : 's'}`
-        + ' pinned to other bytes kept — delete the hash there to use this file');
+      added.push(
+        `${loaded.file}: ${pinnedElsewhere} row${pinnedElsewhere === 1 ? '' : 's'}` +
+          ' pinned to other bytes kept — delete the hash there to use this file',
+      );
     }
     // Whether the bytes survive a reload is the same news on either path, and
     // it matters most on this one: a drop that answers "the file is not on
     // this device" would have to answer it again after every reload.
-    const fragile = loaded.durable ? ''
-      : ' (this browser is not storing files — it will be gone on reload)';
+    const fragile = loaded.durable ? '' : ' (this browser is not storing files — it will be gone on reload)';
     if (known) {
       added.push(`${loaded.file} reloaded${fragile}`);
       continue;
@@ -1736,10 +1995,12 @@ function showNotice(text: string) {
   // A live region: this is the ONLY feedback that a file parsed, failed, or
   // will not survive a reload, and it disappears after five seconds — with no
   // announcement, a screen-reader user has nothing to go back and read.
-  noticeEl ??= document.body.appendChild(Object.assign(document.createElement('div'), {
-    className: 'notice',
-    role: 'status',
-  }));
+  noticeEl ??= document.body.appendChild(
+    Object.assign(document.createElement('div'), {
+      className: 'notice',
+      role: 'status',
+    }),
+  );
   noticeEl.setAttribute('aria-live', 'polite');
   noticeEl.textContent = text;
   noticeEl.classList.add('show');
@@ -1906,7 +2167,11 @@ function sliderOf(eq: Equation): { def: NonNullable<Equation['def']>; rhs: strin
 /** The constants now, for a slider range whose ends use them: render()'s
  *  constEnv may not have run yet, and must not advance the states here. */
 function sliderEnv(): Record<string, number> {
-  try { return evaluateFrame(defs, graphTime(), stateVals); } catch { return { ...stateVals }; }
+  try {
+    return evaluateFrame(defs, graphTime(), stateVals);
+  } catch {
+    return { ...stateVals };
+  }
 }
 
 /** The row text with the slider moved to `v`: held to its range and step,
@@ -1931,7 +2196,10 @@ const lineEls = (): HTMLElement[] =>
  */
 function setLineText(line: HTMLElement, text: string) {
   const at = noteStart(text);
-  if (at < 0) { line.textContent = text; return; }
+  if (at < 0) {
+    line.textContent = text;
+    return;
+  }
   const note = document.createElement('span');
   note.className = 'eq-note';
   note.textContent = text.slice(at);
@@ -1988,10 +2256,7 @@ function setCaret(line: number, offset: number) {
 }
 
 /** Restore a (possibly multi-line) selection by character positions. */
-function setSelectionSpan(
-  start: { line: number; offset: number },
-  end: { line: number; offset: number },
-) {
+function setSelectionSpan(start: { line: number; offset: number }, end: { line: number; offset: number }) {
   const a = nodeAt(start.line, start.offset);
   const b = nodeAt(end.line, end.offset);
   if (a && b) getSelection()!.setBaseAndExtent(a.node, a.offset, b.node, b.offset);
@@ -2225,46 +2490,87 @@ function rowToggles(eq: Equation): RowToggle[] {
   const one = rowToggle(eq);
   if (eq.cpu?.type !== 'vfield3d') return one ? [one] : [];
   // Trajectories unless one of these is on; they exclude each other.
-  const retrace = () => { eq.sysCache = undefined; eq.traceTarget = undefined; traceQueue.cancelPending(eq.id); };
-  const streamlines: RowToggle[] = eq.gpu?.type !== 'vfield3d' ? [] : [{
-    label: 'streamlines', title: 'Fill space with short streamlines drifting along the field', on: !!eq.showStreamlines,
-    flip: () => { eq.showStreamlines = !eq.showStreamlines; eq.showArrows = false; retrace(); },
-  }];
-  return [...streamlines, {
-    label: 'arrows', title: 'Show a lattice of direction arrows', on: !!eq.showArrows,
-    flip: () => { eq.showArrows = !eq.showArrows; eq.showStreamlines = false; retrace(); },
-  }];
+  const retrace = () => {
+    eq.sysCache = undefined;
+    eq.traceTarget = undefined;
+    traceQueue.cancelPending(eq.id);
+  };
+  const streamlines: RowToggle[] =
+    eq.gpu?.type !== 'vfield3d'
+      ? []
+      : [
+          {
+            label: 'streamlines',
+            title: 'Fill space with short streamlines drifting along the field',
+            on: !!eq.showStreamlines,
+            flip: () => {
+              eq.showStreamlines = !eq.showStreamlines;
+              eq.showArrows = false;
+              retrace();
+            },
+          },
+        ];
+  return [
+    ...streamlines,
+    {
+      label: 'arrows',
+      title: 'Show a lattice of direction arrows',
+      on: !!eq.showArrows,
+      flip: () => {
+        eq.showArrows = !eq.showArrows;
+        eq.showStreamlines = false;
+        retrace();
+      },
+    },
+  ];
 }
 
 function rowToggle(eq: Equation): RowToggle | null {
-  if (eq.cpu?.type === 'system' && !eq.cpu!.parametric && !eq.cpu!.angular?.some(Boolean)) return {
-    label: 'certify search box', title: 'Prove roots and completeness in the bounded search box; unsupported functions remain unresolved', on: !!eq.certify,
-    flip: () => { eq.certify = !eq.certify; eq.info = eq.certify ? 'Certifying search box…' : undefined; eq.sysCache = undefined; eq.traceTarget = undefined; traceQueue.cancelPending(eq.id); },
-  };
+  if (eq.cpu?.type === 'system' && !eq.cpu!.parametric && !eq.cpu!.angular?.some(Boolean))
+    return {
+      label: 'certify search box',
+      title: 'Prove roots and completeness in the bounded search box; unsupported functions remain unresolved',
+      on: !!eq.certify,
+      flip: () => {
+        eq.certify = !eq.certify;
+        eq.info = eq.certify ? 'Certifying search box…' : undefined;
+        eq.sysCache = undefined;
+        eq.traceTarget = undefined;
+        traceQueue.cancelPending(eq.id);
+      },
+    };
   switch (eq.cpu?.type) {
     case 'sequence':
       return {
         label: 'Σ partial sums',
         title: 'Plot the partial sums S_N = Σ aₙ instead of the terms',
         on: !!eq.partialSum,
-        flip: () => { eq.partialSum = !eq.partialSum; },
+        flip: () => {
+          eq.partialSum = !eq.partialSum;
+        },
       };
     case 'vlist':
       return {
         label: 'bars',
         title: 'Draw the list as bars instead of dots',
         on: !!eq.barMode,
-        flip: () => { eq.barMode = !eq.barMode; },
+        flip: () => {
+          eq.barMode = !eq.barMode;
+        },
       };
     case 'dlist':
       // Bars only while the list is small enough to draw as shapes; past
       // that it is a cloud and a bar per point would be a solid block.
-      return eq.cpu!.values.length > CLOUD_MIN ? null : {
-        label: 'bars',
-        title: 'Draw the list as bars instead of dots',
-        on: !!eq.barMode,
-        flip: () => { eq.barMode = !eq.barMode; },
-      };
+      return eq.cpu!.values.length > CLOUD_MIN
+        ? null
+        : {
+            label: 'bars',
+            title: 'Draw the list as bars instead of dots',
+            on: !!eq.barMode,
+            flip: () => {
+              eq.barMode = !eq.barMode;
+            },
+          };
     default:
       return null;
   }
@@ -2399,7 +2705,8 @@ function reconcile() {
         }
         if (v < eq.sliderMin) eq.sliderMin = v;
         if (v > eq.sliderMax) eq.sliderMax = v;
-        lo = eq.sliderMin; hi = eq.sliderMax;
+        lo = eq.sliderMin;
+        hi = eq.sliderMax;
       }
       if (document.activeElement !== min) min.value = fmtNum(lo);
       if (document.activeElement !== max) max.value = fmtNum(hi);
@@ -2409,7 +2716,10 @@ function reconcile() {
       // likewise the n of Binomial(n, p), which no fraction is valid for, and
       // any constant written round(…).
       // Otherwise a round step (1, 2 or 5 × 10^k), so round values sit on it.
-      range.step = form.whole || sumBoundNames.has(sliderDef.name) || wholeParamNames.has(sliderDef.name) ? '1' : String(niceSpacing((hi - lo) / 400, 1).major);
+      range.step =
+        form.whole || sumBoundNames.has(sliderDef.name) || wholeParamNames.has(sliderDef.name)
+          ? '1'
+          : String(niceSpacing((hi - lo) / 400, 1).major);
       range.value = String(v);
       wanted.push(eq.sliderUI.box);
     }
@@ -2429,7 +2739,7 @@ function reconcile() {
     }
     const toggles = rowToggles(eq);
     if (toggles.length) {
-      const ui = eq.toggleUI ??= makeToggles();
+      const ui = (eq.toggleUI ??= makeToggles());
       const btns = toggles.map((toggle, k) => {
         const btn = toggleButton(eq, ui, k);
         btn.textContent = toggle.label;
@@ -2438,7 +2748,8 @@ function reconcile() {
         return btn;
       });
       // Only when the set changes: re-inserting would drop hover and focus.
-      if (btns.length !== ui.box.children.length || btns.some((b, k) => ui.box.children[k] !== b)) ui.box.replaceChildren(...btns);
+      if (btns.length !== ui.box.children.length || btns.some((b, k) => ui.box.children[k] !== b))
+        ui.box.replaceChildren(...btns);
       wanted.push(ui.box);
     }
     // A data row's readout is the handle on a preview of the file itself:
@@ -2477,10 +2788,10 @@ function reconcile() {
       eq.errorEl.title = wantsFile ? 'Choose the file' : '';
       eq.errorEl.onkeydown = wantsFile
         ? ev => {
-          if (ev.key !== 'Enter' && ev.key !== ' ') return;
-          ev.preventDefault();
-          pickDataFiles();
-        }
+            if (ev.key !== 'Enter' && ev.key !== ' ') return;
+            ev.preventDefault();
+            pickDataFiles();
+          }
         : null;
       if (wantsFile) {
         eq.errorEl.setAttribute('role', 'button');
@@ -2498,7 +2809,10 @@ function reconcile() {
       if (ref.nextSibling !== w) listEl.insertBefore(w, ref.nextSibling);
       ref = w;
     }
-    while (ref.nextSibling && !(ref.nextSibling instanceof HTMLElement && ref.nextSibling.classList.contains('eq-line'))) {
+    while (
+      ref.nextSibling &&
+      !(ref.nextSibling instanceof HTMLElement && ref.nextSibling.classList.contains('eq-line'))
+    ) {
       ref.nextSibling.remove();
     }
   });
@@ -2652,9 +2966,7 @@ function selectionSpan(): { start: { line: number; offset: number }; end: { line
   if (!listEl.contains(range.commonAncestorContainer)) return null;
   const a = posOf(range.startContainer, range.startOffset);
   const b = posOf(range.endContainer, range.endOffset);
-  return a.line < b.line || (a.line === b.line && a.offset <= b.offset)
-    ? { start: a, end: b }
-    : { start: b, end: a };
+  return a.line < b.line || (a.line === b.line && a.offset <= b.offset) ? { start: a, end: b } : { start: b, end: a };
 }
 
 /**
@@ -2908,8 +3220,7 @@ function selectionAsText(): string | null {
 // beforeinput events to the host. Document editing must ignore those: while
 // focus is in a widget input the document selection still points at whatever
 // line the caret last touched, so acting on it edits an unrelated equation.
-const fromWidget = (e: Event): boolean =>
-  e.target instanceof Element && e.target.closest('.eq-widget') !== null;
+const fromWidget = (e: Event): boolean => e.target instanceof Element && e.target.closest('.eq-widget') !== null;
 
 // First beforeinput listener: route undo/redo to our stack and capture the
 // pre-edit caret for the snapshot the upcoming 'input' event will push.
@@ -3170,7 +3481,12 @@ function openExample(text: string) {
   // An example is a fresh start: it replaces the whole document (undo brings
   // the old one back). Multi-row examples separate rows with ';' (the same
   // separator as the hash).
-  replaceDocument(splitStatements(text).map(s => s.trim()).filter(Boolean), true);
+  replaceDocument(
+    splitStatements(text)
+      .map(s => s.trim())
+      .filter(Boolean),
+    true,
+  );
 }
 
 function buildExamplesMenu() {
@@ -3218,11 +3534,19 @@ function snapToPixel(v: number, axis = 0): number {
  * place while a slider name moves through its own row. `commit` receives the
  * rewritten pair text.
  */
-function makePairWriter(pairText: string, commit: (pair: string) => void, round = snapToPixel, pinned?: ReadonlySet<string>): ((x: number, y: number) => void) | null {
+function makePairWriter(
+  pairText: string,
+  commit: (pair: string) => void,
+  round = snapToPixel,
+  pinned?: ReadonlySet<string>,
+): ((x: number, y: number) => void) | null {
   // A name moves only if it is a slider constant: a plain number in its own
   // row is the only right-hand side a drag knows how to rewrite.
-  const drag = dragAxes(pairText, p => equations.find(r =>
-    r.def?.kind === 'const' && r.def.name === p && sliderOf(r)), pinned);
+  const drag = dragAxes(
+    pairText,
+    p => equations.find(r => r.def?.kind === 'const' && r.def.name === p && sliderOf(r)),
+    pinned,
+  );
   if (!drag) return null;
   const { parts, axes } = drag;
   return (x, y) => {
@@ -3241,7 +3565,10 @@ function makePairWriter(pairText: string, commit: (pair: string) => void, round 
   };
 }
 
-const pointWriter = (eq: Equation) => makePairWriter(stripNote(eq.text), p => { eq.text = keepNote(eq.text, p); });
+const pointWriter = (eq: Equation) =>
+  makePairWriter(stripNote(eq.text), p => {
+    eq.text = keepNote(eq.text, p);
+  });
 
 /** Evaluate the named coordinates at the pointer before writing the RHS. */
 function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
@@ -3252,19 +3579,36 @@ function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
   const lhs = code.slice(0, at).trim();
   // Writing a slider that defines either chart coordinate changes the map
   // itself, so ordinary coordinate writeback cannot move that axis reliably.
-  const pinned = definitionDependencies(coords.flatMap(c => [...freeVars(c)]), defs);
-  const write = makePairWriter(code.slice(at + 1), p => { eq.text = keepNote(eq.text, `${lhs} = ${p}`); }, v => v, pinned);
+  const pinned = definitionDependencies(
+    coords.flatMap(c => [...freeVars(c)]),
+    defs,
+  );
+  const write = makePairWriter(
+    code.slice(at + 1),
+    p => {
+      eq.text = keepNote(eq.text, `${lhs} = ${p}`);
+    },
+    v => v,
+    pinned,
+  );
   if (!write) return null;
-  return coordinateDragWriter(coords, () => {
-    const time = graphTime();
-    return { ...currentConstEnv(time), t: time };
-  }, write, snapToPixel);
+  return coordinateDragWriter(
+    coords,
+    () => {
+      const time = graphTime();
+      return { ...currentConstEnv(time), t: time };
+    },
+    write,
+    snapToPixel,
+  );
 }
 
 /** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
 const defPointWriter = (eq: Equation) => {
   const def = eq.def as Definition & { kind: 'const' };
-  return makePairWriter(def.rhs, p => { eq.text = keepNote(eq.text, `${def.name} = ${p}`); });
+  return makePairWriter(def.rhs, p => {
+    eq.text = keepNote(eq.text, `${def.name} = ${p}`);
+  });
 };
 
 /** Push text a drag rewrote back into the editor lines. */
@@ -3287,7 +3631,7 @@ function toMath(clientX: number, clientY: number): [number, number] {
   const rect = canvas.getBoundingClientRect();
   const px = (clientX - rect.left - rect.width / 2) * dpr;
   const py = (rect.height / 2 - (clientY - rect.top)) * dpr;
-  return [view.cx + px * view.upp, view.cy + py * view.upp / (view.ratio ?? 1)];
+  return [view.cx + px * view.upp, view.cy + (py * view.upp) / (view.ratio ?? 1)];
 }
 
 /** The nearest grabbable point within GRAB_PX of a client position. */
@@ -3341,7 +3685,7 @@ function screenMap() {
   return {
     rect,
     toSx: (x: number) => (x - view.cx) / uppCss + rect.width / 2,
-    toSy: (y: number) => rect.height / 2 - (y - view.cy) * (view.ratio ?? 1) / uppCss,
+    toSy: (y: number) => rect.height / 2 - ((y - view.cy) * (view.ratio ?? 1)) / uppCss,
   };
 }
 
@@ -3405,9 +3749,10 @@ function computeSpecialPoints(eq: Equation) {
   const { halfW, halfH } = hoverHalfSpan();
   let expr = eq.cpu.equation;
   if (cls.params.length) {
-    expr = substVars(expr, Object.fromEntries(
-      cls.params.map(p => [p, { kind: 'num', value: constEnv[p] ?? 0 } as Expr]),
-    ));
+    expr = substVars(
+      expr,
+      Object.fromEntries(cls.params.map(p => [p, { kind: 'num', value: constEnv[p] ?? 0 } as Expr])),
+    );
   }
   const xlo = view.cx - halfW * 1.5;
   const xhi = view.cx + halfW * 1.5;
@@ -3429,9 +3774,17 @@ function pointsFor(eq: Equation): SpecialPoint[] {
   const { halfW, halfH } = hoverHalfSpan();
   const envKey = hoverEnvKey(cls);
   const c = eq.spCache;
-  if (c && c.text === eq.text && c.env === envKey
-    && c.xlo <= view.cx - halfW && c.xhi >= view.cx + halfW && c.xhi - c.xlo <= 6 * halfW
-    && c.ylo <= view.cy - halfH && c.yhi >= view.cy + halfH && c.yhi - c.ylo <= 6 * halfH) {
+  if (
+    c &&
+    c.text === eq.text &&
+    c.env === envKey &&
+    c.xlo <= view.cx - halfW &&
+    c.xhi >= view.cx + halfW &&
+    c.xhi - c.xlo <= 6 * halfW &&
+    c.ylo <= view.cy - halfH &&
+    c.yhi >= view.cy + halfH &&
+    c.yhi - c.ylo <= 6 * halfH
+  ) {
     return c.pts;
   }
   scheduleSpecialPoints(eq);
@@ -3632,8 +3985,10 @@ canvas.addEventListener('pointermove', e => {
   } else if (panning) {
     // Pan the target in the camera's screen plane.
     const s = camera.radius * 0.0022;
-    const ct = Math.cos(camera.theta), st = Math.sin(camera.theta);
-    const sp = Math.sin(camera.phi), cp = Math.cos(camera.phi);
+    const ct = Math.cos(camera.theta),
+      st = Math.sin(camera.theta);
+    const sp = Math.sin(camera.phi),
+      cp = Math.cos(camera.phi);
     // right = (-sinθ, cosθ, 0); up = (-cosθ·sinφ, -sinθ·sinφ, cosφ)
     camera.target[0] += (st * dx + ct * sp * dy) * s;
     camera.target[1] += (-ct * dx + st * sp * dy) * s;
@@ -3699,12 +4054,16 @@ canvas.addEventListener('dblclick', () => {
   requestRender();
 });
 
-canvas.addEventListener('wheel', e => {
-  e.preventDefault();
-  setHover(null);
-  const factor = Math.exp(Math.max(-60, Math.min(60, e.deltaY)) * 0.002);
-  zoomAt(e.clientX, e.clientY, factor);
-}, { passive: false });
+canvas.addEventListener(
+  'wheel',
+  e => {
+    e.preventDefault();
+    setHover(null);
+    const factor = Math.exp(Math.max(-60, Math.min(60, e.deltaY)) * 0.002);
+    zoomAt(e.clientX, e.clientY, factor);
+  },
+  { passive: false },
+);
 
 // touch-action stops the viewport pinch-zoom everywhere it is honored, but
 // WebKit still runs its own two-finger zoom off these non-standard gesture
@@ -3772,10 +4131,7 @@ initPanelSwipe(
 
 // Drag the strip on the panel's outer vertical edge to resize it (the width
 // persists; double-click resets).
-initPanelResize(
-  document.getElementById('panel')!,
-  document.getElementById('panel-resize')!,
-);
+initPanelResize(document.getElementById('panel')!, document.getElementById('panel-resize')!);
 
 // --- boot ---
 
@@ -3795,8 +4151,11 @@ const initialPayload = urlPayload();
 const initialRows = decodePayload(initialPayload);
 if (initialRows.length) initialRows.forEach(t => addEquation(t));
 else if (!embedded) {
-  try { emptyDefault = nextFeatured(localStorage).eqs; }
-  catch { emptyDefault = nextFeatured(null).eqs; }
+  try {
+    emptyDefault = nextFeatured(localStorage).eqs;
+  } catch {
+    emptyDefault = nextFeatured(null).eqs;
+  }
   emptyDefault.forEach(t => addEquation(t));
 }
 recompileAll();
@@ -3842,7 +4201,10 @@ void refreshFileMenu();
 if (!embedded) {
   document.getElementById('try-another')?.addEventListener('click', () => {
     const store = typeof localStorage === 'undefined' ? null : localStorage;
-    emptyDefault = nextFeatured(store, equations.map(e => e.text)).eqs;
+    emptyDefault = nextFeatured(
+      store,
+      equations.map(e => e.text),
+    ).eqs;
     replaceDocument(emptyDefault, true);
   });
 
@@ -3857,87 +4219,99 @@ if (!embedded) {
     onRecording(on) {
       recBtn?.classList.toggle('recording', on);
       recBtn?.setAttribute('aria-pressed', on ? 'true' : 'false');
-      recBtn?.setAttribute('title', on
-        ? 'Stop recording'
-        : 'Record the graph as video (up to 8 seconds)');
+      recBtn?.setAttribute('title', on ? 'Stop recording' : 'Record the graph as video (up to 8 seconds)');
     },
   });
-  shotBtn?.addEventListener('click', e => { void capture?.snapshot(e.shiftKey); });
-  if (!capture.mime && recBtn) recBtn.hidden = true;
-  else recBtn?.addEventListener('click', () => {
-    if (capture?.isRecording()) capture.stopRecording();
-    else capture?.startRecording();
+  shotBtn?.addEventListener('click', e => {
+    void capture?.snapshot(e.shiftKey);
   });
+  if (!capture.mime && recBtn) recBtn.hidden = true;
+  else
+    recBtn?.addEventListener('click', () => {
+      if (capture?.isRecording()) capture.stopRecording();
+      else capture?.startRecording();
+    });
 }
 
 if (mcpApp) {
-  void import('./mcp-app.ts').then(({ connectGraphApp }) => connectGraphApp({
-    getRows: () => equations.map(e => e.text),
-    setRows: rows => {
-      // A new tool result replaces the document, including its undo history.
-      // Pending gestures belong to the old document, not the incoming rows.
-      resetViewport();
-      restartGraphClock();
-      if (urlTimer !== null) clearTimeout(urlTimer);
-      urlTimer = null;
-      urlPending = false;
-      undoStack.length = redoStack.length = 0;
-      equations.length = 0;
-      rows.forEach(t => addEquation(t));
-      recompileAll();
-      resetState();
-      renderAll();
-      requestRender();
-    },
-    onChange: cb => { graphChanged = cb; },
-    onEdit: cb => { graphEdited = cb; },
-    setVisible: setGraphVisible,
-    flush: flushViewportWriteback,
-    dispose: () => {
-      if (rendererDisposed) return;
-      rendererDisposed = true;
-      r3d.clearGeometry();
-      canvasSizeObserver.disconnect();
-      window.removeEventListener('resize', resize);
-      cancelRender();
-      graphChanged = undefined;
-      graphEdited = undefined;
-      if (urlTimer !== null) clearTimeout(urlTimer);
-      if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
-      if (noticeTimer !== null) clearTimeout(noticeTimer);
-      urlTimer = viewportWriteTimer = noticeTimer = null;
-      urlPending = false;
-      spGen++;
-      spQueue.clear();
-      if (spSlot !== null) {
-        if (typeof cancelIdleCallback === 'function') cancelIdleCallback(spSlot);
-        else clearTimeout(spSlot);
-        spSlot = null;
-      }
-      traceQueue.clear();
-      if (traceWorker) {
-        traceWorker.onmessage = traceWorker.onerror = traceWorker.onmessageerror = null;
-        traceWorker.terminate();
-        traceWorker = undefined;
-      }
-      // Release cached GPU programs/buffers together; this renderer will
-      // never be resumed after the host has requested teardown.
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
-    },
-  })).catch(() => {
-    document.getElementById('app-status')!.textContent = 'Could not connect the graph. Try again.';
-  });
+  void import('./mcp-app.ts')
+    .then(({ connectGraphApp }) =>
+      connectGraphApp({
+        getRows: () => equations.map(e => e.text),
+        setRows: rows => {
+          // A new tool result replaces the document, including its undo history.
+          // Pending gestures belong to the old document, not the incoming rows.
+          resetViewport();
+          restartGraphClock();
+          if (urlTimer !== null) clearTimeout(urlTimer);
+          urlTimer = null;
+          urlPending = false;
+          undoStack.length = redoStack.length = 0;
+          equations.length = 0;
+          rows.forEach(t => addEquation(t));
+          recompileAll();
+          resetState();
+          renderAll();
+          requestRender();
+        },
+        onChange: cb => {
+          graphChanged = cb;
+        },
+        onEdit: cb => {
+          graphEdited = cb;
+        },
+        setVisible: setGraphVisible,
+        flush: flushViewportWriteback,
+        dispose: () => {
+          if (rendererDisposed) return;
+          rendererDisposed = true;
+          r3d.clearGeometry();
+          canvasSizeObserver.disconnect();
+          window.removeEventListener('resize', resize);
+          cancelRender();
+          graphChanged = undefined;
+          graphEdited = undefined;
+          if (urlTimer !== null) clearTimeout(urlTimer);
+          if (viewportWriteTimer !== null) clearTimeout(viewportWriteTimer);
+          if (noticeTimer !== null) clearTimeout(noticeTimer);
+          urlTimer = viewportWriteTimer = noticeTimer = null;
+          urlPending = false;
+          spGen++;
+          spQueue.clear();
+          if (spSlot !== null) {
+            if (typeof cancelIdleCallback === 'function') cancelIdleCallback(spSlot);
+            else clearTimeout(spSlot);
+            spSlot = null;
+          }
+          traceQueue.clear();
+          if (traceWorker) {
+            traceWorker.onmessage = traceWorker.onerror = traceWorker.onmessageerror = null;
+            traceWorker.terminate();
+            traceWorker = undefined;
+          }
+          // Release cached GPU programs/buffers together; this renderer will
+          // never be resumed after the host has requested teardown.
+          gl.getExtension('WEBGL_lose_context')?.loseContext();
+        },
+      }),
+    )
+    .catch(() => {
+      document.getElementById('app-status')!.textContent = 'Could not connect the graph. Try again.';
+    });
 }
 
 // Dev-only handle for driving/inspecting the view in automated tests.
-if (import.meta.env.DEV) (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback, capture };
+if (import.meta.env.DEV)
+  (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback, capture };
 
 // Completion is an ordinary text edit, with the same undo and URL path as typing.
 initSyntaxHelp(listEl, {
   context: () => {
     const caret = caretPos();
     const eq = caret && equations[caret.line];
-    return caret && eq ? { caret, text: eq.text, defs, declared: declaredNames(equations.map(e => stripNote(e.text))) } : null;
+    return caret && eq
+      ? { caret, text: eq.text, defs, declared: declaredNames(equations.map(e => stripNote(e.text))) }
+      : null;
   },
   replace: (caret, start, end, text, offset) => {
     const eq = equations[caret.line];

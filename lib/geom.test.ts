@@ -1,7 +1,7 @@
 import { compileCpu } from './compiler.ts';
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { type Definition, buildDefs,  scanDefinition } from './defs.ts';
+import { type Definition, buildDefs, scanDefinition } from './defs.ts';
 import { diff } from './diff.ts';
 import { angleFn, evaluate, parseExpr } from './expr.ts';
 import { arrowHead, lowerGeom } from './geom.ts';
@@ -23,7 +23,10 @@ describe('point arithmetic lowering', () => {
   it('expands a point name to its component constants', () => {
     expect(low('A')).toEqual({
       kind: 'vec',
-      items: [{ kind: 'var', name: 'A_x' }, { kind: 'var', name: 'A_y' }],
+      items: [
+        { kind: 'var', name: 'A_x' },
+        { kind: 'var', name: 'A_y' },
+      ],
     });
   });
 
@@ -91,7 +94,13 @@ describe('point arithmetic lowering', () => {
 });
 
 describe('distance and angle measurements', () => {
-  const lowL = (s: string) => lowerGeom(parseExpr(s), isPt, n => (n === 'M' ? [[parseExpr('1')]] : null) as never, n => n === 'L');
+  const lowL = (s: string) =>
+    lowerGeom(
+      parseExpr(s),
+      isPt,
+      n => (n === 'M' ? [[parseExpr('1')]] : null) as never,
+      n => n === 'L',
+    );
 
   it('distance(A, B) is |A - B|', () => {
     expect(evalAt('distance(A, B)')).toBe(5);
@@ -141,7 +150,9 @@ describe('distance and angle measurements', () => {
 
   it('lowers angle to one internal call: each arm component appears once', () => {
     expect(low('angle(A, B, C)')).toEqual({
-      kind: 'call', name: '[angle]', args: [low('A_x - B_x'), low('A_y - B_y'), low('C_x - B_x'), low('C_y - B_y')],
+      kind: 'call',
+      name: '[angle]',
+      args: [low('A_x - B_x'), low('A_y - B_y'), low('C_x - B_x'), low('C_y - B_y')],
     });
     const glsl = toGLSL(low('angle((1, 0), (x, y))'));
     expect(glsl).toBe('eq_angle(1.0, 0.0, x, y)');
@@ -172,7 +183,7 @@ describe('distance and angle measurements', () => {
     const num2 = (evaluate(d1, { x: 0.4 + h }) - evaluate(d1, { x: 0.4 - h })) / (2 * h);
     expect(evaluate(diff(d1, 'x'), { x: 0.4 })).toBeCloseTo(num2, 5);
     // A fixed arm contributes nothing, so it is not emitted at all.
-    expect(toGLSL(diff(low('angle((1, 0), (x, y))'), 'x'))).toBe("eq_angle_rate(x, y, 1.0, 0.0)");
+    expect(toGLSL(diff(low('angle((1, 0), (x, y))'), 'x'))).toBe('eq_angle_rate(x, y, 1.0, 0.0)');
   });
 
   it('angleFn and its GLSL twin agree on every edge', () => {
@@ -203,9 +214,13 @@ describe('distance and angle measurements', () => {
     expect(at('A + distance(A, B) unit(B - A)')).toEqual([4, 6]);
     expect(compileCpu(classify(low('distance(A, B)'), new Set(Object.keys(env)))).type).toBe('value');
     expect(compileCpu(classify(low('angle(A, B, C)'), new Set(Object.keys(env)))).type).toBe('value');
-    expect(compileCpu(classify(low('y = distance(A, B) sin(x + angle(A, B, C))'), new Set(Object.keys(env)))).type).toBe('implicit2d');
+    expect(
+      compileCpu(classify(low('y = distance(A, B) sin(x + angle(A, B, C))'), new Set(Object.keys(env)))).type,
+    ).toBe('implicit2d');
     expect(compileCpu(classify(low('circle(A, distance(A, B))'), new Set(Object.keys(env)))).type).toBe('implicit2d');
-    expect(compileCpu(classify(low('distance((x, y), A) + distance((x, y), B) = 6'), new Set(Object.keys(env)))).type).toBe('implicit2d');
+    expect(
+      compileCpu(classify(low('distance((x, y), A) + distance((x, y), B) = 6'), new Set(Object.keys(env)))).type,
+    ).toBe('implicit2d');
     expect(classify(low('distance((cos(t), sin(t)), A)'), new Set(Object.keys(env))).animated).toBe(true);
   });
 
@@ -219,18 +234,36 @@ describe('distance and angle measurements', () => {
   });
 
   it('fail loudly, with messages true however the tuples flattened', () => {
-    for (const row of ['distance(A)', 'distance(A, B, C)', 'distance(A, 3)', 'distance(3, A)',
-      'distance(1, 2, 3)', 'distance(a)']) {
+    for (const row of [
+      'distance(A)',
+      'distance(A, B, C)',
+      'distance(A, 3)',
+      'distance(3, A)',
+      'distance(1, 2, 3)',
+      'distance(a)',
+    ]) {
       expect(() => low(row), row).toThrow(/^distance takes two points: distance\(A, B\)/);
     }
-    for (const row of ['angle(A)', 'angle(A, B, C, A)', 'angle(A, 3)', 'angle(1, 2, 3)',
-      'angle(a)', 'angle(A, B, 0.5)']) {
-      expect(() => low(row), row).toThrow(/^angle takes three matching points — angle\(A, B, C\), the angle at B — or two vectors/);
+    for (const row of [
+      'angle(A)',
+      'angle(A, B, C, A)',
+      'angle(A, 3)',
+      'angle(1, 2, 3)',
+      'angle(a)',
+      'angle(A, B, 0.5)',
+    ]) {
+      expect(() => low(row), row).toThrow(
+        /^angle takes three matching points — angle\(A, B, C\), the angle at B — or two vectors/,
+      );
     }
     // A list *as* an argument would be a list of points: families (plan #13).
     const listy = /a list cannot stand for a point yet/;
-    expect(() => low('distance([(0, 0), (1, 1)], A)')).toThrow(/^distance takes points, and a list cannot stand for a point yet — distance\(A, B\)/);
-    expect(() => low('angle(A, [A, B], C)')).toThrow(/^angle takes points, and a list cannot stand for a point yet — angle\(A, B, C\)/);
+    expect(() => low('distance([(0, 0), (1, 1)], A)')).toThrow(
+      /^distance takes points, and a list cannot stand for a point yet — distance\(A, B\)/,
+    );
+    expect(() => low('angle(A, [A, B], C)')).toThrow(
+      /^angle takes points, and a list cannot stand for a point yet — angle\(A, B, C\)/,
+    );
     expect(() => lowL('distance(L, A)')).toThrow(listy);
     expect(() => lowL('distance(M, A)')).toThrow(listy);
     // ...but a list inside a component is an ordinary scalar list: it stays
@@ -266,9 +299,13 @@ describe('geometry statements', () => {
     expect(c).not.toHaveProperty('arrow');
     expect((c as { pts: never[] }).pts.map(e => evaluate(e, {}))).toEqual([0, 0, 1, 1, 2, 0]);
     // Named points and point arithmetic mix with literals; n = 2 is a segment.
-    const mixed = compileCpu(classify(low('polyline(A, (A + B)/2, (0, 0), C)'), new Set(Object.keys(env)))) as { pts: never[] };
+    const mixed = compileCpu(classify(low('polyline(A, (A + B)/2, (0, 0), C)'), new Set(Object.keys(env)))) as {
+      pts: never[];
+    };
     expect(mixed.pts.map(e => evaluate(e, env))).toEqual([1, 2, 2.5, 4, 0, 0, -1, 0]);
-    expect((compileCpu(classify(low('polyline(A, B)'), new Set(Object.keys(env)))) as { pts: never[] }).pts).toHaveLength(4);
+    expect(
+      (compileCpu(classify(low('polyline(A, B)'), new Set(Object.keys(env)))) as { pts: never[] }).pts,
+    ).toHaveLength(4);
   });
 
   it('vector is an arrow from A to B, or from the origin', () => {
@@ -294,7 +331,13 @@ describe('geometry statements', () => {
     expect(classify(low('vector((1, 2, 3))')).needs3D).toBe(true);
     expect(compileCpu(classify(low('vector((1, 2, 3), (4, 5, 6))'))).type).toBe('polygon');
     // A named list of points (or a 2×2 one, which reads as a matrix) is a list too.
-    const lowL = (s: string) => lowerGeom(parseExpr(s), isPt, n => (n === 'M' ? [[parseExpr('1')]] : null) as never, n => n === 'L');
+    const lowL = (s: string) =>
+      lowerGeom(
+        parseExpr(s),
+        isPt,
+        n => (n === 'M' ? [[parseExpr('1')]] : null) as never,
+        n => n === 'L',
+      );
     expect(() => lowL('polyline(L)')).toThrow(/one by one for now.*not as a list/);
     expect(() => lowL('vector(A, L)')).toThrow(/one by one for now.*not as a list/);
     expect(() => lowL('polyline(M)')).toThrow(/one by one for now.*not as a list/);

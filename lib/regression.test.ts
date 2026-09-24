@@ -1,7 +1,7 @@
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
-import { buildDefs,  scanDefinition, type Definition } from './defs.ts';
+import { buildDefs, scanDefinition, type Definition } from './defs.ts';
 import { parseCsv } from './csv.ts';
 import { evaluate } from './expr.ts';
 import { scanRegressions } from './regression.ts';
@@ -13,7 +13,15 @@ function fit(rows: string[]) {
 
 describe('equation-native regression', () => {
   it('fits a line and exposes coefficients to curves, functions and residual lists', () => {
-    const result = analyze(['X = [0,1,2,3]', 'Y = [1,3,5,7]', 'Y ~ m X + b', 'f(x) = m x + b', 'y = f(x)', 'R = Y - f(X)', '(X,R)']);
+    const result = analyze([
+      'X = [0,1,2,3]',
+      'Y = [1,3,5,7]',
+      'Y ~ m X + b',
+      'f(x) = m x + b',
+      'y = f(x)',
+      'R = Y - f(X)',
+      '(X,R)',
+    ]);
     expect(result.rows.map(r => r.error)).toEqual(Array(7).fill(undefined));
     expect(result.constEnv.m).toBeCloseTo(2, 10);
     expect(result.constEnv.b).toBeCloseTo(1, 10);
@@ -30,7 +38,8 @@ describe('equation-native regression', () => {
   });
   it('fits nonlinear exponential models deterministically', () => {
     const rows = ['X = [0,0.5,1,1.5,2]', 'Y = 2 exp(0.7 X)', 'Y ~ a exp(b X)'];
-    const one = fit(rows), two = fit(rows);
+    const one = fit(rows),
+      two = fit(rows);
     expect([...one.errors]).toEqual([]);
     expect(evaluateFrame(one.defs, 0).a).toBeCloseTo(2, 5);
     expect(evaluateFrame(one.defs, 0).b).toBeCloseTo(0.7, 5);
@@ -91,7 +100,15 @@ describe('equation-native regression', () => {
   it('keeps the zoo names that are also functions or coefficients as models over data', () => {
     // gamma is a function and beta/T everyday names: like exp, declared data
     // on the left makes the row a model; an undeclared left side declares.
-    const rows = ['X=[1,2,3]', 'Y=[2,4,6]', 'beta=2', 'Y ~ beta (X - 1) + c', 'Y ~ gamma(a X)', 'W ~ Gamma(2, 1)', 'V ~ T(5)'];
+    const rows = [
+      'X=[1,2,3]',
+      'Y=[2,4,6]',
+      'beta=2',
+      'Y ~ beta (X - 1) + c',
+      'Y ~ gamma(a X)',
+      'W ~ Gamma(2, 1)',
+      'V ~ T(5)',
+    ];
     expect([...scanRegressions(rows).keys()]).toEqual([3, 4]);
     // The unambiguous names declare whatever is on the left.
     expect(scanRegressions(['Y=[1,2]', 'Y ~ Weibull(2, 1)', 'Y ~ chisq(3)', 'Y ~ Cauchy']).size).toBe(0);
@@ -114,7 +131,13 @@ describe('equation-native regression', () => {
 describe('fitting a list of points by its coordinates', () => {
   // Two separately written lists are independent and cross, so the examples
   // write their data as points: P.x and P.y pair up point by point.
-  const rows = ['P = [(-2,9),(-1,2),(0,1),(1,6),(2,17)]', 'P.y ~ a P.x^2 + b P.x + c', 'P', '(P.x, P.y)', '(P.x, P.y - (a P.x^2 + b P.x + c))'];
+  const rows = [
+    'P = [(-2,9),(-1,2),(0,1),(1,6),(2,17)]',
+    'P.y ~ a P.x^2 + b P.x + c',
+    'P',
+    '(P.x, P.y)',
+    '(P.x, P.y - (a P.x^2 + b P.x + c))',
+  ];
 
   it('fits P.y against P.x, one observation per point', () => {
     const r = analyze(rows);

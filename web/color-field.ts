@@ -10,10 +10,12 @@ import type { ColorSpace } from '../lib/math-object.ts';
  * Oklab matrices at https://bottosson.github.io/posts/oklab/ .
  */
 export function colorConversionGLSL(space: ColorSpace): string {
-  if (space === 'rgb') return `
+  if (space === 'rgb')
+    return `
 vec3 eqColorToSRGB(vec3 c) { return clamp(c, 0.0, 1.0); }
 `;
-  if (space === 'hsl') return `
+  if (space === 'hsl')
+    return `
 vec3 eqColorToSRGB(vec3 c) {
   float h = mod(c.x * (6.0 / 3.141592653589793), 12.0);
   float s = clamp(c.y, 0.0, 1.0);

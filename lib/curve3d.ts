@@ -86,12 +86,7 @@ export function curveExtent(pts: Float32Array): number {
   return Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2;
 }
 
-export function curveFrames(
-  pts: Float32Array,
-  d1?: Float32Array,
-  d2?: Float32Array,
-  d3?: Float32Array,
-): CurveFrames {
+export function curveFrames(pts: Float32Array, d1?: Float32Array, d2?: Float32Array, d3?: Float32Array): CurveFrames {
   const n = pts.length / 3;
   const r1 = d1 ?? fdDeriv(pts, n);
   const r2 = d2 ?? fdDeriv(r1, n);
@@ -109,8 +104,12 @@ export function curveFrames(
   let prevT: [number, number, number] = [1, 0, 0];
   for (let i = 0; i < n; i++) {
     const j = i * 3;
-    const vx = r1[j], vy = r1[j + 1], vz = r1[j + 2];
-    const ax = r2[j], ay = r2[j + 1], az = r2[j + 2];
+    const vx = r1[j],
+      vy = r1[j + 1],
+      vz = r1[j + 2];
+    const ax = r2[j],
+      ay = r2[j + 1],
+      az = r2[j + 2];
     const speed = Math.hypot(vx, vy, vz);
     if (isFinite(speed) && speed > 1e-12) {
       prevT = [vx / speed, vy / speed, vz / speed];
@@ -127,7 +126,9 @@ export function curveFrames(
     const cLen = Math.hypot(cx, cy, cz);
     kappa[i] = cLen / (speed * speed * speed);
     if (cLen > 1e-12 * speed * speed) {
-      const bx = cx / cLen, by = cy / cLen, bz = cz / cLen;
+      const bx = cx / cLen,
+        by = cy / cLen,
+        bz = cz / cLen;
       frenetBinormal[j] = bx;
       frenetBinormal[j + 1] = by;
       frenetBinormal[j + 2] = bz;
@@ -147,48 +148,82 @@ export function curveFrames(
   // bisecting plane, then through the plane bisecting the tangents.
   {
     const j0 = 0;
-    const tx = tangent[j0], ty = tangent[j0 + 1], tz = tangent[j0 + 2];
+    const tx = tangent[j0],
+      ty = tangent[j0 + 1],
+      tz = tangent[j0 + 2];
     // Seed with the axis least aligned with T, projected perpendicular.
-    const ax = Math.abs(tx), ay = Math.abs(ty), az = Math.abs(tz);
-    let sx = 0, sy = 0, sz = 0;
+    const ax = Math.abs(tx),
+      ay = Math.abs(ty),
+      az = Math.abs(tz);
+    let sx = 0,
+      sy = 0,
+      sz = 0;
     if (ax <= ay && ax <= az) sx = 1;
     else if (ay <= az) sy = 1;
     else sz = 1;
     const d = sx * tx + sy * ty + sz * tz;
-    let nx = sx - d * tx, ny = sy - d * ty, nz = sz - d * tz;
+    let nx = sx - d * tx,
+      ny = sy - d * ty,
+      nz = sz - d * tz;
     const len = Math.hypot(nx, ny, nz) || 1;
     normal[0] = nx / len;
     normal[1] = ny / len;
     normal[2] = nz / len;
   }
   for (let i = 0; i + 1 < n; i++) {
-    const j = i * 3, k = j + 3;
-    let nx = normal[j], ny = normal[j + 1], nz = normal[j + 2];
-    const t0x = tangent[j], t0y = tangent[j + 1], t0z = tangent[j + 2];
-    const t1x = tangent[k], t1y = tangent[k + 1], t1z = tangent[k + 2];
-    const v1x = pts[k] - pts[j], v1y = pts[k + 1] - pts[j + 1], v1z = pts[k + 2] - pts[j + 2];
+    const j = i * 3,
+      k = j + 3;
+    let nx = normal[j],
+      ny = normal[j + 1],
+      nz = normal[j + 2];
+    const t0x = tangent[j],
+      t0y = tangent[j + 1],
+      t0z = tangent[j + 2];
+    const t1x = tangent[k],
+      t1y = tangent[k + 1],
+      t1z = tangent[k + 2];
+    const v1x = pts[k] - pts[j],
+      v1y = pts[k + 1] - pts[j + 1],
+      v1z = pts[k + 2] - pts[j + 2];
     const c1 = v1x * v1x + v1y * v1y + v1z * v1z;
     if (isFinite(c1) && c1 > 1e-24) {
-      const dn = (v1x * nx + v1y * ny + v1z * nz) * 2 / c1;
-      const dt = (v1x * t0x + v1y * t0y + v1z * t0z) * 2 / c1;
-      const rx = nx - dn * v1x, ry = ny - dn * v1y, rz = nz - dn * v1z;
-      const px = t0x - dt * v1x, py = t0y - dt * v1y, pz = t0z - dt * v1z;
-      const v2x = t1x - px, v2y = t1y - py, v2z = t1z - pz;
+      const dn = ((v1x * nx + v1y * ny + v1z * nz) * 2) / c1;
+      const dt = ((v1x * t0x + v1y * t0y + v1z * t0z) * 2) / c1;
+      const rx = nx - dn * v1x,
+        ry = ny - dn * v1y,
+        rz = nz - dn * v1z;
+      const px = t0x - dt * v1x,
+        py = t0y - dt * v1y,
+        pz = t0z - dt * v1z;
+      const v2x = t1x - px,
+        v2y = t1y - py,
+        v2z = t1z - pz;
       const c2 = v2x * v2x + v2y * v2y + v2z * v2z;
       if (c2 > 1e-24) {
-        const dr = (v2x * rx + v2y * ry + v2z * rz) * 2 / c2;
+        const dr = ((v2x * rx + v2y * ry + v2z * rz) * 2) / c2;
         nx = rx - dr * v2x;
         ny = ry - dr * v2y;
         nz = rz - dr * v2z;
       } else {
-        nx = rx; ny = ry; nz = rz;
+        nx = rx;
+        ny = ry;
+        nz = rz;
       }
       // Guard drift and degenerate reflections.
       const dd = nx * t1x + ny * t1y + nz * t1z;
-      nx -= dd * t1x; ny -= dd * t1y; nz -= dd * t1z;
+      nx -= dd * t1x;
+      ny -= dd * t1y;
+      nz -= dd * t1z;
       const ln = Math.hypot(nx, ny, nz);
-      if (ln > 1e-12) { nx /= ln; ny /= ln; nz /= ln; }
-      else { nx = normal[j]; ny = normal[j + 1]; nz = normal[j + 2]; }
+      if (ln > 1e-12) {
+        nx /= ln;
+        ny /= ln;
+        nz /= ln;
+      } else {
+        nx = normal[j];
+        ny = normal[j + 1];
+        nz = normal[j + 2];
+      }
     }
     normal[k] = nx;
     normal[k + 1] = ny;
@@ -203,7 +238,9 @@ export function curveFrames(
   const tDot = tangent[0] * tangent[e] + tangent[1] * tangent[e + 1] + tangent[2] * tangent[e + 2];
   const closed = extent > 0 && gap < 1e-3 * extent && tDot > 0.999;
   if (closed) {
-    const nex = normal[e], ney = normal[e + 1], nez = normal[e + 2];
+    const nex = normal[e],
+      ney = normal[e + 1],
+      nez = normal[e + 2];
     // Signed angle from N_end to N_0 about the (shared) tangent.
     const crx = ney * normal[2] - nez * normal[1];
     const cry = nez * normal[0] - nex * normal[2];
@@ -213,12 +250,19 @@ export function curveFrames(
     const theta = Math.atan2(sin, cos);
     for (let i = 1; i < n; i++) {
       const j = i * 3;
-      const a = theta * i / (n - 1);
-      const ca = Math.cos(a), sa = Math.sin(a);
-      const tx = tangent[j], ty = tangent[j + 1], tz = tangent[j + 2];
-      const nx = normal[j], ny = normal[j + 1], nz = normal[j + 2];
+      const a = (theta * i) / (n - 1);
+      const ca = Math.cos(a),
+        sa = Math.sin(a);
+      const tx = tangent[j],
+        ty = tangent[j + 1],
+        tz = tangent[j + 2];
+      const nx = normal[j],
+        ny = normal[j + 1],
+        nz = normal[j + 2];
       // B = T × N, then N' = N cos a + B sin a.
-      const bx = ty * nz - tz * ny, by = tz * nx - tx * nz, bz = tx * ny - ty * nx;
+      const bx = ty * nz - tz * ny,
+        by = tz * nx - tx * nz,
+        bz = tx * ny - ty * nx;
       normal[j] = nx * ca + bx * sa;
       normal[j + 1] = ny * ca + by * sa;
       normal[j + 2] = nz * ca + bz * sa;
@@ -256,12 +300,7 @@ export interface TubeMesh {
 const ANGULAR_CELLS = 8;
 
 /** Sweep a circle of `radius` along the curve using the rotation-minimizing frame. */
-export function buildTube(
-  pts: Float32Array,
-  frames: CurveFrames,
-  radius: number,
-  segments = 24,
-): TubeMesh {
+export function buildTube(pts: Float32Array, frames: CurveFrames, radius: number, segments = 24): TubeMesh {
   const n = pts.length / 3;
   const { normal, binormal, closed } = frames;
   // Rings carry a duplicated seam column (angle 0 again as angle 1) so the
@@ -284,8 +323,8 @@ export function buildTube(
   const sin = new Float64Array(stride);
   for (let s = 0; s < stride; s++) {
     // s % segments keeps the seam column bit-identical to column 0.
-    cos[s] = Math.cos(2 * Math.PI * (s % segments) / segments);
-    sin[s] = Math.sin(2 * Math.PI * (s % segments) / segments);
+    cos[s] = Math.cos((2 * Math.PI * (s % segments)) / segments);
+    sin[s] = Math.sin((2 * Math.PI * (s % segments)) / segments);
   }
   const valid: boolean[] = new Array(n);
   for (let i = 0; i < n; i++) {
@@ -321,7 +360,7 @@ export function buildTube(
   // Along-length cell size matched to the angular cell (2πr / ANGULAR_CELLS);
   // on closed curves an even count makes the checker parity continue across
   // the loop seam.
-  let lenCells = Math.max(2, Math.round(total / (2 * Math.PI * radius / ANGULAR_CELLS)));
+  let lenCells = Math.max(2, Math.round(total / ((2 * Math.PI * radius) / ANGULAR_CELLS)));
   if (closed && lenCells % 2) lenCells += 1;
   return {
     positions,
@@ -343,13 +382,7 @@ export interface Comb {
  * Comb of teeth P + dir·value·scale sampled every `step` points, plus the
  * envelope through the tips. Invalid samples produce NaN breaks.
  */
-export function buildComb(
-  pts: Float32Array,
-  dirs: Float32Array,
-  values: Float64Array,
-  scale: number,
-  step = 4,
-): Comb {
+export function buildComb(pts: Float32Array, dirs: Float32Array, values: Float64Array, scale: number, step = 4): Comb {
   const n = pts.length / 3;
   const teeth: number[] = [];
   const tips: number[] = [];
@@ -388,5 +421,5 @@ export function combScale(values: Float64Array, extent: number, frac = 0.18): nu
     if (isFinite(a) && a > max) max = a;
   }
   if (extent === 0 || max * extent < 1e-2) return 0;
-  return frac * extent / max;
+  return (frac * extent) / max;
 }

@@ -21,7 +21,6 @@ export function walk<T>(
       const args = pop(op.n);
       if (args.length < op.n) throw new ParseError('Incomplete expression.', tok);
 
-
       // Push the result of applying the operator:
       const result = op.fn(...args);
 
