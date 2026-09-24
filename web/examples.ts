@@ -143,6 +143,8 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['prime indicator', 'a_n = isprime(n)'],
     ['cobweb', 'r = 2.9; a_0 = 0.15; a_{n+1} = r a_n (1 - a_n)'],
     ['logistic bifurcation', 'a_{n+1} = x a_n (1 - a_n)'],
+    ['alternating sum → ln 2', 'a_n = (-1)^(n+1)/n; s_n = sum(k=1..n, a_k); y = ln(2)'],
+    ['differences of squares', 'b_n = n^2; a_n = b_[n+1] - b_n'],
   ]],
   ['data + piecewise', [
     ['data list', '[3, 1, 4, 1, 5, 9, 2, 6]'],
@@ -156,6 +158,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['level sets', 'c = 0.3; sin(x)cos(y) = c'],
     ['function', 'f(x) = x^3 - 3x; y = f(x)'],
     ['derivative', 'y = d/dx (x^3 - 3x)'],
+    ['power rule family', 'N = [1..4]; y = x^N; y = d/dx x^N'],
     ['tangent line', 'f(x) = x^3 - 2x; g(x) = d/dx f(x); a = 1; y = f(x); y = f(a) + g(a)(x - a)'],
     ['running integral', 'view(x = -7..7, y = -1.5..4); f(x) = sin(x)^2; y = f(x); y = int[0..x] f(t) dt'],
     ['signed area', 'view(x = -1..7, y = -1.5..1.5); b = 5; y = sin(x); int[0..b] sin(x) dx'],
@@ -169,6 +172,9 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['fourier square wave', 'N = 3; y = (4/pi) sum(n=1..N, sin((2n-1)x)/(2n-1))'],
     ['fourier sawtooth', 'N = 5; y = 2 sum[n=1..N] (-1)^(n+1) sin(n x)/n'],
     ['taylor cosine', 'N = 2; y = sum(n=0..N, (-1)^n x^(2n)/prod(k=1..2n, k)); y = cos(x)'],
+    // A list bound draws every partial sum at once: one curve per element.
+    ['fourier convergence', 'N = [1, 3, 10]; y = (4/pi) sum(n=1..N, sin((2n-1)x)/(2n-1))'],
+    ['taylor sine, term by term', 'N = [0..4]; y = sum(n=0..N, (-1)^n x^(2n+1)/prod(k=1..2n+1, k)); y = sin(x)'],
   ]],
   ['points (drag them)', [
     ['a point', '(2, 3)'],
