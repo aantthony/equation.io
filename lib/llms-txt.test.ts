@@ -48,19 +48,56 @@ describe('llms.txt', () => {
   });
 
   // Assistants learn the language from this file alone, so a builtin it
-  // never names is one they will never write.
-  it('names every builtin function', () => {
-    const missing = [...FUNCTIONS].filter(name => !new RegExp(`\\b${name}\\b`).test(llms));
+  // never names is one they will never write. A plain word match passes on
+  // English ("count", "total", "line", "int"), so each name must appear as
+  // code: called, `name(` or `name[`, or in the "- Functions:" entry's list.
+  it('names every builtin function as code', () => {
+    const entry = /^- Functions:([\s\S]*?)(?=^- )/m.exec(llms)?.[1] ?? '';
+    const listed = new Set(entry.split(/[\s,.;:`()]+/));
+    const escape = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const missing = [...FUNCTIONS].filter(name => !listed.has(name)
+      && !new RegExp(`(?<![\\w.])${escape(name)}[([]`).test(llms));
     expect(missing).toEqual([]);
   });
 
-  it('gives builtin examples that compile', () => {
-    for (const row of [
-      'y = erf(x)', 'y = normalcdf(x, 0, 1)', '1/gcd(floor(x), floor(y))', 'a_n = isprime(n)',
-      'grad(x^2 - y^2)', '∇(x^2 - y^2)', 'dot(grad(x^2 - y^2), (1, 0))',
-      'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)',
-    ]) {
-      expect(analyzeRows([row]).rows[0].error, row).toBeUndefined();
+  // Every snippet the builtin and vector-calculus entries give, with what it
+  // must draw: a form that parses but means something else (grad(f) as the
+  // point (0, 0)) is as wrong as one that errors.
+  it('gives builtin examples that mean what the text says', () => {
+    const f = ['f(x, y) = x^2 - y^2'];
+    const cases: Array<[string[], string, string]> = [
+      [[], 'erf(x)', 'curve'],
+      [[], '1/gcd(floor(x), floor(y))', 'scalar-field'],
+      [[], 'a_n = isprime(n)', 'sequence'],
+      [[], 'grad(x^2 - y^2)', 'vector-field'],
+      [[], 'div((x y, y^2))', 'scalar-field'],
+      [[], 'curl((y z, -x z, 0))', 'vector-field'],
+      [[], 'curl((-y, x))', 'value'],
+      [[], 'laplacian(x^2 + y^2)', 'value'],
+      [[], '∇ x^2 y', 'vector-field'],
+      [f, '∇f(x, y)', 'vector-field'],
+      [f, '∇f', 'vector-field'],
+      [f, 'grad(f)', 'vector-field'],
+      [f, '∇f · (1, 1)/sqrt(2)', 'scalar-field'],
+      [['r = sqrt(x^2 + y^2)'], 'grad(1/r)', 'vector-field'],
+      [['r = sqrt(x^2 + y^2)'], 'd/dx r', 'scalar-field'],
+      [['F = (-y, x)'], 'curl(F)', 'value'],
+      [['F = (-y, x)'], '∇×F', 'value'],
+      [['F = (-y, x)'], '∇·F', 'value'],
+      [[], 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', 'curve'],
+    ];
+    for (const [defs, row, kind] of cases) {
+      expect(llms, row).toContain(row);
+      const a = analyzeRows([...defs, row]);
+      const last = a.rows[a.rows.length - 1];
+      expect(last.error, row).toBeUndefined();
+      expect(last.cls?.object.kind, row).toBe(kind);
     }
+    // normalcdf(x, mean, sd) is only a signature in the text.
+    expect(analyzeRows(['y = normalcdf(x, 0, 1)']).rows[0].cls?.object.kind).toBe('curve');
+    // The values the text quotes.
+    const readout = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
+    expect(readout(['curl((-y, x))'])).toBe('= 2');
+    expect(readout(['laplacian(x^2 + y^2)'])).toBe('= 4');
   });
 });

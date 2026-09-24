@@ -16,8 +16,10 @@ import { exprKey } from './expr.ts';
  * - `f(x) = x^3 - a x` defines a function; calls are inlined symbolically.
  * - `d/dx (…)` (also `d^2/dx^2`, any single-letter variable) differentiates
  *   symbolically at resolve time via diff().
- * - `grad(f)` (also ∇) expands to the tuple (∂f/∂x, ∂f/∂y) the same way, so
- *   it plots as a vector field.
+ * - `grad(f)`, `div(F)`, `curl(F)` and `laplacian(f)` (also ∇f, ∇·F, ∇×F,
+ *   ∇²f) expand the same way: grad to the tuple (∂f/∂x, ∂f/∂y), so it plots
+ *   as a vector field, and the rest to what they are by definition. They
+ *   differentiate through named fields and vectors (see throughFields).
  * - `sum(n=1..N, …)` / `prod(…)` (also Σ/Π, and `sum[n=1..N] …` binding the
  *   trailing product like d/dx) expand symbolically at resolve time, so the
  *   bounds must be numbers or already-known constants. A bound that uses a
@@ -699,7 +701,9 @@ function numeratorWrap(n: Expr): { order: number; wrap: (x: Expr) => Expr } | nu
  *  float32 roundoff — plots evaluate the expanded expression on the GPU. */
 const FD_H = 1e-4;
 
-function applyDiff(e: Expr, v: string, order: number, isList?: (n: string) => boolean): Expr {
+function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts): Expr {
+  const isList = opts?.isList;
+  e = throughFields(e, opts);
   // A list is still just a name at this point, and diff() treats an unknown
   // name as a constant — so differentiating one would answer 0 for every
   // element. Elements may only use constants, states, and t, so that is
@@ -745,10 +749,41 @@ function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts): Expr | null {
   if (!dx || dx.order !== head.order || factors.length === 0) return null;
   let operand = factors[0];
   for (let k = 1; k < factors.length; k++) operand = { kind: 'bin', op: '*', a: operand, b: factors[k] };
-  return head.wrap(applyDiff(operand, dx.v, head.order, opts?.isList));
+  return head.wrap(applyDiff(operand, dx.v, head.order, opts));
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
+
+/**
+ * `e` with the named definitions it reaches that depend on position written
+ * out. Differentiation has to see through them: with `g = x^2 + y^2`, the
+ * name g alone differentiates as a constant, so `d/dx g` and `grad(g)` were
+ * silently 0. Names whose value does not use x, y or z (sliders, animated
+ * constants) stay names.
+ */
+function throughFields(e: Expr, opts?: ResolveOpts): Expr {
+  const lookup = opts?.definition;
+  if (!lookup) return e;
+  const closed = (name: string, seen: ReadonlySet<string>): Expr | null => {
+    if (SPACE.has(name) || seen.has(name)) return null;
+    const value = lookup(name);
+    if (!value || value.kind === 'vec' || value.kind === 'list') return null;
+    const inner = new Set(seen).add(name);
+    const sub: Record<string, Expr> = {};
+    for (const v of freeVars(value)) {
+      const c = closed(v, inner);
+      if (c) sub[v] = c;
+    }
+    const out = Object.keys(sub).length ? substVars(value, sub) : value;
+    return [...freeVars(out)].some(v => SPACE.has(v)) ? out : null;
+  };
+  const sub: Record<string, Expr> = {};
+  for (const v of freeVars(e)) {
+    const c = closed(v, new Set());
+    if (c) sub[v] = c;
+  }
+  return Object.keys(sub).length ? substVars(e, sub) : e;
+}
 
 export interface ResolveOpts {
   /** A sequence term by name (a_3, a_k) or index (a_[…]). `open` are the
@@ -784,6 +819,15 @@ export interface ResolveOpts {
    * answer must not: see indexIssue.
    */
   indexIssue?: (idx: Expr) => string | null;
+  /**
+   * The value of a name defined as a number or field (`g = x^2 + y^2`, or a
+   * named vector's component F_x), so derivatives can differentiate through
+   * it — see throughFields. Undefined for anything else.
+   */
+  definition?: (name: string) => Expr | undefined;
+  /** The component names a named vector lowers to (F → F_x, F_y), so the
+   *  vector operators see a named field's components. */
+  comps?: (name: string) => readonly string[] | null;
 }
 
 interface Ctx {
@@ -845,6 +889,123 @@ const intCallOf = (header: Expr, body: Expr): Expr => {
   const b = intBounds(header);
   return { kind: 'call', name: 'int', args: b ? [b[0], b[1], body] : [body] };
 };
+
+/** The vector-calculus operators, each also written with ∇ (see splitNablaChain). */
+const VECTOR_OPS: ReadonlySet<string> = new Set(['grad', 'div', 'curl', 'laplacian']);
+const VECTOR_OP_EXAMPLE: Record<string, string> = {
+  grad: 'grad(x^2 + y^2)', div: 'div((x y, y^2))', curl: 'curl((-y, x))', laplacian: 'laplacian(x^2 - y^2)',
+};
+
+/**
+ * `∇` as a prefix operator. It tokenizes as a bare `grad` factor, and like
+ * d/dx binds the rest of its product chain: `∇f`, `∇ x^2 y`, `∇f(x, y)`.
+ * A written `·` or `×` right after it makes `∇·F` (div) and `∇×F` (curl);
+ * `∇^2 f` (also `∇²f`) is laplacian(f). The operand stops at the next
+ * written `·` or `×`, so `∇f · v` is (∇f)·v. `∇(…)` parses as a call and
+ * never gets here. Returns the rewritten chain, or null when it has no ∇.
+ */
+function splitNablaChain(e: Expr, ctx: Ctx): Expr | null {
+  type Factor = { e: Expr; op: '*' | '/'; glyph?: 'dot' | 'cross' };
+  const factors: Factor[] = [];
+  let node: Expr = e;
+  while (node.kind === 'bin' && (node.op === '*' || node.op === '/')) {
+    factors.unshift({ e: node.b, op: node.op, glyph: node.glyph });
+    node = node.a;
+  }
+  factors.unshift({ e: node, op: '*' });
+  const header = (f: Expr): { laplacian: boolean; negate: boolean } | null => {
+    if (f.kind === 'neg') {
+      const h = header(f.a);
+      return h && { ...h, negate: !h.negate };
+    }
+    const bare = (n: Expr) => n.kind === 'var' && n.name === 'grad'
+      // A graph that defines its own `grad` keeps it (it is shadowable).
+      && !ctx.getFn('grad') && !ctx.opts.definition?.('grad');
+    if (bare(f)) return { laplacian: false, negate: false };
+    if (f.kind === 'bin' && f.op === '^' && bare(f.a) && f.b.kind === 'num' && f.b.value === 2) return { laplacian: true, negate: false };
+    return null;
+  };
+  const at = factors.findIndex(f => header(f.e));
+  // A Σ/∫ further left binds the ∇ into its own body, which resolves on its own.
+  if (at < 0 || factors.slice(0, at).some(f => isSumHeader(f.e) || isIntHeader(f.e))) return null;
+  const h = header(factors[at].e)!;
+  const first = factors[at + 1];
+  if (!first) return null; // a bare ∇: classify says to write it with parentheses
+  if (first.op === '/') throw new Error('∇ needs something to act on: ∇f, ∇·F, ∇×F or ∇²f.');
+  if (h.laplacian && first.glyph) throw new Error('∇² takes a scalar field: write ∇²f.');
+  let end = at + 2;
+  while (end < factors.length && !factors[end].glyph) end++;
+  let operand = first.e;
+  for (const f of factors.slice(at + 2, end)) operand = { kind: 'bin', op: f.op, a: operand, b: f.e };
+  const name = h.laplacian ? 'laplacian' : first.glyph === 'dot' ? 'div' : first.glyph === 'cross' ? 'curl' : 'grad';
+  let out: Expr = { kind: 'call', name, args: [operand] };
+  if (h.negate) out = { kind: 'neg', a: out };
+  if (at > 0) {
+    let coeff = factors[0].e;
+    for (const f of factors.slice(1, at)) coeff = { kind: 'bin', op: f.op, a: coeff, b: f.e, ...(f.glyph && { glyph: f.glyph }) };
+    out = { kind: 'bin', op: factors[at].op, a: coeff, b: out, ...(factors[at].glyph && { glyph: factors[at].glyph }) };
+  }
+  for (const f of factors.slice(end)) out = { kind: 'bin', op: f.op, a: out, b: f.e, ...(f.glyph && { glyph: f.glyph }) };
+  return out;
+}
+
+/**
+ * What a vector operator differentiates. A bare function name stands for the
+ * function at its own parameters (`grad(f)` with f(x, y) = …), a named
+ * vector for its components, and named fields are written out (throughFields)
+ * — otherwise each would differentiate as a constant and quietly give 0.
+ */
+function vectorOperand(name: string, arg: Expr, ctx: Ctx): Expr {
+  if (arg.kind === 'var') {
+    const fn = ctx.getFn(arg.name);
+    if (fn) {
+      const bad = fn.params.find(p => !SPACE.has(p) && p !== 't');
+      if (bad !== undefined || fn.recursive) {
+        throw new Error(`${name}(${arg.name}) needs ${arg.name} to be a function of x, y, z or t; write ${name}(${arg.name}(x, y)) to choose.`);
+      }
+      return fn.body;
+    }
+    // Differentiated as it stands, an unknown name is a constant: say so
+    // rather than draw grad(f) as the point (0, 0).
+    if (!SPACE.has(arg.name) && arg.name !== 't' && ctx.opts.definition && !ctx.opts.definition(arg.name)
+      && !ctx.opts.comps?.(arg.name) && !ctx.opts.isList?.(arg.name)) {
+      throw new Error(`${name}(${arg.name}): ${arg.name} is not defined. Define a function ${arg.name}(x, y) = … or a field ${arg.name} = … first.`);
+    }
+  }
+  const lowered = ctx.opts.comps ? lowerGeom(arg, ctx.opts.comps, () => null, ctx.opts.isList) : arg;
+  return throughFields(lowered, ctx.opts);
+}
+
+/** grad, div, curl and laplacian, expanded symbolically as d/dx is. */
+function vectorCalculus(name: string, args: readonly Expr[], ctx: Ctx): Expr {
+  const example = VECTOR_OP_EXAMPLE[name];
+  if (args.length !== 1) throw new Error(`${name} takes one expression: ${example}.`);
+  const f = vectorOperand(name, args[0], ctx);
+  if (f.kind === 'list' || f.kind === 'eq' || f.kind === 'ineq') {
+    throw new Error(`${name} needs ${name === 'div' || name === 'curl' ? 'a vector field' : 'a scalar expression'}, like ${example}.`);
+  }
+  const d = (g: Expr, v: string, order = 1) => applyDiff(g, v, order, ctx.opts);
+  const AXES = ['x', 'y', 'z'];
+  if (name === 'grad' || name === 'laplacian') {
+    if (f.kind === 'vec') {
+      throw new Error(name === 'grad'
+        ? 'grad takes a scalar field; for a vector field F, div(F) is its divergence and curl(F) its curl.'
+        : 'laplacian takes a scalar field, like laplacian(x^2 - y^2); the Laplacian of a vector field is not supported.');
+    }
+    // z joins only when f uses it, so a plane field stays in the plane.
+    const axes = AXES.slice(0, freeVars(f).has('z') ? 3 : 2);
+    if (name === 'grad') return { kind: 'vec', items: axes.map(v => d(f, v)) };
+    return axes.map(v => d(f, v, 2)).reduce((s, term) => add(s, term));
+  }
+  if (f.kind !== 'vec' || (f.items.length !== 2 && f.items.length !== 3)) {
+    throw new Error(`${name} takes a vector field of 2 or 3 components, like ${example}; for a scalar f, grad(f) is its gradient.`);
+  }
+  const [P, Q, R] = f.items;
+  if (name === 'div') return f.items.map((c, k) => d(c, AXES[k])).reduce((s, term) => add(s, term));
+  // In the plane, the scalar ∂Q/∂x − ∂P/∂y (the z-component of the 3D curl).
+  if (!R) return sub(d(Q, 'x'), d(P, 'y'));
+  return { kind: 'vec', items: [sub(d(R, 'y'), d(Q, 'z')), sub(d(P, 'z'), d(R, 'x')), sub(d(Q, 'x'), d(P, 'y'))] };
+}
 
 interface StripDx {
   v: string;
@@ -1340,6 +1501,8 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'neg': return { kind: 'neg', a: rx(e.a, ctx) };
     case 'bin': {
       if (e.op === '*' || e.op === '/') {
+        const nabla = splitNablaChain(e, ctx);
+        if (nabla) return rx(nabla, ctx);
         // Σ/∫ headers capture their trailing product chain before it
         // resolves, so `sum[n=1..N] sin(n x)/n` divides each term, not the
         // whole sum, and `int[0..1] x^2 dx` binds through to its dx.
@@ -1357,12 +1520,13 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const d = matchDeriv(a, b, ctx.opts);
         if (d) return d;
       }
+      if (e.glyph) return { kind: 'bin', op: e.op, a, b, glyph: e.glyph };
       if (e.op === '*' && a.kind === 'bin' && a.op === '/') {
         // The parenthesized form (d/dx)(expr): the quotient is bare.
         const head = numeratorWrap(a.a);
         const dx = dxOrder(a.b);
         if (head && dx && head.order === dx.order) {
-          return head.wrap(applyDiff(b, dx.v, head.order, ctx.opts.isList));
+          return head.wrap(applyDiff(b, dx.v, head.order, ctx.opts));
         }
       }
       return { kind: 'bin', op: e.op, a, b };
@@ -1418,17 +1582,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         }
         return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
       }
-      if (e.name === 'grad') {
-        if (args.length !== 1) throw new Error('grad takes one expression: grad(x^2 + y^2).');
-        const f = args[0];
-        if (f.kind === 'vec' || f.kind === 'list' || f.kind === 'eq' || f.kind === 'ineq') {
-          throw new Error('grad needs a scalar expression in x and y, like grad(x^2 + y^2).');
-        }
-        // ∇f as a tuple, so it plots as a vector field and feeds dot(…) like
-        // any other; z joins only when f uses it.
-        const vars = freeVars(f).has('z') ? ['x', 'y', 'z'] : ['x', 'y'];
-        return { kind: 'vec', items: vars.map(v => applyDiff(f, v, 1, ctx.opts.isList)) };
-      }
+      if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (e.name === 'clamp') {
         // clamp(x, lo, hi) ≡ min(max(x, lo), hi): every backend already runs those.
         if (args.length !== 3) throw new Error('clamp takes three arguments: clamp(x, lo, hi).');
@@ -1532,6 +1686,10 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     isList: n => isListName(listNamesOf(defs), n),
     getList: listGetter(defs),
     indexIssue: idx => indexIssue(idx, defs),
+    // Live too: definitions above this one (a point's components included).
+    // A state stands for itself: defined, and constant across space.
+    definition: n => defs.consts.get(n) ?? (stateNames.has(n) ? { kind: 'var', name: n } : undefined),
+    comps: n => compsOf(defs, n),
   };
 
   const parsed = new Map<string, Expr>();

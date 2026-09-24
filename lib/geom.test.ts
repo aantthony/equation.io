@@ -78,7 +78,7 @@ describe('point arithmetic lowering', () => {
 
   it('rejects invalid point algebra with clear errors', () => {
     expect(() => low('A + 2')).toThrow(/add a point and a number/);
-    expect(() => low('A B')).toThrow(/dot\(A, B\) or cross\(A, B\)/);
+    expect(() => low('A B')).toThrow(/A · B or A × B/);
     expect(() => low('2/A')).toThrow(/divide by a point/);
     expect(() => low('A^2')).toThrow(/length/);
     expect(() => low('sin(A)')).toThrow(/sin is not defined for points/);

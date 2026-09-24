@@ -29,7 +29,10 @@ export type Expr = ExprNode & { axes?: readonly Axis[]; origin?: number };
 type ExprNode =
   | { readonly kind: 'num'; readonly value: number }
   | { readonly kind: 'var'; readonly name: string }
-  | { readonly kind: 'bin'; readonly op: '+' | '-' | '*' | '/' | '^'; readonly a: Expr; readonly b: Expr }
+  /** `glyph` records a product written `·`/`⋅` ('dot') or `×` ('cross'):
+   *  between two vectors lowerGeom reads it as dot(a, b) or cross(a, b);
+   *  between numbers it is plain multiplication. */
+  | { readonly kind: 'bin'; readonly op: '+' | '-' | '*' | '/' | '^'; readonly a: Expr; readonly b: Expr; readonly glyph?: 'dot' | 'cross' }
   | { readonly kind: 'neg'; readonly a: Expr }
   | { readonly kind: 'call'; readonly name: string; readonly args: readonly Expr[] }
   | { readonly kind: 'index'; readonly args: readonly [Expr, Expr] }
@@ -107,7 +110,7 @@ export const isRecur = (e: Expr): e is Expr & { kind: 'call' } => e.kind === 'ca
 /** Historical tuple-call spelling, applied before resolving argument values.
  * Only syntax vectors flatten: a named or computed vector is never splatted. */
 export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Expr[] {
-  const grouped = new Set(['segment', 'polyline', 'polygon', 'hull', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit', 'rotate']);
+  const grouped = new Set(['segment', 'polyline', 'polygon', 'hull', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit', 'rotate', 'grad', 'div', 'curl', 'laplacian']);
   return grouped.has(name) ? args : args.flatMap(x => x.kind === 'vec' ? x.items : [x]);
 }
 
@@ -130,8 +133,9 @@ export const FUNCTIONS = new Set([
   // Small-matrix helpers (det, trace, matvec, linear solve), also lowered
   // symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts).
   'det', 'trace', 'solve',
-  // Not real functions: Σ/Π/∫ binders and ∇, expanded symbolically by resolveExpr.
-  'sum', 'prod', 'int', 'grad',
+  // Not real functions: Σ/Π/∫ binders and the ∇ operators, expanded
+  // symbolically by resolveExpr.
+  'sum', 'prod', 'int', 'grad', 'div', 'curl', 'laplacian',
   // Whole-expression plot modes (see classify): domain coloring, conformal
   // grids, escape-time iteration, swept tubes, motion trails, and surfaces
   // of revolution.
@@ -146,7 +150,7 @@ export const FUNCTIONS = new Set([
 export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'gamma', 'factorial', 'sinc', 'coth', 'clamp',
   'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
-  'grad',
+  'grad', 'div', 'curl', 'laplacian',
   'polyline', 'vector', 'distance', 'angle',
   'revolve', 'rgb', 'hsl', 'oklch',
 ]);
@@ -273,6 +277,10 @@ const asVecOrExpr = (n: PNode): Expr =>
 const asBin = (op: '+' | '-' | '*' | '/' | '^') =>
   BinaryInfix<PNode>((a, b) => bin(op)(asVecOrExpr(a), asVecOrExpr(b)));
 
+/** `·` and `×`: multiplication that remembers its glyph (see the bin node). */
+const asProduct = (glyph: 'dot' | 'cross') =>
+  BinaryInfix<PNode>((a, b): Expr => ({ kind: 'bin', op: '*', a: asVecOrExpr(a), b: asVecOrExpr(b), glyph }));
+
 const asIneq = (op: IneqOp) =>
   BinaryInfix<PNode>((a, b): Expr => ({ kind: 'ineq', op, l: asVecOrExpr(a), r: asVecOrExpr(b) }));
 
@@ -392,9 +400,9 @@ const ops = operators<PNode>({
   '−': asBin('-'),
 
   '*': asBin('*'),
-  '×': asBin('*'),
-  '·': asBin('*'),
-  '⋅': asBin('*'),
+  '×': asProduct('cross'),
+  '·': asProduct('dot'),
+  '⋅': asProduct('dot'),
   '/': asBin('/'),
   '÷': asBin('/'),
 
