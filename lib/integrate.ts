@@ -659,7 +659,7 @@ export function improperSum(body: Expr, v: string, lo: Expr | null, hi: Expr | n
  *  the bound variable is eliminated in the same pass). */
 function substAll(e: Expr, v: string, val: Expr): Expr {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substAll(x, v, val));
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substAll(x, v, val));
     case 'num': return e;
     case 'var': return e.name === v ? val : e;
     case 'neg': return neg(substAll(e.a, v, val));

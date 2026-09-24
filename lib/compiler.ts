@@ -3,7 +3,7 @@ import { complexParts, SplitTooLarge } from './complex-parts.ts';
 import { compileTyped, usesComplex, type Typed } from './complex.ts';
 import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
-import { type Expr, exprKey, freeVars, mapChildren, substVars } from './expr.ts';
+import { type Column, type Expr, exprKey, freeVars, mapChildren, substVars } from './expr.ts';
 import { toGLSL, uniformName } from './glsl.ts';
 import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
@@ -26,7 +26,8 @@ export type CpuPlan =
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   | { type: 'orbit'; dim: 2 | 3; paths: Expr[][]; series: boolean; from: Expr; to: Expr }
-  | { type: 'polygon'; dim: 2 | 3; pts: Expr[]; closed: boolean; arrow?: boolean; hull?: boolean }
+  /** `pts` flat, or with `over` one vertex template run over the columns. */
+  | { type: 'polygon'; dim: 2 | 3; pts: Expr[]; closed: boolean; arrow?: boolean; hull?: boolean; over?: readonly Column[] }
   | { type: 'spacecurve'; residuals: Expr[] }
   | { type: 'system'; dim: 2 | 3; residuals: Expr[]; complexEquation?: Expr; parametric?: boolean; angular?: boolean[]; coordinates?: Expr[] }
   | { type: 'vfield2d'; comps: [Expr, Expr] }
@@ -136,7 +137,7 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'point': { const coords = point(object.source, 'point'); return { type: 'point', dim: coords.length as 2 | 3, coords }; }
     case 'trail': return { type: 'trail', dim: object.coordinates.length as 2 | 3, coords: object.coordinates.map(real) };
     case 'orbit': return { type: 'orbit', dim: object.series ? 2 : object.paths[0].length as 2 | 3, paths: object.paths.map(p => p.map(real)), series: object.series, from: object.from, to: object.to };
-    case 'figure': return { type: 'polygon', dim: object.dimension, pts: [...object.vertices], closed: ['polygon', 'square', 'hull'].includes(object.form), ...(object.form === 'vector' ? { arrow: true } : {}), ...(object.form === 'hull' ? { hull: true } : {}) };
+    case 'figure': return { type: 'polygon', dim: object.dimension, pts: [...object.vertices], closed: ['polygon', 'square', 'hull'].includes(object.form), ...(object.form === 'vector' ? { arrow: true } : {}), ...(object.form === 'hull' ? { hull: true } : {}), ...(object.over ? { over: object.over } : {}) };
     case 'system': {
       const { source, parametric, angular, coordinates } = object;
       if (source.representation === 'real') return { type: 'system', dim: source.residuals.length as 2 | 3, residuals: source.residuals.map(real), ...(parametric ? { parametric } : {}), ...(angular ? { angular: [...angular] } : {}), ...(coordinates ? { coordinates: [...coordinates] } : {}) };
@@ -306,7 +307,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'fractal2d': structure = [exprKey(plan.step), plan.seed, plan.maxIter]; break;
     case 'point': case 'trail': structure = expressions(plan.coords); break;
     case 'orbit': structure = [plan.series, plan.paths.map(expressions), exprKey(plan.from), exprKey(plan.to)]; break;
-    case 'polygon': structure = [plan.dim, expressions(plan.pts), plan.closed, plan.arrow, plan.hull]; break;
+    case 'polygon': structure = [plan.dim, expressions(plan.pts), plan.closed, plan.arrow, plan.hull, plan.over?.map(c => [c.name, c.values.length])]; break;
     case 'spacecurve': structure = expressions(plan.residuals); break;
     case 'system': structure = [expressions(plan.residuals), plan.parametric, plan.angular, plan.coordinates?.map(exprKey)]; break;
     case 'vfield2d': case 'vfield3d': case 'psurface': structure = expressions(plan.comps); break;

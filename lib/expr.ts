@@ -16,6 +16,11 @@ export type FigureForm = 'polygon' | 'segment' | 'polyline' | 'vector' | 'square
 
 export interface Axis { id: string; n: number }
 
+/** A packed column a `lazy` list or packed figure runs over: `name` is the
+ *  variable its template reads, bound to values[k] for element k. Names start
+ *  with '@', so they never collide with anything a row can write. */
+export interface Column { readonly name: string; readonly values: Float64Array }
+
 /** Nodes are immutable. The exception is `axes` and `origin`: list identity
  *  that list lowering records on the nodes it meets (markOrigins, axesOf),
  *  never part of the math — exprKey leaves them out. */
@@ -31,7 +36,10 @@ type ExprNode =
   | { readonly kind: 'range'; readonly args: readonly [Expr, Expr] }
   | { readonly kind: 'eqtest'; readonly op: '==' | '!='; readonly args: readonly [Expr, Expr] }
   | { readonly kind: 'comp'; readonly value: Expr; readonly index: number; readonly arity: number; readonly functionName: string }
-  | { readonly kind: 'figure'; readonly form: FigureForm; readonly dimension: 2 | 3; readonly vertices: readonly Expr[] }
+  /** A figure's vertices, flat (dimension numbers per vertex) — or, with
+   *  `over`, ONE vertex template evaluated once per element of the columns:
+   *  a path through thousands of computed points stays a single template. */
+  | { readonly kind: 'figure'; readonly form: FigureForm; readonly dimension: 2 | 3; readonly vertices: readonly Expr[]; readonly over?: readonly Column[] }
   | { readonly kind: 'trail'; readonly coordinates: readonly Expr[] }
   | { readonly kind: 'hist'; readonly centers: Float64Array; readonly counts: Float64Array; readonly width: number }
   | { readonly kind: 'family'; readonly members: readonly Expr[] }
@@ -52,6 +60,15 @@ type ExprNode =
    * GLSL, diff, and the integrator never see it.
    */
   | { readonly kind: 'data'; readonly values: Float64Array }
+  /**
+   * A list kept as one template over packed columns: element k is `body` with
+   * each column's variable bound to its k-th value. What list lowering builds
+   * when an operation over numbers involves a slider or t — `sin(a L)` — so
+   * the fast path cannot fold it and one tree per element would cost a whole
+   * copy of the body each. Like `data`, it never survives lowering unless the
+   * caller asks for it (a connected figure, which keeps it as `over`).
+   */
+  | { readonly kind: 'lazy'; readonly cols: readonly Column[]; readonly body: Expr }
   /**
    * A text literal, `"NYC"`. Text is not a value the plane can draw: it
    * exists so a filter can compare a text column against it, and every
@@ -802,6 +819,7 @@ export function childrenOf(e: Expr): readonly Expr[] {
     case 'index': case 'range': case 'eqtest': case 'call': return e.args;
     case 'comp': return [e.value];
     case 'figure': return e.vertices;
+    case 'lazy': return [e.body];
     case 'trail': return e.coordinates;
     case 'family': return e.members;
     case 'eq': case 'ineq': return [e.l, e.r];
@@ -823,6 +841,7 @@ export function mapChildren(e: Expr, map: (child: Expr) => Expr): Expr {
     case 'call': return { ...e, args: next };
     case 'comp': return { ...e, value: next[0] };
     case 'figure': return { ...e, vertices: next };
+    case 'lazy': return { ...e, body: next[0] };
     case 'trail': return { ...e, coordinates: next };
     case 'family': return { ...e, members: next };
     case 'eq': case 'ineq': return { ...e, l: next[0], r: next[1] };
@@ -1193,7 +1212,7 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
       return fn(...e.args.map(a => evaluate(a, env)));
     }
     case 'eq': return evaluate(e.l, env) - evaluate(e.r, env);
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
     case 'ineq': throw new Error('Cannot evaluate an inequality.');
     case 'vec': throw new Error('Vector in scalar context.');
     case 'list':
@@ -1270,7 +1289,17 @@ export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
       e.args.forEach(a => freeVars(a, out));
       break;
     }
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': childrenOf(e).forEach(a => freeVars(a, out)); break;
+    case 'figure': case 'lazy': {
+      // A template's column variables are bound by the template itself.
+      const cols = e.kind === 'lazy' ? e.cols : e.over;
+      if (!cols) { childrenOf(e).forEach(a => freeVars(a, out)); break; }
+      const inner = new Set<string>();
+      childrenOf(e).forEach(a => freeVars(a, inner));
+      for (const c of cols) inner.delete(c.name);
+      for (const v of inner) out.add(v);
+      break;
+    }
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'trail': case 'hist': case 'family': childrenOf(e).forEach(a => freeVars(a, out)); break;
     case 'eq': freeVars(e.l, out); freeVars(e.r, out); break;
     case 'ineq': freeVars(e.l, out); freeVars(e.r, out); break;
     case 'vec': e.items.forEach(a => freeVars(a, out)); break;

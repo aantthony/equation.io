@@ -349,7 +349,7 @@ export const uniformName = (p: string): string =>
  */
 export function toGLSL(e: Expr): string {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
     case 'num': return fmt(e.value);
     case 'var': return e.name;
     case 'neg': return `(-${toGLSL(e.a)})`;

@@ -15,7 +15,7 @@ import { compileGridCpu, compileGridGpu } from './compiler.ts';
 
 export function hasAtan2(e: Expr): boolean {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return childrenOf(e).some(hasAtan2);
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return childrenOf(e).some(hasAtan2);
     case 'num':
     case 'var':
       return false;

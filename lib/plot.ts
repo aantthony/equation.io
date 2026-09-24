@@ -381,10 +381,11 @@ function classifyLowered(
     if (hasSpace || hasParam) {
       throw new Error(`${figure.what} must be constant — they cannot use x, y, u, or v.`);
     }
-    if (expr.form === 'hull' && expr.dimension === 3 && expr.vertices.length / 3 > HULL_3D_MAX) {
-      throw new Error(`A 3D hull takes at most ${HULL_3D_MAX} points (got ${expr.vertices.length / 3}).`);
+    const count = expr.over ? expr.over[0].values.length : expr.vertices.length / expr.dimension;
+    if (expr.form === 'hull' && expr.dimension === 3 && count > HULL_3D_MAX) {
+      throw new Error(`A 3D hull takes at most ${HULL_3D_MAX} points (got ${count}).`);
     }
-    return done({ kind: 'figure', form: expr.form, dimension: expr.dimension, vertices: expr.vertices });
+    return done({ kind: 'figure', form: expr.form, dimension: expr.dimension, vertices: expr.vertices, ...(expr.over ? { over: expr.over } : {}) });
   }
 
   if (expr.kind === 'text' || expr.kind === 'str') {

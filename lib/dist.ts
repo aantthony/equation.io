@@ -853,7 +853,7 @@ function evalCols(
 ): Float64Array {
   const alloc = () => new Float64Array(n);
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
     case 'num': {
       const out = alloc();
       out.fill(e.value);

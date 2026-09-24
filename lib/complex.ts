@@ -28,7 +28,7 @@ export const WHOLE_EXPR_NAMES: ReadonlySet<string> = new Set([...SPECIAL_FORMS, 
  *  iteration variable bound by an enclosing special form). */
 export function usesComplex(e: Expr, extra?: ReadonlySet<string>): boolean {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return childrenOf(e).some(c => usesComplex(c, extra));
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return childrenOf(e).some(c => usesComplex(c, extra));
     case 'num': return false;
     case 'var': return e.name === 'i' || e.name === 'w' || !!extra?.has(e.name);
     case 'neg': return usesComplex(e.a, extra);
@@ -117,7 +117,7 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNa
   }
 
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
     case 'num': return { type: 'real', code: toGLSL(e) };
     case 'var':
       if (e.name in env) return env[e.name];
@@ -332,7 +332,7 @@ export function inferScalarType(e: Expr, env: Record<string, ScalarType> = {}): 
       return values.includes('complex') ? 'complex' : 'real';
     }
     case 'loop': return loopTypes(e, env).result;
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family':
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family':
       throw new Error('This object must be lowered before scalar type inference.');
     case 'data': case 'str': case 'text': throw new Error('Expected a scalar expression.');
   }

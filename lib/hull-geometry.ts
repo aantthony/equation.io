@@ -1,7 +1,6 @@
-import { type Expr, evaluate, freeVars } from './expr.ts';
-import { foldNums } from './defs.ts';
+import type { Column, Expr } from './expr.ts';
+import { vertexSampler } from './figure-vertices.ts';
 import { hullFaces, hullMesh } from './hull.ts';
-import { compileProg, run } from './vm.ts';
 
 /** Immutable drawing buffers, shared across frames until a vertex input changes. */
 export interface HullGeometry {
@@ -9,28 +8,16 @@ export interface HullGeometry {
   edges: Float32Array;
 }
 
-export function hullGeometrySampler(points: readonly Expr[], dim: 2 | 3) {
-  const names = new Set<string>();
-  for (const point of points) freeVars(point, names);
-  const dependencies = [...names];
-  // Rotations expand into repeated scalar arithmetic. Fold fixed angles and
-  // other numeric subtrees once, then run the remaining arithmetic in the VM.
-  // Keep unsupported expressions on the interpreter's existing path.
-  const slots = new Map(dependencies.map((name, i) => [name, i]));
-  const programs = points.map(point => {
-    try { return compileProg(foldNums(point, true), slots); } catch { return null; }
-  });
-  const variables = new Float64Array(dependencies.length);
-  const stack = new Float64Array(Math.max(1, ...programs.map(p => p?.depth ?? 0)));
+export function hullGeometrySampler(points: readonly Expr[], dim: 2 | 3, over?: readonly Column[]) {
+  const sample = vertexSampler(points, over);
+  const { dependencies } = sample;
   let previous: number[] | undefined;
   let geometry: HullGeometry | null = null;
   /** `time` stands in for `t`, so a caller can pass its constants uncopied. */
   return (env: Record<string, number>, time?: number): HullGeometry | null => {
     const values = dependencies.map(name => name === 't' && time !== undefined ? time : env[name]);
     if (previous && values.every((value, i) => Object.is(value, previous![i]))) return geometry;
-    variables.set(values);
-    const fallback = () => time === undefined ? env : { ...env, t: time };
-    const coordinates = points.map((point, i) => programs[i] ? run(programs[i]!, variables, stack) : evaluate(point, fallback()));
+    const coordinates = sample(env, time);
     let next: HullGeometry | null = null;
     if (coordinates.every(Number.isFinite)) {
       const faces = hullFaces(coordinates, dim);

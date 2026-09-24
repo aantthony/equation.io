@@ -264,7 +264,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
   const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
   const matOf = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'figure': case 'trail': case 'hist': case 'family': return sc(mapChildren(e, n => { const v = lo(n); return v.vec ? { kind: 'vec', items: v.items } : v.e; }));
+    case 'index': case 'range': case 'eqtest': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return sc(mapChildren(e, n => { const v = lo(n); return v.vec ? { kind: 'vec', items: v.items } : v.e; }));
     case 'num': return sc(e);
     case 'var': {
       if (getMat(e.name)) {
