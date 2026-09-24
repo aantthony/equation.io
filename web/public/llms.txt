@@ -642,6 +642,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `dot(s, s) = 1` and `|s| = 1` are the unit circle, `|s| < 1` the unit
   disk. `F = (y, -x)` is any field of the plane. In space,
   `s = (x, y, z); dot(s, s) = 1` is the unit sphere.
+- Named curve or surface: a named vector that uses u or v is inlined the
+  same way — `c = (cos(2pi u), sin(2pi u))` draws nothing of its own, and
+  later rows use it as the point it traces: `c` draws the unit circle,
+  `M c` its image under a matrix M, `2c + (1, 0)` a moved copy. A scalar
+  works too (`k = u^2; (u, k)`) and goes wherever u itself could — so
+  `y = k` is the same error as `y = u` — and so does a surface over u and v.
+  A definition may use u, v or x, y, z, not both: `(x, u)` is an error.
 - Dragging: a point (named or bare) is draggable only where the drag has
   somewhere to write the new value: a coordinate that is a plain number
   (`(2, 3)`) or a bare slider name (`(a, 3)` with `a = 1` above) moves;

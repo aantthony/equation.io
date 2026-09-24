@@ -272,12 +272,16 @@ describe('buildDefs', () => {
     expect(defs.fields.has('a')).toBe(true);
   });
 
-  it('rejects constants that depend on other plot variables', () => {
+  it('makes a definition over a plot variable a field, not a constant', () => {
+    // u is a curve's parameter: the definition inlines where it is used.
     const { errors, defs } = buildDefs([cdef('a', 'u + 1')]);
-    expect(errors.get('a')).toMatch(/found u/);
+    expect(errors.size).toBe(0);
     expect(defs.consts.size).toBe(0);
+    expect(defs.fields.has('a')).toBe(true);
     // z is a coordinate of space: a definition reaching it is a field.
     expect(buildDefs([cdef('a', 'z + 1')]).defs.fields.has('a')).toBe(true);
+    // One or the other, though: a curve cannot also depend on position.
+    expect(buildDefs([cdef('a', 'x + u')]).errors.get('a')).toMatch(/mixes position.*found u/);
   });
 
   it('checks arity when inlining', () => {

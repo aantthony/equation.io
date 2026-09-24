@@ -5,7 +5,8 @@ import { type Env } from './env.ts';
 import { pointComponentNames, shadowedFnNames } from './defs.ts';
 import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-families.ts';
 import { tildeRow } from './regression.ts';
-import { FUNCTIONS, NAME_SRC, NAME_START_CHARS, WRITTEN_NAME_CHARS, builtinFn, canonicalName } from './expr.ts';
+import { FUNCTIONS, NAME_SRC, NAME_START_CHARS, WRITTEN_NAME_CHARS, builtinFn, canonicalName, freeVars } from './expr.ts';
+import { pointComps } from './geom.ts';
 import { ESCAPES } from './escapes.ts';
 import { VALUE_END, noteStart } from './statements.ts';
 
@@ -134,8 +135,17 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values(defs.consts.keys(), 'Defined constant');
   values(defs.states.keys(), 'Simulation state');
   values(defs.vecStates.keys(), 'Vector state');
-  values([...defs.fields.keys()].filter(n => !pointComponentNames(defs).has(n)), 'Coordinate field');
-  values(defs.points, 'Defined point');
+  // A field over u, v is a named curve or surface (`c = (cos(2pi u), …)`).
+  const overParams = (name: string) => {
+    const vars = freeVars(defs.fields.get(name) ?? { kind: 'num', value: 0 });
+    return vars.has('u') || vars.has('v');
+  };
+  const pointOverParams = (p: string) => pointComps(p, defs.pointDims.get(p)).some(overParams);
+  const fields = [...defs.fields.keys()].filter(n => !pointComponentNames(defs).has(n));
+  values(fields.filter(n => !overParams(n)), 'Coordinate field');
+  values(fields.filter(overParams), 'Parametric value');
+  values([...defs.points].filter(p => !pointOverParams(p)), 'Defined point');
+  values([...defs.points].filter(pointOverParams), 'Named curve or surface');
   values(defs.mats.keys(), 'Defined matrix');
   values(defs.lists.keys(), 'Defined list');
   for (const [name, table] of defs.tables) {

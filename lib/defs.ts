@@ -43,6 +43,8 @@ import { type RegressionRow, type FitResult, fitRegression } from './regression.
 
 /** The axis variables: a definition reaching one is a coordinate field. */
 const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
+/** The parametric parameters, each ranging over (0, 1). */
+const PARAMS: ReadonlySet<string> = new Set(['u', 'v']);
 
 export type Definition =
   | RegressionRow
@@ -2030,16 +2032,22 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
 
   // A definition whose value depends on position — x, y, or z, directly or
   // via another such definition — is a coordinate field, not a constant.
+  // So is one over the parameters u, v: `c = (cos(2pi u), sin(2pi u))`
+  // names a curve that later rows inline, as they inline `s = (x, y)`.
   const fieldNames = new Set<string>();
+  // The fields over u, v among them, so their errors speak of curves.
+  const paramNames = new Set<string>();
   for (let changed = true; changed;) {
     changed = false;
     for (const [name, e] of defs.consts) {
-      if (fieldNames.has(name)) continue;
       for (const fv of freeVars(e)) {
-        if (SPACE.has(fv) || fieldNames.has(fv)) {
+        if (!fieldNames.has(name) && (SPACE.has(fv) || PARAMS.has(fv) || fieldNames.has(fv))) {
           fieldNames.add(name);
           changed = true;
-          break;
+        }
+        if (!paramNames.has(name) && (PARAMS.has(fv) || paramNames.has(fv))) {
+          paramNames.add(name);
+          changed = true;
         }
       }
     }
@@ -2052,6 +2060,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     const comps = pointComps(p, defs.pointDims.get(p));
     if (!comps.some(c => fieldNames.has(c))) continue;
     for (const c of comps) fieldNames.add(c);
+    // `c = (u, w)`: the w component belongs to a curve too.
+    if (comps.some(c => paramNames.has(c))) for (const c of comps) paramNames.add(c);
   }
 
   const constNames = new Set(raw.filter(d => d.kind === 'const' && !fieldNames.has(d.name)).map(d => d.name));
@@ -2088,9 +2098,18 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         if (pendingFields.has(fv)) sub[fv] = resolveField(fv);
       }
       if (Object.keys(sub).length) e = substVars(e, sub);
-      for (const fv of freeVars(e)) {
-        if (!SPACE.has(fv) && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
-          throw new Error(`${shown} defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found ${fv}).`);
+      // A field lives over the plane or space, or over the parameters — a
+      // position-dependent curve has no one meaning.
+      const vars = [...freeVars(e)];
+      const param = vars.find(fv => PARAMS.has(fv));
+      if (param && vars.some(fv => SPACE.has(fv))) {
+        throw new Error(`${shown} mixes position (x, y, z) with the parameter ${param}; a definition may use one or the other (found ${param}).`);
+      }
+      for (const fv of vars) {
+        if (!SPACE.has(fv) && !PARAMS.has(fv) && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
+          throw new Error(param || paramNames.has(name)
+            ? `${shown} is a curve or surface (it uses u or v), so it may only use u, v, t, and constants (found ${fv}).`
+            : `${shown} defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found ${fv}).`);
         }
       }
       // Trial-evaluate to surface unsupported calls (re, im, …) now.
@@ -2118,6 +2137,18 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         for (const c of pointComps(owner, defs.pointDims.get(owner))) defs.fields.delete(c);
       }
     }
+  }
+  // The same rule across a named vector's components: `s = (x, u)` has no
+  // one meaning, though each component alone would.
+  for (const p of [...defs.points]) {
+    const comps = pointComps(p, defs.pointDims.get(p)).map(c => defs.fields.get(c));
+    if (!comps.every(Boolean)) continue;
+    const vars = comps.flatMap(e => [...freeVars(e!)]);
+    const param = vars.find(fv => PARAMS.has(fv));
+    if (!param || !vars.some(fv => SPACE.has(fv))) continue;
+    errors.set(p, `${p} mixes position (x, y, z) with the parameter ${param}; a definition may use one or the other (found ${param}).`);
+    defs.points.delete(p);
+    for (const c of pointComps(p, defs.pointDims.get(p))) defs.fields.delete(c);
   }
   // Grid families draw in definition order, not dependency-resolution order.
   const orderedFields = new Map<string, Expr>();
