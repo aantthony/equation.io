@@ -82,10 +82,13 @@ import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
 
+
 interface Equation {
   familyParent?: Equation;
   familyShade?: number;
   showArrows?: boolean;
+  /** A 3D vector field drawn as animated streamlines instead of trajectories. */
+  showStreamlines?: boolean;
   certify?: boolean;
   trail?: PointTrail;
   /** A definite-integral row's shaded area: the integrand compiled once per
@@ -142,7 +145,7 @@ interface Equation {
   tableUI?: TableUI;
   /** Cached hover points (axis intercepts/roots) for the cached view range. */
   spCache?: { text: string; env: string; xlo: number; xhi: number; ylo: number; yhi: number; pts: SpecialPoint[] };
-  toggleUI?: { box: HTMLElement; btn: HTMLButtonElement };
+  toggleUI?: { box: HTMLElement; btns: HTMLButtonElement[] };
   /** Cached system solutions for the box and constants they were solved at. */
   traceTarget?: string;
   traceClock?: number;
@@ -618,8 +621,8 @@ function renderMembers(eq: Equation): Equation[] {
   }
   return children;
 }
-const familyShared = ({ colorIndex, showArrows, certify, showLevels, combK, combT, partialSum, barMode }: Equation) =>
-  ({ colorIndex, showArrows, certify, showLevels, combK, combT, partialSum, barMode });
+const familyShared = ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum, barMode }: Equation) =>
+  ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum, barMode });
 
 const rowColor = (eq: Equation): [number, number, number] => theme.palette[eq.colorIndex].map(c => c + (1 - c) * (eq.familyShade ?? 0)) as [number, number, number];
 const liveRow = (eq: Equation) => equations.includes(eq.familyParent ?? eq) && (!eq.familyParent || (!!eq.familyParent.cls && renderMembers(eq.familyParent).includes(eq)));
@@ -903,6 +906,10 @@ function render() {
           break;
         }
         case 'vfield3d': {
+          if (eq.showStreamlines && eq.gpu?.type === 'vfield3d') {
+            (scene.streamlines ??= []).push({ comps: gpuFor(eq, 'vfield3d').comps, color, params, uniforms });
+            break;
+          }
           const pts = solveFor(eq, 3, plot.comps);
           if (eq.showArrows) {
             const flat = pts.flat();
@@ -1418,7 +1425,9 @@ function render() {
   const gridAnimated = mode === '2d'
     && gridFields.some(f => freeVars(f.expr).has('t') || (defsAnimated && f.params.length > 0));
   // A state system is never at rest: keep frames coming so it keeps stepping.
-  if (stateSys || gridAnimated
+  // Streamlines drift downstream even through a field that holds still.
+  const streamlinesAnimated = mode === '3d' && active.some(e => e.cpu!.type === 'vfield3d' && e.gpu?.type === 'vfield3d' && e.showStreamlines);
+  if (stateSys || gridAnimated || streamlinesAnimated
     || active.some(e => e.cls!.animated || (defsAnimated && e.cls!.params.length > 0))) {
     requestRender();
   }
@@ -2209,18 +2218,31 @@ function makeCurveUI(eq: Equation): CurveUI {
   return { box, kappa, tau };
 }
 
+type RowToggle = { label: string; title: string; on: boolean; flip: () => void };
+
 /**
- * The display toggle a row offers, if any. Read at click time as well as on
- * reconcile, so one button element follows the row as its plot type changes.
+ * The display toggles a row offers, if any. Read at click time as well as on
+ * reconcile, so the button elements follow the row as its plot type changes.
  */
-function rowToggle(eq: Equation): { label: string; title: string; on: boolean; flip: () => void } | null {
+function rowToggles(eq: Equation): RowToggle[] {
+  const one = rowToggle(eq);
+  if (eq.cpu?.type !== 'vfield3d') return one ? [one] : [];
+  // Trajectories unless one of these is on; they exclude each other.
+  const retrace = () => { eq.sysCache = undefined; eq.traceTarget = undefined; traceQueue.cancelPending(eq.id); };
+  const streamlines: RowToggle[] = eq.gpu?.type !== 'vfield3d' ? [] : [{
+    label: 'streamlines', title: 'Fill space with short streamlines drifting along the field', on: !!eq.showStreamlines,
+    flip: () => { eq.showStreamlines = !eq.showStreamlines; eq.showArrows = false; retrace(); },
+  }];
+  return [...streamlines, {
+    label: 'arrows', title: 'Show a lattice of direction arrows', on: !!eq.showArrows,
+    flip: () => { eq.showArrows = !eq.showArrows; eq.showStreamlines = false; retrace(); },
+  }];
+}
+
+function rowToggle(eq: Equation): RowToggle | null {
   if (eq.cpu?.type === 'system' && !eq.cpu!.parametric && !eq.cpu!.angular?.some(Boolean)) return {
     label: 'certify search box', title: 'Prove roots and completeness in the bounded search box; unsupported functions remain unresolved', on: !!eq.certify,
     flip: () => { eq.certify = !eq.certify; eq.info = eq.certify ? 'Certifying search box…' : undefined; eq.sysCache = undefined; eq.traceTarget = undefined; traceQueue.cancelPending(eq.id); },
-  };
-  if (eq.cpu?.type === 'vfield3d') return {
-    label: 'arrows', title: 'Show a lattice of direction arrows', on: !!eq.showArrows,
-    flip: () => { eq.showArrows = !eq.showArrows; eq.sysCache = undefined; eq.traceTarget = undefined; traceQueue.cancelPending(eq.id); },
   };
   switch (eq.cpu?.type) {
     case 'sequence':
@@ -2251,21 +2273,29 @@ function rowToggle(eq: Equation): { label: string; title: string; on: boolean; f
   }
 }
 
-function makeToggle(eq: Equation): { box: HTMLElement; btn: HTMLButtonElement } {
+function makeToggles(): { box: HTMLElement; btns: HTMLButtonElement[] } {
   const box = document.createElement('div');
   box.className = 'eq-widget eq-toggles';
   box.contentEditable = 'false';
-  const btn = document.createElement('button');
-  btn.className = 'eq-toggle';
-  btn.addEventListener('click', () => {
-    const t = rowToggle(eq);
-    if (!t) return;
-    t.flip();
-    reconcile();
-    requestRender();
-  });
-  box.append(btn);
-  return { box, btn };
+  return { box, btns: [] };
+}
+
+/** Button k of a row's toggles, created on first use. */
+function toggleButton(eq: Equation, ui: { box: HTMLElement; btns: HTMLButtonElement[] }, k: number): HTMLButtonElement {
+  let btn = ui.btns[k];
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.className = 'eq-toggle';
+    btn.addEventListener('click', () => {
+      const t = rowToggles(eq)[k];
+      if (!t) return;
+      t.flip();
+      reconcile();
+      requestRender();
+    });
+    ui.btns[k] = btn;
+  }
+  return btn;
 }
 
 /** Data rows shown in the preview grid under an `open(…)` row. */
@@ -2400,14 +2430,19 @@ function reconcile() {
       eq.curveUI.tau.checked = !!eq.combT;
       wanted.push(eq.curveUI.box);
     }
-    const toggle = rowToggle(eq);
-    if (toggle) {
-      eq.toggleUI ??= makeToggle(eq);
-      const { box, btn } = eq.toggleUI;
-      btn.textContent = toggle.label;
-      btn.title = toggle.title;
-      btn.classList.toggle('on', toggle.on);
-      wanted.push(box);
+    const toggles = rowToggles(eq);
+    if (toggles.length) {
+      const ui = eq.toggleUI ??= makeToggles();
+      const btns = toggles.map((toggle, k) => {
+        const btn = toggleButton(eq, ui, k);
+        btn.textContent = toggle.label;
+        btn.title = toggle.title;
+        btn.classList.toggle('on', toggle.on);
+        return btn;
+      });
+      // Only when the set changes: re-inserting would drop hover and focus.
+      if (btns.length !== ui.box.children.length || btns.some((b, k) => ui.box.children[k] !== b)) ui.box.replaceChildren(...btns);
+      wanted.push(ui.box);
     }
     // A data row's readout is the handle on a preview of the file itself:
     // the summary says what was parsed, opening it shows the first rows.
