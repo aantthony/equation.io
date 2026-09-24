@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "printWidth": 120,
+  "arrowParens": "avoid",
+  "ignorePatterns": ["**/*.md", "**/*.html", "**/*.json", "**/*.jsonc", "**/*.yaml", "**/*.yml", "pnpm-lock.yaml", "worker-configuration.d.ts"]
+}
