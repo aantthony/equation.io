@@ -2952,9 +2952,9 @@ const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['shear + swirl', '(sin(y), sin(x))'],
   ]],
   ['regression', [
-    ['line fit and residuals', 'X = [0,1,2,3,4]; Y = [1.1,2.9,5.2,6.8,9.1]; Y ~ m X + b; (X,Y); y = m x + b; # residuals; (X,Y-(m X+b))'],
-    ['quadratic fit', 'X = [-2,-1,0,1,2]; Y = [9,2,1,6,17]; Y ~ a X^2 + b X + c; (X,Y); y = a x^2 + b x + c'],
-    ['exponential fit', 'X = [0,0.5,1,1.5,2]; Y = [2,2.84,4.03,5.72,8.11]; Y ~ a exp(b X); (X,Y); y = a exp(b x)'],
+    ['line fit and residuals', 'P = [(0,1.1),(1,2.9),(2,5.2),(3,6.8),(4,9.1)]; P.y ~ m P.x + b; P; y = m x + b; # residuals; (P.x,P.y-(m P.x+b))'],
+    ['quadratic fit', 'P = [(-2,9),(-1,2),(0,1),(1,6),(2,17)]; P.y ~ a P.x^2 + b P.x + c; P; y = a x^2 + b x + c'],
+    ['exponential fit', 'P = [(0,2),(0.5,2.84),(1,4.03),(1.5,5.72),(2,8.11)]; P.y ~ a exp(b P.x); P; y = a exp(b x)'],
   ]],
   ['odes (click to trace)', [
     ['slope field', "y' = x - y"],

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
 import { buildDefs,  scanDefinition, type Definition } from './defs.ts';
 import { parseCsv } from './csv.ts';
+import { evaluate } from './expr.ts';
 import { scanRegressions } from './regression.ts';
 
 function fit(rows: string[]) {
@@ -107,5 +108,56 @@ describe('equation-native regression', () => {
     [['X=[-2,-1]', 'Y=[1,2]', 'Y ~ a ln(X)'], /undefined/],
   ])('rejects invalid or underdetermined fits: %j', (rows, message) => {
     expect([...fit(rows).errors.values()].join(' ')).toMatch(message);
+  });
+});
+
+describe('fitting a list of points by its coordinates', () => {
+  // Two separately written lists are independent and cross, so the examples
+  // write their data as points: P.x and P.y pair up point by point.
+  const rows = ['P = [(-2,9),(-1,2),(0,1),(1,6),(2,17)]', 'P.y ~ a P.x^2 + b P.x + c', 'P', '(P.x, P.y)', '(P.x, P.y - (a P.x^2 + b P.x + c))'];
+
+  it('fits P.y against P.x, one observation per point', () => {
+    const r = analyze(rows);
+    expect(r.rows.map(row => row.error)).toEqual(rows.map(() => undefined));
+    expect(r.constEnv.a).toBeCloseTo(3);
+    expect(r.constEnv.b).toBeCloseTo(2);
+    expect(r.constEnv.c).toBeCloseTo(1);
+    expect(r.rows[1].info).toMatch(/5 observations/);
+  });
+
+  it('pairs the coordinate lists rather than crossing them', () => {
+    const r = analyze(rows);
+    for (const at of [2, 3, 4]) {
+      const plan = r.rows[at].cpu!;
+      expect(plan.type).toBe('plist');
+      if (plan.type === 'plist') expect(plan.pts).toHaveLength(5);
+    }
+    const residuals = r.rows[4].cpu!;
+    if (residuals.type !== 'plist') throw new Error('residuals');
+    for (const [, dy] of residuals.pts) expect(Math.abs(evaluate(dy, r.constEnv))).toBeLessThan(1e-9);
+  });
+
+  it('names the coordinates a point list has', () => {
+    expect(analyze(['P = [(1,2),(3,4)]', 'P.z']).rows[1].error).toMatch(/2D points: its coordinates are P\.x, P\.y/);
+    expect(analyze(['L = [1,2]', 'L.x']).rows[1].error).toMatch(/L is a list of numbers/);
+  });
+
+  it('reads the rows of a point list that is shaped like a matrix', () => {
+    // Two 2D points are a 2×2 matrix as well; P.x still means their x's.
+    const r = analyze(['P = [(1,2),(3,5)]', 'P.y ~ m P.x + b', '(P.x, P.y)']);
+    expect(r.constEnv.m).toBeCloseTo(1.5);
+    const plan = r.rows[2].cpu!;
+    expect(plan.type === 'plist' && plan.pts).toHaveLength(2);
+  });
+
+  it('filters one coordinate of a matrix-shaped point list by another', () => {
+    const row = analyze(['P = [(1,2),(3,5)]', 'P.y[P.x > 2]']).rows[1];
+    expect(row.error).toBeUndefined();
+    expect(row.cpu).toEqual({ type: 'vlist', values: [{ kind: 'num', value: 5 }] });
+  });
+
+  it('keeps two separately written lists independent', () => {
+    const plan = analyze(['X = [1,2,3]', 'Y = [4,5,6]', '(X, Y)']).rows[2].cpu!;
+    expect(plan.type === 'plist' && plan.pts).toHaveLength(9);
   });
 });
