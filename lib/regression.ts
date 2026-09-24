@@ -69,7 +69,7 @@ export function tildeRow(
   const lhs = text.slice(0, tilde).trim(), rhs = text.slice(tilde + 1).trim();
   const head = HEAD_RE.exec(rhs);
   const law = !!head && !!distFamily(head[1]) && !isModelName(head[1]);
-  const regression = !law && !/^exp$/i.test(rhs) && (declared.has(canonicalName(lhs)) || /[.\[\](+*/-]/.test(lhs));
+  const regression = !law && !/^exp$/i.test(rhs) && (declared.has(canonicalName(lhs)) || /[.[\](+*/-]/.test(lhs));
   return { lhs, rhs, tilde, regression };
 }
 

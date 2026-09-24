@@ -1362,9 +1362,6 @@ function render() {
           } catch { /* not evaluable this frame */ }
           break;
         }
-        case 'orbit':
-          extras.polylines.push({ pts: orbitFor(eq).flat(), color: css });
-          break;
         case 'system':
           // A 3-unknown system forces the 3D view, so only 2D lands here.
           if (plot.dim === 2) {

@@ -206,7 +206,7 @@ async function handleOgImage(url: URL): Promise<Response> {
   });
 }
 
-async function handleApi(request: Request, url: URL, env: Env): Promise<Response> {
+async function handleApi(request: Request, url: URL, _env: Env): Promise<Response> {
   if (url.pathname === '/api/health') {
     return Response.json({ ok: true });
   }
