@@ -162,7 +162,7 @@ describe('integralAreas', () => {
     const runs = integralRuns(x => (Math.abs(x) >= 1 ? 1 : NaN), -100, 100, -10, 10);
     expect(runs.map(r => [r.clipLo, r.clipHi])).toEqual([[true, false], [false, true]]);
     // A bound exactly on the window edge is a bound, not a clip.
-    expect(integralRuns(x => 1, -10, 10, -10, 10)[0]).toMatchObject({ clipLo: false, clipHi: false });
+    expect(integralRuns(() => 1, -10, 10, -10, 10)[0]).toMatchObject({ clipLo: false, clipHi: false });
   });
 
   it('sampling ignores the vertical window: the clamp happens in runPaths', () => {

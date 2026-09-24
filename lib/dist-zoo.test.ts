@@ -563,7 +563,7 @@ describe('review follow-ups', () => {
     expect(cdf(dist('Beta(1000000000000, 1000000000000)'), 0.5)).toBeCloseTo(0.5, 9);
     expect(cdf(dist('Gamma(10000000000000, 1)'), 1e13)).toBeCloseTo(0.5 + 1 / (3 * Math.sqrt(2 * Math.PI * 1e13)), 9);
     expect(cdf(dist('Gamma(10000000000000, 1)'), 1e13 + 2e6 * Math.sqrt(10))).toBeCloseTo(0.9772, 3);
-    expect(cdf(dist('Beta(3, 1000000000000)'), 2.6740603137235617e-12)).toBeCloseTo(0.5, 6); // → Gamma(3)/b
+    expect(cdf(dist('Beta(3, 1000000000000)'), 2.674060313723562e-12)).toBeCloseTo(0.5, 6); // → Gamma(3)/b
     expect(sf(dist('ChiSquared(40000000000000)'), 4e13)).toBeCloseTo(0.5, 6);
     const { sys } = build(['X ~ Beta(30000000, 50000000)']);
     const col = sys.columns('X', {}).slice().sort();

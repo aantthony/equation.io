@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
 
 jobs:
@@ -28,6 +28,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm lint
 
       - name: Test
         run: pnpm vitest run

@@ -259,8 +259,8 @@ describe('astronomically large parameters', () => {
     close(betaPQ(1e12, 1e12, 0.5)[0], 0.5, 1e-9);
     close(betaPQ(1e8, 3e8, 0.25)[0], 0.5000076776477685, 1e-8);
     close(betaPQ(1e8, 3e8, 0.25005)[0], 0.9895370208077992, 1e-8); // scipy betainc
-    close(betaPQ(3, 1e13, 2.6740603137235617e-13)[0], 0.5, 1e-6);
-    close(betaPQ(1e13, 3, 1 - 2.6740603137235617e-13, 2.6740603137235617e-13)[1], 0.5, 1e-6);
+    close(betaPQ(3, 1e13, 2.674060313723562e-13)[0], 0.5, 1e-6);
+    close(betaPQ(1e13, 3, 1 - 2.674060313723562e-13, 2.674060313723562e-13)[1], 0.5, 1e-6);
     // Continuous across the switch to the limit laws, in each of their regimes:
     // both huge (skew-corrected normal), and one side modest (a Gamma law).
     for (const [a, b, xs] of [

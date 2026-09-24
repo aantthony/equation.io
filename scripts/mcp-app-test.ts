@@ -60,7 +60,7 @@ try {
     contentType: 'text/html', body: '<!doctype html><html><body style="margin:0"><iframe title="Graph" sandbox="allow-scripts allow-same-origin allow-popups" style="width:100%;height:520px;border:0"></iframe></body></html>',
   }));
   await page.goto('http://127.0.0.1:5195/');
-  await page.evaluate(({ html, result, origin }) => {
+  await page.evaluate(({ html, origin }) => {
     const frame = document.querySelector('iframe')!;
     const state = window as any;
     state.messages = [];
@@ -92,7 +92,7 @@ try {
     // Same resource restrictions as the declared policy; inline style is used
     // by the existing graph controls and the host bridge's sizing helpers.
     frame.srcdoc = html.replace('<head>', `<head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src ${origin} blob: 'unsafe-inline'; style-src ${origin} 'unsafe-inline'; img-src ${origin} data:; worker-src blob:; connect-src 'none'; frame-src 'none'">`);
-  }, { html: resource.text.replaceAll(origin, assetOrigin), result, origin: assetOrigin });
+  }, { html: resource.text.replaceAll(origin, assetOrigin), origin: assetOrigin });
   const frame = page.frames().find(f => f !== page.mainFrame())!;
   await frame.waitForSelector('.eq-slider input[type=range]', { state: 'attached', timeout: 10000 }).catch(async error => {
     console.error({ errors, messages: await page.evaluate(() => (window as any).messages), body: await frame.locator('body').innerText() });

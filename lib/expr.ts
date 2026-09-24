@@ -569,8 +569,8 @@ export const canonicalName = (name: string): string =>
   name.replace(/[₀-₉]+/g, run => '_' + [...run].map(c => String(c.codePointAt(0)! - 0x2080)).join(''));
 
 const syntax: PatternDict = {
-  parenopen: /^[\(\{\[]$/,
-  parenclose: /^[\)\}\]]$/,
+  parenopen: /^[({[]$/,
+  parenclose: /^[)}\]]$/,
   number: /^\d+\.?\d*$/,
   superscript: new RegExp(`^[${SUPERSCRIPT_CHARS}]+$`),
   bar: /^\|$/,
@@ -1018,6 +1018,7 @@ export function realPow(a: number, b: number): number {
  *  below what a float carries. The CPU side is lgamma() in specfn.ts (g = 7,
  *  ~1e-15) — one ln Γ for gamma(x) and for the distributions alike. */
 export const LANCZOS = [
+  // oxlint-disable-next-line no-loss-of-precision -- published coefficients, kept verbatim
   76.18009172947146, -86.50532032941677, 24.01409824083091,
   -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5,
 ];

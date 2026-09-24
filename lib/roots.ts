@@ -98,7 +98,7 @@ function numericRoots(f: Expr, v: string, lo: number, hi: number): FoundRoot[] |
       continue;
     }
     if (y0 * y1 < 0) {
-      const x = refineBracket(ev, dev, xs[i], xs[i + 1], y0, y1);
+      const x = refineBracket(ev, dev, xs[i], xs[i + 1], y0);
       // A pole (tan at π/2) also flips sign; a genuine root has a tiny residual.
       const fx = ev(x);
       if (isFinite(fx) && Math.abs(fx) <= residualTol) {
@@ -130,14 +130,13 @@ function refineBracket(
   a: number,
   b: number,
   fa: number,
-  fb: number,
 ): number {
   let x = (a + b) / 2;
   for (let iter = 0; iter < 80; iter++) {
     const fx = ev(x);
     if (fx === 0 || !isFinite(fx)) break;
     if (Math.sign(fx) === Math.sign(fa)) { a = x; fa = fx; }
-    else { b = x; fb = fx; }
+    else b = x;
     const d = dev(x);
     let nx = x - fx / d;
     if (!isFinite(nx) || nx <= a || nx >= b) nx = (a + b) / 2;
@@ -161,7 +160,7 @@ function refineExtremum(
     return refineBracket(dev, x => {
       const h = 1e-6 * (1 + Math.abs(x));
       return (dev(x + h) - dev(x - h)) / (2 * h);
-    }, a, b, da, db);
+    }, a, b, da);
   }
   // Golden-section on |f|.
   const phi = (Math.sqrt(5) - 1) / 2;

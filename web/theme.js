@@ -12,5 +12,5 @@
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
     document.getElementById('theme-color')
       ?.setAttribute('content', dark ? '#171a1f' : '#ffffff');
-  } catch (e) {}
+  } catch {}
 })();

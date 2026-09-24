@@ -218,7 +218,7 @@ function dataOf(values: Float64Array, ctx: Ctx): Expr {
  * fast path cannot carry — anything involving t, a slider that must stay a
  * uniform, or a comparison. This is where a big column meets ITEMS_MAX.
  */
-function expand(e: Expr, ctx: Ctx): Expr {
+function expand(e: Expr, _ctx: Ctx): Expr {
   if (!isData(e) && !isText(e) && !isLazy(e)) return e;
   const n = seqLength(e);
   if (n > ITEMS_MAX) {
