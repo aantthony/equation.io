@@ -50,7 +50,7 @@ import { type SpecialPoint, specialPoints } from '../lib/special.ts';
 
 import { type StateSystem, advanceState, initialState } from '../lib/state.ts';
 import { type OrbitInput, orbitInput } from '../lib/orbit.ts';
-import { splitStatements } from '../lib/statements.ts';
+import { keepNote, noteStart, splitStatements, stripNote } from '../lib/statements.ts';
 import {
   type ViewSpec,
   clampPhi,
@@ -516,13 +516,14 @@ function writebackViewport() {
   } else {
     text = formatCameraRow(camera);
   }
+  text = keepNote(eq.text, text);
   if (text === eq.text) return;
   pushUndo(`viewport:${eq.id}`);
   if (mode === '2d') appliedViewText = text;
   else appliedCameraText = text;
   eq.text = text;
   const line = lineEls()[equations.indexOf(eq)];
-  if (line) line.textContent = text;
+  if (line) setLineText(line, text);
   // Only the framing changed. Reclassifying the math here discards geometry
   // caches and can block every camera gesture for hundreds of milliseconds.
   // Text the formatter cannot round-trip (a non-finite window) still lands
@@ -1425,7 +1426,7 @@ let trailDocument = '';
 function resetEditedTrails() {
   // Framing and comment edits preserve trails; changing the math starts a
   // fresh observation so unrelated runs never get joined by a false segment.
-  const mathText = equations.map(eq => eq.text.trim()).filter(text =>
+  const mathText = equations.map(eq => stripNote(eq.text).trim()).filter(text =>
     text && !text.startsWith('#') && !/^(view|camera)\s*\(/i.test(text)).join('\n');
   if (mathText !== trailDocument) {
     for (const eq of equations) eq.trail = undefined;
@@ -1599,12 +1600,12 @@ function pinTableHashes(): boolean {
     if (d?.kind !== 'table' || d.hash || eq.error || i === editing) continue;
     const f = lookupFile(d.file, '');
     if (!f) continue;
-    const text = formatTableRow(d.name, d.file, f.hash);
+    const text = keepNote(eq.text, formatTableRow(d.name, d.file, f.hash));
     if (text === eq.text.trim()) continue;
     eq.text = text;
     // Write the line through the way a slider drag does, so the pin does not
     // need a full re-render of the list to become visible.
-    if (lines[i]) lines[i].textContent = text;
+    if (lines[i]) setLineText(lines[i], text);
     changed = true;
   }
   if (changed) {
@@ -1622,7 +1623,7 @@ function rowNameFor(base: string): string {
   // with the same stem (sales.csv, sales.tsv) the same name, and the second
   // row then lost to the duplicate check.
   return freeTableName(base, new Set(equations
-    .map(eq => eq.def?.name ?? scanDefinition(eq.text)?.name)
+    .map(eq => eq.def?.name ?? scanDefinition(stripNote(eq.text))?.name)
     .filter((n): n is string => !!n)));
 }
 
@@ -1662,7 +1663,7 @@ async function openDataFiles(files: File[]) {
         continue;
       }
       known = true;
-      const text = formatTableRow(d.name, d.file, loaded.hash);
+      const text = keepNote(eq.text, formatTableRow(d.name, d.file, loaded.hash));
       if (text !== eq.text.trim()) eq.text = text;
     }
     if (pinnedElsewhere) {
@@ -1874,6 +1875,28 @@ const fmtNum = (v: number) => String(parseFloat(v.toPrecision(6)));
 const lineEls = (): HTMLElement[] =>
   [...listEl.children].filter((el): el is HTMLElement => el.classList.contains('eq-line'));
 
+/**
+ * Write a row's text into its line. A trailing `# note` goes in its own span,
+ * which the stylesheet sets on the next visual line in a smaller prose face;
+ * it is still the line's text, so caret offsets, copy and undo see one row.
+ */
+function setLineText(line: HTMLElement, text: string) {
+  const at = noteStart(text);
+  if (at < 0) { line.textContent = text; return; }
+  const note = document.createElement('span');
+  note.className = 'eq-note';
+  note.textContent = text.slice(at);
+  line.replaceChildren(text.slice(0, at), note);
+}
+
+/** Whether the line's DOM already has the shape setLineText gives `text`. */
+function lineShaped(line: HTMLElement, text: string): boolean {
+  const note = line.querySelector('.eq-note');
+  const at = noteStart(text);
+  if (at < 0) return !note;
+  return note !== null && line.lastChild === note && note.textContent === text.slice(at);
+}
+
 const lineText = (line: HTMLElement): string => (line.textContent ?? '').replace(/ /g, ' ');
 
 // --- caret mapped to (line index, character offset) ---
@@ -2041,9 +2064,9 @@ function makeSlider(eq: Equation): SliderUI {
     pushUndo(`slider:${eq.id}`);
     const lhs = kind === 'init' ? `${eq.def!.name}(0)` : eq.def!.name;
     const rhs = fmtNum(Number(range.value));
-    eq.text = `${lhs} = ${rhs}`;
+    eq.text = keepNote(eq.text, `${lhs} = ${rhs}`);
     const line = lineEls()[equations.indexOf(eq)];
-    if (line) line.textContent = eq.text;
+    if (line) setLineText(line, eq.text);
     if (kind === 'const' && runtimeSliders.has(lhs) && !equations.some(row => row.error || row.needsFile)) {
       defs.drop(lhs);
       defs.bind(lhs, { tag: 'scalar', role: 'const', expr: { kind: 'num', value: Number(rhs) } });
@@ -2423,7 +2446,7 @@ function renderAll() {
     const line = document.createElement('div');
     line.className = 'eq-line';
     line.dataset.id = String(eq.id);
-    if (eq.text) line.textContent = eq.text;
+    if (eq.text) setLineText(line, eq.text);
     else line.append(document.createElement('br'));
     listEl.append(line);
   }
@@ -2476,6 +2499,23 @@ function syncFromDOM() {
   }
   equations.length = 0;
   equations.push(...next);
+}
+
+/**
+ * After a native edit, rebuild only the lines whose note span no longer
+ * matches their text — typing or deleting a `#` moves a note onto or off its
+ * own line — keeping the selection where it was by character position.
+ */
+function reshapeLines() {
+  const lines = lineEls();
+  let span: ReturnType<typeof selectionSpan> | undefined;
+  lines.forEach((line, i) => {
+    const eq = equations[i];
+    if (!eq || lineShaped(line, eq.text)) return;
+    span ??= selectionSpan();
+    setLineText(line, eq.text);
+  });
+  if (span) setSelectionSpan(span.start, span.end);
 }
 
 /**
@@ -2832,6 +2872,7 @@ listEl.addEventListener('input', e => {
     renderAll();
     setCaret(caretLine, caretOff);
   } else {
+    reshapeLines();
     recompileAll();
     reconcile();
   }
@@ -3095,24 +3136,25 @@ function makePairWriter(pairText: string, commit: (pair: string) => void, round 
       if (!axis) return;
       const value = fmtNum(round(coords[k], k));
       if (axis === 'literal') text[k] = value;
-      else axis.text = `${axis.def!.name} = ${value}`;
+      else axis.text = keepNote(axis.text, `${axis.def!.name} = ${value}`);
     });
     commit(`(${text[0]}, ${text[1]})`);
   };
 }
 
-const pointWriter = (eq: Equation) => makePairWriter(eq.text, p => { eq.text = p; });
+const pointWriter = (eq: Equation) => makePairWriter(stripNote(eq.text), p => { eq.text = keepNote(eq.text, p); });
 
 /** Evaluate the named coordinates at the pointer before writing the RHS. */
 function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
   if (!coords) return null;
-  const at = eq.text.indexOf('=');
+  const code = stripNote(eq.text);
+  const at = code.indexOf('=');
   if (at < 0) return null;
-  const lhs = eq.text.slice(0, at).trim();
+  const lhs = code.slice(0, at).trim();
   // Writing a slider that defines either chart coordinate changes the map
   // itself, so ordinary coordinate writeback cannot move that axis reliably.
   const pinned = definitionDependencies(coords.flatMap(c => [...freeVars(c)]), defs);
-  const write = makePairWriter(eq.text.slice(at + 1), p => { eq.text = `${lhs} = ${p}`; }, v => v, pinned);
+  const write = makePairWriter(code.slice(at + 1), p => { eq.text = keepNote(eq.text, `${lhs} = ${p}`); }, v => v, pinned);
   if (!write) return null;
   return coordinateDragWriter(coords, () => {
     const time = graphTime();
@@ -3123,7 +3165,7 @@ function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
 /** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
 const defPointWriter = (eq: Equation) => {
   const def = eq.def as Definition & { kind: 'const' };
-  return makePairWriter(def.rhs, p => { eq.text = `${def.name} = ${p}`; });
+  return makePairWriter(def.rhs, p => { eq.text = keepNote(eq.text, `${def.name} = ${p}`); });
 };
 
 /** Push text a drag rewrote back into the editor lines. */
@@ -3131,7 +3173,7 @@ function syncLineTexts() {
   const lines = lineEls();
   equations.forEach((eq, i) => {
     const line = lines[i];
-    if (line && lineText(line) !== eq.text) line.textContent = eq.text;
+    if (line && lineText(line) !== eq.text) setLineText(line, eq.text);
   });
 }
 
@@ -3796,7 +3838,7 @@ initSyntaxHelp(listEl, {
   context: () => {
     const caret = caretPos();
     const eq = caret && equations[caret.line];
-    return caret && eq ? { caret, text: eq.text, defs, declared: declaredNames(equations.map(e => e.text)) } : null;
+    return caret && eq ? { caret, text: eq.text, defs, declared: declaredNames(equations.map(e => stripNote(e.text))) } : null;
   },
   replace: (caret, start, end, text, offset) => {
     const eq = equations[caret.line];

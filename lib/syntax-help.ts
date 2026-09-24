@@ -7,7 +7,7 @@ import { DIST_FAMILIES, distFamily, distUsage, isModelName } from './dist-famili
 import { tildeRow } from './regression.ts';
 import { FUNCTIONS, NAME_SRC, NAME_START_CHARS, WRITTEN_NAME_CHARS, builtinFn, canonicalName } from './expr.ts';
 import { ESCAPES } from './escapes.ts';
-import { VALUE_END } from './statements.ts';
+import { VALUE_END, noteStart } from './statements.ts';
 
 export interface Suggestion {
   name: string;
@@ -94,9 +94,15 @@ const definedNames = (defs: Env): ReadonlySet<string> => new Set([
  *  which decide whether `Y ~ gamma(` is a model or a law exactly as the row
  *  itself will be read; without it the built definitions stand in. */
 export function syntaxHelp(text: string, offset: number, defs: Env, declared?: ReadonlySet<string>): SyntaxHelp {
-  const before = text.slice(0, offset);
   const empty: SyntaxHelp = { start: offset, end: offset, suggestions: [] };
   if (text.trimStart().startsWith('#')) return empty;
+  // A trailing `# note` is prose: no help inside it, and none read from it.
+  const note = noteStart(text);
+  if (note >= 0) {
+    if (offset > note) return empty;
+    text = text.slice(0, note);
+  }
+  const before = text.slice(0, offset);
   // Primes after identifiers/values are derivatives, not string delimiters.
   let quote = '', stack: Array<{ name?: string; at: number }> = [];
   for (let i = 0; i < before.length; i++) {

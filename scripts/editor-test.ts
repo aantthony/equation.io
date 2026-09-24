@@ -214,6 +214,41 @@ await scenario('typing syncs', async () => {
   check('typing syncs state to the URL', url.includes('y = x^2'), `url=${url}`);
 });
 
+// --- trailing # notes ---
+
+const noteTexts = (page: Page) =>
+  page.evaluate(() => [...document.querySelectorAll('.eq-line')].map(l => l.querySelector('.eq-note')?.textContent ?? null));
+
+await scenario('trailing # notes render under the row and stay out of the math', async () => {
+  await load(page, ['y = x^2 # parabola']);
+  check('a loaded note gets its own span', JSON.stringify(await noteTexts(page)) === '["# parabola"]', JSON.stringify(await noteTexts(page)));
+  check('a row with a note still plots', await page.locator('.eq-line.invalid').count() === 0);
+  const font = await page.evaluate(() => {
+    const note = document.querySelector('.eq-note')!;
+    const line = note.closest('.eq-line')!;
+    return [getComputedStyle(note).display, getComputedStyle(note).fontFamily, getComputedStyle(line).fontFamily];
+  });
+  check('the note is a block in a prose face', font[0] === 'block' && font[1] !== font[2] && !/mono/i.test(font[1]), JSON.stringify(font));
+
+  // Typing the `#` moves what follows onto its own line, caret intact.
+  await load(page, ['y = x']);
+  await caretTo(page, 0, 5);
+  await page.keyboard.type(' # line');
+  check('typing a note builds the span', JSON.stringify(await noteTexts(page)) === '["# line"]', JSON.stringify(await noteTexts(page)));
+  check('typing through the # keeps every character in order', JSON.stringify(await rowTexts(page)) === '["y = x # line"]', JSON.stringify(await rowTexts(page)));
+  for (let k = 0; k < 6; k++) await page.keyboard.press('Backspace');
+  check('deleting the # folds the note back in', JSON.stringify(await noteTexts(page)) === '[null]'
+    && JSON.stringify(await rowTexts(page)) === '["y = x "]', JSON.stringify(await rowTexts(page)));
+});
+
+await scenario('a slider drag keeps the row\'s note', async () => {
+  await load(page, ['a = 2 # slope', 'y = a x']);
+  const slider = page.locator('.eq-slider-range').first();
+  await slider.evaluate((el: HTMLInputElement) => { el.value = '3'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  check('the drag rewrites the value and keeps the note', (await rowTexts(page))[0] === 'a = 3 # slope', JSON.stringify(await rowTexts(page)));
+  check('the note stays in its span', (await noteTexts(page))[0] === '# slope');
+});
+
 // --- comment rows and collapsible groups ---
 
 const visibleRows = (page: Page) =>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitStatements } from './statements.ts';
+import { keepNote, noteStart, splitStatements, stripNote } from './statements.ts';
 
 describe('splitStatements', () => {
   it('splits on ";" and newlines at depth zero', () => {
@@ -86,5 +86,24 @@ describe('splitStatements', () => {
     expect(splitStatements("T₀' = 1; y = 2")).toEqual(["T₀' = 1", ' y = 2']);
     expect(splitStatements("y = x²'; z = 3")).toEqual(["y = x²'", ' z = 3']);
     expect(splitStatements("y = ∇'; z = 3")).toEqual(["y = ∇'", ' z = 3']);
+  });
+});
+
+describe('trailing # notes', () => {
+  it('finds the note after the math, not in a comment row or quoted text', () => {
+    expect(noteStart('y = x^2 # parabola')).toBe(8);
+    expect(noteStart('# heading')).toBe(-1);
+    expect(noteStart('  # heading')).toBe(-1);
+    expect(noteStart('p = open("a#b.csv")')).toBe(-1);
+    expect(noteStart('p = open("a#b.csv") # sales')).toBe(20);
+    expect(noteStart("f'(x) # slope")).toBe(6);
+    expect(noteStart('y = x^2')).toBe(-1);
+  });
+
+  it('strips the note from the math and carries it across rewrites', () => {
+    expect(stripNote('y = x^2 # parabola')).toBe('y = x^2');
+    expect(stripNote('# heading')).toBe('# heading');
+    expect(keepNote('a = 2 # slope', 'a = 3.5')).toBe('a = 3.5 # slope');
+    expect(keepNote('a = 2', 'a = 3.5')).toBe('a = 3.5');
   });
 });

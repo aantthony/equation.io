@@ -240,6 +240,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Comments: a row starting with `#` (e.g. `# tangent lines`) plots nothing; in
   the app it renders as a heading whose group (the rows until the next `#` row)
   can be collapsed. Use them to label sections of longer documents.
+- Notes: `#` after a row's math starts a note to the end of the row
+  (`y = x^2 # parabola`, `a = 2 # slope`). Only the math before it is read;
+  the app shows the note in small text under the row. A `;` still ends the
+  row, note included.
 
 ## Variables (what a row means)
 

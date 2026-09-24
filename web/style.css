@@ -316,6 +316,13 @@ html, body {
   cursor: pointer;
 }
 .eq-line.is-def::before { visibility: hidden; }
+/* A trailing `# note` (lib/statements.ts noteStart) reads as a caption: on
+   its own line under the math, in a smaller prose face. */
+.eq-note {
+  display: block;
+  color: var(--muted);
+  font: 12.5px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
 /* `# label` comment rows head a collapsible group; the gutter chevron
    (replacing the color dot) toggles it. */
 .eq-line.is-comment {
