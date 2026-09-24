@@ -13,6 +13,7 @@ import { traceField } from '../lib/flow.ts';
 import { type PmfStems, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
+import { cellShades, runAutomaton } from '../lib/automaton.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { hullFaces } from '../lib/hull.ts';
 import { vertexSampler } from '../lib/figure-vertices.ts';
@@ -298,6 +299,22 @@ function renderRow2D(
   const { cls, cpu } = row;
   if (!cls || !cpu) return;
   const compile = (e: Expr) => compileFor(env, e);
+  if (cpu.type === 'automaton') {
+    // The same cells the app uploads as a texture, looked up per pixel.
+    const grid = runAutomaton(cpu, envValues(env));
+    const shades = cellShades(grid);
+    const upy = v.upp / (v.ratio ?? 1);
+    for (let y = 0; y < r.h; y++) {
+      const n = Math.floor(0.5 - (v.cy + (r.h / 2 - y - 0.5) * upy));
+      if (n < 0 || n >= grid.rows) continue;
+      for (let x = 0; x < r.w; x++) {
+        const j = Math.max(0, Math.min(grid.width - 1, Math.floor(v.cx + (x + 0.5 - r.w / 2) * v.upp - grid.x0 + 0.5)));
+        const shade = shades[n * grid.width + j];
+        if (shade) blend(r, x, y, color, 0.92 * shade / 255);
+      }
+    }
+    return;
+  }
   if (cpu.type === 'value') {
     // A definite-integral row shades the area it measures (the app's case
     // 'value'): parts adding to the value in the row color, parts subtracting
@@ -730,6 +747,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // Pure polyline work — the map's curve, the y = x diagonal, the iterated
   // path — so the scanline renderer draws the full figure.
   cobweb: 'draws',
+  // Cells computed on the CPU in the app too (lib/automaton.ts), one lookup per pixel.
+  automaton: 'draws',
   // Each of these needs a per-pixel shader — domain coloring, conformal grids,
   // escape-time iteration, line-integral convolution — that a scanline
   // rasterizer cannot reproduce faithfully at preview size. They get the

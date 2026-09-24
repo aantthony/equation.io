@@ -62,6 +62,18 @@ export interface Fractal2D {
   params?: string[];
 }
 
+/** A cellular automaton's space-time diagram (lib/automaton.ts): `shades`
+ *  holds `rows` rows of `width` cells, 0 empty to 255 solid; cell i of row n
+ *  is the unit square centred on (i, -n), in column i - x0. The first and
+ *  last columns are each side's background, which runs on past the edge. */
+export interface Cells2D {
+  shades: Uint8Array;
+  width: number;
+  rows: number;
+  x0: number;
+  color: [number, number, number];
+}
+
 /** An orbit diagram: field is f(a, x), iterated per pixel column from uSeed. */
 export type Bif2D = Curve2D;
 
@@ -69,6 +81,7 @@ export type Bif2D = Curve2D;
 export interface Layers2D {
   /** Contour stacks of f for `f(x,y) = c` rows; drawn under the other layers. */
   levels?: LevelSpec[];
+  cells?: Cells2D[];
   fractals?: Fractal2D[];
   domains?: Curve2D[];
   colors?: ColorField2D[];
@@ -653,10 +666,55 @@ ${edgeBlocks}
 `;
 }
 
+const CELLS_FRAG = `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform vec3 uColor;
+uniform highp usampler2D uCells;
+uniform vec2 uSize;
+uniform float uX0;
+out vec4 outColor;
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  float row = floor(0.5 - p.y);
+  if (row < 0.0 || row >= uSize.y) discard;
+  float col = clamp(floor(p.x - uX0 + 0.5), 0.0, uSize.x - 1.0);
+  float v = float(texelFetch(uCells, ivec2(int(col), int(row)), 0).r) / 255.0;
+  if (v <= 0.0) discard;
+  // Once cells are big enough to count, a hairline gap keeps them apart.
+  vec2 px = 1.0 / uUpp;
+  vec2 edge = (0.5 - abs(fract(vec2(p.x, -p.y) + 0.5) - 0.5)) * px;
+  float gap = min(px.x, px.y) >= 8.0 && min(edge.x, edge.y) < 0.75 ? 0.55 : 1.0;
+  outColor = vec4(uColor, 0.92 * v * gap);
+}
+`;
+
 export class Renderer2D {
   private cache: ProgramCache;
+  /** Cell textures by the shade buffer they were uploaded from. */
+  private cellTextures = new Map<Uint8Array, WebGLTexture>();
   constructor(private gl: WebGL2RenderingContext, private quad: { draw(): void }) {
     this.cache = new ProgramCache(gl);
+  }
+
+  /** The texture for these cells, uploaded once per buffer; textures no
+   *  layer drew this frame are dropped. */
+  private cellTexture(c: Cells2D): WebGLTexture {
+    const { gl } = this;
+    let tex = this.cellTextures.get(c.shades);
+    if (tex) return tex;
+    tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, c.width, c.rows, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, c.shades);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.cellTextures.set(c.shades, tex);
+    return tex;
   }
 
   render(
@@ -745,6 +803,20 @@ export class Renderer2D {
       drawProgram(levelsFrag(lv), lv.color, lv.params, undefined, prog => {
         gl.uniform1f(gl.getUniformLocation(prog, 'uMajor'), lv.major);
         gl.uniform1f(gl.getUniformLocation(prog, 'uMinor'), lv.minor);
+      });
+    }
+    const drawn = new Set(layers.cells?.map(c => c.shades));
+    for (const [shades, tex] of this.cellTextures) {
+      if (!drawn.has(shades)) { gl.deleteTexture(tex); this.cellTextures.delete(shades); }
+    }
+    for (const c of layers.cells ?? []) {
+      const tex = this.cellTexture(c);
+      drawProgram(CELLS_FRAG, c.color, undefined, undefined, prog => {
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.uniform1i(gl.getUniformLocation(prog, 'uCells'), 0);
+        gl.uniform2f(gl.getUniformLocation(prog, 'uSize'), c.width, c.rows);
+        gl.uniform1f(gl.getUniformLocation(prog, 'uX0'), c.x0);
       });
     }
     for (const f of layers.fractals ?? []) {

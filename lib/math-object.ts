@@ -48,6 +48,9 @@ export type MathObject =
   | { readonly kind: 'sequence'; readonly form: 'explicit'; readonly term: Expr; readonly index: string }
   | { readonly kind: 'sequence'; readonly form: 'cobweb'; readonly expr: Expr; readonly variable: string; readonly seedName?: string }
   | { readonly kind: 'sequence'; readonly form: 'bifurcation'; readonly expr: Expr; readonly variable: string; readonly seedName?: string }
+  /** A 1D cellular automaton (lib/automaton.ts): `rule` reads the previous
+   *  row's cells within `radius`; `seed` is row 0 as an expression in its cell. */
+  | { readonly kind: 'automaton'; readonly rule: Expr; readonly radius: number; readonly seed?: Expr }
   | { readonly kind: 'list'; readonly element: 'scalar'; readonly storage: 'expressions'; readonly values: readonly Expr[] }
   | { readonly kind: 'list'; readonly element: 'scalar'; readonly storage: 'packed'; readonly values: Float64Array }
   | { readonly kind: 'list'; readonly element: 'point'; readonly storage: 'expressions'; readonly dimension: 2 | 3; readonly values: ReadonlyArray<readonly Expr[]> }
@@ -91,7 +94,7 @@ export function publicKind(object: MathObject) {
       ? object.storage === 'packed' ? 'dlist' : 'vlist'
       : object.storage === 'packed' ? 'dscatter' : 'plist';
     case 'distribution': return object.form;
-    case 'point': case 'trail': case 'orbit': case 'system': case 'histogram': case 'value': case 'note': case 'family': return object.kind;
+    case 'point': case 'trail': case 'orbit': case 'system': case 'histogram': case 'value': case 'note': case 'family': case 'automaton': return object.kind;
   }
 }
 export type PublicKind = ReturnType<typeof publicKind>;
@@ -113,6 +116,6 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'system': return object.source.representation === 'real' && object.source.residuals.length === 3;
     case 'list': return object.element === 'point' && object.dimension === 3;
     case 'family': return object.members.some(member => member.needs3D);
-    case 'region': case 'scalar-field': case 'color-field': case 'complex-field': case 'sequence': case 'histogram': case 'distribution': case 'value': case 'note': return false;
+    case 'region': case 'scalar-field': case 'color-field': case 'complex-field': case 'sequence': case 'automaton': case 'histogram': case 'distribution': case 'value': case 'note': return false;
   }
 }

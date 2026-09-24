@@ -34,6 +34,7 @@ export const PUBLIC_KIND_ROWS = {
   sequence: ['a_n = 1/(n + 1)^2'],
   cobweb: ['a_{n+1} = cos(a_n)'],
   bifurcation: ['a_{n+1} = x a_n (1 - a_n)'],
+  automaton: ['c_{n+1}[i] = mod(c_n[i-1] + c_n[i+1], 2)'],
   density: ['X ~ Normal(0, 1)', 'X^2 + 1'],
   pmf: ['X ~ Binomial(4, 0.5)'],
   prob: ['X ~ Binomial(4, 0.5)', 'P(X <= 2)'],

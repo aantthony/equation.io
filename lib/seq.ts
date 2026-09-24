@@ -28,6 +28,11 @@ export interface SeqScan {
   name: string;
   index: string;
   rhs: string;
+  /** Set for a cellular automaton's rows, `c_{n+1}[i] = …` and its seed
+   *  `c_0[i] = …`: the cell index they are written in (lib/automaton.ts). */
+  cell?: string;
+  /** The seed row `c_0[i] = …` (with `cell`; its `index` is empty). */
+  seed?: boolean;
 }
 
 /** A sequence letter: one Latin or Greek letter (a_n, θ_n). */
@@ -39,6 +44,10 @@ const NAMED_RE = new RegExp(`^(${L})_([A-Za-z${GREEK_NAME_CHARS}]\\w*)$`);
 /** a_n = …, also written a_{n} = … or a_(n) = …. */
 const SEQ_RE = new RegExp(String.raw`^\s*(${L})_(?:(${L})|\{\s*(${L})\s*\}|\(\s*(${L})\s*\))\s*=(?!=)([\s\S]+)$`);
 const REC_RE = new RegExp(String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*=(?!=)([\s\S]+)$`);
+/** c_{n+1}[i] = …: a row of cells stepping from the row before. */
+const CELL_REC_RE = new RegExp(String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*\[\s*(${L})\s*\]\s*=(?!=)([\s\S]+)$`);
+/** c_0[i] = …: the row an automaton starts from. */
+const CELL_SEED_RE = new RegExp(String.raw`^\s*(${L})_(?:0|\{\s*0\s*\}|\(\s*0\s*\))\s*\[\s*(${L})\s*\]\s*=(?!=)([\s\S]+)$`);
 
 /** The last term a sequence computes. */
 const SEQ_MAX = 1000;
@@ -56,7 +65,11 @@ const usesIndex = (rhs: string, index: string): boolean =>
 
 /** Detect a sequence/recurrence row before definition scanning. */
 export function scanSeqRec(text: string): SeqScan | null {
-  let m = REC_RE.exec(text);
+  let m = CELL_REC_RE.exec(text);
+  if (m) return { rec: true, name: m[1], index: m[2] ?? m[3], cell: m[4], rhs: m[5] };
+  m = CELL_SEED_RE.exec(text);
+  if (m) return { rec: false, seed: true, name: m[1], index: '', cell: m[2], rhs: m[3] };
+  m = REC_RE.exec(text);
   if (m) return { rec: true, name: m[1], index: m[2] ?? m[3], rhs: m[4] };
   m = SEQ_RE.exec(text);
   if (m) {
@@ -80,7 +93,7 @@ export function scanSeqRec(text: string): SeqScan | null {
 export function scanSequences(texts: readonly string[]): (SeqScan | null)[] {
   const scans = texts.map(scanSeqRec);
   const owners = new Set(scans.filter(s => s && (s.rec || usesIndex(s.rhs, s.index))).map(s => s!.name));
-  return scans.map(s => (s && !s.rec && owners.has(s.name) && !usesIndex(s.rhs, s.index) ? null : s));
+  return scans.map(s => (s && !s.rec && !s.cell && owners.has(s.name) && !usesIndex(s.rhs, s.index) ? null : s));
 }
 
 export function classifySeqRec(

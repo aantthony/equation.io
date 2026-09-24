@@ -48,6 +48,7 @@ import { lowerLists } from './list.ts';
 import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
 import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from './seq.ts';
+import { classifyAutomatonRow } from './automaton.ts';
 import { buildStateSystem, initialState } from './state.ts';
 import { stripNote } from './statements.ts';
 import { planarField } from './grid.ts';
@@ -186,7 +187,8 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
     raw.push(d);
   }
 
-  const built = buildDefs(raw, tables, seqScans.filter(s => s !== null));
+  // An automaton's letter names rows of cells, not scalar terms (automaton.ts).
+  const built = buildDefs(raw, tables, seqScans.filter((s): s is SeqScan => s !== null && !s.cell));
   const defs = built.defs;
   for (const [key, fit] of built.fits) {
     const row = rows.find(r => r.def && defKey(r.def) === key);
@@ -494,6 +496,11 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         continue;
       }
       const seq = document.seqScans[ri];
+      if (seq?.cell) {
+        const cls = classifyAutomatonRow(document.seqScans, ri, fnNames, getFn, constNames, ropts);
+        if (cls) row.cls = cls;
+        continue;
+      }
       if (seq) {
         const first = document.seqScans.findIndex(s => s?.name === seq.name);
         if (first < ri) throw new Error(`Sequence ${seq.name} is already defined.`);
