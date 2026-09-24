@@ -65,3 +65,36 @@ export function splitStatements(text: string): string[] {
   parts.push(cur);
   return parts;
 }
+
+/**
+ * Where a row's trailing `# note` starts (`y = x^2 # parabola`), or -1. The
+ * note is prose, not math: analysis reads only the text before it, and the
+ * editor sets it under the row in a smaller face. A row that STARTS with `#`
+ * is a comment row (a group heading), not a row with a note, so it has none.
+ * A `#` in quoted text (a file name, a column value) is data, not a note —
+ * the same quote scan as splitStatements.
+ */
+export function noteStart(text: string): number {
+  if (text.trimStart().startsWith('#')) return -1;
+  let quote = '';
+  for (let k = 0; k < text.length; k++) {
+    const c = text[k];
+    if (quote) { if (c === quote) quote = ''; continue; }
+    if (c === '"' || (c === "'" && !VALUE_END.test(text[k - 1] ?? ''))) quote = c;
+    else if (c === '#') return k;
+  }
+  return -1;
+}
+
+/** A row's math, without its trailing `# note`. */
+export function stripNote(text: string): string {
+  const at = noteStart(text);
+  return at < 0 ? text : text.slice(0, at).trimEnd();
+}
+
+/** `code` with `old`'s trailing note carried over, for writers that rebuild a
+ *  row's math (a slider drag, a dragged point) and must not drop the note. */
+export function keepNote(old: string, code: string): string {
+  const at = noteStart(old);
+  return at < 0 ? code : `${code} ${old.slice(at)}`;
+}

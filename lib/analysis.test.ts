@@ -18,6 +18,15 @@ describe('shared document analysis', () => {
     expect(document.rows[4].cls).toBeUndefined();
   });
 
+  it('reads only the math before a trailing # note', () => {
+    const result = analyzeRows(['a = 2 # slope', 'y = a x # line', 'a + 1 # readout']);
+    expect(result.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
+    expect(result.rows[0].def).toMatchObject({ kind: 'const', name: 'a' });
+    expect(result.rows[0].def?.kind === 'const' && result.rows[0].def.rhs.trim()).toBe('2');
+    expect(result.rows[1].comment).toBeUndefined();
+    expect(result.rows[2].info).toBe('= 3');
+  });
+
   it('takes live integrated values without reseeding and keeps structure independent of values', () => {
     const rows = ["a'=-a", 'a(0)=2', 'b=a+1', 'b'];
     const document = prepareDocument(rows);

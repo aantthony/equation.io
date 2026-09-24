@@ -49,6 +49,7 @@ import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
 import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from './seq.ts';
 import { buildStateSystem, initialState } from './state.ts';
+import { stripNote } from './statements.ts';
 import { planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 
@@ -145,8 +146,9 @@ export interface Analysis {
 
 /** No source splitting here: one input row remains one result, including blanks. */
 export function prepareDocument(sources: readonly (string | RowSource)[], { tables }: PrepareOptions = {}): PreparedDocument {
+  // A trailing `# note` is prose for the reader; the math is what precedes it.
   const rows: RowInfo[] = sources.map(source => typeof source === 'string'
-    ? { text: source.trim() } : { ...source, text: source.text.trim() });
+    ? { text: stripNote(source).trim() } : { ...source, text: stripNote(source.text).trim() });
   const texts = rows.map(row => row.text);
   const seqScans = scanSequences(texts);
   const statements: StatementScan[] = rows.map((source, i) => ({ source, kind:
