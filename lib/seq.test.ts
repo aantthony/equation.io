@@ -2,7 +2,7 @@ import { compileCpu, compileGpu } from './compiler.ts';
 import { Env } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { evaluate, type Expr } from './expr.ts';
-import { classifySeqRec, scanSeqRec, sequenceResolver } from './seq.ts';
+import { classifySeqRec, scanSeqRec, scanSequences, sequenceResolver } from './seq.ts';
 import { analyzeRows } from './analysis.ts';
 import { resolveExpr } from './defs.ts';
 import { parseExpr } from './expr.ts';
@@ -202,5 +202,61 @@ describe('sequence term references', () => {
       const { rows } = analyzeRows(['a_0 = 1', 'a_{n+1} = a_n / 2', 'N = [2..4]', row]);
       expect(rows[3].error).toBeUndefined();
     }
+  });
+});
+
+describe('sequences built from other sequences', () => {
+  /** The plotted term of `row`, with the explicit sequences in `others` defined. */
+  const termOf = (others: string[], row: string) => {
+    const defs = new Env(others.map(r => { const scan = scanSeqRec(r)!; return [scan.name, scan] as const; }));
+    const sequenceTerm = sequenceResolver(defs, () => undefined, {}, new Set<string>());
+    const names = new Set([...defs.sequences.keys(), scanSeqRec(row)!.name]);
+    const c = classifySeqRec(scanSeqRec(row)!, none, () => undefined, new Set(), { sequenceTerm }, names);
+    return (compileCpu(c) as { term: Expr }).term;
+  };
+  const errorsOf = (rows: string[]) => analyzeRows(rows).rows.map(r => r.error);
+
+  it('reads another explicit sequence at the row\'s own index', () => {
+    expect(evaluate(termOf(['b_n = n^2'], 'a_n = b_n + 1'), { n: 3 })).toBe(10);
+    expect(evaluate(termOf(['b_k = k^2'], 'a_n = b_n + 1'), { n: 3 })).toBe(10); // its own letter
+    expect(evaluate(termOf(['b_n = n^2'], 'a_n = b_[n+1] - b_n'), { n: 3 })).toBe(7);
+    expect(evaluate(termOf(['b_n = n^2'], 'a_n = sum(k=1..n, b_k)'), { n: 3 })).toBe(14);
+  });
+
+  it('gives terms at fixed indices too', () => {
+    const { rows, constEnv } = analyzeRows(['b_n = n^2', 'a_n = b_n + 1', 'c = a_3']);
+    expect(rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
+    expect(constEnv.c).toBe(10);
+  });
+
+  it('names a cycle rather than looping', () => {
+    expect(errorsOf(['a_n = b_n', 'b_n = a_n'])[1]).toMatch(/a and b are defined in terms of each other/);
+    expect(errorsOf(['a_n = a_n + 1'])[0]).toMatch(/depends on itself/);
+  });
+
+  it('says a recurrence has no term at a changing index', () => {
+    expect(errorsOf(['b_0 = 1', 'b_{n+1} = 2 b_n', 'a_n = b_n + 1'])[2]).toMatch(/b is a recurrence/);
+    expect(errorsOf(['b_0 = 1', 'b_{k+1} = 2 b_k', 'a_n = b_n + 1'])[2]).toMatch(/b is a recurrence/);
+    // …and a recurrence is drawn as a map, with no index to read another term at.
+    expect(errorsOf(['b_n = n', 'a_0 = 1', 'a_{n+1} = a_n + b_n'])[2]).toMatch(/cannot use b_n/);
+    // Fixed indices of a recurrence still work.
+    expect(errorsOf(['b_0 = 1', 'b_{n+1} = 2 b_n', 'a_n = b_3 n'])[2]).toBeUndefined();
+  });
+});
+
+describe('one sequence per letter', () => {
+  it('reads a_k = 7 beside a_n = 1/n as the constant a_k', () => {
+    expect(scanSequences(['a_n = 1/n', 'a_k = 7']).map(s => s?.name ?? null)).toEqual(['a', null]);
+    // Alone, it is still the constant sequence.
+    expect(scanSequences(['a_k = 7'])[0]).toMatchObject({ name: 'a', index: 'k' });
+    const { rows, constEnv } = analyzeRows(['a_n = 1/n', 'k = 2', 'a_k = 7', 'c = a_k', 'p = a_2']);
+    expect(rows.map(r => r.error)).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    expect(constEnv.c).toBe(7);
+    expect(constEnv.p).toBe(0.5);
+  });
+
+  it('refuses a second definition of the same sequence', () => {
+    expect(analyzeRows(['a_n = 1/n', 'a_k = k^2']).rows[1].error).toBe('Sequence a is already defined.');
+    expect(analyzeRows(['a_n = 1/n', 'a_{n+1} = a_n / 2']).rows[1].error).toBe('Sequence a is already defined.');
   });
 });

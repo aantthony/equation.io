@@ -730,7 +730,9 @@ function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts): Expr | null {
 const num = (value: number): Expr => ({ kind: 'num', value });
 
 export interface ResolveOpts {
-  sequenceTerm?: (name: string, index?: Expr) => Expr | null;
+  /** A sequence term by name (a_3, a_k) or index (a_[…]). `open` are the
+   *  names still unbound here — a sequence row's own index. */
+  sequenceTerm?: (name: string, index: Expr | undefined, open: ReadonlySet<string> | undefined) => Expr | null;
   /** Definition values cannot contain row-only motion trails. */
   inDefinition?: boolean;
   /** Numeric constant values, used to evaluate Σ/Π bounds at expansion time. */
@@ -1313,7 +1315,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
   const { getFn } = ctx;
   switch (e.kind) {
     case 'num': return e;
-    case 'var': return ctx.opts.sequenceTerm?.(e.name) ?? e;
+    case 'var': return ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ?? e;
     case 'neg': return { kind: 'neg', a: rx(e.a, ctx) };
     case 'bin': {
       if (e.op === '*' || e.op === '/') {
@@ -1346,7 +1348,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
     }
     case 'index': {
       if (e.args[0]?.kind === 'var') {
-        const term = ctx.opts.sequenceTerm?.(e.args[0].name, e.args[1]);
+        const term = ctx.opts.sequenceTerm?.(e.args[0].name, e.args[1], ctx.opts.openVars);
         if (term) return term;
       }
       return mapChildren(e, x => rx(x, ctx));
@@ -1481,7 +1483,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const errors = new Map<string, string>();
   const needsFile = new Set<string>();
   const defs = emptyDraft();
-  for (const scan of sequences) defs.sequences.set(scan.name, scan);
+  // The first row defining a letter is its sequence; analysis reports the rest.
+  for (const scan of sequences) if (!defs.sequences.has(scan.name)) defs.sequences.set(scan.name, scan);
   while (raw.some(d => d.name.startsWith(defs.sequencePrefix + '_'))) defs.sequencePrefix += 'X';
   const byName = new Map(raw.map(d => [d.name, d]));
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
