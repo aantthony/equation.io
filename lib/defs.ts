@@ -681,8 +681,10 @@ const FD_H = 1e-4;
 function applyDiff(e: Expr, v: string, order: number, isList?: (n: string) => boolean): Expr {
   // A list is still just a name at this point, and diff() treats an unknown
   // name as a constant — so differentiating one would answer 0 for every
-  // element. Say it cannot be done rather than answer wrongly.
-  const list = isList && [...freeVars(e)].find(isList);
+  // element. Elements may only use constants, states, and t, so that is
+  // right for x, y, and z (d/dx x^N with N a list) and wrong for the rest:
+  // say it cannot be done rather than answer wrongly.
+  const list = !SPACE.has(v) && isList && [...freeVars(e)].find(isList);
   if (list) {
     throw new Error(`${list} is a list, and d/d${v} cannot differentiate one`
       + ` — write the derivative of its elements, like [d/d${v} f(${v}), …].`);

@@ -326,16 +326,30 @@ describe('the expression budget', () => {
 });
 
 describe('differentiating a list', () => {
-  it('says it cannot, rather than answering 0', () => {
+  it('says it cannot along t, rather than answering 0', () => {
     // Derivatives expand at resolve time, before list.ts substitutes, so the
-    // list is still a bare name and diff() reads it as a constant.
+    // list is still a bare name and diff() reads it as a constant — wrong
+    // for t, which elements may use.
     expect(() => lowerRow('d/dt L', ['L = [sin(t), t^2]'])).toThrow(/L is a list/);
-    expect(() => lowerRow('d/dx L', ['L = [sin(t), t^2]'])).toThrow(/cannot differentiate one/);
-    // A column is a list too.
-    expect(() => lowerRow('d/dx person.age', [`person = open("people.csv", ${HASH})`]))
-      .toThrow(/is a list/);
+    expect(() => lowerRow('d/dt L', ['L = [sin(t), t^2]'])).toThrow(/cannot differentiate one/);
     // Ordinary derivatives are untouched.
     expect(evaluate(lowerRow('d/dx x^2', []), { x: 3 })).toBe(6);
+  });
+
+  it('differentiates along x, y, z, which no element can use', () => {
+    const L = ['L = [sin(t), t^2]'];
+    const at = (e: Expr, env: Record<string, number>) => (e as Expr & { kind: 'list' }).items.map(it => evaluate(it, env));
+    expect(at(lowerRow('d/dx (L x^2)', L), { x: 3, t: 2 })).toEqual([6 * Math.sin(2), 24]);
+    expect(at(lowerRow('d/dx x^N', ['N = [1..3]']), { x: 2 })).toEqual([1, 4, 12]);
+    expect(at(lowerRow('d/dy (L y)', L), { y: 1, t: 3 })).toEqual([Math.sin(3), 9]);
+    // A column along x is constant. Nothing of it survives the derivative,
+    // so the answer is one 0 rather than one per row: the same value, drawn once.
+    expect(lowerRow('d/dx person.age', [`person = open("people.csv", ${HASH})`])).toEqual({ kind: 'num', value: 0 });
+  });
+
+  it('differentiates a list literal elementwise', () => {
+    const e = lowerRow('d/dx [x, x^2]', []) as Expr & { kind: 'list' };
+    expect(e.items.map(it => evaluate(it, { x: 3 }))).toEqual([1, 6]);
   });
 
   it('says it on a device without the file too', () => {
@@ -344,8 +358,8 @@ describe('differentiating a list', () => {
     // errored for the author and drew the line y = 0 in every shared link,
     // preview, and MCP listing. The head of the path is enough to answer.
     const rows = [`person = open("people.csv", ${HASH})`];
-    expect(() => lowerRow('d/dx person.age', rows, null)).toThrow(/is a list/);
-    expect(() => lowerRow('d/dx (person.age + 1)', rows, null)).toThrow(/is a list/);
+    expect(() => lowerRow('d/dt person.age', rows, null)).toThrow(/is a list/);
+    expect(() => lowerRow('d/dt (person.age + 1)', rows, null)).toThrow(/is a list/);
   });
 
   it('says the same about text, instead of the internal "Unreachable"', () => {
@@ -354,7 +368,7 @@ describe('differentiating a list', () => {
     // free variable to look up.
     expect(() => lowerRow('d/dx "NYC"', [])).toThrow(/Cannot differentiate text/);
     expect(() => lowerRow('d/dx sin("NYC")', [])).toThrow(/Cannot differentiate text/);
-    expect(() => lowerRow('d/dx ["a", "b"]', [])).toThrow(/Cannot differentiate a list/);
+    expect(() => lowerRow('d/dx ["a", "b"]', [])).toThrow(/Cannot differentiate text/);
   });
 });
 
