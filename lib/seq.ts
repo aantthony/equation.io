@@ -20,7 +20,7 @@ import { type GetFn, RESERVED, type ResolveOpts, resolveExpr, substIdx } from '.
 import { axesOf, lowerLists, withAxes } from './list.ts';
 import { listGetter } from './defs.ts';
 import { GREEK_NAME_CHARS, WRITTEN_NAME_CHARS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
-import { freezeClassified, type Classified } from './math-object.ts';
+import { type Classified } from './math-object.ts';
 
 export interface SeqScan {
   /** True for a_{n+1} = … (recurrence); false for a_n = … (explicit term). */
@@ -105,7 +105,7 @@ export function classifySeqRec(
       throw new Error(`A sequence term may only use ${index}, t, and constants (found ${v}).`);
     }
     params.sort();
-    return freezeClassified({ object: { kind: 'sequence', form: 'explicit', term: parsed, index }, animated, needs3D: false, params });
+    return { object: { kind: 'sequence', form: 'explicit', term: parsed, index }, animated, needs3D: false, params };
   }
 
   const bifurcation = vars.delete('x');
@@ -120,10 +120,10 @@ export function classifySeqRec(
   if (a0Name) params.push(a0Name);
   params.sort();
 
-  return freezeClassified({
+  return {
     object: { kind: 'sequence', form: bifurcation ? 'bifurcation' : 'cobweb', expr: parsed, variable: recVar, seedName: a0Name },
     animated, needs3D: false, params,
-  });
+  };
 }
 
 /** Sequence values share the same scalar/list pipeline as CSV columns.

@@ -26,7 +26,7 @@ import { exceedsNodes } from './size.ts';
 
 export { publicKind } from './math-object.ts';
 export type { Classified, MathObject } from './math-object.ts';
-import { components, freezeClassified, objectNeeds3D, publicKind, type Classified, type MathObject, type LevelSetSpec } from './math-object.ts';
+import { components, objectNeeds3D, publicKind, type Classified, type MathObject, type LevelSetSpec } from './math-object.ts';
 import type { CpuPlan } from './compiler.ts';
 
 const SPACE_VARS = new Set(['x', 'y', 'z']);
@@ -286,8 +286,8 @@ function classifyLowered(
       if (exceedsNodes(merged, 32768)) throw new Error('The shared family program is too large (32768 nodes).');
       shared = { classified: classifyLowered(merged, new Set([...defined, index]), fields, timeDerivative).cls, index };
     }
-    return { cls: freezeClassified({ object: { kind: 'family', members, shared }, animated: members.some(m => m.animated),
-      needs3D: members.some(m => m.needs3D), params: [...new Set(members.flatMap(m => m.params))] }) };
+    return { cls: { object: { kind: 'family', members, shared }, animated: members.some(m => m.animated),
+      needs3D: members.some(m => m.needs3D), params: [...new Set(members.flatMap(m => m.params))] } };
   }
   const coordinate = coordinateRow(expr, fields);
   expr = lowerCoordinateFlow(expr, fields, timeDerivative);
@@ -357,11 +357,11 @@ function classifyLowered(
     throw new Error('Complex expressions plot in 2D only (x, y, w).');
   }
 
-  const done = (object: MathObject): { cls: Classified } => ({ cls: freezeClassified({
+  const done = (object: MathObject): { cls: Classified } => ({ cls: {
     object,
     animated: animated || (object.kind === 'vector-field' && object.components.length === 2),
     needs3D: objectNeeds3D(object), params,
-  }) });
+  } });
 
   if ((expr.kind === 'eq' || expr.kind === 'ineq') && expr.l.kind !== 'vec' && expr.r.kind !== 'vec' && !hasSpace && !hasParam) return done({ kind: 'note', expr, variable: animated || params.length > 0 });
 
@@ -606,7 +606,7 @@ export function classifyRow(
   const { cls } = classifyLowered(lowered, known, fields, timeDerivative);
   if (cls.object.kind === 'value' && row.integral) {
     const shade = lowerShade(row.integral, lower, known);
-    if (shade) return { cls: freezeClassified({ ...cls, object: { ...cls.object, shade } }) };
+    if (shade) return { cls: { ...cls, object: { ...cls.object, shade } } };
   }
   return { cls };
 }

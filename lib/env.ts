@@ -81,13 +81,8 @@ export class Env {
     for (const key of [name, ...components]) {
       if (this.owned.has(key)) throw new Error(`${key} is already defined.`);
     }
-    const stored: Binding = binding.tag !== 'vector' ? Object.freeze({ ...binding })
-      : binding.role === 'state' ? Object.freeze({ ...binding,
-        deriv: Object.freeze([...binding.deriv]) as Components,
-        init: Object.freeze([...binding.init]) as Components })
-      : Object.freeze({ ...binding, components: Object.freeze([...binding.components]) as Components });
-    this.owned.set(name, Object.freeze({ kind: 'binding', binding: stored }));
-    components.forEach((key, index) => this.owned.set(key, Object.freeze({ kind: 'component', owner: name, index: index as 0 | 1 | 2 })));
+    this.owned.set(name, { kind: 'binding', binding });
+    components.forEach((key, index) => this.owned.set(key, { kind: 'component', owner: name, index: index as 0 | 1 | 2 }));
     this.generation++;
   }
 

@@ -67,7 +67,7 @@ import {
 } from './expr.ts';
 import { WHOLE_EXPR_NAMES, usesComplex } from './complex.ts';
 import { GEOM_STATEMENTS } from './geom.ts';
-import { freezeClassified, type Classified } from './math-object.ts';
+import type { Classified } from './math-object.ts';
 import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from './defs.ts';
 import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
 import { quadrature } from './integrate.ts';
@@ -332,7 +332,7 @@ export function variableRow(sys: RVSystem, name: string):
   if (exact) return { kind: 'exact', density: densityExpr(exact) };
   const ps = sys.paramsOf(name);
   const kind = discrete ? 'pmf' : 'density';
-  return { kind, cls: freezeClassified({ object: { kind: 'distribution', form: kind, rv: name }, animated: ps.has('t'), needs3D: false, params: [...ps].filter(p => p !== 't') }) };
+  return { kind, cls: { object: { kind: 'distribution', form: kind, rv: name }, animated: ps.has('t'), needs3D: false, params: [...ps].filter(p => p !== 't') } };
 }
 
 /** A derived row's readout, from RVSystem.moments' verdict: `μ = …, σ = …`
