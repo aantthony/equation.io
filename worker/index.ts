@@ -13,12 +13,14 @@ const escapeAttr = (s: string) =>
 /**
  * Title and og:/twitter: pairs for a share link.
  *
- * A rendered preview is only advertised for graphs the CPU renderer actually
- * draws. For anything else the tags are omitted so the shell's own og:image —
- * the static site card — survives: a truthful generic card beats a picture of
- * an empty grid, which reads as a broken graph.
+ * The page never analyzes its graph: a heavy graph (thousands of list
+ * elements) can take a second or more of CPU to analyze, past the Worker's
+ * limit, and the page must load regardless. The preview image is always
+ * advertised; /api/og/ decides whether it can draw the graph and otherwise
+ * redirects to the static site card — a truthful generic card beats a
+ * picture of an empty grid, which reads as a broken graph.
  *
- * Split out from handleShare so this decision is testable without the Workers
+ * Split out from handleShare so this is testable without the Workers
  * runtime (HTMLRewriter is a runtime global).
  */
 export function shareMeta(
@@ -35,16 +37,12 @@ export function shareMeta(
     ['og:description', description],
     ['og:type', 'website'],
     ['og:url', `${origin}/g/${payload}`],
+    ['og:image', `${origin}/api/og/${payload}`],
+    ['og:image:width', String(OG_WIDTH)],
+    ['og:image:height', String(OG_HEIGHT)],
+    ['twitter:card', 'summary_large_image'],
+    ['twitter:image', `${origin}/api/og/${payload}`],
   ];
-  if (canRenderOg(equations)) {
-    meta.push(
-      ['og:image', `${origin}/api/og/${payload}`],
-      ['og:image:width', String(OG_WIDTH)],
-      ['og:image:height', String(OG_HEIGHT)],
-      ['twitter:card', 'summary_large_image'],
-      ['twitter:image', `${origin}/api/og/${payload}`],
-    );
-  }
   return { title, meta };
 }
 
@@ -193,9 +191,9 @@ async function handleOgImage(url: URL): Promise<Response> {
   } catch {
     return Response.json({ error: 'bad_payload' }, { status: 400 });
   }
-  // handleShare only advertises this URL for drawable graphs, but the link may
-  // be hit directly or from a cached card; send those to the static site image
-  // rather than render an empty grid.
+  // handleShare advertises this URL for every graph without analyzing it, so
+  // this is where an undrawable graph is sent to the static site image rather
+  // than rendered as an empty grid.
   if (!canRenderOg(equations)) {
     return Response.redirect(new URL(FALLBACK_OG, url).toString(), 302);
   }

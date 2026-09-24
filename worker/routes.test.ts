@@ -68,13 +68,20 @@ describe('share meta tags', () => {
     expect(k).toContain('og:image:width');
   });
 
-  it('omits image tags for a shader-only graph so the site card survives', () => {
+  it('advertises the preview without analyzing, leaving undrawable graphs to /api/og/', () => {
+    // A shader-only graph still points at /api/og/, which redirects it to the
+    // site card (see the /api/og tests); the page itself never analyzes.
     const k = keys(['iter(z^2 + w)']);
-    expect(k).not.toContain('og:image');
-    expect(k).not.toContain('twitter:image');
-    // Title and description stay: they are accurate regardless.
+    expect(k).toContain('og:image');
     expect(k).toContain('og:title');
     expect(k).toContain('og:description');
+  });
+
+  it('builds share tags for a heavy graph without analyzing it', () => {
+    const rows = ['n = 101', 'm = [0..n(n-1)/2]', 'polyline(mod(m, n), mod(3m, n))'];
+    const started = performance.now();
+    expect(keys(rows)).toContain('og:image');
+    expect(performance.now() - started).toBeLessThan(50);
   });
 
   it('titles the card with the first equation', () => {
