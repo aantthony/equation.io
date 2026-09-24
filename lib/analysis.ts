@@ -51,7 +51,7 @@ import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from '.
 import { classifyAutomatonRow } from './automaton.ts';
 import { buildStateSystem, initialState } from './state.ts';
 import { stripNote } from './statements.ts';
-import { planarField } from './grid.ts';
+import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 
 export interface RowSource { id?: string | number; text: string }
@@ -207,7 +207,10 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
     const { name, kind } = row.def!;
     const original = rows.find(r => r.def && defKey(r.def) === defKey(row.def!));
     const levelSet = kind === 'fn' && defs.fns.has(name) && row.text !== original?.text;
-    if (defs.fields.has(name) || levelSet) row.def = undefined;
+    // `r = sqrt(x^2 + y^2); r = 2` is a level set of r. A field over u, v has
+    // no level sets in the plane, so a second `k = …` is a redefinition.
+    const field = defs.fields.get(name);
+    if ((field && !overParams(field)) || levelSet) row.def = undefined;
     else row.error = `${defKey(row.def!)} is already defined.`;
   }
 

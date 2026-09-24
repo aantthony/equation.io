@@ -2035,15 +2035,19 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // So is one over the parameters u, v: `c = (cos(2pi u), sin(2pi u))`
   // names a curve that later rows inline, as they inline `s = (x, y)`.
   const fieldNames = new Set<string>();
+  // The fields over u, v among them, so their errors speak of curves.
+  const paramNames = new Set<string>();
   for (let changed = true; changed;) {
     changed = false;
     for (const [name, e] of defs.consts) {
-      if (fieldNames.has(name)) continue;
       for (const fv of freeVars(e)) {
-        if (SPACE.has(fv) || PARAMS.has(fv) || fieldNames.has(fv)) {
+        if (!fieldNames.has(name) && (SPACE.has(fv) || PARAMS.has(fv) || fieldNames.has(fv))) {
           fieldNames.add(name);
           changed = true;
-          break;
+        }
+        if (!paramNames.has(name) && (PARAMS.has(fv) || paramNames.has(fv))) {
+          paramNames.add(name);
+          changed = true;
         }
       }
     }
@@ -2056,6 +2060,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     const comps = pointComps(p, defs.pointDims.get(p));
     if (!comps.some(c => fieldNames.has(c))) continue;
     for (const c of comps) fieldNames.add(c);
+    // `c = (u, w)`: the w component belongs to a curve too.
+    if (comps.some(c => paramNames.has(c))) for (const c of comps) paramNames.add(c);
   }
 
   const constNames = new Set(raw.filter(d => d.kind === 'const' && !fieldNames.has(d.name)).map(d => d.name));
@@ -2101,7 +2107,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       }
       for (const fv of vars) {
         if (!SPACE.has(fv) && !PARAMS.has(fv) && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
-          throw new Error(param
+          throw new Error(param || paramNames.has(name)
             ? `${shown} is a curve or surface (it uses u or v), so it may only use u, v, t, and constants (found ${fv}).`
             : `${shown} defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found ${fv}).`);
         }
