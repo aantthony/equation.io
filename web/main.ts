@@ -599,8 +599,20 @@ function renderMembers(eq: Equation): Equation[] {
       sysCache: undefined, pathCache: undefined, traceTarget: undefined, orbitCache: undefined, orbitPending: undefined }));
     familyRows.set(cls, children);
   }
+  // The row's own display choices (colour, toggles) change without a new
+  // classification, so the cached members take them from the row every time.
+  for (const child of children) {
+    if (child.certify !== eq.certify || child.showArrows !== eq.showArrows) {
+      child.sysCache = undefined;
+      child.traceTarget = undefined;
+      traceQueue.cancelPending(child.id);
+    }
+    Object.assign(child, familyShared(eq));
+  }
   return children;
 }
+const familyShared = ({ colorIndex, showArrows, certify, showLevels, combK, combT, partialSum, barMode }: Equation) =>
+  ({ colorIndex, showArrows, certify, showLevels, combK, combT, partialSum, barMode });
 
 const rowColor = (eq: Equation): [number, number, number] => theme.palette[eq.colorIndex].map(c => c + (1 - c) * (eq.familyShade ?? 0)) as [number, number, number];
 const liveRow = (eq: Equation) => equations.includes(eq.familyParent ?? eq) && (!eq.familyParent || (!!eq.familyParent.cls && renderMembers(eq.familyParent).includes(eq)));
