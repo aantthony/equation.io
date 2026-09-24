@@ -1041,6 +1041,8 @@ function sourceFreeVars(e: Expr, out = new Set<string>()): Set<string> {
 }
 
 const SUM_MAX_TOTAL = 2000;
+/** Runs one state family may start: the point-figure family budget. */
+const FAMILY_MAX = 1024;
 
 /** Expand a Σ/Π into an explicit sum/product of per-index terms. */
 function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
@@ -1706,6 +1708,10 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // wherever expressions lower, exactly as a point name does, so `th' = om`
   // and `segment((0, 0), om)` both work.
   const vecOwnerKey = new Map<string, string>();
+  /** Starting values per run of a state family, by owner and component. */
+  const familyInits = new Map<string, Expr[][]>();
+  /** A family run's hidden scalar state → the row that defines it. */
+  const familyOwner = new Map<string, string>();
   {
     // Dims propagate (`th' = om` is scalar until om's own row makes om a
     // vector), so discovery iterates to a fixed point. Lowering failures
@@ -1758,6 +1764,30 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       try {
         const low = lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
         const dim = defs.vecStates.get(name);
+        // A list of starting values is a family: one run of the system each.
+        const listed = lowerLists(low, listGetter(defs), ropts, true);
+        if (isSeq(listed)) {
+          if (listed.kind !== 'list') throw new Error(`${name}(0) must list numbers${dim ? ' or points' : ''}.`);
+          const members = listed.items.map(it => {
+            if (dim === undefined) {
+              if (it.kind === 'vec') throw new Error(`${name}(0) lists points, but ${name} is a single number.`);
+              return [it];
+            }
+            if (it.kind !== 'vec' || it.items.length !== dim) {
+              throw new Error(`${name} is a ${dim}-component state, but ${name}(0) lists ${it.kind === 'vec' ? `${it.items.length}-component points` : 'single numbers'}.`);
+            }
+            return it.items;
+          });
+          if (!members.length) throw new Error(`${name}(0) is an empty list.`);
+          if (members.length > FAMILY_MAX) throw new Error(`${name}(0) starts ${members.length} runs — the limit is ${FAMILY_MAX}.`);
+          familyInits.set(name, members);
+          const comps = dim === undefined ? [name] : vecStateComps(name, dim);
+          comps.forEach((c, k) => {
+            flatInits.set(c, members[0][k]);
+            if (dim !== undefined) vecOwnerKey.set(c, name);
+          });
+          continue;
+        }
         if (dim === undefined) {
           if (low.kind === 'vec') throw new Error(`${name}(0) has ${low.items.length} components, but ${name} is a single number.`);
           flatInits.set(name, low);
@@ -1782,6 +1812,129 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     // Downstream validation runs over the scalar components.
     stateNames.clear();
     for (const k of derivs.keys()) stateNames.add(k);
+  }
+
+  // State families: `p(0) = ([0..99]/10, 0, 0)` runs the system once per
+  // starting value. Each run is its own set of hidden scalar states, so the
+  // integrator is unchanged, and the state's names become lists over one
+  // shared axis — `p` draws as a point per run, `p[1]` is the first run. A
+  // state coupled to a family (`r' = vel` with a list of r(0)) runs per
+  // member too, seeded from its own single starting value.
+  if (familyInits.size) {
+    const rowOf = (c: string) => vecOwnerKey.get(c) ?? c;
+    const compsOfState = (owner: string) => {
+      const dim = defs.vecStates.get(owner);
+      return dim === undefined ? [owner] : vecStateComps(owner, dim);
+    };
+    // Constants that read a state are inlined into each run's derivative:
+    // `f = (…th_1…)` means a different f per run.
+    const stateDependent = new Map<string, Expr>();
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const [n, e] of defs.consts) {
+        if (stateDependent.has(n)) continue;
+        if ([...freeVars(e)].some(v => stateNames.has(v) || stateDependent.has(v))) {
+          stateDependent.set(n, e);
+          changed = true;
+        }
+      }
+    }
+    const inline = (e: Expr): Expr => {
+      for (let depth = 0; depth <= stateDependent.size; depth++) {
+        const hit = [...freeVars(e)].filter(v => stateDependent.has(v));
+        if (!hit.length) return e;
+        e = substVars(e, Object.fromEntries(hit.map(v => [v, stateDependent.get(v)!])));
+      }
+      return e; // a cycle: validation below reports it on the constant
+    };
+    // Coupled states run together, so they share one family.
+    const parent = new Map<string, string>();
+    const find = (a: string): string => {
+      const p = parent.get(a) ?? a;
+      if (p === a) return a;
+      const root = find(p);
+      parent.set(a, root);
+      return root;
+    };
+    const inlined = new Map([...derivs].map(([c, d]) => [c, inline(d)]));
+    for (const [c, d] of inlined) {
+      for (const fv of freeVars(d)) if (stateNames.has(fv)) parent.set(find(rowOf(c)), find(rowOf(fv)));
+    }
+    const sizes = new Map<string, { n: number; from: string }>();
+    for (const [owner, members] of familyInits) {
+      const root = find(owner), seen = sizes.get(root);
+      if (!seen) sizes.set(root, { n: members.length, from: owner });
+      else if (seen.n !== members.length) {
+        errors.set(`${owner}(0)`, `${owner}(0) starts ${members.length} runs, but ${seen.from}(0), which it moves with, starts ${seen.n}.`);
+        familyInits.delete(owner);
+      }
+    }
+    const owners = new Set([...derivs.keys()].map(rowOf));
+    for (const [root, { n }] of sizes) {
+      const group = [...owners].filter(o => find(o) === root);
+      const comps = group.flatMap(compsOfState).filter(c => derivs.has(c));
+      const hidden = (c: string, k: number) => `${defs.sequencePrefix}_run_${c}_${k}`;
+      const axes = [{ id: `${root}#runs`, n }];
+      const runs = Array.from({ length: n }, (_, k) =>
+        Object.fromEntries(comps.map(c => [c, { kind: 'var', name: hidden(c, k) } as Expr])));
+      for (const owner of group) {
+        const own = compsOfState(owner);
+        const members = familyInits.get(owner);
+        own.forEach((c, i) => {
+          const deriv = inlined.get(c);
+          const init = inits.get(c) ?? num(0);
+          for (let k = 0; k < n; k++) {
+            const h = hidden(c, k);
+            if (deriv) derivs.set(h, substVars(deriv, runs[k]));
+            inits.set(h, members ? members[k][i] : init);
+            stateNames.add(h);
+            familyOwner.set(h, owner);
+          }
+          derivs.delete(c);
+          inits.delete(c);
+          stateNames.delete(c);
+          vecOwnerKey.delete(c);
+          const list: Expr = { kind: 'list', items: runs.map(r => r[c] ?? num(0)) };
+          if (own.length > 1) defs.lists.set(c, withAxes(list, axes));
+        });
+        const list: Expr = own.length > 1
+          ? { kind: 'list', items: runs.map(r => ({ kind: 'vec', items: own.map(c => r[c] ?? num(0)) })) }
+          : { kind: 'list', items: runs.map(r => r[owner] ?? num(0)) };
+        defs.lists.set(owner, withAxes(list, axes));
+        defs.vecStates.delete(owner);
+      }
+    }
+    // A constant reading a family is a list of values, one per run.
+    const familyNames = () => new Set(defs.lists.keys());
+    for (const [n, e] of [...defs.consts]) {
+      const names = familyNames();
+      if (![...freeVars(e)].some(v => names.has(v))) continue;
+      try {
+        const listed = lowerLists(e, listGetter(defs), ropts, true);
+        if (!isSeq(listed)) continue;
+        defs.consts.delete(n);
+        defs.lists.set(n, listed);
+      } catch (err) {
+        errors.set(compOwner.get(n) ?? n, msg(err));
+        defs.consts.delete(n);
+      }
+    }
+    // A point with a component per run is a list of points.
+    for (const owner of [...defs.points]) {
+      const comps = pointComps(owner, defs.pointDims.get(owner));
+      const lists = comps.map(c => defs.lists.get(c));
+      if (!lists.some(Boolean)) continue;
+      const len = lists.find(Boolean)!.kind === 'list' ? (lists.find(Boolean) as Expr & { kind: 'list' }).items.length : 0;
+      const axes = axesOf(lists.find(Boolean) as Seq);
+      const items = Array.from({ length: len }, (_, k): Expr => ({ kind: 'vec', items: comps.map((c, i) => {
+        const l = lists[i];
+        return l ? (l as Expr & { kind: 'list' }).items[k] : defs.consts.get(c) ?? num(0);
+      }) }));
+      for (const c of comps) { defs.consts.delete(c); compOwner.delete(c); }
+      defs.points.delete(owner);
+      defs.pointDims.delete(owner);
+      defs.lists.set(owner, withAxes({ kind: 'list', items }, axes));
+    }
   }
 
   // A definition whose value depends on position — x, y, or z, directly or
@@ -1952,7 +2105,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // States. A derivative sees time, constants, and the other states; an
   // initial value is read once at reset, so it must be constant. Vector
   // states validate per scalar component; their errors land on the base row.
-  const stateRow = (n: string): string => vecOwnerKey.get(n) ?? n;
+  const stateRow = (n: string): string => vecOwnerKey.get(n) ?? familyOwner.get(n) ?? n;
   for (const [name, deriv] of derivs) {
     try {
       if (defs.fields.has(name)) throw new Error(`${name} is a coordinate field — use a tuple flow like (${name}', y') = (F, G).`);
@@ -2015,7 +2168,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // source dependencies until publication, so no binding can outlive a
   // failed owner merely because its lowered expression hid that reference.
   if (errors.size) {
-    const ownerOf = (name: string) => compOwner.get(name) ?? vecOwnerKey.get(name) ?? fitOwner.get(name) ?? name;
+    const ownerOf = (name: string) => compOwner.get(name) ?? vecOwnerKey.get(name) ?? familyOwner.get(name) ?? fitOwner.get(name) ?? name;
     const known = new Set([...byName.keys(), ...compOwner.keys(), ...vecOwnerKey.keys(), ...fittedNames, ...defs.consts.keys()]);
     const present = (name: string): boolean => defs.consts.has(name) || defs.fields.has(name)
       || defs.states.has(name) || defs.points.has(name) || defs.vecStates.has(name)

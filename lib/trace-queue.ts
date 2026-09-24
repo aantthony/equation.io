@@ -1,6 +1,7 @@
 import { type Env } from './env.ts';
 import { exprKey } from './expr.ts';
 import type { Expr } from './expr.ts';
+import type { OrbitInput } from './orbit.ts';
 import { animatedConstNames, definitionDependencies } from './defs.ts';
 
 /** Separate moving values from the definitions and fixed inputs of a trace.
@@ -17,7 +18,7 @@ export function traceEnvironment(params: readonly string[], animated: boolean, d
 }
 
 export interface TraceInput {
-  kind?: 'system' | 'field' | 'intersection' | 'certify';
+  kind?: 'system' | 'field' | 'intersection' | 'certify' | 'orbit';
   glyphs?: boolean;
   residuals: Expr[];
   dim: 2 | 3;
@@ -25,6 +26,7 @@ export interface TraceInput {
   hi: number[];
   env: Record<string, number>;
   angular?: boolean[];
+  orbit?: OrbitInput;
 }
 export type TraceResult = { pts: number[][]; info?: string; error?: string };
 export type TraceMessage = { token: number; input: TraceInput };

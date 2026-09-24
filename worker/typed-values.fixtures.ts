@@ -39,6 +39,7 @@ export const PUBLIC_KIND_ROWS = {
   prob: ['X ~ Binomial(4, 0.5)', 'P(X <= 2)'],
   expect: ['X ~ Binomial(4, 0.5)', 'E(X)'],
   family: ['y = [1, 2] x'],
+  orbit: ["q' = -q", 'q(0) = 1', 'q(0..3)'],
 } satisfies Record<Exclude<PublicKind, 'dlist' | 'dscatter'>, string[]>;
 
 /** Distribution rows deliberately retain MCP's descriptive presentation labels. */
