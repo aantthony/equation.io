@@ -664,7 +664,10 @@ export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env:
     truth = comparisons.every((c, k) => { const [a, b] = vals[k]; return c.op === '<' ? a < b : c.op === '<=' ? a <= b : c.op === '>' ? a > b : a >= b; });
     values = comparisons.map((c, k) => `${Number(vals[k][0].toPrecision(6))} ${c.op} ${Number(vals[k][1].toPrecision(6))}`).join(', ');
   }
-  return `${plot.variable ? (truth ? 'True now' : 'False now') : (truth ? 'Always true' : 'Never true')} (${values})`;
+  const verdict = `${plot.variable ? (truth ? 'True now' : 'False now') : (truth ? 'Always true' : 'Never true')} (${values})`;
+  // `e = 0.6` meant as a slider: the constant cannot be one, so say why the
+  // row became a (false) claim instead.
+  return plot.constant && !truth ? `${verdict} — ${plot.constant} is a constant; name a slider something else` : verdict;
 }
 
 /** One readout per source row, including lists and families of readouts. */
