@@ -234,13 +234,28 @@ describe('sequences built from other sequences', () => {
     expect(errorsOf(['a_n = a_n + 1'])[0]).toMatch(/depends on itself/);
   });
 
-  it('says a recurrence has no term at a changing index', () => {
-    expect(errorsOf(['b_0 = 1', 'b_{n+1} = 2 b_n', 'a_n = b_n + 1'])[2]).toMatch(/b is a recurrence/);
-    expect(errorsOf(['b_0 = 1', 'b_{k+1} = 2 b_k', 'a_n = b_n + 1'])[2]).toMatch(/b is a recurrence/);
-    // …and a recurrence is drawn as a map, with no index to read another term at.
+  it('reads a recurrence at a changing index from the chain of its terms', () => {
+    const at = (rows: string[], n: number) => {
+      const { rows: out, constEnv } = analyzeRows(rows);
+      expect(out.map(r => r.error)).toEqual(rows.map(() => undefined));
+      const plot = compileCpu(out[out.length - 1].cls!) as { term: Expr; index: string };
+      return evaluate(plot.term, { ...constEnv, [plot.index]: n });
+    };
+    const doubling = ['a_0 = 1', 'a_{n+1} = 2 a_n'];
+    expect(at([...doubling, 'd_n = a_{n+1} - a_n'], 3)).toBe(8);
+    expect(at([...doubling, 'd_k = a_(k+1)/a_k'], 5)).toBe(2); // its own letter
+    expect(at([...doubling, 'b_n = a_n + 1'], 4)).toBe(17);
+    // Past the chain (1000 terms), or off the whole numbers: no term.
+    expect(at([...doubling, 'd_n = a_{n+1} - a_n'], 1000)).toBeNaN();
+    // A recurrence still steps from its own term alone: drawn as a map, it
+    // has no index to read another sequence at.
     expect(errorsOf(['b_n = n', 'a_0 = 1', 'a_{n+1} = a_n + b_n'])[2]).toMatch(/cannot use b_n/);
-    // Fixed indices of a recurrence still work.
-    expect(errorsOf(['b_0 = 1', 'b_{n+1} = 2 b_n', 'a_n = b_3 n'])[2]).toBeUndefined();
+  });
+
+  it('depends on what the recurrence depends on', () => {
+    const { rows } = analyzeRows(['r = 2.9', 'a_0 = 0.15', 'a_{n+1} = r a_n (1 - a_n)', 'd_n = a_{n+1}/a_n']);
+    expect(rows[3].cls).toMatchObject({ params: ['a_0', 'r'], animated: false });
+    expect(analyzeRows(['a_{n+1} = a_n + t', 'd_n = a_{n+1} - a_n']).rows[1].cls).toMatchObject({ animated: true });
   });
 });
 
