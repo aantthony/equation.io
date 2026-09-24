@@ -23,7 +23,10 @@ const none = new Set<string>();
 function build(rows: string[], consts: string[] = []) {
   const sys = new RVSystem();
   const built = buildRVSystem(sys, scanRandomRows(rows), {
-    fnNames: none, getFn: () => undefined, constNames: new Set(consts), taken: () => false,
+    fnNames: none,
+    getFn: () => undefined,
+    constNames: new Set(consts),
+    taken: () => false,
   });
   return { sys, built };
 }
@@ -78,7 +81,17 @@ describe('exact pmfs by enumeration', () => {
   });
 
   it('a derived variable is not whole-number valued: atoms stand where g puts them', () => {
-    const { sys } = build([...DICE, 'H = X / 2', 'T = 0.1 X', 'Q = X^2', 'R = sqrt(X)', 'F = sin(X)', 'N ~ Poisson(2)', 'I = 1 / N', 'J = 1 / (X - 3)']);
+    const { sys } = build([
+      ...DICE,
+      'H = X / 2',
+      'T = 0.1 X',
+      'Q = X^2',
+      'R = sqrt(X)',
+      'F = sin(X)',
+      'N ~ Poisson(2)',
+      'I = 1 / N',
+      'J = 1 / (X - 3)',
+    ]);
     expect([...sys.pmfOf('H', {})!.xs]).toEqual([0.5, 1, 1.5, 2, 2.5, 3]);
     // 0.1·3 is 0.30000000000000004 and 0.1·6 is 0.6000000000000001: canonical atoms.
     expect([...sys.pmfOf('T', {})!.xs]).toEqual([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
@@ -102,10 +115,18 @@ describe('exact pmfs by enumeration', () => {
   });
 
   it('merges joint points that differ by rounding, and a sum that cancelled is 0', () => {
-    const { sys } = build([...DICE, 'W ~ DiscreteUniform(1, 6)', 'T = 0.1 X + 0.2 Y', 'Z = 0.1 X + 0.2 Y - 0.3 W', 'G = X (0.1 + 0.2) - 0.3 X']);
+    const { sys } = build([
+      ...DICE,
+      'W ~ DiscreteUniform(1, 6)',
+      'T = 0.1 X + 0.2 Y',
+      'Z = 0.1 X + 0.2 Y - 0.3 W',
+      'G = X (0.1 + 0.2) - 0.3 X',
+    ]);
     // 0.1·1 + 0.2·2 = 0.5 and 0.1·3 + 0.2·1 = 0.5000000000000001 are one atom.
     const t = atoms(sys, 'T');
-    expect([...sys.pmfOf('T', {})!.xs]).toEqual([0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8]);
+    expect([...sys.pmfOf('T', {})!.xs]).toEqual([
+      0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8,
+    ]);
     expect(t[0.5]).toBeCloseTo(2 / 36, 14);
     expect(P(sys, ['X', 'Y', 'T'], 'T = 0.3').value).toBeCloseTo(1 / 36, 14);
     expect(P(sys, ['X', 'Y', 'T'], 'T <= 0.1 + 0.2').value).toBeCloseTo(1 / 36, 14); // the bound is 0.30000000000000004
@@ -115,10 +136,13 @@ describe('exact pmfs by enumeration', () => {
     expect([...z.xs]).toContain(0);
     expect([...z.xs].filter(x => x !== 0 && Math.abs(x) < 0.05)).toEqual([]);
     let plane = 0;
-    for (let x = 1; x <= 6; x++) for (let y = 1; y <= 6; y++) for (let w = 1; w <= 6; w++) if (x + 2 * y === 3 * w) plane++;
+    for (let x = 1; x <= 6; x++)
+      for (let y = 1; y <= 6; y++) for (let w = 1; w <= 6; w++) if (x + 2 * y === 3 * w) plane++;
     expect(z.ps[[...z.xs].indexOf(0)]).toBeCloseTo(plane / 216, 14);
     expect(P(sys, ['X', 'Y', 'W'], '0.1 X + 0.2 Y = 0.3 W').value).toBeCloseTo(plane / 216, 14);
-    expect(P(sys, ['X', 'Y', 'W'], '0.1 X + 0.2 Y <= 0.3 W').value - P(sys, ['X', 'Y', 'W'], '0.1 X + 0.2 Y < 0.3 W').value).toBeCloseTo(plane / 216, 14);
+    expect(
+      P(sys, ['X', 'Y', 'W'], '0.1 X + 0.2 Y <= 0.3 W').value - P(sys, ['X', 'Y', 'W'], '0.1 X + 0.2 Y < 0.3 W').value,
+    ).toBeCloseTo(plane / 216, 14);
     expect(atoms(sys, 'G')).toEqual({ 0: 1 }); // shared base: brute force, and still one atom
   });
 
@@ -220,11 +244,26 @@ describe('moments of derived discrete variables', () => {
   });
 
   it('truncation does not bias the mean of a long-tailed law', () => {
-    const { sys } = build(['G ~ Geometric(0.001)', 'R ~ NegativeBinomial(0.5, 0.01)', 'A = G + 0.5', 'B = R^2', 'C = G R']);
+    const { sys } = build([
+      'G ~ Geometric(0.001)',
+      'R ~ NegativeBinomial(0.5, 0.01)',
+      'A = G + 0.5',
+      'B = R^2',
+      'C = G R',
+    ]);
     expect(sys.pmfOf('A', {})!.exact).toBe(true);
     expect(sys.mean('A', {}) / 1000.5 - 1).toBeLessThan(1e-9);
     expect(Math.abs(sys.mean('A', {}) / 1000.5 - 1)).toBeLessThan(1e-9);
-    const r = discreteLaw({ kind: 'negbinomial', args: [{ kind: 'num', value: 0.5 }, { kind: 'num', value: 0.01 }] }, {})!;
+    const r = discreteLaw(
+      {
+        kind: 'negbinomial',
+        args: [
+          { kind: 'num', value: 0.5 },
+          { kind: 'num', value: 0.01 },
+        ],
+      },
+      {},
+    )!;
     expect(Math.abs(sys.mean('B', {}) / (r.sd ** 2 + r.mean ** 2) - 1)).toBeLessThan(1e-9);
     expect(sys.quadMoments('B', {})).not.toBeNull(); // the mean is certified (σ, an x⁴ sum, only to ≈)
     // G × R is 27,000 × 2,600 joint points: over the cap, so it samples — and says so.
@@ -247,7 +286,14 @@ describe('moments of derived discrete variables', () => {
   });
 
   it('a bounded law never reads as heavy-tailed', () => {
-    const { sys } = build(['N ~ Binomial(1000, 0.5)', 'B ~ Bernoulli(0.0055)', 'K ~ Binomial(50, 0.5)', 'A = 2^N', 'C = 1000000 K B', 'D = N^3']);
+    const { sys } = build([
+      'N ~ Binomial(1000, 0.5)',
+      'B ~ Bernoulli(0.0055)',
+      'K ~ Binomial(50, 0.5)',
+      'A = 2^N',
+      'C = 1000000 K B',
+      'D = N^3',
+    ]);
     // 2^N lives ten σ out, where a truncated sum would miss it: the whole support is kept.
     const a = sys.moments('A', {})!;
     expect(a.kind).toBe('exact');
@@ -321,7 +367,11 @@ describe('the sampled tier: past the joint cap, still a pmf', () => {
   });
 
   it('few distinct values stay stems at the sampled values, lattice or not', () => {
-    const { sys } = build(['L ~ Poisson(1000000)', 'M ~ Poisson(1000000)', 'S = sin(L) {M > 0: 0, 1} + {L > M: 0.25, 0.75}']);
+    const { sys } = build([
+      'L ~ Poisson(1000000)',
+      'M ~ Poisson(1000000)',
+      'S = sin(L) {M > 0: 0, 1} + {L > M: 0.25, 0.75}',
+    ]);
     const pmf = sys.pmfOf('S', {})!;
     expect(pmf.exact).toBe(false);
     expect([...pmf.xs]).toEqual([0.25, 0.75]);
@@ -338,7 +388,10 @@ describe('the sampled tier: past the joint cap, still a pmf', () => {
   });
 
   it('degenerate and invalid parameters', () => {
-    const { sys } = build(['X ~ Binomial(n, p)', 'Y ~ Bernoulli(p)', 'S = X + 2 Y', 'L ~ Poisson(1000000)', 'M ~ Poisson(30)', 'W = L M Y'], ['n', 'p']);
+    const { sys } = build(
+      ['X ~ Binomial(n, p)', 'Y ~ Bernoulli(p)', 'S = X + 2 Y', 'L ~ Poisson(1000000)', 'M ~ Poisson(30)', 'W = L M Y'],
+      ['n', 'p'],
+    );
     expect(atoms(sys, 'S', { n: 4, p: 0 })).toEqual({ 0: 1 });
     expect(atoms(sys, 'S', { n: 4, p: 1 })).toEqual({ 6: 1 });
     expect(sys.pmfOf('S', { n: 2.5, p: 0.5 })).toBeNull();
@@ -374,8 +427,22 @@ describe('the sampled tier: past the joint cap, still a pmf', () => {
 
 describe('closure rules', () => {
   it('sums of independent Poissons, Binomials with one p, NegativeBinomials with one p', () => {
-    const { sys } = build(['A ~ Poisson(2)', 'B ~ Poisson(a)', 'S = A + B', 'N ~ Binomial(4, p)', 'M ~ Binomial(6, p)', 'C ~ Bernoulli(p)',
-      'T = N + M + C', 'R1 ~ NegBin(1.5, 0.3)', 'R2 ~ NegBin(2, 0.3)', 'R = R1 + R2', 'V = S + 0'], ['a', 'p']);
+    const { sys } = build(
+      [
+        'A ~ Poisson(2)',
+        'B ~ Poisson(a)',
+        'S = A + B',
+        'N ~ Binomial(4, p)',
+        'M ~ Binomial(6, p)',
+        'C ~ Bernoulli(p)',
+        'T = N + M + C',
+        'R1 ~ NegBin(1.5, 0.3)',
+        'R2 ~ NegBin(2, 0.3)',
+        'R = R1 + R2',
+        'V = S + 0',
+      ],
+      ['a', 'p'],
+    );
     expect(sys.discreteDist('S')).toMatchObject({ kind: 'poisson' });
     expect(sys.exactMoments('S', { a: 3.5 })).toEqual({ mean: 5.5, sd: Math.sqrt(5.5) });
     expect(sys.discreteDist('T')).toMatchObject({ kind: 'binomial' });
@@ -386,7 +453,7 @@ describe('closure rules', () => {
     // The law answers P(…) and draws the stems; nothing is enumerated.
     const before = ENUM_STATS.points;
     expect(P(sys, ['S'], 'S <= 5', { a: 3.5 })).toEqual({ value: expect.closeTo(0.5289, 4), exact: true });
-    expect(P(sys, ['S'], 'S = 5', { a: 3.5 }).value).toBeCloseTo(Math.exp(-5.5) * 5.5 ** 5 / 120, 12);
+    expect(P(sys, ['S'], 'S = 5', { a: 3.5 }).value).toBeCloseTo((Math.exp(-5.5) * 5.5 ** 5) / 120, 12);
     expect(sys.pmfRuns('S', { a: 3.5 }, { lo: 0, hi: 4 })![0].ks).toEqual([0, 1, 2, 3, 4]);
     expect(sys.pmfOf('S', { a: 3.5 })).toBeNull();
     expect(ENUM_STATS.points).toBe(before);
@@ -402,8 +469,24 @@ describe('closure rules', () => {
   });
 
   it('only where it is true', () => {
-    const { sys } = build(['A ~ Poisson(2)', 'N ~ Binomial(4, 0.5)', 'M ~ Binomial(6, 0.25)', 'G ~ Geometric(0.5)', 'H ~ Geometric(0.5)',
-      'D = A + A', 'E = 2 A', 'F = A + 1', 'I = N + M', 'J = G + H', 'K = A + N', 'L = A - A', 'O = N - M'], []);
+    const { sys } = build(
+      [
+        'A ~ Poisson(2)',
+        'N ~ Binomial(4, 0.5)',
+        'M ~ Binomial(6, 0.25)',
+        'G ~ Geometric(0.5)',
+        'H ~ Geometric(0.5)',
+        'D = A + A',
+        'E = 2 A',
+        'F = A + 1',
+        'I = N + M',
+        'J = G + H',
+        'K = A + N',
+        'L = A - A',
+        'O = N - M',
+      ],
+      [],
+    );
     for (const n of ['D', 'E', 'F', 'I', 'J', 'K', 'L', 'O']) expect(sys.discreteDist(n), n).toBeNull();
     // X + X is 2X — on the even numbers, with Poisson(2)'s masses — not Poisson(4).
     const d = sys.pmfOf('D', {})!;
@@ -443,7 +526,9 @@ describe('discrete × continuous is a continuous mixture', () => {
     expect(c.sd).toBeCloseTo(2, 1);
     // The mixture's density: Σ pmf(k) φ(y − k) — at y = 3 about 0.189.
     let truth = 0;
-    for (let k = 0; k < 40; k++) truth += discreteLaw(sys.discreteDist('N')!, {})!.pmf(k) * Math.exp(-((3 - k) ** 2) / 2) / Math.sqrt(2 * Math.PI);
+    for (let k = 0; k < 40; k++)
+      truth +=
+        (discreteLaw(sys.discreteDist('N')!, {})!.pmf(k) * Math.exp(-((3 - k) ** 2) / 2)) / Math.sqrt(2 * Math.PI);
     const i = c.pts.findIndex((x, j) => j % 2 === 0 && x >= 3);
     expect(Math.abs(c.pts[i + 1] / truth - 1)).toBeLessThan(0.08);
     expect(sys.moments('Y', {})).toMatchObject({ kind: 'estimate' });
@@ -492,7 +577,10 @@ describe('drawing: windows, selections, markers', () => {
     expect(sel('2 < H <= 3')).toEqual([[2.5, 3]]);
     expect(sel('H = 2.5')).toEqual([[2.5]]);
     expect(sel('H = 2.25')).toEqual([]);
-    expect(sel('H != 2.5')).toEqual([[1, 1.5, 2], [3, 3.5, 4, 4.5, 5, 5.5, 6]]);
+    expect(sel('H != 2.5')).toEqual([
+      [1, 1.5, 2],
+      [3, 3.5, 4, 4.5, 5, 5.5, 6],
+    ]);
   });
 
   it('the E(…) marker stands on the atom the mean lands on', () => {
@@ -523,7 +611,11 @@ describe('cost is bounded past the cap (the per-frame guards are in perf-guards.
 
 describe('names', () => {
   it('a variable may be called anything an identifier can be', () => {
-    const { sys, built } = build(['constructor ~ DiscreteUniform(1, 6)', 'toString = constructor + 1', 'valueOf = toString + constructor']);
+    const { sys, built } = build([
+      'constructor ~ DiscreteUniform(1, 6)',
+      'toString = constructor + 1',
+      'valueOf = toString + constructor',
+    ]);
     expect([...built.errors]).toEqual([]);
     expect([...sys.pmfOf('valueOf', {})!.xs]).toEqual([3, 5, 7, 9, 11, 13]);
   });
@@ -533,7 +625,11 @@ describe('names', () => {
     const spec = toProbability(parseExpr('N + Z = 3', none), new Set(['N', 'Z']));
     sys.addAnonymous({ name: '@P7', kind: 'derived', expr: spec.inline!.e });
     let message = '';
-    try { sys.checkProbability({ ...spec, single: undefined }); } catch (e) { message = (e as Error).message; }
+    try {
+      sys.checkProbability({ ...spec, single: undefined });
+    } catch (e) {
+      message = (e as Error).message;
+    }
     expect(message).toContain('Z is not');
     expect(message).not.toContain('@');
   });

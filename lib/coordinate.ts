@@ -18,14 +18,18 @@ export function coordinateRow(expr: Expr, fields: Record<string, Expr>) {
   const names = expr.l.items.map(e => (e as Expr & { kind: 'var' }).name);
   const flow = names.some(n => n.endsWith("'"));
   if (!flow && !names.every(n => AXES.has(n) || Object.hasOwn(fields, n))) return null;
-  if (flow && !names.every(n => n.endsWith("'"))) throw new Error('A coordinate flow needs a prime on every coordinate.');
-  const bases = names.map(n => flow ? n.slice(0, -1) : n);
+  if (flow && !names.every(n => n.endsWith("'")))
+    throw new Error('A coordinate flow needs a prime on every coordinate.');
+  const bases = names.map(n => (flow ? n.slice(0, -1) : n));
   const shown = `(${names.join(', ')})`;
-  if (new Set(bases).size !== bases.length) throw new Error(`${shown} repeats a coordinate — use distinct coordinates to determine a point or flow.`);
+  if (new Set(bases).size !== bases.length)
+    throw new Error(`${shown} repeats a coordinate — use distinct coordinates to determine a point or flow.`);
   if (bases.length !== 2 && bases.length !== 3) {
-    throw new Error(flow
-      ? 'A coordinate flow needs two coordinates — flows are 2D only.'
-      : 'Use two coordinates to determine a point in the plane, or three in space.');
+    throw new Error(
+      flow
+        ? 'A coordinate flow needs two coordinates — flows are 2D only.'
+        : 'Use two coordinates to determine a point in the plane, or three in space.',
+    );
   }
   const coords = bases.map(n => {
     if (AXES.has(n)) return { kind: 'var', name: n } as Expr;
@@ -38,31 +42,64 @@ export function coordinateRow(expr: Expr, fields: Record<string, Expr>) {
     if (spatial) throw new Error(`${spatial} uses z, and coordinate flows are 2D only.`);
   }
   const n = bases.length;
-  if (expr.r.kind !== 'vec') throw new Error(flow ? 'A coordinate flow needs two components on the right.' : 'A vector equation needs components on both sides.');
-  if (expr.r.items.length !== n) throw new Error(`Mismatched components: ${n} on the left, ${expr.r.items.length} on the right.`);
+  if (expr.r.kind !== 'vec')
+    throw new Error(
+      flow
+        ? 'A coordinate flow needs two components on the right.'
+        : 'A vector equation needs components on both sides.',
+    );
+  if (expr.r.items.length !== n)
+    throw new Error(`Mismatched components: ${n} on the left, ${expr.r.items.length} on the right.`);
   return { coords, flow, rhs: expr.r.items };
 }
 
-export function lowerCoordinateFlow(expr: Expr, fields: Record<string, Expr>, timeDerivative = (e: Expr) => diff(e, 't')): Expr {
+export function lowerCoordinateFlow(
+  expr: Expr,
+  fields: Record<string, Expr>,
+  timeDerivative = (e: Expr) => diff(e, 't'),
+): Expr {
   const row = coordinateRow(expr, fields);
-  if (!row?.flow || (row.coords.length === 2 && row.coords[0].kind === 'var' && row.coords[0].name === 'x' && row.coords[1].kind === 'var' && row.coords[1].name === 'y')) return Object.keys(fields).length ? substVars(expr, fields) : expr;
+  if (
+    !row?.flow ||
+    (row.coords.length === 2 &&
+      row.coords[0].kind === 'var' &&
+      row.coords[0].name === 'x' &&
+      row.coords[1].kind === 'var' &&
+      row.coords[1].name === 'y')
+  )
+    return Object.keys(fields).length ? substVars(expr, fields) : expr;
   if (row.coords.length === 3) {
     const jac = row.coords.map(c => ['x', 'y', 'z'].map(axis => diff(c, axis)));
     const determinant = detOf(jac);
-    if (freeVars(determinant).size === 0 && evaluate(determinant, {}) === 0) throw new Error('These coordinates have a singular Jacobian and do not determine a flow.');
+    if (freeVars(determinant).size === 0 && evaluate(determinant, {}) === 0)
+      throw new Error('These coordinates have a singular Jacobian and do not determine a flow.');
     const rhs = row.rhs.map((c, k) => bin('-', substVars(c, fields), timeDerivative(row.coords[k])));
-    return { kind: 'eq', l: { kind: 'vec', items: ["x'", "y'", "z'"].map(name => ({ kind: 'var', name })) },
-      r: { kind: 'vec', items: solveVec(jac, rhs) } };
+    return {
+      kind: 'eq',
+      l: { kind: 'vec', items: ["x'", "y'", "z'"].map(name => ({ kind: 'var', name })) },
+      r: { kind: 'vec', items: solveVec(jac, rhs) },
+    };
   }
   const [a, b] = row.coords;
   const [f, g] = row.rhs.map((e, k) => bin('-', substVars(e, fields), timeDerivative(row.coords[k])));
-  const ax = diff(a, 'x'), ay = diff(a, 'y'), bx = diff(b, 'x'), by = diff(b, 'y');
+  const ax = diff(a, 'x'),
+    ay = diff(a, 'y'),
+    bx = diff(b, 'x'),
+    by = diff(b, 'y');
   const det = bin('-', bin('*', ax, by), bin('*', ay, bx));
   if (freeVars(det).size === 0 && evaluate(det, {}) === 0) {
     throw new Error('These coordinates have a singular Jacobian and do not determine a flow.');
   }
   // Emit Cartesian prime notation so even a constant velocity remains a field.
-  return { kind: 'eq', l: { kind: 'vec', items: ["x'", "y'"].map(name => ({ kind: 'var', name })) },
-    r: { kind: 'vec', items: [bin('/', bin('-', bin('*', by, f), bin('*', ay, g)), det),
-      bin('/', bin('-', bin('*', ax, g), bin('*', bx, f)), det)] } };
+  return {
+    kind: 'eq',
+    l: { kind: 'vec', items: ["x'", "y'"].map(name => ({ kind: 'var', name })) },
+    r: {
+      kind: 'vec',
+      items: [
+        bin('/', bin('-', bin('*', by, f), bin('*', ay, g)), det),
+        bin('/', bin('-', bin('*', ax, g), bin('*', bx, f)), det),
+      ],
+    },
+  };
 }

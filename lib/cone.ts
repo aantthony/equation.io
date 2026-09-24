@@ -15,8 +15,9 @@ export function buildUnitCone(sides = CONE_SIDES): {
   const indices: number[] = [];
   const nlen = Math.SQRT2;
   for (let i = 0; i < sides; i++) {
-    const t = 2 * Math.PI * i / sides;
-    const c = Math.cos(t), s = Math.sin(t);
+    const t = (2 * Math.PI * i) / sides;
+    const c = Math.cos(t),
+      s = Math.sin(t);
     // aNormal.z > 0 marks a side vertex; the fragment shader replaces this
     // with the analytic radial normal of the cone.
     positions.push(c, s, -1);
@@ -35,7 +36,7 @@ export function buildUnitCone(sides = CONE_SIDES): {
   normals.push(0, 0, -1);
   const capRing = capCenter + 1;
   for (let i = 0; i < sides; i++) {
-    const t = 2 * Math.PI * i / sides;
+    const t = (2 * Math.PI * i) / sides;
     positions.push(Math.cos(t), Math.sin(t), -1);
     normals.push(0, 0, -1);
   }
@@ -52,18 +53,20 @@ export function buildUnitCone(sides = CONE_SIDES): {
 }
 
 /** Orthonormal frame with +z along `dir`. Matches the cone instance shader. */
-export function coneBasis(dir: [number, number, number]): { x: [number, number, number]; y: [number, number, number]; z: [number, number, number] } {
+export function coneBasis(dir: [number, number, number]): {
+  x: [number, number, number];
+  y: [number, number, number];
+  z: [number, number, number];
+} {
   const len = Math.hypot(...dir);
   const z: [number, number, number] = [dir[0] / len, dir[1] / len, dir[2] / len];
   const h: [number, number, number] = Math.abs(z[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
-  const cx = h[1] * z[2] - h[2] * z[1], cy = h[2] * z[0] - h[0] * z[2], cz = h[0] * z[1] - h[1] * z[0];
+  const cx = h[1] * z[2] - h[2] * z[1],
+    cy = h[2] * z[0] - h[0] * z[2],
+    cz = h[0] * z[1] - h[1] * z[0];
   const cl = Math.hypot(cx, cy, cz);
   const x: [number, number, number] = [cx / cl, cy / cl, cz / cl];
-  const y: [number, number, number] = [
-    z[1] * x[2] - z[2] * x[1],
-    z[2] * x[0] - z[0] * x[2],
-    z[0] * x[1] - z[1] * x[0],
-  ];
+  const y: [number, number, number] = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
   return { x, y, z };
 }
 
@@ -71,7 +74,11 @@ export function coneBasis(dir: [number, number, number]): { x: [number, number, 
  * One lit cone per finite run, plus a copy of `pts` whose last vertex on each
  * run sits at the cone base so the shaft does not poke through the tip.
  */
-export function arrowConeInstances(pts: Float32Array, runs: Array<[number, number]>, boxR: number): {
+export function arrowConeInstances(
+  pts: Float32Array,
+  runs: Array<[number, number]>,
+  boxR: number,
+): {
   shafts: Float32Array;
   instances: Float32Array;
   count: number;
@@ -82,13 +89,17 @@ export function arrowConeInstances(pts: Float32Array, runs: Array<[number, numbe
     if (count < 2) continue;
     const i0 = (first + count - 2) * 3;
     const i1 = (first + count - 1) * 3;
-    const dx = pts[i1] - pts[i0], dy = pts[i1 + 1] - pts[i0 + 1], dz = pts[i1 + 2] - pts[i0 + 2];
+    const dx = pts[i1] - pts[i0],
+      dy = pts[i1 + 1] - pts[i0 + 1],
+      dz = pts[i1 + 2] - pts[i0 + 2];
     const L = Math.hypot(dx, dy, dz);
     if (!(L > 1e-12) || !(boxR > 0)) continue;
     const height = Math.min(0.32 * L, 0.05 * boxR);
     if (!(height > 0)) continue;
     const inv = 1 / L;
-    const ux = dx * inv, uy = dy * inv, uz = dz * inv;
+    const ux = dx * inv,
+      uy = dy * inv,
+      uz = dz * inv;
     shafts[i1] = pts[i1] - ux * height;
     shafts[i1 + 1] = pts[i1 + 1] - uy * height;
     shafts[i1 + 2] = pts[i1 + 2] - uz * height;

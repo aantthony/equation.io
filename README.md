@@ -258,6 +258,7 @@ Before opening a PR, run the same checks CI runs:
 ```sh
 pnpm typecheck    # tsc over lib, web and worker
 pnpm lint         # Oxlint, including type-aware rules
+pnpm fmt:check    # Oxfmt (pnpm fmt rewrites files in place)
 pnpm vitest run   # unit tests
 ```
 

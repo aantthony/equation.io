@@ -20,11 +20,16 @@ function at(rows: string[], env: Record<string, number>): number[] {
   const row = a.rows[a.rows.length - 1];
   if (row.error) throw new Error(row.error);
   const object = row.cls?.object;
-  const exprs: readonly Expr[] = object?.kind === 'vector-field' ? object.components
-    : object?.kind === 'scalar-field' || object?.kind === 'value' ? [object.expr]
-    : object?.kind === 'surface' && object.form === 'implicit' ? [object.residual]
-    : object?.kind === 'point' && object.source.representation === 'real' ? object.source.coordinates
-    : [];
+  const exprs: readonly Expr[] =
+    object?.kind === 'vector-field'
+      ? object.components
+      : object?.kind === 'scalar-field' || object?.kind === 'value'
+        ? [object.expr]
+        : object?.kind === 'surface' && object.form === 'implicit'
+          ? [object.residual]
+          : object?.kind === 'point' && object.source.representation === 'real'
+            ? object.source.coordinates
+            : [];
   if (!exprs.length) throw new Error(`unexpected ${object?.kind}`);
   return exprs.map(e => evaluate(e, { t: 0, ...a.constEnv, ...env }));
 }

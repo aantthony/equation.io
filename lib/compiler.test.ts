@@ -11,9 +11,24 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('semantic classification and independent backends', () => {
   it('classifies all scalar shapes without generating any GLSL', () => {
-    const shader = vi.spyOn(glsl, 'toGLSL').mockImplementation(() => { throw new Error('GPU invoked'); });
-    const typed = vi.spyOn(complex, 'compileTyped').mockImplementation(() => { throw new Error('GPU invoked'); });
-    for (const text of ['sin(x)', 'x+y=2', 're(w)', 're(w)=0', 'w^2=1', '1+2i', 'exp(i u)', 'domain(w)', 'iter(z^2+w)', '(u,v,u*v)']) {
+    const shader = vi.spyOn(glsl, 'toGLSL').mockImplementation(() => {
+      throw new Error('GPU invoked');
+    });
+    const typed = vi.spyOn(complex, 'compileTyped').mockImplementation(() => {
+      throw new Error('GPU invoked');
+    });
+    for (const text of [
+      'sin(x)',
+      'x+y=2',
+      're(w)',
+      're(w)=0',
+      'w^2=1',
+      '1+2i',
+      'exp(i u)',
+      'domain(w)',
+      'iter(z^2+w)',
+      '(u,v,u*v)',
+    ]) {
       expect(classify(parseExpr(text)).object).toBeDefined();
     }
     expect(shader).not.toHaveBeenCalled();
@@ -24,13 +39,19 @@ describe('semantic classification and independent backends', () => {
     expect(complex.usesComplex(parseExpr('re(w)'))).toBe(true);
     expect(complex.inferScalarType(parseExpr('re(w)'))).toBe('real');
     expect(complex.inferScalarType(parseExpr('z^2'), { z: 'complex' })).toBe('complex');
-    expect(() => complex.inferScalarType(parseExpr('i + floor(i)'))).toThrow('floor is not supported for complex values.');
+    expect(() => complex.inferScalarType(parseExpr('i + floor(i)'))).toThrow(
+      'floor is not supported for complex values.',
+    );
     expect(publicKind(classify(parseExpr('re(w)')).object)).toBe('scalar2d');
     expect(publicKind(classify(parseExpr('re(w)=0')).object)).toBe('implicit2d');
   });
 
   it('retains complex point, path and equation sources until CPU projection', () => {
-    for (const [text, kind] of [['1+2i', 'point'], ['exp(i u)', 'pcurve'], ['w^2=1', 'system']] as const) {
+    for (const [text, kind] of [
+      ['1+2i', 'point'],
+      ['exp(i u)', 'pcurve'],
+      ['w^2=1', 'system'],
+    ] as const) {
       const classified = classify(parseExpr(text));
       const object = classified.object;
       expect('source' in object && object.source.representation).toBe('complex');
@@ -44,11 +65,14 @@ describe('semantic classification and independent backends', () => {
     expect(point.coords.map(e => evaluate(e, {}))).toEqual([1, 2]);
     const system = compileCpu(classify(parseExpr('w^2=1')));
     if (system.type !== 'system') throw new Error('system');
-    for (const x of [-1, 1]) for (const residual of system.residuals) expect(evaluate(residual, { x, y: 0 })).toBeCloseTo(0);
+    for (const x of [-1, 1])
+      for (const residual of system.residuals) expect(evaluate(residual, { x, y: 0 })).toBeCloseTo(0);
   });
 
   it('supports CPU-only analysis and projects real expressions involving complex values', () => {
-    const shader = vi.spyOn(glsl, 'toGLSL').mockImplementation(() => { throw new Error('GPU invoked'); });
+    const shader = vi.spyOn(glsl, 'toGLSL').mockImplementation(() => {
+      throw new Error('GPU invoked');
+    });
     const result = analyzeRows(['re(w^2)', 're(w)=2', 're(1+2i)'], { backend: 'cpu' });
     expect(result.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
     expect(result.rows.every(r => r.gpu === undefined)).toBe(true);
@@ -62,7 +86,8 @@ describe('semantic classification and independent backends', () => {
   it('keeps graph RHS, normalized residuals, heightmaps and level parameter identity', () => {
     const graph = classify(parseExpr('sin(x)'));
     expect(graph.object).toMatchObject({ kind: 'curve', form: 'graph' });
-    for (const text of ['y=x^2', 'x^2=y']) expect(classify(parseExpr(text)).object).toMatchObject({ kind: 'curve', form: 'graph' });
+    for (const text of ['y=x^2', 'x^2=y'])
+      expect(classify(parseExpr(text)).object).toMatchObject({ kind: 'curve', form: 'graph' });
     expect(classify(parseExpr('x^2+y^2=1')).object).toMatchObject({ kind: 'curve', form: 'implicit' });
     const curve = compileCpu(graph);
     if (curve.type !== 'implicit2d') throw new Error('curve');
@@ -89,10 +114,13 @@ describe('semantic classification and independent backends', () => {
 
   it('shares one GPU family template while CPU members retain their actual equations', () => {
     const row = analyzeRows(['y=[1,2] x']).rows[0];
-    const cpu = row.cpu!; const gpu = row.gpu!;
+    const cpu = row.cpu!;
+    const gpu = row.gpu!;
     if (cpu.type !== 'family' || gpu.type !== 'family') throw new Error('family');
     expect(cpu.members.map(m => m.cpu.type)).toEqual(['implicit2d', 'implicit2d']);
-    expect(cpu.members.map(m => m.cpu.type === 'implicit2d' && evaluate(m.cpu.residual, { x: 2, y: 4 }))).toEqual([2, 0]);
+    expect(cpu.members.map(m => m.cpu.type === 'implicit2d' && evaluate(m.cpu.residual, { x: 2, y: 4 }))).toEqual([
+      2, 0,
+    ]);
     expect(shaderKey(gpu.members[0])).toBe(shaderKey(gpu.members[1]));
     expect(gpu.members[0].uniforms).not.toEqual(gpu.members[1].uniforms);
     expect(row.cls!.params).not.toContain('eqioFamilyIndex');
@@ -104,8 +132,24 @@ describe('semantic classification and independent backends', () => {
     const cpu = compileCpu(classified);
     if (cpu.type !== 'dlist') throw new Error('packed list');
     expect(cpu.values).toBe(values);
-    const a = compileCpu(classify({ kind: 'vec', items: [{ kind: 'num', value: 1, origin: 10 }, { kind: 'num', value: 2 }] }));
-    const b = compileCpu(classify({ kind: 'vec', items: [{ kind: 'num', value: 1, origin: 99, axes: [{ id: 'axis', n: 100 }] }, { kind: 'num', value: 2 }] }));
+    const a = compileCpu(
+      classify({
+        kind: 'vec',
+        items: [
+          { kind: 'num', value: 1, origin: 10 },
+          { kind: 'num', value: 2 },
+        ],
+      }),
+    );
+    const b = compileCpu(
+      classify({
+        kind: 'vec',
+        items: [
+          { kind: 'num', value: 1, origin: 99, axes: [{ id: 'axis', n: 100 }] },
+          { kind: 'num', value: 2 },
+        ],
+      }),
+    );
     expect(cpuStructureKey(a)).toBe(cpuStructureKey(b));
   });
 
@@ -123,7 +167,9 @@ describe('semantic classification and independent backends', () => {
     expect(shaderKey(plan)).toBe(shaderKey(compileGpu(classify(parseExpr('(-y, x, z/2)')))));
     expect(shaderKey(plan)).not.toBe(shaderKey(compileGpu(classify(parseExpr('(-y, x, z/3)')))));
     // Trajectories trace on the CPU, so the row still draws without it.
-    vi.spyOn(glsl, 'toGLSL').mockImplementation(() => { throw new Error('no GLSL'); });
+    vi.spyOn(glsl, 'toGLSL').mockImplementation(() => {
+      throw new Error('no GLSL');
+    });
     expect(compileGpu(classify(parseExpr('(-y, x, z)'))).type).toBe('none');
   });
 });

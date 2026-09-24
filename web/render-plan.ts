@@ -10,6 +10,8 @@ export function gpuFor<T extends GpuPlan['type']>(row: { gpu?: GpuPlan }, type: 
 export function shaderBindings(plan?: GpuPlan): { params: string[]; uniforms: Record<string, number> } {
   return {
     params: plan?.params ?? [],
-    uniforms: Object.fromEntries(Object.entries(plan?.uniforms ?? {}).map(([name, value]) => [uniformName(name), value])),
+    uniforms: Object.fromEntries(
+      Object.entries(plan?.uniforms ?? {}).map(([name, value]) => [uniformName(name), value]),
+    ),
   };
 }

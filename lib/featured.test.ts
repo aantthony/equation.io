@@ -4,12 +4,24 @@ import { FEATURED, FEATURED_KEY, nextFeatured, sameRows } from './featured.ts';
 function memStore(init: Record<string, string> = {}): Storage {
   const data = { ...init };
   return {
-    get length() { return Object.keys(data).length; },
-    clear() { for (const k of Object.keys(data)) delete data[k]; },
-    getItem(k: string) { return k in data ? data[k] : null; },
-    setItem(k: string, v: string) { data[k] = v; },
-    removeItem(k: string) { delete data[k]; },
-    key(i: number) { return Object.keys(data)[i] ?? null; },
+    get length() {
+      return Object.keys(data).length;
+    },
+    clear() {
+      for (const k of Object.keys(data)) delete data[k];
+    },
+    getItem(k: string) {
+      return k in data ? data[k] : null;
+    },
+    setItem(k: string, v: string) {
+      data[k] = v;
+    },
+    removeItem(k: string) {
+      delete data[k];
+    },
+    key(i: number) {
+      return Object.keys(data)[i] ?? null;
+    },
   };
 }
 

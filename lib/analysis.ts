@@ -54,7 +54,10 @@ import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 
-export interface RowSource { id?: string | number; text: string }
+export interface RowSource {
+  id?: string | number;
+  text: string;
+}
 
 /** Lexical candidates preserve source identity; document binding settles them. */
 export interface StatementScan {
@@ -95,7 +98,9 @@ export interface AnalyzeOpts {
   readouts?: boolean;
 }
 
-export interface PrepareOptions { tables?: TableSource }
+export interface PrepareOptions {
+  tables?: TableSource;
+}
 
 export interface PreparedDocument {
   rows: RowInfo[];
@@ -146,25 +151,41 @@ export interface Analysis {
 }
 
 /** No source splitting here: one input row remains one result, including blanks. */
-export function prepareDocument(sources: readonly (string | RowSource)[], { tables }: PrepareOptions = {}): PreparedDocument {
+export function prepareDocument(
+  sources: readonly (string | RowSource)[],
+  { tables }: PrepareOptions = {},
+): PreparedDocument {
   // A trailing `# note` is prose for the reader; the math is what precedes it.
-  const rows: RowInfo[] = sources.map(source => typeof source === 'string'
-    ? { text: stripNote(source).trim() } : { ...source, text: stripNote(source.text).trim() });
+  const rows: RowInfo[] = sources.map(source =>
+    typeof source === 'string'
+      ? { text: stripNote(source).trim() }
+      : { ...source, text: stripNote(source.text).trim() },
+  );
   const texts = rows.map(row => row.text);
   const seqScans = scanSequences(texts);
-  const statements: StatementScan[] = rows.map((source, i) => ({ source, kind:
-    !source.text ? 'blank' : source.text.startsWith('#') ? 'comment'
-      : /^(view|camera)\s*\(/i.test(source.text) ? 'viewport'
-      : seqScans[i] ? 'sequence'
-      : source.text.includes('~') ? 'distribution'
-      : scanDefinition(source.text) ? 'definition' : 'expression',
+  const statements: StatementScan[] = rows.map((source, i) => ({
+    source,
+    kind: !source.text
+      ? 'blank'
+      : source.text.startsWith('#')
+        ? 'comment'
+        : /^(view|camera)\s*\(/i.test(source.text)
+          ? 'viewport'
+          : seqScans[i]
+            ? 'sequence'
+            : source.text.includes('~')
+              ? 'distribution'
+              : scanDefinition(source.text)
+                ? 'definition'
+                : 'expression',
   }));
 
   // Random-variable rows (`X ~ …`, and `Y = X^2` referencing one) resolve
   // outside the definition system — mirror of web/main.ts recompileAll.
   const regressions = scanRegressions(texts);
-  const rvScan = scanRandomRows(rows.map((r, i) =>
-    regressions.has(i) || !r.text || r.text.startsWith('#') || seqScans[i] ? null : r.text));
+  const rvScan = scanRandomRows(
+    rows.map((r, i) => (regressions.has(i) || !r.text || r.text.startsWith('#') || seqScans[i] ? null : r.text)),
+  );
   const rvRowIdx = new Set([...rvScan.base.keys(), ...rvScan.derived.keys()]);
 
   // Pass 1: definitions. A duplicate coordinate-field row (r = 1 + cos(theta)
@@ -175,20 +196,30 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
   for (const [i, row] of rows.entries()) {
     if (!row.text) continue;
     // `# label` rows are comments (collapsible group headings in the app).
-    if (row.text.startsWith('#')) { row.comment = true; continue; }
+    if (row.text.startsWith('#')) {
+      row.comment = true;
+      continue;
+    }
     if (rvRowIdx.has(i)) continue;
     // Sequence/recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
     if (seqScans[i]) continue;
     const d = regressions.get(i) ?? scanDefinition(row.text);
     if (!d) continue;
     row.def = d;
-    if (defNames.has(defKey(d))) { dupRows.push(row); continue; }
+    if (defNames.has(defKey(d))) {
+      dupRows.push(row);
+      continue;
+    }
     defNames.add(defKey(d));
     raw.push(d);
   }
 
   // An automaton's letter names rows of cells, not scalar terms (automaton.ts).
-  const built = buildDefs(raw, tables, seqScans.filter((s): s is SeqScan => s !== null && !s.cell));
+  const built = buildDefs(
+    raw,
+    tables,
+    seqScans.filter((s): s is SeqScan => s !== null && !s.cell),
+  );
   const defs = built.defs;
   for (const [key, fit] of built.fits) {
     const row = rows.find(r => r.def && defKey(r.def) === key);
@@ -200,8 +231,10 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
     // A definition that only wants a dropped CSV (`ages = person.age / 2`)
     // is not a broken row — the bytes never travelled in the link. Same
     // distinction the plot-row catch below makes.
-    if (built.needsFile.has(key)) { row.dataLocal = message; row.needsFile = true; }
-    else row.error = message;
+    if (built.needsFile.has(key)) {
+      row.dataLocal = message;
+      row.needsFile = true;
+    } else row.error = message;
   }
   for (const row of dupRows) {
     const { name, kind } = row.def!;
@@ -217,15 +250,18 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
   for (const [name, table] of defs.tables) {
     const row = rows.find(r => r.def && defKey(r.def) === name);
     if (!row || row.error || !table.data) continue;
-    const cols = table.data.columns.map(c => c.type === 'num' ? c.name : `${c.name} (text)`);
+    const cols = table.data.columns.map(c => (c.type === 'num' ? c.name : `${c.name} (text)`));
     row.info = [`${table.data.rows} rows`, cols.join(', '), ...table.data.warnings].join(' · ');
   }
   const stateSystem = buildStateSystem(defs);
   // Only static constants can affect compilation. Dummy states permit evaluating
   // unrelated constants; every state and dependent constant is removed below.
   let constEnv: Record<string, number> = {};
-  try { constEnv = evaluateFrame(defs, 0, Object.fromEntries([...defs.states.keys()].map(n => [n, 0]))); }
-  catch { /* failed definitions already carry diagnostics */ }
+  try {
+    constEnv = evaluateFrame(defs, 0, Object.fromEntries([...defs.states.keys()].map(n => [n, 0])));
+  } catch {
+    /* failed definitions already carry diagnostics */
+  }
 
   // Pass 2: viewport rows and plots. States are constants to every consumer.
   const constNames = new Set([...defs.consts.keys(), ...defs.states.keys()]);
@@ -264,14 +300,18 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
     getList,
     indexIssue: (idx: Expr) => indexIssue(idx, defs),
     // A state stands for itself: defined, and constant across space.
-    definition: (n: string): Expr | undefined => defs.fields.get(n) ?? defs.consts.get(n)
-      ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
+    definition: (n: string): Expr | undefined =>
+      defs.fields.get(n) ?? defs.consts.get(n) ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
     comps: (n: string) => compsOf(defs, n),
   };
   ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
 
   const { declarations, ...builtRVs } = buildRVDeclarations(rvScan, {
-    fnNames, getFn, ropts, constNames, taken: n => nameTaken(defs, n),
+    fnNames,
+    getFn,
+    ropts,
+    constNames,
+    taken: n => nameTaken(defs, n),
   });
   for (const [name, declaration] of declarations) defs.bind(name, { tag: 'rv', declaration });
 
@@ -279,15 +319,36 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
   const skipGrid = pointComponentNames(defs);
   for (const [name, expr] of defs.fields) {
     if (skipGrid.has(name) || !planarField(expr)) continue;
-    try { gridFields.push({ name, expr, params: [...freeVars(expr)].filter(n => constNames.has(n)).sort() }); }
-    catch (e) {
+    try {
+      gridFields.push({ name, expr, params: [...freeVars(expr)].filter(n => constNames.has(n)).sort() });
+    } catch (e) {
       const row = rows.find(r => r.def && defKey(r.def) === name);
       if (row && !row.error) row.error = e instanceof Error ? e.message : String(e);
     }
   }
-  return { rows, statements, seqScans, raw, built, defs, rvScan, builtRVs, stateSystem,
-    sumBoundConsts: built.sumBoundConsts, constNames, fieldEnv, fnNames,
-    listNames, valueNames, getFn, getList, boundVals, structuralConsts, ropts, gridFields };
+  return {
+    rows,
+    statements,
+    seqScans,
+    raw,
+    built,
+    defs,
+    rvScan,
+    builtRVs,
+    stateSystem,
+    sumBoundConsts: built.sumBoundConsts,
+    constNames,
+    fieldEnv,
+    fnNames,
+    listNames,
+    valueNames,
+    getFn,
+    getList,
+    boundVals,
+    structuralConsts,
+    ropts,
+    gridFields,
+  };
 }
 
 /** Resolve/classify with caller-owned runtime; preparation diagnostics stay reusable. */
@@ -296,7 +357,8 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
 function classifyOrbit(value: Expr, [from, to]: [Expr, Expr], defs: Env, constNames: ReadonlySet<string>): Classified {
   const moving = new Set([...animatedConstNames(defs), ...defs.states.keys(), 't']);
   for (const bound of [from, to]) {
-    if (bound.kind === 'vec' || bound.kind === 'list') throw new Error('An orbit runs between two times, like p(0..50).');
+    if (bound.kind === 'vec' || bound.kind === 'list')
+      throw new Error('An orbit runs between two times, like p(0..50).');
     const v = [...freeVars(bound)].find(n => moving.has(n) || !constNames.has(n));
     if (v) throw new Error(`An orbit's time range must hold still (found ${v}).`);
   }
@@ -304,13 +366,16 @@ function classifyOrbit(value: Expr, [from, to]: [Expr, Expr], defs: Env, constNa
   const series = items.every(it => it.kind !== 'vec');
   const paths = items.map(it => {
     if (it.kind === 'vec') {
-      if (series || (it.items.length !== 2 && it.items.length !== 3)) throw new Error('An orbit draws a 2D or 3D point, or one number against t.');
+      if (series || (it.items.length !== 2 && it.items.length !== 3))
+        throw new Error('An orbit draws a 2D or 3D point, or one number against t.');
       return it.items;
     }
-    if (it.kind === 'eq' || it.kind === 'ineq' || it.kind === 'data' || it.kind === 'list') throw new Error('An orbit draws a state, like p(0..50).');
+    if (it.kind === 'eq' || it.kind === 'ineq' || it.kind === 'data' || it.kind === 'list')
+      throw new Error('An orbit draws a state, like p(0..50).');
     return [it];
   });
-  if (!series && new Set(paths.map(p => p.length)).size > 1) throw new Error('All points in an orbit need the same number of coordinates.');
+  if (!series && new Set(paths.map(p => p.length)).size > 1)
+    throw new Error('All points in an orbit need the same number of coordinates.');
   const params = new Set<string>();
   for (const e of [...paths.flat(), from, to]) {
     for (const n of freeVars(e)) {
@@ -328,11 +393,19 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   const rows = document.rows.map(row => ({ ...row }));
   const { stateValues: stateVals = {}, time = 0, readouts = true, readoutPolicy = 'frame', backend = 'both' } = context;
   let constEnv: Record<string, number> = { ...stateVals };
-  try { constEnv = evaluateFrame(defs, time, stateVals); } catch { /* definition diagnostics remain on rows */ }
+  try {
+    constEnv = evaluateFrame(defs, time, stateVals);
+  } catch {
+    /* definition diagnostics remain on rows */
+  }
   let readoutEnv: Record<string, number> = constEnv;
   if (readoutPolicy === 'static') {
     readoutEnv = {};
-    try { readoutEnv = evaluateFrame(defs, 0); } catch { /* browser readouts omit unseeded state values */ }
+    try {
+      readoutEnv = evaluateFrame(defs, 0);
+    } catch {
+      /* browser readouts omit unseeded state values */
+    }
   }
 
   // Random variables next, so P(…) and bare-expression rows can reference
@@ -357,7 +430,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     try {
       const m = rvs.moments(name, readoutEnv);
       if (m) row.info = momentsReadout(m);
-    } catch { /* not computable at t = 0 (animated): no readout */ }
+    } catch {
+      /* not computable at t = 0 (animated): no readout */
+    }
   };
   const movingConsts = new Set([...animatedConstNames(defs), ...Object.keys(stateVals)]);
   for (const [i, name] of builtRVs.rowRV) {
@@ -383,15 +458,28 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   // The body of a P(…)/E(…) row, read exactly as a plot row is read — with the
   // list names, and lowered — so `P(X < mean(L))` sees the list two rows above
   // rather than reporting it unknown (mirror of web/main.ts).
-  const parseRowBody = (body: string, top: (e: Expr, lower: (e: Expr) => Expr) => Expr = (e, lower) => lower(e)): Expr => top(
-    resolveExpr(parseExpr(body, fnNames, listNames, valueNames), getFn, ropts),
-    // Points first, as in a plot row: `P(X < g(A))` reads g at the point A.
-    // (What geometry refuses keeps the message this body always gave.)
-    e => {
-      try { e = lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null, n => getList(n) !== null); } catch { /* as written */ }
-      return lowerLists(e, getList, ropts);
-    },
-  );
+  const parseRowBody = (
+    body: string,
+    top: (e: Expr, lower: (e: Expr) => Expr) => Expr = (e, lower) => lower(e),
+  ): Expr =>
+    top(
+      resolveExpr(parseExpr(body, fnNames, listNames, valueNames), getFn, ropts),
+      // Points first, as in a plot row: `P(X < g(A))` reads g at the point A.
+      // (What geometry refuses keeps the message this body always gave.)
+      e => {
+        try {
+          e = lowerGeom(
+            e,
+            n => compsOf(defs, n),
+            n => defs.mats.get(n) ?? null,
+            n => getList(n) !== null,
+          );
+        } catch {
+          /* as written */
+        }
+        return lowerLists(e, getList, ropts);
+      },
+    );
 
   const seenViewKinds = new Set<string>();
   for (const [ri, row] of rows.entries()) {
@@ -441,12 +529,13 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         if (single && exact) {
           const region = regionExpr(exact, single.lo, single.hi);
           row.cls = classify(region, constNames);
-          if (readouts) try {
-            const value = probabilityValue(exact, single.lo, single.hi, readoutEnv);
-            if (isFinite(value)) row.info = `≈ ${value.toFixed(4)}`;
-          } catch {
-            // Not numerically computable at t = 0 (e.g. animated); no readout.
-          }
+          if (readouts)
+            try {
+              const value = probabilityValue(exact, single.lo, single.hi, readoutEnv);
+              if (isFinite(value)) row.info = `≈ ${value.toFixed(4)}`;
+            } catch {
+              // Not numerically computable at t = 0 (e.g. animated); no readout.
+            }
         } else {
           const ps = rvs.bodyParams(p.body);
           row.cls = {
@@ -455,13 +544,16 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
             needs3D: false,
             params: [...ps].filter(v => v !== 't'),
           };
-          if (readouts) try {
-            // A uniform-sum law still gets its exact value, and an event over
-            // discrete variables is enumerated (mirror of the app's readout);
-            // everything else estimates over joint samples.
-            const { value, exact: settled } = rvs.eventProbability(p.body, single, readoutEnv);
-            if (isFinite(value)) row.info = `≈ ${value.toFixed(settled ? 4 : 3)}`;
-          } catch { /* animated or broken: no readout */ }
+          if (readouts)
+            try {
+              // A uniform-sum law still gets its exact value, and an event over
+              // discrete variables is enumerated (mirror of the app's readout);
+              // everything else estimates over joint samples.
+              const { value, exact: settled } = rvs.eventProbability(p.body, single, readoutEnv);
+              if (isFinite(value)) row.info = `≈ ${value.toFixed(settled ? 4 : 3)}`;
+            } catch {
+              /* animated or broken: no readout */
+            }
         }
         continue;
       }
@@ -492,14 +584,17 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           needs3D: false,
           params: [...ps].filter(p => p !== 't'),
         };
-        if (readouts) try {
-          // Closed form and quadrature both earn full display precision;
-          // only the Monte Carlo fallback rounds to its noise floor.
-          const m = rvs.exactMoments(name, readoutEnv) ?? rvs.quadMoments(name, readoutEnv);
-          const value = m ? m.mean : rvs.mean(name, readoutEnv);
-          if (isFinite(value)) row.info = `≈ ${readoutNumber(value, m ? 4 : 3)}`;
-          else if (rvs.meanUnstable(name, readoutEnv)) row.info = NO_MEAN_INFO;
-        } catch { /* animated or broken: no readout */ }
+        if (readouts)
+          try {
+            // Closed form and quadrature both earn full display precision;
+            // only the Monte Carlo fallback rounds to its noise floor.
+            const m = rvs.exactMoments(name, readoutEnv) ?? rvs.quadMoments(name, readoutEnv);
+            const value = m ? m.mean : rvs.mean(name, readoutEnv);
+            if (isFinite(value)) row.info = `≈ ${readoutNumber(value, m ? 4 : 3)}`;
+            else if (rvs.meanUnstable(name, readoutEnv)) row.info = NO_MEAN_INFO;
+          } catch {
+            /* animated or broken: no readout */
+          }
         continue;
       }
       const seq = document.seqScans[ri];
@@ -517,7 +612,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // `d = 1` is no definition (d starts d/dx), and would otherwise fail
       // with advice about derivatives that the author never wrote.
       if (takenDefinitionName(row.text) === 'd') {
-        throw new Error('d is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.');
+        throw new Error(
+          'd is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.',
+        );
       }
       const rawParsed = parseExpr(row.text, fnNames, listNames, valueNames);
       // `p(50..400)`: where p goes over that time — a range in call position,
@@ -551,14 +648,16 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
       // `e = 0.6` parsed with e already a number; only the text still says e.
       const taken = row.cls.object.kind === 'note' ? takenDefinitionName(row.text) : null;
-      if (taken && row.cls.object.kind === 'note') row.cls = { ...row.cls, object: { ...row.cls.object, constant: taken } };
-
+      if (taken && row.cls.object.kind === 'note')
+        row.cls = { ...row.cls, object: { ...row.cls.object, constant: taken } };
     } catch (e) {
       // A row reading a dropped CSV is not broken here — the bytes simply
       // live on the device that made the graph, and never travelled in the
       // link. Report that as a gap in this render, not as a bad row.
-      if (e instanceof MissingDataError) { row.dataLocal = e.message; row.needsFile = true; }
-      else row.error = e instanceof Error ? e.message : String(e);
+      if (e instanceof MissingDataError) {
+        row.dataLocal = e.message;
+        row.needsFile = true;
+      } else row.error = e instanceof Error ? e.message : String(e);
     }
   }
 
@@ -571,9 +670,15 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (backend !== 'cpu') row.gpu = compileGpu(row.cls);
       if (readouts && row.cpu) {
         try {
-          const info = plotReadout(row.cpu, { ...readoutEnv, ...document.boundVals, t: readoutPolicy === 'static' ? 0 : time });
+          const info = plotReadout(row.cpu, {
+            ...readoutEnv,
+            ...document.boundVals,
+            t: readoutPolicy === 'static' ? 0 : time,
+          });
           if (info !== null) row.info = info;
-        } catch { if (readoutPolicy === 'static' && row.cpu.type === 'value') row.info = '= …'; }
+        } catch {
+          if (readoutPolicy === 'static' && row.cpu.type === 'value') row.info = '= …';
+        }
       }
     } catch (error) {
       row.error = error instanceof Error ? error.message : String(error);
@@ -582,13 +687,20 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     }
   }
 
-  try { constEnv = evaluateFrame(defs, time, stateVals); } catch { /* row errors already reported */ }
+  try {
+    constEnv = evaluateFrame(defs, time, stateVals);
+  } catch {
+    /* row errors already reported */
+  }
   rvs.prune();
   return { rows, defs, constEnv, rvs, rvNames, gridFields, document };
 }
 
 /** Worker/preview convenience: initial state at t=0, with a fresh sampler. */
-export function analyzeRows(sources: readonly (string | RowSource)[], options: AnalyzeOpts & PrepareOptions = {}): Analysis {
+export function analyzeRows(
+  sources: readonly (string | RowSource)[],
+  options: AnalyzeOpts & PrepareOptions = {},
+): Analysis {
   const document = prepareDocument(sources, options);
   const stateValues = document.stateSystem ? initialState(document.defs, document.stateSystem) : {};
   return analyzePrepared(document, { stateValues, readouts: options.readouts, backend: options.backend });

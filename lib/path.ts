@@ -37,18 +37,25 @@ export function pathSampler(comps: readonly Expr[]): PathSampler {
   for (const c of comps) freeVars(c, read);
   read.delete('u');
   const names = [...read];
-  const part = (c: Expr) => compileSampler(c, 'u', names) ?? ((env: Record<string, number>) => {
-    const scope = { ...env };
-    return (u: number) => {
-      scope.u = u;
-      try { return evaluate(c, scope); } catch { return NaN; }
-    };
-  });
+  const part = (c: Expr) =>
+    compileSampler(c, 'u', names) ??
+    ((env: Record<string, number>) => {
+      const scope = { ...env };
+      return (u: number) => {
+        scope.u = u;
+        try {
+          return evaluate(c, scope);
+        } catch {
+          return NaN;
+        }
+      };
+    });
   const [re, im] = comps.map(part);
   return {
     names,
     sample: env => {
-      const x = re(env), y = im(env);
+      const x = re(env),
+        y = im(env);
       return samplePath(u => [x(u), y(u)], CURVE_SAMPLES);
     },
   };
@@ -95,11 +102,17 @@ export function samplePath(at: (u: number) => [number, number], n: number): numb
   const len: number[] = [];
   for (let k = 0; k + 1 < n; k++) len.push(chord(pts[k], pts[k + 1]));
 
-  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity, far = 0;
+  let xmin = Infinity,
+    xmax = -Infinity,
+    ymin = Infinity,
+    ymax = -Infinity,
+    far = 0;
   for (const [x, y] of pts) {
     if (!isFinite(x) || !isFinite(y)) continue;
-    xmin = Math.min(xmin, x); xmax = Math.max(xmax, x);
-    ymin = Math.min(ymin, y); ymax = Math.max(ymax, y);
+    xmin = Math.min(xmin, x);
+    xmax = Math.max(xmax, x);
+    ymin = Math.min(ymin, y);
+    ymax = Math.max(ymax, y);
     far = Math.max(far, Math.abs(x), Math.abs(y));
   }
   const floor = Math.max(EXTENT_FLOOR * Math.hypot(xmax - xmin, ymax - ymin), NOISE_FLOOR * far);
@@ -119,19 +132,34 @@ export function samplePath(at: (u: number) => [number, number], n: number): numb
 
   const jumps = new Set<number>();
   suspects.forEach(({ k }, rank) => {
-    if (rank >= MAX_SUSPECTS) { jumps.add(k); return; }
+    if (rank >= MAX_SUSPECTS) {
+      jumps.add(k);
+      return;
+    }
     const d = len[k];
-    let lo = k / (n - 1), hi = (k + 1) / (n - 1);
-    let a = pts[k], b = pts[k + 1];
+    let lo = k / (n - 1),
+      hi = (k + 1) / (n - 1);
+    let a = pts[k],
+      b = pts[k + 1];
     let jump = true;
     for (let s = 0; s < BISECTIONS; s++) {
       const mid = (lo + hi) / 2;
       const m = at(mid);
-      const da = chord(a, m), db = chord(m, b);
+      const da = chord(a, m),
+        db = chord(m, b);
       // An undefined midpoint is a hole in the path: break there too.
       if (!isFinite(da) || !isFinite(db)) break;
-      if (da >= db) { hi = mid; b = m; } else { lo = mid; a = m; }
-      if (chord(a, b) < d / 2) { jump = false; break; }
+      if (da >= db) {
+        hi = mid;
+        b = m;
+      } else {
+        lo = mid;
+        a = m;
+      }
+      if (chord(a, b) < d / 2) {
+        jump = false;
+        break;
+      }
     }
     if (jump) jumps.add(k);
   });

@@ -28,7 +28,11 @@ export const FEATURED: FeaturedGraph[] = [
   {
     title: 'double pendulum',
     eqs: [
-      'g = 9.8', 'L1 = 1', 'L2 = 1', 'm1 = 1', 'm2 = 1',
+      'g = 9.8',
+      'L1 = 1',
+      'L2 = 1',
+      'm1 = 1',
+      'm2 = 1',
       'M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]',
       'f = (-m2 L2 om_2^2 sin(th_1 - th_2) - (m1+m2) g sin(th_1), L1 om_1^2 sin(th_1 - th_2) - g sin(th_2))',
       "th' = om",
@@ -59,8 +63,13 @@ export const FEATURED: FeaturedGraph[] = [
     title: 'central limit theorem',
     eqs: [
       'view(x = -0.5..4.5, y = -0.15..1.35)',
-      'X1 ~ Uniform(0, 1)', 'X2 ~ Uniform(0, 1)', 'X3 ~ Uniform(0, 1)', 'X4 ~ Uniform(0, 1)',
-      'S = X1 + X2 + X3 + X4', 'Z ~ Normal(2, sqrt(1/3))', 'P(S > 3)',
+      'X1 ~ Uniform(0, 1)',
+      'X2 ~ Uniform(0, 1)',
+      'X3 ~ Uniform(0, 1)',
+      'X4 ~ Uniform(0, 1)',
+      'S = X1 + X2 + X3 + X4',
+      'Z ~ Normal(2, sqrt(1/3))',
+      'P(S > 3)',
     ],
   },
   {
@@ -69,10 +78,7 @@ export const FEATURED: FeaturedGraph[] = [
   },
   {
     title: 'tangent line',
-    eqs: [
-      'f(x) = x^3 - 2x', 'g(x) = d/dx f(x)', 'a = 1',
-      'y = f(x)', 'y = f(a) + g(a)(x - a)',
-    ],
+    eqs: ['f(x) = x^3 - 2x', 'g(x) = d/dx f(x)', 'a = 1', 'y = f(x)', 'y = f(a) + g(a)(x - a)'],
   },
   {
     title: 'ripples',
@@ -93,11 +99,15 @@ export function nextFeatured(store: Store | null, current?: string[]): FeaturedG
   let i = 0;
   try {
     i = Number(store?.getItem(FEATURED_KEY) ?? 0) || 0;
-  } catch { /* private mode, quota, … */ }
+  } catch {
+    /* private mode, quota, … */
+  }
   i = ((i % n) + n) % n;
   if (current && sameRows(FEATURED[i].eqs, current)) i = (i + 1) % n;
   try {
     store?.setItem(FEATURED_KEY, String(i + 1));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return FEATURED[i];
 }

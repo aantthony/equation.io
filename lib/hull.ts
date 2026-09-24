@@ -14,7 +14,10 @@ type P3 = [number, number, number];
 
 /** One flat face: its outline in order (not repeated at the end), and the
  *  triangles that fill it, as indices into the outline. */
-export interface HullFace { outline: P3[]; triangles: Array<[number, number, number]> }
+export interface HullFace {
+  outline: P3[];
+  triangles: Array<[number, number, number]>;
+}
 
 /** Points a 3D hull accepts: the incremental build is quadratic in the worst case. */
 export const HULL_3D_MAX = 2000;
@@ -26,7 +29,8 @@ const norm = (a: P3): number => Math.hypot(a[0], a[1], a[2]);
 
 /** Andrew's monotone chain: the hull counterclockwise, collinear points dropped. */
 export function hull2(points: readonly P2[]): P2[] {
-  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1])
+  const pts = [...points]
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1])
     .filter((p, k, all) => k === 0 || p[0] !== all[k - 1][0] || p[1] !== all[k - 1][1]);
   if (pts.length < 3) return pts;
   const turn = (o: P2, a: P2, b: P2): number => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
@@ -56,8 +60,11 @@ function flatHull(pts: P3[], origin: P3, normal: P3 | null, along: P3 | null): H
   }
   const w = cross(normal, u);
   const v: P3 = w.map(c => c / norm(w)) as P3;
-  const outline = hull2(pts.map((p): P2 => [dot(sub(p, origin), u), dot(sub(p, origin), v)]))
-    .map(([a, b]): P3 => [origin[0] + a * u[0] + b * v[0], origin[1] + a * u[1] + b * v[1], origin[2] + a * u[2] + b * v[2]]);
+  const outline = hull2(pts.map((p): P2 => [dot(sub(p, origin), u), dot(sub(p, origin), v)])).map(([a, b]): P3 => [
+    origin[0] + a * u[0] + b * v[0],
+    origin[1] + a * u[1] + b * v[1],
+    origin[2] + a * u[2] + b * v[2],
+  ]);
   return [{ outline, triangles: fan(outline.length) }];
 }
 
@@ -88,15 +95,27 @@ export function hull3(points: readonly P3[]): HullFace[] {
   const normalOf = (t: Tri): P3 => cross(sub(pts[t[1]], pts[t[0]]), sub(pts[t[2]], pts[t[0]]));
   const outward = (t: Tri): Tri => (dot(normalOf(t), sub(inside, pts[t[0]])) > 0 ? [t[0], t[2], t[1]] : t);
   const [ia, ib, ic, id] = [a, b, c, d].map(p => pts.indexOf(p));
-  let faces: Tri[] = ([[ia, ib, ic], [ia, ib, id], [ia, ic, id], [ib, ic, id]] as Tri[]).map(outward);
+  let faces: Tri[] = (
+    [
+      [ia, ib, ic],
+      [ia, ib, id],
+      [ia, ic, id],
+      [ib, ic, id],
+    ] as Tri[]
+  ).map(outward);
 
   for (let k = 0; k < pts.length; k++) {
     if (k === ia || k === ib || k === ic || k === id) continue;
-    const sees = faces.map(t => { const n = normalOf(t); return dot(n, sub(pts[k], pts[t[0]])) > eps * norm(n); });
+    const sees = faces.map(t => {
+      const n = normalOf(t);
+      return dot(n, sub(pts[k], pts[t[0]])) > eps * norm(n);
+    });
     if (!sees.some(Boolean)) continue;
     // The horizon: edges of a visible face whose other side stays hidden.
     const hiddenEdges = new Set<string>();
-    faces.forEach((t, f) => { if (!sees[f]) for (let e = 0; e < 3; e++) hiddenEdges.add(`${t[e]},${t[(e + 1) % 3]}`); });
+    faces.forEach((t, f) => {
+      if (!sees[f]) for (let e = 0; e < 3; e++) hiddenEdges.add(`${t[e]},${t[(e + 1) % 3]}`);
+    });
     const next = faces.filter((_, f) => !sees[f]);
     faces.forEach((t, f) => {
       if (!sees[f]) return;
@@ -110,12 +129,19 @@ export function hull3(points: readonly P3[]): HullFace[] {
 
   // Merge coplanar neighbours: group triangles by plane, walk each group's
   // boundary (edges no other triangle of the group shares) into an outline.
-  const unit = (t: Tri): P3 => { const n = normalOf(t); const len = norm(n); return [n[0] / len, n[1] / len, n[2] / len]; };
+  const unit = (t: Tri): P3 => {
+    const n = normalOf(t);
+    const len = norm(n);
+    return [n[0] / len, n[1] / len, n[2] / len];
+  };
   const groups: Array<{ n: P3; tris: Tri[] }> = [];
   for (const t of faces) {
     const n = unit(t);
-    const home = groups.find(g => dot(g.n, n) > 1 - 1e-9 && Math.abs(dot(g.n, sub(pts[t[0]], pts[g.tris[0][0]]))) <= 1e-7 * (size || 1));
-    if (home) home.tris.push(t); else groups.push({ n, tris: [t] });
+    const home = groups.find(
+      g => dot(g.n, n) > 1 - 1e-9 && Math.abs(dot(g.n, sub(pts[t[0]], pts[g.tris[0][0]]))) <= 1e-7 * (size || 1),
+    );
+    if (home) home.tris.push(t);
+    else groups.push({ n, tris: [t] });
   }
   return groups.map(({ tris }): HullFace => {
     const edges = new Map<number, number>();
@@ -163,18 +189,30 @@ export function hullFaces(values: readonly number[], dim: 2 | 3): HullFace[] {
  * rather than being smoothed into a ball. UVs are constant — the lit-mesh
  * material paints its checker from them, and a solid has none.
  */
-export function hullMesh(faces: readonly HullFace[]): { positions: Float32Array; normals: Float32Array; uvs: Float32Array; indices: Uint32Array } {
-  const positions: number[] = [], normals: number[] = [], indices: number[] = [];
+export function hullMesh(faces: readonly HullFace[]): {
+  positions: Float32Array;
+  normals: Float32Array;
+  uvs: Float32Array;
+  indices: Uint32Array;
+} {
+  const positions: number[] = [],
+    normals: number[] = [],
+    indices: number[] = [];
   for (const { outline, triangles } of faces) {
     if (!triangles.length) continue;
     const n = cross(sub(outline[1], outline[0]), sub(outline[2], outline[0]));
     const len = norm(n) || 1;
     const base = positions.length / 3;
-    for (const p of outline) { positions.push(...p); normals.push(n[0] / len, n[1] / len, n[2] / len); }
+    for (const p of outline) {
+      positions.push(...p);
+      normals.push(n[0] / len, n[1] / len, n[2] / len);
+    }
     for (const tri of triangles) indices.push(...tri.map(i => base + i));
   }
   return {
-    positions: new Float32Array(positions), normals: new Float32Array(normals),
-    uvs: new Float32Array(positions.length / 3 * 2), indices: new Uint32Array(indices),
+    positions: new Float32Array(positions),
+    normals: new Float32Array(normals),
+    uvs: new Float32Array((positions.length / 3) * 2),
+    indices: new Uint32Array(indices),
   };
 }

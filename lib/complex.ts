@@ -28,32 +28,61 @@ export const WHOLE_EXPR_NAMES: ReadonlySet<string> = new Set([...SPECIAL_FORMS, 
  *  iteration variable bound by an enclosing special form). */
 export function usesComplex(e: Expr, extra?: ReadonlySet<string>): boolean {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return childrenOf(e).some(c => usesComplex(c, extra));
-    case 'num': return false;
-    case 'var': return e.name === 'i' || e.name === 'w' || !!extra?.has(e.name);
-    case 'neg': return usesComplex(e.a, extra);
-    case 'bin': return usesComplex(e.a, extra) || usesComplex(e.b, extra);
-    case 'call': return e.args.some(a => usesComplex(a, extra));
-    case 'eq': return usesComplex(e.l, extra) || usesComplex(e.r, extra);
-    case 'ineq': return usesComplex(e.l, extra) || usesComplex(e.r, extra);
-    case 'vec': return e.items.some(a => usesComplex(a, extra));
-    case 'list': return e.items.some(a => usesComplex(a, extra));
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      return childrenOf(e).some(c => usesComplex(c, extra));
+    case 'num':
+      return false;
+    case 'var':
+      return e.name === 'i' || e.name === 'w' || !!extra?.has(e.name);
+    case 'neg':
+      return usesComplex(e.a, extra);
+    case 'bin':
+      return usesComplex(e.a, extra) || usesComplex(e.b, extra);
+    case 'call':
+      return e.args.some(a => usesComplex(a, extra));
+    case 'eq':
+      return usesComplex(e.l, extra) || usesComplex(e.r, extra);
+    case 'ineq':
+      return usesComplex(e.l, extra) || usesComplex(e.r, extra);
+    case 'vec':
+      return e.items.some(a => usesComplex(a, extra));
+    case 'list':
+      return e.items.some(a => usesComplex(a, extra));
     case 'data':
     case 'str':
-    case 'text': return false;
+    case 'text':
+      return false;
     case 'piecewise':
-      return e.cases.some(c => usesComplex(c.cond, extra) || usesComplex(c.value, extra))
-        || (e.otherwise ? usesComplex(e.otherwise, extra) : false);
+      return (
+        e.cases.some(c => usesComplex(c.cond, extra) || usesComplex(c.value, extra)) ||
+        (e.otherwise ? usesComplex(e.otherwise, extra) : false)
+      );
     // A param is complex only through its seed, and a seed that is complex
     // already answers; the body then only matters for i and w of its own.
-    case 'loop': return childrenOf(e).some(c => usesComplex(c, extra));
+    case 'loop':
+      return childrenOf(e).some(c => usesComplex(c, extra));
   }
 }
 
 const C_FNS: Record<string, string> = {
-  sin: 'c_sin', cos: 'c_cos', tan: 'c_tan',
-  exp: 'c_exp', ln: 'c_ln', log: 'c_log10', sqrt: 'c_sqrt',
-  sinh: 'c_sinh', cosh: 'c_cosh', tanh: 'c_tanh',
+  sin: 'c_sin',
+  cos: 'c_cos',
+  tan: 'c_tan',
+  exp: 'c_exp',
+  ln: 'c_ln',
+  log: 'c_log10',
+  sqrt: 'c_sqrt',
+  sinh: 'c_sinh',
+  cosh: 'c_cosh',
+  tanh: 'c_tanh',
 };
 
 /** Complex-argument functions returning a real value. */
@@ -99,26 +128,44 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNa
     // re/im/arg/conj of a real value still need complex handling below.
     const touchesComplexFns = (function scan(n: Expr): boolean {
       switch (n.kind) {
-        case 'call': return n.name in C_TO_REAL || n.name === 'conj' || SPECIAL_FORMS.has(n.name) || n.args.some(scan);
-        case 'bin': return scan(n.a) || scan(n.b);
-        case 'neg': return scan(n.a);
-        case 'eq': return scan(n.l) || scan(n.r);
-        case 'ineq': return scan(n.l) || scan(n.r);
-        case 'vec': return n.items.some(scan);
-        case 'list': return n.items.some(scan);
+        case 'call':
+          return n.name in C_TO_REAL || n.name === 'conj' || SPECIAL_FORMS.has(n.name) || n.args.some(scan);
+        case 'bin':
+          return scan(n.a) || scan(n.b);
+        case 'neg':
+          return scan(n.a);
+        case 'eq':
+          return scan(n.l) || scan(n.r);
+        case 'ineq':
+          return scan(n.l) || scan(n.r);
+        case 'vec':
+          return n.items.some(scan);
+        case 'list':
+          return n.items.some(scan);
         case 'piecewise':
-          return n.cases.some(c => scan(c.cond) || scan(c.value))
-            || (n.otherwise ? scan(n.otherwise) : false);
-        case 'loop': return true; // emitted here, whatever its types
-        default: return false;
+          return n.cases.some(c => scan(c.cond) || scan(c.value)) || (n.otherwise ? scan(n.otherwise) : false);
+        case 'loop':
+          return true; // emitted here, whatever its types
+        default:
+          return false;
       }
     })(e);
     if (!touchesComplexFns) return { type: 'real', code: toGLSL(e) };
   }
 
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
-    case 'num': return { type: 'real', code: toGLSL(e) };
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      throw new Error(structuralDiagnostic(e));
+    case 'num':
+      return { type: 'real', code: toGLSL(e) };
     case 'var':
       if (e.name in env) return env[e.name];
       if (e.name === 'i') return { type: 'complex', code: 'vec2(0.0, 1.0)' };
@@ -138,10 +185,14 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNa
       const ca = promote(a);
       const cb = promote(b);
       switch (e.op) {
-        case '+': return { type: 'complex', code: `(${ca} + ${cb})` };
-        case '-': return { type: 'complex', code: `(${ca} - ${cb})` };
-        case '*': return { type: 'complex', code: `c_mul(${ca}, ${cb})` };
-        case '/': return { type: 'complex', code: `c_div(${ca}, ${cb})` };
+        case '+':
+          return { type: 'complex', code: `(${ca} + ${cb})` };
+        case '-':
+          return { type: 'complex', code: `(${ca} - ${cb})` };
+        case '*':
+          return { type: 'complex', code: `c_mul(${ca}, ${cb})` };
+        case '/':
+          return { type: 'complex', code: `c_div(${ca}, ${cb})` };
         case '^': {
           // Small integer powers as repeated c_mul: exact at 0 (c_pow goes
           // through ln), and much cheaper inside fractal iteration loops.
@@ -160,7 +211,10 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNa
         throw new Error(`${e.name}(…) must be the whole expression.`);
       }
       const args = e.args.map(a => compileTyped(a, env, envComplex));
-      inferCallType(e.name, args.map(a => a.type));
+      inferCallType(
+        e.name,
+        args.map(a => a.type),
+      );
       const anyComplex = args.some(a => a.type === 'complex');
       if (e.name === 'conj') {
         const z = promote(args[0]);
@@ -198,7 +252,8 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNa
       const emitValue = (x: Expr): string => cast(compileTyped(x, env, envComplex), type);
       return { type, code: piecewiseGLSL(e, emitCond, emitValue, nanOf(type)) };
     }
-    case 'loop': return compileLoop(e, env);
+    case 'loop':
+      return compileLoop(e, env);
   }
   throw new Error('Unreachable');
 }
@@ -223,7 +278,10 @@ function compileLoop(e: Expr & { kind: 'loop' }, env: Record<string, Typed>): Ty
   const free = new Set<string>();
   for (const v of freeVars(e.body)) {
     if (e.params.includes(v) || v === 'i') continue;
-    if (v === 'w' && !(v in env)) { free.add('x'); free.add('y'); } else free.add(v);
+    if (v === 'w' && !(v in env)) {
+      free.add('x');
+      free.add('y');
+    } else free.add(v);
   }
   // The params become the locals p<d>_0, p<d>_1, … by substitution, not only
   // by binding: a real subtree compiles through toGLSL, which spells
@@ -260,8 +318,13 @@ function compileLoop(e: Expr & { kind: 'loop' }, env: Record<string, Typed>): Ty
     const cases = body.cases.map(c => `if (${condGLSL(c.cond, emitCond)}) { ${emitBody(c.value)} }`);
     return `${cases.join(' else ')} else { ${body.otherwise ? emitBody(body.otherwise) : `return ${nanOf(result)};`} }`;
   };
-  const finite = e.params.map((_, k) => (ptypes[k] === 'complex'
-    ? `any(isnan(${local(k)})) || any(isinf(${local(k)}))` : `isnan(${local(k)}) || isinf(${local(k)})`)).join(' || ');
+  const finite = e.params
+    .map((_, k) =>
+      ptypes[k] === 'complex'
+        ? `any(isnan(${local(k)})) || any(isinf(${local(k)}))`
+        : `isnan(${local(k)}) || isinf(${local(k)})`,
+    )
+    .join(' || ');
   const name = declareHelper(`${glType(result)} ${HELPER_SELF}(${decls.join(', ')}) {
   for (int k = 0; k < ${e.limit}; k++) {
     if (${finite}) return ${nanOf(result)};
@@ -279,17 +342,26 @@ function compileLoop(e: Expr & { kind: 'loop' }, env: Record<string, Typed>): Ty
  * point; complex is absorbing, so it needs at most one round per param).
  * The result is complex if any exit leaf is.
  */
-export function loopTypes(e: Expr & { kind: 'loop' }, env: Record<string, ScalarType>): { params: ScalarType[]; result: ScalarType } {
+export function loopTypes(
+  e: Expr & { kind: 'loop' },
+  env: Record<string, ScalarType>,
+): { params: ScalarType[]; result: ScalarType } {
   const params = e.seeds.map(s => inferScalarType(s, env));
   const leaves = loopLeaves(e.body);
-  const bound = (): Record<string, ScalarType> => ({ ...env, ...Object.fromEntries(e.params.map((p, k) => [p, params[k]])) });
+  const bound = (): Record<string, ScalarType> => ({
+    ...env,
+    ...Object.fromEntries(e.params.map((p, k) => [p, params[k]])),
+  });
   for (let changed = true; changed;) {
     changed = false;
     const inner = bound();
     for (const leaf of leaves) {
       if (!isRecur(leaf)) continue;
       leaf.args.forEach((a, k) => {
-        if (params[k] === 'real' && inferScalarType(a, inner) === 'complex') { params[k] = 'complex'; changed = true; }
+        if (params[k] === 'real' && inferScalarType(a, inner) === 'complex') {
+          params[k] = 'complex';
+          changed = true;
+        }
       });
     }
   }
@@ -302,11 +374,18 @@ export function loopTypes(e: Expr & { kind: 'loop' }, env: Record<string, Scalar
 /** Every comparison in a loop body's cases compares real values. */
 function checkConditions(body: Expr, env: Record<string, ScalarType>): void {
   if (body.kind !== 'piecewise') return;
-  for (const c of body.cases) { realCondition(c.cond, env); checkConditions(c.value, env); }
+  for (const c of body.cases) {
+    realCondition(c.cond, env);
+    checkConditions(c.value, env);
+  }
   if (body.otherwise) checkConditions(body.otherwise, env);
 }
 function realCondition(cond: Expr, env: Record<string, ScalarType>): void {
-  if (cond.kind === 'ineq') { realCondition(cond.l, env); realCondition(cond.r, env); return; }
+  if (cond.kind === 'ineq') {
+    realCondition(cond.l, env);
+    realCondition(cond.r, env);
+    return;
+  }
   if (inferScalarType(cond, env) === 'complex') throw new Error('Complex condition: compare re(…), im(…), or abs(…).');
 }
 
@@ -315,25 +394,52 @@ export type ScalarType = 'real' | 'complex';
 export function inferScalarType(e: Expr, env: Record<string, ScalarType> = {}): ScalarType {
   const infer = (value: Expr) => inferScalarType(value, env);
   switch (e.kind) {
-    case 'num': return 'real';
-    case 'var': return env[e.name] ?? (e.name === 'i' || e.name === 'w' ? 'complex' : 'real');
-    case 'neg': return infer(e.a);
-    case 'bin': { const a = infer(e.a); const b = infer(e.b); return a === 'complex' || b === 'complex' ? 'complex' : 'real'; }
-    case 'call': return inferCallType(e.name, e.args.map(infer));
-    case 'eq':
-      if (infer(e.l) === 'complex' || infer(e.r) === 'complex') throw new Error('Complex equation: compare re(…) or im(…) instead.');
+    case 'num':
       return 'real';
-    case 'ineq': throw new Error('Unexpected inequality.');
-    case 'vec': throw new Error('Vector in scalar context.');
-    case 'list': throw new Error('A list can only be plotted as its own row.');
+    case 'var':
+      return env[e.name] ?? (e.name === 'i' || e.name === 'w' ? 'complex' : 'real');
+    case 'neg':
+      return infer(e.a);
+    case 'bin': {
+      const a = infer(e.a);
+      const b = infer(e.b);
+      return a === 'complex' || b === 'complex' ? 'complex' : 'real';
+    }
+    case 'call':
+      return inferCallType(e.name, e.args.map(infer));
+    case 'eq':
+      if (infer(e.l) === 'complex' || infer(e.r) === 'complex')
+        throw new Error('Complex equation: compare re(…) or im(…) instead.');
+      return 'real';
+    case 'ineq':
+      throw new Error('Unexpected inequality.');
+    case 'vec':
+      throw new Error('Vector in scalar context.');
+    case 'list':
+      throw new Error('A list can only be plotted as its own row.');
     case 'piecewise': {
-      const values = e.cases.map(c => { realCondition(c.cond, env); return infer(c.value); });
+      const values = e.cases.map(c => {
+        realCondition(c.cond, env);
+        return infer(c.value);
+      });
       if (e.otherwise) values.push(infer(e.otherwise));
       return values.includes('complex') ? 'complex' : 'real';
     }
-    case 'loop': return loopTypes(e, env).result;
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family':
+    case 'loop':
+      return loopTypes(e, env).result;
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
       throw new Error('This object must be lowered before scalar type inference.');
-    case 'data': case 'str': case 'text': throw new Error('Expected a scalar expression.');
+    case 'data':
+    case 'str':
+    case 'text':
+      throw new Error('Expected a scalar expression.');
   }
 }

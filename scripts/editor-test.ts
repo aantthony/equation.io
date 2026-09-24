@@ -205,7 +205,8 @@ await scenario('typing syncs', async () => {
   await page.evaluate(() => {
     const line = document.querySelector<HTMLElement>('.eq-line')!;
     line.textContent = 'y = x^2';
-    document.querySelector<HTMLElement>('#equations')!
+    document
+      .querySelector<HTMLElement>('#equations')!
       .dispatchEvent(new InputEvent('input', { inputType: 'insertText', bubbles: true }));
   });
   // Edits normalize the address to the /g/ path form (writeUrl), so the
@@ -217,35 +218,63 @@ await scenario('typing syncs', async () => {
 // --- trailing # notes ---
 
 const noteTexts = (page: Page) =>
-  page.evaluate(() => [...document.querySelectorAll('.eq-line')].map(l => l.querySelector('.eq-note')?.textContent ?? null));
+  page.evaluate(() =>
+    [...document.querySelectorAll('.eq-line')].map(l => l.querySelector('.eq-note')?.textContent ?? null),
+  );
 
 await scenario('trailing # notes render under the row and stay out of the math', async () => {
   await load(page, ['y = x^2 # parabola']);
-  check('a loaded note gets its own span', JSON.stringify(await noteTexts(page)) === '["# parabola"]', JSON.stringify(await noteTexts(page)));
-  check('a row with a note still plots', await page.locator('.eq-line.invalid').count() === 0);
+  check(
+    'a loaded note gets its own span',
+    JSON.stringify(await noteTexts(page)) === '["# parabola"]',
+    JSON.stringify(await noteTexts(page)),
+  );
+  check('a row with a note still plots', (await page.locator('.eq-line.invalid').count()) === 0);
   const font = await page.evaluate(() => {
     const note = document.querySelector('.eq-note')!;
     const line = note.closest('.eq-line')!;
     return [getComputedStyle(note).display, getComputedStyle(note).fontFamily, getComputedStyle(line).fontFamily];
   });
-  check('the note is a block in a prose face', font[0] === 'block' && font[1] !== font[2] && !/mono/i.test(font[1]), JSON.stringify(font));
+  check(
+    'the note is a block in a prose face',
+    font[0] === 'block' && font[1] !== font[2] && !/mono/i.test(font[1]),
+    JSON.stringify(font),
+  );
 
   // Typing the `#` moves what follows onto its own line, caret intact.
   await load(page, ['y = x']);
   await caretTo(page, 0, 5);
   await page.keyboard.type(' # line');
-  check('typing a note builds the span', JSON.stringify(await noteTexts(page)) === '["# line"]', JSON.stringify(await noteTexts(page)));
-  check('typing through the # keeps every character in order', JSON.stringify(await rowTexts(page)) === '["y = x # line"]', JSON.stringify(await rowTexts(page)));
+  check(
+    'typing a note builds the span',
+    JSON.stringify(await noteTexts(page)) === '["# line"]',
+    JSON.stringify(await noteTexts(page)),
+  );
+  check(
+    'typing through the # keeps every character in order',
+    JSON.stringify(await rowTexts(page)) === '["y = x # line"]',
+    JSON.stringify(await rowTexts(page)),
+  );
   for (let k = 0; k < 6; k++) await page.keyboard.press('Backspace');
-  check('deleting the # folds the note back in', JSON.stringify(await noteTexts(page)) === '[null]'
-    && JSON.stringify(await rowTexts(page)) === '["y = x "]', JSON.stringify(await rowTexts(page)));
+  check(
+    'deleting the # folds the note back in',
+    JSON.stringify(await noteTexts(page)) === '[null]' && JSON.stringify(await rowTexts(page)) === '["y = x "]',
+    JSON.stringify(await rowTexts(page)),
+  );
 });
 
-await scenario('a slider drag keeps the row\'s note', async () => {
+await scenario("a slider drag keeps the row's note", async () => {
   await load(page, ['a = 2 # slope', 'y = a x']);
   const slider = page.locator('.eq-slider-range').first();
-  await slider.evaluate((el: HTMLInputElement) => { el.value = '3'; el.dispatchEvent(new Event('input', { bubbles: true })); });
-  check('the drag rewrites the value and keeps the note', (await rowTexts(page))[0] === 'a = 3 # slope', JSON.stringify(await rowTexts(page)));
+  await slider.evaluate((el: HTMLInputElement) => {
+    el.value = '3';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  check(
+    'the drag rewrites the value and keeps the note',
+    (await rowTexts(page))[0] === 'a = 3 # slope',
+    JSON.stringify(await rowTexts(page)),
+  );
   check('the note stays in its span', (await noteTexts(page))[0] === '# slope');
 });
 
@@ -263,7 +292,9 @@ const gutterClick = (page: Page, line: number) =>
   page.evaluate(l => {
     const el = [...document.querySelectorAll<HTMLElement>('.eq-line')][l];
     const r = el.getBoundingClientRect();
-    el.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.left + 10, clientY: r.top + 10, bubbles: true, cancelable: true }));
+    el.dispatchEvent(
+      new PointerEvent('pointerdown', { clientX: r.left + 10, clientY: r.top + 10, bubbles: true, cancelable: true }),
+    );
   }, line);
 
 await scenario('comment rows collapse their group', async () => {
@@ -273,8 +304,8 @@ await scenario('comment rows collapse their group', async () => {
   );
   check(
     '# rows render as comments, not errors',
-    JSON.stringify(classed) === JSON.stringify([true, false, false, true, false])
-      && (await page.evaluate(() => document.querySelectorAll('.eq-error').length)) === 0,
+    JSON.stringify(classed) === JSON.stringify([true, false, false, true, false]) &&
+      (await page.evaluate(() => document.querySelectorAll('.eq-error').length)) === 0,
     `is-comment=${JSON.stringify(classed)}`,
   );
   await gutterClick(page, 0);
@@ -294,11 +325,7 @@ await scenario('collapsed rows still copy and share', async () => {
   await load(page, ['# Lines', 'y=x', 'y=x^2']);
   await gutterClick(page, 0);
   const url = await page.evaluate(() => decodeURIComponent(location.pathname + location.hash));
-  check(
-    'collapsed rows stay in the share URL',
-    url.includes('y=x^2') && url.includes('# Lines'),
-    `url=${url}`,
-  );
+  check('collapsed rows stay in the share URL', url.includes('y=x^2') && url.includes('# Lines'), `url=${url}`);
 });
 
 await scenario('Enter after a collapsed heading expands it', async () => {
@@ -307,11 +334,7 @@ await scenario('Enter after a collapsed heading expands it', async () => {
   await caretTo(page, 0, 7); // caret at end of "# Lines"
   await page.keyboard.press('Enter');
   const visible = await visibleRows(page);
-  check(
-    'the new row is visible (group auto-expanded)',
-    visible.length === 3,
-    `visible=${JSON.stringify(visible)}`,
-  );
+  check('the new row is visible (group auto-expanded)', visible.length === 3, `visible=${JSON.stringify(visible)}`);
 });
 
 // --- code-editor keyboard shortcuts ---
@@ -376,7 +399,11 @@ await scenario('Alt+arrows move rows', async () => {
   );
   await page.keyboard.press('Alt+ArrowUp');
   rows = await rowTexts(page);
-  check('Alt+Up moves it back', JSON.stringify(rows) === JSON.stringify(['a = 1', 'y = sin(a x)']), JSON.stringify(rows));
+  check(
+    'Alt+Up moves it back',
+    JSON.stringify(rows) === JSON.stringify(['a = 1', 'y = sin(a x)']),
+    JSON.stringify(rows),
+  );
   await page.keyboard.type('9');
   rows = await rowTexts(page);
   check('the caret rode along with the row', rows[0] === 'a 9= 1', JSON.stringify(rows));
@@ -459,7 +486,11 @@ await scenario('Cmd+Alt+brackets fold and unfold the caret group', async () => {
   await caretTo(page, 1, 0);
   await page.keyboard.press('ControlOrMeta+Alt+BracketLeft');
   const folded = await visibleRows(page);
-  check('fold collapses the group holding the caret', JSON.stringify(folded) === JSON.stringify(['# trig']), JSON.stringify(folded));
+  check(
+    'fold collapses the group holding the caret',
+    JSON.stringify(folded) === JSON.stringify(['# trig']),
+    JSON.stringify(folded),
+  );
   await page.keyboard.press('ControlOrMeta+Alt+BracketRight');
   const open = await visibleRows(page);
   check('unfold restores it', open.length === 3, JSON.stringify(open));
@@ -488,8 +519,7 @@ await scenario('shortcut keys inside slider widgets stay native', async () => {
 });
 
 await scenario('coordinate point drag persists through the URL', async () => {
-  await load(page, ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
-    '(r, theta) = (2, 0)', 'view(x = -4..4, y = -3..3)']);
+  await load(page, ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)', '(r, theta) = (2, 0)', 'view(x = -4..4, y = -3..3)']);
   await page.mouse.move(733.33, 350);
   await page.mouse.down();
   await page.mouse.move(616.67, 233.33, { steps: 15 });
@@ -503,20 +533,26 @@ await scenario('coordinate point drag persists through the URL', async () => {
 });
 
 await scenario('coordinate drag rounds the pointer before converting units', async () => {
-  await load(page, ['p = x/1000', '(p, y) = (0.002, 0)',
-    'view(x = -4..4, y = -3..3)']);
+  await load(page, ['p = x/1000', '(p, y) = (0.002, 0)', 'view(x = -4..4, y = -3..3)']);
   await page.mouse.move(733.33, 350);
   await page.mouse.down();
   await page.mouse.move(616.67, 233.33, { steps: 15 });
   await page.mouse.up();
   const rows = await rowTexts(page);
-  check('scaled coordinate follows the pointer without snapping to zero',
-    rows[1] === '(p, y) = (0.001, 1)', String(rows[1]));
+  check(
+    'scaled coordinate follows the pointer without snapping to zero',
+    rows[1] === '(p, y) = (0.001, 1)',
+    String(rows[1]),
+  );
 });
 
 await scenario('spiral zoom stays responsive while traces run', async () => {
-  await load(page, ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
-    '(r, theta) = (3u, 6pi u)', 'view(x = -4..4, y = -3..3)']);
+  await load(page, [
+    'r = sqrt(x^2+y^2)',
+    'theta = atan2(y,x)',
+    '(r, theta) = (3u, 6pi u)',
+    'view(x = -4..4, y = -3..3)',
+  ]);
   // Wait for actual green curve pixels, not merely an empty responsive grid.
   const hasCurve = () => {
     const c = document.querySelector<HTMLCanvasElement>('#overlay')!;
@@ -533,8 +569,15 @@ await scenario('spiral zoom stays responsive while traces run', async () => {
     observer.observe({ type: 'longtask' });
     const canvas = document.querySelector('#gl')!;
     for (let i = 0; i < 60; i++) {
-      canvas.dispatchEvent(new WheelEvent('wheel', { deltaY: i < 30 ? -60 : 60,
-        clientX: 650, clientY: 350, bubbles: true, cancelable: true }));
+      canvas.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: i < 30 ? -60 : 60,
+          clientX: 650,
+          clientY: 350,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
       await new Promise(r => setTimeout(r, 16));
     }
     await new Promise(r => setTimeout(r, 700));
@@ -551,27 +594,38 @@ await scenario('spiral zoom stays responsive while traces run', async () => {
 await scenario('shared analysis preserves the running state across unrelated edits', async () => {
   await load(page, ['c=1', "a'=c", 'a(0)=2', 'a', '# notes']);
   const readState = () => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, ''));
-  await page.waitForFunction(() => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) > 2.2);
+  await page.waitForFunction(
+    () => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) > 2.2,
+  );
   const before = await page.evaluate(readState);
   const replaceRow = async (index: number, text: string) => {
-    await page.locator('.eq-line').nth(index).evaluate((line, text) => {
-      line.textContent = text;
-      line.parentElement!.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
-    }, text);
+    await page
+      .locator('.eq-line')
+      .nth(index)
+      .evaluate((line, text) => {
+        line.textContent = text;
+        line.parentElement!.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+      }, text);
   };
   await replaceRow(4, '# edited notes');
-  await page.waitForFunction(before => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) >= before, before);
-  check('a comment edit retains the integrated value', await page.evaluate(readState) >= before);
+  await page.waitForFunction(
+    before => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) >= before,
+    before,
+  );
+  check('a comment edit retains the integrated value', (await page.evaluate(readState)) >= before);
   await replaceRow(0, 'c=2');
-  await page.waitForFunction(before => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) >= before, before);
-  check('a constant edit retains the integrated value', await page.evaluate(readState) >= before);
+  await page.waitForFunction(
+    before => Number(document.querySelector('.eq-info')?.textContent?.replace(/^[=≈]\s*/, '')) >= before,
+    before,
+  );
+  check('a constant edit retains the integrated value', (await page.evaluate(readState)) >= before);
   await replaceRow(1, "a'=0");
   await page.waitForFunction(() => document.querySelector('.eq-info')?.textContent === '= 2');
-  check('a derivative edit restarts from the seed', await page.evaluate(readState) === 2);
+  check('a derivative edit restarts from the seed', (await page.evaluate(readState)) === 2);
   await replaceRow(2, 'a(0)=4');
   await page.waitForFunction(() => document.querySelector('.eq-info')?.textContent === '= 4');
-  check('an initial-value edit restarts from the new seed', await page.evaluate(readState) === 4);
-  check('state edits have no row errors', await page.locator('.eq-line.invalid').count() === 0);
+  check('an initial-value edit restarts from the new seed', (await page.evaluate(readState)) === 4);
+  check('state edits have no row errors', (await page.locator('.eq-line.invalid').count()) === 0);
 });
 
 await scenario('regression readouts and slider-driven refitting', async () => {
@@ -580,9 +634,12 @@ await scenario('regression readouts and slider-driven refitting', async () => {
   await info.waitFor();
   check('fit readout exposes coefficient', (await info.textContent())!.includes('m ≈ 2.6'));
   const slider = page.locator('.eq-slider-range').first();
-  await slider.evaluate((el: HTMLInputElement) => { el.value = '1'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await slider.evaluate((el: HTMLInputElement) => {
+    el.value = '1';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   check('fixed slider refits the model', (await info.textContent())!.includes('m ≈ 2 ·'));
-  check('regression curves have no row errors', await page.locator('.eq-line.invalid').count() === 0);
+  check('regression curves have no row errors', (await page.locator('.eq-line.invalid').count()) === 0);
 });
 
 await scenario('contextual completion is a single undoable equation edit', async () => {
@@ -716,7 +773,10 @@ await scenario('runtime scale sliders update geometry and preserve undo', async 
   });
   check('scale slider updates row text', (await rowTexts(page))[0] === 's = 2');
   const vertices = await page.evaluate(() => (window as any).hullVertices as number[][]);
-  check('scale slider updates hull vertex buffers', vertices.some(v => v.every(c => Math.abs(c) === 2)));
+  check(
+    'scale slider updates hull vertex buffers',
+    vertices.some(v => v.every(c => Math.abs(c) === 2)),
+  );
   await caretTo(page, 0, 0);
   await page.keyboard.press('ControlOrMeta+z');
   check('one undo restores the original scale', (await rowTexts(page))[0] === rows[0]);
@@ -738,7 +798,8 @@ await scenario('camera writeback preserves hull buffers and undo', async () => {
     };
   });
   const box = (await page.locator('#gl').boundingBox())!;
-  const x = box.x + box.width * .7, y = box.y + box.height * .5;
+  const x = box.x + box.width * 0.7,
+    y = box.y + box.height * 0.5;
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + 50, y + 20, { steps: 5 });
@@ -782,7 +843,16 @@ await scenario('random replaces the document and writes a share URL', async () =
     return JSON.stringify(now) !== JSON.stringify(prev);
   }, before);
   const after = await rowTexts(page);
-  check('random loads a different featured graph', FEATURED.some(g => sameRows(g.eqs, after.filter((r): r is string => r !== null))), JSON.stringify(after));
+  check(
+    'random loads a different featured graph',
+    FEATURED.some(g =>
+      sameRows(
+        g.eqs,
+        after.filter((r): r is string => r !== null),
+      ),
+    ),
+    JSON.stringify(after),
+  );
   await page.waitForFunction(() => location.pathname.startsWith('/g/'));
   check('random writes /g/', new URL(page.url()).pathname.startsWith('/g/'), page.url());
 });
@@ -802,10 +872,7 @@ await scenario('replacing the document resets the live view', async () => {
 
 await scenario('png button downloads a screenshot', async () => {
   await load(page, ['y = x']);
-  const [download] = await Promise.all([
-    page.waitForEvent('download', { timeout: 8000 }),
-    page.click('#shot'),
-  ]);
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 8000 }), page.click('#shot')]);
   check('screenshot filename is png', download.suggestedFilename().endsWith('.png'), download.suggestedFilename());
   const path = await download.path();
   const { statSync } = await import('node:fs');
@@ -820,12 +887,9 @@ await scenario('record button captures a short webm', async () => {
     return;
   }
   await rec.click();
-  check('recording state is pressed', await rec.getAttribute('aria-pressed') === 'true');
+  check('recording state is pressed', (await rec.getAttribute('aria-pressed')) === 'true');
   await page.waitForTimeout(800);
-  const [download] = await Promise.all([
-    page.waitForEvent('download', { timeout: 12000 }),
-    rec.click(),
-  ]);
+  const [download] = await Promise.all([page.waitForEvent('download', { timeout: 12000 }), rec.click()]);
   const name = download.suggestedFilename();
   check('recording filename is video', /\.(webm|mp4)$/.test(name), name);
   const path = await download.path();

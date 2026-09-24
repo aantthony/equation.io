@@ -26,7 +26,10 @@ describe('specialPoints', () => {
   it('finds all four axis intercepts of a circle', () => {
     const pts = points('x^2 + y^2 = 4');
     expect(pts.map(p => [p.x, p.y])).toEqual([
-      [-2, 0], [2, 0], [0, -2], [0, 2],
+      [-2, 0],
+      [2, 0],
+      [0, -2],
+      [0, 2],
     ]);
     expect(pts[0].lines[0]).toBe('x-intercept');
   });

@@ -251,12 +251,7 @@ export type Claim = 'panel' | 'scroll' | 'undecided';
  * how a sheet behaves under a scroll view on iOS. `scroll` says whether such
  * a scrollable exists and which ways it can currently move.
  */
-export function claimGesture(
-  dx: number,
-  dy: number,
-  scroll: { up: boolean; down: boolean } | null,
-  slop = 9,
-): Claim {
+export function claimGesture(dx: number, dy: number, scroll: { up: boolean; down: boolean } | null, slop = 9): Claim {
   if (dx * dx + dy * dy < slop * slop) return 'undecided';
   if (Math.abs(dx) > Math.abs(dy)) return 'panel';
   // A finger moving up reveals content further down, and vice versa.

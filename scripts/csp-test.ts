@@ -13,12 +13,18 @@ try {
     });
   });
   // Exercise the analytics origins without sending test traffic to Cloudflare.
-  await context.route('https://static.cloudflareinsights.com/**', route => route.fulfill({
-    contentType: 'application/javascript', body: 'window.analyticsLoaded = true;',
-  }));
-  await context.route('https://cloudflareinsights.com/**', route => route.fulfill({
-    headers: { 'Access-Control-Allow-Origin': '*' }, body: 'ok',
-  }));
+  await context.route('https://static.cloudflareinsights.com/**', route =>
+    route.fulfill({
+      contentType: 'application/javascript',
+      body: 'window.analyticsLoaded = true;',
+    }),
+  );
+  await context.route('https://cloudflareinsights.com/**', route =>
+    route.fulfill({
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: 'ok',
+    }),
+  );
   for (const path of ['/', '/about/', '/g/y%3Dx%5E2', '/implicit/']) {
     const page = await context.newPage();
     const response = await page.goto(`http://localhost:5198${path}`);
@@ -41,9 +47,7 @@ try {
     }
     const themeResponse = await context.request.get(new URL((await themeScript.getAttribute('src'))!, page.url()).href);
     assert.match(themeResponse.headers()['cache-control'], /max-age=31536000.*immutable/);
-    const ready = path === '/about/' ? '#gallery img'
-      : path === '/implicit/' ? 'iframe#graph[src*="/g/"]'
-      : '.eq-line';
+    const ready = path === '/about/' ? '#gallery img' : path === '/implicit/' ? 'iframe#graph[src*="/g/"]' : '.eq-line';
     await page.waitForSelector(ready);
     if (path === '/implicit/') {
       await page.waitForFunction(() => {

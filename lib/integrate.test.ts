@@ -82,8 +82,7 @@ describe('antiderivative: exact families', () => {
     expect(Fe).not.toBeNull();
     const dF = diff(Fe, 'x');
     for (const x of [-1.1, 0.4, 2.3]) {
-      expect(evaluate(dF, { a: 1.5, b: -0.7, x }))
-        .toBeCloseTo(Math.sin(1.5 * x - 0.7), 6);
+      expect(evaluate(dF, { a: 1.5, b: -0.7, x })).toBeCloseTo(Math.sin(1.5 * x - 0.7), 6);
     }
   });
 
@@ -182,8 +181,7 @@ describe('verifyDefinite', () => {
 });
 
 describe('∫ syntax through resolveExpr', () => {
-  const r = (s: string, fns: ReadonlySet<string> = new Set()) =>
-    resolveExpr(parseExpr(s, fns), () => undefined);
+  const r = (s: string, fns: ReadonlySet<string> = new Set()) => resolveExpr(parseExpr(s, fns), () => undefined);
   const val = (s: string, env: Record<string, number> = {}) => evaluate(r(s), env);
 
   it('integrates definite forms exactly', () => {

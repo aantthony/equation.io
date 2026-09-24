@@ -32,8 +32,7 @@ const encodeRow = (text: string, escapePercent = false): string =>
 export function encodePayload(texts: string[]): string {
   const rows = texts.map(t => t.trim()).filter(Boolean);
   const escapePercent = rows.some(t => t.includes('%'));
-  return (escapePercent ? ESCAPED_PERCENT_VERSION : '')
-    + rows.map(t => encodeRow(t, escapePercent)).join(';');
+  return (escapePercent ? ESCAPED_PERCENT_VERSION : '') + rows.map(t => encodeRow(t, escapePercent)).join(';');
 }
 
 /**
@@ -58,7 +57,7 @@ export function decodePayload(payload: string): string[] {
       const decoded = decodeURIComponent(s);
       // One pass: a restored literal %3B must not be decoded a second time.
       return escapePercent
-        ? decoded.replace(/%25|%3B/gi, token => token.toUpperCase() === '%25' ? '%' : ';')
+        ? decoded.replace(/%25|%3B/gi, token => (token.toUpperCase() === '%25' ? '%' : ';'))
         : decoded.replace(/%3B/gi, ';');
     })
     .filter(s => s.trim());

@@ -16,10 +16,17 @@ describe('parseViewRow', () => {
     expect(parse('camera(-pi/3, 0.6)')).toEqual({ kind: 'camera', theta: -Math.PI / 3, phi: 0.6 });
     expect(parse('camera(0, 1, 7)')).toEqual({ kind: 'camera', theta: 0, phi: 1, radius: 7 });
     expect(parse('camera(0, 1, 7, (1, 0, 2))')).toEqual({
-      kind: 'camera', theta: 0, phi: 1, radius: 7, target: [1, 0, 2],
+      kind: 'camera',
+      theta: 0,
+      phi: 1,
+      radius: 7,
+      target: [1, 0, 2],
     });
     expect(parse('camera(0, 1, (1, 0, 2))')).toEqual({
-      kind: 'camera', theta: 0, phi: 1, target: [1, 0, 2],
+      kind: 'camera',
+      theta: 0,
+      phi: 1,
+      target: [1, 0, 2],
     });
   });
 
@@ -87,7 +94,6 @@ describe('writeback round-trip', () => {
   });
 });
 
-
 describe('independent axis scaling', () => {
   it('parses positive ratios, including expressions, and rejects invalid settings', () => {
     expect(parse('view(x=-10..10, ratio=a/2)', { a: 10 })).toEqual({ kind: 'view', x: [-10, 10], ratio: 5 });
@@ -99,12 +105,15 @@ describe('independent axis scaling', () => {
   });
 
   it('fits all bounds while preserving the ratio on different screens', () => {
-    for (const [w, h] of [[800, 400], [400, 800]]) {
+    for (const [w, h] of [
+      [800, 400],
+      [400, 800],
+    ]) {
       const v = fitView2D({ kind: 'view', x: [-10, 10], y: [-1, 1], ratio: 5 }, w, h);
       expect(w * v.upp).toBeGreaterThanOrEqual(20);
-      expect(h * v.upp / v.ratio!).toBeGreaterThanOrEqual(2);
+      expect((h * v.upp) / v.ratio!).toBeGreaterThanOrEqual(2);
       expect(v.ratio).toBe(5);
-      const row = formatViewRow(-w*v.upp/2, w*v.upp/2, -h*v.upp/10, h*v.upp/10, v.ratio);
+      const row = formatViewRow((-w * v.upp) / 2, (w * v.upp) / 2, (-h * v.upp) / 10, (h * v.upp) / 10, v.ratio);
       expect(fitView2D(parse(row) as import('./view.ts').View2DSpec, w, h)).toEqual(v);
     }
   });
@@ -113,7 +122,7 @@ describe('independent axis scaling', () => {
     const v = { cx: 3, cy: -2, upp: 0.1, ratio: 5 };
     const scaled = scaleViewAt(v, 100, -50, 2, 0.5);
     expect(scaled.cx + 100 * scaled.upp).toBeCloseTo(13);
-    expect(scaled.cy - 50 * scaled.upp / scaled.ratio).toBeCloseTo(-3);
+    expect(scaled.cy - (50 * scaled.upp) / scaled.ratio).toBeCloseTo(-3);
     expect(scaled.ratio).toBe(20);
     expect(scaleViewAt(v, 0, 0, 2, 2).ratio).toBe(5);
   });

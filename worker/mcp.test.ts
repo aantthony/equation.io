@@ -19,8 +19,10 @@ const env = {
       new URL(req.url).pathname === '/llms.txt'
         ? new Response(SYNTAX_DOC)
         : new URL(req.url).pathname === '/mcp-app/'
-        ? new Response('<html data-mcp-app><meta content="__EQUATION_ORIGIN__"><script type="module" src="/assets/graph.js"></script><link href="/assets/graph.css"></html>')
-        : new Response('not found', { status: 404 }),
+          ? new Response(
+              '<html data-mcp-app><meta content="__EQUATION_ORIGIN__"><script type="module" src="/assets/graph.js"></script><link href="/assets/graph.css"></html>',
+            )
+          : new Response('not found', { status: 404 }),
   },
 } as unknown as Env;
 
@@ -43,8 +45,7 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
       }
     }
     const name = (params as { name: string }).name;
-    const canonical = name === 'create_graph' ? 'encode_graph_url'
-      : name === 'read_graph' ? 'decode_graph_url' : name;
+    const canonical = name === 'create_graph' ? 'encode_graph_url' : name === 'read_graph' ? 'decode_graph_url' : name;
     const validate = outputValidators.get(canonical)!;
     expect(validate(body.result.structuredContent), JSON.stringify(validate.errors)).toBe(true);
   }
@@ -54,7 +55,8 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
 describe('mcp endpoint', () => {
   it.each(Object.entries(PUBLIC_KIND_ROWS))('preserves the %s kind at the MCP boundary', async (kind, equations) => {
     const { body } = await rpc('tools/call', {
-      name: 'encode_graph_url', arguments: { equations },
+      name: 'encode_graph_url',
+      arguments: { equations },
     });
     const rows = body.result.structuredContent.rows;
     expect(rows.every((r: { status: string }) => r.status === 'ok')).toBe(true);
@@ -94,13 +96,20 @@ describe('mcp endpoint', () => {
 
   it('lists link tools and the interactive graph tool', async () => {
     const { body } = await rpc('tools/list');
-    expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual(['encode_graph_url', 'decode_graph_url', 'show_graph']);
+    expect(body.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      'encode_graph_url',
+      'decode_graph_url',
+      'show_graph',
+    ]);
     for (const tool of body.result.tools) {
       // Both the top-level title (current MCP spec) and annotations.title
       // (older spec field) are set: the connector directory reads the latter.
       expect(tool.title).toEqual(expect.any(String));
       expect(tool.annotations).toEqual({
-        title: tool.title, readOnlyHint: true, openWorldHint: false, destructiveHint: false,
+        title: tool.title,
+        readOnlyHint: true,
+        openWorldHint: false,
+        destructiveHint: false,
       });
     }
   });
@@ -129,7 +138,11 @@ describe('mcp endpoint', () => {
     expect(out.share_url).not.toMatch(/[()!'*]/);
     expect(out.url).not.toMatch(/[()!'*]/);
     expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual([
-      'definition (fn)', 'definition (fn)', 'definition (const)', 'implicit2d', 'implicit2d',
+      'definition (fn)',
+      'definition (fn)',
+      'definition (const)',
+      'implicit2d',
+      'implicit2d',
     ]);
   });
 
@@ -143,7 +156,10 @@ describe('mcp endpoint', () => {
     const out = body.result.structuredContent;
     expect(out.valid).toBe(true);
     expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual([
-      'definition (const)', 'definition (const)', 'cobweb', 'point',
+      'definition (const)',
+      'definition (const)',
+      'cobweb',
+      'point',
     ]);
     // The static preview draws cobwebs, so nothing is omitted and the image
     // attaches with the recurrence included.
@@ -159,7 +175,10 @@ describe('mcp endpoint', () => {
     const out = body.result.structuredContent;
     expect(out.valid).toBe(true);
     expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual([
-      'definition (const)', 'definition (const)', 'random variable (density curve)', 'probability (shaded area)',
+      'definition (const)',
+      'definition (const)',
+      'random variable (density curve)',
+      'probability (shaded area)',
     ]);
     // The P row carries its numeric value, matching the app's row readout.
     expect(out.rows[3].value).toBe('≈ 0.9545');
@@ -204,8 +223,7 @@ describe('mcp endpoint', () => {
     const { body } = await rpc('tools/call', {
       name: 'encode_graph_url',
       arguments: {
-        equations: ['X ~ Normal(0, 1)', 'Y = {X > 0: X^2, 1}', 'P(-1 < X < 1)', 'P(Y > X)', 'X + X',
-          'P(X + X < 1)'],
+        equations: ['X ~ Normal(0, 1)', 'Y = {X > 0: X^2, 1}', 'P(-1 < X < 1)', 'P(Y > X)', 'X + X', 'P(X + X < 1)'],
       },
     });
     const out = body.result.structuredContent;
@@ -294,7 +312,10 @@ describe('mcp endpoint', () => {
     const out = body.result.structuredContent;
     expect(out.valid).toBe(true);
     expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual([
-      'definition (const)', 'definition (const)', 'implicit2d', 'implicit2d',
+      'definition (const)',
+      'definition (const)',
+      'implicit2d',
+      'implicit2d',
     ]);
     // …while a document that binds neither still reduces and still opens.
     const { body: b2 } = await rpc('tools/call', {
@@ -309,16 +330,25 @@ describe('mcp endpoint', () => {
       arguments: { equations: ['2+2', 'a = 2', 'sqrt(a)', '2x'] },
     });
     expect(bv.result.structuredContent.rows.map((r: { kind?: string; value?: string }) => [r.kind, r.value])).toEqual([
-      ['value', '= 4'], ['definition (const)', undefined], ['value', '≈ 1.41421'], ['implicit2d', undefined],
+      ['value', '= 4'],
+      ['definition (const)', undefined],
+      ['value', '≈ 1.41421'],
+      ['implicit2d', undefined],
     ]);
     // Measurements are numbers too: distance/angle rows read out, a zero-length
     // arm is undefined, and a document's own `angle` still wins over the builtin.
     const { body: bm } = await rpc('tools/call', {
       name: 'encode_graph_url',
-      arguments: { equations: ['A = (0, 0)', 'B = (3, 4)', 'distance(A, B)', 'angle((1, 0), A, (0, 2)) 180/pi', 'angle(B, B, A)'] },
+      arguments: {
+        equations: ['A = (0, 0)', 'B = (3, 4)', 'distance(A, B)', 'angle((1, 0), A, (0, 2)) 180/pi', 'angle(B, B, A)'],
+      },
     });
-    expect(bm.result.structuredContent.rows.slice(2).map((r: { kind?: string; value?: string }) => [r.kind, r.value])).toEqual([
-      ['value', '= 5'], ['value', '= 90'], ['value', 'undefined'],
+    expect(
+      bm.result.structuredContent.rows.slice(2).map((r: { kind?: string; value?: string }) => [r.kind, r.value]),
+    ).toEqual([
+      ['value', '= 5'],
+      ['value', '= 90'],
+      ['value', 'undefined'],
     ]);
     const { body: bs } = await rpc('tools/call', {
       name: 'encode_graph_url',
@@ -496,8 +526,13 @@ describe('draggable points', () => {
   });
 
   it('reports coordinate RHS dragging without making intersection rows draggable', async () => {
-    const rows = await rowsFor(['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)',
-      '(r, theta) = (2, 0.8)', '(r, theta) = (sqrt(2), pi/4)', '(x, y) = (y, -sin(x))']);
+    const rows = await rowsFor([
+      'r = sqrt(x^2+y^2)',
+      'theta = atan2(y,x)',
+      '(r, theta) = (2, 0.8)',
+      '(r, theta) = (sqrt(2), pi/4)',
+      '(x, y) = (y, -sin(x))',
+    ]);
     expect(rows[2]).toMatchObject({ kind: 'system', draggable: true });
     expect(rows[3]).toMatchObject({ kind: 'system', draggable: false });
     expect(rows[4].draggable).toBeUndefined();
@@ -532,8 +567,7 @@ describe('draggable points', () => {
 });
 
 describe('graph previews', () => {
-  const call = (equations: string[]) =>
-    rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
+  const call = (equations: string[]) => rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
 
   it('returns only text content for drawable graphs', async () => {
     const { body } = await call(['y = sin(x)', 'y = x/2']);
@@ -552,9 +586,7 @@ describe('graph previews', () => {
     expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
     const out = body.result.structuredContent;
     expect(out.preview).toContain('nothing about whether the graph works');
-    expect(out.preview_omits).toEqual([
-      { row: 'iter(z^2 + w)', why: expect.stringContaining('fractal2d') },
-    ]);
+    expect(out.preview_omits).toEqual([{ row: 'iter(z^2 + w)', why: expect.stringContaining('fractal2d') }]);
     expect(out.preview_omits[0].why).toContain('live app');
   });
 
@@ -589,9 +621,7 @@ describe('graph previews', () => {
     const out = body.result.structuredContent;
     expect(out.valid).toBe(true);
     expect(out.preview).toContain('the graph itself is fine');
-    expect(out.preview_omits).toEqual([
-      { row: 'y = person.age', why: expect.stringContaining('not on this device') },
-    ]);
+    expect(out.preview_omits).toEqual([{ row: 'y = person.age', why: expect.stringContaining('not on this device') }]);
   });
 
   it('does not call a row valid just because the file is elsewhere', async () => {
@@ -609,9 +639,7 @@ describe('graph previews', () => {
     // about; a row that fails to parse is broken everywhere. Saying "the
     // graph itself is fine" over the top of it sends the caller away from an
     // error that `rows` — and only `rows` — is reporting.
-    const { body } = await call([
-      'person = open("people.csv", 3a7f1b2c9d4e)', 'y = person.age', 'y = florb(x)',
-    ]);
+    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'y = person.age', 'y = florb(x)']);
     const out = body.result.structuredContent;
     expect(out.valid).toBe(false);
     expect(out.preview).not.toContain('the graph itself is fine');
@@ -636,8 +664,7 @@ describe('graph previews', () => {
 });
 
 describe('viewport rows', () => {
-  const call = (equations: string[]) =>
-    rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
+  const call = (equations: string[]) => rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
 
   it('classifies viewport rows and describes the share-link preview', async () => {
     const { body } = await call(['view(x = 98..102)', 'y = (x - 100)^2']);
@@ -712,12 +739,20 @@ describe('syntax resource', () => {
   });
 
   it('reports missing UI assets instead of returning the website fallback as a widget', async () => {
-    const request = new Request(URL_BASE, { method: 'POST', body: JSON.stringify({
-      jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: GRAPH_UI_URI },
-    }) });
+    const request = new Request(URL_BASE, {
+      method: 'POST',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'resources/read',
+        params: { uri: GRAPH_UI_URI },
+      }),
+    });
     const missing = { ASSETS: { fetch: async () => new Response('<html>website fallback</html>') } } as unknown as Env;
     const response = await handleMcp(request, new URL(URL_BASE), missing);
-    expect(await response.json()).toMatchObject({ error: { code: -32603, message: 'Graph UI unavailable; rebuild the web assets.' } });
+    expect(await response.json()).toMatchObject({
+      error: { code: -32603, message: 'Graph UI unavailable; rebuild the web assets.' },
+    });
   });
 
   it('names the valid uri when asked for an unknown one', async () => {

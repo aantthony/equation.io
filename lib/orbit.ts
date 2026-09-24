@@ -38,8 +38,14 @@ export interface OrbitInput {
  * that move (read a state or t) inlined, since the orbit evaluates them at
  * its own time rather than the frame's.
  */
-export function orbitInput(defs: Env, paths: readonly (readonly Expr[])[], series: boolean,
-  from: number, to: number, env: Record<string, number>): OrbitInput {
+export function orbitInput(
+  defs: Env,
+  paths: readonly (readonly Expr[])[],
+  series: boolean,
+  from: number,
+  to: number,
+  env: Record<string, number>,
+): OrbitInput {
   if (!(Number.isFinite(from) && Number.isFinite(to))) throw new Error('An orbit needs a finite time range.');
   if (from < 0) throw new Error('An orbit starts at t = 0 or later: the states begin at their (0) values.');
   if (!(to > from)) throw new Error('An orbit runs forward in time: write the earlier time first, like p(0..50).');
@@ -82,13 +88,17 @@ export function orbitInput(defs: Env, paths: readonly (readonly Expr[])[], serie
     try {
       const v = evaluate(defs.states.get(n)!.init, env);
       return Number.isFinite(v) ? v : 0;
-    } catch { return 0; }
+    } catch {
+      return 0;
+    }
   });
   const steps = Math.ceil(to / STEP);
   if (steps * Math.max(1, names.length) > ORBIT_WORK_MAX) {
-    throw new Error(paths.length > 1
-      ? `That is too much to integrate for ${paths.length} runs — draw one run's orbit, like p[1](${fmt(from)}..${fmt(to)}), or a shorter time range.`
-      : 'That orbit is too long to integrate — try a shorter time range.');
+    throw new Error(
+      paths.length > 1
+        ? `That is too much to integrate for ${paths.length} runs — draw one run's orbit, like p[1](${fmt(from)}..${fmt(to)}), or a shorter time range.`
+        : 'That orbit is too long to integrate — try a shorter time range.',
+    );
   }
   const fixed: Record<string, number> = {};
   for (const e of [...drawn.flat(), ...derivs]) {
@@ -143,7 +153,7 @@ export function traceOrbit(input: OrbitInput): number[][] {
 
   const steps = Math.ceil(to / STEP - 1e-9);
   const first = Math.max(0, Math.floor(from / STEP + 1e-9));
-  const stride = Math.max(1, Math.ceil((steps - first + 1) * paths.length / ORBIT_VERTICES));
+  const stride = Math.max(1, Math.ceil(((steps - first + 1) * paths.length) / ORBIT_VERTICES));
   const out: number[][][] = paths.map(() => []);
   const sample = (time: number) => {
     for (let i = 0; i < n; i++) vars[i] = y[i];
@@ -170,6 +180,6 @@ export function traceOrbit(input: OrbitInput): number[][] {
     if (!ok) break;
     y.set(tmp);
   }
-  const dim = series ? 2 : paths[0]?.length ?? 2;
+  const dim = series ? 2 : (paths[0]?.length ?? 2);
   return out.flatMap(path => [...path, Array(dim).fill(NaN)]);
 }

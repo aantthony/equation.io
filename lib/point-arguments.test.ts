@@ -7,9 +7,18 @@ import { lowerGeom } from './geom.ts';
 import { lowerLists, withAxes } from './list.ts';
 
 const PRE = [
-  'f(x,y) = (x + y/2, y)', 'g(x,y) = x y', 'F(x,y,z) = (x + z, y, z)',
-  'A = (1, 2)', 'B = (3, 4)', 'C = (1, 2, 3)', 'J = [(0,-1),(1,0)]',
-  'a = [0..2]', 'b = [0..2]', 'P = (a, b)', 'Q = [(0,0),(1,0),(1,1),(0,1)]', 'L = [1, 2, 3]',
+  'f(x,y) = (x + y/2, y)',
+  'g(x,y) = x y',
+  'F(x,y,z) = (x + z, y, z)',
+  'A = (1, 2)',
+  'B = (3, 4)',
+  'C = (1, 2, 3)',
+  'J = [(0,-1),(1,0)]',
+  'a = [0..2]',
+  'b = [0..2]',
+  'P = (a, b)',
+  'Q = [(0,0),(1,0),(1,1),(0,1)]',
+  'L = [1, 2, 3]',
 ];
 const run = (row: string, pre = PRE) => {
   const an = analyze([...pre, row]);
@@ -23,11 +32,16 @@ const values = (row: string, pre = PRE): number[][] => {
   const cpu = r.cpu!;
   const at = (coordinates: Expr[]) => coordinates.map(c => evaluate(c, env) + 0);
   switch (cpu.type) {
-    case 'point': return [at(cpu.coords)];
-    case 'plist': return cpu.pts.map(at);
-    case 'vlist': return cpu.values.map(value => at([value]));
-    case 'value': return [at([cpu.expr])];
-    default: throw new Error(`Expected points or scalar values, got ${cpu.type}`);
+    case 'point':
+      return [at(cpu.coords)];
+    case 'plist':
+      return cpu.pts.map(at);
+    case 'vlist':
+      return cpu.values.map(value => at([value]));
+    case 'value':
+      return [at([cpu.expr])];
+    default:
+      throw new Error(`Expected points or scalar values, got ${cpu.type}`);
   }
 };
 const error = (row: string, pre = PRE) => run(row, pre).row.error;
@@ -79,8 +93,16 @@ describe('a list of points as the argument', () => {
   it('maps the list: f(P) is f(a, b) point for point, not a crossing of its own components', () => {
     expect(values('f(P)')).toEqual(values('f(a, b)'));
     expect(values('f(P)')).toHaveLength(9);
-    expect(values('f(Q)')).toEqual([[0, 0], [1, 0], [1.5, 1], [0.5, 1]]);
-    expect(values('f([A, B])')).toEqual([[2, 2], [5, 4]]);
+    expect(values('f(Q)')).toEqual([
+      [0, 0],
+      [1, 0],
+      [1.5, 1],
+      [0.5, 1],
+    ]);
+    expect(values('f([A, B])')).toEqual([
+      [2, 2],
+      [5, 4],
+    ]);
     const lattice = ['f(x,y) = (x + y/2, y)', 'a = [-1, -0.9..1]', 'b = [-1, -0.9..1]', 'P = (a, b)'];
     expect(values('f(P)', lattice)).toHaveLength(441);
     expect(values('f(f(f(P)))', lattice)).toHaveLength(441);
@@ -91,16 +113,31 @@ describe('a list of points as the argument', () => {
     const sorted = (pts: number[][]) => pts.map(p => p.join()).sort();
     expect(sorted(values('f(J P)'))).toEqual(sorted(values('f(-b, a)')));
     expect(values('f(P + (1, 0))')).toEqual(values('f(a + 1, b)'));
-    expect(values('J f(Q)')).toEqual([[0, 0], [0, 1], [-1, 1.5], [-1, 0.5]]);
+    expect(values('J f(Q)')).toEqual([
+      [0, 0],
+      [0, 1],
+      [-1, 1.5],
+      [-1, 0.5],
+    ]);
     expect(values('k(P)', [...PRE, 'k(p) = f(p)'])).toEqual(values('f(P)'));
   });
   it('reads a matrix as its rows, like every call that asks for points — a named list of 2 points is one', () => {
     const pre = [...PRE, 'S = [(1,2),(3,4)]', 'T = [(1,2,0),(3,4,0),(0,0,1)]'];
     expect(values('g(S)', pre).flat()).toEqual([2, 12]);
     expect(values('g(S)', pre)).toEqual(values('g([(1,2),(3,4)])', pre));
-    expect(values('f(J)')).toEqual([[-0.5, -1], [1, 0]]);
-    expect(values('f(2 J)')).toEqual([[-1, -2], [2, 0]]);
-    expect(values('F(T)', pre)).toEqual([[1, 2, 0], [3, 4, 0], [1, 0, 1]]);
+    expect(values('f(J)')).toEqual([
+      [-0.5, -1],
+      [1, 0],
+    ]);
+    expect(values('f(2 J)')).toEqual([
+      [-1, -2],
+      [2, 0],
+    ]);
+    expect(values('F(T)', pre)).toEqual([
+      [1, 2, 0],
+      [3, 4, 0],
+      [1, 0, 1],
+    ]);
     expect(run('hull(F(T))', pre).row.cpu!.type).toBe('polygon');
     const arrows = run('vector(S, f(S))', pre).row.cpu!;
     expect(arrows.type === 'family' && arrows.members.length).toBe(2);
@@ -115,18 +152,30 @@ describe('a list of points as the argument', () => {
   it('still crosses with an independent list, and a filtered list keeps its pairing', () => {
     expect(values('(g(P), [0, 10])')).toHaveLength(18);
     const cut = [...PRE, 'c = a[a > 0]', 'R = (c, c^2)'];
-    expect(values('f(R)', cut)).toEqual([[1.5, 1], [4, 4]]);
+    expect(values('f(R)', cut)).toEqual([
+      [1.5, 1],
+      [4, 4],
+    ]);
   });
   it('names a list: Q2 = f(Q)', () => {
     expect(values('Q2', [...PRE, 'Q2 = f(Q)'])).toEqual(values('f(Q)'));
   });
   it('reads a data scatter by its columns', () => {
     // (The columns of one file run over the same rows.)
-    const col = (...xs: number[]): Expr => withAxes({ kind: 'data', values: Float64Array.from(xs) }, [{ id: 'S', n: xs.length }]);
+    const col = (...xs: number[]): Expr =>
+      withAxes({ kind: 'data', values: Float64Array.from(xs) }, [{ id: 'S', n: xs.length }]);
     const S: Expr = { kind: 'vec', items: [col(1, 2, 3), col(10, 20, 30)] };
     const getFn = (n: string) => (n === 'g' ? { params: ['x', 'y'], body: parseExpr('x y') } : undefined);
     const e = resolveExpr(parseExpr('g(S)', new Set(['g'])), getFn as never);
-    const low = lowerLists(lowerGeom(e, () => null, () => null, n => n === 'S'), n => (n === 'S' ? S : null));
+    const low = lowerLists(
+      lowerGeom(
+        e,
+        () => null,
+        () => null,
+        n => n === 'S',
+      ),
+      n => (n === 'S' ? S : null),
+    );
     expect(low.kind === 'data' && [...low.values]).toEqual([10, 40, 90]);
   });
   it('rejects a list that is not of n-component points', () => {
@@ -166,7 +215,10 @@ describe('the argument stays one list, however the row copies it', () => {
   it('zips an anonymous literal through point-list arithmetic', () => {
     expect(values('g(2 [A, B])').flat()).toEqual([8, 48]);
     expect(values('g(-[A, B])').flat()).toEqual([2, 12]);
-    expect(values('f(2 [A, B])')).toEqual([[4, 4], [10, 8]]);
+    expect(values('f(2 [A, B])')).toEqual([
+      [4, 4],
+      [10, 8],
+    ]);
     const p = run('vector([A, B], f(2 [A, B]))').row.cpu!;
     // (The two literals are independent, so 2 × 2 — not 2 × 2 × 2 × 2.)
     expect(p.type === 'family' && p.members.length).toBe(4);
@@ -174,9 +226,10 @@ describe('the argument stays one list, however the row copies it', () => {
   it('zips through the clones Σ and a finite difference make', () => {
     expect(values('sum(n=1..2, g([(1,2),(3,4)]))').flat()).toEqual([4, 24]);
     expect(values('sum(n=1..2, g(n [(1,2),(3,4)]))').flat()).toEqual([10, 60]);
-    const d = values('d/dc g([(1,2),(3,4)] + (c, floor(c)))', [...PRE, 'c = 1.5']) // (floor forces the finite difference).flat();
+    const d = values('d/dc g([(1,2),(3,4)] + (c, floor(c)))', [...PRE, 'c = 1.5']); // (floor forces the finite difference).flat();
     expect(d).toHaveLength(2);
-    expect(d[0]).toBeCloseTo(3); expect(d[1]).toBeCloseTo(5);
+    expect(d[0]).toBeCloseTo(3);
+    expect(d[1]).toBeCloseTo(5);
   });
   it('reduces over a computed point list', () => {
     expect(run('mean(g(2 Q))').row.info).toBe('= 1');
@@ -216,7 +269,11 @@ describe('what the same rule changes outside f(P)', () => {
 
 describe('the documented example', () => {
   it('deforms a lattice with one name for the points', () => {
-    const an = analyze('a = [-10..10]/2; b = [-10..10]/2; P = (a, b); f(x,y) = (x + sin(y + t)/3, y + sin(x)/3); vector(P, f(P)); f(P)'.split('; '));
+    const an = analyze(
+      'a = [-10..10]/2; b = [-10..10]/2; P = (a, b); f(x,y) = (x + sin(y + t)/3, y + sin(x)/3); vector(P, f(P)); f(P)'.split(
+        '; ',
+      ),
+    );
     expect(an.rows.map(r => r.error).filter(Boolean)).toEqual([]);
     const [arrows, dots] = an.rows.slice(-2).map(r => ({ ...r.cls!, cpu: r.cpu! }));
     expect(arrows.cpu.type === 'family' && arrows.cpu.members.length).toBe(441);
@@ -227,7 +284,11 @@ describe('the documented example', () => {
 
 describe('cost', () => {
   it('lowers a shared argument once, however deep the composition', () => {
-    const nest = (n: number, inner: string) => { let s = inner; for (let k = 0; k < n; k++) s = `f(${s})`; return s; };
+    const nest = (n: number, inner: string) => {
+      let s = inner;
+      for (let k = 0; k < n; k++) s = `f(${s})`;
+      return s;
+    };
     const pre = ['f(x,y) = (x + y/2, y - x/2)', 'A = (1, 2)', 'J = [(0,-1),(1,0)]'];
     const t0 = performance.now();
     expect(values(nest(8, 'J A'), pre)).toHaveLength(1);

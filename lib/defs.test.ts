@@ -1,12 +1,7 @@
 import { compileCpu, compileGpu } from './compiler.ts';
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { type Definition,
-  buildDefs,
-  constsAnimated,
-
-  resolveExpr,
-  scanDefinition } from './defs.ts';
+import { type Definition, buildDefs, constsAnimated, resolveExpr, scanDefinition } from './defs.ts';
 import { evaluate, freeVars, gammaFn, parseExpr, substVars } from './expr.ts';
 import { toGLSL } from './glsl.ts';
 import { classify } from './plot.ts';
@@ -102,7 +97,10 @@ describe('d/dx derivative syntax', () => {
 
   it('falls back to finite differences where diff() has no answer', () => {
     const fd = (f: (x: number) => number, x: number) => (f(x + 1e-4) - f(x - 1e-4)) / 2e-4;
-    expect(at('d/dx (x!)', { x: 4 })).toBeCloseTo(fd(x => gammaFn(x + 1), 4), 10);
+    expect(at('d/dx (x!)', { x: 4 })).toBeCloseTo(
+      fd(x => gammaFn(x + 1), 4),
+      10,
+    );
     expect(at('d/dx gamma(x)', { x: 4 })).toBeCloseTo(fd(gammaFn, 4), 10);
     expect(at('d/dx floor(x)', { x: 0.5 })).toBe(0);
   });
@@ -235,21 +233,14 @@ describe('buildDefs', () => {
   });
 
   it('inlines functions, including calls to other functions', () => {
-    const { defs, errors } = buildDefs([
-      fdef('f', ['x'], 'x^2 + c'),
-      fdef('g', ['x'], 'f(x) + 1'),
-      cdef('c', '3'),
-    ]);
+    const { defs, errors } = buildDefs([fdef('f', ['x'], 'x^2 + c'), fdef('g', ['x'], 'f(x) + 1'), cdef('c', '3')]);
     expect(errors.size).toBe(0);
     const e = resolveExpr(parseExpr('g(2)', new Set(['g'])), n => defs.fns.get(n));
     expect(evaluate(e, { c: 3 })).toBe(8);
   });
 
   it('differentiates through function definitions', () => {
-    const { defs, errors } = buildDefs([
-      fdef('f', ['x'], 'sin(x)'),
-      fdef('g', ['x'], 'd/dx f(x)'),
-    ]);
+    const { defs, errors } = buildDefs([fdef('f', ['x'], 'sin(x)'), fdef('g', ['x'], 'd/dx f(x)')]);
     expect(errors.size).toBe(0);
     const e = resolveExpr(parseExpr('g(0)', new Set(['g'])), n => defs.fns.get(n));
     expect(evaluate(e, {})).toBe(1);
@@ -286,8 +277,7 @@ describe('buildDefs', () => {
 
   it('checks arity when inlining', () => {
     const { defs } = buildDefs([fdef('f', ['a', 'b'], 'a + b')]);
-    expect(() => resolveExpr(parseExpr('f(1)', new Set(['f'])), n => defs.fns.get(n)))
-      .toThrow(/2 arguments/);
+    expect(() => resolveExpr(parseExpr('f(1)', new Set(['f'])), n => defs.fns.get(n))).toThrow(/2 arguments/);
   });
 });
 
@@ -337,9 +327,9 @@ describe('unicode names in definitions', () => {
   });
 
   it('resolves a Greek definition wherever the name appears', () => {
-    const { defs, errors } = buildDefs([
-      scanDefinition('θmax = 4'), scanDefinition('g(θ) = θ² + θmax'),
-    ].filter((d): d is Definition => !!d));
+    const { defs, errors } = buildDefs(
+      [scanDefinition('θmax = 4'), scanDefinition('g(θ) = θ² + θmax')].filter((d): d is Definition => !!d),
+    );
     expect(errors.size).toBe(0);
     const e = resolveExpr(parseExpr('g(3)', new Set(['g'])), n => defs.fns.get(n));
     expect(evaluate(e, evaluateFrame(defs))).toBe(13);

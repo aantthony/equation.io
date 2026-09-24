@@ -8,7 +8,10 @@ import { cpuStructureKey } from './compiler.ts';
 /** The complete graph on n points of a Fibonacci sphere, as one polyline:
  *  with n prime, stepping by s = 1…(n-1)/2 walks every edge once. */
 const sphere = (n: number) => [
-  `n = ${n}`, 'g = pi(3 - sqrt(5))', 'm = [0..n(n-1)/2]', 'h(j) = 1 - (2j+1)/n',
+  `n = ${n}`,
+  'g = pi(3 - sqrt(5))',
+  'm = [0..n(n-1)/2]',
+  'h(j) = 1 - (2j+1)/n',
   'F(j) = (sqrt(1 - h(j)^2) cos(g j), sqrt(1 - h(j)^2) sin(g j), h(j))',
   'rotate(polyline(F(mod((floor(m/n) + 1) mod(m, n), n))), t/5, (0, 1, 0))',
 ];
@@ -23,7 +26,7 @@ const polygonPlan = (rows: string[], at = rows.length - 1) => {
 
 describe('lazy lists', () => {
   const list = (n: number): Float64Array => Float64Array.from({ length: n }, (_, k) => k);
-  const getList = (name: string) => (name === 'L' ? { kind: 'data', values: list(5) } as const : null);
+  const getList = (name: string) => (name === 'L' ? ({ kind: 'data', values: list(5) } as const) : null);
 
   it('keep a slider over packed numbers as one template, when asked', () => {
     const lazy = lowerLists(parseExpr('sin(a L) + a'), getList, {}, false, true);
@@ -50,7 +53,7 @@ describe('lazy lists', () => {
 describe('packed figures', () => {
   it('draw a polyline through thousands of computed points as one vertex template', () => {
     const { plan } = polygonPlan(sphere(101));
-    expect(plan.over?.[0].values.length).toBe(101 * 100 / 2 + 1);
+    expect(plan.over?.[0].values.length).toBe((101 * 100) / 2 + 1);
     expect(plan.pts).toHaveLength(3);
   });
 
@@ -68,15 +71,20 @@ describe('packed figures', () => {
     const xyz = vertexSampler(plan.pts, plan.over)(env, 0);
     const at = (k: number) => xyz.slice(3 * k, 3 * k + 3);
     for (let k = 0; k < xyz.length / 3; k++) expect(Math.hypot(...at(k))).toBeCloseTo(1, 9);
-    const key = (k: number) => at(k).map(c => c.toFixed(9)).join();
+    const key = (k: number) =>
+      at(k)
+        .map(c => c.toFixed(9))
+        .join();
     const vertices = new Map<string, number>();
     const edges = new Set<string>();
     for (let k = 0; k + 1 < xyz.length / 3; k++) {
-      const [a, b] = [key(k), key(k + 1)].map(v => vertices.get(v) ?? (vertices.set(v, vertices.size), vertices.size - 1));
+      const [a, b] = [key(k), key(k + 1)].map(
+        v => vertices.get(v) ?? (vertices.set(v, vertices.size), vertices.size - 1),
+      );
       edges.add([Math.min(a, b), Math.max(a, b)].join());
     }
     expect(vertices.size).toBe(n);
-    expect(edges.size).toBe(n * (n - 1) / 2);
+    expect(edges.size).toBe((n * (n - 1)) / 2);
   });
 
   it('keep their structure across slider values that do not change the length', () => {

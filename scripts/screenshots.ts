@@ -38,7 +38,10 @@ mkdirSync(HERO_DIR, { recursive: true });
 
 // A leftover server on the port would silently serve some other checkout's
 // app; refuse to shoot against anything we didn't start ourselves.
-const taken = await fetch(ORIGIN).then(() => true, () => false);
+const taken = await fetch(ORIGIN).then(
+  () => true,
+  () => false,
+);
 if (taken) throw new Error(`something is already listening on ${ORIGIN} — stop it and rerun`);
 
 // Spawn the vite binary directly (not via pnpm) so kill() reaches the server.
@@ -71,13 +74,17 @@ try {
     // Frame the shot before settling, so the wait covers the final view.
     // __eq is the app's dev-only handle; shots always run against dev.
     if (item.view) {
-      await page.waitForFunction(() =>
-        !!(window as unknown as { __eq?: unknown }).__eq
-        && (document.getElementById('gl') as HTMLCanvasElement).width > 0);
+      await page.waitForFunction(
+        () =>
+          !!(window as unknown as { __eq?: unknown }).__eq &&
+          (document.getElementById('gl') as HTMLCanvasElement).width > 0,
+      );
       await page.evaluate(v => {
-        const { view, requestRender } = (window as unknown as {
-          __eq: { view: { cx: number; cy: number; upp: number }; requestRender: () => void };
-        }).__eq;
+        const { view, requestRender } = (
+          window as unknown as {
+            __eq: { view: { cx: number; cy: number; upp: number }; requestRender: () => void };
+          }
+        ).__eq;
         const gl = document.getElementById('gl') as HTMLCanvasElement;
         // span is measured across the short edge, matching the app's own
         // opening-zoom convention.

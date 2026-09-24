@@ -7,15 +7,21 @@ describe('RGB color fields', () => {
   it('preserves 0–1 channel values as a literal field', () => {
     const row = analyzeRows(['rgb(1, 0.5, 0)']).rows[0];
     expect(row.error).toBeUndefined();
-    expect(row.cpu).toMatchObject({ type: 'rgb2d', channels: [
-      { kind: 'num', value: 1 }, { kind: 'num', value: 0.5 }, { kind: 'num', value: 0 },
-    ] });
+    expect(row.cpu).toMatchObject({
+      type: 'rgb2d',
+      channels: [
+        { kind: 'num', value: 1 },
+        { kind: 'num', value: 0.5 },
+        { kind: 'num', value: 0 },
+      ],
+    });
     expect(row.gpu).toMatchObject({ type: 'rgb2d', field: 'vec3(1.0, 0.5, 0.0)' });
   });
 
   it('supports the aperture palette through coordinate fields and real projections of complex expressions', () => {
     const rows = analyzeRows([
-      'R = 1', 'alpha = atan2(y,x)/2',
+      'R = 1',
+      'alpha = atan2(y,x)/2',
       'rgb(R cos(alpha)^2, R cos(alpha+1)^2, R cos(alpha+2)^2)',
     ]).rows;
     expect(rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
@@ -27,7 +33,8 @@ describe('RGB color fields', () => {
     expect(complex.gpu).toMatchObject({ type: 'rgb2d' });
     // Both independent backends leave the shared semantic object unchanged.
     const before = JSON.stringify(row.cls);
-    compileCpu(row.cls!); compileGpu(row.cls!);
+    compileCpu(row.cls!);
+    compileGpu(row.cls!);
     expect(JSON.stringify(row.cls)).toBe(before);
   });
 

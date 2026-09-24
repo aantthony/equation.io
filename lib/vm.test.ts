@@ -5,9 +5,19 @@ import { compileProg, compileSampler, run } from './vm.ts';
 describe('expression stack machine', () => {
   it('matches the AST evaluator on a typical field', () => {
     const e = parseExpr('sin(x)cos(y) + x^2/4 - atan2(y, x)');
-    const prog = compileProg(e, new Map([['x', 0], ['y', 1]]));
+    const prog = compileProg(
+      e,
+      new Map([
+        ['x', 0],
+        ['y', 1],
+      ]),
+    );
     const stack = new Float64Array(prog.depth);
-    for (const [x, y] of [[0.5, -1.2], [3, 4], [-2.5, 0.1]]) {
+    for (const [x, y] of [
+      [0.5, -1.2],
+      [3, 4],
+      [-2.5, 0.1],
+    ]) {
       expect(run(prog, [x, y], stack)).toBeCloseTo(evaluate(e, { x, y }), 12);
     }
   });
@@ -15,9 +25,19 @@ describe('expression stack machine', () => {
   it('matches the AST evaluator on the probability builtins', () => {
     // erf is 1-arg, normalpdf/normalcdf are the only 3-arg builtins (Fn3).
     const e = parseExpr('normalcdf(x, 1, 0.5) - normalcdf(y, 1, 0.5) + normalpdf(x y, 0, 2) + erf(x - y)');
-    const prog = compileProg(e, new Map([['x', 0], ['y', 1]]));
+    const prog = compileProg(
+      e,
+      new Map([
+        ['x', 0],
+        ['y', 1],
+      ]),
+    );
     const stack = new Float64Array(prog.depth);
-    for (const [x, y] of [[2, 0], [0.3, -1.2], [-0.5, 0.5]]) {
+    for (const [x, y] of [
+      [2, 0],
+      [0.3, -1.2],
+      [-0.5, 0.5],
+    ]) {
       expect(run(prog, [x, y], stack)).toBeCloseTo(evaluate(e, { x, y }), 12);
     }
   });
@@ -58,7 +78,10 @@ describe('compileSampler', () => {
   it('samples one variable like evaluate(), rebinding the rest per frame', () => {
     const e = parseExpr('{x < a: sin(a x) + b}');
     const sampler = compileSampler(e, 'x', ['a', 'b', 'x'])!;
-    for (const env of [{ a: 2, b: 1 }, { a: -1, b: 0.5 }]) {
+    for (const env of [
+      { a: 2, b: 1 },
+      { a: -1, b: 0.5 },
+    ]) {
       const f = sampler(env);
       for (const x of [-3, 0.5, 1.5, 4]) expect(f(x)).toBe(evaluate(e, { ...env, x }));
     }

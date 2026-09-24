@@ -99,7 +99,12 @@ export function niceSpacing(upp: number, minPx: number): { major: number; minor:
   const target = upp * minPx;
   const k = Math.floor(Math.log10(target));
   const base = Math.pow(10, k);
-  for (const [m, div] of [[1, 5], [2, 4], [5, 5], [10, 5]] as const) {
+  for (const [m, div] of [
+    [1, 5],
+    [2, 4],
+    [5, 5],
+    [10, 5],
+  ] as const) {
     if (m * base >= target) return { major: m * base, minor: (m * base) / div };
   }
   return { major: 10 * base, minor: 2 * base };
@@ -148,14 +153,20 @@ float gridLine(float c, float lg, float spacing, float halfWidthPx) {
  */
 function gridFrag(specs: GridSpec[]): string {
   const params = [...new Set(specs.flatMap(s => s.params))];
-  const decls = specs.map((s, k) => {
-    const grad = s.gradGlsl
-      ? `vec2 grad${k}(float x, float y) { return vec2(${s.gradGlsl[0]}, ${s.gradGlsl[1]}); }\n`
-      : '';
-    return `float coord${k}(float x, float y) { return ${s.glsl}; }\n${grad}`
-      + `uniform float uMajor${k};\nuniform float uMinor${k};\n`;
-  }).join('');
-  const blocks = specs.map((s, k) => `
+  const decls = specs
+    .map((s, k) => {
+      const grad = s.gradGlsl
+        ? `vec2 grad${k}(float x, float y) { return vec2(${s.gradGlsl[0]}, ${s.gradGlsl[1]}); }\n`
+        : '';
+      return (
+        `float coord${k}(float x, float y) { return ${s.glsl}; }\n${grad}` +
+        `uniform float uMajor${k};\nuniform float uMinor${k};\n`
+      );
+    })
+    .join('');
+  const blocks = specs
+    .map(
+      (s, k) => `
   {
     float c = coord${k}(p.x, p.y);
     if (!isnan(c) && !isinf(c)) {
@@ -164,7 +175,9 @@ function gridFrag(specs: GridSpec[]): string {
       majorA = max(majorA, gridLine(c, lg, uMajor${k}, 0.5));
       axisA = max(axisA, 1.0 - smoothstep(0.9, 1.9, abs(c) / max(lg, 1e-24)));
     }
-  }`).join('');
+  }`,
+    )
+    .join('');
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -622,7 +635,9 @@ function ineqFrag(field: string, edges: string[], params?: string[]): string {
   // Each non-strict comparison draws its boundary with the same two-scale
   // distance estimate as curveFrag, gated to the region's edge so a chain's
   // bound lines stop where the other comparisons cut them off.
-  const edgeBlocks = edges.map((_, i) => `
+  const edgeBlocks = edges
+    .map(
+      (_, i) => `
   {
     float ev = E${i}(p.x, p.y);
     if (!isnan(ev) && !isinf(ev) && v < 2.5 * aa) {
@@ -637,7 +652,9 @@ function ineqFrag(field: string, edges: string[], params?: string[]): string {
         edge = max(edge, 1.0 - smoothstep(1.1, 2.1, max(e1, e2)));
       }
     }
-  }`).join('');
+  }`,
+    )
+    .join('');
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -695,7 +712,10 @@ export class Renderer2D {
   private cache: ProgramCache;
   /** Cell textures by the shade buffer they were uploaded from. */
   private cellTextures = new Map<Uint8Array, WebGLTexture>();
-  constructor(private gl: WebGL2RenderingContext, private quad: { draw(): void }) {
+  constructor(
+    private gl: WebGL2RenderingContext,
+    private quad: { draw(): void },
+  ) {
     this.cache = new ProgramCache(gl);
   }
 
@@ -717,13 +737,7 @@ export class Renderer2D {
     return tex;
   }
 
-  render(
-    view: View2D,
-    layers: Layers2D,
-    time = 0,
-    env: Record<string, number> = {},
-    gridSpecs?: GridSpec[],
-  ): void {
+  render(view: View2D, layers: Layers2D, time = 0, env: Record<string, number> = {}, gridSpecs?: GridSpec[]): void {
     const { gl } = this;
     const w = gl.drawingBufferWidth;
     const h = gl.drawingBufferHeight;
@@ -807,7 +821,10 @@ export class Renderer2D {
     }
     const drawn = new Set(layers.cells?.map(c => c.shades));
     for (const [shades, tex] of this.cellTextures) {
-      if (!drawn.has(shades)) { gl.deleteTexture(tex); this.cellTextures.delete(shades); }
+      if (!drawn.has(shades)) {
+        gl.deleteTexture(tex);
+        this.cellTextures.delete(shades);
+      }
     }
     for (const c of layers.cells ?? []) {
       const tex = this.cellTexture(c);
@@ -852,7 +869,15 @@ export interface Overlay2D {
    *  usually translucent) paints the enclosed region when every vertex is
    *  finite. arrow puts a head at the last vertex, sized in CSS px so it does
    *  not scale with zoom. noStroke fills only (the outline is its own entry). */
-  polylines: Array<{ pts: number[]; color: string; closed?: boolean; fill?: string; width?: number; arrow?: boolean; noStroke?: boolean }>;
+  polylines: Array<{
+    pts: number[];
+    color: string;
+    closed?: boolean;
+    fill?: string;
+    width?: number;
+    arrow?: boolean;
+    noStroke?: boolean;
+  }>;
   /** Vertical bars from y = 0, halfWidth in math units (data-list bar mode). */
   bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
 }
@@ -860,7 +885,13 @@ export interface Overlay2D {
 /** Axis labels plus CPU-sampled geometry (points, parametric curves).
  *  numbers=false skips the axis numerals (custom coordinate grids have no
  *  straight axes to label them along). */
-export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: number, extras?: Overlay2D, numbers = true): void {
+export function drawLabels2D(
+  ctx: CanvasRenderingContext2D,
+  view: View2D,
+  dpr: number,
+  extras?: Overlay2D,
+  numbers = true,
+): void {
   const w = ctx.canvas.width / dpr;
   const h = ctx.canvas.height / dpr;
   ctx.save();
@@ -942,18 +973,31 @@ export function drawLabels2D(ctx: CanvasRenderingContext2D, view: View2D, dpr: n
       let pen = false;
       let broken = false;
       const n = line.pts.length;
-      const head = line.arrow && n >= 4
-        ? arrowHead(toScreenX(line.pts[n - 4]), toScreenY(line.pts[n - 3]),
-          toScreenX(line.pts[n - 2]), toScreenY(line.pts[n - 1]), ARROW_HEAD_PX)
-        : null;
+      const head =
+        line.arrow && n >= 4
+          ? arrowHead(
+              toScreenX(line.pts[n - 4]),
+              toScreenY(line.pts[n - 3]),
+              toScreenX(line.pts[n - 2]),
+              toScreenY(line.pts[n - 1]),
+              ARROW_HEAD_PX,
+            )
+          : null;
       for (let i = 0; i + 1 < n; i += 2) {
         // The shaft stops inside the head, so the tip stays sharp.
         const last = head && i + 2 >= n;
         const sx = last ? head.shaftEnd[0] : toScreenX(line.pts[i]);
         const sy = last ? head.shaftEnd[1] : toScreenY(line.pts[i + 1]);
-        if (!isFinite(sx) || !isFinite(sy)) { pen = false; broken = true; continue; }
+        if (!isFinite(sx) || !isFinite(sy)) {
+          pen = false;
+          broken = true;
+          continue;
+        }
         if (pen) ctx.lineTo(sx, sy);
-        else { ctx.moveTo(sx, sy); pen = true; }
+        else {
+          ctx.moveTo(sx, sy);
+          pen = true;
+        }
       }
       if (line.closed && pen && !broken) ctx.closePath();
       if (line.fill && !broken) {

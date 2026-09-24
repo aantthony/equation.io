@@ -8,11 +8,7 @@ const consts = (...pairs: Array<[string, string]>): Definition[] =>
 
 describe('coordinate fields in buildDefs', () => {
   it('moves x/y-dependent definitions from consts to fields', () => {
-    const { defs, errors } = buildDefs(consts(
-      ['a', '2'],
-      ['r', 'sqrt(x^2 + y^2)'],
-      ['theta', 'atan2(y, x)'],
-    ));
+    const { defs, errors } = buildDefs(consts(['a', '2'], ['r', 'sqrt(x^2 + y^2)'], ['theta', 'atan2(y, x)']));
     expect(errors.size).toBe(0);
     expect([...defs.consts.keys()]).toEqual(['a']);
     expect([...defs.fields.keys()]).toEqual(['r', 'theta']);
@@ -20,10 +16,7 @@ describe('coordinate fields in buildDefs', () => {
   });
 
   it('resolves fields defined in terms of other fields', () => {
-    const { defs, errors } = buildDefs(consts(
-      ['r', 'sqrt(x^2 + y^2)'],
-      ['s', 'r^2'],
-    ));
+    const { defs, errors } = buildDefs(consts(['r', 'sqrt(x^2 + y^2)'], ['s', 'r^2']));
     expect(errors.size).toBe(0);
     expect(evaluate(defs.fields.get('s')!, { x: 3, y: 4 })).toBe(25);
   });
@@ -110,13 +103,35 @@ describe('sampleGradMag', () => {
 
   it('is 1 everywhere for polar r', () => {
     const f = buildGridField('r', polar.get('r')!, new Set());
-    expect(sampleGradMag(f, [[1, 1], [5, 0], [0, -3]], {}, 0.01)).toBeCloseTo(1);
+    expect(
+      sampleGradMag(
+        f,
+        [
+          [1, 1],
+          [5, 0],
+          [0, -3],
+        ],
+        {},
+        0.01,
+      ),
+    ).toBeCloseTo(1);
   });
 
   it('skips singular samples (θ at the origin)', () => {
     const f = buildGridField('theta', polar.get('theta')!, new Set());
     // |∇θ| = 1/ρ: median over ρ = {∞(skipped), 2, 2} is 1/2.
-    expect(sampleGradMag(f, [[0, 0], [2, 0], [0, 2]], {}, 0.01)).toBeCloseTo(0.5);
+    expect(
+      sampleGradMag(
+        f,
+        [
+          [0, 0],
+          [2, 0],
+          [0, 2],
+        ],
+        {},
+        0.01,
+      ),
+    ).toBeCloseTo(0.5);
   });
 
   it('falls back to finite differences without a symbolic gradient', () => {
@@ -129,23 +144,17 @@ describe('sampleGradMag', () => {
 
 describe('planarField', () => {
   it('draws a grid family for fields over the plane only', () => {
-    const { defs } = buildDefs(consts(
-      ['r', 'sqrt(x^2 + y^2)'],
-      ['rho', 'sqrt(r^2 + z^2)'],
-      ['theta', 'atan2(y, x)'],
-    ));
+    const { defs } = buildDefs(consts(['r', 'sqrt(x^2 + y^2)'], ['rho', 'sqrt(r^2 + z^2)'], ['theta', 'atan2(y, x)']));
     expect([...defs.fields].filter(([, e]) => planarField(e)).map(([name]) => name)).toEqual(['r', 'theta']);
   });
 
   it('does not treat a named vector field as a grid family', () => {
-    const { defs, errors } = buildDefs(consts(
-      ['s', '(x, y)'],
-      ['r', 'sqrt(x^2 + y^2)'],
-    ));
+    const { defs, errors } = buildDefs(consts(['s', '(x, y)'], ['r', 'sqrt(x^2 + y^2)']));
     expect(errors.size).toBe(0);
     const skip = pointComponentNames(defs);
     expect([...skip].sort()).toEqual(['s_x', 's_y']);
-    expect([...defs.fields].filter(([name, e]) => !skip.has(name) && planarField(e)).map(([name]) => name))
-      .toEqual(['r']);
+    expect([...defs.fields].filter(([name, e]) => !skip.has(name) && planarField(e)).map(([name]) => name)).toEqual([
+      'r',
+    ]);
   });
 });

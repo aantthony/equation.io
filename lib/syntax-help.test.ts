@@ -1,16 +1,22 @@
 import { emptyEnv } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { buildDefs,  scanDefinition, type Definition } from './defs.ts';
+import { buildDefs, scanDefinition, type Definition } from './defs.ts';
 import { parseCsv } from './csv.ts';
 import { syntaxHelp } from './syntax-help.ts';
 
-const defs = () => buildDefs(['amplitude = 2', 'f(x,q) = x+q', 'wave(x) = sin(x)', 'L = [1,2]', 'data = open("people.csv")']
-  .map(scanDefinition).filter((d): d is Definition => !!d), () => parseCsv('age,height\n20,170')).defs;
+const defs = () =>
+  buildDefs(
+    ['amplitude = 2', 'f(x,q) = x+q', 'wave(x) = sin(x)', 'L = [1,2]', 'data = open("people.csv")']
+      .map(scanDefinition)
+      .filter((d): d is Definition => !!d),
+    () => parseCsv('age,height\n20,170'),
+  ).defs;
 
 describe('contextual syntax help', () => {
   it('suggests builtins and replaces the entire token when the caret is in its middle', () => {
     const h = syntaxHelp('y = sqroot', 6, defs());
-    expect(h.start).toBe(4); expect(h.end).toBe(10);
+    expect(h.start).toBe(4);
+    expect(h.end).toBe(10);
     expect(h.suggestions.some(s => s.name === 'sqrt')).toBe(true);
   });
   it('distinguishes motion trails from matrix trace in suggestions and hints', () => {
@@ -105,7 +111,8 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('NORMAL(', 7, d).hint).toContain('Normal(mean, sd)');
   });
   it('honors user shadowing of builtins', () => {
-    const d = emptyEnv(); d.bind('mean', { tag: 'scalar', role: 'const', expr: {kind:'num',value:3} });
+    const d = emptyEnv();
+    d.bind('mean', { tag: 'scalar', role: 'const', expr: { kind: 'num', value: 3 } });
     expect(syntaxHelp('mea', 3, d).suggestions.find(s => s.name === 'mean')?.call).toBe(false);
     expect(syntaxHelp('mean(', 5, d).hint).toBeUndefined();
     expect(syntaxHelp('Mean(', 5, d).hint).toBeUndefined();
@@ -136,7 +143,8 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('\\v', 2, defs()).suggestions.some(s => s.name === 'vector')).toBe(true);
   });
   it('completes user definitions with Greek names', () => {
-    const d = emptyEnv(); d.bind('θmax', { tag: 'scalar', role: 'const', expr: {kind:'num',value:3} });
+    const d = emptyEnv();
+    d.bind('θmax', { tag: 'scalar', role: 'const', expr: { kind: 'num', value: 3 } });
     expect(syntaxHelp('θ', 1, d).suggestions.map(s => s.name)).toEqual(['θmax']);
   });
   it('reads a subscript spelling as its canonical name', () => {

@@ -30,8 +30,7 @@ import { compileProg, run } from './vm.ts';
 const none = new Set<string>();
 const dist = (rhs: string): BaseDist => parseDistribution(rhs, none);
 const num = (value: number): Expr => ({ kind: 'num', value });
-const pmfAt = (d: BaseDist, k: number, env: Record<string, number> = {}): number =>
-  evaluate(pmfExpr(d, num(k))!, env);
+const pmfAt = (d: BaseDist, k: number, env: Record<string, number> = {}): number => evaluate(pmfExpr(d, num(k))!, env);
 /** The exact value of a P(…) body over the one variable X ~ rhs. */
 const P = (rhs: string, body: string, env: Record<string, number> = {}): number => {
   const s = toProbability(parseExpr(body, none), new Set(['X'])).single!;
@@ -51,18 +50,39 @@ const build = (rows: string[], constNames = new Set(['a', 'b', 'n', 'p'])) => {
 };
 
 const LAWS = [
-  'Binomial(10, 0.3)', 'Binomial(1000, 0.3)', 'Binomial(7, 0)', 'Binomial(7, 1)', 'Binomial(0, 0.4)',
-  'Poisson(3)', 'Poisson(0.01)', 'Poisson(500)', 'Geometric(0.2)', 'Geometric(1)',
-  'NegativeBinomial(3, 0.4)', 'NegativeBinomial(2.5, 0.4)', 'NegativeBinomial(4, 1)',
-  'Bernoulli(0.3)', 'Bernoulli(0)', 'Bernoulli(1)', 'DiscreteUniform(-2, 4)', 'DiscreteUniform(5, 5)',
+  'Binomial(10, 0.3)',
+  'Binomial(1000, 0.3)',
+  'Binomial(7, 0)',
+  'Binomial(7, 1)',
+  'Binomial(0, 0.4)',
+  'Poisson(3)',
+  'Poisson(0.01)',
+  'Poisson(500)',
+  'Geometric(0.2)',
+  'Geometric(1)',
+  'NegativeBinomial(3, 0.4)',
+  'NegativeBinomial(2.5, 0.4)',
+  'NegativeBinomial(4, 1)',
+  'Bernoulli(0.3)',
+  'Bernoulli(0)',
+  'Bernoulli(1)',
+  'DiscreteUniform(-2, 4)',
+  'DiscreteUniform(5, 5)',
 ];
 
 describe('parsing the discrete families', () => {
   it('reads every family, its aliases, any capitalization, and marks it discrete', () => {
     const kinds: Array<[string, string]> = [
-      ['Binomial(10, 0.3)', 'binomial'], ['binom(10, 0.3)', 'binomial'], ['Poisson(3)', 'poisson'], ['POIS(3)', 'poisson'],
-      ['Geometric(0.2)', 'geometric'], ['Geom(0.2)', 'geometric'], ['NegativeBinomial(3, 0.4)', 'negbinomial'],
-      ['NegBin(3, 0.4)', 'negbinomial'], ['Bernoulli(0.5)', 'bernoulli'], ['DiscreteUniform(1, 6)', 'discreteuniform'],
+      ['Binomial(10, 0.3)', 'binomial'],
+      ['binom(10, 0.3)', 'binomial'],
+      ['Poisson(3)', 'poisson'],
+      ['POIS(3)', 'poisson'],
+      ['Geometric(0.2)', 'geometric'],
+      ['Geom(0.2)', 'geometric'],
+      ['NegativeBinomial(3, 0.4)', 'negbinomial'],
+      ['NegBin(3, 0.4)', 'negbinomial'],
+      ['Bernoulli(0.5)', 'bernoulli'],
+      ['DiscreteUniform(1, 6)', 'discreteuniform'],
     ];
     for (const [rhs, kind] of kinds) {
       expect(dist(rhs).kind).toBe(kind);
@@ -90,7 +110,14 @@ describe('parsing the discrete families', () => {
   });
 
   it('accepts the degenerate members and a whole number that arrives with rounding', () => {
-    for (const rhs of ['Binomial(0, 0.5)', 'Binomial(5, 0)', 'Binomial(5, 1)', 'Geometric(1)', 'NegBin(0.5, 1)', 'DiscreteUniform(2, 2)']) {
+    for (const rhs of [
+      'Binomial(0, 0.5)',
+      'Binomial(5, 0)',
+      'Binomial(5, 1)',
+      'Geometric(1)',
+      'NegBin(0.5, 1)',
+      'DiscreteUniform(2, 2)',
+    ]) {
       expect(() => dist(rhs)).not.toThrow();
     }
     expect(paramProblem('binomial', [0.1 * 30, 0.5])).toBeNull(); // 3.0000000000000004
@@ -228,7 +255,7 @@ describe('cdf: closed forms, both tails', () => {
 });
 
 describe('P(…): strict and non-strict bounds are different events', () => {
-  it('keeps each comparison\'s strictness through both directions and chains', () => {
+  it("keeps each comparison's strictness through both directions and chains", () => {
     expect(bounds('X < 3')).toMatchObject({ hiStrict: true });
     expect(bounds('X <= 3')).toMatchObject({ hiStrict: false });
     expect(bounds('3 > X')).toMatchObject({ hiStrict: true });
@@ -237,7 +264,10 @@ describe('P(…): strict and non-strict bounds are different events', () => {
     expect(bounds('2 < X <= 5')).toMatchObject({ loStrict: true, hiStrict: false });
     expect(bounds('5 >= X > 2')).toMatchObject({ loStrict: true, hiStrict: false });
     expect(bounds('5 > X >= 2')).toMatchObject({ loStrict: false, hiStrict: true });
-    expect(toProbability(parseExpr('2 <= X + 1 < 5', none), new Set(['X'])).inline).toMatchObject({ loStrict: false, hiStrict: true });
+    expect(toProbability(parseExpr('2 <= X + 1 < 5', none), new Set(['X'])).inline).toMatchObject({
+      loStrict: false,
+      hiStrict: true,
+    });
   });
 
   it('lands each bound on the right whole number', () => {
@@ -301,7 +331,9 @@ describe('P(…): strict and non-strict bounds are different events', () => {
 
   it('refuses shapes it cannot mean', () => {
     const names = new Set(['X', 'Y']);
-    expect(() => toProbability(parseExpr('(X, Y) = 3', none), names)).toThrow('P(… = …) compares single values, like P(X = 3) or P(X = Y).');
+    expect(() => toProbability(parseExpr('(X, Y) = 3', none), names)).toThrow(
+      'P(… = …) compares single values, like P(X = 3) or P(X = Y).',
+    );
     expect(() => toProbability(parseExpr('a = 3', none), names)).toThrow('must reference a random variable');
     // A point event of an expression, or between two variables, is a shape of its own (plan #6).
     expect(toProbability(parseExpr('X + 1 = 3', none), names)).toMatchObject({ point: true, inline: { point: true } });
@@ -375,7 +407,8 @@ describe('quantile: a step function, exact at the steps', () => {
       expect(law.quantile(p), `${rhs} q(cdf(${k}))`).toBe(k);
       expect(law.quantile((p + below) / 2)).toBe(k);
       if (below > 0) expect(law.quantile(below)).toBeLessThan(k);
-      if (q > 0 && q < law.pq(k - 1)[1]) { // (the upper tail's own steps; it rounds to 1 deep in the lower one)
+      if (q > 0 && q < law.pq(k - 1)[1]) {
+        // (the upper tail's own steps; it rounds to 1 deep in the lower one)
         expect(law.quantile(q, true)).toBe(k);
         expect(law.quantile(Math.min(1, p * (1 + 1e-12) + 1e-300))).toBeGreaterThanOrEqual(k);
       }
@@ -398,8 +431,14 @@ describe('quantile: a step function, exact at the steps', () => {
 
 describe('RVSystem over discrete variables', () => {
   it('declares, takes exact moments, and answers P(…) and E(…) exactly', () => {
-    const { sys, built } = build(['X ~ Binomial(10, 0.3)', 'K ~ Poisson(a)', 'G ~ Geom(0.2)', 'W ~ NegBin(3, 0.4)',
-      'B ~ Bernoulli(0.3)', 'D ~ DiscreteUniform(1, 6)']);
+    const { sys, built } = build([
+      'X ~ Binomial(10, 0.3)',
+      'K ~ Poisson(a)',
+      'G ~ Geom(0.2)',
+      'W ~ NegBin(3, 0.4)',
+      'B ~ Bernoulli(0.3)',
+      'D ~ DiscreteUniform(1, 6)',
+    ]);
     expect([...built.errors]).toEqual([]);
     const env = { a: 3 };
     const mom = (n: string) => sys.exactMoments(n, env)!;
@@ -453,8 +492,16 @@ describe('RVSystem over discrete variables', () => {
   });
 
   it('derived arithmetic is a pmf, never a KDE; a mixture with a continuous base is a density', () => {
-    const { sys, built } = build(['X ~ Poisson(3)', 'N ~ Binomial(5, 0.5)', 'Z ~ Normal(0, 1)', 'S = X + N', 'Y = X^2',
-      'M = N + Z', 'V = Y + 1', 'W = Z + 1']);
+    const { sys, built } = build([
+      'X ~ Poisson(3)',
+      'N ~ Binomial(5, 0.5)',
+      'Z ~ Normal(0, 1)',
+      'S = X + N',
+      'Y = X^2',
+      'M = N + Z',
+      'V = Y + 1',
+      'W = Z + 1',
+    ]);
     expect(built.errors.size).toBe(0);
     for (const n of ['S', 'Y', 'V']) {
       expect(sys.isDiscreteVar(n), n).toBe(true);
@@ -476,16 +523,22 @@ describe('RVSystem over discrete variables', () => {
     expect(() => check('X > Z')).not.toThrow();
     expect(() => check('X + Z < 2')).not.toThrow();
     expect(() => check('0 < X < Z')).not.toThrow();
-    expect(() => check('Z = 3')).toThrow('P(Z = …) needs a discrete variable: a continuous one takes any single value with probability 0.');
+    expect(() => check('Z = 3')).toThrow(
+      'P(Z = …) needs a discrete variable: a continuous one takes any single value with probability 0.',
+    );
     expect(() => check('Z != 3')).toThrow('P(Z != …) needs a discrete variable');
-    expect(() => check('X = Z')).toThrow('P(… = …) needs discrete variables, and Z is not: a continuous value equals any given one with probability 0.');
+    expect(() => check('X = Z')).toThrow(
+      'P(… = …) needs discrete variables, and Z is not: a continuous value equals any given one with probability 0.',
+    );
   });
 
   it('judges a slider at its value, skips a moving one, and draws nothing while invalid', () => {
     const { sys } = build(['X ~ Binomial(n, p)']);
     const still = new Set<string>();
     expect(sys.paramProblem('X', { n: 10, p: 0.3 }, still)).toBeNull();
-    expect(sys.paramProblem('X', { n: 2.5, p: 0.3 }, still)).toBe('Binomial(n, p) needs a whole number n ≥ 0 (n = 2.5).');
+    expect(sys.paramProblem('X', { n: 2.5, p: 0.3 }, still)).toBe(
+      'Binomial(n, p) needs a whole number n ≥ 0 (n = 2.5).',
+    );
     expect(sys.paramProblem('X', { n: 10, p: 1.5 }, still)).toBe('Binomial(n, p) needs 0 ≤ p ≤ 1.');
     expect(sys.paramProblem('X', { n: 2.5, p: 0.3 }, new Set(['n']))).toBeNull(); // animated: fine the next instant
     // …and at the instant n = 2.5 there is no Binomial(2.5, p): nothing is drawn, nothing is claimed.
@@ -572,7 +625,10 @@ describe('stems', () => {
     expect(sel('X < 2.5')).toEqual([[0, 1, 2]]);
     expect(sel('2 < X <= 5')).toEqual([[3, 4, 5]]);
     expect(sel('X = 3')).toEqual([[3]]);
-    expect(sel('X != 3')).toEqual([[0, 1, 2], [4, 5, 6, 7, 8, 9, 10]]);
+    expect(sel('X != 3')).toEqual([
+      [0, 1, 2],
+      [4, 5, 6, 7, 8, 9, 10],
+    ]);
     expect(sel('X != 2.5')).toEqual([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     expect(sel('X != 0')).toEqual([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     expect(sel('X > 10')).toEqual([]);
@@ -581,7 +637,9 @@ describe('stems', () => {
     // The highlighted mass IS the readout.
     for (const body of ['X < 3', 'X <= 3', '2 < X <= 5', 'X != 3', 'X = 3', 'X >= 4']) {
       const b = bounds(body);
-      const mass = selectStems(stems, law, integerBounds(b, {})).flatMap(r => r.ps).reduce((s, p) => s + p, 0);
+      const mass = selectStems(stems, law, integerBounds(b, {}))
+        .flatMap(r => r.ps)
+        .reduce((s, p) => s + p, 0);
       expect(mass).toBeCloseTo(probabilityValue(sys.discreteDist('X')!, b.lo, b.hi, {}, b), 13);
     }
   });

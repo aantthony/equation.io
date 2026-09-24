@@ -6,7 +6,11 @@ export class PointTrail {
   private pendingBreak = false;
   head: number[] | null = null;
 
-  constructor(readonly dim: 2 | 3, readonly seconds = 30, readonly capacity = 2048) {}
+  constructor(
+    readonly dim: 2 | 3,
+    readonly seconds = 30,
+    readonly capacity = 2048,
+  ) {}
 
   sample(time: number, point: number[]): void {
     if (!Number.isFinite(time)) return;
@@ -34,8 +38,8 @@ export class PointTrail {
   }
 
   coordinates(dim: 2 | 3 = this.dim): number[] {
-    return this.samples.flatMap(({ point }) => dim === 3 && this.dim === 2
-      ? [point[0], point[1], Number.isFinite(point[0]) ? 0 : NaN]
-      : point.slice(0, dim));
+    return this.samples.flatMap(({ point }) =>
+      dim === 3 && this.dim === 2 ? [point[0], point[1], Number.isFinite(point[0]) ? 0 : NaN] : point.slice(0, dim),
+    );
   }
 }

@@ -27,15 +27,23 @@ export function vertexSampler(pts: readonly Expr[], over?: readonly Column[]): V
   // subtrees once, then run the rest in the VM. A coordinate the VM cannot
   // compile keeps the interpreter.
   const programs = pts.map(p => {
-    try { return compileProg(foldNums(p, true), slots); } catch { return null; }
+    try {
+      return compileProg(foldNums(p, true), slots);
+    } catch {
+      return null;
+    }
   });
   const variables = new Float64Array(slots.size);
   const stack = new Float64Array(Math.max(1, ...programs.map(p => p?.depth ?? 0)));
   const sample = (env: Readonly<Record<string, number>>, time?: number): number[] => {
-    dependencies.forEach((name, i) => { variables[i] = name === 't' && time !== undefined ? time : env[name]; });
+    dependencies.forEach((name, i) => {
+      variables[i] = name === 't' && time !== undefined ? time : env[name];
+    });
     const scope = (): Record<string, number> => (time === undefined ? { ...env } : { ...env, t: time });
-    if (!over) return pts.map((p, i) => programs[i] ? run(programs[i]!, variables, stack) : evaluate(p, scope()));
-    const n = over[0].values.length, dim = pts.length, first = dependencies.length;
+    if (!over) return pts.map((p, i) => (programs[i] ? run(programs[i]!, variables, stack) : evaluate(p, scope())));
+    const n = over[0].values.length,
+      dim = pts.length,
+      first = dependencies.length;
     const out = new Array<number>(n * dim);
     const fallback = programs.some(p => !p) ? scope() : null;
     for (let k = 0; k < n; k++) {
@@ -43,7 +51,8 @@ export function vertexSampler(pts: readonly Expr[], over?: readonly Column[]): V
         variables[first + c] = over[c].values[k];
         if (fallback) fallback[over[c].name] = over[c].values[k];
       }
-      for (let i = 0; i < dim; i++) out[k * dim + i] = programs[i] ? run(programs[i]!, variables, stack) : evaluate(pts[i], fallback!);
+      for (let i = 0; i < dim; i++)
+        out[k * dim + i] = programs[i] ? run(programs[i]!, variables, stack) : evaluate(pts[i], fallback!);
     }
     return out;
   };

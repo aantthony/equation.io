@@ -44,7 +44,8 @@ The result returns text and structured data only. "rows" gives each equation's v
         equations: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Every equation in the graph, in display order. One equation or definition per string — do not join rows with ";" (inside quoted text a ";" is data, and kept).',
+          description:
+            'Every equation in the graph, in display order. One equation or definition per string — do not join rows with ";" (inside quoted text a ";" is data, and kept).',
         },
       },
       required: ['equations'],
@@ -106,7 +107,8 @@ The result returns text and structured data only. "rows" gives each equation's v
     name: 'decode_graph_url',
     title: 'Read a graph link',
     annotations: { title: 'Read a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description: 'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url. The rows use the equation.io syntax documented in the "syntax" MCP resource (also at https://equation.io/llms.txt).',
+    description:
+      'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url. The rows use the equation.io syntax documented in the "syntax" MCP resource (also at https://equation.io/llms.txt).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -136,7 +138,8 @@ const SHOW_GRAPH_TOOL = {
   name: 'show_graph',
   title: 'Show an interactive graph',
   annotations: { title: 'Show an interactive graph', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-  description: 'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns per-row validation and share links; a row with status "error" is not drawn until its text is corrected and the graph resubmitted. Use encode_graph_url for validation or link-only requests (including share-link preview notes). In clients without UI support, provide share_url.',
+  description:
+    'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns per-row validation and share links; a row with status "error" is not drawn until its text is corrected and the graph resubmitted. Use encode_graph_url for validation or link-only requests (including share-link preview notes). In clients without UI support, provide share_url.',
   outputSchema: {
     ...TOOLS[0].outputSchema,
     properties: showGraphOutputProperties,
@@ -169,8 +172,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
     const got = Object.keys(args).filter(k => k !== 'equations');
     const hint = got.length ? ` Received ${got.map(k => `"${k}"`).join(', ')} instead.` : '';
     throw new Error(
-      `encode_graph_url takes "equations": a flat array of strings, one per equation, e.g. `
-        + `{"equations": ["y = x^2", "y = sin(x)"]}.${hint}`,
+      `encode_graph_url takes "equations": a flat array of strings, one per equation, e.g. ` +
+        `{"equations": ["y = x^2", "y = sin(x)"]}.${hint}`,
     );
   }
   const texts = (equations as string[]).map(t => t.trim()).filter(Boolean);
@@ -182,8 +185,10 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   // that may not be in it.
   const bad = texts.find(t => splitStatements(t).length > 1);
   if (bad) {
-    throw new Error(`Row ${JSON.stringify(bad)} holds more than one equation`
-      + " (';' and line breaks each separate rows) — send each as its own array item.");
+    throw new Error(
+      `Row ${JSON.stringify(bad)} holds more than one equation` +
+        " (';' and line breaks each separate rows) — send each as its own array item.",
+    );
   }
   const analysis = analyze(texts);
   const plotRows = analysis.rows.filter(r => r.cls);
@@ -192,20 +197,26 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   // Mirror the app's drag test (web/main.ts pointWriter/defPointWriter) so
   // "draggable" reports what the app will actually let the user grab: 2D
   // graphs only, and only coordinates that are plain numbers or slider names.
-  const sliderRow = (name: string) => analysis.rows.find(r =>
-    r.def?.kind === 'const' && r.def.name === name && !r.error && sliderForm(r.def.rhs, analysis.document.fnNames));
+  const sliderRow = (name: string) =>
+    analysis.rows.find(
+      r =>
+        r.def?.kind === 'const' && r.def.name === name && !r.error && sliderForm(r.def.rhs, analysis.document.fnNames),
+    );
   const draggable = (row: (typeof analysis.rows)[number]): boolean | undefined => {
     const coordinates = row.cpu?.type === 'system' ? row.cpu.coordinates : undefined;
     const pair = coordinates
       ? row.text.slice(row.text.indexOf('=') + 1)
       : row.cpu?.type === 'point'
-      ? row.text
-      : row.def?.kind === 'const' && analysis.defs.points.has(row.def.name)
-        ? row.def.rhs
-        : null;
+        ? row.text
+        : row.def?.kind === 'const' && analysis.defs.points.has(row.def.name)
+          ? row.def.rhs
+          : null;
     if (pair === null) return undefined;
     const pinned = coordinates
-      ? definitionDependencies(coordinates.flatMap(c => [...freeVars(c)]), analysis.defs)
+      ? definitionDependencies(
+          coordinates.flatMap(c => [...freeVars(c)]),
+          analysis.defs,
+        )
       : undefined;
     return !needs3D && dragAxes(pair, sliderRow, pinned) !== null;
   };
@@ -221,23 +232,24 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
             kind: row.comment
               ? 'comment (group heading)'
               : row.def
-                // `adults = person[…]` scans as a constant, but what it
-                // defines is another data file.
-                ? `definition (${row.def.kind === 'const' && analysis.defs.tables.has(row.def.name)
-                  ? 'filtered data' : row.def.kind})`
+                ? // `adults = person[…]` scans as a constant, but what it
+                  // defines is another data file.
+                  `definition (${
+                    row.def.kind === 'const' && analysis.defs.tables.has(row.def.name) ? 'filtered data' : row.def.kind
+                  })`
                 : row.view
                   ? `viewport (${row.view.kind})`
                   : row.dist === 'density'
                     ? 'random variable (density curve)'
                     : row.dist === 'pmf'
                       ? 'discrete random variable (pmf stems)'
-                    : row.dist === 'probability'
-                      ? 'probability (shaded area)'
-                      : row.dist === 'expectation'
-                        ? 'expectation (mean readout)'
-                        : row.dataLocal
-                          ? 'data (reads a file on the author\'s device)'
-                          : publicKind(row.cls!.object),
+                      : row.dist === 'probability'
+                        ? 'probability (shaded area)'
+                        : row.dist === 'expectation'
+                          ? 'expectation (mean readout)'
+                          : row.dataLocal
+                            ? "data (reads a file on the author's device)"
+                            : publicKind(row.cls!.object),
             ...(row.cls?.animated ? { animated: true } : {}),
             ...(row.info ? { value: row.info } : {}),
             ...(row.dataLocal ? { note: row.dataLocal } : {}),
@@ -273,15 +285,18 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
     // broken row is not "fine", and "rows" — which says so — is the verdict.
     preview = dataWouldPlot
       ? rows.every(r => r.status === 'ok')
-        ? 'none — every plot row reads a data file on the author\'s device (see preview_omits; the graph itself is fine)'
-        : 'none — every plot row reads a data file on the author\'s device (see preview_omits), and other rows have errors (see rows)'
+        ? "none — every plot row reads a data file on the author's device (see preview_omits; the graph itself is fine)"
+        : "none — every plot row reads a data file on the author's device (see preview_omits), and other rows have errors (see rows)"
       : 'none — no plot rows to draw';
   } else if (omitted.length === plotRows.length) {
-    preview = 'none — the static preview cannot draw any of these rows (see preview_omits; this says nothing about whether the graph works)';
+    preview =
+      'none — the static preview cannot draw any of these rows (see preview_omits; this says nothing about whether the graph works)';
   } else {
     const notes = [
       analysis.rows.some(r => r.cls?.animated) ? 'at t = 0; the live graph animates' : '',
-      omitted.length ? `${omitted.length} of ${plotRows.length} plot rows missing from the share-link preview — see preview_omits` : '',
+      omitted.length
+        ? `${omitted.length} of ${plotRows.length} plot rows missing from the share-link preview — see preview_omits`
+        : '',
       plotRows.length > MAX_PLOTS ? `first ${MAX_PLOTS} plot rows only` : '',
     ].filter(Boolean);
     preview = 'not attached — available via share link' + (notes.length ? ` (${notes.join('; ')})` : '');
@@ -302,11 +317,7 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
 function decodeGraphUrl(args: Record<string, unknown>) {
   if (typeof args.url !== 'string') throw new Error('url must be a string');
   const url = new URL(args.url);
-  const payload = url.hash.length > 1
-    ? url.hash.slice(1)
-    : url.pathname.startsWith('/g/')
-      ? url.pathname.slice(3)
-      : '';
+  const payload = url.hash.length > 1 ? url.hash.slice(1) : url.pathname.startsWith('/g/') ? url.pathname.slice(3) : '';
   if (!payload) throw new Error('No equations found in that URL (expected /#... or /g/... form).');
   return { equations: decodePayload(payload) };
 }
@@ -346,7 +357,8 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         serverInfo: { name: 'equation', title: 'equation.io grapher', version: '1.0.0' },
         instructions:
           'Graphing calculator whose entire state lives in the URL. show_graph displays an interactive graph in the conversation. encode_graph_url validates equations and creates a share link without displaying a widget. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
-          origin + '/llms.txt',
+          origin +
+          '/llms.txt',
       });
     }
     case 'ping':
@@ -367,7 +379,8 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         }
       }
       const expected = syntaxResource(origin).uri;
-      if (uri !== expected) return error(-32002, `Unknown resource: ${uri}. Available resources: ${expected}, ${GRAPH_UI_URI}.`);
+      if (uri !== expected)
+        return error(-32002, `Unknown resource: ${uri}. Available resources: ${expected}, ${GRAPH_UI_URI}.`);
       try {
         return result({ contents: [{ uri: expected, mimeType: 'text/markdown', text: await ctx.syntaxText() }] });
       } catch (e) {
@@ -431,11 +444,11 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
     // No server-initiated streams (GET) and no sessions to delete.
     return new Response(
       'Equation.io MCP server\n\n' +
-      'To create and edit graphs with an AI assistant, add https://equation.io/mcp ' +
-      'to your MCP client using Streamable HTTP. No API key is required.\n\n' +
-      'For the graphing calculator, visit https://equation.io/\n' +
-      'Expression syntax: https://equation.io/llms.txt\n\n' +
-      'MCP requests use HTTP POST. This endpoint does not offer a GET event stream.\n',
+        'To create and edit graphs with an AI assistant, add https://equation.io/mcp ' +
+        'to your MCP client using Streamable HTTP. No API key is required.\n\n' +
+        'For the graphing calculator, visit https://equation.io/\n' +
+        'Expression syntax: https://equation.io/llms.txt\n\n' +
+        'MCP requests use HTTP POST. This endpoint does not offer a GET event stream.\n',
       {
         status: 405,
         headers: { ...CORS_HEADERS, Allow: 'POST, OPTIONS', 'Content-Type': 'text/plain; charset=utf-8' },
@@ -467,9 +480,9 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
       return res.text();
     },
   };
-  const responses = (await Promise.all(
-    (Array.isArray(body) ? body : [body]).map(r => handleRpc(r as RpcRequest, ctx)),
-  )).filter((r): r is object => r !== null);
+  const responses = (
+    await Promise.all((Array.isArray(body) ? body : [body]).map(r => handleRpc(r as RpcRequest, ctx)))
+  ).filter((r): r is object => r !== null);
 
   if (!responses.length) return new Response(null, { status: 202, headers: CORS_HEADERS });
   const payload = Array.isArray(body) ? responses : responses[0];

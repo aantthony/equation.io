@@ -137,7 +137,13 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
     // on-screen range barely dims and the flight does the fading.
     const out = Math.min(
       1,
-      Math.max(-x / (w + EXIT_PAD), (x + w - vw) / (w + EXIT_PAD), -y / (h + EXIT_PAD), (y + h - vh) / (h + EXIT_PAD), 0),
+      Math.max(
+        -x / (w + EXIT_PAD),
+        (x + w - vw) / (w + EXIT_PAD),
+        -y / (h + EXIT_PAD),
+        (y + h - vh) / (h + EXIT_PAD),
+        0,
+      ),
     );
     panel.style.transform = offset.x || offset.y ? `translate3d(${offset.x}px, ${offset.y}px, 0)` : '';
     panel.style.opacity = out ? String(1 - 0.5 * out * out) : '';
@@ -406,7 +412,13 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
     return null;
   };
 
-  function startPanelGesture(id: number, x: number, y: number, t: number, opts: { claimed: boolean; mouse: boolean; fromEditor: boolean; scroll: Gesture['scroll'] }) {
+  function startPanelGesture(
+    id: number,
+    x: number,
+    y: number,
+    t: number,
+    opts: { claimed: boolean; mouse: boolean; fromEditor: boolean; scroll: Gesture['scroll'] },
+  ) {
     const flying = raf !== 0;
     if (flying) stopAnim();
     gesture = {

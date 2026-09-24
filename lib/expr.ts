@@ -8,18 +8,34 @@
 import { BinaryInfix, BinaryRightInfix, operators, Postfix, Prefix, shunting } from './lang/parser.ts';
 import Tokenizer, { type PatternDict, type Token } from './lang/tokenizer.ts';
 import { walk } from './lang/ast.ts';
-import { betaPdf, binomPmf, discreteUniformPmf, gammaPdf, lgamma, negBinomPmf, poissonPmf, studentTPdf, weibullPdf } from './specfn.ts';
+import {
+  betaPdf,
+  binomPmf,
+  discreteUniformPmf,
+  gammaPdf,
+  lgamma,
+  negBinomPmf,
+  poissonPmf,
+  studentTPdf,
+  weibullPdf,
+} from './specfn.ts';
 
 export type IneqOp = '<' | '<=' | '>' | '>=';
 
 export type FigureForm = 'polygon' | 'segment' | 'polyline' | 'vector' | 'square' | 'hull';
 
-export interface Axis { id: string; n: number }
+export interface Axis {
+  id: string;
+  n: number;
+}
 
 /** A packed column a `lazy` list or packed figure runs over: `name` is the
  *  variable its template reads, bound to values[k] for element k. Names start
  *  with '@', so they never collide with anything a row can write. */
-export interface Column { readonly name: string; readonly values: Float64Array }
+export interface Column {
+  readonly name: string;
+  readonly values: Float64Array;
+}
 
 /** Nodes are immutable. The exception is `axes` and `origin`: list identity
  *  that list lowering records on the nodes it meets (markOrigins, axesOf),
@@ -32,17 +48,35 @@ type ExprNode =
   /** `glyph` records a product written `·`/`⋅` ('dot') or `×` ('cross'):
    *  between two vectors lowerGeom reads it as dot(a, b) or cross(a, b);
    *  between numbers it is plain multiplication. */
-  | { readonly kind: 'bin'; readonly op: '+' | '-' | '*' | '/' | '^'; readonly a: Expr; readonly b: Expr; readonly glyph?: 'dot' | 'cross' }
+  | {
+      readonly kind: 'bin';
+      readonly op: '+' | '-' | '*' | '/' | '^';
+      readonly a: Expr;
+      readonly b: Expr;
+      readonly glyph?: 'dot' | 'cross';
+    }
   | { readonly kind: 'neg'; readonly a: Expr }
   | { readonly kind: 'call'; readonly name: string; readonly args: readonly Expr[] }
   | { readonly kind: 'index'; readonly args: readonly [Expr, Expr] }
   | { readonly kind: 'range'; readonly args: readonly [Expr, Expr] }
   | { readonly kind: 'eqtest'; readonly op: '==' | '!='; readonly args: readonly [Expr, Expr] }
-  | { readonly kind: 'comp'; readonly value: Expr; readonly index: number; readonly arity: number; readonly functionName: string }
+  | {
+      readonly kind: 'comp';
+      readonly value: Expr;
+      readonly index: number;
+      readonly arity: number;
+      readonly functionName: string;
+    }
   /** A figure's vertices, flat (dimension numbers per vertex) — or, with
    *  `over`, ONE vertex template evaluated once per element of the columns:
    *  a path through thousands of computed points stays a single template. */
-  | { readonly kind: 'figure'; readonly form: FigureForm; readonly dimension: 2 | 3; readonly vertices: readonly Expr[]; readonly over?: readonly Column[] }
+  | {
+      readonly kind: 'figure';
+      readonly form: FigureForm;
+      readonly dimension: 2 | 3;
+      readonly vertices: readonly Expr[];
+      readonly over?: readonly Column[];
+    }
   | { readonly kind: 'trail'; readonly coordinates: readonly Expr[] }
   | { readonly kind: 'hist'; readonly centers: Float64Array; readonly counts: Float64Array; readonly width: number }
   | { readonly kind: 'family'; readonly members: readonly Expr[] }
@@ -81,7 +115,11 @@ type ExprNode =
   /** A text column, the counterpart of `data`. Same rule: only comparisons. */
   | { readonly kind: 'text'; readonly values: readonly string[] }
   /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
-  | { readonly kind: 'piecewise'; readonly cases: ReadonlyArray<{ readonly cond: Expr; readonly value: Expr }>; readonly otherwise?: Expr }
+  | {
+      readonly kind: 'piecewise';
+      readonly cases: ReadonlyArray<{ readonly cond: Expr; readonly value: Expr }>;
+      readonly otherwise?: Expr;
+    }
   /**
    * A tail-recursive function call run as a bounded loop: `params` start at
    * `seeds`; each pass evaluates `body`, a piecewise whose leaves either give
@@ -91,7 +129,13 @@ type ExprNode =
    * once `limit` passes run out, a param leaves the finite range, or no
    * case holds and there is no default.
    */
-  | { readonly kind: 'loop'; readonly params: readonly string[]; readonly seeds: readonly Expr[]; readonly body: Expr; readonly limit: number };
+  | {
+      readonly kind: 'loop';
+      readonly params: readonly string[];
+      readonly seeds: readonly Expr[];
+      readonly body: Expr;
+      readonly limit: number;
+    };
 
 /** The self-call inside a `loop` body: its args are the next pass's params. */
 export const RECUR = '@recur';
@@ -110,36 +154,127 @@ export const isRecur = (e: Expr): e is Expr & { kind: 'call' } => e.kind === 'ca
 /** Historical tuple-call spelling, applied before resolving argument values.
  * Only syntax vectors flatten: a named or computed vector is never splatted. */
 export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Expr[] {
-  const grouped = new Set(['segment', 'polyline', 'polygon', 'hull', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit', 'rotate', 'grad', 'div', 'curl', 'laplacian']);
-  return grouped.has(name) ? args : args.flatMap(x => x.kind === 'vec' ? x.items : [x]);
+  const grouped = new Set([
+    'segment',
+    'polyline',
+    'polygon',
+    'hull',
+    'vector',
+    'line',
+    'circle',
+    'square',
+    'distance',
+    'angle',
+    'dot',
+    'cross',
+    'midpoint',
+    'perp',
+    'unit',
+    'rotate',
+    'grad',
+    'div',
+    'curl',
+    'laplacian',
+  ]);
+  return grouped.has(name) ? args : args.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
 }
 
 /** Functions available in expressions (all map to GLSL builtins or helpers). */
 export const FUNCTIONS = new Set([
-  'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2',
-  'sinh', 'cosh', 'tanh', 'sech', 'asinh', 'acosh', 'atanh',
-  'sqrt', 'abs', 'exp', 'ln', 'log', 'floor', 'ceil', 'round',
-  'min', 'max', 'clamp', 'mod', 'sign', 'fract',
-  'erf', 'normalpdf', 'normalcdf',
-  'gcd', 'isprime', 'gamma', 'factorial', 'sinc', 'coth',
-  're', 'im', 'arg', 'conj',
+  'sin',
+  'cos',
+  'tan',
+  'asin',
+  'acos',
+  'atan',
+  'atan2',
+  'sinh',
+  'cosh',
+  'tanh',
+  'sech',
+  'asinh',
+  'acosh',
+  'atanh',
+  'sqrt',
+  'abs',
+  'exp',
+  'ln',
+  'log',
+  'floor',
+  'ceil',
+  'round',
+  'min',
+  'max',
+  'clamp',
+  'mod',
+  'sign',
+  'fract',
+  'erf',
+  'normalpdf',
+  'normalcdf',
+  'gcd',
+  'isprime',
+  'gamma',
+  'factorial',
+  'sinc',
+  'coth',
+  're',
+  'im',
+  'arg',
+  'conj',
   // List reductions and transforms: lowered symbolically (or evaluated
   // numerically) by list.ts, so nothing downstream ever sees them.
-  'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
+  'mean',
+  'total',
+  'count',
+  'stdev',
+  'median',
+  'sort',
+  'hist',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
-  'dot', 'cross', 'perp', 'midpoint', 'unit', 'rotate', 'distance', 'angle',
-  'segment', 'polyline', 'vector', 'line', 'polygon', 'square', 'circle', 'hull',
+  'dot',
+  'cross',
+  'perp',
+  'midpoint',
+  'unit',
+  'rotate',
+  'distance',
+  'angle',
+  'segment',
+  'polyline',
+  'vector',
+  'line',
+  'polygon',
+  'square',
+  'circle',
+  'hull',
   // Small-matrix helpers (det, trace, matvec, linear solve), also lowered
   // symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts).
-  'det', 'trace', 'solve',
+  'det',
+  'trace',
+  'solve',
   // Not real functions: Σ/Π/∫ binders and the ∇ operators, expanded
   // symbolically by resolveExpr.
-  'sum', 'prod', 'int', 'grad', 'div', 'curl', 'laplacian',
+  'sum',
+  'prod',
+  'int',
+  'grad',
+  'div',
+  'curl',
+  'laplacian',
   // Whole-expression plot modes (see classify): domain coloring, conformal
   // grids, escape-time iteration, swept tubes, motion trails, and surfaces
   // of revolution.
-  'domain', 'conformal', 'iter', 'rgb', 'hsl', 'oklch', 'tube', 'trail', 'revolve',
+  'domain',
+  'conformal',
+  'iter',
+  'rgb',
+  'hsl',
+  'oklch',
+  'tube',
+  'trail',
+  'revolve',
 ]);
 
 /**
@@ -148,11 +283,30 @@ export const FUNCTIONS = new Set([
  * that defines its own `gamma(x) = …` or `sinc = …` keeps its meaning.
  */
 export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
-  'gamma', 'factorial', 'sinc', 'coth', 'clamp',
-  'mean', 'total', 'count', 'stdev', 'median', 'sort', 'hist',
-  'grad', 'div', 'curl', 'laplacian',
-  'polyline', 'vector', 'distance', 'angle',
-  'revolve', 'rgb', 'hsl', 'oklch',
+  'gamma',
+  'factorial',
+  'sinc',
+  'coth',
+  'clamp',
+  'mean',
+  'total',
+  'count',
+  'stdev',
+  'median',
+  'sort',
+  'hist',
+  'grad',
+  'div',
+  'curl',
+  'laplacian',
+  'polyline',
+  'vector',
+  'distance',
+  'angle',
+  'revolve',
+  'rgb',
+  'hsl',
+  'oklch',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
@@ -229,8 +383,7 @@ export const builtinFn = (name: string): string | null => {
 };
 
 /** Canonical name for a call: user functions win (exact), then case-folded builtins. */
-const canonicalFn = (name: string): string =>
-  activeUserFns.has(name) ? name : (builtinFn(name) ?? name);
+const canonicalFn = (name: string): string => (activeUserFns.has(name) ? name : (builtinFn(name) ?? name));
 
 /** Whether this document defines the builtin `name` would fold to, so the
  *  name reads as a value. Folds case with builtinFn, so `Total(…)` does not
@@ -242,11 +395,12 @@ const shadowedFn = (name: string): boolean => {
   return b !== null && SHADOWABLE_FNS.has(b) && activeValueNames.has(b);
 };
 
-const isFnName = (name: string): boolean =>
-  activeUserFns.has(name) || (builtinFn(name) !== null && !shadowedFn(name));
+const isFnName = (name: string): boolean => activeUserFns.has(name) || (builtinFn(name) !== null && !shadowedFn(name));
 
 const num = (value: number): Expr => ({ kind: 'num', value });
-const bin = (op: '+' | '-' | '*' | '/' | '^') => (a: Expr, b: Expr): Expr => ({ kind: 'bin', op, a, b });
+const bin =
+  (op: '+' | '-' | '*' | '/' | '^') =>
+  (a: Expr, b: Expr): Expr => ({ kind: 'bin', op, a, b });
 
 // Private nodes used only while parsing: a comma-joined argument list, an
 // open-bracket marker, and a `cond: value` piecewise part.
@@ -266,9 +420,7 @@ function asExpr(n: PNode | undefined): Expr {
 }
 
 const asVecOrExpr = (n: PNode): Expr =>
-  n.kind === 'series' && (n.items.length === 2 || n.items.length === 3)
-    ? seriesToVec(n.items)
-    : asExpr(n);
+  n.kind === 'series' && (n.items.length === 2 || n.items.length === 3) ? seriesToVec(n.items) : asExpr(n);
 
 // Operators take tuples as operands — a parenthesized pair used in arithmetic
 // is a vector literal, so (A + (1, 2))/2 works. Only a function application
@@ -328,7 +480,8 @@ const closer = (open: string, finish: (content: PNode | null, call: boolean) => 
   BinaryInfix<PNode>((a, b) => {
     const marker = b ?? a;
     if (!marker || marker.kind !== 'popen') throw new Error('Mismatched brackets.');
-    if (marker.bracket !== open) throw new Error(`Mismatched brackets: "${marker.bracket}" closed by "${BRACKET_CLOSE[open]}".`);
+    if (marker.bracket !== open)
+      throw new Error(`Mismatched brackets: "${marker.bracket}" closed by "${BRACKET_CLOSE[open]}".`);
     return finish(b === undefined ? null : a, marker.call);
   });
 
@@ -378,12 +531,9 @@ const ops = operators<PNode>({
   // (list.ts) and reports itself anywhere else. Recognized as one token each
   // so '!=' never half-matches as postfix '!' followed by '=', which would
   // silently graph factorial(x) = 2.
-  '==': BinaryInfix<PNode>((a, b): Expr =>
-    ({ kind: 'eqtest', op: '==', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
-  '!=': BinaryInfix<PNode>((a, b): Expr =>
-    ({ kind: 'eqtest', op: '!=', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
-  '≠': BinaryInfix<PNode>((a, b): Expr =>
-    ({ kind: 'eqtest', op: '!=', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+  '==': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'eqtest', op: '==', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+  '!=': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'eqtest', op: '!=', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
+  '≠': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'eqtest', op: '!=', args: [asVecOrExpr(a), asVecOrExpr(b)] })),
 
   '<': asIneq('<'),
   '<=': asIneq('<='),
@@ -429,8 +579,7 @@ const ops = operators<PNode>({
   // List indexing: `L[2]` for a known list name L (1-based; list.ts lowers
   // it). Only named lists index — `x[2]` keeps meaning 2x, and a literal
   // `[1,2,3][2]` stays implicit multiplication.
-  '[at]': BinaryInfix<PNode>((a, b): Expr =>
-    ({ kind: 'index', args: [asExpr(a), asVecOrExpr(b)] })),
+  '[at]': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'index', args: [asExpr(a), asVecOrExpr(b)] })),
 
   // Column access: `person.age` is one name, not a product. Binding tighter
   // than everything else, it is purely a naming device — the dotted name
@@ -517,9 +666,7 @@ const MULTI_CHAR_OPS = Object.keys(ops).filter(o => o.length > 1);
  * (see GLYPH_ALIASES). µ is the micro sign Mac keyboards type for mu; it is
  * just a name character of its own.
  */
-export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςσυφχψω'
-  + 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩ'
-  + 'ϑϕϖϱϵµ';
+export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςσυφχψω' + 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩ' + 'ϑϕϖϱϵµ';
 /** Regex character-class fragment for a name's first character. */
 export const NAME_START_CHARS = `A-Za-z_${GREEK_NAME_CHARS}`;
 /**
@@ -544,14 +691,30 @@ export const NAME_SRC = `[${NAME_START_CHARS}][${WRITTEN_NAME_CHARS}]*`;
  * plain symbol like xy is one name.
  */
 const GLYPH_ALIASES: Record<string, string> = {
-  'Σ': 'sum', '∑': 'sum', 'Π': 'prod', '∏': 'prod', '∫': 'int', '∞': 'inf', '∇': 'grad',
-  'π': 'pi', 'τ': 'tau',
+  Σ: 'sum',
+  '∑': 'sum',
+  Π: 'prod',
+  '∏': 'prod',
+  '∫': 'int',
+  '∞': 'inf',
+  '∇': 'grad',
+  π: 'pi',
+  τ: 'tau',
 };
 export const GLYPH_CHARS = Object.keys(GLYPH_ALIASES).join('');
 
 const SUPERSCRIPTS: Record<string, string> = {
-  '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4',
-  '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9', '⁻': '-',
+  '⁰': '0',
+  '¹': '1',
+  '²': '2',
+  '³': '3',
+  '⁴': '4',
+  '⁵': '5',
+  '⁶': '6',
+  '⁷': '7',
+  '⁸': '8',
+  '⁹': '9',
+  '⁻': '-',
 };
 export const SUPERSCRIPT_CHARS = Object.keys(SUPERSCRIPTS).join('');
 
@@ -583,8 +746,10 @@ const syntax: PatternDict = {
   operator: x => !!ops[x] || MULTI_CHAR_OPS.some(m => m.startsWith(x)),
   invalid(x) {
     if (x === '\\') {
-      throw new Error('Invalid character: "\\". Write the symbol itself (π, θ, ∇, …)'
-        + ' — in the editor, typing \\pi, \\theta or \\nabla inserts it.');
+      throw new Error(
+        'Invalid character: "\\". Write the symbol itself (π, θ, ∇, …)' +
+          ' — in the editor, typing \\pi, \\theta or \\nabla inserts it.',
+      );
     }
     throw new Error(`Invalid character: ${JSON.stringify(x)}.`);
   },
@@ -598,7 +763,7 @@ const tokenize = Tokenizer(syntax);
  * x⁻² is x ^ - 2, whose '-' becomes the [neg] prefix downstream and shares
  * ^'s precedence, so it binds as x^(-2).
  */
-function *desugarUnicode(bare: Iterable<Token>): Iterable<Token> {
+function* desugarUnicode(bare: Iterable<Token>): Iterable<Token> {
   for (const token of bare) {
     if (token.type === 'glyph') {
       yield { ...token, type: 'symbol', str: GLYPH_ALIASES[token.str] };
@@ -628,13 +793,16 @@ function op(str: string): Token {
  * number after it is a leading-dot decimal (`.5`); every other '.' is the
  * column-access operator (`person.age`).
  */
-function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
+function* normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
   let held: Token | null = null;
   let dot: Token | null = null;
   let afterValue = false;
-  const ends = (t: Token): boolean => t.type === 'number' || t.type === 'symbol'
-    || t.type === 'parenclose' || t.type === 'string'
-    || (t.type === 'operator' && t.str === '!');
+  const ends = (t: Token): boolean =>
+    t.type === 'number' ||
+    t.type === 'symbol' ||
+    t.type === 'parenclose' ||
+    t.type === 'string' ||
+    (t.type === 'operator' && t.str === '!');
   for (let token of bare) {
     if (held) {
       if (token.type === 'operator' && token.str.startsWith('.')) {
@@ -687,17 +855,28 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
  * Only a single name or whole number; `a_{n+1}` stays an index (a sequence's,
  * see addImplicitTokens).
  */
-function *mergeBracedSubscripts(bare: Iterable<Token>): Iterable<Token> {
+function* mergeBracedSubscripts(bare: Iterable<Token>): Iterable<Token> {
   const all = [...bare];
-  const skip = (k: number) => { while (all[k]?.type === 'whitespace') k++; return k; };
+  const skip = (k: number) => {
+    while (all[k]?.type === 'whitespace') k++;
+    return k;
+  };
   for (let i = 0; i < all.length; i++) {
     const token = all[i];
-    if (token.type === 'symbol' && token.str.endsWith('_') && all[i + 1]?.type === 'parenopen' && all[i + 1].str === '{') {
+    if (
+      token.type === 'symbol' &&
+      token.str.endsWith('_') &&
+      all[i + 1]?.type === 'parenopen' &&
+      all[i + 1].str === '{'
+    ) {
       const at = skip(i + 2);
       const inner = all[at];
       const close = skip(at + 1);
-      if ((inner?.type === 'symbol' || (inner?.type === 'number' && /^\d+$/.test(inner.str)))
-        && all[close]?.type === 'parenclose' && all[close].str === '}') {
+      if (
+        (inner?.type === 'symbol' || (inner?.type === 'number' && /^\d+$/.test(inner.str))) &&
+        all[close]?.type === 'parenclose' &&
+        all[close].str === '}'
+      ) {
         yield { ...token, str: token.str + inner.str };
         i = close;
         continue;
@@ -711,7 +890,7 @@ function *mergeBracedSubscripts(bare: Iterable<Token>): Iterable<Token> {
  * Insert implicit multiplication tokens (2x, x(x+1), (x+1)(x-1), x y) and
  * rewrite unary +/- into a dedicated prefix operator.
  */
-function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
+function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   let last: Token | null = null;
   /** The dotted name ending at `last` when it is a symbol: `person.age`. */
   let path: string | null = null;
@@ -726,8 +905,13 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     // adds, so both reach the check that says text has no numeric value.
     // Without this the '+' reads as a unary sign and the row dies as
     // "Incomplete expression.", which sends the reader hunting for a typo.
-    const afterValue = last !== null && (last.type === 'number' || last.type === 'symbol'
-      || last.type === 'parenclose' || last.type === 'string' || afterPostfix);
+    const afterValue =
+      last !== null &&
+      (last.type === 'number' ||
+        last.type === 'symbol' ||
+        last.type === 'parenclose' ||
+        last.type === 'string' ||
+        afterPostfix);
 
     if (token.type === 'bar') {
       // |x| is abs(x): a bar after a value closes the innermost open bar;
@@ -761,19 +945,26 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     }
 
     let emit = token;
-    if (afterValue
-      && (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen'
-        || token.type === 'string')) {
+    if (
+      afterValue &&
+      (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen' || token.type === 'string')
+    ) {
       // A column or list indexes under its full name: person.age[2]. Decided
       // BEFORE the function reading and beating it, because a name can be
       // both: a CSV column headed `sin` gives `person.sin`, and `mean` is
       // shadowable, so `mean = [1, 4, 2]` then `mean[2]` is an index.
       // A sequence also takes its index in braces or parens, as its
       // recurrence row is written: a_{n+1}, a_(n-1), a_{10}.
-      const isIndex = token.type === 'parenopen' && last!.type === 'symbol'
-        && (token.str === '[' ? indexes(path ?? last!.str) : last!.str.endsWith('_') && activeListNames.has(last!.str));
-      const isFnCall = !isIndex && !path?.includes('.') && token.type === 'parenopen'
-        && last!.type === 'symbol' && isFnName(last!.str);
+      const isIndex =
+        token.type === 'parenopen' &&
+        last!.type === 'symbol' &&
+        (token.str === '[' ? indexes(path ?? last!.str) : last!.str.endsWith('_') && activeListNames.has(last!.str));
+      const isFnCall =
+        !isIndex &&
+        !path?.includes('.') &&
+        token.type === 'parenopen' &&
+        last!.type === 'symbol' &&
+        isFnName(last!.str);
       yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };
     }
@@ -781,9 +972,14 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     const afterDot = last?.type === 'operator' && last.str === '.';
     yield emit;
     last = emit;
-    path = emit.type === 'symbol' ? (afterDot && path ? `${path}.${emit.str}` : emit.str)
-      : emit.type === 'operator' && emit.str === '.' ? path
-        : null;
+    path =
+      emit.type === 'symbol'
+        ? afterDot && path
+          ? `${path}.${emit.str}`
+          : emit.str
+        : emit.type === 'operator' && emit.str === '.'
+          ? path
+          : null;
   }
 }
 
@@ -846,50 +1042,91 @@ export function parseExpr(
   }
 }
 
-
 /** Immediate expression children. Packed numeric and text columns are leaves. */
 export function childrenOf(e: Expr): readonly Expr[] {
   switch (e.kind) {
-    case 'neg': return [e.a];
-    case 'bin': return [e.a, e.b];
-    case 'index': case 'range': case 'eqtest': case 'call': return e.args;
-    case 'comp': return [e.value];
-    case 'figure': return e.vertices;
-    case 'lazy': return [e.body];
-    case 'trail': return e.coordinates;
-    case 'family': return e.members;
-    case 'eq': case 'ineq': return [e.l, e.r];
-    case 'vec': case 'list': return e.items;
-    case 'piecewise': return e.cases.flatMap(c => [c.cond, c.value]).concat(e.otherwise ? [e.otherwise] : []);
-    case 'loop': return [...e.seeds, e.body];
-    default: return [];
+    case 'neg':
+      return [e.a];
+    case 'bin':
+      return [e.a, e.b];
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'call':
+      return e.args;
+    case 'comp':
+      return [e.value];
+    case 'figure':
+      return e.vertices;
+    case 'lazy':
+      return [e.body];
+    case 'trail':
+      return e.coordinates;
+    case 'family':
+      return e.members;
+    case 'eq':
+    case 'ineq':
+      return [e.l, e.r];
+    case 'vec':
+    case 'list':
+      return e.items;
+    case 'piecewise':
+      return e.cases.flatMap(c => [c.cond, c.value]).concat(e.otherwise ? [e.otherwise] : []);
+    case 'loop':
+      return [...e.seeds, e.body];
+    default:
+      return [];
   }
 }
 
 /** Map one child level, preserving metadata and reusing unchanged nodes. */
 export function mapChildren(e: Expr, map: (child: Expr) => Expr): Expr {
-  const old = childrenOf(e), next = old.map(map);
+  const old = childrenOf(e),
+    next = old.map(map);
   if (next.every((child, i) => child === old[i])) return e;
   switch (e.kind) {
-    case 'neg': return { ...e, a: next[0] };
-    case 'bin': return { ...e, a: next[0], b: next[1] };
-    case 'index': case 'range': case 'eqtest': return { ...e, args: [next[0], next[1]] };
-    case 'call': return { ...e, args: next };
-    case 'comp': return { ...e, value: next[0] };
-    case 'figure': return { ...e, vertices: next };
-    case 'lazy': return { ...e, body: next[0] };
-    case 'trail': return { ...e, coordinates: next };
-    case 'family': return { ...e, members: next };
-    case 'eq': case 'ineq': return { ...e, l: next[0], r: next[1] };
-    case 'vec': case 'list': return { ...e, items: next };
-    case 'piecewise': return { ...e, cases: e.cases.map((_, i) => ({ cond: next[2 * i], value: next[2 * i + 1] })), otherwise: e.otherwise ? next[next.length - 1] : undefined };
-    case 'loop': return { ...e, seeds: next.slice(0, e.seeds.length), body: next[e.seeds.length] };
-    default: return e;
+    case 'neg':
+      return { ...e, a: next[0] };
+    case 'bin':
+      return { ...e, a: next[0], b: next[1] };
+    case 'index':
+    case 'range':
+    case 'eqtest':
+      return { ...e, args: [next[0], next[1]] };
+    case 'call':
+      return { ...e, args: next };
+    case 'comp':
+      return { ...e, value: next[0] };
+    case 'figure':
+      return { ...e, vertices: next };
+    case 'lazy':
+      return { ...e, body: next[0] };
+    case 'trail':
+      return { ...e, coordinates: next };
+    case 'family':
+      return { ...e, members: next };
+    case 'eq':
+    case 'ineq':
+      return { ...e, l: next[0], r: next[1] };
+    case 'vec':
+    case 'list':
+      return { ...e, items: next };
+    case 'piecewise':
+      return {
+        ...e,
+        cases: e.cases.map((_, i) => ({ cond: next[2 * i], value: next[2 * i + 1] })),
+        otherwise: e.otherwise ? next[next.length - 1] : undefined,
+      };
+    case 'loop':
+      return { ...e, seeds: next.slice(0, e.seeds.length), body: next[e.seeds.length] };
+    default:
+      return e;
   }
 }
 
 /** Stable mathematical serialization excludes transient list identity. */
-export const exprReplacer = (key: string, value: unknown): unknown => key === 'axes' || key === 'origin' ? undefined : value;
+export const exprReplacer = (key: string, value: unknown): unknown =>
+  key === 'axes' || key === 'origin' ? undefined : value;
 export const exprKey = (value: unknown): string => JSON.stringify(value, exprReplacer);
 let origins = 0;
 export const originOf = (e: Expr): number | undefined => e.origin;
@@ -945,8 +1182,9 @@ export function substVars(e: Expr, env: Record<string, Expr>): Expr {
 export function erf(x: number): number {
   const a = Math.abs(x);
   const t = 1 / (1 + 0.3275911 * a);
-  const y = 1 - ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592)
-    * t * Math.exp(-a * a);
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-a * a);
   return Math.sign(x) * y;
 }
 
@@ -1000,10 +1238,16 @@ export function realPow(a: number, b: number): number {
   if (a >= 0) return Math.pow(a, b);
   for (let q = 1; q <= POW_RATIONAL_MAX_Q; q++) {
     const p = Math.round(b * q);
-    let x = Math.abs(p), y = q;
-    while (y) { const t = x % y; x = y; y = t; } // gcd(|p|, q)
+    let x = Math.abs(p),
+      y = q;
+    while (y) {
+      const t = x % y;
+      x = y;
+      y = t;
+    } // gcd(|p|, q)
     const g = x || 1;
-    const pr = p / g, qr = q / g;
+    const pr = p / g,
+      qr = q / g;
     if (Math.abs(b - pr / qr) < POW_RATIONAL_TOL) {
       if (qr % 2 === 0) return NaN; // even root of a negative number: undefined
       const sign = Math.abs(pr) % 2 === 1 ? -1 : 1;
@@ -1019,8 +1263,8 @@ export function realPow(a: number, b: number): number {
  *  ~1e-15) — one ln Γ for gamma(x) and for the distributions alike. */
 export const LANCZOS = [
   // oxlint-disable-next-line no-loss-of-precision -- published coefficients, kept verbatim
-  76.18009172947146, -86.50532032941677, 24.01409824083091,
-  -1.231739572450155, 0.1208650973866179e-2, -0.5395239384953e-5,
+  76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155, 0.1208650973866179e-2,
+  -0.5395239384953e-5,
 ];
 
 /**
@@ -1070,7 +1314,8 @@ export const ANGLE_FN = '[angle]';
  */
 export function structuralDiagnostic(e: Expr): string {
   if (e.kind === 'comp') return compArity(e.functionName, e.arity);
-  if (e.kind === 'range') return "'..' ranges only appear in sum(n=1..N, …), prod(…), int[a..b], or a list like [1..10].";
+  if (e.kind === 'range')
+    return "'..' ranges only appear in sum(n=1..N, …), prod(…), int[a..b], or a list like [1..10].";
   if (e.kind === 'index') return 'List indexing must resolve before scalar evaluation.';
   if (e.kind === 'eqtest') return `'${e.op}' tests a list inside a filter.`;
   return `${e.kind === 'figure' ? e.form : e.kind}(…) must be the whole expression.`;
@@ -1079,8 +1324,7 @@ export function structuralDiagnostic(e: Expr): string {
 export const compArity = (fn: string, n: number): string => `${fn} takes ${n} arguments.`;
 /** A `[comp]` that outlived lowering (a list of points where no list can go:
  *  an ODE, a sampled body) — said in the user's terms, not the node's. */
-export const strayComp = (e: Expr): string | null => (e.kind === 'comp'
-  ? compArity(e.functionName, e.arity) : null);
+export const strayComp = (e: Expr): string | null => (e.kind === 'comp' ? compArity(e.functionName, e.arity) : null);
 export const compDims = (fn: string, n: number, value: Expr, got: number): string =>
   `${fn} takes ${n} arguments, and ${value.kind === 'var' ? value.name : 'that point'} has ${got} components.`;
 /** d/dp of [angle] is a difference of two of these, one per arm (lib/diff.ts):
@@ -1109,7 +1353,7 @@ export const PMF_FNS: ReadonlySet<string> = new Set([BINOM_PMF_FN, POISSON_PMF_F
 /** The name an internal call wears in a message: `[polygon]` is written
  *  polygon, and both angle helpers are the user's angle. */
 export const plainFnName = (name: string): string =>
-  (name === ANGLE_RATE_FN ? 'angle' : name.startsWith('[') ? name.slice(1, -1) : name);
+  name === ANGLE_RATE_FN ? 'angle' : name.startsWith('[') ? name.slice(1, -1) : name;
 
 /**
  * The signed angle turning from arm u to arm v, counterclockwise positive, in
@@ -1124,7 +1368,10 @@ export function angleFn(u0: number, u1: number, v0: number, v1: number): number 
   const su = Math.max(Math.abs(u0), Math.abs(u1));
   const sv = Math.max(Math.abs(v0), Math.abs(v1));
   if (!(su > 0 && sv > 0)) return NaN; // a zero arm, or a NaN component
-  const a0 = u0 / su, a1 = u1 / su, b0 = v0 / sv, b1 = v1 / sv;
+  const a0 = u0 / su,
+    a1 = u1 / su,
+    b0 = v0 / sv,
+    b1 = v1 / sv;
   const cross = a0 * b1 - a1 * b0;
   const dot = a0 * b0 + a1 * b1;
   if (cross === 0) return dot < 0 ? Math.PI : dot > 0 ? 0 : NaN; // −0 === 0: no −π
@@ -1140,7 +1387,8 @@ export function angleFn(u0: number, u1: number, v0: number, v1: number): number 
 export function angleRateFn(v0: number, v1: number, w0: number, w1: number): number {
   const s = Math.max(Math.abs(v0), Math.abs(v1));
   if (!(s > 0)) return NaN;
-  const a0 = v0 / s, a1 = v1 / s;
+  const a0 = v0 / s,
+    a1 = v1 / s;
   return (a0 * (w1 / s) - a1 * (w0 / s)) / (a0 * a0 + a1 * a1);
 }
 
@@ -1150,21 +1398,44 @@ export const sincFn = (x: number): number => (x === 0 ? 1 : Math.sin(x) / x);
 export const cothFn = (x: number): number => 1 / Math.tanh(x);
 
 export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
-  sin: Math.sin, cos: Math.cos, tan: Math.tan,
-  asin: Math.asin, acos: Math.acos, atan: Math.atan, atan2: Math.atan2,
-  sinh: Math.sinh, cosh: Math.cosh, tanh: Math.tanh,
+  sin: Math.sin,
+  cos: Math.cos,
+  tan: Math.tan,
+  asin: Math.asin,
+  acos: Math.acos,
+  atan: Math.atan,
+  atan2: Math.atan2,
+  sinh: Math.sinh,
+  cosh: Math.cosh,
+  tanh: Math.tanh,
   sech: x => 1 / Math.cosh(x),
-  asinh: Math.asinh, acosh: Math.acosh, atanh: Math.atanh,
-  sqrt: Math.sqrt, abs: Math.abs, exp: Math.exp, ln: Math.log, log: Math.log10,
-  floor: Math.floor, ceil: Math.ceil, round: Math.round, sign: Math.sign,
-  min: Math.min, max: Math.max,
+  asinh: Math.asinh,
+  acosh: Math.acosh,
+  atanh: Math.atanh,
+  sqrt: Math.sqrt,
+  abs: Math.abs,
+  exp: Math.exp,
+  ln: Math.log,
+  log: Math.log10,
+  floor: Math.floor,
+  ceil: Math.ceil,
+  round: Math.round,
+  sign: Math.sign,
+  min: Math.min,
+  max: Math.max,
   mod: (a, b) => a - Math.floor(a / b) * b,
   fract: a => a - Math.floor(a),
-  erf, normalpdf, normalcdf,
+  erf,
+  normalpdf,
+  normalcdf,
   gcd: (a, b) => {
     a = Math.abs(Math.round(a));
     b = Math.abs(Math.round(b));
-    while (b) { const t = a % b; a = b; b = t; }
+    while (b) {
+      const t = a % b;
+      a = b;
+      b = t;
+    }
     return a;
   },
   isprime: x => {
@@ -1235,21 +1506,28 @@ function evalReduce(e: Expr & { kind: 'call' }, env: Record<string, number>): nu
 /** Numerically evaluate a scalar expression with the given variable bindings. */
 export function evaluate(e: Expr, env: Record<string, number>): number {
   switch (e.kind) {
-    case 'num': return e.value;
+    case 'num':
+      return e.value;
     case 'var': {
       if (!(e.name in env)) throw new Error(`Unbound variable: ${e.name}`);
       return env[e.name];
     }
-    case 'neg': return -evaluate(e.a, env);
+    case 'neg':
+      return -evaluate(e.a, env);
     case 'bin': {
       const a = evaluate(e.a, env);
       const b = evaluate(e.b, env);
       switch (e.op) {
-        case '+': return a + b;
-        case '-': return a - b;
-        case '*': return a * b;
-        case '/': return a / b;
-        case '^': return realPow(a, b);
+        case '+':
+          return a + b;
+        case '-':
+          return a - b;
+        case '*':
+          return a * b;
+        case '/':
+          return a / b;
+        case '^':
+          return realPow(a, b);
       }
     }
     case 'call': {
@@ -1264,14 +1542,28 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
       if (!fn) throw new Error(strayComp(e) ?? `Unknown function: ${e.name}`);
       return fn(...e.args.map(a => evaluate(a, env)));
     }
-    case 'eq': return evaluate(e.l, env) - evaluate(e.r, env);
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
-    case 'ineq': throw new Error('Cannot evaluate an inequality.');
-    case 'vec': throw new Error('Vector in scalar context.');
+    case 'eq':
+      return evaluate(e.l, env) - evaluate(e.r, env);
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      throw new Error(structuralDiagnostic(e));
+    case 'ineq':
+      throw new Error('Cannot evaluate an inequality.');
+    case 'vec':
+      throw new Error('Vector in scalar context.');
     case 'list':
-    case 'data': throw new Error('List in scalar context.');
+    case 'data':
+      throw new Error('List in scalar context.');
     case 'str':
-    case 'text': throw new Error('Text has no numeric value — it can only be compared, inside a filter.');
+    case 'text':
+      throw new Error('Text has no numeric value — it can only be compared, inside a filter.');
     case 'piecewise': {
       for (const c of e.cases) {
         if (c.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities.');
@@ -1284,7 +1576,8 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
       }
       return e.otherwise ? evaluate(e.otherwise, env) : NaN;
     }
-    case 'loop': return evalLoop(e, env);
+    case 'loop':
+      return evalLoop(e, env);
   }
 }
 
@@ -1295,7 +1588,9 @@ function evalLoop(e: Expr & { kind: 'loop' }, env: Record<string, number>): numb
   try {
     for (let pass = 0; pass < e.limit; pass++) {
       if (!state.every(isFinite)) return NaN;
-      e.params.forEach((p, k) => { env[p] = state[k]; });
+      e.params.forEach((p, k) => {
+        env[p] = state[k];
+      });
       // The taken leaf: the piecewise selects it; a NaN pick is "no case".
       const leaf = pickLeaf(e.body, env);
       if (!leaf) return NaN;
@@ -1304,7 +1599,10 @@ function evalLoop(e: Expr & { kind: 'loop' }, env: Record<string, number>): numb
     }
     return NaN;
   } finally {
-    saved.forEach(([had, value], k) => { if (had) env[e.params[k]] = value; else delete env[e.params[k]]; });
+    saved.forEach(([had, value], k) => {
+      if (had) env[e.params[k]] = value;
+      else delete env[e.params[k]];
+    });
   }
 }
 
@@ -1325,10 +1623,18 @@ function pickLeaf(body: Expr, env: Record<string, number>): Expr | null {
 /** Collect free variable names (excluding function names and constants). */
 export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
   switch (e.kind) {
-    case 'num': break;
-    case 'var': out.add(e.name); break;
-    case 'bin': freeVars(e.a, out); freeVars(e.b, out); break;
-    case 'neg': freeVars(e.a, out); break;
+    case 'num':
+      break;
+    case 'var':
+      out.add(e.name);
+      break;
+    case 'bin':
+      freeVars(e.a, out);
+      freeVars(e.b, out);
+      break;
+    case 'neg':
+      freeVars(e.a, out);
+      break;
     case 'call': {
       const idx = e.args[0];
       if (isBoundSum(e) && idx?.kind === 'var') {
@@ -1342,26 +1648,52 @@ export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
       e.args.forEach(a => freeVars(a, out));
       break;
     }
-    case 'figure': case 'lazy': {
+    case 'figure':
+    case 'lazy': {
       // A template's column variables are bound by the template itself.
       const cols = e.kind === 'lazy' ? e.cols : e.over;
-      if (!cols) { childrenOf(e).forEach(a => freeVars(a, out)); break; }
+      if (!cols) {
+        childrenOf(e).forEach(a => freeVars(a, out));
+        break;
+      }
       const inner = new Set<string>();
       childrenOf(e).forEach(a => freeVars(a, inner));
       for (const c of cols) inner.delete(c.name);
       for (const v of inner) out.add(v);
       break;
     }
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'trail': case 'hist': case 'family': childrenOf(e).forEach(a => freeVars(a, out)); break;
-    case 'eq': freeVars(e.l, out); freeVars(e.r, out); break;
-    case 'ineq': freeVars(e.l, out); freeVars(e.r, out); break;
-    case 'vec': e.items.forEach(a => freeVars(a, out)); break;
-    case 'list': e.items.forEach(a => freeVars(a, out)); break;
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      childrenOf(e).forEach(a => freeVars(a, out));
+      break;
+    case 'eq':
+      freeVars(e.l, out);
+      freeVars(e.r, out);
+      break;
+    case 'ineq':
+      freeVars(e.l, out);
+      freeVars(e.r, out);
+      break;
+    case 'vec':
+      e.items.forEach(a => freeVars(a, out));
+      break;
+    case 'list':
+      e.items.forEach(a => freeVars(a, out));
+      break;
     case 'data':
     case 'str':
-    case 'text': break;
+    case 'text':
+      break;
     case 'piecewise':
-      e.cases.forEach(c => { freeVars(c.cond, out); freeVars(c.value, out); });
+      e.cases.forEach(c => {
+        freeVars(c.cond, out);
+        freeVars(c.value, out);
+      });
       if (e.otherwise) freeVars(e.otherwise, out);
       break;
     case 'loop': {

@@ -34,7 +34,9 @@ const MAX_STEPS = 60;
 
 /** The system to integrate, or null when the graph defines no states. */
 export function buildStateSystem(defs: Env): StateSystem | null {
-  const states = [...scalarDefinitions(defs)].filter((entry): entry is [string, Extract<typeof entry[1], { role: 'state' }>] => entry[1].role === 'state');
+  const states = [...scalarDefinitions(defs)].filter(
+    (entry): entry is [string, Extract<(typeof entry)[1], { role: 'state' }>] => entry[1].role === 'state',
+  );
   if (!states.length) return null;
   const names = states.map(([name]) => name);
   const derivs = states.map(([, state]) => state.deriv);
@@ -52,12 +54,16 @@ export function initialState(defs: Env, sys: StateSystem): Record<string, number
     // Constants that read a state cannot be resolved before there is one;
     // initial values may not use states, so those failures don't matter here.
     env = evaluateFrame(defs, 0, Object.fromEntries(sys.names.map(n => [n, 0])));
-  } catch { /* leave env empty: an init using a broken constant lands on 0 */ }
+  } catch {
+    /* leave env empty: an init using a broken constant lands on 0 */
+  }
   for (const name of sys.names) {
     let v = 0;
     try {
       v = evaluate(defs.states.get(name)!.init, env);
-    } catch { /* keep 0 */ }
+    } catch {
+      /* keep 0 */
+    }
     out[name] = isFinite(v) ? v : 0;
   }
   return out;

@@ -28,7 +28,12 @@ const P = (rhs: string, body: string, env: Record<string, number> = {}): number 
 };
 const build = (rows: string[]) => {
   const sys = new RVSystem();
-  buildRVSystem(sys, scanRandomRows(rows), { fnNames: none, getFn: () => undefined, constNames: new Set(['a', 'p']), taken: () => false });
+  buildRVSystem(sys, scanRandomRows(rows), {
+    fnNames: none,
+    getFn: () => undefined,
+    constNames: new Set(['a', 'p']),
+    taken: () => false,
+  });
   return sys;
 };
 
@@ -36,7 +41,10 @@ describe('1. bounds within rounding of a whole number are that whole number', ()
   const B = 'Binomial(10, 0.3)';
   const up = 0.1 * 3 * 10; // 3.0000000000000004
   const down = 3 - 4e-16;
-  it.each([['3 + ε', up], ['3 − ε', down]])('%s', (_, a) => {
+  it.each([
+    ['3 + ε', up],
+    ['3 − ε', down],
+  ])('%s', (_, a) => {
     expect(a).not.toBe(3);
     expect(P(B, 'X < a', { a })).toBeCloseTo(0.3827827864, 10);
     expect(P(B, 'X <= a', { a })).toBeCloseTo(0.6496107184, 10);
@@ -82,7 +90,11 @@ describe('2. the E(X) marker reaches the stem when the mean is a whole number up
 describe('3. the envelope is a view-independent lattice that includes the mode', () => {
   it('Poisson(1e6): the peak is sampled exactly, from any window', () => {
     const sys = build(['X ~ Poisson(1000000)']);
-    for (const view of [{ lo: -1e7, hi: 1e7 }, { lo: 990000.3, hi: 1010000.7 }, { lo: 999000, hi: 1003000 }]) {
+    for (const view of [
+      { lo: -1e7, hi: 1e7 },
+      { lo: 990000.3, hi: 1010000.7 },
+      { lo: 999000, hi: 1003000 },
+    ]) {
       const { stems } = sys.stems('X', {}, view)!;
       expect(stems.envelope).toBe(true);
       expect(stems.ks.length).toBeLessThanOrEqual(STEM_MAX + 3);
@@ -140,7 +152,12 @@ describe('5. a short run of whole numbers is summed, not differenced', () => {
   });
   it('long runs still difference the tails (no thousand-term sums), and agree at the seam', () => {
     const law = discreteLaw(dist('Binomial(1000, 0.3)'), {})!;
-    for (const [lo, hi] of [[290, 353], [290, 354], [290, 355], [100, 900]]) {
+    for (const [lo, hi] of [
+      [290, 353],
+      [290, 354],
+      [290, 355],
+      [100, 900],
+    ]) {
       let sum = 0;
       for (let k = lo; k <= hi; k++) sum += law.pmf(k);
       expect(P('Binomial(1000, 0.3)', `${lo} <= X <= ${hi}`)).toBeCloseTo(sum, 12);
@@ -175,7 +192,11 @@ describe('7. one stem geometry for the app and the og rasterizer', () => {
   it('describes stems, selected bands and envelopes', () => {
     const run = { ks: [1, 2], ps: [0.25, 0.5], envelope: false };
     expect(stemGeometry(run, false, 40)).toEqual({
-      lines: [1, 0, 1, 0.25, NaN, NaN, 2, 0, 2, 0.5, NaN, NaN], width: 2, alpha: 1, dots: { r: 3.5, outlined: true }, fill: null,
+      lines: [1, 0, 1, 0.25, NaN, NaN, 2, 0, 2, 0.5, NaN, NaN],
+      width: 2,
+      alpha: 1,
+      dots: { r: 3.5, outlined: true },
+      fill: null,
     });
     const heavy = stemGeometry(run, true, 40);
     expect(heavy).toMatchObject({ width: 9, alpha: 0.45, dots: { r: 6.5, outlined: false }, fill: null });
@@ -191,7 +212,10 @@ describe('8. discreteness has one source of truth: the family', () => {
   it('a hand-built BaseDist is discrete because its kind is', () => {
     const d: BaseDist = { kind: 'poisson', args: [{ kind: 'num', value: 3 }] };
     expect(discreteLaw(d, {})!.mean).toBe(3);
-    expect(probabilityValue(d, undefined, { kind: 'num', value: 2 }, {}, { hiStrict: false })).toBeCloseTo(0.42319008112684353, 12);
+    expect(probabilityValue(d, undefined, { kind: 'num', value: 2 }, {}, { hiStrict: false })).toBeCloseTo(
+      0.42319008112684353,
+      12,
+    );
     const sys = new RVSystem();
     const declarations = new Map<string, import('./dist.ts').RV>([['X', { name: 'X', kind: 'base', dist: d }]]);
     sys.useDeclarations(declarations);

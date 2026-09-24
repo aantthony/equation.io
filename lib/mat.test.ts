@@ -20,7 +20,11 @@ const rows = (...texts: string[]): Definition[] =>
 /** Build defs, then lower a plot row against them (the recompile pipeline). */
 function lowRow(defRows: string[], text: string) {
   const { defs, errors } = buildDefs(rows(...defRows));
-  const lowered = lowerGeom(parseExpr(text), n => compsOf(defs, n), n => defs.mats.get(n) ?? null);
+  const lowered = lowerGeom(
+    parseExpr(text),
+    n => compsOf(defs, n),
+    n => defs.mats.get(n) ?? null,
+  );
   return { defs, errors, lowered };
 }
 
@@ -108,8 +112,8 @@ describe('det, trace, matvec, solve', () => {
 });
 
 describe('matrices with states', () => {
-  it('drives a linear phase portrait: (x\', y\') = A (x, y)', () => {
-    const { defs, lowered } = lowRow(["A = [(0, 1), (-1, -0.2)]"], "(x', y') = A (x, y)");
+  it("drives a linear phase portrait: (x', y') = A (x, y)", () => {
+    const { defs, lowered } = lowRow(['A = [(0, 1), (-1, -0.2)]'], "(x', y') = A (x, y)");
     const cls = classify(lowered, new Set(defs.consts.keys()));
     expect(compileGpu(cls)).toMatchObject({ type: 'vfield2d' });
   });
@@ -156,11 +160,7 @@ describe('matrices with states', () => {
   it('solve works inside a vector-state derivative', () => {
     // (State-dependent entries are covered by the pendulum test above, where
     // M carries cos(th_1 - th_2) and is re-evaluated at every RK4 stage.)
-    const { defs, errors } = buildDefs(rows(
-      'M = [(1, 0), (0, 1)]',
-      "r' = solve(M, (r_2, -r_1))",
-      'r(0) = (1, 0)',
-    ));
+    const { defs, errors } = buildDefs(rows('M = [(1, 0), (0, 1)]', "r' = solve(M, (r_2, -r_1))", 'r(0) = (1, 0)'));
     expect(errors.size).toBe(0);
     const sys = buildStateSystem(defs)!;
     const values = initialState(defs, sys);
@@ -190,14 +190,42 @@ describe('matrix algebra and the exponential', () => {
   it('exponentiates any 2×2: spirals, saddles and the defective case', () => {
     // Against the power series, on both sides of δ = 0 and at it.
     const series = (m: number[][]): number[][] => {
-      let term = [[1, 0], [0, 1]]; let sum = [[1, 0], [0, 1]];
+      let term = [
+        [1, 0],
+        [0, 1],
+      ];
+      let sum = [
+        [1, 0],
+        [0, 1],
+      ];
       for (let k = 1; k < 40; k++) {
         term = term.map(r => [0, 1].map(c => (r[0] * m[0][c] + r[1] * m[1][c]) / k));
         sum = sum.map((r, i) => r.map((v, c) => v + term[i][c]));
       }
       return sum;
     };
-    for (const m of [[[0.1, -1], [1, 0.3]], [[0, 1], [1, 0]], [[1, 1], [0, 1]], [[2, 0], [0, -1]], [[0, 0], [0, 0]]]) {
+    for (const m of [
+      [
+        [0.1, -1],
+        [1, 0.3],
+      ],
+      [
+        [0, 1],
+        [1, 0],
+      ],
+      [
+        [1, 1],
+        [0, 1],
+      ],
+      [
+        [2, 0],
+        [0, -1],
+      ],
+      [
+        [0, 0],
+        [0, 0],
+      ],
+    ]) {
       const want = series(m);
       const def = `A = [(${m[0].join(', ')}), (${m[1].join(', ')})]`;
       close(point([def], 'e^(1 A) (1, 0)'), [want[0][0], want[1][0]]);
@@ -207,7 +235,7 @@ describe('matrix algebra and the exponential', () => {
   it('rotates about an axis with cross(n), including a zero axis and zero angle', () => {
     close(point([], 'e^(a cross((0, 0, 1))) (1, 0, 0)', { a: Math.PI / 2 }), [0, 1, 0]);
     close(point([], 'e^(a cross((0, 0, 2))) (1, 0, 0)', { a: Math.PI / 4 }), [0, 1, 0]);
-    close(point([], 'e^(a cross((1, 1, 1)/sqrt(3))) (1, 0, 0)', { a: 2 * Math.PI / 3 }), [0, 1, 0]);
+    close(point([], 'e^(a cross((1, 1, 1)/sqrt(3))) (1, 0, 0)', { a: (2 * Math.PI) / 3 }), [0, 1, 0]);
     close(point(['b = 0', 'n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 1, n_x: 0, n_y: 0, n_z: 0 }), [1, 0, 0]);
     close(point(['b = 0', 'n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 0, n_x: 0, n_y: 0, n_z: 1 }), [1, 0, 0]);
     expect(() => lowRow(['S = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]'], 'e^(a S) (1, 0, 0)')).toThrow(/rotation generator/);
@@ -241,7 +269,10 @@ describe('matrix algebra and the exponential', () => {
   it('rotate is the same turn, about a centre or an axis', () => {
     close(point([], 'rotate((1, 0), a)', { a: Math.PI / 2 }), [0, 1]);
     close(point([], 'rotate((1, 0), a, (1, 1))', { a: Math.PI }), [1, 2]);
-    close(point(['P = (1, 0)', 'C = (1, 1)'], 'rotate(P, a, C)', { a: Math.PI, P_x: 1, P_y: 0, C_x: 1, C_y: 1 }), [1, 2]);
+    close(
+      point(['P = (1, 0)', 'C = (1, 1)'], 'rotate(P, a, C)', { a: Math.PI, P_x: 1, P_y: 0, C_x: 1, C_y: 1 }),
+      [1, 2],
+    );
     close(point([], 'rotate((1, 0, 0), a, (0, 0, 5))', { a: Math.PI / 2 }), [0, 1, 0]);
     expect(() => lowRow([], 'rotate((1, 0))')).toThrow(/rotate takes/);
   });

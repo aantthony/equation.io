@@ -166,12 +166,7 @@ describe('exprToPoly coefficient bit budget', () => {
   });
 
   it('bails to null once coefficients outgrow the bit budget', () => {
-    for (const s of [
-      '(0.1x - 0.3)^16',
-      '(0.1x - 0.3)^128',
-      '(x - 0.1)^32 (x - 0.3)^32',
-      '(x - 0.1)^64 (x - 0.3)^64',
-    ]) {
+    for (const s of ['(0.1x - 0.3)^16', '(0.1x - 0.3)^128', '(x - 0.1)^32 (x - 0.3)^32', '(x - 0.1)^64 (x - 0.3)^64']) {
       expect(poly(s), s).toBeNull();
       // polynomialRoots propagates the null so roots.ts falls back to
       // numeric root finding rather than grinding on huge rationals.
@@ -211,9 +206,7 @@ describe('exprToPoly coefficient bit budget', () => {
     expect(bin[1].sym).toBe('2^(1/128)');
     // Wilkinson-20: 64 bits, all twenty roots exact.
     const w = Array.from({ length: 20 }, (_, i) => `(x - ${i + 1})`).join('');
-    expect(roots(w)).toEqual(
-      Array.from({ length: 20 }, (_, i) => ({ x: i + 1, mult: 1, sym: undefined })),
-    );
+    expect(roots(w)).toEqual(Array.from({ length: 20 }, (_, i) => ({ x: i + 1, mult: 1, sym: undefined })));
     expect(performance.now() - t0).toBeLessThan(2000);
   });
 });

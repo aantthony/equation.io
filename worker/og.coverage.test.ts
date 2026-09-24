@@ -14,7 +14,19 @@ import { analyze } from './graph.ts';
 
 describe('og renderer coverage', () => {
   it('draws the everyday 2D and 3D families', () => {
-    for (const t of ['implicit2d', 'ineq2d', 'scalar2d', 'point', 'pcurve', 'psurface', 'implicit3d', 'polygon', 'cobweb', 'system', 'vfield2d'] as const) {
+    for (const t of [
+      'implicit2d',
+      'ineq2d',
+      'scalar2d',
+      'point',
+      'pcurve',
+      'psurface',
+      'implicit3d',
+      'polygon',
+      'cobweb',
+      'system',
+      'vfield2d',
+    ] as const) {
       expect(OG_COVERAGE[t], t).toBe('draws');
     }
   });
@@ -98,7 +110,10 @@ describe('previewGap', () => {
   // must blame the preview and say what the live app does with the row.
   const gap = (texts: string[], i = 0) => {
     const rows = analyze(texts).rows.filter(r => r.cls);
-    return previewGap(rows[i], rows.some(r => r.cls!.needs3D));
+    return previewGap(
+      rows[i],
+      rows.some(r => r.cls!.needs3D),
+    );
   };
 
   it('is null for every row the renderer draws', () => {

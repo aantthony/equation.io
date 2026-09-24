@@ -23,15 +23,12 @@ const escapeAttr = (s: string) =>
  * Split out from handleShare so this is testable without the Workers
  * runtime (HTMLRewriter is a runtime global).
  */
-export function shareMeta(
-  equations: string[],
-  payload: string,
-  origin: string,
-): { title: string; meta: string[][] } {
+export function shareMeta(equations: string[], payload: string, origin: string): { title: string; meta: string[][] } {
   const title = `${equations[0]}${equations.length > 1 ? ' …' : ''} — equation.io`;
-  const description = equations.length > 1
-    ? `Interactive graph of ${equations.length} equations: ${equations.join('; ')}`
-    : 'Interactive graph — opens rendered in the browser, no account needed.';
+  const description =
+    equations.length > 1
+      ? `Interactive graph of ${equations.length} equations: ${equations.join('; ')}`
+      : 'Interactive graph — opens rendered in the browser, no account needed.';
   const meta: string[][] = [
     ['og:title', title],
     ['og:description', description],
@@ -61,9 +58,8 @@ export function landingMeta(
   const title = `${page.title} — Equation.io`;
   const description = page.lead;
   const canonical = `${origin}${page.path}`;
-  const image = page.og === 'preview'
-    ? `${origin}/api/og/${encodePayload(page.heroEqs)}`
-    : `${origin}/shots/${page.slug}.png`;
+  const image =
+    page.og === 'preview' ? `${origin}/api/og/${encodePayload(page.heroEqs)}` : `${origin}/shots/${page.slug}.png`;
   const width = page.og === 'preview' ? String(OG_WIDTH) : '900';
   const height = page.og === 'preview' ? String(OG_HEIGHT) : '600';
   const meta: string[][] = [
@@ -94,10 +90,7 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
   } catch {
     // Undecodable payload — serve the plain app.
   }
-  const shell = withCsp(
-    withCharset(await env.ASSETS.fetch(new Request(new URL('/', url), request))),
-    GRAPH_CSP,
-  );
+  const shell = withCsp(withCharset(await env.ASSETS.fetch(new Request(new URL('/', url), request))), GRAPH_CSP);
   if (!equations.length || !shell.headers.get('content-type')?.includes('text/html')) return shell;
 
   const { title, meta } = shareMeta(equations, payload, url.origin);
@@ -136,51 +129,69 @@ async function handleLanding(request: Request, url: URL, env: Env, page: Landing
     .filter(([k]) => k === 'twitter:card' || k === 'twitter:image' || k === 'og:image:width' || k === 'og:image:height')
     .map(([p, c]) => `<meta ${p.startsWith('twitter:') ? 'name' : 'property'}="${p}" content="${escapeAttr(c)}">`)
     .join('\n  ');
-  return withCsp(new HTMLRewriter()
-    .on('head', {
-      element(el) {
-        el.append(`${extra}\n  `, { html: true });
-      },
-    })
-    .on('title', {
-      element(el) { el.setInnerContent(title); },
-    })
-    .on('meta[name="description"]', {
-      element(el) { el.setAttribute('content', description); },
-    })
-    .on('link[rel="canonical"]', {
-      element(el) { el.setAttribute('href', canonical); },
-    })
-    .on('meta[property="og:title"]', {
-      element(el) { el.setAttribute('content', title); },
-    })
-    .on('meta[property="og:description"]', {
-      element(el) { el.setAttribute('content', description); },
-    })
-    .on('meta[property="og:url"]', {
-      element(el) { el.setAttribute('content', canonical); },
-    })
-    .on('meta[property="og:image"]', {
-      element(el) {
-        const image = meta.find(([k]) => k === 'og:image')![1];
-        el.setAttribute('content', image);
-      },
-    })
-    .on('h1#h1', {
-      element(el) { el.setInnerContent(page.h1); },
-    })
-    .on('p#lead', {
-      element(el) { el.setInnerContent(page.lead); },
-    })
-    .on('noscript', {
-      element(el) {
-        el.prepend(
-          `<p>${escapeAttr(page.lead)}</p><p><a href="${escapeAttr(share)}">${escapeAttr(share)}</a></p>`,
-          { html: true },
-        );
-      },
-    })
-    .transform(shell), LANDING_CSP);
+  return withCsp(
+    new HTMLRewriter()
+      .on('head', {
+        element(el) {
+          el.append(`${extra}\n  `, { html: true });
+        },
+      })
+      .on('title', {
+        element(el) {
+          el.setInnerContent(title);
+        },
+      })
+      .on('meta[name="description"]', {
+        element(el) {
+          el.setAttribute('content', description);
+        },
+      })
+      .on('link[rel="canonical"]', {
+        element(el) {
+          el.setAttribute('href', canonical);
+        },
+      })
+      .on('meta[property="og:title"]', {
+        element(el) {
+          el.setAttribute('content', title);
+        },
+      })
+      .on('meta[property="og:description"]', {
+        element(el) {
+          el.setAttribute('content', description);
+        },
+      })
+      .on('meta[property="og:url"]', {
+        element(el) {
+          el.setAttribute('content', canonical);
+        },
+      })
+      .on('meta[property="og:image"]', {
+        element(el) {
+          const image = meta.find(([k]) => k === 'og:image')![1];
+          el.setAttribute('content', image);
+        },
+      })
+      .on('h1#h1', {
+        element(el) {
+          el.setInnerContent(page.h1);
+        },
+      })
+      .on('p#lead', {
+        element(el) {
+          el.setInnerContent(page.lead);
+        },
+      })
+      .on('noscript', {
+        element(el) {
+          el.prepend(`<p>${escapeAttr(page.lead)}</p><p><a href="${escapeAttr(share)}">${escapeAttr(share)}</a></p>`, {
+            html: true,
+          });
+        },
+      })
+      .transform(shell),
+    LANDING_CSP,
+  );
 }
 
 async function handleOgImage(url: URL): Promise<Response> {

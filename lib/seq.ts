@@ -19,7 +19,16 @@ import { usesComplex } from './complex.ts';
 import { type GetFn, RESERVED, type ResolveOpts, resolveExpr, substIdx } from './defs.ts';
 import { axesOf, lowerLists, withAxes } from './list.ts';
 import { listGetter } from './defs.ts';
-import { GREEK_NAME_CHARS, TERM_AT_FN, WRITTEN_NAME_CHARS, type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import {
+  GREEK_NAME_CHARS,
+  TERM_AT_FN,
+  WRITTEN_NAME_CHARS,
+  type Expr,
+  evaluate,
+  freeVars,
+  parseExpr,
+  substVars,
+} from './expr.ts';
 import { type Classified } from './math-object.ts';
 
 export interface SeqScan {
@@ -43,11 +52,17 @@ const TERM_RE = new RegExp(`^(${L})_(\\d+)$`);
 const NAMED_RE = new RegExp(`^(${L})_([A-Za-z${GREEK_NAME_CHARS}]\\w*)$`);
 /** a_n = …, also written a_{n} = … or a_(n) = …. */
 const SEQ_RE = new RegExp(String.raw`^\s*(${L})_(?:(${L})|\{\s*(${L})\s*\}|\(\s*(${L})\s*\))\s*=(?!=)([\s\S]+)$`);
-const REC_RE = new RegExp(String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*=(?!=)([\s\S]+)$`);
+const REC_RE = new RegExp(
+  String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*=(?!=)([\s\S]+)$`,
+);
 /** c_{n+1}[i] = …: a row of cells stepping from the row before. */
-const CELL_REC_RE = new RegExp(String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*\[\s*(${L})\s*\]\s*=(?!=)([\s\S]+)$`);
+const CELL_REC_RE = new RegExp(
+  String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*\[\s*(${L})\s*\]\s*=(?!=)([\s\S]+)$`,
+);
 /** c_0[i] = …: the row an automaton starts from. */
-const CELL_SEED_RE = new RegExp(String.raw`^\s*(${L})_(?:0|\{\s*0\s*\}|\(\s*0\s*\))\s*\[\s*(${L})\s*\]\s*=(?!=)([\s\S]+)$`);
+const CELL_SEED_RE = new RegExp(
+  String.raw`^\s*(${L})_(?:0|\{\s*0\s*\}|\(\s*0\s*\))\s*\[\s*(${L})\s*\]\s*=(?!=)([\s\S]+)$`,
+);
 
 /** The last term a sequence computes. */
 const SEQ_MAX = 1000;
@@ -116,17 +131,25 @@ export function classifySeqRec(
   const source = parseExpr(rhs, fnNames, new Set([...sequences].map(s => s + '_')));
   if (scan.rec) {
     // Drawn as the map a_n → a_{n+1}: there is no n to read another term at.
-    const other = [...freeVars(source)].find(v => v !== `${name}_${index}` && v === `${v[0]}_${index}` && sequences.has(v[0]));
-    if (other) throw new Error(`A recurrence cannot use ${other}: it steps from ${name}_${index} alone, with no ${index} to read ${other} at.`);
+    const other = [...freeVars(source)].find(
+      v => v !== `${name}_${index}` && v === `${v[0]}_${index}` && sequences.has(v[0]),
+    );
+    if (other)
+      throw new Error(
+        `A recurrence cannot use ${other}: it steps from ${name}_${index} alone, with no ${index} to read ${other} at.`,
+      );
   }
   // A recurrence's own a_n (a_{n}, a_(n)) is its previous term, the variable
   // the map steps — not a lookup into the terms it is defining.
   const recVar = `${name}_${index}`;
   const lookup = ropts.sequenceTerm;
-  const sequenceTerm: ResolveOpts['sequenceTerm'] = scan.rec && lookup
-    ? (symbol, at, open) => symbol === recVar || (symbol === `${name}_` && at?.kind === 'var' && at.name === index)
-      ? { kind: 'var', name: recVar } : lookup(symbol, at, open)
-    : lookup;
+  const sequenceTerm: ResolveOpts['sequenceTerm'] =
+    scan.rec && lookup
+      ? (symbol, at, open) =>
+          symbol === recVar || (symbol === `${name}_` && at?.kind === 'var' && at.name === index)
+            ? { kind: 'var', name: recVar }
+            : lookup(symbol, at, open)
+      : lookup;
   const parsed = resolveExpr(source, getFn, { ...ropts, openVars, sequenceTerm });
   if (usesComplex(parsed)) throw new Error('Sequences are real-valued; use re(…) or im(…).');
 
@@ -167,30 +190,48 @@ export function classifySeqRec(
   params.sort();
 
   return {
-    object: { kind: 'sequence', form: bifurcation ? 'bifurcation' : 'cobweb', expr: parsed, variable: recVar, seedName: a0Name },
-    animated, needs3D: false, params,
+    object: {
+      kind: 'sequence',
+      form: bifurcation ? 'bifurcation' : 'cobweb',
+      expr: parsed,
+      variable: recVar,
+      seedName: a0Name,
+    },
+    animated,
+    needs3D: false,
+    params,
   };
 }
 
 /** Sequence values share the same scalar/list pipeline as CSV columns.
  * Recurrences form a linear chain of computed constants rather than an
  * exponentially duplicated expression. Those constants become uniforms. */
-export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: ResolveOpts,
-  known: Set<string>, protectedNames: ReadonlySet<string> = new Set(),
+export function sequenceResolver(
+  defs: ValueDefinitions,
+  getFn: GetFn,
+  opts: ResolveOpts,
+  known: Set<string>,
+  protectedNames: ReadonlySet<string> = new Set(),
   defineConstant: (name: string, expr: Expr) => void = (name, expr) => {
     if (!(defs instanceof Env)) throw new Error('Sequence construction needs a binding writer.');
     defs.bind(name, { tag: 'scalar', role: 'const', expr });
-  }) {
+  },
+) {
   const resolving = new Set<string>();
   const term = (name: string, k: number): Expr => {
-    if (!Number.isInteger(k) || k < 0 || k > SEQ_MAX) throw new Error(`Sequence indices must be whole numbers from 0 to ${SEQ_MAX}.`);
+    if (!Number.isInteger(k) || k < 0 || k > SEQ_MAX)
+      throw new Error(`Sequence indices must be whole numbers from 0 to ${SEQ_MAX}.`);
     const scan = defs.sequences.get(name)!;
     const key = `${name}_${k}`;
     if (protectedNames.has(key) || defs.consts.has(key)) return { kind: 'var', name: key };
     if (resolving.has(name)) throw new Error(`Sequence ${name} depends on itself outside its recurrence.`);
     resolving.add(name);
     try {
-      const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), new Set([...defs.sequences.keys()].map(n => n + '_')));
+      const parsed = parseExpr(
+        scan.rhs,
+        new Set(defs.fns.keys()),
+        new Set([...defs.sequences.keys()].map(n => n + '_')),
+      );
       if (!scan.rec) {
         // Pin the index in the source (a Σ/∫ that rebinds it keeps its own),
         // then resolve ONCE — so a_5 of a_n = Σ(s=1..n, s) is the number 15,
@@ -201,7 +242,8 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
       }
       const body = resolveExpr(parsed, getFn, opts);
       for (const v of freeVars(body)) {
-        if (v !== `${name}_${scan.index}` && v !== 't' && !known.has(v) && !defs.consts.has(v)) throw new Error(`Sequence ${name} terms need constant parameters (found ${v}).`);
+        if (v !== `${name}_${scan.index}` && v !== 't' && !known.has(v) && !defs.consts.has(v))
+          throw new Error(`Sequence ${name} terms need constant parameters (found ${v}).`);
       }
       // A chain is built from 0 without gaps, so past the first missing term
       // every later one is missing too — and not asking matters: each binding
@@ -211,14 +253,26 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
         const internal = `${defs.sequencePrefix}_${name}_${i}`;
         if (!fresh && defs.consts.has(internal)) continue;
         fresh = true;
-        const value: Expr = i === 0
-          ? (protectedNames.has(`${name}_0`) || defs.consts.has(`${name}_0`) ? { kind: 'var', name: `${name}_0` } : { kind: 'num', value: .5 })
-          : substVars(body, { [`${name}_${scan.index}`]: { kind: 'var', name: `${defs.sequencePrefix}_${name}_${i - 1}` } });
-        defineConstant(internal, value); known.add(internal);
-        try { if (opts.consts) opts.consts[internal] = evaluate(value, opts.consts); } catch { /* resolved at frame time */ }
+        const value: Expr =
+          i === 0
+            ? protectedNames.has(`${name}_0`) || defs.consts.has(`${name}_0`)
+              ? { kind: 'var', name: `${name}_0` }
+              : { kind: 'num', value: 0.5 }
+            : substVars(body, {
+                [`${name}_${scan.index}`]: { kind: 'var', name: `${defs.sequencePrefix}_${name}_${i - 1}` },
+              });
+        defineConstant(internal, value);
+        known.add(internal);
+        try {
+          if (opts.consts) opts.consts[internal] = evaluate(value, opts.consts);
+        } catch {
+          /* resolved at frame time */
+        }
       }
       return { kind: 'var', name: `${defs.sequencePrefix}_${name}_${k}` };
-    } finally { resolving.delete(name); }
+    } finally {
+      resolving.delete(name);
+    }
   };
   const seqNames = () => new Set([...defs.sequences.keys()].map(n => n + '_'));
   /**
@@ -235,19 +289,31 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
       const body = resolveExpr(parseExpr(scan.rhs, new Set(defs.fns.keys()), seqNames()), getFn, opts);
       const inputs = [...freeVars(body)].filter(v => v !== `${name}_${scan.index}`);
       if (protectedNames.has(`${name}_0`) || defs.consts.has(`${name}_0`)) inputs.push(`${name}_0`);
-      return { kind: 'call', name: TERM_AT_FN, args: [
-        { kind: 'str', value: `${defs.sequencePrefix}_${name}_` }, at, ...inputs.map((v): Expr => ({ kind: 'var', name: v })),
-      ] };
+      return {
+        kind: 'call',
+        name: TERM_AT_FN,
+        args: [
+          { kind: 'str', value: `${defs.sequencePrefix}_${name}_` },
+          at,
+          ...inputs.map((v): Expr => ({ kind: 'var', name: v })),
+        ],
+      };
     }
     if (resolving.has(name)) {
       const cycle = [...resolving].slice([...resolving].indexOf(name));
-      throw new Error(cycle.length > 1 ? `Sequences ${cycle.join(' and ')} are defined in terms of each other.` : `Sequence ${name} depends on itself.`);
+      throw new Error(
+        cycle.length > 1
+          ? `Sequences ${cycle.join(' and ')} are defined in terms of each other.`
+          : `Sequence ${name} depends on itself.`,
+      );
     }
     resolving.add(name);
     try {
       const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), seqNames());
       return resolveExpr(substIdx(parsed, scan.index, at), getFn, { ...opts, openVars: open });
-    } finally { resolving.delete(name); }
+    } finally {
+      resolving.delete(name);
+    }
   };
   const resolve = (symbol: string, index?: Expr, open?: ReadonlySet<string>): Expr | null => {
     if (index === undefined) {
@@ -271,7 +337,8 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
     // A recurrence's own previous term, written a_{n} or a_(n): its variable
     // a_n, as when written plainly.
     const scan = defs.sequences.get(name)!;
-    if (scan.rec && index.kind === 'var' && index.name === scan.index && !open?.has(index.name)) return { kind: 'var', name: `${name}_${scan.index}` };
+    if (scan.rec && index.kind === 'var' && index.name === scan.index && !open?.has(index.name))
+      return { kind: 'var', name: `${name}_${scan.index}` };
     if (open && [...freeVars(index)].some(v => open.has(v))) return inline(name, index, open);
     const input: Expr = index.kind === 'range' ? { kind: 'list', items: [index] } : index;
     const indices = lowerLists(input, listGetter(defs), opts);
@@ -281,7 +348,8 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
     };
     // One term per index, so a_[n] runs over the same instances n does.
     if (indices.kind === 'list') return withAxes({ kind: 'list', items: indices.items.map(one) }, axesOf(indices));
-    if (indices.kind === 'data') return withAxes({ kind: 'list', items: Array.from(indices.values, k => term(name, k)) }, axesOf(indices));
+    if (indices.kind === 'data')
+      return withAxes({ kind: 'list', items: Array.from(indices.values, k => term(name, k)) }, axesOf(indices));
     return one(indices);
   };
   return resolve;

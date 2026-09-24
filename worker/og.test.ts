@@ -183,7 +183,8 @@ describe('og raster renderer', () => {
     const r = renderRaster([`vector((${ax}, ${ay}), (${bx}, ${by}))`, 'view(x = -5..5, y = -5..5)'], 100, 100);
     const [x0, y0, x1, y1] = [50.75 + 10 * ax, 50.75 - 10 * ay, 50.75 + 10 * bx, 50.75 - 10 * by];
     const len = Math.hypot(x1 - x0, y1 - y0);
-    const ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+    const ux = (x1 - x0) / len,
+      uy = (y1 - y0) / len;
     const holes: string[] = [];
     for (let y = 0; y < 100; y++) {
       for (let x = 0; x < 100; x++) {
@@ -285,7 +286,16 @@ describe('og raster renderer', () => {
   it('draws every zoo family without falling back to a blank plot', () => {
     const view = 'view(x = -3..5, y = -0.1..1)';
     const grid = inkFraction(renderRaster([view], 100, 100));
-    for (const decl of ['Gamma(0.5, 1)', 'Beta(2, 3)', 'ChiSquared(3)', 'StudentT(2)', 'LogNormal(0, 0.5)', 'Cauchy(1, 0.5)', 'Weibull(1.5, 2)', 'Gamma(50, 25)']) {
+    for (const decl of [
+      'Gamma(0.5, 1)',
+      'Beta(2, 3)',
+      'ChiSquared(3)',
+      'StudentT(2)',
+      'LogNormal(0, 0.5)',
+      'Cauchy(1, 0.5)',
+      'Weibull(1.5, 2)',
+      'Gamma(50, 25)',
+    ]) {
       expect(inkFraction(renderRaster([view, `X ~ ${decl}`], 100, 100)), decl).toBeGreaterThan(grid + 0.003);
     }
   });
@@ -340,7 +350,8 @@ describe('og raster renderer', () => {
     expect(Math.min(...pixel(r, 80, 85))).toBeGreaterThan(230);
     // Strictness is visible: P(X < 3) leaves the stem at 3 alone, P(X <= 3) thickens it.
     // (A plain stem inks the two columns x and x + 1; a selected one the four from x − 1 to x + 2.)
-    const ink = (rows: string[], x: number) => [x - 1, x + 2].map(px => Math.min(...pixel(renderRaster([view, ...rows], 100, 100), px, 60)));
+    const ink = (rows: string[], x: number) =>
+      [x - 1, x + 2].map(px => Math.min(...pixel(renderRaster([view, ...rows], 100, 100), px, 60)));
     const strict = ink(['X ~ Binomial(6, 0.5)', 'P(X < 3)'], 40);
     const closed = ink(['X ~ Binomial(6, 0.5)', 'P(X <= 3)'], 40);
     expect(Math.min(...strict)).toBeGreaterThan(230);
@@ -371,7 +382,8 @@ describe('og raster renderer', () => {
     for (let x = 0; x < 100; x++) if (inked(r, x, 75) && !inked(only, x, 75)) columns++;
     expect(columns).toBeLessThanOrEqual(8);
     // P(H <= 1.5) thickens the stem at 1.5 and leaves 2's alone; P(H < 1.5) leaves both.
-    const band = (body: string, px: number) => inked(renderRaster([view, ...rows, body], 100, 100), px + 2, 75) && !inked(r, px + 2, 75);
+    const band = (body: string, px: number) =>
+      inked(renderRaster([view, ...rows, body], 100, 100), px + 2, 75) && !inked(r, px + 2, 75);
     expect(band('P(H <= 1.5)', 40)).toBe(true);
     expect(band('P(H < 1.5)', 40)).toBe(false);
     expect(band('P(H <= 1.5)', 50)).toBe(false);
@@ -391,7 +403,14 @@ describe('og raster renderer', () => {
     expect(a.rows.map(r => r.cpu?.type)).toEqual(['pmf', 'pmf', 'pmf', 'prob', 'expect', 'prob']);
     expect(ENUM_STATS).toEqual(before);
     // MCP validation asks for them, and gets them.
-    expect(analyze(rows).rows.map(r => r.info)).toEqual([undefined, undefined, 'μ = 900, σ = 234.307', '≈ 0.4742', '≈ 900.0000', '≈ 0.5032']);
+    expect(analyze(rows).rows.map(r => r.info)).toEqual([
+      undefined,
+      undefined,
+      'μ = 900, σ = 234.307',
+      '≈ 0.4742',
+      '≈ 900.0000',
+      '≈ 0.5032',
+    ]);
     // Drawing enumerates what is drawn — S, the marker's variable, the selection — and not the joint event.
     const mid = { ...ENUM_STATS };
     renderRaster(['X ~ Poisson(30)', 'Y ~ Poisson(30)', 'P(X > Y)'], 100, 100);
@@ -404,7 +423,9 @@ describe('og raster renderer', () => {
     const band = (view: string, x: number, y: number) => {
       const plain = renderRaster([view, rows[0]], 100, 100);
       const sel = renderRaster([view, ...rows], 100, 100);
-      return Math.abs(pixel(sel, x, y)[0] - pixel(plain, x, y)[0]) + Math.abs(pixel(sel, x, y)[2] - pixel(plain, x, y)[2]);
+      return (
+        Math.abs(pixel(sel, x, y)[0] - pixel(plain, x, y)[0]) + Math.abs(pixel(sel, x, y)[2] - pixel(plain, x, y)[2])
+      );
     };
     const wide = 'view(x = 2..4.5, y = -0.05..0.45, ratio = 5)'; // 40 px per unit: x = 3 at px 40, band 9 px
     const narrow = 'view(x = -1..9, y = -0.05..0.45, ratio = 20)'; // 10 px per unit: x = 3 at px 40, band 6 px
@@ -432,7 +453,11 @@ describe('og raster renderer', () => {
 
   it('draws a huge discrete law zoomed out as its envelope, in bounded time', () => {
     const t0 = performance.now();
-    const r = renderRaster(['view(x = 990000..1010000, y = -0.00005..0.00045, ratio = 40000000)', 'X ~ Poisson(1000000)'], 100, 100);
+    const r = renderRaster(
+      ['view(x = 990000..1010000, y = -0.00005..0.00045, ratio = 40000000)', 'X ~ Poisson(1000000)'],
+      100,
+      100,
+    );
     expect(performance.now() - t0).toBeLessThan(2000);
     // Under the peak (px 50; pmf ≈ 0.0004 → py ≈ 10) the outline is filled.
     expect(Math.min(...pixel(r, 50, 50))).toBeLessThan(245);
@@ -541,12 +566,23 @@ describe('coordinate and complex previews', () => {
   });
   it('draws all three roots of unity', () => {
     const r = renderRaster(['w^3 = 1', frame], 160, 160);
-    for (const [x, y] of [[100, 80], [70, 63], [70, 97]]) expect(pixel(r, x, y)[0]).toBeLessThan(150);
+    for (const [x, y] of [
+      [100, 80],
+      [70, 63],
+      [70, 97],
+    ])
+      expect(pixel(r, x, y)[0]).toBeLessThan(150);
   });
   it('draws a complex path in the same plane as Argand points and roots', () => {
     // The unit circle passes through all three roots of unity and through i.
     const r = renderRaster(['exp(i 2 pi u)', frame], 160, 160);
-    for (const [x, y] of [[100, 80], [70, 63], [70, 97], [80, 60], [60, 80]]) {
+    for (const [x, y] of [
+      [100, 80],
+      [70, 63],
+      [70, 97],
+      [80, 60],
+      [60, 80],
+    ]) {
       expect(Math.min(...pixel(r, x, y)), `${x},${y}`).toBeLessThan(150);
     }
     expect(Math.min(...pixel(r, 85, 85))).toBeGreaterThan(200);
@@ -576,7 +612,11 @@ describe('coordinate and complex previews', () => {
 });
 
 describe('rows whose plan fails to compile', () => {
-  const nest = (n: number, inner: string) => { let s = inner; for (let k = 0; k < n; k++) s = `f(${s})`; return s; };
+  const nest = (n: number, inner: string) => {
+    let s = inner;
+    for (let k = 0; k < n; k++) s = `f(${s})`;
+    return s;
+  };
   const rows = ['f(w) = w*w + w', nest(10, 'i')];
 
   it('are not previewable: the object exists, the CPU plan does not', () => {
@@ -590,6 +630,8 @@ describe('rows whose plan fails to compile', () => {
 
   it('are skipped by the raster rather than drawn blank or thrown on', () => {
     // The failed row comes last so the drawn row keeps its palette slot.
-    expect(renderRaster([rows[0], 'y = x', rows[1]], 100, 100).px).toEqual(renderRaster([rows[0], 'y = x'], 100, 100).px);
+    expect(renderRaster([rows[0], 'y = x', rows[1]], 100, 100).px).toEqual(
+      renderRaster([rows[0], 'y = x'], 100, 100).px,
+    );
   });
 });

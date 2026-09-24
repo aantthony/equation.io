@@ -156,8 +156,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
 }
 
 /** The app clamps phi short of the poles so "up" never flips; match it. */
-export const clampPhi = (phi: number): number =>
-  Math.min(Math.PI / 2 - 0.01, Math.max(-Math.PI / 2 + 0.01, phi));
+export const clampPhi = (phi: number): number => Math.min(Math.PI / 2 - 0.01, Math.max(-Math.PI / 2 + 0.01, phi));
 
 /**
  * Fit the requested box into a w×h viewport: specified axis ratio (default 1), whole box
@@ -171,7 +170,7 @@ export function fitView2D(
 ): { cx: number; cy: number; upp: number; ratio?: number } {
   const sx = spec.x ? spec.x[1] - spec.x[0] : 0;
   const sy = spec.y ? spec.y[1] - spec.y[0] : 0;
-  const upp = Math.max(sx / w, sy * (spec.ratio ?? 1) / h);
+  const upp = Math.max(sx / w, (sy * (spec.ratio ?? 1)) / h);
   return {
     cx: spec.x ? (spec.x[0] + spec.x[1]) / 2 : 0,
     cy: spec.y ? (spec.y[0] + spec.y[1]) / 2 : 0,
@@ -219,7 +218,10 @@ export function formatCameraRow(c: {
 /** Scale each axis around a fixed device-pixel offset from the view center. */
 export function scaleViewAt(
   view: { cx: number; cy: number; upp: number; ratio?: number },
-  px: number, py: number, factorX: number, factorY: number,
+  px: number,
+  py: number,
+  factorX: number,
+  factorY: number,
 ): { cx: number; cy: number; upp: number; ratio: number } {
   const oldY = view.upp / (view.ratio ?? 1);
   const clamp = (n: number) => Math.max(1e-12, Math.min(1e12, n));

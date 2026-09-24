@@ -197,7 +197,10 @@ export function parseRecords(text: string, delimiter: string): string[][] {
 
 /** Turn a header cell into an identifier usable after a dot. */
 function toIdent(label: string, index: number): string {
-  let name = label.trim().replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+  let name = label
+    .trim()
+    .replace(/[^A-Za-z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '');
   if (!name) name = `col${index + 1}`;
   if (/^\d/.test(name)) name = `c${name}`;
   // `people.e` would read the constant e, not a column, so nudge the name.
@@ -253,8 +256,11 @@ export function parseCsv(text: string): Table {
   // real row ragged, and the file arrives as one column and no rows — so drop
   // it, but only when the lines below agree on a wider shape, which is what
   // tells a title apart from a genuine one-column file.
-  const titled = records.length > 2 && records[0].length === 1 && records[1].length > 1
-    && records.filter(r => r.length === records[1].length).length > records.length / 2;
+  const titled =
+    records.length > 2 &&
+    records[0].length === 1 &&
+    records[1].length > 1 &&
+    records.filter(r => r.length === records[1].length).length > records.length / 2;
   if (titled) warnings.push('1 title line above the header ignored');
   const first = titled ? 1 : 0;
   const header = records[first];
@@ -296,10 +302,12 @@ export function parseCsv(text: string): Table {
     // Tabs and semicolons do not imply a numeric locale. Require an actual
     // comma-form number in this column before reading dots as grouping.
     // In particular, an ordinary TSV's 1.234 must remain a decimal.
-    const decimalComma = delimiter !== ',' && cells.some(cell => {
-      const value = cell.trim().replace(/%$/, '').trim();
-      return /^[+-]?(?:\d+|\d{1,3}(?:\.\d{3})+),\d+$/.test(value);
-    });
+    const decimalComma =
+      delimiter !== ',' &&
+      cells.some(cell => {
+        const value = cell.trim().replace(/%$/, '').trim();
+        return /^[+-]?(?:\d+|\d{1,3}(?:\.\d{3})+),\d+$/.test(value);
+      });
     let numeric = cells.length > 0;
     let seen = 0;
     for (const cell of cells) {
@@ -339,8 +347,10 @@ export function parseCsv(text: string): Table {
 
   if (pointedByComma) {
     const named = delimiter === '\t' ? 'tabs' : `"${delimiter}"`;
-    warnings.push(`${pointedByComma} value${pointedByComma === 1 ? '' : 's'} read with ',' as the decimal point`
-      + ` (the file separates its columns with ${named})`);
+    warnings.push(
+      `${pointedByComma} value${pointedByComma === 1 ? '' : 's'} read with ',' as the decimal point` +
+        ` (the file separates its columns with ${named})`,
+    );
   }
   const gaps = [...missing.entries()];
   if (gaps.length) {

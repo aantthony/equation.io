@@ -11,7 +11,13 @@ describe('canonical value ownership', () => {
     env.bind('B', { tag: 'vector', role: 'const', components: [parseExpr('A_x+3'), parseExpr('A_y*2')] });
     expect(env.names.get('A_x')).toEqual({ kind: 'component', owner: 'A', index: 0 });
     expect(lookupValue(env, 'A_x')).toEqual({ tag: 'scalar', role: 'const', expr: n(1) });
-    expect(lowerValueRef(env, 'A')).toEqual({ kind: 'vec', items: [{ kind: 'var', name: 'A_x' }, { kind: 'var', name: 'A_y' }] });
+    expect(lowerValueRef(env, 'A')).toEqual({
+      kind: 'vec',
+      items: [
+        { kind: 'var', name: 'A_x' },
+        { kind: 'var', name: 'A_y' },
+      ],
+    });
     expect(evaluateFrame(env, 0)).toEqual({ A_x: 1, A_y: 2, B_x: 4, B_y: 4 });
     expect('set' in env.consts).toBe(false);
     expect('set' in env.names).toBe(false);
@@ -40,7 +46,9 @@ describe('canonical value ownership', () => {
     expect([...scalarDefinitions(env).keys()]).toEqual(['om_1', 'om_2', 'a']);
     expect(env.states.get('om_2')).toEqual({ deriv: n(30), init: n(3) });
     expect(evaluateFrame(env, 0, { om_1: 4, om_2: 5 })).toEqual({ om_1: 4, om_2: 5, a: 9 });
-    expect(() => env.bind('bad', { tag: 'vector', role: 'state', deriv: [n(1), n(2)], init: [n(0), n(0), n(0)] })).toThrow('dimensions');
+    expect(() =>
+      env.bind('bad', { tag: 'vector', role: 'state', deriv: [n(1), n(2)], init: [n(0), n(0), n(0)] }),
+    ).toThrow('dimensions');
     expect(env.names.has('bad')).toBe(false);
   });
   it('does not reserve sequence letters as ordinary value names', () => {
@@ -54,7 +62,10 @@ describe('canonical value ownership', () => {
 describe('RV declaration provider', () => {
   const declarationEnv = (mean: number) => {
     const env = new Env();
-    env.bind('X', { tag: 'rv', declaration: { name: 'X', kind: 'base', dist: { kind: 'normal', args: [n(mean), n(1)] } } });
+    env.bind('X', {
+      tag: 'rv',
+      declaration: { name: 'X', kind: 'base', dist: { kind: 'normal', args: [n(mean), n(1)] } },
+    });
     env.bind('Y', { tag: 'rv', declaration: { name: 'Y', kind: 'derived', expr: parseExpr('X+1') } });
     return env;
   };
@@ -70,7 +81,8 @@ describe('RV declaration provider', () => {
     expect(changed[0] - samples[0]).toBeCloseTo(2);
   });
   it('keeps anonymous expression declarations outside user bindings', () => {
-    const env = declarationEnv(0), sys = new RVSystem();
+    const env = declarationEnv(0),
+      sys = new RVSystem();
     sys.useDeclarations(env.rvs);
     sys.addAnonymous({ name: '@E0', kind: 'derived', expr: parseExpr('X+3') });
     expect(sys.has('@E0')).toBe(true);
@@ -112,7 +124,8 @@ describe('document binding commits', () => {
     const { buildStateSystem, initialState } = await import('./state.ts');
     const make = (rows: string[]) => buildDefs(rows.map(row => scanDefinition(row)!)).defs;
     const rows = ['c=2', "om'=(-om_1, c-om_2)", 'om(0)=(c,3)'];
-    const env = make(rows), system = buildStateSystem(env)!;
+    const env = make(rows),
+      system = buildStateSystem(env)!;
     expect(initialState(env, system)).toEqual({ om_1: 2, om_2: 3 });
     expect(buildStateSystem(make([...rows, 'b=5']))!.key).toBe(system.key);
     expect(buildStateSystem(make(['c=4', ...rows.slice(1)]))!.key).toBe(system.key);
@@ -125,13 +138,19 @@ describe('document RV name claims', () => {
   it('lets ordinary names and component aliases win in either row order', async () => {
     const { prepareDocument } = await import('./analysis.ts');
     for (const ordinary of ['a=2', 'a=(1,2)']) {
-      for (const rows of [[ordinary, 'a ~ Normal(0,1)'], ['a ~ Normal(0,1)', ordinary]]) {
+      for (const rows of [
+        [ordinary, 'a ~ Normal(0,1)'],
+        ['a ~ Normal(0,1)', ordinary],
+      ]) {
         const document = prepareDocument(rows);
         expect(document.defs.rvs.has('a')).toBe(false);
         expect([...document.builtRVs.errors.values()]).toEqual(['a is already defined.']);
       }
     }
-    for (const rows of [['A=(1,2)', 'A_x ~ Normal(0,1)'], ['A_x ~ Normal(0,1)', 'A=(1,2)']]) {
+    for (const rows of [
+      ['A=(1,2)', 'A_x ~ Normal(0,1)'],
+      ['A_x ~ Normal(0,1)', 'A=(1,2)'],
+    ]) {
       const document = prepareDocument(rows);
       expect(document.defs.rvs.has('A_x')).toBe(false);
       expect([...document.builtRVs.errors.values()]).toEqual(['A_x is already defined.']);
@@ -151,9 +170,19 @@ describe('failed owner dependency propagation', () => {
   it('rejects all dependent binding forms and keeps unrelated states running', async () => {
     const { analyzeRows } = await import('./analysis.ts');
     const { initialState, buildStateSystem, advanceState } = await import('./state.ts');
-    const rows = ['A=(1,b)', "c'=A_x", "d'=c", 'B=(A_x+1,x)',
-      'f(q)=q+A_x', 'g(q)=f(q)', 'M=[(A_x,0),(0,1)]', 'L=[A_x,2]',
-      "ok'=1", 'ok(0)=2', 'P=(3,4)'];
+    const rows = [
+      'A=(1,b)',
+      "c'=A_x",
+      "d'=c",
+      'B=(A_x+1,x)',
+      'f(q)=q+A_x',
+      'g(q)=f(q)',
+      'M=[(A_x,0),(0,1)]',
+      'L=[A_x,2]',
+      "ok'=1",
+      'ok(0)=2',
+      'P=(3,4)',
+    ];
     const result = analyzeRows(rows);
     for (let i = 0; i < 8; i++) expect(result.rows[i].error, rows[i]).toBeTruthy();
     for (let i = 8; i < rows.length; i++) expect(result.rows[i].error, rows[i]).toBeUndefined();
@@ -174,8 +203,16 @@ describe('failed owner dependency propagation', () => {
     for (const name of ['A', 'A_x', 'q', 'B', 'B_x', 'B_y', 'r']) expect(field.defs.names.has(name)).toBe(false);
     expect(field.rows[4].error).toBeUndefined();
     expect((await import('./expr.ts')).evaluate(field.defs.fields.get('s')!, { x: 3 })).toBe(5);
-    const folded = analyzeRows(['A=(2,b)', 'q=sum(k=1..A_x,k)', 'L=[1..A_x]',
-      'M=[(A_x,0),(0,1)]', 'N=2M', 'r=det(M)', 'C=M(1,2)', 's=7']);
+    const folded = analyzeRows([
+      'A=(2,b)',
+      'q=sum(k=1..A_x,k)',
+      'L=[1..A_x]',
+      'M=[(A_x,0),(0,1)]',
+      'N=2M',
+      'r=det(M)',
+      'C=M(1,2)',
+      's=7',
+    ]);
     for (let i = 0; i < 7; i++) expect(folded.rows[i].error, folded.rows[i].text).toBeTruthy();
     for (const name of ['q', 'L', 'M', 'N', 'r', 'C', 'C_x', 'C_y']) expect(folded.defs.names.has(name)).toBe(false);
     expect(folded.rows[7].error).toBeUndefined();
@@ -184,8 +221,15 @@ describe('failed owner dependency propagation', () => {
   it('diagnoses invalid seeds without discarding states or valid sibling seeds', async () => {
     const { analyzeRows } = await import('./analysis.ts');
     const { buildStateSystem, initialState, advanceState } = await import('./state.ts');
-    const result = analyzeRows(['A=(2,b)', "c'=1", 'c(0)=A_x',
-      "om'=(1,2)", 'om(0)=(A_x,3)', "p'=1", 'p(0)=sum(k=1..A_x,k)']);
+    const result = analyzeRows([
+      'A=(2,b)',
+      "c'=1",
+      'c(0)=A_x',
+      "om'=(1,2)",
+      'om(0)=(A_x,3)',
+      "p'=1",
+      'p(0)=sum(k=1..A_x,k)',
+    ]);
     for (const index of [0, 2, 4, 6]) expect(result.rows[index].error).toBeTruthy();
     for (const index of [1, 3, 5]) expect(result.rows[index].error).toBeUndefined();
     const system = buildStateSystem(result.defs)!;

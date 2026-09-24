@@ -72,8 +72,24 @@ import { type GetFn, RESERVED, type ResolveOpts, nameable, resolveExpr } from '.
 import { type BaseKind, DIST_FAMILIES, distFamily, distUsage, familyOf } from './dist-families.ts';
 import { quadrature } from './integrate.ts';
 import {
-  BETA_GAMMA_SIDE, BETA_LIMIT_SUM, GAMMA_UNIFORM_SHAPE, betaPQ, betaPdf, binomPmf, discreteUniformPmf, gammaPQ, gammaPdf, lbeta, lgamma,
-  negBinomPmf, normalPQ, poissonPmf, studentTPQ, studentTPdf, weibullPdf, wholeNumber,
+  BETA_GAMMA_SIDE,
+  BETA_LIMIT_SUM,
+  GAMMA_UNIFORM_SHAPE,
+  betaPQ,
+  betaPdf,
+  binomPmf,
+  discreteUniformPmf,
+  gammaPQ,
+  gammaPdf,
+  lbeta,
+  lgamma,
+  negBinomPmf,
+  normalPQ,
+  poissonPmf,
+  studentTPQ,
+  studentTPdf,
+  weibullPdf,
+  wholeNumber,
 } from './specfn.ts';
 
 // --- base distributions ---
@@ -167,9 +183,11 @@ export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): Ba
   const m = DIST_RE.exec(rhs);
   const spec = m && distFamily(m[1]);
   if (!m || !spec) {
-    throw new Error(m && !distFamily(m[1])
-      ? `Unknown distribution: ${m[1]}. ${DIST_HINT}`
-      : 'Expected a distribution like Normal(0, 1).');
+    throw new Error(
+      m && !distFamily(m[1])
+        ? `Unknown distribution: ${m[1]}. ${DIST_HINT}`
+        : 'Expected a distribution like Normal(0, 1).',
+    );
   }
   const arity = spec.params.length;
   const arityError = `${distUsage(spec)} takes ${arity} argument${arity > 1 ? 's' : ''}.`;
@@ -197,15 +215,20 @@ export function parseDistribution(rhs: string, fnNames: ReadonlySet<string>): Ba
 const v = (name: string): Expr => ({ kind: 'var', name });
 const num = (value: number): Expr => ({ kind: 'num', value });
 const bin = (op: '+' | '-' | '*' | '/' | '^', a: Expr, b: Expr): Expr => ({ kind: 'bin', op, a, b });
-const chain = (lo: Expr, mid: Expr, hi: Expr): Expr =>
-  ({ kind: 'ineq', op: '<', l: { kind: 'ineq', op: '<', l: lo, r: mid }, r: hi });
+const chain = (lo: Expr, mid: Expr, hi: Expr): Expr => ({
+  kind: 'ineq',
+  op: '<',
+  l: { kind: 'ineq', op: '<', l: lo, r: mid },
+  r: hi,
+});
 const call = (name: string, ...args: Expr[]): Expr => ({ kind: 'call', name, args });
 const positive = (e: Expr): Expr => ({ kind: 'ineq', op: '>', l: e, r: num(0) });
 /** `value` where every condition holds, 0 elsewhere (nested piecewise = AND). */
-const whereAll = (conds: Expr[], value: Expr): Expr => conds.reduceRight<Expr>(
-  (inner, cond) => ({ kind: 'piecewise', cases: [{ cond, value: inner }], otherwise: num(0) }),
-  value,
-);
+const whereAll = (conds: Expr[], value: Expr): Expr =>
+  conds.reduceRight<Expr>(
+    (inner, cond) => ({ kind: 'piecewise', cases: [{ cond, value: inner }], otherwise: num(0) }),
+    value,
+  );
 
 /**
  * The pmf of a discrete law at `k`: P(X = k). Exactly 0 — not NaN — off the
@@ -270,10 +293,12 @@ export function pdfExpr(d: BaseDist, x: Expr): Expr {
       const r: Expr = { kind: 'call', name: 'max', args: [d.args[0], num(0)] };
       return {
         kind: 'piecewise',
-        cases: [{
-          cond: { kind: 'ineq', op: '>=', l: x, r: num(0) },
-          value: bin('*', r, { kind: 'call', name: 'exp', args: [{ kind: 'neg', a: bin('*', r, x) }] }),
-        }],
+        cases: [
+          {
+            cond: { kind: 'ineq', op: '>=', l: x, r: num(0) },
+            value: bin('*', r, { kind: 'call', name: 'exp', args: [{ kind: 'neg', a: bin('*', r, x) }] }),
+          },
+        ],
         otherwise: num(0),
       };
     }
@@ -294,12 +319,16 @@ export function pdfExpr(d: BaseDist, x: Expr): Expr {
       return call(WEIBULL_PDF_FN, x, d.args[0], d.args[1]);
     case 'lognormal':
       // normalpdf(ln x)/x on x > 0; the sigma > 0 guard flattens a bad slider.
-      return whereAll([positive(d.args[1]), positive(x)],
-        bin('/', call('normalpdf', call('ln', x), d.args[0], d.args[1]), x));
+      return whereAll(
+        [positive(d.args[1]), positive(x)],
+        bin('/', call('normalpdf', call('ln', x), d.args[0], d.args[1]), x),
+      );
     case 'cauchy': {
       const z = bin('/', bin('-', x, d.args[0]), d.args[1]);
-      return whereAll([positive(d.args[1])],
-        bin('/', num(1), bin('*', bin('*', num(Math.PI), d.args[1]), bin('+', num(1), bin('*', z, z)))));
+      return whereAll(
+        [positive(d.args[1])],
+        bin('/', num(1), bin('*', bin('*', num(Math.PI), d.args[1]), bin('+', num(1), bin('*', z, z)))),
+      );
     }
     default:
       throw new Error(`${familyOf(d.kind).name} has no density.`); // discrete: answered by pmfExpr above
@@ -324,15 +353,24 @@ export function densityExpr(d: BaseDist): Expr {
  * square of a standard normal); else a density drawn on the CPU (a uniform
  * sum's exact piecewise polynomial, the quadrature curve, the sample estimate).
  */
-export function variableRow(sys: RVSystem, name: string):
-  | { kind: 'pmf' | 'density'; cls: Classified }
-  | { kind: 'exact'; density: Expr } {
+export function variableRow(
+  sys: RVSystem,
+  name: string,
+): { kind: 'pmf' | 'density'; cls: Classified } | { kind: 'exact'; density: Expr } {
   const discrete = sys.isDiscreteVar(name);
   const exact = discrete ? null : sys.exactDist(name);
   if (exact) return { kind: 'exact', density: densityExpr(exact) };
   const ps = sys.paramsOf(name);
   const kind = discrete ? 'pmf' : 'density';
-  return { kind, cls: { object: { kind: 'distribution', form: kind, rv: name }, animated: ps.has('t'), needs3D: false, params: [...ps].filter(p => p !== 't') } };
+  return {
+    kind,
+    cls: {
+      object: { kind: 'distribution', form: kind, rv: name },
+      animated: ps.has('t'),
+      needs3D: false,
+      params: [...ps].filter(p => p !== 't'),
+    },
+  };
 }
 
 /** A derived row's readout, from RVSystem.moments' verdict: `μ = …, σ = …`
@@ -342,12 +380,15 @@ export function variableRow(sys: RVSystem, name: string):
  *  analyze(). */
 export function momentsReadout(m: NonNullable<ReturnType<RVSystem['moments']>>): string {
   const about = (x: number): string => readoutNumber(x, 3);
-  return (m.kind === 'exact' ? `μ = ${readoutNumber(m.mean)}, σ = ${readoutNumber(m.sd)}`
-    : m.kind === 'robust'
-      ? `median ≈ ${about(m.median)}, IQR ≈ ${about(m.iqr)} (heavy tails: ${m.meanOk ? 'σ' : 'μ, σ'} unstable)`
-      : `μ ≈ ${about(m.mean)}, σ ${isFinite(m.sd) ? `≈ ${about(m.sd)}` : m.sd === Infinity ? '= ∞' : 'unstable'}`)
-    + (m.mass < 0.9995 ? `, P(defined) ≈ ${m.mass.toFixed(3)}` : '')
-    + (m.note ? ` (${m.note})` : '');
+  return (
+    (m.kind === 'exact'
+      ? `μ = ${readoutNumber(m.mean)}, σ = ${readoutNumber(m.sd)}`
+      : m.kind === 'robust'
+        ? `median ≈ ${about(m.median)}, IQR ≈ ${about(m.iqr)} (heavy tails: ${m.meanOk ? 'σ' : 'μ, σ'} unstable)`
+        : `μ ≈ ${about(m.mean)}, σ ${isFinite(m.sd) ? `≈ ${about(m.sd)}` : m.sd === Infinity ? '= ∞' : 'unstable'}`) +
+    (m.mass < 0.9995 ? `, P(defined) ≈ ${m.mass.toFixed(3)}` : '') +
+    (m.note ? ` (${m.note})` : '')
+  );
 }
 
 /** A readout's number: to `places` decimals while that is a number a reader
@@ -431,10 +472,12 @@ const POINT_SHAPE = 'P(… = …) compares single values, like P(X = 3) or P(X =
 /** Interpret a parsed P(…) body against the declared random variables. */
 export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
   // `=` parses as an equation, `==` and `!=` as the filter comparisons.
-  const point = e.kind === 'eq' ? { l: e.l, r: e.r, not: false }
-    : e.kind === 'eqtest' && e.args.length === 2
-      ? { l: e.args[0], r: e.args[1], not: e.op === '!=' }
-      : null;
+  const point =
+    e.kind === 'eq'
+      ? { l: e.l, r: e.r, not: false }
+      : e.kind === 'eqtest' && e.args.length === 2
+        ? { l: e.args[0], r: e.args[1], not: e.op === '!=' }
+        : null;
   if (e.kind !== 'ineq' && !point) throw new Error('P(…) expects an inequality like P(X < 2).');
   const frees = freeVars(e);
   const rvs = [...frees].filter(n => rvNames.has(n));
@@ -452,7 +495,8 @@ export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
     if (bearing(point.l) && bearing(point.r)) return { body: e, rvs, point: true };
     const [t, at] = bearing(point.l) ? [point.l, point.r] : [point.r, point.l];
     const bounds: ProbBounds = { lo: at, hi: at, point: true, ...(point.not ? { not: true } : {}) };
-    return t.kind === 'var' ? { body: e, rvs, point: true, single: { rv: t.name, ...bounds } }
+    return t.kind === 'var'
+      ? { body: e, rvs, point: true, single: { rv: t.name, ...bounds } }
       : { body: e, rvs, point: true, inline: { e: t, ...bounds } };
   }
   const comps = ineqComparisons(e as Expr & { kind: 'ineq' });
@@ -461,7 +505,10 @@ export function toProbability(e: Expr, rvNames: ReadonlySet<string>): ProbSpec {
   }
   // Normalize to ascending order so the terms read lo … X … hi; each
   // comparison keeps whether it was strict.
-  const asc = comps.map(c => ({ ...(c.op[0] === '<' ? { l: c.l, r: c.r } : { l: c.r, r: c.l }), strict: c.op.length === 1 }));
+  const asc = comps.map(c => ({
+    ...(c.op[0] === '<' ? { l: c.l, r: c.r } : { l: c.r, r: c.l }),
+    strict: c.op.length === 1,
+  }));
   if (comps[0].op[0] === '>') asc.reverse();
   const terms = [asc[0].l, ...asc.map(c => c.r)];
   const spec: ProbSpec = { body: e, rvs };
@@ -699,17 +746,26 @@ export function scanRandomRows(texts: readonly (string | null)[]): {
  * toward the sampler before classify could refuse them.
  */
 function wholeRowForm(e: Expr, rvNames: ReadonlySet<string>): void {
-  const kids: readonly Expr[] = e.kind === 'neg' ? [e.a]
-    : e.kind === 'bin' ? [e.a, e.b]
-    : e.kind === 'call' ? e.args
-    : e.kind === 'piecewise' ? [...e.cases.flatMap(c => [c.cond, c.value]), ...(e.otherwise ? [e.otherwise] : [])]
-    : e.kind === 'ineq' || e.kind === 'eq' ? [e.l, e.r]
-    : e.kind === 'vec' || e.kind === 'list' ? e.items
-    : [];
+  const kids: readonly Expr[] =
+    e.kind === 'neg'
+      ? [e.a]
+      : e.kind === 'bin'
+        ? [e.a, e.b]
+        : e.kind === 'call'
+          ? e.args
+          : e.kind === 'piecewise'
+            ? [...e.cases.flatMap(c => [c.cond, c.value]), ...(e.otherwise ? [e.otherwise] : [])]
+            : e.kind === 'ineq' || e.kind === 'eq'
+              ? [e.l, e.r]
+              : e.kind === 'vec' || e.kind === 'list'
+                ? e.items
+                : [];
   if (e.kind === 'call' && rvNames.size && (WHOLE_EXPR_NAMES.has(e.name) || GEOM_STATEMENTS.has(e.name))) {
-    throw new Error([...freeVars(e)].some(n => rvNames.has(n))
-      ? `${e.name}(…) cannot take a random variable.`
-      : `${e.name}(…) must be the whole expression.`);
+    throw new Error(
+      [...freeVars(e)].some(n => rvNames.has(n))
+        ? `${e.name}(…) cannot take a random variable.`
+        : `${e.name}(…) must be the whole expression.`,
+    );
   }
   for (const k of kids) wholeRowForm(k, rvNames);
 }
@@ -741,9 +797,7 @@ export function checkDerived(e: Expr, rvNames: ReadonlySet<string>, constNames: 
  *  slider drag can still resample every affected variable within a frame. */
 export const SAMPLE_COUNT = 1 << 17;
 
-export type RV =
-  | { name: string; kind: 'base'; dist: BaseDist }
-  | { name: string; kind: 'derived'; expr: Expr };
+export type RV = { name: string; kind: 'base'; dist: BaseDist } | { name: string; kind: 'derived'; expr: Expr };
 
 export interface DensityCurve {
   /** Flat [x0, y0, x1, y1, …] polyline of the continuous part's density
@@ -770,8 +824,11 @@ export interface DensityCurve {
  *  (StudentT, 1 < df ≤ 2); 2 — some base has no mean (Cauchy, StudentT df ≤ 1). */
 type HeavyBase = 0 | 1 | 2;
 
-export interface Robust { median: number; iqr: number; meanOk: boolean }
-
+export interface Robust {
+  median: number;
+  iqr: number;
+  meanOk: boolean;
+}
 
 const fnv1a = (s: string): number => {
   let h = 0x811c9dc5;
@@ -822,25 +879,33 @@ function uniformStream(name: string): Float64Array {
 
 /** Acklam's rational approximation to the standard normal quantile (~1e-9). */
 function normalQuantile(p: number): number {
-  const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2,
-    1.383577518672690e2, -3.066479806614716e1, 2.506628277459239];
-  const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2,
-    6.680131188771972e1, -1.328068155288572e1];
-  const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838,
-    -2.549732539343734, 4.374664141464968, 2.938163982698783];
+  const a = [
+    -3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.38357751867269e2, -3.066479806614716e1,
+    2.506628277459239,
+  ];
+  const b = [
+    -5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1,
+  ];
+  const c = [
+    -7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734, 4.374664141464968,
+    2.938163982698783,
+  ];
   const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416];
   const plow = 0.02425;
   if (p <= 0 || p >= 1) return NaN;
   if (p < plow || p > 1 - plow) {
     const q = Math.sqrt(-2 * Math.log(p < plow ? p : 1 - p));
-    const x = (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5])
-      / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+    const x =
+      (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) /
+      ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
     return p < plow ? x : -x;
   }
   const q = p - 0.5;
   const r = q * q;
-  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q
-    / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+  return (
+    ((((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q) /
+    (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
+  );
 }
 
 /** Evaluate an expression column-wise over the sample vectors. Inequalities
@@ -853,7 +918,16 @@ function evalCols(
 ): Float64Array {
   const alloc = () => new Float64Array(n);
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new Error(structuralDiagnostic(e));
+    case 'index':
+    case 'range':
+    case 'eqtest':
+    case 'comp':
+    case 'figure':
+    case 'lazy':
+    case 'trail':
+    case 'hist':
+    case 'family':
+      throw new Error(structuralDiagnostic(e));
     case 'num': {
       const out = alloc();
       out.fill(e.value);
@@ -878,11 +952,21 @@ function evalCols(
       const b = evalCols(e.b, cols, env, n);
       const out = alloc();
       switch (e.op) {
-        case '+': for (let i = 0; i < n; i++) out[i] = a[i] + b[i]; break;
-        case '-': for (let i = 0; i < n; i++) out[i] = a[i] - b[i]; break;
-        case '*': for (let i = 0; i < n; i++) out[i] = a[i] * b[i]; break;
-        case '/': for (let i = 0; i < n; i++) out[i] = a[i] / b[i]; break;
-        case '^': for (let i = 0; i < n; i++) out[i] = Math.pow(a[i], b[i]); break;
+        case '+':
+          for (let i = 0; i < n; i++) out[i] = a[i] + b[i];
+          break;
+        case '-':
+          for (let i = 0; i < n; i++) out[i] = a[i] - b[i];
+          break;
+        case '*':
+          for (let i = 0; i < n; i++) out[i] = a[i] * b[i];
+          break;
+        case '/':
+          for (let i = 0; i < n; i++) out[i] = a[i] / b[i];
+          break;
+        case '^':
+          for (let i = 0; i < n; i++) out[i] = Math.pow(a[i], b[i]);
+          break;
       }
       return out;
     }
@@ -918,13 +1002,14 @@ function evalCols(
         for (let i = 0; i < n; i++) {
           if (Number.isNaN(out[i])) continue;
           if (Number.isNaN(a[i]) || Number.isNaN(b[i])) out[i] = NaN;
-          else if (!(op === '<' ? a[i] < b[i] : op === '<=' ? a[i] <= b[i]
-            : op === '>' ? a[i] > b[i] : a[i] >= b[i])) out[i] = 0;
+          else if (!(op === '<' ? a[i] < b[i] : op === '<=' ? a[i] <= b[i] : op === '>' ? a[i] > b[i] : a[i] >= b[i]))
+            out[i] = 0;
         }
       }
       return out;
     }
-    case 'loop': throw new Error('A recursive function cannot be applied to a data column or random variable yet.');
+    case 'loop':
+      throw new Error('A recursive function cannot be applied to a data column or random variable yet.');
     case 'piecewise': {
       const out = alloc();
       out.fill(NaN);
@@ -945,11 +1030,14 @@ function evalCols(
       }
       return out;
     }
-    case 'vec': throw new Error('Vector in scalar context.');
+    case 'vec':
+      throw new Error('Vector in scalar context.');
     case 'list':
-    case 'data': throw new Error('List in scalar context.');
+    case 'data':
+      throw new Error('List in scalar context.');
     case 'str':
-    case 'text': throw new Error('Text has no numeric value.');
+    case 'text':
+      throw new Error('Text has no numeric value.');
   }
 }
 
@@ -1151,7 +1239,7 @@ function estimateCurve(col: Float64Array, heavy: HeavyBase = 0): DensityCurve | 
       // Local linear can undershoot below zero where samples are sparse;
       // there, fall back to the renormalized mean, which cannot.
       const ll = den > 0 ? (a2 * s0 - a1 * s1) / den : -1;
-      y = ll > 0 ? ll : (a0 > 0.05 ? s0 / a0 : s0);
+      y = ll > 0 ? ll : a0 > 0.05 ? s0 / a0 : s0;
     }
     pts.push(lo + j * dx, y);
   }
@@ -1172,8 +1260,10 @@ function estimateCurve(col: Float64Array, heavy: HeavyBase = 0): DensityCurve | 
 }
 
 /** Quantiles of an already-sorted pool, by nearest rank. */
-const quantileOf = (sorted: ArrayLike<number>) => (p: number): number =>
-  sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+const quantileOf =
+  (sorted: ArrayLike<number>) =>
+  (p: number): number =>
+    sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
 
 /** A sorted sample of at most ~4096 values: plenty for quantiles, and cheap
  *  enough to take of a full sample column. */
@@ -1319,10 +1409,7 @@ const ATOM_RUN_FRAC = 0.01;
 
 /** The quantile function of a base distribution at these parameter values,
  *  or null while the parameters are invalid. */
-export function quantileClosure(
-  d: BaseDist,
-  env: Record<string, number>,
-): ((u: number) => number) | null {
+export function quantileClosure(d: BaseDist, env: Record<string, number>): ((u: number) => number) | null {
   const a = d.args.map(e => evaluate(e, env));
   if (!a.every(isFinite)) return null;
   switch (d.kind) {
@@ -1417,8 +1504,12 @@ function buildQuantile(law: WarpedLaw): ((u: number) => number) | null {
     const t = f - k;
     const t2 = t * t;
     const t3 = t2 * t;
-    return law.unwarp((2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * h * ms[k]
-      + (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * h * ms[k + 1]);
+    return law.unwarp(
+      (2 * t3 - 3 * t2 + 1) * ys[k] +
+        (t3 - 2 * t2 + t) * h * ms[k] +
+        (-2 * t3 + 3 * t2) * ys[k + 1] +
+        (t3 - t2) * h * ms[k + 1],
+    );
   };
 }
 
@@ -1587,7 +1678,7 @@ function conditionalBase(
   for (const col of sorted) {
     for (let j = 0; j < M; j++) {
       const v = col[j];
-      if (isFinite(v) && allSeen++ % allStride === (allStride >> 1)) allPool.push(v);
+      if (isFinite(v) && allSeen++ % allStride === allStride >> 1) allPool.push(v);
     }
   }
   allPool.sort((a, b) => a - b);
@@ -1596,14 +1687,24 @@ function conditionalBase(
   // on, so that tier reads its tails off a modest joint draw instead: the
   // head of each variable's own stream (a uniform random subsample, the two
   // independently shuffled), through the same quantile functions.
-  const tailPool = outer && ((): Float64Array => {
-    TAIL_POOL_STATS.builds++;
-    TAIL_POOL_STATS.samples += TAIL_POOL_SIZE;
-    const draw = (v: { name: string; quantile: (u: number) => number }): Float64Array =>
-      uniformStream(v.name).subarray(0, TAIL_POOL_SIZE).map(v.quantile);
-    const joint = evalCols(g, new Map([[outer.name, draw(outer)], [inner.name, draw(inner)]]), env, TAIL_POOL_SIZE);
-    return joint.filter(Number.isFinite).sort();
-  });
+  const tailPool =
+    outer &&
+    ((): Float64Array => {
+      TAIL_POOL_STATS.builds++;
+      TAIL_POOL_STATS.samples += TAIL_POOL_SIZE;
+      const draw = (v: { name: string; quantile: (u: number) => number }): Float64Array =>
+        uniformStream(v.name).subarray(0, TAIL_POOL_SIZE).map(v.quantile);
+      const joint = evalCols(
+        g,
+        new Map([
+          [outer.name, draw(outer)],
+          [inner.name, draw(inner)],
+        ]),
+        env,
+        TAIL_POOL_SIZE,
+      );
+      return joint.filter(Number.isFinite).sort();
+    });
   const robust = robustIfUnstable(allPool, sd, heavy, tailPool || undefined);
 
   // Repeated values are point masses (piecewise branches, floor, constants):
@@ -1620,7 +1721,7 @@ function conditionalBase(
   // stems holding all of it, with no curve left to draw.
   const runMass = new Map<number, number>();
   for (const col of sorted) {
-    for (let j = 0; j < M; ) {
+    for (let j = 0; j < M;) {
       const v = col[j];
       let k = j + 1;
       while (k < M && col[k] === v) k++;
@@ -1701,7 +1802,7 @@ function condDensity(base: QCBase, lo: number, hi: number): number[] {
     const nx: number[] = [];
     const nF: number[] = [];
     let cum = 0;
-    for (let j = 0; j < M; ) {
+    for (let j = 0; j < M;) {
       const v = col[j];
       let k = j + 1;
       while (k < M && col[k] === v) k++;
@@ -1755,9 +1856,7 @@ function condDensity(base: QCBase, lo: number, hi: number): number[] {
     raw[k] = Math.max(0, (b - a) / (k === 0 || k === B ? dz : 2 * dz));
   }
   const win = base.window!;
-  const r = NX === 1
-    ? 2
-    : Math.max(2, Math.min(64, Math.round((win.hi - win.lo) / B / dz / 2)));
+  const r = NX === 1 ? 2 : Math.max(2, Math.min(64, Math.round((win.hi - win.lo) / B / dz / 2)));
   const kern = new Float64Array(2 * r + 1);
   for (let k = -r; k <= r; k++) kern[k + r] = Math.exp((-2 * k * k) / (r * r));
   const dens = new Float64Array(B + 1);
@@ -2197,7 +2296,10 @@ export function stemGeometry(run: PmfStems, heavy: boolean, pxPerUnit: number): 
  * parameter this frame).
  */
 export function markerHeight(
-  sys: RVSystem, name: string, env: Record<string, number>, view?: { lo: number; hi: number },
+  sys: RVSystem,
+  name: string,
+  env: Record<string, number>,
+  view?: { lo: number; hi: number },
 ): { x: number; h: number } | null {
   const m = sys.mean(name, env);
   if (!isFinite(m)) return null;
@@ -2218,11 +2320,18 @@ export const stemDotRadius = (pxPerUnit: number): number => (pxPerUnit >= 9 ? 3.
  *  complement). In envelope mode each run gains its exact end points, so the
  *  shaded outline stops at the bound and not at the nearest sample. */
 export function selectStems(
-  stems: PmfStems, law: DiscreteLaw, sel: { kLo: number; kHi: number; not: boolean },
+  stems: PmfStems,
+  law: DiscreteLaw,
+  sel: { kLo: number; kHi: number; not: boolean },
 ): PmfStems[] {
   if (Number.isNaN(sel.kLo) || Number.isNaN(sel.kHi)) return [];
   const ranges: Array<[number, number]> = sel.not
-    ? (sel.kLo > sel.kHi ? [[-Infinity, Infinity]] : [[-Infinity, sel.kLo - 1], [sel.kHi + 1, Infinity]])
+    ? sel.kLo > sel.kHi
+      ? [[-Infinity, Infinity]]
+      : [
+          [-Infinity, sel.kLo - 1],
+          [sel.kHi + 1, Infinity],
+        ]
     : [[sel.kLo, sel.kHi]];
   const first = stems.ks[0];
   const last = stems.ks[stems.ks.length - 1];
@@ -2327,9 +2436,12 @@ export const ENUM_STATS = { builds: 0, points: 0, pmfEvals: 0 };
 /** Whether two CANONICAL values are one atom. Whole numbers are exact, and
  *  never merge with each other. */
 const sameAtom = (a: number, b: number): boolean =>
-  a === b || (Number.isNaN(a) && Number.isNaN(b))
-  || (isFinite(a) && isFinite(b) && !(Number.isInteger(a) && Number.isInteger(b))
-    && Math.abs(a - b) <= ATOM_REL * Math.max(Math.abs(a), Math.abs(b)));
+  a === b ||
+  (Number.isNaN(a) && Number.isNaN(b)) ||
+  (isFinite(a) &&
+    isFinite(b) &&
+    !(Number.isInteger(a) && Number.isInteger(b)) &&
+    Math.abs(a - b) <= ATOM_REL * Math.max(Math.abs(a), Math.abs(b)));
 
 /** Whether a sum of magnitude `mag` that came to x cancelled: its operands'
  *  rounding is all that is left. (Whole operands add exactly: 0 is then 0.) */
@@ -2353,10 +2465,14 @@ function canonical(x: number, mag: number): number {
 /** An expression bounding the magnitude of what `e` adds up: |a| + |b| for
  *  a ± b, through products; null when nothing in it can cancel. */
 function magnitude(e: Expr): Expr | null {
-  const cancels = (x: Expr): boolean => x.kind === 'bin'
-    ? ((x.op === '+' || x.op === '-') || cancels(x.a) || cancels(x.b))
-    : x.kind === 'neg' ? cancels(x.a)
-      : x.kind === 'call' ? x.args.some(cancels) : x.kind === 'piecewise';
+  const cancels = (x: Expr): boolean =>
+    x.kind === 'bin'
+      ? x.op === '+' || x.op === '-' || cancels(x.a) || cancels(x.b)
+      : x.kind === 'neg'
+        ? cancels(x.a)
+        : x.kind === 'call'
+          ? x.args.some(cancels)
+          : x.kind === 'piecewise';
   const mag = (x: Expr): Expr => {
     if (x.kind === 'neg') return mag(x.a);
     if (x.kind === 'bin' && (x.op === '+' || x.op === '-')) return bin('+', mag(x.a), mag(x.b));
@@ -2369,7 +2485,12 @@ function magnitude(e: Expr): Expr | null {
 /** `e` over columns, unrounded, with the magnitude of each value (see
  *  `canonical`); a sum that cancelled is already 0. (A bare variable is its
  *  column, untouched.) */
-function columnOf(e: Expr, cols: ReadonlyMap<string, Float64Array>, env: Record<string, number>, count: number): { vals: Float64Array; mags: Float64Array } {
+function columnOf(
+  e: Expr,
+  cols: ReadonlyMap<string, Float64Array>,
+  env: Record<string, number>,
+  count: number,
+): { vals: Float64Array; mags: Float64Array } {
   const vals = evalCols(e, cols, env, count);
   const mag = magnitude(e);
   if (!mag) return { vals, mags: vals.map(Math.abs) };
@@ -2380,7 +2501,12 @@ function columnOf(e: Expr, cols: ReadonlyMap<string, Float64Array>, env: Record<
 
 /** `e` over columns, as canonical values: a finished column — an event's
  *  term, a sampled variable. */
-function canonicalColumn(e: Expr, cols: ReadonlyMap<string, Float64Array>, env: Record<string, number>, count: number): Float64Array {
+function canonicalColumn(
+  e: Expr,
+  cols: ReadonlyMap<string, Float64Array>,
+  env: Record<string, number>,
+  count: number,
+): Float64Array {
   if (e.kind === 'var') return evalCols(e, cols, env, count);
   const { vals, mags } = columnOf(e, cols, env, count);
   return canonicalize(vals, mags);
@@ -2413,8 +2539,13 @@ interface AtomSet {
  *  step of their magnitude apart); without, they stay the floats they are and
  *  only float variants of one value merge (FLOAT_REL). */
 function mergeAtoms(
-  vals: Float64Array, mags: ArrayLike<number>, wp: ArrayLike<number>, wn: ArrayLike<number>, wc: ArrayLike<number>,
-  lost: number, finished: boolean,
+  vals: Float64Array,
+  mags: ArrayLike<number>,
+  wp: ArrayLike<number>,
+  wn: ArrayLike<number>,
+  wc: ArrayLike<number>,
+  lost: number,
+  finished: boolean,
 ): AtomSet {
   if (finished) canonicalize(vals, mags);
   const count = vals.length;
@@ -2465,8 +2596,12 @@ function mergeAtoms(
     }
   }
   return {
-    xs: Float64Array.from(xs), mag: Float64Array.from(mag),
-    p: Float64Array.from(p), n: Float64Array.from(n), c: Float64Array.from(c), lost,
+    xs: Float64Array.from(xs),
+    mag: Float64Array.from(mag),
+    p: Float64Array.from(p),
+    n: Float64Array.from(n),
+    c: Float64Array.from(c),
+    lost,
   };
 }
 
@@ -2523,8 +2658,15 @@ interface Joint {
   lost: number;
 }
 
-const blockOf = (term: number, atoms: AtomSet): Block =>
-  ({ terms: [term], cols: [atoms.xs], mags: [atoms.mag], p: atoms.p, n: atoms.n, c: atoms.c, lost: atoms.lost });
+const blockOf = (term: number, atoms: AtomSet): Block => ({
+  terms: [term],
+  cols: [atoms.xs],
+  mags: [atoms.mag],
+  p: atoms.p,
+  n: atoms.n,
+  c: atoms.c,
+  lost: atoms.lost,
+});
 
 /** INDEPENDENT blocks laid out over their product: every combination once,
  *  with the product of the weights. Null past JOINT_MAX. Columns of terms no
@@ -2599,9 +2741,18 @@ function eventMask(cols: ArrayLike<number>[], ops: string[], count: number): Flo
         continue;
       }
       const tie = sameAtom(a[i], b[i]);
-      const holds = op === '=' ? tie : op === '!=' ? !tie
-        : op === '<' ? !tie && a[i] < b[i] : op === '>' ? !tie && a[i] > b[i]
-          : op === '<=' ? tie || a[i] < b[i] : tie || a[i] > b[i];
+      const holds =
+        op === '='
+          ? tie
+          : op === '!='
+            ? !tie
+            : op === '<'
+              ? !tie && a[i] < b[i]
+              : op === '>'
+                ? !tie && a[i] > b[i]
+                : op === '<='
+                  ? tie || a[i] < b[i]
+                  : tie || a[i] > b[i];
       if (!holds) out[i] = 0;
     }
   });
@@ -2736,17 +2887,22 @@ function tailOf(deep: number, shallow: number): Tail {
 /** Divergence along ANY path settles it (the path has positive probability);
  *  short of that, one 'unknown' leaves the moment uncertified. */
 const worseTail = (a: Tail, b: Tail): Tail =>
-  (a === 'diverges' || b === 'diverges' ? 'diverges' : a === 'unknown' || b === 'unknown' ? 'unknown' : 'ok');
+  a === 'diverges' || b === 'diverges' ? 'diverges' : a === 'unknown' || b === 'unknown' ? 'unknown' : 'ok';
 
 /** The upper tail of E[h(X)] for a law too wide to enumerate, by quadrature in
  *  ln u over the slivers u ∈ [1e-9, 1e-6] and [1e-6, 1e-3] (as `diverges`
  *  does for a density). An integral that does not settle, or an h that
  *  overflows out there, is 'unknown' — never "fine". */
 function quantileTail(h: (x: number) => number, upperQuantile: (u: number) => number): Tail {
-  const sliver = (lo: number, hi: number): number => quadrature(s => {
-    const u = Math.exp(s);
-    return h(upperQuantile(u)) * u;
-  }, Math.log(lo), Math.log(hi));
+  const sliver = (lo: number, hi: number): number =>
+    quadrature(
+      s => {
+        const u = Math.exp(s);
+        return h(upperQuantile(u)) * u;
+      },
+      Math.log(lo),
+      Math.log(hi),
+    );
   return tailOf(sliver(1e-9, 1e-6), sliver(1e-6, 1e-3));
 }
 
@@ -2799,7 +2955,7 @@ function sampledPmf(col: Float64Array, tails: { mean: Tail; second: Tail }): Dis
   for (let i = 0; i < finite.length; i++) {
     if (xs.length && sameAtom(first, finite[i])) counts[counts.length - 1]++;
     else {
-      xs.push(first = finite[i]);
+      xs.push((first = finite[i]));
       counts.push(1);
     }
   }
@@ -3058,8 +3214,12 @@ interface PPoly {
 
 const padd = (a: number[], b: number[]): number[] => {
   const out = new Array(Math.max(a.length, b.length)).fill(0);
-  a.forEach((v, i) => { out[i] += v; });
-  b.forEach((v, i) => { out[i] += v; });
+  a.forEach((v, i) => {
+    out[i] += v;
+  });
+  b.forEach((v, i) => {
+    out[i] += v;
+  });
   return out;
 };
 
@@ -3089,8 +3249,7 @@ const plin = (p: number[], k: number, t: number): number[] => {
   return out;
 };
 
-const uniformPP = (lo: number, hi: number): PPoly =>
-  ({ breaks: [lo, hi], pieces: [[1 / (hi - lo)]] });
+const uniformPP = (lo: number, hi: number): PPoly => ({ breaks: [lo, hi], pieces: [[1 / (hi - lo)]] });
 
 /** The density of c·X + t for X with density p (c ≠ 0). */
 function scalePP(p: PPoly, c: number, t: number): PPoly {
@@ -3119,14 +3278,23 @@ const binom = (n: number, k: number): number => {
  * sums — each limit is either a constant or z + shift, so h is a polynomial.
  */
 function convPP(p: PPoly, q: PPoly): PPoly {
-  interface Pair { a: number; b: number; c: number; e: number; Wx: number[][] }
+  interface Pair {
+    a: number;
+    b: number;
+    c: number;
+    e: number;
+    Wx: number[][];
+  }
   const pairs: Pair[] = [];
   const zb: number[] = [];
   for (let i = 0; i + 1 < p.breaks.length; i++) {
     for (let k = 0; k + 1 < q.breaks.length; k++) {
-      const a = p.breaks[i], b = p.breaks[i + 1];
-      const c = q.breaks[k], e = q.breaks[k + 1];
-      const u = p.pieces[i], v = q.pieces[k];
+      const a = p.breaks[i],
+        b = p.breaks[i + 1];
+      const c = q.breaks[k],
+        e = q.breaks[k + 1];
+      const u = p.pieces[i],
+        v = q.pieces[k];
       // v(z−x) gathered by powers of x: Vx[r] is a polynomial in z.
       const Vx: number[][] = [];
       for (let kk = 0; kk < v.length; kk++) {
@@ -3201,7 +3369,8 @@ function curvePP(p: PPoly): number[] {
   const span = p.breaks[p.breaks.length - 1] - p.breaks[0];
   const pts: number[] = [];
   for (let i = 0; i + 1 < p.breaks.length; i++) {
-    const x0 = p.breaks[i], x1 = p.breaks[i + 1];
+    const x0 = p.breaks[i],
+      x1 = p.breaks[i + 1];
     const n = Math.max(2, Math.ceil(((x1 - x0) / span) * 256));
     for (let k = 0; k <= n; k++) {
       const x = x0 + ((x1 - x0) * k) / n;
@@ -3335,11 +3504,15 @@ export class RVSystem {
     if (!continuous.length) return;
     const single = spec.single;
     if (single) {
-      throw new Error(`P(${single.rv} ${single.not ? '!=' : '='} …) needs a discrete variable: a continuous one`
-        + ` takes any single value with probability 0. Ask about an interval, like P(a < ${single.rv} < b).`);
+      throw new Error(
+        `P(${single.rv} ${single.not ? '!=' : '='} …) needs a discrete variable: a continuous one` +
+          ` takes any single value with probability 0. Ask about an interval, like P(a < ${single.rv} < b).`,
+      );
     }
-    throw new Error(`P(… = …) needs discrete variables, and ${continuous.join(', ')} ${continuous.length > 1 ? 'are' : 'is'} not:`
-      + ' a continuous value equals any given one with probability 0. Ask about an interval, like P(a < … < b).');
+    throw new Error(
+      `P(… = …) needs discrete variables, and ${continuous.join(', ')} ${continuous.length > 1 ? 'are' : 'is'} not:` +
+        ' a continuous value equals any given one with probability 0. Ask about an interval, like P(a < … < b).',
+    );
   }
 
   has(name: string): boolean {
@@ -3390,7 +3563,9 @@ export class RVSystem {
   }
 
   /** Detect definition cycles; returns per-variable errors. */
-  validate(): Map<string, string> { return validateDeclarations(this.rvs); }
+  validate(): Map<string, string> {
+    return validateDeclarations(this.rvs);
+  }
 
   /** Non-random free names the variable depends on, transitively (may include 't'). */
   paramsOf(name: string): ReadonlySet<string> {
@@ -3403,9 +3578,8 @@ export class RVSystem {
       seen.add(n);
       const rv = this.rvs.get(n);
       if (!rv) return;
-      const frees = rv.kind === 'base'
-        ? rv.dist.args.reduce((s, a) => freeVars(a, s), new Set<string>())
-        : freeVars(rv.expr);
+      const frees =
+        rv.kind === 'base' ? rv.dist.args.reduce((s, a) => freeVars(a, s), new Set<string>()) : freeVars(rv.expr);
       for (const f of frees) {
         if (this.rvs.has(f)) walk(f);
         else out.add(f);
@@ -3421,10 +3595,11 @@ export class RVSystem {
   private affine(e: Expr): Affine | null {
     const rvFree = (x: Expr): boolean => ![...freeVars(x)].some(n => this.rvs.has(n));
     if (rvFree(e)) return { terms: new Map(), c: e };
-    const scale = (af: Affine | null, k: Expr): Affine | null => af && {
-      terms: new Map([...af.terms].map(([n, coef]) => [n, bin('*', k, coef)])),
-      c: bin('*', k, af.c),
-    };
+    const scale = (af: Affine | null, k: Expr): Affine | null =>
+      af && {
+        terms: new Map([...af.terms].map(([n, coef]) => [n, bin('*', k, coef)])),
+        c: bin('*', k, af.c),
+      };
     switch (e.kind) {
       case 'var': {
         const rv = this.rvs.get(e.name)!;
@@ -3685,7 +3860,10 @@ export class RVSystem {
     if (rv?.kind !== 'base') return null;
     if ([...this.paramsOf(name)].some(n => n === 't' || moving.has(n) || !(n in env))) return null;
     try {
-      return paramProblem(rv.dist.kind, rv.dist.args.map(e => evaluate(e, env)));
+      return paramProblem(
+        rv.dist.kind,
+        rv.dist.args.map(e => evaluate(e, env)),
+      );
     } catch {
       return null;
     }
@@ -3708,7 +3886,11 @@ export class RVSystem {
    * the same variable, costs a cache hit. Null while the parameters declare no distribution
    * — a slider n at 2.5 draws nothing, because nothing is there to draw.
    */
-  stems(name: string, env: Record<string, number>, view?: { lo: number; hi: number }): { stems: PmfStems; law: DiscreteLaw } | null {
+  stems(
+    name: string,
+    env: Record<string, number>,
+    view?: { lo: number; hi: number },
+  ): { stems: PmfStems; law: DiscreteLaw } | null {
     const rv = this.rvs.get(name);
     if (!rv || !this.discreteDist(name)) return null;
     const slot = this.entry(name, this.sig(rv, env));
@@ -3825,7 +4007,7 @@ export class RVSystem {
         const law = discreteLaw(rv.dist, env);
         col = new Float64Array(SAMPLE_COUNT);
         if (law) {
-          const strata = slot.strata ??= sortedQuantiles(law);
+          const strata = (slot.strata ??= sortedQuantiles(law));
           for (let i = 0; i < SAMPLE_COUNT; i++) col[i] = strata[Math.floor(u[i] * SAMPLE_COUNT)];
         } else col.fill(NaN);
         slot.col = col;
@@ -3896,26 +4078,19 @@ export class RVSystem {
    * grid's cells. The zoomed range carries ×3 pan headroom and recomputes
    * only when the view leaves it or outgrows its resolution.
    */
-  curve(
-    name: string,
-    env: Record<string, number>,
-    view?: { lo: number; hi: number },
-  ): DensityCurve | null {
+  curve(name: string, env: Record<string, number>, view?: { lo: number; hi: number }): DensityCurve | null {
     const c = this.rawCurve(name, env, view);
     // One verdict per variable: a mean that quadrature certified (absolutely
     // convergent, see quadMoments) exists, whatever a tail-index estimate
     // near its bar made of it.
     if (!c?.robust || c.robust.meanOk || !this.quadMoments(name, env)) return c;
     const slot = this.cache.get(name)!;
-    if (slot.certified?.from !== c) slot.certified = { from: c, curve: { ...c, robust: { ...c.robust, meanOk: true } } };
+    if (slot.certified?.from !== c)
+      slot.certified = { from: c, curve: { ...c, robust: { ...c.robust, meanOk: true } } };
     return slot.certified.curve;
   }
 
-  private rawCurve(
-    name: string,
-    env: Record<string, number>,
-    view?: { lo: number; hi: number },
-  ): DensityCurve | null {
+  private rawCurve(name: string, env: Record<string, number>, view?: { lo: number; hi: number }): DensityCurve | null {
     const law = this.exactLaw(name);
     if (law?.kind === 'usum') {
       const rv = this.rvs.get(name)!;
@@ -4212,7 +4387,10 @@ export class RVSystem {
    * μ) a truncation artifact; otherwise the best estimate — quadrature where
    * it settled, the curve's moments elsewhere. Null when nothing computes.
    */
-  moments(name: string, env: Record<string, number>):
+  moments(
+    name: string,
+    env: Record<string, number>,
+  ):
     | { kind: 'exact' | 'estimate'; mean: number; sd: number; mass: number; note?: string }
     | { kind: 'robust'; median: number; iqr: number; meanOk: boolean; mass: number; note?: string }
     | null {
@@ -4225,7 +4403,11 @@ export class RVSystem {
       const pmf = this.pmfOf(name, env);
       if (!pmf) return null;
       // A sampled pmf is said to be one — loudly where it could not be resolved.
-      const note = pmf.exact ? undefined : pmf.unresolved ? 'sampled: too many distinct values to resolve the pmf' : 'sampled';
+      const note = pmf.exact
+        ? undefined
+        : pmf.unresolved
+          ? 'sampled: too many distinct values to resolve the pmf'
+          : 'sampled';
       if (!pmf.meanOk) {
         const q = (u: number): number => atomQuantile(pmf, u);
         return { kind: 'robust', median: q(0.5), iqr: q(0.75) - q(0.25), meanOk: false, mass: pmf.mass, note };
@@ -4273,7 +4455,9 @@ export class RVSystem {
       else if (rv.dist.kind === 'studentt') {
         try {
           df = evaluate(rv.dist.args[0], env);
-        } catch { /* unbound parameter: the caller reports it */ }
+        } catch {
+          /* unbound parameter: the caller reports it */
+        }
       }
       const tail: HeavyBase = df <= 1 ? 2 : df <= 2 ? 1 : 0;
       if (tail > level) level = tail;
@@ -4315,7 +4499,9 @@ export class RVSystem {
    * always was. `single` is the row's bounded variable, when it has that shape.
    */
   eventProbability(
-    body: Expr, single: ({ rv: string } & ProbBounds) | undefined, env: Record<string, number>,
+    body: Expr,
+    single: ({ rv: string } & ProbBounds) | undefined,
+    env: Record<string, number>,
   ): { value: number; exact: boolean } {
     if (single) {
       const value = this.exactProbability(single.rv, single.lo, single.hi, env, single);
@@ -4353,7 +4539,11 @@ export class RVSystem {
       return { value: Math.min(1, value / total), exact: true };
     }
     // Past the cap: the same event, with the same tie rule, over the sample.
-    const mask = eventMask(shape.terms.map((t, k) => this.sampledColumn(terms[k] ?? t, env)), shape.ops, SAMPLE_COUNT);
+    const mask = eventMask(
+      shape.terms.map((t, k) => this.sampledColumn(terms[k] ?? t, env)),
+      shape.ops,
+      SAMPLE_COUNT,
+    );
     let count = 0;
     let defined = 0;
     for (let i = 0; i < SAMPLE_COUNT; i++) {
@@ -4439,7 +4629,13 @@ export class RVSystem {
       if (members.length === 1 && !whole) {
         const atoms = this.enumerate(terms[root], env);
         block = atoms && atoms !== 'cap' ? blockOf(root, atoms) : atoms;
-      } else block = this.jointBlock(members.map(k => terms[k]), members, env, whole);
+      } else
+        block = this.jointBlock(
+          members.map(k => terms[k]),
+          members,
+          env,
+          whole,
+        );
       if (!block || block === 'cap') return block;
       blocks.push(block);
     }
@@ -4447,7 +4643,8 @@ export class RVSystem {
     const joint = tensor(blocks, terms.length);
     if (!joint) return 'cap';
     terms.forEach((t, k) => {
-      if (!random[k].length) ({ vals: joint.cols[k], mags: joint.mags[k] } = columnOf(t, new Map(), env, joint.wp.length));
+      if (!random[k].length)
+        ({ vals: joint.cols[k], mags: joint.mags[k] } = columnOf(t, new Map(), env, joint.wp.length));
     });
     return joint;
   }
@@ -4493,16 +4690,25 @@ export class RVSystem {
       for (let i = 0; i < rows; i++) {
         // A computed key is an own property whatever the name (`__proto__`).
         const at: Record<string, Expr> = {};
-        shared.forEach((n, k) => { at[n] = num(over.cols[k][i]); });
-        const part = this.enumerateTerms(terms.map(t => substVars(t, at)), env);
+        shared.forEach((n, k) => {
+          at[n] = num(over.cols[k][i]);
+        });
+        const part = this.enumerateTerms(
+          terms.map(t => substVars(t, at)),
+          env,
+        );
         if (!part || part === 'cap') return part;
         size += part.wp.length;
         if (size > JOINT_MAX) return 'cap';
         parts.push(part);
       }
       const block: Block = {
-        terms: ids, cols: ids.map(() => new Float64Array(size)), mags: ids.map(() => new Float64Array(size)),
-        p: new Float64Array(size), n: new Float64Array(size), c: new Float64Array(size),
+        terms: ids,
+        cols: ids.map(() => new Float64Array(size)),
+        mags: ids.map(() => new Float64Array(size)),
+        p: new Float64Array(size),
+        n: new Float64Array(size),
+        c: new Float64Array(size),
         lost: 1 - (1 - over.lost) * (1 - Math.max(0, ...parts.map(part => part.lost))),
       };
       let at = 0;
@@ -4527,7 +4733,15 @@ export class RVSystem {
     if (!joint) return 'cap';
     const byName = new Map(all.map((n, k) => [n, joint.cols[k]]));
     const columns = terms.map(t => columnOf(t, byName, env, joint.wp.length));
-    return { terms: ids, cols: columns.map(col => col.vals), mags: columns.map(col => col.mags), p: joint.wp, n: joint.wn, c: joint.wc, lost: joint.lost };
+    return {
+      terms: ids,
+      cols: columns.map(col => col.vals),
+      mags: columns.map(col => col.mags),
+      p: joint.wp,
+      n: joint.wn,
+      c: joint.wc,
+      lost: joint.lost,
+    };
   }
 
   /** The atoms of a grounded expression over discrete bases (see above):
@@ -4545,9 +4759,12 @@ export class RVSystem {
     if (kids) {
       const names = kids.map((_, k) => `\u0000${k}`); // no identifier: cannot collide with a user's name
       const at = (k: number): Expr => v(names[k]);
-      const node: Expr = e.kind === 'neg' ? { kind: 'neg', a: at(0) }
-        : e.kind === 'bin' ? { kind: 'bin', op: e.op, a: at(0), b: at(1) }
-          : { kind: 'call', name: (e as Expr & { kind: 'call' }).name, args: kids.map((_, k) => at(k)) };
+      const node: Expr =
+        e.kind === 'neg'
+          ? { kind: 'neg', a: at(0) }
+          : e.kind === 'bin'
+            ? { kind: 'bin', op: e.op, a: at(0), b: at(1) }
+            : { kind: 'call', name: (e as Expr & { kind: 'call' }).name, args: kids.map((_, k) => at(k)) };
       vals = evalCols(node, new Map(names.map((n, k) => [n, joint.cols[k]])), env, size);
       // What this node added up: |a| + |b| for a sum (which may have cancelled
       // to 0), carried through a product or quotient, else the value's own.
@@ -4633,10 +4850,14 @@ export class RVSystem {
       const memo = new Map<number, number>();
       const upper = (u: number): number => {
         let k = memo.get(u);
-        if (k === undefined) memo.set(u, k = law.quantile(u, true));
+        if (k === undefined) memo.set(u, (k = law.quantile(u, true)));
         return k;
       };
-      for (const others of [(l: DiscreteLaw) => l.quantile(0.5), (l: DiscreteLaw) => l.quantile(1e-6, true), (l: DiscreteLaw) => l.quantile(1e-6)]) {
+      for (const others of [
+        (l: DiscreteLaw) => l.quantile(0.5),
+        (l: DiscreteLaw) => l.quantile(1e-6, true),
+        (l: DiscreteLaw) => l.quantile(1e-6),
+      ]) {
         const at: Record<string, number> = { ...env };
         for (const [n, l] of laws) at[n] = others(l);
         const gAt = (x: number): number => {
@@ -4647,7 +4868,10 @@ export class RVSystem {
             return NaN;
           }
         };
-        for (const [key, h] of [['mean', gAt], ['second', (x: number) => gAt(x) ** 2]] as const) {
+        for (const [key, h] of [
+          ['mean', gAt],
+          ['second', (x: number) => gAt(x) ** 2],
+        ] as const) {
           let tail: Tail;
           if (atoms && atoms !== 'cap') {
             let deep = 0;
@@ -4676,7 +4900,12 @@ export class RVSystem {
    * discrete, or while its parameters declare no distribution. Cached per
    * parameter values, window and selection.
    */
-  pmfRuns(name: string, env: Record<string, number>, view?: { lo: number; hi: number }, select?: ProbBounds): PmfStems[] | null {
+  pmfRuns(
+    name: string,
+    env: Record<string, number>,
+    view?: { lo: number; hi: number },
+    select?: ProbBounds,
+  ): PmfStems[] | null {
     if (this.discreteDist(name)) {
       const drawn = this.stems(name, env, view);
       if (!drawn) return null;
@@ -4686,16 +4915,23 @@ export class RVSystem {
     if (!pmf) return null;
     const range = select ? atomRange(pmf, select, env) : { i0: 0, i1: pmf.xs.length - 1 };
     if (!range) return [];
-    const ranges = select?.not ? [{ i0: 0, i1: range.i0 - 1 }, { i0: range.i1 + 1, i1: pmf.xs.length - 1 }] : [range];
+    const ranges = select?.not
+      ? [
+          { i0: 0, i1: range.i0 - 1 },
+          { i0: range.i1 + 1, i1: pmf.xs.length - 1 },
+        ]
+      : [range];
     if (pmf.binned) {
       // The histogram is one shape whatever the window; a selection keeps the
       // bins (and heavy atoms) whose centres it covers.
       const [from, to] = [pmf.xs[range.i0] ?? Infinity, pmf.xs[range.i1] ?? -Infinity];
       const keep = (x: number): boolean => !select || (x >= from && x <= to) !== !!select.not;
-      return [pmf.binned.bulk, pmf.binned.heavy].map(run => {
-        const ks = run.ks.filter(keep);
-        return { ...run, ks, ps: run.ps.filter((_, i) => keep(run.ks[i])) };
-      }).filter(run => run.ks.length);
+      return [pmf.binned.bulk, pmf.binned.heavy]
+        .map(run => {
+          const ks = run.ks.filter(keep);
+          return { ...run, ks, ps: run.ps.filter((_, i) => keep(run.ks[i])) };
+        })
+        .filter(run => run.ks.length);
     }
     // Keyed by the atoms in view — which decide everything drawn, the stride
     // past STEM_MAX included — and the atoms selected: a pan that brings none
@@ -4734,26 +4970,26 @@ export class RVSystem {
 }
 
 function validateDeclarations(declarations: ReadonlyMap<string, RV>): Map<string, string> {
-    const broken = new Map<string, string>();
-    const state = new Map<string, 'visiting' | 'done'>();
-    const visit = (name: string, path: string[]): void => {
-      const rv = declarations.get(name);
-      if (!rv || state.get(name) === 'done') return;
-      if (state.get(name) === 'visiting') {
-        const cycle = path.slice(path.indexOf(name)).concat(name);
-        for (const cn of cycle) broken.set(cn, `${cycle.join(' → ')} is circular.`);
-        return;
+  const broken = new Map<string, string>();
+  const state = new Map<string, 'visiting' | 'done'>();
+  const visit = (name: string, path: string[]): void => {
+    const rv = declarations.get(name);
+    if (!rv || state.get(name) === 'done') return;
+    if (state.get(name) === 'visiting') {
+      const cycle = path.slice(path.indexOf(name)).concat(name);
+      for (const cn of cycle) broken.set(cn, `${cycle.join(' → ')} is circular.`);
+      return;
+    }
+    state.set(name, 'visiting');
+    if (rv.kind === 'derived') {
+      for (const dep of freeVars(rv.expr)) {
+        if (declarations.has(dep)) visit(dep, [...path, name]);
       }
-      state.set(name, 'visiting');
-      if (rv.kind === 'derived') {
-        for (const dep of freeVars(rv.expr)) {
-          if (declarations.has(dep)) visit(dep, [...path, name]);
-        }
-      }
-      state.set(name, 'done');
-    };
-    for (const name of declarations.keys()) visit(name, []);
-    return broken;
+    }
+    state.set(name, 'done');
+  };
+  for (const name of declarations.keys()) visit(name, []);
+  return broken;
 }
 
 // --- building the system from scanned rows ---

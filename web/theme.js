@@ -7,10 +7,8 @@
   }
   try {
     var s = localStorage.getItem('eq-theme');
-    var dark = s === 'dark' ||
-      (s !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+    var dark = s === 'dark' || (s !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    document.getElementById('theme-color')
-      ?.setAttribute('content', dark ? '#171a1f' : '#ffffff');
+    document.getElementById('theme-color')?.setAttribute('content', dark ? '#171a1f' : '#ffffff');
   } catch {}
 })();

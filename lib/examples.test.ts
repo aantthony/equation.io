@@ -31,16 +31,24 @@ describe('examples menu', () => {
   // can also compile and still be wrong — `e = 0.6` meant as a slider reads
   // "Never true" — so every row must also define, frame or draw something,
   // and none may be a decided comparison.
-  it.each(EXAMPLES.flatMap(([category, items]) =>
-    items.map(([label, text]) => [`${category} / ${label}`, text])))('%s compiles', (_, text) => {
-    const rows = splitStatements(text).map(s => s.trim()).filter(Boolean);
-    // An automaton's seed row `c_0[i] = …` draws through its rule row.
-    const seeds = scanSequences(rows).map(s => !!s?.seed);
-    const problems = analyzeRows(rows).rows.flatMap((r, i) =>
-      r.error ? [`${r.text}: ${r.error}`]
-      : /^(Always|Never) true/.test(r.info ?? '') ? [`${r.text}: ${r.info}`]
-      : !r.comment && !r.cls && !r.def && !r.view && !seeds[i] ? [`${r.text}: does nothing`]
-      : []);
-    expect(problems).toEqual([]);
-  });
+  it.each(EXAMPLES.flatMap(([category, items]) => items.map(([label, text]) => [`${category} / ${label}`, text])))(
+    '%s compiles',
+    (_, text) => {
+      const rows = splitStatements(text)
+        .map(s => s.trim())
+        .filter(Boolean);
+      // An automaton's seed row `c_0[i] = …` draws through its rule row.
+      const seeds = scanSequences(rows).map(s => !!s?.seed);
+      const problems = analyzeRows(rows).rows.flatMap((r, i) =>
+        r.error
+          ? [`${r.text}: ${r.error}`]
+          : /^(Always|Never) true/.test(r.info ?? '')
+            ? [`${r.text}: ${r.info}`]
+            : !r.comment && !r.cls && !r.def && !r.view && !seeds[i]
+              ? [`${r.text}: does nothing`]
+              : [],
+      );
+      expect(problems).toEqual([]);
+    },
+  );
 });

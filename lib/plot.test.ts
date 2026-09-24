@@ -82,7 +82,9 @@ describe('classify', () => {
     expect(() => cls('sin(u)')).toThrow('u/v need a vector expression like (cos(u), sin(u), v).');
     // Real for all its i: a number depending on u, which is no path — said so.
     for (const s of ['abs(exp(i u))', 're(exp(i 2 pi u))']) {
-      expect(() => cls(s), s).toThrow('This is a real number for each u, not a path — a complex path needs an imaginary part, like exp(i 2 pi u); for a real curve write (u, …).');
+      expect(() => cls(s), s).toThrow(
+        'This is a real number for each u, not a path — a complex path needs an imaginary part, like exp(i 2 pi u); for a real curve write (u, …).',
+      );
     }
     expect(() => cls('domain(exp(i u))')).toThrow('Cannot use u/v in domain(…).');
     expect(() => cls('iter(z^2 + i u)')).toThrow('Cannot use u/v in iter(…).');
@@ -245,7 +247,8 @@ describe('level families', () => {
   const clsWith = (s: string, consts: string[]) => classify(parseExpr(s), new Set(consts));
   const levelsOf = (c: ReturnType<typeof classify>) =>
     c.cpu.type === 'implicit2d' && c.cpu.levels && c.gpu.type === 'implicit2d'
-      ? { ...c.cpu.levels, ...c.gpu.levels } : undefined;
+      ? { ...c.cpu.levels, ...c.gpu.levels }
+      : undefined;
 
   it('detects f(x,y) = c with a slider constant, either way around', () => {
     for (const s of ['x^2 + y^2 = c', 'c = x^2 + y^2']) {

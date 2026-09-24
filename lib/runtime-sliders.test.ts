@@ -6,8 +6,15 @@ const names = (rows: string[]) => [...runtimeSliderNames(analyzeRows(rows))].sor
 
 describe('runtime-only sliders', () => {
   it('keeps scalar uniforms and figure transforms live without recompilation', () => {
-    expect(names(['s=.24', 'R=3', 'P=[(0,0,0),(1,0,0),(0,1,0),(0,0,1)]',
-      'a=pi[1..3]/4', 'rotate(s hull(P),a,(0,1,0))+(R,0,0)'])).toEqual(['R', 's']);
+    expect(
+      names([
+        's=.24',
+        'R=3',
+        'P=[(0,0,0),(1,0,0),(0,1,0),(0,0,1)]',
+        'a=pi[1..3]/4',
+        'rotate(s hull(P),a,(0,1,0))+(R,0,0)',
+      ]),
+    ).toEqual(['R', 's']);
     expect(names(['a=1', 'y=sin(a x)', 'a+2'])).toEqual(['a']);
   });
 

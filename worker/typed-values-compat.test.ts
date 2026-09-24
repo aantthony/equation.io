@@ -7,7 +7,10 @@ import { PUBLIC_KIND_ROWS } from './typed-values.fixtures.ts';
 
 function successful(rows: string[]) {
   const analysis = analyze(rows);
-  expect(analysis.rows.map(r => r.error), rows.join('; ')).toEqual(rows.map(() => undefined));
+  expect(
+    analysis.rows.map(r => r.error),
+    rows.join('; '),
+  ).toEqual(rows.map(() => undefined));
   return analysis;
 }
 
@@ -15,13 +18,29 @@ function successful(rows: string[]) {
 function numbers(plot: CpuPlan, env: Record<string, number>): number[] {
   let expressions: Expr[];
   switch (plot.type) {
-    case 'value': expressions = [plot.expr]; break;
-    case 'point': case 'trail': expressions = plot.coords; break;
-    case 'polygon': expressions = plot.pts; break;
-    case 'pcurve': case 'vfield2d': case 'vfield3d': expressions = plot.comps; break;
-    case 'vlist': expressions = plot.values; break;
-    case 'plist': expressions = plot.pts.flat(); break;
-    default: throw new Error(`No numeric fixture projection for ${plot.type}`);
+    case 'value':
+      expressions = [plot.expr];
+      break;
+    case 'point':
+    case 'trail':
+      expressions = plot.coords;
+      break;
+    case 'polygon':
+      expressions = plot.pts;
+      break;
+    case 'pcurve':
+    case 'vfield2d':
+    case 'vfield3d':
+      expressions = plot.comps;
+      break;
+    case 'vlist':
+      expressions = plot.values;
+      break;
+    case 'plist':
+      expressions = plot.pts.flat();
+      break;
+    default:
+      throw new Error(`No numeric fixture projection for ${plot.type}`);
   }
   return expressions.map(e => evaluate(e, env));
 }
@@ -71,11 +90,15 @@ const CALLS: CallFixture[] = [
   { calls: ['angle((1,0),(0,1))', 'angle(1,0,0,1)'], kind: 'value', values: [Math.PI / 2] },
   { calls: ['midpoint((1,2),(3,4))', 'midpoint(1,2,3,4)'], kind: 'point', values: [2, 3] },
   { calls: ['perp((1,2))', 'perp(1,2)'], kind: 'point', values: [-2, 1] },
-  { calls: ['unit((3,4))', 'unit(3,4)'], kind: 'point', values: [.6, .8] },
+  { calls: ['unit((3,4))', 'unit(3,4)'], kind: 'point', values: [0.6, 0.8] },
   { calls: ['rotate((1,2),0)', 'rotate(1,2,0)'], kind: 'point', values: [1, 2] },
   { calls: ['rotate((2,1),pi/2,(1,1))', 'rotate(2,1,pi/2,1,1)'], kind: 'point', values: [1, 2] },
   { calls: ['rotate((1,0,0),pi/2,(0,0,1))', 'rotate(1,0,0,pi/2,0,0,1)'], kind: 'point', values: [0, 1, 0] },
-  { calls: ['tube((u,2u,3u))', 'tube(u,2u,3u)', 'tube((u,2u,3u),0.2)', 'tube(u,2u,3u,0.2)'], kind: 'pcurve', values: [.5, 1, 1.5] },
+  {
+    calls: ['tube((u,2u,3u))', 'tube(u,2u,3u)', 'tube((u,2u,3u),0.2)', 'tube(u,2u,3u,0.2)'],
+    kind: 'pcurve',
+    values: [0.5, 1, 1.5],
+  },
   { setup: ['M = [(2,0),(0,4)]'], calls: ['solve(M,(6,8))', 'solve(M,6,8)'], kind: 'point', values: [3, 2] },
   { calls: ['abs(-3)'], kind: 'value', values: [3] },
   { calls: ['abs((3,4))', 'abs(3,4)', 'abs(A)'], setup: ['A = (3,4)'], kind: 'value', values: [5] },
@@ -87,7 +110,12 @@ const CALLS: CallFixture[] = [
   { calls: ['max((1,2),3)', 'max(1,(2,3))'], kind: 'value', values: [3] },
   { calls: ['max((1,2),(3,4))'], kind: 'value', values: [4] },
   { calls: ['min((3,2),1)', 'min(3,(2,1))'], kind: 'value', values: [1] },
-  { setup: ['f(x,y,z) = x + 10y + 100z'], calls: ['f(1,2,3)', 'f((1,2),3)', 'f(1,(2,3))', 'f((1,2,3))'], kind: 'value', values: [321] },
+  {
+    setup: ['f(x,y,z) = x + 10y + 100z'],
+    calls: ['f(1,2,3)', 'f((1,2),3)', 'f(1,(2,3))', 'f((1,2,3))'],
+    kind: 'value',
+    values: [321],
+  },
   { setup: ['gamma(x,y) = x + y'], calls: ['gamma((1,2))', 'gamma(1,2)'], kind: 'value', values: [3] },
   { setup: ['gamma = 2'], calls: ['gamma(3)'], kind: 'value', values: [6] },
   { setup: ['open(x,y) = x + y'], calls: ['open((1,2))', 'open(1,2)'], kind: 'value', values: [3] },
@@ -95,7 +123,7 @@ const CALLS: CallFixture[] = [
   { calls: ['sum(n=1..3,n)'], kind: 'value', values: [6] },
   { calls: ['sum(n=1..3,(n,99))'], kind: 'point', values: [6, 297] },
   { calls: ['prod(n=1..3,n)'], kind: 'value', values: [6] },
-  { calls: ['int(0..1,x dx)'], kind: 'value', values: [.5] },
+  { calls: ['int(0..1,x dx)'], kind: 'value', values: [0.5] },
 ];
 
 describe('call-shape compatibility before preserving tuple syntax', () => {
@@ -104,10 +132,10 @@ describe('call-shape compatibility before preserving tuple syntax', () => {
       const a = successful([...(fixture.setup ?? []), call]);
       const p = a.rows.at(-1)!.cpu!;
       expect(publicKind(a.rows.at(-1)!.cls!.object)).toBe(fixture.kind);
-      const actual = numbers(p, { ...a.constEnv, t: 0, u: .5 });
+      const actual = numbers(p, { ...a.constEnv, t: 0, u: 0.5 });
       expect(actual).toHaveLength(fixture.values.length);
       actual.forEach((v, i) => expect(v).toBeCloseTo(fixture.values[i], 10));
-      if (p.type === 'pcurve') expect(evaluate(p.tube!, {})).toBe(call.includes('0.2') ? .2 : .1);
+      if (p.type === 'pcurve') expect(evaluate(p.tube!, {})).toBe(call.includes('0.2') ? 0.2 : 0.1);
       if (p.type === 'polygon') {
         expect(p.closed).toBe(call.startsWith('polygon'));
         expect(!!p.arrow).toBe(call.startsWith('vector'));
@@ -147,8 +175,10 @@ describe('typed-values semantic edge baseline', () => {
   it('keeps deferred computed-point components zipped through function composition', () => {
     const setup = ['f(x,y) = (x+y/2,y)', 'A = (1,2)', 'B = (3,4)', 'J = [(0,-1),(1,0)]'];
     for (const [call, expected] of [
-      ['f(J A)', [-1.5, 1]], ['f(A+A)', [4, 4]],
-      ['f(midpoint(A,B))', [3.5, 3]], ['f(f(A))', [3, 2]],
+      ['f(J A)', [-1.5, 1]],
+      ['f(A+A)', [4, 4]],
+      ['f(midpoint(A,B))', [3.5, 3]],
+      ['f(f(A))', [3, 2]],
       ['f(f([A,B]))', [3, 2, 7, 4]],
     ] as const) {
       const a = successful([...setup, call]);
@@ -158,7 +188,8 @@ describe('typed-values semantic edge baseline', () => {
 
   it('keeps alias parameters live on the CPU and stable in shaders', () => {
     const make = (x: number) => successful([`A = (${x},2)`, 'A', 'y = A_x x + A_y']);
-    const a = make(1), b = make(5);
+    const a = make(1),
+      b = make(5);
     const point = a.rows[1].cpu!;
     expect(numbers(point, a.constEnv)).toEqual([1, 2]);
     expect(numbers(point, b.constEnv)).toEqual([5, 2]);
@@ -172,8 +203,9 @@ describe('typed-values semantic edge baseline', () => {
     const a = successful(['re(w)', 're(w)=0', 'w^2=1', '1+2i', 'exp(i pi u)']);
     expect(a.rows.map(r => publicKind(r.cls!.object))).toEqual(['scalar2d', 'implicit2d', 'system', 'point', 'pcurve']);
     expect(numbers(a.rows[3].cpu!, {})).toEqual([1, 2]);
-    const path = numbers(a.rows[4].cpu!, { u: .5 });
-    expect(path[0]).toBeCloseTo(0, 10); expect(path[1]).toBeCloseTo(1, 10);
+    const path = numbers(a.rows[4].cpu!, { u: 0.5 });
+    expect(path[0]).toBeCloseTo(0, 10);
+    expect(path[1]).toBeCloseTo(1, 10);
     const system = a.rows[2].cpu!;
     if (system.type !== 'system') throw new Error('Expected complex roots');
     expect(system.complexEquation).toBeDefined();

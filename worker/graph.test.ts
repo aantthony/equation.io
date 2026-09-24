@@ -9,18 +9,39 @@ const out = (texts: string[]) => analyze(texts).rows.map(r => [r.error ?? r.cpu?
 
 describe('distance / angle through analyze()', () => {
   it('take any single point, however it was computed', () => {
-    const rows = out(['M = [(1, 2), (3, 4)]', 'L = [1, 2, 3]', 'A = (1, 2)', 'B = (5, 11)',
-      'distance(M A, B)', 'distance(A, det(M) B)', 'distance(A, (mean(L), 2))',
-      'distance(A, (total(L), count(L)))', 'distance(A, (L[1], 5))', 'angle(A, (0, 0), (total(L), -3))']);
+    const rows = out([
+      'M = [(1, 2), (3, 4)]',
+      'L = [1, 2, 3]',
+      'A = (1, 2)',
+      'B = (5, 11)',
+      'distance(M A, B)',
+      'distance(A, det(M) B)',
+      'distance(A, (mean(L), 2))',
+      'distance(A, (total(L), count(L)))',
+      'distance(A, (L[1], 5))',
+      'angle(A, (0, 0), (total(L), -3))',
+    ]);
     expect(rows.slice(4)).toEqual([
-      ['value', '= 0'], ['value', '≈ 26.4008'], ['value', '= 1'], ['value', '≈ 5.09902'], ['value', '= 3'],
+      ['value', '= 0'],
+      ['value', '≈ 26.4008'],
+      ['value', '= 1'],
+      ['value', '≈ 5.09902'],
+      ['value', '= 3'],
       ['value', '≈ -1.5708'],
     ]);
   });
 
   it('broadcast over a scalar list exactly as |A - B| does', () => {
-    const rows = analyze(['L = [1, 2, 3]', 'A = (0, 0)', '|A - (L, 0)|', 'distance(A, (L, 0))',
-      'f(k) = distance(A, (k, 0))', 'f(L)', 'angle((1, 0), A, (L, L))', 'total(angle((1, 0), (0, L)))']).rows;
+    const rows = analyze([
+      'L = [1, 2, 3]',
+      'A = (0, 0)',
+      '|A - (L, 0)|',
+      'distance(A, (L, 0))',
+      'f(k) = distance(A, (k, 0))',
+      'f(L)',
+      'angle((1, 0), A, (L, L))',
+      'total(angle((1, 0), (0, L)))',
+    ]).rows;
     expect(rows.map(r => r.error)).toEqual(Array(8).fill(undefined));
     expect(rows[3].cpu!).toEqual(rows[2].cpu!);
     expect(rows[5].cpu!).toEqual(rows[2].cpu!);
@@ -29,8 +50,15 @@ describe('distance / angle through analyze()', () => {
   });
 
   it('measures point lists and their selected elements, rejecting scalar points', () => {
-    const rows = out(['P = [(0, 0), (1, 1)]', 'L = [1, 2, 3]', 'A = (1, 2)',
-      'distance(P, A)', 'distance(A, L)', 'angle(A, [A, A], A)', 'distance(P[1], P[2])']);
+    const rows = out([
+      'P = [(0, 0), (1, 1)]',
+      'L = [1, 2, 3]',
+      'A = (1, 2)',
+      'distance(P, A)',
+      'distance(A, L)',
+      'angle(A, [A, A], A)',
+      'distance(P[1], P[2])',
+    ]);
     expect(rows[3][0]).toBe('vlist');
     expect(rows[4][0]).toMatch(/distance takes two points/);
     expect(rows[5][0]).toBe('vlist');
@@ -45,19 +73,40 @@ describe('distance / angle through analyze()', () => {
   });
 
   it('tiny arms still have a direction; only a zero arm is undefined', () => {
-    const rows = out(['k = 10^(-200)', 'angle((k, 0), (0, k))', 'angle((k, 0), (0, 0), (0, 1))', 'angle((0, 0), (0, k))']);
-    expect(rows.slice(1)).toEqual([['value', '≈ 1.5708'], ['value', '≈ 1.5708'], ['value', 'undefined']]);
+    const rows = out([
+      'k = 10^(-200)',
+      'angle((k, 0), (0, k))',
+      'angle((k, 0), (0, 0), (0, 1))',
+      'angle((0, 0), (0, k))',
+    ]);
+    expect(rows.slice(1)).toEqual([
+      ['value', '≈ 1.5708'],
+      ['value', '≈ 1.5708'],
+      ['value', 'undefined'],
+    ]);
   });
 
   it('a straight angle is π on the CPU, in the og VM and in GLSL, with no foldable + 0', () => {
-    const { rows, constEnv } = analyze(['A = (-1, 0)', 'B = (1, 0)', 'angle(A, (0, 0), B)', 'angle(B, (0, 0), A)', 'y = angle(A, (0, 0), B) x']);
+    const { rows, constEnv } = analyze([
+      'A = (-1, 0)',
+      'B = (1, 0)',
+      'angle(A, (0, 0), B)',
+      'angle(B, (0, 0), A)',
+      'y = angle(A, (0, 0), B) x',
+    ]);
     expect(rows[2].info).toBe('≈ 3.14159');
     expect(rows[3].info).toBe('≈ 3.14159');
     for (const r of [rows[2], rows[3]]) {
       const names = Object.keys(constEnv);
       if (r.cpu?.type !== 'value') throw new Error('Expected scalar readout');
       const prog = compileProg(r.cpu.expr, new Map(names.map((n, i) => [n, i])));
-      expect(runProg(prog, names.map(n => constEnv[n]), new Float64Array(prog.depth))).toBe(Math.PI);
+      expect(
+        runProg(
+          prog,
+          names.map(n => constEnv[n]),
+          new Float64Array(prog.depth),
+        ),
+      ).toBe(Math.PI);
       expect(evaluate(r.cpu.expr, constEnv)).toBe(Math.PI);
     }
     if (rows[4].gpu?.type !== 'implicit2d') throw new Error('Expected curve shader');
@@ -166,21 +215,53 @@ describe('definite-integral rows shade their area', () => {
 describe('the continuous distribution zoo through analyze()', () => {
   it('every family is a drawn density with an exact, shaded P(…)', () => {
     const rows = out([
-      'X ~ Gamma(2, 1)', 'P(X < 1)', 'B ~ Beta(2, 3)', 'P(B > 0.4)', 'C ~ ChiSquared(3)', 'P(1 < C < 4)',
-      'S ~ T(5)', 'P(-1 < S < 1)', 'L ~ LogNormal(0, 0.5)', 'P(L > 2)', 'K ~ Cauchy', 'P(K > 3)',
-      'W ~ Weibull(0.7, 2)', 'P(W > 2)',
+      'X ~ Gamma(2, 1)',
+      'P(X < 1)',
+      'B ~ Beta(2, 3)',
+      'P(B > 0.4)',
+      'C ~ ChiSquared(3)',
+      'P(1 < C < 4)',
+      'S ~ T(5)',
+      'P(-1 < S < 1)',
+      'L ~ LogNormal(0, 0.5)',
+      'P(L > 2)',
+      'K ~ Cauchy',
+      'P(K > 3)',
+      'W ~ Weibull(0.7, 2)',
+      'P(W > 2)',
     ]);
     expect(rows).toEqual([
-      ['implicit2d', undefined], ['ineq2d', '≈ 0.2642'], ['implicit2d', undefined], ['ineq2d', '≈ 0.4752'],
-      ['implicit2d', undefined], ['ineq2d', '≈ 0.5398'], ['implicit2d', undefined], ['ineq2d', '≈ 0.6368'],
-      ['implicit2d', undefined], ['ineq2d', '≈ 0.0828'], ['implicit2d', undefined], ['ineq2d', '≈ 0.1024'],
-      ['implicit2d', undefined], ['ineq2d', '≈ 0.3679'],
+      ['implicit2d', undefined],
+      ['ineq2d', '≈ 0.2642'],
+      ['implicit2d', undefined],
+      ['ineq2d', '≈ 0.4752'],
+      ['implicit2d', undefined],
+      ['ineq2d', '≈ 0.5398'],
+      ['implicit2d', undefined],
+      ['ineq2d', '≈ 0.6368'],
+      ['implicit2d', undefined],
+      ['ineq2d', '≈ 0.0828'],
+      ['implicit2d', undefined],
+      ['ineq2d', '≈ 0.1024'],
+      ['implicit2d', undefined],
+      ['ineq2d', '≈ 0.3679'],
     ]);
   });
 
   it('draws closed laws exactly: Gamma sums, the scaled Gamma, the square of a standard normal', () => {
-    const a = analyze(['X ~ Gamma(2, 3)', 'Y ~ Gamma(1.5, 3)', 'S = X + Y', 'D = X + X', 'V = X + 1',
-      'Z ~ N', 'Q = Z^2', 'P(Z^2 < 3.8414588)', 'P(X + Y < 1)', 'E(S)', 'E(Q)']);
+    const a = analyze([
+      'X ~ Gamma(2, 3)',
+      'Y ~ Gamma(1.5, 3)',
+      'S = X + Y',
+      'D = X + X',
+      'V = X + 1',
+      'Z ~ N',
+      'Q = Z^2',
+      'P(Z^2 < 3.8414588)',
+      'P(X + Y < 1)',
+      'E(S)',
+      'E(Q)',
+    ]);
     expect(a.rows.map(r => r.error)).toEqual(Array(11).fill(undefined));
     const types = a.rows.map(r => r.cpu!.type);
     // S, D and Q go to the shader as pdfs; the shifted V has no closed family.
@@ -194,8 +275,21 @@ describe('the continuous distribution zoo through analyze()', () => {
   });
 
   it('declines a mean that does not exist instead of printing the sample mean', () => {
-    const rows = out(['X ~ Cauchy', 'E(X)', 'E(X^2)', 'E(atan(X))', 'T2 ~ StudentT(2)', 'E(T2 + 1)', 'T1 ~ T(1)', 'E(3 T1)',
-      'T3 ~ T(3)', 'E(T3^2)', 'N1 ~ N', 'E(T2^2 + N1)', 'E(2X + 1)']);
+    const rows = out([
+      'X ~ Cauchy',
+      'E(X)',
+      'E(X^2)',
+      'E(atan(X))',
+      'T2 ~ StudentT(2)',
+      'E(T2 + 1)',
+      'T1 ~ T(1)',
+      'E(3 T1)',
+      'T3 ~ T(3)',
+      'E(T3^2)',
+      'N1 ~ N',
+      'E(T2^2 + N1)',
+      'E(2X + 1)',
+    ]);
     expect(rows[1]).toEqual(['expect', 'no stable mean (heavy tails)']);
     expect(rows[2]).toEqual(['expect', 'no stable mean (heavy tails)']);
     expect(rows[3]).toEqual(['expect', '≈ 0.0000']); // bounded transform: a real mean
@@ -207,8 +301,17 @@ describe('the continuous distribution zoo through analyze()', () => {
   });
 
   it('reports bad parameters on the row: written out, or a constant at its value', () => {
-    const rows = out(['X ~ Gamma(-1, 1)', 'a = -2', 'Y ~ Beta(2, a)', 'W ~ Weibull(a + 3, 1)', 'N1 ~ Normal(0, a)',
-      's = sin(t)', 'M ~ Normal(0, s)', 'G ~ Gamma', 'F ~ Fisher(2, 3)']);
+    const rows = out([
+      'X ~ Gamma(-1, 1)',
+      'a = -2',
+      'Y ~ Beta(2, a)',
+      'W ~ Weibull(a + 3, 1)',
+      'N1 ~ Normal(0, a)',
+      's = sin(t)',
+      'M ~ Normal(0, s)',
+      'G ~ Gamma',
+      'F ~ Fisher(2, 3)',
+    ]);
     expect(rows[0][0]).toBe('Gamma(shape, rate) needs shape > 0.');
     expect(rows[2][0]).toBe('Beta(a, b) needs b > 0.');
     expect(rows[3][0]).toBe('implicit2d');
@@ -230,7 +333,13 @@ describe('the continuous distribution zoo through analyze()', () => {
     if (cpu.type !== 'implicit2d') throw new Error('Expected density curve');
     const row = cpu.equation;
     if (row.kind !== 'eq') throw new Error('a density row is y = pdf(x)');
-    const prog = compileProg({ kind: 'bin', op: '-', a: row.l, b: row.r }, new Map([['x', 0], ['y', 1]]));
+    const prog = compileProg(
+      { kind: 'bin', op: '-', a: row.l, b: row.r },
+      new Map([
+        ['x', 0],
+        ['y', 1],
+      ]),
+    );
     // y − pdf(x) at the mode x = 79/198, where the pdf is 11.5061.
     expect(runProg(prog, [79 / 198, 11.5], new Float64Array(prog.depth))).toBeCloseTo(11.5 - 11.506129392, 6);
   });
@@ -239,16 +348,48 @@ describe('the continuous distribution zoo through analyze()', () => {
 describe('discrete distributions through analyze()', () => {
   it('every family is a pmf row with an exact P(…) that keeps its strictness', () => {
     const rows = out([
-      'X ~ Binomial(10, 0.3)', 'P(X < 3)', 'P(X <= 3)', 'P(X = 3)', 'P(X != 3)', 'P(2 < X <= 5)', 'P(X < 2.5)', 'E(X)',
-      'K ~ Pois(3)', 'P(K >= 2)', 'G ~ Geometric(0.2)', 'P(G = 1)', 'W ~ NegBin(3, 0.4)', 'P(W = 0)', 'E(W)',
-      'B ~ Bernoulli(0.3)', 'P(B > 0)', 'D ~ DiscreteUniform(1, 6)', 'P(1 < D < 6)', 'E(D)',
+      'X ~ Binomial(10, 0.3)',
+      'P(X < 3)',
+      'P(X <= 3)',
+      'P(X = 3)',
+      'P(X != 3)',
+      'P(2 < X <= 5)',
+      'P(X < 2.5)',
+      'E(X)',
+      'K ~ Pois(3)',
+      'P(K >= 2)',
+      'G ~ Geometric(0.2)',
+      'P(G = 1)',
+      'W ~ NegBin(3, 0.4)',
+      'P(W = 0)',
+      'E(W)',
+      'B ~ Bernoulli(0.3)',
+      'P(B > 0)',
+      'D ~ DiscreteUniform(1, 6)',
+      'P(1 < D < 6)',
+      'E(D)',
     ]);
     expect(rows).toEqual([
-      ['pmf', undefined], ['prob', '≈ 0.3828'], ['prob', '≈ 0.6496'], ['prob', '≈ 0.2668'], ['prob', '≈ 0.7332'],
-      ['prob', '≈ 0.5699'], ['prob', '≈ 0.3828'], ['expect', '≈ 3.0000'],
-      ['pmf', undefined], ['prob', '≈ 0.8009'], ['pmf', undefined], ['prob', '≈ 0.2000'],
-      ['pmf', undefined], ['prob', '≈ 0.0640'], ['expect', '≈ 4.5000'],
-      ['pmf', undefined], ['prob', '≈ 0.3000'], ['pmf', undefined], ['prob', '≈ 0.6667'], ['expect', '≈ 3.5000'],
+      ['pmf', undefined],
+      ['prob', '≈ 0.3828'],
+      ['prob', '≈ 0.6496'],
+      ['prob', '≈ 0.2668'],
+      ['prob', '≈ 0.7332'],
+      ['prob', '≈ 0.5699'],
+      ['prob', '≈ 0.3828'],
+      ['expect', '≈ 3.0000'],
+      ['pmf', undefined],
+      ['prob', '≈ 0.8009'],
+      ['pmf', undefined],
+      ['prob', '≈ 0.2000'],
+      ['pmf', undefined],
+      ['prob', '≈ 0.0640'],
+      ['expect', '≈ 4.5000'],
+      ['pmf', undefined],
+      ['prob', '≈ 0.3000'],
+      ['pmf', undefined],
+      ['prob', '≈ 0.6667'],
+      ['expect', '≈ 3.5000'],
     ]);
     const a = analyze(['X ~ Binomial(10, 0.3)', 'P(2 < X <= 5)']);
     expect(a.rows[0].dist).toBe('pmf');
@@ -256,9 +397,22 @@ describe('discrete distributions through analyze()', () => {
   });
 
   it('follows constants, and reports bad parameters on the row at their values', () => {
-    const rows = out(['n = 20', 'p = 0.3', 'X ~ Binomial(n, p)', 'P(X <= 4)', 'h = 2.5', 'Y ~ Binomial(h, p)', 'q = 1.5',
-      'Z ~ Bernoulli(q)', 'W ~ Poisson(0)', 's = 3 + sin(t)', 'V ~ Binomial(s, 0.5)', 'P(V < 2)', 'U ~ Binomial(10)',
-      'A ~ DiscreteUniform(4, 1)']);
+    const rows = out([
+      'n = 20',
+      'p = 0.3',
+      'X ~ Binomial(n, p)',
+      'P(X <= 4)',
+      'h = 2.5',
+      'Y ~ Binomial(h, p)',
+      'q = 1.5',
+      'Z ~ Bernoulli(q)',
+      'W ~ Poisson(0)',
+      's = 3 + sin(t)',
+      'V ~ Binomial(s, 0.5)',
+      'P(V < 2)',
+      'U ~ Binomial(10)',
+      'A ~ DiscreteUniform(4, 1)',
+    ]);
     expect(rows[2]).toEqual(['pmf', undefined]);
     expect(rows[3]).toEqual(['prob', '≈ 0.2375']);
     expect(rows[5][0]).toBe('Binomial(n, p) needs a whole number n ≥ 0 (n = 2.5).');
@@ -272,13 +426,42 @@ describe('discrete distributions through analyze()', () => {
   });
 
   it('derived discrete rows are pmf rows with exact readouts; mixtures are densities', () => {
-    const rows = out(['X ~ DiscreteUniform(1, 6)', 'Y ~ DiscreteUniform(1, 6)', 'Z ~ Normal(0, 1)', 'S = X + Y', 'Q = X^2', 'H = X / 2',
-      'M = X + Z', 'P(X > Y)', 'P(X >= Y)', 'P(X = Y)', 'P(S <= 5)', 'P(S < 5)', 'P(X + Y = 7)', 'E(X Y)', 'E(X + Z)', 'X - X', 'X Z',
-      'P(X > Z)', 'P(H = 1.5)', 'I = 1 / (X - 3)']);
-    expect(rows.slice(3, 7)).toEqual([
-      ['pmf', 'μ = 7, σ = 2.41523'], ['pmf', 'μ = 15.1667, σ = 12.2122'], ['pmf', 'μ = 1.75, σ = 0.853913'], ['density', undefined],
+    const rows = out([
+      'X ~ DiscreteUniform(1, 6)',
+      'Y ~ DiscreteUniform(1, 6)',
+      'Z ~ Normal(0, 1)',
+      'S = X + Y',
+      'Q = X^2',
+      'H = X / 2',
+      'M = X + Z',
+      'P(X > Y)',
+      'P(X >= Y)',
+      'P(X = Y)',
+      'P(S <= 5)',
+      'P(S < 5)',
+      'P(X + Y = 7)',
+      'E(X Y)',
+      'E(X + Z)',
+      'X - X',
+      'X Z',
+      'P(X > Z)',
+      'P(H = 1.5)',
+      'I = 1 / (X - 3)',
     ]);
-    expect(rows.slice(7, 13).map(r => r[1])).toEqual(['≈ 0.4167', '≈ 0.5833', '≈ 0.1667', '≈ 0.2778', '≈ 0.1667', '≈ 0.1667']);
+    expect(rows.slice(3, 7)).toEqual([
+      ['pmf', 'μ = 7, σ = 2.41523'],
+      ['pmf', 'μ = 15.1667, σ = 12.2122'],
+      ['pmf', 'μ = 1.75, σ = 0.853913'],
+      ['density', undefined],
+    ]);
+    expect(rows.slice(7, 13).map(r => r[1])).toEqual([
+      '≈ 0.4167',
+      '≈ 0.5833',
+      '≈ 0.1667',
+      '≈ 0.2778',
+      '≈ 0.1667',
+      '≈ 0.1667',
+    ]);
     expect(rows[13]).toEqual(['expect', '≈ 12.2500']);
     expect(rows[14]).toEqual(['expect', '≈ 3.500']); // a mixture: the sampled-density tier, three places
     expect(rows[15]).toEqual(['pmf', 'μ = 0, σ = 0']);
@@ -287,7 +470,13 @@ describe('discrete distributions through analyze()', () => {
     expect(rows[17][1]).toMatch(/^≈ 0\.9[67]\d$/); // mean of Φ(k): 0.9695 — sampled, three places
     expect(rows[18]).toEqual(['prob', '≈ 0.1667']);
     expect(rows[19]).toEqual(['pmf', 'μ = 0.0666667, σ = 0.719568, P(defined) ≈ 0.833']);
-    const a = analyze(['X ~ DiscreteUniform(1, 6)', 'Y ~ DiscreteUniform(1, 6)', 'S = X + Y', 'P(3 < S <= 5)', 'X + Y']);
+    const a = analyze([
+      'X ~ DiscreteUniform(1, 6)',
+      'Y ~ DiscreteUniform(1, 6)',
+      'S = X + Y',
+      'P(3 < S <= 5)',
+      'X + Y',
+    ]);
     expect(a.rows[2].dist).toBe('pmf');
     expect(a.rows[2].cpu!).toEqual({ type: 'pmf', rv: 'S' });
     expect(a.rows[3].cpu!).toMatchObject({ type: 'prob', shade: { rv: 'S', loStrict: true, hiStrict: false } });
@@ -295,13 +484,27 @@ describe('discrete distributions through analyze()', () => {
   });
 
   it('closure, the sampled fallback, and what is still refused — by the names the user wrote', () => {
-    const rows = out(['A ~ Poisson(1000000)', 'B ~ Poisson(1000000)', 'S = A + B', 'P(S > 2000000)', 'C ~ Poisson(30)', 'W = A B C',
-      'Z ~ Normal(0, 1)', 'P(A + Z = 3)', 'P(A = Z)', 'P(Z = 1)', 'P(Z < 1)', 'P((A, B) = 3)']);
+    const rows = out([
+      'A ~ Poisson(1000000)',
+      'B ~ Poisson(1000000)',
+      'S = A + B',
+      'P(S > 2000000)',
+      'C ~ Poisson(30)',
+      'W = A B C',
+      'Z ~ Normal(0, 1)',
+      'P(A + Z = 3)',
+      'P(A = Z)',
+      'P(Z = 1)',
+      'P(Z < 1)',
+      'P((A, B) = 3)',
+    ]);
     expect(rows[2]).toEqual(['pmf', 'μ = 2000000, σ = 1414.21']);
     expect(rows[3]).toEqual(['prob', '≈ 0.4998']);
     expect(rows[5][0]).toBe('pmf');
     expect(rows[5][1]).toMatch(/^μ ≈ 3\d{13}\.\d{3}, σ ≈ .* \(sampled\)$/);
-    expect(rows[7][0]).toBe('P(… = …) needs discrete variables, and Z is not: a continuous value equals any given one with probability 0. Ask about an interval, like P(a < … < b).');
+    expect(rows[7][0]).toBe(
+      'P(… = …) needs discrete variables, and Z is not: a continuous value equals any given one with probability 0. Ask about an interval, like P(a < … < b).',
+    );
     expect(rows[8][0]).toMatch(/^P\(… = …\) needs discrete variables, and Z is not/);
     expect(rows[9][0]).toMatch(/^P\(Z = …\) needs a discrete variable/);
     expect(rows[10]).toEqual(['ineq2d', '≈ 0.8413']); // the continuous path is untouched
@@ -311,7 +514,14 @@ describe('discrete distributions through analyze()', () => {
   });
 
   it('keeps the names out of the document namespace, and regressions over declared data alone', () => {
-    const rows = out(['Poisson = 3', 'binom(q) = q^2', 'Geom = 0.5', 'X ~ Poisson(Poisson)', 'Y ~ Binom(binom(2), Geom)', 'P(Y = 2)']);
+    const rows = out([
+      'Poisson = 3',
+      'binom(q) = q^2',
+      'Geom = 0.5',
+      'X ~ Poisson(Poisson)',
+      'Y ~ Binom(binom(2), Geom)',
+      'P(Y = 2)',
+    ]);
     expect(rows.map(r => r[0])).toEqual(['def', 'def', 'def', 'pmf', 'pmf', 'prob']);
     expect(rows[5][1]).toBe('≈ 0.3750');
     // A declared list on the left does not turn a law's name into a model…
@@ -322,8 +532,16 @@ describe('discrete distributions through analyze()', () => {
   });
 
   it('a bound that is a whole number up to rounding reads as that whole number', () => {
-    const rows = out(['a = 0.1*3*10', 'X ~ Binomial(10, 0.3)', 'P(X < a)', 'P(X <= a)', 'P(X = a)', 'P(X != a)',
-      'U ~ DiscreteUniform(-10^17, 10^17)', 'P(0 <= U <= 2)']);
+    const rows = out([
+      'a = 0.1*3*10',
+      'X ~ Binomial(10, 0.3)',
+      'P(X < a)',
+      'P(X <= a)',
+      'P(X = a)',
+      'P(X != a)',
+      'U ~ DiscreteUniform(-10^17, 10^17)',
+      'P(0 <= U <= 2)',
+    ]);
     expect(rows.slice(2, 6).map(r => r[1])).toEqual(['≈ 0.3828', '≈ 0.6496', '≈ 0.2668', '≈ 0.7332']);
     expect(rows[7]).toEqual(['prob', '≈ 0.0000']); // 1.5e-17, not the 0 of two differenced cdfs (lib test has the digits)
   });
@@ -356,7 +574,11 @@ describe('complex paths through analyze()', () => {
   });
 
   it('refuses a huge composition without first splitting it', () => {
-    const nest = (n: number, inner: string) => { let s = inner; for (let k = 0; k < n; k++) s = `f(${s})`; return s; };
+    const nest = (n: number, inner: string) => {
+      let s = inner;
+      for (let k = 0; k < n; k++) s = `f(${s})`;
+      return s;
+    };
     // The shared pipeline (inlining, lowering) is what a non-path row of the
     // same size costs; the path may not add a split of the whole tree on top.
     const time = (row: string) => {
@@ -372,10 +594,15 @@ describe('complex paths through analyze()', () => {
   }, 60000);
 
   it('protects the other users of the split the same way: root systems and Argand points', () => {
-    const nest = (n: number, inner: string) => { let s = inner; for (let k = 0; k < n; k++) s = `f(${s})`; return s; };
+    const nest = (n: number, inner: string) => {
+      let s = inner;
+      for (let k = 0; k < n; k++) s = `f(${s})`;
+      return s;
+    };
     expect(last(['f(w) = w*w + w', `${nest(2, 'w')} = 1`]).cpu!.type).toBe('system');
-    expect(last(['f(w) = w*w + w', `${nest(10, 'w')} = 1`]).error)
-      .toBe('This complex equation is too large to solve once split into real and imaginary parts — reduce the nesting or the powers.');
+    expect(last(['f(w) = w*w + w', `${nest(10, 'w')} = 1`]).error).toBe(
+      'This complex equation is too large to solve once split into real and imaginary parts — reduce the nesting or the powers.',
+    );
     expect(last(['f(w) = w*w + w', nest(2, 'i')]).cpu!.type).toBe('point');
     expect(last(['f(w) = w*w + w', nest(10, 'i')]).error).toMatch(/^This complex point is too large to evaluate/);
   }, 60000);
@@ -468,7 +695,14 @@ describe('revolve(f) through analyze()', () => {
 
   it('must be the whole row', () => {
     const err = (texts: string[]) => analyze(texts).rows[texts.length - 1].error;
-    for (const t of ['2 revolve(x)', 'y = revolve(x)', 'revolve(revolve(x))', 'revolve(x) + 1', '(revolve(x), 1)', 'revolve(iter(z^2 + x))']) {
+    for (const t of [
+      '2 revolve(x)',
+      'y = revolve(x)',
+      'revolve(revolve(x))',
+      'revolve(x) + 1',
+      '(revolve(x), 1)',
+      'revolve(iter(z^2 + x))',
+    ]) {
       expect(err([t]), t).toMatch(/\(…\) must be the whole expression\.$/);
     }
     expect(err(['s = revolve(x)'])).toBe('revolve(…) must be a whole row, not part of a definition.');
@@ -519,9 +753,22 @@ describe('revolve(f) through analyze()', () => {
 
 describe('whole-row forms over a random variable', () => {
   it('are refused by name instead of becoming a derived density', () => {
-    const forms = ['revolve(X)', 'tube(X, X, X)', 'tube((X, 1, 2))', 'domain(X)', 'conformal(X)', 'iter(X)', 'trail((X, 1))',
-      'segment((0, 0), (X, 1))', 'polyline((0, 0), (X, 1), (2, 2))', 'vector((X, 1))', 'line((0, 0), (X, 1))',
-      'polygon((0, 0), (X, 1), (2, 0))', 'square((0, 0), (X, 1))', 'circle((0, 0), X)'];
+    const forms = [
+      'revolve(X)',
+      'tube(X, X, X)',
+      'tube((X, 1, 2))',
+      'domain(X)',
+      'conformal(X)',
+      'iter(X)',
+      'trail((X, 1))',
+      'segment((0, 0), (X, 1))',
+      'polyline((0, 0), (X, 1), (2, 2))',
+      'vector((X, 1))',
+      'line((0, 0), (X, 1))',
+      'polygon((0, 0), (X, 1), (2, 0))',
+      'square((0, 0), (X, 1))',
+      'circle((0, 0), X)',
+    ];
     for (const t of forms) {
       const name = t.slice(0, t.indexOf('('));
       const row = analyze(['X ~ Normal(0, 1)', t]).rows[1];
@@ -529,8 +776,12 @@ describe('whole-row forms over a random variable', () => {
       expect(row.cls, t).toBeUndefined();
     }
     // Nested too, and inside P and E.
-    expect(analyze(['X ~ Normal(0, 1)', '2 revolve(X)']).rows[1].error).toBe('revolve(…) cannot take a random variable.');
-    expect(analyze(['X ~ Normal(0, 1)', 'E(domain(X))']).rows[1].error).toBe('domain(…) cannot take a random variable.');
+    expect(analyze(['X ~ Normal(0, 1)', '2 revolve(X)']).rows[1].error).toBe(
+      'revolve(…) cannot take a random variable.',
+    );
+    expect(analyze(['X ~ Normal(0, 1)', 'E(domain(X))']).rows[1].error).toBe(
+      'domain(…) cannot take a random variable.',
+    );
     // Ordinary derived variables are untouched.
     expect(analyze(['X ~ Normal(0, 1)', 'X^2 + 1']).rows[1].cpu?.type).toBe('density');
   });
@@ -541,9 +792,17 @@ describe('coordinate fields over z through analyze()', () => {
   const polar = ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
 
   it('leaves every planar chart row what it was', () => {
-    expect(types([...polar, 'r = 1 + cos(theta)', '(r, theta) = (2, pi/4)', '(r, theta) = (3u, 6 pi u)',
-      "(r', theta') = (r(1-r), 1)", 'theta = pi', 'theta = 3 + 2 pi']))
-      .toEqual(['def', 'def', 'implicit2d', 'system', 'system', 'vfield2d', 'implicit2d', 'implicit2d']);
+    expect(
+      types([
+        ...polar,
+        'r = 1 + cos(theta)',
+        '(r, theta) = (2, pi/4)',
+        '(r, theta) = (3u, 6 pi u)',
+        "(r', theta') = (r(1-r), 1)",
+        'theta = pi',
+        'theta = 3 + 2 pi',
+      ]),
+    ).toEqual(['def', 'def', 'implicit2d', 'system', 'system', 'vfield2d', 'implicit2d', 'implicit2d']);
     const point = analyze([...polar, '(r, theta) = (2, pi/4)']).rows.at(-1)!.cpu!;
     expect(point.type === 'system' && point.dim === 2 && point.coordinates?.length === 2).toBe(true);
     // A planar field in a z equation was a surface before fields could use z.
@@ -551,8 +810,15 @@ describe('coordinate fields over z through analyze()', () => {
   });
 
   it('mixes a planar chart with a spherical one built on it', () => {
-    const rows = [...polar, 'rho = sqrt(r^2 + z^2)', 'phi = atan2(r, z)', 'rho = 2', 'r = 1',
-      '(rho, theta, phi) = (2, pi/4, pi/3)', '(r, theta, z) = (1, 6 pi u, u)'];
+    const rows = [
+      ...polar,
+      'rho = sqrt(r^2 + z^2)',
+      'phi = atan2(r, z)',
+      'rho = 2',
+      'r = 1',
+      '(rho, theta, phi) = (2, pi/4, pi/3)',
+      '(r, theta, z) = (1, 6 pi u, u)',
+    ];
     expect(types(rows)).toEqual(['def', 'def', 'def', 'def', 'implicit3d', 'implicit2d', 'system', 'system']);
     const a = analyze(rows);
     // The chart alone is planar; its rows in space are what make the scene 3D.

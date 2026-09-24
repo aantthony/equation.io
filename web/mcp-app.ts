@@ -1,4 +1,9 @@
-import { App, applyDocumentTheme, applyHostStyleVariables, type McpUiHostContext } from '@modelcontextprotocol/ext-apps';
+import {
+  App,
+  applyDocumentTheme,
+  applyHostStyleVariables,
+  type McpUiHostContext,
+} from '@modelcontextprotocol/ext-apps';
 import { encodePayload } from '../lib/link.ts';
 import { setHostTheme } from './theme.ts';
 
@@ -23,12 +28,19 @@ const strings = (value: unknown): value is string[] =>
 // are not resets: host-context notifications contain only changed fields.
 function mergeDefined<T extends object>(previous: T | undefined, update: T | undefined): T | undefined {
   if (!update) return previous;
-  return Object.assign({}, previous, Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined))) as T;
+  return Object.assign(
+    {},
+    previous,
+    Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined)),
+  ) as T;
 }
 
 export async function connectGraphApp(editor: GraphEditor) {
-  const app = new App({ name: 'equation.io', version: '1.0.0' },
-    { availableDisplayModes: ['inline', 'fullscreen'] }, { autoResize: false });
+  const app = new App(
+    { name: 'equation.io', version: '1.0.0' },
+    { availableDisplayModes: ['inline', 'fullscreen'] },
+    { autoResize: false },
+  );
   const status = document.getElementById('app-status')!;
   const open = document.getElementById('app-open') as HTMLAnchorElement;
   const expand = document.getElementById('app-expand') as HTMLButtonElement;
@@ -36,10 +48,14 @@ export async function connectGraphApp(editor: GraphEditor) {
   const configuredOrigin = document.querySelector<HTMLMetaElement>('meta[name="equation-origin"]')!.content;
   const origin = configuredOrigin === '__EQUATION_ORIGIN__' ? location.origin : new URL(configuredOrigin).origin;
   // Optional ChatGPT persistence; all communication uses the standard bridge.
-  const openai = (window as Window & { openai?: {
-    widgetState?: WidgetState;
-    setWidgetState?: (state: WidgetState) => void;
-  } }).openai;
+  const openai = (
+    window as Window & {
+      openai?: {
+        widgetState?: WidgetState;
+        setWidgetState?: (state: WidgetState) => void;
+      };
+    }
+  ).openai;
   const restored = openai?.widgetState?.privateContent;
   let source = '';
   let connected = false;
@@ -106,7 +122,9 @@ export async function connectGraphApp(editor: GraphEditor) {
     const publishedSource = source;
     try {
       openai?.setWidgetState?.({ privateContent: { source, equations: rows } });
-    } catch { /* Persistence may be unavailable; the live graph still works. */ }
+    } catch {
+      /* Persistence may be unavailable; the live graph still works. */
+    }
     try {
       await app.updateModelContext({ structuredContent: { equations: rows, share_url: open.href } });
       if (!closing && hasResult && source === publishedSource) status.textContent = '';
@@ -117,11 +135,13 @@ export async function connectGraphApp(editor: GraphEditor) {
 
   function hostContext(update: McpUiHostContext) {
     if (closing) return;
-    const styles = update.styles ? {
-      ...mergeDefined(context.styles, update.styles),
-      variables: mergeDefined(context.styles?.variables, update.styles.variables),
-      css: mergeDefined(context.styles?.css, update.styles.css),
-    } : context.styles;
+    const styles = update.styles
+      ? {
+          ...mergeDefined(context.styles, update.styles),
+          variables: mergeDefined(context.styles?.variables, update.styles.variables),
+          css: mergeDefined(context.styles?.css, update.styles.css),
+        }
+      : context.styles;
     context = mergeDefined(context, update)!;
     context.styles = styles;
     if (context.theme) {
@@ -135,10 +155,14 @@ export async function connectGraphApp(editor: GraphEditor) {
         if (value === undefined) root.style.removeProperty(name);
       }
       const mapped: Record<string, string> = {
-        '--page-bg': '--color-background-primary', '--panel-bg': '--color-background-secondary',
-        '--text': '--color-text-primary', '--muted': '--color-text-secondary',
-        '--summary': '--color-text-secondary', '--info': '--color-text-secondary',
-        '--panel-border': '--color-border-primary', '--accent': '--color-text-info',
+        '--page-bg': '--color-background-primary',
+        '--panel-bg': '--color-background-secondary',
+        '--text': '--color-text-primary',
+        '--muted': '--color-text-secondary',
+        '--summary': '--color-text-secondary',
+        '--info': '--color-text-secondary',
+        '--panel-border': '--color-border-primary',
+        '--accent': '--color-text-info',
       };
       for (const [local, host] of Object.entries(mapped)) {
         const value = styles.variables[host as keyof typeof styles.variables];
@@ -230,7 +254,7 @@ export async function connectGraphApp(editor: GraphEditor) {
     }
     const data = result.structuredContent as Record<string, unknown> | undefined;
     const rows = Array.isArray(data?.rows)
-      ? data.rows.map((row: unknown) => row && typeof row === 'object' && 'text' in row ? row.text : null)
+      ? data.rows.map((row: unknown) => (row && typeof row === 'object' && 'text' in row ? row.text : null))
       : null;
     if (!strings(rows)) {
       inputSource = undefined;
@@ -241,8 +265,12 @@ export async function connectGraphApp(editor: GraphEditor) {
     source = JSON.stringify(rows);
     // Matching results confirm the already-rendered graph without resetting
     // animation, undo history, or slider edits made while validation ran.
-    const wanted = inputSource === source ? editor.getRows()
-      : restored?.source === source && strings(restored.equations) ? restored.equations : rows;
+    const wanted =
+      inputSource === source
+        ? editor.getRows()
+        : restored?.source === source && strings(restored.equations)
+          ? restored.equations
+          : rows;
     showRows(wanted);
     inputSource = undefined;
     hasResult = true;
@@ -259,19 +287,27 @@ export async function connectGraphApp(editor: GraphEditor) {
     syncReset();
     status.textContent = 'Graph request cancelled.';
   };
-  editor.onEdit(() => { if (!closing) syncReset(); });
-  editor.onChange(rows => { if (!closing) void publish(rows); });
+  editor.onEdit(() => {
+    if (!closing) syncReset();
+  });
+  editor.onChange(rows => {
+    if (!closing) void publish(rows);
+  });
 
   reset.addEventListener('click', resetGraph, { signal: events.signal });
-  open.addEventListener('click', event => {
-    link(editor.getRows()); // Include edits still waiting for the throttled callback.
-    if (connected && app.getHostCapabilities()?.openLinks) {
-      event.preventDefault();
-      void app.openLink({ url: open.href }).catch(() => {
-        status.textContent = 'Could not open the link. Try again.';
-      });
-    }
-  }, { signal: events.signal });
+  open.addEventListener(
+    'click',
+    event => {
+      link(editor.getRows()); // Include edits still waiting for the throttled callback.
+      if (connected && app.getHostCapabilities()?.openLinks) {
+        event.preventDefault();
+        void app.openLink({ url: open.href }).catch(() => {
+          status.textContent = 'Could not open the link. Try again.';
+        });
+      }
+    },
+    { signal: events.signal },
+  );
   async function requestMode(mode: 'inline' | 'fullscreen') {
     if (closing || !connected || changingMode || !context.availableDisplayModes?.includes(mode)) return;
     changingMode = true;
@@ -286,32 +322,41 @@ export async function connectGraphApp(editor: GraphEditor) {
       expand.disabled = false;
     }
   }
-  expand.addEventListener('click', () => {
-    void requestMode(context.displayMode === 'fullscreen' ? 'inline' : 'fullscreen');
-  }, { signal: events.signal });
-  document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && context.displayMode === 'fullscreen') {
-      void requestMode('inline');
-    }
-  }, { signal: events.signal });
-  app.onteardown = () => teardown ??= (async () => {
-    closing = true;
-    cancelPreview();
-    events.abort();
-    observer.disconnect();
-    toolbarSize.disconnect();
-    editor.onChange(() => {});
-    try {
-      editor.flush();
-      const rows = editor.getRows();
-      editor.dispose();
-      await publish(rows);
-    } finally {
-      editor.dispose();
-      connected = false;
-    }
-    return {};
-  })();
+  expand.addEventListener(
+    'click',
+    () => {
+      void requestMode(context.displayMode === 'fullscreen' ? 'inline' : 'fullscreen');
+    },
+    { signal: events.signal },
+  );
+  document.addEventListener(
+    'keydown',
+    event => {
+      if (event.key === 'Escape' && context.displayMode === 'fullscreen') {
+        void requestMode('inline');
+      }
+    },
+    { signal: events.signal },
+  );
+  app.onteardown = () =>
+    (teardown ??= (async () => {
+      closing = true;
+      cancelPreview();
+      events.abort();
+      observer.disconnect();
+      toolbarSize.disconnect();
+      editor.onChange(() => {});
+      try {
+        editor.flush();
+        const rows = editor.getRows();
+        editor.dispose();
+        await publish(rows);
+      } finally {
+        editor.dispose();
+        connected = false;
+      }
+      return {};
+    })());
   await app.connect();
   connected = true;
   hostContext(app.getHostContext() ?? {});

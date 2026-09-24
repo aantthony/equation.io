@@ -12,7 +12,11 @@ describe('sliderForm', () => {
   });
 
   it('reads a range from clamp', () => {
-    expect(sliderForm('clamp(0.433, 0, 1)')).toMatchObject({ literal: 0.433, whole: false, bounds: { lo: '0', hi: '1' } });
+    expect(sliderForm('clamp(0.433, 0, 1)')).toMatchObject({
+      literal: 0.433,
+      whole: false,
+      bounds: { lo: '0', hi: '1' },
+    });
     expect(sliderForm(' clamp( 3 , -pi, 2 b ) ')).toMatchObject({ literal: 3, bounds: { lo: '-pi', hi: '2 b' } });
     expect(sliderForm('clamp(0.4, max(a, 1), 2)')).toMatchObject({ bounds: { lo: 'max(a, 1)', hi: '2' } });
   });
@@ -20,7 +24,11 @@ describe('sliderForm', () => {
   it('reads whole steps from round, floor and ceil, alone or with clamp', () => {
     expect(sliderForm('round(4)')).toMatchObject({ literal: 4, whole: true });
     expect(sliderForm('floor(4)')).toMatchObject({ whole: true });
-    expect(sliderForm('round(clamp(30, 0, 255))')).toMatchObject({ literal: 30, whole: true, bounds: { lo: '0', hi: '255' } });
+    expect(sliderForm('round(clamp(30, 0, 255))')).toMatchObject({
+      literal: 30,
+      whole: true,
+      bounds: { lo: '0', hi: '255' },
+    });
     expect(sliderForm('clamp(ceil(3), 0, 9)')).toMatchObject({ literal: 3, whole: true, bounds: { lo: '0', hi: '9' } });
   });
 
@@ -34,7 +42,7 @@ describe('sliderForm', () => {
     expect(sliderForm('sin(2)')).toBeNull();
   });
 
-  it('is not fooled by a function of the user\'s own', () => {
+  it("is not fooled by a function of the user's own", () => {
     expect(sliderForm('clamp(0.4, 0, 1)', new Set(['clamp']))).toBeNull();
     expect(sliderForm('round(4)', new Set(['round']))).toBeNull();
   });

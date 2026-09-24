@@ -58,7 +58,9 @@ function numericRoots(f: Expr, v: string, lo: number, hi: number): FoundRoot[] |
     if (dfExpr) {
       try {
         return evaluate(dfExpr, { [v]: x });
-      } catch { /* fall through to finite differences */ }
+      } catch {
+        /* fall through to finite differences */
+      }
     }
     const h = 6e-6 * (1 + Math.abs(x));
     return (ev(x + h) - ev(x - h)) / (2 * h);
@@ -108,9 +110,13 @@ function numericRoots(f: Expr, v: string, lo: number, hi: number): FoundRoot[] |
     }
     // Tangential root candidate: an interior local minimum of |f| that dips
     // near zero without a sign change.
-    if (i > 0 && isFinite(ys[i - 1])
-      && Math.abs(y0) <= Math.abs(ys[i - 1]) && Math.abs(y0) <= Math.abs(y1)
-      && Math.abs(y0) < 1e-3 * maxAbs) {
+    if (
+      i > 0 &&
+      isFinite(ys[i - 1]) &&
+      Math.abs(y0) <= Math.abs(ys[i - 1]) &&
+      Math.abs(y0) <= Math.abs(y1) &&
+      Math.abs(y0) < 1e-3 * maxAbs
+    ) {
       const x = refineExtremum(ev, dev, xs[i - 1], xs[i + 1]);
       const fx = ev(x);
       if (isFinite(fx) && Math.abs(fx) <= 1e-10 * maxAbs) {
@@ -135,8 +141,10 @@ function refineBracket(
   for (let iter = 0; iter < 80; iter++) {
     const fx = ev(x);
     if (fx === 0 || !isFinite(fx)) break;
-    if (Math.sign(fx) === Math.sign(fa)) { a = x; fa = fx; }
-    else b = x;
+    if (Math.sign(fx) === Math.sign(fa)) {
+      a = x;
+      fa = fx;
+    } else b = x;
     const d = dev(x);
     let nx = x - fx / d;
     if (!isFinite(nx) || nx <= a || nx >= b) nx = (a + b) / 2;
@@ -148,19 +156,20 @@ function refineBracket(
 
 /** Locate the extremum of f in (a, b) by bisecting the derivative's sign
  *  change, falling back to golden-section on |f|. */
-function refineExtremum(
-  ev: (x: number) => number,
-  dev: (x: number) => number,
-  a: number,
-  b: number,
-): number {
+function refineExtremum(ev: (x: number) => number, dev: (x: number) => number, a: number, b: number): number {
   const da = dev(a);
   const db = dev(b);
   if (isFinite(da) && isFinite(db) && da * db < 0) {
-    return refineBracket(dev, x => {
-      const h = 1e-6 * (1 + Math.abs(x));
-      return (dev(x + h) - dev(x - h)) / (2 * h);
-    }, a, b, da);
+    return refineBracket(
+      dev,
+      x => {
+        const h = 1e-6 * (1 + Math.abs(x));
+        return (dev(x + h) - dev(x - h)) / (2 * h);
+      },
+      a,
+      b,
+      da,
+    );
   }
   // Golden-section on |f|.
   const phi = (Math.sqrt(5) - 1) / 2;
@@ -170,11 +179,17 @@ function refineExtremum(
   let f2 = Math.abs(ev(x2));
   for (let i = 0; i < 60 && b - a > 1e-15 * (1 + Math.abs(a)); i++) {
     if (f1 <= f2) {
-      b = x2; x2 = x1; f2 = f1;
-      x1 = b - phi * (b - a); f1 = Math.abs(ev(x1));
+      b = x2;
+      x2 = x1;
+      f2 = f1;
+      x1 = b - phi * (b - a);
+      f1 = Math.abs(ev(x1));
     } else {
-      a = x1; x1 = x2; f1 = f2;
-      x2 = a + phi * (b - a); f2 = Math.abs(ev(x2));
+      a = x1;
+      x1 = x2;
+      f1 = f2;
+      x2 = a + phi * (b - a);
+      f2 = Math.abs(ev(x2));
     }
   }
   return (a + b) / 2;
@@ -185,12 +200,7 @@ function refineExtremum(
  * m ≈ log2(|f(x0+h)| / |f(x0+h/2)|). Crossing roots are forced odd,
  * tangential ones even; unusable data defaults to 1 or 2.
  */
-function multiplicityEstimate(
-  ev: (x: number) => number,
-  x0: number,
-  span: number,
-  crossing: boolean,
-): number {
+function multiplicityEstimate(ev: (x: number) => number, x0: number, span: number, crossing: boolean): number {
   const ests: number[] = [];
   for (const dir of [1, -1]) {
     const h = dir * Math.max(span * 1e-4, 1e-7 * (1 + Math.abs(x0)));

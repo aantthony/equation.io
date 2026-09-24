@@ -186,7 +186,10 @@ function summarize(frames: number[], compilesAfterLoad: number, compilesDuringAc
 
 // --- run ---
 
-const taken = await fetch(ORIGIN).then(() => true, () => false);
+const taken = await fetch(ORIGIN).then(
+  () => true,
+  () => false,
+);
 if (taken) throw new Error(`something is already listening on ${ORIGIN} — stop it and rerun`);
 
 const vite = spawn(`${ROOT}node_modules/.bin/vite`, ['--port', String(PORT), '--strictPort'], {
@@ -258,7 +261,9 @@ for (const [name, m] of Object.entries(results)) {
   }
   const frameLimit = Math.max(b.p95FrameMs * 2.5, b.p95FrameMs + 8);
   if (m.p95FrameMs > frameLimit) {
-    failures.push(`${name}: p95 frame ${m.p95FrameMs}ms exceeds ${frameLimit.toFixed(1)}ms (baseline ${b.p95FrameMs}ms)`);
+    failures.push(
+      `${name}: p95 frame ${m.p95FrameMs}ms exceeds ${frameLimit.toFixed(1)}ms (baseline ${b.p95FrameMs}ms)`,
+    );
   }
 }
 

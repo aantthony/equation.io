@@ -41,7 +41,10 @@ function piMultiple(x: number): string | null {
   const r = x / Math.PI;
   if (r === 0 || !isFinite(r) || Math.abs(r) > 60) return null;
   // Best small-denominator rational for r via continued fractions.
-  let p0 = 1, q0 = 0, p1 = Math.floor(r), q1 = 1;
+  let p0 = 1,
+    q0 = 0,
+    p1 = Math.floor(r),
+    q1 = 1;
   let frac = r - p1;
   for (let i = 0; i < 24 && frac > 1e-12; i++) {
     const v = 1 / frac;
@@ -49,7 +52,10 @@ function piMultiple(x: number): string | null {
     const p2 = a * p1 + p0;
     const q2 = a * q1 + q0;
     if (q2 > 48) break;
-    p0 = p1; q0 = q1; p1 = p2; q1 = q2;
+    p0 = p1;
+    q0 = q1;
+    p1 = p2;
+    q1 = q2;
     frac = v - a;
   }
   if (p1 === 0 || Math.abs(p1) > 60) return null;
@@ -62,7 +68,7 @@ function piMultiple(x: number): string | null {
  *  Roots with no radical form show their defining polynomial — the exact
  *  representation the finder actually holds. */
 function valueLines(v: string, r: FoundRoot): string[] {
-  const sym = r.sym ?? (r.exact ? undefined : piMultiple(r.x) ?? undefined);
+  const sym = r.sym ?? (r.exact ? undefined : (piMultiple(r.x) ?? undefined));
   if (sym) return [`${v} = ${sym}`, `≈ ${fmtRoot(r.x)}`];
   if (r.rootOf) return [`${v} ≈ ${fmtRoot(r.x)}`, `root of ${r.rootOf}`];
   return [`${v} = ${fmtRoot(r.x)}`];
@@ -76,13 +82,7 @@ function valueLines(v: string, r: FoundRoot): string[] {
  * variables are only x and/or y. For a bare scalar the x-intercepts are
  * labelled as roots of the function.
  */
-export function specialPoints(
-  expr: Expr,
-  xlo: number,
-  xhi: number,
-  ylo: number,
-  yhi: number,
-): SpecialPoint[] {
+export function specialPoints(expr: Expr, xlo: number, xhi: number, ylo: number, yhi: number): SpecialPoint[] {
   if (usesComplex(expr)) return [];
   const isFn = expr.kind !== 'eq';
   const F: Expr = isFn ? { kind: 'eq', l: { kind: 'var', name: 'y' }, r: expr } : expr;

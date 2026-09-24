@@ -205,7 +205,10 @@ await scenario('flick left dismisses', async () => {
 
 await scenario('swipe on a scrollable list scrolls it, not the panel', async () => {
   // Enough rows that #equations overflows and owns vertical pans.
-  await load(page, Array.from({ length: 40 }, (_, i) => `y = ${i + 1} x`));
+  await load(
+    page,
+    Array.from({ length: 40 }, (_, i) => `y = ${i + 1} x`),
+  );
   const box = await page.evaluate(() => {
     const r = document.getElementById('equations')!.getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
@@ -258,8 +261,8 @@ await scenario('swipe from the gutter dismisses without recoloring', async () =>
   });
   await swipe(cdp, path({ x: line.x, y: line.y }, { x: line.x, y: line.y - 150 }, 4));
   await waitState(page, 'hidden');
-  const after = await page.evaluate(
-    () => document.querySelector<HTMLElement>('.eq-line')!.style.getPropertyValue('--eq-color'),
+  const after = await page.evaluate(() =>
+    document.querySelector<HTMLElement>('.eq-line')!.style.getPropertyValue('--eq-color'),
   );
   check('gutter-origin swipe left the row color alone', after === line.color, `${line.color} -> ${after}`);
   await page.tap('#panel-chip');
@@ -274,8 +277,8 @@ await scenario('gutter tap still recolors', async () => {
   });
   await page.touchscreen.tap(line.x, line.y);
   await sleep(100);
-  const after = await page.evaluate(
-    () => document.querySelector<HTMLElement>('.eq-line')!.style.getPropertyValue('--eq-color'),
+  const after = await page.evaluate(() =>
+    document.querySelector<HTMLElement>('.eq-line')!.style.getPropertyValue('--eq-color'),
   );
   check('a plain touch tap on the dot cycles the color', after !== line.color, `stuck at ${after}`);
 });
@@ -309,7 +312,10 @@ await scenario('dragging the chip pulls the panel back in', async () => {
 
 await scenario('the panel can be caught mid-flight', async () => {
   // A tall panel makes for a long flight — long enough to intercept.
-  await load(page, Array.from({ length: 8 }, (_, i) => `y = x + ${i}`));
+  await load(
+    page,
+    Array.from({ length: 8 }, (_, i) => `y = x + ${i}`),
+  );
   const from = await panelBody(page, 0.5, 0.7);
   // A modest flick: enough to commit the dismissal, slow enough to catch.
   await swipe(cdp, path(from, { x: from.x, y: from.y - 100 }, 6), { stepMs: 24 });

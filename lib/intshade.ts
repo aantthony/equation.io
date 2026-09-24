@@ -74,9 +74,12 @@ export const SHADE_MAX_EVALS = 8 * SHADE_SAMPLES;
 export function boundValue(e: Expr, env: Record<string, number>): number {
   if (e.kind === 'var' && e.name === 'inf') return Infinity;
   if (e.kind === 'neg' && e.a.kind === 'var' && e.a.name === 'inf') return -Infinity;
-  try { return evaluate(e, env); } catch { return NaN; }
+  try {
+    return evaluate(e, env);
+  } catch {
+    return NaN;
+  }
 }
-
 
 /**
  * Sample the region between f and the axis over [lo, hi], clipped to the
@@ -87,7 +90,12 @@ export function boundValue(e: Expr, env: Record<string, number>): number {
  * Nothing here depends on the vertical window: see runPaths.
  */
 export function integralRuns(
-  f: (x: number) => number, lo: number, hi: number, xmin: number, xmax: number, n = SHADE_SAMPLES,
+  f: (x: number) => number,
+  lo: number,
+  hi: number,
+  xmin: number,
+  xmax: number,
+  n = SHADE_SAMPLES,
 ): ShadeRun[] {
   const out: ShadeRun[] = [];
   // lo == hi is an empty region (and a zero integral); a NaN bound has none.
@@ -102,7 +110,11 @@ export function integralRuns(
   let refineLeft = SHADE_MAX_EVALS - (n + 1);
   const at = (x: number): number => {
     let y: number;
-    try { y = f(x); } catch { return NaN; }
+    try {
+      y = f(x);
+    } catch {
+      return NaN;
+    }
     // ±Infinity is a pole sampled dead on: undefined there, like NaN.
     return Number.isFinite(y) ? y : NaN;
   };
@@ -148,7 +160,10 @@ export function integralRuns(
       const xm = (xOk + xBad) / 2;
       const ym = at(xm);
       if (Number.isNaN(ym)) xBad = xm;
-      else { xOk = xm; yOk = ym; }
+      else {
+        xOk = xm;
+        yOk = ym;
+      }
     }
     return [xOk, yOk];
   };
@@ -175,15 +190,28 @@ export function integralRuns(
         // xa, start the other at xb. A continuous crossing has f ≈ 0 at both,
         // so the runs meet on the axis; a jump (or a pole) keeps its two
         // one-sided values, and an undefined point inside splits the run.
-        let xa = px, ya = py, xb = x, yb = y;
+        let xa = px,
+          ya = py,
+          xb = x,
+          yb = y;
         if (canRefine()) {
           let xz = NaN; // an exact zero, or an undefined point, inside the bracket
           let hole = false;
           for (let s = 0; s < REFINE_STEPS; s++) {
             const xm = (xa + xb) / 2;
             const ym = at(xm);
-            if (Number.isNaN(ym) || ym === 0) { xz = xm; hole = ym !== 0; break; }
-            if (ym > 0 === ya > 0) { xa = xm; ya = ym; } else { xb = xm; yb = ym; }
+            if (Number.isNaN(ym) || ym === 0) {
+              xz = xm;
+              hole = ym !== 0;
+              break;
+            }
+            if (ym > 0 === ya > 0) {
+              xa = xm;
+              ya = ym;
+            } else {
+              xb = xm;
+              yb = ym;
+            }
           }
           if (hole) {
             [xa, ya] = edge(xa, ya, xz);
@@ -209,7 +237,10 @@ export function integralRuns(
         push(x, y);
         // A sample landing exactly on the axis ends the run, so the next one
         // takes its own sign (x^3 sampled at 0 must not span both tints).
-        if (y === 0) { close(); open(x, 0); }
+        if (y === 0) {
+          close();
+          open(x, 0);
+        }
       }
     }
     px = x;
@@ -265,14 +296,22 @@ export type ShadeSampler = (env: Record<string, number>) => (x: number) => numbe
 /** The tree-walking sampler; renderers pass the compiled one instead
  *  (lib/vm.ts compileSampler). The integration variable is bound per
  *  sample, shadowing any constant or `t` of the same name. */
-export const evalSampler = (shade: IntShade): ShadeSampler => env => {
-  const scope = { ...env };
-  return x => { scope[shade.v] = x; return evaluate(shade.body, scope); };
-};
+export const evalSampler =
+  (shade: IntShade): ShadeSampler =>
+  env => {
+    const scope = { ...env };
+    return x => {
+      scope[shade.v] = x;
+      return evaluate(shade.body, scope);
+    };
+  };
 
 /** integralRuns for a row's shade under env. */
 export function shadeRuns(
-  shade: IntShade, env: Record<string, number>, xmin: number, xmax: number,
+  shade: IntShade,
+  env: Record<string, number>,
+  xmin: number,
+  xmax: number,
   sampler: ShadeSampler = evalSampler(shade),
 ): ShadeRun[] {
   return integralRuns(sampler(env), boundValue(shade.lo, env), boundValue(shade.hi, env), xmin, xmax);

@@ -39,33 +39,51 @@ describe('dragAxes', () => {
     expect(dragAxes('(b, c)', sliders([]))).toBeNull(); // names that are not sliders
   });
 
-  it.each(['p=x/a; q=y', 'b=a^2; p=x/b; q=y', 'p=x; q=y/a'])('pins sliders defining either chart coordinate: %s', chart => {
-    const a = analyze(['a=2', ...chart.split(';'), '(p,q)=(a,0)']);
-    expect(a.rows.some(r => r.error)).toBe(false);
-    const plot = a.rows.at(-1)!.cpu!;
-    if (plot.type !== 'system' || !plot.coordinates) throw new Error('expected coordinate point');
-    const coords = plot.coordinates;
-    const pinned = definitionDependencies(coords.flatMap(c => [...freeVars(c)]), a.defs);
-    expect(dragAxes('(a,0)', sliders(['a']), pinned)?.axes).toEqual([null, 'literal']);
-    expect(dragAxes('(a,a)', sliders(['a']), pinned)).toBeNull();
-    expect(dragAxes('(c,0)', sliders(['a', 'c']), pinned)?.axes).toEqual(['slider', 'literal']);
-  });
+  it.each(['p=x/a; q=y', 'b=a^2; p=x/b; q=y', 'p=x; q=y/a'])(
+    'pins sliders defining either chart coordinate: %s',
+    chart => {
+      const a = analyze(['a=2', ...chart.split(';'), '(p,q)=(a,0)']);
+      expect(a.rows.some(r => r.error)).toBe(false);
+      const plot = a.rows.at(-1)!.cpu!;
+      if (plot.type !== 'system' || !plot.coordinates) throw new Error('expected coordinate point');
+      const coords = plot.coordinates;
+      const pinned = definitionDependencies(
+        coords.flatMap(c => [...freeVars(c)]),
+        a.defs,
+      );
+      expect(dragAxes('(a,0)', sliders(['a']), pinned)?.axes).toEqual([null, 'literal']);
+      expect(dragAxes('(a,a)', sliders(['a']), pinned)).toBeNull();
+      expect(dragAxes('(c,0)', sliders(['a', 'c']), pinned)?.axes).toEqual(['slider', 'literal']);
+    },
+  );
 });
 
 describe('coordinateDragWriter', () => {
   it('reads current time and dependency values throughout the same drag', () => {
     let env = { t: 1, a: 2 };
     const values: number[][] = [];
-    const write = coordinateDragWriter([parseExpr('x+t'), parseExpr('y+a')], () => env, (a, b) => values.push([a, b]));
+    const write = coordinateDragWriter(
+      [parseExpr('x+t'), parseExpr('y+a')],
+      () => env,
+      (a, b) => values.push([a, b]),
+    );
     write(4, 5);
     env = { t: 7, a: 9 };
     write(4, 5);
-    expect(values).toEqual([[5, 7], [11, 14]]);
+    expect(values).toEqual([
+      [5, 7],
+      [11, 14],
+    ]);
   });
 
   it('rounds the pointer before transforming and ignores singular updates', () => {
     const values: number[][] = [];
-    const write = coordinateDragWriter([parseExpr('1/x'), parseExpr('y/3')], () => ({}), (a, b) => values.push([a, b]), Math.round);
+    const write = coordinateDragWriter(
+      [parseExpr('1/x'), parseExpr('y/3')],
+      () => ({}),
+      (a, b) => values.push([a, b]),
+      Math.round,
+    );
     write(1.8, 4.8);
     write(0.2, 3);
     expect(values).toEqual([[0.5, 5 / 3]]);

@@ -49,18 +49,26 @@ export type Automaton = Extract<MathObject, { kind: 'automaton' }>;
  * its own (null); the rule row carries it.
  */
 export function classifyAutomatonRow(
-  scans: readonly (SeqScan | null)[], ri: number, fnNames: ReadonlySet<string>, getFn: GetFn,
-  constNames: ReadonlySet<string>, ropts: ResolveOpts,
+  scans: readonly (SeqScan | null)[],
+  ri: number,
+  fnNames: ReadonlySet<string>,
+  getFn: GetFn,
+  constNames: ReadonlySet<string>,
+  ropts: ResolveOpts,
 ): Classified | null {
   const scan = scans[ri]!;
   const same = scans.map((s, k) => [s, k] as const).filter(([s]) => s?.name === scan.name);
   const [plain] = same.find(([s]) => !s!.cell) ?? [];
   if (plain) throw new Error(`${scan.name} is already a sequence; name the automaton another letter.`);
   const [, first] = same.find(([s]) => !!s!.seed === !!scan.seed)!;
-  if (first < ri) throw new Error(scan.seed ? `${scan.name}_0 is already defined.` : `Automaton ${scan.name} is already defined.`);
+  if (first < ri)
+    throw new Error(scan.seed ? `${scan.name}_0 is already defined.` : `Automaton ${scan.name} is already defined.`);
   const [rule] = same.find(([s]) => !s!.seed) ?? [];
   if (scan.seed) {
-    if (!rule) throw new Error(`${scan.name}_0[${scan.cell}] starts an automaton: add its rule, like ${scan.name}_{n+1}[${scan.cell}] = ${scan.name}_n[${scan.cell}-1].`);
+    if (!rule)
+      throw new Error(
+        `${scan.name}_0[${scan.cell}] starts an automaton: add its rule, like ${scan.name}_{n+1}[${scan.cell}] = ${scan.name}_n[${scan.cell}-1].`,
+      );
     // Its errors belong on this row, not the rule's.
     classifySeed(scan, fnNames, getFn, constNames, ropts);
     return null;
@@ -68,9 +76,13 @@ export function classifyAutomatonRow(
   const [seedScan] = same.find(([s]) => s!.seed) ?? [];
   let seed: ReturnType<typeof classifySeed> | undefined;
   // A broken seed is reported on its own row; the rule still draws from the default.
-  try { if (seedScan) seed = classifySeed(seedScan, fnNames, getFn, constNames, ropts); } catch { /* see the seed row */ }
+  try {
+    if (seedScan) seed = classifySeed(seedScan, fnNames, getFn, constNames, ropts);
+  } catch {
+    /* see the seed row */
+  }
   const ruleExpr = classifyRule(scan, fnNames, getFn, constNames, ropts);
-  const params = new Set([...ruleExpr.params, ...seed?.params ?? []]);
+  const params = new Set([...ruleExpr.params, ...(seed?.params ?? [])]);
   return {
     object: { kind: 'automaton', rule: ruleExpr.rule, radius: ruleExpr.radius, ...(seed ? { seed: seed.expr } : {}) },
     animated: ruleExpr.animated || !!seed?.animated,
@@ -87,7 +99,9 @@ function offsetOf(at: Expr, cell: string): number | null {
     const k = evaluate(at, { [cell]: 0 });
     if (!Number.isInteger(k) || evaluate(at, { [cell]: 1 }) - k !== 1) return null;
     return k;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** Params, t, and nothing else free once `own` (the row's own names) are out. */
@@ -103,7 +117,13 @@ function checkFree(e: Expr, own: ReadonlySet<string>, constNames: ReadonlySet<st
   return { params, animated };
 }
 
-function classifyRule(scan: SeqScan, fnNames: ReadonlySet<string>, getFn: GetFn, constNames: ReadonlySet<string>, ropts: ResolveOpts) {
+function classifyRule(
+  scan: SeqScan,
+  fnNames: ReadonlySet<string>,
+  getFn: GetFn,
+  constNames: ReadonlySet<string>,
+  ropts: ResolveOpts,
+) {
   const { name, index, cell } = scan as SeqScan & { cell: string };
   if (index === cell) throw new Error(`Name the step and the cell differently, like ${name}_{n+1}[i].`);
   const row = `${name}_${index}`;
@@ -112,25 +132,36 @@ function classifyRule(scan: SeqScan, fnNames: ReadonlySet<string>, getFn: GetFn,
   const reads = (e: Expr): Expr => {
     if (e.kind === 'index' && e.args[0].kind === 'var' && e.args[0].name === row) {
       const k = offsetOf(e.args[1], cell);
-      if (k === null) throw new Error(`Read the previous row at a fixed offset from ${cell}, like ${row}[${cell}-1] or ${row}[${cell}+2].`);
+      if (k === null)
+        throw new Error(
+          `Read the previous row at a fixed offset from ${cell}, like ${row}[${cell}-1] or ${row}[${cell}+2].`,
+        );
       radius = Math.max(radius, Math.abs(k));
       return { kind: 'var', name: neighbour(k) };
     }
-    if (e.kind === 'var' && e.name === row) throw new Error(`${row} is a whole row; read one cell of it, like ${row}[${cell}].`);
-    if (e.kind === 'var' && e.name === cell) throw new Error(`A rule is the same at every cell: read neighbours like ${row}[${cell}-1], not ${cell} itself.`);
+    if (e.kind === 'var' && e.name === row)
+      throw new Error(`${row} is a whole row; read one cell of it, like ${row}[${cell}].`);
+    if (e.kind === 'var' && e.name === cell)
+      throw new Error(`A rule is the same at every cell: read neighbours like ${row}[${cell}-1], not ${cell} itself.`);
     return mapChildren(e, reads);
   };
   let rule = substVars(reads(parsed), { [index]: { kind: 'var', name: STEP_VAR } });
   const own = new Set([STEP_VAR, ...Array.from({ length: 2 * radius + 1 }, (_, k) => neighbour(k - radius))]);
-  rule = resolveExpr(rule, getFn, { ...ropts, openVars: new Set([...ropts.openVars ?? [], ...own]) });
+  rule = resolveExpr(rule, getFn, { ...ropts, openVars: new Set([...(ropts.openVars ?? []), ...own]) });
   if (usesComplex(rule)) throw new Error('Cells are real-valued; use re(…) or im(…).');
   return { rule, radius, ...checkFree(rule, own, constNames, 'rule') };
 }
 
-function classifySeed(scan: SeqScan, fnNames: ReadonlySet<string>, getFn: GetFn, constNames: ReadonlySet<string>, ropts: ResolveOpts) {
+function classifySeed(
+  scan: SeqScan,
+  fnNames: ReadonlySet<string>,
+  getFn: GetFn,
+  constNames: ReadonlySet<string>,
+  ropts: ResolveOpts,
+) {
   const parsed = substVars(parseExpr(scan.rhs, fnNames), { [scan.cell!]: { kind: 'var', name: CELL_VAR } });
   const own = new Set([CELL_VAR]);
-  const expr = resolveExpr(parsed, getFn, { ...ropts, openVars: new Set([...ropts.openVars ?? [], CELL_VAR]) });
+  const expr = resolveExpr(parsed, getFn, { ...ropts, openVars: new Set([...(ropts.openVars ?? []), CELL_VAR]) });
   if (usesComplex(expr)) throw new Error('Cells are real-valued; use re(…) or im(…).');
   return { expr, ...checkFree(expr, own, constNames, 'seed') };
 }
@@ -151,7 +182,8 @@ export interface CellGrid {
  *  numbers; one that is not finite stays so (and draws as empty). */
 export function runAutomaton(a: Pick<Automaton, 'rule' | 'radius' | 'seed'>, env: Record<string, number>): CellGrid {
   const r = a.radius;
-  const steps = r === 0 ? AUTOMATON_STEPS : Math.min(AUTOMATON_STEPS, Math.floor((MAX_WIDTH - 2 - (2 * SEED_HALF + 1)) / (2 * r)));
+  const steps =
+    r === 0 ? AUTOMATON_STEPS : Math.min(AUTOMATON_STEPS, Math.floor((MAX_WIDTH - 2 - (2 * SEED_HALF + 1)) / (2 * r)));
   const reach = SEED_HALF + r * steps;
   const width = 2 * reach + 3;
   const rows = steps + 1;
@@ -159,7 +191,7 @@ export function runAutomaton(a: Pick<Automaton, 'rule' | 'radius' | 'seed'>, env
   const values = new Float32Array(width * rows);
 
   // Every name the programs read, in one slot layout: neighbours, n, i, then params.
-  const names = [...new Set([...freeVars(a.rule), ...a.seed ? freeVars(a.seed) : []])];
+  const names = [...new Set([...freeVars(a.rule), ...(a.seed ? freeVars(a.seed) : [])])];
   const slots = new Map<string, number>(names.map((n, k) => [n, k]));
   for (const n of [STEP_VAR, CELL_VAR]) if (!slots.has(n)) slots.set(n, slots.size);
   const vars = new Float64Array(slots.size);
@@ -194,11 +226,13 @@ export function runAutomaton(a: Pick<Automaton, 'rule' | 'radius' | 'seed'>, env
   // Cells [lo, hi] may differ from their side's background; outside it the
   // row is that background. The span grows by the rule's reach each step.
   const same = (p: number, q: number) => p === q || (p !== p && q !== q);
-  let lo = 1, hi = width - 2;
+  let lo = 1,
+    hi = width - 2;
   while (lo <= hi && same(values[lo], values[0])) lo++;
   while (hi >= lo && same(values[hi], values[width - 1])) hi--;
   for (let n = 1; n < rows; n++) {
-    const prev = (n - 1) * width, row = n * width;
+    const prev = (n - 1) * width,
+      row = n * width;
     vars[stepSlot] = n - 1;
     if (perRow) stamp++;
     const cellAt = (j: number): number => {
@@ -210,7 +244,10 @@ export function runAutomaton(a: Pick<Automaton, 'rule' | 'radius' | 'seed'>, env
         key = key >= 0 && v >= 0 && v < base && v === Math.floor(v) ? key * base + v : -1;
       }
       if (key < 0) return run(rule, vars, stack);
-      if (stamps[key] !== stamp) { memo[key] = run(rule, vars, stack); stamps[key] = stamp; }
+      if (stamps[key] !== stamp) {
+        memo[key] = run(rule, vars, stack);
+        stamps[key] = stamp;
+      }
       return memo[key];
     };
     // Each background steps as the rule applied to itself alone.
@@ -218,10 +255,12 @@ export function runAutomaton(a: Pick<Automaton, 'rule' | 'radius' | 'seed'>, env
       for (const slot of nbr) if (slot >= 0) vars[slot] = b;
       return run(rule, vars, stack);
     };
-    const left = background(values[prev]), right = background(values[prev + width - 1]);
+    const left = background(values[prev]),
+      right = background(values[prev + width - 1]);
     // A changing span reaches r cells further each step. An empty one
     // (lo = hi + 1) still marks where the two backgrounds meet.
-    lo = Math.max(1, lo - r); hi = Math.min(width - 2, hi + r);
+    lo = Math.max(1, lo - r);
+    hi = Math.min(width - 2, hi + r);
     for (let j = 0; j < width; j++) {
       values[row + j] = j < lo ? left : j > hi ? right : cellAt(j);
     }

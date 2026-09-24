@@ -19,17 +19,27 @@ import { type Expr, evaluate, freeVars } from './expr.ts';
 
 // --- exact rationals (bigint numerator / positive bigint denominator) ---
 
-export interface Frac { n: bigint; d: bigint }
+export interface Frac {
+  n: bigint;
+  d: bigint;
+}
 
 function bgcd(a: bigint, b: bigint): bigint {
   a = a < 0n ? -a : a;
   b = b < 0n ? -b : b;
-  while (b) { const t = a % b; a = b; b = t; }
+  while (b) {
+    const t = a % b;
+    a = b;
+    b = t;
+  }
   return a;
 }
 
 export function frac(n: bigint, d: bigint): Frac {
-  if (d < 0n) { n = -n; d = -d; }
+  if (d < 0n) {
+    n = -n;
+    d = -d;
+  }
   const g = bgcd(n, d) || 1n;
   return { n: n / g, d: d / g };
 }
@@ -255,7 +265,7 @@ function polyIn(e: Expr, v: string): FPoly | null {
       if (!a || !b) return null;
       if (e.op === '+') return fpadd(a, b);
       if (e.op === '-') return fpadd(a, fpscale(b, { n: -1n, d: 1n }));
-      if ((a.length - 1) + (b.length - 1) > MAX_DEGREE) return null;
+      if (a.length - 1 + (b.length - 1) > MAX_DEGREE) return null;
       return fpmul(a, b);
     }
     case 'eq': {
@@ -442,7 +452,10 @@ function polish(qd: number[], lo: number, hi: number): number {
   let bestAbs = Infinity;
   for (let i = 0; i < 10; i++) {
     const [f, df] = hornerBoth(qd, x);
-    if (Math.abs(f) < bestAbs) { bestAbs = Math.abs(f); best = x; }
+    if (Math.abs(f) < bestAbs) {
+      bestAbs = Math.abs(f);
+      best = x;
+    }
     if (f === 0 || df === 0) break;
     const nx = x - f / df;
     if (!isFinite(nx) || Math.abs(nx - x) > hi - lo || nx === x) break;
@@ -478,7 +491,7 @@ export function realRootsSquareFree(p: ZPoly): number[] {
     // Deflate exact dyadic roots out so no isolating interval of the
     // remaining roots has a root of q at an endpoint.
     for (const iso of exact) {
-      roots.push(sign * Number(iso.a) / 2 ** iso.k * 2 ** m);
+      roots.push(((sign * Number(iso.a)) / 2 ** iso.k) * 2 ** m);
       q = deflateLinear(q, iso.a, 1n << BigInt(iso.k));
     }
     const qd = toDoubles(q);
@@ -528,7 +541,10 @@ function squarePart(n: bigint): { t: bigint; s: bigint } {
   let rem = n;
   for (let d = 2n; d <= 10000n && d * d <= rem; d++) {
     let e = 0n;
-    while (rem % d === 0n) { rem /= d; e++; }
+    while (rem % d === 0n) {
+      rem /= d;
+      e++;
+    }
     t *= d ** (e >> 1n);
     if (e & 1n) s *= d;
   }
@@ -553,7 +569,10 @@ function ratApprox(x: number, maxDen: number): [bigint, bigint] | null {
     const p2 = BigInt(a) * p1 + p0;
     const q2 = BigInt(a) * q1 + q0;
     if (q2 > BigInt(maxDen)) break;
-    p0 = p1; q0 = q1; p1 = p2; q1 = q2;
+    p0 = p1;
+    q0 = q1;
+    p1 = p2;
+    q1 = q2;
     frac = v - a;
   }
   return [p1, q1];
@@ -573,8 +592,7 @@ function isRationalRoot(f: ZPoly, p: bigint, q: bigint): boolean {
 
 const SYM_LIMIT = 1000000n;
 
-const fitsSym = (...xs: bigint[]): boolean =>
-  xs.every(x => (x < 0n ? -x : x) <= SYM_LIMIT);
+const fitsSym = (...xs: bigint[]): boolean => xs.every(x => (x < 0n ? -x : x) <= SYM_LIMIT);
 
 function fmtRat(p: bigint, q: bigint): string | undefined {
   if (q === 1n) return undefined; // the decimal already shows integers
@@ -584,9 +602,17 @@ function fmtRat(p: bigint, q: bigint): string | undefined {
 
 /** Render (p + q√s)/r reduced; undefined when the numbers get ugly. */
 function fmtQuadVal(p: bigint, q: bigint, r: bigint, s: bigint): string | undefined {
-  if (r < 0n) { p = -p; q = -q; r = -r; }
+  if (r < 0n) {
+    p = -p;
+    q = -q;
+    r = -r;
+  }
   const g = bgcd(bgcd(p, q), r);
-  if (g > 1n) { p /= g; q /= g; r /= g; }
+  if (g > 1n) {
+    p /= g;
+    q /= g;
+    r /= g;
+  }
   if (!fitsSym(p, q, r, s)) return undefined;
   const rootTerm = `${q === 1n ? '' : q === -1n ? '-' : q}√${s}`;
   if (p === 0n) return r === 1n ? rootTerm : `${rootTerm}/${r}`;
@@ -610,7 +636,10 @@ function solveQuadratic(f: ZPoly): Array<{ val: number; sym: string | undefined 
 }
 
 function ratNorm(p: bigint, q: bigint): [bigint, bigint] {
-  if (q < 0n) { p = -p; q = -q; }
+  if (q < 0n) {
+    p = -p;
+    q = -q;
+  }
   const g = bgcd(p, q) || 1n;
   return [p / g, q / g];
 }
@@ -626,8 +655,11 @@ function solveBinomial(f: ZPoly): Array<{ val: number; sym: string | undefined }
   for (;;) {
     const rp = isqrt(p);
     const rq = isqrt(q);
-    if (n % 2 === 0 && n > 2 && rp * rp === p && rq * rq === q) { p = rp; q = rq; n /= 2; }
-    else break;
+    if (n % 2 === 0 && n > 2 && rp * rp === p && rq * rq === q) {
+      p = rp;
+      q = rq;
+      n /= 2;
+    } else break;
   }
   const val = (Number(p) / Number(q)) ** (1 / n);
   let sym: string | undefined;
@@ -647,8 +679,16 @@ function solveBinomial(f: ZPoly): Array<{ val: number; sym: string | undefined }
 }
 
 const SUPERSCRIPT: Record<string, string> = {
-  '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
-  '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+  '0': '⁰',
+  '1': '¹',
+  '2': '²',
+  '3': '³',
+  '4': '⁴',
+  '5': '⁵',
+  '6': '⁶',
+  '7': '⁷',
+  '8': '⁸',
+  '9': '⁹',
 };
 
 /** Render an integer polynomial like "x⁷ - x - 2"; undefined if unwieldy. */
@@ -663,9 +703,7 @@ function fmtPoly(f: ZPoly): string | undefined {
     const mag = c < 0n ? -c : c;
     const coeff = i > 0 && mag === 1n ? '' : `${mag}`;
     const xPow = i === 0 ? '' : i === 1 ? 'x' : `x${String(i).replace(/\d/g, d => SUPERSCRIPT[d])}`;
-    parts.push(parts.length === 0
-      ? `${c < 0n ? '-' : ''}${coeff}${xPow}`
-      : `${c < 0n ? '- ' : '+ '}${coeff}${xPow}`);
+    parts.push(parts.length === 0 ? `${c < 0n ? '-' : ''}${coeff}${xPow}` : `${c < 0n ? '- ' : '+ '}${coeff}${xPow}`);
   }
   const s = parts.join(' ');
   return s.length <= 48 ? s : undefined;
@@ -693,9 +731,13 @@ function labelRoots(f: ZPoly, roots: number[]): RootLabel[] {
   for (let i = 0; i < roots.length; i++) {
     if (roots[i] === 0) continue;
     const cand = ratApprox(roots[i], 1000000);
-    if (cand && cand[1] > 0n
-      && Math.abs(roots[i] - Number(cand[0]) / Number(cand[1])) <= 1e-8 * Math.max(1, Math.abs(roots[i]))
-      && rem.length > 1 && isRationalRoot(rem, ...cand)) {
+    if (
+      cand &&
+      cand[1] > 0n &&
+      Math.abs(roots[i] - Number(cand[0]) / Number(cand[1])) <= 1e-8 * Math.max(1, Math.abs(roots[i])) &&
+      rem.length > 1 &&
+      isRationalRoot(rem, ...cand)
+    ) {
       out[i].sym = fmtRat(...cand);
       rem = deflateLinear(rem, cand[0], cand[1]);
     } else {
@@ -759,7 +801,11 @@ export function polynomialRoots(e: Expr, v: string): PolyRoot[] | null | 'zero' 
   return out;
 }
 
-export interface ComplexRootLabel { re: number; im: number; label: string }
+export interface ComplexRootLabel {
+  re: number;
+  im: number;
+  label: string;
+}
 /** Rational linear and quadratic factors, with exact division checking every
  * candidate. Factoring work is bounded; a remaining factor keeps its exact
  * defining-polynomial label instead of inventing a radical approximation. */
@@ -767,51 +813,92 @@ export function complexRootLabels(e: Expr): { roots: ComplexRootLabel[]; rootOf?
   const p = exprToPoly(e, 'w');
   if (!p || p.length < 2 || p.length > 17) return null;
   const roots: ComplexRootLabel[] = [];
-  const rationalLabel = (p: bigint, q: bigint) => { const [a, b] = ratNorm(p, q); return b === 1n ? String(a) : fmtRat(a, b); };
+  const rationalLabel = (p: bigint, q: bigint) => {
+    const [a, b] = ratNorm(p, q);
+    return b === 1n ? String(a) : fmtRat(a, b);
+  };
   const real = polynomialRoots(e, 'w');
-  if (real && real !== 'zero') for (const r of real) if (r.sym || (Number.isInteger(r.x) && isRationalRoot(primitive(p).map(c => c.n), BigInt(r.x), 1n))) roots.push({ re: r.x, im: 0, label: r.sym ?? String(r.x) });
+  if (real && real !== 'zero')
+    for (const r of real)
+      if (
+        r.sym ||
+        (Number.isInteger(r.x) &&
+          isRationalRoot(
+            primitive(p).map(c => c.n),
+            BigInt(r.x),
+            1n,
+          ))
+      )
+        roots.push({ re: r.x, im: 0, label: r.sym ?? String(r.x) });
   let budget = 16000;
   const divisors = (v: bigint): bigint[] => {
     v = v < 0n ? -v : v;
     if (v > 10000n || !v) return [];
     const out: bigint[] = [];
-    for (let k = 1n; k * k <= v; k++) if (v % k === 0n) { out.push(k); if (k * k !== v) out.push(v / k); }
+    for (let k = 1n; k * k <= v; k++)
+      if (v % k === 0n) {
+        out.push(k);
+        if (k * k !== v) out.push(v / k);
+      }
     return out;
   };
   const quadratic = (f: ZPoly) => {
-    const [c, b, a] = f, disc = b * b - 4n * a * c;
+    const [c, b, a] = f,
+      disc = b * b - 4n * a * c;
     if (disc >= 0n) return;
     const { t, s } = squarePart(-disc);
-    const re = Number(-b) / Number(2n * a), im = Math.abs(Number(t) * Math.sqrt(Number(s)) / Number(2n * a));
+    const re = Number(-b) / Number(2n * a),
+      im = Math.abs((Number(t) * Math.sqrt(Number(s))) / Number(2n * a));
     const reLabel = rationalLabel(-b, 2n * a);
     const imag = s === 1n ? rationalLabel(t, 2n * (a < 0n ? -a : a)) : fmtQuadVal(0n, t, 2n * (a < 0n ? -a : a), s);
     if (!imag || (b !== 0n && !reLabel)) return;
     for (const sign of [-1, 1]) {
       const part = imag === '1' ? 'i' : `${imag} i`;
-      roots.push({ re, im: sign * im, label: b === 0n ? (sign < 0 ? '-' : '') + part : `${reLabel} ${sign < 0 ? '−' : '+'} ${part}` });
+      roots.push({
+        re,
+        im: sign * im,
+        label: b === 0n ? (sign < 0 ? '-' : '') + part : `${reLabel} ${sign < 0 ? '−' : '+'} ${part}`,
+      });
     }
   };
   for (const { p: factor } of squareFree(primitive(p))) {
     let rem = factor;
-    while (rem.length > 1 && rem[0].n === 0n) { roots.push({ re: 0, im: 0, label: '0' }); rem = rem.slice(1); }
+    while (rem.length > 1 && rem[0].n === 0n) {
+      roots.push({ re: 0, im: 0, label: '0' });
+      rem = rem.slice(1);
+    }
     // Remove rational real factors before looking for quadratic factors.
     const rs = realRootsSquareFree(primitive(rem).map(c => c.n));
     for (const root of rs) {
       const rat = ratApprox(root, 1000000);
       if (!rat || rem.length < 2) continue;
-      const divisor = [{ n: -rat[0], d: 1n }, { n: rat[1], d: 1n }];
+      const divisor = [
+        { n: -rat[0], d: 1n },
+        { n: rat[1], d: 1n },
+      ];
       const qr = fpdivmod(rem, divisor);
       if (!qr.r.length) rem = primitive(qr.q);
     }
     while (rem.length > 3 && budget > 0) {
       let found = false;
       const z = primitive(rem).map(c => c.n);
-      search: for (const a of divisors(z[z.length - 1])) for (const c0 of divisors(z[0])) for (const sign of [-1n, 1n]) for (let b = -32n; b <= 32n; b++) {
-        if (--budget <= 0) break search;
-        const f = [sign * c0, b, a];
-        const qr = fpdivmod(rem, f.map(n => ({ n, d: 1n })));
-        if (!qr.r.length) { quadratic(f); rem = primitive(qr.q); found = true; break search; }
-      }
+      search: for (const a of divisors(z[z.length - 1]))
+        for (const c0 of divisors(z[0]))
+          for (const sign of [-1n, 1n])
+            for (let b = -32n; b <= 32n; b++) {
+              if (--budget <= 0) break search;
+              const f = [sign * c0, b, a];
+              const qr = fpdivmod(
+                rem,
+                f.map(n => ({ n, d: 1n })),
+              );
+              if (!qr.r.length) {
+                quadratic(f);
+                rem = primitive(qr.q);
+                found = true;
+                break search;
+              }
+            }
       if (!found) break;
     }
     if (rem.length === 3) quadratic(primitive(rem).map(c => c.n));
