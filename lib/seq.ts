@@ -34,6 +34,8 @@ export interface SeqScan {
 const L = `[A-Za-z${GREEK_NAME_CHARS}]`;
 /** A term reference by literal index: a_3 (or a₃, canonicalized), θ_2. */
 const TERM_RE = new RegExp(`^(${L})_(\\d+)$`);
+/** A term reference by a named index: a_k (a slider) or a_N (a list). */
+const NAMED_RE = new RegExp(`^(${L})_([A-Za-z${GREEK_NAME_CHARS}]\\w*)$`);
 const SEQ_RE = new RegExp(String.raw`^\s*(${L})_(${L})\s*=(?!=)([\s\S]+)$`);
 const REC_RE = new RegExp(String.raw`^\s*(${L})_(?:\{\s*(${L})\s*\+\s*1\s*\}|\(\s*(${L})\s*\+\s*1\s*\))\s*=(?!=)([\s\S]+)$`);
 
@@ -169,10 +171,18 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
       return { kind: 'var', name: `${defs.sequencePrefix}_${name}_${k}` };
     } finally { resolving.delete(name); }
   };
-  return (symbol: string, index?: Expr): Expr | null => {
+  const resolve = (symbol: string, index?: Expr): Expr | null => {
     if (index === undefined) {
       const hit = TERM_RE.exec(symbol);
-      return hit && defs.sequences.has(hit[1]) ? term(hit[1], Number(hit[2])) : null;
+      if (hit) return defs.sequences.has(hit[1]) ? term(hit[1], Number(hit[2])) : null;
+      // a_k or a_N: the term at a slider, or one per element of a list —
+      // unless a_k is a name of its own, or k is the sequence's own index.
+      const named = NAMED_RE.exec(symbol);
+      const scan = named && defs.sequences.get(named[1]);
+      if (!named || !scan || named[2] === scan.index || protectedNames.has(symbol) || known.has(symbol)) return null;
+      const k = named[2];
+      if (!opts.isList?.(k) && opts.consts?.[k] === undefined) return null;
+      return resolve(`${named[1]}_`, { kind: 'var', name: k });
     }
     const name = symbol.slice(0, -1);
     if (!symbol.endsWith('_') || !defs.sequences.has(name)) return null;
@@ -187,4 +197,5 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
     if (indices.kind === 'data') return withAxes({ kind: 'list', items: Array.from(indices.values, k => term(name, k)) }, axesOf(indices));
     return one(indices);
   };
+  return resolve;
 }

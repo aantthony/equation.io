@@ -148,7 +148,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   after it in the product chain as the body (`2 sum[n=1..N] ...` keeps the 2
   outside). Bounds must be numbers or constants defined in another row (not
   `t`), because the sum is expanded symbolically before compiling — which makes
-  `N` a slider that adds terms as you drag it.
+  `N` a slider that adds terms as you drag it. A bound may also be a named
+  list of numbers: with `N = [3..5]`, `sum(n=1..N, sin(n x)/n)` draws one
+  partial sum per element (a family that pairs with other uses of `N`).
+  Inside a sum over `n`, a sequence term `a_n` is each term: `sum(n=1..N, a_n)`.
 - Integrals: `int[a..b] f(x) dx` (definite) and `int(f(x) dx)`
   (antiderivative), also written `∫`. The trailing `dx` names the variable;
   any letter works, so `y = int[0..x] exp(-t^2) dt` plots a function of x,
@@ -200,7 +203,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   both axes, so counts in the thousands need `hist(L, 40) / 800` to share a
   view with values in the units. Missing values are left out.
 - List indexing is 1-based, on named lists: with `L = [5, 6, 7]` in a row
-  above, `L[2]` is 6 and `L[k]` takes k from a slider. Only a named list
+  above, `L[2]` is 6 and `L[k]` takes k from a slider. A list of indices
+  picks one element each: `L[2..3]` is `[6, 7]`, `L[[3, 1]]` is `[7, 5]`, and
+  `L[N]` for a named list `N` pairs with `N`. Only a named list
   indexes — `x[2]` is plain multiplication (2x).
 - Data columns: with `person = open("people.csv", 3a7f9c1d2e4b)` in a row
   above (see Definitions), `person.age` is a list of that column's numbers.
@@ -385,7 +390,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   entire point list, including a CSV scatter `polyline((data.x, data.y))`.
   Range bounds may use sliders, but not t; families re-expand on bound changes.
 - Sequence values: `a_n = 1/n` defines `a_3` as a scalar and `a_[1..10]`
-  as a list, usable in sums, scatters, histograms and regression. Indices
+  as a list, usable in sums, scatters, histograms and regression. `a_k`
+  reads the term at a slider `k`, and `a_N` one term per element of a list
+  `N`. Indices
   must be whole numbers from 0 to 1000. Recurrences use their `a_0` seed
   (default 0.5); terms compute as a bounded chain of scalar constants, so
   sliders and t remain live. A recurrence using x as a bifurcation parameter

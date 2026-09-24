@@ -32,12 +32,12 @@ import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
 import { type Column, type Table, filterTable } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, SUM_MAX_TERMS, type Expr, builtinFn, canonicalName, compDims, evaluate, markOrigins, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
+import { FUNCTIONS, GREEK_NAME_CHARS, NAME_SRC, SHADOWABLE_FNS, SUM_MAX_TERMS, type Expr, builtinFn, canonicalName, compDims, evaluate, markOrigins, freeVars, ineqComparisons, parseExpr, revolveAxis, sameList, substVars } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { lowerGeom, lowerMatrix, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
-import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, axesOf, isDataScatter, isSeq, lowerLists, lowerMask, namedAxes, plainFnName, withAxes } from './list.ts';
+import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, axesOf, isDataScatter, isSeq, lowerLists, lowerMask, namedAxes, plainFnName, withAxes } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
@@ -402,14 +402,14 @@ const DEAD_FILTER = 'A filter has to test the list itself, like L[L > 2]'
  * The other half of the `[…]` syntax from checkFilterShape below, and the same
  * reasoning: list.ts settles these by lowering, which needs the bytes, and a
  * question answered only where the file is makes a link valid on one device
- * and broken on the next. So `person.age[person.age]` is a slice everywhere,
- * and `person.age[1 < 2]` is a dead filter everywhere, rather than reported as
- * merely device-local in a shared link and refused for the author.
+ * and broken on the next. So `person.age[1 < 2]` is a dead filter everywhere,
+ * rather than reported as merely device-local in a shared link and refused
+ * for the author. (A list of indices picks elements, so it is no issue here.)
  */
 export function indexIssue(idx: Expr, defs: ValueDefinitions): string | null {
   const inside = wholePlotOverList(idx, defs);
   if (inside) return `Lists cannot appear inside ${inside}(…).`;
-  if (!isComparison(idx)) return staysList(idx, defs) ? SLICE : null;
+  if (!isComparison(idx)) return null;
   const operands = idx.kind === 'ineq'
     ? ineqComparisons(idx).flatMap(c => [c.l, c.r])
     : idx.args;
@@ -748,6 +748,11 @@ export interface ResolveOpts {
    */
   isList?: (name: string) => boolean;
   /**
+   * A list's value, for a Σ/Π whose bound is a list: `N = [3..5]` then
+   * `sum(n=1..N, …)` expands once per element, into a list over N's axes.
+   */
+  getList?: GetList;
+  /**
    * What is wrong with `L[idx]` judged by SHAPE alone — a slice, a filter no
    * list reaches, a whole-plot call over one — or null if nothing is. Asked
    * before list.ts lowers anything, because lowering needs the bytes and the
@@ -879,12 +884,20 @@ function stripDx(body: Expr): StripDx | null {
   return { v, integrand: product(inside), residual: tailHasDx ? product(tail) : null };
 }
 
+const SEQ_LETTER = new RegExp(`^[A-Za-z${GREEK_NAME_CHARS}]$`);
+
 /** substVars for a Σ/Π index, stopping at nested Σ/Π that rebind the same name. */
 export function substIdx(e: Expr, idx: string, val: Expr): Expr {
   switch (e.kind) {
     case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substIdx(x, idx, val));
     case 'num': return e;
-    case 'var': return e.name === idx ? val : e;
+    case 'var': {
+      if (e.name === idx) return val;
+      // A subscript written with the index names a term: a_n at n = 3 is a_3.
+      const at = e.name.length === idx.length + 2 && e.name.endsWith(`_${idx}`) && val.kind === 'num'
+        && Number.isInteger(val.value) && val.value >= 0 && SEQ_LETTER.test(e.name[0]);
+      return at ? { kind: 'var', name: `${e.name[0]}_${val.value}` } : e;
+    }
     case 'neg': return { kind: 'neg', a: substIdx(e.a, idx, val) };
     case 'bin': {
       if (e.op === '*' || e.op === '/') {
@@ -1054,6 +1067,25 @@ function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
   if (idxE.kind !== 'var') throw new Error(`Expected ${header.name}(n=1..N, …).`);
   const idx = idxE.name;
   if (RESERVED.has(idx)) throw new Error(`Cannot use "${idx}" as a ${sym} index (it is reserved).`);
+  const listed = boundList(loE, hiE, sym, ctx);
+  if (listed) {
+    const { name, seq, values } = listed;
+    // Each element's sum would itself be a list: a family of families.
+    const inner = [...freeVars(body)].find(n => n !== name && ctx.opts.isList?.(n))
+      ?? (containsListLiteral(body) ? 'a list literal' : null);
+    if (inner) throw new Error(`${sym} over the list ${name} cannot also use ${inner} in its body.`);
+    const before = ctx.terms;
+    const items = values.map(v => {
+      const at = (e: Expr) => substIdx(e, name, num(v));
+      try {
+        return expandSum({ ...header, args: [idxE, at(loE), at(hiE)] }, at(body), ctx);
+      } catch (err) {
+        if (ctx.terms <= SUM_MAX_TOTAL) throw err;
+        throw new Error(`${sym} over the list ${name} expands to over ${ctx.terms - before} terms across its values (limit ${SUM_MAX_TOTAL} total).`);
+      }
+    });
+    return withAxes<Expr>({ kind: 'list', items }, namedAxes(name, seq));
+  }
   // A bound that uses an open name (the sequence index) cannot be expanded
   // here: the sum stays a call and evaluate() runs it once that name is a number.
   const bound = (b: Expr): { expr: Expr; value?: number } => {
@@ -1104,6 +1136,34 @@ function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
     acc = acc === null ? term : combine(acc, term);
   }
   return acc ?? num(header.name === 'sum' ? 0 : 1);
+}
+
+const containsListLiteral = (e: Expr): boolean =>
+  e.kind === 'list' || childrenOf(e).some(containsListLiteral);
+
+/**
+ * The list a Σ/Π bound names, with its numeric values — or null when the
+ * bounds name none. One list at a time: two would have to cross or zip, and
+ * neither reading is obvious from `sum(n=A..B, …)`.
+ */
+function boundList(loE: Expr, hiE: Expr, sym: string, ctx: Ctx): { name: string; seq: Seq; values: number[] } | null {
+  const get = ctx.opts.getList;
+  if (!get) return null;
+  const names = [...new Set([...freeVars(loE), ...freeVars(hiE)])]
+    .filter(n => ctx.opts.consts?.[n] === undefined && !ctx.opts.openVars?.has(n) && ctx.opts.isList?.(n));
+  if (!names.length) return null;
+  if (names.length > 1) throw new Error(`${sym} bounds can use one list at a time (found ${names.join(' and ')}).`);
+  const [name] = names;
+  let seq: Expr | null = null;
+  try { seq = get(name); } catch { /* reported below */ }
+  const values = !seq ? null
+    : seq.kind === 'data' ? [...seq.values]
+      : seq.kind === 'list' && seq.items.every(it => it.kind === 'num')
+        ? seq.items.map(it => (it as Expr & { kind: 'num' }).value)
+        : null;
+  if (!seq || !isSeq(seq) || !values) throw new Error(`${sym} bounds need a list of plain numbers — ${name} is not one.`);
+  if (values.length > SUM_MAX_TERMS) throw new Error(`${name} has too many elements to bound a ${sym} (limit ${SUM_MAX_TERMS}).`);
+  return { name, seq, values };
 }
 
 /**
@@ -1438,6 +1498,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     boundConsts: new Set(),
     // Live: list names accumulate as definitions are processed.
     isList: n => isListName(listNamesOf(defs), n),
+    getList: listGetter(defs),
     indexIssue: idx => indexIssue(idx, defs),
   };
 

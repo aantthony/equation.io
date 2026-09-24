@@ -3,6 +3,9 @@ import { Env } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { evaluate, type Expr } from './expr.ts';
 import { classifySeqRec, scanSeqRec, sequenceResolver } from './seq.ts';
+import { analyzeRows } from './analysis.ts';
+import { resolveExpr } from './defs.ts';
+import { parseExpr } from './expr.ts';
 
 
 const none = new Set<string>();
@@ -177,5 +180,27 @@ describe('sequence term references', () => {
     const resolveSums = sequenceResolver(sums, () => undefined, {}, new Set<string>());
     expect(resolveSums('s_5')).toEqual({ kind: 'num', value: 15 });
     expect(resolveSums('b_4')).toEqual({ kind: 'num', value: 10 });
+  });
+
+  it('reads a_k at a slider, but never a_n at its own index', () => {
+    const defs = new Env([['a', scanSeqRec('a_n = n^2')!]]);
+    const resolve = sequenceResolver(defs, () => undefined, { consts: { k: 3, n: 2 } }, new Set(['k', 'n']));
+    expect(evaluate(resolve('a_k')!, {})).toBe(9);
+    expect(resolve('a_n')).toBeNull();
+    expect(resolve('a_q')).toBeNull(); // no value to index by
+  });
+
+  it('reads a_n inside a Σ over n as each term', () => {
+    const defs = new Env([['a', scanSeqRec('a_n = n^2')!]]);
+    const resolve = sequenceResolver(defs, () => undefined, {}, new Set<string>());
+    expect(evaluate(resolveExpr(parseExpr('sum(n=1..3, a_n)'), () => undefined, { sequenceTerm: resolve }), {})).toBe(14);
+    expect(evaluate(resolveExpr(parseExpr('sum(m=1..3, a_m)'), () => undefined, { sequenceTerm: resolve }), {})).toBe(14);
+  });
+
+  it('reads a_N once per element of a list, in rows and in list-bounded sums', () => {
+    for (const row of ['y = a_N x', 'y = (a_N + N) x', 'y = sum(n=1..N, a_n) x']) {
+      const { rows } = analyzeRows(['a_0 = 1', 'a_{n+1} = a_n / 2', 'N = [2..4]', row]);
+      expect(rows[3].error).toBeUndefined();
+    }
   });
 });

@@ -677,21 +677,11 @@ describe('data that is not on this device', () => {
     expect(defs.tables.has('adults')).toBe(true);
   });
 
-  it('refuses a slice the same way with the file and without it', () => {
-    // Whether an index is a slice is a question about shape, so it must be
-    // answered identically on a device that has not got the bytes — otherwise
-    // a shared link reports valid and the author's device rejects the row.
+  it('picks elements by a list of indices, from a column too', () => {
     const rows = [`person = open("people.csv", ${HASH})`];
-    expect(() => lowerRow('person.age[person.age]', rows)).toThrow(/Slicing/);
-    const away = ['person = open("people.csv", a1b2c3d4e5f6)'];
-    const { defs } = build(away, null);
-    const names = listNamesOf(defs);
-    const e = resolveExpr(parseExpr('person.age[person.age]', new Set(), names), () => undefined, {
-      isList: (n: string) => names.has(n),
-      indexIssue: (idx: Expr) => indexIssue(idx, defs),
-    });
-    expect(() => lowerLists(e, listGetter(defs), { indexIssue: idx => indexIssue(idx, defs) }))
-      .toThrow(/Slicing/);
+    expect(values(lowerRow('person.age[[3, 1]]', rows))).toEqual([29, 36]);
+    expect(values(lowerRow('person.name.length[[2, 1]]', rows))).toEqual([3, 3]);
+    expect(() => lowerRow('person.age[person.age]', rows)).toThrow(/out of range/);
   });
 
   it('refuses a filter no list reaches, with the file and without it', () => {

@@ -595,13 +595,13 @@ describe('graph previews', () => {
   });
 
   it('does not call a row valid just because the file is elsewhere', async () => {
-    // `person.age[person.age]` is a slice, which the app refuses once the
-    // bytes are here. Reporting it as merely device-local would make the same
-    // link valid in a preview and broken for its author.
-    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'person.age[person.age]']);
+    // `person.age[1 < 2]` is a filter no list reaches, which the app refuses
+    // once the bytes are here. Reporting it as merely device-local would make
+    // the same link valid in a preview and broken for its author.
+    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'person.age[1 < 2]']);
     const out = body.result.structuredContent;
     expect(out.valid).toBe(false);
-    expect(out.rows[1].error).toMatch(/Slicing/);
+    expect(out.rows[1].error).toMatch(/filter/);
   });
 
   it('does not call a graph fine while another row is broken', async () => {

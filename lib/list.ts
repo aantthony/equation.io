@@ -742,10 +742,6 @@ function histogram(xs: Float64Array, bins: number | null, ctx: Ctx): Expr {
   return histBars(centers, counts, width, ctx);
 }
 
-/** Exported because defs.ts answers the same question without the bytes
- *  (indexIssue), and the two devices must say the same sentence. */
-export const SLICE = 'Slicing L[a..b] is not supported yet — index one element, like L[1].';
-
 function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
   // Before anything is lowered, because lowering a column whose file is not
@@ -781,17 +777,29 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
     if (isText(low)) return withAxes({ kind: 'text', values: low.values.filter((_, k) => keep[k]) }, cut);
     return withAxes(listOf(low.items.filter((_, k) => keep[k]), ctx), cut);
   }
-  if (isSeq(idxLow)) throw new Error(SLICE);
-  const v = constVal(idxLow, ctx, 'A list index', true);
-  const k = Math.round(v);
-  if (Math.abs(v - k) > 1e-9) throw new Error('List indices must be whole numbers.');
-  if (k === 0) throw new Error('Lists are 1-based: the first element is L[1].');
-  if (k < 1 || k > n) {
-    throw new Error(`Index ${k} is out of range — the list has ${n} element${n === 1 ? '' : 's'}.`);
+  const position = (v: number): number => {
+    const k = Math.round(v);
+    if (Math.abs(v - k) > 1e-9) throw new Error('List indices must be whole numbers.');
+    if (k === 0) throw new Error('Lists are 1-based: the first element is L[1].');
+    if (k < 1 || k > n) {
+      throw new Error(`Index ${k} is out of range — the list has ${n} element${n === 1 ? '' : 's'}.`);
+    }
+    return k - 1;
+  };
+  // A list of indices picks one element each, over the index list's own
+  // instances: `L[N]` zips with every other use of N.
+  if (isSeq(idxLow)) {
+    const at = Array.from(numbersOf(isLazy(idxLow) ? settle(idxLow, ctx) as Seq : idxLow)
+      ?? (expand(idxLow, ctx) as Expr & { kind: 'list' }).items.map(it => constVal(it, ctx, 'A list index', true)), position);
+    const axes = axesOf(idxLow);
+    if (isData(low)) return withAxes(dataOf(Float64Array.from(at, k => low.values[k]), ctx), axes);
+    if (isText(low)) return withAxes({ kind: 'text', values: at.map(k => low.values[k]) }, axes);
+    return withAxes(listOf(at.map(k => low.items[k]), ctx), axes);
   }
-  if (isData(low)) return num(low.values[k - 1]);
-  if (isText(low)) return { kind: 'str', value: low.values[k - 1] };
-  return low.items[k - 1];
+  const k = position(constVal(idxLow, ctx, 'A list index', true));
+  if (isData(low)) return num(low.values[k]);
+  if (isText(low)) return { kind: 'str', value: low.values[k] };
+  return low.items[k];
 }
 
 /**

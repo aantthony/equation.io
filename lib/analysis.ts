@@ -250,6 +250,7 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
     }),
     boundConsts: built.sumBoundConsts,
     isList: (n: string) => isListName(listNames, n),
+    getList,
     indexIssue: (idx: Expr) => indexIssue(idx, defs),
   };
   ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
