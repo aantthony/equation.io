@@ -150,6 +150,12 @@ describe('fitting a list of points by its coordinates', () => {
     expect(plan.type === 'plist' && plan.pts).toHaveLength(2);
   });
 
+  it('filters one coordinate of a matrix-shaped point list by another', () => {
+    const row = analyze(['P = [(1,2),(3,5)]', 'P.y[P.x > 2]']).rows[1];
+    expect(row.error).toBeUndefined();
+    expect(row.cpu).toEqual({ type: 'vlist', values: [{ kind: 'num', value: 5 }] });
+  });
+
   it('keeps two separately written lists independent', () => {
     const plan = analyze(['X = [1,2,3]', 'Y = [4,5,6]', '(X, Y)']).rows[2].cpu!;
     expect(plan.type === 'plist' && plan.pts).toHaveLength(9);

@@ -198,11 +198,6 @@ export function columnExprs(col: Column): Expr[] {
 }
 
 /**
- * Resolve a name to list elements: a named list, or a data column written
- * `table.column`. Throws (rather than returning null) when the name clearly
- * means a column but cannot produce one, so the row explains itself.
- */
-/**
  * `P.x`, `P.y`, `P.z` of a named point list: the list of that coordinate,
  * over P's own instances — so `(P.x, P.y - (m P.x + b))` and
  * `P.y ~ m P.x + b` pair up point by point, the way a data file's columns
@@ -226,6 +221,11 @@ function pointColumn(defs: ValueDefinitions, name: string, axis: string): Seq | 
   return withAxes({ kind: 'list', items: points.items.map(p => (p as Expr & { kind: 'vec' }).items[k]) }, namedAxes(name, points));
 }
 
+/**
+ * Resolve a name to list elements: a named list, or a data column written
+ * `table.column`. Throws (rather than returning null) when the name clearly
+ * means a column but cannot produce one, so the row explains itself.
+ */
 export function listGetter(defs: ValueDefinitions): GetList {
   return name => {
     const hit = defs.lists.get(name);
@@ -353,9 +353,14 @@ const draftNameTaken = (defs: ValueDefinitions, n: string): boolean =>
 function staysList(e: Expr, defs: ValueDefinitions): boolean {
   switch (e.kind) {
     case 'var':
-      return defs.lists.has(e.name) || defs.missingData.get(e.name)?.list === true
-        || (e.name.includes('.') && (defs.tables.has(e.name.slice(0, e.name.indexOf('.')))
-          || defs.lists.has(e.name.slice(0, e.name.indexOf('.')))));
+    {
+      if (defs.lists.has(e.name) || defs.missingData.get(e.name)?.list === true) return true;
+      const dot = e.name.indexOf('.');
+      if (dot <= 0) return false;
+      // `P.x` of a point list — including one short enough to read as a matrix.
+      const head = e.name.slice(0, dot);
+      return defs.tables.has(head) || defs.lists.has(head) || defs.mats.has(head);
+    }
     case 'list':
     case 'data':
     case 'text': return true;
