@@ -194,11 +194,14 @@ pnpm deploy     # build and deploy to Cloudflare
 
 **Regression**
 
-- `X = [0, 1, 2, 3]; Y = [1, 3, 5, 7]; Y ~ m X + b` fits a line.
+- `P = [(0, 1), (1, 3), (2, 5), (3, 7)]; P.y ~ m P.x + b` fits a line
+  through the points. `P.x` and `P.y` are the lists of their coordinates,
+  paired point by point like a data file's columns (two separately written
+  lists `X`, `Y` are independent, so `(X, Y)` would be their grid).
   Unbound names `m` and `b` become fitted constants; `y = m x + b` draws the
-  model and `(X, Y - (m X + b))` draws its residuals. A fit row reports the
+  model and `(P.x, P.y - (m P.x + b))` draws its residuals. A fit row reports the
   coefficients, RMSE, R² (when defined), and observation count.
-- `Y ~ a X^2 + b X + c` fits a polynomial; `Y ~ a exp(b X)` fits a nonlinear
+- `P.y ~ a P.x^2 + b P.x + c` fits a polynomial; `P.y ~ a exp(b P.x)` fits a nonlinear
   model. Already defined constants stay fixed and changing them refits the
   other coefficients. Define data and fixed constants above the fit.
 - `data.height ~ m data.age + b` works with CSV columns. Missing/nonfinite

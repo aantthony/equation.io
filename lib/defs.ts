@@ -36,8 +36,8 @@ import { FUNCTIONS, NAME_SRC, SHADOWABLE_FNS, SUM_MAX_TERMS, type Expr, builtinF
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
-import { lowerGeom, lowerMatrix, pointComps, vecStateComps } from './geom.ts';
-import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, axesOf, isDataScatter, isSeq, lowerLists, lowerMask, plainFnName, withAxes } from './list.ts';
+import { lowerGeom, lowerMatrix, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
+import { type GetList, type Seq, NO_LIST_INSIDE, SCALAR_REDUCTIONS, SLICE, axesOf, isDataScatter, isSeq, lowerLists, lowerMask, namedAxes, plainFnName, withAxes } from './list.ts';
 import { type Mat, matrixFromList } from './mat.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
@@ -202,6 +202,30 @@ export function columnExprs(col: Column): Expr[] {
  * `table.column`. Throws (rather than returning null) when the name clearly
  * means a column but cannot produce one, so the row explains itself.
  */
+/**
+ * `P.x`, `P.y`, `P.z` of a named point list: the list of that coordinate,
+ * over P's own instances — so `(P.x, P.y - (m P.x + b))` and
+ * `P.y ~ m P.x + b` pair up point by point, the way a data file's columns
+ * do. (Two separately written lists `X`, `Y` are independent and cross.)
+ */
+function pointColumn(defs: ValueDefinitions, name: string, axis: string): Seq | null {
+  // Two or three 2D points — three 3D ones — read as a matrix; its rows are
+  // the same points.
+  const mat = defs.mats.get(name);
+  const points = mat ? rowsAsPoints(mat, name) : defs.lists.get(name);
+  if (!points || points.kind !== 'list') return null;
+  const k = ['x', 'y', 'z'].indexOf(axis);
+  const dims = new Set(points.items.map(p => (p.kind === 'vec' ? p.items.length : 0)));
+  if (!points.items.length || dims.has(0)) {
+    throw new Error(`${name}.${axis} reads a coordinate of a list of points; ${name} is a list of numbers.`);
+  }
+  const dim = Math.min(...dims);
+  if (k < 0 || k >= dim) {
+    throw new Error(`${name} is a list of ${dim}D points: its coordinates are ${['x', 'y', 'z'].slice(0, dim).map(c => `${name}.${c}`).join(', ')}.`);
+  }
+  return withAxes({ kind: 'list', items: points.items.map(p => (p as Expr & { kind: 'vec' }).items[k]) }, namedAxes(name, points));
+}
+
 export function listGetter(defs: ValueDefinitions): GetList {
   return name => {
     const hit = defs.lists.get(name);
@@ -222,7 +246,7 @@ export function listGetter(defs: ValueDefinitions): GetList {
         + ` or name a filtered copy: adults = ${name}[…].`);
     }
     const table = defs.tables.get(name.slice(0, dot));
-    if (!table) return null;
+    if (!table) return pointColumn(defs, name.slice(0, dot), name.slice(dot + 1));
     const path = name.slice(dot + 1);
     const length = path.endsWith('.length');
     const col = length ? path.slice(0, -'.length'.length) : path;
@@ -330,7 +354,8 @@ function staysList(e: Expr, defs: ValueDefinitions): boolean {
   switch (e.kind) {
     case 'var':
       return defs.lists.has(e.name) || defs.missingData.get(e.name)?.list === true
-        || (e.name.includes('.') && defs.tables.has(e.name.slice(0, e.name.indexOf('.'))));
+        || (e.name.includes('.') && (defs.tables.has(e.name.slice(0, e.name.indexOf('.')))
+          || defs.lists.has(e.name.slice(0, e.name.indexOf('.')))));
     case 'list':
     case 'data':
     case 'text': return true;

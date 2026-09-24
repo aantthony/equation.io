@@ -183,7 +183,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `([0,1],[0,1],[0,1])` is the 8 corners of a cube, `[1,2] + [10,20,30]` has
   6 elements, and two separately defined lists `(a, b)` make a grid. Columns
   of one data file share its rows, so `(data.x, data.y)` pairs up. To pair
-  literal values write the points out: `[(1,4), (2,5), (3,6)]`.
+  literal values write the points out: `P = [(1,4), (2,5), (3,6)]`; then
+  `P.x` and `P.y` (and `P.z`) are the lists of their coordinates, paired the
+  same way — `(P.x, 2 P.y)` is 3 points, not 9.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
   `stdev(L)` (sample), `median(L)`, `sort(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
@@ -791,16 +793,19 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 
 ## Regression
 
-Write `X = [0,1,2,3]; Y = [1,3,5,7]; Y ~ m X + b` to fit a line.
-The left side is a numeric list (defined above the fit), an explicit list,
-or a CSV column. The right side is a model over equally long lists, or a
+Write `P = [(0,1),(1,3),(2,5),(3,7)]; P.y ~ m P.x + b` to fit a line through
+the points: `P.x` and `P.y` are their coordinates, paired point by point.
+(Write the data as points, or as columns of one CSV file: two separately
+defined lists `X = […]`, `Y = […]` are independent, so `(X, Y)` would plot
+their grid.) The left side is a numeric list (defined above the fit), an
+explicit list, or a CSV column. The right side is a model over equally long lists, or a
 scalar broadcast to the observations. Unbound scalar names are fitted
 coefficients; already defined constants stay fixed. Data and fixed constants
 must be static and defined above the fit. Coefficients are reusable values:
 `y = m x + b` draws the model, `f(x) = m x + b` names it, and
-`(X, Y - f(X))` draws residuals. No fit settings exist outside the equations.
+`(P.x, P.y - f(P.x))` draws residuals. No fit settings exist outside the equations.
 
-Examples: `Y ~ a X^2 + b X + c` (polynomial), `Y ~ a exp(b X)` (nonlinear),
+Examples: `P.y ~ a P.x^2 + b P.x + c` (polynomial), `P.y ~ a exp(b P.x)` (nonlinear),
 `data.height ~ m data.age + b` (CSV). A fit row reports coefficients, RMSE,
 R² when the observations have nonzero variance, and observation count.
 Changing fixed constants or data refits the model. Missing/nonfinite pairs
