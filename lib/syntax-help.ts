@@ -43,6 +43,7 @@ const signatures: Record<string, [string, string]> = {
   hist: ['hist(L)', 'Histogram of a numeric list'],
   sort: ['sort(L)', 'Sort a numeric list'],
   min: ['min(a, b) or min(L)', 'Minimum'], max: ['max(a, b) or max(L)', 'Maximum'],
+  clamp: ['clamp(x, lo, hi)', 'x held within [lo, hi]; as a constant, a slider over that range'],
   mod: ['mod(a, b)', 'Remainder modulo b'], gcd: ['gcd(a, b)', 'Greatest common divisor'],
   segment: ['segment(A, B)', 'Segment joining two 2D or 3D points'],
   polyline: ['polyline(A, B, C, …)', 'Open path through 2D/3D points; also polyline(P) for a point list'],

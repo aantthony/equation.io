@@ -30,7 +30,8 @@ import {
 } from '../lib/dist.ts';
 import { type IntShade, type ShadeRun, type ShadeSampler, evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { compileSampler } from '../lib/vm.ts';
-import { SLIDER_NUM_RE as NUM_RE, coordinateDragWriter, dragAxes } from '../lib/drag.ts';
+import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
+import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
 import { type Expr, evaluate, freeVars, substVars } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
@@ -1872,6 +1873,27 @@ function addEquation(text: string, at = equations.length): Equation {
 
 const fmtNum = (v: number) => String(parseFloat(v.toPrecision(6)));
 
+/** The slider a row's definition makes (lib/slider.ts), if any. */
+function sliderOf(eq: Equation): { def: NonNullable<Equation['def']>; rhs: string; form: SliderForm } | null {
+  const def = eq.def;
+  if ((def?.kind !== 'const' && def?.kind !== 'init') || eq.error) return null;
+  const rhs = def.rhs.trim();
+  const form = sliderForm(rhs, new Set(defs.fns.keys()));
+  return form ? { def, rhs, form } : null;
+}
+
+/** The row text with the slider moved to `v`: held to its range and step,
+ *  written into its literal. Returns the value it holds. */
+function moveSlider(eq: Equation, v: number): { text: string; rhs: string; value: number } | null {
+  const slider = sliderOf(eq);
+  if (!slider) return null;
+  const { def, form } = slider;
+  const value = sliderValue(form, v, sliderBounds(form, constEnv, new Set(defs.fns.keys())));
+  const rhs = writeSlider(slider.rhs, form, fmtNum(value));
+  const lhs = def.kind === 'init' ? `${def.name}(0)` : def.name;
+  return { text: `${lhs} = ${rhs}`, rhs, value: Number(fmtNum(value)) };
+}
+
 const lineEls = (): HTMLElement[] =>
   [...listEl.children].filter((el): el is HTMLElement => el.classList.contains('eq-line'));
 
@@ -2060,17 +2082,18 @@ function makeSlider(eq: Equation): SliderUI {
 
   range.addEventListener('input', () => {
     const kind = eq.def?.kind;
-    if (kind !== 'const' && kind !== 'init') return;
+    const moved = moveSlider(eq, Number(range.value));
+    if (!moved || (kind !== 'const' && kind !== 'init')) return;
     pushUndo(`slider:${eq.id}`);
-    const lhs = kind === 'init' ? `${eq.def!.name}(0)` : eq.def!.name;
-    const rhs = fmtNum(Number(range.value));
-    eq.text = keepNote(eq.text, `${lhs} = ${rhs}`);
+    const lhs = eq.def!.name;
+    eq.text = keepNote(eq.text, moved.text);
     const line = lineEls()[equations.indexOf(eq)];
     if (line) setLineText(line, eq.text);
     if (kind === 'const' && runtimeSliders.has(lhs) && !equations.some(row => row.error || row.needsFile)) {
+      // The literal was written within the range and step, so it is the value.
       defs.drop(lhs);
-      defs.bind(lhs, { tag: 'scalar', role: 'const', expr: { kind: 'num', value: Number(rhs) } });
-      eq.def = { kind: 'const', name: lhs, rhs };
+      defs.bind(lhs, { tag: 'scalar', role: 'const', expr: { kind: 'num', value: moved.value } });
+      eq.def = { kind: 'const', name: lhs, rhs: moved.rhs };
       // Match a math edit's invalidation without discarding compiled plots,
       // their samplers, or GPU buffers.
       resetEditedTrails();
@@ -2084,13 +2107,22 @@ function makeSlider(eq: Equation): SliderUI {
   range.addEventListener('change', () => {
     coalesce = null;
   });
+  // Typed ends become the row's own clamp(…, lo, hi), so the range travels
+  // in the link with everything else.
   const onBound = () => {
     const lo = Number(min.value);
     const hi = Number(max.value);
-    if (isFinite(lo) && isFinite(hi) && hi > lo) {
+    const slider = sliderOf(eq);
+    if (slider && min.value.trim() && max.value.trim() && isFinite(lo) && isFinite(hi) && hi > lo) {
       pushUndo(`bounds:${eq.id}`);
-      eq.sliderMin = lo;
-      eq.sliderMax = hi;
+      const { def, rhs, form } = slider;
+      const lhs = def.kind === 'init' ? `${def.name}(0)` : def.name;
+      eq.text = `${lhs} = ${withBounds(rhs, form, fmtNum(lo), fmtNum(hi))}`;
+      const line = lineEls()[equations.indexOf(eq)];
+      if (line) line.textContent = eq.text;
+      recompileAll();
+      saveUrl();
+      requestRender();
     }
     reconcile();
   };
@@ -2300,25 +2332,35 @@ function reconcile() {
     const wanted: HTMLElement[] = [];
     // Initial values get a slider too: dragging one relaunches the system
     // from there, which is the whole point of `a(0)` in a chaotic system.
-    const sliderDef = (eq.def?.kind === 'const' || eq.def?.kind === 'init')
-      && !eq.error && NUM_RE.test(eq.def.rhs) ? eq.def : null;
-    if (sliderDef) {
+    const slider = sliderOf(eq);
+    if (slider) {
+      const { def: sliderDef, form } = slider;
       eq.sliderUI ??= makeSlider(eq);
       const { min, range, max } = eq.sliderUI;
-      const v = Number(sliderDef.rhs);
-      if (eq.sliderMin === undefined || eq.sliderMax === undefined) {
-        eq.sliderMin = Math.min(-10, Math.floor(v));
-        eq.sliderMax = Math.max(10, Math.ceil(v));
+      const bounds = sliderBounds(form, constEnv, new Set(defs.fns.keys()));
+      let v = form.literal;
+      let lo: number, hi: number;
+      if (bounds) {
+        [lo, hi] = bounds;
+        v = sliderValue(form, v, bounds);
+      } else {
+        // No written range: one that fits the value, widened as it grows.
+        if (eq.sliderMin === undefined || eq.sliderMax === undefined) {
+          eq.sliderMin = Math.min(-10, Math.floor(v));
+          eq.sliderMax = Math.max(10, Math.ceil(v));
+        }
+        if (v < eq.sliderMin) eq.sliderMin = v;
+        if (v > eq.sliderMax) eq.sliderMax = v;
+        lo = eq.sliderMin; hi = eq.sliderMax;
       }
-      if (v < eq.sliderMin) eq.sliderMin = v;
-      if (v > eq.sliderMax) eq.sliderMax = v;
-      min.value = fmtNum(eq.sliderMin);
-      max.value = fmtNum(eq.sliderMax);
-      range.min = String(eq.sliderMin);
-      range.max = String(eq.sliderMax);
+      if (document.activeElement !== min) min.value = fmtNum(lo);
+      if (document.activeElement !== max) max.value = fmtNum(hi);
+      range.min = String(lo);
+      range.max = String(hi);
       // Σ/Π bounds are integers, so their sliders step whole terms at a time;
-      // likewise the n of Binomial(n, p), which no fraction is valid for.
-      range.step = sumBoundNames.has(sliderDef.name) || wholeParamNames.has(sliderDef.name) ? '1' : String((eq.sliderMax - eq.sliderMin) / 400);
+      // likewise the n of Binomial(n, p), which no fraction is valid for, and
+      // any constant written round(…).
+      range.step = form.whole || sumBoundNames.has(sliderDef.name) || wholeParamNames.has(sliderDef.name) ? '1' : String((hi - lo) / 400);
       range.value = String(v);
       wanted.push(eq.sliderUI.box);
     }
@@ -3126,7 +3168,7 @@ function makePairWriter(pairText: string, commit: (pair: string) => void, round 
   // A name moves only if it is a slider constant: a plain number in its own
   // row is the only right-hand side a drag knows how to rewrite.
   const drag = dragAxes(pairText, p => equations.find(r =>
-    r.def?.kind === 'const' && r.def.name === p && !r.error && NUM_RE.test(r.def.rhs)), pinned);
+    r.def?.kind === 'const' && r.def.name === p && sliderOf(r)), pinned);
   if (!drag) return null;
   const { parts, axes } = drag;
   return (x, y) => {
@@ -3136,7 +3178,10 @@ function makePairWriter(pairText: string, commit: (pair: string) => void, round 
       if (!axis) return;
       const value = fmtNum(round(coords[k], k));
       if (axis === 'literal') text[k] = value;
-      else axis.text = keepNote(axis.text, `${axis.def!.name} = ${value}`);
+      else {
+        const moved = moveSlider(axis, round(coords[k], k));
+        if (moved) axis.text = keepNote(axis.text, moved.text);
+      }
     });
     commit(`(${text[0]}, ${text[1]})`);
   };
