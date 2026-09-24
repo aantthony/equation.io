@@ -18,6 +18,7 @@ import {
   resolveRow,
   shadowedFnNames,
   scanDefinition,
+  takenDefinitionName,
   timeDifferentiator,
   type Definition,
   type TableSource,
@@ -497,6 +498,11 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts, new Set(defs.sequences.keys()));
         continue;
       }
+      // `d = 1` is no definition (d starts d/dx), and would otherwise fail
+      // with advice about derivatives that the author never wrote.
+      if (takenDefinitionName(row.text) === 'd') {
+        throw new Error('d is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.');
+      }
       const rawParsed = parseExpr(row.text, fnNames, listNames, valueNames);
       // `p(50..400)`: where p goes over that time — a range in call position,
       // which nothing else accepts.
@@ -527,6 +533,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
+      // `e = 0.6` parsed with e already a number; only the text still says e.
+      const taken = row.cls.object.kind === 'note' ? takenDefinitionName(row.text) : null;
+      if (taken && row.cls.object.kind === 'note') row.cls = { ...row.cls, object: { ...row.cls.object, constant: taken } };
 
     } catch (e) {
       // A row reading a dropped CSV is not broken here — the bytes simply

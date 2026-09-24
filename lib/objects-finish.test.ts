@@ -194,6 +194,20 @@ describe('solver extensions and comparison notes', () => {
     expect(runRows(['2=[1,2]']).rows[0].info).toMatch(/Never true.*Always true/);
     // Repeated constant definitions still follow definition ownership.
   });
+  it('explains a slider named after a constant or d', () => {
+    // Still a claim about e, but one that says why no slider appeared.
+    const [e, tau, pi] = runRows(['e = 0.6', 'tau = 1', 'pi = pi']).rows;
+    expect(e.info).toBe('Never true (2.71828 ≠ 0.6) — e is a constant; name a slider something else');
+    expect(tau.info).toMatch(/— tau is a constant/);
+    expect(pi.info).toBe('Always true (3.14159 = 3.14159)');
+    // `d` starts d/dx: the definition row itself says so, as a function too.
+    for (const row of ['d = 1', 'd(x) = x^2']) {
+      expect(analyze([row]).rows[0].error, row).toMatch(/^d is taken by derivatives/);
+    }
+    // Derivatives and names merely starting with d are unaffected.
+    const ok = runRows(['dx = 1', 'y = d/dx (x^2)', 'y = d^2/dx^2 (x^3)']).rows;
+    expect(ok.map(r => r.error)).toEqual([undefined, undefined, undefined]);
+  });
   it('has real preview paths or explicit fallback for new objects', () => {
     for (const rows of [['A=(1,2,3)','vector(A)'], ["(x',y',z')=(-y,x,0)"], ['y=[1,2,3]x'], ['(x^2+y^2+z^2,z)=(9,1)']]) {
       expect(canRenderOg(rows),rows.join()).toBe(true);
