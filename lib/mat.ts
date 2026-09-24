@@ -1,4 +1,4 @@
-import { exprKey } from './expr.ts';
+import { evaluate, exprKey, freeVars } from './expr.ts';
 /**
  * Small matrices — 2×2 and 3×3 — as definition-time symbolic objects.
  *
@@ -97,6 +97,12 @@ export function solveVec(m: Mat, v: Expr[]): Expr[] {
 const num = (value: number): Expr => ({ kind: 'num', value });
 const fn = (name: string, ...args: Expr[]): Expr => ({ kind: 'call', name, args });
 const isNum = (e: Expr): e is Expr & { kind: 'num' } => e.kind === 'num';
+/** A constant entry as its number: (1, 1, 1)/sqrt(3) is an axis of numbers,
+ *  not three copies of 1/sqrt(3) in every entry of the rotation. */
+const settle = (e: Expr): Expr => {
+  if (isNum(e) || freeVars(e).size) return e;
+  try { const v = evaluate(e, {}); return Number.isFinite(v) ? num(v) : e; } catch { return e; }
+};
 
 /**
  * A matrix under lowering. `scale`·`base` is the same matrix with a scalar
@@ -183,7 +189,7 @@ const opposite = (a: Expr, b: Expr): boolean =>
  */
 export function expOf(v: MatValue): Mat {
   const scale = v.scale ?? num(1);
-  const base = v.base ?? v.m;
+  const base = (v.base ?? v.m).map(row => row.map(settle));
   const eye = identity(base.length);
   if (base.length === 2) {
     const [[a, b], [c, d]] = base;
