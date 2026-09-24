@@ -674,6 +674,32 @@ function *normalizeTokens(bare: Iterable<Token>): Iterable<Token> {
 }
 
 /**
+ * A subscript written in braces, as recurrence rows are: `T_{c}` is T_c and
+ * `a_{10}` is a_10 — one name, as the definition `T_{c} = 300` binds it.
+ * Only a single name or whole number; `a_{n+1}` stays an index (a sequence's,
+ * see addImplicitTokens).
+ */
+function *mergeBracedSubscripts(bare: Iterable<Token>): Iterable<Token> {
+  const all = [...bare];
+  const skip = (k: number) => { while (all[k]?.type === 'whitespace') k++; return k; };
+  for (let i = 0; i < all.length; i++) {
+    const token = all[i];
+    if (token.type === 'symbol' && token.str.endsWith('_') && all[i + 1]?.type === 'parenopen' && all[i + 1].str === '{') {
+      const at = skip(i + 2);
+      const inner = all[at];
+      const close = skip(at + 1);
+      if ((inner?.type === 'symbol' || (inner?.type === 'number' && /^\d+$/.test(inner.str)))
+        && all[close]?.type === 'parenclose' && all[close].str === '}') {
+        yield { ...token, str: token.str + inner.str };
+        i = close;
+        continue;
+      }
+    }
+    yield token;
+  }
+}
+
+/**
  * Insert implicit multiplication tokens (2x, x(x+1), (x+1)(x-1), x y) and
  * rewrite unary +/- into a dedicated prefix operator.
  */
@@ -734,8 +760,10 @@ function *addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
       // BEFORE the function reading and beating it, because a name can be
       // both: a CSV column headed `sin` gives `person.sin`, and `mean` is
       // shadowable, so `mean = [1, 4, 2]` then `mean[2]` is an index.
-      const isIndex = token.type === 'parenopen' && token.str === '['
-        && last!.type === 'symbol' && indexes(path ?? last!.str);
+      // A sequence also takes its index in braces or parens, as its
+      // recurrence row is written: a_{n+1}, a_(n-1), a_{10}.
+      const isIndex = token.type === 'parenopen' && last!.type === 'symbol'
+        && (token.str === '[' ? indexes(path ?? last!.str) : last!.str.endsWith('_') && activeListNames.has(last!.str));
       const isFnCall = !isIndex && !path?.includes('.') && token.type === 'parenopen'
         && last!.type === 'symbol' && isFnName(last!.str);
       yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
@@ -789,7 +817,7 @@ export function parseExpr(
   activeListNames = listNames;
   activeValueNames = valueNames;
   try {
-    const tokens = addImplicitTokens(normalizeTokens(desugarUnicode(tokenize(str))));
+    const tokens = addImplicitTokens(mergeBracedSubscripts(normalizeTokens(desugarUnicode(tokenize(str)))));
     const stack: PNode[] = [];
     walk(
       ops,
