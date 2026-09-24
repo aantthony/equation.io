@@ -5,7 +5,7 @@ import { structuralDiagnostic } from './expr.ts';
  * readable and cheap. Non-smooth functions (min, max, floor, …) throw;
  * callers fall back to finite differences.
  */
-import { ANGLE_FN, ANGLE_RATE_FN, type Expr, plainFnName } from './expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, type Expr, plainFnName, sameList } from './expr.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const ZERO = num(0);
@@ -181,6 +181,9 @@ export function diff(e: Expr, v: string): Expr {
     case 'ineq': throw new Error('Cannot differentiate an inequality.');
     case 'vec': throw new Error('Differentiate vector components individually.');
     case 'list':
+      // Elementwise, and still the same list: d/dx [x, x^2] pairs with [x, x^2].
+      if (e.items.some(it => it.kind === 'range')) throw new Error('Cannot differentiate a ".." range.');
+      return sameList(e, { kind: 'list', items: e.items.map(it => diff(it, v)) });
     case 'data': throw new Error('Cannot differentiate a list.');
     case 'str':
     case 'text': throw new Error('Cannot differentiate text.');

@@ -143,6 +143,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   conditions themselves compare real values (`re(w) > 0`, `|w| < 1`).
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
+  Along x, y, or z it works through lists too: with `N = [1..4]`,
+  `d/dx x^N` is a family, and `d/dx [sin(x), x^2]` is `[cos(x), 2x]`.
+  Along t a named list is refused (its elements may use t).
 - Sums and products: `sum(n=1..N, sin(n x)/n)` and `prod(k=1..N, k)`, also
   written `Σ`/`Π`. The bracket form `sum[n=1..N] sin(n x)/n` takes everything
   after it in the product chain as the body (`2 sum[n=1..N] ...` keeps the 2
