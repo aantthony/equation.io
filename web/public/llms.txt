@@ -460,6 +460,16 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Decided comparisons: `2+2=4` reads “Always true (4 = 4)”; `e=2` reads
   “Never true (2.71828 ≠ 2)”. Comparisons involving sliders/time say
   “True now” or “False now”. They draw no degenerate implicit curve.
+- Identities: an equation in x, y, z and t whose two sides agree everywhere
+  reads “Holds everywhere (checked numerically)” instead of drawing a curve.
+  The check compares both sides at many random points, for any slider
+  values, so it is evidence, not a proof. `sin(x)^2 + cos(x)^2 = 1` holds;
+  `sin(x)^2 + cos(x)^2 = 1.0001` does not, and stays an (empty) implicit
+  curve. The wave equation for d'Alembert's solution:
+  `c = 1; g(s) = exp(-s^2); f(x, t) = (g(x - c t) + g(x + c t))/2;
+  y = f(x, t); d^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)`. The pulse splits in two
+  and the last row holds everywhere. (u and w are the parametric and
+  complex variables, so they cannot name the solution.)
 - Vector field: a 2-tuple in x, y — `(-y, x)` — drawn as animated streamlines
   (line-integral convolution); clicking the canvas traces integral curves.
   A 3-tuple in x/y/z, or `(x',y',z') = (10(y-x), x(28-z)-y, x y-8z/3)`,

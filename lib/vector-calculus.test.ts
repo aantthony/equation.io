@@ -1,6 +1,6 @@
 /**
- * grad, div, curl and laplacian, their ∇ spellings, and `·`/`×` between
- * vectors (lib/defs.ts, lib/geom.ts).
+ * grad, div, curl and laplacian, their ∇ spellings, `·`/`×` between vectors,
+ * and equations that hold everywhere (lib/defs.ts, lib/geom.ts, lib/plot.ts).
  */
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
@@ -151,5 +151,31 @@ describe('· and × between vectors', () => {
 
   it('keep * between vectors an error, pointing at · and ×', () => {
     expect(last(['A = (1, 2)', 'B = (3, 4)', 'A * B']).error).toMatch(/A · B or A × B/);
+  });
+});
+
+describe('equations that hold everywhere', () => {
+  it('read as holding instead of drawing a curve', () => {
+    for (const rows of [
+      ['sin(x)^2 + cos(x)^2 = 1'],
+      ['c = 1', 'g(s) = exp(-s^2)', 'f(x, t) = (g(x - c t) + g(x + c t))/2', 'd^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)'],
+      ['h = sin(x) sin(y) cos(sqrt(2) t)', 'd^2/dt^2 h = ∇^2 h'],
+      ['rho = sqrt(x^2 + y^2 + z^2)', 'd^2/dt^2 (sin(rho - t)/rho) = ∇^2 (sin(rho - t)/rho)'],
+      ['curl((-y, x)) = 2 + 0x'],
+    ]) {
+      const { kind, info } = last(rows);
+      expect(kind, rows.at(-1)).toBe('note');
+      expect(info).toBe('Holds everywhere (checked numerically)');
+    }
+  });
+
+  it('leaves near misses and ordinary curves alone', () => {
+    expect(last(['sin(x)^2 + cos(x)^2 = 1.0001']).kind).toBe('curve');
+    expect(last(['x^2 + y^2 = 1']).kind).toBe('curve');
+    expect(last(['min(x, 10) = x']).kind).toBe('curve');
+    expect(last(['abs(x) = x']).kind).toBe('curve');
+    expect(last(['y = x']).kind).toBe('curve');
+    // A wave speed that does not match the solution's.
+    expect(last(['h = sin(x - 2t)', 'd^2/dt^2 h = ∇^2 h']).kind).not.toBe('note');
   });
 });

@@ -300,9 +300,11 @@ describe('coordinate fields over z', () => {
   });
 
   it('plots a second row over a z-using field as a surface', () => {
-    for (const row of ['rho = 2', 'phi = pi/4', 'rho = 1 + cos(3 theta)', 'z = rho cos(phi)']) {
+    for (const row of ['rho = 2', 'phi = pi/4', 'rho = 1 + cos(3 theta)', 'z = 2 rho cos(phi)']) {
       expect(last([...spherical, row]).type).toBe('implicit3d');
     }
+    // The chart's own conversion formula holds everywhere: a claim, not a surface.
+    expect(last([...spherical, 'z = rho cos(phi)']).type).toBe('note');
     // A planar field in the same document keeps its planar reading.
     const a = analyze([...spherical, 'theta = pi/4']);
     expect(a.rows.at(-1)!.cpu!.type).toBe('implicit2d');

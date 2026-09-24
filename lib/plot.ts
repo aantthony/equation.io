@@ -374,6 +374,11 @@ function classifyLowered(
   } });
 
   if ((expr.kind === 'eq' || expr.kind === 'ineq') && expr.l.kind !== 'vec' && expr.r.kind !== 'vec' && !hasSpace && !hasParam) return done({ kind: 'note', expr, variable: animated || params.length > 0 });
+  // `d^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)`: an equation whose sides agree
+  // everywhere has no curve to draw — it is a claim, and it holds.
+  if (expr.kind === 'eq' && expr.l.kind !== 'vec' && expr.r.kind !== 'vec' && hasSpace && !hasParam && !usesComplex(expr) && holdsEverywhere(expr)) {
+    return done({ kind: 'note', expr, variable: false, identity: true });
+  }
 
   if (expr.kind === 'trail') {
     if (hasSpace || hasParam || usesComplex(expr) || expr.coordinates.some(c => c.kind === 'data' || c.kind === 'list')) {
@@ -644,9 +649,44 @@ function lowerShade(int: IntShade, lower: (e: Expr) => Expr, known: ReadonlySet<
   }
 }
 
+/**
+ * Whether the two sides of an equation agree at every x, y, z, t and slider
+ * value — a numerical check, not a proof: they are compared at seeded random
+ * points spread over several scales, where both are defined. An ordinary
+ * implicit curve fails at the first point; `sin(x)^2 + cos(x)^2 = 1.0001`
+ * fails too, since the tolerance is relative rounding error, not 1e-4.
+ */
+export function holdsEverywhere(e: Expr & { kind: 'eq' }): boolean {
+  const names = [...freeVars(e)].filter(n => n !== 'pi' && n !== 'e' && n !== 'tau');
+  let seed = 0x9e3779b9;
+  const random = (): number => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let r = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+  // Magnitudes from 0.1 to 100, either sign: a cutoff like min(x, 10) = x
+  // agrees near the origin and nowhere else.
+  const sample = (): number => (random() < 0.5 ? -1 : 1) * 10 ** (3 * random() - 1);
+  let agreed = 0;
+  try {
+    for (let k = 0; k < 64 && agreed < 24; k++) {
+      const env = Object.fromEntries(names.map(n => [n, sample()]));
+      const a = evaluate(e.l, env), b = evaluate(e.r, env);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      if (Math.abs(a - b) > 1e-9 * (1 + Math.abs(a) + Math.abs(b))) return false;
+      agreed++;
+    }
+  } catch {
+    return false;
+  }
+  return agreed >= 24;
+}
+
 /** A decided comparison is a note, independent of the view and render mode. */
 export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env: Record<string, number>): string {
   const e = plot.expr;
+  if (plot.identity) return 'Holds everywhere (checked numerically)';
   if (e.kind !== 'eq' && e.kind !== 'ineq') return '';
   let truth: boolean;
   let values: string;

@@ -150,6 +150,23 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['matrix phase portrait', "a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y)"],
     ['Lorenz field (3D)', "camera(-pi/3, 0.5, 55, (0, 0, 25)); (x', y', z') = (10(y - x), x(28 - z) - y, x y - 8z/3)"],
   ]],
+  // ∇ rows expand symbolically; a row reading “Holds everywhere” is an
+  // identity checked numerically, not drawn.
+  ['vector calculus', [
+    ['gradient ⟂ level curves', 'f(x, y) = x^2 + 2y^2; f(x, y) = [1, 4, 9, 16]; ∇f'],
+    ['gradient of a saddle', 'f(x, y) = x^2 - y^2; f(x, y); ∇f'],
+    ['directional derivative (slide a)', 'f(x, y) = sin(x) cos(y); a = clamp(0.3, 0, 2pi); dir = (cos(a), sin(a)); vector((0, 0), dir); ∇f · dir'],
+    ['divergence: sources and sinks', 'F = (sin(x), sin(y)); F; ∇·F'],
+    ['source: divergence-free off the origin', 's = (x, y); s/|s|^2; ∇·(s/|s|^2) = 0'],
+    ['rotation: curl 2', 'F = (-y, x); F; ∇×F'],
+    ['vortex: curl-free off the origin', 'F = (-y, x)/(x^2 + y^2); F; ∇×F = 0'],
+    ['curl in 3D', 'F = (0, 0, x^2 + y^2); ∇×F'],
+    ['harmonic: Laplacian 0', 'f(x, y) = x^3 - 3x y^2; f(x, y); ∇²f = 0'],
+    ['d’Alembert wave solution', 'view(x = -8..8, y = -0.5..1.5); c = clamp(1, 0.25, 2); g(s) = exp(-s^2); f(x, t) = (g(x - c t) + g(x + c t))/2; y = f(x, mod(t, 8)); d^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)'],
+    ['drum membrane mode', 'h = sin(x) sin(y) cos(sqrt(2) t); h; d^2/dt^2 h = ∇^2 h'],
+    // The wave lives in space; its slice through z = 0 draws in the plane.
+    ['spherical wave (slice z = 0)', 'rho = sqrt(x^2 + y^2 + z^2); sin(sqrt(x^2 + y^2) - t)/sqrt(x^2 + y^2); d^2/dt^2 (sin(rho - t)/rho) = ∇^2 (sin(rho - t)/rho)'],
+  ]],
   ['simulations (↻ to restart)', [
     // th = angle (theta), om = angular velocity (omega): the textbook names.
     // Name each bob as a point, draw the rod with segment(), draw the mass by

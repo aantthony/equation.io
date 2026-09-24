@@ -84,6 +84,10 @@ describe('llms.txt', () => {
       [['F = (-y, x)'], 'curl(F)', 'value'],
       [['F = (-y, x)'], '∇×F', 'value'],
       [['F = (-y, x)'], '∇·F', 'value'],
+      [[], 'sin(x)^2 + cos(x)^2 = 1', 'note'],
+      [[], 'sin(x)^2 + cos(x)^2 = 1.0001', 'curve'],
+      [['c = 1', 'g(s) = exp(-s^2)', 'f(x, t) = (g(x - c t) + g(x + c t))/2'], 'y = f(x, t)', 'curve'],
+      [['c = 1', 'g(s) = exp(-s^2)', 'f(x, t) = (g(x - c t) + g(x + c t))/2'], 'd^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)', 'note'],
       [[], 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', 'curve'],
     ];
     for (const [defs, row, kind] of cases) {
