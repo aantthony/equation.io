@@ -126,11 +126,10 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['3D triangle and its normal', 'A = (0, 0, 0); B = (3, 0, 1); C = (0, 2, 2); polygon(A, B, C); vector(A, cross(B - A, C - A)/3); angle(B - A, C - A)'],
   ]],
   ['matrices, rotations + hulls', [
-    ['determinant = area', 'A = (2, 0.5); B = (0.5, 1.5); polygon((0, 0), A, A + B, B); det([A, B])'],
+    ['determinant = signed area', 'A = (2, 0.5); B = (0.5, 1.5); polygon((0, 0), A, A + B, B); det([A, B])'],
     ['a matrix maps a circle', 'p = 2; q = 1; r = 1; s = 1; M = [(p, q), (r, s)]; (cos(2pi u), sin(2pi u)); '
       + 'M (cos(2pi u), sin(2pi u)); det(M)'],
-    // A list is a variable: every use of `th` moves together, while separate
-    // [..] literals are independent and cross — the corners of a cube.
+    // A list is a variable: every use of `th` moves together.
     ['regular polygon', 'n = 7; th = 2pi [0..n-1]/n; polygon(rotate((2, 0), th + t/4))'],
     ['rotate a shape (matrix exponential)', 'J = [(0, -1), (1, 0)]; a = 0.7; R = e^(a J); P = [(0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)]; polygon(P); polygon(R P)'],
     ['rosette of hulls', 'th = 2pi [0..5]/6; P = [(1, 0), (3, 0.6), (3, -0.6)]; rotate(hull(P), th + t/3)'],
@@ -181,7 +180,8 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     // pos = displacement, vel = velocity: a phase portrait in (pos, vel).
     ['driven oscillator', "pos' = vel; vel' = sin(2t) - pos - vel/5; (pos, vel)"],
     ['SIR epidemic', "view(x = -45..105, y = -0.1..1.1, ratio = 50); b = 0.3; g = 0.1; "
-      + "S' = -b S sick; sick' = b S sick - g sick; S(0) = 0.99; sick(0) = 0.01; S(0..100); sick(0..100)"],
+      + "S' = -b S sick; sick' = b S sick - g sick; S(0) = 0.99; sick(0) = 0.01; R = 1 - S - sick; "
+      + 'S(0..100); sick(0..100); R(0..100)'],
     // One 3-component state; the plot row projects onto the x–z plane.
     ['Lorenz attractor',
       "r' = (10(r_2 - r_1), r_1(28 - r_3) - r_2, r_1 r_2 - 8 r_3/3); "
@@ -233,12 +233,14 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['quadrupole', 'ln(w-2) + ln(w+2) - ln(w-2i) - ln(w+2i)'],
     ['flow past cylinder', 'w + 4/w'],
     ['orbiting charge', 'ln(w-2) - ln(w + 2e^(i t))'],
+    ['breathing dipole', 'r = 2 + sin(t); ln(w - r) - ln(w + r)'],
     ['domain coloring', 'domain((w^3 - 1)/w)'],
     ['conformal map', 'conformal(w^2/4)'],
     ['Joukowski airfoil', 'conformal(w + 1/w)'],
     ['unit circle path', 'exp(i 2 pi u)'],
     ['image of a circle', 'f(w) = w^2 + w; exp(i 2 pi u); f(exp(i 2 pi u))'],
-    ['roots of unity', 'w^3 = 1; 1+2i'],
+    ['roots of unity', 'w^3 = 1'],
+    ['complex numbers as points', '1+2i; 2e^(i t)'],
   ]],
   ['fractals', [
     ['Mandelbrot set', 'iter(z^2 + w)'],
@@ -290,6 +292,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ['breathing torus', '(cos(2pi u)(2+cos(2pi v+t)), sin(2pi u)(2+cos(2pi v+t)), sin(2pi v+t))'],
   ]],
   ['solids', [
+    // Separate [..] literals are independent and cross: 2 × 2 × 2 corners.
     ['corners of a cube', '([0,1], [0,1], [0,1])'],
     ['tumbling cube', 'e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1]))'],
     ['octahedron', 'k = 2pi [0..2]/3; hull(rotate(([-2,2], 0, 0), k, (1, 1, 1)))'],
