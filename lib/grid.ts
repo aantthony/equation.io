@@ -38,8 +38,12 @@ export function hasAtan2(e: Expr): boolean {
 }
 
 /** A field over the plane draws its level sets as a grid family; one that
- *  uses z has no planar level sets to draw, so it only defines. */
-export const planarField = (expr: Expr): boolean => !freeVars(expr).has('z');
+ *  uses z has no planar level sets to draw, so it only defines — as does one
+ *  over the parameters u, v, which is a curve or surface, not a grid. */
+export const planarField = (expr: Expr): boolean => {
+  const vars = freeVars(expr);
+  return !vars.has('z') && !vars.has('u') && !vars.has('v');
+};
 
 /** Convenience compilation of a named coordinate grid through shared backends. */
 export function buildGridField(name: string, expr: Expr, constNames: ReadonlySet<string>): GridField {
