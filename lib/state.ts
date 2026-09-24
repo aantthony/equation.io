@@ -27,7 +27,7 @@ export interface StateSystem {
 }
 
 /** Fixed integration step, in seconds of graph time. */
-const STEP = 1 / 240;
+export const STEP = 1 / 240;
 /** Most steps per frame: past this the simulation runs slow rather than
  *  freezing the page (a backgrounded tab can hand back a gap of minutes). */
 const MAX_STEPS = 60;

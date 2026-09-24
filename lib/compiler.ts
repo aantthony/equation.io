@@ -25,6 +25,7 @@ export type CpuPlan =
   | { type: 'fractal2d'; step: Expr; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
+  | { type: 'orbit'; dim: 2 | 3; paths: Expr[][]; series: boolean; from: Expr; to: Expr }
   | { type: 'polygon'; dim: 2 | 3; pts: Expr[]; closed: boolean; arrow?: boolean; hull?: boolean }
   | { type: 'spacecurve'; residuals: Expr[] }
   | { type: 'system'; dim: 2 | 3; residuals: Expr[]; complexEquation?: Expr; parametric?: boolean; angular?: boolean[]; coordinates?: Expr[] }
@@ -134,6 +135,7 @@ export function compileCpu(classified: Classified): CpuPlan {
         : { type: object.form === 'potential' ? 'complex2d' : object.form === 'domain' ? 'domain2d' : 'conformal2d', expr: object.expr };
     case 'point': { const coords = point(object.source, 'point'); return { type: 'point', dim: coords.length as 2 | 3, coords }; }
     case 'trail': return { type: 'trail', dim: object.coordinates.length as 2 | 3, coords: object.coordinates.map(real) };
+    case 'orbit': return { type: 'orbit', dim: object.series ? 2 : object.paths[0].length as 2 | 3, paths: object.paths.map(p => p.map(real)), series: object.series, from: object.from, to: object.to };
     case 'figure': return { type: 'polygon', dim: object.dimension, pts: [...object.vertices], closed: ['polygon', 'square', 'hull'].includes(object.form), ...(object.form === 'vector' ? { arrow: true } : {}), ...(object.form === 'hull' ? { hull: true } : {}) };
     case 'system': {
       const { source, parametric, angular, coordinates } = object;
@@ -265,7 +267,7 @@ export function compileGpu(classified: Classified): GpuPlan {
         return { type: 'family', params, members: object.members.map((_, k) => ({ ...shared, uniforms: { [object.shared!.index]: k } })) };
       }
       return { type: 'family', params, members: object.members.map(compileGpu) };
-    case 'intersection': case 'point': case 'trail': case 'figure': case 'system': case 'list': case 'histogram': case 'distribution': case 'value': case 'note': break;
+    case 'intersection': case 'point': case 'trail': case 'orbit': case 'figure': case 'system': case 'list': case 'histogram': case 'distribution': case 'value': case 'note': break;
   }
   return { type: 'none', params };
 }
@@ -303,6 +305,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'scalar2d': case 'complex2d': case 'domain2d': case 'conformal2d': case 'value': case 'note': structure = exprKey(plan.expr); break;
     case 'fractal2d': structure = [exprKey(plan.step), plan.seed, plan.maxIter]; break;
     case 'point': case 'trail': structure = expressions(plan.coords); break;
+    case 'orbit': structure = [plan.series, plan.paths.map(expressions), exprKey(plan.from), exprKey(plan.to)]; break;
     case 'polygon': structure = [plan.dim, expressions(plan.pts), plan.closed, plan.arrow, plan.hull]; break;
     case 'spacecurve': structure = expressions(plan.residuals); break;
     case 'system': structure = [expressions(plan.residuals), plan.parametric, plan.angular, plan.coordinates?.map(exprKey)]; break;

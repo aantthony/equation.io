@@ -716,6 +716,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // integral, whose shaded area is a CPU polygon here as there.
   value: 'draws',
   trail: 'fallback',
+  // Integrated in the app's worker; the preview would have to integrate too.
+  orbit: 'fallback',
   pcurve: 'draws',
   psurface: 'draws',
   implicit3d: 'draws',

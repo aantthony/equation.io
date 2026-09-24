@@ -37,6 +37,10 @@ export type MathObject =
   | { readonly kind: 'complex-field'; readonly form: 'fractal'; readonly step: Expr; readonly seed: 'pixel' | 'zero'; readonly maxIter: number }
   | { readonly kind: 'point'; readonly source: PointSource }
   | { readonly kind: 'trail'; readonly coordinates: Components }
+  /** Where states go over [from, to], integrated ahead of time (orbit.ts):
+   *  one path per run, each a point's coordinates or, for a series, the one
+   *  value drawn against t. */
+  | { readonly kind: 'orbit'; readonly paths: readonly (readonly Expr[])[]; readonly series: boolean; readonly from: Expr; readonly to: Expr }
   | { readonly kind: 'figure'; readonly form: 'segment' | 'polyline' | 'vector' | 'polygon' | 'square' | 'hull'; readonly dimension: 2 | 3; readonly vertices: readonly Expr[] }
   | { readonly kind: 'system'; readonly source: SystemSource; readonly parametric?: boolean; readonly angular?: readonly boolean[]; readonly coordinates?: readonly Expr[] }
   | { readonly kind: 'sequence'; readonly form: 'explicit'; readonly term: Expr; readonly index: string }
@@ -83,7 +87,7 @@ export function publicKind(object: MathObject) {
       ? object.storage === 'packed' ? 'dlist' : 'vlist'
       : object.storage === 'packed' ? 'dscatter' : 'plist';
     case 'distribution': return object.form;
-    case 'point': case 'trail': case 'system': case 'histogram': case 'value': case 'note': case 'family': return object.kind;
+    case 'point': case 'trail': case 'orbit': case 'system': case 'histogram': case 'value': case 'note': case 'family': return object.kind;
   }
 }
 export type PublicKind = ReturnType<typeof publicKind>;
@@ -100,6 +104,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'curve': return object.form === 'parametric' && object.source.representation === 'real' && object.source.coordinates.length === 3;
     case 'vector-field': return object.components.length === 3;
     case 'trail': return object.coordinates.length === 3;
+    case 'orbit': return !object.series && object.paths[0]?.length === 3;
     case 'figure': return object.dimension === 3;
     case 'system': return object.source.representation === 'real' && object.source.residuals.length === 3;
     case 'list': return object.element === 'point' && object.dimension === 3;

@@ -47,6 +47,7 @@ import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } fro
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
 
 import { type StateSystem, advanceState, initialState } from '../lib/state.ts';
+import { type OrbitInput, orbitInput } from '../lib/orbit.ts';
 import { splitStatements } from '../lib/statements.ts';
 import {
   type ViewSpec,
@@ -138,6 +139,9 @@ interface Equation {
   traceTarget?: string;
   traceClock?: number;
   sysCache?: { key: string; text: string; env: string; stableEnv: string; lo: number[]; hi: number[]; pts: number[][] };
+  /** The last integrated orbit, and the one being integrated now. */
+  orbitCache?: { key: string; pts: number[][] };
+  orbitPending?: string;
 }
 
 /**
@@ -583,7 +587,7 @@ function renderMembers(eq: Equation): Equation[] {
     const gpuMembers = eq.gpu?.type === 'family' ? eq.gpu.members : [];
     children = cpu.members.map((m, k) => ({ ...eq, id: familyId--, cls: m.cls, cpu: m.cpu, gpu: gpuMembers[k],
       familyParent: eq, familyShade: .45 * k / Math.max(1, cpu.members.length - 1),
-      sysCache: undefined, pathCache: undefined, traceTarget: undefined }));
+      sysCache: undefined, pathCache: undefined, traceTarget: undefined, orbitCache: undefined, orbitPending: undefined }));
     familyRows.set(cls, children);
   }
   return children;
@@ -698,6 +702,45 @@ function render() {
   };
 
   const grabs: Grabbable[] = [];
+
+  /**
+   * An orbit's paths, integrated in the worker whenever something it reads
+   * other than the states and t changes — a slider, an edit — and not per
+   * frame. The previous orbit keeps drawing while the next one integrates.
+   */
+  const orbitFor = (eq: Equation): number[][] => {
+    const plot = eq.cpu as Extract<CpuPlan, { type: 'orbit' }>;
+    const cls = eq.cls!;
+    let environment = traceEnvironments.get(cls);
+    if (!environment) {
+      environment = traceEnvironment(cls.params, false, defs);
+      traceEnvironments.set(cls, environment);
+    }
+    const key = eq.text + '\n' + environment(constEnv, 0).stableEnv;
+    const c = eq.orbitCache;
+    if (c?.key === key) return c.pts;
+    if (eq.orbitPending !== key) {
+      eq.orbitPending = key;
+      let orbit: OrbitInput;
+      try {
+        orbit = orbitInput(defs, plot.paths, plot.series, evaluate(plot.from, constEnv), evaluate(plot.to, constEnv), constEnv);
+      } catch (e) {
+        (eq.familyParent ?? eq).error = e instanceof Error ? e.message : String(e);
+        reconcile();
+        return [];
+      }
+      traceQueue.request(eq.id, key, { kind: 'orbit', orbit, residuals: [], dim: plot.dim, lo: [], hi: [], env: {} }, result => {
+        if (!liveRow(eq) || eq.orbitPending !== key) return;
+        eq.orbitPending = undefined;
+        if (result.error) {
+          (eq.familyParent ?? eq).error = result.error;
+          reconcile();
+        } else eq.orbitCache = { key, pts: result.pts };
+        requestRender();
+      });
+    }
+    return c?.pts ?? [];
+  };
 
   /**
    * Solutions of a square system over the box in view, cached until the text,
@@ -892,6 +935,13 @@ function render() {
         case 'psurface':
           scene.psurfaces.push({ ...gpuFor(eq, 'psurface'), color, params, uniforms });
           break;
+        case 'orbit': {
+          let path: number[] = [];
+          const flush = () => { if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color }); path = []; };
+          for (const p of orbitFor(eq)) { if (p.every(Number.isFinite)) path.push(p[0], p[1], p[2] ?? 0); else flush(); }
+          flush();
+          break;
+        }
         case 'trail': {
           scene.curves.push({ pts: new Float32Array(eq.trail!.coordinates(3)), color });
           const p = eq.trail!.head;
@@ -1027,6 +1077,7 @@ function render() {
           });
           break;
         }
+        case 'orbit': extras.polylines.push({ pts: orbitFor(eq).flat(), color: css }); break;
         case 'trail': {
           extras.polylines.push({ pts: eq.trail!.coordinates(2), color: css });
           const p = eq.trail!.head;
@@ -1266,6 +1317,9 @@ function render() {
           } catch { /* not evaluable this frame */ }
           break;
         }
+        case 'orbit':
+          extras.polylines.push({ pts: orbitFor(eq).flat(), color: css });
+          break;
         case 'system':
           // A 3-unknown system forces the 3D view, so only 2D lands here.
           if (plot.dim === 2) {

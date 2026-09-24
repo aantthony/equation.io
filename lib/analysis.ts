@@ -276,6 +276,38 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
 }
 
 /** Resolve/classify with caller-owned runtime; preparation diagnostics stay reusable. */
+/** `value(from..to)`: the orbit of a state (or anything drawn from states),
+ *  one path per run when the value is a family's list. */
+function classifyOrbit(value: Expr, [from, to]: [Expr, Expr], defs: Env, constNames: ReadonlySet<string>): Classified {
+  const moving = new Set([...animatedConstNames(defs), ...defs.states.keys(), 't']);
+  for (const bound of [from, to]) {
+    if (bound.kind === 'vec' || bound.kind === 'list') throw new Error('An orbit runs between two times, like p(0..50).');
+    const v = [...freeVars(bound)].find(n => moving.has(n) || !constNames.has(n));
+    if (v) throw new Error(`An orbit's time range must hold still (found ${v}).`);
+  }
+  const items = value.kind === 'list' ? value.items : [value];
+  const series = items.every(it => it.kind !== 'vec');
+  const paths = items.map(it => {
+    if (it.kind === 'vec') {
+      if (series || (it.items.length !== 2 && it.items.length !== 3)) throw new Error('An orbit draws a 2D or 3D point, or one number against t.');
+      return it.items;
+    }
+    if (it.kind === 'eq' || it.kind === 'ineq' || it.kind === 'data' || it.kind === 'list') throw new Error('An orbit draws a state, like p(0..50).');
+    return [it];
+  });
+  if (!series && new Set(paths.map(p => p.length)).size > 1) throw new Error('All points in an orbit need the same number of coordinates.');
+  const params = new Set<string>();
+  for (const e of [...paths.flat(), from, to]) {
+    for (const n of freeVars(e)) {
+      if (n === 't') continue;
+      if (!constNames.has(n)) throw new Error(`An orbit draws states, constants and t (found ${n}).`);
+      params.add(n);
+    }
+  }
+  const object = { kind: 'orbit', paths, series, from, to } as const;
+  return freezeClassified({ object, animated: false, needs3D: !series && paths[0].length === 3, params: [...params].sort() });
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   const rows = document.rows.map(row => ({ ...row }));
@@ -461,6 +493,13 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         continue;
       }
       const rawParsed = parseExpr(row.text, fnNames, listNames, valueNames);
+      // `p(50..400)`: where p goes over that time — a range in call position,
+      // which nothing else accepts.
+      if (rawParsed.kind === 'bin' && rawParsed.op === '*' && rawParsed.b.kind === 'range') {
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
+        continue;
+      }
       const resolved = resolveRow(rawParsed, getFn, ropts);
       let parsed = resolved.expr;
       // A bare expression in random variables plots that derived density.
