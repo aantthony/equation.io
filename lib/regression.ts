@@ -113,7 +113,7 @@ function leastSquares(columns: number[][], target: number[]): number[] {
   return x.map((v, i) => v / scale[i]);
 }
 
-export function fitRegression(observed: number[], models: Expr[], parameters: string[], fixed: Record<string, number>): FitResult {
+export function fitRegression(observed: number[], models: readonly Expr[], parameters: string[], fixed: Record<string, number>): FitResult {
   if (observed.length !== models.length) throw new Error('Regression lists must have the same length.');
   if (!parameters.length) throw new Error('Regression needs an unbound coefficient, like Y ~ m X + b. Defined constants stay fixed.');
   if (parameters.length > 8) throw new Error('Regression supports at most 8 fitted coefficients.');

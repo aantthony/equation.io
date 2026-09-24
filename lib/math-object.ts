@@ -1,7 +1,8 @@
 /** Mathematical objects contain source expressions, never backend programs.
- * Semantic properties and collections are readonly. Expr payloads retain the
- * shared resolver IR type; freezeClassified snapshots and freezes their trees
- * at runtime. Packed numeric buffers remain zero-copy, read-only by convention.
+ * Semantic properties and collections are readonly, enforced by the type
+ * checker rather than at runtime: objects are shared by reference, never
+ * copied or frozen. Packed numeric buffers are zero-copy, read-only by
+ * convention.
  */
 import type { Expr } from './expr.ts';
 import type { ProbBounds } from './dist.ts';
@@ -111,28 +112,4 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'family': return object.members.some(member => member.needs3D);
     case 'region': case 'scalar-field': case 'color-field': case 'complex-field': case 'sequence': case 'histogram': case 'distribution': case 'value': case 'note': return false;
   }
-}
-
-const snapshots = new WeakSet<object>();
-
-/** Snapshot mathematical trees without freezing caller-owned resolver/Env nodes.
- * A memo preserves DAG sharing; packed buffers are immutable-by-convention leaves
- * and stay zero-copy, so a million-row column still occupies one payload.
- */
-function snapshot<T>(value: T, memo: WeakMap<object, object>): T {
-  if (value === null || typeof value !== 'object' || ArrayBuffer.isView(value)) return value;
-  if (snapshots.has(value)) return value;
-  const existing = memo.get(value);
-  if (existing) return existing as T;
-  const copy: Record<string, unknown> | unknown[] = Array.isArray(value) ? [] : {};
-  memo.set(value, copy);
-  for (const [key, item] of Object.entries(value)) (copy as Record<string, unknown>)[key] = snapshot(item, memo);
-  Object.freeze(copy);
-  snapshots.add(copy);
-  return copy as T;
-}
-
-/** One immutable semantic snapshot, shared safely by CPU and GPU compilation. */
-export function freezeClassified(value: Classified): Classified {
-  return snapshot(value, new WeakMap());
 }

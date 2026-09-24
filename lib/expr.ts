@@ -16,31 +16,34 @@ export type FigureForm = 'polygon' | 'segment' | 'polyline' | 'vector' | 'square
 
 export interface Axis { id: string; n: number }
 
+/** Nodes are immutable. The exception is `axes` and `origin`: list identity
+ *  that list lowering records on the nodes it meets (markOrigins, axesOf),
+ *  never part of the math — exprKey leaves them out. */
 export type Expr = ExprNode & { axes?: readonly Axis[]; origin?: number };
 
 type ExprNode =
-  | { kind: 'num'; value: number }
-  | { kind: 'var'; name: string }
-  | { kind: 'bin'; op: '+' | '-' | '*' | '/' | '^'; a: Expr; b: Expr }
-  | { kind: 'neg'; a: Expr }
-  | { kind: 'call'; name: string; args: Expr[] }
-  | { kind: 'index'; args: [Expr, Expr] }
-  | { kind: 'range'; args: [Expr, Expr] }
-  | { kind: 'eqtest'; op: '==' | '!='; args: [Expr, Expr] }
-  | { kind: 'comp'; value: Expr; index: number; arity: number; functionName: string }
-  | { kind: 'figure'; form: FigureForm; dimension: 2 | 3; vertices: Expr[] }
-  | { kind: 'trail'; coordinates: Expr[] }
-  | { kind: 'hist'; centers: Float64Array; counts: Float64Array; width: number }
-  | { kind: 'family'; members: Expr[] }
-  | { kind: 'eq'; l: Expr; r: Expr }
+  | { readonly kind: 'num'; readonly value: number }
+  | { readonly kind: 'var'; readonly name: string }
+  | { readonly kind: 'bin'; readonly op: '+' | '-' | '*' | '/' | '^'; readonly a: Expr; readonly b: Expr }
+  | { readonly kind: 'neg'; readonly a: Expr }
+  | { readonly kind: 'call'; readonly name: string; readonly args: readonly Expr[] }
+  | { readonly kind: 'index'; readonly args: readonly [Expr, Expr] }
+  | { readonly kind: 'range'; readonly args: readonly [Expr, Expr] }
+  | { readonly kind: 'eqtest'; readonly op: '==' | '!='; readonly args: readonly [Expr, Expr] }
+  | { readonly kind: 'comp'; readonly value: Expr; readonly index: number; readonly arity: number; readonly functionName: string }
+  | { readonly kind: 'figure'; readonly form: FigureForm; readonly dimension: 2 | 3; readonly vertices: readonly Expr[] }
+  | { readonly kind: 'trail'; readonly coordinates: readonly Expr[] }
+  | { readonly kind: 'hist'; readonly centers: Float64Array; readonly counts: Float64Array; readonly width: number }
+  | { readonly kind: 'family'; readonly members: readonly Expr[] }
+  | { readonly kind: 'eq'; readonly l: Expr; readonly r: Expr }
   /** An inequality; chains like 0 < y < x nest left: ((0 < y) < x). */
-  | { kind: 'ineq'; op: IneqOp; l: Expr; r: Expr }
+  | { readonly kind: 'ineq'; readonly op: IneqOp; readonly l: Expr; readonly r: Expr }
   /** A vector literal like (2, 3) or (cos(u), sin(u), v): the whole
    *  statement, an equation side, or an operand ((A + (1, 2))/2 — lowerGeom
    *  expands 2-item operands; 3-item vectors stay top-level values). */
-  | { kind: 'vec'; items: Expr[] }
+  | { readonly kind: 'vec'; readonly items: readonly Expr[] }
   /** A data list [1, 4, 2] or [(1,2), (3,4)]. Plottable as its own row only. */
-  | { kind: 'list'; items: Expr[] }
+  | { readonly kind: 'list'; readonly items: readonly Expr[] }
   /**
    * A list of numbers held as a typed array — a CSV column, or anything
    * constant derived from one. Semantically a `list` of num nodes; the point
@@ -48,17 +51,17 @@ type ExprNode =
    * lowering makes or reads one, and like `list` it never survives lowering:
    * GLSL, diff, and the integrator never see it.
    */
-  | { kind: 'data'; values: Float64Array }
+  | { readonly kind: 'data'; readonly values: Float64Array }
   /**
    * A text literal, `"NYC"`. Text is not a value the plane can draw: it
    * exists so a filter can compare a text column against it, and every
    * numeric context refuses it.
    */
-  | { kind: 'str'; value: string }
+  | { readonly kind: 'str'; readonly value: string }
   /** A text column, the counterpart of `data`. Same rule: only comparisons. */
-  | { kind: 'text'; values: readonly string[] }
+  | { readonly kind: 'text'; readonly values: readonly string[] }
   /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
-  | { kind: 'piecewise'; cases: Array<{ cond: Expr; value: Expr }>; otherwise?: Expr }
+  | { readonly kind: 'piecewise'; readonly cases: ReadonlyArray<{ readonly cond: Expr; readonly value: Expr }>; readonly otherwise?: Expr }
   /**
    * A tail-recursive function call run as a bounded loop: `params` start at
    * `seeds`; each pass evaluates `body`, a piecewise whose leaves either give
@@ -68,7 +71,7 @@ type ExprNode =
    * once `limit` passes run out, a param leaves the finite range, or no
    * case holds and there is no default.
    */
-  | { kind: 'loop'; params: string[]; seeds: Expr[]; body: Expr; limit: number };
+  | { readonly kind: 'loop'; readonly params: readonly string[]; readonly seeds: readonly Expr[]; readonly body: Expr; readonly limit: number };
 
 /** The self-call inside a `loop` body: its args are the next pass's params. */
 export const RECUR = '@recur';
@@ -86,7 +89,7 @@ export const isRecur = (e: Expr): e is Expr & { kind: 'call' } => e.kind === 'ca
 
 /** Historical tuple-call spelling, applied before resolving argument values.
  * Only syntax vectors flatten: a named or computed vector is never splatted. */
-export function legacyCallArgs(name: string, args: Expr[]): Expr[] {
+export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Expr[] {
   const grouped = new Set(['segment', 'polyline', 'polygon', 'hull', 'vector', 'line', 'circle', 'square', 'distance', 'angle', 'dot', 'cross', 'midpoint', 'perp', 'unit', 'rotate']);
   return grouped.has(name) ? args : args.flatMap(x => x.kind === 'vec' ? x.items : [x]);
 }

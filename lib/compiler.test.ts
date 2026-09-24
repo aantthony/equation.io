@@ -38,20 +38,10 @@ describe('semantic classification and independent backends', () => {
       expect(compileCpu(classified).type).toBe(kind);
       compileGpu(classified);
       expect(JSON.stringify(object)).toBe(before);
-      expect(Object.isFrozen(object)).toBe(true);
-      expect('source' in object && Object.isFrozen(object.source)).toBe(true);
     }
     const point = compileCpu(classify(parseExpr('1+2i')));
     if (point.type !== 'point') throw new Error('point');
     expect(point.coords.map(e => evaluate(e, {}))).toEqual([1, 2]);
-    const original = parseExpr('(1,2)');
-    const frozen = classify(original);
-    if (frozen.object.kind !== 'point' || frozen.object.source.representation !== 'real') throw new Error('point source');
-    const first = frozen.object.source.coordinates[0];
-    expect(() => { if (first.kind === 'num') first.value = 99; }).toThrow();
-    expect(Object.isFrozen(original)).toBe(false);
-    if (original.kind === 'vec' && original.items[0].kind === 'num') original.items[0].value = 42;
-    expect(evaluate(first, {})).toBe(1);
     const system = compileCpu(classify(parseExpr('w^2=1')));
     if (system.type !== 'system') throw new Error('system');
     for (const x of [-1, 1]) for (const residual of system.residuals) expect(evaluate(residual, { x, y: 0 })).toBeCloseTo(0);
@@ -83,7 +73,6 @@ describe('semantic classification and independent backends', () => {
     const levels = classify(parseExpr('a*x+y=c'), new Set(['a', 'c'])).object;
     if (levels.kind !== 'curve' || levels.form !== 'implicit') throw new Error('levels');
     expect(levels.levels).toMatchObject({ level: 'c', params: ['a'] });
-    expect(Object.isFrozen(levels.levels)).toBe(true);
   });
 
   it('preserves CPU aliases and shader identity across slider values', () => {
@@ -107,8 +96,6 @@ describe('semantic classification and independent backends', () => {
     expect(shaderKey(gpu.members[0])).toBe(shaderKey(gpu.members[1]));
     expect(gpu.members[0].uniforms).not.toEqual(gpu.members[1].uniforms);
     expect(row.cls!.params).not.toContain('eqioFamilyIndex');
-    expect(Object.isFrozen(row.cls!.object)).toBe(true);
-    expect(row.cls!.object.kind === 'family' && Object.isFrozen(row.cls!.object.members)).toBe(true);
   });
 
   it('keeps packed storage zero-copy and excludes list identity from structure keys', () => {

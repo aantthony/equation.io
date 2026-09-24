@@ -1709,7 +1709,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // and `segment((0, 0), om)` both work.
   const vecOwnerKey = new Map<string, string>();
   /** Starting values per run of a state family, by owner and component. */
-  const familyInits = new Map<string, Expr[][]>();
+  const familyInits = new Map<string, (readonly Expr[])[]>();
   /** A family run's hidden scalar state → the row that defines it. */
   const familyOwner = new Map<string, string>();
   {

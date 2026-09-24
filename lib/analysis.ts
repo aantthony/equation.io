@@ -1,5 +1,4 @@
 /** Shared document preparation and runtime-aware mathematical analysis. */
-import { freezeClassified } from './math-object.ts';
 import { compileCpu, compileGpu, type CpuPlan, type GpuPlan } from './compiler.ts';
 import type { LevelSetSpec } from './math-object.ts';
 import { type Env, evaluateFrame, nameTaken } from './env.ts';
@@ -305,7 +304,7 @@ function classifyOrbit(value: Expr, [from, to]: [Expr, Expr], defs: Env, constNa
     }
   }
   const object = { kind: 'orbit', paths, series, from, to } as const;
-  return freezeClassified({ object, animated: false, needs3D: !series && paths[0].length === 3, params: [...params].sort() });
+  return { object, animated: false, needs3D: !series && paths[0].length === 3, params: [...params].sort() };
 }
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
@@ -434,12 +433,12 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           }
         } else {
           const ps = rvs.bodyParams(p.body);
-          row.cls = freezeClassified({
+          row.cls = {
             object: { kind: 'distribution', form: 'prob', body: p.body, shade: single },
             animated: ps.has('t'),
             needs3D: false,
             params: [...ps].filter(v => v !== 't'),
-          });
+          };
           if (readouts) try {
             // A uniform-sum law still gets its exact value, and an event over
             // discrete variables is enumerated (mirror of the app's readout);
@@ -471,12 +470,12 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           rvs.addAnonymous({ name, kind: 'derived', expr: ex.body });
         }
         const ps = rvs.bodyParams(ex.body);
-        row.cls = freezeClassified({
+        row.cls = {
           object: { kind: 'distribution', form: 'expect', rv: name },
           animated: ps.has('t'),
           needs3D: false,
           params: [...ps].filter(p => p !== 't'),
-        });
+        };
         if (readouts) try {
           // Closed form and quadrature both earn full display precision;
           // only the Monte Carlo fallback rounds to its noise floor.
