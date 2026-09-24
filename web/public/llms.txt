@@ -148,7 +148,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   after it in the product chain as the body (`2 sum[n=1..N] ...` keeps the 2
   outside). Bounds must be numbers or constants defined in another row (not
   `t`), because the sum is expanded symbolically before compiling — which makes
-  `N` a slider that adds terms as you drag it.
+  `N` a slider that adds terms as you drag it. A bound may also be a named
+  list of numbers: with `N = [3..5]`, `sum(n=1..N, sin(n x)/n)` draws one
+  partial sum per element (a family that pairs with other uses of `N`).
 - Integrals: `int[a..b] f(x) dx` (definite) and `int(f(x) dx)`
   (antiderivative), also written `∫`. The trailing `dx` names the variable;
   any letter works, so `y = int[0..x] exp(-t^2) dt` plots a function of x,

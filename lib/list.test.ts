@@ -25,7 +25,7 @@ function lowerRow(text: string, defRows: string[] = []): Expr {
   const getFn = (n: string) => defs.fns.get(n);
   const listNames = listNamesOf(defs);
   let e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), getFn,
-    { consts, isList: n => listNames.has(n) });
+    { consts, isList: n => listNames.has(n), getList: listGetter(defs) });
   e = lowerGeom(e, () => null, n => defs.mats.get(n) ?? null);
   return lowerLists(e, listGetter(defs), { consts });
 }
@@ -132,6 +132,40 @@ describe('named lists', () => {
   it('accepts range definitions', () => {
     const { defs } = defsOf(['L = [1..3]']);
     expect(items(defs.lists.get('L')!).map(e => evaluate(e, {}))).toEqual([1, 2, 3]);
+  });
+});
+
+describe('Σ over a list bound', () => {
+  it('expands once per element', () => {
+    const e = lowerRow('sum(n=1..N, n x)', ['N = [3..5]']);
+    expect(values(e, { x: 2 })).toEqual([12, 20, 30]);
+  });
+  it('reads the bound list as its element inside the body', () => {
+    expect(values(lowerRow('sum(n=1..N, N)', ['N = [2, 3]']))).toEqual([4, 9]);
+  });
+  it('zips with other uses of the same list', () => {
+    expect(values(lowerRow('N + prod(n=1..N, n)', ['N = [3..5]']))).toEqual([9, 28, 125]);
+  });
+  it('broadcasts a coefficient over the sums', () => {
+    expect(values(lowerRow('2 sum[n=1..N] n', ['N = [1, 2]']))).toEqual([2, 6]);
+  });
+  it('resolves in definitions too', () => {
+    const { defs, errors } = defsOf(['N = [1, 3]', 'S = sum(n=1..N, n)']);
+    expect(errors.size).toBe(0);
+    expect(items(defs.lists.get('S')!).map(e => evaluate(e, {}))).toEqual([1, 6]);
+  });
+  it('refuses a second list in the body', () => {
+    const { errors } = defsOf(['N = [1, 2]', 'M = [3, 4]', 'S = sum(n=1..N, M n)', 'T = sum(n=1..N, [3, 4] n)']);
+    expect(errors.get('S')).toMatch(/cannot also use M/);
+    expect(errors.get('T')).toMatch(/cannot also use a list literal/);
+  });
+  it('names the list when the expansions run past the term budget', () => {
+    const { errors } = defsOf(['N = [400, 450, 500, 499, 498]', 'S = sum(n=1..N, n)']);
+    expect(errors.get('S')).toMatch(/over the list N expands/);
+  });
+  it('refuses two lists in the bounds', () => {
+    const { errors } = defsOf(['A = [1, 2]', 'B = [3, 4]', 'S = sum(n=A..B, n)']);
+    expect(errors.get('S')).toMatch(/one list at a time/);
   });
 });
 
