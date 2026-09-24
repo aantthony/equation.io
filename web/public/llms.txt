@@ -109,7 +109,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 ## Expression syntax
 
 - Operators: `+ - * / ^`, parentheses, unary minus. Multiplication is
-  implicit: `2x`, `x y`, `2cos(t)`, `a(x-1)` all work.
+  implicit: `2x`, `x y`, `2cos(t)`, `a(x-1)` all work. `·` and `×` multiply
+  numbers too, and between two vectors are the dot and cross product (see
+  Vector calculus).
 - Absolute value bars: `|x|`, including nested/multiplied forms like `2|x-1|`.
 - Unicode: Greek letters are ordinary names (`θ = 1` makes a θ slider; `Δx`
   is a name like `dx`), superscript digits are exponents (`x³` is `x^3`,
@@ -128,7 +130,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Functions: sin cos tan asin acos atan atan2(y,x) sinh cosh tanh sech coth
   asinh acosh atanh sqrt abs exp ln (natural) log (base 10) floor ceil round
   min max mod sign fract sinc gamma factorial, complex helpers re im arg conj,
-  and point helpers dot cross perp midpoint unit. Function names are
+  and point helpers dot cross perp midpoint unit. Also `erf(x)`,
+  `normalpdf(x, mean, sd)` and `normalcdf(x, mean, sd)`; `gcd(a, b)`, the
+  greatest common divisor of whole numbers (other arguments round to the
+  nearest one), so `1/gcd(floor(x), floor(y))` is 1 on the coprime cells of
+  the grid; and `isprime(n)`, 1 for a prime and 0 otherwise
+  (`a_n = isprime(n)`), which gives no value past 2048² − 1 rather than
+  guess. Vector calculus has `grad`, `div`, `curl` and `laplacian` (below).
+  Function names are
   case-insensitive: `Sin(x)`, `SQRT(x)` and `sin(x)` are the same call. Always
   use parentheses for arguments — write `sin(x)`, not `sin x`.
 - Factorial: postfix `!` — `5!` is 120, `x!` plots as Γ(x+1), `2^3!` is 2^6.
@@ -143,6 +152,29 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A bare condition is a case worth 1, as in Desmos: `{x > 0, 5}` is
   `{x > 0: 1, 5}`. Values may be complex (`{x > 0: w, conj(w)}`); the
   conditions themselves compare real values (`re(w) > 0`, `|w| < 1`).
+- Vector calculus: four operators, expanded symbolically like d/dx, so
+  sliders and t work inside them.
+  - `grad(f)` is the tuple (∂f/∂x, ∂f/∂y), plus ∂f/∂z when f uses z:
+    `grad(x^2 - y^2)` plots as a vector field.
+  - `div(F)` is ∂F₁/∂x + ∂F₂/∂y (+ ∂F₃/∂z), a scalar field:
+    `div((x y, y^2))`.
+  - `curl(F)` of a 3D field is a vector field: `curl((y z, -x z, 0))`. Of a
+    plane field it is the scalar ∂F₂/∂x − ∂F₁/∂y: `curl((-y, x))` is 2.
+  - `laplacian(f)` is div(grad(f)), for a scalar f: `laplacian(x^2 + y^2)`
+    is 4.
+  - With ∇ (in the editor, type `\nabla`): `∇f` is grad(f), `∇·F` is div(F),
+    `∇×F` is curl(F), and `∇²f` (or `∇^2 f`) is laplacian(f). ∇ takes the
+    rest of the product, as d/dx does: `∇ x^2 y` and `∇f(x, y)`.
+  - Names work as arguments. With `f(x, y) = x^2 - y^2`, `grad(f)` and `∇f`
+    mean grad(f(x, y)). With a field `r = sqrt(x^2 + y^2)`, `grad(1/r)`
+    differentiates through r (so does `d/dx r`). With a named vector
+    `F = (-y, x)`, `curl(F)` and `∇×F` work.
+  - The Laplacian of a vector field is not supported. grad of a vector and
+    div or curl of a scalar are errors.
+  - Between two vectors, `A · B` (also `⋅`) is dot(A, B) and `A × B` is
+    cross(A, B). `*` between vectors is an error, since it could mean either.
+    `·` binds like `*`, so `∇f · (1, 1)/sqrt(2)` is a directional
+    derivative.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   Along x, y, or z it works through lists too: with `N = [1..4]`,
@@ -428,6 +460,16 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Decided comparisons: `2+2=4` reads “Always true (4 = 4)”; `e=2` reads
   “Never true (2.71828 ≠ 2)”. Comparisons involving sliders/time say
   “True now” or “False now”. They draw no degenerate implicit curve.
+- Identities: an equation in x, y, z and t whose two sides agree everywhere
+  reads “Holds everywhere (checked numerically)” instead of drawing a curve.
+  The check compares both sides at many random points, for any slider
+  values, so it is evidence, not a proof. `sin(x)^2 + cos(x)^2 = 1` holds;
+  `sin(x)^2 + cos(x)^2 = 1.0001` does not, and stays an (empty) implicit
+  curve. The wave equation for d'Alembert's solution:
+  `c = 1; g(s) = exp(-s^2); f(x, t) = (g(x - c t) + g(x + c t))/2;
+  y = f(x, t); d^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)`. The pulse splits in two
+  and the last row holds everywhere. (u and w are the parametric and
+  complex variables, so they cannot name the solution.)
 - Vector field: a 2-tuple in x, y — `(-y, x)` — drawn as animated streamlines
   (line-integral convolution); clicking the canvas traces integral curves.
   A 3-tuple in x/y/z, or `(x',y',z') = (10(y-x), x(28-z)-y, x y-8z/3)`,
@@ -451,6 +493,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   components make a 3D curve — `(2cos(6pi u), 2sin(6pi u), 4u - 2)`.
   A plane curve lifts the pen where it jumps (a step, a pole, a branch cut)
   rather than bridging the gap: `(u, floor(3u))`, `(4u - 2, tan(12u - 6))`.
+- Tube: `tube((x(u), y(u), z(u)))` sweeps a 3D parametric curve into a lit
+  solid tube — `tube((sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u),
+  -sin(6pi u)))` is a trefoil knot. An optional last argument sets the radius
+  (default 0.1): `tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)`. It
+  must be the whole row; without it a 3D curve stays a thin line. The curve
+  needs exactly three components: `tube((a, b), r)` does not tube a plane
+  curve, it reads as the 3D curve (a, b, r).
 - Parametric surface: three components in u and v —
   `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`.
 - 3D surface: any equation in x, y, z.

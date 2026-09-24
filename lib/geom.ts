@@ -316,7 +316,11 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
           }
           throw new Error(`Cannot ${e.op === '+' ? 'add' : 'subtract'} a point and a number.`);
         case '*':
-          if (a.vec && b.vec) throw new Error('Use dot(A, B) or cross(A, B) to multiply points.');
+          if (a.vec && b.vec) {
+            // A · B and A × B, as written; a plain * between points has no one meaning.
+            if (e.glyph) return lower({ kind: 'call', name: e.glyph, args: [e.a, e.b] }, getComps, getMat, isList);
+            throw new Error('Use A · B or A × B (or dot(A, B), cross(A, B)) to multiply points.');
+          }
           if (a.vec && !b.vec) return vc(...a.items.map(ai => mul(ai, (b as LV & { vec: false }).e)));
           if (!a.vec && b.vec) return vc(...b.items.map(bi => mul((a as LV & { vec: false }).e, bi)));
           break;

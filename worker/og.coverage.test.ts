@@ -136,9 +136,9 @@ describe('previewGap', () => {
       expect(gap([...chart, row])).toContain('z = f(x, y)');
       expect(canRenderOg([...chart, row])).toBe(false);
     }
-    // `z = rho cos(phi)` has z on both sides once the fields substitute in:
+    // `z = 2 rho cos(phi)` has z on both sides once the fields substitute in:
     // an implicit surface, not the heightmap its left side suggests.
-    expect(gap([...chart, 'z = rho cos(phi)'])).toContain('z = f(x, y)');
+    expect(gap([...chart, 'z = 2 rho cos(phi)'])).toContain('z = f(x, y)');
     expect(gap(['z = z^2 + x'])).toContain('z = f(x, y)');
     expect(canRenderOg([...chart, '(rho, theta, phi) = (2, pi/4, pi/3)'])).toBe(true);
     expect(canRenderOg([...chart, '(rho, theta, phi) = (2, 6 pi u, pi u)'])).toBe(true);

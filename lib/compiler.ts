@@ -48,7 +48,7 @@ export type CpuPlan =
   | { type: 'expect'; rv: string }
   | { type: 'prob'; body: Expr; shade?: { rv: string } & ProbBounds }
   | { type: 'value'; expr: Expr; shade?: IntShade }
-  | { type: 'note'; expr: Expr; variable: boolean; constant?: string };
+  | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true };
 
 export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & (
   | { type: 'none' }
@@ -159,7 +159,7 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'histogram': return { type: 'histogram', centers: object.centers, counts: object.counts, width: object.width };
     case 'distribution': return object.form === 'prob' ? { type: 'prob', body: object.body, shade: object.shade } : { type: object.form, rv: object.rv };
     case 'value': return { type: 'value', expr: real(object.expr), shade: object.shade };
-    case 'note': return { type: 'note', expr: object.expr, variable: object.variable, constant: object.constant };
+    case 'note': return { type: 'note', expr: object.expr, variable: object.variable, constant: object.constant, ...(object.identity && { identity: true as const }) };
     case 'family': return { type: 'family', members: object.members.map(cls => ({ cls, cpu: compileCpu(cls) })) };
   }
 }

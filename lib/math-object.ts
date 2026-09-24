@@ -60,8 +60,9 @@ export type MathObject =
   | { readonly kind: 'distribution'; readonly form: 'prob'; readonly body: Expr; readonly shade?: Readonly<{ rv: string } & ProbBounds> }
   | { readonly kind: 'value'; readonly expr: Expr; readonly shade?: Readonly<IntShade> }
   // `constant`: the row reads like a slider named e, pi or tau (see
-  // takenDefinitionName), which the readout explains.
-  | { readonly kind: 'note'; readonly expr: Expr; readonly variable: boolean; readonly constant?: string }
+  // takenDefinitionName), which the readout explains. `identity`: an equation
+  // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
+  | { readonly kind: 'note'; readonly expr: Expr; readonly variable: boolean; readonly constant?: string; readonly identity?: true }
   | { readonly kind: 'family'; readonly members: readonly Classified[]; readonly shared?: { readonly classified: Classified; readonly index: string } };
 
 export interface Classified {

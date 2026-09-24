@@ -263,6 +263,10 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
     isList: (n: string) => isListName(listNames, n),
     getList,
     indexIssue: (idx: Expr) => indexIssue(idx, defs),
+    // A state stands for itself: defined, and constant across space.
+    definition: (n: string): Expr | undefined => defs.fields.get(n) ?? defs.consts.get(n)
+      ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
+    comps: (n: string) => compsOf(defs, n),
   };
   ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
 
