@@ -882,7 +882,7 @@ function stripDx(body: Expr): StripDx | null {
 /** substVars for a Σ/Π index, stopping at nested Σ/Π that rebind the same name. */
 export function substIdx(e: Expr, idx: string, val: Expr): Expr {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substIdx(x, idx, val));
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return mapChildren(e, x => substIdx(x, idx, val));
     case 'num': return e;
     case 'var': return e.name === idx ? val : e;
     case 'neg': return { kind: 'neg', a: substIdx(e.a, idx, val) };
@@ -950,7 +950,7 @@ const FOLD_BUILD = { '+': add, '-': sub, '*': mul, '/': div, '^': pow } as const
 export function foldNums(e: Expr, calls = false): Expr {
   const fold = (x: Expr) => foldNums(x, calls);
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, fold);
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return mapChildren(e, fold);
     case 'num':
     case 'var':
       return e;
@@ -1201,7 +1201,7 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
  *  resolution the integral is gone, so row readouts test the parse. */
 export function usesIntegral(e: Expr): boolean {
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return childrenOf(e).some(usesIntegral);
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return childrenOf(e).some(usesIntegral);
     case 'num': return false;
     case 'var': return e.name === 'int';
     case 'neg': return usesIntegral(e.a);
@@ -1290,7 +1290,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
       return mapChildren(e, x => rx(x, ctx));
     }
     case 'range': throw new Error(structuralDiagnostic(e));
-    case 'comp': case 'eqtest': case 'figure': case 'trail': case 'hist': case 'family': return mapChildren(e, x => rx(x, ctx));
+    case 'comp': case 'eqtest': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return mapChildren(e, x => rx(x, ctx));
     case 'call': {
       if (e.name === 'sum' || e.name === 'prod') {
         if (e.args.length !== 4) {

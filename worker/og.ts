@@ -15,6 +15,7 @@ import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { hullFaces } from '../lib/hull.ts';
+import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
@@ -219,6 +220,10 @@ function makeEnv(constEnv: Record<string, number>): EvalEnv {
   for (const [name, value] of Object.entries(constEnv)) vars[slots.get(name)!] = value;
   return { slots, vars, stack: new Float64Array(64), slotX: 0, slotY: 1 };
 }
+
+/** The constants env binds, by name. */
+const envValues = (env: EvalEnv): Record<string, number> =>
+  Object.fromEntries([...env.slots].map(([name, slot]) => [name, env.vars[slot]]));
 
 /** Compile against env, growing the shared stack to the program's depth. */
 function compileFor(env: EvalEnv, e: Expr): Prog {
@@ -525,7 +530,7 @@ function renderRow2D(
     case 'polygon': {
       // Flat scalar vertex list [x0, y0, x1, y1, …], constant by
       // classification; like the app, a single non-finite vertex drops the row.
-      const given = cpu.pts.map(p => run(compile(p), env.vars, env.stack));
+      const given = vertexSampler(cpu.pts, cpu.over)(envValues(env));
       if (given.length < 4 || !given.every(Number.isFinite)) return;
       const vals = cpu.hull ? hullFaces(given, 2)[0].outline.flatMap(p => [p[0], p[1]]) : given;
       const sx: number[] = [], sy: number[] = [];
@@ -610,7 +615,7 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
     }
     case 'polygon': {
       const p = cpu, dim = p.dim ?? 2;
-      const vals = p.pts.map(e => run(compile(e), env.vars, env.stack));
+      const vals = vertexSampler(p.pts, p.over)(envValues(env));
       if (!vals.every(Number.isFinite)) return;
       if (p.hull) {
         // A convex solid needs no depth sort: the faces turned toward the

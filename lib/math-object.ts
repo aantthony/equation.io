@@ -4,7 +4,7 @@
  * copied or frozen. Packed numeric buffers are zero-copy, read-only by
  * convention.
  */
-import type { Expr } from './expr.ts';
+import type { Column, Expr } from './expr.ts';
 import type { ProbBounds } from './dist.ts';
 import type { IntShade } from './intshade.ts';
 
@@ -42,7 +42,8 @@ export type MathObject =
    *  one path per run, each a point's coordinates or, for a series, the one
    *  value drawn against t. */
   | { readonly kind: 'orbit'; readonly paths: readonly (readonly Expr[])[]; readonly series: boolean; readonly from: Expr; readonly to: Expr }
-  | { readonly kind: 'figure'; readonly form: 'segment' | 'polyline' | 'vector' | 'polygon' | 'square' | 'hull'; readonly dimension: 2 | 3; readonly vertices: readonly Expr[] }
+  /** `vertices` flat, or with `over` one vertex template run over the columns. */
+  | { readonly kind: 'figure'; readonly form: 'segment' | 'polyline' | 'vector' | 'polygon' | 'square' | 'hull'; readonly dimension: 2 | 3; readonly vertices: readonly Expr[]; readonly over?: readonly Column[] }
   | { readonly kind: 'system'; readonly source: SystemSource; readonly parametric?: boolean; readonly angular?: readonly boolean[]; readonly coordinates?: readonly Expr[] }
   | { readonly kind: 'sequence'; readonly form: 'explicit'; readonly term: Expr; readonly index: string }
   | { readonly kind: 'sequence'; readonly form: 'cobweb'; readonly expr: Expr; readonly variable: string; readonly seedName?: string }

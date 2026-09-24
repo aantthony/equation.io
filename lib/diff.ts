@@ -100,7 +100,7 @@ export function diff(e: Expr, v: string): Expr {
         try { dv = diff(value, v); } catch { throw new NonSmoothError('Cannot differentiate this point.'); }
         return isNumVal(dv, 0) ? ZERO : { ...e, value: dv };
       }
-    case 'index': case 'range': case 'eqtest': case 'figure': case 'trail': case 'hist': case 'family': throw new NonSmoothError(structuralDiagnostic(e));
+    case 'index': case 'range': case 'eqtest': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': throw new NonSmoothError(structuralDiagnostic(e));
     case 'call': {
       if (e.name === 'atan2' || e.name === 'atan' && e.args.length === 2) {
         const [y, x] = e.args;

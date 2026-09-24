@@ -27,17 +27,25 @@ import { childrenOf, mapChildren, structuralDiagnostic } from './expr.ts';
  * comparison) takes the symbolic path, where every element is its own
  * expression and ITEMS_MAX bounds the damage. `expand` converts the first
  * into the second whenever the fast path cannot carry an operation.
+ *
+ * Between the two sits `lazy`: an operation over packed numbers that the fast
+ * path cannot fold, only because a slider or t is involved (`sin(a L)`),
+ * keeps ONE template over the packed columns instead of a copy of it per
+ * element. Operations that need elements as nodes — a filter, a reduction, a
+ * comparison — `expand` it into the symbolic form; so does the end of
+ * lowering, unless the caller can use the template as it is (a connected
+ * figure through thousands of computed points).
  */
 import { add, div } from './diff.ts';
 import type { ResolveOpts } from './defs.ts';
-import { EVAL_FNS, type Axis, exprReplacer, type Expr, compArity, compDims, evaluate, originOf, freeVars, ineqComparisons, plainFnName, realPow } from './expr.ts';
+import { EVAL_FNS, type Axis, type Column, exprReplacer, type Expr, compArity, compDims, evaluate, originOf, freeVars, ineqComparisons, plainFnName, realPow, substVars } from './expr.ts';
 
 /**
  * A list of values, in whichever representation it has: one expression per
  * element, a typed array of numbers, or a column of text. They are
  * interchangeable as values — the difference is only what they cost.
  */
-export type Seq = Expr & { kind: 'list' | 'data' | 'text' };
+export type Seq = Expr & { kind: 'list' | 'data' | 'text' | 'lazy' };
 
 /** A named list's elements: a `list` node (symbolic) or a `data` node. */
 export type GetList = (name: string) => Expr | null;
@@ -81,6 +89,9 @@ interface Ctx {
   hists: number;
   /** Point lists `[comp]` nodes pick from, lowered once however many ask. */
   comps: WeakMap<Expr, Expr>;
+  /** Columns templates have named so far: names count up per lowering, so
+   *  the same row lowers to the same template every time. */
+  columns: number;
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -88,8 +99,10 @@ const num = (value: number): Expr => ({ kind: 'num', value });
 const isList = (e: Expr): e is Expr & { kind: 'list' } => e.kind === 'list';
 const isData = (e: Expr): e is Expr & { kind: 'data' } => e.kind === 'data';
 const isText = (e: Expr): e is Expr & { kind: 'text' } => e.kind === 'text';
-/** Any representation of a list of values: expressions, numbers, or text. */
-export const isSeq = (e: Expr): e is Seq => isList(e) || isData(e) || isText(e);
+export const isLazy = (e: Expr): e is Expr & { kind: 'lazy' } => e.kind === 'lazy';
+/** Any representation of a list of values: expressions, numbers, text, or a
+ *  template over numbers. */
+export const isSeq = (e: Expr): e is Seq => isList(e) || isData(e) || isText(e) || isLazy(e);
 /**
  * A scatter of whole columns — `(person.age, person.height)` — kept as one
  * `vec` of typed arrays rather than one point per row, which is how classify
@@ -99,7 +112,7 @@ export const isSeq = (e: Expr): e is Seq => isList(e) || isData(e) || isText(e);
 export const isDataScatter = (e: Expr): boolean =>
   e.kind === 'vec' && e.items.some(isData) && e.items.every(it => isData(it) || it.kind === 'num');
 export const seqLength = (e: Seq): number =>
-  (e.kind === 'list' ? e.items.length : e.values.length);
+  (e.kind === 'list' ? e.items.length : e.kind === 'lazy' ? e.cols[0].values.length : e.values.length);
 const isRange = (e: Expr): e is Expr & { kind: 'range' } =>
   e.kind === 'range';
 
@@ -177,7 +190,8 @@ function align(parts: Expr[]): { parts: Expr[]; axes: readonly Axis[] | null } {
     }
     const spread: Expr = isData(p) ? { kind: 'data', values: Float64Array.from(index, i => p.values[i]) }
       : isText(p) ? { kind: 'text', values: Array.from(index, i => p.values[i]) }
-        : { kind: 'list', items: Array.from(index, i => p.items[i]) };
+        : isLazy(p) ? { kind: 'lazy', body: p.body, cols: p.cols.map(c => ({ name: c.name, values: Float64Array.from(index, i => c.values[i]) })) }
+          : { kind: 'list', items: Array.from(index, i => p.items[i]) };
     return withAxes(spread, union);
   });
   return { parts: out, axes: union };
@@ -205,11 +219,12 @@ function dataOf(values: Float64Array, ctx: Ctx): Expr {
  * uniform, or a comparison. This is where a big column meets ITEMS_MAX.
  */
 function expand(e: Expr, ctx: Ctx): Expr {
-  if (!isData(e) && !isText(e)) return e;
+  if (!isData(e) && !isText(e) && !isLazy(e)) return e;
   const n = seqLength(e);
   if (n > ITEMS_MAX) {
     throw new Error(`That is ${n} values; only ${ITEMS_MAX} can be combined with sliders, t, or comparisons.`);
   }
+  if (isLazy(e)) return withAxes({ kind: 'list', items: instances(e) }, axesOf(e));
   // Bounded by the check above, and NOT charged against the row's budget:
   // whatever consumes this list charges for the list it builds, and counting
   // both halved the usable size of the one operation the docs quote
@@ -220,6 +235,83 @@ function expand(e: Expr, ctx: Ctx): Expr {
       ? e.values.map((value): Expr => ({ kind: 'str', value }))
       : [...e.values].map(num),
   }, axesOf(e));
+}
+
+/** A lazy list's elements, one tree each: the template per instance. */
+function instances(e: Expr & { kind: 'lazy' }): Expr[] {
+  const n = seqLength(e);
+  const items: Expr[] = new Array(n);
+  for (let k = 0; k < n; k++) {
+    const env: Record<string, Expr> = {};
+    for (const c of e.cols) env[c.name] = num(c.values[k]);
+    items[k] = substVars(e.body, env);
+  }
+  return items;
+}
+
+/** A list's values as numbers, when that is all it holds. */
+const numbersOf = (p: Seq): Float64Array | null =>
+  isData(p) ? p.values
+    : isList(p) && p.items.every(it => it.kind === 'num') ? Float64Array.from(p.items, it => (it as Expr & { kind: 'num' }).value)
+      : null;
+
+/**
+ * Combine operands elementwise as ONE template over their packed columns, when
+ * every list among them is numbers or already a template — the symbolic path
+ * with its per-element copies left out. Null when a list holds anything else
+ * (text, points, per-element expressions): zipN's checks and representation
+ * apply there as they always have.
+ */
+function lazyMap(raw: Expr[], build: (comps: Expr[]) => Expr, ctx: Ctx): Expr | null {
+  const packed: Expr[] = [];
+  let listy = false;
+  for (const p of raw) {
+    // Text only ever compares: zipN refuses it in arithmetic, in its words.
+    if (p.kind === 'str') return null;
+    if (!isSeq(p)) { packed.push(p); continue; }
+    listy = true;
+    if (isLazy(p)) {
+      // Arithmetic over a list of points is zipN's to refuse, in its words.
+      if (p.body.kind === 'vec') return null;
+      packed.push(p);
+      continue;
+    }
+    const values = numbersOf(p);
+    if (!values) return null;
+    packed.push(isData(p) ? p : withAxes({ kind: 'data', values }, axesOf(p)));
+  }
+  if (!listy) return null;
+  // A template still becomes one expression per element wherever it is
+  // settled, so it may only span what the symbolic path could: past that,
+  // zipN's own limit says so.
+  const union = new Map<string, number>();
+  for (const p of packed) if (isSeq(p)) for (const a of axesOf(p)) union.set(a.id, a.n);
+  if ([...union.values()].reduce((size, n) => size * n, 1) > ITEMS_MAX) return null;
+  const { parts, axes } = align(packed);
+  const cols: Column[] = [];
+  const comps = parts.map(p => {
+    if (isLazy(p)) {
+      for (const c of p.cols) if (!cols.some(have => have.name === c.name)) cols.push(c);
+      return p.body;
+    }
+    if (!isData(p)) return p;
+    const name = `@col${++ctx.columns}`;
+    cols.push({ name, values: p.values });
+    return { kind: 'var', name } as Expr;
+  });
+  return withAxes({ kind: 'lazy', cols, body: build(comps) }, axes);
+}
+
+/** A lazy list as per-element trees, for operations that need elements as
+ *  nodes; everything else passes through. Charged like any list the symbolic
+ *  path builds — once, however many operations the template folded in. */
+function settle(e: Expr, ctx: Ctx): Exclude<Expr, { kind: 'lazy' }> {
+  if (!isLazy(e)) return e as Exclude<Expr, { kind: 'lazy' }>;
+  const n = seqLength(e);
+  if (n > ITEMS_MAX) {
+    throw new Error(`That is ${n} values; only ${ITEMS_MAX} can be combined with sliders, t, or comparisons.`);
+  }
+  return withAxes(listOf(instances(e), ctx), axesOf(e)) as Exclude<Expr, { kind: 'lazy' }>;
 }
 
 /**
@@ -661,7 +753,7 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   // device-local — valid in a shared link, rejected for the author.
   const issue = ctx.opts.indexIssue?.(idx);
   if (issue) throw new Error(issue);
-  const low = lower(target, ctx);
+  const low = settle(lower(target, ctx), ctx);
   if (!isSeq(low)) {
     const name = target.kind === 'var' ? target.name : 'this';
     throw new Error(`${name} is not a list here — define it above where it is used.`);
@@ -714,6 +806,12 @@ function lowerComp(e: Expr & { kind: 'comp' }, ctx: Ctx): Expr {
   const dims = (got: number): void => {
     if (got !== n) throw new Error(compDims(fn, n, value, got));
   };
+  // A template of points: its k-th coordinate is the template's.
+  if (isLazy(low) && low.body.kind === 'vec') {
+    dims(low.body.items.length);
+    return withAxes({ kind: 'lazy', cols: low.cols, body: low.body.items[k] }, axesOf(low));
+  }
+  low = settle(low, ctx);
   // A scatter of columns: its k-th component is just its k-th column.
   if (low.kind === 'vec' && isDataScatter(low)) {
     dims(low.items.length);
@@ -733,6 +831,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
     case 'data':
     case 'str':
     case 'text':
+    case 'lazy':
       return e;
     case 'var': {
       const hit = ctx.getList(e.name);
@@ -746,6 +845,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
     case 'neg': {
       const a = lower(e.a, ctx);
       return fastMap([a], xs => -xs[0], ctx)
+        ?? lazyMap([a], ([x]) => ({ kind: 'neg', a: x }), ctx)
         ?? zipN([expand(a, ctx)], ([x]) => ({ kind: 'neg', a: x }), ctx);
     }
     case 'bin': {
@@ -755,6 +855,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
       if (scaled) return scaled;
       const op = BIN_OPS[e.op];
       return fastMap([a, b], xs => op(xs[0], xs[1]), ctx)
+        ?? lazyMap([a, b], ([x, y]) => ({ kind: 'bin', op: e.op, a: x, b: y }), ctx)
         ?? zipN(
           [expand(a, ctx), expand(b, ctx)],
           ([x, y]) => ({ kind: 'bin', op: e.op, a: x, b: y }),
@@ -798,7 +899,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
         if (bins !== null && (bins < 2 || bins > 500)) {
           throw new Error('hist(…) takes 2 to 500 bins.');
         }
-        const arg = e.args[0] === undefined ? undefined : lower(e.args[0], ctx);
+        const arg = e.args[0] === undefined ? undefined : settle(lower(e.args[0], ctx), ctx);
         if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
         if (isText(arg)) throw new Error('hist(…) counts numbers; that column holds text.');
         // Gaps go before the values are read, not after: `hist(person.age)`
@@ -819,7 +920,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
           }
           throw new Error(`${e.name}(…) needs a list, like ${e.name}([1, 4, 2]).`);
         }
-        const arg = args[0];
+        const arg = settle(args[0], ctx) as Seq;
         if (isText(arg)) {
           // count is the only reduction text has an answer for.
           if (e.name === 'count') return num(arg.values.length);
@@ -845,6 +946,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
       const fn = EVAL_FNS[e.name];
       const fast = fn && fastMap(args, xs => fn(...xs), ctx);
       return fast
+        ?? lazyMap(args, comps => ({ kind: 'call', name: e.name, args: comps }), ctx)
         ?? zipN(args.map(a => expand(a, ctx)), comps => ({ kind: 'call', name: e.name, args: comps }), ctx);
     }
     case 'vec': {
@@ -854,7 +956,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
       if (items.some(isData) && items.every(it => isData(it) || it.kind === 'num')) {
         return { kind: 'vec', items: align(items).parts };
       }
-      return zipN(
+      return lazyMap(items, comps => ({ kind: 'vec', items: comps }), ctx) ?? zipN(
         items.map(it => expand(it, ctx)),
         comps => ({ kind: 'vec', items: comps }),
         ctx,
@@ -925,9 +1027,13 @@ export function lowerLists(
    *  value like any other to name; it is only drawing one that has no
    *  meaning, so that check belongs to plot rows alone. */
   named = false,
+  /** Hand back a `lazy` template as it is, rather than one tree per element:
+   *  for a caller that evaluates the template itself (a connected figure). */
+  packed = false,
 ): Expr {
-  const ctx: Ctx = { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap() };
-  const out = lower(e, ctx);
+  const ctx: Ctx = { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap(), columns: 0 };
+  const lowered = lower(e, ctx);
+  const out = packed ? lowered : settle(lowered, ctx);
   if (isMask(out)) {
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
   }
@@ -953,7 +1059,7 @@ export function lowerLists(
  * over a list.
  */
 export function lowerMask(cond: Expr, getList: GetList, opts: ResolveOpts = {}): boolean[] | null {
-  return maskValues(lower(cond, { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap() }), opts);
+  return maskValues(lower(cond, { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap(), columns: 0 }), opts);
 }
 
 /** Whether a parsed (unresolved) row calls a list reduction — such rows get
@@ -966,7 +1072,7 @@ export function usesListReduction(e: Expr): boolean {
   const reduces = (name: string, args: readonly Expr[]): boolean =>
     REDUCTIONS.has(name) || ((name === 'min' || name === 'max') && args.length === 1);
   switch (e.kind) {
-    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'trail': case 'hist': case 'family': return childrenOf(e).some(usesListReduction);
+    case 'index': case 'range': case 'eqtest': case 'comp': case 'figure': case 'lazy': case 'trail': case 'hist': case 'family': return childrenOf(e).some(usesListReduction);
     case 'num':
     case 'data':
     case 'str':

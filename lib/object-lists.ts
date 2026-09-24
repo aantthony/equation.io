@@ -6,7 +6,7 @@ import { exceedsNodes } from './size.ts';
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
 import { type ResolveOpts, compsOf, listGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
-import { type Expr, freeVars, sameList } from './expr.ts';
+import { type Expr, type FigureForm, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists, withAxes } from './list.ts';
 
@@ -95,8 +95,8 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     }
   };
   if (!exceedsNodes(e, 32768)) e = indices(e);
-  const ordinary = (e: Expr) => lowerLists(lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null,
-    n => get(n) !== null), get, opts, named);
+  const ordinary = (e: Expr, packed = false) => lowerLists(lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null,
+    n => get(n) !== null), get, opts, named, packed);
   // A list's elements, with the instances it runs over (see Axis in list.ts).
   type ListValue = { items: readonly Expr[]; axes: readonly Axis[] };
   // Coordinate lists settleComps wrote in: values already, one node each to
@@ -139,6 +139,14 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   // Connectedness consumes a whole list; it does not broadcast its vertices
   // into separate one-vertex figures. Also accepts a zipped CSV scatter.
   if (e.kind === 'call' && ['polyline', 'polygon', 'hull'].includes(e.name) && e.args.length === 1) {
+    // Points computed over packed numbers with a slider or t in the way —
+    // polyline(F(k)) through thousands of k — stay one vertex template.
+    const arg = e.args[0];
+    if (!(arg.kind === 'var' && defs.mats.has(arg.name))) {
+      let value: Expr | null = null;
+      try { value = ordinary(arg, true); } catch { /* the paths below report it */ }
+      if (value?.kind === 'lazy') return packedFigure(e.name as 'polyline' | 'polygon' | 'hull', value);
+    }
     // A point list may itself be computed — R P, P + (1, 0), rotate(P, a) —
     // which is the expansion below, asked for the values it yields.
     const computed = (arg: Expr): readonly Expr[] | null => {
@@ -174,6 +182,22 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     // while reading things as lists of points, would only bury it.
     throw originalError instanceof Error && /matri/i.test(originalError.message) && !/not a value on its own/.test(originalError.message)
       ? originalError : err;
+  }
+
+  /** A connected figure through a template of points: the template is its one
+   *  vertex, evaluated once per element of the columns (see `over`). */
+  function packedFigure(form: 'polyline' | 'polygon' | 'hull', points: Expr & { kind: 'lazy' }): Expr {
+    const vertex = points.body;
+    if (vertex.kind !== 'vec' || (vertex.items.length !== 2 && vertex.items.length !== 3)) throw new Error(`${form} needs a list of points.`);
+    const n = points.cols[0].values.length;
+    if (n > 100000) throw new Error('A point path accepts at most 100000 vertices.');
+    const least = form === 'polyline' ? 2 : 3;
+    if (n < least) {
+      throw new Error(form === 'polyline' ? 'polyline needs at least 2 points: polyline(A, B, C).'
+        : form === 'hull' ? 'hull needs at least 3 points: hull(A, B, C, D), or hull(P) for a list of points.'
+          : 'polygon needs at least 3 vertices.');
+    }
+    return { kind: 'figure', form: form as FigureForm, dimension: vertex.items.length as 2 | 3, vertices: vertex.items, over: points.cols };
   }
 
   /** Every `[comp]` whose value is a computed point list, replaced by the list

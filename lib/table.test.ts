@@ -317,11 +317,11 @@ describe('the expression budget', () => {
     expect(() => lowerRow('big.v t', rows, column(100001))).toThrow(/only 100000 can be combined/);
   });
 
-  it('spends the budget again for each further mapped operation', () => {
-    // Documented in llms.txt as a per-row budget, not a row count.
-    expect(seqLength(lowerRow('big.v t + 1', rows, column(50000)) as Seq)).toBe(50000);
-    expect(() => lowerRow('big.v t + 1', rows, column(60000)))
-      .toThrow(/too many list elements/);
+  it('charges a chain of mapped operations once, as one template', () => {
+    // `big.v t + 1` is one template over the column (a lazy list), settled
+    // into expressions once at the end — not a list per operation.
+    expect(seqLength(lowerRow('big.v t + 1', rows, column(100000)) as Seq)).toBe(100000);
+    expect(() => lowerRow('big.v t + 1', rows, column(100001))).toThrow(/only 100000 can be combined/);
   });
 });
 

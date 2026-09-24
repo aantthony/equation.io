@@ -37,6 +37,7 @@ import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
 import { pointComps } from '../lib/geom.ts';
 import { hullFaces } from '../lib/hull.ts';
 import { hullGeometrySampler } from '../lib/hull-geometry.ts';
+import { type VertexSampler, vertexSampler } from '../lib/figure-vertices.ts';
 
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
@@ -578,6 +579,13 @@ const traceQueue = new TraceQueue((message: TraceMessage) => {
 
 const familyRows = new WeakMap<Classified, Equation[]>();
 const hullSamplers = new WeakMap<CpuPlan, ReturnType<typeof hullGeometrySampler>>();
+/** A figure's coordinates: compiled once per plan, run every frame. */
+const vertexSamplers = new WeakMap<CpuPlan, VertexSampler>();
+const verticesOf = (plot: CpuPlan & { type: 'polygon' }): VertexSampler => {
+  let sample = vertexSamplers.get(plot);
+  if (!sample) vertexSamplers.set(plot, sample = vertexSampler(plot.pts, plot.over));
+  return sample;
+};
 let familyId = -100000;
 function renderMembers(eq: Equation): Equation[] {
   const cls = eq.cls!, cpu = eq.cpu!;
@@ -890,7 +898,7 @@ function render() {
           const dim = plot.dim ?? 2;
           if (plot.hull) {
             let sample = hullSamplers.get(plot);
-            if (!sample) { sample = hullGeometrySampler(plot.pts, dim); hullSamplers.set(plot, sample); }
+            if (!sample) { sample = hullGeometrySampler(plot.pts, dim, plot.over); hullSamplers.set(plot, sample); }
             const geometry = sample(constEnv, time);
             if (!geometry) break;
             const { mesh, edges } = geometry;
@@ -898,7 +906,7 @@ function render() {
             scene.segments.push({ pts: edges, color: mesh.indices.length ? edgeShade(color) : color, retained: true });
             break;
           }
-          const vals = plot.pts.map(p => evaluate(p, { ...constEnv, t: time }));
+          const vals = verticesOf(plot)(constEnv, time);
           if (!vals.every(Number.isFinite)) break;
           const pts: number[] = [];
           for (let k = 0; k < vals.length; k += dim) pts.push(vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0);
@@ -1086,9 +1094,9 @@ function render() {
         }
         case 'pcurve': extras.polylines.push({ pts: sampleCurve(eq, 2), color: css }); break;
         case 'polygon': {
-          const pts: number[] = [];
+          let pts: number[];
           try {
-            for (const c of plot.pts) pts.push(evaluate(c, env));
+            pts = verticesOf(plot)(env);
           } catch {
             break;
           }
