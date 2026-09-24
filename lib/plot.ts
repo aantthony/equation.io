@@ -224,7 +224,7 @@ export function classify(expr: Expr, defined: ReadonlySet<string> = new Set(), f
 
 /** Merge scalar differences into one uniform-selected expression. Structural
  * nodes (equations, vectors and figure calls) retain their shape. */
-function familyTemplate(es: Expr[], index: string): Expr {
+function familyTemplate(es: readonly Expr[], index: string): Expr {
   if (es.every(e => exprKey(e) === exprKey(es[0]))) return es[0];
   const first = es[0];
   if (es.every(e => e.kind === first.kind)) {

@@ -20,6 +20,15 @@ points.values[0].push({ kind: 'num', value: 1 });
 if (point.source.representation === 'real') {
   // @ts-expect-error Point coordinates cannot be replaced.
   point.source.coordinates[0] = { kind: 'num', value: 1 };
+  const first = point.source.coordinates[0];
+  if (first.kind === 'num') {
+    // @ts-expect-error Expression nodes are immutable: nothing is frozen at runtime.
+    first.value = 99;
+  }
+  if (first.kind === 'call') {
+    // @ts-expect-error Nor can a node's children be rearranged.
+    first.args.push(first);
+  }
 }
 
 // Callers can still prepare their own mutable parameter lists.

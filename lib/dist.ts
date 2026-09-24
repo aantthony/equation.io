@@ -103,7 +103,7 @@ export type { BaseKind };
  */
 export interface BaseDist {
   kind: BaseKind;
-  args: Expr[];
+  args: readonly Expr[];
 }
 
 /** A law on the whole numbers: it has a pmf (pmfExpr, stems), a step cdf whose
@@ -228,7 +228,7 @@ export function pmfExpr(d: BaseDist, k: Expr): Expr | null {
  * are not built from it: validation judges the family the user wrote.
  */
 type CoreKind = 'binomial' | 'poisson' | 'negbinomial' | 'discreteuniform';
-function canonicalDiscrete(d: BaseDist): { kind: CoreKind; fn: string; args: Expr[]; shift: number } | null {
+function canonicalDiscrete(d: BaseDist): { kind: CoreKind; fn: string; args: readonly Expr[]; shift: number } | null {
   switch (d.kind) {
     case 'binomial':
       return { kind: 'binomial', fn: BINOM_PMF_FN, args: d.args, shift: 0 };
@@ -699,7 +699,7 @@ export function scanRandomRows(texts: readonly (string | null)[]): {
  * toward the sampler before classify could refuse them.
  */
 function wholeRowForm(e: Expr, rvNames: ReadonlySet<string>): void {
-  const kids: Expr[] = e.kind === 'neg' ? [e.a]
+  const kids: readonly Expr[] = e.kind === 'neg' ? [e.a]
     : e.kind === 'bin' ? [e.a, e.b]
     : e.kind === 'call' ? e.args
     : e.kind === 'piecewise' ? [...e.cases.flatMap(c => [c.cond, c.value]), ...(e.otherwise ? [e.otherwise] : [])]
@@ -2571,7 +2571,7 @@ function tensor(blocks: Block[], termCount: number): Joint | null {
 
 /** The comparisons of a P(…) body as terms and the operators between them:
  *  `a < X <= b` is [a, X, b] with ['<', '<=']; a point event is two terms. */
-function eventShape(body: Expr): { terms: Expr[]; ops: string[] } | null {
+function eventShape(body: Expr): { terms: readonly Expr[]; ops: string[] } | null {
   if (body.kind === 'eq') return { terms: [body.l, body.r], ops: ['='] };
   if (body.kind === 'eqtest' && body.args.length === 2) {
     return { terms: body.args, ops: [body.op === '==' ? '=' : '!='] };
@@ -4419,7 +4419,7 @@ export class RVSystem {
    * of them as one group, over the joint of their bases. 'cap' past JOINT_MAX
    * (or the work budget); null while a base declares no distribution.
    */
-  private enumerateTerms(terms: Expr[], env: Record<string, number>, whole = false): Joint | 'cap' | null {
+  private enumerateTerms(terms: readonly Expr[], env: Record<string, number>, whole = false): Joint | 'cap' | null {
     const random = terms.map(t => this.randomIn(t));
     const group = terms.map((_, k) => k);
     const find = (k: number): number => (group[k] === k ? k : (group[k] = find(group[k])));

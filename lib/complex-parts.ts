@@ -144,7 +144,7 @@ function splitLoop(e: Expr & { kind: 'loop' }, split: (e: Expr, vars: ComplexVar
     inner.set(p, [{ kind: 'var', name: `${p}.re` }, { kind: 'var', name: `${p}.im` }]);
     params.push(`${p}.re`, `${p}.im`);
   });
-  const flatten = (args: Expr[], scope: ComplexVars): Expr[] => args.flatMap((a, k) => {
+  const flatten = (args: readonly Expr[], scope: ComplexVars): Expr[] => args.flatMap((a, k) => {
     const parts = split(a, scope);
     return types[k] === 'real' ? [parts[0]] : parts;
   });

@@ -112,7 +112,7 @@ const isListArg = (a: Expr, getMat: GetMat, isList: IsList): boolean =>
  *  (P[1]). A reduction is one number, so total(L) is neither. */
 function listShape(a: Expr, getMat: GetMat, isList: IsList): 'list' | 'element' | null {
   if (isListArg(a, getMat, isList)) return 'list';
-  const first = (es: Expr[]) => es.map(x => listShape(x, getMat, isList)).find(s => s !== null) ?? null;
+  const first = (es: readonly Expr[]) => es.map(x => listShape(x, getMat, isList)).find(s => s !== null) ?? null;
   switch (a.kind) {
     case 'neg': return first([a.a]);
     case 'bin': return first([a.a, a.b]);

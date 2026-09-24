@@ -98,7 +98,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   const ordinary = (e: Expr) => lowerLists(lowerGeom(e, n => compsOf(defs, n), n => defs.mats.get(n) ?? null,
     n => get(n) !== null), get, opts, named);
   // A list's elements, with the instances it runs over (see Axis in list.ts).
-  type ListValue = { items: Expr[]; axes: readonly Axis[] };
+  type ListValue = { items: readonly Expr[]; axes: readonly Axis[] };
   // Coordinate lists settleComps wrote in: values already, one node each to
   // the expansion's size limit — not a tree it would have to walk.
   const settledLists = new WeakSet<object>();
@@ -141,7 +141,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   if (e.kind === 'call' && ['polyline', 'polygon', 'hull'].includes(e.name) && e.args.length === 1) {
     // A point list may itself be computed — R P, P + (1, 0), rotate(P, a) —
     // which is the expansion below, asked for the values it yields.
-    const computed = (arg: Expr): Expr[] | null => {
+    const computed = (arg: Expr): readonly Expr[] | null => {
       try {
         const value = lowerObjects(arg, defs, opts, true);
         return value.kind === 'list' ? value.items : null;
@@ -186,7 +186,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       if (!out) done.set(n, out = walkOf(n));
       return out;
     };
-    const all = (ns: Expr[]): Expr[] => {
+    const all = (ns: readonly Expr[]): readonly Expr[] => {
       const out = ns.map(walk);
       return out.every((o, k) => o === ns[k]) ? ns : out;
     };
@@ -230,7 +230,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
    *  null when there are none. */
   function expand(source: Expr, outside: boolean): Expr | null {
     if (exceedsNodes(source, 32768, n => settledLists.has(n))) throw new Error('This object family is too large to expand (32768 nodes).');
-    const lists: Array<{ items: Expr[]; axes: readonly Axis[] }> = [];
+    const lists: ListValue[] = [];
     const markers = new Map<Expr, number>();
     // A matrix name is the matrix, not a list of row-points, along the row's
     // own algebra (2 M, M v). Those rows are a list only where a call asks for
@@ -247,7 +247,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
         markers.set(marker, lists.length); lists.push(values);
         return marker;
       }
-      const map = (nodes: Expr[]) => nodes.map(n => visit(n, asMatrix));
+      const map = (nodes: readonly Expr[]) => nodes.map(n => visit(n, asMatrix));
       switch (node.kind) {
         case 'bin': return { ...node, a: visit(node.a, asMatrix || node.op === '*'), b: visit(node.b, asMatrix) };
         case 'neg': return { ...node, a: visit(node.a, asMatrix) };
@@ -286,7 +286,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     };
     const instantiate = (node: Expr, k: number): Expr => {
       const hit = markers.get(node); if (hit !== undefined) return lists[hit].items[at(lists[hit], k)];
-      const map = (ns: Expr[]) => ns.map(n => instantiate(n, k));
+      const map = (ns: readonly Expr[]) => ns.map(n => instantiate(n, k));
       switch (node.kind) {
         case 'bin': return { ...node, a: instantiate(node.a, k), b: instantiate(node.b, k) };
         case 'neg': return { ...node, a: instantiate(node.a, k) };

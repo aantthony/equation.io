@@ -22,7 +22,7 @@ import { add, div, mul, neg, sub } from './diff.ts';
 import type { Expr } from './expr.ts';
 
 /** Row-major square matrix of scalar expressions, side 2 or 3. */
-export type Mat = Expr[][];
+export type Mat = (readonly Expr[])[];
 
 /** Matrix lookup during lowering; null for names that are not matrices. */
 export type GetMat = (name: string) => Mat | null;
@@ -38,7 +38,7 @@ const SHAPE_HINT = 'write rows of equal length: M = [(a, b), (c, d)] or [[a, b],
  */
 export function matrixFromList(e: Expr): Mat | null {
   if (e.kind !== 'list' || e.items.length === 0) return null;
-  const rows: Expr[][] = [];
+  const rows: Mat = [];
   for (const item of e.items) {
     if (item.kind === 'vec') rows.push(item.items);
     else if (item.kind === 'list') {
