@@ -46,7 +46,7 @@ import { lowerGeom } from './geom.ts';
 import { lowerLists } from './list.ts';
 import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
-import { classifySeqRec, scanSeqRec, sequenceResolver } from './seq.ts';
+import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from './seq.ts';
 import { buildStateSystem, initialState } from './state.ts';
 import { planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
@@ -97,6 +97,8 @@ export interface PrepareOptions { tables?: TableSource }
 export interface PreparedDocument {
   rows: RowInfo[];
   statements: StatementScan[];
+  /** Each row's sequence reading, decided across the document (scanSequences). */
+  seqScans: (SeqScan | null)[];
   raw: Definition[];
   built: ReturnType<typeof buildDefs>;
   defs: Env;
@@ -145,10 +147,11 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
   const rows: RowInfo[] = sources.map(source => typeof source === 'string'
     ? { text: source.trim() } : { ...source, text: source.text.trim() });
   const texts = rows.map(row => row.text);
-  const statements: StatementScan[] = rows.map(source => ({ source, kind:
+  const seqScans = scanSequences(texts);
+  const statements: StatementScan[] = rows.map((source, i) => ({ source, kind:
     !source.text ? 'blank' : source.text.startsWith('#') ? 'comment'
       : /^(view|camera)\s*\(/i.test(source.text) ? 'viewport'
-      : scanSeqRec(source.text) ? 'sequence'
+      : seqScans[i] ? 'sequence'
       : source.text.includes('~') ? 'distribution'
       : scanDefinition(source.text) ? 'definition' : 'expression',
   }));
@@ -157,7 +160,7 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
   // outside the definition system — mirror of web/main.ts recompileAll.
   const regressions = scanRegressions(texts);
   const rvScan = scanRandomRows(rows.map((r, i) =>
-    regressions.has(i) || !r.text || r.text.startsWith('#') || scanSeqRec(r.text) ? null : r.text));
+    regressions.has(i) || !r.text || r.text.startsWith('#') || seqScans[i] ? null : r.text));
   const rvRowIdx = new Set([...rvScan.base.keys(), ...rvScan.derived.keys()]);
 
   // Pass 1: definitions. A duplicate coordinate-field row (r = 1 + cos(theta)
@@ -171,7 +174,7 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
     if (row.text.startsWith('#')) { row.comment = true; continue; }
     if (rvRowIdx.has(i)) continue;
     // Sequence/recurrence rows (a_n = …, a_{n+1} = …) are plots, not definitions.
-    if (scanSeqRec(row.text)) continue;
+    if (seqScans[i]) continue;
     const d = regressions.get(i) ?? scanDefinition(row.text);
     if (!d) continue;
     row.def = d;
@@ -180,7 +183,7 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
     raw.push(d);
   }
 
-  const built = buildDefs(raw, tables, texts.map(scanSeqRec).filter(s => s !== null));
+  const built = buildDefs(raw, tables, seqScans.filter(s => s !== null));
   const defs = built.defs;
   for (const [key, fit] of built.fits) {
     const row = rows.find(r => r.def && defKey(r.def) === key);
@@ -270,7 +273,7 @@ export function prepareDocument(sources: readonly (string | RowSource)[], { tabl
       if (row && !row.error) row.error = e instanceof Error ? e.message : String(e);
     }
   }
-  return { rows, statements, raw, built, defs, rvScan, builtRVs, stateSystem,
+  return { rows, statements, seqScans, raw, built, defs, rvScan, builtRVs, stateSystem,
     sumBoundConsts: built.sumBoundConsts, constNames, fieldEnv, fnNames,
     listNames, valueNames, getFn, getList, boundVals, structuralConsts, ropts, gridFields };
 }
@@ -487,9 +490,11 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         } catch { /* animated or broken: no readout */ }
         continue;
       }
-      const seq = scanSeqRec(row.text);
+      const seq = document.seqScans[ri];
       if (seq) {
-        row.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts);
+        const first = document.seqScans.findIndex(s => s?.name === seq.name);
+        if (first < ri) throw new Error(`Sequence ${seq.name} is already defined.`);
+        row.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts, new Set(defs.sequences.keys()));
         continue;
       }
       const rawParsed = parseExpr(row.text, fnNames, listNames, valueNames);

@@ -67,12 +67,25 @@ export function scanSeqRec(text: string): SeqScan | null {
   return null;
 }
 
+/**
+ * scanSeqRec over a whole document. A letter can be a sequence once: beside
+ * `a_n = 1/n`, a row like `a_k = 7` that never uses its k is the constant
+ * a_k (as `T_c = 300` is), not a second definition of a.
+ */
+export function scanSequences(texts: readonly string[]): (SeqScan | null)[] {
+  const scans = texts.map(scanSeqRec);
+  const owners = new Set(scans.filter(s => s && (s.rec || usesIndex(s.rhs, s.index))).map(s => s!.name));
+  return scans.map(s => (s && !s.rec && owners.has(s.name) && !usesIndex(s.rhs, s.index) ? null : s));
+}
+
 export function classifySeqRec(
   scan: SeqScan,
   fnNames: ReadonlySet<string>,
   getFn: GetFn,
   constNames: ReadonlySet<string>,
   ropts: ResolveOpts = {},
+  /** Every sequence in the document, so b_n and b_[n+1] read as its terms. */
+  sequences: ReadonlySet<string> = new Set(),
 ): Classified {
   const { name, index, rhs } = scan;
   if (RESERVED.has(index)) {
@@ -82,7 +95,13 @@ export function classifySeqRec(
   // the index (a_n = Σ(s=1..n, s)) stays a sum; evaluate() runs it at each n.
   const openVars = new Set(ropts.openVars);
   openVars.add(index);
-  const parsed = resolveExpr(parseExpr(rhs, fnNames), getFn, { ...ropts, openVars });
+  const source = parseExpr(rhs, fnNames, new Set([...sequences].map(s => s + '_')));
+  if (scan.rec) {
+    // Drawn as the map a_n → a_{n+1}: there is no n to read another term at.
+    const other = [...freeVars(source)].find(v => v !== `${name}_${index}` && v === `${v[0]}_${index}` && sequences.has(v[0]));
+    if (other) throw new Error(`A recurrence cannot use ${other}: it steps from ${name}_${index} alone, with no ${index} to read ${other} at.`);
+  }
+  const parsed = resolveExpr(source, getFn, { ...ropts, openVars });
   if (usesComplex(parsed)) throw new Error('Sequences are real-valued; use re(…) or im(…).');
 
   const recVar = `${name}_${index}`;
@@ -104,6 +123,10 @@ export function classifySeqRec(
   if (!scan.rec) {
     vars.delete(index);
     for (const v of vars) {
+      // Left as a name only when it is a recurrence's term at the index.
+      if (v === `${v[0]}_${index}` && sequences.has(v[0])) {
+        throw new Error(`${v[0]} is a recurrence, so its terms exist only at fixed indices like ${v[0]}_3 — not at a changing index.`);
+      }
       throw new Error(`A sequence term may only use ${index}, t, and constants (found ${v}).`);
     }
     params.sort();
@@ -171,21 +194,49 @@ export function sequenceResolver(defs: ValueDefinitions, getFn: GetFn, opts: Res
       return { kind: 'var', name: `${defs.sequencePrefix}_${name}_${k}` };
     } finally { resolving.delete(name); }
   };
-  const resolve = (symbol: string, index?: Expr): Expr | null => {
+  const seqNames = () => new Set([...defs.sequences.keys()].map(n => n + '_'));
+  /**
+   * Sequence `name`'s term at an index that is still open — another sequence
+   * row's own n — as an expression in it: b_n in a_n = b_n + 1 is b's term,
+   * written in n. Only an explicit term has one; a recurrence's terms exist
+   * only as a chain from its seed.
+   */
+  const inline = (name: string, at: Expr, open: ReadonlySet<string>): Expr => {
+    const scan = defs.sequences.get(name)!;
+    if (scan.rec) {
+      throw new Error(`${name} is a recurrence, so its terms exist only at fixed indices like ${name}_3 — not at a changing index.`);
+    }
+    if (resolving.has(name)) {
+      const cycle = [...resolving].slice([...resolving].indexOf(name));
+      throw new Error(cycle.length > 1 ? `Sequences ${cycle.join(' and ')} are defined in terms of each other.` : `Sequence ${name} depends on itself.`);
+    }
+    resolving.add(name);
+    try {
+      const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), seqNames());
+      return resolveExpr(substIdx(parsed, scan.index, at), getFn, { ...opts, openVars: open });
+    } finally { resolving.delete(name); }
+  };
+  const resolve = (symbol: string, index?: Expr, open?: ReadonlySet<string>): Expr | null => {
     if (index === undefined) {
       const hit = TERM_RE.exec(symbol);
       if (hit) return defs.sequences.has(hit[1]) ? term(hit[1], Number(hit[2])) : null;
       // a_k or a_N: the term at a slider, or one per element of a list —
-      // unless a_k is a name of its own, or k is the sequence's own index.
+      // unless a_k is a name of its own.
       const named = NAMED_RE.exec(symbol);
       const scan = named && defs.sequences.get(named[1]);
-      if (!named || !scan || named[2] === scan.index || protectedNames.has(symbol) || known.has(symbol)) return null;
+      if (!named || !scan || protectedNames.has(symbol) || known.has(symbol)) return null;
       const k = named[2];
+      // A recurrence's own previous term (b_n in b_{n+1} = 2 b_n) is its
+      // variable, not a lookup.
+      if (scan.rec && k === scan.index) return null;
+      if (open?.has(k)) return inline(named[1], { kind: 'var', name: k }, open);
+      if (k === scan.index) return null;
       if (!opts.isList?.(k) && opts.consts?.[k] === undefined) return null;
-      return resolve(`${named[1]}_`, { kind: 'var', name: k });
+      return resolve(`${named[1]}_`, { kind: 'var', name: k }, open);
     }
     const name = symbol.slice(0, -1);
     if (!symbol.endsWith('_') || !defs.sequences.has(name)) return null;
+    if (open && [...freeVars(index)].some(v => open.has(v))) return inline(name, index, open);
     const input: Expr = index.kind === 'range' ? { kind: 'list', items: [index] } : index;
     const indices = lowerLists(input, listGetter(defs), opts);
     const one = (e: Expr) => {
