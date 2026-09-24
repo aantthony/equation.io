@@ -115,4 +115,15 @@ describe('semantic classification and independent backends', () => {
     expect(plan.step).toContain('zc');
     expect(plan.step).not.toContain('vec2(z,');
   });
+
+  it('gives a 3D vector field a shader for streamlines, and none when GLSL cannot express it', () => {
+    const plan = compileGpu(classify(parseExpr('(-y, x, z/2)')));
+    if (plan.type !== 'vfield3d') throw new Error('vfield3d');
+    expect(plan.comps).toHaveLength(3);
+    expect(shaderKey(plan)).toBe(shaderKey(compileGpu(classify(parseExpr('(-y, x, z/2)')))));
+    expect(shaderKey(plan)).not.toBe(shaderKey(compileGpu(classify(parseExpr('(-y, x, z/3)')))));
+    // Trajectories trace on the CPU, so the row still draws without it.
+    vi.spyOn(glsl, 'toGLSL').mockImplementation(() => { throw new Error('no GLSL'); });
+    expect(compileGpu(classify(parseExpr('(-y, x, z)'))).type).toBe('none');
+  });
 });

@@ -560,6 +560,82 @@ out vec4 outColor;
 void main() { outColor = vec4(vColor, 0.9); }
 `;
 
+/** Lattice cells per axis: an N×N×N jittered lattice fills the camera box. */
+const STREAMLINE_CELLS_N = 13;
+/** Streamlines seeded in each lattice cell. */
+const STREAMLINES_PER_CELL = 8;
+/** Integration steps each way from a streamline's seed. */
+const STREAMLINE_STEPS = 24;
+/** Integration step as a fraction of the box half-width: a streamline spans
+ *  about one half-width, long enough to read as flow. */
+const STREAMLINE_STEP = 0.02;
+
+/**
+ * A 3D vector field as dense short streamlines, the space counterpart of the
+ * 2D line-integral convolution (render2d vfieldFrag): each seed integrates
+ * the unit field forward and back in the vertex shader, and alpha carries
+ * the same Hann window times a travelling wave, so dashes drift downstream.
+ * One instanced LINE_STRIP per seed; vertex i is i − N steps from the seed.
+ */
+function streamlineVert(comps: [string, string, string], params?: string[]): string {
+  return `#version 300 es
+layout(location=0) in vec4 aSeed;
+uniform mat4 uVP;
+uniform float uBoxR;
+uniform vec3 uTarget;
+uniform vec3 uEye;
+uniform float t;
+${paramDecls(params)}
+out float vAlpha;
+${GLSL_PRELUDE}
+vec3 V(float x, float y, float z) { return vec3(${comps[0]}, ${comps[1]}, ${comps[2]}); }
+vec3 dir(vec3 q) {
+  vec3 v = V(q.x, q.y, q.z);
+  float m = length(v);
+  return (isnan(m) || isinf(m) || m < 1e-24) ? vec3(0.0) : v / m;
+}
+const int N = ${STREAMLINE_STEPS};
+const float LAMBDA = 10.0; // wave length in steps
+const float OMEGA = 4.0;   // wave angular speed (rad/s), as in 2D
+void main() {
+  int i = gl_VertexID - N;
+  float h = uBoxR * ${STREAMLINE_STEP} * (i < 0 ? -1.0 : 1.0);
+  vec3 p = uTarget + aSeed.xyz * uBoxR;
+  bool alive = true;
+  for (int k = 0; k < N; k++) {
+    if (k >= abs(i)) break;
+    vec3 d = dir(p);
+    vec3 dm = dir(p + 0.5 * h * d);
+    if (dot(d, d) == 0.0 || dot(dm, dm) == 0.0) { alive = false; break; }
+    p += h * dm;
+  }
+  float s = float(i);
+  float hann = 0.5 + 0.5 * cos(3.14159265 * s / float(N + 1));
+  float wave = 0.5 + 0.5 * cos(6.2831853 * s / LAMBDA - OMEGA * t + aSeed.w);
+  vec3 u = abs(p - uTarget) / uBoxR;
+  float inBox = 1.0 - smoothstep(0.85, 1.0, max(u.x, max(u.y, u.z)));
+  // Depth cue: full strength up to halfway between the near face and the
+  // centre of the box, down to an eighth at the far face, so near flow
+  // reads over the far side.
+  float near = length(uEye - uTarget) - 0.5 * uBoxR;
+  float depth = clamp((length(p - uEye) - near) / (1.5 * uBoxR), 0.0, 1.0);
+  vAlpha = alive ? hann * wave * wave * inBox * mix(1.0, 0.125, depth) : 0.0;
+  gl_Position = uVP * vec4(p, 1.0);
+}
+`;
+}
+
+const STREAMLINE_FRAG = `#version 300 es
+precision highp float;
+uniform vec3 uColor;
+in float vAlpha;
+out vec4 outColor;
+void main() {
+  if (vAlpha < 0.01) discard;
+  outColor = vec4(uColor, vAlpha);
+}
+`;
+
 export interface Scene3D {
   implicits: Array<Surface3D & { grad?: [string, string, string] }>;
   psurfaces: Array<{
@@ -588,6 +664,8 @@ export interface Scene3D {
     retained?: boolean;
   }>;
   points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string }>;
+  /** 3D vector fields drawn as animated streamlines (see streamlineVert). */
+  streamlines?: Array<{ comps: [string, string, string]; color: [number, number, number]; params?: string[]; uniforms?: Record<string, number> }>;
 }
 
 const GRID_N = 160;
@@ -613,6 +691,8 @@ export class Renderer3D {
   private coneIndexCount: number;
   private gridVao: WebGLVertexArrayObject;
   private gridIndexCount: number;
+  private streamlineVao!: WebGLVertexArrayObject;
+  private streamlineSeeds = 0;
 
   constructor(private gl: WebGL2RenderingContext, private quad: { draw(): void }) {
     this.geometry = new RetainedGeometry(gl);
@@ -708,6 +788,7 @@ export class Renderer3D {
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
     gl.bindVertexArray(null);
+    this.initStreamlineSeeds();
     this.axesVao = gl.createVertexArray()!;
     const axes = new Float32Array([
       // x axis: red-ish
@@ -729,6 +810,32 @@ export class Renderer3D {
   }
 
   clearGeometry() { this.geometry.clear(); }
+
+  /** Jittered lattice seeds in the unit box, each with a wave phase. */
+  private initStreamlineSeeds(): void {
+    const { gl } = this;
+    const n = STREAMLINE_CELLS_N;
+    const seeds = new Float32Array(n * n * n * STREAMLINES_PER_CELL * 4);
+    let hash = 0x2545f491;
+    const random = () => { hash ^= hash << 13; hash ^= hash >>> 17; hash ^= hash << 5; return (hash >>> 0) / 4294967296; };
+    let o = 0;
+    for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) for (let c = 0; c < STREAMLINES_PER_CELL; c++) {
+      seeds[o++] = -1 + 2 * (i + random()) / n;
+      seeds[o++] = -1 + 2 * (j + random()) / n;
+      seeds[o++] = -1 + 2 * (k + random()) / n;
+      seeds[o++] = 2 * Math.PI * random();
+    }
+    this.streamlineSeeds = n * n * n * STREAMLINES_PER_CELL;
+    this.streamlineVao = gl.createVertexArray()!;
+    gl.bindVertexArray(this.streamlineVao);
+    const buf = gl.createBuffer()!;
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, seeds, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(0, 1);
+    gl.bindVertexArray(null);
+  }
 
   render(cam: Camera3D, scene: Scene3D, time = 0, env: Record<string, number> = {}): void {
     const surfaces = scene.implicits;
@@ -901,6 +1008,28 @@ export class Renderer3D {
       gl.drawArrays(gl.POINTS, 0, 1);
     }
     gl.bindVertexArray(null);
+
+    // Streamlines blend over everything opaque but write no depth, so the
+    // dense cloud never hides itself.
+    for (const f of scene.streamlines ?? []) {
+      let prog: WebGLProgram;
+      try {
+        prog = this.cache.get(streamlineVert(f.comps, f.params), STREAMLINE_FRAG);
+      } catch (e) {
+        console.error(e);
+        continue;
+      }
+      setCommon(prog);
+      setParams(prog, f.params, f.uniforms);
+      gl.uniform3f(gl.getUniformLocation(prog, 'uTarget'), ...cam.target);
+      gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
+      gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...f.color);
+      gl.depthMask(false);
+      gl.bindVertexArray(this.streamlineVao);
+      gl.drawArraysInstanced(gl.LINE_STRIP, 0, 2 * STREAMLINE_STEPS + 1, this.streamlineSeeds);
+      gl.bindVertexArray(null);
+      gl.depthMask(true);
+    }
 
     // Reference grid plane at z=0, last and without writing depth so its
     // translucent lines never occlude surfaces.

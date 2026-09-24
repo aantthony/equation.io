@@ -63,6 +63,7 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'conformal2d'; field: string }
   | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'vfield2d'; fx: string; fy: string }
+  | { type: 'vfield3d'; comps: [string, string, string] }
   | { type: 'psurface'; comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] }
   | { type: 'cobweb'; curveField: string }
   | { type: 'bifurcation'; field: string }
@@ -250,7 +251,10 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'color-field': return { type: `${object.space}2d`, space: object.space, params, ...colorProgram(object.channels, params) };
     case 'vector-field':
       if (object.components.length === 2) return { type: 'vfield2d', params, fx: toGLSL(sub(object.components[0])), fy: toGLSL(sub(object.components[1])) };
-      break;
+      // Only the optional streamline view uses this; trajectories and arrows
+      // trace on the CPU, so a field GLSL cannot express still draws.
+      try { return { type: 'vfield3d', params, comps: object.components.map(c => toGLSL(sub(c))) as [string, string, string] }; }
+      catch { break; }
     case 'complex-field':
       if (object.form === 'fractal') {
         const step = compileTyped(sub(object.step), { z: { type: 'complex', code: 'zc' } });
@@ -287,6 +291,7 @@ export function shaderKey(plan: GpuPlan): string {
     case 'scalar2d': case 'complex2d': case 'domain2d': case 'conformal2d': return JSON.stringify([plan.type, plan.params, plan.field]);
     case 'fractal2d': return JSON.stringify([plan.type, plan.params, plan.step, plan.seed, plan.maxIter]);
     case 'vfield2d': return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy]);
+    case 'vfield3d': return JSON.stringify([plan.type, plan.params, plan.comps]);
     case 'psurface': return JSON.stringify([plan.type, plan.params, plan.comps, plan.du, plan.dv]);
     case 'cobweb': return JSON.stringify([plan.type, plan.params, plan.curveField]);
     case 'bifurcation': return JSON.stringify([plan.type, plan.params, plan.field]);
