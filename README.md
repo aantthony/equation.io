@@ -63,23 +63,33 @@ pnpm web:build  # build to dist-web/ (client + worker)
 pnpm deploy     # build and deploy to Cloudflare
 ```
 
-### Voice mode (private)
+### Voice mode (credit keys)
 
 A mic button talks to an OpenAI Realtime model
-([`web/voice.ts`](web/voice.ts)): the browser streams audio straight to
-`wss://api.openai.com`, and the model edits the graph with `get_graph` /
-`set_graph` tools, which report each row's readouts (values, intercepts,
-extrema in view). `look_at_graph` puts a screenshot of the canvas into the
-conversation as an image. The Worker ([`worker/voice.ts`](worker/voice.ts))
-only mints a 60-second client secret. A session outlives its secret, so the
-route is passphrase-gated and absent unless both secrets are set:
+([`web/voice.ts`](web/voice.ts)) over WebRTC, and the model edits the graph
+with `get_graph` / `set_graph` tools, which report each row's readouts (values,
+intercepts, extrema in view). `look_at_graph` puts a screenshot of the canvas
+into the conversation as an image.
+
+The page never holds an OpenAI credential. It sends its WebRTC offer and a
+**credit key** to the Worker ([`worker/voice.ts`](worker/voice.ts)), which
+checks the key's balance in D1, creates the call with a fixed session, and
+attaches a sideband ([`worker/voice-call.ts`](worker/voice-call.ts), a Durable
+Object) before answering. The sideband charges every response's token usage to
+the key ([`worker/voice-credit.ts`](worker/voice-credit.ts)) and hangs up when
+the balance runs out or after 30 minutes. Audio flows between the browser and
+OpenAI directly.
 
 ```sh
-wrangler secret put OPENAI_API_KEY
-wrangler secret put VOICE_PASSPHRASE   # locally: both in .dev.vars
+wrangler secret put OPENAI_API_KEY     # locally: in .dev.vars
+wrangler d1 migrations apply DB --remote   # locally: --local
+node scripts/voice-key.ts create "Sam" 5   # a key with $5; prints it once
+node scripts/voice-key.ts list             # balances and spend
+node scripts/voice-key.ts grant <id> 10    # top up; disable/enable <id>
 ```
 
-Visit any page once with `?voice=<passphrase>` to show the mic in that browser
+Each `scripts/voice-key.ts` command takes `--remote` for the deployed database.
+Visit any page once with `?voice=<key>` to show the mic in that browser
 (`?voice=` forgets it).
 
 ## Examples

@@ -1,9 +1,11 @@
 /**
  * Voice mode: talk to an OpenAI Realtime model and it edits the graph.
  *
- * The browser streams microphone PCM straight to wss://api.openai.com; the
- * Worker only mints the short-lived client secret that opens the socket
- * (worker/voice.ts), so the API key never reaches the page.
+ * Audio goes over WebRTC between the browser and OpenAI. The page never holds
+ * an OpenAI credential: it sends its offer to /api/voice/call with a credit
+ * key, and the Worker creates the call, meters it, and hangs up when the
+ * key's credit runs out (worker/voice.ts). Events and tool calls travel over
+ * the call's data channel.
  *
  * The model works the graph through tools, chiefly:
  * - get_graph: every row as text plus what the app computed for it (kind,
@@ -16,19 +18,15 @@
  *   an image, with a legend mapping each row to its color, so the model that
  *   heard the question is the one that looks.
  *
- * The feature is private. A browser is unlocked by visiting any page with
- * `?voice=<passphrase>` once: the passphrase is kept in localStorage and sent
- * with each request, and the mic button stays hidden everywhere else.
+ * The feature needs a credit key (scripts/voice-key.ts). A browser is unlocked
+ * by visiting any page with `?voice=<key>` once: the key is kept in
+ * localStorage and sent with each request, and the mic button stays hidden
+ * everywhere else.
  */
 import type { PublicKind } from '../lib/math-object.ts';
 import { type SyntaxEntry, searchSyntax, syntaxEntries } from '../lib/syntax-search.ts';
-import workletUrl from './voice-worklet.ts?worker&url';
 
-/** Must match the model worker/voice.ts mints the client secret for. */
-const MODEL = 'gpt-realtime-2.1';
-const VOICE = 'marin';
-const RATE = 24000;
-const STORE_KEY = 'voicePassphrase';
+const STORE_KEY = 'voiceKey';
 /** Longest screenshot edge sent to the model: enough to read axis labels. */
 const SCREENSHOT_EDGE = 1280;
 
@@ -132,144 +130,6 @@ export interface VoiceHost {
   notice(text: string): void;
 }
 
-const INSTRUCTIONS = `You are a maths tutor inside equation.io, a graphing calculator. The student talks; you explain out loud and show things on the graph with tools. Teach by showing: draw it, point at it, animate it.
-
-How the graph works:
-- The graph is a list of rows, one per line. Each row is an equation, a definition, or a label. Verified forms:
-  - Curves and regions: "y = sin(x)", "x^2 + y^2 = 4", "y < x^2" (shaded region), "z = x^2 - y^2" (3D surface).
-  - Sliders: "a = 2" makes a slider; then "y = a sin(x)" uses it.
-  - Functions: "f(x) = x^3 - x" only DEFINES f and draws nothing; add "y = f(x)" to draw it, and "y = d/dx f(x)" for its derivative.
-  - Points: "A = (1, 2)" is a draggable named point.
-  - Parametric curves use u, which runs from 0 to 1 (not t): "(2cos(2pi u), 2sin(2pi u))" is a circle of radius 2.
-  - Parametric surfaces are a bare triple in u and v (both 0 to 1), with no wrapper function: "(sin(pi v) cos(2pi u), sin(pi v) sin(2pi u), cos(pi v))" is a unit sphere.
-  - Polar curves r = f(theta): write them parametrically with theta = 2pi u, so negative r draws correctly. The rose r = sin(4 theta) (8 petals) is "(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))". Never write a bare "r = …" row: that defines a constant named r and draws nothing.
-  - t is time in seconds and makes things move: "y = sin(x - t)" is a travelling wave, "(cos(t), sin(t))" a point circling the origin.
-- Implicit multiplication works: "2x", "a sin(x)". Use ^ for powers, sqrt(), abs(), ln(), log(), exp(), pi, e.
-- Anything beyond these forms (vector fields, complex functions, probability, ODEs, geometry, …): call read_syntax first. Never invent function names; "surface(…)" or "plot(…)" do not exist.
-- Labels are rows too: label((2, 4), "they cross here") or label(A, "vertex"). The point can use sliders, so label((a, a^2), "slides along") follows the curve. Keep label text to a few words.
-- Colors: end a row with a hex color, e.g. "y = x^2 #e24" or "y = 2x #1f77b4 tangent" (no space after the #). Use color to connect ideas (a curve and its label in the same color) or to contrast (the original in grey #999, the new one bright). Rows without one take the palette.
-- The student can also type rows themselves, so call get_graph before relying on what you think is on screen.
-- To change the graph call set_graph with the COMPLETE list of rows. Keep every row the student did not ask to change, exactly as it was.
-- get_graph and set_graph return each row's status, meaning (what the row actually is, e.g. "2D curve …" or "defines r: a scalar constant …; draws nothing by itself"), color, readout value, and notable points (intercepts, extrema) in the visible window. After set_graph, check every meaning matches what you intended to draw. Use these for exact numbers. If any row has status "error", or a "warning" (for example a definition nothing uses, which draws nothing), fix it and call set_graph again before answering; use read_syntax if you are not sure of the right form. Don't give up on a first error. Never say you drew something the result doesn't show.
-
-Showing, not just telling:
-- point_at moves your glowing orb to a spot on the graph. Use it whenever you say "here" or "this point".
-- animate_slider glides a slider so the student can watch the effect: to explore "what does a do?", add a slider row, then animate it while you describe what changes. Prefer 3 to 6 seconds.
-- move_view zooms or pans to what matters, e.g. zoom into an intersection or out to see end behaviour. For a 3D shape, give it a slow spin (about 0.3) so the student sees it from every side; spin 0 stops it.
-- look_at_graph shows you a screenshot of the graph. Use it for visual questions the numbers can't answer: what the graph looks like, whether it matches what the student wanted, overlaps, shapes, 3D views. Describe only what the picture shows: things can be off-screen, and moving points and their trails can leave the window. Say something short like "Let me look" first.
-
-How to tutor:
-- Keep replies short: one to three sentences, then let the student respond. Say what you drew, not the syntax: "There's a circle of radius 2", not "x caret 2 plus y caret 2 equals 4".
-- Ask the student to predict before you reveal ("What do you think happens if a goes negative?"), then show it.
-- Round numbers when speaking unless the student wants precision.
-- If a request is ambiguous, draw your best guess and say what you chose.`;
-
-const TOOLS = [
-  {
-    type: 'function',
-    name: 'get_graph',
-    description:
-      'Read the graph: the visible window, and for every row its text, status, kind, color, readout value, and notable points in view.',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    type: 'function',
-    name: 'set_graph',
-    description:
-      'Replace the whole graph. Pass every row that should be on screen, including unchanged ones. Returns the new graph as get_graph does; rows with status "error" are not drawn.',
-    parameters: {
-      type: 'object',
-      properties: {
-        equations: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'One equation or definition per entry, e.g. ["a = 2", "y = a sin(x)"].',
-        },
-      },
-      required: ['equations'],
-    },
-  },
-  {
-    type: 'function',
-    name: 'look_at_graph',
-    description:
-      'Take a screenshot of the graph as the student sees it. It arrives as an image right after this call, with a legend of the rows and their colors.',
-    parameters: { type: 'object', properties: {} },
-  },
-  {
-    type: 'function',
-    name: 'read_syntax',
-    description:
-      'Look up equation.io syntax in its reference manual. Returns the matching entries with examples. Use it before writing any form not in your instructions, and after any row error.',
-    parameters: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description:
-            'A few words naming what you want to write, e.g. "parametric surface", "vector field", "normal distribution".',
-        },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    type: 'function',
-    name: 'point_at',
-    description:
-      'Move your on-screen presence (a glowing orb) to a point on the graph, to show the user what you are talking about. It follows the point as the user pans and returns home after `seconds` or when the user speaks.',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'number' },
-        y: { type: 'number' },
-        z: { type: 'number', description: '3D graphs only.' },
-        seconds: { type: 'number', description: 'How long to stay there. Default 6.' },
-      },
-      required: ['x', 'y'],
-    },
-  },
-  {
-    type: 'function',
-    name: 'animate_slider',
-    description:
-      'Glide a slider (a constant row like "a = 2") to a new value at a steady rate, so the user can watch the graph change. The final value is saved in the row.',
-    parameters: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'The slider name, e.g. "a".' },
-        to: { type: 'number' },
-        from: { type: 'number', description: 'Jump here first. Default: the current value.' },
-        seconds: { type: 'number', description: 'Default 3.' },
-      },
-      required: ['name', 'to'],
-    },
-  },
-  {
-    type: 'function',
-    name: 'move_view',
-    description:
-      'Smoothly pan and zoom to a new framing. In 2D give x and/or y ranges. In 3D give any of theta (azimuth), phi (elevation), radius (distance), target (the point looked at), and spin to keep the camera orbiting once it arrives.',
-    parameters: {
-      type: 'object',
-      properties: {
-        x: { type: 'array', items: { type: 'number' }, description: '2D: [low, high].' },
-        y: { type: 'array', items: { type: 'number' }, description: '2D: [low, high].' },
-        theta: { type: 'number', description: '3D: radians.' },
-        phi: { type: 'number', description: '3D: radians, -pi/2..pi/2.' },
-        radius: { type: 'number', description: '3D.' },
-        target: { type: 'array', items: { type: 'number' }, description: '3D: [x, y, z].' },
-        spin: {
-          type: 'number',
-          description:
-            '3D: after arriving, keep orbiting horizontally at this many radians per second (0.2 is a slow turntable, 1 is fast; negative turns the other way; 0 stops). Saved in the graph, so it keeps spinning when shared.',
-        },
-        seconds: { type: 'number', description: 'Default 1.5.' },
-      },
-    },
-  },
-];
-
 /** The legend that goes with each screenshot. */
 export function screenshotContext(graph: GraphState): string {
   const lines = graph.rows
@@ -295,8 +155,8 @@ function parseArgs(args: string): Record<string, unknown> | null {
 
 /** What a tool call can reach besides the graph: the conversation and the orb. */
 export interface ToolContext {
-  /** Adds an image (and its legend) to the conversation, after this call's output. */
-  attach(image: string, legend: string): void;
+  /** Adds an image (and its legend) to the conversation. */
+  attach(image: string, legend: string): Promise<void>;
   /** Shows the capture happening: a flash, and the picture flying into the orb. */
   captured(canvas: HTMLCanvasElement, rect: DOMRect): void;
   readSyntax(query: string): Promise<string>;
@@ -326,8 +186,8 @@ export async function runTool(host: VoiceHost, name: string, args: string, ctx: 
       // Encode before the canvas goes on screen as the flying card.
       const image = shot.canvas.toDataURL('image/jpeg', 0.85);
       ctx.captured(shot.canvas, shot.rect);
-      ctx.attach(image, screenshotContext(host.graph()));
-      return { screenshot: 'attached as the next message' };
+      await ctx.attach(image, screenshotContext(host.graph()));
+      return { screenshot: 'the image just added to the conversation' };
     } catch (e) {
       return { error: `screenshot failed: ${e instanceof Error ? e.message : String(e)}` };
     }
@@ -372,28 +232,7 @@ export async function runTool(host: VoiceHost, name: string, args: string, ctx: 
   return { error: `unknown tool ${name}` };
 }
 
-export function float32ToBase64Pcm16(samples: Float32Array): string {
-  const pcm = new Int16Array(samples.length);
-  for (let i = 0; i < samples.length; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  const bytes = new Uint8Array(pcm.buffer);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(bin);
-}
-
-export function base64Pcm16ToFloat32(b64: string): Float32Array {
-  const bin = atob(b64);
-  const pcm = new Int16Array(bin.length >> 1);
-  for (let i = 0; i < pcm.length; i++) pcm[i] = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8);
-  const out = new Float32Array(pcm.length);
-  for (let i = 0; i < pcm.length; i++) out[i] = pcm[i] / 0x8000;
-  return out;
-}
-
-function readPassphrase(): string | null {
+function readKey(): string | null {
   try {
     const params = new URLSearchParams(location.search);
     const given = params.get('voice');
@@ -410,13 +249,16 @@ function readPassphrase(): string | null {
   }
 }
 
-function forgetPassphrase() {
+function forgetKey() {
   try {
     localStorage.removeItem(STORE_KEY);
   } catch {
     // Storage blocked: nothing was remembered.
   }
 }
+
+/** A balance in micro-dollars, for people: "$4.21". */
+export const dollars = (micros: number) => `$${(Math.max(0, micros) / 1e6).toFixed(2)}`;
 
 type OrbState = 'listening' | 'thinking' | 'speaking';
 
@@ -559,112 +401,130 @@ class Orb {
 
 /** One live conversation: mic in, speaker out, tool calls against the graph. */
 class Session {
-  private ws?: WebSocket;
+  private pc?: RTCPeerConnection;
+  private dc?: RTCDataChannel;
   private ctx?: AudioContext;
   private mic?: MediaStream;
-  private playhead = 0;
-  private playing = new Set<AudioBufferSourceNode>();
+  private speaker = new Audio();
+  private callId = '';
   /** Tool calls of the current response, still running. */
   private pendingTools: Promise<void>[] = [];
   private transcript = '';
   private orb: Orb;
   /** Tool calls still running, across responses: the orb thinks until they finish. */
   private running = 0;
-  /** Playback goes through this, so the orb can pulse with the model's voice. */
-  private out?: AnalyserNode;
+  /** The model's audio is playing: set by the server's output_audio_buffer events. */
+  private speaking = false;
   closed = false;
 
   constructor(
     private host: VoiceHost,
-    private passphrase: string,
+    private key: string,
     private onState: (state: 'connecting' | 'live' | 'idle', reason?: string) => void,
   ) {
     this.orb = new Orb(host);
+    this.speaker.autoplay = true;
   }
 
   async start() {
     this.onState('connecting');
     try {
       // Both need the click's user activation, so ask before any await on the network.
-      this.ctx = new AudioContext({ sampleRate: RATE });
-      const micPromise = navigator.mediaDevices.getUserMedia({
+      this.ctx = new AudioContext();
+      this.mic = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
       });
-      const tokenPromise = fetch('/api/voice/token', {
-        method: 'POST',
-        headers: { 'X-Voice-Passphrase': this.passphrase },
-      });
-      this.mic = await micPromise;
       // Stopped while the permission prompt was up: stop() ran before there was a mic to release.
       if (this.closed) return this.release();
-      const res = await tokenPromise;
-      if (res.status === 403 || res.status === 404) {
-        forgetPassphrase();
-        throw new Error(res.status === 403 ? 'Voice passphrase rejected.' : 'Voice mode is not configured.');
-      }
-      if (!res.ok) throw new Error('Could not start a voice session.');
-      const { value } = (await res.json()) as { value: string };
-      if (this.closed) return this.release();
 
-      await this.ctx.audioWorklet.addModule(workletUrl);
-      const tap = new AudioWorkletNode(this.ctx, 'mic-tap');
-      tap.port.onmessage = (e: MessageEvent<Float32Array>) => {
-        if (this.ws?.readyState === WebSocket.OPEN) {
-          this.ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: float32ToBase64Pcm16(e.data) }));
-        }
-      };
-      const source = this.ctx.createMediaStreamSource(this.mic);
-      source.connect(tap);
+      const pc = new RTCPeerConnection();
+      this.pc = pc;
       const micLevel = this.ctx.createAnalyser();
-      source.connect(micLevel);
-      this.out = this.ctx.createAnalyser();
-      this.out.connect(this.ctx.destination);
-
-      const ws = new WebSocket(`wss://api.openai.com/v1/realtime?model=${MODEL}`, [
-        'realtime',
-        `openai-insecure-api-key.${value}`,
-      ]);
-      this.ws = ws;
-      ws.onopen = () => {
-        ws.send(
-          JSON.stringify({
-            type: 'session.update',
-            session: {
-              type: 'realtime',
-              instructions: INSTRUCTIONS,
-              audio: {
-                input: { format: { type: 'audio/pcm', rate: RATE }, turn_detection: { type: 'semantic_vad' } },
-                output: { format: { type: 'audio/pcm', rate: RATE }, voice: VOICE },
-              },
-              tools: TOOLS,
-              tool_choice: 'auto',
-            },
-          }),
-        );
-        this.onState('live');
-        this.orb.show(micLevel, this.out!);
+      this.ctx.createMediaStreamSource(this.mic).connect(micLevel);
+      const out = this.ctx.createAnalyser();
+      pc.ontrack = e => {
+        // The <audio> element plays it; the analyser only lets the orb pulse with it.
+        this.speaker.srcObject = e.streams[0];
+        this.ctx?.createMediaStreamSource(e.streams[0]).connect(out);
       };
-      ws.onmessage = e => this.onEvent(JSON.parse(e.data as string));
-      let opened = false;
-      ws.addEventListener('open', () => (opened = true));
-      ws.onerror = () => this.stop('Voice connection failed.');
-      ws.onclose = () => this.stop(opened ? undefined : 'Voice connection failed.');
+      pc.addTrack(this.mic.getTracks()[0], this.mic);
+      const dc = pc.createDataChannel('oai-events');
+      this.dc = dc;
+      dc.onmessage = e => this.onEvent(JSON.parse(e.data as string));
+      dc.onopen = () => {
+        this.onState('live');
+        this.orb.show(micLevel, out);
+      };
+      dc.onclose = () => void this.ended();
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') void this.ended();
+      };
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      const res = await fetch('/api/voice/call', {
+        method: 'POST',
+        headers: { 'X-Voice-Key': this.key, 'Content-Type': 'application/sdp' },
+        body: offer.sdp,
+      });
+      if (this.closed) return this.release();
+      if (!res.ok) throw new Error(await this.refusal(res));
+      this.callId = res.headers.get('X-Voice-Call') ?? '';
+      await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() });
     } catch (e) {
       const denied = e instanceof DOMException && e.name === 'NotAllowedError';
       this.stop(denied ? 'Microphone access is needed for voice mode.' : e instanceof Error ? e.message : String(e));
     }
   }
 
+  /** Why the Worker would not start a call, in words. */
+  private async refusal(res: Response): Promise<string> {
+    if (res.status === 403 || res.status === 404) {
+      forgetKey();
+      return res.status === 403 ? 'Voice key not recognised.' : 'Voice mode is not configured.';
+    }
+    if (res.status === 402) {
+      const { balance_micros } = (await res.json().catch(() => ({}))) as { balance_micros?: number };
+      return `Voice credit used up${balance_micros === undefined ? '' : ` (${dollars(balance_micros)} left)`}.`;
+    }
+    if (res.status === 429) return 'Voice mode is already running elsewhere with this key.';
+    return 'Could not start a voice session.';
+  }
+
+  /** The call ended from the other side: say why when it was the credit. */
+  private async ended() {
+    if (this.closed) return;
+    const balance = await this.balance();
+    this.stop(balance !== null && balance <= 0 ? 'Voice credit used up.' : undefined);
+  }
+
+  private async balance(): Promise<number | null> {
+    try {
+      const res = await fetch('/api/voice/balance', { method: 'POST', headers: { 'X-Voice-Key': this.key } });
+      return res.ok ? ((await res.json()) as { balance_micros: number }).balance_micros : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private send(event: object) {
+    if (this.dc?.readyState === 'open') this.dc.send(JSON.stringify(event));
+  }
+
   private onEvent(event: { type: string; [k: string]: any }) {
     switch (event.type) {
-      case 'response.output_audio.delta':
+      case 'output_audio_buffer.started':
+        this.speaking = true;
         this.orb.setState('speaking');
-        this.play(base64Pcm16ToFloat32(event.delta));
+        break;
+      case 'output_audio_buffer.stopped':
+      case 'output_audio_buffer.cleared':
+        this.speaking = false;
+        if (!this.running) this.orb.setState('listening');
         break;
       case 'input_audio_buffer.speech_started':
-        // Barge-in: the user talking over the model cuts its audio off, and a
-        // new question means the old pointing is stale.
-        this.interrupt();
+        // The server cuts its own audio off on barge-in; a new question
+        // means the old pointing is stale.
         this.orb.home();
         this.orb.setState('listening');
         break;
@@ -679,36 +539,18 @@ class Session {
         const { call_id, name } = event;
         this.orb.setState('thinking');
         this.running++;
-        const images: { image: string; legend: string }[] = [];
         const run = runTool(this.host, name, event.arguments ?? '{}', {
-          attach: (image, legend) => images.push({ image, legend }),
+          attach: (image, legend) => this.attach(image, legend),
           readSyntax: async query => searchSyntax(await this.syntax(), query),
           captured: (canvas, rect) => this.orb.absorb(canvas, rect),
           pointAt: (x, y, z, seconds) => this.orb.pointAt(x, y, z, seconds),
         }).then(output => {
           this.running--;
           if (this.closed) return;
-          this.ws?.send(
-            JSON.stringify({
-              type: 'conversation.item.create',
-              item: { type: 'function_call_output', call_id, output: JSON.stringify(output) },
-            }),
-          );
-          for (const { image, legend } of images) {
-            this.ws?.send(
-              JSON.stringify({
-                type: 'conversation.item.create',
-                item: {
-                  type: 'message',
-                  role: 'user',
-                  content: [
-                    { type: 'input_text', text: legend },
-                    { type: 'input_image', image_url: image },
-                  ],
-                },
-              }),
-            );
-          }
+          this.send({
+            type: 'conversation.item.create',
+            item: { type: 'function_call_output', call_id, output: JSON.stringify(output) },
+          });
         });
         this.pendingTools.push(run);
         break;
@@ -719,11 +561,11 @@ class Session {
         // response that asked for it: ask for the follow-up once, after all
         // of this response's outputs are in.
         const pending = this.pendingTools.splice(0);
-        // A turn that ended without speech (or whose audio already played out) is back to listening.
-        if (!pending.length && !this.running && !this.playing.size) this.orb.setState('listening');
+        // A turn that ended without speech is back to listening.
+        if (!pending.length && !this.running && !this.speaking) this.orb.setState('listening');
         if (pending.length) {
           void Promise.all(pending).then(() => {
-            if (!this.closed) this.ws?.send(JSON.stringify({ type: 'response.create' }));
+            if (!this.closed) this.send({ type: 'response.create' });
           });
         }
         break;
@@ -732,6 +574,16 @@ class Session {
         console.warn('[voice]', event.error ?? event);
         break;
     }
+  }
+
+  /** Screenshots go through the Worker: too large for a data channel message in every browser. */
+  private async attach(image: string, legend: string): Promise<void> {
+    const res = await fetch('/api/voice/image', {
+      method: 'POST',
+      headers: { 'X-Voice-Key': this.key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ call_id: this.callId, image, legend }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 
   private reference?: Promise<SyntaxEntry[]>;
@@ -745,30 +597,6 @@ class Session {
     return this.reference;
   }
 
-  private play(samples: Float32Array) {
-    const ctx = this.ctx;
-    if (!ctx || !samples.length) return;
-    const buffer = ctx.createBuffer(1, samples.length, RATE);
-    buffer.copyToChannel(samples as Float32Array<ArrayBuffer>, 0);
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.connect(this.out ?? ctx.destination);
-    this.playhead = Math.max(this.playhead, ctx.currentTime + 0.02);
-    src.start(this.playhead);
-    this.playhead += buffer.duration;
-    this.playing.add(src);
-    src.onended = () => {
-      this.playing.delete(src);
-      if (!this.playing.size && !this.running) this.orb.setState('listening');
-    };
-  }
-
-  private interrupt() {
-    for (const src of this.playing) src.stop();
-    this.playing.clear();
-    this.playhead = 0;
-  }
-
   stop(reason?: string) {
     this.release();
     if (this.closed) return;
@@ -779,11 +607,13 @@ class Session {
   /** Frees whatever has been acquired so far; safe to call repeatedly. */
   private release() {
     this.orb.hide();
-    this.interrupt();
-    if (this.ws) {
-      this.ws.onopen = this.ws.onclose = this.ws.onerror = this.ws.onmessage = null;
-      this.ws.close();
+    if (this.dc) this.dc.onopen = this.dc.onclose = this.dc.onmessage = null;
+    if (this.pc) {
+      this.pc.ontrack = this.pc.onconnectionstatechange = null;
+      // Closing the peer connection ends the call; the sideband sees it and settles up.
+      this.pc.close();
     }
+    this.speaker.srcObject = null;
     this.mic?.getTracks().forEach(t => t.stop());
     if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
   }
@@ -791,8 +621,8 @@ class Session {
 
 /** Shows the mic button on unlocked browsers and wires it to a session. */
 export function initVoice(button: HTMLButtonElement, host: VoiceHost) {
-  let passphrase = readPassphrase();
-  if (!passphrase || !navigator.mediaDevices?.getUserMedia || typeof AudioWorkletNode === 'undefined') return;
+  let key = readKey();
+  if (!key || !navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') return;
   button.hidden = false;
   let session: Session | null = null;
 
@@ -803,14 +633,14 @@ export function initVoice(button: HTMLButtonElement, host: VoiceHost) {
     button.title = state === 'idle' ? 'Voice mode: describe a graph out loud' : 'Stop voice mode';
     if (state === 'idle') session = null;
     if (reason) host.notice(reason);
-    passphrase = readPassphrase();
-    if (!passphrase) button.hidden = true;
+    key = readKey();
+    if (!key) button.hidden = true;
   };
 
   button.addEventListener('click', () => {
     if (session) return session.stop();
-    if (!passphrase) return;
-    session = new Session(host, passphrase, setState);
+    if (!key) return;
+    session = new Session(host, key, setState);
     void session.start();
   });
   addEventListener('pagehide', () => session?.stop());

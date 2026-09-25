@@ -11,5 +11,8 @@
     "skipLibCheck": true,
     "types": []
   },
-  "include": [".", "../worker-configuration.d.ts"]
+  "include": [".", "../worker-configuration.d.ts"],
+  // Tests and their fixtures run in Node: tsconfig.test.json checks them with
+  // Node's types, which the Worker itself must not see.
+  "exclude": ["**/*.test.ts", "**/*.fixtures.ts"]
 }
