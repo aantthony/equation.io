@@ -483,11 +483,13 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['sphere meets plane', '(x^2 + y^2 + z^2, z) = (9, 1)'],
       // Alpöge's counterexample to the Jacobian conjecture (July 2026), found by
       // Fable: det JF = -2 everywhere, yet the fiber over (-1/4, 0, 0) holds the
-      // three points the solver marks. Drag c above 0 and two of them leave —
-      // they escape to infinity, which is how an étale map gets to be 3-to-1.
+      // three points the solver marks. JF's rows are the gradients of F's
+      // components, and its determinant reads -2 at the fiber point (1, -1.5,
+      // 6.5). Drag c above 0 and two of the points leave — they escape to
+      // infinity, which is how an étale map gets to be 3-to-1.
       [
         'Jacobian counterexample',
-        'c = -0.25; F(x,y,z) = ((1+x y)^3 z + y^2 (1+x y)(4+3 x y), y + 3 x (1+x y)^2 z + 3 x y^2 (4+3 x y), 2 x - 3 x^2 y - x^3 z); F(x,y,z) = (c, 0, 0)',
+        'c = -0.25; P(x,y,z) = (1 + x y)³ z + y² (1 + x y)(4 + 3x y); Q(x,y,z) = y + 3x (1 + x y)² z + 3x y² (4 + 3x y); R(x,y,z) = 2x − 3x² y − x³ z; F(x,y,z) = (P(x,y,z), Q(x,y,z), R(x,y,z)); JF(x,y,z) = [∇P, ∇Q, ∇R]; det(JF(1, −1.5, 6.5)); F(x,y,z) = (c, 0, 0)',
       ],
     ],
   ],
