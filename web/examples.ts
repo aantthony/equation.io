@@ -489,7 +489,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       // infinity, which is how an étale map gets to be 3-to-1.
       [
         'Jacobian counterexample',
-        'c = -0.25; P(x,y,z) = (1 + x y)³ z + y² (1 + x y)(4 + 3x y); Q(x,y,z) = y + 3x (1 + x y)² z + 3x y² (4 + 3x y); R(x,y,z) = 2x − 3x² y − x³ z; F(x,y,z) = (P(x,y,z), Q(x,y,z), R(x,y,z)); JF(x,y,z) = [∇P, ∇Q, ∇R]; det(JF(1, −1.5, 6.5)); F(x,y,z) = (c, 0, 0)',
+        'c = -0.25; F = ((1 + x y)³ z + y² (1 + x y)(4 + 3x y), y + 3x (1 + x y)² z + 3x y² (4 + 3x y), 2x − 3x² y − x³ z); JF(x,y,z) = [∇F_x, ∇F_y, ∇F_z]; det(JF(1, −1.5, 6.5)); (F_x, F_y, F_z) = (c, 0, 0)',
       ],
     ],
   ],
