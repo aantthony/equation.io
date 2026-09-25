@@ -662,11 +662,16 @@ class Session {
   }
 }
 
-/** Shows the mic button on unlocked browsers and wires it to a session. */
+/**
+ * Voice mode's ways in, on unlocked browsers: the panel's mic button, and an
+ * idle orb at the bottom centre ("Talk to your graph") where the live orb
+ * appears once the call connects.
+ */
 export function initVoice(button: HTMLButtonElement, host: VoiceHost) {
   let key = readKey();
   if (!key || !navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') return;
   button.hidden = false;
+  const start = idleOrb();
   let session: Session | null = null;
 
   const setState = (state: 'connecting' | 'live' | 'idle', reason?: string) => {
@@ -674,17 +679,39 @@ export function initVoice(button: HTMLButtonElement, host: VoiceHost) {
     button.classList.toggle('live', state === 'live');
     button.setAttribute('aria-pressed', state === 'idle' ? 'false' : 'true');
     button.title = state === 'idle' ? 'Voice mode: describe a graph out loud' : 'Stop voice mode';
+    // The live orb takes the idle one's place once connected.
+    start.classList.toggle('connecting', state === 'connecting');
+    start.lastElementChild!.textContent = state === 'connecting' ? 'Connecting…' : 'Talk to your graph';
     if (state === 'idle') session = null;
     if (reason) host.notice(reason);
     key = readKey();
     if (!key) button.hidden = true;
+    start.hidden = !key || state === 'live';
   };
 
-  button.addEventListener('click', () => {
+  const toggle = () => {
     if (session) return session.stop();
     if (!key) return;
     session = new Session(host, key, setState);
     void session.start();
-  });
+  };
+  button.addEventListener('click', toggle);
+  start.addEventListener('click', toggle);
   addEventListener('pagehide', () => session?.stop());
+}
+
+function idleOrb(): HTMLButtonElement {
+  const start = document.createElement('button');
+  start.type = 'button';
+  start.className = 'voice-start';
+  start.title = 'Voice mode: describe a graph out loud';
+  const orb = document.createElement('span');
+  orb.className = 'voice-start-orb';
+  orb.setAttribute('aria-hidden', 'true');
+  const label = document.createElement('span');
+  label.className = 'voice-start-label';
+  label.textContent = 'Talk to your graph';
+  start.append(orb, label);
+  document.body.append(start);
+  return start;
 }
