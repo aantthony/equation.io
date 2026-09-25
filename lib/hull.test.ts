@@ -243,7 +243,8 @@ describe('hull(…) rows', () => {
     expect(analyze(turning(200)).rows[1].error).toMatch(/too large to render .* in all/);
     // …while a list INSIDE the figure is its points.
     expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'hull(e^(th J) P)'])).toEqual(['polygon']);
-  });
+    // ~1.3 s locally, several times that on a loaded CI runner: past the 5 s default.
+  }, 20_000);
   it('explains itself', () => {
     expect(analyze(['vector((1,1)) + (1,0)']).rows[0].error).toMatch(/write vector\(A, B\)/);
     expect(analyze(['P=[(0,0),(1,0),(0,1)]', 'hull(P) hull(P)']).rows[1].error).toMatch(/one figure at a time/);
