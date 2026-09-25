@@ -785,7 +785,7 @@ function numeratorWrap(n: Expr): { order: number; wrap: (x: Expr) => Expr } | nu
  *  float32 roundoff — plots evaluate the expanded expression on the GPU. */
 const FD_H = 1e-4;
 
-function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts): Expr {
+function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts, getFn?: GetFn): Expr {
   const isList = opts?.isList;
   e = throughFields(e, opts);
   // A list is still just a name at this point, and diff() treats an unknown
@@ -799,6 +799,22 @@ function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts): Expr 
       `${list} is a list, and d/d${v} cannot differentiate one` +
         ` — write the derivative of its elements, like [d/d${v} f(${v}), …].`,
     );
+  }
+  // Likewise a component that does not exist: F_1 of a vector-valued
+  // function F, or G_1 of a point whose components are G_x, G_y, G_z, is an
+  // unknown name that would differentiate to 0 (a Jacobian of zeros).
+  for (const name of freeVars(e)) {
+    const base = /^(.+)_[^_]+$/.exec(name)?.[1];
+    if (!base || opts?.definition?.(name) || opts?.isList?.(name)) continue;
+    const comps = opts?.comps?.(base);
+    if (comps && !comps.includes(name)) {
+      throw new Error(`${name} is not defined — ${base}'s components are ${comps.join(', ')}.`);
+    }
+    if (!comps && getFn?.(base)) {
+      throw new Error(
+        `${name} is not defined — ${base} is a function. Name its value first, like G = ${base}(x, y, z), then use G_x, G_y, G_z.`,
+      );
+    }
   }
   for (let k = 0; k < order; k++) {
     try {
@@ -819,7 +835,7 @@ function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts): Expr 
  * multiplication binds tighter than '/', so `d/dx expr` parses as
  * d / (dx · expr): the operand is the tail of the denominator's product chain.
  */
-function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts): Expr | null {
+function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts, getFn?: GetFn): Expr | null {
   const head = numeratorWrap(numr);
   if (!head) return null;
   const factors: Expr[] = [];
@@ -832,7 +848,7 @@ function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts): Expr | null {
   if (!dx || dx.order !== head.order || factors.length === 0) return null;
   let operand = factors[0];
   for (let k = 1; k < factors.length; k++) operand = { kind: 'bin', op: '*', a: operand, b: factors[k] };
-  return head.wrap(applyDiff(operand, dx.v, head.order, opts));
+  return head.wrap(applyDiff(operand, dx.v, head.order, opts, getFn));
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -1087,7 +1103,7 @@ function vectorCalculus(name: string, args: readonly Expr[], ctx: Ctx): Expr {
       `${name} needs ${name === 'div' || name === 'curl' ? 'a vector field' : 'a scalar expression'}, like ${example}.`,
     );
   }
-  const d = (g: Expr, v: string, order = 1) => applyDiff(g, v, order, ctx.opts);
+  const d = (g: Expr, v: string, order = 1) => applyDiff(g, v, order, ctx.opts, ctx.getFn);
   const AXES = ['x', 'y', 'z'];
   if (name === 'grad' || name === 'laplacian') {
     if (f.kind === 'vec') {
@@ -1723,7 +1739,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
       const a = rx(e.a, ctx);
       const b = rx(e.b, ctx);
       if (e.op === '/') {
-        const d = matchDeriv(a, b, ctx.opts);
+        const d = matchDeriv(a, b, ctx.opts, ctx.getFn);
         if (d) return d;
       }
       if (e.glyph) return { kind: 'bin', op: e.op, a, b, glyph: e.glyph };
@@ -1732,7 +1748,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const head = numeratorWrap(a.a);
         const dx = dxOrder(a.b);
         if (head && dx && head.order === dx.order) {
-          return head.wrap(applyDiff(b, dx.v, head.order, ctx.opts));
+          return head.wrap(applyDiff(b, dx.v, head.order, ctx.opts, ctx.getFn));
         }
       }
       return { kind: 'bin', op: e.op, a, b };

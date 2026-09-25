@@ -97,6 +97,23 @@ describe('shared document analysis', () => {
     expect(evaluate(result.gridFields[0].expr, { x: 3, y: 4 })).toBe(5);
     expect(result.rows[3].error).toBeUndefined();
   });
+  it('refuses to differentiate a component that does not exist instead of answering 0', () => {
+    // The Jacobian of this polynomial map is −2 everywhere; F_1 and G_1 are
+    // unknown names, which d/dx used to treat as constants (det J = 0).
+    const F = 'F(x,y,z)=((1+x y)^3 z+y^2 (1+x y)(4+3x y),y+3x (1+x y)^2 z+3x y^2 (4+3x y),2x-3x^2 y-x^3 z)';
+    const rows = [F, 'G=F(x,y,z)', 'd/dz F_1', 'd/dz G_1'];
+    const bad = analyzeRows(rows).rows;
+    expect(bad[2].error).toMatch(/F_1 is not defined — F is a function/);
+    expect(bad[3].error).toMatch(/G_1 is not defined — G's components are G_x, G_y, G_z/);
+    const J = 'J=[[d/dx G_x,d/dy G_x,d/dz G_x],[d/dx G_y,d/dy G_y,d/dz G_y],[d/dx G_z,d/dy G_z,d/dz G_z]]';
+    const det = analyzeRows([F, 'G=F(x,y,z)', J, 'det(J)']).rows[3].cls!.object as { residual: Expr };
+    for (const [x, y, z] of [
+      [1, 2, 3],
+      [-0.7, 0.4, 5],
+    ]) {
+      expect(evaluate(det.residual, { x, y, z })).toBeCloseTo(-2, 9);
+    }
+  });
 });
 
 describe('dependency retention after a failed definition', () => {
