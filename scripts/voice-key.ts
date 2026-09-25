@@ -62,7 +62,8 @@ switch (command) {
     console.log(`Key (shown once): ${key}`);
     // A local key exists only in the dev server's database.
     const origin = remote ? 'https://equation.io' : 'http://localhost:5173';
-    console.log(`Unlock a browser with: ${origin}/?voice=${key}${remote ? '' : ' (or your dev port)'}`);
+    // A fragment never reaches the server, so the key stays out of request logs.
+    console.log(`Unlock a browser with: ${origin}/#voice=${key}${remote ? '' : ' (or your dev port)'}`);
     break;
   }
   case 'grant': {

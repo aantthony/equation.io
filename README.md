@@ -89,8 +89,9 @@ node scripts/voice-key.ts grant <id> 10    # top up; disable/enable <id>
 ```
 
 Each `scripts/voice-key.ts` command takes `--remote` for the deployed database.
-Visit any page once with `?voice=<key>` to show the mic in that browser
-(`?voice=` forgets it).
+Visit any page once with `#voice=<key>` to show the mic in that browser
+(`#voice=` forgets it). `?voice=<key>` works too, but a query string reaches
+the server, which may log it; the fragment never does.
 
 ## Examples
 

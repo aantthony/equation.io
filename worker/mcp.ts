@@ -17,7 +17,7 @@ import { sliderForm } from '../lib/slider.ts';
 import { definitionDependencies } from '../lib/defs.ts';
 import { freeVars } from '../lib/expr.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
-import { publicKind } from '../lib/plot.ts';
+import { rowKind } from '../lib/row-kind.ts';
 import { splitStatements } from '../lib/statements.ts';
 import { analyze } from './graph.ts';
 import { MAX_PLOTS, previewGap } from './og.ts';
@@ -251,27 +251,7 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
         ? { status: 'error' as const, error: row.error }
         : {
             status: 'ok' as const,
-            kind: row.comment
-              ? 'comment (group heading)'
-              : row.def
-                ? // `adults = person[…]` scans as a constant, but what it
-                  // defines is another data file.
-                  `definition (${
-                    row.def.kind === 'const' && analysis.defs.tables.has(row.def.name) ? 'filtered data' : row.def.kind
-                  })`
-                : row.view
-                  ? `viewport (${row.view.kind})`
-                  : row.dist === 'density'
-                    ? 'random variable (density curve)'
-                    : row.dist === 'pmf'
-                      ? 'discrete random variable (pmf stems)'
-                      : row.dist === 'probability'
-                        ? 'probability (shaded area)'
-                        : row.dist === 'expectation'
-                          ? 'expectation (mean readout)'
-                          : row.dataLocal
-                            ? "data (reads a file on the author's device)"
-                            : publicKind(row.cls!.object),
+            kind: rowKind(row, analysis.defs.tables)!,
             ...(row.cls?.animated ? { animated: true } : {}),
             ...(row.info ? { value: row.info } : {}),
             ...(row.dataLocal ? { note: row.dataLocal } : {}),

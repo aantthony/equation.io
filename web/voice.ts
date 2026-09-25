@@ -10,7 +10,7 @@
  *
  * The model works the graph through tools, chiefly:
  * - get_graph: every row as text plus what the app computed for it (kind,
- *   color, readout value, intercepts/extrema in view) and the visible window.
+ *   color, readout value, axis intercepts in view) and the visible window.
  *   Exact numbers come from here, never from pixels.
  * - set_graph: replaces the rows and answers with the same readout, including
  *   each row's parse error, so the model can correct itself the way a person
@@ -20,62 +20,20 @@
  *   heard the question is the one that looks.
  *
  * The feature needs a credit key (scripts/voice-key.ts). A browser is unlocked
- * by visiting any page with `?voice=<key>` once: the key is kept in
- * localStorage and sent with each request, and the mic button stays hidden
- * everywhere else.
+ * by visiting any page with `#voice=<key>` once (or `?voice=<key>`, which the
+ * server may log): the key is kept in localStorage and sent with each call,
+ * and the mic button stays hidden everywhere else.
  */
-import type { PublicKind } from '../lib/math-object.ts';
+import { screenshotLegend } from '../lib/voice-agent.ts';
 import { type SyntaxEntry, searchSyntax, syntaxEntries } from '../lib/syntax-search.ts';
+import { forgetKey, readKey } from './voice-key.ts';
 
-const STORE_KEY = 'voiceKey';
 /** Longest screenshot edge sent to the model: enough to read axis labels. */
 const SCREENSHOT_EDGE = 1280;
 /** The Worker answers within a few seconds; past this it has failed. */
 const CONNECT_TIMEOUT_MS = 20_000;
-
-/** What each drawn row kind looks like, for the voice agent: kind names like
- *  `implicit2d` are the MCP's public vocabulary, not words a model can reason
- *  about. The Record keeps it total — a new kind fails the typecheck here. */
-export const KIND_MEANINGS: Record<PublicKind, string> = {
-  implicit2d: '2D curve (the set of points satisfying an equation)',
-  ineq2d: 'shaded 2D region (an inequality)',
-  scalar2d: '2D scalar field, drawn as shading',
-  implicit3d: '3D surface (the points satisfying an equation in x, y, z)',
-  spacecurve: '3D curve where surfaces intersect',
-  pcurve: 'parametric curve, traced as u runs from 0 to 1',
-  psurface: 'parametric surface over u and v in 0..1',
-  vfield2d: '2D vector field, drawn as flowing streamlines',
-  vfield3d: '3D vector field',
-  point: 'a point',
-  polygon: 'geometric figure (segment, polyline, vector arrow, polygon, circle, …)',
-  label: 'text label at a point',
-  trail: 'motion trail behind a moving point',
-  orbit: 'path of a simulated state over a time range',
-  system: 'solutions of a system of equations (points or curves)',
-  value: 'number readout under the row; draws nothing on the graph',
-  note: 'true/false readout under the row; draws nothing on the graph',
-  family: 'one copy of the row per list element',
-  complex2d: 'complex function shown on the plane',
-  domain2d: 'domain colouring of a complex function',
-  conformal2d: 'conformal map: the image of a grid under a complex function',
-  fractal2d: 'escape-time fractal',
-  rgb2d: 'colour field (RGB), filling the plane',
-  hsl2d: 'colour field (HSL), filling the plane',
-  oklch2d: 'colour field (OKLCH), filling the plane',
-  sequence: 'sequence, drawn as dots at whole numbers n',
-  cobweb: 'cobweb diagram of a recurrence',
-  bifurcation: 'bifurcation / orbit diagram of a recurrence',
-  vlist: 'list of numbers, drawn as dots',
-  plist: 'list of points',
-  dlist: 'data column, drawn as dots',
-  dscatter: 'scatter plot of data',
-  histogram: 'histogram',
-  automaton: 'cellular automaton grid',
-  density: 'probability density curve of a random variable',
-  pmf: 'probability mass function (stems) of a discrete random variable',
-  prob: 'probability, shaded under the density, with its value as a readout',
-  expect: 'expected value readout, marked on the density',
-};
+/** Keeps the control socket from looking idle to proxies while the student is quiet. */
+const HEARTBEAT_MS = 30_000;
 
 export interface RowStatus {
   index: number;
@@ -91,7 +49,7 @@ export interface RowStatus {
   /** The readout under the row (`= 4`, a probability) or a slider's value. */
   value?: string;
   animated?: boolean;
-  /** Intercepts, extrema, … within the visible window (2D curves only). */
+  /** Axis intercepts within the visible window (2D curves only). */
   points?: string[];
   /** Valid, but probably not what was meant (a definition nothing uses). */
   warning?: string;
@@ -103,6 +61,8 @@ export interface GraphState {
   mode: '2d' | '3d';
   /** The visible 2D window; absent in 3D. */
   window?: { x: [number, number]; y: [number, number] };
+  /** The 3D orbit camera (radians; spin in radians per second); absent in 2D. */
+  camera?: { theta: number; phi: number; radius: number; target: [number, number, number]; spin: number };
   rows: RowStatus[];
 }
 
@@ -124,27 +84,13 @@ export interface VoiceHost {
   setRows(rows: string[]): GraphState;
   /** Glide a slider to `to` over `seconds`; reports the actual range, or an error. */
   animateSlider(name: string, to: number, seconds: number, from?: number): object;
-  /** Ease the 2D window or 3D camera to a new framing. */
-  moveView(target: MoveViewTarget, seconds: number): object;
+  /** Ease the 2D window or 3D camera to a new framing; settles once it has arrived. */
+  moveView(target: MoveViewTarget, seconds: number): object | Promise<object>;
   /** Where a math point is on the page, or null when it is off-screen. */
   toClient(x: number, y: number, z?: number): { x: number; y: number } | null;
   /** The graph now, longest edge at most maxEdge pixels, and where it sits on the page. */
   screenshot(maxEdge: number): { canvas: HTMLCanvasElement; rect: DOMRect };
   notice(text: string): void;
-}
-
-/** The legend that goes with each screenshot. */
-export function screenshotContext(graph: GraphState): string {
-  const lines = graph.rows
-    .filter(r => r.text.trim())
-    .map(r => {
-      const bits = [r.color, r.kind, r.status === 'error' ? `not drawn: ${r.error}` : undefined].filter(Boolean);
-      return `- ${r.text}${bits.length ? ` (${bits.join(', ')})` : ''}`;
-    });
-  const view = graph.window
-    ? `Visible window: x from ${graph.window.x[0]} to ${graph.window.x[1]}, y from ${graph.window.y[0]} to ${graph.window.y[1]}.`
-    : 'The graph is a 3D view.';
-  return `Rows in the graph, whether or not they are visible in the screenshot (text, color, kind):\n${lines.join('\n')}\n${view}\nThe equation panel may cover the top-left corner of the screenshot.`;
 }
 
 function parseArgs(args: string): Record<string, unknown> | null {
@@ -189,7 +135,7 @@ export async function runTool(host: VoiceHost, name: string, args: string, ctx: 
       // Encode before the canvas goes on screen as the flying card.
       const image = shot.canvas.toDataURL('image/jpeg', 0.85);
       ctx.captured(shot.canvas, shot.rect);
-      await ctx.attach(image, screenshotContext(host.graph()));
+      await ctx.attach(image, screenshotLegend(host.graph()));
       return { screenshot: 'the image just added to the conversation' };
     } catch (e) {
       return { error: `screenshot failed: ${e instanceof Error ? e.message : String(e)}` };
@@ -235,31 +181,6 @@ export async function runTool(host: VoiceHost, name: string, args: string, ctx: 
   return { error: `unknown tool ${name}` };
 }
 
-function readKey(): string | null {
-  try {
-    const params = new URLSearchParams(location.search);
-    const given = params.get('voice');
-    if (given !== null) {
-      if (given) localStorage.setItem(STORE_KEY, given);
-      else localStorage.removeItem(STORE_KEY);
-      params.delete('voice');
-      const search = params.toString();
-      history.replaceState(history.state, '', location.pathname + (search ? '?' + search : '') + location.hash);
-    }
-    return localStorage.getItem(STORE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function forgetKey() {
-  try {
-    localStorage.removeItem(STORE_KEY);
-  } catch {
-    // Storage blocked: nothing was remembered.
-  }
-}
-
 /** A balance in micro-dollars, for people: "$4.21". */
 export const dollars = (micros: number) => `$${(Math.max(0, micros) / 1e6).toFixed(2)}`;
 
@@ -288,7 +209,7 @@ class Orb {
   ) {
     this.el.className = 'voice-orb';
     this.el.setAttribute('aria-hidden', 'true');
-    this.el.title = 'Tap to interrupt';
+    this.el.title = 'Tap (or press Esc) to interrupt';
     this.el.append(document.createElement('span'));
     // Clickable only while speaking (style.css): voices don't interrupt it.
     this.el.addEventListener('click', onTap);
@@ -408,6 +329,12 @@ class Orb {
   };
 }
 
+/** 'unavailable': the server has no voice mode, so there's nothing to offer this page load. */
+type SessionState = 'connecting' | 'live' | 'idle' | 'unavailable';
+
+/** The voice route doesn't exist on this server (worker/voice.ts: not configured). */
+class Unavailable extends Error {}
+
 /** One live conversation: mic in, speaker out, tool calls against the graph. */
 class Session {
   private pc?: RTCPeerConnection;
@@ -423,8 +350,12 @@ class Session {
   private images = new Map<string, (error?: string) => void>();
   /** Tool calls of the current response, still running. */
   private pendingTools: Promise<void>[] = [];
-  private transcript = '';
   private orb: Orb;
+  private heartbeat?: ReturnType<typeof setInterval>;
+  /** Counts the student's turns: a tool follow-up is for the turn that asked for it. */
+  private turn = 0;
+  /** The student cut this turn's reply off: its tool results go in, but no follow-up reply. */
+  private interrupted = false;
   /** Tool calls still running, across responses: the orb thinks until they finish. */
   private running = 0;
   /** The model's audio is playing: set by the server's output_audio_buffer events. */
@@ -440,11 +371,16 @@ class Session {
   constructor(
     private host: VoiceHost,
     private key: string,
-    private onState: (state: 'connecting' | 'live' | 'idle', reason?: string) => void,
+    private onState: (state: SessionState, reason?: string) => void,
   ) {
     this.orb = new Orb(host, () => this.interrupt());
     this.speaker.autoplay = true;
   }
+
+  /** Esc interrupts too: the orb is a pointer target, invisible to keyboards and screen readers. */
+  private onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && this.speaking) this.interrupt();
+  };
 
   async start() {
     this.onState('connecting');
@@ -474,6 +410,7 @@ class Session {
       dc.onopen = () => {
         this.onState('live');
         this.orb.show(micLevel, out);
+        addEventListener('keydown', this.onKey);
       };
       dc.onclose = () => this.stop(this.reasonText());
       pc.onconnectionstatechange = () => {
@@ -486,6 +423,11 @@ class Session {
       if (this.closed) return this.release();
       await pc.setRemoteDescription({ type: 'answer', sdp: answer });
     } catch (e) {
+      if (e instanceof Unavailable) {
+        this.release();
+        this.closed = true;
+        return this.onState('unavailable', 'Voice mode is not available on this site right now.');
+      }
       const denied = e instanceof DOMException && e.name === 'NotAllowedError';
       this.stop(denied ? 'Microphone access is needed for voice mode.' : e instanceof Error ? e.message : String(e));
     }
@@ -497,6 +439,7 @@ class Session {
       const control = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/api/voice/connect`);
       this.control = control;
       let answered = false;
+      let refused = false;
       // The Worker always answers or refuses; this covers one that can't.
       const timeout = setTimeout(() => {
         if (answered) return;
@@ -510,8 +453,10 @@ class Session {
         if (message.type === 'answer') {
           answered = true;
           clearTimeout(timeout);
+          this.heartbeat = setInterval(() => control.send(JSON.stringify({ type: 'ping' })), HEARTBEAT_MS);
           resolve(message.sdp);
         } else if (message.type === 'refused') {
+          refused = true;
           reject(new Error(this.refusal(message.error, message.balance_micros)));
         } else if (message.type === 'image.done') {
           this.images.get(message.id)?.(message.error);
@@ -521,8 +466,15 @@ class Session {
       };
       control.onclose = () => {
         clearTimeout(timeout);
-        if (!answered) reject(new Error('Could not start a voice session.'));
-        else this.stop(this.reasonText());
+        if (answered) this.stop(this.reasonText());
+        else if (refused) return;
+        // A browser doesn't say why a WebSocket handshake failed: ask plainly.
+        // The route is 404 only when the server has no voice mode configured.
+        else
+          void fetch('/api/voice/connect')
+            .then(res => res.status === 404)
+            .catch(() => false)
+            .then(missing => reject(missing ? new Unavailable() : new Error('Could not start a voice session.')));
       };
     });
   }
@@ -584,15 +536,19 @@ class Session {
         // Turns don't answer themselves (lib/voice-agent.ts): reply to the
         // student, and drop what was overheard so no later reply answers it.
         if (this.overheard) this.send({ type: 'conversation.item.delete', item_id: event.item_id });
-        else this.respond();
+        else {
+          this.turn++;
+          this.interrupted = false;
+          this.respond();
+        }
         this.overheard = false;
         break;
       case 'response.created':
         this.responding = true;
         break;
-      case 'response.output_audio_transcript.delta':
-        this.transcript += event.delta;
-        this.host.notice(this.transcript);
+      case 'response.output_audio_transcript.done':
+        // Once per reply: a live region re-announced on every delta reads the reply over and over.
+        if (event.transcript) this.host.notice(event.transcript);
         break;
       case 'response.function_call_arguments.done': {
         const { call_id, name } = event;
@@ -616,7 +572,6 @@ class Session {
         break;
       }
       case 'response.done': {
-        this.transcript = '';
         this.responding = false;
         if (this.wantResponse) {
           this.wantResponse = false;
@@ -629,8 +584,10 @@ class Session {
         // A turn that ended without speech is back to listening.
         if (!pending.length && !this.running && !this.speaking) this.orb.setState('listening');
         if (pending.length) {
+          const turn = this.turn;
           void Promise.all(pending).then(() => {
-            if (!this.closed) this.respond();
+            // Not after a tap, nor once the student has moved on: their new turn gets its own reply.
+            if (!this.closed && !this.interrupted && this.turn === turn) this.respond();
           });
         }
         break;
@@ -644,6 +601,8 @@ class Session {
   /** The student tapped the orb: stop talking, and drop what was still to be said. */
   private interrupt() {
     if (!this.speaking) return;
+    this.interrupted = true;
+    this.wantResponse = false;
     this.send({ type: 'response.cancel' });
     this.send({ type: 'output_audio_buffer.clear' });
     this.orb.home();
@@ -685,6 +644,8 @@ class Session {
   /** Frees whatever has been acquired so far; safe to call repeatedly. */
   private release() {
     this.orb.hide();
+    removeEventListener('keydown', this.onKey);
+    clearInterval(this.heartbeat);
     if (this.dc) this.dc.onopen = this.dc.onclose = this.dc.onmessage = null;
     if (this.pc) {
       this.pc.ontrack = this.pc.onconnectionstatechange = null;
@@ -714,19 +675,26 @@ export function initVoice(button: HTMLButtonElement, host: VoiceHost) {
   const start = idleOrb();
   let session: Session | null = null;
 
-  const setState = (state: 'connecting' | 'live' | 'idle', reason?: string) => {
+  let unavailable = false;
+
+  const setState = (state: SessionState, reason?: string) => {
+    const idle = state === 'idle' || state === 'unavailable';
     button.classList.toggle('connecting', state === 'connecting');
     button.classList.toggle('live', state === 'live');
-    button.setAttribute('aria-pressed', state === 'idle' ? 'false' : 'true');
-    button.title = state === 'idle' ? 'Voice mode: describe a graph out loud' : 'Stop voice mode';
+    button.setAttribute('aria-pressed', idle ? 'false' : 'true');
+    button.title = idle
+      ? 'Voice mode: describe a graph out loud'
+      : 'Stop voice mode (Esc interrupts a reply while it is speaking)';
     // The live orb takes the idle one's place once connected.
     start.classList.toggle('connecting', state === 'connecting');
     start.lastElementChild!.textContent = state === 'connecting' ? 'Connecting…' : 'Talk to your graph';
-    if (state === 'idle') session = null;
+    if (idle) session = null;
+    // The key stays: the server may have voice mode again on a later visit.
+    if (state === 'unavailable') unavailable = true;
     if (reason) host.notice(reason);
     key = readKey();
-    if (!key) button.hidden = true;
-    start.hidden = !key || state === 'live';
+    button.hidden = !key || unavailable;
+    start.hidden = !key || unavailable || state === 'live';
   };
 
   const toggle = () => {

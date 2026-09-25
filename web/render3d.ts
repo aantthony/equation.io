@@ -57,6 +57,15 @@ export function cameraMatrices(
   return { vp, invVp: invert(vp), eye };
 }
 
+/** Where a world point lands in a w×h viewport under `vp`, or null behind the camera. */
+export function projectToScreen(vp: Mat4, p: readonly number[], w: number, h: number): [number, number] | null {
+  const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
+  const cy = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
+  const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+  if (cw <= 0) return null;
+  return [((cx / cw) * 0.5 + 0.5) * w, (0.5 - (cy / cw) * 0.5) * h];
+}
+
 const MARCH_COMMON = `
 uniform mat4 uInvVP;
 uniform mat4 uVP;
@@ -1116,20 +1125,16 @@ export function drawLabels3D(
       ),
   ];
   for (const [text, p, color] of labels) {
-    const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
-    const cy = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
-    const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
-    if (cw <= 0) continue;
+    const at = projectToScreen(vp, p, w, h);
+    if (!at) continue;
     ctx.fillStyle = color;
-    ctx.fillText(text, ((cx / cw) * 0.5 + 0.5) * w + 7, (0.5 - (cy / cw) * 0.5) * h - 7);
+    ctx.fillText(text, at[0] + 7, at[1] - 7);
   }
-  for (const { pos: p, text, color } of texts) {
-    const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
-    const cy = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
-    const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
-    if (cw <= 0) continue;
+  for (const { pos, text, color } of texts) {
+    const at = projectToScreen(vp, pos, w, h);
+    if (!at) continue;
     const css = `rgb(${color.map(c => Math.round(c * 255)).join(',')})`;
-    drawTextLabel(ctx, text, ((cx / cw) * 0.5 + 0.5) * w, (0.5 - (cy / cw) * 0.5) * h, css);
+    drawTextLabel(ctx, text, at[0], at[1], css);
   }
   ctx.restore();
 }

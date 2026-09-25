@@ -231,11 +231,12 @@ describe('mcp endpoint', () => {
     // Every member of the family reports the same human-readable kinds the
     // base rows do, whether the density is exact (X, X + X) or sampled (Y) —
     // and the inline-bounded P(X + X < 1) is a probability the same way.
+    // P(Y > X), an event over two variables, is only estimated: nothing shades.
     expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual([
       'random variable (density curve)',
       'random variable (density curve)',
       'probability (shaded area)',
-      'probability (shaded area)',
+      'probability (readout only)',
       'random variable (density curve)',
       'probability (shaded area)',
     ]);
