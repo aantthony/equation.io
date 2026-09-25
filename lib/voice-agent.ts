@@ -3,6 +3,15 @@
  * which fixes them in the session when it creates the call
  * (worker/voice.ts), and the page, which runs the tools (web/voice.ts).
  */
+import type { ObjectSchema } from './json-schema.ts';
+
+/** A function the Realtime model can call; web/voice.ts runTool implements each. */
+export interface FunctionTool {
+  type: 'function';
+  name: string;
+  description: string;
+  parameters: ObjectSchema;
+}
 
 export const VOICE_MODEL = 'gpt-realtime-2.1';
 export const VOICE_NAME = 'marin';
@@ -39,7 +48,7 @@ How to tutor:
 - Round numbers when speaking unless the student wants precision.
 - If a request is ambiguous, draw your best guess and say what you chose.`;
 
-export const TOOLS = [
+export const TOOLS: FunctionTool[] = [
   {
     type: 'function',
     name: 'get_graph',
