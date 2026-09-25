@@ -48,10 +48,5 @@
       "database_name": "equation",
       "migrations_dir": "migrations"
     }
-  ],
-  // One per live voice call: its metering sideband (worker/voice-call.ts).
-  "durable_objects": {
-    "bindings": [{ "name": "VOICE_CALLS", "class_name": "VoiceCall" }]
-  },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VoiceCall"] }]
+  ]
 }

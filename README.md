@@ -71,14 +71,14 @@ with `get_graph` / `set_graph` tools, which report each row's readouts (values,
 intercepts, extrema in view). `look_at_graph` puts a screenshot of the canvas
 into the conversation as an image.
 
-The page never holds an OpenAI credential. It sends its WebRTC offer and a
-**credit key** to the Worker ([`worker/voice.ts`](worker/voice.ts)), which
-checks the key's balance in D1, creates the call with a fixed session, and
-attaches a sideband ([`worker/voice-call.ts`](worker/voice-call.ts), a Durable
-Object) before answering. The sideband charges every response's token usage to
-the key ([`worker/voice-credit.ts`](worker/voice-credit.ts)) and hangs up when
-the balance runs out or after 30 minutes. Audio flows between the browser and
-OpenAI directly.
+The page never holds an OpenAI credential. It opens a control WebSocket to the
+Worker ([`worker/voice-call.ts`](worker/voice-call.ts)) and sends its WebRTC
+offer with a **credit key**. The Worker checks the key's balance in D1, creates
+the call with a fixed session, and attaches a sideband WebSocket to it before
+answering. The sideband charges every response's token usage to the key
+([`worker/voice-credit.ts`](worker/voice-credit.ts)); the call is hung up when
+the balance runs out, after 30 minutes, or when the page's control socket
+closes. Audio flows between the browser and OpenAI directly.
 
 ```sh
 wrangler secret put OPENAI_API_KEY     # locally: in .dev.vars

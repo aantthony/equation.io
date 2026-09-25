@@ -2,10 +2,11 @@
  * Voice mode: talk to an OpenAI Realtime model and it edits the graph.
  *
  * Audio goes over WebRTC between the browser and OpenAI. The page never holds
- * an OpenAI credential: it sends its offer to /api/voice/call with a credit
- * key, and the Worker creates the call, meters it, and hangs up when the
- * key's credit runs out (worker/voice.ts). Events and tool calls travel over
- * the call's data channel.
+ * an OpenAI credential: it opens a control WebSocket to the Worker and sends
+ * its offer with a credit key, and the Worker creates the call, meters it, and
+ * hangs up when the key's credit runs out or the socket closes
+ * (worker/voice-call.ts). Events and tool calls travel over the call's data
+ * channel; screenshots over the control socket.
  *
  * The model works the graph through tools, chiefly:
  * - get_graph: every row as text plus what the app computed for it (kind,
@@ -406,7 +407,12 @@ class Session {
   private ctx?: AudioContext;
   private mic?: MediaStream;
   private speaker = new Audio();
-  private callId = '';
+  /** The Worker's control socket: the call lives exactly as long as it does (worker/voice-call.ts). */
+  private control?: WebSocket;
+  /** Why the Worker ended the call, once it says. */
+  private endReason?: string;
+  /** Screenshots on their way into the conversation, by id. */
+  private images = new Map<string, (error?: string) => void>();
   /** Tool calls of the current response, still running. */
   private pendingTools: Promise<void>[] = [];
   private transcript = '';
@@ -455,56 +461,67 @@ class Session {
         this.onState('live');
         this.orb.show(micLevel, out);
       };
-      dc.onclose = () => void this.ended();
+      dc.onclose = () => this.stop(this.reasonText());
       pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') void this.ended();
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.stop(this.reasonText());
       };
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      const res = await fetch('/api/voice/call', {
-        method: 'POST',
-        headers: { 'X-Voice-Key': this.key, 'Content-Type': 'application/sdp' },
-        body: offer.sdp,
-      });
+      const answer = await this.connect(offer.sdp!);
       if (this.closed) return this.release();
-      if (!res.ok) throw new Error(await this.refusal(res));
-      this.callId = res.headers.get('X-Voice-Call') ?? '';
-      await pc.setRemoteDescription({ type: 'answer', sdp: await res.text() });
+      await pc.setRemoteDescription({ type: 'answer', sdp: answer });
     } catch (e) {
       const denied = e instanceof DOMException && e.name === 'NotAllowedError';
       this.stop(denied ? 'Microphone access is needed for voice mode.' : e instanceof Error ? e.message : String(e));
     }
   }
 
+  /** Opens the control socket and trades the offer (and key) for the call's answer. */
+  private connect(sdp: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const control = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/api/voice/connect`);
+      this.control = control;
+      let answered = false;
+      control.onopen = () => control.send(JSON.stringify({ type: 'start', key: this.key, sdp }));
+      control.onmessage = e => {
+        const message = JSON.parse(e.data as string) as { type: string; [k: string]: any };
+        if (message.type === 'answer') {
+          answered = true;
+          resolve(message.sdp);
+        } else if (message.type === 'refused') {
+          reject(new Error(this.refusal(message.error, message.balance_micros)));
+        } else if (message.type === 'image.done') {
+          this.images.get(message.id)?.(message.error);
+        } else if (message.type === 'ended') {
+          this.endReason = message.reason;
+        }
+      };
+      control.onclose = () => {
+        if (!answered) reject(new Error('Could not start a voice session.'));
+        else this.stop(this.reasonText());
+      };
+    });
+  }
+
   /** Why the Worker would not start a call, in words. */
-  private async refusal(res: Response): Promise<string> {
-    if (res.status === 403 || res.status === 404) {
+  private refusal(error: string, balance?: number): string {
+    if (error === 'forbidden') {
       forgetKey();
-      return res.status === 403 ? 'Voice key not recognised.' : 'Voice mode is not configured.';
+      return 'Voice key not recognised.';
     }
-    if (res.status === 402) {
-      const { balance_micros } = (await res.json().catch(() => ({}))) as { balance_micros?: number };
-      return `Voice credit used up${balance_micros === undefined ? '' : ` (${dollars(balance_micros)} left)`}.`;
+    if (error === 'no_credit') {
+      return `Voice credit used up${balance === undefined ? '' : ` (${dollars(balance)} left)`}.`;
     }
-    if (res.status === 429) return 'Voice mode is already running elsewhere with this key.';
+    if (error === 'too_many_calls') return 'Voice mode is already running elsewhere with this key.';
     return 'Could not start a voice session.';
   }
 
-  /** The call ended from the other side: say why when it was the credit. */
-  private async ended() {
-    if (this.closed) return;
-    const balance = await this.balance();
-    this.stop(balance !== null && balance <= 0 ? 'Voice credit used up.' : undefined);
-  }
-
-  private async balance(): Promise<number | null> {
-    try {
-      const res = await fetch('/api/voice/balance', { method: 'POST', headers: { 'X-Voice-Key': this.key } });
-      return res.ok ? ((await res.json()) as { balance_micros: number }).balance_micros : null;
-    } catch {
-      return null;
-    }
+  /** Why the call ended, when it wasn't the student's doing. */
+  private reasonText(): string | undefined {
+    if (this.endReason === 'out of credit') return 'Voice credit used up.';
+    if (this.endReason === 'time limit') return 'Voice calls end after 30 minutes.';
+    return undefined;
   }
 
   private send(event: object) {
@@ -576,14 +593,19 @@ class Session {
     }
   }
 
-  /** Screenshots go through the Worker: too large for a data channel message in every browser. */
-  private async attach(image: string, legend: string): Promise<void> {
-    const res = await fetch('/api/voice/image', {
-      method: 'POST',
-      headers: { 'X-Voice-Key': this.key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ call_id: this.callId, image, legend }),
+  /** Screenshots go through the Worker's sideband: too large for a data channel message in every browser. */
+  private attach(image: string, legend: string): Promise<void> {
+    const control = this.control;
+    if (control?.readyState !== WebSocket.OPEN) return Promise.reject(new Error('the call has ended'));
+    const id = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      this.images.set(id, error => {
+        this.images.delete(id);
+        if (error) reject(new Error(error));
+        else resolve();
+      });
+      control.send(JSON.stringify({ type: 'image', id, image, legend }));
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }
 
   private reference?: Promise<SyntaxEntry[]>;
@@ -610,9 +632,14 @@ class Session {
     if (this.dc) this.dc.onopen = this.dc.onclose = this.dc.onmessage = null;
     if (this.pc) {
       this.pc.ontrack = this.pc.onconnectionstatechange = null;
-      // Closing the peer connection ends the call; the sideband sees it and settles up.
       this.pc.close();
     }
+    if (this.control) {
+      this.control.onopen = this.control.onmessage = this.control.onclose = null;
+      // The Worker hangs the call up and settles its charges when this closes.
+      this.control.close();
+    }
+    for (const settle of this.images.values()) settle('the call has ended');
     this.speaker.srcObject = null;
     this.mic?.getTracks().forEach(t => t.stop());
     if (this.ctx && this.ctx.state !== 'closed') void this.ctx.close();
