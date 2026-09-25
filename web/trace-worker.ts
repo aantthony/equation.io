@@ -12,8 +12,10 @@ self.onmessage = (event: MessageEvent<TraceMessage>) => {
     const { residuals, dim, lo, hi, env, angular } = input;
     if (input.kind === 'certify') {
       if (angular?.some(Boolean)) throw new Error('Certification does not yet cover wrapped angular coordinates.');
-      const proof = certifySystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, env);
-      const numeric = solveSystem(residuals, dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'], lo, hi, { env });
+      const names = dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'];
+      const numeric = solveSystem(residuals, names, lo, hi, { env });
+      // The numeric roots only say where to look; each proof is the interval test's.
+      const proof = certifySystem(residuals, names, lo, hi, env, undefined, numeric);
       for (const p of proof.roots)
         if (!numeric.some(q => Math.hypot(...q.map((v, k) => v - p[k])) < 1e-7)) numeric.push(p);
       result = {
