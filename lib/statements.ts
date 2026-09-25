@@ -97,6 +97,22 @@ export function stripNote(text: string): string {
   return at < 0 ? text : text.slice(0, at).trimEnd();
 }
 
+/**
+ * A row's color, when its note opens with a hex color glued to the `#`:
+ * `y = x^2 #e24` or `y = x^2 #1f77b4 parabola`. The glue is what makes it a
+ * color — `# fed` or `# 100 samples` stay plain notes — so the collisions
+ * left are glued notes whose first word is 3 or 6 hex characters (`#bad`,
+ * `#100`). Returns the channels in 0–1, or null for no (or a malformed) color.
+ */
+export function noteColor(text: string): [number, number, number] | null {
+  const at = noteStart(text);
+  if (at < 0) return null;
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})(?![\w])/i.exec(text.slice(at));
+  if (!m) return null;
+  const hex = m[1].length === 3 ? [...m[1]].map(c => c + c).join('') : m[1];
+  return [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
+}
+
 /** `code` with `old`'s trailing note carried over, for writers that rebuild a
  *  row's math (a slider drag, a dragged point) and must not drop the note. */
 export function keepNote(old: string, code: string): string {

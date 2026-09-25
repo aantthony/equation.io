@@ -169,7 +169,8 @@ function matchRevolve(e: Expr): Expr | null {
 
 /** First special-form call at any position other than the root itself. */
 function nestedSpecial(e: Expr, isRoot = false): string | undefined {
-  if (!isRoot && ['trail', 'figure', 'hist', 'family'].includes(e.kind)) return e.kind === 'figure' ? e.form : e.kind;
+  if (!isRoot && ['trail', 'label', 'figure', 'hist', 'family'].includes(e.kind))
+    return e.kind === 'figure' ? e.form : e.kind;
   if (e.kind === 'call' && !isRoot && WHOLE_EXPR_FORMS.has(e.name)) return e.name;
   switch (e.kind) {
     case 'index':
@@ -178,6 +179,7 @@ function nestedSpecial(e: Expr, isRoot = false): string | undefined {
     case 'comp':
     case 'figure':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return childrenOf(e)
@@ -395,6 +397,7 @@ function classifyLowered(
       'prob',
       'expect',
       'trail',
+      'label',
     ]);
     if (unsupported.has(first))
       throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
@@ -534,6 +537,18 @@ function classifyLowered(
       throw new Error('trail needs a real point using constants, states, and t; use u for a parametric curve.');
     }
     return done({ kind: 'trail', coordinates: components(expr.coordinates) });
+  }
+
+  if (expr.kind === 'label') {
+    if (
+      hasSpace ||
+      hasParam ||
+      usesComplex(expr) ||
+      expr.coordinates.some(c => c.kind === 'data' || c.kind === 'list')
+    ) {
+      throw new Error('label needs a real point using constants, points, sliders, and t: label((1, 2), "peak").');
+    }
+    return done({ kind: 'label', coordinates: components(expr.coordinates), text: expr.text });
   }
 
   // Desugared segment()/polyline()/vector()/polygon()/square(): CPU-evaluated

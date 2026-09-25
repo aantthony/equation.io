@@ -21,6 +21,7 @@ export const PUBLIC_KIND_ROWS = {
   note: ['1 < 2'],
   value: ['2 + 3'],
   trail: ['trail((cos(t), sin(t)))'],
+  label: ['label((1, 2), "peak")'],
   polygon: ['segment((0, 0), (1, 1))'],
   spacecurve: ['(x^2 + y^2, z) = (1, 0)'],
   system: ['(x + y, x - y) = (3, 1)'],

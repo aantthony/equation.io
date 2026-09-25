@@ -12,7 +12,7 @@ import { finiteRuns } from '../lib/curve3d.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { ProgramCache, QUAD_VERT, compileProgram } from './gl.ts';
 import { type Mat4, invert, lookAt, multiply, perspective } from './mat4.ts';
-import { niceSpacing, paramDecls } from './render2d.ts';
+import { drawTextLabel, niceSpacing, paramDecls } from './render2d.ts';
 import { glslVec3, theme } from './theme.ts';
 import { RetainedGeometry } from './retained-geometry.ts';
 
@@ -55,6 +55,15 @@ export function cameraMatrices(
   const proj = perspective(Math.PI / 4, aspect, cam.radius * 0.01, cam.radius * 100);
   const vp = multiply(proj, view);
   return { vp, invVp: invert(vp), eye };
+}
+
+/** Where a world point lands in a w×h viewport under `vp`, or null behind the camera. */
+export function projectToScreen(vp: Mat4, p: readonly number[], w: number, h: number): [number, number] | null {
+  const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
+  const cy = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
+  const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+  if (cw <= 0) return null;
+  return [((cx / cw) * 0.5 + 0.5) * w, (0.5 - (cy / cw) * 0.5) * h];
 }
 
 const MARCH_COMMON = `
@@ -674,6 +683,8 @@ export interface Scene3D {
     retained?: boolean;
   }>;
   points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string }>;
+  /** `label(point, "text")` rows: text only, no point sprite. */
+  texts?: Array<{ pos: [number, number, number]; text: string; color: [number, number, number] }>;
   /** 3D vector fields drawn as animated streamlines (see streamlineVert). */
   streamlines?: Array<{
     comps: [string, string, string];
@@ -1093,6 +1104,7 @@ export function drawLabels3D(
   cam: Camera3D,
   dpr: number,
   points: Scene3D['points'] = [],
+  texts: NonNullable<Scene3D['texts']> = [],
 ): void {
   const w = ctx.canvas.width / dpr;
   const h = ctx.canvas.height / dpr;
@@ -1113,12 +1125,16 @@ export function drawLabels3D(
       ),
   ];
   for (const [text, p, color] of labels) {
-    const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
-    const cy = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
-    const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
-    if (cw <= 0) continue;
+    const at = projectToScreen(vp, p, w, h);
+    if (!at) continue;
     ctx.fillStyle = color;
-    ctx.fillText(text, ((cx / cw) * 0.5 + 0.5) * w + 7, (0.5 - (cy / cw) * 0.5) * h - 7);
+    ctx.fillText(text, at[0] + 7, at[1] - 7);
+  }
+  for (const { pos, text, color } of texts) {
+    const at = projectToScreen(vp, pos, w, h);
+    if (!at) continue;
+    const css = `rgb(${color.map(c => Math.round(c * 255)).join(',')})`;
+    drawTextLabel(ctx, text, at[0], at[1], css);
   }
   ctx.restore();
 }

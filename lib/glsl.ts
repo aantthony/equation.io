@@ -368,6 +368,7 @@ export function toGLSL(e: Expr): string {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       throw new Error(structuralDiagnostic(e));

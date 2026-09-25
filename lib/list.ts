@@ -940,6 +940,7 @@ function lower(e: Expr, ctx: Ctx): Expr {
       return e;
     case 'figure':
     case 'trail':
+    case 'label':
     case 'family':
       return mapChildren(e, n => {
         const child = lower(n, ctx);
@@ -1226,6 +1227,7 @@ export function usesListReduction(e: Expr): boolean {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return childrenOf(e).some(usesListReduction);

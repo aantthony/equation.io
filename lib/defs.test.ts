@@ -33,6 +33,7 @@ describe('scanDefinition', () => {
     expect(scanDefinition('distance(x) = 2x')).toMatchObject({ kind: 'fn', name: 'distance' });
     expect(scanDefinition('revolve = 3')).toMatchObject({ kind: 'const', name: 'revolve' });
     expect(scanDefinition('revolve(x) = 2x')).toMatchObject({ kind: 'fn', name: 'revolve' });
+    expect(scanDefinition('label = 3')).toMatchObject({ kind: 'const', name: 'label' });
     const { defs, errors } = buildDefs([{ kind: 'fn', name: 'gamma', params: ['x'], rhs: '2x' }]);
     expect(errors.size).toBe(0);
     const e = resolveExpr(parseExpr('gamma(3) + 1', new Set(['gamma'])), n => defs.fns.get(n));

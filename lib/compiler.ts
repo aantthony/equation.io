@@ -36,6 +36,7 @@ export type CpuPlan =
   | { type: 'fractal2d'; step: Expr; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
+  | { type: 'label'; dim: 2 | 3; coords: Expr[]; text: string }
   | { type: 'orbit'; dim: 2 | 3; paths: Expr[][]; series: boolean; from: Expr; to: Expr }
   /** `pts` flat, or with `over` one vertex template run over the columns. */
   | {
@@ -231,6 +232,13 @@ export function compileCpu(classified: Classified): CpuPlan {
     }
     case 'trail':
       return { type: 'trail', dim: object.coordinates.length as 2 | 3, coords: object.coordinates.map(real) };
+    case 'label':
+      return {
+        type: 'label',
+        dim: object.coordinates.length as 2 | 3,
+        coords: object.coordinates.map(real),
+        text: object.text,
+      };
     case 'orbit':
       return {
         type: 'orbit',
@@ -488,6 +496,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'intersection':
     case 'point':
     case 'trail':
+    case 'label':
     case 'orbit':
     case 'figure':
     case 'system':
@@ -583,6 +592,9 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'point':
     case 'trail':
       structure = expressions(plan.coords);
+      break;
+    case 'label':
+      structure = [expressions(plan.coords), plan.text];
       break;
     case 'orbit':
       structure = [plan.series, plan.paths.map(expressions), exprKey(plan.from), exprKey(plan.to)];

@@ -17,131 +17,153 @@ import { sliderForm } from '../lib/slider.ts';
 import { definitionDependencies } from '../lib/defs.ts';
 import { freeVars } from '../lib/expr.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
-import { publicKind } from '../lib/plot.ts';
+import { rowKind } from '../lib/row-kind.ts';
 import { splitStatements } from '../lib/statements.ts';
 import { analyze } from './graph.ts';
 import { MAX_PLOTS, previewGap } from './og.ts';
 import { GRAPH_UI_URI, graphResource, graphResourceContents } from './mcp-app.ts';
+import type { JsonSchema, ObjectSchema } from '../lib/json-schema.ts';
 
 const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+
+/** A tool as tools/list describes it. */
+interface McpTool {
+  name: string;
+  title?: string;
+  description: string;
+  annotations?: {
+    title?: string;
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
+  inputSchema: ObjectSchema;
+  outputSchema?: ObjectSchema;
+  _meta?: Record<string, unknown>;
+}
+
+/** What encode_graph_url returns; show_graph returns it without the static-preview fields. */
+const ENCODE_RESULT: ObjectSchema & { properties: Record<string, JsonSchema> } = {
+  type: 'object',
+  properties: {
+    valid: { type: 'boolean' },
+    url: { type: 'string', description: 'Graph URL using a #-fragment.' },
+    share_url: { type: 'string', description: 'Shareable /g/ graph URL.' },
+    preview: { type: 'string', description: 'Static preview availability and limitations.' },
+    preview_omits: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { row: { type: 'string' }, why: { type: 'string' } },
+        required: ['row', 'why'],
+        additionalProperties: false,
+      },
+    },
+    rows: {
+      type: 'array',
+      items: {
+        anyOf: [
+          {
+            type: 'object',
+            properties: {
+              text: { type: 'string' },
+              status: { type: 'string', enum: ['ok'] },
+              kind: { type: 'string' },
+              animated: { type: 'boolean' },
+              value: { type: 'string' },
+              note: { type: 'string' },
+              draggable: { type: 'boolean' },
+            },
+            required: ['text', 'status', 'kind'],
+            additionalProperties: false,
+          },
+          {
+            type: 'object',
+            properties: {
+              text: { type: 'string' },
+              status: { type: 'string', enum: ['error'] },
+              error: { type: 'string' },
+            },
+            required: ['text', 'status', 'error'],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+  },
+  required: ['valid', 'url', 'share_url', 'preview', 'rows'],
+  additionalProperties: false,
+};
 
 // Kept deliberately short: a client is known to truncate long tool
 // descriptions (the old inline syntax manual was cut mid-sentence), so this
 // names every capability and defers the actual syntax to the resource below.
-const TOOLS = [
-  {
-    name: 'encode_graph_url',
-    title: 'Create a graph link',
-    annotations: { title: 'Create a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description: `Build an equation.io graph link, validating every row with the app's parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see decode_graph_url), include unchanged rows too.
+const ENCODE_TOOL: McpTool = {
+  name: 'encode_graph_url',
+  title: 'Create a graph link',
+  annotations: { title: 'Create a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  description: `Build an equation.io graph link, validating every row with the app's parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see decode_graph_url), include unchanged rows too.
 
 Rows can be: equations and inequalities in x,y (curves, regions; z makes it 3D), bare expressions (scalar fields; complex plots via w), points (rows report "draggable"), parametric tuples in u,v — and definitions: "a = 2" (a draggable slider), "f(x) = x^3 - a x", coordinate fields like "r = sqrt(x^2+y^2)" for polar. t animates. Also derivatives d/dx, integrals int[a..b] f dx, sums sum[n=1..N], domain()/conformal()/iter() for complex plots, rgb()/hsl()/oklch() color fields, y' = … slope fields, random variables "X ~ Normal(m, s)"/"P(0<X<2)"/"E(X^2)", and "view(x = -5..5, y = -2..2)"/"camera(theta, phi)" framing rows. That is a menu, not the syntax: before your first non-trivial graph, read the "syntax" MCP resource (also at https://equation.io/llms.txt).
 
 The result returns text and structured data only. "rows" gives each equation's validation result: status "ok" with its kind, or "error" with the parser message. The link is usable only once every row is "ok". Give users the share_url (it unfurls to a preview card in chat apps); url is the equivalent #-fragment form. "preview" and "preview_omits" describe the share link's simplified static preview (t = 0, 3D as wireframes), which draws less than the interactive app. No image is attached to the tool response.`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        equations: {
-          type: 'array',
-          items: { type: 'string' },
-          description:
-            'Every equation in the graph, in display order. One equation or definition per string — do not join rows with ";" (inside quoted text a ";" is data, and kept).',
-        },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      equations: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'Every equation in the graph, in display order. One equation or definition per string — do not join rows with ";" (inside quoted text a ";" is data, and kept).',
       },
-      required: ['equations'],
-      additionalProperties: false,
     },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        valid: { type: 'boolean' },
-        url: { type: 'string', description: 'Graph URL using a #-fragment.' },
-        share_url: { type: 'string', description: 'Shareable /g/ graph URL.' },
-        preview: { type: 'string', description: 'Static preview availability and limitations.' },
-        preview_omits: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: { row: { type: 'string' }, why: { type: 'string' } },
-            required: ['row', 'why'],
-            additionalProperties: false,
-          },
-        },
-        rows: {
-          type: 'array',
-          items: {
-            anyOf: [
-              {
-                type: 'object',
-                properties: {
-                  text: { type: 'string' },
-                  status: { type: 'string', enum: ['ok'] },
-                  kind: { type: 'string' },
-                  animated: { type: 'boolean' },
-                  value: { type: 'string' },
-                  note: { type: 'string' },
-                  draggable: { type: 'boolean' },
-                },
-                required: ['text', 'status', 'kind'],
-                additionalProperties: false,
-              },
-              {
-                type: 'object',
-                properties: {
-                  text: { type: 'string' },
-                  status: { type: 'string', enum: ['error'] },
-                  error: { type: 'string' },
-                },
-                required: ['text', 'status', 'error'],
-                additionalProperties: false,
-              },
-            ],
-          },
-        },
-      },
-      required: ['valid', 'url', 'share_url', 'preview', 'rows'],
-      additionalProperties: false,
-    },
+    required: ['equations'],
+    additionalProperties: false,
   },
-  {
-    name: 'decode_graph_url',
-    title: 'Read a graph link',
-    annotations: { title: 'Read a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-    description:
-      'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url. The rows use the equation.io syntax documented in the "syntax" MCP resource (also at https://equation.io/llms.txt).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string', description: 'An equation.io graph URL.' },
-      },
-      required: ['url'],
+  outputSchema: ENCODE_RESULT,
+};
+
+const DECODE_TOOL: McpTool = {
+  name: 'decode_graph_url',
+  title: 'Read a graph link',
+  annotations: { title: 'Read a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  description:
+    'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url. The rows use the equation.io syntax documented in the "syntax" MCP resource (also at https://equation.io/llms.txt).',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: 'An equation.io graph URL.' },
     },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        equations: { type: 'array', items: { type: 'string' } },
-      },
-      required: ['equations'],
-      additionalProperties: false,
-    },
+    required: ['url'],
   },
-];
+  outputSchema: {
+    type: 'object',
+    properties: {
+      equations: { type: 'array', items: { type: 'string' } },
+    },
+    required: ['equations'],
+    additionalProperties: false,
+  },
+};
+
+const TOOLS: McpTool[] = [ENCODE_TOOL, DECODE_TOOL];
 
 // Keep validation/link-only calls separate from rendering a new chat widget.
 // Static share-card fields (`preview`, `preview_omits`) stay on encode_graph_url:
 // the widget is the picture, and "not attached" reads as a missing graph.
 const showGraphOutputProperties = Object.fromEntries(
-  Object.entries(TOOLS[0].outputSchema.properties).filter(([key]) => key !== 'preview' && key !== 'preview_omits'),
+  Object.entries(ENCODE_RESULT.properties).filter(([key]) => key !== 'preview' && key !== 'preview_omits'),
 );
-const SHOW_GRAPH_TOOL = {
-  ...TOOLS[0],
+const SHOW_GRAPH_TOOL: McpTool = {
+  ...ENCODE_TOOL,
   name: 'show_graph',
   title: 'Show an interactive graph',
   annotations: { title: 'Show an interactive graph', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   description:
     'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns per-row validation and share links; a row with status "error" is not drawn until its text is corrected and the graph resubmitted. Use encode_graph_url for validation or link-only requests (including share-link preview notes). In clients without UI support, provide share_url.',
   outputSchema: {
-    ...TOOLS[0].outputSchema,
+    ...ENCODE_RESULT,
     properties: showGraphOutputProperties,
     required: ['valid', 'url', 'share_url', 'rows'],
   },
@@ -229,27 +251,7 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
         ? { status: 'error' as const, error: row.error }
         : {
             status: 'ok' as const,
-            kind: row.comment
-              ? 'comment (group heading)'
-              : row.def
-                ? // `adults = person[…]` scans as a constant, but what it
-                  // defines is another data file.
-                  `definition (${
-                    row.def.kind === 'const' && analysis.defs.tables.has(row.def.name) ? 'filtered data' : row.def.kind
-                  })`
-                : row.view
-                  ? `viewport (${row.view.kind})`
-                  : row.dist === 'density'
-                    ? 'random variable (density curve)'
-                    : row.dist === 'pmf'
-                      ? 'discrete random variable (pmf stems)'
-                      : row.dist === 'probability'
-                        ? 'probability (shaded area)'
-                        : row.dist === 'expectation'
-                          ? 'expectation (mean readout)'
-                          : row.dataLocal
-                            ? "data (reads a file on the author's device)"
-                            : publicKind(row.cls!.object),
+            kind: rowKind(row, analysis.defs.tables)!,
             ...(row.cls?.animated ? { animated: true } : {}),
             ...(row.info ? { value: row.info } : {}),
             ...(row.dataLocal ? { note: row.dataLocal } : {}),
@@ -267,6 +269,11 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   // on the author's device, not in the link. Disclose them the same way.
   const dataLocalRows = analysis.rows.filter(r => r.dataLocal);
   const dataOmits = dataLocalRows.map(r => ({ row: r.text, why: r.dataLocal! }));
+  // Labels count as drawable (og.ts OG_COVERAGE) so the preview survives,
+  // but their text is not in it.
+  const labelOmits = plotRows
+    .filter(r => r.cpu?.type === 'label')
+    .map(r => ({ row: r.text, why: 'label text is not drawn in the static preview; the live app shows it' }));
   // A row that would have drawn something if the bytes were here — as opposed
   // to a definition it feeds, which draws nothing anywhere.
   const dataWouldPlot = dataLocalRows.some(r => !r.def && !r.comment && !r.view);
@@ -288,7 +295,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
         ? "none — every plot row reads a data file on the author's device (see preview_omits; the graph itself is fine)"
         : "none — every plot row reads a data file on the author's device (see preview_omits), and other rows have errors (see rows)"
       : 'none — no plot rows to draw';
-  } else if (omitted.length === plotRows.length) {
+  } else if (omitted.length + labelOmits.length === plotRows.length) {
+    // Labels never have a gap (previewGap), but alone their preview is a bare grid.
     preview =
       'none — the static preview cannot draw any of these rows (see preview_omits; this says nothing about whether the graph works)';
   } else {
@@ -308,7 +316,9 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
       url: `${origin}/#${payload}`,
       share_url: `${origin}/g/${payload}`,
       preview,
-      ...(omitted.length || dataOmits.length ? { preview_omits: [...omitted, ...dataOmits] } : {}),
+      ...(omitted.length || dataOmits.length || labelOmits.length
+        ? { preview_omits: [...omitted, ...dataOmits, ...labelOmits] }
+        : {}),
       rows,
     },
   };

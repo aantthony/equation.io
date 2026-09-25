@@ -1205,6 +1205,7 @@ export function substIdx(e: Expr, idx: string, val: Expr): Expr {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return mapChildren(e, x => substIdx(x, idx, val));
@@ -1308,6 +1309,7 @@ export function foldNums(e: Expr, calls = false): Expr {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return mapChildren(e, fold);
@@ -1651,6 +1653,7 @@ export function usesIntegral(e: Expr): boolean {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return childrenOf(e).some(usesIntegral);
@@ -1767,6 +1770,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return mapChildren(e, x => rx(x, ctx));
@@ -1824,7 +1828,12 @@ function rx(e: Expr, ctx: Ctx): Expr {
       }
       if (
         ctx.opts.inDefinition &&
-        (e.name === 'trail' || e.name === 'revolve' || e.name === 'rgb' || e.name === 'hsl' || e.name === 'oklch')
+        (e.name === 'trail' ||
+          e.name === 'label' ||
+          e.name === 'revolve' ||
+          e.name === 'rgb' ||
+          e.name === 'hsl' ||
+          e.name === 'oklch')
       ) {
         throw new Error(`${e.name}(…) must be a whole row, not part of a definition.`);
       }

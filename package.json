@@ -10,7 +10,7 @@
     "shots": "node scripts/screenshots.ts",
     "icons": "node scripts/icons.ts",
     "deploy": "wrangler types && vite build && wrangler deploy",
-    "typecheck": "wrangler types && tsc --noEmit && tsc -p web --noEmit && tsc -p worker --noEmit",
+    "typecheck": "wrangler types && tsc --noEmit && tsc -p web --noEmit && tsc -p worker --noEmit && tsc -p worker/tsconfig.test.json --noEmit",
     "lint": "oxlint --type-aware --deny-warnings",
     "lint:fix": "oxlint --type-aware --fix",
     "fmt": "oxfmt",

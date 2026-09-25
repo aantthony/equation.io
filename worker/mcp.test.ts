@@ -231,11 +231,12 @@ describe('mcp endpoint', () => {
     // Every member of the family reports the same human-readable kinds the
     // base rows do, whether the density is exact (X, X + X) or sampled (Y) —
     // and the inline-bounded P(X + X < 1) is a probability the same way.
+    // P(Y > X), an event over two variables, is only estimated: nothing shades.
     expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual([
       'random variable (density curve)',
       'random variable (density curve)',
       'probability (shaded area)',
-      'probability (shaded area)',
+      'probability (readout only)',
       'random variable (density curve)',
       'probability (shaded area)',
     ]);
@@ -608,6 +609,21 @@ describe('graph previews', () => {
     const out = body.result.structuredContent;
     expect(out.preview).toContain('1 of 2 plot rows missing');
     expect(out.preview_omits).toEqual([{ row: 'y = sin(x)', why: expect.stringContaining('vertical sheets') }]);
+  });
+
+  it('lists a 3D label once, as text the preview leaves out', async () => {
+    const { body } = await call(['z = x^2 - y^2', 'label((0, 0, 0), "saddle")']);
+    const out = body.result.structuredContent;
+    expect(out.preview).not.toContain('missing');
+    expect(out.preview_omits).toEqual([
+      { row: 'label((0, 0, 0), "saddle")', why: expect.stringContaining('label text') },
+    ]);
+  });
+
+  it('attaches no preview for labels alone', async () => {
+    const { body } = await call(['label((1, 2), "peak")']);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    expect(body.result.structuredContent.preview).toMatch(/^none/);
   });
 
   it('skips the preview when there is nothing to draw', async () => {

@@ -32,6 +32,9 @@ export interface Camera3DSpec {
   phi: number;
   radius?: number;
   target?: [number, number, number];
+  /** Keeps the camera orbiting about the vertical axis, radians per second.
+   *  theta is where the orbit starts; the row does not change as it turns. */
+  spin?: number;
 }
 
 export type ViewSpec = View2DSpec | Camera3DSpec;
@@ -127,7 +130,10 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
     if (!spec.x && !spec.y) throw new Error(usage);
     return spec;
   }
-  const usage = 'Expected camera(theta, phi, radius?, (x, y, z)?) — angles in radians.';
+  const usage = 'Expected camera(theta, phi, radius?, (x, y, z)?, spin = rate?) — angles in radians.';
+  // spin = … is named and comes last, so the positional arguments keep their meaning.
+  const spinArg = args.length && /^\s*spin\s*=([\s\S]*)$/.exec(args[args.length - 1]);
+  if (spinArg) args.pop();
   if (args.length < 2 || args.length > 4) throw new Error(usage);
   const spec: Camera3DSpec = {
     kind: 'camera',
@@ -151,6 +157,11 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       if (r <= 0) throw new Error('The camera radius must be positive.');
       spec.radius = r;
     }
+  }
+  if (spinArg) {
+    if (!spinArg[1].trim()) throw new Error(usage);
+    const spin = num(spinArg[1], env, 'camera spin');
+    if (spin) spec.spin = spin;
   }
   return spec;
 }
@@ -179,8 +190,23 @@ export function fitView2D(
   };
 }
 
-/** Same 6-significant-digit trim sliders use, so rewritten rows stay tidy. */
-const fmt = (v: number, digits = 6) => String(parseFloat(v.toPrecision(digits)));
+/**
+ * Same 6-significant-digit trim sliders use, so rewritten rows stay tidy,
+ * always as plain decimals: the row language has no exponent notation, and
+ * reads `-4.44089e-16` as -4.44089·e − 16.
+ */
+function fmt(v: number, digits = 6): string {
+  const n = parseFloat(v.toPrecision(digits));
+  const s = String(n);
+  if (!s.includes('e')) return s;
+  if (Math.abs(n) >= 1) return BigInt(n).toString();
+  // toFixed takes at most 100 places; anything smaller is 0 at any scale a view shows.
+  const places = digits - 1 - Math.floor(Math.log10(Math.abs(n)));
+  return places > 100 ? '0' : n.toFixed(places).replace(/\.?0+$/, '');
+}
+
+/** Float dust (from easing, or equal and opposite drags) at `scale`, written as 0. */
+const clean = (v: number, scale = 1) => (Math.abs(v) < scale * 1e-9 ? 0 : v);
 
 /**
  * A range's ends at the fewest digits that reproduce it. Six read well, but a
@@ -194,7 +220,7 @@ function fmtRange(lo: number, hi: number): string {
   const scale = Math.max(Math.abs(lo), Math.abs(hi));
   let digits = 6;
   while (digits < 17 && scale * 10 ** (1 - digits) > span / 100) digits++;
-  return `${fmt(lo, digits)}..${fmt(hi, digits)}`;
+  return `${fmt(clean(lo, span), digits)}..${fmt(clean(hi, span), digits)}`;
 }
 
 /** Serialize the visible window back into row text (the writeback half). */
@@ -207,11 +233,17 @@ export function formatCameraRow(c: {
   phi: number;
   radius: number;
   target: [number, number, number];
+  spin?: number;
 }): string {
-  const parts = [fmt(c.theta), fmt(c.phi), fmt(c.radius)];
-  if (c.target.some(v => Math.abs(v) > 1e-9)) {
-    parts.push(`(${c.target.map(v => fmt(v)).join(', ')})`);
-  }
+  // A spun or eased camera accumulates turns and float dust: write the angle
+  // it shows, in (-pi, pi], and 0 for 0.
+  const turn = 2 * Math.PI;
+  const theta = clean(c.theta - turn * Math.round(c.theta / turn));
+  const parts = [fmt(theta), fmt(clean(c.phi)), fmt(c.radius)];
+  const target = c.target.map(v => clean(v, c.radius));
+  if (target.some(v => v !== 0)) parts.push(`(${target.map(v => fmt(v)).join(', ')})`);
+  const spin = clean(c.spin ?? 0);
+  if (spin) parts.push(`spin = ${fmt(spin)}`);
   return `camera(${parts.join(', ')})`;
 }
 

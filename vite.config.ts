@@ -36,5 +36,12 @@ export default defineConfig({
       },
     },
   },
-  plugins: [cloudflare({ configPath: '../wrangler.jsonc' })],
+  plugins: [
+    cloudflare({
+      configPath: '../wrangler.jsonc',
+      // The repo root's .wrangler/state, where `wrangler d1 …` and
+      // scripts/voice-key.ts look — not web/, which is only Vite's root.
+      persistState: { path: fileURLToPath(new URL('.wrangler/state', import.meta.url)) },
+    }),
+  ],
 });

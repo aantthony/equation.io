@@ -276,6 +276,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (`y = x^2 # parabola`, `a = 2 # slope`). Only the math before it is read;
   the app shows the note in small text under the row. A `;` still ends the
   row, note included.
+- Row colors: a note that opens with a hex color draws the row in that color
+  (`y = x^2 #e24`, `y = sin(x) #1f77b4 wave`). The 3 or 6 hex digits must
+  touch the `#`; `# 100 samples` (with a space) stays a plain note. Without
+  one, rows take the palette in order.
 
 ## Variables (what a row means)
 
@@ -802,8 +806,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Coordinate field: a definition that depends on the plane, e.g.
   `r = sqrt(x^2+y^2); theta = atan2(y,x)`. Its level sets draw as a grid, and
   later rows may use it: adding `r = 2(1 + cos(theta))` plots a cardioid in
-  polar coordinates. A named pair or triple that uses x, y, or z is a
-  vector field (see Point), not a grid.
+  polar coordinates. Here r is a distance, so a curve draws only where it is
+  >= 0: `r = sin(4 theta)` shows 4 of the rose's 8 petals. For a polar curve
+  that goes negative, trace it with theta = 2pi u instead:
+  `(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))` is the whole 8-petal rose.
+  A named pair or triple that uses x, y, or z is a vector field (see Point),
+  not a grid.
 - Coordinate fields in space: a field may use z, e.g. spherical
   `rho = sqrt(x^2+y^2+z^2); theta = atan2(y,x); phi = acos(z/rho)`. A z-using
   field only defines — it draws no grid and does not by itself make the graph
@@ -868,6 +876,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   aspect. The whole box is always visible (uniform scale).
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
+  A trailing `spin = rate` keeps it orbiting about the vertical axis at that
+  many radians per second (`camera(-pi/3, 0.6, spin = 0.3)`; negative turns
+  the other way). theta is where the orbit starts: the row stays put while
+  the view turns, and dragging pauses the spin.
 - Binding is two-way in the app: panning, zooming, or orbiting rewrites the
   row the way dragging a slider rewrites its constant, so the URL always
   names the exact picture on screen. Without a viewport row, interaction
@@ -943,6 +955,22 @@ left-hand name, `Z ~ exp(2)` declares an exponential random variable.
 Missing CSV data stays device-local in MCP and
 previews, including curves that depend on its fitted coefficients. Fits over
 literal data and their model curves work in shared links and static previews.
+
+## Labels
+
+`label(point, "text")` writes text beside a point on the graph, in the row's
+color. Use it as a whole row. Examples:
+
+    label((2, 4), "the curves cross here")
+    A = (1, 1)
+    label(A, "vertex")
+    a = 2
+    label((a, a^2), "moves with the slider")
+
+The point may be a tuple, a named point, or point arithmetic, in 2D or 3D, and
+may use constants, sliders, states, and `t`; it cannot use free x/y/z or u/v.
+The text is plain and fixed. The MCP classifies these rows as `label`; static
+previews draw the other rows but leave label text out (see preview_omits).
 
 ## Motion trails
 

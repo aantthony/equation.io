@@ -117,6 +117,7 @@ export function diff(e: Expr, v: string): Expr {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       throw new NonSmoothError(structuralDiagnostic(e));

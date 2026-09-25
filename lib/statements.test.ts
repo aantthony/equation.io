@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { keepNote, noteStart, splitStatements, stripNote } from './statements.ts';
+import { keepNote, noteColor, noteStart, splitStatements, stripNote } from './statements.ts';
 
 describe('splitStatements', () => {
   it('splits on ";" and newlines at depth zero', () => {
@@ -105,5 +105,37 @@ describe('trailing # notes', () => {
     expect(stripNote('# heading')).toBe('# heading');
     expect(keepNote('a = 2 # slope', 'a = 3.5')).toBe('a = 3.5 # slope');
     expect(keepNote('a = 2', 'a = 3.5')).toBe('a = 3.5');
+  });
+});
+
+describe('note colors', () => {
+  const hex = (text: string) =>
+    noteColor(text)
+      ?.map(c =>
+        Math.round(c * 255)
+          .toString(16)
+          .padStart(2, '0'),
+      )
+      .join('') ?? null;
+
+  it('reads a hex color glued to the note mark', () => {
+    expect(hex('y = x^2 #e24')).toBe('ee2244');
+    expect(hex('y = x^2 #1F77B4 parabola')).toBe('1f77b4');
+    expect(hex('y = x^2#0a0')).toBe('00aa00');
+  });
+
+  it('leaves spaced notes and other words alone', () => {
+    expect(hex('y = x # fed')).toBeNull();
+    expect(hex('y = x # 100 samples')).toBeNull();
+    expect(hex('y = x #parabola')).toBeNull();
+    expect(hex('y = x #e2')).toBeNull();
+    expect(hex('y = x #e244')).toBeNull();
+    expect(hex('y = x #e24x')).toBeNull();
+    expect(hex('y = x')).toBeNull();
+  });
+
+  it('is not fooled by comment rows or quoted text', () => {
+    expect(hex('#e24 heading')).toBeNull();
+    expect(hex('p = open("a#e24.csv")')).toBeNull();
   });
 });

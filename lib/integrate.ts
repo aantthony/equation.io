@@ -722,6 +722,7 @@ function substAll(e: Expr, v: string, val: Expr): Expr {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return mapChildren(e, x => substAll(x, v, val));

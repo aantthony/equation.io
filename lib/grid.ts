@@ -22,6 +22,7 @@ export function hasAtan2(e: Expr): boolean {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return childrenOf(e).some(hasAtan2);

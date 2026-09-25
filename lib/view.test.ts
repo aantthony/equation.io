@@ -92,6 +92,52 @@ describe('writeback round-trip', () => {
     const withTarget = formatCameraRow({ theta: 0, phi: 1, radius: 7, target: [1.25, 0, -2] });
     expect(parse(withTarget)).toEqual({ kind: 'camera', theta: 0, phi: 1, radius: 7, target: [1.25, 0, -2] });
   });
+
+  it('keeps a camera spin through format -> parse, and omits a zero one', () => {
+    const spinning = formatCameraRow({ theta: 0, phi: 1, radius: 7, target: [1, 0, 0], spin: -0.3 });
+    expect(spinning).toBe('camera(0, 1, 7, (1, 0, 0), spin = -0.3)');
+    expect(parse(spinning)).toEqual({ kind: 'camera', theta: 0, phi: 1, radius: 7, target: [1, 0, 0], spin: -0.3 });
+    expect(formatCameraRow({ theta: 0, phi: 1, radius: 7, target: [0, 0, 0], spin: 0 })).toBe('camera(0, 1, 7)');
+  });
+
+  it('writes the angle a spun camera shows, without float dust', () => {
+    expect(formatCameraRow({ theta: 6.66e-16, phi: 1, radius: 7, target: [0, 0, 0] })).toBe('camera(0, 1, 7)');
+    expect(formatCameraRow({ theta: 1 + 40 * Math.PI, phi: 1, radius: 7, target: [0, 0, 0] })).toBe('camera(1, 1, 7)');
+    expect(formatCameraRow({ theta: -1 - 6 * Math.PI, phi: 1, radius: 7, target: [0, 0, 0] })).toBe('camera(-1, 1, 7)');
+  });
+
+  it('never writes exponent notation, which rows read as e', () => {
+    // An eased 2D move leaves ulp dust on a zero edge.
+    const view = formatViewRow(-4.440892098500626e-16, 6.28, -1.5, 1.5);
+    expect(view).toBe('view(x = 0..6.28, y = -1.5..1.5)');
+    expect(parse(view)).toEqual({ kind: 'view', x: [0, 6.28], y: [-1.5, 1.5] });
+    // Dust on the camera: phi after opposite drags, target at theta = pi/2, a near-stopped spin.
+    const camera = formatCameraRow({
+      theta: 0.5,
+      phi: 6.93889e-18,
+      radius: 14,
+      target: [1, -1.13157e-16, 0],
+      spin: 2e-7,
+    });
+    expect(camera).toBe('camera(0.5, 0, 14, (1, 0, 0), spin = 0.0000002)');
+    expect(parse(camera)).toEqual({ kind: 'camera', theta: 0.5, phi: 0, radius: 14, target: [1, 0, 0], spin: 2e-7 });
+    // A window that really is that small keeps its digits.
+    const tiny = formatViewRow(1e-8, 2e-8, 0, 1);
+    expect(tiny).toBe('view(x = 0.00000001..0.00000002, y = 0..1)');
+    expect(parse(tiny)).toEqual({ kind: 'view', x: [1e-8, 2e-8], y: [0, 1] });
+    expect(formatViewRow(-1e22, 1e22, 0, 1)).toBe(
+      'view(x = -10000000000000000000000..10000000000000000000000, y = 0..1)',
+    );
+  });
+
+  it('reads spin as a trailing named argument after any positional ones', () => {
+    expect(parse('camera(0, 1, spin = 0.5)')).toEqual({ kind: 'camera', theta: 0, phi: 1, spin: 0.5 });
+    expect(parse('camera(0, 1, spin = pi/10)')).toMatchObject({ spin: Math.PI / 10 });
+    expect(parse('camera(0, 1, spin = w)', { w: 2 })).toMatchObject({ spin: 2 });
+    expect(parse('camera(0, 1, 7, spin = 0)')).toEqual({ kind: 'camera', theta: 0, phi: 1, radius: 7 });
+    expect(() => parse('camera(0, 1, spin =)')).toThrow(/Expected camera/);
+    expect(() => parse('camera(spin = 1, 0, 1)')).toThrow();
+  });
 });
 
 describe('independent axis scaling', () => {

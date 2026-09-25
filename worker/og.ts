@@ -21,6 +21,7 @@ import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
+import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 
@@ -856,6 +857,10 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // integral, whose shaded area is a CPU polygon here as there.
   value: 'draws',
   trail: 'fallback',
+  // The rasterizer has no font, so the text is left out — but a label only
+  // annotates what the other rows draw, and losing the whole preview to the
+  // site card over it would hide the graph itself. mcp.ts discloses the gap.
+  label: 'draws',
   // Integrated in the app's worker; the preview would have to integrate too.
   orbit: 'fallback',
   pcurve: 'draws',
@@ -938,6 +943,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   switch (type) {
     case 'note':
     case 'value':
+    // Its text is left out in 3D as in 2D (OG_COVERAGE); the app draws it in both.
+    case 'label':
     case 'psurface':
     case 'vfield3d':
     case 'spacecurve':
@@ -966,7 +973,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
 
 /**
  * True when every plot row in the graph is one this renderer draws. False for
- * an empty graph too: a bare grid is not worth an image.
+ * an empty graph too, and for one of labels alone, whose text is left out: a
+ * bare grid is not worth an image.
  */
 export function canRenderOg(texts: string[]): boolean {
   let analysis: Analysis;
@@ -979,7 +987,7 @@ export function canRenderOg(texts: string[]): boolean {
   // and no plan: it is not a plot this renderer can draw (nor one whose
   // dimension should pick the scene), exactly as an unclassifiable row.
   const plots = analysis.rows.filter(r => r.cls && r.cpu);
-  if (!plots.length) return false;
+  if (plots.every(r => r.cpu!.type === 'label')) return false;
   const needs3D = plots.some(r => r.cls!.needs3D);
   return plots.every(r => previewGap(r, needs3D) === null);
 }
@@ -1013,8 +1021,12 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
   const spec = (kind: 'view' | 'camera') => analysis.rows.find(r => r.view?.kind === kind)?.view;
 
   // Row colors follow creation order across ALL rows (defs consume a color
-  // slot in the app too, since colorIndex comes from row id).
-  const colorOf = (row: RowInfo) => PALETTE[analysis.rows.indexOf(parents.get(row) ?? row) % PALETTE.length];
+  // slot in the app too, since colorIndex comes from row id), unless the row's
+  // note names one (`y = x #e24`). Analysis rows are the input rows, in order.
+  const colorOf = (row: RowInfo) => {
+    const i = analysis.rows.indexOf(parents.get(row) ?? row);
+    return noteColor(texts[i] ?? '') ?? PALETTE[i % PALETTE.length];
+  };
 
   if (needs3D) {
     const cam = spec('camera');

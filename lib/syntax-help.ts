@@ -107,6 +107,7 @@ const signatures: Record<string, [string, string]> = {
   curl: ['curl(F) or ∇×F', 'Curl: a scalar ∂F₂/∂x − ∂F₁/∂y in 2D, a vector field in 3D'],
   laplacian: ['laplacian(f) or ∇²f', 'Laplacian of a scalar field: the sum of its second partial derivatives'],
   trail: ['trail(point)', 'Draw a moving point’s path'],
+  label: ['label(point, "text")', 'Write text beside a point on the graph'],
   tube: ['tube((x(u), y(u), z(u)))', 'Tube along a parametric space curve'],
   revolve: ['revolve(f(x))', 'Surface of revolution of y = f(x) about the x-axis; revolve(f(y), y) about the y-axis'],
   open: ['data = open("file.csv")', 'Use a CSV file dropped onto the graph'],

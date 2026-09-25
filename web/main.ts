@@ -19,6 +19,7 @@ import { nextFeatured } from '../lib/featured.ts';
 import { declaredNames } from '../lib/regression.ts';
 import { PointTrail } from '../lib/point-trail.ts';
 import {
+  animatedConstNames,
   constsAnimated,
   definitionDependencies,
   formatTableRow,
@@ -42,7 +43,7 @@ import {
 import { compileSampler } from '../lib/vm.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
-import { type Expr, evaluate, freeVars, substVars } from '../lib/expr.ts';
+import { type Expr, canonicalName, evaluate, freeVars, substVars } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -54,14 +55,15 @@ import { type VertexSampler, vertexSampler } from '../lib/figure-vertices.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
 import { CURVE_SAMPLES, type PathSampler, pathSampler } from '../lib/path.ts';
-import { type Classified, plotReadout } from '../lib/plot.ts';
+import { type Classified, plotReadout, publicKind } from '../lib/plot.ts';
+import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
 
 import { type StateSystem, advanceState, initialState } from '../lib/state.ts';
 import { type OrbitInput, orbitInput } from '../lib/orbit.ts';
-import { keepNote, noteStart, splitStatements, stripNote } from '../lib/statements.ts';
+import { keepNote, noteColor, noteStart, splitStatements, stripNote } from '../lib/statements.ts';
 import {
   type ViewSpec,
   clampPhi,
@@ -74,6 +76,8 @@ import {
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
 import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
+import type { GraphState, MoveViewTarget, RowStatus, VoiceHost } from './voice.ts';
+import { readKey as readVoiceKey } from './voice-key.ts';
 import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
 import { fullscreenQuad } from './gl.ts';
 import {
@@ -86,7 +90,15 @@ import {
   drawLabels2D,
   niceSpacing,
 } from './render2d.ts';
-import { type Camera3D, Renderer3D, type Scene3D, cameraBoxR, drawLabels3D } from './render3d.ts';
+import {
+  type Camera3D,
+  Renderer3D,
+  type Scene3D,
+  cameraBoxR,
+  cameraMatrices,
+  drawLabels3D,
+  projectToScreen,
+} from './render3d.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -129,6 +141,10 @@ interface Equation {
   viewSpec?: ViewSpec;
   /** Set when the row is a `# label` comment heading a collapsible group. */
   comment?: boolean;
+  /** The `#hex` note color parsed from `text`, cached until the text changes. */
+  noteColor?: { text: string; rgb: [number, number, number] | null };
+  /** Set for probability rows (`X ~ …`, `P(…)`, `E(…)`). */
+  dist?: 'density' | 'pmf' | 'probability' | 'expectation';
   /** Comment rows: hide the group (rows until the next comment) in the list. */
   collapsed?: boolean;
   sliderMin?: number;
@@ -442,6 +458,75 @@ function resetState() {
   stateTime = graphTime();
 }
 
+// --- tweens: voice mode's slider animations and camera moves ---
+
+interface Tween {
+  start: number;
+  ms: number;
+  ease: (k: number) => number;
+  step: (k: number) => void;
+  /** Settles the change (row, URL): `finished` on arrival, not when cancelled. */
+  done?: (finished: boolean) => void;
+}
+const tweens = new Map<string, Tween>();
+let tweenFrame: number | null = null;
+const linear = (k: number) => k;
+const easeInOut = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - (-2 * k + 2) ** 3 / 2);
+
+function tween(
+  key: string,
+  seconds: number,
+  ease: (k: number) => number,
+  step: (k: number) => void,
+  done?: (finished: boolean) => void,
+) {
+  cancelTween(key);
+  tweens.set(key, { start: performance.now(), ms: Math.max(0, seconds) * 1000, ease, step, done });
+  if (document.hidden) finishTweens();
+  else tweenFrame ??= requestAnimationFrame(runTweens);
+}
+
+/**
+ * Jumps every tween to its end. A hidden tab gets no animation frames, so a
+ * glide would otherwise stall half way, and a tool call waiting on it forever.
+ */
+function finishTweens() {
+  for (const [key, t] of tweens) {
+    tweens.delete(key);
+    t.step(t.ease(1));
+    t.done?.(true);
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) finishTweens();
+});
+
+function cancelTween(key: string) {
+  const t = tweens.get(key);
+  if (!t) return;
+  tweens.delete(key);
+  t.done?.(false);
+}
+
+/** The student's undo, or a new document, takes the graph back from voice mode's animations. */
+function stopVoiceTweens() {
+  for (const key of [...tweens.keys()]) if (key === 'view' || key.startsWith('slider:')) cancelTween(key);
+}
+
+function runTweens(now: number) {
+  for (const [key, t] of tweens) {
+    const k = t.ms ? Math.min(1, Math.max(0, (now - t.start) / t.ms)) : 1;
+    t.step(t.ease(k));
+    // A step may have cancelled its own tween.
+    if (k >= 1 && tweens.get(key) === t) {
+      tweens.delete(key);
+      t.done?.(true);
+    }
+  }
+  // Cleared only now: a tween started by a done() above joins this chain, not a second one.
+  tweenFrame = tweens.size ? requestAnimationFrame(runTweens) : null;
+}
+
 // --- viewport rows: the two-way binding ---
 //
 // A `view(…)` / `camera(…)` row is the framing as document state. Row → view:
@@ -456,6 +541,13 @@ function resetState() {
 let appliedViewText: string | null = null;
 let appliedCameraText: string | null = null;
 
+// A camera row's `spin = …`: the live camera turns about the vertical axis at
+// this rate (radians per second) while the row keeps its starting angle, so a
+// spin never rewrites the URL. spinScale eases a new spin in from rest.
+let cameraSpin = 0;
+let spinScale = 1;
+let lastSpinAt: number | null = null;
+
 /** The viewport row of the given kind, if any (duplicates carry errors). */
 function viewportRow(kind: ViewSpec['kind']): Equation | undefined {
   return equations.find(eq => !eq.error && eq.viewSpec?.kind === kind);
@@ -469,10 +561,13 @@ function applyViewportRows() {
     Object.assign(view, { ratio: 1 }, fitView2D(vRow.viewSpec!, canvas.width, canvas.height));
   }
   const cRow = viewportRow('camera');
-  if (!cRow) appliedCameraText = null;
-  else if (cRow.text !== appliedCameraText && cRow.viewSpec!.kind === 'camera') {
+  if (!cRow) {
+    appliedCameraText = null;
+    cameraSpin = 0;
+  } else if (cRow.text !== appliedCameraText && cRow.viewSpec!.kind === 'camera') {
     appliedCameraText = cRow.text;
     const c = cRow.viewSpec!;
+    cameraSpin = c.spin ?? 0;
     camera.theta = c.theta;
     camera.phi = clampPhi(c.phi);
     camera.radius = c.radius ?? 14;
@@ -484,12 +579,21 @@ function applyViewportRows() {
 // gesture by a beat instead of running per move; release flushes it so the
 // row, URL, and undo entry are settled the moment the gesture ends.
 let viewportWriteTimer: ReturnType<typeof setTimeout> | null = null;
+/** The pending writeback makes its own undo entry: a gesture's does; a voice-mode move made one up front. */
+let viewportWriteUndo = false;
 
-function scheduleViewportWriteback() {
+function scheduleViewportWriteback(undo = true) {
+  viewportWriteUndo ||= undo;
   viewportWriteTimer ??= setTimeout(() => {
     viewportWriteTimer = null;
-    writebackViewport();
+    writebackViewport(takeWritebackUndo());
   }, 200);
+}
+
+function takeWritebackUndo(): boolean {
+  const undo = viewportWriteUndo;
+  viewportWriteUndo = false;
+  return undo;
 }
 
 function flushViewportWriteback() {
@@ -498,7 +602,7 @@ function flushViewportWriteback() {
   if (viewportWriteTimer === null) return;
   clearTimeout(viewportWriteTimer);
   viewportWriteTimer = null;
-  writebackViewport();
+  writebackViewport(takeWritebackUndo());
 }
 
 /** Drop a pending pan and the live window so a new document isn't framed as the old one. */
@@ -507,6 +611,7 @@ function resetViewport() {
     clearTimeout(viewportWriteTimer);
     viewportWriteTimer = null;
   }
+  viewportWriteUndo = false;
   appliedViewText = appliedCameraText = null;
   view.cx = 0;
   view.cy = 0;
@@ -518,6 +623,33 @@ function resetViewport() {
   camera.radius = 14;
   camera.theta = -Math.PI / 3;
   camera.phi = Math.PI / 5.5;
+}
+
+/** Turns the live camera by the spin since the last frame. A hand on the
+ *  graph or a camera move in flight holds it, and it resumes from there. */
+function advanceSpin() {
+  const now = performance.now();
+  const dt = lastSpinAt === null ? 0 : Math.min(0.1, (now - lastSpinAt) / 1000);
+  lastSpinAt = now;
+  if (mode !== '3d' || !cameraSpin || pointers.size || tweens.has('view')) return;
+  camera.theta += cameraSpin * spinScale * dt;
+}
+
+/** Sets the camera row's spin (creating the row if needed), easing it in. */
+function setCameraSpin(spin: number) {
+  if (mode !== '3d') return;
+  cameraSpin = spin;
+  if (viewportRow('camera')) writebackViewport(true);
+  else {
+    pushUndo(null);
+    appliedCameraText = addEquation(formatCameraRow({ ...camera, spin })).text;
+    recompileAll();
+    renderAll();
+    saveUrl();
+  }
+  spinScale = 0;
+  tween('spin', 1.2, easeInOut, k => (spinScale = k));
+  requestRender();
 }
 
 function ensureViewRow() {
@@ -533,7 +665,7 @@ function ensureViewRow() {
   saveUrl();
 }
 
-function writebackViewport() {
+function writebackViewport(undo: boolean) {
   const eq = viewportRow(mode === '2d' ? 'view' : 'camera');
   if (!eq) return;
   let text: string;
@@ -543,11 +675,11 @@ function writebackViewport() {
     const hh = (canvas.height / 2) * (view.upp / (view.ratio ?? 1));
     text = formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh, view.ratio);
   } else {
-    text = formatCameraRow(camera);
+    text = formatCameraRow({ ...camera, spin: cameraSpin });
   }
   text = keepNote(eq.text, text);
   if (text === eq.text) return;
-  pushUndo(`viewport:${eq.id}`);
+  if (undo) pushUndo(`viewport:${eq.id}`);
   if (mode === '2d') appliedViewText = text;
   else appliedCameraText = text;
   eq.text = text;
@@ -558,7 +690,8 @@ function writebackViewport() {
   // Text the formatter cannot round-trip (a non-finite window) still lands
   // as this row's error, the way a typed view(...) does.
   try {
-    eq.viewSpec = parseViewRow(text, {}) ?? undefined;
+    // The row's `# note` is prose, not part of the viewport.
+    eq.viewSpec = parseViewRow(stripNote(text), {}) ?? undefined;
   } catch {
     recompileAll();
   }
@@ -669,11 +802,47 @@ const familyShared = ({
   barMode,
 }: Equation) => ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum, barMode });
 
+/** A row's own color: its `#hex` note if it has one, else its palette slot.
+ *  Family members read their parent's note — their own text is generated. */
+function baseColor(eq: Equation): [number, number, number] {
+  const src = eq.familyParent ?? eq;
+  if (src.noteColor?.text !== src.text) src.noteColor = { text: src.text, rgb: noteColor(src.text) };
+  return src.noteColor.rgb ?? theme.palette[eq.colorIndex];
+}
+
 const rowColor = (eq: Equation): [number, number, number] =>
-  theme.palette[eq.colorIndex].map(c => c + (1 - c) * (eq.familyShade ?? 0)) as [number, number, number];
+  baseColor(eq).map(c => c + (1 - c) * (eq.familyShade ?? 0)) as [number, number, number];
 const liveRow = (eq: Equation) =>
   equations.includes(eq.familyParent ?? eq) &&
   (!eq.familyParent || (!!eq.familyParent.cls && renderMembers(eq.familyParent).includes(eq)));
+
+/** One row that needs 3D makes the whole scene 3D (a family does when any member does). */
+const sceneMode = (): '2d' | '3d' => (equations.some(e => e.cls && !e.error && e.cls.needs3D) ? '3d' : '2d');
+
+/** 2D-only plots (densities, flows, sequences, planar fields) a 3D scene leaves out. */
+const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
+  'scalar2d',
+  'complex2d',
+  'domain2d',
+  'rgb2d',
+  'hsl2d',
+  'oklch2d',
+  'conformal2d',
+  'fractal2d',
+  'ineq2d',
+  'vfield2d',
+  'vlist',
+  'dlist',
+  'histogram',
+  'sequence',
+  'cobweb',
+  'bifurcation',
+  'automaton',
+  'density',
+  'pmf',
+  'prob',
+  'expect',
+]);
 
 function render() {
   if (!syncCanvasSize()) return;
@@ -681,7 +850,8 @@ function render() {
   const dpr = window.devicePixelRatio || 1;
   const time = graphTime();
   const active = equations.filter(e => e.cls && !e.error).flatMap(renderMembers);
-  mode = active.some(e => e.cls!.needs3D) ? '3d' : '2d';
+  mode = sceneMode();
+  advanceSpin();
 
   // States carry between frames, so they are integrated up to now before
   // anything reads them; the constants may then be formulas in those states.
@@ -992,6 +1162,7 @@ function render() {
   if (mode === '3d') {
     const scene: Scene3D = { implicits: [], psurfaces: [], curves: [], segments: [], tubes: [], points: [] };
     for (const eq of active) {
+      if (SKIPPED_IN_3D.has(eq.cpu!.type)) continue;
       const color = rowColor(eq);
       const plot = eq.cpu!;
       const { params, uniforms } = shaderBindings(eq.gpu);
@@ -1002,28 +1173,6 @@ function render() {
         case 'implicit3d':
           scene.implicits.push({ ...gpuFor(eq, 'implicit3d'), color, params, uniforms });
           break;
-        case 'scalar2d':
-        case 'complex2d':
-        case 'domain2d':
-        case 'rgb2d':
-        case 'hsl2d':
-        case 'oklch2d':
-        case 'conformal2d':
-        case 'fractal2d':
-        case 'ineq2d':
-        case 'vfield2d':
-        case 'vlist':
-        case 'dlist':
-        case 'histogram':
-        case 'sequence':
-        case 'cobweb':
-        case 'bifurcation':
-        case 'automaton':
-        case 'density':
-        case 'pmf':
-        case 'prob':
-        case 'expect':
-          break; // 2D-only plots (densities, flows, sequences, planar figures); skipped in 3D scenes
         case 'spacecurve': {
           const pts = solveFor(eq, 3, plot.residuals);
           scene.curves.push({ pts: new Float32Array(pts.flat()), color });
@@ -1119,6 +1268,11 @@ function render() {
           flush();
           break;
         }
+        case 'label': {
+          const p = samplePoint(eq);
+          if (p) (scene.texts ??= []).push({ pos: [p[0], p[1], p[2] ?? 0], text: plot.text, color });
+          break;
+        }
         case 'trail': {
           scene.curves.push({ pts: new Float32Array(eq.trail!.coordinates(3)), color });
           const p = eq.trail!.head;
@@ -1198,7 +1352,7 @@ function render() {
       }
     }
     r3d.render(camera, scene, time, constEnv);
-    drawLabels3D(overlayCtx, camera, dpr, scene.points);
+    drawLabels3D(overlayCtx, camera, dpr, scene.points, scene.texts);
   } else {
     r3d.clearGeometry();
     const layers: Required<Layers2D> = {
@@ -1304,6 +1458,11 @@ function render() {
             };
           }
           layers.cells.push({ ...eq.cellCache.cells, color });
+          break;
+        }
+        case 'label': {
+          const p = samplePoint(eq);
+          if (p) (extras.texts ??= []).push({ x: p[0], y: p[1], text: plot.text, color: css });
           break;
         }
         case 'trail': {
@@ -1619,7 +1778,7 @@ function render() {
       extras.points.push({
         x: px,
         y: py,
-        color: cssColor(theme.palette[eq.colorIndex]),
+        color: cssColor(baseColor(eq)),
         hot: hotPoint === key,
         label: eq.def.name,
       });
@@ -1664,6 +1823,7 @@ function render() {
     stateSys ||
     gridAnimated ||
     streamlinesAnimated ||
+    (mode === '3d' && cameraSpin !== 0) ||
     active.some(e => e.cls!.animated || (defsAnimated && e.cls!.params.length > 0))
   ) {
     requestRender();
@@ -1751,6 +1911,7 @@ function recompileAll() {
     eq.def = row.def;
     eq.viewSpec = row.view;
     eq.comment = row.comment;
+    eq.dist = row.dist;
     if (!eq.comment) eq.collapsed = undefined;
 
     // Cloud capacity is a browser renderer limit, independent of analysis.
@@ -1774,7 +1935,7 @@ function recompileAll() {
   // all, so a 200 000-point CSV beside one `z = …` row is 200 000 projected,
   // depth-sorted sprites. Whether the scene is 3D is only known once every
   // row has classified, which is why this waits for the loop to finish.
-  if (equations.some(eq => eq.cls && !eq.error && eq.cls.needs3D)) {
+  if (sceneMode() === '3d') {
     for (const eq of equations) {
       if (!eq.cls || eq.error) continue;
       const points = cloudPoints(eq.cpu!);
@@ -2164,6 +2325,16 @@ function sliderOf(eq: Equation): { def: NonNullable<Equation['def']>; rhs: strin
   return form ? { def, rhs, form } : null;
 }
 
+/** Whether a slider only takes whole numbers: Σ/Π bounds step whole terms,
+ *  the n of Binomial(n, p) has no fractional value, and neither does a
+ *  constant written round(…). */
+function sliderWhole(eq: Equation): boolean {
+  const slider = sliderOf(eq);
+  if (!slider) return false;
+  const { name } = slider.def;
+  return !!slider.form.whole || sumBoundNames.has(name) || wholeParamNames.has(name);
+}
+
 /** The constants now, for a slider range whose ends use them: render()'s
  *  constEnv may not have run yet, and must not advance the states here. */
 function sliderEnv(): Record<string, number> {
@@ -2340,6 +2511,7 @@ function restoreSnapshot(s: Snapshot) {
 function doUndo() {
   const s = undoStack.pop();
   if (!s) return;
+  stopVoiceTweens();
   redoStack.push(takeSnapshot(caretPos()));
   coalesce = null;
   restoreSnapshot(s);
@@ -2348,12 +2520,42 @@ function doUndo() {
 function doRedo() {
   const s = redoStack.pop();
   if (!s) return;
+  stopVoiceTweens();
   undoStack.push(takeSnapshot(caretPos()));
   coalesce = null;
   restoreSnapshot(s);
 }
 
 // --- rendering & reconciliation ---
+
+/** Moves a slider row to `v` (held to its range and step) the way dragging
+ *  it does: one coalesced undo entry per gesture (none when `undo` is false:
+ *  the caller made one), no plot recompile when the constant is a runtime
+ *  uniform. Returns the value it holds, or null for a row that is not a slider. */
+function setSlider(eq: Equation, v: number, undo = true): number | null {
+  const kind = eq.def?.kind;
+  const moved = moveSlider(eq, v);
+  if (!moved || (kind !== 'const' && kind !== 'init')) return null;
+  if (undo) pushUndo(`slider:${eq.id}`);
+  const lhs = eq.def!.name;
+  eq.text = keepNote(eq.text, moved.text);
+  const line = lineEls()[equations.indexOf(eq)];
+  if (line) setLineText(line, eq.text);
+  if (kind === 'const' && runtimeSliders.has(lhs) && !equations.some(row => row.error || row.needsFile)) {
+    // The literal was written within the range and step, so it is the value.
+    defs.drop(lhs);
+    defs.bind(lhs, { tag: 'scalar', role: 'const', expr: { kind: 'num', value: moved.value } });
+    eq.def = { kind: 'const', name: lhs, rhs: moved.rhs };
+    // Match a math edit's invalidation without discarding compiled plots,
+    // their samplers, or GPU buffers.
+    resetEditedTrails();
+    invalidateDerivedState();
+  } else recompileAll();
+  reconcile();
+  saveUrl();
+  requestRender();
+  return moved.value;
+}
 
 function makeSlider(eq: Equation): SliderUI {
   const box = document.createElement('div');
@@ -2373,27 +2575,9 @@ function makeSlider(eq: Equation): SliderUI {
   box.append(min, range, max);
 
   range.addEventListener('input', () => {
-    const kind = eq.def?.kind;
-    const moved = moveSlider(eq, Number(range.value));
-    if (!moved || (kind !== 'const' && kind !== 'init')) return;
-    pushUndo(`slider:${eq.id}`);
-    const lhs = eq.def!.name;
-    eq.text = keepNote(eq.text, moved.text);
-    const line = lineEls()[equations.indexOf(eq)];
-    if (line) setLineText(line, eq.text);
-    if (kind === 'const' && runtimeSliders.has(lhs) && !equations.some(row => row.error || row.needsFile)) {
-      // The literal was written within the range and step, so it is the value.
-      defs.drop(lhs);
-      defs.bind(lhs, { tag: 'scalar', role: 'const', expr: { kind: 'num', value: moved.value } });
-      eq.def = { kind: 'const', name: lhs, rhs: moved.rhs };
-      // Match a math edit's invalidation without discarding compiled plots,
-      // their samplers, or GPU buffers.
-      resetEditedTrails();
-      invalidateDerivedState();
-    } else recompileAll();
-    reconcile();
-    saveUrl();
-    requestRender();
+    // A hand on the slider takes it back from a voice-mode animation.
+    cancelTween(`slider:${eq.id}`);
+    setSlider(eq, Number(range.value));
   });
   // A drag is one undo entry: coalesced while it lasts, sealed on release.
   range.addEventListener('change', () => {
@@ -2670,7 +2854,7 @@ function reconcile() {
     const eq = equations[i];
     if (!eq) return;
     line.dataset.id = String(eq.id);
-    line.style.setProperty('--eq-color', cssColor(theme.palette[eq.colorIndex]));
+    line.style.setProperty('--eq-color', cssColor(baseColor(eq)));
     line.classList.toggle('invalid', !!eq.error);
     // No colour swatch for rows with nothing drawn in it: definitions, and
     // value rows, whose whole output is the readout beneath them — except a
@@ -2688,7 +2872,7 @@ function reconcile() {
     // from there, which is the whole point of `a(0)` in a chaotic system.
     const slider = sliderOf(eq);
     if (slider) {
-      const { def: sliderDef, form } = slider;
+      const { form } = slider;
       eq.sliderUI ??= makeSlider(eq);
       const { min, range, max } = eq.sliderUI;
       const bounds = sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()));
@@ -2712,14 +2896,9 @@ function reconcile() {
       if (document.activeElement !== max) max.value = fmtNum(hi);
       range.min = String(lo);
       range.max = String(hi);
-      // Σ/Π bounds are integers, so their sliders step whole terms at a time;
-      // likewise the n of Binomial(n, p), which no fraction is valid for, and
-      // any constant written round(…).
-      // Otherwise a round step (1, 2 or 5 × 10^k), so round values sit on it.
-      range.step =
-        form.whole || sumBoundNames.has(sliderDef.name) || wholeParamNames.has(sliderDef.name)
-          ? '1'
-          : String(niceSpacing((hi - lo) / 400, 1).major);
+      // Whole-number sliders step one at a time; otherwise a round step
+      // (1, 2 or 5 × 10^k), so round values sit on it.
+      range.step = sliderWhole(eq) ? '1' : String(niceSpacing((hi - lo) / 400, 1).major);
       range.value = String(v);
       wanted.push(eq.sliderUI.box);
     }
@@ -3417,6 +3596,9 @@ function gutterAct(eq: Equation) {
     reconcile();
     return;
   }
+  // A `#hex` note fixes the color: cycling the palette under it would change
+  // nothing on screen, yet cost an undo entry and the redo stack.
+  if (noteColor(eq.text)) return;
   pushUndo(`color:${eq.id}`);
   eq.colorIndex = (eq.colorIndex + 1) % theme.palette.length;
   reconcile();
@@ -3460,6 +3642,7 @@ document.addEventListener('selectionchange', () => {
 let emptyDefault = ['y = sin(x)'];
 
 function replaceDocument(rows: string[], share: boolean) {
+  stopVoiceTweens();
   pushUndo(null);
   resetViewport();
   equations.length = 0;
@@ -3822,7 +4005,7 @@ function updateHover(clientX: number, clientY: number) {
       const d = Math.hypot(toSx(pt.x) - mx, toSy(pt.y) - my);
       if (d < bestD) {
         bestD = d;
-        best = { pt, color: cssColor(theme.palette[eq.colorIndex]) };
+        best = { pt, color: cssColor(baseColor(eq)) };
       }
     }
   }
@@ -3885,6 +4068,7 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
 }
 
 canvas.addEventListener('pointerdown', e => {
+  cancelTween('view'); // the user's hand beats a voice-mode camera move
   setHover(null); // a tooltip must not survive the gesture that moves the plot
   lastHoverAt = null; // nor may a deferred recompute re-pick mid-gesture
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -4058,6 +4242,7 @@ canvas.addEventListener(
   'wheel',
   e => {
     e.preventDefault();
+    cancelTween('view');
     setHover(null);
     const factor = Math.exp(Math.max(-60, Math.min(60, e.deltaY)) * 0.002);
     zoomAt(e.clientX, e.clientY, factor);
@@ -4133,6 +4318,416 @@ initPanelSwipe(
 // persists; double-click resets).
 initPanelResize(document.getElementById('panel')!, document.getElementById('panel-resize')!);
 
+// --- voice mode ---
+
+const hexColor = (rgb: [number, number, number]) =>
+  '#' +
+  rgb
+    .map(c =>
+      Math.round(c * 255)
+        .toString(16)
+        .padStart(2, '0'),
+    )
+    .join('');
+/** Voice readouts are spoken: six significant digits is already plenty. */
+const round6 = (v: number) => parseFloat(v.toPrecision(6));
+/** Notable points per row: a wiggly curve can have dozens, and each costs tokens. */
+const MAX_VOICE_POINTS = 12;
+
+/** Intercepts and extrema in view, computed now: the hover cache is filled lazily and may be stale. */
+function visiblePoints(eq: Equation): string[] {
+  if (!eq.cls || eq.error || eq.cpu?.type !== 'implicit2d' || eq.cls.animated || mode !== '2d') return [];
+  computeSpecialPoints(eq);
+  const { halfW, halfH } = hoverHalfSpan();
+  return (eq.spCache?.pts ?? [])
+    .filter(p => Math.abs(p.x - view.cx) <= halfW && Math.abs(p.y - view.cy) <= halfH)
+    .slice(0, MAX_VOICE_POINTS)
+    .map(p => `(${round6(p.x)}, ${round6(p.y)}): ${p.lines.join(', ')}`);
+}
+
+/**
+ * Whether any other row reads `name`. A definition nothing reads draws
+ * nothing, yet validates fine — `r = sin(8t)` is a perfectly good constant —
+ * so voice mode flags it; otherwise the voice model announces a curve that isn't there.
+ *
+ * A plot's compiled parameters, followed through the constants they read,
+ * are exact. Functions are inlined and points drawn apart from plots, so
+ * those fall back to the row's text: canonical names (T₀ is T_0), a digit
+ * coefficient allowed before (`2f(x)`), comments and label text ignored.
+ */
+function usedElsewhere(eq: Equation, name: string): boolean {
+  const others = equations.filter(other => other !== eq && !other.comment && !other.viewSpec);
+  const read = definitionDependencies(
+    others.flatMap(other => other.cls?.params ?? []),
+    defs,
+  );
+  if (read.has(name)) return true;
+  const word = new RegExp(`(?<![\\p{L}_])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'u');
+  return others.some(other => word.test(canonicalName(stripNote(other.text).replace(/"[^"]*"/g, '""'))));
+}
+
+/**
+ * What a definition row makes, from its typed binding: `r = sin(16t)` is "a
+ * scalar constant that changes with time", not just "definition (const)". The
+ * binding is what later rows see, so this is the type the model has to reason
+ * about when it uses the name.
+ */
+function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<string>): string {
+  const { name } = def;
+  switch (def.kind) {
+    case 'init':
+      return `sets where the state ${name} starts (its value at t = 0)`;
+    case 'table':
+      return `opens the data file ${def.file} as the table ${name}`;
+    case 'regression':
+      return `fits the model ${def.lhs} ~ ${def.rhs} to data, defining its parameters`;
+    case 'fn':
+      return `defines the function ${name}(${def.params.join(', ')}); draws nothing until another row uses it${
+        def.params.length === 1 && def.params[0] === 'x' ? `, e.g. y = ${name}(x)` : ''
+      }`;
+  }
+  const entry = defs.names.get(name);
+  const b = entry?.kind === 'binding' ? entry.binding : undefined;
+  const quiet = '; draws nothing by itself';
+  if (!b) return `defines ${name}${quiet}`;
+  switch (b.tag) {
+    case 'scalar':
+      if (b.role === 'state')
+        return `defines ${name}: a scalar state, integrated forward in time from its derivative${quiet}`;
+      if (b.role === 'field')
+        return `defines ${name}: a scalar field (a value at every point, e.g. a coordinate like r or theta)${quiet}`;
+      if (sliderOf(eq)) return `defines ${name}: a scalar constant with a slider${quiet}`;
+      return `defines ${name}: a scalar constant${animated.has(name) ? ' that changes with time (t)' : ''}${quiet}`;
+    case 'vector': {
+      const dim = b.role === 'state' ? b.init.length : b.components.length;
+      if (b.role === 'state')
+        return `defines ${name}: a ${dim}D vector state, integrated forward in time from its derivative${quiet}; a row "${name}" draws it as a moving point`;
+      if (b.role === 'field') return `defines ${name}: a ${dim}D vector field${quiet}`;
+      return defs.points.has(name)
+        ? `defines ${name}: a named ${dim}D point, drawn on the graph`
+        : `defines ${name}: a ${dim}D vector${quiet}`;
+    }
+    case 'fn':
+      return `defines the function ${name}${quiet}`;
+    case 'matrix':
+      return `defines ${name}: a matrix${quiet}`;
+    case 'seq':
+      return `defines ${name}: a list${quiet}`;
+    case 'table':
+      return `defines ${name}: a data table${quiet}`;
+    case 'rv':
+      return `defines ${name}: a random variable`;
+    case 'missing':
+      return `defines ${name} from a data file that is not on this device`;
+  }
+}
+
+function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): RowStatus {
+  if (eq.error) {
+    const row: RowStatus = { index, text: eq.text, status: 'error', error: eq.error };
+    // `surface((…))` fails as an unknown *variable* times a bracket, and the
+    // app's slider suggestion then misleads a model; name the real problem.
+    // The call may sit in a helper the row uses: `f(x) = surface(x)`, then `y = f(x)`.
+    const unknown = /^Unknown variable: (\w+)\./.exec(eq.error)?.[1];
+    const call = unknown && new RegExp(`(?<![\\w])${unknown}\\s*\\(`);
+    if (call && [eq, ...equations.filter(o => o.def?.kind === 'fn')].some(o => call.test(stripNote(o.text)))) {
+      row.hint = `${unknown}(…) is not a built-in function; call read_syntax to find the right form`;
+    }
+    return row;
+  }
+  const row: RowStatus = { index, text: eq.text, status: 'ok' };
+  if (!eq.text.trim()) return row;
+  row.kind = rowKind({ ...eq, view: eq.viewSpec }, defs.tables);
+  row.meaning = eq.comment
+    ? 'group heading; draws nothing'
+    : eq.def
+      ? definitionMeaning(eq.def, eq, animated)
+      : eq.viewSpec
+        ? `sets the ${eq.viewSpec.kind === 'view' ? '2D window' : '3D camera'}`
+        : eq.dist
+          ? row.kind
+          : eq.cls
+            ? KIND_MEANINGS[publicKind(eq.cls.object)] +
+              (eq.cls.needs3D && !KIND_MEANINGS[publicKind(eq.cls.object)].includes('3D') ? ' (in 3D)' : '') +
+              (eq.cls.animated ? '; moves with time t' : '')
+            : undefined;
+  // A 3D scene leaves 2D-only plots out (render()), however valid they are.
+  const skipped = mode === '3d' && !!eq.cls && !eq.def && renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type));
+  if (skipped) {
+    row.warning = 'not drawn: another row makes this graph 3D, and a 3D scene leaves out 2D-only plots like this one';
+  }
+  const draws = eq.cls && !eq.def && !eq.comment && !eq.viewSpec && !skipped;
+  if (draws) row.color = hexColor(rowColor(eq));
+  if (eq.info) row.value = eq.info;
+  else if (eq.def?.kind === 'const' && constEnv[eq.def.name] !== undefined)
+    row.value = String(round6(constEnv[eq.def.name]));
+  if (eq.cls?.animated) row.animated = true;
+  const def = eq.def;
+  if ((def?.kind === 'const' || def?.kind === 'fn') && !defs.points.has(def.name) && !usedElsewhere(eq, def.name)) {
+    row.warning = `this defines ${def.name}, but no other row uses it, so nothing is drawn`;
+  }
+  const points = draws ? visiblePoints(eq) : [];
+  if (points.length) row.points = points;
+  return row;
+}
+
+/**
+ * Which existing row each of set_graph's texts continues, so rows keep their
+ * color and widgets when the model inserts or drops one: the same text first,
+ * then a row defining the same name (`a = 2` → `a = 3` keeps a's slider
+ * range), then what is left in order (an edited curve keeps its color, but
+ * not another row's toggles). Undefined for texts that start a new row.
+ */
+function matchRows(texts: string[]): (Equation | undefined)[] {
+  const free = new Set(equations);
+  const out: (Equation | undefined)[] = texts.map(() => undefined);
+  const claim = (i: number, eq: Equation | undefined) => {
+    if (!eq || out[i]) return;
+    out[i] = eq;
+    free.delete(eq);
+  };
+  const lhs = (t: string) => /^([^=<>~]+?)\s*=(?!=)/.exec(stripNote(t))?.[1];
+  texts.forEach((t, i) =>
+    claim(
+      i,
+      [...free].find(eq => eq.text === t),
+    ),
+  );
+  texts.forEach((t, i) => {
+    const name = lhs(t);
+    if (name)
+      claim(
+        i,
+        [...free].find(eq => lhs(eq.text) === name),
+      );
+  });
+  texts.forEach((t, i) => {
+    const eq = [...free][0];
+    // A fresh object with the old color: another row's toggles don't carry over.
+    if (eq && !out[i]) {
+      free.delete(eq);
+      out[i] = { id: nextId++, text: t, colorIndex: eq.colorIndex };
+    }
+  });
+  return out;
+}
+
+function voiceGraph(): GraphState {
+  // Slider values as of now: render() refreshes these on the next frame,
+  // which a tool call answering straight after set_graph would not wait for.
+  constEnv = currentConstEnv(graphTime());
+  const animated = animatedConstNames(defs);
+  const { halfW, halfH } = hoverHalfSpan();
+  return {
+    mode,
+    ...(mode === '2d'
+      ? {
+          window: {
+            x: [round6(view.cx - halfW), round6(view.cx + halfW)] as [number, number],
+            y: [round6(view.cy - halfH), round6(view.cy + halfH)] as [number, number],
+          },
+        }
+      : {
+          // The live camera, spin included, so a move can be relative ("turn a bit left").
+          camera: {
+            theta: round6(camera.theta - 2 * Math.PI * Math.round(camera.theta / (2 * Math.PI))),
+            phi: round6(camera.phi),
+            radius: round6(camera.radius),
+            target: camera.target.map(round6) as [number, number, number],
+            spin: cameraSpin,
+          },
+        }),
+    rows: equations.map((eq, i) => rowStatus(eq, i, animated)),
+  };
+}
+
+/** Voice mode's animate_slider: glides a slider row to a value at a constant rate. */
+function animateSlider(name: string, to: number, seconds: number, from?: number): object {
+  const eq = equations.find(e => sliderOf(e)?.def.name === name);
+  if (!eq) {
+    const names = equations.flatMap(e => sliderOf(e)?.def.name ?? []);
+    return { error: `no slider named "${name}"${names.length ? `; sliders: ${names.join(', ')}` : ''}` };
+  }
+  // The slider's own value: for a(0) that is where the state starts, not
+  // where it has integrated to.
+  const start = from ?? sliderOf(eq)!.form.literal;
+  const whole = sliderWhole(eq);
+  // moveSlider holds values to the slider's range: report where it will stop.
+  const end = moveSlider(eq, whole ? Math.round(to) : to)?.value ?? to;
+  const key = `slider:${eq.id}`;
+  cancelTween(key);
+  // One undo entry for the whole glide; its frames write without one, so
+  // glides running together can't flood the stack.
+  pushUndo(null);
+  if (from !== undefined) setSlider(eq, start, false);
+  let written = eq.text;
+  tween(key, seconds, linear, k => {
+    // The student typed in the row, undid, or opened another graph: it's theirs now.
+    if (eq.text !== written || !equations.includes(eq)) return cancelTween(key);
+    // Whole-number sliders (Σ bounds, the n of Binomial(n, p)) glide in
+    // steps: a fraction would error the row for the whole glide.
+    const v = start + (to - start) * k;
+    setSlider(eq, whole ? Math.round(v) : v, false);
+    written = eq.text;
+  });
+  return { slider: name, from: start, to: end, seconds, ...(end !== to ? { note: `held to the slider's range` } : {}) };
+}
+
+/**
+ * Voice mode's move_view: eases the 2D window or the 3D camera to a new
+ * framing, answering once it is there, so a point_at straight after sees the
+ * new view.
+ */
+function moveView(target: MoveViewTarget, seconds: number): object | Promise<object> {
+  if (mode === '2d') {
+    if (target.spin !== undefined) return { error: 'spin turns the 3D camera; this graph is 2D' };
+    if (!target.x && !target.y) return { error: 'the graph is 2D: give x and/or y ranges' };
+    const bad = [target.x, target.y].some(r => r && !(r[1] > r[0]));
+    if (bad) return { error: 'each range must be [low, high] with high > low' };
+    const a = { cx: view.cx, cy: view.cy, upp: view.upp };
+    const b = fitView2D({ kind: 'view', x: target.x, y: target.y, ratio: view.ratio }, canvas.width, canvas.height);
+    // One range given: the other axis keeps its centre (fitView2D would put it at 0).
+    if (!target.x) b.cx = a.cx;
+    if (!target.y) b.cy = a.cy;
+    cancelTween('view');
+    // One undo entry for the move; its frames' writebacks make none.
+    if (viewportRow('view')) pushUndo(null);
+    return new Promise(resolve =>
+      tween(
+        'view',
+        seconds,
+        easeInOut,
+        k => {
+          view.cx = a.cx + (b.cx - a.cx) * k;
+          view.cy = a.cy + (b.cy - a.cy) * k;
+          // Zoom geometrically, so a 100x zoom doesn't spend its first half barely moving.
+          view.upp = a.upp * (b.upp / a.upp) ** k;
+          scheduleViewportWriteback(false);
+          requestRender();
+        },
+        finished => {
+          flushViewportWriteback();
+          resolve(finished ? { ...voiceGraph().window!, seconds } : STOPPED);
+        },
+      ),
+    );
+  }
+  const moves =
+    target.theta !== undefined || target.phi !== undefined || target.radius !== undefined || !!target.target;
+  if (!moves && target.spin === undefined)
+    return { error: 'the graph is 3D: give theta, phi, radius, target and/or spin' };
+  if (!moves) {
+    setCameraSpin(target.spin!);
+    return { spin: target.spin, note: 'saved in the camera row' };
+  }
+  const a = { ...camera, target: [...camera.target] };
+  // The short way round, not a spin through 350 degrees.
+  const turn = 2 * Math.PI;
+  const dTheta = target.theta === undefined ? 0 : ((((target.theta - a.theta) % turn) + 3 * Math.PI) % turn) - Math.PI;
+  const phi = target.phi === undefined ? a.phi : clampPhi(target.phi);
+  const radius = target.radius ?? a.radius;
+  const goal = target.target ?? a.target;
+  cancelTween('view');
+  if (viewportRow('camera')) pushUndo(null);
+  return new Promise(resolve =>
+    tween(
+      'view',
+      seconds,
+      easeInOut,
+      k => {
+        camera.theta = a.theta + dTheta * k;
+        camera.phi = a.phi + (phi - a.phi) * k;
+        camera.radius = a.radius * (radius / a.radius) ** k;
+        camera.target = [0, 1, 2].map(i => a.target[i] + (goal[i] - a.target[i]) * k) as [number, number, number];
+        scheduleViewportWriteback(false);
+        requestRender();
+      },
+      finished => {
+        flushViewportWriteback();
+        if (!finished) return resolve(STOPPED);
+        // Arrive, then ease into the spin: the camera never jerks from rest to
+        // full speed. A hand that stopped the move stops the spin too.
+        if (target.spin !== undefined) setCameraSpin(target.spin);
+        resolve({
+          ...voiceGraph().camera!,
+          seconds,
+          ...(target.spin !== undefined ? { note: 'spinning now; saved in the camera row' } : {}),
+        });
+      },
+    ),
+  );
+}
+
+/** A move the student cut short by grabbing the graph, or one a new graph replaced. */
+const STOPPED = { stopped: 'the view was taken over before the move finished; call get_graph for where it is' };
+
+/** Where a math point is on the page (client pixels), or null when it can't be seen. */
+function toClient(x: number, y: number, z = 0): { x: number; y: number } | null {
+  const rect = canvas.getBoundingClientRect();
+  let sx: number, sy: number;
+  if (mode === '2d') {
+    const m = screenMap();
+    sx = m.toSx(x);
+    sy = m.toSy(y);
+  } else {
+    const at = projectToScreen(cameraMatrices(camera, rect.width / rect.height).vp, [x, y, z], rect.width, rect.height);
+    if (!at) return null;
+    [sx, sy] = at;
+  }
+  if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return null;
+  return { x: rect.left + sx, y: rect.top + sy };
+}
+
+// Before boot: boot canonicalizes the URL, which would drop the ?voice=
+// unlock before it could be read. Voice mode itself loads only for an
+// unlocked browser; everyone else never downloads it.
+const voiceBtn = document.getElementById('voice') as HTMLButtonElement | null;
+if (voiceBtn && !embedded && readVoiceKey()) {
+  const host: VoiceHost = {
+    graph: voiceGraph,
+    setRows(rows) {
+      // Like an edit, not like opening an example: rows keep their objects
+      // (colors, slider ranges, toggles), and the viewport stays put.
+      // A running animation or camera move would now drive whatever took its place.
+      stopVoiceTweens();
+      pushUndo(null);
+      // One entry per row, as MCP and pasting read them: `y = x^2; y = 2x` is two.
+      const texts = rows
+        .flatMap(t => splitStatements(t))
+        .map(t => t.trim())
+        .filter(Boolean);
+      if (!texts.length) texts.push('');
+      const next = matchRows(texts);
+      equations.length = 0;
+      for (const [i, t] of texts.entries()) {
+        const eq = next[i] ?? addEquation(t);
+        eq.text = t;
+        equations[i] = eq;
+      }
+      recompileAll();
+      renderAll();
+      // render() settles 2D vs 3D and applies view()/camera() rows on the next
+      // frame, but the reply, and the model's next call (a 3D move_view, say),
+      // come before it.
+      mode = sceneMode();
+      applyViewportRows();
+      urlPending = true;
+      flushUrl();
+      requestRender();
+      return voiceGraph();
+    },
+    animateSlider,
+    moveView,
+    toClient,
+    screenshot(maxEdge) {
+      if (!capture) throw new Error('screenshots unavailable');
+      return { canvas: capture.still(maxEdge), rect: canvas.getBoundingClientRect() };
+    },
+    notice: showNotice,
+  };
+  void import('./voice.ts').then(voice => voice.initVoice(voiceBtn, host));
+}
+
 // --- boot ---
 
 /** The graph payload the current URL names: the /g/ path, or a legacy
@@ -4182,6 +4777,7 @@ function loadFromUrl() {
   const wanted = rows.length ? rows : emptyDefault;
   const current = equations.map(e => e.text);
   if (wanted.length === current.length && wanted.every((t, i) => t === current[i])) return;
+  stopVoiceTweens();
   resetViewport();
   equations.length = 0;
   wanted.forEach(t => addEquation(t));
