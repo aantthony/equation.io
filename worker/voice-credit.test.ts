@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { seedKey, testDb } from './d1.fixtures.ts';
 import {
-  callBelongsTo,
   charge,
   endCall,
   generateKey,
@@ -68,18 +67,14 @@ describe('ledger', () => {
     });
   });
 
-  it('counts only recent open calls, and ties calls to their key', async () => {
+  it('counts only recent open calls', async () => {
     const { db, raw } = testDb();
     seedKey(raw, 'h1', 1);
-    seedKey(raw, 'h2', 1);
     await startCall(db, 'old', 'h1', 0);
     await startCall(db, 'live', 'h1', 1000);
     await startCall(db, 'done', 'h1', 1000);
     await endCall(db, 'done', 'ended', 2000);
     expect(await openCalls(db, 'h1', 500)).toBe(1);
-    expect(await callBelongsTo(db, 'live', 'h1')).toBe(true);
-    expect(await callBelongsTo(db, 'live', 'h2')).toBe(false);
-    expect(await callBelongsTo(db, 'done', 'h1')).toBe(false);
     // Ending twice keeps the first reason.
     await endCall(db, 'done', 'again', 3000);
     expect(raw.prepare("SELECT end_reason FROM voice_calls WHERE call_id = 'done'").get()).toEqual({

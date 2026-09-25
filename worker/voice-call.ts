@@ -7,18 +7,23 @@
  * WebSocket onto the same Realtime session (`?call_id=`), where it sees every
  * `response.done` and charges its usage to the caller's credit key. The call
  * lives exactly as long as the control socket: the page closing it, the
- * credit running out, or MAX_CALL_MS hangs the call up.
+ * credit running out, the page changing the session, or MAX_CALL_MS hangs the
+ * call up.
+ *
+ * The control socket is accepted half-open (worker/voice.ts): a page's Close
+ * frame isn't answered until end() has hung up and recorded the call, because
+ * answering it completes the request and the runtime would then cancel those
+ * database writes.
  *
  * The control protocol, as JSON messages:
  *   page → { type: 'start', key, sdp }                  first message
- *   page ← { type: 'answer', sdp, call_id, balance_micros }
+ *   page ← { type: 'answer', sdp, call_id }
  *   page ← { type: 'refused', error, balance_micros? }  then closes
  *   page → { type: 'image', id, image, legend }         a screenshot for the model
  *   page ← { type: 'image.done', id, error? }
- *   page ← { type: 'balance', balance_micros }          after each charge
  *   page ← { type: 'ended', reason }                    then closes
  */
-import { SESSION_CONFIG } from '../lib/voice-agent.ts';
+import { SESSION_CONFIG, TOOLS } from '../lib/voice-agent.ts';
 import { charge, endCall, hashKey, isKeyShaped, lookupKey, openCalls, startCall, usageCost } from './voice-credit.ts';
 
 export interface VoiceCallEnv {
@@ -92,7 +97,7 @@ export class VoiceCall {
     this.page.addEventListener('message', e => void this.onPage(parse(e.data)));
     this.page.addEventListener('close', () => void this.end('ended'));
     this.page.addEventListener('error', () => void this.end('ended'));
-    this.timers.push(setTimeout(() => !this.started && void this.refuse('bad_request'), START_TIMEOUT_MS));
+    this.timers.push(setTimeout(() => !this.started && this.refuse('bad_request'), START_TIMEOUT_MS));
   }
 
   private send(message: object) {
@@ -107,17 +112,35 @@ export class VoiceCall {
     if (!message || this.ended) return;
     if (message.type === 'start' && !this.started) {
       this.started = true;
-      await this.start(message.key, message.sdp);
+      try {
+        await this.start(message.key, message.sdp);
+      } catch (e) {
+        // A database or network failure mid-setup: the page is waiting on an answer.
+        console.error('[voice] start failed', e);
+        await this.abandon();
+      }
     } else if (message.type === 'image') {
-      this.send({ type: 'image.done', id: message.id, ...(await this.image(message.image, message.legend)) });
+      const result = await this.image(message.image, message.legend).catch(() => ({ error: 'call is not live' }));
+      this.send({ type: 'image.done', id: message.id, ...result });
     }
   }
 
-  private async refuse(error: string, extra: object = {}) {
+  private refuse(error: string, extra: object = {}) {
     this.send({ type: 'refused', error, ...extra });
     this.ended = true;
     this.clear();
-    this.page.close(1000, error);
+    this.closePage(error);
+  }
+
+  /** Setup failed part way: hang up whatever call was created, and refuse the page. */
+  private async abandon() {
+    if (this.callId) {
+      await hangUp(this.callId, this.env.OPENAI_API_KEY).catch(() => {});
+      await endCall(this.env.DB, this.callId, 'setup failed', Date.now()).catch(() => {});
+    }
+    this.closeSideband(this.sideband);
+    this.sideband = undefined;
+    if (!this.ended) this.refuse('upstream');
   }
 
   private async start(key: unknown, sdp: unknown) {
@@ -154,13 +177,13 @@ export class VoiceCall {
     if (!sideband || this.ended) {
       await hangUp(callId, OPENAI_API_KEY).catch(() => {});
       await endCall(DB, callId, sideband ? 'ended' : 'sideband failed', Date.now());
-      sideband?.close();
-      if (!this.ended) await this.refuse('upstream');
+      this.closeSideband(sideband);
+      if (!this.ended) this.refuse('upstream');
       return;
     }
     this.sideband = sideband;
     this.timers.push(setTimeout(() => void this.end('time limit'), MAX_CALL_MS));
-    this.send({ type: 'answer', sdp: answer, call_id: callId, balance_micros: row.balance_micros });
+    this.send({ type: 'answer', sdp: answer, call_id: callId });
   }
 
   /** Opens the sideband onto the call just created. */
@@ -179,7 +202,12 @@ export class VoiceCall {
   private onSideband(event: Message | null) {
     if (!event) return;
     const response = event.response as { usage?: object } | undefined;
-    if (event.type === 'response.done') {
+    if (event.type === 'session.updated') {
+      // The page holds the call's data channel and could send session.update:
+      // turn on transcription (billed outside response.done), or swap the
+      // instructions and tools. It never needs to, so any change ends the call.
+      if (!sessionIntact(event.session)) void this.end('session changed');
+    } else if (event.type === 'response.done') {
       const micros = usageCost(response?.usage);
       if (micros > 0) this.bill(micros, JSON.stringify(response?.usage ?? {}));
     } else if (event.type === 'conversation.item.added' || event.type === 'conversation.item.created') {
@@ -194,7 +222,6 @@ export class VoiceCall {
     this.charges = this.charges
       .then(() => charge(this.env.DB, this.keyHash, this.callId, micros, detail, Date.now()))
       .then(balance => {
-        this.send({ type: 'balance', balance_micros: balance });
         // Not returned: end() waits for this chain, so it can't be part of it.
         if (balance <= 0) void this.end('out of credit');
       })
@@ -254,26 +281,72 @@ export class VoiceCall {
     this.timers = [];
   }
 
-  /** Ends the call once, whichever side ended it: hang up, settle charges, record why, tell the page. */
-  private async end(reason: string) {
-    if (this.ended) return;
-    this.ended = true;
-    this.clear();
-    if (this.callId) {
-      await hangUp(this.callId, this.env.OPENAI_API_KEY).catch(e => console.error('[voice] hangup failed', e));
-      try {
-        this.sideband?.close();
-      } catch {
-        // Already closed.
-      }
-      await this.charges;
-      await endCall(this.env.DB, this.callId, reason, Date.now());
+  private closeSideband(sideband: CallSocket | null | undefined) {
+    try {
+      sideband?.close();
+    } catch {
+      // Already closed.
     }
-    this.send({ type: 'ended', reason });
+  }
+
+  private closePage(reason: string) {
     try {
       this.page.close(1000, reason);
     } catch {
       // Already closed.
     }
   }
+
+  /**
+   * Ends the call once, whichever side ended it: tell the page why, hang up,
+   * settle charges and record the call, and only then close the sockets.
+   * Closing the page's socket completes this request, so the writes go first.
+   */
+  private async end(reason: string) {
+    if (this.ended) return;
+    this.ended = true;
+    this.clear();
+    // Before hanging up: the page stops as soon as its call drops, and would miss it after.
+    this.send({ type: 'ended', reason });
+    if (this.callId) {
+      await hangUp(this.callId, this.env.OPENAI_API_KEY).catch(e => console.error('[voice] hangup failed', e));
+      await this.charges;
+      await endCall(this.env.DB, this.callId, reason, Date.now()).catch(e =>
+        console.error('[voice] endCall failed', e),
+      );
+    }
+    this.closeSideband(this.sideband);
+    this.closePage(reason);
+  }
+}
+
+const TOOL_NAMES = TOOLS.map(t => t.name)
+  .sort()
+  .join();
+
+/**
+ * Whether a `session.updated` session is still the one the call was created
+ * with, in everything that changes what it costs or what the model does.
+ */
+export function sessionIntact(session: unknown): boolean {
+  const s = session as
+    | {
+        instructions?: unknown;
+        tools?: { name?: unknown }[];
+        audio?: { input?: { transcription?: unknown; turn_detection?: Record<string, unknown> | null } };
+      }
+    | undefined;
+  const turns = s?.audio?.input?.turn_detection;
+  const expected = SESSION_CONFIG.audio.input.turn_detection;
+  return (
+    s?.instructions === SESSION_CONFIG.instructions &&
+    Array.isArray(s.tools) &&
+    s.tools
+      .map(t => t.name)
+      .sort()
+      .join() === TOOL_NAMES &&
+    !s.audio?.input?.transcription &&
+    !!turns &&
+    Object.entries(expected).every(([k, v]) => turns[k] === v)
+  );
 }

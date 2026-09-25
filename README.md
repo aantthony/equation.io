@@ -77,8 +77,8 @@ offer with a **credit key**. The Worker checks the key's balance in D1, creates
 the call with a fixed session, and attaches a sideband WebSocket to it before
 answering. The sideband charges every response's token usage to the key
 ([`worker/voice-credit.ts`](worker/voice-credit.ts)); the call is hung up when
-the balance runs out, after 30 minutes, or when the page's control socket
-closes. Audio flows between the browser and OpenAI directly.
+the balance runs out, after 30 minutes, if the page changes the session, or
+when the page's control socket closes. Audio flows between the browser and OpenAI directly.
 
 ```sh
 wrangler secret put OPENAI_API_KEY     # locally: in .dev.vars

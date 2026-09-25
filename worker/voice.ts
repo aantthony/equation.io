@@ -22,7 +22,8 @@ export function handleVoiceConnect(request: Request, env: VoiceEnv): Response {
     return Response.json({ error: 'upgrade_required' }, { status: 426, headers: { Upgrade: 'websocket' } });
   }
   const [client, server] = Object.values(new WebSocketPair());
-  server.accept();
+  // Half-open: the call answers the page's Close itself, once it has recorded the call (voice-call.ts).
+  server.accept({ allowHalfOpen: true });
   new VoiceCall(server, { OPENAI_API_KEY, DB }).listen();
   return new Response(null, { status: 101, webSocket: client });
 }

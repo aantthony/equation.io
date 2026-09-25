@@ -315,7 +315,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
         ? "none — every plot row reads a data file on the author's device (see preview_omits; the graph itself is fine)"
         : "none — every plot row reads a data file on the author's device (see preview_omits), and other rows have errors (see rows)"
       : 'none — no plot rows to draw';
-  } else if (omitted.length === plotRows.length) {
+  } else if (omitted.length + labelOmits.length === plotRows.length) {
+    // Labels never have a gap (previewGap), but alone their preview is a bare grid.
     preview =
       'none — the static preview cannot draw any of these rows (see preview_omits; this says nothing about whether the graph works)';
   } else {

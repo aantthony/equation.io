@@ -3,7 +3,7 @@ import { landingFromPath, graphUrl, type Landing } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { handleMcp } from './mcp.ts';
 import { OG_HEIGHT, OG_WIDTH, canRenderOg, renderOgPng } from './og.ts';
-import { handleVoiceConnect, type VoiceEnv } from './voice.ts';
+import { handleVoiceConnect } from './voice.ts';
 
 /** Static card used when a graph is not one the preview renderer can draw. */
 const FALLBACK_OG = '/shots/hero.png';
@@ -223,7 +223,7 @@ async function handleApi(request: Request, url: URL, env: Env): Promise<Response
     return Response.json({ ok: true });
   }
   if (url.pathname === '/api/voice/connect') {
-    return handleVoiceConnect(request, env as Env & VoiceEnv);
+    return handleVoiceConnect(request, env);
   }
   if (url.pathname.startsWith('/api/og/')) {
     return handleOgImage(url);

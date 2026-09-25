@@ -91,15 +91,6 @@ export async function startCall(db: D1Database, callId: string, keyHash: string,
     .run();
 }
 
-/** Whether this call was started with this key (and so may be driven by its holder). */
-export async function callBelongsTo(db: D1Database, callId: string, keyHash: string): Promise<boolean> {
-  const row = await db
-    .prepare('SELECT 1 AS ok FROM voice_calls WHERE call_id = ? AND key_hash = ? AND ended_at IS NULL')
-    .bind(callId, keyHash)
-    .first();
-  return !!row;
-}
-
 /**
  * Charges one response to the key and the call, atomically, and returns the
  * key's balance afterwards. The balance may go below zero by at most one

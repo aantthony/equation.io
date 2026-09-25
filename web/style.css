@@ -166,6 +166,9 @@ body {
   box-shadow: 0 4px 20px var(--panel-shadow);
   /* Extra top room for the grip strip. */
   padding: 16px 8px 8px;
+  /* Over voice mode's idle orb, which a bottom-pinned or tall panel can
+     reach on a phone: a tap there is meant for the panel. */
+  z-index: 5;
 }
 
 /* Corner pinning (panel-swipe.ts): flicking the panel re-anchors it via
@@ -1102,13 +1105,14 @@ html[data-embed][data-embed-boot] #panel {
 }
 
 /* Voice mode's way in (web/voice.ts idleOrb): a resting orb where the live
-   one appears (its centre 56px above the bottom), labelled underneath. */
+   one appears (its centre 56px above the bottom), labelled underneath. Under
+   the panel where they meet (#panel). */
 .voice-start {
   position: fixed;
   left: 50%;
   bottom: calc(8px + var(--safe-area-bottom));
   transform: translateX(-50%);
-  z-index: 5;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   align-items: center;

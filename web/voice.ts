@@ -30,6 +30,8 @@ import { type SyntaxEntry, searchSyntax, syntaxEntries } from '../lib/syntax-sea
 const STORE_KEY = 'voiceKey';
 /** Longest screenshot edge sent to the model: enough to read axis labels. */
 const SCREENSHOT_EDGE = 1280;
+/** The Worker answers within a few seconds; past this it has failed. */
+const CONNECT_TIMEOUT_MS = 20_000;
 
 /** What each drawn row kind looks like, for the voice agent: kind names like
  *  `implicit2d` are the MCP's public vocabulary, not words a model can reason
@@ -427,6 +429,12 @@ class Session {
   private running = 0;
   /** The model's audio is playing: set by the server's output_audio_buffer events. */
   private speaking = false;
+  /** A response is being generated (response.created until response.done). */
+  private responding = false;
+  /** Asked for a response while one was running: send it at the next response.done. */
+  private wantResponse = false;
+  /** The speech being heard began while the model was talking, so it may be anyone. */
+  private overheard = false;
   closed = false;
 
   constructor(
@@ -489,11 +497,19 @@ class Session {
       const control = new WebSocket(`${location.origin.replace(/^http/, 'ws')}/api/voice/connect`);
       this.control = control;
       let answered = false;
+      // The Worker always answers or refuses; this covers one that can't.
+      const timeout = setTimeout(() => {
+        if (answered) return;
+        control.onclose = null;
+        control.close();
+        reject(new Error('Could not start a voice session.'));
+      }, CONNECT_TIMEOUT_MS);
       control.onopen = () => control.send(JSON.stringify({ type: 'start', key: this.key, sdp }));
       control.onmessage = e => {
         const message = JSON.parse(e.data as string) as { type: string; [k: string]: any };
         if (message.type === 'answer') {
           answered = true;
+          clearTimeout(timeout);
           resolve(message.sdp);
         } else if (message.type === 'refused') {
           reject(new Error(this.refusal(message.error, message.balance_micros)));
@@ -504,6 +520,7 @@ class Session {
         }
       };
       control.onclose = () => {
+        clearTimeout(timeout);
         if (!answered) reject(new Error('Could not start a voice session.'));
         else this.stop(this.reasonText());
       };
@@ -534,6 +551,12 @@ class Session {
     if (this.dc?.readyState === 'open') this.dc.send(JSON.stringify(event));
   }
 
+  /** Asks for the model's reply, once any response still running has finished. */
+  private respond() {
+    if (this.responding) this.wantResponse = true;
+    else this.send({ type: 'response.create' });
+  }
+
   private onEvent(event: { type: string; [k: string]: any }) {
     switch (event.type) {
       case 'output_audio_buffer.started':
@@ -543,18 +566,29 @@ class Session {
       case 'output_audio_buffer.stopped':
       case 'output_audio_buffer.cleared':
         this.speaking = false;
-        if (!this.running) this.orb.setState('listening');
+        this.orb.setState(this.running ? 'thinking' : 'listening');
         break;
       case 'input_audio_buffer.speech_started':
         // Speech doesn't interrupt a reply (lib/voice-agent.ts): while the
         // model talks, it may be anyone in the room.
-        if (this.speaking) break;
+        this.overheard = this.speaking;
+        if (this.overheard) break;
         // A new question means the old pointing is stale.
         this.orb.home();
         this.orb.setState('listening');
         break;
       case 'input_audio_buffer.speech_stopped':
-        if (!this.speaking) this.orb.setState('thinking');
+        if (!this.overheard) this.orb.setState('thinking');
+        break;
+      case 'input_audio_buffer.committed':
+        // Turns don't answer themselves (lib/voice-agent.ts): reply to the
+        // student, and drop what was overheard so no later reply answers it.
+        if (this.overheard) this.send({ type: 'conversation.item.delete', item_id: event.item_id });
+        else this.respond();
+        this.overheard = false;
+        break;
+      case 'response.created':
+        this.responding = true;
         break;
       case 'response.output_audio_transcript.delta':
         this.transcript += event.delta;
@@ -562,7 +596,8 @@ class Session {
         break;
       case 'response.function_call_arguments.done': {
         const { call_id, name } = event;
-        this.orb.setState('thinking');
+        // Still speaking ("Let me look"): the orb stays tappable until the audio ends.
+        if (!this.speaking) this.orb.setState('thinking');
         this.running++;
         const run = runTool(this.host, name, event.arguments ?? '{}', {
           attach: (image, legend) => this.attach(image, legend),
@@ -582,6 +617,11 @@ class Session {
       }
       case 'response.done': {
         this.transcript = '';
+        this.responding = false;
+        if (this.wantResponse) {
+          this.wantResponse = false;
+          this.send({ type: 'response.create' });
+        }
         // A response can make several calls, and one can outlive the
         // response that asked for it: ask for the follow-up once, after all
         // of this response's outputs are in.
@@ -590,7 +630,7 @@ class Session {
         if (!pending.length && !this.running && !this.speaking) this.orb.setState('listening');
         if (pending.length) {
           void Promise.all(pending).then(() => {
-            if (!this.closed) this.send({ type: 'response.create' });
+            if (!this.closed) this.respond();
           });
         }
         break;

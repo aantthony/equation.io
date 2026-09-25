@@ -307,6 +307,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'distance',
   'angle',
   'revolve',
+  'label',
   'rgb',
   'hsl',
   'oklch',

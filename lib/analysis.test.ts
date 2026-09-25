@@ -114,6 +114,20 @@ describe('shared document analysis', () => {
       expect(evaluate(det.residual, { x, y, z })).toBeCloseTo(-2, 9);
     }
   });
+
+  it('keeps graphs saved before label() that use label as a name', () => {
+    for (const rows of [
+      ['label = 3', 'y = label x'],
+      ['label(x) = x^2', 'y = label(x)'],
+      ['Label = 2', 'y = Label(x + 1)'],
+      ['label ~ Normal(0, 1)'],
+      ['label = [1, 2, 3]'],
+    ]) {
+      expect(analyzeRows(rows).rows.map(r => r.error)).toEqual(rows.map(() => undefined));
+    }
+    // A label row is still a label.
+    expect(analyzeRows(['label((1, 2), "peak")']).rows[0].cls?.object?.kind).toBe('label');
+  });
 });
 
 describe('dependency retention after a failed definition', () => {

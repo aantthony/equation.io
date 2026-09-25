@@ -610,6 +610,21 @@ describe('graph previews', () => {
     expect(out.preview_omits).toEqual([{ row: 'y = sin(x)', why: expect.stringContaining('vertical sheets') }]);
   });
 
+  it('lists a 3D label once, as text the preview leaves out', async () => {
+    const { body } = await call(['z = x^2 - y^2', 'label((0, 0, 0), "saddle")']);
+    const out = body.result.structuredContent;
+    expect(out.preview).not.toContain('missing');
+    expect(out.preview_omits).toEqual([
+      { row: 'label((0, 0, 0), "saddle")', why: expect.stringContaining('label text') },
+    ]);
+  });
+
+  it('attaches no preview for labels alone', async () => {
+    const { body } = await call(['label((1, 2), "peak")']);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    expect(body.result.structuredContent.preview).toMatch(/^none/);
+  });
+
   it('skips the preview when there is nothing to draw', async () => {
     const { body } = await call(['a = 2', 'f(x) = a x']);
     expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);

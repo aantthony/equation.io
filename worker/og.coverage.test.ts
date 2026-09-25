@@ -59,6 +59,14 @@ describe('canRenderOg', () => {
     // ∫ rows resolve to ordinary expressions (closed form or quadrature sum).
     expect(canRenderOg(['y = int[0..x] exp(-t^2) dt'])).toBe(true);
     expect(canRenderOg(['y = int[0..x] sin(t)/t dt'])).toBe(true);
+    // A label's text is left out, in 3D as in 2D, but the rest still draws.
+    expect(canRenderOg(['y = x^2', 'label((1, 1), "here")'])).toBe(true);
+    expect(canRenderOg(['z = x^2 - y^2', 'label((0, 0, 0), "saddle")'])).toBe(true);
+  });
+
+  it('rejects a graph of labels alone, which would preview as a bare grid', () => {
+    expect(canRenderOg(['label((1, 2), "peak")'])).toBe(false);
+    expect(canRenderOg(['label((0, 0, 1), "top")', 'label((1, 2), "peak")'])).toBe(false);
   });
 
   it('rejects graphs whose preview would be misleading', () => {

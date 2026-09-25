@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedKey, testDb } from './d1.fixtures.ts';
-import { MAX_CALL_MS, VoiceCall } from './voice-call.ts';
+import { SESSION_CONFIG } from '../lib/voice-agent.ts';
+import { MAX_CALL_MS, VoiceCall, sessionIntact } from './voice-call.ts';
 import { hashKey } from './voice-credit.ts';
 
 const KEY = 'eqv_' + 'k'.repeat(43);
@@ -76,7 +77,7 @@ async function started(balance = 5_000_000) {
   const c = await connect(balance);
   c.page.emit({ type: 'start', key: KEY, sdp: OFFER });
   await settle();
-  expect(c.page.last('answer')).toMatchObject({ sdp: ANSWER, call_id: 'rtc_1', balance_micros: balance });
+  expect(c.page.last('answer')).toEqual({ type: 'answer', sdp: ANSWER, call_id: 'rtc_1' });
   return c;
 }
 
@@ -160,6 +161,17 @@ describe('starting a call', () => {
     expect(call()).toMatchObject({ end_reason: 'sideband failed' });
   });
 
+  it('refuses the page and hangs up when setup fails part way', async () => {
+    const c = await connect();
+    // The call is created, then recording it fails.
+    c.raw.exec("CREATE TRIGGER fail BEFORE INSERT ON voice_calls BEGIN SELECT RAISE(FAIL, 'D1 is down'); END");
+    c.page.emit({ type: 'start', key: KEY, sdp: OFFER });
+    await settle();
+    expect(c.page.last('refused')).toMatchObject({ error: 'upstream' });
+    expect(c.page.closed).toBe(true);
+    expect(c.hangups()).toBe(1);
+  });
+
   it('hides upstream failure details', async () => {
     const { page } = await connect();
     vi.stubGlobal('fetch', async () => Response.json({ error: 'account acme-corp is over quota' }, { status: 429 }));
@@ -169,16 +181,36 @@ describe('starting a call', () => {
   });
 });
 
+describe('sessionIntact', () => {
+  const base = () => structuredClone(SESSION_CONFIG) as any;
+  it('accepts the session as created, with fields the server fills in', () => {
+    const s = base();
+    s.audio.input.turn_detection.eagerness = 'auto';
+    s.tools = [...s.tools].reverse();
+    expect(sessionIntact(s)).toBe(true);
+  });
+  it.each<[string, (s: any) => void]>([
+    ['instructions', s => (s.instructions = 'Speak like a pirate.')],
+    ['tools', s => s.tools.pop()],
+    ['transcription', s => (s.audio.input.transcription = { model: 'gpt-4o-transcribe' })],
+    ['turn detection', s => (s.audio.input.turn_detection.create_response = true)],
+    ['no turn detection', s => (s.audio.input.turn_detection = null)],
+  ])('rejects changed %s', (_, change) => {
+    const s = base();
+    change(s);
+    expect(sessionIntact(s)).toBe(false);
+  });
+});
+
 describe('a live call', () => {
-  it('charges each response to the key and the call, and tells the page', async () => {
-    const { sideband, page, call, balanceNow, hangups } = await started(1_000_000);
+  it('charges each response to the key and the call', async () => {
+    const { sideband, call, balanceNow, hangups } = await started(1_000_000);
     sideband.emit(done(1000)); // 1000 × 64 µ$
     sideband.emit(done(500));
     sideband.emit({ type: 'response.done', response: {} }); // no usage: free
     await settle();
     expect(balanceNow()).toBe(1_000_000 - 1500 * 64);
     expect(call()).toMatchObject({ cost_micros: 1500 * 64, ended_at: null });
-    expect(page.last('balance')).toEqual({ type: 'balance', balance_micros: 1_000_000 - 1500 * 64 });
     expect(hangups()).toBe(0);
   });
 
@@ -203,6 +235,37 @@ describe('a live call', () => {
     await settle();
     expect(hangups()).toBe(1);
     expect(call()).toMatchObject({ cost_micros: 640, end_reason: 'ended' });
+  });
+
+  it('records the call before closing either socket, and tells the page why first', async () => {
+    const c = await started();
+    const order: string[] = [];
+    const closeSideband = c.sideband.close.bind(c.sideband);
+    c.sideband.close = () => {
+      order.push(`sideband closed, call ${c.call().ended_at ? 'recorded' : 'open'}`);
+      closeSideband();
+    };
+    c.upstream.mockImplementation(async (url: string) => {
+      if (url.endsWith('/hangup')) order.push(`hangup, page told ${c.page.last('ended')?.reason}`);
+      return new Response(null, { status: 200 });
+    });
+    c.sideband.emit(done(100_000)); // $6.40: over the balance
+    await settle();
+    expect(order).toEqual(['hangup, page told out of credit', 'sideband closed, call recorded']);
+    expect(c.page.closed).toBe(true);
+  });
+
+  it('hangs up when the page changes the session', async () => {
+    const c = await started();
+    const session = structuredClone(SESSION_CONFIG) as any;
+    c.sideband.emit({ type: 'session.updated', session });
+    await settle();
+    expect(c.hangups()).toBe(0);
+    session.audio.input.transcription = { model: 'gpt-4o-transcribe' };
+    c.sideband.emit({ type: 'session.updated', session });
+    await settle();
+    expect(c.hangups()).toBe(1);
+    expect(c.call()).toMatchObject({ end_reason: 'session changed' });
   });
 
   it('hangs up at the time limit', async () => {

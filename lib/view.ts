@@ -190,8 +190,23 @@ export function fitView2D(
   };
 }
 
-/** Same 6-significant-digit trim sliders use, so rewritten rows stay tidy. */
-const fmt = (v: number, digits = 6) => String(parseFloat(v.toPrecision(digits)));
+/**
+ * Same 6-significant-digit trim sliders use, so rewritten rows stay tidy,
+ * always as plain decimals: the row language has no exponent notation, and
+ * reads `-4.44089e-16` as -4.44089·e − 16.
+ */
+function fmt(v: number, digits = 6): string {
+  const n = parseFloat(v.toPrecision(digits));
+  const s = String(n);
+  if (!s.includes('e')) return s;
+  if (Math.abs(n) >= 1) return BigInt(n).toString();
+  // toFixed takes at most 100 places; anything smaller is 0 at any scale a view shows.
+  const places = digits - 1 - Math.floor(Math.log10(Math.abs(n)));
+  return places > 100 ? '0' : n.toFixed(places).replace(/\.?0+$/, '');
+}
+
+/** Float dust (from easing, or equal and opposite drags) at `scale`, written as 0. */
+const clean = (v: number, scale = 1) => (Math.abs(v) < scale * 1e-9 ? 0 : v);
 
 /**
  * A range's ends at the fewest digits that reproduce it. Six read well, but a
@@ -205,7 +220,7 @@ function fmtRange(lo: number, hi: number): string {
   const scale = Math.max(Math.abs(lo), Math.abs(hi));
   let digits = 6;
   while (digits < 17 && scale * 10 ** (1 - digits) > span / 100) digits++;
-  return `${fmt(lo, digits)}..${fmt(hi, digits)}`;
+  return `${fmt(clean(lo, span), digits)}..${fmt(clean(hi, span), digits)}`;
 }
 
 /** Serialize the visible window back into row text (the writeback half). */
@@ -223,13 +238,12 @@ export function formatCameraRow(c: {
   // A spun or eased camera accumulates turns and float dust: write the angle
   // it shows, in (-pi, pi], and 0 for 0.
   const turn = 2 * Math.PI;
-  const wrapped = c.theta - turn * Math.round(c.theta / turn);
-  const theta = Math.abs(wrapped) < 1e-9 ? 0 : wrapped;
-  const parts = [fmt(theta), fmt(c.phi), fmt(c.radius)];
-  if (c.target.some(v => Math.abs(v) > 1e-9)) {
-    parts.push(`(${c.target.map(v => fmt(v)).join(', ')})`);
-  }
-  if (c.spin) parts.push(`spin = ${fmt(c.spin)}`);
+  const theta = clean(c.theta - turn * Math.round(c.theta / turn));
+  const parts = [fmt(theta), fmt(clean(c.phi)), fmt(c.radius)];
+  const target = c.target.map(v => clean(v, c.radius));
+  if (target.some(v => v !== 0)) parts.push(`(${target.map(v => fmt(v)).join(', ')})`);
+  const spin = clean(c.spin ?? 0);
+  if (spin) parts.push(`spin = ${fmt(spin)}`);
   return `camera(${parts.join(', ')})`;
 }
 

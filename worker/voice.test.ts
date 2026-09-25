@@ -22,13 +22,3 @@ describe('/api/voice/connect', () => {
     expect(res.headers.get('upgrade')).toBe('websocket');
   });
 });
-
-describe('retired routes', () => {
-  it.each(['/api/voice/token', '/api/voice/look', '/api/voice/call', '/api/voice/image', '/api/voice/balance'])(
-    '%s is gone',
-    async path => {
-      const res = await worker.fetch(new Request(`https://equation.io${path}`, { method: 'POST' }), CONFIGURED);
-      expect(res.status).toBe(404);
-    },
-  );
-});

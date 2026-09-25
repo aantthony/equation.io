@@ -164,8 +164,10 @@ export const SESSION_CONFIG = {
       // Laptop and room microphones: cleaned before turn detection hears it.
       noise_reduction: { type: 'far_field' },
       // Speech doesn't cut the model off: in a noisy room any voice would.
-      // The student interrupts by tapping the orb instead (web/voice.ts).
-      turn_detection: { type: 'semantic_vad', interrupt_response: false },
+      // The student interrupts by tapping the orb instead. Nor does a turn
+      // answer itself: the page asks for the reply, and drops turns heard
+      // while the model was talking (web/voice.ts), which may be anyone.
+      turn_detection: { type: 'semantic_vad', create_response: false, interrupt_response: false },
     },
     output: { voice: VOICE_NAME },
   },

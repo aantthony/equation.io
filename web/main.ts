@@ -43,7 +43,7 @@ import {
 import { compileSampler } from '../lib/vm.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
-import { type Expr, evaluate, freeVars, substVars } from '../lib/expr.ts';
+import { type Expr, canonicalName, evaluate, freeVars, substVars } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -455,8 +455,8 @@ interface Tween {
   ms: number;
   ease: (k: number) => number;
   step: (k: number) => void;
-  /** Settles the change (undo entry, URL); runs on completion and on cancel. */
-  done?: () => void;
+  /** Settles the change (row, URL): `finished` on arrival, not when cancelled. */
+  done?: (finished: boolean) => void;
 }
 const tweens = new Map<string, Tween>();
 let tweenFrame: number | null = null;
@@ -468,7 +468,7 @@ function tween(
   seconds: number,
   ease: (k: number) => number,
   step: (k: number) => void,
-  done?: () => void,
+  done?: (finished: boolean) => void,
 ) {
   cancelTween(key);
   tweens.set(key, { start: performance.now(), ms: Math.max(0, seconds) * 1000, ease, step, done });
@@ -479,20 +479,26 @@ function cancelTween(key: string) {
   const t = tweens.get(key);
   if (!t) return;
   tweens.delete(key);
-  t.done?.();
+  t.done?.(false);
+}
+
+/** The student's undo, or a new document, takes the graph back from voice mode's animations. */
+function stopVoiceTweens() {
+  for (const key of [...tweens.keys()]) if (key === 'view' || key.startsWith('slider:')) cancelTween(key);
 }
 
 function runTweens(now: number) {
-  tweenFrame = null;
   for (const [key, t] of tweens) {
     const k = t.ms ? Math.min(1, Math.max(0, (now - t.start) / t.ms)) : 1;
     t.step(t.ease(k));
-    if (k >= 1) {
+    // A step may have cancelled its own tween.
+    if (k >= 1 && tweens.get(key) === t) {
       tweens.delete(key);
-      t.done?.();
+      t.done?.(true);
     }
   }
-  if (tweens.size) tweenFrame = requestAnimationFrame(runTweens);
+  // Cleared only now: a tween started by a done() above joins this chain, not a second one.
+  tweenFrame = tweens.size ? requestAnimationFrame(runTweens) : null;
 }
 
 // --- viewport rows: the two-way binding ---
@@ -547,8 +553,11 @@ function applyViewportRows() {
 // gesture by a beat instead of running per move; release flushes it so the
 // row, URL, and undo entry are settled the moment the gesture ends.
 let viewportWriteTimer: ReturnType<typeof setTimeout> | null = null;
+/** The pending writeback makes its own undo entry: a gesture's does; a voice-mode move made one up front. */
+let viewportWriteUndo = false;
 
-function scheduleViewportWriteback() {
+function scheduleViewportWriteback(undo = true) {
+  viewportWriteUndo ||= undo;
   viewportWriteTimer ??= setTimeout(() => {
     viewportWriteTimer = null;
     writebackViewport();
@@ -595,6 +604,7 @@ function advanceSpin() {
 
 /** Sets the camera row's spin (creating the row if needed), easing it in. */
 function setCameraSpin(spin: number) {
+  if (mode !== '3d') return;
   const text = formatCameraRow({ ...camera, spin });
   let eq = viewportRow('camera');
   if (eq) {
@@ -632,6 +642,8 @@ function ensureViewRow() {
 }
 
 function writebackViewport() {
+  const undo = viewportWriteUndo;
+  viewportWriteUndo = false;
   const eq = viewportRow(mode === '2d' ? 'view' : 'camera');
   if (!eq) return;
   let text: string;
@@ -645,7 +657,7 @@ function writebackViewport() {
   }
   text = keepNote(eq.text, text);
   if (text === eq.text) return;
-  pushUndo(`viewport:${eq.id}`);
+  if (undo) pushUndo(`viewport:${eq.id}`);
   if (mode === '2d') appliedViewText = text;
   else appliedCameraText = text;
   eq.text = text;
@@ -2459,6 +2471,7 @@ function restoreSnapshot(s: Snapshot) {
 function doUndo() {
   const s = undoStack.pop();
   if (!s) return;
+  stopVoiceTweens();
   redoStack.push(takeSnapshot(caretPos()));
   coalesce = null;
   restoreSnapshot(s);
@@ -2467,6 +2480,7 @@ function doUndo() {
 function doRedo() {
   const s = redoStack.pop();
   if (!s) return;
+  stopVoiceTweens();
   undoStack.push(takeSnapshot(caretPos()));
   coalesce = null;
   restoreSnapshot(s);
@@ -2475,14 +2489,14 @@ function doRedo() {
 // --- rendering & reconciliation ---
 
 /** Moves a slider row to `v` (held to its range and step) the way dragging
- *  it does: one coalesced undo entry per gesture, no plot recompile when the
- *  constant is a runtime uniform. Returns the value it holds, or null for a
- *  row that is not a slider. */
-function setSlider(eq: Equation, v: number): number | null {
+ *  it does: one coalesced undo entry per gesture (none when `undo` is false:
+ *  the caller made one), no plot recompile when the constant is a runtime
+ *  uniform. Returns the value it holds, or null for a row that is not a slider. */
+function setSlider(eq: Equation, v: number, undo = true): number | null {
   const kind = eq.def?.kind;
   const moved = moveSlider(eq, v);
   if (!moved || (kind !== 'const' && kind !== 'init')) return null;
-  pushUndo(`slider:${eq.id}`);
+  if (undo) pushUndo(`slider:${eq.id}`);
   const lhs = eq.def!.name;
   eq.text = keepNote(eq.text, moved.text);
   const line = lineEls()[equations.indexOf(eq)];
@@ -3590,6 +3604,7 @@ document.addEventListener('selectionchange', () => {
 let emptyDefault = ['y = sin(x)'];
 
 function replaceDocument(rows: string[], share: boolean) {
+  stopVoiceTweens();
   pushUndo(null);
   resetViewport();
   equations.length = 0;
@@ -4301,13 +4316,24 @@ const DIST_KINDS = {
 } as const;
 
 /**
- * Whether any other row mentions `name`. A definition nothing reads draws
+ * Whether any other row reads `name`. A definition nothing reads draws
  * nothing, yet validates fine — `r = sin(8t)` is a perfectly good constant —
  * so voice mode flags it; otherwise the voice model announces a curve that isn't there.
+ *
+ * A plot's compiled parameters, followed through the constants they read,
+ * are exact. Functions are inlined and points drawn apart from plots, so
+ * those fall back to the row's text: canonical names (T₀ is T_0), a digit
+ * coefficient allowed before (`2f(x)`), comments and label text ignored.
  */
 function usedElsewhere(eq: Equation, name: string): boolean {
-  const word = new RegExp(`(?<![\\w])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w])`);
-  return equations.some(other => other !== eq && word.test(stripNote(other.text)));
+  const others = equations.filter(other => other !== eq && !other.comment && !other.viewSpec);
+  const read = definitionDependencies(
+    others.flatMap(other => other.cls?.params ?? []),
+    defs,
+  );
+  if (read.has(name)) return true;
+  const word = new RegExp(`(?<![\\p{L}_])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'u');
+  return others.some(other => word.test(canonicalName(stripNote(other.text).replace(/"[^"]*"/g, '""'))));
 }
 
 /**
@@ -4447,16 +4473,19 @@ function animateSlider(name: string, to: number, seconds: number, from?: number)
   const start = from ?? sliderEnv()[name] ?? 0;
   // moveSlider holds values to the slider's range: report where it will stop.
   const end = moveSlider(eq, to)?.value ?? to;
-  if (from !== undefined) setSlider(eq, start);
-  tween(
-    `slider:${eq.id}`,
-    seconds,
-    linear,
-    k => setSlider(eq, start + (to - start) * k),
-    () => {
-      coalesce = null;
-    },
-  );
+  const key = `slider:${eq.id}`;
+  cancelTween(key);
+  // One undo entry for the whole glide; its frames write without one, so
+  // glides running together can't flood the stack.
+  pushUndo(null);
+  if (from !== undefined) setSlider(eq, start, false);
+  let written = eq.text;
+  tween(key, seconds, linear, k => {
+    // The student typed in the row, undid, or opened another graph: it's theirs now.
+    if (eq.text !== written || !equations.includes(eq)) return cancelTween(key);
+    setSlider(eq, start + (to - start) * k, false);
+    written = eq.text;
+  });
   return { slider: name, from: start, to: end, seconds, ...(end !== to ? { note: `held to the slider's range` } : {}) };
 }
 
@@ -4469,6 +4498,9 @@ function moveView(target: MoveViewTarget, seconds: number): object {
     if (bad) return { error: 'each range must be [low, high] with high > low' };
     const a = { cx: view.cx, cy: view.cy, upp: view.upp };
     const b = fitView2D({ kind: 'view', x: target.x, y: target.y, ratio: view.ratio }, canvas.width, canvas.height);
+    cancelTween('view');
+    // One undo entry for the move; its frames' writebacks make none.
+    if (viewportRow('view')) pushUndo(null);
     tween(
       'view',
       seconds,
@@ -4478,7 +4510,7 @@ function moveView(target: MoveViewTarget, seconds: number): object {
         view.cy = a.cy + (b.cy - a.cy) * k;
         // Zoom geometrically, so a 100x zoom doesn't spend its first half barely moving.
         view.upp = a.upp * (b.upp / a.upp) ** k;
-        scheduleViewportWriteback();
+        scheduleViewportWriteback(false);
         requestRender();
       },
       flushViewportWriteback,
@@ -4500,6 +4532,8 @@ function moveView(target: MoveViewTarget, seconds: number): object {
   const phi = target.phi === undefined ? a.phi : clampPhi(target.phi);
   const radius = target.radius ?? a.radius;
   const goal = target.target ?? a.target;
+  cancelTween('view');
+  if (viewportRow('camera')) pushUndo(null);
   tween(
     'view',
     seconds,
@@ -4509,13 +4543,14 @@ function moveView(target: MoveViewTarget, seconds: number): object {
       camera.phi = a.phi + (phi - a.phi) * k;
       camera.radius = a.radius * (radius / a.radius) ** k;
       camera.target = [0, 1, 2].map(i => a.target[i] + (goal[i] - a.target[i]) * k) as [number, number, number];
-      scheduleViewportWriteback();
+      scheduleViewportWriteback(false);
       requestRender();
     },
-    () => {
+    finished => {
       flushViewportWriteback();
-      // Arrive, then ease into the spin: the camera never jerks from rest to full speed.
-      if (target.spin !== undefined) setCameraSpin(target.spin);
+      // Arrive, then ease into the spin: the camera never jerks from rest to
+      // full speed. A hand that stopped the move stops the spin too.
+      if (finished && target.spin !== undefined) setCameraSpin(target.spin);
     },
   );
   return {
@@ -4560,10 +4595,14 @@ if (voiceBtn && !embedded)
     setRows(rows) {
       // Like an edit, not like opening an example: rows keep their objects
       // (and so their colors) by position, and the viewport stays put.
-      // A running slider animation would now drive whatever row took its place.
-      for (const key of [...tweens.keys()]) if (key.startsWith('slider:')) cancelTween(key);
+      // A running animation or camera move would now drive whatever took its place.
+      stopVoiceTweens();
       pushUndo(null);
-      const texts = rows.map(t => t.trim()).filter(Boolean);
+      // One entry per row, as MCP and pasting read them: `y = x^2; y = 2x` is two.
+      const texts = rows
+        .flatMap(t => splitStatements(t))
+        .map(t => t.trim())
+        .filter(Boolean);
       if (!texts.length) texts.push('');
       equations.length = Math.min(equations.length, texts.length);
       texts.forEach((t, i) => {
@@ -4572,9 +4611,11 @@ if (voiceBtn && !embedded)
       });
       recompileAll();
       renderAll();
-      // render() settles 2D vs 3D on the next frame, but the model's next
-      // call (a 3D move_view, say) often arrives before it.
+      // render() settles 2D vs 3D and applies view()/camera() rows on the next
+      // frame, but the reply, and the model's next call (a 3D move_view, say),
+      // come before it.
       mode = equations.some(e => e.cls && !e.error && e.cls.needs3D) ? '3d' : '2d';
+      applyViewportRows();
       urlPending = true;
       flushUrl();
       requestRender();
@@ -4639,6 +4680,7 @@ function loadFromUrl() {
   const wanted = rows.length ? rows : emptyDefault;
   const current = equations.map(e => e.text);
   if (wanted.length === current.length && wanted.every((t, i) => t === current[i])) return;
+  stopVoiceTweens();
   resetViewport();
   equations.length = 0;
   wanted.forEach(t => addEquation(t));

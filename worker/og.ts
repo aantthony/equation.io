@@ -943,6 +943,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   switch (type) {
     case 'note':
     case 'value':
+    // Its text is left out in 3D as in 2D (OG_COVERAGE); the app draws it in both.
+    case 'label':
     case 'psurface':
     case 'vfield3d':
     case 'spacecurve':
@@ -971,7 +973,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
 
 /**
  * True when every plot row in the graph is one this renderer draws. False for
- * an empty graph too: a bare grid is not worth an image.
+ * an empty graph too, and for one of labels alone, whose text is left out: a
+ * bare grid is not worth an image.
  */
 export function canRenderOg(texts: string[]): boolean {
   let analysis: Analysis;
@@ -984,7 +987,7 @@ export function canRenderOg(texts: string[]): boolean {
   // and no plan: it is not a plot this renderer can draw (nor one whose
   // dimension should pick the scene), exactly as an unclassifiable row.
   const plots = analysis.rows.filter(r => r.cls && r.cpu);
-  if (!plots.length) return false;
+  if (plots.every(r => r.cpu!.type === 'label')) return false;
   const needs3D = plots.some(r => r.cls!.needs3D);
   return plots.every(r => previewGap(r, needs3D) === null);
 }
