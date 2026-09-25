@@ -105,11 +105,11 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['logistic bifurcation', 'a_{n+1} = x a_n (1 - a_n)'],
       [
         'rule 30',
-        'r = 30; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -60..60, y = -80..2)',
+        'r = floor(clamp(30, 0, 255)); c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -60..60, y = -80..2)',
       ],
       [
         'rule 110 from a random row',
-        'r = 110; c_0[i] = {i < 0: mod(floor(i i 0.618), 2), 0}; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -120..20, y = -100..2)',
+        'r = floor(clamp(110, 0, 255)); c_0[i] = {i < 0: mod(floor(i i 0.618), 2), 0}; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -120..20, y = -100..2)',
       ],
       ['Newton’s method for √2', 'a_0 = 3; a_{n+1} = a_n - (a_n^2 - 2)/(2 a_n); y = sqrt(2)'],
       ['Fourier square wave', 'N = 3; y = (4/pi) sum(n=1..N, sin((2n-1)x)/(2n-1))'],

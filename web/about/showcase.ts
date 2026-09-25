@@ -87,6 +87,14 @@ export const SHOWCASE: ShowcaseItem[] = [
     settle: 1.3,
   },
   {
+    slug: 'color-wheel',
+    title: 'Paint with color fields',
+    blurb: 'rgb(…), hsl(…) and oklch(…) of x and y color every pixel — here a perceptually even wheel, turning with t.',
+    eqs: ['oklch(0.72, 0.16, arg(w)+t/3)'],
+    group: 'Fields & complex maps',
+    settle: 0.8,
+  },
+  {
     slug: 'flow-cylinder',
     title: 'Complex potentials',
     blurb: 'Write f(w) and its streamlines and equipotentials appear — here, flow past a cylinder.',
@@ -232,6 +240,47 @@ export const SHOWCASE: ShowcaseItem[] = [
     view: { cy: -0.9, span: 4.6 },
   },
   {
+    slug: 'lorenz-ensemble',
+    title: 'A hundred runs at once',
+    blurb:
+      'A list of starting values runs the system once per element: a hundred nearby starts spread over the Lorenz attractor that one run traces.',
+    eqs: [
+      'camera(-pi/3, 0.5, 55, (0, 0, 25))',
+      "p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3)",
+      'p(0) = ([0..99]/10, 1, 20)',
+      'p[1](5..40)',
+      'p',
+    ],
+    group: 'Vector fields & ODEs',
+    settle: 2.5,
+  },
+  {
+    slug: 'gradient-levels',
+    title: 'Gradients cross level sets',
+    blurb: '∇f expands symbolically into a vector field — perpendicular, everywhere, to the level curves of f.',
+    eqs: ['f(x, y) = x^2 + 2y^2', 'f(x, y) = [1, 4, 9, 16]', '∇f'],
+    group: 'Vector calculus',
+    view: { span: 7.5 },
+    settle: 0.8,
+  },
+  {
+    slug: 'divergence',
+    title: 'Divergence and curl',
+    blurb: '∇·F shades where a field spreads out and gathers in; ∇×F measures how it spins.',
+    eqs: ['F = (sin(x), sin(y))', 'F', '∇·F'],
+    group: 'Vector calculus',
+    settle: 0.8,
+  },
+  {
+    slug: 'harmonic',
+    title: 'Identities you can check',
+    blurb:
+      'A row like ∇²f = 0 is checked, not drawn: it reports that the monkey saddle x³ − 3xy² is harmonic everywhere.',
+    eqs: ['f(x, y) = x^3 - 3x y^2', 'f(x, y)', '∇²f = 0'],
+    group: 'Vector calculus',
+    view: { span: 4 },
+  },
+  {
     slug: 'cardioid-polar',
     title: 'Define your own coordinates',
     blurb: 'Declare r and θ, and the grid itself becomes polar.',
@@ -302,6 +351,14 @@ export const SHOWCASE: ShowcaseItem[] = [
     view: { cx: 0, cy: 2, span: 6.7 },
   },
   {
+    slug: 'koch',
+    title: 'Recursion, run per pixel',
+    blurb:
+      'A function may call itself: it runs as a bounded loop on the GPU, and the region is wherever it ends ≥ 0 — here, the Koch snowflake.',
+    eqs: ['view(y = -2.2..2.2)', 'f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}', 'f(x i - |y|) >= 0'],
+    group: 'Curves & regions',
+  },
+  {
     slug: 'basel',
     title: 'Sequences plot as dots',
     blurb: 'Integer abscissae only — and a Σ toggle on the row sums the series.',
@@ -326,12 +383,40 @@ export const SHOWCASE: ShowcaseItem[] = [
     view: { cx: 1, cy: 0.3, span: 4.9 },
   },
   {
+    slug: 'rule-30',
+    title: 'Cellular automata',
+    blurb:
+      'A sequence of rows, each read from the one above: c_{n+1}[i] from its three neighbours is Wolfram’s rule 30 — drag r for any other rule.',
+    eqs: [
+      'r = floor(clamp(30, 0, 255))',
+      'c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2)',
+      'view(x = -60..60, y = -80..2)',
+    ],
+    group: 'Sequences & data',
+  },
+  {
     slug: 'data-list',
     title: 'Data lists',
     blurb: 'A bracketed list scatters at (k, value) — or as points, or bars via the row toggle.',
     eqs: ['[3, 1, 4, 1, 5, 9, 2, 6]', '[(1, 2), (2, 3.5), (3, 3.1), (4, 5)]'],
     group: 'Sequences & data',
     view: { cx: 4.5, cy: 4.2, span: 10.7 },
+  },
+  {
+    slug: 'line-fit',
+    title: 'Fit a model to data',
+    blurb:
+      'P.y ~ m P.x + b solves for m and b by least squares, and they are ordinary variables after that — the residuals are one more row.',
+    eqs: [
+      'P = [(0,1.1),(1,2.9),(2,5.2),(3,6.8),(4,9.1)]',
+      'P.y ~ m P.x + b',
+      'P',
+      'y = m x + b',
+      '# residuals',
+      '(P.x,P.y-(m P.x+b))',
+    ],
+    group: 'Sequences & data',
+    view: { cx: 2, cy: 4.2, span: 10.5 },
   },
   {
     slug: 'circle-drag',
