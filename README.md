@@ -63,6 +63,25 @@ pnpm web:build  # build to dist-web/ (client + worker)
 pnpm deploy     # build and deploy to Cloudflare
 ```
 
+### Voice mode (private)
+
+A mic button talks to an OpenAI Realtime model
+([`web/voice.ts`](web/voice.ts)): the browser streams audio straight to
+`wss://api.openai.com`, and the model edits the graph with `get_graph` /
+`set_graph` tools, which report each row's readouts (values, intercepts,
+extrema in view). `look_at_graph` puts a screenshot of the canvas into the
+conversation as an image. The Worker ([`worker/voice.ts`](worker/voice.ts))
+only mints a 60-second client secret. A session outlives its secret, so the
+route is passphrase-gated and absent unless both secrets are set:
+
+```sh
+wrangler secret put OPENAI_API_KEY
+wrangler secret put VOICE_PASSPHRASE   # locally: both in .dev.vars
+```
+
+Visit any page once with `?voice=<passphrase>` to show the mic in that browser
+(`?voice=` forgets it).
+
 ## Examples
 
 **Basics**
@@ -147,6 +166,9 @@ pnpm deploy     # build and deploy to Cloudflare
   derivative that is a 2- or 3-vector integrates componentwise as `r_1`,
   `r_2`(, `r_3`), and the bare name draws as a moving point and joins point
   arithmetic — an orbit in two rows
+- `label((2, 4), "peak")` / `label(A, "vertex")` — text beside a point,
+  in the row's color; the point follows sliders and `t` like any other
+- `y = x^2 #e24` — a note that opens with a hex color draws the row in it
 - `trail(A)` — leaves a live motion trail behind a 2D or 3D point.
   For example, `A = (cos(t), sin(t)); trail(A)` draws an orbit as it runs;
   `trail((cos(t), sin(t), t/5))` draws a rising helix. Vector states work too.

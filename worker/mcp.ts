@@ -267,6 +267,11 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   // on the author's device, not in the link. Disclose them the same way.
   const dataLocalRows = analysis.rows.filter(r => r.dataLocal);
   const dataOmits = dataLocalRows.map(r => ({ row: r.text, why: r.dataLocal! }));
+  // Labels count as drawable (og.ts OG_COVERAGE) so the preview survives,
+  // but their text is not in it.
+  const labelOmits = plotRows
+    .filter(r => r.cpu?.type === 'label')
+    .map(r => ({ row: r.text, why: 'label text is not drawn in the static preview; the live app shows it' }));
   // A row that would have drawn something if the bytes were here — as opposed
   // to a definition it feeds, which draws nothing anywhere.
   const dataWouldPlot = dataLocalRows.some(r => !r.def && !r.comment && !r.view);
@@ -308,7 +313,9 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
       url: `${origin}/#${payload}`,
       share_url: `${origin}/g/${payload}`,
       preview,
-      ...(omitted.length || dataOmits.length ? { preview_omits: [...omitted, ...dataOmits] } : {}),
+      ...(omitted.length || dataOmits.length || labelOmits.length
+        ? { preview_omits: [...omitted, ...dataOmits, ...labelOmits] }
+        : {}),
       rows,
     },
   };

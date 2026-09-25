@@ -466,7 +466,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     const valuesOnly = members.every(
       m =>
         ![...freeVars(m)].some(plotVariable) &&
-        !['figure', 'trail', 'hist', 'family'].includes(m.kind) &&
+        !['figure', 'trail', 'label', 'hist', 'family'].includes(m.kind) &&
         m.kind !== 'eq' &&
         m.kind !== 'ineq' &&
         !(

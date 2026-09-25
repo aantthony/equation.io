@@ -21,6 +21,7 @@ import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
+import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 
@@ -856,6 +857,10 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // integral, whose shaded area is a CPU polygon here as there.
   value: 'draws',
   trail: 'fallback',
+  // The rasterizer has no font, so the text is left out — but a label only
+  // annotates what the other rows draw, and losing the whole preview to the
+  // site card over it would hide the graph itself. mcp.ts discloses the gap.
+  label: 'draws',
   // Integrated in the app's worker; the preview would have to integrate too.
   orbit: 'fallback',
   pcurve: 'draws',
@@ -1013,8 +1018,12 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
   const spec = (kind: 'view' | 'camera') => analysis.rows.find(r => r.view?.kind === kind)?.view;
 
   // Row colors follow creation order across ALL rows (defs consume a color
-  // slot in the app too, since colorIndex comes from row id).
-  const colorOf = (row: RowInfo) => PALETTE[analysis.rows.indexOf(parents.get(row) ?? row) % PALETTE.length];
+  // slot in the app too, since colorIndex comes from row id), unless the row's
+  // note names one (`y = x #e24`). Analysis rows are the input rows, in order.
+  const colorOf = (row: RowInfo) => {
+    const i = analysis.rows.indexOf(parents.get(row) ?? row);
+    return noteColor(texts[i] ?? '') ?? PALETTE[i % PALETTE.length];
+  };
 
   if (needs3D) {
     const cam = spec('camera');

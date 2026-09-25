@@ -880,6 +880,22 @@ export interface Overlay2D {
   }>;
   /** Vertical bars from y = 0, halfWidth in math units (data-list bar mode). */
   bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
+  /** `label(point, "text")` rows: text beside a math point, drawn above everything. */
+  texts?: Array<{ x: number; y: number; text: string; color: string }>;
+}
+
+/** A label's text beside its anchor, haloed in the page background so it
+ *  stays legible across curves and gridlines. Shared with the 3D overlay. */
+export function drawTextLabel(ctx: CanvasRenderingContext2D, text: string, sx: number, sy: number, color: string) {
+  ctx.save();
+  ctx.font = '600 13px ui-sans-serif, system-ui';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = `rgb(${theme.bg.map(c => Math.round(c * 255)).join(',')})`;
+  ctx.strokeText(text, sx + 8, sy - 8);
+  ctx.fillStyle = color;
+  ctx.fillText(text, sx + 8, sy - 8);
+  ctx.restore();
 }
 
 /** Axis labels plus CPU-sampled geometry (points, parametric curves).
@@ -1048,6 +1064,11 @@ export function drawLabels2D(
         ctx.font = '11px ui-sans-serif, system-ui';
       }
     }
+  }
+  for (const label of extras?.texts ?? []) {
+    const sx = toScreenX(label.x);
+    const sy = toScreenY(label.y);
+    if (isFinite(sx) && isFinite(sy)) drawTextLabel(ctx, label.text, sx, sy, label.color);
   }
   ctx.restore();
 }

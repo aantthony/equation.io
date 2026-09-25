@@ -78,6 +78,8 @@ type ExprNode =
       readonly over?: readonly Column[];
     }
   | { readonly kind: 'trail'; readonly coordinates: readonly Expr[] }
+  /** `label(point, "text")`: text anchored at a point. Only the point is math. */
+  | { readonly kind: 'label'; readonly coordinates: readonly Expr[]; readonly text: string }
   | { readonly kind: 'hist'; readonly centers: Float64Array; readonly counts: Float64Array; readonly width: number }
   | { readonly kind: 'family'; readonly members: readonly Expr[] }
   | { readonly kind: 'eq'; readonly l: Expr; readonly r: Expr }
@@ -274,6 +276,7 @@ export const FUNCTIONS = new Set([
   'oklch',
   'tube',
   'trail',
+  'label',
   'revolve',
 ]);
 
@@ -1061,6 +1064,7 @@ export function childrenOf(e: Expr): readonly Expr[] {
     case 'lazy':
       return [e.body];
     case 'trail':
+    case 'label':
       return e.coordinates;
     case 'family':
       return e.members;
@@ -1102,6 +1106,7 @@ export function mapChildren(e: Expr, map: (child: Expr) => Expr): Expr {
     case 'lazy':
       return { ...e, body: next[0] };
     case 'trail':
+    case 'label':
       return { ...e, coordinates: next };
     case 'family':
       return { ...e, members: next };
@@ -1551,6 +1556,7 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       throw new Error(structuralDiagnostic(e));
@@ -1667,6 +1673,7 @@ export function freeVars(e: Expr, out = new Set<string>()): Set<string> {
     case 'eqtest':
     case 'comp':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       childrenOf(e).forEach(a => freeVars(a, out));

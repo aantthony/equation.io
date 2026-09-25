@@ -23,6 +23,7 @@ function numbers(plot: CpuPlan, env: Record<string, number>): number[] {
       break;
     case 'point':
     case 'trail':
+    case 'label':
       expressions = plot.coords;
       break;
     case 'polygon':
@@ -51,7 +52,7 @@ describe('typed-values public kind baseline', () => {
     expect(publicKind(a.rows.at(-1)!.cls!.object)).toBe(kind);
   });
 
-  it('covers all 37 kinds, keeping packed lists and scatters distinct', () => {
+  it('covers all 38 kinds, keeping packed lists and scatters distinct', () => {
     const values = new Float64Array([1, 2, 3]);
     const ys = new Float64Array([4, 5, 6]);
     const column: Expr = { kind: 'data', values };
@@ -64,7 +65,7 @@ describe('typed-values public kind baseline', () => {
     expect(list.type === 'dlist' && list.values).toBe(values);
     expect(scatter.type === 'dscatter' && scatter.coords[0]).toBe(values);
     expect(scatter.type === 'dscatter' && scatter.coords[1]).toBe(ys);
-    expect(Object.keys(PUBLIC_KIND_ROWS).length + 2).toBe(37);
+    expect(Object.keys(PUBLIC_KIND_ROWS).length + 2).toBe(38);
   });
 });
 

@@ -263,7 +263,8 @@ body {
 #theme-toggle,
 #state-reset,
 #shot,
-#rec {
+#rec,
+#voice {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -297,6 +298,29 @@ body {
 #rec[hidden] ~ #state-reset {
   right: 62px;
 }
+/* Voice mode (web/voice.ts) is private: the mic only appears on a browser
+   that has been unlocked with the passphrase, and shifts state-reset left. */
+#voice {
+  right: 90px;
+}
+#rec[hidden] ~ #voice {
+  right: 62px;
+}
+#voice:not([hidden]) ~ #state-reset {
+  right: 118px;
+}
+#rec[hidden] ~ #voice:not([hidden]) ~ #state-reset {
+  right: 90px;
+}
+#voice[hidden] {
+  display: none;
+}
+#voice.connecting {
+  opacity: 0.5;
+}
+#voice.live {
+  color: #e24;
+}
 #state-reset[hidden] {
   display: none;
 }
@@ -318,7 +342,8 @@ body {
 #theme-toggle:hover,
 #state-reset:hover,
 #shot:hover,
-#rec:hover {
+#rec:hover,
+#voice:hover {
   background: var(--eq-focus);
   color: var(--muted-hover);
 }
@@ -973,4 +998,125 @@ html[data-embed] #state-reset {
 /* Hide the editor before main.ts initializes the panel's collapsed state. */
 html[data-embed][data-embed-boot] #panel {
   visibility: hidden;
+}
+
+/* Voice mode's orb (web/voice.ts): the assistant's presence and pointer. voice.ts
+   drives --x/--y (page position; bottom centre, or pinned to a math point)
+   and --level (0–1, the mic or the assistant's voice). */
+.voice-orb {
+  --size: 44px;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  width: var(--size);
+  height: var(--size);
+  margin: calc(var(--size) / -2) 0 0 calc(var(--size) / -2);
+  pointer-events: none;
+  transform: translate(var(--x, 50vw), var(--y, 90vh));
+  transition:
+    transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 0.3s,
+    height 0.3s,
+    margin 0.3s;
+}
+.voice-orb > span,
+.voice-orb::before,
+.voice-orb::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+.voice-orb > span {
+  background: radial-gradient(
+    circle at 35% 30%,
+    #fff 0%,
+    var(--accent) 45%,
+    color-mix(in srgb, var(--accent) 60%, #000) 100%
+  );
+  box-shadow: 0 0 calc(12px + 24px * var(--level, 0)) color-mix(in srgb, var(--accent) 70%, transparent);
+  transform: scale(calc(0.8 + 0.45 * var(--level, 0)));
+  transition: transform 0.08s linear;
+}
+.voice-orb::before,
+.voice-orb::after {
+  content: '';
+  border: 2px solid var(--accent);
+  opacity: 0;
+}
+/* Listening: a slow breath. Speaking: rings ripple outward. */
+.voice-orb.listening::before {
+  animation: orb-ripple 2.6s ease-out infinite;
+}
+.voice-orb.speaking::before,
+.voice-orb.speaking::after {
+  animation: orb-ripple 1.1s ease-out infinite;
+}
+.voice-orb.speaking::after {
+  animation-delay: 0.55s;
+}
+/* Thinking (or running a tool): a turning shimmer on the rim. */
+.voice-orb.thinking::before {
+  border-color: transparent;
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+  opacity: 0.9;
+  inset: -6px;
+  animation: orb-spin 0.9s linear infinite;
+}
+/* Pointing: smaller, so it marks the spot without hiding it. */
+.voice-orb.pointing {
+  --size: 22px;
+}
+.voice-orb.pointing:not(.speaking)::after {
+  animation: orb-ripple 1.4s ease-out infinite;
+}
+@keyframes orb-ripple {
+  from {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+@keyframes orb-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-orb {
+    transition: none;
+  }
+  .voice-orb::before,
+  .voice-orb::after {
+    animation: none !important;
+  }
+}
+
+/* Voice mode's screenshot moment (Orb.absorb in web/voice.ts). */
+.voice-flash {
+  position: fixed;
+  inset: 0;
+  /* Over the card: the card starts as the whole screen, and would hide it. */
+  z-index: 7;
+  background: #fff;
+  pointer-events: none;
+}
+.voice-shot {
+  position: fixed;
+  z-index: 6;
+  pointer-events: none;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
+  outline: 1px solid rgba(255, 255, 255, 0.5);
+}
+.voice-orb.absorb > span {
+  animation: orb-gulp 0.5s ease-out;
+}
+@keyframes orb-gulp {
+  40% {
+    transform: scale(1.35);
+  }
 }

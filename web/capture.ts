@@ -53,6 +53,7 @@ function snapshotCanvas(host: CaptureHost): HTMLCanvasElement {
 
 export function attachCapture(host: CaptureHost): {
   snapshot: (copy: boolean) => Promise<void>;
+  still: (maxEdge: number) => HTMLCanvasElement;
   startRecording: () => void;
   stopRecording: () => void;
   isRecording: () => boolean;
@@ -155,5 +156,17 @@ export function attachCapture(host: CaptureHost): {
     if (copy) host.notice('Saved equation.png (clipboard unavailable).');
   }
 
-  return { snapshot, startRecording, stopRecording, isRecording, afterFrame, mime };
+  /** The graph as a fresh canvas, longest edge at most maxEdge pixels — for a
+   *  vision model (voice mode), where full-resolution PNGs only add upload
+   *  time and image tokens. A canvas rather than an encoded image, so the page
+   *  can also show it (the CSP allows no data: images). */
+  function still(maxEdge: number): HTMLCanvasElement {
+    host.render();
+    const scale = Math.min(1, maxEdge / Math.max(host.gl.width, host.gl.height));
+    const out = document.createElement('canvas');
+    blit(out, host.gl, host.overlay, Math.round(host.gl.width * scale), Math.round(host.gl.height * scale));
+    return out;
+  }
+
+  return { snapshot, still, startRecording, stopRecording, isRecording, afterFrame, mime };
 }

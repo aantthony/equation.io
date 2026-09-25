@@ -92,6 +92,28 @@ describe('writeback round-trip', () => {
     const withTarget = formatCameraRow({ theta: 0, phi: 1, radius: 7, target: [1.25, 0, -2] });
     expect(parse(withTarget)).toEqual({ kind: 'camera', theta: 0, phi: 1, radius: 7, target: [1.25, 0, -2] });
   });
+
+  it('keeps a camera spin through format -> parse, and omits a zero one', () => {
+    const spinning = formatCameraRow({ theta: 0, phi: 1, radius: 7, target: [1, 0, 0], spin: -0.3 });
+    expect(spinning).toBe('camera(0, 1, 7, (1, 0, 0), spin = -0.3)');
+    expect(parse(spinning)).toEqual({ kind: 'camera', theta: 0, phi: 1, radius: 7, target: [1, 0, 0], spin: -0.3 });
+    expect(formatCameraRow({ theta: 0, phi: 1, radius: 7, target: [0, 0, 0], spin: 0 })).toBe('camera(0, 1, 7)');
+  });
+
+  it('writes the angle a spun camera shows, without float dust', () => {
+    expect(formatCameraRow({ theta: 6.66e-16, phi: 1, radius: 7, target: [0, 0, 0] })).toBe('camera(0, 1, 7)');
+    expect(formatCameraRow({ theta: 1 + 40 * Math.PI, phi: 1, radius: 7, target: [0, 0, 0] })).toBe('camera(1, 1, 7)');
+    expect(formatCameraRow({ theta: -1 - 6 * Math.PI, phi: 1, radius: 7, target: [0, 0, 0] })).toBe('camera(-1, 1, 7)');
+  });
+
+  it('reads spin as a trailing named argument after any positional ones', () => {
+    expect(parse('camera(0, 1, spin = 0.5)')).toEqual({ kind: 'camera', theta: 0, phi: 1, spin: 0.5 });
+    expect(parse('camera(0, 1, spin = pi/10)')).toMatchObject({ spin: Math.PI / 10 });
+    expect(parse('camera(0, 1, spin = w)', { w: 2 })).toMatchObject({ spin: 2 });
+    expect(parse('camera(0, 1, 7, spin = 0)')).toEqual({ kind: 'camera', theta: 0, phi: 1, radius: 7 });
+    expect(() => parse('camera(0, 1, spin =)')).toThrow(/Expected camera/);
+    expect(() => parse('camera(spin = 1, 0, 1)')).toThrow();
+  });
 });
 
 describe('independent axis scaling', () => {

@@ -21,7 +21,7 @@ export const SPECIAL_FORMS = new Set(['domain', 'conformal', 'iter', 'rgb', 'hsl
 
 /** Every call that is a whole row rather than a value, by the name the user
  *  writes (the geometry statements, lib/geom.ts GEOM_STATEMENTS, are the rest). */
-export const WHOLE_EXPR_NAMES: ReadonlySet<string> = new Set([...SPECIAL_FORMS, 'tube', 'revolve', 'trail']);
+export const WHOLE_EXPR_NAMES: ReadonlySet<string> = new Set([...SPECIAL_FORMS, 'tube', 'revolve', 'trail', 'label']);
 
 /** Does this expression involve complex values anywhere?
  *  extra: additional variable names known to be complex-valued (e.g. an
@@ -35,6 +35,7 @@ export function usesComplex(e: Expr, extra?: ReadonlySet<string>): boolean {
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return childrenOf(e).some(c => usesComplex(c, extra));
@@ -161,6 +162,7 @@ export function compileTyped(e: Expr, env: Record<string, Typed> = {}, complexNa
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       throw new Error(structuralDiagnostic(e));
@@ -434,6 +436,7 @@ export function inferScalarType(e: Expr, env: Record<string, ScalarType> = {}): 
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       throw new Error('This object must be lowered before scalar type inference.');

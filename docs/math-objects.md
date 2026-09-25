@@ -89,6 +89,7 @@ object must respect):
 | `Y ~ m X + b` | regression: binds the fitted parameters | fit readout on the row |
 | `a' = f(…)`, `a(0) = …`; `r' = (…, …, …)` | time-integrated state (scalar or 2/3-vector) | RK4 between frames; a constant to every consumer |
 | `trail(point)` | motion trail | polyline (2D/3D) |
+| `label(point, "text")` | text label | overlay text (2D/3D) |
 | tuple in u (`tube(…)` opt-in) | parametric curve | polyline / tube + κ/τ combs |
 | 3-tuple in u, v | parametric surface | Newton raymarcher |
 | 2-tuple in x, y; `dy/dx =`, `y' =`, `(x', y') =` | vector field / slope field / phase portrait | LIC + click-to-trace RK4 |

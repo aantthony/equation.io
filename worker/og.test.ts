@@ -48,6 +48,13 @@ describe('og raster renderer', () => {
     expect(actual.px).not.toEqual(renderRaster([], 100, 100).px);
   });
 
+  it('draws a row in its #hex note color', () => {
+    const [red, green, blue] = pixel(renderRaster(['y = x #e00 red'], 100, 100), 50, 50);
+    expect(red).toBeGreaterThan(150);
+    expect(green).toBeLessThan(100);
+    expect(blue).toBeLessThan(100);
+  });
+
   it('draws an implicit curve where expected', () => {
     const r = renderRaster(['y = x'], 100, 100);
     // y = x passes through the center; screen y grows downward so the curve

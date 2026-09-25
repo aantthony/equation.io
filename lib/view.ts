@@ -32,6 +32,9 @@ export interface Camera3DSpec {
   phi: number;
   radius?: number;
   target?: [number, number, number];
+  /** Keeps the camera orbiting about the vertical axis, radians per second.
+   *  theta is where the orbit starts; the row does not change as it turns. */
+  spin?: number;
 }
 
 export type ViewSpec = View2DSpec | Camera3DSpec;
@@ -127,7 +130,10 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
     if (!spec.x && !spec.y) throw new Error(usage);
     return spec;
   }
-  const usage = 'Expected camera(theta, phi, radius?, (x, y, z)?) — angles in radians.';
+  const usage = 'Expected camera(theta, phi, radius?, (x, y, z)?, spin = rate?) — angles in radians.';
+  // spin = … is named and comes last, so the positional arguments keep their meaning.
+  const spinArg = args.length && /^\s*spin\s*=([\s\S]*)$/.exec(args[args.length - 1]);
+  if (spinArg) args.pop();
   if (args.length < 2 || args.length > 4) throw new Error(usage);
   const spec: Camera3DSpec = {
     kind: 'camera',
@@ -151,6 +157,11 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       if (r <= 0) throw new Error('The camera radius must be positive.');
       spec.radius = r;
     }
+  }
+  if (spinArg) {
+    if (!spinArg[1].trim()) throw new Error(usage);
+    const spin = num(spinArg[1], env, 'camera spin');
+    if (spin) spec.spin = spin;
   }
   return spec;
 }
@@ -207,11 +218,18 @@ export function formatCameraRow(c: {
   phi: number;
   radius: number;
   target: [number, number, number];
+  spin?: number;
 }): string {
-  const parts = [fmt(c.theta), fmt(c.phi), fmt(c.radius)];
+  // A spun or eased camera accumulates turns and float dust: write the angle
+  // it shows, in (-pi, pi], and 0 for 0.
+  const turn = 2 * Math.PI;
+  const wrapped = c.theta - turn * Math.round(c.theta / turn);
+  const theta = Math.abs(wrapped) < 1e-9 ? 0 : wrapped;
+  const parts = [fmt(theta), fmt(c.phi), fmt(c.radius)];
   if (c.target.some(v => Math.abs(v) > 1e-9)) {
     parts.push(`(${c.target.map(v => fmt(v)).join(', ')})`);
   }
+  if (c.spin) parts.push(`spin = ${fmt(c.spin)}`);
   return `camera(${parts.join(', ')})`;
 }
 

@@ -826,3 +826,35 @@ describe('coordinate fields over z through analyze()', () => {
     expect(a.rows.map(r => !!r.cls?.needs3D)).toEqual([false, false, false, false, true, false, true, true]);
   });
 });
+
+describe('label(point, "text") rows', () => {
+  const plan = (rows: string[]) => {
+    const row = analyze(rows).rows.at(-1)!;
+    return { error: row.error, cpu: row.cpu, needs3D: row.cls?.needs3D };
+  };
+
+  it('anchors text at a tuple, a named point, or a 3D point', () => {
+    expect(plan(['label((1, 2), "peak")']).cpu).toMatchObject({ type: 'label', dim: 2, text: 'peak' });
+    expect(plan(['A = (1, 1)', 'label(A, "vertex")']).cpu).toMatchObject({ type: 'label', text: 'vertex' });
+    const top = plan(['label((1, 2, 3), "top")']);
+    expect(top.cpu).toMatchObject({ type: 'label', dim: 3 });
+    expect(top.needs3D).toBe(true);
+  });
+
+  it('follows sliders: the point is live math, the text is data', () => {
+    const { cpu } = plan(['a = 2', 'label((a, a^2), "a;b # not a note")']);
+    expect(cpu).toMatchObject({ type: 'label', text: 'a;b # not a note' });
+    const coords = (cpu as { coords: Expr[] }).coords;
+    expect(coords.map(c => evaluate(c, { a: 3 }))).toEqual([3, 9]);
+  });
+
+  it.each([
+    ['label((x, 1), "bad")', 'real point'],
+    ['label((1, 2))', 'quoted text'],
+    ['label("peak", (1, 2))', 'quoted text'],
+    ['y = label((1, 2), "n")', 'whole expression'],
+    ['f = label((1, 2), "n")', 'whole row'],
+  ])('refuses %s', (row, message) => {
+    expect(plan([row]).error).toContain(message);
+  });
+});

@@ -326,6 +326,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     case 'figure':
     case 'lazy':
     case 'trail':
+    case 'label':
     case 'hist':
     case 'family':
       return sc(
@@ -452,6 +453,22 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
           throw new Error('trail takes a 2D or 3D point: trail(A) or trail((cos(t), sin(t))).');
         }
         return sc({ kind: 'trail', coordinates: coords });
+      }
+      if (e.name === 'label') {
+        // The text comes last; the point before it arrives as one vector
+        // (label(A, …)) or, from a tuple literal, as its spread coordinates.
+        const text = e.args.at(-1);
+        const args = e.args.slice(0, -1).map(lo);
+        const coords =
+          args.length === 1 && args[0].vec
+            ? args[0].items
+            : args.every(a => !a.vec)
+              ? args.map(a => (a as LV & { vec: false }).e)
+              : [];
+        if ((coords.length !== 2 && coords.length !== 3) || text?.kind !== 'str') {
+          throw new Error('label takes a point and quoted text: label(A, "vertex") or label((1, 2), "peak").');
+        }
+        return sc({ kind: 'label', coordinates: coords, text: text.value });
       }
       if (!matsPossible && e.name === 'cross' && e.args.length === 1) throw new MatrixSeen();
       if (matOf(e)) throw new Error(NOT_A_VALUE);

@@ -59,6 +59,7 @@ export type MathObject =
     }
   | { readonly kind: 'point'; readonly source: PointSource }
   | { readonly kind: 'trail'; readonly coordinates: Components }
+  | { readonly kind: 'label'; readonly coordinates: Components; readonly text: string }
   /** Where states go over [from, to], integrated ahead of time (orbit.ts):
    *  one path per run, each a point's coordinates or, for a series, the one
    *  value drawn against t. */
@@ -204,6 +205,7 @@ export function publicKind(object: MathObject) {
       return object.form;
     case 'point':
     case 'trail':
+    case 'label':
     case 'orbit':
     case 'system':
     case 'histogram':
@@ -237,6 +239,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'vector-field':
       return object.components.length === 3;
     case 'trail':
+    case 'label':
       return object.coordinates.length === 3;
     case 'orbit':
       return !object.series && object.paths[0]?.length === 3;
