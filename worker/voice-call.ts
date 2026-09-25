@@ -23,8 +23,8 @@
  *   page ← { type: 'image.done', id, error? }
  *   page ← { type: 'ended', reason }                    then closes
  */
-import { SESSION_CONFIG, TOOLS } from '../lib/voice-agent.ts';
-import { charge, endCall, hashKey, isKeyShaped, lookupKey, openCalls, startCall, usageCost } from './voice-credit.ts';
+import { MAX_LEGEND_CHARS, SESSION_CONFIG, TOOLS } from '../lib/voice-agent.ts';
+import { charge, claimCall, endCall, hashKey, isKeyShaped, reserveCall, usageCost } from './voice-credit.ts';
 
 export interface VoiceCallEnv {
   OPENAI_API_KEY: string;
@@ -55,13 +55,25 @@ const IMAGE_TIMEOUT_MS = 10_000;
 const MAX_SDP_CHARS = 20_000;
 /** A 1280px JPEG is ~200 KB as a data URL. */
 const MAX_IMAGE_CHARS = 1_500_000;
-const MAX_LEGEND_CHARS = 8000;
 
-export const hangUp = (callId: string, apiKey: string) =>
-  fetch(`${REALTIME_URL}/calls/${encodeURIComponent(callId)}/hangup`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}` },
-  });
+/** Hangs a call up, trying twice; throws when OpenAI never confirms it. */
+export async function hangUp(callId: string, apiKey: string): Promise<void> {
+  let failure: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${REALTIME_URL}/calls/${encodeURIComponent(callId)}/hangup`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      // 404: the call has already ended, which is what hanging up wants.
+      if (res.ok || res.status === 404) return;
+      failure = new Error(`hangup: HTTP ${res.status}`);
+    } catch (e) {
+      failure = e;
+    }
+  }
+  throw failure;
+}
 
 type Message = { type?: unknown; [k: string]: unknown };
 
@@ -77,7 +89,10 @@ function parse(data: unknown): Message | null {
 
 export class VoiceCall {
   private sideband?: CallSocket;
+  /** OpenAI's id for the call, once created. */
   private callId = '';
+  /** The call's voice_calls row: a provisional id until the call is created, then callId. */
+  private rowId = '';
   private keyHash = '';
   private started = false;
   private ended = false;
@@ -132,12 +147,10 @@ export class VoiceCall {
     this.closePage(error);
   }
 
-  /** Setup failed part way: hang up whatever call was created, and refuse the page. */
+  /** Setup failed part way: hang up whatever call was created, free its slot, and refuse the page. */
   private async abandon() {
-    if (this.callId) {
-      await hangUp(this.callId, this.env.OPENAI_API_KEY).catch(() => {});
-      await endCall(this.env.DB, this.callId, 'setup failed', Date.now()).catch(() => {});
-    }
+    if (this.callId) await hangUp(this.callId, this.env.OPENAI_API_KEY).catch(() => {});
+    if (this.rowId) await endCall(this.env.DB, this.rowId, 'setup failed', Date.now()).catch(() => {});
     this.closeSideband(this.sideband);
     this.sideband = undefined;
     if (!this.ended) this.refuse('upstream');
@@ -146,14 +159,23 @@ export class VoiceCall {
   private async start(key: unknown, sdp: unknown) {
     const { DB, OPENAI_API_KEY } = this.env;
     const keyHash = typeof key === 'string' && isKeyShaped(key) ? await hashKey(key) : '';
-    const row = keyHash ? await lookupKey(DB, keyHash) : null;
-    if (!row || row.disabled) return this.refuse('forbidden');
-    if (row.balance_micros < MIN_START_MICROS) return this.refuse('no_credit', { balance_micros: row.balance_micros });
-    const now = Date.now();
-    if ((await openCalls(DB, keyHash, now - MAX_CALL_MS)) >= MAX_OPEN_CALLS) return this.refuse('too_many_calls');
+    if (!keyHash) return this.refuse('forbidden');
+    // Checked before a slot is taken, so a bad offer has nothing to give back.
     if (typeof sdp !== 'string' || !sdp.startsWith('v=0') || sdp.length > MAX_SDP_CHARS) {
       return this.refuse('bad_request');
     }
+    const now = Date.now();
+    const provisional = `pending_${crypto.randomUUID()}`;
+    // One round trip: the key, and (only if it may start one) a slot for this call.
+    const { key: row, reserved } = await reserveCall(DB, keyHash, provisional, now, {
+      since: now - MAX_CALL_MS,
+      maxOpen: MAX_OPEN_CALLS,
+      minMicros: MIN_START_MICROS,
+    });
+    if (!row || row.disabled) return this.refuse('forbidden');
+    if (row.balance_micros < MIN_START_MICROS) return this.refuse('no_credit', { balance_micros: row.balance_micros });
+    if (!reserved) return this.refuse('too_many_calls');
+    this.rowId = provisional;
 
     const form = new FormData();
     form.set('sdp', sdp);
@@ -166,11 +188,15 @@ export class VoiceCall {
     });
     // Don't relay OpenAI's body: it can describe the account behind the key.
     const callId = created.ok ? created.headers.get('Location')?.split('/').pop() : undefined;
-    if (!callId) return this.refuse('upstream');
+    if (!callId) {
+      await endCall(DB, provisional, 'upstream', Date.now());
+      return this.refuse('upstream');
+    }
     const answer = await created.text();
     this.callId = callId;
     this.keyHash = keyHash;
-    await startCall(DB, callId, keyHash, now);
+    await claimCall(DB, provisional, callId);
+    this.rowId = callId;
 
     const sideband = await this.attach().catch(() => null);
     // No sideband, no metering; and a page that left meanwhile gets no call.
@@ -196,6 +222,8 @@ export class VoiceCall {
     ws.accept();
     ws.addEventListener('message', e => this.onSideband(parse(e.data)));
     ws.addEventListener('close', () => void this.end('ended'));
+    // A read error without a close would otherwise stop the metering but not the call.
+    ws.addEventListener('error', () => void this.end('sideband error'));
     return ws;
   }
 
@@ -219,13 +247,19 @@ export class VoiceCall {
   }
 
   private bill(micros: number, detail: string) {
+    // A charge is one atomic batch, so a failed one can be retried without charging twice.
+    const attempt = () => charge(this.env.DB, this.keyHash, this.callId, micros, detail, Date.now());
     this.charges = this.charges
-      .then(() => charge(this.env.DB, this.keyHash, this.callId, micros, detail, Date.now()))
+      .then(() => attempt().catch(attempt))
       .then(balance => {
         // Not returned: end() waits for this chain, so it can't be part of it.
         if (balance <= 0) void this.end('out of credit');
       })
-      .catch(e => console.error('[voice] charge failed', e));
+      .catch(e => {
+        // A call that can't be charged can't go on: it would run unmetered.
+        console.error('[voice] charge failed', e);
+        void this.end('billing failed');
+      });
   }
 
   private settle(id: unknown, error?: string) {
@@ -310,10 +344,11 @@ export class VoiceCall {
     this.send({ type: 'ended', reason });
     if (this.callId) {
       await hangUp(this.callId, this.env.OPENAI_API_KEY).catch(e => console.error('[voice] hangup failed', e));
-      await this.charges;
-      await endCall(this.env.DB, this.callId, reason, Date.now()).catch(e =>
-        console.error('[voice] endCall failed', e),
-      );
+    }
+    await this.charges;
+    // Also a slot reserved for a call still being created: start() hangs that one up once it exists.
+    if (this.rowId) {
+      await endCall(this.env.DB, this.rowId, reason, Date.now()).catch(e => console.error('[voice] endCall failed', e));
     }
     this.closeSideband(this.sideband);
     this.closePage(reason);

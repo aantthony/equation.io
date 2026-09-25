@@ -2,13 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { seedKey, testDb } from './d1.fixtures.ts';
 import {
   charge,
+  claimCall,
   endCall,
   generateKey,
   hashKey,
   isKeyShaped,
-  lookupKey,
-  openCalls,
-  startCall,
+  reserveCall,
   usageCost,
 } from './voice-credit.ts';
 
@@ -56,10 +55,10 @@ describe('ledger', () => {
   it('charges the key and the call atomically and records each charge', async () => {
     const { db, raw } = testDb();
     seedKey(raw, 'h1', 1_000_000);
-    await startCall(db, 'rtc_1', 'h1', 100);
+    raw.prepare("INSERT INTO voice_calls (call_id, key_hash, started_at) VALUES ('rtc_1', 'h1', 100)").run();
     expect(await charge(db, 'h1', 'rtc_1', 250_000, '{}', 200)).toBe(750_000);
     expect(await charge(db, 'h1', 'rtc_1', 900_000, '{}', 300)).toBe(-150_000);
-    expect((await lookupKey(db, 'h1'))?.balance_micros).toBe(-150_000);
+    expect(raw.prepare('SELECT balance_micros FROM voice_keys').get()).toEqual({ balance_micros: -150_000 });
     expect(raw.prepare('SELECT cost_micros FROM voice_calls').get()).toEqual({ cost_micros: 1_150_000 });
     expect(raw.prepare('SELECT SUM(delta_micros) AS s, COUNT(*) AS n FROM voice_ledger').get()).toEqual({
       s: -1_150_000,
@@ -67,14 +66,34 @@ describe('ledger', () => {
     });
   });
 
-  it('counts only recent open calls', async () => {
+  it('reserves a call only for an enabled key with credit and a free slot, counting recent open calls', async () => {
     const { db, raw } = testDb();
-    seedKey(raw, 'h1', 1);
-    await startCall(db, 'old', 'h1', 0);
-    await startCall(db, 'live', 'h1', 1000);
-    await startCall(db, 'done', 'h1', 1000);
+    seedKey(raw, 'h1', 100);
+    seedKey(raw, 'poor', 99);
+    seedKey(raw, 'off', 100, 1);
+    const limits = { since: 500, maxOpen: 2, minMicros: 100 };
+    const insert = raw.prepare('INSERT INTO voice_calls (call_id, key_hash, started_at) VALUES (?, ?, ?)');
+    insert.run('old', 'h1', 0); // too old to count
+    insert.run('live', 'h1', 1000);
+    insert.run('done', 'h1', 1000);
     await endCall(db, 'done', 'ended', 2000);
-    expect(await openCalls(db, 'h1', 500)).toBe(1);
+
+    expect(await reserveCall(db, 'h1', 'p1', 3000, limits)).toEqual({
+      key: { label: 'test', balance_micros: 100, disabled: 0 },
+      reserved: true,
+    });
+    // live and p1 are open: the cap is reached.
+    expect((await reserveCall(db, 'h1', 'p2', 3000, limits)).reserved).toBe(false);
+    for (const hash of ['poor', 'off'])
+      expect((await reserveCall(db, hash, `p_${hash}`, 3000, limits)).reserved).toBe(false);
+    expect(await reserveCall(db, 'nobody', 'p3', 3000, limits)).toEqual({ key: null, reserved: false });
+    expect((raw.prepare('SELECT COUNT(*) AS n FROM voice_calls').get() as { n: number }).n).toBe(4);
+
+    await claimCall(db, 'p1', 'rtc_9');
+    expect(raw.prepare("SELECT key_hash, started_at FROM voice_calls WHERE call_id = 'rtc_9'").get()).toEqual({
+      key_hash: 'h1',
+      started_at: 3000,
+    });
     // Ending twice keeps the first reason.
     await endCall(db, 'done', 'again', 3000);
     expect(raw.prepare("SELECT end_reason FROM voice_calls WHERE call_id = 'done'").get()).toEqual({

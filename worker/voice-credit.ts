@@ -5,6 +5,7 @@
  *
  * Keys are handed out by scripts/voice-key.ts. Only their SHA-256 is stored.
  */
+import { sha256Hex } from '../lib/hash.ts';
 
 /** Every key starts with this, so a pasted key is recognisable (and greppable in logs). */
 export const KEY_PREFIX = 'eqv_';
@@ -19,10 +20,7 @@ export function generateKey(): string {
 
 export const isKeyShaped = (key: string): boolean => key.startsWith(KEY_PREFIX) && /^[\w-]{40,64}$/.test(key.slice(4));
 
-export async function hashKey(key: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
-  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
+export const hashKey = (key: string): Promise<string> => sha256Hex(new TextEncoder().encode(key));
 
 /**
  * gpt-realtime-2.1 prices in dollars per million tokens, which is exactly
@@ -68,27 +66,46 @@ export interface VoiceKey {
   disabled: number;
 }
 
-export function lookupKey(db: D1Database, keyHash: string): Promise<VoiceKey | null> {
-  return db
-    .prepare('SELECT label, balance_micros, disabled FROM voice_keys WHERE key_hash = ?')
-    .bind(keyHash)
-    .first<VoiceKey>();
+export interface Reservation {
+  /** The key, or null when there is no such key. */
+  key: VoiceKey | null;
+  /** Whether the call's row was inserted: the key is enabled, has `minMicros`, and had a free slot. */
+  reserved: boolean;
 }
 
-/** Calls on this key started since `since` (ms) that have not ended. */
-export async function openCalls(db: D1Database, keyHash: string, since: number): Promise<number> {
-  const row = await db
-    .prepare('SELECT COUNT(*) AS n FROM voice_calls WHERE key_hash = ? AND ended_at IS NULL AND started_at >= ?')
-    .bind(keyHash, since)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
+/**
+ * Looks the key up and, in the same round trip, opens a row for a call about
+ * to be created, under the provisional id `callId`: only for an enabled key
+ * with at least `minMicros`, and only while it has fewer than `maxOpen` calls
+ * started since `since` (ms) that have not ended. The count and the insert are
+ * one statement, so starts racing each other can't both take the last slot.
+ * claimCall gives the row its real id; endCall closes it on any failure.
+ */
+export async function reserveCall(
+  db: D1Database,
+  keyHash: string,
+  callId: string,
+  now: number,
+  { since, maxOpen, minMicros }: { since: number; maxOpen: number; minMicros: number },
+): Promise<Reservation> {
+  const [key, inserted] = await db.batch([
+    db.prepare('SELECT label, balance_micros, disabled FROM voice_keys WHERE key_hash = ?').bind(keyHash),
+    db
+      .prepare(
+        `INSERT INTO voice_calls (call_id, key_hash, started_at)
+         SELECT ?1, ?2, ?3
+         WHERE EXISTS (SELECT 1 FROM voice_keys WHERE key_hash = ?2 AND disabled = 0 AND balance_micros >= ?4)
+           AND (SELECT COUNT(*) FROM voice_calls WHERE key_hash = ?2 AND ended_at IS NULL AND started_at >= ?5) < ?6
+         RETURNING call_id`,
+      )
+      .bind(callId, keyHash, now, minMicros, since, maxOpen),
+  ]);
+  return { key: (key.results[0] as VoiceKey | undefined) ?? null, reserved: inserted.results.length > 0 };
 }
 
-export async function startCall(db: D1Database, callId: string, keyHash: string, now: number): Promise<void> {
-  await db
-    .prepare('INSERT INTO voice_calls (call_id, key_hash, started_at) VALUES (?, ?, ?)')
-    .bind(callId, keyHash, now)
-    .run();
+/** Gives a reserved call its id from OpenAI. */
+export async function claimCall(db: D1Database, provisionalId: string, callId: string): Promise<void> {
+  await db.prepare('UPDATE voice_calls SET call_id = ? WHERE call_id = ?').bind(callId, provisionalId).run();
 }
 
 /**

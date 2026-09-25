@@ -26,7 +26,7 @@ How the graph works:
   - Points: "A = (1, 2)" is a draggable named point.
   - Parametric curves use u, which runs from 0 to 1 (not t): "(2cos(2pi u), 2sin(2pi u))" is a circle of radius 2.
   - Parametric surfaces are a bare triple in u and v (both 0 to 1), with no wrapper function: "(sin(pi v) cos(2pi u), sin(pi v) sin(2pi u), cos(pi v))" is a unit sphere.
-  - Polar curves r = f(theta): write them parametrically with theta = 2pi u, so negative r draws correctly. The rose r = sin(4 theta) (8 petals) is "(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))". Never write a bare "r = …" row: that defines a constant named r and draws nothing.
+  - Polar curves r = f(theta): write them parametrically with theta = 2pi u, so negative r draws correctly. The rose r = sin(4 theta) (8 petals) is "(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))". Never write a bare "r = …" row: on its own that defines a constant named r and draws nothing (read_syntax's polar coordinate field draws only where r >= 0, so it loses half of a rose).
   - t is time in seconds and makes things move: "y = sin(x - t)" is a travelling wave, "(cos(t), sin(t))" a point circling the origin.
 - Implicit multiplication works: "2x", "a sin(x)". Use ^ for powers, sqrt(), abs(), ln(), log(), exp(), pi, e.
 - Anything beyond these forms (vector fields, complex functions, probability, ODEs, geometry, …): call read_syntax first. Never invent function names; "surface(…)" or "plot(…)" do not exist.
@@ -34,7 +34,7 @@ How the graph works:
 - Colors: end a row with a hex color, e.g. "y = x^2 #e24" or "y = 2x #1f77b4 tangent" (no space after the #). Use color to connect ideas (a curve and its label in the same color) or to contrast (the original in grey #999, the new one bright). Rows without one take the palette.
 - The student can also type rows themselves, so call get_graph before relying on what you think is on screen.
 - To change the graph call set_graph with the COMPLETE list of rows. Keep every row the student did not ask to change, exactly as it was.
-- get_graph and set_graph return each row's status, meaning (what the row actually is, e.g. "2D curve …" or "defines r: a scalar constant …; draws nothing by itself"), color, readout value, and notable points (intercepts, extrema) in the visible window. After set_graph, check every meaning matches what you intended to draw. Use these for exact numbers. If any row has status "error", or a "warning" (for example a definition nothing uses, which draws nothing), fix it and call set_graph again before answering; use read_syntax if you are not sure of the right form. Don't give up on a first error. Never say you drew something the result doesn't show.
+- get_graph and set_graph return each row's status, meaning (what the row actually is, e.g. "2D curve …" or "defines r: a scalar constant …; draws nothing by itself"), color, readout value, and, for 2D curves, the axis intercepts in the visible window. After set_graph, check every meaning matches what you intended to draw. Use these for exact numbers. If any row has status "error", or a "warning" (for example a definition nothing uses, which draws nothing), fix it and call set_graph again before answering; use read_syntax if you are not sure of the right form. Don't give up on a first error. Never say you drew something the result doesn't show.
 
 Showing, not just telling:
 - point_at moves your glowing orb to a spot on the graph. Use it whenever you say "here" or "this point".
@@ -53,7 +53,7 @@ export const TOOLS: FunctionTool[] = [
     type: 'function',
     name: 'get_graph',
     description:
-      'Read the graph: the visible window, and for every row its text, status, kind, color, readout value, and notable points in view.',
+      'Read the graph: the visible window (2D) or camera (3D), and for every row its text, status, kind, color, readout value, and (2D curves) axis intercepts in view.',
     parameters: { type: 'object', properties: {} },
   },
   {
@@ -174,3 +174,42 @@ export const SESSION_CONFIG = {
   tools: TOOLS,
   tool_choice: 'auto',
 } as const;
+
+/** Longest screenshot legend the Worker adds to the conversation (worker/voice-call.ts). */
+export const MAX_LEGEND_CHARS = 8000;
+/** A row's text in the legend: enough to recognise it, not a whole inline data list. */
+const MAX_LEGEND_ROW_CHARS = 200;
+
+/** The part of a get_graph result a screenshot legend reads. */
+export interface LegendGraph {
+  window?: { x: [number, number]; y: [number, number] };
+  rows: { text: string; status: 'ok' | 'error'; error?: string; kind?: string; color?: string }[];
+}
+
+/**
+ * The legend that goes with each screenshot: every row's text, color and
+ * kind, and the window. Long rows are cut, and rows past the Worker's limit
+ * are counted rather than listed, so a large graph can still be looked at.
+ */
+export function screenshotLegend(graph: LegendGraph): string {
+  const view = graph.window
+    ? `Visible window: x from ${graph.window.x[0]} to ${graph.window.x[1]}, y from ${graph.window.y[0]} to ${graph.window.y[1]}.`
+    : 'The graph is a 3D view.';
+  const head = 'Rows in the graph, whether or not they are visible in the screenshot (text, color, kind):';
+  const rows = graph.rows.filter(r => r.text.trim());
+  const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+  const lines: string[] = [];
+  // Room for the head, the view, and a line saying how many rows were left out.
+  let budget = MAX_LEGEND_CHARS - head.length - view.length - 64;
+  for (const r of rows) {
+    const bits = [r.color, r.kind, r.status === 'error' ? `not drawn: ${cut(r.error ?? '', 200)}` : undefined].filter(
+      Boolean,
+    );
+    const line = `- ${cut(r.text, MAX_LEGEND_ROW_CHARS)}${bits.length ? ` (${bits.join(', ')})` : ''}`;
+    if (line.length + 1 > budget) break;
+    budget -= line.length + 1;
+    lines.push(line);
+  }
+  if (lines.length < rows.length) lines.push(`- … and ${rows.length - lines.length} more rows`);
+  return `${head}\n${lines.join('\n')}\n${view}`;
+}
