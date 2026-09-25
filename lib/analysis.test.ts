@@ -128,6 +128,18 @@ describe('shared document analysis', () => {
     // A label row is still a label.
     expect(analyzeRows(['label((1, 2), "peak")']).rows[0].cls?.object?.kind).toBe('label');
   });
+
+  it('takes a 2D or 3D point and one text, the text last', () => {
+    const row = (...rows: string[]) => analyzeRows(rows).rows.at(-1)!;
+    expect(row('label((1, 2), "peak")').cls?.needs3D).toBe(false);
+    expect(row('label((1, 2, 3), "peak")').cls?.needs3D).toBe(true);
+    expect(row('A = (1, 2)', 'label(A, "vertex")').cls?.object?.kind).toBe('label');
+    expect(row('a = 1', 'label((a, a^2), "slides")').cls?.needs3D).toBe(false);
+    // A second text used to read as a third coordinate: a 3D graph with nothing drawn.
+    expect(row('label((1, 2), "a", "b")').error).toMatch(/one quoted text/);
+    expect(row('label("peak", (1, 2))').error).toMatch(/one quoted text/);
+    expect(row('label((1, 2), 3)').error).toMatch(/quoted text/);
+  });
 });
 
 describe('dependency retention after a failed definition', () => {

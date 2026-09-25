@@ -691,6 +691,11 @@ body.file-drag::after {
   opacity: 1;
   transform: translate(-50%, 0);
 }
+/* Above voice mode's orb (live, or idle with its label), which sits in the
+   same bottom-centre spot and would be covered, or cover the words. */
+:root:has(.voice-orb, .voice-start:not([hidden])) .notice {
+  bottom: calc(124px + var(--safe-area-bottom));
+}
 /* Per-row display toggles (Σ partial sums on sequences, bars on data lists). */
 .eq-toggles {
   display: flex;
@@ -1035,13 +1040,17 @@ html[data-embed][data-embed-boot] #panel {
   inset: 0;
   border-radius: 50%;
 }
-.voice-orb > span {
+/* The orb's body, live and idle (.voice-start-orb). */
+.voice-orb > span,
+.voice-start-orb {
   background: radial-gradient(
     circle at 35% 30%,
     #fff 0%,
     var(--accent) 45%,
     color-mix(in srgb, var(--accent) 60%, #000) 100%
   );
+}
+.voice-orb > span {
   box-shadow: 0 0 calc(12px + 24px * var(--level, 0)) color-mix(in srgb, var(--accent) 70%, transparent);
   transform: scale(calc(0.8 + 0.45 * var(--level, 0)));
   transition: transform 0.08s linear;
@@ -1135,18 +1144,24 @@ html[data-embed][data-embed-boot] #panel {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: radial-gradient(
-    circle at 35% 30%,
-    #fff 0%,
-    var(--accent) 45%,
-    color-mix(in srgb, var(--accent) 60%, #000) 100%
-  );
   box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 50%, transparent);
   opacity: 0.7;
   transform: scale(0.9);
   transition:
     opacity 0.2s,
     transform 0.2s;
+}
+/* The breath: a wider glow drawn once and faded in and out. Animating the
+   shadow itself repainted every frame, on every page of an unlocked browser;
+   opacity runs on the compositor. */
+.voice-start-orb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: 0;
+  will-change: opacity;
   animation: orb-breathe 3.2s ease-in-out infinite;
 }
 .voice-start-label {
@@ -1182,11 +1197,11 @@ html[data-embed][data-embed-boot] #panel {
 }
 @keyframes orb-breathe {
   50% {
-    box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 70%, transparent);
+    opacity: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .voice-start-orb,
+  .voice-start-orb::after,
   .voice-start.connecting .voice-start-orb::before {
     animation: none;
   }

@@ -162,9 +162,9 @@ export function attachCapture(host: CaptureHost): {
    *  can also show it (the CSP allows no data: images). */
   function still(maxEdge: number): HTMLCanvasElement {
     host.render();
-    const scale = Math.min(1, maxEdge / Math.max(host.gl.width, host.gl.height));
+    const { w, h } = captureSize(host.gl.width, host.gl.height, maxEdge);
     const out = document.createElement('canvas');
-    blit(out, host.gl, host.overlay, Math.round(host.gl.width * scale), Math.round(host.gl.height * scale));
+    blit(out, host.gl, host.overlay, w, h);
     return out;
   }
 

@@ -458,6 +458,10 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         // The text comes last; the point before it arrives as one vector
         // (label(A, …)) or, from a tuple literal, as its spread coordinates.
         const text = e.args.at(-1);
+        // One text only: an extra string would read as a third coordinate.
+        if (e.args.slice(0, -1).some(a => a.kind === 'str')) {
+          throw new Error('label takes one quoted text, after the point: label((1, 2), "peak").');
+        }
         const args = e.args.slice(0, -1).map(lo);
         const coords =
           args.length === 1 && args[0].vec
