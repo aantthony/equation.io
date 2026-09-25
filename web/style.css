@@ -1020,6 +1020,11 @@ html[data-embed][data-embed-boot] #panel {
     height 0.3s,
     margin 0.3s;
 }
+/* Tapping it while it speaks interrupts (voices in the room don't). */
+.voice-orb.speaking {
+  pointer-events: auto;
+  cursor: pointer;
+}
 .voice-orb > span,
 .voice-orb::before,
 .voice-orb::after {

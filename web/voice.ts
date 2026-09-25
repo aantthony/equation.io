@@ -280,10 +280,16 @@ class Orb {
   private state: OrbState = 'listening';
   private target: { x: number; y: number; z?: number; until: number } | null = null;
 
-  constructor(private host: VoiceHost) {
+  constructor(
+    private host: VoiceHost,
+    onTap: () => void,
+  ) {
     this.el.className = 'voice-orb';
     this.el.setAttribute('aria-hidden', 'true');
+    this.el.title = 'Tap to interrupt';
     this.el.append(document.createElement('span'));
+    // Clickable only while speaking (style.css): voices don't interrupt it.
+    this.el.addEventListener('click', onTap);
   }
 
   show(mic: AnalyserNode, out: AnalyserNode) {
@@ -428,7 +434,7 @@ class Session {
     private key: string,
     private onState: (state: 'connecting' | 'live' | 'idle', reason?: string) => void,
   ) {
-    this.orb = new Orb(host);
+    this.orb = new Orb(host, () => this.interrupt());
     this.speaker.autoplay = true;
   }
 
@@ -540,13 +546,15 @@ class Session {
         if (!this.running) this.orb.setState('listening');
         break;
       case 'input_audio_buffer.speech_started':
-        // The server cuts its own audio off on barge-in; a new question
-        // means the old pointing is stale.
+        // Speech doesn't interrupt a reply (lib/voice-agent.ts): while the
+        // model talks, it may be anyone in the room.
+        if (this.speaking) break;
+        // A new question means the old pointing is stale.
         this.orb.home();
         this.orb.setState('listening');
         break;
       case 'input_audio_buffer.speech_stopped':
-        this.orb.setState('thinking');
+        if (!this.speaking) this.orb.setState('thinking');
         break;
       case 'response.output_audio_transcript.delta':
         this.transcript += event.delta;
@@ -591,6 +599,14 @@ class Session {
         console.warn('[voice]', event.error ?? event);
         break;
     }
+  }
+
+  /** The student tapped the orb: stop talking, and drop what was still to be said. */
+  private interrupt() {
+    if (!this.speaking) return;
+    this.send({ type: 'response.cancel' });
+    this.send({ type: 'output_audio_buffer.clear' });
+    this.orb.home();
   }
 
   /** Screenshots go through the Worker's sideband: too large for a data channel message in every browser. */

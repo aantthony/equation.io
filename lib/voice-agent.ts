@@ -160,7 +160,13 @@ export const SESSION_CONFIG = {
   model: VOICE_MODEL,
   instructions: INSTRUCTIONS,
   audio: {
-    input: { turn_detection: { type: 'semantic_vad' } },
+    input: {
+      // Laptop and room microphones: cleaned before turn detection hears it.
+      noise_reduction: { type: 'far_field' },
+      // Speech doesn't cut the model off: in a noisy room any voice would.
+      // The student interrupts by tapping the orb instead (web/voice.ts).
+      turn_detection: { type: 'semantic_vad', interrupt_response: false },
+    },
     output: { voice: VOICE_NAME },
   },
   tools: TOOLS,
