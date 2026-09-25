@@ -388,7 +388,7 @@ export const SHOWCASE: ShowcaseItem[] = [
     blurb:
       'A sequence of rows, each read from the one above: c_{n+1}[i] from its three neighbours is Wolfram’s rule 30 — drag r for any other rule.',
     eqs: [
-      'r = 30',
+      'r = floor(clamp(30, 0, 255))',
       'c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2)',
       'view(x = -60..60, y = -80..2)',
     ],
