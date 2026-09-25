@@ -806,8 +806,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Coordinate field: a definition that depends on the plane, e.g.
   `r = sqrt(x^2+y^2); theta = atan2(y,x)`. Its level sets draw as a grid, and
   later rows may use it: adding `r = 2(1 + cos(theta))` plots a cardioid in
-  polar coordinates. A named pair or triple that uses x, y, or z is a
-  vector field (see Point), not a grid.
+  polar coordinates. Here r is a distance, so a curve draws only where it is
+  >= 0: `r = sin(4 theta)` shows 4 of the rose's 8 petals. For a polar curve
+  that goes negative, trace it with theta = 2pi u instead:
+  `(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))` is the whole 8-petal rose.
+  A named pair or triple that uses x, y, or z is a vector field (see Point),
+  not a grid.
 - Coordinate fields in space: a field may use z, e.g. spherical
   `rho = sqrt(x^2+y^2+z^2); theta = atan2(y,x); phi = acos(z/rho)`. A z-using
   field only defines — it draws no grid and does not by itself make the graph
