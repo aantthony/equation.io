@@ -119,6 +119,70 @@ export interface Certification {
   unresolved: number;
   visited: number;
 }
+
+type Krawczyk = { kind: 'none' } | { kind: 'root'; enclosure: Interval[] } | { kind: 'unknown' };
+
+/** The Krawczyk test on one box: no zero there, exactly one (inside the
+ *  returned enclosure), or undecided. */
+function krawczyk(residuals: Expr[], names: string[], box: Interval[], env: Record<string, number>): Krawczyk {
+  const n = names.length;
+  const f = residuals.map(e => intervalAD(e, names, box, env));
+  if (f.some(a => a.valid && excludesZero(a.value))) return { kind: 'none' };
+  const mid = box.map(([a, b]) => a / 2 + b / 2);
+  const atMid = residuals.map(e => intervalAD(e, names, mid.map(point), env));
+  const jm = atMid.map(a => a.jac.map(([a, b]) => a / 2 + b / 2));
+  const cols = Array.from({ length: n }, (_, k) =>
+    solveLinear(
+      jm,
+      names.map((_, j) => +(k === j)),
+      n,
+    ),
+  );
+  if (!f.every(a => a.valid) || !atMid.every(a => a.valid) || !cols.every(c => c && c.every(Number.isFinite))) {
+    return { kind: 'unknown' };
+  }
+  const c = names.map((_, i) => cols.map(col => point(col![i])));
+  if (!excludesZero(determinant(c))) return { kind: 'unknown' };
+  const r = names.map((_, i) =>
+    names.map((_, j) =>
+      isub(
+        point(+(i === j)),
+        c[i].reduce((sum, v, k) => iadd(sum, imul(v, f[k].jac[j])), [0, 0] as Interval),
+      ),
+    ),
+  );
+  const kraw = mid.map((m, i) => {
+    const center = isub(
+      point(m),
+      c[i].reduce((sum, v, j) => iadd(sum, imul(v, atMid[j].value)), [0, 0] as Interval),
+    );
+    return r[i].reduce((sum, v, j) => iadd(sum, imul(v, isub(box[j], point(mid[j])))), center);
+  });
+  // K disjoint from X excludes a zero; strict containment and a
+  // contraction prove one unique zero of the original equations.
+  if (kraw.some((v, i) => v[0] > box[i][1] || v[1] < box[i][0])) return { kind: 'none' };
+  const contraction = r.every(
+    row => row.reduce((sum, v) => nextFloat(sum + Math.max(Math.abs(v[0]), Math.abs(v[1])), true), 0) < 1,
+  );
+  if (contraction && kraw.every((v, i) => v[0] > box[i][0] && v[1] < box[i][1])) {
+    return { kind: 'root', enclosure: kraw };
+  }
+  return { kind: 'unknown' };
+}
+
+const within = (inner: Interval[], outer: Interval[]): boolean =>
+  inner.every((v, k) => v[0] >= outer[k][0] && v[1] <= outer[k][1]);
+
+/** Widths of the boxes tried around a seed, relative to max(1, |seed|). */
+const SEED_RADII = [1e-9, 1e-7, 1e-5, 1e-4, 1e-3, 1e-2, 0.03, 0.1, 0.3];
+
+/**
+ * Prove roots of a square system in the box [lo, hi]. `seeds` are approximate
+ * roots (from the numeric solver): each only chooses a small box around it to
+ * test, widened while the test still proves a unique root there, so a root
+ * the subdivision would only reach after exhausting its budget elsewhere is
+ * still certified. Subdivision then skips boxes inside those proven regions.
+ */
 export function certifySystem(
   residuals: Expr[],
   names: string[],
@@ -126,6 +190,7 @@ export function certifySystem(
   hi: number[],
   env: Record<string, number> = {},
   maxBoxes = 2048,
+  seeds: readonly number[][] = [],
 ): Certification {
   const n = names.length;
   const result: Certification = { roots: [], enclosures: [], complete: false, unresolved: 0, visited: 0 };
@@ -139,59 +204,55 @@ export function certifySystem(
     throw new Error('Certification needs a finite box and a square 2D or 3D system.');
   if (residuals.some(e => exceedsNodes(e, 2048)))
     throw new Error('Certification accepts at most 2048 expression nodes per equation.');
+  // Boxes each proven to hold exactly one root: result.roots[k] is in unique[k].
+  const unique: Interval[][] = [];
+  const record = (box: Interval[], enclosure: Interval[], guess: number[]): void => {
+    // The same root proven twice: its enclosure lies in the other's box.
+    if (unique.some((u, k) => within(enclosure, u) || within(result.enclosures[k], box))) return;
+    const numeric = solveSystem(
+      residuals,
+      names,
+      box.map(v => v[0]),
+      box.map(v => v[1]),
+      { env, seeds: [guess], lattice: false, margin: 0 },
+    );
+    result.roots.push(numeric[0] ?? enclosure.map(([a, b]) => a / 2 + b / 2));
+    result.enclosures.push(enclosure);
+    unique.push(box);
+  };
+  for (const seed of seeds) {
+    if (seed.length !== n || !seed.every((v, k) => v >= lo[k] && v <= hi[k])) continue;
+    if (unique.some(u => within(seed.map(point), u))) continue;
+    const scale = Math.max(1, ...seed.map(Math.abs));
+    let proven: { box: Interval[]; enclosure: Interval[] } | null = null;
+    for (const radius of SEED_RADII) {
+      const box = seed.map((v, k): Interval => [
+        Math.max(lo[k], v - radius * scale),
+        Math.min(hi[k], v + radius * scale),
+      ]);
+      const test = krawczyk(residuals, names, box, env);
+      if (test.kind !== 'root') {
+        if (proven) break;
+        continue;
+      }
+      proven = { box, enclosure: test.enclosure };
+    }
+    if (proven) record(proven.box, proven.enclosure, seed);
+  }
   const pending: Array<{ box: Interval[]; depth: number }> = [{ box: lo.map((v, k) => [v, hi[k]]), depth: 0 }];
   while (pending.length && result.visited < Math.min(8192, Math.max(1, maxBoxes))) {
     const { box, depth } = pending.pop()!;
     result.visited++;
-    const f = residuals.map(e => intervalAD(e, names, box, env));
-    if (f.some(a => a.valid && excludesZero(a.value))) continue;
-    const mid = box.map(([a, b]) => a / 2 + b / 2);
-    const atMid = residuals.map(e => intervalAD(e, names, mid.map(point), env));
-    const jm = atMid.map(a => a.jac.map(([a, b]) => a / 2 + b / 2));
-    const cols = Array.from({ length: n }, (_, k) =>
-      solveLinear(
-        jm,
-        names.map((_, j) => +(k === j)),
-        n,
-      ),
-    );
-    if (f.every(a => a.valid) && atMid.every(a => a.valid) && cols.every(c => c && c.every(Number.isFinite))) {
-      const c = names.map((_, i) => cols.map(col => point(col![i])));
-      if (excludesZero(determinant(c))) {
-        const r = names.map((_, i) =>
-          names.map((_, j) =>
-            isub(
-              point(+(i === j)),
-              c[i].reduce((sum, v, k) => iadd(sum, imul(v, f[k].jac[j])), [0, 0] as Interval),
-            ),
-          ),
-        );
-        const kraw = mid.map((m, i) => {
-          const center = isub(
-            point(m),
-            c[i].reduce((sum, v, j) => iadd(sum, imul(v, atMid[j].value)), [0, 0] as Interval),
-          );
-          return r[i].reduce((sum, v, j) => iadd(sum, imul(v, isub(box[j], point(mid[j])))), center);
-        });
-        // K disjoint from X excludes a zero; strict containment and a
-        // contraction prove one unique zero of the original equations.
-        if (kraw.some((v, i) => v[0] > box[i][1] || v[1] < box[i][0])) continue;
-        const contraction = r.every(
-          row => row.reduce((sum, v) => nextFloat(sum + Math.max(Math.abs(v[0]), Math.abs(v[1])), true), 0) < 1,
-        );
-        if (contraction && kraw.every((v, i) => v[0] > box[i][0] && v[1] < box[i][1])) {
-          const numeric = solveSystem(
-            residuals,
-            names,
-            box.map(v => v[0]),
-            box.map(v => v[1]),
-            { env, seeds: [mid], lattice: false, margin: 0 },
-          );
-          result.roots.push(numeric[0] ?? kraw.map(([a, b]) => a / 2 + b / 2));
-          result.enclosures.push(kraw);
-          continue;
-        }
-      }
+    if (unique.some(u => within(box, u))) continue;
+    const test = krawczyk(residuals, names, box, env);
+    if (test.kind === 'none') continue;
+    if (test.kind === 'root') {
+      record(
+        box,
+        test.enclosure,
+        box.map(([a, b]) => a / 2 + b / 2),
+      );
+      continue;
     }
     const widths = box.map(([a, b], k) => (b - a) / (hi[k] - lo[k]));
     const axis = widths.indexOf(Math.max(...widths));

@@ -257,6 +257,37 @@ describe('solver extensions and comparison notes', () => {
       expect(proof.unresolved).toBeGreaterThan(0);
     }
   });
+  it('certifies roots near numeric seeds that subdivision alone runs out of budget before reaching', () => {
+    // The Jacobian counterexample's fiber over (-1/4, 0, 0): degree-7
+    // residuals whose intervals are too loose over a wide box to subdivide
+    // down to any root within the budget.
+    const fs = exprs([
+      '(1+x y)^3 z + y^2 (1+x y)(4+3 x y) + 0.25',
+      'y + 3 x (1+x y)^2 z + 3 x y^2 (4+3 x y)',
+      '2 x - 3 x^2 y - x^3 z',
+    ]);
+    const [lo, hi] = [
+      [-10, -10, -10],
+      [10, 10, 10],
+    ];
+    expect(certifySystem(fs, ['x', 'y', 'z'], lo, hi).roots).toEqual([]);
+    const truth = [
+      [0, 0, -0.25],
+      [1, -1.5, 6.5],
+      [-1, 1.5, 6.5],
+    ];
+    // Slightly off, as a numeric solver's answers are; one seed is no root.
+    const seeds = [...truth.map(p => p.map(v => v + 1e-9)), [2, 2, 2]];
+    const proof = certifySystem(fs, ['x', 'y', 'z'], lo, hi, {}, 2048, seeds);
+    expect(proof.roots).toHaveLength(3);
+    for (const p of truth) {
+      expect(proof.enclosures.some(box => box.every(([a, b], k) => a <= p[k] && p[k] <= b))).toBe(true);
+    }
+    // A seed at a root subdivision also proves is counted once.
+    const linear = certifySystem(exprs(['x-1', 'y-2']), ['x', 'y'], [-3, -3], [3, 3], {}, 2048, [[1, 2]]);
+    expect(linear.complete).toBe(true);
+    expect(linear.roots).toEqual([[1, 2]]);
+  });
   it('reads decided comparisons instead of drawing degenerate curves', () => {
     const a = runRows(['2+2=4', 'e=2', '1<2<3', 'a=2', 'a+1=3']);
     expect(a.rows[0].info).toBe('Always true (4 = 4)');
