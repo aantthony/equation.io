@@ -491,6 +491,69 @@ export const SHOWCASE: ShowcaseItem[] = [
     view: { cx: 2.5, cy: 1.5, span: 12.5 },
   },
   {
+    slug: 'matrix-action',
+    title: 'See what a matrix does',
+    blurb:
+      'action(M) draws where M sends the unit square, circle and axes: the parallelogram’s area is det M, the ellipse’s axes its singular vectors.',
+    eqs: ['action(((1, 1), (0, 1)))', 'action(((0, -1), (1, 0)) ((1.5, 0), (0, 0.6)))'],
+    group: 'Tensors, quaternions & geometric algebra',
+    view: { cx: 0.3, cy: 0.4, span: 4.5 },
+  },
+  {
+    slug: 'jacobian-glyphs',
+    title: 'Matrix fields as glyphs',
+    blurb:
+      'A 2×2 matrix in x and y draws the image of a small circle at every point. A conformal map’s Jacobian is circles everywhere, its spoke turning twice as fast as the angle.',
+    eqs: ['jacobian((x^2 - y^2, 2 x y)/4)'],
+    group: 'Tensors, quaternions & geometric algebra',
+    view: { span: 9 },
+  },
+  {
+    slug: 'bivector',
+    title: 'Bivectors are oriented areas',
+    blurb:
+      'The geometric product a ⟑ b is a · b plus a ∧ b. Its bivector part draws as a disc with the parallelogram’s area, turning from a toward b.',
+    eqs: ['a = (2, 0)', 'b = (1, 1.5)', 'vector(a)', 'vector(b)', 'polygon((0, 0), a, a + b, b)', 'grade(a ⟑ b, 2)'],
+    group: 'Tensors, quaternions & geometric algebra',
+    view: { cx: 0.8, cy: 0.4, span: 4.2 },
+  },
+  {
+    slug: 'quaternion-slerp',
+    title: 'Quaternions turn solids',
+    blurb:
+      'quat(cos(θ/2), sin(θ/2) n) turns by θ about n, and slerp(q1, q2, s) runs between two orientations at constant speed: five cubes at s = 0, ¼, ½, ¾, 1.',
+    eqs: [
+      'camera(-pi/2.4, 0.35, 8.5)',
+      'q1 = quat(1, 0, 0, 0)',
+      'q2 = quat(cos(1.2), sin(1.2) (1, 1, 1)/sqrt(3))',
+      's = [0..4]/4',
+      'rotate(hull(0.5 ([-1, 1], [-1, 1], [-1, 1])), slerp(q1, q2, s)) + (7 s - 3.5, 0, 0)',
+    ],
+    group: 'Tensors, quaternions & geometric algebra',
+  },
+  {
+    slug: 'hopf',
+    title: 'The Hopf fibration',
+    blurb:
+      'Each fiber of the 3-sphere is a unit quaternion times the circle e^(iθ). Projected stereographically, the fibers over a circle are linked circles on a torus.',
+    eqs: [
+      'camera(-pi/3, 0.6, 6)',
+      'a = 2pi [0..11]/12',
+      'h = pi/4',
+      'q = quat(cos(h), 0, sin(h) cos(a), sin(h) sin(a)) quat(cos(2pi u), sin(2pi u), 0, 0)',
+      '-dual(grade(q, 2))/(1 - grade(q, 0))',
+    ],
+    group: 'Tensors, quaternions & geometric algebra',
+  },
+  {
+    slug: 'quaternion-julia',
+    title: 'Quaternion Julia sets',
+    blurb:
+      'qjulia(c) iterates q ↦ q² + c over the quaternions and raymarches a 3D slice of the set; a second argument slides the slice through the fourth dimension.',
+    eqs: ['camera(-pi/3, 0.5, 3)', 's = 0', 'c = quat(-0.2, 0.8, 0, 0)', 'qjulia(c, s)'],
+    group: 'Tensors, quaternions & geometric algebra',
+  },
+  {
     slug: 'normal-prob',
     title: 'Random variables',
     blurb: 'X ~ Normal(m, s) plots its density; P(a < X < b) shades the area and reports the number.',

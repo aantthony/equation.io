@@ -1,3 +1,12 @@
+/* ⟑ from a math font: the system faces lack it (see web/style.css). */
+@font-face {
+  font-family: 'Eq Math Glyphs';
+  src:
+    local('STIX Two Math Regular'), local('STIXTwoMath-Regular'), local('Cambria Math'), local('Noto Sans Math'),
+    local('Segoe UI Symbol');
+  unicode-range: U+27D1;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -36,6 +45,7 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family:
+    'Eq Math Glyphs',
     ui-sans-serif,
     system-ui,
     -apple-system,
@@ -256,7 +266,8 @@ a {
 .card-body code {
   display: block;
   font:
-    11.5px/1.5 ui-monospace,
+    11.5px/1.5 'Eq Math Glyphs',
+    ui-monospace,
     'SF Mono',
     Menlo,
     monospace;
@@ -294,7 +305,8 @@ a {
 }
 .deeplinks code {
   font:
-    13px/1.5 ui-monospace,
+    13px/1.5 'Eq Math Glyphs',
+    ui-monospace,
     'SF Mono',
     Menlo,
     monospace;
