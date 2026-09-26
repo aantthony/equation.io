@@ -251,6 +251,17 @@ describe('matrix algebra and the exponential', () => {
     close(point(['b = 0', 'n = (0, 0, b)'], 'e^(a cross(n)) (1, 0, 0)', { a: 0, n_x: 0, n_y: 0, n_z: 1 }), [1, 0, 0]);
     expect(() => lowRow(['S = ((1, 0, 0), (0, 1, 0), (0, 0, 1))'], 'e^(a S) (1, 0, 0)')).toThrow(/rotation generator/);
   });
+  it('rotates in the plane of a bivector of named vectors', () => {
+    // a ∧ b's diagonal is a_x b_x − b_x a_x: zero, though not written as 0.
+    const ab = { a_x: 1, a_y: 0, a_z: 0, b_x: 0, b_y: 1, b_z: 0 };
+    const defs = ['a = (1, 0, 0)', 'b = (0, 1, 0)'];
+    close(point(defs, 'e^(s a ∧ b) (1, 0, 0)', { s: Math.PI / 2, ...ab }), [0, -1, 0]);
+    close(point(defs, 'e^(s a ∧ b) (0, 0, 1)', { s: 1, ...ab }), [0, 0, 1]);
+    // Skew only at some slider values is no rotation generator.
+    expect(() => lowRow(['k = 1', 'S = ((0, k, 0), (-1, 0, 0), (0, 0, 0))'], 'e^(a S) (1, 0, 0)')).toThrow(
+      /rotation generator/,
+    );
+  });
   it('combines matrices: scale, sum, product, powers and the inverse', () => {
     const M = 'M = ((1, 2), (3, 4))';
     close(point([M, J], '(2 M) (1, 0)'), [2, 6]);

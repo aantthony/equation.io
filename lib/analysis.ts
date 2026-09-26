@@ -618,8 +618,12 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         continue;
       }
       // `P(…)` shades an area under a declared density — unless the user has
-      // defined P themselves, in which case the row is theirs.
-      const probBody = defs.consts.has('P') || defs.fns.has('P') ? null : matchProbability(row.text);
+      // defined P themselves as something P(…) could apply (a number, a
+      // function, a matrix or a tensor), in which case the row is theirs. (A
+      // list or point named P leaves P(X > 1) the probability it reads as.)
+      const userDefined = (n: string) =>
+        defs.consts.has(n) || defs.fns.has(n) || defs.mats.has(n) || defs.tensors.has(n);
+      const probBody = userDefined('P') ? null : matchProbability(row.text);
       if (probBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
         const p = toProbability(parseRowBody(probBody, lowerProbBody), rvNames);
@@ -675,7 +679,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       // `E(…)` is the mean of an expression in random variables — unless the
       // user has defined E themselves. Mirror of web/main.ts.
-      const expectBody = defs.consts.has('E') || defs.fns.has('E') ? null : matchExpectation(row.text);
+      const expectBody = userDefined('E') ? null : matchExpectation(row.text);
       if (expectBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
         const ex = toExpectation(parseRowBody(expectBody), rvNames);

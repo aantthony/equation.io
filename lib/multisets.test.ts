@@ -363,6 +363,35 @@ describe('§4 tensors', () => {
       '= [(((1, 0), (0, 0)), ((0, 0), (2, 0))), (((2, 0), (0, 0)), ((0, 0), (4, 0)))]',
     );
   });
+  it('a reduction over a multiset of tensors is one tensor, entry by entry', () => {
+    const P = 'P = [(1, 2), (2, 3), (3, 3.5), (4, 5)]';
+    expect(tensors([P, 'total(P ⊗ P)']).values).toEqual([[30, 38.5, 38.5, 50.25]]);
+    expect(multiset([P, 'count(P ⊗ P)'])).toEqual([4]);
+    // Named: the covariance matrix, a matrix like any other.
+    const C = [P, 'm = mean(P)', 'C = mean((P - m) ⊗ (P - m))'];
+    expect(tensors([...C, 'C']).values[0]).toEqual([1.25, 1.1875, 1.1875, 1.171875]);
+    expect(vectors([...C, 'C (1, 0)'])).toEqual([[1.25, 1.1875]]);
+    expect(multiset([...C, 'det(C)'])[0]).toBeCloseTo(1.25 * 1.171875 - 1.1875 ** 2, 12);
+    // Rank 3 stays a tensor.
+    const T = ['Q = [(1, 2), (2, 3)]', 'T = total(Q ⊗ Q ⊗ Q)'];
+    expect(tensors([...T, 'T'])).toEqual({ shape: [2, 2, 2], values: [[9, 14, 14, 22, 14, 22, 22, 35]] });
+    expect(vectors([...T, 'contract(T, 1, 2)'])).toEqual([[31, 49]]);
+    // §1: a name is chosen once, literals cross; a list in an entry is a
+    // multiset of matrices, summed the same way.
+    expect(multiset(['p = [e_x, e_y]', 'count(p ⊗ p)'])).toEqual([2]);
+    expect(multiset(['count([e_x, e_y] ⊗ [e_x, e_y])'])).toEqual([4]);
+    expect(tensors(['a = [1, 2]', 'M = ((a, 0), (0, 1))', 'total(M)']).values).toEqual([[3, 0, 0, 2]]);
+    // Only total, mean and count take tensors, as with points.
+    expect(last([P, 'max(P ⊗ P)']).error).toMatch(/max is not defined for tensors/);
+  });
+  it('a name the grapher already uses says so', () => {
+    expect(last(['v = (1, 2, 3)']).error).toMatch(/^v is a built-in parameter/);
+    expect(last(['w = (1, 0) ∧ (0, 1)']).error).toMatch(/^w is the complex variable/);
+    expect(last(['y = (1, 2)']).error).toMatch(/One side is a point/);
+    // P and E are the user's once defined, as a matrix too.
+    expect(vectors(['P = (1, 0) ⊗ (1, 0)', 'P (2, 3)'])).toEqual([[2, 0]]);
+    expect(vectors(['E = (0, 1) ⊗ (0, 1)', 'E (2, 3)'])).toEqual([[0, 3]]);
+  });
 });
 
 describe('§5 what a row draws', () => {

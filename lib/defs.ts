@@ -76,7 +76,7 @@ import {
   withAxes,
 } from './list.ts';
 import type { Mat } from './mat.ts';
-import { type GetTensor, type Tensor, stack, vectorTensor } from './tensor.ts';
+import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -2332,6 +2332,15 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           );
         } catch {
           e = lowerObjects(resolved, defs, ropts, true);
+        }
+        // `C = mean((P - m) ⊗ (P - m))`: a reduction over a multiset of
+        // tensors is one tensor, named as a matrix when it is square.
+        const reduced = tensorOfNode(e);
+        if (reduced && reduced.shape.length >= 2) {
+          const m = toMat(reduced);
+          if (m) defs.mats.set(d.name, m);
+          else defs.tensors.set(d.name, reduced);
+          continue;
         }
         // `adults = person[person.age >= 18]` names a cut of a data file.
         const cut = filteredTable(e, defs, ropts);

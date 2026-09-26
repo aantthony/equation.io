@@ -176,6 +176,30 @@ const opposite = (a: Expr, b: Expr): boolean =>
   isNum(a) && isNum(b) ? a.value === -b.value : same(neg(a), b) || same(a, neg(b));
 
 /**
+ * Whether e is 0 for every value of its variables. Structure alone misses
+ * a wedge of named vectors, whose diagonal is `a_x b_x − b_x a_x`, so a
+ * symbolic entry is evaluated at a few arbitrary points: an entry that
+ * vanishes at all of them is taken as zero.
+ */
+const PROBES = [0.7318, 1.3906, -0.4561];
+function vanishes(e: Expr): boolean {
+  const vars = [...freeVars(e)];
+  if (!vars.length) {
+    const v = settle(e);
+    return isNum(v) && v.value === 0;
+  }
+  return PROBES.every((seed, k) => {
+    const env: Record<string, number> = {};
+    vars.forEach((name, i) => (env[name] = seed + 0.61 * i + 0.17 * k * i));
+    try {
+      return Math.abs(evaluate(e, env)) < 1e-9;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
  * e^M in closed form.
  *
  * 2×2, `[(p, -w), (w, p)]` — a rotation generator plus a multiple of I — is
@@ -227,7 +251,9 @@ export function expOf(v: MatValue): Mat {
     return mapMat(m, (entry, r, col) => mul(es, add(mul(C, eye[r][col]), mul(S, sub(entry, mul(s, eye[r][col]))))));
   }
   const skew = base.every((row, r) =>
-    row.every((entry, c) => (r === c ? isNum(entry) && entry.value === 0 : opposite(entry, base[c][r]))),
+    row.every((entry, c) =>
+      r === c ? vanishes(entry) : opposite(entry, base[c][r]) || vanishes(add(entry, base[c][r])),
+    ),
   );
   if (!skew) {
     throw new Error('e^M for a 3×3 matrix needs a rotation generator: e^(th cross(n)) turns by th about the axis n.');

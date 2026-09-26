@@ -2,7 +2,7 @@ import type { ValueDefinitions } from './env.ts';
 import type { Mat } from './mat.ts';
 import { lowerMatrix, rowsAsPoints } from './geom.ts';
 import { mapChildren } from './expr.ts';
-import { tensorOfNode } from './tensor.ts';
+import { tensorNode, tensorOfNode } from './tensor.ts';
 import { exceedsNodes } from './size.ts';
 /** Lift lists in object positions before scalar geometry lowering. Existing
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
@@ -22,6 +22,8 @@ const num = (value: number): Expr => ({ kind: 'num', value });
 /** Reductions that take a multiset of points whole: count, and total and
  *  mean coordinate by coordinate. */
 const REDUCES_POINTS = new Set(['count', 'total', 'mean']);
+/** Reductions that need an order or a scale, which a tensor has not. */
+const TENSOR_REFUSED = new Set(['min', 'max', 'median', 'stdev']);
 
 /** Figures that are just their points: moving the points moves the figure. */
 const POINT_FIGURES = new Set(['segment', 'polyline', 'polygon', 'vector', 'hull']);
@@ -502,6 +504,18 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
           return coords;
         }
         case 'call': {
+          // max(P ⊗ P): the other reductions have no order on tensors.
+          if (TENSOR_REFUSED.has(n.name) && n.args.length === 1) {
+            let value: Expr | null;
+            try {
+              value = lowerObjects(n.args[0], defs, opts, true);
+            } catch {
+              value = null;
+            }
+            if (value?.kind === 'list' && value.items.length && value.items.every(it => tensorOfNode(it))) {
+              throw new Error(`${n.name} is not defined for tensors — total, mean and count take them entry by entry.`);
+            }
+          }
           // count(2 P), mean(R P): a reduction takes the computed multiset
           // of points whole (§3), rather than one member per point.
           if (REDUCES_POINTS.has(n.name) && n.args.length === 1) {
@@ -514,6 +528,23 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
             if (pts?.kind === 'list' && pts.items.length && pts.items.every(p => p.kind === 'vec')) {
               settledLists.add(pts);
               return { ...n, args: [pts] };
+            }
+            // total(P ⊗ P), mean of a multiset of matrices: entry by entry,
+            // as a point's are coordinate by coordinate — one tensor.
+            const tensors = pts?.kind === 'list' ? pts.items.map(tensorOfNode) : [];
+            const shape = tensors[0]?.shape.join();
+            if (pts?.kind === 'list' && tensors.length && tensors.every(t => t && t.shape.join() === shape)) {
+              if (n.name === 'count') return num(tensors.length);
+              const axes = axesOf(pts);
+              const first = tensors[0]!;
+              return tensorNode({
+                shape: first.shape,
+                data: first.data.map((_, i) => {
+                  const entries = withAxes<Expr>({ kind: 'list', items: tensors.map(t => t!.data[i]) }, axes);
+                  settledLists.add(entries);
+                  return { ...n, args: [entries] };
+                }),
+              });
             }
           }
           return mapChildren(n, walk);

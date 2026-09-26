@@ -912,6 +912,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   - Lists in entries work as for matrices: with `a = [1, 2]`,
     `a e_x ⊗ e_y` is two matrices, and with `M = ((a, 0), (0, 1))`, `M ⊗ M`
     is two rank-4 tensors, not four (both Ms are the one M).
+  - `total`, `mean` and `count` take a multiset of tensors whole, entry by
+    entry: with `P` a list of points, `C = mean((P - mean(P)) ⊗ (P - mean(P)))`
+    is the covariance matrix, and `C (x, y)` applies it.
+  - A bivector `a ∧ b` of 3D vectors, named or written out, generates the
+    rotation in their plane: `e^(t a ∧ b) P`.
 - Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of

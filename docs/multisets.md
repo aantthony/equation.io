@@ -297,6 +297,8 @@ Checked 2026-09-26 against `lowerLists` (lib/list.ts) and the MCP validator.
 | `person.row` | each record's position in the file (phase 4) | same |
 | `e_x ⊗ e_y`, `a ∧ b`, `contract(T, 1, 2)` | outer product, bivector, contraction; a tensor alone on a row reads out (phase 6) | same |
 | `(((1,2),(3,4)),((5,6),(7,8)))`, `((1,2,3,4),(5,6,7,8))` | a 2×2×2 and a 2×4 tensor (phase 6) | same |
+| `total(P ⊗ P)`, `C = mean((P - m) ⊗ (P - m))` | one tensor, entry by entry; named, a matrix (was an error) | same |
+| `a = (1,0,0)`; `b = (0,1,1)`; `e^(t a ∧ b) P` | the rotation in the plane of a and b (was an error for named vectors) | same |
 | `r = interval(1, 2)`; `(r cos(2πu), r sin(2πu))` | a filled annulus (phase 7) | same |
 | `(u cos(2πv), u sin(2πv))` | a filled disc (phase 7; was an error) | same |
 | `a = interval(1, 2)`; `y = sin(a x)` | the region the family sweeps, searched along a per pixel (phase 7) | same |
@@ -393,6 +395,12 @@ recorded so they can be reviewed and reversed. Progress notes live in
   tuples; `total` and `mean` act position by position; the other reductions
   are errors. A bracket that mixes long tuples with numbers, points or
   tuples of another length is an error.
+- **A built-in name cannot hold a value.** `v = (1, 2, 3)` is an equation in
+  v (v is one of the continuous multisets of §5), so where it fails the error
+  says v is taken rather than that the sides differ; likewise u, t, w, i, e.
+  x, y and z keep the equation's own error (`y = A`: one side is a point).
+  A matrix or tensor named P or E takes over `P(…)`/`E(…)` as a product;
+  a list or point named P does not, so `P(X > 1)` stays a probability.
 - **Tuple literals may be any length.** `(1, 2, 3, 5, 8)` is a tuple of five
   numbers (it was a parse error). A tuple of tuples is a tensor (phase 6).
 - **`sort(P, key)` details.** The key has to run over P's instances or
@@ -457,7 +465,11 @@ recorded so they can be reviewed and reversed. Progress notes live in
   `x ∧ y` is the field x y). A bivector is stored as its antisymmetric
   rank-2 tensor, with no tag of its own: it is also a matrix, so
   `(a ∧ b) v = a (b·v) − b (a·v)`, `det` and `e^(th B)` apply. In 3D its
-  dual is `a × b`, which stays the vector it was.
+  dual is `a × b`, which stays the vector it was. `e^(th a ∧ b)` is the
+  rotation in the plane of a and b for named vectors too: a 3×3 generator is
+  accepted when it is skew-symmetric identically, checked by evaluating
+  `M + Mᵀ` at a few values of its variables (structure alone misses the
+  diagonal `a_x b_x − b_x a_x`). Skew only at some slider values is refused.
 - **Contraction is `contract(T, i, j)`**, indices 1-based and written as
   numbers (a slider would change the result's shape). It names which two
   indices meet, which is all Einstein notation says, without index syntax
@@ -531,7 +543,9 @@ recorded so they can be reviewed and reversed. Progress notes live in
 - **A multiset of matrices pairs with points built from it.** With
   `M = ((a, 0), (0, 1))` and `Q = M (1, 1)`, `M Q` and `R = M Q` choose M
   once per element of a, so they are 2 points (M M (1, 1)). A definition
-  that uses a named list of points is never a matrix.
+  that uses a named list of points is never a matrix — unless a reduction
+  takes the list whole (§3), as in `C = mean((P - m) ⊗ (P - m))`, which is
+  one matrix.
 - **A filter may keep nothing.** `L[L > 5]` is `[]`, so `count` of it is 0
   and the other reductions say the list is empty.
 - **A comparison's multiset is found by its instances.** The members kept
@@ -550,6 +564,15 @@ recorded so they can be reviewed and reversed. Progress notes live in
 - **count, total and mean take computed point lists.** `count(2 P)`,
   `count([0,1] e_x)`; `total` and `mean` of points are taken coordinate by
   coordinate (a point). `min`, `max`, `median`, `stdev` of points stay errors.
+- **count, total and mean take a multiset of tensors** the same way, entry by
+  entry, giving one tensor: `total(P ⊗ P)` is `Σ p ⊗ p` over P (§1: P is
+  chosen once, so 4 points give 4 terms, not 16), and a multiset of matrices
+  from a list in an entry (`M = ((a, 0), (0, 1))`) sums as one. The result is
+  one value, so it can be named, as a matrix when square:
+  `C = mean((P - m) ⊗ (P - m))` is the covariance matrix, and `C v`, `det(C)`
+  and `C^-1` apply. `min`, `max`, `median` and `stdev` of tensors are
+  errors, as of points. `total` of an empty multiset of tensors is `[]`, not
+  a zero tensor, since no shape is known.
 - **A long tuple's readout is cut.** Past 8 values it shows the first 8 and
   `…`, like a list's; a sorted column stays a typed array however long.
 - **A function parameter shadows e_x, e_y, e_z**, as it shadows a named

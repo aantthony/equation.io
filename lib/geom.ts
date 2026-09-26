@@ -56,7 +56,9 @@ import {
   stack,
   tensorAdd,
   tensorNeg,
+  TENSOR_CALL,
   tensorNode,
+  tensorOfNode,
   tensorScale,
   toMat,
   vectorTensor,
@@ -215,6 +217,18 @@ function lowerAngle(args: LV[], usage: string, stray: (index: number) => string)
   return { kind: 'call', name: ANGLE_FN, args: [...u, ...v] };
 }
 
+/** Names a row cannot define, with what they already are (see RESERVED in
+ *  defs.ts): `v = (1, 2, 3)` is an equation in v, which says so. (x, y and
+ *  z are left out: `y = A` is an equation, and its mismatch is the news.) */
+const TAKEN_NAMES: Record<string, string> = {
+  u: 'a built-in parameter running over [0, 1]',
+  v: 'a built-in parameter running over [0, 1], like u',
+  t: 'time',
+  w: 'the complex variable x + iy',
+  i: 'the imaginary unit',
+  e: "Euler's number",
+};
+
 const NOT_A_VALUE =
   'A matrix is not a value on its own — apply it to a vector, like M (x, y), or name it: R = e^(a J).';
 const isE = (e: Expr): boolean => (e.kind === 'var' && e.name === 'e') || (e.kind === 'num' && e.value === Math.E);
@@ -263,10 +277,11 @@ function withMatrices<T>(getTensor: GetTensor, isList: IsList, run: () => T): T 
   }
 }
 
-/** ⊗, ∧ and their spellings outer(…), wedge(…), contract(…): a tensor operation. */
+/** ⊗, ∧ and their spellings outer(…), wedge(…), contract(…): a tensor operation.
+ *  (So is a tensor value already made, such as the total of a multiset of them.) */
 const tensorOp = (e: Expr): boolean =>
   (e.kind === 'bin' && (e.glyph === 'outer' || e.glyph === 'wedge')) ||
-  (e.kind === 'call' && (e.name === 'outer' || e.name === 'wedge' || e.name === 'contract'));
+  (e.kind === 'call' && (e.name === 'outer' || e.name === 'wedge' || e.name === 'contract' || e.name === TENSOR_CALL));
 
 /** Whether a tuple literal holds a row that is no point — a longer tuple, or
  *  a tuple of tuples — so it may be a tensor rather than a tuple of points. */
@@ -371,6 +386,7 @@ function lowerTensor(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): Tensor | nul
       }
       case 'call': {
         if (!tensorOp(e)) return null;
+        if (e.name === TENSOR_CALL) return tensorOfNode(e);
         const any = (n: Expr) => anyTensor(n, lo, getMat);
         if (e.name === 'contract') {
           if (e.args.length !== 3) {
@@ -915,11 +931,19 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       return sc({ kind: 'call', name: e.name, args: flatArgs });
     }
     case 'eq': {
-      const l = lo(e.l);
-      const r = lo(e.r);
-      if (l.vec !== r.vec) throw new Error('One side is a point and the other is a number.');
-      if (!l.vec && l.e === e.l && (r as LV & { vec: false }).e === e.r) return sc(e);
-      return sc({ kind: 'eq', l: toExpr(l), r: toExpr(r) });
+      const taken = e.l.kind === 'var' ? TAKEN_NAMES[e.l.name] : undefined;
+      try {
+        const l = lo(e.l);
+        const r = lo(e.r);
+        if (l.vec !== r.vec) throw new Error('One side is a point and the other is a number.');
+        if (!l.vec && l.e === e.l && (r as LV & { vec: false }).e === e.r) return sc(e);
+        return sc({ kind: 'eq', l: toExpr(l), r: toExpr(r) });
+      } catch (err) {
+        // `v = (1, 2, 3)` reads as an equation in v, not a definition.
+        if (!taken || err instanceof MatrixSeen) throw err;
+        const name = (e.l as Expr & { kind: 'var' }).name;
+        throw new Error(`${name} is ${taken}, so it cannot name a value — pick another name, like q.`);
+      }
     }
     case 'ineq': {
       const l = lo(e.l);
