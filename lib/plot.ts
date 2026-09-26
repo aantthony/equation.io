@@ -35,6 +35,8 @@ import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
+import { mvOfNode, mvText } from './clifford.ts';
+import { multivectorGlyphs } from './mv-glyph.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
@@ -584,6 +586,35 @@ function classifyLowered(
     },
   });
 
+  // A multivector on a row of its own draws grade by grade, and reads out its
+  // value (docs/clifford.md); a multiset of them reads out each.
+  const mvs = expr.kind === 'list' && expr.items.length ? expr.items.map(mvOfNode) : [mvOfNode(expr)];
+  if (mvs.every(m => m !== null)) {
+    if (hasSpace || hasParam) {
+      throw new Error(
+        'A multivector in x, y, z, u or v has no picture yet — take a part of it, like grade(A, 1), to draw a field or a curve.',
+      );
+    }
+    const dim = mvs.some(m => m.dim === 3) ? 3 : 2;
+    const quat = mvs.every(m => m.quat);
+    const values = mvs.flatMap(m => Array.from({ length: 1 << dim }, (_, k) => m.data[k] ?? { kind: 'num', value: 0 }));
+    const readout = done({
+      kind: 'tuple',
+      values,
+      blades: { dim, ...(quat ? { quat: true as const } : {}) },
+      ...(expr.kind === 'list' && { count: mvs.length }),
+    });
+    if (expr.kind === 'list') return readout;
+    const glyphs = multivectorGlyphs(mvs[0]);
+    const drawn = classifyLowered({ kind: 'family', members: glyphs }, defined, fields, timeDerivative).cls;
+    return {
+      cls: {
+        ...drawn,
+        object: { ...(drawn.object as MathObject & { kind: 'family' }), readout: readout.cls },
+      },
+    };
+  }
+
   // A matrix or tensor on a row of its own — or a multiset of them — has no
   // position, so it is drawn as its values: a readout (docs/multisets.md §5).
   const tensors = expr.kind === 'list' && expr.items.length ? expr.items.map(tensorOfNode) : [tensorOfNode(expr)];
@@ -1102,6 +1133,24 @@ export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env:
 export function plotReadout(plot: CpuPlan, env: Record<string, number>): string | null {
   if (plot.type === 'value') return valueReadout(evaluate(plot.expr, env));
   if (plot.type === 'note') return comparisonReadout(plot, env);
+  if (plot.type === 'tuple' && plot.blades) {
+    // A multivector reads as its blades, a multiset of them as a list.
+    const each = 1 << plot.blades.dim;
+    const count = plot.count ?? 1;
+    const shown = Math.min(count, 8);
+    let approx = false;
+    const parts = Array.from({ length: shown }, (_, k) => {
+      const values = plot.values.slice(k * each, (k + 1) * each).map(e => evaluate(e, env));
+      return mvText(plot.blades!, values, v => {
+        const r = valueReadout(v);
+        if (r.startsWith('≈')) approx = true;
+        return r.replace(/^[=≈] /, '');
+      });
+    });
+    const prefix = approx ? '≈' : '=';
+    if (plot.count === undefined) return `${prefix} ${parts[0]}`;
+    return `${prefix} [${parts.join(', ')}${count > shown ? ', …' : ''}]`;
+  }
   if (plot.type === 'tuple') {
     // A tensor's values nest as the tuples that write it; a multiset of
     // them is listed like one of numbers.
@@ -1123,6 +1172,7 @@ export function plotReadout(plot: CpuPlan, env: Record<string, number>): string 
     return `${prefix} [${values.map(v => v.replace(/^[=≈] /, '')).join(', ')}${plot.values.length > 8 ? ', …' : ''}]`;
   }
   if (plot.type === 'family') {
+    if (plot.readout) return plotReadout(plot.readout, env);
     const parts = plot.members.map(m => plotReadout(m.cpu, env));
     if (parts.every(p => p !== null)) return `[${parts.slice(0, 8).join('; ')}${parts.length > 8 ? '; …' : ''}]`;
   }

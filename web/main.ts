@@ -66,6 +66,7 @@ import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
 import { CURVE_SAMPLES, type PathSampler, type RegionSampler, pathSampler, regionSampler } from '../lib/path.ts';
 import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
+import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
@@ -4462,6 +4463,8 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
       return `defines ${name}: a random variable`;
     case 'missing':
       return `defines ${name} from a data file that is not on this device`;
+    case 'multivector':
+      return `defines ${name}: a ${mvOfNode(b.value)?.quat ? 'quaternion' : 'multivector'}${quiet}`;
     case 'interval':
       return `defines ${name}: a continuous interval, one hidden parameter shared by every row that uses ${name}${quiet}`;
   }

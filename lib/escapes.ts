@@ -41,6 +41,7 @@ const SYMBOL_ESCAPES: readonly Escape[] = [
   { name: 'cdot', text: '·', description: 'Dot product (or multiplication)' },
   { name: 'otimes', text: '⊗', description: 'Outer (tensor) product: a ⊗ b' },
   { name: 'wedge', text: '∧', description: 'Wedge product: a ∧ b = a ⊗ b − b ⊗ a' },
+  { name: 'gp', text: '⟑', description: 'Geometric product: e_x ⟑ e_y = e_xy' },
   { name: 'div', text: '÷', description: 'Division' },
   { name: 'le', text: '≤', description: 'Less than or equal' },
   { name: 'leq', text: '≤', description: 'Less than or equal' },

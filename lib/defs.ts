@@ -77,6 +77,7 @@ import {
 } from './list.ts';
 import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
+import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -177,6 +178,7 @@ interface BindingDraft {
   missingData: Map<string, { message: string; list: boolean }>;
   tables: Map<string, TableDef>;
   intervals: Map<string, Expr>;
+  multivectors: Map<string, Expr>;
 }
 
 export interface TableDef {
@@ -203,6 +205,7 @@ const emptyDraft = (): BindingDraft => ({
   missingData: new Map(),
   tables: new Map(),
   intervals: new Map(),
+  multivectors: new Map(),
 });
 
 /**
@@ -459,6 +462,7 @@ const draftNameTaken = (defs: ValueDefinitions, n: string): boolean =>
   defs.points.has(n) ||
   defs.mats.has(n) ||
   defs.tensors.has(n) ||
+  defs.multivectors.has(n) ||
   defs.lists.has(n) ||
   defs.tables.has(n) ||
   defs.missingData.has(n);
@@ -1007,6 +1011,12 @@ export interface ResolveOpts {
    */
   interval?: (name: string) => Expr | undefined;
   /**
+   * The value of a name defined as a multivector (`R = e^(-t/2 e_xy)`): its
+   * internal `[mv]` node, written in wherever the name appears, as an
+   * interval is (lib/clifford.ts). Undefined for anything else.
+   */
+  multivector?: (name: string) => Expr | undefined;
+  /**
    * A function's parameters, while its body resolves: there `x` is the
    * argument, not the continuous multiset a reduction would integrate over
    * (lib/measure.ts).
@@ -1028,9 +1038,11 @@ const UNIT_VECTORS: Readonly<Record<string, readonly number[]>> = {
 
 function unitVector(name: string, opts: ResolveOpts): Expr | null {
   const axis = Object.hasOwn(UNIT_VECTORS, name) ? UNIT_VECTORS[name] : null;
+  // e_xy, e_zx, e_xyz: the blades of space, multivectors (lib/clifford.ts).
+  const blade = axis ? null : bladeByName(name);
   // (An open Σ index of that name is bound, not the vector.)
-  if (!axis || !opts.documentNames || opts.documentNames.has(name) || opts.openVars?.has(name)) return null;
-  return { kind: 'vec', items: axis.map(num) };
+  if ((!axis && !blade) || !opts.documentNames || opts.documentNames.has(name) || opts.openVars?.has(name)) return null;
+  return blade ? mvNode(blade) : { kind: 'vec', items: axis!.map(num) };
 }
 
 interface Ctx {
@@ -1142,7 +1154,8 @@ function splitNablaChain(e: Expr, ctx: Ctx): Expr | null {
   if (!first) return null; // a bare ∇: classify says to write it with parentheses
   if (first.op === '/') throw new Error('∇ needs something to act on: ∇f, ∇·F, ∇×F or ∇²f.');
   if (h.laplacian && first.glyph) throw new Error('∇² takes a scalar field: write ∇²f.');
-  if (first.glyph === 'outer' || first.glyph === 'wedge') throw new Error('∇ makes ∇f, ∇·F, ∇×F or ∇²f — not ⊗ or ∧.');
+  if (first.glyph === 'outer' || first.glyph === 'wedge' || first.glyph === 'geometric')
+    throw new Error('∇ makes ∇f, ∇·F, ∇×F or ∇²f — not ⊗, ∧ or ⟑.');
   let end = at + 2;
   while (end < factors.length && !factors[end].glyph) end++;
   let operand = first.e;
@@ -1856,6 +1869,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
       return (
         ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ??
         ctx.opts.interval?.(e.name) ??
+        ctx.opts.multivector?.(e.name) ??
         unitVector(e.name, ctx.opts) ??
         e
       );
@@ -2107,6 +2121,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     comps: n => compsOf(defs, n),
     documentNames: new Set(byName.keys()),
     interval: n => defs.intervals.get(n),
+    multivector: n => defs.multivectors.get(n),
   };
 
   const parsed = new Map<string, Expr>();
@@ -2142,6 +2157,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       const scope: ResolveOpts = {
         ...ropts,
         interval: n => (d.params.includes(n) ? undefined : ropts.interval?.(n)),
+        multivector: n => (d.params.includes(n) ? undefined : ropts.multivector?.(n)),
         documentNames: ropts.documentNames && new Set([...ropts.documentNames, ...d.params]),
         params: new Set(d.params),
       };
@@ -2332,6 +2348,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           );
         } catch {
           e = lowerObjects(resolved, defs, ropts, true);
+        }
+        // `R = e^(-t/2 e_xy)`, `q = quat(1, 2, 3, 4)`: a multivector, written
+        // into every row that names it.
+        if (mvOfNode(e)) {
+          defs.multivectors.set(d.name, e);
+          continue;
         }
         // `C = mean((P - m) ⊗ (P - m))`: a reduction over a multiset of
         // tensors is one tensor, named as a matrix when it is square.
@@ -3028,6 +3050,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       defs.fns.has(name) ||
       defs.mats.has(name) ||
       defs.tensors.has(name) ||
+      defs.multivectors.has(name) ||
       defs.lists.has(name) ||
       defs.tables.has(name) ||
       defs.missingData.has(name);
@@ -3083,6 +3106,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         defs.fns.delete(name);
         defs.mats.delete(name);
         defs.tensors.delete(name);
+        defs.multivectors.delete(name);
         defs.lists.delete(name);
         defs.tables.delete(name);
         defs.missingData.delete(name);
@@ -3099,6 +3123,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         ...[...defs.fns].map(([name, fn]): [string, Expr[], string[]] => [name, [fn.body], fn.params]),
         ...[...defs.mats].map(([name, matrix]): [string, Expr[], string[]] => [name, matrix.flat(), []]),
         ...[...defs.tensors].map(([name, tensor]): [string, Expr[], string[]] => [name, [...tensor.data], []]),
+        ...[...defs.multivectors].map(([name, value]): [string, Expr[], string[]] => [name, [value], []]),
         ...[...defs.lists].map(([name, value]): [string, Expr[], string[]] => [name, [value], []]),
         ...[...defs.tables.keys()].map((name): [string, Expr[], string[]] => [name, [], []]),
       ];
@@ -3172,6 +3197,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   for (const [name, matrix] of defs.mats) env.bind(name, { tag: 'matrix', matrix });
   for (const [name, tensor] of defs.tensors) env.bind(name, { tag: 'tensor', tensor });
   for (const [name, value] of defs.intervals) env.bind(name, { tag: 'interval', value });
+  for (const [name, value] of defs.multivectors) env.bind(name, { tag: 'multivector', value });
   for (const [name, table] of defs.tables)
     env.bind(name, { tag: 'table', table, unavailable: defs.missingData.get(name) });
   for (const [name, value] of defs.lists)

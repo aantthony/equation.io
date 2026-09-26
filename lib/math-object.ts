@@ -170,6 +170,9 @@ export type MathObject =
       readonly shape?: readonly number[];
       readonly count?: number;
       readonly length?: number;
+      /** The values are a multivector's coefficients, by blade bitmask, read
+       *  out as `1 + 2 e_xy` (or in i, j, k) rather than as a tuple. */
+      readonly blades?: { readonly dim: 2 | 3; readonly quat?: true };
     }
   // `constant`: the row reads like a slider named e, pi or tau (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
@@ -185,6 +188,9 @@ export type MathObject =
       readonly kind: 'family';
       readonly members: readonly Classified[];
       readonly shared?: { readonly classified: Classified; readonly index: string };
+      /** What the row reads out while its members draw: a multivector's
+       *  value beside its grade glyphs (lib/mv-glyph.ts). */
+      readonly readout?: Classified;
     };
 
 export interface Classified {

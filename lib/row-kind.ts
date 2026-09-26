@@ -33,6 +33,7 @@ export interface KindNames {
   intervals?: { has(name: string): boolean };
   mats?: { has(name: string): boolean };
   tensors?: { has(name: string): boolean };
+  multivectors?: { has(name: string): boolean };
   lists?: { has(name: string): boolean };
   points?: { has(name: string): boolean };
 }
@@ -104,6 +105,7 @@ function constKind(name: string, names: KindNames): string {
   if (names.intervals?.has(name)) return 'interval';
   if (names.mats?.has(name)) return 'matrix';
   if (names.tensors?.has(name)) return 'tensor';
+  if (names.multivectors?.has(name)) return 'multivector';
   if (names.points?.has(name)) return 'point';
   if (names.lists?.has(name)) return 'list';
   return 'const';

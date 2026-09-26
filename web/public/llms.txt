@@ -917,6 +917,36 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     is the covariance matrix, and `C (x, y)` applies it.
   - A bivector `a ∧ b` of 3D vectors, named or written out, generates the
     rotation in their plane: `e^(t a ∧ b) P`.
+- Multivectors (geometric algebra, Cl(2) and Cl(3), Euclidean): `a ⟑ b`
+  (type `\gp`, or `gp(a, b)`) is the geometric product, `e_x ⟑ e_y` is the
+  bivector `e_xy`, and `e_x ⟑ e_x` is 1. The blades are built in, like
+  `e_x`: `e_xy`, `e_yz`, `e_zx` (and any reordering, `e_yx = −e_xy`) and
+  `e_xyz`; they are always 3D, while `(1, 0) ⟑ (0, 1)` is the plane's own
+  e_xy. Once one side is a multivector, juxtaposition is the geometric
+  product too (`R v rev(R)`), `∧` is the outer product, and `+`, `−`, whole
+  powers (`A^-1`, `A^3`) and `e^A` work; two plain vectors still need `⟑`
+  (`e_x e_y` stays an error, `e_x ∧ e_y` the tensor wedge). Dividing by a
+  multivector is refused — `a/2 e_xy` would read as `a/(2 e_xy)` — so write
+  `(a/2) e_xy` or `e_xy a/2`, and `A B^-1`. `rev(A)` reverses, `conj(A)` is
+  the Clifford conjugate, `dual(A)` is `A I⁻¹` (`dual(e_xy)` is `e_z`),
+  `grade(A, k)` is the grade-k part, and `|A|` its size. A row that is a
+  multivector draws it grade by grade — its vector an arrow, its bivector an
+  oriented disc of that area in its plane with an arrow round the rim, its
+  trivector a cube of that volume — and reads out `= 1 + 2 e_xy`. A result
+  written only as a number or a vector is that number or vector
+  (`grade(R ⟑ v ⟑ rev(R), 1)` is a point), and a row may name a multivector
+  (`R = e^(-(t/2) e_xy)`). Rotors: `e^(-(th/2) B)` for a unit bivector B
+  turns by th in B's plane, `R v rev(R)` applies it, and `rotate(X, R)` turns
+  a point, a list of points or a figure by it: `rotate(hull(P), R)`.
+- Quaternions: `quat(w, x, y, z)` (or `quat(w, v)` with v a 3D vector) is
+  w + x i + y j + z k, read out that way. They are the even multivectors of
+  space (i = e_zy, j = e_xz, k = e_yx), so they multiply by juxtaposition
+  (`quat(0,1,0,0) quat(0,0,1,0)` is `k`), invert with `q^-1`, conjugate
+  with `conj(q)`, and the unit quaternion `quat(cos(th/2), sin(th/2) n)`
+  turns by th about the unit axis n: `rotate(P, q)`. `slerp(q1, q2, s)`
+  runs the shorter arc between two rotations at constant speed, s from 0 to
+  1: `rotate(hull(P), slerp(q1, q2, (1 - cos(t))/2))` rocks a solid between
+  two orientations.
 - Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of

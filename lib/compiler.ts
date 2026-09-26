@@ -24,7 +24,7 @@ export interface GpuGrid {
   params: string[];
 }
 export type CpuPlan =
-  | { type: 'family'; members: Array<{ cls: Classified; cpu: CpuPlan }> }
+  | { type: 'family'; members: Array<{ cls: Classified; cpu: CpuPlan }>; readout?: CpuPlan }
   | { type: 'implicit2d'; residual: Expr; equation: Expr; levels?: CpuGrid }
   | { type: 'implicit3d'; residual: Expr; equation: Expr; heightmap?: Expr }
   | { type: 'ineq2d'; constraints: Array<{ residual: Expr; strict: boolean }> }
@@ -80,7 +80,14 @@ export type CpuPlan =
   | { type: 'expect'; rv: string }
   | { type: 'prob'; body: Expr; shade?: { rv: string } & ProbBounds }
   | { type: 'value'; expr: Expr; shade?: IntShade }
-  | { type: 'tuple'; values: Expr[]; shape?: readonly number[]; count?: number; length?: number }
+  | {
+      type: 'tuple';
+      values: Expr[];
+      shape?: readonly number[];
+      count?: number;
+      blades?: { readonly dim: 2 | 3; readonly quat?: true };
+      length?: number;
+    }
   | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true };
 
 export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & (
@@ -333,6 +340,7 @@ export function compileCpu(classified: Classified): CpuPlan {
         shape: object.shape,
         count: object.count,
         length: object.length,
+        ...(object.blades ? { blades: object.blades } : {}),
       };
     case 'note':
       return {
@@ -343,7 +351,11 @@ export function compileCpu(classified: Classified): CpuPlan {
         ...(object.identity && { identity: true as const }),
       };
     case 'family':
-      return { type: 'family', members: object.members.map(cls => ({ cls, cpu: compileCpu(cls) })) };
+      return {
+        type: 'family',
+        members: object.members.map(cls => ({ cls, cpu: compileCpu(cls) })),
+        ...(object.readout ? { readout: compileCpu(object.readout) } : {}),
+      };
   }
 }
 

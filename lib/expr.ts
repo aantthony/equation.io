@@ -47,15 +47,15 @@ export interface Column {
 export type Expr = ExprNode & { axes?: readonly Axis[]; origin?: number };
 
 /** The products written with their own glyph (see the bin node). */
-export type ProductGlyph = 'dot' | 'cross' | 'outer' | 'wedge';
+export type ProductGlyph = 'dot' | 'cross' | 'outer' | 'wedge' | 'geometric';
 
 type ExprNode =
   | { readonly kind: 'num'; readonly value: number }
   | { readonly kind: 'var'; readonly name: string }
   /** `glyph` records a product written `·`/`⋅` ('dot'), `×` ('cross'),
-   *  `⊗` ('outer') or `∧` ('wedge'): between two vectors or tensors
-   *  lowerGeom reads it as that product; between numbers it is plain
-   *  multiplication. */
+   *  `⊗` ('outer'), `∧` ('wedge') or `⟑` ('geometric'): between two
+   *  vectors, tensors or multivectors lowerGeom reads it as that product;
+   *  between numbers it is plain multiplication. */
   | {
       readonly kind: 'bin';
       readonly op: '+' | '-' | '*' | '/' | '^';
@@ -206,6 +206,16 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'outer',
     'wedge',
     'contract',
+    // Multivectors take vectors whole: gp((1, 0), (0, 1)) is e_xy.
+    'gp',
+    'rev',
+    'grade',
+    'dual',
+    'slerp',
+    // A matrix or a map, whole: action(((1, 1), (0, 1))), jacobian((x y, x + y)).
+    'action',
+    'jacobian',
+    'hessian',
     // sort((s, sin(s)), s): the points to order, then their key.
     'sort',
   ]);
@@ -293,6 +303,13 @@ export const FUNCTIONS = new Set([
   'outer',
   'wedge',
   'contract',
+  // Multivectors and quaternions (see clifford.ts), lowered the same way.
+  'gp',
+  'rev',
+  'grade',
+  'dual',
+  'quat',
+  'slerp',
   // Not real functions: Σ/Π/∫ binders and the ∇ operators, expanded
   // symbolically by resolveExpr.
   'sum',
@@ -352,6 +369,15 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'wedge',
   'contract',
   'interval',
+  'gp',
+  'rev',
+  'grade',
+  'dual',
+  'quat',
+  'slerp',
+  'action',
+  'jacobian',
+  'hessian',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
@@ -501,7 +527,7 @@ const asVecOrExpr = (n: PNode): Expr =>
 const asBin = (op: '+' | '-' | '*' | '/' | '^') =>
   BinaryInfix<PNode>((a, b) => bin(op)(asVecOrExpr(a), asVecOrExpr(b)));
 
-/** `·`, `×`, `⊗` and `∧`: multiplication that remembers its glyph (see the bin node). */
+/** `·`, `×`, `⊗`, `∧` and `⟑`: multiplication that remembers its glyph (see the bin node). */
 const asProduct = (glyph: ProductGlyph) =>
   BinaryInfix<PNode>((a, b): Expr => ({ kind: 'bin', op: '*', a: asVecOrExpr(a), b: asVecOrExpr(b), glyph }));
 
@@ -636,6 +662,7 @@ const ops = operators<PNode>({
   '·': asProduct('dot'),
   '⋅': asProduct('dot'),
   '⊗': asProduct('outer'),
+  '⟑': asProduct('geometric'),
   '∧': asProduct('wedge'),
   '/': asBin('/'),
   '÷': asBin('/'),
@@ -736,7 +763,7 @@ for (const k of ['<=', '≤', '>', '>=', '≥']) ops[k].prec = ops['<'].prec;
 // Unicode spellings share their operator's level (each key otherwise gets its
 // own), so 5 − 3 - 1 and 5 - 3 − 1 both associate left: ((5 − 3) - 1).
 ops['−'].prec = ops['-'].prec;
-for (const k of ['×', '·', '⋅', '⊗', '∧']) ops[k].prec = ops['*'].prec;
+for (const k of ['×', '·', '⋅', '⊗', '∧', '⟑']) ops[k].prec = ops['*'].prec;
 ops['÷'].prec = ops['/'].prec;
 ops['≠'].prec = ops['!='].prec;
 
