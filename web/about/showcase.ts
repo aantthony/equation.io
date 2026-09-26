@@ -503,7 +503,7 @@ export const SHOWCASE: ShowcaseItem[] = [
     slug: 'jacobian-glyphs',
     title: 'Matrix fields as glyphs',
     blurb:
-      'A 2×2 matrix in x and y draws the image of a small circle at every point. A conformal map’s Jacobian is circles everywhere, its spoke turning twice as fast as the angle.',
+      'A 2×2 matrix in x and y draws the image of a small circle at every point. A conformal map’s Jacobian is circles everywhere, scaled by |f′| and turned by arg f′: for z² the spokes point straight out from the origin.',
     eqs: ['jacobian((x^2 - y^2, 2 x y)/4)'],
     group: 'Tensors, quaternions & geometric algebra',
     view: { span: 9 },

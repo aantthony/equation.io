@@ -554,6 +554,12 @@ function lowerMv(e: Expr, lo: (n: Expr) => LV): Multivector | null {
         const b = of(e.b);
         if (!a && !b) return null;
         if (e.glyph === 'dot' || e.glyph === 'cross' || e.glyph === 'outer') {
+          // grade(a ⟑ b, 1) · (1, 0): a multivector that is only a number or a
+          // vector takes these as that number or vector does, and 2 · e_xy
+          // multiplies as 2 · 3 does.
+          if (plainValue(a) && plainValue(b)) return null;
+          const n = e.glyph === 'dot' && !(a && b) ? lo(a ? e.b : e.a) : null;
+          if (n && !n.vec) return mvScale((a ?? b)!, n.e);
           const sign = e.glyph === 'dot' ? '·' : e.glyph === 'cross' ? '×' : '⊗';
           throw new Error(`${sign} does not take a multivector — ⟑ is the geometric product and ∧ the outer product.`);
         }
@@ -562,8 +568,18 @@ function lowerMv(e: Expr, lo: (n: Expr) => LV): Multivector | null {
           case '+':
           case '-':
             return mvAdd(any(e.a), any(e.b), e.op === '-');
-          case '*':
+          case '*': {
+            // J grade(A, 1): a matrix applies to a multivector that is only a
+            // vector, as J v does — lower() takes both as the values they are.
+            if (!(a && b) && plainValue(a ?? b)) {
+              try {
+                return geometric(any(e.a), any(e.b));
+              } catch {
+                return null;
+              }
+            }
             return geometric(any(e.a), any(e.b));
+          }
           case '/': {
             // Dividing by a multivector is refused, as by a matrix: a/2 e_xy
             // reads as a/(2 e_xy), and e_xy⁻¹ = −e_xy would quietly flip it.
@@ -630,8 +646,36 @@ function lowerMv(e: Expr, lo: (n: Expr) => LV): Multivector | null {
         return null;
     }
   })();
-  mvSeen.set(e, found);
-  return found;
+  const value = found && sandwiched(e, found, any);
+  mvSeen.set(e, value);
+  return value;
+}
+
+/**
+ * R p rev(R), for R a rotor or quaternion (or n p rev(n), n a vector): the
+ * point p turned (or reflected), which is a vector. Its trivector part is
+ * zero, but as products that cancel rather than a written 0, so without
+ * this it would not read as a point. Any other product comes back as it is.
+ */
+function sandwiched(e: Expr, m: Multivector, any: (n: Expr) => Multivector): Multivector {
+  const product = (n: Expr): n is Expr & { kind: 'bin' } =>
+    n.kind === 'bin' && n.op === '*' && (!n.glyph || n.glyph === 'geometric');
+  const factors =
+    e.kind === 'call' && e.name === 'gp' && e.args.length === 3
+      ? e.args
+      : product(e) && product(e.a)
+        ? [e.a.a, e.a.b, e.b]
+        : product(e) && product(e.b)
+          ? [e.a, e.b.a, e.b.b]
+          : null;
+  const back = factors?.[2];
+  if (!factors || back?.kind !== 'call' || back.name !== 'rev' || back.args.length !== 1) return m;
+  const r = any(factors[0]);
+  const p = gradesOf(any(factors[1]));
+  const parities = new Set([...gradesOf(r)].map(g => g % 2));
+  const same = (a: Multivector, b: Multivector) => a.dim === b.dim && JSON.stringify(a.data) === JSON.stringify(b.data);
+  if (parities.size !== 1 || [...p].some(g => g !== 1) || !same(r, any(back.args[0]))) return m;
+  return gradePart(m, 1);
 }
 
 /** Any value read as a multivector: a number is grade 0, a point grade 1. */
@@ -650,10 +694,17 @@ function anyMv(n: Expr, lo: (n: Expr) => LV): Multivector {
 /** A multivector where a number or a point is wanted: fine when that is all
  *  it is written as (e_x ⟑ e_x is 1, grade(A, 1) a vector), an error else. */
 function mvValue(m: Multivector): LV {
+  if (!plainValue(m)) throw new Error(NOT_A_MV_VALUE);
+  if (!gradesOf(m).has(1)) return sc(m.data[0]);
+  return vc(...Array.from({ length: m.dim }, (_, k) => m.data[1 << k]));
+}
+
+/** Whether a multivector — or a side that is none — is only a number or
+ *  only a vector, so mvValue can take it as that. */
+function plainValue(m: Multivector | null): boolean {
+  if (!m) return true;
   const grades = gradesOf(m);
-  if (grades.size === 0 || (grades.size === 1 && grades.has(0))) return sc(m.data[0]);
-  if (grades.size === 1 && grades.has(1)) return vc(...Array.from({ length: m.dim }, (_, k) => m.data[1 << k]));
-  throw new Error(NOT_A_MV_VALUE);
+  return grades.size === 0 || (grades.size === 1 && (grades.has(0) || grades.has(1)));
 }
 
 /**
@@ -1362,12 +1413,13 @@ function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsL
     return actionNode(m);
   }
   // A multivector on a row of its own draws by grade (docs/clifford.md); one
-  // that is only a number or a vector lowers as that number or vector.
+  // that is only a number or a vector lowers as that number or vector. A
+  // quaternion stays one, so q1 = quat(1, 0, 0, 0) still turns rotate(P, q1).
   if (mvIn(e)) {
     const m = lowerMv(e, n => lower(n, getComps, getMat, isList));
     if (m) {
       const grades = gradesOf(m);
-      if (grades.size > 1 || [...grades].some(g => g >= 2)) return mvNode(m);
+      if (m.quat || grades.size > 1 || [...grades].some(g => g >= 2)) return mvNode(m);
     }
   }
   // A matrix or tensor with nothing to act on is drawn as its values

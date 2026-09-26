@@ -233,6 +233,20 @@ function nestedSpecial(e: Expr, isRoot = false): string | undefined {
   }
 }
 
+/** Glyphs drawn with the value they picture read out beside them. The row
+ *  animates and follows sliders by its value, not only by the parts drawn:
+ *  the scalar part of cos(t) + e_xyz has no glyph but still changes. */
+function withReadout(drawn: Classified, readout: Classified): { cls: Classified } {
+  return {
+    cls: {
+      ...drawn,
+      animated: drawn.animated || readout.animated,
+      params: [...new Set([...drawn.params, ...readout.params])].sort(),
+      object: { ...(drawn.object as MathObject & { kind: 'family' }), readout },
+    },
+  };
+}
+
 /**
  * `f(x,y) = c` (either way around) where c is a defined constant: build the
  * level-set family of f so the plot can render the whole contour stack.
@@ -608,9 +622,7 @@ function classifyLowered(
       fields,
       timeDerivative,
     ).cls;
-    return {
-      cls: { ...drawn, object: { ...(drawn.object as MathObject & { kind: 'family' }), readout: readout.cls } },
-    };
+    return withReadout(drawn, readout.cls);
   }
 
   // A multivector on a row of its own draws grade by grade, and reads out its
@@ -632,14 +644,11 @@ function classifyLowered(
       ...(expr.kind === 'list' && { count: mvs.length }),
     });
     if (expr.kind === 'list') return readout;
+    // A quaternion that is only a number (i i = -1) has nothing to draw.
     const glyphs = multivectorGlyphs(mvs[0]);
+    if (!glyphs.length) return readout;
     const drawn = classifyLowered({ kind: 'family', members: glyphs }, defined, fields, timeDerivative).cls;
-    return {
-      cls: {
-        ...drawn,
-        object: { ...(drawn.object as MathObject & { kind: 'family' }), readout: readout.cls },
-      },
-    };
+    return withReadout(drawn, readout.cls);
   }
 
   // A matrix or tensor on a row of its own — or a multiset of them — has no

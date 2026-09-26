@@ -297,7 +297,12 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         'bivector: an oriented area',
         'a = (2, 0); b = (1, 1.5); vector(a); vector(b); polygon((0, 0), a, a + b, b); grade(a ⟑ b, 2)',
       ],
-      ['geometric product = dot + wedge', 'a = (2, 0.5); b = (0.5, 1.5); vector(a); vector(b); a ⟑ b'],
+      // b ⟑ a = a · b + b ∧ a is a rotor turning twice the angle from a to
+      // b: it sends a to its mirror image across b.
+      [
+        'geometric product: twice the turn from a to b',
+        'a = (2, 0.5); b = (0.5, 1.5); vector(a); vector(b); b ⟑ a; vector(rotate(a, b ⟑ a))',
+      ],
       [
         'a rotor turns a vector',
         'camera(-pi/3, 0.6, 5); R = e^(-(t/2) e_xy); p = (1, 0, 0.8); vector(p); vector(rotate(p, R)); R',

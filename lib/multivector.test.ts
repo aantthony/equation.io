@@ -112,6 +112,16 @@ describe('drawing', () => {
   it('reads out a multiset of multivectors', () => {
     expect(readout(['[1, 2] e_xy'])).toBe('= [e_xy, 2 e_xy]');
   });
+  it('animates and follows sliders by its value, not only by what it draws', () => {
+    expect(row(['cos(t) + e_xyz']).r.cls!.animated).toBe(true);
+    expect(row(['a = 1', 'a + e_xyz']).r.cls!.params).toEqual(['a']);
+  });
+  it('takes ·, ×, ⊗ and matrices as the number or vector it reduces to', () => {
+    expect(readout(['grade(e_xy ⟑ e_x, 1) · (0, 1, 0)'])).toBe('= -1');
+    expect(point(['M = ((0, -1, 0), (1, 0, 0), (0, 0, 1))', 'M grade(e_xy ⟑ e_x, 1)'])).toEqual([1, 0, 0]);
+    expect(readout(['2 · e_xy'])).toBe('= 2 e_xy');
+    expect(error(['e_xy · e_x'])).toMatch(/· does not take a multivector/);
+  });
   it('has no picture in x or u', () => {
     expect(error(['x e_xy'])).toMatch(/no picture yet/);
   });
@@ -122,6 +132,13 @@ describe('rotors', () => {
     expect(point(['R = e^(-(pi/4) e_xy)', 'grade(R ⟑ e_x ⟑ rev(R), 1)'])).toEqual([0, 1, 0]);
     expect(point(['R = e^(-(pi/4) e_xy)', 'R e_x rev(R)'])).toEqual([0, 1, 0]);
     expect(point(['R = e^(-(pi/4) e_xy)', 'rotate((1, 0, 0), R)'])).toEqual([0, 1, 0]);
+    // Any point, whose trivector part only cancels, not just an axis.
+    expect(point(['R = e^(-(pi/4) e_xy)', 'p = (1, 2, 3)', 'R p rev(R)'])).toEqual([-2, 1, 3]);
+    expect(point(['R = e^(-(pi/4) e_xy)', 'R ⟑ (1, 2, 3) ⟑ rev(R)'])).toEqual([-2, 1, 3]);
+    expect(point(['q = quat(1, 1, 0, 0)', 'gp(q, (1, 2, 3), rev(q))'])).toEqual([2, -6, 4]);
+    // b ⟑ a turns twice the angle from a to b: a lands on its mirror across b.
+    expect(point(['a = (2, 0.5)', 'b = (0.5, 1.5)', 'rotate(a, b ⟑ a)'])).toEqual([-1.3, 1.6]);
+    expect(row(['R = e^(-(t/2) e_xy)', 'p = (1, 2, 3)', 'vector(R p rev(R))']).r.cls!.object.kind).toBe('figure');
     expect(readout(['e^(-(pi/4) e_xy)'])).toBe('≈ 0.707107 - 0.707107 e_xy');
   });
   it('turn figures and lists of points', () => {
@@ -144,6 +161,12 @@ describe('quaternions', () => {
     expect(readout(['i1 = quat(0, 1, 0, 0)', 'i1 i1'])).toBe('= -1');
     expect(readout(['q = quat(1, 2, 3, 4)', 'q^-1 q'])).toBe('= 1');
     expect(readout(['conj(quat(1, 2, 3, 4))'])).toBe('= 1 - 2i - 3j - 4k');
+  });
+  it('stay quaternions when named, however little they turn', () => {
+    expect(point(['q1 = quat(1, 0, 0, 0)', 'rotate((1, 0, 0), q1)'])).toEqual([1, 0, 0]);
+    expect(error(['q1 = quat(1, 0, 0, 0)', 'rotate((1, 0), q1)'])).toMatch(/give the point a z/);
+    expect(row(['c = quat(-0.8, 0, 0, 0)', 'qjulia(c)']).r.cpu!.type).toBe('implicit3d');
+    expect(readout(['q1 = quat(2, 0, 0, 0)', 'q1 + 1'])).toBe('= 3');
   });
   it('turn about their axis', () => {
     expect(point(['th = pi/2', 'q = quat(cos(th/2), sin(th/2) (0, 0, 1))', 'rotate((1, 0, 0), q)'])).toEqual([0, 1, 0]);
