@@ -1275,7 +1275,7 @@ function lowerCond(e: Expr, ctx: Ctx): Expr {
   // Comparisons are the symbolic path: a mask is per-element structure (and
   // chains nest, so a chain's inner comparison is a condition too), so a
   // typed array expands here.
-  const l = expand(lowerCond(e.l, ctx), ctx);
+  const l = expand(e.l.kind === 'ineq' && e.l.grouped ? lower(e.l, ctx) : lowerCond(e.l, ctx), ctx);
   const r = expand(lower(e.r, ctx), ctx);
   if (e.kind === 'ineq' && (isList(l) || isList(r))) {
     return zipN([l, r], ([a, b]) => ({ kind: 'ineq', op: e.op, l: a, r: b }), ctx);
@@ -1283,7 +1283,7 @@ function lowerCond(e: Expr, ctx: Ctx): Expr {
   if (isList(l) || isList(r)) {
     throw new Error('Cannot put a list in an equation — to keep the members equal to a value, write L == 2.');
   }
-  return e.kind === 'eq' ? { kind: 'eq', l, r } : { kind: 'ineq', op: e.op, l, r };
+  return e.kind === 'eq' ? { kind: 'eq', l, r } : { ...e, l, r };
 }
 
 /**
@@ -1311,7 +1311,9 @@ function keptMembers(e: Expr, mask: Expr & { kind: 'list' }, ctx: Ctx): Expr {
       const hit = find(c, axes);
       if (hit) return hit;
     }
-    if (n.kind === 'ineq' || n.kind === 'eq' || n.kind === 'eqtest') return null;
+    // A comparison is no multiset of its own, unless written in parentheses
+    // as an operand: its kept members are, ([1,2,3] > 1) > 1.
+    if ((n.kind === 'ineq' && !n.grouped) || n.kind === 'eq' || n.kind === 'eqtest') return null;
     // A member column (P.x) belongs to the list it is read from.
     const dot = n.kind === 'var' ? n.name.lastIndexOf('.') : -1;
     if (n.kind === 'var' && dot > 0) {

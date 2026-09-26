@@ -1372,7 +1372,7 @@ export function substIdx(e: Expr, idx: string, val: Expr): Expr {
     case 'eq':
       return { kind: 'eq', l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'ineq':
-      return { kind: 'ineq', op: e.op, l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
+      return { ...e, l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'vec':
       return { kind: 'vec', items: e.items.map(a => substIdx(a, idx, val)) };
     case 'list':
@@ -1447,7 +1447,7 @@ export function foldNums(e: Expr, calls = false): Expr {
     case 'eq':
       return { kind: 'eq', l: fold(e.l), r: fold(e.r) };
     case 'ineq':
-      return { kind: 'ineq', op: e.op, l: fold(e.l), r: fold(e.r) };
+      return { ...e, l: fold(e.l), r: fold(e.r) };
     case 'vec':
       return { kind: 'vec', items: e.items.map(fold) };
     case 'list':
@@ -2019,7 +2019,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'eq':
       return { kind: 'eq', l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'ineq':
-      return { kind: 'ineq', op: e.op, l: rx(e.l, ctx), r: rx(e.r, ctx) };
+      return { ...e, l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'vec':
       return { kind: 'vec', items: e.items.map(x => rx(x, ctx)) };
     case 'list':

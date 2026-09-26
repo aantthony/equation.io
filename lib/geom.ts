@@ -926,7 +926,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       const r = lo(e.r);
       if (l.vec || r.vec) throw new Error('Points cannot be compared — compare |A - B| instead.');
       if (l.e === e.l && r.e === e.r) return sc(e);
-      return sc({ kind: 'ineq', op: e.op, l: l.e, r: r.e });
+      return sc({ ...e, l: l.e, r: r.e });
     }
     case 'vec': {
       const items = e.items.map(lo);

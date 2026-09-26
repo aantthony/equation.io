@@ -816,6 +816,14 @@ describe('§5 a comparison keeps the members it holds for', () => {
     expect(value(['count(0 < x < 1)'])).toBeCloseTo(1, 9);
     expect(last(['total(x^2 + y^2 < 1)']).error).toMatch(/use count/);
   });
+  it('in parentheses is an operand, not a link of a chain', () => {
+    expect(multiset(['([1,2,3] > 1) > 1'])).toEqual([2, 3]);
+    expect(multiset(['([1,2,3] > 1) > 2'])).toEqual([3]);
+    expect(multiset(['[1,2,3] > 1 > 1'])).toEqual([]);
+    expect(multiset(['L = [1,2,3]', '(L^2 > 1) < 3'])).toEqual([2]);
+    expect(multiset(['L = [1,2,3]', '1 < (L > 1)'])).toEqual([2, 3]);
+    expect(last(['(0 < y) < x']).error).toBeUndefined();
+  });
   it('stays a condition inside a condition, and a family with x', () => {
     expect(multiset(['L = [1,2,3]', 'L[L < 3]'])).toEqual([1, 2]);
     expect(last(['a = [1,2]', 'y < a x']).cpu?.type).toBe('family');

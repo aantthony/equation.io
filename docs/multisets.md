@@ -542,6 +542,11 @@ recorded so they can be reviewed and reversed. Progress notes live in
   is pairs); where that fails too, an error points at `L[…]`. A text
   comparison keeps text (`c.city == "NYC"`), which has no picture, so the
   row says to count it or choose another column by it.
+- **Parentheses make a comparison an operand.** `([1,2,3] > 1) > 1` is
+  `[2, 3]`: the inner comparison's kept members, compared again. Without
+  them, `[1,2,3] > 1 > 1` is a chain (`> 1` and `1 > 1`), so `[]`. Over x
+  and y a parenthesized comparison still reads as the chain, so
+  `(0 < y) < x` draws as before; its members reading is not implemented.
 - **count, total and mean take computed point lists.** `count(2 P)`,
   `count([0,1] e_x)`; `total` and `mean` of points are taken coordinate by
   coordinate (a point). `min`, `max`, `median`, `stdev` of points stay errors.

@@ -91,8 +91,11 @@ type ExprNode =
   | { readonly kind: 'hist'; readonly centers: Float64Array; readonly counts: Float64Array; readonly width: number }
   | { readonly kind: 'family'; readonly members: readonly Expr[] }
   | { readonly kind: 'eq'; readonly l: Expr; readonly r: Expr }
-  /** An inequality; chains like 0 < y < x nest left: ((0 < y) < x). */
-  | { readonly kind: 'ineq'; readonly op: IneqOp; readonly l: Expr; readonly r: Expr }
+  /** An inequality; chains like 0 < y < x nest left: ((0 < y) < x).
+   *  `grouped` marks one written in parentheses. Over a list it is an
+   *  operand — its kept members, (L > 1) > 2 — not a link of an outer chain
+   *  (list.ts lowerCond); over x and y it still reads as the chain. */
+  | { readonly kind: 'ineq'; readonly op: IneqOp; readonly l: Expr; readonly r: Expr; readonly grouped?: true }
   /** A vector literal like (2, 3) or (cos(u), sin(u), v): the whole
    *  statement, an equation side, or an operand ((A + (1, 2))/2 — lowerGeom
    *  expands 2-item operands; 3-item vectors stay top-level values). */
@@ -573,7 +576,8 @@ const ops = operators<PNode>({
     // parens turn a comma series into a vector literal like (2, 3).
     if (call) return content ?? { kind: 'series', items: [] };
     if (!content) throw new Error('Empty parentheses.');
-    return content.kind === 'series' ? seriesToVec(content.items) : content;
+    if (content.kind === 'series') return seriesToVec(content.items);
+    return content.kind === 'ineq' ? { ...content, grouped: true } : content;
   }),
   ']': closer('[', (content, call) => {
     if (!content) throw new Error('Empty list.');
