@@ -602,6 +602,9 @@ body {
   color: var(--info);
   font-size: 11px;
   font-family: ui-sans-serif, system-ui, sans-serif;
+  /* Every digit one width, so a readout that changes each frame keeps its
+     length and the rows below do not jump as it rewraps. */
+  font-variant-numeric: tabular-nums;
   padding: 0 6px 3px 28px;
 }
 

@@ -265,7 +265,12 @@ function levelFamily(e: Expr, params: readonly string[], defined: ReadonlySet<st
 export function valueReadout(value: number): string {
   if (Number.isNaN(value)) return 'undefined';
   if (!isFinite(value)) return value > 0 ? '= ∞' : '= −∞';
-  const shown = Number(value.toPrecision(6));
+  // Six significant digits, and at most six decimals: an animated readout
+  // then keeps one width (with .eq-info's tabular figures) instead of
+  // flickering between 0.0585821 and 0.600393 and rewrapping the rows below.
+  // A value under 0.001 keeps its six digits, so a small one still reads.
+  const precise = Number(value.toPrecision(6));
+  const shown = Math.abs(value) >= 1e-3 ? Number(precise.toFixed(6)) : precise;
   return `${shown === value ? '=' : '≈'} ${shown}`;
 }
 
