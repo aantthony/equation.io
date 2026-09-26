@@ -124,5 +124,24 @@ describe('llms.txt', () => {
     expect(llms).toContain('`M = ((a, 0), (0, 1))`');
     expect(readout([...M, 'det(M)'])).toBe('= [1, 2]');
     expect(analyzeRows([...M, 'M M P']).rows.at(-1)!.cpu).toMatchObject({ type: 'plist', pts: { length: 2 } });
+    // Reductions over continuous sets (measures).
+    for (const [row, info] of [
+      ['total(u^2)', '≈ 0.333333'],
+      ['count(interval(1, 3))', '= 2'],
+      ['count((u, u^2))', '= 1'],
+      ['total(exp(-x^2))', '≈ 1.77245'],
+      ['count(x)', '= ∞'],
+      ['count(x^2 + y^2 < 1)', '≈ 3.14159'],
+      ['count(x^2 + y^2 = 1)', '≈ 6.28318'],
+      ['count(x^2 = 2)', '= 2'],
+      ['count({-10 < x < 10, sin(x) = 0})', '= 7'],
+      ['total({x^2 + y^2 < 1: x y})', '= 0'],
+    ]) {
+      expect(llms, row).toContain(`\`${row}\``);
+      expect(readout([row]), row).toBe(info);
+    }
+    expect(llms).toContain('`mean({y = x^2, 0 < x < 1: y})`');
+    expect(readout(['mean({y = x^2, 0 < x < 1: y})'])).toBe('≈ 0.40998');
+    expect(analyzeRows(['count(sin(x) = 0)']).rows[0].error).toMatch(/could not all be found/);
   });
 });

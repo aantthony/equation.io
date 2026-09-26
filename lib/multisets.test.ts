@@ -634,3 +634,89 @@ describe('§4 unit vectors', () => {
     expect(last(['f(e_x) = e_x^2', 'e_x']).cls?.needs3D).toBe(true);
   });
 });
+
+describe('§5 measures', () => {
+  /** A reduction row's value, at the document's constants. */
+  const value = (rows: string[]) => multiset(rows)[0];
+
+  it('a reduction over u or an interval is an integral against length', () => {
+    expect(value(['total(u^2)'])).toBeCloseTo(1 / 3, 12);
+    expect(value(['count(u)'])).toBe(1);
+    expect(value(['mean(u)'])).toBeCloseTo(0.5, 12);
+    expect(value(['count(interval(1, 3))'])).toBe(2);
+    expect(value(['r = interval(1, 3)', 'total(r)'])).toBeCloseTo(4, 12);
+    expect(value(['r = interval(1, 3)', 'mean(r)'])).toBeCloseTo(2, 12);
+    expect(value(['total(u v)'])).toBeCloseTo(0.25, 12);
+    // A parametric set carries its parameter's measure: the parabola arc
+    // (u, u²) has measure 1, not its arc length.
+    expect(value(['count((u, u^2))'])).toBe(1);
+  });
+  it('stays live with sliders, as ∫ rows do', () => {
+    const row = last(['a = 2', 'total(a u)']);
+    const object = row.cls?.object as unknown as { expr: Expr };
+    expect(evaluate(object.expr, { a: 6 })).toBeCloseTo(3, 12);
+  });
+  it('over x is over all of ℝ', () => {
+    expect(value(['total(exp(-x^2))'])).toBeCloseTo(Math.sqrt(Math.PI), 8);
+    expect(value(['count(x)'])).toBe(Infinity);
+    expect(value(['total(u exp(-x^2))'])).toBeCloseTo(Math.sqrt(Math.PI) / 2, 8);
+    expect(last(['total(x)']).error).toMatch(/diverges/);
+    expect(last(['mean(exp(-x^2))']).error).toMatch(/infinite measure/);
+    expect(last(['total(x y)']).error).toMatch(/unbounded plane/);
+  });
+  it('a region is measured by its area', () => {
+    expect(value(['count(x^2 + y^2 < 1)'])).toBeCloseTo(Math.PI, 5);
+    expect(value(['total({x^2 + y^2 < 1: x^2})'])).toBeCloseTo(Math.PI / 4, 5);
+    expect(value(['mean({x^2 + y^2 < 1: x y})'])).toBeCloseTo(0, 8);
+    // Sliders are read when the row resolves, as Σ bounds are.
+    expect(value(['a = 2', 'count(x^2 + y^2 < a)'])).toBeCloseTo(2 * Math.PI, 4);
+    // An unbounded region has infinite area.
+    expect(value(['count(y > x^2)'])).toBe(Infinity);
+    expect(value(['count(x > 0)'])).toBe(Infinity);
+    expect(last(['total(y > x^2)']).error).toMatch(/infinite measure/);
+    // On a line, a region is a length.
+    expect(value(['count(x^2 < 2)'])).toBeCloseTo(2 * Math.SQRT2, 6);
+    expect(value(['total({0 < x < 1: x^2})'])).toBeCloseTo(1 / 3, 12);
+    expect(value(['total({x > 0: exp(-x)})'])).toBeCloseTo(1, 10);
+  });
+  it('a curve is measured by its length, whatever the equation’s spelling', () => {
+    expect(value(['count(x^2 + y^2 = 1)'])).toBeCloseTo(2 * Math.PI, 4);
+    const arc = Math.sqrt(5) / 2 + Math.asinh(2) / 4;
+    expect(value(['count({y = x^2, 0 < x < 1})'])).toBeCloseTo(arc, 8);
+    expect(value(['count({2y = 2x^2, 0 < x < 1})'])).toBeCloseTo(arc, 4);
+    const graph = value(['mean({y = x^2, 0 < x < 1: y})']);
+    expect(value(['mean({2y = 2x^2, 0 < x < 1: y})'])).toBeCloseTo(graph, 4);
+    expect(value(['count(y = sin(x))'])).toBe(Infinity);
+  });
+  it('points are counted', () => {
+    expect(value(['count(x^2 = 2)'])).toBe(2);
+    expect(value(['count(x^2 = 0)'])).toBe(1);
+    expect(value(['count({x^3 - x = 0, x > 0})'])).toBe(1);
+    expect(value(['count({x^3 - x = 0, x >= 0})'])).toBe(2);
+    expect(value(['total({x^2 = 2: x^2})'])).toBeCloseTo(4, 9);
+    expect(value(['max({x^3 - x = 0: x})'])).toBe(1);
+    expect(value(['count({x^2 + y^2 = 1, y = x})'])).toBe(2);
+    expect(value(['count({-4 < x < 4, sin(x) = 0})'])).toBe(3);
+    // Infinitely many, or not all found: never a short count.
+    expect(last(['count(sin(x) = 0)']).error).toMatch(/could not all be found/);
+  });
+  it('min and max search the set', () => {
+    expect(value(['min(u^2 - u)'])).toBeCloseTo(-0.25, 10);
+    expect(value(['max(sin(5u))'])).toBeCloseTo(1, 10);
+    expect(last(['max(x)']).error).toMatch(/bounded set/);
+  });
+  it('a finite multiset in the argument keeps the list reduction', () => {
+    expect(last(['L = [1, 2, 3]', 'y = total(L x)']).error).toBeUndefined();
+    expect(value(['L = [1, 2, 3]', 'total(L)'])).toBe(6);
+  });
+  it('what is not measured yet says so', () => {
+    expect(last(['stdev(u)']).error).toMatch(/not supported yet/);
+    expect(last(['median(interval(0, 1))']).error).toMatch(/not supported yet/);
+    expect(last(['count(x^2 + y^2 + z^2 < 1)']).error).toMatch(/in space/);
+    expect(last(['count(x^2 + y^2 < 1 + t)']).error).toMatch(/cannot follow t/);
+  });
+  it('an equation condition belongs to a reduction', () => {
+    expect(last(['{y = x^2: 1}']).error).toMatch(/filter for a reduction/);
+    expect(last(['y = {x > 0, 2}']).error).toBeUndefined();
+  });
+});

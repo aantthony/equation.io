@@ -124,10 +124,15 @@ type ExprNode =
   | { readonly kind: 'str'; readonly value: string }
   /** A text column, the counterpart of `data`. Same rule: only comparisons. */
   | { readonly kind: 'text'; readonly values: readonly string[] }
-  /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
+  /**
+   * {cond: value, …, otherwise?}; conditions are inequalities, tried in order.
+   * `bare` marks a condition written without a value (`{x > 0, …}`, value 1):
+   * as a reduction's argument, `{c1, c2: f}` is f where c1 and c2 both hold,
+   * and there (only) a condition may be an equation (lib/measure.ts).
+   */
   | {
       readonly kind: 'piecewise';
-      readonly cases: ReadonlyArray<{ readonly cond: Expr; readonly value: Expr }>;
+      readonly cases: ReadonlyArray<{ readonly cond: Expr; readonly value: Expr; readonly bare?: true }>;
       readonly otherwise?: Expr;
     }
   /**
@@ -443,7 +448,11 @@ const bin =
 // open-bracket marker, and a `cond: value` piecewise part.
 type PCase = { kind: 'pcase'; cond: Expr; value: Expr };
 type POpen = { kind: 'popen'; bracket: string; call: boolean };
-type PNode = Expr | { kind: 'series'; items: Array<Expr | PCase> } | PCase | POpen;
+/** `=` beside a comma series: `{y = x^2, 0 < x < 1: y}` binds `=` loosest,
+ *  so braces re-split it into conditions (eqItems); anywhere else it is the
+ *  equation it always was (asExpr). */
+type PEq = { kind: 'peq'; l: PNode; r: PNode };
+type PNode = Expr | { kind: 'series'; items: Array<Expr | PCase> } | PCase | POpen | PEq;
 
 function asExpr(n: PNode | undefined): Expr {
   if (!n) throw new Error('Incomplete expression.');
@@ -452,8 +461,31 @@ function asExpr(n: PNode | undefined): Expr {
     throw new Error('Unexpected argument list.');
   }
   if (n.kind === 'pcase') throw new Error('A "condition: value" pair is only valid inside {…}.');
+  // Outside braces, `a = b, c` keeps its old reading: b, c is a tuple.
+  if (n.kind === 'peq') return { kind: 'eq', l: asVecOrExpr(n.l), r: asVecOrExpr(n.r) };
   if (n.kind === 'popen') throw new Error('Incomplete expression.');
   return n;
+}
+
+/** Whether `=` over these operands may be one condition among others, if
+ *  braces close around it: a comma series or a `cond: value` beside it. */
+const holdsConditions = (n: PNode): boolean => n.kind === 'pcase' || n.kind === 'peq' || n.kind === 'series';
+
+/** The comma items of `a = b` in braces: `=` joins a's last item to b's first. */
+function eqItems(n: PNode): Array<Expr | PCase> {
+  if (n.kind === 'series') return n.items;
+  if (n.kind === 'pcase') return [n];
+  if (n.kind !== 'peq') return [asExpr(n)];
+  const l = eqItems(n.l);
+  const r = eqItems(n.r);
+  const left = l[l.length - 1];
+  if (left.kind === 'pcase') throw new Error('A piecewise value cannot be an equation.');
+  const right = r[0];
+  const joined: Expr | PCase =
+    right.kind === 'pcase'
+      ? { kind: 'pcase', cond: { kind: 'eq', l: left, r: right.cond }, value: right.value }
+      : { kind: 'eq', l: left, r: right };
+  return [...l.slice(0, -1), joined, ...r.slice(1)];
 }
 
 const asVecOrExpr = (n: PNode): Expr =>
@@ -482,23 +514,27 @@ function seriesToVec(items: Array<Expr | PCase>): Expr {
 
 /** Assemble {…} content into a piecewise if it contains `cond: value` parts. */
 function bracePiecewise(content: PNode): PNode {
-  const items = content.kind === 'series' ? content.items : [content];
+  const items = content.kind === 'series' || content.kind === 'peq' ? eqItems(content) : [content];
+  if (content.kind === 'peq' && items.length === 1 && items[0].kind !== 'pcase') return asExpr(items[0]);
   // A bare condition among several parts is Desmos's `{cond, else}`: 1 where
   // it holds. Alone, {x > 0} keeps meaning the inequality itself.
-  const bare = items.length > 1 && items.some(n => n.kind === 'ineq');
+  const bare = items.length > 1 && items.some(n => n.kind === 'ineq' || n.kind === 'eq');
   if (!items.some(n => n.kind === 'pcase') && !bare) {
     return content.kind === 'series' ? seriesToVec(content.items) : content;
   }
-  const cases: Array<{ cond: Expr; value: Expr }> = [];
+  const cases: Array<{ cond: Expr; value: Expr; bare?: true }> = [];
   let otherwise: Expr | undefined;
   items.forEach((n, k) => {
-    if (n.kind === 'ineq' && items.length > 1) {
+    if ((n.kind === 'ineq' || n.kind === 'eq') && items.length > 1) {
       if (otherwise) throw new Error('The default value must come last in {…}.');
-      cases.push({ cond: n, value: num(1) });
+      cases.push({ cond: n, value: num(1), bare: true });
       return;
     }
     if (n.kind === 'pcase') {
-      if (n.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities, like x < 0.');
+      // An equation condition parses, and only a reduction accepts it
+      // (lib/measure.ts); the resolver refuses it anywhere else.
+      if (n.cond.kind !== 'ineq' && n.cond.kind !== 'eq')
+        throw new Error('Piecewise conditions must be inequalities, like x < 0.');
       if (otherwise) throw new Error('The default value must come last in {…}.');
       cases.push({ cond: n.cond, value: n.value });
     } else {
@@ -554,7 +590,11 @@ const ops = operators<PNode>({
   // Either side of '=' may be a tuple, so (x', y') = (y, -sin(x)) parses.
   // (In `sum(n = 1..N, body)` the ',' binds tighter than '=', so the rhs
   // arrives as the tuple (1..N, body); sumCall unpacks that shape.)
-  '=': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'eq', l: asVecOrExpr(a), r: asVecOrExpr(b) })),
+  '=': BinaryInfix<PNode>((a, b): PNode =>
+    holdsConditions(a) || holdsConditions(b)
+      ? { kind: 'peq', l: a, r: b }
+      : { kind: 'eq', l: asVecOrExpr(a), r: asVecOrExpr(b) },
+  ),
 
   ',': BinaryInfix<PNode>((a, b) => {
     const items = (n: PNode): Array<Expr | PCase> =>
@@ -610,7 +650,7 @@ const ops = operators<PNode>({
   '[apply]': BinaryInfix<PNode>((a, b): Expr => {
     if (a?.kind !== 'var' || !isFnName(a.name)) throw new Error('Expected a function name.');
     const name = canonicalFn(a.name);
-    if (name === 'sum' || name === 'prod') return sumCall(name, b);
+    if (name === 'sum' || name === 'prod') return sumCall(name, b?.kind === 'peq' ? asExpr(b) : b);
     if (name === 'int') return intCall(b);
     const args = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
     return { kind: 'call', name, args };
@@ -1209,7 +1249,11 @@ export function mapChildren(e: Expr, map: (child: Expr) => Expr): Expr {
     case 'piecewise':
       return {
         ...e,
-        cases: e.cases.map((_, i) => ({ cond: next[2 * i], value: next[2 * i + 1] })),
+        cases: e.cases.map((c, i) => ({
+          cond: next[2 * i],
+          value: next[2 * i + 1],
+          ...(c.bare ? { bare: c.bare } : {}),
+        })),
         otherwise: e.otherwise ? next[next.length - 1] : undefined,
       };
     case 'loop':

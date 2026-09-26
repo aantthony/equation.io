@@ -52,11 +52,14 @@ const signatures: Record<string, [string, string]> = {
   atan2: ['atan2(y, x)', 'Angle of the point (x, y)'],
   normalpdf: ['normalpdf(x, mean, sd)', 'Normal probability density'],
   normalcdf: ['normalcdf(x, mean, sd)', 'Normal cumulative probability'],
-  mean: ['mean(L)', 'Mean of a numeric list or column'],
+  mean: ['mean(L)', 'Mean of a numeric list or column; over a set, mean({y = x^2, 0 < x < 1: y})'],
   stdev: ['stdev(L)', 'Standard deviation of a numeric list'],
   median: ['median(L)', 'Median of a numeric list'],
-  total: ['total(L)', 'Sum of a numeric list'],
-  count: ['count(L)', 'Number of elements in a list'],
+  total: ['total(L)', 'Sum of a numeric list; over a continuous set an integral: total(u^2) = 1/3'],
+  count: [
+    'count(L)',
+    'Number of elements in a list; of a filter its measure: count(x^2 + y^2 < 1) = π, count(x^2 = 2) = 2',
+  ],
   hist: ['hist(L)', 'Histogram of a numeric list'],
   interval: [
     'interval(a, b)',

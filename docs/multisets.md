@@ -291,6 +291,10 @@ Checked 2026-09-26 against `lowerLists` (lib/list.ts) and the MCP validator.
 | `(u cos(2πv), u sin(2πv))` | a filled disc (phase 7; was an error) | same |
 | `a = interval(1, 2)`; `y = sin(a x)` | the region the family sweeps, searched along a per pixel (phase 7) | same |
 | `interval(0, 10)` | its density against length: height 1 over [0, 10] (phase 7) | same |
+| `total(u^2)`, `count(interval(1, 3))`, `total(exp(-x^2))` | 1/3, 2, √π: integrals against length (phase 8) | same |
+| `count(x^2 + y^2 < 1)`, `count(x^2 + y^2 = 1)`, `count(x^2 = 2)` | π, 2π, 2: area, length, points (phase 8) | same |
+| `mean({y = x^2, 0 < x < 1: y})` | the mean over the arc by length; `2y = 2x^2` agrees (phase 8) | same |
+| volume or surface area (`count(x^2 + y^2 + z^2 < 1)`) | error (phase 8 cut) | the measure |
 
 [lists-tables-plan.md](lists-tables-plan.md) still says lists of different
 lengths are an error; they have taken every combination since the axis model
@@ -514,3 +518,62 @@ recorded so they can be reviewed and reversed. Progress notes live in
   in a. The link preview steps 64 values on 8-px blocks and judges only edge
   blocks per pixel. A member narrower than a pixel that grazes between
   steps can still be missed at the tangent edge of a band.
+- **A list in a reduction keeps the list meaning** (phase 8). A reduction
+  integrates over the continuous multisets in its argument (x, y, z, u, v,
+  intervals) only when the argument holds no finite multiset. With
+  `L = [1, 2, 3]`, `y = total(L x)` stays the line y = 6x — the sum over L
+  at each x — as graphs have always used it; the strict reading (a total over
+  L × x) would make every polynomial written with `total` diverge. A
+  function's parameters are never integrated: in `f(x) = count(…)`, x is the
+  argument.
+- **`{c1, c2: f}` in a reduction is a conjunction.** As a reduction's
+  argument, conditions written before the last one without values restrict
+  together: f where c1 and c2 hold. Elsewhere `{c1, c2: f}` keeps Desmos's
+  reading (1 where c1 holds, else f where c2 does); the parser marks bare
+  conditions so the two can be told apart. Only there may a condition be an
+  equation (`{y = x^2, 0 < x < 1: y}`); elsewhere `y = x^2` as a condition is
+  an error that points at reductions. A lone filter reduces with value 1:
+  `total(x^2 + y^2 < 1)` is the area. A comparison as the value
+  (`{A: x > 0}`) is an error.
+- **How a set is measured** (phase 8). A comparison of one variable with a
+  constant (`0 < x < 1`, `u < a`) narrows that variable's range. What is left
+  decides the route. Nothing left, or one equation `y = g(x)` over a bounded
+  range of the other variable: symbolic integrals through the ∫ machinery
+  (arc length ∫ f √(1 + g'²) for the graph), so sliders stay symbolic and the
+  row is live. Anything else (a region or implicit curve in one or two
+  variables, roots) is numeric: the set is first proved bounded by interval
+  arithmetic on the far strips (R = 2⁻⁸ … 2²⁰), then measured on a quadtree of
+  depth 12 over that box (cells proved in count whole, proved out drop,
+  boundary cells by marching squares — corner values for a single open
+  comparison, an 8×8 sample for several). A cell budget (100k) steps the
+  depth down to 8 before giving up. Its sliders are read when the row
+  resolves, like Σ bounds: moving one re-resolves the row (no runtime-slider
+  fast path), and t is an error. Results are memoized per set and values.
+- **Unbounded sets.** A far strip proved inside the set (`x > 0`) makes the
+  count ∞. When neither boundedness nor a strip is proved (`y > x^2`,
+  `y = sin(x)`), the set is measured in the squares of half-size 1024 and
+  2048: growth by more than 1.5× reads as ∞, otherwise the row is an error
+  (unbounded but thin sets, like `|y| < exp(-x^2)`, are not measured). This
+  is a heuristic, not a proof. Over x alone, `total`/`mean` need ∫|f| to
+  converge (a Lebesgue integral), so `total(x)` is an error rather than 0 by
+  symmetry; `mean` over any infinite measure is an error, `count` is ∞, and
+  two unbounded variables with no filter (`total(x y)`) are an error.
+- **Counting points.** A polynomial in one variable counts its distinct real
+  roots exactly (`count(x^2 = 0)` = 1). Otherwise the roots are sought in the
+  proved box: in one variable by dense sampling and refinement
+  (lib/roots.ts; not certified, so a root narrower than the sampling can be
+  missed), in two by Krawczyk-certified subdivision, where an incomplete
+  search is an error rather than a short count (so systems beyond +, −, ×, ÷
+  and whole powers, which the certificate cannot enclose, are errors). An
+  unbounded set of roots (`sin(x) = 0`) is an error that suggests a range.
+  A curve with no sign change (`(x^2 + y^2 - 1)^2 = 0`) measures 0, as
+  marching squares sees no crossing. For points, `<` and `≤` differ.
+- **min and max** of a continuous set search a dense grid (4097 points in 1D,
+  257² in 2D) and refine by pattern search; over points they read the
+  roots' values. Over a region or curve they are errors for now, as are
+  `stdev`, `median` and `hist` of any continuous set (cut), and volumes and
+  surface areas in space (cut).
+- **A parametric set carries its parameter's measure.** `count((u, u^2))` is
+  1, the length of u's range, not the parabola's arc length; `total` and
+  `mean` of a tuple act componentwise (`mean((u, u^2))` is the point
+  (1/2, 1/3)).

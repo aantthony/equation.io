@@ -101,6 +101,135 @@ function intervalAD(e: Expr, names: string[], box: Interval[], env: Record<strin
       return bad();
   }
 }
+/** x^n for a whole n ≥ 0: even powers of an interval that holds 0 start at 0,
+ *  which repeated multiplication (x·x over [-1, 1] is [-1, 1]) loses. */
+function ipow(a: Interval, n: number): Interval {
+  if (n === 0) return [1, 1];
+  let p: Interval = a;
+  for (let i = 1; i < n; i++) p = imul(p, a);
+  if (n % 2 === 0 && a[0] < 0 && a[1] > 0) return [0, p[1]];
+  if (n % 2 === 0 && a[1] <= 0) return [p[0] < 0 ? 0 : p[0], p[1]];
+  return p;
+}
+
+/** f over [a, b] for an increasing f, rounded outward. */
+const rising = (f: (x: number) => number, a: Interval): Interval => outward(f(a[0]), f(a[1]));
+
+/** sin over [a, b]: the ends, and ±1 wherever a peak or trough falls inside. */
+function isin(a: Interval, shift = 0): Interval {
+  const lo = a[0] + shift;
+  const hi = a[1] + shift;
+  if (!(hi - lo < 2 * Math.PI)) return [-1, 1];
+  let min = Math.min(Math.sin(lo), Math.sin(hi));
+  let max = Math.max(Math.sin(lo), Math.sin(hi));
+  // Peaks at π/2 + 2πk, troughs at 3π/2 + 2πk.
+  if (Math.ceil((lo - Math.PI / 2) / (2 * Math.PI)) <= Math.floor((hi - Math.PI / 2) / (2 * Math.PI))) max = 1;
+  if (Math.ceil((lo - 1.5 * Math.PI) / (2 * Math.PI)) <= Math.floor((hi - 1.5 * Math.PI) / (2 * Math.PI))) min = -1;
+  return [Math.max(-1, nextFloat(min, false)), Math.min(1, nextFloat(max, true))];
+}
+
+/**
+ * The values `e` takes over a box, without derivatives: the enclosure a
+ * quadtree prunes by (lib/measure.ts). Wider than intervalAD's set of forms —
+ * the elementary functions a filter is usually written with — and a form it
+ * does not know encloses as the whole line, which only costs subdivision.
+ * Infinite box sides are allowed, so a strip out to ∞ can be tested too.
+ */
+export function intervalValue(
+  e: Expr,
+  names: readonly string[],
+  box: readonly Interval[],
+  env: Record<string, number>,
+): Interval {
+  const rec = (x: Expr) => intervalValue(x, names, box, env);
+  switch (e.kind) {
+    case 'num':
+      return point(e.value);
+    case 'var': {
+      const k = names.indexOf(e.name);
+      if (k >= 0) return box[k];
+      return Object.hasOwn(env, e.name) ? point(env[e.name]) : whole();
+    }
+    case 'neg':
+      return ineg(rec(e.a));
+    case 'bin': {
+      const a = rec(e.a);
+      if (e.op === '^') {
+        if (e.b.kind === 'num' && Number.isInteger(e.b.value) && Math.abs(e.b.value) <= 64) {
+          const p = ipow(a, Math.abs(e.b.value));
+          return e.b.value >= 0 ? p : idiv([1, 1], p);
+        }
+        // A fixed real power of a non-negative base rises (or falls) with it.
+        if (e.b.kind === 'num' && a[0] >= 0) {
+          const q = e.b.value;
+          const ends = [a[0] ** q, a[1] ** q];
+          return outward(Math.min(...ends), Math.max(...ends));
+        }
+        const b = rec(e.b);
+        // A constant positive base, as in 2^x: rising or falling in the power.
+        if (a[0] > 0 && a[0] === a[1] && Number.isFinite(b[0]) && Number.isFinite(b[1])) {
+          const ends = [a[0] ** b[0], a[0] ** b[1]];
+          return outward(Math.min(...ends), Math.max(...ends));
+        }
+        return whole();
+      }
+      const b = rec(e.b);
+      if (e.op === '+') return iadd(a, b);
+      if (e.op === '-') return isub(a, b);
+      if (e.op === '*') return imul(a, b);
+      return idiv(a, b);
+    }
+    case 'call': {
+      const args = e.args.map(rec);
+      const [a] = args;
+      switch (e.args.length === 1 ? e.name : '') {
+        case 'sqrt':
+          return a[1] < 0 ? whole() : rising(Math.sqrt, [Math.max(0, a[0]), a[1]]);
+        case 'exp':
+          return rising(Math.exp, a);
+        case 'ln':
+        case 'log': {
+          if (a[1] <= 0) return whole();
+          const base = e.name === 'log' ? Math.LN10 : 1;
+          return rising(x => Math.log(x) / base, [Math.max(0, a[0]), a[1]]);
+        }
+        case 'atan':
+          return rising(Math.atan, a);
+        // Steps rise too, and exactly: no rounding to widen.
+        case 'floor':
+          return [Math.floor(a[0]), Math.floor(a[1])];
+        case 'ceil':
+          return [Math.ceil(a[0]), Math.ceil(a[1])];
+        case 'round':
+          return [Math.round(a[0]), Math.round(a[1])];
+        case 'sign':
+          return [Math.sign(a[0]), Math.sign(a[1])];
+        case 'tanh':
+          return rising(Math.tanh, a);
+        case 'sinh':
+          return rising(Math.sinh, a);
+        case 'abs':
+          return a[0] >= 0 ? a : a[1] <= 0 ? ineg(a) : [0, Math.max(-a[0], a[1])];
+        case 'cosh': {
+          const ends = [Math.cosh(a[0]), Math.cosh(a[1])];
+          return outward(a[0] < 0 && a[1] > 0 ? 1 : Math.min(...ends), Math.max(...ends));
+        }
+        case 'sin':
+          return isin(a);
+        case 'cos':
+          return isin(a, Math.PI / 2);
+      }
+      if ((e.name === 'min' || e.name === 'max') && args.length >= 2) {
+        const pick = e.name === 'min' ? Math.min : Math.max;
+        return [pick(...args.map(v => v[0])), pick(...args.map(v => v[1]))];
+      }
+      return whole();
+    }
+    default:
+      return whole();
+  }
+}
+
 function determinant(m: Interval[][]): Interval {
   if (m.length === 2) return isub(imul(m[0][0], m[1][1]), imul(m[0][1], m[1][0]));
   return m[0].reduce(

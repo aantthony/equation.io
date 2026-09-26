@@ -55,6 +55,7 @@ import {
 } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { hasInterval, hiddenInterval } from './interval.ts';
+import { isReductionCall, reduceOverSet } from './measure.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { lowerGeom, lowerMatrix, lowerTensorValue, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
@@ -998,6 +999,12 @@ export interface ResolveOpts {
    * (lib/interval.ts). Undefined for anything else.
    */
   interval?: (name: string) => Expr | undefined;
+  /**
+   * A function's parameters, while its body resolves: there `x` is the
+   * argument, not the continuous multiset a reduction would integrate over
+   * (lib/measure.ts).
+   */
+  params?: ReadonlySet<string>;
 }
 
 /**
@@ -1678,9 +1685,21 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
   if (!m) throw new Error('∫ needs its variable as a dx factor: int(x^2 dx) or int[0..2] x^2 dx.');
   const v = m.v;
   const integrand = m.integrand;
-  let lo = bounds && rx(bounds[0], ctx);
-  let hi = bounds && rx(bounds[1], ctx);
+  const lo = bounds && rx(bounds[0], ctx);
+  const hi = bounds && rx(bounds[1], ctx);
   ctx.ints?.push(lo && hi && !m.residual ? { body: integrand, v, lo, hi } : null);
+  const out = integral(integrand, v, lo, hi, ctx);
+  // An enclosing integral's measure rides along: (∫ inner) · residual.
+  return m.residual ? { kind: 'bin', op: '*', a: out, b: m.residual } : out;
+}
+
+/**
+ * ∫ integrand dv from lo to hi (resolved; null bounds for the indefinite
+ * integral anchored at 0). Shared by ∫ rows and the reductions over
+ * continuous sets that become integrals (lib/measure.ts).
+ */
+function integral(integrand: Expr, v: string, lo: Expr | null, hi: Expr | null, ctx: Ctx): Expr {
+  const bounds = lo && hi;
   let loI = infOf(lo);
   let hiI = infOf(hi);
   // Normalize a downhill infinite range (int[inf..0]) to the negated uphill one.
@@ -1692,11 +1711,7 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
     if (loI === 1 || hiI === -1) return num(0); // int[inf..inf]: equal bounds
   }
   const memoKey = exprKey([v, integrand, lo, hi]);
-  const done = (out: Expr): Expr => {
-    const signed = flip ? neg(out) : out;
-    // An enclosing integral's measure rides along: (∫ inner) · residual.
-    return m.residual ? { kind: 'bin', op: '*', a: signed, b: m.residual } : signed;
-  };
+  const done = (out: Expr): Expr => (flip ? neg(out) : out);
   const hit = intMemo.get(memoKey);
   if (hit) return done(hit);
 
@@ -1884,6 +1899,21 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const body = e.args[e.args.length - 1];
         return expandInt(e.args.length === 3 ? [e.args[0], e.args[1]] : null, body, ctx);
       }
+      // A reduction over x, u, an interval or a filter is an integral against
+      // its measure (docs/multisets.md §5); over a list it lowers later.
+      if (isReductionCall(e)) {
+        const over = reduceOverSet(e.name, e.args[0], {
+          resolve: x => rx(x, ctx),
+          integrate: (body, v, lo, hi) => integral(body, v, lo, hi, ctx),
+          consts: ctx.opts.consts,
+          isList: ctx.opts.isList,
+          bound: n => !!ctx.opts.params?.has(n) || !!ctx.opts.openVars?.has(n),
+        });
+        if ('expr' in over) return over.expr;
+        // A tuple literal spreads into arguments, as legacyCallArgs does.
+        const { arg } = over;
+        return { kind: 'call', name: e.name, args: e.args[0].kind === 'vec' && arg.kind === 'vec' ? arg.items : [arg] };
+      }
       const args = legacyCallArgs(e.name, e.args).map(x => rx(x, ctx));
       const fn = getFn(e.name);
       if (fn) {
@@ -1980,6 +2010,12 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'text':
       return e;
     case 'piecewise':
+      for (const c of e.cases) {
+        if (c.cond.kind === 'eq')
+          throw new Error(
+            'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
+          );
+      }
       return {
         kind: 'piecewise',
         cases: e.cases.map(c => ({ cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
@@ -2081,6 +2117,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         ...ropts,
         interval: n => (d.params.includes(n) ? undefined : ropts.interval?.(n)),
         documentNames: ropts.documentNames && new Set([...ropts.documentNames, ...d.params]),
+        params: new Set(d.params),
       };
       let body = resolveExpr(parse(d), getFn, scope);
       if (containsRecur(body)) body = wrapRecursion(name, d.params, body);

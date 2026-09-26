@@ -40,6 +40,10 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         'curves swept over an interval',
         'view(x = -6..6, y = -2..2); a = interval(1, 2); y = sin(a x); y = sin(x); y = sin(2x)',
       ],
+      // A reduction over a filter measures the set in its own dimension:
+      // area for a region, length for a curve.
+      ['area of the unit disc', 'x^2 + y^2 < 1; count(x^2 + y^2 < 1)'],
+      ['length of a parabola arc', 'y = {0 < x < 1: x^2}; count({y = x^2, 0 < x < 1})'],
       // A recursive function runs as a loop per pixel; the region is where it
       // terminates with f >= 0.
       [

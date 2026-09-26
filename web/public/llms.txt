@@ -340,6 +340,24 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   draws its values like `u` does, against length rather than probability:
   `interval(0, 10)` is the line at height 1 over [0, 10], and
   `interval(0, 1)^2` has density 1/(2√x).
+- Reductions over continuous sets are integrals: `count` is the measure,
+  `total` the integral, `mean` their ratio. Over u, v and intervals the
+  measure is length: `total(u^2)` is 1/3, `count(interval(1, 3))` is 2,
+  `count((u, u^2))` is 1 (a parametric set carries its parameter's length).
+  Over x (all of ℝ) `total(exp(-x^2))` is √π, `count(x)` is ∞, and a total
+  that does not converge is an error. A filter is the set it keeps, measured
+  in its own dimension: `count(x^2 + y^2 < 1)` is the area π,
+  `count(x^2 + y^2 = 1)` the length 2π, `count(x^2 = 2)` the 2 roots. Reduce
+  a value over a set with `{conditions: value}`, the conditions joined by
+  "and" (only here may one be an equation): `total({x^2 + y^2 < 1: x y})`,
+  `mean({y = x^2, 0 < x < 1: y})`. The measure depends on the set, not the
+  spelling (`2y = 2x^2` agrees with `y = x^2`), and never on the view: an
+  unbounded region counts ∞, and a count of roots that cannot all be found
+  (`sin(x) = 0`) is an error — restrict it, `count({-10 < x < 10, sin(x) = 0})`.
+  `min`/`max` work over u, v and intervals and over points; `stdev`,
+  `median` and `hist` of a continuous set, sets in space (x, y, z) and totals
+  over unbounded plane regions are errors. A list in the argument keeps the
+  list reduction: with `L = [1, 2, 3]`, `y = total(L x)` is the line y = 6x.
 - `w`: the complex plane point x + iy. A complex-valued expression in `w`
   (e.g. `ln(w-2) - ln(w+2)`) draws field lines and equipotentials. Wrapping it
   in `domain(…)` or `conformal(…)` picks a different view of the same function.
