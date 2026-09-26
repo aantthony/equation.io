@@ -960,7 +960,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   turns by th about the unit axis n: `rotate(P, q)`. `slerp(q1, q2, s)`
   runs the shorter arc between two rotations at constant speed, s from 0 to
   1: `rotate(hull(P), slerp(q1, q2, (1 - cos(t))/2))` rocks a solid between
-  two orientations.
+  two orientations. `qjulia(c)` draws the quaternion Julia set of c — the
+  points x + y i + z j whose orbit under q ↦ q² + c stays bounded — as a 3D
+  surface (a level set of the orbit's Green function, 12 passes);
+  `qjulia(c, s)` cuts the slice at k = s instead of 0, so a slider sweeps
+  through the fourth dimension: `c = quat(-0.2, 0.8, 0, 0); qjulia(c)`,
+  framed with `camera(-pi/3, 0.5, 3)`.
 - Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of

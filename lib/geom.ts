@@ -74,6 +74,7 @@ import {
   gradePart,
   gradesOf,
   isScalar,
+  juliaSurface,
   mvAdd,
   mvExp,
   mvNeg,
@@ -84,6 +85,7 @@ import {
   normSquared,
   outerMv,
   quaternion,
+  quaternionParts,
   reverse,
   sandwichMatrix,
   scalarMv,
@@ -957,7 +959,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       return sc(v.items[k]);
     }
     case 'call': {
-      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action')
+      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'qjulia')
         throw new Error(`${e.name}(…) must be a whole statement.`);
       if (e.name === 'trail') {
         const args = e.args.map(lo);
@@ -1337,6 +1339,18 @@ export function lowerGeom(
 }
 
 function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): Expr {
+  // qjulia(c[, s]): the quaternion Julia set of c, sliced at k = s.
+  if (e.kind === 'call' && e.name === 'qjulia') {
+    const usage =
+      'qjulia takes a quaternion and, optionally, the slice to cut: qjulia(quat(-0.2, 0.8, 0, 0)) or qjulia(c, s).';
+    if (e.args.length !== 1 && e.args.length !== 2) throw new Error(usage);
+    const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
+    const c = lowerMv(e.args[0], lo);
+    if (!c) throw new Error(usage);
+    const slice = e.args[1] ? lo(e.args[1]) : sc({ kind: 'num', value: 0 });
+    if (slice.vec) throw new Error(usage);
+    return juliaSurface(quaternionParts(c), slice.e);
+  }
   // action(M): the matrix drawn by what it does (lib/glyphs.ts).
   if (e.kind === 'call' && e.name === 'action') {
     if (!matsPossible) throw new MatrixSeen();

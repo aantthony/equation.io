@@ -310,8 +310,10 @@ export const FUNCTIONS = new Set([
   'dual',
   'quat',
   'slerp',
-  // A matrix drawn by what it does (lib/glyphs.ts).
+  // A matrix drawn by what it does (lib/glyphs.ts), and a quaternion's
+  // Julia set (lib/clifford.ts juliaSurface).
   'action',
+  'qjulia',
   // Not real functions: Σ/Π/∫ binders and the ∇ operators, expanded
   // symbolically by resolveExpr.
   'sum',
@@ -382,6 +384,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'action',
   'jacobian',
   'hessian',
+  'qjulia',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */

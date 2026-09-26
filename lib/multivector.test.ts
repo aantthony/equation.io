@@ -129,3 +129,21 @@ describe('quaternions', () => {
     expect(error(['quat(1, 2)'])).toMatch(/quat\(w, x, y, z\)/);
   });
 });
+
+describe('quaternion Julia sets', () => {
+  it('draw as the implicit surface of the orbit’s Green function', () => {
+    const { r } = row(['c = quat(-0.2, 0.8, 0, 0)', 'qjulia(c)']);
+    expect(r.cpu!.type).toBe('implicit3d');
+    const residual = (r.cpu as { residual: Expr }).residual;
+    const at = (x: number, y: number, z: number) => evaluate(residual, { x, y, z });
+    // Far away the orbit escapes at once, well above the level; at a point of
+    // the filled set (0 lies in it for this c) it stays below.
+    expect(at(2, 2, 2)).toBeGreaterThan(0);
+    expect(at(0, 0, 0)).toBeLessThan(0);
+  });
+  it('takes a slice, and says what it takes', () => {
+    expect(row(['qjulia(quat(-0.2, 0.8, 0, 0), 0.3)']).r.cpu!.type).toBe('implicit3d');
+    expect(error(['qjulia(2)'])).toMatch(/qjulia takes a quaternion/);
+    expect(error(['1 + qjulia(quat(0, 0, 0, 0))'])).toMatch(/whole statement/);
+  });
+});

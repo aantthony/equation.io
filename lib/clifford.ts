@@ -14,7 +14,7 @@
  * (n̂ read as i, j, k) is the rotor that turns by θ about n̂ in R v R̃.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import type { Expr } from './expr.ts';
+import { type Expr, RECUR } from './expr.ts';
 
 export type Dim = 2 | 3;
 
@@ -424,4 +424,53 @@ export function glyphParts(a: Multivector): {
     bivector: any([3, 5, 6]) ? { normal: [d[6], neg(d[5]), d[3]] } : null,
     trivector: any([7]) ? d[7] : null,
   };
+}
+
+/** Passes of q ↦ q² + c a Julia surface takes, and where an orbit has escaped. */
+export const JULIA_STEPS = 12;
+const JULIA_ESCAPE = 1e4;
+/** The level of the Green's function drawn: small, so the surface hugs the set. */
+export const JULIA_LEVEL = 1e-3;
+
+/**
+ * The quaternion Julia set of c, as the implicit surface G = JULIA_LEVEL in
+ * the slice where q's k-part is `slice`: q = x + y i + z j + slice k.
+ *
+ * G is the Green's function ln|qₙ|/2ⁿ of the orbit q ↦ q² + c, read at the
+ * pass the orbit escapes (or the last). It is continuous — it tends to 0 on
+ * the set and inside it — so the raymarcher sees a crossing where escape
+ * counts would give it a jump, which it refuses. q² = (w² − |v|², 2 w v).
+ * The orbit runs as a bounded loop, like a tail-recursive function.
+ */
+export function juliaSurface(c: readonly [Expr, Expr, Expr, Expr], slice: Expr): Expr {
+  const [w, x, y, z, n] = ['eqioQw', 'eqioQx', 'eqioQy', 'eqioQz', 'eqioQn'];
+  const v = (name: string): Expr => ({ kind: 'var', name });
+  const r2 = [w, x, y, z].reduce<Expr>((s, k) => add(s, mul(v(k), v(k))), ZERO);
+  const green = div(call('ln', call('max', r2, num(1e-12))), { kind: 'bin', op: '^', a: num(2), b: add(v(n), num(1)) });
+  const step: Expr = {
+    kind: 'call',
+    name: RECUR,
+    args: [
+      add(sub(mul(v(w), v(w)), add(add(mul(v(x), v(x)), mul(v(y), v(y))), mul(v(z), v(z)))), c[0]),
+      add(mul(num(2), mul(v(w), v(x))), c[1]),
+      add(mul(num(2), mul(v(w), v(y))), c[2]),
+      add(mul(num(2), mul(v(w), v(z))), c[3]),
+      add(v(n), num(1)),
+    ],
+  };
+  const loop: Expr = {
+    kind: 'loop',
+    params: [w, x, y, z, n],
+    seeds: [v('x'), v('y'), v('z'), slice, ZERO],
+    body: {
+      kind: 'piecewise',
+      cases: [
+        { cond: { kind: 'ineq', op: '>', l: r2, r: num(JULIA_ESCAPE) }, value: green },
+        { cond: { kind: 'ineq', op: '>=', l: v(n), r: num(JULIA_STEPS) }, value: green },
+      ],
+      otherwise: step,
+    },
+    limit: JULIA_STEPS + 1,
+  };
+  return { kind: 'eq', l: loop, r: num(JULIA_LEVEL) };
 }
