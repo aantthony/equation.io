@@ -43,7 +43,27 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 - Final review (phase 8 + fixes + spec walk): phase 8 gives confident wrong numbers (bbox clipping, 0·∞ interval, negative measures, divergent integrals finite, endpoint-singular arc length, root undercount, quadtree budget degradation, freezes). Also polyline(M N) vs named differ; `sort(L) [2]` spaced indexes; named point T[2] not indexed; bracket of 4-tuples flattens; (1,1) T 2×3 fails. Fixer D done (6 fixed; juxtaposition always product; spacing rule; named points index; long-tuple multisets). Fixer C (measure) running. Rosette `e^(th J) hull(P)` [tensor] regression (phase 6) → fixer E done (object-lists visit recurses into tensor-item lists; hull.test checks vertices). Use scratchpad/orch/probe.ts (shared probe got modified).
 - E2E: test:objects all PASS, test:editor 95/95, test:swipe 24/24 (at 48d5189). csp/embed/mcp-app need `vite build` + `wrangler dev --config dist-web/equation/wrangler.json --port 5198` (5196 failed to start alongside; mcp-app via MCP_TEST_ORIGIN=5198). Results at 48d5189: embed PASS, mcp-app PASS, csp FAIL only on loading external cloudflareinsights beacon (sandbox network; branch touches no CSP files).
 
+## Final state (2026-09-26)
+
+All 8 phases implemented; three review rounds' findings fixed (commits 580032e, 51ca1d3).
+At 51ca1d3: vitest 86 files / 2419 pass (baseline 2283); typecheck, oxlint, oxfmt clean;
+test:objects all PASS; test:editor 95/95; test:swipe 24/24; embed-test PASS; mcp-app-test PASS;
+csp-test fails only loading the external cloudflareinsights beacon (sandbox network).
+Screenshots checked by orchestrator: annulus, swept band (zoomed), parabola arc readout, rosette.
+
 ## Blockers / open issues
+
+Known limits (also in multisets.md §9), none blocking:
+- Measures: 3D volumes/surface areas; totals over unbounded plane regions; stdev/median/hist over
+  continuous sets; min/max over regions/curves; 2D root counts the Krawczyk prover can't certify
+  (singular roots, non-interval functions like gamma) error; implicit curve length compares two
+  refinement levels (not a proof); intricate sets beyond the work budget error.
+- Swept regions: one interval beside x, y; fields over an interval are errors.
+- Tuples/tensors: `(T, T)` for a named 2×3 tuple; `T[T > 1]` on a named point; a bracket of
+  tensors; tensors cap at 729 entries; no transpose/Hodge star beyond ×.
+- Number-line stacks keep unit spacing, so long lists stand very tall.
+- `M T` for a k×k M and n≠k points still moves each point (M·T undefined there).
+
 
 ## Phase 5 plan (from planning agent, decisions by orchestrator)
 
