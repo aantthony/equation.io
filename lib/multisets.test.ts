@@ -880,3 +880,13 @@ describe('§5 a row in u is drawn by its value type', () => {
     for (const row of ['u^2', 'abs((u, v))', 'dot((1,2),(u,v))']) expect(plan([row]).type).toBe('density');
   });
 });
+
+describe('families in space', () => {
+  it('draw up to 32 curves or surfaces, but only 8 raymarched surfaces', () => {
+    expect(last(['r = [1..32]/4', '(r cos(2pi u), r sin(2pi u), u)']).error).toBeUndefined();
+    expect(last(['r = [1..32]/8', '(u, v, r u v)']).error).toBeUndefined();
+    expect(last(['r = [1..33]', '(r cos(2pi u), r sin(2pi u), u)']).error).toMatch(/1–32 members/);
+    expect(last(['r = [1..8]', 'x^2 + y^2 + z^2 = r']).error).toBeUndefined();
+    expect(last(['r = [1..9]', 'x^2 + y^2 + z^2 = r']).error).toMatch(/at most 8 members/);
+  });
+});

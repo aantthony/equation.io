@@ -462,8 +462,11 @@ function classifyLowered(
       throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
-    if (!figures && members.some(m => m.needs3D) && members.length > 8)
-      throw new Error('A 3D object family has at most 8 members.');
+    // An implicit surface is raymarched across the whole screen, once per
+    // member, so its families stay small. Curves, points and meshes in space
+    // cost what they do in the plane, and share the plane's limit.
+    if (first === 'implicit3d' && members.length > 8)
+      throw new Error('A family of implicit surfaces has at most 8 members — each is raymarched across the screen.');
     const shaders = new Set(['implicit2d', 'ineq2d', 'implicit3d', 'psurface', 'vfield2d']);
     let shared: { classified: Classified; index: string } | undefined;
     if (shaders.has(first)) {

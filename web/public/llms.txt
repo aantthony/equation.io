@@ -517,9 +517,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `y = [1,2,3] x`, `circle((0,0), [1,2,3])`, `(cos(u),sin(u),[1,2,3])`.
   Uses of the same named list move together (`m = [1,2]`, `y = m x + m` is 2
   lines); independent lists cross (`y = [1,2] x + [0,1]` is 4 lines,
-  `circle(([0,1],[0,1]), 1)` is 4 circles). Limit 32 objects, or 8
-  when the family is 3D — except point figures (segment, vector, polyline,
-  polygon, hull), which are cheap and allow 1024: a deformation drawn as
+  `circle(([0,1],[0,1]), 1)` is 4 circles). Limit 32 objects, in 2D or 3D,
+  or 8 implicit surfaces (each is raymarched across the screen) — except
+  point figures (segment, vector, polyline, polygon, hull), which are cheap
+  and allow 1024: a deformation drawn as
   arrows is `a = [0..20]; b = [0..20]; P = (a, b);
   f(x,y) = (x + y/2, y + sin(x)/2); vector(P, f(P))`. Shader members share
   one program with per-draw uniforms. Scalar fields/RGB fields/domain coloring/fractals cannot superimpose as
