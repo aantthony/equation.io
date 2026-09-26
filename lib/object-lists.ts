@@ -364,8 +364,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       if (outside && node.kind === 'call' && POINT_FIGURES.has(node.name)) return node;
       const values = listValue(node);
       if (values) {
-        if (!values.items.length || values.items.length > 100000)
-          throw new Error('Point-list arithmetic needs 1–100000 values.');
+        if (values.items.length > 100000) throw new Error('Point-list arithmetic needs at most 100000 values.');
         const marker = num(0);
         markers.set(marker, lists.length);
         lists.push(values);
@@ -410,6 +409,12 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       else if (seen.n !== a.n) throw new Error(`Lists have different lengths (${seen.n} vs ${a.n}).`);
     }
     const n = axes.reduce((size, a) => size * a.n, 1);
+    // A × [] = []: an empty multiset anywhere leaves no combinations.
+    // (A reduction that has no value there says so rather than vanishing.)
+    if (!n && !outside) {
+      if (originalError instanceof Error && /of an empty list/.test(originalError.message)) throw originalError;
+      return withAxes({ kind: 'list', items: [] }, axes);
+    }
     if (n > 100000)
       throw new Error(
         `Independent lists combine every value with every other — that is ${n} combinations. Name one list and reuse it to pair values up instead.`,

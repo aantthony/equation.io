@@ -987,6 +987,30 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   }
 }
 
+/** `[]` is the empty multiset, `[1,2] + [] = []` (docs/multisets.md §1). An
+ *  operator-precedence parser has no operand to hang an empty bracket on, so
+ *  the pair arrives as one symbol token that no user can type. */
+const EMPTY_LIST = '[]';
+
+function* mergeEmptyBrackets(tokens: Iterable<Token>): Iterable<Token> {
+  let open: Token | null = null;
+  for (const token of tokens) {
+    if (open) {
+      if (token.type === 'whitespace') continue;
+      if (token.type === 'parenclose' && token.str === ']') {
+        yield { ...open, type: 'symbol', str: EMPTY_LIST };
+        open = null;
+        continue;
+      }
+      yield open;
+      open = null;
+    }
+    if (token.type === 'parenopen' && token.str === '[') open = token;
+    else yield token;
+  }
+  if (open) yield open;
+}
+
 function createLeaf(token: Token): PNode {
   if (token.type === 'number') return num(Number(token.str));
   if (token.type === 'string') {
@@ -1003,6 +1027,7 @@ function createLeaf(token: Token): PNode {
   }
   if (token.type === 'parenopen') return { kind: 'popen', bracket: token.str, call: !!token.call };
   if (token.type === 'symbol') {
+    if (token.str === EMPTY_LIST) return { kind: 'list', items: [] };
     if (Object.hasOwn(CONSTANTS, token.str)) return num(CONSTANTS[token.str]);
     return { kind: 'var', name: token.str };
   }
@@ -1025,7 +1050,9 @@ export function parseExpr(
   activeListNames = listNames;
   activeValueNames = valueNames;
   try {
-    const tokens = addImplicitTokens(mergeBracedSubscripts(normalizeTokens(desugarUnicode(tokenize(str)))));
+    const tokens = addImplicitTokens(
+      mergeEmptyBrackets(mergeBracedSubscripts(normalizeTokens(desugarUnicode(tokenize(str))))),
+    );
     const stack: PNode[] = [];
     walk(
       ops,

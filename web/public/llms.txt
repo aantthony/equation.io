@@ -226,7 +226,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   of one data file share its rows, so `(data.x, data.y)` pairs up. To pair
   literal values write the points out: `P = [(1,4), (2,5), (3,6)]`; then
   `P.x` and `P.y` (and `P.z`) are the lists of their coordinates, paired the
-  same way — `(P.x, 2 P.y)` is 3 points, not 9.
+  same way — `(P.x, 2 P.y)` is 3 points, not 9. Brackets add: a list
+  inside a list contributes its elements, so with `n = [1,2]`, `[n, 3, 5]`
+  is `[1, 2, 3, 5]` (a new list, independent of `n`), while `[n]` is `n`
+  itself. `[]` is the empty list: combined with anything it gives `[]`, and
+  `count([])` and `total([])` are 0.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
   `stdev(L)` (sample), `median(L)`, `sort(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max

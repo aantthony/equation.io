@@ -426,8 +426,11 @@ function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
   for (const item of raw) {
     if (!isRange(item)) {
       const low = lower(item, ctx);
-      if (isSeq(low)) throw new Error('Lists cannot be nested.');
-      out.push(low);
+      // A bracket is a multiset sum (docs/multisets.md §2): a multiset among
+      // the items contributes every one of its elements, so [n, 3, 5] with
+      // n = [1,2] is [1 2 3 5]. The result is a new multiset, not n.
+      if (isSeq(low)) out.push(...(expand(settle(low, ctx), ctx) as Expr & { kind: 'list' }).items);
+      else out.push(low);
       continue;
     }
     // NOT marked whole: a range bound is an ordinary number ([1..3.5] is
@@ -701,6 +704,13 @@ function reduce(name: string, all: readonly Expr[], ctx: Ctx): Expr {
   // slider away, folded them in and answered NaN.
   const items = all.filter(it => !holdsGap(it));
   const n = items.length;
+  // The empty multiset `[]`: a sum over nothing is 0; anything that picks or
+  // averages a value has none to pick.
+  if (!all.length) {
+    if (name === 'total') return num(0);
+    if (name === 'sort') return listOf([], ctx);
+    throw new Error(`${name}(…) of an empty list has no value.`);
+  }
   if (!n) {
     throw new Error(`${name}(…) has no values to work with — every cell there is missing.`);
   }

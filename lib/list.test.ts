@@ -103,8 +103,9 @@ describe('broadcasting', () => {
     expect(() => lowerRow('y = [1,2]')).toThrow(/own row/);
     expect(() => lowerRow('{x<0: [1,2], 0}')).toThrow(/piecewise/);
   });
-  it('rejects nested lists', () => {
-    expect(() => lowerRow('[L, 1]', ['L = [1,2]'])).toThrow(/nested/);
+  it('flattens nested lists: a bracket is a multiset sum', () => {
+    expect(values(lowerRow('[L, 1]', ['L = [1,2]']))).toEqual([1, 2, 1]);
+    expect(values(lowerRow('[[1,2],[3]]'))).toEqual([1, 2, 3]);
   });
 });
 
