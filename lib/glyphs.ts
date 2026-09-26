@@ -10,7 +10,7 @@
  */
 import { add, div, mul, neg, pow } from './diff.ts';
 import type { Column, Expr } from './expr.ts';
-import { type Multivector, glyphParts } from './clifford.ts';
+import { type Multivector, bladeGrade, glyphParts } from './clifford.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const call = (name: string, ...args: Expr[]): Expr => ({ kind: 'call', name, args });
@@ -127,7 +127,85 @@ export function actionGlyphs(m: readonly (readonly Expr[])[]): Expr[] {
 
 /** The figures that draw a multivector: at least one for any that is not a
  *  plain number (which never reaches here). */
+/**
+ * A sweep through `angle` (radians, either sign) of the circle of radius r
+ * in the plane of e1, e2, as one template over the fraction of the sweep: a
+ * `sector` starts at the centre, so the polygon fills the wedge. The angle
+ * may be any expression — a quaternion's, which moves with its sliders.
+ */
+function sweep(
+  form: 'polygon' | 'vector',
+  dimension: 2 | 3,
+  r: Expr,
+  e1: Expr[],
+  e2: Expr[],
+  angle: Expr,
+  steps: number,
+  sector = false,
+): Expr {
+  const n = steps + 1 + (sector ? 1 : 0);
+  const over: Column[] = [
+    { name: SWEEP_F, values: Float64Array.from({ length: n }, (_, k) => Math.max(0, k - (sector ? 1 : 0)) / steps) },
+    { name: SWEEP_R, values: Float64Array.from({ length: n }, (_, k) => (sector && k === 0 ? 0 : 1)) },
+  ];
+  const th = mul({ kind: 'var', name: SWEEP_F }, angle);
+  const rr = mul({ kind: 'var', name: SWEEP_R }, r);
+  const c = call('cos', th);
+  const sn = call('sin', th);
+  return { kind: 'figure', form, dimension, vertices: e1.map((a, i) => mul(rr, add(mul(c, a), mul(sn, e2[i])))), over };
+}
+const SWEEP_F = 'eqioSweepF';
+const SWEEP_R = 'eqioSweepR';
+
+/**
+ * A quaternion or a rotor — a scalar and a bivector — drawn as the rotation
+ * it makes in R v R̃: q = w + v turns by θ = 2 atan2(|v|, w) about v, so the
+ * picture is an arrow along the axis, |q| long, and a filled sector of
+ * radius |q| sweeping θ with an arrow for the turn. Moving w moves θ, which
+ * a disc of the bivector alone could not show. Null when the multivector is
+ * not one: an odd part, no bivector, or no scalar (a pure bivector is an
+ * oriented area, drawn as one — unless it was written as a quaternion).
+ */
+function rotationGlyphs(m: Multivector): Expr[] | null {
+  const zero = (e: Expr) => e.kind === 'num' && e.value === 0;
+  const odd = m.data.some((c, k) => bladeGrade(k) % 2 === 1 && !zero(c));
+  const { bivector } = glyphParts(m);
+  if (odd || !bivector || (zero(m.data[0]) && !m.quat)) return null;
+  const w = m.data[0];
+  const size = call(
+    'sqrt',
+    m.data.reduce<Expr>((s, c) => (zero(c) ? s : add(s, mul(c, c))), num(0)),
+  );
+  const steps = Math.round(RIM * 0.75);
+  if ('plane' in bivector) {
+    // R = cos(θ/2) − sin(θ/2) e_xy turns the plane by θ counterclockwise.
+    const angle = mul(num(2), call('atan2', neg(bivector.plane), w));
+    const e1 = [num(1), num(0)];
+    const e2 = [num(0), num(1)];
+    return [
+      sweep('polygon', 2, size, e1, e2, angle, steps, true),
+      sweep('vector', 2, mul(num(1.12), size), e1, e2, angle, steps),
+    ];
+  }
+  // The quaternion's vector part is minus the bivector's dual (i = e_zy).
+  const v = bivector.normal.map(neg);
+  const len = call(
+    'sqrt',
+    v.reduce<Expr>((s, c) => add(s, mul(c, c)), num(0)),
+  );
+  const axis = v.map(c => div(c, len));
+  const [e1, e2] = planeBasis(axis);
+  const angle = mul(num(2), call('atan2', len, w));
+  return [
+    sweep('polygon', 3, size, e1, e2, angle, steps, true),
+    sweep('vector', 3, mul(num(1.12), size), e1, e2, angle, steps),
+    figure('vector', 3, [axis.map(() => num(0)), axis.map(c => mul(size, c))]),
+  ];
+}
+
 export function multivectorGlyphs(m: Multivector): Expr[] {
+  const turn = rotationGlyphs(m);
+  if (turn) return turn;
   const { vector, bivector, trivector } = glyphParts(m);
   const dim = m.dim;
   const origin = Array.from({ length: dim }, () => num(0));

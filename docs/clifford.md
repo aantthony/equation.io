@@ -80,7 +80,12 @@ the `[mv]` node; classify turns it into a family of figures with a
 - bivector — a disc of area |B| in its plane, with an arrow round an inner
   arc for its sense; in space the plane's basis is the closed-form
   orthonormal pair of Duff et al. (2017) about the dual normal;
-- trivector — a cube of volume |p|.
+- trivector — a cube of volume |p|;
+- a quaternion, or any rotor (a scalar and a bivector, nothing odd) —
+  instead, the rotation it makes: an arrow along the axis |q| long and a
+  filled sector of radius |q| sweeping θ = 2 atan2(|v|, w). The disc of the
+  bivector alone would ignore w, so a slider on a quaternion's scalar part
+  moved nothing. A pure bivector keeps its disc (unless written with quat).
 
 The rim and the arc are one vertex template over columns of cos θ and
 sin θ (`over`), so a large coefficient (a slerp's) is written once rather

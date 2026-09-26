@@ -947,7 +947,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `grade(A, k)` is the grade-k part, and `|A|` its size. A row that is a
   multivector draws it grade by grade — its vector an arrow, its bivector an
   oriented disc of that area in its plane with an arrow round the rim, its
-  trivector a cube of that volume — and reads out `= 1 + 2 e_xy`. A result
+  trivector a cube of that volume — and reads out `= 1 + 2 e_xy`. A
+  quaternion, or a rotor (a scalar and a bivector), draws as the rotation it
+  makes: an arrow along the axis, |q| long, and a sector of radius |q|
+  sweeping the angle 2 atan2(|v|, w), so its scalar part moves the picture. A result
   written only as a number or a vector is that number or vector
   (`grade(R ⟑ v ⟑ rev(R), 1)` is a point), and a row may name a multivector
   (`R = e^(-(t/2) e_xy)`). Rotors: `e^(-(th/2) B)` for a unit bivector B

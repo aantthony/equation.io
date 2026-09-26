@@ -83,6 +83,27 @@ describe('drawing', () => {
     // A 48-gon inscribed in the circle of area 3.
     expect(area / 2).toBeCloseTo(3 * (48 / (2 * Math.PI)) * Math.sin((2 * Math.PI) / 48), 6);
   });
+  it('draws a quaternion or rotor as its turn, so the scalar part moves it', () => {
+    const end = (rows: string[]) => {
+      const { r, env } = row(rows);
+      const o = r.cls!.object as { members: Array<{ object: { form: string; vertices: Expr[]; over?: Column[] } }> };
+      const sector = o.members[0].object;
+      return vertexSampler(
+        sector.vertices,
+        sector.over,
+      )(env)
+        .slice(-3)
+        .map(v => Math.round(v * 1e6) / 1e6 + 0);
+    };
+    // A quarter turn about z: the sector runs from e_x to e_y, and the axis is e_z.
+    expect(kinds(['quat(cos(pi/4), 0, 0, sin(pi/4))'])).toEqual(['polygon', 'vector', 'vector']);
+    expect(end(['quat(cos(pi/4), 0, 0, sin(pi/4))'])).toEqual([0, 1, 0]);
+    expect(end(['e^(-(pi/4) e_xy)'])).toEqual([0, 1, 0]);
+    // Only w differs, and the picture follows it.
+    expect(end(['a = -7.65', 'quat(a, -1.05, 0.55, -0.8)'])).not.toEqual(end(['a = 0', 'quat(a, -1.05, 0.55, -0.8)']));
+    // A pure bivector is still an oriented area.
+    expect(kinds(['e_xy'])).toEqual(['polygon', 'vector']);
+  });
   it('writes a large coefficient once, not once per rim vertex', () => {
     // A slerp's coefficients are long; the rim is one template over columns.
     const kinds = row(['slerp(quat(1, 0, 0, 0), quat(0, 1, 1, 1), 0.5)']).r.cls!.object;
