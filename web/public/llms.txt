@@ -140,7 +140,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   nearest one), so `1/gcd(floor(x), floor(y))` is 1 on the coprime cells of
   the grid; and `isprime(n)`, 1 for a prime and 0 otherwise
   (`a_n = isprime(n)`), which gives no value past 2048² − 1 rather than
-  guess. Vector calculus has `grad`, `div`, `curl` and `laplacian` (below).
+  guess. Vector calculus has `grad`, `div`, `curl`, `laplacian`, `jacobian`
+  and `hessian` (below).
   Function names are
   case-insensitive: `Sin(x)`, `SQRT(x)` and `sin(x)` are the same call. Always
   use parentheses for arguments — write `sin(x)`, not `sin x`.
@@ -156,7 +157,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A bare condition is a case worth 1, as in Desmos: `{x > 0, 5}` is
   `{x > 0: 1, 5}`. Values may be complex (`{x > 0: w, conj(w)}`); the
   conditions themselves compare real values (`re(w) > 0`, `|w| < 1`).
-- Vector calculus: four operators, expanded symbolically like d/dx, so
+- Vector calculus: these operators expand symbolically like d/dx, so
   sliders and t work inside them.
   - `grad(f)` is the tuple (∂f/∂x, ∂f/∂y), plus ∂f/∂z when f uses z:
     `grad(x^2 - y^2)` plots as a vector field.
@@ -166,6 +167,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     plane field it is the scalar ∂F₂/∂x − ∂F₁/∂y: `curl((-y, x))` is 2.
   - `laplacian(f)` is div(grad(f)), for a scalar f: `laplacian(x^2 + y^2)`
     is 4.
+  - `jacobian(F)` is the matrix of partials, row i the gradient of F's
+    component i (2 components: over x, y; 3: over x, y, z), and `hessian(f)`
+    the matrix of second partials of a scalar f. A 2×2 one in x and y draws
+    as a matrix field: `jacobian((x^2 - y^2, 2 x y))` is all circles, the
+    mark of a conformal map.
   - With ∇ (in the editor, type `\nabla`): `∇f` is grad(f), `∇·F` is div(F),
     `∇×F` is curl(F), and `∇²f` (or `∇^2 f`) is laplacian(f). ∇ takes the
     rest of the product, as d/dx does: `∇ x^2 y` and `∇f(x, y)`.
@@ -511,9 +517,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `y = [1,2,3] x`, `circle((0,0), [1,2,3])`, `(cos(u),sin(u),[1,2,3])`.
   Uses of the same named list move together (`m = [1,2]`, `y = m x + m` is 2
   lines); independent lists cross (`y = [1,2] x + [0,1]` is 4 lines,
-  `circle(([0,1],[0,1]), 1)` is 4 circles). Limit 32 objects, or 8
-  when the family is 3D — except point figures (segment, vector, polyline,
-  polygon, hull), which are cheap and allow 1024: a deformation drawn as
+  `circle(([0,1],[0,1]), 1)` is 4 circles). Limit 32 objects, in 2D or 3D,
+  or 8 implicit surfaces (each is raymarched across the screen) — except
+  point figures (segment, vector, polyline, polygon, hull), which are cheap
+  and allow 1024: a deformation drawn as
   arrows is `a = [0..20]; b = [0..20]; P = (a, b);
   f(x,y) = (x + y/2, y + sin(x)/2); vector(P, f(P))`. Shader members share
   one program with per-draw uniforms. Scalar fields/RGB fields/domain coloring/fractals cannot superimpose as
@@ -886,7 +893,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Matrices combine — `2 M`, `M / 2`, `M + N`, `M N`, `M^2` (whole powers 0–8),
   `M^-1` — and a row may name the result (`R = M N`). A matrix has no
   position, so on a row of its own it draws nothing and reads out its value,
-  `= ((1, 2), (3, 4))`: apply it to a vector to draw. Note `a/2 J` reads as
+  `= ((1, 2), (3, 4))`: apply it to a vector to draw, or write `action(M)`
+  to draw what it does — the image of the unit square (filled; its signed
+  area is det M), of the unit circle (an ellipse whose axes are the singular
+  vectors) and the arrows M e_x, M e_y, its columns; for a 3×3, the image of
+  the unit cube and three arrows. `action(e^(t J))` turns the square with t.
+  A 2×2 matrix in x and y is a matrix field, `((x, y), (y, -x))`: a grid of
+  glyphs, each the image of a small circle under the matrix there with a
+  spoke to where e_x goes, drawn true size while small and a cell at most,
+  in the row colour's complement where det < 0. Note `a/2 J` reads as
   `a/(2 J)`; write `(a/2) J`.
 - Tensors: a rank-k tensor is k-deep nested tuples, and its shape is part of
   its value — `((1, 2, 3), (4, 5, 6))` is 2×3, `(((1, 2), (3, 4)), ((5, 6),
@@ -917,6 +932,45 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     is the covariance matrix, and `C (x, y)` applies it.
   - A bivector `a ∧ b` of 3D vectors, named or written out, generates the
     rotation in their plane: `e^(t a ∧ b) P`.
+- Multivectors (geometric algebra, Cl(2) and Cl(3), Euclidean): `a ⟑ b`
+  (type `\gp`, or `gp(a, b)`) is the geometric product, `e_x ⟑ e_y` is the
+  bivector `e_xy`, and `e_x ⟑ e_x` is 1. The blades are built in, like
+  `e_x`: `e_xy`, `e_yz`, `e_zx` (and any reordering, `e_yx = −e_xy`) and
+  `e_xyz`; they are always 3D, while `(1, 0) ⟑ (0, 1)` is the plane's own
+  e_xy. Once one side is a multivector, juxtaposition is the geometric
+  product too (`R p rev(R)`), `∧` is the outer product, and `+`, `−`, whole
+  powers (`A^-1`, `A^3`) and `e^A` work; two plain vectors still need `⟑`
+  (`e_x e_y` stays an error, `e_x ∧ e_y` the tensor wedge). Dividing by a
+  multivector is refused — `a/2 e_xy` would read as `a/(2 e_xy)` — so write
+  `(a/2) e_xy` or `e_xy a/2`, and `A B^-1`. `rev(A)` reverses, `conj(A)` is
+  the Clifford conjugate, `dual(A)` is `A I⁻¹` (`dual(e_xy)` is `e_z`),
+  `grade(A, k)` is the grade-k part, and `|A|` its size. A row that is a
+  multivector draws it grade by grade — its vector an arrow, its bivector an
+  oriented disc of that area in its plane with an arrow round the rim, its
+  trivector a cube of that volume — and reads out `= 1 + 2 e_xy`. A
+  quaternion, or a rotor (a scalar and a bivector), draws as the rotation it
+  makes: an arrow along the axis, |q| long, and a sector of radius |q|
+  sweeping the angle 2 atan2(|v|, w), so its scalar part moves the picture. A result
+  written only as a number or a vector is that number or vector
+  (`grade(R ⟑ v ⟑ rev(R), 1)` is a point), and a row may name a multivector
+  (`R = e^(-(t/2) e_xy)`). Rotors: `e^(-(th/2) B)` for a unit bivector B
+  turns by th in B's plane, `R p rev(R)` applies it, and `rotate(X, R)` turns
+  a point, a list of points or a figure by it: `rotate(hull(P), R)`.
+- Quaternions: `quat(w, x, y, z)` (or `quat(w, v)` with v a 3D vector) is
+  w + x i + y j + z k, read out that way. They are the even multivectors of
+  space (i = e_zy, j = e_xz, k = e_yx), so they multiply by juxtaposition
+  (`quat(0,1,0,0) quat(0,0,1,0)` is `k`), invert with `q^-1`, conjugate
+  with `conj(q)`, and the unit quaternion `quat(cos(th/2), sin(th/2) n)`
+  turns by th about the unit axis n: `rotate(P, q)`. `grade(q, 0)` is its
+  w, and `-dual(grade(q, 2))` its vector part (x, y, z), a point. `slerp(q1, q2, s)`
+  runs the shorter arc between two rotations at constant speed, s from 0 to
+  1: `rotate(hull(P), slerp(q1, q2, (1 - cos(t))/2))` rocks a solid between
+  two orientations. `qjulia(c)` draws the quaternion Julia set of c — the
+  points x + y i + z j whose orbit under q ↦ q² + c stays bounded — as a 3D
+  surface (a level set of the orbit's Green function, 12 passes);
+  `qjulia(c, s)` cuts the slice at k = s instead of 0, so a slider sweeps
+  through the fourth dimension: `c = quat(-0.2, 0.8, 0, 0); qjulia(c)`,
+  framed with `camera(-pi/3, 0.5, 3)`.
 - Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of

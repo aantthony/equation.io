@@ -64,6 +64,34 @@ import {
   vectorTensor,
   wedge,
 } from './tensor.ts';
+import { actionNode } from './glyphs.ts';
+import {
+  type Multivector,
+  MV_CALL,
+  conjugate,
+  dual,
+  geometric,
+  gradePart,
+  gradesOf,
+  isScalar,
+  juliaSurface,
+  mvAdd,
+  mvExp,
+  mvNeg,
+  mvNode,
+  mvOfNode,
+  mvPower,
+  mvScale,
+  normSquared,
+  outerMv,
+  quaternion,
+  quaternionParts,
+  reverse,
+  sandwichMatrix,
+  scalarMv,
+  slerp,
+  vectorMv,
+} from './clifford.ts';
 
 /** Whole-statement geometry forms (like SPECIAL_FORMS, they never nest). */
 export const GEOM_STATEMENTS = new Set([
@@ -252,6 +280,8 @@ let matsPossible = false;
 let compSeen = new WeakMap<Expr, LV | { wait: Expr }>();
 /** Tensor-valued subexpressions met during one lowerGeom (see lowerTensor). */
 let tenSeen = new WeakMap<Expr, Tensor | null>();
+/** Multivector-valued subexpressions met during one lowerGeom (see lowerMv). */
+let mvSeen = new WeakMap<Expr, Multivector | null>();
 /** Named tensors for the lowering under way. Like the caches above it lives
  *  for one call: lowering is synchronous, and threading it through every
  *  recursive call would touch every caller of lower() for one lookup. */
@@ -262,6 +292,7 @@ function fresh(getTensor: GetTensor, isList: IsList, possible: boolean): void {
   matSeen = new WeakMap();
   compSeen = new WeakMap();
   tenSeen = new WeakMap();
+  mvSeen = new WeakMap();
   tensorNamed = getTensor;
   listNamed = isList;
   matsPossible = possible;
@@ -310,7 +341,7 @@ function constIndex(e: Expr, what: string): number {
  * handed back to it as a matrix.)
  */
 function lowerTensor(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): Tensor | null {
-  if (!matsPossible) return null;
+  if (!matsPossible || lowerMv(e, lo)) return null;
   if (tenSeen.has(e)) return tenSeen.get(e)!;
   // A cycle guard: a node under way is not a tensor to itself.
   tenSeen.set(e, null);
@@ -459,6 +490,172 @@ function anyTensor(n: Expr, lo: (n: Expr) => LV, getMat: GetMat): Tensor {
   return scalarTensor(v.e);
 }
 
+/** The calls that make or take multivectors (lib/clifford.ts). */
+const MV_FNS = new Set(['gp', 'rev', 'grade', 'dual', 'quat', 'slerp', MV_CALL]);
+
+/** Whether a subtree holds a multivector at all: a blade, ⟑ or a multivector
+ *  function. Rows without one — nearly all — skip lowerMv entirely. */
+const mvMark = new WeakMap<Expr, boolean>();
+function mvIn(e: Expr): boolean {
+  const hit = mvMark.get(e);
+  if (hit !== undefined) return hit;
+  let found = false;
+  switch (e.kind) {
+    case 'call':
+      found = MV_FNS.has(e.name) || e.args.some(mvIn);
+      break;
+    case 'bin':
+      found = e.glyph === 'geometric' || mvIn(e.a) || mvIn(e.b);
+      break;
+    case 'neg':
+      found = mvIn(e.a);
+      break;
+  }
+  mvMark.set(e, found);
+  return found;
+}
+
+const NOT_A_MV_VALUE =
+  'A multivector is not a number or a point here — grade(A, 1) is its vector part and |A| its size, or give it a row of its own to draw it.';
+
+/**
+ * A multivector-valued expression, or null: a blade (e_xy), quat(…), ⟑ and
+ * gp(…), and — once one side is a multivector — juxtaposition (the geometric
+ * product), ∧ (the outer product), +, −, division (by the inverse), whole
+ * powers, e^A, rev, dual, grade, slerp and |A|. Two plain vectors multiply
+ * as they always have: juxtaposition between them stays an error and ∧ the
+ * tensor wedge, so only ⟑ turns vectors into a multivector.
+ */
+function lowerMv(e: Expr, lo: (n: Expr) => LV): Multivector | null {
+  if (!mvIn(e)) return null;
+  if (mvSeen.has(e)) return mvSeen.get(e)!;
+  mvSeen.set(e, null);
+  const of = (n: Expr) => lowerMv(n, lo);
+  const any = (n: Expr) => anyMv(n, lo);
+  const found = ((): Multivector | null => {
+    switch (e.kind) {
+      case 'neg': {
+        const a = of(e.a);
+        return a && mvNeg(a);
+      }
+      case 'bin': {
+        if (e.glyph === 'geometric') return geometric(any(e.a), any(e.b));
+        if (e.op === '^') {
+          if (isE(e.a)) {
+            const p = of(e.b);
+            return p && mvExp(p);
+          }
+          const a = of(e.a);
+          if (!a) return null;
+          const n = e.b.kind === 'neg' && e.b.a.kind === 'num' ? -e.b.a.value : e.b.kind === 'num' ? e.b.value : NaN;
+          return mvPower(a, n);
+        }
+        const a = of(e.a);
+        const b = of(e.b);
+        if (!a && !b) return null;
+        if (e.glyph === 'dot' || e.glyph === 'cross' || e.glyph === 'outer') {
+          const sign = e.glyph === 'dot' ? '·' : e.glyph === 'cross' ? '×' : '⊗';
+          throw new Error(`${sign} does not take a multivector — ⟑ is the geometric product and ∧ the outer product.`);
+        }
+        if (e.glyph === 'wedge') return outerMv(any(e.a), any(e.b));
+        switch (e.op) {
+          case '+':
+          case '-':
+            return mvAdd(any(e.a), any(e.b), e.op === '-');
+          case '*':
+            return geometric(any(e.a), any(e.b));
+          case '/': {
+            // Dividing by a multivector is refused, as by a matrix: a/2 e_xy
+            // reads as a/(2 e_xy), and e_xy⁻¹ = −e_xy would quietly flip it.
+            const d = any(e.b);
+            if (!isScalar(d)) {
+              throw new Error(
+                'Cannot divide by a multivector — multiply by B^-1. (a/2 e_xy reads as a/(2 e_xy): write (a/2) e_xy.)',
+              );
+            }
+            return mvScale(any(e.a), div({ kind: 'num', value: 1 }, d.data[0]));
+          }
+        }
+        return null;
+      }
+      case 'call': {
+        if (e.name === MV_CALL) return mvOfNode(e);
+        const args = e.args;
+        const arity = (n: number, usage: string) => {
+          if (args.length !== n) throw new Error(usage);
+        };
+        switch (e.name) {
+          case 'gp':
+            if (args.length < 2) throw new Error('gp takes two or more multivectors: gp(a, b) is a ⟑ b.');
+            return args.slice(1).reduce((acc, n) => geometric(acc, any(n)), any(args[0]));
+          case 'rev':
+            arity(1, 'rev takes one multivector: rev(R) reverses it, so R p rev(R) turns the point p.');
+            return reverse(any(args[0]));
+          case 'dual':
+            arity(1, 'dual takes one multivector: dual(e_xy) is e_z.');
+            return dual(any(args[0]));
+          case 'conj':
+            // conj of a multivector is its Clifford conjugate; of a number, the complex one.
+            return args.length === 1 && of(args[0]) ? conjugate(of(args[0])!) : null;
+          case 'grade': {
+            arity(2, 'grade takes a multivector and a grade: grade(A, 2) is its bivector part.');
+            return gradePart(any(args[0]), constIndex(args[1], 'A grade'));
+          }
+          case 'quat': {
+            // quat(w, x, y, z), or quat(w, v) with v a 3-vector.
+            const vals = args.map(lo);
+            const flat = vals.flatMap(v => (v.vec ? v.items : [v.e]));
+            if (flat.length !== 4 || (vals.length === 2 && (!vals[1].vec || vals[1].items.length !== 3)))
+              throw new Error('quat takes quat(w, x, y, z) — w + x i + y j + z k — or quat(w, v) with v a 3D vector.');
+            return quaternion(flat[0], flat[1], flat[2], flat[3]);
+          }
+          case 'slerp': {
+            arity(3, 'slerp takes two rotors or quaternions and how far along: slerp(q1, q2, u), u from 0 to 1.');
+            const u = lo(args[2]);
+            if (u.vec) throw new Error('slerp goes a number of the way from q1 to q2: slerp(q1, q2, u).');
+            return slerp(any(args[0]), any(args[1]), u.e);
+          }
+          case 'exp': {
+            const a = args.length === 1 ? of(args[0]) : null;
+            return a && mvExp(a);
+          }
+          case 'abs': {
+            const a = args.length === 1 ? of(args[0]) : null;
+            return a && scalarMv({ kind: 'call', name: 'sqrt', args: [normSquared(a)] }, a.dim);
+          }
+        }
+        return null;
+      }
+      default:
+        return null;
+    }
+  })();
+  mvSeen.set(e, found);
+  return found;
+}
+
+/** Any value read as a multivector: a number is grade 0, a point grade 1. */
+function anyMv(n: Expr, lo: (n: Expr) => LV): Multivector {
+  const m = lowerMv(n, lo);
+  if (m) return m;
+  // Inside a multivector, a sum of a number and a vector is one too: in
+  // 1 + e_x + e_xy the 1 + e_x is read before e_xy says what it is.
+  if (n.kind === 'bin' && (n.op === '+' || n.op === '-') && !n.glyph)
+    return mvAdd(anyMv(n.a, lo), anyMv(n.b, lo), n.op === '-');
+  if (n.kind === 'neg') return mvNeg(anyMv(n.a, lo));
+  const v = lo(n);
+  return v.vec ? vectorMv(v.items) : scalarMv(v.e);
+}
+
+/** A multivector where a number or a point is wanted: fine when that is all
+ *  it is written as (e_x ⟑ e_x is 1, grade(A, 1) a vector), an error else. */
+function mvValue(m: Multivector): LV {
+  const grades = gradesOf(m);
+  if (grades.size === 0 || (grades.size === 1 && grades.has(0))) return sc(m.data[0]);
+  if (grades.size === 1 && grades.has(1)) return vc(...Array.from({ length: m.dim }, (_, k) => m.data[1 << k]));
+  throw new Error(NOT_A_MV_VALUE);
+}
+
 /**
  * A matrix-valued expression — a named matrix, a tuple of rows
  * `((a, b), (c, d))`, or algebra over them: `s M`, `M / s`, `-M`, `M + N`,
@@ -466,7 +663,7 @@ function anyTensor(n: Expr, lo: (n: Expr) => LV, getMat: GetMat): Tensor {
  * null for anything else.
  */
 function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null {
-  if (!matsPossible) return null;
+  if (!matsPossible || lowerMv(e, lo)) return null;
   if (matSeen.has(e)) return matSeen.get(e)!;
   const of = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
   const scalar = (n: Expr, what: string): Expr => {
@@ -590,6 +787,21 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
 function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV {
   const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
   const matOf = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
+  // A multivector — or a number or vector that one reduces to — first: its
+  // ⟑, ∧ and products are its own, not matrix algebra's.
+  if (e.kind === 'bin' || e.kind === 'neg' || e.kind === 'call') {
+    if (e.kind === 'call' && e.name === 'rotate' && e.args.length === 2) {
+      // rotate(P, R): the sandwich R P R⁻¹, as the matrix it is.
+      const r = lowerMv(e.args[1], lo);
+      if (r) {
+        const p = lo(e.args[0]);
+        if (!p.vec) throw new Error('rotate(P, R) turns a point P by a rotor or quaternion R.');
+        return vc(...matVec(sandwichMatrix(r, p.items.length as 2 | 3), p.items));
+      }
+    }
+    const m = lowerMv(e, lo);
+    if (m) return mvValue(m);
+  }
   if (
     e.kind === 'var' ||
     e.kind === 'vec' ||
@@ -747,7 +959,8 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       return sc(v.items[k]);
     }
     case 'call': {
-      if (GEOM_STATEMENTS.has(e.name)) throw new Error(`${e.name}(…) must be a whole statement.`);
+      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'qjulia')
+        throw new Error(`${e.name}(…) must be a whole statement.`);
       if (e.name === 'trail') {
         const args = e.args.map(lo);
         const coords =
@@ -1126,6 +1339,37 @@ export function lowerGeom(
 }
 
 function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): Expr {
+  // qjulia(c[, s]): the quaternion Julia set of c, sliced at k = s.
+  if (e.kind === 'call' && e.name === 'qjulia') {
+    const usage =
+      'qjulia takes a quaternion and, optionally, the slice to cut: qjulia(quat(-0.2, 0.8, 0, 0)) or qjulia(c, s).';
+    if (e.args.length !== 1 && e.args.length !== 2) throw new Error(usage);
+    const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
+    const c = lowerMv(e.args[0], lo);
+    if (!c) throw new Error(usage);
+    const slice = e.args[1] ? lo(e.args[1]) : sc({ kind: 'num', value: 0 });
+    if (slice.vec) throw new Error(usage);
+    return juliaSurface(quaternionParts(c), slice.e);
+  }
+  // action(M): the matrix drawn by what it does (lib/glyphs.ts).
+  if (e.kind === 'call' && e.name === 'action') {
+    if (!matsPossible) throw new MatrixSeen();
+    const usage =
+      'action takes one 2×2 or 3×3 matrix — action(((1, 1), (0, 1))) draws where it sends the unit square, circle and axes.';
+    if (e.args.length !== 1) throw new Error(usage);
+    const m = lowerMat(e.args[0], n => lower(n, getComps, getMat, isList), getMat)?.m;
+    if (!m) throw new Error(usage);
+    return actionNode(m);
+  }
+  // A multivector on a row of its own draws by grade (docs/clifford.md); one
+  // that is only a number or a vector lowers as that number or vector.
+  if (mvIn(e)) {
+    const m = lowerMv(e, n => lower(n, getComps, getMat, isList));
+    if (m) {
+      const grades = gradesOf(m);
+      if (grades.size > 1 || [...grades].some(g => g >= 2)) return mvNode(m);
+    }
+  }
   // A matrix or tensor with nothing to act on is drawn as its values
   // (docs/multisets.md §5): it has no position, so its row reads it out.
   // A pair of named points keeps saying what it is not: it was most likely

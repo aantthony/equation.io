@@ -32,6 +32,9 @@ export type Binding =
       // A value holding a continuous interval (lib/interval.ts), written into
       // every row that names it.
       | { tag: 'interval'; value: Expr }
+      // A multivector (lib/clifford.ts), its `[mv]` node written into every
+      // row that names it, as an interval is.
+      | { tag: 'multivector'; value: Expr }
     >;
 export type NameEntry = Readonly<
   { kind: 'binding'; binding: Binding } | { kind: 'component'; owner: string; index: 0 | 1 | 2 }
@@ -181,6 +184,7 @@ export class Env {
   );
   readonly rvs = this.projection((_, b) => (b.tag === 'rv' ? b.declaration : undefined));
   readonly intervals = this.projection((_, b) => (b.tag === 'interval' ? b.value : undefined));
+  readonly multivectors = this.projection((_, b) => (b.tag === 'multivector' ? b.value : undefined));
   readonly pointDims: ReadonlyMap<string, number> = this.projection((_, b) =>
     b.tag === 'vector' && b.role !== 'state' ? b.components.length : undefined,
   );
@@ -259,6 +263,7 @@ export type ValueDefinitions = Pick<
   | 'fns'
   | 'mats'
   | 'tensors'
+  | 'multivectors'
   | 'lists'
   | 'tables'
   | 'missingData'

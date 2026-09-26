@@ -288,7 +288,9 @@ describe('§4 tensors', () => {
     expect(last(['((1,0),(0,2))']).info).toBe('= ((1, 0), (0, 2))');
     expect(last(['M = ((1,2),(3,4))', '2 M']).info).toBe('= ((2, 4), (6, 8))');
     expect(last(['(((1,2),(3,4)),((5,6),(7,8)))']).info).toBe('= (((1, 2), (3, 4)), ((5, 6), (7, 8)))');
-    expect(last(['(x,0) ⊗ (0,1)']).error).toMatch(/no picture/);
+    // A 2×2 in x and y is a matrix field (lib/glyphs.ts); a larger one is not.
+    expect(last(['(x,0) ⊗ (0,1)']).cpu?.type).toBe('tfield2d');
+    expect(last(['(x,0,0) ⊗ (0,1,0)']).error).toMatch(/no picture/);
     // Points, point lists and arrows draw as before.
     expect(last(['((1,2),(3,4),(5,6))']).cpu).toMatchObject({ type: 'plist' });
     expect(last(['A = (0,0)', 'B = (1,1)', 'vector(A, B)']).cpu).toMatchObject({ type: 'polygon' });
@@ -876,5 +878,15 @@ describe('§5 a row in u is drawn by its value type', () => {
   });
   it('a number-valued row keeps its density, even with a tuple inside', () => {
     for (const row of ['u^2', 'abs((u, v))', 'dot((1,2),(u,v))']) expect(plan([row]).type).toBe('density');
+  });
+});
+
+describe('families in space', () => {
+  it('draw up to 32 curves or surfaces, but only 8 raymarched surfaces', () => {
+    expect(last(['r = [1..32]/4', '(r cos(2pi u), r sin(2pi u), u)']).error).toBeUndefined();
+    expect(last(['r = [1..32]/8', '(u, v, r u v)']).error).toBeUndefined();
+    expect(last(['r = [1..33]', '(r cos(2pi u), r sin(2pi u), u)']).error).toMatch(/1–32 members/);
+    expect(last(['r = [1..8]', 'x^2 + y^2 + z^2 = r']).error).toBeUndefined();
+    expect(last(['r = [1..9]', 'x^2 + y^2 + z^2 = r']).error).toMatch(/at most 8 members/);
   });
 });

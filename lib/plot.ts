@@ -35,6 +35,8 @@ import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
+import { mvOfNode, mvText } from './clifford.ts';
+import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
@@ -263,7 +265,12 @@ function levelFamily(e: Expr, params: readonly string[], defined: ReadonlySet<st
 export function valueReadout(value: number): string {
   if (Number.isNaN(value)) return 'undefined';
   if (!isFinite(value)) return value > 0 ? '= ∞' : '= −∞';
-  const shown = Number(value.toPrecision(6));
+  // Six significant digits, and at most six decimals: an animated readout
+  // then keeps one width (with .eq-info's tabular figures) instead of
+  // flickering between 0.0585821 and 0.600393 and rewrapping the rows below.
+  // A value under 0.001 keeps its six digits, so a small one still reads.
+  const precise = Number(value.toPrecision(6));
+  const shown = Math.abs(value) >= 1e-3 ? Number(precise.toFixed(6)) : precise;
   return `${shown === value ? '=' : '≈'} ${shown}`;
 }
 
@@ -455,8 +462,11 @@ function classifyLowered(
       throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
-    if (!figures && members.some(m => m.needs3D) && members.length > 8)
-      throw new Error('A 3D object family has at most 8 members.');
+    // An implicit surface is raymarched across the whole screen, once per
+    // member, so its families stay small. Curves, points and meshes in space
+    // cost what they do in the plane, and share the plane's limit.
+    if (first === 'implicit3d' && members.length > 8)
+      throw new Error('A family of implicit surfaces has at most 8 members — each is raymarched across the screen.');
     const shaders = new Set(['implicit2d', 'ineq2d', 'implicit3d', 'psurface', 'vfield2d']);
     let shared: { classified: Classified; index: string } | undefined;
     if (shaders.has(first)) {
@@ -584,12 +594,77 @@ function classifyLowered(
     },
   });
 
+  // action(M): what the matrix does to the unit square, circle and axes,
+  // drawn, with the matrix read out.
+  const acting = expr.kind === 'list' ? null : actionOfNode(expr);
+  if (acting || (expr.kind === 'list' && expr.items.some(it => actionOfNode(it)))) {
+    if (!acting) throw new Error('action draws one matrix at a time — pick one, like M[1], or fix its entries.');
+    if (hasSpace || hasParam)
+      throw new Error('action takes a constant matrix — sliders and t are fine, x, y, u and v are not.');
+    const readout = done({ kind: 'tuple', values: acting.flat(), shape: [acting.length, acting.length] });
+    const drawn = classifyLowered(
+      { kind: 'family', members: actionGlyphs(acting) },
+      defined,
+      fields,
+      timeDerivative,
+    ).cls;
+    return {
+      cls: { ...drawn, object: { ...(drawn.object as MathObject & { kind: 'family' }), readout: readout.cls } },
+    };
+  }
+
+  // A multivector on a row of its own draws grade by grade, and reads out its
+  // value (docs/clifford.md); a multiset of them reads out each.
+  const mvs = expr.kind === 'list' && expr.items.length ? expr.items.map(mvOfNode) : [mvOfNode(expr)];
+  if (mvs.every(m => m !== null)) {
+    if (hasSpace || hasParam) {
+      throw new Error(
+        'A multivector in x, y, z, u or v has no picture yet — take a part of it, like grade(A, 1), to draw a field or a curve.',
+      );
+    }
+    const dim = mvs.some(m => m.dim === 3) ? 3 : 2;
+    const quat = mvs.every(m => m.quat);
+    const values = mvs.flatMap(m => Array.from({ length: 1 << dim }, (_, k) => m.data[k] ?? { kind: 'num', value: 0 }));
+    const readout = done({
+      kind: 'tuple',
+      values,
+      blades: { dim, ...(quat ? { quat: true as const } : {}) },
+      ...(expr.kind === 'list' && { count: mvs.length }),
+    });
+    if (expr.kind === 'list') return readout;
+    const glyphs = multivectorGlyphs(mvs[0]);
+    const drawn = classifyLowered({ kind: 'family', members: glyphs }, defined, fields, timeDerivative).cls;
+    return {
+      cls: {
+        ...drawn,
+        object: { ...(drawn.object as MathObject & { kind: 'family' }), readout: readout.cls },
+      },
+    };
+  }
+
   // A matrix or tensor on a row of its own — or a multiset of them — has no
   // position, so it is drawn as its values: a readout (docs/multisets.md §5).
   const tensors = expr.kind === 'list' && expr.items.length ? expr.items.map(tensorOfNode) : [tensorOfNode(expr)];
   if (tensors.every(t => t !== null)) {
+    // A 2×2 matrix over the plane is a tensor field, drawn as glyphs.
+    const [only] = tensors;
+    if (
+      hasSpace &&
+      !hasParam &&
+      !vars.has('z') &&
+      tensors.length === 1 &&
+      expr.kind !== 'list' &&
+      only.shape.length === 2 &&
+      only.shape[0] === 2 &&
+      only.shape[1] === 2
+    ) {
+      if (usesComplex(expr)) throw new Error('A matrix field must be real.');
+      return done({ kind: 'tensor-field', entries: only.data as [Expr, Expr, Expr, Expr] });
+    }
     if (hasSpace || hasParam) {
-      throw new Error('A matrix or tensor in x, y, z, u or v has no picture — apply it to a vector, like M (x, y).');
+      throw new Error(
+        'Only a 2×2 matrix in x and y draws as a field; a larger one has no picture yet — apply it to a vector, like M (x, y, z).',
+      );
     }
     const shape = tensors[0].shape;
     return done({
@@ -1102,6 +1177,24 @@ export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env:
 export function plotReadout(plot: CpuPlan, env: Record<string, number>): string | null {
   if (plot.type === 'value') return valueReadout(evaluate(plot.expr, env));
   if (plot.type === 'note') return comparisonReadout(plot, env);
+  if (plot.type === 'tuple' && plot.blades) {
+    // A multivector reads as its blades, a multiset of them as a list.
+    const each = 1 << plot.blades.dim;
+    const count = plot.count ?? 1;
+    const shown = Math.min(count, 8);
+    let approx = false;
+    const parts = Array.from({ length: shown }, (_, k) => {
+      const values = plot.values.slice(k * each, (k + 1) * each).map(e => evaluate(e, env));
+      return mvText(plot.blades!, values, v => {
+        const r = valueReadout(v);
+        if (r.startsWith('≈')) approx = true;
+        return r.replace(/^[=≈] /, '');
+      });
+    });
+    const prefix = approx ? '≈' : '=';
+    if (plot.count === undefined) return `${prefix} ${parts[0]}`;
+    return `${prefix} [${parts.join(', ')}${count > shown ? ', …' : ''}]`;
+  }
   if (plot.type === 'tuple') {
     // A tensor's values nest as the tuples that write it; a multiset of
     // them is listed like one of numbers.
@@ -1123,6 +1216,7 @@ export function plotReadout(plot: CpuPlan, env: Record<string, number>): string 
     return `${prefix} [${values.map(v => v.replace(/^[=≈] /, '')).join(', ')}${plot.values.length > 8 ? ', …' : ''}]`;
   }
   if (plot.type === 'family') {
+    if (plot.readout) return plotReadout(plot.readout, env);
     const parts = plot.members.map(m => plotReadout(m.cpu, env));
     if (parts.every(p => p !== null)) return `[${parts.slice(0, 8).join('; ')}${parts.length > 8 ? '; …' : ''}]`;
   }

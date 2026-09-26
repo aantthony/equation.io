@@ -19,8 +19,11 @@ export interface Theme {
   gridMinor: RGB;
   gridMajor: RGB;
   axis: RGB;
-  /** 3D reference-plane grid line color. */
+  /** 3D reference-plane grid line color, and how strongly its grid lines
+   *  (not its axes) are drawn: dark lines on white need half the weight of
+   *  light lines on dark to sit as far back. */
   plane: RGB;
+  planeGrid: number;
   /** Overlay canvas: axis numerals / labels. */
   label: string;
   /** Overlay canvas: stroke around plotted points. */
@@ -36,6 +39,7 @@ const LIGHT: Theme = {
   gridMajor: [0.8, 0.8, 0.8],
   axis: [0.25, 0.25, 0.25],
   plane: [0.25, 0.25, 0.25],
+  planeGrid: 0.5,
   label: '#555',
   pointOutline: '#fff',
   palette: [
@@ -55,6 +59,7 @@ const DARK: Theme = {
   gridMajor: [0.3, 0.31, 0.35],
   axis: [0.55, 0.56, 0.6],
   plane: [0.55, 0.56, 0.6],
+  planeGrid: 1,
   label: '#8b909a',
   pointOutline: '#16181d',
   palette: [

@@ -59,6 +59,14 @@ export interface VField2D {
   params?: string[];
 }
 
+/** A 2×2 matrix field: GLSL for its entries, row-major, in floats x, y. */
+export interface TField2D {
+  uniforms?: Record<string, number>;
+  entries: [string, string, string, string];
+  color: [number, number, number];
+  params?: string[];
+}
+
 export interface Fractal2D {
   uniforms?: Record<string, number>;
   /** GLSL vec2 expression for one iteration step, in terms of vec2 zc and floats x, y. */
@@ -94,6 +102,7 @@ export interface Layers2D {
   colors?: ColorField2D[];
   conformals?: Curve2D[];
   vfields?: VField2D[];
+  tfields?: TField2D[];
   ineqs?: Ineq2D[];
   projections?: Projected2D[];
   bifs?: Bif2D[];
@@ -434,6 +443,74 @@ void main() {
   a *= 0.45 * smoothstep(0.1, 0.55, travel / (2.0 * float(N) * STEP));
   if (a < 0.004) discard;
   outColor = vec4(uColor, a);
+}
+`;
+}
+
+/**
+ * A matrix field as a grid of glyphs: in each cell, the image of a circle
+ * under M at the cell's centre, lightly filled, with a spoke to M e_x so a
+ * turn or a reflection shows (a circle's image alone cannot). Cells are
+ * anchored in the plane — a power-of-two size near CELL pixels — so panning
+ * moves the glyphs with it. The glyph scale is lib/glyphs.ts glyphScale:
+ * tanh(σ₁)/σ₁, true size while small, a cell at most. An orientation-
+ * reversing matrix (det < 0) draws in the complement of the row colour.
+ * Distances are taken in pixel space, where the ring is {A w : |w| = 1}
+ * and |adj(A) q| − |det A| vanishes on it, so even a singular M (a segment)
+ * draws.
+ */
+function tfieldFrag(entries: [string, string, string, string], params?: string[]): string {
+  return `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform vec3 uColor;
+uniform float t;
+${paramDecls(params)}
+out vec4 outColor;
+${GLSL_PRELUDE}
+mat2 M(float x, float y) {
+  // Column-major: mat2(m00, m10, m01, m11).
+  return mat2(${entries[0]}, ${entries[2]}, ${entries[1]}, ${entries[3]});
+}
+const float CELL = 72.0;
+float sigma1(mat2 m) {
+  float p = dot(m[0], m[0]), q = dot(m[1], m[1]), r = dot(m[0], m[1]);
+  return sqrt(0.5 * (p + q) + sqrt(max(0.0, 0.25 * (p - q) * (p - q) + r * r)));
+}
+float segDist(vec2 q, vec2 b) {
+  float h = clamp(dot(q, b) / max(dot(b, b), 1e-12), 0.0, 1.0);
+  return length(q - b * h);
+}
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  float wx = exp2(ceil(log2(CELL * uUpp.x)));
+  vec2 w = vec2(wx, wx * uUpp.y / uUpp.x);
+  vec2 c = (floor(p / w) + 0.5) * w;
+  mat2 m = M(c.x, c.y);
+  if (any(isnan(m[0])) || any(isnan(m[1])) || any(isinf(m[0])) || any(isinf(m[1]))) discard;
+  float s1 = sigma1(m);
+  float s = s1 < 1e-9 ? 1.0 : tanh(s1) / s1;
+  // The same map in pixels: D⁻¹ M D with D = diag(uUpp).
+  mat2 mp = mat2(m[0][0], m[0][1] * uUpp.x / uUpp.y, m[1][0] * uUpp.y / uUpp.x, m[1][1]);
+  float radius = 0.42 * wx / uUpp.x;
+  mat2 a = radius * s * mp;
+  vec2 q = (p - c) / uUpp;
+  if (length(q) > radius * s * sigma1(mp) + 2.0) discard;
+  mat2 adj = mat2(a[1][1], -a[0][1], -a[1][0], a[0][0]);
+  float det = a[0][0] * a[1][1] - a[1][0] * a[0][1];
+  vec2 g = adj * q;
+  float lg = length(g);
+  float f = lg - abs(det);
+  vec2 grad = transpose(adj) * (lg > 1e-12 ? g / lg : vec2(0.0));
+  float ring = abs(f) / max(length(grad), 1e-6);
+  float alpha = max(1.0 - smoothstep(0.6, 1.6, ring), f < 0.0 ? 0.1 : 0.0);
+  float spoke = segDist(q, a[0]);
+  alpha = max(alpha, 0.85 * (1.0 - smoothstep(0.5, 1.4, spoke)));
+  if (alpha < 0.004) discard;
+  float sense = m[0][0] * m[1][1] - m[1][0] * m[0][1];
+  outColor = vec4(sense < 0.0 ? vec3(1.0) - uColor : uColor, alpha);
 }
 `;
 }
@@ -957,6 +1034,7 @@ export class Renderer2D {
     for (const c of layers.colors ?? []) drawField(c, (field, params) => colorFrag(field, params, c.locals, c.space));
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
     for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
+    for (const f of layers.tfields ?? []) drawProgram(tfieldFrag(f.entries, f.params), f.color, f.params, f.uniforms);
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
     for (const q of layers.projections ?? []) drawField(q, (f, ps) => projFrag(f, q.relation, q.slope, ps));
     for (const b of layers.bifs ?? []) drawField(b, bifFrag);

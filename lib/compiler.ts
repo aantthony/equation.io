@@ -24,7 +24,7 @@ export interface GpuGrid {
   params: string[];
 }
 export type CpuPlan =
-  | { type: 'family'; members: Array<{ cls: Classified; cpu: CpuPlan }> }
+  | { type: 'family'; members: Array<{ cls: Classified; cpu: CpuPlan }>; readout?: CpuPlan }
   | { type: 'implicit2d'; residual: Expr; equation: Expr; levels?: CpuGrid }
   | { type: 'implicit3d'; residual: Expr; equation: Expr; heightmap?: Expr }
   | { type: 'ineq2d'; constraints: Array<{ residual: Expr; strict: boolean }> }
@@ -63,6 +63,7 @@ export type CpuPlan =
       coordinates?: Expr[];
     }
   | { type: 'vfield2d'; comps: [Expr, Expr] }
+  | { type: 'tfield2d'; entries: [Expr, Expr, Expr, Expr] }
   | { type: 'vfield3d'; comps: Expr[] }
   | { type: 'pcurve'; dim: 2 | 3; comps: Expr[]; tube?: Expr; d1?: Expr[]; d2?: Expr[]; d3?: Expr[] }
   | { type: 'psurface'; comps: [Expr, Expr, Expr] }
@@ -80,7 +81,14 @@ export type CpuPlan =
   | { type: 'expect'; rv: string }
   | { type: 'prob'; body: Expr; shade?: { rv: string } & ProbBounds }
   | { type: 'value'; expr: Expr; shade?: IntShade }
-  | { type: 'tuple'; values: Expr[]; shape?: readonly number[]; count?: number; length?: number }
+  | {
+      type: 'tuple';
+      values: Expr[];
+      shape?: readonly number[];
+      count?: number;
+      blades?: { readonly dim: 2 | 3; readonly quat?: true };
+      length?: number;
+    }
   | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true };
 
 export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & (
@@ -99,6 +107,7 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'conformal2d'; field: string }
   | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'vfield2d'; fx: string; fy: string }
+  | { type: 'tfield2d'; entries: [string, string, string, string] }
   | { type: 'vfield3d'; comps: [string, string, string] }
   | { type: 'psurface'; comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] }
   | { type: 'cobweb'; curveField: string }
@@ -229,6 +238,8 @@ export function compileCpu(classified: Classified): CpuPlan {
     // Like domain coloring, these expressions are rendered per pixel on the GPU.
     case 'color-field':
       return { type: `${object.space}2d`, channels: [...object.channels] };
+    case 'tensor-field':
+      return { type: 'tfield2d', entries: object.entries.map(real) as [Expr, Expr, Expr, Expr] };
     case 'vector-field':
       return object.components.length === 2
         ? { type: 'vfield2d', comps: object.components.map(real) as [Expr, Expr] }
@@ -333,6 +344,7 @@ export function compileCpu(classified: Classified): CpuPlan {
         shape: object.shape,
         count: object.count,
         length: object.length,
+        ...(object.blades ? { blades: object.blades } : {}),
       };
     case 'note':
       return {
@@ -343,7 +355,11 @@ export function compileCpu(classified: Classified): CpuPlan {
         ...(object.identity && { identity: true as const }),
       };
     case 'family':
-      return { type: 'family', members: object.members.map(cls => ({ cls, cpu: compileCpu(cls) })) };
+      return {
+        type: 'family',
+        members: object.members.map(cls => ({ cls, cpu: compileCpu(cls) })),
+        ...(object.readout ? { readout: compileCpu(object.readout) } : {}),
+      };
   }
 }
 
@@ -483,6 +499,12 @@ export function compileGpu(classified: Classified): GpuPlan {
     }
     case 'scalar-field':
       return { type: 'scalar2d', params, field: scalar(object.expr) };
+    case 'tensor-field':
+      return {
+        type: 'tfield2d',
+        params,
+        entries: object.entries.map(e => toGLSL(sub(e))) as [string, string, string, string],
+      };
     case 'color-field':
       return { type: `${object.space}2d`, space: object.space, params, ...colorProgram(object.channels, params) };
     case 'vector-field':
@@ -595,6 +617,8 @@ export function shaderKey(plan: GpuPlan): string {
       return JSON.stringify([plan.type, plan.params, plan.step, plan.seed, plan.maxIter]);
     case 'vfield2d':
       return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy]);
+    case 'tfield2d':
+      return JSON.stringify([plan.type, plan.params, plan.entries]);
     case 'vfield3d':
       return JSON.stringify([plan.type, plan.params, plan.comps]);
     case 'psurface':
@@ -615,7 +639,10 @@ export function cpuStructureKey(plan: CpuPlan): string {
   let structure: unknown;
   switch (plan.type) {
     case 'family':
-      structure = plan.members.map(member => cpuStructureKey(member.cpu));
+      structure = [
+        plan.members.map(member => cpuStructureKey(member.cpu)),
+        plan.readout && cpuStructureKey(plan.readout),
+      ];
       break;
     case 'implicit2d':
     case 'implicit3d':
@@ -677,6 +704,9 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'psurface':
       structure = expressions(plan.comps);
       break;
+    case 'tfield2d':
+      structure = expressions(plan.entries);
+      break;
     case 'pcurve':
       structure = [expressions(plan.comps), plan.tube && exprKey(plan.tube)];
       break;
@@ -684,7 +714,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = expressions(plan.values);
       break;
     case 'tuple':
-      structure = [expressions(plan.values), plan.length];
+      structure = [expressions(plan.values), plan.length, plan.shape, plan.count, plan.blades];
       break;
     case 'plist':
       structure = [plan.dim, plan.pts.map(expressions)];

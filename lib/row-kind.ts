@@ -33,6 +33,7 @@ export interface KindNames {
   intervals?: { has(name: string): boolean };
   mats?: { has(name: string): boolean };
   tensors?: { has(name: string): boolean };
+  multivectors?: { has(name: string): boolean };
   lists?: { has(name: string): boolean };
   points?: { has(name: string): boolean };
 }
@@ -64,6 +65,8 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   pregion: 'filled 2D region traced by two parameters (u, v, or intervals), each over its range',
   projected2d: 'shaded 2D region swept by a family over an interval, like y = sin(a x) for a = interval(1, 2)',
   vfield2d: '2D vector field, drawn as flowing streamlines',
+  tfield2d:
+    '2D matrix (tensor) field, drawn as a grid of glyphs: each the image of a small circle under the matrix, with a spoke where e_x goes',
   vfield3d: '3D vector field',
   point: 'a point',
   polygon: 'geometric figure (segment, polyline, vector arrow, polygon, circle, …)',
@@ -104,6 +107,7 @@ function constKind(name: string, names: KindNames): string {
   if (names.intervals?.has(name)) return 'interval';
   if (names.mats?.has(name)) return 'matrix';
   if (names.tensors?.has(name)) return 'tensor';
+  if (names.multivectors?.has(name)) return 'multivector';
   if (names.points?.has(name)) return 'point';
   if (names.lists?.has(name)) return 'list';
   return 'const';
