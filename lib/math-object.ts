@@ -28,7 +28,7 @@ export type MathObject =
       readonly kind: 'curve';
       readonly form: 'graph';
       readonly rhs: Expr;
-      readonly equation?: Expr;
+      readonly equation: Expr;
       readonly levels?: LevelSetSpec;
     }
   | {
@@ -44,6 +44,19 @@ export type MathObject =
   | { readonly kind: 'intersection'; readonly residuals: readonly [Expr, Expr] }
   | {
       readonly kind: 'region';
+      readonly form?: undefined;
+      readonly constraints: ReadonlyArray<{ readonly residual: Expr; readonly strict: boolean }>;
+    }
+  /** The filled region two parameters trace, u and v each over [0, 1]:
+   *  `(u cos(2 pi v), u sin(2 pi v))` is the unit disc. */
+  | { readonly kind: 'region'; readonly form: 'parametric'; readonly coordinates: readonly [Expr, Expr] }
+  /** The region a family over an interval sweeps (lib/plot.ts
+   *  projectedRegion): the points where some u in [0, 1] makes the residual
+   *  vanish (`eq`), or every constraint negative (`ineq`). */
+  | {
+      readonly kind: 'region';
+      readonly form: 'projected';
+      readonly relation: 'eq' | 'ineq';
       readonly constraints: ReadonlyArray<{ readonly residual: Expr; readonly strict: boolean }>;
     }
   | { readonly kind: 'scalar-field'; readonly expr: Expr }
@@ -130,7 +143,14 @@ export type MathObject =
       readonly counts: Float64Array;
       readonly width: number;
     }
-  | { readonly kind: 'distribution'; readonly form: 'density' | 'pmf' | 'expect'; readonly rv: string }
+  /** `mass` multiplies the drawn density or pmf: the length of a row's
+   *  intervals, whose multiplicity is a measure, not a probability. */
+  | {
+      readonly kind: 'distribution';
+      readonly form: 'density' | 'pmf' | 'expect';
+      readonly rv: string;
+      readonly mass?: Expr;
+    }
   | {
       readonly kind: 'distribution';
       readonly form: 'prob';
@@ -138,6 +158,19 @@ export type MathObject =
       readonly shade?: Readonly<{ rv: string } & ProbBounds>;
     }
   | { readonly kind: 'value'; readonly expr: Expr; readonly shade?: Readonly<IntShade> }
+  /** A tuple of more than 3 numbers: values at positions, with no picture
+   *  (2 or 3 of them are a point). Shown as its readout (docs/multisets.md §3).
+   *  A matrix or tensor is a tuple of tuples, its values row-major under
+   *  `shape`; `count` of them back to back are a multiset of tensors (§4).
+   *  `length`: a long tuple of numbers (a sorted column) keeps only the
+   *  values its readout shows, and says how many it has. */
+  | {
+      readonly kind: 'tuple';
+      readonly values: readonly Expr[];
+      readonly shape?: readonly number[];
+      readonly count?: number;
+      readonly length?: number;
+    }
   // `constant`: the row reads like a slider named e, pi or tau (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
@@ -171,7 +204,7 @@ export function publicKind(object: MathObject) {
     case 'intersection':
       return 'spacecurve';
     case 'region':
-      return 'ineq2d';
+      return object.form === 'parametric' ? 'pregion' : object.form === 'projected' ? 'projected2d' : 'ineq2d';
     case 'scalar-field':
       return 'scalar2d';
     case 'color-field':
@@ -210,6 +243,7 @@ export function publicKind(object: MathObject) {
     case 'system':
     case 'histogram':
     case 'value':
+    case 'tuple':
     case 'note':
     case 'family':
     case 'automaton':
@@ -260,6 +294,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'histogram':
     case 'distribution':
     case 'value':
+    case 'tuple':
     case 'note':
       return false;
   }

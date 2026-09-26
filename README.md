@@ -112,7 +112,9 @@ the server, which may log it; the fragment never does.
   `{0 < x < 1: 1, 0}`, and a bare condition counts 1 (`{x > 0, 5}`)
 - `y = {0 < x < 2: x^2}` — a domain restriction: with no default, the value
   is undefined outside the conditions, so nothing is drawn there
-- `sin(x)cos(y)` — a bare expression in x, y is a 2D scalar/density field
+- `sin(x)cos(y)` — a bare expression in x, y is a 2D scalar field, shaded
+  in the row color where positive and its complement where negative. `sin(x)`
+  is a field too (constant along y): the curve is `y = sin(x)`
 - `2+2`, `sqrt(a)`, `|A - B|` — a bare number draws nothing and reads out
   `= 4` under the row, live with sliders and `t`; write `y = 4` for the line
 
@@ -187,14 +189,16 @@ the server, which may log it; the fragment never does.
   equations or simulation restart, and are local to the current session.
 - `p(0) = ([0..299]/30, 0, 0)` — a *state family*: a list of starting values
   runs the system once per element (up to 1024), and states coupled to it run
-  along. `p` then draws a cloud of moving points, `p[1]` is one run, and
-  `mean(p_1)` reduces across runs
+  along. `p` then draws a cloud of moving points and `mean(p_1)` reduces
+  across runs. Started from a tuple, `p(0) = (sort([0..299])/30, 0, 0)`, the
+  runs are in order and `p[1]` is the first
 - `p(50..400)` — an *orbit*: where the state goes between those times,
   integrated ahead of time with the live simulation's own steps
   ([`lib/orbit.ts`](lib/orbit.ts)), so moving points ride their orbit. A
-  family draws one path per run (`p[1](50..400)` draws one); a scalar state
-  plots against time, `th(0..20)` being the curve (t, th). With both, the
-  Rössler attractor is a thin band of orbit with particles flowing along it
+  family draws one path per run (`p[1](50..400)` draws one, when the runs
+  start from a tuple); a scalar state plots against time, `th(0..20)` being
+  the curve (t, th). With both, the Rössler attractor is a thin band of
+  orbit with particles flowing along it
 
 **Custom coordinates and complex roots**
 
@@ -209,9 +213,10 @@ the server, which may log it; the fragment never does.
 
 **Matrices**
 
-- `M = [(a, b), (c, d)]` — a 2×2 or 3×3 matrix; `det(M)`, `trace(M)`, the
-  matvec `M v`, and `solve(M, v)` (Cramer's rule) expand symbolically at
-  lowering time, see [`lib/mat.ts`](lib/mat.ts). So `(x', y') = A (x, y)` is a
+- `M = ((a, b), (c, d))` — a tuple of rows is a 2×2 or 3×3 matrix (a
+  bracket of tuples, `[(a, b), (c, d)]`, is two points); `det(M)`,
+  `trace(M)`, the matvec `M v`, and `solve(M, v)` (Cramer's rule) expand
+  symbolically at lowering time, see [`lib/mat.ts`](lib/mat.ts). So `(x', y') = A (x, y)` is a
   phase portrait with sliders in the entries, and `om' = solve(M, f)`
   integrates the double pendulum in the Lagrangian form M(θ)ω′ = f it is
   derived in
@@ -219,6 +224,8 @@ the server, which may log it; the fragment never does.
 **Parametric curves and surfaces**
 
 - `(2cos(2pi u), 2sin(2pi u), 3u)` — parametric curve, u ∈ (0,1)
+- `u^2` — a bare row in u, v alone draws its values: the density of u² for
+  u uniform on [0, 1]
 - `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))` —
   parametric surface, u,v ∈ (0,1); per-fragment Newton ray/surface
   intersection with a glossy specular material
@@ -232,8 +239,9 @@ the server, which may log it; the fragment never does.
   for a slider, default ½). With `x` free on the right side, x becomes the
   parameter axis and the plot is the orbit/bifurcation diagram:
   `a_{n+1} = x a_n (1 - a_n)` is the logistic bifurcation
-- `[3, 1, 4, 1, 5]` — a data list: dots at (k, value), k = 1, 2, …; the row's
-  bar toggle draws it as a bar chart. `[(1, 2), (3, 4)]` is a scatter of points
+- `[3, 1, 4, 1, 5]` — a data list: a dot plot on the number line, each value
+  at x = value with its copies stacked (1 twice: dots at (1, 1) and (1, 2)).
+  `[(1, 2), (3, 4)]` is a scatter of points
 
 **Regression**
 

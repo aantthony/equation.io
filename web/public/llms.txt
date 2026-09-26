@@ -60,10 +60,10 @@ Examples (paste-ready):
 - [Thébault's theorem (squares on a parallelogram)](https://equation.io/#A%20%3D%20(0%2C%200);B%20%3D%20(4%2C%200.5);D%20%3D%20(1%2C%202.5);C%20%3D%20B%20%2B%20D%20-%20A;polygon(A%2C%20B%2C%20C%2C%20D);square(B%2C%20A);square(C%2C%20B);square(D%2C%20C);square(A%2C%20D);P%20%3D%20midpoint(A%2C%20B)%20-%20perp(B%20-%20A)%2F2;Q%20%3D%20midpoint(B%2C%20C)%20-%20perp(C%20-%20B)%2F2;R%20%3D%20midpoint(C%2C%20D)%20-%20perp(D%20-%20C)%2F2;S%20%3D%20midpoint(D%2C%20A)%20-%20perp(A%20-%20D)%2F2;polygon(P%2C%20Q%2C%20R%2C%20S)): `A = (0, 0); B = (4, 0.5); D = (1, 2.5); C = B + D - A; polygon(A, B, C, D); square(B, A); square(C, B); square(D, C); square(A, D); P = midpoint(A, B) - perp(B - A)/2; …; polygon(P, Q, R, S)` — drag A, B or D; the square centers stay a square
 - [Normal probability](https://equation.io/#m%20%3D%201;s%20%3D%200.5;X%20~%20Normal(m%2C%20s);P(0%20%3C%20X%20%3C%202)): `m = 1; s = 0.5; X ~ Normal(m, s); P(0 < X < 2)` — the density with the area between 0 and 2 shaded; drag m or s and the probability follows
 - [Swinging pendulum (integrated state)](https://equation.io/#th'%20%3D%20om;om'%20%3D%20-sin(th)%20-%20om%2F8;th(0)%20%3D%203;bob%20%3D%20(sin(th)%2C%20-cos(th));segment((0%2C%200)%2C%20bob);bob): `th' = om; om' = -sin(th) - om/8; th(0) = 3; bob = (sin(th), -cos(th)); segment((0, 0), bob); bob` — th is the angle, om the angular velocity; segment() draws the rod, the named point draws the bob
-- [Double pendulum](https://equation.io/#g%20%3D%209.8;L1%20%3D%201;L2%20%3D%201;m1%20%3D%201;m2%20%3D%201;M%20%3D%20%5B((m1%2Bm2)%20L1%2C%20m2%20L2%20cos(th_1%20-%20th_2))%2C%20(L1%20cos(th_1%20-%20th_2)%2C%20L2)%5D;f%20%3D%20(-m2%20L2%20om_2%5E2%20sin(th_1%20-%20th_2)%20-%20(m1%2Bm2)%20g%20sin(th_1)%2C%20L1%20om_1%5E2%20sin(th_1%20-%20th_2)%20-%20g%20sin(th_2));th'%20%3D%20om;om'%20%3D%20solve(M%2C%20f);th(0)%20%3D%20(2.5%2C%202.4);b1%20%3D%20(L1%20sin(th_1)%2C%20-L1%20cos(th_1));b2%20%3D%20b1%20%2B%20(L2%20sin(th_2)%2C%20-L2%20cos(th_2));segment((0%2C%200)%2C%20b1);segment(b1%2C%20b2);b1;b2): `M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]; f = (…); th' = om; om' = solve(M, f); th(0) = (2.5, 2.4); …` — the Lagrangian form M(θ)ω′ = f: th and om are 2-vector states with components th_1, th_2; solve() is Cramer's rule; segment()s between named bob points draw the linkage
+- [Double pendulum](https://equation.io/#g%20%3D%209.8;L1%20%3D%201;L2%20%3D%201;m1%20%3D%201;m2%20%3D%201;M%20%3D%20(((m1%2Bm2)%20L1%2C%20m2%20L2%20cos(th_1%20-%20th_2))%2C%20(L1%20cos(th_1%20-%20th_2)%2C%20L2));f%20%3D%20(-m2%20L2%20om_2%5E2%20sin(th_1%20-%20th_2)%20-%20(m1%2Bm2)%20g%20sin(th_1)%2C%20L1%20om_1%5E2%20sin(th_1%20-%20th_2)%20-%20g%20sin(th_2));th'%20%3D%20om;om'%20%3D%20solve(M%2C%20f);th(0)%20%3D%20(2.5%2C%202.4);b1%20%3D%20(L1%20sin(th_1)%2C%20-L1%20cos(th_1));b2%20%3D%20b1%20%2B%20(L2%20sin(th_2)%2C%20-L2%20cos(th_2));segment((0%2C%200)%2C%20b1);segment(b1%2C%20b2);b1;b2): `M = (((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)); f = (…); th' = om; om' = solve(M, f); th(0) = (2.5, 2.4); …` — the Lagrangian form M(θ)ω′ = f: th and om are 2-vector states with components th_1, th_2; solve() is Cramer's rule; segment()s between named bob points draw the linkage
 - [Orbit (vector gravity)](https://equation.io/#r'%20%3D%20vel;vel'%20%3D%20-9%20r%2F%7Cr%7C%5E3;r(0)%20%3D%20(2%2C%200);vel(0)%20%3D%20(0%2C%201.5);segment((0%2C%200)%2C%20r);r;(0%2C%200)): `r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); segment((0, 0), r); r; (0, 0)` — vector states with point arithmetic; the bare state name draws as a moving point
-- [Rössler attractor (state family + orbit)](https://equation.io/#a%20%3D%200.2;b%20%3D%200.2;c%20%3D%205.7;k%20%3D%204;p'%20%3D%20k%20(-p_2%20-%20p_3%2C%20p_1%20%2B%20a%20p_2%2C%20b%20%2B%20p_3%20(p_1%20-%20c));s%20%3D%202pi%20%5B0..299%5D%2F300;p(0)%20%3D%20(8cos(s)%2C%208sin(s)%2C%200);p%5B1%5D(10..100);p;camera(-0.9%2C%200.35%2C%2045%2C%20(0%2C%200%2C%207))): `p' = k (-p_2 - p_3, p_1 + a p_2, b + p_3 (p_1 - c)); s = 2pi [0..299]/300; p(0) = (8cos(s), 8sin(s), 0); p[1](10..100); p` — a list of starting values runs 300 copies of the system; `p[1](10..100)` draws one run's path over that time as the attractor, and `p` the 300 particles flowing along it; k speeds the flow up
-- [Matrix phase portrait](https://equation.io/#a%20%3D%20-1;b%20%3D%20-1%2F4;A%20%3D%20%5B(0%2C%201)%2C%20(a%2C%20b)%5D;(x'%2C%20y')%20%3D%20A%20(x%2C%20y)): `a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y)` — a linear system as its literal matrix, sliders in the entries
+- [Rössler attractor (state family + orbit)](https://equation.io/#a%20%3D%200.2;b%20%3D%200.2;c%20%3D%205.7;k%20%3D%204;p'%20%3D%20k%20(-p_2%20-%20p_3%2C%20p_1%20%2B%20a%20p_2%2C%20b%20%2B%20p_3%20(p_1%20-%20c));s%20%3D%202pi%20sort(%5B0..299%5D)%2F300;p(0)%20%3D%20(8cos(s)%2C%208sin(s)%2C%200);p%5B1%5D(10..100);p;camera(-0.9%2C%200.35%2C%2045%2C%20(0%2C%200%2C%207))): `p' = k (-p_2 - p_3, p_1 + a p_2, b + p_3 (p_1 - c)); s = 2pi sort([0..299])/300; p(0) = (8cos(s), 8sin(s), 0); p[1](10..100); p` — a tuple of starting values runs 300 copies of the system, in order; `p[1](10..100)` draws one run's path over that time as the attractor, and `p` the 300 particles flowing along it; k speeds the flow up
+- [Matrix phase portrait](https://equation.io/#a%20%3D%20-1;b%20%3D%20-1%2F4;A%20%3D%20((0%2C%201)%2C%20(a%2C%20b));(x'%2C%20y')%20%3D%20A%20(x%2C%20y)): `a = -1; b = -1/4; A = ((0, 1), (a, b)); (x', y') = A (x, y)` — a linear system as its literal matrix, sliders in the entries
 - [Poisson: strict versus non-strict](https://equation.io/#m%20%3D%204;X%20~%20Poisson(m);P(X%20%3C%203);P(X%20%3C%3D%203);P(X%20%3D%203)): `m = 4; X ~ Poisson(m); P(X < 3); P(X <= 3); P(X = 3)` — a discrete variable draws its pmf as stems; each P(…) row highlights exactly the stems it counts, so `<` stops at 2, `<=` takes the stem at 3, and `P(X = 3)` is that one stem
 - [Two dice](https://equation.io/#X%20~%20DiscreteUniform(1%2C%206);Y%20~%20DiscreteUniform(1%2C%206);S%20%3D%20X%20%2B%20Y;P(S%20%3E%3D%2010);P(X%20%3E%20Y);P(X%20%3E%3D%20Y);E(S)): `X ~ DiscreteUniform(1, 6); Y ~ DiscreteUniform(1, 6); S = X + Y; P(S >= 10); P(X > Y); P(X >= Y); E(S)` — arithmetic over discrete variables is exact: the sum's pmf is the triangle on 2…12, drawn as stems; `P(X > Y)` = 15/36 and `P(X >= Y)` = 21/36 differ by the ties, `P(X = Y)`
 - [Central limit theorem](https://equation.io/#X1%20~%20Uniform%280%2C%201%29;X2%20~%20Uniform%280%2C%201%29;X3%20~%20Uniform%280%2C%201%29;X4%20~%20Uniform%280%2C%201%29;S%20%3D%20X1%20%2B%20X2%20%2B%20X3%20%2B%20X4;Z%20~%20Normal%282%2C%20sqrt%281%2F3%29%29;P%28S%20%3E%203%29): `X1 ~ Uniform(0, 1); X2 ~ Uniform(0, 1); X3 ~ Uniform(0, 1); X4 ~ Uniform(0, 1); S = X1 + X2 + X3 + X4; Z ~ Normal(2, sqrt(1/3)); P(S > 3)` — the sum of four uniforms hugs the matching normal
@@ -111,7 +111,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Operators: `+ - * / ^`, parentheses, unary minus. Multiplication is
   implicit: `2x`, `x y`, `2cos(t)`, `a(x-1)` all work. `·` and `×` multiply
   numbers too, and between two vectors are the dot and cross product (see
-  Vector calculus).
+  Vector calculus); `⊗` and `∧` are the outer and wedge products (see
+  Tensors). All four bind like `*`.
 - Absolute value bars: `|x|`, including nested/multiplied forms like `2|x-1|`.
 - Unicode: Greek letters are ordinary names (`θ = 1` makes a θ slider; `Δx`
   is a name like `dx`), superscript digits are exponents (`x³` is `x^3`,
@@ -120,13 +121,16 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   component and `a₃` a sequence's third term. A single name or number in
   braces is the same subscript: `T_{c}` is `T_c`, `a_{10}` is `a_10`.
   `·`, `⋅`, `×`, `÷`, `−`, `≤`,
-  `≥`, `≠` mean their ASCII counterparts. π and τ never join a longer name,
+  `≥`, `≠` mean their ASCII counterparts (`⊗` is `outer(a, b)`, `∧` is
+  `wedge(a, b)`; the editor types them from `\otimes` and `\wedge`). π and τ never join a longer name,
   so `2πr` is 2·π·r. In the editor, typing `\pi`, `\theta`, `\nabla`, …
   inserts the symbol itself, and a `\` before any built-in function name
   simply drops (`\sin(x)` → `sin(x)`, `\trail` → `trail`), so `\` also works
   as a function search.
-- Constants: `pi`, `tau`, `e` (π and τ also parse directly). Imaginary unit
-  `i` in complex expressions.
+- Constants: `pi`, `tau`, `e` (π and τ also parse directly), and the unit
+  vectors `e_x`, `e_y`, `e_z` = `(1,0,0)`, `(0,1,0)`, `(0,0,1)` (always 3D,
+  so a row using one is a 3D scene; defining `e_x` yourself replaces it).
+  Imaginary unit `i` in complex expressions.
 - Functions: sin cos tan asin acos atan atan2(y,x) sinh cosh tanh sech coth
   asinh acosh atanh sqrt abs exp ln (natural) log (base 10) floor ceil round
   min max mod sign fract sinc gamma factorial, complex helpers re im arg conj,
@@ -140,7 +144,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Function names are
   case-insensitive: `Sin(x)`, `SQRT(x)` and `sin(x)` are the same call. Always
   use parentheses for arguments — write `sin(x)`, not `sin x`.
-- Factorial: postfix `!` — `5!` is 120, `x!` plots as Γ(x+1), `2^3!` is 2^6.
+- Factorial: postfix `!` — `5!` is 120, `y = x!` plots Γ(x+1), `2^3!` is 2^6.
   Non-integers use the Gamma function; negative integers are undefined.
 - Piecewise: `{x < 0: -x, x >= 0: x^2}` — `cond: value` cases tried in order,
   with an optional last bare value as the default (`{0 < x < 1: 1, 0}`).
@@ -178,7 +182,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   Along x, y, or z it works through lists too: with `N = [1..4]`,
-  `d/dx x^N` is a family, and `d/dx [sin(x), x^2]` is `[cos(x), 2x]`.
+  `y = d/dx x^N` is a family of curves, and `y = d/dx [sin(x), x^2]` draws
+  `y = cos(x)` and `y = 2x`.
   Along t a named list is refused (its elements may use t).
 - Sums and products: `sum(n=1..N, sin(n x)/n)` and `prod(k=1..N, k)`, also
   written `Σ`/`Π`. The bracket form `sum[n=1..N] sin(n x)/n` takes everything
@@ -186,7 +191,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   outside). Bounds must be numbers or constants defined in another row (not
   `t`), because the sum is expanded symbolically before compiling — which makes
   `N` a slider that adds terms as you drag it. A bound may also be a named
-  list of numbers: with `N = [3..5]`, `sum(n=1..N, sin(n x)/n)` draws one
+  list of numbers: with `N = [3..5]`, `y = sum(n=1..N, sin(n x)/n)` draws one
   partial sum per element (a family that pairs with other uses of `N`).
   Inside a sum over `n`, a sequence term `a_n` is each term: `sum(n=1..N, a_n)`.
 - Integrals: `int[a..b] f(x) dx` (definite) and `int(f(x) dx)`
@@ -226,9 +231,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   of one data file share its rows, so `(data.x, data.y)` pairs up. To pair
   literal values write the points out: `P = [(1,4), (2,5), (3,6)]`; then
   `P.x` and `P.y` (and `P.z`) are the lists of their coordinates, paired the
-  same way — `(P.x, 2 P.y)` is 3 points, not 9.
+  same way — `(P.x, 2 P.y)` is 3 points, not 9. Brackets add: a list
+  inside a list contributes its elements, so with `n = [1,2]`, `[n, 3, 5]`
+  is `[1, 2, 3, 5]` (a new list, independent of `n`), while `[n]` is `n`
+  itself. `[]` is the empty list: combined with anything it gives `[]`, and
+  `count([])` and `total([])` are 0.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
-  `stdev(L)` (sample), `median(L)`, `sort(L)`. A row that reduces to a
+  `stdev(L)` (sample), `median(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
   expand symbolically, so elements may animate (`mean([sin(t), 2])`);
   stdev/median/sort need constant elements. Over a column, a missing cell is
@@ -239,21 +248,42 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   one thing you may do to it is scale it: the plane has a single scale for
   both axes, so counts in the thousands need `hist(L, 40) / 800` to share a
   view with values in the units. Missing values are left out.
-- List indexing is 1-based, on named lists: with `L = [5, 6, 7]` in a row
-  above, `L[2]` is 6 and `L[k]` takes k from a slider. A list of indices
-  picks one element each: `L[2..3]` is `[6, 7]`, `L[[3, 1]]` is `[7, 5]`, and
-  `L[N]` for a named list `N` pairs with `N`. Only a named list
-  indexes — `x[2]` is plain multiplication (2x).
+- Order lives in tuples. A list `[ … ]` has no order — `[3, 1, 2]` and
+  `[1, 2, 3]` are the same list — so anything that needs one takes a tuple
+  `( … )`. `sort(L)` is L's values in ascending order, as a tuple, and
+  `sort(P, key)` orders a list by a key written in that list: `sort(P, P.x)`,
+  `sort((s, sin(s)), s)`. A tuple of 2 or 3 numbers is a point
+  (`sort([3, 1, 2])` draws the point (1, 2, 3)); a longer one reads out,
+  `sort([5, 3, 8, 1, 2])` = (1, 2, 3, 5, 8), and draws nothing. Tuples of one
+  length combine position by position, like vectors: `sort(A) + sort(B)`. A
+  tuple of points, `T = ((0, 0), (1, 1), (2, 0))`, is one value in order —
+  `polyline(T)` walks it — and a square one is also a matrix.
+- Indexing is 1-based and needs a tuple: with `T = sort([7, 5, 6])` in a row
+  above, `T[2]` is 6 and `T[k]` takes k from a slider. `T[2..3]` is (6, 7),
+  and a list of indices picks one element each: `T[[3, 1]]` is `[7, 5]`, and
+  `T[N]` for a named list `N` pairs with `N`. `L[2]` on a list `[ … ]` is an
+  error that says to sort it first; a filter `L[L > 2]` is no index and
+  works on any list. A named tuple or list indexes, and so does a sort
+  call, `sort(L)[2]`; `x[2]` is plain multiplication (2x).
 - Data columns: with `person = open("people.csv", 3a7f9c1d2e4b)` in a row
   above (see Definitions), `person.age` is a list of that column's numbers.
   Everything lists can do applies: `(person.age, person.height)` is a
-  scatter, `mean(person.age)` a readout, `person.age[2]` one value. Naming
+  scatter, `mean(person.age)` a readout. File order is not part of the
+  data: each record's position in the file is `person.row` (`row_index`
+  when the file has its own `row` column), so `sort(person.age, person.row)`
+  is the column in file order, and
+  `polyline(sort((person.x, person.y), person.row))` draws a series in it
+  (or sort by the x column itself). Naming
   works throughout — `half = person.age / 2`, `P = (person.age, person.height)`
   — and a named scatter is still a scatter. Only the
   device that dropped the file has its data — the link carries the file's
   name and hash, not its bytes.
-- Filters keep the elements a comparison selects: `L[L > 2]`,
-  `person.height[person.age >= 18]` (one column chosen by another — rows stay
+- A comparison over a list keeps the members it holds for: `L > 2` (or
+  `L[L > 2]`) is the elements above 2, `count(L > 2)` how many. It keeps
+  members of the list, not the values compared: `L^2 < 4` keeps elements
+  of L, `P.x < 0` keeps points of P. Inside `{…}` a comparison is still one
+  condition per element: `{L > 2: 1, 0}`. Index by a comparison to choose
+  one column by another: `person.height[person.age >= 18]` (rows stay
   aligned), chains, `person.age[30 <= person.age < 40]`, and text,
   `person.height[person.city == "NYC"]` (`!=` too, and either quote).
   Filtering a whole file names a new one,
@@ -284,12 +314,57 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 ## Variables (what a row means)
 
 - `x`, `y`: the 2D plane. `y = f(x)`, or any implicit equation in x and y
-  (`x^2+y^2=4`), renders as a curve.
+  (`x^2+y^2=4`), renders as a curve. A row is drawn per pixel when it
+  depends on x or y, so a bare expression like `sin(x)` is a scalar field,
+  not a curve: write `y = sin(x)` for the graph.
 - `z`: using z switches to 3D. `z = sin(x)cos(y)` is a surface;
-  `x^2+y^2+z^2=9` is an implicit 3D surface.
+  `x^2+y^2+z^2=9` is an implicit 3D surface. A bare expression in x, y, z is
+  a field in space, which cannot be drawn yet (an error): write `… = 0` for
+  its surface.
 - `t`: time in seconds. Any row mentioning `t` animates, e.g.
   `y = sin(x - 2t)`.
-- `u`, `v`: parametric parameters, each ranging over (0, 1).
+- `u`, `v`: parametric parameters, each ranging over (0, 1). A row whose value
+  is a point traces curves and surfaces, however it is written: `(u, u^2)`,
+  `(0,0,1) u` and `u e_z` are all curves; a complex expression in u alone is
+  a path (`exp(i 2 pi u)`). A bare real row in u and v alone does not depend
+  on the plane, so it draws its values: the numbers it takes as u and v run
+  over [0, 1], as a density curve, like a random variable — `u` is the flat
+  line at height 1 over [0, 1], `u^2` has density 1/(2√x), `u v` has −ln(x).
+- `interval(a, b)`: every real number from a to b (a < b; the bounds may use
+  sliders and t). `[1..2]` is only the whole numbers 1 and 2. An interval is
+  a parameter like u and v, over [a, b]. Every mention of one name is the
+  same number, so with `r = interval(1, 2)`, `r + r` is 2r; each written
+  `interval(…)` is a separate one, so `interval(0, 1) + interval(0, 1)` is
+  the sum of two. In a tuple it traces with u and v:
+  `(r cos(2 pi u), r sin(2 pi u))` is a filled annulus, `(r, r^2)` a curve
+  over [1, 2]. A row in x and y over one interval is a family, drawn as the
+  region its members sweep: with `a = interval(1, 2)`, `y = sin(a x)` shades
+  every point some a ∈ [1, 2] puts on its curve, and `y < a x` every point
+  below some member. At most one interval in such a row, and a bare field
+  (`sin(a x)`) is an error: set it equal to something. Alone, an interval row
+  draws its values like `u` does, against length rather than probability:
+  `interval(0, 10)` is the line at height 1 over [0, 10], and
+  `interval(0, 1)^2` has density 1/(2√x).
+- Reductions over continuous sets are integrals: `count` is the measure,
+  `total` the integral, `mean` their ratio. Over u, v and intervals the
+  measure is length: `total(u^2)` is 1/3, `count(interval(1, 3))` is 2,
+  `count((u, u^2))` is 1 (a parametric set carries its parameter's length).
+  Over x (all of ℝ) `total(exp(-x^2))` is √π, `count(x)` is ∞, and a total
+  that does not converge is an error. A filter is the set it keeps, measured
+  in its own dimension: `count(x^2 + y^2 < 1)` is the area π,
+  `count(x^2 + y^2 = 1)` the length 2π, `count(x^2 = 2)` the 2 roots; other
+  reductions take its members, so `total(0 < x < 1)` is 1/2 (a region's
+  members are points: use `count` for its area). Reduce
+  a value over a set with `{conditions: value}`, the conditions joined by
+  "and" (only here may one be an equation): `total({x^2 + y^2 < 1: x y})`,
+  `mean({y = x^2, 0 < x < 1: y})`. The measure depends on the set, not the
+  spelling (`2y = 2x^2` agrees with `y = x^2`), and never on the view: an
+  unbounded region counts ∞, and a count of roots that cannot all be found
+  (`sin(x) = 0`) is an error — restrict it, `count({-10 < x < 10, sin(x) = 0})`.
+  `min`/`max` work over u, v and intervals and over points; `stdev`,
+  `median` and `hist` of a continuous set, sets in space (x, y, z) and totals
+  over unbounded plane regions are errors. A list in the argument keeps the
+  list reduction: with `L = [1, 2, 3]`, `y = total(L x)` is the line y = 6x.
 - `w`: the complex plane point x + iy. A complex-valued expression in `w`
   (e.g. `ln(w-2) - ln(w+2)`) draws field lines and equipotentials. Wrapping it
   in `domain(…)` or `conformal(…)` picks a different view of the same function.
@@ -301,14 +376,18 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Curve: an equation in x and y — `y = x^2`, `(x^2+y^2)^2 = 8(x^2-y^2)`.
 - Region: inequalities, including chains — `y < x/2 + 1`,
   `4 <= x^2 + y^2 <= 9`. Non-strict comparisons draw a solid boundary.
-- Scalar field: a bare expression in x, y — `sin(x)cos(y)` — shaded by value.
+- Scalar field: a bare expression in x and/or y — `sin(x)cos(y)`, or `sin(x)`
+  (constant along y) — shaded by value: the row color where it is positive,
+  the color's complement where negative, stronger the larger it is. There is
+  no implicit graph; a row in x alone reads out how to write its curve
+  (`y = sin(x)`). A list of fields (`a = [1, 2]; sin(a x)`) is an error: write
+  `y = sin(a x)` for the curves.
 - Value: a bare expression with no plot coordinate — `2+2`, `sqrt(a)` with a
   slider a, `|A - B|` between named points, `int[0..1] x^2 dx`, `sin(t)` —
   draws nothing (a lone definite integral shades its area) and reads out `= 4` (or `≈ 1.41421`) under the row, live as
   sliders, states and t move. The tool result reports it as kind `value`
   with the number in `value`. A number is not assumed to mean `y = number`:
-  write `y = 4` for the horizontal line. (A bare expression in x alone,
-  like `sin(x)`, still plots as y = sin(x).)
+  write `y = 4` for the horizontal line.
 - Complex point: a constant complex expression such as `1+2i` draws at (1, 2).
   Constants and t may animate its real and imaginary components.
 - Complex roots: `w^3 = 1` draws three solution points; equations in w become
@@ -371,10 +450,16 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `iter(z^2 + w, 600)` (default 250, max 5000). Any expression works:
   `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship.
 - Point: `(2, 3)`; animate with t: `(2cos(t), 2sin(t))`.
-- Data list: `[3, 1, 4]` draws dots at (1, 3), (2, 1), (3, 4) — the panel can
-  switch them to bars — and `[(1, 2), (3, 4)]` draws a scatter of points.
+- Data list: `[3, 1, 4, 4]` is a dot plot on the number line — a dot at each
+  value on the x axis, copies stacked upward, so 4 has dots at (4, 1) and
+  (4, 2). A list has no order, so no index is drawn (a sequence `a_n` does
+  draw at n). Values closer than a dot's width at the current zoom share a
+  column, so a long list (`sin(L)` for `L = [1..300]`, a CSV column of
+  thousands) stacks into the shape of its distribution rather than one row of
+  overlapping dots; zoom in and they separate. `[(1, 2), (3, 4)]` draws a
+  scatter of points.
   Any list-valued expression plots the same way (`L^2 + 1`,
-  `(L, sort(L))` with `L` defined above, or a CSV column: `person.age`).
+  `(L, L^2)` with `L` defined above, or a CSV column: `person.age`).
 - Geometry: with points defined in rows above (`A = (0, 0)`), `segment(A, B)`,
   `polyline(A, B, C, …)` (an open path through the points, not filled),
   `vector(A, B)` (an arrow from A to B; `vector(V)` draws V from the origin —
@@ -393,7 +478,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   marker), and they work inside any expression (`circle(A, distance(A, B))`).
   A scalar list inside a point broadcasts as in any scalar math
   (`distance(A, (L, 0))` is a list of distances); a list of points as an
-  argument broadcasts too, and P[1] selects a point value. An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
+  argument broadcasts too, and `T[1]` of a tuple of points selects one. An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
   point like `A + u(B - A)` traces the segment. Tuple literals work directly
   as arguments (`segment((0, 0), A)`) and as operands: `A + (1, 2)`,
   `((0, 0) + B)/2`, `|(3, 4)|`.
@@ -403,6 +488,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   triangles fill; larger 3D polygons draw their outline. `cross` returns a
   vector in 3D. 3D `angle` is unsigned in [0, pi]; zero arms are undefined.
   `perp`, `line`, `square`, and `circle` remain planar; 3D dragging is not defined.
+  Point lists draw as dots in space too: `[0,1] e_x + [0,1] e_y` is 4 points,
+  `[e_x, e_z]` 2, and `([0,1],[0,1],[0,1])` the 8 corners of a cube.
 - Convex hulls: `hull(A, B, C, …)` or `hull(P)` for a whole point list draws
   the convex hull — a filled polygon in 2D, a lit opaque solid with flat-shaded faces and outlined edges in 3D
   (coplanar facets merge, so a cube shows six squares). Interior and repeated
@@ -431,8 +518,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   f(x,y) = (x + y/2, y + sin(x)/2); vector(P, f(P))`. Shader members share
   one program with per-draw uniforms. Scalar fields/RGB fields/domain coloring/fractals cannot superimpose as
   families; use a selected list element. Point-list arithmetic works:
-  `Q = P + (1,0)`, `2P`, `P[2]`; `polyline(P)` / `polygon(P)` consume an
-  entire point list, including a CSV scatter `polyline((data.x, data.y))`.
+  `Q = P + (1,0)`, `2P`. `polyline(T)` / `polygon(T)` walk a whole tuple of
+  points in order, `T = ((0, 0), (2, 0), (1, 1))`, and a list only once it
+  is sorted: `polyline(sort(P, P.x))`, a CSV scatter
+  `polyline(sort((data.x, data.y), data.x))`; a list `[ … ]` has no order to
+  walk. `hull(P)` takes any list.
   Range bounds may use sliders, but not t; families re-expand on bound changes.
 - Sequence values: `a_n = 1/n` defines `a_3` as a scalar and `a_[1..10]`
   as a list, usable in sums, scatters, histograms and regression. `a_k`
@@ -506,6 +596,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   curve, it reads as the 3D curve (a, b, r).
 - Parametric surface: three components in u and v —
   `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`.
+- Parametric region: two components in two parameters fill the region they
+  trace — `(u cos(2 pi v), u sin(2 pi v))` is the unit disc, and with
+  `r = interval(1, 2)`, `(r cos(2 pi u), r sin(2 pi u))` an annulus. In a 3D
+  scene it lies in the plane z = 0.
 - 3D surface: any equation in x, y, z.
 - Surface of revolution: `revolve(f)` turns the curve y = f(x) about the
   x-axis — `revolve(sqrt(x))`, `revolve(sin(x) + 2)`, or `revolve(f)` with
@@ -672,7 +766,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   all work; a scalar `g(x,y) = x y` gives `g(A)` a number (`y = g(A) x`) and
   `g(P)` a value list. The point must have exactly as many components as the
   function has parameters (3D: `F(x,y,z)` takes `F(B)`). A matrix argument
-  is read as the list of its rows (a named list of 2 points in 2D is a 2×2
+  is read as the list of its rows (a tuple of 2 points in 2D is a 2×2
   matrix, and `g(S)` maps it like any other point list). A point does not
   spread among other arguments, and built-ins (`atan2(A)`) do not take one.
 - Recursive function: a function may call itself when every self-call is a
@@ -728,14 +822,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (up to 1024 runs): `p(0) = ([0..99]/10, 0, 0)` is 100 runs, crossing and
   zipping like any list. States coupled to it (`r' = vel` with a list of
   r(0)) run per element too, from their own single starting value. `p`
-  then draws one moving point per run, `p[1]` is the first run, `p_1` the
-  list of first components (`mean(p_1)`), and figures built from the state
-  (`segment((0, 0), b1)`) draw one per run.
+  then draws one moving point per run, `p_1` the list of first components
+  (`mean(p_1)`), and figures built from the state (`segment((0, 0), b1)`)
+  draw one per run. Started from a tuple, `p(0) = (sort([0..99])/10, 0, 0)`,
+  the runs are in order and `p[1]` is the first run.
 - Orbit: `p(50..400)` draws the path the state takes from t = 50 to t = 400,
   integrated ahead of time from p(0) with the live simulation's own steps —
   the moving point rides exactly along it. Start after 0 to skip the
   transient onto an attractor. A family draws one path per run (keep it to
-  a few, or pick one: `p[1](50..400)`); a scalar state plots against time,
+  a few, or pick one of runs in order: `p[1](50..400)`); a scalar state plots against time,
   `th(0..20)` being the curve (t, th). The range must be constant (sliders
   are fine; the orbit re-integrates when they move), 0 <= start < end; anything
   drawn from states works too, like `b2(0..30)` for a pendulum bob. Orbit
@@ -771,28 +866,64 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   rows below it (`mean(ages)`, `(ages, person.height)`) cost no more than
   reading the column directly.
 - List: `L = [3, 1, 4]` or `L = [1..100]` names a data list; rows below
-  broadcast over it (`L^2`, `(L, sort(L))`), reduce it (`mean(L)`), or index
-  it (`L[2]`, 1-based). Elements may use constants, states, and t. A list of
-  tuples names a scatter — except 2–3 equal-length tuple rows, which define
-  a matrix (below).
-- Matrix: `M = [(a, b), (c, d)]` (also `[[a, b], [c, d]]`, or named points
-  as rows) defines a 2×2 or 3×3 matrix. `det(M)`, `trace(M)`, the matvec
-  `M v`, and `solve(M, v)` (Cramer's rule) expand symbolically, so entries
+  broadcast over it (`L^2`, `(L, L^2)`), reduce it (`mean(L)`), or filter
+  it (`L[L > 2]`); to index it, sort it (`sort(L)[2]`, or `T = sort(L)`,
+  then `T[2]`). Elements may use constants, states, and t. A list of
+  tuples names a scatter of points, whatever its shape: `[(1, 2), (3, 4)]`
+  is two points, never a matrix.
+- Matrix: a tuple of rows, `M = ((a, b), (c, d))` or
+  `M = ((a, b, c), (d, e, f), (g, h, i))`, or of named points as rows
+  (`M = (A, B)`), is a 2×2 or 3×3 matrix; it works unnamed too:
+  `((0, -1), (1, 0)) (2, 1)`, `det(((1, 2), (3, 4)))`. A list in an entry
+  makes one matrix per element: with `a = [1, 2]`, `M = ((a, 0), (0, 1))`
+  is two matrices, `det(M)` is `[1, 2]`, and `M M P` is two points (both
+  Ms are the one M). `det(M)`, `trace(M)`, the matvec `M v`, and
+  `solve(M, v)` (Cramer's rule) expand symbolically, so entries
   may hold sliders, t, x/y, or states, and results work anywhere:
   `(x', y') = A (x, y)` is a linear phase portrait, and
   `th' = om; om' = solve(M, f)` integrates a system written in the
   Lagrangian form M(θ)ω′ = f — the natural shape for a double pendulum.
   Matrices combine — `2 M`, `M / 2`, `M + N`, `M N`, `M^2` (whole powers 0–8),
-  `M^-1` — and a row may name the result (`R = M N`), but a matrix is never
-  plotted on its own: apply it to a vector. Note `a/2 J` reads as `a/(2 J)`;
-  write `(a/2) J`.
-- Rotations are matrix exponentials: with `J = [(0, -1), (1, 0)]`,
+  `M^-1` — and a row may name the result (`R = M N`). A matrix has no
+  position, so on a row of its own it draws nothing and reads out its value,
+  `= ((1, 2), (3, 4))`: apply it to a vector to draw. Note `a/2 J` reads as
+  `a/(2 J)`; write `(a/2) J`.
+- Tensors: a rank-k tensor is k-deep nested tuples, and its shape is part of
+  its value — `((1, 2, 3), (4, 5, 6))` is 2×3, `(((1, 2), (3, 4)), ((5, 6),
+  (7, 8)))` is 2×2×2. A value that is also a tuple of 2D or 3D points and
+  not square draws as those points, however it was made — `(1, 2) ⊗ (3, 4, 5)`
+  is the dots (3, 4, 5) and (6, 8, 10) — until a product reads it as a
+  matrix: `T (1, 1)`. Operations act on coordinates:
+  - `a ⊗ b` (`outer(a, b)`) is the outer product, `(a ⊗ b)_ij = a_i b_j`, for
+    vectors, matrices or tensors: `e_x ⊗ e_y` is the 3×3 matrix with a 1 in
+    row 1, column 2.
+  - `contract(T, i, j)` sums T over its indices i and j (1-based, written as
+    numbers), dropping both: `contract(M, 1, 2)` is `trace(M)`, and
+    `contract(A ⊗ B, 2, 3)` is the product `A B`. Juxtaposition contracts
+    the last index of the left with the first of the right, so `T v` and
+    `A B` (2×3 by 3×2) work.
+  - `a ∧ b` (`wedge(a, b)`) is `a ⊗ b − b ⊗ a`, a bivector, read out as its
+    antisymmetric matrix; it is also a matrix, `(a ∧ b) v = a (b·v) − b (a·v)`.
+    `e_x ∧ e_y ∧ e_z` is the rank-3 volume element (∧ is associative); in 3D
+    `a × b` is the vector dual to `a ∧ b`.
+  - `T[k]` of a named tensor is its k-th slice; `2 T`, `T + S` work
+    entrywise. A tensor on its own row reads out; anywhere a number or point
+    is needed it is an error until contracted.
+  - Lists in entries work as for matrices: with `a = [1, 2]`,
+    `a e_x ⊗ e_y` is two matrices, and with `M = ((a, 0), (0, 1))`, `M ⊗ M`
+    is two rank-4 tensors, not four (both Ms are the one M).
+  - `total`, `mean` and `count` take a multiset of tensors whole, entry by
+    entry: with `P` a list of points, `C = mean((P - mean(P)) ⊗ (P - mean(P)))`
+    is the covariance matrix, and `C (x, y)` applies it.
+  - A bivector `a ∧ b` of 3D vectors, named or written out, generates the
+    rotation in their plane: `e^(t a ∧ b) P`.
+- Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of
   `v -> n × v`, scaled so |n| multiplies the angle (`rotate(P, a, n)`
   normalizes n for you). Both expand to exact cos/sin closed forms, so a may
-  be a slider, t, or a LIST: `th = 2pi [0..4]/5; polygon(e^(th J) (1, 0))` is
-  a regular pentagon, `segment((0,0), rotate((1,0), th))` its 5 spokes, and
+  be a slider, t, or a LIST: `th = 2pi sort([0..4])/5; polygon(e^(th J) (1, 0))` is
+  a regular pentagon (the turns sorted into a tuple, so the polygon has an order), `segment((0,0), rotate((1,0), th))` its 5 spokes, and
   `phi = (1+sqrt(5))/2; k = 2pi [0..2]/3;
   rotate((0, [-1,1], [-phi,phi]), k, (1,1,1))` the 12 vertices of an
   icosahedron (independent lists cross, the named turn list zips). `e^M` works

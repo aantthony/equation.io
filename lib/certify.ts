@@ -7,24 +7,53 @@ import { solveLinear, solveSystem } from './solve.ts';
 import { exceedsNodes } from './size.ts';
 export type Interval = [number, number];
 const whole = (): Interval => [-Infinity, Infinity];
-const bits = new DataView(new ArrayBuffer(8));
+// The float's bits as two 32-bit words (low word first on little-endian
+// hosts): stepping them is one ulp, without BigInt.
+const f64 = new Float64Array(1);
+const u32 = new Uint32Array(f64.buffer);
+const LOW = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1 ? 0 : 1;
+/** |x|·STEP lies strictly between half an ulp of x and a whole one, so
+ *  x ± |x|·STEP rounds to the neighbouring float (normal x). */
+const STEP = 2 ** -53 + 2 ** -105;
 export function nextFloat(x: number, up: boolean): number {
   if (Number.isNaN(x) || x === (up ? Infinity : -Infinity)) return x;
   if (x === 0) return up ? Number.MIN_VALUE : -Number.MIN_VALUE;
-  bits.setFloat64(0, x);
-  bits.setBigUint64(0, bits.getBigUint64(0) + (x > 0 === up ? 1n : -1n));
-  return bits.getFloat64(0);
+  const a = Math.abs(x);
+  if (a > 2 ** -1000 && a < Infinity) {
+    const y = up ? x + a * STEP : x - a * STEP;
+    if (y !== x) return y;
+  }
+  return stepBits(x, up);
+}
+function stepBits(x: number, up: boolean): number {
+  f64[0] = x;
+  if (x > 0 === up) {
+    u32[LOW] = (u32[LOW] + 1) >>> 0;
+    if (u32[LOW] === 0) u32[1 - LOW]++;
+  } else {
+    if (u32[LOW] === 0) u32[1 - LOW]--;
+    u32[LOW] = (u32[LOW] - 1) >>> 0;
+  }
+  return f64[0];
 }
 const point = (v: number): Interval => (Number.isFinite(v) ? [v, v] : whole());
 const outward = (lo: number, hi: number): Interval =>
   Number.isNaN(lo) || Number.isNaN(hi) ? whole() : [nextFloat(lo, false), nextFloat(hi, true)];
-export const iadd = (a: Interval, b: Interval): Interval => outward(a[0] + b[0], a[1] + b[1]);
+/** Adding exactly 0 is exact: no widening (x^2 − 0 < 0 stays provably false). */
+export const iadd = (a: Interval, b: Interval): Interval =>
+  b[0] === 0 && b[1] === 0 ? a : a[0] === 0 && a[1] === 0 ? b : outward(a[0] + b[0], a[1] + b[1]);
 export const ineg = (a: Interval): Interval => [-a[1], -a[0]];
 export const isub = (a: Interval, b: Interval): Interval => iadd(a, ineg(b));
+/** An endpoint product, with 0·∞ = 0: an interval holds reals, so an
+ *  infinite end is a limit, and 0 times any real is 0. */
+const endMul = (p: number, q: number): number => (p === 0 || q === 0 ? 0 : p * q);
 export const imul = (a: Interval, b: Interval): Interval => {
   if ((a[0] === 0 && a[1] === 0) || (b[0] === 0 && b[1] === 0)) return [0, 0];
-  const v = [a[0] * b[0], a[0] * b[1], a[1] * b[0], a[1] * b[1]];
-  return outward(Math.min(...v), Math.max(...v));
+  const p = endMul(a[0], b[0]);
+  const q = endMul(a[0], b[1]);
+  const r = endMul(a[1], b[0]);
+  const t = endMul(a[1], b[1]);
+  return outward(Math.min(p, q, r, t), Math.max(p, q, r, t));
 };
 const idiv = (a: Interval, b: Interval): Interval =>
   b[0] <= 0 && b[1] >= 0 ? whole() : imul(a, outward(1 / b[1], 1 / b[0]));
@@ -101,6 +130,223 @@ function intervalAD(e: Expr, names: string[], box: Interval[], env: Record<strin
       return bad();
   }
 }
+/** x^n for a whole n ≥ 0: even powers of an interval that holds 0 start at 0,
+ *  which repeated multiplication (x·x over [-1, 1] is [-1, 1]) loses. */
+function ipow(a: Interval, n: number): Interval {
+  if (n === 0) return [1, 1];
+  let p: Interval = a;
+  for (let i = 1; i < n; i++) p = imul(p, a);
+  if (n % 2 === 0 && a[0] < 0 && a[1] > 0) return [0, p[1]];
+  if (n % 2 === 0 && a[1] <= 0) return [p[0] < 0 ? 0 : p[0], p[1]];
+  return p;
+}
+
+/** f over [a, b] for an increasing f, rounded outward. */
+const rising = (f: (x: number) => number, a: Interval): Interval => outward(f(a[0]), f(a[1]));
+
+/** sin over [a, b]: the ends, and ±1 wherever a peak or trough falls inside. */
+function isin(a: Interval, shift = 0): Interval {
+  const lo = a[0] + shift;
+  const hi = a[1] + shift;
+  if (!(hi - lo < 2 * Math.PI)) return [-1, 1];
+  let min = Math.min(Math.sin(lo), Math.sin(hi));
+  let max = Math.max(Math.sin(lo), Math.sin(hi));
+  // Peaks at π/2 + 2πk, troughs at 3π/2 + 2πk.
+  if (Math.ceil((lo - Math.PI / 2) / (2 * Math.PI)) <= Math.floor((hi - Math.PI / 2) / (2 * Math.PI))) max = 1;
+  if (Math.ceil((lo - 1.5 * Math.PI) / (2 * Math.PI)) <= Math.floor((hi - 1.5 * Math.PI) / (2 * Math.PI))) min = -1;
+  return [Math.max(-1, nextFloat(min, false)), Math.min(1, nextFloat(max, true))];
+}
+
+/**
+ * The values `e` takes over a box, without derivatives: the enclosure a
+ * quadtree prunes by (lib/measure.ts). Wider than intervalAD's set of forms —
+ * the elementary functions a filter is usually written with — and a form it
+ * does not know encloses as the whole line, which only costs subdivision.
+ * Infinite box sides are allowed, so a strip out to ∞ can be tested too.
+ */
+export function intervalValue(
+  e: Expr,
+  names: readonly string[],
+  box: readonly Interval[],
+  env: Record<string, number>,
+): Interval {
+  return intervalFn(e, names, env)(box);
+}
+
+type IFn = (box: readonly Interval[]) => Interval;
+
+/** intervalValue compiled once for many boxes (a quadtree's cells). */
+export function intervalFn(e: Expr, names: readonly string[], env: Record<string, number>): IFn {
+  const rec = (x: Expr) => intervalFn(x, names, env);
+  switch (e.kind) {
+    case 'num': {
+      const v = point(e.value);
+      return () => v;
+    }
+    case 'var': {
+      const k = names.indexOf(e.name);
+      if (k >= 0) return box => box[k];
+      const v = Object.hasOwn(env, e.name) ? point(env[e.name]) : whole();
+      return () => v;
+    }
+    case 'neg': {
+      const a = rec(e.a);
+      return box => ineg(a(box));
+    }
+    case 'bin': {
+      const fa = rec(e.a);
+      if (e.op === '^') {
+        const q = e.b.kind === 'num' ? e.b.value : NaN;
+        if (Number.isInteger(q) && Math.abs(q) <= 64) {
+          return box => {
+            const p = ipow(fa(box), Math.abs(q));
+            return q >= 0 ? p : idiv([1, 1], p);
+          };
+        }
+        const fb = rec(e.b);
+        return box => {
+          const a = fa(box);
+          // A fixed real power of a non-negative base rises (or falls) with it.
+          if (!Number.isNaN(q) && a[0] >= 0) {
+            const ends = [a[0] ** q, a[1] ** q];
+            return outward(Math.min(...ends), Math.max(...ends));
+          }
+          const b = fb(box);
+          // A constant positive base, as in 2^x: rising or falling in the power.
+          if (a[0] > 0 && a[0] === a[1] && Number.isFinite(b[0]) && Number.isFinite(b[1])) {
+            const ends = [a[0] ** b[0], a[0] ** b[1]];
+            return outward(Math.min(...ends), Math.max(...ends));
+          }
+          return whole();
+        };
+      }
+      const fb = rec(e.b);
+      const op = e.op === '+' ? iadd : e.op === '-' ? isub : e.op === '*' ? imul : idiv;
+      return box => op(fa(box), fb(box));
+    }
+    case 'call': {
+      const args = e.args.map(rec);
+      if ((e.name === 'min' || e.name === 'max') && args.length >= 2) {
+        const pick = e.name === 'min' ? Math.min : Math.max;
+        return box => {
+          const vs = args.map(f => f(box));
+          return [pick(...vs.map(v => v[0])), pick(...vs.map(v => v[1]))];
+        };
+      }
+      const one = args.length === 1 ? unary(e.name) : null;
+      if (!one) return () => whole();
+      const [fa] = args;
+      return box => one(fa(box));
+    }
+    default:
+      return () => whole();
+  }
+}
+
+/** A one-argument function over an interval, or null when not known. */
+function unary(name: string): ((a: Interval) => Interval) | null {
+  switch (name) {
+    case 'sqrt':
+      return a => (a[1] < 0 ? whole() : rising(Math.sqrt, [Math.max(0, a[0]), a[1]]));
+    case 'exp':
+      return a => rising(Math.exp, a);
+    case 'ln':
+    case 'log': {
+      const base = name === 'log' ? Math.LN10 : 1;
+      return a => (a[1] <= 0 ? whole() : rising(x => Math.log(x) / base, [Math.max(0, a[0]), a[1]]));
+    }
+    case 'atan':
+      return a => rising(Math.atan, a);
+    // Steps rise too, and exactly: no rounding to widen.
+    case 'floor':
+      return a => [Math.floor(a[0]), Math.floor(a[1])];
+    case 'ceil':
+      return a => [Math.ceil(a[0]), Math.ceil(a[1])];
+    case 'round':
+      return a => [Math.round(a[0]), Math.round(a[1])];
+    case 'sign':
+      return a => [Math.sign(a[0]), Math.sign(a[1])];
+    case 'tanh':
+      return a => rising(Math.tanh, a);
+    case 'sinh':
+      return a => rising(Math.sinh, a);
+    case 'abs':
+      return a => (a[0] >= 0 ? a : a[1] <= 0 ? ineg(a) : [0, Math.max(-a[0], a[1])]);
+    case 'cosh':
+      return a => {
+        const ends = [Math.cosh(a[0]), Math.cosh(a[1])];
+        return outward(a[0] < 0 && a[1] > 0 ? 1 : Math.min(...ends), Math.max(...ends));
+      };
+    case 'sin':
+      return a => isin(a);
+    case 'cos':
+      return a => isin(a, Math.PI / 2);
+    case 'tan':
+      return a => {
+        // Rising between poles; a pole inside (or too wide to tell) is the whole line.
+        const k = Math.floor(a[0] / Math.PI + 0.5);
+        if (!(a[1] - a[0] < Math.PI) || Math.floor(a[1] / Math.PI + 0.5) !== k) return whole();
+        const lo = Math.tan(a[0]);
+        const hi = Math.tan(a[1]);
+        return lo <= hi ? outward(lo, hi) : whole();
+      };
+    case 'asin':
+    case 'acos':
+      return a => {
+        if (a[1] < -1 || a[0] > 1) return whole();
+        const c: Interval = [Math.max(-1, a[0]), Math.min(1, a[1])];
+        return name === 'asin' ? rising(Math.asin, c) : outward(Math.acos(c[1]), Math.acos(c[0]));
+      };
+    default:
+      return null;
+  }
+}
+
+/** Calls intervalValue encloses (anything else is the whole line). */
+const KNOWN_CALLS = new Set([
+  'sqrt',
+  'exp',
+  'ln',
+  'log',
+  'atan',
+  'floor',
+  'ceil',
+  'round',
+  'sign',
+  'tanh',
+  'sinh',
+  'abs',
+  'cosh',
+  'sin',
+  'cos',
+  'tan',
+  'asin',
+  'acos',
+]);
+
+/** Whether intervalValue encloses `e` tightly enough to decide anything: an
+ *  unknown function makes every enclosure the whole line, which proves
+ *  nothing (so a measure built on it could never be certified). */
+export function intervalKnows(e: Expr): boolean {
+  switch (e.kind) {
+    case 'num':
+    case 'var':
+      return true;
+    case 'neg':
+      return intervalKnows(e.a);
+    case 'bin':
+      return intervalKnows(e.a) && intervalKnows(e.b);
+    case 'call':
+      return (
+        ((KNOWN_CALLS.has(e.name) && e.args.length === 1) ||
+          ((e.name === 'min' || e.name === 'max') && e.args.length >= 2)) &&
+        e.args.every(intervalKnows)
+      );
+    default:
+      return false;
+  }
+}
+
 function determinant(m: Interval[][]): Interval {
   if (m.length === 2) return isub(imul(m[0][0], m[1][1]), imul(m[0][1], m[1][0]));
   return m[0].reduce(

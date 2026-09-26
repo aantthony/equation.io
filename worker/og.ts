@@ -10,7 +10,7 @@
  */
 import { traceIntersection } from '../lib/intersection.ts';
 import { traceField } from '../lib/flow.ts';
-import { type PmfStems, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
+import { type PmfStems, markerHeight, scaleCurve, scaleStems, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { cellShades, runAutomaton } from '../lib/automaton.ts';
@@ -18,7 +18,7 @@ import { arrowHead } from '../lib/geom.ts';
 import { hullFaces } from '../lib/hull.ts';
 import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
-import { pathSampler } from '../lib/path.ts';
+import { pathSampler, regionSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
 import { noteColor } from '../lib/statements.ts';
@@ -71,6 +71,10 @@ function drawLine(r: Raster, x0: number, y0: number, x1: number, y1: number, c: 
     blend(r, xi + 1, yi + 1, c, a * 0.35);
   }
 }
+
+/** A point list's dots: a handful read as points, a few hundred as a cloud,
+ *  where full-size dots would merge into one blot (the app thins them too). */
+const listDotRadius = (count: number) => (count > 200 ? 2 : 4.5);
 
 function drawDisc(r: Raster, cx: number, cy: number, rad: number, c: [number, number, number], a = 1) {
   for (let y = Math.floor(cy - rad - 1); y <= cy + rad + 1; y++) {
@@ -172,6 +176,13 @@ const ARROW_HEAD_PX = 9;
  * self-intersecting figures (a pentagram) fill the same way in both.
  */
 function fillPolygon(r: Raster, sx: number[], sy: number[], c: [number, number, number], a: number) {
+  polygonSpans(r, sx, sy, (y, xa, xb) => {
+    for (let px = xa; px <= xb; px++) blend(r, px, y, c, a);
+  });
+}
+
+/** The pixel runs fillPolygon covers, row by row (nonzero rule). */
+function polygonSpans(r: Raster, sx: number[], sy: number[], span: (y: number, xa: number, xb: number) => void) {
   const n = sx.length;
   const y0 = Math.max(0, Math.floor(Math.min(...sy)));
   const y1 = Math.min(r.h - 1, Math.ceil(Math.max(...sy)));
@@ -192,11 +203,108 @@ function fillPolygon(r: Raster, sx: number[], sy: number[], c: [number, number, 
       if (wind === 0) spanStart = x;
       wind += dir;
       if (wind !== 0) continue;
-      const xa = Math.max(0, Math.ceil(spanStart - 0.5));
-      const xb = Math.min(r.w - 1, Math.floor(x - 0.5));
-      for (let px = xa; px <= xb; px++) blend(r, px, y, c, a);
+      span(y, Math.max(0, Math.ceil(spanStart - 0.5)), Math.min(r.w - 1, Math.floor(x - 0.5)));
     }
   }
+}
+
+/** Blend each marked pixel once: a region drawn in pieces (triangles, or
+ *  one pass per sample of u) fills at one opacity, as the app's does. */
+function fillMask(r: Raster, mask: Uint8Array, c: [number, number, number], a: number) {
+  for (let i = 0; i < mask.length; i++) if (mask[i]) blend(r, i % r.w, Math.floor(i / r.w), c, a);
+}
+
+/** Steps of u per point for a family over an interval (the app takes 48,
+ *  searching 8x finer only where a member could cross between two), and the
+ *  pixels per side of a block the swept region is first judged on. */
+const PROJECTION_STEPS = 64;
+const PROJECTION_BLOCK = 8;
+
+/**
+ * The region a family over u ∈ [0, 1] sweeps, as a pixel mask — the app's
+ * projFrag on the CPU. A point is inside when F changes sign between two
+ * steps of u (an equation), or the constraints all hold at one
+ * (inequalities). Judged first at the corners of 8-px blocks: a block whose
+ * corners are all inside is filled whole, and one whose corners are all
+ * outside and agree in sign at every step has no member (at a step)
+ * crossing it, so it is skipped; only blocks along an edge are judged per
+ * pixel. That keeps the preview near a pass per 16 steps rather than a pass
+ * per step.
+ */
+function projectedMask(
+  r: Raster,
+  v: View2D,
+  env: EvalEnv,
+  slotU: number,
+  prog: Prog,
+  relation: 'eq' | 'ineq',
+): Uint8Array {
+  const { w, h } = r;
+  const { vars, stack, slotX, slotY } = env;
+  const uy = v.upp / (v.ratio ?? 1);
+  const M = PROJECTION_STEPS;
+  const at = (i: number, j: number) => {
+    vars[slotX] = v.cx + (i - w / 2) * v.upp;
+    vars[slotY] = v.cy + (h / 2 - j) * uy;
+  };
+  // Whether some u puts the pixel's centre on a member (or in the region):
+  // F changes sign between two of the M steps.
+  const inside = (i: number, j: number): boolean => {
+    at(i, j);
+    let prev = NaN;
+    for (let k = 0; k < M; k++) {
+      vars[slotU] = k / (M - 1);
+      const f = run(prog, vars, stack);
+      if (relation === 'ineq' ? f < 0 : f === 0 || prev * f < 0) return true;
+      prev = f;
+    }
+    return false;
+  };
+  // A block corner, judged at every sub-step (the samples a pixel refines
+  // to): bit k of `neg` is set when F < 0 at step k (of `bad`, when F is not
+  // finite there), a word per 32 steps.
+  const B = PROJECTION_BLOCK;
+  const words = Math.ceil(M / 32);
+  const cw = Math.ceil(w / B) + 1,
+    ch = Math.ceil(h / B) + 1;
+  const neg = new Uint32Array(cw * ch * words),
+    bad = new Uint32Array(cw * ch * words),
+    hit = new Uint8Array(cw * ch);
+  for (let c = 0; c < cw * ch; c++) {
+    at((c % cw) * B, Math.floor(c / cw) * B);
+    let prev = NaN;
+    for (let k = 0; k < M; k++) {
+      vars[slotU] = k / (M - 1);
+      const f = run(prog, vars, stack);
+      const bit = 1 << (k & 31);
+      if (!Number.isFinite(f)) bad[c * words + (k >> 5)] |= bit;
+      else if (f < 0 || (f === 0 && relation === 'eq')) neg[c * words + (k >> 5)] |= bit;
+      if (relation === 'ineq' ? f < 0 : f === 0 || prev * f < 0) hit[c] = 1;
+      prev = f;
+    }
+  }
+  // Corners outside that agree in sign at every step have no member at a
+  // step crossing the block between them.
+  const agree = (c: number[]) => {
+    for (const k of c) {
+      if (hit[k]) return false;
+      for (let q = 0; q < words; q++)
+        if (neg[k * words + q] !== neg[c[0] * words + q] || bad[k * words + q] !== bad[c[0] * words + q]) return false;
+    }
+    return true;
+  };
+  const mask = new Uint8Array(w * h);
+  for (let cj = 0; cj + 1 < ch; cj++)
+    for (let ci = 0; ci + 1 < cw; ci++) {
+      const c = [cj * cw + ci, cj * cw + ci + 1, (cj + 1) * cw + ci, (cj + 1) * cw + ci + 1];
+      const all = c.every(k => hit[k]);
+      if (!all && agree(c)) continue;
+      for (let j = cj * B; j < Math.min(h, (cj + 1) * B); j++)
+        for (let i = ci * B; i < Math.min(w, (ci + 1) * B); i++) {
+          if (all || inside(i, j)) mask[j * w + i] = 1;
+        }
+    }
+  return mask;
 }
 
 function shadeScalar(r: Raster, grid: Float64Array, c: [number, number, number]) {
@@ -384,6 +492,10 @@ function renderRow2D(
       // atoms stand where they are, not at whole numbers.
       runs = analysis.rvs.pmfRuns(name, analysis.constEnv, { lo: v.cx - halfW, hi: v.cx + halfW }, shade);
       if (!runs) return;
+      if (cpu.type === 'pmf' && cpu.mass) {
+        const mass = evaluate(cpu.mass, analysis.constEnv);
+        runs = runs.map(run => scaleStems(run, mass));
+      }
     } catch {
       return; // a parameter with no value at t = 0
     }
@@ -424,8 +536,9 @@ function renderRow2D(
     const shade = cpu.type === 'prob' ? cpu.shade : undefined;
     if (cpu.type === 'prob' && !shade) return; // readout-only row
     const name = cpu.type === 'density' ? cpu.rv : shade!.rv;
-    const curve = analysis.rvs.curve(name, analysis.constEnv);
+    let curve = analysis.rvs.curve(name, analysis.constEnv);
     if (!curve) return;
+    if (cpu.type === 'density' && cpu.mass) curve = scaleCurve(curve, evaluate(cpu.mass, analysis.constEnv));
     if (cpu.type === 'density') {
       // Point masses draw as probability stems (height = mass, not density).
       for (const a of curve.atoms ?? []) {
@@ -537,10 +650,48 @@ function renderRow2D(
     case 'scalar2d':
       shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color);
       return;
+    case 'pregion': {
+      // The app's fill (web/render2d.ts regions): the sampled triangles'
+      // union, at the inequality fill's opacity, with no outline.
+      const tris = regionSampler(cpu.comps).sample(envValues(env));
+      const mask = new Uint8Array(r.w * r.h);
+      for (let i = 0; i + 5 < tris.length; i += 6) {
+        const sx = [0, 2, 4].map(k => toScreenX(r, v, tris[i + k]));
+        const sy = [1, 3, 5].map(k => toScreenY(r, v, tris[i + k]));
+        polygonSpans(r, sx, sy, (y, xa, xb) => mask.fill(1, y * r.w + xa, y * r.w + xb + 1));
+      }
+      fillMask(r, mask, color, 0.18);
+      return;
+    }
+    case 'projected2d': {
+      // The union over samples of u, as the app's projFrag (projectedMask).
+      const slotU = env.slots.get('u')!;
+      const field: Expr =
+        cpu.constraints.length === 1
+          ? cpu.constraints[0].residual
+          : cpu.constraints
+              .slice(1)
+              .reduce<Expr>(
+                (m, c) => ({ kind: 'call', name: 'max', args: [m, c.residual] }),
+                cpu.constraints[0].residual,
+              );
+      const mask = projectedMask(r, v, env, slotU, compile(field), cpu.relation);
+      fillMask(r, mask, color, 0.18);
+      return;
+    }
     case 'point': {
       if (cpu.dim !== 2) return;
       const [px, py] = cpu.coords.map(c2 => run(compile(c2), env.vars, env.stack));
       drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), 4.5, color);
+      return;
+    }
+    case 'plist': {
+      if (cpu.dim !== 2) return;
+      const rad = listDotRadius(cpu.pts.length);
+      for (const p of cpu.pts) {
+        const [px, py] = p.map(c2 => run(compile(c2), env.vars, env.stack));
+        if (isFinite(px) && isFinite(py)) drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), rad, color);
+      }
       return;
     }
     case 'system': {
@@ -653,8 +804,12 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
   const slotU = env.slots.get('u')!,
     slotV = env.slots.get('v')!;
   switch (cpu.type) {
-    case 'psurface': {
-      const progs = cpu.comps.map(compile);
+    case 'psurface':
+    case 'pregion': {
+      // A planar region lies in z = 0 of the scene, drawn as the app draws it: a surface.
+      const progs = (cpu.type === 'pregion' ? [...cpu.comps, { kind: 'num', value: 0 } as Expr] : cpu.comps).map(
+        compile,
+      );
       const at = (): [number, number, number] => [
         run(progs[0], env.vars, env.stack),
         run(progs[1], env.vars, env.stack),
@@ -796,6 +951,17 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       drawDisc(r, sx, sy, 4.5, color);
       return;
     }
+    case 'plist': {
+      // A 2D list sits on the z = 0 plane, as the live app draws it.
+      const rad = listDotRadius(cpu.pts.length);
+      for (const p of cpu.pts) {
+        const [px, py, pz = 0] = p.map(c2 => run(compile(c2), env.vars, env.stack));
+        if (!isFinite(px) || !isFinite(py) || !isFinite(pz)) continue;
+        const [sx, sy] = project(v, [px, py, pz]);
+        drawDisc(r, sx, sy, rad, color);
+      }
+      return;
+    }
     case 'implicit3d': {
       // Only the z = f(x, y) heightmap form draws (as a wireframe); general
       // implicit surfaces would need a raymarcher, too slow on CPU here.
@@ -847,10 +1013,15 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
 export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   spacecurve: 'draws',
   note: 'draws',
+  tuple: 'draws',
   family: 'draws',
   vfield3d: 'draws',
   implicit2d: 'draws',
   ineq2d: 'draws',
+  // Filled on the CPU in the app too: the union of the sampled triangles.
+  pregion: 'draws',
+  // The app searches along the interval per pixel; so does this, more coarsely.
+  projected2d: 'draws',
   scalar2d: 'draws',
   point: 'draws',
   // A readout: nothing on the canvas in the app either — except a definite
@@ -887,7 +1058,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // The rest of the sequence family (term dots, orbit diagrams) and data
   // lists have no scanline path here yet; the site card beats a blank grid.
   vlist: 'fallback',
-  plist: 'fallback',
+  // Dots, like a point row's, in 2D or in space.
+  plist: 'draws',
   // Typed-array lists reach the worker only from a data file, whose bytes
   // never travel in the link — so there is nothing to draw here anyway.
   dlist: 'fallback',
@@ -942,10 +1114,12 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   }
   switch (type) {
     case 'note':
+    case 'tuple':
     case 'value':
     // Its text is left out in 3D as in 2D (OG_COVERAGE); the app draws it in both.
     case 'label':
     case 'psurface':
+    case 'pregion':
     case 'vfield3d':
     case 'spacecurve':
       return null;
@@ -953,6 +1127,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
       return cpu.type === 'implicit3d' && cpu.heightmap
         ? null
         : 'the static preview draws only z = f(x, y) surfaces; the live app renders general implicit surfaces in full';
+    case 'plist':
+      return null;
     case 'pcurve':
     case 'point':
       return cpu.dim === 3

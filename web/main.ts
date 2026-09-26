@@ -29,7 +29,16 @@ import {
   type Definition,
 } from '../lib/defs.ts';
 import { buildComb, buildTube, combScale, curveExtent, curveFrames } from '../lib/curve3d.ts';
-import { type DensityCurve, type PmfStems, RVSystem, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
+import {
+  type DensityCurve,
+  type PmfStems,
+  RVSystem,
+  markerHeight,
+  scaleCurve,
+  scaleStems,
+  shadePolygon,
+  stemGeometry,
+} from '../lib/dist.ts';
 import {
   type IntShade,
   type ShadeRun,
@@ -54,8 +63,8 @@ import { type VertexSampler, vertexSampler } from '../lib/figure-vertices.ts';
 
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
-import { CURVE_SAMPLES, type PathSampler, pathSampler } from '../lib/path.ts';
-import { type Classified, plotReadout, publicKind } from '../lib/plot.ts';
+import { CURVE_SAMPLES, type PathSampler, type RegionSampler, pathSampler, regionSampler } from '../lib/path.ts';
+import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
@@ -119,6 +128,9 @@ interface Equation {
    *  polyline, resampled only when a value it reads (sliders, states, t)
    *  changes — the shadeCache pattern. */
   pathCache?: { comps: Expr[]; sampler: PathSampler; key: string; pts: number[] };
+  /** A filled parametric region's sampler and triangles (lib/path.ts), kept
+   *  the same way. */
+  regionCache?: { comps: readonly Expr[]; sampler: RegionSampler; key: string; tris: Float64Array };
   /** An automaton's cells (lib/automaton.ts), rerun only when its plan or a
    *  value it reads (sliders, t) changes — the shadeCache pattern. */
   cellCache?: { plan: CpuPlan; key: string; cells: Cells2D };
@@ -157,8 +169,6 @@ interface Equation {
   combT?: boolean;
   /** Sequence rows: plot partial sums S_N = Σ aₙ instead of the terms. */
   partialSum?: boolean;
-  /** Numeric-list rows: draw bars instead of dots. */
-  barMode?: boolean;
   /** Interleaved non-editable widgets, created lazily and kept across edits. */
   sliderUI?: SliderUI;
   levelsBtn?: HTMLButtonElement;
@@ -279,20 +289,47 @@ const cloudPoints = (plot: CpuPlan): number =>
 const TUBE_SEGMENTS = 24;
 
 /**
- * The 1…n a value list is drawn against, kept per column. Drawing runs every
+ * A large column's dot plot, stacked in columns one cloud dot wide at the
+ * current zoom, kept per column until the zoom changes. Drawing runs every
  * frame while anything on the page animates, and a 200k-point column would
- * otherwise allocate and fill 1.6 MB of the same numbers each time.
+ * otherwise rebuild 3.2 MB of the same stacks each time; panning keeps them.
  */
-const indexXs = new WeakMap<Float64Array, Float64Array>();
-function indexCoords(values: Float64Array): Float64Array {
-  let xs = indexXs.get(values);
-  if (!xs) {
-    xs = new Float64Array(values.length);
-    for (let k = 0; k < xs.length; k++) xs[k] = k + 1;
-    indexXs.set(values, xs);
+const stacks = new WeakMap<object, { width: number; values: ArrayLike<number>; xs: Float64Array; ys: Float64Array }>();
+function columnStacks(key: object, values: ArrayLike<number>, dotPx: number): { xs: Float64Array; ys: Float64Array } {
+  const width = dotPx * view.upp * (window.devicePixelRatio || 1);
+  let hit = stacks.get(key);
+  if (!hit || hit.width !== width || !sameValues(hit.values, values)) {
+    // Dots that would overlap at this zoom share a column; values at least a
+    // dot apart keep their exact place, so small lists stack exact copies.
+    const binned = values.length > CLOUD_MIN || crowded(values, width);
+    hit = {
+      width,
+      values: values === key ? values : Float64Array.from(values),
+      ...dotPlot(values, binned ? width : 0),
+    };
+    stacks.set(key, hit);
   }
-  return xs;
+  return hit;
 }
+function sameValues(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let k = 0; k < a.length; k++) if (!Object.is(a[k], b[k])) return false;
+  return true;
+}
+/** Whether two different values lie closer than a dot's width. */
+function crowded(values: ArrayLike<number>, width: number): boolean {
+  const sorted = Float64Array.from(values).filter(Number.isFinite).sort();
+  for (let k = 1; k < sorted.length; k++) {
+    const gap = sorted[k] - sorted[k - 1];
+    if (gap > 0 && gap < width) return true;
+  }
+  return false;
+}
+/** Dot diameters in CSS px: a listed point (r 4) and a cloud dot
+ *  (render2d drawLabels2D). */
+const POINT_DOT_PX = 8;
+const CLOUD_DOT_PX = 3;
 const COMB_STEP = 4;
 
 // --- state ---
@@ -772,6 +809,7 @@ function renderMembers(eq: Equation): Equation[] {
       familyShade: (0.45 * k) / Math.max(1, cpu.members.length - 1),
       sysCache: undefined,
       pathCache: undefined,
+      regionCache: undefined,
       traceTarget: undefined,
       orbitCache: undefined,
       orbitPending: undefined,
@@ -799,8 +837,7 @@ const familyShared = ({
   combK,
   combT,
   partialSum,
-  barMode,
-}: Equation) => ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum, barMode });
+}: Equation) => ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum });
 
 /** A row's own color: its `#hex` note if it has one, else its palette slot.
  *  Family members read their parent's note — their own text is generated. */
@@ -830,6 +867,7 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'conformal2d',
   'fractal2d',
   'ineq2d',
+  'projected2d',
   'vfield2d',
   'vlist',
   'dlist',
@@ -891,6 +929,20 @@ function render() {
 
   gl.clearColor(theme.bg[0], theme.bg[1], theme.bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  // A filled parametric region's triangles, resampled when a value it reads changes.
+  const sampleRegion = (eq: Equation, comps: readonly [Expr, Expr]): Float64Array => {
+    let c = eq.regionCache;
+    if (c?.comps !== comps)
+      c = eq.regionCache = { comps, sampler: regionSampler(comps), key: '', tris: new Float64Array() };
+    const env: Record<string, number> = { ...constEnv, t: time };
+    const key = c.sampler.names.map(n => env[n]).join();
+    if (key !== c.key || !c.tris.length) {
+      c.key = key;
+      c.tris = c.sampler.sample(env);
+    }
+    return c.tris;
+  };
 
   // CPU sampling of parametric curves / points, with t bound to seconds.
   const sampleCurve = (eq: Equation, dim: 2 | 3): number[] => {
@@ -1253,6 +1305,8 @@ function render() {
           break;
         }
         case 'psurface':
+        // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
+        case 'pregion':
           scene.psurfaces.push({ ...gpuFor(eq, 'psurface'), color, params, uniforms });
           break;
         case 'orbit': {
@@ -1364,6 +1418,7 @@ function render() {
       conformals: [],
       vfields: [],
       ineqs: [],
+      projections: [],
       bifs: [],
       scalars: [],
       complexes: [],
@@ -1415,6 +1470,12 @@ function render() {
           break;
         case 'ineq2d':
           layers.ineqs.push({ ...gpuFor(eq, 'ineq2d'), color, params, uniforms });
+          break;
+        case 'projected2d':
+          layers.projections.push({ ...gpuFor(eq, 'projected2d'), color, params, uniforms });
+          break;
+        case 'pregion':
+          (extras.regions ??= []).push({ tris: sampleRegion(eq, plot.comps), fill: cssColorA(color, 0.22) });
           break;
         case 'scalar2d':
           layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms });
@@ -1501,17 +1562,20 @@ function render() {
           break;
         }
         case 'vlist': {
-          plot.values.forEach((expr, k) => {
-            let v: number;
+          // Numbers on the number line, copies stacked (lib/plot.ts dotPlot).
+          const values = plot.values.map(expr => {
             try {
-              v = evaluate(expr, env);
+              return evaluate(expr, env);
             } catch {
-              return;
+              return NaN;
             }
-            if (!isFinite(v)) return;
-            if (eq.barMode) extras.bars!.push({ x: k + 1, y: v, halfWidth: 0.35, color: css });
-            else extras.points.push({ x: k + 1, y: v, color: css, r: 4 });
           });
+          if (values.length > CLOUD_MIN) {
+            extras.clouds!.push({ ...columnStacks(plot, values, CLOUD_DOT_PX), color: css });
+            break;
+          }
+          const { xs, ys } = columnStacks(plot, values, POINT_DOT_PX);
+          for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
           break;
         }
         case 'plist': {
@@ -1532,19 +1596,16 @@ function render() {
         }
         // Typed-array lists: nothing to evaluate, so the only question is how
         // to draw them. Few enough to read as individual points, and they go
-        // through the same path as any other point (outlines, bars); past
-        // that they are a cloud, drawn in bulk.
+        // through the same path as any other point (outlines); past that
+        // they are a cloud, drawn in bulk, stacked in dot-wide columns.
         case 'dlist': {
           const { values } = plot;
           if (values.length <= CLOUD_MIN) {
-            values.forEach((v, k) => {
-              if (!isFinite(v)) return;
-              if (eq.barMode) extras.bars!.push({ x: k + 1, y: v, halfWidth: 0.35, color: css });
-              else extras.points.push({ x: k + 1, y: v, color: css, r: 4 });
-            });
+            const { xs, ys } = columnStacks(values, values, POINT_DOT_PX);
+            for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
             break;
           }
-          extras.clouds!.push({ xs: indexCoords(values), ys: values, color: css });
+          extras.clouds!.push({ ...columnStacks(values, values, CLOUD_DOT_PX), color: css });
           break;
         }
         case 'dscatter': {
@@ -1647,6 +1708,7 @@ function render() {
           let c: DensityCurve | null = null;
           try {
             c = rvSys.curve(plot.rv, env, { lo: xmin, hi: xmax });
+            if (c && plot.mass) c = scaleCurve(c, evaluate(plot.mass, env));
           } catch {
             break; /* a parameter is missing this frame */
           }
@@ -1695,8 +1757,9 @@ function render() {
           // Stems at the atoms in view — whole numbers for a declared law,
           // wherever g put them for a derived one; lib caches them per window.
           try {
+            const mass = plot.mass ? evaluate(plot.mass, env) : 1;
             for (const run of rvSys.pmfRuns(plot.rv, env, { lo: xmin, hi: xmax }) ?? []) {
-              pushStems(extras, run, color, false, stemPx);
+              pushStems(extras, scaleStems(run, mass), color, false, stemPx);
             }
           } catch {
             /* a parameter is missing this frame */
@@ -2733,28 +2796,6 @@ function rowToggle(eq: Equation): RowToggle | null {
           eq.partialSum = !eq.partialSum;
         },
       };
-    case 'vlist':
-      return {
-        label: 'bars',
-        title: 'Draw the list as bars instead of dots',
-        on: !!eq.barMode,
-        flip: () => {
-          eq.barMode = !eq.barMode;
-        },
-      };
-    case 'dlist':
-      // Bars only while the list is small enough to draw as shapes; past
-      // that it is a cloud and a bar per point would be a solid block.
-      return eq.cpu!.values.length > CLOUD_MIN
-        ? null
-        : {
-            label: 'bars',
-            title: 'Draw the list as bars instead of dots',
-            on: !!eq.barMode,
-            flip: () => {
-              eq.barMode = !eq.barMode;
-            },
-          };
     default:
       return null;
   }
@@ -4411,6 +4452,8 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
       return `defines the function ${name}${quiet}`;
     case 'matrix':
       return `defines ${name}: a matrix${quiet}`;
+    case 'tensor':
+      return `defines ${name}: a ${b.tensor.shape.join('×')} tensor${quiet}`;
     case 'seq':
       return `defines ${name}: a list${quiet}`;
     case 'table':
@@ -4419,6 +4462,8 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
       return `defines ${name}: a random variable`;
     case 'missing':
       return `defines ${name} from a data file that is not on this device`;
+    case 'interval':
+      return `defines ${name}: a continuous interval, one hidden parameter shared by every row that uses ${name}${quiet}`;
   }
 }
 
@@ -4437,7 +4482,7 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
   }
   const row: RowStatus = { index, text: eq.text, status: 'ok' };
   if (!eq.text.trim()) return row;
-  row.kind = rowKind({ ...eq, view: eq.viewSpec }, defs.tables);
+  row.kind = rowKind({ ...eq, view: eq.viewSpec }, defs);
   row.meaning = eq.comment
     ? 'group heading; draws nothing'
     : eq.def

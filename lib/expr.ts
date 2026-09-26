@@ -27,6 +27,10 @@ export type FigureForm = 'polygon' | 'segment' | 'polyline' | 'vector' | 'square
 export interface Axis {
   id: string;
   n: number;
+  /** A tuple's axis: its values sit at positions 1…n, so it indexes, draws
+   *  as a path, and meets another tuple by position rather than crossing
+   *  (docs/multisets.md §3). Every other axis is a multiset's: no order. */
+  ordered?: true;
 }
 
 /** A packed column a `lazy` list or packed figure runs over: `name` is the
@@ -42,18 +46,22 @@ export interface Column {
  *  never part of the math — exprKey leaves them out. */
 export type Expr = ExprNode & { axes?: readonly Axis[]; origin?: number };
 
+/** The products written with their own glyph (see the bin node). */
+export type ProductGlyph = 'dot' | 'cross' | 'outer' | 'wedge';
+
 type ExprNode =
   | { readonly kind: 'num'; readonly value: number }
   | { readonly kind: 'var'; readonly name: string }
-  /** `glyph` records a product written `·`/`⋅` ('dot') or `×` ('cross'):
-   *  between two vectors lowerGeom reads it as dot(a, b) or cross(a, b);
-   *  between numbers it is plain multiplication. */
+  /** `glyph` records a product written `·`/`⋅` ('dot'), `×` ('cross'),
+   *  `⊗` ('outer') or `∧` ('wedge'): between two vectors or tensors
+   *  lowerGeom reads it as that product; between numbers it is plain
+   *  multiplication. */
   | {
       readonly kind: 'bin';
       readonly op: '+' | '-' | '*' | '/' | '^';
       readonly a: Expr;
       readonly b: Expr;
-      readonly glyph?: 'dot' | 'cross';
+      readonly glyph?: ProductGlyph;
     }
   | { readonly kind: 'neg'; readonly a: Expr }
   | { readonly kind: 'call'; readonly name: string; readonly args: readonly Expr[] }
@@ -83,8 +91,11 @@ type ExprNode =
   | { readonly kind: 'hist'; readonly centers: Float64Array; readonly counts: Float64Array; readonly width: number }
   | { readonly kind: 'family'; readonly members: readonly Expr[] }
   | { readonly kind: 'eq'; readonly l: Expr; readonly r: Expr }
-  /** An inequality; chains like 0 < y < x nest left: ((0 < y) < x). */
-  | { readonly kind: 'ineq'; readonly op: IneqOp; readonly l: Expr; readonly r: Expr }
+  /** An inequality; chains like 0 < y < x nest left: ((0 < y) < x).
+   *  `grouped` marks one written in parentheses. Over a list it is an
+   *  operand — its kept members, (L > 1) > 2 — not a link of an outer chain
+   *  (list.ts lowerCond); over x and y it still reads as the chain. */
+  | { readonly kind: 'ineq'; readonly op: IneqOp; readonly l: Expr; readonly r: Expr; readonly grouped?: true }
   /** A vector literal like (2, 3) or (cos(u), sin(u), v): the whole
    *  statement, an equation side, or an operand ((A + (1, 2))/2 — lowerGeom
    *  expands 2-item operands; 3-item vectors stay top-level values). */
@@ -116,10 +127,15 @@ type ExprNode =
   | { readonly kind: 'str'; readonly value: string }
   /** A text column, the counterpart of `data`. Same rule: only comparisons. */
   | { readonly kind: 'text'; readonly values: readonly string[] }
-  /** {cond: value, …, otherwise?}; conditions are inequalities, tried in order. */
+  /**
+   * {cond: value, …, otherwise?}; conditions are inequalities, tried in order.
+   * `bare` marks a condition written without a value (`{x > 0, …}`, value 1):
+   * as a reduction's argument, `{c1, c2: f}` is f where c1 and c2 both hold,
+   * and there (only) a condition may be an equation (lib/measure.ts).
+   */
   | {
       readonly kind: 'piecewise';
-      readonly cases: ReadonlyArray<{ readonly cond: Expr; readonly value: Expr }>;
+      readonly cases: ReadonlyArray<{ readonly cond: Expr; readonly value: Expr; readonly bare?: true }>;
       readonly otherwise?: Expr;
     }
   /**
@@ -138,6 +154,10 @@ type ExprNode =
       readonly body: Expr;
       readonly limit: number;
     };
+
+/** A continuous interval's hidden parameter (lib/interval.ts): not an
+ *  identifier, so no document name or builtin can collide with it. */
+export const INTERVAL = '[interval]';
 
 /** The self-call inside a `loop` body: its args are the next pass's params. */
 export const RECUR = '@recur';
@@ -177,6 +197,17 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'div',
     'curl',
     'laplacian',
+    // A tuple of rows is one matrix argument: det(((a, b), (c, d))).
+    'det',
+    'trace',
+    'solve',
+    'exp',
+    // Tensors are nested tuples: outer((1, 0), (0, 1)) takes two vectors.
+    'outer',
+    'wedge',
+    'contract',
+    // sort((s, sin(s)), s): the points to order, then their key.
+    'sort',
   ]);
   return grouped.has(name) ? args : args.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
 }
@@ -233,6 +264,8 @@ export const FUNCTIONS = new Set([
   'median',
   'sort',
   'hist',
+  // A continuous interval, resolved into a hidden parameter (lib/interval.ts).
+  'interval',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
   'dot',
@@ -256,6 +289,10 @@ export const FUNCTIONS = new Set([
   'det',
   'trace',
   'solve',
+  // Tensor products and contraction (see tensor.ts), lowered the same way.
+  'outer',
+  'wedge',
+  'contract',
   // Not real functions: Σ/Π/∫ binders and the ∇ operators, expanded
   // symbolically by resolveExpr.
   'sum',
@@ -311,6 +348,10 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'rgb',
   'hsl',
   'oklch',
+  'outer',
+  'wedge',
+  'contract',
+  'interval',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
@@ -410,7 +451,11 @@ const bin =
 // open-bracket marker, and a `cond: value` piecewise part.
 type PCase = { kind: 'pcase'; cond: Expr; value: Expr };
 type POpen = { kind: 'popen'; bracket: string; call: boolean };
-type PNode = Expr | { kind: 'series'; items: Array<Expr | PCase> } | PCase | POpen;
+/** `=` beside a comma series: `{y = x^2, 0 < x < 1: y}` binds `=` loosest,
+ *  so braces re-split it into conditions (eqItems); anywhere else it is the
+ *  equation it always was (asExpr). */
+type PEq = { kind: 'peq'; l: PNode; r: PNode };
+type PNode = Expr | { kind: 'series'; items: Array<Expr | PCase> } | PCase | POpen | PEq;
 
 function asExpr(n: PNode | undefined): Expr {
   if (!n) throw new Error('Incomplete expression.');
@@ -419,8 +464,31 @@ function asExpr(n: PNode | undefined): Expr {
     throw new Error('Unexpected argument list.');
   }
   if (n.kind === 'pcase') throw new Error('A "condition: value" pair is only valid inside {…}.');
+  // Outside braces, `a = b, c` keeps its old reading: b, c is a tuple.
+  if (n.kind === 'peq') return { kind: 'eq', l: asVecOrExpr(n.l), r: asVecOrExpr(n.r) };
   if (n.kind === 'popen') throw new Error('Incomplete expression.');
   return n;
+}
+
+/** Whether `=` over these operands may be one condition among others, if
+ *  braces close around it: a comma series or a `cond: value` beside it. */
+const holdsConditions = (n: PNode): boolean => n.kind === 'pcase' || n.kind === 'peq' || n.kind === 'series';
+
+/** The comma items of `a = b` in braces: `=` joins a's last item to b's first. */
+function eqItems(n: PNode): Array<Expr | PCase> {
+  if (n.kind === 'series') return n.items;
+  if (n.kind === 'pcase') return [n];
+  if (n.kind !== 'peq') return [asExpr(n)];
+  const l = eqItems(n.l);
+  const r = eqItems(n.r);
+  const left = l[l.length - 1];
+  if (left.kind === 'pcase') throw new Error('A piecewise value cannot be an equation.');
+  const right = r[0];
+  const joined: Expr | PCase =
+    right.kind === 'pcase'
+      ? { kind: 'pcase', cond: { kind: 'eq', l: left, r: right.cond }, value: right.value }
+      : { kind: 'eq', l: left, r: right };
+  return [...l.slice(0, -1), joined, ...r.slice(1)];
 }
 
 const asVecOrExpr = (n: PNode): Expr =>
@@ -433,38 +501,43 @@ const asVecOrExpr = (n: PNode): Expr =>
 const asBin = (op: '+' | '-' | '*' | '/' | '^') =>
   BinaryInfix<PNode>((a, b) => bin(op)(asVecOrExpr(a), asVecOrExpr(b)));
 
-/** `·` and `×`: multiplication that remembers its glyph (see the bin node). */
-const asProduct = (glyph: 'dot' | 'cross') =>
+/** `·`, `×`, `⊗` and `∧`: multiplication that remembers its glyph (see the bin node). */
+const asProduct = (glyph: ProductGlyph) =>
   BinaryInfix<PNode>((a, b): Expr => ({ kind: 'bin', op: '*', a: asVecOrExpr(a), b: asVecOrExpr(b), glyph }));
 
 const asIneq = (op: IneqOp) =>
   BinaryInfix<PNode>((a, b): Expr => ({ kind: 'ineq', op, l: asVecOrExpr(a), r: asVecOrExpr(b) }));
 
-/** A comma series of 2–3 scalars in plain brackets is a vector literal. */
+/** A comma series in plain brackets is a tuple: 2–3 numbers are a point, a
+ *  longer run is a tuple of values (list lowering reads it as one). */
 function seriesToVec(items: Array<Expr | PCase>): Expr {
-  if (items.length === 2 || items.length === 3) return { kind: 'vec', items: items.map(asExpr) };
+  if (items.length >= 2) return { kind: 'vec', items: items.map(asExpr) };
   throw new Error('Expected 2 or 3 vector components.');
 }
 
 /** Assemble {…} content into a piecewise if it contains `cond: value` parts. */
 function bracePiecewise(content: PNode): PNode {
-  const items = content.kind === 'series' ? content.items : [content];
+  const items = content.kind === 'series' || content.kind === 'peq' ? eqItems(content) : [content];
+  if (content.kind === 'peq' && items.length === 1 && items[0].kind !== 'pcase') return asExpr(items[0]);
   // A bare condition among several parts is Desmos's `{cond, else}`: 1 where
   // it holds. Alone, {x > 0} keeps meaning the inequality itself.
-  const bare = items.length > 1 && items.some(n => n.kind === 'ineq');
+  const bare = items.length > 1 && items.some(n => n.kind === 'ineq' || n.kind === 'eq');
   if (!items.some(n => n.kind === 'pcase') && !bare) {
     return content.kind === 'series' ? seriesToVec(content.items) : content;
   }
-  const cases: Array<{ cond: Expr; value: Expr }> = [];
+  const cases: Array<{ cond: Expr; value: Expr; bare?: true }> = [];
   let otherwise: Expr | undefined;
   items.forEach((n, k) => {
-    if (n.kind === 'ineq' && items.length > 1) {
+    if ((n.kind === 'ineq' || n.kind === 'eq') && items.length > 1) {
       if (otherwise) throw new Error('The default value must come last in {…}.');
-      cases.push({ cond: n, value: num(1) });
+      cases.push({ cond: n, value: num(1), bare: true });
       return;
     }
     if (n.kind === 'pcase') {
-      if (n.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities, like x < 0.');
+      // An equation condition parses, and only a reduction accepts it
+      // (lib/measure.ts); the resolver refuses it anywhere else.
+      if (n.cond.kind !== 'ineq' && n.cond.kind !== 'eq')
+        throw new Error('Piecewise conditions must be inequalities, like x < 0.');
       if (otherwise) throw new Error('The default value must come last in {…}.');
       cases.push({ cond: n.cond, value: n.value });
     } else {
@@ -503,7 +576,8 @@ const ops = operators<PNode>({
     // parens turn a comma series into a vector literal like (2, 3).
     if (call) return content ?? { kind: 'series', items: [] };
     if (!content) throw new Error('Empty parentheses.');
-    return content.kind === 'series' ? seriesToVec(content.items) : content;
+    if (content.kind === 'series') return seriesToVec(content.items);
+    return content.kind === 'ineq' ? { ...content, grouped: true } : content;
   }),
   ']': closer('[', (content, call) => {
     if (!content) throw new Error('Empty list.');
@@ -520,7 +594,11 @@ const ops = operators<PNode>({
   // Either side of '=' may be a tuple, so (x', y') = (y, -sin(x)) parses.
   // (In `sum(n = 1..N, body)` the ',' binds tighter than '=', so the rhs
   // arrives as the tuple (1..N, body); sumCall unpacks that shape.)
-  '=': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'eq', l: asVecOrExpr(a), r: asVecOrExpr(b) })),
+  '=': BinaryInfix<PNode>((a, b): PNode =>
+    holdsConditions(a) || holdsConditions(b)
+      ? { kind: 'peq', l: a, r: b }
+      : { kind: 'eq', l: asVecOrExpr(a), r: asVecOrExpr(b) },
+  ),
 
   ',': BinaryInfix<PNode>((a, b) => {
     const items = (n: PNode): Array<Expr | PCase> =>
@@ -557,6 +635,8 @@ const ops = operators<PNode>({
   '×': asProduct('cross'),
   '·': asProduct('dot'),
   '⋅': asProduct('dot'),
+  '⊗': asProduct('outer'),
+  '∧': asProduct('wedge'),
   '/': asBin('/'),
   '÷': asBin('/'),
 
@@ -574,15 +654,15 @@ const ops = operators<PNode>({
   '[apply]': BinaryInfix<PNode>((a, b): Expr => {
     if (a?.kind !== 'var' || !isFnName(a.name)) throw new Error('Expected a function name.');
     const name = canonicalFn(a.name);
-    if (name === 'sum' || name === 'prod') return sumCall(name, b);
+    if (name === 'sum' || name === 'prod') return sumCall(name, b?.kind === 'peq' ? asExpr(b) : b);
     if (name === 'int') return intCall(b);
     const args = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
     return { kind: 'call', name, args };
   }),
 
   // List indexing: `L[2]` for a known list name L (1-based; list.ts lowers
-  // it). Only named lists index — `x[2]` keeps meaning 2x, and a literal
-  // `[1,2,3][2]` stays implicit multiplication.
+  // it), a sort(…) call, or a list literal right against its index (see
+  // addImplicitTokens) — `x[2]` keeps meaning 2x.
   '[at]': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'index', args: [asExpr(a), asVecOrExpr(b)] })),
 
   // Column access: `person.age` is one name, not a product. Binding tighter
@@ -645,6 +725,10 @@ function sumCall(name: 'sum' | 'prod', b: PNode): Expr {
 // '-x^2' parses as -(x^2) and 'x^-1' as x^(-1) without either popping the other.
 ops['[neg]'].prec = ops['^'].prec;
 
+// Indexing shares application's level (both associate left), so sort(L)[2]
+// indexes the call rather than calling sort on L[2].
+ops['[at]'].prec = ops['[apply]'].prec;
+
 // All comparators share one precedence level so chains like 0 <= y < x
 // associate left: ((0 <= y) < x), the shape classify flattens.
 for (const k of ['<=', '≤', '>', '>=', '≥']) ops[k].prec = ops['<'].prec;
@@ -652,7 +736,7 @@ for (const k of ['<=', '≤', '>', '>=', '≥']) ops[k].prec = ops['<'].prec;
 // Unicode spellings share their operator's level (each key otherwise gets its
 // own), so 5 − 3 - 1 and 5 - 3 − 1 both associate left: ((5 − 3) - 1).
 ops['−'].prec = ops['-'].prec;
-for (const k of ['×', '·', '⋅']) ops[k].prec = ops['*'].prec;
+for (const k of ['×', '·', '⋅', '⊗', '∧']) ops[k].prec = ops['*'].prec;
 ops['÷'].prec = ops['/'].prec;
 ops['≠'].prec = ops['!='].prec;
 
@@ -899,6 +983,10 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   /** The dotted name ending at `last` when it is a symbol: `person.age`. */
   let path: string | null = null;
   let barDepth = 0;
+  /** What each open bracket is: the function it calls, an index, or null. */
+  const opened: (string | null)[] = [];
+  /** What the bracket `last` closed was. */
+  let closed: string | null = null;
   for (const token of bare) {
     if (token.type === 'whitespace') continue;
 
@@ -925,6 +1013,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         const close: Token = { ...token, type: 'parenclose', str: ')' };
         yield close;
         last = close;
+        closed = opened.pop() ?? null;
       } else {
         barDepth++;
         if (afterValue) yield op('[impl]');
@@ -933,6 +1022,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         const open: Token = { ...token, type: 'parenopen', str: '(', call: true };
         yield open;
         last = open;
+        opened.push('abs');
       }
       path = null;
       continue;
@@ -949,6 +1039,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     }
 
     let emit = token;
+    let indexing = false;
     if (
       afterValue &&
       (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen' || token.type === 'string')
@@ -959,21 +1050,37 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
       // shadowable, so `mean = [1, 4, 2]` then `mean[2]` is an index.
       // A sequence also takes its index in braces or parens, as its
       // recurrence row is written: a_{n+1}, a_(n-1), a_{10}.
+      // A sort(…) is a tuple, so it indexes as one: sort(L)[2]. A list
+      // literal written right against its index, [3, 1, 2][2], is indexed
+      // too, so it can say it has no order. A bracket index is written
+      // right against what it indexes: with a space, L [2], sort(L) [2] and
+      // [1, 2] [3] multiply (docs/multisets.md §9).
+      const touching = last!.loc[1] === token.loc[0];
       const isIndex =
         token.type === 'parenopen' &&
-        last!.type === 'symbol' &&
-        (token.str === '[' ? indexes(path ?? last!.str) : last!.str.endsWith('_') && activeListNames.has(last!.str));
+        (last!.type === 'symbol'
+          ? token.str === '['
+            ? touching && indexes(path ?? last!.str)
+            : last!.str.endsWith('_') && activeListNames.has(last!.str)
+          : token.str === '[' && touching && last!.type === 'parenclose' && (closed === 'sort' || closed === '[list]'));
       const isFnCall =
         !isIndex &&
         !path?.includes('.') &&
         token.type === 'parenopen' &&
         last!.type === 'symbol' &&
         isFnName(last!.str);
+      indexing = isIndex;
       yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };
     }
 
     const afterDot = last?.type === 'operator' && last.str === '.';
+    if (emit.type === 'parenopen') {
+      opened.push(
+        emit.call ? (builtinFn(last!.str) ?? last!.str) : indexing ? '[at]' : emit.str === '[' ? '[list]' : null,
+      );
+    }
+    closed = emit.type === 'parenclose' ? (opened.pop() ?? null) : null;
     yield emit;
     last = emit;
     path =
@@ -985,6 +1092,30 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
           ? path
           : null;
   }
+}
+
+/** `[]` is the empty multiset, `[1,2] + [] = []` (docs/multisets.md §1). An
+ *  operator-precedence parser has no operand to hang an empty bracket on, so
+ *  the pair arrives as one symbol token that no user can type. */
+const EMPTY_LIST = '[]';
+
+function* mergeEmptyBrackets(tokens: Iterable<Token>): Iterable<Token> {
+  let open: Token | null = null;
+  for (const token of tokens) {
+    if (open) {
+      if (token.type === 'whitespace') continue;
+      if (token.type === 'parenclose' && token.str === ']') {
+        yield { ...open, type: 'symbol', str: EMPTY_LIST };
+        open = null;
+        continue;
+      }
+      yield open;
+      open = null;
+    }
+    if (token.type === 'parenopen' && token.str === '[') open = token;
+    else yield token;
+  }
+  if (open) yield open;
 }
 
 function createLeaf(token: Token): PNode {
@@ -1003,6 +1134,7 @@ function createLeaf(token: Token): PNode {
   }
   if (token.type === 'parenopen') return { kind: 'popen', bracket: token.str, call: !!token.call };
   if (token.type === 'symbol') {
+    if (token.str === EMPTY_LIST) return { kind: 'list', items: [] };
     if (Object.hasOwn(CONSTANTS, token.str)) return num(CONSTANTS[token.str]);
     return { kind: 'var', name: token.str };
   }
@@ -1025,7 +1157,9 @@ export function parseExpr(
   activeListNames = listNames;
   activeValueNames = valueNames;
   try {
-    const tokens = addImplicitTokens(mergeBracedSubscripts(normalizeTokens(desugarUnicode(tokenize(str)))));
+    const tokens = addImplicitTokens(
+      mergeEmptyBrackets(mergeBracedSubscripts(normalizeTokens(desugarUnicode(tokenize(str))))),
+    );
     const stack: PNode[] = [];
     walk(
       ops,
@@ -1120,7 +1254,11 @@ export function mapChildren(e: Expr, map: (child: Expr) => Expr): Expr {
     case 'piecewise':
       return {
         ...e,
-        cases: e.cases.map((_, i) => ({ cond: next[2 * i], value: next[2 * i + 1] })),
+        cases: e.cases.map((c, i) => ({
+          cond: next[2 * i],
+          value: next[2 * i + 1],
+          ...(c.bare ? { bare: c.bare } : {}),
+        })),
         otherwise: e.otherwise ? next[next.length - 1] : undefined,
       };
     case 'loop':
@@ -1545,6 +1683,10 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
         return v ?? NaN;
       }
       const fn = EVAL_FNS[e.name];
+      if (!fn && e.name === INTERVAL)
+        throw new Error(
+          'An interval is a range of numbers, not one value: draw it in a row of its own, in a tuple, or beside x and y.',
+        );
       if (!fn) throw new Error(strayComp(e) ?? `Unknown function: ${e.name}`);
       return fn(...e.args.map(a => evaluate(a, env)));
     }

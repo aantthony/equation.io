@@ -6,11 +6,12 @@ import { lowerLists } from './list.ts';
 import { cpuStructureKey } from './compiler.ts';
 
 /** The complete graph on n points of a Fibonacci sphere, as one polyline:
- *  with n prime, stepping by s = 1…(n-1)/2 walks every edge once. */
+ *  with n prime, stepping by s = 1…(n-1)/2 walks every edge once. The steps
+ *  are a tuple, so the path has an order to walk (docs/multisets.md §3). */
 const sphere = (n: number) => [
   `n = ${n}`,
   'g = pi(3 - sqrt(5))',
-  'm = [0..n(n-1)/2]',
+  'm = sort([0..n(n-1)/2])',
   'h(j) = 1 - (2j+1)/n',
   'F(j) = (sqrt(1 - h(j)^2) cos(g j), sqrt(1 - h(j)^2) sin(g j), h(j))',
   'rotate(polyline(F(mod((floor(m/n) + 1) mod(m, n), n))), t/5, (0, 1, 0))',
@@ -88,14 +89,21 @@ describe('packed figures', () => {
   });
 
   it('keep their structure across slider values that do not change the length', () => {
-    const rows = (a: number) => [`a = ${a}`, 'k = [0..99]', 'polyline(rotate((k, sin(a k)), t))'];
+    const rows = (a: number) => [`a = ${a}`, 'k = sort([0..99])', 'polyline(rotate((k, sin(a k)), t))'];
     expect(cpuStructureKey(polygonPlan(rows(1)).plan)).toBe(cpuStructureKey(polygonPlan(rows(2)).plan));
   });
 
   it('keep the limits and messages of an unpacked figure', () => {
     const error = (rows: string[]) => analyzeRows(rows, { backend: 'cpu', readouts: false }).rows.at(-1)!.error;
-    expect(error(['a = 1', 'k = [0]', 'polyline((k, a k))'])).toMatch(/at least 2 points/);
-    expect(error(['a = 1', 'k = [0, 1]', 'polygon((k, a k))'])).toMatch(/at least 3 vertices/);
+    expect(error(['a = 1', 'k = sort([0])', 'polyline((k, a k))'])).toMatch(/at least 2 points/);
+    expect(error(['a = 1', 'k = sort([0, 1])', 'polygon((k, a k))'])).toMatch(/at least 3 vertices/);
+    // A path walks its points in order: a multiset has none (§3).
+    expect(error(['a = 1', 'k = [0..9]', 'polyline((k, a k))'])).toMatch(/polyline needs an order.*sort/);
     expect(error(['a = 1', 'k = [1..2001]', 'hull((k, a k, k^2))'])).toMatch(/3D hull takes at most 2000 points/);
+  });
+
+  it('sort a template by its key without unpacking it', () => {
+    const { plan } = polygonPlan(['a = 2', 'k = [9, 3, 5, 1]', 'polyline(sort((k, sin(a k)), k))']);
+    expect(plan.over?.[0].values).toEqual(Float64Array.of(1, 3, 5, 9));
   });
 });

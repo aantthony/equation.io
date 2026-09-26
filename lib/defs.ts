@@ -1,7 +1,7 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
 import { childrenOf, LOOP_LIMIT, RECUR, isRecur } from './expr.ts';
 import { mapChildren, structuralDiagnostic, legacyCallArgs } from './expr.ts';
-import { exprKey } from './expr.ts';
+import { exprKey, type ProductGlyph } from './expr.ts';
 /**
  * User definitions and derivative syntax.
  *
@@ -32,7 +32,7 @@ import { exprKey } from './expr.ts';
  */
 import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
-import { type Column, type Table, filterTable } from './csv.ts';
+import { type Column, type Table, filterTable, positionColumn, rowPositions } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import {
   FUNCTIONS,
@@ -54,9 +54,11 @@ import {
   substVars,
 } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
+import { hasInterval, hiddenInterval } from './interval.ts';
+import { isReductionCall, reduceOverSet } from './measure.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
-import { lowerGeom, lowerMatrix, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
+import { lowerGeom, lowerMatrix, lowerTensorValue, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
 import {
   type GetList,
   type Seq,
@@ -65,13 +67,16 @@ import {
   axesOf,
   isDataScatter,
   isSeq,
+  isTuple,
   lowerLists,
   lowerMask,
+  orderMessage,
   namedAxes,
   plainFnName,
   withAxes,
 } from './list.ts';
-import { type Mat, matrixFromList } from './mat.ts';
+import type { Mat } from './mat.ts';
+import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -167,9 +172,11 @@ interface BindingDraft {
   states: Map<string, StateDef>;
   vecStates: Map<string, number>;
   mats: Map<string, Mat>;
+  tensors: Map<string, Tensor>;
   lists: Map<string, Seq | (Expr & { kind: 'vec' })>;
   missingData: Map<string, { message: string; list: boolean }>;
   tables: Map<string, TableDef>;
+  intervals: Map<string, Expr>;
 }
 
 export interface TableDef {
@@ -191,9 +198,11 @@ const emptyDraft = (): BindingDraft => ({
   states: new Map(),
   vecStates: new Map(),
   mats: new Map(),
+  tensors: new Map(),
   lists: new Map(),
   missingData: new Map(),
   tables: new Map(),
+  intervals: new Map(),
 });
 
 /**
@@ -211,6 +220,14 @@ export const TABLE_MAX_ROWS = 200_000;
  * device-local rather than broken, because it is not the graph that is wrong.
  */
 export class MissingDataError extends Error {}
+
+/** Row positions, built once per table (and so shared by every row asking). */
+const tablePositions = new WeakMap<Table, Float64Array>();
+function positions(table: Table): Float64Array {
+  let hit = tablePositions.get(table);
+  if (!hit) tablePositions.set(table, (hit = rowPositions(table)));
+  return hit;
+}
 
 /** Expression elements of a numeric column, built once per parsed column. */
 const colExprs = new WeakMap<Column, Expr[]>();
@@ -248,7 +265,7 @@ export function columnExprs(col: Column): Expr[] {
  * do. (Two separately written lists `X`, `Y` are independent and cross.)
  */
 function pointColumn(defs: ValueDefinitions, name: string, axis: string): Seq | null {
-  // Two or three 2D points — three 3D ones — read as a matrix; its rows are
+  // A tuple of two 2D points — three 3D ones — is a matrix; its rows are
   // the same points.
   const mat = defs.mats.get(name);
   const points = mat ? rowsAsPoints(mat, name) : defs.lists.get(name);
@@ -271,6 +288,26 @@ function pointColumn(defs: ValueDefinitions, name: string, axis: string): Seq | 
     { kind: 'list', items: points.items.map(p => (p as Expr & { kind: 'vec' }).items[k]) },
     namedAxes(name, points),
   );
+}
+
+/**
+ * Resolve a name to a tensor: a named tensor, or — asked with `tuples`, by an
+ * operation on tensors — a named tuple, which is one too: a tuple of numbers
+ * a vector, a tuple of points a rank-2 tensor (docs/multisets.md §3: the
+ * consumer decides the reading).
+ */
+export function tensorGetter(defs: ValueDefinitions): GetTensor {
+  return (name, tuples) => {
+    const hit = defs.tensors.get(name);
+    if (hit || !tuples) return hit ?? null;
+    const list = defs.lists.get(name);
+    if ((list?.kind !== 'list' && list?.kind !== 'data') || !isTuple(list) || axesOf(list).length !== 1) return null;
+    // A tuple of numbers is a vector of any length: T = sort(L).
+    if (list.kind === 'data') return vectorTensor([...list.values].map(value => ({ kind: 'num', value })));
+    if (list.items.every(it => it.kind !== 'vec' && it.kind !== 'list')) return vectorTensor(list.items);
+    const rows = list.items.map(it => (it.kind === 'vec' ? vectorTensor(it.items) : null));
+    return rows.length && rows.every(r => r !== null) ? stack(rows as Tensor[]) : null;
+  };
 }
 
 /**
@@ -306,6 +343,12 @@ export function listGetter(defs: ValueDefinitions): GetList {
     const col = length ? path.slice(0, -'.length'.length) : path;
     if (!table.data) throw new MissingDataError(table.missing ?? `${table.file} is not loaded.`);
     const found = table.data.columns.find(c => c.name === col);
+    // Every row's position in the file: `person.row` (docs/multisets.md §3).
+    if (!found && !length && col === positionColumn(table.data)) {
+      return withAxes({ kind: 'data', values: positions(table.data) }, [
+        { id: `${name.slice(0, dot)}.`, n: table.data.rows },
+      ]);
+    }
     if (!found) {
       throw new Error(
         `${table.file} has no column "${col}" (columns: ${table.data.columns.map(c => c.name).join(', ')}).`,
@@ -339,15 +382,29 @@ export function listGetter(defs: ValueDefinitions): GetList {
  *  `person[…]` index instead of multiplying (parseExpr needs this before it
  *  parses). Table names count: a data file is indexed by a filter. */
 export function listNamesOf(defs: ValueDefinitions): Set<string> {
-  const out = new Set([...defs.mats.keys(), ...defs.lists.keys(), ...[...defs.sequences.keys()].map(n => n + '_')]);
+  const out = new Set([
+    ...defs.mats.keys(),
+    ...defs.tensors.keys(),
+    ...defs.lists.keys(),
+    ...[...defs.sequences.keys()].map(n => n + '_'),
+  ]);
   // A list whose file is elsewhere still indexes: the row must parse the same
   // way on every device (see `indexes` in expr.ts).
   for (const [name, m] of defs.missingData) if (m.list) out.add(name);
   for (const [name, t] of defs.tables) {
     out.add(name);
     for (const c of t.data?.columns ?? []) out.add(`${name}.${c.name}`);
+    const row = t.data && positionColumn(t.data);
+    if (row) out.add(`${name}.${row}`);
   }
   return out;
+}
+
+/** Every name that `name[k]` indexes when parsing: the lists, and named
+ *  points, which are tuples of 2 or 3 numbers (T[2]; docs/multisets.md §3)
+ *  but are not lists anywhere else. */
+export function indexNamesOf(defs: ValueDefinitions): Set<string> {
+  return new Set([...listNamesOf(defs), ...defs.pointDims.keys()]);
 }
 
 /**
@@ -401,6 +458,7 @@ const draftNameTaken = (defs: ValueDefinitions, n: string): boolean =>
   defs.states.has(n) ||
   defs.points.has(n) ||
   defs.mats.has(n) ||
+  defs.tensors.has(n) ||
   defs.lists.has(n) ||
   defs.tables.has(n) ||
   defs.missingData.has(n);
@@ -418,7 +476,7 @@ function staysList(e: Expr, defs: ValueDefinitions): boolean {
       if (defs.lists.has(e.name) || defs.missingData.get(e.name)?.list === true) return true;
       const dot = e.name.indexOf('.');
       if (dot <= 0) return false;
-      // `P.x` of a point list — including one short enough to read as a matrix.
+      // `P.x` of a point list, or of the rows of a matrix.
       const head = e.name.slice(0, dot);
       return defs.tables.has(head) || defs.lists.has(head) || defs.mats.has(head);
     }
@@ -471,10 +529,16 @@ const DEAD_FILTER =
  * rather than reported as merely device-local in a shared link and refused
  * for the author. (A list of indices picks elements, so it is no issue here.)
  */
-export function indexIssue(idx: Expr, defs: ValueDefinitions): string | null {
+export function indexIssue(idx: Expr, defs: ValueDefinitions, target?: Expr): string | null {
   const inside = wholePlotOverList(idx, defs);
   if (inside) return `Lists cannot appear inside ${inside}(…).`;
-  if (!isComparison(idx)) return null;
+  if (!isComparison(idx)) {
+    // A column is a multiset whether or not its file is here, so picking by
+    // position is refused on every device alike (docs/multisets.md §3).
+    const name = target?.kind === 'var' ? target.name : '';
+    const dot = name.indexOf('.');
+    return dot > 0 && defs.tables.has(name.slice(0, dot)) ? orderMessage(name, idx, false) : null;
+  }
   const operands = idx.kind === 'ineq' ? ineqComparisons(idx).flatMap(c => [c.l, c.r]) : idx.args;
   return operands.some(a => staysList(a, defs)) ? null : DEAD_FILTER;
 }
@@ -531,13 +595,15 @@ function filteredTable(e: Expr, defs: ValueDefinitions, opts: ResolveOpts): Tabl
   if (!src) return null;
   const name = e.args[0].name;
   const shape = `${name}[…] needs a comparison, like ${name}[${name}.x > 0].`;
+  // Judged by shape on every device first, so a filter the bytes would
+  // refuse for another reason (an index inside it) says the same everywhere.
+  checkFilterShape(e.args[1], defs, shape);
   // No bytes to cut (a shared link elsewhere, or a server-side preview): the
   // cut is a table too, and reports the same reason its source does. Only the
   // per-row answer waits for the data — whether the row is a filter at all,
   // and whether it could ever settle, are answered here either way, or a
   // shared link would call `person[5]` valid and the author's device would not.
   if (!src.data) {
-    checkFilterShape(e.args[1], defs, shape);
     return { file: src.file, hash: src.hash, data: null, missing: src.missing };
   }
   const keep = lowerMask(e.args[1], listGetter(defs), opts);
@@ -917,7 +983,7 @@ export interface ResolveOpts {
    * before list.ts lowers anything, because lowering needs the bytes and the
    * answer must not: see indexIssue.
    */
-  indexIssue?: (idx: Expr) => string | null;
+  indexIssue?: (idx: Expr, target: Expr) => string | null;
   /**
    * The value of a name defined as a number or field (`g = x^2 + y^2`, or a
    * named vector's component F_x), so derivatives can differentiate through
@@ -927,6 +993,44 @@ export interface ResolveOpts {
   /** The component names a named vector lowers to (F → F_x, F_y), so the
    *  vector operators see a named field's components. */
   comps?: (name: string) => readonly string[] | null;
+  /**
+   * Every name the document binds. The unit vectors e_x, e_y, e_z are in
+   * scope only when this is given and does not hold them: a caller that
+   * cannot see the whole document cannot tell `e_x = 3` from the built-in.
+   */
+  documentNames?: ReadonlySet<string>;
+  /**
+   * The value of a name whose definition holds a continuous interval
+   * (`r = interval(1, 2)`, or `s = 2 r` after it): written in wherever the
+   * name appears, so every mention is the same hidden parameter
+   * (lib/interval.ts). Undefined for anything else.
+   */
+  interval?: (name: string) => Expr | undefined;
+  /**
+   * A function's parameters, while its body resolves: there `x` is the
+   * argument, not the continuous multiset a reduction would integrate over
+   * (lib/measure.ts).
+   */
+  params?: ReadonlySet<string>;
+}
+
+/**
+ * The unit vectors (docs/multisets.md §4), so `[0,1] e_x` is two points.
+ * Unlike pi and e they are resolved rather than parsed, so a document that
+ * defines `e_x` keeps its own. They are always 3D: a row using one is a 3D
+ * scene, as `(1,0,0)` makes it.
+ */
+const UNIT_VECTORS: Readonly<Record<string, readonly number[]>> = {
+  e_x: [1, 0, 0],
+  e_y: [0, 1, 0],
+  e_z: [0, 0, 1],
+};
+
+function unitVector(name: string, opts: ResolveOpts): Expr | null {
+  const axis = Object.hasOwn(UNIT_VECTORS, name) ? UNIT_VECTORS[name] : null;
+  // (An open Σ index of that name is bound, not the vector.)
+  if (!axis || !opts.documentNames || opts.documentNames.has(name) || opts.openVars?.has(name)) return null;
+  return { kind: 'vec', items: axis.map(num) };
 }
 
 interface Ctx {
@@ -1006,7 +1110,7 @@ const VECTOR_OP_EXAMPLE: Record<string, string> = {
  * never gets here. Returns the rewritten chain, or null when it has no ∇.
  */
 function splitNablaChain(e: Expr, ctx: Ctx): Expr | null {
-  type Factor = { e: Expr; op: '*' | '/'; glyph?: 'dot' | 'cross' };
+  type Factor = { e: Expr; op: '*' | '/'; glyph?: ProductGlyph };
   const factors: Factor[] = [];
   let node: Expr = e;
   while (node.kind === 'bin' && (node.op === '*' || node.op === '/')) {
@@ -1038,6 +1142,7 @@ function splitNablaChain(e: Expr, ctx: Ctx): Expr | null {
   if (!first) return null; // a bare ∇: classify says to write it with parentheses
   if (first.op === '/') throw new Error('∇ needs something to act on: ∇f, ∇·F, ∇×F or ∇²f.');
   if (h.laplacian && first.glyph) throw new Error('∇² takes a scalar field: write ∇²f.');
+  if (first.glyph === 'outer' || first.glyph === 'wedge') throw new Error('∇ makes ∇f, ∇·F, ∇×F or ∇²f — not ⊗ or ∧.');
   let end = at + 2;
   while (end < factors.length && !factors[end].glyph) end++;
   let operand = first.e;
@@ -1267,7 +1372,7 @@ export function substIdx(e: Expr, idx: string, val: Expr): Expr {
     case 'eq':
       return { kind: 'eq', l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'ineq':
-      return { kind: 'ineq', op: e.op, l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
+      return { ...e, l: substIdx(e.l, idx, val), r: substIdx(e.r, idx, val) };
     case 'vec':
       return { kind: 'vec', items: e.items.map(a => substIdx(a, idx, val)) };
     case 'list':
@@ -1342,7 +1447,7 @@ export function foldNums(e: Expr, calls = false): Expr {
     case 'eq':
       return { kind: 'eq', l: fold(e.l), r: fold(e.r) };
     case 'ineq':
-      return { kind: 'ineq', op: e.op, l: fold(e.l), r: fold(e.r) };
+      return { ...e, l: fold(e.l), r: fold(e.r) };
     case 'vec':
       return { kind: 'vec', items: e.items.map(fold) };
     case 'list':
@@ -1587,9 +1692,39 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
   if (!m) throw new Error('∫ needs its variable as a dx factor: int(x^2 dx) or int[0..2] x^2 dx.');
   const v = m.v;
   const integrand = m.integrand;
-  let lo = bounds && rx(bounds[0], ctx);
-  let hi = bounds && rx(bounds[1], ctx);
+  const lo = bounds && rx(bounds[0], ctx);
+  const hi = bounds && rx(bounds[1], ctx);
   ctx.ints?.push(lo && hi && !m.residual ? { body: integrand, v, lo, hi } : null);
+  const out = integral(integrand, v, lo, hi, ctx);
+  // An enclosing integral's measure rides along: (∫ inner) · residual.
+  return m.residual ? { kind: 'bin', op: '*', a: out, b: m.residual } : out;
+}
+
+/**
+ * ∫ integrand dv from lo to hi (resolved; null bounds for the indefinite
+ * integral anchored at 0). Shared by ∫ rows and the reductions over
+ * continuous sets that become integrals (lib/measure.ts).
+ */
+function integral(integrand: Expr, v: string, lo: Expr | null, hi: Expr | null, ctx: Ctx): Expr;
+function integral(
+  integrand: Expr,
+  v: string,
+  lo: Expr | null,
+  hi: Expr | null,
+  ctx: Ctx,
+  exactOnly: boolean,
+): Expr | null;
+/** With `exactOnly`, a verified closed form or null — never the fixed-order
+ *  numeric fallback (the caller integrates adaptively instead). */
+function integral(
+  integrand: Expr,
+  v: string,
+  lo: Expr | null,
+  hi: Expr | null,
+  ctx: Ctx,
+  exactOnly = false,
+): Expr | null {
+  const bounds = lo && hi;
   let loI = infOf(lo);
   let hiI = infOf(hi);
   // Normalize a downhill infinite range (int[inf..0]) to the negated uphill one.
@@ -1600,12 +1735,8 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
     flip = true;
     if (loI === 1 || hiI === -1) return num(0); // int[inf..inf]: equal bounds
   }
-  const memoKey = exprKey([v, integrand, lo, hi]);
-  const done = (out: Expr): Expr => {
-    const signed = flip ? neg(out) : out;
-    // An enclosing integral's measure rides along: (∫ inner) · residual.
-    return m.residual ? { kind: 'bin', op: '*', a: signed, b: m.residual } : signed;
-  };
+  const memoKey = exprKey([v, integrand, lo, hi, exactOnly]);
+  const done = (out: Expr): Expr => (flip ? neg(out) : out);
   const hit = intMemo.get(memoKey);
   if (hit) return done(hit);
 
@@ -1621,6 +1752,7 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
     const hiChk = hiI ? num(hiI * Infinity) : hi!;
     if (verifyDefinite(val, integrand, v, loChk, hiChk)) out = val;
   }
+  if (!out && exactOnly) return null;
   if (!out) {
     // Numeric fallback. An indefinite ∫ anchors at 0: F(x) = ∫₀ˣ; infinite
     // ranges transform onto a finite interval first (improperSum).
@@ -1721,7 +1853,12 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'num':
       return e;
     case 'var':
-      return ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ?? e;
+      return (
+        ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ??
+        ctx.opts.interval?.(e.name) ??
+        unitVector(e.name, ctx.opts) ??
+        e
+      );
     case 'neg':
       return { kind: 'neg', a: rx(e.a, ctx) };
     case 'bin': {
@@ -1788,6 +1925,21 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const body = e.args[e.args.length - 1];
         return expandInt(e.args.length === 3 ? [e.args[0], e.args[1]] : null, body, ctx);
       }
+      // A reduction over x, u, an interval or a filter is an integral against
+      // its measure (docs/multisets.md §5); over a list it lowers later.
+      if (isReductionCall(e)) {
+        const over = reduceOverSet(e.name, e.args[0], {
+          resolve: x => rx(x, ctx),
+          integrate: (body, v, lo, hi) => integral(body, v, lo, hi, ctx, true),
+          consts: ctx.opts.consts,
+          isList: ctx.opts.isList,
+          bound: n => !!ctx.opts.params?.has(n) || !!ctx.opts.openVars?.has(n),
+        });
+        if ('expr' in over) return over.expr;
+        // A tuple literal spreads into arguments, as legacyCallArgs does.
+        const { arg } = over;
+        return { kind: 'call', name: e.name, args: e.args[0].kind === 'vec' && arg.kind === 'vec' ? arg.items : [arg] };
+      }
       const args = legacyCallArgs(e.name, e.args).map(x => rx(x, ctx));
       const fn = getFn(e.name);
       if (fn) {
@@ -1820,6 +1972,9 @@ function rx(e: Expr, ctx: Ctx): Expr {
         return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
+      // Keyed by the source node: a function body inlined twice holds the
+      // same literal, and `f(interval(0, 1))` hands one to every use of x.
+      if (e.name === 'interval') return hiddenInterval(e, args);
       if (e.name === 'clamp') {
         // clamp(x, lo, hi) ≡ min(max(x, lo), hi): every backend already runs those.
         if (args.length !== 3) throw new Error('clamp takes three arguments: clamp(x, lo, hi).');
@@ -1864,7 +2019,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'eq':
       return { kind: 'eq', l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'ineq':
-      return { kind: 'ineq', op: e.op, l: rx(e.l, ctx), r: rx(e.r, ctx) };
+      return { ...e, l: rx(e.l, ctx), r: rx(e.r, ctx) };
     case 'vec':
       return { kind: 'vec', items: e.items.map(x => rx(x, ctx)) };
     case 'list':
@@ -1881,6 +2036,12 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'text':
       return e;
     case 'piecewise':
+      for (const c of e.cases) {
+        if (c.cond.kind === 'eq')
+          throw new Error(
+            'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
+          );
+      }
       return {
         kind: 'piecewise',
         cases: e.cases.map(c => ({ cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
@@ -1939,11 +2100,13 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     // Live: list names accumulate as definitions are processed.
     isList: n => isListName(listNamesOf(defs), n),
     getList: listGetter(defs),
-    indexIssue: idx => indexIssue(idx, defs),
+    indexIssue: (idx, target) => indexIssue(idx, defs, target),
     // Live too: definitions above this one (a point's components included).
     // A state stands for itself: defined, and constant across space.
     definition: n => defs.consts.get(n) ?? (stateNames.has(n) ? { kind: 'var', name: n } : undefined),
     comps: n => compsOf(defs, n),
+    documentNames: new Set(byName.keys()),
+    interval: n => defs.intervals.get(n),
   };
 
   const parsed = new Map<string, Expr>();
@@ -1953,7 +2116,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const parse = (d: Definition & { rhs: string }): Expr => {
     const key = defKey(d);
     let p = parsed.get(key);
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, listNamesOf(defs), valueNames)));
+    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, indexNamesOf(defs), valueNames)));
     return p;
   };
 
@@ -1974,7 +2137,15 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     }
     resolving.push(name);
     try {
-      let body = resolveExpr(parse(d), getFn, ropts);
+      // A parameter shadows a named interval of the same name, and a
+      // built-in unit vector: f(e_x) = e_x^2 squares its argument.
+      const scope: ResolveOpts = {
+        ...ropts,
+        interval: n => (d.params.includes(n) ? undefined : ropts.interval?.(n)),
+        documentNames: ropts.documentNames && new Set([...ropts.documentNames, ...d.params]),
+        params: new Set(d.params),
+      };
+      let body = resolveExpr(parse(d), getFn, scope);
       if (containsRecur(body)) body = wrapRecursion(name, d.params, body);
       const fn: FnDef = { params: d.params, body };
       defs.fns.set(name, fn);
@@ -2000,8 +2171,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   for (const d of raw) {
     try {
       if (d.kind === 'regression') {
-        const lhsSource = parseExpr(d.lhs, fnNames, listNamesOf(defs), valueNames);
-        const rhsSource = parseExpr(d.rhs, fnNames, listNamesOf(defs), valueNames);
+        const lhsSource = parseExpr(d.lhs, fnNames, indexNamesOf(defs), valueNames);
+        const rhsSource = parseExpr(d.rhs, fnNames, indexNamesOf(defs), valueNames);
         parsed.set(defKey(d), { kind: 'eq', l: lhsSource, r: rhsSource });
         const lhs = resolveExpr(lhsSource, getFn, ropts),
           rhs = resolveExpr(rhsSource, getFn, ropts);
@@ -2107,25 +2278,69 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
         const resolved = resolveExpr(parse(d), getFn, ropts);
-        // `R = e^(a J)`, `N = 2 M`: matrix algebra names a matrix.
-        const computed = lowerMatrix(
-          resolved,
-          n => compsOf(defs, n),
-          n => defs.mats.get(n) ?? null,
-        );
+        // `r = interval(1, 2)`, or anything built from one: not a number but a
+        // hidden parameter, which every row using the name shares.
+        if (hasInterval(resolved)) {
+          defs.intervals.set(d.name, resolved);
+          continue;
+        }
+        // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
+        // or matrix algebra, names a matrix.
+        const isList = (n: string) => defs.lists.has(n);
+        // M Q with Q a multiset of points is those points moved, never a
+        // matrix: the object expansion below applies M to each.
+        const ofPoints = [...freeVars(resolved)].some(n => {
+          const l = defs.lists.get(n);
+          return l?.kind === 'list' && l.items[0]?.kind === 'vec';
+        });
+        const computed =
+          !ofPoints &&
+          lowerMatrix(
+            resolved,
+            n => compsOf(defs, n),
+            n => defs.mats.get(n) ?? null,
+            tensorGetter(defs),
+            isList,
+          );
         if (computed) {
           defs.mats.set(d.name, computed);
           continue;
         }
+        // `T = e_x ⊗ e_y ⊗ e_z`: a tensor of any other shape.
+        const tensor =
+          !ofPoints &&
+          lowerTensorValue(
+            resolved,
+            n => compsOf(defs, n),
+            n => defs.mats.get(n) ?? null,
+            tensorGetter(defs),
+            isList,
+          );
+        if (tensor) {
+          defs.tensors.set(d.name, tensor);
+          continue;
+        }
         let e: Expr;
         try {
+          if (ofPoints) throw new Error('points');
           e = lowerGeom(
             resolved,
             n => compsOf(defs, n),
             n => defs.mats.get(n) ?? null,
+            isList,
+            tensorGetter(defs),
           );
         } catch {
           e = lowerObjects(resolved, defs, ropts, true);
+        }
+        // `C = mean((P - m) ⊗ (P - m))`: a reduction over a multiset of
+        // tensors is one tensor, named as a matrix when it is square.
+        const reduced = tensorOfNode(e);
+        if (reduced && reduced.shape.length >= 2) {
+          const m = toMat(reduced);
+          if (m) defs.mats.set(d.name, m);
+          else defs.tensors.set(d.name, reduced);
+          continue;
         }
         // `adults = person[person.age >= 18]` names a cut of a data file.
         const cut = filteredTable(e, defs, ropts);
@@ -2138,23 +2353,6 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           // for the file and every use of it did too.
           if (cut.missing && tables) throw new MissingDataError(cut.missing);
           continue;
-        }
-        if (e.kind === 'list') {
-          // A named list of 2–3 equal-length tuple/nested rows is a matrix
-          // (that syntax predates data lists); every other shape falls
-          // through to data-list handling below.
-          let mat: Mat | null = null;
-          try {
-            mat = matrixFromList(e);
-          } catch (err) {
-            // Nested-list rows ([[1,2],[3,4],…]) always spell a matrix, so
-            // a bad shape there keeps the matrix error.
-            if (e.items.some(it => it.kind === 'list')) throw err;
-          }
-          if (mat) {
-            defs.mats.set(d.name, mat);
-            continue;
-          }
         }
         e = lowerLists(e, listGetter(defs), ropts, true);
         if (isSeq(e)) {
@@ -2265,6 +2463,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const vecOwnerKey = new Map<string, string>();
   /** Starting values per run of a state family, by owner and component. */
   const familyInits = new Map<string, (readonly Expr[])[]>();
+  /** Owners whose starting values are a tuple: their runs are in order, so
+   *  `p[1]` is the first run (docs/multisets.md §3). */
+  const orderedInits = new Set<string>();
   /** A family run's hidden scalar state → the row that defines it. */
   const familyOwner = new Map<string, string>();
   {
@@ -2353,6 +2554,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           if (members.length > FAMILY_MAX)
             throw new Error(`${name}(0) starts ${members.length} runs — the limit is ${FAMILY_MAX}.`);
           familyInits.set(name, members);
+          if (isTuple(listed)) orderedInits.add(name);
           const comps = dim === undefined ? [name] : vecStateComps(name, dim);
           comps.forEach((c, k) => {
             flatInits.set(c, members[0][k]);
@@ -2451,7 +2653,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       const group = [...owners].filter(o => find(o) === root);
       const comps = group.flatMap(compsOfState).filter(c => derivs.has(c));
       const hidden = (c: string, k: number) => `${defs.sequencePrefix}_run_${c}_${k}`;
-      const axes = [{ id: `${root}#runs`, n }];
+      const inOrder = group.every(o => !familyInits.has(o) || orderedInits.has(o));
+      const axes = [{ id: `${root}#runs`, n, ...(inOrder ? { ordered: true as const } : {}) }];
       const runs = Array.from({ length: n }, (_, k) =>
         Object.fromEntries(comps.map(c => [c, { kind: 'var', name: hidden(c, k) } as Expr])),
       );
@@ -2700,9 +2903,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     const e = defs.consts.get(name);
     // A surviving list (or matrix) name means it was defined below its use,
     // so lowering saw it as a plain scalar.
-    if (!e && (defs.lists.has(name) || defs.mats.has(name))) {
+    if (!e && (defs.lists.has(name) || defs.mats.has(name) || defs.tensors.has(name))) {
       throw new Error(
-        `${name} is a ${defs.lists.has(name) ? 'list' : 'matrix'} — move its definition above where it is used.`,
+        `${name} is a ${defs.lists.has(name) ? 'list' : defs.mats.has(name) ? 'matrix' : 'tensor'} — move its definition above where it is used.`,
       );
     }
     if (!e) throw new Error(`${name} is not defined.`);
@@ -2824,6 +3027,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       defs.vecStates.has(name) ||
       defs.fns.has(name) ||
       defs.mats.has(name) ||
+      defs.tensors.has(name) ||
       defs.lists.has(name) ||
       defs.tables.has(name) ||
       defs.missingData.has(name);
@@ -2878,6 +3082,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         defs.states.delete(name);
         defs.fns.delete(name);
         defs.mats.delete(name);
+        defs.tensors.delete(name);
         defs.lists.delete(name);
         defs.tables.delete(name);
         defs.missingData.delete(name);
@@ -2893,6 +3098,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         ...[...defs.states].map(([name, state]): [string, Expr[], string[]] => [name, [state.deriv], []]),
         ...[...defs.fns].map(([name, fn]): [string, Expr[], string[]] => [name, [fn.body], fn.params]),
         ...[...defs.mats].map(([name, matrix]): [string, Expr[], string[]] => [name, matrix.flat(), []]),
+        ...[...defs.tensors].map(([name, tensor]): [string, Expr[], string[]] => [name, [...tensor.data], []]),
         ...[...defs.lists].map(([name, value]): [string, Expr[], string[]] => [name, [value], []]),
         ...[...defs.tables.keys()].map((name): [string, Expr[], string[]] => [name, [], []]),
       ];
@@ -2964,6 +3170,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   }
   for (const [name, fn] of defs.fns) env.bind(name, { tag: 'fn', fn });
   for (const [name, matrix] of defs.mats) env.bind(name, { tag: 'matrix', matrix });
+  for (const [name, tensor] of defs.tensors) env.bind(name, { tag: 'tensor', tensor });
+  for (const [name, value] of defs.intervals) env.bind(name, { tag: 'interval', value });
   for (const [name, table] of defs.tables)
     env.bind(name, { tag: 'table', table, unavailable: defs.missingData.get(name) });
   for (const [name, value] of defs.lists)

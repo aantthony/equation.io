@@ -27,7 +27,7 @@ describe('runtime-only sliders', () => {
   });
 
   it('recompiles values referenced by definitions even if lowering consumed the reference', () => {
-    for (const definition of ['b=2a', 'L=[0,a..2]', 'f(x)=a x', 'M=[(a,0),(0,a)]']) {
+    for (const definition of ['b=2a', 'L=[0,a..2]', 'f(x)=a x', 'M=((a,0),(0,a))']) {
       expect(names(['a=1', definition]), definition).toEqual([]);
     }
     expect(names(['a=1', 'b=2a', '[0..b]'])).toEqual([]);

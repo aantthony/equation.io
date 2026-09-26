@@ -81,7 +81,7 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'ripples',
     title: 'Scalar fields as height maps',
-    blurb: 'A bare expression in x and y renders as a shaded field — with t, it moves.',
+    blurb: 'A bare expression in x and y is a scalar field, shaded by sign and size — with t, it moves.',
     eqs: ['sin(x^2 + y^2 - 4t)/2'],
     group: 'Fields & complex maps',
     settle: 1.3,
@@ -223,7 +223,7 @@ export const SHOWCASE: ShowcaseItem[] = [
       'L2 = 1',
       'm1 = 1',
       'm2 = 1',
-      'M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]',
+      'M = (((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2))',
       'f = (-m2 L2 om_2^2 sin(th_1 - th_2) - (m1+m2) g sin(th_1), L1 om_1^2 sin(th_1 - th_2) - g sin(th_2))',
       "th' = om",
       "om' = solve(M, f)",
@@ -243,11 +243,11 @@ export const SHOWCASE: ShowcaseItem[] = [
     slug: 'lorenz-ensemble',
     title: 'A hundred runs at once',
     blurb:
-      'A list of starting values runs the system once per element: a hundred nearby starts spread over the Lorenz attractor that one run traces.',
+      'A tuple of starting values runs the system once per element: a hundred nearby starts spread over the Lorenz attractor that one run, p[1], traces.',
     eqs: [
       'camera(-pi/3, 0.5, 55, (0, 0, 25))',
       "p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3)",
-      'p(0) = ([0..99]/10, 1, 20)',
+      'p(0) = (sort([0..99])/10, 1, 20)',
       'p[1](5..40)',
       'p',
     ],
@@ -397,10 +397,10 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'data-list',
     title: 'Data lists',
-    blurb: 'A bracketed list scatters at (k, value) — or as points, or bars via the row toggle.',
-    eqs: ['[3, 1, 4, 1, 5, 9, 2, 6]', '[(1, 2), (2, 3.5), (3, 3.1), (4, 5)]'],
+    blurb: 'A list of numbers is a dot plot on the number line, repeats stacked; a list of points scatters.',
+    eqs: ['[3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]', '[(1, 4), (2, 5.5), (3, 5.1), (4, 7)]'],
     group: 'Sequences & data',
-    view: { cx: 4.5, cy: 4.2, span: 10.7 },
+    view: { cx: 4.5, cy: 3.8, span: 10.7 },
   },
   {
     slug: 'line-fit',
@@ -445,13 +445,13 @@ export const SHOWCASE: ShowcaseItem[] = [
     slug: 'rosette',
     title: 'Rotate, repeat, take the hull',
     blurb:
-      'A list is a variable: rotate a shape by a list of angles and you get one copy per angle. hull(…) wraps any points — even moving ones — in their convex hull.',
+      'A list is a variable: rotate a shape by a list of angles and you get one copy per angle. hull(…) wraps any points — even moving ones — in their convex hull; a polygon joins its points in order, so its turns are sorted into a tuple.',
     eqs: [
       'th = 2pi [0..5]/6',
       'P = [(1, 0), (3, 0.6), (3, -0.6)]',
       'rotate(hull(P), th + t/3)',
       'n = 7',
-      'polygon(rotate((0.8, 0), 2pi [0..n-1]/n - t/3))',
+      'polygon(rotate((0.8, 0), 2pi sort([0..n-1])/n - t/3))',
     ],
     group: 'Geometry',
     view: { span: 8 },
@@ -462,7 +462,7 @@ export const SHOWCASE: ShowcaseItem[] = [
     title: 'Rotations are matrix exponentials',
     blurb:
       'e^(tA) solves (x′, y′) = A(x, y) exactly: with A = J it is a rotation, and with any other 2×2 a spiral, saddle or node. The dots are e^(sA) applied to one point for a list of times s; the last row rides along them with t.',
-    eqs: ['A = [(-0.2, -1), (1, -0.2)]', 's = [0..60]/5', 'e^(s A) (3, 0)', 'e^(t A) (3, 0)'],
+    eqs: ['A = ((-0.2, -1), (1, -0.2))', 's = [0..60]/5', 'e^(s A) (3, 0)', 'e^(t A) (3, 0)'],
     group: 'Geometry',
     view: { span: 8 },
   },

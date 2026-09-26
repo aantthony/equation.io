@@ -101,8 +101,9 @@ describe('object families and sequence values', () => {
     }
   });
   it('supports point lists, named arithmetic, paths and CPU families', () => {
+    // A tuple of points, so it has an order to draw and index (§3).
     const a = runRows([
-      'P=[(0,0),(1,1),(2,0)]',
+      'P=((0,0),(1,1),(2,0))',
       'Q=P+(2,3)',
       'Q',
       'polyline(Q)',
@@ -117,7 +118,7 @@ describe('object families and sequence values', () => {
     expect(a.rows[6].cpu!.type).toBe('family');
     expect(a.rows[7].cls!.needs3D).toBe(true);
     expect(last(['P=([1..100],0)', 'P+(1,1)']).cpu!.type).toBe('plist');
-    expect(last(['s=x^2', '[1,2]s']).cpu!.type).toBe('family');
+    expect(last(['s=x^2', 'y = [1,2]s']).cpu!.type).toBe('family');
   });
   it('crosses independent lists and zips every use of the same one', () => {
     const pts = (rows: string[]) => {
@@ -156,13 +157,14 @@ describe('object families and sequence values', () => {
       if (p.type !== 'plist') throw new Error(p.type);
       return p.pts.map(pt => pt.map(c => +evaluate(c, a.constEnv).toFixed(3)).join());
     };
-    expect(pts(['J=[(0,-1),(1,0)]', 'th=2pi [0..3]/4', 'e^(th J) (1,0)'])).toEqual(['1,0', '0,1', '-1,0', '0,-1']);
+    expect(pts(['J=((0,-1),(1,0))', 'th=2pi [0..3]/4', 'e^(th J) (1,0)'])).toEqual(['1,0', '0,1', '-1,0', '0,-1']);
     // One literal written into every output component is still one list: the
     // icosahedron is 3 turns × 2 × 2 = 12 vertices, all at the same radius.
     const ico = pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'e^(k cross((1,1,1)/sqrt(3))) (0,[-1,1],[-phi,phi])']);
     expect(new Set(ico).size).toBe(12);
     expect(ico).toEqual(pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'rotate((0,[-1,1],[-phi,phi]),k,(1,1,1))']));
-    expect(last(['th=2pi [0..4]/5', 'polygon(rotate((1,0),th))']).cpu!).toMatchObject({ type: 'polygon' });
+    expect(last(['th=2pi [0..4]/5', 'polygon(sort(rotate((1,0),th),th))']).cpu!).toMatchObject({ type: 'polygon' });
+    expect(analyze(['th=2pi [0..4]/5', 'polygon(rotate((1,0),th))']).rows[1].error).toMatch(/polygon needs an order/);
     const spokes = last(['th=2pi [0..4]/5', 'segment((0,0),rotate((1,0),th))']).cpu!;
     expect(spokes.type === 'family' && spokes.members.length).toBe(5);
   });

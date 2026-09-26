@@ -6,6 +6,7 @@ import { type Expr, evaluate, freeVars } from './expr.ts';
 import { pointComps, vecStateComps } from './geom.ts';
 import type { Seq } from './list.ts';
 import type { Mat } from './mat.ts';
+import type { Tensor } from './tensor.ts';
 import type { SeqScan } from './seq.ts';
 
 export type Components = readonly [Expr, Expr] | readonly [Expr, Expr, Expr];
@@ -23,10 +24,14 @@ export type Binding =
   | Readonly<
       | { tag: 'fn'; fn: FnDef }
       | { tag: 'matrix'; matrix: Mat }
+      | { tag: 'tensor'; tensor: Tensor }
       | { tag: 'seq'; value: SeqValue }
       | { tag: 'table'; table: TableDef; unavailable?: { message: string; list: boolean } }
       | { tag: 'rv'; declaration: RV }
       | { tag: 'missing'; message: string; list: boolean }
+      // A value holding a continuous interval (lib/interval.ts), written into
+      // every row that names it.
+      | { tag: 'interval'; value: Expr }
     >;
 export type NameEntry = Readonly<
   { kind: 'binding'; binding: Binding } | { kind: 'component'; owner: string; index: 0 | 1 | 2 }
@@ -166,6 +171,7 @@ export class Env {
   );
   readonly fns = this.projection((_, b) => (b.tag === 'fn' ? b.fn : undefined));
   readonly mats = this.projection((_, b) => (b.tag === 'matrix' ? b.matrix : undefined));
+  readonly tensors = this.projection((_, b) => (b.tag === 'tensor' ? b.tensor : undefined));
   readonly lists = this.projection((_, b) =>
     b.tag === 'seq' ? (b.value.representation === 'sequence' ? b.value.sequence : b.value.vector) : undefined,
   );
@@ -174,6 +180,7 @@ export class Env {
     b.tag === 'missing' ? { message: b.message, list: b.list } : b.tag === 'table' ? b.unavailable : undefined,
   );
   readonly rvs = this.projection((_, b) => (b.tag === 'rv' ? b.declaration : undefined));
+  readonly intervals = this.projection((_, b) => (b.tag === 'interval' ? b.value : undefined));
   readonly pointDims: ReadonlyMap<string, number> = this.projection((_, b) =>
     b.tag === 'vector' && b.role !== 'state' ? b.components.length : undefined,
   );
@@ -251,6 +258,7 @@ export type ValueDefinitions = Pick<
   | 'states'
   | 'fns'
   | 'mats'
+  | 'tensors'
   | 'lists'
   | 'tables'
   | 'missingData'

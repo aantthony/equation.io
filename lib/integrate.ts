@@ -739,7 +739,7 @@ function substAll(e: Expr, v: string, val: Expr): Expr {
     case 'eq':
       return { kind: 'eq', l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
     case 'ineq':
-      return { kind: 'ineq', op: e.op, l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
+      return { ...e, l: substAll(e.l, v, val), r: substAll(e.r, v, val) };
     case 'vec':
       return { kind: 'vec', items: e.items.map(a => substAll(a, v, val)) };
     case 'list':

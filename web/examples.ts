@@ -32,6 +32,19 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['closed disc', 'x^2 + y^2 <= 4'],
       ['annulus', '4 <= x^2 + y^2 <= 9'],
       ['band under a wave', '-1 <= y - sin(x) < 1'],
+      // A continuous interval is a parameter like u: with u it fills the
+      // region it traces, and beside x and y it sweeps the region its family
+      // of curves covers.
+      ['annulus traced by an interval', 'r = interval(1, 2); (r cos(2 pi u), r sin(2 pi u))'],
+      [
+        'curves swept over an interval',
+        'view(x = -6..6, y = -2..2); a = interval(1, 2); y = sin(a x); y = sin(x); y = sin(2x)',
+      ],
+      // A reduction over a filter measures the set in its own dimension:
+      // area for a region, length for a curve.
+      ['area of the unit disc', 'x^2 + y^2 < 1; count(x^2 + y^2 < 1)'],
+      ['length of a parabola arc', 'y = {0 < x < 1: x^2}; count({y = x^2, 0 < x < 1})'],
+      ['area between curves', 'y = x^2; y = 1; x^2 < y < 1; count(x^2 < y < 1)'],
       // A recursive function runs as a loop per pixel; the region is where it
       // terminates with f >= 0.
       [
@@ -78,12 +91,13 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['tangent line', 'f(x) = x^3 - 2x; g(x) = d/dx f(x); a = 1; y = f(x); y = f(a) + g(a)(x - a)'],
       ['running integral', 'view(x = -7..7, y = -1.5..4); f(x) = sin(x)^2; y = f(x); y = int[0..x] f(t) dt'],
       ['signed area', 'view(x = -1..7, y = -1.5..1.5); b = 5; y = sin(x); int[0..b] sin(x) dx'],
-      // One rectangle per element of k; the sum beside the exact integral.
+      // One rectangle per element of k; the total over the same k beside the
+      // exact integral.
       [
         'Riemann sum (slide n)',
         'view(x = -1..7, y = -0.5..3); f(x) = sin(x) + 1.5; n = 8; a = 0; b = 6; h = (b - a)/n; k = [0..n-1]; y = f(x); ' +
           'polygon((a + k h, 0), (a + k h + h, 0), (a + k h + h, f(a + k h)), (a + k h, f(a + k h))); ' +
-          'sum(j=0..n-1, f(a + j h) h); int[a..b] f(x) dx',
+          'total(f(a + k h) h); int[a..b] f(x) dx',
       ],
       ['antiderivative', 'f(x) = x^2 - 1; y = f(x); y = int(f(x) dx)'],
       ['Gaussian integral = √π', 'view(x = -3.5..3.5, y = -0.6..1.6); y = exp(-x^2); int[-inf..inf] exp(-x^2) dx'],
@@ -123,13 +137,14 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   [
     'lists + data',
     [
-      ['data list', '[3, 1, 4, 1, 5, 9, 2, 6]'],
+      // A dot plot on the number line: 1, 3 and 5 repeat, so they stack.
+      ['data list', '[3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]'],
       ['scatter', '[(1, 2), (2, 3.5), (3, 3.1), (4, 5)]'],
       // A list is a variable: both uses of s move together, one point each.
       ['sampled curve', 's = [0..50]/5; (s, sin(s))'],
       [
         'filters + summaries',
-        'view(x = -7..12, y = -1..10); L = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]; L; L[L > 3]; mean(L); median(L); stdev(L)',
+        'view(x = -7..12, y = -1..10); L = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]; L; L > 3; count(L > 3); mean(L); median(L); stdev(L)',
       ],
       ['family of lines', 'y = [-2, -1, 0, 1, 2] x'],
       ['concentric circles', 'circle((0, 0), [1, 2, 3, 4])'],
@@ -140,7 +155,8 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     [
       [
         'line fit and residuals',
-        'P = [(0,1.1),(1,2.9),(2,5.2),(3,6.8),(4,9.1)]; P.y ~ m P.x + b; P; y = m x + b; # residuals; (P.x,P.y-(m P.x+b))',
+        'view(x = -1..6, y = -1..10); P = [(0,1.1),(1,2.9),(2,5.2),(3,6.8),(4,9.1)]; P.y ~ m P.x + b; P; y = m x + b; # above the line; P.y > m P.x + b; ' +
+          '# residuals; (P.x,P.y-(m P.x+b)); total((P.y - (m P.x + b))^2)',
       ],
       ['quadratic fit', 'P = [(-2,9),(-1,2),(0,1),(1,6),(2,17)]; P.y ~ a P.x^2 + b P.x + c; P; y = a x^2 + b x + c'],
       ['exponential fit', 'P = [(0,2),(0.5,2.84),(1,4.03),(1.5,5.72),(2,8.11)]; P.y ~ a exp(b P.x); P; y = a exp(b x)'],
@@ -197,17 +213,18 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   [
     'matrices, rotations + hulls',
     [
-      ['determinant = signed area', 'A = (2, 0.5); B = (0.5, 1.5); polygon((0, 0), A, A + B, B); det([A, B])'],
+      ['determinant = signed area', 'A = (2, 0.5); B = (0.5, 1.5); polygon((0, 0), A, A + B, B); det((A, B))'],
       [
         'a matrix maps a circle',
-        'p = 2; q = 1; r = 1; s = 1; M = [(p, q), (r, s)]; (cos(2pi u), sin(2pi u)); ' +
+        'p = 2; q = 1; r = 1; s = 1; M = ((p, q), (r, s)); (cos(2pi u), sin(2pi u)); ' +
           'M (cos(2pi u), sin(2pi u)); det(M)',
       ],
-      // A list is a variable: every use of `th` moves together.
-      ['regular polygon', 'n = 7; th = 2pi [0..n-1]/n; polygon(rotate((2, 0), th + t/4))'],
+      // A list is a variable: every use of `th` moves together. sort makes
+      // the turns a tuple, so the polygon has an order to join them in.
+      ['regular polygon', 'n = 7; th = 2pi sort([0..n-1])/n; polygon(rotate((2, 0), th + t/4))'],
       [
         'rotate a shape (matrix exponential)',
-        'J = [(0, -1), (1, 0)]; a = 0.7; R = e^(a J); P = [(0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)]; polygon(P); polygon(R P)',
+        'J = ((0, -1), (1, 0)); a = 0.7; R = e^(a J); P = ((0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)); polygon(P); polygon(R P)',
       ],
       ['rosette of hulls', 'th = 2pi [0..5]/6; P = [(1, 0), (3, 0.6), (3, -0.6)]; rotate(hull(P), th + t/3)'],
       [
@@ -216,11 +233,51 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ],
       [
         'exact linear flow: e^(tA)',
-        "A = [(-0.2, -1), (1, -0.2)]; s = [0..60]/5; (x', y') = A (x, y); e^(s A) (3, 0); e^(t A) (3, 0)",
+        "A = ((-0.2, -1), (1, -0.2)); s = [0..60]/5; (x', y') = A (x, y); e^(s A) (3, 0); e^(t A) (3, 0)",
       ],
       [
         'deform a lattice (arrows)',
         'a = [-10..10]/2; b = [-10..10]/2; P = (a, b); f(x,y) = (x + sin(y + t)/3, y + sin(x)/3); vector(P, f(P)); f(P)',
+      ],
+    ],
+  ],
+  [
+    'tensors',
+    [
+      // n ⊗ n is the matrix of v ↦ n (n·v): every point drops onto the line.
+      [
+        'outer product projects: n ⊗ n',
+        'a = 0.5; n = (cos(a), sin(a)); (4u - 2) n; th = 2pi [0..11]/12; p = 2(cos(th), sin(th)); p; vector(p, (n ⊗ n) p)',
+      ],
+      [
+        'reflection: I − 2 n ⊗ n',
+        'a = 0.5; n = (cos(a), sin(a)); n · (x, y) = 0; H = ((1, 0), (0, 1)) - 2 n ⊗ n; ' +
+          'S = ((0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)); polygon(S); H polygon(S)',
+      ],
+      // A ⊗ B is rank 4; contracting its middle pair is the matrix product.
+      [
+        'product = outer, then contract',
+        'A = ((1, 2), (3, 4)); B = ((0, 1), (1, 0)); A ⊗ B; contract(A ⊗ B, 2, 3); A B',
+      ],
+      // e_x ∧ e_y ∧ e_z is the Levi-Civita symbol; fed three edges it is
+      // the box's signed volume.
+      [
+        'volume element e_x ∧ e_y ∧ e_z',
+        'a = (2, 0, 0); b = (0.5, 1.5, 0); c = (0.3, 0.4, 1.2); hull([0, 1] a + [0, 1] b + [0, 1] c); ' +
+          'V = e_x ∧ e_y ∧ e_z; V c b a; det((a, b, c))',
+      ],
+      // A bivector a ∧ b generates the rotation in the plane of a and b.
+      [
+        'rotate in the plane a ∧ b (slide k)',
+        'k = 1; a = (1, 0, 0); b = (0, cos(k), sin(k)); e^(t a ∧ b) hull(([-1,1], [-1,1], [-1,1])); vector(3 a); vector(3 b)',
+      ],
+      // total and mean take a multiset of tensors entry by entry. The level
+      // sets of the Mahalanobis distance through C⁻¹ are the 1σ and 2σ ellipses.
+      [
+        'covariance: mean of (P − m) ⊗ (P − m)',
+        'P = [(-3, -2), (-2, -2.5), (-1, 0), (0, -0.5), (0, 1), (1, 0.5), (2, 2.5), (3, 1.5), (-1.5, -1), (1.5, 2)]; ' +
+          'm = mean(P); C = mean((P - m) ⊗ (P - m)); C; P; m; ' +
+          '((x, y) - m) · C^-1 ((x, y) - m) = 1; ((x, y) - m) · C^-1 ((x, y) - m) = 4',
       ],
     ],
   ],
@@ -236,7 +293,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['Lotka–Volterra', "view(x = -4..11, y = -1..6); (x', y') = (x - x y/2, x y/4 - y)"],
       ['Van der Pol', "(x', y') = (y, (1 - x^2)y - x)"],
       // A linear system as its literal matrix; drag the entries' sliders.
-      ['matrix phase portrait', "a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y)"],
+      ['matrix phase portrait', "a = -1; b = -1/4; A = ((0, 1), (a, b)); (x', y') = A (x, y)"],
       [
         'Lorenz field (3D)',
         "camera(-pi/3, 0.5, 55, (0, 0, 25)); (x', y', z') = (10(y - x), x(28 - z) - y, x y - 8z/3)",
@@ -295,7 +352,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         'double pendulum',
         '# parameters; g = 9.8; L1 = 1; L2 = 1; m1 = 1; m2 = 1; ' +
           '# equations of motion; ' +
-          'M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]; ' +
+          'M = (((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)); ' +
           'f = (-m2 L2 om_2^2 sin(th_1 - th_2) - (m1+m2) g sin(th_1), L1 om_1^2 sin(th_1 - th_2) - g sin(th_2)); ' +
           "th' = om; om' = solve(M, f); " +
           'th(0) = (2.5, 2.4); ' +
@@ -323,11 +380,12 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         'Lorenz attractor',
         "r' = (10(r_2 - r_1), r_1(28 - r_3) - r_2, r_1 r_2 - 8 r_3/3); " + 'r(0) = (1, 1, 20); (r_1/4, r_3/4 - 6)',
       ],
-      // 100 runs from nearby starts spread over the attractor one run traces.
+      // 100 runs from nearby starts spread over the attractor one run traces;
+      // the starts are a tuple, so p[1] is the first run.
       [
         'Lorenz attractor in 3D',
         "camera(-pi/3, 0.5, 55, (0, 0, 25)); p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3); " +
-          'p(0) = ([0..99]/10, 1, 20); p[1](5..40); p',
+          'p(0) = (sort([0..99])/10, 1, 20); p[1](5..40); p',
       ],
     ],
   ],
@@ -478,7 +536,10 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   [
     'systems',
     [
-      ['curve intersection', 'x^2 + y^2 = 4; x y = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0)'],
+      [
+        'curve intersection',
+        'x^2 + y^2 = 4; x y = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0); count({x^2 + y^2 = 4, x y = 1})',
+      ],
       ['three planes', '(x + y, x - y, z) = (1, 2, 3)'],
       ['sphere meets plane', '(x^2 + y^2 + z^2, z) = (9, 1)'],
       // Alpöge's counterexample to the Jacobian conjecture (July 2026), found by
@@ -489,7 +550,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       // infinity, which is how an étale map gets to be 3-to-1.
       [
         'Jacobian counterexample',
-        'c = -0.25; F = ((1 + x y)³ z + y² (1 + x y)(4 + 3x y), y + 3x (1 + x y)² z + 3x y² (4 + 3x y), 2x − 3x² y − x³ z); JF(x,y,z) = [∇F_x, ∇F_y, ∇F_z]; det(JF(1, −1.5, 6.5)); (F_x, F_y, F_z) = (c, 0, 0)',
+        'c = -0.25; F = ((1 + x y)³ z + y² (1 + x y)(4 + 3x y), y + 3x (1 + x y)² z + 3x y² (4 + 3x y), 2x − 3x² y − x³ z); JF(x,y,z) = (∇F_x, ∇F_y, ∇F_z); det(JF(1, −1.5, 6.5)); (F_x, F_y, F_z) = (c, 0, 0)',
       ],
     ],
   ],

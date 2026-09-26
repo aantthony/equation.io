@@ -7,18 +7,18 @@ function points(s: string, r = 10) {
 }
 
 describe('specialPoints', () => {
-  it('labels roots and the y-intercept of y = f(x)', () => {
-    const pts = points('x^2 - 2');
+  it('labels the x- and y-intercepts of y = f(x)', () => {
+    const pts = points('y = x^2 - 2');
     expect(pts.length).toBe(3);
     expect(pts[0]).toMatchObject({ x: -Math.SQRT2, y: 0 });
-    expect(pts[0].lines[0]).toBe('root');
+    expect(pts[0].lines[0]).toBe('x-intercept');
     expect(pts[1]).toMatchObject({ x: Math.SQRT2, y: 0 });
     expect(pts[2]).toMatchObject({ x: 0, y: -2 });
     expect(pts[2].lines[0]).toBe('y-intercept');
   });
 
   it('reports multiplicity in the tooltip lines', () => {
-    const pts = points('(x-1)^2 (x+2)');
+    const pts = points('y = (x-1)^2 (x+2)');
     const double = pts.find(p => Math.abs(p.x - 1) < 1e-12)!;
     expect(double.lines).toContain('double root');
   });

@@ -26,11 +26,20 @@ const DIST_KINDS = {
   expectation: 'expectation (mean readout)',
 } as const;
 
-export function rowKind(row: KindSource, tables: { has(name: string): boolean }): string | undefined {
+/** Names the document binds to something other than a number, so a `const`
+ *  definition of one is not reported as though it were a slider. */
+export interface KindNames {
+  tables: { has(name: string): boolean };
+  intervals?: { has(name: string): boolean };
+  mats?: { has(name: string): boolean };
+  tensors?: { has(name: string): boolean };
+  lists?: { has(name: string): boolean };
+  points?: { has(name: string): boolean };
+}
+
+export function rowKind(row: KindSource, names: KindNames): string | undefined {
   if (row.comment) return 'comment (group heading)';
-  // `adults = person[…]` scans as a constant, but what it defines is another data file.
-  if (row.def)
-    return `definition (${row.def.kind === 'const' && tables.has(row.def.name) ? 'filtered data' : row.def.kind})`;
+  if (row.def) return `definition (${row.def.kind === 'const' ? constKind(row.def.name, names) : row.def.kind})`;
   if (row.view) return `viewport (${row.view.kind})`;
   if (row.dist === 'probability') {
     // An event with no single-variable shape (P(X < Y)) is estimated, not drawn.
@@ -47,11 +56,13 @@ export function rowKind(row: KindSource, tables: { has(name: string): boolean })
 export const KIND_MEANINGS: Record<PublicKind, string> = {
   implicit2d: '2D curve (the set of points satisfying an equation)',
   ineq2d: 'shaded 2D region (an inequality)',
-  scalar2d: '2D scalar field, drawn as shading',
+  scalar2d: '2D scalar field, shaded by sign and size (row colour positive, its complement negative)',
   implicit3d: '3D surface (the points satisfying an equation in x, y, z)',
   spacecurve: '3D curve where surfaces intersect',
   pcurve: 'parametric curve, traced as u runs from 0 to 1',
   psurface: 'parametric surface over u and v in 0..1',
+  pregion: 'filled 2D region traced by two parameters (u, v, or intervals), each over its range',
+  projected2d: 'shaded 2D region swept by a family over an interval, like y = sin(a x) for a = interval(1, 2)',
   vfield2d: '2D vector field, drawn as flowing streamlines',
   vfield3d: '3D vector field',
   point: 'a point',
@@ -63,6 +74,7 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   value:
     'number readout under the row; draws nothing on the graph, except a definite integral, which shades the area it measures',
   note: 'true/false readout under the row; draws nothing on the graph',
+  tuple: 'tuple of more than 3 numbers, like sort(L) of 5 values: a readout under the row; draws nothing',
   family: 'one copy of the row per list element',
   complex2d: 'complex function shown on the plane',
   domain2d: 'domain colouring of a complex function',
@@ -74,9 +86,9 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   sequence: 'sequence, drawn as dots at whole numbers n',
   cobweb: 'cobweb diagram of a recurrence',
   bifurcation: 'bifurcation / orbit diagram of a recurrence',
-  vlist: 'list of numbers, drawn as dots',
+  vlist: 'list of numbers, a dot plot on the number line: each value at x = value, copies stacked upward',
   plist: 'list of points',
-  dlist: 'data column, drawn as dots',
+  dlist: 'data column, a dot plot on the number line: each value at x = value, copies stacked upward',
   dscatter: 'scatter plot of data',
   histogram: 'histogram',
   automaton: 'cellular automaton grid',
@@ -85,3 +97,14 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   prob: 'probability, shaded under the density, with its value as a readout',
   expect: 'expected value readout, marked on the density',
 };
+
+function constKind(name: string, names: KindNames): string {
+  // `adults = person[…]` scans as a constant, but what it defines is another data file.
+  if (names.tables.has(name)) return 'filtered data';
+  if (names.intervals?.has(name)) return 'interval';
+  if (names.mats?.has(name)) return 'matrix';
+  if (names.tensors?.has(name)) return 'tensor';
+  if (names.points?.has(name)) return 'point';
+  if (names.lists?.has(name)) return 'list';
+  return 'const';
+}
