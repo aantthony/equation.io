@@ -10,7 +10,7 @@ const out = (texts: string[]) => analyze(texts).rows.map(r => [r.error ?? r.cpu?
 describe('distance / angle through analyze()', () => {
   it('take any single point, however it was computed', () => {
     const rows = out([
-      'M = [(1, 2), (3, 4)]',
+      'M = ((1, 2), (3, 4))',
       'L = [1, 2, 3]',
       'A = (1, 2)',
       'B = (5, 11)',

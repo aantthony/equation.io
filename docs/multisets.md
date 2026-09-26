@@ -274,8 +274,8 @@ Checked 2026-09-26 against `lowerLists` (lib/list.ts) and the MCP validator.
 | `a = [1,2]`; `y = sin(a x)` | family of 2 curves | same |
 | `A = (1,0,0)`; `[0,1] A`, `[A, B]`, `[0,1]A + [0,1]B` | point list | same |
 | `([0,1],[0,1],[0,1])` | 8 cube corners | same |
-| `a = [1,2]`; `M = [(a,0),(0,1)]`; `M P` | 2 points (matrix) | 2 points (multiset of points, not a matrix) |
-| `M = ((a,0),(0,1))` | error: "A pair of points — did you mean segment(A, B)?" | a matrix |
+| `a = [1,2]`; `M = [(a,0),(0,1)]`; `M P` | 2 points (multiset of points, phase 2) | 2 points (multiset of points, not a matrix) |
+| `M = ((a,0),(0,1))` | a matrix (phase 2) | a matrix |
 | `b = [n, 3, 5]` | bracket sum (phase 1) | bracket sum |
 | `[1,2] + []` | `[]` (phase 1) | `[]` |
 | point lists in a 3D scene | not drawn | drawn |
@@ -327,3 +327,14 @@ recorded so they can be reviewed and reversed. Progress notes live in
 - **Flattening a column.** `[person.age, 3]` flattens the column's values like
   any other multiset; the result is a new multiset, so it no longer lines up
   with `person`.
+- **A tuple argument to a matrix function is one matrix.** `det`, `trace`,
+  `solve` and `exp` no longer spread a tuple literal into separate
+  arguments, so `det(((a, b), (c, d)))` is the determinant of one matrix.
+  (`solve(M, 1, 0)` still reads its right-hand side from loose scalars.)
+- **A tuple of points that is not a square matrix is an error for now.**
+  `((1, 2), (3, 4), (5, 6))` or two 3D points are neither a matrix nor
+  drawn; phase 4 decides what `polyline(T)` and friends make of them. A bare
+  pair of same-dimension points names `segment(A, B)` in its error, and says
+  it is a 2×2 matrix when it is one.
+- **Nested brackets are never a matrix.** `[[1, 2], [3, 4]]` is the multiset
+  `[1 2 3 4]` (phase 1 flattening), not the old nested-list matrix spelling.

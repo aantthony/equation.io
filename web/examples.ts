@@ -197,17 +197,17 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   [
     'matrices, rotations + hulls',
     [
-      ['determinant = signed area', 'A = (2, 0.5); B = (0.5, 1.5); polygon((0, 0), A, A + B, B); det([A, B])'],
+      ['determinant = signed area', 'A = (2, 0.5); B = (0.5, 1.5); polygon((0, 0), A, A + B, B); det((A, B))'],
       [
         'a matrix maps a circle',
-        'p = 2; q = 1; r = 1; s = 1; M = [(p, q), (r, s)]; (cos(2pi u), sin(2pi u)); ' +
+        'p = 2; q = 1; r = 1; s = 1; M = ((p, q), (r, s)); (cos(2pi u), sin(2pi u)); ' +
           'M (cos(2pi u), sin(2pi u)); det(M)',
       ],
       // A list is a variable: every use of `th` moves together.
       ['regular polygon', 'n = 7; th = 2pi [0..n-1]/n; polygon(rotate((2, 0), th + t/4))'],
       [
         'rotate a shape (matrix exponential)',
-        'J = [(0, -1), (1, 0)]; a = 0.7; R = e^(a J); P = [(0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)]; polygon(P); polygon(R P)',
+        'J = ((0, -1), (1, 0)); a = 0.7; R = e^(a J); P = [(0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)]; polygon(P); polygon(R P)',
       ],
       ['rosette of hulls', 'th = 2pi [0..5]/6; P = [(1, 0), (3, 0.6), (3, -0.6)]; rotate(hull(P), th + t/3)'],
       [
@@ -216,7 +216,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ],
       [
         'exact linear flow: e^(tA)',
-        "A = [(-0.2, -1), (1, -0.2)]; s = [0..60]/5; (x', y') = A (x, y); e^(s A) (3, 0); e^(t A) (3, 0)",
+        "A = ((-0.2, -1), (1, -0.2)); s = [0..60]/5; (x', y') = A (x, y); e^(s A) (3, 0); e^(t A) (3, 0)",
       ],
       [
         'deform a lattice (arrows)',
@@ -236,7 +236,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['Lotka–Volterra', "view(x = -4..11, y = -1..6); (x', y') = (x - x y/2, x y/4 - y)"],
       ['Van der Pol', "(x', y') = (y, (1 - x^2)y - x)"],
       // A linear system as its literal matrix; drag the entries' sliders.
-      ['matrix phase portrait', "a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y)"],
+      ['matrix phase portrait', "a = -1; b = -1/4; A = ((0, 1), (a, b)); (x', y') = A (x, y)"],
       [
         'Lorenz field (3D)',
         "camera(-pi/3, 0.5, 55, (0, 0, 25)); (x', y', z') = (10(y - x), x(28 - z) - y, x y - 8z/3)",
@@ -295,7 +295,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         'double pendulum',
         '# parameters; g = 9.8; L1 = 1; L2 = 1; m1 = 1; m2 = 1; ' +
           '# equations of motion; ' +
-          'M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]; ' +
+          'M = (((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)); ' +
           'f = (-m2 L2 om_2^2 sin(th_1 - th_2) - (m1+m2) g sin(th_1), L1 om_1^2 sin(th_1 - th_2) - g sin(th_2)); ' +
           "th' = om; om' = solve(M, f); " +
           'th(0) = (2.5, 2.4); ' +
@@ -489,7 +489,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       // infinity, which is how an étale map gets to be 3-to-1.
       [
         'Jacobian counterexample',
-        'c = -0.25; F = ((1 + x y)³ z + y² (1 + x y)(4 + 3x y), y + 3x (1 + x y)² z + 3x y² (4 + 3x y), 2x − 3x² y − x³ z); JF(x,y,z) = [∇F_x, ∇F_y, ∇F_z]; det(JF(1, −1.5, 6.5)); (F_x, F_y, F_z) = (c, 0, 0)',
+        'c = -0.25; F = ((1 + x y)³ z + y² (1 + x y)(4 + 3x y), y + 3x (1 + x y)² z + 3x y² (4 + 3x y), 2x − 3x² y − x³ z); JF(x,y,z) = (∇F_x, ∇F_y, ∇F_z); det(JF(1, −1.5, 6.5)); (F_x, F_y, F_z) = (c, 0, 0)',
       ],
     ],
   ],

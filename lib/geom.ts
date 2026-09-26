@@ -38,7 +38,8 @@ import {
   matPow,
   matScale,
   matVec,
-  matrixFromList,
+  matrixFromRows,
+  SHAPE_HINT,
   solveVec,
   traceOf,
 } from './mat.ts';
@@ -128,7 +129,7 @@ function pairPoints(name: string, args: LV[], usage: string): Array<[Expr, Expr]
 }
 
 /** An argument that is itself a list: a literal, a named list, or a named
- *  2×2/3×3 one, which reads as a matrix. (A list deeper inside — (L, 0),
+ *  matrix, read as its rows. (A list deeper inside — (L, 0),
  *  total(L), M A — is a scalar or a point by the time it matters.) */
 const isListArg = (a: Expr, getMat: GetMat, isList: IsList): boolean =>
   a.kind === 'list' || a.kind === 'data' || (a.kind === 'var' && (isList(a.name) || getMat(a.name) !== null));
@@ -206,9 +207,9 @@ let matSeen = new WeakMap<Expr, MatValue | null>();
  * Whether matrix algebra is live for this lowering. Nearly every row has no
  * matrix in it, and asking "is this a matrix?" at every node of a huge one is
  * real time — so lowering starts with the question switched off and costs
- * nothing. The only ways a matrix can enter are a matrix NAME and the
- * generator cross(n); meeting either throws MatrixSeen, and the expression is
- * lowered again with the question switched on.
+ * nothing. The only ways a matrix can enter are a matrix NAME, a tuple of
+ * points and the generator cross(n); meeting any throws MatrixSeen, and the
+ * expression is lowered again with the question switched on.
  */
 let matsPossible = false;
 /** The values `[comp]` nodes pick from, lowered once per lowerGeom however
@@ -233,9 +234,10 @@ function withMatrices<T>(run: () => T): T {
 }
 
 /**
- * A matrix-valued expression — a named matrix, or algebra over them: `s M`,
- * `M / s`, `-M`, `M + N`, `M N`, `M^n`, `e^M` / `exp(M)`, and the rotation
- * generator `cross(n)` — or null for anything else.
+ * A matrix-valued expression — a named matrix, a tuple of rows
+ * `((a, b), (c, d))`, or algebra over them: `s M`, `M / s`, `-M`, `M + N`,
+ * `M N`, `M^n`, `e^M` / `exp(M)`, and the rotation generator `cross(n)` — or
+ * null for anything else.
  */
 function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null {
   if (!matsPossible) return null;
@@ -293,6 +295,15 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
             return matScale(a, div({ kind: 'num', value: 1 }, scalar(e.b, 'divide')));
         }
         return null;
+      }
+      case 'vec': {
+        // A tuple of rows — ((a, b), (c, d)), or named points (A, B) — is a
+        // matrix when it is square. Anything else is left to lower(), which
+        // says what that tuple is instead.
+        const rows = e.items.map(lo);
+        if (!rows.every(r => r.vec)) return null;
+        const m = matrixFromRows(rows.map(r => (r as LV & { vec: true }).items));
+        return m && { m };
       }
       case 'call': {
         if (e.name === 'exp' && e.args.length === 1) {
@@ -413,8 +424,8 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       let v = compSeen.get(value);
       // A matrix (a name, or algebra over one: 2 S) has no meaning of its own
       // to a function of scalars, so it is what it is wherever a call asks
-      // for points — hull(S), distance(S, A): the list of its rows. (A named
-      // list of 2 points IS a 2×2 matrix; f must not refuse it for that.)
+      // for points — hull(S), distance(S, A): the list of its rows. (A tuple
+      // of 2 points IS a 2×2 matrix; f must not refuse it for that.)
       const m = !v && ((value.kind === 'var' ? getMat(value.name) : null) ?? matOf(value)?.m);
       if (m) {
         if (m.length !== n) throw new Error(compDims(fn, n, value, m.length));
@@ -504,19 +515,14 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       if (e.name === 'det' || e.name === 'trace' || e.name === 'solve') {
         const matArg = (raw: Expr | undefined): ReturnType<GetMat> => {
           if (!raw) return null;
-          // Anything but an inline literal here is matrix algebra — switch it on.
-          if (!matsPossible && raw.kind !== 'list') throw new MatrixSeen();
-          const value = matOf(raw);
-          if (value) return value.m;
-          if (raw.kind === 'list') {
-            // Inline literal: lower the rows, then read the shape.
-            return matrixFromList(toExpr(lo(raw)));
-          }
-          return null;
+          // A matrix — named, a tuple of rows, or algebra over them — is only
+          // read with matrix algebra on: switch it on.
+          if (!matsPossible) throw new MatrixSeen();
+          return matOf(raw)?.m ?? null;
         };
         const m = matArg(e.args[0]);
         if (!m) {
-          throw new Error(`${e.name} takes a matrix — define one with M = [(a, b), (c, d)].`);
+          throw new Error(`${e.name} takes a matrix — define one with M = ((a, b), (c, d)).`);
         }
         if (e.name === 'det' || e.name === 'trace') {
           if (e.args.length !== 1) throw new Error(`${e.name} takes one matrix.`);
@@ -557,7 +563,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
           }
           return usage;
         };
-        // (A named 2×2 list reads as a matrix, which lowering would reject first.)
+        // (A named matrix is a list of rows here, which lowering would reject first.)
         if (e.args.some(a => a.kind === 'var' && getMat(a.name) !== null)) throw new Error(listy);
         const args = e.args.map(lo);
         return sc(e.name === 'distance' ? lowerDistance(args, usage, stray) : lowerAngle(args, usage, stray));
@@ -639,8 +645,22 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     case 'vec': {
       const items = e.items.map(lo);
       if (items.some(a => a.vec)) {
-        if (e.items.length === 2 && items.every(a => a.vec)) {
-          throw new Error('A pair of points — did you mean segment(A, B)?');
+        if (items.every(a => a.vec)) {
+          // A tuple of points is a matrix: it is read again with matrix
+          // algebra on, so a consumer — M v, det(M), a definition — sees it
+          // as one. Reaching here with it on, nothing consumed it.
+          if (!matsPossible) throw new MatrixSeen();
+          const square = matOf(e) !== null;
+          const dims = new Set(items.map(a => (a as LV & { vec: true }).items.length));
+          // Two points of one dimension may well have meant the segment.
+          if (e.items.length === 2 && dims.size === 1) {
+            throw new Error(
+              square
+                ? 'A pair of points is a 2×2 matrix, not a figure — segment(A, B) joins them, and M (x, y) applies the matrix.'
+                : 'A pair of points — did you mean segment(A, B)? (A tuple of points is a matrix only when it is square.)',
+            );
+          }
+          throw new Error(square ? NOT_A_VALUE : `A matrix is 2×2 or 3×3 — ${SHAPE_HINT}.`);
         }
         throw new Error('A point cannot be a component of a vector.');
       }
@@ -721,6 +741,12 @@ export function lowerMatrix(e: Expr, getComps: GetComps, getMat: GetMat): Mat | 
     switch (n.kind) {
       case 'var':
         return getMat(n.name) !== null;
+      // A tuple with a row in it: ((a, b), (c, d)), or named points (A, B).
+      case 'vec':
+        return (
+          (n.items.length === 2 || n.items.length === 3) &&
+          n.items.some(it => it.kind === 'vec' || (it.kind === 'var' && getComps(it.name) !== null))
+        );
       case 'neg':
         return spine(n.a);
       case 'bin':
@@ -753,8 +779,8 @@ export function lowerGeom(
 
 function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): Expr {
   if (e.kind === 'call' && GEOM_STATEMENTS.has(e.name)) {
-    // A list of points — literal, named, or a named 2×2/3×3 one that reads as
-    // a matrix — is plan #13's; until then say so rather than "takes points".
+    // A list of points — literal, named, or a named matrix read as its rows —
+    // is plan #13's; until then say so rather than "takes points".
     if ((e.name === 'polyline' || e.name === 'vector') && e.args.some(a => isListArg(a, getMat, isList))) {
       throw new Error(
         `${e.name} takes its points one by one for now — ${e.name === 'polyline' ? 'polyline(A, B, C)' : 'vector(A, B)'} — not as a list.`,

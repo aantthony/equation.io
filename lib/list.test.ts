@@ -116,12 +116,12 @@ describe('named lists', () => {
     expect(defs.lists.has('L')).toBe(true);
     expect(items(defs.lists.get('M')!).map(e => evaluate(e, {}))).toEqual([2, 8, 4]);
   });
-  it('keeps 2×2 tuple lists as matrices', () => {
+  it('keeps a bracket of two 2D points a list, not a matrix', () => {
     const { defs } = defsOf(['M = [(1,2),(3,4)]']);
-    expect(defs.mats.has('M')).toBe(true);
-    expect(defs.lists.has('M')).toBe(false);
+    expect(defs.mats.has('M')).toBe(false);
+    expect(items(defs.lists.get('M')!)).toHaveLength(2);
   });
-  it('names a scatter of points when the shape is not a matrix', () => {
+  it('names a scatter of points', () => {
     const { defs } = defsOf(['P = [(1,2),(3,4),(5,6)]']);
     expect(items(defs.lists.get('P')!)).toHaveLength(3);
     const c = classify(lowerRow('P', ['P = [(1,2),(3,4),(5,6)]']));

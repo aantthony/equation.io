@@ -60,10 +60,10 @@ Examples (paste-ready):
 - [Thébault's theorem (squares on a parallelogram)](https://equation.io/#A%20%3D%20(0%2C%200);B%20%3D%20(4%2C%200.5);D%20%3D%20(1%2C%202.5);C%20%3D%20B%20%2B%20D%20-%20A;polygon(A%2C%20B%2C%20C%2C%20D);square(B%2C%20A);square(C%2C%20B);square(D%2C%20C);square(A%2C%20D);P%20%3D%20midpoint(A%2C%20B)%20-%20perp(B%20-%20A)%2F2;Q%20%3D%20midpoint(B%2C%20C)%20-%20perp(C%20-%20B)%2F2;R%20%3D%20midpoint(C%2C%20D)%20-%20perp(D%20-%20C)%2F2;S%20%3D%20midpoint(D%2C%20A)%20-%20perp(A%20-%20D)%2F2;polygon(P%2C%20Q%2C%20R%2C%20S)): `A = (0, 0); B = (4, 0.5); D = (1, 2.5); C = B + D - A; polygon(A, B, C, D); square(B, A); square(C, B); square(D, C); square(A, D); P = midpoint(A, B) - perp(B - A)/2; …; polygon(P, Q, R, S)` — drag A, B or D; the square centers stay a square
 - [Normal probability](https://equation.io/#m%20%3D%201;s%20%3D%200.5;X%20~%20Normal(m%2C%20s);P(0%20%3C%20X%20%3C%202)): `m = 1; s = 0.5; X ~ Normal(m, s); P(0 < X < 2)` — the density with the area between 0 and 2 shaded; drag m or s and the probability follows
 - [Swinging pendulum (integrated state)](https://equation.io/#th'%20%3D%20om;om'%20%3D%20-sin(th)%20-%20om%2F8;th(0)%20%3D%203;bob%20%3D%20(sin(th)%2C%20-cos(th));segment((0%2C%200)%2C%20bob);bob): `th' = om; om' = -sin(th) - om/8; th(0) = 3; bob = (sin(th), -cos(th)); segment((0, 0), bob); bob` — th is the angle, om the angular velocity; segment() draws the rod, the named point draws the bob
-- [Double pendulum](https://equation.io/#g%20%3D%209.8;L1%20%3D%201;L2%20%3D%201;m1%20%3D%201;m2%20%3D%201;M%20%3D%20%5B((m1%2Bm2)%20L1%2C%20m2%20L2%20cos(th_1%20-%20th_2))%2C%20(L1%20cos(th_1%20-%20th_2)%2C%20L2)%5D;f%20%3D%20(-m2%20L2%20om_2%5E2%20sin(th_1%20-%20th_2)%20-%20(m1%2Bm2)%20g%20sin(th_1)%2C%20L1%20om_1%5E2%20sin(th_1%20-%20th_2)%20-%20g%20sin(th_2));th'%20%3D%20om;om'%20%3D%20solve(M%2C%20f);th(0)%20%3D%20(2.5%2C%202.4);b1%20%3D%20(L1%20sin(th_1)%2C%20-L1%20cos(th_1));b2%20%3D%20b1%20%2B%20(L2%20sin(th_2)%2C%20-L2%20cos(th_2));segment((0%2C%200)%2C%20b1);segment(b1%2C%20b2);b1;b2): `M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]; f = (…); th' = om; om' = solve(M, f); th(0) = (2.5, 2.4); …` — the Lagrangian form M(θ)ω′ = f: th and om are 2-vector states with components th_1, th_2; solve() is Cramer's rule; segment()s between named bob points draw the linkage
+- [Double pendulum](https://equation.io/#g%20%3D%209.8;L1%20%3D%201;L2%20%3D%201;m1%20%3D%201;m2%20%3D%201;M%20%3D%20(((m1%2Bm2)%20L1%2C%20m2%20L2%20cos(th_1%20-%20th_2))%2C%20(L1%20cos(th_1%20-%20th_2)%2C%20L2));f%20%3D%20(-m2%20L2%20om_2%5E2%20sin(th_1%20-%20th_2)%20-%20(m1%2Bm2)%20g%20sin(th_1)%2C%20L1%20om_1%5E2%20sin(th_1%20-%20th_2)%20-%20g%20sin(th_2));th'%20%3D%20om;om'%20%3D%20solve(M%2C%20f);th(0)%20%3D%20(2.5%2C%202.4);b1%20%3D%20(L1%20sin(th_1)%2C%20-L1%20cos(th_1));b2%20%3D%20b1%20%2B%20(L2%20sin(th_2)%2C%20-L2%20cos(th_2));segment((0%2C%200)%2C%20b1);segment(b1%2C%20b2);b1;b2): `M = (((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)); f = (…); th' = om; om' = solve(M, f); th(0) = (2.5, 2.4); …` — the Lagrangian form M(θ)ω′ = f: th and om are 2-vector states with components th_1, th_2; solve() is Cramer's rule; segment()s between named bob points draw the linkage
 - [Orbit (vector gravity)](https://equation.io/#r'%20%3D%20vel;vel'%20%3D%20-9%20r%2F%7Cr%7C%5E3;r(0)%20%3D%20(2%2C%200);vel(0)%20%3D%20(0%2C%201.5);segment((0%2C%200)%2C%20r);r;(0%2C%200)): `r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); segment((0, 0), r); r; (0, 0)` — vector states with point arithmetic; the bare state name draws as a moving point
 - [Rössler attractor (state family + orbit)](https://equation.io/#a%20%3D%200.2;b%20%3D%200.2;c%20%3D%205.7;k%20%3D%204;p'%20%3D%20k%20(-p_2%20-%20p_3%2C%20p_1%20%2B%20a%20p_2%2C%20b%20%2B%20p_3%20(p_1%20-%20c));s%20%3D%202pi%20%5B0..299%5D%2F300;p(0)%20%3D%20(8cos(s)%2C%208sin(s)%2C%200);p%5B1%5D(10..100);p;camera(-0.9%2C%200.35%2C%2045%2C%20(0%2C%200%2C%207))): `p' = k (-p_2 - p_3, p_1 + a p_2, b + p_3 (p_1 - c)); s = 2pi [0..299]/300; p(0) = (8cos(s), 8sin(s), 0); p[1](10..100); p` — a list of starting values runs 300 copies of the system; `p[1](10..100)` draws one run's path over that time as the attractor, and `p` the 300 particles flowing along it; k speeds the flow up
-- [Matrix phase portrait](https://equation.io/#a%20%3D%20-1;b%20%3D%20-1%2F4;A%20%3D%20%5B(0%2C%201)%2C%20(a%2C%20b)%5D;(x'%2C%20y')%20%3D%20A%20(x%2C%20y)): `a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y)` — a linear system as its literal matrix, sliders in the entries
+- [Matrix phase portrait](https://equation.io/#a%20%3D%20-1;b%20%3D%20-1%2F4;A%20%3D%20((0%2C%201)%2C%20(a%2C%20b));(x'%2C%20y')%20%3D%20A%20(x%2C%20y)): `a = -1; b = -1/4; A = ((0, 1), (a, b)); (x', y') = A (x, y)` — a linear system as its literal matrix, sliders in the entries
 - [Poisson: strict versus non-strict](https://equation.io/#m%20%3D%204;X%20~%20Poisson(m);P(X%20%3C%203);P(X%20%3C%3D%203);P(X%20%3D%203)): `m = 4; X ~ Poisson(m); P(X < 3); P(X <= 3); P(X = 3)` — a discrete variable draws its pmf as stems; each P(…) row highlights exactly the stems it counts, so `<` stops at 2, `<=` takes the stem at 3, and `P(X = 3)` is that one stem
 - [Two dice](https://equation.io/#X%20~%20DiscreteUniform(1%2C%206);Y%20~%20DiscreteUniform(1%2C%206);S%20%3D%20X%20%2B%20Y;P(S%20%3E%3D%2010);P(X%20%3E%20Y);P(X%20%3E%3D%20Y);E(S)): `X ~ DiscreteUniform(1, 6); Y ~ DiscreteUniform(1, 6); S = X + Y; P(S >= 10); P(X > Y); P(X >= Y); E(S)` — arithmetic over discrete variables is exact: the sum's pmf is the triangle on 2…12, drawn as stems; `P(X > Y)` = 15/36 and `P(X >= Y)` = 21/36 differ by the ties, `P(X = Y)`
 - [Central limit theorem](https://equation.io/#X1%20~%20Uniform%280%2C%201%29;X2%20~%20Uniform%280%2C%201%29;X3%20~%20Uniform%280%2C%201%29;X4%20~%20Uniform%280%2C%201%29;S%20%3D%20X1%20%2B%20X2%20%2B%20X3%20%2B%20X4;Z%20~%20Normal%282%2C%20sqrt%281%2F3%29%29;P%28S%20%3E%203%29): `X1 ~ Uniform(0, 1); X2 ~ Uniform(0, 1); X3 ~ Uniform(0, 1); X4 ~ Uniform(0, 1); S = X1 + X2 + X3 + X4; Z ~ Normal(2, sqrt(1/3)); P(S > 3)` — the sum of four uniforms hugs the matching normal
@@ -676,7 +676,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   all work; a scalar `g(x,y) = x y` gives `g(A)` a number (`y = g(A) x`) and
   `g(P)` a value list. The point must have exactly as many components as the
   function has parameters (3D: `F(x,y,z)` takes `F(B)`). A matrix argument
-  is read as the list of its rows (a named list of 2 points in 2D is a 2×2
+  is read as the list of its rows (a tuple of 2 points in 2D is a 2×2
   matrix, and `g(S)` maps it like any other point list). A point does not
   spread among other arguments, and built-ins (`atan2(A)`) do not take one.
 - Recursive function: a function may call itself when every self-call is a
@@ -777,11 +777,16 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - List: `L = [3, 1, 4]` or `L = [1..100]` names a data list; rows below
   broadcast over it (`L^2`, `(L, sort(L))`), reduce it (`mean(L)`), or index
   it (`L[2]`, 1-based). Elements may use constants, states, and t. A list of
-  tuples names a scatter — except 2–3 equal-length tuple rows, which define
-  a matrix (below).
-- Matrix: `M = [(a, b), (c, d)]` (also `[[a, b], [c, d]]`, or named points
-  as rows) defines a 2×2 or 3×3 matrix. `det(M)`, `trace(M)`, the matvec
-  `M v`, and `solve(M, v)` (Cramer's rule) expand symbolically, so entries
+  tuples names a scatter of points, whatever its shape: `[(1, 2), (3, 4)]`
+  is two points, never a matrix.
+- Matrix: a tuple of rows, `M = ((a, b), (c, d))` or
+  `M = ((a, b, c), (d, e, f), (g, h, i))`, or of named points as rows
+  (`M = (A, B)`), is a 2×2 or 3×3 matrix; it works unnamed too:
+  `((0, -1), (1, 0)) (2, 1)`, `det(((1, 2), (3, 4)))`. A list in an entry
+  makes one matrix per element: with `a = [1, 2]`, `M = ((a, 0), (0, 1))`
+  is two matrices, `det(M)` is `[1, 2]`, and `M M P` is two points (both
+  Ms are the one M). `det(M)`, `trace(M)`, the matvec `M v`, and
+  `solve(M, v)` (Cramer's rule) expand symbolically, so entries
   may hold sliders, t, x/y, or states, and results work anywhere:
   `(x', y') = A (x, y)` is a linear phase portrait, and
   `th' = om; om' = solve(M, f)` integrates a system written in the
@@ -790,7 +795,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `M^-1` — and a row may name the result (`R = M N`), but a matrix is never
   plotted on its own: apply it to a vector. Note `a/2 J` reads as `a/(2 J)`;
   write `(a/2) J`.
-- Rotations are matrix exponentials: with `J = [(0, -1), (1, 0)]`,
+- Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of
   `v -> n × v`, scaled so |n| multiplies the angle (`rotate(P, a, n)`

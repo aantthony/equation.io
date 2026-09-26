@@ -209,9 +209,10 @@ the server, which may log it; the fragment never does.
 
 **Matrices**
 
-- `M = [(a, b), (c, d)]` — a 2×2 or 3×3 matrix; `det(M)`, `trace(M)`, the
-  matvec `M v`, and `solve(M, v)` (Cramer's rule) expand symbolically at
-  lowering time, see [`lib/mat.ts`](lib/mat.ts). So `(x', y') = A (x, y)` is a
+- `M = ((a, b), (c, d))` — a tuple of rows is a 2×2 or 3×3 matrix (a
+  bracket of tuples, `[(a, b), (c, d)]`, is two points); `det(M)`,
+  `trace(M)`, the matvec `M v`, and `solve(M, v)` (Cramer's rule) expand
+  symbolically at lowering time, see [`lib/mat.ts`](lib/mat.ts). So `(x', y') = A (x, y)` is a
   phase portrait with sliders in the entries, and `om' = solve(M, f)`
   integrates the double pendulum in the Lagrangian form M(θ)ω′ = f it is
   derived in

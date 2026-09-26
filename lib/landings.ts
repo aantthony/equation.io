@@ -92,7 +92,7 @@ export const LANDINGS: readonly Landing[] = [
       'dy/dx = y(1 - y/4) — logistic growth',
       "(x', y') = (y, -sin(x)) — a phase portrait",
       '(-y, x) — a vector field, drawn as animated streamlines',
-      "a = -1; b = -1/4; A = [(0, 1), (a, b)]; (x', y') = A (x, y) — a linear system as its matrix",
+      "a = -1; b = -1/4; A = ((0, 1), (a, b)); (x', y') = A (x, y) — a linear system as its matrix",
     ],
     prompts: [
       "Show a slope field for y' = x - y on equation.io so I can click to trace solutions",

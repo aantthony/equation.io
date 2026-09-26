@@ -100,7 +100,7 @@ const CALLS: CallFixture[] = [
     kind: 'pcurve',
     values: [0.5, 1, 1.5],
   },
-  { setup: ['M = [(2,0),(0,4)]'], calls: ['solve(M,(6,8))', 'solve(M,6,8)'], kind: 'point', values: [3, 2] },
+  { setup: ['M = ((2,0),(0,4))'], calls: ['solve(M,(6,8))', 'solve(M,6,8)'], kind: 'point', values: [3, 2] },
   { calls: ['abs(-3)'], kind: 'value', values: [3] },
   { calls: ['abs((3,4))', 'abs(3,4)', 'abs(A)'], setup: ['A = (3,4)'], kind: 'value', values: [5] },
   { calls: ['abs((2,3,6))', 'abs(2,3,6)'], kind: 'value', values: [2] },
@@ -174,7 +174,7 @@ describe('call-shape compatibility before preserving tuple syntax', () => {
 
 describe('typed-values semantic edge baseline', () => {
   it('keeps deferred computed-point components zipped through function composition', () => {
-    const setup = ['f(x,y) = (x+y/2,y)', 'A = (1,2)', 'B = (3,4)', 'J = [(0,-1),(1,0)]'];
+    const setup = ['f(x,y) = (x+y/2,y)', 'A = (1,2)', 'B = (3,4)', 'J = ((0,-1),(1,0))'];
     for (const [call, expected] of [
       ['f(J A)', [-1.5, 1]],
       ['f(A+A)', [4, 4]],

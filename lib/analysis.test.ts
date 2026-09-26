@@ -105,7 +105,7 @@ describe('shared document analysis', () => {
     const bad = analyzeRows(rows).rows;
     expect(bad[2].error).toMatch(/F_1 is not defined — F is a function/);
     expect(bad[3].error).toMatch(/G_1 is not defined — G's components are G_x, G_y, G_z/);
-    const J = 'J=[[d/dx G_x,d/dy G_x,d/dz G_x],[d/dx G_y,d/dy G_y,d/dz G_y],[d/dx G_z,d/dy G_z,d/dz G_z]]';
+    const J = 'J=((d/dx G_x,d/dy G_x,d/dz G_x),(d/dx G_y,d/dy G_y,d/dz G_y),(d/dx G_z,d/dy G_z,d/dz G_z))';
     const det = analyzeRows([F, 'G=F(x,y,z)', J, 'det(J)']).rows[3].cls!.object as { residual: Expr };
     for (const [x, y, z] of [
       [1, 2, 3],

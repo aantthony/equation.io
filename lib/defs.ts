@@ -71,7 +71,7 @@ import {
   plainFnName,
   withAxes,
 } from './list.ts';
-import { type Mat, matrixFromList } from './mat.ts';
+import type { Mat } from './mat.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -248,7 +248,7 @@ export function columnExprs(col: Column): Expr[] {
  * do. (Two separately written lists `X`, `Y` are independent and cross.)
  */
 function pointColumn(defs: ValueDefinitions, name: string, axis: string): Seq | null {
-  // Two or three 2D points — three 3D ones — read as a matrix; its rows are
+  // A tuple of two 2D points — three 3D ones — is a matrix; its rows are
   // the same points.
   const mat = defs.mats.get(name);
   const points = mat ? rowsAsPoints(mat, name) : defs.lists.get(name);
@@ -418,7 +418,7 @@ function staysList(e: Expr, defs: ValueDefinitions): boolean {
       if (defs.lists.has(e.name) || defs.missingData.get(e.name)?.list === true) return true;
       const dot = e.name.indexOf('.');
       if (dot <= 0) return false;
-      // `P.x` of a point list — including one short enough to read as a matrix.
+      // `P.x` of a point list, or of the rows of a matrix.
       const head = e.name.slice(0, dot);
       return defs.tables.has(head) || defs.lists.has(head) || defs.mats.has(head);
     }
@@ -2107,7 +2107,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
         const resolved = resolveExpr(parse(d), getFn, ropts);
-        // `R = e^(a J)`, `N = 2 M`: matrix algebra names a matrix.
+        // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
+        // or matrix algebra, names a matrix.
         const computed = lowerMatrix(
           resolved,
           n => compsOf(defs, n),
@@ -2138,23 +2139,6 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           // for the file and every use of it did too.
           if (cut.missing && tables) throw new MissingDataError(cut.missing);
           continue;
-        }
-        if (e.kind === 'list') {
-          // A named list of 2–3 equal-length tuple/nested rows is a matrix
-          // (that syntax predates data lists); every other shape falls
-          // through to data-list handling below.
-          let mat: Mat | null = null;
-          try {
-            mat = matrixFromList(e);
-          } catch (err) {
-            // Nested-list rows ([[1,2],[3,4],…]) always spell a matrix, so
-            // a bad shape there keeps the matrix error.
-            if (e.items.some(it => it.kind === 'list')) throw err;
-          }
-          if (mat) {
-            defs.mats.set(d.name, mat);
-            continue;
-          }
         }
         e = lowerLists(e, listGetter(defs), ropts, true);
         if (isSeq(e)) {

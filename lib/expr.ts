@@ -177,6 +177,11 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'div',
     'curl',
     'laplacian',
+    // A tuple of rows is one matrix argument: det(((a, b), (c, d))).
+    'det',
+    'trace',
+    'solve',
+    'exp',
   ]);
   return grouped.has(name) ? args : args.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
 }

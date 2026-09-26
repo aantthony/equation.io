@@ -96,6 +96,10 @@ describe('llms.txt', () => {
         'note',
       ],
       [[], 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', 'curve'],
+      // A tuple of rows is a matrix; a bracket of tuples is points.
+      [[], '((0, -1), (1, 0)) (2, 1)', 'point'],
+      [[], 'det(((1, 2), (3, 4)))', 'value'],
+      [[], '[(1, 2), (3, 4)]', 'list'],
     ];
     for (const [defs, row, kind] of cases) {
       expect(llms, row).toContain(row);
@@ -110,5 +114,9 @@ describe('llms.txt', () => {
     const readout = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
     expect(readout(['curl((-y, x))'])).toBe('= 2');
     expect(readout(['laplacian(x^2 + y^2)'])).toBe('= 4');
+    const M = ['a = [1, 2]', 'M = ((a, 0), (0, 1))', 'P = (1, 1)'];
+    expect(llms).toContain('`M = ((a, 0), (0, 1))`');
+    expect(readout([...M, 'det(M)'])).toBe('= [1, 2]');
+    expect(analyzeRows([...M, 'M M P']).rows.at(-1)!.cpu).toMatchObject({ type: 'plist', pts: { length: 2 } });
   });
 });

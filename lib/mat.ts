@@ -2,8 +2,9 @@ import { evaluate, exprKey, freeVars } from './expr.ts';
 /**
  * Small matrices — 2×2 and 3×3 — as definition-time symbolic objects.
  *
- * `M = [(a, b), (c, d)]` (rows as tuples, or nested `[[a, b], [c, d]]`, or
- * named points as rows: `R = [r1, r2]`) names a matrix. Like sums, d/dx,
+ * `M = ((a, b), (c, d))` — a tuple of rows, or of named points as rows:
+ * `R = (r1, r2)` — is a matrix. (A bracket of tuples is a multiset of points,
+ * never a matrix: order lives in tuples.) Like sums, d/dx,
  * and points, matrices vanish before anything downstream looks: det, trace,
  * the matvec `M v`, and `solve(M, v)` (Cramer's rule) all expand during
  * geometry lowering into ordinary scalar expressions. GLSL, evaluate, diff,
@@ -14,7 +15,7 @@ import { evaluate, exprKey, freeVars } from './expr.ts';
  * Cramer is exact and symbolic at these sizes; n ≥ 4 is rejected up front.
  *
  * Matrices also combine — `s M`, `M + N`, `M N`, `M^n`, `M^-1` — and
- * exponentiate: `e^(th J)` with `J = [(0, -1), (1, 0)]` is the rotation by
+ * exponentiate: `e^(th J)` with `J = ((0, -1), (1, 0))` is the rotation by
  * th, and `e^(th cross(n))` the rotation about the axis n, each expanded to
  * its closed form (see expOf) so that the result is, again, only scalars.
  */
@@ -27,32 +28,18 @@ export type Mat = (readonly Expr[])[];
 /** Matrix lookup during lowering; null for names that are not matrices. */
 export type GetMat = (name: string) => Mat | null;
 
-const SHAPE_HINT = 'write rows of equal length: M = [(a, b), (c, d)] or [[a, b], [c, d]]';
+/** The shape a matrix literal takes, for errors about one. */
+export const SHAPE_HINT = 'write a tuple of equal-length rows: M = ((a, b), (c, d))';
 
 /**
- * Read a matrix out of a lowered list literal. The list's items are rows —
- * vecs (tuples or scattered named points) or nested lists of scalars.
- * Throws on ragged or non-square shapes; a list with no row structure at
- * all (e.g. [1, 2, 3]) returns null so callers can say what a list means
- * in their context.
+ * Read a matrix out of lowered rows — the items of a tuple of tuples, or of
+ * named points. A square 2×2 or 3×3 is a matrix; any other shape is null, so
+ * the caller can say what that tuple is in its own context.
  */
-export function matrixFromList(e: Expr): Mat | null {
-  if (e.kind !== 'list' || e.items.length === 0) return null;
-  const rows: Mat = [];
-  for (const item of e.items) {
-    if (item.kind === 'vec') rows.push(item.items);
-    else if (item.kind === 'list') {
-      if (item.items.some(c => c.kind === 'vec' || c.kind === 'list')) {
-        throw new Error(`Matrix rows hold numbers — ${SHAPE_HINT}.`);
-      }
-      rows.push(item.items);
-    } else return null; // a flat data list, not a matrix
-  }
+export function matrixFromRows(rows: readonly (readonly Expr[])[]): Mat | null {
   const n = rows.length;
-  if (rows.some(r => r.length !== n) || (n !== 2 && n !== 3)) {
-    throw new Error(`A matrix is 2×2 or 3×3 — ${SHAPE_HINT}.`);
-  }
-  return rows;
+  if ((n !== 2 && n !== 3) || rows.some(r => r.length !== n)) return null;
+  return rows.map(r => [...r]);
 }
 
 /** det for side 2 or 3 (cofactor expansion along the first row). */

@@ -165,16 +165,16 @@ describe('fitting a list of points by its coordinates', () => {
     expect(analyze(['L = [1,2]', 'L.x']).rows[1].error).toMatch(/L is a list of numbers/);
   });
 
-  it('reads the rows of a point list that is shaped like a matrix', () => {
-    // Two 2D points are a 2×2 matrix as well; P.x still means their x's.
-    const r = analyze(['P = [(1,2),(3,5)]', 'P.y ~ m P.x + b', '(P.x, P.y)']);
+  it('reads the rows of a tuple of points, which is a matrix', () => {
+    // Two 2D points in a tuple are a 2×2 matrix as well; P.x still means their x's.
+    const r = analyze(['P = ((1,2),(3,5))', 'P.y ~ m P.x + b', '(P.x, P.y)']);
     expect(r.constEnv.m).toBeCloseTo(1.5);
     const plan = r.rows[2].cpu!;
     expect(plan.type === 'plist' && plan.pts).toHaveLength(2);
   });
 
-  it('filters one coordinate of a matrix-shaped point list by another', () => {
-    const row = analyze(['P = [(1,2),(3,5)]', 'P.y[P.x > 2]']).rows[1];
+  it('filters one coordinate of a matrix of points by another', () => {
+    const row = analyze(['P = ((1,2),(3,5))', 'P.y[P.x > 2]']).rows[1];
     expect(row.error).toBeUndefined();
     expect(row.cpu).toEqual({ type: 'vlist', values: [{ kind: 'num', value: 5 }] });
   });

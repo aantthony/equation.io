@@ -156,7 +156,7 @@ describe('object families and sequence values', () => {
       if (p.type !== 'plist') throw new Error(p.type);
       return p.pts.map(pt => pt.map(c => +evaluate(c, a.constEnv).toFixed(3)).join());
     };
-    expect(pts(['J=[(0,-1),(1,0)]', 'th=2pi [0..3]/4', 'e^(th J) (1,0)'])).toEqual(['1,0', '0,1', '-1,0', '0,-1']);
+    expect(pts(['J=((0,-1),(1,0))', 'th=2pi [0..3]/4', 'e^(th J) (1,0)'])).toEqual(['1,0', '0,1', '-1,0', '0,-1']);
     // One literal written into every output component is still one list: the
     // icosahedron is 3 turns × 2 × 2 = 12 vertices, all at the same radius.
     const ico = pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'e^(k cross((1,1,1)/sqrt(3))) (0,[-1,1],[-phi,phi])']);

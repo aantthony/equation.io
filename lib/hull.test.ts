@@ -204,8 +204,8 @@ describe('hull(…) rows', () => {
       );
     };
     const quarter = ['0,0', '0,2', '-1,1'];
-    expect(verts(['J=[(0,-1),(1,0)]', 'R=e^((pi/2) J)', P, 'R hull(P)']).sort()).toEqual([...quarter].sort());
-    expect(verts(['J=[(0,-1),(1,0)]', 'R=e^((pi/2) J)', P, 'hull(R P)']).sort()).toEqual([...quarter].sort());
+    expect(verts(['J=((0,-1),(1,0))', 'R=e^((pi/2) J)', P, 'R hull(P)']).sort()).toEqual([...quarter].sort());
+    expect(verts(['J=((0,-1),(1,0))', 'R=e^((pi/2) J)', P, 'hull(R P)']).sort()).toEqual([...quarter].sort());
     expect(verts([P, 'rotate(hull(P), pi/2)']).sort()).toEqual([...quarter].sort());
     expect(verts([P, '2 hull(P) + (1,1)']).sort()).toEqual(['1,1', '3,3', '5,1']);
     expect(verts([P, '-hull(P)/2']).sort()).toEqual(['-0.5,-0.5', '-1,0', '0,0']);
@@ -220,7 +220,7 @@ describe('hull(…) rows', () => {
       return p.type === 'family' ? p.members.map(m => m.cpu.type) : [p.type];
     };
     const P = 'P=[(1,0),(2,0),(2,1)]';
-    expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'e^(th J) hull(P)'])).toEqual([
+    expect(members(['J=((0,-1),(1,0))', 'th=2pi [0..2]/3', P, 'e^(th J) hull(P)'])).toEqual([
       'polygon',
       'polygon',
       'polygon',
@@ -242,7 +242,7 @@ describe('hull(…) rows', () => {
     expect(members(turning(30))).toHaveLength(30);
     expect(analyze(turning(200)).rows[1].error).toMatch(/too large to render .* in all/);
     // …while a list INSIDE the figure is its points.
-    expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'hull(e^(th J) P)'])).toEqual(['polygon']);
+    expect(members(['J=((0,-1),(1,0))', 'th=2pi [0..2]/3', P, 'hull(e^(th J) P)'])).toEqual(['polygon']);
     // ~1.3 s locally, several times that on a loaded CI runner: past the 5 s default.
   }, 20_000);
   it('explains itself', () => {

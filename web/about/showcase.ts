@@ -223,7 +223,7 @@ export const SHOWCASE: ShowcaseItem[] = [
       'L2 = 1',
       'm1 = 1',
       'm2 = 1',
-      'M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]',
+      'M = (((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2))',
       'f = (-m2 L2 om_2^2 sin(th_1 - th_2) - (m1+m2) g sin(th_1), L1 om_1^2 sin(th_1 - th_2) - g sin(th_2))',
       "th' = om",
       "om' = solve(M, f)",
@@ -462,7 +462,7 @@ export const SHOWCASE: ShowcaseItem[] = [
     title: 'Rotations are matrix exponentials',
     blurb:
       'e^(tA) solves (x′, y′) = A(x, y) exactly: with A = J it is a rotation, and with any other 2×2 a spiral, saddle or node. The dots are e^(sA) applied to one point for a list of times s; the last row rides along them with t.',
-    eqs: ['A = [(-0.2, -1), (1, -0.2)]', 's = [0..60]/5', 'e^(s A) (3, 0)', 'e^(t A) (3, 0)'],
+    eqs: ['A = ((-0.2, -1), (1, -0.2))', 's = [0..60]/5', 'e^(s A) (3, 0)', 'e^(t A) (3, 0)'],
     group: 'Geometry',
     view: { span: 8 },
   },

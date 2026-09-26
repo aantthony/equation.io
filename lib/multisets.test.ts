@@ -8,16 +8,18 @@ import { evaluate, type Expr } from './expr.ts';
  */
 const last = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!;
 
-/** The values of a row that draws a finite multiset of numbers, sorted:
- *  order is not part of a multiset. */
+/** The values of a row that draws a finite multiset of numbers, evaluated at
+ *  the document's constants and sorted: order is not part of a multiset. */
 function multiset(rows: string[]): number[] {
-  const row = last(rows);
+  const analysis = analyzeRows(rows, { readouts: true });
+  const row = analysis.rows.at(-1)!;
   if (row.error) throw new Error(row.error);
+  const env = analysis.constEnv;
   const object = row.cls?.object as { kind: string; values?: readonly Expr[] | Float64Array } | undefined;
-  if (object?.kind === 'value') return [evaluate((object as unknown as { expr: Expr }).expr, {})];
+  if (object?.kind === 'value') return [evaluate((object as unknown as { expr: Expr }).expr, env)];
   if (object?.kind !== 'list') throw new Error(`expected a list, got ${object?.kind}`);
   const vals = object.values!;
-  const out = vals instanceof Float64Array ? [...vals] : vals.map(v => evaluate(v, {}));
+  const out = vals instanceof Float64Array ? [...vals] : vals.map(v => evaluate(v, env));
   return out.sort((a, b) => a - b);
 }
 
@@ -70,5 +72,52 @@ describe('§3 reductions see the whole multiset', () => {
     expect(multiset(['total([])'])).toEqual([0]);
     expect(last(['mean([])']).error).toMatch(/empty/);
     expect(last(['max([])']).error).toMatch(/empty/);
+  });
+});
+
+/** The points a row draws — one, or a finite multiset — as sorted `x,y[,z]`
+ *  strings, evaluated at the document's constants. */
+function points(rows: string[]): string[] {
+  const analysis = analyzeRows(rows, { readouts: true });
+  const row = analysis.rows.at(-1)!;
+  if (row.error) throw new Error(row.error);
+  const cpu = row.cpu as { type: string; coords?: Expr[]; pts?: Expr[][] } | undefined;
+  const pts = cpu?.type === 'point' ? [cpu.coords!] : cpu?.type === 'plist' ? cpu.pts! : null;
+  if (!pts) throw new Error(`expected points, got ${cpu?.type}`);
+  return pts.map(p => p.map(c => evaluate(c, analysis.constEnv)).join(',')).sort();
+}
+
+describe('§4 tuple matrices', () => {
+  const M = ['a = [1,2]', 'M = ((a,0),(0,1))', 'P = (1,1)'];
+  it('a tuple of rows is a matrix, named or not', () => {
+    expect(points(['M = ((1,2),(3,4))', 'M (1,0)'])).toEqual(['1,3']);
+    expect(points(['((1,2),(3,4)) (1,0)'])).toEqual(['1,3']);
+    expect(points(['M = ((1,2,3),(4,5,6),(7,8,10))', 'M (1,1,1)'])).toEqual(['6,15,25']);
+    expect(multiset(['det(((1,2,3),(4,5,6),(7,8,10)))'])).toEqual([-3]);
+    expect(multiset(['M = ((1,2),(3,4))', 'trace(M)'])).toEqual([5]);
+  });
+  it('a tuple of named points is a matrix of rows', () => {
+    expect(points(['A = (1,2)', 'B = (3,4)', 'M = (A, B)', 'M (1,0)'])).toEqual(['1,3']);
+    expect(multiset(['A = (1,2)', 'B = (3,4)', 'det((A, B))'])).toEqual([-2]);
+  });
+  it('matrix algebra and the exponential take tuples', () => {
+    expect(
+      points(['J = ((0,-1),(1,0))', 'e^((pi/2) J) (1,0)']).map(p => p.split(',').map(Math.round).join(',')),
+    ).toEqual(['0,1']);
+    expect(points(['M = ((1,2),(3,4))', 'M^-1 (M (5,6))'])).toEqual(['5,6']);
+  });
+  it('a multiset of matrices carries through, one choice per name', () => {
+    expect(points([...M, 'M P'])).toEqual(['1,1', '2,1']);
+    // Both Ms are the one M: two points, not four.
+    expect(points([...M, 'M M P'])).toEqual(['1,1', '4,1']);
+    expect(multiset([...M, 'det(M)'])).toEqual([1, 2]);
+  });
+  it('a bracket of tuples is a multiset of points, never a matrix', () => {
+    expect(points(['[(1,2),(3,4)]'])).toEqual(['1,2', '3,4']);
+    expect(points(['M = [(1,2),(3,4)]', 'M'])).toEqual(['1,2', '3,4']);
+    expect(last(['M = [(1,2),(3,4)]', 'det(M)']).error).toMatch(/takes a matrix/);
+  });
+  it('a bare pair of points says what it is', () => {
+    expect(last(['A = (1,2)', 'B = (3,4)', '(A, B)']).error).toMatch(/2×2 matrix.*segment\(A, B\)/);
   });
 });

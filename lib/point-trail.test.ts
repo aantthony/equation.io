@@ -19,14 +19,14 @@ describe('trail(point)', () => {
   });
 
   it('preserves matrix trace, including within arithmetic', () => {
-    const graph = analyze(['M = [(1, 2), (3, 4)]', 'a = trace(M) + 1']);
+    const graph = analyze(['M = ((1, 2), (3, 4))', 'a = trace(M) + 1']);
     expect(graph.rows.map(r => r.error)).toEqual([undefined, undefined]);
     expect(graph.constEnv.a).toBe(6);
   });
 
   it('keeps point trails and matrix trace distinct', () => {
     expect(analyze(['A = (1, 2)', 'trace(A)']).rows[1].error).toContain('takes a matrix');
-    expect(analyze(['M = [(1, 2), (3, 4)]', 'trail(M)']).rows[1].error).toBeTruthy();
+    expect(analyze(['M = ((1, 2), (3, 4))', 'trail(M)']).rows[1].error).toBeTruthy();
   });
 
   it('rejects scalar, spatial, parametric, and nested trail expressions', () => {
