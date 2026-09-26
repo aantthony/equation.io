@@ -93,6 +93,9 @@ const signatures: Record<string, [string, string]> = {
   det: ['det(M)', 'Matrix determinant'],
   trace: ['trace(M)', 'Matrix trace'],
   solve: ['solve(M, v)', 'Solve the linear system M x = v'],
+  outer: ['outer(a, b) or a ⊗ b', 'Outer (tensor) product: (a ⊗ b)_ij = a_i b_j, of vectors, matrices or tensors'],
+  wedge: ['wedge(a, b) or a ∧ b', 'Wedge product a ⊗ b − b ⊗ a: a bivector, read out as its antisymmetric matrix'],
+  contract: ['contract(T, i, j)', 'Sum a tensor over indices i = j (1-based): contract(M, 1, 2) is trace(M)'],
   sum: ['sum(n=1..N, expression)', 'Finite sum'],
   prod: ['prod(n=1..N, expression)', 'Finite product'],
   int: ['int[a..b] f(x) dx', 'Definite integral; bounds may be omitted. Alone on a row it shades its signed area'],
@@ -134,6 +137,7 @@ const definedNames = (defs: Env): ReadonlySet<string> =>
     ...defs.states.keys(),
     ...defs.points,
     ...defs.mats.keys(),
+    ...defs.tensors.keys(),
     ...defs.lists.keys(),
     ...defs.tables.keys(),
     ...defs.missingData.keys(),
@@ -213,6 +217,7 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   );
   values([...defs.points].filter(pointOverParams), 'Named curve or surface');
   values(defs.mats.keys(), 'Defined matrix');
+  values(defs.tensors.keys(), 'Defined tensor');
   values(defs.lists.keys(), 'Defined list');
   for (const [name, table] of defs.tables) {
     values([name], 'Data table');

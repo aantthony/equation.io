@@ -39,6 +39,8 @@ const SYMBOL_ESCAPES: readonly Escape[] = [
   { name: 'int', text: '∫', description: 'Integral: ∫[a..b] f(x) dx' },
   { name: 'times', text: '×', description: 'Cross product (or multiplication)' },
   { name: 'cdot', text: '·', description: 'Dot product (or multiplication)' },
+  { name: 'otimes', text: '⊗', description: 'Outer (tensor) product: a ⊗ b' },
+  { name: 'wedge', text: '∧', description: 'Wedge product: a ∧ b = a ⊗ b − b ⊗ a' },
   { name: 'div', text: '÷', description: 'Division' },
   { name: 'le', text: '≤', description: 'Less than or equal' },
   { name: 'leq', text: '≤', description: 'Less than or equal' },

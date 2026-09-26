@@ -4384,6 +4384,8 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
       return `defines the function ${name}${quiet}`;
     case 'matrix':
       return `defines ${name}: a matrix${quiet}`;
+    case 'tensor':
+      return `defines ${name}: a ${b.tensor.shape.join('×')} tensor${quiet}`;
     case 'seq':
       return `defines ${name}: a list${quiet}`;
     case 'table':

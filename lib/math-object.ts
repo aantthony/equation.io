@@ -139,8 +139,15 @@ export type MathObject =
     }
   | { readonly kind: 'value'; readonly expr: Expr; readonly shade?: Readonly<IntShade> }
   /** A tuple of more than 3 numbers: values at positions, with no picture
-   *  (2 or 3 of them are a point). Shown as its readout (docs/multisets.md §3). */
-  | { readonly kind: 'tuple'; readonly values: readonly Expr[] }
+   *  (2 or 3 of them are a point). Shown as its readout (docs/multisets.md §3).
+   *  A matrix or tensor is a tuple of tuples, its values row-major under
+   *  `shape`; `count` of them back to back are a multiset of tensors (§4). */
+  | {
+      readonly kind: 'tuple';
+      readonly values: readonly Expr[];
+      readonly shape?: readonly number[];
+      readonly count?: number;
+    }
   // `constant`: the row reads like a slider named e, pi or tau (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).

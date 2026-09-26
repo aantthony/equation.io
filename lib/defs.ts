@@ -1,7 +1,7 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
 import { childrenOf, LOOP_LIMIT, RECUR, isRecur } from './expr.ts';
 import { mapChildren, structuralDiagnostic, legacyCallArgs } from './expr.ts';
-import { exprKey } from './expr.ts';
+import { exprKey, type ProductGlyph } from './expr.ts';
 /**
  * User definitions and derivative syntax.
  *
@@ -56,7 +56,7 @@ import {
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
-import { lowerGeom, lowerMatrix, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
+import { lowerGeom, lowerMatrix, lowerTensorValue, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
 import {
   type GetList,
   type Seq,
@@ -74,6 +74,7 @@ import {
   withAxes,
 } from './list.ts';
 import type { Mat } from './mat.ts';
+import { type GetTensor, type Tensor, stack, vectorTensor } from './tensor.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -169,6 +170,7 @@ interface BindingDraft {
   states: Map<string, StateDef>;
   vecStates: Map<string, number>;
   mats: Map<string, Mat>;
+  tensors: Map<string, Tensor>;
   lists: Map<string, Seq | (Expr & { kind: 'vec' })>;
   missingData: Map<string, { message: string; list: boolean }>;
   tables: Map<string, TableDef>;
@@ -193,6 +195,7 @@ const emptyDraft = (): BindingDraft => ({
   states: new Map(),
   vecStates: new Map(),
   mats: new Map(),
+  tensors: new Map(),
   lists: new Map(),
   missingData: new Map(),
   tables: new Map(),
@@ -284,6 +287,26 @@ function pointColumn(defs: ValueDefinitions, name: string, axis: string): Seq | 
 }
 
 /**
+ * Resolve a name to a tensor: a named tensor, or — asked with `tuples`, by an
+ * operation on tensors — a named tuple, which is one too: a tuple of numbers
+ * a vector, a tuple of points a rank-2 tensor (docs/multisets.md §3: the
+ * consumer decides the reading).
+ */
+export function tensorGetter(defs: ValueDefinitions): GetTensor {
+  return (name, tuples) => {
+    const hit = defs.tensors.get(name);
+    if (hit || !tuples) return hit ?? null;
+    const list = defs.lists.get(name);
+    if ((list?.kind !== 'list' && list?.kind !== 'data') || !isTuple(list) || axesOf(list).length !== 1) return null;
+    // A tuple of numbers is a vector of any length: T = sort(L).
+    if (list.kind === 'data') return vectorTensor([...list.values].map(value => ({ kind: 'num', value })));
+    if (list.items.every(it => it.kind !== 'vec' && it.kind !== 'list')) return vectorTensor(list.items);
+    const rows = list.items.map(it => (it.kind === 'vec' ? vectorTensor(it.items) : null));
+    return rows.length && rows.every(r => r !== null) ? stack(rows as Tensor[]) : null;
+  };
+}
+
+/**
  * Resolve a name to list elements: a named list, or a data column written
  * `table.column`. Throws (rather than returning null) when the name clearly
  * means a column but cannot produce one, so the row explains itself.
@@ -355,7 +378,12 @@ export function listGetter(defs: ValueDefinitions): GetList {
  *  `person[…]` index instead of multiplying (parseExpr needs this before it
  *  parses). Table names count: a data file is indexed by a filter. */
 export function listNamesOf(defs: ValueDefinitions): Set<string> {
-  const out = new Set([...defs.mats.keys(), ...defs.lists.keys(), ...[...defs.sequences.keys()].map(n => n + '_')]);
+  const out = new Set([
+    ...defs.mats.keys(),
+    ...defs.tensors.keys(),
+    ...defs.lists.keys(),
+    ...[...defs.sequences.keys()].map(n => n + '_'),
+  ]);
   // A list whose file is elsewhere still indexes: the row must parse the same
   // way on every device (see `indexes` in expr.ts).
   for (const [name, m] of defs.missingData) if (m.list) out.add(name);
@@ -419,6 +447,7 @@ const draftNameTaken = (defs: ValueDefinitions, n: string): boolean =>
   defs.states.has(n) ||
   defs.points.has(n) ||
   defs.mats.has(n) ||
+  defs.tensors.has(n) ||
   defs.lists.has(n) ||
   defs.tables.has(n) ||
   defs.missingData.has(n);
@@ -1056,7 +1085,7 @@ const VECTOR_OP_EXAMPLE: Record<string, string> = {
  * never gets here. Returns the rewritten chain, or null when it has no ∇.
  */
 function splitNablaChain(e: Expr, ctx: Ctx): Expr | null {
-  type Factor = { e: Expr; op: '*' | '/'; glyph?: 'dot' | 'cross' };
+  type Factor = { e: Expr; op: '*' | '/'; glyph?: ProductGlyph };
   const factors: Factor[] = [];
   let node: Expr = e;
   while (node.kind === 'bin' && (node.op === '*' || node.op === '/')) {
@@ -1088,6 +1117,7 @@ function splitNablaChain(e: Expr, ctx: Ctx): Expr | null {
   if (!first) return null; // a bare ∇: classify says to write it with parentheses
   if (first.op === '/') throw new Error('∇ needs something to act on: ∇f, ∇·F, ∇×F or ∇²f.');
   if (h.laplacian && first.glyph) throw new Error('∇² takes a scalar field: write ∇²f.');
+  if (first.glyph === 'outer' || first.glyph === 'wedge') throw new Error('∇ makes ∇f, ∇·F, ∇×F or ∇²f — not ⊗ or ∧.');
   let end = at + 2;
   while (end < factors.length && !factors[end].glyph) end++;
   let operand = first.e;
@@ -2160,13 +2190,28 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         const resolved = resolveExpr(parse(d), getFn, ropts);
         // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
         // or matrix algebra, names a matrix.
+        const isList = (n: string) => defs.lists.has(n);
         const computed = lowerMatrix(
           resolved,
           n => compsOf(defs, n),
           n => defs.mats.get(n) ?? null,
+          tensorGetter(defs),
+          isList,
         );
         if (computed) {
           defs.mats.set(d.name, computed);
+          continue;
+        }
+        // `T = e_x ⊗ e_y ⊗ e_z`: a tensor of any other shape.
+        const tensor = lowerTensorValue(
+          resolved,
+          n => compsOf(defs, n),
+          n => defs.mats.get(n) ?? null,
+          tensorGetter(defs),
+          isList,
+        );
+        if (tensor) {
+          defs.tensors.set(d.name, tensor);
           continue;
         }
         let e: Expr;
@@ -2175,6 +2220,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
             resolved,
             n => compsOf(defs, n),
             n => defs.mats.get(n) ?? null,
+            isList,
+            tensorGetter(defs),
           );
         } catch {
           e = lowerObjects(resolved, defs, ropts, true);
@@ -2740,9 +2787,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     const e = defs.consts.get(name);
     // A surviving list (or matrix) name means it was defined below its use,
     // so lowering saw it as a plain scalar.
-    if (!e && (defs.lists.has(name) || defs.mats.has(name))) {
+    if (!e && (defs.lists.has(name) || defs.mats.has(name) || defs.tensors.has(name))) {
       throw new Error(
-        `${name} is a ${defs.lists.has(name) ? 'list' : 'matrix'} — move its definition above where it is used.`,
+        `${name} is a ${defs.lists.has(name) ? 'list' : defs.mats.has(name) ? 'matrix' : 'tensor'} — move its definition above where it is used.`,
       );
     }
     if (!e) throw new Error(`${name} is not defined.`);
@@ -2864,6 +2911,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       defs.vecStates.has(name) ||
       defs.fns.has(name) ||
       defs.mats.has(name) ||
+      defs.tensors.has(name) ||
       defs.lists.has(name) ||
       defs.tables.has(name) ||
       defs.missingData.has(name);
@@ -2918,6 +2966,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         defs.states.delete(name);
         defs.fns.delete(name);
         defs.mats.delete(name);
+        defs.tensors.delete(name);
         defs.lists.delete(name);
         defs.tables.delete(name);
         defs.missingData.delete(name);
@@ -2933,6 +2982,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         ...[...defs.states].map(([name, state]): [string, Expr[], string[]] => [name, [state.deriv], []]),
         ...[...defs.fns].map(([name, fn]): [string, Expr[], string[]] => [name, [fn.body], fn.params]),
         ...[...defs.mats].map(([name, matrix]): [string, Expr[], string[]] => [name, matrix.flat(), []]),
+        ...[...defs.tensors].map(([name, tensor]): [string, Expr[], string[]] => [name, [...tensor.data], []]),
         ...[...defs.lists].map(([name, value]): [string, Expr[], string[]] => [name, [value], []]),
         ...[...defs.tables.keys()].map((name): [string, Expr[], string[]] => [name, [], []]),
       ];
@@ -3004,6 +3054,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   }
   for (const [name, fn] of defs.fns) env.bind(name, { tag: 'fn', fn });
   for (const [name, matrix] of defs.mats) env.bind(name, { tag: 'matrix', matrix });
+  for (const [name, tensor] of defs.tensors) env.bind(name, { tag: 'tensor', tensor });
   for (const [name, table] of defs.tables)
     env.bind(name, { tag: 'table', table, unavailable: defs.missingData.get(name) });
   for (const [name, value] of defs.lists)

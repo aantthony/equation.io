@@ -285,6 +285,8 @@ Checked 2026-09-26 against `lowerLists` (lib/list.ts) and the MCP validator.
 | `polyline(P)`, `polygon(P)`, `L[2]` over a list `[ … ]` | an error that points at `sort` (phase 4) | error |
 | `polyline(((0,0),(1,1),(2,0)))`, `T[2]` of a tuple | walked / indexed in order (phase 4) | same |
 | `person.row` | each record's position in the file (phase 4) | same |
+| `e_x ⊗ e_y`, `a ∧ b`, `contract(T, 1, 2)` | outer product, bivector, contraction; a tensor alone on a row reads out (phase 6) | same |
+| `(((1,2),(3,4)),((5,6),(7,8)))`, `((1,2,3,4),(5,6,7,8))` | a 2×2×2 and a 2×4 tensor (phase 6) | same |
 
 [lists-tables-plan.md](lists-tables-plan.md) still says lists of different
 lengths are an error; they have taken every combination since the axis model
@@ -340,7 +342,7 @@ recorded so they can be reviewed and reversed. Progress notes live in
   (phase 4; phase 2 made it an error). `((1, 2), (3, 4), (5, 6))` and two 3D
   points are walked by `polyline`/`polygon`, indexed by `T[k]`, and drawn as
   dots on a row of their own. A square one is also a matrix, and alone on a
-  row stays the matrix error (a pair of 2D points still names
+  row reads out as one since phase 6 (a pair of named 2D points still names
   `segment(A, B)`).
 - **Nested brackets are never a matrix.** `[[1, 2], [3, 4]]` is the multiset
   `[1 2 3 4]` (phase 1 flattening), not the old nested-list matrix spelling.
@@ -366,8 +368,7 @@ recorded so they can be reviewed and reversed. Progress notes live in
   `tuple` row kind) and draws nothing. A multiset of short tuples is a
   multiset of points; of longer ones, an error.
 - **Tuple literals may be any length.** `(1, 2, 3, 5, 8)` is a tuple of five
-  numbers (it was a parse error). A tuple of tuples is not a value yet
-  (phase 6).
+  numbers (it was a parse error). A tuple of tuples is a tensor (phase 6).
 - **`sort(P, key)` details.** The key has to be identical to P (the same
   instances), a number per element, and constant (sliders yes, t no). The
   sort is stable, and an element whose key is missing is left out, as
@@ -410,3 +411,42 @@ recorded so they can be reviewed and reversed. Progress notes live in
   at the current zoom before stacking, so continuous measurements stack into
   their shape instead of a single row of dots at height 1. Stacks keep unit
   spacing, so a column of thousands is tall; zoom out to see its outline.
+- **A matrix or tensor alone on a row reads out** (phase 6), as nested tuples:
+  `2 M` is `= ((2, 4), (6, 8))`, where it used to be an error, and a
+  multiset of them lists each, `= [((1, 0), (0, 1)), ((2, 0), (0, 1))]`.
+  Three readings of the old rules are kept: a tuple of 2D or 3D points that
+  is not square is still drawn as dots, and so is any tensor of that shape
+  however it was made (`(1,2) ⊗ (3,4,5)` draws what
+  `((3,4,5),(6,8,10))` draws, so `==` holds); a pair of named points `(A, B)` still
+  says it is not a figure (it was most likely meant as the segment); and in
+  x, y or z a matrix is an error, not a field of matrices.
+- **The wedge is the graded one.** On vectors it is `a ⊗ b − b ⊗ a`; in
+  general `(p+q)!/(p! q!) Alt(A ⊗ B)`, so `(a ∧ b) ∧ c = a ∧ (b ∧ c)` is the
+  volume element, and a scalar wedges as multiplication (`2 ∧ 3 = 6`,
+  `x ∧ y` is the field x y). A bivector is stored as its antisymmetric
+  rank-2 tensor, with no tag of its own: it is also a matrix, so
+  `(a ∧ b) v = a (b·v) − b (a·v)`, `det` and `e^(th B)` apply. In 3D its
+  dual is `a × b`, which stays the vector it was.
+- **Contraction is `contract(T, i, j)`**, indices 1-based and written as
+  numbers (a slider would change the result's shape). It names which two
+  indices meet, which is all Einstein notation says, without index syntax
+  the parser does not have; with ⊗ it gives every other contraction.
+  Juxtaposition contracts the last index of the left with the first of the
+  right (matvec, `M N`, `T v`, `(1, 1) T`), except that a vector on the left
+  of a square matrix stays the error it was (`M v` is the one order).
+- **A tuple of points is a matrix to a product on its right.** `A (1, 1, 1)`
+  and `A B` for 2×3 and 3×2 tuples of points multiply as matrices (the
+  consumer decides, §3). `2 T` still scales the points, and `M T` still
+  moves each point of T.
+- **`T[k]` of a named tensor is its k-th slice** along the first index.
+  `T[2][1]` is `T[2]` times the one-element multiset `[1]`, since only a name
+  indexes; name the slice first.
+- **Cut from phase 6.** A bracket of tensors (`[M, N]`) is an error rather
+  than a multiset of matrices; a multiset of tensors cannot be named when it
+  comes from a list of vectors (`B = p ∧ e_z` with `p = [e_x, e_y]`; unnamed,
+  the row expands element by element and works, and a list in an entry,
+  `M = ((a, 0), (0, 1))`, can always be named); a tuple is read as a tensor
+  when it is written out or named (`L = sort(K)`, then `L ⊗ L`), while
+  `sort(K) ⊗ v` unnamed is expanded element by element (the same values,
+  but it cannot be named); a tensor has at most 729 entries; no transpose,
+  symmetrisation or Hodge star beyond `×`.

@@ -111,7 +111,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Operators: `+ - * / ^`, parentheses, unary minus. Multiplication is
   implicit: `2x`, `x y`, `2cos(t)`, `a(x-1)` all work. `·` and `×` multiply
   numbers too, and between two vectors are the dot and cross product (see
-  Vector calculus).
+  Vector calculus); `⊗` and `∧` are the outer and wedge products (see
+  Tensors). All four bind like `*`.
 - Absolute value bars: `|x|`, including nested/multiplied forms like `2|x-1|`.
 - Unicode: Greek letters are ordinary names (`θ = 1` makes a θ slider; `Δx`
   is a name like `dx`), superscript digits are exponents (`x³` is `x^3`,
@@ -120,7 +121,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   component and `a₃` a sequence's third term. A single name or number in
   braces is the same subscript: `T_{c}` is `T_c`, `a_{10}` is `a_10`.
   `·`, `⋅`, `×`, `÷`, `−`, `≤`,
-  `≥`, `≠` mean their ASCII counterparts. π and τ never join a longer name,
+  `≥`, `≠` mean their ASCII counterparts (`⊗` is `outer(a, b)`, `∧` is
+  `wedge(a, b)`; the editor types them from `\otimes` and `\wedge`). π and τ never join a longer name,
   so `2πr` is 2·π·r. In the editor, typing `\pi`, `\theta`, `\nabla`, …
   inserts the symbol itself, and a `\` before any built-in function name
   simply drops (`\sin(x)` → `sin(x)`, `\trail` → `trail`), so `\` also works
@@ -834,9 +836,34 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `th' = om; om' = solve(M, f)` integrates a system written in the
   Lagrangian form M(θ)ω′ = f — the natural shape for a double pendulum.
   Matrices combine — `2 M`, `M / 2`, `M + N`, `M N`, `M^2` (whole powers 0–8),
-  `M^-1` — and a row may name the result (`R = M N`), but a matrix is never
-  plotted on its own: apply it to a vector. Note `a/2 J` reads as `a/(2 J)`;
-  write `(a/2) J`.
+  `M^-1` — and a row may name the result (`R = M N`). A matrix has no
+  position, so on a row of its own it draws nothing and reads out its value,
+  `= ((1, 2), (3, 4))`: apply it to a vector to draw. Note `a/2 J` reads as
+  `a/(2 J)`; write `(a/2) J`.
+- Tensors: a rank-k tensor is k-deep nested tuples, and its shape is part of
+  its value — `((1, 2, 3), (4, 5, 6))` is 2×3, `(((1, 2), (3, 4)), ((5, 6),
+  (7, 8)))` is 2×2×2. A value that is also a tuple of 2D or 3D points and
+  not square draws as those points, however it was made — `(1, 2) ⊗ (3, 4, 5)`
+  is the dots (3, 4, 5) and (6, 8, 10) — until a product reads it as a
+  matrix: `T (1, 1)`. Operations act on coordinates:
+  - `a ⊗ b` (`outer(a, b)`) is the outer product, `(a ⊗ b)_ij = a_i b_j`, for
+    vectors, matrices or tensors: `e_x ⊗ e_y` is the 3×3 matrix with a 1 in
+    row 1, column 2.
+  - `contract(T, i, j)` sums T over its indices i and j (1-based, written as
+    numbers), dropping both: `contract(M, 1, 2)` is `trace(M)`, and
+    `contract(A ⊗ B, 2, 3)` is the product `A B`. Juxtaposition contracts
+    the last index of the left with the first of the right, so `T v` and
+    `A B` (2×3 by 3×2) work.
+  - `a ∧ b` (`wedge(a, b)`) is `a ⊗ b − b ⊗ a`, a bivector, read out as its
+    antisymmetric matrix; it is also a matrix, `(a ∧ b) v = a (b·v) − b (a·v)`.
+    `e_x ∧ e_y ∧ e_z` is the rank-3 volume element (∧ is associative); in 3D
+    `a × b` is the vector dual to `a ∧ b`.
+  - `T[k]` of a named tensor is its k-th slice; `2 T`, `T + S` work
+    entrywise. A tensor on its own row reads out; anywhere a number or point
+    is needed it is an error until contracted.
+  - Lists in entries work as for matrices: with `a = [1, 2]`,
+    `a e_x ⊗ e_y` is two matrices, and with `M = ((a, 0), (0, 1))`, `M ⊗ M`
+    is two rank-4 tensors, not four (both Ms are the one M).
 - Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of

@@ -261,6 +261,109 @@ describe('§4 vectors in 3D', () => {
   });
 });
 
+/** The tensors a row reads out: their shape, and each one's entries in
+ *  row-major order — sorted, since a multiset of them has no order. */
+function tensors(rows: string[]): { shape: readonly number[]; values: number[][] } {
+  const analysis = analyzeRows(rows, { readouts: true });
+  const row = analysis.rows.at(-1)!;
+  if (row.error) throw new Error(row.error);
+  const object = row.cls?.object;
+  if (object?.kind !== 'tuple' || !object.shape) throw new Error(`expected a tensor, got ${object?.kind}`);
+  const shape = object.shape;
+  const size = shape.reduce((n, d) => n * d, 1);
+  const flat = object.values.map(v => evaluate(v, analysis.constEnv) + 0);
+  const values = Array.from({ length: object.count ?? 1 }, (_, k) => flat.slice(k * size, (k + 1) * size));
+  return { shape, values: values.sort((a, b) => a.join().localeCompare(b.join())) };
+}
+
+describe('§4 tensors', () => {
+  it('rank-k tuples are values whose shape is part of the type', () => {
+    expect(tensors(['((1,2,3,4),(5,6,7,8))'])).toEqual({ shape: [2, 4], values: [[1, 2, 3, 4, 5, 6, 7, 8]] });
+    expect(tensors(['(((1,2),(3,4)),((5,6),(7,8)))']).shape).toEqual([2, 2, 2]);
+    expect(tensors(['T = (((1,2),(3,4)),((5,6),(7,8)))', '2 T - T']).values).toEqual([[1, 2, 3, 4, 5, 6, 7, 8]]);
+    expect(last(['((1,2,3,4),(5,6))']).error).toMatch(/one shape/);
+  });
+  it('a matrix or tensor alone on a row reads out', () => {
+    expect(last(['((1,0),(0,2))']).info).toBe('= ((1, 0), (0, 2))');
+    expect(last(['M = ((1,2),(3,4))', '2 M']).info).toBe('= ((2, 4), (6, 8))');
+    expect(last(['(((1,2),(3,4)),((5,6),(7,8)))']).info).toBe('= (((1, 2), (3, 4)), ((5, 6), (7, 8)))');
+    expect(last(['(x,0) ⊗ (0,1)']).error).toMatch(/no picture/);
+    // Points, point lists and arrows draw as before.
+    expect(last(['((1,2),(3,4),(5,6))']).cpu).toMatchObject({ type: 'plist' });
+    expect(last(['A = (0,0)', 'B = (1,1)', 'vector(A, B)']).cpu).toMatchObject({ type: 'polygon' });
+  });
+  it('the outer product: (A ⊗ B)_ij = A_i B_j', () => {
+    expect(tensors(['(1,2) ⊗ (3,4,5,6)'])).toEqual({ shape: [2, 4], values: [[3, 4, 5, 6, 6, 8, 10, 12]] });
+    expect(tensors(['outer((1,2), (3,4,5,6))'])).toEqual(tensors(['(1,2) ⊗ (3,4,5,6)']));
+    // A 2×3 tensor is a tuple of two 3D points, and draws as its value written out.
+    expect(vectors(['(1,2) ⊗ (3,4,5)'])).toEqual(vectors(['((3,4,5),(6,8,10))']));
+    expect(vectors(['L = sort([3,1,2])', 'L ⊗ (1,1)'])).toEqual(vectors(['((1,1),(2,2),(3,3))']));
+    expect(tensors(['L = sort([3,1,2])', 'L ⊗ L']).values).toEqual([[1, 2, 3, 2, 4, 6, 3, 6, 9]]);
+    expect(tensors(['e_x ⊗ e_y']).values).toEqual([[0, 1, 0, 0, 0, 0, 0, 0, 0]]);
+    expect(tensors(['M = ((1,2),(3,4))', 'M ⊗ (1,1)']).shape).toEqual([2, 2, 2]);
+    // ⊗ binds like *: 2 e_x ⊗ e_y is (2 e_x) ⊗ e_y.
+    expect(tensors(['2 e_x ⊗ e_y']).values[0][1]).toBe(2);
+  });
+  it('contraction, and products that contract', () => {
+    expect(multiset(['M = ((1,2),(3,4))', 'contract(M, 1, 2)'])).toEqual([5]);
+    expect(tensors(['A = ((1,2),(3,4))', 'B = ((0,1),(1,0))', 'contract(A ⊗ B, 2, 3)'])).toEqual(
+      tensors(['A = ((1,2),(3,4))', 'B = ((0,1),(1,0))', 'A B']),
+    );
+    expect(vectors(['T = (((1,2),(3,4)),((5,6),(7,8)))', 'contract(T, 1, 3)'])).toEqual([[7, 11]]);
+    expect(tensors(['T = (((1,2),(3,4)),((5,6),(7,8)))', 'T (1,1)']).values).toEqual([[3, 7, 11, 15]]);
+    // A tuple of points that is not square is a matrix to a product.
+    expect(tensors(['((1,2,3),(4,5,6)) ((1,2),(3,4),(5,6))']).values).toEqual([[22, 28, 49, 64]]);
+    expect(vectors(['A = ((1,2,3),(4,5,6))', 'A (1,1,1)'])).toEqual([[6, 15]]);
+    expect(multiset(['det(((1,2,3),(4,5,6)) ((1,2),(3,4),(5,6)))'])).toEqual([36]);
+    expect(last(['contract(e_x ⊗ e_y, 1, 1)']).error).toMatch(/two different indices/);
+    expect(last(['k = 1', 'contract(e_x ⊗ e_y, k, 2)']).error).toMatch(/written out/);
+  });
+  it('the wedge is a ⊗ b − b ⊗ a, and its 3D dual is the cross product', () => {
+    expect(tensors(['(1,0) ∧ (0,1)'])).toEqual({ shape: [2, 2], values: [[0, 1, -1, 0]] });
+    expect(tensors(['wedge((1,2,3), (4,5,6))'])).toEqual(tensors(['(1,2,3) ⊗ (4,5,6) - (4,5,6) ⊗ (1,2,3)']));
+    const [w] = tensors(['(1,2,3) ∧ (4,5,6)']).values;
+    expect([w[5], -w[2], w[1]]).toEqual(vectors(['(1,2,3) × (4,5,6)'])[0]);
+    // A bivector is a matrix too: (a ∧ b) v = a (b·v) − b (a·v).
+    expect(vectors(['(e_x ∧ e_y) (1,2,3)'])).toEqual([[2, -1, 0]]);
+    // ∧ is associative: the volume element is antisymmetric in every pair.
+    const [vol] = tensors(['e_x ∧ e_y ∧ e_z']).values;
+    expect([vol[5], vol[7], vol[11], vol[15], vol[19], vol[21]]).toEqual([1, -1, -1, 1, 1, -1]);
+    expect(tensors(['wedge(e_x, e_y, e_z)']).values).toEqual([vol]);
+    expect(last(['(1,2) ∧ (1,2,3)']).error).toMatch(/one dimension/);
+  });
+  it('named tensors and their slices', () => {
+    const T = 'T = (((1,2),(3,4)),((5,6),(7,8)))';
+    expect(tensors([T, 'T[2]'])).toEqual({ shape: [2, 2], values: [[5, 6, 7, 8]] });
+    expect(multiset([T, 'det(T[2])'])).toEqual([-2]);
+    expect(tensors([T, 'U = T[1]', 'U']).values).toEqual([[1, 2, 3, 4]]);
+    expect(last([T, 'sin(T)']).error).toMatch(/2×2×2 tensor is not a number/);
+  });
+  it('a multiset of tensors: identical names are chosen together', () => {
+    const a = 'a = [1,2]';
+    // A list in an entry: two matrices.
+    expect(tensors([a, 'a e_x ⊗ e_y']).values.map(t => t[1])).toEqual([1, 2]);
+    // Both Ms are the one M: 2 rank-4 tensors, not 4.
+    const MM = tensors([a, 'M = ((a,0),(0,1))', 'M ⊗ M']);
+    expect(MM.shape).toEqual([2, 2, 2, 2]);
+    expect(MM.values.map(t => t[0])).toEqual([1, 4]);
+    expect(tensors([a, 'M = ((a,0),(0,1))', 'M']).values).toEqual([
+      [1, 0, 0, 1],
+      [2, 0, 0, 1],
+    ]);
+    // Identity through ∧: a named multiset of vectors wedged with itself is
+    // [0, 0]; separate literals cross.
+    expect(tensors(['p = [e_x, e_y]', 'p ∧ p']).values).toEqual([Array(9).fill(0), Array(9).fill(0)]);
+    expect(tensors(['p = [e_x, e_y]', 'q = [e_y, e_z]', 'p ∧ q']).values).toHaveLength(4);
+    expect(tensors([a, '(a e_x) ∧ (a e_y)']).values.map(t => t[1])).toEqual([1, 4]);
+    expect(tensors(['[1,2] e_x ∧ [1,2] e_y']).values.map(t => t[1])).toEqual([1, 2, 2, 4]);
+    // Identity through ⊗: p ⊗ p is two matrices, each p_i ⊗ p_i.
+    expect(tensors(['p = [e_x, e_y]', 'p ⊗ p']).values.map(t => t[0] + t[4])).toEqual([1, 1]);
+    expect(last(['M = ((1,0),(0,2))', 'a = [1,2]', 'M ⊗ (a, 0)']).info).toBe(
+      '= [(((1, 0), (0, 0)), ((0, 0), (2, 0))), (((2, 0), (0, 0)), ((0, 0), (4, 0)))]',
+    );
+  });
+});
+
 describe('§5 what a row draws', () => {
   const kind = (rows: string[]) => {
     const row = last(rows);

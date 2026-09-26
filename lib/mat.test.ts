@@ -267,8 +267,9 @@ describe('matrix algebra and the exponential', () => {
     expect(() => lowRow([M], 'M + 1')).toThrow(/matrix and a number/);
     expect(() => lowRow([M], '2^M (1, 0)')).toThrow(/Only e/);
     expect(() => lowRow([M], 'e^(a/2 M) (1, 0)')).toThrow(/\(a\/2\) J/);
-    expect(() => lowRow([M], '2 M')).toThrow(/not a value on its own/);
-    expect(analyze([M, '2 M']).rows[1].error).toMatch(/not a value on its own/);
+    // On a row of its own a matrix is read out, not drawn (docs/multisets.md §5).
+    expect(analyze([M, '2 M']).rows[1].cls?.object).toMatchObject({ kind: 'tuple', shape: [2, 2] });
+    expect(() => lowRow([M], 'sin(2 M)')).toThrow(/not a value on its own/);
     expect(() => lowRow([M], '(1, 0) M')).toThrow(/on the left/);
   });
   it('names a computed matrix', () => {

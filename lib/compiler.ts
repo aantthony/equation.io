@@ -76,7 +76,7 @@ export type CpuPlan =
   | { type: 'expect'; rv: string }
   | { type: 'prob'; body: Expr; shade?: { rv: string } & ProbBounds }
   | { type: 'value'; expr: Expr; shade?: IntShade }
-  | { type: 'tuple'; values: Expr[] }
+  | { type: 'tuple'; values: Expr[]; shape?: readonly number[]; count?: number }
   | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true };
 
 export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & (
@@ -312,7 +312,7 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'value':
       return { type: 'value', expr: real(object.expr), shade: object.shade };
     case 'tuple':
-      return { type: 'tuple', values: object.values.map(real) };
+      return { type: 'tuple', values: object.values.map(real), shape: object.shape, count: object.count };
     case 'note':
       return {
         type: 'note',

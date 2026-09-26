@@ -33,6 +33,7 @@ import {
 import type { FigureName } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
 import { tupleRow } from './list.ts';
+import { nestedText, tensorOfNode } from './tensor.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
@@ -510,6 +511,22 @@ function classifyLowered(
       params,
     },
   });
+
+  // A matrix or tensor on a row of its own — or a multiset of them — has no
+  // position, so it is drawn as its values: a readout (docs/multisets.md §5).
+  const tensors = expr.kind === 'list' && expr.items.length ? expr.items.map(tensorOfNode) : [tensorOfNode(expr)];
+  if (tensors.every(t => t !== null)) {
+    if (hasSpace || hasParam) {
+      throw new Error('A matrix or tensor in x, y, z, u or v has no picture — apply it to a vector, like M (x, y).');
+    }
+    const shape = tensors[0].shape;
+    return done({
+      kind: 'tuple',
+      values: tensors.flatMap(t => t.data),
+      shape,
+      ...(expr.kind === 'list' && { count: tensors.length }),
+    });
+  }
 
   if (
     (expr.kind === 'eq' || expr.kind === 'ineq') &&
@@ -989,9 +1006,17 @@ export function plotReadout(plot: CpuPlan, env: Record<string, number>): string 
   if (plot.type === 'value') return valueReadout(evaluate(plot.expr, env));
   if (plot.type === 'note') return comparisonReadout(plot, env);
   if (plot.type === 'tuple') {
-    const values = plot.values.map(e => valueReadout(evaluate(e, env)));
+    // A tensor's values nest as the tuples that write it; a multiset of
+    // them is listed like one of numbers.
+    const shape = plot.shape ?? [plot.values.length];
+    const each = shape.reduce((n, d) => n * d, 1);
+    const shown = plot.count === undefined ? 1 : Math.min(plot.count, 8);
+    const values = plot.values.slice(0, shown * each).map(e => valueReadout(evaluate(e, env)));
     const prefix = values.some(v => v.startsWith('≈')) ? '≈' : '=';
-    return `${prefix} (${values.map(v => v.replace(/^[=≈] /, '')).join(', ')})`;
+    const bare = values.map(v => v.replace(/^[=≈] /, ''));
+    const parts = Array.from({ length: shown }, (_, k) => nestedText(shape, bare.slice(k * each, (k + 1) * each)));
+    if (plot.count === undefined) return `${prefix} ${parts[0]}`;
+    return `${prefix} [${parts.join(', ')}${plot.count > shown ? ', …' : ''}]`;
   }
   if (plot.type === 'vlist') {
     const values = plot.values.slice(0, 8).map(e => valueReadout(evaluate(e, env)));

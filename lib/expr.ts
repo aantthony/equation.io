@@ -46,18 +46,22 @@ export interface Column {
  *  never part of the math — exprKey leaves them out. */
 export type Expr = ExprNode & { axes?: readonly Axis[]; origin?: number };
 
+/** The products written with their own glyph (see the bin node). */
+export type ProductGlyph = 'dot' | 'cross' | 'outer' | 'wedge';
+
 type ExprNode =
   | { readonly kind: 'num'; readonly value: number }
   | { readonly kind: 'var'; readonly name: string }
-  /** `glyph` records a product written `·`/`⋅` ('dot') or `×` ('cross'):
-   *  between two vectors lowerGeom reads it as dot(a, b) or cross(a, b);
-   *  between numbers it is plain multiplication. */
+  /** `glyph` records a product written `·`/`⋅` ('dot'), `×` ('cross'),
+   *  `⊗` ('outer') or `∧` ('wedge'): between two vectors or tensors
+   *  lowerGeom reads it as that product; between numbers it is plain
+   *  multiplication. */
   | {
       readonly kind: 'bin';
       readonly op: '+' | '-' | '*' | '/' | '^';
       readonly a: Expr;
       readonly b: Expr;
-      readonly glyph?: 'dot' | 'cross';
+      readonly glyph?: ProductGlyph;
     }
   | { readonly kind: 'neg'; readonly a: Expr }
   | { readonly kind: 'call'; readonly name: string; readonly args: readonly Expr[] }
@@ -186,6 +190,10 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'trace',
     'solve',
     'exp',
+    // Tensors are nested tuples: outer((1, 0), (0, 1)) takes two vectors.
+    'outer',
+    'wedge',
+    'contract',
     // sort((s, sin(s)), s): the points to order, then their key.
     'sort',
   ]);
@@ -267,6 +275,10 @@ export const FUNCTIONS = new Set([
   'det',
   'trace',
   'solve',
+  // Tensor products and contraction (see tensor.ts), lowered the same way.
+  'outer',
+  'wedge',
+  'contract',
   // Not real functions: Σ/Π/∫ binders and the ∇ operators, expanded
   // symbolically by resolveExpr.
   'sum',
@@ -322,6 +334,9 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'rgb',
   'hsl',
   'oklch',
+  'outer',
+  'wedge',
+  'contract',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
@@ -444,8 +459,8 @@ const asVecOrExpr = (n: PNode): Expr =>
 const asBin = (op: '+' | '-' | '*' | '/' | '^') =>
   BinaryInfix<PNode>((a, b) => bin(op)(asVecOrExpr(a), asVecOrExpr(b)));
 
-/** `·` and `×`: multiplication that remembers its glyph (see the bin node). */
-const asProduct = (glyph: 'dot' | 'cross') =>
+/** `·`, `×`, `⊗` and `∧`: multiplication that remembers its glyph (see the bin node). */
+const asProduct = (glyph: ProductGlyph) =>
   BinaryInfix<PNode>((a, b): Expr => ({ kind: 'bin', op: '*', a: asVecOrExpr(a), b: asVecOrExpr(b), glyph }));
 
 const asIneq = (op: IneqOp) =>
@@ -569,6 +584,8 @@ const ops = operators<PNode>({
   '×': asProduct('cross'),
   '·': asProduct('dot'),
   '⋅': asProduct('dot'),
+  '⊗': asProduct('outer'),
+  '∧': asProduct('wedge'),
   '/': asBin('/'),
   '÷': asBin('/'),
 
@@ -664,7 +681,7 @@ for (const k of ['<=', '≤', '>', '>=', '≥']) ops[k].prec = ops['<'].prec;
 // Unicode spellings share their operator's level (each key otherwise gets its
 // own), so 5 − 3 - 1 and 5 - 3 − 1 both associate left: ((5 − 3) - 1).
 ops['−'].prec = ops['-'].prec;
-for (const k of ['×', '·', '⋅']) ops[k].prec = ops['*'].prec;
+for (const k of ['×', '·', '⋅', '⊗', '∧']) ops[k].prec = ops['*'].prec;
 ops['÷'].prec = ops['/'].prec;
 ops['≠'].prec = ops['!='].prec;
 

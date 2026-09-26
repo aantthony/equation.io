@@ -4,7 +4,7 @@ import { mapChildren } from './expr.ts';
 import { exceedsNodes } from './size.ts';
 /** Lift lists in object positions before scalar geometry lowering. Existing
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
-import { type ResolveOpts, compsOf, listGetter } from './defs.ts';
+import { type ResolveOpts, compsOf, listGetter, tensorGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
 import { type Expr, type FigureForm, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
@@ -89,8 +89,11 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     if (!out) indexed.set(n, (out = indicesOf(n)));
     return out;
   };
+  // T[2] of a tensor is a slice of it, which geometry lowering takes.
+  const ofTensor = (n: Expr): boolean =>
+    n.kind === 'var' ? defs.tensors.has(n.name) : n.kind === 'index' && ofTensor(n.args[0]);
   const indicesOf = (n: Expr): Expr => {
-    if (n.kind === 'index') return lowerLists(n, get, opts, true);
+    if (n.kind === 'index') return ofTensor(n.args[0]) ? n : lowerLists(n, get, opts, true);
     switch (n.kind) {
       case 'call':
         return { ...n, args: n.args.map(indices) };
@@ -122,6 +125,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
         n => compsOf(defs, n),
         n => defs.mats.get(n) ?? null,
         n => get(n) !== null,
+        tensorGetter(defs),
       ),
       get,
       opts,
@@ -247,11 +251,12 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   try {
     return expand(e, false)!;
   } catch (err) {
-    // A matrix error is about the matrix: the expansion's own complaint, made
-    // while reading things as lists of points, would only bury it. So is a
-    // sort key's: expanded, sort(P, L) is only ever handed single values.
+    // A matrix or tensor error is about the matrix: the expansion's own
+    // complaint, made while reading things as lists of points, would only
+    // bury it. So is a sort key's: expanded, sort(P, L) is only ever handed
+    // single values.
     throw originalError instanceof Error &&
-      ((/matri/i.test(originalError.message) && !/not a value on its own/.test(originalError.message)) ||
+      ((/matri|tensor/i.test(originalError.message) && !/not a value on its own/.test(originalError.message)) ||
         /sort\(P, P\.x\)/.test(originalError.message))
       ? originalError
       : err;

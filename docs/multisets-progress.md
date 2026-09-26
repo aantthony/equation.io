@@ -11,10 +11,10 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 | 2 Tuple matrices | done | geom.ts lowerMat vec case; mat.ts matrixFromRows; defs.ts no bracket→matrix; det/trace/solve/exp take a tuple as one matrix. Examples rewritten. |
 | 3 Vectors in 3D | done | e_x/e_y/e_z resolved in defs.ts `rx` via ResolveOpts.documentNames (doc names win); render3d batches point runs; og.ts preview draws plists. App already drew 3D plists. |
 | 4 Order | done (uncommitted) | Axis.ordered (expr.ts); list.ts unionAxes/tupleOf/sortBy/tupleRow/needsOrder; object-lists polyline/polygon need order; geom non-square tuple of points passes; csv/defs `row`; defs state-family order; new `tuple` row kind. Spec tests §3 in multisets.test.ts. |
-| 5 Display | ready to merge | worktree branch worktree-agent-acf75691499f51a6f, commit cb5ec73 (on cca578d); cherry-pick after phase 4 commit. Agent verified vitest 2314, test:objects, test:editor 95/95, screenshots. |
-| 6 Tensors | todo | |
-| 7 Continuous intervals | planning | Plan agent (7+8) |
-| 8 Measures | todo | |
+| 5 Display | done | commit 9803156 (cherry-pick of cb5ec73). plot.ts: bare x/y scalar → field, xyz → error; curveHint; uniformDraws for u/v; signed field shading; dotPlot for lists, barMode removed. |
+| 6 Tensors | done | lib/tensor.ts {shape,data}; geom.ts lowerTensor; ⊗ ∧ outer wedge contract(T,i,j); defs.tensors; readouts via `tuple` row kind. |
+| 7 Continuous intervals | ready to merge | branch worktree-agent-a310074886604d33c commit 0600db5 (on 9803156); lib/interval.ts `[interval](lo,hi,id)`, pregion, projected2d projFrag; agent: vitest 84/2356, test:objects pass. Cherry-pick after phase 6 commit. |
+| 8 Measures | doing | subagent, worktree based on 0600db5 |
 
 ## Decisions made while implementing (not in the agreed spec)
 
@@ -30,6 +30,8 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 - Phase 3 merged: vitest 83/2308 pass.
 - Phase 4: vitest see report; typecheck/lint/fmt clean.
 - Phase 4: vitest 83/2326; typecheck/lint clean; test:objects pass.
+- Phases 4+5 combined: vitest 83/2332; typecheck/lint clean. Probe: shared scratchpad/probe.ts may be repointed by worktree agents; use scratchpad/main/probe.sh.
+- Phase 6: vitest 84/2344; typecheck/lint clean; test:objects pass (agent).
 
 ## Blockers / open issues
 
