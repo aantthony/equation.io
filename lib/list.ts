@@ -1047,6 +1047,42 @@ function histogram(xs: Float64Array, bins: number | null, ctx: Ctx): Expr {
   return histBars(centers, counts, width, ctx);
 }
 
+/** Keep the elements of a list where a filter holds. */
+function cutBy(low: Exclude<Seq, { kind: 'lazy' }>, keep: readonly boolean[], idx: Expr, ctx: Ctx): Expr {
+  const n = keep.length;
+  const kept = keep.reduce((c, k) => c + (k ? 1 : 0), 0);
+  // The same cut of the same list is the same instances, however many
+  // times it is written: (L[L > 2], L[L > 2]^2) still pairs up.
+  const test = JSON.stringify(idx, (key, v) => (ArrayBuffer.isView(v) ? undefined : exprReplacer(key, v)));
+  // (A filter keeps the order of what it filters: a cut of a tuple is one.)
+  const own = axesOf(low);
+  const cut: Axis[] | null =
+    own.length === 1 && own[0].ordered
+      ? [tupleAxis(kept)]
+      : test.length > 4096
+        ? null
+        : [
+            {
+              id: `${own.map(a => a.id).join('×')}[${test}]`,
+              n: kept,
+            },
+          ];
+  if (isData(low)) {
+    const out = new Float64Array(kept);
+    let at = 0;
+    for (let k = 0; k < n; k++) if (keep[k]) out[at++] = low.values[k];
+    return withAxes(dataOf(out, ctx), cut);
+  }
+  if (isText(low)) return withAxes({ kind: 'text', values: low.values.filter((_, k) => keep[k]) }, cut);
+  return withAxes(
+    listOf(
+      low.items.filter((_, k) => keep[k]),
+      ctx,
+    ),
+    cut,
+  );
+}
+
 function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
   // Before anything is lowered, because lowering a column whose file is not
@@ -1067,43 +1103,13 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
     throw new Error(`${name} is not a list here — define it above where it is used.`);
   }
   const n = seqLength(low);
-  const idxLow = lower(idx, ctx);
+  const idxLow = lowerCond(idx, ctx);
   const keep = maskValues(idxLow, ctx.opts);
   if (keep) {
     if (keep.length !== n) {
       throw new Error(`The filter tests ${keep.length} values but the list has ${n}.`);
     }
-    const kept = keep.reduce((c, k) => c + (k ? 1 : 0), 0);
-    // The same cut of the same list is the same instances, however many
-    // times it is written: (L[L > 2], L[L > 2]^2) still pairs up.
-    const test = JSON.stringify(idx, (key, v) => (ArrayBuffer.isView(v) ? undefined : exprReplacer(key, v)));
-    // (A filter keeps the order of what it filters: a cut of a tuple is one.)
-    const own = axesOf(low);
-    const cut: Axis[] | null =
-      own.length === 1 && own[0].ordered
-        ? [tupleAxis(kept)]
-        : test.length > 4096
-          ? null
-          : [
-              {
-                id: `${own.map(a => a.id).join('×')}[${test}]`,
-                n: kept,
-              },
-            ];
-    if (isData(low)) {
-      const out = new Float64Array(kept);
-      let at = 0;
-      for (let k = 0; k < n; k++) if (keep[k]) out[at++] = low.values[k];
-      return withAxes(dataOf(out, ctx), cut);
-    }
-    if (isText(low)) return withAxes({ kind: 'text', values: low.values.filter((_, k) => keep[k]) }, cut);
-    return withAxes(
-      listOf(
-        low.items.filter((_, k) => keep[k]),
-        ctx,
-      ),
-      cut,
-    );
+    return cutBy(low, keep, idx, ctx);
   }
   // Anything but a filter picks by position, and only a tuple has positions.
   const axes = axesOf(low);
@@ -1247,6 +1253,89 @@ function lowerComp(e: Expr & { kind: 'comp' }, ctx: Ctx): Expr {
   );
 }
 
+/**
+ * A comparison where a condition is expected — inside `L[…]` or a `{…}`
+ * piecewise — is decided element by element: over a list it lowers to a
+ * mask, one comparison per element, which the caller keeps or drops by.
+ */
+function lowerCond(e: Expr, ctx: Ctx): Expr {
+  if (e.kind === 'eqtest') {
+    const parts = e.args.map(a => expand(lower(a, ctx), ctx));
+    if (!parts.some(isList)) {
+      throw new Error(
+        `'${e.op}' tests the members of a list, like people.city == "NYC".` +
+          (e.op === '!='
+            ? " For a factorial equation, put a space before '=': x! = 2."
+            : " An equation takes a single '=': x^2 = y."),
+      );
+    }
+    return zipN(parts, comps => ({ ...e, args: [comps[0], comps[1]] }), ctx);
+  }
+  if (e.kind !== 'eq' && e.kind !== 'ineq') return lower(e, ctx);
+  // Comparisons are the symbolic path: a mask is per-element structure (and
+  // chains nest, so a chain's inner comparison is a condition too), so a
+  // typed array expands here.
+  const l = expand(lowerCond(e.l, ctx), ctx);
+  const r = expand(lower(e.r, ctx), ctx);
+  if (e.kind === 'ineq' && (isList(l) || isList(r))) {
+    return zipN([l, r], ([a, b]) => ({ kind: 'ineq', op: e.op, l: a, r: b }), ctx);
+  }
+  if (isList(l) || isList(r)) {
+    throw new Error('Cannot put a list in an equation — to keep the members equal to a value, write L == 2.');
+  }
+  return e.kind === 'eq' ? { kind: 'eq', l, r } : { kind: 'ineq', op: e.op, l, r };
+}
+
+/**
+ * A comparison as a value keeps the members of the multiset it runs over
+ * (docs/multisets.md §4): `[1,2,3] < 3` is [1, 2], just as `x < 3` is the
+ * reals below 3. The members are those of the multiset, not the values
+ * compared: `L^2 < 4` keeps members of L and `P.x < 0` keeps points of P,
+ * as `x^2 < 4` shades x in (−2, 2). That multiset is the innermost part of
+ * the comparison running over exactly the mask's instances; over two
+ * separate multisets (`L < M`) the members are the pairs.
+ */
+function keptMembers(e: Expr, mask: Expr & { kind: 'list' }, ctx: Ctx): Expr {
+  const want = axesOf(mask);
+  const same = (a: readonly Axis[], b: readonly Axis[]) => a.length === b.length && a.every((x, k) => x.id === b[k].id);
+  const lowered = (n: Expr): Expr | null => {
+    try {
+      return lower(n, ctx);
+    } catch {
+      return null;
+    }
+  };
+  // Children first, so the innermost part wins: P over P.x.
+  const find = (n: Expr, axes: readonly Axis[]): Expr | null => {
+    for (const c of childrenOf(n)) {
+      const hit = find(c, axes);
+      if (hit) return hit;
+    }
+    if (n.kind === 'ineq' || n.kind === 'eq' || n.kind === 'eqtest') return null;
+    // A member column (P.x) belongs to the list it is read from.
+    const dot = n.kind === 'var' ? n.name.lastIndexOf('.') : -1;
+    if (n.kind === 'var' && dot > 0) {
+      const base = find({ kind: 'var', name: n.name.slice(0, dot) }, axes);
+      if (base) return base;
+    }
+    const low = lowered(n);
+    return low && isSeq(low) && same(axesOf(low), axes) ? n : null;
+  };
+  let subject = find(e, want);
+  if (!subject && want.length > 1) {
+    const parts = want.map(a => find(e, [a]));
+    if (parts.every(p => p !== null)) subject = { kind: 'vec', items: parts as Expr[] };
+  }
+  const low = subject && lowered(subject);
+  const got = low && settle(low, ctx);
+  if (!got || !isSeq(got) || isLazy(got) || !same(axesOf(got), want)) {
+    throw new Error(
+      'This comparison runs over more than one list in a way that has no members to keep — filter with L[…].',
+    );
+  }
+  return cutBy(got, maskValues(mask, ctx.opts)!, e, ctx);
+}
+
 function lower(e: Expr, ctx: Ctx): Expr {
   switch (e.kind) {
     case 'range':
@@ -1298,20 +1387,8 @@ function lower(e: Expr, ctx: Ctx): Expr {
       );
     }
     case 'eqtest': {
-      const args = e.args.map(a => lower(a, ctx));
-      // Equality is a filter test, not a relation to draw: zip it into a
-      // mask, which only `[ ]` will accept.
-      const parts = args.map(a => expand(a, ctx));
-      if (!parts.some(isList)) {
-        const op = e.op;
-        throw new Error(
-          `'${op}' tests a list inside a filter, like people[people.city == "NYC"].` +
-            (e.op === '!='
-              ? " For a factorial equation, put a space before '=': x! = 2."
-              : " An equation takes a single '=': x^2 = y."),
-        );
-      }
-      return zipN(parts, comps => ({ ...e, args: [comps[0], comps[1]] }), ctx);
+      const mask = lowerCond(e, ctx);
+      return isMask(mask) ? keptMembers(e, mask, ctx) : mask;
     }
     case 'index':
       return lowerIndex(e, ctx);
@@ -1474,22 +1551,11 @@ function lower(e: Expr, ctx: Ctx): Expr {
     }
     case 'eq':
     case 'ineq': {
-      // Comparisons are the symbolic path: a mask is per-element structure
-      // (and chains nest), so a typed array expands here.
-      const l = expand(lower(e.l, ctx), ctx);
-      const r = expand(lower(e.r, ctx), ctx);
-      if (e.kind === 'ineq' && (isList(l) || isList(r))) {
-        // A mask, for a filter. It is only meaningful inside [ ]; anywhere
-        // else it reaches classify as a list of comparisons and is refused.
-        return zipN([l, r], ([a, b]) => ({ kind: 'ineq', op: e.op, l: a, r: b }), ctx);
-      }
-      if (isList(l) || isList(r)) {
-        throw new Error('Cannot put a list in an equation — plot the list on its own row.');
-      }
-      return e.kind === 'eq' ? { kind: 'eq', l, r } : { kind: 'ineq', op: e.op, l, r };
+      const mask = lowerCond(e, ctx);
+      return isMask(mask) ? keptMembers(e, mask, ctx) : mask;
     }
     case 'piecewise': {
-      const cases = e.cases.map(c => ({ cond: lower(c.cond, ctx), value: lower(c.value, ctx) }));
+      const cases = e.cases.map(c => ({ cond: lowerCond(c.cond, ctx), value: lower(c.value, ctx) }));
       const otherwise = e.otherwise && lower(e.otherwise, ctx);
       if (cases.some(c => isSeq(c.value)) || (otherwise && isSeq(otherwise))) {
         throw new Error('Lists are not supported inside {…} piecewise yet.');
@@ -1530,7 +1596,9 @@ export function lowerLists(
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
   }
   if (!named && (out.kind === 'text' || out.kind === 'str')) {
-    throw new Error('Text cannot be plotted — compare it inside a filter, like people[people.city == "NYC"].');
+    throw new Error(
+      'Text cannot be plotted — count it, or keep another column where it holds, like people.age[people.city == "NYC"].',
+    );
   }
   // Bars are a whole row, never a value — including a named one. `h = hist(L)`
   // would otherwise store the internal `[hist]` node as a constant and every
@@ -1601,7 +1669,7 @@ export function packedTuple(e: Expr): Float64Array | null {
  */
 export function lowerMask(cond: Expr, getList: GetList, opts: ResolveOpts = {}): boolean[] | null {
   return maskValues(
-    lower(cond, { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap(), columns: 0 }),
+    lowerCond(cond, { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap(), columns: 0 }),
     opts,
   );
 }

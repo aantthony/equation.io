@@ -100,7 +100,7 @@ describe('broadcasting', () => {
     expect(values(lowerRow('[1,2] + t'), { t: 10 })).toEqual([11, 12]);
   });
   it('rejects lists inside equations and piecewise', () => {
-    expect(() => lowerRow('y = [1,2]')).toThrow(/own row/);
+    expect(() => lowerRow('y = [1,2]')).toThrow(/list in an equation/);
     expect(() => lowerRow('{x<0: [1,2], 0}')).toThrow(/piecewise/);
   });
   it('flattens nested lists: a bracket is a multiset sum', () => {

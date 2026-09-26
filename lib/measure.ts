@@ -112,9 +112,14 @@ export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { exp
   }
   let conds = condsRaw.map(c => host.resolve(c));
   let value = host.resolve(valueRaw);
+  // A lone filter's members are the members it keeps (docs/multisets.md §4):
+  // count measures them; the other reductions take their values, so
+  // total(0 < x < 1) is ∫₀¹ x dx, as total([1,2,3] < 3) is 1 + 2.
+  let lone = false;
   if (!condsRaw.length && (value.kind === 'eq' || value.kind === 'ineq')) {
     conds = [value];
     value = num(1);
+    lone = name !== 'count';
   }
   if (condsRaw.length && (value.kind === 'eq' || value.kind === 'ineq')) {
     throw new Error('In {condition: value}, the value is a number to reduce; put every comparison before the colon.');
@@ -125,6 +130,14 @@ export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { exp
   const hidden = whole.flatMap(e => intervalsIn(e)).filter((h, k, all) => all.findIndex(o => o.key === h.key) === k);
   if ((!names.size && !hidden.length) || whole.some(e => hasList(e, host))) {
     return { arg: condsRaw.length ? host.resolve(raw) : conds.length ? conds[0] : value };
+  }
+  if (lone) {
+    if (names.size !== 1 || hidden.length) {
+      throw new Error(
+        `The members of this filter are points, and ${name}(…) needs numbers — for its size, use count(…).`,
+      );
+    }
+    value = vr([...names][0]);
   }
   if (name === 'stdev' || name === 'median' || name === 'hist') {
     throw new Error(

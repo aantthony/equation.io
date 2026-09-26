@@ -58,7 +58,7 @@ const signatures: Record<string, [string, string]> = {
   total: ['total(L)', 'Sum of a numeric list; over a continuous set an integral: total(u^2) = 1/3'],
   count: [
     'count(L)',
-    'Number of elements in a list; of a filter its measure: count(x^2 + y^2 < 1) = π, count(x^2 = 2) = 2',
+    'Number of elements in a list; of a filter its measure: count(L > 2), count(x^2 + y^2 < 1) = π, count(x^2 = 2) = 2',
   ],
   hist: ['hist(L)', 'Histogram of a numeric list'],
   interval: [

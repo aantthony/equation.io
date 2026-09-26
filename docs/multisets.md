@@ -166,6 +166,16 @@ interval. The rule in §1 does not change.
 - **An equation filters.** `y = x^2` keeps the pairs `(a, b)` of `x × y` with
   `b = a²`: the infinite version of `L[L > 2]`. An inequality is the same
   filter and leaves a region.
+- **So does a comparison over a finite multiset.** `[1,2,3] < 3` is `[1, 2]`:
+  a comparison as a value keeps the members of the multiset it runs over,
+  as `x < 3` keeps the reals below 3. The members are those of that
+  multiset, not the values compared: `L^2 < 4` keeps members of L, as
+  `x^2 < 4` shades x in (−2, 2), and `P.x < 0` keeps points of P. Over two
+  separate multisets (`L < M`) the members are the pairs, as `x < y` is a
+  region. Inside a condition (`L[…]`, `{L < 3: 5, 0}`) a comparison is still
+  decided member by member, as `{x < 0: -x, x}` is per x; `L[L > 2]` is the
+  same as `L > 2`, and indexing by a comparison stays for choosing one
+  column by another, `person.name[person.age > 30]`.
 - **A tuple over one identical variable traces a graph.** `(u, u^2)` is the
   parabola as a multiset of points.
 - Finite and infinite combine: `a = [1,2]`, `y = sin(a x)` is the plane's
@@ -295,6 +305,9 @@ Checked 2026-09-26 against `lowerLists` (lib/list.ts) and the MCP validator.
 | `count(x^2 + y^2 < 1)`, `count(x^2 + y^2 = 1)`, `count(x^2 = 2)` | π, 2π, 2: area, length, points (phase 8) | same |
 | `mean({y = x^2, 0 < x < 1: y})` | the mean over the arc by length; `2y = 2x^2` agrees (phase 8) | same |
 | volume or surface area (`count(x^2 + y^2 + z^2 < 1)`) | error (phase 8 cut) | the measure |
+| `[1,2,3] < 3`, `L^2 < 4`, `P.x < 0` | the kept members: `[1, 2]`, members of L, points of P (was one "always/never true" note per element) | same |
+| `count(L < 3)`, `total(L < 3)` | 2 and 3: the kept members (was 3 and an error) | same |
+| `total(0 < x < 1)`, `total(x^2 + y^2 < 1)` | ½, the members summed; points cannot be summed, so an error that points at `count` (was 1 and π) | same |
 
 [lists-tables-plan.md](lists-tables-plan.md) still says lists of different
 lengths are an error; they have taken every combination since the axis model
@@ -521,6 +534,14 @@ recorded so they can be reviewed and reversed. Progress notes live in
   that uses a named list of points is never a matrix.
 - **A filter may keep nothing.** `L[L > 5]` is `[]`, so `count` of it is 0
   and the other reductions say the list is empty.
+- **A comparison's multiset is found by its instances.** The members kept
+  by `L^2 < 4` are those of the innermost part of the comparison that runs
+  over exactly the instances the comparison does (L, not L²); a data
+  column read from a named list (`P.x`) belongs to that list. Where no one
+  part does, the members are the tuple of one part per instance (`L < M`
+  is pairs); where that fails too, an error points at `L[…]`. A text
+  comparison keeps text (`c.city == "NYC"`), which has no picture, so the
+  row says to count it or choose another column by it.
 - **count, total and mean take computed point lists.** `count(2 P)`,
   `count([0,1] e_x)`; `total` and `mean` of points are taken coordinate by
   coordinate (a point). `min`, `max`, `median`, `stdev` of points stay errors.
@@ -557,8 +578,12 @@ recorded so they can be reviewed and reversed. Progress notes live in
   reading (1 where c1 holds, else f where c2 does); the parser marks bare
   conditions so the two can be told apart. Only there may a condition be an
   equation (`{y = x^2, 0 < x < 1: y}`); elsewhere `y = x^2` as a condition is
-  an error that points at reductions. A lone filter reduces with value 1:
-  `total(x^2 + y^2 < 1)` is the area. A comparison as the value
+  an error that points at reductions. A lone filter reduces its members
+  (§5): `count(x^2 + y^2 < 1)` is the area, `total(0 < x < 1)` is ½, as
+  `total([1,2,3] < 3)` is 3; `total` of a region is an error pointing at
+  `count`, since its members are points. (It first reduced with value 1,
+  so `total` of a region was its area; that disagreed with `total(L < 3)`
+  once a finite comparison kept members.) A comparison as the value
   (`{A: x > 0}`) is an error.
 - **How a set is measured** (phase 8). A comparison of one variable with a
   constant (`0 < x < 1`, `u < a`) narrows that variable's range. What is left

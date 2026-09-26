@@ -741,7 +741,7 @@ describe('§5 measures', () => {
     // An unbounded region has infinite area.
     expect(value(['count(y > x^2)'])).toBe(Infinity);
     expect(value(['count(x > 0)'])).toBe(Infinity);
-    expect(last(['total(y > x^2)']).error).toMatch(/infinite measure/);
+    expect(last(['total(y > x^2)']).error).toMatch(/members of this filter are points/);
     // On a line, a region is a length.
     expect(value(['count(x^2 < 2)'])).toBeCloseTo(2 * Math.SQRT2, 6);
     expect(value(['total({0 < x < 1: x^2})'])).toBeCloseTo(1 / 3, 12);
@@ -786,6 +786,39 @@ describe('§5 measures', () => {
   it('an equation condition belongs to a reduction', () => {
     expect(last(['{y = x^2: 1}']).error).toMatch(/filter for a reduction/);
     expect(last(['y = {x > 0, 2}']).error).toBeUndefined();
+  });
+});
+
+describe('§5 a comparison keeps the members it holds for', () => {
+  const value = (rows: string[]) => multiset(rows)[0];
+  it('keeps members of a finite multiset', () => {
+    expect(multiset(['[1,2,3] < 3'])).toEqual([1, 2]);
+    expect(multiset(['L = [1,2,3]', 'L < 3'])).toEqual([1, 2]);
+    expect(multiset(['L = [1,2,3]', '1 < L <= 3'])).toEqual([2, 3]);
+    expect(multiset(['L = [1,2,3]', 'L == 2'])).toEqual([2]);
+    expect(multiset(['L = [1,2,3]', 'L > 5'])).toEqual([]);
+  });
+  it('keeps members of the multiset, not the values compared', () => {
+    expect(multiset(['L = [1,2,3]', 'L^2 < 4'])).toEqual([1]);
+    const pts = last(['P = [(1,2),(-1,3)]', 'P.x < 0']).cpu as { type: string; pts: unknown[] };
+    expect(pts.type).toBe('plist');
+    expect(pts.pts).toHaveLength(1);
+  });
+  it('is the same as the filter it abbreviates', () => {
+    expect(multiset(['L = [4,1,3]', 'L > 2'])).toEqual(multiset(['L = [4,1,3]', 'L[L > 2]']));
+    expect(multiset(['L = [4,1,3]', 'F = L > 2', '2 F'])).toEqual([6, 8]);
+  });
+  it('reduces by its members', () => {
+    expect(multiset(['L = [1,2,3]', 'count(L < 3)'])).toEqual([2]);
+    expect(multiset(['L = [1,2,3]', 'total(L < 3)'])).toEqual([3]);
+    expect(value(['total(0 < x < 1)'])).toBeCloseTo(0.5, 9);
+    expect(value(['mean(0 < x < 2)'])).toBeCloseTo(1, 9);
+    expect(value(['count(0 < x < 1)'])).toBeCloseTo(1, 9);
+    expect(last(['total(x^2 + y^2 < 1)']).error).toMatch(/use count/);
+  });
+  it('stays a condition inside a condition, and a family with x', () => {
+    expect(multiset(['L = [1,2,3]', 'L[L < 3]'])).toEqual([1, 2]);
+    expect(last(['a = [1,2]', 'y < a x']).cpu?.type).toBe('family');
   });
 });
 

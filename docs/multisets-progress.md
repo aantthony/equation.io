@@ -51,6 +51,14 @@ test:objects all PASS; test:editor 95/95; test:swipe 24/24; embed-test PASS; mcp
 csp-test fails only loading the external cloudflareinsights beacon (sandbox network).
 Screenshots checked by orchestrator: annulus, swept band (zoomed), parabola arc readout, rosette.
 
+## After review: comparisons keep members (2026-09-26)
+
+`[1,2,3] < 3` is `[1, 2]` (multisets.md §5, §9): a comparison as a value keeps the members of
+the multiset it runs over; conditions (`L[…]`, `{…}`) stay per element. list.ts `lowerCond` /
+`keptMembers` / `cutBy`; lone-filter `total`/`mean` sum members (measure.ts), so
+`total(0<x<1)` = ½ and `total` of a region errors toward `count`. vitest 86/2426; typecheck,
+oxlint, oxfmt clean; test:objects PASS.
+
 ## Blockers / open issues
 
 Known limits (also in multisets.md §9), none blocking:

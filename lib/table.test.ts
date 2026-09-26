@@ -561,9 +561,10 @@ describe('filters', () => {
     expect(values(lowerRow('person.age[person.age > 30]', rows))).toEqual([36, 41]);
     expect(values(lowerRow('L[L >= 5]', [...rows, 'L = [1, 5, 2, 9]']))).toEqual([5, 9]);
     // A literal list right against its brackets is filtered too; with a
-    // space it multiplies, so the mask has nowhere to go and says so.
+    // space it multiplies by the members the comparison keeps: two separate
+    // multisets, so every pair.
     expect(values(lowerRow('[1, 5][[1, 5] >= 5]', rows))).toEqual([5]);
-    expect(() => lowerRow('[1, 5] [[1, 5] >= 5]', rows)).toThrow(/put it in brackets/);
+    expect(values(lowerRow('[1, 5] [[1, 5] >= 5]', rows))).toEqual([5, 25]);
   });
 
   it('drops a missing cell from every test, including !=', () => {
@@ -628,8 +629,8 @@ describe('filters', () => {
     expect(() => lowerRow('person.age[[1, 2] > 0]', rows)).toThrow(/tests 2 values but the list has 3/);
   });
 
-  it('will not let a bare comparison masquerade as a plot', () => {
-    expect(() => lowerRow('person.age > 30', rows)).toThrow(/put it in brackets/);
+  it('keeps the members a bare comparison holds for (docs/multisets.md §4)', () => {
+    expect(values(lowerRow('person.age > 30', rows))).toEqual([36, 41]);
   });
 
   it('compares text, and says where a comparison belongs', () => {
@@ -642,9 +643,9 @@ describe('filters', () => {
     expect(d2.tables.get('ny')!.data!.columns[0].strs).toEqual(['NYC', 'NYC']);
     // Text never matches a number, rather than coercing to one.
     expect(values(lowerRow('c.pop[c.city == 3]', defs, cities))).toEqual([]);
-    // A comparison outside brackets says where it belongs, and '!=' still
-    // rescues the factorial reading.
-    expect(() => lowerRow('c.city == "NYC"', defs, cities)).toThrow(/put it in brackets/);
+    // A comparison outside brackets keeps text, which has no picture, and
+    // '!=' still rescues the factorial reading.
+    expect(() => lowerRow('c.city == "NYC"', defs, cities)).toThrow(/Text cannot be plotted/);
     expect(() => lowerRow('x != 2', defs, cities)).toThrow(/space before '=': x! = 2/);
   });
 

@@ -278,8 +278,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   — and a named scatter is still a scatter. Only the
   device that dropped the file has its data — the link carries the file's
   name and hash, not its bytes.
-- Filters keep the elements a comparison selects: `L[L > 2]`,
-  `person.height[person.age >= 18]` (one column chosen by another — rows stay
+- A comparison over a list keeps the members it holds for: `L > 2` (or
+  `L[L > 2]`) is the elements above 2, `count(L > 2)` how many. It keeps
+  members of the list, not the values compared: `L^2 < 4` keeps elements
+  of L, `P.x < 0` keeps points of P. Inside `{…}` a comparison is still one
+  condition per element: `{L > 2: 1, 0}`. Index by a comparison to choose
+  one column by another: `person.height[person.age >= 18]` (rows stay
   aligned), chains, `person.age[30 <= person.age < 40]`, and text,
   `person.height[person.city == "NYC"]` (`!=` too, and either quote).
   Filtering a whole file names a new one,
@@ -348,7 +352,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Over x (all of ℝ) `total(exp(-x^2))` is √π, `count(x)` is ∞, and a total
   that does not converge is an error. A filter is the set it keeps, measured
   in its own dimension: `count(x^2 + y^2 < 1)` is the area π,
-  `count(x^2 + y^2 = 1)` the length 2π, `count(x^2 = 2)` the 2 roots. Reduce
+  `count(x^2 + y^2 = 1)` the length 2π, `count(x^2 = 2)` the 2 roots; other
+  reductions take its members, so `total(0 < x < 1)` is 1/2 (a region's
+  members are points: use `count` for its area). Reduce
   a value over a set with `{conditions: value}`, the conditions joined by
   "and" (only here may one be an equation): `total({x^2 + y^2 < 1: x y})`,
   `mean({y = x^2, 0 < x < 1: y})`. The measure depends on the set, not the
