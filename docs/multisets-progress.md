@@ -101,3 +101,18 @@ Decisions: interval density height via length measure; count(x^2=0)=1 (distinct)
 pushforward measure (count((u,u^2))=1); unbounded count = inf, total/mean over infinite measure error
 unless 1D improper integral converges. Cuts: 3D volume/surface area, >1 hidden param projection,
 median/stdev/hist over continuous sets, unbounded 2D totals.
+
+## Follow-up PR: solids (not in this branch)
+
+`(interval(0,1), interval(0,1), interval(0,1))` — three separate continuous multisets, dimension
+3 (§5) — is refused today ("at most two parameters"), as is `x^2+y^2+z^2 < 1` ("Inequalities are 2D
+only"). Neither has an object kind or renderer. Plan agreed 2026-09-26 for a separate PR:
+1. Classify 3 params + 3 components as `region/parametric` of dimension 3 (a solid).
+2. Draw its boundary: the six faces of the parameter box (one param at lo/hi), each an existing
+   `psurface` mesh; drop degenerate faces (sampled area ≈ 0, e.g. r = 0 of a spherical ball) and
+   seam pairs (faces mapping to the same set, e.g. φ = 0/2π). Exact for maps without folds; fold
+   boundaries (Jacobian = 0) are a documented limit.
+3. MCP kind and og preview wherever 3D surfaces are drawn.
+Later, same object: 3D inequalities as clipped boundary surfaces; volumes for `count` via an
+octree extension of the certified quadtree (phase 8 cut). Identity note: `r = interval(0,1)`,
+`(r, r, r)` is one parameter — the diagonal segment, already a curve.
