@@ -889,4 +889,12 @@ describe('families in space', () => {
     expect(last(['r = [1..8]', 'x^2 + y^2 + z^2 = r']).error).toBeUndefined();
     expect(last(['r = [1..9]', 'x^2 + y^2 + z^2 = r']).error).toMatch(/at most 8 members/);
   });
+  it('trace at most 8 curves of intersection or fields in space', () => {
+    expect(last(['r = [1..8]', '(x^2 + y^2 + z^2, z - x) = (r, 0)']).error).toBeUndefined();
+    expect(last(['r = [1..9]', '(x^2 + y^2 + z^2, z - x) = (r, 0)']).error).toMatch(
+      /curves of intersection has at most 8/,
+    );
+    expect(last(['r = [1..8]', 'grad(r x y z)']).error).toBeUndefined();
+    expect(last(['r = [1..9]', 'grad(r x y z)']).error).toMatch(/fields in space has at most 8/);
+  });
 });

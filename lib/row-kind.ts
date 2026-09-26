@@ -79,6 +79,9 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   note: 'true/false readout under the row; draws nothing on the graph',
   tuple: 'tuple of more than 3 numbers, like sort(L) of 5 values: a readout under the row; draws nothing',
   family: 'one copy of the row per list element',
+  multivector:
+    'multivector or quaternion, like e_xy or quat(1, 2, 3, 4): its grades drawn as arrows, oriented discs and cubes (a rotor as the turn it makes), its value read out',
+  action: 'action(M): where a matrix sends the unit square, circle and axes, with the matrix read out',
   complex2d: 'complex function shown on the plane',
   domain2d: 'domain colouring of a complex function',
   conformal2d: 'conformal map: the image of a grid under a complex function',

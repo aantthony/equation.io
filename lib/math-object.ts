@@ -192,7 +192,8 @@ export type MathObject =
       readonly members: readonly Classified[];
       readonly shared?: { readonly classified: Classified; readonly index: string };
       /** What the row reads out while its members draw: a multivector's
-       *  value beside its grade glyphs (lib/mv-glyph.ts). */
+       *  value beside its grade glyphs, or action(M)'s matrix beside the
+       *  image of the unit square (lib/glyphs.ts). */
       readonly readout?: Classified;
     };
 
@@ -235,6 +236,11 @@ export function publicKind(object: MathObject) {
       }
     case 'figure':
       return 'polygon';
+    case 'family':
+      // One multivector or matrix drawn as several glyphs is not a list.
+      if (object.readout)
+        return object.readout.object.kind === 'tuple' && object.readout.object.blades ? 'multivector' : 'action';
+      return 'family';
     case 'sequence':
       return object.form === 'explicit' ? 'sequence' : object.form;
     case 'list':
@@ -256,7 +262,6 @@ export function publicKind(object: MathObject) {
     case 'value':
     case 'tuple':
     case 'note':
-    case 'family':
     case 'automaton':
       return object.kind;
   }

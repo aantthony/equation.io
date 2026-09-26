@@ -518,7 +518,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Uses of the same named list move together (`m = [1,2]`, `y = m x + m` is 2
   lines); independent lists cross (`y = [1,2] x + [0,1]` is 4 lines,
   `circle(([0,1],[0,1]), 1)` is 4 circles). Limit 32 objects, in 2D or 3D,
-  or 8 implicit surfaces (each is raymarched across the screen) — except
+  or 8 implicit surfaces, curves of intersection or fields in space (each
+  is raymarched or traced on its own) — except
   point figures (segment, vector, polyline, polygon, hull), which are cheap
   and allow 1024: a deformation drawn as
   arrows is `a = [0..20]; b = [0..20]; P = (a, b);

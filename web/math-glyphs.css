@@ -1,0 +1,12 @@
+/* ⟑ (the geometric product) is missing from the system monospace faces, and
+   their fallback draws it as a small ∧ whose dot hardly shows. This face
+   covers that one code point from a math font the system has, so it reads
+   as ∧ with a dot wherever the monospace stack is used. Shared by the app
+   (style.css) and the about page (about/about.css). */
+@font-face {
+  font-family: 'Eq Math Glyphs';
+  src:
+    local('STIX Two Math Regular'), local('STIXTwoMath-Regular'), local('Cambria Math'), local('Noto Sans Math'),
+    local('Segoe UI Symbol');
+  unicode-range: U+27D1;
+}

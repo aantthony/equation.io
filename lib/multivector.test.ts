@@ -111,6 +111,9 @@ describe('drawing', () => {
   });
   it('reads out a multiset of multivectors', () => {
     expect(readout(['[1, 2] e_xy'])).toBe('= [e_xy, 2 e_xy]');
+    expect(readout(['[e_xy, 2 e_xy]'])).toBe('= [e_xy, 2 e_xy]');
+    // An item that reduced to a number is still one of the multiset.
+    expect(readout(['[e_xy, e_x ⟑ e_x]'])).toBe('= [e_xy, 1]');
   });
   it('animates and follows sliders by its value, not only by what it draws', () => {
     expect(row(['cos(t) + e_xyz']).r.cls!.animated).toBe(true);
@@ -173,6 +176,10 @@ describe('quaternions', () => {
   });
   it('slerp the shorter arc', () => {
     expect(readout(['slerp(quat(1, 0, 0, 0), quat(0, 0, 0, 1), 0.5)'])).toBe('≈ 0.707107 + 0.707107k');
+  });
+  it('say to move a multivector’s definition above its use', () => {
+    const analysis = analyzeRows(['B = A e_x', 'A = e_xy'], { readouts: true });
+    expect(analysis.rows[0].error).toMatch(/A is a multivector — move its definition above/);
   });
   it('are named and described as quaternions', () => {
     const analysis = analyzeRows(['q = quat(1, 2, 3, 4)', 'q'], { readouts: true });

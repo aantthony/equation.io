@@ -477,10 +477,16 @@ function classifyLowered(
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
     // An implicit surface is raymarched across the whole screen, once per
-    // member, so its families stay small. Curves, points and meshes in space
-    // cost what they do in the plane, and share the plane's limit.
+    // member, and a curve of intersection or a field in space is traced on
+    // the worker, again per member (a field every 50 ms while it animates),
+    // so their families stay small. Parametric curves, points and meshes in
+    // space cost what they do in the plane, and share the plane's limit.
     if (first === 'implicit3d' && members.length > 8)
       throw new Error('A family of implicit surfaces has at most 8 members — each is raymarched across the screen.');
+    if ((first === 'spacecurve' || first === 'vfield3d') && members.length > 8)
+      throw new Error(
+        `A family of ${first === 'spacecurve' ? 'curves of intersection' : 'fields in space'} has at most 8 members — each is traced on its own.`,
+      );
     const shaders = new Set(['implicit2d', 'ineq2d', 'implicit3d', 'psurface', 'vfield2d']);
     let shared: { classified: Classified; index: string } | undefined;
     if (shaders.has(first)) {

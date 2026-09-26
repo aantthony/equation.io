@@ -10,7 +10,7 @@
  */
 import { add, div, mul, neg, pow } from './diff.ts';
 import type { Column, Expr } from './expr.ts';
-import { type Multivector, bladeGrade, glyphParts } from './clifford.ts';
+import { type Multivector, bladeGrade, glyphParts, isZero, magnitude, normSquared } from './clifford.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const call = (name: string, ...args: Expr[]): Expr => ({ kind: 'call', name, args });
@@ -125,8 +125,6 @@ export function actionGlyphs(m: readonly (readonly Expr[])[]): Expr[] {
   return out;
 }
 
-/** The figures that draw a multivector: at least one for any that is not a
- *  plain number (which never reaches here). */
 /**
  * A sweep through `angle` (radians, either sign) of the circle of radius r
  * in the plane of e1, e2, as one template over the fraction of the sweep: a
@@ -167,15 +165,11 @@ const SWEEP_R = 'eqioSweepR';
  * oriented area, drawn as one — unless it was written as a quaternion).
  */
 function rotationGlyphs(m: Multivector): Expr[] | null {
-  const zero = (e: Expr) => e.kind === 'num' && e.value === 0;
-  const odd = m.data.some((c, k) => bladeGrade(k) % 2 === 1 && !zero(c));
+  const odd = m.data.some((c, k) => bladeGrade(k) % 2 === 1 && !isZero(c));
   const { bivector } = glyphParts(m);
-  if (odd || !bivector || (zero(m.data[0]) && !m.quat)) return null;
+  if (odd || !bivector || (isZero(m.data[0]) && !m.quat)) return null;
   const w = m.data[0];
-  const size = call(
-    'sqrt',
-    m.data.reduce<Expr>((s, c) => (zero(c) ? s : add(s, mul(c, c))), num(0)),
-  );
+  const size = call('sqrt', normSquared(m));
   const steps = Math.round(RIM * 0.75);
   if ('plane' in bivector) {
     // R = cos(θ/2) − sin(θ/2) e_xy turns the plane by θ counterclockwise.
@@ -189,10 +183,7 @@ function rotationGlyphs(m: Multivector): Expr[] | null {
   }
   // The quaternion's vector part is minus the bivector's dual (i = e_zy).
   const v = bivector.normal.map(neg);
-  const len = call(
-    'sqrt',
-    v.reduce<Expr>((s, c) => add(s, mul(c, c)), num(0)),
-  );
+  const len = magnitude(v);
   const axis = v.map(c => div(c, len));
   const [e1, e2] = planeBasis(axis);
   const angle = mul(num(2), call('atan2', len, w));
@@ -203,6 +194,8 @@ function rotationGlyphs(m: Multivector): Expr[] | null {
   ];
 }
 
+/** The figures that draw a multivector: none for a plain number, which
+ *  plot.ts reads out alone, and at least one for anything else. */
 export function multivectorGlyphs(m: Multivector): Expr[] {
   const turn = rotationGlyphs(m);
   if (turn) return turn;
@@ -223,10 +216,7 @@ export function multivectorGlyphs(m: Multivector): Expr[] {
       // In space the disc lies across its dual, turning counterclockwise
       // seen from the tip of the normal, which is the bivector's sense.
       const n = bivector.normal;
-      const len = call(
-        'sqrt',
-        n.reduce<Expr>((s, c) => add(s, mul(c, c)), num(0)),
-      );
+      const len = magnitude(n);
       const [e1, e2] = planeBasis(n.map(c => div(c, len)));
       const r = call('sqrt', div(len, num(Math.PI)));
       out.push(arc('polygon', 3, r, e1, e2, 1, RIM));

@@ -1,11 +1,5 @@
-/* ⟑ from a math font: the system faces lack it (see web/style.css). */
-@font-face {
-  font-family: 'Eq Math Glyphs';
-  src:
-    local('STIX Two Math Regular'), local('STIXTwoMath-Regular'), local('Cambria Math'), local('Noto Sans Math'),
-    local('Segoe UI Symbol');
-  unicode-range: U+27D1;
-}
+/* ⟑ from a math font: the system faces lack it. */
+@import '../math-glyphs.css';
 
 * {
   box-sizing: border-box;

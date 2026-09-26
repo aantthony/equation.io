@@ -29,7 +29,7 @@ export interface Multivector {
 const num = (value: number): Expr => ({ kind: 'num', value });
 const ZERO = num(0);
 const call = (name: string, ...args: Expr[]): Expr => ({ kind: 'call', name, args });
-const isZero = (e: Expr): boolean => e.kind === 'num' && e.value === 0;
+export const isZero = (e: Expr): boolean => e.kind === 'num' && e.value === 0;
 
 export const bladeGrade = (blade: number): number => (blade & 1) + ((blade >> 1) & 1) + ((blade >> 2) & 1);
 
@@ -241,7 +241,7 @@ export function mvPower(a: Multivector, n: number): Multivector {
 }
 
 /** sqrt of a sum of squares, left as |c| for one coefficient. */
-function magnitude(coeffs: readonly Expr[]): Expr {
+export function magnitude(coeffs: readonly Expr[]): Expr {
   if (coeffs.length === 1) return call('abs', coeffs[0]);
   return call(
     'sqrt',

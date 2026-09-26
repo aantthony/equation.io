@@ -835,6 +835,15 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
   return value;
 }
 
+/** sandwichMatrix, built once per rotor: rotate(hull(…), R) turns each
+ *  vertex by the same R, which mvSeen hands back as the same object. */
+const turnSeen = new WeakMap<Multivector, Partial<Record<2 | 3, Expr[][]>>>();
+function turnMatrix(r: Multivector, dim: 2 | 3): Expr[][] {
+  let byDim = turnSeen.get(r);
+  if (!byDim) turnSeen.set(r, (byDim = {}));
+  return (byDim[dim] ??= sandwichMatrix(r, dim));
+}
+
 function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV {
   const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
   const matOf = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
@@ -847,7 +856,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       if (r) {
         const p = lo(e.args[0]);
         if (!p.vec) throw new Error('rotate(P, R) turns a point P by a rotor or quaternion R.');
-        return vc(...matVec(sandwichMatrix(r, p.items.length as 2 | 3), p.items));
+        return vc(...matVec(turnMatrix(r, p.items.length as 2 | 3), p.items));
       }
     }
     const m = lowerMv(e, lo);
@@ -1253,6 +1262,11 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     case 'text':
       return sc(e);
     case 'list': {
+      // A list holding a multivector is a multiset of them, read out item
+      // by item: [e_xy, e_x ⟑ e_x] holds e_xy and 1.
+      if (e.items.some(a => !plainValue(lowerMv(a, lo)))) {
+        return sc(sameList(e, { kind: 'list', items: e.items.map(a => mvNode(anyMv(a, lo))) }));
+      }
       // Items lower independently; a named point becomes its (A_x, A_y) vec,
       // so [A, B] scatters named points like [(1, 2), (3, 4)] does literals.
       const items = e.items.map(a => toExpr(lo(a)));

@@ -2943,13 +2943,18 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // stand in as 0 and never recurse.
   const check = (name: string, visiting: Set<string>): void => {
     const e = defs.consts.get(name);
-    // A surviving list (or matrix) name means it was defined below its use,
-    // so lowering saw it as a plain scalar.
-    if (!e && (defs.lists.has(name) || defs.mats.has(name) || defs.tensors.has(name))) {
-      throw new Error(
-        `${name} is a ${defs.lists.has(name) ? 'list' : defs.mats.has(name) ? 'matrix' : 'tensor'} — move its definition above where it is used.`,
-      );
-    }
+    // A surviving list (or matrix, tensor or multivector) name means it was
+    // defined below its use, so lowering saw it as a plain scalar.
+    const kind = defs.lists.has(name)
+      ? 'list'
+      : defs.mats.has(name)
+        ? 'matrix'
+        : defs.tensors.has(name)
+          ? 'tensor'
+          : defs.multivectors.has(name)
+            ? 'multivector'
+            : null;
+    if (!e && kind) throw new Error(`${name} is a ${kind} — move its definition above where it is used.`);
     if (!e) throw new Error(`${name} is not defined.`);
     if (visiting.has(name)) throw new Error(`${name} is defined in terms of itself.`);
     visiting.add(name);
