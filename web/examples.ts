@@ -242,6 +242,46 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     ],
   ],
   [
+    'tensors',
+    [
+      // n ⊗ n is the matrix of v ↦ n (n·v): every point drops onto the line.
+      [
+        'outer product projects: n ⊗ n',
+        'a = 0.5; n = (cos(a), sin(a)); (4u - 2) n; th = 2pi [0..11]/12; p = 2(cos(th), sin(th)); p; vector(p, (n ⊗ n) p)',
+      ],
+      [
+        'reflection: I − 2 n ⊗ n',
+        'a = 0.5; n = (cos(a), sin(a)); n · (x, y) = 0; H = ((1, 0), (0, 1)) - 2 n ⊗ n; ' +
+          'S = ((0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)); polygon(S); H polygon(S)',
+      ],
+      // A ⊗ B is rank 4; contracting its middle pair is the matrix product.
+      [
+        'product = outer, then contract',
+        'A = ((1, 2), (3, 4)); B = ((0, 1), (1, 0)); A ⊗ B; contract(A ⊗ B, 2, 3); A B',
+      ],
+      // e_x ∧ e_y ∧ e_z is the Levi-Civita symbol; fed three edges it is
+      // the box's signed volume.
+      [
+        'volume element e_x ∧ e_y ∧ e_z',
+        'a = (2, 0, 0); b = (0.5, 1.5, 0); c = (0.3, 0.4, 1.2); hull([0, 1] a + [0, 1] b + [0, 1] c); ' +
+          'V = e_x ∧ e_y ∧ e_z; V c b a; det((a, b, c))',
+      ],
+      // A bivector a ∧ b generates the rotation in the plane of a and b.
+      [
+        'rotate in the plane a ∧ b (slide k)',
+        'k = 1; a = (1, 0, 0); b = (0, cos(k), sin(k)); e^(t a ∧ b) hull(([-1,1], [-1,1], [-1,1])); vector(3 a); vector(3 b)',
+      ],
+      // total and mean take a multiset of tensors entry by entry. The level
+      // sets of the Mahalanobis distance through C⁻¹ are the 1σ and 2σ ellipses.
+      [
+        'covariance: mean of (P − m) ⊗ (P − m)',
+        'P = [(-3, -2), (-2, -2.5), (-1, 0), (0, -0.5), (0, 1), (1, 0.5), (2, 2.5), (3, 1.5), (-1.5, -1), (1.5, 2)]; ' +
+          'm = mean(P); C = mean((P - m) ⊗ (P - m)); C; P; m; ' +
+          '((x, y) - m) · C^-1 ((x, y) - m) = 1; ((x, y) - m) · C^-1 ((x, y) - m) = 4',
+      ],
+    ],
+  ],
+  [
     'vector fields + odes (click to trace)',
     [
       ['rotation', '(-y, x)'],
