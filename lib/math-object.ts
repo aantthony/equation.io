@@ -62,6 +62,9 @@ export type MathObject =
   | { readonly kind: 'scalar-field'; readonly expr: Expr }
   | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly [Expr, Expr, Expr] }
   | { readonly kind: 'vector-field'; readonly components: Components }
+  /** A 2×2 matrix over the plane, row-major: each glyph is the image of a
+   *  small circle under the matrix there, with a spoke where e_x goes. */
+  | { readonly kind: 'tensor-field'; readonly entries: readonly [Expr, Expr, Expr, Expr] }
   | { readonly kind: 'complex-field'; readonly form: 'potential' | 'domain' | 'conformal'; readonly expr: Expr }
   | {
       readonly kind: 'complex-field';
@@ -217,6 +220,8 @@ export function publicKind(object: MathObject) {
       return `${object.space}2d` as const;
     case 'vector-field':
       return object.components.length === 3 ? 'vfield3d' : 'vfield2d';
+    case 'tensor-field':
+      return 'tfield2d';
     case 'complex-field':
       switch (object.form) {
         case 'potential':
@@ -293,6 +298,7 @@ export function objectNeeds3D(object: MathObject): boolean {
       return object.members.some(member => member.needs3D);
     case 'region':
     case 'scalar-field':
+    case 'tensor-field':
     case 'color-field':
     case 'complex-field':
     case 'sequence':

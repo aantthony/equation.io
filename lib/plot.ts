@@ -36,7 +36,7 @@ import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep 
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
 import { mvOfNode, mvText } from './clifford.ts';
-import { multivectorGlyphs } from './mv-glyph.ts';
+import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
@@ -586,6 +586,25 @@ function classifyLowered(
     },
   });
 
+  // action(M): what the matrix does to the unit square, circle and axes,
+  // drawn, with the matrix read out.
+  const acting = expr.kind === 'list' ? null : actionOfNode(expr);
+  if (acting || (expr.kind === 'list' && expr.items.some(it => actionOfNode(it)))) {
+    if (!acting) throw new Error('action draws one matrix at a time — pick one, like M[1], or fix its entries.');
+    if (hasSpace || hasParam)
+      throw new Error('action takes a constant matrix — sliders and t are fine, x, y, u and v are not.');
+    const readout = done({ kind: 'tuple', values: acting.flat(), shape: [acting.length, acting.length] });
+    const drawn = classifyLowered(
+      { kind: 'family', members: actionGlyphs(acting) },
+      defined,
+      fields,
+      timeDerivative,
+    ).cls;
+    return {
+      cls: { ...drawn, object: { ...(drawn.object as MathObject & { kind: 'family' }), readout: readout.cls } },
+    };
+  }
+
   // A multivector on a row of its own draws grade by grade, and reads out its
   // value (docs/clifford.md); a multiset of them reads out each.
   const mvs = expr.kind === 'list' && expr.items.length ? expr.items.map(mvOfNode) : [mvOfNode(expr)];
@@ -619,8 +638,25 @@ function classifyLowered(
   // position, so it is drawn as its values: a readout (docs/multisets.md §5).
   const tensors = expr.kind === 'list' && expr.items.length ? expr.items.map(tensorOfNode) : [tensorOfNode(expr)];
   if (tensors.every(t => t !== null)) {
+    // A 2×2 matrix over the plane is a tensor field, drawn as glyphs.
+    const [only] = tensors;
+    if (
+      hasSpace &&
+      !hasParam &&
+      !vars.has('z') &&
+      tensors.length === 1 &&
+      expr.kind !== 'list' &&
+      only.shape.length === 2 &&
+      only.shape[0] === 2 &&
+      only.shape[1] === 2
+    ) {
+      if (usesComplex(expr)) throw new Error('A matrix field must be real.');
+      return done({ kind: 'tensor-field', entries: only.data as [Expr, Expr, Expr, Expr] });
+    }
     if (hasSpace || hasParam) {
-      throw new Error('A matrix or tensor in x, y, z, u or v has no picture — apply it to a vector, like M (x, y).');
+      throw new Error(
+        'Only a 2×2 matrix in x and y draws as a field; a larger one has no picture yet — apply it to a vector, like M (x, y, z).',
+      );
     }
     const shape = tensors[0].shape;
     return done({

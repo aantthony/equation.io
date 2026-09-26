@@ -310,6 +310,8 @@ export const FUNCTIONS = new Set([
   'dual',
   'quat',
   'slerp',
+  // A matrix drawn by what it does (lib/glyphs.ts).
+  'action',
   // Not real functions: Σ/Π/∫ binders and the ∇ operators, expanded
   // symbolically by resolveExpr.
   'sum',
@@ -319,6 +321,8 @@ export const FUNCTIONS = new Set([
   'div',
   'curl',
   'laplacian',
+  'jacobian',
+  'hessian',
   // Whole-expression plot modes (see classify): domain coloring, conformal
   // grids, escape-time iteration, swept tubes, motion trails, and surfaces
   // of revolution.

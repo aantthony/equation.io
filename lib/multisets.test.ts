@@ -288,7 +288,9 @@ describe('§4 tensors', () => {
     expect(last(['((1,0),(0,2))']).info).toBe('= ((1, 0), (0, 2))');
     expect(last(['M = ((1,2),(3,4))', '2 M']).info).toBe('= ((2, 4), (6, 8))');
     expect(last(['(((1,2),(3,4)),((5,6),(7,8)))']).info).toBe('= (((1, 2), (3, 4)), ((5, 6), (7, 8)))');
-    expect(last(['(x,0) ⊗ (0,1)']).error).toMatch(/no picture/);
+    // A 2×2 in x and y is a matrix field (lib/glyphs.ts); a larger one is not.
+    expect(last(['(x,0) ⊗ (0,1)']).cpu?.type).toBe('tfield2d');
+    expect(last(['(x,0,0) ⊗ (0,1,0)']).error).toMatch(/no picture/);
     // Points, point lists and arrows draw as before.
     expect(last(['((1,2),(3,4),(5,6))']).cpu).toMatchObject({ type: 'plist' });
     expect(last(['A = (0,0)', 'B = (1,1)', 'vector(A, B)']).cpu).toMatchObject({ type: 'polygon' });

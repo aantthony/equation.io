@@ -1105,12 +1105,14 @@ const intCallOf = (header: Expr, body: Expr): Expr => {
 };
 
 /** The vector-calculus operators, each also written with ∇ (see splitNablaChain). */
-const VECTOR_OPS: ReadonlySet<string> = new Set(['grad', 'div', 'curl', 'laplacian']);
+const VECTOR_OPS: ReadonlySet<string> = new Set(['grad', 'div', 'curl', 'laplacian', 'jacobian', 'hessian']);
 const VECTOR_OP_EXAMPLE: Record<string, string> = {
   grad: 'grad(x^2 + y^2)',
   div: 'div((x y, y^2))',
   curl: 'curl((-y, x))',
   laplacian: 'laplacian(x^2 - y^2)',
+  jacobian: 'jacobian((x^2 - y^2, 2 x y))',
+  hessian: 'hessian(x^2 - y^2)',
 };
 
 /**
@@ -1211,7 +1213,8 @@ function vectorOperand(name: string, arg: Expr, ctx: Ctx): Expr {
   return throughFields(lowered, ctx.opts);
 }
 
-/** grad, div, curl and laplacian, expanded symbolically as d/dx is. */
+/** grad, div, curl and laplacian — and the matrices jacobian and hessian —
+ *  expanded symbolically as d/dx is. */
 function vectorCalculus(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   const example = VECTOR_OP_EXAMPLE[name];
   if (args.length !== 1) throw new Error(`${name} takes one expression: ${example}.`);
@@ -1223,6 +1226,23 @@ function vectorCalculus(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   }
   const d = (g: Expr, v: string, order = 1) => applyDiff(g, v, order, ctx.opts, ctx.getFn);
   const AXES = ['x', 'y', 'z'];
+  const matrix = (rows: Expr[][]): Expr => ({ kind: 'vec', items: rows.map(items => ({ kind: 'vec', items })) });
+  if (name === 'hessian') {
+    if (f.kind === 'vec')
+      throw new Error('hessian takes a scalar field, like hessian(x^2 - y^2); for a map, jacobian.');
+    // The matrix of second derivatives: in the plane unless f uses z.
+    const axes = AXES.slice(0, freeVars(f).has('z') ? 3 : 2);
+    const firsts = axes.map(v => d(f, v));
+    return matrix(firsts.map(fi => axes.map(v => d(fi, v))));
+  }
+  if (name === 'jacobian') {
+    if (f.kind !== 'vec' || (f.items.length !== 2 && f.items.length !== 3)) {
+      throw new Error(`jacobian takes a map of 2 or 3 components, like ${example}; for a scalar f, hessian(f).`);
+    }
+    // Row i is the gradient of component i, over as many axes as components.
+    const axes = AXES.slice(0, f.items.length);
+    return matrix(f.items.map(c => axes.map(v => d(c, v))));
+  }
   if (name === 'grad' || name === 'laplacian') {
     if (f.kind === 'vec') {
       throw new Error(

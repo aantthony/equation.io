@@ -870,6 +870,7 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'ineq2d',
   'projected2d',
   'vfield2d',
+  'tfield2d',
   'vlist',
   'dlist',
   'histogram',
@@ -1418,6 +1419,7 @@ function render() {
       colors: [],
       conformals: [],
       vfields: [],
+      tfields: [],
       ineqs: [],
       projections: [],
       bifs: [],
@@ -1497,6 +1499,9 @@ function render() {
           break;
         case 'fractal2d':
           layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
+          break;
+        case 'tfield2d':
+          layers.tfields.push({ ...gpuFor(eq, 'tfield2d'), color, params, uniforms });
           break;
         case 'vfield2d': {
           layers.vfields.push({ ...gpuFor(eq, 'vfield2d'), color, params, uniforms });

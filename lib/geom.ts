@@ -64,6 +64,7 @@ import {
   vectorTensor,
   wedge,
 } from './tensor.ts';
+import { actionNode } from './glyphs.ts';
 import {
   type Multivector,
   MV_CALL,
@@ -956,7 +957,8 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       return sc(v.items[k]);
     }
     case 'call': {
-      if (GEOM_STATEMENTS.has(e.name)) throw new Error(`${e.name}(…) must be a whole statement.`);
+      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action')
+        throw new Error(`${e.name}(…) must be a whole statement.`);
       if (e.name === 'trail') {
         const args = e.args.map(lo);
         const coords =
@@ -1335,6 +1337,16 @@ export function lowerGeom(
 }
 
 function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): Expr {
+  // action(M): the matrix drawn by what it does (lib/glyphs.ts).
+  if (e.kind === 'call' && e.name === 'action') {
+    if (!matsPossible) throw new MatrixSeen();
+    const usage =
+      'action takes one 2×2 or 3×3 matrix — action(((1, 1), (0, 1))) draws where it sends the unit square, circle and axes.';
+    if (e.args.length !== 1) throw new Error(usage);
+    const m = lowerMat(e.args[0], n => lower(n, getComps, getMat, isList), getMat)?.m;
+    if (!m) throw new Error(usage);
+    return actionNode(m);
+  }
   // A multivector on a row of its own draws by grade (docs/clifford.md); one
   // that is only a number or a vector lowers as that number or vector.
   if (mvIn(e)) {

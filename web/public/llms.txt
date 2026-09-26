@@ -140,7 +140,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   nearest one), so `1/gcd(floor(x), floor(y))` is 1 on the coprime cells of
   the grid; and `isprime(n)`, 1 for a prime and 0 otherwise
   (`a_n = isprime(n)`), which gives no value past 2048² − 1 rather than
-  guess. Vector calculus has `grad`, `div`, `curl` and `laplacian` (below).
+  guess. Vector calculus has `grad`, `div`, `curl`, `laplacian`, `jacobian`
+  and `hessian` (below).
   Function names are
   case-insensitive: `Sin(x)`, `SQRT(x)` and `sin(x)` are the same call. Always
   use parentheses for arguments — write `sin(x)`, not `sin x`.
@@ -156,7 +157,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A bare condition is a case worth 1, as in Desmos: `{x > 0, 5}` is
   `{x > 0: 1, 5}`. Values may be complex (`{x > 0: w, conj(w)}`); the
   conditions themselves compare real values (`re(w) > 0`, `|w| < 1`).
-- Vector calculus: four operators, expanded symbolically like d/dx, so
+- Vector calculus: these operators expand symbolically like d/dx, so
   sliders and t work inside them.
   - `grad(f)` is the tuple (∂f/∂x, ∂f/∂y), plus ∂f/∂z when f uses z:
     `grad(x^2 - y^2)` plots as a vector field.
@@ -166,6 +167,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     plane field it is the scalar ∂F₂/∂x − ∂F₁/∂y: `curl((-y, x))` is 2.
   - `laplacian(f)` is div(grad(f)), for a scalar f: `laplacian(x^2 + y^2)`
     is 4.
+  - `jacobian(F)` is the matrix of partials, row i the gradient of F's
+    component i (2 components: over x, y; 3: over x, y, z), and `hessian(f)`
+    the matrix of second partials of a scalar f. A 2×2 one in x and y draws
+    as a matrix field: `jacobian((x^2 - y^2, 2 x y))` is all circles, the
+    mark of a conformal map.
   - With ∇ (in the editor, type `\nabla`): `∇f` is grad(f), `∇·F` is div(F),
     `∇×F` is curl(F), and `∇²f` (or `∇^2 f`) is laplacian(f). ∇ takes the
     rest of the product, as d/dx does: `∇ x^2 y` and `∇f(x, y)`.
@@ -886,7 +892,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Matrices combine — `2 M`, `M / 2`, `M + N`, `M N`, `M^2` (whole powers 0–8),
   `M^-1` — and a row may name the result (`R = M N`). A matrix has no
   position, so on a row of its own it draws nothing and reads out its value,
-  `= ((1, 2), (3, 4))`: apply it to a vector to draw. Note `a/2 J` reads as
+  `= ((1, 2), (3, 4))`: apply it to a vector to draw, or write `action(M)`
+  to draw what it does — the image of the unit square (filled; its signed
+  area is det M), of the unit circle (an ellipse whose axes are the singular
+  vectors) and the arrows M e_x, M e_y, its columns; for a 3×3, the image of
+  the unit cube and three arrows. `action(e^(t J))` turns the square with t.
+  A 2×2 matrix in x and y is a matrix field, `((x, y), (y, -x))`: a grid of
+  glyphs, each the image of a small circle under the matrix there with a
+  spoke to where e_x goes, drawn true size while small and a cell at most,
+  in the row colour's complement where det < 0. Note `a/2 J` reads as
   `a/(2 J)`; write `(a/2) J`.
 - Tensors: a rank-k tensor is k-deep nested tuples, and its shape is part of
   its value — `((1, 2, 3), (4, 5, 6))` is 2×3, `(((1, 2), (3, 4)), ((5, 6),

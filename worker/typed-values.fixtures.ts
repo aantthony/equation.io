@@ -27,6 +27,7 @@ export const PUBLIC_KIND_ROWS = {
   system: ['(x + y, x - y) = (3, 1)'],
   vfield3d: ['(-y, x, z)'],
   vfield2d: ['(-y, x)'],
+  tfield2d: ['((x, y), (y, -x))'],
   pcurve: ['(cos(u), sin(u), u)'],
   psurface: ['(u, v, u v)'],
   pregion: ['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u))'],
