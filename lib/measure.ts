@@ -1247,8 +1247,10 @@ const GL3_W = [5 / 9, 8 / 9, 5 / 9];
  *  thread). */
 const WORK_BUDGET = 2_200_000;
 /** A hard stop, whatever the work estimate says (a safety net: the work
- *  budget, which is deterministic, is what normally ends a measurement). */
-const HARD_MS = 300;
+ *  budget, which is deterministic, is what normally ends a measurement).
+ *  Generous, so a slow machine or a cold JIT (a CI runner is ~4× slower)
+ *  still gets the budget's answer rather than a refusal. */
+const HARD_MS = 1000;
 
 /** A measurement that ran out of budget before it was precise enough. */
 class TooCostly extends Error {
