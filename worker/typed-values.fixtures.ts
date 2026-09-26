@@ -29,6 +29,8 @@ export const PUBLIC_KIND_ROWS = {
   vfield2d: ['(-y, x)'],
   pcurve: ['(cos(u), sin(u), u)'],
   psurface: ['(u, v, u v)'],
+  pregion: ['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u))'],
+  projected2d: ['a = interval(1, 2)', 'y = sin(a x)'],
   vlist: ['[1, 2, 3]'],
   tuple: ['sort([5, 3, 8, 1, 2])'],
   plist: ['[(1, 2), (3, 4)]'],

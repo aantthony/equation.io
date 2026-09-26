@@ -29,7 +29,16 @@ import {
   type Definition,
 } from '../lib/defs.ts';
 import { buildComb, buildTube, combScale, curveExtent, curveFrames } from '../lib/curve3d.ts';
-import { type DensityCurve, type PmfStems, RVSystem, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
+import {
+  type DensityCurve,
+  type PmfStems,
+  RVSystem,
+  markerHeight,
+  scaleCurve,
+  scaleStems,
+  shadePolygon,
+  stemGeometry,
+} from '../lib/dist.ts';
 import {
   type IntShade,
   type ShadeRun,
@@ -54,7 +63,7 @@ import { type VertexSampler, vertexSampler } from '../lib/figure-vertices.ts';
 
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
-import { CURVE_SAMPLES, type PathSampler, pathSampler } from '../lib/path.ts';
+import { CURVE_SAMPLES, type PathSampler, type RegionSampler, pathSampler, regionSampler } from '../lib/path.ts';
 import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { solveSystem } from '../lib/solve.ts';
@@ -119,6 +128,9 @@ interface Equation {
    *  polyline, resampled only when a value it reads (sliders, states, t)
    *  changes — the shadeCache pattern. */
   pathCache?: { comps: Expr[]; sampler: PathSampler; key: string; pts: number[] };
+  /** A filled parametric region's sampler and triangles (lib/path.ts), kept
+   *  the same way. */
+  regionCache?: { comps: readonly Expr[]; sampler: RegionSampler; key: string; tris: Float64Array };
   /** An automaton's cells (lib/automaton.ts), rerun only when its plan or a
    *  value it reads (sliders, t) changes — the shadeCache pattern. */
   cellCache?: { plan: CpuPlan; key: string; cells: Cells2D };
@@ -772,6 +784,7 @@ function renderMembers(eq: Equation): Equation[] {
       familyShade: (0.45 * k) / Math.max(1, cpu.members.length - 1),
       sysCache: undefined,
       pathCache: undefined,
+      regionCache: undefined,
       traceTarget: undefined,
       orbitCache: undefined,
       orbitPending: undefined,
@@ -829,6 +842,7 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'conformal2d',
   'fractal2d',
   'ineq2d',
+  'projected2d',
   'vfield2d',
   'vlist',
   'dlist',
@@ -890,6 +904,20 @@ function render() {
 
   gl.clearColor(theme.bg[0], theme.bg[1], theme.bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  // A filled parametric region's triangles, resampled when a value it reads changes.
+  const sampleRegion = (eq: Equation, comps: readonly [Expr, Expr]): Float64Array => {
+    let c = eq.regionCache;
+    if (c?.comps !== comps)
+      c = eq.regionCache = { comps, sampler: regionSampler(comps), key: '', tris: new Float64Array() };
+    const env: Record<string, number> = { ...constEnv, t: time };
+    const key = c.sampler.names.map(n => env[n]).join();
+    if (key !== c.key || !c.tris.length) {
+      c.key = key;
+      c.tris = c.sampler.sample(env);
+    }
+    return c.tris;
+  };
 
   // CPU sampling of parametric curves / points, with t bound to seconds.
   const sampleCurve = (eq: Equation, dim: 2 | 3): number[] => {
@@ -1252,6 +1280,8 @@ function render() {
           break;
         }
         case 'psurface':
+        // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
+        case 'pregion':
           scene.psurfaces.push({ ...gpuFor(eq, 'psurface'), color, params, uniforms });
           break;
         case 'orbit': {
@@ -1363,6 +1393,7 @@ function render() {
       conformals: [],
       vfields: [],
       ineqs: [],
+      projections: [],
       bifs: [],
       scalars: [],
       complexes: [],
@@ -1414,6 +1445,12 @@ function render() {
           break;
         case 'ineq2d':
           layers.ineqs.push({ ...gpuFor(eq, 'ineq2d'), color, params, uniforms });
+          break;
+        case 'projected2d':
+          layers.projections.push({ ...gpuFor(eq, 'projected2d'), color, params, uniforms });
+          break;
+        case 'pregion':
+          (extras.regions ??= []).push({ tris: sampleRegion(eq, plot.comps), fill: cssColorA(color, 0.22) });
           break;
         case 'scalar2d':
           layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms });
@@ -1642,6 +1679,7 @@ function render() {
           let c: DensityCurve | null = null;
           try {
             c = rvSys.curve(plot.rv, env, { lo: xmin, hi: xmax });
+            if (c && plot.mass) c = scaleCurve(c, evaluate(plot.mass, env));
           } catch {
             break; /* a parameter is missing this frame */
           }
@@ -1690,8 +1728,9 @@ function render() {
           // Stems at the atoms in view — whole numbers for a declared law,
           // wherever g put them for a derived one; lib caches them per window.
           try {
+            const mass = plot.mass ? evaluate(plot.mass, env) : 1;
             for (const run of rvSys.pmfRuns(plot.rv, env, { lo: xmin, hi: xmax }) ?? []) {
-              pushStems(extras, run, color, false, stemPx);
+              pushStems(extras, scaleStems(run, mass), color, false, stemPx);
             }
           } catch {
             /* a parameter is missing this frame */
@@ -4394,6 +4433,8 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
       return `defines ${name}: a random variable`;
     case 'missing':
       return `defines ${name} from a data file that is not on this device`;
+    case 'interval':
+      return `defines ${name}: a continuous interval, one hidden parameter shared by every row that uses ${name}${quiet}`;
   }
 }
 

@@ -37,6 +37,13 @@ export interface Ineq2D extends Curve2D {
   edges: string[];
 }
 
+/** A family over an interval (lib/plot.ts projectedRegion): `field` is
+ *  F(x, y, u), with `slope` ∂F/∂u when it has one. */
+export interface Projected2D extends Curve2D {
+  relation: 'eq' | 'ineq';
+  slope?: string;
+}
+
 export interface ColorField2D extends Curve2D {
   space: ColorSpace;
   /** Shared per-pixel calculations, evaluated before the vec3 field. */
@@ -88,6 +95,7 @@ export interface Layers2D {
   conformals?: Curve2D[];
   vfields?: VField2D[];
   ineqs?: Ineq2D[];
+  projections?: Projected2D[];
   bifs?: Bif2D[];
   scalars?: Curve2D[];
   complexes?: Curve2D[];
@@ -686,6 +694,65 @@ ${edgeBlocks}
 `;
 }
 
+/** Samples of u per pixel when a family over an interval is projected. */
+const PROJECTION_SAMPLES = 48;
+
+/**
+ * The region a family over u ∈ [0, 1] sweeps: a pixel is kept when some u
+ * satisfies the relation there, found by stepping u. For an equation that is
+ * a sign change of F between neighbouring samples, or a sample within half a
+ * step of zero at its slope ∂F/∂u (so a member that only grazes the pixel
+ * between samples still counts); for inequalities, the smallest max of the
+ * constraints below 0. Outside, the nearest member's residual feathers the
+ * edge over a pixel, as ineqFrag's fill does.
+ */
+export function projFrag(field: string, relation: 'eq' | 'ineq', slope?: string, params?: string[]): string {
+  const step =
+    relation === 'eq'
+      ? `
+    float lip = 0.5 * ${slope ? 'abs(S(p.x, p.y, s)) * du' : '(had ? abs(f - prev) : 0.0)'};
+    if (abs(f) <= lip || (had && prev * f <= 0.0)) inside = true;
+    near = min(near, abs(f));`
+      : `
+    near = min(near, f);`;
+  return `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform vec3 uColor;
+uniform float t;
+${paramDecls(params)}
+out vec4 outColor;
+${GLSL_PRELUDE}
+float F(float x, float y, float u) { return ${field}; }
+${slope ? `float S(float x, float y, float u) { return ${slope}; }` : ''}
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  const float du = 1.0 / float(${PROJECTION_SAMPLES - 1});
+  bool inside = false;
+  float near = 1e30;
+  float prev = 0.0;
+  bool had = false;
+  for (int k = 0; k < ${PROJECTION_SAMPLES}; k++) {
+    float s = float(k) * du;
+    float f = F(p.x, p.y, s);
+    if (isnan(f) || isinf(f)) {
+      had = false;
+      continue;
+    }${step}
+    prev = f;
+    had = true;
+  }
+  float aa = max(fwidth(near), 1e-24);
+  float cover = ${relation === 'eq' ? 'inside ? 1.0 : 1.0 - smoothstep(0.0, aa, near)' : '1.0 - smoothstep(-aa, aa, near)'};
+  float alpha = cover * 0.22;
+  if (alpha < 0.004) discard;
+  outColor = vec4(uColor, alpha);
+}
+`;
+}
+
 const CELLS_FRAG = `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -847,6 +914,7 @@ export class Renderer2D {
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
     for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
+    for (const q of layers.projections ?? []) drawField(q, (f, ps) => projFrag(f, q.relation, q.slope, ps));
     for (const b of layers.bifs ?? []) drawField(b, bifFrag);
     for (const s of layers.scalars ?? []) drawField(s, scalarFrag);
     for (const c of layers.complexes ?? []) drawField(c, complexFrag);
@@ -881,6 +949,10 @@ export interface Overlay2D {
     arrow?: boolean;
     noStroke?: boolean;
   }>;
+  /** Filled parametric regions: triangles [x0, y0, x1, y1, x2, y2, …], all
+   *  counter-clockwise (lib/path.ts regionSampler), filled as one path by the
+   *  nonzero rule, so overlaps show once. No outline. */
+  regions?: Array<{ tris: Float64Array; fill: string }>;
   /** Vertical bars from y = 0, halfWidth in math units (histograms). */
   bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
   /** `label(point, "text")` rows: text beside a math point, drawn above everything. */
@@ -983,6 +1055,18 @@ export function drawLabels2D(
       ctx.strokeStyle = bar.color;
       ctx.lineWidth = 1.5;
       ctx.strokeRect(sx - hw, Math.min(sy0, sy), hw * 2, Math.abs(sy - sy0));
+    }
+    for (const region of extras.regions ?? []) {
+      const path = new Path2D();
+      const { tris } = region;
+      for (let i = 0; i + 5 < tris.length; i += 6) {
+        path.moveTo(toScreenX(tris[i]), toScreenY(tris[i + 1]));
+        path.lineTo(toScreenX(tris[i + 2]), toScreenY(tris[i + 3]));
+        path.lineTo(toScreenX(tris[i + 4]), toScreenY(tris[i + 5]));
+        path.closePath();
+      }
+      ctx.fillStyle = region.fill;
+      ctx.fill(path, 'nonzero');
     }
     for (const line of extras.polylines) {
       ctx.strokeStyle = line.color;

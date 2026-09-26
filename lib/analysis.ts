@@ -45,6 +45,7 @@ import {
 } from './dist.ts';
 import { type Expr, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
+import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { lowerGeom } from './geom.ts';
 import { lowerLists } from './list.ts';
 import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
@@ -305,6 +306,7 @@ export function prepareDocument(
     definition: (n: string): Expr | undefined =>
       defs.fields.get(n) ?? defs.consts.get(n) ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
     comps: (n: string) => compsOf(defs, n),
+    interval: (n: string) => defs.intervals.get(n),
     documentNames: new Set([
       ...raw.map(d => d.name),
       ...[...rvScan.base.values()].map(s => s.name),
@@ -400,17 +402,24 @@ function classifyOrbit(value: Expr, [from, to]: [Expr, Expr], defs: Env, constNa
  * variables under internal names — or null when the row is not one, or the
  * random-variable engine cannot take it (a tuple, a complex path, a list),
  * which leaves the row to classify, where u and v trace curves.
+ *
+ * A continuous interval (lib/interval.ts) is a uniform draw over its bounds.
+ * Its multiplicity is length, not probability (docs/multisets.md §5), so the
+ * density is drawn times `mass`, the product of the intervals' lengths:
+ * interval(0, 10) stands at height 1, as u does.
  */
 function uniformDraws(
   e: Expr,
   constNames: ReadonlySet<string>,
   rvNames: ReadonlySet<string>,
   id: string,
-): { expr: Expr; bases: Record<string, BaseDist> } | null {
+): { expr: Expr; bases: Record<string, BaseDist>; mass?: Expr } | null {
   if (e.kind === 'eq' || e.kind === 'ineq' || usesComplex(e)) return null;
   const free = [...freeVars(e)].filter(n => !constNames.has(n));
   const params = free.filter(n => n === 'u' || n === 'v');
-  if (!params.length || free.some(n => n === 'x' || n === 'y' || n === 'z' || n === 'w')) return null;
+  const hidden = intervalsIn(e);
+  if ((!params.length && !hidden.length) || free.some(n => n === 'x' || n === 'y' || n === 'z' || n === 'w'))
+    return null;
   const uniform: BaseDist = {
     kind: 'uniform',
     args: [
@@ -424,13 +433,27 @@ function uniformDraws(
     bases[`@${p}${id}`] = uniform;
     names[p] = { kind: 'var', name: `@${p}${id}` };
   }
-  const expr = substVars(e, names);
+  const drawn = new Map(hidden.map((h, k) => [h.key, `@iv${k}${id}`]));
+  for (const h of hidden) bases[drawn.get(h.key)!] = { kind: 'uniform', args: [h.lo, h.hi] };
+  const expr = replaceIntervals(substVars(e, names), h => ({ kind: 'var', name: drawn.get(h.key)! }));
   try {
     checkDerived(expr, new Set([...rvNames, ...Object.keys(bases)]), constNames);
   } catch {
     return null;
   }
-  return { expr, bases };
+  const mass = hidden
+    .map(lengthOf)
+    .reduce<Expr | undefined>(
+      (m, l) =>
+        !m
+          ? l
+          : m.kind === 'num' && l.kind === 'num'
+            ? { kind: 'num', value: m.value * l.value }
+            : { kind: 'bin', op: '*', a: m, b: l },
+      undefined,
+    );
+  // Unit length (u, v, interval(0, 1)) leaves the probability as it is.
+  return { expr, bases, ...(mass && !(mass.kind === 'num' && mass.value === 1) ? { mass } : {}) };
 }
 
 /** A scalar field in x alone (or y alone) is most often a curve meant as
@@ -470,11 +493,16 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   const builtRVs = document.builtRVs;
   const rvNames = builtRVs.names;
   // How a variable's row draws is lib's (variableRow), shared with the app.
-  const classifyVariable = (row: RowInfo, name: string): void => {
+  // `mass` scales the curve from a probability to the measure of the row's
+  // intervals (see uniformDraws).
+  const classifyVariable = (row: RowInfo, name: string, mass?: Expr): void => {
     const shape = variableRow(rvs, name);
     row.dist = shape.kind === 'pmf' ? 'pmf' : 'density';
     if (shape.kind === 'exact') {
-      row.cls = classify(shape.density, constNames);
+      const d = shape.density as Expr & { kind: 'eq' };
+      row.cls = classify(mass ? { ...d, r: { kind: 'bin', op: '*', a: mass, b: d.r } } : d, constNames);
+    } else if (mass && shape.cls.object.kind === 'distribution' && shape.cls.object.form !== 'prob') {
+      row.cls = { ...shape.cls, object: { ...shape.cls.object, mass } };
     } else row.cls = shape.cls;
     if ((shape.kind === 'pmf' || readoutPolicy === 'static') && rvs.get(name)?.kind === 'derived') pmfInfo(row, name);
   };
@@ -704,7 +732,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         checkDerived(parsed, known, constNames);
         const name = `@${row.id ?? ri}`;
         rvs.addAnonymous({ name, kind: 'derived', expr: parsed });
-        classifyVariable(row, name);
+        classifyVariable(row, name, draws?.mass);
         continue;
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)

@@ -52,6 +52,8 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   spacecurve: '3D curve where surfaces intersect',
   pcurve: 'parametric curve, traced as u runs from 0 to 1',
   psurface: 'parametric surface over u and v in 0..1',
+  pregion: 'filled 2D region traced by two parameters (u, v, or intervals), each over its range',
+  projected2d: 'shaded 2D region swept by a family over an interval, like y = sin(a x) for a = interval(1, 2)',
   vfield2d: '2D vector field, drawn as flowing streamlines',
   vfield3d: '3D vector field',
   point: 'a point',

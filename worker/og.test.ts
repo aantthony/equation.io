@@ -57,6 +57,50 @@ describe('og raster renderer', () => {
     expect(actual.px).not.toEqual(renderRaster([], 100, 100).px);
   });
 
+  it.each([
+    // [rows, filled pixels, empty pixels]; with this view, pixel (i, j) is (i/10 - 5, 5 - j/10).
+    // An annulus traced by an interval: radius 1.5 is in, the hole and past 2 out.
+    [
+      ['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u)) #e00'],
+      [[65, 47]],
+      [
+        [53, 47],
+        [85, 47],
+      ],
+    ],
+    // The region y = sin(a x) sweeps for a in [1, 2]: at x = 0.5 it runs from
+    // sin(0.5) to sin(1); at x = 3.5 from −1 to sin(3.5).
+    [
+      ['a = interval(1, 2)', 'y = sin(a x) #e00'],
+      [
+        [55, 43],
+        [85, 55],
+      ],
+      [
+        [55, 48],
+        [55, 55],
+        [85, 41],
+      ],
+    ],
+    // Below some member of y < a x: below the steeper line where x > 0.
+    [
+      ['a = interval(1, 2)', 'y < a x #e00'],
+      [
+        [25, 80],
+        [65, 25],
+      ],
+      [
+        [25, 65],
+        [65, 15],
+      ],
+    ],
+  ])('fills the region an interval traces or sweeps: %s', (rows, filled, empty) => {
+    const r = renderRaster([...rows, 'view(x = -5..5, y = -5..5)'], 100, 100);
+    for (const [x, y] of filled) expect(pixel(r, x, y)[1], `(${x}, ${y})`).toBeLessThan(230);
+    for (const [x, y] of empty) expect(pixel(r, x, y)[1], `(${x}, ${y})`).toBeGreaterThan(245);
+    expect(canRenderOg(rows)).toBe(true);
+  });
+
   it('draws a row in its #hex note color', () => {
     const [red, green, blue] = pixel(renderRaster(['y = x #e00 red'], 100, 100), 50, 50);
     expect(red).toBeGreaterThan(150);

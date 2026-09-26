@@ -57,7 +57,9 @@ describe('classify', () => {
     expect(cls('(cos(2pi u), sin(2pi u))').cpu).toMatchObject({ type: 'pcurve', dim: 2 });
     expect(cls('(cos(2pi u), sin(2pi u), u)').cpu).toMatchObject({ type: 'pcurve', dim: 3 });
     expect(cls('(u, v, sin(2pi u))').cpu.type).toBe('psurface');
-    expect(() => cls('(u, v)')).toThrow(/3 components/);
+    // Two parameters in the plane fill the region they trace.
+    expect(cls('(u, v)').cpu.type).toBe('pregion');
+    expect(() => cls('(u, v, u, v)')).toThrow();
   });
 
   it('reads a complex expression in u alone as a path in the Argand plane', () => {

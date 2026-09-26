@@ -58,6 +58,10 @@ const signatures: Record<string, [string, string]> = {
   total: ['total(L)', 'Sum of a numeric list'],
   count: ['count(L)', 'Number of elements in a list'],
   hist: ['hist(L)', 'Histogram of a numeric list'],
+  interval: [
+    'interval(a, b)',
+    'Every real number from a to b: r = interval(1, 2); (r cos(2pi u), r sin(2pi u)) fills an annulus',
+  ],
   sort: ['sort(L) or sort(P, P.x)', 'A list in ascending order, as a tuple; points by a key written in them'],
   min: ['min(a, b) or min(L)', 'Minimum'],
   max: ['max(a, b) or max(L)', 'Maximum'],

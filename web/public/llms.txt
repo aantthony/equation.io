@@ -324,6 +324,21 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   on the plane, so it draws its values: the numbers it takes as u and v run
   over [0, 1], as a density curve, like a random variable — `u` is the flat
   line at height 1 over [0, 1], `u^2` has density 1/(2√x), `u v` has −ln(x).
+- `interval(a, b)`: every real number from a to b (a < b; the bounds may use
+  sliders and t). `[1..2]` is only the whole numbers 1 and 2. An interval is
+  a parameter like u and v, over [a, b]. Every mention of one name is the
+  same number, so with `r = interval(1, 2)`, `r + r` is 2r; each written
+  `interval(…)` is a separate one, so `interval(0, 1) + interval(0, 1)` is
+  the sum of two. In a tuple it traces with u and v:
+  `(r cos(2 pi u), r sin(2 pi u))` is a filled annulus, `(r, r^2)` a curve
+  over [1, 2]. A row in x and y over one interval is a family, drawn as the
+  region its members sweep: with `a = interval(1, 2)`, `y = sin(a x)` shades
+  every point some a ∈ [1, 2] puts on its curve, and `y < a x` every point
+  below some member. At most one interval in such a row, and a bare field
+  (`sin(a x)`) is an error: set it equal to something. Alone, an interval row
+  draws its values like `u` does, against length rather than probability:
+  `interval(0, 10)` is the line at height 1 over [0, 10], and
+  `interval(0, 1)^2` has density 1/(2√x).
 - `w`: the complex plane point x + iy. A complex-valued expression in `w`
   (e.g. `ln(w-2) - ln(w+2)`) draws field lines and equipotentials. Wrapping it
   in `domain(…)` or `conformal(…)` picks a different view of the same function.
@@ -552,6 +567,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   curve, it reads as the 3D curve (a, b, r).
 - Parametric surface: three components in u and v —
   `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`.
+- Parametric region: two components in two parameters fill the region they
+  trace — `(u cos(2 pi v), u sin(2 pi v))` is the unit disc, and with
+  `r = interval(1, 2)`, `(r cos(2 pi u), r sin(2 pi u))` an annulus. In a 3D
+  scene it lies in the plane z = 0.
 - 3D surface: any equation in x, y, z.
 - Surface of revolution: `revolve(f)` turns the curve y = f(x) about the
   x-axis — `revolve(sqrt(x))`, `revolve(sin(x) + 2)`, or `revolve(f)` with

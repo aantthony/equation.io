@@ -32,6 +32,14 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['closed disc', 'x^2 + y^2 <= 4'],
       ['annulus', '4 <= x^2 + y^2 <= 9'],
       ['band under a wave', '-1 <= y - sin(x) < 1'],
+      // A continuous interval is a parameter like u: with u it fills the
+      // region it traces, and beside x and y it sweeps the region its family
+      // of curves covers.
+      ['annulus traced by an interval', 'r = interval(1, 2); (r cos(2 pi u), r sin(2 pi u))'],
+      [
+        'curves swept over an interval',
+        'view(x = -6..6, y = -2..2); a = interval(1, 2); y = sin(a x); y = sin(x); y = sin(2x)',
+      ],
       // A recursive function runs as a loop per pixel; the region is where it
       // terminates with f >= 0.
       [

@@ -287,6 +287,10 @@ Checked 2026-09-26 against `lowerLists` (lib/list.ts) and the MCP validator.
 | `person.row` | each record's position in the file (phase 4) | same |
 | `e_x ⊗ e_y`, `a ∧ b`, `contract(T, 1, 2)` | outer product, bivector, contraction; a tensor alone on a row reads out (phase 6) | same |
 | `(((1,2),(3,4)),((5,6),(7,8)))`, `((1,2,3,4),(5,6,7,8))` | a 2×2×2 and a 2×4 tensor (phase 6) | same |
+| `r = interval(1, 2)`; `(r cos(2πu), r sin(2πu))` | a filled annulus (phase 7) | same |
+| `(u cos(2πv), u sin(2πv))` | a filled disc (phase 7; was an error) | same |
+| `a = interval(1, 2)`; `y = sin(a x)` | the region the family sweeps, searched along a per pixel (phase 7) | same |
+| `interval(0, 10)` | its density against length: height 1 over [0, 10] (phase 7) | same |
 
 [lists-tables-plan.md](lists-tables-plan.md) still says lists of different
 lengths are an error; they have taken every combination since the axis model
@@ -450,3 +454,29 @@ recorded so they can be reviewed and reversed. Progress notes live in
   `sort(K) ⊗ v` unnamed is expanded element by element (the same values,
   but it cannot be named); a tensor has at most 729 entries; no transpose,
   symmetrisation or Hodge star beyond `×`.
+- **An interval's density is drawn against length.** A row of intervals
+  alone draws its pushforward of length measure, not a probability:
+  `interval(0, 10)` is height 1, the density times the product of the
+  intervals' lengths (`r + r` for `r = interval(0, 2)` is 1/2 over [0, 4]).
+  Readouts (μ, σ) stay those of the uniform draw.
+- **Intervals take the free parameter slots.** Without x, y or z, each
+  interval becomes u or v, whichever the row leaves free, swept over [0, 1]
+  as `lo + (hi − lo) u`; with u and v both used, one more is an error. Two
+  parameters and two components fill a region, so `(u, v)` and the disc
+  `(u cos(2πv), u sin(2πv))`, errors before, are filled regions. It is drawn
+  without an outline, at the inequality fill's opacity; in a 3D scene it lies
+  in z = 0.
+- **A definition built from an interval is that interval.** `s = 2 r` is
+  written into rows as r's own parameter, so `(r, s)` is a curve. A function
+  parameter named r shadows it. A literal in a function body is written once,
+  so every call shares it, as a list literal in a body does.
+- **A swept region is a union over one interval.** Beside x and y, the row
+  keeps a pixel when some value of its one interval satisfies the relation;
+  for a chain, one value must satisfy every comparison. Two intervals, z, a
+  bare field (`sin(a x)`) or a vector field are errors. The shader steps 48
+  values and the link preview 32, so a member narrower than a pixel between
+  steps can be missed where ∂F/∂a is not smooth.
+- **An interval is not a list item.** `[interval(0, 1), 2]` is an error for
+  now: a bracket of an interval and a number is a mixed measure, which has no
+  picture yet. A state, sequence or other place that needs one number reports
+  that an interval is a range of numbers.

@@ -13,7 +13,7 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 | 4 Order | done (uncommitted) | Axis.ordered (expr.ts); list.ts unionAxes/tupleOf/sortBy/tupleRow/needsOrder; object-lists polyline/polygon need order; geom non-square tuple of points passes; csv/defs `row`; defs state-family order; new `tuple` row kind. Spec tests §3 in multisets.test.ts. |
 | 5 Display | done | commit 9803156 (cherry-pick of cb5ec73). plot.ts: bare x/y scalar → field, xyz → error; curveHint; uniformDraws for u/v; signed field shading; dotPlot for lists, barMode removed. |
 | 6 Tensors | done | lib/tensor.ts {shape,data}; geom.ts lowerTensor; ⊗ ∧ outer wedge contract(T,i,j); defs.tensors; readouts via `tuple` row kind. |
-| 7 Continuous intervals | ready to merge | branch worktree-agent-a310074886604d33c commit 0600db5 (on 9803156); lib/interval.ts `[interval](lo,hi,id)`, pregion, projected2d projFrag; agent: vitest 84/2356, test:objects pass. Cherry-pick after phase 6 commit. |
+| 7 Continuous intervals | done | cherry-picked 0600db5 onto phase 6 (additive conflicts in defs/expr/doc). lib/interval.ts; pregion; projected2d. |
 | 8 Measures | doing | subagent, worktree based on 0600db5 |
 
 ## Decisions made while implementing (not in the agreed spec)
@@ -32,6 +32,7 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 - Phase 4: vitest 83/2326; typecheck/lint clean; test:objects pass.
 - Phases 4+5 combined: vitest 83/2332; typecheck/lint clean. Probe: shared scratchpad/probe.ts may be repointed by worktree agents; use scratchpad/main/probe.sh.
 - Phase 6: vitest 84/2344; typecheck/lint clean; test:objects pass (agent).
+- Phases 6+7 combined: vitest 85/2368; typecheck/lint/fmt clean.
 
 ## Blockers / open issues
 

@@ -32,6 +32,7 @@ import {
 } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
+import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
 import { tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -351,6 +352,48 @@ function familyTemplate(es: readonly Expr[], index: string): Expr {
   };
 }
 
+/**
+ * A row in x and y over one interval: the family of its members, drawn as
+ * the region they sweep — `a = interval(1, 2)`; `y = sin(a x)` is every
+ * (x, y) that some a ∈ [1, 2] puts on its curve (docs/multisets.md §5). The
+ * interval becomes u over [0, 1], so each residual is F(x, y, u), and a pixel
+ * is kept when some u satisfies the relation there: a search along u per
+ * pixel (render2d's projFrag), not a draw per member.
+ */
+function projectedRegion(expr: Expr, hidden: readonly HiddenInterval[], vars: ReadonlySet<string>): MathObject {
+  if (hidden.length > 1)
+    throw new Error(
+      `A row in x and y can range over one interval (this one has ${hidden.length}) — fix the others to a value.`,
+    );
+  if (vars.has('z')) throw new Error('A family over an interval is drawn in the plane; it cannot use z.');
+  if (vars.has('u') || vars.has('v')) throw new Error('Cannot mix u/v with x/y/z.');
+  if (usesComplex(expr)) throw new Error('A family over an interval must be real.');
+  const swept = replaceIntervals(expr, h => sweep(h, 'u'));
+  if (swept.kind === 'eq' && swept.l.kind !== 'vec' && swept.r.kind !== 'vec')
+    return {
+      kind: 'region',
+      form: 'projected',
+      relation: 'eq',
+      constraints: [{ residual: { kind: 'bin', op: '-', a: swept.l, b: swept.r }, strict: false }],
+    };
+  if (swept.kind === 'ineq') {
+    const comps = ineqComparisons(swept);
+    if (new Set(comps.map(c => c.op[0])).size > 1) throw new Error('Chained inequalities must point the same way.');
+    return {
+      kind: 'region',
+      form: 'projected',
+      relation: 'ineq',
+      constraints: comps.map(c => {
+        const [lo, hi] = c.op[0] === '<' ? [c.l, c.r] : [c.r, c.l];
+        return { residual: { kind: 'bin', op: '-', a: lo, b: hi }, strict: c.op.length === 1 };
+      }),
+    };
+  }
+  throw new Error(
+    'A field in x and y cannot range over an interval — set it equal to something for the region its family sweeps, like y = sin(a x).',
+  );
+}
+
 /** classify, also handing back the equation a revolve(…) row desugared to
  *  (`surface`) — the one place that desugaring happens, after coordinate
  *  fields have expanded, so a field hiding y or z is seen for what it is. */
@@ -446,7 +489,14 @@ function classifyLowered(
   const vars = freeVars(expr);
   if (tube) {
     const r = tube.radius;
-    if (r.kind === 'vec' || r.kind === 'list' || r.kind === 'eq' || r.kind === 'ineq' || usesComplex(r)) {
+    if (
+      r.kind === 'vec' ||
+      r.kind === 'list' ||
+      r.kind === 'eq' ||
+      r.kind === 'ineq' ||
+      usesComplex(r) ||
+      hasInterval(r)
+    ) {
       throw new Error('The tube radius must be a single real number.');
     }
     // The radius was split off before the root-only check below, so whole-
@@ -485,6 +535,26 @@ function classifyLowered(
       if (fn) throw new Error(`${v} is a function — write it with parentheses, e.g. ${fn}(x).`);
       throw new Error(`Unknown variable: ${v}. Define "${v} = 1" to make a slider.`);
     }
+  }
+  // Continuous intervals (lib/interval.ts). Beside x and y an interval makes
+  // the row a family over it, drawn as the region the family sweeps; anywhere
+  // else it is one more sampling parameter, swept over [0, 1] like u and v.
+  const hidden = intervalsIn(expr);
+  if (hidden.length) {
+    if (special) throw new Error(`Cannot use an interval in ${special}(…).`);
+    if (vars.has('x') || vars.has('y') || vars.has('z')) {
+      const object = projectedRegion(expr, hidden, vars);
+      return { cls: { object, animated: vars.has('t'), needs3D: false, params } };
+    }
+    if (expr.kind === 'list') throw new Error('An interval cannot be an item of a list — write it in a tuple.');
+    const free = [...PARAM_VARS].filter(p => !vars.has(p));
+    if (hidden.length > free.length)
+      throw new Error(
+        `A row can sweep at most two parameters (intervals, u and v) — this one has ${hidden.length + 2 - free.length}.`,
+      );
+    const slot = new Map(hidden.map((h, k) => [h.key, free[k]]));
+    expr = replaceIntervals(expr, h => sweep(h, slot.get(h.key)!));
+    for (const p of slot.values()) vars.add(p);
   }
   const animated = vars.has('t');
   const hasParam = vars.has('u') || vars.has('v');
@@ -712,6 +782,8 @@ function classifyLowered(
     }
     if (vars.has('v') && !vars.has('u')) throw new Error('Parametric surfaces use u (and v).');
     if (vars.has('u') && vars.has('v')) {
+      // Two parameters in the plane fill the region they trace.
+      if (dim === 2) return done({ kind: 'region', form: 'parametric', coordinates: [expr.items[0], expr.items[1]] });
       if (dim !== 3) throw new Error('A parametric surface needs 3 components.');
       return done({ kind: 'surface', form: 'parametric', coordinates: expr.items as [Expr, Expr, Expr] });
     }
@@ -744,7 +816,11 @@ function classifyLowered(
   }
   // (A bare real row in u, v is a random draw — analysis renames them first.)
   if (hasParam && !paramSystem)
-    throw new Error('u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v).');
+    throw new Error(
+      hidden.length
+        ? 'An interval traces a curve or region in a tuple, like (r cos(2 pi u), r sin(2 pi u)); a number alone draws its density.'
+        : 'u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v).',
+    );
 
   // A vector equation is a system, one residual per component: F(x,y,z) =
   // (a, b, c) is the fiber of a map, (f, g) = (0, 0) an intersection of

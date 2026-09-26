@@ -436,3 +436,74 @@ describe('§5 what a row draws', () => {
     expect(density(['u v'], 0.3)).toBeCloseTo(-Math.log(0.3), 1);
   });
 });
+
+/** The height a number-line row draws at x = at: its exact density, or the
+ *  sampled curve times the measure of its intervals. */
+function drawnDensity(rows: string[], at: number): number {
+  const a = analyzeRows(rows, { readouts: true });
+  const row = a.rows.at(-1)!;
+  if (row.error) throw new Error(row.error);
+  const object = row.cls!.object;
+  if (object.kind === 'curve' && object.form === 'graph') return evaluate(object.rhs, { ...a.constEnv, x: at });
+  if (object.kind !== 'distribution' || object.form !== 'density') throw new Error(object.kind);
+  const mass = object.mass ? evaluate(object.mass, a.constEnv) : 1;
+  return mass * densityAt(a.rvs.curve(object.rv, a.constEnv)!, at);
+}
+
+describe('§5 continuous intervals', () => {
+  const kind = (rows: string[]) => {
+    const row = last(rows);
+    if (row.error) throw new Error(row.error);
+    return row.cpu?.type;
+  };
+  it('a name is one parameter, each literal its own', () => {
+    // r + r is 2r: identical, so a curve over one parameter.
+    expect(kind(['r = interval(1, 2)', '(r + r, r)'])).toBe('pcurve');
+    // Two literals are separate: two parameters fill a region.
+    expect(kind(['(interval(0, 1), interval(0, 1))'])).toBe('pregion');
+    // A function's argument is one multiset, used twice inside it.
+    expect(kind(['f(s) = (s, s^2)', 'f(interval(0, 1))'])).toBe('pcurve');
+    // A definition built from r is r too.
+    expect(kind(['r = interval(1, 2)', 's = 2 r', '(r, s)'])).toBe('pcurve');
+  });
+  it('with u and v an interval traces curves, regions and surfaces', () => {
+    expect(kind(['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u))'])).toBe('pregion');
+    expect(kind(['(u cos(2 pi v), u sin(2 pi v))'])).toBe('pregion');
+    expect(kind(['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u), r)'])).toBe('psurface');
+    expect(last(['(u, v, interval(0, 1))']).error).toMatch(/at most two parameters/);
+  });
+  it('the annulus is the points at radius 1 to 2', () => {
+    const cpu = last(['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u))']).cpu;
+    if (cpu?.type !== 'pregion') throw new Error(cpu?.type);
+    const radii = [0, 0.5, 1].map(v => Math.hypot(...cpu.comps.map(c => evaluate(c, { u: 0.3, v }))));
+    expect(radii[0]).toBeCloseTo(1, 9);
+    expect(radii[1]).toBeCloseTo(1.5, 9);
+    expect(radii[2]).toBeCloseTo(2, 9);
+  });
+  it('beside x and y an interval sweeps the region of its family', () => {
+    const cpu = last(['a = interval(1, 2)', 'y = sin(a x)']).cpu;
+    if (cpu?.type !== 'projected2d') throw new Error(cpu?.type);
+    // F(x, y, u), with a = 1 + u: zero where the member a passes.
+    expect(evaluate(cpu.constraints[0].residual, { x: 1, y: Math.sin(1.5), u: 0.5 })).toBeCloseTo(0, 12);
+    expect(kind(['a = interval(1, 2)', 'y < a x'])).toBe('projected2d');
+    expect(last(['a = interval(1, 2)', 'sin(a x)']).error).toMatch(/cannot range over an interval/);
+    expect(last(['y = interval(0, 1) x + interval(0, 1)']).error).toMatch(/one interval/);
+  });
+  it('alone an interval draws its values against length', () => {
+    // interval(0, 10) holds each number once: height 1, not 1/10.
+    expect(drawnDensity(['interval(0, 10)'], 5)).toBeCloseTo(1, 9);
+    expect(drawnDensity(['interval(1, 2)'], 1.5)).toBeCloseTo(1, 9);
+    expect(drawnDensity(['interval(1, 2)'], 2.5)).toBe(0);
+    // Squared, each b in (0, 1) comes from √b, as u² does.
+    expect(drawnDensity(['interval(0, 1)^2'], 0.25)).toBeCloseTo(1, 1);
+    // Sliders set the bounds.
+    expect(drawnDensity(['b = 4', 'interval(0, b)'], 2)).toBeCloseTo(1, 9);
+    // r + r: 2r spreads the length 2 of r over [0, 4].
+    expect(drawnDensity(['r = interval(0, 2)', 'r + r'], 1)).toBeCloseTo(0.5, 9);
+  });
+  it('checks its bounds', () => {
+    expect(last(['interval(2, 1)']).error).toMatch(/a < b/);
+    expect(last(['interval(1)']).error).toMatch(/two bounds/);
+    expect(last(['(interval(0, x), u)']).error).toMatch(/constants, sliders and t/);
+  });
+});

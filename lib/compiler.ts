@@ -28,6 +28,10 @@ export type CpuPlan =
   | { type: 'implicit2d'; residual: Expr; equation: Expr; levels?: CpuGrid }
   | { type: 'implicit3d'; residual: Expr; equation: Expr; heightmap?: Expr }
   | { type: 'ineq2d'; constraints: Array<{ residual: Expr; strict: boolean }> }
+  /** A filled region traced by (x(u, v), y(u, v)), sampled as triangles. */
+  | { type: 'pregion'; comps: [Expr, Expr] }
+  /** The region a family over u ∈ [0, 1] sweeps (see MathObject). */
+  | { type: 'projected2d'; relation: 'eq' | 'ineq'; constraints: Array<{ residual: Expr; strict: boolean }> }
   | { type: 'scalar2d'; expr: Expr }
   | { type: `${ColorSpace}2d`; channels: Expr[] }
   | { type: 'complex2d'; expr: Expr }
@@ -71,8 +75,8 @@ export type CpuPlan =
   | { type: 'cobweb'; f: Expr; recVar: string; a0Name?: string }
   | { type: 'bifurcation'; expr: Expr; recVar: string; a0Name?: string }
   | { type: 'automaton'; rule: Expr; radius: number; seed?: Expr }
-  | { type: 'density'; rv: string }
-  | { type: 'pmf'; rv: string }
+  | { type: 'density'; rv: string; mass?: Expr }
+  | { type: 'pmf'; rv: string; mass?: Expr }
   | { type: 'expect'; rv: string }
   | { type: 'prob'; body: Expr; shade?: { rv: string } & ProbBounds }
   | { type: 'value'; expr: Expr; shade?: IntShade }
@@ -85,6 +89,9 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'implicit2d'; field: string; levels?: GpuGrid }
   | { type: 'implicit3d'; field: string; grad?: [string, string, string] }
   | { type: 'ineq2d'; field: string; edges: string[] }
+  /** F(x, y, u) searched along u per pixel; `slope` is ∂F/∂u for an
+   *  equation (absent when it has no symbolic derivative). */
+  | { type: 'projected2d'; relation: 'eq' | 'ineq'; field: string; slope?: string }
   | { type: 'scalar2d'; field: string }
   | { type: `${ColorSpace}2d`; space: ColorSpace; field: string; locals: string }
   | { type: 'complex2d'; field: string }
@@ -209,8 +216,14 @@ export function compileCpu(classified: Classified): CpuPlan {
       }
     case 'intersection':
       return { type: 'spacecurve', residuals: object.residuals.map(real) };
-    case 'region':
-      return { type: 'ineq2d', constraints: object.constraints.map(c => ({ ...c, residual: real(c.residual) })) };
+    case 'region': {
+      if (object.form === 'parametric')
+        return { type: 'pregion', comps: [real(object.coordinates[0]), real(object.coordinates[1])] };
+      const constraints = object.constraints.map(c => ({ ...c, residual: real(c.residual) }));
+      return object.form === 'projected'
+        ? { type: 'projected2d', relation: object.relation, constraints }
+        : { type: 'ineq2d', constraints };
+    }
     case 'scalar-field':
       return { type: 'scalar2d', expr: real(object.expr) };
     // Like domain coloring, these expressions are rendered per pixel on the GPU.
@@ -308,7 +321,9 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'distribution':
       return object.form === 'prob'
         ? { type: 'prob', body: object.body, shade: object.shade }
-        : { type: object.form, rv: object.rv };
+        : object.form === 'expect'
+          ? { type: 'expect', rv: object.rv }
+          : { type: object.form, rv: object.rv, ...(object.mass ? { mass: object.mass } : {}) };
     case 'value':
       return { type: 'value', expr: real(object.expr), shade: object.shade };
     case 'tuple':
@@ -432,6 +447,30 @@ export function compileGpu(classified: Classified): GpuPlan {
         return { type: 'implicit3d', params, field: scalar(object.equation ?? object.residual), grad };
       }
     case 'region': {
+      // In a 3D scene a planar region lies in z = 0, drawn like any surface.
+      if (object.form === 'parametric') {
+        const coordinates: Expr[] = [...object.coordinates, zero];
+        return {
+          type: 'psurface',
+          params,
+          comps: coordinates.map(e => toGLSL(sub(e))) as [string, string, string],
+          du: gradient(coordinates, 'u'),
+          dv: gradient(coordinates, 'v'),
+        };
+      }
+      if (object.form === 'projected') {
+        const residuals = object.constraints.map(c => c.residual);
+        const field = residuals.map(scalar).reduce((combined, f) => `max(${combined}, ${f})`);
+        let slope: string | undefined;
+        if (object.relation === 'eq') {
+          try {
+            slope = scalar(diff(residuals[0], 'u'));
+          } catch {
+            /* the shader estimates it from neighbouring samples */
+          }
+        }
+        return { type: 'projected2d', params, relation: object.relation, field, ...(slope ? { slope } : {}) };
+      }
       const fields = object.constraints.map(c => ({ code: scalar(c.residual), edge: !c.strict }));
       const field = fields.slice(1).reduce((combined, f) => `max(${combined}, ${f.code})`, fields[0].code);
       return { type: 'ineq2d', params, field, edges: fields.filter(f => f.edge).map(f => f.code) };
@@ -535,6 +574,8 @@ export function shaderKey(plan: GpuPlan): string {
       return JSON.stringify([plan.type, plan.params, plan.field, plan.grad]);
     case 'ineq2d':
       return JSON.stringify([plan.type, plan.params, plan.field, plan.edges]);
+    case 'projected2d':
+      return JSON.stringify([plan.type, plan.params, plan.relation, plan.field, plan.slope]);
     case 'rgb2d':
     case 'hsl2d':
     case 'oklch2d':
@@ -576,6 +617,12 @@ export function cpuStructureKey(plan: CpuPlan): string {
       break;
     case 'ineq2d':
       structure = plan.constraints.map(c => [exprKey(c.residual), c.strict]);
+      break;
+    case 'projected2d':
+      structure = [plan.relation, plan.constraints.map(c => [exprKey(c.residual), c.strict])];
+      break;
+    case 'pregion':
+      structure = expressions(plan.comps);
       break;
     case 'rgb2d':
     case 'hsl2d':
@@ -657,6 +704,8 @@ export function cpuStructureKey(plan: CpuPlan): string {
       break;
     case 'density':
     case 'pmf':
+      structure = [plan.rv, plan.mass && exprKey(plan.mass)];
+      break;
     case 'expect':
       structure = plan.rv;
       break;

@@ -10,7 +10,7 @@
  */
 import { traceIntersection } from '../lib/intersection.ts';
 import { traceField } from '../lib/flow.ts';
-import { type PmfStems, markerHeight, shadePolygon, stemGeometry } from '../lib/dist.ts';
+import { type PmfStems, markerHeight, scaleCurve, scaleStems, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { cellShades, runAutomaton } from '../lib/automaton.ts';
@@ -18,7 +18,7 @@ import { arrowHead } from '../lib/geom.ts';
 import { hullFaces } from '../lib/hull.ts';
 import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
-import { pathSampler } from '../lib/path.ts';
+import { pathSampler, regionSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
 import { clampPhi, fitView2D } from '../lib/view.ts';
 import { noteColor } from '../lib/statements.ts';
@@ -176,6 +176,13 @@ const ARROW_HEAD_PX = 9;
  * self-intersecting figures (a pentagram) fill the same way in both.
  */
 function fillPolygon(r: Raster, sx: number[], sy: number[], c: [number, number, number], a: number) {
+  polygonSpans(r, sx, sy, (y, xa, xb) => {
+    for (let px = xa; px <= xb; px++) blend(r, px, y, c, a);
+  });
+}
+
+/** The pixel runs fillPolygon covers, row by row (nonzero rule). */
+function polygonSpans(r: Raster, sx: number[], sy: number[], span: (y: number, xa: number, xb: number) => void) {
   const n = sx.length;
   const y0 = Math.max(0, Math.floor(Math.min(...sy)));
   const y1 = Math.min(r.h - 1, Math.ceil(Math.max(...sy)));
@@ -196,12 +203,19 @@ function fillPolygon(r: Raster, sx: number[], sy: number[], c: [number, number, 
       if (wind === 0) spanStart = x;
       wind += dir;
       if (wind !== 0) continue;
-      const xa = Math.max(0, Math.ceil(spanStart - 0.5));
-      const xb = Math.min(r.w - 1, Math.floor(x - 0.5));
-      for (let px = xa; px <= xb; px++) blend(r, px, y, c, a);
+      span(y, Math.max(0, Math.ceil(spanStart - 0.5)), Math.min(r.w - 1, Math.floor(x - 0.5)));
     }
   }
 }
+
+/** Blend each marked pixel once: a region drawn in pieces (triangles, or
+ *  one pass per sample of u) fills at one opacity, as the app's does. */
+function fillMask(r: Raster, mask: Uint8Array, c: [number, number, number], a: number) {
+  for (let i = 0; i < mask.length; i++) if (mask[i]) blend(r, i % r.w, Math.floor(i / r.w), c, a);
+}
+
+/** Samples of u per pixel for a family over an interval (the app takes 48). */
+const PROJECTION_SAMPLES = 32;
 
 function shadeScalar(r: Raster, grid: Float64Array, c: [number, number, number]) {
   const { w, h } = r;
@@ -388,6 +402,10 @@ function renderRow2D(
       // atoms stand where they are, not at whole numbers.
       runs = analysis.rvs.pmfRuns(name, analysis.constEnv, { lo: v.cx - halfW, hi: v.cx + halfW }, shade);
       if (!runs) return;
+      if (cpu.type === 'pmf' && cpu.mass) {
+        const mass = evaluate(cpu.mass, analysis.constEnv);
+        runs = runs.map(run => scaleStems(run, mass));
+      }
     } catch {
       return; // a parameter with no value at t = 0
     }
@@ -428,8 +446,9 @@ function renderRow2D(
     const shade = cpu.type === 'prob' ? cpu.shade : undefined;
     if (cpu.type === 'prob' && !shade) return; // readout-only row
     const name = cpu.type === 'density' ? cpu.rv : shade!.rv;
-    const curve = analysis.rvs.curve(name, analysis.constEnv);
+    let curve = analysis.rvs.curve(name, analysis.constEnv);
     if (!curve) return;
+    if (cpu.type === 'density' && cpu.mass) curve = scaleCurve(curve, evaluate(cpu.mass, analysis.constEnv));
     if (cpu.type === 'density') {
       // Point masses draw as probability stems (height = mass, not density).
       for (const a of curve.atoms ?? []) {
@@ -541,6 +560,50 @@ function renderRow2D(
     case 'scalar2d':
       shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color);
       return;
+    case 'pregion': {
+      // The app's fill (web/render2d.ts regions): the sampled triangles'
+      // union, at the inequality fill's opacity, with no outline.
+      const tris = regionSampler(cpu.comps).sample(envValues(env));
+      const mask = new Uint8Array(r.w * r.h);
+      for (let i = 0; i + 5 < tris.length; i += 6) {
+        const sx = [0, 2, 4].map(k => toScreenX(r, v, tris[i + k]));
+        const sy = [1, 3, 5].map(k => toScreenY(r, v, tris[i + k]));
+        polygonSpans(r, sx, sy, (y, xa, xb) => mask.fill(1, y * r.w + xa, y * r.w + xb + 1));
+      }
+      fillMask(r, mask, color, 0.18);
+      return;
+    }
+    case 'projected2d': {
+      // The union over samples of u, as the app's projFrag: a pixel whose
+      // residual changes sign between neighbouring samples (an equation),
+      // or whose constraints all hold at one (inequalities).
+      const slotU = env.slots.get('u')!;
+      const field: Expr =
+        cpu.constraints.length === 1
+          ? cpu.constraints[0].residual
+          : cpu.constraints
+              .slice(1)
+              .reduce<Expr>(
+                (m, c) => ({ kind: 'call', name: 'max', args: [m, c.residual] }),
+                cpu.constraints[0].residual,
+              );
+      const prog = compile(field);
+      const mask = new Uint8Array(r.w * r.h);
+      let prev: Float64Array | null = null;
+      for (let k = 0; k < PROJECTION_SAMPLES; k++) {
+        env.vars[slotU] = k / (PROJECTION_SAMPLES - 1);
+        const grid = sampleField(r, v, prog, env);
+        for (let j = 0; j < r.h; j++)
+          for (let i = 0; i < r.w; i++) {
+            const f = grid[j * (r.w + 1) + i];
+            const hit = cpu.relation === 'ineq' ? f < 0 : f === 0 || (prev !== null && prev[j * (r.w + 1) + i] * f < 0);
+            if (hit) mask[j * r.w + i] = 1;
+          }
+        prev = grid;
+      }
+      fillMask(r, mask, color, 0.18);
+      return;
+    }
     case 'point': {
       if (cpu.dim !== 2) return;
       const [px, py] = cpu.coords.map(c2 => run(compile(c2), env.vars, env.stack));
@@ -666,8 +729,12 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
   const slotU = env.slots.get('u')!,
     slotV = env.slots.get('v')!;
   switch (cpu.type) {
-    case 'psurface': {
-      const progs = cpu.comps.map(compile);
+    case 'psurface':
+    case 'pregion': {
+      // A planar region lies in z = 0 of the scene, drawn as the app draws it: a surface.
+      const progs = (cpu.type === 'pregion' ? [...cpu.comps, { kind: 'num', value: 0 } as Expr] : cpu.comps).map(
+        compile,
+      );
       const at = (): [number, number, number] => [
         run(progs[0], env.vars, env.stack),
         run(progs[1], env.vars, env.stack),
@@ -876,6 +943,10 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   vfield3d: 'draws',
   implicit2d: 'draws',
   ineq2d: 'draws',
+  // Filled on the CPU in the app too: the union of the sampled triangles.
+  pregion: 'draws',
+  // The app searches along the interval per pixel; so does this, more coarsely.
+  projected2d: 'draws',
   scalar2d: 'draws',
   point: 'draws',
   // A readout: nothing on the canvas in the app either — except a definite
@@ -973,6 +1044,7 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
     // Its text is left out in 3D as in 2D (OG_COVERAGE); the app draws it in both.
     case 'label':
     case 'psurface':
+    case 'pregion':
     case 'vfield3d':
     case 'spacecurve':
       return null;

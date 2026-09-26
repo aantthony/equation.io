@@ -54,6 +54,7 @@ import {
   substVars,
 } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
+import { hasInterval, hiddenInterval } from './interval.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { lowerGeom, lowerMatrix, lowerTensorValue, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
@@ -174,6 +175,7 @@ interface BindingDraft {
   lists: Map<string, Seq | (Expr & { kind: 'vec' })>;
   missingData: Map<string, { message: string; list: boolean }>;
   tables: Map<string, TableDef>;
+  intervals: Map<string, Expr>;
 }
 
 export interface TableDef {
@@ -199,6 +201,7 @@ const emptyDraft = (): BindingDraft => ({
   lists: new Map(),
   missingData: new Map(),
   tables: new Map(),
+  intervals: new Map(),
 });
 
 /**
@@ -988,6 +991,13 @@ export interface ResolveOpts {
    * cannot see the whole document cannot tell `e_x = 3` from the built-in.
    */
   documentNames?: ReadonlySet<string>;
+  /**
+   * The value of a name whose definition holds a continuous interval
+   * (`r = interval(1, 2)`, or `s = 2 r` after it): written in wherever the
+   * name appears, so every mention is the same hidden parameter
+   * (lib/interval.ts). Undefined for anything else.
+   */
+  interval?: (name: string) => Expr | undefined;
 }
 
 /**
@@ -1801,7 +1811,12 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'num':
       return e;
     case 'var':
-      return ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ?? unitVector(e.name, ctx.opts) ?? e;
+      return (
+        ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ??
+        ctx.opts.interval?.(e.name) ??
+        unitVector(e.name, ctx.opts) ??
+        e
+      );
     case 'neg':
       return { kind: 'neg', a: rx(e.a, ctx) };
     case 'bin': {
@@ -1900,6 +1915,9 @@ function rx(e: Expr, ctx: Ctx): Expr {
         return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
+      // Keyed by the source node: a function body inlined twice holds the
+      // same literal, and `f(interval(0, 1))` hands one to every use of x.
+      if (e.name === 'interval') return hiddenInterval(e, args);
       if (e.name === 'clamp') {
         // clamp(x, lo, hi) ≡ min(max(x, lo), hi): every backend already runs those.
         if (args.length !== 3) throw new Error('clamp takes three arguments: clamp(x, lo, hi).');
@@ -2025,6 +2043,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     definition: n => defs.consts.get(n) ?? (stateNames.has(n) ? { kind: 'var', name: n } : undefined),
     comps: n => compsOf(defs, n),
     documentNames: new Set(byName.keys()),
+    interval: n => defs.intervals.get(n),
   };
 
   const parsed = new Map<string, Expr>();
@@ -2055,7 +2074,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     }
     resolving.push(name);
     try {
-      let body = resolveExpr(parse(d), getFn, ropts);
+      // A parameter shadows a named interval of the same name.
+      const scope: ResolveOpts = {
+        ...ropts,
+        interval: n => (d.params.includes(n) ? undefined : ropts.interval?.(n)),
+      };
+      let body = resolveExpr(parse(d), getFn, scope);
       if (containsRecur(body)) body = wrapRecursion(name, d.params, body);
       const fn: FnDef = { params: d.params, body };
       defs.fns.set(name, fn);
@@ -2188,6 +2212,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
         const resolved = resolveExpr(parse(d), getFn, ropts);
+        // `r = interval(1, 2)`, or anything built from one: not a number but a
+        // hidden parameter, which every row using the name shares.
+        if (hasInterval(resolved)) {
+          defs.intervals.set(d.name, resolved);
+          continue;
+        }
         // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
         // or matrix algebra, names a matrix.
         const isList = (n: string) => defs.lists.has(n);
@@ -3055,6 +3085,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   for (const [name, fn] of defs.fns) env.bind(name, { tag: 'fn', fn });
   for (const [name, matrix] of defs.mats) env.bind(name, { tag: 'matrix', matrix });
   for (const [name, tensor] of defs.tensors) env.bind(name, { tag: 'tensor', tensor });
+  for (const [name, value] of defs.intervals) env.bind(name, { tag: 'interval', value });
   for (const [name, table] of defs.tables)
     env.bind(name, { tag: 'table', table, unavailable: defs.missingData.get(name) });
   for (const [name, value] of defs.lists)

@@ -147,6 +147,10 @@ type ExprNode =
       readonly limit: number;
     };
 
+/** A continuous interval's hidden parameter (lib/interval.ts): not an
+ *  identifier, so no document name or builtin can collide with it. */
+export const INTERVAL = '[interval]';
+
 /** The self-call inside a `loop` body: its args are the next pass's params. */
 export const RECUR = '@recur';
 /** Passes a tail-recursive function may take before it is undefined. Enough
@@ -252,6 +256,8 @@ export const FUNCTIONS = new Set([
   'median',
   'sort',
   'hist',
+  // A continuous interval, resolved into a hidden parameter (lib/interval.ts).
+  'interval',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
   // by lowerGeom before anything evaluates or compiles them.
   'dot',
@@ -337,6 +343,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'outer',
   'wedge',
   'contract',
+  'interval',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
@@ -1601,6 +1608,10 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
         return v ?? NaN;
       }
       const fn = EVAL_FNS[e.name];
+      if (!fn && e.name === INTERVAL)
+        throw new Error(
+          'An interval is a range of numbers, not one value: draw it in a row of its own, in a tuple, or beside x and y.',
+        );
       if (!fn) throw new Error(strayComp(e) ?? `Unknown function: ${e.name}`);
       return fn(...e.args.map(a => evaluate(a, env)));
     }
