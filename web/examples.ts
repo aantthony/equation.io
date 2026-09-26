@@ -44,6 +44,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       // area for a region, length for a curve.
       ['area of the unit disc', 'x^2 + y^2 < 1; count(x^2 + y^2 < 1)'],
       ['length of a parabola arc', 'y = {0 < x < 1: x^2}; count({y = x^2, 0 < x < 1})'],
+      ['area between curves', 'y = x^2; y = 1; x^2 < y < 1; count(x^2 < y < 1)'],
       // A recursive function runs as a loop per pixel; the region is where it
       // terminates with f >= 0.
       [
@@ -90,12 +91,13 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['tangent line', 'f(x) = x^3 - 2x; g(x) = d/dx f(x); a = 1; y = f(x); y = f(a) + g(a)(x - a)'],
       ['running integral', 'view(x = -7..7, y = -1.5..4); f(x) = sin(x)^2; y = f(x); y = int[0..x] f(t) dt'],
       ['signed area', 'view(x = -1..7, y = -1.5..1.5); b = 5; y = sin(x); int[0..b] sin(x) dx'],
-      // One rectangle per element of k; the sum beside the exact integral.
+      // One rectangle per element of k; the total over the same k beside the
+      // exact integral.
       [
         'Riemann sum (slide n)',
         'view(x = -1..7, y = -0.5..3); f(x) = sin(x) + 1.5; n = 8; a = 0; b = 6; h = (b - a)/n; k = [0..n-1]; y = f(x); ' +
           'polygon((a + k h, 0), (a + k h + h, 0), (a + k h + h, f(a + k h)), (a + k h, f(a + k h))); ' +
-          'sum(j=0..n-1, f(a + j h) h); int[a..b] f(x) dx',
+          'total(f(a + k h) h); int[a..b] f(x) dx',
       ],
       ['antiderivative', 'f(x) = x^2 - 1; y = f(x); y = int(f(x) dx)'],
       ['Gaussian integral = √π', 'view(x = -3.5..3.5, y = -0.6..1.6); y = exp(-x^2); int[-inf..inf] exp(-x^2) dx'],
@@ -142,7 +144,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['sampled curve', 's = [0..50]/5; (s, sin(s))'],
       [
         'filters + summaries',
-        'view(x = -7..12, y = -1..10); L = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]; L; L[L > 3]; mean(L); median(L); stdev(L)',
+        'view(x = -7..12, y = -1..10); L = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]; L; L > 3; count(L > 3); mean(L); median(L); stdev(L)',
       ],
       ['family of lines', 'y = [-2, -1, 0, 1, 2] x'],
       ['concentric circles', 'circle((0, 0), [1, 2, 3, 4])'],
@@ -153,7 +155,8 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     [
       [
         'line fit and residuals',
-        'P = [(0,1.1),(1,2.9),(2,5.2),(3,6.8),(4,9.1)]; P.y ~ m P.x + b; P; y = m x + b; # residuals; (P.x,P.y-(m P.x+b))',
+        'view(x = -1..6, y = -1..10); P = [(0,1.1),(1,2.9),(2,5.2),(3,6.8),(4,9.1)]; P.y ~ m P.x + b; P; y = m x + b; # above the line; P.y > m P.x + b; ' +
+          '# residuals; (P.x,P.y-(m P.x+b)); total((P.y - (m P.x + b))^2)',
       ],
       ['quadratic fit', 'P = [(-2,9),(-1,2),(0,1),(1,6),(2,17)]; P.y ~ a P.x^2 + b P.x + c; P; y = a x^2 + b x + c'],
       ['exponential fit', 'P = [(0,2),(0.5,2.84),(1,4.03),(1.5,5.72),(2,8.11)]; P.y ~ a exp(b P.x); P; y = a exp(b x)'],
@@ -493,7 +496,10 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   [
     'systems',
     [
-      ['curve intersection', 'x^2 + y^2 = 4; x y = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0)'],
+      [
+        'curve intersection',
+        'x^2 + y^2 = 4; x y = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0); count({x^2 + y^2 = 4, x y = 1})',
+      ],
       ['three planes', '(x + y, x - y, z) = (1, 2, 3)'],
       ['sphere meets plane', '(x^2 + y^2 + z^2, z) = (9, 1)'],
       // Alpöge's counterexample to the Jacobian conjecture (July 2026), found by
