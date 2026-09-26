@@ -121,3 +121,64 @@ describe('§4 tuple matrices', () => {
     expect(last(['A = (1,2)', 'B = (3,4)', '(A, B)']).error).toMatch(/2×2 matrix.*segment\(A, B\)/);
   });
 });
+
+/** The points a row draws, each as its coordinates, sorted. */
+function vectors(rows: string[]): number[][] {
+  const analysis = analyzeRows(rows, { readouts: true });
+  const row = analysis.rows.at(-1)!;
+  if (row.error) throw new Error(row.error);
+  const at = (p: readonly Expr[]) => p.map(c => evaluate(c, analysis.constEnv));
+  const cpu = row.cpu;
+  if (cpu?.type === 'point') return [at(cpu.coords)];
+  if (cpu?.type !== 'plist') throw new Error(`expected points, got ${cpu?.type}`);
+  return cpu.pts.map(at).sort((a, b) => a.join().localeCompare(b.join()));
+}
+
+describe('§4 vectors in 3D', () => {
+  it('e_x, e_y, e_z are the unit vectors', () => {
+    expect(vectors(['e_x'])).toEqual([[1, 0, 0]]);
+    expect(vectors(['e_x + 2 e_y'])).toEqual([[1, 2, 0]]);
+    expect(vectors(['e_{z}'])).toEqual([[0, 0, 1]]);
+    expect(last(['e_y']).cls?.needs3D).toBe(true);
+  });
+  it('a multiset of vectors', () => {
+    expect(vectors(['[0,1] e_x'])).toEqual([
+      [0, 0, 0],
+      [1, 0, 0],
+    ]);
+    expect(vectors(['[0,1] e_x'])).toEqual(vectors(['([0,1],0,0)']));
+    expect(vectors(['[e_x, e_z]'])).toEqual([
+      [0, 0, 1],
+      [1, 0, 0],
+    ]);
+    expect(vectors(['A = (1,0,0)', '[0,1]A + [0,1]e_y'])).toEqual([
+      [0, 0, 0],
+      [0, 1, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+    ]);
+    expect(vectors(['f(s) = s e_x + e_z', 'f([1,2])'])).toEqual([
+      [1, 0, 1],
+      [2, 0, 1],
+    ]);
+  });
+  it('a document that defines the name keeps its own', () => {
+    expect(multiset(['e_x = 3', 'e_x + 1'])).toEqual([4]);
+    expect(multiset(['e_y = [1,2]', 'e_y + 1'])).toEqual([2, 3]);
+    expect(multiset(['e_z(s) = 2s', 'e_z(3)'])).toEqual([6]);
+    expect(last(['e_x = x^2', 'y = e_x']).cls?.object.kind).toBe('curve');
+  });
+  it('leaves e, subscripts of e and a sequence named e alone', () => {
+    expect(multiset(['e'])).toEqual([Math.E]);
+    expect(multiset(['e_1 = 3', 'e_1 + 1'])).toEqual([4]);
+    expect(multiset(['e_n = n^2', 'e_3'])).toEqual([9]);
+    expect(multiset(['N = 2', 'e_n = n^2', 'e_N'])).toEqual([4]);
+  });
+  it('a point list in space is drawn as dots', () => {
+    const cube = last(['([0,1],[0,1],[0,1])']);
+    expect(cube.cls?.needs3D).toBe(true);
+    expect(cube.cpu).toMatchObject({ type: 'plist', dim: 3 });
+    expect(vectors(['([0,1],[0,1],[0,1])'])).toHaveLength(8);
+    expect(vectors(['[(0,0,0),(1,1,1)]'])).toHaveLength(2);
+  });
+});

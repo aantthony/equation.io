@@ -188,6 +188,10 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   const values = (names: Iterable<string>, description: string) => {
     for (const name of names) candidates.set(name, { name, signature: name, description, call: false });
   };
+  // Built in, and replaced below by a document's own e_x.
+  values(['e_x'], 'Unit vector (1, 0, 0)');
+  values(['e_y'], 'Unit vector (0, 1, 0)');
+  values(['e_z'], 'Unit vector (0, 0, 1)');
   values(defs.consts.keys(), 'Defined constant');
   values(defs.states.keys(), 'Simulation state');
   values(defs.vecStates.keys(), 'Vector state');

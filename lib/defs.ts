@@ -927,6 +927,30 @@ export interface ResolveOpts {
   /** The component names a named vector lowers to (F → F_x, F_y), so the
    *  vector operators see a named field's components. */
   comps?: (name: string) => readonly string[] | null;
+  /**
+   * Every name the document binds. The unit vectors e_x, e_y, e_z are in
+   * scope only when this is given and does not hold them: a caller that
+   * cannot see the whole document cannot tell `e_x = 3` from the built-in.
+   */
+  documentNames?: ReadonlySet<string>;
+}
+
+/**
+ * The unit vectors (docs/multisets.md §4), so `[0,1] e_x` is two points.
+ * Unlike pi and e they are resolved rather than parsed, so a document that
+ * defines `e_x` keeps its own. They are always 3D: a row using one is a 3D
+ * scene, as `(1,0,0)` makes it.
+ */
+const UNIT_VECTORS: Readonly<Record<string, readonly number[]>> = {
+  e_x: [1, 0, 0],
+  e_y: [0, 1, 0],
+  e_z: [0, 0, 1],
+};
+
+function unitVector(name: string, opts: ResolveOpts): Expr | null {
+  const axis = Object.hasOwn(UNIT_VECTORS, name) ? UNIT_VECTORS[name] : null;
+  if (!axis || !opts.documentNames || opts.documentNames.has(name)) return null;
+  return { kind: 'vec', items: axis.map(num) };
 }
 
 interface Ctx {
@@ -1721,7 +1745,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
     case 'num':
       return e;
     case 'var':
-      return ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ?? e;
+      return ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ?? unitVector(e.name, ctx.opts) ?? e;
     case 'neg':
       return { kind: 'neg', a: rx(e.a, ctx) };
     case 'bin': {
@@ -1944,6 +1968,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     // A state stands for itself: defined, and constant across space.
     definition: n => defs.consts.get(n) ?? (stateNames.has(n) ? { kind: 'var', name: n } : undefined),
     comps: n => compsOf(defs, n),
+    documentNames: new Set(byName.keys()),
   };
 
   const parsed = new Map<string, Expr>();

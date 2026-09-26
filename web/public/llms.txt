@@ -125,8 +125,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   inserts the symbol itself, and a `\` before any built-in function name
   simply drops (`\sin(x)` → `sin(x)`, `\trail` → `trail`), so `\` also works
   as a function search.
-- Constants: `pi`, `tau`, `e` (π and τ also parse directly). Imaginary unit
-  `i` in complex expressions.
+- Constants: `pi`, `tau`, `e` (π and τ also parse directly), and the unit
+  vectors `e_x`, `e_y`, `e_z` = `(1,0,0)`, `(0,1,0)`, `(0,0,1)` (always 3D,
+  so a row using one is a 3D scene; defining `e_x` yourself replaces it).
+  Imaginary unit `i` in complex expressions.
 - Functions: sin cos tan asin acos atan atan2(y,x) sinh cosh tanh sech coth
   asinh acosh atanh sqrt abs exp ln (natural) log (base 10) floor ceil round
   min max mod sign fract sinc gamma factorial, complex helpers re im arg conj,
@@ -407,6 +409,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   triangles fill; larger 3D polygons draw their outline. `cross` returns a
   vector in 3D. 3D `angle` is unsigned in [0, pi]; zero arms are undefined.
   `perp`, `line`, `square`, and `circle` remain planar; 3D dragging is not defined.
+  Point lists draw as dots in space too: `[0,1] e_x + [0,1] e_y` is 4 points,
+  `[e_x, e_z]` 2, and `([0,1],[0,1],[0,1])` the 8 corners of a cube.
 - Convex hulls: `hull(A, B, C, …)` or `hull(P)` for a whole point list draws
   the convex hull — a filled polygon in 2D, a lit opaque solid with flat-shaded faces and outlined edges in 3D
   (coplanar facets merge, so a cube shows six squares). Interior and repeated

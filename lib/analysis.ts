@@ -303,6 +303,11 @@ export function prepareDocument(
     definition: (n: string): Expr | undefined =>
       defs.fields.get(n) ?? defs.consts.get(n) ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
     comps: (n: string) => compsOf(defs, n),
+    documentNames: new Set([
+      ...raw.map(d => d.name),
+      ...[...rvScan.base.values()].map(s => s.name),
+      ...[...rvScan.derived.values()].map(s => s.name),
+    ]),
   };
   ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
 

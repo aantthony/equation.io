@@ -278,8 +278,8 @@ Checked 2026-09-26 against `lowerLists` (lib/list.ts) and the MCP validator.
 | `M = ((a,0),(0,1))` | a matrix (phase 2) | a matrix |
 | `b = [n, 3, 5]` | bracket sum (phase 1) | bracket sum |
 | `[1,2] + []` | `[]` (phase 1) | `[]` |
-| point lists in a 3D scene | not drawn | drawn |
-| `e_x`, `e_y`, `e_z` | not built in | built in |
+| point lists in a 3D scene | drawn as dots (phase 3: the app already did; the link preview and MCP validator now do too) | drawn |
+| `e_x`, `e_y`, `e_z` | built in (phase 3) | built in |
 
 [lists-tables-plan.md](lists-tables-plan.md) still says lists of different
 lengths are an error; they have taken every combination since the axis model
@@ -338,3 +338,16 @@ recorded so they can be reviewed and reversed. Progress notes live in
   it is a 2×2 matrix when it is one.
 - **Nested brackets are never a matrix.** `[[1, 2], [3, 4]]` is the multiset
   `[1 2 3 4]` (phase 1 flattening), not the old nested-list matrix spelling.
+- **Unit vectors are 3D.** `e_x`, `e_y`, `e_z` are always `(1,0,0)`, `(0,1,0)`,
+  `(0,0,1)`, so any row using one is a 3D scene, even `[0,1] e_x` alone. The
+  alternative, 2-component `e_x`, `e_y` while nothing else in the document is
+  3D, would make a row's value depend on the other rows; not pursued. In 2D,
+  write `(1,0)`.
+- **A document's own `e_x` wins.** Unlike `e` and `pi`, which may not be
+  redefined, `e_x = 3` (or a list, function or random variable of that name)
+  replaces the built-in for the whole document, so graphs that already used
+  the name keep their meaning. `e_1`, `e_n` and a sequence `e` are untouched.
+- **Point lists draw in the link preview too.** §6 said point lists in a 3D
+  scene were not drawn; the app did draw them, but the static preview did
+  not, and the MCP validator told assistants the app skipped them. Both now
+  draw them as dots, in the plane and in space.

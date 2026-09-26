@@ -32,13 +32,15 @@ try {
     }
   });
   await page.addInitScript(() => {
-    const state = { strips: 0, triangles: 0, family: [] as number[], sources: [] as string[] };
+    // `dots`: the most points one draw call has put on screen.
+    const state = { strips: 0, triangles: 0, dots: 0, family: [] as number[], sources: [] as string[] };
     (window as unknown as { objectTest: typeof state }).objectTest = state;
     const proto = WebGL2RenderingContext.prototype;
     const draw = proto.drawArrays;
     proto.drawArrays = function (mode, first, count) {
       if (mode === this.LINE_STRIP && count > 2) state.strips++;
       if (mode === this.TRIANGLES) state.triangles += count / 3;
+      if (mode === this.POINTS) state.dots = Math.max(state.dots, count);
       return draw.call(this, mode, first, count);
     };
     const drawEI = proto.drawElementsInstanced;
@@ -72,6 +74,12 @@ try {
   await page.screenshot({ path: '/private/tmp/equation-objects-geometry.png' });
   assert.deepEqual(errors, []);
   console.log('PASS 3D points, triangle and arrow');
+  // A point list in space is one batched draw of all its dots.
+  await load(['([0,1],[0,1],[0,1])', '[0,1] e_x + 2 e_z']);
+  await page.waitForFunction(() => (window as any).objectTest.dots === 8);
+  await page.screenshot({ path: '/private/tmp/equation-objects-point-list.png' });
+  assert.deepEqual(errors, []);
+  console.log('PASS 3D point lists and unit vectors');
   await load(['y=[1,2,3]x']);
   await page.waitForFunction(() => [0, 1, 2].every(v => (window as any).objectTest.family.includes(v)));
   await page.screenshot({ path: '/private/tmp/equation-objects-family.png' });

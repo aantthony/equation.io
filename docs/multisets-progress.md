@@ -9,7 +9,7 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 |---|---|---|
 | 1 Bracket sums | done | commit bb739c2. Parser: `[]` token merged in `mergeEmptyBrackets` (expr.ts); flatten in `expandItems` (list.ts); empty reductions in `reduce`; empty family in object-lists `expand`. |
 | 2 Tuple matrices | done | geom.ts lowerMat vec case; mat.ts matrixFromRows; defs.ts no bracket→matrix; det/trace/solve/exp take a tuple as one matrix. Examples rewritten. |
-| 3 Vectors in 3D | doing | subagent, worktree; merge after phase 2 |
+| 3 Vectors in 3D | done | e_x/e_y/e_z resolved in defs.ts `rx` via ResolveOpts.documentNames (doc names win); render3d batches point runs; og.ts preview draws plists. App already drew 3D plists. |
 | 4 Order | todo | |
 | 5 Display | doing | subagent, worktree (from phase-1 commit) |
 | 6 Tensors | todo | |
@@ -27,6 +27,7 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 - Phase 1: vitest 83 files / 2293 pass; typecheck, oxlint clean. Spec tests in lib/multisets.test.ts.
 
 - Phase 2: vitest 83/2299 pass; typecheck/lint/fmt clean; probes M M P→2 pts, det(M)=[1,2].
+- Phase 3 merged: vitest 83/2308 pass.
 
 ## Blockers / open issues
 

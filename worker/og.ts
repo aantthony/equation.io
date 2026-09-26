@@ -72,6 +72,10 @@ function drawLine(r: Raster, x0: number, y0: number, x1: number, y1: number, c: 
   }
 }
 
+/** A point list's dots: a handful read as points, a few hundred as a cloud,
+ *  where full-size dots would merge into one blot (the app thins them too). */
+const listDotRadius = (count: number) => (count > 200 ? 2 : 4.5);
+
 function drawDisc(r: Raster, cx: number, cy: number, rad: number, c: [number, number, number], a = 1) {
   for (let y = Math.floor(cy - rad - 1); y <= cy + rad + 1; y++) {
     for (let x = Math.floor(cx - rad - 1); x <= cx + rad + 1; x++) {
@@ -543,6 +547,15 @@ function renderRow2D(
       drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), 4.5, color);
       return;
     }
+    case 'plist': {
+      if (cpu.dim !== 2) return;
+      const rad = listDotRadius(cpu.pts.length);
+      for (const p of cpu.pts) {
+        const [px, py] = p.map(c2 => run(compile(c2), env.vars, env.stack));
+        if (isFinite(px) && isFinite(py)) drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), rad, color);
+      }
+      return;
+    }
     case 'system': {
       const plot = cpu;
       if (plot.dim !== 2) return;
@@ -796,6 +809,17 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
       drawDisc(r, sx, sy, 4.5, color);
       return;
     }
+    case 'plist': {
+      // A 2D list sits on the z = 0 plane, as the live app draws it.
+      const rad = listDotRadius(cpu.pts.length);
+      for (const p of cpu.pts) {
+        const [px, py, pz = 0] = p.map(c2 => run(compile(c2), env.vars, env.stack));
+        if (!isFinite(px) || !isFinite(py) || !isFinite(pz)) continue;
+        const [sx, sy] = project(v, [px, py, pz]);
+        drawDisc(r, sx, sy, rad, color);
+      }
+      return;
+    }
     case 'implicit3d': {
       // Only the z = f(x, y) heightmap form draws (as a wireframe); general
       // implicit surfaces would need a raymarcher, too slow on CPU here.
@@ -887,7 +911,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // The rest of the sequence family (term dots, orbit diagrams) and data
   // lists have no scanline path here yet; the site card beats a blank grid.
   vlist: 'fallback',
-  plist: 'fallback',
+  // Dots, like a point row's, in 2D or in space.
+  plist: 'draws',
   // Typed-array lists reach the worker only from a data file, whose bytes
   // never travel in the link — so there is nothing to draw here anyway.
   dlist: 'fallback',
@@ -953,6 +978,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
       return cpu.type === 'implicit3d' && cpu.heightmap
         ? null
         : 'the static preview draws only z = f(x, y) surfaces; the live app renders general implicit surfaces in full';
+    case 'plist':
+      return null;
     case 'pcurve':
     case 'point':
       return cpu.dim === 3

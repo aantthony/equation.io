@@ -117,6 +117,16 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('mean(', 5, d).hint).toBeUndefined();
     expect(syntaxHelp('Mean(', 5, d).hint).toBeUndefined();
   });
+  it('suggests the built-in unit vectors unless the document defines one', () => {
+    expect(syntaxHelp('A = 2 e_', 8, defs()).suggestions.map(s => s.description)).toEqual([
+      'Unit vector (1, 0, 0)',
+      'Unit vector (0, 1, 0)',
+      'Unit vector (0, 0, 1)',
+    ]);
+    const d = emptyEnv();
+    d.bind('e_x', { tag: 'scalar', role: 'const', expr: { kind: 'num', value: 3 } });
+    expect(syntaxHelp('e_', 2, d).suggestions.find(s => s.name === 'e_x')?.description).toBe('Defined constant');
+  });
   it('suggests symbol escapes for a \\word, replacing the backslash too', () => {
     const h = syntaxHelp('y = \\pi', 7, defs());
     expect(h.start).toBe(4); // covers the backslash

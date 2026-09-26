@@ -48,6 +48,15 @@ describe('og raster renderer', () => {
     expect(actual.px).not.toEqual(renderRaster([], 100, 100).px);
   });
 
+  it.each([
+    [['[(1,2),(3,4)] #e00'], ['(1,2) #e00', '(3,4) #e00']],
+    [['[e_x, e_z] #e00'], ['(1,0,0) #e00', '(0,0,1) #e00']],
+  ])('draws a point list as its points: %s', (list, singly) => {
+    const actual = renderRaster(list, 100, 100);
+    expect(actual.px).toEqual(renderRaster(singly, 100, 100).px);
+    expect(actual.px).not.toEqual(renderRaster([], 100, 100).px);
+  });
+
   it('draws a row in its #hex note color', () => {
     const [red, green, blue] = pixel(renderRaster(['y = x #e00 red'], 100, 100), 50, 50);
     expect(red).toBeGreaterThan(150);
