@@ -415,6 +415,8 @@ function uniformDraws(
   constNames: ReadonlySet<string>,
   rvNames: ReadonlySet<string>,
   id: string,
+  /** The row's value once point arithmetic has run — lowerObjects. */
+  lower: (e: Expr) => Expr,
 ): { expr: Expr; bases: Record<string, BaseDist>; mass?: Expr } | null {
   if (e.kind === 'eq' || e.kind === 'ineq' || usesComplex(e)) return null;
   const free = [...freeVars(e)].filter(n => !constNames.has(n));
@@ -422,6 +424,11 @@ function uniformDraws(
   const hidden = intervalsIn(e);
   if ((!params.length && !hidden.length) || free.some(n => n === 'x' || n === 'y' || n === 'z' || n === 'w'))
     return null;
+  // Numbers have a density; a point does not. Which one the row is depends on
+  // its value, not its spelling: `(0,0,1) u` and `u e_z` are the tuple
+  // (0, 0, u), a curve, though no tuple sits at the top of the row. Only the
+  // lowered row says so.
+  if (pointValued(e, lower)) return null;
   const uniform: BaseDist = {
     kind: 'uniform',
     args: [
@@ -456,6 +463,30 @@ function uniformDraws(
     );
   // Unit length (u, v, interval(0, 1)) leaves the probability as it is.
   return { expr, bases, ...(mass && !(mass.kind === 'num' && mass.value === 1) ? { mass } : {}) };
+}
+
+/** Whether a row's value is a point, points, or a figure through them —
+ *  anything classify draws by position rather than as numbers. A row that
+ *  does not lower is left to the density path, which reports it. */
+function pointValued(e: Expr, lower: (e: Expr) => Expr): boolean {
+  let value: Expr;
+  try {
+    value = lower(e);
+  } catch {
+    return false;
+  }
+  switch (value.kind) {
+    case 'vec':
+    case 'figure':
+    case 'family':
+      return true;
+    case 'list':
+      return value.items.some(it => it.kind === 'vec');
+    case 'lazy':
+      return value.body.kind === 'vec';
+    default:
+      return false;
+  }
 }
 
 /** A scalar field in x alone (or y alone) is most often a curve meant as
@@ -716,7 +747,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // and the row is a multiset of numbers with a density. That is the
       // object an expression in random variables already is, with u and v
       // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
-      const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`);
+      const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
       const known = draws ? new Set([...rvNames, ...Object.keys(draws.bases)]) : rvNames;
       if (draws) {
         for (const [name, dist] of Object.entries(draws.bases)) rvs.addAnonymous({ name, kind: 'base', dist });

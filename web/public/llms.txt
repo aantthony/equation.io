@@ -319,8 +319,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   its surface.
 - `t`: time in seconds. Any row mentioning `t` animates, e.g.
   `y = sin(x - 2t)`.
-- `u`, `v`: parametric parameters, each ranging over (0, 1). In a tuple they
-  trace curves and surfaces (`(u, u^2)`); a complex expression in u alone is
+- `u`, `v`: parametric parameters, each ranging over (0, 1). A row whose value
+  is a point traces curves and surfaces, however it is written: `(u, u^2)`,
+  `(0,0,1) u` and `u e_z` are all curves; a complex expression in u alone is
   a path (`exp(i 2 pi u)`). A bare real row in u and v alone does not depend
   on the plane, so it draws its values: the numbers it takes as u and v run
   over [0, 1], as a density curve, like a random variable — `u` is the flat

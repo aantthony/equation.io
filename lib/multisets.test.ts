@@ -788,3 +788,23 @@ describe('§5 measures', () => {
     expect(last(['y = {x > 0, 2}']).error).toBeUndefined();
   });
 });
+
+describe('§5 a row in u is drawn by its value type', () => {
+  const plan = (rows: string[]) => {
+    const row = last(rows);
+    if (row.error) throw new Error(row.error);
+    return row.cpu!;
+  };
+  it('a vector-valued row is a curve or surface, however it is spelled', () => {
+    for (const row of ['(0,0,1) u', 'u (0,0,1)', 'u e_z'])
+      expect(plan([row])).toMatchObject({ type: 'pcurve', dim: 3 });
+    expect(plan(['(1,2) u'])).toMatchObject({ type: 'pcurve', dim: 2 });
+    expect(plan(['r = interval(0,1)', '(0,0,1) r'])).toMatchObject({ type: 'pcurve', dim: 3 });
+    expect(plan(['u e_x + v e_y + u v e_z'])).toMatchObject({ type: 'psurface' });
+    // The same curve as the tuple written out.
+    expect(plan(['(0,0,1) u'])).toEqual(plan(['(0,0,u)']));
+  });
+  it('a number-valued row keeps its density, even with a tuple inside', () => {
+    for (const row of ['u^2', 'abs((u, v))', 'dot((1,2),(u,v))']) expect(plan([row]).type).toBe('density');
+  });
+});
