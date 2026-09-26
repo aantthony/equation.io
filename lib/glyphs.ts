@@ -9,7 +9,7 @@
  * draws figures draws these.
  */
 import { add, div, mul, neg, pow } from './diff.ts';
-import type { Expr } from './expr.ts';
+import type { Column, Expr } from './expr.ts';
 import { type Multivector, glyphParts } from './clifford.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -27,15 +27,35 @@ const RIM = 48;
 const TURN = 0.75;
 const INSET = 0.6;
 
-/** r (cos θ e1 + sin θ e2) for θ in [0, 2π·share], k steps. */
-function arc(r: Expr, e1: Expr[], e2: Expr[], share: number, steps: number, sense: Expr = num(1)): Expr[][] {
-  return Array.from({ length: steps + 1 }, (_, k) => {
-    const th = (2 * Math.PI * share * k) / steps;
-    const c = num(Math.cos(th));
-    const s = mul(sense, num(Math.sin(th)));
-    return e1.map((a, i) => mul(r, add(mul(c, a), mul(s, e2[i]))));
-  });
+/**
+ * The arc r (cos θ e1 + sin θ e2), θ from 0 to 2π·share in `steps` steps
+ * (a closed rim leaves out its repeated last point), as ONE vertex template
+ * run over columns of cos θ and sin θ: e1, e2 and r may be large — a slerp's
+ * coefficients — and are then written once, not once per vertex.
+ */
+function arc(
+  form: 'polygon' | 'vector',
+  dimension: 2 | 3,
+  r: Expr,
+  e1: Expr[],
+  e2: Expr[],
+  share: number,
+  steps: number,
+  sense: Expr = num(1),
+): Expr {
+  const count = form === 'polygon' ? steps : steps + 1;
+  const angle = (k: number) => (2 * Math.PI * share * k) / steps;
+  const over: Column[] = [
+    { name: ARC_COS, values: Float64Array.from({ length: count }, (_, k) => Math.cos(angle(k))) },
+    { name: ARC_SIN, values: Float64Array.from({ length: count }, (_, k) => Math.sin(angle(k))) },
+  ];
+  const c: Expr = { kind: 'var', name: ARC_COS };
+  const s = mul(sense, { kind: 'var', name: ARC_SIN });
+  return { kind: 'figure', form, dimension, vertices: e1.map((a, i) => mul(r, add(mul(c, a), mul(s, e2[i])))), over };
 }
+/** The columns an arc runs over: not names a document can write. */
+const ARC_COS = 'eqioArcCos';
+const ARC_SIN = 'eqioArcSin';
 
 /**
  * A right-handed orthonormal pair spanning the plane normal to the unit
@@ -119,8 +139,8 @@ export function multivectorGlyphs(m: Multivector): Expr[] {
       const r = call('sqrt', div(call('abs', b), num(Math.PI)));
       const e1 = [num(1), num(0)];
       const e2 = [num(0), num(1)];
-      out.push(figure('polygon', 2, arc(r, e1, e2, 1, RIM).slice(0, -1)));
-      out.push(figure('vector', 2, arc(mul(num(INSET), r), e1, e2, TURN, Math.round(RIM * TURN), call('sign', b))));
+      out.push(arc('polygon', 2, r, e1, e2, 1, RIM));
+      out.push(arc('vector', 2, mul(num(INSET), r), e1, e2, TURN, Math.round(RIM * TURN), call('sign', b)));
     } else {
       // In space the disc lies across its dual, turning counterclockwise
       // seen from the tip of the normal, which is the bivector's sense.
@@ -131,8 +151,8 @@ export function multivectorGlyphs(m: Multivector): Expr[] {
       );
       const [e1, e2] = planeBasis(n.map(c => div(c, len)));
       const r = call('sqrt', div(len, num(Math.PI)));
-      out.push(figure('polygon', 3, arc(r, e1, e2, 1, RIM).slice(0, -1)));
-      out.push(figure('vector', 3, arc(mul(num(INSET), r), e1, e2, TURN, Math.round(RIM * TURN))));
+      out.push(arc('polygon', 3, r, e1, e2, 1, RIM));
+      out.push(arc('vector', 3, mul(num(INSET), r), e1, e2, TURN, Math.round(RIM * TURN)));
     }
   }
   if (trivector) {

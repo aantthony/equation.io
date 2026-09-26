@@ -279,6 +279,43 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
           'm = mean(P); C = mean((P - m) ⊗ (P - m)); C; P; m; ' +
           '((x, y) - m) · C^-1 ((x, y) - m) = 1; ((x, y) - m) · C^-1 ((x, y) - m) = 4',
       ],
+      // action(M) draws the images of the unit square, circle and axes.
+      ['action of a shear', 'action(((1, 1), (0, 1)))'],
+      ['action of a turn and a stretch', 'J = ((0, -1), (1, 0)); action(e^(t J) ((1.5, 0), (0, 0.6)))'],
+      // A matrix field draws as glyphs, the image of a small circle at each
+      // cell; a conformal map's Jacobian gives circles everywhere.
+      ['Jacobian of z²: conformal circles', 'jacobian((x^2 - y^2, 2 x y)/4)'],
+      ['Hessian: curvature glyphs', 'f(x, y) = sin(x) cos(y); f(x, y); hessian(f)'],
+    ],
+  ],
+  // Multivectors draw grade by grade: vectors as arrows, bivectors as
+  // oriented discs, trivectors as cubes; quaternions are the even ones.
+  [
+    'geometric algebra + quaternions',
+    [
+      [
+        'bivector: an oriented area',
+        'a = (2, 0); b = (1, 1.5); vector(a); vector(b); polygon((0, 0), a, a + b, b); grade(a ⟑ b, 2)',
+      ],
+      ['geometric product = dot + wedge', 'a = (2, 0.5); b = (0.5, 1.5); vector(a); vector(b); a ⟑ b'],
+      [
+        'a rotor turns a vector',
+        'camera(-pi/3, 0.6, 5); R = e^(-(t/2) e_xy); p = (1, 0, 0.8); vector(p); vector(rotate(p, R)); R',
+      ],
+      [
+        'quaternion slerp between orientations',
+        'camera(-pi/3, 0.5, 7); q1 = quat(1, 0, 0, 0); q2 = quat(cos(1), sin(1) (1, 1, 1)/sqrt(3)); ' +
+          'rotate(hull(([-1, 1], [-1, 1], [-1, 1])), slerp(q1, q2, (1 - cos(t))/2))',
+      ],
+      // Each fiber of S³ → S² is q₀ times the circle e^(iθ); projected
+      // stereographically they are linked circles on a torus.
+      [
+        'Hopf fibration',
+        'camera(-pi/3, 0.6, 6); a = 2pi [0..7]/8; h = pi/4; ' +
+          'q = quat(cos(h), 0, sin(h) cos(a), sin(h) sin(a)) quat(cos(2pi u), sin(2pi u), 0, 0); ' +
+          '-dual(grade(q, 2))/(1 - grade(q, 0))',
+      ],
+      ['quaternion Julia set (slide s)', 'camera(-pi/3, 0.5, 3); s = 0; c = quat(-0.2, 0.8, 0, 0); qjulia(c, s)'],
     ],
   ],
   [

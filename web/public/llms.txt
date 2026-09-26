@@ -937,7 +937,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `e_x`: `e_xy`, `e_yz`, `e_zx` (and any reordering, `e_yx = −e_xy`) and
   `e_xyz`; they are always 3D, while `(1, 0) ⟑ (0, 1)` is the plane's own
   e_xy. Once one side is a multivector, juxtaposition is the geometric
-  product too (`R v rev(R)`), `∧` is the outer product, and `+`, `−`, whole
+  product too (`R p rev(R)`), `∧` is the outer product, and `+`, `−`, whole
   powers (`A^-1`, `A^3`) and `e^A` work; two plain vectors still need `⟑`
   (`e_x e_y` stays an error, `e_x ∧ e_y` the tensor wedge). Dividing by a
   multivector is refused — `a/2 e_xy` would read as `a/(2 e_xy)` — so write
@@ -950,14 +950,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   written only as a number or a vector is that number or vector
   (`grade(R ⟑ v ⟑ rev(R), 1)` is a point), and a row may name a multivector
   (`R = e^(-(t/2) e_xy)`). Rotors: `e^(-(th/2) B)` for a unit bivector B
-  turns by th in B's plane, `R v rev(R)` applies it, and `rotate(X, R)` turns
+  turns by th in B's plane, `R p rev(R)` applies it, and `rotate(X, R)` turns
   a point, a list of points or a figure by it: `rotate(hull(P), R)`.
 - Quaternions: `quat(w, x, y, z)` (or `quat(w, v)` with v a 3D vector) is
   w + x i + y j + z k, read out that way. They are the even multivectors of
   space (i = e_zy, j = e_xz, k = e_yx), so they multiply by juxtaposition
   (`quat(0,1,0,0) quat(0,0,1,0)` is `k`), invert with `q^-1`, conjugate
   with `conj(q)`, and the unit quaternion `quat(cos(th/2), sin(th/2) n)`
-  turns by th about the unit axis n: `rotate(P, q)`. `slerp(q1, q2, s)`
+  turns by th about the unit axis n: `rotate(P, q)`. `grade(q, 0)` is its
+  w, and `-dual(grade(q, 2))` its vector part (x, y, z), a point. `slerp(q1, q2, s)`
   runs the shorter arc between two rotations at constant speed, s from 0 to
   1: `rotate(hull(P), slerp(q1, q2, (1 - cos(t))/2))` rocks a solid between
   two orientations. `qjulia(c)` draws the quaternion Julia set of c — the

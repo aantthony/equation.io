@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
-import { evaluate, type Expr } from './expr.ts';
+import { type Column, evaluate, type Expr } from './expr.ts';
+import { vertexSampler } from './figure-vertices.ts';
 import { plotReadout } from './plot.ts';
 
 /**
@@ -69,8 +70,9 @@ describe('drawing', () => {
   });
   it('gives the disc the bivector’s area', () => {
     const { r, env } = row(['3 e_xy']);
-    const o = r.cls!.object as { members: Array<{ object: { vertices: Expr[] } }> };
-    const vs = o.members[0].object.vertices.map(v => evaluate(v, env));
+    const o = r.cls!.object as { members: Array<{ object: { vertices: Expr[]; over?: Column[] } }> };
+    const rim = o.members[0].object;
+    const vs = vertexSampler(rim.vertices, rim.over)(env);
     const pts = Array.from({ length: vs.length / 3 }, (_, k) => vs.slice(3 * k, 3 * k + 3));
     let area = 0;
     pts.forEach(([x0, y0, z0], k) => {
@@ -80,6 +82,11 @@ describe('drawing', () => {
     });
     // A 48-gon inscribed in the circle of area 3.
     expect(area / 2).toBeCloseTo(3 * (48 / (2 * Math.PI)) * Math.sin((2 * Math.PI) / 48), 6);
+  });
+  it('writes a large coefficient once, not once per rim vertex', () => {
+    // A slerp's coefficients are long; the rim is one template over columns.
+    const kinds = row(['slerp(quat(1, 0, 0, 0), quat(0, 1, 1, 1), 0.5)']).r.cls!.object;
+    expect(kinds.kind).toBe('family');
   });
   it('reads out a multiset of multivectors', () => {
     expect(readout(['[1, 2] e_xy'])).toBe('= [e_xy, 2 e_xy]');

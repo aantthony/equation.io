@@ -107,7 +107,7 @@ const signatures: Record<string, [string, string]> = {
   jacobian: ['jacobian((f, g))', 'The matrix of partial derivatives of a map; a 2×2 in x, y draws as glyphs'],
   hessian: ['hessian(f)', 'The matrix of second partial derivatives of a scalar field'],
   gp: ['gp(a, b) or a ⟑ b', 'Geometric product of vectors or multivectors: e_x ⟑ e_y is the bivector e_xy'],
-  rev: ['rev(A)', 'Reverse a multivector: R v rev(R) turns v by the rotor R'],
+  rev: ['rev(A)', 'Reverse a multivector: R p rev(R) turns p by the rotor R'],
   grade: ['grade(A, k)', 'The grade-k part of a multivector: grade(A, 1) is its vector'],
   dual: ['dual(A)', 'The dual A I⁻¹: dual(e_xy) is e_z'],
   quat: ['quat(w, x, y, z)', 'The quaternion w + x i + y j + z k; quat(cos(a/2), sin(a/2) n) turns by a about n'],

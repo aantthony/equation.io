@@ -589,7 +589,7 @@ function lowerMv(e: Expr, lo: (n: Expr) => LV): Multivector | null {
             if (args.length < 2) throw new Error('gp takes two or more multivectors: gp(a, b) is a ⟑ b.');
             return args.slice(1).reduce((acc, n) => geometric(acc, any(n)), any(args[0]));
           case 'rev':
-            arity(1, 'rev takes one multivector: rev(R) reverses it, so R v rev(R) turns v.');
+            arity(1, 'rev takes one multivector: rev(R) reverses it, so R p rev(R) turns the point p.');
             return reverse(any(args[0]));
           case 'dual':
             arity(1, 'dual takes one multivector: dual(e_xy) is e_z.');
