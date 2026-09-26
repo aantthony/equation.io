@@ -546,7 +546,7 @@ void main() {
   float minor = max(lineAlpha(p.x, uMinor, w), lineAlpha(p.y, uMinor, w));
   float major = max(lineAlpha(p.x, uMajor, w * 1.4), lineAlpha(p.y, uMajor, w * 1.4));
   float axis = max(lineAlpha(p.x, 1e30, w * 2.2), lineAlpha(p.y, 1e30, w * 2.2));
-  float a = max(max(minor * 0.18, major * 0.34), axis * 0.6);
+  float a = max(max(minor * ${(0.18 * theme.planeGrid).toFixed(3)}, major * ${(0.34 * theme.planeGrid).toFixed(3)}), axis * 0.6);
   float fade = 1.0 - smoothstep(uBoxR * 0.6, uBoxR, length(p.xy));
   if (a * fade < 0.01) discard;
   outColor = vec4(${glslVec3(theme.plane)}, a * fade);
