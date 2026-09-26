@@ -326,7 +326,15 @@ function lowerTensor(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): Tensor | nul
           // (Scaled, 2 T, it stays a tuple of points; on the right, M T, each
           // of its points is moved.)
           const l = e.op === '*' ? pointRows(e.a, lo, getMat) : null;
-          if (!l) return null;
+          if (!l) {
+            // v T, a vector on the left of a tuple of points that is not
+            // square: the contraction v_i T_ij, a vector of T's width. (On
+            // a square matrix M v is the one order.)
+            const r = e.op === '*' ? pointRows(e.b, lo, getMat) : null;
+            if (!r || r.shape[0] === r.shape[1]) return null;
+            const v = lo(e.a);
+            return v.vec ? product(vectorTensor(v.items), r) : null;
+          }
           const r = pointRows(e.b, lo, getMat) ?? lowerMat(e.b, lo, getMat);
           const v = r ? null : lo(e.b);
           if (r) return product(l, 'm' in r ? fromMat(r.m) : r);
@@ -496,12 +504,22 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
           case '-':
             if (!a || !b) {
               const verb = e.op === '+' ? 'add' : 'subtract';
-              // A point beside a tuple of points moves each of them — in a
-              // figure, which reads T as its points (docs/multisets.md §3).
-              if (lo(a ? e.b : e.a).vec) {
-                throw new Error(
-                  `Cannot ${verb} a matrix and a point. To move a tuple of points, draw it: polygon(T + (1, 0)).`,
-                );
+              // A point beside a tuple of points moves each of them: the
+              // point is added to every row, wherever T is written, so
+              // `T + p` means one thing on a row, in a definition and in a
+              // figure (docs/multisets.md §9).
+              const p = lo(a ? e.b : e.a);
+              if (p.vec) {
+                const m = (a ?? b)!.m;
+                if (p.items.length !== m[0].length) {
+                  throw new Error(
+                    `Cannot ${verb} a ${p.items.length}D point and a tuple of ${m[0].length}D points — each row takes a point of its own size.`,
+                  );
+                }
+                const op = e.op === '+' ? add : sub;
+                return {
+                  m: m.map(row => row.map((entry, c) => (a ? op(entry, p.items[c]) : op(p.items[c], entry)))),
+                };
               }
               throw new Error(`Cannot ${verb} a matrix and a number — use a multiple of the identity.`);
             }
@@ -569,8 +587,12 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         tensorOp(e) ||
         deepTuple(e) ||
         (e.kind === 'var' && tensorNamed(e.name)) ||
-        // T v: a named tuple of points applied as a matrix (see lowerTensor).
-        (e.kind === 'bin' && e.op === '*' && e.a.kind === 'var' && tensorNamed(e.a.name, true)?.shape.length === 2)
+        // T v: a named tuple of points applied as a matrix (see lowerTensor),
+        // and v T, a vector contracted with one.
+        (e.kind === 'bin' &&
+          e.op === '*' &&
+          ((e.a.kind === 'var' && tensorNamed(e.a.name, true)?.shape.length === 2) ||
+            (e.b.kind === 'var' && tensorNamed(e.b.name, true)?.shape.length === 2 && lo(e.a).vec)))
       )
         throw new MatrixSeen();
     } else {

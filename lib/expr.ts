@@ -1048,16 +1048,17 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
       // recurrence row is written: a_{n+1}, a_(n-1), a_{10}.
       // A sort(…) is a tuple, so it indexes as one: sort(L)[2]. A list
       // literal written right against its index, [3, 1, 2][2], is indexed
-      // too, so it can say it has no order (with a space it multiplies).
+      // too, so it can say it has no order. A bracket index is written
+      // right against what it indexes: with a space, L [2], sort(L) [2] and
+      // [1, 2] [3] multiply (docs/multisets.md §9).
+      const touching = last!.loc[1] === token.loc[0];
       const isIndex =
         token.type === 'parenopen' &&
         (last!.type === 'symbol'
           ? token.str === '['
-            ? indexes(path ?? last!.str)
+            ? touching && indexes(path ?? last!.str)
             : last!.str.endsWith('_') && activeListNames.has(last!.str)
-          : token.str === '[' &&
-            last!.type === 'parenclose' &&
-            (closed === 'sort' || (closed === '[list]' && last!.loc[1] === token.loc[0])));
+          : token.str === '[' && touching && last!.type === 'parenclose' && (closed === 'sort' || closed === '[list]'));
       const isFnCall =
         !isIndex &&
         !path?.includes('.') &&

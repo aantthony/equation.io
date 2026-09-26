@@ -335,7 +335,13 @@ export function withHelpers(shader: string): string {
 }
 
 function fmt(value: number): string {
-  if (!isFinite(value)) throw new Error(`Cannot compile non-finite constant: ${value}`);
+  if (!isFinite(value)) {
+    throw new Error(
+      Number.isNaN(value)
+        ? 'This row has an undefined constant (NaN) in it, so it cannot be drawn.'
+        : `This row has an infinite constant (${value > 0 ? '∞' : '−∞'}) in it, so it cannot be drawn — a count or total over an unbounded set is ∞.`,
+    );
+  }
   const s = String(value);
   return /[.e]/.test(s) ? s.replace('e', 'E') : `${s}.0`;
 }

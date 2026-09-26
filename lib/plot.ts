@@ -33,7 +33,7 @@ import {
 import type { FigureName } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
-import { packedTuple, tupleRow } from './list.ts';
+import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
@@ -976,6 +976,12 @@ export function classifyRow(
   if (packed) {
     const values = Array.from(packed.subarray(0, TUPLE_SHOWN), (value): Expr => ({ kind: 'num', value }));
     const object: MathObject = { kind: 'tuple', values, length: packed.length };
+    return { cls: { object, animated: false, needs3D: false, params: [] } };
+  }
+  // A multiset of longer tuples reads out, as a multiset of matrices does.
+  const tuples = tupleMultiset(low);
+  if (tuples && !tuples.values.some(v => [...freeVars(v)].some(n => ['x', 'y', 'z', 'u', 'v', 't'].includes(n)))) {
+    const object: MathObject = { kind: 'tuple', values: tuples.values, shape: [tuples.width], count: tuples.count };
     return { cls: { object, animated: false, needs3D: false, params: [] } };
   }
   const lowered = tupleRow(low);

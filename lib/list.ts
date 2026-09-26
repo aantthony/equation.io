@@ -457,17 +457,48 @@ function constVal(e: Expr, ctx: Ctx, what: string, whole = false): number {
 
 /** Expand the items of a list literal: ranges become runs of numbers, with
  *  the step set by the element just before the range ([0, 0.5..10]). */
-function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] {
-  const out: Expr[] = [];
+function expandItems(raw: readonly Expr[], ctx: Ctx): Expr[] & { width?: number } {
+  const out: Expr[] & { width?: number } = [];
+  /** Tuples among the items, and other things, for the one message. */
+  let tuples = 0;
   for (const item of raw) {
     if (!isRange(item)) {
       const low = lower(item, ctx);
       // A bracket is a multiset sum (docs/multisets.md §2): a multiset among
       // the items contributes every one of its elements, so [n, 3, 5] with
-      // n = [1,2] is [1 2 3 5]. The result is a new multiset, not n.
-      if (isSeq(low)) out.push(...(expand(settle(low, ctx), ctx) as Expr & { kind: 'list' }).items);
-      else out.push(low);
+      // n = [1,2] is [1 2 3 5]. The result is a new multiset, not n. A tuple
+      // is one element, not its positions: [(1, 2, 3, 4), (5, 6, 7, 8)] is a
+      // multiset of two 4-tuples, stored as tuples are, positions innermost.
+      // (A tuple of 2 or 3 numbers is a point, and joins as one.)
+      if (isSeq(low)) {
+        const axes = axesOf(low);
+        const at = axes.findIndex(a => a.ordered);
+        const values = (expand(settle(low, ctx), ctx) as Expr & { kind: 'list' }).items;
+        if (at >= 0 && at === axes.length - 1) {
+          const width = axes[at].n;
+          if (width <= 3 && !values.some(v => v.kind === 'vec')) {
+            for (let k = 0; k < values.length; k += width) out.push({ kind: 'vec', items: values.slice(k, k + width) });
+            continue;
+          }
+          if (out.width !== undefined && out.width !== width) {
+            throw new Error(`A multiset holds tuples of one length, not ${out.width} and ${width}.`);
+          }
+          out.width = width;
+          tuples += values.length / width;
+        }
+        out.push(...values);
+      } else out.push(low);
+      if (out.width !== undefined && tuples !== out.length / out.width) {
+        throw new Error(
+          `A multiset of ${out.width}-tuples cannot also hold numbers or points: a tuple is one element, not its values.`,
+        );
+      }
       continue;
+    }
+    if (out.width !== undefined) {
+      throw new Error(
+        `A multiset of ${out.width}-tuples cannot also hold numbers or points: a tuple is one element, not its values.`,
+      );
     }
     // NOT marked whole: a range bound is an ordinary number ([1..3.5] is
     // legal), and in `[0, b..2]` the bound IS the thing that sets the step.
@@ -911,7 +942,13 @@ const isPointValue = (e: Expr): boolean =>
  */
 function tupleOf(items: Expr[], ctx: Ctx): Expr {
   const n = items.length;
-  if (items.some(isTuple)) throw new Error('A tuple of tuples is a matrix — not a value of its own yet.');
+  // (A tuple of tuples written out is a tensor, which geometry lowering
+  // builds; one that reaches here is built over a multiset.)
+  if (items.some(isTuple)) {
+    throw new Error(
+      'A tensor over a list — a tuple of tuples with a list inside — is not supported yet: take one element at a time, or write the tensor out on a row of its own.',
+    );
+  }
   const { parts, axes } = align(items.map(it => (isDataScatter(it) ? scatterPoints(it) : it)));
   if (!axes) return withAxes(listOf(parts, ctx), [tupleAxis(n)]);
   const total = axes.reduce((size, a) => size * a.n, 1);
@@ -1018,7 +1055,13 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   const issue = ctx.opts.indexIssue?.(idx, target);
   if (issue) throw new Error(issue);
   const lowered = settle(lower(target, ctx), ctx);
-  const low = (isDataScatter(lowered) ? scatterPoints(lowered) : lowered) as Exclude<Expr, { kind: 'lazy' }>;
+  // A point is a tuple of its coordinates (docs/multisets.md §3): a named
+  // one, T = (3, 1, 2), reaches here as (T_x, T_y, T_z) and T[2] is T_y.
+  const point =
+    lowered.kind === 'vec' && !isSeq(lowered) && lowered.items.every(it => it.kind !== 'vec' && !isSeq(it))
+      ? withAxes<Expr>({ kind: 'list', items: lowered.items }, [tupleAxis(lowered.items.length)])
+      : null;
+  const low = (point ?? (isDataScatter(lowered) ? scatterPoints(lowered) : lowered)) as Exclude<Expr, { kind: 'lazy' }>;
   if (!isSeq(low)) {
     const name = target.kind === 'var' ? target.name : 'this';
     throw new Error(`${name} is not a list here — define it above where it is used.`);
@@ -1331,6 +1374,29 @@ function lower(e: Expr, ctx: Ctx): Expr {
           if (e.name === 'count') return num(arg.values.length);
           throw new Error(`${e.name}(…) needs numbers; that column holds text.`);
         }
+        // A multiset of tuples (the positions stored innermost) is reduced
+        // tuple by tuple: count counts the tuples, and total and mean are
+        // taken position by position, as they are for points.
+        const own = axesOf(arg);
+        const tupleAt = own.findIndex(a => a.ordered);
+        if (e.name !== 'sort' && own.length > 1 && tupleAt === own.length - 1) {
+          const width = own[tupleAt].n;
+          const all = isData(arg) ? Array.from(arg.values, num) : (arg as Expr & { kind: 'list' }).items;
+          if (e.name === 'count') return num(all.length / width);
+          if (e.name !== 'total' && e.name !== 'mean') {
+            throw new Error(
+              `${e.name}(…) of a multiset of ${width}-tuples is not defined — only count, total and mean are.`,
+            );
+          }
+          const at = (k: number) => all.filter((_, i) => i % width === k);
+          return withAxes(
+            listOf(
+              Array.from({ length: width }, (_, k) => reduce(e.name, at(k), ctx)),
+              ctx,
+            ),
+            [tupleAxis(width)],
+          );
+        }
         const reduced = isData(arg)
           ? reduceData(e.name, arg.values, ctx)
           : reduce(e.name, (arg as Expr & { kind: 'list' }).items, ctx);
@@ -1385,17 +1451,24 @@ function lower(e: Expr, ctx: Ctx): Expr {
       // The origin is the literal itself, not this visit to it: expanding
       // M (0, [-1,1]) writes the same literal into every output component,
       // and those are one list, not several.
-      const out = listOf(expandItems(e.items, ctx), ctx) as Seq;
+      const items = expandItems(e.items, ctx);
+      const out = listOf(items, ctx) as Seq;
       // (…nor this COPY of it: a literal marked with its origin is one list
       // in every clone Σ expansion or a finite difference made of it.)
       const known = e.axes;
       const origin = originOf(e);
+      const width = items.width ?? 1;
+      const elements = seqLength(out) / width;
+      const own: Axis[] =
+        origin !== undefined ? [{ id: `#o${origin}`, n: elements }] : [{ id: `#${++anonymous}`, n: elements }];
       const axes =
         known && known.reduce((size, a) => size * a.n, 1) === seqLength(out)
           ? known
-          : origin !== undefined
-            ? [{ id: `#o${origin}`, n: seqLength(out) }]
-            : axesOf(out);
+          : items.width !== undefined
+            ? [...own, tupleAxis(width)]
+            : origin !== undefined
+              ? own
+              : axesOf(out);
       e.axes = axes;
       return withAxes(out, axes);
     }
@@ -1497,6 +1570,19 @@ export function tupleRow(e: Expr): Expr {
   const points: Expr[] = [];
   for (let k = 0; k < items.length; k += n) points.push({ kind: 'vec', items: items.slice(k, k + n) });
   return withAxes({ kind: 'list', items: points }, axes.slice(0, -1));
+}
+
+/** A multiset of tuples of more than 3 numbers — [(1, 2, 3, 4), (5, 6, 7, 8)]
+ *  — as its values back to back, `count` tuples of `width`, so its row can
+ *  read out as a multiset of matrices does; null for anything else. */
+export function tupleMultiset(e: Expr): { values: readonly Expr[]; width: number; count: number } | null {
+  if (!isList(e) && !isData(e)) return null;
+  const axes = axesOf(e);
+  const width = axes.at(-1)?.n ?? 0;
+  if (axes.length < 2 || !axes.at(-1)!.ordered || axes.slice(0, -1).some(a => a.ordered) || width <= 3) return null;
+  const values = isData(e) ? Array.from(e.values, num) : e.items;
+  if (values.some(it => it.kind === 'vec')) return null;
+  return { values, width, count: values.length / width };
 }
 
 /** A tuple of more than 3 packed numbers — a sorted column — as its numbers,

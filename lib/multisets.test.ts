@@ -549,7 +549,7 @@ describe('§3 figures over multisets of tuples', () => {
       [2, 0, 0, 1],
     ]);
   });
-  it('moves a square tuple of points point by point', () => {
+  it('reads a square tuple of points the same way inside a figure and out', () => {
     const T3 = 'T = ((0,0,0),(1,0,0),(0,1,0))';
     expect(figures([T3, 'polygon(T + (0,0,1))'])).toEqual([[0, 0, 1, 1, 0, 1, 0, 1, 1]]);
     const turned = figures([T3, 'polygon(rotate(T, pi/2, (0,0,1)))'])[0];
@@ -557,11 +557,79 @@ describe('§3 figures over multisets of tuples', () => {
     const T = 'T = ((0,0),(1,1))';
     expect(figures([T, 'polyline(T + (1,0))'])).toEqual([[1, 0, 2, 1]]);
     expect(figures([T, 'polyline(2 T)'])).toEqual([[0, 0, 2, 2]]);
-    expect(figures([T, 'R = ((0,-1),(1,0))', 'polyline(R T)'])).toEqual([[0, 0, -1, 1]]);
+    // R T is the matrix product R·T, whose rows are not the turned points;
+    // a transform of the figure turns each point.
+    expect(figures([T, 'R = ((0,-1),(1,0))', 'polyline(R T)'])).toEqual([[-1, -1, 0, 0]]);
+    expect(figures([T, 'R = ((0,-1),(1,0))', 'R polyline(T)'])).toEqual([[0, 0, -1, 1]]);
     const spun = figures([T, 'polyline(rotate(T, pi))'])[0];
     [0, 0, -1, -1].forEach((v, k) => expect(spun[k]).toBeCloseTo(v, 12));
-    // On a row of its own it is a matrix, and a point is not called a number.
-    expect(last([T, 'T + (1,0)']).error).toMatch(/a matrix and a point.*polygon\(T \+ \(1, 0\)\)/);
+    // On a row of its own, T + p adds p to every row too.
+    expect(last([T, 'T + (1,0)']).info).toBe('= ((1, 0), (2, 1))');
+    expect(last([T, '(1,0) - T']).info).toBe('= ((1, 0), (0, -1))');
+  });
+  it('draws the same figure whether the matrix is named or not', () => {
+    const M = ['M = ((1,2),(3,4))', 'N = ((0,1),(1,0))'];
+    for (const X of ['M N', 'M M', '2 M', 'M + (1,1)', 'N M']) {
+      const inline = figures([...M, `polyline(${X})`]);
+      expect(inline).toEqual(figures([...M, `P = ${X}`, 'polyline(P)']));
+    }
+    expect(figures([...M, 'polyline(M N)'])).toEqual([[2, 1, 4, 3]]);
+    expect(figures([...M, 'polyline(M N)'])).toEqual(figures(['polyline(((2,1),(4,3)))']));
+    expect(figures([...M, 'polyline(M M)'])).toEqual([[7, 10, 15, 22]]);
+    // A multiset of matrices: one figure per element, named or not.
+    const a = ['a = [1,2]', 'M = ((a,0),(0,1))', 'N = ((0,1),(1,0))'];
+    expect(figures([...a, 'polyline(M N)'])).toEqual([
+      [0, 1, 1, 0],
+      [0, 2, 1, 0],
+    ]);
+    expect(figures([...a, 'polyline(M N)'])).toEqual(figures([...a, 'P = M N', 'polyline(P)']));
+  });
+});
+
+describe('§3 indexing is written against its brackets', () => {
+  it('multiplies with a space, indexes without', () => {
+    expect(last(['L = [3,1,2]', 'sort(L)[2]']).info).toBe('= 2');
+    const spaced = last(['L = [3,1,2]', 'sort(L) [2]']).cls!.object;
+    if (spaced.kind !== 'point') throw new Error(spaced.kind);
+    expect(spaced.source.coordinates.map(c => evaluate(c, {}))).toEqual([2, 4, 6]);
+    expect(multiset(['L = [3,1,2]', 'L [2]'])).toEqual([2, 4, 6]);
+  });
+  it('indexes a named point, which is a tuple', () => {
+    expect(last(['T = (3,1,2)', 'T[2]']).info).toBe('= 1');
+    expect(last(['T = (3,1)', 'T[2]']).info).toBe('= 1');
+    expect(last(['T = (3,1)', 'q = T[2] + 1', 'q']).info).toBe('= 2');
+    expect(last(['T = (3,1)', 'k = 1', 'T[k]']).info).toBe('= 3');
+    expect(last(['T = (3,1)', 'T[3]']).error).toMatch(/out of range/);
+    // A matrix's first index is its rows, as a tensor's is its slices.
+    const row = last(['M = ((1,2),(3,4))', 'M[1]']).cls!.object;
+    if (row.kind !== 'point') throw new Error(row.kind);
+    expect(row.source.coordinates.map(c => evaluate(c, {}))).toEqual([1, 2]);
+    // A named point is still no list: d/ds of a function of it is symbolic.
+    expect(last(['A = (1,2)', 'G(x,y) = x^2 y', 's = 1', 'd/ds G(s A)']).info).toBe('= 6');
+  });
+});
+
+describe('§2 a bracket of tuples', () => {
+  it('is a multiset of tuples, not of their values', () => {
+    expect(last(['[(1,2,3,4),(5,6,7,8)]']).info).toBe('= [(1, 2, 3, 4), (5, 6, 7, 8)]');
+    expect(last(['count([(1,2,3,4),(5,6,7,8)])']).info).toBe('= 2');
+    expect(last(['mean([(1,2,3,4),(5,6,7,8)])']).info).toBe('= (3, 4, 5, 6)');
+    expect(last(['P = ([1,2],3,4,5)', 'count(P)']).info).toBe('= 2');
+    expect(last(['[(1,2,3,4), 5]']).error).toMatch(/4-tuples cannot also hold numbers/);
+    expect(last(['[(1,2,3,4), (1,2,3,4,5)]']).error).toMatch(/tuples of one length/);
+    // Short tuples are points, and join as points.
+    expect(last(['[sort([1,2]), (3,4)]']).cls!.object).toMatchObject({ kind: 'list', element: 'point' });
+  });
+});
+
+describe('§4 a vector on the left of a tuple of points', () => {
+  it('contracts with it', () => {
+    const v = last(['T = ((1,2,3),(4,5,6))', '(1,1) T']);
+    expect(v.error).toBeUndefined();
+    if (v.cls!.object.kind !== 'point') throw new Error(v.cls!.object.kind);
+    expect(v.cls!.object.source.coordinates.map(c => evaluate(c, {}))).toEqual([5, 7, 9]);
+    expect(last(['T = ((1,2,3),(4,5,6))', '(1,1,1) T']).error).toMatch(/need one length/);
+    expect(last(['a = [1,2]', 'T = ((1,2,3),(4,5,a))', '(1,1) T']).error).not.toMatch(/not a value of its own/);
   });
 });
 

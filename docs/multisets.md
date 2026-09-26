@@ -374,7 +374,12 @@ recorded so they can be reviewed and reversed. Progress notes live in
   draws the point (1, 2, 3), which makes the scene 3D. A longer tuple of
   numbers has no picture: its row reads out `= (1, 2, 3, 5, 8)` (a new
   `tuple` row kind) and draws nothing. A multiset of short tuples is a
-  multiset of points; of longer ones, an error.
+  multiset of points; of longer ones, a multiset of tuples that reads out
+  (`[(1,2,3,4), (5,6,7,8)]` is `= [(1, 2, 3, 4), (5, 6, 7, 8)]`: a bracket
+  keeps a tuple whole rather than flattening its values). `count` counts its
+  tuples; `total` and `mean` act position by position; the other reductions
+  are errors. A bracket that mixes long tuples with numbers, points or
+  tuples of another length is an error.
 - **Tuple literals may be any length.** `(1, 2, 3, 5, 8)` is a tuple of five
   numbers (it was a parse error). A tuple of tuples is a tensor (phase 6).
 - **`sort(P, key)` details.** The key has to run over P's instances or
@@ -387,10 +392,16 @@ recorded so they can be reviewed and reversed. Progress notes live in
 - **Indexing details.** A slice `T[2..4]` is a tuple; a list of indices,
   `T[N]`, runs over N (a multiset) as before; a filter keeps a tuple's order.
   On a multiset of tuples, `T[k]` is position k of each. Besides a name, a
-  `sort(…)` call indexes, `sort(L)[2]`, and so does a list literal written
-  right against its brackets, `[3, 1, 2][2]`, which is the needs-order
-  error (with a space, `[1, 2] [3]`, it still multiplies). Other calls and
-  parenthesised expressions still multiply.
+  `sort(…)` call indexes, `sort(L)[2]`, and so does a list literal,
+  `[3, 1, 2][2]`, which is the needs-order error. An index is written right
+  against what it indexes: with a space, `L [2]`, `sort(L) [2]` and
+  `[1, 2] [3]` all multiply (a sequence's `a_(n-1)` and `a_{n}` keep their
+  own rule). Other calls and parenthesised expressions multiply.
+- **A named point indexes.** A point is a tuple of 2 or 3 numbers, so with
+  `T = (3, 1, 2)`, `T[2]` is 1 (slices and slider indices too); it used to
+  be `T` times the multiset `[2]`, which a space still writes (`T [2]`). A
+  named point is still not a list anywhere else (`d/ds G(s A)` stays
+  symbolic). State families (`p[1]`) and sequences (`a_n`) are unchanged.
 - **A matrix's rows are a tuple.** `M[2]` is its second row and `polyline(M)`
   walks the rows, so `g(M)` for `g(x, y) = x y` and a 2×2 M is a tuple of
   2 numbers — a point — where `g([(1,2),(3,4)])` is a multiset of 2 numbers.
@@ -422,7 +433,9 @@ recorded so they can be reviewed and reversed. Progress notes live in
   Three readings of the old rules are kept: a tuple of 2D or 3D points that
   is not square is still drawn as dots, and so is any tensor of that shape
   however it was made (`(1,2) ⊗ (3,4,5)` draws what
-  `((3,4,5),(6,8,10))` draws, so `==` holds); a pair of named points `(A, B)` still
+  `((3,4,5),(6,8,10))` draws, so `==` holds, and a figure of a matrix
+  expression draws what the same expression named draws — see the bullet
+  on figures below); a pair of named points `(A, B)` still
   says it is not a figure (it was most likely meant as the segment); and in
   x, y or z a matrix is an error, not a field of matrices.
 - **The wedge is the graded one.** On vectors it is `a ⊗ b − b ⊗ a`; in
@@ -441,16 +454,21 @@ recorded so they can be reviewed and reversed. Progress notes live in
   of a square matrix stays the error it was (`M v` is the one order).
 - **A tuple of points is a matrix to a product on its right.** `A (1, 1, 1)`
   and `A B` for 2×3 and 3×2 tuples of points multiply as matrices (the
-  consumer decides, §3). `2 T` still scales the points, and `M T` still
-  moves each point of T.
+  consumer decides, §3), and `(1, 1) T` for a 2×3 T is the row vector
+  `v_i T_ij`. `2 T` scales the points, and `M T` for a k×k M and a tuple of
+  n ≠ k points of k coordinates moves each point of T (the product M·T is
+  not defined there). A square T is a matrix, so `M T` is the product M·T:
+  see the bullet on figures below.
 - **`T[k]` of a named tensor is its k-th slice** along the first index.
   `T[2][1]` is `T[2]` times the one-element multiset `[1]`, since only a name
   indexes; name the slice first.
 - **Cut from phase 6.** A bracket of tensors (`[M, N]`) is an error rather
-  than a multiset of matrices; a multiset of tensors cannot be named when it
-  comes from a list of vectors (`B = p ∧ e_z` with `p = [e_x, e_y]`; unnamed,
-  the row expands element by element and works, and a list in an entry,
-  `M = ((a, 0), (0, 1))`, can always be named); a tuple is read as a tensor
+  than a multiset of matrices; a multiset of tensors can be named when it
+  comes from a list of vectors (`B = p ∧ e_z` with `p = [e_x, e_y]` reads
+  out both bivectors) or from a list in an entry (`M = ((a, 0), (0, 1))`),
+  but a tuple of tuples built over a list inside the tensor layer
+  (`(1, 1) T` for `T = ((1, 2, 3), (4, 5, a))`) is an error that says so;
+  `(T, T)` for a named tuple of points is not yet the 2×2×3 tensor; a tuple is read as a tensor
   when it is written out or named (`L = sort(K)`, then `L ⊗ L`), while
   `sort(K) ⊗ v` unnamed is expanded element by element (the same values,
   but it cannot be named); a tensor has at most 729 entries; no transpose,
@@ -484,12 +502,19 @@ recorded so they can be reviewed and reversed. Progress notes live in
   `polygon(T)` and `hull(T)` walk T's tuple axis; each other axis (a list
   inside T, `polyline(sort(P, P.x) + (a, 0))`, a named `M = ((a, 0), (0, 1))`)
   is a family, as the tuple written out is, up to 1024 figures.
-- **A figure moves a square tuple of points point by point.** In
-  `polygon(T + (0, 0, 1))`, `polyline(2 T)`, `polygon(R T)` and
-  `polygon(rotate(T, a))`, a named square T is read as its rows (the
-  consumer decides, §3), so each point moves; a matrix on the left of a
-  product stays the matrix. On a row of its own `T + (1, 0)` is still an
-  error (a matrix and a point do not add), `2 T` and `R T` matrix algebra.
+- **A matrix means the same inside a figure and out.** An expression's
+  value never depends on whether a figure consumes it, so `polyline(X)` and
+  `P = X; polyline(P)` draw the same for every X (§1's `==`). Juxtaposition
+  is always the matrix or tensor product: `polyline(M N)` computes M·N, then
+  walks its rows. So for a square tuple of points T, `R T` is R·T, whose
+  rows are **not** the turned points (those are the rows of T Rᵀ); turn a
+  tuple of points with `rotate(T, a)`, or transform the figure,
+  `R polygon(T)`, which applies R to each vertex. `T + p` (and `p + T`,
+  `T - p`) adds p to every row wherever it is written — on a row of its own
+  it reads out `= ((1, 0), (2, 1))`, and it can be named — and `2 T` scales
+  every row, so both move the figure point by point. (Until this fix a
+  figure read a named T as its points inside any product, so
+  `polyline(M N)` drew M applied to N's rows, unlike `P = M N`.)
 - **A multiset of matrices pairs with points built from it.** With
   `M = ((a, 0), (0, 1))` and `Q = M (1, 1)`, `M Q` and `R = M Q` choose M
   once per element of a, so they are 2 points (M M (1, 1)). A definition
@@ -538,31 +563,70 @@ recorded so they can be reviewed and reversed. Progress notes live in
 - **How a set is measured** (phase 8). A comparison of one variable with a
   constant (`0 < x < 1`, `u < a`) narrows that variable's range. What is left
   decides the route. Nothing left, or one equation `y = g(x)` over a bounded
-  range of the other variable: symbolic integrals through the ∫ machinery
-  (arc length ∫ f √(1 + g'²) for the graph), so sliders stay symbolic and the
-  row is live. Anything else (a region or implicit curve in one or two
-  variables, roots) is numeric: the set is first proved bounded by interval
-  arithmetic on the far strips (R = 2⁻⁸ … 2²⁰), then measured on a quadtree of
-  depth 12 over that box (cells proved in count whole, proved out drop,
-  boundary cells by marching squares — corner values for a single open
-  comparison, an 8×8 sample for several). A cell budget (100k) steps the
-  depth down to 8 before giving up. Its sliders are read when the row
-  resolves, like Σ bounds: moving one re-resolves the row (no runtime-slider
-  fast path), and t is an error. Results are memoized per set and values.
+  range of the other variable: integrals (arc length ∫ f √(1 + g'²) for the
+  graph). An integrand that is finite and continuous everywhere (sums,
+  products and whole powers of sin, exp, …) over bounded ranges keeps its
+  verified closed form, so sliders stay symbolic and the row is live; an
+  empty range clamps to 0 (`max(lo, hi)` as the upper end, `max(0, hi − lo)`
+  for a length), never a negative measure. Any other integrand is integrated
+  at the sliders' values by adaptive Gauss–Kronrod that finds its own
+  singularities: where panels will not settle, dyadic shells of ∫|f| around
+  the spot decide — shells that stop shrinking are a divergence (∞ for a
+  length, an error for a total or mean: `total({0 < x < 1: 1/x})`), shells
+  shrinking geometrically bound the rest, and anything else is an error. A
+  closed form that agrees is kept. On a graph, where g is undefined the curve
+  is not there (`y = sqrt(x)` over −1 < x < 1 is the arc over [0, 1]).
+  Anything else (a region or implicit curve in one or two variables, roots)
+  is numeric: the set is first proved bounded by interval arithmetic on
+  strips, each side of each coordinate separately (cuts at 0, ±2⁻⁸ … ±2²⁰,
+  then bisected), with a polynomial's leading form as a fallback (for P of
+  degree n whose top form is definite on the circle, P keeps its sign beyond
+  a radius; several equations through the sum of their squares), so the
+  lemniscate is bounded. It is then measured on a quadtree refined only
+  where the edge is: cells proved in count whole, proved out drop. For a
+  region the undecided cells are bounded by the mean value theorem (the
+  gradient's enclosure gives, per cell quadrant, linear bounds that leave a
+  band of width O(h²)), so the measure is certified to a relative 2·10⁻³ or
+  the row is an error ("could not be measured precisely enough"), and the
+  readout shows only the digits the bound vouches for (the last one shown is
+  the first uncertain). Values integrate on proved-inside cells by a Gauss
+  rule checked against its four children where the value varies; a value
+  unbounded at a point is refined toward it and its shells decide
+  divergence. A curve's length is marching squares at the last level, with
+  four times the change from the level before (plus the cells where the
+  curve meets its domain's edge) as its uncertain error; where the equation
+  may jump (not continuous everywhere), a sign change is kept only if
+  bisection along the edge finds a real zero (`y = sign(x)` has no vertical
+  segment). All of this runs to a deterministic work budget (about 50 ms)
+  with a 300 ms hard stop; past it the row is an error, never a freeze.
+  Its sliders are read when the row resolves, like Σ bounds: moving one
+  re-resolves the row (no runtime-slider fast path), and t is an error.
+  Results — and refusals — are memoized per set, values and constants.
 - **Unbounded sets.** A far strip proved inside the set (`x > 0`) makes the
   count ∞. When neither boundedness nor a strip is proved (`y > x^2`,
   `y = sin(x)`), the set is measured in the squares of half-size 1024 and
   2048: growth by more than 1.5× reads as ∞, otherwise the row is an error
   (unbounded but thin sets, like `|y| < exp(-x^2)`, are not measured). This
-  is a heuristic, not a proof. Over x alone, `total`/`mean` need ∫|f| to
+  is a heuristic, not a proof (the one place a measure is not certified or
+  refused). Interval products take 0·∞ = 0 (an interval holds reals), so a
+  strip of a quarter plane encloses instead of reading as the whole line. A
+  count of ∞ in a drawn row (`y = count({0 < v < 1, v < x})`, where x is
+  reduced over too) is an error naming the infinite constant. Over x alone, `total`/`mean` need ∫|f| to
   converge (a Lebesgue integral), so `total(x)` is an error rather than 0 by
   symmetry; `mean` over any infinite measure is an error, `count` is ∞, and
   two unbounded variables with no filter (`total(x y)`) are an error.
 - **Counting points.** A polynomial in one variable counts its distinct real
   roots exactly (`count(x^2 = 0)` = 1). Otherwise the roots are sought in the
-  proved box: in one variable by dense sampling and refinement
-  (lib/roots.ts; not certified, so a root narrower than the sampling can be
-  missed), in two by Krawczyk-certified subdivision, where an incomplete
+  proved box (clipped to the ranges given, whose ends the conditions still
+  decide): in one variable by interval subdivision — a piece where the
+  function's enclosure excludes 0 drops, and on a piece where the
+  derivative's enclosure keeps one sign a certain sign change proves exactly
+  one root. A piece that never settles (a double root like `sin(x) = 1`, or
+  roots piling up like `sin(1/x) = 0` at 0) or more than 40,000 pieces is an
+  error, never a short count; a root at a range's own end is separated by
+  proving the shells toward it empty (to 10⁻³⁰ of the scale). Functions
+  without an interval enclosure (gamma) are errors. In two variables by
+  Krawczyk-certified subdivision, where an incomplete
   search is an error rather than a short count (so systems beyond +, −, ×, ÷
   and whole powers, which the certificate cannot enclose, are errors). An
   unbounded set of roots (`sin(x) = 0`) is an error that suggests a range.

@@ -11,6 +11,7 @@ import {
   defKey,
   listGetter,
   listNamesOf,
+  indexNamesOf,
   isListName,
   indexIssue,
   MissingDataError,
@@ -349,7 +350,8 @@ export function prepareDocument(
     constNames,
     fieldEnv,
     fnNames,
-    listNames,
+    // What parses as an index: the lists and the named points (T[2]).
+    listNames: indexNamesOf(defs),
     valueNames,
     getFn,
     getList,

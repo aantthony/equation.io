@@ -400,6 +400,13 @@ export function listNamesOf(defs: ValueDefinitions): Set<string> {
   return out;
 }
 
+/** Every name that `name[k]` indexes when parsing: the lists, and named
+ *  points, which are tuples of 2 or 3 numbers (T[2]; docs/multisets.md §3)
+ *  but are not lists anywhere else. */
+export function indexNamesOf(defs: ValueDefinitions): Set<string> {
+  return new Set([...listNamesOf(defs), ...defs.pointDims.keys()]);
+}
+
 /**
  * Whether a name reads as a list — what `d/dx L` asks before it differentiates.
  *
@@ -1698,7 +1705,25 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
  * integral anchored at 0). Shared by ∫ rows and the reductions over
  * continuous sets that become integrals (lib/measure.ts).
  */
-function integral(integrand: Expr, v: string, lo: Expr | null, hi: Expr | null, ctx: Ctx): Expr {
+function integral(integrand: Expr, v: string, lo: Expr | null, hi: Expr | null, ctx: Ctx): Expr;
+function integral(
+  integrand: Expr,
+  v: string,
+  lo: Expr | null,
+  hi: Expr | null,
+  ctx: Ctx,
+  exactOnly: boolean,
+): Expr | null;
+/** With `exactOnly`, a verified closed form or null — never the fixed-order
+ *  numeric fallback (the caller integrates adaptively instead). */
+function integral(
+  integrand: Expr,
+  v: string,
+  lo: Expr | null,
+  hi: Expr | null,
+  ctx: Ctx,
+  exactOnly = false,
+): Expr | null {
   const bounds = lo && hi;
   let loI = infOf(lo);
   let hiI = infOf(hi);
@@ -1710,7 +1735,7 @@ function integral(integrand: Expr, v: string, lo: Expr | null, hi: Expr | null, 
     flip = true;
     if (loI === 1 || hiI === -1) return num(0); // int[inf..inf]: equal bounds
   }
-  const memoKey = exprKey([v, integrand, lo, hi]);
+  const memoKey = exprKey([v, integrand, lo, hi, exactOnly]);
   const done = (out: Expr): Expr => (flip ? neg(out) : out);
   const hit = intMemo.get(memoKey);
   if (hit) return done(hit);
@@ -1727,6 +1752,7 @@ function integral(integrand: Expr, v: string, lo: Expr | null, hi: Expr | null, 
     const hiChk = hiI ? num(hiI * Infinity) : hi!;
     if (verifyDefinite(val, integrand, v, loChk, hiChk)) out = val;
   }
+  if (!out && exactOnly) return null;
   if (!out) {
     // Numeric fallback. An indefinite ∫ anchors at 0: F(x) = ∫₀ˣ; infinite
     // ranges transform onto a finite interval first (improperSum).
@@ -1904,7 +1930,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (isReductionCall(e)) {
         const over = reduceOverSet(e.name, e.args[0], {
           resolve: x => rx(x, ctx),
-          integrate: (body, v, lo, hi) => integral(body, v, lo, hi, ctx),
+          integrate: (body, v, lo, hi) => integral(body, v, lo, hi, ctx, true),
           consts: ctx.opts.consts,
           isList: ctx.opts.isList,
           bound: n => !!ctx.opts.params?.has(n) || !!ctx.opts.openVars?.has(n),
@@ -2090,7 +2116,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const parse = (d: Definition & { rhs: string }): Expr => {
     const key = defKey(d);
     let p = parsed.get(key);
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, listNamesOf(defs), valueNames)));
+    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, indexNamesOf(defs), valueNames)));
     return p;
   };
 
@@ -2145,8 +2171,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   for (const d of raw) {
     try {
       if (d.kind === 'regression') {
-        const lhsSource = parseExpr(d.lhs, fnNames, listNamesOf(defs), valueNames);
-        const rhsSource = parseExpr(d.rhs, fnNames, listNamesOf(defs), valueNames);
+        const lhsSource = parseExpr(d.lhs, fnNames, indexNamesOf(defs), valueNames);
+        const rhsSource = parseExpr(d.rhs, fnNames, indexNamesOf(defs), valueNames);
         parsed.set(defKey(d), { kind: 'eq', l: lhsSource, r: rhsSource });
         const lhs = resolveExpr(lhsSource, getFn, ropts),
           rhs = resolveExpr(rhsSource, getFn, ropts);

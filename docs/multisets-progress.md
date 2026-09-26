@@ -40,6 +40,9 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 - Review 5–7 (done): projFrag Lipschitz widening overfills (high); expression lists don't stack; og projected slow; llms.txt d/dx family snippet; MCP kind for interval. Fixer B done: all 5 fixed (projFrag sign-change only + bounded refine; columnStacks for all number lists; og projectedMask; MCP kinds). Both committed together; vitest 85/2380.
 - Fixes + phase 8 combined: vitest 86/2405; typecheck/lint/fmt clean; probes π, 2π, 1/3, ∞, arc 1.47894 OK.
 
+- Final review (phase 8 + fixes + spec walk): phase 8 gives confident wrong numbers (bbox clipping, 0·∞ interval, negative measures, divergent integrals finite, endpoint-singular arc length, root undercount, quadtree budget degradation, freezes). Also polyline(M N) vs named differ; `sort(L) [2]` spaced indexes; named point T[2] not indexed; bracket of 4-tuples flattens; (1,1) T 2×3 fails. Fixer D done (6 fixed; juxtaposition always product; spacing rule; named points index; long-tuple multisets). Fixer C (measure) running. Rosette `e^(th J) hull(P)` [tensor] regression (phase 6) → fixer E done (object-lists visit recurses into tensor-item lists; hull.test checks vertices). Use scratchpad/orch/probe.ts (shared probe got modified).
+- E2E: test:objects all PASS, test:editor 95/95, test:swipe 24/24 (at 48d5189). csp/embed/mcp-app need `vite build` + `wrangler dev --config dist-web/equation/wrangler.json --port 5198` (5196 failed to start alongside; mcp-app via MCP_TEST_ORIGIN=5198). Results at 48d5189: embed PASS, mcp-app PASS, csp FAIL only on loading external cloudflareinsights beacon (sandbox network; branch touches no CSP files).
+
 ## Blockers / open issues
 
 ## Phase 5 plan (from planning agent, decisions by orchestrator)
