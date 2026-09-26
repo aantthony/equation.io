@@ -3734,7 +3734,13 @@ function buildExamplesMenu() {
       const code = document.createElement('code');
       code.textContent = text;
       item.append(code);
-      item.addEventListener('click', () => openExample(text));
+      item.addEventListener('click', () => {
+        // Fold the menu away so the example's rows have the panel; the
+        // category stays open for the next pick.
+        const root = document.getElementById('examples');
+        if (root instanceof HTMLDetailsElement) root.open = false;
+        openExample(text);
+      });
       group.append(item);
     }
     list.append(group);
