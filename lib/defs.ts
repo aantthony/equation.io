@@ -1014,7 +1014,8 @@ const UNIT_VECTORS: Readonly<Record<string, readonly number[]>> = {
 
 function unitVector(name: string, opts: ResolveOpts): Expr | null {
   const axis = Object.hasOwn(UNIT_VECTORS, name) ? UNIT_VECTORS[name] : null;
-  if (!axis || !opts.documentNames || opts.documentNames.has(name)) return null;
+  // (An open Σ index of that name is bound, not the vector.)
+  if (!axis || !opts.documentNames || opts.documentNames.has(name) || opts.openVars?.has(name)) return null;
   return { kind: 'vec', items: axis.map(num) };
 }
 
@@ -2074,10 +2075,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     }
     resolving.push(name);
     try {
-      // A parameter shadows a named interval of the same name.
+      // A parameter shadows a named interval of the same name, and a
+      // built-in unit vector: f(e_x) = e_x^2 squares its argument.
       const scope: ResolveOpts = {
         ...ropts,
         interval: n => (d.params.includes(n) ? undefined : ropts.interval?.(n)),
+        documentNames: ropts.documentNames && new Set([...ropts.documentNames, ...d.params]),
       };
       let body = resolveExpr(parse(d), getFn, scope);
       if (containsRecur(body)) body = wrapRecursion(name, d.params, body);
@@ -2221,31 +2224,42 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // `M = ((a, b), (c, d))`, `R = e^(a J)`, `N = 2 M`: a tuple of rows,
         // or matrix algebra, names a matrix.
         const isList = (n: string) => defs.lists.has(n);
-        const computed = lowerMatrix(
-          resolved,
-          n => compsOf(defs, n),
-          n => defs.mats.get(n) ?? null,
-          tensorGetter(defs),
-          isList,
-        );
+        // M Q with Q a multiset of points is those points moved, never a
+        // matrix: the object expansion below applies M to each.
+        const ofPoints = [...freeVars(resolved)].some(n => {
+          const l = defs.lists.get(n);
+          return l?.kind === 'list' && l.items[0]?.kind === 'vec';
+        });
+        const computed =
+          !ofPoints &&
+          lowerMatrix(
+            resolved,
+            n => compsOf(defs, n),
+            n => defs.mats.get(n) ?? null,
+            tensorGetter(defs),
+            isList,
+          );
         if (computed) {
           defs.mats.set(d.name, computed);
           continue;
         }
         // `T = e_x ⊗ e_y ⊗ e_z`: a tensor of any other shape.
-        const tensor = lowerTensorValue(
-          resolved,
-          n => compsOf(defs, n),
-          n => defs.mats.get(n) ?? null,
-          tensorGetter(defs),
-          isList,
-        );
+        const tensor =
+          !ofPoints &&
+          lowerTensorValue(
+            resolved,
+            n => compsOf(defs, n),
+            n => defs.mats.get(n) ?? null,
+            tensorGetter(defs),
+            isList,
+          );
         if (tensor) {
           defs.tensors.set(d.name, tensor);
           continue;
         }
         let e: Expr;
         try {
+          if (ofPoints) throw new Error('points');
           e = lowerGeom(
             resolved,
             n => compsOf(defs, n),

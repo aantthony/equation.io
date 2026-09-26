@@ -617,8 +617,8 @@ const ops = operators<PNode>({
   }),
 
   // List indexing: `L[2]` for a known list name L (1-based; list.ts lowers
-  // it). Only named lists index — `x[2]` keeps meaning 2x, and a literal
-  // `[1,2,3][2]` stays implicit multiplication.
+  // it), a sort(…) call, or a list literal right against its index (see
+  // addImplicitTokens) — `x[2]` keeps meaning 2x.
   '[at]': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'index', args: [asExpr(a), asVecOrExpr(b)] })),
 
   // Column access: `person.age` is one name, not a product. Binding tighter
@@ -680,6 +680,10 @@ function sumCall(name: 'sum' | 'prod', b: PNode): Expr {
 // Unary minus and '^' must share a precedence level (both right-associative):
 // '-x^2' parses as -(x^2) and 'x^-1' as x^(-1) without either popping the other.
 ops['[neg]'].prec = ops['^'].prec;
+
+// Indexing shares application's level (both associate left), so sort(L)[2]
+// indexes the call rather than calling sort on L[2].
+ops['[at]'].prec = ops['[apply]'].prec;
 
 // All comparators share one precedence level so chains like 0 <= y < x
 // associate left: ((0 <= y) < x), the shape classify flattens.
@@ -935,6 +939,10 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   /** The dotted name ending at `last` when it is a symbol: `person.age`. */
   let path: string | null = null;
   let barDepth = 0;
+  /** What each open bracket is: the function it calls, an index, or null. */
+  const opened: (string | null)[] = [];
+  /** What the bracket `last` closed was. */
+  let closed: string | null = null;
   for (const token of bare) {
     if (token.type === 'whitespace') continue;
 
@@ -961,6 +969,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         const close: Token = { ...token, type: 'parenclose', str: ')' };
         yield close;
         last = close;
+        closed = opened.pop() ?? null;
       } else {
         barDepth++;
         if (afterValue) yield op('[impl]');
@@ -969,6 +978,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         const open: Token = { ...token, type: 'parenopen', str: '(', call: true };
         yield open;
         last = open;
+        opened.push('abs');
       }
       path = null;
       continue;
@@ -985,6 +995,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
     }
 
     let emit = token;
+    let indexing = false;
     if (
       afterValue &&
       (token.type === 'number' || token.type === 'symbol' || token.type === 'parenopen' || token.type === 'string')
@@ -995,21 +1006,36 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
       // shadowable, so `mean = [1, 4, 2]` then `mean[2]` is an index.
       // A sequence also takes its index in braces or parens, as its
       // recurrence row is written: a_{n+1}, a_(n-1), a_{10}.
+      // A sort(…) is a tuple, so it indexes as one: sort(L)[2]. A list
+      // literal written right against its index, [3, 1, 2][2], is indexed
+      // too, so it can say it has no order (with a space it multiplies).
       const isIndex =
         token.type === 'parenopen' &&
-        last!.type === 'symbol' &&
-        (token.str === '[' ? indexes(path ?? last!.str) : last!.str.endsWith('_') && activeListNames.has(last!.str));
+        (last!.type === 'symbol'
+          ? token.str === '['
+            ? indexes(path ?? last!.str)
+            : last!.str.endsWith('_') && activeListNames.has(last!.str)
+          : token.str === '[' &&
+            last!.type === 'parenclose' &&
+            (closed === 'sort' || (closed === '[list]' && last!.loc[1] === token.loc[0])));
       const isFnCall =
         !isIndex &&
         !path?.includes('.') &&
         token.type === 'parenopen' &&
         last!.type === 'symbol' &&
         isFnName(last!.str);
+      indexing = isIndex;
       yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };
     }
 
     const afterDot = last?.type === 'operator' && last.str === '.';
+    if (emit.type === 'parenopen') {
+      opened.push(
+        emit.call ? (builtinFn(last!.str) ?? last!.str) : indexing ? '[at]' : emit.str === '[' ? '[list]' : null,
+      );
+    }
+    closed = emit.type === 'parenclose' ? (opened.pop() ?? null) : null;
     yield emit;
     last = emit;
     path =

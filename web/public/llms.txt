@@ -182,7 +182,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   Along x, y, or z it works through lists too: with `N = [1..4]`,
-  `d/dx x^N` is a family, and `d/dx [sin(x), x^2]` is `[cos(x), 2x]`.
+  `y = d/dx x^N` is a family of curves, and `y = d/dx [sin(x), x^2]` draws
+  `y = cos(x)` and `y = 2x`.
   Along t a named list is refused (its elements may use t).
 - Sums and products: `sum(n=1..N, sin(n x)/n)` and `prod(k=1..N, k)`, also
   written `Σ`/`Π`. The bracket form `sum[n=1..N] sin(n x)/n` takes everything
@@ -190,7 +191,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   outside). Bounds must be numbers or constants defined in another row (not
   `t`), because the sum is expanded symbolically before compiling — which makes
   `N` a slider that adds terms as you drag it. A bound may also be a named
-  list of numbers: with `N = [3..5]`, `sum(n=1..N, sin(n x)/n)` draws one
+  list of numbers: with `N = [3..5]`, `y = sum(n=1..N, sin(n x)/n)` draws one
   partial sum per element (a family that pairs with other uses of `N`).
   Inside a sum over `n`, a sequence term `a_n` is each term: `sum(n=1..N, a_n)`.
 - Integrals: `int[a..b] f(x) dx` (definite) and `int(f(x) dx)`
@@ -262,8 +263,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   and a list of indices picks one element each: `T[[3, 1]]` is `[7, 5]`, and
   `T[N]` for a named list `N` pairs with `N`. `L[2]` on a list `[ … ]` is an
   error that says to sort it first; a filter `L[L > 2]` is no index and
-  works on any list. Only a named tuple or list indexes — `x[2]` is plain
-  multiplication (2x).
+  works on any list. A named tuple or list indexes, and so does a sort
+  call, `sort(L)[2]`; `x[2]` is plain multiplication (2x).
 - Data columns: with `person = open("people.csv", 3a7f9c1d2e4b)` in a row
   above (see Definitions), `person.age` is a list of that column's numbers.
   Everything lists can do applies: `(person.age, person.height)` is a
@@ -427,8 +428,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Data list: `[3, 1, 4, 4]` is a dot plot on the number line — a dot at each
   value on the x axis, copies stacked upward, so 4 has dots at (4, 1) and
   (4, 2). A list has no order, so no index is drawn (a sequence `a_n` does
-  draw at n). A column of thousands stacks in dot-wide columns. `[(1, 2),
-  (3, 4)]` draws a scatter of points.
+  draw at n). Values closer than a dot's width at the current zoom share a
+  column, so a long list (`sin(L)` for `L = [1..300]`, a CSV column of
+  thousands) stacks into the shape of its distribution rather than one row of
+  overlapping dots; zoom in and they separate. `[(1, 2), (3, 4)]` draws a
+  scatter of points.
   Any list-valued expression plots the same way (`L^2 + 1`,
   `(L, L^2)` with `L` defined above, or a CSV column: `person.age`).
 - Geometry: with points defined in rows above (`A = (0, 0)`), `segment(A, B)`,
@@ -838,8 +842,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   reading the column directly.
 - List: `L = [3, 1, 4]` or `L = [1..100]` names a data list; rows below
   broadcast over it (`L^2`, `(L, L^2)`), reduce it (`mean(L)`), or filter
-  it (`L[L > 2]`); to index it, name it in order (`T = sort(L)`, then
-  `T[2]`). Elements may use constants, states, and t. A list of
+  it (`L[L > 2]`); to index it, sort it (`sort(L)[2]`, or `T = sort(L)`,
+  then `T[2]`). Elements may use constants, states, and t. A list of
   tuples names a scatter of points, whatever its shape: `[(1, 2), (3, 4)]`
   is two points, never a matrix.
 - Matrix: a tuple of rows, `M = ((a, b), (c, d))` or

@@ -17,6 +17,10 @@ export const FAMILY_3D_MAX = 8;
 export const FIGURE_FAMILY_MAX = 1024;
 const num = (value: number): Expr => ({ kind: 'num', value });
 
+/** Reductions that take a multiset of points whole: count, and total and
+ *  mean coordinate by coordinate. */
+const REDUCES_POINTS = new Set(['count', 'total', 'mean']);
+
 /** Figures that are just their points: moving the points moves the figure. */
 const POINT_FIGURES = new Set(['segment', 'polyline', 'polygon', 'vector', 'hull']);
 
@@ -147,6 +151,12 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     let value: Expr;
     if (e.kind === 'var' && defs.mats.has(e.name)) {
       const rows = rowsAsPoints(defs.mats.get(e.name)!, e.name);
+      // With a list among its entries, M is a multiset of matrices, so its
+      // rows are a multiset of tuples of points: M = ((a, 0), (0, 1)).
+      if (rows.items.some(r => [...freeVars(r)].some(v => get(v) !== null))) {
+        const value = lowerLists({ kind: 'vec', items: rows.items }, get, opts, true);
+        if (value.kind === 'list') return { items: value.items, axes: axesOf(value) };
+      }
       return { items: rows.items, axes: axesOf(rows) };
     }
     try {
@@ -209,8 +219,15 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
         /* the paths below report it */
       }
       if (value?.kind === 'lazy') {
-        inOrder(axesOf(value));
-        return packedFigure(e.name as 'polyline' | 'polygon' | 'hull', value);
+        const axes = axesOf(value);
+        inOrder(axes);
+        const lazy = value;
+        return walkEach(axes, cut =>
+          packedFigure(form as 'polyline' | 'polygon' | 'hull', {
+            ...lazy,
+            cols: lazy.cols.map(c => ({ name: c.name, values: Float64Array.from(cut, k => c.values[k]) })),
+          }),
+        );
       }
     }
     // A point list may itself be computed — R P, P + (1, 0), rotate(P, a) —
@@ -223,11 +240,25 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
         return null;
       }
     };
-    const pts = listValue(arg) ?? computed(arg);
+    // A square tuple of points is also a matrix, so 2 T, T + (1, 0), R T and
+    // rotate(T, a) are matrix algebra (or errors) on a row of their own. A
+    // figure reads T as its points (the consumer decides, §3): each moves.
+    const pointwise = (arg: Expr): ListValue | null => {
+      const names = freeVars(arg);
+      if (![...names].some(v => defs.mats.has(v))) return null;
+      try {
+        const value = expand(arg, false, true);
+        return value?.kind === 'list' ? { items: value.items, axes: axesOf(value) } : null;
+      } catch {
+        return null;
+      }
+    };
+    const pts = listValue(arg) ?? computed(arg) ?? pointwise(arg);
     if (pts) {
       if (!pts.items.every(p => p.kind === 'vec')) throw new Error(`${e.name} needs a list of points.`);
       inOrder(pts.axes);
-      return ordinary({ ...e, args: pts.items });
+      const call = e;
+      return walkEach(pts.axes, cut => ordinary({ ...call, args: cut.map(k => pts.items[k]) }));
     }
   }
   let originalError: unknown;
@@ -260,6 +291,59 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
         /sort\(P, P\.x\)/.test(originalError.message))
       ? originalError
       : err;
+  }
+
+  /**
+   * A connected figure walks the positions of its tuple; every other axis is a
+   * multiset of such tuples, and gives one figure per element — a family, as
+   * the tuple written out would (docs/multisets.md §3). `figure` builds one
+   * member from the flat indices of its vertices, in order. (A hull of a
+   * plain multiset has no positions: all of it is the one figure.)
+   */
+  function walkEach(axes: readonly Axis[], figure: (cut: number[]) => Expr): Expr {
+    const total = axes.reduce((size, a) => size * a.n, 1);
+    const at = axes.findIndex(a => a.ordered);
+    if (at < 0 || axes.length === 1) return figure(Array.from({ length: total }, (_, k) => k));
+    const n = axes[at].n;
+    const inner = axes.slice(at + 1).reduce((size, a) => size * a.n, 1);
+    const members = total / n;
+    if (members > FIGURE_FAMILY_MAX) {
+      throw new Error(`An object family needs 1–${FIGURE_FAMILY_MAX} members (got ${members}).`);
+    }
+    if (named) throw new Error('An object family is a whole row; give it a row of its own.');
+    return {
+      kind: 'family',
+      members: Array.from({ length: members }, (_, m) => {
+        const base = Math.floor(m / inner) * n * inner + (m % inner);
+        return figure(Array.from({ length: n }, (_, k) => base + k * inner));
+      }),
+    };
+  }
+
+  /** A named matrix with a list among its entries as the multiset of matrices
+   *  it is, each written out as its tuple of rows; null for one matrix. */
+  function matrices(name: string): ListValue | null {
+    const m = defs.mats.get(name)!;
+    const entries = m.flat();
+    if (!entries.some(it => [...freeVars(it)].some(v => get(v) !== null))) return null;
+    // (More than 3 entries, so a tuple: the positions innermost.)
+    const value = lowerLists({ kind: 'vec', items: entries }, get, opts, true);
+    if (value.kind !== 'list') return null;
+    const axes = axesOf(value);
+    if (axes.length < 2 || !axes.at(-1)!.ordered) return null;
+    const n = entries.length;
+    const size = m.length;
+    const items = Array.from({ length: value.items.length / n }, (_, k): Expr => {
+      const flat = value.items.slice(k * n, (k + 1) * n);
+      return {
+        kind: 'vec',
+        items: Array.from({ length: size }, (_, r): Expr => ({
+          kind: 'vec',
+          items: flat.slice(r * size, (r + 1) * size),
+        })),
+      };
+    });
+    return { items, axes: axes.slice(0, -1) };
   }
 
   /** A connected figure through a template of points: the template is its one
@@ -361,8 +445,23 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
           settledLists.add(coords);
           return coords;
         }
-        case 'call':
+        case 'call': {
+          // count(2 P), mean(R P): a reduction takes the computed multiset
+          // of points whole (§3), rather than one member per point.
+          if (REDUCES_POINTS.has(n.name) && n.args.length === 1) {
+            let pts: Expr | null;
+            try {
+              pts = lowerObjects(n.args[0], defs, opts, true);
+            } catch {
+              pts = null;
+            }
+            if (pts?.kind === 'list' && pts.items.length && pts.items.every(p => p.kind === 'vec')) {
+              settledLists.add(pts);
+              return { ...n, args: [pts] };
+            }
+          }
           return mapChildren(n, walk);
+        }
         default:
           return mapChildren(n, walk);
       }
@@ -372,8 +471,9 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
 
   /** One member per combination of the lists in `source`. `outside`: only the
    *  lists around a figure, each member a figure lowered in its own right;
-   *  null when there are none. */
-  function expand(source: Expr, outside: boolean): Expr | null {
+   *  null when there are none. `rows`: a matrix name is its tuple of rows
+   *  except as the left factor of a product, as a figure reads it. */
+  function expand(source: Expr, outside: boolean, rows = false): Expr | null {
     if (exceedsNodes(source, 32768, n => settledLists.has(n)))
       throw new Error('This object family is too large to expand (32768 nodes).');
     const lists: ListValue[] = [];
@@ -383,7 +483,16 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     // points — hull(M), distance(P, A) — and there still not as the matrix
     // factor of a product.
     const visit = (node: Expr, asMatrix = true): Expr => {
-      if (asMatrix && node.kind === 'var' && defs.mats.has(node.name)) return node;
+      if (asMatrix && node.kind === 'var' && defs.mats.has(node.name)) {
+        // M = ((a, 0), (0, 1)) is a multiset of matrices: one per member,
+        // chosen with every other use of a, so M Q pairs up with Q = M P.
+        const each = matrices(node.name);
+        if (!each) return node;
+        const marker = num(0);
+        markers.set(marker, lists.length);
+        lists.push(each);
+        return marker;
+      }
       // Around a figure, only the transform's lists count: the figure keeps its own.
       if (outside && node.kind === 'call' && POINT_FIGURES.has(node.name)) return node;
       const values = listValue(node);
@@ -419,7 +528,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
           return mapChildren(node, n => visit(n, asMatrix));
       }
     };
-    const template = visit(source);
+    const template = visit(source, !rows);
     if (!lists.length) {
       if (outside) return null;
       throw originalError ?? new Error('This expression cannot be expanded as an object family.');

@@ -214,8 +214,98 @@ function fillMask(r: Raster, mask: Uint8Array, c: [number, number, number], a: n
   for (let i = 0; i < mask.length; i++) if (mask[i]) blend(r, i % r.w, Math.floor(i / r.w), c, a);
 }
 
-/** Samples of u per pixel for a family over an interval (the app takes 48). */
-const PROJECTION_SAMPLES = 32;
+/** Steps of u per point for a family over an interval (the app takes 48,
+ *  searching 8x finer only where a member could cross between two), and the
+ *  pixels per side of a block the swept region is first judged on. */
+const PROJECTION_STEPS = 64;
+const PROJECTION_BLOCK = 8;
+
+/**
+ * The region a family over u ∈ [0, 1] sweeps, as a pixel mask — the app's
+ * projFrag on the CPU. A point is inside when F changes sign between two
+ * steps of u (an equation), or the constraints all hold at one
+ * (inequalities). Judged first at the corners of 8-px blocks: a block whose
+ * corners are all inside is filled whole, and one whose corners are all
+ * outside and agree in sign at every step has no member (at a step)
+ * crossing it, so it is skipped; only blocks along an edge are judged per
+ * pixel. That keeps the preview near a pass per 16 steps rather than a pass
+ * per step.
+ */
+function projectedMask(
+  r: Raster,
+  v: View2D,
+  env: EvalEnv,
+  slotU: number,
+  prog: Prog,
+  relation: 'eq' | 'ineq',
+): Uint8Array {
+  const { w, h } = r;
+  const { vars, stack, slotX, slotY } = env;
+  const uy = v.upp / (v.ratio ?? 1);
+  const M = PROJECTION_STEPS;
+  const at = (i: number, j: number) => {
+    vars[slotX] = v.cx + (i - w / 2) * v.upp;
+    vars[slotY] = v.cy + (h / 2 - j) * uy;
+  };
+  // Whether some u puts the pixel's centre on a member (or in the region):
+  // F changes sign between two of the M steps.
+  const inside = (i: number, j: number): boolean => {
+    at(i, j);
+    let prev = NaN;
+    for (let k = 0; k < M; k++) {
+      vars[slotU] = k / (M - 1);
+      const f = run(prog, vars, stack);
+      if (relation === 'ineq' ? f < 0 : f === 0 || prev * f < 0) return true;
+      prev = f;
+    }
+    return false;
+  };
+  // A block corner, judged at every sub-step (the samples a pixel refines
+  // to): bit k of `neg` is set when F < 0 at step k (of `bad`, when F is not
+  // finite there), a word per 32 steps.
+  const B = PROJECTION_BLOCK;
+  const words = Math.ceil(M / 32);
+  const cw = Math.ceil(w / B) + 1,
+    ch = Math.ceil(h / B) + 1;
+  const neg = new Uint32Array(cw * ch * words),
+    bad = new Uint32Array(cw * ch * words),
+    hit = new Uint8Array(cw * ch);
+  for (let c = 0; c < cw * ch; c++) {
+    at((c % cw) * B, Math.floor(c / cw) * B);
+    let prev = NaN;
+    for (let k = 0; k < M; k++) {
+      vars[slotU] = k / (M - 1);
+      const f = run(prog, vars, stack);
+      const bit = 1 << (k & 31);
+      if (!Number.isFinite(f)) bad[c * words + (k >> 5)] |= bit;
+      else if (f < 0 || (f === 0 && relation === 'eq')) neg[c * words + (k >> 5)] |= bit;
+      if (relation === 'ineq' ? f < 0 : f === 0 || prev * f < 0) hit[c] = 1;
+      prev = f;
+    }
+  }
+  // Corners outside that agree in sign at every step have no member at a
+  // step crossing the block between them.
+  const agree = (c: number[]) => {
+    for (const k of c) {
+      if (hit[k]) return false;
+      for (let q = 0; q < words; q++)
+        if (neg[k * words + q] !== neg[c[0] * words + q] || bad[k * words + q] !== bad[c[0] * words + q]) return false;
+    }
+    return true;
+  };
+  const mask = new Uint8Array(w * h);
+  for (let cj = 0; cj + 1 < ch; cj++)
+    for (let ci = 0; ci + 1 < cw; ci++) {
+      const c = [cj * cw + ci, cj * cw + ci + 1, (cj + 1) * cw + ci, (cj + 1) * cw + ci + 1];
+      const all = c.every(k => hit[k]);
+      if (!all && agree(c)) continue;
+      for (let j = cj * B; j < Math.min(h, (cj + 1) * B); j++)
+        for (let i = ci * B; i < Math.min(w, (ci + 1) * B); i++) {
+          if (all || inside(i, j)) mask[j * w + i] = 1;
+        }
+    }
+  return mask;
+}
 
 function shadeScalar(r: Raster, grid: Float64Array, c: [number, number, number]) {
   const { w, h } = r;
@@ -574,9 +664,7 @@ function renderRow2D(
       return;
     }
     case 'projected2d': {
-      // The union over samples of u, as the app's projFrag: a pixel whose
-      // residual changes sign between neighbouring samples (an equation),
-      // or whose constraints all hold at one (inequalities).
+      // The union over samples of u, as the app's projFrag (projectedMask).
       const slotU = env.slots.get('u')!;
       const field: Expr =
         cpu.constraints.length === 1
@@ -587,20 +675,7 @@ function renderRow2D(
                 (m, c) => ({ kind: 'call', name: 'max', args: [m, c.residual] }),
                 cpu.constraints[0].residual,
               );
-      const prog = compile(field);
-      const mask = new Uint8Array(r.w * r.h);
-      let prev: Float64Array | null = null;
-      for (let k = 0; k < PROJECTION_SAMPLES; k++) {
-        env.vars[slotU] = k / (PROJECTION_SAMPLES - 1);
-        const grid = sampleField(r, v, prog, env);
-        for (let j = 0; j < r.h; j++)
-          for (let i = 0; i < r.w; i++) {
-            const f = grid[j * (r.w + 1) + i];
-            const hit = cpu.relation === 'ineq' ? f < 0 : f === 0 || (prev !== null && prev[j * (r.w + 1) + i] * f < 0);
-            if (hit) mask[j * r.w + i] = 1;
-          }
-        prev = grid;
-      }
+      const mask = projectedMask(r, v, env, slotU, compile(field), cpu.relation);
       fillMask(r, mask, color, 0.18);
       return;
     }

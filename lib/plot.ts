@@ -33,7 +33,7 @@ import {
 import type { FigureName } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
-import { tupleRow } from './list.ts';
+import { packedTuple, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
@@ -52,6 +52,8 @@ import {
 import type { CpuPlan } from './compiler.ts';
 
 const SPACE_VARS = new Set(['x', 'y', 'z']);
+/** Values a long tuple's readout shows, as a list's shows 8 (plotReadout). */
+const TUPLE_SHOWN = 8;
 const PARAM_VARS = new Set(['u', 'v']);
 
 const isVarNamed = (e: Expr, name: string): boolean => e.kind === 'var' && e.name === name;
@@ -770,7 +772,11 @@ function classifyLowered(
     if (expr.items.length > 3) {
       if (hasSpace || hasParam || expr.items.some(it => it.kind === 'vec'))
         throw new Error('A tuple of more than 3 values is a value to read, not a picture: (1, 2, 3, 5, 8).');
-      return done({ kind: 'tuple', values: expr.items });
+      return done(
+        expr.items.length > TUPLE_SHOWN
+          ? { kind: 'tuple', values: expr.items.slice(0, TUPLE_SHOWN), length: expr.items.length }
+          : { kind: 'tuple', values: expr.items },
+      );
     }
     const dim = expr.items.length as 2 | 3;
     if (hasSpace || ode) {
@@ -962,8 +968,17 @@ export function classifyRow(
   fields: Record<string, Expr> = {},
   timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified } {
-  // A tuple of numbers is shown as what it is (see tupleRow).
-  const lowered = tupleRow(lower(row.expr));
+  // A tuple of numbers is shown as what it is (see tupleRow). A long one of
+  // packed numbers — a sorted column — keeps only what its readout shows,
+  // rather than a node per value.
+  const low = lower(row.expr);
+  const packed = packedTuple(low);
+  if (packed) {
+    const values = Array.from(packed.subarray(0, TUPLE_SHOWN), (value): Expr => ({ kind: 'num', value }));
+    const object: MathObject = { kind: 'tuple', values, length: packed.length };
+    return { cls: { object, animated: false, needs3D: false, params: [] } };
+  }
+  const lowered = tupleRow(low);
   // A revolve(…) row hands back the surface it draws, not a call nothing
   // evaluates.
   const { cls } = classifyLowered(lowered, known, fields, timeDerivative);
@@ -1091,6 +1106,8 @@ export function plotReadout(plot: CpuPlan, env: Record<string, number>): string 
     const prefix = values.some(v => v.startsWith('≈')) ? '≈' : '=';
     const bare = values.map(v => v.replace(/^[=≈] /, ''));
     const parts = Array.from({ length: shown }, (_, k) => nestedText(shape, bare.slice(k * each, (k + 1) * each)));
+    // (A long tuple kept only the values it shows: see TUPLE_SHOWN.)
+    if (plot.length !== undefined) return `${prefix} (${bare.join(', ')}, …)`;
     if (plot.count === undefined) return `${prefix} ${parts[0]}`;
     return `${prefix} [${parts.join(', ')}${plot.count > shown ? ', …' : ''}]`;
   }

@@ -261,8 +261,8 @@ describe('indexing', () => {
   // Only a tuple has positions (docs/multisets.md §3); sort makes one.
   const L = ['L = sort([7,5,6])'];
   it('needs an order: a list [ … ] has none', () => {
-    expect(() => lowerRow('M[2]', ['M = [5,6,7]'])).toThrow(/M\[2\] needs an order.*T = sort\(M\)/);
-    expect(() => lowerRow('P[1]', ['P = [(1,2),(3,4)]'])).toThrow(/T = sort\(P, P\.x\)/);
+    expect(() => lowerRow('M[2]', ['M = [5,6,7]'])).toThrow(/M\[2\] needs an order.*sort\(M\)\[2\]/);
+    expect(() => lowerRow('P[1]', ['P = [(1,2),(3,4)]'])).toThrow(/sort\(P, P\.x\)\[1\]/);
     // A filter is no index: it keeps what passes, whatever the order.
     expect(values(lowerRow('M[M > 5]', ['M = [5,6,7]']))).toEqual([6, 7]);
   });

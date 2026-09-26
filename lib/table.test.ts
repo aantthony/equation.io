@@ -210,8 +210,9 @@ describe('reductions over a list of points', () => {
     expect(lowerRow('count([(1,2),(3,4),(5,6)])', [])).toEqual({ kind: 'num', value: 3 });
   });
 
-  it('still refuses the reductions that would have to add them up', () => {
-    expect(() => lowerRow('mean([(1,2),(3,4)])', [])).toThrow(/list of points is not supported/);
+  it('takes a total or mean coordinate by coordinate', () => {
+    expect(lowerRow('mean([(1,2),(3,4)])', [])).toMatchObject({ kind: 'vec', items: [{ value: 2 }, { value: 3 }] });
+    expect(() => lowerRow('median([(1,2),(3,4)])', [])).toThrow(/list of points is not supported/);
   });
 });
 
@@ -559,9 +560,10 @@ describe('filters', () => {
   it('keeps the elements a comparison selects', () => {
     expect(values(lowerRow('person.age[person.age > 30]', rows))).toEqual([36, 41]);
     expect(values(lowerRow('L[L >= 5]', [...rows, 'L = [1, 5, 2, 9]']))).toEqual([5, 9]);
-    // A literal list still multiplies (only named lists index), so the mask
-    // has nowhere to go and says so rather than plotting nonsense.
-    expect(() => lowerRow('[1, 5][[1, 5] >= 5]', rows)).toThrow(/put it in brackets/);
+    // A literal list right against its brackets is filtered too; with a
+    // space it multiplies, so the mask has nowhere to go and says so.
+    expect(values(lowerRow('[1, 5][[1, 5] >= 5]', rows))).toEqual([5]);
+    expect(() => lowerRow('[1, 5] [[1, 5] >= 5]', rows)).toThrow(/put it in brackets/);
   });
 
   it('drops a missing cell from every test, including !=', () => {
@@ -576,7 +578,7 @@ describe('filters', () => {
     // a string") was returned before either side was asked about gaps, so
     // `!=` kept exactly the rows it was written to exclude.
     expect(values(lowerRow('p.age[p.age != "unknown"]', rows, src))).toEqual([30, 40]);
-    expect(() => lowerRow('p.age[p.age == "unknown"]', rows, src)).toThrow(/keeps nothing/);
+    expect(values(lowerRow('p.age[p.age == "unknown"]', rows, src))).toEqual([]);
   });
 
   it('drops a missing TEXT cell from every test too', () => {
@@ -587,7 +589,7 @@ describe('filters', () => {
     // An "N/A" reads as a gap in a text column exactly as in a numeric one,
     // so the only other row drops out and the filter keeps nothing at all.
     const na: TableSource = () => parseCsv('city,pop\nNYC,10\nN/A,20\n');
-    expect(() => lowerRow('p.pop[p.city != "NYC"]', rows, na)).toThrow(/keeps nothing/);
+    expect(values(lowerRow('p.pop[p.city != "NYC"]', rows, na))).toEqual([]);
     expect(parseCsv('city,pop\nNYC,10\n,20\n').missing.get('city')).toBe(1);
   });
 
@@ -620,9 +622,9 @@ describe('filters', () => {
     expect(values(lowerRow('g.b[g.a > 0]', gRows, gappy))).toEqual([10, 30]);
   });
 
-  it('refuses a filter that cannot settle, or keeps nothing', () => {
+  it('refuses a filter that cannot settle; one that keeps nothing is []', () => {
     expect(() => lowerRow('person.age[person.age > t]', rows)).toThrow(/cannot depend on t/);
-    expect(() => lowerRow('person.age[person.age > 99]', rows)).toThrow(/keeps nothing \(0 of 3\)/);
+    expect(values(lowerRow('person.age[person.age > 99]', rows))).toEqual([]);
     expect(() => lowerRow('person.age[[1, 2] > 0]', rows)).toThrow(/tests 2 values but the list has 3/);
   });
 
@@ -639,7 +641,7 @@ describe('filters', () => {
     const { defs: d2 } = build([...defs, 'ny = c[c.city == "NYC"]'], cities);
     expect(d2.tables.get('ny')!.data!.columns[0].strs).toEqual(['NYC', 'NYC']);
     // Text never matches a number, rather than coercing to one.
-    expect(() => lowerRow('c.pop[c.city == 3]', defs, cities)).toThrow(/keeps nothing/);
+    expect(values(lowerRow('c.pop[c.city == 3]', defs, cities))).toEqual([]);
     // A comparison outside brackets says where it belongs, and '!=' still
     // rescues the factorial reading.
     expect(() => lowerRow('c.city == "NYC"', defs, cities)).toThrow(/put it in brackets/);

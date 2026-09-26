@@ -103,7 +103,7 @@ order takes a tuple:
   only. On a multiset they are errors that point at `sort`.
 - `sort(L)` and `sort(P, key)` are the bridge from a multiset to a tuple. The
   key is an expression in the same multiset, so it is identical to it:
-  `polyline(sort(P, P_x))` draws a time series in x order.
+  `polyline(sort(P, P.x))` draws a time series in x order.
 - A tuple of points is a rank-2 tensor, which is also a matrix. The consumer
   decides the reading: `polyline(T)` walks the rows as points; `T Q` uses it
   as a matrix.
@@ -373,17 +373,20 @@ recorded so they can be reviewed and reversed. Progress notes live in
   multiset of points; of longer ones, an error.
 - **Tuple literals may be any length.** `(1, 2, 3, 5, 8)` is a tuple of five
   numbers (it was a parse error). A tuple of tuples is a tensor (phase 6).
-- **`sort(P, key)` details.** The key has to be identical to P (the same
-  instances), a number per element, and constant (sliders yes, t no). The
+- **`sort(P, key)` details.** The key has to run over P's instances or
+  some of them (`sort(L + M, L)`: each element takes the key of the L it
+  came from, ties in order), a number per element, and constant (sliders yes, t no). The
   sort is stable, and an element whose key is missing is left out, as
   `sort(L)` leaves gaps out. `sort(P)` of points, with no key, is an error
   that suggests `sort(P, P.x)`. `P_x` is not a key spelling: it is already
   a subscripted name (a named point's component); `P.x` is.
 - **Indexing details.** A slice `T[2..4]` is a tuple; a list of indices,
   `T[N]`, runs over N (a multiset) as before; a filter keeps a tuple's order.
-  On a multiset of tuples, `T[k]` is position k of each. `sort(L)[2]` still
-  multiplies (only a name indexes), so the error says to name it:
-  `T = sort(L)`, then `T[2]`.
+  On a multiset of tuples, `T[k]` is position k of each. Besides a name, a
+  `sort(…)` call indexes, `sort(L)[2]`, and so does a list literal written
+  right against its brackets, `[3, 1, 2][2]`, which is the needs-order
+  error (with a space, `[1, 2] [3]`, it still multiplies). Other calls and
+  parenthesised expressions still multiply.
 - **A matrix's rows are a tuple.** `M[2]` is its second row and `polyline(M)`
   walks the rows, so `g(M)` for `g(x, y) = x y` and a 2×2 M is a tuple of
   2 numbers — a point — where `g([(1,2),(3,4)])` is a multiset of 2 numbers.
@@ -409,12 +412,6 @@ recorded so they can be reviewed and reversed. Progress notes live in
   `X + u` is the density of X plus an independent uniform. A row the random
   variable engine cannot take (`u + L` for a list `L`, `u < 0.5`) keeps the
   classifier's error, which says u and v trace curves in a tuple.
-- **A large data column stacks in dot-wide columns.** Up to 400 values, equal
-  values stack exactly (height = multiplicity). Past that the column is a
-  cloud, and values are gathered into columns one cloud dot (3 CSS px) wide
-  at the current zoom before stacking, so continuous measurements stack into
-  their shape instead of a single row of dots at height 1. Stacks keep unit
-  spacing, so a column of thousands is tall; zoom out to see its outline.
 - **A matrix or tensor alone on a row reads out** (phase 6), as nested tuples:
   `2 M` is `= ((2, 4), (6, 8))`, where it used to be an error, and a
   multiset of them lists each, `= [((1, 0), (0, 1)), ((2, 0), (0, 1))]`.
@@ -473,10 +470,47 @@ recorded so they can be reviewed and reversed. Progress notes live in
 - **A swept region is a union over one interval.** Beside x and y, the row
   keeps a pixel when some value of its one interval satisfies the relation;
   for a chain, one value must satisfy every comparison. Two intervals, z, a
-  bare field (`sin(a x)`) or a vector field are errors. The shader steps 48
-  values and the link preview 32, so a member narrower than a pixel between
-  steps can be missed where ∂F/∂a is not smooth.
+  bare field (`sin(a x)`) or a vector field are errors. (How the shader and
+  preview search the interval is in the bullet on sign changes below.)
 - **An interval is not a list item.** `[interval(0, 1), 2]` is an error for
   now: a bracket of an interval and a number is a mixed measure, which has no
   picture yet. A state, sequence or other place that needs one number reports
   that an interval is a range of numbers.
+- **A multiset of tuples draws one figure per element.** `polyline(T)`,
+  `polygon(T)` and `hull(T)` walk T's tuple axis; each other axis (a list
+  inside T, `polyline(sort(P, P.x) + (a, 0))`, a named `M = ((a, 0), (0, 1))`)
+  is a family, as the tuple written out is, up to 1024 figures.
+- **A figure moves a square tuple of points point by point.** In
+  `polygon(T + (0, 0, 1))`, `polyline(2 T)`, `polygon(R T)` and
+  `polygon(rotate(T, a))`, a named square T is read as its rows (the
+  consumer decides, §3), so each point moves; a matrix on the left of a
+  product stays the matrix. On a row of its own `T + (1, 0)` is still an
+  error (a matrix and a point do not add), `2 T` and `R T` matrix algebra.
+- **A multiset of matrices pairs with points built from it.** With
+  `M = ((a, 0), (0, 1))` and `Q = M (1, 1)`, `M Q` and `R = M Q` choose M
+  once per element of a, so they are 2 points (M M (1, 1)). A definition
+  that uses a named list of points is never a matrix.
+- **A filter may keep nothing.** `L[L > 5]` is `[]`, so `count` of it is 0
+  and the other reductions say the list is empty.
+- **count, total and mean take computed point lists.** `count(2 P)`,
+  `count([0,1] e_x)`; `total` and `mean` of points are taken coordinate by
+  coordinate (a point). `min`, `max`, `median`, `stdev` of points stay errors.
+- **A long tuple's readout is cut.** Past 8 values it shows the first 8 and
+  `…`, like a list's; a sorted column stays a typed array however long.
+- **A function parameter shadows e_x, e_y, e_z**, as it shadows a named
+  interval: `f(e_x) = e_x^2` squares its argument. So does an open Σ index.
+- **Every number list stacks by dot width, not only CSV columns.** A list
+  whose distinct values lie closer than a dot at the current zoom (`sin(L)`
+  for `L = [1..300]`, `[1..2000]/1000`) gathers into columns one dot wide
+  (8 CSS px as outlined points; 3 px past 400 values, drawn as a cloud) and
+  stacks there; a list whose values are all a dot apart stacks exact copies
+  only (`[1,2,2,3,3,3]`). Unit spacing is kept, so a stack's height in
+  pixels is the same at every zoom and a long list stands taller than the
+  screen: its outline shows only with a stretched y axis (`view(…, ratio)`).
+- **A swept region's edge is at most a pixel wide.** The app keeps a pixel
+  on a sign change of F between steps of the interval, and only searches
+  finer (8 sub-steps) where ∂F/∂a says a member could cross between two; a
+  near miss is feathered by its distance on screen, |F|/|∇F|, never by a step
+  in a. The link preview steps 64 values on 8-px blocks and judges only edge
+  blocks per pixel. A member narrower than a pixel that grazes between
+  steps can still be missed at the tangent edge of a band.

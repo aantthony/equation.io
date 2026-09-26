@@ -251,7 +251,7 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
         ? { status: 'error' as const, error: row.error }
         : {
             status: 'ok' as const,
-            kind: rowKind(row, analysis.defs.tables)!,
+            kind: rowKind(row, analysis.defs)!,
             ...(row.cls?.animated ? { animated: true } : {}),
             ...(row.info ? { value: row.info } : {}),
             ...(row.dataLocal ? { note: row.dataLocal } : {}),

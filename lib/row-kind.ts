@@ -26,11 +26,20 @@ const DIST_KINDS = {
   expectation: 'expectation (mean readout)',
 } as const;
 
-export function rowKind(row: KindSource, tables: { has(name: string): boolean }): string | undefined {
+/** Names the document binds to something other than a number, so a `const`
+ *  definition of one is not reported as though it were a slider. */
+export interface KindNames {
+  tables: { has(name: string): boolean };
+  intervals?: { has(name: string): boolean };
+  mats?: { has(name: string): boolean };
+  tensors?: { has(name: string): boolean };
+  lists?: { has(name: string): boolean };
+  points?: { has(name: string): boolean };
+}
+
+export function rowKind(row: KindSource, names: KindNames): string | undefined {
   if (row.comment) return 'comment (group heading)';
-  // `adults = person[…]` scans as a constant, but what it defines is another data file.
-  if (row.def)
-    return `definition (${row.def.kind === 'const' && tables.has(row.def.name) ? 'filtered data' : row.def.kind})`;
+  if (row.def) return `definition (${row.def.kind === 'const' ? constKind(row.def.name, names) : row.def.kind})`;
   if (row.view) return `viewport (${row.view.kind})`;
   if (row.dist === 'probability') {
     // An event with no single-variable shape (P(X < Y)) is estimated, not drawn.
@@ -88,3 +97,14 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   prob: 'probability, shaded under the density, with its value as a readout',
   expect: 'expected value readout, marked on the density',
 };
+
+function constKind(name: string, names: KindNames): string {
+  // `adults = person[…]` scans as a constant, but what it defines is another data file.
+  if (names.tables.has(name)) return 'filtered data';
+  if (names.intervals?.has(name)) return 'interval';
+  if (names.mats?.has(name)) return 'matrix';
+  if (names.tensors?.has(name)) return 'tensor';
+  if (names.points?.has(name)) return 'point';
+  if (names.lists?.has(name)) return 'list';
+  return 'const';
+}

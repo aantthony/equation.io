@@ -733,6 +733,23 @@ function reduce(name: string, all: readonly Expr[], ctx: Ctx): Expr {
   if (name === 'count') return num(all.length);
   if (all.some(it => it.kind === 'vec')) {
     if (name === 'sort') throw new Error(SORT_POINTS);
+    // A total or mean of points is taken coordinate by coordinate.
+    if ((name === 'total' || name === 'mean') && all.every(it => it.kind === 'vec')) {
+      const dims = (all[0] as Expr & { kind: 'vec' }).items.length;
+      if (all.some(it => (it as Expr & { kind: 'vec' }).items.length !== dims)) {
+        throw new Error('All points in a list need the same number of coordinates.');
+      }
+      return {
+        kind: 'vec',
+        items: Array.from({ length: dims }, (_, k) =>
+          reduce(
+            name,
+            all.map(it => (it as Expr & { kind: 'vec' }).items[k]),
+            ctx,
+          ),
+        ),
+      };
+    }
     throw new Error(`${name}(…) over a list of points is not supported yet.`);
   }
   // Gaps leave the same way they leave a typed array (reduceData) — the rule
@@ -800,15 +817,21 @@ function sortBy(p: Expr, key: Expr, ctx: Ctx): Expr {
   if (!own) throw new Error(usage);
   if (isText(p)) throw new Error('sort(…) orders numbers or points; that column holds text.');
   // Identical, not merely as long: a key from another list would pair up
-  // elements that have nothing to do with each other.
+  // elements that have nothing to do with each other. A key over some of
+  // P's instances is fine — sort(L + M, L) — and every element of P takes
+  // the key of the instance it came from (ties stay in order).
   const keyAxes = isSeq(key) ? axesOf(key) : [];
-  if (!isSeq(key) || keyAxes.length !== own.length || keyAxes.some((a, i) => a.id !== own[i].id)) {
+  if (!isSeq(key) || !keyAxes.length || keyAxes.some(a => !own.some(o => o.id === a.id))) {
     throw new Error(
       'The sort key has to be written in the list it sorts, so each element carries its own: sort(P, P.x).',
     );
   }
-  const n = seqLength(key);
-  const keys = sortKeys(key, ctx);
+  const n = own.reduce((size, a) => size * a.n, 1);
+  const same = keyAxes.length === own.length && keyAxes.every((a, i) => a.id === own[i].id);
+  const spread = same
+    ? key
+    : (align([withAxes({ kind: 'data', values: new Float64Array(n) } as Expr, own), key]).parts[1] as Seq);
+  const keys = sortKeys(spread, ctx);
   // Stable, and a missing key (a gap) leaves its element out, as sort(L) does.
   const order = Int32Array.from({ length: n }, (_, k) => k).filter(k => !Number.isNaN(keys[k]));
   order.sort((a, b) => keys[a] - keys[b] || a - b);
@@ -1008,7 +1031,6 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
       throw new Error(`The filter tests ${keep.length} values but the list has ${n}.`);
     }
     const kept = keep.reduce((c, k) => c + (k ? 1 : 0), 0);
-    if (!kept) throw new Error(`That filter keeps nothing (0 of ${keep.length}).`);
     // The same cut of the same list is the same instances, however many
     // times it is written: (L[L > 2], L[L > 2]^2) still pairs up.
     const test = JSON.stringify(idx, (key, v) => (ArrayBuffer.isView(v) ? undefined : exprReplacer(key, v)));
@@ -1127,7 +1149,12 @@ function needsOrder(target: Expr, idx: Expr, low: Seq): string {
     const k = idx.kind === 'num' ? String(idx.value) : 'k';
     return `${name}[${k}] needs an order — its runs start from a list [ … ], which has none. Start them from a tuple to number them: ${name}(0) = (sort([1..4]), 0).`;
   }
-  return orderMessage(target.kind === 'var' ? target.name : 'L', idx, isList(low) && low.items[0]?.kind === 'vec');
+  const points = isList(low) && low.items[0]?.kind === 'vec';
+  if (target.kind === 'list') {
+    const k = idx.kind === 'num' ? String(idx.value) : 'k';
+    return `[ … ][${k}] needs an order — a list [ … ] has none. Sort it: ${points ? 'sort(P, P.x)' : 'sort([ … ])'}[${k}].`;
+  }
+  return orderMessage(target.kind === 'var' ? target.name : 'L', idx, points);
 }
 
 /** The words of needsOrder, for a caller that knows the shape without the
@@ -1140,7 +1167,7 @@ export function orderMessage(name: string, idx: Expr, points: boolean): string {
     : dot > 0
       ? `sort(${name}, ${name.slice(0, dot)}.row)`
       : `sort(${name})`;
-  return `${name}[${k}] needs an order — a list [ … ] has none. Name it sorted, T = ${sorted}, and use T[${k}].`;
+  return `${name}[${k}] needs an order — a list [ … ] has none. Sort it: ${sorted}[${k}].`;
 }
 
 /**
@@ -1470,6 +1497,14 @@ export function tupleRow(e: Expr): Expr {
   const points: Expr[] = [];
   for (let k = 0; k < items.length; k += n) points.push({ kind: 'vec', items: items.slice(k, k + n) });
   return withAxes({ kind: 'list', items: points }, axes.slice(0, -1));
+}
+
+/** A tuple of more than 3 packed numbers — a sorted column — as its numbers,
+ *  so its row can read out without a node per value; null for anything else. */
+export function packedTuple(e: Expr): Float64Array | null {
+  if (!isData(e) || e.values.length <= 3) return null;
+  const axes = axesOf(e);
+  return axes.length === 1 && axes[0].ordered ? e.values : null;
 }
 
 /**

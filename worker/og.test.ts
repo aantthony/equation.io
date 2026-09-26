@@ -101,6 +101,35 @@ describe('og raster renderer', () => {
     expect(canRenderOg(rows)).toBe(true);
   });
 
+  it('keeps a swept region to the members it sweeps, however steep in a', () => {
+    // a in [1, 100]: y = sin(a x) fills |y| <= 1 and nothing past it (the
+    // app once filled an hourglass to |y| ≈ 6); pixel (i, j) is (i/10 - 10, 5 - j/10).
+    const view = 'view(x = -10..10, y = -5..5)';
+    const base = renderRaster([view], 200, 100);
+    const changed = (r: ReturnType<typeof renderRaster>, j: number) => {
+      let n = 0;
+      for (let i = 0; i < r.w; i++) if (pixel(r, i, j).some((c, k) => c !== pixel(base, i, j)[k])) n++;
+      return n / r.w;
+    };
+    const band = renderRaster(['a = interval(1, 100)', 'y = sin(a x) #e00', view], 200, 100);
+    for (const j of [20, 37, 63, 80]) expect(changed(band, j), `row ${j}`).toBe(0);
+    for (const j of [42, 50, 58]) expect(changed(band, j), `row ${j}`).toBeGreaterThan(0.95); // grid lines draw over it
+    // An annulus swept by circles stops at radius 2, not a step beyond it.
+    const ring = renderRaster(['a = interval(1, 2)', 'x^2 + y^2 = a^2 #e00', view], 200, 100);
+    expect(changed(ring, 50)).toBeCloseTo(0.1, 1);
+    expect(pixel(ring, 121, 50)).toEqual(pixel(base, 121, 50));
+    expect(pixel(ring, 119, 50)).not.toEqual(pixel(base, 119, 50));
+  });
+
+  it('previews a swept region at a fraction of a pass per sample', () => {
+    const rows = ['a = interval(1, 20)', 'y = sin(a x) + cos(a y)'];
+    renderRaster(rows);
+    const t = performance.now();
+    renderRaster(rows);
+    // It took 32 full passes (≈ 600 ms); a generous bound for slow CI.
+    expect(performance.now() - t).toBeLessThan(400);
+  });
+
   it('draws a row in its #hex note color', () => {
     const [red, green, blue] = pixel(renderRaster(['y = x #e00 red'], 100, 100), 50, 50);
     expect(red).toBeGreaterThan(150);

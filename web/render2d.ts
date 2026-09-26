@@ -696,25 +696,69 @@ ${edgeBlocks}
 
 /** Samples of u per pixel when a family over an interval is projected. */
 const PROJECTION_SAMPLES = 48;
+/** Sub-steps between two samples that a member could cross between. */
+const PROJECTION_REFINE = 8;
 
 /**
  * The region a family over u ∈ [0, 1] sweeps: a pixel is kept when some u
  * satisfies the relation there, found by stepping u. For an equation that is
- * a sign change of F between neighbouring samples, or a sample within half a
- * step of zero at its slope ∂F/∂u (so a member that only grazes the pixel
- * between samples still counts); for inequalities, the smallest max of the
- * constraints below 0. Outside, the nearest member's residual feathers the
- * edge over a pixel, as ineqFrag's fill does.
+ * a sign change of F between neighbouring samples. Where F keeps its sign but
+ * could still reach 0 between two samples at its slope ∂F/∂u (a member that
+ * only grazes the pixel), that step is searched again finer — still for a
+ * sign change, so a steep ∂F/∂u costs time, never extra fill. Outside, the
+ * member nearest the pixel feathers the edge by its distance in pixels,
+ * |F| / |∇F| (confirmed by a Newton step that crosses it), so the edge is an
+ * antialiasing pixel wide at most and u never leaves [0, 1]. For inequalities,
+ * the smallest max of the constraints below 0.
  */
 export function projFrag(field: string, relation: 'eq' | 'ineq', slope?: string, params?: string[]): string {
+  const R = PROJECTION_REFINE;
   const step =
     relation === 'eq'
       ? `
-    float lip = 0.5 * ${slope ? 'abs(S(p.x, p.y, s)) * du' : '(had ? abs(f - prev) : 0.0)'};
-    if (abs(f) <= lip || (had && prev * f <= 0.0)) inside = true;
-    near = min(near, abs(f));`
+    float sl = ${slope ? 'abs(S(p.x, p.y, s))' : '2.0 * (had ? abs(f - prev) : 0.0)'};
+    if (abs(f) < near) {
+      near = abs(f);
+      best = s;
+    }
+    if (f == 0.0 || (had && prev * f <= 0.0)) inside = true;
+    else if (had && !inside && min(abs(f), abs(prev)) <= 0.5 * max(sl, prevSl) * du) {
+      float q = prev;
+      for (int j = 1; j < ${R}; j++) {
+        float s2 = s - du + float(j) * (du / ${R}.0);
+        float g = F(p.x, p.y, s2);
+        if (isnan(g) || isinf(g)) continue;
+        if (abs(g) < near) {
+          near = abs(g);
+          best = s2;
+        }
+        if (q * g <= 0.0) inside = true;
+        q = g;
+      }
+    }
+    prevSl = sl;`
       : `
     near = min(near, f);`;
+  const cover =
+    relation === 'eq'
+      ? `
+  float cover = 1.0;
+  if (!inside) {
+    // Distance in pixels to the nearest member, from its gradient on screen.
+    vec2 h = uUpp;
+    float f0 = F(p.x, p.y, best);
+    vec2 g = 0.5 * vec2(F(p.x + h.x, p.y, best) - F(p.x - h.x, p.y, best), F(p.x, p.y + h.y, best) - F(p.x, p.y - h.y, best));
+    float g2 = dot(g, g);
+    float dist = abs(f0) / sqrt(max(g2, 1e-30));
+    // Near a fold of F the straight line misleads: step 1.5x toward the
+    // member and keep the feather only if F changes sign there.
+    vec2 q = p - 1.5 * f0 / max(g2, 1e-30) * g * h;
+    float f1 = F(q.x, q.y, best);
+    cover = dist < 1.0 && f0 * f1 <= 0.0 ? 1.0 - dist : 0.0;
+  }`
+      : `
+  float aa = max(fwidth(near), 1e-24);
+  float cover = 1.0 - smoothstep(-aa, aa, near);`;
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -732,7 +776,9 @@ void main() {
   const float du = 1.0 / float(${PROJECTION_SAMPLES - 1});
   bool inside = false;
   float near = 1e30;
+  float best = 0.0;
   float prev = 0.0;
+  float prevSl = 0.0;
   bool had = false;
   for (int k = 0; k < ${PROJECTION_SAMPLES}; k++) {
     float s = float(k) * du;
@@ -743,9 +789,7 @@ void main() {
     }${step}
     prev = f;
     had = true;
-  }
-  float aa = max(fwidth(near), 1e-24);
-  float cover = ${relation === 'eq' ? 'inside ? 1.0 : 1.0 - smoothstep(0.0, aa, near)' : '1.0 - smoothstep(-aa, aa, near)'};
+  }${cover}
   float alpha = cover * 0.22;
   if (alpha < 0.004) discard;
   outColor = vec4(uColor, alpha);

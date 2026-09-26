@@ -494,10 +494,17 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
         switch (e.op) {
           case '+':
           case '-':
-            if (!a || !b)
-              throw new Error(
-                `Cannot ${e.op === '+' ? 'add' : 'subtract'} a matrix and a number — use a multiple of the identity.`,
-              );
+            if (!a || !b) {
+              const verb = e.op === '+' ? 'add' : 'subtract';
+              // A point beside a tuple of points moves each of them — in a
+              // figure, which reads T as its points (docs/multisets.md §3).
+              if (lo(a ? e.b : e.a).vec) {
+                throw new Error(
+                  `Cannot ${verb} a matrix and a point. To move a tuple of points, draw it: polygon(T + (1, 0)).`,
+                );
+              }
+              throw new Error(`Cannot ${verb} a matrix and a number — use a multiple of the identity.`);
+            }
             return { m: matAdd(a.m, b.m, e.op === '-') };
           case '*':
             if (a && b) return { m: matMul(a.m, b.m) };
@@ -873,7 +880,10 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       }
       // sort(P, P.x) orders points by a key; list lowering does the sorting,
       // and a point stays one value there (docs/multisets.md §3).
-      if (e.name === 'sort') return sc({ kind: 'call', name: e.name, args: args.map(toExpr) });
+      // count, total and mean take any multiset, points included (§3): a
+      // computed one, 2 [(1, 2), (3, 4)], arrives here as a point of lists.
+      if (e.name === 'sort' || (['count', 'total', 'mean'].includes(e.name) && args.length === 1 && args[0].vec))
+        return sc({ kind: 'call', name: e.name, args: args.map(toExpr) });
       const flatArgs: Expr[] = [];
       for (const a of args) {
         if (a.vec) throw new Error(`${e.name} is not defined for points.`);

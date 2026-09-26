@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
+import { parseCsv } from './csv.ts';
 import { densityAt } from './dist.ts';
 import { evaluate, type Expr } from './expr.ts';
 import { dotPlot } from './plot.ts';
@@ -119,7 +120,7 @@ describe('§3 order lives in tuples', () => {
     const P = ['P = [(0,0),(1,1),(2,0)]'];
     expect(last([...P, 'polyline(P)']).error).toMatch(/polyline needs an order.*polyline\(sort\(P, P\.x\)\)/);
     expect(last([...P, 'polygon(P)']).error).toMatch(/polygon needs an order/);
-    expect(last(['L = [3,1,2]', 'L[2]']).error).toMatch(/L\[2\] needs an order.*T = sort\(L\).*T\[2\]/);
+    expect(last(['L = [3,1,2]', 'L[2]']).error).toMatch(/L\[2\] needs an order.*sort\(L\)\[2\]/);
     expect(multiset(['L = [3,1,2]', 'T = sort(L)', 'T[2]'])).toEqual([2]);
     // Order-free: a hull, a filter, and points written out one by one.
     expect(last([...P, 'hull(P)']).cpu?.type).toBe('polygon');
@@ -505,5 +506,131 @@ describe('§5 continuous intervals', () => {
     expect(last(['interval(2, 1)']).error).toMatch(/a < b/);
     expect(last(['interval(1)']).error).toMatch(/two bounds/);
     expect(last(['(interval(0, x), u)']).error).toMatch(/constants, sliders and t/);
+  });
+});
+
+describe('§3 figures over multisets of tuples', () => {
+  /** Each member's vertices, as numbers: one array per figure drawn. */
+  const figures = (rows: string[]): number[][] => {
+    const row = last(rows);
+    if (row.error) throw new Error(row.error);
+    const object = row.cls!.object;
+    const members = object.kind === 'family' ? object.members.map(m => m.object) : [object];
+    return members.map(m => {
+      if (m.kind !== 'figure') throw new Error(m.kind);
+      if (m.over) {
+        const n = m.over[0].values.length;
+        return Array.from({ length: n }, (_, k) => {
+          const env = Object.fromEntries(m.over!.map(c => [c.name, c.values[k]]));
+          return m.vertices.map(v => evaluate(v, env));
+        }).flat();
+      }
+      return m.vertices.map(v => evaluate(v, {}));
+    });
+  };
+  it('walks the tuple, and gives one figure per element of every other axis', () => {
+    expect(figures(['a = [1,2]', 'T = ((0,0),(a,0),(0,1))', 'polyline(T)'])).toEqual([
+      [0, 0, 1, 0, 0, 1],
+      [0, 0, 2, 0, 0, 1],
+    ]);
+    // No edge joins the two copies.
+    expect(figures(['P = [(3,1),(1,2),(2,0)]', 'a = [0,10]', 'polyline(sort(P, P.x) + (a,0))'])).toEqual([
+      [1, 2, 2, 0, 3, 1],
+      [11, 2, 12, 0, 13, 1],
+    ]);
+    // …packed as well: two paths of 3 vertices, not one of 6.
+    expect(figures(['L = [1,5]', 'polyline((sort([1,2,3]), L))'])).toEqual([
+      [1, 1, 2, 1, 3, 1],
+      [1, 5, 2, 5, 3, 5],
+    ]);
+    // A multiset of matrices walks each one's rows.
+    expect(figures(['a = [1,2]', 'M = ((a,0),(0,1))', 'polyline(M)'])).toEqual([
+      [1, 0, 0, 1],
+      [2, 0, 0, 1],
+    ]);
+  });
+  it('moves a square tuple of points point by point', () => {
+    const T3 = 'T = ((0,0,0),(1,0,0),(0,1,0))';
+    expect(figures([T3, 'polygon(T + (0,0,1))'])).toEqual([[0, 0, 1, 1, 0, 1, 0, 1, 1]]);
+    const turned = figures([T3, 'polygon(rotate(T, pi/2, (0,0,1)))'])[0];
+    [0, 0, 0, 0, 1, 0, -1, 0, 0].forEach((v, k) => expect(turned[k]).toBeCloseTo(v, 12));
+    const T = 'T = ((0,0),(1,1))';
+    expect(figures([T, 'polyline(T + (1,0))'])).toEqual([[1, 0, 2, 1]]);
+    expect(figures([T, 'polyline(2 T)'])).toEqual([[0, 0, 2, 2]]);
+    expect(figures([T, 'R = ((0,-1),(1,0))', 'polyline(R T)'])).toEqual([[0, 0, -1, 1]]);
+    const spun = figures([T, 'polyline(rotate(T, pi))'])[0];
+    [0, 0, -1, -1].forEach((v, k) => expect(spun[k]).toBeCloseTo(v, 12));
+    // On a row of its own it is a matrix, and a point is not called a number.
+    expect(last([T, 'T + (1,0)']).error).toMatch(/a matrix and a point.*polygon\(T \+ \(1, 0\)\)/);
+  });
+});
+
+describe('§3 indexing, filters and reductions', () => {
+  it('indexes a sort(…) call; a literal list has no order', () => {
+    expect(last(['L = [3,1,2]', 'sort(L)[2]']).info).toBe('= 2');
+    expect(last(['sort([3,1,2])[2]']).info).toBe('= 2');
+    expect(last(['q = sort([3,1,2])[3] + 1', 'q']).info).toBe('= 4');
+    expect(last(['[1,2,3][2]']).error).toMatch(/needs an order.*sort\(\[ … \]\)\[2\]/);
+    // With a space between them, brackets still multiply.
+    expect(multiset(['[1,2,3] [2]'])).toEqual([2, 4, 6]);
+  });
+  it('a filter that keeps nothing is []', () => {
+    expect(multiset(['L = [1,2]', 'L[L > 5]'])).toEqual([]);
+    expect(last(['L = [1,2]', 'M = L[L > 5]', 'count(M)']).info).toBe('= 0');
+  });
+  it('sorts by a key over some of the instances, ties in order', () => {
+    expect(last(['L = [2,1]', 'M = [10,20]', 'sort(L + M, L)']).info).toBe('= (11, 21, 12, 22)');
+    expect(last(['L = [2,1]', 'M = [10,20]', 'sort(L + M, [1,2])']).error).toMatch(/written in the list it sorts/);
+  });
+  it('counts any multiset, computed points included', () => {
+    expect(last(['count(2 [(1,2),(3,4)])']).info).toBe('= 2');
+    expect(last(['count([0,1] e_x)']).info).toBe('= 2');
+    expect(last(['P = [(1,2),(3,4)]', 'count(P + (1,0))']).info).toBe('= 2');
+    const mean = last(['P = [(1,2),(3,4)]', 'mean(2 P)']).cls!.object;
+    if (mean.kind !== 'point') throw new Error(mean.kind);
+    expect(mean.source.coordinates.map(c => evaluate(c, {}))).toEqual([4, 6]);
+  });
+  it('reads out a sorted column without a node per value', () => {
+    let csv = 'age\n';
+    for (let k = 0; k < 20000; k++) csv += `${(k * 7919) % 97}\n`;
+    const tables = () => parseCsv(csv);
+    for (const row of ['sort(q.age)', 'sort(q.age) + 1']) {
+      const out = analyzeRows(['q = open("big.csv")', row], { readouts: true, tables }).rows[1];
+      const object = out.cls!.object;
+      if (object.kind !== 'tuple') throw new Error(object.kind);
+      expect(object.values.length).toBe(8);
+      expect(object.length).toBe(20000);
+      expect(out.info).toMatch(/^= \(\d+(, \d+){7}, …\)$/);
+    }
+  });
+});
+
+describe('§4 multisets of matrices', () => {
+  it('chooses M once when it meets points made from it', () => {
+    const rows = ['a = [1,2]', 'M = ((a,0),(0,1))', 'Q = M (1,1)'];
+    const points = (rs: string[]) => {
+      const object = last(rs).cls!.object;
+      if (object.kind !== 'list' || object.element !== 'point' || object.storage !== 'expressions')
+        throw new Error(JSON.stringify(object).slice(0, 200));
+      return object.values.map(p => p.map(c => evaluate(c, {})));
+    };
+    expect(points([...rows, 'M Q'])).toEqual([
+      [1, 1],
+      [4, 1],
+    ]);
+    expect(points([...rows, 'R = M Q', 'R'])).toEqual([
+      [1, 1],
+      [4, 1],
+    ]);
+  });
+});
+
+describe('§4 unit vectors', () => {
+  it('a parameter of that name shadows the built-in', () => {
+    expect(last(['f(e_x) = e_x^2', 'f(3)']).info).toBe('= 9');
+    expect(last(['g(e_y, k) = e_y + k', 'g(3,1)']).info).toBe('= 4');
+    expect(last(['sum(e_z = 1..3, e_z)']).info).toBe('= 6');
+    // Outside the function it is the vector again.
+    expect(last(['f(e_x) = e_x^2', 'e_x']).cls?.needs3D).toBe(true);
   });
 });

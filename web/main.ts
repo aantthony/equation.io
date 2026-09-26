@@ -294,17 +294,42 @@ const TUBE_SEGMENTS = 24;
  * frame while anything on the page animates, and a 200k-point column would
  * otherwise rebuild 3.2 MB of the same stacks each time; panning keeps them.
  */
-const stacks = new WeakMap<Float64Array, { width: number; xs: Float64Array; ys: Float64Array }>();
-function columnStacks(values: Float64Array): { xs: Float64Array; ys: Float64Array } {
-  // The cloud's default dot is 3 CSS px across (render2d drawLabels2D).
-  const width = 3 * view.upp * (window.devicePixelRatio || 1);
-  let hit = stacks.get(values);
-  if (!hit || hit.width !== width) {
-    hit = { width, ...dotPlot(values, width) };
-    stacks.set(values, hit);
+const stacks = new WeakMap<object, { width: number; values: ArrayLike<number>; xs: Float64Array; ys: Float64Array }>();
+function columnStacks(key: object, values: ArrayLike<number>, dotPx: number): { xs: Float64Array; ys: Float64Array } {
+  const width = dotPx * view.upp * (window.devicePixelRatio || 1);
+  let hit = stacks.get(key);
+  if (!hit || hit.width !== width || !sameValues(hit.values, values)) {
+    // Dots that would overlap at this zoom share a column; values at least a
+    // dot apart keep their exact place, so small lists stack exact copies.
+    const binned = values.length > CLOUD_MIN || crowded(values, width);
+    hit = {
+      width,
+      values: values === key ? values : Float64Array.from(values),
+      ...dotPlot(values, binned ? width : 0),
+    };
+    stacks.set(key, hit);
   }
   return hit;
 }
+function sameValues(a: ArrayLike<number>, b: ArrayLike<number>): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let k = 0; k < a.length; k++) if (!Object.is(a[k], b[k])) return false;
+  return true;
+}
+/** Whether two different values lie closer than a dot's width. */
+function crowded(values: ArrayLike<number>, width: number): boolean {
+  const sorted = Float64Array.from(values).filter(Number.isFinite).sort();
+  for (let k = 1; k < sorted.length; k++) {
+    const gap = sorted[k] - sorted[k - 1];
+    if (gap > 0 && gap < width) return true;
+  }
+  return false;
+}
+/** Dot diameters in CSS px: a listed point (r 4) and a cloud dot
+ *  (render2d drawLabels2D). */
+const POINT_DOT_PX = 8;
+const CLOUD_DOT_PX = 3;
 const COMB_STEP = 4;
 
 // --- state ---
@@ -1545,7 +1570,11 @@ function render() {
               return NaN;
             }
           });
-          const { xs, ys } = dotPlot(values);
+          if (values.length > CLOUD_MIN) {
+            extras.clouds!.push({ ...columnStacks(plot, values, CLOUD_DOT_PX), color: css });
+            break;
+          }
+          const { xs, ys } = columnStacks(plot, values, POINT_DOT_PX);
           for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
           break;
         }
@@ -1572,11 +1601,11 @@ function render() {
         case 'dlist': {
           const { values } = plot;
           if (values.length <= CLOUD_MIN) {
-            const { xs, ys } = dotPlot(values);
+            const { xs, ys } = columnStacks(values, values, POINT_DOT_PX);
             for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
             break;
           }
-          extras.clouds!.push({ ...columnStacks(values), color: css });
+          extras.clouds!.push({ ...columnStacks(values, values, CLOUD_DOT_PX), color: css });
           break;
         }
         case 'dscatter': {
@@ -4453,7 +4482,7 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
   }
   const row: RowStatus = { index, text: eq.text, status: 'ok' };
   if (!eq.text.trim()) return row;
-  row.kind = rowKind({ ...eq, view: eq.viewSpec }, defs.tables);
+  row.kind = rowKind({ ...eq, view: eq.viewSpec }, defs);
   row.meaning = eq.comment
     ? 'group heading; draws nothing'
     : eq.def
