@@ -28,7 +28,7 @@ export type MathObject =
       readonly kind: 'curve';
       readonly form: 'graph';
       readonly rhs: Expr;
-      readonly equation?: Expr;
+      readonly equation: Expr;
       readonly levels?: LevelSetSpec;
     }
   | {

@@ -334,7 +334,8 @@ describe('mcp endpoint', () => {
       ['value', '= 4'],
       ['definition (const)', undefined],
       ['value', '≈ 1.41421'],
-      ['implicit2d', undefined],
+      // A bare expression in x is a field, and says how to write the curve.
+      ['scalar2d', 'scalar field — for the curve write y = 2x'],
     ]);
     // Measurements are numbers too: distance/angle rows read out, a zero-length
     // arm is undefined, and a document's own `angle` still wins over the builtin.

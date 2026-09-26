@@ -81,7 +81,7 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'ripples',
     title: 'Scalar fields as height maps',
-    blurb: 'A bare expression in x and y renders as a shaded field — with t, it moves.',
+    blurb: 'A bare expression in x and y is a scalar field, shaded by sign and size — with t, it moves.',
     eqs: ['sin(x^2 + y^2 - 4t)/2'],
     group: 'Fields & complex maps',
     settle: 1.3,
@@ -397,10 +397,10 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'data-list',
     title: 'Data lists',
-    blurb: 'A bracketed list scatters at (k, value) — or as points, or bars via the row toggle.',
-    eqs: ['[3, 1, 4, 1, 5, 9, 2, 6]', '[(1, 2), (2, 3.5), (3, 3.1), (4, 5)]'],
+    blurb: 'A list of numbers is a dot plot on the number line, repeats stacked; a list of points scatters.',
+    eqs: ['[3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]', '[(1, 4), (2, 5.5), (3, 5.1), (4, 7)]'],
     group: 'Sequences & data',
-    view: { cx: 4.5, cy: 4.2, span: 10.7 },
+    view: { cx: 4.5, cy: 3.8, span: 10.7 },
   },
   {
     slug: 'line-fit',

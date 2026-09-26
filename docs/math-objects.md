@@ -62,9 +62,10 @@ object must respect):
 | equation in x, y (incl. `y = f(x)`, field names) | implicit curve | 2D distance-estimate shader |
 | `f(x,y) = c`, c a slider (+ "all levels") | level-set family | contour-stack shader |
 | inequality / chain in x, y | region (+ solid edges) | fill shader |
-| bare scalar in x only | graph `y = expr` | implicit curve |
-| bare scalar in x, y | scalar field | density shader |
-| equation/bare scalar with z | implicit surface | raymarcher |
+| bare scalar in x and/or y (`sin(x)` too: no implicit graph) | scalar field | signed density shader |
+| equation with z | implicit surface | raymarcher |
+| bare scalar with z | error: a field in space, not drawable yet (write `… = 0`) | — |
+| bare real scalar in u, v alone | density of its values, u, v ~ Uniform(0, 1) | density curve |
 | `revolve(f)`, `revolve(f, y)` | surface of revolution, lowered to the implicit surface `y^2 + z^2 = f(x)^2` | raymarcher |
 | complex-valued expr in w | field lines + equipotentials | level-curve shader |
 | `domain(f)` / `conformal(f)` / `iter(step)` | domain coloring / conformal grid / escape-time fractal | dedicated shaders |
@@ -84,7 +85,7 @@ object must respect):
 | `{cond: val, …}`; no default = restriction | piecewise value | flows through every renderer (NaN outside the cases) |
 | `a_n = …`; `a_{n+1} = …` | sequence dots (+ Σ toggle); cobweb / bifurcation | CPU overlay |
 | `c_{n+1}[i] = …` (rule reading `c_n[i±k]`), optional `c_0[i] = …` seed | 1D cellular automaton: space-time diagram, cell (i, n) at (i, −n), 1000 steps, exact background on each side | CPU-stepped cells as an R8 texture layer |
-| `[…]`, `[1..5]`, `L^2`; `(L, L^2)`; `hist(L)` | scalar list (dots/bars); scatter (same list zips, independent lists cross: `([0,1],[0,1],[0,1])` is a cube's corners); histogram | CPU overlay |
+| `[…]`, `[1..5]`, `L^2`; `(L, L^2)`; `hist(L)` | scalar list (a number-line dot plot, copies stacked); scatter (same list zips, independent lists cross: `([0,1],[0,1],[0,1])` is a cube's corners); histogram | CPU overlay |
 | `data = open("file.csv")`, `data.col` | table; a numeric column is a list | definition |
 | `Y ~ m X + b` | regression: binds the fitted parameters | fit readout on the row |
 | `a' = f(…)`, `a(0) = …`; `r' = (…, …, …)` | time-integrated state (scalar or 2/3-vector) | RK4 between frames; a constant to every consumer |
@@ -245,7 +246,8 @@ shape before value type:
 5. Inequalities → regions; equations → implicit curve/surface; a comparison
    with no free variables → decided note (#35, not shipped); complex
    equations → root point set (§6, shipped).
-6. Bare scalars: x → graph; x,y → scalar field; complex → field lines;
+6. Bare scalars: x and/or y → scalar field; x, y, z → error; u, v alone →
+   density of its values (docs/multisets.md §5); complex → field lines;
    constant → a **"= value" readout, nothing drawn** (`y = 4` is the line); constant complex
    → Argand point.
 

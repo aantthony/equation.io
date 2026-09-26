@@ -123,7 +123,8 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
   [
     'lists + data',
     [
-      ['data list', '[3, 1, 4, 1, 5, 9, 2, 6]'],
+      // A dot plot on the number line: 1, 3 and 5 repeat, so they stack.
+      ['data list', '[3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5]'],
       ['scatter', '[(1, 2), (2, 3.5), (3, 3.1), (4, 5)]'],
       // A list is a variable: both uses of s move together, one point each.
       ['sampled curve', 's = [0..50]/5; (s, sin(s))'],

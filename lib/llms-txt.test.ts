@@ -69,7 +69,7 @@ describe('llms.txt', () => {
   it('gives builtin examples that mean what the text says', () => {
     const f = ['f(x, y) = x^2 - y^2'];
     const cases: Array<[string[], string, string]> = [
-      [[], 'erf(x)', 'curve'],
+      [[], 'erf(x)', 'scalar-field'],
       [[], '1/gcd(floor(x), floor(y))', 'scalar-field'],
       [[], 'a_n = isprime(n)', 'sequence'],
       [[], 'grad(x^2 - y^2)', 'vector-field'],
@@ -100,6 +100,12 @@ describe('llms.txt', () => {
       [[], '((0, -1), (1, 0)) (2, 1)', 'point'],
       [[], 'det(((1, 2), (3, 4)))', 'value'],
       [[], '[(1, 2), (3, 4)]', 'list'],
+      // A row is drawn per pixel only when it depends on x or y.
+      [[], 'y = x!', 'curve'],
+      [[], 'sin(x)cos(y)', 'scalar-field'],
+      [[], '(u, u^2)', 'curve'],
+      [[], 'u^2', 'distribution'],
+      [[], '[3, 1, 4, 4]', 'list'],
     ];
     for (const [defs, row, kind] of cases) {
       expect(llms, row).toContain(row);

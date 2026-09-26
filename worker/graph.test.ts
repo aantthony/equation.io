@@ -208,9 +208,9 @@ describe('definite-integral rows shade their area', () => {
   it('rows that are not a number never shade', () => {
     const types = (texts: string[]) => analyze(texts).rows.map(r => r.error ?? r.cpu?.type ?? 'def');
     // A definition names the number (nothing draws); non-constant bounds are a
-    // curve; a complex integrand a point; a list integrand a list.
+    // field; a complex integrand a point; a list integrand a list.
     expect(types(['a = int[0..1] x^2 dx'])).toEqual(['def']);
-    expect(types(['int[0..x] t^2 dt'])).toEqual(['implicit2d']);
+    expect(types(['int[0..x] t^2 dt'])).toEqual(['scalar2d']);
     expect(types(['int[0..1] i x dx'])).toEqual(['point']);
     expect(types(['L = [1, 2]', 'int[0..1] L x dx'])).toEqual(['def', 'vlist']);
   });
@@ -666,7 +666,7 @@ describe('revolve(f) through analyze()', () => {
   });
 
   it('stays shadowable by a document that already uses the name', () => {
-    expect(out(['revolve = 3', 'revolve(x)'])[1][0]).toBe('implicit2d'); // the product 3x
+    expect(out(['revolve = 3', 'y = revolve(x)'])[1][0]).toBe('implicit2d'); // the product 3x
     expect(out(['revolve = 3', '2 revolve'])[1]).toEqual(['value', '= 6']);
     const fn = analyze(['revolve(x) = 2x', 'y = revolve(x) + 1', 'revolve(4)']);
     expect(fn.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);

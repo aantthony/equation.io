@@ -55,7 +55,7 @@ import { type VertexSampler, vertexSampler } from '../lib/figure-vertices.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
 import { CURVE_SAMPLES, type PathSampler, pathSampler } from '../lib/path.ts';
-import { type Classified, plotReadout, publicKind } from '../lib/plot.ts';
+import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
@@ -157,8 +157,6 @@ interface Equation {
   combT?: boolean;
   /** Sequence rows: plot partial sums S_N = Σ aₙ instead of the terms. */
   partialSum?: boolean;
-  /** Numeric-list rows: draw bars instead of dots. */
-  barMode?: boolean;
   /** Interleaved non-editable widgets, created lazily and kept across edits. */
   sliderUI?: SliderUI;
   levelsBtn?: HTMLButtonElement;
@@ -279,19 +277,21 @@ const cloudPoints = (plot: CpuPlan): number =>
 const TUBE_SEGMENTS = 24;
 
 /**
- * The 1…n a value list is drawn against, kept per column. Drawing runs every
+ * A large column's dot plot, stacked in columns one cloud dot wide at the
+ * current zoom, kept per column until the zoom changes. Drawing runs every
  * frame while anything on the page animates, and a 200k-point column would
- * otherwise allocate and fill 1.6 MB of the same numbers each time.
+ * otherwise rebuild 3.2 MB of the same stacks each time; panning keeps them.
  */
-const indexXs = new WeakMap<Float64Array, Float64Array>();
-function indexCoords(values: Float64Array): Float64Array {
-  let xs = indexXs.get(values);
-  if (!xs) {
-    xs = new Float64Array(values.length);
-    for (let k = 0; k < xs.length; k++) xs[k] = k + 1;
-    indexXs.set(values, xs);
+const stacks = new WeakMap<Float64Array, { width: number; xs: Float64Array; ys: Float64Array }>();
+function columnStacks(values: Float64Array): { xs: Float64Array; ys: Float64Array } {
+  // The cloud's default dot is 3 CSS px across (render2d drawLabels2D).
+  const width = 3 * view.upp * (window.devicePixelRatio || 1);
+  let hit = stacks.get(values);
+  if (!hit || hit.width !== width) {
+    hit = { width, ...dotPlot(values, width) };
+    stacks.set(values, hit);
   }
-  return xs;
+  return hit;
 }
 const COMB_STEP = 4;
 
@@ -799,8 +799,7 @@ const familyShared = ({
   combK,
   combT,
   partialSum,
-  barMode,
-}: Equation) => ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum, barMode });
+}: Equation) => ({ colorIndex, showArrows, showStreamlines, certify, showLevels, combK, combT, partialSum });
 
 /** A row's own color: its `#hex` note if it has one, else its palette slot.
  *  Family members read their parent's note — their own text is generated. */
@@ -1501,17 +1500,16 @@ function render() {
           break;
         }
         case 'vlist': {
-          plot.values.forEach((expr, k) => {
-            let v: number;
+          // Numbers on the number line, copies stacked (lib/plot.ts dotPlot).
+          const values = plot.values.map(expr => {
             try {
-              v = evaluate(expr, env);
+              return evaluate(expr, env);
             } catch {
-              return;
+              return NaN;
             }
-            if (!isFinite(v)) return;
-            if (eq.barMode) extras.bars!.push({ x: k + 1, y: v, halfWidth: 0.35, color: css });
-            else extras.points.push({ x: k + 1, y: v, color: css, r: 4 });
           });
+          const { xs, ys } = dotPlot(values);
+          for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
           break;
         }
         case 'plist': {
@@ -1532,19 +1530,16 @@ function render() {
         }
         // Typed-array lists: nothing to evaluate, so the only question is how
         // to draw them. Few enough to read as individual points, and they go
-        // through the same path as any other point (outlines, bars); past
-        // that they are a cloud, drawn in bulk.
+        // through the same path as any other point (outlines); past that
+        // they are a cloud, drawn in bulk, stacked in dot-wide columns.
         case 'dlist': {
           const { values } = plot;
           if (values.length <= CLOUD_MIN) {
-            values.forEach((v, k) => {
-              if (!isFinite(v)) return;
-              if (eq.barMode) extras.bars!.push({ x: k + 1, y: v, halfWidth: 0.35, color: css });
-              else extras.points.push({ x: k + 1, y: v, color: css, r: 4 });
-            });
+            const { xs, ys } = dotPlot(values);
+            for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
             break;
           }
-          extras.clouds!.push({ xs: indexCoords(values), ys: values, color: css });
+          extras.clouds!.push({ ...columnStacks(values), color: css });
           break;
         }
         case 'dscatter': {
@@ -2733,28 +2728,6 @@ function rowToggle(eq: Equation): RowToggle | null {
           eq.partialSum = !eq.partialSum;
         },
       };
-    case 'vlist':
-      return {
-        label: 'bars',
-        title: 'Draw the list as bars instead of dots',
-        on: !!eq.barMode,
-        flip: () => {
-          eq.barMode = !eq.barMode;
-        },
-      };
-    case 'dlist':
-      // Bars only while the list is small enough to draw as shapes; past
-      // that it is a cloud and a bar per point would be a solid block.
-      return eq.cpu!.values.length > CLOUD_MIN
-        ? null
-        : {
-            label: 'bars',
-            title: 'Draw the list as bars instead of dots',
-            on: !!eq.barMode,
-            flip: () => {
-              eq.barMode = !eq.barMode;
-            },
-          };
     default:
       return null;
   }

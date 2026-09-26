@@ -5,8 +5,9 @@ import { exprKey } from './expr.ts';
  * equation.io renderable dispatcher:
  *
  * - "l = r" → implicit curve (2D) or implicit surface (3D when z appears)
- * - bare scalar in x → treated as y = expr
- * - bare scalar in x,y → 2D scalar field (density)
+ * - bare scalar in x and/or y → 2D scalar field, drawn per pixel (no implicit
+ *   graph: `sin(x)` is a field, the curve is `y = sin(x)`); in x, y, z → an
+ *   error until fields in space can be drawn
  * - vector literal with no free vars → a point
  * - vector with free u (and v) → parametric curve (u) / surface (u,v), u,v ∈ (0,1)
  * - vector with free x/y → 2D vector field, drawn as animated streamlines (LIC)
@@ -400,6 +401,10 @@ function classifyLowered(
       'trail',
       'label',
     ]);
+    if (first === 'scalar2d')
+      throw new Error(
+        'A family of scalar fields cannot be drawn — for curves write y = …, or pick one member, like L[k].',
+      );
     if (unsupported.has(first))
       throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
@@ -720,7 +725,9 @@ function classifyLowered(
     }
     return done({ kind: 'curve', form: 'parametric', source: { representation: 'complex', expr } });
   }
-  if (hasParam && !paramSystem) throw new Error('u/v need a vector expression like (cos(u), sin(u), v).');
+  // (A bare real row in u, v is a random draw — analysis renames them first.)
+  if (hasParam && !paramSystem)
+    throw new Error('u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v).');
 
   // A vector equation is a system, one residual per component: F(x,y,z) =
   // (a, b, c) is the fiber of a map, (f, g) = (0, 0) an intersection of
@@ -830,10 +837,15 @@ function classifyLowered(
     if (!hasSpace && !hasParam) return done({ kind: 'point', source: { representation: 'complex', expr } });
     return done({ kind: 'complex-field', form: 'potential', expr });
   }
-  if (vars.has('z')) return done({ kind: 'surface', form: 'implicit', residual: expr });
-  if (vars.has('y')) return done({ kind: 'scalar-field', expr });
-  if (!hasSpace && !hasParam) return done({ kind: 'value', expr });
-  return done({ kind: 'curve', form: 'graph', rhs: expr });
+  // A scalar that depends on the screen's x and y is drawn at every pixel —
+  // `sin(x)` too, constant along y. There is no implicit graph: the curve is
+  // `y = sin(x)`, and the surface of a field in space is `f = 0`.
+  if (vars.has('z'))
+    throw new Error(
+      'A bare expression in x, y, z is a field in space, which cannot be drawn yet — set it equal to a value for its surface, like … = 0.',
+    );
+  if (hasSpace) return done({ kind: 'scalar-field', expr });
+  return done({ kind: 'value', expr });
 }
 
 /** A stand-in for the integration variable while the integrand is lowered:
@@ -991,4 +1003,31 @@ export function plotReadout(plot: CpuPlan, env: Record<string, number>): string 
     if (parts.every(p => p !== null)) return `[${parts.slice(0, 8).join('; ')}${parts.length > 8 ? '; …' : ''}]`;
   }
   return null;
+}
+
+/**
+ * A list of numbers drawn as its values (docs/multisets.md §5): a dot plot on
+ * the number line. Each value sits at x = value and its copies stack upward,
+ * the j-th at y = j, so a column's height is the value's multiplicity. No
+ * index is drawn — a multiset has no order.
+ *
+ * With `width` > 0, values are first gathered into columns that wide (the
+ * dot's width on screen), so a large column of distinct measurements stacks
+ * into its shape instead of drawing every dot on top of the last at y = 1.
+ */
+export function dotPlot(values: ArrayLike<number>, width = 0): { xs: Float64Array; ys: Float64Array } {
+  const xs = new Float64Array(values.length);
+  const ys = new Float64Array(values.length);
+  const heights = new Map<number, number>();
+  let n = 0;
+  for (let k = 0; k < values.length; k++) {
+    const v = values[k];
+    if (!Number.isFinite(v)) continue;
+    const x = width > 0 ? (Math.floor(v / width) + 0.5) * width : v;
+    const j = (heights.get(x) ?? 0) + 1;
+    heights.set(x, j);
+    xs[n] = x;
+    ys[n++] = j;
+  }
+  return { xs: xs.subarray(0, n), ys: ys.subarray(0, n) };
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
+import { densityAt } from './dist.ts';
 import { evaluate, type Expr } from './expr.ts';
+import { dotPlot } from './plot.ts';
 
 /**
  * The multiset semantics of docs/multisets.md, row by row, through the whole
@@ -256,5 +258,78 @@ describe('§4 vectors in 3D', () => {
     expect(cube.cpu).toMatchObject({ type: 'plist', dim: 3 });
     expect(vectors(['([0,1],[0,1],[0,1])'])).toHaveLength(8);
     expect(vectors(['[(0,0,0),(1,1,1)]'])).toHaveLength(2);
+  });
+});
+
+describe('§5 what a row draws', () => {
+  const kind = (rows: string[]) => {
+    const row = last(rows);
+    if (row.error) throw new Error(row.error);
+    return row.cpu!.type;
+  };
+
+  it('a row that depends on x or y is drawn per pixel', () => {
+    expect(kind(['y = x^2'])).toBe('implicit2d'); // a filter: the parabola
+    expect(kind(['x^2 + y^2 < 1'])).toBe('ineq2d'); // a filter: the disc
+    expect(kind(['sin(x y)'])).toBe('scalar2d');
+    expect(kind(['(y, -x)'])).toBe('vfield2d');
+    expect(kind(['(x, x^2)'])).toBe('vfield2d');
+  });
+
+  it('has no implicit graph: a scalar in x alone is a field, constant along y', () => {
+    for (const text of ['sin(x)', 'x']) {
+      const row = last([text]);
+      expect(row.cpu?.type, text).toBe('scalar2d');
+      expect(row.info, text).toBe(`scalar field — for the curve write y = ${text}`);
+    }
+    expect(last(['y^2']).info).toBe('scalar field — for the curve write x = y^2');
+    // A field of several variables is plainly a field; no hint.
+    expect(last(['sin(x y)']).info).toBeUndefined();
+  });
+
+  it('refuses what it cannot draw per pixel, and says what to write', () => {
+    expect(last(['x y z']).error).toMatch(/field in space, which cannot be drawn yet .* = 0/);
+    expect(last(['a = [1, 2]', 'sin(a x)']).error).toMatch(/family of scalar fields .* y = /);
+    expect(kind(['a = [1, 2]', 'y = sin(a x)'])).toBe('family'); // two curves
+  });
+
+  it('a row that does not depend on x or y is drawn as its values', () => {
+    expect(kind(['(u, u^2)'])).toBe('pcurve');
+    expect(kind(['(1, 2)'])).toBe('point');
+    expect(kind(['[1, 2, 3]'])).toBe('vlist');
+    expect(kind(['[1, 2] + [1, 2]'])).toBe('vlist');
+    expect(kind(['exp(i 2 pi u)'])).toBe('pcurve'); // a complex path stays a path
+    const readout = last(['2 + 2']);
+    expect([readout.cpu?.type, readout.info]).toEqual(['value', '= 4']);
+  });
+
+  it('numbers are a dot plot on the number line, copies stacked', () => {
+    const { xs, ys } = dotPlot([3, 1, 3, NaN, 2, 3]);
+    expect([...xs]).toEqual([3, 1, 3, 2, 3]);
+    expect([...ys]).toEqual([1, 1, 2, 1, 3]); // height = multiplicity
+    // A large column stacks in dot-wide columns instead.
+    const binned = dotPlot([0.1, 0.2, 0.9, 1.1], 0.5);
+    expect([...binned.xs]).toEqual([0.25, 0.25, 0.75, 1.25]);
+    expect([...binned.ys]).toEqual([1, 2, 1, 1]);
+  });
+
+  it('u and v alone are each [0, 1]: the row draws the density of its values', () => {
+    const density = (rows: string[], at: number) => {
+      const a = analyzeRows(rows, { readouts: true });
+      const row = a.rows.at(-1)!;
+      if (row.error) throw new Error(row.error);
+      expect(row.dist).toBe('density');
+      const object = row.cls!.object;
+      if (object.kind === 'curve' && object.form === 'graph') return evaluate(object.rhs, { x: at });
+      if (object.kind !== 'distribution' || object.form !== 'density') throw new Error(object.kind);
+      return densityAt(a.rvs.curve(object.rv, a.constEnv)!, at);
+    };
+    // u: the line at height 1 over [0, 1], and nothing outside it.
+    expect(density(['u'], 0.5)).toBeCloseTo(1, 9);
+    expect(density(['u'], 1.5)).toBe(0);
+    // u²: each b in (0, 1) comes from √b, with density 1/(2√b).
+    for (const b of [0.25, 0.5]) expect(density(['u^2'], b)).toBeCloseTo(1 / (2 * Math.sqrt(b)), 1);
+    // u v: two separate draws, density −ln(b).
+    expect(density(['u v'], 0.3)).toBeCloseTo(-Math.log(0.3), 1);
   });
 });

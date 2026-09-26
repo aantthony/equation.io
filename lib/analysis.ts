@@ -1,6 +1,6 @@
 /** Shared document preparation and runtime-aware mathematical analysis. */
 import { compileCpu, compileGpu, type CpuPlan, type GpuPlan } from './compiler.ts';
-import type { LevelSetSpec } from './math-object.ts';
+import type { LevelSetSpec, MathObject } from './math-object.ts';
 import { type Env, evaluateFrame, nameTaken } from './env.ts';
 import { lowerObjects } from './object-lists.ts';
 import {
@@ -28,6 +28,7 @@ import {
   NO_MEAN_INFO,
   RVSystem,
   buildRVDeclarations,
+  type BaseDist,
   type BuiltRVs,
   checkDerived,
   lowerProbBody,
@@ -42,7 +43,8 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, freeVars, parseExpr } from './expr.ts';
+import { type Expr, freeVars, parseExpr, substVars } from './expr.ts';
+import { usesComplex } from './complex.ts';
 import { lowerGeom } from './geom.ts';
 import { lowerLists } from './list.ts';
 import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
@@ -393,6 +395,54 @@ function classifyOrbit(value: Expr, [from, to]: [Expr, Expr], defs: Env, constNa
   return { object, animated: false, needs3D: !series && paths[0].length === 3, params: [...params].sort() };
 }
 
+/**
+ * u and v in a real row with no x, y or z, as independent Uniform(0, 1) base
+ * variables under internal names — or null when the row is not one, or the
+ * random-variable engine cannot take it (a tuple, a complex path, a list),
+ * which leaves the row to classify, where u and v trace curves.
+ */
+function uniformDraws(
+  e: Expr,
+  constNames: ReadonlySet<string>,
+  rvNames: ReadonlySet<string>,
+  id: string,
+): { expr: Expr; bases: Record<string, BaseDist> } | null {
+  if (e.kind === 'eq' || e.kind === 'ineq' || usesComplex(e)) return null;
+  const free = [...freeVars(e)].filter(n => !constNames.has(n));
+  const params = free.filter(n => n === 'u' || n === 'v');
+  if (!params.length || free.some(n => n === 'x' || n === 'y' || n === 'z' || n === 'w')) return null;
+  const uniform: BaseDist = {
+    kind: 'uniform',
+    args: [
+      { kind: 'num', value: 0 },
+      { kind: 'num', value: 1 },
+    ],
+  };
+  const bases: Record<string, BaseDist> = {};
+  const names: Record<string, Expr> = {};
+  for (const p of params) {
+    bases[`@${p}${id}`] = uniform;
+    names[p] = { kind: 'var', name: `@${p}${id}` };
+  }
+  const expr = substVars(e, names);
+  try {
+    checkDerived(expr, new Set([...rvNames, ...Object.keys(bases)]), constNames);
+  } catch {
+    return null;
+  }
+  return { expr, bases };
+}
+
+/** A scalar field in x alone (or y alone) is most often a curve meant as
+ *  `y = …`: the row says how to write that, since it now draws a field. */
+function curveHint(object: MathObject, text: string): string | null {
+  if (object.kind !== 'scalar-field') return null;
+  const vars = freeVars(object.expr);
+  const [free, other] = vars.has('x') ? ['x', 'y'] : ['y', 'x'];
+  if (!vars.has(free) || vars.has(other)) return null;
+  return `scalar field — for the curve write ${other} = ${text}`;
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   const rows = document.rows.map(row => ({ ...row }));
@@ -631,8 +681,19 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       const resolved = resolveRow(rawParsed, getFn, ropts);
       let parsed = resolved.expr;
+      // A real row in u and v alone does not depend on the screen, so it is
+      // drawn as its values (docs/multisets.md §5): u and v are each [0, 1],
+      // and the row is a multiset of numbers with a density. That is the
+      // object an expression in random variables already is, with u and v
+      // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
+      const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`);
+      const known = draws ? new Set([...rvNames, ...Object.keys(draws.bases)]) : rvNames;
+      if (draws) {
+        for (const [name, dist] of Object.entries(draws.bases)) rvs.addAnonymous({ name, kind: 'base', dist });
+        parsed = draws.expr;
+      }
       // A bare expression in random variables plots that derived density.
-      const rvRefs = [...freeVars(parsed)].filter(n => rvNames.has(n));
+      const rvRefs = [...freeVars(parsed)].filter(n => known.has(n));
       if (rvRefs.length) {
         for (const n of rvRefs) {
           if (!rvs.has(n)) throw new Error(`${n} has an error in its definition.`);
@@ -640,7 +701,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         if (parsed.kind === 'ineq') {
           throw new Error(`An inequality in random variables is a probability: try P(${row.text}).`);
         }
-        checkDerived(parsed, rvNames, constNames);
+        checkDerived(parsed, known, constNames);
         const name = `@${row.id ?? ri}`;
         rvs.addAnonymous({ name, kind: 'derived', expr: parsed });
         classifyVariable(row, name);
@@ -651,6 +712,8 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
+      const hint = curveHint(row.cls.object, row.text);
+      if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
       const taken = row.cls.object.kind === 'note' ? takenDefinitionName(row.text) : null;
       if (taken && row.cls.object.kind === 'note')

@@ -118,7 +118,7 @@ describe('object families and sequence values', () => {
     expect(a.rows[6].cpu!.type).toBe('family');
     expect(a.rows[7].cls!.needs3D).toBe(true);
     expect(last(['P=([1..100],0)', 'P+(1,1)']).cpu!.type).toBe('plist');
-    expect(last(['s=x^2', '[1,2]s']).cpu!.type).toBe('family');
+    expect(last(['s=x^2', 'y = [1,2]s']).cpu!.type).toBe('family');
   });
   it('crosses independent lists and zips every use of the same one', () => {
     const pts = (rows: string[]) => {

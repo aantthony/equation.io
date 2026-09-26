@@ -302,10 +302,13 @@ void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
-  // Density map: positive values fade the color in, like the old scalar2.
-  float a = 0.62 * clamp(v, 0.0, 1.0);
+  // Signed shade, as in the static preview (worker/og.ts shadeScalar):
+  // positive toward the row color, negative toward its complement, so a
+  // field that changes sign (sin(x), or plain x) reads on both sides of 0.
+  float s = tanh(v * 0.6);
+  float a = 0.55 * abs(s);
   if (a < 0.004) discard;
-  outColor = vec4(uColor, a);
+  outColor = vec4(s >= 0.0 ? uColor : vec3(1.0) - uColor, a);
 }
 `;
 }
@@ -878,7 +881,7 @@ export interface Overlay2D {
     arrow?: boolean;
     noStroke?: boolean;
   }>;
-  /** Vertical bars from y = 0, halfWidth in math units (data-list bar mode). */
+  /** Vertical bars from y = 0, halfWidth in math units (histograms). */
   bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
   /** `label(point, "text")` rows: text beside a math point, drawn above everything. */
   texts?: Array<{ x: number; y: number; text: string; color: string }>;

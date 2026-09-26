@@ -157,7 +157,7 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'curve':
       switch (object.form) {
         case 'graph': {
-          const equation = object.equation ? realEquation(object.equation) : graphEquation(real(object.rhs));
+          const equation = realEquation(object.equation);
           return {
             type: 'implicit2d',
             equation,
@@ -406,7 +406,7 @@ export function compileGpu(classified: Classified): GpuPlan {
       return {
         type: 'implicit2d',
         params,
-        field: scalar(object.equation ?? (object.form === 'graph' ? graphEquation(object.rhs) : object.residual)),
+        field: scalar(object.form === 'graph' ? object.equation : (object.equation ?? object.residual)),
         levels: object.levels ? compileGridGpu(object.levels) : undefined,
       };
     case 'surface':

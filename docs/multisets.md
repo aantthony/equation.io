@@ -395,3 +395,18 @@ recorded so they can be reviewed and reversed. Progress notes live in
   scene were not drawn; the app did draw them, but the static preview did
   not, and the MCP validator told assistants the app skipped them. Both now
   draw them as dots, in the plane and in space.
+- **Scalar field shading is signed.** A field is shaded in the row color
+  where it is positive and in the color's complement where negative, with
+  opacity `0.55·|tanh(0.6 v)|` (the static preview already did this), so
+  `x` and `sin(x)` read on both sides of 0. A field in x alone (or y alone)
+  reads out "scalar field — for the curve write y = …" under the row.
+- **u and v alone are Uniform(0, 1) draws, also next to random variables.**
+  `X + u` is the density of X plus an independent uniform. A row the random
+  variable engine cannot take (`u + L` for a list `L`, `u < 0.5`) keeps the
+  classifier's error, which says u and v trace curves in a tuple.
+- **A large data column stacks in dot-wide columns.** Up to 400 values, equal
+  values stack exactly (height = multiplicity). Past that the column is a
+  cloud, and values are gathered into columns one cloud dot (3 CSS px) wide
+  at the current zoom before stacking, so continuous measurements stack into
+  their shape instead of a single row of dots at height 1. Stacks keep unit
+  spacing, so a column of thousands is tall; zoom out to see its outline.

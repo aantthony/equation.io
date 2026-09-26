@@ -106,7 +106,7 @@ describe('shared document analysis', () => {
     expect(bad[2].error).toMatch(/F_1 is not defined — F is a function/);
     expect(bad[3].error).toMatch(/G_1 is not defined — G's components are G_x, G_y, G_z/);
     const J = 'J=((d/dx G_x,d/dy G_x,d/dz G_x),(d/dx G_y,d/dy G_y,d/dz G_y),(d/dx G_z,d/dy G_z,d/dz G_z))';
-    const det = analyzeRows([F, 'G=F(x,y,z)', J, 'det(J)']).rows[3].cls!.object as { residual: Expr };
+    const det = analyzeRows([F, 'G=F(x,y,z)', J, 'det(J) = 0']).rows[3].cls!.object as { residual: Expr };
     for (const [x, y, z] of [
       [1, 2, 3],
       [-0.7, 0.4, 5],
@@ -165,7 +165,7 @@ describe('dependency retention after a failed definition', () => {
       expect(rows[0].error).toBeDefined();
       expect(rows[1].error, source).toBeUndefined();
       expect(rows[2].error, source).toBeUndefined();
-      expect(rows[2].cpu?.type, source).toBe('implicit2d');
+      expect(rows[2].cpu?.type, source).toBe('scalar2d');
     }
     const integral = analyzeRows(['k = w', 'I = int[0..1] k^2 dk', 'I + y']);
     expect(integral.rows[1].error).toBeUndefined();

@@ -112,7 +112,9 @@ the server, which may log it; the fragment never does.
   `{0 < x < 1: 1, 0}`, and a bare condition counts 1 (`{x > 0, 5}`)
 - `y = {0 < x < 2: x^2}` — a domain restriction: with no default, the value
   is undefined outside the conditions, so nothing is drawn there
-- `sin(x)cos(y)` — a bare expression in x, y is a 2D scalar/density field
+- `sin(x)cos(y)` — a bare expression in x, y is a 2D scalar field, shaded
+  in the row color where positive and its complement where negative. `sin(x)`
+  is a field too (constant along y): the curve is `y = sin(x)`
 - `2+2`, `sqrt(a)`, `|A - B|` — a bare number draws nothing and reads out
   `= 4` under the row, live with sliders and `t`; write `y = 4` for the line
 
@@ -222,6 +224,8 @@ the server, which may log it; the fragment never does.
 **Parametric curves and surfaces**
 
 - `(2cos(2pi u), 2sin(2pi u), 3u)` — parametric curve, u ∈ (0,1)
+- `u^2` — a bare row in u, v alone draws its values: the density of u² for
+  u uniform on [0, 1]
 - `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))` —
   parametric surface, u,v ∈ (0,1); per-fragment Newton ray/surface
   intersection with a glossy specular material
@@ -235,8 +239,9 @@ the server, which may log it; the fragment never does.
   for a slider, default ½). With `x` free on the right side, x becomes the
   parameter axis and the plot is the orbit/bifurcation diagram:
   `a_{n+1} = x a_n (1 - a_n)` is the logistic bifurcation
-- `[3, 1, 4, 1, 5]` — a data list: dots at (k, value), k = 1, 2, …; the row's
-  bar toggle draws it as a bar chart. `[(1, 2), (3, 4)]` is a scatter of points
+- `[3, 1, 4, 1, 5]` — a data list: a dot plot on the number line, each value
+  at x = value with its copies stacked (1 twice: dots at (1, 1) and (1, 2)).
+  `[(1, 2), (3, 4)]` is a scatter of points
 
 **Regression**
 

@@ -142,7 +142,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Function names are
   case-insensitive: `Sin(x)`, `SQRT(x)` and `sin(x)` are the same call. Always
   use parentheses for arguments — write `sin(x)`, not `sin x`.
-- Factorial: postfix `!` — `5!` is 120, `x!` plots as Γ(x+1), `2^3!` is 2^6.
+- Factorial: postfix `!` — `5!` is 120, `y = x!` plots Γ(x+1), `2^3!` is 2^6.
   Non-integers use the Gamma function; negative integers are undefined.
 - Piecewise: `{x < 0: -x, x >= 0: x^2}` — `cond: value` cases tried in order,
   with an optional last bare value as the default (`{0 < x < 1: 1, 0}`).
@@ -307,12 +307,21 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 ## Variables (what a row means)
 
 - `x`, `y`: the 2D plane. `y = f(x)`, or any implicit equation in x and y
-  (`x^2+y^2=4`), renders as a curve.
+  (`x^2+y^2=4`), renders as a curve. A row is drawn per pixel when it
+  depends on x or y, so a bare expression like `sin(x)` is a scalar field,
+  not a curve: write `y = sin(x)` for the graph.
 - `z`: using z switches to 3D. `z = sin(x)cos(y)` is a surface;
-  `x^2+y^2+z^2=9` is an implicit 3D surface.
+  `x^2+y^2+z^2=9` is an implicit 3D surface. A bare expression in x, y, z is
+  a field in space, which cannot be drawn yet (an error): write `… = 0` for
+  its surface.
 - `t`: time in seconds. Any row mentioning `t` animates, e.g.
   `y = sin(x - 2t)`.
-- `u`, `v`: parametric parameters, each ranging over (0, 1).
+- `u`, `v`: parametric parameters, each ranging over (0, 1). In a tuple they
+  trace curves and surfaces (`(u, u^2)`); a complex expression in u alone is
+  a path (`exp(i 2 pi u)`). A bare real row in u and v alone does not depend
+  on the plane, so it draws its values: the numbers it takes as u and v run
+  over [0, 1], as a density curve, like a random variable — `u` is the flat
+  line at height 1 over [0, 1], `u^2` has density 1/(2√x), `u v` has −ln(x).
 - `w`: the complex plane point x + iy. A complex-valued expression in `w`
   (e.g. `ln(w-2) - ln(w+2)`) draws field lines and equipotentials. Wrapping it
   in `domain(…)` or `conformal(…)` picks a different view of the same function.
@@ -324,14 +333,18 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Curve: an equation in x and y — `y = x^2`, `(x^2+y^2)^2 = 8(x^2-y^2)`.
 - Region: inequalities, including chains — `y < x/2 + 1`,
   `4 <= x^2 + y^2 <= 9`. Non-strict comparisons draw a solid boundary.
-- Scalar field: a bare expression in x, y — `sin(x)cos(y)` — shaded by value.
+- Scalar field: a bare expression in x and/or y — `sin(x)cos(y)`, or `sin(x)`
+  (constant along y) — shaded by value: the row color where it is positive,
+  the color's complement where negative, stronger the larger it is. There is
+  no implicit graph; a row in x alone reads out how to write its curve
+  (`y = sin(x)`). A list of fields (`a = [1, 2]; sin(a x)`) is an error: write
+  `y = sin(a x)` for the curves.
 - Value: a bare expression with no plot coordinate — `2+2`, `sqrt(a)` with a
   slider a, `|A - B|` between named points, `int[0..1] x^2 dx`, `sin(t)` —
   draws nothing (a lone definite integral shades its area) and reads out `= 4` (or `≈ 1.41421`) under the row, live as
   sliders, states and t move. The tool result reports it as kind `value`
   with the number in `value`. A number is not assumed to mean `y = number`:
-  write `y = 4` for the horizontal line. (A bare expression in x alone,
-  like `sin(x)`, still plots as y = sin(x).)
+  write `y = 4` for the horizontal line.
 - Complex point: a constant complex expression such as `1+2i` draws at (1, 2).
   Constants and t may animate its real and imaginary components.
 - Complex roots: `w^3 = 1` draws three solution points; equations in w become
@@ -394,8 +407,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `iter(z^2 + w, 600)` (default 250, max 5000). Any expression works:
   `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship.
 - Point: `(2, 3)`; animate with t: `(2cos(t), 2sin(t))`.
-- Data list: `[3, 1, 4]` draws dots at (1, 3), (2, 1), (3, 4) — the panel can
-  switch them to bars — and `[(1, 2), (3, 4)]` draws a scatter of points.
+- Data list: `[3, 1, 4, 4]` is a dot plot on the number line — a dot at each
+  value on the x axis, copies stacked upward, so 4 has dots at (4, 1) and
+  (4, 2). A list has no order, so no index is drawn (a sequence `a_n` does
+  draw at n). A column of thousands stacks in dot-wide columns. `[(1, 2),
+  (3, 4)]` draws a scatter of points.
   Any list-valued expression plots the same way (`L^2 + 1`,
   `(L, L^2)` with `L` defined above, or a CSV column: `person.age`).
 - Geometry: with points defined in rows above (`A = (0, 0)`), `segment(A, B)`,

@@ -77,15 +77,11 @@ function valueLines(v: string, r: FoundRoot): string[] {
 /**
  * Axis intercepts of the plotted curve within the given view ranges.
  *
- * expr is the plotted expression — an equation, or a bare scalar in x
- * meaning y = expr — with user constants already substituted, so its free
- * variables are only x and/or y. For a bare scalar the x-intercepts are
- * labelled as roots of the function.
+ * F is the plotted equation with user constants already substituted, so its
+ * free variables are only x and/or y.
  */
-export function specialPoints(expr: Expr, xlo: number, xhi: number, ylo: number, yhi: number): SpecialPoint[] {
-  if (usesComplex(expr)) return [];
-  const isFn = expr.kind !== 'eq';
-  const F: Expr = isFn ? { kind: 'eq', l: { kind: 'var', name: 'y' }, r: expr } : expr;
+export function specialPoints(F: Expr, xlo: number, xhi: number, ylo: number, yhi: number): SpecialPoint[] {
+  if (usesComplex(F)) return [];
   const pts: SpecialPoint[] = [];
 
   let xr: ReturnType<typeof findRoots> = [];
@@ -99,7 +95,7 @@ export function specialPoints(expr: Expr, xlo: number, xhi: number, ylo: number,
 
   if (xr !== 'zero') {
     for (const r of xr) {
-      const lines = [isFn ? 'root' : 'x-intercept', ...valueLines('x', r)];
+      const lines = ['x-intercept', ...valueLines('x', r)];
       const m = multText(r.mult);
       if (m) lines.push(m);
       pts.push({ x: r.x, y: 0, lines });
