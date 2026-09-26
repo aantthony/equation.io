@@ -27,6 +27,10 @@ export type FigureForm = 'polygon' | 'segment' | 'polyline' | 'vector' | 'square
 export interface Axis {
   id: string;
   n: number;
+  /** A tuple's axis: its values sit at positions 1…n, so it indexes, draws
+   *  as a path, and meets another tuple by position rather than crossing
+   *  (docs/multisets.md §3). Every other axis is a multiset's: no order. */
+  ordered?: true;
 }
 
 /** A packed column a `lazy` list or packed figure runs over: `name` is the
@@ -182,6 +186,8 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'trace',
     'solve',
     'exp',
+    // sort((s, sin(s)), s): the points to order, then their key.
+    'sort',
   ]);
   return grouped.has(name) ? args : args.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
 }
@@ -445,9 +451,10 @@ const asProduct = (glyph: 'dot' | 'cross') =>
 const asIneq = (op: IneqOp) =>
   BinaryInfix<PNode>((a, b): Expr => ({ kind: 'ineq', op, l: asVecOrExpr(a), r: asVecOrExpr(b) }));
 
-/** A comma series of 2–3 scalars in plain brackets is a vector literal. */
+/** A comma series in plain brackets is a tuple: 2–3 numbers are a point, a
+ *  longer run is a tuple of values (list lowering reads it as one). */
 function seriesToVec(items: Array<Expr | PCase>): Expr {
-  if (items.length === 2 || items.length === 3) return { kind: 'vec', items: items.map(asExpr) };
+  if (items.length >= 2) return { kind: 'vec', items: items.map(asExpr) };
   throw new Error('Expected 2 or 3 vector components.');
 }
 

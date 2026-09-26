@@ -17,7 +17,8 @@ const PRE = [
   'a = [0..2]',
   'b = [0..2]',
   'P = (a, b)',
-  'Q = [(0,0),(1,0),(1,1),(0,1)]',
+  // A shape: a tuple of points, in order (docs/multisets.md §3).
+  'Q = ((0,0),(1,0),(1,1),(0,1))',
   'L = [1, 2, 3]',
 ];
 const run = (row: string, pre = PRE) => {
@@ -123,8 +124,10 @@ describe('a list of points as the argument', () => {
   });
   it('reads a matrix as its rows, like every call that asks for points — a named list of 2 points is one', () => {
     const pre = [...PRE, 'S = ((1,2),(3,4))', 'T = ((1,2,0),(3,4,0),(0,0,1))'];
-    expect(values('g(S)', pre).flat()).toEqual([2, 12]);
-    expect(values('g(S)', pre)).toEqual(values('g([(1,2),(3,4)])', pre));
+    // The rows are in order, so g of them is a tuple of 2 numbers — a point;
+    // a bracket of the same points is a multiset, and so are its values.
+    expect(values('g(S)', pre)).toEqual([[2, 12]]);
+    expect(values('g([(1,2),(3,4)])', pre)).toEqual([[2], [12]]);
     expect(values('f(J)')).toEqual([
       [-0.5, -1],
       [1, 0],

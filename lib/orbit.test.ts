@@ -52,12 +52,17 @@ describe('state families', () => {
   });
 
   it('draws the family as points and reads single runs and reductions', () => {
-    const rows = [...ROSSLER, 'p(0) = ([1..4]/4, 0, 0)', 'p', 'p[2]', 'mean(p_1)', 'x_0 = p_1[4]'];
+    // Runs started from a tuple are numbered, so p[2] is the second (§3).
+    const rows = [...ROSSLER, 'p(0) = (sort([1..4])/4, 0, 0)', 'p', 'p[2]', 'mean(p_1)', 'x_0 = p_1[4]'];
     const analysis = analyzeRows(rows);
     expect(analysis.rows[5].cls?.object.kind).toBe('list');
     expect(analysis.rows[6].cls?.object.kind).toBe('point');
     expect(analysis.rows[7].info).toBe('= 0.625');
     expect(analysis.rows[8].error).toBeUndefined();
+    // …and from a multiset they are not: its runs have no first.
+    const unordered = analyzeRows([...ROSSLER, 'p(0) = ([1..4]/4, 0, 0)', 'p', 'p[2]']);
+    expect(unordered.rows[5].cls?.object.kind).toBe('list');
+    expect(unordered.rows[6].error).toMatch(/p\[2\] needs an order.*Start them from a tuple/);
   });
 
   it('carries coupled states along with the family, through constants and matrices', () => {
@@ -107,7 +112,7 @@ describe('orbits', () => {
   });
 
   it('ends where the live simulation arrives, integrating only the run it draws', () => {
-    const rows = [...ROSSLER, 'p(0) = ([1, 2, 3], 0, 0)', 'p[2](0..4)'];
+    const rows = [...ROSSLER, 'p(0) = (sort([1, 2, 3]), 0, 0)', 'p[2](0..4)'];
     const { input, pts } = orbitOf(rows, 5);
     expect(input.names).toHaveLength(3);
     const live = integrate(rows, 4);

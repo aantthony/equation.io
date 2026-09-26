@@ -30,6 +30,7 @@ export const PUBLIC_KIND_ROWS = {
   pcurve: ['(cos(u), sin(u), u)'],
   psurface: ['(u, v, u v)'],
   vlist: ['[1, 2, 3]'],
+  tuple: ['sort([5, 3, 8, 1, 2])'],
   plist: ['[(1, 2), (3, 4)]'],
   histogram: ['hist([1, 2, 2, 3])'],
   sequence: ['a_n = 1/(n + 1)^2'],

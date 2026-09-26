@@ -18,7 +18,7 @@ describe('distance / angle through analyze()', () => {
       'distance(A, det(M) B)',
       'distance(A, (mean(L), 2))',
       'distance(A, (total(L), count(L)))',
-      'distance(A, (L[1], 5))',
+      'distance(A, (min(L), 5))',
       'angle(A, (0, 0), (total(L), -3))',
     ]);
     expect(rows.slice(4)).toEqual([
@@ -58,11 +58,15 @@ describe('distance / angle through analyze()', () => {
       'distance(A, L)',
       'angle(A, [A, A], A)',
       'distance(P[1], P[2])',
+      'T = sort(P, P.x)',
+      'distance(T[1], T[2])',
     ]);
     expect(rows[3][0]).toBe('vlist');
     expect(rows[4][0]).toMatch(/distance takes two points/);
     expect(rows[5][0]).toBe('vlist');
-    expect(rows[6]).toEqual(['value', '≈ 1.41421']);
+    // Only a tuple has positions (docs/multisets.md §3).
+    expect(rows[6][0]).toMatch(/P\[1\] needs an order/);
+    expect(rows[8]).toEqual(['value', '≈ 1.41421']);
   });
 
   it('never shows the internal [angle] name', () => {

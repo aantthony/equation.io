@@ -24,7 +24,7 @@ import { type FigureForm, mapChildren } from './expr.ts';
  */
 import { add, div, mul, neg, sub } from './diff.ts';
 import { ANGLE_FN, type Expr, compArity, compDims, sameList } from './expr.ts';
-import { SCALAR_REDUCTIONS, withAxes } from './list.ts';
+import { SCALAR_REDUCTIONS, tupleAxis, withAxes } from './list.ts';
 import {
   type GetMat,
   type Mat,
@@ -620,6 +620,9 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         const pts = pairPoints('abs', args, 'A');
         if (pts.length === 1) return sc(lenOfN([pts[0][0], pts[0][1]]));
       }
+      // sort(P, P.x) orders points by a key; list lowering does the sorting,
+      // and a point stays one value there (docs/multisets.md §3).
+      if (e.name === 'sort') return sc({ kind: 'call', name: e.name, args: args.map(toExpr) });
       const flatArgs: Expr[] = [];
       for (const a of args) {
         if (a.vec) throw new Error(`${e.name} is not defined for points.`);
@@ -652,12 +655,13 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
           if (!matsPossible) throw new MatrixSeen();
           const square = matOf(e) !== null;
           const dims = new Set(items.map(a => (a as LV & { vec: true }).items.length));
+          // Not square, so not a matrix here: a tuple of points, which list
+          // lowering keeps in order for polyline(T), T[k] and friends.
+          if (!square && dims.size === 1) return sc({ kind: 'vec', items: items.map(toExpr) });
           // Two points of one dimension may well have meant the segment.
           if (e.items.length === 2 && dims.size === 1) {
             throw new Error(
-              square
-                ? 'A pair of points is a 2×2 matrix, not a figure — segment(A, B) joins them, and M (x, y) applies the matrix.'
-                : 'A pair of points — did you mean segment(A, B)? (A tuple of points is a matrix only when it is square.)',
+              'A pair of points is a 2×2 matrix, not a figure — segment(A, B) joins them, and M (x, y) applies the matrix.',
             );
           }
           throw new Error(square ? NOT_A_VALUE : `A matrix is 2×2 or 3×3 — ${SHAPE_HINT}.`);
@@ -728,10 +732,12 @@ const polyCall = (name: FigureName, pts: Expr[][]): Expr => ({
   vertices: pts.flat(),
 });
 
-/** A matrix consumed as a point set. Named rows share axes across all calls. */
+/** A matrix consumed as its rows: a tuple of points, in order (docs/multisets.md
+ *  §3), so polyline(M) walks them and M[2] is the second. Named rows share
+ *  axes across all calls. */
 export function rowsAsPoints(matrix: Mat, name?: string): Expr & { kind: 'list' } {
   const rows: Expr & { kind: 'list' } = { kind: 'list', items: matrix.map(items => ({ kind: 'vec', items })) };
-  return name ? withAxes(rows, [{ id: `${name}#0`, n: matrix.length }]) : rows;
+  return withAxes(rows, name ? [{ id: `${name}#0`, n: matrix.length, ordered: true }] : [tupleAxis(matrix.length)]);
 }
 
 /** A definition whose value is a matrix (`R = e^(a J)`, `N = 2 M`), or null. */

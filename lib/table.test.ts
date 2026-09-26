@@ -22,6 +22,7 @@ import { type Expr, evaluate, freeVars, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import { decodePayload, encodePayload } from './link.ts';
 import { type Seq, lowerLists, seqLength } from './list.ts';
+import { lowerObjects } from './object-lists.ts';
 import { classify } from './plot.ts';
 
 const PEOPLE = 'name,age,height\nada,36,1.70\nbob,41,1.82\ncy,29,1.65\n';
@@ -52,7 +53,7 @@ function lowerRow(text: string, defRows: string[], tables: TableSource | null = 
   const ropts = {
     consts,
     isList: (n: string) => isListName(listNames, n),
-    indexIssue: (idx: Expr) => indexIssue(idx, defs),
+    indexIssue: (idx: Expr, target: Expr) => indexIssue(idx, defs, target),
   };
   const e = resolveExpr(parseExpr(text, new Set(defs.fns.keys()), listNames), n => defs.fns.get(n), ropts);
   return lowerLists(
@@ -64,6 +65,14 @@ function lowerRow(text: string, defRows: string[], tables: TableSource | null = 
     listGetter(defs),
     ropts,
   );
+}
+
+/** A plot row through object lowering too, where paths consume a list. */
+function lowerObjectsRow(text: string, defRows: string[]): Expr {
+  const { defs } = build(defRows);
+  const listNames = listNamesOf(defs);
+  const ropts = { consts: evaluateFrame(defs, 0), isList: (n: string) => isListName(listNames, n) };
+  return lowerObjects(parseExpr(text, new Set(), listNames), defs, ropts);
 }
 
 const values = (e: Expr): number[] => {
@@ -186,7 +195,8 @@ describe('open() rows', () => {
     const t = defs.tables.get('person')!;
     expect(t.file).toBe('people.csv');
     expect(t.data!.rows).toBe(3);
-    expect([...listNamesOf(defs)]).toEqual(['person', 'person.name', 'person.age', 'person.height']);
+    // `person.row` too: each record's position in the file (§3).
+    expect([...listNamesOf(defs)]).toEqual(['person', 'person.name', 'person.age', 'person.height', 'person.row']);
   });
 
   it('reports a file this device does not have', () => {
@@ -232,7 +242,9 @@ describe('columns as lists', () => {
   it('reduces and indexes like any other list', () => {
     expect(evaluate(lowerRow('mean(person.age)', rows), {})).toBeCloseTo(35.3333, 4);
     expect(evaluate(lowerRow('count(person.age)', rows), {})).toBe(3);
-    expect(evaluate(lowerRow('person.age[2]', rows), {})).toBe(41);
+    // A column is a multiset: file order comes back through `row`.
+    expect(() => lowerRow('person.age[2]', rows)).toThrow(/needs an order.*sort\(person\.age, person\.row\)/);
+    expect(values(lowerRow('sort(person.age, person.row)', rows))).toEqual([36, 41, 29]);
     expect(evaluate(lowerRow('median(person.height)', rows), {})).toBe(1.7);
   });
 
@@ -303,16 +315,17 @@ describe('a column or list named after a builtin', () => {
     // A CSV headed `sin` is perfectly legal, and `mean` is shadowable.
     const src: TableSource = () => parseCsv('sin,age\n7,2\n8,4\n');
     expect(values(lowerRow('p.sin', ['p = open("t.csv")'], src))).toEqual([7, 8]);
-    expect(lowerRow('p.sin[2]', ['p = open("t.csv")'], src)).toMatchObject({ kind: 'num', value: 8 });
+    // (An index, so it asks for an order: a column has none.)
+    expect(() => lowerRow('p.sin[2]', ['p = open("t.csv")'], src)).toThrow(/p\.sin\[2\] needs an order/);
     // A function that is NOT a list still calls: sin[2] is sin applied to 2.
     expect(lowerRow('sin[0]', ['p = open("t.csv")'], src)).toMatchObject({ kind: 'call', name: 'sin' });
   });
 
   it('indexes a named list that shadows a reduction', () => {
-    const { defs, errors } = build(['mean = [3, 1, 4]']);
+    const { defs, errors } = build(['mean = sort([3, 1, 4])']);
     expect([...errors]).toEqual([]);
     expect(listNamesOf(defs).has('mean')).toBe(true);
-    expect(lowerRow('mean[2]', ['mean = [3, 1, 4]'])).toMatchObject({ kind: 'num', value: 1 });
+    expect(lowerRow('mean[2]', ['mean = sort([3, 1, 4])'])).toMatchObject({ kind: 'num', value: 3 });
   });
 });
 
@@ -731,11 +744,14 @@ describe('data that is not on this device', () => {
     expect(defs.tables.has('adults')).toBe(true);
   });
 
-  it('picks elements by a list of indices, from a column too', () => {
-    const rows = [`person = open("people.csv", ${HASH})`];
-    expect(values(lowerRow('person.age[[3, 1]]', rows))).toEqual([29, 36]);
-    expect(values(lowerRow('person.name.length[[2, 1]]', rows))).toEqual([3, 3]);
-    expect(() => lowerRow('person.age[person.age]', rows)).toThrow(/out of range/);
+  it('picks elements by a list of indices from a tuple, never from a column', () => {
+    const rows = [`person = open("people.csv", ${HASH})`, 'ages = sort(person.age, person.row)'];
+    expect(values(lowerRow('ages[[3, 1]]', rows))).toEqual([29, 36]);
+    // A column has no positions, with its file or without it.
+    for (const tables of [store(), null]) {
+      expect(() => lowerRow('person.age[[3, 1]]', rows.slice(0, 1), tables)).toThrow(/needs an order/);
+      expect(() => lowerRow('person.name.length[2]', rows.slice(0, 1), tables)).toThrow(/needs an order/);
+    }
   });
 
   it('refuses a filter no list reaches, with the file and without it', () => {
@@ -761,7 +777,9 @@ describe('data that is not on this device', () => {
       );
     }
     expect(values(lowerRow('person.age[person.age > 30]', rows))).toEqual([36, 41]);
-    expect(lowerRow('person.age[1]', rows)).toMatchObject({ kind: 'num', value: 36 });
+    for (const tables of [store(), null]) {
+      expect(() => lowerRow('person.age[1]', rows, tables)).toThrow(/needs an order/);
+    }
   });
 
   it('carries through a NAMED list, so the row below still reports the file', () => {
@@ -910,6 +928,40 @@ describe('rules the file cannot change', () => {
   });
 });
 
+describe('file order is a property, not an order (§3)', () => {
+  const rows = [`person = open("people.csv", ${HASH})`];
+
+  it('gives every record its 1-based position in the file as `row`', () => {
+    expect(values(lowerRow('person.row', rows))).toEqual([1, 2, 3]);
+    // …so a series in file order is a sort by it.
+    expect(values(lowerRow('sort(person.age, person.row)', rows))).toEqual([36, 41, 29]);
+    expect(values(lowerRow('sort(person.age, -person.row)', rows))).toEqual([29, 41, 36]);
+  });
+
+  it('keeps the positions a filtered table had in its file', () => {
+    const cut = [...rows, 'older = person[person.age > 30]'];
+    expect(values(lowerRow('older.row', cut))).toEqual([1, 2]);
+    const young = [...rows, 'young = person[person.age < 40]'];
+    expect(values(lowerRow('young.row', young))).toEqual([1, 3]);
+  });
+
+  it('lets a column named row win, and calls the position row_index', () => {
+    const tables = store({ 'r.csv': 'row,v\n10,1\n20,2\n' });
+    expect(values(lowerRow('r.row', ['r = open("r.csv")'], tables))).toEqual([10, 20]);
+    expect(values(lowerRow('r.row_index', ['r = open("r.csv")'], tables))).toEqual([1, 2]);
+  });
+
+  it('draws a path in file order, and refuses one without an order', () => {
+    const packed = (text: string) => lowerObjectsRow(text, rows);
+    expect(() => packed('polyline((person.age, person.height))')).toThrow(/polyline needs an order/);
+    expect(packed('polyline(sort((person.age, person.height), person.row))')).toMatchObject({
+      kind: 'figure',
+      form: 'polyline',
+      vertices: [36, 1.7, 41, 1.82, 29, 1.65].map(value => ({ kind: 'num', value })),
+    });
+  });
+});
+
 describe('text column character counts', () => {
   const rows = ['p = open("p.csv")'];
   const tables = store({ 'p.csv': 'name,age,length\nAda,36,short\n😀é,41,longer\n,29,NA\n' });
@@ -918,7 +970,7 @@ describe('text column character counts', () => {
     const e = lowerRow('p.name.length', rows, tables);
     expect(values(e)).toEqual([3, 2, NaN]);
     expect(compileCpu(classify(e)).type).toBe('dlist');
-    expect(lowerRow('p.name.length[2]', rows, tables)).toEqual({ kind: 'num', value: 2 });
+    expect(values(lowerRow('sort(p.name.length, p.row)', rows, tables))).toEqual([3, 2, NaN]);
     expect(values(lowerRow('p.length.length', rows, tables))).toEqual([5, 6, NaN]);
   });
 
@@ -960,7 +1012,7 @@ describe('columns named after functions', () => {
     const rows = ['p = open("p.csv")'];
     const tables = store({ 'p.csv': `${name},a\n1,2\n3,4\n` });
     expect(values(lowerRow(`p.${name}(2+1)`, rows, tables))).toEqual([3, 9]);
-    expect(lowerRow(`p.${name}[2]`, rows, tables)).toEqual({ kind: 'num', value: 3 });
+    expect(() => lowerRow(`p.${name}[2]`, rows, tables)).toThrow(/needs an order/);
   });
 });
 

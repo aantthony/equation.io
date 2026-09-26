@@ -8,7 +8,7 @@ import { type ResolveOpts, compsOf, listGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
 import { type Expr, type FigureForm, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
-import { type Axis, axesOf, isDataScatter, lowerLists, withAxes } from './list.ts';
+import { type Axis, axesOf, isDataScatter, lowerLists, unionAxes, withAxes } from './list.ts';
 
 export const FAMILY_MAX = 32;
 export const FAMILY_3D_MAX = 8;
@@ -180,9 +180,23 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   // Connectedness consumes a whole list; it does not broadcast its vertices
   // into separate one-vertex figures. Also accepts a zipped CSV scatter.
   if (e.kind === 'call' && ['polyline', 'polygon', 'hull'].includes(e.name) && e.args.length === 1) {
+    const arg = e.args[0];
+    // A tuple of points written out — polyline(((0, 0), (1, 1), (2, 0))),
+    // polygon((A, B, C)) — is its points in order: the argument list again.
+    const point = (p: Expr) => p.kind === 'vec' || (p.kind === 'var' && compsOf(defs, p.name) !== null);
+    if (arg.kind === 'vec' && arg.items.length >= 2 && arg.items.every(point)) {
+      return lowerObjects({ ...e, args: arg.items }, defs, opts, named);
+    }
+    // A path or a polygon walks its points in order, so it takes a tuple; a
+    // hull is the same whatever the order (docs/multisets.md §3).
+    const form = e.name;
+    const inOrder = (axes: readonly Axis[]): void => {
+      if (form === 'hull' || axes.some(a => a.ordered)) return;
+      const P = arg.kind === 'var' ? arg.name : 'P';
+      throw new Error(`${form} needs an order — a list [ … ] has none. Sort it: ${form}(sort(${P}, ${P}.x)).`);
+    };
     // Points computed over packed numbers with a slider or t in the way —
     // polyline(F(k)) through thousands of k — stay one vertex template.
-    const arg = e.args[0];
     if (!(arg.kind === 'var' && defs.mats.has(arg.name))) {
       let value: Expr | null = null;
       try {
@@ -190,22 +204,26 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       } catch {
         /* the paths below report it */
       }
-      if (value?.kind === 'lazy') return packedFigure(e.name as 'polyline' | 'polygon' | 'hull', value);
+      if (value?.kind === 'lazy') {
+        inOrder(axesOf(value));
+        return packedFigure(e.name as 'polyline' | 'polygon' | 'hull', value);
+      }
     }
     // A point list may itself be computed — R P, P + (1, 0), rotate(P, a) —
     // which is the expansion below, asked for the values it yields.
-    const computed = (arg: Expr): readonly Expr[] | null => {
+    const computed = (arg: Expr): ListValue | null => {
       try {
         const value = lowerObjects(arg, defs, opts, true);
-        return value.kind === 'list' ? value.items : null;
+        return value.kind === 'list' ? { items: value.items, axes: axesOf(value) } : null;
       } catch {
         return null;
       }
     };
-    const pts = listValue(e.args[0])?.items ?? computed(e.args[0]);
+    const pts = listValue(arg) ?? computed(arg);
     if (pts) {
-      if (!pts.every(p => p.kind === 'vec')) throw new Error(`${e.name} needs a list of points.`);
-      return ordinary({ ...e, args: pts });
+      if (!pts.items.every(p => p.kind === 'vec')) throw new Error(`${e.name} needs a list of points.`);
+      inOrder(pts.axes);
+      return ordinary({ ...e, args: pts.items });
     }
   }
   let originalError: unknown;
@@ -230,10 +248,11 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     return expand(e, false)!;
   } catch (err) {
     // A matrix error is about the matrix: the expansion's own complaint, made
-    // while reading things as lists of points, would only bury it.
+    // while reading things as lists of points, would only bury it. So is a
+    // sort key's: expanded, sort(P, L) is only ever handed single values.
     throw originalError instanceof Error &&
-      /matri/i.test(originalError.message) &&
-      !/not a value on its own/.test(originalError.message)
+      ((/matri/i.test(originalError.message) && !/not a value on its own/.test(originalError.message)) ||
+        /sort\(P, P\.x\)/.test(originalError.message))
       ? originalError
       : err;
   }
@@ -402,12 +421,8 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     }
     // One member per instance: uses of the same list move together, lists with
     // different origins are independent and cross.
-    const axes: Axis[] = [];
-    for (const a of lists.flatMap(l => l.axes)) {
-      const seen = axes.find(u => u.id === a.id);
-      if (!seen) axes.push(a);
-      else if (seen.n !== a.n) throw new Error(`Lists have different lengths (${seen.n} vs ${a.n}).`);
-    }
+    // (Tuples meet by position: see unionAxes.)
+    const { union: axes, canon } = unionAxes(lists.map(l => l.axes));
     const n = axes.reduce((size, a) => size * a.n, 1);
     // A × [] = []: an empty multiset anywhere leaves no combinations.
     // (A reduction that has no value there says so rather than vanishing.)
@@ -423,7 +438,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     const at = (list: { axes: readonly Axis[] }, k: number): number => {
       let index = 0;
       for (let d = axes.length - 1, rest = k; d >= 0; rest = Math.floor(rest / axes[d].n), d--) {
-        const own = list.axes.findIndex(a => a.id === axes[d].id);
+        const own = list.axes.findIndex(a => canon(a) === axes[d].id);
         if (own < 0) continue;
         index += (rest % axes[d].n) * list.axes.slice(own + 1).reduce((size, a) => size * a.n, 1);
       }

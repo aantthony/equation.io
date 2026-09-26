@@ -243,11 +243,11 @@ export const SHOWCASE: ShowcaseItem[] = [
     slug: 'lorenz-ensemble',
     title: 'A hundred runs at once',
     blurb:
-      'A list of starting values runs the system once per element: a hundred nearby starts spread over the Lorenz attractor that one run traces.',
+      'A tuple of starting values runs the system once per element: a hundred nearby starts spread over the Lorenz attractor that one run, p[1], traces.',
     eqs: [
       'camera(-pi/3, 0.5, 55, (0, 0, 25))',
       "p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3)",
-      'p(0) = ([0..99]/10, 1, 20)',
+      'p(0) = (sort([0..99])/10, 1, 20)',
       'p[1](5..40)',
       'p',
     ],
@@ -445,13 +445,13 @@ export const SHOWCASE: ShowcaseItem[] = [
     slug: 'rosette',
     title: 'Rotate, repeat, take the hull',
     blurb:
-      'A list is a variable: rotate a shape by a list of angles and you get one copy per angle. hull(…) wraps any points — even moving ones — in their convex hull.',
+      'A list is a variable: rotate a shape by a list of angles and you get one copy per angle. hull(…) wraps any points — even moving ones — in their convex hull; a polygon joins its points in order, so its turns are sorted into a tuple.',
     eqs: [
       'th = 2pi [0..5]/6',
       'P = [(1, 0), (3, 0.6), (3, -0.6)]',
       'rotate(hull(P), th + t/3)',
       'n = 7',
-      'polygon(rotate((0.8, 0), 2pi [0..n-1]/n - t/3))',
+      'polygon(rotate((0.8, 0), 2pi sort([0..n-1])/n - t/3))',
     ],
     group: 'Geometry',
     view: { span: 8 },

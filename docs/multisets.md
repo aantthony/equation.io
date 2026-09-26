@@ -280,6 +280,11 @@ Checked 2026-09-26 against `lowerLists` (lib/list.ts) and the MCP validator.
 | `[1,2] + []` | `[]` (phase 1) | `[]` |
 | point lists in a 3D scene | drawn as dots (phase 3: the app already did; the link preview and MCP validator now do too) | drawn |
 | `e_x`, `e_y`, `e_z` | built in (phase 3) | built in |
+| `sort(L)` | a tuple: `sort([3,1,2])` is the point (1, 2, 3) (phase 4) | a tuple |
+| `sort(P, P.x)`, `sort((s, sin(s)), s)` | a tuple, ordered by the key (phase 4) | same |
+| `polyline(P)`, `polygon(P)`, `L[2]` over a list `[ … ]` | an error that points at `sort` (phase 4) | error |
+| `polyline(((0,0),(1,1),(2,0)))`, `T[2]` of a tuple | walked / indexed in order (phase 4) | same |
+| `person.row` | each record's position in the file (phase 4) | same |
 
 [lists-tables-plan.md](lists-tables-plan.md) still says lists of different
 lengths are an error; they have taken every combination since the axis model
@@ -331,11 +336,12 @@ recorded so they can be reviewed and reversed. Progress notes live in
   `solve` and `exp` no longer spread a tuple literal into separate
   arguments, so `det(((a, b), (c, d)))` is the determinant of one matrix.
   (`solve(M, 1, 0)` still reads its right-hand side from loose scalars.)
-- **A tuple of points that is not a square matrix is an error for now.**
-  `((1, 2), (3, 4), (5, 6))` or two 3D points are neither a matrix nor
-  drawn; phase 4 decides what `polyline(T)` and friends make of them. A bare
-  pair of same-dimension points names `segment(A, B)` in its error, and says
-  it is a 2×2 matrix when it is one.
+- **A tuple of points that is not a square matrix is a tuple of points**
+  (phase 4; phase 2 made it an error). `((1, 2), (3, 4), (5, 6))` and two 3D
+  points are walked by `polyline`/`polygon`, indexed by `T[k]`, and drawn as
+  dots on a row of their own. A square one is also a matrix, and alone on a
+  row stays the matrix error (a pair of 2D points still names
+  `segment(A, B)`).
 - **Nested brackets are never a matrix.** `[[1, 2], [3, 4]]` is the multiset
   `[1 2 3 4]` (phase 1 flattening), not the old nested-list matrix spelling.
 - **Unit vectors are 3D.** `e_x`, `e_y`, `e_z` are always `(1,0,0)`, `(0,1,0)`,
@@ -347,6 +353,44 @@ recorded so they can be reviewed and reversed. Progress notes live in
   redefined, `e_x = 3` (or a list, function or random variable of that name)
   replaces the built-in for the whole document, so graphs that already used
   the name keep their meaning. `e_1`, `e_n` and a sequence `e` are untouched.
+- **Tuples are an `ordered` axis** (phase 4). A tuple is stored like any list
+  (`list`, `data`, `lazy`), with its positions as one axis marked `ordered`;
+  anything built from it carries the mark. Every tuple axis in one
+  combination is the same axis of positions (tuples never cross), and it is
+  stored innermost, so a multiset of tuples is tuple by tuple. So sorting a
+  column stays a typed array, and `sort(template, key)` permutes the packed
+  columns of one template.
+- **A tuple of 2 or 3 numbers is a point, on its own row too.** `sort([3,1,2])`
+  draws the point (1, 2, 3), which makes the scene 3D. A longer tuple of
+  numbers has no picture: its row reads out `= (1, 2, 3, 5, 8)` (a new
+  `tuple` row kind) and draws nothing. A multiset of short tuples is a
+  multiset of points; of longer ones, an error.
+- **Tuple literals may be any length.** `(1, 2, 3, 5, 8)` is a tuple of five
+  numbers (it was a parse error). A tuple of tuples is not a value yet
+  (phase 6).
+- **`sort(P, key)` details.** The key has to be identical to P (the same
+  instances), a number per element, and constant (sliders yes, t no). The
+  sort is stable, and an element whose key is missing is left out, as
+  `sort(L)` leaves gaps out. `sort(P)` of points, with no key, is an error
+  that suggests `sort(P, P.x)`. `P_x` is not a key spelling: it is already
+  a subscripted name (a named point's component); `P.x` is.
+- **Indexing details.** A slice `T[2..4]` is a tuple; a list of indices,
+  `T[N]`, runs over N (a multiset) as before; a filter keeps a tuple's order.
+  On a multiset of tuples, `T[k]` is position k of each. `sort(L)[2]` still
+  multiplies (only a name indexes), so the error says to name it:
+  `T = sort(L)`, then `T[2]`.
+- **A matrix's rows are a tuple.** `M[2]` is its second row and `polyline(M)`
+  walks the rows, so `g(M)` for `g(x, y) = x y` and a 2×2 M is a tuple of
+  2 numbers — a point — where `g([(1,2),(3,4)])` is a multiset of 2 numbers.
+- **State families are numbered only when they start from a tuple.**
+  `p(0) = (sort([0..99])/10, 1, 20)` makes `p[1]` the first run; from a list
+  `[0..99]/10` the runs are a multiset, and `p[1]` is an error that says so.
+- **`row` is a position among the parsed records.** 1 is the first record
+  after the header; records skipped as ragged do not count. A filtered table
+  (`adults = person[…]`) keeps the positions its rows had. Indexing a column
+  (`person.age[2]`) is refused by its shape, so a device without the file
+  says the same; a named list derived from an absent file cannot be judged
+  that way and still reports the file.
 - **Point lists draw in the link preview too.** §6 said point lists in a 3D
   scene were not drawn; the app did draw them, but the static preview did
   not, and the MCP validator told assistants the app skipped them. Both now

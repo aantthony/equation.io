@@ -31,6 +31,7 @@ import {
 } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
+import { tupleRow } from './list.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
@@ -673,6 +674,12 @@ function classifyLowered(
 
   if (expr.kind === 'vec') {
     if (usesComplex(expr)) throw new Error('Complex values are not supported in vectors.');
+    // Longer than a point: values at positions, shown as a readout.
+    if (expr.items.length > 3) {
+      if (hasSpace || hasParam || expr.items.some(it => it.kind === 'vec'))
+        throw new Error('A tuple of more than 3 values is a value to read, not a picture: (1, 2, 3, 5, 8).');
+      return done({ kind: 'tuple', values: expr.items });
+    }
     const dim = expr.items.length as 2 | 3;
     if (hasSpace || ode) {
       if (hasParam) throw new Error('Vector fields cannot use u or v.');
@@ -850,7 +857,8 @@ export function classifyRow(
   fields: Record<string, Expr> = {},
   timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified } {
-  const lowered = lower(row.expr);
+  // A tuple of numbers is shown as what it is (see tupleRow).
+  const lowered = tupleRow(lower(row.expr));
   // A revolve(…) row hands back the surface it draws, not a call nothing
   // evaluates.
   const { cls } = classifyLowered(lowered, known, fields, timeDerivative);
@@ -968,6 +976,11 @@ export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env:
 export function plotReadout(plot: CpuPlan, env: Record<string, number>): string | null {
   if (plot.type === 'value') return valueReadout(evaluate(plot.expr, env));
   if (plot.type === 'note') return comparisonReadout(plot, env);
+  if (plot.type === 'tuple') {
+    const values = plot.values.map(e => valueReadout(evaluate(e, env)));
+    const prefix = values.some(v => v.startsWith('≈')) ? '≈' : '=';
+    return `${prefix} (${values.map(v => v.replace(/^[=≈] /, '')).join(', ')})`;
+  }
   if (plot.type === 'vlist') {
     const values = plot.values.slice(0, 8).map(e => valueReadout(evaluate(e, env)));
     const prefix = values.some(v => v.startsWith('≈')) ? '≈' : '=';

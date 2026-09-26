@@ -138,6 +138,9 @@ export type MathObject =
       readonly shade?: Readonly<{ rv: string } & ProbBounds>;
     }
   | { readonly kind: 'value'; readonly expr: Expr; readonly shade?: Readonly<IntShade> }
+  /** A tuple of more than 3 numbers: values at positions, with no picture
+   *  (2 or 3 of them are a point). Shown as its readout (docs/multisets.md §3). */
+  | { readonly kind: 'tuple'; readonly values: readonly Expr[] }
   // `constant`: the row reads like a slider named e, pi or tau (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
@@ -210,6 +213,7 @@ export function publicKind(object: MathObject) {
     case 'system':
     case 'histogram':
     case 'value':
+    case 'tuple':
     case 'note':
     case 'family':
     case 'automaton':
@@ -260,6 +264,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'histogram':
     case 'distribution':
     case 'value':
+    case 'tuple':
     case 'note':
       return false;
   }

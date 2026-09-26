@@ -187,14 +187,16 @@ the server, which may log it; the fragment never does.
   equations or simulation restart, and are local to the current session.
 - `p(0) = ([0..299]/30, 0, 0)` — a *state family*: a list of starting values
   runs the system once per element (up to 1024), and states coupled to it run
-  along. `p` then draws a cloud of moving points, `p[1]` is one run, and
-  `mean(p_1)` reduces across runs
+  along. `p` then draws a cloud of moving points and `mean(p_1)` reduces
+  across runs. Started from a tuple, `p(0) = (sort([0..299])/30, 0, 0)`, the
+  runs are in order and `p[1]` is the first
 - `p(50..400)` — an *orbit*: where the state goes between those times,
   integrated ahead of time with the live simulation's own steps
   ([`lib/orbit.ts`](lib/orbit.ts)), so moving points ride their orbit. A
-  family draws one path per run (`p[1](50..400)` draws one); a scalar state
-  plots against time, `th(0..20)` being the curve (t, th). With both, the
-  Rössler attractor is a thin band of orbit with particles flowing along it
+  family draws one path per run (`p[1](50..400)` draws one, when the runs
+  start from a tuple); a scalar state plots against time, `th(0..20)` being
+  the curve (t, th). With both, the Rössler attractor is a thin band of
+  orbit with particles flowing along it
 
 **Custom coordinates and complex roots**
 

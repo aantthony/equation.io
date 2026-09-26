@@ -50,11 +50,15 @@ describe('matrix definitions', () => {
     expect(at(m[0][1], { r1_y: 2 })).toBe(2);
   });
 
-  it('rejects ragged and non-square tuples of rows; brackets are data lists', () => {
+  it('rejects ragged tuples of rows; non-square ones are tuples of points; brackets are data lists', () => {
     expect(buildDefs(rows('M = ((1, 2), (3, 4, 5))')).errors.get('M')).toMatch(/2×2 or 3×3/);
-    expect(buildDefs(rows('M = ((1, 2), (3, 4), (5, 6))')).errors.get('M')).toMatch(/2×2 or 3×3/);
-    // Two 3D points are no matrix, and may have meant the segment.
-    expect(buildDefs(rows('M = ((1, 2, 3), (4, 5, 6))')).errors.get('M')).toMatch(/segment\(A, B\)/);
+    // Not square, so no matrix: a tuple of points, kept in order (§3).
+    for (const text of ['M = ((1, 2), (3, 4), (5, 6))', 'M = ((1, 2, 3), (4, 5, 6))']) {
+      const { defs, errors } = buildDefs(rows(text));
+      expect(errors.get('M')).toBeUndefined();
+      expect(defs.mats.has('M')).toBe(false);
+      expect(defs.lists.get('M')?.axes?.[0].ordered).toBe(true);
+    }
     expect(buildDefs(rows('M = [(1, 2), (3, 4, 5)]')).errors.get('M')).toMatch(/same number of coordinates/);
     // Not matrices: a bracket of tuples is a named scatter, a flat list is a
     // named data list (list.ts).

@@ -63,6 +63,7 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   value:
     'number readout under the row; draws nothing on the graph, except a definite integral, which shades the area it measures',
   note: 'true/false readout under the row; draws nothing on the graph',
+  tuple: 'tuple of more than 3 numbers, like sort(L) of 5 values: a readout under the row; draws nothing',
   family: 'one copy of the row per list element',
   complex2d: 'complex function shown on the plane',
   domain2d: 'domain colouring of a complex function',

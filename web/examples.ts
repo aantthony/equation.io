@@ -203,11 +203,12 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         'p = 2; q = 1; r = 1; s = 1; M = ((p, q), (r, s)); (cos(2pi u), sin(2pi u)); ' +
           'M (cos(2pi u), sin(2pi u)); det(M)',
       ],
-      // A list is a variable: every use of `th` moves together.
-      ['regular polygon', 'n = 7; th = 2pi [0..n-1]/n; polygon(rotate((2, 0), th + t/4))'],
+      // A list is a variable: every use of `th` moves together. sort makes
+      // the turns a tuple, so the polygon has an order to join them in.
+      ['regular polygon', 'n = 7; th = 2pi sort([0..n-1])/n; polygon(rotate((2, 0), th + t/4))'],
       [
         'rotate a shape (matrix exponential)',
-        'J = ((0, -1), (1, 0)); a = 0.7; R = e^(a J); P = [(0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)]; polygon(P); polygon(R P)',
+        'J = ((0, -1), (1, 0)); a = 0.7; R = e^(a J); P = ((0, 0), (3, 0), (3, 1), (1, 1), (1, 2), (0, 2)); polygon(P); polygon(R P)',
       ],
       ['rosette of hulls', 'th = 2pi [0..5]/6; P = [(1, 0), (3, 0.6), (3, -0.6)]; rotate(hull(P), th + t/3)'],
       [
@@ -323,11 +324,12 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         'Lorenz attractor',
         "r' = (10(r_2 - r_1), r_1(28 - r_3) - r_2, r_1 r_2 - 8 r_3/3); " + 'r(0) = (1, 1, 20); (r_1/4, r_3/4 - 6)',
       ],
-      // 100 runs from nearby starts spread over the attractor one run traces.
+      // 100 runs from nearby starts spread over the attractor one run traces;
+      // the starts are a tuple, so p[1] is the first run.
       [
         'Lorenz attractor in 3D',
         "camera(-pi/3, 0.5, 55, (0, 0, 25)); p' = (10(p_2 - p_1), p_1(28 - p_3) - p_2, p_1 p_2 - 8 p_3/3); " +
-          'p(0) = ([0..99]/10, 1, 20); p[1](5..40); p',
+          'p(0) = (sort([0..99])/10, 1, 20); p[1](5..40); p',
       ],
     ],
   ],

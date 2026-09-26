@@ -62,7 +62,7 @@ Examples (paste-ready):
 - [Swinging pendulum (integrated state)](https://equation.io/#th'%20%3D%20om;om'%20%3D%20-sin(th)%20-%20om%2F8;th(0)%20%3D%203;bob%20%3D%20(sin(th)%2C%20-cos(th));segment((0%2C%200)%2C%20bob);bob): `th' = om; om' = -sin(th) - om/8; th(0) = 3; bob = (sin(th), -cos(th)); segment((0, 0), bob); bob` — th is the angle, om the angular velocity; segment() draws the rod, the named point draws the bob
 - [Double pendulum](https://equation.io/#g%20%3D%209.8;L1%20%3D%201;L2%20%3D%201;m1%20%3D%201;m2%20%3D%201;M%20%3D%20(((m1%2Bm2)%20L1%2C%20m2%20L2%20cos(th_1%20-%20th_2))%2C%20(L1%20cos(th_1%20-%20th_2)%2C%20L2));f%20%3D%20(-m2%20L2%20om_2%5E2%20sin(th_1%20-%20th_2)%20-%20(m1%2Bm2)%20g%20sin(th_1)%2C%20L1%20om_1%5E2%20sin(th_1%20-%20th_2)%20-%20g%20sin(th_2));th'%20%3D%20om;om'%20%3D%20solve(M%2C%20f);th(0)%20%3D%20(2.5%2C%202.4);b1%20%3D%20(L1%20sin(th_1)%2C%20-L1%20cos(th_1));b2%20%3D%20b1%20%2B%20(L2%20sin(th_2)%2C%20-L2%20cos(th_2));segment((0%2C%200)%2C%20b1);segment(b1%2C%20b2);b1;b2): `M = (((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)); f = (…); th' = om; om' = solve(M, f); th(0) = (2.5, 2.4); …` — the Lagrangian form M(θ)ω′ = f: th and om are 2-vector states with components th_1, th_2; solve() is Cramer's rule; segment()s between named bob points draw the linkage
 - [Orbit (vector gravity)](https://equation.io/#r'%20%3D%20vel;vel'%20%3D%20-9%20r%2F%7Cr%7C%5E3;r(0)%20%3D%20(2%2C%200);vel(0)%20%3D%20(0%2C%201.5);segment((0%2C%200)%2C%20r);r;(0%2C%200)): `r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); segment((0, 0), r); r; (0, 0)` — vector states with point arithmetic; the bare state name draws as a moving point
-- [Rössler attractor (state family + orbit)](https://equation.io/#a%20%3D%200.2;b%20%3D%200.2;c%20%3D%205.7;k%20%3D%204;p'%20%3D%20k%20(-p_2%20-%20p_3%2C%20p_1%20%2B%20a%20p_2%2C%20b%20%2B%20p_3%20(p_1%20-%20c));s%20%3D%202pi%20%5B0..299%5D%2F300;p(0)%20%3D%20(8cos(s)%2C%208sin(s)%2C%200);p%5B1%5D(10..100);p;camera(-0.9%2C%200.35%2C%2045%2C%20(0%2C%200%2C%207))): `p' = k (-p_2 - p_3, p_1 + a p_2, b + p_3 (p_1 - c)); s = 2pi [0..299]/300; p(0) = (8cos(s), 8sin(s), 0); p[1](10..100); p` — a list of starting values runs 300 copies of the system; `p[1](10..100)` draws one run's path over that time as the attractor, and `p` the 300 particles flowing along it; k speeds the flow up
+- [Rössler attractor (state family + orbit)](https://equation.io/#a%20%3D%200.2;b%20%3D%200.2;c%20%3D%205.7;k%20%3D%204;p'%20%3D%20k%20(-p_2%20-%20p_3%2C%20p_1%20%2B%20a%20p_2%2C%20b%20%2B%20p_3%20(p_1%20-%20c));s%20%3D%202pi%20sort(%5B0..299%5D)%2F300;p(0)%20%3D%20(8cos(s)%2C%208sin(s)%2C%200);p%5B1%5D(10..100);p;camera(-0.9%2C%200.35%2C%2045%2C%20(0%2C%200%2C%207))): `p' = k (-p_2 - p_3, p_1 + a p_2, b + p_3 (p_1 - c)); s = 2pi sort([0..299])/300; p(0) = (8cos(s), 8sin(s), 0); p[1](10..100); p` — a tuple of starting values runs 300 copies of the system, in order; `p[1](10..100)` draws one run's path over that time as the attractor, and `p` the 300 particles flowing along it; k speeds the flow up
 - [Matrix phase portrait](https://equation.io/#a%20%3D%20-1;b%20%3D%20-1%2F4;A%20%3D%20((0%2C%201)%2C%20(a%2C%20b));(x'%2C%20y')%20%3D%20A%20(x%2C%20y)): `a = -1; b = -1/4; A = ((0, 1), (a, b)); (x', y') = A (x, y)` — a linear system as its literal matrix, sliders in the entries
 - [Poisson: strict versus non-strict](https://equation.io/#m%20%3D%204;X%20~%20Poisson(m);P(X%20%3C%203);P(X%20%3C%3D%203);P(X%20%3D%203)): `m = 4; X ~ Poisson(m); P(X < 3); P(X <= 3); P(X = 3)` — a discrete variable draws its pmf as stems; each P(…) row highlights exactly the stems it counts, so `<` stops at 2, `<=` takes the stem at 3, and `P(X = 3)` is that one stem
 - [Two dice](https://equation.io/#X%20~%20DiscreteUniform(1%2C%206);Y%20~%20DiscreteUniform(1%2C%206);S%20%3D%20X%20%2B%20Y;P(S%20%3E%3D%2010);P(X%20%3E%20Y);P(X%20%3E%3D%20Y);E(S)): `X ~ DiscreteUniform(1, 6); Y ~ DiscreteUniform(1, 6); S = X + Y; P(S >= 10); P(X > Y); P(X >= Y); E(S)` — arithmetic over discrete variables is exact: the sum's pmf is the triangle on 2…12, drawn as stems; `P(X > Y)` = 15/36 and `P(X >= Y)` = 21/36 differ by the ties, `P(X = Y)`
@@ -234,7 +234,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   itself. `[]` is the empty list: combined with anything it gives `[]`, and
   `count([])` and `total([])` are 0.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
-  `stdev(L)` (sample), `median(L)`, `sort(L)`. A row that reduces to a
+  `stdev(L)` (sample), `median(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
   expand symbolically, so elements may animate (`mean([sin(t), 2])`);
   stdev/median/sort need constant elements. Over a column, a missing cell is
@@ -245,15 +245,32 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   one thing you may do to it is scale it: the plane has a single scale for
   both axes, so counts in the thousands need `hist(L, 40) / 800` to share a
   view with values in the units. Missing values are left out.
-- List indexing is 1-based, on named lists: with `L = [5, 6, 7]` in a row
-  above, `L[2]` is 6 and `L[k]` takes k from a slider. A list of indices
-  picks one element each: `L[2..3]` is `[6, 7]`, `L[[3, 1]]` is `[7, 5]`, and
-  `L[N]` for a named list `N` pairs with `N`. Only a named list
-  indexes — `x[2]` is plain multiplication (2x).
+- Order lives in tuples. A list `[ … ]` has no order — `[3, 1, 2]` and
+  `[1, 2, 3]` are the same list — so anything that needs one takes a tuple
+  `( … )`. `sort(L)` is L's values in ascending order, as a tuple, and
+  `sort(P, key)` orders a list by a key written in that list: `sort(P, P.x)`,
+  `sort((s, sin(s)), s)`. A tuple of 2 or 3 numbers is a point
+  (`sort([3, 1, 2])` draws the point (1, 2, 3)); a longer one reads out,
+  `sort([5, 3, 8, 1, 2])` = (1, 2, 3, 5, 8), and draws nothing. Tuples of one
+  length combine position by position, like vectors: `sort(A) + sort(B)`. A
+  tuple of points, `T = ((0, 0), (1, 1), (2, 0))`, is one value in order —
+  `polyline(T)` walks it — and a square one is also a matrix.
+- Indexing is 1-based and needs a tuple: with `T = sort([7, 5, 6])` in a row
+  above, `T[2]` is 6 and `T[k]` takes k from a slider. `T[2..3]` is (6, 7),
+  and a list of indices picks one element each: `T[[3, 1]]` is `[7, 5]`, and
+  `T[N]` for a named list `N` pairs with `N`. `L[2]` on a list `[ … ]` is an
+  error that says to sort it first; a filter `L[L > 2]` is no index and
+  works on any list. Only a named tuple or list indexes — `x[2]` is plain
+  multiplication (2x).
 - Data columns: with `person = open("people.csv", 3a7f9c1d2e4b)` in a row
   above (see Definitions), `person.age` is a list of that column's numbers.
   Everything lists can do applies: `(person.age, person.height)` is a
-  scatter, `mean(person.age)` a readout, `person.age[2]` one value. Naming
+  scatter, `mean(person.age)` a readout. File order is not part of the
+  data: each record's position in the file is `person.row` (`row_index`
+  when the file has its own `row` column), so `sort(person.age, person.row)`
+  is the column in file order, and
+  `polyline(sort((person.x, person.y), person.row))` draws a series in it
+  (or sort by the x column itself). Naming
   works throughout — `half = person.age / 2`, `P = (person.age, person.height)`
   — and a named scatter is still a scatter. Only the
   device that dropped the file has its data — the link carries the file's
@@ -380,7 +397,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Data list: `[3, 1, 4]` draws dots at (1, 3), (2, 1), (3, 4) — the panel can
   switch them to bars — and `[(1, 2), (3, 4)]` draws a scatter of points.
   Any list-valued expression plots the same way (`L^2 + 1`,
-  `(L, sort(L))` with `L` defined above, or a CSV column: `person.age`).
+  `(L, L^2)` with `L` defined above, or a CSV column: `person.age`).
 - Geometry: with points defined in rows above (`A = (0, 0)`), `segment(A, B)`,
   `polyline(A, B, C, …)` (an open path through the points, not filled),
   `vector(A, B)` (an arrow from A to B; `vector(V)` draws V from the origin —
@@ -399,7 +416,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   marker), and they work inside any expression (`circle(A, distance(A, B))`).
   A scalar list inside a point broadcasts as in any scalar math
   (`distance(A, (L, 0))` is a list of distances); a list of points as an
-  argument broadcasts too, and P[1] selects a point value. An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
+  argument broadcasts too, and `T[1]` of a tuple of points selects one. An angle with a zero-length arm (`angle(A, A, C)`) reads "undefined". A parametric
   point like `A + u(B - A)` traces the segment. Tuple literals work directly
   as arguments (`segment((0, 0), A)`) and as operands: `A + (1, 2)`,
   `((0, 0) + B)/2`, `|(3, 4)|`.
@@ -439,8 +456,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   f(x,y) = (x + y/2, y + sin(x)/2); vector(P, f(P))`. Shader members share
   one program with per-draw uniforms. Scalar fields/RGB fields/domain coloring/fractals cannot superimpose as
   families; use a selected list element. Point-list arithmetic works:
-  `Q = P + (1,0)`, `2P`, `P[2]`; `polyline(P)` / `polygon(P)` consume an
-  entire point list, including a CSV scatter `polyline((data.x, data.y))`.
+  `Q = P + (1,0)`, `2P`. `polyline(T)` / `polygon(T)` walk a whole tuple of
+  points in order, `T = ((0, 0), (2, 0), (1, 1))`, and a list only once it
+  is sorted: `polyline(sort(P, P.x))`, a CSV scatter
+  `polyline(sort((data.x, data.y), data.x))`; a list `[ … ]` has no order to
+  walk. `hull(P)` takes any list.
   Range bounds may use sliders, but not t; families re-expand on bound changes.
 - Sequence values: `a_n = 1/n` defines `a_3` as a scalar and `a_[1..10]`
   as a list, usable in sums, scatters, histograms and regression. `a_k`
@@ -736,14 +756,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (up to 1024 runs): `p(0) = ([0..99]/10, 0, 0)` is 100 runs, crossing and
   zipping like any list. States coupled to it (`r' = vel` with a list of
   r(0)) run per element too, from their own single starting value. `p`
-  then draws one moving point per run, `p[1]` is the first run, `p_1` the
-  list of first components (`mean(p_1)`), and figures built from the state
-  (`segment((0, 0), b1)`) draw one per run.
+  then draws one moving point per run, `p_1` the list of first components
+  (`mean(p_1)`), and figures built from the state (`segment((0, 0), b1)`)
+  draw one per run. Started from a tuple, `p(0) = (sort([0..99])/10, 0, 0)`,
+  the runs are in order and `p[1]` is the first run.
 - Orbit: `p(50..400)` draws the path the state takes from t = 50 to t = 400,
   integrated ahead of time from p(0) with the live simulation's own steps —
   the moving point rides exactly along it. Start after 0 to skip the
   transient onto an attractor. A family draws one path per run (keep it to
-  a few, or pick one: `p[1](50..400)`); a scalar state plots against time,
+  a few, or pick one of runs in order: `p[1](50..400)`); a scalar state plots against time,
   `th(0..20)` being the curve (t, th). The range must be constant (sliders
   are fine; the orbit re-integrates when they move), 0 <= start < end; anything
   drawn from states works too, like `b2(0..30)` for a pendulum bob. Orbit
@@ -779,8 +800,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   rows below it (`mean(ages)`, `(ages, person.height)`) cost no more than
   reading the column directly.
 - List: `L = [3, 1, 4]` or `L = [1..100]` names a data list; rows below
-  broadcast over it (`L^2`, `(L, sort(L))`), reduce it (`mean(L)`), or index
-  it (`L[2]`, 1-based). Elements may use constants, states, and t. A list of
+  broadcast over it (`L^2`, `(L, L^2)`), reduce it (`mean(L)`), or filter
+  it (`L[L > 2]`); to index it, name it in order (`T = sort(L)`, then
+  `T[2]`). Elements may use constants, states, and t. A list of
   tuples names a scatter of points, whatever its shape: `[(1, 2), (3, 4)]`
   is two points, never a matrix.
 - Matrix: a tuple of rows, `M = ((a, b), (c, d))` or
@@ -804,8 +826,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   turns P by a about the axis n — `cross(n)` alone is the matrix of
   `v -> n × v`, scaled so |n| multiplies the angle (`rotate(P, a, n)`
   normalizes n for you). Both expand to exact cos/sin closed forms, so a may
-  be a slider, t, or a LIST: `th = 2pi [0..4]/5; polygon(e^(th J) (1, 0))` is
-  a regular pentagon, `segment((0,0), rotate((1,0), th))` its 5 spokes, and
+  be a slider, t, or a LIST: `th = 2pi sort([0..4])/5; polygon(e^(th J) (1, 0))` is
+  a regular pentagon (the turns sorted into a tuple, so the polygon has an order), `segment((0,0), rotate((1,0), th))` its 5 spokes, and
   `phi = (1+sqrt(5))/2; k = 2pi [0..2]/3;
   rotate((0, [-1,1], [-phi,phi]), k, (1,1,1))` the 12 vertices of an
   icosahedron (independent lists cross, the named turn list zips). `e^M` works

@@ -10,10 +10,10 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 | 1 Bracket sums | done | commit bb739c2. Parser: `[]` token merged in `mergeEmptyBrackets` (expr.ts); flatten in `expandItems` (list.ts); empty reductions in `reduce`; empty family in object-lists `expand`. |
 | 2 Tuple matrices | done | geom.ts lowerMat vec case; mat.ts matrixFromRows; defs.ts no bracket→matrix; det/trace/solve/exp take a tuple as one matrix. Examples rewritten. |
 | 3 Vectors in 3D | done | e_x/e_y/e_z resolved in defs.ts `rx` via ResolveOpts.documentNames (doc names win); render3d batches point runs; og.ts preview draws plists. App already drew 3D plists. |
-| 4 Order | todo | |
-| 5 Display | doing | subagent, worktree (from phase-1 commit) |
+| 4 Order | done (uncommitted) | Axis.ordered (expr.ts); list.ts unionAxes/tupleOf/sortBy/tupleRow/needsOrder; object-lists polyline/polygon need order; geom non-square tuple of points passes; csv/defs `row`; defs state-family order; new `tuple` row kind. Spec tests §3 in multisets.test.ts. |
+| 5 Display | ready to merge | worktree branch worktree-agent-acf75691499f51a6f, commit cb5ec73 (on cca578d); cherry-pick after phase 4 commit. Agent verified vitest 2314, test:objects, test:editor 95/95, screenshots. |
 | 6 Tensors | todo | |
-| 7 Continuous intervals | todo | |
+| 7 Continuous intervals | planning | Plan agent (7+8) |
 | 8 Measures | todo | |
 
 ## Decisions made while implementing (not in the agreed spec)
@@ -28,6 +28,8 @@ Each phase lands as its own commit. Status: todo / doing / done / blocked.
 
 - Phase 2: vitest 83/2299 pass; typecheck/lint/fmt clean; probes M M P→2 pts, det(M)=[1,2].
 - Phase 3 merged: vitest 83/2308 pass.
+- Phase 4: vitest see report; typecheck/lint/fmt clean.
+- Phase 4: vitest 83/2326; typecheck/lint clean; test:objects pass.
 
 ## Blockers / open issues
 
@@ -43,3 +45,27 @@ graphEquation at compiler.ts:159/406; special.ts isFn branch test-only. Decision
 6. `a_n = …` sequences keep dots at index n (a sequence is ordered, i.e. a tuple).
 7. List bars option (barMode) removed; lists draw as number-line dot plot, stacked by multiplicity (height = multiplicity).
 u/v rows with no x,y,z: rename to anonymous Uniform(0,1) base RVs (dist.ts addAnonymous) → density curve.
+
+## Phases 7–8 plan (planning agent; decisions by orchestrator)
+
+Phase 7 (start after phase 5 lands — shares plot.ts/analysis.ts):
+1. `interval` builtin; `r = interval(lo,hi)` → defs.intervals; `rx` var case replaces r with
+   `lo+(hi-lo)·[iv:r]` (identical per name); literal → `[iv#N]` keyed by node identity (separate).
+2. Hidden params join u,v in classify (PARAM_VARS plot.ts:51): 1 param pcurve; 2 params+3 comps psurface;
+   2 params+2 comps → NEW region/parametric (filled; CPU `pregion`: 64×64 quads, CCW, one Path2D nonzero
+   fill, no outline; og too). Makes `(u cos 2πv, u sin 2πv)` a disc. ≥3 params error.
+3. Densities: extend phase-5 `uniformDraws` to [iv] params; multiply by mass Π(hi−lo) (length measure).
+4. Projection: x/y + one hidden param → region/projected residual F(x,y,s); GPU `projFrag` K=48 sign-change
+   + Lipschitz widening; inequalities fill if min_k G<0; og union over K. Scalar field w/ interval: error.
+Phase 8:
+5. Desugar reductions in `rx` beside `int` (defs.ts ~1810): total(f(u)) → int[0..1]; intervals affine;
+   count = mass; mean = total/count; x → improper int; count(x)=inf; min/max numeric; stdev/median cut.
+6. Measure module: region area quadtree with interval eval (certify.ts intervalAD, export value-only),
+   boundedness check; curves: graph form symbolic arc length, implicit: marching squares (coarea |∇F|);
+   points: findRoots / certifySystem in a fixed box; incomplete → error. Never view-dependent.
+7. Syntax: `count(filter)`, `total({filter: f})` (allow `=` conditions in piecewise only as reduction arg).
+   Slider-dependent 2D measures: whole-row plan only, else cut.
+Decisions: interval density height via length measure; count(x^2=0)=1 (distinct); parametric sets use
+pushforward measure (count((u,u^2))=1); unbounded count = inf, total/mean over infinite measure error
+unless 1D improper integral converges. Cuts: 3D volume/surface area, >1 hidden param projection,
+median/stdev/hist over continuous sets, unbounded 2D totals.

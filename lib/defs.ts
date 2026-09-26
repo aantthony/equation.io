@@ -32,7 +32,7 @@ import { exprKey } from './expr.ts';
  */
 import { type SeqScan, sequenceResolver } from './seq.ts';
 import { lowerObjects } from './object-lists.ts';
-import { type Column, type Table, filterTable } from './csv.ts';
+import { type Column, type Table, filterTable, positionColumn, rowPositions } from './csv.ts';
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import {
   FUNCTIONS,
@@ -65,8 +65,10 @@ import {
   axesOf,
   isDataScatter,
   isSeq,
+  isTuple,
   lowerLists,
   lowerMask,
+  orderMessage,
   namedAxes,
   plainFnName,
   withAxes,
@@ -212,6 +214,14 @@ export const TABLE_MAX_ROWS = 200_000;
  */
 export class MissingDataError extends Error {}
 
+/** Row positions, built once per table (and so shared by every row asking). */
+const tablePositions = new WeakMap<Table, Float64Array>();
+function positions(table: Table): Float64Array {
+  let hit = tablePositions.get(table);
+  if (!hit) tablePositions.set(table, (hit = rowPositions(table)));
+  return hit;
+}
+
 /** Expression elements of a numeric column, built once per parsed column. */
 const colExprs = new WeakMap<Column, Expr[]>();
 /** Character counts are stable for a parsed column, including filtered copies. */
@@ -306,6 +316,12 @@ export function listGetter(defs: ValueDefinitions): GetList {
     const col = length ? path.slice(0, -'.length'.length) : path;
     if (!table.data) throw new MissingDataError(table.missing ?? `${table.file} is not loaded.`);
     const found = table.data.columns.find(c => c.name === col);
+    // Every row's position in the file: `person.row` (docs/multisets.md §3).
+    if (!found && !length && col === positionColumn(table.data)) {
+      return withAxes({ kind: 'data', values: positions(table.data) }, [
+        { id: `${name.slice(0, dot)}.`, n: table.data.rows },
+      ]);
+    }
     if (!found) {
       throw new Error(
         `${table.file} has no column "${col}" (columns: ${table.data.columns.map(c => c.name).join(', ')}).`,
@@ -346,6 +362,8 @@ export function listNamesOf(defs: ValueDefinitions): Set<string> {
   for (const [name, t] of defs.tables) {
     out.add(name);
     for (const c of t.data?.columns ?? []) out.add(`${name}.${c.name}`);
+    const row = t.data && positionColumn(t.data);
+    if (row) out.add(`${name}.${row}`);
   }
   return out;
 }
@@ -471,10 +489,16 @@ const DEAD_FILTER =
  * rather than reported as merely device-local in a shared link and refused
  * for the author. (A list of indices picks elements, so it is no issue here.)
  */
-export function indexIssue(idx: Expr, defs: ValueDefinitions): string | null {
+export function indexIssue(idx: Expr, defs: ValueDefinitions, target?: Expr): string | null {
   const inside = wholePlotOverList(idx, defs);
   if (inside) return `Lists cannot appear inside ${inside}(…).`;
-  if (!isComparison(idx)) return null;
+  if (!isComparison(idx)) {
+    // A column is a multiset whether or not its file is here, so picking by
+    // position is refused on every device alike (docs/multisets.md §3).
+    const name = target?.kind === 'var' ? target.name : '';
+    const dot = name.indexOf('.');
+    return dot > 0 && defs.tables.has(name.slice(0, dot)) ? orderMessage(name, idx, false) : null;
+  }
   const operands = idx.kind === 'ineq' ? ineqComparisons(idx).flatMap(c => [c.l, c.r]) : idx.args;
   return operands.some(a => staysList(a, defs)) ? null : DEAD_FILTER;
 }
@@ -531,13 +555,15 @@ function filteredTable(e: Expr, defs: ValueDefinitions, opts: ResolveOpts): Tabl
   if (!src) return null;
   const name = e.args[0].name;
   const shape = `${name}[…] needs a comparison, like ${name}[${name}.x > 0].`;
+  // Judged by shape on every device first, so a filter the bytes would
+  // refuse for another reason (an index inside it) says the same everywhere.
+  checkFilterShape(e.args[1], defs, shape);
   // No bytes to cut (a shared link elsewhere, or a server-side preview): the
   // cut is a table too, and reports the same reason its source does. Only the
   // per-row answer waits for the data — whether the row is a filter at all,
   // and whether it could ever settle, are answered here either way, or a
   // shared link would call `person[5]` valid and the author's device would not.
   if (!src.data) {
-    checkFilterShape(e.args[1], defs, shape);
     return { file: src.file, hash: src.hash, data: null, missing: src.missing };
   }
   const keep = lowerMask(e.args[1], listGetter(defs), opts);
@@ -917,7 +943,7 @@ export interface ResolveOpts {
    * before list.ts lowers anything, because lowering needs the bytes and the
    * answer must not: see indexIssue.
    */
-  indexIssue?: (idx: Expr) => string | null;
+  indexIssue?: (idx: Expr, target: Expr) => string | null;
   /**
    * The value of a name defined as a number or field (`g = x^2 + y^2`, or a
    * named vector's component F_x), so derivatives can differentiate through
@@ -1963,7 +1989,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     // Live: list names accumulate as definitions are processed.
     isList: n => isListName(listNamesOf(defs), n),
     getList: listGetter(defs),
-    indexIssue: idx => indexIssue(idx, defs),
+    indexIssue: (idx, target) => indexIssue(idx, defs, target),
     // Live too: definitions above this one (a point's components included).
     // A state stands for itself: defined, and constant across space.
     definition: n => defs.consts.get(n) ?? (stateNames.has(n) ? { kind: 'var', name: n } : undefined),
@@ -2274,6 +2300,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const vecOwnerKey = new Map<string, string>();
   /** Starting values per run of a state family, by owner and component. */
   const familyInits = new Map<string, (readonly Expr[])[]>();
+  /** Owners whose starting values are a tuple: their runs are in order, so
+   *  `p[1]` is the first run (docs/multisets.md §3). */
+  const orderedInits = new Set<string>();
   /** A family run's hidden scalar state → the row that defines it. */
   const familyOwner = new Map<string, string>();
   {
@@ -2362,6 +2391,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           if (members.length > FAMILY_MAX)
             throw new Error(`${name}(0) starts ${members.length} runs — the limit is ${FAMILY_MAX}.`);
           familyInits.set(name, members);
+          if (isTuple(listed)) orderedInits.add(name);
           const comps = dim === undefined ? [name] : vecStateComps(name, dim);
           comps.forEach((c, k) => {
             flatInits.set(c, members[0][k]);
@@ -2460,7 +2490,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       const group = [...owners].filter(o => find(o) === root);
       const comps = group.flatMap(compsOfState).filter(c => derivs.has(c));
       const hidden = (c: string, k: number) => `${defs.sequencePrefix}_run_${c}_${k}`;
-      const axes = [{ id: `${root}#runs`, n }];
+      const inOrder = group.every(o => !familyInits.has(o) || orderedInits.has(o));
+      const axes = [{ id: `${root}#runs`, n, ...(inOrder ? { ordered: true as const } : {}) }];
       const runs = Array.from({ length: n }, (_, k) =>
         Object.fromEntries(comps.map(c => [c, { kind: 'var', name: hidden(c, k) } as Expr])),
       );

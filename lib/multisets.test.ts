@@ -75,6 +75,82 @@ describe('§3 reductions see the whole multiset', () => {
   });
 });
 
+/** The vertices of a figure row, in the order it joins them. */
+function path(rows: string[]): string[] {
+  const analysis = analyzeRows(rows, { readouts: true });
+  const row = analysis.rows.at(-1)!;
+  if (row.error) throw new Error(row.error);
+  const cpu = row.cpu;
+  if (cpu?.type !== 'polygon') throw new Error(`expected a figure, got ${cpu?.type}`);
+  const at = (e: Expr, k: number) =>
+    evaluate(e, { ...analysis.constEnv, ...Object.fromEntries((cpu.over ?? []).map(c => [c.name, c.values[k]])) });
+  const n = cpu.over ? cpu.over[0].values.length : cpu.pts.length / cpu.dim;
+  const out: string[] = [];
+  for (let k = 0; k < n; k++) {
+    const vertex = cpu.over ? cpu.pts : cpu.pts.slice(k * cpu.dim, (k + 1) * cpu.dim);
+    out.push(vertex.map(c => +at(c, k).toFixed(6)).join(','));
+  }
+  return out;
+}
+
+describe('§3 order lives in tuples', () => {
+  it('sort bridges a multiset to a tuple: 2 or 3 numbers are a point, more read out', () => {
+    expect(last(['sort([3,1,2])']).cpu).toMatchObject({ type: 'point', dim: 3 });
+    expect(last(['sort([3,1,2])']).cls?.needs3D).toBe(true);
+    expect(last(['L = [3,1,2]', 'T = sort(L)', 'T']).cpu).toMatchObject({ type: 'point', dim: 3 });
+    const five = last(['sort([5,3,8,1,2])']);
+    expect(five.cpu?.type).toBe('tuple');
+    expect(five.info).toBe('= (1, 2, 3, 5, 8)');
+    expect(last(['(1, 2, 3, 5, 8)']).info).toBe('= (1, 2, 3, 5, 8)');
+  });
+  it('sort(P, key) orders by a key written in the same multiset', () => {
+    const P = ['P = [(1,2),(3,0),(2,5)]'];
+    expect(path([...P, 'polyline(sort(P, P.x))'])).toEqual(['1,2', '2,5', '3,0']);
+    expect(path([...P, 'polyline(sort(P, -P.y))'])).toEqual(['2,5', '1,2', '3,0']);
+    expect(path(['s = [3,1,2]', 'polyline(sort((s, s^2), s))'])).toEqual(['1,1', '2,4', '3,9']);
+    // Through a slider, the points stay one template, permuted by the key.
+    expect(path(['a = 2', 's = [3,1,2]', 'polyline(sort((s, a s), s))'])).toEqual(['1,2', '2,4', '3,6']);
+    expect(last([...P, 'L = [1,2]', 'sort(P, L)']).error).toMatch(/key has to be written in the list it sorts/);
+    expect(last([...P, 'sort(P)']).error).toMatch(/sort\(P, P\.x\)/);
+  });
+  it('a path, a polygon and an index need an order; a multiset has none', () => {
+    const P = ['P = [(0,0),(1,1),(2,0)]'];
+    expect(last([...P, 'polyline(P)']).error).toMatch(/polyline needs an order.*polyline\(sort\(P, P\.x\)\)/);
+    expect(last([...P, 'polygon(P)']).error).toMatch(/polygon needs an order/);
+    expect(last(['L = [3,1,2]', 'L[2]']).error).toMatch(/L\[2\] needs an order.*T = sort\(L\).*T\[2\]/);
+    expect(multiset(['L = [3,1,2]', 'T = sort(L)', 'T[2]'])).toEqual([2]);
+    // Order-free: a hull, a filter, and points written out one by one.
+    expect(last([...P, 'hull(P)']).cpu?.type).toBe('polygon');
+    expect(multiset(['L = [3,1,2]', 'L[L > 1]'])).toEqual([2, 3]);
+    expect(path(['A = (0,0)', 'B = (1,1)', 'C = (2,0)', 'polyline(A, B, C)'])).toEqual(['0,0', '1,1', '2,0']);
+  });
+  it('a tuple of points is walked in order, square or not', () => {
+    expect(path(['polyline(((0,0),(1,1),(2,0)))'])).toEqual(['0,0', '1,1', '2,0']);
+    expect(path(['T = ((0,0),(2,0),(2,1),(0,1))', 'polygon(T)'])).toEqual(['0,0', '2,0', '2,1', '0,1']);
+    expect(points(['T = ((0,0),(2,0),(2,1),(0,1))', 'T[3]'])).toEqual(['2,1']);
+    // Square, it is also a matrix: the consumer decides.
+    expect(path(['M = ((0,0),(1,1))', 'polyline(M)'])).toEqual(['0,0', '1,1']);
+    expect(points(['M = ((1,2),(3,4))', 'M (1,0)'])).toEqual(['1,3']);
+    expect(points(['M = ((1,2),(3,4))', 'M[2]'])).toEqual(['3,4']);
+  });
+  it('tuples combine by position, never by crossing', () => {
+    expect(last(['A = sort([4,1,3,2])', 'B = sort([40,10,30,20])', 'A + B']).info).toBe('= (11, 22, 33, 44)');
+    expect(last(['A = sort([1,2,3,4])', 'B = sort([1,2,3])', 'A + B']).error).toMatch(/different lengths/);
+    // A multiset over a tuple is a multiset of tuples: here, of 2D points.
+    expect(points(['sort([2,1]) + [0,10]'])).toEqual(['1,2', '11,12']);
+    expect(multiset(['T = sort([2,1]) + [0,10]', 'T[1]'])).toEqual([1, 11]);
+  });
+  it('a filter of a tuple, and a slice, keep its order', () => {
+    expect(last(['T = sort([5,1,4,2,3])', 'T[T > 1]']).info).toBe('= (2, 3, 4, 5)');
+    expect(last(['T = sort([5,1,4,2,3])', 'T[2..5]']).info).toBe('= (2, 3, 4, 5)');
+  });
+  it('state families are numbered only when they start from a tuple', () => {
+    const run = ["p' = -p", 'p(0) = (sort([1..4])/4, 0)', 'p[2]'];
+    expect(last(run).cpu?.type).toBe('point');
+    expect(last(["p' = -p", 'p(0) = ([1..4]/4, 0)', 'p[2]']).error).toMatch(/Start them from a tuple/);
+  });
+});
+
 /** The points a row draws — one, or a finite multiset — as sorted `x,y[,z]`
  *  strings, evaluated at the document's constants. */
 function points(rows: string[]): string[] {

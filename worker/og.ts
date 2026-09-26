@@ -871,6 +871,7 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
 export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   spacecurve: 'draws',
   note: 'draws',
+  tuple: 'draws',
   family: 'draws',
   vfield3d: 'draws',
   implicit2d: 'draws',
@@ -967,6 +968,7 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   }
   switch (type) {
     case 'note':
+    case 'tuple':
     case 'value':
     // Its text is left out in 3D as in 2D (OG_COVERAGE); the app draws it in both.
     case 'label':

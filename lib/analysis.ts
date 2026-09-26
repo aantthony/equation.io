@@ -298,7 +298,7 @@ export function prepareDocument(
     boundConsts: built.sumBoundConsts,
     isList: (n: string) => isListName(listNames, n),
     getList,
-    indexIssue: (idx: Expr) => indexIssue(idx, defs),
+    indexIssue: (idx: Expr, target: Expr) => indexIssue(idx, defs, target),
     // A state stands for itself: defined, and constant across space.
     definition: (n: string): Expr | undefined =>
       defs.fields.get(n) ?? defs.consts.get(n) ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),

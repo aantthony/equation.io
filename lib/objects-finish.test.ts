@@ -101,8 +101,9 @@ describe('object families and sequence values', () => {
     }
   });
   it('supports point lists, named arithmetic, paths and CPU families', () => {
+    // A tuple of points, so it has an order to draw and index (§3).
     const a = runRows([
-      'P=[(0,0),(1,1),(2,0)]',
+      'P=((0,0),(1,1),(2,0))',
       'Q=P+(2,3)',
       'Q',
       'polyline(Q)',
@@ -162,7 +163,8 @@ describe('object families and sequence values', () => {
     const ico = pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'e^(k cross((1,1,1)/sqrt(3))) (0,[-1,1],[-phi,phi])']);
     expect(new Set(ico).size).toBe(12);
     expect(ico).toEqual(pts(['phi=(1+sqrt(5))/2', 'k=2pi [0..2]/3', 'rotate((0,[-1,1],[-phi,phi]),k,(1,1,1))']));
-    expect(last(['th=2pi [0..4]/5', 'polygon(rotate((1,0),th))']).cpu!).toMatchObject({ type: 'polygon' });
+    expect(last(['th=2pi [0..4]/5', 'polygon(sort(rotate((1,0),th),th))']).cpu!).toMatchObject({ type: 'polygon' });
+    expect(analyze(['th=2pi [0..4]/5', 'polygon(rotate((1,0),th))']).rows[1].error).toMatch(/polygon needs an order/);
     const spokes = last(['th=2pi [0..4]/5', 'segment((0,0),rotate((1,0),th))']).cpu!;
     expect(spokes.type === 'family' && spokes.members.length).toBe(5);
   });
