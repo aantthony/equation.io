@@ -1870,7 +1870,20 @@ function render() {
             layers.tfields.push({ ...gpuFor(eq, 'tfield2d'), color, params, uniforms });
             break;
           case 'vfield2d': {
-            layers.vfields.push({ ...gpuFor(eq, 'vfield2d'), color, params, uniforms });
+            const gpu = gpuFor(eq, 'vfield2d');
+            layers.vfields.push({ ...gpu, color, params, uniforms });
+            // A Hamiltonian flow runs along the level sets of H: draw them under it.
+            if (plot.levels && gpu.levels) {
+              const sp = levelSpacing(plot.levels);
+              layers.levels.push({
+                glsl: gpu.levels.glsl,
+                gradGlsl: gpu.levels.gradGlsl,
+                params: plot.levels.params,
+                major: sp.major,
+                minor: sp.minor,
+                color,
+              });
+            }
             drops.forEach((d, i) => {
               extras.polylines.push({ pts: integralCurve(plot.comps, d.x, d.y, time), color: css });
               extras.points.push({ x: d.x, y: d.y, color: css, hot: hotPoint === `drop${i}` });

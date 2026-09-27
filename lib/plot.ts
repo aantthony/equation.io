@@ -20,6 +20,7 @@ import { complexParts } from './complex-parts.ts';
 import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, inferScalarType, usesComplex } from './complex.ts';
 import {
   ANGLE_FN,
+  HAMILTONIAN,
   REVOLVE_AXES,
   legacyCallArgs,
   builtinFn,
@@ -36,7 +37,7 @@ import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep 
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
 import { mvOfNode, mvText } from './clifford.ts';
-import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
+import { actionGlyphs, actionOfNode, eigenGlyphs, eigenOfNode, eigenvalues, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
@@ -618,6 +619,15 @@ function classifyLowered(
     },
   });
 
+  // hamiltonian(H): its flow as streamlines, over the level sets of H that
+  // the flow runs along (lib/defs.ts hamiltonianFlow).
+  if (expr.kind === 'call' && expr.name === HAMILTONIAN) {
+    const [H, dq, dp] = expr.args;
+    if (usesComplex(H)) throw new Error('hamiltonian takes a real H.');
+    const levels: LevelSetSpec = { name: 'H', expr: H, params: [...freeVars(H)].filter(n => defined.has(n)).sort() };
+    return done({ kind: 'vector-field', components: [dq, dp], levels });
+  }
+
   // action(M): what the matrix does to the unit square, circle and axes,
   // drawn, with the matrix read out.
   const acting = expr.kind === 'list' ? null : actionOfNode(expr);
@@ -632,6 +642,18 @@ function classifyLowered(
       fields,
       timeDerivative,
     ).cls;
+    return withReadout(drawn, readout.cls);
+  }
+
+  // eigen(M): the eigenvalues read out, each real eigenvector drawn as the
+  // line M keeps and the arrow λv it sends the unit eigenvector to.
+  const eigen = expr.kind === 'list' ? null : eigenOfNode(expr);
+  if (eigen || (expr.kind === 'list' && expr.items.some(it => eigenOfNode(it)))) {
+    if (!eigen) throw new Error('eigen takes one matrix at a time — pick one, like M[1], or fix its entries.');
+    if (hasSpace || hasParam)
+      throw new Error('eigen takes a constant matrix — sliders and t are fine, x, y, u and v are not.');
+    const readout = done({ kind: 'tuple', values: eigenvalues(eigen).flat(), eigenvalues: true });
+    const drawn = classifyLowered({ kind: 'family', members: eigenGlyphs(eigen) }, defined, fields, timeDerivative).cls;
     return withReadout(drawn, readout.cls);
   }
 
@@ -1194,6 +1216,28 @@ export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env:
 export function plotReadout(plot: CpuPlan, env: Record<string, number>): string | null {
   if (plot.type === 'value') return valueReadout(evaluate(plot.expr, env));
   if (plot.type === 'note') return comparisonReadout(plot, env);
+  if (plot.type === 'tuple' && plot.eigenvalues) {
+    // Real and imaginary parts, pair by pair: = (3, 1) or = (1 + 2i, 1 − 2i).
+    // The closed forms (cube roots, cosines) leave rounding a few ulps off:
+    // a part that small beside the largest is 0, and the rest are rounded to
+    // 12 digits first, so 10.9999999999998 reads = 11 and not ≈ 11.
+    const values = plot.values.map(v => evaluate(v, env));
+    const scale = Math.max(1, ...values.map(v => (Number.isFinite(v) ? Math.abs(v) : 0)));
+    const clean = (v: number): number => (Math.abs(v) <= 1e-9 * scale ? 0 : Number(v.toPrecision(12)));
+    let approx = false;
+    const text = (v: number): string => {
+      const r = valueReadout(v);
+      if (r.startsWith('≈')) approx = true;
+      return r.replace(/^[=≈] /, '');
+    };
+    const parts: string[] = [];
+    for (let k = 0; k < values.length; k += 2) {
+      const re = clean(values[k]);
+      const im = clean(values[k + 1]);
+      parts.push(im === 0 ? text(re) : `${text(re)} ${im < 0 ? '−' : '+'} ${text(Math.abs(im))}i`);
+    }
+    return `${approx ? '≈' : '='} (${parts.join(', ')})`;
+  }
   if (plot.type === 'tuple' && plot.blades) {
     // A multivector reads as its blades, a multiset of them as a list.
     const each = 1 << plot.blades.dim;

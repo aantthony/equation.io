@@ -768,6 +768,19 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
         continue;
       }
+      // curvature(C) alone is κ along the curve, a number per u — which as a
+      // row in u would draw the density of its values. Say how to show it.
+      if (
+        rawParsed.kind === 'call' &&
+        (rawParsed.name === 'curvature' || rawParsed.name === 'torsion') &&
+        rawParsed.args.length === 1 &&
+        !getFn(rawParsed.name)
+      ) {
+        const f = rawParsed.name;
+        throw new Error(
+          `${f}(C) is a function of u along the curve: plot it with (u, ${f}(C)), or read it at a point with ${f}(C, 0.25).`,
+        );
+      }
       const resolved = resolveRow(rawParsed, getFn, ropts);
       let parsed = resolved.expr;
       // A real row in u and v alone does not depend on the screen, so it is

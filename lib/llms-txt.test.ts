@@ -99,6 +99,14 @@ describe('llms.txt', () => {
         'note',
       ],
       [[], 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', 'curve'],
+      // Curves, Hamiltonian flows and eigenvectors.
+      [[], 'curvature((u, u^2), 0)', 'value'],
+      [['C = (2cos(u), sin(u))'], '(u, curvature(C))', 'curve'],
+      [['C = (2cos(u), sin(u))'], 'frame(C, t)', 'family'],
+      [['C = (2cos(u), sin(u))'], 'osculating(C, t)', 'curve'],
+      [[], 'hamiltonian(y^2/2 - cos(x))', 'vector-field'],
+      [['k = 1'], 'hamiltonian(y^2/2 + k x^2/2)', 'vector-field'],
+      [[], 'eigen(((2, 1), (1, 2)))', 'family'],
       // A tuple of rows is a matrix; a bracket of tuples is points.
       [[], '((0, -1), (1, 0)) (2, 1)', 'point'],
       [[], 'det(((1, 2), (3, 4)))', 'value'],
@@ -123,6 +131,12 @@ describe('llms.txt', () => {
     const readout = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
     expect(readout(['curl((-y, x))'])).toBe('= 2');
     expect(readout(['laplacian(x^2 + y^2)'])).toBe('= 4');
+    expect(readout(['curvature((u, u^2), 0)'])).toBe('= 2');
+    expect(readout(['curvature((2cos(u), -2sin(u)), 0)'])).toBe('= -0.5');
+    expect(readout(['C = (2cos(u), 2sin(u), u)', 'curvature(C, 1)'])).toBe('= 0.4');
+    expect(readout(['C = (2cos(u), 2sin(u), u)', 'torsion(C, 1)'])).toBe('= 0.2');
+    expect(readout(['eigen(((2, 1), (1, 2)))'])).toBe('= (3, 1)');
+    expect(readout(['eigen(((0, -1), (1, 0)))'])).toBe('= (0 + 1i, 0 − 1i)');
     const M = ['a = [1, 2]', 'M = ((a, 0), (0, 1))', 'P = (1, 1)'];
     expect(llms).toContain('`M = ((a, 0), (0, 1))`');
     expect(readout([...M, 'det(M)'])).toBe('= [1, 2]');

@@ -63,7 +63,9 @@ export type MathObject =
    *  a shade or a translucent cloud. */
   | { readonly kind: 'scalar-field'; readonly expr: Expr; readonly dimension?: 3 }
   | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly [Expr, Expr, Expr] }
-  | { readonly kind: 'vector-field'; readonly components: Components }
+  /** `levels`: a Hamiltonian flow's H, whose level sets draw under the
+   *  streamlines — the flow runs along them. */
+  | { readonly kind: 'vector-field'; readonly components: Components; readonly levels?: LevelSetSpec }
   /** A 2×2 matrix over the plane, row-major: each glyph is the image of a
    *  small circle under the matrix there, with a spoke where e_x goes. */
   | { readonly kind: 'tensor-field'; readonly entries: readonly [Expr, Expr, Expr, Expr] }
@@ -178,6 +180,9 @@ export type MathObject =
       /** The values are a multivector's coefficients, by blade bitmask, read
        *  out as `1 + 2 e_xy` (or in i, j, k) rather than as a tuple. */
       readonly blades?: { readonly dim: 2 | 3; readonly quat?: true };
+      /** The values are eigenvalues, each as its real and imaginary parts,
+       *  read out as `= (1 + 2i, 1 − 2i)` (lib/glyphs.ts eigenvalues). */
+      readonly eigenvalues?: true;
     }
   // `constant`: the row reads like a slider named e, pi or tau (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
@@ -240,8 +245,9 @@ export function publicKind(object: MathObject) {
       return 'polygon';
     case 'family':
       // One multivector or matrix drawn as several glyphs is not a list.
-      if (object.readout)
-        return object.readout.object.kind === 'tuple' && object.readout.object.blades ? 'multivector' : 'action';
+      if (object.readout?.object.kind === 'tuple' && object.readout.object.blades) return 'multivector';
+      if (object.readout?.object.kind === 'tuple' && object.readout.object.eigenvalues) return 'eigen';
+      if (object.readout) return 'action';
       return 'family';
     case 'sequence':
       return object.form === 'explicit' ? 'sequence' : object.form;

@@ -159,6 +159,10 @@ type ExprNode =
  *  identifier, so no document name or builtin can collide with it. */
 export const INTERVAL = '[interval]';
 
+/** hamiltonian(H) once resolved: H, then its flow (∂H/∂y, −∂H/∂x), which
+ *  classify draws as streamlines over the level sets of H. */
+export const HAMILTONIAN = '[hamiltonian]';
+
 /** The self-call inside a `loop` body: its args are the next pass's params. */
 export const RECUR = '@recur';
 /** Passes a tail-recursive function may take before it is undefined. Enough
@@ -217,6 +221,13 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'action',
     'jacobian',
     'hessian',
+    'eigen',
+    'transpose',
+    // A curve, whole: curvature((cos(u), sin(u)), 0.5).
+    'curvature',
+    'torsion',
+    'osculating',
+    'frame',
     // sort((s, sin(s)), s): the points to order, then their key.
     'sort',
   ]);
@@ -295,11 +306,14 @@ export const FUNCTIONS = new Set([
   'square',
   'circle',
   'hull',
-  // Small-matrix helpers (det, trace, matvec, linear solve), also lowered
-  // symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts).
+  // Small-matrix helpers (det, trace, matvec, linear solve, transpose), also
+  // lowered symbolically — Cramer's rule for 2×2 and 3×3 (see mat.ts) — and
+  // eigen(M), drawn as its invariant lines (lib/glyphs.ts).
   'det',
   'trace',
   'solve',
+  'transpose',
+  'eigen',
   // Tensor products and contraction (see tensor.ts), lowered the same way.
   'outer',
   'wedge',
@@ -327,6 +341,13 @@ export const FUNCTIONS = new Set([
   'laplacian',
   'jacobian',
   'hessian',
+  // The differential geometry of a curve in u (see curves.ts), and a
+  // Hamiltonian's flow, expanded the same way.
+  'curvature',
+  'torsion',
+  'osculating',
+  'frame',
+  'hamiltonian',
   // Whole-expression plot modes (see classify): domain coloring, conformal
   // grids, escape-time iteration, swept tubes, motion trails, and surfaces
   // of revolution.
@@ -388,6 +409,13 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'hessian',
   'qjulia',
   'vec',
+  'eigen',
+  'transpose',
+  'curvature',
+  'torsion',
+  'osculating',
+  'frame',
+  'hamiltonian',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
