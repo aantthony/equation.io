@@ -67,7 +67,7 @@ import {
   CURVE_SAMPLES,
   type PathSampler,
   type RegionSampler,
-  foldExcept,
+  foldAllExcept,
   pathSampler,
   regionSampler,
 } from '../lib/path.ts';
@@ -1248,7 +1248,7 @@ function render() {
     }
     // What does not move with u is worked out once for the frame, not per sample.
     const frameEnv: Record<string, number> = { ...constEnv, t: time };
-    const along = comps.map(c => foldExcept(c, 'u', frameEnv));
+    const along = foldAllExcept(comps, 'u', frameEnv);
     const out: number[] = [];
     for (let k = 0; k < CURVE_SAMPLES; k++) {
       const u = k / (CURVE_SAMPLES - 1);
@@ -1295,21 +1295,35 @@ function render() {
     }
   };
 
-  // Evaluate a symbolic derivative vector at the curve samples; NaN on failure.
-  const sampleDeriv = (es: import('../lib/expr.ts').Expr[] | undefined): Float32Array | undefined => {
-    if (!es) return undefined;
-    const out = new Float32Array(CURVE_SAMPLES * 3);
-    for (let k = 0; k < CURVE_SAMPLES; k++) {
-      const u = k / (CURVE_SAMPLES - 1);
-      for (let c = 0; c < 3; c++) {
-        try {
-          out[k * 3 + c] = evaluate(es[c], { ...constEnv, u, t: time });
-        } catch {
-          out[k * 3 + c] = NaN;
+  // Evaluate symbolic derivative vectors (r′, r″, r‴) at the curve samples;
+  // NaN on failure. What does not move with u is worked out once for the
+  // frame, and once for all three, as in sampleCurve: an osculating circle's
+  // derivatives each repeat its whole centre.
+  type Exprs = import('../lib/expr.ts').Expr[] | undefined;
+  const sampleDerivs = (ds: readonly Exprs[]): Array<Float32Array | undefined> => {
+    const frameEnv: Record<string, number> = { ...constEnv, t: time };
+    const along = foldAllExcept(
+      ds.flatMap(es => es ?? []),
+      'u',
+      frameEnv,
+    );
+    let at = 0;
+    return ds.map(es => {
+      if (!es) return undefined;
+      const mine = along.slice(at, (at += es.length));
+      const out = new Float32Array(CURVE_SAMPLES * 3);
+      for (let k = 0; k < CURVE_SAMPLES; k++) {
+        const u = k / (CURVE_SAMPLES - 1);
+        for (let c = 0; c < 3; c++) {
+          try {
+            out[k * 3 + c] = evaluate(mine[c], { ...frameEnv, u });
+          } catch {
+            out[k * 3 + c] = NaN;
+          }
         }
       }
-    }
-    return out;
+      return out;
+    });
   };
 
   /**
@@ -1730,7 +1744,8 @@ function render() {
               scene.curves.push({ pts, color });
               break;
             }
-            const fr = curveFrames(pts, sampleDeriv(plot.d1), sampleDeriv(plot.d2), sampleDeriv(plot.d3));
+            const [d1, d2, d3] = sampleDerivs([plot.d1, plot.d2, plot.d3]);
+            const fr = curveFrames(pts, d1, d2, d3);
             if (radius > 0) {
               scene.tubes.push({ ...buildTube(pts, fr, radius, TUBE_SEGMENTS), color });
             } else {

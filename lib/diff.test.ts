@@ -4,6 +4,16 @@ import { diff } from './diff.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { classify } from './plot.ts';
 
+describe('non-smooth functions of a constant', () => {
+  it('differentiate to 0 when their argument does not move, and still throw when it does', () => {
+    // A curve operator's straight-line gate at a point u0: sign(…) in t, not u.
+    const e = parseExpr('sqrt(sign(a - t)) cos(u)');
+    expect(evaluate(diff(e, 'u'), { a: 2, t: 1, u: 0.5 })).toBeCloseTo(-Math.sin(0.5));
+    expect(() => diff(parseExpr('sign(u)'), 'u')).toThrow(/sign/);
+    expect(() => diff(parseExpr('floor(u)'), 'u')).toThrow(/floor/);
+  });
+});
+
 function ddx(s: string, at: Record<string, number>, wrt = 'x'): number {
   return evaluate(diff(parseExpr(s), wrt), at);
 }

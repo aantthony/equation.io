@@ -231,7 +231,10 @@ export function diff(e: Expr, v: string): Expr {
           return chain(sub(ONE, pow(call('coth', a), num(2))));
         default:
           // floor/mod/… (and gamma: digamma isn't in the language):
-          // no smooth derivative; caller falls back to FD.
+          // no smooth derivative; caller falls back to FD. Of an argument
+          // that does not move with v it is 0, like any constant: the
+          // straight-line gate sign(…) of a curve operator, at a point u0.
+          if (isNumVal(da, 0)) return ZERO;
           throw new NonSmoothError(`Cannot differentiate ${plainFnName(e.name)}.`);
       }
     }

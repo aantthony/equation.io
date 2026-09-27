@@ -1,7 +1,7 @@
 import { compileCpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { evaluate, parseExpr } from './expr.ts';
-import { CURVE_SAMPLES, PATH_NODE_BUDGET, foldExcept, pathSampler, samplePath } from './path.ts';
+import { CURVE_SAMPLES, PATH_NODE_BUDGET, foldAllExcept, foldExcept, pathSampler, samplePath } from './path.ts';
 import { countNodes, exceedsNodes } from './size.ts';
 import { classify } from './plot.ts';
 
@@ -145,10 +145,46 @@ describe('foldExcept', () => {
       expect(evaluate(folded, { u })).toBeCloseTo(evaluate(e, { a: 3, t: 7, b: 1, u }));
     }
   });
+  it('folds several expressions at once, and leaves them be if folding fails', () => {
+    const shared = parseExpr('sqrt(a^2 + t)');
+    const es = [
+      { kind: 'bin', op: '*', a: shared, b: parseExpr('cos(u)') },
+      { kind: 'bin', op: '*', a: shared, b: parseExpr('sin(u)') },
+    ] as const;
+    const folded = foldAllExcept(es, 'u', { a: 3, t: 7 });
+    expect(folded.map(e => evaluate(e, { u: 0 }))).toEqual([4, 0]);
+    // Folding runs outside the per-sample guard: a throw there keeps the input.
+    const hostile = { a: 3 } as Record<string, number>;
+    Object.defineProperty(hostile, 't', {
+      enumerable: true,
+      get() {
+        throw new Error('boom');
+      },
+    });
+    expect(foldAllExcept(es, 'u', hostile)).toBe(es);
+  });
   it('leaves a sum over a name the frame also binds alone', () => {
     // n is a slider and the sum's own variable: the sum must still bind it.
     const e = parseExpr('sum(n=1..3, n u)');
     expect(evaluate(foldExcept(e, 'u', { n: 100 }), { u: 2 })).toBe(12);
+  });
+});
+
+describe('pathSampler folding', () => {
+  it('samples a large curve whose bulk does not move with u as it would unfolded', () => {
+    // An osculating circle's size: its centre is ~2k nodes in t alone.
+    let centre = parseExpr('cos(t) + a');
+    for (let k = 0; k < 9; k++) centre = { kind: 'bin', op: '+', a: centre, b: centre };
+    const comps = [
+      { kind: 'bin', op: '+', a: centre, b: parseExpr('cos(2pi u)') },
+      { kind: 'bin', op: '+', a: centre, b: parseExpr('sin(2pi u)') },
+    ] as const;
+    expect(countNodes(comps[0])).toBeGreaterThan(500);
+    const env = { a: 0.25, t: 1.5 };
+    const pts = pathSampler(comps).sample(env);
+    const c = 512 * (Math.cos(1.5) + 0.25);
+    expect(pts[0]).toBeCloseTo(c + 1, 9);
+    expect(pts[1]).toBeCloseTo(c, 9);
   });
 });
 

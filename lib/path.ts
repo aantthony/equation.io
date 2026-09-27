@@ -4,6 +4,7 @@
  */
 import { type Expr, evaluate, freeVars, mapChildren } from './expr.ts';
 import { compileProg, compileSampler, run } from './vm.ts';
+import { exceedsNodes } from './size.ts';
 
 /**
  * Nodes (lib/size.ts) evaluated for one sample of a split path. Splitting
@@ -51,15 +52,22 @@ export function pathSampler(comps: readonly Expr[]): PathSampler {
       };
     });
   const [re, im] = comps.map(part);
+  // A large curve whose bulk does not move with u — an osculating circle,
+  // its centre and radius written out of the curve's derivatives — is folded
+  // under env first, and what is left compiled: far less than running the
+  // whole tree at every sample.
+  const fold = exceedsNodes(comps, FOLD_NODES);
   return {
     names,
     sample: env => {
-      const x = re(env),
-        y = im(env);
+      const [x, y] = fold ? foldAllExcept(comps, 'u', env).map(c => part(c)(env)) : [re(env), im(env)];
       return samplePath(u => [x(u), y(u)], CURVE_SAMPLES);
     },
   };
 }
+
+/** Nodes past which pathSampler folds a curve before sampling it. */
+const FOLD_NODES = 500;
 
 /** Node kinds whose children all live in the enclosing scope (as compiler.ts
  *  HOISTABLE): anything else may bind a name, and is folded whole or not. */
@@ -77,6 +85,24 @@ const binds = (e: Expr): boolean =>
  * evaluate here stays as it is, to fail (or not) at sample time as before.
  */
 export function foldExcept(e: Expr, v: string, env: Record<string, number>): Expr {
+  return foldAllExcept([e], v, env)[0];
+}
+
+/**
+ * foldExcept over several expressions at once, sharing what they share: a
+ * curve's components and their derivatives along u repeat the same large
+ * subtrees, each worked out once. Whatever fails to fold (an overflow in a
+ * pasted row) leaves the expressions as they were.
+ */
+export function foldAllExcept(es: readonly Expr[], v: string, env: Record<string, number>): readonly Expr[] {
+  try {
+    return foldWith(es, v, env);
+  } catch {
+    return es;
+  }
+}
+
+function foldWith(es: readonly Expr[], v: string, env: Record<string, number>): Expr[] {
   const memo = new Map<Expr, Expr>();
   const value = (n: Expr): Expr | null => {
     try {
@@ -106,7 +132,7 @@ export function foldExcept(e: Expr, v: string, env: Record<string, number>): Exp
     memo.set(n, out);
     return out;
   };
-  return visit(e);
+  return es.map(visit);
 }
 
 /** Cells per side of the grid a filled parametric region is sampled on. */
