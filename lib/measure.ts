@@ -111,25 +111,37 @@ const hasList = (e: Expr, host: MeasureHost): boolean =>
  */
 export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { expr: Expr } | { arg: Expr } {
   // `{c1, c2: f}` in a reduction is f restricted to where c1 and c2 hold.
-  let condsRaw: Expr[] = [];
-  let valueRaw = raw;
-  if (raw.kind === 'piecewise' && !raw.otherwise && raw.cases.slice(0, -1).every(c => c.bare)) {
-    condsRaw = raw.cases.map(c => c.cond);
-    const lastCase = raw.cases[raw.cases.length - 1];
-    valueRaw = lastCase.bare ? num(1) : lastCase.value;
+  // (Written out, its conditions resolve one by one: an equation is a
+  // condition only here.)
+  let conds: Expr[] = [];
+  let value: Expr;
+  /** The argument as the list reduction takes it, when it is not a set. */
+  let resolved: () => Expr;
+  const filter = barePiecewise(raw);
+  if (filter) {
+    conds = filter.conds.map(c => host.resolve(c));
+    value = host.resolve(filter.value);
+    resolved = () => host.resolve(raw);
+  } else {
+    const whole = host.resolve(raw);
+    resolved = () => whole;
+    // Or handed back by a function: f(k) = {0 < x < k, x > 1/2: x} is the
+    // same filter in total(f(1)) as written out, since f(1) is its body.
+    const handed = barePiecewise(whole);
+    if (handed) conds = handed.conds;
+    value = handed ? handed.value : whole;
   }
-  let conds = condsRaw.map(c => host.resolve(c));
-  let value = host.resolve(valueRaw);
   // A lone filter's members are the members it keeps (docs/multisets.md §4):
   // count measures them; the other reductions take their values, so
   // total(0 < x < 1) is ∫₀¹ x dx, as total([1,2,3] < 3) is 1 + 2.
   let lone = false;
-  if (!condsRaw.length && (value.kind === 'eq' || value.kind === 'ineq')) {
+  const filtered = conds.length > 0;
+  if (!filtered && (value.kind === 'eq' || value.kind === 'ineq')) {
     conds = [value];
     value = num(1);
     lone = name !== 'count';
   }
-  if (condsRaw.length && (value.kind === 'eq' || value.kind === 'ineq')) {
+  if (filtered && (value.kind === 'eq' || value.kind === 'ineq')) {
     throw new Error('In {condition: value}, the value is a number to reduce; put every comparison before the colon.');
   }
   const whole = [...conds, value];
@@ -137,15 +149,16 @@ export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { exp
   for (const e of whole) for (const n of freeVars(e)) if (CONTINUOUS.includes(n) && !host.bound(n)) names.add(n);
   const hidden = whole.flatMap(e => intervalsIn(e)).filter((h, k, all) => all.findIndex(o => o.key === h.key) === k);
   if ((!names.size && !hidden.length) || whole.some(e => hasList(e, host))) {
-    return { arg: condsRaw.length ? host.resolve(raw) : conds.length ? conds[0] : value };
+    return { arg: filtered ? resolved() : conds.length ? conds[0] : value };
   }
   if (lone) {
-    if (names.size !== 1 || hidden.length) {
+    // One coordinate, x or an interval: its kept members are numbers.
+    if (names.size + hidden.length !== 1) {
       throw new Error(
         `The members of this filter are points, and ${name}(…) needs numbers — for its size, use count(…).`,
       );
     }
-    value = vr([...names][0]);
+    value = names.size ? vr([...names][0]) : hidden[0].node;
   }
   if (name === 'stdev' || name === 'median' || name === 'hist') {
     throw new Error(
@@ -167,6 +180,14 @@ export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { exp
   }
   const cs = conds.flatMap(c => comparisons(c));
   return { expr: reduceMeasure(name, cs, value, coords, host) };
+}
+
+/** `{c1, c2: f}` (or `{c1, c2}`, f = 1): conditions each written without a
+ *  value, then the value — or null for any other piecewise. */
+function barePiecewise(e: Expr): { conds: Expr[]; value: Expr } | null {
+  if (e.kind !== 'piecewise' || e.otherwise || !e.cases.slice(0, -1).every(c => c.bare)) return null;
+  const lastCase = e.cases[e.cases.length - 1];
+  return { conds: e.cases.map(c => c.cond), value: lastCase.bare ? num(1) : lastCase.value };
 }
 
 interface Comparison {
@@ -289,6 +310,13 @@ function constantsFor(es: readonly Expr[], coords: readonly string[], host: Meas
   for (const e of es) {
     for (const n of freeVars(e)) {
       if (coords.includes(n) || n === 'inf' || Object.hasOwn(env, n)) continue;
+      // A function's parameter (or a Σ index, an ∫ variable) has no value
+      // here, only a name — whatever a slider of that name holds.
+      if (host.bound(n)) {
+        throw new Error(
+          `${what} cannot follow ${n}: it is measured once, where it is written, not for each value of ${n}.`,
+        );
+      }
       const v = host.consts?.[n];
       if (v === undefined || !Number.isFinite(v)) {
         throw new Error(

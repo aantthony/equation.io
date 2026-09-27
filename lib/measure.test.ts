@@ -132,6 +132,39 @@ describe('slider-dependent measures', () => {
   });
 });
 
+// Code review (2026-09-27): what a reduction ranges over, when names are bound.
+describe('reductions and the names around them', () => {
+  it('a function’s parameter is its argument, never a slider of the same name', () => {
+    // It was read from the slider: f(9) was 2√2, the measure at a = 2.
+    const analysis = analyzeRows(['a = 2', 'f(a) = count({x^2 < a})', 'f(9)'], { readouts: true });
+    expect(analysis.rows[1].error).toMatch(/cannot follow a/);
+    expect(analysis.rows[2].error).toBeDefined();
+    // A closed form still follows its parameter.
+    expect(value(['a = 2', 'f(a) = total({0 < x < a: x})', 'f(3)'])).toBe(4.5);
+  });
+
+  it('a reduction inside ∫ … dx runs for each value of its variable', () => {
+    // It took x as a continuous set too, and diverged.
+    expect(value(['int[0..1] total({0 < u < 1: x u}) dx'])).toBe(0.25);
+    expect(value(['int[0..1] mean({0 < u < 1: x + u}) dx'])).toBe(1);
+    expect(value(['int[0..1] count({0 < u < x}) dx'])).toBeCloseTo(0.5, 6);
+  });
+
+  it('a filter a function hands back is the same filter as written out', () => {
+    expect(value(['total({0 < x < 1, x > 0.5: x})'])).toBe(0.375);
+    // f(1) is its body, so the reduction reads the same {c1, c2: f}.
+    expect(value(['f(k) = {0 < x < k, x > 0.5: x}', 'total(f(1))'])).toBe(0.375);
+  });
+
+  it('a lone filter over one interval keeps numbers, as one over u does', () => {
+    expect(value(['total(interval(1,3) < 2)'])).toBe(1.5);
+    expect(value(['mean(interval(1,3) < 2)'])).toBe(1.5);
+    expect(value(['total(u < 0.5)'])).toBe(0.125);
+    // Two coordinates keep points, which are not numbers.
+    expect(error(['total(x^2 + interval(0, 1)^2 < 1)'])).toMatch(/members of this filter are points/);
+  });
+});
+
 /** The number a readout row holds (throws its error). */
 function value(rows: string[]): number {
   const analysis = analyzeRows(rows, { readouts: true });

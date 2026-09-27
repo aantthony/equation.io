@@ -1384,7 +1384,7 @@ export function substIdx(e: Expr, idx: string, val: Expr): Expr {
     case 'piecewise':
       return {
         kind: 'piecewise',
-        cases: e.cases.map(c => ({ cond: substIdx(c.cond, idx, val), value: substIdx(c.value, idx, val) })),
+        cases: e.cases.map(c => ({ ...c, cond: substIdx(c.cond, idx, val), value: substIdx(c.value, idx, val) })),
         otherwise: e.otherwise && substIdx(e.otherwise, idx, val),
       };
     // A loop's params rebind inside its body: substitute in the seeds only.
@@ -1459,7 +1459,7 @@ export function foldNums(e: Expr, calls = false): Expr {
     case 'piecewise':
       return {
         kind: 'piecewise',
-        cases: e.cases.map(c => ({ cond: fold(c.cond), value: fold(c.value) })),
+        cases: e.cases.map(c => ({ ...c, cond: fold(c.cond), value: fold(c.value) })),
         otherwise: e.otherwise && fold(e.otherwise),
       };
     case 'loop':
@@ -1688,7 +1688,7 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
   // Resolve the body FIRST: a d/dt inside consumes its own dt, user
   // functions inline, and nested (parenthesized) integrals expand — only
   // then is the surviving d<letter> factor unambiguous.
-  const m = stripDx(rx(rawBody, ctx));
+  const m = stripDx(resolveIntegrand(rawBody, ctx));
   if (!m) throw new Error('∫ needs its variable as a dx factor: int(x^2 dx) or int[0..2] x^2 dx.');
   const v = m.v;
   const integrand = m.integrand;
@@ -1698,6 +1698,38 @@ function expandInt(bounds: [Expr, Expr] | null, rawBody: Expr, ctx: Ctx): Expr {
   const out = integral(integrand, v, lo, hi, ctx);
   // An enclosing integral's measure rides along: (∫ inner) · residual.
   return m.residual ? { kind: 'bin', op: '*', a: out, b: m.residual } : out;
+}
+
+const containsReduction = (e: Expr): boolean => isReductionCall(e) || childrenOf(e).some(containsReduction);
+
+/**
+ * An ∫ body, resolved with its variable bound: a reduction inside runs over
+ * its own continuous sets for each value of it, so ∫₀¹ total({0 < u < 1:
+ * x u}) dx is ∫₀¹ x/2 dx, not a total over every x as well. The variable is
+ * certain only once the body has resolved (see expandInt), so a body with a
+ * reduction is resolved again when the dx read off it first was not it.
+ */
+function resolveIntegrand(rawBody: Expr, ctx: Ctx): Expr {
+  if (!containsReduction(rawBody)) return rx(rawBody, ctx);
+  const bound = (v: string | undefined): Expr => {
+    if (!v) return rx(rawBody, ctx);
+    const saved = ctx.opts;
+    ctx.opts = { ...saved, params: new Set([...(saved.params ?? []), v]) };
+    try {
+      return rx(rawBody, ctx);
+    } finally {
+      ctx.opts = saved;
+    }
+  };
+  let guess: string | undefined;
+  try {
+    guess = stripDx(rawBody)?.v;
+  } catch {
+    guess = undefined;
+  }
+  const body = bound(guess);
+  const v = stripDx(body)?.v;
+  return v === guess ? body : bound(v);
 }
 
 /**
@@ -2042,9 +2074,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
             'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
           );
       }
+      // (A bare condition stays marked: a reduction reads {c1, c2: f} as a
+      // filter, and a function may hand one to it.)
       return {
         kind: 'piecewise',
-        cases: e.cases.map(c => ({ cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
+        cases: e.cases.map(c => ({ ...c, cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
         otherwise: e.otherwise && rx(e.otherwise, ctx),
       };
     case 'loop':
