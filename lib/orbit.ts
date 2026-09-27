@@ -11,6 +11,7 @@
 import type { Env } from './env.ts';
 import { type Expr, evaluate, freeVars, substVars } from './expr.ts';
 import { STEP } from './state.ts';
+import { isSysName } from './sys.ts';
 import { compileProg, run } from './vm.ts';
 
 /** State-steps one orbit may integrate (a step of every needed state). */
@@ -64,6 +65,9 @@ export function orbitInput(
     for (let depth = 0; depth <= moving.size; depth++) {
       const hit = [...freeVars(e)].filter(v => moving.has(v));
       if (!hit.length) return e;
+      // Inlined, sys.clock would be its rate alone — t, from 0 — not the time.
+      const sys = hit.find(isSysName);
+      if (sys) throw new Error(`An orbit runs in its own time from t = 0, so it cannot read ${sys}.`);
       e = substVars(e, Object.fromEntries(hit.map(v => [v, moving.get(v)!])));
     }
     throw new Error('An orbit cannot read a constant defined in terms of itself.');

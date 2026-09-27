@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { constsAnimated } from './defs.ts';
 import { emptyEnv, evaluateFrame } from './env.ts';
+import { orbitInput } from './orbit.ts';
 import { syntaxHelp } from './syntax-help.ts';
 import { setSysClock } from './sys.ts';
 
@@ -37,6 +38,28 @@ describe('sys values', () => {
   it('names the sys values when a row asks for one that does not exist', () => {
     expect(analyzeRows(['y = sys.time x']).rows[0].error).toBe(
       'sys.time is not a system value — there are sys.clock and sys.day.',
+    );
+  });
+
+  it('reads sys values written right after a number', () => {
+    const a = analyzeRows(['y = 2sys.clock x', 'y = x/2sys.day']);
+    expect(a.rows.map(r => r.error)).toEqual([undefined, undefined]);
+    expect(a.rows[0].cls?.params).toEqual(['sys.clock']);
+  });
+
+  it('refuses to set a sys value', () => {
+    expect(analyzeRows(['sys.clock = 5']).rows[0].error).toBe(
+      "sys.clock comes from the device's clock, so it cannot be set. Name your own value instead, like c = 5.",
+    );
+  });
+
+  it('keeps sys values out of orbits, which run in their own time from 0', () => {
+    const a = analyzeRows(["th' = sys.clock/100000 - th", 'th(0) = 1', 'th(0..10)']);
+    expect(a.rows.map(r => r.error).slice(0, 2)).toEqual([undefined, undefined]);
+    const { object } = a.rows[2].cls!;
+    if (object.kind !== 'orbit') throw new Error(`an orbit, not ${object.kind}`);
+    expect(() => orbitInput(a.defs, object.paths, object.series, 0, 10, a.constEnv)).toThrow(
+      'An orbit runs in its own time from t = 0, so it cannot read sys.clock.',
     );
   });
 

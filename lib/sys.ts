@@ -55,7 +55,9 @@ export const isSysName = (name: string): boolean => name.startsWith(SYS_PREFIX) 
 /** The current value of a sys name (`sys.clock`). */
 export const sysValue = (name: string): number => SYS[name.slice(4)].value(new Date(clock()));
 
-const MENTION = /\bsys\s*\.\s*([A-Za-z_]\w*)/g;
+/** No `\b` before sys: `2sys.clock` is 2 × sys.clock. A name ending in sys
+ *  (`abcsys.clock`) over-matches, which costs only a per-frame evaluation. */
+const MENTION = /sys\s*\.\s*([A-Za-z_]\w*)/g;
 
 /**
  * The constant definitions a document's rows call for: one per sys value
@@ -66,6 +68,13 @@ export function sysDefinitions(texts: Iterable<string>): Definition[] {
   const names = new Set<string>();
   for (const text of texts) for (const [, key] of text.matchAll(MENTION)) if (key in SYS) names.add(key);
   return [...names].sort().map(key => ({ kind: 'const', name: SYS_PREFIX + key, rhs: SYS[key].rate }));
+}
+
+/** The sys value a row tries to define (`sys.clock = 5`), or null. */
+export function sysDefinitionIssue(text: string): string | null {
+  const m = /^\s*sys\s*\.\s*([A-Za-z_]\w*)\s*=(?!=)/.exec(text);
+  if (!m || !(m[1] in SYS)) return null;
+  return `sys.${m[1]} comes from the device's clock, so it cannot be set. Name your own value instead, like c = 5.`;
 }
 
 /** Why `name` (under `sys.`) is not a sys value — or null when it is one or
