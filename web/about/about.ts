@@ -1,4 +1,5 @@
 import { landingForGroup } from '../../lib/landings.ts';
+import { initTheme, onThemeChange, theme, toggleTheme } from '../theme.ts';
 import { startHeroField } from './hero-field.ts';
 import { SHOWCASE, hashUrl, type ShowcaseItem } from './showcase.ts';
 
@@ -33,12 +34,27 @@ const anchor = (group: string) => group.toLowerCase().replace(/[^a-z0-9]+/g, '-'
 const orbit = item('orbiting-charge');
 const typed = document.getElementById('typed') as HTMLAnchorElement;
 typed.href = hashUrl(orbit.eqs);
-startHeroField({
+const hero = startHeroField({
   canvas: document.getElementById('field') as HTMLCanvasElement,
   clock: document.getElementById('clock')!,
   typed,
   rows: orbit.eqs,
 });
+
+// Theme: shares the app's saved choice. theme.ts only tints #theme-color with
+// the grapher's canvas color, so this page tints its own meta from --bg.
+const themeToggle = document.getElementById('theme-toggle') as HTMLButtonElement;
+const themeColor = document.querySelector('meta[name="theme-color"]');
+onThemeChange(() => {
+  const next = theme.dark ? 'light' : 'dark';
+  themeToggle.textContent = theme.dark ? '☀' : '☾';
+  themeToggle.setAttribute('aria-label', `Switch to ${next} mode`);
+  themeToggle.title = `Switch to ${next} mode`;
+  themeColor?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+  hero.restyle();
+});
+initTheme();
+themeToggle.addEventListener('click', toggleTheme);
 
 // Gallery, one numbered chapter per group.
 const gallery = document.getElementById('gallery')!;
