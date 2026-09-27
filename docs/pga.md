@@ -5,8 +5,10 @@ and R³ a value type. This adds the projective algebras Cl(2,0,1) and
 Cl(3,0,1) (PGA), so geometry is spelled with meet and join instead of
 hand-written formulas, and rigid motions compose and interpolate.
 
-Status: **proposed** — the decisions marked *open* need a call before
-phase 2.
+Status: **agreed 2026-09-27** — the three open questions below were
+settled as recommended: the algebra stays hidden behind meet/join,
+`line(A, B)` becomes a value (consistent with docs/multisets.md), and
+conformal GA is out of scope.
 
 ## Why
 
@@ -34,10 +36,10 @@ about any line in space, and slerp of motors interpolates a rigid motion.
 - **Geometric objects are values; the algebra stays underneath.** Users
   write points as the tuples they already are, and get lines and planes
   from constructors and from meet/join. The PGA element travels as an
-  internal `[pga]` node (like `[mv]`) tagged with what it is. *Open:*
-  whether to also expose the degenerate basis (`e_0`, `e_0x`, …) for
-  people who want to compute in PGA directly. Recommendation: not in the
-  first phase; the names clash with nothing and can be added later.
+  internal `[pga]` node (like `[mv]`) tagged with what it is. *Decided:*
+  the degenerate basis (`e_0`, `e_0x`, …) is not exposed yet; the names
+  clash with nothing and can be added later for people who want to
+  compute in PGA directly.
 - **Points stay tuples.** A 2D or 3D point converts to a PGA point on
   entry, and a finite PGA point converts back to a tuple, so every
   existing construction (`midpoint`, `polygon`, dragging) keeps working on
@@ -45,9 +47,10 @@ about any line in space, and slerp of motors interpolates a rigid motion.
 - **`line(A, B)` becomes a line value that draws exactly as today.** In
   the plane it still renders as the implicit line; the change is that it
   can now be named and passed to meet, distance and reflect. In space it
-  becomes possible at all (drawn as a segment across the view box). *Open:*
-  confirm this is acceptable — old links draw identically, but
-  `line(A, B)` inside arithmetic changes from an error to a value.
+  becomes possible at all (drawn as a segment across the view box).
+  *Decided:* old links draw identically, and `line(A, B)` inside
+  arithmetic changes from an error to a value — under the multiset rules
+  below.
 - **New constructors:** `plane(A, B, C)`, `plane(P, n)` (through P,
   normal n), `line(P, v)`… is ambiguous with `line(A, B)`, so a direction
   line is `line(P, dir(v))` or simply `join(P, P + v)`; recommendation:
@@ -58,9 +61,37 @@ about any line in space, and slerp of motors interpolates a rigid motion.
   if the algebra is exposed (see above).
 - **Ideal elements draw as nothing and read out as a direction:**
   `meet` of parallel lines `= at infinity, direction (1, 2)`.
-- **CGA is out of scope** for this plan (circles and spheres through
-  points, inversion — Cl(4,1), 32 coefficients). PGA covers flats; round
-  objects keep `circle(A, r)`. Revisit after PGA ships.
+- **CGA is out of scope** (*decided*) for this plan (circles and spheres
+  through points, inversion — Cl(4,1), 32 coefficients). PGA covers flats;
+  round objects keep `circle(A, r)`. Revisit after PGA ships.
+
+## Consistency with the multiset foundation (docs/multisets.md)
+
+Lines and planes are values like any other, so every rule there applies
+unchanged; phase 2 and 3 tests pin each one.
+
+- **Names are identical, literals separate (§1).** With `P = [A, B]`,
+  `join(P, C)` is two lines, and `L = join(P, C); meet(L, L)` pairs each
+  line with itself (two lines back), never the four cross pairs;
+  `meet(join(P, C), join(P, D))` crosses its separate literals as §1 says.
+- **A multiset argument broadcasts** like any other: `meet(L, H)` for a
+  line and a family of planes `H` is the multiset of crossing points,
+  drawn as dots and reducible (`mean(meet(L, H))`, `count(…)`).
+- **Drawn as its values (§5).** A line or plane has no x, y or z, so a row
+  holding one draws it — the set of points it is — rather than being
+  drawn per pixel as a filter. In the plane that picture is produced by
+  the implicit-line shader, as today; that is a renderer detail, not a
+  change of kind, so `L = line(A, B)` and `line(A, B)` draw the same.
+- **A value means the same inside a figure and out (§9).** `polyline`,
+  `polygon` and friends consume the tuples a finite meet converts to;
+  a line or plane handed to a figure is an error that says what it is,
+  as a matrix handed to a scalar function is.
+- **Order lives in tuples (§3).** `join(A, B, C)` takes its points in
+  order (the plane's orientation, hence the sign of a signed distance),
+  so it takes separate arguments or a tuple, never a bracket.
+- **Ideal points are values too.** Parallel lines meet at an ideal point,
+  which a multiset holds like any other element; it draws nothing and
+  reads out as a direction, and `count` includes it.
 
 ## Algebra (lib/pga.ts)
 
