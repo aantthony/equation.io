@@ -19,9 +19,9 @@ export interface Theme {
   gridMinor: RGB;
   gridMajor: RGB;
   axis: RGB;
-  /** 3D reference-plane grid line color, and how strongly its grid lines
-   *  (not its axes) are drawn: dark lines on white need half the weight of
-   *  light lines on dark to sit as far back. */
+  /** 3D reference-plane grid line color, and how strongly its lines and
+   *  axes are drawn: dark lines on white need half the weight of light lines
+   *  on dark to sit as far back. */
   plane: RGB;
   planeGrid: number;
   /** Overlay canvas: axis numerals / labels. */
