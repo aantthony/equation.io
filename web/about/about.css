@@ -22,6 +22,8 @@
   --line-2: rgba(255, 255, 255, 0.16);
   --gold: #f0ad5c;
   --gold-hi: #f8d58c;
+  /* The intent landing pages import this sheet and still say --accent. */
+  --accent: var(--gold);
   --copper: #d4735a;
   --display: 'Archivo Variable', 'Arial Black', system-ui, sans-serif;
   --serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
