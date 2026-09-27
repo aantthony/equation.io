@@ -159,10 +159,6 @@ type ExprNode =
  *  identifier, so no document name or builtin can collide with it. */
 export const INTERVAL = '[interval]';
 
-/** hamiltonian(H) once resolved: H, then its flow (∂H/∂y, −∂H/∂x), which
- *  classify draws as streamlines over the level sets of H. */
-export const HAMILTONIAN = '[hamiltonian]';
-
 /** The self-call inside a `loop` body: its args are the next pass's params. */
 export const RECUR = '@recur';
 /** Passes a tail-recursive function may take before it is undefined. Enough
@@ -341,13 +337,12 @@ export const FUNCTIONS = new Set([
   'laplacian',
   'jacobian',
   'hessian',
-  // The differential geometry of a curve in u (see curves.ts), and a
-  // Hamiltonian's flow, expanded the same way.
+  // The differential geometry of a curve in u (see curves.ts), expanded the
+  // same way.
   'curvature',
   'torsion',
   'osculating',
   'frame',
-  'hamiltonian',
   // Whole-expression plot modes (see classify): domain coloring, conformal
   // grids, escape-time iteration, swept tubes, motion trails, and surfaces
   // of revolution.
@@ -415,7 +410,6 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'torsion',
   'osculating',
   'frame',
-  'hamiltonian',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */

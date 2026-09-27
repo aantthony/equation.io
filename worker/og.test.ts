@@ -181,11 +181,7 @@ describe('og raster renderer', () => {
     expect(pixel(r, 80, 80)[0]).toBeGreaterThan(200);
   });
 
-  it('draws a Hamiltonian flow with the level sets it runs along', () => {
-    const view = 'view(x = -7..7, y = -4..4)';
-    const field = inkFraction(renderRaster([view, '(y, -sin(x))'], 200, 120));
-    const flow = inkFraction(renderRaster([view, 'hamiltonian(y^2/2 - cos(x))'], 200, 120));
-    expect(flow).toBeGreaterThan(field + 0.02);
+  it('draws eigen(M) as its invariant lines', () => {
     expect(canRenderOg(['eigen(((2, 1), (1, 2)))'])).toBe(true);
     // Its invariant lines are long segments, clipped to the frame: y = x
     // reaches the corner of the view.

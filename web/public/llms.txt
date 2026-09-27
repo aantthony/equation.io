@@ -141,8 +141,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   the grid; and `isprime(n)`, 1 for a prime and 0 otherwise
   (`a_n = isprime(n)`), which gives no value past 2048² − 1 rather than
   guess. Vector calculus has `grad`, `div`, `curl`, `laplacian`, `jacobian`
-  and `hessian`, the geometry of a curve `curvature`, `torsion`,
-  `osculating` and `frame`, and mechanics `hamiltonian` (all below).
+  and `hessian`, and the geometry of a curve `curvature`, `torsion`,
+  `osculating` and `frame` (all below).
   Function names are
   case-insensitive: `Sin(x)`, `SQRT(x)` and `sin(x)` are the same call. Always
   use parentheses for arguments — write `sin(x)`, not `sin x`.
@@ -622,16 +622,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   field (1, f); a system `(x', y') = (y, -sin(x))` plots its phase portrait.
   (Primes on x/y/z mean this. A prime on a name of your own is a state — see
   below — so `y' = -y` is a slope field while `th' = -th` is a simulation.)
-- Hamiltonian flow: `hamiltonian(H)` takes H(x, y) with x the position q
-  and y the momentum p — the same axes as the phase portrait
-  `(x', y') = (y, -sin(x))` — and draws the flow q′ = ∂H/∂p, p′ = −∂H/∂q
-  as streamlines, with the level sets of H — the orbits, which the flow runs
-  along (energy is conserved) — drawn over them in a darker ink, spaced by
-  H's values at its wells and saddles. The separatrices, the levels through
-  its saddles, are drawn bolder. `hamiltonian(y^2/2 - cos(x))` is the
-  pendulum: closed orbits inside the separatrix, rotations outside. Sliders work
-  (`hamiltonian(y^2/2 + k x^2/2)`), and so does a named `H(x, y) = …`.
-  Write q as x and p as y; H may not use z, u or v.
+  A system that conserves an energy H(x, y) flows along its level sets, so
+  a row `H = c` draws an orbit: beside the pendulum `(x', y') = (y, -sin(x))`,
+  `y^2/2 - cos(x) = 1` is its separatrix, the level through the saddles at
+  ±π, with swinging inside and spinning outside.
 - Random variable: `X ~ Normal(mean, sd)` declares X and plots its density
   curve. Parameters may use sliders and t, so `X ~ Normal(0, a)` follows the
   slider live.

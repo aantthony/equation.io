@@ -37,7 +37,6 @@ import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import {
   FUNCTIONS,
   GREEK_NAME_CHARS,
-  HAMILTONIAN,
   NAME_SRC,
   SHADOWABLE_FNS,
   SUM_MAX_TERMS,
@@ -1345,28 +1344,6 @@ function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   return u0 ? substVars(along, { u: u0 }) : along;
 }
 
-/**
- * hamiltonian(H): the flow of H(x, y), with x the position q and y the
- * momentum p — q′ = ∂H/∂p, p′ = −∂H/∂q — as the internal call classify
- * draws: the flow as streamlines over the level sets of H, along which it
- * runs (lib/plot.ts).
- */
-function hamiltonianFlow(args: readonly Expr[], ctx: Ctx): Expr {
-  const usage = 'hamiltonian takes H in x (the position q) and y (the momentum p), like hamiltonian(y^2/2 - cos(x)).';
-  if (args.length !== 1) throw new Error(usage);
-  const H = vectorOperand('hamiltonian', args[0], ctx);
-  if (H.kind === 'vec' || H.kind === 'list' || H.kind === 'eq' || H.kind === 'ineq') throw new Error(usage);
-  const vars = freeVars(H);
-  if (vars.has('z') || vars.has('u') || vars.has('v')) throw new Error(usage);
-  if (!vars.has('x') && !vars.has('y')) {
-    // q and p are the textbook names, but the plane's axes are x and y.
-    if (vars.has('q') || vars.has('p')) throw new Error(`Write q as x and p as y: ${usage}`);
-    throw new Error(`H is constant, so nothing flows. ${usage}`);
-  }
-  const d = (v: string) => applyDiff(H, v, 1, ctx.opts, ctx.getFn);
-  return { kind: 'call', name: HAMILTONIAN, args: [H, d('y'), neg(d('x'))] };
-}
-
 interface StripDx {
   v: string;
   integrand: Expr;
@@ -2160,7 +2137,6 @@ function rx(e: Expr, ctx: Ctx): Expr {
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
-      if (e.name === 'hamiltonian') return hamiltonianFlow(args, ctx);
       // Keyed by the source node: a function body inlined twice holds the
       // same literal, and `f(interval(0, 1))` hands one to every use of x.
       if (e.name === 'interval') return hiddenInterval(e, args);

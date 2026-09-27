@@ -744,24 +744,6 @@ function renderRow2D(
       return;
     }
     case 'vfield2d': {
-      // A Hamiltonian flow's level sets of H, which its arrows run along:
-      // evenly spaced values across the middle of what the frame shows.
-      if (cpu.levels) {
-        const H = sampleField(r, v, compile(cpu.levels.expr), env);
-        const seen = [...H].filter(Number.isFinite).sort((a, b) => a - b);
-        if (seen.length) {
-          const lo = seen[Math.floor(seen.length * 0.02)];
-          const hi = seen[Math.floor(seen.length * 0.98)];
-          for (let k = 1; k < 12 && hi > lo; k++) {
-            const c = lo + ((hi - lo) * k) / 12;
-            strokeZeroSet(
-              r,
-              H.map(value => value - c),
-              color,
-            );
-          }
-        }
-      }
       const progs = cpu.comps.map(compile);
       for (let sy = 12; sy < r.h; sy += 22)
         for (let sx = 12; sx < r.w; sx += 22) {

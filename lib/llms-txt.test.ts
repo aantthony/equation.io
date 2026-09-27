@@ -99,13 +99,11 @@ describe('llms.txt', () => {
         'note',
       ],
       [[], 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', 'curve'],
-      // Curves, Hamiltonian flows and eigenvectors.
+      // Curves and eigenvectors.
       [[], 'curvature((u, u^2), 0)', 'value'],
       [['C = (2cos(u), sin(u))'], '(u, curvature(C))', 'curve'],
       [['C = (2cos(u), sin(u))'], 'frame(C, t)', 'family'],
       [['C = (2cos(u), sin(u))'], 'osculating(C, t)', 'curve'],
-      [[], 'hamiltonian(y^2/2 - cos(x))', 'vector-field'],
-      [['k = 1'], 'hamiltonian(y^2/2 + k x^2/2)', 'vector-field'],
       [[], 'eigen(((2, 1), (1, 2)))', 'family'],
       // A tuple of rows is a matrix; a bracket of tuples is points.
       [[], '((0, -1), (1, 0)) (2, 1)', 'point'],
