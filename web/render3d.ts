@@ -10,9 +10,9 @@
 import { arrowConeInstances, buildUnitCone } from '../lib/cone.ts';
 import { finiteRuns } from '../lib/curve3d.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
-import { ProgramCache, QUAD_VERT, compileProgram } from './gl.ts';
+import { type Frame, ProgramCache, QUAD_VERT, compileProgram } from './gl.ts';
 import { type Mat4, invert, lookAt, multiply, perspective } from './mat4.ts';
-import { drawTextLabel, niceSpacing, paramDecls } from './render2d.ts';
+import { type OverlayBox, beginOverlay, drawTextLabel, niceSpacing, paramDecls } from './render2d.ts';
 import { glslVec3, theme } from './theme.ts';
 import { RetainedGeometry } from './retained-geometry.ts';
 
@@ -70,6 +70,7 @@ const MARCH_COMMON = `
 uniform mat4 uInvVP;
 uniform mat4 uVP;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform float uBoxR;
 uniform float t;
 
@@ -148,7 +149,7 @@ float F(vec3 p) {
 ${gradFn}
 
 void main() {
-  vec2 ndc = (gl_FragCoord.xy / uRes) * 2.0 - 1.0;
+  vec2 ndc = ((gl_FragCoord.xy - uOrigin) / uRes) * 2.0 - 1.0;
   vec3 ro = unproject(vec3(ndc, -1.0));
   vec3 far = unproject(vec3(ndc, 1.0));
   vec3 rd = normalize(far - ro);
@@ -531,7 +532,7 @@ float lineAlpha(float coord, float spacing, float halfWidth) {
 }
 
 void main() {
-  vec2 ndc = (gl_FragCoord.xy / uRes) * 2.0 - 1.0;
+  vec2 ndc = ((gl_FragCoord.xy - uOrigin) / uRes) * 2.0 - 1.0;
   vec3 ro = unproject(vec3(ndc, -1.0));
   vec3 far = unproject(vec3(ndc, 1.0));
   vec3 rd = normalize(far - ro);
@@ -880,12 +881,12 @@ export class Renderer3D {
     gl.bindVertexArray(null);
   }
 
-  render(cam: Camera3D, scene: Scene3D, time = 0, env: Record<string, number> = {}): void {
+  render(cam: Camera3D, scene: Scene3D, time = 0, env: Record<string, number> = {}, frame: Frame = {}): void {
     const surfaces = scene.implicits;
     const { gl } = this;
-    const w = gl.drawingBufferWidth;
-    const h = gl.drawingBufferHeight;
-    gl.viewport(0, 0, w, h);
+    const { x: ox, y: oy, w, h } = frame.vp ?? { x: 0, y: 0, w: gl.drawingBufferWidth, h: gl.drawingBufferHeight };
+    const grid = frame.grid ?? 'on';
+    gl.viewport(ox, oy, w, h);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
     gl.enable(gl.BLEND);
@@ -902,6 +903,8 @@ export class Renderer3D {
       if (inv) gl.uniformMatrix4fv(inv, false, invVp);
       const res = gl.getUniformLocation(prog, 'uRes');
       if (res) gl.uniform2f(res, w, h);
+      const origin = gl.getUniformLocation(prog, 'uOrigin');
+      if (origin) gl.uniform2f(origin, ox, oy);
       const box = gl.getUniformLocation(prog, 'uBoxR');
       if (box) gl.uniform1f(box, boxR);
       const tLoc = gl.getUniformLocation(prog, 't');
@@ -915,10 +918,12 @@ export class Renderer3D {
     };
 
     // Axes lines.
-    setCommon(this.axesProgram);
-    gl.bindVertexArray(this.axesVao);
-    gl.drawArrays(gl.LINES, 0, 6);
-    gl.bindVertexArray(null);
+    if (grid !== 'off') {
+      setCommon(this.axesProgram);
+      gl.bindVertexArray(this.axesVao);
+      gl.drawArrays(gl.LINES, 0, 6);
+      gl.bindVertexArray(null);
+    }
 
     for (const s of surfaces) {
       let prog: WebGLProgram;
@@ -1102,14 +1107,22 @@ export class Renderer3D {
 
     // Reference grid plane at z=0, last and without writing depth so its
     // translucent lines never occlude surfaces.
-    const spacing = niceSpacing(boxR / 300, 60);
-    const plane = this.cache.get(QUAD_VERT, planeFrag());
-    setCommon(plane);
-    gl.uniform1f(gl.getUniformLocation(plane, 'uMajor'), spacing.major);
-    gl.uniform1f(gl.getUniformLocation(plane, 'uMinor'), spacing.minor);
-    gl.depthMask(false);
-    this.quad.draw();
-    gl.depthMask(true);
+    if (grid === 'on') {
+      const spacing = niceSpacing(boxR / 300, 60);
+      const plane = this.cache.get(QUAD_VERT, planeFrag());
+      setCommon(plane);
+      gl.uniform1f(gl.getUniformLocation(plane, 'uMajor'), spacing.major);
+      gl.uniform1f(gl.getUniformLocation(plane, 'uMinor'), spacing.minor);
+      gl.depthMask(false);
+      this.quad.draw();
+      gl.depthMask(true);
+    }
+  }
+
+  /** Free retained geometry no render drew since the last call. Once per
+   *  frame, after every panel has rendered: a split view renders several
+   *  scenes a frame, and each must keep the others' meshes. */
+  endFrame() {
     this.geometry.endFrame();
   }
 }
@@ -1121,19 +1134,20 @@ export function drawLabels3D(
   dpr: number,
   points: Scene3D['points'] = [],
   texts: NonNullable<Scene3D['texts']> = [],
+  box?: OverlayBox,
+  axes = true,
 ): void {
-  const w = ctx.canvas.width / dpr;
-  const h = ctx.canvas.height / dpr;
-  ctx.save();
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
+  const { w, h } = beginOverlay(ctx, dpr, box);
   const { vp } = cameraMatrices(cam, w / h);
   const boxR = cameraBoxR(cam);
   ctx.font = 'italic 13px ui-sans-serif, system-ui';
-  const labels: Array<[string, number[], string]> = [
+  const axisLabels: Array<[string, number[], string]> = [
     ['x', [boxR * 1.04, 0, 0], '#a44'],
     ['y', [0, boxR * 1.04, 0], '#4a4'],
     ['z', [0, 0, boxR * 1.04], '#46a'],
+  ];
+  const labels: Array<[string, number[], string]> = [
+    ...(axes ? axisLabels : []),
     ...points
       .filter(p => p.label)
       .map(

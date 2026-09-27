@@ -9,6 +9,17 @@ import { withHelpers } from '../lib/glsl.ts';
 export const glStats = { compiles: 0 };
 (globalThis as { __glStats?: typeof glStats }).__glStats = glStats;
 
+/**
+ * Where a renderer draws: a panel's box in device pixels, from the bottom-left
+ * corner as GL counts, and how much of the grid goes behind its plots
+ * (lib/panels.ts GridRowSpec). Fragment shaders subtract the box's corner from
+ * gl_FragCoord (uOrigin), so every field maps pixels to math inside its panel.
+ */
+export interface Frame {
+  vp?: { x: number; y: number; w: number; h: number };
+  grid?: 'on' | 'off' | 'axes';
+}
+
 export function compileProgram(gl: WebGL2RenderingContext, vert: string, frag: string): WebGLProgram {
   glStats.compiles++;
   const compile = (type: number, src: string) => {

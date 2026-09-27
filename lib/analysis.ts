@@ -57,6 +57,7 @@ import { buildStateSystem, initialState } from './state.ts';
 import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
+import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 
 export interface RowSource {
   id?: string | number;
@@ -154,6 +155,11 @@ export interface Analysis {
   document: PreparedDocument;
 }
 
+/** A viewport row by its text: a `---` divider, or a view/camera/grid call
+ *  that is not the definition of a function by that name (`grid(x) = …`). */
+export const isViewportText = (text: string): boolean =>
+  isDividerRow(text) || (/^(view|camera|grid)\s*\(/i.test(text) && !scanDefinition(text));
+
 /** No source splitting here: one input row remains one result, including blanks. */
 export function prepareDocument(
   sources: readonly (string | RowSource)[],
@@ -173,7 +179,7 @@ export function prepareDocument(
       ? 'blank'
       : source.text.startsWith('#')
         ? 'comment'
-        : /^(view|camera)\s*\(/i.test(source.text)
+        : isViewportText(source.text)
           ? 'viewport'
           : seqScans[i]
             ? 'sequence'
@@ -599,6 +605,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     );
 
   const seenViewKinds = new Set<string>();
+  let panel = 0;
   for (const [ri, row] of rows.entries()) {
     if (row.def && !row.error && defs.pointDims.get(row.def.name) === 3) {
       const comps = compsOf(defs, row.def.name)!;
@@ -611,9 +618,25 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     try {
       const badRow = badTableRow(row.text);
       if (badRow) throw new Error(badRow);
-      const view = parseViewRow(row.text, ropts.consts!);
+      // A call to the user's own view/camera/grid function is theirs.
+      const head = /^\s*(view|camera|grid)\s*\(/.exec(row.text);
+      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!);
       if (view) {
-        if (seenViewKinds.has(view.kind)) throw new Error(`${view.kind} is already set by another row.`);
+        // Each panel frames itself: a divider starts a fresh set.
+        if (view.kind === 'split') {
+          if (++panel >= MAX_PANELS) throw new Error(`A graph splits into at most ${MAX_PANELS} panels.`);
+          seenViewKinds.clear();
+        } else if (seenViewKinds.has(view.kind)) {
+          throw new Error(
+            `${view.kind} is already set by another row${panel ? ' in this panel' : ''}` +
+              (panel ? '.' : ' — a --- row starts a new panel with its own.'),
+          );
+        }
+        if (view.kind === 'grid')
+          for (const name of view.coords ?? []) {
+            const problem = gridCoordinateProblem(name, gridFields, defs.fields);
+            if (problem) throw new Error(problem);
+          }
         seenViewKinds.add(view.kind);
         row.view = view;
         continue;

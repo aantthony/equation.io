@@ -43,6 +43,7 @@ export interface SyntaxHelp {
 
 const signatures: Record<string, [string, string]> = {
   view: ['view(x = lo..hi, y = lo..hi, ratio = 1)', 'Frame the graph; ratio is pixels per y unit / pixels per x unit'],
+  grid: ['grid(off | axes | r, theta)', "What draws behind the panel's plots: nothing, the axes, or named coordinates"],
   sin: ['sin(x)', 'Sine; angles in radians'],
   cos: ['cos(x)', 'Cosine; angles in radians'],
   tan: ['tan(x)', 'Tangent; angles in radians'],

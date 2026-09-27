@@ -15,6 +15,7 @@
  * so `pi` and defined constants work; callers evaluate at t = 0.
  */
 import { evaluate, parseExpr } from './expr.ts';
+import { type GridRowSpec, type SplitSpec, parseDividerRow, parseGridRow } from './panels.ts';
 
 export interface View2DSpec {
   kind: 'view';
@@ -23,6 +24,8 @@ export interface View2DSpec {
   /** [lo, hi] of the axis, when given. At least one axis is always present. */
   x?: [number, number];
   y?: [number, number];
+  /** Pinned: pointer gestures leave this panel's window where the row puts it. */
+  locked?: boolean;
 }
 
 export interface Camera3DSpec {
@@ -35,9 +38,13 @@ export interface Camera3DSpec {
   /** Keeps the camera orbiting about the vertical axis, radians per second.
    *  theta is where the orbit starts; the row does not change as it turns. */
   spin?: number;
+  /** Pinned: dragging orbits nothing; the camera stays where the row aims it. */
+  locked?: boolean;
 }
 
-export type ViewSpec = View2DSpec | Camera3DSpec;
+/** Viewport rows: the framing rows, plus the split-view rows of lib/panels.ts
+ *  (a `---` divider, a `grid(…)`), which are document structure the same way. */
+export type ViewSpec = View2DSpec | Camera3DSpec | SplitSpec | GridRowSpec;
 
 const HEAD_RE = /^\s*(view|camera)\s*\(([\s\S]*)\)\s*$/;
 
@@ -101,12 +108,21 @@ function num(src: string, env: Record<string, number>, what: string): number {
  * when it is one but malformed. `env` supplies constant values (t = 0).
  */
 export function parseViewRow(text: string, env: Record<string, number>): ViewSpec | null {
+  const split = parseDividerRow(text);
+  if (split) return split;
+  const grid = parseGridRow(text);
+  if (grid) return grid;
   const m = HEAD_RE.exec(text);
   if (!m) return null;
   const args = splitArgs(m[2]);
+  // A bare `locked` pins the panel; it may sit anywhere among the arguments.
+  const lockAt = args.findIndex(a => /^locked$/i.test(a));
+  const locked = lockAt >= 0;
+  if (locked) args.splice(lockAt, 1);
   if (m[1] === 'view') {
-    const usage = 'Expected view(x = lo..hi, y = lo..hi, ratio = 1) — either axis alone works.';
+    const usage = 'Expected view(x = lo..hi, y = lo..hi, ratio = 1, locked) — either axis alone works.';
     const spec: View2DSpec = { kind: 'view' };
+    if (locked) spec.locked = true;
     if (!args.length || args.length > 3) throw new Error(usage);
     for (const arg of args) {
       const named = /^([A-Za-z]\w*)\s*=\s*([\s\S]+)$/.exec(arg);
@@ -130,7 +146,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
     if (!spec.x && !spec.y) throw new Error(usage);
     return spec;
   }
-  const usage = 'Expected camera(theta, phi, radius?, (x, y, z)?, spin = rate?) — angles in radians.';
+  const usage = 'Expected camera(theta, phi, radius?, (x, y, z)?, spin = rate?, locked?) — angles in radians.';
   // spin = … is named and comes last, so the positional arguments keep their meaning.
   const spinArg = args.length && /^\s*spin\s*=([\s\S]*)$/.exec(args[args.length - 1]);
   if (spinArg) args.pop();
@@ -140,6 +156,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
     theta: num(args[0], env, 'camera theta'),
     phi: num(args[1], env, 'camera phi'),
   };
+  if (locked) spec.locked = true;
   for (const arg of args.slice(2)) {
     let parsed;
     try {
@@ -224,8 +241,18 @@ function fmtRange(lo: number, hi: number): string {
 }
 
 /** Serialize the visible window back into row text (the writeback half). */
-export function formatViewRow(x0: number, x1: number, y0: number, y1: number, ratio = 1): string {
-  return `view(x = ${fmtRange(x0, x1)}, y = ${fmtRange(y0, y1)}${ratio === 1 ? '' : `, ratio = ${fmt(ratio)}`})`;
+export function formatViewRow(x0: number, x1: number, y0: number, y1: number, ratio = 1, locked = false): string {
+  return formatViewSpec({ x: [x0, x1], y: [y0, y1], ratio, locked });
+}
+
+/** A view row naming only some axes: a panel sharing x with another frames y alone. */
+export function formatViewSpec(spec: Omit<View2DSpec, 'kind'>): string {
+  const parts: string[] = [];
+  if (spec.x) parts.push(`x = ${fmtRange(...spec.x)}`);
+  if (spec.y) parts.push(`y = ${fmtRange(...spec.y)}`);
+  if (spec.ratio !== undefined && spec.ratio !== 1) parts.push(`ratio = ${fmt(spec.ratio)}`);
+  if (spec.locked) parts.push('locked');
+  return `view(${parts.join(', ')})`;
 }
 
 export function formatCameraRow(c: {
@@ -234,6 +261,7 @@ export function formatCameraRow(c: {
   radius: number;
   target: [number, number, number];
   spin?: number;
+  locked?: boolean;
 }): string {
   // A spun or eased camera accumulates turns and float dust: write the angle
   // it shows, in (-pi, pi], and 0 for 0.
@@ -244,6 +272,7 @@ export function formatCameraRow(c: {
   if (target.some(v => v !== 0)) parts.push(`(${target.map(v => fmt(v)).join(', ')})`);
   const spin = clean(c.spin ?? 0);
   if (spin) parts.push(`spin = ${fmt(spin)}`);
+  if (c.locked) parts.push('locked');
   return `camera(${parts.join(', ')})`;
 }
 
@@ -265,4 +294,61 @@ export function scaleViewAt(
     upp,
     ratio: upp / uppY,
   };
+}
+
+/** A 2D window: center, math units per pixel across, and pixels per y unit
+ *  over pixels per x unit (web/render2d.ts View2D). */
+export interface Window2D {
+  cx: number;
+  cy: number;
+  upp: number;
+  ratio?: number;
+}
+
+const uppY = (v: Window2D) => v.upp / (v.ratio ?? 1);
+
+/**
+ * A panel's window with its shared axes taken from the panels that own them
+ * (`from.x`, `from.y`; see lib/panels.ts linkRoot). Sharing x shares the center and the
+ * units per pixel across, and the panel keeps its own ratio, so zooming one
+ * zooms the other's y by the same factor; sharing y is the transpose. Sharing
+ * both takes the whole window.
+ */
+export function linkedWindow(
+  own: Window2D,
+  shared: { x: boolean; y: boolean },
+  from: { x?: Window2D; y?: Window2D },
+): Window2D {
+  const x = shared.x ? from.x : undefined;
+  const y = shared.y ? from.y : undefined;
+  if (x && y) return { cx: x.cx, cy: y.cy, upp: x.upp, ratio: x.upp / uppY(y) };
+  if (x) return { ...own, cx: x.cx, upp: x.upp };
+  if (y) return { ...own, cy: y.cy, upp: uppY(y) * (own.ratio ?? 1) };
+  return { ...own };
+}
+
+/**
+ * The window a panel's view row asks for, given the window its shared axes
+ * already put it in (`linked`, from linkedWindow). A panel sharing x frames
+ * y alone — the row's y range fits the panel exactly, through its ratio —
+ * and one sharing y frames x alone. One sharing both has nothing to frame.
+ */
+export function fitPanelWindow(
+  spec: View2DSpec,
+  w: number,
+  h: number,
+  shared: { x: boolean; y: boolean },
+  linked: Window2D,
+): Window2D {
+  if (shared.x && shared.y) return { ...linked };
+  if (shared.x) {
+    if (!spec.y) return { ...linked };
+    return { ...linked, cy: (spec.y[0] + spec.y[1]) / 2, ratio: linked.upp / ((spec.y[1] - spec.y[0]) / h) };
+  }
+  if (shared.y) {
+    if (!spec.x) return { ...linked };
+    const upp = (spec.x[1] - spec.x[0]) / w;
+    return { ...linked, cx: (spec.x[0] + spec.x[1]) / 2, upp, ratio: upp / uppY(linked) };
+  }
+  return { ratio: 1, ...fitView2D(spec, w, h) };
 }
