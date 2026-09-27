@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
-import { evaluate, type Expr } from './expr.ts';
+import { curvatureOf, torsionOf } from './curves.ts';
+import { diff } from './diff.ts';
+import { evaluate, type Expr, parseExpr } from './expr.ts';
 import { foldAllExcept } from './path.ts';
 import { plotReadout } from './plot.ts';
 import { countNodes, exceedsNodes } from './size.ts';
@@ -103,6 +105,32 @@ describe('curvature', () => {
     expect(evaluate(o.source.coordinates[1], { ...env, u: 0 })).toBeCloseTo(2);
     expect(evaluate(o.source.coordinates[1], { ...env, u: Math.PI / 2 })).toBeCloseTo(0.25);
   });
+  it('is undefined on the GPU where the curve is straight', () => {
+    const rows = ['C = (u, {u < 0.5: 0, (u - 0.5)^3}, u^2)', 'y = torsion(C, x)'];
+    const r = analyzeRows(rows, { backend: 'gpu' }).rows.at(-1)!;
+    expect(r.error).toBeUndefined();
+    const glsl = JSON.stringify(r.gpu);
+    // GLSL leaves sqrt of a negative undefined (ANGLE folds sqrt(-1.0) to
+    // 0): the gate is an even root, which eq_pow makes EQ_NAN.
+    expect(glsl).not.toMatch(/sqrt\(sign/);
+    expect(glsl).toMatch(/eq_pow\(sign\(/);
+  });
+  it('plots along u inside any curve in u, and in a tube', () => {
+    const C = 'C = (2cos(2pi u), sin(2pi u))';
+    expect(error([C, '2(u, curvature(C))'])).toBeUndefined();
+    expect(error([C, '(u, 0) + (0, curvature(C))'])).toBeUndefined();
+    const helix = 'C = (cos(2pi u), sin(2pi u), u)';
+    expect(error([helix, 'tube((u, curvature(C), torsion(C)))'])).toBeUndefined();
+  });
+  it('says how to plot κ named as a function of u', () => {
+    const C = 'C = (2cos(2pi u), sin(2pi u))';
+    expect(error([C, 'k(u) = curvature(C, u)', 'k(u)'])).toMatch(/\(u, curvature\(C\)\)/);
+    expect(error([C, 'k(u) = curvature(C, u)', '(u, k(u))'])).toBeUndefined();
+  });
+  it('says what a name that is no curve is', () => {
+    expect(error(['a = 2', 'curvature(a)'])).toMatch(/a is a number, not a curve in u/);
+    expect(error(['s = [1, 2]', 'curvature(s, 0)'])).toMatch(/s is a list, not a curve in u/);
+  });
   it('says what it needs', () => {
     expect(error(['C = (cos(u), sin(u))', 'curvature(C)'])).toMatch(/\(u, curvature\(C\)\)/);
     expect(error(['C = (cos(u), sin(u))', '1/curvature(C)'])).toMatch(/\(u, curvature\(C\)\)/);
@@ -134,6 +162,32 @@ describe('curvature', () => {
     expect(value(['g(torsion, k) = torsion(k + 1)', 'g(2, 3)'])).toBe(8);
     expect(value(['sum(frame=1..3, frame(2))'])).toBe(12);
     expect(value(['sum(curvature=1..3, curvature)'])).toBe(6);
+    // Only inside its own sum: outside it, the builtin is the builtin.
+    expect(arrows(['frame((cos(2pi u), sin(2pi u)), sum(frame=1..3, frame)/10)'])).toHaveLength(2);
+    const outside = parseExpr('sum(frame=1..3, frame(2)) + frame(C, 0.2)');
+    expect(outside.kind === 'bin' && outside.b).toMatchObject({ kind: 'call', name: 'frame' });
+    // Nor does a Σ written with a subscript bind it before the Σ.
+    const before = parseExpr('frame(C, 0.2) + Σ_(frame=1)^3 frame');
+    expect(before.kind === 'bin' && before.a).toMatchObject({ kind: 'call', name: 'frame' });
+  });
+  it('differentiates along u symbolically', () => {
+    // The straight-line gate is flat away from its jump, as a piecewise is:
+    // no finite difference stands in for d/du κ.
+    const r = [parseExpr('2cos(2pi u)'), parseExpr('sin(2pi u)')];
+    const d = (e: Expr) => diff(e, 'u');
+    const dk = diff(curvatureOf(r, d), 'u');
+    // κ = 2/q^(3/2), q = 4sin² + cos² of 2πu: dκ/du = −18 · 2π sin cos / q^(5/2).
+    const at = 0.1,
+      s = Math.sin(2 * Math.PI * at),
+      c = Math.cos(2 * Math.PI * at);
+    const q = 4 * s * s + c * c;
+    expect(evaluate(dk, { u: at })).toBeCloseTo((-18 * 2 * Math.PI * s * c) / q ** 2.5, 8);
+    const helix = ['cos(2pi u)', 'sin(2pi u)', 'u^2'].map(s => parseExpr(s));
+    expect(() => diff(torsionOf(helix, d), 'u')).not.toThrow();
+    expect(value(['C = (2cos(2pi u), sin(2pi u))', 'f(u) = d/du curvature(C, u)', 'f(0.1)'])).toBeCloseTo(
+      evaluate(dk, { u: at }),
+      5,
+    );
   });
 });
 
@@ -282,6 +336,11 @@ describe('frame(C, u0)', () => {
   it('takes one point at a time', () => {
     expect(error(['C = (2cos(u), sin(u))', 'frame(C, [0.2, 0.4])'])).toMatch(/one point on the curve at a time/);
     expect(error(['C = (2cos(u), sin(u))', 's = [0.2, 0.4]', 'frame(C, s)'])).toMatch(/one point/);
+    expect(error(['C = (2cos(u), sin(u))', 's = [0.2, 0.4]', 'frame(C, 2s)'])).toMatch(/one point/);
+    // An index or a reduction of a list is one number.
+    for (const u0 of ['sort(s)[1]', 'mean(s)', 'total(s)/4']) {
+      expect(arrows(['C = (2cos(u), sin(u))', 's = [0.2, 0.4]', `frame(C, ${u0})`])).toHaveLength(2);
+    }
   });
 });
 

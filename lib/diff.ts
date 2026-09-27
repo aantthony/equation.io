@@ -229,11 +229,14 @@ export function diff(e: Expr, v: string): Expr {
           });
         case 'coth':
           return chain(sub(ONE, pow(call('coth', a), num(2))));
+        case 'sign':
+          // Flat on either side of its jump, as a piecewise is branchwise:
+          // the straight-line gate of a curve operator (lib/curves.ts).
+          return ZERO;
         default:
           // floor/mod/… (and gamma: digamma isn't in the language):
           // no smooth derivative; caller falls back to FD. Of an argument
-          // that does not move with v it is 0, like any constant: the
-          // straight-line gate sign(…) of a curve operator, at a point u0.
+          // that does not move with v it is 0, like any constant.
           if (isNumVal(da, 0)) return ZERO;
           throw new NonSmoothError(`Cannot differentiate ${plainFnName(e.name)}.`);
       }

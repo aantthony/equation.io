@@ -10,7 +10,7 @@ import { type ResolveOpts, compsOf, listGetter, tensorGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
 import { type Expr, type FigureForm, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
-import { type Axis, axesOf, isDataScatter, lowerLists, unionAxes, withAxes } from './list.ts';
+import { type Axis, axesOf, isDataScatter, lowerLists, SCALAR_REDUCTIONS, unionAxes, withAxes } from './list.ts';
 
 export const FAMILY_MAX = 32;
 export const FAMILY_3D_MAX = 8;
@@ -628,6 +628,13 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
         case 'vec':
           return { ...node, items: map(node.items) };
         case 'call':
+          // A reduction takes its list whole, as staysList judges it: mean(s)
+          // is one number in every member, not s broadcast into mean.
+          if (
+            SCALAR_REDUCTIONS.has(node.name) ||
+            ((node.name === 'min' || node.name === 'max') && node.args.length === 1)
+          )
+            return node;
           return { ...node, args: node.args.map(n => visit(n, false)) };
         case 'comp':
           return { ...node, value: visit(node.value, false) };

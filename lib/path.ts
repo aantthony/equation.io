@@ -51,16 +51,19 @@ export function pathSampler(comps: readonly Expr[]): PathSampler {
         }
       };
     });
-  const [re, im] = comps.map(part);
+  // Compiled once, when first sampled whole.
+  let whole: ReturnType<typeof part>[] | null = null;
   // A large curve whose bulk does not move with u — an osculating circle,
   // its centre and radius written out of the curve's derivatives — is folded
   // under env first, and what is left compiled: far less than running the
-  // whole tree at every sample.
+  // whole tree at every sample. A fold that leaves it as it was (it failed)
+  // samples the whole.
   const fold = exceedsNodes(comps, FOLD_NODES);
   return {
     names,
     sample: env => {
-      const [x, y] = fold ? foldAllExcept(comps, 'u', env).map(c => part(c)(env)) : [re(env), im(env)];
+      const folded = fold ? foldAllExcept(comps, 'u', env) : comps;
+      const [x, y] = (folded === comps ? (whole ??= comps.map(part)) : folded.map(part)).map(p => p(env));
       return samplePath(u => [x(u), y(u)], CURVE_SAMPLES);
     },
   };
@@ -77,22 +80,15 @@ const binds = (e: Expr): boolean =>
   !SCOPED.has(e.kind) || (e.kind === 'call' && (e.name === 'sum' || e.name === 'prod') && e.args.length >= 4);
 
 /**
- * `e` with every part that does not read `v` replaced by its value under env,
- * once per frame, so a curve sampled hundreds of times along u evaluates only
- * what moves with u. osculating(C, t) in space is the reason: its centre,
- * radius and plane are one large expression in t that each sample would
- * otherwise repeat. Shared subtrees are visited once. A part that does not
- * evaluate here stays as it is, to fail (or not) at sample time as before.
- */
-export function foldExcept(e: Expr, v: string, env: Record<string, number>): Expr {
-  return foldAllExcept([e], v, env)[0];
-}
-
-/**
- * foldExcept over several expressions at once, sharing what they share: a
- * curve's components and their derivatives along u repeat the same large
- * subtrees, each worked out once. Whatever fails to fold (an overflow in a
- * pasted row) leaves the expressions as they were.
+ * `es` with every part that does not read `v` replaced by its value under
+ * env, once per frame, so a curve sampled hundreds of times along u evaluates
+ * only what moves with u. osculating(C, t) in space is the reason: its
+ * centre, radius and plane are one large expression in t that each sample
+ * would otherwise repeat. Shared subtrees — a curve's components and their
+ * derivatives along u repeat the same large ones — are worked out once. A
+ * part that does not evaluate here stays as it is, to fail (or not) at sample
+ * time as before; whatever fails to fold (an overflow in a pasted row) leaves
+ * the expressions as they were.
  */
 export function foldAllExcept(es: readonly Expr[], v: string, env: Record<string, number>): readonly Expr[] {
   try {

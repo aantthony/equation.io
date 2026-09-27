@@ -1,7 +1,7 @@
 import { compileCpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { evaluate, parseExpr } from './expr.ts';
-import { CURVE_SAMPLES, PATH_NODE_BUDGET, foldAllExcept, foldExcept, pathSampler, samplePath } from './path.ts';
+import { CURVE_SAMPLES, PATH_NODE_BUDGET, foldAllExcept, pathSampler, samplePath } from './path.ts';
 import { countNodes, exceedsNodes } from './size.ts';
 import { classify } from './plot.ts';
 
@@ -135,10 +135,10 @@ describe('pathSampler', () => {
   });
 });
 
-describe('foldExcept', () => {
+describe('foldAllExcept', () => {
   it('works out once what does not move with u', () => {
     const e = parseExpr('sqrt(a^2 + t) cos(2pi u) + sum(n=1..3, n a) + b');
-    const folded = foldExcept(e, 'u', { a: 3, t: 7, b: 1 });
+    const [folded] = foldAllExcept([e], 'u', { a: 3, t: 7, b: 1 });
     // Only u (and pi, a constant) is left to read: sqrt(16), the sum and b are numbers.
     expect(countNodes(folded)).toBeLessThan(countNodes(e));
     for (const u of [0, 0.3, 0.8]) {
@@ -166,7 +166,7 @@ describe('foldExcept', () => {
   it('leaves a sum over a name the frame also binds alone', () => {
     // n is a slider and the sum's own variable: the sum must still bind it.
     const e = parseExpr('sum(n=1..3, n u)');
-    expect(evaluate(foldExcept(e, 'u', { n: 100 }), { u: 2 })).toBe(12);
+    expect(evaluate(foldAllExcept([e], 'u', { n: 100 })[0], { u: 2 })).toBe(12);
   });
 });
 

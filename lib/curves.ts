@@ -20,8 +20,8 @@
  * centre as off its normal.
  *
  * Where the curve is straight nothing depends on a branch: the gate is
- * arithmetic (sign, max, sqrt), so a list of points u0 maps element by
- * element — a piecewise over a list would filter it instead.
+ * arithmetic (sign, max, an even root), so a list of points u0 maps element
+ * by element — a piecewise over a list would filter it instead.
  */
 import { add, div, mul, neg, pow, sub } from './diff.ts';
 import { type Expr, substVars } from './expr.ts';
@@ -73,7 +73,10 @@ function pieces(r: readonly Expr[], d: AlongU, u0: Expr = U, straight = 1e-10) {
   );
   const side = call('sign', sub(c2, floor));
   const bent = call('max', side, num(0));
-  const defined = call('sqrt', side);
+  // (−1)^(1/2), not sqrt(−1): both are NaN on the CPU, but GLSL leaves the
+  // square root of a negative undefined (ANGLE folds it to 0), while eq_pow
+  // makes an even root of one EQ_NAN.
+  const defined = pow(side, num(0.5));
   const r3 = () => r2raw.map(d).map(at);
   return { p, r1, speed2, k, c2, w, bent, defined, r3 };
 }
@@ -105,7 +108,7 @@ export function torsionOf(r: readonly Expr[], d: AlongU): Expr {
  * space curve:
  *   p + (1 − cos 2πu) R N + sin 2πu R T,  R N = |r′|² w / c²,  R T = |r′|² r′ / c
  * with R = |r′|³/c. Its centre and size do not move with u, so the samplers
- * work them out once a frame (lib/path.ts foldExcept) rather than once per
+ * work them out once a frame (lib/path.ts foldAllExcept) rather than once per
  * pixel, as an implicit circle would. Where the curve is straight (c = 0) the
  * radius is infinite and nothing is drawn.
  */

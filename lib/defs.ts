@@ -1310,9 +1310,12 @@ function curveOperand(name: string, arg: Expr, ctx: Ctx): readonly Expr[] {
   if (ctx.opts.comps) r = lowerGeom(r, ctx.opts.comps, () => null, ctx.opts.isList);
   r = throughFields(r, ctx.opts, ALONG);
   if (r.kind === 'var' && arg.kind === 'var') {
-    throw new Error(
-      `${name}: ${arg.name} is not a curve — define one first, like ${arg.name} = (cos(2pi u), sin(2pi u)).`,
-    );
+    const n = arg.name;
+    const what = ctx.opts.consts?.[n] !== undefined ? 'a number' : ctx.opts.isList?.(n) ? 'a list' : null;
+    if (what) throw new Error(`${name}: ${n} is ${what}, not a curve in u. ${usage}`);
+    if (!ctx.opts.documentNames?.has(n)) {
+      throw new Error(`${name}: ${n} is not a curve — define one first, like ${n} = (cos(2pi u), sin(2pi u)).`);
+    }
   }
   if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
   const vars = freeVars(r);
@@ -1321,16 +1324,18 @@ function curveOperand(name: string, arg: Expr, ctx: Ctx): readonly Expr[] {
   return r.items;
 }
 
-/** Whether e holds a list: a literal, a data column or a named list. */
+/** Whether e is a list: a literal, a data column or a named list, or one
+ *  mapped over — not one reduced or indexed to a number (as staysList). */
 function listValued(e: Expr, ctx: Ctx): boolean {
   if (e.kind === 'list' || e.kind === 'data') return true;
   if (e.kind === 'var') return !!ctx.opts.isList?.(e.name);
-  let found = false;
-  mapChildren(e, c => {
-    found ||= listValued(c, ctx);
-    return c;
-  });
-  return found;
+  if (e.kind === 'index') return false;
+  if (
+    e.kind === 'call' &&
+    (SCALAR_REDUCTIONS.has(e.name) || ((e.name === 'min' || e.name === 'max') && e.args.length === 1))
+  )
+    return false;
+  return childrenOf(e).some(c => listValued(c, ctx));
 }
 
 /**

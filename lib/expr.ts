@@ -456,6 +456,12 @@ let activeListNames: ReadonlySet<string> = new Set();
  */
 let activeValueNames: ReadonlySet<string> = new Set();
 
+/** Where a Σ/Π index of the row that a late-addition builtin would claim is
+ *  bound (set by parseExpr): inside its sum, an index named frame is a
+ *  number, and outside it frame is the builtin. */
+type BoundSpan = { name: string; from: number; to: number };
+let activeBound: readonly BoundSpan[] = [];
+
 /**
  * Whether `name[…]` indexes rather than multiplies.
  *
@@ -1125,7 +1131,8 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         !path?.includes('.') &&
         token.type === 'parenopen' &&
         last!.type === 'symbol' &&
-        isFnName(last!.str);
+        isFnName(last!.str) &&
+        !boundAt(last!);
       indexing = isIndex;
       yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
       if (isFnCall) emit = { ...token, call: true };
@@ -1198,19 +1205,34 @@ function createLeaf(token: Token): PNode {
   throw new Error(`Invalid token: ${token.type} ${JSON.stringify(token.str)}`);
 }
 
-/** A Σ/Π index written into the row: `sum(frame=1..3, frame(2))`. */
-const BOUND_INDEX = /(?:\bsum|\bprod|[Σ∑Π∏])\s*_?\s*[({]\s*([A-Za-z][A-Za-z0-9]*)\s*=/g;
+/** A Σ/Π index written into the row: `sum(frame=1..3, frame(2))` (`==`
+ *  compares, and binds nothing). */
+const BOUND_INDEX = /(?:\bsum|\bprod|([Σ∑Π∏]))\s*_?\s*[({]\s*([A-Za-z][A-Za-z0-9]*)\s*=(?!=)/g;
 
-/** valueNames with the Σ/Π indices of `str` that a late-addition builtin
- *  would claim: inside its sum, an index named frame is a number. */
-function withBoundNames(str: string, valueNames: ReadonlySet<string>): ReadonlySet<string> {
-  let out: Set<string> | null = null;
+/** The spans of `str` its Σ/Π indices bind: sum(…) to its closing bracket,
+ *  and after Σ_(…), whose body has no bracket of its own, the rest. */
+function boundSpans(str: string, valueNames: ReadonlySet<string>): BoundSpan[] {
+  const spans: BoundSpan[] = [];
   for (const m of str.matchAll(BOUND_INDEX)) {
-    const b = builtinFn(m[1]);
-    if (b && SHADOWABLE_FNS.has(b) && !valueNames.has(b)) (out ??= new Set(valueNames)).add(b);
+    const name = builtinFn(m[2]);
+    if (!name || !SHADOWABLE_FNS.has(name) || valueNames.has(name)) continue;
+    const from = m.index + m[0].search(/[({]/);
+    let to = str.length;
+    for (let k = from, depth = 0; !m[1] && k < str.length; k++) {
+      if ('([{'.includes(str[k])) depth++;
+      else if (')]}'.includes(str[k]) && --depth === 0) {
+        to = k;
+        break;
+      }
+    }
+    spans.push({ name, from, to });
   }
-  return out ?? valueNames;
+  return spans;
 }
+
+/** Whether a symbol names a Σ/Π index where it is written. */
+const boundAt = (token: Token): boolean =>
+  activeBound.some(s => s.name === builtinFn(token.str) && token.loc[0] > s.from && token.loc[0] < s.to);
 
 /**
  * Parse an expression or equation, keeping free variables symbolic.
@@ -1226,7 +1248,8 @@ export function parseExpr(
 ): Expr {
   activeUserFns = userFns;
   activeListNames = listNames;
-  activeValueNames = withBoundNames(str, valueNames);
+  activeValueNames = valueNames;
+  activeBound = boundSpans(str, valueNames);
   try {
     const tokens = addImplicitTokens(
       mergeEmptyBrackets(mergeBracedSubscripts(normalizeTokens(desugarUnicode(tokenize(str))))),
@@ -1248,6 +1271,7 @@ export function parseExpr(
     activeUserFns = new Set();
     activeListNames = new Set();
     activeValueNames = new Set();
+    activeBound = [];
   }
 }
 

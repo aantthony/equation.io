@@ -44,7 +44,7 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, freeVars, mapChildren, parseExpr, substVars } from './expr.ts';
+import { type Expr, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { lowerGeom } from './geom.ts';
@@ -506,17 +506,27 @@ function curveHint(object: MathObject, text: string): string | null {
   return `scalar field — for the curve write ${other} = ${text}`;
 }
 
-/** The first curvature(C) or torsion(C) along the curve (no point given)
- *  that e calls, unless the document defines its own. */
-function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
+/** The curve operator a definition's text calls: `k(u) = curvature(C, u)`. */
+const CURVE_OP_CALL = /\b(curvature|torsion)\s*\(/;
+
+/**
+ * The first curvature(C) or torsion(C) along the curve (no point given) that
+ * e calls, or that a definition it reads does (k(u) = curvature(C, u)) —
+ * unless the document defines its own.
+ */
+function alongCurve(e: Expr, getFn: (name: string) => unknown, raw: readonly Definition[]): string | null {
   if (e.kind === 'call' && (e.name === 'curvature' || e.name === 'torsion') && e.args.length === 1 && !getFn(e.name))
     return e.name;
-  let found: string | null = null;
-  mapChildren(e, c => {
-    found ??= alongCurve(c, getFn);
-    return c;
-  });
-  return found;
+  if (e.kind === 'call') {
+    const def = raw.find(d => d.kind === 'fn' && d.name === e.name);
+    const op = def?.kind === 'fn' ? CURVE_OP_CALL.exec(def.rhs)?.[1] : undefined;
+    if (op && !getFn(op)) return op;
+  }
+  for (const c of childrenOf(e)) {
+    const found = alongCurve(c, getFn, raw);
+    if (found) return found;
+  }
+  return null;
 }
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
@@ -783,25 +793,21 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       const resolved = resolveRow(rawParsed, getFn, ropts);
       let parsed = resolved.expr;
-      // curvature(C) is κ along the curve, a number per u — which as a row in
-      // u alone (1/curvature(C) too) would draw the density of its values.
-      // Once it has resolved, so the curve is known to be one: say how to
-      // show it.
-      const along = rawParsed.kind === 'vec' ? null : alongCurve(rawParsed, getFn);
-      if (along) {
-        const vars = freeVars(parsed);
-        if (vars.has('u') && !['x', 'y', 'z', 'v'].some(n => vars.has(n))) {
-          throw new Error(
-            `${along}(C) is a function of u along the curve: plot it with (u, ${along}(C)), or read it at a point with ${along}(C, 0.25).`,
-          );
-        }
-      }
       // A real row in u and v alone does not depend on the screen, so it is
       // drawn as its values (docs/multisets.md §5): u and v are each [0, 1],
       // and the row is a multiset of numbers with a density. That is the
       // object an expression in random variables already is, with u and v
       // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
       const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
+      // curvature(C) is κ along the curve, a number per u — which as such a
+      // row (1/curvature(C), or k(u) with k(u) = curvature(C, u)) would draw
+      // the density of its values. Say how to show it.
+      const along = draws && alongCurve(rawParsed, getFn, document.raw);
+      if (along) {
+        throw new Error(
+          `${along}(C) is a function of u along the curve: plot it with (u, ${along}(C)), or read it at a point with ${along}(C, 0.25).`,
+        );
+      }
       const known = draws ? new Set([...rvNames, ...Object.keys(draws.bases)]) : rvNames;
       if (draws) {
         for (const [name, dist] of Object.entries(draws.bases)) rvs.addAnonymous({ name, kind: 'base', dist });
