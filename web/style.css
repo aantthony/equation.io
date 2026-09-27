@@ -39,6 +39,7 @@ body {
   --text: #222;
   --dot-border: rgba(0, 0, 0, 0.15);
   --eq-focus: rgba(0, 90, 200, 0.05);
+  --row-focus: rgba(20, 30, 50, 0.06);
   --error-line: #d33;
   --error: #c0392b;
   --info: #557;
@@ -65,6 +66,7 @@ body {
   --text: #e6e8ea;
   --dot-border: rgba(255, 255, 255, 0.22);
   --eq-focus: rgba(90, 150, 255, 0.14);
+  --row-focus: rgba(0, 0, 0, 0.32);
   --error-line: #f0575c;
   --error: #f0797d;
   --info: #97a3b8;
@@ -125,7 +127,7 @@ body {
   background: var(--panel-bg);
   color: var(--text);
   border: 1.5px solid var(--muted);
-  border-radius: 6px;
+  border-radius: 3px;
   box-shadow: 0 2px 10px var(--panel-shadow);
   padding: 5px 9px;
   font-size: 12px;
@@ -164,7 +166,7 @@ body {
   background: var(--panel-bg);
   backdrop-filter: blur(8px);
   border: 1px solid var(--panel-border);
-  border-radius: 10px;
+  border-radius: 4px;
   box-shadow: 0 4px 20px var(--panel-shadow);
   /* Extra top room for the grip strip. */
   padding: 16px 8px 8px;
@@ -385,23 +387,23 @@ body {
 .eq-line {
   position: relative;
   padding: 4px 6px 4px 28px;
-  border-radius: 6px;
+  margin: 1px 0;
   white-space: pre-wrap;
   word-break: break-word;
   min-height: 1.5em;
 }
 .eq-line::before {
-  /* color dot; clicks in the left gutter cycle the color */
+  /* color bar down the row's left edge; clicks in the left gutter (the
+     first 22px, main.ts gutterHit) cycle the color */
   content: '';
   position: absolute;
-  left: 6px;
-  top: 8.5px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
   background: var(--eq-color, #ccc);
-  border: 1px solid var(--dot-border);
   cursor: pointer;
+  transition: width 0.12s;
 }
 .eq-line.is-def::before {
   visibility: hidden;
@@ -432,9 +434,9 @@ body {
 .eq-line.is-comment::before {
   content: '▸';
   background: none;
-  border: none;
-  border-radius: 0;
+  left: 6px;
   top: 4px;
+  bottom: auto;
   width: 14px;
   height: auto;
   color: var(--muted);
@@ -461,7 +463,10 @@ body {
   display: none;
 }
 .eq-line.focused {
-  background: var(--eq-focus);
+  background: var(--row-focus);
+}
+.eq-line.focused:not(.is-comment)::before {
+  width: 5px;
 }
 .eq-line.invalid {
   box-shadow: inset 0 -1px var(--error-line);
@@ -527,7 +532,7 @@ body {
   display: block;
   margin: 0 0 3px 28px; /* clears the color-dot gutter, like the other widgets */
   border: 1px solid var(--dot-border);
-  border-radius: 9px;
+  border-radius: 2px;
   background: none;
   color: var(--muted);
   font:
@@ -1043,7 +1048,7 @@ body.file-drag::after {
   height: 40px;
   padding: 0;
   border: 1px solid var(--panel-border);
-  border-radius: 11px;
+  border-radius: 4px;
   background: var(--panel-bg);
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 20px var(--panel-shadow);
