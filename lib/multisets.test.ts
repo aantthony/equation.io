@@ -10,6 +10,12 @@ import { dotPlot } from './plot.ts';
  * analysis. Each block follows a section of that document.
  */
 const last = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!;
+/** A readout row's text (throws its error). */
+function readout(rows: string[]): string | undefined {
+  const row = last(rows);
+  if (row.error) throw new Error(row.error);
+  return row.info;
+}
 
 /** The values of a row that draws a finite multiset of numbers, evaluated at
  *  the document's constants and sorted: order is not part of a multiset. */
@@ -635,6 +641,15 @@ describe('§3 indexing is written against its brackets', () => {
     expect(row.source.coordinates.map(c => evaluate(c, {}))).toEqual([1, 2]);
     // A named point is still no list: d/ds of a function of it is symbolic.
     expect(last(['A = (1,2)', 'G(x,y) = x^2 y', 's = 1', 'd/ds G(s A)']).info).toBe('= 6');
+  });
+  it('indexes a name written with a braced subscript, T_{1}[2]', () => {
+    // The merged name kept the position of `T_`, so the index never touched
+    // it and multiplied instead (main indexed it).
+    expect(multiset(['L_{1} = [1,2,3]', 'L_{1}[L_{1} > 1]'])).toEqual([2, 3]);
+    expect(readout(['T_{1} = (3,1,2)', 'T_{1}[2]'])).toBe('= 1');
+    expect(readout(['T_1 = (3,1,2)', 'T_1[2]'])).toBe('= 1');
+    // With a space it still multiplies.
+    expect(last(['T_{1} = (3,1,2)', 'T_{1} [2]']).cpu).toMatchObject({ type: 'point' });
   });
 });
 
