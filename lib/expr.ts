@@ -212,6 +212,7 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'grade',
     'dual',
     'slerp',
+    'vec',
     // A matrix or a map, whole: action(((1, 1), (0, 1))), jacobian((x y, x + y)).
     'action',
     'jacobian',
@@ -310,6 +311,7 @@ export const FUNCTIONS = new Set([
   'dual',
   'quat',
   'slerp',
+  'vec',
   // A matrix drawn by what it does (lib/glyphs.ts), and a quaternion's
   // Julia set (lib/clifford.ts juliaSurface).
   'action',
@@ -385,6 +387,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'jacobian',
   'hessian',
   'qjulia',
+  'vec',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */

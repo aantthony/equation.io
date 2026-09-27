@@ -541,7 +541,7 @@ export const SHOWCASE: ShowcaseItem[] = [
       'a = 2pi [0..11]/12',
       'h = pi/4',
       'q = quat(cos(h), 0, sin(h) cos(a), sin(h) sin(a)) quat(cos(2pi u), sin(2pi u), 0, 0)',
-      '-dual(grade(q, 2))/(1 - grade(q, 0))',
+      'vec(q)/(1 - grade(q, 0))',
     ],
     group: 'Tensors, quaternions & geometric algebra',
   },

@@ -491,7 +491,7 @@ function anyTensor(n: Expr, lo: (n: Expr) => LV, getMat: GetMat): Tensor {
 }
 
 /** The calls that make or take multivectors (lib/clifford.ts). */
-const MV_FNS = new Set(['gp', 'rev', 'grade', 'dual', 'quat', 'slerp', MV_CALL]);
+const MV_FNS = new Set(['gp', 'rev', 'grade', 'dual', 'quat', 'slerp', 'vec', MV_CALL]);
 
 /** Whether a subtree holds a multivector at all: a blade, ⟑ or a multivector
  *  function. Rows without one — nearly all — skip lowerMv entirely. */
@@ -616,6 +616,13 @@ function lowerMv(e: Expr, lo: (n: Expr) => LV): Multivector | null {
           case 'grade': {
             arity(2, 'grade takes a multivector and a grade: grade(A, 2) is its bivector part.');
             return gradePart(any(args[0]), constIndex(args[1], 'A grade'));
+          }
+          case 'vec': {
+            // A quaternion's vector part (x, y, z): the axis it turns about,
+            // scaled by sin(θ/2). For any multivector, the vector of its
+            // bivector part read as a quaternion's (i = e_zy, j = e_xz, k = e_yx).
+            arity(1, 'vec takes one quaternion: vec(quat(w, x, y, z)) is the point (x, y, z).');
+            return vectorMv(quaternionParts(any(args[0])).slice(1));
           }
           case 'quat': {
             // quat(w, x, y, z), or quat(w, v) with v a 3-vector.

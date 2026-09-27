@@ -58,7 +58,7 @@ import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
 import { pointComps } from '../lib/geom.ts';
 import { hullFaces } from '../lib/hull.ts';
 import { hullGeometrySampler } from '../lib/hull-geometry.ts';
-import { type VertexSampler, vertexSampler } from '../lib/figure-vertices.ts';
+import { type VertexSampler, fanFillable, vertexSampler } from '../lib/figure-vertices.ts';
 
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
@@ -1599,9 +1599,12 @@ function render() {
             if (!vals.every(Number.isFinite)) break;
             const pts: number[] = [];
             for (let k = 0; k < vals.length; k += dim) pts.push(vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0);
-            const triangle = plot.closed && pts.length === 9;
+            // A closed polygon fills translucently when a fan from its first
+            // vertex covers it exactly: triangles, convex outlines, and the
+            // discs and sectors multivectors draw (lib/glyphs.ts).
+            const fill = plot.closed && fanFillable(pts);
             if (plot.closed) pts.push(...pts.slice(0, 3));
-            scene.curves.push({ pts: new Float32Array(pts), color, arrow: plot.arrow, triangle });
+            scene.curves.push({ pts: new Float32Array(pts), color, arrow: plot.arrow, fill });
             break;
           }
           case 'dscatter': {
