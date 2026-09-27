@@ -999,7 +999,9 @@ function* mergeBracedSubscripts(bare: Iterable<Token>): Iterable<Token> {
         all[close]?.type === 'parenclose' &&
         all[close].str === '}'
       ) {
-        yield { ...token, str: token.str + inner.str };
+        // The merged name spans through the `}`, so an index written against
+        // it (T_{1}[2]) still touches it (see addImplicitTokens).
+        yield { ...token, str: token.str + inner.str, loc: [token.loc[0], all[close].loc[1]] };
         i = close;
         continue;
       }
@@ -1139,7 +1141,7 @@ function* mergeEmptyBrackets(tokens: Iterable<Token>): Iterable<Token> {
     if (open) {
       if (token.type === 'whitespace') continue;
       if (token.type === 'parenclose' && token.str === ']') {
-        yield { ...open, type: 'symbol', str: EMPTY_LIST };
+        yield { ...open, type: 'symbol', str: EMPTY_LIST, loc: [open.loc[0], token.loc[1]] };
         open = null;
         continue;
       }

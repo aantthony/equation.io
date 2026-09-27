@@ -10,6 +10,12 @@ import { dotPlot } from './plot.ts';
  * analysis. Each block follows a section of that document.
  */
 const last = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!;
+/** A readout row's text (throws its error). */
+function readout(rows: string[]): string | undefined {
+  const row = last(rows);
+  if (row.error) throw new Error(row.error);
+  return row.info;
+}
 
 /** The values of a row that draws a finite multiset of numbers, evaluated at
  *  the document's constants and sorted: order is not part of a multiset. */
@@ -538,6 +544,23 @@ describe('§5 continuous intervals', () => {
     expect(last(['interval(1)']).error).toMatch(/two bounds/);
     expect(last(['(interval(0, x), u)']).error).toMatch(/constants, sliders and t/);
   });
+  it('a name survives an error in another row', () => {
+    // An error anywhere checks which definitions lean on a failed one, and a
+    // named interval was taken for failed: everything using it was dropped.
+    const rows = ['r = interval(1,3)', 'c = count(r)', 'bad = 1/foo(2)', 'c'];
+    const analysis = analyzeRows(rows, { readouts: true });
+    expect(analysis.rows[1].error).toBeUndefined();
+    expect(analysis.rows[3].error).toBeUndefined();
+    expect(analysis.rows[3].info).toBe('= 2');
+    expect(analysis.rows[2].error).toMatch(/foo/);
+    // So does a function built on one.
+    const fn = analyzeRows(
+      ['r = interval(1,2)', 'f(k) = k + r', 'bad = zz(1)', '(f(1) cos(2 pi u), f(1) sin(2 pi u))'],
+      { readouts: true },
+    );
+    expect(fn.rows[1].error).toBeUndefined();
+    expect(fn.rows[3].error).toBeUndefined();
+  });
 });
 
 describe('§3 figures over multisets of tuples', () => {
@@ -638,6 +661,15 @@ describe('§3 indexing is written against its brackets', () => {
     // A named point is still no list: d/ds of a function of it is symbolic.
     expect(last(['A = (1,2)', 'G(x,y) = x^2 y', 's = 1', 'd/ds G(s A)']).info).toBe('= 6');
   });
+  it('indexes a name written with a braced subscript, T_{1}[2]', () => {
+    // The merged name kept the position of `T_`, so the index never touched
+    // it and multiplied instead (main indexed it).
+    expect(multiset(['L_{1} = [1,2,3]', 'L_{1}[L_{1} > 1]'])).toEqual([2, 3]);
+    expect(readout(['T_{1} = (3,1,2)', 'T_{1}[2]'])).toBe('= 1');
+    expect(readout(['T_1 = (3,1,2)', 'T_1[2]'])).toBe('= 1');
+    // With a space it still multiplies.
+    expect(last(['T_{1} = (3,1,2)', 'T_{1} [2]']).cpu).toMatchObject({ type: 'point' });
+  });
 });
 
 describe('§2 a bracket of tuples', () => {
@@ -650,6 +682,19 @@ describe('§2 a bracket of tuples', () => {
     expect(last(['[(1,2,3,4), (1,2,3,4,5)]']).error).toMatch(/tuples of one length/);
     // Short tuples are points, and join as points.
     expect(last(['[sort([1,2]), (3,4)]']).cls!.object).toMatchObject({ kind: 'list', element: 'point' });
+  });
+  it('sorts no multiset of tuples: its values are not one list', () => {
+    // It was (1, 2, 3, 3, 4, 4, 5, 5), two 4-tuples' values in one tuple.
+    expect(last(['L=[1,2]', 'T = (L, 5, 3, 4)', 'sort(T)']).error).toMatch(/multiset of 4-tuples is not defined/);
+    expect(last(['L=[1,2]', 'sort((L, 5, 3, 4))']).error).toMatch(/multiset of 4-tuples is not defined/);
+    expect(last(['L=[1,2]', 'T = (L, 5, 3, 4)', 'max(T)']).error).toMatch(/multiset of 4-tuples is not defined/);
+    // Short tuples are points, which have no order either.
+    expect(last(['L=[1,2]', 'M=[4,3]', 'sort(L + sort(M))']).error).toMatch(/Points have no order/);
+    // count, total and mean still take them, tuple by tuple.
+    expect(readout(['L=[1,2]', 'T = (L, 5, 3, 4)', 'count(T)'])).toBe('= 2');
+    expect(readout(['L=[1,2]', 'T = (L, 5, 3, 4)', 'total(T)'])).toBe('= (3, 10, 6, 8)');
+    // One tuple sorts.
+    expect(readout(['T = (4,2,3,1)', 'sort(T)'])).toBe('= (1, 2, 3, 4)');
   });
 });
 
@@ -896,5 +941,20 @@ describe('families in space', () => {
     );
     expect(last(['r = [1..8]', 'grad(r x y z)']).error).toBeUndefined();
     expect(last(['r = [1..9]', 'grad(r x y z)']).error).toMatch(/fields in space has at most 8/);
+  });
+});
+
+describe('§5 a comparison over a tuple written out', () => {
+  it('keeps its members, as over a named one', () => {
+    // A tuple took a fresh axis every time it lowered, so the members were
+    // never found again: per-element true/false notes, and count refused.
+    expect(readout(['L = [3,1,2]', 'count(sort(L) > 1)'])).toBe('= 2');
+    expect(last(['L = [3,1,2]', 'sort(L) > 1']).cpu).toEqual(last(['L = [3,1,2]', 'T = sort(L)', 'T > 1']).cpu);
+    expect(last(['(1,2,3,4) > 2']).cpu).toMatchObject({ type: 'point' });
+    expect(readout(['count((1,2,3,4,5) > 2)'])).toBe('= 3');
+    // Grouped comparisons, member columns and pairs are unchanged.
+    expect(multiset(['L = [1,2,3]', '(L > 1) > 2'])).toEqual([3]);
+    expect(readout(['P = [(1,2),(3,-1)]', 'count(P.y < 0)'])).toBe('= 1');
+    expect(readout(['L = [1,2]', 'M = [1,2,3]', 'count(L < M)'])).toBe('= 3');
   });
 });

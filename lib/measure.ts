@@ -27,7 +27,15 @@
  *   measurement runs to a work budget. Its constants are read at resolve
  *   time, as Σ bounds are, so a slider change recomputes it.
  */
-import { certifySystem, intervalFn, intervalKnows, type Interval } from './certify.ts';
+import {
+  REACH_ALL,
+  REACH_NONE,
+  certifySystem,
+  intervalFn,
+  intervalKnows,
+  lastReach,
+  type Interval,
+} from './certify.ts';
 import { countNodes } from './size.ts';
 import { NonSmoothError, add, diff, mul, pow } from './diff.ts';
 import { type Expr, childrenOf, evaluate, exprKey, freeVars, substVars } from './expr.ts';
@@ -103,25 +111,37 @@ const hasList = (e: Expr, host: MeasureHost): boolean =>
  */
 export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { expr: Expr } | { arg: Expr } {
   // `{c1, c2: f}` in a reduction is f restricted to where c1 and c2 hold.
-  let condsRaw: Expr[] = [];
-  let valueRaw = raw;
-  if (raw.kind === 'piecewise' && !raw.otherwise && raw.cases.slice(0, -1).every(c => c.bare)) {
-    condsRaw = raw.cases.map(c => c.cond);
-    const lastCase = raw.cases[raw.cases.length - 1];
-    valueRaw = lastCase.bare ? num(1) : lastCase.value;
+  // (Written out, its conditions resolve one by one: an equation is a
+  // condition only here.)
+  let conds: Expr[] = [];
+  let value: Expr;
+  /** The argument as the list reduction takes it, when it is not a set. */
+  let resolved: () => Expr;
+  const filter = barePiecewise(raw);
+  if (filter) {
+    conds = filter.conds.map(c => host.resolve(c));
+    value = host.resolve(filter.value);
+    resolved = () => host.resolve(raw);
+  } else {
+    const whole = host.resolve(raw);
+    resolved = () => whole;
+    // Or handed back by a function: f(k) = {0 < x < k, x > 1/2: x} is the
+    // same filter in total(f(1)) as written out, since f(1) is its body.
+    const handed = barePiecewise(whole);
+    if (handed) conds = handed.conds;
+    value = handed ? handed.value : whole;
   }
-  let conds = condsRaw.map(c => host.resolve(c));
-  let value = host.resolve(valueRaw);
   // A lone filter's members are the members it keeps (docs/multisets.md §4):
   // count measures them; the other reductions take their values, so
   // total(0 < x < 1) is ∫₀¹ x dx, as total([1,2,3] < 3) is 1 + 2.
   let lone = false;
-  if (!condsRaw.length && (value.kind === 'eq' || value.kind === 'ineq')) {
+  const filtered = conds.length > 0;
+  if (!filtered && (value.kind === 'eq' || value.kind === 'ineq')) {
     conds = [value];
     value = num(1);
     lone = name !== 'count';
   }
-  if (condsRaw.length && (value.kind === 'eq' || value.kind === 'ineq')) {
+  if (filtered && (value.kind === 'eq' || value.kind === 'ineq')) {
     throw new Error('In {condition: value}, the value is a number to reduce; put every comparison before the colon.');
   }
   const whole = [...conds, value];
@@ -129,15 +149,16 @@ export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { exp
   for (const e of whole) for (const n of freeVars(e)) if (CONTINUOUS.includes(n) && !host.bound(n)) names.add(n);
   const hidden = whole.flatMap(e => intervalsIn(e)).filter((h, k, all) => all.findIndex(o => o.key === h.key) === k);
   if ((!names.size && !hidden.length) || whole.some(e => hasList(e, host))) {
-    return { arg: condsRaw.length ? host.resolve(raw) : conds.length ? conds[0] : value };
+    return { arg: filtered ? resolved() : conds.length ? conds[0] : value };
   }
   if (lone) {
-    if (names.size !== 1 || hidden.length) {
+    // One coordinate, x or an interval: its kept members are numbers.
+    if (names.size + hidden.length !== 1) {
       throw new Error(
         `The members of this filter are points, and ${name}(…) needs numbers — for its size, use count(…).`,
       );
     }
-    value = vr([...names][0]);
+    value = names.size ? vr([...names][0]) : hidden[0].node;
   }
   if (name === 'stdev' || name === 'median' || name === 'hist') {
     throw new Error(
@@ -159,6 +180,14 @@ export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { exp
   }
   const cs = conds.flatMap(c => comparisons(c));
   return { expr: reduceMeasure(name, cs, value, coords, host) };
+}
+
+/** `{c1, c2: f}` (or `{c1, c2}`, f = 1): conditions each written without a
+ *  value, then the value — or null for any other piecewise. */
+function barePiecewise(e: Expr): { conds: Expr[]; value: Expr } | null {
+  if (e.kind !== 'piecewise' || e.otherwise || !e.cases.slice(0, -1).every(c => c.bare)) return null;
+  const lastCase = e.cases[e.cases.length - 1];
+  return { conds: e.cases.map(c => c.cond), value: lastCase.bare ? num(1) : lastCase.value };
 }
 
 interface Comparison {
@@ -256,8 +285,9 @@ function graphForm(c: Comparison, coords: Coord[]): Graph | null {
     if (lhs.kind !== 'var') continue;
     const solved = geo.find(k => k.name === lhs.name);
     if (!solved || freeVars(rhs).has(solved.name)) continue;
-    // The solved coordinate is the curve's own: a range on it is not a graph.
-    if (!isInf(solved.lo, -1) || !isInf(solved.hi, 1)) return null;
+    // The solved coordinate is the curve's own: a range on it is not a graph
+    // this way round (x = y with 0 < x < 1 is still y = x over that range).
+    if (!isInf(solved.lo, -1) || !isInf(solved.hi, 1)) continue;
     const along = geo.find(k => k !== solved)!;
     // Over all of ℝ the graph may leave its domain; the quadtree handles that.
     if (isInf(along.lo, -1) || isInf(along.hi, 1)) return null;
@@ -281,6 +311,13 @@ function constantsFor(es: readonly Expr[], coords: readonly string[], host: Meas
   for (const e of es) {
     for (const n of freeVars(e)) {
       if (coords.includes(n) || n === 'inf' || Object.hasOwn(env, n)) continue;
+      // A function's parameter (or a Σ index, an ∫ variable) has no value
+      // here, only a name — whatever a slider of that name holds.
+      if (host.bound(n)) {
+        throw new Error(
+          `${what} cannot follow ${n}: it is measured once, where it is written, not for each value of ${n}.`,
+        );
+      }
       const v = host.consts?.[n];
       if (v === undefined || !Number.isFinite(v)) {
         throw new Error(
@@ -789,7 +826,9 @@ function ivOf(e: Expr, names: readonly string[], env: Record<string, number>) {
 }
 
 /** Whether every condition holds on the whole box, on none of it, or neither
- *  is proven. An equation never holds on a whole box. */
+ *  is proven. An equation never holds on a whole box. A point where a
+ *  condition is undefined (sqrt(x) at x < 0) is in no set: a box wholly out
+ *  of its domain is outside, and one partly out is never wholly inside. */
 function truthOn(
   conds: readonly Cond[],
   names: readonly string[],
@@ -799,12 +838,14 @@ function truthOn(
   let all = true;
   for (const c of conds) {
     const [lo, hi] = ivOf(c.d, names, env)(box);
+    const reach = lastReach();
+    if (reach === REACH_NONE) return FALSE;
     if (c.eq) {
       if (lo > 0 || hi < 0) return FALSE;
       all = false;
     } else {
       if (lo > 0 || (c.strict && lo >= 0)) return FALSE;
-      if (!(hi < 0 || (!c.strict && hi <= 0))) all = false;
+      if (reach !== REACH_ALL || !(hi < 0 || (!c.strict && hi <= 0))) all = false;
     }
   }
   return all ? TRUE : UNKNOWN;
@@ -844,13 +885,16 @@ function numericReduction(name: string, conds: Cond[], value: Expr, coords: Coor
   const key =
     exprKey([name, conds.map(c => [c.d, c.eq ? 1 : c.strict ? 2 : 0]), values, names]) + JSON.stringify([lo, hi, env]);
   // Failures are kept too: a slider drag must not redo a refused measurement.
+  // Only a deterministic one, though: a run the wall clock stopped says how
+  // fast the device was, and the next analysis tries again.
   let hit = memo.get(key);
   if (!hit) {
+    measureRuns.count++;
     try {
       // count needs only the measure; the others need the values too.
       hit = measureSet(conds, name === 'count' ? [] : values, names, lo, hi, env);
     } catch (e) {
-      if (!(e instanceof Error)) throw e;
+      if (!(e instanceof Error) || e instanceof OutOfTime) throw e;
       hit =
         e instanceof Diverges
           ? new Error(
@@ -900,7 +944,10 @@ export function certified(v: number, gap: number): number {
   const unit = 10 ** Math.floor(Math.log10(gap));
   if (unit <= Math.abs(v) * 1e-6) return v;
   const r = Number((Math.round(v / unit) * unit).toPrecision(15));
-  return r === 0 ? 0 : r * (1 + 1e-13);
+  // A value smaller than its bound has no digit the bound vouches for, but
+  // it is not 0: its first digit, which reads ≈, never an exact = 0.
+  if (r === 0) return Number(v.toPrecision(1)) * (1 + 1e-13);
+  return r * (1 + 1e-13);
 }
 
 /**
@@ -1246,11 +1293,19 @@ const GL3_W = [5 / 9, 8 / 9, 5 / 9];
  *  50 ms, so a readout never stalls the page (analysis runs on the main
  *  thread). */
 const WORK_BUDGET = 2_200_000;
-/** A hard stop, whatever the work estimate says (a safety net: the work
- *  budget, which is deterministic, is what normally ends a measurement).
- *  Generous, so a slow machine or a cold JIT (a CI runner is ~4× slower)
- *  still gets the budget's answer rather than a refusal. */
-const HARD_MS = 1000;
+/** A hard stop on the wall clock, whatever the work estimate says: a small
+ *  safety net for a slow device, since analysis runs on the main thread. The
+ *  work budget, which is deterministic, is what normally ends a measurement;
+ *  a run the clock stops is refused this time but not remembered (see memo),
+ *  so a slow moment is never a lasting answer. */
+const HARD_MS = 300;
+let hardMs = HARD_MS;
+/** Set the wall-clock stop, in ms (Infinity turns it off); no argument
+ *  restores the default. Tests turn it off, so every answer they check comes
+ *  from the work budget alone and a slow runner cannot change it. */
+export function setMeasureHardStop(ms: number = HARD_MS): void {
+  hardMs = ms;
+}
 
 /** A measurement that ran out of budget before it was precise enough. */
 class TooCostly extends Error {
@@ -1260,6 +1315,18 @@ class TooCostly extends Error {
     );
   }
 }
+
+/** A measurement the wall clock stopped: the device was slow, not the set
+ *  too intricate, so it is not remembered. */
+class OutOfTime extends Error {
+  constructor() {
+    super('That set could not be measured within the time a readout may take. Restrict it to a smaller range.');
+  }
+}
+
+/** How many measurements have run rather than come from the memo (for tests:
+ *  a refusal is remembered, a slow run is not). */
+export const measureRuns = { count: 0 };
 
 /** Relative precision a measure's bounds must reach to be reported (the
  *  readout then shows only the digits they vouch for). */
@@ -1331,12 +1398,12 @@ function gridMeasure(
   // Measuring an undecided cell at the end, in cells' worth of work: corner
   // values, or a sample grid when several comparisons are open there.
   const estimateCost = (conds.length > 1 ? 3 : 1) * (curve && !continuous ? 12 : 1);
-  const deadline = performance.now() + HARD_MS;
+  const deadline = performance.now() + hardMs;
   let cells = 0;
   let ticks = 0;
   const tick = () => {
     cells++;
-    if (++ticks % 512 === 0 && performance.now() > deadline) throw new TooCostly();
+    if (++ticks % 512 === 0 && performance.now() > deadline) throw new OutOfTime();
   };
 
   // Cells proved inside: their measure is exact; values integrate on them.
@@ -1574,9 +1641,15 @@ function certainParts(
   F: (box: readonly Interval[]) => Interval,
   G: ReadonlyArray<(box: readonly Interval[]) => Interval>,
 ): { inside: number; outside: number } {
+  // The mean value theorem needs F defined on the whole cell.
+  F(cell);
+  if (lastReach() !== REACH_ALL) return { inside: 0, outside: 0 };
   const c = cell.map(([a, b]) => (a + b) / 2);
   const [flo, fhi] = F(c.map((v): Interval => [v, v]));
-  const g = G.map(f => f(cell));
+  const g = G.map(f => {
+    const v = f(cell);
+    return lastReach() === REACH_ALL ? v : ([-Infinity, Infinity] as Interval);
+  });
   if (![flo, fhi, ...g.flat()].every(Number.isFinite)) return { inside: 0, outside: 0 };
   // Rounding in the linear bounds, generously.
   const h = cell.map(([a, b]) => b - a);
@@ -1960,25 +2033,34 @@ function rootsOnLine(
   }
   const F = intervalFn(d, [v], {});
   const D = intervalFn(dd, [v], {});
+  // (NaN where the equation is undefined: no root there.)
   const sign = (x: number) => {
     const [a, b] = F([[x, x]]);
+    if (lastReach() === REACH_NONE) return NaN;
     return a > 0 ? 1 : b < 0 ? -1 : 0;
   };
-  const deadline = performance.now() + HARD_MS;
+  const deadline = performance.now() + hardMs;
   const roots: number[] = [];
   const stack: Interval[] = [[lo, hi]];
   let visited = 0;
   while (stack.length) {
     const [a, b] = stack.pop()!;
-    if (++visited > ROOT_BUDGET || (visited % 256 === 0 && performance.now() > deadline)) {
+    // (The clock stopping it says the device was slow, not that there are
+    // too many roots.)
+    if (visited % 256 === 0 && performance.now() > deadline) throw new OutOfTime();
+    if (++visited > ROOT_BUDGET) {
       throw new Error(
         `That equation has too many roots in the range to count (or infinitely many). Restrict the range, like count({0 < ${v} < 10, …}).`,
       );
     }
     const [flo, fhi] = F([[a, b]]);
-    if (flo > 0 || fhi < 0) continue;
+    // No root where the equation is undefined, nor where it cannot vanish.
+    const reach = lastReach();
+    if (reach === REACH_NONE || flo > 0 || fhi < 0) continue;
     const [dlo, dhi] = D([[a, b]]);
-    if (dlo > 0 || dhi < 0) {
+    // Monotone only where both are defined throughout (sqrt(x) − 1 on
+    // [-1, 4] rises where it is defined, but its end at -1 has no sign).
+    if (reach === REACH_ALL && lastReach() === REACH_ALL && (dlo > 0 || dhi < 0)) {
       // Monotone here: at most one root, found by the signs at the ends.
       const sa = sign(a);
       const sb = sign(b);
@@ -2023,7 +2105,7 @@ function emptyToward(F: (box: readonly Interval[]) => Interval, a: number, b: nu
     const outer = end + (far - end) / 2 ** k;
     if (Math.abs(near - end) < floor) return true;
     const [flo, fhi] = F([[Math.min(near, outer), Math.max(near, outer)]]);
-    if (!(flo > 0 || fhi < 0)) return false;
+    if (lastReach() !== REACH_NONE && !(flo > 0 || fhi < 0)) return false;
   }
   return false;
 }

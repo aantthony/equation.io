@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
-import { imul, intervalValue } from './certify.ts';
+import { REACH_ALL, REACH_NONE, REACH_SOME, imul, intervalValue, lastReach } from './certify.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { type Cond, certified, measureSet } from './measure.ts';
 import { runtimeSliderNames } from './runtime-sliders.ts';
@@ -50,6 +50,35 @@ describe('intervalValue', () => {
         [0, 0],
       ]),
     ).toEqual([-Infinity, Infinity]);
+  });
+  it('says how much of the box a function is defined on', () => {
+    const reach = (s: string, x: [number, number]) => {
+      at(s, [x, [0, 0]]);
+      return lastReach();
+    };
+    expect(reach('sqrt(x)', [1, 4])).toBe(REACH_ALL);
+    expect(reach('sqrt(x)', [-1, 4])).toBe(REACH_SOME);
+    expect(reach('sqrt(x)', [-4, -1])).toBe(REACH_NONE);
+    expect(reach('ln(x) + 1', [-1, 1])).toBe(REACH_SOME);
+    expect(reach('acos(x)', [0.5, 3])).toBe(REACH_SOME);
+    expect(reach('acos(x)', [2, 3])).toBe(REACH_NONE);
+    expect(reach('x^0.5', [-1, 1])).toBe(REACH_SOME);
+    // Whole powers are defined everywhere, and each enclosure starts afresh.
+    expect(reach('x^2', [-1, 1])).toBe(REACH_ALL);
+  });
+  // Code review (2026-09-27): the enclosures of sqrt, ln and acos cover only
+  // where they are defined, so a box partly out of the domain was proved
+  // wholly inside, and these read ∞.
+  it('measures a set partly outside a function’s domain where it is defined', () => {
+    expect(value(['count(sqrt(x) < 1)'])).toBeCloseTo(1, 5);
+    expect(value(['count(ln(x) < 0)'])).toBeCloseTo(1, 5);
+    expect(value(['count(acos(x) < 1)'])).toBeCloseTo(1 - Math.cos(1), 5);
+    expect(value(['count(sqrt(1 - x^2) > y > 0)'])).toBeCloseTo(Math.PI / 2, 4);
+    expect(value(['count({ln(x) < 0, -5 < x < 5})'])).toBeCloseTo(1, 5);
+    expect(value(['count(x^0.5 < 1)'])).toBeCloseTo(1, 5);
+    expect(value(['total({sqrt(1 - x^2) > y > 0: y})'])).toBeCloseTo(2 / 3, 4);
+    // Roots where the equation is defined are still counted.
+    expect(value(['count(sqrt(x) = 0.5)'])).toBe(1);
   });
 });
 
@@ -103,6 +132,39 @@ describe('slider-dependent measures', () => {
   });
 });
 
+// Code review (2026-09-27): what a reduction ranges over, when names are bound.
+describe('reductions and the names around them', () => {
+  it('a function’s parameter is its argument, never a slider of the same name', () => {
+    // It was read from the slider: f(9) was 2√2, the measure at a = 2.
+    const analysis = analyzeRows(['a = 2', 'f(a) = count({x^2 < a})', 'f(9)'], { readouts: true });
+    expect(analysis.rows[1].error).toMatch(/cannot follow a/);
+    expect(analysis.rows[2].error).toBeDefined();
+    // A closed form still follows its parameter.
+    expect(value(['a = 2', 'f(a) = total({0 < x < a: x})', 'f(3)'])).toBe(4.5);
+  });
+
+  it('a reduction inside ∫ … dx runs for each value of its variable', () => {
+    // It took x as a continuous set too, and diverged.
+    expect(value(['int[0..1] total({0 < u < 1: x u}) dx'])).toBe(0.25);
+    expect(value(['int[0..1] mean({0 < u < 1: x + u}) dx'])).toBe(1);
+    expect(value(['int[0..1] count({0 < u < x}) dx'])).toBeCloseTo(0.5, 6);
+  });
+
+  it('a filter a function hands back is the same filter as written out', () => {
+    expect(value(['total({0 < x < 1, x > 0.5: x})'])).toBe(0.375);
+    // f(1) is its body, so the reduction reads the same {c1, c2: f}.
+    expect(value(['f(k) = {0 < x < k, x > 0.5: x}', 'total(f(1))'])).toBe(0.375);
+  });
+
+  it('a lone filter over one interval keeps numbers, as one over u does', () => {
+    expect(value(['total(interval(1,3) < 2)'])).toBe(1.5);
+    expect(value(['mean(interval(1,3) < 2)'])).toBe(1.5);
+    expect(value(['total(u < 0.5)'])).toBe(0.125);
+    // Two coordinates keep points, which are not numbers.
+    expect(error(['total(x^2 + interval(0, 1)^2 < 1)'])).toMatch(/members of this filter are points/);
+  });
+});
+
 /** The number a readout row holds (throws its error). */
 function value(rows: string[]): number {
   const analysis = analyzeRows(rows, { readouts: true });
@@ -114,12 +176,6 @@ function value(rows: string[]): number {
 }
 const error = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.error ?? '';
 const info = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info ?? '';
-/** Milliseconds a readout takes to analyze. */
-function timed(rows: string[]): number {
-  const t0 = performance.now();
-  analyzeRows(rows, { readouts: true });
-  return performance.now() - t0;
-}
 
 // Review findings for phase 8 (docs/multisets.md §9): each one a confident
 // wrong number, a freeze, or an internal error before.
@@ -216,16 +272,18 @@ describe('measures: review findings', () => {
     expect(certified(0, 0.1)).toBe(0);
   });
 
-  it('8. an intricate set is refused quickly, never a freeze', () => {
-    expect(timed(['count({-1000<x<1000,-1000<y<1000, sin(x y)>0, cos(x+y)>0})'])).toBeLessThan(1000);
-    expect(error(['count({-1000<x<1000,-1000<y<1000, sin(x y)>0, cos(x+y)>0})'])).toMatch(/precisely enough/);
-    expect(timed(['a = 3', 'count({-1000<x<1000,-1000<y<1000, sin(a x y)>0})'])).toBeLessThan(1000);
-    expect(timed(['count({x^2+y^2<1, sin(1000 x y)>0})'])).toBeLessThan(1000);
-    expect(timed(['total({-1000<x<1000,-1000<y<1000, sin(x y)>0: x^2})'])).toBeLessThan(1000);
-    // A refusal is remembered: the same slider value does not redo it.
-    const row = ['a = 3.5', 'count({-1000<x<1000,-1000<y<1000, sin(a x y)>0})'];
-    timed(row);
-    expect(timed(row)).toBeLessThan(100);
+  it('8. an intricate set is refused by the work budget, never a freeze', () => {
+    // The wall clock is off in tests (lib/test-setup.ts), so each of these
+    // ends on the deterministic budget alone, whatever the runner's speed.
+    // (The remembered refusal and the clock are measure-limits.test.ts's.)
+    for (const rows of [
+      ['count({-1000<x<1000,-1000<y<1000, sin(x y)>0, cos(x+y)>0})'],
+      ['a = 3', 'count({-1000<x<1000,-1000<y<1000, sin(a x y)>0})'],
+      ['count({x^2+y^2<1, sin(1000 x y)>0})'],
+      ['total({-1000<x<1000,-1000<y<1000, sin(x y)>0: x^2})'],
+    ]) {
+      expect(error(rows), rows.at(-1)).toMatch(/precisely enough/);
+    }
   });
 
   it('9. jumps, lemniscates and infinite counts', () => {
@@ -239,5 +297,22 @@ describe('measures: review findings', () => {
     // Bounded too; its root at the origin is singular, so it cannot be proved.
     expect(error(['count({x^5-x=y, y^5-y=x})'])).toMatch(/could not all be proved/);
     expect(info(['count(x^2+y^2<1)'])).toBe('≈ 3.14159');
+  });
+});
+
+// Code review (2026-09-27): readings that were right in value but not in form.
+describe('measures: the exact route and the readout', () => {
+  it('a total smaller than its error bound reads ≈, never an exact = 0', () => {
+    expect(info(['total({x^2+y^2<1: x + 0.0000001})'])).toMatch(/^≈ /);
+    expect(value(['total({x^2+y^2<1: x + 0.0000001})'])).toBeGreaterThan(0);
+    expect(certified(3e-7, 1e-6)).not.toBe(0);
+    expect(certified(-3e-7, 1e-6)).toBeLessThan(0);
+  });
+
+  it('x = y with a range on x is the graph y = x over it, exactly', () => {
+    // The first way round has the range on its solved coordinate; the other
+    // way round is a graph, and was never tried.
+    expect(value(['count({x = y, 0 < x < 1})'])).toBe(Math.SQRT2);
+    expect(value(['count({y = x, 0 < y < 1})'])).toBe(Math.SQRT2);
   });
 });

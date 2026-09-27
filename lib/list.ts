@@ -125,6 +125,9 @@ interface Ctx {
   /** Columns templates have named so far: names count up per lowering, so
    *  the same row lowers to the same template every time. */
   columns: number;
+  /** While a comparison lowers as a value, what each of its nodes lowered
+   *  to: the multiset whose members it keeps is one of them (keptMembers). */
+  lowered?: Map<Expr, Expr>;
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -830,6 +833,8 @@ function reduce(name: string, all: readonly Expr[], ctx: Ctx): Expr {
 }
 
 const SORT_POINTS = 'Points have no order of their own — sort them by a key written in the list: sort(P, P.x).';
+const SORT_TUPLES = (width: number) =>
+  `sort(…) of a multiset of ${width}-tuples is not defined — a tuple is one element, not its values; only count, total and mean are.`;
 
 /**
  * `sort(P, key)`: the elements of P as a tuple, in ascending order of the key
@@ -1294,17 +1299,26 @@ function lowerCond(e: Expr, ctx: Ctx): Expr {
  * as `x^2 < 4` shades x in (−2, 2). That multiset is the innermost part of
  * the comparison running over exactly the mask's instances; over two
  * separate multisets (`L < M`) the members are the pairs.
+ *
+ * The parts are taken as the mask was built from them, not lowered again:
+ * a tuple (`sort(L) > 1`) gets a fresh axis each time it lowers, so a second
+ * lowering would never run over the mask's instances.
  */
-function keptMembers(e: Expr, mask: Expr & { kind: 'list' }, ctx: Ctx): Expr {
+function comparisonValue(e: Expr, ctx: Ctx): Expr {
+  const outer = ctx.lowered;
+  const lowered = new Map<Expr, Expr>();
+  ctx.lowered = lowered;
+  let mask: Expr;
+  try {
+    mask = lowerCond(e, ctx);
+  } finally {
+    ctx.lowered = outer;
+  }
+  if (!isMask(mask)) return mask;
   const want = axesOf(mask);
   const same = (a: readonly Axis[], b: readonly Axis[]) => a.length === b.length && a.every((x, k) => x.id === b[k].id);
-  const lowered = (n: Expr): Expr | null => {
-    try {
-      return lower(n, ctx);
-    } catch {
-      return null;
-    }
-  };
+  const over = (low: Expr | null | undefined, axes: readonly Axis[]): low is Seq =>
+    !!low && isSeq(low) && same(axesOf(low), axes);
   // Children first, so the innermost part wins: P over P.x.
   const find = (n: Expr, axes: readonly Axis[]): Expr | null => {
     for (const c of childrenOf(n)) {
@@ -1314,22 +1328,28 @@ function keptMembers(e: Expr, mask: Expr & { kind: 'list' }, ctx: Ctx): Expr {
     // A comparison is no multiset of its own, unless written in parentheses
     // as an operand: its kept members are, ([1,2,3] > 1) > 1.
     if ((n.kind === 'ineq' && !n.grouped) || n.kind === 'eq' || n.kind === 'eqtest') return null;
-    // A member column (P.x) belongs to the list it is read from.
+    // A member column (P.x) belongs to the list it is read from: that name
+    // is the one thing looked up here, since the comparison never needed P.
     const dot = n.kind === 'var' ? n.name.lastIndexOf('.') : -1;
     if (n.kind === 'var' && dot > 0) {
-      const base = find({ kind: 'var', name: n.name.slice(0, dot) }, axes);
-      if (base) return base;
+      let base: Expr | null = null;
+      try {
+        base = lower({ kind: 'var', name: n.name.slice(0, dot) }, ctx);
+      } catch {
+        // Not a list of its own (a table): the column is the multiset.
+      }
+      if (over(base, axes)) return base;
     }
-    const low = lowered(n);
-    return low && isSeq(low) && same(axesOf(low), axes) ? n : null;
+    const low = lowered.get(n);
+    return over(low, axes) ? low : null;
   };
   let subject = find(e, want);
   if (!subject && want.length > 1) {
+    // Over two separate multisets the members are the pairs.
     const parts = want.map(a => find(e, [a]));
-    if (parts.every(p => p !== null)) subject = { kind: 'vec', items: parts as Expr[] };
+    if (parts.every(p => p !== null)) subject = lower({ kind: 'vec', items: parts as Expr[] }, ctx);
   }
-  const low = subject && lowered(subject);
-  const got = low && settle(low, ctx);
+  const got = subject && settle(subject, ctx);
   if (!got || !isSeq(got) || isLazy(got) || !same(axesOf(got), want)) {
     throw new Error(
       'This comparison runs over more than one list in a way that has no members to keep — filter with L[…].',
@@ -1339,6 +1359,12 @@ function keptMembers(e: Expr, mask: Expr & { kind: 'list' }, ctx: Ctx): Expr {
 }
 
 function lower(e: Expr, ctx: Ctx): Expr {
+  const out = lowerNode(e, ctx);
+  ctx.lowered?.set(e, out);
+  return out;
+}
+
+function lowerNode(e: Expr, ctx: Ctx): Expr {
   switch (e.kind) {
     case 'range':
       throw new Error(structuralDiagnostic(e));
@@ -1388,10 +1414,8 @@ function lower(e: Expr, ctx: Ctx): Expr {
         zipN([expand(a, ctx), expand(b, ctx)], ([x, y]) => ({ kind: 'bin', op: e.op, a: x, b: y }), ctx)
       );
     }
-    case 'eqtest': {
-      const mask = lowerCond(e, ctx);
-      return isMask(mask) ? keptMembers(e, mask, ctx) : mask;
-    }
+    case 'eqtest':
+      return comparisonValue(e, ctx);
     case 'index':
       return lowerIndex(e, ctx);
     case 'comp':
@@ -1458,10 +1482,13 @@ function lower(e: Expr, ctx: Ctx): Expr {
         // taken position by position, as they are for points.
         const own = axesOf(arg);
         const tupleAt = own.findIndex(a => a.ordered);
-        if (e.name !== 'sort' && own.length > 1 && tupleAt === own.length - 1) {
+        if (own.length > 1 && tupleAt === own.length - 1) {
           const width = own[tupleAt].n;
           const all = isData(arg) ? Array.from(arg.values, num) : (arg as Expr & { kind: 'list' }).items;
           if (e.name === 'count') return num(all.length / width);
+          // A tuple is one element, not its values: sorting them all together
+          // would mix up the tuples. (Short ones are points, with no order.)
+          if (e.name === 'sort') throw new Error(width <= 3 ? SORT_POINTS : SORT_TUPLES(width));
           if (e.name !== 'total' && e.name !== 'mean') {
             throw new Error(
               `${e.name}(…) of a multiset of ${width}-tuples is not defined — only count, total and mean are.`,
@@ -1552,10 +1579,8 @@ function lower(e: Expr, ctx: Ctx): Expr {
       return withAxes(out, axes);
     }
     case 'eq':
-    case 'ineq': {
-      const mask = lowerCond(e, ctx);
-      return isMask(mask) ? keptMembers(e, mask, ctx) : mask;
-    }
+    case 'ineq':
+      return comparisonValue(e, ctx);
     case 'piecewise': {
       const cases = e.cases.map(c => ({ cond: lowerCond(c.cond, ctx), value: lower(c.value, ctx) }));
       const otherwise = e.otherwise && lower(e.otherwise, ctx);

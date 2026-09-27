@@ -599,16 +599,21 @@ recorded so they can be reviewed and reversed. Progress notes live in
   at each x — as graphs have always used it; the strict reading (a total over
   L × x) would make every polynomial written with `total` diverge. A
   function's parameters are never integrated: in `f(x) = count(…)`, x is the
-  argument.
+  argument. Nor is the variable of an enclosing ∫: `int[0..1] total({0 < u
+  < 1: x u}) dx` is ¼, the total taken for each x.
 - **`{c1, c2: f}` in a reduction is a conjunction.** As a reduction's
   argument, conditions written before the last one without values restrict
   together: f where c1 and c2 hold. Elsewhere `{c1, c2: f}` keeps Desmos's
   reading (1 where c1 holds, else f where c2 does); the parser marks bare
-  conditions so the two can be told apart. Only there may a condition be an
+  conditions so the two can be told apart, and the mark survives
+  resolution, so a function that hands one back reads the same:
+  `f(k) = {0 < x < k, x > 0.5: x}`; `total(f(1))` is `total({0 < x < 1,
+  x > 0.5: x})`, 0.375. Only there may a condition be an
   equation (`{y = x^2, 0 < x < 1: y}`); elsewhere `y = x^2` as a condition is
   an error that points at reductions. A lone filter reduces its members
   (§5): `count(x^2 + y^2 < 1)` is the area, `total(0 < x < 1)` is ½, as
-  `total([1,2,3] < 3)` is 3; `total` of a region is an error pointing at
+  `total([1,2,3] < 3)` is 3, and over one interval as over x
+  (`total(interval(1, 3) < 2)` is 1.5); `total` of a region is an error pointing at
   `count`, since its members are points. (It first reduced with value 1,
   so `total` of a region was its area; that disagreed with `total(L < 3)`
   once a finite comparison kept members.) A comparison as the value
@@ -654,7 +659,16 @@ recorded so they can be reviewed and reversed. Progress notes live in
   with a 300 ms hard stop; past it the row is an error, never a freeze.
   Its sliders are read when the row resolves, like Σ bounds: moving one
   re-resolves the row (no runtime-slider fast path), and t is an error.
-  Results — and refusals — are memoized per set, values and constants.
+  Results — and the budget's refusals — are memoized per set, values and
+  constants; a run the hard stop ends is not (a slow moment is not the
+  answer), and tests turn the stop off so only the budget decides. A
+  function's parameter, a Σ index or the ∫ variable has no value to read,
+  so a numeric measure that depends on one is an error (a closed form
+  follows it).
+- **Domains.** An enclosure covers only where every function in it is
+  defined (sqrt, ln, asin, acos, fractional powers), and says how much of
+  the box that is: none, and the box is outside the set; some, and the box
+  is never proved inside. So `count(sqrt(x) < 1)` is 1, not ∞.
 - **Unbounded sets.** A far strip proved inside the set (`x > 0`) makes the
   count ∞. When neither boundedness nor a strip is proved (`y > x^2`,
   `y = sin(x)`), the set is measured in the squares of half-size 1024 and
