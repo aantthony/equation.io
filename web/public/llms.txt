@@ -198,15 +198,20 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     osculating plane. The helix `C = (2cos(u), 2sin(u), u)` has curvature
     0.4 and torsion 0.2 everywhere. A plane curve has none (an error).
   - Without u0 both are functions of u, for use in other rows:
-    `(u, curvature(C))` plots κ against u. Alone on a row they are an error
-    that says so (a row in u alone would draw the density of its values).
+    `(u, curvature(C))` plots κ against u, and `k(u) = curvature(C, u)`
+    names it. Alone on a row (or `1/curvature(C)`) they are an error that
+    says so (a row in u alone would draw the density of its values). A
+    list u0 reads each point: `curvature(C, [0.2, 0.4])`.
   - `osculating(C, u0)` draws the osculating circle at u = u0: through the
     point, radius 1/|κ|, centred on the concave side. A space curve's lies in
-    its osculating plane. Nothing is drawn where κ = 0 (an inflection).
+    its osculating plane. Nothing is drawn where κ = 0 (an inflection). A
+    list u0 draws one circle per point.
   - `frame(C, u0)` draws the Frenet frame at u = u0 as unit arrows from the
     point: T (tangent), N (toward the centre of curvature) and, in space,
-    B = T × N. With t for u0 it rides along: `C = (2cos(u), sin(u))`,
-    `frame(C, t)`, `osculating(C, t)`.
+    B = T × N; one point at a time. With t for u0 it rides along; a `C` row draws u from 0 to 1,
+    so trace the curve once over that and wrap t into it:
+    `C = (2cos(2pi u), sin(2pi u))`, `C`, `frame(C, t/10)`,
+    `osculating(C, t/10)` (u0 past 1 is the same point again).
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   Along x, y, or z it works through lists too: with `N = [1..4]`,

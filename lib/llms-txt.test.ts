@@ -102,8 +102,8 @@ describe('llms.txt', () => {
       // Curves.
       [[], 'curvature((u, u^2), 0)', 'value'],
       [['C = (2cos(u), sin(u))'], '(u, curvature(C))', 'curve'],
-      [['C = (2cos(u), sin(u))'], 'frame(C, t)', 'family'],
-      [['C = (2cos(u), sin(u))'], 'osculating(C, t)', 'curve'],
+      [['C = (2cos(2pi u), sin(2pi u))'], 'frame(C, t/10)', 'family'],
+      [['C = (2cos(2pi u), sin(2pi u))'], 'osculating(C, t/10)', 'curve'],
       // A tuple of rows is a matrix; a bracket of tuples is points.
       [[], '((0, -1), (1, 0)) (2, 1)', 'point'],
       [[], 'det(((1, 2), (3, 4)))', 'value'],
@@ -129,6 +129,9 @@ describe('llms.txt', () => {
     expect(readout(['curl((-y, x))'])).toBe('= 2');
     expect(readout(['laplacian(x^2 + y^2)'])).toBe('= 4');
     expect(readout(['curvature((u, u^2), 0)'])).toBe('= 2');
+    // A ride-along traces the curve once over the u a C row draws.
+    expect(llms).toContain('`C = (2cos(2pi u), sin(2pi u))`, `C`, `frame(C, t/10)`');
+    expect(llms).not.toMatch(/frame\(C, t\)/);
     expect(readout(['curvature((2cos(u), -2sin(u)), 0)'])).toBe('= -0.5');
     expect(readout(['C = (2cos(u), 2sin(u), u)', 'curvature(C, 1)'])).toBe('= 0.4');
     expect(readout(['C = (2cos(u), 2sin(u), u)', 'torsion(C, 1)'])).toBe('= 0.2');

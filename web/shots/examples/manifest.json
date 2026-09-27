@@ -232,7 +232,7 @@
   "3d-curves-knots/torus-knot-2-5": "tube(((2+cos(10pi u))cos(4pi u), (2+cos(10pi u))sin(4pi u), sin(10pi u)))",
   "3d-curves-knots/figure-eight": "tube(((2+cos(4pi u))cos(6pi u), (2+cos(4pi u))sin(6pi u), sin(8pi u)))",
   "3d-curves-knots/viviani": "tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)",
-  "3d-curves-knots/frenet-frame-on-a-helix": "C = (2cos(4pi u), 2sin(4pi u), 3u - 1.5); C; frame(C, t/10); osculating(C, t/10); curvature(C, t/10); torsion(C, t/10)",
+  "3d-curves-knots/frenet-frame-on-a-helix": "C = (2cos(4pi u), 2sin(4pi u), 3u - 1.5); s = (1 - cos(pi t/10))/2; C; frame(C, s); osculating(C, s); curvature(C, s); torsion(C, s)",
   "3d-curves-knots/frenet-frame-on-a-trefoil": "C = (sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u), -sin(6pi u)); C; frame(C, t/20); osculating(C, t/20); torsion(C, t/20)",
   "split-views/a-function-over-its-derivative": "view(x = -3..3, y = -3..3); f(x) = x^3 - 3x; y = f(x); --- below 40%, shared x; view(y = -4..10); y = d/dx f(x)",
   "split-views/circle-beside-its-sine": "grid(axes); view(x = -1.4..1.4, y = -1.4..1.4); P = (cos(t), sin(t)); circle((0, 0), 1); segment((0, 0), P); P; --- right 65%, shared y; grid(axes); view(x = -0.5..8); y = {x >= 0: sin(t - x)}; (0, sin(t))",

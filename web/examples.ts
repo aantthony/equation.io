@@ -968,10 +968,11 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['figure eight', 'tube(((2+cos(4pi u))cos(6pi u), (2+cos(4pi u))sin(6pi u), sin(8pi u)))', '3d parametric knot'],
       ['Viviani', 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', '3d parametric'],
       // T, N and B ride the curve; the osculating circle lies in the plane
-      // of T and N, and torsion is how fast that plane turns.
+      // of T and N, and torsion is how fast that plane turns. A helix does
+      // not close up, so s runs up it and back down.
       [
         'Frenet frame on a helix',
-        'C = (2cos(4pi u), 2sin(4pi u), 3u - 1.5); C; frame(C, t/10); osculating(C, t/10); curvature(C, t/10); torsion(C, t/10)',
+        'C = (2cos(4pi u), 2sin(4pi u), 3u - 1.5); s = (1 - cos(pi t/10))/2; C; frame(C, s); osculating(C, s); curvature(C, s); torsion(C, s)',
         '3d parametric derivative animated',
       ],
       [
