@@ -479,7 +479,7 @@ describe('point definitions', () => {
 
   it('reports a named vector that mixes position with a parameter on the point row', () => {
     expect(defsOf(['s = (x, u)']).errors.get('s')).toMatch(/mixes position.*found u/);
-    expect(defsOf(['s = (x, w)']).errors.get('s')).toMatch(/found w/);
+    expect(defsOf(['s = (x, k)']).errors.get('s')).toMatch(/found k/);
   });
 
   it('keeps coordinate fields working alongside points', () => {

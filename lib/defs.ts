@@ -78,12 +78,22 @@ import {
 import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
+import { inferScalarType } from './complex.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
 const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
 /** The parametric parameters, each ranging over (0, 1). */
 const PARAMS: ReadonlySet<string> = new Set(['u', 'v']);
+/** Position: an axis variable, or w, the complex point x + iy. */
+const onPosition = (v: string): boolean => SPACE.has(v) || v === 'w';
+const complexValued = (e: Expr): boolean => {
+  try {
+    return inferScalarType(e) === 'complex';
+  } catch {
+    return false;
+  }
+};
 
 export type Definition =
   | RegressionRow
@@ -2835,7 +2845,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     changed = false;
     for (const [name, e] of defs.consts) {
       for (const fv of freeVars(e)) {
-        if (!fieldNames.has(name) && (SPACE.has(fv) || PARAMS.has(fv) || fieldNames.has(fv))) {
+        if (!fieldNames.has(name) && (onPosition(fv) || PARAMS.has(fv) || fieldNames.has(fv))) {
           fieldNames.add(name);
           changed = true;
         }
@@ -2896,13 +2906,21 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       // position-dependent curve has no one meaning.
       const vars = [...freeVars(e)];
       const param = vars.find(fv => PARAMS.has(fv));
-      if (param && vars.some(fv => SPACE.has(fv))) {
+      if (param && vars.some(onPosition)) {
         throw new Error(
           `${shown} mixes position (x, y, z) with the parameter ${param}; a definition may use one or the other (found ${param}).`,
         );
       }
+      // A field may be complex: `q = x + iy` names the point w does.
       for (const fv of vars) {
-        if (!SPACE.has(fv) && !PARAMS.has(fv) && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
+        if (
+          !onPosition(fv) &&
+          !PARAMS.has(fv) &&
+          fv !== 't' &&
+          fv !== 'i' &&
+          !constNames.has(fv) &&
+          !stateNames.has(fv)
+        ) {
           throw new Error(
             param || paramNames.has(name)
               ? `${shown} is a curve or surface (it uses u or v), so it may only use u, v, t, and constants (found ${fv}).`
@@ -2910,10 +2928,13 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           );
         }
       }
-      // Trial-evaluate to surface unsupported calls (re, im, …) now.
-      const env: Record<string, number> = { x: 0.7, y: 0.4, z: 0.3, t: 0 };
-      for (const fv of freeVars(e)) env[fv] ??= 1;
-      evaluate(e, env);
+      // Trial-evaluate to surface unsupported calls (re, im, …) now. A
+      // complex field has no real value; the rows using it check it.
+      if (!vars.includes('i') && !vars.includes('w')) {
+        const env: Record<string, number> = { x: 0.7, y: 0.4, z: 0.3, t: 0 };
+        for (const fv of vars) env[fv] ??= 1;
+        evaluate(e, env);
+      }
       defs.fields.set(name, e);
       return e;
     } finally {
@@ -2937,17 +2958,21 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     }
   }
   // The same rule across a named vector's components: `s = (x, u)` has no
-  // one meaning, though each component alone would.
+  // one meaning, though each component alone would. Nor has `s = (x, w)`:
+  // a vector's components are real.
   for (const p of [...defs.points]) {
     const comps = pointComps(p, defs.pointDims.get(p)).map(c => defs.fields.get(c));
     if (!comps.every(Boolean)) continue;
     const vars = comps.flatMap(e => [...freeVars(e!)]);
     const param = vars.find(fv => PARAMS.has(fv));
-    if (!param || !vars.some(fv => SPACE.has(fv))) continue;
-    errors.set(
-      p,
-      `${p} mixes position (x, y, z) with the parameter ${param}; a definition may use one or the other (found ${param}).`,
-    );
+    if (comps.some(e => complexValued(e!))) {
+      errors.set(p, `${p} has a complex component; a vector's components are real — take re(…) or im(…).`);
+    } else if (param && vars.some(onPosition)) {
+      errors.set(
+        p,
+        `${p} mixes position (x, y, z) with the parameter ${param}; a definition may use one or the other (found ${param}).`,
+      );
+    } else continue;
     defs.points.delete(p);
     for (const c of pointComps(p, defs.pointDims.get(p))) defs.fields.delete(c);
   }

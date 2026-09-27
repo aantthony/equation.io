@@ -342,10 +342,30 @@ describe('coordinate fields over z', () => {
       'a is defined in terms of itself.',
       'b is defined in terms of itself.',
     ]);
-    expect(errorsOf(['rho = sqrt(x^2+y^2+w)'])[0]).toBe(
-      'rho defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found w).',
+    expect(errorsOf(['rho = sqrt(x^2+y^2+k)'])[0]).toBe(
+      'rho defines a coordinate (it uses x, y, or z), so it may only use x, y, z, t, and constants (found k).',
     );
     expect(errorsOf(['s = (x, u)'])[0]).toMatch(/found u/);
+  });
+
+  it('names the complex point as w does: q = x + iy', () => {
+    for (const body of ['ln(q-2) - ln(q+2)', 'domain((q^3 - 1)/q)', 'conformal(q^2/4)', 'iter(z^2 + q)', 're(q^2)']) {
+      expect(last(['q = x + i y', body]).type).toBe(last([body.replaceAll('q', 'w')]).type);
+    }
+    expect(last(['q = w^2', 'a = 2', 'domain(q/a)']).type).toBe('domain2d');
+    const roots = solutions(['q = x + i y', 'q^2 = -4']).sort((p, q) => p[1] - q[1]);
+    expect(roots).toHaveLength(2);
+    expect(roots[0][0]).toBeCloseTo(0, 7);
+    expect(roots[0][1]).toBeCloseTo(-2, 7);
+    expect(roots[1][1]).toBeCloseTo(2, 7);
+    // A vector's components are real.
+    expect(errorsOf(['q = x + i y', 'P = (q, 1)'])[1]).toBe(
+      "P has a complex component; a vector's components are real — take re(…) or im(…).",
+    );
+    expect(errorsOf(['s = (x, w)'])[0]).toMatch(/^s has a complex component;/);
+    expect(last(['q = x + i y', 'P = (re(q), im(q))', 'dot(P, P) = 1']).type).toBe('implicit2d');
+    // No real level sets to draw as a grid family.
+    expect(errorsOf(['q = x + i y', 'grid(q)'])[1]).toMatch(/q is not a coordinate over the plane .*is complex/);
   });
 
   it('draws the unit circle from the position vector', () => {

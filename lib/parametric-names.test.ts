@@ -28,10 +28,10 @@ describe('named curves and surfaces', () => {
   });
 
   it('says what went wrong in the terms of a curve', () => {
-    // c_y = w holds no u itself, but it is part of the curve c.
-    for (const row of ['c = (u, w)', 'c = (w, u)', 'k = u + w']) {
+    // c_y = k holds no u itself, but it is part of the curve c.
+    for (const row of ['c = (u, k)', 'c = (k, u)', 'm = u + k']) {
       const [r] = analyzeRows([row]).rows;
-      expect(r.error, row).toMatch(/is a curve or surface \(it uses u or v\).*found w/);
+      expect(r.error, row).toMatch(/is a curve or surface \(it uses u or v\).*found k/);
     }
     expect(analyzeRows(['s = (x, u)']).rows[0].error).toMatch(/mixes position.*found u/);
   });
