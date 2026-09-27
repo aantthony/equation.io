@@ -59,7 +59,9 @@ export type MathObject =
       readonly relation: 'eq' | 'ineq';
       readonly constraints: ReadonlyArray<{ readonly residual: Expr; readonly strict: boolean }>;
     }
-  | { readonly kind: 'scalar-field'; readonly expr: Expr }
+  /** A bare expression in the plane, or in space (`dimension: 3`), drawn as
+   *  a shade or a translucent cloud. */
+  | { readonly kind: 'scalar-field'; readonly expr: Expr; readonly dimension?: 3 }
   | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly [Expr, Expr, Expr] }
   | { readonly kind: 'vector-field'; readonly components: Components }
   /** A 2×2 matrix over the plane, row-major: each glyph is the image of a
@@ -216,7 +218,7 @@ export function publicKind(object: MathObject) {
     case 'region':
       return object.form === 'parametric' ? 'pregion' : object.form === 'projected' ? 'projected2d' : 'ineq2d';
     case 'scalar-field':
-      return 'scalar2d';
+      return object.dimension === 3 ? 'scalar3d' : 'scalar2d';
     case 'color-field':
       return `${object.space}2d` as const;
     case 'vector-field':
@@ -288,6 +290,8 @@ export function objectNeeds3D(object: MathObject): boolean {
       );
     case 'vector-field':
       return object.components.length === 3;
+    case 'scalar-field':
+      return object.dimension === 3;
     case 'trail':
     case 'label':
       return object.coordinates.length === 3;
@@ -302,7 +306,6 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'family':
       return object.members.some(member => member.needs3D);
     case 'region':
-    case 'scalar-field':
     case 'tensor-field':
     case 'color-field':
     case 'complex-field':

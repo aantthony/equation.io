@@ -13,16 +13,10 @@ function last(rows: string[]) {
   return { kind: row.cls?.object.kind, info: row.info, error: row.error, object: row.cls?.object };
 }
 
-/** The last row's value at a point: a scalar field, value or scalar over
- *  space as [v], a vector as its components. A bare scalar over space draws
- *  nothing, so it is read as the first component of the field (…, 0, 0). */
+/** The last row's value at a point: a scalar field (in the plane or in
+ *  space) or value as [v], a vector as its components. */
 function at(rows: string[], env: Record<string, number>): number[] {
-  let a = analyzeRows(rows);
-  if (a.rows.at(-1)!.error?.includes('field in space')) {
-    a = analyzeRows([...rows.slice(0, -1), `(${rows.at(-1)}, 0, 0)`]);
-    const field = a.rows.at(-1)!.cls?.object;
-    if (field?.kind === 'vector-field') return [evaluate(field.components[0], { t: 0, ...a.constEnv, ...env })];
-  }
+  const a = analyzeRows(rows);
   const row = a.rows[a.rows.length - 1];
   if (row.error) throw new Error(row.error);
   const object = row.cls?.object;

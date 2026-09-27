@@ -64,7 +64,7 @@ object must respect):
 | inequality / chain in x, y | region (+ solid edges) | fill shader |
 | bare scalar in x and/or y (`sin(x)` too: no implicit graph) | scalar field | signed density shader |
 | equation with z | implicit surface | raymarcher |
-| bare scalar with z | error: a field in space, not drawable yet (write `… = 0`) | — |
+| bare scalar with z | scalar field in space | volume raymarcher (emission–absorption cloud) |
 | bare real scalar in u, v alone | density of its values, u, v ~ Uniform(0, 1) | density curve |
 | `revolve(f)`, `revolve(f, y)` | surface of revolution, lowered to the implicit surface `y^2 + z^2 = f(x)^2` | raymarcher |
 | complex-valued expr in w | field lines + equipotentials | level-curve shader |

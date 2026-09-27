@@ -429,7 +429,7 @@ describe('§5 what a row draws', () => {
   });
 
   it('refuses what it cannot draw per pixel, and says what to write', () => {
-    expect(last(['x y z']).error).toMatch(/field in space, which cannot be drawn yet .* = 0/);
+    expect(last(['a = [1, 2]', 'a x y z']).error).toMatch(/family of fields in space .* = \[1\.\.5\]/);
     expect(last(['a = [1, 2]', 'sin(a x)']).error).toMatch(/family of scalar fields .* y = /);
     expect(kind(['a = [1, 2]', 'y = sin(a x)'])).toBe('family'); // two curves
   });

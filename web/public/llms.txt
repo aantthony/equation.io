@@ -326,8 +326,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   not a curve: write `y = sin(x)` for the graph.
 - `z`: using z switches to 3D. `z = sin(x)cos(y)` is a surface;
   `x^2+y^2+z^2=9` is an implicit 3D surface. A bare expression in x, y, z is
-  a field in space, which cannot be drawn yet (an error): write `… = 0` for
-  its surface.
+  a field in space, drawn as a translucent cloud (see Scalar field); write
+  `… = 0` for its surface.
 - `t`: time in seconds. Any row mentioning `t` animates, e.g.
   `y = sin(x - 2t)`.
 - `sys.clock`, `sys.day`: the viewer's wall clock, animating like `t`.
@@ -396,6 +396,19 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   no implicit graph; a row in x alone reads out how to write its curve
   (`y = sin(x)`). A list of fields (`a = [1, 2]; sin(a x)`) is an error: write
   `y = sin(a x)` for the curves.
+- Scalar field in space: a bare expression in x, y and z — `x y z`,
+  `z exp(-sqrt(x^2 + y^2 + z^2)/2)` — is a translucent cloud, tinted the same
+  way (row color positive, complement negative) and denser where the field is
+  larger. The density is relative: the scale is what |f| typically reaches in
+  the view, so `x y z` and a tiny orbital both show, and a slider that only
+  multiplies the field changes nothing. The cloud fills a soft ball around
+  the view's center, fading out before the camera; a field that dies away
+  (an orbital) shows whole, and zooming out shows more of one that does not
+  (`x y z`). An implicit surface in the same
+  graph is seen through the cloud in front of it, so
+  `f(x, y, z) = …; f(x, y, z); f(x, y, z) = 0.5` draws a level surface inside
+  its field. For nested level surfaces instead, write
+  `f(x, y, z) = [1..5]`.
 - Value: a bare expression with no plot coordinate — `2+2`, `sqrt(a)` with a
   slider a, `|A - B|` between named points, `int[0..1] x^2 dx`, `sin(t)` —
   draws nothing (a lone definite integral shades its area) and reads out `= 4` (or `≈ 1.41421`) under the row, live as

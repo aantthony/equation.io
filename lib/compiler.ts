@@ -33,6 +33,7 @@ export type CpuPlan =
   /** The region a family over u ∈ [0, 1] sweeps (see MathObject). */
   | { type: 'projected2d'; relation: 'eq' | 'ineq'; constraints: Array<{ residual: Expr; strict: boolean }> }
   | { type: 'scalar2d'; expr: Expr }
+  | { type: 'scalar3d'; expr: Expr }
   | { type: `${ColorSpace}2d`; channels: Expr[] }
   | { type: 'complex2d'; expr: Expr }
   | { type: 'domain2d'; expr: Expr }
@@ -101,6 +102,7 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
    *  equation (absent when it has no symbolic derivative). */
   | { type: 'projected2d'; relation: 'eq' | 'ineq'; field: string; slope?: string }
   | { type: 'scalar2d'; field: string }
+  | { type: 'scalar3d'; field: string }
   | { type: `${ColorSpace}2d`; space: ColorSpace; field: string; locals: string }
   | { type: 'complex2d'; field: string }
   | { type: 'domain2d'; field: string }
@@ -234,7 +236,7 @@ export function compileCpu(classified: Classified): CpuPlan {
         : { type: 'ineq2d', constraints };
     }
     case 'scalar-field':
-      return { type: 'scalar2d', expr: real(object.expr) };
+      return { type: object.dimension === 3 ? 'scalar3d' : 'scalar2d', expr: real(object.expr) };
     // Like domain coloring, these expressions are rendered per pixel on the GPU.
     case 'color-field':
       return { type: `${object.space}2d`, channels: [...object.channels] };
@@ -504,7 +506,7 @@ export function compileGpu(classified: Classified): GpuPlan {
       return { type: 'ineq2d', params, field, edges: fields.filter(f => f.edge).map(f => f.code) };
     }
     case 'scalar-field':
-      return { type: 'scalar2d', params, field: scalar(object.expr) };
+      return { type: object.dimension === 3 ? 'scalar3d' : 'scalar2d', params, field: scalar(object.expr) };
     case 'tensor-field':
       return {
         type: 'tfield2d',
@@ -615,6 +617,7 @@ export function shaderKey(plan: GpuPlan): string {
     case 'oklch2d':
       return JSON.stringify([plan.type, plan.params, plan.field, plan.locals]);
     case 'scalar2d':
+    case 'scalar3d':
     case 'complex2d':
     case 'domain2d':
     case 'conformal2d':
@@ -669,6 +672,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = expressions(plan.channels);
       break;
     case 'scalar2d':
+    case 'scalar3d':
     case 'complex2d':
     case 'domain2d':
     case 'conformal2d':

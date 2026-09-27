@@ -49,6 +49,7 @@ import {
   shadeRuns,
 } from '../lib/intshade.ts';
 import { compileSampler } from '../lib/vm.ts';
+import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
 import { type Expr, canonicalName, evaluate, freeVars, substVars } from '../lib/expr.ts';
@@ -1126,6 +1127,9 @@ function panelGridFields(p: Panel): Array<GridField | 'x' | 'y'> {
   return gridFields.filter(f => (gridFieldPanels.get(f.name) ?? 0) === i);
 }
 
+/** Each cloud's scale (lib/volume.ts) and the view and sliders it was read under. */
+const volumeScales = new WeakMap<CpuPlan, { key: string; scale: number }>();
+
 /** 2D-only plots (densities, flows, sequences, planar fields) a 3D scene leaves out. */
 const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'scalar2d',
@@ -1558,6 +1562,21 @@ function render() {
           case 'implicit3d':
             scene.implicits.push({ ...gpuFor(eq, 'implicit3d'), color, params, uniforms });
             break;
+          case 'scalar3d': {
+            const env = { ...constEnv, t: time };
+            // The largest the field has been since the view or a slider last
+            // moved: renormalized every frame, a standing wave would never fade.
+            const scale = (center: readonly number[], r: number) => {
+              const now = fieldScale(plot.expr, env, center, r);
+              const key = JSON.stringify([center, r, params.map(p => constEnv[p])]);
+              const last = volumeScales.get(plot);
+              const scale = last?.key === key ? Math.max(last.scale, now) : now;
+              volumeScales.set(plot, { key, scale });
+              return scale;
+            };
+            (scene.volumes ??= []).push({ field: gpuFor(eq, 'scalar3d').field, scale, color, params, uniforms });
+            break;
+          }
           case 'spacecurve': {
             const pts = solveFor(eq, 3, plot.residuals);
             scene.curves.push({ pts: new Float32Array(pts.flat()), color });
