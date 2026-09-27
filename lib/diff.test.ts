@@ -54,6 +54,8 @@ describe('diff', () => {
     // clamp(x², 0, 1), as definitions lower it.
     expect(ddx('min(max(x^2, 0), 1)', { x: 0.5 })).toBeCloseTo(1);
     expect(ddx('min(max(x^2, 0), 1)', { x: 2 })).toBe(0);
+    // Constant in x: plain 0, not a conditional that always gives 0.
+    expect(diff(parseExpr('min(max(a, 0), 2)'), 'x')).toEqual({ kind: 'num', value: 0 });
   });
 
   it('throws for non-smooth functions', () => {

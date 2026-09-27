@@ -162,10 +162,12 @@ export function diff(e: Expr, v: string): Expr {
         // are ignored. clamp(x, lo, hi) arrives here as min(max(x, lo), hi).
         const [a, b, ...rest] = e.args;
         if (rest.length) return diff(call(e.name, call(e.name, a, b), ...rest), v);
+        const [da, db] = [diff(a, v), diff(b, v)];
+        if (isNumVal(da, 0) && isNumVal(db, 0)) return ZERO;
         return {
           kind: 'piecewise',
-          cases: [{ cond: { kind: 'ineq', op: e.name === 'min' ? '<' : '>', l: a, r: b }, value: diff(a, v) }],
-          otherwise: diff(b, v),
+          cases: [{ cond: { kind: 'ineq', op: e.name === 'min' ? '<' : '>', l: a, r: b }, value: da }],
+          otherwise: db,
         };
       }
       if (e.args.length !== 1) throw new NonSmoothError(`Cannot differentiate ${plainFnName(e.name)}.`);
