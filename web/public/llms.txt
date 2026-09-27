@@ -626,6 +626,24 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `n = 6; T[i, j] = {0 <= i < n: {0 <= j < n: mod(i + j, n)}}` is the
   addition table of ℤ/n. Only the cells in view are computed, so a table
   may be unbounded (`T[i, j] = gcd(i, j)`).
+- Graph: `graph(from, to)` or `graph(from, to, label)` draws arrows between
+  numbered vertices, laid out automatically. Its arguments are read as one
+  tuple whose elements are the arrows, so lists combine by the usual rule:
+  with `k = [0..11]; g = [1, 4]`, `graph(k, mod(k + g, 12), g)` is the Cayley
+  graph of ℤ/12 by 1 and 4 (both k's chosen together, g crossing them), and
+  with `Q = [0..2]; S = [0, 1]` and a transition function `step(q, s)`,
+  `graph(Q, step(Q, S), S)` is every transition of a state machine.
+  `graph(P)` takes a list of pairs, `graph([(1, 2), (2, 3)])`. An arrow
+  listed twice is drawn once with its count (×2); an undefined vertex drops
+  its arrow, so a case keeps the ones wanted — composing two multisets of
+  arrows (matrix multiplication, as paths): `graph({A.y = B.x: A.x}, B.y)`.
+  Cases in graph rows may test equality. A panel of graphs has no grid.
+  Put a piecewise inside a function rather than inline over a list:
+  `c(m) = {mod(m, 2) = 0: m/2, 3m + 1}; k = [1..40]; graph(k, c(k))`.
+- `mark(v)` highlights vertex v in the graphs of its panel and reads v out;
+  with a slider or t it walks, e.g. a state machine's run as a recursive
+  function: `run(q, k, m) = {k >= m: q, run(step(q, digit(k)), k + 1, m)};
+  mark(run(0, 0, N))`.
 - Lattice panels: a panel whose rows are all automata and tables (or whose
   view row names index axes) is a lattice. Its grid runs between cells, its
   edges are numbered by index (whole numbers only), and zoomed in far enough

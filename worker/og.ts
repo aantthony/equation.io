@@ -1095,6 +1095,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // Cells computed on the CPU in the app too (lib/automaton.ts), one lookup per pixel.
   automaton: 'draws',
   lattice: 'draws',
+  // Laid out by a force simulation in the app (lib/graph.ts); not yet here.
+  graph: 'fallback',
   // Each of these needs a per-pixel shader — domain coloring, conformal grids,
   // escape-time iteration, line-integral convolution — that a scanline
   // rasterizer cannot reproduce faithfully at preview size. They get the

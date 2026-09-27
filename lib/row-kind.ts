@@ -103,6 +103,8 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   histogram: 'histogram',
   automaton:
     'cellular automaton on the integer lattice: a 1D rule draws its space-time diagram (cells across, steps down), a 2D rule one generation of its board, stepping with t',
+  graph:
+    'graph drawn node-link: one arrow per (from, to) element, parallel edges counted, labels on edges; laid out automatically',
   lattice: 'table of values on the integer lattice, one cell per (i, j), shaded by value and printed when zoomed in',
   density: 'probability density curve of a random variable',
   pmf: 'probability mass function (stems) of a discrete random variable',
