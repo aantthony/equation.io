@@ -433,7 +433,7 @@ export function compileGpu(classified: Classified): GpuPlan {
   const typed = (expr: Expr) => compileTyped(sub(expr));
   const scalar = (expr: Expr) => typed(expr).code;
   // P(u, v) with its tangents, when they are cheaper than the renderer's
-  // finite differences (four more evaluations of P per pixel). Differentiating
+  // finite differences (four more evaluations of P per vertex). Differentiating
   // repeats every inlined definition in each product- and chain-rule term, so
   // a long P can have tangents many times its size: the belt trick's are 12×.
   // They are built a component at a time and abandoned once over budget.
