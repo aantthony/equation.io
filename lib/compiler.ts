@@ -437,6 +437,18 @@ export function compileGpu(classified: Classified): GpuPlan {
       return undefined;
     }
   };
+  // P(u, v) with its tangents, when they are cheaper than the renderer's
+  // finite differences (four more evaluations of P per vertex). Differentiating
+  // repeats every inlined definition in each product- and chain-rule term, so
+  // a long P can have tangents many times its size: the belt trick's are 12×.
+  const parametric = (coordinates: readonly Expr[]) => {
+    const comps = coordinates.map(e => toGLSL(sub(e))) as [string, string, string];
+    const du = gradient(coordinates, 'u');
+    const dv = gradient(coordinates, 'v');
+    const size = (glsl?: string[]) => (glsl ?? []).reduce((n, c) => n + c.length, 0);
+    const cost = size(du) + size(dv);
+    return cost <= 4096 || cost <= 4 * size(comps) ? { comps, du, dv } : { comps };
+  };
   switch (object.kind) {
     case 'curve':
       if (object.form === 'parametric') break;
@@ -447,14 +459,7 @@ export function compileGpu(classified: Classified): GpuPlan {
         levels: object.levels ? compileGridGpu(object.levels) : undefined,
       };
     case 'surface':
-      if (object.form === 'parametric')
-        return {
-          type: 'psurface',
-          params,
-          comps: object.coordinates.map(e => toGLSL(sub(e))) as [string, string, string],
-          du: gradient(object.coordinates, 'u'),
-          dv: gradient(object.coordinates, 'v'),
-        };
+      if (object.form === 'parametric') return { type: 'psurface', params, ...parametric(object.coordinates) };
       else {
         let grad: [string, string, string] | undefined;
         try {
@@ -472,13 +477,7 @@ export function compileGpu(classified: Classified): GpuPlan {
       // In a 3D scene a planar region lies in z = 0, drawn like any surface.
       if (object.form === 'parametric') {
         const coordinates: Expr[] = [...object.coordinates, zero];
-        return {
-          type: 'psurface',
-          params,
-          comps: coordinates.map(e => toGLSL(sub(e))) as [string, string, string],
-          du: gradient(coordinates, 'u'),
-          dv: gradient(coordinates, 'v'),
-        };
+        return { type: 'psurface', params, ...parametric(coordinates) };
       }
       if (object.form === 'projected') {
         const residuals = object.constraints.map(c => c.residual);

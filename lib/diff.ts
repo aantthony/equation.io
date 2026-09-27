@@ -2,7 +2,7 @@ import { structuralDiagnostic } from './expr.ts';
 /**
  * Symbolic differentiation over the plotting AST, with just enough
  * simplification (constant folding, 0/1 pruning) that the emitted GLSL stays
- * readable and cheap. Non-smooth functions (min, max, floor, …) throw;
+ * readable and cheap. Discontinuous functions (floor, mod, …) throw;
  * callers fall back to finite differences.
  */
 import { ANGLE_FN, ANGLE_RATE_FN, type Expr, INTERVAL, plainFnName, sameList } from './expr.ts';
@@ -157,6 +157,17 @@ export function diff(e: Expr, v: string): Expr {
         // φ′ = φ·(−z·z′ − s′/s): the −z z′ from the exponent, −s′/s from 1/s.
         return mul(pdf, sub(mul(neg(z), dz), div(diff(s, v), s)));
       }
+      if ((e.name === 'min' || e.name === 'max') && e.args.length >= 2) {
+        // The derivative of whichever argument is chosen; like abs, the kinks
+        // are ignored. clamp(x, lo, hi) arrives here as min(max(x, lo), hi).
+        const [a, b, ...rest] = e.args;
+        if (rest.length) return diff(call(e.name, call(e.name, a, b), ...rest), v);
+        return {
+          kind: 'piecewise',
+          cases: [{ cond: { kind: 'ineq', op: e.name === 'min' ? '<' : '>', l: a, r: b }, value: diff(a, v) }],
+          otherwise: diff(b, v),
+        };
+      }
       if (e.args.length !== 1) throw new NonSmoothError(`Cannot differentiate ${plainFnName(e.name)}.`);
       const a = e.args[0];
       const da = diff(a, v);
@@ -217,7 +228,7 @@ export function diff(e: Expr, v: string): Expr {
         case 'coth':
           return chain(sub(ONE, pow(call('coth', a), num(2))));
         default:
-          // min/max/floor/mod/… (and gamma: digamma isn't in the language):
+          // floor/mod/… (and gamma: digamma isn't in the language):
           // no smooth derivative; caller falls back to FD.
           throw new NonSmoothError(`Cannot differentiate ${plainFnName(e.name)}.`);
       }
