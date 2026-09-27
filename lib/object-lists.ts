@@ -571,11 +571,16 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       throw new Error('This object family is too large to expand (32768 nodes).');
     const lists: ListValue[] = [];
     const markers = new Map<Expr, number>();
+    // Inside a recursive function's loop, its params are its own names, not
+    // the document lists or matrices they may share a spelling with.
+    let bound: ReadonlySet<string> = new Set();
+    const mentionsBound = (node: Expr): boolean => bound.size > 0 && [...freeVars(node)].some(v => bound.has(v));
     // A matrix name is the matrix, not a list of row-points, along the row's
     // own algebra (2 M, M v). Those rows are a list only where a call asks for
     // points — hull(M), distance(P, A) — and there still not as the matrix
     // factor of a product.
     const visit = (node: Expr, asMatrix = true): Expr => {
+      if (node.kind === 'var' && bound.has(node.name)) return node;
       if (asMatrix && node.kind === 'var' && defs.mats.has(node.name)) {
         // M = ((a, 0), (0, 1)) is a multiset of matrices: one per member,
         // chosen with every other use of a, so M Q pairs up with Q = M P.
@@ -592,7 +597,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       // per element: a value for a row of its own, but no factor a member can
       // evaluate. Its lists expand inside it instead, so each member holds
       // the matrix e^(th_k J) as algebra and applies it.
-      const values = listValue(node);
+      const values = mentionsBound(node) ? null : listValue(node);
       if (values && !values.items.some(it => tensorOfNode(it))) {
         if (values.items.length > 100000) throw new Error('Point-list arithmetic needs at most 100000 values.');
         const marker = num(0);
@@ -621,6 +626,16 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
             cases: node.cases.map(c => ({ cond: visit(c.cond), value: visit(c.value) })),
             otherwise: node.otherwise && visit(node.otherwise),
           };
+        case 'loop': {
+          const seeds = map(node.seeds);
+          const outer = bound;
+          bound = new Set([...outer, ...node.params]);
+          try {
+            return { ...node, seeds, body: visit(node.body, asMatrix) };
+          } finally {
+            bound = outer;
+          }
+        }
         default:
           return mapChildren(node, n => visit(n, asMatrix));
       }
