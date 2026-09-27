@@ -75,19 +75,21 @@
     <button id="state-reset" type="button" aria-label="Restart the simulation" title="Restart the simulation" hidden>↻</button>
     <div id="equations" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Equations, one per line" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="enter"></div>
     <!-- CSV files dropped onto the app, kept in this browser (filestore.ts).
-         Hidden until there is one; sits above #examples so the panel's link
-         row stays anchored to the examples button. The way IN when there is
+         Hidden until there is one; sits above #panel-footer so the panel's link
+         row stays at the bottom. The way IN when there is
          nothing here yet is the "+ csv" link below, beside github. -->
     <details id="data-files" hidden>
       <summary>data files</summary>
       <div id="data-files-list"></div>
     </details>
-    <button id="examples" type="button" aria-haspopup="dialog">examples</button>
-    <div id="panel-links">
-      <button type="button" id="try-another" title="Load another featured graph">random</button>
-      <button id="open-csv" type="button" title="Plot the columns of a CSV file (you can also drop one anywhere)">+ csv</button>
-      <a href="https://github.com/aantthony/equation.io" title="Source code on GitHub" rel="noopener">github</a>
-      <a id="about-link" href="/about/">about</a>
+    <div id="panel-footer">
+      <button id="examples" type="button" aria-haspopup="dialog">examples</button>
+      <div id="panel-links">
+        <button type="button" id="try-another" title="Load another featured graph">random</button>
+        <button id="open-csv" type="button" title="Plot the columns of a CSV file (you can also drop one anywhere)">+ csv</button>
+        <a href="https://github.com/aantthony/equation.io" title="Source code on GitHub" rel="noopener">github</a>
+        <a id="about-link" href="/about/">about</a>
+      </div>
     </div>
   </div>
   <!-- The panel's collapsed form: swiping the panel off-screen (touch; see

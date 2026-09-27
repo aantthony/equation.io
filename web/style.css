@@ -743,18 +743,21 @@ body.file-drag::after {
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-#examples {
-  /* A row of its own under the equations; #panel-links sits on its right. */
+/* The panel's bottom row: examples on the left, the links on the right. Only
+   the labels are buttons, so the space between them is inert. */
+#panel-footer {
   flex: none;
-  align-self: stretch;
-  border: none;
+  display: flex;
+  align-items: baseline;
   border-top: 1px solid var(--divider);
-  background: none;
   margin-top: 4px;
-  padding: 6px;
-  text-align: left;
-  font: inherit;
   font-size: 12px;
+}
+#examples {
+  border: none;
+  background: none;
+  padding: 6px;
+  font: inherit;
   color: var(--muted);
   cursor: pointer;
 }
@@ -819,10 +822,8 @@ body.file-drag::after {
 }
 
 #panel-links {
-  position: absolute;
-  right: 14px;
-  /* sits on the examples row, level with its label */
-  bottom: 14px;
+  margin-left: auto;
+  padding-right: 6px;
   font-size: 12px;
   display: flex;
   gap: 10px;
@@ -1163,8 +1164,7 @@ body.file-drag::after {
 
 /* Framed graphs start with the editor collapsed; hide chrome that belongs
    to the full site. The y= chip and theme toggle stay. */
-html[data-embed] #panel-links,
-html[data-embed] #examples,
+html[data-embed] #panel-footer,
 html[data-embed] #data-files,
 html[data-embed] #shot,
 html[data-embed] #rec,
