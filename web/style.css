@@ -853,7 +853,7 @@ body.file-drag::after {
   max-height: none;
   padding: 0;
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: 4px;
   background: var(--page-bg);
   color: var(--text);
   box-shadow: 0 12px 48px var(--panel-shadow);
@@ -884,7 +884,7 @@ body.file-drag::after {
   min-width: 0;
   padding: 6px 10px;
   border: 1px solid var(--panel-border);
-  border-radius: 6px;
+  border-radius: 2px;
   background: var(--page-bg);
   color: var(--text);
   font: inherit;
@@ -909,7 +909,7 @@ body.file-drag::after {
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: 6px;
+  border-radius: 2px;
   background: none;
   color: var(--muted);
   font-size: 22px;
@@ -941,7 +941,7 @@ body.file-drag::after {
   min-width: 0;
   padding: 0 0 8px;
   border: 1px solid var(--panel-border);
-  border-radius: 8px;
+  border-radius: 2px;
   background: none;
   overflow: hidden;
   text-align: left;
@@ -952,7 +952,7 @@ body.file-drag::after {
 .exd-card.selected,
 .exd-card:focus-visible {
   border-color: var(--accent);
-  background: var(--ex-hover-bg);
+  background: var(--row-focus);
   outline: none;
 }
 .exd-card img {
@@ -977,7 +977,7 @@ body.file-drag::after {
     4px -4px 0 0 var(--panel-border);
 }
 .exd-card.exd-cat img {
-  border-radius: 7px 7px 0 0;
+  border-radius: 1px 1px 0 0;
 }
 .exd-card.exd-cat.selected {
   box-shadow:
@@ -988,7 +988,11 @@ body.file-drag::after {
   font-weight: 600;
 }
 .exd-card code {
-  padding: 0 8px;
+  /* Set like an equation row: a bar down the left, on the row-focus tint. */
+  margin: 4px 8px 0;
+  padding: 3px 6px 3px 8px;
+  border-left: 3px solid var(--accent);
+  background: var(--row-focus);
   color: var(--ex-code);
   font:
     10.5px 'Eq Math Glyphs',
@@ -1007,7 +1011,7 @@ body.file-drag::after {
 }
 .exd-tag {
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: 2px;
   background: var(--ex-hover-bg);
   color: var(--summary);
   font-size: 10.5px;
@@ -1018,6 +1022,10 @@ body.file-drag::after {
   color: #fff;
 }
 .exd-cat code {
+  margin: 0;
+  padding: 0 8px;
+  border: none;
+  background: none;
   font-family: inherit;
   font-size: 11px;
 }
