@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { layoutPanels, linkRoot, panelAt, panelIndices, parseDividerRow, parseGridRow, splitsOf } from './panels.ts';
-import { formatCameraRow, formatViewRow, parseViewRow } from './view.ts';
+import { prepareDocument } from './analysis.ts';
+import { fitPanelWindow, formatCameraRow, formatViewRow, linkedWindow, parseViewRow } from './view.ts';
 
 describe('divider rows', () => {
   it('reads placement, size and shared axes in any order', () => {
@@ -200,5 +201,57 @@ describe('panels in a document', () => {
     const a = analyzeRows(Array(9).fill('---'));
     expect(a.rows[6].error).toBeUndefined();
     expect(a.rows[7].error).toMatch(/at most 8 panels/);
+  });
+});
+
+describe('shared windows', () => {
+  const host = { cx: 1, cy: 2, upp: 0.01, ratio: 2 };
+  const own = { cx: -5, cy: -5, upp: 0.1, ratio: 4 };
+
+  it('share x: center and units across, keeping the panel ratio', () => {
+    expect(linkedWindow(own, { x: true, y: false }, { x: host })).toEqual({ cx: 1, cy: -5, upp: 0.01, ratio: 4 });
+  });
+
+  it('share y: center and units up, keeping the panel ratio', () => {
+    const w = linkedWindow(own, { x: false, y: true }, { y: host });
+    expect(w.cy).toBe(2);
+    expect(w.upp / w.ratio!).toBeCloseTo(host.upp / host.ratio);
+    expect(w.ratio).toBe(4);
+  });
+
+  it('share both: the whole window, whatever the panel row says', () => {
+    const shared = { x: true, y: true };
+    const linked = linkedWindow(own, shared, { x: host, y: host });
+    expect(linked).toEqual(host);
+    expect(fitPanelWindow({ kind: 'view', x: [-5, 5], y: [-1, 1] }, 100, 100, shared, linked)).toEqual(host);
+  });
+
+  it('frames the unshared axis from the row, exactly', () => {
+    const linked = linkedWindow(own, { x: true, y: false }, { x: host });
+    const fit = fitPanelWindow({ kind: 'view', y: [-4, 10] }, 200, 70, { x: true, y: false }, linked);
+    expect(fit.upp).toBe(host.upp);
+    expect(fit.cy).toBe(3);
+    expect(70 * (fit.upp / fit.ratio!)).toBeCloseTo(14);
+  });
+
+  it('fits an unshared panel as fitView2D does', () => {
+    const none = { x: false, y: false };
+    expect(fitPanelWindow({ kind: 'view', x: [-2, 2] }, 400, 100, none, own)).toEqual({
+      cx: 0,
+      cy: 0,
+      upp: 0.01,
+      ratio: 1,
+    });
+  });
+});
+
+describe('viewport heads the document owns', () => {
+  it('reads a view/camera/grid function definition as a definition', () => {
+    const doc = prepareDocument(['grid(x) = x^2', 'view(t) = 2t', 'grid(off)', '---']);
+    expect(doc.statements.map(s => s.kind)).toEqual(['definition', 'definition', 'viewport', 'viewport']);
+  });
+
+  it('refuses a grid over a name the grid cannot draw', () => {
+    expect(analyzeRows(['P = (x, y)', 'grid(P_x)']).rows[1].error).toMatch(/not a coordinate/);
   });
 });

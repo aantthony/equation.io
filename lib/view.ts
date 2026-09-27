@@ -295,3 +295,60 @@ export function scaleViewAt(
     ratio: upp / uppY,
   };
 }
+
+/** A 2D window: center, math units per pixel across, and pixels per y unit
+ *  over pixels per x unit (web/render2d.ts View2D). */
+export interface Window2D {
+  cx: number;
+  cy: number;
+  upp: number;
+  ratio?: number;
+}
+
+const uppY = (v: Window2D) => v.upp / (v.ratio ?? 1);
+
+/**
+ * A panel's window with its shared axes taken from the panels that own them
+ * (`from.x`, `from.y`; see lib/panels.ts linkRoot). Sharing x shares the center and the
+ * units per pixel across, and the panel keeps its own ratio, so zooming one
+ * zooms the other's y by the same factor; sharing y is the transpose. Sharing
+ * both takes the whole window.
+ */
+export function linkedWindow(
+  own: Window2D,
+  shared: { x: boolean; y: boolean },
+  from: { x?: Window2D; y?: Window2D },
+): Window2D {
+  const x = shared.x ? from.x : undefined;
+  const y = shared.y ? from.y : undefined;
+  if (x && y) return { cx: x.cx, cy: y.cy, upp: x.upp, ratio: x.upp / uppY(y) };
+  if (x) return { ...own, cx: x.cx, upp: x.upp };
+  if (y) return { ...own, cy: y.cy, upp: uppY(y) * (own.ratio ?? 1) };
+  return { ...own };
+}
+
+/**
+ * The window a panel's view row asks for, given the window its shared axes
+ * already put it in (`linked`, from linkedWindow). A panel sharing x frames
+ * y alone — the row's y range fits the panel exactly, through its ratio —
+ * and one sharing y frames x alone. One sharing both has nothing to frame.
+ */
+export function fitPanelWindow(
+  spec: View2DSpec,
+  w: number,
+  h: number,
+  shared: { x: boolean; y: boolean },
+  linked: Window2D,
+): Window2D {
+  if (shared.x && shared.y) return { ...linked };
+  if (shared.x) {
+    if (!spec.y) return { ...linked };
+    return { ...linked, cy: (spec.y[0] + spec.y[1]) / 2, ratio: linked.upp / ((spec.y[1] - spec.y[0]) / h) };
+  }
+  if (shared.y) {
+    if (!spec.x) return { ...linked };
+    const upp = (spec.x[1] - spec.x[0]) / w;
+    return { ...linked, cx: (spec.x[0] + spec.x[1]) / 2, upp, ratio: upp / uppY(linked) };
+  }
+  return { ratio: 1, ...fitView2D(spec, w, h) };
+}

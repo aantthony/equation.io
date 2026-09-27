@@ -21,8 +21,8 @@ import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler, regionSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
-import { type ViewSpec, clampPhi, fitView2D } from '../lib/view.ts';
-import { type GridRowSpec, layoutPanels, panelIndices, splitsOf } from '../lib/panels.ts';
+import { type ViewSpec, clampPhi, fitPanelWindow, linkedWindow } from '../lib/view.ts';
+import { type GridRowSpec, layoutPanels, linkRoot, panelIndices, splitsOf } from '../lib/panels.ts';
 import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
@@ -1298,19 +1298,18 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
         }
       }
     } else {
+      // Shared axes come from the panels owning them, as in the app
+      // (web/main.ts applyViewportRows); the view row frames the rest.
       const box = spec('view');
-      let view: View2D = box ? fitView2D(box, sub.w, sub.h) : { cx: 0, cy: 0, upp: 12 / Math.min(sub.w, sub.h) };
-      // Shared axes follow the panel split from (web/main.ts fitPanelView).
-      const host = views[panel.host];
-      if (k && host && panel.shared.x) {
-        const ratio = box?.y ? host.upp / ((box.y[1] - box.y[0]) / sub.h) : (view.ratio ?? 1);
-        view = { ...view, cx: host.cx, upp: host.upp, ratio };
-        if (box?.y) view.cy = (box.y[0] + box.y[1]) / 2;
-      }
-      if (k && host && panel.shared.y) {
-        const hostUppY = host.upp / (host.ratio ?? 1);
-        view = { ...view, cy: host.cy, ratio: view.upp / hostUppY };
-      }
+      const root = (axis: 'x' | 'y') => {
+        const r = linkRoot(layout, k, axis);
+        return r === k ? undefined : views[r];
+      };
+      const linked = linkedWindow({ cx: 0, cy: 0, upp: 12 / Math.min(sub.w, sub.h) }, panel.shared, {
+        x: root('x'),
+        y: root('y'),
+      });
+      const view: View2D = box ? fitPanelWindow(box, sub.w, sub.h, panel.shared, linked) : linked;
       views[k] = view;
       if (gridMode !== 'off') drawGrid2D(sub, view, gridMode === 'axes');
       for (const row of rows) {

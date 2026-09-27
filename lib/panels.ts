@@ -21,7 +21,7 @@
  * same center and scale, so stacked panels line up column for column, and
  * panning either pans both. `shared y` does the same for rows.
  */
-import { freeVars, parseExpr } from './expr.ts';
+import { parseExpr } from './expr.ts';
 
 export type SplitPlace = 'right' | 'left' | 'below' | 'above' | 'inset';
 export type InsetCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
@@ -161,17 +161,19 @@ export function parseGridRow(text: string): GridRowSpec | null {
   return { kind: 'grid', mode: 'coords', coords };
 }
 
-/** Whether `name` can draw as a grid family: x, y, or a planar coordinate field. */
-export function gridCoordinateProblem(name: string, fields: ReadonlyMap<string, import('./expr.ts').Expr>) {
-  if (name === 'x' || name === 'y') return null;
+/** Why `name` cannot draw as a grid family, or null when it can: x, y, or
+ *  one of the document's planar coordinate fields (`gridFields`, the list the
+ *  renderers draw from). `fields` tells a field that is not planar apart
+ *  from a name that is no field at all. */
+export function gridCoordinateProblem(
+  name: string,
+  gridFields: ReadonlyArray<{ name: string }>,
+  fields: ReadonlyMap<string, unknown>,
+): string | null {
+  if (name === 'x' || name === 'y' || gridFields.some(f => f.name === name)) return null;
   if (name === 'z') return 'z has no level sets in the plane; a grid draws x, y, or coordinates over them.';
-  const field = fields.get(name);
-  if (!field)
-    return `${name} is not a coordinate — define it as a function of x and y first, like r = sqrt(x^2 + y^2).`;
-  const vars = freeVars(field);
-  if (vars.has('z')) return `${name} uses z, so it has no level sets in the plane to draw.`;
-  if (vars.has('u') || vars.has('v')) return `${name} is a curve or surface over u, v — not a coordinate.`;
-  return null;
+  if (fields.has(name)) return `${name} is not a coordinate over the plane (it uses z, u or v, or is a point's part).`;
+  return `${name} is not a coordinate — define it as a function of x and y first, like r = sqrt(x^2 + y^2).`;
 }
 
 /** Each row's panel: 0 until the first divider, then one more per divider.

@@ -922,6 +922,8 @@ export class Renderer2D {
   private cache: ProgramCache;
   /** Cell textures by the shade buffer they were uploaded from. */
   private cellTextures = new Map<Uint8Array, WebGLTexture>();
+  /** Shade buffers drawn since the last endFrame. */
+  private cellsDrawn = new Set<Uint8Array>();
   constructor(
     private gl: WebGL2RenderingContext,
     private quad: { draw(): void },
@@ -930,7 +932,7 @@ export class Renderer2D {
   }
 
   /** The texture for these cells, uploaded once per buffer; textures no
-   *  layer drew this frame are dropped. */
+   *  layer drew this frame are dropped (endFrame). */
   private cellTexture(c: Cells2D): WebGLTexture {
     const { gl } = this;
     let tex = this.cellTextures.get(c.shades);
@@ -1039,14 +1041,8 @@ export class Renderer2D {
         gl.uniform1f(gl.getUniformLocation(prog, 'uMinor'), lv.minor);
       });
     }
-    const drawn = new Set(layers.cells?.map(c => c.shades));
-    for (const [shades, tex] of this.cellTextures) {
-      if (!drawn.has(shades)) {
-        gl.deleteTexture(tex);
-        this.cellTextures.delete(shades);
-      }
-    }
     for (const c of layers.cells ?? []) {
+      this.cellsDrawn.add(c.shades);
       const tex = this.cellTexture(c);
       drawProgram(CELLS_FRAG, c.color, undefined, undefined, prog => {
         gl.activeTexture(gl.TEXTURE0);
@@ -1070,6 +1066,18 @@ export class Renderer2D {
     for (const s of layers.scalars ?? []) drawField(s, scalarFrag);
     for (const c of layers.complexes ?? []) drawField(c, complexFrag);
     for (const c of layers.curves ?? []) drawField(c, curveFrag);
+  }
+
+  /** Drop cell textures no render drew since the last call: once per frame,
+   *  after every panel of a split view has rendered. */
+  endFrame() {
+    for (const [shades, tex] of this.cellTextures) {
+      if (!this.cellsDrawn.has(shades)) {
+        this.gl.deleteTexture(tex);
+        this.cellTextures.delete(shades);
+      }
+    }
+    this.cellsDrawn.clear();
   }
 }
 

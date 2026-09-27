@@ -155,6 +155,11 @@ export interface Analysis {
   document: PreparedDocument;
 }
 
+/** A viewport row by its text: a `---` divider, or a view/camera/grid call
+ *  that is not the definition of a function by that name (`grid(x) = …`). */
+export const isViewportText = (text: string): boolean =>
+  isDividerRow(text) || (/^(view|camera|grid)\s*\(/i.test(text) && !scanDefinition(text));
+
 /** No source splitting here: one input row remains one result, including blanks. */
 export function prepareDocument(
   sources: readonly (string | RowSource)[],
@@ -174,7 +179,7 @@ export function prepareDocument(
       ? 'blank'
       : source.text.startsWith('#')
         ? 'comment'
-        : /^(view|camera|grid)\s*\(/i.test(source.text) || isDividerRow(source.text)
+        : isViewportText(source.text)
           ? 'viewport'
           : seqScans[i]
             ? 'sequence'
@@ -613,8 +618,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     try {
       const badRow = badTableRow(row.text);
       if (badRow) throw new Error(badRow);
-      // A user's own grid(…) function is theirs; the rest are viewport rows.
-      const view = fnNames.has('grid') && /^\s*grid\s*\(/.test(row.text) ? null : parseViewRow(row.text, ropts.consts!);
+      // A call to the user's own view/camera/grid function is theirs.
+      const head = /^\s*(view|camera|grid)\s*\(/.exec(row.text);
+      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!);
       if (view) {
         // Each panel frames itself: a divider starts a fresh set.
         if (view.kind === 'split') {
@@ -628,7 +634,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         }
         if (view.kind === 'grid')
           for (const name of view.coords ?? []) {
-            const problem = gridCoordinateProblem(name, defs.fields);
+            const problem = gridCoordinateProblem(name, gridFields, defs.fields);
             if (problem) throw new Error(problem);
           }
         seenViewKinds.add(view.kind);

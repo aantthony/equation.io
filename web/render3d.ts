@@ -1117,6 +1117,12 @@ export class Renderer3D {
       this.quad.draw();
       gl.depthMask(true);
     }
+  }
+
+  /** Free retained geometry no render drew since the last call. Once per
+   *  frame, after every panel has rendered: a split view renders several
+   *  scenes a frame, and each must keep the others' meshes. */
+  endFrame() {
     this.geometry.endFrame();
   }
 }

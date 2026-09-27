@@ -8,7 +8,7 @@ import {
   compileGridGpu,
   cpuStructureKey,
 } from '../lib/compiler.ts';
-import { analyzePrepared, prepareDocument } from '../lib/analysis.ts';
+import { analyzePrepared, isViewportText, prepareDocument } from '../lib/analysis.ts';
 import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
 import { complexRootLabel } from '../lib/complex-label.ts';
 
@@ -77,7 +77,9 @@ import {
   type ViewSpec,
   clampPhi,
   scaleViewAt,
+  fitPanelWindow,
   fitView2D,
+  linkedWindow,
   formatCameraRow,
   formatViewRow,
   formatViewSpec,
@@ -395,13 +397,17 @@ const overlayCtx = overlay.getContext('2d')!;
 // --- panels ---
 //
 // `---` rows split the canvas into panels (lib/panels.ts). Each has its own
-// window, camera, 2D-or-3D mode, seeds and grabbable points, and its own
-// renderers, so a 3D panel's retained geometry survives a 2D panel's frame.
+// window, camera, 2D-or-3D mode, seeds and grabbable points; the renderers
+// are shared, drawing each panel into its own viewport, and free what no
+// panel drew once per frame (endFrame).
 // `view`, `camera`, `mode`, `drops` and `grabbable` name the current panel's:
 // render() points them at each panel in turn, and a gesture at the panel
 // under the pointer, so the code below keeps reading one viewport.
 
 interface Panel {
+  /** Which panel this is across edits: the id of the divider row that opens
+   *  it, 0 for the first. A divider added above keeps the panels below it. */
+  key: number;
   layout: PanelLayout;
   view: View2D;
   camera: Camera3D;
@@ -422,14 +428,16 @@ interface Panel {
   grabs: Grabbable[];
   /** Set until the panel has a size, when its opening zoom is picked. */
   fresh: boolean;
-  r2d: Renderer2D;
-  r3d: Renderer3D;
 }
+
+const r2d = new Renderer2D(gl, quad);
+const r3d = new Renderer3D(gl, quad);
 
 const defaultCamera = (): Camera3D => ({ target: [0, 0, 0], radius: 14, theta: -Math.PI / 3, phi: Math.PI / 5.5 });
 
-function makePanel(): Panel {
+function makePanel(key: number): Panel {
   return {
+    key,
     layout: { rect: { x: 0, y: 0, w: 0, h: 0 }, host: 0, inset: false, shared: { x: false, y: false } },
     view: { cx: 0, cy: 0, upp: 0.01 },
     camera: defaultCamera(),
@@ -442,12 +450,10 @@ function makePanel(): Panel {
     drops: [],
     grabs: [],
     fresh: true,
-    r2d: new Renderer2D(gl, quad),
-    r3d: new Renderer3D(gl, quad),
   };
 }
 
-const panels: Panel[] = [makePanel()];
+const panels: Panel[] = [makePanel(0)];
 /** The panel gestures, hover and voice mode act on: the one under the pointer. */
 let activePanel = panels[0];
 let cur = panels[0];
@@ -514,12 +520,13 @@ function activate(p: Panel) {
  * its divider and the next. A panel is 3D when one of its rows is.
  */
 function syncPanels() {
-  const splits = splitsOf(equations.map(e => ({ view: e.error ? undefined : e.viewSpec })));
-  while (panels.length < splits.length + 1) panels.push(makePanel());
-  for (const p of panels.splice(splits.length + 1)) {
-    p.r3d.clearGeometry();
-    if (activePanel === p) activePanel = panels[0];
-  }
+  const rows = equations.map(e => ({ view: e.viewSpec }));
+  const splits = splitsOf(rows);
+  const byKey = new Map(panels.map(p => [p.key, p]));
+  const keys = [0, ...equations.filter(e => e.viewSpec?.kind === 'split').map(e => e.id)];
+  panels.splice(0, panels.length, ...keys.map(k => byKey.get(k) ?? makePanel(k)));
+  if (!panels.includes(activePanel)) activePanel = panels[0];
+  if (!panels.includes(cur)) cur = activePanel;
   const dpr = window.devicePixelRatio || 1;
   const layout = layoutPanels(splits, canvas.width, canvas.height, Math.round(12 * dpr));
   panels.forEach((p, i) => {
@@ -543,30 +550,50 @@ function syncPanels() {
   usePanel(cur);
 }
 
+/** The panels owning panel p's shared axes (lib/panels.ts linkRoot); an
+ *  axis p does not share is its own. */
+function linkRoots(p: Panel): { x: Panel; y: Panel } {
+  const layouts = panels.map(q => q.layout);
+  const k = panels.indexOf(p);
+  return { x: panels[linkRoot(layouts, k, 'x')] ?? p, y: panels[linkRoot(layouts, k, 'y')] ?? p };
+}
+
 /**
- * Carry shared axes between panels (`--- below, shared x`): the panel just
- * moved pushes its shared axes up to the panel that owns them, and every
- * sharing panel then takes them from there. Sharing x shares the center and
- * the units per pixel across; each panel keeps its own ratio, so zooming one
- * zooms the other's y by the same factor.
+ * Carry shared axes between panels (`--- below, shared x`, lib/view.ts
+ * linkedWindow). A panel a gesture `moved` first pushes its shared axes up
+ * to the panels that own them; then every sharing panel takes them from
+ * there, in panel order, so an owner (always earlier) is settled before the
+ * panels that follow it. Without `moved` the owners win: a row edited in an
+ * owner reaches every panel sharing it. Returns the panels whose window
+ * changed.
  */
-function syncLinks(moved: Panel) {
-  const layouts = panels.map(p => p.layout);
-  const copy = (from: Panel, to: Panel, axis: 'x' | 'y') => {
-    if (from === to) return;
-    if (axis === 'x') {
-      to.view.cx = from.view.cx;
-      to.view.upp = from.view.upp;
-    } else {
-      to.view.cy = from.view.cy;
-      to.view.upp = (from.view.upp / (from.view.ratio ?? 1)) * (to.view.ratio ?? 1);
-    }
+function syncLinks(moved: Panel | null): Set<Panel> {
+  const changed = new Set<Panel>();
+  const assign = (p: Panel, w: View2D) => {
+    const v = p.view;
+    if (v.cx === w.cx && v.cy === w.cy && v.upp === w.upp && (v.ratio ?? 1) === (w.ratio ?? 1)) return;
+    Object.assign(v, w);
+    changed.add(p);
   };
-  const i = panels.indexOf(moved);
-  for (const axis of ['x', 'y'] as const) {
-    if (i >= 0) copy(moved, panels[linkRoot(layouts, i, axis)], axis);
-    panels.forEach((p, k) => copy(panels[linkRoot(layouts, k, axis)], p, axis));
+  if (moved) {
+    const roots = linkRoots(moved);
+    const m = moved.view;
+    const { shared } = moved.layout;
+    if (shared.x && shared.y && roots.x === roots.y) assign(roots.x, { ...m });
+    else {
+      if (shared.x && roots.x !== moved) assign(roots.x, { ...roots.x.view, cx: m.cx, upp: m.upp });
+      if (shared.y && roots.y !== moved) {
+        const r = roots.y.view;
+        assign(roots.y, { ...r, cy: m.cy, upp: (m.upp / (m.ratio ?? 1)) * (r.ratio ?? 1) });
+      }
+    }
   }
+  for (const p of panels) {
+    const roots = linkRoots(p);
+    const from = { x: roots.x === p ? undefined : roots.x.view, y: roots.y === p ? undefined : roots.y.view };
+    assign(p, linkedWindow(p.view, p.layout.shared, from));
+  }
+  return changed;
 }
 
 let capture: ReturnType<typeof attachCapture> | undefined;
@@ -765,38 +792,19 @@ function viewportRow(kind: ViewSpec['kind'], p: Panel = cur): Equation | undefin
   return equations.find(eq => !eq.error && eq.viewSpec?.kind === kind && (eq.panel ?? 0) === i);
 }
 
-/**
- * The window a view row asks for. A panel sharing x with another takes its
- * x from there, so its row frames y alone (and the other way about): the
- * row's y range then fits the panel exactly, through the panel's ratio.
- */
-function fitPanelView(p: Panel, spec: Extract<ViewSpec, { kind: 'view' }>): View2D {
-  const { w, h } = p.layout.rect;
-  const { x: sx, y: sy } = p.layout.shared;
-  if (!sx && !sy) return { ratio: 1, ...fitView2D(spec, w, h) };
-  const fit: View2D = { ...p.view };
-  if (sx && spec.y) {
-    fit.cy = (spec.y[0] + spec.y[1]) / 2;
-    fit.ratio = p.view.upp / ((spec.y[1] - spec.y[0]) / h);
-  }
-  if (sy && spec.x) {
-    fit.cx = (spec.x[0] + spec.x[1]) / 2;
-    fit.upp = (spec.x[1] - spec.x[0]) / w;
-    fit.ratio = fit.upp / (p.view.upp / (p.view.ratio ?? 1));
-  }
-  return fit;
-}
-
 function applyViewportRows() {
   for (const p of panels) {
     const vRow = viewportRow('view', p);
     if (!vRow) p.appliedViewText = null;
     else if (vRow.text !== p.appliedViewText && vRow.viewSpec!.kind === 'view' && p.layout.rect.w) {
       p.appliedViewText = vRow.text;
-      // Shared axes come from the panel that owns them, which is earlier in
-      // the list and already framed.
-      syncLinks(panels[p.layout.host]);
-      Object.assign(p.view, fitPanelView(p, vRow.viewSpec!));
+      // Shared axes come from the panels that own them, which are earlier in
+      // the list and already framed; the row frames the rest.
+      const roots = linkRoots(p);
+      const from = { x: roots.x === p ? undefined : roots.x.view, y: roots.y === p ? undefined : roots.y.view };
+      const linked = linkedWindow(p.view, p.layout.shared, from);
+      const { w, h } = p.layout.rect;
+      Object.assign(p.view, fitPanelWindow(vRow.viewSpec!, w, h, p.layout.shared, linked));
     }
     const cRow = viewportRow('camera', p);
     if (!cRow) {
@@ -820,8 +828,15 @@ function applyViewportRows() {
 let viewportWriteTimer: ReturnType<typeof setTimeout> | null = null;
 /** The pending writeback makes its own undo entry: a gesture's does; a voice-mode move made one up front. */
 let viewportWriteUndo = false;
+/** Panels whose window or camera moved since the last writeback: only their
+ *  rows are rewritten, so a gesture never reformats an untouched panel's row. */
+const movedPanels = new Set<Panel>();
 
-function scheduleViewportWriteback(undo = true) {
+/** Panel p just moved (the current one, for a gesture): carry its shared
+ *  axes to the panels sharing them, and write the rows back shortly. */
+function scheduleViewportWriteback(undo = true, p: Panel = cur) {
+  movedPanels.add(p);
+  for (const q of syncLinks(p)) movedPanels.add(q);
   viewportWriteUndo ||= undo;
   viewportWriteTimer ??= setTimeout(() => {
     viewportWriteTimer = null;
@@ -851,6 +866,7 @@ function resetViewport() {
     viewportWriteTimer = null;
   }
   viewportWriteUndo = false;
+  movedPanels.clear();
   for (const p of panels) {
     p.appliedViewText = p.appliedCameraText = null;
     p.view.cx = 0;
@@ -888,6 +904,7 @@ function setCameraSpin(spin: number) {
   if (mode !== '3d') return;
   const p = cur;
   p.spin = spin;
+  movedPanels.add(p);
   if (viewportRow('camera')) writebackViewport(true);
   else {
     pushUndo(null);
@@ -897,7 +914,7 @@ function setCameraSpin(spin: number) {
     saveUrl();
   }
   p.spinScale = 0;
-  tween('spin', 1.2, easeInOut, k => (p.spinScale = k));
+  tween(`spin:${p.key}`, 1.2, easeInOut, k => (p.spinScale = k));
   requestRender();
 }
 
@@ -939,10 +956,12 @@ function panelViewText(p: Panel): { eq: Equation; text: string } | null {
   return text === eq.text ? null : { eq, text };
 }
 
-/** Rewrite every panel's viewport row to the picture on screen (shared axes
- *  move more than one panel, so a gesture can change several rows). */
+/** Rewrite the moved panels' viewport rows to the picture on screen (shared
+ *  axes move more than one panel, so a gesture can change several rows). */
 function writebackViewport(undo: boolean) {
-  const changes = panels.flatMap(p => {
+  const moved = panels.filter(p => movedPanels.has(p));
+  movedPanels.clear();
+  const changes = moved.flatMap(p => {
     const change = panelViewText(p);
     return change ? [{ p, ...change }] : [];
   });
@@ -1132,7 +1151,7 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
 function render() {
   if (!syncCanvasSize()) return;
   applyViewportRows();
-  syncLinks(activePanel);
+  syncLinks(null);
   const dpr = window.devicePixelRatio || 1;
   const time = graphTime();
   const active = equations.filter(e => e.cls && !e.error).flatMap(renderMembers);
@@ -1478,6 +1497,8 @@ function render() {
     panel.grabs = grabbable = grabs;
   }
   gl.disable(gl.SCISSOR_TEST);
+  r2d.endFrame();
+  r3d.endFrame();
   if (split) drawPanelEdges(dpr);
   usePanel(activePanel);
 
@@ -1711,10 +1732,9 @@ function render() {
             break;
         }
       }
-      panel.r3d.render(camera, scene, time, constEnv, frame);
+      r3d.render(camera, scene, time, constEnv, frame);
       drawLabels3D(overlayCtx, camera, dpr, scene.points, scene.texts, box, frame.grid !== 'off');
     } else {
-      panel.r3d.clearGeometry();
       const layers: Required<Layers2D> = {
         levels: [],
         cells: [],
@@ -2186,7 +2206,7 @@ function render() {
           return { glsl: f.glsl, gradGlsl: f.gradGlsl, params: f.params, major: sp.major, minor: sp.minor };
         });
       }
-      panel.r2d.render(view, layers, time, constEnv, gridSpecs, frame);
+      r2d.render(view, layers, time, constEnv, gridSpecs, frame);
       drawLabels2D(overlayCtx, view, dpr, extras, frame.grid !== 'off' && !gridSpecs, box);
       drawHoverMarker(dpr);
     }
@@ -2242,7 +2262,7 @@ function resetEditedTrails() {
   // fresh observation so unrelated runs never get joined by a false segment.
   const mathText = equations
     .map(eq => stripNote(eq.text).trim())
-    .filter(text => text && !text.startsWith('#') && !/^(view|camera|grid)\s*\(/i.test(text))
+    .filter(text => text && !text.startsWith('#') && !isViewportText(text))
     .join('\n');
   if (mathText !== trailDocument) {
     for (const eq of equations) eq.trail = undefined;
@@ -5050,7 +5070,7 @@ function movePanelView(target: MoveViewTarget, seconds: number): object | Promis
           view.cy = a.cy + (b.cy - a.cy) * k;
           // Zoom geometrically, so a 100x zoom doesn't spend its first half barely moving.
           view.upp = a.upp * (b.upp / a.upp) ** k;
-          scheduleViewportWriteback(false);
+          scheduleViewportWriteback(false, p);
           requestRender();
         },
         finished => {
@@ -5087,7 +5107,7 @@ function movePanelView(target: MoveViewTarget, seconds: number): object | Promis
         camera.phi = a.phi + (phi - a.phi) * k;
         camera.radius = a.radius * (radius / a.radius) ** k;
         camera.target = [0, 1, 2].map(i => a.target[i] + (goal[i] - a.target[i]) * k) as [number, number, number];
-        scheduleViewportWriteback(false);
+        scheduleViewportWriteback(false, p);
         requestRender();
       },
       finished => {
@@ -5313,7 +5333,7 @@ if (mcpApp) {
         dispose: () => {
           if (rendererDisposed) return;
           rendererDisposed = true;
-          for (const p of panels) p.r3d.clearGeometry();
+          r3d.clearGeometry();
           canvasSizeObserver.disconnect();
           window.removeEventListener('resize', resize);
           cancelRender();
@@ -5350,7 +5370,7 @@ if (mcpApp) {
 
 // Dev-only handle for driving/inspecting the view in automated tests.
 if (import.meta.env.DEV)
-  (window as any).__eq = { view, camera, equations, requestRender, flushViewportWriteback, capture };
+  (window as any).__eq = { view, camera, panels, equations, requestRender, flushViewportWriteback, capture };
 
 // Completion is an ordinary text edit, with the same undo and URL path as typing.
 initSyntaxHelp(listEl, {
