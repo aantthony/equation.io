@@ -228,7 +228,7 @@ export function prepareDocument(
   const built = buildDefs(
     raw,
     tables,
-    seqScans.filter((s): s is SeqScan => s !== null && !s.cell),
+    seqScans.filter((s): s is SeqScan => s !== null && !s.lattice),
   );
   const defs = built.defs;
   for (const [key, fit] of built.fits) {
@@ -756,7 +756,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         continue;
       }
       const seq = document.seqScans[ri];
-      if (seq?.cell) {
+      if (seq?.lattice) {
         const cls = classifyAutomatonRow(document.seqScans, ri, fnNames, getFn, constNames, ropts);
         if (cls) row.cls = cls;
         continue;

@@ -118,9 +118,22 @@ export type MathObject =
       readonly variable: string;
       readonly seedName?: string;
     }
-  /** A 1D cellular automaton (lib/automaton.ts): `rule` reads the previous
-   *  row's cells within `radius`; `seed` is row 0 as an expression in its cell. */
-  | { readonly kind: 'automaton'; readonly rule: Expr; readonly radius: number; readonly seed?: Expr }
+  /** A cellular automaton (lib/automaton.ts): `rule` reads the previous
+   *  generation's cells within `radius`; `seed` is generation 0 as an
+   *  expression in its cells. `dims` 1 draws the space-time diagram, 2 one
+   *  generation of a board. `axes` names the lattice's across and down
+   *  indices as written (`c_{n+1}[i]` is i, n; `L_{n+1}[i, j]` is i, j). */
+  | {
+      readonly kind: 'automaton';
+      readonly rule: Expr;
+      readonly radius: number;
+      readonly seed?: Expr;
+      readonly dims: 1 | 2;
+      readonly axes: readonly [string, string];
+    }
+  /** A function on the integer lattice, `T[i, j] = …` (lib/automaton.ts):
+   *  `expr` reads CELL_VAR and CELL_VAR2. */
+  | { readonly kind: 'lattice'; readonly expr: Expr; readonly axes: readonly [string, string] }
   | {
       readonly kind: 'list';
       readonly element: 'scalar';
@@ -265,6 +278,7 @@ export function publicKind(object: MathObject) {
     case 'tuple':
     case 'note':
     case 'automaton':
+    case 'lattice':
       return object.kind;
   }
 }
@@ -311,6 +325,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'complex-field':
     case 'sequence':
     case 'automaton':
+    case 'lattice':
     case 'histogram':
     case 'distribution':
     case 'value':

@@ -18,6 +18,8 @@ export const glStats = { compiles: 0 };
 export interface Frame {
   vp?: { x: number; y: number; w: number; h: number };
   grid?: 'on' | 'off' | 'axes';
+  /** A lattice panel (docs/discrete.md): the grid runs between cells. */
+  lattice?: boolean;
 }
 
 export function compileProgram(gl: WebGL2RenderingContext, vert: string, frag: string): WebGLProgram {

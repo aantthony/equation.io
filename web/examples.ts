@@ -226,16 +226,6 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'sequence recursion chaos slider',
       ],
       ['logistic bifurcation', 'a_{n+1} = x a_n (1 - a_n)', 'sequence recursion chaos'],
-      [
-        'rule 30',
-        'r = floor(clamp(30, 0, 255)); c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -60..60, y = -80..2)',
-        'automaton recursion',
-      ],
-      [
-        'rule 110 from a random row',
-        'r = floor(clamp(110, 0, 255)); c_0[i] = {i < 0: mod(floor(i i 0.618), 2), 0}; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(x = -120..20, y = -100..2)',
-        'automaton recursion',
-      ],
       ['Newton’s method for √2', 'a_0 = 3; a_{n+1} = a_n - (a_n^2 - 2)/(2 a_n); y = sqrt(2)', 'sequence recursion'],
       ['Fourier square wave', 'N = 3; y = (4/pi) sum(n=1..N, sin((2n-1)x)/(2n-1))', 'fourier series trig slider'],
       ['Fourier sawtooth', 'N = 5; y = 2 sum[n=1..N] (-1)^(n+1) sin(n x)/n', 'fourier series trig slider'],
@@ -255,6 +245,50 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'N = [0..4]; y = sum(n=0..N, (-1)^n x^(2n+1)/prod(k=1..2n+1, k)); y = sin(x)',
         'series polynomial trig list',
       ],
+    ],
+  ],
+  // The integer lattice (docs/discrete.md): these draw in a lattice panel,
+  // whose axes are the rows' own indices.
+  [
+    'lattices + automata',
+    [
+      [
+        'rule 30',
+        'r = floor(clamp(30, 0, 255)); c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(i = -60..60, n = 0..80)',
+        'automaton recursion slider',
+      ],
+      [
+        'rule 110 from a random row',
+        'r = floor(clamp(110, 0, 255)); c_0[i] = {i < 0: mod(floor(i i 0.618), 2), 0}; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2); view(i = -120..20, n = 0..100)',
+        'automaton recursion slider',
+      ],
+      [
+        'Pascal’s triangle mod m',
+        'm = 2; p_{n+1}[k] = mod(p_n[k-1] + p_n[k], m); view(k = -4..68, n = 0..64)',
+        'automaton number-theory slider',
+      ],
+      [
+        'Game of Life: a glider',
+        'life(c, s) = {s = 3: 1, s = 4: c, 0}; L_0 = [(0, 1), (1, 2), (2, 0), (2, 1), (2, 2)]; L_{n+1}[i, j] = life(L_n[i, j], sum(a=-1..1, sum(b=-1..1, L_n[i+a, j+b]))); view(i = -4..24, j = -4..24)',
+        'automaton animated',
+      ],
+      [
+        'Game of Life: a random soup',
+        'life(c, s) = {s = 3: 1, s = 4: c, 0}; L_0[i, j] = {-20 < i < 20: {-20 < j < 20: mod(floor(43758.5 fract(sin(12.9898 i + 78.233 j))), 2), 0}, 0}; L_{n+1}[i, j] = life(L_n[i, j], sum(a=-1..1, sum(b=-1..1, L_n[i+a, j+b]))); view(i = -60..60, j = -60..60)',
+        'automaton animated',
+      ],
+      ['Cayley table of ℤ/n', 'n = 6; T[i, j] = {0 <= i < n: {0 <= j < n: mod(i + j, n)}}', 'number-theory slider'],
+      [
+        'units mod n',
+        'n = 12; T[i, j] = {0 < i < n: {0 < j < n: {gcd(i, n) = 1: {gcd(j, n) = 1: mod(i j, n)}}}}',
+        'number-theory slider',
+      ],
+      [
+        'D₃: the symmetries of a triangle',
+        '# k = a + 3b is the rotation r^a, then the flip s^b; rot(k) = mod(k, 3); flip(k) = floor(k/3); T[i, j] = {0 <= i < 6: {0 <= j < 6: mod(rot(i) + (-1)^flip(i) rot(j), 3) + 3 mod(flip(i) + flip(j), 2)}}',
+        'number-theory',
+      ],
+      ['gcd table', 'T[i, j] = {i > 0: {j > 0: gcd(i, j)}}', 'number-theory'],
     ],
   ],
   [
@@ -1024,7 +1058,8 @@ export const COVERS: Record<string, string> = {
   'parametric curves': 'rose (slide k)',
   'fields + color': 'RGB color field',
   'sliders + calculus': 'Riemann sum (slide n)',
-  'sequences + series': 'rule 30',
+  'sequences + series': 'cobweb',
+  'lattices + automata': 'rule 30',
   'lists + data': 'concentric circles',
   'points + motion': 'motion trail',
   'geometry (drag the points)': 'Thébault’s theorem',
