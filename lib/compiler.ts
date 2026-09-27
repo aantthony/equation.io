@@ -78,6 +78,7 @@ export type CpuPlan =
   | { type: 'bifurcation'; expr: Expr; recVar: string; a0Name?: string }
   | { type: 'automaton'; rule: Expr; radius: number; seed?: Expr; dims: 1 | 2; axes: readonly [string, string] }
   | { type: 'lattice'; expr: Expr; axes: readonly [string, string] }
+  | { type: 'graph'; edges: Expr[][] }
   | { type: 'density'; rv: string; mass?: Expr }
   | { type: 'pmf'; rv: string; mass?: Expr }
   | { type: 'expect'; rv: string }
@@ -326,6 +327,8 @@ export function compileCpu(classified: Classified): CpuPlan {
       };
     case 'lattice':
       return { type: 'lattice', expr: object.expr, axes: object.axes };
+    case 'graph':
+      return { type: 'graph', edges: object.edges.map(row => row.map(real)) };
     case 'list':
       if (object.element === 'scalar')
         return object.storage === 'packed'
@@ -591,6 +594,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'note':
     case 'automaton':
     case 'lattice':
+    case 'graph':
       break;
   }
   return { type: 'none', params };
@@ -758,6 +762,9 @@ export function cpuStructureKey(plan: CpuPlan): string {
       break;
     case 'lattice':
       structure = [exprKey(plan.expr), ...plan.axes];
+      break;
+    case 'graph':
+      structure = plan.edges.map(row => row.map(exprKey).join('|'));
       break;
     case 'density':
     case 'pmf':

@@ -52,7 +52,8 @@ import { lowerLists } from './list.ts';
 import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
 import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from './seq.ts';
-import { classifyAutomatonRow } from './automaton.ts';
+import { classifyAutomatonRow, exactCases } from './automaton.ts';
+import { GRAPH_RE, MARK_RE, graphObject } from './graph.ts';
 import { buildStateSystem, initialState } from './state.ts';
 import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
@@ -85,6 +86,9 @@ export interface RowInfo extends RowSource {
   /** Set for probability rows: `X ~ …` plots a density, `P(…)` a shaded
    *  area, `E(…)` a mean marker. */
   dist?: 'density' | 'pmf' | 'probability' | 'expectation';
+  /** Set for `mark(v)` rows: v's value is highlighted as a vertex of the
+   *  graphs in the row's panel (lib/graph.ts). */
+  mark?: true;
   /** Readout shown under the row in the app (the numeric value of a P(…) or E(…) row). */
   info?: string;
   /** Set when the row reads a local data file (`open(…)`) that is not on this
@@ -760,7 +764,13 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           'd is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.',
         );
       }
-      const rawParsed = parseExpr(row.text, fnNames, listNames, valueNames);
+      // graph(from, to, label) reads as the tuple of its arguments: one edge
+      // per element of its multiset (lib/graph.ts).
+      const graphArgs = GRAPH_RE.exec(row.text);
+      // mark(v) is v, highlighted in the panel's graphs.
+      const markArg = MARK_RE.exec(row.text);
+      const source = graphArgs ? `(${graphArgs[1]})` : markArg ? `(${markArg[1]})` : row.text;
+      const rawParsed = parseExpr(source, fnNames, listNames, valueNames);
       // `p(50..400)`: where p goes over that time — a range in call position,
       // which nothing else accepts.
       if (rawParsed.kind === 'bin' && rawParsed.op === '*' && rawParsed.b.kind === 'range') {
@@ -768,7 +778,12 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
         continue;
       }
-      const resolved = resolveRow(rawParsed, getFn, ropts);
+      // A graph's vertices are whole numbers, so its cases may test equality.
+      const resolved = resolveRow(
+        graphArgs ? exactCases(rawParsed) : rawParsed,
+        getFn,
+        graphArgs ? { ...ropts, exactConditions: true } : ropts,
+      );
       let parsed = resolved.expr;
       // A real row in u and v alone does not depend on the screen, so it is
       // drawn as its values (docs/multisets.md §5): u and v are each [0, 1],
@@ -801,6 +816,16 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
+      if (graphArgs) {
+        row.cls = graphObject(row.cls);
+        continue;
+      }
+      if (markArg) {
+        if (row.cls.object.kind !== 'value')
+          throw new Error('mark(v) highlights the vertex v of the graphs in its panel: give it one number.');
+        row.mark = true;
+        continue;
+      }
       const hint = curveHint(row.cls.object, row.text);
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.

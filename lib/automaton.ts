@@ -200,13 +200,16 @@ function unrollSum(e: Expr): Expr | null {
 }
 
 /** A piecewise case testing equality as an inequality the evaluator runs:
- *  |l - r| < 1e-9, which on whole-number cells is exact. */
+ *  r - ε < l < r + ε, which on whole-number cells is exact. */
 export function exactCase(l: Expr, r: Expr): Expr {
-  return { kind: 'ineq', op: '<', l: call('abs', bin('-', l, r)), r: num(1e-9) };
+  // Each side kept whole: over lists, a comparison whose one side mixes two
+  // lists (abs(l - r) < ε) does not lower element by element.
+  const eps = num(1e-9);
+  return { kind: 'ineq', op: '<', l: { kind: 'ineq', op: '<', l: bin('-', r, eps), r: l }, r: bin('+', r, eps) };
 }
 
 /** Every equality case below `e` as exactCase. */
-function exactCases(e: Expr): Expr {
+export function exactCases(e: Expr): Expr {
   const inner = mapChildren(e, exactCases);
   if (inner.kind !== 'piecewise' || !inner.cases.some(c => c.cond.kind === 'eq')) return inner;
   return {

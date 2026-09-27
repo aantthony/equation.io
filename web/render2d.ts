@@ -1137,6 +1137,7 @@ function drawLatticeLabels(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
     ctx.strokeStyle = cssRgb(theme.bg);
     ctx.fillStyle = theme.label;
     for (const v of lattice.values) {
@@ -1154,6 +1155,7 @@ function drawLatticeLabels(
   ctx.font = '11px ui-sans-serif, system-ui';
   ctx.fillStyle = theme.label;
   ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
   ctx.strokeStyle = cssRgb(theme.bg);
   const label = (text: string, x: number, y: number) => {
     ctx.strokeText(text, x, y);
@@ -1228,7 +1230,15 @@ export interface Overlay2D {
   bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
   /** `label(point, "text")` rows: text beside a math point, drawn above everything. */
   texts?: Array<{ x: number; y: number; text: string; color: string }>;
+  /** A graph's vertices (lib/graph.ts): a ring of GRAPH_NODE_PX with the
+   *  vertex's value in it, filled in its colour when marked (`mark(v)`). */
+  nodes?: Array<{ x: number; y: number; text: string; color: string; mark?: boolean }>;
+  /** Small text centred on a math point, haloed: a graph edge's labels. */
+  tags?: Array<{ x: number; y: number; text: string; color: string }>;
 }
+
+/** A graph vertex's radius in CSS px. */
+export const GRAPH_NODE_PX = 13;
 
 /** A panel's box on the overlay, in CSS pixels from the top-left corner. */
 export interface OverlayBox {
@@ -1287,7 +1297,7 @@ export interface LatticeLabels {
 }
 
 /** Below this many CSS px per cell, lattice values are not printed. */
-export const LATTICE_VALUE_PX = 22;
+export const LATTICE_VALUE_PX = 18;
 
 /** Axis labels plus CPU-sampled geometry (points, parametric curves).
  *  numbers=false skips the axis numerals (custom coordinate grids have no
@@ -1467,6 +1477,40 @@ export function drawLabels2D(
         ctx.font = '11px ui-sans-serif, system-ui';
       }
     }
+  }
+  if (extras?.nodes?.length || extras?.tags?.length) {
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    const bg = `rgb(${theme.bg.map(c => Math.round(c * 255)).join(', ')})`;
+    ctx.font = '12px ui-sans-serif, system-ui';
+    for (const tag of extras.tags ?? []) {
+      const sx = toScreenX(tag.x),
+        sy = toScreenY(tag.y);
+      if (!isFinite(sx) || !isFinite(sy)) continue;
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = bg;
+      ctx.strokeText(tag.text, sx, sy);
+      ctx.fillStyle = tag.color;
+      ctx.fillText(tag.text, sx, sy);
+    }
+    ctx.font = '600 12px ui-sans-serif, system-ui';
+    for (const node of extras.nodes ?? []) {
+      const sx = toScreenX(node.x),
+        sy = toScreenY(node.y);
+      if (!isFinite(sx) || !isFinite(sy)) continue;
+      ctx.beginPath();
+      ctx.arc(sx, sy, GRAPH_NODE_PX, 0, Math.PI * 2);
+      ctx.fillStyle = node.mark ? node.color : bg;
+      ctx.fill();
+      ctx.lineWidth = node.mark ? 3 : 1.75;
+      ctx.strokeStyle = node.color;
+      ctx.stroke();
+      ctx.fillStyle = node.mark ? bg : node.color;
+      ctx.fillText(node.text, sx, sy + 0.5);
+    }
+    ctx.restore();
   }
   for (const label of extras?.texts ?? []) {
     const sx = toScreenX(label.x);

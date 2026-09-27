@@ -193,7 +193,11 @@ describe('lattice views', () => {
   });
 
   it('writes back in index names, in the order the row wrote them', () => {
-    const spec = { axes: ['j', 'i'] as [string, string], x: [0, 20] as [number, number], y: [-10, 0] as [number, number] };
+    const spec = {
+      axes: ['j', 'i'] as [string, string],
+      x: [0, 20] as [number, number],
+      y: [-10, 0] as [number, number],
+    };
     expect(formatViewSpec(spec)).toBe('view(j = 0..20, i = 0..10)');
     expect(formatViewSpec(spec, ['i', 'j'])).toBe('view(i = 0..10, j = 0..20)');
   });

@@ -134,6 +134,9 @@ export type MathObject =
   /** A function on the integer lattice, `T[i, j] = …` (lib/automaton.ts):
    *  `expr` reads CELL_VAR and CELL_VAR2. */
   | { readonly kind: 'lattice'; readonly expr: Expr; readonly axes: readonly [string, string] }
+  /** `graph(from, to)` / `graph(from, to, label)` (lib/graph.ts): one edge
+   *  per element of the tuple's multiset, each [from, to] or [from, to, label]. */
+  | { readonly kind: 'graph'; readonly edges: ReadonlyArray<readonly Expr[]> }
   | {
       readonly kind: 'list';
       readonly element: 'scalar';
@@ -279,6 +282,7 @@ export function publicKind(object: MathObject) {
     case 'note':
     case 'automaton':
     case 'lattice':
+    case 'graph':
       return object.kind;
   }
 }
@@ -326,6 +330,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'sequence':
     case 'automaton':
     case 'lattice':
+    case 'graph':
     case 'histogram':
     case 'distribution':
     case 'value':

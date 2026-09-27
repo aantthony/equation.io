@@ -10,6 +10,7 @@ import {
   runBoard,
   tableShades,
 } from '../lib/automaton.ts';
+import { type GraphData, collectEdges, edgeText, layoutGraph } from '../lib/graph.ts';
 import {
   type CpuGrid,
   type CpuPlan,
@@ -121,6 +122,7 @@ import {
   Renderer2D,
   type View2D,
   drawLabels2D,
+  GRAPH_NODE_PX,
   LATTICE_VALUE_PX,
   type LatticeLabels,
   type OverlayBox,
@@ -167,6 +169,8 @@ interface Equation {
   boardCache?: { plan: CpuPlan; key: string; board: Board; generation: number; cells: Cells2D };
   /** A table's cells over the window last drawn (the cellCache pattern). */
   tableCache?: { plan: CpuPlan; key: string; grid: CellGrid; cells: Cells2D };
+  /** A graph's edges as last evaluated, and its layout (lib/graph.ts). */
+  graphCache?: { key: string; data: GraphData; pos: Map<number, [number, number]> };
   id: number;
   text: string;
   /** The row's palette slot; -1 until recompileAll colors it (lib/palette.ts),
@@ -194,6 +198,8 @@ interface Equation {
   noteColor?: { text: string; rgb: [number, number, number] | null };
   /** Set for probability rows (`X ~ …`, `P(…)`, `E(…)`). */
   dist?: 'density' | 'pmf' | 'probability' | 'expectation';
+  /** A `mark(v)` row: v highlighted as a vertex of its panel's graphs. */
+  mark?: true;
   /** Comment rows: hide the group (rows until the next comment) in the list. */
   collapsed?: boolean;
   sliderMin?: number;
@@ -1250,11 +1256,82 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'bifurcation',
   'automaton',
   'lattice',
+  'graph',
   'density',
   'pmf',
   'prob',
   'expect',
 ]);
+
+/**
+ * A graph's arrows, vertices and edge labels for the overlay. `node` is a
+ * vertex's radius in plane units, so arrows stop at its ring. An arrow whose
+ * reverse is also drawn bends to its own side, a loop hangs above its
+ * vertex, and the rest are straight.
+ */
+function graphOverlay(
+  data: GraphData,
+  pos: ReadonlyMap<number, [number, number]>,
+  color: string,
+  marks: ReadonlySet<number>,
+  node: number,
+  extras: Overlay2D,
+) {
+  const texts = new Map(data.edges.map(e => [`${e.from}>${e.to}`, edgeText(e)]));
+  const tags = (extras.tags ??= []);
+  for (const e of data.edges) {
+    // Both ways with the same labels (an involution's two arrows, s·s = 1)
+    // is one plain line, drawn from the smaller end.
+    const reverse = texts.get(`${e.to}>${e.from}`);
+    const both = e.from !== e.to && reverse === texts.get(`${e.from}>${e.to}`);
+    if (both && e.from > e.to) continue;
+    const [ax, ay] = pos.get(e.from)!;
+    const [bx, by] = pos.get(e.to)!;
+    const text = edgeText(e);
+    const pts: number[] = [];
+    let mid: [number, number];
+    if (e.from === e.to) {
+      // A loop: a circle above the vertex, entering it from the right.
+      const r = node * 1.3;
+      const cx = ax,
+        cy = ay + node + r * 0.45;
+      const start = Math.PI * 1.25,
+        end = Math.PI * 1.25 - Math.PI * 1.5;
+      // Few enough steps that the last is long enough to carry the head.
+      for (let k = 0; k <= 9; k++) {
+        const a = start + ((end - start) * k) / 9;
+        pts.push(cx + r * Math.cos(a), cy + r * Math.sin(a));
+      }
+      mid = [cx, cy + r + node * 0.6];
+    } else {
+      const len = Math.hypot(bx - ax, by - ay) || 1;
+      // Perpendicular, to the arrow's left; bend only when the reverse is drawn too.
+      const [nx, ny] = [-(by - ay) / len, (bx - ax) / len];
+      const bend = reverse !== undefined && !both ? len * 0.18 : 0;
+      const [qx, qy] = [(ax + bx) / 2 + nx * bend, (ay + by) / 2 + ny * bend];
+      const t0 = Math.min(0.45, node / len),
+        t1 = 1 - Math.min(0.45, (node * 1.1) / len);
+      // The arrowhead is as long as the last segment (lib/geom.ts arrowHead),
+      // so the curve stops a head short of the tip and one segment finishes it.
+      const tHead = Math.max(t0, t1 - (node * 0.95) / len);
+      const at = (t: number) => {
+        const u = 1 - t;
+        pts.push(u * u * ax + 2 * u * t * qx + t * t * bx, u * u * ay + 2 * u * t * qy + t * t * by);
+      };
+      for (let k = 0; k <= 12; k++) at(t0 + ((tHead - t0) * k) / 12);
+      at(t1);
+      const lift = bend ? bend / 2 + node * 0.55 : node * 0.55;
+      mid = [(ax + bx) / 2 + nx * lift, (ay + by) / 2 + ny * lift];
+    }
+    extras.polylines.push({ pts, color, width: 1.75, arrow: !both });
+    if (text) tags.push({ x: mid[0], y: mid[1], text, color });
+  }
+  const nodes = (extras.nodes ??= []);
+  for (const v of data.vertices) {
+    const [x, y] = pos.get(v)!;
+    nodes.push({ x, y, text: String(parseFloat(v.toPrecision(6))), color, mark: marks.has(v) });
+  }
+}
 
 /** Which edges of an automaton's cells run on as background: a 1D diagram's
  *  sides, and every side of a 2D board. */
@@ -1601,7 +1678,18 @@ function render() {
     const rows = active.filter(e => panelOf(e) === index);
     const r = panel.layout.rect;
     if (!r.w || !r.h) continue;
-    const gridMode = panel.grid?.mode === 'off' ? 'off' : panel.grid?.mode === 'axes' ? 'axes' : 'on';
+    // A graph has no coordinates to grid: a panel of graphs draws none unless asked.
+    const graphs =
+      rows.some(e => e.cpu!.type === 'graph') && rows.every(e => ['graph', 'value', 'note'].includes(e.cpu!.type));
+    const gridMode = panel.grid
+      ? panel.grid.mode === 'off'
+        ? 'off'
+        : panel.grid.mode === 'axes'
+          ? 'axes'
+          : 'on'
+      : graphs
+        ? 'off'
+        : 'on';
     const frame: Frame = {
       vp: { x: r.x, y: canvas.height - r.y - r.h, w: r.w, h: r.h },
       grid: gridMode,
@@ -2036,6 +2124,32 @@ function render() {
             }
             layers.cells.push({ ...eq.cellCache.cells, color });
             latticeValues(eq.cellCache.grid, true);
+            break;
+          }
+          case 'graph': {
+            const values = plot.edges.map(e =>
+              e.map(c => {
+                try {
+                  return evaluate(c, env);
+                } catch {
+                  return NaN;
+                }
+              }),
+            );
+            const data = collectEdges(values);
+            const key = JSON.stringify(data);
+            let c = eq.graphCache;
+            // Laid out again only when the graph changes, from where it was.
+            if (c?.key !== key) c = eq.graphCache = { key, data, pos: layoutGraph(data, c?.pos) };
+            const marks = new Set<number>();
+            for (const m of rows)
+              if (m.mark && m.cpu?.type === 'value')
+                try {
+                  marks.add(evaluate(m.cpu.expr, env));
+                } catch {
+                  /* nothing to mark */
+                }
+            graphOverlay(c.data, c.pos, css, marks, GRAPH_NODE_PX * view.upp * dpr, extras);
             break;
           }
           case 'lattice': {
@@ -2547,6 +2661,7 @@ function recompileAll() {
     eq.viewSpec = row.view;
     eq.comment = row.comment;
     eq.dist = row.dist;
+    eq.mark = row.mark;
     if (!eq.comment) eq.collapsed = undefined;
 
     // Cloud capacity is a browser renderer limit, independent of analysis.
