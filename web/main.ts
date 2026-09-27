@@ -2159,10 +2159,12 @@ function render() {
             break;
         }
       }
-      // Named points (`A = (0, 0)` rows) draw labeled with their name; rows
-      // whose components are plain numbers or slider names can be dragged.
+      // Named points (`A = (0, 0)` rows) draw labeled with their name, in the
+      // panel their row is in; rows whose components are plain numbers or
+      // slider names can be dragged.
       for (const eq of equations) {
         if (eq.def?.kind !== 'const' || eq.error || !defs.points.has(eq.def.name)) continue;
+        if (panelOf(eq) !== index) continue;
         const [cx, cy] = pointComps(eq.def.name);
         const px = constEnv[cx];
         const py = constEnv[cy];
