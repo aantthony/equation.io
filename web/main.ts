@@ -121,6 +121,7 @@ import {
   drawLabels3D,
   projectToScreen,
 } from './render3d.ts';
+import { assignColors, takesColor } from '../lib/palette.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -149,6 +150,8 @@ interface Equation {
   cellCache?: { plan: CpuPlan; key: string; cells: Cells2D };
   id: number;
   text: string;
+  /** The row's palette slot; -1 until recompileAll colors it (lib/palette.ts),
+   *  and for rows that show no color. */
   colorIndex: number;
   cls?: Classified;
   cpu?: CpuPlan;
@@ -1098,7 +1101,7 @@ const familyShared = ({
 function baseColor(eq: Equation): [number, number, number] {
   const src = eq.familyParent ?? eq;
   if (src.noteColor?.text !== src.text) src.noteColor = { text: src.text, rgb: noteColor(src.text) };
-  return src.noteColor.rgb ?? theme.palette[eq.colorIndex];
+  return src.noteColor.rgb ?? theme.palette[eq.colorIndex] ?? theme.palette[0];
 }
 
 const rowColor = (eq: Equation): [number, number, number] =>
@@ -2368,6 +2371,22 @@ function recompileAll() {
       `This ${panels.length > 1 ? 'panel' : 'graph'} is 3D, where every point is a sprite: at most ${CLOUD_3D_MAX},` +
       ` and this row has ${points}. Filter it, or drop the row that uses z.`;
   }
+  // New rows are created uncolored and colored here, once the whole document
+  // is known and classified: only rows that show a color use up a slot.
+  assignColors(
+    equations,
+    equations.map(eq =>
+      takesColor({
+        text: eq.text,
+        comment: eq.comment,
+        def: eq.def,
+        point: eq.def?.kind === 'const' && defs.points.has(eq.def.name),
+        view: eq.viewSpec,
+        cpu: eq.cpu,
+      }),
+    ),
+    theme.palette.length,
+  );
   rvSys.prune(); // sample caches of variables that no longer exist
   invalidateDerivedState();
   // A row that named a file with no hash and found it here gets pinned, on
@@ -2731,7 +2750,7 @@ addEventListener('visibilitychange', () => {
 });
 
 function addEquation(text: string, at = equations.length): Equation {
-  const eq: Equation = { id: nextId++, text, colorIndex: (nextId - 2) % theme.palette.length };
+  const eq: Equation = { id: nextId++, text, colorIndex: -1 };
   equations.splice(at, 0, eq);
   return eq;
 }
@@ -3259,7 +3278,9 @@ function reconcile() {
     const eq = equations[i];
     if (!eq) return;
     line.dataset.id = String(eq.id);
-    line.style.setProperty('--eq-color', cssColor(baseColor(eq)));
+    // A row with no palette slot (blank, a view row) keeps the dot's neutral grey.
+    if (eq.colorIndex < 0 && !noteColor(eq.text)) line.style.removeProperty('--eq-color');
+    else line.style.setProperty('--eq-color', cssColor(baseColor(eq)));
     line.classList.toggle('invalid', !!eq.error);
     // No colour swatch for rows with nothing drawn in it: definitions, and
     // value rows, whose whole output is the readout beneath them — except a
@@ -3489,7 +3510,7 @@ function syncFromDOM() {
     const id = line.dataset.id;
     let eq = id && !seen.has(id) ? byId.get(id) : undefined;
     if (!eq) {
-      eq = { id: nextId++, text: '', colorIndex: (nextId - 2) % theme.palette.length };
+      eq = { id: nextId++, text: '', colorIndex: -1 };
       line.dataset.id = String(eq.id);
     }
     seen.add(String(eq.id));
@@ -3586,13 +3607,15 @@ function insertStatements(text: string) {
   const before = equations[start.line]?.text.slice(0, start.offset) ?? '';
   const after = equations[end.line]?.text.slice(end.offset) ?? '';
   const first = equations[start.line] ?? addEquation('');
-  const inserted: Equation[] = [first];
-  first.text = before + parts[0];
-  for (let i = 1; i < parts.length; i++) {
-    inserted.push({ id: nextId++, text: parts[i].trim(), colorIndex: (nextId - 2) % theme.palette.length });
-  }
-  const caretOffset = inserted[inserted.length - 1].text.length;
-  inserted[inserted.length - 1].text += after;
+  const texts = [before + parts[0], ...parts.slice(1).map(p => p.trim())];
+  const caretOffset = texts[texts.length - 1].length;
+  texts[texts.length - 1] += after;
+  // Enter at the start of a row opens blank rows above it: the row itself
+  // moves down with its text, keeping its color and toggles.
+  const keep = texts.length > 1 && !texts[0] ? texts.length - 1 : 0;
+  const inserted = texts.map((text, i): Equation =>
+    i === keep ? Object.assign(first, { text }) : { id: nextId++, text, colorIndex: -1 },
+  );
   equations.splice(start.line, end.line - start.line + 1, ...inserted);
 
   recompileAll();
@@ -3709,12 +3732,14 @@ function duplicateLines(dir: -1 | 1) {
   const copies = equations.slice(first, last + 1).map(eq => ({
     id: nextId++,
     text: eq.text,
-    colorIndex: (nextId - 2) % theme.palette.length,
+    colorIndex: -1,
     sliderMin: eq.sliderMin,
     sliderMax: eq.sliderMax,
     showLevels: eq.showLevels,
   }));
-  equations.splice(last + 1, 0, ...copies);
+  // The copies go on the side the selection moves to, so the selected rows
+  // are always the new ones and the originals keep their place.
+  equations.splice(dir > 0 ? last + 1 : first, 0, ...copies);
   recompileAll();
   renderAll();
   const count = dir > 0 ? copies.length : 0;
@@ -4007,8 +4032,9 @@ function gutterAct(eq: Equation) {
     return;
   }
   // A `#hex` note fixes the color: cycling the palette under it would change
-  // nothing on screen, yet cost an undo entry and the redo stack.
-  if (noteColor(eq.text)) return;
+  // nothing on screen, yet cost an undo entry and the redo stack. A row with
+  // no slot draws nothing to recolor.
+  if (noteColor(eq.text) || eq.colorIndex < 0) return;
   pushUndo(`color:${eq.id}`);
   eq.colorIndex = (eq.colorIndex + 1) % theme.palette.length;
   reconcile();

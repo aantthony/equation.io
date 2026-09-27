@@ -9,6 +9,8 @@
  * that captured the import keep seeing the current palette.
  */
 
+import { DARK_PALETTE, LIGHT_PALETTE } from '../lib/palette.ts';
+
 type RGB = [number, number, number];
 
 export interface Theme {
@@ -42,14 +44,7 @@ const LIGHT: Theme = {
   planeGrid: 0.5,
   label: '#555',
   pointOutline: '#fff',
-  palette: [
-    [0.176, 0.439, 0.702], // blue
-    [0.78, 0.267, 0.251], // red
-    [0.22, 0.549, 0.275], // green
-    [0.376, 0.259, 0.651], // purple
-    [0.98, 0.494, 0.098], // orange
-    [0.0, 0.0, 0.0], // black
-  ],
+  palette: LIGHT_PALETTE,
 };
 
 const DARK: Theme = {
@@ -62,14 +57,7 @@ const DARK: Theme = {
   planeGrid: 1,
   label: '#8b909a',
   pointOutline: '#16181d',
-  palette: [
-    [0.4, 0.62, 0.92], // blue
-    [0.92, 0.45, 0.42], // red
-    [0.42, 0.78, 0.48], // green
-    [0.65, 0.52, 0.95], // purple
-    [0.98, 0.62, 0.28], // orange
-    [0.9, 0.91, 0.93], // light (stands in for black)
-  ],
+  palette: DARK_PALETTE,
 };
 
 /** The live theme; mutated in place so imported references stay current. */
