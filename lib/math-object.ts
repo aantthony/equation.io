@@ -61,9 +61,7 @@ export type MathObject =
     }
   | { readonly kind: 'scalar-field'; readonly expr: Expr }
   | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly [Expr, Expr, Expr] }
-  /** `levels`: a Hamiltonian flow's H, whose level sets draw under the
-   *  streamlines — the flow runs along them. */
-  | { readonly kind: 'vector-field'; readonly components: Components; readonly levels?: LevelSetSpec }
+  | { readonly kind: 'vector-field'; readonly components: Components }
   /** A 2×2 matrix over the plane, row-major: each glyph is the image of a
    *  small circle under the matrix there, with a spoke where e_x goes. */
   | { readonly kind: 'tensor-field'; readonly entries: readonly [Expr, Expr, Expr, Expr] }

@@ -5,8 +5,9 @@ a learning map" poster against what equation.io already draws, checked
 against web/public/llms.txt. Each idea below is a candidate, not a plan:
 one that gets picked up should get its own doc (as docs/pga.md did).
 
-Status: **ideas** — nothing here is agreed, except 1, 2 and 5, which are
-implemented (the "suggested first three"; marked below).
+Status: **ideas** — nothing here is agreed, except 1 and 5, which are
+implemented, and 2, which was tried and dropped in favour of existing rows
+(the "suggested first three"; marked below).
 
 ## Already covered
 
@@ -47,12 +48,15 @@ and geodesics.
 
 ### 2. Hamiltonian and Lagrangian mechanics
 
-**Implemented (Hamiltonian).** `hamiltonian(H)` takes H(x, y) with x as q
-and y as p — the plane's axes, as in the existing phase portrait
-`(x', y') = (y, -sin(x))` — and draws the flow as streamlines over the
-level sets of H (lib/defs.ts, lib/plot.ts, and the link preview). Deferred:
-`lagrangian(L)` (it needs the Euler–Lagrange equations solved for the
-accelerations and run as states — not trivial), and Poincaré sections.
+**Tried, then dropped: `hamiltonian(H)`.** A first version drew the flow
+(∂H/∂y, −∂H/∂x) as streamlines, which is exactly the vector-field row
+`(x', y') = (y, -sin(x))`, plus H's level sets. Even with the levels drawn
+over the flow and the separatrices found and drawn bold, it added one
+spelling for what two existing rows already say: the flow, and `H = c` as
+an implicit curve for the orbit that matters. The examples now do that
+(`y^2/2 - cos(x) = 1` beside the pendulum). Deferred: `lagrangian(L)` (it
+needs the Euler–Lagrange equations solved for the accelerations and run as
+states — not trivial), and Poincaré sections.
 
 - `hamiltonian(H)` in (q, p) draws the level sets of H and the flow
   (q' = ∂H/∂p, p' = −∂H/∂q) as streamlines.

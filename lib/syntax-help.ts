@@ -116,7 +116,6 @@ const signatures: Record<string, [string, string]> = {
   torsion: ['torsion(C) or torsion(C, u0)', 'Torsion of a space curve in u: how fast it twists out of its plane'],
   osculating: ['osculating(C, u0)', 'The osculating circle of a curve in u at u = u0: radius 1/κ, on the concave side'],
   frame: ['frame(C, u0)', 'The Frenet frame of a curve in u at u = u0: unit T and N, and B in 3D'],
-  hamiltonian: ['hamiltonian(H)', 'The flow of H(x, y), x the position q and y the momentum p, over its level sets'],
   gp: ['gp(a, b) or a ⟑ b', 'Geometric product of vectors or multivectors: e_x ⟑ e_y is the bivector e_xy'],
   rev: ['rev(A)', 'Reverse a multivector: R p rev(R) turns p by the rotor R'],
   grade: ['grade(A, k)', 'The grade-k part of a multivector: grade(A, 1) is its vector'],

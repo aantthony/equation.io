@@ -4,8 +4,7 @@ import { evaluate, type Expr } from './expr.ts';
 import { publicKind } from './math-object.ts';
 import { plotReadout } from './plot.ts';
 
-/** eigen(M) and transpose(M) (lib/glyphs.ts, lib/mat.ts), and hamiltonian(H)
- *  (lib/defs.ts, lib/plot.ts). */
+/** eigen(M) and transpose(M) (lib/glyphs.ts, lib/mat.ts). */
 function row(rows: string[]) {
   const analysis = analyzeRows(rows, { readouts: true });
   const r = analysis.rows.at(-1)!;
@@ -187,43 +186,5 @@ describe('transpose(M)', () => {
     const p = row(['M = ((1, 2), (3, 4))', 'transpose(M) M']);
     expect(plotReadout(p.r.cpu!, p.env)).toBe('= ((10, 14), (14, 20))');
     expect(error(['transpose(3)'])).toMatch(/takes a matrix/);
-  });
-});
-
-describe('hamiltonian(H)', () => {
-  it('flows along the level sets of H: q′ = ∂H/∂p, p′ = −∂H/∂q', () => {
-    const { r } = row(['hamiltonian(y^2/2 - cos(x))']);
-    const o = r.cls!.object;
-    if (o.kind !== 'vector-field') throw new Error(o.kind);
-    expect(publicKind(o)).toBe('vfield2d');
-    const H = o.levels!.expr;
-    for (const [x, y] of [
-      [0.3, 1.2],
-      [-2, 0.5],
-      [1, -1],
-    ]) {
-      const [dq, dp] = o.components.map(c => evaluate(c, { x, y }));
-      expect(dq).toBeCloseTo(y);
-      expect(dp).toBeCloseTo(-Math.sin(x));
-      // The flow is perpendicular to ∇H, so it keeps H fixed.
-      const h = 1e-6;
-      const gx = (evaluate(H, { x: x + h, y }) - evaluate(H, { x: x - h, y })) / (2 * h);
-      const gy = (evaluate(H, { x, y: y + h }) - evaluate(H, { x, y: y - h })) / (2 * h);
-      expect(dq * gx + dp * gy).toBeCloseTo(0, 6);
-    }
-    expect(r.cpu).toMatchObject({ type: 'vfield2d', levels: { params: [] } });
-  });
-  it('takes a named H(x, y) and sliders', () => {
-    const { r } = row(['k = 2', 'H(x, y) = y^2/2 + k x^2/2', 'hamiltonian(H)']);
-    const o = r.cls!.object;
-    if (o.kind !== 'vector-field') throw new Error(o.kind);
-    expect(o.components.map(c => evaluate(c, { x: 1, y: 3, k: 2 }))).toEqual([3, -2]);
-    expect(o.levels!.params).toEqual(['k']);
-  });
-  it('says which variables it takes', () => {
-    expect(error(['hamiltonian(p^2/2 + q^2/2)'])).toMatch(/q as x and p as y/);
-    expect(error(['hamiltonian(3)'])).toMatch(/constant/);
-    expect(error(['hamiltonian(x + z)'])).toMatch(/x \(the position q\)/);
-    expect(error(['hamiltonian((x, y))'])).toMatch(/hamiltonian takes H/);
   });
 });

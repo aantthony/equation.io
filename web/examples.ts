@@ -529,13 +529,14 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['slope field', "y' = x - y", 'ode'],
       ['logistic growth', 'dy/dx = y(1 - y/4)', 'ode biology'],
       ['pendulum phase portrait', "(x', y') = (y, -sin(x))", 'ode physics'],
-      // hamiltonian(H): x is the position q, y the momentum p; the flow runs
-      // along the level sets of H, since it conserves the energy.
-      ['Hamiltonian: pendulum', 'view(x = -7..7, y = -4..4); hamiltonian(y^2/2 - cos(x))', 'ode physics vector-field'],
+      // The flow conserves the energy H = y²/2 + V(x), so it runs along H's
+      // level sets: the one through the saddles is the separatrix, between
+      // swinging (inside) and spinning or crossing over (outside).
+      ['pendulum separatrix', "view(x = -7..7, y = -4..4); (x', y') = (y, -sin(x)); y^2/2 - cos(x) = 1", 'ode physics'],
       [
-        'Hamiltonian: double well (slide k)',
-        'view(x = -3..3, y = -2..2); k = clamp(1, -1, 2); hamiltonian(y^2/2 + x^4/4 - k x^2/2)',
-        'ode physics vector-field slider',
+        'double well (slide k)',
+        "view(x = -3..3, y = -2..2); k = clamp(1, 0.1, 2); (x', y') = (y, k x - x^3); y^2/2 + x^4/4 - k x^2/2 = 0",
+        'ode physics slider',
       ],
       ['Lotka–Volterra', "view(x = -4..11, y = -1..6); (x', y') = (x - x y/2, x y/4 - y)", 'ode biology'],
       ['Van der Pol', "(x', y') = (y, (1 - x^2)y - x)", 'ode physics'],

@@ -48,7 +48,6 @@ import {
   shadeNames,
   shadeRuns,
 } from '../lib/intshade.ts';
-import { criticalFinder } from '../lib/separatrix.ts';
 import { compileSampler } from '../lib/vm.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
@@ -156,8 +155,6 @@ interface Equation {
   /** An automaton's cells (lib/automaton.ts), rerun only when its plan or a
    *  value it reads (sliders, t) changes — the shadeCache pattern. */
   cellCache?: { plan: CpuPlan; key: string; cells: Cells2D };
-  /** hamiltonian(H)'s critical-point search, compiled once per plan (lib/separatrix.ts). */
-  critical?: { plan: CpuPlan; find: ReturnType<typeof criticalFinder> };
   id: number;
   text: string;
   /** The row's palette slot; -1 until recompileAll colors it (lib/palette.ts),
@@ -1762,7 +1759,6 @@ function render() {
         colors: [],
         conformals: [],
         vfields: [],
-        energies: [],
         tfields: [],
         ineqs: [],
         projections: [],
@@ -1848,35 +1844,7 @@ function render() {
             layers.tfields.push({ ...gpuFor(eq, 'tfield2d'), color, params, uniforms });
             break;
           case 'vfield2d': {
-            const gpu = gpuFor(eq, 'vfield2d');
-            layers.vfields.push({ ...gpu, color, params, uniforms });
-            // A Hamiltonian flow runs along the level sets of H: draw them over
-            // it, with the separatrices (through the saddles, in and around the
-            // view) bolder. The levels are spaced by H's own critical values,
-            // three between its lowest well and highest saddle, where the
-            // motion changes; a view's typical gradient suits a steep H badly.
-            if (plot.levels && gpu.levels) {
-              if (eq.critical?.plan !== plot)
-                eq.critical = { plan: plot, find: criticalFinder(plot.levels.expr, plot.levels.params) };
-              const box = {
-                x0: xmin - halfW / 2,
-                x1: xmax + halfW / 2,
-                y0: view.cy - 1.5 * halfH,
-                y1: view.cy + 1.5 * halfH,
-              };
-              const { separatrices, critical } = eq.critical.find?.(env, box) ?? { separatrices: [], critical: [] };
-              const spread = critical.length > 1 ? critical[critical.length - 1] - critical[0] : 0;
-              const sp = spread > 0 ? niceSpacing(spread / 4, 1) : levelSpacing(plot.levels);
-              layers.energies.push({
-                glsl: gpu.levels.glsl,
-                gradGlsl: gpu.levels.gradGlsl,
-                params: plot.levels.params,
-                major: sp.major,
-                minor: sp.minor,
-                color,
-                separatrices,
-              });
-            }
+            layers.vfields.push({ ...gpuFor(eq, 'vfield2d'), color, params, uniforms });
             drops.forEach((d, i) => {
               extras.polylines.push({ pts: integralCurve(plot.comps, d.x, d.y, time), color: css });
               extras.points.push({ x: d.x, y: d.y, color: css, hot: hotPoint === `drop${i}` });

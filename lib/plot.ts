@@ -20,7 +20,6 @@ import { complexParts } from './complex-parts.ts';
 import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, inferScalarType, usesComplex } from './complex.ts';
 import {
   ANGLE_FN,
-  HAMILTONIAN,
   REVOLVE_AXES,
   legacyCallArgs,
   builtinFn,
@@ -614,15 +613,6 @@ function classifyLowered(
       params,
     },
   });
-
-  // hamiltonian(H): its flow as streamlines, over the level sets of H that
-  // the flow runs along (lib/defs.ts hamiltonianFlow).
-  if (expr.kind === 'call' && expr.name === HAMILTONIAN) {
-    const [H, dq, dp] = expr.args;
-    if (usesComplex(H)) throw new Error('hamiltonian takes a real H.');
-    const levels: LevelSetSpec = { name: 'H', expr: H, params: [...freeVars(H)].filter(n => defined.has(n)).sort() };
-    return done({ kind: 'vector-field', components: [dq, dp], levels });
-  }
 
   // action(M): what the matrix does to the unit square, circle and axes,
   // drawn, with the matrix read out.
