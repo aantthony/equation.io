@@ -1,5 +1,6 @@
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { EXAMPLES } from '../web/examples.ts';
+import { COVERS, EXAMPLES, TAGS, exampleShotPath, searchCategories, searchExamples } from '../web/examples.ts';
 import { analyzeRows } from './analysis.ts';
 import { scanSequences } from './seq.ts';
 import { splitStatements } from './statements.ts';
@@ -51,4 +52,85 @@ describe('examples menu', () => {
       expect(problems).toEqual([]);
     },
   );
+
+  // The menu shows each example by its screenshot. The manifest records the
+  // rows each shot was taken from, so an edited example fails here until
+  // `pnpm shots:examples` reshoots it.
+  it('has a current screenshot of every example, and no others', () => {
+    const dir = new URL('../web/shots/examples/', import.meta.url);
+    const manifest: Record<string, string> = JSON.parse(readFileSync(new URL('manifest.json', dir), 'utf8'));
+    const expected: Record<string, string> = {};
+    for (const [category, items] of EXAMPLES) {
+      for (const [label, text] of items) {
+        const slug = exampleShotPath(category, label);
+        expect(expected[slug], `${category} / ${label} shares a shot path`).toBeUndefined();
+        expected[slug] = text;
+        expect(existsSync(new URL(`${slug}.webp`, dir)), `${slug}.webp — run pnpm shots:examples`).toBe(true);
+      }
+    }
+    expect(manifest, 'shots out of date — run pnpm shots:examples').toEqual(expected);
+    const files = readdirSync(dir, { recursive: true, encoding: 'utf8' })
+      .filter(f => f.endsWith('.webp'))
+      .map(f => f.replace(/\.webp$/, ''));
+    expect(files.filter(f => !(f in expected))).toEqual([]);
+  });
+
+  it('covers each category with one of its own examples', () => {
+    for (const [category, label] of Object.entries(COVERS)) {
+      const items = EXAMPLES.find(([c]) => c === category)?.[1];
+      expect(items, `COVERS names unknown category "${category}"`).toBeDefined();
+      expect(
+        items!.map(([l]) => l),
+        category,
+      ).toContain(label);
+    }
+  });
+
+  it('searches labels, categories and rows, every word, ignoring accents and case', () => {
+    const labels = (q: string) => searchExamples(q).map(e => e.label);
+    expect(labels('julia')).toEqual(['quaternion Julia set (slide s)', 'Julia set', 'Julia orbit']);
+    expect(labels('THEBAULT')).toEqual(['Thébault’s theorem']);
+    expect(labels('fractals ship')).toEqual(['burning ship']);
+    expect(labels('conformal(w')).toContain('Joukowski airfoil');
+    expect(labels('  ')).toEqual([]);
+  });
+
+  it('tags every example from the list, and uses every tag', () => {
+    const used = new Set<string>();
+    for (const [category, items] of EXAMPLES) {
+      for (const [label, , tags] of items) {
+        const list = tags.split(' ');
+        expect(list.length, `${category} / ${label}`).toBeGreaterThan(0);
+        expect(new Set(list).size, `${category} / ${label} repeats a tag`).toBe(list.length);
+        for (const t of list) {
+          expect(TAGS as readonly string[], `${category} / ${label}`).toContain(t);
+          used.add(t);
+        }
+      }
+    }
+    expect(TAGS.filter(t => !used.has(t))).toEqual([]);
+  });
+
+  it('finds tags by word, and exactly with #', () => {
+    const labels = (q: string) => searchExamples(q).map(e => e.label);
+    expect(labels('#knot')).toEqual(['trefoil', 'torus knot (2,5)', 'figure eight']);
+    // `knot` alone also finds the category's name in the rows' category.
+    expect(labels('knot')).toContain('helix');
+    expect(labels('#biology')).toEqual(['logistic growth', 'Lotka–Volterra', 'SIR epidemic']);
+    expect(labels('#animated #complex').length).toBeGreaterThan(3);
+    expect(searchCategories('#3d')).toEqual([]);
+  });
+
+  it('searches within one category', () => {
+    const labels = (q: string, c: string) => searchExamples(q, c).map(e => e.label);
+    expect(labels('julia', 'fractals')).toEqual(['Julia set', 'Julia orbit']);
+    expect(labels('torus', 'fractals')).toEqual([]);
+  });
+
+  it('matches categories by name alone', () => {
+    expect(searchCategories('3d')).toEqual(['3D surfaces', '3D curves + knots']);
+    expect(searchCategories('probability')).toEqual(['probability: continuous', 'probability: discrete']);
+    // `torus` names examples, not a category.
+    expect(searchCategories('torus')).toEqual([]);
+  });
 });

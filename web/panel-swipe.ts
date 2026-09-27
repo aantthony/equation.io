@@ -365,7 +365,7 @@ export function initPanelSwipe(panel: HTMLElement, chip: HTMLElement, grip: HTML
   let suppressGripClick = false;
 
   /**
-   * The scrollable under the touch (the equation list or the examples tree)
+   * The scrollable under the touch (the equation list or the data files)
    * and which ways it can currently move — the input claimGesture arbitrates
    * on. First match wins: they don't nest, and overscroll-behavior keeps a
    * scroll that hits its end from chaining anywhere.

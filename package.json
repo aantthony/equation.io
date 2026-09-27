@@ -8,6 +8,7 @@
     "web": "vite",
     "web:build": "vite build",
     "shots": "node scripts/screenshots.ts",
+    "shots:examples": "node scripts/screenshots.ts --examples",
     "icons": "node scripts/icons.ts",
     "deploy": "wrangler types && vite build && wrangler deploy",
     "typecheck": "wrangler types && tsc --noEmit && tsc -p web --noEmit && tsc -p worker --noEmit && tsc -p worker/tsconfig.test.json --noEmit",
