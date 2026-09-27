@@ -119,6 +119,19 @@ describe('osculating(C, u0)', () => {
   it('needs a point on the curve', () => {
     expect(error(['C = (cos(u), sin(u))', 'osculating(C)'])).toMatch(/where on it/);
   });
+  it('is straight at an inflection that rounding leaves slightly bent', () => {
+    // The figure eight's crossing at u = 1: sin 2π ≈ −2.4e-16, not 0.
+    const eight = 'C = (2sin(2pi u), sin(4pi u))';
+    expect(value([eight, 'curvature(C, 1)'])).toBe(0);
+    const { r, env } = row([eight, 'osculating(C, 1)']);
+    const o = r.cls!.object;
+    if (o.kind !== 'curve' || o.form !== 'implicit') throw new Error(o.kind);
+    expect(evaluate(o.residual, { ...env, x: 1, y: 1 })).toBeNaN();
+    // N is undefined there; T is still drawn.
+    const [T, N] = arrows([eight, 'frame(C, 1)']);
+    expect(minus(T[1], T[0]).every(Number.isFinite)).toBe(true);
+    expect(minus(N[1], N[0]).some(Number.isNaN)).toBe(true);
+  });
 });
 
 describe('frame(C, u0)', () => {

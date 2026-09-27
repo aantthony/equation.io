@@ -31,7 +31,7 @@ const cross = (a: readonly Expr[], b: readonly Expr[]): Expr[] =>
   a.map((_, k) => sub(mul(a[(k + 1) % 3], b[(k + 2) % 3]), mul(a[(k + 2) % 3], b[(k + 1) % 3])));
 
 /** The curve's pieces at u0 (or along u, with u0 = u). */
-function pieces(r: readonly Expr[], d: AlongU, u0: Expr = U) {
+function pieces(r: readonly Expr[], d: AlongU, u0: Expr = U, straight = 1e-10) {
   const at = (e: Expr): Expr => (u0 === U ? e : substVars(e, { u: u0 }));
   const r1raw = r.map(d);
   const r2raw = r1raw.map(d);
@@ -42,8 +42,20 @@ function pieces(r: readonly Expr[], d: AlongU, u0: Expr = U) {
   const along = dot(r1, r2);
   const c2 = sub(mul(speed2, dot(r2, r2)), mul(along, along));
   const w = r2.map((a, k) => sub(mul(speed2, a), mul(along, r1[k])));
-  return { p, r1, r2, speed2, c2, w };
+  // At an inflection c² is 0 only up to rounding (sin 2π ≈ −2.4e-16), which
+  // would draw a circle of radius 1e16 and an N pointing anywhere. u spans
+  // (0, 1), so |r′| is on the curve's own scale: bending below `straight`
+  // |r′| (|w| < straight |r′|³) is straight.
+  const bent: Expr = { kind: 'ineq', op: '>', l: c2, r: mul(num(straight ** 2), mul(speed2, speed2)) } as Expr;
+  return { p, r1, r2, speed2, c2, w, bent };
 }
+
+/** e where the curve bends, else `otherwise` (undefined when omitted). */
+const whereBent = (bent: Expr, e: Expr, otherwise?: Expr): Expr => ({
+  kind: 'piecewise',
+  cases: [{ cond: bent, value: e }],
+  ...(otherwise ? { otherwise } : {}),
+});
 
 /**
  * κ along the curve, an expression in u. In the plane it is signed —
@@ -51,15 +63,15 @@ function pieces(r: readonly Expr[], d: AlongU, u0: Expr = U) {
  * eight changes sign at its crossing; in space it is |r′ × r″|/|r′|³ ≥ 0.
  */
 export function curvatureOf(r: readonly Expr[], d: AlongU): Expr {
-  const { r1, r2, speed2, c2 } = pieces(r, d);
+  const { r1, r2, speed2, c2, bent } = pieces(r, d);
   const top = r.length === 2 ? sub(mul(r1[0], r2[1]), mul(r1[1], r2[0])) : call('sqrt', c2);
-  return div(top, pow(speed2, num(1.5)));
+  return div(whereBent(bent, top, num(0)), pow(speed2, num(1.5)));
 }
 
 /** τ along a space curve: (r′ × r″) · r‴ / |r′ × r″|². */
 export function torsionOf(r: readonly Expr[], d: AlongU): Expr {
-  const { r1, r2, c2 } = pieces(r, d);
-  return div(dot(cross(r1, r2), r2.map(d)), c2);
+  const { r1, r2, c2, bent } = pieces(r, d);
+  return div(dot(cross(r1, r2), r2.map(d)), whereBent(bent, c2));
 }
 
 /**
@@ -69,7 +81,10 @@ export function torsionOf(r: readonly Expr[], d: AlongU): Expr {
  * is straight (c = 0) the radius is infinite and nothing is drawn.
  */
 export function osculatingOf(r: readonly Expr[], d: AlongU, u0: Expr): Expr {
-  const { p, speed2, c2, w } = pieces(r, d, u0);
+  // The circle is drawn on the GPU in float32, where the rounding is 1e-7:
+  // past 10⁴ times the curve's size it is its tangent line anyway.
+  const { p, speed2, c2: c2raw, w, bent } = pieces(r, d, u0, 1e-4);
+  const c2 = whereBent(bent, c2raw);
   const centre = plus(p, scale(div(speed2, c2), w));
   const radius = div(pow(speed2, num(1.5)), call('sqrt', c2));
   if (r.length === 2) return call('circle', { kind: 'vec', items: centre }, radius);
@@ -82,9 +97,9 @@ export function osculatingOf(r: readonly Expr[], d: AlongU, u0: Expr): Expr {
 /** The unit tangent, normal (toward the centre of curvature) and, in space,
  *  binormal T × N at u0. */
 function frameAt(r: readonly Expr[], d: AlongU, u0: Expr): { p: Expr[]; T: Expr[]; N: Expr[]; B?: Expr[] } {
-  const { p, r1, speed2, c2, w } = pieces(r, d, u0);
+  const { p, r1, speed2, c2, w, bent } = pieces(r, d, u0);
   const T = scale(div(num(1), call('sqrt', speed2)), r1);
-  const N = scale(div(num(1), call('sqrt', mul(speed2, c2))), w);
+  const N = scale(whereBent(bent, div(num(1), call('sqrt', mul(speed2, c2)))), w);
   return r.length === 2 ? { p, T, N } : { p, T, N, B: cross(T, N) };
 }
 
