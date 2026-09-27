@@ -16,7 +16,6 @@ import {
 } from './expr.ts';
 import { pointComps } from './geom.ts';
 import { ESCAPES } from './escapes.ts';
-import { SYS, SYS_PREFIX } from './sys.ts';
 import { VALUE_END, noteStart } from './statements.ts';
 
 export interface Suggestion {
@@ -221,8 +220,6 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values(['e_zx'], 'Bivector e_z ⟑ e_x');
   values(['e_xyz'], 'Pseudoscalar e_x ⟑ e_y ⟑ e_z: the unit volume');
   values(defs.consts.keys(), 'Defined constant');
-  // After the constants: a document mentioning sys.clock holds it as one.
-  for (const [key, { doc }] of Object.entries(SYS)) values([SYS_PREFIX + key], doc[0].toUpperCase() + doc.slice(1));
   values(defs.states.keys(), 'Simulation state');
   values(defs.vecStates.keys(), 'Vector state');
   // A field over u, v is a named curve or surface (`c = (cos(2pi u), …)`).
