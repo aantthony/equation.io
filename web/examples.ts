@@ -300,6 +300,26 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
     ],
   ],
   [
+    'your clock',
+    [
+      [
+        'analog clock',
+        'hand(a, r) = r (sin(2pi a), cos(2pi a)); s = sys.clock; circle((0, 0), 1); hand([1..12]/12, 0.9); segment((0, 0), hand(s/43200, 0.5)); segment((0, 0), hand(s/3600, 0.8)); segment((0, 0), hand(floor(s)/60, 0.9)); grid(off); view(y = -1.3..1.3)',
+        'animated trig geometry',
+      ],
+      [
+        "tonight's moon",
+        'p = mod(sys.day - 5.76, 29.53)/29.53; x^2 + y^2 = 1; sign(sin(2pi p)) x > {x^2 + y^2 < 1: cos(2pi p) sqrt(1 - y^2)}; 29.53 p; grid(off); view(y = -1.4..1.4)',
+        'animated inequality piecewise',
+      ],
+      [
+        'day and night on Earth',
+        'N = sys.day; D = -23.44 cos(2pi (mod(N, 365.24) + 10)/365.24) pi/180; L = -360 (mod(N, 1) - 0.5); {-180 < x < 180: {-90 < y < 90: sin(y pi/180) sin(D) + cos(y pi/180) cos(D) cos((x - L) pi/180)}} < 0; (L, D 180/pi); view(x = -200..200)',
+        'animated inequality trig physics',
+      ],
+    ],
+  ],
+  [
     'geometry (drag the points)',
     [
       ['segment + midpoint', 'A = (-2, -1); B = (2, 1.5); segment(A, B); midpoint(A, B)', 'geometry draggable'],

@@ -8,6 +8,7 @@ import type { Seq } from './list.ts';
 import type { Mat } from './mat.ts';
 import type { Tensor } from './tensor.ts';
 import type { SeqScan } from './seq.ts';
+import { isSysName, sysValue } from './sys.ts';
 
 export type Components = readonly [Expr, Expr] | readonly [Expr, Expr, Expr];
 export type SeqValue =
@@ -239,6 +240,8 @@ export function evaluateFrame(
     if (name in out) return out[name];
     const value = lookupValue(env, name);
     if (value?.tag !== 'scalar' || value.role !== 'const') throw new Error(`${name} is not defined.`);
+    // A sys value's definition gives only its rate; its value is the wall clock.
+    if (isSysName(name)) return (out[name] = sysValue(name));
     if (visiting.has(name)) throw new Error(`${name} is defined in terms of itself.`);
     visiting.add(name);
     try {

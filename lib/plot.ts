@@ -40,6 +40,7 @@ import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
+import { sysNameIssue } from './sys.ts';
 
 export { publicKind } from './math-object.ts';
 export type { Classified, MathObject } from './math-object.ts';
@@ -565,6 +566,8 @@ function classifyLowered(
       if (v === 'd' || /^d[A-Za-z]$/.test(v)) throw new Error('Write derivatives as d/dx (…).');
       const fn = builtinFn(v);
       if (fn) throw new Error(`${v} is a function — write it with parentheses, e.g. ${fn}(x).`);
+      const sys = sysNameIssue(v);
+      if (sys) throw new Error(sys);
       throw new Error(`Unknown variable: ${v}. Define "${v} = 1" to make a slider.`);
     }
   }
