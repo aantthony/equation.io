@@ -37,6 +37,7 @@ import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import {
   FUNCTIONS,
   GREEK_NAME_CHARS,
+  HAMILTONIAN,
   NAME_SRC,
   SHADOWABLE_FNS,
   SUM_MAX_TERMS,
@@ -78,6 +79,7 @@ import {
 import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
+import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -928,13 +930,14 @@ const num = (value: number): Expr => ({ kind: 'num', value });
  * out. Differentiation has to see through them: with `g = x^2 + y^2`, the
  * name g alone differentiates as a constant, so `d/dx g` and `grad(g)` were
  * silently 0. Names whose value does not use x, y or z (sliders, animated
- * constants) stay names.
+ * constants) stay names. `over` asks for other variables instead: u writes
+ * out a named curve and the scalars over u it uses.
  */
-function throughFields(e: Expr, opts?: ResolveOpts): Expr {
+function throughFields(e: Expr, opts?: ResolveOpts, over: ReadonlySet<string> = SPACE): Expr {
   const lookup = opts?.definition;
   if (!lookup) return e;
   const closed = (name: string, seen: ReadonlySet<string>): Expr | null => {
-    if (SPACE.has(name) || seen.has(name)) return null;
+    if (over.has(name) || seen.has(name)) return null;
     const value = lookup(name);
     if (!value || value.kind === 'vec' || value.kind === 'list') return null;
     const inner = new Set(seen).add(name);
@@ -944,7 +947,7 @@ function throughFields(e: Expr, opts?: ResolveOpts): Expr {
       if (c) sub[v] = c;
     }
     const out = Object.keys(sub).length ? substVars(value, sub) : value;
-    return [...freeVars(out)].some(v => SPACE.has(v)) ? out : null;
+    return [...freeVars(out)].some(v => over.has(v)) ? out : null;
   };
   const sub: Record<string, Expr> = {};
   for (const v of freeVars(e)) {
@@ -1266,6 +1269,92 @@ function vectorCalculus(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   // In the plane, the scalar ∂Q/∂x − ∂P/∂y (the z-component of the 3D curl).
   if (!R) return sub(d(Q, 'x'), d(P, 'y'));
   return { kind: 'vec', items: [sub(d(R, 'y'), d(Q, 'z')), sub(d(P, 'z'), d(R, 'x')), sub(d(Q, 'x'), d(P, 'y'))] };
+}
+
+/** The operators on a parametric curve in u (lib/curves.ts). */
+const CURVE_OPS: ReadonlySet<string> = new Set(['curvature', 'torsion', 'osculating', 'frame']);
+const CURVE_OP_EXAMPLE: Record<string, string> = {
+  curvature: 'curvature(C) or curvature(C, 0.25)',
+  torsion: 'torsion(C) or torsion(C, 0.25)',
+  osculating: 'osculating(C, 0.25)',
+  frame: 'frame(C, 0.25)',
+};
+/** The curve parameter: a definition over it is a named curve. */
+const ALONG: ReadonlySet<string> = new Set(['u']);
+
+/**
+ * What a curve operator acts on, as its components in u: a tuple, a named
+ * curve (c = (cos(2pi u), sin(2pi u)), written out through any scalar it
+ * uses), or a function of one parameter, called at u.
+ */
+function curveOperand(name: string, arg: Expr, ctx: Ctx): readonly Expr[] {
+  const usage = `${name} takes a parametric curve in u, like ${CURVE_OP_EXAMPLE[name]} with C = (cos(2pi u), sin(2pi u)).`;
+  let r: Expr = arg;
+  if (arg.kind === 'var') {
+    const fn = ctx.getFn(arg.name);
+    if (fn) {
+      if (fn.params.length !== 1 || fn.recursive) throw new Error(usage);
+      r = substVars(fn.body, { [fn.params[0]]: { kind: 'var', name: 'u' } });
+    }
+  }
+  if (ctx.opts.comps) r = lowerGeom(r, ctx.opts.comps, () => null, ctx.opts.isList);
+  r = throughFields(r, ctx.opts, ALONG);
+  if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
+  const vars = freeVars(r);
+  if (!vars.has('u')) throw new Error(`${name} needs a curve, which moves with u — this is a fixed point. ${usage}`);
+  if (vars.has('v') || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
+  return r.items;
+}
+
+/**
+ * curvature and torsion (along u, or at a point u0 of the curve), the
+ * osculating circle at u0 and the Frenet frame at u0.
+ */
+function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
+  const example = CURVE_OP_EXAMPLE[name];
+  const needsPoint = name === 'osculating' || name === 'frame';
+  if (args.length !== 2 && (needsPoint || args.length !== 1)) {
+    throw new Error(
+      needsPoint
+        ? `${name} takes a curve and where on it: ${example}.`
+        : `${name} takes a curve, and optionally where on it: ${example}.`,
+    );
+  }
+  const r = curveOperand(name, args[0], ctx);
+  const u0 = args[1];
+  if (u0 && (u0.kind === 'vec' || freeVars(u0).has('u'))) {
+    throw new Error(`${name}: the second argument is where on the curve — a number, slider or t, not u: ${example}.`);
+  }
+  if (name === 'torsion' && r.length !== 3) {
+    throw new Error('torsion needs a curve in space — a plane curve has none, and its curvature is signed.');
+  }
+  const d = (e: Expr): Expr => applyDiff(e, 'u', 1, ctx.opts, ctx.getFn);
+  if (name === 'osculating') return osculatingOf(r, d, u0);
+  if (name === 'frame') return frameOf(r, d, u0);
+  const along = name === 'curvature' ? curvatureOf(r, d) : torsionOf(r, d);
+  return u0 ? substVars(along, { u: u0 }) : along;
+}
+
+/**
+ * hamiltonian(H): the flow of H(x, y), with x the position q and y the
+ * momentum p — q′ = ∂H/∂p, p′ = −∂H/∂q — as the internal call classify
+ * draws: the flow as streamlines over the level sets of H, along which it
+ * runs (lib/plot.ts).
+ */
+function hamiltonianFlow(args: readonly Expr[], ctx: Ctx): Expr {
+  const usage = 'hamiltonian takes H in x (the position q) and y (the momentum p), like hamiltonian(y^2/2 - cos(x)).';
+  if (args.length !== 1) throw new Error(usage);
+  const H = vectorOperand('hamiltonian', args[0], ctx);
+  if (H.kind === 'vec' || H.kind === 'list' || H.kind === 'eq' || H.kind === 'ineq') throw new Error(usage);
+  const vars = freeVars(H);
+  if (vars.has('z') || vars.has('u') || vars.has('v')) throw new Error(usage);
+  if (!vars.has('x') && !vars.has('y')) {
+    // q and p are the textbook names, but the plane's axes are x and y.
+    if (vars.has('q') || vars.has('p')) throw new Error(`Write q as x and p as y: ${usage}`);
+    throw new Error(`H is constant, so nothing flows. ${usage}`);
+  }
+  const d = (v: string) => applyDiff(H, v, 1, ctx.opts, ctx.getFn);
+  return { kind: 'call', name: HAMILTONIAN, args: [H, d('y'), neg(d('x'))] };
 }
 
 interface StripDx {
@@ -2038,6 +2127,8 @@ function rx(e: Expr, ctx: Ctx): Expr {
         return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
+      if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
+      if (e.name === 'hamiltonian') return hamiltonianFlow(args, ctx);
       // Keyed by the source node: a function body inlined twice holds the
       // same literal, and `f(interval(0, 1))` hands one to every use of x.
       if (e.name === 'interval') return hiddenInterval(e, args);

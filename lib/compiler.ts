@@ -62,7 +62,7 @@ export type CpuPlan =
       angular?: boolean[];
       coordinates?: Expr[];
     }
-  | { type: 'vfield2d'; comps: [Expr, Expr] }
+  | { type: 'vfield2d'; comps: [Expr, Expr]; levels?: CpuGrid }
   | { type: 'tfield2d'; entries: [Expr, Expr, Expr, Expr] }
   | { type: 'vfield3d'; comps: Expr[] }
   | { type: 'pcurve'; dim: 2 | 3; comps: Expr[]; tube?: Expr; d1?: Expr[]; d2?: Expr[]; d3?: Expr[] }
@@ -87,6 +87,7 @@ export type CpuPlan =
       shape?: readonly number[];
       count?: number;
       blades?: { readonly dim: 2 | 3; readonly quat?: true };
+      eigenvalues?: true;
       length?: number;
     }
   | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true };
@@ -106,7 +107,7 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'domain2d'; field: string }
   | { type: 'conformal2d'; field: string }
   | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
-  | { type: 'vfield2d'; fx: string; fy: string }
+  | { type: 'vfield2d'; fx: string; fy: string; levels?: GpuGrid }
   | { type: 'tfield2d'; entries: [string, string, string, string] }
   | { type: 'vfield3d'; comps: [string, string, string] }
   | { type: 'psurface'; comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] }
@@ -242,7 +243,11 @@ export function compileCpu(classified: Classified): CpuPlan {
       return { type: 'tfield2d', entries: object.entries.map(real) as [Expr, Expr, Expr, Expr] };
     case 'vector-field':
       return object.components.length === 2
-        ? { type: 'vfield2d', comps: object.components.map(real) as [Expr, Expr] }
+        ? {
+            type: 'vfield2d',
+            comps: object.components.map(real) as [Expr, Expr],
+            ...(object.levels ? { levels: compileGridCpu(object.levels) } : {}),
+          }
         : { type: 'vfield3d', comps: object.components.map(real) };
     case 'complex-field':
       return object.form === 'fractal'
@@ -345,6 +350,7 @@ export function compileCpu(classified: Classified): CpuPlan {
         count: object.count,
         length: object.length,
         ...(object.blades ? { blades: object.blades } : {}),
+        ...(object.eigenvalues ? { eigenvalues: object.eigenvalues } : {}),
       };
     case 'note':
       return {
@@ -514,6 +520,7 @@ export function compileGpu(classified: Classified): GpuPlan {
           params,
           fx: toGLSL(sub(object.components[0])),
           fy: toGLSL(sub(object.components[1])),
+          ...(object.levels ? { levels: compileGridGpu(object.levels) } : {}),
         };
       // Only the optional streamline view uses this; trajectories and arrows
       // trace on the CPU, so a field GLSL cannot express still draws.
@@ -616,7 +623,7 @@ export function shaderKey(plan: GpuPlan): string {
     case 'fractal2d':
       return JSON.stringify([plan.type, plan.params, plan.step, plan.seed, plan.maxIter]);
     case 'vfield2d':
-      return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy]);
+      return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy, plan.levels?.glsl, plan.levels?.gradGlsl]);
     case 'tfield2d':
       return JSON.stringify([plan.type, plan.params, plan.entries]);
     case 'vfield3d':
@@ -700,6 +707,8 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = [expressions(plan.residuals), plan.parametric, plan.angular, plan.coordinates?.map(exprKey)];
       break;
     case 'vfield2d':
+      structure = [expressions(plan.comps), plan.levels && exprKey(plan.levels.expr)];
+      break;
     case 'vfield3d':
     case 'psurface':
       structure = expressions(plan.comps);
@@ -714,7 +723,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = expressions(plan.values);
       break;
     case 'tuple':
-      structure = [expressions(plan.values), plan.length, plan.shape, plan.count, plan.blades];
+      structure = [expressions(plan.values), plan.length, plan.shape, plan.count, plan.blades, plan.eigenvalues];
       break;
     case 'plist':
       structure = [plan.dim, plan.pts.map(expressions)];

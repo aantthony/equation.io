@@ -256,3 +256,140 @@ export function largestSingular(a: number, b: number, c: number, d: number): num
   const half = (p + q) / 2;
   return Math.sqrt(half + Math.sqrt(Math.max(0, ((p - q) / 2) ** 2 + r * r)));
 }
+
+/**
+ * The internal call `eigen(M)` lowers to, laid out as ACTION_CALL is.
+ * Classify reads the eigenvalues out and draws eigenGlyphs.
+ */
+export const EIGEN_CALL = '[eigen]';
+export const eigenNode = (m: readonly (readonly Expr[])[]): Expr => ({
+  kind: 'call',
+  name: EIGEN_CALL,
+  args: [num(m.length), ...m.flat()],
+});
+export function eigenOfNode(e: Expr): Expr[][] | null {
+  if (e.kind !== 'call' || e.name !== EIGEN_CALL) return null;
+  return actionOfNode({ ...e, name: ACTION_CALL });
+}
+
+const sub = (a: Expr, b: Expr): Expr => add(a, neg(b));
+const sqrt = (e: Expr): Expr => call('sqrt', e);
+const when = (cond: Expr, value: Expr, otherwise?: Expr): Expr => ({
+  kind: 'piecewise',
+  cases: [{ cond, value }],
+  ...(otherwise ? { otherwise } : {}),
+});
+const atLeast = (l: Expr, r: Expr): Expr => ({ kind: 'ineq', op: '>=', l, r });
+const dot = (a: readonly Expr[], b: readonly Expr[]): Expr => a.map((ak, k) => mul(ak, b[k])).reduce(add);
+const cross = (a: readonly Expr[], b: readonly Expr[]): Expr[] =>
+  a.map((_, k) => sub(mul(a[(k + 1) % 3], b[(k + 2) % 3]), mul(a[(k + 2) % 3], b[(k + 1) % 3])));
+/** The real cube root, of either sign. */
+const cbrt = (e: Expr): Expr => mul(call('sign', e), pow(call('abs', e), num(1 / 3)));
+const minor = (m: readonly (readonly Expr[])[], r0: number, r1: number, c0: number, c1: number): Expr =>
+  sub(mul(m[r0][c0], m[r1][c1]), mul(m[r0][c1], m[r1][c0]));
+
+/**
+ * The eigenvalues of a 2×2 or 3×3 matrix in closed form, each as its real
+ * and imaginary parts: real ones first, largest first, then any conjugate
+ * pair with its positive imaginary part first.
+ *
+ * 2×2: s ± √δ with s = tr/2 and δ = s² − det, the pair s ± i√−δ when δ < 0.
+ * 3×3: the roots of λ³ − tr λ² + c λ − det (c the sum of the principal 2×2
+ * minors), shifted to μ³ + p μ + q by λ = μ + tr/3. Three real roots — the
+ * discriminant D = (q/2)² + (p/3)³ ≤ 0 — come from Viète's cosines, one
+ * real root and a conjugate pair from Cardano's cube roots.
+ */
+export function eigenvalues(m: readonly (readonly Expr[])[]): Array<[Expr, Expr]> {
+  const zero = num(0);
+  if (m.length === 2) {
+    const [[a, b], [c, d]] = m;
+    const s = div(add(a, d), num(2));
+    const delta = sub(mul(s, s), sub(mul(a, d), mul(b, c)));
+    const real = sqrt(call('max', delta, zero));
+    const imag = sqrt(call('max', neg(delta), zero));
+    return [
+      [add(s, real), imag],
+      [sub(s, real), neg(imag)],
+    ];
+  }
+  const tr = add(add(m[0][0], m[1][1]), m[2][2]);
+  const c = add(add(minor(m, 0, 1, 0, 1), minor(m, 0, 2, 0, 2)), minor(m, 1, 2, 1, 2));
+  const det = add(
+    sub(mul(m[0][0], minor(m, 1, 2, 1, 2)), mul(m[0][1], minor(m, 1, 2, 0, 2))),
+    mul(m[0][2], minor(m, 1, 2, 0, 1)),
+  );
+  const shift = div(tr, num(3));
+  const p = sub(c, div(mul(tr, tr), num(3)));
+  const q = sub(sub(div(mul(c, tr), num(3)), div(mul(num(2), pow(tr, num(3))), num(27))), det);
+  const halfQ = div(q, num(2));
+  const D = add(mul(halfQ, halfQ), pow(div(p, num(3)), num(3)));
+  const three = atLeast(zero, D);
+  // Viète: μ_k = 2ρ cos(θ − 2πk/3), ρ = √(−p/3), θ ∈ [0, π/3]; k = 0, 1, −1
+  // is largest first. (ρ = 0 only with q = 0 too: a triple root, μ = 0.)
+  const rho = sqrt(call('max', neg(div(p, num(3))), zero));
+  const cosArg = div(neg(halfQ), call('max', pow(rho, num(3)), num(1e-300)));
+  const theta = div(call('acos', call('max', num(-1), call('min', num(1), cosArg))), num(3));
+  const viete = (k: number): Expr => mul(mul(num(2), rho), call('cos', sub(theta, num((2 * Math.PI * k) / 3))));
+  // Cardano: A + B is the real root, −(A + B)/2 ± i(√3/2)(A − B) the pair.
+  const root = sqrt(call('max', D, zero));
+  const A = cbrt(add(neg(halfQ), root));
+  const B = cbrt(sub(neg(halfQ), root));
+  const pairRe = neg(div(add(A, B), num(2)));
+  const pairIm = mul(num(Math.sqrt(3) / 2), sub(A, B));
+  return [
+    [add(shift, when(three, viete(0), add(A, B))), zero],
+    [add(shift, when(three, viete(1), pairRe)), when(three, zero, pairIm)],
+    [add(shift, when(three, viete(-1), pairRe)), when(three, zero, neg(pairIm))],
+  ];
+}
+
+/** How far each invariant line runs from the origin: past any sensible view. */
+const LINE_REACH = 1000;
+
+/**
+ * What eigen(M) draws for each real eigenvalue λ: its invariant line through
+ * the origin, and the arrow M v = λ v for the unit eigenvector v — the line
+ * is the direction M keeps, the arrow how far it stretches (or flips) it. A
+ * complex pair has no real eigenvector and draws nothing; neither does a
+ * multiple of the identity, whose every line is invariant.
+ *
+ * The eigenvector is a nonzero column of the adjugate of M − λI: in 2×2,
+ * (b, λ − a) or (λ − d, c); in 3×3 the cross product of two rows of M − λI.
+ * The longest candidate is taken, so a zero entry never loses it.
+ */
+export function eigenGlyphs(m: readonly (readonly Expr[])[]): Expr[] {
+  const n = m.length as 2 | 3;
+  const out: Expr[] = [];
+  for (const [lambda, imag] of eigenvalues(m)) {
+    const shifted = m.map((row, i) => row.map((entry, j) => (i === j ? sub(entry, lambda) : entry)));
+    const candidates: Expr[][] =
+      n === 2
+        ? [
+            [m[0][1], neg(shifted[0][0])],
+            [neg(shifted[1][1]), m[1][0]],
+          ]
+        : [cross(shifted[0], shifted[1]), cross(shifted[0], shifted[2]), cross(shifted[1], shifted[2])];
+    // The longest candidate, one comparison per rival.
+    let best = candidates[0];
+    let size = dot(best, best);
+    for (const v of candidates.slice(1)) {
+      const vs = dot(v, v);
+      const longer = atLeast(vs, size);
+      best = best.map((c, k) => when(longer, v[k], c));
+      size = when(longer, vs, size);
+    }
+    // A complex λ leaves the vector undefined, so nothing is drawn for it.
+    const real: Expr = { kind: 'ineq', op: '<', l: call('abs', imag), r: num(1e-9) };
+    const len = sqrt(size);
+    const unit = best.map(c => when(real, div(c, len)));
+    const origin = unit.map(() => num(0));
+    out.push({
+      kind: 'figure',
+      form: 'segment',
+      dimension: n,
+      vertices: [...unit.map(c => mul(num(-LINE_REACH), c)), ...unit.map(c => mul(num(LINE_REACH), c))],
+    });
+    out.push(figure('vector', n, [origin, unit.map(c => mul(lambda, c))]));
+  }
+  return out;
+}

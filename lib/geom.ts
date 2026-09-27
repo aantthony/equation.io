@@ -42,6 +42,7 @@ import {
   SHAPE_HINT,
   solveVec,
   traceOf,
+  transposeOf,
 } from './mat.ts';
 import {
   type GetTensor,
@@ -64,7 +65,7 @@ import {
   vectorTensor,
   wedge,
 } from './tensor.ts';
-import { actionNode } from './glyphs.ts';
+import { actionNode, eigenNode } from './glyphs.ts';
 import {
   type Multivector,
   MV_CALL,
@@ -824,6 +825,11 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
           const a = of(e.args[0]);
           return a && { m: expOf(a) };
         }
+        if (e.name === 'transpose' && e.args.length === 1) {
+          const a = of(e.args[0]);
+          if (!a) throw new Error('transpose takes a matrix — define one with M = ((a, b), (c, d)).');
+          return { m: transposeOf(a.m) };
+        }
         // cross(n, v) with its v left off: the matrix of v ↦ n × v.
         if (e.name === 'cross' && e.args.length === 1) {
           const n = lo(e.args[0]);
@@ -1026,7 +1032,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       return sc(v.items[k]);
     }
     case 'call': {
-      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'qjulia')
+      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'eigen' || e.name === 'qjulia')
         throw new Error(`${e.name}(…) must be a whole statement.`);
       if (e.name === 'trail') {
         const args = e.args.map(lo);
@@ -1087,6 +1093,15 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
           ),
         );
         return vc(...matVec(turn, [sub(flat[0], c[0]), sub(flat[1], c[1])]).map((p, k) => add(c[k], p)));
+      }
+      // A transpose lowered here stands where a number or point goes: matrix
+      // algebra (lowerMat) takes every transpose of a matrix before this.
+      if (e.name === 'transpose') {
+        if (!matsPossible) throw new MatrixSeen();
+        if (e.args.length !== 1 || !matOf(e.args[0])) {
+          throw new Error('transpose takes a matrix — define one with M = ((a, b), (c, d)).');
+        }
+        throw new Error('transpose(M) is a matrix: apply it to a vector, or give it a row of its own to read it.');
       }
       if (e.name === 'det' || e.name === 'trace' || e.name === 'solve') {
         const matArg = (raw: Expr | undefined): ReturnType<GetMat> => {
@@ -1361,7 +1376,8 @@ export function lowerMatrix(
         return spine(n.a) || spine(n.b);
       case 'call':
         return (
-          (n.name === 'cross' && n.args.length === 1) || (n.name === 'exp' && n.args.length === 1 && spine(n.args[0]))
+          (n.name === 'cross' && n.args.length === 1) ||
+          ((n.name === 'exp' || n.name === 'transpose') && n.args.length === 1 && spine(n.args[0]))
         );
       default:
         return false;
@@ -1432,6 +1448,16 @@ function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsL
     const m = lowerMat(e.args[0], n => lower(n, getComps, getMat, isList), getMat)?.m;
     if (!m) throw new Error(usage);
     return actionNode(m);
+  }
+  // eigen(M): the eigenvalues read out, the real eigenvectors drawn as the
+  // lines M keeps (lib/glyphs.ts).
+  if (e.kind === 'call' && e.name === 'eigen') {
+    if (!matsPossible) throw new MatrixSeen();
+    const usage = 'eigen takes one 2×2 or 3×3 matrix — eigen(((2, 1), (1, 2))) draws the lines it keeps.';
+    if (e.args.length !== 1) throw new Error(usage);
+    const m = lowerMat(e.args[0], n => lower(n, getComps, getMat, isList), getMat)?.m;
+    if (!m) throw new Error(usage);
+    return eigenNode(m);
   }
   // A multivector on a row of its own draws by grade (docs/clifford.md); one
   // that is only a number or a vector lowers as that number or vector. A

@@ -47,6 +47,7 @@ export const PUBLIC_KIND_ROWS = {
   family: ['y = [1, 2] x'],
   multivector: ['quat(1, 2, 3, 4)'],
   action: ['action(((1, 1), (0, 1)))'],
+  eigen: ['eigen(((2, 1), (1, 2)))'],
   orbit: ["q' = -q", 'q(0) = 1', 'q(0..3)'],
 } satisfies Record<Exclude<PublicKind, 'dlist' | 'dscatter'>, string[]>;
 
