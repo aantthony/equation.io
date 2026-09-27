@@ -664,7 +664,8 @@ export interface Scene3D {
     pts: Float32Array;
     color: [number, number, number];
     arrow?: boolean;
-    triangle?: boolean;
+    /** Closed, with its first vertex repeated last: fill it as a fan. */
+    fill?: boolean;
     fade?: boolean;
   }>;
   /** Disconnected segments (comb teeth, hull edges), drawn as vertex pairs.
@@ -1003,10 +1004,10 @@ export class Renderer3D {
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 1);
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uFade'), c.fade ? 1 : 0);
       gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uCount'), pts.length / 3);
-      if (c.triangle) {
+      if (c.fill) {
         gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 0.18);
         gl.depthMask(false);
-        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.drawArrays(gl.TRIANGLE_FAN, 0, pts.length / 3 - 1);
         gl.depthMask(true);
         gl.uniform1f(gl.getUniformLocation(this.lineProgram, 'uAlpha'), 1);
       }

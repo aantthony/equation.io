@@ -58,3 +58,50 @@ export function vertexSampler(pts: readonly Expr[], over?: readonly Column[]): V
   };
   return Object.assign(sample, { dependencies });
 }
+
+/**
+ * Whether a closed polygon in space (x, y, z per vertex, not repeating the
+ * first) fills correctly as a triangle fan from its first vertex: planar,
+ * and every fan triangle turning the same way about the polygon's normal.
+ * That holds for every convex polygon and for a star-shaped one seen from
+ * vertex 0 — a sector past 180° starts at its centre — and fails for a
+ * skew or concave outline, which then stays an outline rather than filling
+ * across itself.
+ */
+export function fanFillable(pts: ArrayLike<number>): boolean {
+  const n = pts.length / 3;
+  if (n < 3) return false;
+  const at = (k: number, i: number) => pts[k * 3 + i];
+  // Newell's normal, robust for any simple polygon.
+  let nx = 0,
+    ny = 0,
+    nz = 0,
+    extent = 0;
+  for (let k = 0; k < n; k++) {
+    const j = (k + 1) % n;
+    nx += (at(k, 1) - at(j, 1)) * (at(k, 2) + at(j, 2));
+    ny += (at(k, 2) - at(j, 2)) * (at(k, 0) + at(j, 0));
+    nz += (at(k, 0) - at(j, 0)) * (at(k, 1) + at(j, 1));
+    for (let i = 0; i < 3; i++) extent = Math.max(extent, Math.abs(at(k, i) - at(0, i)));
+  }
+  const len = Math.hypot(nx, ny, nz);
+  if (!(len > 0) || !(extent > 0)) return false;
+  nx /= len;
+  ny /= len;
+  nz /= len;
+  const tol = 1e-6 * extent;
+  for (let k = 1; k < n; k++) {
+    const dx = at(k, 0) - at(0, 0),
+      dy = at(k, 1) - at(0, 1),
+      dz = at(k, 2) - at(0, 2);
+    if (Math.abs(dx * nx + dy * ny + dz * nz) > 1e-4 * extent) return false; // not planar
+    if (k + 1 < n) {
+      const ex = at(k + 1, 0) - at(0, 0),
+        ey = at(k + 1, 1) - at(0, 1),
+        ez = at(k + 1, 2) - at(0, 2);
+      const turn = (dy * ez - dz * ey) * nx + (dz * ex - dx * ez) * ny + (dx * ey - dy * ex) * nz;
+      if (turn < -tol * extent) return false;
+    }
+  }
+  return true;
+}
