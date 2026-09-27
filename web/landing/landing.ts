@@ -1,15 +1,16 @@
 import { SHOWCASE, type ShowcaseItem } from '../about/showcase.ts';
 import { LANDINGS, graphUrl, landingFromPath, landingJsonLd } from '../../lib/landings.ts';
+import { shotUrls, themedShot } from '../themed-shot.ts';
 
-const shots = import.meta.glob<string>('../shots/*.png', {
+const shots = import.meta.glob<string>('../shots/*.webp', {
   eager: true,
   query: '?url',
   import: 'default',
 });
-function shotUrl(slug: string): string {
-  const url = shots[`../shots/${slug}.png`];
-  if (!url) throw new Error(`no bundled shot for "${slug}"`);
-  return url;
+function shotUrl(slug: string) {
+  const urls = shotUrls(shots, `../shots/${slug}`);
+  if (!urls) throw new Error(`no bundled shot for "${slug}"`);
+  return urls;
 }
 
 function bySlug(slug: string): ShowcaseItem {
@@ -96,7 +97,7 @@ function cardFor(item: ShowcaseItem): HTMLAnchorElement {
   card.title = 'Open in the app';
 
   const img = document.createElement('img');
-  img.src = shotUrl(item.slug);
+  themedShot(img, shotUrl(item.slug));
   img.alt = item.title;
   img.loading = 'lazy';
   img.width = 900;

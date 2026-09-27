@@ -13,7 +13,23 @@ const LN_K_STEP = 0.32;
 const LN_K_LEVELS = 12;
 const STREAMLINES = 14;
 
-const FIELD = '222, 128, 88';
+/** Canvas colors per page theme (about.css sets color-scheme). */
+const PALETTES = {
+  dark: {
+    grid: '150, 170, 210',
+    gridAlpha: [0.045, 0.1],
+    field: '222, 128, 88',
+    label: 'rgba(170, 180, 200, 0.32)',
+    charge: '255, 190, 120',
+  },
+  light: {
+    grid: '40, 55, 90',
+    gridAlpha: [0.05, 0.1],
+    field: '196, 96, 52',
+    label: 'rgba(60, 70, 90, 0.5)',
+    charge: '232, 128, 56',
+  },
+} as const;
 const FONT = "11px 'JetBrains Mono Variable', ui-monospace, Menlo, monospace";
 
 export function startHeroField(opts: {
@@ -21,10 +37,12 @@ export function startHeroField(opts: {
   clock: HTMLElement;
   typed: HTMLElement;
   rows: string[];
-}): void {
+}): { restyle: () => void } {
   const { canvas, clock, typed, rows } = opts;
   const ctx = canvas.getContext('2d')!;
   const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const readPalette = () => PALETTES[getComputedStyle(canvas).colorScheme === 'light' ? 'light' : 'dark'];
+  let pal = readPalette();
 
   let w = 0;
   let h = 0;
@@ -102,10 +120,10 @@ export function startHeroField(opts: {
     // Grid: fifths, then units, then the axes.
     ctx.lineWidth = 1;
     for (const [step, alpha] of [
-      [0.2, 0.045],
-      [1, 0.1],
+      [0.2, pal.gridAlpha[0]],
+      [1, pal.gridAlpha[1]],
     ] as const) {
-      ctx.strokeStyle = `rgba(150, 170, 210, ${alpha})`;
+      ctx.strokeStyle = `rgba(${pal.grid}, ${alpha})`;
       ctx.beginPath();
       for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) {
         const px = Math.round(X(x)) + 0.5;
@@ -119,7 +137,7 @@ export function startHeroField(opts: {
       }
       ctx.stroke();
     }
-    ctx.strokeStyle = `rgba(${FIELD}, 0.32)`;
+    ctx.strokeStyle = `rgba(${pal.field}, 0.32)`;
     ctx.beginPath();
     ctx.moveTo(0, Math.round(Y(0)) + 0.5);
     ctx.lineTo(w, Math.round(Y(0)) + 0.5);
@@ -128,7 +146,7 @@ export function startHeroField(opts: {
     ctx.stroke();
 
     ctx.font = FONT;
-    ctx.fillStyle = 'rgba(170, 180, 200, 0.32)';
+    ctx.fillStyle = pal.label;
     ctx.textBaseline = 'top';
     ctx.textAlign = 'center';
     for (let x = Math.ceil(x0); x <= x1; x++) if (x) ctx.fillText(String(x), X(x), Y(0) + 6);
@@ -147,7 +165,7 @@ export function startHeroField(opts: {
       const cx = (r * (1 + k * k)) / (k * k - 1);
       const rad = (2 * r * k) / (k * k - 1);
       const a = reveal * (0.62 - n * 0.025);
-      ctx.strokeStyle = `rgba(${FIELD}, ${a})`;
+      ctx.strokeStyle = `rgba(${pal.field}, ${a})`;
       ctx.beginPath();
       ctx.arc(X(cx), Y(0), rad * s, 0, Math.PI * 2);
       ctx.moveTo(X(-cx) + rad * s, Y(0));
@@ -155,7 +173,7 @@ export function startHeroField(opts: {
       ctx.stroke();
     }
     // Streamlines: circles through ±r, centered on the y-axis.
-    ctx.strokeStyle = `rgba(${FIELD}, ${reveal * 0.5})`;
+    ctx.strokeStyle = `rgba(${pal.field}, ${reveal * 0.5})`;
     ctx.beginPath();
     for (let n = 1; n < STREAMLINES; n++) {
       const th = (n * Math.PI) / STREAMLINES;
@@ -170,8 +188,8 @@ export function startHeroField(opts: {
     // The two charges.
     for (const cx of [r, -r]) {
       const g = ctx.createRadialGradient(X(cx), Y(0), 0, X(cx), Y(0), 18);
-      g.addColorStop(0, `rgba(255, 190, 120, ${0.9 * reveal})`);
-      g.addColorStop(1, 'rgba(255, 190, 120, 0)');
+      g.addColorStop(0, `rgba(${pal.charge}, ${0.9 * reveal})`);
+      g.addColorStop(1, `rgba(${pal.charge}, 0)`);
       ctx.fillStyle = g;
       ctx.fillRect(X(cx) - 18, Y(0) - 18, 36, 36);
     }
@@ -210,4 +228,11 @@ export function startHeroField(opts: {
     t0 = performance.now();
     start();
   }
+
+  return {
+    restyle() {
+      pal = readPalette();
+      if (!running) draw();
+    },
+  };
 }

@@ -65,13 +65,14 @@ describe('examples menu', () => {
         const slug = exampleShotPath(category, label);
         expect(expected[slug], `${category} / ${label} shares a shot path`).toBeUndefined();
         expected[slug] = text;
-        expect(existsSync(new URL(`${slug}.webp`, dir)), `${slug}.webp — run pnpm shots:examples`).toBe(true);
+        for (const file of [`${slug}.webp`, `${slug}.dark.webp`])
+          expect(existsSync(new URL(file, dir)), `${file} — run pnpm shots:examples`).toBe(true);
       }
     }
     expect(manifest, 'shots out of date — run pnpm shots:examples').toEqual(expected);
     const files = readdirSync(dir, { recursive: true, encoding: 'utf8' })
       .filter(f => f.endsWith('.webp'))
-      .map(f => f.replace(/\.webp$/, ''));
+      .map(f => f.replace(/(\.dark)?\.webp$/, ''));
     expect(files.filter(f => !(f in expected))).toEqual([]);
   });
 

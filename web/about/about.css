@@ -9,7 +9,9 @@
 * {
   box-sizing: border-box;
 }
-/* One palette: this page is a dark stage whatever the app theme is. */
+/* Dark stage by default. theme.js sets data-theme from the app's saved choice
+   before first paint; without it, the system setting decides. hero-field.ts
+   reads color-scheme to pick its canvas palette. */
 :root {
   color-scheme: dark;
   --bg: #07090e;
@@ -20,15 +22,89 @@
   --faint: #5c6576;
   --line: rgba(255, 255, 255, 0.08);
   --line-2: rgba(255, 255, 255, 0.16);
+  /* --gold is for text and rules; --gold-fill sits behind dark text. */
   --gold: #f0ad5c;
+  --gold-fill: #f0ad5c;
   --gold-hi: #f8d58c;
   /* The intent landing pages import this sheet and still say --accent. */
   --accent: var(--gold);
   --copper: #d4735a;
+  --nav-bg: linear-gradient(rgba(7, 9, 14, 0.85), rgba(7, 9, 14, 0.55));
+  --hero-glow: #111726;
+  --footer-glow: #0e131f;
+  --clock: rgba(238, 240, 244, 0.7);
+  --title: linear-gradient(100deg, #c9ccd3 0%, #ffffff 45%, #e9ebf0 100%);
+  --outline: rgba(238, 240, 244, 0.9);
+  --reveal: linear-gradient(180deg, #f6c47e, #eba14d);
+  --lede: #b6bdca;
+  --code-bg: rgba(0, 0, 0, 0.3);
+  --code-ink: #c3c9d4;
+  --code-ink-2: #d6dbe4;
+  --card-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  /* The app's canvas color, held while a shot loads. */
+  --shot-bg: #171a1f;
   --display: 'Archivo Variable', 'Arial Black', system-ui, sans-serif;
   --serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
   --mono: 'Eq Math Glyphs', 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
   --gutter: clamp(16px, 4vw, 48px);
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    color-scheme: light;
+    --bg: #fbfaf7;
+    --bg-2: #f3f1ec;
+    --surface: #ffffff;
+    --ink: #161a22;
+    --muted: #5b6472;
+    --faint: #8a919d;
+    --line: rgba(20, 30, 50, 0.1);
+    --line-2: rgba(20, 30, 50, 0.18);
+    --gold: #9c5710;
+    --gold-fill: #eba14d;
+    --gold-hi: #f6c47e;
+    --copper: #c4603f;
+    --nav-bg: linear-gradient(rgba(251, 250, 247, 0.9), rgba(251, 250, 247, 0.65));
+    --hero-glow: #ffffff;
+    --footer-glow: #f1ede4;
+    --clock: rgba(22, 26, 34, 0.65);
+    --title: linear-gradient(100deg, #161a22 0%, #3b4250 45%, #161a22 100%);
+    --outline: rgba(22, 26, 34, 0.85);
+    --reveal: linear-gradient(180deg, #eba14d, #c26c1c);
+    --lede: #3d4452;
+    --code-bg: rgba(20, 30, 50, 0.05);
+    --code-ink: #3d4452;
+    --code-ink-2: #2a303c;
+    --card-shadow: 0 18px 50px rgba(20, 30, 50, 0.14);
+    --shot-bg: #ffffff;
+  }
+}
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #fbfaf7;
+  --bg-2: #f3f1ec;
+  --surface: #ffffff;
+  --ink: #161a22;
+  --muted: #5b6472;
+  --faint: #8a919d;
+  --line: rgba(20, 30, 50, 0.1);
+  --line-2: rgba(20, 30, 50, 0.18);
+  --gold: #9c5710;
+  --gold-fill: #eba14d;
+  --gold-hi: #f6c47e;
+  --copper: #c4603f;
+  --nav-bg: linear-gradient(rgba(251, 250, 247, 0.9), rgba(251, 250, 247, 0.65));
+  --hero-glow: #ffffff;
+  --footer-glow: #f1ede4;
+  --clock: rgba(22, 26, 34, 0.65);
+  --title: linear-gradient(100deg, #161a22 0%, #3b4250 45%, #161a22 100%);
+  --outline: rgba(22, 26, 34, 0.85);
+  --reveal: linear-gradient(180deg, #eba14d, #c26c1c);
+  --lede: #3d4452;
+  --code-bg: rgba(20, 30, 50, 0.05);
+  --code-ink: #3d4452;
+  --code-ink-2: #2a303c;
+  --card-shadow: 0 18px 50px rgba(20, 30, 50, 0.14);
+  --shot-bg: #ffffff;
 }
 @property --fill {
   syntax: '<percentage>';
@@ -59,7 +135,7 @@ a {
   color: var(--gold);
 }
 ::selection {
-  background: var(--gold);
+  background: var(--gold-fill);
   color: var(--bg);
 }
 
@@ -93,7 +169,7 @@ a {
   /* Clear the translucent status bar when opened from the installed app; the
      inset is 0 in a browser tab. */
   padding: calc(14px + env(safe-area-inset-top)) var(--gutter) 14px;
-  background: linear-gradient(rgba(7, 9, 14, 0.85), rgba(7, 9, 14, 0.55));
+  background: var(--nav-bg);
   backdrop-filter: blur(14px) saturate(1.3);
   -webkit-backdrop-filter: blur(14px) saturate(1.3);
   border-bottom: 1px solid var(--line);
@@ -130,6 +206,13 @@ a {
 .nav-link:hover {
   color: var(--ink);
 }
+.theme-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 16px;
+  cursor: pointer;
+}
 @media (max-width: 620px) {
   .nav-link[href^='#'] {
     display: none;
@@ -138,7 +221,7 @@ a {
 
 .cta {
   display: inline-block;
-  background: var(--gold);
+  background: var(--gold-fill);
   color: #1a1206;
   text-decoration: none;
   font-family: var(--display);
@@ -187,7 +270,7 @@ a {
   padding: calc(96px + env(safe-area-inset-top)) var(--gutter) 150px;
   overflow: hidden;
   isolation: isolate;
-  background: radial-gradient(ellipse 70% 60% at 50% 50%, #111726 0%, transparent 70%), var(--bg);
+  background: radial-gradient(ellipse 70% 60% at 50% 50%, var(--hero-glow) 0%, transparent 70%), var(--bg);
 }
 .hero::after {
   /* Vignette so the field lines melt into the page. */
@@ -213,7 +296,7 @@ a {
   right: var(--gutter);
   margin: 0;
   font: 400 clamp(18px, 2.4vw, 28px) / 1 var(--mono);
-  color: rgba(238, 240, 244, 0.7);
+  color: var(--clock);
   font-variant-numeric: tabular-nums;
 }
 .clock i {
@@ -235,7 +318,7 @@ a {
   display: block;
 }
 .hero h1 .line:first-child {
-  background: linear-gradient(100deg, #c9ccd3 0%, #ffffff 45%, #e9ebf0 100%);
+  background: var(--title);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -246,14 +329,14 @@ a {
   position: relative;
   width: max-content;
   color: transparent;
-  -webkit-text-stroke: max(1.5px, 0.018em) rgba(238, 240, 244, 0.9);
+  -webkit-text-stroke: max(1.5px, 0.018em) var(--outline);
 }
 .reveal::after {
   content: attr(data-text);
   position: absolute;
   inset: 0;
   color: transparent;
-  background: linear-gradient(180deg, #f6c47e, #eba14d);
+  background: var(--reveal);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-stroke: 0;
@@ -271,7 +354,7 @@ a {
   margin: 0 0 32px;
   font-size: clamp(16px, 1.5vw, 19px);
   line-height: 1.6;
-  color: #b6bdca;
+  color: var(--lede);
   text-wrap: pretty;
   text-shadow:
     0 0 18px var(--bg),
@@ -321,7 +404,7 @@ a {
   width: 0.55em;
   height: 1.15em;
   margin-left: -8px;
-  background: var(--gold);
+  background: var(--gold-fill);
   animation: blink 1s steps(1) infinite;
 }
 .typed:hover .row span {
@@ -432,12 +515,12 @@ a {
   text-decoration: none;
   white-space: nowrap;
   padding: 8px 12px;
-  border: 1px solid rgba(240, 173, 92, 0.35);
+  border: 1px solid color-mix(in srgb, var(--gold) 35%, transparent);
   border-radius: 999px;
   transition: background 0.15s;
 }
 .group-head .more:hover {
-  background: rgba(240, 173, 92, 0.12);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
 }
 .grid {
   display: grid;
@@ -475,15 +558,15 @@ a {
 }
 .card:hover {
   transform: translateY(-4px);
-  border-color: rgba(240, 173, 92, 0.5);
+  border-color: color-mix(in srgb, var(--gold) 50%, transparent);
   box-shadow:
-    0 18px 50px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(240, 173, 92, 0.15);
+    var(--card-shadow),
+    0 0 0 1px color-mix(in srgb, var(--gold) 15%, transparent);
 }
 .shot {
   overflow: hidden;
   aspect-ratio: 3 / 2;
-  background: #fff;
+  background: var(--shot-bg);
 }
 .shot img {
   display: block;
@@ -520,9 +603,9 @@ a {
   display: block;
   padding: 8px 10px 8px 12px;
   border-left: 3px solid var(--tint);
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--code-bg);
   font: 12px/1.5 var(--mono);
-  color: #c3c9d4;
+  color: var(--code-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -582,7 +665,7 @@ a {
 }
 .deeplinks code {
   font: 13px/1.5 var(--mono);
-  color: #d6dbe4;
+  color: var(--code-ink-2);
 }
 .deeplinks ul {
   list-style: none;
@@ -623,7 +706,7 @@ footer {
   text-align: center;
   color: var(--muted);
   font-size: 14.5px;
-  background: radial-gradient(ellipse 60% 70% at 50% 30%, #0e131f, transparent 70%);
+  background: radial-gradient(ellipse 60% 70% at 50% 30%, var(--footer-glow), transparent 70%);
 }
 .sign {
   width: fit-content;

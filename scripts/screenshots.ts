@@ -9,10 +9,12 @@
  *
  * Boots the vite dev server, loads each item via the same `#eq;eq` URL the
  * gallery links to, waits for the scene to settle, and captures the canvas
- * (panel hidden for cards, visible for the hero).
+ * (panel hidden for cards, visible for the hero). Gallery and menu shots are
+ * WebP, rendered once per theme: `<slug>.webp` and `<slug>.dark.webp`
+ * (web/themed-shot.ts picks between them). The og:image PNGs are light only.
  */
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -24,8 +26,8 @@ import { splitStatements } from '../lib/statements.ts';
 const PORT = 5199;
 const ORIGIN = `http://localhost:${PORT}`;
 // Gallery shots are imported by about.ts, so Vite content-hashes them into
-// assets/. The hero is the og:image and must keep a stable public URL, so it
-// stays in public/shots/ (copied verbatim by Vite).
+// assets/. The hero and the landing og:images must keep stable public URLs,
+// so they stay in public/shots/ (copied verbatim by Vite).
 const SHOTS_DIR = fileURLToPath(new URL('../web/shots/', import.meta.url));
 const HERO_DIR = fileURLToPath(new URL('../web/public/shots/', import.meta.url));
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -71,20 +73,29 @@ try {
 
   async function shoot(
     item: ShowcaseItem,
-    opts: { width: number; height: number; panel: boolean; dir: string; scale?: number; webp?: number },
+    opts: {
+      width: number;
+      height: number;
+      panel: boolean;
+      dir: string;
+      scale?: number;
+      webp?: number;
+      dark?: boolean;
+    },
   ) {
     const page = await browser.newPage({
       viewport: { width: opts.width, height: opts.height },
       deviceScaleFactor: opts.scale ?? 2,
     });
+    // The app reads its theme from here before first paint (theme.js).
+    await page.addInitScript(mode => localStorage.setItem('eq-theme', mode), opts.dark ? 'dark' : 'light');
     await page.goto(ORIGIN + hashUrl(item.eqs));
     await page.waitForSelector('#gl');
     // backdrop-filter over the WebGL canvas blanks it in headless Chromium;
     // swap the panel's blur for a nearly-opaque background in shots.
+    const panelBg = opts.dark ? 'rgba(24, 27, 33, 0.97)' : 'rgba(255, 255, 255, 0.97)';
     await page.addStyleTag({
-      content: opts.panel
-        ? '#panel { backdrop-filter: none; background: rgba(255, 255, 255, 0.97); }'
-        : '#panel { display: none; }',
+      content: opts.panel ? `#panel { backdrop-filter: none; background: ${panelBg}; }` : '#panel { display: none; }',
     });
     // Frame the shot before settling, so the wait covers the final view.
     // __eq is the app's dev-only handle; shots always run against dev.
@@ -116,8 +127,9 @@ try {
       await page.mouse.click(fx * opts.width, fy * opts.height);
     }
     if (item.clicks?.length) await page.waitForTimeout(250);
+    const stem = `${opts.dir}${item.slug}${opts.dark ? '.dark' : ''}`;
     if (opts.webp === undefined) {
-      await page.screenshot({ path: `${opts.dir}${item.slug}.png` });
+      await page.screenshot({ path: `${stem}.png` });
     } else {
       // Playwright writes only PNG and JPEG; Chromium's own encoder makes the
       // WebP, from the same page once the shot is taken.
@@ -135,12 +147,12 @@ try {
         },
         [png.toString('base64'), opts.webp] as const,
       );
-      const path = `${opts.dir}${item.slug}.webp`;
+      const path = `${stem}.webp`;
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, Buffer.from(webp, 'base64'));
     }
     await page.close();
-    console.log(`✓ ${item.slug} (${item.eqs.join('; ')})`);
+    console.log(`✓ ${item.slug}${opts.dark ? ' (dark)' : ''} (${item.eqs.join('; ')})`);
   }
 
   async function shootExamples(only: string[]) {
@@ -153,7 +165,10 @@ try {
       for (const [label, text] of items) {
         const slug = exampleShotPath(category, label);
         const named = names.some(n => slug === n || slug.startsWith(n + '/'));
-        const stale = manifest[slug] !== text || !existsSync(`${EXAMPLES_DIR}${slug}.webp`);
+        const stale =
+          manifest[slug] !== text ||
+          !existsSync(`${EXAMPLES_DIR}${slug}.webp`) ||
+          !existsSync(`${EXAMPLES_DIR}${slug}.dark.webp`);
         // An example left unshot keeps the text its current shot was taken
         // from, so a later run still sees it as stale.
         if (slug in manifest) next[slug] = manifest[slug];
@@ -172,14 +187,16 @@ try {
     for (const slug of Object.keys(manifest)) {
       if (current.has(slug)) continue;
       rmSync(`${EXAMPLES_DIR}${slug}.webp`, { force: true });
+      rmSync(`${EXAMPLES_DIR}${slug}.dark.webp`, { force: true });
       console.log(`✗ ${slug} (removed)`);
     }
     // A few pages at a time: each mostly waits out its settle.
-    const queue = [...todo];
+    const queue = todo.flatMap(item => [false, true].map(dark => ({ item, dark })));
     await Promise.all(
       Array.from({ length: 4 }, async () => {
-        for (let item = queue.shift(); item; item = queue.shift()) {
-          await shoot(item, { width: 400, height: 300, panel: false, dir: EXAMPLES_DIR, scale: 2, webp: 0.8 });
+        for (let job = queue.shift(); job; job = queue.shift()) {
+          const { item, dark } = job;
+          await shoot(item, { width: 400, height: 300, panel: false, dir: EXAMPLES_DIR, scale: 2, webp: 0.8, dark });
         }
       }),
     );
@@ -192,17 +209,26 @@ try {
     const wanted = (s: string) => only.length === 0 || only.includes(s);
 
     if (wanted(HERO.slug)) await shoot(HERO, { width: 1440, height: 900, panel: true, dir: HERO_DIR });
-    for (const item of SHOWCASE) {
-      if (wanted(item.slug)) await shoot(item, { width: 900, height: 600, panel: false, dir: SHOTS_DIR });
-    }
+    const queue = SHOWCASE.filter(item => wanted(item.slug)).flatMap(item =>
+      [false, true].map(dark => ({ item, dark })),
+    );
+    await Promise.all(
+      Array.from({ length: 4 }, async () => {
+        for (let job = queue.shift(); job; job = queue.shift()) {
+          const { item, dark } = job;
+          await shoot(item, { width: 900, height: 600, panel: false, dir: SHOTS_DIR, webp: 0.85, dark });
+        }
+      }),
+    );
 
     // Landing pages whose hero the OG renderer cannot draw need a stable PNG
-    // at /shots/<slug>.png (the gallery file is content-hashed by Vite).
+    // at /shots/<slug>.png (the gallery file is WebP and content-hashed).
     for (const page of LANDINGS) {
       if (page.og !== 'shot') continue;
       if (!wanted(page.hero) && !wanted(page.slug)) continue;
-      copyFileSync(`${SHOTS_DIR}${page.hero}.png`, `${HERO_DIR}${page.slug}.png`);
-      console.log(`✓ ${page.slug} og shot ← ${page.hero}`);
+      const item = SHOWCASE.find(i => i.slug === page.hero);
+      if (!item) throw new Error(`landing ${page.slug}: no showcase item "${page.hero}"`);
+      await shoot({ ...item, slug: page.slug }, { width: 900, height: 600, panel: false, dir: HERO_DIR });
     }
   }
 
