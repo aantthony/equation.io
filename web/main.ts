@@ -3726,13 +3726,22 @@ function buildExamplesMenu() {
   let menu: typeof import('./examples-menu.ts') | undefined;
   const load = () =>
     import('./examples-menu.ts').then(m => (menu = m)).catch(err => console.error('examples menu failed to load', err));
+  /** An open is waiting on the first load. */
+  let opening = false;
   const toggle = () => {
     // Once loaded, open synchronously: keys typed straight after the
     // shortcut then reach the popup's search, not the row being edited.
     if (menu) return menu.toggleExamplesMenu(openExample);
-    // The first time, they have nowhere to go until it arrives.
+    // A second press during the first load (a double-click, ⌘K twice) would
+    // otherwise toggle the popup shut the moment it opens.
+    if (opening) return;
+    opening = true;
+    // The first time, keys have nowhere to go until it arrives.
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    void load().then(m => m?.toggleExamplesMenu(openExample));
+    void load().then(m => {
+      opening = false;
+      m?.toggleExamplesMenu(openExample);
+    });
   };
   button.addEventListener('pointerenter', () => void load(), { once: true });
   button.addEventListener('click', toggle);
