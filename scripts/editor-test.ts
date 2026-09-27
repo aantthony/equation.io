@@ -15,6 +15,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Page } from 'playwright';
 import { FEATURED, sameRows } from '../lib/featured.ts';
+import { LIGHT_PALETTE } from '../lib/palette.ts';
 
 const PORT = 5197;
 const ORIGIN = `http://localhost:${PORT}`;
@@ -444,6 +445,71 @@ await scenario('Shift+Alt+Down duplicates the row', async () => {
   );
 });
 
+/** Each row's palette slot, read from its swatch color (-1: not a palette color). */
+const rowSlots = async (page: Page) => {
+  const css = LIGHT_PALETTE.map(c => `rgb(${c.map(v => Math.round(v * 255)).join(', ')})`);
+  const colors = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.eq-line')].map(l => l.style.getPropertyValue('--eq-color')),
+  );
+  return colors.map(c => css.indexOf(c));
+};
+const SIX = ['y = x', 'y = x^2', 'y = x^3', 'y = x^4', 'y = x^5', 'y = x^6'];
+
+await scenario('new rows take the least-used color, whatever made them', async () => {
+  // Definitions draw nothing, so the curves after them start at blue.
+  await load(page, ['a = 1', 'b = 2', 'y = a x', 'y = b x']);
+  let slots = await rowSlots(page);
+  check('rows that draw nothing take no color', slots[2] === 0 && slots[3] === 1, JSON.stringify(slots));
+
+  // Enter and Cmd+Enter at the same caret: a row between blue and red, with
+  // every color in use once, is neither.
+  for (const key of ['Enter', 'ControlOrMeta+Enter']) {
+    await load(page, SIX);
+    await caretTo(page, 0, 5);
+    await page.keyboard.press(key);
+    await page.keyboard.type('y = -x');
+    slots = await rowSlots(page);
+    check(`${key} colors the new row apart from its neighbours`, slots[1] === 2, JSON.stringify(slots));
+  }
+
+  // Enter at the start of a row moves that row down; it keeps its color.
+  await load(page, ['y = x', 'y = x^2']);
+  await caretTo(page, 1, 0);
+  await page.keyboard.press('Enter');
+  slots = await rowSlots(page);
+  check('Enter at a row start keeps the row its color', slots[2] === 1, JSON.stringify(slots));
+
+  // Pasting over the whole document counts none of the rows it replaces.
+  await load(page, ['y = x', 'y = x^2', 'y = x^3']);
+  await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>('#equations')!;
+    el.focus();
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    getSelection()!.removeAllRanges();
+    getSelection()!.addRange(r);
+    const dt = new DataTransfer();
+    dt.setData('text/plain', 'y = sin(x)\ny = cos(x)\ny = tan(x)');
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  slots = await rowSlots(page);
+  check('a paste over everything colors like a fresh load', JSON.stringify(slots) === '[0,1,2]', JSON.stringify(slots));
+
+  // Shift+Alt+Up: the selected upper row is the copy, in a new color.
+  await load(page, ['y = sin(x)', 'y = cos(x)']);
+  await caretTo(page, 0, 10);
+  await page.keyboard.press('Shift+Alt+ArrowUp');
+  await page.keyboard.type(' + 1');
+  const rows = await rowTexts(page);
+  slots = await rowSlots(page);
+  check(
+    'duplicating up selects the copy and leaves the original its color',
+    JSON.stringify(rows) === JSON.stringify(['y = sin(x) + 1', 'y = sin(x)', 'y = cos(x)']) &&
+      JSON.stringify(slots) === '[2,0,1]',
+    `${JSON.stringify(rows)} ${JSON.stringify(slots)}`,
+  );
+});
+
 await scenario('Cmd+Shift+K deletes rows', async () => {
   await load(page, ['a = 1', 'b = 2', 'y = a x + b']);
   await caretTo(page, 1, 0);
@@ -553,12 +619,13 @@ await scenario('spiral zoom stays responsive while traces run', async () => {
     '(r, theta) = (3u, 6pi u)',
     'view(x = -4..4, y = -3..3)',
   ]);
-  // Wait for actual green curve pixels, not merely an empty responsive grid.
+  // Wait for actual curve pixels (blue: the definitions above it take no
+  // color), not merely an empty responsive grid.
   const hasCurve = () => {
     const c = document.querySelector<HTMLCanvasElement>('#overlay')!;
     const pixels = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
     for (let i = 0; i < pixels.length; i += 4) {
-      if (pixels[i + 3] > 100 && pixels[i + 1] > pixels[i] + 30 && pixels[i + 1] > pixels[i + 2] + 15) return true;
+      if (pixels[i + 3] > 100 && pixels[i + 2] > pixels[i] + 60 && pixels[i + 2] > pixels[i + 1] + 30) return true;
     }
     return false;
   };

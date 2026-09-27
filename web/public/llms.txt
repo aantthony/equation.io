@@ -315,7 +315,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Row colors: a note that opens with a hex color draws the row in that color
   (`y = x^2 #e24`, `y = sin(x) #1f77b4 wave`). The 3 or 6 hex digits must
   touch the `#`; `# 100 samples` (with a space) stays a plain note. Without
-  one, rows take the palette in order.
+  one, the rows that draw take the palette in order (blue, red, green,
+  purple, orange, black); definitions, comments and view rows take no color.
 
 ## Variables (what a row means)
 

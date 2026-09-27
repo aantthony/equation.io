@@ -23,19 +23,10 @@ import { pathSampler, regionSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
 import { type ViewSpec, clampPhi, fitPanelWindow, linkedWindow } from '../lib/view.ts';
 import { type GridRowSpec, layoutPanels, linkRoot, panelIndices, splitsOf } from '../lib/panels.ts';
+import { LIGHT_PALETTE, assignColors, takesColor } from '../lib/palette.ts';
 import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
-
-// Matches web/main.ts PALETTE.
-const PALETTE: [number, number, number][] = [
-  [0.176, 0.439, 0.702],
-  [0.78, 0.267, 0.251],
-  [0.22, 0.549, 0.275],
-  [0.376, 0.259, 0.651],
-  [0.98, 0.494, 0.098],
-  [0.0, 0.0, 0.0],
-];
 
 export const OG_WIDTH = 600;
 export const OG_HEIGHT = 315;
@@ -1248,12 +1239,25 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
       });
     });
 
-  // Row colors follow position across ALL rows (defs consume a color slot in
-  // the app too: a loaded document's rows take slots in order), unless the row's
-  // note names one (`y = x #e24`). Analysis rows are the input rows, in order.
+  // Rows take palette slots as the app gives them when it opens the link
+  // (lib/palette.ts), unless the row's note names a color (`y = x #e24`).
+  // Analysis rows are the input rows, in order.
+  const slots = analysis.rows.map(() => ({ colorIndex: -1 }));
+  // Analysis strips a row's note, so whether it names a color is read from the input.
+  assignColors(
+    slots,
+    analysis.rows.map((row, i) =>
+      takesColor({
+        ...row,
+        text: texts[i] ?? '',
+        point: row.def?.kind === 'const' && analysis.defs.points.has(row.def.name),
+      }),
+    ),
+    LIGHT_PALETTE.length,
+  );
   const colorOf = (row: RowInfo) => {
     const i = analysis.rows.indexOf(parents.get(row) ?? row);
-    return noteColor(texts[i] ?? '') ?? PALETTE[i % PALETTE.length];
+    return noteColor(texts[i] ?? '') ?? LIGHT_PALETTE[Math.max(0, slots[i].colorIndex)];
   };
 
   // A split view (`---` rows) draws each panel into its own raster, laid out
