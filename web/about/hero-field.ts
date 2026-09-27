@@ -15,8 +15,20 @@ const STREAMLINES = 14;
 
 /** Canvas colors per page theme (about.css sets color-scheme). */
 const PALETTES = {
-  dark: { grid: '150, 170, 210', gridAlpha: [0.045, 0.1], field: '222, 128, 88', label: 'rgba(170, 180, 200, 0.32)', charge: '255, 190, 120' },
-  light: { grid: '40, 55, 90', gridAlpha: [0.05, 0.1], field: '196, 96, 52', label: 'rgba(60, 70, 90, 0.5)', charge: '232, 128, 56' },
+  dark: {
+    grid: '150, 170, 210',
+    gridAlpha: [0.045, 0.1],
+    field: '222, 128, 88',
+    label: 'rgba(170, 180, 200, 0.32)',
+    charge: '255, 190, 120',
+  },
+  light: {
+    grid: '40, 55, 90',
+    gridAlpha: [0.05, 0.1],
+    field: '196, 96, 52',
+    label: 'rgba(60, 70, 90, 0.5)',
+    charge: '232, 128, 56',
+  },
 } as const;
 const FONT = "11px 'JetBrains Mono Variable', ui-monospace, Menlo, monospace";
 
