@@ -143,12 +143,6 @@ function value(rows: string[]): number {
 }
 const error = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.error ?? '';
 const info = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info ?? '';
-/** Milliseconds a readout takes to analyze. */
-function timed(rows: string[]): number {
-  const t0 = performance.now();
-  analyzeRows(rows, { readouts: true });
-  return performance.now() - t0;
-}
 
 // Review findings for phase 8 (docs/multisets.md §9): each one a confident
 // wrong number, a freeze, or an internal error before.
@@ -245,16 +239,18 @@ describe('measures: review findings', () => {
     expect(certified(0, 0.1)).toBe(0);
   });
 
-  it('8. an intricate set is refused quickly, never a freeze', () => {
-    expect(timed(['count({-1000<x<1000,-1000<y<1000, sin(x y)>0, cos(x+y)>0})'])).toBeLessThan(1000);
-    expect(error(['count({-1000<x<1000,-1000<y<1000, sin(x y)>0, cos(x+y)>0})'])).toMatch(/precisely enough/);
-    expect(timed(['a = 3', 'count({-1000<x<1000,-1000<y<1000, sin(a x y)>0})'])).toBeLessThan(1000);
-    expect(timed(['count({x^2+y^2<1, sin(1000 x y)>0})'])).toBeLessThan(1000);
-    expect(timed(['total({-1000<x<1000,-1000<y<1000, sin(x y)>0: x^2})'])).toBeLessThan(1000);
-    // A refusal is remembered: the same slider value does not redo it.
-    const row = ['a = 3.5', 'count({-1000<x<1000,-1000<y<1000, sin(a x y)>0})'];
-    timed(row);
-    expect(timed(row)).toBeLessThan(100);
+  it('8. an intricate set is refused by the work budget, never a freeze', () => {
+    // The wall clock is off in tests (lib/test-setup.ts), so each of these
+    // ends on the deterministic budget alone, whatever the runner's speed.
+    // (The remembered refusal and the clock are measure-limits.test.ts's.)
+    for (const rows of [
+      ['count({-1000<x<1000,-1000<y<1000, sin(x y)>0, cos(x+y)>0})'],
+      ['a = 3', 'count({-1000<x<1000,-1000<y<1000, sin(a x y)>0})'],
+      ['count({x^2+y^2<1, sin(1000 x y)>0})'],
+      ['total({-1000<x<1000,-1000<y<1000, sin(x y)>0: x^2})'],
+    ]) {
+      expect(error(rows), rows.at(-1)).toMatch(/precisely enough/);
+    }
   });
 
   it('9. jumps, lemniscates and infinite counts', () => {

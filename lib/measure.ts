@@ -856,13 +856,16 @@ function numericReduction(name: string, conds: Cond[], value: Expr, coords: Coor
   const key =
     exprKey([name, conds.map(c => [c.d, c.eq ? 1 : c.strict ? 2 : 0]), values, names]) + JSON.stringify([lo, hi, env]);
   // Failures are kept too: a slider drag must not redo a refused measurement.
+  // Only a deterministic one, though: a run the wall clock stopped says how
+  // fast the device was, and the next analysis tries again.
   let hit = memo.get(key);
   if (!hit) {
+    measureRuns.count++;
     try {
       // count needs only the measure; the others need the values too.
       hit = measureSet(conds, name === 'count' ? [] : values, names, lo, hi, env);
     } catch (e) {
-      if (!(e instanceof Error)) throw e;
+      if (!(e instanceof Error) || e instanceof OutOfTime) throw e;
       hit =
         e instanceof Diverges
           ? new Error(
@@ -1258,11 +1261,19 @@ const GL3_W = [5 / 9, 8 / 9, 5 / 9];
  *  50 ms, so a readout never stalls the page (analysis runs on the main
  *  thread). */
 const WORK_BUDGET = 2_200_000;
-/** A hard stop, whatever the work estimate says (a safety net: the work
- *  budget, which is deterministic, is what normally ends a measurement).
- *  Generous, so a slow machine or a cold JIT (a CI runner is ~4× slower)
- *  still gets the budget's answer rather than a refusal. */
-const HARD_MS = 1000;
+/** A hard stop on the wall clock, whatever the work estimate says: a small
+ *  safety net for a slow device, since analysis runs on the main thread. The
+ *  work budget, which is deterministic, is what normally ends a measurement;
+ *  a run the clock stops is refused this time but not remembered (see memo),
+ *  so a slow moment is never a lasting answer. */
+const HARD_MS = 300;
+let hardMs = HARD_MS;
+/** Set the wall-clock stop, in ms (Infinity turns it off); no argument
+ *  restores the default. Tests turn it off, so every answer they check comes
+ *  from the work budget alone and a slow runner cannot change it. */
+export function setMeasureHardStop(ms: number = HARD_MS): void {
+  hardMs = ms;
+}
 
 /** A measurement that ran out of budget before it was precise enough. */
 class TooCostly extends Error {
@@ -1272,6 +1283,18 @@ class TooCostly extends Error {
     );
   }
 }
+
+/** A measurement the wall clock stopped: the device was slow, not the set
+ *  too intricate, so it is not remembered. */
+class OutOfTime extends Error {
+  constructor() {
+    super('That set could not be measured within the time a readout may take. Restrict it to a smaller range.');
+  }
+}
+
+/** How many measurements have run rather than come from the memo (for tests:
+ *  a refusal is remembered, a slow run is not). */
+export const measureRuns = { count: 0 };
 
 /** Relative precision a measure's bounds must reach to be reported (the
  *  readout then shows only the digits they vouch for). */
@@ -1343,12 +1366,12 @@ function gridMeasure(
   // Measuring an undecided cell at the end, in cells' worth of work: corner
   // values, or a sample grid when several comparisons are open there.
   const estimateCost = (conds.length > 1 ? 3 : 1) * (curve && !continuous ? 12 : 1);
-  const deadline = performance.now() + HARD_MS;
+  const deadline = performance.now() + hardMs;
   let cells = 0;
   let ticks = 0;
   const tick = () => {
     cells++;
-    if (++ticks % 512 === 0 && performance.now() > deadline) throw new TooCostly();
+    if (++ticks % 512 === 0 && performance.now() > deadline) throw new OutOfTime();
   };
 
   // Cells proved inside: their measure is exact; values integrate on them.
@@ -1984,13 +2007,16 @@ function rootsOnLine(
     if (lastReach() === REACH_NONE) return NaN;
     return a > 0 ? 1 : b < 0 ? -1 : 0;
   };
-  const deadline = performance.now() + HARD_MS;
+  const deadline = performance.now() + hardMs;
   const roots: number[] = [];
   const stack: Interval[] = [[lo, hi]];
   let visited = 0;
   while (stack.length) {
     const [a, b] = stack.pop()!;
-    if (++visited > ROOT_BUDGET || (visited % 256 === 0 && performance.now() > deadline)) {
+    // (The clock stopping it says the device was slow, not that there are
+    // too many roots.)
+    if (visited % 256 === 0 && performance.now() > deadline) throw new OutOfTime();
+    if (++visited > ROOT_BUDGET) {
       throw new Error(
         `That equation has too many roots in the range to count (or infinitely many). Restrict the range, like count({0 < ${v} < 10, …}).`,
       );
