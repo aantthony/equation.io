@@ -58,8 +58,12 @@ export function hasAtan2(e: Expr): boolean {
 
 /** A field over the plane draws its level sets as a grid family; one that
  *  uses z has no planar level sets to draw, so it only defines — as does one
- *  over the parameters u, v, which is a curve or surface, not a grid. */
-export const planarField = (expr: Expr): boolean => !freeVars(expr).has('z') && !overParams(expr);
+ *  over the parameters u, v, which is a curve or surface, not a grid, and a
+ *  complex one (`q = x + iy`), which has no real level sets. */
+export const planarField = (expr: Expr): boolean => {
+  const vars = freeVars(expr);
+  return !vars.has('z') && !vars.has('i') && !vars.has('w') && !overParams(expr);
+};
 
 /** A field over the parameters u, v: a named curve or surface's value. */
 export const overParams = (expr: Expr): boolean => {

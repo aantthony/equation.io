@@ -172,7 +172,8 @@ export function gridCoordinateProblem(
 ): string | null {
   if (name === 'x' || name === 'y' || gridFields.some(f => f.name === name)) return null;
   if (name === 'z') return 'z has no level sets in the plane; a grid draws x, y, or coordinates over them.';
-  if (fields.has(name)) return `${name} is not a coordinate over the plane (it uses z, u or v, or is a point's part).`;
+  if (fields.has(name))
+    return `${name} is not a coordinate over the plane (it uses z, u or v, is complex, or is a point's part).`;
   return `${name} is not a coordinate — define it as a function of x and y first, like r = sqrt(x^2 + y^2).`;
 }
 

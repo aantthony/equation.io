@@ -84,6 +84,8 @@ import { type RegressionRow, type FitResult, fitRegression } from './regression.
 const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
 /** The parametric parameters, each ranging over (0, 1). */
 const PARAMS: ReadonlySet<string> = new Set(['u', 'v']);
+/** Position: an axis variable, or w, the complex point x + iy. */
+const onPosition = (v: string): boolean => SPACE.has(v) || v === 'w';
 
 export type Definition =
   | RegressionRow
@@ -2835,7 +2837,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     changed = false;
     for (const [name, e] of defs.consts) {
       for (const fv of freeVars(e)) {
-        if (!fieldNames.has(name) && (SPACE.has(fv) || PARAMS.has(fv) || fieldNames.has(fv))) {
+        if (!fieldNames.has(name) && (onPosition(fv) || PARAMS.has(fv) || fieldNames.has(fv))) {
           fieldNames.add(name);
           changed = true;
         }
@@ -2896,13 +2898,21 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       // position-dependent curve has no one meaning.
       const vars = [...freeVars(e)];
       const param = vars.find(fv => PARAMS.has(fv));
-      if (param && vars.some(fv => SPACE.has(fv))) {
+      if (param && vars.some(onPosition)) {
         throw new Error(
           `${shown} mixes position (x, y, z) with the parameter ${param}; a definition may use one or the other (found ${param}).`,
         );
       }
+      // A field may be complex: `q = x + iy` names the point w does.
       for (const fv of vars) {
-        if (!SPACE.has(fv) && !PARAMS.has(fv) && fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
+        if (
+          !onPosition(fv) &&
+          !PARAMS.has(fv) &&
+          fv !== 't' &&
+          fv !== 'i' &&
+          !constNames.has(fv) &&
+          !stateNames.has(fv)
+        ) {
           throw new Error(
             param || paramNames.has(name)
               ? `${shown} is a curve or surface (it uses u or v), so it may only use u, v, t, and constants (found ${fv}).`
@@ -2910,10 +2920,13 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           );
         }
       }
-      // Trial-evaluate to surface unsupported calls (re, im, …) now.
-      const env: Record<string, number> = { x: 0.7, y: 0.4, z: 0.3, t: 0 };
-      for (const fv of freeVars(e)) env[fv] ??= 1;
-      evaluate(e, env);
+      // Trial-evaluate to surface unsupported calls (re, im, …) now. A
+      // complex field has no real value; the rows using it check it.
+      if (!vars.includes('i') && !vars.includes('w')) {
+        const env: Record<string, number> = { x: 0.7, y: 0.4, z: 0.3, t: 0 };
+        for (const fv of vars) env[fv] ??= 1;
+        evaluate(e, env);
+      }
       defs.fields.set(name, e);
       return e;
     } finally {
@@ -2943,7 +2956,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (!comps.every(Boolean)) continue;
     const vars = comps.flatMap(e => [...freeVars(e!)]);
     const param = vars.find(fv => PARAMS.has(fv));
-    if (!param || !vars.some(fv => SPACE.has(fv))) continue;
+    if (!param || !vars.some(onPosition)) continue;
     errors.set(
       p,
       `${p} mixes position (x, y, z) with the parameter ${param}; a definition may use one or the other (found ${param}).`,

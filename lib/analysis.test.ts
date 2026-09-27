@@ -144,7 +144,7 @@ describe('shared document analysis', () => {
 
 describe('dependency retention after a failed definition', () => {
   it('drops a definition that references the failed name', () => {
-    const { rows } = analyzeRows(['n = w', 'S = n + 1', 'S + x']);
+    const { rows } = analyzeRows(['n = m', 'S = n + 1', 'S + x']);
     expect(rows[0].error).toBeDefined();
     expect(rows[1].error).toMatch(/\bn\b/);
     expect(rows[2].error).toBeDefined();
@@ -161,13 +161,13 @@ describe('dependency retention after a failed definition', () => {
 
   it('keeps a definition whose Σ index or ∫ measure merely shares the letter', () => {
     for (const source of ['S = sum[n=1..5] n', 'S = sum(n=1..5, n)', 'S = 2 sum[n=1..5] n / n']) {
-      const { rows } = analyzeRows(['n = w', source, 'S + x']);
+      const { rows } = analyzeRows(['n = m', source, 'S + x']);
       expect(rows[0].error).toBeDefined();
       expect(rows[1].error, source).toBeUndefined();
       expect(rows[2].error, source).toBeUndefined();
       expect(rows[2].cpu?.type, source).toBe('scalar2d');
     }
-    const integral = analyzeRows(['k = w', 'I = int[0..1] k^2 dk', 'I + y']);
+    const integral = analyzeRows(['k = m', 'I = int[0..1] k^2 dk', 'I + y']);
     expect(integral.rows[1].error).toBeUndefined();
     expect(integral.rows[2].error).toBeUndefined();
     expect(integral.rows[2].cpu?.type).toBe('scalar2d');

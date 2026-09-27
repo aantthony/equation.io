@@ -36,9 +36,9 @@ describe('coordinate fields in buildDefs', () => {
   });
 
   it('rejects fields using variables beyond x, y, z, t, constants', () => {
-    const { defs, errors } = buildDefs(consts(['q', 'x + w']));
+    const { defs, errors } = buildDefs(consts(['q', 'x + k']));
     expect(defs.fields.size).toBe(0);
-    expect(errors.get('q')).toMatch(/found w/);
+    expect(errors.get('q')).toMatch(/found k/);
     // z is a coordinate of space, so a field may use it.
     expect(buildDefs(consts(['q', 'x + z'])).defs.fields.has('q')).toBe(true);
   });

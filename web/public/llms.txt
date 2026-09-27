@@ -1028,7 +1028,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   that goes negative, trace it with theta = 2pi u instead:
   `(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))` is the whole 8-petal rose.
   A named pair or triple that uses x, y, or z is a vector field (see Point),
-  not a grid.
+  not a grid. A field may be complex: `q = (x + i y)/2` (or `q = w^2`) is
+  used wherever w is — `ln(q-2) - ln(q+2)`, `domain(q^3 - 1)`,
+  `iter(z^2 + q)` — and draws no grid of its own.
 - Coordinate fields in space: a field may use z, e.g. spherical
   `rho = sqrt(x^2+y^2+z^2); theta = atan2(y,x); phi = acos(z/rho)`. A z-using
   field only defines — it draws no grid and does not by itself make the graph
