@@ -62,7 +62,14 @@ import { type VertexSampler, fanFillable, vertexSampler } from '../lib/figure-ve
 
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
-import { CURVE_SAMPLES, type PathSampler, type RegionSampler, pathSampler, regionSampler } from '../lib/path.ts';
+import {
+  CURVE_SAMPLES,
+  type PathSampler,
+  type RegionSampler,
+  foldExcept,
+  pathSampler,
+  regionSampler,
+} from '../lib/path.ts';
 import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { mvOfNode } from '../lib/clifford.ts';
@@ -1233,12 +1240,15 @@ function render() {
       }
       return c.pts;
     }
+    // What does not move with u is worked out once for the frame, not per sample.
+    const frameEnv: Record<string, number> = { ...constEnv, t: time };
+    const along = comps.map(c => foldExcept(c, 'u', frameEnv));
     const out: number[] = [];
     for (let k = 0; k < CURVE_SAMPLES; k++) {
       const u = k / (CURVE_SAMPLES - 1);
       for (let c = 0; c < dim; c++) {
         try {
-          out.push(evaluate(comps[c], { ...constEnv, u, t: time }));
+          out.push(evaluate(along[c], { ...frameEnv, u }));
         } catch {
           out.push(NaN);
         }

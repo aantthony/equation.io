@@ -2,7 +2,7 @@
  * CPU sampling of 2D parametric curves, complex paths included: a complex
  * expression in u is split into the curve (re, im) by lib/complex-parts.ts.
  */
-import { type Expr, evaluate, freeVars } from './expr.ts';
+import { type Expr, evaluate, freeVars, mapChildren } from './expr.ts';
 import { compileProg, compileSampler, run } from './vm.ts';
 
 /**
@@ -59,6 +59,54 @@ export function pathSampler(comps: readonly Expr[]): PathSampler {
       return samplePath(u => [x(u), y(u)], CURVE_SAMPLES);
     },
   };
+}
+
+/** Node kinds whose children all live in the enclosing scope (as compiler.ts
+ *  HOISTABLE): anything else may bind a name, and is folded whole or not. */
+const SCOPED = new Set<Expr['kind']>(['bin', 'neg', 'call', 'piecewise', 'ineq', 'eq']);
+const FOLDABLE = new Set<Expr['kind']>(['bin', 'neg', 'call']);
+const binds = (e: Expr): boolean =>
+  !SCOPED.has(e.kind) || (e.kind === 'call' && (e.name === 'sum' || e.name === 'prod') && e.args.length >= 4);
+
+/**
+ * `e` with every part that does not read `v` replaced by its value under env,
+ * once per frame, so a curve sampled hundreds of times along u evaluates only
+ * what moves with u. osculating(C, t) in space is the reason: its centre,
+ * radius and plane are one large expression in t that each sample would
+ * otherwise repeat. Shared subtrees are visited once. A part that does not
+ * evaluate here stays as it is, to fail (or not) at sample time as before.
+ */
+export function foldExcept(e: Expr, v: string, env: Record<string, number>): Expr {
+  const memo = new Map<Expr, Expr>();
+  const value = (n: Expr): Expr | null => {
+    try {
+      return { kind: 'num', value: evaluate(n, env) };
+    } catch {
+      return null;
+    }
+  };
+  const visit = (n: Expr): Expr => {
+    const known = memo.get(n);
+    if (known) return known;
+    let out: Expr = n;
+    if (n.kind === 'var') {
+      if (n.name !== v && Object.hasOwn(env, n.name)) out = { kind: 'num', value: env[n.name] };
+    } else if (n.kind !== 'num' && binds(n)) {
+      const free = [...freeVars(n)];
+      if (free.every(k => k !== v && Object.hasOwn(env, k))) out = value(n) ?? n;
+    } else if (n.kind !== 'num') {
+      const mapped = mapChildren(n, visit);
+      let constant = FOLDABLE.has(n.kind);
+      mapChildren(mapped, c => {
+        if (c.kind !== 'num') constant = false;
+        return c;
+      });
+      out = (constant && value(mapped)) || mapped;
+    }
+    memo.set(n, out);
+    return out;
+  };
+  return visit(e);
 }
 
 /** Cells per side of the grid a filled parametric region is sampled on. */
