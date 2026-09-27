@@ -833,6 +833,8 @@ function reduce(name: string, all: readonly Expr[], ctx: Ctx): Expr {
 }
 
 const SORT_POINTS = 'Points have no order of their own — sort them by a key written in the list: sort(P, P.x).';
+const SORT_TUPLES = (width: number) =>
+  `sort(…) of a multiset of ${width}-tuples is not defined — a tuple is one element, not its values; only count, total and mean are.`;
 
 /**
  * `sort(P, key)`: the elements of P as a tuple, in ascending order of the key
@@ -1480,10 +1482,13 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
         // taken position by position, as they are for points.
         const own = axesOf(arg);
         const tupleAt = own.findIndex(a => a.ordered);
-        if (e.name !== 'sort' && own.length > 1 && tupleAt === own.length - 1) {
+        if (own.length > 1 && tupleAt === own.length - 1) {
           const width = own[tupleAt].n;
           const all = isData(arg) ? Array.from(arg.values, num) : (arg as Expr & { kind: 'list' }).items;
           if (e.name === 'count') return num(all.length / width);
+          // A tuple is one element, not its values: sorting them all together
+          // would mix up the tuples. (Short ones are points, with no order.)
+          if (e.name === 'sort') throw new Error(width <= 3 ? SORT_POINTS : SORT_TUPLES(width));
           if (e.name !== 'total' && e.name !== 'mean') {
             throw new Error(
               `${e.name}(…) of a multiset of ${width}-tuples is not defined — only count, total and mean are.`,

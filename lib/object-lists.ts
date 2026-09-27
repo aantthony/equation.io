@@ -332,9 +332,16 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     if (settled === e) break;
     e = settled;
   }
-  // A bracket that mixes tuples with other things is wrong as written; one
-  // member per element would only hide that (docs/multisets.md §2).
-  if (originalError instanceof Error && /A multiset (of \d+-tuples cannot|holds tuples)/.test(originalError.message)) {
+  // A bracket that mixes tuples with other things is wrong as written, and a
+  // reduction a multiset of tuples has no answer for (sort, max) is too; one
+  // member per element would only hide that — sort would sort each tuple's
+  // own values (docs/multisets.md §2, §9).
+  if (
+    originalError instanceof Error &&
+    /A multiset (of \d+-tuples cannot|holds tuples)|of a multiset of \d+-tuples is not defined/.test(
+      originalError.message,
+    )
+  ) {
     throw originalError;
   }
   try {

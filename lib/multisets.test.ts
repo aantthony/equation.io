@@ -681,6 +681,19 @@ describe('§2 a bracket of tuples', () => {
     // Short tuples are points, and join as points.
     expect(last(['[sort([1,2]), (3,4)]']).cls!.object).toMatchObject({ kind: 'list', element: 'point' });
   });
+  it('sorts no multiset of tuples: its values are not one list', () => {
+    // It was (1, 2, 3, 3, 4, 4, 5, 5), two 4-tuples' values in one tuple.
+    expect(last(['L=[1,2]', 'T = (L, 5, 3, 4)', 'sort(T)']).error).toMatch(/multiset of 4-tuples is not defined/);
+    expect(last(['L=[1,2]', 'sort((L, 5, 3, 4))']).error).toMatch(/multiset of 4-tuples is not defined/);
+    expect(last(['L=[1,2]', 'T = (L, 5, 3, 4)', 'max(T)']).error).toMatch(/multiset of 4-tuples is not defined/);
+    // Short tuples are points, which have no order either.
+    expect(last(['L=[1,2]', 'M=[4,3]', 'sort(L + sort(M))']).error).toMatch(/Points have no order/);
+    // count, total and mean still take them, tuple by tuple.
+    expect(readout(['L=[1,2]', 'T = (L, 5, 3, 4)', 'count(T)'])).toBe('= 2');
+    expect(readout(['L=[1,2]', 'T = (L, 5, 3, 4)', 'total(T)'])).toBe('= (3, 10, 6, 8)');
+    // One tuple sorts.
+    expect(readout(['T = (4,2,3,1)', 'sort(T)'])).toBe('= (1, 2, 3, 4)');
+  });
 });
 
 describe('§4 a vector on the left of a tuple of points', () => {
