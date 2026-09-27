@@ -38,6 +38,26 @@ export interface Table {
   delimiter: string;
   /** Human-readable notes: skipped rows, renamed columns, missing cells. */
   warnings: string[];
+  /** Each row's 1-based position among the file's records, when it is not
+   *  simply 1…rows: a filtered table keeps the positions its rows had. */
+  positions?: Float64Array;
+}
+
+/**
+ * The name under which a table's rows give their position in the file:
+ * `row`, unless the file has a column of that name, which wins — then
+ * `row_index` (docs/multisets.md §3). File order is not part of the multiset
+ * of records; this property is how a row asks for it back, as in
+ * `sort((person.x, person.y), person.row)`.
+ */
+export function positionColumn(table: Pick<Table, 'columns'>): string | null {
+  for (const name of ['row', 'row_index']) if (!table.columns.some(c => c.name === name)) return name;
+  return null;
+}
+
+/** Each row's 1-based position in the file (see positionColumn). */
+export function rowPositions(table: Table): Float64Array {
+  return table.positions ?? Float64Array.from({ length: table.rows }, (_, k) => k + 1);
 }
 
 /** Delimiters we sniff for, in preference order on a tie. */
@@ -392,7 +412,10 @@ export function filterTable(table: Table, keep: readonly boolean[]): Table {
   const warnings = missing.size
     ? [`${[...missing.values()].reduce((a, b) => a + b, 0)} missing values in ${[...missing.keys()].join(', ')}`]
     : [];
-  return { columns, rows, skipped: 0, missing, delimiter: table.delimiter, warnings };
+  const all = rowPositions(table);
+  const positions = new Float64Array(rows);
+  for (let k = 0, at = 0; k < keep.length; k++) if (keep[k]) positions[at++] = all[k];
+  return { columns, rows, skipped: 0, missing, delimiter: table.delimiter, warnings, positions };
 }
 
 /** Suggest a row name from a file name: "people 2024.csv" → "people_2024". */

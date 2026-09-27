@@ -18,19 +18,20 @@ describe('classify', () => {
     expect(cls('z = sin(x)cos(y)').cpu.type).toBe('implicit3d');
   });
 
-  it('routes bare scalars', () => {
-    expect(cls('sin(x)').cpu.type).toBe('implicit2d'); // y = sin(x)
+  it('draws a bare scalar in x, y per pixel: a field, never an implicit graph', () => {
+    expect(cls('sin(x)').cpu.type).toBe('scalar2d'); // constant along y; the curve is y = sin(x)
     expect(cls('sin(x)cos(y)').cpu.type).toBe('scalar2d');
-    expect(cls('x^2+y^2+z^2-9').cpu.type).toBe('implicit3d');
+    expect(cls('y').cpu.type).toBe('scalar2d');
+    expect(() => cls('x^2+y^2+z^2-9')).toThrow(/field in space, which cannot be drawn yet/);
   });
 
   it('reads a bare number out instead of plotting y = it', () => {
     expect(cls('2+2').cpu.type).toBe('value');
     expect(cls('sin(t)')).toMatchObject({ cpu: { type: 'value' }, animated: true, needs3D: false });
     expect(classify(parseExpr('a^2'), new Set(['a']))).toMatchObject({ cpu: { type: 'value' }, params: ['a'] });
-    // Anything with a plot coordinate is still a graph, and a complex
+    // Anything with a plot coordinate is drawn per pixel, and a complex
     // constant is still a point on the Argand plane.
-    expect(cls('2x').cpu.type).toBe('implicit2d');
+    expect(cls('2x').cpu.type).toBe('scalar2d');
     expect(cls('y = 4').cpu.type).toBe('implicit2d');
     expect(cls('1+2i').cpu.type).toBe('point');
   });
@@ -56,7 +57,9 @@ describe('classify', () => {
     expect(cls('(cos(2pi u), sin(2pi u))').cpu).toMatchObject({ type: 'pcurve', dim: 2 });
     expect(cls('(cos(2pi u), sin(2pi u), u)').cpu).toMatchObject({ type: 'pcurve', dim: 3 });
     expect(cls('(u, v, sin(2pi u))').cpu.type).toBe('psurface');
-    expect(() => cls('(u, v)')).toThrow(/3 components/);
+    // Two parameters in the plane fill the region they trace.
+    expect(cls('(u, v)').cpu.type).toBe('pregion');
+    expect(() => cls('(u, v, u, v)')).toThrow();
   });
 
   it('reads a complex expression in u alone as a path in the Argand plane', () => {
@@ -78,8 +81,11 @@ describe('classify', () => {
   it('changes nothing else that mentions u or i', () => {
     // No free variable: still the Argand point.
     expect(cls('exp(i pi/3)').cpu).toMatchObject({ type: 'point', dim: 2 });
-    // Real in u: as before, u needs a vector.
-    expect(() => cls('sin(u)')).toThrow('u/v need a vector expression like (cos(u), sin(u), v).');
+    // Real in u: the classifier traces u only in a tuple (analysis reads a
+    // bare real row in u as a random draw before it gets here).
+    expect(() => cls('sin(u)')).toThrow(
+      'u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v).',
+    );
     // Real for all its i: a number depending on u, which is no path — said so.
     for (const s of ['abs(exp(i u))', 're(exp(i 2 pi u))']) {
       expect(() => cls(s), s).toThrow(
@@ -352,6 +358,6 @@ describe('lists and piecewise plots', () => {
 
   it('routes piecewise equations through implicit curves', () => {
     expect(cls('y = {x < 0: -x, x >= 0: x^2}').cpu.type).toBe('implicit2d');
-    expect(cls('{x < 0: -x, x^2}').cpu.type).toBe('implicit2d'); // bare → y = expr
+    expect(cls('{x < 0: -x, x^2}').cpu.type).toBe('scalar2d'); // bare: a field
   });
 });

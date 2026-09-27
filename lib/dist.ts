@@ -820,6 +820,13 @@ export interface DensityCurve {
   robust?: Robust;
 }
 
+/** A curve drawn `k` times as tall: a row over continuous intervals is drawn
+ *  against their length measure, not a probability (docs/multisets.md §5). */
+export function scaleCurve(c: DensityCurve, k: number): DensityCurve {
+  if (k === 1) return c;
+  return { ...c, pts: c.pts.map((v, i) => (i % 2 ? v * k : v)), atoms: c.atoms?.map(a => ({ ...a, p: a.p * k })) };
+}
+
 /** 0 — every base law has a variance; 1 — some base has none but has a mean
  *  (StudentT, 1 < df ≤ 2); 2 — some base has no mean (Cauchy, StudentT df ≤ 1). */
 type HeavyBase = 0 | 1 | 2;
@@ -2210,6 +2217,10 @@ export interface PmfStems {
    *  decides whether dots fit. */
   step?: number;
 }
+
+/** Stems drawn `k` times as tall (see scaleCurve). */
+export const scaleStems = (run: PmfStems, k: number): PmfStems =>
+  k === 1 ? run : { ...run, ps: run.ps.map(p => p * k) };
 
 /** Every whole number of [kLo, kHi] (finite, at most STEM_MAX of them). */
 function buildStems(law: DiscreteLaw, kLo: number, kHi: number): PmfStems {

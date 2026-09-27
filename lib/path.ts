@@ -3,7 +3,7 @@
  * expression in u is split into the curve (re, im) by lib/complex-parts.ts.
  */
 import { type Expr, evaluate, freeVars } from './expr.ts';
-import { compileSampler } from './vm.ts';
+import { compileProg, compileSampler, run } from './vm.ts';
 
 /**
  * Nodes (lib/size.ts) evaluated for one sample of a split path. Splitting
@@ -57,6 +57,83 @@ export function pathSampler(comps: readonly Expr[]): PathSampler {
       const x = re(env),
         y = im(env);
       return samplePath(u => [x(u), y(u)], CURVE_SAMPLES);
+    },
+  };
+}
+
+/** Cells per side of the grid a filled parametric region is sampled on. */
+export const REGION_CELLS = 64;
+
+/** Like PathSampler: `names` are what a cached fill is keyed on. */
+export interface RegionSampler {
+  names: string[];
+  sample: (env: Record<string, number>) => Float64Array;
+}
+
+/**
+ * The triangles filling a 2D region traced by (x(u, v), y(u, v)), u and v
+ * each over [0, 1]: flat [x0, y0, x1, y1, x2, y2, …], each triangle turned
+ * counter-clockwise. With one orientation, overlapping triangles (a disc's
+ * cells all meet at its centre) wind the same way, so a nonzero fill of them
+ * all is their union at one opacity — no seams, no darker overlaps. A
+ * triangle with an undefined corner is left out.
+ */
+export function regionSampler(comps: readonly [Expr, Expr]): RegionSampler {
+  const read = new Set<string>();
+  for (const c of comps) freeVars(c, read);
+  read.delete('u');
+  read.delete('v');
+  const names = [...read];
+  const slots = new Map<string, number>([['u', 0], ['v', 1], ...names.map((n, k): [string, number] => [n, k + 2])]);
+  const vars = new Float64Array(names.length + 2);
+  let at: (u: number, v: number, k: 0 | 1) => number;
+  try {
+    const progs = comps.map(c => compileProg(c, slots));
+    const stack = new Float64Array(Math.max(1, ...progs.map(p => p.depth)));
+    at = (u, v, k) => {
+      vars[0] = u;
+      vars[1] = v;
+      return run(progs[k], vars, stack);
+    };
+  } catch {
+    // A form the VM does not run: the tree-walking evaluator, per corner.
+    at = (u, v, k) => {
+      const scope: Record<string, number> = { u, v };
+      names.forEach((n, j) => (scope[n] = vars[j + 2]));
+      try {
+        return evaluate(comps[k], scope);
+      } catch {
+        return NaN;
+      }
+    };
+  }
+  return {
+    names,
+    sample: env => {
+      names.forEach((n, j) => (vars[j + 2] = Object.hasOwn(env, n) ? env[n] : NaN));
+      const n = REGION_CELLS + 1;
+      const xs = new Float64Array(n * n),
+        ys = new Float64Array(n * n);
+      for (let i = 0; i < n; i++)
+        for (let j = 0; j < n; j++) {
+          xs[i * n + j] = at(i / REGION_CELLS, j / REGION_CELLS, 0);
+          ys[i * n + j] = at(i / REGION_CELLS, j / REGION_CELLS, 1);
+        }
+      const out: number[] = [];
+      const tri = (a: number, b: number, c: number) => {
+        const [ax, ay, bx, by, cx, cy] = [xs[a], ys[a], xs[b], ys[b], xs[c], ys[c]];
+        const turn = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+        if (!Number.isFinite(turn) || turn === 0) return;
+        if (turn > 0) out.push(ax, ay, bx, by, cx, cy);
+        else out.push(ax, ay, cx, cy, bx, by);
+      };
+      for (let i = 0; i < REGION_CELLS; i++)
+        for (let j = 0; j < REGION_CELLS; j++) {
+          const a = i * n + j;
+          tri(a, a + n, a + n + 1);
+          tri(a, a + n + 1, a + 1);
+        }
+      return Float64Array.from(out);
     },
   };
 }

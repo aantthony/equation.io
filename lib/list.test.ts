@@ -100,11 +100,12 @@ describe('broadcasting', () => {
     expect(values(lowerRow('[1,2] + t'), { t: 10 })).toEqual([11, 12]);
   });
   it('rejects lists inside equations and piecewise', () => {
-    expect(() => lowerRow('y = [1,2]')).toThrow(/own row/);
+    expect(() => lowerRow('y = [1,2]')).toThrow(/list in an equation/);
     expect(() => lowerRow('{x<0: [1,2], 0}')).toThrow(/piecewise/);
   });
-  it('rejects nested lists', () => {
-    expect(() => lowerRow('[L, 1]', ['L = [1,2]'])).toThrow(/nested/);
+  it('flattens nested lists: a bracket is a multiset sum', () => {
+    expect(values(lowerRow('[L, 1]', ['L = [1,2]']))).toEqual([1, 2, 1]);
+    expect(values(lowerRow('[[1,2],[3]]'))).toEqual([1, 2, 3]);
   });
 });
 
@@ -115,12 +116,12 @@ describe('named lists', () => {
     expect(defs.lists.has('L')).toBe(true);
     expect(items(defs.lists.get('M')!).map(e => evaluate(e, {}))).toEqual([2, 8, 4]);
   });
-  it('keeps 2×2 tuple lists as matrices', () => {
+  it('keeps a bracket of two 2D points a list, not a matrix', () => {
     const { defs } = defsOf(['M = [(1,2),(3,4)]']);
-    expect(defs.mats.has('M')).toBe(true);
-    expect(defs.lists.has('M')).toBe(false);
+    expect(defs.mats.has('M')).toBe(false);
+    expect(items(defs.lists.get('M')!)).toHaveLength(2);
   });
-  it('names a scatter of points when the shape is not a matrix', () => {
+  it('names a scatter of points', () => {
     const { defs } = defsOf(['P = [(1,2),(3,4),(5,6)]']);
     expect(items(defs.lists.get('P')!)).toHaveLength(3);
     const c = classify(lowerRow('P', ['P = [(1,2),(3,4),(5,6)]']));
@@ -248,7 +249,7 @@ describe('range steps', () => {
     // Nor a range bound, which is an ordinary number too ([1..3.5] is legal).
     expect([...defsOf(['N = 4', 'L = [1..N]']).sumBoundConsts]).toEqual([]);
     // An index does snap: there is no element 2.5.
-    expect([...defsOf(['k = 2', 'L = [1..5]', 'val = L[k]']).sumBoundConsts]).toEqual(['k']);
+    expect([...defsOf(['k = 2', 'L = sort([1..5])', 'val = L[k]']).sumBoundConsts]).toEqual(['k']);
   });
 
   it('still refuses one that cannot settle', () => {
@@ -257,7 +258,14 @@ describe('range steps', () => {
 });
 
 describe('indexing', () => {
-  const L = ['L = [5,6,7]'];
+  // Only a tuple has positions (docs/multisets.md §3); sort makes one.
+  const L = ['L = sort([7,5,6])'];
+  it('needs an order: a list [ … ] has none', () => {
+    expect(() => lowerRow('M[2]', ['M = [5,6,7]'])).toThrow(/M\[2\] needs an order.*sort\(M\)\[2\]/);
+    expect(() => lowerRow('P[1]', ['P = [(1,2),(3,4)]'])).toThrow(/sort\(P, P\.x\)\[1\]/);
+    // A filter is no index: it keeps what passes, whatever the order.
+    expect(values(lowerRow('M[M > 5]', ['M = [5,6,7]']))).toEqual([6, 7]);
+  });
   it('is 1-based', () => {
     expect(evaluate(lowerRow('L[2]', L), {})).toBe(6);
     expect(() => lowerRow('L[0]', L)).toThrow(/1-based/);
@@ -281,5 +289,45 @@ describe('indexing', () => {
   });
   it('leaves non-list brackets as multiplication', () => {
     expect(evaluate(lowerRow('x[2]'), { x: 3 })).toBe(6);
+  });
+});
+
+describe('order (docs/multisets.md §3)', () => {
+  const n = 100_000;
+  // A column in reverse, so sorting has everything to move.
+  const column = Float64Array.from({ length: n }, (_, k) => n - k);
+  const getList = (name: string) =>
+    name === 'C' ? ({ kind: 'data', values: column, axes: [{ id: 'file.', n }] } as Expr) : null;
+
+  it('sorts a whole column as a typed array, into a tuple', () => {
+    const sorted = lowerLists(parseExpr('sort(C)'), getList);
+    expect(sorted.kind).toBe('data');
+    if (sorted.kind !== 'data') return;
+    expect(sorted.values[0]).toBe(1);
+    expect(sorted.values[n - 1]).toBe(n);
+    expect(sorted.axes).toEqual([expect.objectContaining({ n, ordered: true })]);
+  });
+
+  it('permutes a template by its key without unpacking it', () => {
+    // The slider keeps (C, a C) one template over the column; sorting moves
+    // its packed values and leaves the body alone.
+    const sorted = lowerLists(parseExpr('sort((C, a C), C)'), getList, { consts: { a: 2 } }, false, true);
+    expect(sorted.kind).toBe('lazy');
+    if (sorted.kind !== 'lazy') return;
+    expect(sorted.body.kind).toBe('vec');
+    for (const col of sorted.cols) {
+      expect(col.values).toBeInstanceOf(Float64Array);
+      expect([col.values[0], col.values[n - 1]]).toEqual([1, n]);
+    }
+    expect(sorted.axes?.[0].ordered).toBe(true);
+  });
+
+  it('keeps a scatter of columns two typed arrays', () => {
+    const sorted = lowerLists(parseExpr('sort((C, 2 C), -C)'), getList);
+    expect(sorted.kind).toBe('vec');
+    if (sorted.kind !== 'vec') return;
+    expect(sorted.items.map(it => it.kind)).toEqual(['data', 'data']);
+    const [x, y] = sorted.items as Array<Expr & { kind: 'data' }>;
+    expect([x.values[0], y.values[0]]).toEqual([n, 2 * n]);
   });
 });

@@ -23,6 +23,7 @@ describe('og renderer coverage', () => {
       'psurface',
       'implicit3d',
       'polygon',
+      'plist',
       'cobweb',
       'system',
       'vfield2d',
@@ -38,7 +39,7 @@ describe('og renderer coverage', () => {
   });
 
   it('falls back for the rest of the sequence family', () => {
-    for (const t of ['sequence', 'bifurcation', 'vlist', 'plist'] as const) {
+    for (const t of ['sequence', 'bifurcation', 'vlist'] as const) {
       expect(OG_COVERAGE[t], t).toBe('fallback');
     }
   });
@@ -135,6 +136,14 @@ describe('previewGap', () => {
     const rows = ['X ~ Binomial(10, 0.3)', 'P(X <= 3)', 'E(X)'];
     for (let i = 0; i < rows.length; i++) expect(gap(rows, i)).toBeNull();
     expect(canRenderOg(rows)).toBe(true);
+  });
+
+  it('is null for a point list, in the plane or in space', () => {
+    expect(gap(['[(1,2),(3,4)]'])).toBeNull();
+    expect(gap(['([0,1],[0,1],[0,1])'])).toBeNull();
+    expect(gap(['[0,1] e_x + [0,1] e_y'])).toBeNull();
+    expect(gap(['z = x^2 + y^2', '[(1,2),(3,4)]'], 1)).toBeNull();
+    expect(canRenderOg(['([0,1],[0,1],[0,1])'])).toBe(true);
   });
 
   it('is null for a cobweb, which now draws', () => {

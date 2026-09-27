@@ -5,7 +5,7 @@ import { structuralDiagnostic } from './expr.ts';
  * readable and cheap. Non-smooth functions (min, max, floor, …) throw;
  * callers fall back to finite differences.
  */
-import { ANGLE_FN, ANGLE_RATE_FN, type Expr, plainFnName, sameList } from './expr.ts';
+import { ANGLE_FN, ANGLE_RATE_FN, type Expr, INTERVAL, plainFnName, sameList } from './expr.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
 const ZERO = num(0);
@@ -122,6 +122,8 @@ export function diff(e: Expr, v: string): Expr {
     case 'family':
       throw new NonSmoothError(structuralDiagnostic(e));
     case 'call': {
+      // A continuous interval's parameter varies on its own, not with x.
+      if (e.name === INTERVAL) return ZERO;
       if (e.name === 'atan2' || (e.name === 'atan' && e.args.length === 2)) {
         const [y, x] = e.args;
         const n = sub(mul(diff(y, v), x), mul(y, diff(x, v)));

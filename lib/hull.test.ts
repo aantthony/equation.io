@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
-import { evaluate } from './expr.ts';
+import { type Expr, evaluate } from './expr.ts';
 import { canRenderOg, renderRaster } from '../worker/og.ts';
 import { hull2, hull3, hullFaces, hullMesh } from './hull.ts';
 
@@ -204,8 +204,8 @@ describe('hull(…) rows', () => {
       );
     };
     const quarter = ['0,0', '0,2', '-1,1'];
-    expect(verts(['J=[(0,-1),(1,0)]', 'R=e^((pi/2) J)', P, 'R hull(P)']).sort()).toEqual([...quarter].sort());
-    expect(verts(['J=[(0,-1),(1,0)]', 'R=e^((pi/2) J)', P, 'hull(R P)']).sort()).toEqual([...quarter].sort());
+    expect(verts(['J=((0,-1),(1,0))', 'R=e^((pi/2) J)', P, 'R hull(P)']).sort()).toEqual([...quarter].sort());
+    expect(verts(['J=((0,-1),(1,0))', 'R=e^((pi/2) J)', P, 'hull(R P)']).sort()).toEqual([...quarter].sort());
     expect(verts([P, 'rotate(hull(P), pi/2)']).sort()).toEqual([...quarter].sort());
     expect(verts([P, '2 hull(P) + (1,1)']).sort()).toEqual(['1,1', '3,3', '5,1']);
     expect(verts([P, '-hull(P)/2']).sort()).toEqual(['-0.5,-0.5', '-1,0', '0,0']);
@@ -220,11 +220,35 @@ describe('hull(…) rows', () => {
       return p.type === 'family' ? p.members.map(m => m.cpu.type) : [p.type];
     };
     const P = 'P=[(1,0),(2,0),(2,1)]';
-    expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'e^(th J) hull(P)'])).toEqual([
-      'polygon',
-      'polygon',
-      'polygon',
-    ]);
+    // Each member is P's hull turned by its own th, with numbers for vertices
+    // (not a matrix over th left inside each vertex).
+    const text = (ps: number[][]) => ps.map(q => q.map(c => +c.toFixed(6) + 0).join()).sort();
+    const outline = (pts: readonly Expr[], env: Record<string, unknown>) =>
+      text(
+        hullFaces(
+          pts.map(e => evaluate(e, { ...env, t: 0 })),
+          2,
+        )[0].outline.map(q => q.slice(0, 2)),
+      );
+    const turned = (angles: number[]) =>
+      angles.flatMap(a =>
+        [
+          [1, 0],
+          [2, 0],
+          [2, 1],
+        ].map(([x, y]) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)]),
+      );
+    const thirds = [0, (2 * Math.PI) / 3, (4 * Math.PI) / 3];
+    const rosette = (row: string) => {
+      const { cpu: p, env } = plot(['J=((0,-1),(1,0))', 'th=2pi [0..2]/3', P, row]);
+      if (p.type !== 'family') throw new Error(p.type);
+      return p.members.map(m => {
+        if (m.cpu.type !== 'polygon') throw new Error(m.cpu.type);
+        return outline(m.cpu.pts, env);
+      });
+    };
+    for (const row of ['e^(th J) hull(P)', 'rotate(hull(P), th)', 'e^(th J) polygon((1,0),(2,0),(2,1))'])
+      expect(rosette(row), row).toEqual(thirds.map(a => text(turned([a]))));
     expect(members(['th=2pi [0..4]/5', P, 'rotate(hull(P), th)'])).toHaveLength(5);
     expect(members([P, 'hull(P) + ([0,3],0)'])).toHaveLength(2);
     expect(members(['th=2pi [0..2]/3', 'rotate(polygon((1,0),(2,0),(2,1)), th)'])).toHaveLength(3);
@@ -242,7 +266,11 @@ describe('hull(…) rows', () => {
     expect(members(turning(30))).toHaveLength(30);
     expect(analyze(turning(200)).rows[1].error).toMatch(/too large to render .* in all/);
     // …while a list INSIDE the figure is its points.
-    expect(members(['J=[(0,-1),(1,0)]', 'th=2pi [0..2]/3', P, 'hull(e^(th J) P)'])).toEqual(['polygon']);
+    const whole = plot(['J=((0,-1),(1,0))', 'th=2pi [0..2]/3', P, 'hull(e^(th J) P)']);
+    if (whole.cpu.type !== 'polygon') throw new Error(whole.cpu.type);
+    // The hull of all nine turned points: the outer corner (2, 1) of each copy
+    // and the far end (2, 0) of each, alternating.
+    expect(outline(whole.cpu.pts, whole.env)).toEqual(text(turned(thirds).filter((_, k) => k % 3 !== 0)));
     // ~1.3 s locally, several times that on a loaded CI runner: past the 5 s default.
   }, 20_000);
   it('explains itself', () => {

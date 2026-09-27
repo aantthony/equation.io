@@ -96,7 +96,7 @@ export function orbitInput(
   if (steps * Math.max(1, names.length) > ORBIT_WORK_MAX) {
     throw new Error(
       paths.length > 1
-        ? `That is too much to integrate for ${paths.length} runs — draw one run's orbit, like p[1](${fmt(from)}..${fmt(to)}), or a shorter time range.`
+        ? `That is too much to integrate for ${paths.length} runs — draw one run's orbit, like p[1](${fmt(from)}..${fmt(to)}) with the runs started from a tuple, or a shorter time range.`
         : 'That orbit is too long to integrate — try a shorter time range.',
     );
   }

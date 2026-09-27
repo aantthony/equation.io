@@ -1,6 +1,6 @@
 /** Shared document preparation and runtime-aware mathematical analysis. */
 import { compileCpu, compileGpu, type CpuPlan, type GpuPlan } from './compiler.ts';
-import type { LevelSetSpec } from './math-object.ts';
+import type { LevelSetSpec, MathObject } from './math-object.ts';
 import { type Env, evaluateFrame, nameTaken } from './env.ts';
 import { lowerObjects } from './object-lists.ts';
 import {
@@ -11,6 +11,7 @@ import {
   defKey,
   listGetter,
   listNamesOf,
+  indexNamesOf,
   isListName,
   indexIssue,
   MissingDataError,
@@ -28,6 +29,7 @@ import {
   NO_MEAN_INFO,
   RVSystem,
   buildRVDeclarations,
+  type BaseDist,
   type BuiltRVs,
   checkDerived,
   lowerProbBody,
@@ -42,7 +44,9 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, freeVars, parseExpr } from './expr.ts';
+import { type Expr, freeVars, parseExpr, substVars } from './expr.ts';
+import { usesComplex } from './complex.ts';
+import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { lowerGeom } from './geom.ts';
 import { lowerLists } from './list.ts';
 import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
@@ -298,11 +302,17 @@ export function prepareDocument(
     boundConsts: built.sumBoundConsts,
     isList: (n: string) => isListName(listNames, n),
     getList,
-    indexIssue: (idx: Expr) => indexIssue(idx, defs),
+    indexIssue: (idx: Expr, target: Expr) => indexIssue(idx, defs, target),
     // A state stands for itself: defined, and constant across space.
     definition: (n: string): Expr | undefined =>
       defs.fields.get(n) ?? defs.consts.get(n) ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
     comps: (n: string) => compsOf(defs, n),
+    interval: (n: string) => defs.intervals.get(n),
+    documentNames: new Set([
+      ...raw.map(d => d.name),
+      ...[...rvScan.base.values()].map(s => s.name),
+      ...[...rvScan.derived.values()].map(s => s.name),
+    ]),
   };
   ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
 
@@ -340,7 +350,8 @@ export function prepareDocument(
     constNames,
     fieldEnv,
     fnNames,
-    listNames,
+    // What parses as an index: the lists and the named points (T[2]).
+    listNames: indexNamesOf(defs),
     valueNames,
     getFn,
     getList,
@@ -388,6 +399,106 @@ function classifyOrbit(value: Expr, [from, to]: [Expr, Expr], defs: Env, constNa
   return { object, animated: false, needs3D: !series && paths[0].length === 3, params: [...params].sort() };
 }
 
+/**
+ * u and v in a real row with no x, y or z, as independent Uniform(0, 1) base
+ * variables under internal names — or null when the row is not one, or the
+ * random-variable engine cannot take it (a tuple, a complex path, a list),
+ * which leaves the row to classify, where u and v trace curves.
+ *
+ * A continuous interval (lib/interval.ts) is a uniform draw over its bounds.
+ * Its multiplicity is length, not probability (docs/multisets.md §5), so the
+ * density is drawn times `mass`, the product of the intervals' lengths:
+ * interval(0, 10) stands at height 1, as u does.
+ */
+function uniformDraws(
+  e: Expr,
+  constNames: ReadonlySet<string>,
+  rvNames: ReadonlySet<string>,
+  id: string,
+  /** The row's value once point arithmetic has run — lowerObjects. */
+  lower: (e: Expr) => Expr,
+): { expr: Expr; bases: Record<string, BaseDist>; mass?: Expr } | null {
+  if (e.kind === 'eq' || e.kind === 'ineq' || usesComplex(e)) return null;
+  const free = [...freeVars(e)].filter(n => !constNames.has(n));
+  const params = free.filter(n => n === 'u' || n === 'v');
+  const hidden = intervalsIn(e);
+  if ((!params.length && !hidden.length) || free.some(n => n === 'x' || n === 'y' || n === 'z' || n === 'w'))
+    return null;
+  // Numbers have a density; a point does not. Which one the row is depends on
+  // its value, not its spelling: `(0,0,1) u` and `u e_z` are the tuple
+  // (0, 0, u), a curve, though no tuple sits at the top of the row. Only the
+  // lowered row says so.
+  if (pointValued(e, lower)) return null;
+  const uniform: BaseDist = {
+    kind: 'uniform',
+    args: [
+      { kind: 'num', value: 0 },
+      { kind: 'num', value: 1 },
+    ],
+  };
+  const bases: Record<string, BaseDist> = {};
+  const names: Record<string, Expr> = {};
+  for (const p of params) {
+    bases[`@${p}${id}`] = uniform;
+    names[p] = { kind: 'var', name: `@${p}${id}` };
+  }
+  const drawn = new Map(hidden.map((h, k) => [h.key, `@iv${k}${id}`]));
+  for (const h of hidden) bases[drawn.get(h.key)!] = { kind: 'uniform', args: [h.lo, h.hi] };
+  const expr = replaceIntervals(substVars(e, names), h => ({ kind: 'var', name: drawn.get(h.key)! }));
+  try {
+    checkDerived(expr, new Set([...rvNames, ...Object.keys(bases)]), constNames);
+  } catch {
+    return null;
+  }
+  const mass = hidden
+    .map(lengthOf)
+    .reduce<Expr | undefined>(
+      (m, l) =>
+        !m
+          ? l
+          : m.kind === 'num' && l.kind === 'num'
+            ? { kind: 'num', value: m.value * l.value }
+            : { kind: 'bin', op: '*', a: m, b: l },
+      undefined,
+    );
+  // Unit length (u, v, interval(0, 1)) leaves the probability as it is.
+  return { expr, bases, ...(mass && !(mass.kind === 'num' && mass.value === 1) ? { mass } : {}) };
+}
+
+/** Whether a row's value is a point, points, or a figure through them —
+ *  anything classify draws by position rather than as numbers. A row that
+ *  does not lower is left to the density path, which reports it. */
+function pointValued(e: Expr, lower: (e: Expr) => Expr): boolean {
+  let value: Expr;
+  try {
+    value = lower(e);
+  } catch {
+    return false;
+  }
+  switch (value.kind) {
+    case 'vec':
+    case 'figure':
+    case 'family':
+      return true;
+    case 'list':
+      return value.items.some(it => it.kind === 'vec');
+    case 'lazy':
+      return value.body.kind === 'vec';
+    default:
+      return false;
+  }
+}
+
+/** A scalar field in x alone (or y alone) is most often a curve meant as
+ *  `y = …`: the row says how to write that, since it now draws a field. */
+function curveHint(object: MathObject, text: string): string | null {
+  if (object.kind !== 'scalar-field') return null;
+  const vars = freeVars(object.expr);
+  const [free, other] = vars.has('x') ? ['x', 'y'] : ['y', 'x'];
+  if (!vars.has(free) || vars.has(other)) return null;
+  return `scalar field — for the curve write ${other} = ${text}`;
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   const rows = document.rows.map(row => ({ ...row }));
@@ -415,11 +526,16 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   const builtRVs = document.builtRVs;
   const rvNames = builtRVs.names;
   // How a variable's row draws is lib's (variableRow), shared with the app.
-  const classifyVariable = (row: RowInfo, name: string): void => {
+  // `mass` scales the curve from a probability to the measure of the row's
+  // intervals (see uniformDraws).
+  const classifyVariable = (row: RowInfo, name: string, mass?: Expr): void => {
     const shape = variableRow(rvs, name);
     row.dist = shape.kind === 'pmf' ? 'pmf' : 'density';
     if (shape.kind === 'exact') {
-      row.cls = classify(shape.density, constNames);
+      const d = shape.density as Expr & { kind: 'eq' };
+      row.cls = classify(mass ? { ...d, r: { kind: 'bin', op: '*', a: mass, b: d.r } } : d, constNames);
+    } else if (mass && shape.cls.object.kind === 'distribution' && shape.cls.object.form !== 'prob') {
+      row.cls = { ...shape.cls, object: { ...shape.cls.object, mass } };
     } else row.cls = shape.cls;
     if ((shape.kind === 'pmf' || readoutPolicy === 'static') && rvs.get(name)?.kind === 'derived') pmfInfo(row, name);
   };
@@ -502,8 +618,12 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         continue;
       }
       // `P(…)` shades an area under a declared density — unless the user has
-      // defined P themselves, in which case the row is theirs.
-      const probBody = defs.consts.has('P') || defs.fns.has('P') ? null : matchProbability(row.text);
+      // defined P themselves as something P(…) could apply (a number, a
+      // function, a matrix or a tensor), in which case the row is theirs. (A
+      // list or point named P leaves P(X > 1) the probability it reads as.)
+      const userDefined = (n: string) =>
+        defs.consts.has(n) || defs.fns.has(n) || defs.mats.has(n) || defs.tensors.has(n);
+      const probBody = userDefined('P') ? null : matchProbability(row.text);
       if (probBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
         const p = toProbability(parseRowBody(probBody, lowerProbBody), rvNames);
@@ -559,7 +679,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       // `E(…)` is the mean of an expression in random variables — unless the
       // user has defined E themselves. Mirror of web/main.ts.
-      const expectBody = defs.consts.has('E') || defs.fns.has('E') ? null : matchExpectation(row.text);
+      const expectBody = userDefined('E') ? null : matchExpectation(row.text);
       if (expectBody !== null) {
         if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
         const ex = toExpectation(parseRowBody(expectBody), rvNames);
@@ -626,8 +746,19 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       const resolved = resolveRow(rawParsed, getFn, ropts);
       let parsed = resolved.expr;
+      // A real row in u and v alone does not depend on the screen, so it is
+      // drawn as its values (docs/multisets.md §5): u and v are each [0, 1],
+      // and the row is a multiset of numbers with a density. That is the
+      // object an expression in random variables already is, with u and v
+      // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
+      const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
+      const known = draws ? new Set([...rvNames, ...Object.keys(draws.bases)]) : rvNames;
+      if (draws) {
+        for (const [name, dist] of Object.entries(draws.bases)) rvs.addAnonymous({ name, kind: 'base', dist });
+        parsed = draws.expr;
+      }
       // A bare expression in random variables plots that derived density.
-      const rvRefs = [...freeVars(parsed)].filter(n => rvNames.has(n));
+      const rvRefs = [...freeVars(parsed)].filter(n => known.has(n));
       if (rvRefs.length) {
         for (const n of rvRefs) {
           if (!rvs.has(n)) throw new Error(`${n} has an error in its definition.`);
@@ -635,10 +766,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         if (parsed.kind === 'ineq') {
           throw new Error(`An inequality in random variables is a probability: try P(${row.text}).`);
         }
-        checkDerived(parsed, rvNames, constNames);
+        checkDerived(parsed, known, constNames);
         const name = `@${row.id ?? ri}`;
         rvs.addAnonymous({ name, kind: 'derived', expr: parsed });
-        classifyVariable(row, name);
+        classifyVariable(row, name, draws?.mass);
         continue;
       }
       // Expand point arithmetic and geometry statements (segment, polygon, …)
@@ -646,6 +777,8 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
+      const hint = curveHint(row.cls.object, row.text);
+      if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
       const taken = row.cls.object.kind === 'note' ? takenDefinitionName(row.text) : null;
       if (taken && row.cls.object.kind === 'note')

@@ -33,7 +33,7 @@ export const FEATURED: FeaturedGraph[] = [
       'L2 = 1',
       'm1 = 1',
       'm2 = 1',
-      'M = [((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2)]',
+      'M = (((m1+m2) L1, m2 L2 cos(th_1 - th_2)), (L1 cos(th_1 - th_2), L2))',
       'f = (-m2 L2 om_2^2 sin(th_1 - th_2) - (m1+m2) g sin(th_1), L1 om_1^2 sin(th_1 - th_2) - g sin(th_2))',
       "th' = om",
       "om' = solve(M, f)",
@@ -44,7 +44,8 @@ export const FEATURED: FeaturedGraph[] = [
       'segment(b1, b2)',
       'b1',
       'b2',
-      viewBox(0, -0.9, 4.6),
+      // b2 starts at y = -cos 2.5 - cos 2.4 ≈ 1.54 and swings back that high.
+      viewBox(0, -0.3, 4.6),
     ],
   },
   {

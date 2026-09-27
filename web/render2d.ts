@@ -37,6 +37,13 @@ export interface Ineq2D extends Curve2D {
   edges: string[];
 }
 
+/** A family over an interval (lib/plot.ts projectedRegion): `field` is
+ *  F(x, y, u), with `slope` ∂F/∂u when it has one. */
+export interface Projected2D extends Curve2D {
+  relation: 'eq' | 'ineq';
+  slope?: string;
+}
+
 export interface ColorField2D extends Curve2D {
   space: ColorSpace;
   /** Shared per-pixel calculations, evaluated before the vec3 field. */
@@ -88,6 +95,7 @@ export interface Layers2D {
   conformals?: Curve2D[];
   vfields?: VField2D[];
   ineqs?: Ineq2D[];
+  projections?: Projected2D[];
   bifs?: Bif2D[];
   scalars?: Curve2D[];
   complexes?: Curve2D[];
@@ -302,10 +310,13 @@ void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
-  // Density map: positive values fade the color in, like the old scalar2.
-  float a = 0.62 * clamp(v, 0.0, 1.0);
+  // Signed shade, as in the static preview (worker/og.ts shadeScalar):
+  // positive toward the row color, negative toward its complement, so a
+  // field that changes sign (sin(x), or plain x) reads on both sides of 0.
+  float s = tanh(v * 0.6);
+  float a = 0.55 * abs(s);
   if (a < 0.004) discard;
-  outColor = vec4(uColor, a);
+  outColor = vec4(s >= 0.0 ? uColor : vec3(1.0) - uColor, a);
 }
 `;
 }
@@ -683,6 +694,109 @@ ${edgeBlocks}
 `;
 }
 
+/** Samples of u per pixel when a family over an interval is projected. */
+const PROJECTION_SAMPLES = 48;
+/** Sub-steps between two samples that a member could cross between. */
+const PROJECTION_REFINE = 8;
+
+/**
+ * The region a family over u ∈ [0, 1] sweeps: a pixel is kept when some u
+ * satisfies the relation there, found by stepping u. For an equation that is
+ * a sign change of F between neighbouring samples. Where F keeps its sign but
+ * could still reach 0 between two samples at its slope ∂F/∂u (a member that
+ * only grazes the pixel), that step is searched again finer — still for a
+ * sign change, so a steep ∂F/∂u costs time, never extra fill. Outside, the
+ * member nearest the pixel feathers the edge by its distance in pixels,
+ * |F| / |∇F| (confirmed by a Newton step that crosses it), so the edge is an
+ * antialiasing pixel wide at most and u never leaves [0, 1]. For inequalities,
+ * the smallest max of the constraints below 0.
+ */
+export function projFrag(field: string, relation: 'eq' | 'ineq', slope?: string, params?: string[]): string {
+  const R = PROJECTION_REFINE;
+  const step =
+    relation === 'eq'
+      ? `
+    float sl = ${slope ? 'abs(S(p.x, p.y, s))' : '2.0 * (had ? abs(f - prev) : 0.0)'};
+    if (abs(f) < near) {
+      near = abs(f);
+      best = s;
+    }
+    if (f == 0.0 || (had && prev * f <= 0.0)) inside = true;
+    else if (had && !inside && min(abs(f), abs(prev)) <= 0.5 * max(sl, prevSl) * du) {
+      float q = prev;
+      for (int j = 1; j < ${R}; j++) {
+        float s2 = s - du + float(j) * (du / ${R}.0);
+        float g = F(p.x, p.y, s2);
+        if (isnan(g) || isinf(g)) continue;
+        if (abs(g) < near) {
+          near = abs(g);
+          best = s2;
+        }
+        if (q * g <= 0.0) inside = true;
+        q = g;
+      }
+    }
+    prevSl = sl;`
+      : `
+    near = min(near, f);`;
+  const cover =
+    relation === 'eq'
+      ? `
+  float cover = 1.0;
+  if (!inside) {
+    // Distance in pixels to the nearest member, from its gradient on screen.
+    vec2 h = uUpp;
+    float f0 = F(p.x, p.y, best);
+    vec2 g = 0.5 * vec2(F(p.x + h.x, p.y, best) - F(p.x - h.x, p.y, best), F(p.x, p.y + h.y, best) - F(p.x, p.y - h.y, best));
+    float g2 = dot(g, g);
+    float dist = abs(f0) / sqrt(max(g2, 1e-30));
+    // Near a fold of F the straight line misleads: step 1.5x toward the
+    // member and keep the feather only if F changes sign there.
+    vec2 q = p - 1.5 * f0 / max(g2, 1e-30) * g * h;
+    float f1 = F(q.x, q.y, best);
+    cover = dist < 1.0 && f0 * f1 <= 0.0 ? 1.0 - dist : 0.0;
+  }`
+      : `
+  float aa = max(fwidth(near), 1e-24);
+  float cover = 1.0 - smoothstep(-aa, aa, near);`;
+  return `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform vec3 uColor;
+uniform float t;
+${paramDecls(params)}
+out vec4 outColor;
+${GLSL_PRELUDE}
+float F(float x, float y, float u) { return ${field}; }
+${slope ? `float S(float x, float y, float u) { return ${slope}; }` : ''}
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  const float du = 1.0 / float(${PROJECTION_SAMPLES - 1});
+  bool inside = false;
+  float near = 1e30;
+  float best = 0.0;
+  float prev = 0.0;
+  float prevSl = 0.0;
+  bool had = false;
+  for (int k = 0; k < ${PROJECTION_SAMPLES}; k++) {
+    float s = float(k) * du;
+    float f = F(p.x, p.y, s);
+    if (isnan(f) || isinf(f)) {
+      had = false;
+      continue;
+    }${step}
+    prev = f;
+    had = true;
+  }${cover}
+  float alpha = cover * 0.22;
+  if (alpha < 0.004) discard;
+  outColor = vec4(uColor, alpha);
+}
+`;
+}
+
 const CELLS_FRAG = `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -844,6 +958,7 @@ export class Renderer2D {
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
     for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
+    for (const q of layers.projections ?? []) drawField(q, (f, ps) => projFrag(f, q.relation, q.slope, ps));
     for (const b of layers.bifs ?? []) drawField(b, bifFrag);
     for (const s of layers.scalars ?? []) drawField(s, scalarFrag);
     for (const c of layers.complexes ?? []) drawField(c, complexFrag);
@@ -878,7 +993,11 @@ export interface Overlay2D {
     arrow?: boolean;
     noStroke?: boolean;
   }>;
-  /** Vertical bars from y = 0, halfWidth in math units (data-list bar mode). */
+  /** Filled parametric regions: triangles [x0, y0, x1, y1, x2, y2, …], all
+   *  counter-clockwise (lib/path.ts regionSampler), filled as one path by the
+   *  nonzero rule, so overlaps show once. No outline. */
+  regions?: Array<{ tris: Float64Array; fill: string }>;
+  /** Vertical bars from y = 0, halfWidth in math units (histograms). */
   bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
   /** `label(point, "text")` rows: text beside a math point, drawn above everything. */
   texts?: Array<{ x: number; y: number; text: string; color: string }>;
@@ -980,6 +1099,18 @@ export function drawLabels2D(
       ctx.strokeStyle = bar.color;
       ctx.lineWidth = 1.5;
       ctx.strokeRect(sx - hw, Math.min(sy0, sy), hw * 2, Math.abs(sy - sy0));
+    }
+    for (const region of extras.regions ?? []) {
+      const path = new Path2D();
+      const { tris } = region;
+      for (let i = 0; i + 5 < tris.length; i += 6) {
+        path.moveTo(toScreenX(tris[i]), toScreenY(tris[i + 1]));
+        path.lineTo(toScreenX(tris[i + 2]), toScreenY(tris[i + 3]));
+        path.lineTo(toScreenX(tris[i + 4]), toScreenY(tris[i + 5]));
+        path.closePath();
+      }
+      ctx.fillStyle = region.fill;
+      ctx.fill(path, 'nonzero');
     }
     for (const line of extras.polylines) {
       ctx.strokeStyle = line.color;

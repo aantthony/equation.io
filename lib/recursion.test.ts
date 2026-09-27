@@ -45,11 +45,14 @@ describe('tail-recursive functions', () => {
   });
 
   it('accepts Desmos’s bare condition {cond, else}', () => {
-    expect(parse('{x > 0, 5}')).toEqual(parse('{x > 0: 1, 5}'));
-    expect(parse('{x > 0, y > 0}')).toEqual(parse('{x > 0: 1, y > 0: 1}'));
+    // Bare cases are marked (a reduction reads `{c1, c2: f}` as c1 and c2),
+    // and otherwise mean the same.
+    const unmarked = (s: string) => JSON.parse(JSON.stringify(parse(s), (k, v) => (k === 'bare' ? undefined : v)));
+    expect(unmarked('{x > 0, 5}')).toEqual(parse('{x > 0: 1, 5}'));
+    expect(unmarked('{x > 0, y > 0}')).toEqual(parse('{x > 0: 1, y > 0: 1}'));
     expect(parse('{x > 0}')).toEqual(parse('x > 0'));
     // A trailing bare condition is a case too, never an inequality as a value.
-    expect(parse('{x > 0: 2, y > 0}')).toEqual(parse('{x > 0: 2, y > 0: 1}'));
+    expect(unmarked('{x > 0: 2, y > 0}')).toEqual(parse('{x > 0: 2, y > 0: 1}'));
   });
 
   it('lets other functions call a recursive one, and recursive ones call each other in exit leaves', () => {

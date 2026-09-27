@@ -52,7 +52,7 @@ describe('typed-values public kind baseline', () => {
     expect(publicKind(a.rows.at(-1)!.cls!.object)).toBe(kind);
   });
 
-  it('covers all 38 kinds, keeping packed lists and scatters distinct', () => {
+  it('covers all 41 kinds, keeping packed lists and scatters distinct', () => {
     const values = new Float64Array([1, 2, 3]);
     const ys = new Float64Array([4, 5, 6]);
     const column: Expr = { kind: 'data', values };
@@ -65,7 +65,7 @@ describe('typed-values public kind baseline', () => {
     expect(list.type === 'dlist' && list.values).toBe(values);
     expect(scatter.type === 'dscatter' && scatter.coords[0]).toBe(values);
     expect(scatter.type === 'dscatter' && scatter.coords[1]).toBe(ys);
-    expect(Object.keys(PUBLIC_KIND_ROWS).length + 2).toBe(38);
+    expect(Object.keys(PUBLIC_KIND_ROWS).length + 2).toBe(41);
   });
 });
 
@@ -100,7 +100,7 @@ const CALLS: CallFixture[] = [
     kind: 'pcurve',
     values: [0.5, 1, 1.5],
   },
-  { setup: ['M = [(2,0),(0,4)]'], calls: ['solve(M,(6,8))', 'solve(M,6,8)'], kind: 'point', values: [3, 2] },
+  { setup: ['M = ((2,0),(0,4))'], calls: ['solve(M,(6,8))', 'solve(M,6,8)'], kind: 'point', values: [3, 2] },
   { calls: ['abs(-3)'], kind: 'value', values: [3] },
   { calls: ['abs((3,4))', 'abs(3,4)', 'abs(A)'], setup: ['A = (3,4)'], kind: 'value', values: [5] },
   { calls: ['abs((2,3,6))', 'abs(2,3,6)'], kind: 'value', values: [2] },
@@ -174,7 +174,7 @@ describe('call-shape compatibility before preserving tuple syntax', () => {
 
 describe('typed-values semantic edge baseline', () => {
   it('keeps deferred computed-point components zipped through function composition', () => {
-    const setup = ['f(x,y) = (x+y/2,y)', 'A = (1,2)', 'B = (3,4)', 'J = [(0,-1),(1,0)]'];
+    const setup = ['f(x,y) = (x+y/2,y)', 'A = (1,2)', 'B = (3,4)', 'J = ((0,-1),(1,0))'];
     for (const [call, expected] of [
       ['f(J A)', [-1.5, 1]],
       ['f(A+A)', [4, 4]],

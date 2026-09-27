@@ -69,7 +69,7 @@ describe('llms.txt', () => {
   it('gives builtin examples that mean what the text says', () => {
     const f = ['f(x, y) = x^2 - y^2'];
     const cases: Array<[string[], string, string]> = [
-      [[], 'erf(x)', 'curve'],
+      [[], 'erf(x)', 'scalar-field'],
       [[], '1/gcd(floor(x), floor(y))', 'scalar-field'],
       [[], 'a_n = isprime(n)', 'sequence'],
       [[], 'grad(x^2 - y^2)', 'vector-field'],
@@ -96,6 +96,16 @@ describe('llms.txt', () => {
         'note',
       ],
       [[], 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', 'curve'],
+      // A tuple of rows is a matrix; a bracket of tuples is points.
+      [[], '((0, -1), (1, 0)) (2, 1)', 'point'],
+      [[], 'det(((1, 2), (3, 4)))', 'value'],
+      [[], '[(1, 2), (3, 4)]', 'list'],
+      // A row is drawn per pixel only when it depends on x or y.
+      [[], 'y = x!', 'curve'],
+      [[], 'sin(x)cos(y)', 'scalar-field'],
+      [[], '(u, u^2)', 'curve'],
+      [[], 'u^2', 'distribution'],
+      [[], '[3, 1, 4, 4]', 'list'],
     ];
     for (const [defs, row, kind] of cases) {
       expect(llms, row).toContain(row);
@@ -110,5 +120,28 @@ describe('llms.txt', () => {
     const readout = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
     expect(readout(['curl((-y, x))'])).toBe('= 2');
     expect(readout(['laplacian(x^2 + y^2)'])).toBe('= 4');
+    const M = ['a = [1, 2]', 'M = ((a, 0), (0, 1))', 'P = (1, 1)'];
+    expect(llms).toContain('`M = ((a, 0), (0, 1))`');
+    expect(readout([...M, 'det(M)'])).toBe('= [1, 2]');
+    expect(analyzeRows([...M, 'M M P']).rows.at(-1)!.cpu).toMatchObject({ type: 'plist', pts: { length: 2 } });
+    // Reductions over continuous sets (measures).
+    for (const [row, info] of [
+      ['total(u^2)', '≈ 0.333333'],
+      ['count(interval(1, 3))', '= 2'],
+      ['count((u, u^2))', '= 1'],
+      ['total(exp(-x^2))', '≈ 1.77245'],
+      ['count(x)', '= ∞'],
+      ['count(x^2 + y^2 < 1)', '≈ 3.14159'],
+      ['count(x^2 + y^2 = 1)', '≈ 6.28319'],
+      ['count(x^2 = 2)', '= 2'],
+      ['count({-10 < x < 10, sin(x) = 0})', '= 7'],
+      ['total({x^2 + y^2 < 1: x y})', '= 0'],
+    ]) {
+      expect(llms, row).toContain(`\`${row}\``);
+      expect(readout([row]), row).toBe(info);
+    }
+    expect(llms).toContain('`mean({y = x^2, 0 < x < 1: y})`');
+    expect(readout(['mean({y = x^2, 0 < x < 1: y})'])).toBe('≈ 0.40998');
+    expect(analyzeRows(['count(sin(x) = 0)']).rows[0].error).toMatch(/could not all be found/);
   });
 });

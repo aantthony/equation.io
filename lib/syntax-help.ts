@@ -52,26 +52,33 @@ const signatures: Record<string, [string, string]> = {
   atan2: ['atan2(y, x)', 'Angle of the point (x, y)'],
   normalpdf: ['normalpdf(x, mean, sd)', 'Normal probability density'],
   normalcdf: ['normalcdf(x, mean, sd)', 'Normal cumulative probability'],
-  mean: ['mean(L)', 'Mean of a numeric list or column'],
+  mean: ['mean(L)', 'Mean of a numeric list or column; over a set, mean({y = x^2, 0 < x < 1: y})'],
   stdev: ['stdev(L)', 'Standard deviation of a numeric list'],
   median: ['median(L)', 'Median of a numeric list'],
-  total: ['total(L)', 'Sum of a numeric list'],
-  count: ['count(L)', 'Number of elements in a list'],
+  total: ['total(L)', 'Sum of a numeric list; over a continuous set an integral: total(u^2) = 1/3'],
+  count: [
+    'count(L)',
+    'Number of elements in a list; of a filter its measure: count(L > 2), count(x^2 + y^2 < 1) = π, count(x^2 = 2) = 2',
+  ],
   hist: ['hist(L)', 'Histogram of a numeric list'],
-  sort: ['sort(L)', 'Sort a numeric list'],
+  interval: [
+    'interval(a, b)',
+    'Every real number from a to b: r = interval(1, 2); (r cos(2pi u), r sin(2pi u)) fills an annulus',
+  ],
+  sort: ['sort(L) or sort(P, P.x)', 'A list in ascending order, as a tuple; points by a key written in them'],
   min: ['min(a, b) or min(L)', 'Minimum'],
   max: ['max(a, b) or max(L)', 'Maximum'],
   clamp: ['clamp(x, lo, hi)', 'x held within [lo, hi]; as a constant, a slider over that range'],
   mod: ['mod(a, b)', 'Remainder modulo b'],
   gcd: ['gcd(a, b)', 'Greatest common divisor'],
   segment: ['segment(A, B)', 'Segment joining two 2D or 3D points'],
-  polyline: ['polyline(A, B, C, …)', 'Open path through 2D/3D points; also polyline(P) for a point list'],
+  polyline: ['polyline(A, B, C, …)', 'Open path through 2D/3D points; also polyline(T) for a tuple, like sort(P, P.x)'],
   vector: ['vector(A, B) or vector(V)', 'Arrow from A to B, or from the origin to V'],
   line: ['line(A, B)', 'Line through two points'],
   circle: ['circle(A, r)', 'Circle with center A and radius r'],
   polygon: [
     'polygon(A, B, C, …)',
-    'Polygon through points or a point list; 3D triangles fill, larger 3D polygons outline',
+    'Polygon through points or a tuple of them; 3D triangles fill, larger 3D polygons outline',
   ],
   square: ['square(A, B)', 'Square erected to the left of side A → B'],
   midpoint: ['midpoint(A, B)', 'Midpoint of two points'],
@@ -93,6 +100,9 @@ const signatures: Record<string, [string, string]> = {
   det: ['det(M)', 'Matrix determinant'],
   trace: ['trace(M)', 'Matrix trace'],
   solve: ['solve(M, v)', 'Solve the linear system M x = v'],
+  outer: ['outer(a, b) or a ⊗ b', 'Outer (tensor) product: (a ⊗ b)_ij = a_i b_j, of vectors, matrices or tensors'],
+  wedge: ['wedge(a, b) or a ∧ b', 'Wedge product a ⊗ b − b ⊗ a: a bivector, read out as its antisymmetric matrix'],
+  contract: ['contract(T, i, j)', 'Sum a tensor over indices i = j (1-based): contract(M, 1, 2) is trace(M)'],
   sum: ['sum(n=1..N, expression)', 'Finite sum'],
   prod: ['prod(n=1..N, expression)', 'Finite product'],
   int: ['int[a..b] f(x) dx', 'Definite integral; bounds may be omitted. Alone on a row it shades its signed area'],
@@ -134,6 +144,7 @@ const definedNames = (defs: Env): ReadonlySet<string> =>
     ...defs.states.keys(),
     ...defs.points,
     ...defs.mats.keys(),
+    ...defs.tensors.keys(),
     ...defs.lists.keys(),
     ...defs.tables.keys(),
     ...defs.missingData.keys(),
@@ -188,6 +199,10 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   const values = (names: Iterable<string>, description: string) => {
     for (const name of names) candidates.set(name, { name, signature: name, description, call: false });
   };
+  // Built in, and replaced below by a document's own e_x.
+  values(['e_x'], 'Unit vector (1, 0, 0)');
+  values(['e_y'], 'Unit vector (0, 1, 0)');
+  values(['e_z'], 'Unit vector (0, 0, 1)');
   values(defs.consts.keys(), 'Defined constant');
   values(defs.states.keys(), 'Simulation state');
   values(defs.vecStates.keys(), 'Vector state');
@@ -209,6 +224,7 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   );
   values([...defs.points].filter(pointOverParams), 'Named curve or surface');
   values(defs.mats.keys(), 'Defined matrix');
+  values(defs.tensors.keys(), 'Defined tensor');
   values(defs.lists.keys(), 'Defined list');
   for (const [name, table] of defs.tables) {
     values([name], 'Data table');

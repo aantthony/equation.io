@@ -51,8 +51,8 @@ describe.each(['rgb', 'hsl', 'oklch'] as const)('%s color fields', name => {
 
   it('preserves user-defined functions and constants with this name', () => {
     for (const rows of [
-      [`${name}(q)=q^2`, `${name}(x)`],
-      [`${name}=2`, `${name} x`],
+      [`${name}(q)=q^2`, `y = ${name}(x)`],
+      [`${name}=2`, `y = ${name} x`],
     ]) {
       const result = analyzeRows(rows).rows;
       expect(result.map(r => r.error)).toEqual([undefined, undefined]);

@@ -334,7 +334,8 @@ describe('mcp endpoint', () => {
       ['value', '= 4'],
       ['definition (const)', undefined],
       ['value', '≈ 1.41421'],
-      ['implicit2d', undefined],
+      // A bare expression in x is a field, and says how to write the curve.
+      ['scalar2d', 'scalar field — for the curve write y = 2x'],
     ]);
     // Measurements are numbers too: distance/angle rows read out, a zero-length
     // arm is undefined, and a document's own `angle` still wins over the builtin.
@@ -552,8 +553,25 @@ describe('draggable points', () => {
 
   it('reports named points (A = (…)) too', async () => {
     const rows = await rowsFor(['A = (1, 2)', 'B = (2cos(1), sin(2))']);
-    expect(rows[0]).toMatchObject({ kind: 'definition (const)', draggable: true });
-    expect(rows[1]).toMatchObject({ kind: 'definition (const)', draggable: false });
+    expect(rows[0]).toMatchObject({ kind: 'definition (point)', draggable: true });
+    expect(rows[1]).toMatchObject({ kind: 'definition (point)', draggable: false });
+  });
+
+  it('names what a definition holds when it is not a number (no slider)', async () => {
+    const rows = await rowsFor([
+      'a = interval(1, 100)',
+      'M = ((1, 2), (3, 4))',
+      'K = (1, 2) ⊗ (3, 4) ⊗ (5, 6)',
+      'L = [1, 2, 3]',
+      'c = 3',
+    ]);
+    expect(rows.map(r => r.kind)).toEqual([
+      'definition (interval)',
+      'definition (matrix)',
+      'definition (tensor)',
+      'definition (list)',
+      'definition (const)',
+    ]);
   });
 
   it('never drags in 3D, where the app has no point dragging', async () => {

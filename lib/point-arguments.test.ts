@@ -13,11 +13,12 @@ const PRE = [
   'A = (1, 2)',
   'B = (3, 4)',
   'C = (1, 2, 3)',
-  'J = [(0,-1),(1,0)]',
+  'J = ((0,-1),(1,0))',
   'a = [0..2]',
   'b = [0..2]',
   'P = (a, b)',
-  'Q = [(0,0),(1,0),(1,1),(0,1)]',
+  // A shape: a tuple of points, in order (docs/multisets.md §3).
+  'Q = ((0,0),(1,0),(1,1),(0,1))',
   'L = [1, 2, 3]',
 ];
 const run = (row: string, pre = PRE) => {
@@ -122,9 +123,11 @@ describe('a list of points as the argument', () => {
     expect(values('k(P)', [...PRE, 'k(p) = f(p)'])).toEqual(values('f(P)'));
   });
   it('reads a matrix as its rows, like every call that asks for points — a named list of 2 points is one', () => {
-    const pre = [...PRE, 'S = [(1,2),(3,4)]', 'T = [(1,2,0),(3,4,0),(0,0,1)]'];
-    expect(values('g(S)', pre).flat()).toEqual([2, 12]);
-    expect(values('g(S)', pre)).toEqual(values('g([(1,2),(3,4)])', pre));
+    const pre = [...PRE, 'S = ((1,2),(3,4))', 'T = ((1,2,0),(3,4,0),(0,0,1))'];
+    // The rows are in order, so g of them is a tuple of 2 numbers — a point;
+    // a bracket of the same points is a multiset, and so are its values.
+    expect(values('g(S)', pre)).toEqual([[2, 12]]);
+    expect(values('g([(1,2),(3,4)])', pre)).toEqual([[2], [12]]);
     expect(values('f(J)')).toEqual([
       [-0.5, -1],
       [1, 0],
@@ -289,7 +292,7 @@ describe('cost', () => {
       for (let k = 0; k < n; k++) s = `f(${s})`;
       return s;
     };
-    const pre = ['f(x,y) = (x + y/2, y - x/2)', 'A = (1, 2)', 'J = [(0,-1),(1,0)]'];
+    const pre = ['f(x,y) = (x + y/2, y - x/2)', 'A = (1, 2)', 'J = ((0,-1),(1,0))'];
     const t0 = performance.now();
     expect(values(nest(8, 'J A'), pre)).toHaveLength(1);
     expect(performance.now() - t0).toBeLessThan(2000);

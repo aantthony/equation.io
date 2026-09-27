@@ -14,9 +14,15 @@ function last(rows: string[]) {
 }
 
 /** The last row's value at a point: a scalar field, value or scalar over
- *  space (an implicit surface's residual) as [v], a vector as its components. */
+ *  space as [v], a vector as its components. A bare scalar over space draws
+ *  nothing, so it is read as the first component of the field (…, 0, 0). */
 function at(rows: string[], env: Record<string, number>): number[] {
-  const a = analyzeRows(rows);
+  let a = analyzeRows(rows);
+  if (a.rows.at(-1)!.error?.includes('field in space')) {
+    a = analyzeRows([...rows.slice(0, -1), `(${rows.at(-1)}, 0, 0)`]);
+    const field = a.rows.at(-1)!.cls?.object;
+    if (field?.kind === 'vector-field') return [evaluate(field.components[0], { t: 0, ...a.constEnv, ...env })];
+  }
   const row = a.rows[a.rows.length - 1];
   if (row.error) throw new Error(row.error);
   const object = row.cls?.object;
@@ -131,7 +137,7 @@ describe('∇ notation', () => {
   });
 
   it('leaves a graph that defines its own grad alone', () => {
-    expect(last(['grad = 3', 'grad x']).kind).toBe('curve');
+    expect(last(['grad = 3', 'y = grad x']).kind).toBe('curve');
   });
 });
 

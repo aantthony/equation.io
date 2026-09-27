@@ -84,7 +84,7 @@ describe('semantic classification and independent backends', () => {
   });
 
   it('keeps graph RHS, normalized residuals, heightmaps and level parameter identity', () => {
-    const graph = classify(parseExpr('sin(x)'));
+    const graph = classify(parseExpr('y = sin(x)'));
     expect(graph.object).toMatchObject({ kind: 'curve', form: 'graph' });
     for (const text of ['y=x^2', 'x^2=y'])
       expect(classify(parseExpr(text)).object).toMatchObject({ kind: 'curve', form: 'graph' });

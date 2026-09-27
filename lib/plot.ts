@@ -5,8 +5,9 @@ import { exprKey } from './expr.ts';
  * equation.io renderable dispatcher:
  *
  * - "l = r" → implicit curve (2D) or implicit surface (3D when z appears)
- * - bare scalar in x → treated as y = expr
- * - bare scalar in x,y → 2D scalar field (density)
+ * - bare scalar in x and/or y → 2D scalar field, drawn per pixel (no implicit
+ *   graph: `sin(x)` is a field, the curve is `y = sin(x)`); in x, y, z → an
+ *   error until fields in space can be drawn
  * - vector literal with no free vars → a point
  * - vector with free u (and v) → parametric curve (u) / surface (u,v), u,v ∈ (0,1)
  * - vector with free x/y → 2D vector field, drawn as animated streamlines (LIC)
@@ -31,6 +32,9 @@ import {
 } from './expr.ts';
 import type { FigureName } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
+import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
+import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
+import { nestedText, tensorOfNode } from './tensor.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { PATH_NODE_BUDGET } from './path.ts';
 import { exceedsNodes } from './size.ts';
@@ -48,6 +52,8 @@ import {
 import type { CpuPlan } from './compiler.ts';
 
 const SPACE_VARS = new Set(['x', 'y', 'z']);
+/** Values a long tuple's readout shows, as a list's shows 8 (plotReadout). */
+const TUPLE_SHOWN = 8;
 const PARAM_VARS = new Set(['u', 'v']);
 
 const isVarNamed = (e: Expr, name: string): boolean => e.kind === 'var' && e.name === name;
@@ -348,6 +354,48 @@ function familyTemplate(es: readonly Expr[], index: string): Expr {
   };
 }
 
+/**
+ * A row in x and y over one interval: the family of its members, drawn as
+ * the region they sweep — `a = interval(1, 2)`; `y = sin(a x)` is every
+ * (x, y) that some a ∈ [1, 2] puts on its curve (docs/multisets.md §5). The
+ * interval becomes u over [0, 1], so each residual is F(x, y, u), and a pixel
+ * is kept when some u satisfies the relation there: a search along u per
+ * pixel (render2d's projFrag), not a draw per member.
+ */
+function projectedRegion(expr: Expr, hidden: readonly HiddenInterval[], vars: ReadonlySet<string>): MathObject {
+  if (hidden.length > 1)
+    throw new Error(
+      `A row in x and y can range over one interval (this one has ${hidden.length}) — fix the others to a value.`,
+    );
+  if (vars.has('z')) throw new Error('A family over an interval is drawn in the plane; it cannot use z.');
+  if (vars.has('u') || vars.has('v')) throw new Error('Cannot mix u/v with x/y/z.');
+  if (usesComplex(expr)) throw new Error('A family over an interval must be real.');
+  const swept = replaceIntervals(expr, h => sweep(h, 'u'));
+  if (swept.kind === 'eq' && swept.l.kind !== 'vec' && swept.r.kind !== 'vec')
+    return {
+      kind: 'region',
+      form: 'projected',
+      relation: 'eq',
+      constraints: [{ residual: { kind: 'bin', op: '-', a: swept.l, b: swept.r }, strict: false }],
+    };
+  if (swept.kind === 'ineq') {
+    const comps = ineqComparisons(swept);
+    if (new Set(comps.map(c => c.op[0])).size > 1) throw new Error('Chained inequalities must point the same way.');
+    return {
+      kind: 'region',
+      form: 'projected',
+      relation: 'ineq',
+      constraints: comps.map(c => {
+        const [lo, hi] = c.op[0] === '<' ? [c.l, c.r] : [c.r, c.l];
+        return { residual: { kind: 'bin', op: '-', a: lo, b: hi }, strict: c.op.length === 1 };
+      }),
+    };
+  }
+  throw new Error(
+    'A field in x and y cannot range over an interval — set it equal to something for the region its family sweeps, like y = sin(a x).',
+  );
+}
+
 /** classify, also handing back the equation a revolve(…) row desugared to
  *  (`surface`) — the one place that desugaring happens, after coordinate
  *  fields have expanded, so a field hiding y or z is seen for what it is. */
@@ -399,6 +447,10 @@ function classifyLowered(
       'trail',
       'label',
     ]);
+    if (first === 'scalar2d')
+      throw new Error(
+        'A family of scalar fields cannot be drawn — for curves write y = …, or pick one member, like L[k].',
+      );
     if (unsupported.has(first))
       throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
@@ -439,7 +491,14 @@ function classifyLowered(
   const vars = freeVars(expr);
   if (tube) {
     const r = tube.radius;
-    if (r.kind === 'vec' || r.kind === 'list' || r.kind === 'eq' || r.kind === 'ineq' || usesComplex(r)) {
+    if (
+      r.kind === 'vec' ||
+      r.kind === 'list' ||
+      r.kind === 'eq' ||
+      r.kind === 'ineq' ||
+      usesComplex(r) ||
+      hasInterval(r)
+    ) {
       throw new Error('The tube radius must be a single real number.');
     }
     // The radius was split off before the root-only check below, so whole-
@@ -479,6 +538,26 @@ function classifyLowered(
       throw new Error(`Unknown variable: ${v}. Define "${v} = 1" to make a slider.`);
     }
   }
+  // Continuous intervals (lib/interval.ts). Beside x and y an interval makes
+  // the row a family over it, drawn as the region the family sweeps; anywhere
+  // else it is one more sampling parameter, swept over [0, 1] like u and v.
+  const hidden = intervalsIn(expr);
+  if (hidden.length) {
+    if (special) throw new Error(`Cannot use an interval in ${special}(…).`);
+    if (vars.has('x') || vars.has('y') || vars.has('z')) {
+      const object = projectedRegion(expr, hidden, vars);
+      return { cls: { object, animated: vars.has('t'), needs3D: false, params } };
+    }
+    if (expr.kind === 'list') throw new Error('An interval cannot be an item of a list — write it in a tuple.');
+    const free = [...PARAM_VARS].filter(p => !vars.has(p));
+    if (hidden.length > free.length)
+      throw new Error(
+        `A row can sweep at most two parameters (intervals, u and v) — this one has ${hidden.length + 2 - free.length}.`,
+      );
+    const slot = new Map(hidden.map((h, k) => [h.key, free[k]]));
+    expr = replaceIntervals(expr, h => sweep(h, slot.get(h.key)!));
+    for (const p of slot.values()) vars.add(p);
+  }
   const animated = vars.has('t');
   const hasParam = vars.has('u') || vars.has('v');
   const hasSpace = vars.has('x') || vars.has('y') || vars.has('z');
@@ -504,6 +583,22 @@ function classifyLowered(
       params,
     },
   });
+
+  // A matrix or tensor on a row of its own — or a multiset of them — has no
+  // position, so it is drawn as its values: a readout (docs/multisets.md §5).
+  const tensors = expr.kind === 'list' && expr.items.length ? expr.items.map(tensorOfNode) : [tensorOfNode(expr)];
+  if (tensors.every(t => t !== null)) {
+    if (hasSpace || hasParam) {
+      throw new Error('A matrix or tensor in x, y, z, u or v has no picture — apply it to a vector, like M (x, y).');
+    }
+    const shape = tensors[0].shape;
+    return done({
+      kind: 'tuple',
+      values: tensors.flatMap(t => t.data),
+      shape,
+      ...(expr.kind === 'list' && { count: tensors.length }),
+    });
+  }
 
   if (
     (expr.kind === 'eq' || expr.kind === 'ineq') &&
@@ -673,6 +768,16 @@ function classifyLowered(
 
   if (expr.kind === 'vec') {
     if (usesComplex(expr)) throw new Error('Complex values are not supported in vectors.');
+    // Longer than a point: values at positions, shown as a readout.
+    if (expr.items.length > 3) {
+      if (hasSpace || hasParam || expr.items.some(it => it.kind === 'vec'))
+        throw new Error('A tuple of more than 3 values is a value to read, not a picture: (1, 2, 3, 5, 8).');
+      return done(
+        expr.items.length > TUPLE_SHOWN
+          ? { kind: 'tuple', values: expr.items.slice(0, TUPLE_SHOWN), length: expr.items.length }
+          : { kind: 'tuple', values: expr.items },
+      );
+    }
     const dim = expr.items.length as 2 | 3;
     if (hasSpace || ode) {
       if (hasParam) throw new Error('Vector fields cannot use u or v.');
@@ -683,6 +788,8 @@ function classifyLowered(
     }
     if (vars.has('v') && !vars.has('u')) throw new Error('Parametric surfaces use u (and v).');
     if (vars.has('u') && vars.has('v')) {
+      // Two parameters in the plane fill the region they trace.
+      if (dim === 2) return done({ kind: 'region', form: 'parametric', coordinates: [expr.items[0], expr.items[1]] });
       if (dim !== 3) throw new Error('A parametric surface needs 3 components.');
       return done({ kind: 'surface', form: 'parametric', coordinates: expr.items as [Expr, Expr, Expr] });
     }
@@ -713,7 +820,13 @@ function classifyLowered(
     }
     return done({ kind: 'curve', form: 'parametric', source: { representation: 'complex', expr } });
   }
-  if (hasParam && !paramSystem) throw new Error('u/v need a vector expression like (cos(u), sin(u), v).');
+  // (A bare real row in u, v is a random draw — analysis renames them first.)
+  if (hasParam && !paramSystem)
+    throw new Error(
+      hidden.length
+        ? 'An interval traces a curve or region in a tuple, like (r cos(2 pi u), r sin(2 pi u)); a number alone draws its density.'
+        : 'u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v).',
+    );
 
   // A vector equation is a system, one residual per component: F(x,y,z) =
   // (a, b, c) is the fiber of a map, (f, g) = (0, 0) an intersection of
@@ -823,10 +936,15 @@ function classifyLowered(
     if (!hasSpace && !hasParam) return done({ kind: 'point', source: { representation: 'complex', expr } });
     return done({ kind: 'complex-field', form: 'potential', expr });
   }
-  if (vars.has('z')) return done({ kind: 'surface', form: 'implicit', residual: expr });
-  if (vars.has('y')) return done({ kind: 'scalar-field', expr });
-  if (!hasSpace && !hasParam) return done({ kind: 'value', expr });
-  return done({ kind: 'curve', form: 'graph', rhs: expr });
+  // A scalar that depends on the screen's x and y is drawn at every pixel —
+  // `sin(x)` too, constant along y. There is no implicit graph: the curve is
+  // `y = sin(x)`, and the surface of a field in space is `f = 0`.
+  if (vars.has('z'))
+    throw new Error(
+      'A bare expression in x, y, z is a field in space, which cannot be drawn yet — set it equal to a value for its surface, like … = 0.',
+    );
+  if (hasSpace) return done({ kind: 'scalar-field', expr });
+  return done({ kind: 'value', expr });
 }
 
 /** A stand-in for the integration variable while the integrand is lowered:
@@ -850,7 +968,23 @@ export function classifyRow(
   fields: Record<string, Expr> = {},
   timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified } {
-  const lowered = lower(row.expr);
+  // A tuple of numbers is shown as what it is (see tupleRow). A long one of
+  // packed numbers — a sorted column — keeps only what its readout shows,
+  // rather than a node per value.
+  const low = lower(row.expr);
+  const packed = packedTuple(low);
+  if (packed) {
+    const values = Array.from(packed.subarray(0, TUPLE_SHOWN), (value): Expr => ({ kind: 'num', value }));
+    const object: MathObject = { kind: 'tuple', values, length: packed.length };
+    return { cls: { object, animated: false, needs3D: false, params: [] } };
+  }
+  // A multiset of longer tuples reads out, as a multiset of matrices does.
+  const tuples = tupleMultiset(low);
+  if (tuples && !tuples.values.some(v => [...freeVars(v)].some(n => ['x', 'y', 'z', 'u', 'v', 't'].includes(n)))) {
+    const object: MathObject = { kind: 'tuple', values: tuples.values, shape: [tuples.width], count: tuples.count };
+    return { cls: { object, animated: false, needs3D: false, params: [] } };
+  }
+  const lowered = tupleRow(low);
   // A revolve(…) row hands back the surface it draws, not a call nothing
   // evaluates.
   const { cls } = classifyLowered(lowered, known, fields, timeDerivative);
@@ -968,6 +1102,21 @@ export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env:
 export function plotReadout(plot: CpuPlan, env: Record<string, number>): string | null {
   if (plot.type === 'value') return valueReadout(evaluate(plot.expr, env));
   if (plot.type === 'note') return comparisonReadout(plot, env);
+  if (plot.type === 'tuple') {
+    // A tensor's values nest as the tuples that write it; a multiset of
+    // them is listed like one of numbers.
+    const shape = plot.shape ?? [plot.values.length];
+    const each = shape.reduce((n, d) => n * d, 1);
+    const shown = plot.count === undefined ? 1 : Math.min(plot.count, 8);
+    const values = plot.values.slice(0, shown * each).map(e => valueReadout(evaluate(e, env)));
+    const prefix = values.some(v => v.startsWith('≈')) ? '≈' : '=';
+    const bare = values.map(v => v.replace(/^[=≈] /, ''));
+    const parts = Array.from({ length: shown }, (_, k) => nestedText(shape, bare.slice(k * each, (k + 1) * each)));
+    // (A long tuple kept only the values it shows: see TUPLE_SHOWN.)
+    if (plot.length !== undefined) return `${prefix} (${bare.join(', ')}, …)`;
+    if (plot.count === undefined) return `${prefix} ${parts[0]}`;
+    return `${prefix} [${parts.join(', ')}${plot.count > shown ? ', …' : ''}]`;
+  }
   if (plot.type === 'vlist') {
     const values = plot.values.slice(0, 8).map(e => valueReadout(evaluate(e, env)));
     const prefix = values.some(v => v.startsWith('≈')) ? '≈' : '=';
@@ -978,4 +1127,31 @@ export function plotReadout(plot: CpuPlan, env: Record<string, number>): string 
     if (parts.every(p => p !== null)) return `[${parts.slice(0, 8).join('; ')}${parts.length > 8 ? '; …' : ''}]`;
   }
   return null;
+}
+
+/**
+ * A list of numbers drawn as its values (docs/multisets.md §5): a dot plot on
+ * the number line. Each value sits at x = value and its copies stack upward,
+ * the j-th at y = j, so a column's height is the value's multiplicity. No
+ * index is drawn — a multiset has no order.
+ *
+ * With `width` > 0, values are first gathered into columns that wide (the
+ * dot's width on screen), so a large column of distinct measurements stacks
+ * into its shape instead of drawing every dot on top of the last at y = 1.
+ */
+export function dotPlot(values: ArrayLike<number>, width = 0): { xs: Float64Array; ys: Float64Array } {
+  const xs = new Float64Array(values.length);
+  const ys = new Float64Array(values.length);
+  const heights = new Map<number, number>();
+  let n = 0;
+  for (let k = 0; k < values.length; k++) {
+    const v = values[k];
+    if (!Number.isFinite(v)) continue;
+    const x = width > 0 ? (Math.floor(v / width) + 0.5) * width : v;
+    const j = (heights.get(x) ?? 0) + 1;
+    heights.set(x, j);
+    xs[n] = x;
+    ys[n++] = j;
+  }
+  return { xs: xs.subarray(0, n), ys: ys.subarray(0, n) };
 }

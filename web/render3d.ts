@@ -1054,11 +1054,27 @@ export class Renderer3D {
     }
     gl.bindVertexArray(this.dynVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.dynBuf);
-    for (const p of scene.points) {
+    if (scene.points.length) {
+      // One draw per run of same-coloured points: a row pushes its whole
+      // point list with one colour, so a 10 000-point cloud is one upload and
+      // one draw, not 10 000. The dots are opaque, so order does not matter.
       setCommon(this.pointProgram);
-      gl.uniform3f(gl.getUniformLocation(this.pointProgram, 'uColor'), ...p.color);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(p.pos), gl.DYNAMIC_DRAW);
-      gl.drawArrays(gl.POINTS, 0, 1);
+      const uColor = gl.getUniformLocation(this.pointProgram, 'uColor');
+      const pos = new Float32Array(scene.points.length * 3);
+      let start = 0;
+      for (let k = 0; k <= scene.points.length; k++) {
+        const p = scene.points[k];
+        const run = scene.points[start];
+        if (p && p.color.every((c, i) => c === run.color[i])) {
+          pos.set(p.pos, k * 3);
+          continue;
+        }
+        gl.uniform3f(uColor, ...run.color);
+        gl.bufferData(gl.ARRAY_BUFFER, pos.subarray(start * 3, k * 3), gl.DYNAMIC_DRAW);
+        gl.drawArrays(gl.POINTS, 0, k - start);
+        if (p) pos.set(p.pos, k * 3);
+        start = k;
+      }
     }
     gl.bindVertexArray(null);
 

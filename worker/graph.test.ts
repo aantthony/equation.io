@@ -10,7 +10,7 @@ const out = (texts: string[]) => analyze(texts).rows.map(r => [r.error ?? r.cpu?
 describe('distance / angle through analyze()', () => {
   it('take any single point, however it was computed', () => {
     const rows = out([
-      'M = [(1, 2), (3, 4)]',
+      'M = ((1, 2), (3, 4))',
       'L = [1, 2, 3]',
       'A = (1, 2)',
       'B = (5, 11)',
@@ -18,7 +18,7 @@ describe('distance / angle through analyze()', () => {
       'distance(A, det(M) B)',
       'distance(A, (mean(L), 2))',
       'distance(A, (total(L), count(L)))',
-      'distance(A, (L[1], 5))',
+      'distance(A, (min(L), 5))',
       'angle(A, (0, 0), (total(L), -3))',
     ]);
     expect(rows.slice(4)).toEqual([
@@ -58,11 +58,15 @@ describe('distance / angle through analyze()', () => {
       'distance(A, L)',
       'angle(A, [A, A], A)',
       'distance(P[1], P[2])',
+      'T = sort(P, P.x)',
+      'distance(T[1], T[2])',
     ]);
     expect(rows[3][0]).toBe('vlist');
     expect(rows[4][0]).toMatch(/distance takes two points/);
     expect(rows[5][0]).toBe('vlist');
-    expect(rows[6]).toEqual(['value', '≈ 1.41421']);
+    // Only a tuple has positions (docs/multisets.md §3).
+    expect(rows[6][0]).toMatch(/P\[1\] needs an order/);
+    expect(rows[8]).toEqual(['value', '≈ 1.41421']);
   });
 
   it('never shows the internal [angle] name', () => {
@@ -204,9 +208,9 @@ describe('definite-integral rows shade their area', () => {
   it('rows that are not a number never shade', () => {
     const types = (texts: string[]) => analyze(texts).rows.map(r => r.error ?? r.cpu?.type ?? 'def');
     // A definition names the number (nothing draws); non-constant bounds are a
-    // curve; a complex integrand a point; a list integrand a list.
+    // field; a complex integrand a point; a list integrand a list.
     expect(types(['a = int[0..1] x^2 dx'])).toEqual(['def']);
-    expect(types(['int[0..x] t^2 dt'])).toEqual(['implicit2d']);
+    expect(types(['int[0..x] t^2 dt'])).toEqual(['scalar2d']);
     expect(types(['int[0..1] i x dx'])).toEqual(['point']);
     expect(types(['L = [1, 2]', 'int[0..1] L x dx'])).toEqual(['def', 'vlist']);
   });
@@ -662,7 +666,7 @@ describe('revolve(f) through analyze()', () => {
   });
 
   it('stays shadowable by a document that already uses the name', () => {
-    expect(out(['revolve = 3', 'revolve(x)'])[1][0]).toBe('implicit2d'); // the product 3x
+    expect(out(['revolve = 3', 'y = revolve(x)'])[1][0]).toBe('implicit2d'); // the product 3x
     expect(out(['revolve = 3', '2 revolve'])[1]).toEqual(['value', '= 6']);
     const fn = analyze(['revolve(x) = 2x', 'y = revolve(x) + 1', 'revolve(4)']);
     expect(fn.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);

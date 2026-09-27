@@ -330,7 +330,7 @@ describe('geometry statements', () => {
     }
     expect(classify(low('vector((1, 2, 3))')).needs3D).toBe(true);
     expect(compileCpu(classify(low('vector((1, 2, 3), (4, 5, 6))'))).type).toBe('polygon');
-    // A named list of points (or a 2×2 one, which reads as a matrix) is a list too.
+    // A named list of points (or a named matrix, read as its rows) is a list too.
     const lowL = (s: string) =>
       lowerGeom(
         parseExpr(s),
