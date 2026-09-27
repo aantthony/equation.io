@@ -111,6 +111,7 @@
   "geometric-algebra-quaternions/a-rotor-turns-a-vector": "camera(-pi/3, 0.6, 5); R = e^(-(t/2) e_xy); p = (1, 0, 0.8); vector(p); vector(rotate(p, R)); R",
   "geometric-algebra-quaternions/quaternion-slerp-between-orientations": "camera(-pi/3, 0.5, 7); q1 = quat(1, 0, 0, 0); q2 = quat(cos(1), sin(1) (1, 1, 1)/sqrt(3)); rotate(hull(([-1, 1], [-1, 1], [-1, 1])), slerp(q1, q2, (1 - cos(t))/2))",
   "geometric-algebra-quaternions/hopf-fibration": "camera(-pi/3, 0.6, 6); a = 2pi [0..7]/8; h = pi/4; q = quat(cos(h), 0, sin(h) cos(a), sin(h) sin(a)) quat(cos(2pi u), sin(2pi u), 0, 0); vec(q)/(1 - grade(q, 0))",
+  "geometric-algebra-quaternions/belt-trick-untangled-every-720": "camera(-0.49, 0.31, 7); b = clamp(0.72, 0.2, 1.4) # ribbon width; q = 0.58; k = 2pi [0..2]/3; f = t/2; g = (sqrt((q + 3u)^2 + (b(v-0.5))^2) - sqrt(3) q)/(q + 3 - sqrt(3) q); p = pi clamp(g, 0, 1); c = (1 + cos(p))/2; Q = quat(1 - c(1 - cos(f)), c sin(f) (1,1,1)/sqrt(3) + sin(f/2) sin(p) (1,-1,0)/sqrt(2)); rotate(rotate(([-1,1](q + 3u), b(v-0.5), 0), k, (1,1,1)), Q); rotate(hull(([-q,q], [-q,q], [-q,q])), t, (1,1,1))",
   "geometric-algebra-quaternions/quaternion-julia-set-slide-s": "camera(-pi/3, 0.5, 3); s = 0; C = quat(-0.2, 0.8, 0, 0); Q(a, b, c, d, k) = {|quat(a, b, c, d)| > 2: ln(|quat(a, b, c, d)|)/2^k, k >= 12: ln(|quat(a, b, c, d)|)/2^k, Q(quat(a, b, c, d)^2 + C, k + 1)}; Q(x, y, z, s, 0) = 0.001",
   "vector-fields-odes-click-to-trace/rotation": "(-y, x)",
   "vector-fields-odes-click-to-trace/saddle": "(x, -y)",
