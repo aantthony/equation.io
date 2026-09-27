@@ -400,7 +400,7 @@ body {
   left: 0;
   top: 0;
   bottom: 0;
-  width: 3px;
+  width: 5px;
   background: var(--eq-color, #ccc);
   cursor: pointer;
   transition: width 0.12s;
@@ -466,7 +466,7 @@ body {
   background: var(--row-focus);
 }
 .eq-line.focused:not(.is-comment)::before {
-  width: 5px;
+  width: 7px;
 }
 .eq-line.invalid {
   box-shadow: inset 0 -1px var(--error-line);
