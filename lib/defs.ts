@@ -2937,10 +2937,15 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     const e = defs.consts.get(name);
     // A surviving list (or matrix) name means it was defined below its use,
     // so lowering saw it as a plain scalar.
-    if (!e && (defs.lists.has(name) || defs.mats.has(name) || defs.tensors.has(name))) {
-      throw new Error(
-        `${name} is a ${defs.lists.has(name) ? 'list' : defs.mats.has(name) ? 'matrix' : 'tensor'} — move its definition above where it is used.`,
-      );
+    if (!e && (defs.lists.has(name) || defs.mats.has(name) || defs.tensors.has(name) || defs.intervals.has(name))) {
+      const what = defs.lists.has(name)
+        ? 'a list'
+        : defs.mats.has(name)
+          ? 'a matrix'
+          : defs.tensors.has(name)
+            ? 'a tensor'
+            : 'an interval';
+      throw new Error(`${name} is ${what} — move its definition above where it is used.`);
     }
     if (!e) throw new Error(`${name} is not defined.`);
     if (visiting.has(name)) throw new Error(`${name} is defined in terms of itself.`);
@@ -3062,6 +3067,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       defs.fns.has(name) ||
       defs.mats.has(name) ||
       defs.tensors.has(name) ||
+      defs.intervals.has(name) ||
       defs.lists.has(name) ||
       defs.tables.has(name) ||
       defs.missingData.has(name);
@@ -3117,6 +3123,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         defs.fns.delete(name);
         defs.mats.delete(name);
         defs.tensors.delete(name);
+        defs.intervals.delete(name);
         defs.lists.delete(name);
         defs.tables.delete(name);
         defs.missingData.delete(name);
@@ -3133,6 +3140,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         ...[...defs.fns].map(([name, fn]): [string, Expr[], string[]] => [name, [fn.body], fn.params]),
         ...[...defs.mats].map(([name, matrix]): [string, Expr[], string[]] => [name, matrix.flat(), []]),
         ...[...defs.tensors].map(([name, tensor]): [string, Expr[], string[]] => [name, [...tensor.data], []]),
+        ...[...defs.intervals].map(([name, value]): [string, Expr[], string[]] => [name, [value], []]),
         ...[...defs.lists].map(([name, value]): [string, Expr[], string[]] => [name, [value], []]),
         ...[...defs.tables.keys()].map((name): [string, Expr[], string[]] => [name, [], []]),
       ];

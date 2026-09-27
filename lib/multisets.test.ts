@@ -542,6 +542,23 @@ describe('§5 continuous intervals', () => {
     expect(last(['interval(1)']).error).toMatch(/two bounds/);
     expect(last(['(interval(0, x), u)']).error).toMatch(/constants, sliders and t/);
   });
+  it('a name survives an error in another row', () => {
+    // An error anywhere checks which definitions lean on a failed one, and a
+    // named interval was taken for failed: everything using it was dropped.
+    const rows = ['r = interval(1,3)', 'c = count(r)', 'bad = 1/foo(2)', 'c'];
+    const analysis = analyzeRows(rows, { readouts: true });
+    expect(analysis.rows[1].error).toBeUndefined();
+    expect(analysis.rows[3].error).toBeUndefined();
+    expect(analysis.rows[3].info).toBe('= 2');
+    expect(analysis.rows[2].error).toMatch(/foo/);
+    // So does a function built on one.
+    const fn = analyzeRows(
+      ['r = interval(1,2)', 'f(k) = k + r', 'bad = zz(1)', '(f(1) cos(2 pi u), f(1) sin(2 pi u))'],
+      { readouts: true },
+    );
+    expect(fn.rows[1].error).toBeUndefined();
+    expect(fn.rows[3].error).toBeUndefined();
+  });
 });
 
 describe('§3 figures over multisets of tuples', () => {
