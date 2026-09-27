@@ -1129,8 +1129,9 @@ export interface OverlayBox {
 /**
  * Save the overlay and set it up for one panel: CSS-pixel units, the panel's
  * corner at the origin and everything clipped to its box. Without a box the
- * whole overlay is the panel and is cleared first; a split view clears the
- * overlay once per frame, before its panels draw.
+ * whole overlay is the panel and is cleared first. A split view clears the
+ * overlay once per frame, before its panels draw, and each panel clears its
+ * own box too, so an inset hides what its host drew beneath it.
  */
 export function beginOverlay(ctx: CanvasRenderingContext2D, dpr: number, box?: OverlayBox): { w: number; h: number } {
   ctx.save();
@@ -1145,6 +1146,7 @@ export function beginOverlay(ctx: CanvasRenderingContext2D, dpr: number, box?: O
   ctx.beginPath();
   ctx.rect(0, 0, box.w, box.h);
   ctx.clip();
+  ctx.clearRect(0, 0, box.w, box.h);
   return { w: box.w, h: box.h };
 }
 
