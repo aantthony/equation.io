@@ -430,24 +430,31 @@ export function compileGpu(classified: Classified): GpuPlan {
   const sub = uniformSub(params);
   const typed = (expr: Expr) => compileTyped(sub(expr));
   const scalar = (expr: Expr) => typed(expr).code;
-  const gradient = (exprs: readonly Expr[], variable: string): [string, string, string] | undefined => {
-    try {
-      return exprs.map(e => toGLSL(sub(diff(e, variable)))) as [string, string, string];
-    } catch {
-      return undefined;
-    }
-  };
   // P(u, v) with its tangents, when they are cheaper than the renderer's
   // finite differences (four more evaluations of P per pixel). Differentiating
   // repeats every inlined definition in each product- and chain-rule term, so
   // a long P can have tangents many times its size: the belt trick's are 12×.
+  // They are built a component at a time and abandoned once over budget.
   const parametric = (coordinates: readonly Expr[]) => {
     const comps = coordinates.map(e => toGLSL(sub(e))) as [string, string, string];
-    const du = gradient(coordinates, 'u');
-    const dv = gradient(coordinates, 'v');
-    const size = (glsl?: string[]) => (glsl ?? []).reduce((n, c) => n + c.length, 0);
-    const cost = size(du) + size(dv);
-    return cost <= 4096 || cost <= 4 * size(comps) ? { comps, du, dv } : { comps };
+    let budget = Math.max(4096, 4 * comps.reduce((n, c) => n + c.length, 0));
+    const tangent = (variable: string): [string, string, string] | undefined => {
+      const glsl: string[] = [];
+      try {
+        for (const e of coordinates) {
+          const code = toGLSL(sub(diff(e, variable)));
+          budget -= code.length;
+          if (budget < 0) return undefined;
+          glsl.push(code);
+        }
+      } catch {
+        return undefined;
+      }
+      return glsl as [string, string, string];
+    };
+    const du = tangent('u');
+    const dv = du && tangent('v');
+    return du && dv ? { comps, du, dv } : { comps };
   };
   switch (object.kind) {
     case 'curve':
