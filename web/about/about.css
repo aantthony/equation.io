@@ -41,6 +41,8 @@
   --code-ink: #c3c9d4;
   --code-ink-2: #d6dbe4;
   --card-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  /* The app's canvas color, held while a shot loads. */
+  --shot-bg: #171a1f;
   --display: 'Archivo Variable', 'Arial Black', system-ui, sans-serif;
   --serif: 'Instrument Serif', Georgia, 'Times New Roman', serif;
   --mono: 'Eq Math Glyphs', 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, monospace;
@@ -73,6 +75,7 @@
     --code-ink: #3d4452;
     --code-ink-2: #2a303c;
     --card-shadow: 0 18px 50px rgba(20, 30, 50, 0.14);
+    --shot-bg: #ffffff;
   }
 }
 :root[data-theme='light'] {
@@ -101,6 +104,7 @@
   --code-ink: #3d4452;
   --code-ink-2: #2a303c;
   --card-shadow: 0 18px 50px rgba(20, 30, 50, 0.14);
+  --shot-bg: #ffffff;
 }
 @property --fill {
   syntax: '<percentage>';
@@ -562,7 +566,7 @@ a {
 .shot {
   overflow: hidden;
   aspect-ratio: 3 / 2;
-  background: #fff;
+  background: var(--shot-bg);
 }
 .shot img {
   display: block;

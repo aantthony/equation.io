@@ -1,20 +1,27 @@
 import { landingForGroup } from '../../lib/landings.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from '../theme.ts';
+import { shotUrls, themedShot } from '../themed-shot.ts';
 import { startHeroField } from './hero-field.ts';
 import { SHOWCASE, hashUrl, type ShowcaseItem } from './showcase.ts';
 
-// Bundle the shots through Vite so each ships as assets/<slug>-<hash>.png:
+// Bundle the shots through Vite so each ships as assets/<slug>-<hash>.webp:
 // content-hashed filenames can cache forever and bust automatically on change.
 // (hero.png stays in public/ — it's the og:image and needs a stable URL.)
-const shots = import.meta.glob<string>('../shots/*.png', {
+const shots = import.meta.glob<string>('../shots/*.webp', {
   eager: true,
   query: '?url',
   import: 'default',
 });
-function shotUrl(slug: string): string {
-  const url = shots[`../shots/${slug}.png`];
-  if (!url) throw new Error(`no bundled shot for "${slug}" (expected web/shots/${slug}.png)`);
-  return url;
+function shotImage(slug: string, alt: string): HTMLImageElement {
+  const urls = shotUrls(shots, `../shots/${slug}`);
+  if (!urls) throw new Error(`no bundled shot for "${slug}" (expected web/shots/${slug}.webp)`);
+  const img = el('img');
+  themedShot(img, urls);
+  img.alt = alt;
+  img.loading = 'lazy';
+  img.width = 900;
+  img.height = 600;
+  return img;
 }
 function item(slug: string): ShowcaseItem {
   const found = SHOWCASE.find(i => i.slug === slug);
@@ -93,13 +100,7 @@ groups.forEach((group, gi) => {
     card.title = 'Open in the app';
 
     const frame = el('div', 'shot');
-    const img = el('img');
-    img.src = shotUrl(it.slug);
-    img.alt = it.title;
-    img.loading = 'lazy';
-    img.width = 900;
-    img.height = 600;
-    frame.append(img);
+    frame.append(shotImage(it.slug, it.title));
 
     const body = el('div', 'card-body');
     body.append(el('h3', undefined, it.title), el('p', undefined, it.blurb), el('code', undefined, it.eqs.join(';  ')));

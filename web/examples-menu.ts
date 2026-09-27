@@ -13,10 +13,11 @@ import {
   searchCategories,
   searchExamples,
 } from './examples.ts';
+import { shotUrls, themedShot } from './themed-shot.ts';
 
 // Bundled through Vite like the /about/ shots, so each ships as
 // assets/<name>-<hash>.webp and can be cached forever. `pnpm shots:examples`
-// renders them.
+// renders them, once per theme.
 const shots = import.meta.glob<string>('./shots/examples/*/*.webp', {
   eager: true,
   query: '?url',
@@ -25,9 +26,9 @@ const shots = import.meta.glob<string>('./shots/examples/*/*.webp', {
 
 function shotImage(category: string, label: string): HTMLImageElement {
   const img = document.createElement('img');
-  const url = shots[`./shots/examples/${exampleShotPath(category, label)}.webp`];
+  const urls = shotUrls(shots, `./shots/examples/${exampleShotPath(category, label)}`);
   // A missing shot is a CI failure (lib/examples.test.ts), not a broken menu.
-  if (url) img.src = url;
+  if (urls) themedShot(img, urls);
   img.alt = '';
   img.loading = 'lazy';
   img.decoding = 'async';
