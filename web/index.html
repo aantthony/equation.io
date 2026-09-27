@@ -76,16 +76,13 @@
     <div id="equations" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Equations, one per line" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="enter"></div>
     <!-- CSV files dropped onto the app, kept in this browser (filestore.ts).
          Hidden until there is one; sits above #examples so the panel's link
-         row stays anchored to the examples summary. The way IN when there is
+         row stays anchored to the examples button. The way IN when there is
          nothing here yet is the "+ csv" link below, beside github. -->
     <details id="data-files" hidden>
       <summary>data files</summary>
       <div id="data-files-list"></div>
     </details>
-    <details id="examples">
-    <summary>examples</summary>
-    <div id="examples-list"></div>
-  </details>
+    <button id="examples" type="button" aria-haspopup="dialog">examples</button>
     <div id="panel-links">
       <button type="button" id="try-another" title="Load another featured graph">random</button>
       <button id="open-csv" type="button" title="Plot the columns of a CSV file (you can also drop one anywhere)">+ csv</button>

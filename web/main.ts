@@ -14,7 +14,6 @@ import { complexRootLabel } from '../lib/complex-label.ts';
 
 import { initSyntaxHelp } from './syntax-help.ts';
 import { attachCapture } from './capture.ts';
-import { EXAMPLES } from './examples.ts';
 import { nextFeatured } from '../lib/featured.ts';
 import { declaredNames } from '../lib/regression.ts';
 import { PointTrail } from '../lib/point-trail.ts';
@@ -3720,31 +3719,35 @@ function openExample(text: string) {
 }
 
 function buildExamplesMenu() {
-  const list = document.getElementById('examples-list');
-  if (!list) return;
-  for (const [category, items] of EXAMPLES) {
-    const group = document.createElement('details');
-    const label = document.createElement('summary');
-    label.textContent = category;
-    group.append(label);
-    for (const [name, text] of items) {
-      const item = document.createElement('button');
-      item.className = 'ex-item';
-      item.textContent = name;
-      const code = document.createElement('code');
-      code.textContent = text;
-      item.append(code);
-      item.addEventListener('click', () => {
-        // Fold the menu away so the example's rows have the panel; the
-        // category stays open for the next pick.
-        const root = document.getElementById('examples');
-        if (root instanceof HTMLDetailsElement) root.open = false;
-        openExample(text);
-      });
-      group.append(item);
-    }
-    list.append(group);
-  }
+  const button = document.getElementById('examples');
+  if (!button) return;
+  // The popup and its thumbnails load on first use; hovering, or holding the
+  // shortcut's modifier, starts the fetch.
+  let menu: typeof import('./examples-menu.ts') | undefined;
+  const load = () =>
+    import('./examples-menu.ts').then(m => (menu = m)).catch(err => console.error('examples menu failed to load', err));
+  const toggle = () => {
+    // Once loaded, open synchronously: keys typed straight after the
+    // shortcut then reach the popup's search, not the row being edited.
+    if (menu) return menu.toggleExamplesMenu(openExample);
+    // The first time, they have nowhere to go until it arrives.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    void load().then(m => m?.toggleExamplesMenu(openExample));
+  };
+  button.addEventListener('pointerenter', () => void load(), { once: true });
+  button.addEventListener('click', toggle);
+  // Cmd+K on Apple platforms, Ctrl+K elsewhere. Only the platform's own
+  // modifier: on a Mac, Ctrl+K is kill-to-end-of-line in the editor. Shift
+  // must be up, since Cmd+Shift+K deletes rows.
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  button.title = `Browse examples (${mac ? '⌘K' : 'Ctrl+K'})`;
+  addEventListener('keydown', e => {
+    if (e.key === (mac ? 'Meta' : 'Control') && !menu) void load();
+    if (e.key.toLowerCase() !== 'k' || e.altKey || e.shiftKey) return;
+    if (mac ? !e.metaKey || e.ctrlKey : !e.ctrlKey || e.metaKey) return;
+    e.preventDefault();
+    toggle();
+  });
 }
 
 // --- draggable points ---

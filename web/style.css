@@ -152,7 +152,7 @@ body {
   /* Tighter than the blanket pan-x pan-y: nothing in the panel scrolls
      sideways, so declaring pan-y keeps horizontal touchmoves cancelable and
      the swipe-to-dismiss drag (panel-swipe.ts) can claim them. Vertical
-     panning stays native for #equations/#examples scrolling. */
+     panning stays native for #equations scrolling. */
   touch-action: pan-y;
   /* Keep the panel on screen with many equations: cap it at the viewport
      (12px margin top and bottom) and let #equations scroll inside. */
@@ -734,20 +734,24 @@ body.file-drag::after {
 }
 
 #examples {
-  /* Never shrinks (the summary row stays visible), but caps itself and scrolls
-     internally so an open example tree can't push the panel past its max.
-     `none` for the same reason as #equations: the swipe-dismiss gesture picks
-     up where the scroll ends. */
+  /* A row of its own under the equations; #panel-links sits on its right. */
   flex: none;
-  max-height: 40%;
-  overflow-y: auto;
-  overscroll-behavior: none;
+  align-self: stretch;
+  border: none;
   border-top: 1px solid var(--divider);
+  background: none;
   margin-top: 4px;
-  padding: 4px;
+  padding: 6px;
+  text-align: left;
+  font: inherit;
   font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
 }
-/* Local data files: same shape as the examples tree, one row per file. */
+#examples:hover {
+  color: var(--muted-hover);
+}
+/* Local data files: a folding list under the equations, one row per file. */
 #data-files {
   flex: none;
   max-height: 30%;
@@ -807,7 +811,7 @@ body.file-drag::after {
 #panel-links {
   position: absolute;
   right: 14px;
-  /* sits on the examples summary row (panel padding + summary padding) */
+  /* sits on the examples row, level with its label */
   bottom: 14px;
   font-size: 12px;
   display: flex;
@@ -830,46 +834,151 @@ body.file-drag::after {
   color: var(--muted-hover);
   text-decoration: underline;
 }
-#examples[open] ~ #panel-links {
+/* The examples popup (examples-menu.ts): categories, then one category's
+   examples, each a screenshot card. */
+#examples-dialog {
+  width: min(960px, calc(100vw - 32px));
+  height: min(760px, calc(100dvh - 32px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  background: var(--page-bg);
+  color: var(--text);
+  box-shadow: 0 12px 48px var(--panel-shadow);
+  overflow: hidden;
+}
+#examples-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+#examples-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}
+.exd-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider);
+}
+.exd-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.exd-search {
+  flex: 0 1 260px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  background: var(--page-bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.exd-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.exd-search[hidden] {
   display: none;
 }
-#examples > summary {
+.exd-empty {
+  grid-column: 1 / -1;
+  margin: 24px 0;
+  text-align: center;
   color: var(--muted);
-  cursor: pointer;
-  padding: 2px;
+  font-size: 13px;
 }
-#examples > summary:hover {
+.exd-back,
+.exd-close {
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.exd-back:hover,
+.exd-close:hover {
+  background: var(--ex-hover-bg);
   color: var(--muted-hover);
 }
-#examples details {
-  margin: 2px 0 2px 8px;
+.exd-grid {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  /* The cards clip their corners (overflow: hidden), which lets auto rows
+     squeeze them to fit the dialog; they keep their full height instead. */
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 14px;
+  padding: 14px;
 }
-#examples details > summary {
-  color: var(--summary);
+.exd-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 0 8px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: none;
+  overflow: hidden;
+  text-align: left;
+  font: inherit;
+  color: var(--ex-text);
   cursor: pointer;
-  padding: 2px;
-  font-weight: 500;
 }
-#examples details > summary:hover {
-  color: var(--summary-hover);
+.exd-card.selected,
+.exd-card:focus-visible {
+  border-color: var(--accent);
+  background: var(--ex-hover-bg);
+  outline: none;
 }
-.ex-item {
+.exd-card img {
   display: block;
   width: 100%;
-  text-align: left;
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 3px 4px 3px 14px;
-  border-radius: 4px;
-  color: var(--ex-text);
-  font-size: 12px;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--divider);
+  /* The shots are of the light theme; hold their white while they load. */
+  background: #fff;
 }
-.ex-item:hover {
-  background: var(--ex-hover-bg);
+.exd-name {
+  padding: 0 8px;
+  font-size: 13px;
 }
-.ex-item code {
-  display: block;
+/* A category among the cards: a stack of shots rather than one, in bold. */
+.exd-card.exd-cat {
+  overflow: visible;
+  box-shadow:
+    4px -4px 0 -1px var(--page-bg),
+    4px -4px 0 0 var(--panel-border);
+}
+.exd-card.exd-cat img {
+  border-radius: 7px 7px 0 0;
+}
+.exd-card.exd-cat.selected {
+  box-shadow:
+    4px -4px 0 -1px var(--page-bg),
+    4px -4px 0 0 var(--accent);
+}
+.exd-cat .exd-name {
+  font-weight: 600;
+}
+.exd-card code {
+  padding: 0 8px;
   color: var(--ex-code);
   font:
     10.5px 'Eq Math Glyphs',
@@ -880,8 +989,42 @@ body.file-drag::after {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.ex-item:hover code {
-  color: var(--ex-code-hover);
+.exd-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 8px 0;
+}
+.exd-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ex-hover-bg);
+  color: var(--summary);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.exd-tag:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.exd-cat code {
+  font-family: inherit;
+  font-size: 11px;
+}
+@media (max-width: 600px) {
+  #examples-dialog {
+    width: 100vw;
+    height: 100dvh;
+    border: none;
+    border-radius: 0;
+    padding-top: var(--safe-area-top);
+    padding-bottom: var(--safe-area-bottom);
+  }
+  .exd-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    padding: 10px;
+  }
 }
 
 /* The panel's collapsed form: after a swipe dismisses the panel
