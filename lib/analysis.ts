@@ -44,7 +44,7 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, freeVars, mapChildren, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { lowerGeom } from './geom.ts';
@@ -506,6 +506,19 @@ function curveHint(object: MathObject, text: string): string | null {
   return `scalar field — for the curve write ${other} = ${text}`;
 }
 
+/** The first curvature(C) or torsion(C) along the curve (no point given)
+ *  that e calls, unless the document defines its own. */
+function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
+  if (e.kind === 'call' && (e.name === 'curvature' || e.name === 'torsion') && e.args.length === 1 && !getFn(e.name))
+    return e.name;
+  let found: string | null = null;
+  mapChildren(e, c => {
+    found ??= alongCurve(c, getFn);
+    return c;
+  });
+  return found;
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   const rows = document.rows.map(row => ({ ...row }));
@@ -768,21 +781,21 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
         continue;
       }
-      // curvature(C) alone is κ along the curve, a number per u — which as a
-      // row in u would draw the density of its values. Say how to show it.
-      if (
-        rawParsed.kind === 'call' &&
-        (rawParsed.name === 'curvature' || rawParsed.name === 'torsion') &&
-        rawParsed.args.length === 1 &&
-        !getFn(rawParsed.name)
-      ) {
-        const f = rawParsed.name;
-        throw new Error(
-          `${f}(C) is a function of u along the curve: plot it with (u, ${f}(C)), or read it at a point with ${f}(C, 0.25).`,
-        );
-      }
       const resolved = resolveRow(rawParsed, getFn, ropts);
       let parsed = resolved.expr;
+      // curvature(C) is κ along the curve, a number per u — which as a row in
+      // u alone (1/curvature(C) too) would draw the density of its values.
+      // Once it has resolved, so the curve is known to be one: say how to
+      // show it.
+      const along = rawParsed.kind === 'vec' ? null : alongCurve(rawParsed, getFn);
+      if (along) {
+        const vars = freeVars(parsed);
+        if (vars.has('u') && !['x', 'y', 'z', 'v'].some(n => vars.has(n))) {
+          throw new Error(
+            `${along}(C) is a function of u along the curve: plot it with (u, ${along}(C)), or read it at a point with ${along}(C, 0.25).`,
+          );
+        }
+      }
       // A real row in u and v alone does not depend on the screen, so it is
       // drawn as its values (docs/multisets.md §5): u and v are each [0, 1],
       // and the row is a multiset of numbers with a density. That is the

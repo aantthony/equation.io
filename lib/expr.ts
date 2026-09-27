@@ -1198,6 +1198,20 @@ function createLeaf(token: Token): PNode {
   throw new Error(`Invalid token: ${token.type} ${JSON.stringify(token.str)}`);
 }
 
+/** A Σ/Π index written into the row: `sum(frame=1..3, frame(2))`. */
+const BOUND_INDEX = /(?:\bsum|\bprod|[Σ∑Π∏])\s*_?\s*[({]\s*([A-Za-z][A-Za-z0-9]*)\s*=/g;
+
+/** valueNames with the Σ/Π indices of `str` that a late-addition builtin
+ *  would claim: inside its sum, an index named frame is a number. */
+function withBoundNames(str: string, valueNames: ReadonlySet<string>): ReadonlySet<string> {
+  let out: Set<string> | null = null;
+  for (const m of str.matchAll(BOUND_INDEX)) {
+    const b = builtinFn(m[1]);
+    if (b && SHADOWABLE_FNS.has(b) && !valueNames.has(b)) (out ??= new Set(valueNames)).add(b);
+  }
+  return out ?? valueNames;
+}
+
 /**
  * Parse an expression or equation, keeping free variables symbolic.
  * Names in userFns parse as function calls (`f(x+1)`) instead of products;
@@ -1212,7 +1226,7 @@ export function parseExpr(
 ): Expr {
   activeUserFns = userFns;
   activeListNames = listNames;
-  activeValueNames = valueNames;
+  activeValueNames = withBoundNames(str, valueNames);
   try {
     const tokens = addImplicitTokens(
       mergeEmptyBrackets(mergeBracedSubscripts(normalizeTokens(desugarUnicode(tokenize(str))))),

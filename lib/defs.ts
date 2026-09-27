@@ -1288,8 +1288,9 @@ const CURVE_OP_EXAMPLE: Record<string, string> = {
   osculating: 'osculating(C, 0.25)',
   frame: 'frame(C, 0.25)',
 };
-/** The curve parameter: a definition over it is a named curve. */
-const ALONG: ReadonlySet<string> = new Set(['u']);
+/** The curve parameter: a definition over it is a named curve. A named
+ *  field over x, y or z is written out too, to be refused. */
+const ALONG: ReadonlySet<string> = new Set(['u', ...SPACE]);
 
 /**
  * What a curve operator acts on, as its components in u: a tuple, a named
@@ -1308,11 +1309,28 @@ function curveOperand(name: string, arg: Expr, ctx: Ctx): readonly Expr[] {
   }
   if (ctx.opts.comps) r = lowerGeom(r, ctx.opts.comps, () => null, ctx.opts.isList);
   r = throughFields(r, ctx.opts, ALONG);
+  if (r.kind === 'var' && arg.kind === 'var') {
+    throw new Error(
+      `${name}: ${arg.name} is not a curve — define one first, like ${arg.name} = (cos(2pi u), sin(2pi u)).`,
+    );
+  }
   if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
   const vars = freeVars(r);
   if (!vars.has('u')) throw new Error(`${name} needs a curve, which moves with u — this is a fixed point. ${usage}`);
   if (vars.has('v') || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
   return r.items;
+}
+
+/** Whether e holds a list: a literal, a data column or a named list. */
+function listValued(e: Expr, ctx: Ctx): boolean {
+  if (e.kind === 'list' || e.kind === 'data') return true;
+  if (e.kind === 'var') return !!ctx.opts.isList?.(e.name);
+  let found = false;
+  mapChildren(e, c => {
+    found ||= listValued(c, ctx);
+    return c;
+  });
+  return found;
 }
 
 /**
@@ -1331,8 +1349,19 @@ function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   }
   const r = curveOperand(name, args[0], ctx);
   const u0 = args[1];
-  if (u0 && (u0.kind === 'vec' || freeVars(u0).has('u'))) {
+  // κ(u) and τ(u) are functions of u, so k(u) = curvature(C, u) is κ; the
+  // circle and frame are drawn over u of their own, which a u0 in u
+  // would capture.
+  const ownU = !needsPoint && !!ctx.opts.params?.has('u');
+  if (u0 && (u0.kind === 'vec' || (freeVars(u0).has('u') && !ownU))) {
     throw new Error(`${name}: the second argument is where on the curve — a number, slider or t, not u: ${example}.`);
+  }
+  // Several points map element by element (the gate is arithmetic), and the
+  // circles make a family; the frame's arrows take one point at a time.
+  if (name === 'frame' && u0 && listValued(u0, ctx)) {
+    throw new Error(
+      'frame takes one point on the curve at a time — a number, slider or t, like frame(C, 0.25) — not a list.',
+    );
   }
   if (name === 'torsion' && r.length !== 3) {
     throw new Error('torsion needs a curve in space — a plane curve has none, and its curvature is signed.');
@@ -2098,8 +2127,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const { arg } = over;
         return { kind: 'call', name: e.name, args: e.args[0].kind === 'vec' && arg.kind === 'vec' ? arg.items : [arg] };
       }
-      const args = legacyCallArgs(e.name, e.args).map(x => rx(x, ctx));
       const fn = getFn(e.name);
+      // A document's own function takes its arguments as any function does:
+      // the builtin of that name may group a tuple (frame((1, 2), 3)), but
+      // `frame(a, b, c) = a + b + c` spreads it.
+      const args = legacyCallArgs(fn ? '' : e.name, e.args).map(x => rx(x, ctx));
       if (fn) {
         const n = fn.params.length;
         if (fn.recursive) {
@@ -2284,7 +2316,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const parse = (d: Definition & { rhs: string }): Expr => {
     const key = defKey(d);
     let p = parsed.get(key);
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, indexNamesOf(defs), valueNames)));
+    // A function's parameters are values in its body: f(frame) = frame(2).
+    const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedFnNames(d.params)]) : valueNames;
+    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, indexNamesOf(defs), values)));
     return p;
   };
 
