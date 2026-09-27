@@ -1,5 +1,15 @@
 import { type Env, emptyEnv, evaluateFrame } from '../lib/env.ts';
-import { cellShades, runAutomaton } from '../lib/automaton.ts';
+import {
+  BOARD_STEPS,
+  type Board,
+  type CellGrid,
+  TABLE_MAX,
+  cellShades,
+  evalTable,
+  runAutomaton,
+  runBoard,
+  tableShades,
+} from '../lib/automaton.ts';
 import {
   type CpuGrid,
   type CpuPlan,
@@ -75,6 +85,7 @@ import { type StateSystem, advanceState, initialState } from '../lib/state.ts';
 import { type OrbitInput, orbitInput } from '../lib/orbit.ts';
 import { keepNote, noteColor, noteStart, splitStatements, stripNote } from '../lib/statements.ts';
 import {
+  type View2DSpec,
   type ViewSpec,
   clampPhi,
   scaleViewAt,
@@ -82,8 +93,8 @@ import {
   fitView2D,
   linkedWindow,
   formatCameraRow,
-  formatViewRow,
   formatViewSpec,
+  orientLattice,
   parseViewRow,
 } from '../lib/view.ts';
 import { type Table, tableNameFor } from '../lib/csv.ts';
@@ -110,6 +121,8 @@ import {
   Renderer2D,
   type View2D,
   drawLabels2D,
+  LATTICE_VALUE_PX,
+  type LatticeLabels,
   type OverlayBox,
   niceSpacing,
 } from './render2d.ts';
@@ -148,7 +161,12 @@ interface Equation {
   regionCache?: { comps: readonly Expr[]; sampler: RegionSampler; key: string; tris: Float64Array };
   /** An automaton's cells (lib/automaton.ts), rerun only when its plan or a
    *  value it reads (sliders, t) changes — the shadeCache pattern. */
-  cellCache?: { plan: CpuPlan; key: string; cells: Cells2D };
+  cellCache?: { plan: CpuPlan; key: string; grid: CellGrid; cells: Cells2D };
+  /** A 2D automaton's board (lib/automaton.ts runBoard), stepped on as t
+   *  runs, and its shades at the generation last drawn. */
+  boardCache?: { plan: CpuPlan; key: string; board: Board; generation: number; cells: Cells2D };
+  /** A table's cells over the window last drawn (the cellCache pattern). */
+  tableCache?: { plan: CpuPlan; key: string; grid: CellGrid; cells: Cells2D };
   id: number;
   text: string;
   /** The row's palette slot; -1 until recompileAll colors it (lib/palette.ts),
@@ -416,6 +434,12 @@ interface Panel {
   view: View2D;
   camera: Camera3D;
   mode: '2d' | '3d';
+  /**
+   * A 2D panel on the integer lattice (docs/discrete.md): its view row names
+   * index axes, or every row it draws is an automaton or a table. Cell
+   * (i, k) is centred on (i, -k), so the down index runs down the page.
+   */
+  lattice: { axes: readonly [string, string]; written?: readonly [string, string] } | null;
   /** The panel's view(…) / camera(…) row pins it (`locked`). */
   locked: boolean;
   /** The panel's grid(…) row, if any. */
@@ -446,6 +470,7 @@ function makePanel(key: number): Panel {
     view: { cx: 0, cy: 0, upp: 0.01 },
     camera: defaultCamera(),
     mode: '2d',
+    lattice: null,
     locked: false,
     appliedViewText: null,
     appliedCameraText: null,
@@ -533,9 +558,11 @@ function syncPanels() {
   if (!panels.includes(cur)) cur = activePanel;
   const dpr = window.devicePixelRatio || 1;
   const layout = layoutPanels(splits, canvas.width, canvas.height, Math.round(12 * dpr));
+  const wasLattice = new Set(panels.filter(p => p.lattice));
   panels.forEach((p, i) => {
     p.layout = layout[i];
     p.mode = '2d';
+    p.lattice = null;
     p.locked = false;
     p.grid = undefined;
     if (p.fresh && p.layout.rect.w && p.layout.rect.h) {
@@ -551,7 +578,68 @@ function syncPanels() {
     if (spec?.kind === 'grid') p.grid = spec;
     if ((spec?.kind === 'view' || spec?.kind === 'camera') && spec.locked) p.locked = true;
   }
+  panels.forEach((p, i) => {
+    if (p.mode !== '2d') return;
+    const rows = equations.filter(e => !e.error && (e.panel ?? 0) === i);
+    const written = (rows.find(e => e.viewSpec?.kind === 'view' && e.viewSpec.axes)?.viewSpec as View2DSpec)?.axes;
+    // Readouts draw nothing, so they leave a lattice a lattice.
+    const drawn = rows.filter(e => e.cpu && !['value', 'note', 'tuple'].includes(e.cpu.type));
+    const cells = drawn.filter(e => e.cpu!.type === 'automaton' || e.cpu!.type === 'lattice');
+    // The rows say which index runs across; a view row naming the same two
+    // in the other order still frames them (orientLattice).
+    const own = (cells[0]?.cpu as Extract<CpuPlan, { type: 'automaton' | 'lattice' }> | undefined)?.axes;
+    const agrees = own && written && new Set([...own, ...written]).size === 2;
+    if (written) p.lattice = { axes: agrees ? own : written, written };
+    else if (own && cells.length === drawn.length) p.lattice = { axes: own };
+    // A panel that just became a lattice, with no view row, opens on its cells.
+    if (p.lattice && !wasLattice.has(p) && !viewportRow('view', p) && p.layout.rect.w) frameLattice(p, cells);
+  });
   usePanel(cur);
+}
+
+/**
+ * The opening window of a lattice panel with no view row: a 1D diagram from
+ * its first row down, centred; a board around its origin; a table from cell
+ * (0, 0) in the top-left corner, big enough to print its values.
+ */
+function frameLattice(p: Panel, cells: Equation[]) {
+  const { w, h } = p.layout.rect;
+  const cpu = cells[0]?.cpu;
+  const dpr = window.devicePixelRatio || 1;
+  const v = p.view;
+  delete v.ratio;
+  if (cpu?.type === 'automaton' && cpu.dims === 1) {
+    v.upp = 121 / w;
+    v.cx = 0;
+    v.cy = 1.5 - (h / 2) * v.upp;
+  } else if (cpu?.type === 'automaton') {
+    v.upp = 80 / Math.min(w, h);
+    v.cx = v.cy = 0;
+  } else {
+    // A table fits the cells it defines near the origin (a Cayley table's
+    // n × n), with a cell of margin; one defined everywhere opens on (0, 0)
+    // with cells a little over the size values print at.
+    let box = [Infinity, -Infinity, Infinity, -Infinity];
+    if (cpu?.type === 'lattice') {
+      const R = 32;
+      try {
+        const g = evalTable(cpu, constEnv, -R, -R, 2 * R + 1, 2 * R + 1);
+        for (let y = 0; y < g.rows; y++)
+          for (let x = 0; x < g.width; x++)
+            if (Number.isFinite(g.values[y * g.width + x]))
+              box = [Math.min(box[0], x), Math.max(box[1], x), Math.min(box[2], y), Math.max(box[3], y)];
+        const edge = box[0] === 0 || box[1] === 2 * R || box[2] === 0 || box[3] === 2 * R;
+        if (edge || box[0] > box[1]) box = [R, R + 11, R, R + 11];
+        box = [box[0] - R, box[1] - R, box[2] - R, box[3] - R];
+      } catch {
+        box = [0, 11, 0, 11];
+      }
+    } else box = [0, 11, 0, 11];
+    const [i0, i1, k0, k1] = box;
+    v.upp = Math.max((i1 - i0 + 3) / w, (k1 - k0 + 3) / h, 1 / ((LATTICE_VALUE_PX + 30) * dpr));
+    v.cx = (i0 + i1) / 2;
+    v.cy = -(k0 + k1) / 2;
+  }
 }
 
 /** The panels owning panel p's shared axes (lib/panels.ts linkRoot); an
@@ -810,7 +898,8 @@ function applyViewportRows() {
       const from = { x: roots.x === p ? undefined : roots.x.view, y: roots.y === p ? undefined : roots.y.view };
       const linked = linkedWindow(p.view, p.layout.shared, from);
       const { w, h } = p.layout.rect;
-      Object.assign(p.view, fitPanelWindow(vRow.viewSpec!, w, h, p.layout.shared, linked));
+      const spec = p.lattice ? orientLattice(vRow.viewSpec!, p.lattice.axes) : vRow.viewSpec!;
+      Object.assign(p.view, fitPanelWindow(spec, w, h, p.layout.shared, linked));
     }
     const cRow = viewportRow('camera', p);
     if (!cRow) {
@@ -930,7 +1019,12 @@ function ensureViewRow() {
   pushUndo(`viewport:${id}`);
   const hw = (panelW() * view.upp) / 2;
   const hh = (panelH() * view.upp) / (view.ratio ?? 1) / 2;
-  const text = formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh, view.ratio);
+  const text = formatViewSpec({
+    x: [view.cx - hw, view.cx + hw],
+    y: [view.cy - hh, view.cy + hh],
+    ratio: view.ratio,
+    axes: cur.lattice?.axes as [string, string] | undefined,
+  });
   cur.appliedViewText = addEquation(text, panelRowEnd(cur)).text;
   recompileAll();
   renderAll();
@@ -950,11 +1044,15 @@ function panelViewText(p: Panel): { eq: Equation; text: string } | null {
     const v = p.view;
     const hw = (w / 2) * v.upp;
     const hh = (h / 2) * (v.upp / (v.ratio ?? 1));
-    text = formatViewSpec({
-      x: sx ? undefined : [v.cx - hw, v.cx + hw],
-      y: sy ? undefined : [v.cy - hh, v.cy + hh],
-      ratio: sx || sy ? undefined : v.ratio,
-    });
+    text = formatViewSpec(
+      {
+        x: sx ? undefined : [v.cx - hw, v.cx + hw],
+        y: sy ? undefined : [v.cy - hh, v.cy + hh],
+        ratio: sx || sy ? undefined : v.ratio,
+        axes: p.lattice?.axes as [string, string] | undefined,
+      },
+      p.lattice?.written,
+    );
   } else {
     text = formatCameraRow({ ...p.camera, spin: p.spin });
   }
@@ -1151,11 +1249,22 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'cobweb',
   'bifurcation',
   'automaton',
+  'lattice',
   'density',
   'pmf',
   'prob',
   'expect',
 ]);
+
+/** Which edges of an automaton's cells run on as background: a 1D diagram's
+ *  sides, and every side of a 2D board. */
+const ROW_RUNS = { x: true, y: false };
+const BOARD_RUNS = { x: true, y: true };
+
+/** Cells for the renderer (web/render2d.ts Cells2D), coloured where drawn. */
+function cellsOf(g: CellGrid, runs: Cells2D['runs'], shades = cellShades(g)): Cells2D {
+  return { shades, width: g.width, rows: g.rows, x0: g.x0, y0: g.y0, runs, color: [0, 0, 0] };
+}
 
 function render() {
   if (!syncCanvasSize()) return;
@@ -1493,7 +1602,11 @@ function render() {
     const r = panel.layout.rect;
     if (!r.w || !r.h) continue;
     const gridMode = panel.grid?.mode === 'off' ? 'off' : panel.grid?.mode === 'axes' ? 'axes' : 'on';
-    const frame: Frame = { vp: { x: r.x, y: canvas.height - r.y - r.h, w: r.w, h: r.h }, grid: gridMode };
+    const frame: Frame = {
+      vp: { x: r.x, y: canvas.height - r.y - r.h, w: r.w, h: r.h },
+      grid: gridMode,
+      lattice: !!panel.lattice,
+    };
     const box = split ? { x: r.x / dpr, y: r.y / dpr, w: r.w / dpr, h: r.h / dpr } : undefined;
     if (split) {
       // Scissored, so an inset paints over its host and nothing spills over an edge.
@@ -1784,6 +1897,32 @@ function render() {
         curves: [],
       };
       const extras: Overlay2D = { points: [], polylines: [], bars: [], clouds: [] };
+      // A lattice panel's labels: its axes, and the values of the cells in
+      // view once they are big enough to print (docs/discrete.md).
+      const lattice: LatticeLabels = { axes: panel.lattice?.axes ?? ['x', 'y'], values: [] };
+      const printValues = !!panel.lattice && 1 / (view.upp * dpr) >= LATTICE_VALUE_PX;
+      /** Print the grid's visible cells; `nonzero` skips an automaton's empty ones. */
+      const latticeValues = (g: CellGrid, nonzero: boolean) => {
+        if (!printValues) return;
+        const r = panel.layout.rect;
+        const uppY = view.upp / (view.ratio ?? 1);
+        const iLo = Math.floor(view.cx - (r.w / 2) * view.upp + 0.5);
+        const iHi = Math.floor(view.cx + (r.w / 2) * view.upp + 0.5);
+        const kLo = Math.floor(-view.cy - (r.h / 2) * uppY + 0.5);
+        const kHi = Math.floor(-view.cy + (r.h / 2) * uppY + 0.5);
+        for (let k = kLo; k <= kHi; k++) {
+          const y = k - g.y0;
+          if (y < 0 || y >= g.rows) continue;
+          for (let i = iLo; i <= iHi; i++) {
+            const x = i - g.x0;
+            if (x < 0 || x >= g.width) continue;
+            const v = g.values[y * g.width + x];
+            if (!Number.isFinite(v) || (nonzero && v === 0)) continue;
+            const text = Number.isInteger(v) ? String(v) : String(parseFloat(v.toPrecision(3)));
+            lattice.values!.push({ i, k, text });
+          }
+        }
+      };
       // Spacing for any level-set family (custom grids, contour stacks): sample
       // |∇c| around the view to convert the target pixel gap into coordinate
       // units (π-based for angles).
@@ -1871,16 +2010,58 @@ function render() {
             extras.polylines.push({ pts: orbitFor(eq).flat(), color: css });
             break;
           case 'automaton': {
-            const key = JSON.stringify([...(eq.cls?.params ?? []).map(p => env[p]), eq.cls?.animated ? time : 0]);
+            const params = (eq.cls?.params ?? []).map(p => env[p]);
+            if (plot.dims === 2) {
+              // One generation of the board, 8 a second, stepped on from the last.
+              const key = JSON.stringify(params);
+              let c = eq.boardCache;
+              if (c?.plan !== plot || c.key !== key) {
+                const board = runBoard(plot, env);
+                c = eq.boardCache = { plan: plot, key, board, generation: -1, cells: cellsOf(board.grid, BOARD_RUNS) };
+              }
+              c.board.advance(Math.floor(time * 8) % (BOARD_STEPS + 1));
+              if (c.generation !== c.board.generation) {
+                c.generation = c.board.generation;
+                c.cells = cellsOf(c.board.grid, BOARD_RUNS);
+              }
+              layers.cells.push({ ...c.cells, color });
+              lattice.status = `generation ${c.generation}`;
+              latticeValues(c.board.grid, true);
+              break;
+            }
+            const key = JSON.stringify([...params, eq.cls?.animated ? time : 0]);
             if (eq.cellCache?.plan !== plot || eq.cellCache.key !== key) {
               const grid = runAutomaton(plot, env);
-              eq.cellCache = {
-                plan: plot,
-                key,
-                cells: { shades: cellShades(grid), width: grid.width, rows: grid.rows, x0: grid.x0, color },
-              };
+              eq.cellCache = { plan: plot, key, grid, cells: cellsOf(grid, ROW_RUNS) };
             }
             layers.cells.push({ ...eq.cellCache.cells, color });
+            latticeValues(eq.cellCache.grid, true);
+            break;
+          }
+          case 'lattice': {
+            // Only the cells in the window, which is all a table ever needs.
+            const r = panel.layout.rect;
+            const uppY = view.upp / (view.ratio ?? 1);
+            const span = (lo: number, hi: number): [number, number] => {
+              const [a, b] = [Math.floor(lo + 0.5), Math.floor(hi + 0.5)];
+              if (b - a + 1 <= TABLE_MAX) return [a, b - a + 1];
+              return [Math.round((lo + hi) / 2) - TABLE_MAX / 2, TABLE_MAX];
+            };
+            const [i0, iw] = span(view.cx - (r.w / 2) * view.upp, view.cx + (r.w / 2) * view.upp);
+            const [k0, kh] = span(-view.cy - (r.h / 2) * uppY, -view.cy + (r.h / 2) * uppY);
+            const params = (eq.cls?.params ?? []).map(p => env[p]);
+            const key = JSON.stringify([i0, iw, k0, kh, ...params, eq.cls?.animated ? time : 0]);
+            if (eq.tableCache?.plan !== plot || eq.tableCache.key !== key) {
+              const grid = evalTable(plot, env, i0, k0, iw, kh);
+              eq.tableCache = {
+                plan: plot,
+                key,
+                grid,
+                cells: cellsOf(grid, { x: false, y: false }, tableShades(grid)),
+              };
+            }
+            layers.cells.push({ ...eq.tableCache.cells, color });
+            latticeValues(eq.tableCache.grid, false);
             break;
           }
           case 'label': {
@@ -2241,7 +2422,15 @@ function render() {
         });
       }
       r2d.render(view, layers, time, constEnv, gridSpecs, frame);
-      drawLabels2D(overlayCtx, view, dpr, extras, frame.grid !== 'off' && !gridSpecs, box);
+      drawLabels2D(
+        overlayCtx,
+        view,
+        dpr,
+        extras,
+        frame.grid !== 'off' && !gridSpecs,
+        box,
+        panel.lattice ? lattice : undefined,
+      );
       drawHoverMarker(dpr);
     }
   }

@@ -1,6 +1,6 @@
-import { scaleViewAt } from './view.ts';
+import { type View2DSpec, scaleViewAt } from './view.ts';
 import { describe, expect, it } from 'vitest';
-import { fitView2D, formatCameraRow, formatViewRow, parseViewRow } from './view.ts';
+import { fitView2D, formatCameraRow, formatViewRow, formatViewSpec, orientLattice, parseViewRow } from './view.ts';
 
 const parse = (text: string, env: Record<string, number> = {}) => parseViewRow(text, env);
 
@@ -171,5 +171,30 @@ describe('independent axis scaling', () => {
     expect(scaled.cy - (50 * scaled.upp) / scaled.ratio).toBeCloseTo(-3);
     expect(scaled.ratio).toBe(20);
     expect(scaleViewAt(v, 0, 0, 2, 2).ratio).toBe(5);
+  });
+});
+
+describe('lattice views', () => {
+  it('names index axes, the second running down', () => {
+    expect(parse('view(i = -60..60, n = 0..80)')).toEqual({
+      kind: 'view',
+      axes: ['i', 'n'],
+      x: [-60, 60],
+      y: [-80, -0],
+    });
+    expect(() => parse('view(i = 0..5)')).toThrow(/two index axes/);
+    expect(() => parse('view(x = 0..5, n = 0..5)')).toThrow(/two index axes/);
+  });
+
+  it('swaps a view naming the axes the other way round', () => {
+    const spec = parse('view(i = 0..10, j = 0..20)') as View2DSpec;
+    expect(orientLattice(spec, ['i', 'j'])).toBe(spec);
+    expect(orientLattice(spec, ['j', 'i'])).toMatchObject({ axes: ['j', 'i'], x: [0, 20], y: [-10, -0] });
+  });
+
+  it('writes back in index names, in the order the row wrote them', () => {
+    const spec = { axes: ['j', 'i'] as [string, string], x: [0, 20] as [number, number], y: [-10, 0] as [number, number] };
+    expect(formatViewSpec(spec)).toBe('view(j = 0..20, i = 0..10)');
+    expect(formatViewSpec(spec, ['i', 'j'])).toBe('view(i = 0..10, j = 0..20)');
   });
 });

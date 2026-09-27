@@ -76,7 +76,8 @@ export type CpuPlan =
   | { type: 'sequence'; term: Expr; index: string }
   | { type: 'cobweb'; f: Expr; recVar: string; a0Name?: string }
   | { type: 'bifurcation'; expr: Expr; recVar: string; a0Name?: string }
-  | { type: 'automaton'; rule: Expr; radius: number; seed?: Expr }
+  | { type: 'automaton'; rule: Expr; radius: number; seed?: Expr; dims: 1 | 2; axes: readonly [string, string] }
+  | { type: 'lattice'; expr: Expr; axes: readonly [string, string] }
   | { type: 'density'; rv: string; mass?: Expr }
   | { type: 'pmf'; rv: string; mass?: Expr }
   | { type: 'expect'; rv: string }
@@ -320,7 +321,11 @@ export function compileCpu(classified: Classified): CpuPlan {
         rule: object.rule,
         radius: object.radius,
         ...(object.seed ? { seed: object.seed } : {}),
+        dims: object.dims,
+        axes: object.axes,
       };
+    case 'lattice':
+      return { type: 'lattice', expr: object.expr, axes: object.axes };
     case 'list':
       if (object.element === 'scalar')
         return object.storage === 'packed'
@@ -585,6 +590,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'tuple':
     case 'note':
     case 'automaton':
+    case 'lattice':
       break;
   }
   return { type: 'none', params };
@@ -748,7 +754,10 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = [exprKey(plan.expr), plan.recVar, plan.a0Name];
       break;
     case 'automaton':
-      structure = [exprKey(plan.rule), plan.radius, plan.seed && exprKey(plan.seed)];
+      structure = [exprKey(plan.rule), plan.radius, plan.seed && exprKey(plan.seed), plan.dims, ...plan.axes];
+      break;
+    case 'lattice':
+      structure = [exprKey(plan.expr), ...plan.axes];
       break;
     case 'density':
     case 'pmf':

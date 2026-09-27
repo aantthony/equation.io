@@ -101,7 +101,9 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   dlist: 'data column, a dot plot on the number line: each value at x = value, copies stacked upward',
   dscatter: 'scatter plot of data',
   histogram: 'histogram',
-  automaton: 'cellular automaton grid',
+  automaton:
+    'cellular automaton on the integer lattice: a 1D rule draws its space-time diagram (cells across, steps down), a 2D rule one generation of its board, stepping with t',
+  lattice: 'table of values on the integer lattice, one cell per (i, j), shaded by value and printed when zoomed in',
   density: 'probability density curve of a random variable',
   pmf: 'probability mass function (stems) of a discrete random variable',
   prob: 'probability, shaded under the density, with its value as a readout',

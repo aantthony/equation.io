@@ -981,6 +981,12 @@ export interface ResolveOpts {
    */
   openVars?: ReadonlySet<string>;
   /**
+   * A piecewise case may test equality, `{s = 3: 1, 0}`: the rows of the
+   * integer lattice (lib/automaton.ts), whose cells are whole numbers.
+   * Elsewhere an equation as a condition is a reduction's filter.
+   */
+  exactConditions?: boolean;
+  /**
    * Whether a name is a list. Derivatives expand HERE, before list.ts
    * substitutes, so without this `d/dt L` differentiates `L` as an opaque
    * variable and quietly becomes 0.
@@ -2135,7 +2141,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
       return e;
     case 'piecewise':
       for (const c of e.cases) {
-        if (c.cond.kind === 'eq')
+        // A lattice row may test equality, and so may a function body for
+        // the lattice rows that call it (life(c, s) = {s = 3: 1, …}); the
+        // lattice rewrites the case (lib/automaton.ts exactCases), and any
+        // other row inlining it fails to compile.
+        if (c.cond.kind === 'eq' && !ctx.opts.inDefinition && !ctx.opts.exactConditions)
           throw new Error(
             'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
           );

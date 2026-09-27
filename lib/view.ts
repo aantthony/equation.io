@@ -26,6 +26,14 @@ export interface View2DSpec {
   y?: [number, number];
   /** Pinned: pointer gestures leave this panel's window where the row puts it. */
   locked?: boolean;
+  /**
+   * A lattice view names its index axes instead of x and y —
+   * `view(i = -60..60, n = 0..80)` (docs/discrete.md). x and y still hold
+   * the window in plane units: x is the first index, y minus the second, so
+   * row n + 1 sits below row n. A panel whose rows run the axes the other
+   * way round swaps them (orientLattice).
+   */
+  axes?: [string, string];
 }
 
 export interface Camera3DSpec {
@@ -124,6 +132,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
     const spec: View2DSpec = { kind: 'view' };
     if (locked) spec.locked = true;
     if (!args.length || args.length > 3) throw new Error(usage);
+    const lattice: Array<[string, [number, number]]> = [];
     for (const arg of args) {
       const named = /^([A-Za-z]\w*)\s*=\s*([\s\S]+)$/.exec(arg);
       if (!named) throw new Error(usage);
@@ -134,14 +143,26 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
         if (spec.ratio <= 0) throw new Error('The view ratio must be positive.');
         continue;
       }
-      if (axis !== 'x' && axis !== 'y') throw new Error(`view(...) frames the x and y axes, not "${axis}".`);
-      if (spec[axis]) throw new Error(`view(...) sets ${axis} twice.`);
+      if (spec[axis as 'x'] || lattice.some(([a]) => a === axis)) throw new Error(`view(...) sets ${axis} twice.`);
       const range = splitRange(named[2]);
       if (!range) throw new Error(usage);
       const lo = num(range[0], env, `view ${axis} lower bound`);
       const hi = num(range[1], env, `view ${axis} upper bound`);
       if (lo >= hi) throw new Error(`view ${axis} range needs lo < hi (got ${lo}..${hi}).`);
-      spec[axis] = [lo, hi];
+      // Any other letter names an index axis: the view is a lattice.
+      if (axis === 'x' || axis === 'y') spec[axis] = [lo, hi];
+      else lattice.push([axis, [lo, hi]]);
+    }
+    if (lattice.length) {
+      if (spec.x || spec.y || lattice.length !== 2)
+        throw new Error(
+          'A lattice view names its two index axes, across then down: view(i = -60..60, n = 0..80). ' +
+            'The plane is framed with x and y.',
+        );
+      const [[a, across], [b, down]] = lattice;
+      spec.axes = [a, b];
+      spec.x = across;
+      spec.y = [-down[1], -down[0]];
     }
     if (!spec.x && !spec.y) throw new Error(usage);
     return spec;
@@ -245,11 +266,26 @@ export function formatViewRow(x0: number, x1: number, y0: number, y1: number, ra
   return formatViewSpec({ x: [x0, x1], y: [y0, y1], ratio, locked });
 }
 
-/** A view row naming only some axes: a panel sharing x with another frames y alone. */
-export function formatViewSpec(spec: Omit<View2DSpec, 'kind'>): string {
+/**
+ * A lattice view's window for a panel whose rows run `axes` = [across,
+ * down]. The row names its axes in either order — `view(i = …, j = …)`
+ * frames a table's row i and column j alike — so when it names them the
+ * other way round, its ranges swap. Anything else is left as it is.
+ */
+export function orientLattice(spec: View2DSpec, axes: readonly [string, string]): View2DSpec {
+  const [a, b] = spec.axes ?? [];
+  if (!spec.x || !spec.y || a !== axes[1] || b !== axes[0]) return spec;
+  return { ...spec, axes: [b, a], x: [-spec.y[1], -spec.y[0]], y: [-spec.x[1], -spec.x[0]] };
+}
+
+/** A view row naming only some axes: a panel sharing x with another frames y alone.
+ *  A lattice view's axes go in `order` when given (as its row wrote them). */
+export function formatViewSpec(spec: Omit<View2DSpec, 'kind'>, order?: readonly [string, string]): string {
   const parts: string[] = [];
-  if (spec.x) parts.push(`x = ${fmtRange(...spec.x)}`);
-  if (spec.y) parts.push(`y = ${fmtRange(...spec.y)}`);
+  const [across, down] = spec.axes ?? ['x', 'y'];
+  if (spec.x) parts.push(`${across} = ${fmtRange(...spec.x)}`);
+  if (spec.y) parts.push(`${down} = ${spec.axes ? fmtRange(-spec.y[1], -spec.y[0]) : fmtRange(...spec.y)}`);
+  if (spec.axes && parts.length === 2 && order?.[0] === down && order[1] === across) parts.reverse();
   if (spec.ratio !== undefined && spec.ratio !== 1) parts.push(`ratio = ${fmt(spec.ratio)}`);
   if (spec.locked) parts.push('locked');
   return `view(${parts.join(', ')})`;

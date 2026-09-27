@@ -77,15 +77,19 @@ export interface Fractal2D {
   params?: string[];
 }
 
-/** A cellular automaton's space-time diagram (lib/automaton.ts): `shades`
- *  holds `rows` rows of `width` cells, 0 empty to 255 solid; cell i of row n
- *  is the unit square centred on (i, -n), in column i - x0. The first and
- *  last columns are each side's background, which runs on past the edge. */
+/** Cells on the integer lattice (lib/automaton.ts): `shades` holds `rows`
+ *  rows of `width` cells, 0 empty to 255 solid; cell (i, k) is the unit
+ *  square centred on (i, -k), in column i - x0 of row k - y0. `runs` says
+ *  which edges run on past the texture (an automaton's background) rather
+ *  than stop: a 1D diagram's columns, a board's columns and rows, a
+ *  table's neither. */
 export interface Cells2D {
   shades: Uint8Array;
   width: number;
   rows: number;
   x0: number;
+  y0: number;
+  runs: { x: boolean; y: boolean };
   color: [number, number, number];
 }
 
@@ -125,6 +129,27 @@ export function niceSpacing(upp: number, minPx: number): { major: number; minor:
     if (m * base >= target) return { major: m * base, minor: (m * base) / div };
   }
   return { major: 10 * base, minor: 2 * base };
+}
+
+/**
+ * A lattice panel's grid: lines between cells, never through them. Cell
+ * (i, k) spans x in [i - 1/2, i + 1/2] and y in [-k - 1/2, -k + 1/2], so the
+ * edges are level sets of x + 1/2 and y - 1/2, and the axes are the edges
+ * before column 0 and above row 0. Majors every 1, 2, 5 × 10^k cells; the
+ * edge of every cell once cells are big enough to see apart.
+ */
+export function latticeSpacing(upp: number): { major: number; minor: number } {
+  const major = Math.max(1, niceSpacing(upp, 90).major);
+  return { major, minor: 1 / upp >= 6 ? 1 : major };
+}
+
+function latticeGrid(view: View2D): GridSpec[] {
+  const sx = latticeSpacing(view.upp);
+  const sy = latticeSpacing(view.upp / (view.ratio ?? 1));
+  return [
+    { glsl: '(x + 0.5)', gradGlsl: ['1.0', '0.0'], params: [], ...sx },
+    { glsl: '(y - 0.5)', gradGlsl: ['0.0', '1.0'], params: [], ...sy },
+  ];
 }
 
 /** One grid family: level sets of a coordinate field c(x, y). */
@@ -901,13 +926,17 @@ uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform highp usampler2D uCells;
 uniform vec2 uSize;
-uniform float uX0;
+uniform vec2 uCorner;
+uniform vec2 uRuns;
 out vec4 outColor;
 void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
-  float row = floor(0.5 - p.y);
-  if (row < 0.0 || row >= uSize.y) discard;
-  float col = clamp(floor(p.x - uX0 + 0.5), 0.0, uSize.x - 1.0);
+  float row = floor(0.5 - p.y) - uCorner.y;
+  float col = floor(p.x + 0.5) - uCorner.x;
+  if (uRuns.y > 0.5) row = clamp(row, 0.0, uSize.y - 1.0);
+  else if (row < 0.0 || row >= uSize.y) discard;
+  if (uRuns.x > 0.5) col = clamp(col, 0.0, uSize.x - 1.0);
+  else if (col < 0.0 || col >= uSize.x) discard;
   float v = float(texelFetch(uCells, ivec2(int(col), int(row)), 0).r) / 255.0;
   if (v <= 0.0) discard;
   // Once cells are big enough to count, a hairline gap keeps them apart.
@@ -966,7 +995,8 @@ export class Renderer2D {
 
     const grid = frame.grid ?? 'on';
     let specs = grid === 'off' ? [] : gridSpecs;
-    if (grid !== 'off' && !specs?.length) {
+    if (grid !== 'off' && !specs?.length && frame.lattice) specs = latticeGrid(view);
+    else if (grid !== 'off' && !specs?.length) {
       const spacing = niceSpacing(view.upp, 90);
       const spacingY = niceSpacing(view.upp / (view.ratio ?? 1), 90);
       specs = [
@@ -1049,7 +1079,8 @@ export class Renderer2D {
         gl.bindTexture(gl.TEXTURE_2D, tex);
         gl.uniform1i(gl.getUniformLocation(prog, 'uCells'), 0);
         gl.uniform2f(gl.getUniformLocation(prog, 'uSize'), c.width, c.rows);
-        gl.uniform1f(gl.getUniformLocation(prog, 'uX0'), c.x0);
+        gl.uniform2f(gl.getUniformLocation(prog, 'uCorner'), c.x0, c.y0);
+        gl.uniform2f(gl.getUniformLocation(prog, 'uRuns'), +c.runs.x, +c.runs.y);
       });
     }
     for (const f of layers.fractals ?? []) {
@@ -1080,6 +1111,87 @@ export class Renderer2D {
     this.cellsDrawn.clear();
   }
 }
+
+/**
+ * A lattice panel's labels: cell values in their cells, the column indices
+ * along the top edge and the row indices down the left (cell centres, at
+ * the grid's major spacing), and the axis names in the corner.
+ */
+function drawLatticeLabels(
+  ctx: CanvasRenderingContext2D,
+  lattice: LatticeLabels,
+  numbers: boolean,
+  view: View2D,
+  w: number,
+  h: number,
+  upp: number,
+  uppY: number,
+  toScreenX: (x: number) => number,
+  toScreenY: (y: number) => number,
+) {
+  const cell = Math.min(1 / upp, 1 / uppY);
+  if (lattice.values?.length && cell >= LATTICE_VALUE_PX) {
+    const size = Math.min(15, Math.max(9, cell * 0.38));
+    ctx.save();
+    ctx.font = `${size}px ui-sans-serif, system-ui`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = cssRgb(theme.bg);
+    ctx.fillStyle = theme.label;
+    for (const v of lattice.values) {
+      const sx = toScreenX(v.i),
+        sy = toScreenY(-v.k);
+      if (sx < -cell || sx > w + cell || sy < -cell || sy > h + cell) continue;
+      ctx.strokeText(v.text, sx, sy);
+      ctx.fillText(v.text, sx, sy);
+    }
+    ctx.restore();
+  }
+  const [across, down] = lattice.axes;
+  const corner = `${across} → ${down} ↓`;
+  ctx.save();
+  ctx.font = '11px ui-sans-serif, system-ui';
+  ctx.fillStyle = theme.label;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = cssRgb(theme.bg);
+  const label = (text: string, x: number, y: number) => {
+    ctx.strokeText(text, x, y);
+    ctx.fillText(text, x, y);
+  };
+  // The corner note sits bottom left, clear of the equation panel.
+  if (numbers) {
+    // The grid's own spacing (device px), so every number sits on a major line.
+    const { major } = latticeSpacing(view.upp);
+    const majorY = latticeSpacing(view.upp / (view.ratio ?? 1)).major;
+    const left = Math.ceil(invX(toScreenX, 0) / major) * major;
+    ctx.textAlign = 'center';
+    for (let i = left; toScreenX(i) < w; i += major) {
+      const sx = toScreenX(i);
+      if (sx > 24) label(String(i), sx, 13);
+    }
+    ctx.textAlign = 'left';
+    const top = Math.ceil(-invY(toScreenY, 0) / majorY) * majorY;
+    for (let k = top; toScreenY(-k) < h; k += majorY) {
+      const sy = toScreenY(-k);
+      if (sy > 24 && sy < h - 24) label(String(k), 4, sy + 4);
+    }
+  }
+  ctx.textAlign = 'left';
+  label(lattice.status ? `${corner}    ${lattice.status}` : corner, 6, h - 8);
+  ctx.restore();
+}
+
+/** The plane coordinate at a screen coordinate, for a linear toScreen map. */
+const invX = (to: (x: number) => number, s: number) => {
+  const a = to(0),
+    b = to(1);
+  return (s - a) / (b - a);
+};
+const invY = invX;
+
+const cssRgb = ([r, g, b]: readonly number[]) =>
+  `rgb(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)})`;
 
 /** Arrowhead length for vector(…) rows, in CSS px. */
 const ARROW_HEAD_PX = 12;
@@ -1164,9 +1276,23 @@ export function drawTextLabel(ctx: CanvasRenderingContext2D, text: string, sx: n
   ctx.restore();
 }
 
+/** What a lattice panel labels (docs/discrete.md). */
+export interface LatticeLabels {
+  /** The index names across and down, as the view row or the rows name them. */
+  axes: readonly [string, string];
+  /** Values to print in their cells (cell (i, k)), once cells are big enough to read. */
+  values?: Array<{ i: number; k: number; text: string }>;
+  /** A corner note, like which generation a board shows. */
+  status?: string;
+}
+
+/** Below this many CSS px per cell, lattice values are not printed. */
+export const LATTICE_VALUE_PX = 22;
+
 /** Axis labels plus CPU-sampled geometry (points, parametric curves).
  *  numbers=false skips the axis numerals (custom coordinate grids have no
- *  straight axes to label them along). */
+ *  straight axes to label them along). A lattice panel numbers its cells
+ *  instead, along the top and left edges. */
 export function drawLabels2D(
   ctx: CanvasRenderingContext2D,
   view: View2D,
@@ -1174,6 +1300,7 @@ export function drawLabels2D(
   extras?: Overlay2D,
   numbers = true,
   box?: OverlayBox,
+  lattice?: LatticeLabels,
 ): void {
   const { w, h } = beginOverlay(ctx, dpr, box);
   ctx.font = '11px ui-sans-serif, system-ui';
@@ -1193,7 +1320,8 @@ export function drawLabels2D(
     return String(parseFloat(v.toPrecision(10)));
   };
 
-  if (numbers) {
+  if (lattice) drawLatticeLabels(ctx, lattice, numbers, view, w, h, upp, uppY, toScreenX, toScreenY);
+  else if (numbers) {
     const axisY = Math.min(Math.max(toScreenY(0), 12), h - 6);
     const axisX = Math.min(Math.max(toScreenX(0), 4), w - 30);
 

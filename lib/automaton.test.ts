@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
-import { type CellGrid, cellShades, runAutomaton } from './automaton.ts';
-import { scanSeqRec } from './seq.ts';
+import { type CellGrid, cellShades, evalTable, runAutomaton, runBoard, tableShades } from './automaton.ts';
+import { scanSeqRec, scanSequences } from './seq.ts';
 
 const RULE = 'c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2)';
 
@@ -146,5 +146,133 @@ describe('diagnostics', () => {
   it('rebuilds when a slider moves', () => {
     const a = analyzeRows(['r = 30', RULE]);
     expect(a.rows[1].cls?.params).toEqual(['r']);
+  });
+});
+
+const LIFE = 'L_{n+1}[i, j] = life(L_n[i, j], sum(a=-1..1, sum(b=-1..1, L_n[i+a, j+b])))';
+const LIFE_FN = 'life(c, s) = {s = 3: 1, s = 4: c, 0}';
+const GLIDER = 'L_0 = [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)]';
+
+/** The board the rows define, at generation `n`. */
+function board(rows: string[], n: number) {
+  const analysis = analyzeRows(rows);
+  const bad = analysis.rows.find(r => r.error);
+  if (bad) throw new Error(bad.error);
+  const row = analysis.rows.find(r => r.cpu?.type === 'automaton');
+  if (row?.cpu?.type !== 'automaton') throw new Error('no automaton row');
+  const b = runBoard(row.cpu, analysis.constEnv);
+  b.advance(n);
+  return b;
+}
+/** Live cells of a board as sorted "row,column" strings, as seeds list them. */
+const live = (g: CellGrid) => {
+  const out: string[] = [];
+  for (let y = 0; y < g.rows; y++)
+    for (let x = 0; x < g.width; x++) if (g.values[y * g.width + x]) out.push(`${y + g.y0},${x + g.x0}`);
+  return out.sort();
+};
+const shift = (cells: string[], di: number, dj: number) =>
+  cells
+    .map(c => c.split(',').map(Number))
+    .map(([i, j]) => `${i + di},${j + dj}`)
+    .sort();
+
+describe('2D automata', () => {
+  it('scans rule, seed and live-cell seed rows', () => {
+    expect(scanSeqRec('L_{n+1}[i, j] = L_n[i, j]')).toMatchObject({ rec: true, name: 'L', cell: 'i', cell2: 'j' });
+    expect(scanSeqRec('L_0[i, j] = 1')).toMatchObject({ seed: true, cell: 'i', cell2: 'j' });
+    const a = { seqScans: scanSequences(['L_0 = [(0, 0)]', 'L_{n+1}[i, j] = L_n[i, j]']) };
+    expect(a.seqScans[0]).toMatchObject({ seed: true, seedList: true });
+    // Without a rule for L, L_0 = […] is an ordinary list.
+    expect(scanSequences(['L_0 = [1, 2]'])[0]).toBeNull();
+  });
+
+  it('a glider moves one cell diagonally every four generations', () => {
+    const start = live(board([LIFE_FN, GLIDER, LIFE], 0).grid);
+    expect(start).toEqual(['0,2', '1,0', '1,2', '2,1', '2,2']);
+    expect(live(board([LIFE_FN, GLIDER, LIFE], 4).grid)).toEqual(shift(start, 1, 1));
+    expect(live(board([LIFE_FN, GLIDER, LIFE], 40).grid)).toEqual(shift(start, 10, 10));
+  });
+
+  it('a blinker blinks, and stepping back starts over from the seed', () => {
+    const b = board([LIFE_FN, 'L_0 = [(-1, 0), (0, 0), (1, 0)]', LIFE], 1);
+    expect(live(b.grid)).toEqual(['0,-1', '0,0', '0,1']);
+    b.advance(2);
+    expect(live(b.grid)).toEqual(['-1,0', '0,0', '1,0']);
+    b.advance(1);
+    expect(b.generation).toBe(1);
+    expect(live(b.grid)).toEqual(['0,-1', '0,0', '0,1']);
+  });
+
+  it('a glider is exact across the board', () => {
+    const start = live(board([LIFE_FN, GLIDER, LIFE], 0).grid);
+    expect(live(board([LIFE_FN, GLIDER, LIFE], 960).grid)).toEqual(shift(start, 240, 240));
+  });
+
+  it('reads a seed over i and j, and a rule written out by offsets', () => {
+    // Each cell copies its left neighbour (row first): the seed column walks right.
+    const b = board(['L_0[i, j] = {0 <= i <= 2: {j = 0: 1, 0}, 0}', 'L_{n+1}[i, j] = L_n[i, j-1]'], 3);
+    expect(live(b.grid)).toEqual(['0,3', '1,3', '2,3']);
+  });
+
+  it('diagnoses 2D rules', () => {
+    const errors = (rows: string[]) => analyzeRows(rows).rows.map(r => r.error ?? null);
+    expect(errors(['L_{n+1}[i, j] = L_n[i]'])[0]).toMatch(/fixed offsets/);
+    expect(errors(['L_{n+1}[i, j] = L_n[i, 2j]'])[0]).toMatch(/fixed offsets/);
+    expect(errors(['L_{n+1}[i, j] = L_n[i, j] + j'])[0]).toMatch(/same at every cell/);
+    expect(errors(['L_0[i] = 1', 'L_{n+1}[i, j] = L_n[i, j]'])[0]).toMatch(/2D automaton/);
+    expect(errors(['L_0 = [(0.5, 0)]', 'L_{n+1}[i, j] = L_n[i, j]'])[0]).toMatch(/whole numbers/);
+  });
+
+  it('a 2D rule animates and names its axes', () => {
+    const cls = analyzeRows([LIFE_FN, LIFE]).rows[1].cls!;
+    expect(cls.animated).toBe(true);
+    expect(cls.object).toMatchObject({ kind: 'automaton', dims: 2, axes: ['j', 'i'] });
+    expect(analyzeRows(['r = 30', RULE]).rows[1].cls!.object).toMatchObject({ dims: 1, axes: ['i', 'n'] });
+  });
+});
+
+describe('tables', () => {
+  const table = (rows: string[]) => {
+    const analysis = analyzeRows(rows);
+    const bad = analysis.rows.find(r => r.error);
+    if (bad) throw new Error(bad.error);
+    const row = analysis.rows.find(r => r.cpu?.type === 'lattice');
+    if (row?.cpu?.type !== 'lattice') throw new Error('no table row');
+    return { cpu: row.cpu, env: analysis.constEnv };
+  };
+
+  it('evaluates a Cayley table over a window', () => {
+    const { cpu, env } = table(['m = 5', 'T[i, j] = mod(i + j, m)']);
+    // Row i, column j, as a matrix is read: j runs across, i down.
+    expect(cpu.axes).toEqual(['j', 'i']);
+    const g = evalTable(cpu, env, 0, 0, 5, 5);
+    expect(Array.from(g.values.slice(0, 5))).toEqual([0, 1, 2, 3, 4]);
+    expect(Array.from(g.values.slice(5, 10))).toEqual([1, 2, 3, 4, 0]);
+  });
+
+  it('reads like a matrix: row i down, column j across', () => {
+    const { cpu, env } = table(['T[i, j] = 10 i + j']);
+    expect(Array.from(evalTable(cpu, env, 0, 0, 3, 2).values)).toEqual([0, 1, 2, 10, 11, 12]);
+  });
+
+  it('a piecewise with no case leaves a cell empty', () => {
+    const { cpu, env } = table(['T[i, j] = {0 <= i < 2: {0 <= j < 2: i j}}']);
+    const g = evalTable(cpu, env, -1, 0, 4, 1);
+    expect(Array.from(g.values).map(v => (Number.isNaN(v) ? null : v))).toEqual([null, 0, 0, null]);
+    const shades = tableShades(g);
+    expect(shades[0]).toBe(0);
+    expect(shades[1]).toBeGreaterThan(0);
+  });
+
+  it('equality cases, beside a sequence of another letter', () => {
+    const { cpu, env } = table(['a_n = n^2', 'T[i, j] = {i = j: 1, 0}']);
+    expect(Array.from(evalTable(cpu, env, 0, 0, 3, 1).values)).toEqual([1, 0, 0]);
+  });
+
+  it('diagnoses tables', () => {
+    const errors = (rows: string[]) => analyzeRows(rows).rows.map(r => r.error ?? null);
+    expect(errors(['T[i, j] = q'])[0]).toMatch(/Unknown variable in the table: q/);
+    expect(errors(['T[i, j] = 1', 'T[i, j] = 2'])[1]).toMatch(/already defined/);
   });
 });
