@@ -1248,8 +1248,8 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
       });
     });
 
-  // Row colors follow creation order across ALL rows (defs consume a color
-  // slot in the app too, since colorIndex comes from row id), unless the row's
+  // Row colors follow position across ALL rows (defs consume a color slot in
+  // the app too: a loaded document's rows take slots in order), unless the row's
   // note names one (`y = x #e24`). Analysis rows are the input rows, in order.
   const colorOf = (row: RowInfo) => {
     const i = analysis.rows.indexOf(parents.get(row) ?? row);

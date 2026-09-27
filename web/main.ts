@@ -121,6 +121,7 @@ import {
   drawLabels3D,
   projectToScreen,
 } from './render3d.ts';
+import { freshColorIndex } from '../lib/palette.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -2730,8 +2731,15 @@ addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flushUrl();
 });
 
+/** The palette slot for a new row among `rows` (lib/palette.ts). */
+const freshColor = (rows: Iterable<Equation> = equations) =>
+  freshColorIndex(
+    [...rows].map(e => e.colorIndex),
+    theme.palette.length,
+  );
+
 function addEquation(text: string, at = equations.length): Equation {
-  const eq: Equation = { id: nextId++, text, colorIndex: (nextId - 2) % theme.palette.length };
+  const eq: Equation = { id: nextId++, text, colorIndex: freshColor() };
   equations.splice(at, 0, eq);
   return eq;
 }
@@ -3489,7 +3497,7 @@ function syncFromDOM() {
     const id = line.dataset.id;
     let eq = id && !seen.has(id) ? byId.get(id) : undefined;
     if (!eq) {
-      eq = { id: nextId++, text: '', colorIndex: (nextId - 2) % theme.palette.length };
+      eq = { id: nextId++, text: '', colorIndex: freshColor(new Set([...equations, ...next])) };
       line.dataset.id = String(eq.id);
     }
     seen.add(String(eq.id));
@@ -3589,7 +3597,7 @@ function insertStatements(text: string) {
   const inserted: Equation[] = [first];
   first.text = before + parts[0];
   for (let i = 1; i < parts.length; i++) {
-    inserted.push({ id: nextId++, text: parts[i].trim(), colorIndex: (nextId - 2) % theme.palette.length });
+    inserted.push({ id: nextId++, text: parts[i].trim(), colorIndex: freshColor([...equations, ...inserted]) });
   }
   const caretOffset = inserted[inserted.length - 1].text.length;
   inserted[inserted.length - 1].text += after;
@@ -3706,14 +3714,16 @@ function duplicateLines(dir: -1 | 1) {
   const [first, last] = selectedRows(span);
   if (last < first) return;
   pushUndo(null);
-  const copies = equations.slice(first, last + 1).map(eq => ({
-    id: nextId++,
-    text: eq.text,
-    colorIndex: (nextId - 2) % theme.palette.length,
-    sliderMin: eq.sliderMin,
-    sliderMax: eq.sliderMax,
-    showLevels: eq.showLevels,
-  }));
+  const copies: Equation[] = [];
+  for (const eq of equations.slice(first, last + 1))
+    copies.push({
+      id: nextId++,
+      text: eq.text,
+      colorIndex: freshColor([...equations, ...copies]),
+      sliderMin: eq.sliderMin,
+      sliderMax: eq.sliderMax,
+      showLevels: eq.showLevels,
+    });
   equations.splice(last + 1, 0, ...copies);
   recompileAll();
   renderAll();
