@@ -10,6 +10,7 @@ export const TAGS = [
   'slider',
   'draggable',
   '3d',
+  'split-view',
   // what it draws
   'implicit',
   'inequality',
@@ -907,21 +908,25 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       [
         'a function over its derivative',
         'view(x = -3..3, y = -3..3); f(x) = x^3 - 3x; y = f(x); --- below 40%, shared x; view(y = -4..10); y = d/dx f(x)',
+        'split-view derivative polynomial',
       ],
       [
         'circle beside its sine',
         'grid(axes); view(x = -1.4..1.4, y = -1.4..1.4); P = (cos(t), sin(t)); circle((0, 0), 1); segment((0, 0), P); P; ' +
           '--- right 65%, shared y; grid(axes); view(x = -0.5..8); y = {x >= 0: sin(t - x)}; (0, sin(t))',
+        'split-view trig geometry animated',
       ],
       [
         'surface beside its contour map',
         'camera(-pi/3, 0.6, 14); z = sin(x) cos(y); --- right; view(x = -4..4, y = -4..4); sin(x) cos(y)',
+        'split-view 3d surface scalar-field',
       ],
       [
         'pendulum inset on its phase plane',
         "view(x = -4..4, y = -3..3); th' = om; om' = -sin(th) - om/6; th(0) = 3; trail((th, om)); " +
           '--- inset top left 35%; grid(off); view(x = -1.3..1.3, y = -1.3..1.1, locked); ' +
           'segment((0, 0), (sin(th), -cos(th))); (sin(th), -cos(th))',
+        'split-view ode physics animated',
       ],
     ],
   ],
