@@ -1,3 +1,5 @@
+@import './math-glyphs.css';
+
 * {
   box-sizing: border-box;
 }
@@ -368,7 +370,8 @@ body {
   outline: none;
   color: var(--text);
   font:
-    15px/1.5 ui-monospace,
+    15px/1.5 'Eq Math Glyphs',
+    ui-monospace,
     'SF Mono',
     Menlo,
     monospace;
@@ -493,7 +496,8 @@ body {
   outline: none;
   background: none;
   font:
-    11px ui-monospace,
+    11px 'Eq Math Glyphs',
+    ui-monospace,
     'SF Mono',
     Menlo,
     monospace;
@@ -547,7 +551,8 @@ body {
 .eq-curve-label {
   flex: none;
   font:
-    11px ui-monospace,
+    11px 'Eq Math Glyphs',
+    ui-monospace,
     'SF Mono',
     Menlo,
     monospace;
@@ -587,6 +592,9 @@ body {
   color: var(--info);
   font-size: 11px;
   font-family: ui-sans-serif, system-ui, sans-serif;
+  /* Every digit one width, so a readout that changes each frame keeps its
+     length and the rows below do not jump as it rewraps. */
+  font-variant-numeric: tabular-nums;
   padding: 0 6px 3px 28px;
 }
 
@@ -614,7 +622,8 @@ body {
 .eq-table table {
   border-collapse: collapse;
   font:
-    11px ui-monospace,
+    11px 'Eq Math Glyphs',
+    ui-monospace,
     'SF Mono',
     Menlo,
     monospace;
@@ -863,7 +872,8 @@ body.file-drag::after {
   display: block;
   color: var(--ex-code);
   font:
-    10.5px ui-monospace,
+    10.5px 'Eq Math Glyphs',
+    ui-monospace,
     Menlo,
     monospace;
   white-space: nowrap;
@@ -891,7 +901,8 @@ body.file-drag::after {
   box-shadow: 0 4px 20px var(--panel-shadow);
   color: var(--text);
   font:
-    15px/1 ui-monospace,
+    15px/1 'Eq Math Glyphs',
+    ui-monospace,
     'SF Mono',
     Menlo,
     monospace;
@@ -973,7 +984,8 @@ body.file-drag::after {
 }
 #syntax-suggestions strong {
   font:
-    13px ui-monospace,
+    13px 'Eq Math Glyphs',
+    ui-monospace,
     monospace;
   overflow-wrap: anywhere;
 }

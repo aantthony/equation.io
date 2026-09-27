@@ -27,6 +27,7 @@ export const PUBLIC_KIND_ROWS = {
   system: ['(x + y, x - y) = (3, 1)'],
   vfield3d: ['(-y, x, z)'],
   vfield2d: ['(-y, x)'],
+  tfield2d: ['((x, y), (y, -x))'],
   pcurve: ['(cos(u), sin(u), u)'],
   psurface: ['(u, v, u v)'],
   pregion: ['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u))'],
@@ -44,6 +45,8 @@ export const PUBLIC_KIND_ROWS = {
   prob: ['X ~ Binomial(4, 0.5)', 'P(X <= 2)'],
   expect: ['X ~ Binomial(4, 0.5)', 'E(X)'],
   family: ['y = [1, 2] x'],
+  multivector: ['quat(1, 2, 3, 4)'],
+  action: ['action(((1, 1), (0, 1)))'],
   orbit: ["q' = -q", 'q(0) = 1', 'q(0..3)'],
 } satisfies Record<Exclude<PublicKind, 'dlist' | 'dscatter'>, string[]>;
 

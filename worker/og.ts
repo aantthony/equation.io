@@ -15,6 +15,7 @@ import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/
 import { type Expr, evaluate, substVars } from '../lib/expr.ts';
 import { cellShades, runAutomaton } from '../lib/automaton.ts';
 import { arrowHead } from '../lib/geom.ts';
+import { glyphScale } from '../lib/glyphs.ts';
 import { hullFaces } from '../lib/hull.ts';
 import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
@@ -739,6 +740,39 @@ function renderRow2D(
         }
       return;
     }
+    case 'tfield2d': {
+      // The app's glyphs (web/render2d.ts tfieldFrag) as outlines: the image
+      // of a circle under M at each cell's centre, and the spoke M e_x.
+      const progs = cpu.entries.map(compile);
+      const cell = 36;
+      const ratio = v.ratio ?? 1;
+      for (let sy = cell / 2; sy < r.h; sy += cell)
+        for (let sx = cell / 2; sx < r.w; sx += cell) {
+          env.vars[env.slotX] = v.cx + (sx - r.w / 2) * v.upp;
+          env.vars[env.slotY] = v.cy - (sy - r.h / 2) * (v.upp / ratio);
+          const [a, b, c, d] = progs.map(p => run(p, env.vars, env.stack));
+          const scale = glyphScale(a, b, c, d) * cell * 0.42;
+          if (!(scale > 0)) continue;
+          // The same map in pixels, D⁻¹ M D with D = diag(1, 1/ratio), as the
+          // shader draws it; screen y points down, so the second row flips.
+          const at = (u: number, w: number): [number, number] => [
+            sx + scale * (a * u + (b / ratio) * w),
+            sy - scale * (c * ratio * u + d * w),
+          ];
+          // A map that reverses orientation draws in the complementary colour.
+          const ink: [number, number, number] = a * d - b * c < 0 ? [1 - color[0], 1 - color[1], 1 - color[2]] : color;
+          let last = at(1, 0);
+          for (let k = 1; k <= 24; k++) {
+            const th = (2 * Math.PI * k) / 24;
+            const next = at(Math.cos(th), Math.sin(th));
+            drawLine(r, last[0], last[1], next[0], next[1], ink, 0.8);
+            last = next;
+          }
+          const tip = at(1, 0);
+          drawLine(r, sx, sy, tip[0], tip[1], ink, 0.8);
+        }
+      return;
+    }
     case 'pcurve': {
       if (cpu.dim !== 2) return;
       // Sampled as the app samples it (lib/path.ts), pen up at the jumps. A
@@ -1015,6 +1049,9 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   note: 'draws',
   tuple: 'draws',
   family: 'draws',
+  // Drawn member by member, like a family: their glyphs are figures.
+  multivector: 'draws',
+  action: 'draws',
   vfield3d: 'draws',
   implicit2d: 'draws',
   ineq2d: 'draws',
@@ -1055,6 +1092,7 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   conformal2d: 'fallback',
   fractal2d: 'fallback',
   vfield2d: 'draws',
+  tfield2d: 'draws',
   // The rest of the sequence family (term dots, orbit diagrams) and data
   // lists have no scanline path here yet; the site card beats a blank grid.
   vlist: 'fallback',

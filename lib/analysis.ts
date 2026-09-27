@@ -308,6 +308,7 @@ export function prepareDocument(
       defs.fields.get(n) ?? defs.consts.get(n) ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
     comps: (n: string) => compsOf(defs, n),
     interval: (n: string) => defs.intervals.get(n),
+    multivector: (n: string) => defs.multivectors.get(n),
     documentNames: new Set([
       ...raw.map(d => d.name),
       ...[...rvScan.base.values()].map(s => s.name),

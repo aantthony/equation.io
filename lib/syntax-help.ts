@@ -103,6 +103,16 @@ const signatures: Record<string, [string, string]> = {
   outer: ['outer(a, b) or a ⊗ b', 'Outer (tensor) product: (a ⊗ b)_ij = a_i b_j, of vectors, matrices or tensors'],
   wedge: ['wedge(a, b) or a ∧ b', 'Wedge product a ⊗ b − b ⊗ a: a bivector, read out as its antisymmetric matrix'],
   contract: ['contract(T, i, j)', 'Sum a tensor over indices i = j (1-based): contract(M, 1, 2) is trace(M)'],
+  action: ['action(M)', 'Draw what a 2×2 or 3×3 matrix does to the unit square, circle and axes'],
+  jacobian: ['jacobian((f, g))', 'The matrix of partial derivatives of a map; a 2×2 in x, y draws as glyphs'],
+  hessian: ['hessian(f)', 'The matrix of second partial derivatives of a scalar field'],
+  gp: ['gp(a, b) or a ⟑ b', 'Geometric product of vectors or multivectors: e_x ⟑ e_y is the bivector e_xy'],
+  rev: ['rev(A)', 'Reverse a multivector: R p rev(R) turns p by the rotor R'],
+  grade: ['grade(A, k)', 'The grade-k part of a multivector: grade(A, 1) is its vector'],
+  dual: ['dual(A)', 'The dual A I⁻¹: dual(e_xy) is e_z'],
+  quat: ['quat(w, x, y, z)', 'The quaternion w + x i + y j + z k; quat(cos(a/2), sin(a/2) n) turns by a about n'],
+  qjulia: ['qjulia(c) or qjulia(c, s)', 'The quaternion Julia set of c as a 3D surface, sliced at k = s'],
+  slerp: ['slerp(q1, q2, s)', 'Turn from rotation q1 to q2 at constant speed, s from 0 to 1'],
   sum: ['sum(n=1..N, expression)', 'Finite sum'],
   prod: ['prod(n=1..N, expression)', 'Finite product'],
   int: ['int[a..b] f(x) dx', 'Definite integral; bounds may be omitted. Alone on a row it shades its signed area'],
@@ -145,6 +155,7 @@ const definedNames = (defs: Env): ReadonlySet<string> =>
     ...defs.points,
     ...defs.mats.keys(),
     ...defs.tensors.keys(),
+    ...defs.multivectors.keys(),
     ...defs.lists.keys(),
     ...defs.tables.keys(),
     ...defs.missingData.keys(),
@@ -203,6 +214,10 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values(['e_x'], 'Unit vector (1, 0, 0)');
   values(['e_y'], 'Unit vector (0, 1, 0)');
   values(['e_z'], 'Unit vector (0, 0, 1)');
+  values(['e_xy'], 'Bivector e_x ⟑ e_y: the unit plane of x and y');
+  values(['e_yz'], 'Bivector e_y ⟑ e_z');
+  values(['e_zx'], 'Bivector e_z ⟑ e_x');
+  values(['e_xyz'], 'Pseudoscalar e_x ⟑ e_y ⟑ e_z: the unit volume');
   values(defs.consts.keys(), 'Defined constant');
   values(defs.states.keys(), 'Simulation state');
   values(defs.vecStates.keys(), 'Vector state');
@@ -225,6 +240,7 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values([...defs.points].filter(pointOverParams), 'Named curve or surface');
   values(defs.mats.keys(), 'Defined matrix');
   values(defs.tensors.keys(), 'Defined tensor');
+  values(defs.multivectors.keys(), 'Defined multivector');
   values(defs.lists.keys(), 'Defined list');
   for (const [name, table] of defs.tables) {
     values([name], 'Data table');

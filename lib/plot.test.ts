@@ -43,6 +43,14 @@ describe('classify', () => {
     expect(valueReadout(1 / 0)).toBe('= ∞');
     expect(valueReadout(NaN)).toBe('undefined');
   });
+  it('shows at most six decimals, so an animated readout keeps its width', () => {
+    expect(valueReadout(-0.0585821)).toBe('≈ -0.058582');
+    expect(valueReadout(0.600393)).toBe('= 0.600393');
+    expect(valueReadout(123456.789)).toBe('≈ 123457');
+    // Below 0.001 the six significant digits stay, so small values still read.
+    expect(valueReadout(0.000123456789)).toBe('≈ 0.000123457');
+    expect(valueReadout(1.5e-9)).toBe('= 1.5e-9');
+  });
 
   it('routes points', () => {
     const p2 = cls('(2, 3)');

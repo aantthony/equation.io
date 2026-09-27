@@ -66,6 +66,7 @@ import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
 import { CURVE_SAMPLES, type PathSampler, type RegionSampler, pathSampler, regionSampler } from '../lib/path.ts';
 import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
+import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
 import { type SpecialPoint, specialPoints } from '../lib/special.ts';
@@ -869,6 +870,7 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'ineq2d',
   'projected2d',
   'vfield2d',
+  'tfield2d',
   'vlist',
   'dlist',
   'histogram',
@@ -1417,6 +1419,7 @@ function render() {
       colors: [],
       conformals: [],
       vfields: [],
+      tfields: [],
       ineqs: [],
       projections: [],
       bifs: [],
@@ -1496,6 +1499,9 @@ function render() {
           break;
         case 'fractal2d':
           layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
+          break;
+        case 'tfield2d':
+          layers.tfields.push({ ...gpuFor(eq, 'tfield2d'), color, params, uniforms });
           break;
         case 'vfield2d': {
           layers.vfields.push({ ...gpuFor(eq, 'vfield2d'), color, params, uniforms });
@@ -3728,7 +3734,13 @@ function buildExamplesMenu() {
       const code = document.createElement('code');
       code.textContent = text;
       item.append(code);
-      item.addEventListener('click', () => openExample(text));
+      item.addEventListener('click', () => {
+        // Fold the menu away so the example's rows have the panel; the
+        // category stays open for the next pick.
+        const root = document.getElementById('examples');
+        if (root instanceof HTMLDetailsElement) root.open = false;
+        openExample(text);
+      });
       group.append(item);
     }
     list.append(group);
@@ -4462,6 +4474,8 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
       return `defines ${name}: a random variable`;
     case 'missing':
       return `defines ${name} from a data file that is not on this device`;
+    case 'multivector':
+      return `defines ${name}: a ${mvOfNode(b.value)?.quat ? 'quaternion' : 'multivector'}${quiet}`;
     case 'interval':
       return `defines ${name}: a continuous interval, one hidden parameter shared by every row that uses ${name}${quiet}`;
   }
