@@ -55,7 +55,7 @@ import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from '.
 import { classifyAutomatonRow } from './automaton.ts';
 import { buildStateSystem, initialState } from './state.ts';
 import { stripNote } from './statements.ts';
-import { sysDefinitionIssue, sysDefinitions } from './sys.ts';
+import { deviceDefinitionIssue, deviceDefinitions } from './device.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
@@ -225,8 +225,8 @@ export function prepareDocument(
     raw.push(d);
   }
 
-  // sys.clock and the like: constants the device supplies (lib/sys.ts).
-  raw.unshift(...sysDefinitions(rows.map(r => (r.comment ? '' : r.text))));
+  // device.clock and the like: constants the device supplies (lib/device.ts).
+  raw.unshift(...deviceDefinitions(rows.map(r => (r.comment ? '' : r.text))));
 
   // An automaton's letter names rows of cells, not scalar terms (automaton.ts).
   const built = buildDefs(
@@ -811,9 +811,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       const taken = row.cls.object.kind === 'note' ? takenDefinitionName(row.text) : null;
       if (taken && row.cls.object.kind === 'note')
         row.cls = { ...row.cls, object: { ...row.cls.object, constant: taken } };
-      const sysSet = row.cls.object.kind === 'note' ? sysDefinitionIssue(row.text) : null;
-      if (sysSet) {
-        row.error = sysSet;
+      const deviceSet = row.cls.object.kind === 'note' ? deviceDefinitionIssue(row.text) : null;
+      if (deviceSet) {
+        row.error = deviceSet;
         row.cls = undefined;
       }
     } catch (e) {

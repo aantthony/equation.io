@@ -87,7 +87,7 @@ try {
     const page = await browser.newPage({
       viewport: { width: opts.width, height: opts.height },
       deviceScaleFactor: opts.scale ?? 2,
-      // sys.clock and sys.day read the wall clock: pin it, in one zone, so a
+      // device.clock and device.day read the wall clock: pin it, in one zone, so a
       // reshoot of an unchanged example is the same picture. The June
       // solstice, a waxing crescent, and the watch-advert 10:10.
       timezoneId: 'UTC',

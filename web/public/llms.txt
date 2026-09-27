@@ -330,13 +330,29 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   its surface.
 - `t`: time in seconds. Any row mentioning `t` animates, e.g.
   `y = sin(x - 2t)`.
-- `sys.clock`, `sys.day`: the viewer's wall clock, animating like `t`.
-  `sys.clock` is local time in seconds since midnight (0–86400), so an hour
-  hand points along `(sin(2pi sys.clock/43200), cos(2pi sys.clock/43200))`;
-  `sys.day` is days since 2000-01-01 00:00 UTC with today's fraction (the
-  moon's mean phase is `mod(sys.day - 5.76, 29.53)/29.53`). They live under
-  `sys.` so `clock` and `day` stay free for sliders; `t` starts at 0 on load,
-  these read the device's clock.
+- `device.clock`, `device.day`: the viewer's wall clock, animating like `t`.
+  `device.clock` is local time in seconds since midnight (0–86400), so an
+  hour hand points along
+  `(sin(2pi device.clock/43200), cos(2pi device.clock/43200))`; `device.day`
+  is days since 2000-01-01 00:00 UTC with today's fraction (the moon's mean
+  phase is `mod(device.day - 5.76, 29.53)/29.53`). They live under `device.`
+  so `clock` and `day` stay free for sliders; `t` starts at 0 on load, these
+  read the device's clock.
+- More live `device.` values from the viewer's device, each updating every
+  frame and usable anywhere a constant is (states and fields included):
+  - `device.mouse`: the pointer as a point in graph coordinates
+    (`device.mouse_x`, `device.mouse_y`); `p' = 3(device.mouse - p)` chases
+    it.
+  - `device.gravity`: gravity as a 3-vector in m/s² along the screen's x, y
+    and out of the screen (`device.gravity_x`, `_y`, `_z`). On a phone it
+    follows the tilt (after a tap grants motion access); elsewhere it is
+    (0, −9.80665, 0), straight down the screen.
+  - `device.xmin`, `device.xmax`, `device.ymin`, `device.ymax`: the visible
+    window of the first panel (undefined while it is 3D), so
+    `y = sin(6pi (x - device.xmin)/(device.xmax - device.xmin))` keeps three
+    periods across the screen at any zoom.
+  Outside the app (previews, the MCP server) these hold resting values: the
+  pointer at (0, 0), the window ±10.
 - `u`, `v`: parametric parameters, each ranging over (0, 1). A row whose value
   is a point traces curves and surfaces, however it is written: `(u, u^2)`,
   `(0,0,1) u` and `u e_z` are all curves; a complex expression in u alone is

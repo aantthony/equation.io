@@ -122,9 +122,11 @@ import {
   projectToScreen,
 } from './render3d.ts';
 import { assignColors, takesColor } from '../lib/palette.ts';
+import { readsMotion, setDeviceInput } from '../lib/device.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
+import { syncMotion } from './device-inputs.ts';
 
 interface Equation {
   familyParent?: Equation;
@@ -689,6 +691,21 @@ function setGraphVisible(visible: boolean) {
   }
 }
 
+/** device.xmin … device.ymax: the first panel's window (one set of constants serves
+ *  every panel), undefined while it is 3D. */
+function feedDeviceWindow() {
+  const p = panels[0];
+  const { w, h } = p.layout.rect;
+  const ok = p.mode === '2d' && w > 0 && h > 0;
+  const { cx, cy, upp, ratio = 1 } = p.view;
+  const hx = (w / 2) * upp;
+  const hy = ((h / 2) * upp) / ratio;
+  setDeviceInput('xmin', [ok ? cx - hx : NaN]);
+  setDeviceInput('xmax', [ok ? cx + hx : NaN]);
+  setDeviceInput('ymin', [ok ? cy - hy : NaN]);
+  setDeviceInput('ymax', [ok ? cy + hy : NaN]);
+}
+
 /** The same current state and constant values for rendering and drag updates. */
 function currentConstEnv(time: number): Record<string, number> {
   if (stateSys) stateTime = advanceState(defs, stateSys, stateVals, stateTime, time);
@@ -1160,6 +1177,7 @@ function render() {
   const dpr = window.devicePixelRatio || 1;
   const time = graphTime();
   const active = equations.filter(e => e.cls && !e.error).flatMap(renderMembers);
+  feedDeviceWindow();
   advanceSpin();
 
   // States carry between frames, so they are integrated up to now before
@@ -2311,6 +2329,7 @@ function recompileAll() {
     },
   );
   defs = prepared.defs;
+  syncMotion(readsMotion(defs.consts.keys()), showNotice);
   ensureTables(prepared.raw);
   sumBoundNames = prepared.sumBoundConsts;
   const wasKey = stateSys?.key;
@@ -4581,6 +4600,8 @@ canvas.addEventListener('pointerleave', () => {
   setHover(null);
 });
 canvas.addEventListener('pointermove', e => {
+  // device.mouse, in the panel gestures act on (the one under an idle pointer).
+  if (cur.mode === '2d') setDeviceInput('mouse', toMath(e.clientX, e.clientY));
   const p = pointers.get(e.pointerId);
   if (p) {
     p.x = e.clientX;
