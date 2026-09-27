@@ -44,7 +44,8 @@ export const FEATURED: FeaturedGraph[] = [
       'segment(b1, b2)',
       'b1',
       'b2',
-      viewBox(0, -0.9, 4.6),
+      // b2 starts at y = -cos 2.5 - cos 2.4 ≈ 1.54 and swings back that high.
+      viewBox(0, -0.3, 4.6),
     ],
   },
   {

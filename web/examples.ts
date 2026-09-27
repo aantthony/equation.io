@@ -101,7 +101,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ],
       ['antiderivative', 'f(x) = x^2 - 1; y = f(x); y = int(f(x) dx)'],
       ['Gaussian integral = √π', 'view(x = -3.5..3.5, y = -0.6..1.6); y = exp(-x^2); int[-inf..inf] exp(-x^2) dx'],
-      ['Gaussian error fn', 'view(x = -4..4, y = -1.2..1.2); y = int[0..x] exp(-t^2) dt'],
+      ['Gaussian error fn', 'view(x = -4..4, y = -1.2..1.2); y = (2/sqrt(pi)) int[0..x] exp(-t^2) dt'],
       ['normal cdf', 'view(x = -4..4, y = -0.6..1.2); y = normalpdf(x, 0, 1); y = int[-inf..x] normalpdf(t, 0, 1) dt'],
       ['sine integral Si(x)', 'view(x = -20..20, y = -2.2..2.2); y = int[0..x] sin(t)/t dt'],
     ],
@@ -115,7 +115,7 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       ['alternating sum → ln 2', 'a_n = (-1)^(n+1)/n; s_n = sum(k=1..n, a_k); y = ln(2)'],
       ['differences of squares', 'b_n = n^2; a_n = b_[n+1] - b_n'],
       ['sequence statistics', 'a_n = 1/n; L = a_[1..20]; L; mean(L); hist(L)'],
-      ['cobweb', 'r = 2.9; a_0 = 0.15; a_{n+1} = r a_n (1 - a_n)'],
+      ['cobweb', 'view(x = 0..1, y = 0..1); r = 2.9; a_0 = 0.15; a_{n+1} = r a_n (1 - a_n)'],
       ['logistic bifurcation', 'a_{n+1} = x a_n (1 - a_n)'],
       [
         'rule 30',
@@ -158,7 +158,11 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         'view(x = -1..6, y = -1..10); P = [(0,1.1),(1,2.9),(2,5.2),(3,6.8),(4,9.1)]; P.y ~ m P.x + b; P; y = m x + b; # above the line; P.y > m P.x + b; ' +
           '# residuals; (P.x,P.y-(m P.x+b)); total((P.y - (m P.x + b))^2)',
       ],
-      ['quadratic fit', 'P = [(-2,9),(-1,2),(0,1),(1,6),(2,17)]; P.y ~ a P.x^2 + b P.x + c; P; y = a x^2 + b x + c'],
+      [
+        'quadratic fit',
+        'view(x = -3..3, y = -1..18); P = [(-2,9),(-1,2),(0,1),(1,6),(2,17)]; P.y ~ a P.x^2 + b P.x + c; P; ' +
+          'y = a x^2 + b x + c',
+      ],
       ['exponential fit', 'P = [(0,2),(0.5,2.84),(1,4.03),(1.5,5.72),(2,8.11)]; P.y ~ a exp(b P.x); P; y = a exp(b x)'],
     ],
   ],
@@ -368,17 +372,24 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
         "r' = vel; vel' = -9 r/|r|^3; r(0) = (2, 0); vel(0) = (0, 1.5); segment((0, 0), r); r; (0, 0)",
       ],
       // pos = displacement, vel = velocity: a phase portrait in (pos, vel).
-      ['driven oscillator', "pos' = vel; vel' = sin(2t) - pos - vel/5; (pos, vel)"],
+      // X(0..60) draws the path settling from rest onto the driven cycle.
+      [
+        'driven oscillator',
+        "view(x = -2..2, y = -2..2); pos' = vel; vel' = sin(2t) - pos - vel/5; X = (pos, vel); X(0..60); X",
+      ],
       [
         'SIR epidemic',
         'view(x = -45..105, y = -0.1..1.1, ratio = 50); b = 0.3; g = 0.1; ' +
           "S' = -b S sick; sick' = b S sick - g sick; S(0) = 0.99; sick(0) = 0.01; R = 1 - S - sick; " +
           'S(0..100); sick(0..100); R(0..100)',
       ],
-      // One 3-component state; the plot row projects onto the x–z plane.
+      // One 3-component state; q projects it onto the x–z plane, q(5..40)
+      // draws the attractor past the transient and q rides along it. (Not P:
+      // P(…) is a probability.)
       [
         'Lorenz attractor',
-        "r' = (10(r_2 - r_1), r_1(28 - r_3) - r_2, r_1 r_2 - 8 r_3/3); " + 'r(0) = (1, 1, 20); (r_1/4, r_3/4 - 6)',
+        "r' = (10(r_2 - r_1), r_1(28 - r_3) - r_2, r_1 r_2 - 8 r_3/3); " +
+          'r(0) = (1, 1, 20); q = (r_1/4, r_3/4 - 6); q(5..40); q',
       ],
       // 100 runs from nearby starts spread over the attractor one run traces;
       // the starts are a tuple, so p[1] is the first run.
@@ -547,10 +558,13 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
       // three points the solver marks. JF's rows are the gradients of F's
       // components, and its determinant reads -2 at the fiber point (1, -1.5,
       // 6.5). Drag c above 0 and two of the points leave — they escape to
-      // infinity, which is how an étale map gets to be 3-to-1.
+      // infinity, which is how an étale map gets to be 3-to-1. The camera
+      // lifts the frame to z = 6.5 and turns so the two high points separate;
+      // it stays close because the solver's search box grows with the camera
+      // distance, and from radius 20 its seeds miss one of the pair.
       [
         'Jacobian counterexample',
-        'c = -0.25; F = ((1 + x y)³ z + y² (1 + x y)(4 + 3x y), y + 3x (1 + x y)² z + 3x y² (4 + 3x y), 2x − 3x² y − x³ z); JF(x,y,z) = (∇F_x, ∇F_y, ∇F_z); det(JF(1, −1.5, 6.5)); (F_x, F_y, F_z) = (c, 0, 0)',
+        'camera(0.6, 0.35, 14, (0, 0, 3)); c = -0.25; F = ((1 + x y)³ z + y² (1 + x y)(4 + 3x y), y + 3x (1 + x y)² z + 3x y² (4 + 3x y), 2x − 3x² y − x³ z); JF(x,y,z) = (∇F_x, ∇F_y, ∇F_z); det(JF(1, −1.5, 6.5)); (F_x, F_y, F_z) = (c, 0, 0)',
       ],
     ],
   ],
@@ -559,12 +573,18 @@ export const EXAMPLES: Array<[string, Array<[string, string]>]> = [
     [
       ['waves', 'z = sin(x)cos(y)'],
       ['sphere', 'x^2 + y^2 + z^2 = 9'],
-      ['saddle', 'z = (x^2 - y^2)/4'],
-      ['gyroid', 'sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x) = 0'],
+      ['saddle', 'z = x^2 - y^2'],
+      // Unbounded, the gyroid surrounds the camera; a ball cuts out a piece.
+      ['gyroid', 'sin(x)cos(y) + sin(y)cos(z) + sin(z)cos(x) = {x^2 + y^2 + z^2 < 36: 0}'],
       ['vase (revolve)', 'a = 1; revolve({-3 < y < 3: 1.5 + a sin(y) / 2}, y)'],
       ['torus', '(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))'],
       ['sphere (u,v)', '(2sin(pi v)cos(2pi u), 2sin(pi v)sin(2pi u), 2cos(pi v))'],
-      ['breathing torus', '(cos(2pi u)(2+cos(2pi v+t)), sin(2pi u)(2+cos(2pi v+t)), sin(2pi v+t))'],
+      // The tube radius swells and shrinks with t (shifting v by t would
+      // only slide the same torus along itself).
+      [
+        'breathing torus',
+        '(cos(2pi u)(2+(1+sin(t)/2)cos(2pi v)), sin(2pi u)(2+(1+sin(t)/2)cos(2pi v)), (1+sin(t)/2)sin(2pi v))',
+      ],
     ],
   ],
   [

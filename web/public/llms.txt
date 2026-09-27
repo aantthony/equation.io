@@ -38,11 +38,11 @@ Examples (paste-ready):
 
 - [Parabola](https://equation.io/#y%3Dx%5E2): `y = x^2`
 - [Circle](https://equation.io/#x%5E2%2By%5E2%3D4): `x^2 + y^2 = 4`
-- [Sine + tangent line](https://equation.io/#f(x)%3Dx%5E3-2x;g(x)%3Dd%2Fdx%20f(x);a%3D1;y%3Df(x);y%3Df(a)%2Bg(a)(x-a)): `f(x) = x^3 - 2x; g(x) = d/dx f(x); a = 1; y = f(x); y = f(a) + g(a)(x-a)`
+- [Cubic + tangent line](https://equation.io/#f(x)%3Dx%5E3-2x;g(x)%3Dd%2Fdx%20f(x);a%3D1;y%3Df(x);y%3Df(a)%2Bg(a)(x-a)): `f(x) = x^3 - 2x; g(x) = d/dx f(x); a = 1; y = f(x); y = f(a) + g(a)(x-a)`
 - [Slider-controlled wave](https://equation.io/#a%3D2;y%3Dsin(a%20x)%2Fa): `a = 2; y = sin(a x)/a`
 - [Fourier series](https://equation.io/#N%20%3D%208;y%20%3D%202%20sum%5Bn%3D1..N%5D%20(-1)%5E(n%2B1)%20sin(n%20x)%2Fn): `N = 8; y = 2 sum[n=1..N] (-1)^(n+1) sin(n x)/n` — drag N for more harmonics
 - [Animated ripples](https://equation.io/#sin(x%5E2%2By%5E2-4t)%2F2): `sin(x^2+y^2-4t)/2`
-- [3D saddle](https://equation.io/#z%3D(x%5E2-y%5E2)%2F4): `z = (x^2 - y^2)/4`
+- [3D saddle](https://equation.io/#z%20%3D%20x%5E2%20-%20y%5E2): `z = x^2 - y^2`
 - [Torus (parametric 3D)](https://equation.io/#(cos(2pi%20u)(2%2Bcos(2pi%20v))%2C%20sin(2pi%20u)(2%2Bcos(2pi%20v))%2C%20sin(2pi%20v))): `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`
 - [Complex dipole field](https://equation.io/#ln(w-2)-ln(w%2B2)): `ln(w-2) - ln(w+2)`
 - [Domain coloring](https://equation.io/#domain((w%5E3%20-%201)%2Fw)): `domain((w^3 - 1)/w)`
