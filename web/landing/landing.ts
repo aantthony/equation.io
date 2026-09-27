@@ -101,6 +101,10 @@ function cardFor(item: ShowcaseItem): HTMLAnchorElement {
   img.loading = 'lazy';
   img.width = 900;
   img.height = 600;
+  // about.css crops the shot to 3:2 through this frame.
+  const frame = document.createElement('div');
+  frame.className = 'shot';
+  frame.append(img);
 
   const body = document.createElement('div');
   body.className = 'card-body';
@@ -111,7 +115,7 @@ function cardFor(item: ShowcaseItem): HTMLAnchorElement {
   const code = document.createElement('code');
   code.textContent = item.eqs.join(';  ');
   body.append(h3, p, code);
-  card.append(img, body);
+  card.append(frame, body);
 
   card.addEventListener('click', e => {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;

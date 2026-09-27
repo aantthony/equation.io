@@ -19,6 +19,9 @@ export default defineConfig({
   build: {
     outDir: '../dist-web',
     emptyOutDir: true,
+    // The CSP's font-src 'self' refuses data: URIs, so small font subsets
+    // must ship as files rather than be inlined into the CSS.
+    assetsInlineLimit: file => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined),
   },
   environments: {
     client: {

@@ -8,6 +8,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Equation.io — graph anything you can write down</title>
   <meta name="description" content="Equation.io plots implicit equations, inequalities, vector fields, complex functions, fractals, simulations and 3D surfaces straight from your browser, compiled to the GPU as you type.">
+  <meta name="theme-color" content="#07090e">
+  <meta name="color-scheme" content="dark">
   <link rel="canonical" href="https://equation.io/about/">
   <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM instructions">
   <meta property="og:type" content="website">
@@ -26,38 +28,54 @@
   <header class="nav">
     <a class="brand" href="/about/">Equation<span>.io</span></a>
     <div class="nav-links">
+      <a class="nav-link" href="#gallery">Gallery</a>
+      <a class="nav-link" href="#deep-links">Links</a>
       <a class="nav-link" href="https://github.com/aantthony/equation.io" title="Source code on GitHub" rel="noopener">GitHub</a>
       <a class="cta" href="/">Start graphing</a>
     </div>
   </header>
 
   <section class="hero">
-    <h1>Graph anything you can <em>write down</em></h1>
-    <p class="tagline">
-      Implicit curves, inequalities, vector fields, complex functions, fractals,
-      simulations and 3D surfaces — typed as they'd appear on paper, compiled to your GPU as you type.
-    </p>
-    <div class="hero-actions">
-      <a class="cta big" href="/">Start graphing — it's free</a>
+    <!-- The orbiting-charge scene from the gallery, drawn live behind the type. -->
+    <canvas id="field" aria-hidden="true"></canvas>
+    <p class="clock" aria-hidden="true"><i>t</i> = <span id="clock">0.000</span></p>
+    <div class="hero-inner">
+      <h1 class="display">
+        <span class="line">Type an</span>
+        <span class="line reveal" data-text="Equation"><span>Equation</span></span>
+      </h1>
+      <p class="lede">
+        Graph anything you can write down. Implicit curves, inequalities, vector fields,
+        complex functions, fractals, simulations and 3D surfaces — typed as they'd appear
+        on paper, compiled to your GPU as you type.
+      </p>
+      <div class="hero-actions">
+        <a class="cta big" href="/">Start graphing — it's free</a>
+        <a class="ghost" href="#gallery">See what it draws ↓</a>
+      </div>
     </div>
-    <figure class="hero-shot browser-frame">
-      <div class="chrome"><i></i><i></i><i></i><span class="addr">equation.io</span></div>
-      <img src="/shots/hero.png" alt="The Equation.io app plotting a circle, a traveling wave and a shaded region" width="1440" height="900">
-    </figure>
+    <a class="typed" id="typed" href="/" title="Open this graph in the app">
+      <!-- rows are typed out by hero-field.ts -->
+    </a>
   </section>
 
+  <nav class="chapters" aria-label="Gallery chapters">
+    <p class="eyebrow">Every image below is a live graph — click one to open it in the app.</p>
+    <ol id="chapters"><!-- rendered from about.ts --></ol>
+  </nav>
+
   <main id="gallery">
-    <p class="hint">Every image below is a live graph — click one to open it in the app.</p>
     <!-- sections are rendered from showcase.ts -->
   </main>
 
   <section class="deeplinks" id="deep-links">
-    <h2>Link straight to a graph</h2>
+    <p class="kicker">URL&nbsp;/&nbsp;API</p>
+    <h2 class="display small">The link <em>is</em> the graph</h2>
     <p>
       Every graph <em>is</em> a URL. To open Equation.io with equations already
       rendered, build a link of the form:
     </p>
-    <pre><code>https://equation.io/#&lt;equation&gt;;&lt;equation&gt;;...</code></pre>
+    <pre><code>https://equation.io/#<b>&lt;equation&gt;</b>;<b>&lt;equation&gt;</b>;...</code></pre>
     <p>
       Percent-encode each equation (JavaScript <code>encodeURIComponent</code>)
       and join them with <code>;</code>. Each equation gets its own row and
@@ -65,11 +83,11 @@
       link is the interface.
     </p>
     <ul>
-      <li>Parabola: <a href="https://equation.io/#y%3Dx%5E2">https://equation.io/#y%3Dx%5E2</a></li>
-      <li>Circle: <a href="https://equation.io/#x%5E2%2By%5E2%3D4">https://equation.io/#x%5E2%2By%5E2%3D4</a></li>
-      <li>3D cylinder (parametric): <a href="https://equation.io/#(cos(2pi%20u)%2C%20sin(2pi%20u)%2C%204v-2)">https://equation.io/#(cos(2pi u), sin(2pi u), 4v-2)</a></li>
-      <li>Animated wave: <a href="https://equation.io/#y%3Dsin(x-2t)">https://equation.io/#y%3Dsin(x-2t)</a></li>
-      <li>Solid cube (convex hull of crossed lists): <a href="https://equation.io/#hull((%5B-1%2C1%5D%2C%5B-1%2C1%5D%2C%5B-1%2C1%5D))">https://equation.io/#hull(([-1,1],[-1,1],[-1,1]))</a></li>
+      <li><span>Parabola</span> <a href="https://equation.io/#y%3Dx%5E2">https://equation.io/#y%3Dx%5E2</a></li>
+      <li><span>Circle</span> <a href="https://equation.io/#x%5E2%2By%5E2%3D4">https://equation.io/#x%5E2%2By%5E2%3D4</a></li>
+      <li><span>3D cylinder (parametric)</span> <a href="https://equation.io/#(cos(2pi%20u)%2C%20sin(2pi%20u)%2C%204v-2)">https://equation.io/#(cos(2pi u), sin(2pi u), 4v-2)</a></li>
+      <li><span>Animated wave</span> <a href="https://equation.io/#y%3Dsin(x-2t)">https://equation.io/#y%3Dsin(x-2t)</a></li>
+      <li><span>Solid cube (convex hull of crossed lists)</span> <a href="https://equation.io/#hull((%5B-1%2C1%5D%2C%5B-1%2C1%5D%2C%5B-1%2C1%5D))">https://equation.io/#hull(([-1,1],[-1,1],[-1,1]))</a></li>
     </ul>
     <p>
       Full syntax reference for people and language models alike:
@@ -80,6 +98,10 @@
   </section>
 
   <footer>
+    <div class="sign">
+      <a class="wordmark" href="/">Equation<span>.io</span></a>
+      <p class="motto">Type an equation. See it instantly.</p>
+    </div>
     <p>Runs entirely in your browser. Your graphs live in the URL — share a link, share the graph.</p>
     <p class="fine">Equation.io &copy; 2026 &middot; <a href="https://github.com/aantthony/equation.io" rel="noopener">open source (MIT)</a> &middot; <a href="/llms.txt">llms.txt</a> &middot; <a href="/privacy/">Privacy</a> &middot; <a href="/terms/">Terms</a></p>
   </footer>

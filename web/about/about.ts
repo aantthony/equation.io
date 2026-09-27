@@ -1,5 +1,6 @@
 import { landingForGroup } from '../../lib/landings.ts';
-import { SHOWCASE, hashUrl } from './showcase.ts';
+import { startHeroField } from './hero-field.ts';
+import { SHOWCASE, hashUrl, type ShowcaseItem } from './showcase.ts';
 
 // Bundle the shots through Vite so each ships as assets/<slug>-<hash>.png:
 // content-hashed filenames can cache forever and bust automatically on change.
@@ -14,56 +15,82 @@ function shotUrl(slug: string): string {
   if (!url) throw new Error(`no bundled shot for "${slug}" (expected web/shots/${slug}.png)`);
   return url;
 }
+function item(slug: string): ShowcaseItem {
+  const found = SHOWCASE.find(i => i.slug === slug);
+  if (!found) throw new Error(`no showcase item "${slug}"`);
+  return found;
+}
+function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+const pad = (n: number) => String(n).padStart(2, '0');
+const anchor = (group: string) => group.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
+// Hero: the backdrop is this gallery item, and the typed rows open it.
+const orbit = item('orbiting-charge');
+const typed = document.getElementById('typed') as HTMLAnchorElement;
+typed.href = hashUrl(orbit.eqs);
+startHeroField({
+  canvas: document.getElementById('field') as HTMLCanvasElement,
+  clock: document.getElementById('clock')!,
+  typed,
+  rows: orbit.eqs,
+});
+
+// Gallery, one numbered chapter per group.
 const gallery = document.getElementById('gallery')!;
-
+const chapters = document.getElementById('chapters')!;
 const groups: string[] = [];
-for (const item of SHOWCASE) if (!groups.includes(item.group)) groups.push(item.group);
+for (const it of SHOWCASE) if (!groups.includes(it.group)) groups.push(it.group);
 
-for (const group of groups) {
-  const section = document.createElement('section');
-  section.className = 'group';
-  const head = document.createElement('div');
-  head.className = 'group-head';
-  const h = document.createElement('h2');
-  h.textContent = group;
-  head.append(h);
+groups.forEach((group, gi) => {
+  const items = SHOWCASE.filter(i => i.group === group);
+  const counter = `${pad(gi + 1)} / ${pad(groups.length)}`;
+
+  const li = el('li');
+  const link = el('a');
+  link.href = `#${anchor(group)}`;
+  link.append(el('span', 'num', pad(gi + 1)), el('span', 'name', group), el('span', 'count', String(items.length)));
+  li.append(link);
+  chapters.append(li);
+
+  const section = el('section', 'group');
+  section.id = anchor(group);
+  const head = el('div', 'group-head');
+  const title = el('div', 'group-title');
+  title.append(el('span', 'counter', counter), el('h2', 'display small', group));
+  head.append(title);
   const landing = landingForGroup(group);
   if (landing) {
-    const a = document.createElement('a');
+    const a = el('a', 'more', landing.nav + ' →');
     a.href = landing.path;
-    a.textContent = landing.nav + ' →';
     a.title = landing.title;
     head.append(a);
   }
-  const grid = document.createElement('div');
-  grid.className = 'grid';
-  for (const item of SHOWCASE.filter(i => i.group === group)) {
-    const card = document.createElement('a');
-    card.className = 'card';
-    card.href = hashUrl(item.eqs);
+  const grid = el('div', 'grid');
+  for (const it of items) {
+    const card = el('a', 'card');
+    card.href = hashUrl(it.eqs);
     card.title = 'Open in the app';
 
-    const img = document.createElement('img');
-    img.src = shotUrl(item.slug);
-    img.alt = item.title;
+    const frame = el('div', 'shot');
+    const img = el('img');
+    img.src = shotUrl(it.slug);
+    img.alt = it.title;
     img.loading = 'lazy';
     img.width = 900;
     img.height = 600;
+    frame.append(img);
 
-    const body = document.createElement('div');
-    body.className = 'card-body';
-    const h3 = document.createElement('h3');
-    h3.textContent = item.title;
-    const p = document.createElement('p');
-    p.textContent = item.blurb;
-    const code = document.createElement('code');
-    code.textContent = item.eqs.join(';  ');
-    body.append(h3, p, code);
+    const body = el('div', 'card-body');
+    body.append(el('h3', undefined, it.title), el('p', undefined, it.blurb), el('code', undefined, it.eqs.join(';  ')));
 
-    card.append(img, body);
+    card.append(frame, body);
     grid.append(card);
   }
   section.append(head, grid);
   gallery.append(section);
-}
+});

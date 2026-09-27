@@ -1,24 +1,54 @@
+/* Self-hosted (the CSP allows only same-origin fonts), shared with the about
+   page: a wide grotesque for headings, a mono for dates and code. */
+@import '@fontsource-variable/archivo/wdth.css';
+@import '@fontsource-variable/jetbrains-mono/index.css';
+
+/* Light by default. theme.js sets data-theme from the app's saved choice
+   before first paint; without it, the system setting decides. */
 :root {
-  color-scheme: light dark;
-  --bg: #fafbfc;
-  --ink: #1a2230;
-  --muted: #5a6675;
-  --accent: #2568ac;
-  --line: #dce1e7;
+  color-scheme: light;
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --ink: #161a22;
+  --muted: #5b6472;
+  --accent: #9c5710;
+  --gold: #e39b45;
+  --line: #e4e1da;
+  --grid: rgba(20, 30, 50, 0.06);
+  --grid-major: rgba(20, 30, 50, 0.1);
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14161a;
-    --ink: #e6e8ea;
-    --muted: #a5afbc;
-    --accent: #78b4ff;
-    --line: #343b46;
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #07090e;
+    --surface: #10141d;
+    --ink: #eef0f4;
+    --muted: #98a1b0;
+    --accent: #f0ad5c;
+    --gold: #f0ad5c;
+    --line: rgba(255, 255, 255, 0.1);
+    --grid: rgba(150, 170, 210, 0.05);
+    --grid-major: rgba(150, 170, 210, 0.1);
   }
 }
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #07090e;
+  --surface: #10141d;
+  --ink: #eef0f4;
+  --muted: #98a1b0;
+  --accent: #f0ad5c;
+  --gold: #f0ad5c;
+  --line: rgba(255, 255, 255, 0.1);
+  --grid: rgba(150, 170, 210, 0.05);
+  --grid-major: rgba(150, 170, 210, 0.1);
+}
+
 * {
   box-sizing: border-box;
 }
 body {
+  position: relative;
   margin: 0;
   background: var(--bg);
   color: var(--ink);
@@ -28,6 +58,23 @@ body {
     -apple-system,
     'Segoe UI',
     sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+/* Graph paper behind the header and title, fading into the page. */
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 460px;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--grid-major) 1px, transparent 1px) 0 0 / 60px 60px,
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px) 0 0 / 60px 60px,
+    linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 12px 12px,
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 12px 12px;
+  -webkit-mask-image: linear-gradient(#000 30%, transparent);
+  mask-image: linear-gradient(#000 30%, transparent);
 }
 header,
 main,
@@ -41,9 +88,19 @@ header {
   align-items: center;
   flex-wrap: wrap;
   gap: 16px;
-  padding-block: 28px;
+  padding-block: 26px;
   border-bottom: 1px solid var(--line);
-  font-size: 15px;
+}
+header > a:not(.brand) {
+  font:
+    500 13px/1 'JetBrains Mono Variable',
+    ui-monospace,
+    Menlo,
+    monospace;
+  text-decoration: none;
+}
+header > a:not(.brand):hover {
+  text-decoration: underline;
 }
 a {
   color: var(--accent);
@@ -56,40 +113,76 @@ a:focus-visible {
 }
 .brand {
   color: var(--ink);
-  font-size: 22px;
-  font-weight: 700;
+  font-family: 'Archivo Variable', system-ui, sans-serif;
+  font-stretch: 112%;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   text-decoration: none;
 }
 .brand span {
-  color: var(--accent);
+  color: var(--gold);
 }
 main {
-  padding-block: 38px 48px;
+  padding-block: 56px 48px;
+  counter-reset: section;
+}
+h1,
+h2 {
+  font-family: 'Archivo Variable', system-ui, sans-serif;
+  text-wrap: balance;
 }
 h1 {
-  font-size: clamp(32px, 6vw, 44px);
-  line-height: 1.15;
-  letter-spacing: -0.03em;
-  margin: 0 0 12px;
+  font-size: clamp(30px, 7vw, 58px);
+  font-stretch: 125%;
+  font-weight: 850;
+  text-transform: uppercase;
+  line-height: 0.98;
+  letter-spacing: -0.01em;
+  margin: 0 0 18px;
 }
 h2 {
-  font-size: 23px;
+  font-size: 22px;
+  font-stretch: 112%;
+  font-weight: 750;
   line-height: 1.3;
-  margin: 36px 0 12px;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.01em;
+  margin: 48px 0 14px;
+}
+/* Numbered like the about page's gallery chapters. */
+h2::before {
+  counter-increment: section;
+  content: counter(section, decimal-leading-zero);
+  display: block;
+  margin-bottom: 6px;
+  font:
+    600 12.5px/1 'JetBrains Mono Variable',
+    ui-monospace,
+    Menlo,
+    monospace;
+  letter-spacing: 0.04em;
+  color: var(--accent);
 }
 p {
   margin: 0 0 18px;
 }
 .date {
   color: var(--muted);
-  font-size: 14px;
+  font:
+    13px/1.5 'JetBrains Mono Variable',
+    ui-monospace,
+    Menlo,
+    monospace;
+  letter-spacing: 0.02em;
 }
+/* Set like a highlighted equation row: a bar down the left on a tint. */
 .summary {
-  font-size: 19px;
-  margin-top: 28px;
-  padding-left: 20px;
-  border-left: 3px solid var(--accent);
+  font-size: 18.5px;
+  margin: 32px 0 28px;
+  padding: 18px 22px;
+  border-left: 5px solid var(--gold);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
 }
 ul {
   padding-left: 24px;
@@ -97,15 +190,32 @@ ul {
 li {
   margin-bottom: 12px;
 }
+li::marker {
+  color: var(--gold);
+}
+strong {
+  font-weight: 650;
+}
 code {
-  font-size: 0.9em;
+  font:
+    0.86em 'JetBrains Mono Variable',
+    ui-monospace,
+    Menlo,
+    monospace;
+  padding: 1px 5px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
   overflow-wrap: anywhere;
 }
 footer {
   border-top: 1px solid var(--line);
   padding-block: 24px 36px;
   color: var(--muted);
-  font-size: 14px;
+  font:
+    13px/1.6 'JetBrains Mono Variable',
+    ui-monospace,
+    Menlo,
+    monospace;
   display: flex;
   justify-content: space-between;
   flex-wrap: wrap;
@@ -116,11 +226,20 @@ nav {
   gap: 18px;
 }
 @media print {
-  :root {
+  :root,
+  :root:not([data-theme='light']),
+  :root[data-theme='dark'] {
+    color-scheme: light;
     --bg: white;
+    --surface: white;
     --ink: black;
     --muted: #444;
     --accent: #222;
+    --gold: #222;
+    --line: #ccc;
+  }
+  body::before {
+    display: none;
   }
   header,
   main,

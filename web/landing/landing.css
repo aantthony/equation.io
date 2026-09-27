@@ -11,7 +11,8 @@
 #landing {
   max-width: 1080px;
   margin: 0 auto;
-  padding: 28px 24px 10px;
+  /* Clear about.css's fixed nav (and the status bar in the installed app). */
+  padding: calc(96px + env(safe-area-inset-top)) 24px 10px;
 }
 #landing h1 {
   font-size: clamp(28px, 5vw, 44px);
