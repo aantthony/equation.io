@@ -1904,6 +1904,22 @@ export function resolveRow(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Resol
   return { expr, integral: sole ? ctx.ints![0] : null };
 }
 
+/** Multivector functions (lib/clifford.ts): their values may be quaternions. */
+const MV_VALUED = new Set(['quat', 'gp', 'rev', 'dual', 'slerp', 'grade', 'vec']);
+
+/**
+ * Whether a resolved argument may lower to a point or a quaternion — a tuple,
+ * a named point or unit vector, or multivector algebra somewhere inside — and
+ * so fill more than one parameter. Anything else is one number.
+ */
+function mightBePoint(e: Expr, opts: ResolveOpts): boolean {
+  if (e.kind === 'vec') return true;
+  if (e.kind === 'var') return !!opts.comps?.(e.name) || /^e_[xyz]+$/.test(e.name);
+  if (e.kind === 'call' && MV_VALUED.has(e.name)) return true;
+  if (e.kind === 'bin' && e.glyph === 'geometric') return true;
+  return childrenOf(e).some(c => mightBePoint(c, opts));
+}
+
 /**
  * Inline user-function calls, resolve d/dx derivative notation, and expand
  * Σ/Π sums and ∫ integrals (post-order).
@@ -2015,7 +2031,13 @@ function rx(e: Expr, ctx: Ctx): Expr {
           const splat = args.length === 1 && n >= 2 && args[0].kind === 'vec' ? args[0].items : args;
           if (args.length === 1 && n >= 2 && args[0].kind === 'vec' && splat.length !== n)
             throw new Error(compDims(e.name, n, args[0], splat.length));
-          if (splat.length !== n) throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
+          // A computed point (or quaternion) spreads into consecutive
+          // parameters too — f(T(a, b) + P, k + 1) for f(a, b, k) — but how
+          // many it fills is only known once it lowers, so geometry lowering
+          // counts then (lib/geom.ts, case 'loop'). Arguments that cannot be
+          // points are counted here, where the definition was written.
+          if (splat.length !== n && !splat.some(a => mightBePoint(a, ctx.opts)))
+            throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
           return { kind: 'call', name: RECUR, args: splat };
         }
         if (args.length === 1 && n >= 2 && args[0].kind !== 'num') {

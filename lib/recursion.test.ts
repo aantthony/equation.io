@@ -89,6 +89,65 @@ describe('tail-recursive functions', () => {
     );
   });
 
+  it('spreads a computed point or quaternion among the self-call’s other arguments', () => {
+    // p ↦ p/2 + (1, 1) from the origin: (1, 1), (1.5, 1.5), (1.75, 1.75).
+    expect(valueOf(['G(a, b, k) = {k >= 3: a + b, G((a, b)/2 + (1, 1), k + 1)}', 'G(0, 0, 0)'])).toBe(3.5);
+    // A helper that returns a point, and a named point.
+    expect(valueOf(['T(a, b) = (b, a)', 'G(a, b, k) = {k >= 1: a, G(T(a, b), k + 1)}', 'G(1, 2, 0)'])).toBe(2);
+    const named = analyzeRows(['P = (1, 2)', 'G(a, b, k) = {k >= 1: a + b, G(P, k + 1)}', 'G(0, 0, 0)']).rows[2];
+    expect(named.error).toBeUndefined();
+    expect(evaluate((named.cpu as { expr: import('./expr.ts').Expr }).expr, { P_x: 1, P_y: 2 })).toBe(3);
+    // A quaternion spreads into w, x, y, z: i² + i = −1 + i.
+    expect(
+      valueOf([
+        'C = quat(0, 1, 0, 0)',
+        'Q(a, b, c, d, k) = {k >= 1: a, Q(quat(a, b, c, d)^2 + C, k + 1)}',
+        'Q(0, 1, 0, 0, 0)',
+      ]),
+    ).toBe(-1);
+    // The count is checked once the point's size is known.
+    const short = analyzeRows(['G(a, b, c, k) = {k >= 3: a, G((a, b) + (x, y), k + 1)}', 'G(x, y, z, 0) = 0.5']);
+    expect(short.rows[1].error).toMatch(/passes 3 values, and the function takes 4/);
+    const long = analyzeRows(['G(a, b, k) = {k >= 3: a, G((a, b) + (x, y), k + 1, 2)}', 'G(x, y, 0) = 0.5']);
+    expect(long.rows[1].error).toMatch(/passes 4 values, and the function takes 3/);
+  });
+
+  it('draws the Mandelbulb, written out, as the level set of its orbit’s Green function', () => {
+    const rows = [
+      'n = 8',
+      'r(a, b, c) = sqrt(a^2 + b^2 + c^2)',
+      'T(a, b, c) = r(a, b, c)^n (sin(n acos(c/r(a, b, c))) cos(n atan2(b, a)), sin(n acos(c/r(a, b, c))) sin(n atan2(b, a)), cos(n acos(c/r(a, b, c))))',
+      'G(a, b, c, k) = {r(a, b, c) > 2: ln(r(a, b, c))/n^k, k >= 12: ln(r(a, b, c))/n^k, G(T(a, b, c) + (x, y, z), k + 1)}',
+      'G(x, y, z, 0) = 0.001',
+    ];
+    const row = analyzeRows(rows).rows.at(-1)!;
+    expect(row.error).toBeUndefined();
+    expect(row.cpu!.type).toBe('implicit3d');
+    const residual = (row.cpu as { residual: import('./expr.ts').Expr }).residual;
+    const at = (x: number, y: number, z: number) => evaluate(residual, { n: 8, x, y, z });
+    // Near the origin the orbit stays bounded (below the level); far away it
+    // escapes at once (above it).
+    expect(at(0.1, 0.2, 0.3)).toBeLessThan(0);
+    expect(at(1.5, 1.5, 1.5)).toBeGreaterThan(0);
+  });
+
+  it('draws a quaternion Julia set from an orbit written in quaternion algebra', () => {
+    const rows = [
+      's = 0',
+      'C = quat(-0.2, 0.8, 0, 0)',
+      'Q(a, b, c, d, k) = {|quat(a, b, c, d)| > 2: ln(|quat(a, b, c, d)|)/2^k, k >= 12: ln(|quat(a, b, c, d)|)/2^k, Q(quat(a, b, c, d)^2 + C, k + 1)}',
+      'Q(x, y, z, s, 0) = 0.001',
+    ];
+    const row = analyzeRows(rows).rows.at(-1)!;
+    expect(row.error).toBeUndefined();
+    expect(row.cpu!.type).toBe('implicit3d');
+    expect(row.cls!.params).toEqual(['s']);
+    const residual = (row.cpu as { residual: import('./expr.ts').Expr }).residual;
+    // 0 lies in the filled set for this C; (2, 2, 2) escapes at once.
+    expect(evaluate(residual, { s: 0, x: 0, y: 0, z: 0 })).toBeLessThan(0);
+    expect(evaluate(residual, { s: 0, x: 2, y: 2, z: 2 })).toBeGreaterThan(0);
+  });
+
   it('does not capture a substituted name that matches a loop param', () => {
     // g(c) = f(2) inlines c → the slider n inside a loop whose param is also n.
     const row = analyzeRows(['f(n) = {n <= 0: c, f(n - 1)}', 'g(c) = f(2)', 'n = 7', 'g(n)']).rows[3];

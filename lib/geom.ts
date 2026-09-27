@@ -23,7 +23,7 @@ import { type FigureForm, mapChildren } from './expr.ts';
  * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import { ANGLE_FN, type Expr, compArity, compDims, sameList } from './expr.ts';
+import { ANGLE_FN, type Expr, compArity, compDims, isRecur, sameList } from './expr.ts';
 import { SCALAR_REDUCTIONS, tupleAxis, withAxes } from './list.ts';
 import {
   type GetMat,
@@ -1295,14 +1295,45 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         return sc(e);
       return sc({ kind: 'piecewise', cases, otherwise });
     }
-    case 'loop':
-      return sc(
-        mapChildren(e, n => {
-          const v = lo(n);
-          if (v.vec) throw new Error('Points cannot pass through a recursive function.');
-          return v.e;
-        }),
-      );
+    case 'loop': {
+      const scalar = (n: Expr): Expr => {
+        const v = lo(n);
+        if (v.vec) throw new Error('Points cannot pass through a recursive function.');
+        return v.e;
+      };
+      // A self-call's points spread into consecutive parameters, as a call's
+      // single point does: f(T(a, b) + P, k + 1) passes f(a, b, k) three
+      // values. A quaternion spreads the same way, into its w, x, y, z, so
+      // an orbit can be written in quaternion algebra: Q(q^2 + c, k + 1).
+      // The function's result and conditions stay numbers.
+      const n = e.params.length;
+      const spread = (a: Expr): Expr[] => {
+        const m = lowerMv(a, lo);
+        if (m) {
+          if (!m.quat) throw new Error(NOT_A_MV_VALUE);
+          return quaternionParts(m);
+        }
+        const v = lo(a);
+        return v.vec ? v.items : [v.e];
+      };
+      const body = (x: Expr): Expr => {
+        if (isRecur(x)) {
+          const args = x.args.flatMap(spread);
+          if (args.length !== n)
+            throw new Error(
+              `A recursive call passes ${args.length} value${args.length === 1 ? '' : 's'}, and the function takes ${n}.`,
+            );
+          return { ...x, args };
+        }
+        if (x.kind !== 'piecewise') return scalar(x);
+        return {
+          ...x,
+          cases: x.cases.map(c => ({ cond: scalar(c.cond), value: body(c.value) })),
+          otherwise: x.otherwise && body(x.otherwise),
+        };
+      };
+      return sc({ ...e, seeds: e.seeds.map(scalar), body: body(e.body) });
+    }
   }
   throw new Error('Unreachable');
 }

@@ -101,10 +101,15 @@ segment. The glyph scale is tanh(σ₁)/σ₁ (glyphs.ts `glyphScale`): true siz
 while small, one cell at most; det < 0 draws in the complement colour.
 `jacobian` and `hessian` expand beside grad/div/curl.
 
-`qjulia(c, s)` is the implicit surface G = 10⁻³ of the Green function
-G = ln|qₙ|/2ⁿ of q ↦ q² + c from q₀ = x + y i + z j + s k, run as a bounded
-`loop` (12 passes). G is continuous — escape counts would jump, and the
-raymarcher refuses a crossing whose bracket does not close.
+The quaternion Julia set is written in user space: a recursive function
+whose self-call passes a quaternion, which spreads into its four parameters
+(lib/geom.ts, case `loop`) — `Q(a, b, c, d, k) = {|quat(a, b, c, d)| > 2:
+ln(|quat(a, b, c, d)|)/2^k, k >= 12: …, Q(quat(a, b, c, d)^2 + C, k + 1)}`
+and `Q(x, y, z, s, 0) = 0.001`. It returns the Green function
+G = ln|qₙ|/2ⁿ rather than an escape count: G is continuous, while escape
+counts jump and the raymarcher refuses a crossing whose bracket does not
+close. `qjulia(c, s)` built the same surface in; it is kept, undocumented,
+so links that use it still open.
 
 ## Not done
 

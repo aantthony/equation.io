@@ -96,7 +96,10 @@ float depthOf(vec3 p) {
 `;
 
 const STEPS = 220;
-const BISECT = 24;
+/** Halvings of a sign-change bracket (at most 1/MIN_SAMPLES of the span):
+ *  12 leave it well under a pixel. Each is one more evaluation of the field,
+ *  which for an escape surface is a whole orbit. */
+const BISECT = 12;
 /** March samples spent bisecting onto an edge of a field's domain (where it
  *  turns NaN). */
 const EDGE_BISECT = 6;
@@ -119,6 +122,52 @@ const JUMP_BUDGET = 4;
  *  it started. Refused when the bisected gap is still this fraction of it. */
 const JUMP_RATIO = 0.25;
 
+/** Progressive refinement (Renderer3D.drawImplicits): with uChunk =
+ *  (grid, x, y), fragment (i, j) of a pass stands for full-resolution pixel
+ *  (grid i + x, grid j + y) — one cell of every grid × grid block, as a
+ *  dense image a grid-th the size. (Masking the full-size image down to
+ *  that cell instead saves nothing: GPUs shade 2×2 quads and wider groups,
+ *  which run the whole march for their one surviving pixel.) grid 0 is the
+ *  plain full-resolution pass. */
+const CHUNK_DECL = 'uniform ivec3 uChunk;';
+const CHUNK_PIXEL =
+  'vec2 pix = uChunk.x > 0 ? floor(gl_FragCoord.xy) * float(uChunk.x) + vec2(uChunk.yz) + 0.5 : gl_FragCoord.xy;';
+/** A sample's offset within its pixel, for antialiasing at rest. */
+const JITTER_DECL = 'uniform vec2 uJitter;';
+
+/** Writes a chunk pass into its cell of the full-resolution surface target. */
+const SCATTER_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D uColorTex;
+uniform sampler2D uDepthTex;
+${CHUNK_DECL}
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  if (p % uChunk.x != uChunk.yz) discard;
+  ivec2 q = p / uChunk.x;
+  outColor = texelFetch(uColorTex, q, 0);
+  gl_FragDepth = texelFetch(uDepthTex, q, 0).r;
+}
+`;
+
+/** Draws a surface target (premultiplied color and depth) into the frame,
+ *  so the surfaces still hide, and hide behind, what the frame draws. */
+const COMPOSITE_FRAG = `#version 300 es
+precision highp float;
+uniform sampler2D uColorTex;
+uniform sampler2D uDepthTex;
+uniform vec2 uOrigin;
+out vec4 outColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy - uOrigin);
+  vec4 c = texelFetch(uColorTex, p, 0);
+  if (c.a <= 0.0) discard;
+  outColor = c;
+  gl_FragDepth = texelFetch(uDepthTex, p, 0).r;
+}
+`;
+
 function surfaceFrag(field: string, grad?: [string, string, string], params?: string[]): string {
   const gradFn = grad
     ? `
@@ -137,6 +186,8 @@ vec3 gradF(vec3 p, float h) {
 precision highp float;
 uniform vec3 uColor;
 uniform vec3 uEye;
+${CHUNK_DECL}
+${JITTER_DECL}
 ${paramDecls(params)}
 out vec4 outColor;
 ${GLSL_PRELUDE}
@@ -149,7 +200,8 @@ float F(vec3 p) {
 ${gradFn}
 
 void main() {
-  vec2 ndc = ((gl_FragCoord.xy - uOrigin) / uRes) * 2.0 - 1.0;
+  ${CHUNK_PIXEL}
+  vec2 ndc = ((pix + uJitter - uOrigin) / uRes) * 2.0 - 1.0;
   vec3 ro = unproject(vec3(ndc, -1.0));
   vec3 far = unproject(vec3(ndc, 1.0));
   vec3 rd = normalize(far - ro);
@@ -698,6 +750,74 @@ export interface Scene3D {
 
 const GRID_N = 160;
 
+/** Pixels a raymarch of the surfaces may cover in a frame where the view
+ *  or the surfaces changed. A larger panel draws them at 1/2 (or 1/4 …) the
+ *  resolution on such frames, then refines at rest (drawImplicits). */
+const MOVING_PIXELS = 2e6;
+/** Rays per pixel the surfaces average once at rest: the first through the
+ *  pixel's center, the rest jittered within it. */
+const AA_SAMPLES = 8;
+/** How long the surfaces must hold still before refining begins: during a
+ *  drag the gaps between moves would otherwise each draw a refinement pass,
+ *  as costly as the drag's own frames, only for the next move to discard it. */
+const REST_MS = 150;
+
+/** Sample k's offset within the pixel, in (−½, ½)²: the Halton (2, 3)
+ *  sequence, which covers the pixel evenly at every count. */
+function haltonJitter(k: number): [number, number] {
+  const halton = (i: number, base: number) => {
+    let f = 1;
+    let r = 0;
+    for (; i > 0; i = Math.floor(i / base)) {
+      f /= base;
+      r += f * (i % base);
+    }
+    return r;
+  };
+  return [halton(k, 2) - 0.5, halton(k, 3) - 0.5];
+}
+
+/** An offscreen color and depth pair the implicit surfaces raymarch into. */
+interface SurfaceTarget {
+  fb: WebGLFramebuffer;
+  color: WebGLTexture;
+  depth: WebGLTexture;
+  w: number;
+  h: number;
+}
+
+/** A panel's surfaces as last drawn, and how far their refinement has got. */
+interface SurfaceState {
+  full: SurfaceTarget;
+  low: SurfaceTarget | null;
+  /** Everything the surfaces' pixels depend on but time. */
+  key: string;
+  time: number;
+  /** The grid × grid cells still to draw at full resolution, in order. */
+  cells: Array<[number, number]>;
+  grid: number;
+  /** The sample the cells belong to: 0 unjittered, up to AA_SAMPLES − 1. */
+  sample: number;
+  /** performance.now() when the key last changed. */
+  changedAt: number;
+  used: boolean;
+}
+
+/** The cells of a grid × grid block (grid a power of two) in ordered-dither
+ *  order, so each pass spreads its samples evenly over the block. */
+function ditherOrder(grid: number): Array<[number, number]> {
+  const cells: Array<[number, number, number]> = [];
+  const levels = Math.log2(grid);
+  for (let y = 0; y < grid; y++)
+    for (let x = 0; x < grid; x++) {
+      let rank = 0;
+      for (let i = 0; i < levels; i++)
+        rank += [0, 2, 3, 1][((y >> i) & 1) * 2 + ((x >> i) & 1)] * 4 ** (levels - 1 - i);
+      cells.push([x, y, rank]);
+    }
+  return cells.sort((a, b) => a[2] - b[2]).map(([x, y]) => [x, y]);
+}
+
 export class Renderer3D {
   private geometry: RetainedGeometry;
   private cache: ProgramCache;
@@ -721,6 +841,8 @@ export class Renderer3D {
   private gridIndexCount: number;
   private streamlineVao!: WebGLVertexArrayObject;
   private streamlineSeeds = 0;
+  /** Per panel, by its viewport origin. */
+  private surfaceStates = new Map<string, SurfaceState>();
 
   constructor(
     private gl: WebGL2RenderingContext,
@@ -926,19 +1048,48 @@ export class Renderer3D {
       gl.bindVertexArray(null);
     }
 
-    for (const s of surfaces) {
-      let prog: WebGLProgram;
-      try {
-        prog = this.cache.get(QUAD_VERT, surfaceFrag(s.field, s.grad, s.params));
-      } catch (e) {
-        console.error(e);
-        continue;
-      }
-      setCommon(prog);
-      setParams(prog, s.params, s.uniforms);
-      gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
-      gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
-      this.quad.draw();
+    if (surfaces.length) {
+      const drawSurfaces = (res: [number, number], chunk: [number, number, number], jitter: [number, number]) => {
+        for (const s of surfaces) {
+          let prog: WebGLProgram;
+          try {
+            prog = this.cache.get(QUAD_VERT, surfaceFrag(s.field, s.grad, s.params));
+          } catch (e) {
+            console.error(e);
+            continue;
+          }
+          setCommon(prog);
+          setParams(prog, s.params, s.uniforms);
+          // Offscreen: the target's own pixels, which may be coarser than the panel's.
+          gl.uniform2f(gl.getUniformLocation(prog, 'uRes'), ...res);
+          gl.uniform2f(gl.getUniformLocation(prog, 'uOrigin'), 0, 0);
+          gl.uniform3i(gl.getUniformLocation(prog, 'uChunk'), ...chunk);
+          gl.uniform2f(gl.getUniformLocation(prog, 'uJitter'), ...jitter);
+          gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
+          gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
+          this.quad.draw();
+        }
+      };
+      // What the surfaces' pixels depend on, bar time: a frame that changes
+      // none of it (a hover, an edit to another row) reuses them as drawn.
+      const key = JSON.stringify([
+        Array.from(vp),
+        boxR,
+        w,
+        h,
+        surfaces.map(s => [
+          s.field,
+          s.grad,
+          s.color,
+          (s.params ?? []).map(p => s.uniforms?.[uniformName(p)] ?? env[p] ?? 0),
+        ]),
+      ]);
+      const timed = surfaces.some(s => /\bt\b/.test([s.field, ...(s.grad ?? [])].join(' ')));
+      const id = `${ox},${oy}`;
+      this.drawImplicits(id, w, h, key, timed ? time : 0, drawSurfaces);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(ox, oy, w, h);
+      this.composite(this.surfaceStates.get(id)!.full, ox, oy);
     }
 
     for (const s of scene.psurfaces) {
@@ -1120,11 +1271,226 @@ export class Renderer3D {
     }
   }
 
+  /**
+   * Raymarch a panel's implicit surfaces into its offscreen target, as little
+   * as the frame needs. Raymarching is by far the costliest thing drawn: a
+   * fractal's field is a whole orbit, sampled ~50 times per pixel.
+   *
+   * - Nothing changed since the last frame: keep the target as it is.
+   * - The view, a slider or the surfaces changed: raymarch at a resolution
+   *   of at most MOVING_PIXELS, upscale it into the target, and queue the
+   *   full-resolution pixels to follow as the cells of a grid × grid block,
+   *   one cell per frame in dither order, while nothing changes again
+   *   (`refining` asks for those frames).
+   * - Once they are in, keep going at rest: AA_SAMPLES − 1 more passes, each
+   *   jittered within the pixel and blended in as a running average, so
+   *   edges smooth and the dust of thin detail a single ray hits or misses
+   *   averages out. Depth stays the unjittered pass's.
+   * - Only time changed (an animated field): raymarch at full resolution,
+   *   as an animation has no rest to refine in.
+   */
+  private drawImplicits(
+    id: string,
+    w: number,
+    h: number,
+    key: string,
+    time: number,
+    drawSurfaces: (res: [number, number], chunk: [number, number, number], jitter: [number, number]) => void,
+  ): void {
+    const { gl } = this;
+    let st = this.surfaceStates.get(id);
+    if (st && (st.full.w !== w || st.full.h !== h)) {
+      this.freeState(st);
+      st = undefined;
+    }
+    if (!st) {
+      st = {
+        full: this.makeTarget(w, h),
+        low: null,
+        key: '',
+        time: NaN,
+        cells: [],
+        grid: 1,
+        sample: AA_SAMPLES,
+        changedAt: 0,
+        used: true,
+      };
+      this.surfaceStates.set(id, st);
+    }
+    st.used = true;
+
+    const scissor = gl.isEnabled(gl.SCISSOR_TEST);
+    const clearColor = gl.getParameter(gl.COLOR_CLEAR_VALUE) as Float32Array;
+    gl.disable(gl.SCISSOR_TEST);
+    gl.enable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    // Premultiplied, so the target composites as the surfaces would have
+    // blended into the frame directly.
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    const clear = (t: SurfaceTarget) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    };
+
+    const grid = Math.max(1, 2 ** Math.ceil(Math.log(Math.max(1, (w * h) / MOVING_PIXELS)) / Math.log(4)));
+    const lw = Math.ceil(w / grid);
+    const lh = Math.ceil(h / grid);
+    if (!st.low || st.low.w !== lw || st.low.h !== lh) {
+      if (st.low) this.freeTarget(st.low);
+      st.low = this.makeTarget(lw, lh);
+    }
+    const low = st.low;
+    if (key !== st.key) {
+      st.key = key;
+      st.time = time;
+      st.changedAt = performance.now();
+      st.grid = grid;
+      st.sample = 0;
+      if (grid > 1) {
+        clear(low);
+        gl.viewport(0, 0, lw, lh);
+        // A coarse pixel's center is its block's center, so the upscale lines up.
+        drawSurfaces([w / grid, h / grid], [0, 0, 0], [0, 0]);
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, low.fb);
+        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, st.full.fb);
+        gl.blitFramebuffer(0, 0, lw, lh, 0, 0, lw * grid, lh * grid, gl.COLOR_BUFFER_BIT, gl.LINEAR);
+        gl.blitFramebuffer(0, 0, lw, lh, 0, 0, lw * grid, lh * grid, gl.DEPTH_BUFFER_BIT, gl.NEAREST);
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+        st.cells = ditherOrder(grid);
+      } else {
+        clear(st.full);
+        gl.viewport(0, 0, w, h);
+        drawSurfaces([w, h], [0, 0, 0], [0, 0]);
+        st.cells = [];
+      }
+    } else if (time !== st.time) {
+      st.time = time;
+      clear(st.full);
+      gl.viewport(0, 0, w, h);
+      drawSurfaces([w, h], [0, 0, 0], [0, 0]);
+      st.cells = [];
+      st.sample = AA_SAMPLES;
+    } else if (st.cells.length && performance.now() - st.changedAt >= REST_MS) {
+      const [x, y] = st.cells.shift()!;
+      const chunk: [number, number, number] = [st.grid, x, y];
+      // Raymarch this cell of every block as a dense coarse image …
+      clear(low);
+      gl.viewport(0, 0, lw, lh);
+      drawSurfaces([w, h], chunk, st.sample ? haltonJitter(st.sample) : [0, 0]);
+      // … then write it over the upscaled pass's pixels there, or for a
+      // jittered sample, blend it into their running average (color only).
+      gl.bindFramebuffer(gl.FRAMEBUFFER, st.full.fb);
+      gl.viewport(0, 0, w, h);
+      if (st.sample) {
+        gl.blendColor(0, 0, 0, 1 / (st.sample + 1));
+        gl.blendFunc(gl.CONSTANT_ALPHA, gl.ONE_MINUS_CONSTANT_ALPHA);
+        gl.depthMask(false);
+      } else gl.disable(gl.BLEND);
+      gl.depthFunc(gl.ALWAYS);
+      const prog = this.cache.get(QUAD_VERT, SCATTER_FRAG);
+      gl.useProgram(prog);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, low.color);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, low.depth);
+      gl.uniform1i(gl.getUniformLocation(prog, 'uColorTex'), 0);
+      gl.uniform1i(gl.getUniformLocation(prog, 'uDepthTex'), 1);
+      gl.uniform3i(gl.getUniformLocation(prog, 'uChunk'), ...chunk);
+      this.quad.draw();
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      gl.enable(gl.BLEND);
+    }
+    // A pass done, and none of its cells left: the next jittered sample.
+    if (!st.cells.length && st.sample + 1 < AA_SAMPLES) {
+      st.sample++;
+      st.cells = ditherOrder(st.grid);
+    }
+
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.clearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+    if (scissor) gl.enable(gl.SCISSOR_TEST);
+  }
+
+  /** Draw a surface target into the bound frame at its viewport. */
+  private composite(t: SurfaceTarget, ox: number, oy: number): void {
+    const { gl } = this;
+    const prog = this.cache.get(QUAD_VERT, COMPOSITE_FRAG);
+    gl.useProgram(prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, t.color);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, t.depth);
+    gl.uniform1i(gl.getUniformLocation(prog, 'uColorTex'), 0);
+    gl.uniform1i(gl.getUniformLocation(prog, 'uDepthTex'), 1);
+    gl.uniform2f(gl.getUniformLocation(prog, 'uOrigin'), ox, oy);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    this.quad.draw();
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+  }
+
+  private makeTarget(w: number, h: number): SurfaceTarget {
+    const { gl } = this;
+    const texture = (format: number) => {
+      const tex = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, format, w, h);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      return tex;
+    };
+    const color = texture(gl.RGBA8);
+    const depth = texture(gl.DEPTH_COMPONENT24);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    const fb = gl.createFramebuffer()!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, color, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, depth, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { fb, color, depth, w, h };
+  }
+
+  private freeTarget(t: SurfaceTarget): void {
+    this.gl.deleteFramebuffer(t.fb);
+    this.gl.deleteTexture(t.color);
+    this.gl.deleteTexture(t.depth);
+  }
+
+  private freeState(st: SurfaceState): void {
+    this.freeTarget(st.full);
+    if (st.low) this.freeTarget(st.low);
+  }
+
+  /** Milliseconds until a panel's surfaces are due their next refinement
+   *  pass (0: now), or null once none has any left. The caller renders then. */
+  refineIn(): number | null {
+    let wait: number | null = null;
+    const now = performance.now();
+    for (const st of this.surfaceStates.values()) {
+      if (!st.cells.length) continue;
+      const due = Math.max(0, st.changedAt + REST_MS - now);
+      wait = wait === null ? due : Math.min(wait, due);
+    }
+    return wait;
+  }
+
   /** Free retained geometry no render drew since the last call. Once per
    *  frame, after every panel has rendered: a split view renders several
    *  scenes a frame, and each must keep the others' meshes. */
   endFrame() {
     this.geometry.endFrame();
+    for (const [id, st] of this.surfaceStates) {
+      if (!st.used) {
+        this.freeState(st);
+        this.surfaceStates.delete(id);
+      } else st.used = false;
+    }
   }
 }
 
