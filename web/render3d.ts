@@ -326,10 +326,13 @@ void main() {
  * Parametric surface P(u,v), u,v in (0,1), the old surface3 way: a static
  * (u,v) grid mesh is displaced by P in the VERTEX shader (rasterization gives
  * depth for free), and the fragment shader lights with the symbolically
- * differentiated tangents ∂P/∂u × ∂P/∂v — finite differences only when a
- * component has no smooth derivative.
+ * differentiated tangents ∂P/∂u × ∂P/∂v. When a component has no smooth
+ * derivative the tangents are finite differences, taken here per vertex and
+ * interpolated: per pixel they would cost four more evaluations of P, and a
+ * long P (the belt trick's ribbons are ~60 KB of GLSL each) then drops Safari
+ * far below frame rate.
  */
-function psurfVert(comps: [string, string, string], params?: string[]): string {
+function psurfVert(comps: [string, string, string], params?: string[], fdNormal = false): string {
   return `#version 300 es
 layout(location=0) in vec2 aUV;
 uniform mat4 uVP;
@@ -337,33 +340,36 @@ uniform float t;
 ${paramDecls(params)}
 out vec2 vUV;
 out vec3 vPos;
+${fdNormal ? 'out vec3 vNormal;' : ''}
 ${GLSL_PRELUDE}
 vec3 P(float u, float v) {
   return vec3(${comps[0]}, ${comps[1]}, ${comps[2]});
 }
 void main() {
   vUV = aUV;
-  vPos = P(aUV.x, aUV.y);
+  vPos = P(aUV.x, aUV.y);${
+    fdNormal
+      ? `
+  vec3 pu = P(aUV.x + 1e-3, aUV.y) - P(aUV.x - 1e-3, aUV.y);
+  vec3 pv = P(aUV.x, aUV.y + 1e-3) - P(aUV.x, aUV.y - 1e-3);
+  vNormal = cross(pu, pv);`
+      : ''
+  }
   gl_Position = uVP * vec4(vPos, 1.0);
 }
 `;
 }
 
-function psurfFrag(
-  comps: [string, string, string],
-  du?: [string, string, string],
-  dv?: [string, string, string],
-  params?: string[],
-): string {
+function psurfFrag(du?: [string, string, string], dv?: [string, string, string], params?: string[]): string {
   const tangents =
     du && dv
       ? `
 vec3 Pu(float u, float v) { return vec3(${du[0]}, ${du[1]}, ${du[2]}); }
-vec3 Pv(float u, float v) { return vec3(${dv[0]}, ${dv[1]}, ${dv[2]}); }`
+vec3 Pv(float u, float v) { return vec3(${dv[0]}, ${dv[1]}, ${dv[2]}); }
+vec3 surfaceNormal() { return cross(Pu(vUV.x, vUV.y), Pv(vUV.x, vUV.y)); }`
       : `
-vec3 P(float u, float v) { return vec3(${comps[0]}, ${comps[1]}, ${comps[2]}); }
-vec3 Pu(float u, float v) { return (P(u + 1e-3, v) - P(u - 1e-3, v)) * 500.0; }
-vec3 Pv(float u, float v) { return (P(u, v + 1e-3) - P(u, v - 1e-3)) * 500.0; }`;
+in vec3 vNormal;
+vec3 surfaceNormal() { return vNormal; }`;
   return `#version 300 es
 precision highp float;
 uniform vec3 uColor;
@@ -377,7 +383,7 @@ ${GLSL_PRELUDE}
 ${tangents}
 
 void main() {
-  vec3 n = normalize(cross(Pu(vUV.x, vUV.y), Pv(vUV.x, vUV.y)));
+  vec3 n = normalize(surfaceNormal());
   vec3 rd = normalize(vPos - uEye);
   if (any(isnan(n))) n = -rd;
   if (dot(n, rd) > 0.0) n = -n;
@@ -1095,7 +1101,7 @@ export class Renderer3D {
     for (const s of scene.psurfaces) {
       let prog: WebGLProgram;
       try {
-        prog = this.cache.get(psurfVert(s.comps, s.params), psurfFrag(s.comps, s.du, s.dv, s.params));
+        prog = this.cache.get(psurfVert(s.comps, s.params, !(s.du && s.dv)), psurfFrag(s.du, s.dv, s.params));
       } catch (e) {
         console.error(e);
         continue;
