@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
-import { imul, intervalValue } from './certify.ts';
+import { REACH_ALL, REACH_NONE, REACH_SOME, imul, intervalValue, lastReach } from './certify.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { type Cond, certified, measureSet } from './measure.ts';
 import { runtimeSliderNames } from './runtime-sliders.ts';
@@ -50,6 +50,35 @@ describe('intervalValue', () => {
         [0, 0],
       ]),
     ).toEqual([-Infinity, Infinity]);
+  });
+  it('says how much of the box a function is defined on', () => {
+    const reach = (s: string, x: [number, number]) => {
+      at(s, [x, [0, 0]]);
+      return lastReach();
+    };
+    expect(reach('sqrt(x)', [1, 4])).toBe(REACH_ALL);
+    expect(reach('sqrt(x)', [-1, 4])).toBe(REACH_SOME);
+    expect(reach('sqrt(x)', [-4, -1])).toBe(REACH_NONE);
+    expect(reach('ln(x) + 1', [-1, 1])).toBe(REACH_SOME);
+    expect(reach('acos(x)', [0.5, 3])).toBe(REACH_SOME);
+    expect(reach('acos(x)', [2, 3])).toBe(REACH_NONE);
+    expect(reach('x^0.5', [-1, 1])).toBe(REACH_SOME);
+    // Whole powers are defined everywhere, and each enclosure starts afresh.
+    expect(reach('x^2', [-1, 1])).toBe(REACH_ALL);
+  });
+  // Code review (2026-09-27): the enclosures of sqrt, ln and acos cover only
+  // where they are defined, so a box partly out of the domain was proved
+  // wholly inside, and these read ∞.
+  it('measures a set partly outside a function’s domain where it is defined', () => {
+    expect(value(['count(sqrt(x) < 1)'])).toBeCloseTo(1, 5);
+    expect(value(['count(ln(x) < 0)'])).toBeCloseTo(1, 5);
+    expect(value(['count(acos(x) < 1)'])).toBeCloseTo(1 - Math.cos(1), 5);
+    expect(value(['count(sqrt(1 - x^2) > y > 0)'])).toBeCloseTo(Math.PI / 2, 4);
+    expect(value(['count({ln(x) < 0, -5 < x < 5})'])).toBeCloseTo(1, 5);
+    expect(value(['count(x^0.5 < 1)'])).toBeCloseTo(1, 5);
+    expect(value(['total({sqrt(1 - x^2) > y > 0: y})'])).toBeCloseTo(2 / 3, 4);
+    // Roots where the equation is defined are still counted.
+    expect(value(['count(sqrt(x) = 0.5)'])).toBe(1);
   });
 });
 

@@ -158,11 +158,43 @@ function isin(a: Interval, shift = 0): Interval {
 }
 
 /**
+ * How much of a box lies in the domain of every function an enclosure passed
+ * through (sqrt, ln and asin need their argument in range, and a fractional
+ * power a base ≥ 0): all of it, some of it, or none. An enclosure covers only
+ * the values at points where the expression is defined, so it proves a
+ * comparison false wherever it is defined — the points where it is undefined
+ * are in no set either — but proves it true only when the whole box is in
+ * the domain (sqrt(x) < 1 does not hold at x = -1).
+ */
+export const REACH_NONE = 0;
+export const REACH_SOME = 1;
+export const REACH_ALL = 2;
+export type Reach = typeof REACH_NONE | typeof REACH_SOME | typeof REACH_ALL;
+let reach: Reach = REACH_ALL;
+/** The reach of the box an intervalFn (or intervalValue) enclosed last: read
+ *  it right after the call. */
+export const lastReach = (): Reach => reach;
+const limit = (r: Reach): void => {
+  if (r < reach) reach = r;
+};
+/** The part of `a` inside [lo, hi], noting how much of `a` that is; null
+ *  when none of it is. */
+function inDomain(a: Interval, lo: number, hi: number): Interval | null {
+  if (a[1] < lo || a[0] > hi) {
+    limit(REACH_NONE);
+    return null;
+  }
+  if (a[0] < lo || a[1] > hi) limit(REACH_SOME);
+  return [Math.max(lo, a[0]), Math.min(hi, a[1])];
+}
+
+/**
  * The values `e` takes over a box, without derivatives: the enclosure a
  * quadtree prunes by (lib/measure.ts). Wider than intervalAD's set of forms —
  * the elementary functions a filter is usually written with — and a form it
  * does not know encloses as the whole line, which only costs subdivision.
  * Infinite box sides are allowed, so a strip out to ∞ can be tested too.
+ * Where part of the box is outside a function's domain, see lastReach.
  */
 export function intervalValue(
   e: Expr,
@@ -177,7 +209,15 @@ type IFn = (box: readonly Interval[]) => Interval;
 
 /** intervalValue compiled once for many boxes (a quadtree's cells). */
 export function intervalFn(e: Expr, names: readonly string[], env: Record<string, number>): IFn {
-  const rec = (x: Expr) => intervalFn(x, names, env);
+  const f = compileInterval(e, names, env);
+  return box => {
+    reach = REACH_ALL;
+    return f(box);
+  };
+}
+
+function compileInterval(e: Expr, names: readonly string[], env: Record<string, number>): IFn {
+  const rec = (x: Expr) => compileInterval(x, names, env);
   switch (e.kind) {
     case 'num': {
       const v = point(e.value);
@@ -205,7 +245,13 @@ export function intervalFn(e: Expr, names: readonly string[], env: Record<string
         }
         const fb = rec(e.b);
         return box => {
-          const a = fa(box);
+          let a = fa(box);
+          // A fractional power of a negative number is undefined.
+          if (!Number.isNaN(q) && !Number.isInteger(q)) {
+            const base = inDomain(a, 0, Infinity);
+            if (!base) return whole();
+            a = base;
+          }
           // A fixed real power of a non-negative base rises (or falls) with it.
           if (!Number.isNaN(q) && a[0] >= 0) {
             const ends = [a[0] ** q, a[1] ** q];
@@ -247,13 +293,20 @@ export function intervalFn(e: Expr, names: readonly string[], env: Record<string
 function unary(name: string): ((a: Interval) => Interval) | null {
   switch (name) {
     case 'sqrt':
-      return a => (a[1] < 0 ? whole() : rising(Math.sqrt, [Math.max(0, a[0]), a[1]]));
+      return a => {
+        const c = inDomain(a, 0, Infinity);
+        return c ? rising(Math.sqrt, c) : whole();
+      };
     case 'exp':
       return a => rising(Math.exp, a);
     case 'ln':
     case 'log': {
       const base = name === 'log' ? Math.LN10 : 1;
-      return a => (a[1] <= 0 ? whole() : rising(x => Math.log(x) / base, [Math.max(0, a[0]), a[1]]));
+      // (ln 0 is -∞, which the arithmetic still reads as a value.)
+      return a => {
+        const c = inDomain(a, 0, Infinity);
+        return c ? rising(x => Math.log(x) / base, c) : whole();
+      };
     }
     case 'atan':
       return a => rising(Math.atan, a);
@@ -293,8 +346,8 @@ function unary(name: string): ((a: Interval) => Interval) | null {
     case 'asin':
     case 'acos':
       return a => {
-        if (a[1] < -1 || a[0] > 1) return whole();
-        const c: Interval = [Math.max(-1, a[0]), Math.min(1, a[1])];
+        const c = inDomain(a, -1, 1);
+        if (!c) return whole();
         return name === 'asin' ? rising(Math.asin, c) : outward(Math.acos(c[1]), Math.acos(c[0]));
       };
     default:

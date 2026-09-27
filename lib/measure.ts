@@ -27,7 +27,15 @@
  *   measurement runs to a work budget. Its constants are read at resolve
  *   time, as Σ bounds are, so a slider change recomputes it.
  */
-import { certifySystem, intervalFn, intervalKnows, type Interval } from './certify.ts';
+import {
+  REACH_ALL,
+  REACH_NONE,
+  certifySystem,
+  intervalFn,
+  intervalKnows,
+  lastReach,
+  type Interval,
+} from './certify.ts';
 import { countNodes } from './size.ts';
 import { NonSmoothError, add, diff, mul, pow } from './diff.ts';
 import { type Expr, childrenOf, evaluate, exprKey, freeVars, substVars } from './expr.ts';
@@ -789,7 +797,9 @@ function ivOf(e: Expr, names: readonly string[], env: Record<string, number>) {
 }
 
 /** Whether every condition holds on the whole box, on none of it, or neither
- *  is proven. An equation never holds on a whole box. */
+ *  is proven. An equation never holds on a whole box. A point where a
+ *  condition is undefined (sqrt(x) at x < 0) is in no set: a box wholly out
+ *  of its domain is outside, and one partly out is never wholly inside. */
 function truthOn(
   conds: readonly Cond[],
   names: readonly string[],
@@ -799,12 +809,14 @@ function truthOn(
   let all = true;
   for (const c of conds) {
     const [lo, hi] = ivOf(c.d, names, env)(box);
+    const reach = lastReach();
+    if (reach === REACH_NONE) return FALSE;
     if (c.eq) {
       if (lo > 0 || hi < 0) return FALSE;
       all = false;
     } else {
       if (lo > 0 || (c.strict && lo >= 0)) return FALSE;
-      if (!(hi < 0 || (!c.strict && hi <= 0))) all = false;
+      if (reach !== REACH_ALL || !(hi < 0 || (!c.strict && hi <= 0))) all = false;
     }
   }
   return all ? TRUE : UNKNOWN;
@@ -1574,9 +1586,15 @@ function certainParts(
   F: (box: readonly Interval[]) => Interval,
   G: ReadonlyArray<(box: readonly Interval[]) => Interval>,
 ): { inside: number; outside: number } {
+  // The mean value theorem needs F defined on the whole cell.
+  F(cell);
+  if (lastReach() !== REACH_ALL) return { inside: 0, outside: 0 };
   const c = cell.map(([a, b]) => (a + b) / 2);
   const [flo, fhi] = F(c.map((v): Interval => [v, v]));
-  const g = G.map(f => f(cell));
+  const g = G.map(f => {
+    const v = f(cell);
+    return lastReach() === REACH_ALL ? v : ([-Infinity, Infinity] as Interval);
+  });
   if (![flo, fhi, ...g.flat()].every(Number.isFinite)) return { inside: 0, outside: 0 };
   // Rounding in the linear bounds, generously.
   const h = cell.map(([a, b]) => b - a);
@@ -1960,8 +1978,10 @@ function rootsOnLine(
   }
   const F = intervalFn(d, [v], {});
   const D = intervalFn(dd, [v], {});
+  // (NaN where the equation is undefined: no root there.)
   const sign = (x: number) => {
     const [a, b] = F([[x, x]]);
+    if (lastReach() === REACH_NONE) return NaN;
     return a > 0 ? 1 : b < 0 ? -1 : 0;
   };
   const deadline = performance.now() + HARD_MS;
@@ -1976,9 +1996,13 @@ function rootsOnLine(
       );
     }
     const [flo, fhi] = F([[a, b]]);
-    if (flo > 0 || fhi < 0) continue;
+    // No root where the equation is undefined, nor where it cannot vanish.
+    const reach = lastReach();
+    if (reach === REACH_NONE || flo > 0 || fhi < 0) continue;
     const [dlo, dhi] = D([[a, b]]);
-    if (dlo > 0 || dhi < 0) {
+    // Monotone only where both are defined throughout (sqrt(x) − 1 on
+    // [-1, 4] rises where it is defined, but its end at -1 has no sign).
+    if (reach === REACH_ALL && lastReach() === REACH_ALL && (dlo > 0 || dhi < 0)) {
       // Monotone here: at most one root, found by the signs at the ends.
       const sa = sign(a);
       const sb = sign(b);
@@ -2023,7 +2047,7 @@ function emptyToward(F: (box: readonly Interval[]) => Interval, a: number, b: nu
     const outer = end + (far - end) / 2 ** k;
     if (Math.abs(near - end) < floor) return true;
     const [flo, fhi] = F([[Math.min(near, outer), Math.max(near, outer)]]);
-    if (!(flo > 0 || fhi < 0)) return false;
+    if (lastReach() !== REACH_NONE && !(flo > 0 || fhi < 0)) return false;
   }
   return false;
 }
