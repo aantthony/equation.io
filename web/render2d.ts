@@ -8,6 +8,7 @@ import { colorConversionGLSL } from './color-field.ts';
 import type { ColorSpace } from '../lib/math-object.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
+import { MAX_SEPARATRICES } from '../lib/separatrix.ts';
 import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
 
@@ -102,6 +103,8 @@ export interface Layers2D {
   colors?: ColorField2D[];
   conformals?: Curve2D[];
   vfields?: VField2D[];
+  /** hamiltonian(H) contours, over the flow of the same row. */
+  energies?: EnergySpec[];
   tfields?: TField2D[];
   ineqs?: Ineq2D[];
   projections?: Projected2D[];
@@ -141,6 +144,15 @@ export interface GridSpec {
 /** A level-set family drawn in an equation's color (topographic map). */
 export interface LevelSpec extends GridSpec {
   color: [number, number, number];
+}
+
+/**
+ * A Hamiltonian's energy contours, drawn over its flow in a darker ink so
+ * they read against the streamlines: the major levels, and bolder, the
+ * separatrices (the levels through its saddles, lib/separatrix.ts).
+ */
+export interface EnergySpec extends LevelSpec {
+  separatrices: number[];
 }
 
 /**
@@ -258,6 +270,52 @@ void main() {
   float a = max(gridLine(v, lg, uMinor, 0.5) * 0.18, gridLine(v, lg, uMajor, 0.5) * 0.45);
   if (a < 0.004) discard;
   outColor = vec4(uColor, a);
+}
+`;
+}
+
+function energyFrag(spec: { glsl: string; gradGlsl?: [string, string]; params: string[] }): string {
+  const grad = spec.gradGlsl
+    ? `vec2 gradF(float x, float y) { return vec2(${spec.gradGlsl[0]}, ${spec.gradGlsl[1]}); }\n`
+    : '';
+  return `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform vec2 uOrigin;
+uniform vec3 uColor;
+uniform float uMajor;
+uniform float uSep[${MAX_SEPARATRICES}];
+uniform int uSepCount;
+uniform float t;
+${paramDecls(spec.params)}
+out vec4 outColor;
+${GLSL_PRELUDE}
+float F(float x, float y) { return ${spec.glsl}; }
+${grad}${GRID_LINE_GLSL}
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
+  float v = F(p.x, p.y);
+  if (isnan(v) || isinf(v)) discard;
+  float lg = ${spec.gradGlsl ? 'length(gradF(p.x, p.y) * uUpp)' : 'length(vec2(dFdx(v), dFdy(v)))'};
+  // One spacing cannot suit all of a steep H (a quartic well packs its
+  // levels at the edges): fade them out where they come closer than 24 px,
+  // gone by 12, so the flow shows between them.
+  float perPx = lg / uMajor;
+  float a = gridLine(v, lg, uMajor, 0.6) * ${theme.dark ? '0.75' : '0.55'} * clamp((1.0 / 12.0 - perPx) * 24.0, 0.0, 1.0);
+  // A separatrix is one level, not a stack: its distance in pixels, with no
+  // fade where the gradient vanishes (it passes through the saddle itself).
+  for (int k = 0; k < ${MAX_SEPARATRICES}; k++) {
+    if (k >= uSepCount) break;
+    float distPx = abs(v - uSep[k]) / max(lg, 1e-24);
+    a = max(a, (1.0 - smoothstep(1.1, 2.1, distPx)) * 0.9);
+  }
+  if (a < 0.004) discard;
+  // The row's color toward ink, darker on white and lighter on dark, so it
+  // stands off the streamlines drawn in the row's own color (light lines on
+  // dark need more weight to read as strongly).
+  outColor = vec4(mix(uColor, ${theme.dark ? 'vec3(0.92)' : glslVec3(theme.axis)}, ${theme.dark ? '0.65' : '0.55'}), a);
 }
 `;
 }
@@ -1059,6 +1117,15 @@ export class Renderer2D {
     for (const c of layers.colors ?? []) drawField(c, (field, params) => colorFrag(field, params, c.locals, c.space));
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
     for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
+    for (const en of layers.energies ?? []) {
+      drawProgram(energyFrag(en), en.color, en.params, undefined, prog => {
+        gl.uniform1f(gl.getUniformLocation(prog, 'uMajor'), en.major);
+        const seps = new Float32Array(MAX_SEPARATRICES);
+        seps.set(en.separatrices.slice(0, MAX_SEPARATRICES));
+        gl.uniform1fv(gl.getUniformLocation(prog, 'uSep'), seps);
+        gl.uniform1i(gl.getUniformLocation(prog, 'uSepCount'), Math.min(en.separatrices.length, MAX_SEPARATRICES));
+      });
+    }
     for (const f of layers.tfields ?? []) drawProgram(tfieldFrag(f.entries, f.params), f.color, f.params, f.uniforms);
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
     for (const q of layers.projections ?? []) drawField(q, (f, ps) => projFrag(f, q.relation, q.slope, ps));
