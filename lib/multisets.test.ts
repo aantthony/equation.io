@@ -910,3 +910,18 @@ describe('§5 a row in u is drawn by its value type', () => {
     for (const row of ['u^2', 'abs((u, v))', 'dot((1,2),(u,v))']) expect(plan([row]).type).toBe('density');
   });
 });
+
+describe('§5 a comparison over a tuple written out', () => {
+  it('keeps its members, as over a named one', () => {
+    // A tuple took a fresh axis every time it lowered, so the members were
+    // never found again: per-element true/false notes, and count refused.
+    expect(readout(['L = [3,1,2]', 'count(sort(L) > 1)'])).toBe('= 2');
+    expect(last(['L = [3,1,2]', 'sort(L) > 1']).cpu).toEqual(last(['L = [3,1,2]', 'T = sort(L)', 'T > 1']).cpu);
+    expect(last(['(1,2,3,4) > 2']).cpu).toMatchObject({ type: 'point' });
+    expect(readout(['count((1,2,3,4,5) > 2)'])).toBe('= 3');
+    // Grouped comparisons, member columns and pairs are unchanged.
+    expect(multiset(['L = [1,2,3]', '(L > 1) > 2'])).toEqual([3]);
+    expect(readout(['P = [(1,2),(3,-1)]', 'count(P.y < 0)'])).toBe('= 1');
+    expect(readout(['L = [1,2]', 'M = [1,2,3]', 'count(L < M)'])).toBe('= 3');
+  });
+});
