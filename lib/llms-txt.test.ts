@@ -99,12 +99,11 @@ describe('llms.txt', () => {
         'note',
       ],
       [[], 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', 'curve'],
-      // Curves and eigenvectors.
+      // Curves.
       [[], 'curvature((u, u^2), 0)', 'value'],
       [['C = (2cos(u), sin(u))'], '(u, curvature(C))', 'curve'],
       [['C = (2cos(u), sin(u))'], 'frame(C, t)', 'family'],
       [['C = (2cos(u), sin(u))'], 'osculating(C, t)', 'curve'],
-      [[], 'eigen(((2, 1), (1, 2)))', 'family'],
       // A tuple of rows is a matrix; a bracket of tuples is points.
       [[], '((0, -1), (1, 0)) (2, 1)', 'point'],
       [[], 'det(((1, 2), (3, 4)))', 'value'],
@@ -133,8 +132,6 @@ describe('llms.txt', () => {
     expect(readout(['curvature((2cos(u), -2sin(u)), 0)'])).toBe('= -0.5');
     expect(readout(['C = (2cos(u), 2sin(u), u)', 'curvature(C, 1)'])).toBe('= 0.4');
     expect(readout(['C = (2cos(u), 2sin(u), u)', 'torsion(C, 1)'])).toBe('= 0.2');
-    expect(readout(['eigen(((2, 1), (1, 2)))'])).toBe('= (3, 1)');
-    expect(readout(['eigen(((0, -1), (1, 0)))'])).toBe('= (0 + 1i, 0 − 1i)');
     const M = ['a = [1, 2]', 'M = ((a, 0), (0, 1))', 'P = (1, 1)'];
     expect(llms).toContain('`M = ((a, 0), (0, 1))`');
     expect(readout([...M, 'det(M)'])).toBe('= [1, 2]');

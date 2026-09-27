@@ -88,7 +88,6 @@ export type CpuPlan =
       shape?: readonly number[];
       count?: number;
       blades?: { readonly dim: 2 | 3; readonly quat?: true };
-      eigenvalues?: true;
       length?: number;
     }
   | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true };
@@ -348,7 +347,6 @@ export function compileCpu(classified: Classified): CpuPlan {
         count: object.count,
         length: object.length,
         ...(object.blades ? { blades: object.blades } : {}),
-        ...(object.eigenvalues ? { eigenvalues: object.eigenvalues } : {}),
       };
     case 'note':
       return {
@@ -726,7 +724,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = expressions(plan.values);
       break;
     case 'tuple':
-      structure = [expressions(plan.values), plan.length, plan.shape, plan.count, plan.blades, plan.eigenvalues];
+      structure = [expressions(plan.values), plan.length, plan.shape, plan.count, plan.blades];
       break;
     case 'plist':
       structure = [plan.dim, plan.pts.map(expressions)];

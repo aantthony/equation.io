@@ -394,19 +394,6 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'P = [(-3, -1), (-1, 2), (0.5, -2), (2, 1.5), (3, -0.5), (0, 0.3), (1, 0.5 + 2sin(t))]; hull(P); P',
         'geometry list animated',
       ],
-      // eigen(M) reads out the eigenvalues and draws the lines M keeps, each
-      // with the arrow λv; action(M) shows the square stretched along them.
-      ['eigenvectors: the lines M keeps', 'M = ((2, 1), (1, 2)); action(M); eigen(M)', 'matrix'],
-      [
-        'eigenvalues turn complex (slide b)',
-        'b = clamp(0.5, -1, 1); M = ((1, 1), (b, 1)); action(M); eigen(M)',
-        'matrix slider complex',
-      ],
-      [
-        'eigenvectors of a symmetric 3×3: orthogonal',
-        'camera(-pi/4, 0.5, 16); M = ((2, 1, 0), (1, 3, 1), (0, 1, 4)); eigen(M)',
-        'matrix 3d',
-      ],
       [
         'exact linear flow: e^(tA)',
         "A = ((-0.2, -1), (1, -0.2)); s = [0..60]/5; (x', y') = A (x, y); e^(s A) (3, 0); e^(t A) (3, 0)",
@@ -560,13 +547,6 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['Van der Pol', "(x', y') = (y, (1 - x^2)y - x)", 'ode physics'],
       // A linear system as its literal matrix; drag the entries' sliders.
       ['matrix phase portrait', "a = -1; b = -1/4; A = ((0, 1), (a, b)); (x', y') = A (x, y)", 'ode matrix slider'],
-      // Along an eigenvector the flow stays on its line: the straight-line
-      // solutions. Slide b above -2 and they turn into a spiral's complex pair.
-      [
-        'straight-line solutions are eigenvectors',
-        "a = -1; b = -3; A = ((0, 1), (a, b)); (x', y') = A (x, y); eigen(A)",
-        'ode matrix slider',
-      ],
       [
         'Lorenz field (3D)',
         "camera(-pi/3, 0.5, 55, (0, 0, 25)); (x', y', z') = (10(y - x), x(28 - z) - y, x y - 8z/3)",

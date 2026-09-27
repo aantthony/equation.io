@@ -65,34 +65,6 @@ function drawLine(r: Raster, x0: number, y0: number, x1: number, y1: number, c: 
   }
 }
 
-/**
- * A figure's straight edge, clipped to the raster first (Liang–Barsky): an
- * edge may run far past the frame — eigen(M) draws its invariant lines as long
- * segments — and drawLine refuses anything over 4000 px as a jump in a curve.
- */
-function drawEdge(r: Raster, x0: number, y0: number, x1: number, y1: number, c: [number, number, number]) {
-  const dx = x1 - x0,
-    dy = y1 - y0;
-  let t0 = 0,
-    t1 = 1;
-  for (const [p, q] of [
-    [-dx, x0 + 2],
-    [dx, r.w + 2 - x0],
-    [-dy, y0 + 2],
-    [dy, r.h + 2 - y0],
-  ]) {
-    if (p === 0) {
-      if (q < 0) return;
-    } else {
-      const t = q / p;
-      if (p < 0) t0 = Math.max(t0, t);
-      else t1 = Math.min(t1, t);
-    }
-  }
-  if (t0 > t1) return;
-  drawLine(r, x0 + t0 * dx, y0 + t0 * dy, x0 + t1 * dx, y0 + t1 * dy, c);
-}
-
 /** A point list's dots: a handful read as points, a few hundred as a cloud,
  *  where full-size dots would merge into one blot (the app thins them too). */
 const listDotRadius = (count: number) => (count > 200 ? 2 : 4.5);
@@ -844,8 +816,8 @@ function renderRow2D(
         );
         [sx[n - 1], sy[n - 1]] = head.shaftEnd;
       }
-      for (let i = 0; i + 1 < sx.length; i++) drawEdge(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color);
-      if (closed) drawEdge(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);
+      for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color);
+      if (closed) drawLine(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);
       return;
     }
   }
@@ -1072,7 +1044,6 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // Drawn member by member, like a family: their glyphs are figures.
   multivector: 'draws',
   action: 'draws',
-  eigen: 'draws',
   vfield3d: 'draws',
   implicit2d: 'draws',
   ineq2d: 'draws',

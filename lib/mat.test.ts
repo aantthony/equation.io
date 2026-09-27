@@ -5,7 +5,8 @@ import { type Definition, buildDefs, compsOf, scanDefinition } from './defs.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';
 import type { Seq } from './list.ts';
-import { classify } from './plot.ts';
+import { classify, plotReadout } from './plot.ts';
+import { analyzeRows } from './analysis.ts';
 import { advanceState, buildStateSystem, initialState } from './state.ts';
 
 /** A named list's elements (always symbolic here — no data file in sight). */
@@ -298,5 +299,20 @@ describe('matrix algebra and the exponential', () => {
     );
     close(point([], 'rotate((1, 0, 0), a, (0, 0, 5))', { a: Math.PI / 2 }), [0, 1, 0]);
     expect(() => lowRow([], 'rotate((1, 0))')).toThrow(/rotate takes/);
+  });
+});
+
+describe('transpose(M)', () => {
+  const last = (rows: string[]) => analyzeRows(rows, { readouts: true });
+  const readout = (rows: string[]) => {
+    const analysis = last(rows);
+    const r = analysis.rows.at(-1)!;
+    if (r.error) throw new Error(r.error);
+    return plotReadout(r.cpu!, { ...analysis.constEnv, t: 0 });
+  };
+  it('swaps rows and columns, and works inside products', () => {
+    expect(readout(['M = ((1, 2), (3, 4))', 'transpose(M)'])).toBe('= ((1, 3), (2, 4))');
+    expect(readout(['M = ((1, 2), (3, 4))', 'transpose(M) M'])).toBe('= ((10, 14), (14, 20))');
+    expect(last(['transpose(3)']).rows.at(-1)!.error).toMatch(/takes a matrix/);
   });
 });

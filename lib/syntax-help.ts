@@ -101,7 +101,6 @@ const signatures: Record<string, [string, string]> = {
   det: ['det(M)', 'Matrix determinant'],
   trace: ['trace(M)', 'Matrix trace'],
   transpose: ['transpose(M)', 'Matrix transpose: rows become columns'],
-  eigen: ['eigen(M)', 'Eigenvalues of a 2×2 or 3×3 matrix, read out; the lines it keeps drawn through the origin'],
   solve: ['solve(M, v)', 'Solve the linear system M x = v'],
   outer: ['outer(a, b) or a ⊗ b', 'Outer (tensor) product: (a ⊗ b)_ij = a_i b_j, of vectors, matrices or tensors'],
   wedge: ['wedge(a, b) or a ∧ b', 'Wedge product a ⊗ b − b ⊗ a: a bivector, read out as its antisymmetric matrix'],

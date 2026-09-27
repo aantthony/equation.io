@@ -959,14 +959,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   area is det M), of the unit circle (an ellipse whose axes are the singular
   vectors) and the arrows M e_x, M e_y, its columns; for a 3×3, the image of
   the unit cube and three arrows. `action(e^(t J))` turns the square with t.
-  `eigen(M)` reads out the eigenvalues of a 2×2 or 3×3 matrix, real ones
-  largest first and a complex pair as `a ± bi` — `eigen(((2, 1), (1, 2)))`
-  reads `= (3, 1)`, `eigen(((0, -1), (1, 0)))` reads `= (0 + 1i, 0 − 1i)` —
-  and for each real eigenvalue λ draws the line through the origin that M
-  maps to itself, with the arrow M v = λ v for its unit eigenvector v (so a
-  negative λ points back). A complex pair has no real line; nor does a
-  multiple of the identity draw any, since every line is kept. Entries may
-  use sliders and t, not x or y; it must be a row of its own.
   A 2×2 matrix in x and y is a matrix field, `((x, y), (y, -x))`: a grid of
   glyphs, each the image of a small circle under the matrix there with a
   spoke to where e_x goes, drawn true size while small and a cell at most,

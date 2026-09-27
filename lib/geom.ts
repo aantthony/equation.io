@@ -65,7 +65,7 @@ import {
   vectorTensor,
   wedge,
 } from './tensor.ts';
-import { actionNode, eigenNode } from './glyphs.ts';
+import { actionNode } from './glyphs.ts';
 import {
   type Multivector,
   MV_CALL,
@@ -1032,7 +1032,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       return sc(v.items[k]);
     }
     case 'call': {
-      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'eigen' || e.name === 'qjulia')
+      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'qjulia')
         throw new Error(`${e.name}(…) must be a whole statement.`);
       if (e.name === 'trail') {
         const args = e.args.map(lo);
@@ -1479,16 +1479,6 @@ function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsL
     const m = lowerMat(e.args[0], n => lower(n, getComps, getMat, isList), getMat)?.m;
     if (!m) throw new Error(usage);
     return actionNode(m);
-  }
-  // eigen(M): the eigenvalues read out, the real eigenvectors drawn as the
-  // lines M keeps (lib/glyphs.ts).
-  if (e.kind === 'call' && e.name === 'eigen') {
-    if (!matsPossible) throw new MatrixSeen();
-    const usage = 'eigen takes one 2×2 or 3×3 matrix — eigen(((2, 1), (1, 2))) draws the lines it keeps.';
-    if (e.args.length !== 1) throw new Error(usage);
-    const m = lowerMat(e.args[0], n => lower(n, getComps, getMat, isList), getMat)?.m;
-    if (!m) throw new Error(usage);
-    return eigenNode(m);
   }
   // A multivector on a row of its own draws by grade (docs/clifford.md); one
   // that is only a number or a vector lowers as that number or vector. A

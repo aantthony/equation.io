@@ -90,12 +90,12 @@ states — not trivial), and Poincaré sections.
 
 ### 5. Eigenvalues and matrix theory
 
-**Implemented.** `eigen(M)` for 2×2 and 3×3 reads out the eigenvalues in
-closed form (a complex pair as a ± bi) and draws each real eigenvector's
-invariant line with the arrow λv (lib/glyphs.ts). `transpose(M)` is new;
-`det(M)` and `M^-1` already existed, so no `inverse`. Deferred: `svd(M)`
-(`action(M)` already draws the circle-to-ellipse picture whose axes are the
-singular vectors), and larger matrices.
+**`eigen(M)` moved to a follow-up (branch eigen-numeric).** The closed-form
+symbolic 3×3 blows the node cap and rounding decides real vs complex, so it
+will be redone numerically. `transpose(M)` is in; `det(M)` and `M^-1`
+already existed, so no `inverse`. Deferred: `svd(M)` (`action(M)` already
+draws the circle-to-ellipse picture whose axes are the singular vectors),
+and larger matrices.
 
 - `eigen(M)` returning eigenvalues (readout, complex where needed) and
   eigenvectors; eigenvectors drawn as the invariant lines of the matrix

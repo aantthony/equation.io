@@ -181,14 +181,6 @@ describe('og raster renderer', () => {
     expect(pixel(r, 80, 80)[0]).toBeGreaterThan(200);
   });
 
-  it('draws eigen(M) as its invariant lines', () => {
-    expect(canRenderOg(['eigen(((2, 1), (1, 2)))'])).toBe(true);
-    // Its invariant lines are long segments, clipped to the frame: y = x
-    // reaches the corner of the view.
-    const eigen = renderRaster(['view(x = -5..5, y = -5..5)', 'eigen(((2, 1), (1, 2)))'], 100, 100);
-    expect(Math.min(...pixel(eigen, 90, 10))).toBeLessThan(200);
-  });
-
   it('fills regions for inequalities, including chains', () => {
     const grid = inkFraction(renderRaster([], 100, 100));
     const disc = inkFraction(renderRaster(['x^2 + y^2 <= 25'], 100, 100));

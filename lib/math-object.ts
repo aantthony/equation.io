@@ -178,9 +178,6 @@ export type MathObject =
       /** The values are a multivector's coefficients, by blade bitmask, read
        *  out as `1 + 2 e_xy` (or in i, j, k) rather than as a tuple. */
       readonly blades?: { readonly dim: 2 | 3; readonly quat?: true };
-      /** The values are eigenvalues, each as its real and imaginary parts,
-       *  read out as `= (1 + 2i, 1 − 2i)` (lib/glyphs.ts eigenvalues). */
-      readonly eigenvalues?: true;
     }
   // `constant`: the row reads like a slider named e, pi or tau (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
@@ -243,9 +240,8 @@ export function publicKind(object: MathObject) {
       return 'polygon';
     case 'family':
       // One multivector or matrix drawn as several glyphs is not a list.
-      if (object.readout?.object.kind === 'tuple' && object.readout.object.blades) return 'multivector';
-      if (object.readout?.object.kind === 'tuple' && object.readout.object.eigenvalues) return 'eigen';
-      if (object.readout) return 'action';
+      if (object.readout)
+        return object.readout.object.kind === 'tuple' && object.readout.object.blades ? 'multivector' : 'action';
       return 'family';
     case 'sequence':
       return object.form === 'explicit' ? 'sequence' : object.form;
