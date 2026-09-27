@@ -174,6 +174,13 @@ describe('quaternions', () => {
   it('turn about their axis', () => {
     expect(point(['th = pi/2', 'q = quat(cos(th/2), sin(th/2) (0, 0, 1))', 'rotate((1, 0, 0), q)'])).toEqual([0, 1, 0]);
   });
+  it('vec is the vector part, as a point', () => {
+    expect(point(['vec(quat(1, 2, 3, 4))'])).toEqual([2, 3, 4]);
+    // A rotor about z has its vector part on the axis: sin(θ/2) e_z.
+    expect(point(['vec(e^(-(pi/4) e_xy))'])).toEqual([0, 0, Math.round(Math.SQRT1_2 * 1e9) / 1e9]);
+    expect(error(['vec(1, 2)'])).toMatch(/vec takes one quaternion/);
+    expect(readout(['vec = 3', '2 vec'])).toBe('= 6');
+  });
   it('slerp the shorter arc', () => {
     expect(readout(['slerp(quat(1, 0, 0, 0), quat(0, 0, 0, 1), 0.5)'])).toBe('≈ 0.707107 + 0.707107k');
   });

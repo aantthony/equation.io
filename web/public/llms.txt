@@ -963,7 +963,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (`quat(0,1,0,0) quat(0,0,1,0)` is `k`), invert with `q^-1`, conjugate
   with `conj(q)`, and the unit quaternion `quat(cos(th/2), sin(th/2) n)`
   turns by th about the unit axis n: `rotate(P, q)`. `grade(q, 0)` is its
-  w, and `-dual(grade(q, 2))` its vector part (x, y, z), a point. `slerp(q1, q2, s)`
+  w, and `vec(q)` its vector part (x, y, z), a point. `slerp(q1, q2, s)`
   runs the shorter arc between two rotations at constant speed, s from 0 to
   1: `rotate(hull(P), slerp(q1, q2, (1 - cos(t))/2))` rocks a solid between
   two orientations. `qjulia(c)` draws the quaternion Julia set of c — the
