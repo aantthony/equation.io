@@ -601,6 +601,17 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
         return marker;
       }
       const map = (nodes: readonly Expr[]) => nodes.map(n => visit(n, asMatrix));
+      // A piecewise condition is decided per member, never a list of its own:
+      // as a value `k < 3` is the members kept, so taking it whole would drop
+      // the comparison and cross those members with k. Its sides are what
+      // expand — a chain's inner comparison too, unless written in
+      // parentheses as an operand ((L > 1) > 1 compares L's kept members).
+      const cond = (c: Expr): Expr => {
+        if (c.kind === 'ineq')
+          return { ...c, l: c.l.kind === 'ineq' && !c.l.grouped ? cond(c.l) : visit(c.l), r: visit(c.r) };
+        if (c.kind === 'eqtest') return { ...c, args: [visit(c.args[0]), visit(c.args[1])] };
+        return visit(c);
+      };
       switch (node.kind) {
         case 'bin':
           return { ...node, a: visit(node.a, asMatrix || node.op === '*'), b: visit(node.b, asMatrix) };
@@ -618,7 +629,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
         case 'piecewise':
           return {
             ...node,
-            cases: node.cases.map(c => ({ cond: visit(c.cond), value: visit(c.value) })),
+            cases: node.cases.map(c => ({ cond: cond(c.cond), value: visit(c.value) })),
             otherwise: node.otherwise && visit(node.otherwise),
           };
         default:

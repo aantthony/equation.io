@@ -50,6 +50,35 @@ describe('§1 equal vs identical', () => {
     expect(multiset(['[]'])).toEqual([]);
     expect(multiset(['L = []', 'L + 1'])).toEqual([]);
   });
+  it('a piecewise condition is decided per member, not taken as the members it keeps', () => {
+    // The points of a row, evaluated and sorted; a case that fails is NaN.
+    const points = (rows: string[]): string[] => {
+      const analysis = analyzeRows(rows, { readouts: true });
+      const row = analysis.rows.at(-1)!;
+      if (row.error) throw new Error(row.error);
+      const values = (row.cls?.object as { values?: readonly Expr[][] } | undefined)?.values ?? [];
+      return values.map(p => p.map(c => evaluate(c, analysis.constEnv)).join(',')).sort();
+    };
+    // Separate lists on ONE side of the comparison still cross: 4 × 3 pairs,
+    // each compared, keeping A.x where A.y = B.x.
+    const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
+    const kept = ['1,1', '1,2', '1,2', '2,1', '2,1', '2,2', '2,2'];
+    const dropped = ['NaN,1', 'NaN,2', 'NaN,2', 'NaN,2', 'NaN,2'];
+    for (const cond of ['abs(A.y - B.x) < 0.5', '-0.5 < A.y - B.x < 0.5']) {
+      const got = points([...AB, `({${cond}: A.x}, B.y)`]);
+      expect(got.filter(p => !p.startsWith('NaN')).sort()).toEqual(kept);
+      expect(got.filter(p => p.startsWith('NaN'))).toEqual(dropped);
+    }
+    // One sided: A.y ≤ B.x. A.y = 1 keeps all of B.
+    expect(points([...AB, '({A.y - B.x < 0.5: A.x}, B.y)']).filter(p => !p.startsWith('NaN'))).toHaveLength(9);
+    // A name beside its own condition is chosen together with it: 40 points,
+    // the same as through a function.
+    const collatz = points(['k = [1..40]', '(k, {mod(k, 2) < 0.5: k/2, 3k + 1})']);
+    expect(collatz).toHaveLength(40);
+    expect(collatz).toEqual(points(['k = [1..40]', 'c(m) = {mod(m, 2) < 0.5: m/2, 3m + 1}', '(k, c(k))']));
+    expect(collatz).toContain('3,10');
+    expect(collatz).toContain('4,2');
+  });
 });
 
 describe('§2 brackets are sums', () => {
