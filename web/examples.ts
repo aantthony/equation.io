@@ -129,6 +129,18 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['nephroid', '(3cos(2pi u) - cos(6pi u), 3sin(2pi u) - sin(6pi u))', 'parametric trig'],
       // The pen lifts at each pole rather than drawing a vertical asymptote.
       ['tangent, lifted at poles', '(4u - 2, tan(12u - 6))', 'parametric trig'],
+      // curvature, osculating and frame differentiate the curve along u; t
+      // as the point rides them round.
+      [
+        'osculating circle rides an ellipse',
+        'C = (3cos(2pi u), 1.5sin(2pi u)); C; osculating(C, t/10); frame(C, t/10); curvature(C, t/10)',
+        'parametric derivative geometry animated',
+      ],
+      [
+        'signed curvature flips at inflections (slide s)',
+        'view(x = -3..3, y = -2..2); s = clamp(0.1, 0, 1); C = (2sin(2pi u), sin(4pi u)); C; osculating(C, s); frame(C, s); curvature(C, s)',
+        'parametric derivative geometry slider',
+      ],
     ],
   ],
   [
@@ -382,6 +394,19 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'P = [(-3, -1), (-1, 2), (0.5, -2), (2, 1.5), (3, -0.5), (0, 0.3), (1, 0.5 + 2sin(t))]; hull(P); P',
         'geometry list animated',
       ],
+      // eigen(M) reads out the eigenvalues and draws the lines M keeps, each
+      // with the arrow λv; action(M) shows the square stretched along them.
+      ['eigenvectors: the lines M keeps', 'M = ((2, 1), (1, 2)); action(M); eigen(M)', 'matrix'],
+      [
+        'eigenvalues turn complex (slide b)',
+        'b = clamp(0.5, -1, 1); M = ((1, 1), (b, 1)); action(M); eigen(M)',
+        'matrix slider complex',
+      ],
+      [
+        'eigenvectors of a symmetric 3×3: orthogonal',
+        'camera(-pi/4, 0.5, 16); M = ((2, 1, 0), (1, 3, 1), (0, 1, 4)); eigen(M)',
+        'matrix 3d',
+      ],
       [
         'exact linear flow: e^(tA)',
         "A = ((-0.2, -1), (1, -0.2)); s = [0..60]/5; (x', y') = A (x, y); e^(s A) (3, 0); e^(t A) (3, 0)",
@@ -522,10 +547,25 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['slope field', "y' = x - y", 'ode'],
       ['logistic growth', 'dy/dx = y(1 - y/4)', 'ode biology'],
       ['pendulum phase portrait', "(x', y') = (y, -sin(x))", 'ode physics'],
+      // hamiltonian(H): x is the position q, y the momentum p; the flow runs
+      // along the level sets of H, since it conserves the energy.
+      ['Hamiltonian: pendulum', 'view(x = -7..7, y = -4..4); hamiltonian(y^2/2 - cos(x))', 'ode physics vector-field'],
+      [
+        'Hamiltonian: double well (slide k)',
+        'view(x = -3..3, y = -2..2); k = clamp(1, -1, 2); hamiltonian(y^2/2 + x^4/4 - k x^2/2)',
+        'ode physics vector-field slider',
+      ],
       ['Lotka–Volterra', "view(x = -4..11, y = -1..6); (x', y') = (x - x y/2, x y/4 - y)", 'ode biology'],
       ['Van der Pol', "(x', y') = (y, (1 - x^2)y - x)", 'ode physics'],
       // A linear system as its literal matrix; drag the entries' sliders.
       ['matrix phase portrait', "a = -1; b = -1/4; A = ((0, 1), (a, b)); (x', y') = A (x, y)", 'ode matrix slider'],
+      // Along an eigenvector the flow stays on its line: the straight-line
+      // solutions. Slide b above -2 and they turn into a spiral's complex pair.
+      [
+        'straight-line solutions are eigenvectors',
+        "a = -1; b = -3; A = ((0, 1), (a, b)); (x', y') = A (x, y); eigen(A)",
+        'ode matrix slider',
+      ],
       [
         'Lorenz field (3D)',
         "camera(-pi/3, 0.5, 55, (0, 0, 25)); (x', y', z') = (10(y - x), x(28 - z) - y, x y - 8z/3)",
@@ -946,6 +986,18 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
       ['figure eight', 'tube(((2+cos(4pi u))cos(6pi u), (2+cos(4pi u))sin(6pi u), sin(8pi u)))', '3d parametric knot'],
       ['Viviani', 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', '3d parametric'],
+      // T, N and B ride the curve; the osculating circle lies in the plane
+      // of T and N, and torsion is how fast that plane turns.
+      [
+        'Frenet frame on a helix',
+        'C = (2cos(4pi u), 2sin(4pi u), 3u - 1.5); C; frame(C, t/10); osculating(C, t/10); curvature(C, t/10); torsion(C, t/10)',
+        '3d parametric derivative animated',
+      ],
+      [
+        'Frenet frame on a trefoil',
+        'C = (sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u), -sin(6pi u)); C; frame(C, t/20); osculating(C, t/20); torsion(C, t/20)',
+        '3d parametric knot derivative animated',
+      ],
     ],
   ],
   [

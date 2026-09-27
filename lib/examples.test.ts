@@ -114,7 +114,7 @@ describe('examples menu', () => {
 
   it('finds tags by word, and exactly with #', () => {
     const labels = (q: string) => searchExamples(q).map(e => e.label);
-    expect(labels('#knot')).toEqual(['trefoil', 'torus knot (2,5)', 'figure eight']);
+    expect(labels('#knot')).toEqual(['trefoil', 'torus knot (2,5)', 'figure eight', 'Frenet frame on a trefoil']);
     // `knot` alone also finds the category's name in the rows' category.
     expect(labels('knot')).toContain('helix');
     expect(labels('#biology')).toEqual(['logistic growth', 'Lotka–Volterra', 'SIR epidemic']);
