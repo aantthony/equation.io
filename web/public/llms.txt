@@ -625,9 +625,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Hamiltonian flow: `hamiltonian(H)` takes H(x, y) with x the position q
   and y the momentum p — the same axes as the phase portrait
   `(x', y') = (y, -sin(x))` — and draws the flow q′ = ∂H/∂p, p′ = −∂H/∂q
-  as streamlines over the level sets of H, which the flow runs along
-  (energy is conserved). `hamiltonian(y^2/2 - cos(x))` is the pendulum:
-  closed orbits inside the separatrix, rotations outside. Sliders work
+  as streamlines, with the level sets of H — the orbits, which the flow runs
+  along (energy is conserved) — drawn over them in a darker ink, spaced by
+  H's values at its wells and saddles. The separatrices, the levels through
+  its saddles, are drawn bolder. `hamiltonian(y^2/2 - cos(x))` is the
+  pendulum: closed orbits inside the separatrix, rotations outside. Sliders work
   (`hamiltonian(y^2/2 + k x^2/2)`), and so does a named `H(x, y) = …`.
   Write q as x and p as y; H may not use z, u or v.
 - Random variable: `X ~ Normal(mean, sd)` declares X and plots its density
