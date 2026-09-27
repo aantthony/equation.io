@@ -55,6 +55,7 @@ import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from '.
 import { classifyAutomatonRow } from './automaton.ts';
 import { buildStateSystem, initialState } from './state.ts';
 import { stripNote } from './statements.ts';
+import { sysDefinitions } from './sys.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
@@ -223,6 +224,9 @@ export function prepareDocument(
     defNames.add(defKey(d));
     raw.push(d);
   }
+
+  // sys.clock and the like: constants the device supplies (lib/sys.ts).
+  raw.unshift(...sysDefinitions(rows.map(r => (r.comment ? '' : r.text))));
 
   // An automaton's letter names rows of cells, not scalar terms (automaton.ts).
   const built = buildDefs(
