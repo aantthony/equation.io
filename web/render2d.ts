@@ -8,7 +8,7 @@ import { colorConversionGLSL } from './color-field.ts';
 import type { ColorSpace } from '../lib/math-object.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
-import { ProgramCache, QUAD_VERT } from './gl.ts';
+import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
 
 export interface View2D {
@@ -168,7 +168,7 @@ float gridLine(float c, float lg, float spacing, float halfWidthPx) {
  * The grid is itself a field renderer: each family draws the level sets
  * c = k·spacing via gridLine. The Cartesian grid is the identity pair (x, y).
  */
-function gridFrag(specs: GridSpec[]): string {
+function gridFrag(specs: GridSpec[], axesOnly = false): string {
   const params = [...new Set(specs.flatMap(s => s.params))];
   const decls = specs
     .map((s, k) => {
@@ -188,9 +188,13 @@ function gridFrag(specs: GridSpec[]): string {
     float c = coord${k}(p.x, p.y);
     if (!isnan(c) && !isinf(c)) {
       float lg = ${s.gradGlsl ? `length(grad${k}(p.x, p.y) * uUpp)` : 'length(vec2(dFdx(c), dFdy(c)))'};
-      minorA = max(minorA, gridLine(c, lg, uMinor${k}, 0.5));
+${
+  axesOnly
+    ? ''
+    : `      minorA = max(minorA, gridLine(c, lg, uMinor${k}, 0.5));
       majorA = max(majorA, gridLine(c, lg, uMajor${k}, 0.5));
-      axisA = max(axisA, 1.0 - smoothstep(0.9, 1.9, abs(c) / max(lg, 1e-24)));
+`
+}      axisA = max(axisA, 1.0 - smoothstep(0.9, 1.9, abs(c) / max(lg, 1e-24)));
     }
   }`,
     )
@@ -200,6 +204,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform float t;
 ${paramDecls(params)}
 out vec4 outColor;
@@ -207,7 +212,7 @@ ${GLSL_PRELUDE}
 ${decls}
 ${GRID_LINE_GLSL}
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   vec3 col = ${glslVec3(theme.bg)};
   float minorA = 0.0;
   float majorA = 0.0;
@@ -235,6 +240,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float uMajor;
 uniform float uMinor;
@@ -245,7 +251,7 @@ ${GLSL_PRELUDE}
 float F(float x, float y) { return ${spec.glsl}; }
 ${grad}${GRID_LINE_GLSL}
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
   float lg = ${spec.gradGlsl ? 'length(gradF(p.x, p.y) * uUpp)' : 'length(vec2(dFdx(v), dFdy(v)))'};
@@ -262,6 +268,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -269,7 +276,7 @@ out vec4 outColor;
 ${GLSL_PRELUDE}
 float F(float x, float y) { return ${field}; }
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
 
@@ -309,6 +316,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -316,7 +324,7 @@ out vec4 outColor;
 ${GLSL_PRELUDE}
 float F(float x, float y) { return ${field}; }
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
   // Signed shade, as in the static preview (worker/og.ts shadeScalar):
@@ -336,6 +344,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -358,7 +367,7 @@ float contour(float val, float S) {
 }
 
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   vec2 f = F(p.x, p.y);
   if (any(isnan(f)) || any(isinf(f))) discard;
   const float S = ${(Math.PI / 8).toFixed(8)};
@@ -377,6 +386,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -404,12 +414,12 @@ float weight(float s) {
 }
 
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   vec2 v0 = V(p.x, p.y);
   if (any(isnan(v0)) || any(isinf(v0))) discard;
 
   float w0 = weight(0.0);
-  float sum = w0 * vfNoise(gl_FragCoord.xy);
+  float sum = w0 * vfNoise(gl_FragCoord.xy - uOrigin);
   float wsum = w0;
   float travel = 0.0;
   float h = STEP;
@@ -465,6 +475,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -484,7 +495,7 @@ float segDist(vec2 q, vec2 b) {
   return length(q - b * h);
 }
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   float wx = exp2(ceil(log2(CELL * uUpp.x)));
   vec2 w = vec2(wx, wx * uUpp.y / uUpp.x);
   vec2 c = (floor(p / w) + 0.5) * w;
@@ -521,6 +532,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -532,7 +544,7 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(vec3(1.0), rgb, c.y);
 }
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   vec2 f = F(p.x, p.y);
   if (any(isnan(f))) discard;
   // Hue = arg f (0 → red); a brightness ridge each factor of 2 in |f|;
@@ -557,6 +569,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -576,7 +589,7 @@ float checker(vec2 f, float s) {
   return mod(q.x + q.y, 2.0);
 }
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   vec2 f = F(p.x, p.y);
   if (any(isnan(f)) || any(isinf(f))) discard;
   // Pullback of the Cartesian grid in the image plane: level curves of re f
@@ -605,6 +618,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform float t;
 ${paramDecls(params)}
 out vec4 outColor;
@@ -615,7 +629,7 @@ ${locals}
 return ${field};
 }
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   vec3 channels = F(p.x, p.y);
   if (any(isnan(channels)) || any(isinf(channels))) discard;
   outColor = vec4(eqColorToSRGB(channels), 1.0);
@@ -629,6 +643,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -636,7 +651,7 @@ out vec4 outColor;
 ${GLSL_PRELUDE}
 vec2 stepFn(vec2 zc, float x, float y) { return ${step}; }
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   vec2 zc = ${seed === 'pixel' ? 'p' : 'vec2(0.0)'};
   float mu = -1.0;
   float m2 = dot(zc, zc);
@@ -691,6 +706,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 uniform float uSeed;
@@ -699,7 +715,7 @@ out vec4 outColor;
 ${GLSL_PRELUDE}
 float f(float a, float x) { return ${field}; }
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   float a = uSeed;
   for (int k = 0; k < 150; k++) {
     a = f(a, p.x);
@@ -748,6 +764,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -756,7 +773,7 @@ ${GLSL_PRELUDE}
 float F(float x, float y) { return ${field}; }
 ${edges.map((e, i) => `float E${i}(float x, float y) { return ${e}; }`).join('\n')}
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
   float aa = max(fwidth(v), 1e-24);
@@ -841,6 +858,7 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform float t;
 ${paramDecls(params)}
@@ -849,7 +867,7 @@ ${GLSL_PRELUDE}
 float F(float x, float y, float u) { return ${field}; }
 ${slope ? `float S(float x, float y, float u) { return ${slope}; }` : ''}
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   const float du = 1.0 / float(${PROJECTION_SAMPLES - 1});
   bool inside = false;
   float near = 1e30;
@@ -879,13 +897,14 @@ precision highp float;
 uniform vec2 uCenter;
 uniform vec2 uUpp;
 uniform vec2 uRes;
+uniform vec2 uOrigin;
 uniform vec3 uColor;
 uniform highp usampler2D uCells;
 uniform vec2 uSize;
 uniform float uX0;
 out vec4 outColor;
 void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - 0.5 * uRes) * uUpp;
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   float row = floor(0.5 - p.y);
   if (row < 0.0 || row >= uSize.y) discard;
   float col = clamp(floor(p.x - uX0 + 0.5), 0.0, uSize.x - 1.0);
@@ -928,17 +947,24 @@ export class Renderer2D {
     return tex;
   }
 
-  render(view: View2D, layers: Layers2D, time = 0, env: Record<string, number> = {}, gridSpecs?: GridSpec[]): void {
+  render(
+    view: View2D,
+    layers: Layers2D,
+    time = 0,
+    env: Record<string, number> = {},
+    gridSpecs?: GridSpec[],
+    frame: Frame = {},
+  ): void {
     const { gl } = this;
-    const w = gl.drawingBufferWidth;
-    const h = gl.drawingBufferHeight;
-    gl.viewport(0, 0, w, h);
+    const { x: ox, y: oy, w, h } = frame.vp ?? { x: 0, y: 0, w: gl.drawingBufferWidth, h: gl.drawingBufferHeight };
+    gl.viewport(ox, oy, w, h);
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
-    let specs = gridSpecs;
-    if (!specs?.length) {
+    const grid = frame.grid ?? 'on';
+    let specs = grid === 'off' ? [] : gridSpecs;
+    if (grid !== 'off' && !specs?.length) {
       const spacing = niceSpacing(view.upp, 90);
       const spacingY = niceSpacing(view.upp / (view.ratio ?? 1), 90);
       specs = [
@@ -947,18 +973,20 @@ export class Renderer2D {
       ];
     }
     try {
-      const grid = this.cache.get(QUAD_VERT, gridFrag(specs));
-      gl.useProgram(grid);
-      gl.uniform2f(gl.getUniformLocation(grid, 'uCenter'), view.cx, view.cy);
-      gl.uniform2f(gl.getUniformLocation(grid, 'uUpp'), view.upp, view.upp / (view.ratio ?? 1));
-      gl.uniform2f(gl.getUniformLocation(grid, 'uRes'), w, h);
-      const tLoc = gl.getUniformLocation(grid, 't');
+      const gridSpecsDrawn = specs ?? [];
+      const prog = this.cache.get(QUAD_VERT, gridFrag(gridSpecsDrawn, grid === 'axes'));
+      gl.useProgram(prog);
+      gl.uniform2f(gl.getUniformLocation(prog, 'uCenter'), view.cx, view.cy);
+      gl.uniform2f(gl.getUniformLocation(prog, 'uUpp'), view.upp, view.upp / (view.ratio ?? 1));
+      gl.uniform2f(gl.getUniformLocation(prog, 'uRes'), w, h);
+      gl.uniform2f(gl.getUniformLocation(prog, 'uOrigin'), ox, oy);
+      const tLoc = gl.getUniformLocation(prog, 't');
       if (tLoc) gl.uniform1f(tLoc, time);
-      specs.forEach((s, k) => {
-        gl.uniform1f(gl.getUniformLocation(grid, `uMajor${k}`), s.major);
-        gl.uniform1f(gl.getUniformLocation(grid, `uMinor${k}`), s.minor);
+      gridSpecsDrawn.forEach((s, k) => {
+        gl.uniform1f(gl.getUniformLocation(prog, `uMajor${k}`), s.major);
+        gl.uniform1f(gl.getUniformLocation(prog, `uMinor${k}`), s.minor);
         for (const p of s.params) {
-          const loc = gl.getUniformLocation(grid, uniformName(p));
+          const loc = gl.getUniformLocation(prog, uniformName(p));
           if (loc) gl.uniform1f(loc, env[p] ?? 0);
         }
       });
@@ -985,6 +1013,7 @@ export class Renderer2D {
       gl.uniform2f(gl.getUniformLocation(prog, 'uCenter'), view.cx, view.cy);
       gl.uniform2f(gl.getUniformLocation(prog, 'uUpp'), view.upp, view.upp / (view.ratio ?? 1));
       gl.uniform2f(gl.getUniformLocation(prog, 'uRes'), w, h);
+      gl.uniform2f(gl.getUniformLocation(prog, 'uOrigin'), ox, oy);
       gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...color);
       const tLoc = gl.getUniformLocation(prog, 't');
       if (tLoc) gl.uniform1f(tLoc, time);
@@ -1081,6 +1110,36 @@ export interface Overlay2D {
   texts?: Array<{ x: number; y: number; text: string; color: string }>;
 }
 
+/** A panel's box on the overlay, in CSS pixels from the top-left corner. */
+export interface OverlayBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * Save the overlay and set it up for one panel: CSS-pixel units, the panel's
+ * corner at the origin and everything clipped to its box. Without a box the
+ * whole overlay is the panel and is cleared first; a split view clears the
+ * overlay once per frame, before its panels draw.
+ */
+export function beginOverlay(ctx: CanvasRenderingContext2D, dpr: number, box?: OverlayBox): { w: number; h: number } {
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  if (!box) {
+    const w = ctx.canvas.width / dpr;
+    const h = ctx.canvas.height / dpr;
+    ctx.clearRect(0, 0, w, h);
+    return { w, h };
+  }
+  ctx.translate(box.x, box.y);
+  ctx.beginPath();
+  ctx.rect(0, 0, box.w, box.h);
+  ctx.clip();
+  return { w: box.w, h: box.h };
+}
+
 /** A label's text beside its anchor, haloed in the page background so it
  *  stays legible across curves and gridlines. Shared with the 3D overlay. */
 export function drawTextLabel(ctx: CanvasRenderingContext2D, text: string, sx: number, sy: number, color: string) {
@@ -1104,12 +1163,9 @@ export function drawLabels2D(
   dpr: number,
   extras?: Overlay2D,
   numbers = true,
+  box?: OverlayBox,
 ): void {
-  const w = ctx.canvas.width / dpr;
-  const h = ctx.canvas.height / dpr;
-  ctx.save();
-  ctx.scale(dpr, dpr);
-  ctx.clearRect(0, 0, w, h);
+  const { w, h } = beginOverlay(ctx, dpr, box);
   ctx.font = '11px ui-sans-serif, system-ui';
   ctx.fillStyle = theme.label;
 

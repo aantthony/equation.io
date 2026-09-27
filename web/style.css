@@ -406,6 +406,11 @@ body {
 .eq-line.is-def::before {
   visibility: hidden;
 }
+/* A `---` row splits the graph into panels (lib/panels.ts): it reads as a rule. */
+.eq-line.is-divider {
+  color: var(--muted);
+  border-top: 1px solid var(--placeholder);
+}
 /* A trailing `# note` (lib/statements.ts noteStart) reads as a caption: on
    its own line under the math, in a smaller prose face. */
 .eq-note {

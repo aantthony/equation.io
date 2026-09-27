@@ -41,6 +41,8 @@ export interface KindNames {
 export function rowKind(row: KindSource, names: KindNames): string | undefined {
   if (row.comment) return 'comment (group heading)';
   if (row.def) return `definition (${row.def.kind === 'const' ? constKind(row.def.name, names) : row.def.kind})`;
+  if (row.view?.kind === 'split') return 'panel divider (the rows below it draw in a panel of their own)';
+  if (row.view?.kind === 'grid') return "grid (what draws behind its panel's plots)";
   if (row.view) return `viewport (${row.view.kind})`;
   if (row.dist === 'probability') {
     // An event with no single-variable shape (P(X < Y)) is estimated, not drawn.

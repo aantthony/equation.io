@@ -18,6 +18,25 @@ function pixel(r: { w: number; px: Uint8ClampedArray }, x: number, y: number) {
 }
 
 describe('og raster renderer', () => {
+  it('draws each panel of a split view in its own box', () => {
+    // Side by side: the left panel's line is the first panel alone, squeezed
+    // into its half; the right half holds the second panel's rows.
+    const split = renderRaster(['y = 0', '---', 'x = 0', 'grid(off)'], 200, 100);
+    const alone = renderRaster(['y = 0'], 100, 100);
+    for (let y = 0; y < 100; y++) {
+      expect(split.px.subarray(y * 600, y * 600 + 300)).toEqual(alone.px.subarray(y * 300, y * 300 + 300));
+    }
+    // grid(off): the right panel is blank but for its hairline edge and x = 0.
+    expect(pixel(split, 150, 20)[0]).toBeLessThan(200);
+    expect(pixel(split, 130, 20)).toEqual([255, 255, 255]);
+    expect(pixel(split, 100, 20)[0]).toBeLessThan(250);
+  });
+
+  it("lets one panel be 3D without dropping another panel's 2D-only rows", () => {
+    expect(canRenderOg(['z = x y', '--- right', 'y < sin(x)'])).toBe(true);
+    expect(canRenderOg(['z = x y', 'y < sin(x)'])).toBe(false);
+  });
+
   it.each([
     ['re(w)=0', 'x=0'],
     ['im(w)', 'y'],

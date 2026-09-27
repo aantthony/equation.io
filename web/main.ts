@@ -80,6 +80,7 @@ import {
   fitView2D,
   formatCameraRow,
   formatViewRow,
+  formatViewSpec,
   parseViewRow,
 } from '../lib/view.ts';
 import { type Table, tableNameFor } from '../lib/csv.ts';
@@ -88,7 +89,16 @@ import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
 import type { GraphState, MoveViewTarget, RowStatus, VoiceHost } from './voice.ts';
 import { readKey as readVoiceKey } from './voice-key.ts';
 import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
-import { fullscreenQuad } from './gl.ts';
+import { type Frame, fullscreenQuad } from './gl.ts';
+import {
+  type PanelLayout,
+  type GridRowSpec,
+  layoutPanels,
+  linkRoot,
+  panelAt,
+  panelIndices,
+  splitsOf,
+} from '../lib/panels.ts';
 import {
   type Cells2D,
   type GridSpec,
@@ -97,6 +107,7 @@ import {
   Renderer2D,
   type View2D,
   drawLabels2D,
+  type OverlayBox,
   niceSpacing,
 } from './render2d.ts';
 import {
@@ -149,8 +160,10 @@ interface Equation {
   info?: string;
   /** Set when the row is a definition (`a = 2`, `f(x) = …`) rather than a plot. */
   def?: Definition;
-  /** Set when the row is a viewport row (`view(…)` / `camera(…)`). */
+  /** Set when the row is a viewport row (`view(…)`, `camera(…)`, `grid(…)`, a `---` divider). */
   viewSpec?: ViewSpec;
+  /** The split-view panel the row draws in (lib/panels.ts); 0 without dividers. */
+  panel?: number;
   /** Set when the row is a `# label` comment heading a collapsible group. */
   comment?: boolean;
   /** The `#hex` note color parsed from `text`, cached until the text changes. */
@@ -353,18 +366,13 @@ let stateVals: Record<string, number> = {};
 let stateTime = 0;
 /** Compiled coordinate fields; non-empty replaces the Cartesian grid. */
 let gridFields: GridField[] = [];
+/** The panel each coordinate field is defined in: its grid draws there. */
+let gridFieldPanels = new Map<string, number>();
 /** Declared random variables and their sample caches (persists across
  *  recompiles; definition-aware caching makes stale samples impossible). */
 const rvSys = new RVSystem();
-/** Click-dropped seeds for integral curves through vector fields / ODEs. */
-const drops: Array<{ x: number; y: number }> = [];
-/** What the pointer can grab, in math coords; rebuilt by every 2D frame. */
-let grabbable: Grabbable[] = [];
 /** Key of the point under the pointer (or being dragged): drawn with a ring. */
 let hotPoint: string | null = null;
-
-const view: View2D = { cx: 0, cy: 0, upp: 0.01 };
-const camera: Camera3D = { target: [0, 0, 0], radius: 14, theta: -Math.PI / 3, phi: Math.PI / 5.5 };
 
 // --- canvas / renderers ---
 
@@ -382,13 +390,186 @@ if (!glCtx) {
 }
 const gl = glCtx;
 const quad = fullscreenQuad(gl);
-const r2d = new Renderer2D(gl, quad);
-const r3d = new Renderer3D(gl, quad);
 const overlayCtx = overlay.getContext('2d')!;
-let capture: ReturnType<typeof attachCapture> | undefined;
 
-/** True until the canvas has been measured once and the opening zoom picked. */
-let awaitingFirstSize = true;
+// --- panels ---
+//
+// `---` rows split the canvas into panels (lib/panels.ts). Each has its own
+// window, camera, 2D-or-3D mode, seeds and grabbable points, and its own
+// renderers, so a 3D panel's retained geometry survives a 2D panel's frame.
+// `view`, `camera`, `mode`, `drops` and `grabbable` name the current panel's:
+// render() points them at each panel in turn, and a gesture at the panel
+// under the pointer, so the code below keeps reading one viewport.
+
+interface Panel {
+  layout: PanelLayout;
+  view: View2D;
+  camera: Camera3D;
+  mode: '2d' | '3d';
+  /** The panel's view(…) / camera(…) row pins it (`locked`). */
+  locked: boolean;
+  /** The panel's grid(…) row, if any. */
+  grid?: GridRowSpec;
+  /** Row texts last applied to the live view/camera (see applyViewportRows). */
+  appliedViewText: string | null;
+  appliedCameraText: string | null;
+  /** A camera row's `spin = …` in radians per second, and the ease-in factor. */
+  spin: number;
+  spinScale: number;
+  /** Click-dropped seeds for integral curves through vector fields / ODEs. */
+  drops: Array<{ x: number; y: number }>;
+  /** What the pointer can grab, in math coords; rebuilt by every 2D frame. */
+  grabs: Grabbable[];
+  /** Set until the panel has a size, when its opening zoom is picked. */
+  fresh: boolean;
+  r2d: Renderer2D;
+  r3d: Renderer3D;
+}
+
+const defaultCamera = (): Camera3D => ({ target: [0, 0, 0], radius: 14, theta: -Math.PI / 3, phi: Math.PI / 5.5 });
+
+function makePanel(): Panel {
+  return {
+    layout: { rect: { x: 0, y: 0, w: 0, h: 0 }, host: 0, inset: false, shared: { x: false, y: false } },
+    view: { cx: 0, cy: 0, upp: 0.01 },
+    camera: defaultCamera(),
+    mode: '2d',
+    locked: false,
+    appliedViewText: null,
+    appliedCameraText: null,
+    spin: 0,
+    spinScale: 1,
+    drops: [],
+    grabs: [],
+    fresh: true,
+    r2d: new Renderer2D(gl, quad),
+    r3d: new Renderer3D(gl, quad),
+  };
+}
+
+const panels: Panel[] = [makePanel()];
+/** The panel gestures, hover and voice mode act on: the one under the pointer. */
+let activePanel = panels[0];
+let cur = panels[0];
+let view = cur.view;
+let camera = cur.camera;
+let drops = cur.drops;
+let grabbable = cur.grabs;
+
+function usePanel(p: Panel) {
+  cur = p;
+  view = p.view;
+  camera = p.camera;
+  mode = p.mode;
+  drops = p.drops;
+  grabbable = p.grabs;
+}
+
+/** Run `fn` with `p` as the current panel. */
+function withPanel<T>(p: Panel, fn: () => T): T {
+  const prev = cur;
+  usePanel(p);
+  try {
+    return fn();
+  } finally {
+    usePanel(prev);
+  }
+}
+
+/** The current panel's size in device pixels. */
+const panelW = () => cur.layout.rect.w;
+const panelH = () => cur.layout.rect.h;
+
+const panelOf = (eq: Equation): number => (eq.familyParent ?? eq).panel ?? 0;
+
+/** The current panel's box on the page, in CSS pixels. */
+function panelClientRect(): { left: number; top: number; width: number; height: number } {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const r = cur.layout.rect;
+  return { left: rect.left + r.x / dpr, top: rect.top + r.y / dpr, width: r.w / dpr, height: r.h / dpr };
+}
+
+/** The panel under a client position. */
+function panelAtClient(clientX: number, clientY: number): Panel {
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const i = panelAt(
+    panels.map(p => p.layout),
+    (clientX - rect.left) * dpr,
+    (clientY - rect.top) * dpr,
+  );
+  return panels[i] ?? panels[0];
+}
+
+/** Point gestures, hover and voice mode at `p` from now on. */
+function activate(p: Panel) {
+  activePanel = p;
+  usePanel(p);
+}
+
+/**
+ * Match the panels to the document's dividers and lay them out in the
+ * canvas: one panel per divider plus the first, each with the rows between
+ * its divider and the next. A panel is 3D when one of its rows is.
+ */
+function syncPanels() {
+  const splits = splitsOf(equations.map(e => ({ view: e.error ? undefined : e.viewSpec })));
+  while (panels.length < splits.length + 1) panels.push(makePanel());
+  for (const p of panels.splice(splits.length + 1)) {
+    p.r3d.clearGeometry();
+    if (activePanel === p) activePanel = panels[0];
+  }
+  const dpr = window.devicePixelRatio || 1;
+  const layout = layoutPanels(splits, canvas.width, canvas.height, Math.round(12 * dpr));
+  panels.forEach((p, i) => {
+    p.layout = layout[i];
+    p.mode = '2d';
+    p.locked = false;
+    p.grid = undefined;
+    if (p.fresh && p.layout.rect.w && p.layout.rect.h) {
+      p.fresh = false;
+      p.view.upp = 12 / Math.min(p.layout.rect.w, p.layout.rect.h);
+    }
+  });
+  for (const eq of equations) {
+    if (eq.error) continue;
+    const p = panels[eq.panel ?? 0] ?? panels[0];
+    if (eq.cls?.needs3D) p.mode = '3d';
+    const spec = eq.viewSpec;
+    if (spec?.kind === 'grid') p.grid = spec;
+    if ((spec?.kind === 'view' || spec?.kind === 'camera') && spec.locked) p.locked = true;
+  }
+  usePanel(cur);
+}
+
+/**
+ * Carry shared axes between panels (`--- below, shared x`): the panel just
+ * moved pushes its shared axes up to the panel that owns them, and every
+ * sharing panel then takes them from there. Sharing x shares the center and
+ * the units per pixel across; each panel keeps its own ratio, so zooming one
+ * zooms the other's y by the same factor.
+ */
+function syncLinks(moved: Panel) {
+  const layouts = panels.map(p => p.layout);
+  const copy = (from: Panel, to: Panel, axis: 'x' | 'y') => {
+    if (from === to) return;
+    if (axis === 'x') {
+      to.view.cx = from.view.cx;
+      to.view.upp = from.view.upp;
+    } else {
+      to.view.cy = from.view.cy;
+      to.view.upp = (from.view.upp / (from.view.ratio ?? 1)) * (to.view.ratio ?? 1);
+    }
+  };
+  const i = panels.indexOf(moved);
+  for (const axis of ['x', 'y'] as const) {
+    if (i >= 0) copy(moved, panels[linkRoot(layouts, i, axis)], axis);
+    panels.forEach((p, k) => copy(panels[linkRoot(layouts, k, axis)], p, axis));
+  }
+}
+
+let capture: ReturnType<typeof attachCapture> | undefined;
 
 /** Point the drawing buffers at the canvas's real CSS box. Returns false while
  *  the element has no box yet (not laid out, hidden), in which case the old
@@ -410,11 +591,9 @@ function syncCanvasSize(): boolean {
   // window.innerWidth * devicePixelRatio — those agree only once the page has
   // settled, and a link opened mid-transition would otherwise keep whatever
   // zoom the guess produced. (This supersedes the non-finite-upp repair the
-  // hover work carried: the same boot bug, fixed at the source.)
-  if (awaitingFirstSize) {
-    awaitingFirstSize = false;
-    view.upp = 12 / Math.min(w, h); // ~12 math units across the short edge
-  }
+  // hover work carried: the same boot bug, fixed at the source.) Each panel
+  // opens at ~12 math units across its short edge (syncPanels).
+  syncPanels();
   return true;
 }
 
@@ -575,40 +754,63 @@ function runTweens(now: number) {
 // its own text as applied, so the re-apply never snaps the live view to the
 // row's rounded numbers mid-gesture.
 
-let appliedViewText: string | null = null;
-let appliedCameraText: string | null = null;
-
 // A camera row's `spin = …`: the live camera turns about the vertical axis at
-// this rate (radians per second) while the row keeps its starting angle, so a
-// spin never rewrites the URL. spinScale eases a new spin in from rest.
-let cameraSpin = 0;
-let spinScale = 1;
+// its rate (radians per second) while the row keeps its starting angle, so a
+// spin never rewrites the URL. A panel's spinScale eases a new spin in from rest.
 let lastSpinAt: number | null = null;
 
-/** The viewport row of the given kind, if any (duplicates carry errors). */
-function viewportRow(kind: ViewSpec['kind']): Equation | undefined {
-  return equations.find(eq => !eq.error && eq.viewSpec?.kind === kind);
+/** The current panel's viewport row of the given kind, if any (duplicates carry errors). */
+function viewportRow(kind: ViewSpec['kind'], p: Panel = cur): Equation | undefined {
+  const i = panels.indexOf(p);
+  return equations.find(eq => !eq.error && eq.viewSpec?.kind === kind && (eq.panel ?? 0) === i);
+}
+
+/**
+ * The window a view row asks for. A panel sharing x with another takes its
+ * x from there, so its row frames y alone (and the other way about): the
+ * row's y range then fits the panel exactly, through the panel's ratio.
+ */
+function fitPanelView(p: Panel, spec: Extract<ViewSpec, { kind: 'view' }>): View2D {
+  const { w, h } = p.layout.rect;
+  const { x: sx, y: sy } = p.layout.shared;
+  if (!sx && !sy) return { ratio: 1, ...fitView2D(spec, w, h) };
+  const fit: View2D = { ...p.view };
+  if (sx && spec.y) {
+    fit.cy = (spec.y[0] + spec.y[1]) / 2;
+    fit.ratio = p.view.upp / ((spec.y[1] - spec.y[0]) / h);
+  }
+  if (sy && spec.x) {
+    fit.cx = (spec.x[0] + spec.x[1]) / 2;
+    fit.upp = (spec.x[1] - spec.x[0]) / w;
+    fit.ratio = fit.upp / (p.view.upp / (p.view.ratio ?? 1));
+  }
+  return fit;
 }
 
 function applyViewportRows() {
-  const vRow = viewportRow('view');
-  if (!vRow) appliedViewText = null;
-  else if (vRow.text !== appliedViewText && vRow.viewSpec!.kind === 'view') {
-    appliedViewText = vRow.text;
-    Object.assign(view, { ratio: 1 }, fitView2D(vRow.viewSpec!, canvas.width, canvas.height));
-  }
-  const cRow = viewportRow('camera');
-  if (!cRow) {
-    appliedCameraText = null;
-    cameraSpin = 0;
-  } else if (cRow.text !== appliedCameraText && cRow.viewSpec!.kind === 'camera') {
-    appliedCameraText = cRow.text;
-    const c = cRow.viewSpec!;
-    cameraSpin = c.spin ?? 0;
-    camera.theta = c.theta;
-    camera.phi = clampPhi(c.phi);
-    camera.radius = c.radius ?? 14;
-    camera.target = c.target ? [...c.target] : [0, 0, 0];
+  for (const p of panels) {
+    const vRow = viewportRow('view', p);
+    if (!vRow) p.appliedViewText = null;
+    else if (vRow.text !== p.appliedViewText && vRow.viewSpec!.kind === 'view' && p.layout.rect.w) {
+      p.appliedViewText = vRow.text;
+      // Shared axes come from the panel that owns them, which is earlier in
+      // the list and already framed.
+      syncLinks(panels[p.layout.host]);
+      Object.assign(p.view, fitPanelView(p, vRow.viewSpec!));
+    }
+    const cRow = viewportRow('camera', p);
+    if (!cRow) {
+      p.appliedCameraText = null;
+      p.spin = 0;
+    } else if (cRow.text !== p.appliedCameraText && cRow.viewSpec!.kind === 'camera') {
+      p.appliedCameraText = cRow.text;
+      const c = cRow.viewSpec!;
+      p.spin = c.spin ?? 0;
+      p.camera.theta = c.theta;
+      p.camera.phi = clampPhi(c.phi);
+      p.camera.radius = c.radius ?? 14;
+      p.camera.target = c.target ? [...c.target] : [0, 0, 0];
+    }
   }
 }
 
@@ -649,43 +851,53 @@ function resetViewport() {
     viewportWriteTimer = null;
   }
   viewportWriteUndo = false;
-  appliedViewText = appliedCameraText = null;
-  view.cx = 0;
-  view.cy = 0;
-  delete view.ratio;
-  const w = canvas.width;
-  const h = canvas.height;
-  view.upp = w && h ? 12 / Math.min(w, h) : 0.01;
-  camera.target = [0, 0, 0];
-  camera.radius = 14;
-  camera.theta = -Math.PI / 3;
-  camera.phi = Math.PI / 5.5;
+  for (const p of panels) {
+    p.appliedViewText = p.appliedCameraText = null;
+    p.view.cx = 0;
+    p.view.cy = 0;
+    delete p.view.ratio;
+    const { w, h } = p.layout.rect;
+    p.view.upp = w && h ? 12 / Math.min(w, h) : 0.01;
+    p.fresh = !(w && h);
+    Object.assign(p.camera, defaultCamera());
+  }
 }
 
-/** Turns the live camera by the spin since the last frame. A hand on the
+/** Turns each live camera by its spin since the last frame. A hand on the
  *  graph or a camera move in flight holds it, and it resumes from there. */
 function advanceSpin() {
   const now = performance.now();
   const dt = lastSpinAt === null ? 0 : Math.min(0.1, (now - lastSpinAt) / 1000);
   lastSpinAt = now;
-  if (mode !== '3d' || !cameraSpin || pointers.size || tweens.has('view')) return;
-  camera.theta += cameraSpin * spinScale * dt;
+  if (tweens.has('view')) return;
+  for (const p of panels) {
+    if (p.mode !== '3d' || !p.spin || (pointers.size && p === activePanel)) continue;
+    p.camera.theta += p.spin * p.spinScale * dt;
+  }
 }
 
-/** Sets the camera row's spin (creating the row if needed), easing it in. */
+/** Where a new viewport row for panel p goes: the end of the panel's rows. */
+function panelRowEnd(p: Panel): number {
+  const i = panels.indexOf(p);
+  const next = equations.findIndex(e => (e.panel ?? 0) > i);
+  return next < 0 ? equations.length : next;
+}
+
+/** Sets the current panel's camera-row spin (creating the row if needed), easing it in. */
 function setCameraSpin(spin: number) {
   if (mode !== '3d') return;
-  cameraSpin = spin;
+  const p = cur;
+  p.spin = spin;
   if (viewportRow('camera')) writebackViewport(true);
   else {
     pushUndo(null);
-    appliedCameraText = addEquation(formatCameraRow({ ...camera, spin })).text;
+    p.appliedCameraText = addEquation(formatCameraRow({ ...camera, spin }), panelRowEnd(p)).text;
     recompileAll();
     renderAll();
     saveUrl();
   }
-  spinScale = 0;
-  tween('spin', 1.2, easeInOut, k => (spinScale = k));
+  p.spinScale = 0;
+  tween('spin', 1.2, easeInOut, k => (p.spinScale = k));
   requestRender();
 }
 
@@ -693,45 +905,68 @@ function ensureViewRow() {
   if (viewportRow('view')) return;
   const id = nextId;
   pushUndo(`viewport:${id}`);
-  const hw = (canvas.width * view.upp) / 2;
-  const hh = (canvas.height * view.upp) / (view.ratio ?? 1) / 2;
-  const eq = addEquation(formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh, view.ratio));
-  appliedViewText = eq.text;
+  const hw = (panelW() * view.upp) / 2;
+  const hh = (panelH() * view.upp) / (view.ratio ?? 1) / 2;
+  const text = formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh, view.ratio);
+  cur.appliedViewText = addEquation(text, panelRowEnd(cur)).text;
   recompileAll();
   renderAll();
   saveUrl();
 }
 
-function writebackViewport(undo: boolean) {
-  const eq = viewportRow(mode === '2d' ? 'view' : 'camera');
-  if (!eq) return;
+/** The row text framing panel p as it is now, when that differs from its row. */
+function panelViewText(p: Panel): { eq: Equation; text: string } | null {
+  const eq = viewportRow(p.mode === '2d' ? 'view' : 'camera', p);
+  if (!eq || p.locked) return null;
   let text: string;
-  if (mode === '2d') {
-    if (!canvas.width || !canvas.height) return;
-    const hw = (canvas.width / 2) * view.upp;
-    const hh = (canvas.height / 2) * (view.upp / (view.ratio ?? 1));
-    text = formatViewRow(view.cx - hw, view.cx + hw, view.cy - hh, view.cy + hh, view.ratio);
+  if (p.mode === '2d') {
+    const { w, h } = p.layout.rect;
+    const { x: sx, y: sy } = p.layout.shared;
+    // An axis shared with another panel is that panel's row's to write.
+    if (!w || !h || (sx && sy)) return null;
+    const v = p.view;
+    const hw = (w / 2) * v.upp;
+    const hh = (h / 2) * (v.upp / (v.ratio ?? 1));
+    text = formatViewSpec({
+      x: sx ? undefined : [v.cx - hw, v.cx + hw],
+      y: sy ? undefined : [v.cy - hh, v.cy + hh],
+      ratio: sx || sy ? undefined : v.ratio,
+    });
   } else {
-    text = formatCameraRow({ ...camera, spin: cameraSpin });
+    text = formatCameraRow({ ...p.camera, spin: p.spin });
   }
   text = keepNote(eq.text, text);
-  if (text === eq.text) return;
-  if (undo) pushUndo(`viewport:${eq.id}`);
-  if (mode === '2d') appliedViewText = text;
-  else appliedCameraText = text;
-  eq.text = text;
-  const line = lineEls()[equations.indexOf(eq)];
-  if (line) setLineText(line, text);
-  // Only the framing changed. Reclassifying the math here discards geometry
-  // caches and can block every camera gesture for hundreds of milliseconds.
-  // Text the formatter cannot round-trip (a non-finite window) still lands
-  // as this row's error, the way a typed view(...) does.
-  try {
-    // The row's `# note` is prose, not part of the viewport.
-    eq.viewSpec = parseViewRow(stripNote(text), {}) ?? undefined;
-  } catch {
-    recompileAll();
+  return text === eq.text ? null : { eq, text };
+}
+
+/** Rewrite every panel's viewport row to the picture on screen (shared axes
+ *  move more than one panel, so a gesture can change several rows). */
+function writebackViewport(undo: boolean) {
+  const changes = panels.flatMap(p => {
+    const change = panelViewText(p);
+    return change ? [{ p, ...change }] : [];
+  });
+  if (!changes.length) return;
+  if (undo) pushUndo(`viewport:${changes[0].eq.id}`);
+  let failed = false;
+  for (const { p, eq, text } of changes) {
+    if (p.mode === '2d') p.appliedViewText = text;
+    else p.appliedCameraText = text;
+    eq.text = text;
+    const line = lineEls()[equations.indexOf(eq)];
+    if (line) setLineText(line, text);
+    // Only the framing changed. Reclassifying the math here discards geometry
+    // caches and can block every camera gesture for hundreds of milliseconds.
+    // Text the formatter cannot round-trip (a non-finite window) still lands
+    // as this row's error, the way a typed view(...) does.
+    try {
+      // The row's `# note` is prose, not part of the viewport.
+      eq.viewSpec = parseViewRow(stripNote(text), {}) ?? undefined;
+    } catch {
+      failed = true;
+    }
   }
+  if (failed) recompileAll();
   reconcile();
   saveUrl();
 }
@@ -853,8 +1088,19 @@ const liveRow = (eq: Equation) =>
   equations.includes(eq.familyParent ?? eq) &&
   (!eq.familyParent || (!!eq.familyParent.cls && renderMembers(eq.familyParent).includes(eq)));
 
-/** One row that needs 3D makes the whole scene 3D (a family does when any member does). */
-const sceneMode = (): '2d' | '3d' => (equations.some(e => e.cls && !e.error && e.cls.needs3D) ? '3d' : '2d');
+/** Which grid families draw behind a 2D panel: those its grid(…) row names,
+ *  or else the coordinate fields defined among its rows. Empty is Cartesian. */
+function panelGridFields(p: Panel): Array<GridField | 'x' | 'y'> {
+  const coords = p.grid?.mode === 'coords' ? p.grid.coords! : null;
+  if (coords) {
+    if (coords.length === 2 && coords.includes('x') && coords.includes('y')) return [];
+    return coords.flatMap<GridField | 'x' | 'y'>(name =>
+      name === 'x' || name === 'y' ? [name] : gridFields.filter(f => f.name === name),
+    );
+  }
+  const i = panels.indexOf(p);
+  return gridFields.filter(f => (gridFieldPanels.get(f.name) ?? 0) === i);
+}
 
 /** 2D-only plots (densities, flows, sequences, planar fields) a 3D scene leaves out. */
 const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
@@ -886,10 +1132,10 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
 function render() {
   if (!syncCanvasSize()) return;
   applyViewportRows();
+  syncLinks(activePanel);
   const dpr = window.devicePixelRatio || 1;
   const time = graphTime();
   const active = equations.filter(e => e.cls && !e.error).flatMap(renderMembers);
-  mode = sceneMode();
   advanceSpin();
 
   // States carry between frames, so they are integrated up to now before
@@ -930,6 +1176,10 @@ function render() {
 
   gl.clearColor(theme.bg[0], theme.bg[1], theme.bg[2], 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  const split = panels.length > 1;
+  // One panel draws its overlay whole, clearing it; split panels each draw
+  // clipped to their box, so the overlay is cleared once for all of them.
+  if (split) overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
 
   // A filled parametric region's triangles, resampled when a value it reads changes.
   const sampleRegion = (eq: Equation, comps: readonly [Expr, Expr]): Float64Array => {
@@ -984,8 +1234,8 @@ function render() {
     time: number,
     uniforms: Record<string, number> = {},
   ): number[] => {
-    const w = 1.5 * gl.drawingBufferWidth * view.upp;
-    const h = (1.5 * gl.drawingBufferHeight * view.upp) / (view.ratio ?? 1);
+    const w = 1.5 * panelW() * view.upp;
+    const h = (1.5 * panelH() * view.upp) / (view.ratio ?? 1);
     return streamline(
       fieldEvaluator(comps, { ...constEnv, ...uniforms, t: time }),
       [x0, y0],
@@ -1023,8 +1273,6 @@ function render() {
     }
     return out;
   };
-
-  const grabs: Grabbable[] = [];
 
   /**
    * An orbit's paths, integrated in the worker whenever something it reads
@@ -1094,9 +1342,8 @@ function render() {
       vlo = [tx - r, ty - r, tz - r];
       vhi = [tx + r, ty + r, tz + r];
     } else {
-      const dpr = window.devicePixelRatio || 1;
-      const halfW = ((canvas.clientWidth * dpr) / 2) * view.upp;
-      const halfH = ((canvas.clientHeight * dpr) / 2) * (view.upp / (view.ratio ?? 1));
+      const halfW = (panelW() / 2) * view.upp;
+      const halfH = (panelH() / 2) * (view.upp / (view.ratio ?? 1));
       vlo = [view.cx - halfW, view.cy - halfH];
       vhi = [view.cx + halfW, view.cy + halfH];
     }
@@ -1212,691 +1459,768 @@ function render() {
     return pts;
   };
 
-  if (mode === '3d') {
-    const scene: Scene3D = { implicits: [], psurfaces: [], curves: [], segments: [], tubes: [], points: [] };
-    for (const eq of active) {
-      if (SKIPPED_IN_3D.has(eq.cpu!.type)) continue;
-      const color = rowColor(eq);
-      const plot = eq.cpu!;
-      const { params, uniforms } = shaderBindings(eq.gpu);
-      switch (plot.type) {
-        case 'implicit2d': // extrudes to its true locus (a vertical sheet)
-          scene.implicits.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
-          break;
-        case 'implicit3d':
-          scene.implicits.push({ ...gpuFor(eq, 'implicit3d'), color, params, uniforms });
-          break;
-        case 'spacecurve': {
-          const pts = solveFor(eq, 3, plot.residuals);
-          scene.curves.push({ pts: new Float32Array(pts.flat()), color });
-          break;
-        }
-        case 'vfield3d': {
-          if (eq.showStreamlines && eq.gpu?.type === 'vfield3d') {
-            (scene.streamlines ??= []).push({ comps: gpuFor(eq, 'vfield3d').comps, color, params, uniforms });
-            break;
-          }
-          const pts = solveFor(eq, 3, plot.comps);
-          if (eq.showArrows) {
-            const flat = pts.flat();
-            if (flat.length >= 6) scene.curves.push({ pts: new Float32Array(flat), color, arrow: true });
-          } else {
-            let path: number[] = [];
-            const flush = () => {
-              if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color, fade: true });
-              path = [];
-            };
-            for (const p of pts) {
-              if (p.every(Number.isFinite)) path.push(...p);
-              else flush();
-            }
-            flush();
-          }
-          break;
-        }
-        case 'polygon': {
-          const dim = plot.dim ?? 2;
-          if (plot.hull) {
-            let sample = hullSamplers.get(plot);
-            if (!sample) {
-              sample = hullGeometrySampler(plot.pts, dim, plot.over);
-              hullSamplers.set(plot, sample);
-            }
-            const geometry = sample(constEnv, time);
-            if (!geometry) break;
-            const { mesh, edges } = geometry;
-            if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
-            scene.segments.push({ pts: edges, color: mesh.indices.length ? edgeShade(color) : color, retained: true });
-            break;
-          }
-          const vals = verticesOf(plot)(constEnv, time);
-          if (!vals.every(Number.isFinite)) break;
-          const pts: number[] = [];
-          for (let k = 0; k < vals.length; k += dim) pts.push(vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0);
-          const triangle = plot.closed && pts.length === 9;
-          if (plot.closed) pts.push(...pts.slice(0, 3));
-          scene.curves.push({ pts: new Float32Array(pts), color, arrow: plot.arrow, triangle });
-          break;
-        }
-        case 'dscatter': {
-          // One sprite per point (see CLOUD_3D_MAX); any row with more than
-          // that is rejected at compile time — flat clouds included, since
-          // they reach this path too whenever the scene is 3D — so nothing is
-          // dropped here. A gap in ANY coordinate skips the point: an unplaced
-          // z would otherwise reach projection and depth sorting as NaN.
-          const [xs, ys, zs] = plot.coords;
-          for (let k = 0; k < xs.length; k++) {
-            const z = zs ? zs[k] : 0;
-            if (isFinite(xs[k]) && isFinite(ys[k]) && isFinite(z)) {
-              scene.points.push({ pos: [xs[k], ys[k], z], color });
-            }
-          }
-          break;
-        }
-        case 'plist': {
-          const env = { ...constEnv, t: time };
-          for (const comps of plot.pts) {
-            try {
-              const p = comps.map(c => evaluate(c, env));
-              if (p.every(isFinite)) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
-            } catch {
-              /* skip unevaluable points */
-            }
-          }
-          break;
-        }
-        case 'psurface':
-        // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
-        case 'pregion':
-          scene.psurfaces.push({ ...gpuFor(eq, 'psurface'), color, params, uniforms });
-          break;
-        case 'orbit': {
-          let path: number[] = [];
-          const flush = () => {
-            if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color });
-            path = [];
-          };
-          for (const p of orbitFor(eq)) {
-            if (p.every(Number.isFinite)) path.push(p[0], p[1], p[2] ?? 0);
-            else flush();
-          }
-          flush();
-          break;
-        }
-        case 'label': {
-          const p = samplePoint(eq);
-          if (p) (scene.texts ??= []).push({ pos: [p[0], p[1], p[2] ?? 0], text: plot.text, color });
-          break;
-        }
-        case 'trail': {
-          scene.curves.push({ pts: new Float32Array(eq.trail!.coordinates(3)), color });
-          const p = eq.trail!.head;
-          if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
-          break;
-        }
-        case 'pcurve': {
-          const flat = sampleCurve(eq, plot.dim);
-          // A broken path carries extra (NaN) points at its jumps.
-          const count = flat.length / plot.dim;
-          const pts = new Float32Array(count * 3);
-          for (let k = 0; k < count; k++) {
-            pts[k * 3] = flat[k * plot.dim];
-            pts[k * 3 + 1] = flat[k * plot.dim + 1];
-            pts[k * 3 + 2] = plot.dim === 3 ? flat[k * plot.dim + 2] : 0;
-          }
-          // Tubes are opt-in through tube(…): a bare curve stays a line, so
-          // it never hides points or curves sharing the scene. The radius may
-          // use sliders and t; while it evaluates ≤ 0 (say, mid slider drag)
-          // the curve draws as a bare line instead of an inside-out tube.
-          let radius = 0;
-          if (plot.dim === 3 && plot.tube) {
-            try {
-              const r = evaluate(plot.tube, { ...constEnv, t: time });
-              if (isFinite(r) && r > 0) radius = r;
-            } catch {
-              /* unevaluable this frame: draw the bare curve */
-            }
-          }
-          const combs = plot.dim === 3 && (eq.combK || eq.combT);
-          if (radius <= 0 && !combs) {
-            scene.curves.push({ pts, color });
-            break;
-          }
-          const fr = curveFrames(pts, sampleDeriv(plot.d1), sampleDeriv(plot.d2), sampleDeriv(plot.d3));
-          if (radius > 0) {
-            scene.tubes.push({ ...buildTube(pts, fr, radius, TUBE_SEGMENTS), color });
-          } else {
-            scene.curves.push({ pts, color });
-          }
-          const extent = curveExtent(pts);
-          if (eq.combK) {
-            // Teeth point along −N (away from the center of curvature).
-            const kColor: [number, number, number] = [color[0] * 0.7, color[1] * 0.7, color[2] * 0.7];
-            const comb = buildComb(pts, fr.frenetNormal, fr.kappa, -combScale(fr.kappa, extent), COMB_STEP);
-            scene.segments.push({ pts: comb.teeth, color: kColor });
-            scene.curves.push({ pts: comb.tips, color: kColor });
-          }
-          if (eq.combT) {
-            // Signed teeth along ±B expose where torsion changes hand.
-            const tColor: [number, number, number] = [
-              color[0] * 0.45 + 0.25,
-              color[1] * 0.45 + 0.25,
-              color[2] * 0.45 + 0.25,
-            ];
-            const comb = buildComb(pts, fr.frenetBinormal, fr.tau, combScale(fr.tau, extent), COMB_STEP);
-            scene.segments.push({ pts: comb.teeth, color: tColor });
-            scene.curves.push({ pts: comb.tips, color: tColor });
-          }
-          break;
-        }
-        case 'point': {
-          const p = samplePoint(eq);
-          if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name });
-          break;
-        }
-        case 'system':
-          if (plot.parametric) {
-            const pts = solveFor(eq, plot.dim, plot.residuals).flatMap(p => [p[0], p[1], p[2] ?? 0]);
-            scene.curves.push({ pts: new Float32Array(pts), color });
-            break;
-          }
-          for (const p of solveFor(eq, plot.dim, plot.residuals)) {
-            scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
-          }
-          break;
-      }
+  for (const [index, panel] of panels.entries()) {
+    usePanel(panel);
+    const rows = active.filter(e => panelOf(e) === index);
+    const r = panel.layout.rect;
+    if (!r.w || !r.h) continue;
+    const gridMode = panel.grid?.mode === 'off' ? 'off' : panel.grid?.mode === 'axes' ? 'axes' : 'on';
+    const frame: Frame = { vp: { x: r.x, y: canvas.height - r.y - r.h, w: r.w, h: r.h }, grid: gridMode };
+    const box = split ? { x: r.x / dpr, y: r.y / dpr, w: r.w / dpr, h: r.h / dpr } : undefined;
+    if (split) {
+      // Scissored, so an inset paints over its host and nothing spills over an edge.
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(frame.vp!.x, frame.vp!.y, r.w, r.h);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     }
-    r3d.render(camera, scene, time, constEnv);
-    drawLabels3D(overlayCtx, camera, dpr, scene.points, scene.texts);
-  } else {
-    r3d.clearGeometry();
-    const layers: Required<Layers2D> = {
-      levels: [],
-      cells: [],
-      fractals: [],
-      domains: [],
-      colors: [],
-      conformals: [],
-      vfields: [],
-      tfields: [],
-      ineqs: [],
-      projections: [],
-      bifs: [],
-      scalars: [],
-      complexes: [],
-      curves: [],
-    };
-    const extras: Overlay2D = { points: [], polylines: [], bars: [], clouds: [] };
-    // Spacing for any level-set family (custom grids, contour stacks): sample
-    // |∇c| around the view to convert the target pixel gap into coordinate
-    // units (π-based for angles).
-    const halfW = (gl.drawingBufferWidth / 2) * view.upp;
-    const halfH = (gl.drawingBufferHeight / 2) * (view.upp / (view.ratio ?? 1));
-    const xmin = view.cx - halfW;
-    const xmax = view.cx + halfW;
-    const stemPx = 1 / (view.upp * dpr); // CSS px between consecutive whole numbers
-    const viewPts: Array<[number, number]> = [
-      [view.cx, view.cy],
-      [view.cx - halfW / 2, view.cy],
-      [view.cx + halfW / 2, view.cy],
-      [view.cx, view.cy - halfH / 2],
-      [view.cx, view.cy + halfH / 2],
-    ];
-    const env: Record<string, number> = { ...constEnv, t: time };
-    const seedOf = (a0Name?: string): number => (a0Name !== undefined ? constEnv[a0Name] : undefined) ?? 0.5;
-    const levelSpacing = (f: CpuGrid) => {
-      const cupp = sampleGradMag(f, viewPts, env, view.upp * 4, view.ratio) * view.upp;
-      return f.angular ? angularSpacing(cupp, 90) : niceSpacing(cupp, 90);
-    };
-    for (const eq of active) {
-      const color = rowColor(eq);
-      const css = cssColor(color);
-      const plot = eq.cpu!;
-      const { params, uniforms } = shaderBindings(eq.gpu);
-      switch (plot.type) {
-        case 'implicit2d':
-          layers.curves.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
-          if (eq.showLevels && plot.levels) {
-            const f = plot.levels;
-            const shader = gpuFor(eq, 'implicit2d').levels!;
-            const sp = levelSpacing(f);
-            layers.levels.push({
-              glsl: shader.glsl,
-              gradGlsl: shader.gradGlsl,
-              params: f.params,
-              major: sp.major,
-              minor: sp.minor,
-              color,
-            });
-          }
-          break;
-        case 'ineq2d':
-          layers.ineqs.push({ ...gpuFor(eq, 'ineq2d'), color, params, uniforms });
-          break;
-        case 'projected2d':
-          layers.projections.push({ ...gpuFor(eq, 'projected2d'), color, params, uniforms });
-          break;
-        case 'pregion':
-          (extras.regions ??= []).push({ tris: sampleRegion(eq, plot.comps), fill: cssColorA(color, 0.22) });
-          break;
-        case 'scalar2d':
-          layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms });
-          break;
-        case 'complex2d':
-          layers.complexes.push({ ...gpuFor(eq, 'complex2d'), color, params, uniforms });
-          break;
-        case 'domain2d':
-          layers.domains.push({ ...gpuFor(eq, 'domain2d'), color, params, uniforms });
-          break;
-        case 'rgb2d':
-        case 'hsl2d':
-        case 'oklch2d':
-          layers.colors.push({ ...gpuFor(eq, plot.type), color, params, uniforms });
-          break;
-        case 'conformal2d':
-          layers.conformals.push({ ...gpuFor(eq, 'conformal2d'), color, params, uniforms });
-          break;
-        case 'fractal2d':
-          layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
-          break;
-        case 'tfield2d':
-          layers.tfields.push({ ...gpuFor(eq, 'tfield2d'), color, params, uniforms });
-          break;
-        case 'vfield2d': {
-          layers.vfields.push({ ...gpuFor(eq, 'vfield2d'), color, params, uniforms });
-          drops.forEach((d, i) => {
-            extras.polylines.push({ pts: integralCurve(plot.comps, d.x, d.y, time), color: css });
-            extras.points.push({ x: d.x, y: d.y, color: css, hot: hotPoint === `drop${i}` });
-          });
-          break;
-        }
-        case 'orbit':
-          extras.polylines.push({ pts: orbitFor(eq).flat(), color: css });
-          break;
-        case 'automaton': {
-          const key = JSON.stringify([...(eq.cls?.params ?? []).map(p => env[p]), eq.cls?.animated ? time : 0]);
-          if (eq.cellCache?.plan !== plot || eq.cellCache.key !== key) {
-            const grid = runAutomaton(plot, env);
-            eq.cellCache = {
-              plan: plot,
-              key,
-              cells: { shades: cellShades(grid), width: grid.width, rows: grid.rows, x0: grid.x0, color },
-            };
-          }
-          layers.cells.push({ ...eq.cellCache.cells, color });
-          break;
-        }
-        case 'label': {
-          const p = samplePoint(eq);
-          if (p) (extras.texts ??= []).push({ x: p[0], y: p[1], text: plot.text, color: css });
-          break;
-        }
-        case 'trail': {
-          extras.polylines.push({ pts: eq.trail!.coordinates(2), color: css });
-          const p = eq.trail!.head;
-          if (p) extras.points.push({ x: p[0], y: p[1], color: css });
-          break;
-        }
-        case 'pcurve':
-          extras.polylines.push({ pts: sampleCurve(eq, 2), color: css });
-          break;
-        case 'polygon': {
-          let pts: number[];
-          try {
-            pts = verticesOf(plot)(env);
-          } catch {
-            break;
-          }
-          if (!pts.every(isFinite)) break;
-          extras.polylines.push({
-            pts: plot.hull ? hullFaces(pts, 2)[0].outline.flatMap(p => [p[0], p[1]]) : pts,
-            color: css,
-            closed: plot.closed,
-            fill: plot.closed ? cssColorA(color, 0.16) : undefined,
-            arrow: plot.arrow,
-          });
-          break;
-        }
-        case 'point': {
-          const p = samplePoint(eq);
-          if (!p) break;
-          const key = `eq${eq.id}`;
-          extras.points.push({ x: p[0], y: p[1], color: css, hot: hotPoint === key });
-          const set = pointWriter(eq);
-          if (set) grabs.push({ key, x: p[0], y: p[1], edits: true, set });
-          break;
-        }
-        case 'vlist': {
-          // Numbers on the number line, copies stacked (lib/plot.ts dotPlot).
-          const values = plot.values.map(expr => {
-            try {
-              return evaluate(expr, env);
-            } catch {
-              return NaN;
-            }
-          });
-          if (values.length > CLOUD_MIN) {
-            extras.clouds!.push({ ...columnStacks(plot, values, CLOUD_DOT_PX), color: css });
-            break;
-          }
-          const { xs, ys } = columnStacks(plot, values, POINT_DOT_PX);
-          for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
-          break;
-        }
-        case 'plist': {
-          // A handful of points read as points; a few thousand read as a
-          // cloud, where fat outlined dots would merge into one white smear.
-          const dense = plot.pts.length > 200;
-          const r = dense ? 2 : 4;
-          for (const comps of plot.pts) {
-            try {
-              const px = evaluate(comps[0], env);
-              const py = evaluate(comps[1], env);
-              if (isFinite(px) && isFinite(py)) extras.points.push({ x: px, y: py, color: css, r, bare: dense });
-            } catch {
-              /* skip unevaluable points */
-            }
-          }
-          break;
-        }
-        // Typed-array lists: nothing to evaluate, so the only question is how
-        // to draw them. Few enough to read as individual points, and they go
-        // through the same path as any other point (outlines); past that
-        // they are a cloud, drawn in bulk, stacked in dot-wide columns.
-        case 'dlist': {
-          const { values } = plot;
-          if (values.length <= CLOUD_MIN) {
-            const { xs, ys } = columnStacks(values, values, POINT_DOT_PX);
-            for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
-            break;
-          }
-          extras.clouds!.push({ ...columnStacks(values, values, CLOUD_DOT_PX), color: css });
-          break;
-        }
-        case 'dscatter': {
-          if (plot.dim === 3) break; // drawn in the 3D pass
-          const [xs, ys] = plot.coords;
-          if (xs.length <= CLOUD_MIN) {
-            for (let k = 0; k < xs.length; k++) {
-              if (isFinite(xs[k]) && isFinite(ys[k])) {
-                extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
-              }
-            }
-            break;
-          }
-          extras.clouds!.push({ xs, ys, color: css });
-          break;
-        }
-        case 'histogram': {
-          const { centers, counts, width } = plot;
-          for (let k = 0; k < centers.length; k++) {
-            extras.bars!.push({ x: centers[k], y: counts[k], halfWidth: width / 2, color: css });
-          }
-          break;
-        }
-        case 'sequence': {
-          // Dots at integer n in view; partial-sum mode accumulates from n = 0
-          // (terms that are not finite, like 1/0², are skipped). A term that
-          // throws — a Σ(s=1..n, …) past its term limit — is skipped, and a
-          // partial sum stops there so the running total does not freeze.
-          const termAt = (n: number): number | undefined => {
-            env[plot.index] = n;
-            try {
-              return evaluate(plot.term, env);
-            } catch {
-              return undefined;
-            }
-          };
-          const nEnd = Math.min(Math.floor(xmax), eq.partialSum ? 20000 : 100000);
-          const n0 = Math.max(0, Math.ceil(xmin));
-          const step = Math.max(1, Math.ceil((nEnd - n0 + 1) / 4000));
-          if (eq.partialSum) {
-            let sum = 0;
-            let started = false;
-            for (let n = 0; n <= nEnd; n++) {
-              const v = termAt(n);
-              if (v === undefined) break;
-              if (isFinite(v)) {
-                sum += v;
-                started = true;
-              }
-              if (started && n >= n0 && (n - n0) % step === 0) {
-                extras.points.push({ x: n, y: sum, color: css, r: 3.5 });
-              }
-            }
-          } else {
-            for (let n = n0; n <= nEnd; n += step) {
-              const v = termAt(n);
-              if (v !== undefined && isFinite(v)) extras.points.push({ x: n, y: v, color: css, r: 3.5 });
-            }
-          }
-          delete env[plot.index];
-          break;
-        }
-        case 'cobweb': {
-          layers.curves.push({ field: gpuFor(eq, 'cobweb').curveField, color, params, uniforms });
-          const seed = seedOf(plot.a0Name);
-          const dLo = Math.max(xmin, view.cy - halfH);
-          const dHi = Math.min(xmax, view.cy + halfH);
-          if (dHi > dLo) {
-            // y = x, the guide the orbit reflects off; kept lighter than the axes.
-            extras.polylines.push({ pts: [dLo, dLo, dHi, dHi], color: cssColorA(theme.axis, 0.45), width: 1 });
-          }
-          const pts: number[] = [seed, seed];
-          let a = seed;
-          for (let k = 0; k < 80; k++) {
-            env[plot.recVar] = a;
-            let b: number;
-            try {
-              b = evaluate(plot.f, env);
-            } catch {
-              break;
-            }
-            if (!isFinite(b) || Math.abs(b) > 1e9) break;
-            pts.push(a, b, b, b);
-            a = b;
-          }
-          delete env[plot.recVar];
-          extras.polylines.push({ pts, color: css, width: 1.5 });
-          extras.points.push({ x: seed, y: seed, color: css, r: 3.5 });
-          break;
-        }
-        case 'bifurcation':
-          layers.bifs.push({
-            field: gpuFor(eq, 'bifurcation').field,
-            color,
-            params,
-            uniforms: { uSeed: seedOf(plot.a0Name) },
-          });
-          break;
-        case 'density': {
-          let c: DensityCurve | null = null;
-          try {
-            c = rvSys.curve(plot.rv, env, { lo: xmin, hi: xmax });
-            if (c && plot.mass) c = scaleCurve(c, evaluate(plot.mass, env));
-          } catch {
-            break; /* a parameter is missing this frame */
-          }
-          if (!c) break;
-          if (c.pts.length >= 4) extras.polylines.push({ pts: c.pts, color: css, width: 2 });
-          // Point masses draw as probability stems (height = mass, not density).
-          for (const a of c.atoms ?? []) {
-            extras.polylines.push({ pts: [a.x, 0, a.x, a.p], color: css, width: 2 });
-            extras.points.push({ x: a.x, y: a.p, color: css, r: 4 });
-          }
-          break;
-        }
-        case 'value': {
-          // A definite-integral row: the number lives in the row's readout;
-          // the plot is the area it measures. Parts that add to the value
-          // take the row color, parts that subtract its complement.
-          if (!plot.shade) break;
-          let c = eq.shadeCache;
-          if (c?.shade !== plot.shade) {
-            const names = shadeNames(plot.shade);
-            const sampler = compileSampler(plot.shade.body, plot.shade.v, names) ?? evalSampler(plot.shade);
-            c = eq.shadeCache = { shade: plot.shade, names, sampler, key: '', runs: [] };
-          }
-          const key = [xmin, xmax, ...c.names.map(n => env[n])].join();
-          if (key !== c.key) {
-            c.key = key;
-            c.runs = shadeRuns(plot.shade, env, xmin, xmax, c.sampler);
-          }
-          const minus = minusTint(color);
-          for (const run of c.runs) {
-            // Only real edges are stroked: not where the window cut the range.
-            const tint = run.sign > 0 ? color : minus;
-            const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH);
-            extras.polylines.push({
-              pts: fill,
-              color: cssColor(tint),
-              closed: true,
-              fill: cssColorA(tint, 0.16),
-              noStroke: true,
-            });
-            extras.polylines.push({ pts: stroke, color: cssColor(tint) });
-          }
-          break;
-        }
-        case 'pmf': {
-          // Stems at the atoms in view — whole numbers for a declared law,
-          // wherever g put them for a derived one; lib caches them per window.
-          try {
-            const mass = plot.mass ? evaluate(plot.mass, env) : 1;
-            for (const run of rvSys.pmfRuns(plot.rv, env, { lo: xmin, hi: xmax }) ?? []) {
-              pushStems(extras, scaleStems(run, mass), color, false, stemPx);
-            }
-          } catch {
-            /* a parameter is missing this frame */
-          }
-          break;
-        }
-        case 'prob': {
-          // The estimate lives in the row's readout; the plot is the shaded
-          // area under the variable's density, when the body has that shape.
-          if (!plot.shade) break;
-          try {
-            // Over a discrete variable: the selected stems, drawn heavier —
-            // `X < 3` stops at 2 and `X <= 3` takes the stem at 3.
-            const selected = rvSys.pmfRuns(plot.shade.rv, env, { lo: xmin, hi: xmax }, plot.shade);
-            if (selected) {
-              for (const run of selected) pushStems(extras, run, color, true, stemPx);
-              break;
-            }
-            const c = rvSys.curve(plot.shade.rv, env, { lo: xmin, hi: xmax });
-            if (!c) break;
-            const lo = plot.shade.lo ? evaluate(plot.shade.lo, env) : undefined;
-            const hi = plot.shade.hi ? evaluate(plot.shade.hi, env) : undefined;
-            const poly = shadePolygon(c, lo, hi);
-            if (poly) {
-              extras.polylines.push({ pts: poly, color: css, closed: true, fill: cssColorA(color, 0.16) });
-            }
-          } catch {
-            /* not evaluable this frame */
-          }
-          break;
-        }
-        case 'expect': {
-          // The value lives in the row's readout; the plot is a vertical
-          // marker at x = E under the variable's density.
-          try {
-            // Where and how high is lib's rule (markerHeight), shared with og.
-            const mark = markerHeight(rvSys, plot.rv, env, { lo: xmin, hi: xmax });
-            if (!mark) break;
-            if (mark.h > 0) extras.polylines.push({ pts: [mark.x, 0, mark.x, mark.h], color: css, width: 2 });
-            extras.points.push({ x: mark.x, y: mark.h, color: css, r: 4 });
-          } catch {
-            /* not evaluable this frame */
-          }
-          break;
-        }
-        case 'system':
-          // A 3-unknown system forces the 3D view, so only 2D lands here.
-          if (plot.dim === 2) {
-            const points = solveFor(eq, 2, plot.residuals);
-            if (plot.parametric) {
-              extras.polylines.push({ pts: points.flat(), color: css });
-              break;
-            }
-            const set = coordinatePointWriter(eq, plot.coordinates);
-            points.forEach((p, i) => {
-              const key = `sys${eq.id}:${i}`;
-              extras.points.push({
-                x: p[0],
-                y: p[1],
-                color: css,
-                hot: hotPoint === key,
-                label: complexRootLabel(plot.complexEquation, p, env),
-              });
-              if (set) grabs.push({ key, x: p[0], y: p[1], edits: true, set });
-            });
-          }
-          break;
-      }
-    }
-    // Named points (`A = (0, 0)` rows) draw labeled with their name; rows
-    // whose components are plain numbers or slider names can be dragged.
-    for (const eq of equations) {
-      if (eq.def?.kind !== 'const' || eq.error || !defs.points.has(eq.def.name)) continue;
-      const [cx, cy] = pointComps(eq.def.name);
-      const px = constEnv[cx];
-      const py = constEnv[cy];
-      if (!isFinite(px) || !isFinite(py)) continue;
-      const key = `def${eq.id}`;
-      extras.points.push({
-        x: px,
-        y: py,
-        color: cssColor(baseColor(eq)),
-        hot: hotPoint === key,
-        label: eq.def.name,
-      });
-      const set = defPointWriter(eq);
-      if (set) grabs.push({ key, x: px, y: py, edits: true, set });
-    }
-    // A seed is one grabbable point however many fields trace a curve from it.
-    if (layers.vfields.length) {
-      drops.forEach((d, i) =>
-        grabs.push({
-          key: `drop${i}`,
-          x: d.x,
-          y: d.y,
-          edits: false,
-          set: (x, y) => {
-            d.x = x;
-            d.y = y;
-          },
-        }),
-      );
-    }
-    let gridSpecs: GridSpec[] | undefined;
-    if (gridFields.length) {
-      gridSpecs = gridFields.map(f => {
-        const sp = levelSpacing(f);
-        return { glsl: f.glsl, gradGlsl: f.gradGlsl, params: f.params, major: sp.major, minor: sp.minor };
-      });
-    }
-    r2d.render(view, layers, time, constEnv, gridSpecs);
-    drawLabels2D(overlayCtx, view, dpr, extras, !gridFields.length);
-    drawHoverMarker(dpr);
+    const grabs: Grabbable[] = [];
+    renderPanel(panel, index, rows, frame, box, grabs);
+    panel.grabs = grabbable = grabs;
   }
-  grabbable = grabs;
+  gl.disable(gl.SCISSOR_TEST);
+  if (split) drawPanelEdges(dpr);
+  usePanel(activePanel);
 
   const gridAnimated =
-    mode === '2d' && gridFields.some(f => freeVars(f.expr).has('t') || (defsAnimated && f.params.length > 0));
+    panels.some(p => p.mode === '2d') &&
+    gridFields.some(f => freeVars(f.expr).has('t') || (defsAnimated && f.params.length > 0));
   // A state system is never at rest: keep frames coming so it keeps stepping.
   // Streamlines drift downstream even through a field that holds still.
-  const streamlinesAnimated =
-    mode === '3d' && active.some(e => e.cpu!.type === 'vfield3d' && e.gpu?.type === 'vfield3d' && e.showStreamlines);
+  const streamlinesAnimated = active.some(
+    e =>
+      panels[panelOf(e)]?.mode === '3d' &&
+      e.cpu!.type === 'vfield3d' &&
+      e.gpu?.type === 'vfield3d' &&
+      e.showStreamlines,
+  );
   if (
     stateSys ||
     gridAnimated ||
     streamlinesAnimated ||
-    (mode === '3d' && cameraSpin !== 0) ||
+    panels.some(p => p.mode === '3d' && p.spin !== 0) ||
     active.some(e => e.cls!.animated || (defsAnimated && e.cls!.params.length > 0))
   ) {
     requestRender();
   }
   capture?.afterFrame();
+
+  /** One panel's plots: `rows` are the live rows drawn in it. */
+  function renderPanel(
+    panel: Panel,
+    index: number,
+    rows: Equation[],
+    frame: Frame,
+    box: OverlayBox | undefined,
+    grabs: Grabbable[],
+  ) {
+    if (mode === '3d') {
+      const scene: Scene3D = { implicits: [], psurfaces: [], curves: [], segments: [], tubes: [], points: [] };
+      for (const eq of rows) {
+        if (SKIPPED_IN_3D.has(eq.cpu!.type)) continue;
+        const color = rowColor(eq);
+        const plot = eq.cpu!;
+        const { params, uniforms } = shaderBindings(eq.gpu);
+        switch (plot.type) {
+          case 'implicit2d': // extrudes to its true locus (a vertical sheet)
+            scene.implicits.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
+            break;
+          case 'implicit3d':
+            scene.implicits.push({ ...gpuFor(eq, 'implicit3d'), color, params, uniforms });
+            break;
+          case 'spacecurve': {
+            const pts = solveFor(eq, 3, plot.residuals);
+            scene.curves.push({ pts: new Float32Array(pts.flat()), color });
+            break;
+          }
+          case 'vfield3d': {
+            if (eq.showStreamlines && eq.gpu?.type === 'vfield3d') {
+              (scene.streamlines ??= []).push({ comps: gpuFor(eq, 'vfield3d').comps, color, params, uniforms });
+              break;
+            }
+            const pts = solveFor(eq, 3, plot.comps);
+            if (eq.showArrows) {
+              const flat = pts.flat();
+              if (flat.length >= 6) scene.curves.push({ pts: new Float32Array(flat), color, arrow: true });
+            } else {
+              let path: number[] = [];
+              const flush = () => {
+                if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color, fade: true });
+                path = [];
+              };
+              for (const p of pts) {
+                if (p.every(Number.isFinite)) path.push(...p);
+                else flush();
+              }
+              flush();
+            }
+            break;
+          }
+          case 'polygon': {
+            const dim = plot.dim ?? 2;
+            if (plot.hull) {
+              let sample = hullSamplers.get(plot);
+              if (!sample) {
+                sample = hullGeometrySampler(plot.pts, dim, plot.over);
+                hullSamplers.set(plot, sample);
+              }
+              const geometry = sample(constEnv, time);
+              if (!geometry) break;
+              const { mesh, edges } = geometry;
+              if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
+              scene.segments.push({
+                pts: edges,
+                color: mesh.indices.length ? edgeShade(color) : color,
+                retained: true,
+              });
+              break;
+            }
+            const vals = verticesOf(plot)(constEnv, time);
+            if (!vals.every(Number.isFinite)) break;
+            const pts: number[] = [];
+            for (let k = 0; k < vals.length; k += dim) pts.push(vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0);
+            const triangle = plot.closed && pts.length === 9;
+            if (plot.closed) pts.push(...pts.slice(0, 3));
+            scene.curves.push({ pts: new Float32Array(pts), color, arrow: plot.arrow, triangle });
+            break;
+          }
+          case 'dscatter': {
+            // One sprite per point (see CLOUD_3D_MAX); any row with more than
+            // that is rejected at compile time — flat clouds included, since
+            // they reach this path too whenever the scene is 3D — so nothing is
+            // dropped here. A gap in ANY coordinate skips the point: an unplaced
+            // z would otherwise reach projection and depth sorting as NaN.
+            const [xs, ys, zs] = plot.coords;
+            for (let k = 0; k < xs.length; k++) {
+              const z = zs ? zs[k] : 0;
+              if (isFinite(xs[k]) && isFinite(ys[k]) && isFinite(z)) {
+                scene.points.push({ pos: [xs[k], ys[k], z], color });
+              }
+            }
+            break;
+          }
+          case 'plist': {
+            const env = { ...constEnv, t: time };
+            for (const comps of plot.pts) {
+              try {
+                const p = comps.map(c => evaluate(c, env));
+                if (p.every(isFinite)) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+              } catch {
+                /* skip unevaluable points */
+              }
+            }
+            break;
+          }
+          case 'psurface':
+          // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
+          case 'pregion':
+            scene.psurfaces.push({ ...gpuFor(eq, 'psurface'), color, params, uniforms });
+            break;
+          case 'orbit': {
+            let path: number[] = [];
+            const flush = () => {
+              if (path.length >= 6) scene.curves.push({ pts: new Float32Array(path), color });
+              path = [];
+            };
+            for (const p of orbitFor(eq)) {
+              if (p.every(Number.isFinite)) path.push(p[0], p[1], p[2] ?? 0);
+              else flush();
+            }
+            flush();
+            break;
+          }
+          case 'label': {
+            const p = samplePoint(eq);
+            if (p) (scene.texts ??= []).push({ pos: [p[0], p[1], p[2] ?? 0], text: plot.text, color });
+            break;
+          }
+          case 'trail': {
+            scene.curves.push({ pts: new Float32Array(eq.trail!.coordinates(3)), color });
+            const p = eq.trail!.head;
+            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+            break;
+          }
+          case 'pcurve': {
+            const flat = sampleCurve(eq, plot.dim);
+            // A broken path carries extra (NaN) points at its jumps.
+            const count = flat.length / plot.dim;
+            const pts = new Float32Array(count * 3);
+            for (let k = 0; k < count; k++) {
+              pts[k * 3] = flat[k * plot.dim];
+              pts[k * 3 + 1] = flat[k * plot.dim + 1];
+              pts[k * 3 + 2] = plot.dim === 3 ? flat[k * plot.dim + 2] : 0;
+            }
+            // Tubes are opt-in through tube(…): a bare curve stays a line, so
+            // it never hides points or curves sharing the scene. The radius may
+            // use sliders and t; while it evaluates ≤ 0 (say, mid slider drag)
+            // the curve draws as a bare line instead of an inside-out tube.
+            let radius = 0;
+            if (plot.dim === 3 && plot.tube) {
+              try {
+                const r = evaluate(plot.tube, { ...constEnv, t: time });
+                if (isFinite(r) && r > 0) radius = r;
+              } catch {
+                /* unevaluable this frame: draw the bare curve */
+              }
+            }
+            const combs = plot.dim === 3 && (eq.combK || eq.combT);
+            if (radius <= 0 && !combs) {
+              scene.curves.push({ pts, color });
+              break;
+            }
+            const fr = curveFrames(pts, sampleDeriv(plot.d1), sampleDeriv(plot.d2), sampleDeriv(plot.d3));
+            if (radius > 0) {
+              scene.tubes.push({ ...buildTube(pts, fr, radius, TUBE_SEGMENTS), color });
+            } else {
+              scene.curves.push({ pts, color });
+            }
+            const extent = curveExtent(pts);
+            if (eq.combK) {
+              // Teeth point along −N (away from the center of curvature).
+              const kColor: [number, number, number] = [color[0] * 0.7, color[1] * 0.7, color[2] * 0.7];
+              const comb = buildComb(pts, fr.frenetNormal, fr.kappa, -combScale(fr.kappa, extent), COMB_STEP);
+              scene.segments.push({ pts: comb.teeth, color: kColor });
+              scene.curves.push({ pts: comb.tips, color: kColor });
+            }
+            if (eq.combT) {
+              // Signed teeth along ±B expose where torsion changes hand.
+              const tColor: [number, number, number] = [
+                color[0] * 0.45 + 0.25,
+                color[1] * 0.45 + 0.25,
+                color[2] * 0.45 + 0.25,
+              ];
+              const comb = buildComb(pts, fr.frenetBinormal, fr.tau, combScale(fr.tau, extent), COMB_STEP);
+              scene.segments.push({ pts: comb.teeth, color: tColor });
+              scene.curves.push({ pts: comb.tips, color: tColor });
+            }
+            break;
+          }
+          case 'point': {
+            const p = samplePoint(eq);
+            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name });
+            break;
+          }
+          case 'system':
+            if (plot.parametric) {
+              const pts = solveFor(eq, plot.dim, plot.residuals).flatMap(p => [p[0], p[1], p[2] ?? 0]);
+              scene.curves.push({ pts: new Float32Array(pts), color });
+              break;
+            }
+            for (const p of solveFor(eq, plot.dim, plot.residuals)) {
+              scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+            }
+            break;
+        }
+      }
+      panel.r3d.render(camera, scene, time, constEnv, frame);
+      drawLabels3D(overlayCtx, camera, dpr, scene.points, scene.texts, box, frame.grid !== 'off');
+    } else {
+      panel.r3d.clearGeometry();
+      const layers: Required<Layers2D> = {
+        levels: [],
+        cells: [],
+        fractals: [],
+        domains: [],
+        colors: [],
+        conformals: [],
+        vfields: [],
+        tfields: [],
+        ineqs: [],
+        projections: [],
+        bifs: [],
+        scalars: [],
+        complexes: [],
+        curves: [],
+      };
+      const extras: Overlay2D = { points: [], polylines: [], bars: [], clouds: [] };
+      // Spacing for any level-set family (custom grids, contour stacks): sample
+      // |∇c| around the view to convert the target pixel gap into coordinate
+      // units (π-based for angles).
+      const halfW = (panelW() / 2) * view.upp;
+      const halfH = (panelH() / 2) * (view.upp / (view.ratio ?? 1));
+      const xmin = view.cx - halfW;
+      const xmax = view.cx + halfW;
+      const stemPx = 1 / (view.upp * dpr); // CSS px between consecutive whole numbers
+      const viewPts: Array<[number, number]> = [
+        [view.cx, view.cy],
+        [view.cx - halfW / 2, view.cy],
+        [view.cx + halfW / 2, view.cy],
+        [view.cx, view.cy - halfH / 2],
+        [view.cx, view.cy + halfH / 2],
+      ];
+      const env: Record<string, number> = { ...constEnv, t: time };
+      const seedOf = (a0Name?: string): number => (a0Name !== undefined ? constEnv[a0Name] : undefined) ?? 0.5;
+      const levelSpacing = (f: CpuGrid) => {
+        const cupp = sampleGradMag(f, viewPts, env, view.upp * 4, view.ratio) * view.upp;
+        return f.angular ? angularSpacing(cupp, 90) : niceSpacing(cupp, 90);
+      };
+      for (const eq of rows) {
+        const color = rowColor(eq);
+        const css = cssColor(color);
+        const plot = eq.cpu!;
+        const { params, uniforms } = shaderBindings(eq.gpu);
+        switch (plot.type) {
+          case 'implicit2d':
+            layers.curves.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
+            if (eq.showLevels && plot.levels) {
+              const f = plot.levels;
+              const shader = gpuFor(eq, 'implicit2d').levels!;
+              const sp = levelSpacing(f);
+              layers.levels.push({
+                glsl: shader.glsl,
+                gradGlsl: shader.gradGlsl,
+                params: f.params,
+                major: sp.major,
+                minor: sp.minor,
+                color,
+              });
+            }
+            break;
+          case 'ineq2d':
+            layers.ineqs.push({ ...gpuFor(eq, 'ineq2d'), color, params, uniforms });
+            break;
+          case 'projected2d':
+            layers.projections.push({ ...gpuFor(eq, 'projected2d'), color, params, uniforms });
+            break;
+          case 'pregion':
+            (extras.regions ??= []).push({ tris: sampleRegion(eq, plot.comps), fill: cssColorA(color, 0.22) });
+            break;
+          case 'scalar2d':
+            layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms });
+            break;
+          case 'complex2d':
+            layers.complexes.push({ ...gpuFor(eq, 'complex2d'), color, params, uniforms });
+            break;
+          case 'domain2d':
+            layers.domains.push({ ...gpuFor(eq, 'domain2d'), color, params, uniforms });
+            break;
+          case 'rgb2d':
+          case 'hsl2d':
+          case 'oklch2d':
+            layers.colors.push({ ...gpuFor(eq, plot.type), color, params, uniforms });
+            break;
+          case 'conformal2d':
+            layers.conformals.push({ ...gpuFor(eq, 'conformal2d'), color, params, uniforms });
+            break;
+          case 'fractal2d':
+            layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
+            break;
+          case 'tfield2d':
+            layers.tfields.push({ ...gpuFor(eq, 'tfield2d'), color, params, uniforms });
+            break;
+          case 'vfield2d': {
+            layers.vfields.push({ ...gpuFor(eq, 'vfield2d'), color, params, uniforms });
+            drops.forEach((d, i) => {
+              extras.polylines.push({ pts: integralCurve(plot.comps, d.x, d.y, time), color: css });
+              extras.points.push({ x: d.x, y: d.y, color: css, hot: hotPoint === `drop${i}` });
+            });
+            break;
+          }
+          case 'orbit':
+            extras.polylines.push({ pts: orbitFor(eq).flat(), color: css });
+            break;
+          case 'automaton': {
+            const key = JSON.stringify([...(eq.cls?.params ?? []).map(p => env[p]), eq.cls?.animated ? time : 0]);
+            if (eq.cellCache?.plan !== plot || eq.cellCache.key !== key) {
+              const grid = runAutomaton(plot, env);
+              eq.cellCache = {
+                plan: plot,
+                key,
+                cells: { shades: cellShades(grid), width: grid.width, rows: grid.rows, x0: grid.x0, color },
+              };
+            }
+            layers.cells.push({ ...eq.cellCache.cells, color });
+            break;
+          }
+          case 'label': {
+            const p = samplePoint(eq);
+            if (p) (extras.texts ??= []).push({ x: p[0], y: p[1], text: plot.text, color: css });
+            break;
+          }
+          case 'trail': {
+            extras.polylines.push({ pts: eq.trail!.coordinates(2), color: css });
+            const p = eq.trail!.head;
+            if (p) extras.points.push({ x: p[0], y: p[1], color: css });
+            break;
+          }
+          case 'pcurve':
+            extras.polylines.push({ pts: sampleCurve(eq, 2), color: css });
+            break;
+          case 'polygon': {
+            let pts: number[];
+            try {
+              pts = verticesOf(plot)(env);
+            } catch {
+              break;
+            }
+            if (!pts.every(isFinite)) break;
+            extras.polylines.push({
+              pts: plot.hull ? hullFaces(pts, 2)[0].outline.flatMap(p => [p[0], p[1]]) : pts,
+              color: css,
+              closed: plot.closed,
+              fill: plot.closed ? cssColorA(color, 0.16) : undefined,
+              arrow: plot.arrow,
+            });
+            break;
+          }
+          case 'point': {
+            const p = samplePoint(eq);
+            if (!p) break;
+            const key = `eq${eq.id}`;
+            extras.points.push({ x: p[0], y: p[1], color: css, hot: hotPoint === key });
+            const set = pointWriter(eq);
+            if (set) grabs.push({ key, x: p[0], y: p[1], edits: true, set });
+            break;
+          }
+          case 'vlist': {
+            // Numbers on the number line, copies stacked (lib/plot.ts dotPlot).
+            const values = plot.values.map(expr => {
+              try {
+                return evaluate(expr, env);
+              } catch {
+                return NaN;
+              }
+            });
+            if (values.length > CLOUD_MIN) {
+              extras.clouds!.push({ ...columnStacks(plot, values, CLOUD_DOT_PX), color: css });
+              break;
+            }
+            const { xs, ys } = columnStacks(plot, values, POINT_DOT_PX);
+            for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
+            break;
+          }
+          case 'plist': {
+            // A handful of points read as points; a few thousand read as a
+            // cloud, where fat outlined dots would merge into one white smear.
+            const dense = plot.pts.length > 200;
+            const r = dense ? 2 : 4;
+            for (const comps of plot.pts) {
+              try {
+                const px = evaluate(comps[0], env);
+                const py = evaluate(comps[1], env);
+                if (isFinite(px) && isFinite(py)) extras.points.push({ x: px, y: py, color: css, r, bare: dense });
+              } catch {
+                /* skip unevaluable points */
+              }
+            }
+            break;
+          }
+          // Typed-array lists: nothing to evaluate, so the only question is how
+          // to draw them. Few enough to read as individual points, and they go
+          // through the same path as any other point (outlines); past that
+          // they are a cloud, drawn in bulk, stacked in dot-wide columns.
+          case 'dlist': {
+            const { values } = plot;
+            if (values.length <= CLOUD_MIN) {
+              const { xs, ys } = columnStacks(values, values, POINT_DOT_PX);
+              for (let k = 0; k < xs.length; k++) extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
+              break;
+            }
+            extras.clouds!.push({ ...columnStacks(values, values, CLOUD_DOT_PX), color: css });
+            break;
+          }
+          case 'dscatter': {
+            if (plot.dim === 3) break; // drawn in the 3D pass
+            const [xs, ys] = plot.coords;
+            if (xs.length <= CLOUD_MIN) {
+              for (let k = 0; k < xs.length; k++) {
+                if (isFinite(xs[k]) && isFinite(ys[k])) {
+                  extras.points.push({ x: xs[k], y: ys[k], color: css, r: 4 });
+                }
+              }
+              break;
+            }
+            extras.clouds!.push({ xs, ys, color: css });
+            break;
+          }
+          case 'histogram': {
+            const { centers, counts, width } = plot;
+            for (let k = 0; k < centers.length; k++) {
+              extras.bars!.push({ x: centers[k], y: counts[k], halfWidth: width / 2, color: css });
+            }
+            break;
+          }
+          case 'sequence': {
+            // Dots at integer n in view; partial-sum mode accumulates from n = 0
+            // (terms that are not finite, like 1/0², are skipped). A term that
+            // throws — a Σ(s=1..n, …) past its term limit — is skipped, and a
+            // partial sum stops there so the running total does not freeze.
+            const termAt = (n: number): number | undefined => {
+              env[plot.index] = n;
+              try {
+                return evaluate(plot.term, env);
+              } catch {
+                return undefined;
+              }
+            };
+            const nEnd = Math.min(Math.floor(xmax), eq.partialSum ? 20000 : 100000);
+            const n0 = Math.max(0, Math.ceil(xmin));
+            const step = Math.max(1, Math.ceil((nEnd - n0 + 1) / 4000));
+            if (eq.partialSum) {
+              let sum = 0;
+              let started = false;
+              for (let n = 0; n <= nEnd; n++) {
+                const v = termAt(n);
+                if (v === undefined) break;
+                if (isFinite(v)) {
+                  sum += v;
+                  started = true;
+                }
+                if (started && n >= n0 && (n - n0) % step === 0) {
+                  extras.points.push({ x: n, y: sum, color: css, r: 3.5 });
+                }
+              }
+            } else {
+              for (let n = n0; n <= nEnd; n += step) {
+                const v = termAt(n);
+                if (v !== undefined && isFinite(v)) extras.points.push({ x: n, y: v, color: css, r: 3.5 });
+              }
+            }
+            delete env[plot.index];
+            break;
+          }
+          case 'cobweb': {
+            layers.curves.push({ field: gpuFor(eq, 'cobweb').curveField, color, params, uniforms });
+            const seed = seedOf(plot.a0Name);
+            const dLo = Math.max(xmin, view.cy - halfH);
+            const dHi = Math.min(xmax, view.cy + halfH);
+            if (dHi > dLo) {
+              // y = x, the guide the orbit reflects off; kept lighter than the axes.
+              extras.polylines.push({ pts: [dLo, dLo, dHi, dHi], color: cssColorA(theme.axis, 0.45), width: 1 });
+            }
+            const pts: number[] = [seed, seed];
+            let a = seed;
+            for (let k = 0; k < 80; k++) {
+              env[plot.recVar] = a;
+              let b: number;
+              try {
+                b = evaluate(plot.f, env);
+              } catch {
+                break;
+              }
+              if (!isFinite(b) || Math.abs(b) > 1e9) break;
+              pts.push(a, b, b, b);
+              a = b;
+            }
+            delete env[plot.recVar];
+            extras.polylines.push({ pts, color: css, width: 1.5 });
+            extras.points.push({ x: seed, y: seed, color: css, r: 3.5 });
+            break;
+          }
+          case 'bifurcation':
+            layers.bifs.push({
+              field: gpuFor(eq, 'bifurcation').field,
+              color,
+              params,
+              uniforms: { uSeed: seedOf(plot.a0Name) },
+            });
+            break;
+          case 'density': {
+            let c: DensityCurve | null = null;
+            try {
+              c = rvSys.curve(plot.rv, env, { lo: xmin, hi: xmax });
+              if (c && plot.mass) c = scaleCurve(c, evaluate(plot.mass, env));
+            } catch {
+              break; /* a parameter is missing this frame */
+            }
+            if (!c) break;
+            if (c.pts.length >= 4) extras.polylines.push({ pts: c.pts, color: css, width: 2 });
+            // Point masses draw as probability stems (height = mass, not density).
+            for (const a of c.atoms ?? []) {
+              extras.polylines.push({ pts: [a.x, 0, a.x, a.p], color: css, width: 2 });
+              extras.points.push({ x: a.x, y: a.p, color: css, r: 4 });
+            }
+            break;
+          }
+          case 'value': {
+            // A definite-integral row: the number lives in the row's readout;
+            // the plot is the area it measures. Parts that add to the value
+            // take the row color, parts that subtract its complement.
+            if (!plot.shade) break;
+            let c = eq.shadeCache;
+            if (c?.shade !== plot.shade) {
+              const names = shadeNames(plot.shade);
+              const sampler = compileSampler(plot.shade.body, plot.shade.v, names) ?? evalSampler(plot.shade);
+              c = eq.shadeCache = { shade: plot.shade, names, sampler, key: '', runs: [] };
+            }
+            const key = [xmin, xmax, ...c.names.map(n => env[n])].join();
+            if (key !== c.key) {
+              c.key = key;
+              c.runs = shadeRuns(plot.shade, env, xmin, xmax, c.sampler);
+            }
+            const minus = minusTint(color);
+            for (const run of c.runs) {
+              // Only real edges are stroked: not where the window cut the range.
+              const tint = run.sign > 0 ? color : minus;
+              const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH);
+              extras.polylines.push({
+                pts: fill,
+                color: cssColor(tint),
+                closed: true,
+                fill: cssColorA(tint, 0.16),
+                noStroke: true,
+              });
+              extras.polylines.push({ pts: stroke, color: cssColor(tint) });
+            }
+            break;
+          }
+          case 'pmf': {
+            // Stems at the atoms in view — whole numbers for a declared law,
+            // wherever g put them for a derived one; lib caches them per window.
+            try {
+              const mass = plot.mass ? evaluate(plot.mass, env) : 1;
+              for (const run of rvSys.pmfRuns(plot.rv, env, { lo: xmin, hi: xmax }) ?? []) {
+                pushStems(extras, scaleStems(run, mass), color, false, stemPx);
+              }
+            } catch {
+              /* a parameter is missing this frame */
+            }
+            break;
+          }
+          case 'prob': {
+            // The estimate lives in the row's readout; the plot is the shaded
+            // area under the variable's density, when the body has that shape.
+            if (!plot.shade) break;
+            try {
+              // Over a discrete variable: the selected stems, drawn heavier —
+              // `X < 3` stops at 2 and `X <= 3` takes the stem at 3.
+              const selected = rvSys.pmfRuns(plot.shade.rv, env, { lo: xmin, hi: xmax }, plot.shade);
+              if (selected) {
+                for (const run of selected) pushStems(extras, run, color, true, stemPx);
+                break;
+              }
+              const c = rvSys.curve(plot.shade.rv, env, { lo: xmin, hi: xmax });
+              if (!c) break;
+              const lo = plot.shade.lo ? evaluate(plot.shade.lo, env) : undefined;
+              const hi = plot.shade.hi ? evaluate(plot.shade.hi, env) : undefined;
+              const poly = shadePolygon(c, lo, hi);
+              if (poly) {
+                extras.polylines.push({ pts: poly, color: css, closed: true, fill: cssColorA(color, 0.16) });
+              }
+            } catch {
+              /* not evaluable this frame */
+            }
+            break;
+          }
+          case 'expect': {
+            // The value lives in the row's readout; the plot is a vertical
+            // marker at x = E under the variable's density.
+            try {
+              // Where and how high is lib's rule (markerHeight), shared with og.
+              const mark = markerHeight(rvSys, plot.rv, env, { lo: xmin, hi: xmax });
+              if (!mark) break;
+              if (mark.h > 0) extras.polylines.push({ pts: [mark.x, 0, mark.x, mark.h], color: css, width: 2 });
+              extras.points.push({ x: mark.x, y: mark.h, color: css, r: 4 });
+            } catch {
+              /* not evaluable this frame */
+            }
+            break;
+          }
+          case 'system':
+            // A 3-unknown system forces the 3D view, so only 2D lands here.
+            if (plot.dim === 2) {
+              const points = solveFor(eq, 2, plot.residuals);
+              if (plot.parametric) {
+                extras.polylines.push({ pts: points.flat(), color: css });
+                break;
+              }
+              const set = coordinatePointWriter(eq, plot.coordinates);
+              points.forEach((p, i) => {
+                const key = `sys${eq.id}:${i}`;
+                extras.points.push({
+                  x: p[0],
+                  y: p[1],
+                  color: css,
+                  hot: hotPoint === key,
+                  label: complexRootLabel(plot.complexEquation, p, env),
+                });
+                if (set) grabs.push({ key, x: p[0], y: p[1], edits: true, set });
+              });
+            }
+            break;
+        }
+      }
+      // Named points (`A = (0, 0)` rows) draw labeled with their name; rows
+      // whose components are plain numbers or slider names can be dragged.
+      for (const eq of equations) {
+        if (eq.def?.kind !== 'const' || eq.error || !defs.points.has(eq.def.name)) continue;
+        const [cx, cy] = pointComps(eq.def.name);
+        const px = constEnv[cx];
+        const py = constEnv[cy];
+        if (!isFinite(px) || !isFinite(py)) continue;
+        const key = `def${eq.id}`;
+        extras.points.push({
+          x: px,
+          y: py,
+          color: cssColor(baseColor(eq)),
+          hot: hotPoint === key,
+          label: eq.def.name,
+        });
+        const set = defPointWriter(eq);
+        if (set) grabs.push({ key, x: px, y: py, edits: true, set });
+      }
+      // A seed is one grabbable point however many fields trace a curve from it.
+      if (layers.vfields.length) {
+        drops.forEach((d, i) =>
+          grabs.push({
+            key: `drop${i}`,
+            x: d.x,
+            y: d.y,
+            edits: false,
+            set: (x, y) => {
+              d.x = x;
+              d.y = y;
+            },
+          }),
+        );
+      }
+      let gridSpecs: GridSpec[] | undefined;
+      const families = frame.grid === 'on' ? panelGridFields(panel) : [];
+      if (families.length) {
+        gridSpecs = families.map(f => {
+          if (f === 'x' || f === 'y') {
+            const sp = niceSpacing(f === 'x' ? view.upp : view.upp / (view.ratio ?? 1), 90);
+            const gradGlsl: [string, string] = f === 'x' ? ['1.0', '0.0'] : ['0.0', '1.0'];
+            return { glsl: f, gradGlsl, params: [], major: sp.major, minor: sp.minor };
+          }
+          const sp = levelSpacing(f);
+          return { glsl: f.glsl, gradGlsl: f.gradGlsl, params: f.params, major: sp.major, minor: sp.minor };
+        });
+      }
+      panel.r2d.render(view, layers, time, constEnv, gridSpecs, frame);
+      drawLabels2D(overlayCtx, view, dpr, extras, frame.grid !== 'off' && !gridSpecs, box);
+      drawHoverMarker(dpr);
+    }
+  }
+}
+
+/** Hairlines between tiled panels, and a frame round each inset. */
+function drawPanelEdges(dpr: number) {
+  const ctx = overlayCtx;
+  ctx.save();
+  ctx.scale(dpr, dpr);
+  ctx.lineWidth = 1;
+  for (const p of panels) {
+    const { x, y, w, h } = p.layout.rect;
+    const [l, t, pw, ph] = [x / dpr, y / dpr, w / dpr, h / dpr];
+    ctx.strokeStyle = cssColorA(theme.axis, p.layout.inset ? 0.55 : 0.35);
+    ctx.beginPath();
+    if (p.layout.inset) ctx.rect(Math.round(l) + 0.5, Math.round(t) + 0.5, Math.round(pw) - 1, Math.round(ph) - 1);
+    else {
+      // Every shared edge is some panel's left or top.
+      const ex = Math.round(l) + 0.5;
+      const ey = Math.round(t) + 0.5;
+      if (x > 0) {
+        ctx.moveTo(ex, t);
+        ctx.lineTo(ex, t + ph);
+      }
+      if (y > 0) {
+        ctx.moveTo(l, ey);
+        ctx.lineTo(l + pw, ey);
+      }
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // --- equation list UI ---
@@ -1918,7 +2242,7 @@ function resetEditedTrails() {
   // fresh observation so unrelated runs never get joined by a false segment.
   const mathText = equations
     .map(eq => stripNote(eq.text).trim())
-    .filter(text => text && !text.startsWith('#') && !/^(view|camera)\s*\(/i.test(text))
+    .filter(text => text && !text.startsWith('#') && !/^(view|camera|grid)\s*\(/i.test(text))
     .join('\n');
   if (mathText !== trailDocument) {
     for (const eq of equations) eq.trail = undefined;
@@ -1998,21 +2322,26 @@ function recompileAll() {
     }
   }
   defsAnimated = constsAnimated(defs) || defs.states.size > 0;
-  // …and a 2D cloud costs the same once ANYTHING makes the scene 3D: the
+  const rowPanels = panelIndices(equations.map(e => ({ view: e.viewSpec })));
+  gridFieldPanels = new Map();
+  equations.forEach((eq, i) => {
+    eq.panel = rowPanels[i];
+    if (eq.def && !gridFieldPanels.has(eq.def.name)) gridFieldPanels.set(eq.def.name, eq.panel);
+  });
+  // …and a 2D cloud costs the same once ANYTHING makes its panel 3D: the
   // renderer sends every scatter through the sprite path there, z = 0 and
   // all, so a 200 000-point CSV beside one `z = …` row is 200 000 projected,
-  // depth-sorted sprites. Whether the scene is 3D is only known once every
+  // depth-sorted sprites. Whether a panel is 3D is only known once every
   // row has classified, which is why this waits for the loop to finish.
-  if (sceneMode() === '3d') {
-    for (const eq of equations) {
-      if (!eq.cls || eq.error) continue;
-      const points = cloudPoints(eq.cpu!);
-      if (points <= CLOUD_3D_MAX) continue;
-      eq.cls = undefined;
-      eq.error =
-        `This graph is 3D, where every point is a sprite: at most ${CLOUD_3D_MAX},` +
-        ` and this row has ${points}. Filter it, or drop the row that uses z.`;
-    }
+  const panels3D = new Set(equations.filter(e => e.cls && !e.error && e.cls.needs3D).map(e => e.panel));
+  for (const eq of equations) {
+    if (!eq.cls || eq.error || !panels3D.has(eq.panel)) continue;
+    const points = cloudPoints(eq.cpu!);
+    if (points <= CLOUD_3D_MAX) continue;
+    eq.cls = undefined;
+    eq.error =
+      `This ${panels.length > 1 ? 'panel' : 'graph'} is 3D, where every point is a sprite: at most ${CLOUD_3D_MAX},` +
+      ` and this row has ${points}. Filter it, or drop the row that uses z.`;
   }
   rvSys.prune(); // sample caches of variables that no longer exist
   invalidateDerivedState();
@@ -2510,7 +2839,8 @@ function setSelectionSpan(start: { line: number; offset: number }, end: { line: 
 // whole-state snapshots beat operation diffing on simplicity.
 
 interface Snapshot {
-  view: View2D;
+  /** Each panel's window, in panel order. */
+  views: View2D[];
   eqs: Array<Pick<Equation, 'id' | 'text' | 'colorIndex' | 'sliderMin' | 'sliderMax' | 'showLevels'>>;
   caret: { line: number; offset: number } | null;
 }
@@ -2525,7 +2855,7 @@ let pendingCaret: { line: number; offset: number } | null = null;
 
 function takeSnapshot(caret: Snapshot['caret']): Snapshot {
   return {
-    view: { ...view },
+    views: panels.map(p => ({ ...p.view })),
     eqs: equations.map(e => ({
       id: e.id,
       text: e.text,
@@ -2557,8 +2887,12 @@ function pushUndo(key: string | null, caret: Snapshot['caret'] = caretPos()) {
 }
 
 function restoreSnapshot(s: Snapshot) {
-  Object.assign(view, { ratio: 1 }, s.view);
-  appliedViewText = null;
+  s.views.forEach((v, i) => {
+    const p = panels[i];
+    if (!p) return;
+    Object.assign(p.view, { ratio: 1 }, v);
+    p.appliedViewText = null;
+  });
   // Reuse Equation objects by id so widget elements survive the round-trip.
   const byId = new Map(equations.map(e => [e.id, e]));
   equations.length = 0;
@@ -2906,7 +3240,12 @@ function reconcile() {
     // value rows, whose whole output is the readout beneath them — except a
     // definite integral shading its area, which draws in that colour.
     const drawn = eq.error ? undefined : eq.cpu;
-    line.classList.toggle('is-def', !!eq.def || (drawn?.type === 'value' && !drawn.shade) || drawn?.type === 'note');
+    const structure = eq.viewSpec?.kind === 'split' || eq.viewSpec?.kind === 'grid';
+    line.classList.toggle(
+      'is-def',
+      !!eq.def || structure || (drawn?.type === 'value' && !drawn.shade) || drawn?.type === 'note',
+    );
+    line.classList.toggle('is-divider', eq.viewSpec?.kind === 'split');
     line.classList.toggle('is-comment', !!eq.comment);
     line.classList.toggle('collapsed', !!(eq.comment && eq.collapsed));
     line.title = eq.error ?? (eq.comment ? 'Click the arrow to collapse or expand this group' : '');
@@ -3876,7 +4215,7 @@ let grab: { pt: Grabbable; dx: number; dy: number } | null = null;
 /** Math coordinates under a client position. */
 function toMath(clientX: number, clientY: number): [number, number] {
   const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
+  const rect = panelClientRect();
   const px = (clientX - rect.left - rect.width / 2) * dpr;
   const py = (rect.height / 2 - (clientY - rect.top)) * dpr;
   return [view.cx + px * view.upp, view.cy + (py * view.upp) / (view.ratio ?? 1)];
@@ -3920,20 +4259,24 @@ function movePoint(pt: Grabbable, x: number, y: number) {
 
 // --- hover: intercepts and roots ---
 
-let hover: { pt: SpecialPoint; color: string } | null = null;
+let hover: { pt: SpecialPoint; color: string; panel: Panel } | null = null;
 
 const tooltip = document.createElement('div');
 tooltip.id = 'tooltip';
 document.body.append(tooltip);
 
-/** Math units per CSS pixel and the canvas rect, for screen↔world mapping. */
+/** The canvas rect, and the current panel's math → CSS pixels from that
+ *  rect's corner, for screen↔world mapping. */
 function screenMap() {
   const rect = canvas.getBoundingClientRect();
+  const box = panelClientRect();
+  const ox = box.left - rect.left;
+  const oy = box.top - rect.top;
   const uppCss = view.upp * (window.devicePixelRatio || 1);
   return {
     rect,
-    toSx: (x: number) => (x - view.cx) / uppCss + rect.width / 2,
-    toSy: (y: number) => rect.height / 2 - ((y - view.cy) * (view.ratio ?? 1)) / uppCss,
+    toSx: (x: number) => ox + (x - view.cx) / uppCss + box.width / 2,
+    toSy: (y: number) => oy + box.height / 2 - ((y - view.cy) * (view.ratio ?? 1)) / uppCss,
   };
 }
 
@@ -3967,7 +4310,8 @@ function ensureSpSlot() {
     const next: Equation | undefined = spQueue.values().next().value;
     if (next) {
       spQueue.delete(next);
-      if (equations.includes(next)) computeSpecialPoints(next);
+      // Over the row's own panel's window, whichever panel the pointer is in.
+      if (equations.includes(next)) withPanel(panels[panelOf(next)] ?? panels[0], () => computeSpecialPoints(next));
       if (spQueue.size) ensureSpSlot();
     }
     if (lastHoverAt) updateHover(lastHoverAt.x, lastHoverAt.y);
@@ -3975,10 +4319,9 @@ function ensureSpSlot() {
 }
 
 function hoverHalfSpan() {
-  const dpr = window.devicePixelRatio || 1;
   return {
-    halfW: ((canvas.clientWidth * dpr) / 2) * view.upp,
-    halfH: ((canvas.clientHeight * dpr) / 2) * (view.upp / (view.ratio ?? 1)),
+    halfW: (panelW() / 2) * view.upp,
+    halfH: (panelH() / 2) * (view.upp / (view.ratio ?? 1)),
   };
 }
 
@@ -4039,7 +4382,7 @@ function pointsFor(eq: Equation): SpecialPoint[] {
   return c && c.text === eq.text && c.env === envKey ? c.pts : [];
 }
 
-function setHover(next: { pt: SpecialPoint; color: string } | null) {
+function setHover(next: { pt: SpecialPoint; color: string; panel: Panel } | null) {
   if (hover?.pt === next?.pt && hover?.color === next?.color) return;
   hover = next;
   if (!hover) {
@@ -4063,14 +4406,16 @@ function updateHover(clientX: number, clientY: number) {
   const { rect, toSx, toSy } = screenMap();
   const mx = clientX - rect.left;
   const my = clientY - rect.top;
-  let best: { pt: SpecialPoint; color: string } | null = null;
+  let best: { pt: SpecialPoint; color: string; panel: Panel } | null = null;
   let bestD = 16; // CSS px pick radius
+  const here = panels.indexOf(cur);
   for (const eq of equations) {
+    if (panelOf(eq) !== here) continue;
     for (const pt of pointsFor(eq)) {
       const d = Math.hypot(toSx(pt.x) - mx, toSy(pt.y) - my);
       if (d < bestD) {
         bestD = d;
-        best = { pt, color: cssColor(baseColor(eq)) };
+        best = { pt, color: cssColor(baseColor(eq)), panel: cur };
       }
     }
   }
@@ -4079,7 +4424,7 @@ function updateHover(clientX: number, clientY: number) {
 
 /** Marker for the hovered point, drawn over the axis labels. */
 function drawHoverMarker(dpr: number) {
-  if (!hover || mode !== '2d') return;
+  if (!hover || mode !== '2d' || hover.panel !== cur) return;
   const { toSx, toSy } = screenMap();
   const sx = toSx(hover.pt.x);
   const sy = toSy(hover.pt.y);
@@ -4115,9 +4460,10 @@ let dragMoved = false;
 
 /** Zoom by `factor` keeping the math point under (clientX, clientY) fixed. */
 function zoomAt(clientX: number, clientY: number, factor: number) {
+  if (cur.locked) return;
   if (mode === '2d') {
     const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
+    const rect = panelClientRect();
     const px = (clientX - rect.left - rect.width / 2) * dpr;
     const py = (rect.height / 2 - (clientY - rect.top)) * dpr;
     const mx = view.cx + px * view.upp;
@@ -4136,6 +4482,8 @@ canvas.addEventListener('pointerdown', e => {
   cancelTween('view'); // the user's hand beats a voice-mode camera move
   setHover(null); // a tooltip must not survive the gesture that moves the plot
   lastHoverAt = null; // nor may a deferred recompute re-pick mid-gesture
+  // A gesture belongs to the panel it starts in, wherever it wanders.
+  if (!pointers.size) activate(panelAtClient(e.clientX, e.clientY));
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   try {
     canvas.setPointerCapture(e.pointerId);
@@ -4188,7 +4536,7 @@ canvas.addEventListener('pointermove', e => {
     const dx = mx - lastX;
     const dy = my - lastY;
     const dpr = window.devicePixelRatio || 1;
-    if (mode === '2d') {
+    if (mode === '2d' && !cur.locked) {
       view.cx -= dx * dpr * view.upp;
       view.cy += dy * dpr * (view.upp / (view.ratio ?? 1));
     }
@@ -4206,7 +4554,8 @@ canvas.addEventListener('pointermove', e => {
     return;
   }
   if (!dragging) {
-    // Hover: show what can be picked up.
+    // Hover: show what can be picked up, in the panel under the pointer.
+    if (!pointers.size) activate(panelAtClient(e.clientX, e.clientY));
     const hit = pointAt(e.clientX, e.clientY);
     canvas.style.cursor = hit ? 'grab' : '';
     setHot(hit?.key ?? null);
@@ -4220,10 +4569,12 @@ canvas.addEventListener('pointermove', e => {
   lastX = e.clientX;
   lastY = e.clientY;
   const dpr = window.devicePixelRatio || 1;
+  // A locked panel's view(…, locked) or camera(…, locked) row holds it still.
+  if (cur.locked) return;
   if (mode === '2d' && scaling) {
     if (!dragMoved) return;
     ensureViewRow();
-    const rect = canvas.getBoundingClientRect();
+    const rect = panelClientRect();
     const px = (downX - rect.left - rect.width / 2) * dpr;
     const py = (rect.height / 2 - (downY - rect.top)) * dpr;
     const next = scaleViewAt(view, px, py, Math.exp(-dx * 0.01), Math.exp(dy * 0.01));
@@ -4309,6 +4660,7 @@ canvas.addEventListener(
     e.preventDefault();
     cancelTween('view');
     setHover(null);
+    if (!pointers.size) activate(panelAtClient(e.clientX, e.clientY));
     const factor = Math.exp(Math.max(-60, Math.min(60, e.deltaY)) * 0.002);
     zoomAt(e.clientX, e.clientY, factor);
   },
@@ -4514,7 +4866,12 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
     : eq.def
       ? definitionMeaning(eq.def, eq, animated)
       : eq.viewSpec
-        ? `sets the ${eq.viewSpec.kind === 'view' ? '2D window' : '3D camera'}`
+        ? {
+            view: 'sets the 2D window',
+            camera: 'sets the 3D camera',
+            grid: "sets what draws behind its panel's plots",
+            split: 'starts a new panel; the rows below it draw there',
+          }[eq.viewSpec.kind]
         : eq.dist
           ? row.kind
           : eq.cls
@@ -4523,7 +4880,11 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
               (eq.cls.animated ? '; moves with time t' : '')
             : undefined;
   // A 3D scene leaves 2D-only plots out (render()), however valid they are.
-  const skipped = mode === '3d' && !!eq.cls && !eq.def && renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type));
+  const skipped =
+    panels[panelOf(eq)]?.mode === '3d' &&
+    !!eq.cls &&
+    !eq.def &&
+    renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type));
   if (skipped) {
     row.warning = 'not drawn: another row makes this graph 3D, and a 3D scene leaves out 2D-only plots like this one';
   }
@@ -4583,7 +4944,12 @@ function matchRows(texts: string[]): (Equation | undefined)[] {
   return out;
 }
 
+/** Voice mode frames the first panel of a split view: the graph's own. */
 function voiceGraph(): GraphState {
+  return withPanel(panels[0], panelGraph);
+}
+
+function panelGraph(): GraphState {
   // Slider values as of now: render() refreshes these on the next frame,
   // which a tool call answering straight after set_graph would not wait for.
   constEnv = currentConstEnv(graphTime());
@@ -4605,7 +4971,7 @@ function voiceGraph(): GraphState {
             phi: round6(camera.phi),
             radius: round6(camera.radius),
             target: camera.target.map(round6) as [number, number, number],
-            spin: cameraSpin,
+            spin: cur.spin,
           },
         }),
     rows: equations.map((eq, i) => rowStatus(eq, i, animated)),
@@ -4650,13 +5016,24 @@ function animateSlider(name: string, to: number, seconds: number, from?: number)
  * new view.
  */
 function moveView(target: MoveViewTarget, seconds: number): object | Promise<object> {
+  return withPanel(panels[0], () => movePanelView(target, seconds));
+}
+
+/** The current panel's move; the eases hold on to it, whatever panel is current when they run. */
+function movePanelView(target: MoveViewTarget, seconds: number): object | Promise<object> {
+  const p = cur;
+  const { view, camera } = p;
   if (mode === '2d') {
     if (target.spin !== undefined) return { error: 'spin turns the 3D camera; this graph is 2D' };
     if (!target.x && !target.y) return { error: 'the graph is 2D: give x and/or y ranges' };
     const bad = [target.x, target.y].some(r => r && !(r[1] > r[0]));
     if (bad) return { error: 'each range must be [low, high] with high > low' };
     const a = { cx: view.cx, cy: view.cy, upp: view.upp };
-    const b = fitView2D({ kind: 'view', x: target.x, y: target.y, ratio: view.ratio }, canvas.width, canvas.height);
+    const b = fitView2D(
+      { kind: 'view', x: target.x, y: target.y, ratio: view.ratio },
+      p.layout.rect.w,
+      p.layout.rect.h,
+    );
     // One range given: the other axis keeps its centre (fitView2D would put it at 0).
     if (!target.x) b.cx = a.cx;
     if (!target.y) b.cy = a.cy;
@@ -4688,7 +5065,7 @@ function moveView(target: MoveViewTarget, seconds: number): object | Promise<obj
   if (!moves && target.spin === undefined)
     return { error: 'the graph is 3D: give theta, phi, radius, target and/or spin' };
   if (!moves) {
-    setCameraSpin(target.spin!);
+    withPanel(p, () => setCameraSpin(target.spin!));
     return { spin: target.spin, note: 'saved in the camera row' };
   }
   const a = { ...camera, target: [...camera.target] };
@@ -4718,7 +5095,7 @@ function moveView(target: MoveViewTarget, seconds: number): object | Promise<obj
         if (!finished) return resolve(STOPPED);
         // Arrive, then ease into the spin: the camera never jerks from rest to
         // full speed. A hand that stopped the move stops the spin too.
-        if (target.spin !== undefined) setCameraSpin(target.spin);
+        if (target.spin !== undefined) withPanel(p, () => setCameraSpin(target.spin!));
         resolve({
           ...voiceGraph().camera!,
           seconds,
@@ -4734,19 +5111,22 @@ const STOPPED = { stopped: 'the view was taken over before the move finished; ca
 
 /** Where a math point is on the page (client pixels), or null when it can't be seen. */
 function toClient(x: number, y: number, z = 0): { x: number; y: number } | null {
-  const rect = canvas.getBoundingClientRect();
-  let sx: number, sy: number;
-  if (mode === '2d') {
-    const m = screenMap();
-    sx = m.toSx(x);
-    sy = m.toSy(y);
-  } else {
-    const at = projectToScreen(cameraMatrices(camera, rect.width / rect.height).vp, [x, y, z], rect.width, rect.height);
-    if (!at) return null;
-    [sx, sy] = at;
-  }
-  if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return null;
-  return { x: rect.left + sx, y: rect.top + sy };
+  return withPanel(panels[0], () => {
+    const rect = panelClientRect();
+    let sx: number, sy: number;
+    if (mode === '2d') {
+      const m = screenMap();
+      sx = m.rect.left + m.toSx(x) - rect.left;
+      sy = m.rect.top + m.toSy(y) - rect.top;
+    } else {
+      const vp = cameraMatrices(camera, rect.width / rect.height).vp;
+      const at = projectToScreen(vp, [x, y, z], rect.width, rect.height);
+      if (!at) return null;
+      [sx, sy] = at;
+    }
+    if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return null;
+    return { x: rect.left + sx, y: rect.top + sy };
+  });
 }
 
 // Before boot: boot canonicalizes the URL, which would drop the ?voice=
@@ -4780,8 +5160,9 @@ if (voiceBtn && !embedded && readVoiceKey()) {
       // render() settles 2D vs 3D and applies view()/camera() rows on the next
       // frame, but the reply, and the model's next call (a 3D move_view, say),
       // come before it.
-      mode = sceneMode();
+      syncPanels();
       applyViewportRows();
+      activate(panels[0]);
       urlPending = true;
       flushUrl();
       requestRender();
@@ -4932,7 +5313,7 @@ if (mcpApp) {
         dispose: () => {
           if (rendererDisposed) return;
           rendererDisposed = true;
-          r3d.clearGeometry();
+          for (const p of panels) p.r3d.clearGeometry();
           canvasSizeObserver.disconnect();
           window.removeEventListener('resize', resize);
           cancelRender();

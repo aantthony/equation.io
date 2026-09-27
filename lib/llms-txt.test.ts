@@ -33,6 +33,9 @@ describe('llms.txt', () => {
       'open("people.csv"', // CSV data files, dropped in and pinned by hash
       'view(x = ', // 2D framing row
       'camera(', // 3D orbit-camera row
+      '--- below', // split-view panels
+      'shared x',
+      'grid(off)', // grid rows
       '## Row types',
       '## Definitions',
       'https://equation.io/implicit/',

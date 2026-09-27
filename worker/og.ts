@@ -21,7 +21,8 @@ import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler, regionSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
-import { clampPhi, fitView2D } from '../lib/view.ts';
+import { type ViewSpec, clampPhi, fitView2D } from '../lib/view.ts';
+import { type GridRowSpec, layoutPanels, panelIndices, splitsOf } from '../lib/panels.ts';
 import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
@@ -99,7 +100,7 @@ interface View2D {
 const toScreenX = (r: Raster, v: View2D, wx: number) => r.w / 2 + (wx - v.cx) / v.upp;
 const toScreenY = (r: Raster, v: View2D, wy: number) => r.h / 2 - (wy - v.cy) / (v.upp / (v.ratio ?? 1));
 
-function drawGrid2D(r: Raster, v: View2D) {
+function drawGrid2D(r: Raster, v: View2D, axesOnly = false) {
   const minor: [number, number, number] = [0.92, 0.92, 0.92];
   const axis: [number, number, number] = [0.65, 0.65, 0.65];
   // With a viewport row the window is author-controlled: a zoomed-out view
@@ -110,7 +111,7 @@ function drawGrid2D(r: Raster, v: View2D) {
   const y0 = v.cy - (r.h / 2) * (v.upp / (v.ratio ?? 1)),
     y1 = v.cy + (r.h / 2) * (v.upp / (v.ratio ?? 1));
   const lines = (lo: number, hi: number, upp: number) =>
-    1 / upp >= 3
+    1 / upp >= 3 && !axesOnly
       ? Array.from({ length: Math.max(0, Math.floor(hi) - Math.ceil(lo) + 1) }, (_, i) => Math.ceil(lo) + i)
       : [0];
   for (const wx of lines(x0, x1, v.upp)) {
@@ -1202,8 +1203,26 @@ export function canRenderOg(texts: string[]): boolean {
   // dimension should pick the scene), exactly as an unclassifiable row.
   const plots = analysis.rows.filter(r => r.cls && r.cpu);
   if (plots.every(r => r.cpu!.type === 'label')) return false;
-  const needs3D = plots.some(r => r.cls!.needs3D);
-  return plots.every(r => previewGap(r, needs3D) === null);
+  // Each panel of a split view is 2D or 3D on its own.
+  const panel = panelIndices(analysis.rows);
+  const needs3D = new Set(analysis.rows.flatMap((r, i) => (r.cls?.needs3D && r.cpu ? [panel[i]] : [])));
+  return plots.every(r => previewGap(r, needs3D.has(panel[analysis.rows.indexOf(r)])) === null);
+}
+
+/** Copy a panel's raster into place, with a hairline along its edges. */
+function blitPanel(r: Raster, sub: Raster, at: { x: number; y: number }, inset: boolean) {
+  for (let y = 0; y < sub.h; y++) {
+    const from = y * sub.w * 3;
+    r.px.set(sub.px.subarray(from, from + sub.w * 3), ((at.y + y) * r.w + at.x) * 3);
+  }
+  const edge: [number, number, number] = [0.7, 0.7, 0.7];
+  const [x0, y0, x1, y1] = [at.x, at.y, at.x + sub.w - 1, at.y + sub.h - 1];
+  if (inset || x0 > 0) for (let y = y0; y <= y1; y++) blend(r, x0, y, edge, 1);
+  if (inset || y0 > 0) for (let x = x0; x <= x1; x++) blend(r, x, y0, edge, 1);
+  if (inset) {
+    for (let y = y0; y <= y1; y++) blend(r, x1, y, edge, 1);
+    for (let x = x0; x <= x1; x++) blend(r, x, y1, edge, 1);
+  }
 }
 
 /** Render equations to a raw RGB raster (exported for tests). */
@@ -1228,11 +1247,6 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
         return child;
       });
     });
-  const needs3D = plotRows.some(r => r.cls!.needs3D);
-
-  // Honor viewport rows: the author's framing is document state, so the
-  // preview draws the window the app would open with.
-  const spec = (kind: 'view' | 'camera') => analysis.rows.find(r => r.view?.kind === kind)?.view;
 
   // Row colors follow creation order across ALL rows (defs consume a color
   // slot in the app too, since colorIndex comes from row id), unless the row's
@@ -1242,39 +1256,73 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
     return noteColor(texts[i] ?? '') ?? PALETTE[i % PALETTE.length];
   };
 
-  if (needs3D) {
-    const cam = spec('camera');
-    const view: View3D =
-      cam?.kind === 'camera'
-        ? {
-            scale: h / (cam.radius ?? RADIUS),
-            ox: w / 2,
-            oy: h / 2 + h / RADIUS,
-            theta: cam.theta,
-            phi: clampPhi(cam.phi),
-            target: cam.target ?? [0, 0, 0],
-          }
-        : { scale: h / RADIUS, ox: w / 2, oy: h / 2 + h / RADIUS, theta: THETA, phi: PHI, target: [0, 0, 0] };
-    drawGrid3D(raster, view);
-    for (const row of plotRows) {
-      try {
-        renderRow3D(raster, view, row, env, colorOf(row));
-      } catch {
-        /* skip row */
+  // A split view (`---` rows) draws each panel into its own raster, laid out
+  // as the app lays it out, and copies it into place.
+  const panelOfRow = panelIndices(analysis.rows);
+  const panelOf = (row: RowInfo) => panelOfRow[analysis.rows.indexOf(parents.get(row) ?? row)];
+  const layout = layoutPanels(splitsOf(analysis.rows), w, h, 6);
+  const views: View2D[] = [];
+  layout.forEach((panel, k) => {
+    const { rect } = panel;
+    if (!rect.w || !rect.h) return;
+    const sub: Raster =
+      layout.length === 1 ? raster : { w: rect.w, h: rect.h, px: new Uint8ClampedArray(rect.w * rect.h * 3).fill(255) };
+    const inPanel = analysis.rows.filter((_, i) => panelOfRow[i] === k);
+    // Honor viewport rows: the author's framing is document state, so the
+    // preview draws the window the app would open with.
+    const spec = <K extends ViewSpec['kind']>(kind: K) =>
+      inPanel.find(r => r.view?.kind === kind)?.view as Extract<ViewSpec, { kind: K }> | undefined;
+    const rows = plotRows.filter(r => panelOf(r) === k);
+    const grid = spec('grid') as GridRowSpec | undefined;
+    const gridMode = grid?.mode === 'off' ? 'off' : grid?.mode === 'axes' ? 'axes' : 'on';
+    if (rows.some(r => r.cls!.needs3D)) {
+      const cam = spec('camera');
+      const s3 = sub.h;
+      const view: View3D =
+        cam?.kind === 'camera'
+          ? {
+              scale: s3 / (cam.radius ?? RADIUS),
+              ox: sub.w / 2,
+              oy: s3 / 2 + s3 / RADIUS,
+              theta: cam.theta,
+              phi: clampPhi(cam.phi),
+              target: cam.target ?? [0, 0, 0],
+            }
+          : { scale: s3 / RADIUS, ox: sub.w / 2, oy: s3 / 2 + s3 / RADIUS, theta: THETA, phi: PHI, target: [0, 0, 0] };
+      if (gridMode !== 'off') drawGrid3D(sub, view);
+      for (const row of rows) {
+        try {
+          renderRow3D(sub, view, row, env, colorOf(row));
+        } catch {
+          /* skip row */
+        }
+      }
+    } else {
+      const box = spec('view');
+      let view: View2D = box ? fitView2D(box, sub.w, sub.h) : { cx: 0, cy: 0, upp: 12 / Math.min(sub.w, sub.h) };
+      // Shared axes follow the panel split from (web/main.ts fitPanelView).
+      const host = views[panel.host];
+      if (k && host && panel.shared.x) {
+        const ratio = box?.y ? host.upp / ((box.y[1] - box.y[0]) / sub.h) : (view.ratio ?? 1);
+        view = { ...view, cx: host.cx, upp: host.upp, ratio };
+        if (box?.y) view.cy = (box.y[0] + box.y[1]) / 2;
+      }
+      if (k && host && panel.shared.y) {
+        const hostUppY = host.upp / (host.ratio ?? 1);
+        view = { ...view, cy: host.cy, ratio: view.upp / hostUppY };
+      }
+      views[k] = view;
+      if (gridMode !== 'off') drawGrid2D(sub, view, gridMode === 'axes');
+      for (const row of rows) {
+        try {
+          renderRow2D(sub, view, row, env, colorOf(row), analysis);
+        } catch {
+          /* skip row */
+        }
       }
     }
-  } else {
-    const box = spec('view');
-    const view: View2D = box?.kind === 'view' ? fitView2D(box, w, h) : { cx: 0, cy: 0, upp: 12 / h };
-    drawGrid2D(raster, view);
-    for (const row of plotRows) {
-      try {
-        renderRow2D(raster, view, row, env, colorOf(row), analysis);
-      } catch {
-        /* skip row */
-      }
-    }
-  }
+    if (sub !== raster) blitPanel(raster, sub, rect, panel.inset);
+  });
   return raster;
 }
 

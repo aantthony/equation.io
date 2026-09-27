@@ -57,6 +57,7 @@ import { buildStateSystem, initialState } from './state.ts';
 import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
+import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 
 export interface RowSource {
   id?: string | number;
@@ -173,7 +174,7 @@ export function prepareDocument(
       ? 'blank'
       : source.text.startsWith('#')
         ? 'comment'
-        : /^(view|camera)\s*\(/i.test(source.text)
+        : /^(view|camera|grid)\s*\(/i.test(source.text) || isDividerRow(source.text)
           ? 'viewport'
           : seqScans[i]
             ? 'sequence'
@@ -599,6 +600,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     );
 
   const seenViewKinds = new Set<string>();
+  let panel = 0;
   for (const [ri, row] of rows.entries()) {
     if (row.def && !row.error && defs.pointDims.get(row.def.name) === 3) {
       const comps = compsOf(defs, row.def.name)!;
@@ -611,9 +613,24 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     try {
       const badRow = badTableRow(row.text);
       if (badRow) throw new Error(badRow);
-      const view = parseViewRow(row.text, ropts.consts!);
+      // A user's own grid(…) function is theirs; the rest are viewport rows.
+      const view = fnNames.has('grid') && /^\s*grid\s*\(/.test(row.text) ? null : parseViewRow(row.text, ropts.consts!);
       if (view) {
-        if (seenViewKinds.has(view.kind)) throw new Error(`${view.kind} is already set by another row.`);
+        // Each panel frames itself: a divider starts a fresh set.
+        if (view.kind === 'split') {
+          if (++panel >= MAX_PANELS) throw new Error(`A graph splits into at most ${MAX_PANELS} panels.`);
+          seenViewKinds.clear();
+        } else if (seenViewKinds.has(view.kind)) {
+          throw new Error(
+            `${view.kind} is already set by another row${panel ? ' in this panel' : ''}` +
+              (panel ? '.' : ' — a --- row starts a new panel with its own.'),
+          );
+        }
+        if (view.kind === 'grid')
+          for (const name of view.coords ?? []) {
+            const problem = gridCoordinateProblem(name, defs.fields);
+            if (problem) throw new Error(problem);
+          }
         seenViewKinds.add(view.kind);
         row.view = view;
         continue;
