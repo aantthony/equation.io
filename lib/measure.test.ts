@@ -299,3 +299,20 @@ describe('measures: review findings', () => {
     expect(info(['count(x^2+y^2<1)'])).toBe('≈ 3.14159');
   });
 });
+
+// Code review (2026-09-27): readings that were right in value but not in form.
+describe('measures: the exact route and the readout', () => {
+  it('a total smaller than its error bound reads ≈, never an exact = 0', () => {
+    expect(info(['total({x^2+y^2<1: x + 0.0000001})'])).toMatch(/^≈ /);
+    expect(value(['total({x^2+y^2<1: x + 0.0000001})'])).toBeGreaterThan(0);
+    expect(certified(3e-7, 1e-6)).not.toBe(0);
+    expect(certified(-3e-7, 1e-6)).toBeLessThan(0);
+  });
+
+  it('x = y with a range on x is the graph y = x over it, exactly', () => {
+    // The first way round has the range on its solved coordinate; the other
+    // way round is a graph, and was never tried.
+    expect(value(['count({x = y, 0 < x < 1})'])).toBe(Math.SQRT2);
+    expect(value(['count({y = x, 0 < y < 1})'])).toBe(Math.SQRT2);
+  });
+});

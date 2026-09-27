@@ -285,8 +285,9 @@ function graphForm(c: Comparison, coords: Coord[]): Graph | null {
     if (lhs.kind !== 'var') continue;
     const solved = geo.find(k => k.name === lhs.name);
     if (!solved || freeVars(rhs).has(solved.name)) continue;
-    // The solved coordinate is the curve's own: a range on it is not a graph.
-    if (!isInf(solved.lo, -1) || !isInf(solved.hi, 1)) return null;
+    // The solved coordinate is the curve's own: a range on it is not a graph
+    // this way round (x = y with 0 < x < 1 is still y = x over that range).
+    if (!isInf(solved.lo, -1) || !isInf(solved.hi, 1)) continue;
     const along = geo.find(k => k !== solved)!;
     // Over all of ℝ the graph may leave its domain; the quadtree handles that.
     if (isInf(along.lo, -1) || isInf(along.hi, 1)) return null;
@@ -943,7 +944,10 @@ export function certified(v: number, gap: number): number {
   const unit = 10 ** Math.floor(Math.log10(gap));
   if (unit <= Math.abs(v) * 1e-6) return v;
   const r = Number((Math.round(v / unit) * unit).toPrecision(15));
-  return r === 0 ? 0 : r * (1 + 1e-13);
+  // A value smaller than its bound has no digit the bound vouches for, but
+  // it is not 0: its first digit, which reads ≈, never an exact = 0.
+  if (r === 0) return Number(v.toPrecision(1)) * (1 + 1e-13);
+  return r * (1 + 1e-13);
 }
 
 /**
