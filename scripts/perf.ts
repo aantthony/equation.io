@@ -19,7 +19,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Page } from 'playwright';
 
-const PORT = 5198;
+// PERF_PORT when another checkout's dev server holds the default.
+const PORT = Number(process.env.PERF_PORT) || 5198;
 const ORIGIN = `http://localhost:${PORT}`;
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BASELINE_PATH = fileURLToPath(new URL('./perf-baseline.json', import.meta.url));

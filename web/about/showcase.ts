@@ -549,8 +549,14 @@ export const SHOWCASE: ShowcaseItem[] = [
     slug: 'quaternion-julia',
     title: 'Quaternion Julia sets',
     blurb:
-      'qjulia(c) iterates q ↦ q² + c over the quaternions and raymarches a 3D slice of the set; a second argument slides the slice through the fourth dimension.',
-    eqs: ['camera(-pi/3, 0.5, 3)', 's = 0', 'c = quat(-0.2, 0.8, 0, 0)', 'qjulia(c, s)'],
+      'A recursive function iterates q ↦ q² + C in quaternion algebra; a small level of the orbit’s Green function ln|q|/2ᵏ is the surface, raymarched in a 3D slice that s slides through the fourth dimension.',
+    eqs: [
+      'camera(-pi/3, 0.5, 3)',
+      's = 0',
+      'C = quat(-0.2, 0.8, 0, 0)',
+      'Q(a, b, c, d, k) = {|quat(a, b, c, d)| > 2: ln(|quat(a, b, c, d)|)/2^k, k >= 12: ln(|quat(a, b, c, d)|)/2^k, Q(quat(a, b, c, d)^2 + C, k + 1)}',
+      'Q(x, y, z, s, 0) = 0.001',
+    ],
     group: 'Tensors, quaternions & geometric algebra',
   },
   {

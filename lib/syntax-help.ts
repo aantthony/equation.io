@@ -113,7 +113,6 @@ const signatures: Record<string, [string, string]> = {
   dual: ['dual(A)', 'The dual A I⁻¹: dual(e_xy) is e_z'],
   vec: ['vec(q)', 'A quaternion’s vector part (x, y, z), as a point'],
   quat: ['quat(w, x, y, z)', 'The quaternion w + x i + y j + z k; quat(cos(a/2), sin(a/2) n) turns by a about n'],
-  qjulia: ['qjulia(c) or qjulia(c, s)', 'The quaternion Julia set of c as a 3D surface, sliced at k = s'],
   slerp: ['slerp(q1, q2, s)', 'Turn from rotation q1 to q2 at constant speed, s from 0 to 1'],
   sum: ['sum(n=1..N, expression)', 'Finite sum'],
   prod: ['prod(n=1..N, expression)', 'Finite product'],

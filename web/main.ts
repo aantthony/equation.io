@@ -635,6 +635,8 @@ function resize() {
 
 let renderQueued = false;
 let renderFrame = 0;
+/** The frame raymarched surfaces are due to refine in, once at rest. */
+let refineTimer: ReturnType<typeof setTimeout> | null = null;
 let renderTimer: ReturnType<typeof setTimeout> | null = null;
 let rendererDisposed = false;
 let pausedAt: number | null = null;
@@ -1517,10 +1519,15 @@ function render() {
       e.gpu?.type === 'vfield3d' &&
       e.showStreamlines,
   );
+  // Raymarched surfaces refine once they hold still (Renderer3D.drawImplicits).
+  const refineIn = r3d.refineIn();
+  if (refineTimer !== null) clearTimeout(refineTimer);
+  refineTimer = refineIn ? setTimeout(requestRender, refineIn) : null;
   if (
     stateSys ||
     gridAnimated ||
     streamlinesAnimated ||
+    refineIn === 0 ||
     panels.some(p => p.mode === '3d' && p.spin !== 0) ||
     active.some(e => e.cls!.animated || (defsAnimated && e.cls!.params.length > 0))
   ) {

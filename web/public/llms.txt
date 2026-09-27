@@ -456,6 +456,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   is a Julia set. An optional second argument sets the iteration count,
   `iter(z^2 + w, 600)` (default 250, max 5000). Any expression works:
   `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship.
+  `iter` is for the plane; an escape-time fractal in space (the Mandelbulb,
+  a quaternion Julia set) is a recursive function — see "Recursive
+  function" below.
 - Point: `(2, 3)`; animate with t: `(2cos(t), 2sin(t))`.
 - Data list: `[3, 1, 4, 4]` is a dot plot on the number line — a dot at each
   value on the x axis, copies stacked upward, so 4 has dots at (4, 1) and
@@ -787,7 +790,24 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   undefined and nothing is drawn — a region shades exactly where the
   recursion terminates. `n f(n - 1)`, a call inside a condition, and two
   functions defined through each other are errors (they would need a
-  stack), as is `d/dx` of a recursive function.
+  stack), as is `d/dx` of a recursive function. Parameters are numbers,
+  but a self-call's point (a tuple, a named point, or a helper's result)
+  spreads into consecutive parameters, and a quaternion into four:
+  `G(T(a, b, c) + (x, y, z), k + 1)` passes `G(a, b, c, k)` four values.
+  A recursive function of x, y, z set equal to a constant is an implicit
+  surface, raymarched per pixel. For an escape-time fractal in space,
+  return the orbit's Green function ln|p|/nᵏ (degree n, k passes) rather
+  than the escape count — the count jumps, which the raymarcher cannot
+  draw — and draw a small level of it. The Mandelbulb, whose "triplex"
+  power raises r to n and multiplies both spherical angles by n:
+  `n = 8; S(R, t, p) = R (sin(t) cos(p), sin(t) sin(p), cos(t));
+  r(a, b, c) = sqrt(a^2 + b^2 + c^2);
+  T(a, b, c) = S(r(a, b, c)^n, n acos(c/r(a, b, c)), n atan2(b, a));
+  G(a, b, c, k) = {r(a, b, c) > 2: ln(r(a, b, c))/n^k,
+  k >= 12: ln(r(a, b, c))/n^k, G(T(a, b, c) + (x, y, z), k + 1)};
+  G(x, y, z, 0) = 0.001`, framed with `camera(-pi/3, 0.4, 5)`; `+ C` for
+  a fixed point C in place of `+ (x, y, z)` draws its Julia bulb. Thin
+  detail finer than the raymarch step reads as dust at the edges.
 - Point: `A = (0, 0)` — a named, labeled point drawn on the canvas; the user
   can drag it and every row using it follows. Points may be computed from
   other points defined above: `C = B + D`, `M = midpoint(A, B)`,
@@ -967,12 +987,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   w, and `vec(q)` its vector part (x, y, z), a point. `slerp(q1, q2, s)`
   runs the shorter arc between two rotations at constant speed, s from 0 to
   1: `rotate(hull(P), slerp(q1, q2, (1 - cos(t))/2))` rocks a solid between
-  two orientations. `qjulia(c)` draws the quaternion Julia set of c — the
-  points x + y i + z j whose orbit under q ↦ q² + c stays bounded — as a 3D
-  surface (a level set of the orbit's Green function, 12 passes);
-  `qjulia(c, s)` cuts the slice at k = s instead of 0, so a slider sweeps
-  through the fourth dimension: `c = quat(-0.2, 0.8, 0, 0); qjulia(c)`,
-  framed with `camera(-pi/3, 0.5, 3)`.
+  two orientations. A quaternion passed to a recursive function's self-call
+  spreads into four parameters, so an orbit is written in quaternion
+  algebra — the quaternion Julia set of C, sliced at k = s (see "Recursive
+  function"): `C = quat(-0.2, 0.8, 0, 0); s = 0;
+  Q(a, b, c, d, k) = {|quat(a, b, c, d)| > 2: ln(|quat(a, b, c, d)|)/2^k,
+  k >= 12: ln(|quat(a, b, c, d)|)/2^k, Q(quat(a, b, c, d)^2 + C, k + 1)};
+  Q(x, y, z, s, 0) = 0.001`, framed with `camera(-pi/3, 0.5, 3)`. Older
+  links write the same surface as `qjulia(C, s)`; it still draws, but new
+  graphs should spell the orbit out as above.
 - Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of

@@ -23,7 +23,8 @@ import { HERO, SHOWCASE, type ShowcaseItem, hashUrl } from '../web/about/showcas
 import { EXAMPLES, exampleShotPath } from '../web/examples.ts';
 import { splitStatements } from '../lib/statements.ts';
 
-const PORT = 5199;
+// SHOTS_PORT when another checkout's dev server holds the default.
+const PORT = Number(process.env.SHOTS_PORT) || 5199;
 const ORIGIN = `http://localhost:${PORT}`;
 // Gallery shots are imported by about.ts, so Vite content-hashes them into
 // assets/. The hero and the landing og:images must keep stable public URLs,

@@ -490,8 +490,12 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
       [
         'quaternion Julia set (slide s)',
-        'camera(-pi/3, 0.5, 3); s = 0; c = quat(-0.2, 0.8, 0, 0); qjulia(c, s)',
-        'quaternion fractal 3d slider',
+        // q ↦ q² + C in quaternion algebra; the surface is a level of the
+        // orbit's Green function ln|q|/2^k, as the Mandelbulb's is.
+        'camera(-pi/3, 0.5, 3); s = 0; C = quat(-0.2, 0.8, 0, 0); ' +
+          'Q(a, b, c, d, k) = {|quat(a, b, c, d)| > 2: ln(|quat(a, b, c, d)|)/2^k, k >= 12: ln(|quat(a, b, c, d)|)/2^k, Q(quat(a, b, c, d)^2 + C, k + 1)}; ' +
+          'Q(x, y, z, s, 0) = 0.001',
+        'quaternion fractal 3d slider recursion',
       ],
     ],
   ],
@@ -757,6 +761,18 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['Julia set', 'view(x = -1.7..1.7, y = -1.1..1.1); iter(z^2 - 0.7269 + 0.1889i)', 'fractal complex'],
       ['Julia orbit', 'view(x = -1.8..1.8, y = -1.3..1.3); iter(z^2 + 0.7885e^(i t/8))', 'fractal complex animated'],
       ['burning ship', 'view(x = -2.4..1.7, y = -1.2..1.9); iter((|re(z)| - i |im(z)|)^2 + w)', 'fractal complex'],
+      // The "triplex" power raises r to n and multiplies both spherical
+      // angles by n. An escape count jumps, which the raymarcher cannot
+      // draw; the orbit's Green function ln|p|/n^k is continuous, and a small
+      // level of it hugs the set.
+      [
+        'Mandelbulb (slide n)',
+        'camera(-pi/3, 0.4, 5); n = 8; S(R, t, p) = R (sin(t) cos(p), sin(t) sin(p), cos(t)); ' +
+          'r(a, b, c) = sqrt(a^2 + b^2 + c^2); T(a, b, c) = S(r(a, b, c)^n, n acos(c/r(a, b, c)), n atan2(b, a)); ' +
+          'G(a, b, c, k) = {r(a, b, c) > 2: ln(r(a, b, c))/n^k, k >= 12: ln(r(a, b, c))/n^k, G(T(a, b, c) + (x, y, z), k + 1)}; ' +
+          'G(x, y, z, 0) = 0.001',
+        'fractal 3d slider recursion',
+      ],
     ],
   ],
   [
