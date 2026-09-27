@@ -1083,6 +1083,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   oklch2d: 'fallback',
   conformal2d: 'fallback',
   fractal2d: 'fallback',
+  // A cloud is a raymarched integral per pixel, too costly for the preview.
+  scalar3d: 'fallback',
   vfield2d: 'draws',
   tfield2d: 'draws',
   // The rest of the sequence family (term dots, orbit diagrams) and data

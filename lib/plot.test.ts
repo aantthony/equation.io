@@ -22,7 +22,14 @@ describe('classify', () => {
     expect(cls('sin(x)').cpu.type).toBe('scalar2d'); // constant along y; the curve is y = sin(x)
     expect(cls('sin(x)cos(y)').cpu.type).toBe('scalar2d');
     expect(cls('y').cpu.type).toBe('scalar2d');
-    expect(() => cls('x^2+y^2+z^2-9')).toThrow(/field in space, which cannot be drawn yet/);
+  });
+
+  it('draws a bare scalar in x, y, z as a cloud in space', () => {
+    const c = cls('x^2+y^2+z^2-9');
+    expect(c.cpu.type).toBe('scalar3d');
+    expect(c.gpu.type).toBe('scalar3d');
+    expect(c.needs3D).toBe(true);
+    expect(cls('x y z').cpu.type).toBe('scalar3d');
   });
 
   it('reads a bare number out instead of plotting y = it', () => {

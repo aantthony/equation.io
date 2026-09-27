@@ -499,7 +499,7 @@ function pointValued(e: Expr, lower: (e: Expr) => Expr): boolean {
 /** A scalar field in x alone (or y alone) is most often a curve meant as
  *  `y = …`: the row says how to write that, since it now draws a field. */
 function curveHint(object: MathObject, text: string): string | null {
-  if (object.kind !== 'scalar-field') return null;
+  if (object.kind !== 'scalar-field' || object.dimension === 3) return null;
   const vars = freeVars(object.expr);
   const [free, other] = vars.has('x') ? ['x', 'y'] : ['y', 'x'];
   if (!vars.has(free) || vars.has(other)) return null;

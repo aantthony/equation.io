@@ -472,6 +472,10 @@ function classifyLowered(
       throw new Error(
         'A family of scalar fields cannot be drawn — for curves write y = …, or pick one member, like L[k].',
       );
+    if (first === 'scalar3d')
+      throw new Error(
+        'A family of fields in space cannot be drawn — for nested level surfaces write f(x, y, z) = [1..5], or pick one member, like L[k].',
+      );
     if (unsupported.has(first))
       throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
@@ -1028,11 +1032,9 @@ function classifyLowered(
   }
   // A scalar that depends on the screen's x and y is drawn at every pixel —
   // `sin(x)` too, constant along y. There is no implicit graph: the curve is
-  // `y = sin(x)`, and the surface of a field in space is `f = 0`.
-  if (vars.has('z'))
-    throw new Error(
-      'A bare expression in x, y, z is a field in space, which cannot be drawn yet — set it equal to a value for its surface, like … = 0.',
-    );
+  // `y = sin(x)`, and the surface of a field in space is `f = 0`. In space
+  // the field is a translucent cloud, denser where it is larger.
+  if (vars.has('z')) return done({ kind: 'scalar-field', expr, dimension: 3 });
   if (hasSpace) return done({ kind: 'scalar-field', expr });
   return done({ kind: 'value', expr });
 }

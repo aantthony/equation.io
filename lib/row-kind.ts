@@ -60,6 +60,8 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   implicit2d: '2D curve (the set of points satisfying an equation)',
   ineq2d: 'shaded 2D region (an inequality)',
   scalar2d: '2D scalar field, shaded by sign and size (row colour positive, its complement negative)',
+  scalar3d:
+    '3D scalar field, drawn as a translucent cloud denser where the field is larger in size (row colour positive, its complement negative)',
   implicit3d: '3D surface (the points satisfying an equation in x, y, z)',
   spacecurve: '3D curve where surfaces intersect',
   pcurve: 'parametric curve, traced as u runs from 0 to 1',

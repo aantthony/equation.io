@@ -9,6 +9,7 @@ export const PUBLIC_KIND_ROWS = {
   implicit2d: ['y = x^2'],
   ineq2d: ['x^2 + y^2 < 4'],
   scalar2d: ['x + y'],
+  scalar3d: ['x y z'],
   implicit3d: ['x^2 + y^2 + z^2 = 4'],
   complex2d: ['w^2'],
   domain2d: ['domain(w^2)'],

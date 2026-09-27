@@ -897,6 +897,24 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
     ],
   ],
   [
+    'fields in space',
+    [
+      // A bare expression in x, y, z is a cloud: row colour where it is
+      // positive, the complement where negative, denser where it is larger.
+      ['Gaussian cloud', 'exp(-(x^2 + y^2 + z^2)/4)', '3d scalar-field'],
+      ['octants of x y z', 'x y z', '3d scalar-field polynomial'],
+      ['hydrogen 2p orbital', 'z exp(-sqrt(x^2 + y^2 + z^2)/2)', '3d scalar-field physics'],
+      ['dipole potential', '1/sqrt(x^2 + y^2 + (z - 1)^2) - 1/sqrt(x^2 + y^2 + (z + 1)^2)', '3d scalar-field physics'],
+      // The ray stops at the surface, so the cloud in front of it tints it.
+      [
+        'a level surface inside its cloud',
+        'f(x, y, z) = exp(-(x^2 + y^2 + z^2)/4); f(x, y, z); f(x, y, z) = 0.8',
+        '3d scalar-field surface implicit',
+      ],
+      ['standing wave', 'sin(x) sin(y) sin(z) cos(2t)', '3d scalar-field animated waves'],
+    ],
+  ],
+  [
     'solids',
     [
       // Separate [..] literals are independent and cross: 2 × 2 × 2 corners.
@@ -988,6 +1006,7 @@ export const COVERS: Record<string, string> = {
   'polar + plane coordinates': 'spiral traced in (r, θ)',
   'spherical + cylindrical': 'cylindrical chart',
   '3D surfaces': 'gyroid',
+  'fields in space': 'hydrogen 2p orbital',
   solids: 'icosahedron',
   '3D curves + knots': 'torus knot (2,5)',
 };

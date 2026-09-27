@@ -36,6 +36,11 @@ export interface Surface3D {
 
 /** Half-width of the axis-aligned box every 3D plot is clipped to. */
 export const cameraBoxR = (cam: Camera3D): number => cam.radius * 0.85;
+/** Radius of the ball around the target where a cloud is at full density;
+ *  it thins to nothing at twice that, still short of the camera (at
+ *  cam.radius), so the field near the lens never fogs the view. A ball, not
+ *  a box: soft and round, it shows no face or corner from any side. */
+export const volumeRadius = (cam: Camera3D): number => cam.radius * 0.25;
 
 export function cameraEye(cam: Camera3D): [number, number, number] {
   const cp = Math.cos(cam.phi);
@@ -318,6 +323,106 @@ void main() {
   float edge = smoothstep(uBoxR, uBoxR * 0.96, max(max(abs(p.x), abs(p.y)), abs(p.z)));
   outColor = vec4(col, 0.6 + 0.4 * edge);
   gl_FragDepth = depthOf(p);
+}
+`;
+}
+
+/** Samples along each ray through a cloud: its chord through the cloud's
+ *  ball (to the nearest surface, if nearer) in equal steps, their start jittered per pixel
+ *  and per antialiasing pass so the steps band into noise that averages out. */
+const VOLUME_STEPS = 160;
+/** Optical depth across the cloud's full-density radius where |F| is at its
+ *  scale: a ray through that much of it is ~86% covered. */
+const VOLUME_DENSITY = 1.2;
+
+/**
+ * A field in space as a cloud: emission–absorption along each ray, front to
+ * back, with density (F / uScale)² — thin where the field is small, dense
+ * where it is large — tinted like a field in the plane, the row colour where
+ * F is positive and its complement where negative. The march stops at the
+ * implicit surfaces' depth (uStopDepth), so a surface inside the cloud is
+ * seen through the part in front of it.
+ *
+ * The reference grid is the plane z = 0, and a cloud straddles it: each ray
+ * is marched in two passes split where it crosses the plane, uBack choosing
+ * the part beyond it, drawn before the grid, or the part before it, drawn
+ * after. They share one step size, so together they cost one march. The depth
+ * is where the cloud starts, only tested against what is already drawn —
+ * never written, since a faint haze must not hide the grid behind it.
+ */
+function volumeFrag(field: string, params?: string[]): string {
+  return `#version 300 es
+precision highp float;
+uniform vec3 uColor;
+uniform float uScale;
+uniform sampler2D uStopDepth;
+uniform bool uStop;
+uniform bool uBack;
+uniform float uVolR;
+uniform vec3 uVolC;
+${CHUNK_DECL}
+${JITTER_DECL}
+${paramDecls(params)}
+out vec4 outColor;
+${GLSL_PRELUDE}
+${MARCH_COMMON}
+
+float F(vec3 p) {
+  float x = p.x, y = p.y, z = p.z;
+  return ${field};
+}
+
+void main() {
+  ${CHUNK_PIXEL}
+  vec2 uv = (pix + uJitter - uOrigin) / uRes;
+  vec2 ndc = uv * 2.0 - 1.0;
+  vec3 ro = unproject(vec3(ndc, -1.0));
+  vec3 far = unproject(vec3(ndc, 1.0));
+  vec3 rd = normalize(far - ro);
+
+  // The chord through the ball of radius 2 uVolR where the cloud has any density.
+  vec3 oc = ro - uVolC;
+  float b = dot(oc, rd);
+  float disc = b * b - dot(oc, oc) + 4.0 * uVolR * uVolR;
+  if (disc <= 0.0) discard;
+  float t0 = max(-b - sqrt(disc), 0.0);
+  float t1 = -b + sqrt(disc);
+  if (uStop) {
+    float d = texture(uStopDepth, uv).r;
+    if (d < 1.0) t1 = min(t1, dot(unproject(vec3(ndc, d * 2.0 - 1.0)) - ro, rd));
+  }
+  if (t1 <= t0) discard;
+  float dt = (t1 - t0) / float(${VOLUME_STEPS});
+  // Where the ray meets the grid's plane, or never if it runs parallel or away.
+  float tPlane = rd.z != 0.0 && -ro.z / rd.z > 0.0 ? -ro.z / rd.z : 1e30;
+  float from = uBack ? max(t0, tPlane) : t0;
+  float to = uBack ? t1 : min(t1, tPlane);
+  if (to <= from) discard;
+
+  float offset = fract(sin(dot(pix + uJitter * 7.31, vec2(12.9898, 78.233))) * 43758.5453);
+  vec3 comp = 1.0 - uColor;
+  vec3 color = vec3(0.0);
+  float alpha = 0.0;
+  float tFront = to;
+  for (int i = 0; i < ${VOLUME_STEPS}; i++) {
+    float t = t0 + (float(i) + offset) * dt;
+    if (t < from) continue;
+    if (t > to) break;
+    vec3 p = ro + rd * t;
+    float s = F(p) / uScale;
+    if (isnan(s) || isinf(s)) continue;
+    s = clamp(s, -1.0, 1.0);
+    // Full density out to uVolR, thinning smoothly to none at twice that.
+    float falloff = smoothstep(2.0 * uVolR, uVolR, length(p - uVolC));
+    float a = 1.0 - exp(-${VOLUME_DENSITY.toFixed(1)} * s * s * falloff * dt / uVolR);
+    color += (1.0 - alpha) * a * (s >= 0.0 ? uColor : comp);
+    alpha += (1.0 - alpha) * a;
+    if (tFront == to && alpha > 0.0) tFront = t;
+    if (alpha > 0.99) break;
+  }
+  if (alpha < 1.0 / 255.0) discard;
+  outColor = vec4(color / alpha, alpha);
+  gl_FragDepth = depthOf(ro + rd * tFront);
 }
 `;
 }
@@ -739,6 +844,15 @@ export interface Scene3D {
   points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string }>;
   /** `label(point, "text")` rows: text only, no point sprite. */
   texts?: Array<{ pos: [number, number, number]; text: string; color: [number, number, number] }>;
+  /** Fields in space, drawn as clouds (see volumeFrag); `scale` is the size
+   *  of the field that draws densest, for the box of half-width r at center. */
+  volumes?: Array<{
+    field: string;
+    scale: (center: readonly number[], r: number) => number;
+    color: [number, number, number];
+    params?: string[];
+    uniforms?: Record<string, number>;
+  }>;
   /** 3D vector fields drawn as animated streamlines (see streamlineVert). */
   streamlines?: Array<{
     comps: [string, string, string];
@@ -1048,6 +1162,8 @@ export class Renderer3D {
       gl.bindVertexArray(null);
     }
 
+    let surfaceState: SurfaceState | undefined;
+    let surfaceKey = '';
     if (surfaces.length) {
       const drawSurfaces = (res: [number, number], chunk: [number, number, number], jitter: [number, number]) => {
         for (const s of surfaces) {
@@ -1089,7 +1205,11 @@ export class Renderer3D {
       this.drawImplicits(id, w, h, key, timed ? time : 0, drawSurfaces);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(ox, oy, w, h);
-      this.composite(this.surfaceStates.get(id)!.full, ox, oy);
+      surfaceState = this.surfaceStates.get(id)!;
+      this.composite(surfaceState.full, ox, oy);
+      // A cloud stops at the surfaces, so it redraws when they do — and once
+      // more when their full-resolution depth is in.
+      surfaceKey = `${key}|${surfaceState.grid === 1 || surfaceState.sample > 0 || !surfaceState.cells.length}|${timed ? time : 0}`;
     }
 
     for (const s of scene.psurfaces) {
@@ -1235,6 +1355,68 @@ export class Renderer3D {
     }
     gl.bindVertexArray(null);
 
+    // Clouds over everything opaque, raymarched like the surfaces — as
+    // costly, so drawn progressively the same way, into targets of their own:
+    // one for the part of each ray beyond the grid's plane, drawn now, and one
+    // for the part before it, drawn over the grid (see volumeFrag).
+    const volumes = scene.volumes ?? [];
+    const volR = volumeRadius(cam);
+    const scales = volumes.map(v => v.scale(cam.target, volR));
+    const drawClouds = (back: boolean) => {
+      if (!volumes.length) return;
+      const stop = surfaceState?.full.depth ?? null;
+      const drawVolumes = (res: [number, number], chunk: [number, number, number], jitter: [number, number]) => {
+        volumes.forEach((v, k) => {
+          let prog: WebGLProgram;
+          try {
+            prog = this.cache.get(QUAD_VERT, volumeFrag(v.field, v.params));
+          } catch (e) {
+            console.error(e);
+            return;
+          }
+          setCommon(prog);
+          setParams(prog, v.params, v.uniforms);
+          gl.uniform2f(gl.getUniformLocation(prog, 'uRes'), ...res);
+          gl.uniform2f(gl.getUniformLocation(prog, 'uOrigin'), 0, 0);
+          gl.uniform3i(gl.getUniformLocation(prog, 'uChunk'), ...chunk);
+          gl.uniform2f(gl.getUniformLocation(prog, 'uJitter'), ...jitter);
+          gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...v.color);
+          gl.uniform1f(gl.getUniformLocation(prog, 'uScale'), scales[k]);
+          gl.uniform1f(gl.getUniformLocation(prog, 'uVolR'), volR);
+          gl.uniform3f(gl.getUniformLocation(prog, 'uVolC'), ...cam.target);
+          gl.uniform1i(gl.getUniformLocation(prog, 'uBack'), back ? 1 : 0);
+          gl.uniform1i(gl.getUniformLocation(prog, 'uStop'), stop ? 1 : 0);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, stop);
+          gl.uniform1i(gl.getUniformLocation(prog, 'uStopDepth'), 0);
+          this.quad.draw();
+          gl.bindTexture(gl.TEXTURE_2D, null);
+        });
+      };
+      const key = JSON.stringify([
+        Array.from(vp),
+        boxR,
+        w,
+        h,
+        surfaceKey,
+        volumes.map((v, k) => [
+          v.field,
+          v.color,
+          scales[k],
+          (v.params ?? []).map(p => v.uniforms?.[uniformName(p)] ?? env[p] ?? 0),
+        ]),
+      ]);
+      const timed = volumes.some(v => /\bt\b/.test(v.field));
+      const id = `${ox},${oy}/volume-${back ? 'back' : 'front'}`;
+      this.drawImplicits(id, w, h, key, timed ? time : 0, drawVolumes);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(ox, oy, w, h);
+      gl.depthMask(false);
+      this.composite(this.surfaceStates.get(id)!.full, ox, oy);
+      gl.depthMask(true);
+    };
+    drawClouds(true);
+
     // Streamlines blend over everything opaque but write no depth, so the
     // dense cloud never hides itself.
     for (const f of scene.streamlines ?? []) {
@@ -1269,6 +1451,7 @@ export class Renderer3D {
       this.quad.draw();
       gl.depthMask(true);
     }
+    drawClouds(false);
   }
 
   /**
