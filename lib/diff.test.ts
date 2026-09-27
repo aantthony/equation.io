@@ -46,8 +46,19 @@ describe('diff', () => {
     expect(ddx('sinc(x)', { x: -0.7 })).toBeCloseTo(fd(x => Math.sin(x) / x, -0.7));
   });
 
+  it('differentiates min and max branchwise, as the chosen argument', () => {
+    expect(ddx('min(x, 1)', { x: 0.5 })).toBe(1);
+    expect(ddx('min(x, 1)', { x: 2 })).toBe(0);
+    expect(ddx('max(x^2, 3x, 1)', { x: 2 })).toBe(3);
+    expect(ddx('max(x^2, 3x, 1)', { x: 4 })).toBe(8);
+    // clamp(x², 0, 1), as definitions lower it.
+    expect(ddx('min(max(x^2, 0), 1)', { x: 0.5 })).toBeCloseTo(1);
+    expect(ddx('min(max(x^2, 0), 1)', { x: 2 })).toBe(0);
+    // Constant in x: plain 0, not a conditional that always gives 0.
+    expect(diff(parseExpr('min(max(a, 0), 2)'), 'x')).toEqual({ kind: 'num', value: 0 });
+  });
+
   it('throws for non-smooth functions', () => {
-    expect(() => diff(parseExpr('min(x, 1)'), 'x')).toThrow(/differentiate/);
     expect(() => diff(parseExpr('floor(x)'), 'x')).toThrow(/differentiate/);
   });
 });
@@ -63,6 +74,20 @@ describe('symbolic derivatives in classification', () => {
 
   it('falls back to undefined tangents for non-smooth components', () => {
     const c = classify(parseExpr('(u, v, floor(4u))'));
+    if (compileGpu(c).type !== 'psurface') throw new Error('expected psurface');
+    expect(compileGpu(c).du).toBeUndefined();
+  });
+
+  it('provides tangents through min and max', () => {
+    const c = classify(parseExpr('(u, v, max(u, v)^2)'));
+    if (compileGpu(c).type !== 'psurface') throw new Error('expected psurface');
+    expect(compileGpu(c).du).toBeDefined();
+  });
+
+  it('leaves tangents to finite differences when they are much larger than P', () => {
+    // Every product-rule term repeats the whole (inlined) factor it multiplies.
+    const f = Array.from({ length: 20 }, (_, k) => `sin(${k + 2}u + v)`).join(' ');
+    const c = classify(parseExpr(`(u, v, ${f})`));
     if (compileGpu(c).type !== 'psurface') throw new Error('expected psurface');
     expect(compileGpu(c).du).toBeUndefined();
   });

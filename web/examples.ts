@@ -508,6 +508,20 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
           'vec(q)/(1 - grade(q, 0))',
         'quaternion 3d',
       ],
+      // Dirac's belt trick: the cube spins forever while the ribbons' far ends
+      // stay put. Each sphere of radius |P| turns rigidly by Q, a chord across
+      // the disk the cube's quaternion circles in S³, so the ribbons never
+      // touch; at t = 2π (one turn, Q = −1) they are tangled, at 4π straight.
+      [
+        'belt trick: untangled every 720°',
+        'camera(-0.49, 0.31, 7); b = clamp(0.72, 0.2, 1.4) # ribbon width; q = 0.58; k = 2pi [0..2]/3; f = t/2; ' +
+          'g = (sqrt((q + 3u)^2 + (b(v-0.5))^2) - sqrt(3) q)/(q + 3 - sqrt(3) q); p = pi clamp(g, 0, 1); ' +
+          'c = (1 + cos(p))/2; ' +
+          'Q = quat(1 - c(1 - cos(f)), c sin(f) (1,1,1)/sqrt(3) + sin(f/2) sin(p) (1,-1,0)/sqrt(2)); ' +
+          'rotate(rotate(([-1,1](q + 3u), b(v-0.5), 0), k, (1,1,1)), Q); ' +
+          'rotate(hull(([-q,q], [-q,q], [-q,q])), t, (1,1,1))',
+        'quaternion 3d animated slider',
+      ],
       [
         'quaternion Julia set (slide s)',
         // q ↦ q² + C in quaternion algebra; the surface is a level of the
