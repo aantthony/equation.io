@@ -358,6 +358,12 @@ describe('coordinate fields over z', () => {
     expect(roots[0][0]).toBeCloseTo(0, 7);
     expect(roots[0][1]).toBeCloseTo(-2, 7);
     expect(roots[1][1]).toBeCloseTo(2, 7);
+    // A vector's components are real.
+    expect(errorsOf(['q = x + i y', 'P = (q, 1)'])[1]).toBe(
+      "P has a complex component; a vector's components are real — take re(…) or im(…).",
+    );
+    expect(errorsOf(['s = (x, w)'])[0]).toMatch(/^s has a complex component;/);
+    expect(last(['q = x + i y', 'P = (re(q), im(q))', 'dot(P, P) = 1']).type).toBe('implicit2d');
     // No real level sets to draw as a grid family.
     expect(errorsOf(['q = x + i y', 'grid(q)'])[1]).toMatch(/q is not a coordinate over the plane .*is complex/);
   });
