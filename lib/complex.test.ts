@@ -94,6 +94,38 @@ describe('classify (special forms)', () => {
     expect(() => classify(parseExpr('iter(z^2 + w, x)'))).toThrow(/plain number/);
   });
 
+  it('iter takes a color in n, the escape count, with or without a count', () => {
+    const c = compileGpu(classify(parseExpr('iter(z^2 + w, 600, hsl(n/10, 1, 0.5))'))) as {
+      maxIter: number;
+      palette: { space: string; field: string; locals: string };
+    };
+    expect(c).toMatchObject({ maxIter: 600, palette: { space: 'hsl' } });
+    expect(c.palette.locals + c.palette.field).toContain('eqIterN');
+    const d = compileGpu(classify(parseExpr('iter(z^2 + w, oklch(0.7, 0.2, arg(z)))'))) as {
+      maxIter: number;
+      palette: { field: string; locals: string };
+    };
+    expect(d.maxIter).toBe(250);
+    expect(d.palette.locals + d.palette.field).toContain('eqIterZ');
+  });
+
+  it("iter's n is the escape count even beside a slider n the step uses", () => {
+    const c = classify(parseExpr('iter(z^n + w, rgb(n/50, 0, 0))'), new Set(['n']));
+    expect(c.params).toEqual(['n']);
+    const plan = compileGpu(c) as { step: string; palette: { field: string; locals: string } };
+    expect(plan.step).toContain('u_n');
+    expect(plan.palette.locals + plan.palette.field).not.toContain('u_n');
+    // Outside the color, n is still an ordinary unknown.
+    expect(() => classify(parseExpr('iter(z^n + w, rgb(n, 0, 0))'))).toThrow(/Unknown variable: n/);
+  });
+
+  it('rejects malformed iter colors', () => {
+    expect(() => classify(parseExpr('iter(z^2 + w, hsl(n, 1))'))).toThrow(/three channels/);
+    expect(() => classify(parseExpr('iter(z^2 + w, rgb(z, 0, 0))'))).toThrow(/real numbers/);
+    expect(() => classify(parseExpr('iter(z^2 + w, rgb(domain(w), 0, 0))'))).toThrow(/whole expression/);
+    expect(() => classify(parseExpr('rgb(iter(z^2 + w), 0, 0)'))).toThrow(/whole expression/);
+  });
+
   it('special forms must stand alone', () => {
     expect(() => classify(parseExpr('1 + iter(z^2 - 1)'))).toThrow(/whole expression/);
     expect(() => classify(parseExpr('domain(w) = 1'))).toThrow(/whole expression/);

@@ -68,7 +68,7 @@ object must respect):
 | bare real scalar in u, v alone | density of its values, u, v ~ Uniform(0, 1) | density curve |
 | `revolve(f)`, `revolve(f, y)` | surface of revolution, lowered to the implicit surface `y^2 + z^2 = f(x)^2` | raymarcher |
 | complex-valued expr in w | field lines + equipotentials | level-curve shader |
-| `domain(f)` / `conformal(f)` / `iter(step)` | domain coloring / conformal grid / escape-time fractal | dedicated shaders |
+| `domain(f)` / `conformal(f)` / `iter(step[, count][, color])` | domain coloring / conformal grid / escape-time fractal (color: `rgb`/`hsl`/`oklch` in escape count `n` and iterate `z`) | dedicated shaders |
 | tuple, no free vars (t ok) | point (2D/3D) | overlay dot / billboard; draggable where its literals/constants can be written back |
 | `A = (1,2)`; `A + 2B`, `midpoint(A,B)`, `perp(A)` | named point (2 or 3 components) / point arithmetic | point; `A_x`, `A_y` (and `A_z` in 3D) are scalars |
 | `segment` / `polyline` / `polygon` / `square` (points) | polygon (open or closed) | CPU polyline / fill |

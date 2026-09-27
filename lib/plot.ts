@@ -48,6 +48,7 @@ import {
   objectNeeds3D,
   publicKind,
   type Classified,
+  type ColorSpace,
   type MathObject,
   type LevelSetSpec,
 } from './math-object.ts';
@@ -175,8 +176,23 @@ function matchRevolve(e: Expr): Expr | null {
   };
 }
 
+const COLOR_SPACES = new Set(['rgb', 'hsl', 'oklch']);
+
+/** iter's optional color argument: a trailing rgb/hsl/oklch call after the
+ *  step, in which n is the smooth escape count and z the iterate as it
+ *  first leaves radius 2. */
+function iterColor(call: Expr & { kind: 'call' }): (Expr & { kind: 'call' }) | undefined {
+  const last = call.args.at(-1);
+  return call.args.length > 1 && last?.kind === 'call' && COLOR_SPACES.has(last.name) ? last : undefined;
+}
+
 /** First special-form call at any position other than the root itself. */
 function nestedSpecial(e: Expr, isRoot = false): string | undefined {
+  if (isRoot && e.kind === 'call' && e.name === 'iter') {
+    // iter's color is part of the form; only its channels are subterms.
+    const color = iterColor(e);
+    return [...e.args.filter(a => a !== color), ...(color?.args ?? [])].map(a => nestedSpecial(a)).find(Boolean);
+  }
   if (!isRoot && ['trail', 'label', 'figure', 'hist', 'family'].includes(e.kind))
     return e.kind === 'figure' ? e.form : e.kind;
   if (e.kind === 'call' && !isRoot && WHOLE_EXPR_FORMS.has(e.name)) return e.name;
@@ -523,6 +539,15 @@ function classifyLowered(
   const nested = nestedSpecial(expr, true);
   if (nested) throw new Error(`${nested === '[trail]' ? 'trail' : nested}(…) must be the whole expression.`);
   const vars = freeVars(expr);
+  const color = special === 'iter' ? iterColor(expr as Expr & { kind: 'call' }) : undefined;
+  if (color) {
+    // n in the color is the escape count, not a slider; rebuild the set so an
+    // n the step (or count) uses still counts.
+    vars.clear();
+    for (const a of (expr as Expr & { kind: 'call' }).args) {
+      for (const v of freeVars(a)) if (a !== color || v !== 'n') vars.add(v);
+    }
+  }
   if (tube) {
     const r = tube.radius;
     if (
@@ -832,25 +857,46 @@ function classifyLowered(
       return done({ kind: 'color-field', space: special, channels: call.args as [Expr, Expr, Expr] });
     }
     if (special === 'iter') {
-      if (call.args.length < 1 || call.args.length > 2) {
-        throw new Error('iter takes iter(step) or iter(step, count).');
+      const color = iterColor(call);
+      const args = color ? call.args.slice(0, -1) : call.args;
+      if (args.length < 1 || args.length > 2) {
+        throw new Error('iter takes iter(step), iter(step, count) or iter(step, count, color).');
       }
       let maxIter = 250;
-      if (call.args.length === 2) {
+      if (args.length === 2) {
         try {
-          maxIter = evaluate(call.args[1], {});
+          maxIter = evaluate(args[1], {});
         } catch {
           throw new Error('The iteration count must be a plain number.');
         }
         if (!isFinite(maxIter) || maxIter < 1) throw new Error('The iteration count must be at least 1.');
         maxIter = Math.min(5000, Math.round(maxIter));
       }
-      inferScalarType(call.args[0], { z: 'complex' });
+      inferScalarType(args[0], { z: 'complex' });
+      let palette: { space: ColorSpace; channels: [Expr, Expr, Expr] } | undefined;
+      if (color) {
+        const space = color.name as ColorSpace;
+        if (color.args.length !== 3) throw new Error(`${space} takes three channels, e.g. hsl(n/10, 1, 0.5).`);
+        for (const channel of color.args) {
+          if (channel.kind === 'ineq' || channel.kind === 'eq')
+            throw new Error(`${space} channels must be real numbers, not comparisons.`);
+          if (inferScalarType(channel, { z: 'complex' }) !== 'real')
+            throw new Error(`${space} channels must be real numbers; use re, im, abs, or arg for complex values.`);
+        }
+        palette = { space, channels: color.args as [Expr, Expr, Expr] };
+      }
       // The pixel enters either as a parameter (w/x/y in the step → seed 0,
       // the Mandelbrot convention) or as the seed (fixed map → Julia set).
-      const bodyVars = freeVars(call.args[0]);
+      const bodyVars = freeVars(args[0]);
       const seed = bodyVars.has('w') || bodyVars.has('x') || bodyVars.has('y') ? 'zero' : 'pixel';
-      return done({ kind: 'complex-field', form: 'fractal', step: call.args[0], seed, maxIter });
+      return done({
+        kind: 'complex-field',
+        form: 'fractal',
+        step: args[0],
+        seed,
+        maxIter,
+        ...(palette && { palette }),
+      });
     }
     if (call.args.length !== 1) throw new Error(`${special} takes one argument.`);
     const typed = inferScalarType(call.args[0]);

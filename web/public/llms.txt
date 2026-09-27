@@ -468,7 +468,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   fixed constant the pixel is the starting point, so `iter(z^2 - 0.8 + 0.156i)`
   is a Julia set. An optional second argument sets the iteration count,
   `iter(z^2 + w, 600)` (default 250, max 5000). Any expression works:
-  `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship.
+  `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship. A last argument
+  `rgb(…)`, `hsl(…)` or `oklch(…)` paints the outside with a color map: in it
+  `n` is the smooth (fractional) escape count and `z` the iterate as it first
+  leaves radius 2, and the set itself is black. `iter(z^2 + w, hsl(n/10, 1,
+  0.5))` cycles the rainbow by escape time; add `arg(z)` for field-line
+  stripes, `oklch(0.5 + 0.3cos(n/3) + 0.12cos(3arg(z)), 0.16, 5.8 +
+  1.4cos(n/3))`. The count may be left out before a color.
   `iter` is for the plane; an escape-time fractal in space (the Mandelbulb,
   a quaternion Julia set) is a recursive function — see "Recursive
   function" below.

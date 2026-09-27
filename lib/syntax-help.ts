@@ -122,7 +122,10 @@ const signatures: Record<string, [string, string]> = {
   hsl: ['hsl(hue, saturation, lightness)', '2D color field; hue in radians, saturation and lightness 0–1'],
   oklch: ['oklch(lightness, chroma, hue)', '2D color field; lightness 0–1, chroma typically 0–0.4, hue in radians'],
   conformal: ['conformal(f(w))', 'Image of a complex coordinate grid'],
-  iter: ['iter(w^2 + c)', 'Complex escape-time iteration'],
+  iter: [
+    'iter(z^2 + w, count, color)',
+    'Escape-time fractal; the optional color is rgb/hsl/oklch in n (escape count) and z',
+  ],
   grad: ['grad(f) or ∇f', 'Gradient in 2D or 3D, plotted as a vector field'],
   div: ['div(F) or ∇·F', 'Divergence of a 2D or 3D vector field, a scalar field'],
   curl: ['curl(F) or ∇×F', 'Curl: a scalar ∂F₂/∂x − ∂F₁/∂y in 2D, a vector field in 3D'],

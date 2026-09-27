@@ -73,6 +73,9 @@ export interface Fractal2D {
   step: string;
   seed: 'pixel' | 'zero';
   maxIter: number;
+  /** A color field of the escape count eqIterN and the iterate eqIterZ as
+   *  it first leaves radius 2; the exterior is painted with it, the set black. */
+  palette?: { space: ColorSpace; field: string; locals: string };
   color: [number, number, number];
   params?: string[];
 }
@@ -637,7 +640,13 @@ void main() {
 `;
 }
 
-function fractalFrag(step: string, seed: 'pixel' | 'zero', maxIter: number, params?: string[]): string {
+function fractalFrag(
+  step: string,
+  seed: 'pixel' | 'zero',
+  maxIter: number,
+  params?: string[],
+  palette?: Fractal2D['palette'],
+): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -649,16 +658,37 @@ uniform float t;
 ${paramDecls(params)}
 out vec4 outColor;
 ${GLSL_PRELUDE}
+${
+  palette
+    ? `${colorConversionGLSL(palette.space)}
+vec3 P(float x, float y, float eqIterN, vec2 eqIterZ) {
+${palette.locals}
+return ${palette.field};
+}`
+    : ''
+}
 vec2 stepFn(vec2 zc, float x, float y) { return ${step}; }
 void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   vec2 zc = ${seed === 'pixel' ? 'p' : 'vec2(0.0)'};
   float mu = -1.0;
   float m2 = dot(zc, zc);
+  // The iterate as it first leaves radius 2: its angle is smooth within an
+  // escape band, where at the far bailout it has doubled into noise.
+  vec2 zEsc = vec2(0.0);
+  bool out2 = false;
   for (int k = 0; k < ${maxIter}; k++) {
     zc = stepFn(zc, p.x, p.y);
     float prev = m2;
-    m2 = dot(zc, zc);
+    m2 = dot(zc, zc);${
+      palette
+        ? `
+    if (!out2 && m2 > 4.0) {
+      out2 = true;
+      zEsc = zc;
+    }`
+        : ''
+    }
     if (isnan(m2) || isinf(m2)) {
       // For degree >= 4, |z|^(2d) can leave the float32 range inside the step
       // before the bailout test fires, yielding inf — or NaN, once inf - inf
@@ -678,10 +708,18 @@ void main() {
   }
   if (mu < 0.0) {
     // Bounded orbit: inside the filled Julia / Mandelbrot set.
-    outColor = vec4(uColor * 0.08, 1.0);
+    outColor = vec4(${palette ? 'vec3(0.0)' : 'uColor * 0.08'}, 1.0);
     return;
   }
-  // Exterior: with a 1e6 bailout even distant points take a few iterations,
+${
+  palette
+    ? `  vec3 channels = P(p.x, p.y, mu, zEsc);
+  if (any(isnan(channels)) || any(isinf(channels))) discard;
+  outColor = vec4(eqColorToSRGB(channels), 1.0);
+  return;
+`
+    : ''
+}  // Exterior: with a 1e6 bailout even distant points take a few iterations,
   // so subtract the "free escape" count log2(ln B / ln |p|) a point at this
   // radius needs with no dynamics — the excess measures closeness to the
   // set, and the far field fades fully so the plot sits on the graph paper.
@@ -1053,7 +1091,7 @@ export class Renderer2D {
       });
     }
     for (const f of layers.fractals ?? []) {
-      drawProgram(fractalFrag(f.step, f.seed, f.maxIter, f.params), f.color, f.params);
+      drawProgram(fractalFrag(f.step, f.seed, f.maxIter, f.params, f.palette), f.color, f.params);
     }
     for (const d of layers.domains ?? []) drawField(d, domainFrag);
     for (const c of layers.colors ?? []) drawField(c, (field, params) => colorFrag(field, params, c.locals, c.space));

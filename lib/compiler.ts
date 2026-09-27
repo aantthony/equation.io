@@ -38,7 +38,13 @@ export type CpuPlan =
   | { type: 'complex2d'; expr: Expr }
   | { type: 'domain2d'; expr: Expr }
   | { type: 'conformal2d'; expr: Expr }
-  | { type: 'fractal2d'; step: Expr; seed: 'pixel' | 'zero'; maxIter: number }
+  | {
+      type: 'fractal2d';
+      step: Expr;
+      seed: 'pixel' | 'zero';
+      maxIter: number;
+      palette?: { space: ColorSpace; channels: Expr[] };
+    }
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   | { type: 'label'; dim: 2 | 3; coords: Expr[]; text: string }
@@ -107,7 +113,14 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'complex2d'; field: string }
   | { type: 'domain2d'; field: string }
   | { type: 'conformal2d'; field: string }
-  | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
+  | {
+      type: 'fractal2d';
+      step: string;
+      seed: 'pixel' | 'zero';
+      maxIter: number;
+      /** GLSL for a color field of the escape count eqIterN and iterate eqIterZ. */
+      palette?: { space: ColorSpace; field: string; locals: string };
+    }
   | { type: 'vfield2d'; fx: string; fy: string }
   | { type: 'tfield2d'; entries: [string, string, string, string] }
   | { type: 'vfield3d'; comps: [string, string, string] }
@@ -248,7 +261,13 @@ export function compileCpu(classified: Classified): CpuPlan {
         : { type: 'vfield3d', comps: object.components.map(real) };
     case 'complex-field':
       return object.form === 'fractal'
-        ? { type: 'fractal2d', step: object.step, seed: object.seed, maxIter: object.maxIter }
+        ? {
+            type: 'fractal2d',
+            step: object.step,
+            seed: object.seed,
+            maxIter: object.maxIter,
+            ...(object.palette && { palette: { space: object.palette.space, channels: [...object.palette.channels] } }),
+          }
         : {
             type: object.form === 'potential' ? 'complex2d' : object.form === 'domain' ? 'domain2d' : 'conformal2d',
             expr: object.expr,
@@ -385,12 +404,27 @@ const bindsVariable = (e: Expr): boolean =>
  * All expressions are pure; undefined values in an unselected piecewise arm
  * stay in that arm's temporary and do not affect the selected result.
  */
-function colorProgram(channels: readonly Expr[], params: readonly string[]): { field: string; locals: string } {
+/** iter's color sees the escape count as n and the iterate leaving radius 2 as z,
+ *  renamed first so a slider named n (used by the step) cannot capture them. */
+const ITER_COLOR_VARS: Record<string, Expr> = {
+  n: { kind: 'var', name: 'eqIterN' },
+  z: { kind: 'var', name: 'eqIterZ' },
+};
+const ITER_COLOR_ENV: Record<string, Typed> = {
+  eqIterN: { type: 'real', code: 'eqIterN' },
+  eqIterZ: { type: 'complex', code: 'eqIterZ' },
+};
+
+function colorProgram(
+  channels: readonly Expr[],
+  params: readonly string[],
+  env: Record<string, Typed> = {},
+): { field: string; locals: string } {
   const sub = uniformSub(params);
   const memo = new WeakMap<Expr, Expr>();
   const shared = new Map<string, Expr>();
-  const bindings: Record<string, Typed> = {};
-  const complexLocals = new Set<string>();
+  const bindings: Record<string, Typed> = { ...env };
+  const complexLocals = new Set(Object.keys(env).filter(k => env[k].type === 'complex'));
   const lines: string[] = [];
   const visit = (expr: Expr): Expr => {
     const known = memo.get(expr);
@@ -543,6 +577,16 @@ export function compileGpu(classified: Classified): GpuPlan {
           step: step.type === 'complex' ? step.code : `vec2(${step.code}, 0.0)`,
           seed: object.seed,
           maxIter: object.maxIter,
+          ...(object.palette && {
+            palette: {
+              space: object.palette.space,
+              ...colorProgram(
+                object.palette.channels.map(c => substVars(c, ITER_COLOR_VARS)),
+                params,
+                ITER_COLOR_ENV,
+              ),
+            },
+          }),
         };
       }
       return {
@@ -623,7 +667,7 @@ export function shaderKey(plan: GpuPlan): string {
     case 'conformal2d':
       return JSON.stringify([plan.type, plan.params, plan.field]);
     case 'fractal2d':
-      return JSON.stringify([plan.type, plan.params, plan.step, plan.seed, plan.maxIter]);
+      return JSON.stringify([plan.type, plan.params, plan.step, plan.seed, plan.maxIter, plan.palette]);
     case 'vfield2d':
       return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy]);
     case 'tfield2d':
@@ -681,7 +725,12 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = exprKey(plan.expr);
       break;
     case 'fractal2d':
-      structure = [exprKey(plan.step), plan.seed, plan.maxIter];
+      structure = [
+        exprKey(plan.step),
+        plan.seed,
+        plan.maxIter,
+        plan.palette && [plan.palette.space, expressions(plan.palette.channels)],
+      ];
       break;
     case 'point':
     case 'trail':

@@ -74,6 +74,10 @@ export type MathObject =
       readonly step: Expr;
       readonly seed: 'pixel' | 'zero';
       readonly maxIter: number;
+      /** Colors the exterior per pixel; n is the smooth escape count and z
+       *  the iterate as it first leaves radius 2. Without it the row's color
+       *  fades by n. */
+      readonly palette?: { readonly space: ColorSpace; readonly channels: readonly [Expr, Expr, Expr] };
     }
   | { readonly kind: 'point'; readonly source: PointSource }
   | { readonly kind: 'trail'; readonly coordinates: Components }

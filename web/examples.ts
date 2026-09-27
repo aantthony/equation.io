@@ -775,6 +775,14 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['Julia set', 'view(x = -1.7..1.7, y = -1.1..1.1); iter(z^2 - 0.7269 + 0.1889i)', 'fractal complex'],
       ['Julia orbit', 'view(x = -1.8..1.8, y = -1.3..1.3); iter(z^2 + 0.7885e^(i t/8))', 'fractal complex animated'],
       ['burning ship', 'view(x = -2.4..1.7, y = -1.2..1.9); iter((|re(z)| - i |im(z)|)^2 + w)', 'fractal complex'],
+      // A color in n (smooth escape count) and z (the iterate leaving radius
+      // 2), on the row palette's hues: n sweeps blue → purple → red →
+      // orange, arg z stripes the elephants.
+      [
+        'elephant valley in color',
+        'view(x = 0.2795..0.2925, y = 0.0055..0.0175); iter(z^2 + w, 1000, oklch(0.5 + 0.3cos(n/3) + 0.12cos(3arg(z)), 0.16, 5.8 + 1.4cos(n/3)))',
+        'fractal complex color',
+      ],
       // The "triplex" power raises r to n and multiplies both spherical
       // angles by n. An escape count jumps, which the raymarcher cannot
       // draw; the orbit's Green function ln|p|/n^k is continuous, and a small
