@@ -113,6 +113,8 @@ so links that use it still open.
 
 ## Not done
 
+Planned in docs/geometry-next.md (PGA itself in docs/pga.md).
+
 - Multivector fields (a multivector in x, y, z, u or v) have no picture;
   take a part (`grade(A, 1)`) to draw a field or curve.
 - A 3×3 matrix field (ellipsoid glyphs) and tensor streamlines along the
