@@ -94,7 +94,8 @@ describe('compiled size budgets', () => {
     ode2d: 70,
     domain2d: 240,
     conformal2d: 160,
-    fractal2d: 170,
+    // An OKLCH field over a recursive escape count (2026-09: 697).
+    fractal: 1750,
     // Sequence/list rows carry Exprs (CPU-evaluated), so only their labels
     // and the cobweb/bifurcation fields are GLSL — small floors again.
     sequence: 25,

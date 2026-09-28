@@ -47,8 +47,8 @@ Examples (paste-ready):
 - [Complex dipole field](https://equation.io/#ln(w-2)-ln(w%2B2)): `ln(w-2) - ln(w+2)`
 - [Domain coloring](https://equation.io/#domain((w%5E3%20-%201)%2Fw)): `domain((w^3 - 1)/w)`
 - [Conformal grid image](https://equation.io/#conformal(w%5E2%2F4)): `conformal(w^2/4)`
-- [Mandelbrot set](https://equation.io/#iter(z%5E2%20%2B%20w)): `iter(z^2 + w)`
-- [Julia set](https://equation.io/#iter(z%5E2%20-%200.7269%20%2B%200.1889i)): `iter(z^2 - 0.7269 + 0.1889i)`
+- [Mandelbrot set](https://equation.io/#M(z%2C%20k)%20%3D%20%7B%7Cz%7C%20%3E%20100%3A%20max(k%20-%20log2(ln(%7Cz%7C))%2C%200)%2F30%2C%20k%20%3E%3D%20250%3A%2010%2C%20M(z%5E2%20%2B%20w%2C%20k%20%2B%201)%7D;M(w%2C%200)): `M(z, k) = {|z| > 100: max(k - log2(ln(|z|)), 0)/30, k >= 250: 10, M(z^2 + w, k + 1)}; M(w, 0)` — a recursive escape count, drawn as a scalar field in the row's color
+- [Julia set](https://equation.io/#M(z%2C%20k)%20%3D%20%7B%7Cz%7C%20%3E%20100%3A%20max(k%20-%20log2(ln(%7Cz%7C))%2C%200)%2F30%2C%20k%20%3E%3D%20250%3A%2010%2C%20M(z%5E2%20-%200.7269%20%2B%200.1889i%2C%20k%20%2B%201)%7D;M(w%2C%200)): `M(z, k) = {|z| > 100: max(k - log2(ln(|z|)), 0)/30, k >= 250: 10, M(z^2 - 0.7269 + 0.1889i, k + 1)}; M(w, 0)`
 - [Koch snowflake (recursive function)](https://equation.io/#f(z)%20%3D%20%7Bre(z)%20%3E%3D%201%3A%201%2C%20f(4%20-%203(z%5E6)%5E(1%2F6))%7D;f(x%20i%20-%20%7Cy%7C)%20%3E%3D%200): `f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}; f(x i - |y|) >= 0` — a tail-recursive function shades where its recursion terminates
 - [Vector field](https://equation.io/#(-y%2C%20x)): `(-y, x)` — drawn as animated streamlines
 - [Pendulum phase portrait](https://equation.io/#(x'%2C%20y')%20%3D%20(y%2C%20-sin(x))): `(x', y') = (y, -sin(x))`
@@ -405,8 +405,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - `w`: the complex plane point x + iy. A complex-valued expression in `w`
   (e.g. `ln(w-2) - ln(w+2)`) draws field lines and equipotentials. Wrapping it
   in `domain(…)` or `conformal(…)` picks a different view of the same function.
-- `z` inside `iter(…)`: the iterate being fed back through the step. Outside
-  `iter`, `z` is the 3D axis as above.
 
 ## Row types
 
@@ -494,16 +492,25 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   arg f, brightness |f|; zeros render black and poles white.
 - Conformal map: `conformal(f)` — `conformal(w^2/4)` — draws the image of the
   coordinate grid under f (the level curves of re f and im f).
-- Fractal: `iter(step)` iterates `z ↦ step`, coloring by escape time. Inside
-  `iter` only, `z` is the iterate. If the step mentions the plane (`w`, `x`,
-  `y`) iteration starts at 0, so `iter(z^2 + w)` is the Mandelbrot set; with a
-  fixed constant the pixel is the starting point, so `iter(z^2 - 0.8 + 0.156i)`
-  is a Julia set. An optional second argument sets the iteration count,
-  `iter(z^2 + w, 600)` (default 250, max 5000). Any expression works:
-  `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship.
-  `iter` is for the plane; an escape-time fractal in space (the Mandelbulb,
-  a quaternion Julia set) is a recursive function — see "Recursive
-  function" below.
+- Fractal: an escape-time fractal is a recursive function (see "Recursive
+  function" below) that counts the passes of z ↦ step before |z| escapes,
+  drawn as a bare scalar field, so it takes the row's color like any
+  other field. The Mandelbrot set: `M(z, k) = {|z| > 100:
+  max(k - log2(ln(|z|)), 0)/30, k >= 250: 10, M(z^2 + w, k + 1)}` and the
+  row `M(w, 0)`. `k - log2(ln(|z|))` is the smooth escape count (no
+  bands), near 0 far from the set; dividing by 30 spreads it over the
+  scalar shading, which saturates near 3, so the far field fades out and
+  the filaments stay distinct. An orbit still bounded at the cap is inside
+  and returns 10, well past saturation, so the set is solid. Starting at
+  the pixel, `M(w, 0)`, with `+ w` in the step is the Mandelbrot set; a
+  fixed constant in its place, `M(z^2 - 0.7269 + 0.1889i, k + 1)`, is a
+  Julia set, and any step works — `(|re(z)| - i |im(z)|)^2 + w` is the
+  burning ship. For deep zooms raise the cap and the divisor together
+  (`/75` with `k >= 600: 10`): counts near the set grow with the zoom.
+  Keep the escape radius small (100): the step runs before the test, so a
+  degree-n map reaches 100ⁿ, and much past that leaves the GPU's float
+  range and the pixel goes blank. The old `iter(step)` and
+  `iter(step, count)` still draw, as these rows.
 - Point: `(2, 3)`; animate with t: `(2cos(t), 2sin(t))`.
 - Data list: `[3, 1, 4, 4]` is a dot plot on the number line — a dot at each
   value on the x axis, copies stacked upward, so 4 has dots at (4, 1) and
@@ -832,7 +839,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   spread among other arguments, and built-ins (`atan2(A)`) do not take one.
 - Recursive function: a function may call itself when every self-call is a
   whole case of its `{…}` (tail position), so the call runs as a loop —
-  per pixel on the GPU, like `iter`. `f(n, a) = {n <= 0: a, f(n - 1, a + n)}`
+  per pixel on the GPU. `f(n, a) = {n <= 0: a, f(n - 1, a + n)}`
   sums 1..n; `f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}` with
   `f(x i - |y|) >= 0` shades the Koch snowflake. At most 250 passes run —
   more, up to 5000, when a parameter every self-call advances by one is

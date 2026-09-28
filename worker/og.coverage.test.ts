@@ -33,7 +33,7 @@ describe('og renderer coverage', () => {
   });
 
   it('falls back for every shader-only family', () => {
-    for (const t of ['complex2d', 'domain2d', 'rgb2d', 'hsl2d', 'oklch2d', 'conformal2d', 'fractal2d'] as const) {
+    for (const t of ['complex2d', 'domain2d', 'rgb2d', 'hsl2d', 'oklch2d', 'conformal2d'] as const) {
       expect(OG_COVERAGE[t], t).toBe('fallback');
     }
   });
@@ -75,17 +75,19 @@ describe('canRenderOg', () => {
     expect(canRenderOg(['rgb(1, 0, 0)'])).toBe(false);
     expect(canRenderOg(['hsl(2pi/3, 1, 0.5)'])).toBe(false);
     expect(canRenderOg(['oklch(0.7, 0.15, 2pi/3)'])).toBe(false);
-    expect(canRenderOg(['iter(z^2 + w)'])).toBe(false);
-    // A recursion is a scalar field the preview draws, unless it may run too
-    // many passes per pixel for the CPU.
+    // An escape-time fractal is a scalar field the preview draws, unless its
+    // recursion may run too many passes per pixel for the CPU.
+    expect(canRenderOg(['iter(z^2 + w)'])).toBe(true);
+    expect(canRenderOg(['iter(z^2 + w, 600)'])).toBe(false);
     expect(canRenderOg(['M(z, k) = {|z| > 2: k, k >= 200: 0, M(z^2 + w, k + 1)}', 'M(w, 0)'])).toBe(true);
     expect(canRenderOg(['M(z, k) = {|z| > 2: k, k >= 600: 0, M(z^2 + w, k + 1)}', 'M(w, 0)'])).toBe(false);
+    expect(canRenderOg(['M(z, k) = {|z| > 2: k, k >= 600: 0, M(z^2 + w, k + 1)}', 'M(w, 0) > 3'])).toBe(false);
     expect(canRenderOg(['conformal(w^2/4)'])).toBe(false);
     expect(canRenderOg(['(-y, x)'])).toBe(true);
     expect(canRenderOg(['w^3 = 1', '1+2i'])).toBe(true);
     expect(canRenderOg(['ln(w-2) - ln(w+2)'])).toBe(false);
     // One unsupported row poisons the graph: a partial picture is still wrong.
-    expect(canRenderOg(['y = sin(x)', 'iter(z^2 + w)'])).toBe(false);
+    expect(canRenderOg(['y = sin(x)', 'domain(w^2)'])).toBe(false);
     // Sequence rows classify without a resolved expr — the gap must still be seen.
     expect(canRenderOg(['a_n = 1/n^2'])).toBe(false);
     // ...but a recurrence with no parameter axis is a cobweb, which draws.

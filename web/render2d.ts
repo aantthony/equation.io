@@ -67,16 +67,6 @@ export interface TField2D {
   params?: string[];
 }
 
-export interface Fractal2D {
-  uniforms?: Record<string, number>;
-  /** GLSL vec2 expression for one iteration step, in terms of vec2 zc and floats x, y. */
-  step: string;
-  seed: 'pixel' | 'zero';
-  maxIter: number;
-  color: [number, number, number];
-  params?: string[];
-}
-
 /** A cellular automaton's space-time diagram (lib/automaton.ts): `shades`
  *  holds `rows` rows of `width` cells, 0 empty to 255 solid; cell i of row n
  *  is the unit square centred on (i, -n), in column i - x0. The first and
@@ -97,7 +87,6 @@ export interface Layers2D {
   /** Contour stacks of f for `f(x,y) = c` rows; drawn under the other layers. */
   levels?: LevelSpec[];
   cells?: Cells2D[];
-  fractals?: Fractal2D[];
   domains?: Curve2D[];
   colors?: ColorField2D[];
   conformals?: Curve2D[];
@@ -639,65 +628,6 @@ void main() {
 `;
 }
 
-function fractalFrag(step: string, seed: 'pixel' | 'zero', maxIter: number, params?: string[]): string {
-  return `#version 300 es
-precision highp float;
-uniform vec2 uCenter;
-uniform vec2 uUpp;
-uniform vec2 uRes;
-uniform vec2 uOrigin;
-uniform vec3 uColor;
-uniform float t;
-${paramDecls(params)}
-out vec4 outColor;
-${GLSL_PRELUDE}
-vec2 stepFn(vec2 zc, float x, float y) { return ${step}; }
-void main() {
-  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
-  vec2 zc = ${seed === 'pixel' ? 'p' : 'vec2(0.0)'};
-  float mu = -1.0;
-  float m2 = dot(zc, zc);
-  for (int k = 0; k < ${maxIter}; k++) {
-    zc = stepFn(zc, p.x, p.y);
-    float prev = m2;
-    m2 = dot(zc, zc);
-    if (isnan(m2) || isinf(m2)) {
-      // For degree >= 4, |z|^(2d) can leave the float32 range inside the step
-      // before the bailout test fires, yielding inf — or NaN, once inf - inf
-      // appears in a complex multiply. An orbit already outside the escape
-      // disc has escaped, and log2(inf) below would drive mu to -inf and
-      // paint it as interior; only a step undefined near the origin is
-      // genuinely bounded. No smooth term survives at this magnitude.
-      if (prev > 4.0) mu = float(k);
-      break;
-    }
-    if (m2 > 1.0e12) {
-      // Smooth (fractional) escape count, assuming a roughly degree-2 map:
-      // log2 of the bailout overshoot ratio, bailout radius 1e6.
-      mu = float(k) + 1.0 - log2(max(0.5 * log2(m2), 1.0) / 19.93);
-      break;
-    }
-  }
-  if (mu < 0.0) {
-    // Bounded orbit: inside the filled Julia / Mandelbrot set.
-    outColor = vec4(uColor * 0.08, 1.0);
-    return;
-  }
-  // Exterior: with a 1e6 bailout even distant points take a few iterations,
-  // so subtract the "free escape" count log2(ln B / ln |p|) a point at this
-  // radius needs with no dynamics — the excess measures closeness to the
-  // set, and the far field fades fully so the plot sits on the graph paper.
-  float lp = max(length(p), 2.72);
-  float s = max(mu - log2(13.8155 / log(lp)) - ${seed === 'zero' ? '1.0' : '0.0'}, 0.0);
-  float aBase = 1.0 - exp(-0.18 * s * s);
-  float a = aBase * (0.75 + 0.25 * cos(0.45 * mu));
-  vec3 col = uColor * (0.72 + 0.28 * cos(0.16 * mu + vec3(0.0, 0.9, 1.8)));
-  if (a < 0.004) discard;
-  outColor = vec4(col, clamp(a, 0.0, 1.0));
-}
-`;
-}
-
 function bifFrag(field: string, params?: string[]): string {
   // Orbit diagram of the map a ← f(a, x): each pixel column fixes the
   // parameter x, iterates past the transient from the seed, then accumulates
@@ -1053,9 +983,6 @@ export class Renderer2D {
         gl.uniform2f(gl.getUniformLocation(prog, 'uSize'), c.width, c.rows);
         gl.uniform1f(gl.getUniformLocation(prog, 'uX0'), c.x0);
       });
-    }
-    for (const f of layers.fractals ?? []) {
-      drawProgram(fractalFrag(f.step, f.seed, f.maxIter, f.params), f.color, f.params);
     }
     for (const d of layers.domains ?? []) drawField(d, domainFrag);
     for (const c of layers.colors ?? []) drawField(c, (field, params) => colorFrag(field, params, c.locals, c.space));

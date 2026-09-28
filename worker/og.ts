@@ -1082,7 +1082,6 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   hsl2d: 'fallback',
   oklch2d: 'fallback',
   conformal2d: 'fallback',
-  fractal2d: 'fallback',
   // A cloud is a raymarched integral per pixel, too costly for the preview.
   scalar3d: 'fallback',
   vfield2d: 'draws',

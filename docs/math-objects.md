@@ -68,7 +68,8 @@ object must respect):
 | bare real scalar in u, v alone | density of its values, u, v ~ Uniform(0, 1) | density curve |
 | `revolve(f)`, `revolve(f, y)` | surface of revolution, lowered to the implicit surface `y^2 + z^2 = f(x)^2` | raymarcher |
 | complex-valued expr in w | field lines + equipotentials | level-curve shader |
-| `domain(f)` / `conformal(f)` / `iter(step)` | domain coloring / conformal grid / escape-time fractal | dedicated shaders |
+| `domain(f)` / `conformal(f)` | domain coloring / conformal grid | dedicated shaders |
+| `iter(step)`, `iter(step, n)` (old links) | rewritten to a recursive escape count under an `oklch(…)` color field | color-field shader |
 | tuple, no free vars (t ok) | point (2D/3D) | overlay dot / billboard; draggable where its literals/constants can be written back |
 | `A = (1,2)`; `A + 2B`, `midpoint(A,B)`, `perp(A)` | named point (2 or 3 components) / point arithmetic | point; `A_x`, `A_y` (and `A_z` in 3D) are scalars |
 | `segment` / `polyline` / `polygon` / `square` (points) | polygon (open or closed) | CPU polyline / fill |
@@ -239,7 +240,7 @@ shape before value type:
    the left are the readable special case, arbitrary components the general
    one. RHS constant → solved point set; RHS in u → parametric solution
    curve (§6).
-3. Whole-expression forms: `domain` / `conformal` / `iter` / `tube` / `revolve` (and the
+3. Whole-expression forms: `domain` / `conformal` / `iter` (rewritten, see above) / `tube` / `revolve` (and the
    phase-2/3 wrappers: `polyline`, `segment`, `polygon`, `circle`,
    restrictions).
 4. Tuples by free vars: none → point; u(,v) → parametric; x,y → vector field.

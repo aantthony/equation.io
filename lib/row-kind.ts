@@ -89,7 +89,6 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   complex2d: 'complex function shown on the plane',
   domain2d: 'domain colouring of a complex function',
   conformal2d: 'conformal map: the image of a grid under a complex function',
-  fractal2d: 'escape-time fractal',
   rgb2d: 'colour field (RGB), filling the plane',
   hsl2d: 'colour field (HSL), filling the plane',
   oklch2d: 'colour field (OKLCH), filling the plane',

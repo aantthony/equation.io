@@ -68,13 +68,6 @@ export type MathObject =
    *  small circle under the matrix there, with a spoke where e_x goes. */
   | { readonly kind: 'tensor-field'; readonly entries: readonly [Expr, Expr, Expr, Expr] }
   | { readonly kind: 'complex-field'; readonly form: 'potential' | 'domain' | 'conformal'; readonly expr: Expr }
-  | {
-      readonly kind: 'complex-field';
-      readonly form: 'fractal';
-      readonly step: Expr;
-      readonly seed: 'pixel' | 'zero';
-      readonly maxIter: number;
-    }
   | { readonly kind: 'point'; readonly source: PointSource }
   | { readonly kind: 'trail'; readonly coordinates: Components }
   | { readonly kind: 'label'; readonly coordinates: Components; readonly text: string }
@@ -233,8 +226,6 @@ export function publicKind(object: MathObject) {
           return 'domain2d';
         case 'conformal':
           return 'conformal2d';
-        case 'fractal':
-          return 'fractal2d';
       }
     case 'figure':
       return 'polygon';

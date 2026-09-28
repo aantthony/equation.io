@@ -18,6 +18,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium, type Page } from 'playwright';
+import { escapeTimeRows } from '../lib/escape-time.ts';
 
 // PERF_PORT when another checkout's dev server holds the default.
 const PORT = Number(process.env.PERF_PORT) || 5198;
@@ -165,7 +166,7 @@ const SCENARIOS: Scenario[] = [
   },
   {
     name: 'fractal',
-    rows: ['iter(z^2 + w)'],
+    rows: escapeTimeRows('z^2 + w'),
     action: page => wheelZoom(page, 20, -120),
   },
 ];

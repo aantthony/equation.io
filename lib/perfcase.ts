@@ -1,5 +1,6 @@
 /** Performance corpus compiled through the same document pipeline as web/worker. */
 import { analyzeRows } from './analysis.ts';
+import { escapeTimeRows } from './escape-time.ts';
 import type { Classified } from './plot.ts';
 import { type CpuPlan, type GpuPlan, type GpuGrid, compileGridGpu } from './compiler.ts';
 
@@ -45,7 +46,7 @@ export const CORPUS: { name: string; rows: (c: number) => string[] }[] = [
   { name: 'ode2d', rows: c => [`a = ${c}`, 'dy/dx = a x y'] },
   { name: 'domain2d', rows: c => [`a = ${c}`, 'domain((w^3 - a)/w)'] },
   { name: 'conformal2d', rows: c => [`a = ${c}`, 'conformal(w^2/a)'] },
-  { name: 'fractal2d', rows: c => [`a = ${c}`, 'iter(z^2 + w/a)'] },
+  { name: 'fractal', rows: c => [`a = ${c}`, ...escapeTimeRows('z^2 + w/a')] },
   // Sequences, recurrences, lists, piecewise, and number theory (README rows).
   { name: 'sequence', rows: c => [`a = ${c}`, 'a_n = a/n^2'] },
   { name: 'seq-isprime', rows: c => [`a = ${c}`, 'a_n = a isprime(n)'] },

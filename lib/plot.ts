@@ -28,9 +28,13 @@ import {
   evaluate,
   freeVars,
   ineqComparisons,
+  LOOP_LIMIT_MAX,
+  parseExpr,
+  RECUR,
   substVars,
 } from './expr.ts';
 import type { FigureName } from './geom.ts';
+import { ESCAPE_INSIDE, ESCAPE_RADIUS, escapeScale } from './escape-time.ts';
 import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
@@ -173,6 +177,62 @@ function matchRevolve(e: Expr): Expr | null {
     l: { kind: 'bin', op: '+', a: sq({ kind: 'var', name: p }), b: sq({ kind: 'var', name: q }) },
     r: sq(f),
   };
+}
+
+/**
+ * `iter(step, count)`, from links made before a recursive function could
+ * draw a fractal, rewritten as the rows lib/escape-time.ts writes: the
+ * count M as a loop, drawn as a scalar field in the row's color. The
+ * counter gets a name no row can use, so a slider called k still reaches
+ * the step.
+ */
+function desugarIter(call: Expr & { kind: 'call' }): Expr {
+  if (call.args.length < 1 || call.args.length > 2) throw new Error('iter takes iter(step) or iter(step, count).');
+  let count = 250;
+  if (call.args.length === 2) {
+    try {
+      count = evaluate(call.args[1], {});
+    } catch {
+      throw new Error('The iteration count must be a plain number.');
+    }
+    if (!isFinite(count) || count < 1) throw new Error('The iteration count must be at least 1.');
+    count = Math.min(LOOP_LIMIT_MAX, Math.round(count));
+  }
+  const step = call.args[0];
+  const vars = freeVars(step);
+  if (vars.has('u') || vars.has('v')) throw new Error('Cannot use u/v in iter(…).');
+  inferScalarType(step, { z: 'complex' });
+  const k = '[iter]';
+  const z: Expr = { kind: 'var', name: 'z' };
+  const w: Expr = { kind: 'var', name: 'w' };
+  const n: Expr = { kind: 'num', value: count };
+  const scale: Expr = { kind: 'num', value: escapeScale(count) };
+  const at = (src: string, env: Record<string, Expr>) => substVars(parseExpr(src), env);
+  // iter started a step that reads the plane (w, x or y) at 0, so its orbit
+  // runs through step(0); a fixed map started at the pixel. M(w, 0) is the
+  // same orbit for z^2 + w, where step(0) = w, but not for z^2 + w/a.
+  const seed = vars.has('w') || vars.has('x') || vars.has('y') ? substVars(step, { z: { kind: 'num', value: 0 } }) : w;
+  const loop: Expr = {
+    kind: 'loop',
+    params: ['z', k],
+    seeds: [seed, { kind: 'num', value: 0 }],
+    body: {
+      kind: 'piecewise',
+      cases: [
+        {
+          cond: at(`abs(z) > ${ESCAPE_RADIUS}`, { z }),
+          value: at('max(K - log2(ln(abs(z))), 0)/S', { z, K: { kind: 'var', name: k }, S: scale }),
+        },
+        {
+          cond: { kind: 'ineq', op: '>=', l: { kind: 'var', name: k }, r: n },
+          value: { kind: 'num', value: ESCAPE_INSIDE },
+        },
+      ],
+      otherwise: { kind: 'call', name: RECUR, args: [step, at('K + 1', { K: { kind: 'var', name: k } })] },
+    },
+    limit: count + 2,
+  };
+  return loop;
 }
 
 /** First special-form call at any position other than the root itself. */
@@ -460,7 +520,6 @@ function classifyLowered(
       'domain2d',
       'complex2d',
       'conformal2d',
-      'fractal2d',
       'density',
       'pmf',
       'prob',
@@ -519,6 +578,7 @@ function classifyLowered(
   if (tube) expr = tube.inner;
   const surface = matchRevolve(expr) ?? undefined;
   if (surface) expr = surface;
+  if (expr.kind === 'call' && expr.name === 'iter' && !tube && !surface) expr = desugarIter(expr);
   const special = expr.kind === 'call' && SPECIAL_FORMS.has(expr.name) ? expr.name : undefined;
   const nested = nestedSpecial(expr, true);
   if (nested) throw new Error(`${nested === '[trail]' ? 'trail' : nested}(…) must be the whole expression.`);
@@ -549,8 +609,6 @@ function classifyLowered(
     }
   }
   vars.delete('i');
-  // iter binds z as the iterate: z ↦ step(z) starting from the seed.
-  if (special === 'iter') vars.delete('z');
   if (vars.delete('w')) {
     vars.add('x');
     vars.add('y');
@@ -831,27 +889,6 @@ function classifyLowered(
           throw new Error(`${special} channels must be real numbers; use re, im, abs, or arg for complex values.`);
       }
       return done({ kind: 'color-field', space: special, channels: call.args });
-    }
-    if (special === 'iter') {
-      if (call.args.length < 1 || call.args.length > 2) {
-        throw new Error('iter takes iter(step) or iter(step, count).');
-      }
-      let maxIter = 250;
-      if (call.args.length === 2) {
-        try {
-          maxIter = evaluate(call.args[1], {});
-        } catch {
-          throw new Error('The iteration count must be a plain number.');
-        }
-        if (!isFinite(maxIter) || maxIter < 1) throw new Error('The iteration count must be at least 1.');
-        maxIter = Math.min(5000, Math.round(maxIter));
-      }
-      inferScalarType(call.args[0], { z: 'complex' });
-      // The pixel enters either as a parameter (w/x/y in the step → seed 0,
-      // the Mandelbrot convention) or as the seed (fixed map → Julia set).
-      const bodyVars = freeVars(call.args[0]);
-      const seed = bodyVars.has('w') || bodyVars.has('x') || bodyVars.has('y') ? 'zero' : 'pixel';
-      return done({ kind: 'complex-field', form: 'fractal', step: call.args[0], seed, maxIter });
     }
     if (call.args.length !== 1) throw new Error(`${special} takes one argument.`);
     const typed = inferScalarType(call.args[0]);

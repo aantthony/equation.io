@@ -601,11 +601,11 @@ describe('graph previews', () => {
   });
 
   it('says why shader-only plots get no image instead of sending a wrong one', async () => {
-    const { body } = await call(['iter(z^2 + w)']);
+    const { body } = await call(['domain(w^2)']);
     expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
     const out = body.result.structuredContent;
     expect(out.preview).toContain('nothing about whether the graph works');
-    expect(out.preview_omits).toEqual([{ row: 'iter(z^2 + w)', why: expect.stringContaining('fractal2d') }]);
+    expect(out.preview_omits).toEqual([{ row: 'domain(w^2)', why: expect.stringContaining('domain2d') }]);
     expect(out.preview_omits[0].why).toContain('live app');
   });
 

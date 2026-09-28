@@ -1,5 +1,7 @@
 /** Graphs for empty `/` and the random control. Cursor in FEATURED_KEY; `/` stays until edit/example/random. */
 
+import { escapeTimeRows } from './escape-time.ts';
+
 export interface FeaturedGraph {
   /** Short label for the random control. */
   title: string;
@@ -58,7 +60,7 @@ export const FEATURED: FeaturedGraph[] = [
   },
   {
     title: 'Mandelbrot set',
-    eqs: ['iter(z^2 + w)', viewBox(-0.5, 0, 2.7)],
+    eqs: [...escapeTimeRows('z^2 + w'), viewBox(-0.5, 0, 2.7)],
   },
   {
     title: 'central limit theorem',

@@ -1146,7 +1146,6 @@ const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'hsl2d',
   'oklch2d',
   'conformal2d',
-  'fractal2d',
   'ineq2d',
   'projected2d',
   'vfield2d',
@@ -1788,7 +1787,6 @@ function render() {
       const layers: Required<Layers2D> = {
         levels: [],
         cells: [],
-        fractals: [],
         domains: [],
         colors: [],
         conformals: [],
@@ -1870,9 +1868,6 @@ function render() {
             break;
           case 'conformal2d':
             layers.conformals.push({ ...gpuFor(eq, 'conformal2d'), color, params, uniforms });
-            break;
-          case 'fractal2d':
-            layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
             break;
           case 'tfield2d':
             layers.tfields.push({ ...gpuFor(eq, 'tfield2d'), color, params, uniforms });

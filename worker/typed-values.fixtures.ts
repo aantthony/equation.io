@@ -17,7 +17,6 @@ export const PUBLIC_KIND_ROWS = {
   hsl2d: ['hsl(arg(w), 1, 0.5)'],
   oklch2d: ['oklch(0.7, 0.15, arg(w))'],
   conformal2d: ['conformal(w^2)'],
-  fractal2d: ['iter(z^2 + w)'],
   point: ['(1, 2)'],
   note: ['1 < 2'],
   value: ['2 + 3'],

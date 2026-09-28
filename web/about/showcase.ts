@@ -1,3 +1,5 @@
+import { escapeTimeRows } from '../../lib/escape-time.ts';
+
 /**
  * The curated gallery shown on /about/, shared with scripts/screenshots.ts so
  * every image on the page is rendered by the app itself and clicking a card
@@ -145,8 +147,8 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'mandelbrot',
     title: 'Fractals from a recurrence',
-    blurb: 'iter(z² + w) iterates z ↦ z² + w from 0 — the Mandelbrot set, straight from its definition.',
-    eqs: ['iter(z^2 + w)'],
+    blurb: 'M counts the passes of z ↦ z² + w before |z| escapes — the Mandelbrot set, straight from its definition.',
+    eqs: escapeTimeRows('z^2 + w'),
     group: 'Fractals',
     view: { cx: -0.5, span: 2.7 },
     settle: 1,
@@ -154,12 +156,12 @@ export const SHOWCASE: ShowcaseItem[] = [
   {
     slug: 'seahorse-valley',
     title: 'Zoom until it surprises you',
-    blurb: 'Seahorse valley, 200× in. A second argument buys more iterations for deep zooms.',
+    blurb: 'Seahorse valley, 200× in. Raise the cap on k and the recursion runs more passes for deep zooms.',
     // The framing rides in the link as a view(…) row: landing on the default
     // view would show the whole set, not the valley the caption promises.
     // Equal x/y spans make fitView2D match the shot's span convention exactly
     // (span 0.042 centered on -0.7627 + 0.1085i), so no `view:` override.
-    eqs: ['iter(z^2 + w, 600)', 'view(x = -0.7837..-0.7417, y = 0.0875..0.1295)'],
+    eqs: [...escapeTimeRows('z^2 + w', 600), 'view(x = -0.7837..-0.7417, y = 0.0875..0.1295)'],
     group: 'Fractals',
     settle: 1.2,
   },
@@ -167,7 +169,7 @@ export const SHOWCASE: ShowcaseItem[] = [
     slug: 'julia',
     title: 'Julia sets',
     blurb: 'Fix the constant instead of reading it from the plane, and the pixel becomes the starting point.',
-    eqs: ['iter(z^2 - 0.7269 + 0.1889i)'],
+    eqs: escapeTimeRows('z^2 - 0.7269 + 0.1889i'),
     group: 'Fractals',
     view: { span: 2.8 },
     settle: 1,
@@ -176,7 +178,7 @@ export const SHOWCASE: ShowcaseItem[] = [
     slug: 'burning-ship',
     title: 'Any map you can write',
     blurb: 'Nothing is hard-coded: fold absolute values into the step and the burning ship appears.',
-    eqs: ['iter((|re(z)| - i |im(z)|)^2 + w)'],
+    eqs: escapeTimeRows('(|re(z)| - i |im(z)|)^2 + w'),
     group: 'Fractals',
     view: { cx: -0.35, cy: 0.5, span: 2.9 },
     settle: 1,

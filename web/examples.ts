@@ -1,3 +1,5 @@
+import { escapeTimeRows } from '../lib/escape-time.ts';
+
 /**
  * The tags an example can carry: what cuts across the categories, so a search
  * for `#animated` or `#physics` gathers examples from all over the menu.
@@ -58,6 +60,9 @@ export const TAGS = [
   'physics',
   'biology',
 ] as const;
+
+/** An escape-time fractal example: its framing, then the rows of lib/escape-time.ts. */
+const fractal = (view: string, step: string): string => [view, ...escapeTimeRows(step)].join('; ');
 
 /**
  * The examples menu: [category, [[label, rows, tags], …]] in menu order. Rows
@@ -792,10 +797,26 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
     [
       // Framed on the set: the default view is ~12 units across, where these
       // are a smudge at the origin.
-      ['Mandelbrot set', 'view(x = -2.2..0.8, y = -1.3..1.3); iter(z^2 + w)', 'fractal complex'],
-      ['Julia set', 'view(x = -1.7..1.7, y = -1.1..1.1); iter(z^2 - 0.7269 + 0.1889i)', 'fractal complex'],
-      ['Julia orbit', 'view(x = -1.8..1.8, y = -1.3..1.3); iter(z^2 + 0.7885e^(i t/8))', 'fractal complex animated'],
-      ['burning ship', 'view(x = -2.4..1.7, y = -1.2..1.9); iter((|re(z)| - i |im(z)|)^2 + w)', 'fractal complex'],
+      [
+        'Mandelbrot set',
+        fractal('view(x = -2.2..0.8, y = -1.3..1.3)', 'z^2 + w'),
+        'fractal complex recursion scalar-field',
+      ],
+      [
+        'Julia set',
+        fractal('view(x = -1.7..1.7, y = -1.1..1.1)', 'z^2 - 0.7269 + 0.1889i'),
+        'fractal complex recursion scalar-field',
+      ],
+      [
+        'Julia orbit',
+        fractal('view(x = -1.8..1.8, y = -1.3..1.3)', 'z^2 + 0.7885e^(i t/8)'),
+        'fractal complex animated recursion scalar-field',
+      ],
+      [
+        'burning ship',
+        fractal('view(x = -2.4..1.7, y = -1.2..1.9)', '(|re(z)| - i |im(z)|)^2 + w'),
+        'fractal complex recursion scalar-field',
+      ],
       // The "triplex" power raises r to n and multiplies both spherical
       // angles by n. An escape count jumps, which the raymarcher cannot
       // draw; the orbit's Green function ln|p|/n^k is continuous, and a small

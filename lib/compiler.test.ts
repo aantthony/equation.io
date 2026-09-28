@@ -1,3 +1,4 @@
+import { GLSL_PRELUDE, withHelpers } from './glsl.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { compileCpu, compileGpu, cpuStructureKey, shaderKey } from './compiler.ts';
@@ -155,9 +156,10 @@ describe('semantic classification and independent backends', () => {
 
   it('retains the locally complex iteration variable through piecewise GPU compilation', () => {
     const plan = compileGpu(classify(parseExpr('iter({re(z)<0:re(z),im(z)})')));
-    if (plan.type !== 'fractal2d') throw new Error('fractal');
-    expect(plan.step).toContain('zc');
-    expect(plan.step).not.toContain('vec2(z,');
+    if (plan.type !== 'scalar2d') throw new Error('scalar2d');
+    const shader = withHelpers(`${GLSL_PRELUDE}\n${plan.field}`);
+    expect(shader).toContain('(p0_0).x');
+    expect(shader).not.toContain('vec2(z,');
   });
 
   it('gives a 3D vector field a shader for streamlines, and none when GLSL cannot express it', () => {

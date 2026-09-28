@@ -38,7 +38,6 @@ export type CpuPlan =
   | { type: 'complex2d'; expr: Expr }
   | { type: 'domain2d'; expr: Expr }
   | { type: 'conformal2d'; expr: Expr }
-  | { type: 'fractal2d'; step: Expr; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'point'; dim: 2 | 3; coords: Expr[] }
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   | { type: 'label'; dim: 2 | 3; coords: Expr[]; text: string }
@@ -107,7 +106,6 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'complex2d'; field: string }
   | { type: 'domain2d'; field: string }
   | { type: 'conformal2d'; field: string }
-  | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'vfield2d'; fx: string; fy: string }
   | { type: 'tfield2d'; entries: [string, string, string, string] }
   | { type: 'vfield3d'; comps: [string, string, string] }
@@ -247,12 +245,10 @@ export function compileCpu(classified: Classified): CpuPlan {
         ? { type: 'vfield2d', comps: object.components.map(real) as [Expr, Expr] }
         : { type: 'vfield3d', comps: object.components.map(real) };
     case 'complex-field':
-      return object.form === 'fractal'
-        ? { type: 'fractal2d', step: object.step, seed: object.seed, maxIter: object.maxIter }
-        : {
-            type: object.form === 'potential' ? 'complex2d' : object.form === 'domain' ? 'domain2d' : 'conformal2d',
-            expr: object.expr,
-          };
+      return {
+        type: object.form === 'potential' ? 'complex2d' : object.form === 'domain' ? 'domain2d' : 'conformal2d',
+        expr: object.expr,
+      };
     case 'point': {
       const coords = point(object.source, 'point');
       return { type: 'point', dim: coords.length as 2 | 3, coords };
@@ -400,7 +396,7 @@ function colorProgram(channels: readonly Expr[], params: readonly string[]): { f
     else if (expr.kind === 'var' || (bindsVariable(expr) && expr.kind !== 'loop')) result = sub(expr);
     else {
       // A loop is interned whole, never entered: an escape count read by
-      // every channel then runs once per pixel.
+      // every channel (lib/escape-time.ts) then runs once per pixel.
       const lowered = expr.kind === 'loop' ? sub(expr) : mapChildren(expr, visit);
       // Inequalities retain their boolean shape for piecewiseGLSL.
       if (expr.kind === 'ineq') result = lowered;
@@ -539,16 +535,6 @@ export function compileGpu(classified: Classified): GpuPlan {
         break;
       }
     case 'complex-field':
-      if (object.form === 'fractal') {
-        const step = compileTyped(sub(object.step), { z: { type: 'complex', code: 'zc' } });
-        return {
-          type: 'fractal2d',
-          params,
-          step: step.type === 'complex' ? step.code : `vec2(${step.code}, 0.0)`,
-          seed: object.seed,
-          maxIter: object.maxIter,
-        };
-      }
       return {
         type: object.form === 'potential' ? 'complex2d' : object.form === 'domain' ? 'domain2d' : 'conformal2d',
         params,
@@ -626,8 +612,6 @@ export function shaderKey(plan: GpuPlan): string {
     case 'domain2d':
     case 'conformal2d':
       return JSON.stringify([plan.type, plan.params, plan.field]);
-    case 'fractal2d':
-      return JSON.stringify([plan.type, plan.params, plan.step, plan.seed, plan.maxIter]);
     case 'vfield2d':
       return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy]);
     case 'tfield2d':
@@ -683,9 +667,6 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'value':
     case 'note':
       structure = exprKey(plan.expr);
-      break;
-    case 'fractal2d':
-      structure = [exprKey(plan.step), plan.seed, plan.maxIter];
       break;
     case 'point':
     case 'trail':

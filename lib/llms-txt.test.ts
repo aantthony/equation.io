@@ -24,7 +24,7 @@ describe('llms.txt', () => {
       'hsl(',
       'oklch(', // custom per-pixel color
       'conformal(', // conformal grid maps
-      'iter(', // escape-time fractals
+      'M(z^2 + w, k + 1)', // escape-time fractals, as recursion
       'revolve(', // surfaces of revolution
       'sum[n=1..N]', // symbolically expanded sums, slider bounds
       "(x', y')", // ODE systems / phase portraits
