@@ -42,7 +42,10 @@ export interface SyntaxHelp {
 }
 
 const signatures: Record<string, [string, string]> = {
-  view: ['view(x = lo..hi, y = lo..hi, ratio = 1)', 'Frame the graph; ratio is pixels per y unit / pixels per x unit'],
+  view: [
+    'view(x = lo..hi, y = lo..hi, ratio = 1)',
+    'Frame the graph; ratio is pixels per y unit / pixels per x unit. A lattice panel is framed by its index names: view(i = -60..60, n = 0..80)',
+  ],
   grid: ['grid(off | axes | r, theta)', "What draws behind the panel's plots: nothing, the axes, or named coordinates"],
   sin: ['sin(x)', 'Sine; angles in radians'],
   cos: ['cos(x)', 'Cosine; angles in radians'],
@@ -73,6 +76,12 @@ const signatures: Record<string, [string, string]> = {
   clamp: ['clamp(x, lo, hi)', 'x held within [lo, hi]; as a constant, a slider over that range'],
   mod: ['mod(a, b)', 'Remainder modulo b'],
   gcd: ['gcd(a, b)', 'Greatest common divisor'],
+  isprime: ['isprime(n)', '1 when n is a prime, else 0'],
+  graph: [
+    'graph(from, to) or graph(from, to, label)',
+    'Arrows between numbered vertices; lists combine as a tuple: k = [0..11]; graph(k, mod(k + 1, 12))',
+  ],
+  mark: ['mark(v)', 'Highlight vertex v in the graphs of its panel'],
   segment: ['segment(A, B)', 'Segment joining two 2D or 3D points'],
   polyline: ['polyline(A, B, C, …)', 'Open path through 2D/3D points; also polyline(T) for a tuple, like sort(P, P.x)'],
   vector: ['vector(A, B) or vector(V)', 'Arrow from A to B, or from the origin to V'],
