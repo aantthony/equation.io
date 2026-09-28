@@ -161,12 +161,15 @@ interface LoopProg {
   vars: Float64Array;
 }
 
+/** A variable layout: each name's index into the `vars` array run() reads. */
+export type Slots = Pick<ReadonlyMap<string, number>, 'get'>;
+
 /**
  * Compile `e` against a fixed variable layout: slots[name] is an index into
  * the `vars` array passed to run(). Throws on names or calls it can't handle
  * (e.g. complex-only forms) — callers treat that as "no preview for this row".
  */
-export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
+export function compileProg(e: Expr, slots: Slots): Prog {
   const code: number[] = [];
   const consts: number[] = [];
   const loops: LoopProg[] = [];
@@ -258,8 +261,16 @@ export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
       case 'loop': {
         for (const seed of node.seeds) emit(seed);
         const n = node.params.length;
-        const inner = new Map<string, number>([...slots].map(([name, slot]): [string, number] => [name, slot + n]));
-        node.params.forEach((p, k) => inner.set(p, k));
+        // A view, not a copy: a layout may hold thousands of names (the
+        // loops lib/graph.ts hoists), and each loop would copy them all.
+        const inner: Slots = {
+          get: name => {
+            const k = node.params.indexOf(name);
+            if (k >= 0) return k;
+            const slot = slots.get(name);
+            return slot === undefined ? undefined : slot + n;
+          },
+        };
         // Number the leaves; the selector returns the number of the one taken.
         const branches: LoopProg['branches'] = [];
         const numbered = (body: Expr): Expr => {

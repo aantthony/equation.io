@@ -13,7 +13,7 @@
  * a multiset of arrows is (Wildberger): the matrix A with A_ij arrows i → j.
  */
 import { exactCases } from './automaton.ts';
-import { type Expr, evaluate, freeVars } from './expr.ts';
+import { type Expr, evaluate, exprKey, freeVars, mapChildren } from './expr.ts';
 import type { Classified } from './math-object.ts';
 import { type Prog, compileProg, run } from './vm.ts';
 
@@ -50,43 +50,70 @@ export interface GraphData {
   edges: GraphEdge[];
 }
 
+/** Hoisted loops' slot names: no row can spell them. */
+const LOOP_SLOT = '@loop';
+
 /**
  * The edges' values in an environment, compiled once (lib/vm.ts): a graph of
  * orbits runs thousands of recursive loops, which the tree-walking evaluate()
- * takes most of a second over. An expression the VM cannot compile is
- * evaluated as it is.
+ * takes most of a second over. The same loop recurs across edges and within
+ * one — `graph({f(k, j) > 1: f(k, j)}, c(f(k, j)))` calls f(k, j) three
+ * times an edge — so each distinct loop is compiled once and run once per
+ * evaluation, into a slot the edges read. An expression the VM cannot
+ * compile is evaluated as it is.
  */
 export function edgeEvaluator(edges: ReadonlyArray<readonly Expr[]>): (env: Record<string, number>) => number[][] {
   const names = [...new Set(edges.flatMap(e => e.flatMap(c => [...freeVars(c)])))];
-  const slots = new Map(names.map((n, k) => [n, k]));
-  const vars = new Float64Array(names.length);
+  const outer = new Set(names);
+  // Keyed structurally, in order: a loop's seeds are hoisted before it.
+  const loops = new Map<string, { name: string; loop: Expr }>();
+  const hoist = (e: Expr): Expr => {
+    if (e.kind !== 'loop') return mapChildren(e, hoist);
+    const seeds = e.seeds.map(hoist);
+    const loop = seeds.every((s, k) => s === e.seeds[k]) ? e : { ...e, seeds };
+    // Only a loop of the edges' own values: one inside Σ that reads its
+    // index differs per term.
+    if (![...freeVars(loop)].every(v => outer.has(v) || v.startsWith(LOOP_SLOT))) return loop;
+    const key = exprKey(loop);
+    let h = loops.get(key);
+    if (!h) loops.set(key, (h = { name: `${LOOP_SLOT}${loops.size}`, loop }));
+    return { kind: 'var', name: h.name };
+  };
+  const hoisted = edges.map(e => e.map(hoist));
+  const temps = [...loops.values()];
+  const slots = new Map([...names, ...temps.map(h => h.name)].map((n, k) => [n, k]));
+  const vars = new Float64Array(slots.size);
   let depth = 1;
-  const progs = edges.map(e =>
-    e.map((c): Prog | Expr => {
-      try {
-        const p = compileProg(c, slots);
-        depth = Math.max(depth, p.depth);
-        return p;
-      } catch {
-        return c;
-      }
-    }),
-  );
+  const compile = (c: Expr): Prog | Expr => {
+    try {
+      const p = compileProg(c, slots);
+      depth = Math.max(depth, p.depth);
+      return p;
+    } catch {
+      return c;
+    }
+  };
+  const loopProgs = temps.map(h => compile(h.loop));
+  const progs = hoisted.map(e => e.map(compile));
   const stack = new Float64Array(depth);
   return env => {
     names.forEach((n, k) => {
       vars[k] = Object.hasOwn(env, n) ? env[n] : NaN;
     });
-    return progs.map(e =>
-      e.map(p => {
-        if ('code' in p) return run(p, vars, stack);
-        try {
-          return evaluate(p, env);
-        } catch {
-          return NaN;
-        }
-      }),
-    );
+    // What the VM cannot run reads the loops' values by name.
+    const scope = { ...env };
+    const value = (p: Prog | Expr): number => {
+      if ('code' in p) return run(p, vars, stack);
+      try {
+        return evaluate(p, scope);
+      } catch {
+        return NaN;
+      }
+    };
+    temps.forEach((h, k) => {
+      scope[h.name] = vars[names.length + k] = value(loopProgs[k]);
+    });
+    return progs.map(e => e.map(value));
   };
 }
 
