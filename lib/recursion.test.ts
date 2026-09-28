@@ -180,6 +180,28 @@ describe('tail-recursive functions', () => {
     expect(evaluate(swapped, {})).toBe(1);
     expect(evaluate(expr, { a: -1 })).toBeNaN();
   });
+
+  it('lets a param shadow a document list of the same name', () => {
+    // 13 is 1101 in binary: the digits, fed through q ↦ 2q + s mod 3, leave 13 mod 3.
+    const walk = [
+      'step(q, s) = mod(2q + s, 3)',
+      'digit(k) = mod(floor(13 / 2^(3 - k)), 2)',
+      'run(q, k, m) = {k >= m: q, run(step(q, digit(k)), k + 1, m)}',
+    ];
+    expect(valueOf([...walk, 'run(0, 0, 4)'])).toBe(1);
+    expect(valueOf(['k = 3', ...walk, 'run(0, 0, 4)'])).toBe(1);
+    expect(valueOf(['k = [1..40]', ...walk, 'run(0, 0, 4)'])).toBe(1);
+    expect(valueOf(['f(k) = {k >= 3: k, f(k + 1)}', 'k = [1..3]', 'f(0)'])).toBe(3);
+    expect(valueOf(['f(k) = k^2', 'k = [1..3]', 'f(2)'])).toBe(4);
+    // The list still reaches the seeds, one loop per element, as any other list would.
+    for (const list of ['k', 'L']) {
+      const row = analyzeRows(['k = [1..4]', 'L = [1..4]', ...walk, `run(0, 0, ${list})`]).rows.at(-1)!;
+      expect(row.error).toBeUndefined();
+      expect(row.cpu!.type).toBe('vlist');
+      const { values } = row.cpu as { values: import('./expr.ts').Expr[] };
+      expect(values.map(v => evaluate(v, {}))).toEqual([1, 0, 0, 1]);
+    }
+  });
 });
 
 describe('the Koch snowflake', () => {

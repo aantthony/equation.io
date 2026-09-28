@@ -1590,7 +1590,18 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
       return { kind: 'piecewise', cases, otherwise };
     }
     case 'loop': {
-      const lowered = mapChildren(e, n => lower(n, ctx));
+      // The params are the loop's own names: in the body they shadow any
+      // document list spelled the same (run(q, k) beside k = [1..40]).
+      const seeds = e.seeds.map(n => lower(n, ctx));
+      const { getList } = ctx;
+      ctx.getList = name => (e.params.includes(name) ? null : getList(name));
+      let body: Expr;
+      try {
+        body = lower(e.body, ctx);
+      } finally {
+        ctx.getList = getList;
+      }
+      const lowered = body === e.body && seeds.every((s, k) => s === e.seeds[k]) ? e : { ...e, seeds, body };
       if (childrenOf(lowered).some(isSeq)) throw new Error('Lists are not supported in a recursive function yet.');
       return lowered;
     }
