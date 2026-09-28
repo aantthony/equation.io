@@ -57,6 +57,23 @@ export function pow(a: Expr, b: Expr): Expr {
 
 const call = (name: string, ...args: Expr[]): Expr => ({ kind: 'call', name, args });
 
+/**
+ * sinc′ within SINC_SERIES_BELOW of 0: its Taylor polynomial
+ * Σ (−1)ⁿ 2n x^(2n−1)/(2n+1)!, n = 1…5, as [coefficient, power], so sinc's
+ * derivatives are exact at 0 through the 10th. Where the two branches meet,
+ * at |x| = 0.2, the term left out and the quotient's cancellation each cost
+ * sinc′, sinc″ and sinc‴ at most ~1e-13 (float64). Five terms, not more: the
+ * polynomial is copied into every product- and chain-rule term of a
+ * derivative, and an osculating circle's d³/du³ has dozens.
+ */
+const SINC_SERIES_BELOW = 0.2;
+const SINC_PRIME_SERIES: [number, number][] = Array.from({ length: 5 }, (_, k) => {
+  const n = k + 1;
+  let fact = 1;
+  for (let j = 2; j <= 2 * n + 1; j++) fact *= j;
+  return [((-1) ** n * 2 * n) / fact, 2 * n - 1];
+});
+
 /** A function with no usable symbolic derivative: callers may fall back to
  *  finite differences (unlike other diff() errors, which are real errors). */
 export class NonSmoothError extends Error {}
@@ -214,18 +231,20 @@ export function diff(e: Expr, v: string): Expr {
         case 'erf':
           return chain(mul(num(2 / Math.sqrt(Math.PI)), call('exp', neg(pow(a, num(2))))));
         case 'sinc':
-          // (cos x − sinc x)/x away from 0 — this form cancels less than
-          // cos/x − sin/x² — and the removable hole filled in: sinc is
-          // differentiable at 0 with derivative 0.
+          // (x cos x − sin x)/x² away from 0, and its Taylor polynomial near
+          // 0, where the quotient cancels (and each derivative of it divides
+          // by x once more). Neither branch calls sinc, so differentiating
+          // again nests no piecewise, and the polynomial differentiates in
+          // turn: sinc″, sinc‴, … are right at and around 0 too.
           return chain({
             kind: 'piecewise',
             cases: [
               {
-                cond: { kind: 'ineq', op: '>', l: call('abs', a), r: ZERO },
-                value: div(sub(call('cos', a), call('sinc', a)), a),
+                cond: { kind: 'ineq', op: '>', l: call('abs', a), r: num(SINC_SERIES_BELOW) },
+                value: div(sub(mul(a, call('cos', a)), call('sin', a)), pow(a, num(2))),
               },
             ],
-            otherwise: ZERO,
+            otherwise: SINC_PRIME_SERIES.map(([c, n]) => mul(num(c), pow(a, num(n)))).reduce(add),
           });
         case 'coth':
           return chain(sub(ONE, pow(call('coth', a), num(2))));

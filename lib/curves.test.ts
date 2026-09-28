@@ -213,6 +213,68 @@ describe('osculating(C, u0)', () => {
     expect(at(0)[0]).toBeCloseTo(1);
     expect(at(1)[0]).toBeCloseTo(1);
   });
+  it('closes while half its length fits in the reach', () => {
+    // A smooth cap on S fell short of the half turn by ~R², and a radius-100
+    // circle left a gap of 29. S = min(πR, 1000) closes every circle up to
+    // radius 1000/π, and a larger one is an arc 2000 long.
+    for (const [rows, R] of [
+      [['C = (30cos(u), 30sin(u))', 'osculating(C, 0.3)'], 30],
+      [['C = (10cos(u), 10sin(u))', 'osculating(C, 2)'], 10],
+      [['C = (100cos(u), 100sin(u))', 'osculating(C, -1)'], 100],
+      [['C = (300cos(u), 300sin(u))', 'osculating(C, 0)'], 300],
+    ] as const) {
+      const { at } = circle([...rows]);
+      expect(Math.hypot(...minus(at(0), at(1)))).toBeLessThan(1e-6);
+      for (const p of us.map(at)) expect(Math.hypot(...p) / R).toBeCloseTo(1, 12);
+    }
+    const { at } = circle(['C = (1000cos(u), 1000sin(u))', 'osculating(C, 0)']);
+    for (const p of us.map(at)) expect(Math.hypot(...p)).toBeCloseTo(1000, 8);
+    // An arc 2000 long: 2 radians of the circle, the point in the middle.
+    expect(Math.atan2(at(1)[1], at(1)[0])).toBeCloseTo(1, 12);
+    expect(Math.atan2(at(0)[1], at(0)[0])).toBeCloseTo(-1, 12);
+  });
+  it('has the third derivative of a circle along u, through sinc″(0)', () => {
+    // The ellipse's circle at u0 = 0: centre (1.5, 0), radius 1/2, a whole
+    // turn over u, so c(u) = (1.5 − cos 2πu/2, −sin 2πu/2) (the point at
+    // u = 1/2). d³/du³ at 1/2 is (0, −(2π)³/2), the y part through sinc″(0),
+    // which differentiated to 0 (and so read 0) once.
+    const { coordinates, env } = circle(['C = (2cos(u), sin(u))', 'osculating(C, 0)']);
+    const d3 = coordinates.map(c => diff(diff(diff(c, 'u'), 'u'), 'u'));
+    const exact = (u: number) => [
+      -0.5 * (2 * Math.PI) ** 3 * Math.sin(2 * Math.PI * u),
+      0.5 * (2 * Math.PI) ** 3 * Math.cos(2 * Math.PI * u),
+    ];
+    const pos = circle(['C = (2cos(u), sin(u))', 'osculating(C, 0)']).at;
+    // Central differences, h = 1e-3: O(h²) error, ~1e-4 relative here.
+    const h = 1e-3;
+    const numeric = (u: number) =>
+      minus(
+        minus(pos(u + 2 * h), pos(u - 2 * h)),
+        minus(pos(u + h), pos(u - h)).map(x => 2 * x),
+      ).map(x => x / (2 * h ** 3));
+    for (const u of [0.5, 0.5 + 1e-9, 0.52, 0.8]) {
+      const got = d3.map(e => evaluate(e, { ...env, u }));
+      const want = exact(u);
+      for (let k = 0; k < 2; k++) {
+        expect(got[k]).toBeCloseTo(want[k], 8);
+        expect(Math.abs(numeric(u)[k] - got[k])).toBeLessThan(1e-3 * (2 * Math.PI) ** 3);
+      }
+    }
+    // Where every argument of sinc is tiny: a hair off the figure eight's
+    // inflection the circle is huge, and d³ along it matches differences.
+    const eight = circle(['C = (2sin(2pi u), sin(4pi u))', 'osculating(C, 0.99999)']);
+    const e3 = eight.coordinates.map(c => diff(diff(diff(c, 'u'), 'u'), 'u'));
+    const H = 1e-2;
+    for (const u of [0.5, 0.6]) {
+      const got = e3.map(e => evaluate(e, { ...eight.env, u }));
+      const p = eight.at;
+      const num3 = minus(
+        minus(p(u + 2 * H), p(u - 2 * H)),
+        minus(p(u + H), p(u - H)).map(x => 2 * x),
+      ).map(x => x / (2 * H ** 3));
+      for (let k = 0; k < 2; k++) expect(got[k]).toBeCloseTo(num3[k], 3);
+    }
+  });
   it('touches the curve at a general point, matching it to second order', () => {
     // At u0 = 0.6 on y = x³ − x: the circle passes through the point, and
     // the curve's neighbours stay within O(h³) of it.
@@ -270,11 +332,13 @@ describe('osculating(C, u0)', () => {
     // Symbolic, so the combs are not finite differences (a jagged τ comb).
     expect(cpu.d3).toBeDefined();
     const perFrame = [cpu.comps, cpu.d1, cpu.d2, cpu.d3].flatMap(v => v ?? []);
-    // What a frame samples: folded, and each part that recurs (sinc and its
-    // derivatives, in every product-rule term) worked out once.
+    // What a frame samples, folded: ~15K operations a sample, nearly all of
+    // them d³ (sinc and its derivatives, repeated in every product-rule
+    // term): the comb costs ~20 ms a frame at 400 samples. Working out each
+    // recurring part once would take it to ~3K (#186).
     const folded = foldAllExcept(perFrame, 'u', { ...env, t: 7 });
     const ops = folded.reduce((n, c) => n + compileProg(c, new Map([['u', 0]])).code.length / 2, 0);
-    expect(ops).toBeLessThan(2000);
+    expect(ops).toBeLessThan(20000);
   });
   it('needs a point on the curve', () => {
     expect(error(['C = (cos(u), sin(u))', 'osculating(C)'])).toMatch(/where on it/);
