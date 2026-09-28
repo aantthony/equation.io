@@ -1325,11 +1325,12 @@ function curveOperand(name: string, arg: Expr, ctx: Ctx): readonly Expr[] {
 }
 
 /** Whether e is a list: a literal, a data column or a named list, or one
- *  mapped over — not one reduced or indexed to a number (as staysList). */
+ *  mapped over, filtered (s[s > 0.3]) or sliced — not one reduced or
+ *  indexed to a number (as staysList). */
 function listValued(e: Expr, ctx: Ctx): boolean {
   if (e.kind === 'list' || e.kind === 'data') return true;
   if (e.kind === 'var') return !!ctx.opts.isList?.(e.name);
-  if (e.kind === 'index') return false;
+  if (e.kind === 'index') return e.args[1].kind === 'range' || listValued(e.args[1], ctx);
   if (
     e.kind === 'call' &&
     (SCALAR_REDUCTIONS.has(e.name) || ((e.name === 'min' || e.name === 'max') && e.args.length === 1))

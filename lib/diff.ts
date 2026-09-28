@@ -229,10 +229,6 @@ export function diff(e: Expr, v: string): Expr {
           });
         case 'coth':
           return chain(sub(ONE, pow(call('coth', a), num(2))));
-        case 'sign':
-          // Flat on either side of its jump, as a piecewise is branchwise:
-          // the straight-line gate of a curve operator (lib/curves.ts).
-          return ZERO;
         default:
           // floor/mod/… (and gamma: digamma isn't in the language):
           // no smooth derivative; caller falls back to FD. Of an argument

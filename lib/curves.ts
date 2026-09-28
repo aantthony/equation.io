@@ -20,8 +20,8 @@
  * centre as off its normal.
  *
  * Where the curve is straight nothing depends on a branch: the gate is
- * arithmetic (sign, max, an even root), so a list of points u0 maps element
- * by element — a piecewise over a list would filter it instead.
+ * arithmetic (cos atan2, max, an even root), so a list of points u0 maps
+ * element by element — a piecewise over a list would filter it instead.
  */
 import { add, div, mul, neg, pow, sub } from './diff.ts';
 import { type Expr, substVars } from './expr.ts';
@@ -71,7 +71,12 @@ function pieces(r: readonly Expr[], d: AlongU, u0: Expr = U, straight = 1e-10) {
     mul(num(straight ** 2), mul(speed2, speed2)),
     mul(num(ROUNDING ** 2), mul(speed2, dot(r2, r2))),
   );
-  const side = call('sign', sub(c2, floor));
+  // 1 where it bends and −1 where not, as sign(c² − floor) is, but its
+  // own derivative: atan2(0, ·) is 0 or π, flat on either side, and diff
+  // takes it as exactly 0 (its y is 0), so d/du κ stays symbolic while sign
+  // stays non-smooth to diff for the measures and root finders that must
+  // see its jump. cos, not a sign, of π: GLSL may give atan(0, −x) as −π.
+  const side = call('cos', call('atan2', num(0), sub(c2, floor)));
   const bent = call('max', side, num(0));
   // (−1)^(1/2), not sqrt(−1): both are NaN on the CPU, but GLSL leaves the
   // square root of a negative undefined (ANGLE folds it to 0), while eq_pow

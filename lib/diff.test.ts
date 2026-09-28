@@ -10,10 +10,8 @@ describe('non-smooth functions of a constant', () => {
     expect(evaluate(diff(e, 'u'), { a: 2.5, t: 1, u: 0.5 })).toBeCloseTo(-Math.sin(0.5));
     expect(() => diff(parseExpr('floor(u)'), 'u')).toThrow(/floor/);
   });
-  it('take sign as flat either side of its jump, as a piecewise is', () => {
-    // A curve operator's straight-line gate, sign(…) in u.
-    expect(evaluate(diff(parseExpr('sign(u^2 - 1) u'), 'u'), { u: 2 })).toBe(1);
-    expect(evaluate(diff(parseExpr('sign(u^2 - 1) u'), 'u'), { u: 0.5 })).toBe(-1);
+  it('leave sign non-smooth, so callers can see its jump', () => {
+    expect(() => diff(parseExpr('sign(u^2 - 1) u'), 'u')).toThrow(/sign/);
   });
 });
 

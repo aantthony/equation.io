@@ -112,8 +112,8 @@ describe('curvature', () => {
     const glsl = JSON.stringify(r.gpu);
     // GLSL leaves sqrt of a negative undefined (ANGLE folds sqrt(-1.0) to
     // 0): the gate is an even root, which eq_pow makes EQ_NAN.
-    expect(glsl).not.toMatch(/sqrt\(sign/);
-    expect(glsl).toMatch(/eq_pow\(sign\(/);
+    expect(glsl).not.toMatch(/sqrt\(cos\(atan/);
+    expect(glsl).toMatch(/eq_pow\(cos\(atan\(/);
   });
   it('plots along u inside any curve in u, and in a tube', () => {
     const C = 'C = (2cos(2pi u), sin(2pi u))';
@@ -122,10 +122,12 @@ describe('curvature', () => {
     const helix = 'C = (cos(2pi u), sin(2pi u), u)';
     expect(error([helix, 'tube((u, curvature(C), torsion(C)))'])).toBeUndefined();
   });
-  it('says how to plot κ named as a function of u', () => {
+  it('says how to plot κ only on a row that is κ itself', () => {
     const C = 'C = (2cos(2pi u), sin(2pi u))';
-    expect(error([C, 'k(u) = curvature(C, u)', 'k(u)'])).toMatch(/\(u, curvature\(C\)\)/);
     expect(error([C, 'k(u) = curvature(C, u)', '(u, k(u))'])).toBeUndefined();
+    // A row that only reads κ somewhere is its own: here a density.
+    expect(error([C, 'k(u) = curvature(C, u)', 'u + k(0.3)'])).toBeUndefined();
+    expect(error([C, 'k(x) = curvature(C, 0.3) x', 'k(u)'])).toBeUndefined();
   });
   it('says what a name that is no curve is', () => {
     expect(error(['a = 2', 'curvature(a)'])).toMatch(/a is a number, not a curve in u/);
@@ -157,21 +159,20 @@ describe('curvature', () => {
     // A function of its own spreads a tuple as any function does.
     expect(value(['frame(a, b, c) = a + b + c', 'frame((1, 2), 3)'])).toBe(6);
     expect(value(['osculating(a, b, c) = a b c', 'osculating((1, 2), 3)'])).toBe(6);
-    // A parameter or a Σ index of that name is a number.
+    // A parameter of that name is a number.
     expect(value(['f(frame) = frame(2)', 'f(3)'])).toBe(6);
     expect(value(['g(torsion, k) = torsion(k + 1)', 'g(2, 3)'])).toBe(8);
-    expect(value(['sum(frame=1..3, frame(2))'])).toBe(12);
-    expect(value(['sum(curvature=1..3, curvature)'])).toBe(6);
-    // Only inside its own sum: outside it, the builtin is the builtin.
-    expect(arrows(['frame((cos(2pi u), sin(2pi u)), sum(frame=1..3, frame)/10)'])).toHaveLength(2);
-    const outside = parseExpr('sum(frame=1..3, frame(2)) + frame(C, 0.2)');
-    expect(outside.kind === 'bin' && outside.b).toMatchObject({ kind: 'call', name: 'frame' });
-    // Nor does a Σ written with a subscript bind it before the Σ.
-    const before = parseExpr('frame(C, 0.2) + Σ_(frame=1)^3 frame');
-    expect(before.kind === 'bin' && before.a).toMatchObject({ kind: 'call', name: 'frame' });
-    // And `==` compares: it binds no index.
-    const compared = parseExpr('Σ_(frame==1)^3 1 + frame(C, 0.2)');
-    expect(compared.kind === 'bin' && compared.b).toMatchObject({ kind: 'call', name: 'frame' });
+    // A Σ index of that name is a number where it is not called, and a call
+    // is the builtin, as with sum(sin=1..3, sin(2)).
+    expect(value(['sum(frame=1..3, frame)'])).toBe(6);
+    const C = 'C = (cos(2pi u), sin(2pi u))';
+    for (const row of [
+      'sum(frame=1..3, frame(2))',
+      'sum[frame=1..3] frame(2)',
+      'Σ(frame=1..3, frame(2)) + frame(C, 0.2)',
+    ]) {
+      expect(error([C, row])).toMatch(/frame takes a curve and where on it/);
+    }
   });
   it('differentiates along u symbolically', () => {
     // The straight-line gate is flat away from its jump, as a piecewise is:
@@ -340,6 +341,10 @@ describe('frame(C, u0)', () => {
     expect(error(['C = (2cos(u), sin(u))', 'frame(C, [0.2, 0.4])'])).toMatch(/one point on the curve at a time/);
     expect(error(['C = (2cos(u), sin(u))', 's = [0.2, 0.4]', 'frame(C, s)'])).toMatch(/one point/);
     expect(error(['C = (2cos(u), sin(u))', 's = [0.2, 0.4]', 'frame(C, 2s)'])).toMatch(/one point/);
+    // A filter, a mask or a slice of a list is still a list.
+    for (const u0 of ['s[s > 0.3]', 's[s > 0.1]', 's[[1, 2]]', 's[1..2]']) {
+      expect(error(['C = (2cos(u), sin(u))', 's = [0.2, 0.4, 0.5]', `frame(C, ${u0})`])).toMatch(/one point/);
+    }
     // An index or a reduction of a list is one number.
     for (const u0 of ['sort(s)[1]', 'mean(s)', 'total(s)/4']) {
       expect(arrows(['C = (2cos(u), sin(u))', 's = [0.2, 0.4]', `frame(C, ${u0})`])).toHaveLength(2);
