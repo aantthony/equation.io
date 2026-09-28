@@ -99,9 +99,11 @@ describe('broadcasting', () => {
   it('keeps t animating elementwise', () => {
     expect(values(lowerRow('[1,2] + t'), { t: 10 })).toEqual([11, 12]);
   });
-  it('rejects lists inside equations and piecewise', () => {
+  it('rejects lists inside equations; a piecewise over one is one per member', () => {
     expect(() => lowerRow('y = [1,2]')).toThrow(/list in an equation/);
-    expect(() => lowerRow('{x<0: [1,2], 0}')).toThrow(/piecewise/);
+    const low = lowerRow('{x<0: [1,2], 0}');
+    expect(low.kind === 'list' && low.items.map(p => evaluate(p, { x: -1 }))).toEqual([1, 2]);
+    expect(low.kind === 'list' && low.items.map(p => evaluate(p, { x: 1 }))).toEqual([0, 0]);
   });
   it('flattens nested lists: a bracket is a multiset sum', () => {
     expect(values(lowerRow('[L, 1]', ['L = [1,2]']))).toEqual([1, 2, 1]);

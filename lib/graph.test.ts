@@ -70,6 +70,27 @@ describe('graph rows', () => {
     expect(arrows(g)).toEqual(['1>1', '1>2:×2', '2>1:×2', '2>2:×2']);
   });
 
+  it('composition as a function of two arrows, named, chained and squared', () => {
+    const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
+    // i → j then j → k is i → k; a pair that does not meet is no arrow.
+    const c = 'c(p, q) = {p.y = q.x: (p.x, q.y)}';
+    const product = ['1>1', '1>2:×2', '2>1:×2', '2>2:×2'];
+    expect(arrows(graphOf([...AB, c, 'graph(c(A, B))']))).toEqual(product);
+    expect(arrows(graphOf([...AB, c, 'AB = c(A, B)', 'graph(AB)']))).toEqual(product);
+    expect(arrows(graphOf([...AB, 'AB = {A.y = B.x: (A.x, B.y)}', 'graph(AB)']))).toEqual(product);
+    // ABB = [[2 3] [2 4]].
+    expect(arrows(graphOf([...AB, c, 'AB = c(A, B)', 'graph(c(AB, B))']))).toEqual([
+      '1>1:×2',
+      '1>2:×3',
+      '2>1:×2',
+      '2>2:×4',
+    ]);
+    // One name is one choice: c(A, A) pairs each arrow with itself, the
+    // loops. [A] is a new multiset, equal to A, so c(A, [A]) is A² = [[1 3] [0 4]].
+    expect(arrows(graphOf([...AB, c, 'graph(c(A, A))']))).toEqual(['1>1', '2>2:×2']);
+    expect(arrows(graphOf([...AB, c, 'graph(c(A, [A]))']))).toEqual(['1>1', '1>2:×3', '2>2:×4']);
+  });
+
   it('every step of the Collatz orbits of 1..50: recursion over two lists', () => {
     const g = graphOf([
       'c(m) = {mod(m, 2) = 0: m/2, 3m + 1}',

@@ -1301,6 +1301,24 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         if (v.vec) throw new Error('Points cannot appear in a piecewise expression.');
         return v.e;
       };
+      // Point-valued cases are a point of cases, coordinate by coordinate:
+      // {c: (a, b), (p, q)} is ({c: a, p}, {c: b, q}). Where no case holds,
+      // every coordinate is undefined, so the point is.
+      const values = [...e.cases.map(c => lo(c.value)), ...(e.otherwise ? [lo(e.otherwise)] : [])];
+      if (values.some(v => v.vec)) {
+        const n = values[0].vec ? values[0].items.length : 0;
+        if (!values.every(v => v.vec && v.items.length === n))
+          throw new Error('Every case of a piecewise point must be a point of the same dimension.');
+        const conds = e.cases.map(c => one(c.cond));
+        const at = (v: LV, k: number): Expr => (v as LV & { vec: true }).items[k];
+        return vc(
+          ...Array.from({ length: n }, (_, k): Expr => ({
+            kind: 'piecewise',
+            cases: conds.map((cond, j) => ({ cond, value: at(values[j], k) })),
+            otherwise: e.otherwise && at(values[conds.length], k),
+          })),
+        );
+      }
       const cases = e.cases.map(c => ({ cond: one(c.cond), value: one(c.value) }));
       const otherwise = e.otherwise && one(e.otherwise);
       if (

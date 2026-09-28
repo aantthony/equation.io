@@ -60,17 +60,15 @@ describe('§1 equal vs identical', () => {
       return values.map(p => p.map(c => evaluate(c, analysis.constEnv)).join(',')).sort();
     };
     // Separate lists on ONE side of the comparison still cross: 4 × 3 pairs,
-    // each compared, keeping A.x where A.y = B.x.
+    // each compared, keeping A.x where A.y = B.x. The 5 pairs that fail
+    // are not in the row at all: the whole point goes, not its x alone.
     const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
     const kept = ['1,1', '1,2', '1,2', '2,1', '2,1', '2,2', '2,2'];
-    const dropped = ['NaN,1', 'NaN,2', 'NaN,2', 'NaN,2', 'NaN,2'];
     for (const cond of ['abs(A.y - B.x) < 0.5', '-0.5 < A.y - B.x < 0.5']) {
-      const got = points([...AB, `({${cond}: A.x}, B.y)`]);
-      expect(got.filter(p => !p.startsWith('NaN')).sort()).toEqual(kept);
-      expect(got.filter(p => p.startsWith('NaN'))).toEqual(dropped);
+      expect(points([...AB, `({${cond}: A.x}, B.y)`])).toEqual(kept);
     }
     // One sided: A.y ≤ B.x. A.y = 1 keeps all of B.
-    expect(points([...AB, '({A.y - B.x < 0.5: A.x}, B.y)']).filter(p => !p.startsWith('NaN'))).toHaveLength(9);
+    expect(points([...AB, '({A.y - B.x < 0.5: A.x}, B.y)'])).toHaveLength(9);
     // A name beside its own condition is chosen together with it: 40 points,
     // the same as through a function.
     const collatz = points(['k = [1..40]', '(k, {mod(k, 2) < 0.5: k/2, 3k + 1})']);
@@ -90,8 +88,17 @@ describe('§2 brackets are sums', () => {
     // n + a has 2 × 4 values: a is equal to n + [3 5], not identical to n.
     expect(multiset(['n = [1,2]', 'a = [n, 3, 5]', 'n + a'])).toHaveLength(8);
   });
-  it('one item is that item unchanged', () => {
-    expect(multiset(['n = [1,2]', '[n] + [n]'])).toEqual([2, 4]);
+  it('a bracket around one multiset is a new one, equal but not identical', () => {
+    expect(multiset(['n = [1,2]', 'n + n'])).toEqual([2, 4]);
+    expect(multiset(['n = [1,2]', 'n + [n]'])).toEqual([2, 3, 3, 4]);
+    expect(multiset(['n = [1,2]', '[n] + [n]'])).toEqual([2, 3, 3, 4]);
+    expect(multiset(['n = [1,2]', 'm = [n]', 'n + m'])).toEqual([2, 3, 3, 4]);
+    // …and it is equal: the same values, so a reduction cannot tell.
+    expect(multiset(['n = [1,2]', 'total([n])'])).toEqual([3]);
+  });
+  it('a bracket around one number or expression is that value', () => {
+    expect(multiset(['[3] + [1,2]'])).toEqual([4, 5]);
+    expect(multiset(['a = 2', '[a + 1] 2'])).toEqual([6]);
   });
   it('a family over a flattened bracket', () => {
     const row = last(['n = [1,2]', 'a = [n, 3, 5]', 'y = sin(a x)']);
@@ -110,6 +117,25 @@ describe('§3 reductions see the whole multiset', () => {
     expect(multiset(['total([])'])).toEqual([0]);
     expect(last(['mean([])']).error).toMatch(/empty/);
     expect(last(['max([])']).error).toMatch(/empty/);
+  });
+  it('a member no case holds for is not in the multiset', () => {
+    const L = 'L = [1, 2, 3, 4]';
+    expect(multiset([L, '{L > 2: L}'])).toEqual([3, 4]);
+    expect(multiset([L, 'count({L > 2: L})'])).toEqual([2]);
+    expect(multiset([L, 'total({L > 2: L})'])).toEqual([7]);
+    // Named, it is a multiset of its own, crossing another as any does.
+    expect(multiset([L, 'M = {L > 2: L}', 'M + [0, 10]'])).toEqual([3, 4, 13, 14]);
+    // A case that holds is its value; an otherwise keeps every member.
+    expect(multiset([L, '{L > 2: L, 0}'])).toEqual([0, 0, 3, 4]);
+    // Arrows: 7 of the 12 pairs meet.
+    const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
+    expect(multiset([...AB, 'c(p, q) = {p.y = q.x: (p.x, q.y)}', 'count(c(A, B))'])).toEqual([7]);
+    expect(multiset([...AB, 'AB = {A.y = B.x: (A.x, B.y)}', 'count(AB)'])).toEqual([7]);
+  });
+  it('a guard that moves with t stays a case, undefined where none holds', () => {
+    const row = last(['L = [1, 2, 3, 4]', '{L > 2 + sin(t): L}']);
+    expect(row.error).toBeUndefined();
+    expect((row.cls!.object as { values: unknown[] }).values).toHaveLength(4);
   });
 });
 

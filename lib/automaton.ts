@@ -33,7 +33,7 @@
  */
 import { usesComplex } from './complex.ts';
 import { type GetFn, type ResolveOpts, resolveExpr } from './defs.ts';
-import { type Expr, evaluate, freeVars, mapChildren, parseExpr, substVars } from './expr.ts';
+import { type Expr, evaluate, exactCase, freeVars, mapChildren, parseExpr, substVars } from './expr.ts';
 import type { Classified, MathObject } from './math-object.ts';
 import type { SeqScan } from './seq.ts';
 import { compileProg, run } from './vm.ts';
@@ -197,15 +197,6 @@ function unrollSum(e: Expr): Expr | null {
     acc = acc ? bin(op, acc, term) : term;
   }
   return acc ?? num(op === '+' ? 0 : 1);
-}
-
-/** A piecewise case testing equality as an inequality the evaluator runs:
- *  r - ε < l < r + ε, which on whole-number cells is exact. */
-export function exactCase(l: Expr, r: Expr): Expr {
-  // Each side kept whole: over lists, a comparison whose one side mixes two
-  // lists (abs(l - r) < ε) does not lower element by element.
-  const eps = num(1e-9);
-  return { kind: 'ineq', op: '<', l: { kind: 'ineq', op: '<', l: bin('-', r, eps), r: l }, r: bin('+', r, eps) };
 }
 
 /** Every equality case below `e` as exactCase. */

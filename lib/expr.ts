@@ -639,8 +639,12 @@ const ops = operators<PNode>({
   }),
   ']': closer('[', (content, call) => {
     if (!content) throw new Error('Empty list.');
-    // A comma series is a data list; a single item keeps its grouping meaning.
+    // A comma series is a data list. So is one item (docs/multisets.md §2):
+    // around a multiset, [A] is a new one, equal to A but not identical;
+    // list lowering gives anything else back as itself, a grouping.
     if (content.kind === 'series') return { kind: 'list', items: content.items.map(asExpr) };
+    if (!call && content.kind !== 'range' && content.kind !== 'popen')
+      return { kind: 'list', items: [asExpr(content)] };
     // A lone range is a list too ([1..10] expands during resolution) — but
     // not in a call bracket, where int[a..b] / sum[n=1..N] own the range.
     if (!call && content.kind === 'range') {
@@ -729,7 +733,14 @@ const ops = operators<PNode>({
   // List indexing: `L[2]` for a known list name L (1-based; list.ts lowers
   // it), a sort(…) call, or a list literal right against its index (see
   // addImplicitTokens) — `x[2]` keeps meaning 2x.
-  '[at]': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'index', args: [asExpr(a), asVecOrExpr(b)] })),
+  // An index bracket holds its index, not a multiset: L[2], L[L > 2].
+  '[at]': BinaryInfix<PNode>((a, b): Expr => ({
+    kind: 'index',
+    args: [
+      asExpr(a),
+      b.kind === 'list' && b.items.length === 1 && b.items[0].kind !== 'range' ? b.items[0] : asVecOrExpr(b),
+    ],
+  })),
 
   // Column access: `person.age` is one name, not a product. Binding tighter
   // than everything else, it is purely a naming device — the dotted name
@@ -1534,6 +1545,21 @@ export function structuralDiagnostic(e: Expr): string {
 }
 /** The messages of a `[comp]` whose value is not an n-component point. */
 export const compArity = (fn: string, n: number): string => `${fn} takes ${n} arguments.`;
+/** A piecewise case testing equality as an inequality every backend runs:
+ *  r - ε < l < r + ε, which on whole numbers (cells, vertices, the
+ *  coordinates of arrows) is exact. */
+export function exactCase(l: Expr, r: Expr): Expr {
+  // Each side kept whole: over lists, a comparison whose one side mixes two
+  // lists (abs(l - r) < ε) does not lower element by element.
+  const eps: Expr = { kind: 'num', value: 1e-9 };
+  return {
+    kind: 'ineq',
+    op: '<',
+    l: { kind: 'ineq', op: '<', l: { kind: 'bin', op: '-', a: r, b: eps }, r: l },
+    r: { kind: 'bin', op: '+', a: r, b: eps },
+  };
+}
+
 /** A `[comp]` that outlived lowering (a list of points where no list can go:
  *  an ODE, a sampled body) — said in the user's terms, not the node's. */
 export const strayComp = (e: Expr): string | null => (e.kind === 'comp' ? compArity(e.functionName, e.arity) : null);
@@ -1776,6 +1802,9 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
     case 'vec':
       throw new Error('Vector in scalar context.');
     case 'list':
+      // [x + 1] groups: one item that is not a multiset is that item.
+      if (e.items.length === 1) return evaluate(e.items[0], env);
+      throw new Error('List in scalar context.');
     case 'data':
       throw new Error('List in scalar context.');
     case 'str':

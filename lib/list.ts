@@ -50,6 +50,7 @@ import {
   compArity,
   compDims,
   evaluate,
+  exactCase,
   originOf,
   freeVars,
   ineqComparisons,
@@ -632,6 +633,72 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
  * line ranges and indices draw. Comparisons against a missing cell (NaN) are
  * false, so filtering a column also drops its gaps.
  */
+/**
+ * Settle a list of piecewise members whose conditions are constant: each
+ * becomes the value of the case that holds, or NaN where none does. The
+ * members stay where they are, paired with everything beside them; it is
+ * the multiset collecting them that leaves the undefined ones out
+ * (dropUndefined). What depends on t stays a piecewise, as a filter could
+ * not settle it either.
+ */
+function decideMembers(items: Expr[], axes: readonly Axis[], ctx: Ctx): Expr {
+  const env: Record<string, number> = {};
+  const decided: Expr[] = [];
+  for (const item of items) {
+    if (item.kind !== 'piecewise') return withAxes(listOf(items, ctx), axes);
+    let pick: Expr | undefined;
+    for (const c of item.cases) {
+      for (const fv of freeVars(c.cond)) {
+        const v = ctx.opts.consts?.[fv];
+        if (v === undefined) return withAxes(listOf(items, ctx), axes);
+        env[fv] = v;
+      }
+      if (c.cond.kind !== 'ineq' && !isEquality(c.cond)) return withAxes(listOf(items, ctx), axes);
+      if (holds(c.cond, env)) {
+        pick = c.value;
+        break;
+      }
+    }
+    decided.push(pick ?? item.otherwise ?? num(NaN));
+  }
+  return withAxes(listOf(decided, ctx), axes);
+}
+
+/** A member a guard decided has no value: NaN, or a point with a NaN coordinate. */
+const undefinedMember = (e: Expr): boolean =>
+  (e.kind === 'num' && Number.isNaN(e.value)) || (e.kind === 'vec' && e.items.some(undefinedMember));
+
+/**
+ * Collect a multiset: a member no case of a guard holds for is not in it —
+ * the empty box of docs/multisets.md §2, so {A.y = B.x: (A.x, B.y)} is the
+ * arrows that meet and count sees only them. A whole member goes, every
+ * coordinate at once, however many lists it was combined from. The rest are
+ * a multiset of their own, as a filter's kept members are.
+ */
+function dropUndefined(e: Expr, ctx: Ctx): Expr {
+  const cols = e.kind === 'vec' && e.items.every(isList) ? (e.items as (Expr & { kind: 'list' })[]) : null;
+  const rows = isList(e) ? e.items : null;
+  const n = cols ? cols[0].items.length : (rows?.length ?? 0);
+  if (!n || (cols && cols.some(c => c.items.length !== n))) return e;
+  const keep = Array.from({ length: n }, (_, k) =>
+    cols ? !cols.some(c => undefinedMember(c.items[k])) : !undefinedMember(rows![k]),
+  );
+  if (keep.every(Boolean)) return e;
+  const own = axesOf((cols ? cols[0] : e) as Seq);
+  if (own.some(a => a.ordered)) return e;
+  const kept = keep.filter(Boolean).length;
+  const cut: Axis[] = [{ id: `${own.map(a => a.id).join('×')}{${keep.map(k => (k ? 1 : 0)).join('')}}`, n: kept }];
+  const pick = (l: Expr & { kind: 'list' }) =>
+    withAxes(
+      listOf(
+        l.items.filter((_, k) => keep[k]),
+        ctx,
+      ),
+      cut,
+    );
+  return cols ? { kind: 'vec', items: cols.map(pick) } : pick(e as Expr & { kind: 'list' });
+}
+
 function maskValues(mask: Expr, opts: ResolveOpts): boolean[] | null {
   if (!isMask(mask)) return null;
   return mask.items.map(cond => {
@@ -1471,7 +1538,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
           }
           throw new Error(`${e.name}(…) needs a list, like ${e.name}([1, 4, 2]).`);
         }
-        const arg = settle(args[0], ctx) as Seq;
+        const arg = dropUndefined(settle(args[0], ctx), ctx) as Seq;
         if (isText(arg)) {
           // count is the only reduction text has an answer for.
           if (e.name === 'count') return num(arg.values.length);
@@ -1552,6 +1619,14 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
       );
     }
     case 'list': {
+      // One item that is not a multiset is that item: [x + 1] groups, and
+      // [3] == 3. Around a multiset the bracket is a new one, below. (Only
+      // as written: a list lowered earlier, like a filter keeping one
+      // element, has its axes and stays a list.)
+      if (e.items.length === 1 && !e.axes && !isRange(e.items[0])) {
+        const only = lower(e.items[0], ctx);
+        if (!isSeq(only)) return only;
+      }
       // A literal is a new origin; a list lowered earlier (an index the
       // object pass settled first) keeps the instances it already had.
       // The origin is the literal itself, not this visit to it: expanding
@@ -1582,12 +1657,26 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
     case 'ineq':
       return comparisonValue(e, ctx);
     case 'piecewise': {
-      const cases = e.cases.map(c => ({ cond: lowerCond(c.cond, ctx), value: lower(c.value, ctx) }));
+      // Over a list, a case may test equality, {A.y = B.x: …}: members are
+      // counted things (vertices, the ends of arrows), so it is exact.
+      const exact = (c: Expr): Expr =>
+        c.kind === 'eq' && [c.l, c.r].some(s => isSeq(expand(lower(s, ctx), ctx))) ? exactCase(c.l, c.r) : c;
+      const cases = e.cases.map(c => ({ cond: lowerCond(exact(c.cond), ctx), value: lower(c.value, ctx) }));
       const otherwise = e.otherwise && lower(e.otherwise, ctx);
-      if (cases.some(c => isSeq(c.value)) || (otherwise && isSeq(otherwise))) {
-        throw new Error('Lists are not supported inside {…} piecewise yet.');
-      }
-      return { kind: 'piecewise', cases, otherwise };
+      const raw = [...cases.flatMap(c => [c.cond, c.value]), ...(otherwise ? [otherwise] : [])];
+      if (!raw.some(isSeq)) return { kind: 'piecewise', cases, otherwise };
+      // Over lists, one piecewise per member, like any other operation: the
+      // conditions are masks here, so this is the one place they are built
+      // on rather than filtered by. A member no case holds for is undefined.
+      const { parts, axes } = align(raw.map(p => expand(isSeq(p) ? settle(p, ctx) : p, ctx)));
+      const n = seqLength(parts.find(isSeq)!);
+      const at = (p: Expr, k: number): Expr => (isList(p) ? p.items[k] : p);
+      const items = Array.from({ length: n }, (_, k): Expr => ({
+        kind: 'piecewise',
+        cases: cases.map((_, j) => ({ cond: at(parts[2 * j], k), value: at(parts[2 * j + 1], k) })),
+        otherwise: otherwise && at(parts[parts.length - 1], k),
+      }));
+      return decideMembers(items, axes!, ctx);
     }
     case 'loop': {
       // The params are the loop's own names: in the body they shadow any
@@ -1629,7 +1718,7 @@ export function lowerLists(
 ): Expr {
   const ctx: Ctx = { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap(), columns: 0 };
   const lowered = lower(e, ctx);
-  const out = packed ? lowered : settle(lowered, ctx);
+  const out = packed ? lowered : dropUndefined(settle(lowered, ctx), ctx);
   if (isMask(out)) {
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
   }
