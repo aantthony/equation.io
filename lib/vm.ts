@@ -61,8 +61,6 @@ const enum Op {
   Sel,
   Fn4,
   Loop,
-  Store,
-  Load,
 }
 
 const FN1: Record<string, (x: number) => number> = {
@@ -139,9 +137,6 @@ export interface Prog {
   depth: number;
   /** The loops this program runs (Op.Loop's argument indexes them). */
   loops?: LoopProg[];
-  /** Where a subexpression used more than once keeps its value (Op.Store,
-   *  Op.Load). */
-  temps?: Float64Array;
 }
 
 /**
@@ -167,74 +162,8 @@ interface LoopProg {
  * Compile `e` against a fixed variable layout: slots[name] is an index into
  * the `vars` array passed to run(). Throws on names or calls it can't handle
  * (e.g. complex-only forms) — callers treat that as "no preview for this row".
- *
- * A subexpression that occurs more than once — the same object, or an equal
- * tree — is worked out once and kept (Op.Store, Op.Load). Symbolic
- * derivatives repeat their operand's subtrees at every product- and
- * chain-rule term: d³/du³ of an osculating circle is 15K nodes as a tree and
- * 141 distinct ones. Every value is evaluated eagerly (no jumps; see
- * piecewise), so the first occurrence in the code always runs first.
  */
 export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
-  const idOf = subexpressionIds();
-  // The first pass finds which subexpressions recur; the second keeps them.
-  const again = new Set<number>();
-  compileWith(e, slots, idOf, again, true);
-  return compileWith(e, slots, idOf, again, false);
-}
-
-/** Node kinds worth keeping when they recur: leaves are as cheap to redo. */
-const KEPT = new Set<Expr['kind']>(['bin', 'neg', 'call', 'piecewise']);
-
-/** A number per node, equal for equal trees (kinds KEPT and what they hold;
- *  anything else is its own). */
-function subexpressionIds(): (node: Expr) => number {
-  const ids = new Map<string, number>();
-  const known = new WeakMap<Expr, number>();
-  const idOf = (n: Expr): number => {
-    const seen = known.get(n);
-    if (seen !== undefined) return seen;
-    let key: string;
-    switch (n.kind) {
-      case 'num':
-        key = `n${Object.is(n.value, -0) ? '-0' : n.value}`;
-        break;
-      case 'var':
-        key = `v${n.name}`;
-        break;
-      case 'neg':
-        key = `-${idOf(n.a)}`;
-        break;
-      case 'bin':
-        key = `b${n.op}${idOf(n.a)},${idOf(n.b)}`;
-        break;
-      case 'call':
-        key = `c${n.name}(${n.args.map(idOf).join()})`;
-        break;
-      case 'ineq':
-        key = `i${n.op}${idOf(n.l)},${idOf(n.r)}`;
-        break;
-      case 'piecewise':
-        key = `p${n.cases.map(c => `${idOf(c.cond)}:${idOf(c.value)}`).join()}|${n.otherwise ? idOf(n.otherwise) : ''}`;
-        break;
-      default:
-        key = `#${ids.size}`;
-    }
-    let id = ids.get(key);
-    if (id === undefined) ids.set(key, (id = ids.size));
-    known.set(n, id);
-    return id;
-  };
-  return idOf;
-}
-
-function compileWith(
-  e: Expr,
-  slots: ReadonlyMap<string, number>,
-  idOf: (node: Expr) => number,
-  again: Set<number>,
-  finding: boolean,
-): Prog {
   const code: number[] = [];
   const consts: number[] = [];
   const loops: LoopProg[] = [];
@@ -244,28 +173,7 @@ function compileWith(
     depth += n;
     if (depth > maxDepth) maxDepth = depth;
   };
-  // While finding, every recurrence is noted (and loaded from a placeholder);
-  // after, those kept are stored where they first run and loaded after that.
-  const emitted = new Set<number>();
-  const temp = new Map<number, number>();
   const emit = (node: Expr): void => {
-    const id = KEPT.has(node.kind) ? idOf(node) : -1;
-    if (id >= 0 && emitted.has(id)) {
-      if (finding) again.add(id);
-      code.push(Op.Load, temp.get(id) ?? 0);
-      push(1);
-      return;
-    }
-    emitNode(node);
-    if (id >= 0 && (finding || again.has(id))) {
-      emitted.add(id);
-      if (!finding) {
-        temp.set(id, temp.size);
-        code.push(Op.Store, temp.get(id)!);
-      }
-    }
-  };
-  const emitNode = (node: Expr): void => {
     switch (node.kind) {
       case 'num':
         code.push(Op.Const, consts.length);
@@ -385,13 +293,7 @@ function compileWith(
     }
   };
   emit(e);
-  return {
-    code,
-    consts,
-    depth: maxDepth,
-    ...(loops.length ? { loops } : {}),
-    ...(temp.size ? { temps: new Float64Array(temp.size) } : {}),
-  };
+  return { code, consts, depth: maxDepth, ...(loops.length ? { loops } : {}) };
 }
 
 function runLoop(loop: LoopProg, seeds: Float64Array, at: number, outer: ArrayLike<number>): number {
@@ -418,7 +320,7 @@ const FN3_TABLE = FN3_NAMES.map(n => FN3[n]);
 const FN4_TABLE = FN4_NAMES.map(n => FN4[n]);
 
 export function run(p: Prog, vars: ArrayLike<number>, stack: Float64Array): number {
-  const { code, consts, temps } = p;
+  const { code, consts } = p;
   let sp = 0;
   for (let i = 0; i < code.length; i += 2) {
     const arg = code[i + 1];
@@ -488,12 +390,6 @@ export function run(p: Prog, vars: ArrayLike<number>, stack: Float64Array): numb
       case Op.Sel:
         sp -= 2;
         stack[sp - 1] = stack[sp - 1] === 1 ? stack[sp] : stack[sp + 1];
-        break;
-      case Op.Store:
-        temps![arg] = stack[sp - 1];
-        break;
-      case Op.Load:
-        stack[sp++] = temps![arg];
         break;
       case Op.Loop: {
         const loop = p.loops![arg];
