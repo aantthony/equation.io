@@ -106,7 +106,7 @@ describe('curvature', () => {
     expect(evaluate(o.source.coordinates[1], { ...env, u: Math.PI / 2 })).toBeCloseTo(0.25);
   });
   it('is undefined on the GPU where the curve is straight', () => {
-    const rows = ['C = (u, {u < 0.5: 0, (u - 0.5)^3}, u^2)', 'y = torsion(C, x)'];
+    const rows = ['C = (u, {u < 0.5: 0, (u - 0.5)^3}, {u < 0.5: 0, (u - 0.5)^4})', 'y = torsion(C, x)'];
     const r = analyzeRows(rows, { backend: 'gpu' }).rows.at(-1)!;
     expect(r.error).toBeUndefined();
     const glsl = JSON.stringify(r.gpu);
@@ -169,6 +169,9 @@ describe('curvature', () => {
     // Nor does a Σ written with a subscript bind it before the Σ.
     const before = parseExpr('frame(C, 0.2) + Σ_(frame=1)^3 frame');
     expect(before.kind === 'bin' && before.a).toMatchObject({ kind: 'call', name: 'frame' });
+    // And `==` compares: it binds no index.
+    const compared = parseExpr('Σ_(frame==1)^3 1 + frame(C, 0.2)');
+    expect(compared.kind === 'bin' && compared.b).toMatchObject({ kind: 'call', name: 'frame' });
   });
   it('differentiates along u symbolically', () => {
     // The straight-line gate is flat away from its jump, as a piecewise is:
