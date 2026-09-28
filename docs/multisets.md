@@ -196,7 +196,19 @@ Wildberger's lists (commas, ordered) are our tuples, so anything that needs
 order takes a tuple:
 
 - `polyline`, `segment` chains and indexing `T[k]` (1-based) take tuples
-  only. On a multiset they are errors that point at `sort`.
+  only. On a multiset of numbers they are errors that point at `sort`.
+- A multiset has no k-th element, so on a multiset of tuples `[k]` reaches
+  into each one: position k of every element, over the multiset's own
+  instances. Points are tuples too, so with `A = [(1, 1), (1, 2)]`, `A[1]`
+  is `A.x` and pairs with `A.y`; `.x`, `.y`, `.z` are names for positions
+  1–3, on one point as on many (`P.x` of `P = (3, 12)` is 3, as `P_x`
+  always was). Past 3 there are only positions: the 4th of `(3, 12, 6, 2)`
+  is `T[4]`.
+- A function's parameters index the same way, and a tuple argument arrives
+  whole when the arguments fill the parameters: `c(p) = p[4]`;
+  `c((3, 12, 6, 2))` is 2, and `c(p, q) = {p[2] = q[1]: (p[1], q[2])}`
+  composes tuples of any length. A tuple spreads only to make up the count,
+  `f((1, 2))` for `f(a, b)`.
 - `sort(L)` and `sort(P, key)` are the bridge from a multiset to a tuple. The
   key is an expression in the same multiset, so it is identical to it:
   `polyline(sort(P, P.x))` draws a time series in x order.

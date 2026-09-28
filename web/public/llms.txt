@@ -311,7 +311,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `T[N]` for a named list `N` pairs with `N`. `L[2]` on a list `[ … ]` is an
   error that says to sort it first; a filter `L[L > 2]` is no index and
   works on any list. A named tuple or list indexes, and so does a sort
-  call, `sort(L)[2]`; `x[2]` is plain multiplication (2x).
+  call, `sort(L)[2]`; `x[2]` is plain multiplication (2x). On a list of
+  points or tuples, which has no k-th element, `[k]` is position k of each:
+  with `A = [(1, 1), (1, 2)]`, `A[1]` is `A.x`, paired with `A.y`, and
+  `Q[4]` is the 4th entry of every 4-tuple in Q. `.x`, `.y`, `.z` name
+  positions 1–3, on one named point too (`P.x`). A function's parameters
+  index (`c(p) = p[4]`), and tuple arguments arrive whole when they fill
+  the parameters: `c((3, 12, 6, 2))`, `c((1, 2), (3, 4))`.
 - Data columns: with `person = open("people.csv", 3a7f9c1d2e4b)` in a row
   above (see Definitions), `person.age` is a list of that column's numbers.
   Everything lists can do applies: `(person.age, person.height)` is a

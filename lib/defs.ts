@@ -2077,6 +2077,18 @@ function mightBePoint(e: Expr, opts: ResolveOpts): boolean {
 
 const COORDS = ['x', 'y', 'z'] as const;
 
+/** `P.x` of one named point is its coordinate P_x, as `A.x` of a list of
+ *  points is that list's (list lowering reads those). */
+function pointCoord(name: string, opts: ResolveOpts): Expr | null {
+  const dot = name.lastIndexOf('.');
+  const k = dot > 0 ? COORDS.indexOf(name.slice(dot + 1) as (typeof COORDS)[number]) : -1;
+  if (k < 0) return null;
+  const base = name.slice(0, dot);
+  if (opts.isList?.(base)) return null;
+  const comps = opts.comps?.(base);
+  return comps && k < comps.length ? { kind: 'var', name: comps[k] } : null;
+}
+
 /**
  * The coordinates of point parameters a body reads, `p.x` in
  * `c(p, q) = {p.y = q.x: (p.x, q.y)}`, as the argument's own: a name's
@@ -2130,6 +2142,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         ctx.opts.interval?.(e.name) ??
         ctx.opts.multivector?.(e.name) ??
         unitVector(e.name, ctx.opts) ??
+        pointCoord(e.name, ctx.opts) ??
         e
       );
     case 'neg':
@@ -2214,10 +2227,14 @@ function rx(e: Expr, ctx: Ctx): Expr {
         return { kind: 'call', name: e.name, args: e.args[0].kind === 'vec' && arg.kind === 'vec' ? arg.items : [arg] };
       }
       const fn = getFn(e.name);
-      // A document's own function takes its arguments as any function does:
-      // the builtin of that name may group a tuple (frame((1, 2), 3)), but
-      // `frame(a, b, c) = a + b + c` spreads it.
-      const args = legacyCallArgs(fn ? '' : e.name, e.args).map(x => rx(x, ctx));
+      // A function's arguments are as written when they fill its parameters:
+      // c((1, 2), (2, 5)) passes two points. Only a mismatch spreads tuples,
+      // f((a, b)) ≡ f(a, b), and a document's own function spreads them as
+      // any function does: the builtin of that name may group a tuple
+      // (frame((1, 2), 3)), but `frame(a, b, c) = a + b + c` spreads it.
+      const args = (
+        fn && !fn.recursive && e.args.length === fn.params.length ? e.args : legacyCallArgs(fn ? '' : e.name, e.args)
+      ).map(x => rx(x, ctx));
       if (fn) {
         const n = fn.params.length;
         if (fn.recursive) {
@@ -2409,9 +2426,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const parse = (d: Definition & { rhs: string }): Expr => {
     const key = defKey(d);
     let p = parsed.get(key);
-    // A function's parameters are values in its body: f(frame) = frame(2).
+    // A function's parameters are values in its body, f(frame) = frame(2),
+    // and index too, p[2], since an argument may be a tuple or a multiset of
+    // them (docs/multisets.md §3).
     const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedFnNames(d.params)]) : valueNames;
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, indexNamesOf(defs), values)));
+    const names = d.kind === 'fn' ? new Set([...indexNamesOf(defs), ...d.params]) : indexNamesOf(defs);
+    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, names, values)));
     return p;
   };
 

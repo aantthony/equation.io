@@ -1233,6 +1233,23 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   // Anything but a filter picks by position, and only a tuple has positions.
   const axes = axesOf(low);
   const ordered = axes.findIndex(a => a.ordered);
+  // A multiset of points has no k-th element, so [k] reaches into each
+  // point, as it does into longer tuples: A[1] is A.x, over A's own
+  // instances, so A[1] and A.y pair up.
+  if (ordered < 0 && isList(low) && low.items.length && low.items.every(p => p.kind === 'vec')) {
+    if (isSeq(idxLow)) throw new Error('A multiset of points takes one index at a time: P[2].');
+    const dims = (low.items[0] as Expr & { kind: 'vec' }).items.length;
+    const k = Math.round(constVal(idxLow, ctx, 'A list index', true));
+    if (k === 0) throw new Error('Positions are 1-based: the first coordinate is P[1].');
+    if (k < 1 || k > dims) throw new Error(`Index ${k} is out of range — each point has ${dims} coordinates.`);
+    return withAxes(
+      listOf(
+        low.items.map(p => (p as Expr & { kind: 'vec' }).items[k - 1]),
+        ctx,
+      ),
+      axes,
+    );
+  }
   if (ordered < 0) throw new Error(needsOrder(target, idx, low));
   if (axes.length > 1) {
     // A multiset of tuples: position k of each, over the multiset.

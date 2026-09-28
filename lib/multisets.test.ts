@@ -208,6 +208,28 @@ function path(rows: string[]): string[] {
 }
 
 describe('§3 order lives in tuples', () => {
+  it('[k] is position k of a point, and of each point in a multiset of them', () => {
+    const A = 'A = [(1, 1), (1, 2), (2, 2), (2, 2)]';
+    expect(multiset([A, 'A[1]'])).toEqual([1, 1, 2, 2]);
+    expect(multiset([A, 'A[2]'])).toEqual([1, 2, 2, 2]);
+    // Over A's own instances: A[1] pairs with A.y, 4 points not 16.
+    expect(points([A, '(A[1], A.y)'])).toEqual(['1,1', '1,2', '2,2', '2,2']);
+    expect(last([A, 'A[3]']).error).toMatch(/each point has 2 coordinates/);
+    // …and .x, .y, .z are names for positions 1–3, on one point too.
+    expect(multiset(['P = (3, 12)', 'P.x + P[2]'])).toEqual([15]);
+    expect(multiset(['P = (3, 12, 5)', 'P.z'])).toEqual([5]);
+    expect(multiset(['T = (3, 12, 6, 2)', 'T[4]'])).toEqual([2]);
+  });
+  it('a function takes tuples whole, and indexes its parameters', () => {
+    expect(multiset(['c(p) = p[4]', 'c((3, 12, 6, 2))'])).toEqual([2]);
+    expect(points(['c(p, q) = (p.x, q.y)', 'c((1, 2), (3, 4))'])).toEqual(['1,4']);
+    // A tuple still spreads when that is what fills the parameters.
+    expect(multiset(['f(a, b) = a + b', 'f((1, 2))'])).toEqual([3]);
+    expect(multiset(['f(a, b, k) = a + b + k', 'f((1, 2), 3)'])).toEqual([6]);
+    // Composition by position, for tuples of any length.
+    const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
+    expect(multiset([...AB, 'c(p, q) = {p[2] = q[1]: (p[1], q[2])}', 'count(c(A, B))'])).toEqual([7]);
+  });
   it('sort bridges a multiset to a tuple: 2 or 3 numbers are a point, more read out', () => {
     expect(last(['sort([3,1,2])']).cpu).toMatchObject({ type: 'point', dim: 3 });
     expect(last(['sort([3,1,2])']).cls?.needs3D).toBe(true);
@@ -261,7 +283,9 @@ describe('§3 order lives in tuples', () => {
   it('state families are numbered only when they start from a tuple', () => {
     const run = ["p' = -p", 'p(0) = (sort([1..4])/4, 0)', 'p[2]'];
     expect(last(run).cpu?.type).toBe('point');
-    expect(last(["p' = -p", 'p(0) = ([1..4]/4, 0)', 'p[2]']).error).toMatch(/Start them from a tuple/);
+    // From a multiset its runs have no first, so p[2] reaches into each
+    // state: the second coordinate of every run.
+    expect(last(["p' = -p", 'p(0) = ([1..4]/4, 0)', 'p[2]']).error).toBeUndefined();
   });
 });
 

@@ -264,7 +264,9 @@ describe('indexing', () => {
   const L = ['L = sort([7,5,6])'];
   it('needs an order: a list [ … ] has none', () => {
     expect(() => lowerRow('M[2]', ['M = [5,6,7]'])).toThrow(/M\[2\] needs an order.*sort\(M\)\[2\]/);
-    expect(() => lowerRow('P[1]', ['P = [(1,2),(3,4)]'])).toThrow(/sort\(P, P\.x\)\[1\]/);
+    // A multiset of points has no first point, so [k] reaches into each:
+    // P[1] is P.x.
+    expect(values(lowerRow('P[1]', ['P = [(1,2),(3,4)]']))).toEqual([1, 3]);
     // A filter is no index: it keeps what passes, whatever the order.
     expect(values(lowerRow('M[M > 5]', ['M = [5,6,7]']))).toEqual([6, 7]);
   });
