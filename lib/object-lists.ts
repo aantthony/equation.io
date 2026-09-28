@@ -1,7 +1,7 @@
 import type { ValueDefinitions } from './env.ts';
 import type { Mat } from './mat.ts';
 import { lowerMatrix, rowsAsPoints } from './geom.ts';
-import { mapChildren } from './expr.ts';
+import { childrenOf, mapChildren } from './expr.ts';
 import { tensorNode, tensorOfNode } from './tensor.ts';
 import { exceedsNodes } from './size.ts';
 /** Lift lists in object positions before scalar geometry lowering. Existing
@@ -18,6 +18,16 @@ export const FAMILY_3D_MAX = 8;
  *  shader draw — so a family of them can be a whole lattice of arrows. */
 export const FIGURE_FAMILY_MAX = 1024;
 const num = (value: number): Expr => ({ kind: 'num', value });
+
+/** `node` itself when `next` is it rebuilt from the same children, so what a
+ *  pass leaves alone stays shared: a recursive function's loop body, inlined
+ *  once and read by every member of a family. */
+function unchanged(node: Expr, next: Expr): Expr {
+  if (next === node || next.kind !== node.kind) return next;
+  const a = childrenOf(node),
+    b = childrenOf(next);
+  return a.length === b.length && a.every((c, k) => c === b[k]) ? node : next;
+}
 
 /** Reductions that take a multiset of points whole: count, and total and
  *  mean coordinate by coordinate. */
@@ -579,7 +589,8 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     // own algebra (2 M, M v). Those rows are a list only where a call asks for
     // points — hull(M), distance(P, A) — and there still not as the matrix
     // factor of a product.
-    const visit = (node: Expr, asMatrix = true): Expr => {
+    const visit = (node: Expr, asMatrix = true): Expr => unchanged(node, visitNode(node, asMatrix));
+    const visitNode = (node: Expr, asMatrix: boolean): Expr => {
       if (node.kind === 'var' && bound.has(node.name)) return node;
       if (asMatrix && node.kind === 'var' && defs.mats.has(node.name)) {
         // M = ((a, 0), (0, 1)) is a multiset of matrices: one per member,
@@ -681,7 +692,16 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       }
       return index;
     };
+    // Only what holds a marker differs per member: the rest — a recursive
+    // function's loop body, above all — is shared by every member as it is.
+    const marked = new Map<Expr, boolean>();
+    const holdsMarker = (node: Expr): boolean => {
+      let hit = marked.get(node);
+      if (hit === undefined) marked.set(node, (hit = markers.has(node) || childrenOf(node).some(holdsMarker)));
+      return hit;
+    };
     const instantiate = (node: Expr, k: number): Expr => {
+      if (!holdsMarker(node)) return node;
       const hit = markers.get(node);
       if (hit !== undefined) return lists[hit].items[at(lists[hit], k)];
       const map = (ns: readonly Expr[]) => ns.map(n => instantiate(n, k));
