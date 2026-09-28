@@ -10,7 +10,7 @@ import {
   runBoard,
   tableShades,
 } from '../lib/automaton.ts';
-import { type GraphData, collectEdges, edgeText, layoutGraph } from '../lib/graph.ts';
+import { type GraphData, collectEdges, edgeEvaluator, edgeText, layoutGraph } from '../lib/graph.ts';
 import {
   type CpuGrid,
   type CpuPlan,
@@ -176,8 +176,17 @@ interface Equation {
   boardCache?: { plan: CpuPlan; key: string; board: Board; generation: number; cells: Cells2D };
   /** A table's cells over the window last drawn (the cellCache pattern). */
   tableCache?: { plan: CpuPlan; key: string; grid: CellGrid; cells: Cells2D };
-  /** A graph's edges as last evaluated, and its layout (lib/graph.ts). */
-  graphCache?: { key: string; data: GraphData; pos: Map<number, [number, number]> };
+  /** A graph's edges as last evaluated from `inputs` (the values it reads:
+   *  sliders, t), and its layout (lib/graph.ts), kept while `key` holds. */
+  graphCache?: {
+    plan: CpuPlan;
+    /** The plan's edges compiled (lib/graph.ts edgeEvaluator). */
+    edges: (env: Record<string, number>) => number[][];
+    inputs: string;
+    key: string;
+    data: GraphData;
+    pos: Map<number, [number, number]>;
+  };
   id: number;
   text: string;
   /** The row's palette slot; -1 until recompileAll colors it (lib/palette.ts),
@@ -2145,20 +2154,21 @@ function render() {
             break;
           }
           case 'graph': {
-            const values = plot.edges.map(e =>
-              e.map(c => {
-                try {
-                  return evaluate(c, env);
-                } catch {
-                  return NaN;
-                }
-              }),
-            );
-            const data = collectEdges(values);
-            const key = JSON.stringify(data);
+            // Evaluated again only when a value it reads changes: a pan
+            // redraws the same arrows.
+            const params = (eq.cls?.params ?? []).map(p => env[p]);
+            const inputs = JSON.stringify([...params, eq.cls?.animated ? time : 0]);
             let c = eq.graphCache;
-            // Laid out again only when the graph changes, from where it was.
-            if (c?.key !== key) c = eq.graphCache = { key, data, pos: layoutGraph(data, c?.pos) };
+            if (c?.plan !== plot || c.inputs !== inputs) {
+              const edges = c?.plan === plot ? c.edges : edgeEvaluator(plot.edges);
+              const data = collectEdges(edges(env));
+              const key = JSON.stringify(data);
+              // Laid out again only when the graph changes, from where it was.
+              c = eq.graphCache =
+                c?.key === key
+                  ? { ...c, plan: plot, edges, inputs }
+                  : { plan: plot, edges, inputs, key, data, pos: layoutGraph(data, c?.pos) };
+            }
             const marks = new Set<number>();
             for (const m of rows)
               if (m.mark && m.cpu?.type === 'value')

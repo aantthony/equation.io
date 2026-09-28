@@ -13,8 +13,9 @@
  * a multiset of arrows is (Wildberger): the matrix A with A_ij arrows i → j.
  */
 import { exactCases } from './automaton.ts';
-import type { Expr } from './expr.ts';
+import { type Expr, evaluate, freeVars } from './expr.ts';
 import type { Classified } from './math-object.ts';
+import { type Prog, compileProg, run } from './vm.ts';
 
 export const GRAPH_RE = /^\s*graph\s*\(([\s\S]*)\)\s*$/;
 /** `mark(v)`: v's vertex highlighted in the graphs of the row's panel. */
@@ -47,6 +48,46 @@ export interface GraphData {
   vertices: number[];
   /** One entry per ordered pair (from, to) that has an arrow. */
   edges: GraphEdge[];
+}
+
+/**
+ * The edges' values in an environment, compiled once (lib/vm.ts): a graph of
+ * orbits runs thousands of recursive loops, which the tree-walking evaluate()
+ * takes most of a second over. An expression the VM cannot compile is
+ * evaluated as it is.
+ */
+export function edgeEvaluator(edges: ReadonlyArray<readonly Expr[]>): (env: Record<string, number>) => number[][] {
+  const names = [...new Set(edges.flatMap(e => e.flatMap(c => [...freeVars(c)])))];
+  const slots = new Map(names.map((n, k) => [n, k]));
+  const vars = new Float64Array(names.length);
+  let depth = 1;
+  const progs = edges.map(e =>
+    e.map((c): Prog | Expr => {
+      try {
+        const p = compileProg(c, slots);
+        depth = Math.max(depth, p.depth);
+        return p;
+      } catch {
+        return c;
+      }
+    }),
+  );
+  const stack = new Float64Array(depth);
+  return env => {
+    names.forEach((n, k) => {
+      vars[k] = Object.hasOwn(env, n) ? env[n] : NaN;
+    });
+    return progs.map(e =>
+      e.map(p => {
+        if ('code' in p) return run(p, vars, stack);
+        try {
+          return evaluate(p, env);
+        } catch {
+          return NaN;
+        }
+      }),
+    );
+  };
 }
 
 /** Collect evaluated edges ([from, to] or [from, to, label]); rows with a
