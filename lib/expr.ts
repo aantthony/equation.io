@@ -166,6 +166,8 @@ export const RECUR = '@recur';
  *  a few hundred items; bounded so a pixel that never terminates costs about
  *  what an escape-time iteration does. */
 export const LOOP_LIMIT = 250;
+/** The most passes a loop with an explicit counter (`k >= 600: …`) may ask for. */
+export const LOOP_LIMIT_MAX = 5000;
 /** The leaves of a loop body's piecewise tree, in order. */
 export function loopLeaves(body: Expr): Expr[] {
   if (body.kind !== 'piecewise') return [body];
@@ -250,6 +252,7 @@ export const FUNCTIONS = new Set([
   'exp',
   'ln',
   'log',
+  'log2',
   'floor',
   'ceil',
   'round',
@@ -406,6 +409,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'torsion',
   'osculating',
   'frame',
+  'log2',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
@@ -712,6 +716,13 @@ const ops = operators<PNode>({
     if (name === 'sum' || name === 'prod') return sumCall(name, b?.kind === 'peq' ? asExpr(b) : b);
     if (name === 'int') return intCall(b);
     const args = b?.kind === 'series' ? b.items.map(asExpr) : [asExpr(b)];
+    // log2 is spelled out here, so every backend (GLSL, complex, d/dx,
+    // intervals) already knows it: ln(x)/ln(2).
+    if (name === 'log2' && !activeUserFns.has(name)) {
+      if (args.length !== 1) throw new Error('log2 takes one argument.');
+      const ln = (a: Expr): Expr => ({ kind: 'call', name: 'ln', args: [a] });
+      return { kind: 'bin', op: '/', a: ln(args[0]), b: ln({ kind: 'num', value: 2 }) };
+    }
     return { kind: 'call', name, args };
   }),
 

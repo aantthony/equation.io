@@ -818,18 +818,19 @@ function classifyLowered(
     if (special === 'rgb' || special === 'hsl' || special === 'oklch') {
       const usage =
         special === 'rgb'
-          ? 'rgb(red, green, blue), each from 0 to 1'
+          ? 'rgb(red, green, blue, opacity?), each from 0 to 1'
           : special === 'hsl'
-            ? 'hsl(hue in radians, saturation 0–1, lightness 0–1)'
-            : 'oklch(lightness 0–1, chroma, hue in radians)';
-      if (call.args.length !== 3) throw new Error(`${special} takes three channels: ${usage}.`);
+            ? 'hsl(hue in radians, saturation 0–1, lightness 0–1, opacity?)'
+            : 'oklch(lightness 0–1, chroma, hue in radians, opacity?)';
+      if (call.args.length !== 3 && call.args.length !== 4)
+        throw new Error(`${special} takes three channels and an optional opacity: ${usage}.`);
       for (const channel of call.args) {
         if (channel.kind === 'ineq' || channel.kind === 'eq')
           throw new Error(`${special} channels must be real numbers, not comparisons: ${usage}.`);
         if (inferScalarType(channel) !== 'real')
           throw new Error(`${special} channels must be real numbers; use re, im, abs, or arg for complex values.`);
       }
-      return done({ kind: 'color-field', space: special, channels: call.args as [Expr, Expr, Expr] });
+      return done({ kind: 'color-field', space: special, channels: call.args });
     }
     if (special === 'iter') {
       if (call.args.length < 1 || call.args.length > 2) {

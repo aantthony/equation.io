@@ -1,5 +1,5 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
-import { childrenOf, LOOP_LIMIT, RECUR, isRecur } from './expr.ts';
+import { childrenOf, LOOP_LIMIT, LOOP_LIMIT_MAX, RECUR, isRecur, loopLeaves } from './expr.ts';
 import { mapChildren, structuralDiagnostic, legacyCallArgs } from './expr.ts';
 import { exprKey, type ProductGlyph } from './expr.ts';
 /**
@@ -156,7 +156,45 @@ function wrapRecursion(name: string, params: string[], body: Expr): Expr {
     for (const child of childrenOf(e)) check(child, false);
   };
   check(body, true);
-  return { kind: 'loop', params, seeds: params.map(name => ({ kind: 'var', name })), body, limit: LOOP_LIMIT };
+  const limit = Math.max(LOOP_LIMIT, counterCap(params, body) ?? 0);
+  return { kind: 'loop', params, seeds: params.map(name => ({ kind: 'var', name })), body, limit };
+}
+
+/**
+ * The passes a counted loop asks for: a param that every self-call advances
+ * by one (`k + 1`) and that a case caps with a plain number (`k >= 600: …`)
+ * ends by itself within that many passes from 0, so the default limit need
+ * not cut it short. Capped at LOOP_LIMIT_MAX, like any pixel's work.
+ */
+function counterCap(params: string[], body: Expr): number | undefined {
+  const leaves = loopLeaves(body);
+  const recurs = leaves.filter(isRecur);
+  const conds: Expr[] = [];
+  for (let e = body; e.kind === 'piecewise'; e = e.otherwise ?? { kind: 'num', value: 0 }) {
+    conds.push(...e.cases.map(c => c.cond));
+  }
+  let cap: number | undefined;
+  params.forEach((p, j) => {
+    const isP = (e: Expr) => e.kind === 'var' && e.name === p;
+    const isOne = (e: Expr) => e.kind === 'num' && e.value === 1;
+    const advances = recurs.every(r => {
+      const a = r.args[j];
+      return a?.kind === 'bin' && a.op === '+' && ((isP(a.a) && isOne(a.b)) || (isOne(a.a) && isP(a.b)));
+    });
+    if (!advances || recurs.length === 0) return;
+    for (const c of conds) {
+      if (c.kind !== 'ineq') continue;
+      const n =
+        (c.op === '>=' || c.op === '>') && isP(c.l) && c.r.kind === 'num'
+          ? c.r.value
+          : (c.op === '<=' || c.op === '<') && isP(c.r) && c.l.kind === 'num'
+            ? c.l.value
+            : undefined;
+      // A counter from 0 reaches n on pass n + 1, and one pass more exits.
+      if (n !== undefined && isFinite(n)) cap = Math.max(cap ?? 0, Math.min(LOOP_LIMIT_MAX, Math.ceil(n)) + 2);
+    }
+  });
+  return cap;
 }
 
 /** Whether `e` calls the function being defined. Markers inside an inlined

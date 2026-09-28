@@ -132,7 +132,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   so a row using one is a 3D scene; defining `e_x` yourself replaces it).
   Imaginary unit `i` in complex expressions.
 - Functions: sin cos tan asin acos atan atan2(y,x) sinh cosh tanh sech coth
-  asinh acosh atanh sqrt abs exp ln (natural) log (base 10) floor ceil round
+  asinh acosh atanh sqrt abs exp ln (natural) log (base 10) log2 floor ceil round
   min max mod sign fract sinc gamma factorial, complex helpers re im arg conj,
   and point helpers dot cross perp midpoint unit. Also `erf(x)`,
   `normalpdf(x, mean, sd)` and `normalcdf(x, mean, sd)`; `gcd(a, b)`, the
@@ -467,7 +467,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   This is a whole-row plot mode, not a color value for styling another row;
   it cannot be nested in arithmetic or lists and does not take u, v, or z.
   A pixel with any undefined or infinite channel is transparent, so a partial
-  piecewise channel can restrict the field: `rgb({x>0:1}, 0, 0)`.
+  piecewise channel can restrict the field: `rgb({x>0:1}, 0, 0)`. An
+  optional fourth argument is the opacity, 0–1 (clamped; default 1), so a
+  field can fade into the graph paper: `rgb(1, 0, 0, exp(-x^2-y^2))`.
   RGB, HSL and OKLCH rows share the same layer and draw in row order;
   curves and regions draw over them.
   Static share-card previews use the site card; the live graph renders the field.
@@ -832,7 +834,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   whole case of its `{…}` (tail position), so the call runs as a loop —
   per pixel on the GPU, like `iter`. `f(n, a) = {n <= 0: a, f(n - 1, a + n)}`
   sums 1..n; `f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}` with
-  `f(x i - |y|) >= 0` shades the Koch snowflake. At most 250 passes run;
+  `f(x i - |y|) >= 0` shades the Koch snowflake. At most 250 passes run —
+  more, up to 5000, when a parameter every self-call advances by one is
+  capped by a case with a plain number (`k >= 600: …` with `f(…, k + 1)`);
   past that, or once a value leaves the finite range, the result is
   undefined and nothing is drawn — a region shades exactly where the
   recursion terminates. `n f(n - 1)`, a call inside a condition, and two

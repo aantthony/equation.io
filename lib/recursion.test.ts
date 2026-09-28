@@ -34,6 +34,16 @@ describe('tail-recursive functions', () => {
     expect(evaluate(expr, { k: 3 })).toBe(6);
   });
 
+  it('runs as many passes as a counted loop caps its counter at, up to 5000', () => {
+    expect(valueOf(['f(a, k) = {k >= 600: a, f(a + 1, k + 1)}', 'f(0, 0)'])).toBe(600);
+    expect(valueOf(['f(a, k) = {600 <= k: a, f(a + 1, 1 + k)}', 'f(0, 0)'])).toBe(600);
+    expect(valueOf(['f(a, k) = {k >= 5000: a, f(a + 1, k + 1)}', 'f(0, 0)'])).toBe(5000);
+    expect(valueOf(['f(a, k) = {k >= 6000: a, f(a + 1, k + 1)}', 'f(0, 0)'])).toBeNaN();
+    // Only a counter every self-call advances by one earns the passes.
+    expect(valueOf(['f(a, k) = {k >= 600: a, f(a + 1, k + 2)}', 'f(0, 0)'])).toBeNaN();
+    expect(valueOf(['f(a, k) = {a >= 600: a, f(a + 2, k + 1)}', 'f(0, 0)'])).toBeNaN();
+  });
+
   it('is undefined when the passes run out, the state blows up, or no case holds', () => {
     expect(valueOf(['f(n) = {n < 0: 1, f(n + 1)}', 'f(0)'])).toBeNaN();
     expect(valueOf(['f(n) = {n > 10^300: 1, f(n + 1)}', 'f(0)'])).toBeNaN();

@@ -12,7 +12,7 @@ import { traceIntersection } from '../lib/intersection.ts';
 import { traceField } from '../lib/flow.ts';
 import { type PmfStems, markerHeight, scaleCurve, scaleStems, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
-import { type Expr, evaluate, substVars } from '../lib/expr.ts';
+import { type Expr, LOOP_LIMIT, evaluate, substVars } from '../lib/expr.ts';
 import { cellShades, runAutomaton } from '../lib/automaton.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { glyphScale } from '../lib/glyphs.ts';
@@ -1114,6 +1114,27 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
 };
 
 /**
+ * The preview evaluates every pixel on the CPU, ~180k of them: one
+ * recursion of LOOP_LIMIT passes is about a second, and a counted loop may
+ * ask for 5000 (lib/defs.ts counterCap) — minutes. Past this many passes
+ * per pixel, nested loops multiplied, the row gets no preview.
+ */
+const OG_LOOP_PASSES = LOOP_LIMIT + 8;
+
+/** The most passes per evaluation any loop in a plan can run. Inlined
+ *  definitions share subtrees, so each node is visited once. */
+function loopPasses(value: unknown, seen = new WeakMap<object, number>()): number {
+  if (typeof value !== 'object' || value === null || ArrayBuffer.isView(value)) return 1;
+  const known = seen.get(value);
+  if (known !== undefined) return known;
+  seen.set(value, 1);
+  const inner = Object.values(value).reduce<number>((m, v) => Math.max(m, loopPasses(v, seen)), 1);
+  const passes = (value as { kind?: unknown }).kind === 'loop' ? (value as { limit: number }).limit * inner : inner;
+  seen.set(value, passes);
+  return passes;
+}
+
+/**
  * Why this renderer cannot draw a classified row — null when it draws.
  *
  * OG_COVERAGE is the type-level map; this is the row-level truth, because two
@@ -1139,6 +1160,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   }
   const type = cpu.type;
   if (type === 'trail') return 'trail(point) accumulates live motion history; no static preview is available';
+  if (loopPasses(cpu) > OG_LOOP_PASSES)
+    return 'a recursive function here may run thousands of passes per pixel, too slow for a static preview; the live app runs them on the GPU';
   if (!needs3D) {
     return OG_COVERAGE[type] === 'draws'
       ? null

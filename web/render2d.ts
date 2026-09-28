@@ -624,15 +624,17 @@ ${paramDecls(params)}
 out vec4 outColor;
 ${GLSL_PRELUDE}
 ${colorConversionGLSL(space)}
-vec3 F(float x, float y) {
+vec4 F(float x, float y) {
 ${locals}
 return ${field};
 }
 void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
-  vec3 channels = F(p.x, p.y);
+  vec4 channels = F(p.x, p.y);
   if (any(isnan(channels)) || any(isinf(channels))) discard;
-  outColor = vec4(eqColorToSRGB(channels), 1.0);
+  float a = clamp(channels.w, 0.0, 1.0);
+  if (a < 0.004) discard;
+  outColor = vec4(eqColorToSRGB(channels.xyz), a);
 }
 `;
 }

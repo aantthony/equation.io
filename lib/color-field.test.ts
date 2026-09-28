@@ -32,7 +32,8 @@ describe.each(['rgb', 'hsl', 'oklch'] as const)('%s color fields', name => {
 
   it.each([
     ['(1,2)', /three channels/],
-    ['(1,2,3,4)', /three channels/],
+    ['(1,2,3,4,5)', /three channels and an optional opacity/],
+    ['(1,2,3,w)', /real numbers/],
     ['(w,0,0)', /real numbers/],
     ['(0<x<1,0,0)', /real numbers, not comparisons/],
     ['(u,0,0)', /Cannot use u\/v/],

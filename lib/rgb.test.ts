@@ -15,7 +15,13 @@ describe('RGB color fields', () => {
         { kind: 'num', value: 0 },
       ],
     });
-    expect(row.gpu).toMatchObject({ type: 'rgb2d', field: 'vec3(1.0, 0.5, 0.0)' });
+    expect(row.gpu).toMatchObject({ type: 'rgb2d', field: 'vec4(1.0, 0.5, 0.0, 1.0)' });
+  });
+
+  it('takes an optional fourth channel, the opacity', () => {
+    const row = analyzeRows(['rgb(1, 0.5, 0, x)']).rows[0];
+    expect(row.error).toBeUndefined();
+    expect(row.gpu).toMatchObject({ type: 'rgb2d', field: 'vec4(1.0, 0.5, 0.0, x)' });
   });
 
   it('supports the aperture palette through coordinate fields and real projections of complex expressions', () => {
