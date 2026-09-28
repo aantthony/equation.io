@@ -30,6 +30,13 @@ describe('contextual syntax help', () => {
     expect(syntaxHelp('polyl', 5, defs()).suggestions.map(s => s.signature)).toEqual(['polyline(A, B, C, …)']);
     expect(syntaxHelp('vector(', 7, defs()).hint).toContain('from the origin to V');
   });
+  it('describes graph and mark while their arguments are typed', () => {
+    expect(syntaxHelp('grap', 4, defs()).suggestions.map(s => s.signature)).toContain(
+      'graph(from, to) or graph(from, to, label)',
+    );
+    expect(syntaxHelp('graph(k, ', 9, defs()).hint).toContain('graph(from, to) or graph(from, to, label)');
+    expect(syntaxHelp('mark(', 5, defs()).hint).toContain('mark(v)');
+  });
   it('describes revolve', () => {
     expect(syntaxHelp('revo', 4, defs()).suggestions.map(s => s.signature)).toEqual(['revolve(f(x))']);
     expect(syntaxHelp('revolve(', 8, defs()).hint).toContain('about the x-axis');
