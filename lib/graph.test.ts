@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { evaluate } from './expr.ts';
-import { collectEdges, edgeText, graphRadius, layoutGraph } from './graph.ts';
+import { collectEdges, edgeEvaluator, edgeText, graphRadius, layoutGraph } from './graph.ts';
 
-/** The graph the last graph(…) row of `rows` draws. */
+/** The graph the last graph(…) row of `rows` draws, compiled as the app
+ *  runs it and checked against evaluate(). */
 function graphOf(rows: string[]) {
   const a = analyzeRows(rows);
   const bad = a.rows.find(r => r.error);
@@ -11,7 +12,9 @@ function graphOf(rows: string[]) {
   const row = a.rows.findLast(r => r.cpu?.type === 'graph');
   if (row?.cpu?.type !== 'graph') throw new Error('no graph row');
   const env = { ...a.constEnv, t: 0 };
-  return collectEdges(row.cpu.edges.map(e => e.map(c => evaluate(c, env))));
+  const g = collectEdges(edgeEvaluator(row.cpu.edges)(env));
+  expect(g).toEqual(collectEdges(row.cpu.edges.map(e => e.map(c => evaluate(c, env)))));
+  return g;
 }
 const arrows = (g: ReturnType<typeof collectEdges>) =>
   g.edges.map(e => `${e.from}>${e.to}${edgeText(e) && ':' + edgeText(e)}`).sort();
@@ -44,6 +47,20 @@ describe('graph rows', () => {
     ]);
     // AB = [[1 2] [2 2]]: (AB)_ik counts the two-step paths i → j → k.
     expect(arrows(g)).toEqual(['1>1', '1>2:×2', '2>1:×2', '2>2:×2']);
+  });
+
+  it('every step of the Collatz orbits of 1..50: recursion over two lists', () => {
+    const g = graphOf([
+      'c(m) = {mod(m, 2) = 0: m/2, 3m + 1}',
+      'f(m, j) = {m <= 1: 1, j <= 0: m, f(c(m), j - 1)}',
+      'k = [1..50]',
+      'j = [0..111]',
+      'graph({f(k, j) > 1: f(k, j)}, c(f(k, j)))',
+    ]);
+    // A tree into 1: every vertex but 1 has one arrow out. 27 peaks at 9232.
+    expect(g.vertices).toHaveLength(173);
+    expect(g.edges).toHaveLength(172);
+    expect(g.vertices.at(-1)).toBe(9232);
   });
 
   it('refuses what is not vertices', () => {
