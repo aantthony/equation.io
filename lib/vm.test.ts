@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { evaluate, parseExpr } from './expr.ts';
+import { type Expr, evaluate, parseExpr } from './expr.ts';
+import { countNodes } from './size.ts';
 import { compileProg, compileSampler, run } from './vm.ts';
 
 describe('expression stack machine', () => {
@@ -61,6 +62,30 @@ describe('expression stack machine', () => {
     const even = parseExpr('x^(1/2)');
     const evenProg = compileProg(even, new Map([['x', 0]]));
     expect(run(evenProg, [-4], new Float64Array(evenProg.depth))).toBeNaN();
+  });
+
+  it('works out a subexpression that recurs once', () => {
+    // Equal trees and one shared node alike: as a symbolic derivative
+    // repeats its operand in every product- and chain-rule term.
+    const e = parseExpr('(sin(x) + y)^2 (sin(x) + y) + cos(sin(x) + y) + {sin(x) + y > 1: sin(x) + y, -(sin(x) + y)}');
+    const shared = parseExpr('sin(x) + y');
+    const dag: Expr = { kind: 'bin', op: '*', a: shared, b: { kind: 'bin', op: '-', a: shared, b: shared } };
+    const slots = new Map([
+      ['x', 0],
+      ['y', 1],
+    ]);
+    for (const tree of [e, dag]) {
+      const prog = compileProg(tree, slots);
+      expect(prog.code.length / 2).toBeLessThan(countNodes(tree));
+      const stack = new Float64Array(prog.depth);
+      for (const [x, y] of [
+        [0.5, -1.2],
+        [3, 4],
+        [-2.5, 0.1],
+      ]) {
+        expect(run(prog, [x, y], stack)).toBe(evaluate(tree, { x, y }));
+      }
+    }
   });
 
   it('reports the true stack depth for deeply right-nested expressions', () => {

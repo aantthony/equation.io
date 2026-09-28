@@ -204,11 +204,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     list u0 reads each point: `curvature(C, [0.2, 0.4])`.
   - `osculating(C, u0)` draws the osculating circle at u = u0: through the
     point, radius 1/|κ|, centred on the concave side. A space curve's lies in
-    its osculating plane. Nothing is drawn where κ = 0 (an inflection). A
-    list u0 draws one circle per point.
+    its osculating plane. Where κ = 0 (an inflection) it is the tangent line,
+    and near one a large circle that flattens into it. A list u0 draws one
+    circle per point.
   - `frame(C, u0)` draws the Frenet frame at u = u0 as unit arrows from the
-    point: T (tangent), N (toward the centre of curvature) and, in space,
-    B = T × N; one point at a time. With t for u0 it rides along; a `C` row draws u from 0 to 1,
+    point: T (tangent), N and, in space, B = T × N; one point at a time. In
+    the plane N is T turned left (with κ signed, κN points toward the centre
+    of curvature); in space N points toward the centre, and N and B are
+    undefined where κ = 0. With t for u0 it rides along; a `C` row draws u from 0 to 1,
     so trace the curve once over that and wrap t into it:
     `C = (2cos(2pi u), sin(2pi u))`, `C`, `frame(C, t/10)`,
     `osculating(C, t/10)` (u0 past 1 is the same point again).

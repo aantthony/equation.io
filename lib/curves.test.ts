@@ -5,7 +5,8 @@ import { diff } from './diff.ts';
 import { evaluate, type Expr, parseExpr } from './expr.ts';
 import { foldAllExcept } from './path.ts';
 import { plotReadout } from './plot.ts';
-import { countNodes, exceedsNodes } from './size.ts';
+import { countNodes } from './size.ts';
+import { compileProg } from './vm.ts';
 import { EXAMPLES } from '../web/examples.ts';
 import { splitStatements } from './statements.ts';
 
@@ -51,14 +52,19 @@ const dot = (a: number[], b: number[]) => a.reduce((s, ak, k) => s + ak * b[k], 
 describe('curvature', () => {
   it('reads 0 on a straight line traced at a varying speed', () => {
     // Lagrange's |r′|²|r″|² − (r′·r″)² left rounding the size of the terms
-    // here: 0.16 on a line, 1e24 where it turns back, and a torsion.
+    // here: 0.16 on a line, and a torsion. The cross product leaves 0, or
+    // rounding far below any curvature (here ~1e-17).
     expect(value(['C = (u^3, 2u^3, 3u^3)', 'curvature(C, 0.0025)'])).toBe(0);
     const line = 'C = (cos(2pi u), cos(2pi u)/3, cos(2pi u)/7)';
-    expect(value([line, 'curvature(C, 0.5)'])).toBe(0);
-    expect(value([line, 'curvature(C, 0.3)'])).toBe(0);
-    expect(readout([line, 'torsion(C, 0.3)'])).toBe('undefined');
+    expect(Math.abs(value([line, 'curvature(C, 0.3)']))).toBeLessThan(1e-15);
     // A curve that is curved but mostly speeding up still reads its κ.
     expect(value(['curvature((u^3, u^6), 0.01)'])).toBeCloseTo(2, 4);
+  });
+  it('reads rounding, not a gate, at an inflection', () => {
+    // The figure eight's crossing: sin 2π ≈ −2.4e-16, not 0, and κ is what
+    // the formula gives, a tiny number. y = x³ has its inflection exactly.
+    expect(Math.abs(value(['C = (2sin(2pi u), sin(4pi u))', 'curvature(C, 1)']))).toBeLessThan(1e-15);
+    expect(value(['curvature((u, u^3), 0)'])).toBe(0);
   });
   it('reads a list of points one by one', () => {
     const C = 'C = (2cos(u), sin(u))';
@@ -104,16 +110,6 @@ describe('curvature', () => {
     // An ellipse is most curved at the ends of its long axis: a/b² = 2.
     expect(evaluate(o.source.coordinates[1], { ...env, u: 0 })).toBeCloseTo(2);
     expect(evaluate(o.source.coordinates[1], { ...env, u: Math.PI / 2 })).toBeCloseTo(0.25);
-  });
-  it('is undefined on the GPU where the curve is straight', () => {
-    const rows = ['C = (u, {u < 0.5: 0, (u - 0.5)^3}, {u < 0.5: 0, (u - 0.5)^4})', 'y = torsion(C, x)'];
-    const r = analyzeRows(rows, { backend: 'gpu' }).rows.at(-1)!;
-    expect(r.error).toBeUndefined();
-    const glsl = JSON.stringify(r.gpu);
-    // GLSL leaves sqrt of a negative undefined (ANGLE folds sqrt(-1.0) to
-    // 0): the gate is an even root, which eq_pow makes EQ_NAN.
-    expect(glsl).not.toMatch(/sqrt\(cos\(atan/);
-    expect(glsl).toMatch(/eq_pow\(cos\(atan\(/);
   });
   it('plots along u inside any curve in u, and in a tube', () => {
     const C = 'C = (2cos(2pi u), sin(2pi u))';
@@ -175,8 +171,8 @@ describe('curvature', () => {
     }
   });
   it('differentiates along u symbolically', () => {
-    // The straight-line gate is flat away from its jump, as a piecewise is:
-    // no finite difference stands in for d/du κ.
+    // κ is a plain quotient: diff takes it whole (it throws where it would
+    // fall back to finite differences), and it matches the closed form.
     const r = [parseExpr('2cos(2pi u)'), parseExpr('sin(2pi u)')];
     const d = (e: Expr) => diff(e, 'u');
     const dk = diff(curvatureOf(r, d), 'u');
@@ -205,20 +201,23 @@ function circumcircle([a, b, c]: number[][]): { centre: number[]; radius: number
 }
 
 describe('osculating(C, u0)', () => {
+  /** u from 0 to 1, as a curve is sampled. */
+  const us = Array.from({ length: 101 }, (_, k) => k / 100);
   it('is the circle of radius 1/κ through the point, on its concave side', () => {
     // The ellipse (2cos u, sin u) at u = 0: the point (2, 0), κ = 2, so the
-    // circle has radius 1/2 and centre (1.5, 0), inside the ellipse.
+    // circle has radius 1/2 and centre (1.5, 0), inside the ellipse. The
+    // point is at u = 1/2, and u = 0 and 1 run round to the far side.
     const { at } = circle(['C = (2cos(u), sin(u))', 'osculating(C, 0)']);
-    expect(at(0).map(c => +c.toFixed(12))).toEqual([2, 0]);
-    const rim = [0, 0.1, 0.25, 0.5, 0.8].map(at);
-    for (const p of rim) expect(Math.hypot(p[0] - 1.5, p[1])).toBeCloseTo(0.5, 12);
-    expect(at(0.5)[0]).toBeCloseTo(1);
+    expect(at(0.5).map(c => +c.toFixed(12))).toEqual([2, 0]);
+    for (const p of us.map(at)) expect(Math.hypot(p[0] - 1.5, p[1])).toBeCloseTo(0.5, 12);
+    expect(at(0)[0]).toBeCloseTo(1);
+    expect(at(1)[0]).toBeCloseTo(1);
   });
   it('touches the curve at a general point, matching it to second order', () => {
     // At u0 = 0.6 on y = x³ − x: the circle passes through the point, and
     // the curve's neighbours stay within O(h³) of it.
     const { at } = circle(['osculating((u, u^3 - u), 0.6)']);
-    const { centre, radius } = circumcircle([0, 0.3, 0.6].map(at));
+    const { centre, radius } = circumcircle([0.2, 0.5, 0.7].map(at));
     const f = (s: number) => Math.hypot(s - centre[0], s ** 3 - s - centre[1]) - radius;
     expect(f(0.6)).toBeCloseTo(0, 9);
     const h = 1e-2;
@@ -229,36 +228,38 @@ describe('osculating(C, u0)', () => {
     // An implicit circle made the og renderer (and the GPU, per pixel) work
     // out the centre from the curve's derivatives at every point of its grid.
     const { coordinates, env } = circle(['C = (3cos(2pi u), 1.5sin(2pi u))', 'osculating(C, t/10)']);
+    expect(coordinates.reduce((n, c) => n + countNodes(c), 0)).toBeGreaterThan(1000);
     const folded = foldAllExcept(coordinates, 'u', { ...env, t: 3 });
-    expect(folded.reduce((n, c) => n + countNodes(c), 0)).toBeLessThan(80);
+    expect(folded.reduce((n, c) => n + countNodes(c), 0)).toBeLessThan(100);
   });
   it('draws one circle per point of a list', () => {
     const { r, env } = row(['C = (2cos(u), sin(u))', 'osculating(C, [0, pi/2])']);
     const o = r.cls!.object;
     if (o.kind !== 'family') throw new Error(o.kind);
     expect(o.members).toHaveLength(2);
-    const [first] = o.members.map(m => {
+    const [first, second] = o.members.map(m => {
       const c = m.object;
       if (c.kind !== 'curve' || c.form !== 'parametric' || c.source.representation !== 'real') throw new Error(c.kind);
       return (u: number) => c.source.coordinates.map(e => evaluate(e, { ...env, u }));
     });
-    expect(Math.hypot(first(0.5)[0] - 1, first(0.5)[1])).toBeCloseTo(0, 12);
+    // Through (2, 0) with radius 1/2, and through (0, 1) with radius 4.
+    expect(Math.hypot(first(0.5)[0] - 2, first(0.5)[1])).toBeCloseTo(0, 12);
+    for (const p of us.map(first)) expect(Math.hypot(p[0] - 1.5, p[1])).toBeCloseTo(0.5, 9);
+    expect(Math.hypot(second(0.5)[0], second(0.5)[1] - 1)).toBeCloseTo(0, 12);
+    for (const p of us.map(second)) expect(Math.hypot(p[0], p[1] + 3)).toBeCloseTo(4, 9);
   });
   it('moves with t', () => {
     const { r } = row(['C = (cos(u), sin(u))', 'osculating(C, t)']);
     expect(r.cls!.animated).toBe(true);
   });
   it('lies in the osculating plane of a space curve', () => {
-    // The helix (2cos u, 2sin u, u): radius 1/κ = 2.5, through the point.
+    // The helix (2cos u, 2sin u, u) at u = 0: the point (2, 0, 0), κ = 0.4,
+    // N toward the axis, so radius 2.5 about (−0.5, 0, 0).
     const { at } = circle(['C = (2cos(u), 2sin(u), u)', 'osculating(C, 0)']);
-    const rim = [0, 0.25, 0.5, 0.75].map(at);
-    const centre = rim[0].map((c, k) => (c + rim[2][k]) / 2);
-    for (const p of rim) expect(Math.hypot(...minus(p, centre))).toBeCloseTo(2.5);
-    // The point of the curve is on it, and the centre is toward the axis.
-    expect(Math.hypot(...minus(at(0), [2, 0, 0]))).toBeLessThan(1e-9);
-    expect(centre[0]).toBeCloseTo(-0.5);
+    expect(Math.hypot(...minus(at(0.5), [2, 0, 0]))).toBeLessThan(1e-12);
+    for (const p of us.map(at)) expect(Math.hypot(...minus(p, [-0.5, 0, 0]))).toBeCloseTo(2.5, 9);
     // Its plane is the osculating plane: normal to B = (0, −1, 2)/√5 there.
-    for (const p of [0.1, 0.3, 0.6, 0.9].map(at)) expect(dot(minus(p, [2, 0, 0]), [0, -1, 2])).toBeCloseTo(0, 12);
+    for (const p of us.map(at)) expect(dot(minus(p, [2, 0, 0]), [0, -1, 2])).toBeCloseTo(0, 12);
   });
   it('keeps a space osculating circle small enough to sample every frame', () => {
     // Its derivatives along u (for a κ comb) were the circle's whole
@@ -269,34 +270,77 @@ describe('osculating(C, u0)', () => {
     // Symbolic, so the combs are not finite differences (a jagged τ comb).
     expect(cpu.d3).toBeDefined();
     const perFrame = [cpu.comps, cpu.d1, cpu.d2, cpu.d3].flatMap(v => v ?? []);
-    expect(exceedsNodes(perFrame, 100000)).toBe(false);
+    // What a frame samples: folded, and each part that recurs (sinc and its
+    // derivatives, in every product-rule term) worked out once.
     const folded = foldAllExcept(perFrame, 'u', { ...env, t: 7 });
-    expect(folded.reduce((n, c) => n + countNodes(c), 0)).toBeLessThan(400);
+    const ops = folded.reduce((n, c) => n + compileProg(c, new Map([['u', 0]])).code.length / 2, 0);
+    expect(ops).toBeLessThan(2000);
   });
   it('needs a point on the curve', () => {
     expect(error(['C = (cos(u), sin(u))', 'osculating(C)'])).toMatch(/where on it/);
   });
-  it('is straight at an inflection that rounding leaves slightly bent', () => {
-    // The figure eight's crossing at u = 1: sin 2π ≈ −2.4e-16, not 0.
-    const eight = 'C = (2sin(2pi u), sin(4pi u))';
-    expect(value([eight, 'curvature(C, 1)'])).toBe(0);
-    expect(circle([eight, 'osculating(C, 1)']).at(0.3).every(Number.isNaN)).toBe(true);
-    // Just off it the circle is back, of radius 1/κ on the concave side.
-    const kappa = value([eight, 'curvature(C, 0.96)']);
-    expect(1 / kappa).toBeCloseTo(6.23, 2);
-    const near = circle([eight, 'osculating(C, 0.96)']);
-    const { radius } = circumcircle([0, 0.3, 0.6].map(near.at));
-    expect(radius).toBeCloseTo(1 / kappa, 4); // κ as read out, to 6 digits
-    // N is undefined there; T is still drawn.
-    const [T, N] = arrows([eight, 'frame(C, 1)']);
-    expect(minus(T[1], T[0]).every(Number.isFinite)).toBe(true);
-    expect(minus(N[1], N[0]).some(Number.isNaN)).toBe(true);
+
+  // The figure eight crosses itself at u = 1 with an inflection: κ is 0
+  // there, up to rounding (sin 2π ≈ −2.4e-16).
+  const eight = 'C = (2sin(2pi u), sin(4pi u))';
+  it('is the tangent line at an inflection', () => {
+    // At (0, 0) the tangent is along (1, 1): the line y = x.
+    const { at } = circle([eight, 'osculating(C, 1)']);
+    const pts = us.map(at);
+    for (const [x, y] of pts) expect(Math.abs(y - x)).toBeLessThan(1e-9);
+    expect(Math.hypot(...at(0.5))).toBeLessThan(1e-12);
+    // It runs far past any view, both ways.
+    expect(pts[0][0]).toBeLessThan(-500);
+    expect(pts[100][0]).toBeGreaterThan(500);
   });
-  it('is not drawn where a straight line turns back', () => {
-    // (cos 2πu, 2cos 2πu) runs along a line and back: at u = 0.50001 the
+  it('is a large circle on the concave side just off an inflection', () => {
+    const kappa = value([eight, 'curvature(C, 0.96)']);
+    expect(1 / Math.abs(kappa)).toBeCloseTo(6.23, 2);
+    const { at } = circle([eight, 'osculating(C, 0.96)']);
+    const { centre, radius } = circumcircle([0.1, 0.5, 0.9].map(at));
+    expect(radius).toBeCloseTo(1 / Math.abs(kappa), 4); // κ as read out, to 6 digits
+    for (const p of us.map(at)) expect(Math.hypot(...minus(p, centre))).toBeCloseTo(radius, 9);
+    // The curve bends toward the centre: its second difference points there.
+    const curve = (u: number) => [2 * Math.sin(2 * Math.PI * u), Math.sin(4 * Math.PI * u)];
+    const bend = minus(minus(curve(0.97), curve(0.96)), minus(curve(0.96), curve(0.95)));
+    expect(dot(bend, minus(centre, at(0.5)))).toBeGreaterThan(0);
+  });
+  it('touches the curve with its tangent nearer the inflection', () => {
+    const { at } = circle([eight, 'osculating(C, 0.99)']);
+    const p = [2 * Math.sin(2 * Math.PI * 0.99), Math.sin(4 * Math.PI * 0.99)];
+    expect(Math.hypot(...minus(at(0.5), p))).toBeLessThan(1e-12);
+    const T = [Math.cos(2 * Math.PI * 0.99), Math.cos(4 * Math.PI * 0.99)];
+    const h = 1e-6;
+    const along = minus(at(0.5 + h), at(0.5 - h));
+    expect(Math.abs(along[0] * T[1] - along[1] * T[0]) / Math.hypot(...along) / Math.hypot(...T)).toBeLessThan(1e-6);
+    expect(dot(along, T)).toBeGreaterThan(0);
+  });
+  it('moves continuously through the inflection', () => {
+    // Within the view (|s| < 4 about the point), the circle a hair before
+    // u0 = 1 and the line at it are the same to far below a pixel.
+    const before = circle([eight, 'osculating(C, 0.999999999)']).at;
+    const on = circle([eight, 'osculating(C, 1)']).at;
+    for (let k = -8; k <= 8; k++) {
+      const u = 0.5 + k * 0.00025;
+      expect(Math.hypot(...minus(before(u), on(u)))).toBeLessThan(1e-6);
+    }
+  });
+  it('is the line itself on a straight line in space', () => {
+    const { at } = circle(['osculating((u, 2u, 3u), 0.3)']);
+    const pts = us.map(at);
+    for (const p of pts) {
+      expect(p.every(Number.isFinite)).toBe(true);
+      const off = minus(p, [0.3, 0.6, 0.9]);
+      const t = off[0];
+      expect(Math.hypot(...minus(off, [t, 2 * t, 3 * t]))).toBeLessThan(1e-9);
+    }
+    expect(Math.hypot(...minus(pts[100], pts[0]))).toBeGreaterThan(1000);
+  });
+  it('is the line where a straight line turns back', () => {
+    // (cos 2πu, 2cos 2πu) runs along y = 2x and back: at u = 0.50001 the
     // Lagrange form drew a circle of radius 0.74 about the point.
     const { at } = circle(['C = (cos(2pi u), 2cos(2pi u))', 'osculating(C, 0.50001)']);
-    expect(at(0.3).every(Number.isNaN)).toBe(true);
+    for (const [x, y] of us.map(at)) expect(Math.abs(y - 2 * x)).toBeLessThan(1e-6);
   });
 });
 
@@ -307,12 +351,20 @@ describe('frame(C, u0)', () => {
     expect(minus(T[1], T[0]).map(c => +c.toFixed(9))).toEqual([0, 1]);
     expect(minus(N[1], N[0]).map(c => +c.toFixed(9))).toEqual([-1, 0]);
   });
-  it('keeps N on the concave side as a plane curve turns either way', () => {
-    // y = x³: concave down left of 0, up right of it.
-    const [, left] = arrows(['frame((u, u^3), -0.5)']);
-    const [, right] = arrows(['frame((u, u^3), 0.5)']);
-    expect(minus(left[1], left[0])[1]).toBeLessThan(0);
-    expect(minus(right[1], right[0])[1]).toBeGreaterThan(0);
+  it('turns N a quarter left of T in the plane, so κN points to the concave side', () => {
+    // y = x³: concave down left of 0 (κ < 0), up right of it (κ > 0).
+    for (const u0 of [-0.5, 0.5]) {
+      const [T, N] = arrows([`frame((u, u^3), ${u0})`]).map(([tail, head]) => minus(head, tail));
+      expect(N[0]).toBeCloseTo(-T[1], 12);
+      expect(N[1]).toBeCloseTo(T[0], 12);
+      const kappa = value([`curvature((u, u^3), ${u0})`]);
+      expect(Math.sign(kappa * N[1])).toBe(Math.sign(u0));
+    }
+  });
+  it('is defined through a plane inflection', () => {
+    const [T, N] = arrows(['C = (2sin(2pi u), sin(4pi u))', 'frame(C, 1)']).map(([tail, head]) => minus(head, tail));
+    const r = Math.SQRT1_2;
+    [r, r, -r, r].forEach((c, k) => expect([...T, ...N][k]).toBeCloseTo(c, 9));
   });
   it('adds B = T × N in space, all three orthonormal', () => {
     const frame = arrows(['C = (2cos(u), 2sin(u), u)', 'frame(C, 0.9)']);

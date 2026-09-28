@@ -1362,7 +1362,7 @@ function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   if (u0 && (u0.kind === 'vec' || (freeVars(u0).has('u') && !ownU))) {
     throw new Error(`${name}: the second argument is where on the curve — a number, slider or t, not u: ${example}.`);
   }
-  // Several points map element by element (the gate is arithmetic), and the
+  // Several points map element by element (the formulas have no branch), and the
   // circles make a family; the frame's arrows take one point at a time.
   if (name === 'frame' && u0 && listValued(u0, ctx)) {
     throw new Error(

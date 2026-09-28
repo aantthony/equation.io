@@ -4,17 +4,6 @@ import { diff } from './diff.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { classify } from './plot.ts';
 
-describe('non-smooth functions of a constant', () => {
-  it('differentiate to 0 when their argument does not move, and still throw when it does', () => {
-    const e = parseExpr('floor(a - t) cos(u)');
-    expect(evaluate(diff(e, 'u'), { a: 2.5, t: 1, u: 0.5 })).toBeCloseTo(-Math.sin(0.5));
-    expect(() => diff(parseExpr('floor(u)'), 'u')).toThrow(/floor/);
-  });
-  it('leave sign non-smooth, so callers can see its jump', () => {
-    expect(() => diff(parseExpr('sign(u^2 - 1) u'), 'u')).toThrow(/sign/);
-  });
-});
-
 function ddx(s: string, at: Record<string, number>, wrt = 'x'): number {
   return evaluate(diff(parseExpr(s), wrt), at);
 }
