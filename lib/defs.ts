@@ -79,6 +79,7 @@ import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
 import { inferScalarType } from './complex.ts';
+import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -938,13 +939,14 @@ const num = (value: number): Expr => ({ kind: 'num', value });
  * out. Differentiation has to see through them: with `g = x^2 + y^2`, the
  * name g alone differentiates as a constant, so `d/dx g` and `grad(g)` were
  * silently 0. Names whose value does not use x, y or z (sliders, animated
- * constants) stay names.
+ * constants) stay names. `over` asks for other variables instead: u writes
+ * out a named curve and the scalars over u it uses.
  */
-function throughFields(e: Expr, opts?: ResolveOpts): Expr {
+function throughFields(e: Expr, opts?: ResolveOpts, over: ReadonlySet<string> = SPACE): Expr {
   const lookup = opts?.definition;
   if (!lookup) return e;
   const closed = (name: string, seen: ReadonlySet<string>): Expr | null => {
-    if (SPACE.has(name) || seen.has(name)) return null;
+    if (over.has(name) || seen.has(name)) return null;
     const value = lookup(name);
     if (!value || value.kind === 'vec' || value.kind === 'list') return null;
     const inner = new Set(seen).add(name);
@@ -954,7 +956,7 @@ function throughFields(e: Expr, opts?: ResolveOpts): Expr {
       if (c) sub[v] = c;
     }
     const out = Object.keys(sub).length ? substVars(value, sub) : value;
-    return [...freeVars(out)].some(v => SPACE.has(v)) ? out : null;
+    return [...freeVars(out)].some(v => over.has(v)) ? out : null;
   };
   const sub: Record<string, Expr> = {};
   for (const v of freeVars(e)) {
@@ -1276,6 +1278,105 @@ function vectorCalculus(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   // In the plane, the scalar ∂Q/∂x − ∂P/∂y (the z-component of the 3D curl).
   if (!R) return sub(d(Q, 'x'), d(P, 'y'));
   return { kind: 'vec', items: [sub(d(R, 'y'), d(Q, 'z')), sub(d(P, 'z'), d(R, 'x')), sub(d(Q, 'x'), d(P, 'y'))] };
+}
+
+/** The operators on a parametric curve in u (lib/curves.ts). */
+const CURVE_OPS: ReadonlySet<string> = new Set(['curvature', 'torsion', 'osculating', 'frame']);
+const CURVE_OP_EXAMPLE: Record<string, string> = {
+  curvature: 'curvature(C) or curvature(C, 0.25)',
+  torsion: 'torsion(C) or torsion(C, 0.25)',
+  osculating: 'osculating(C, 0.25)',
+  frame: 'frame(C, 0.25)',
+};
+/** The curve parameter: a definition over it is a named curve. A named
+ *  field over x, y or z is written out too, to be refused. */
+const ALONG: ReadonlySet<string> = new Set(['u', ...SPACE]);
+
+/**
+ * What a curve operator acts on, as its components in u: a tuple, a named
+ * curve (c = (cos(2pi u), sin(2pi u)), written out through any scalar it
+ * uses), or a function of one parameter, called at u.
+ */
+function curveOperand(name: string, arg: Expr, ctx: Ctx): readonly Expr[] {
+  const usage = `${name} takes a parametric curve in u, like ${CURVE_OP_EXAMPLE[name]} with C = (cos(2pi u), sin(2pi u)).`;
+  let r: Expr = arg;
+  if (arg.kind === 'var') {
+    const fn = ctx.getFn(arg.name);
+    if (fn) {
+      if (fn.params.length !== 1 || fn.recursive) throw new Error(usage);
+      r = substVars(fn.body, { [fn.params[0]]: { kind: 'var', name: 'u' } });
+    }
+  }
+  if (ctx.opts.comps) r = lowerGeom(r, ctx.opts.comps, () => null, ctx.opts.isList);
+  r = throughFields(r, ctx.opts, ALONG);
+  if (r.kind === 'var' && arg.kind === 'var') {
+    const n = arg.name;
+    const what = ctx.opts.consts?.[n] !== undefined ? 'a number' : ctx.opts.isList?.(n) ? 'a list' : null;
+    if (what) throw new Error(`${name}: ${n} is ${what}, not a curve in u. ${usage}`);
+    if (!ctx.opts.documentNames?.has(n)) {
+      throw new Error(`${name}: ${n} is not a curve — define one first, like ${n} = (cos(2pi u), sin(2pi u)).`);
+    }
+  }
+  if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
+  const vars = freeVars(r);
+  if (!vars.has('u')) throw new Error(`${name} needs a curve, which moves with u — this is a fixed point. ${usage}`);
+  if (vars.has('v') || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
+  return r.items;
+}
+
+/** Whether e is a list: a literal, a data column or a named list, or one
+ *  mapped over, filtered (s[s > 0.3]) or sliced — not one reduced or
+ *  indexed to a number (as staysList). */
+function listValued(e: Expr, ctx: Ctx): boolean {
+  if (e.kind === 'list' || e.kind === 'data') return true;
+  if (e.kind === 'var') return !!ctx.opts.isList?.(e.name);
+  if (e.kind === 'index') return e.args[1].kind === 'range' || listValued(e.args[1], ctx);
+  if (
+    e.kind === 'call' &&
+    (SCALAR_REDUCTIONS.has(e.name) || ((e.name === 'min' || e.name === 'max') && e.args.length === 1))
+  )
+    return false;
+  return childrenOf(e).some(c => listValued(c, ctx));
+}
+
+/**
+ * curvature and torsion (along u, or at a point u0 of the curve), the
+ * osculating circle at u0 and the Frenet frame at u0.
+ */
+function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
+  const example = CURVE_OP_EXAMPLE[name];
+  const needsPoint = name === 'osculating' || name === 'frame';
+  if (args.length !== 2 && (needsPoint || args.length !== 1)) {
+    throw new Error(
+      needsPoint
+        ? `${name} takes a curve and where on it: ${example}.`
+        : `${name} takes a curve, and optionally where on it: ${example}.`,
+    );
+  }
+  const r = curveOperand(name, args[0], ctx);
+  const u0 = args[1];
+  // κ(u) and τ(u) are functions of u, so k(u) = curvature(C, u) is κ; the
+  // circle and frame are drawn over u of their own, which a u0 in u
+  // would capture.
+  const ownU = !needsPoint && !!ctx.opts.params?.has('u');
+  if (u0 && (u0.kind === 'vec' || (freeVars(u0).has('u') && !ownU))) {
+    throw new Error(`${name}: the second argument is where on the curve — a number, slider or t, not u: ${example}.`);
+  }
+  // Several points map element by element (the formulas have no branch), and the
+  // circles make a family; the frame's arrows take one point at a time.
+  if (name === 'frame' && u0 && listValued(u0, ctx)) {
+    throw new Error(
+      'frame takes one point on the curve at a time — a number, slider or t, like frame(C, 0.25) — not a list.',
+    );
+  }
+  if (name === 'torsion' && r.length !== 3) {
+    throw new Error('torsion needs a curve in space — a plane curve has none, and its curvature is signed.');
+  }
+  const d = (e: Expr): Expr => applyDiff(e, 'u', 1, ctx.opts, ctx.getFn);
+  if (name === 'osculating') return osculatingOf(r, d, u0);
+  if (name === 'frame') return frameOf(r, d, u0);
+  const along = name === 'curvature' ? curvatureOf(r, d) : torsionOf(r, d);
+  return u0 ? substVars(along, { u: u0 }) : along;
 }
 
 interface StripDx {
@@ -2032,8 +2133,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const { arg } = over;
         return { kind: 'call', name: e.name, args: e.args[0].kind === 'vec' && arg.kind === 'vec' ? arg.items : [arg] };
       }
-      const args = legacyCallArgs(e.name, e.args).map(x => rx(x, ctx));
       const fn = getFn(e.name);
+      // A document's own function takes its arguments as any function does:
+      // the builtin of that name may group a tuple (frame((1, 2), 3)), but
+      // `frame(a, b, c) = a + b + c` spreads it.
+      const args = legacyCallArgs(fn ? '' : e.name, e.args).map(x => rx(x, ctx));
       if (fn) {
         const n = fn.params.length;
         if (fn.recursive) {
@@ -2070,6 +2174,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
+      if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
       // Keyed by the source node: a function body inlined twice holds the
       // same literal, and `f(interval(0, 1))` hands one to every use of x.
       if (e.name === 'interval') return hiddenInterval(e, args);
@@ -2217,7 +2322,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const parse = (d: Definition & { rhs: string }): Expr => {
     const key = defKey(d);
     let p = parsed.get(key);
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, indexNamesOf(defs), valueNames)));
+    // A function's parameters are values in its body: f(frame) = frame(2).
+    const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedFnNames(d.params)]) : valueNames;
+    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, indexNamesOf(defs), values)));
     return p;
   };
 

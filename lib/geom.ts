@@ -42,6 +42,7 @@ import {
   SHAPE_HINT,
   solveVec,
   traceOf,
+  transposeOf,
 } from './mat.ts';
 import {
   type GetTensor,
@@ -824,6 +825,11 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
           const a = of(e.args[0]);
           return a && { m: expOf(a) };
         }
+        if (e.name === 'transpose' && e.args.length === 1) {
+          const a = of(e.args[0]);
+          if (!a) throw new Error('transpose takes a matrix — define one with M = ((a, b), (c, d)).');
+          return { m: transposeOf(a.m) };
+        }
         // cross(n, v) with its v left off: the matrix of v ↦ n × v.
         if (e.name === 'cross' && e.args.length === 1) {
           const n = lo(e.args[0]);
@@ -1087,6 +1093,15 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
           ),
         );
         return vc(...matVec(turn, [sub(flat[0], c[0]), sub(flat[1], c[1])]).map((p, k) => add(c[k], p)));
+      }
+      // A transpose lowered here stands where a number or point goes: matrix
+      // algebra (lowerMat) takes every transpose of a matrix before this.
+      if (e.name === 'transpose') {
+        if (!matsPossible) throw new MatrixSeen();
+        if (e.args.length !== 1 || !matOf(e.args[0])) {
+          throw new Error('transpose takes a matrix — define one with M = ((a, b), (c, d)).');
+        }
+        throw new Error('transpose(M) is a matrix: apply it to a vector, or give it a row of its own to read it.');
       }
       if (e.name === 'det' || e.name === 'trace' || e.name === 'solve') {
         const matArg = (raw: Expr | undefined): ReturnType<GetMat> => {
@@ -1392,7 +1407,8 @@ export function lowerMatrix(
         return spine(n.a) || spine(n.b);
       case 'call':
         return (
-          (n.name === 'cross' && n.args.length === 1) || (n.name === 'exp' && n.args.length === 1 && spine(n.args[0]))
+          (n.name === 'cross' && n.args.length === 1) ||
+          ((n.name === 'exp' || n.name === 'transpose') && n.args.length === 1 && spine(n.args[0]))
         );
       default:
         return false;

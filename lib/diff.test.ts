@@ -46,6 +46,45 @@ describe('diff', () => {
     expect(ddx('sinc(x)', { x: -0.7 })).toBeCloseTo(fd(x => Math.sin(x) / x, -0.7));
   });
 
+  it('differentiates sinc again and again, right at and around 0', () => {
+    // sinc″(0) = −1/3: the hole filled with a constant 0 differentiated to 0.
+    const d1 = diff(parseExpr('sinc(x)'), 'x');
+    const d2 = diff(d1, 'x');
+    const d3 = diff(d2, 'x');
+    const at = (e: typeof d1, x: number) => evaluate(e, { x });
+    expect(at(d1, 0)).toBe(0);
+    expect(at(d2, 0)).toBeCloseTo(-1 / 3, 15);
+    expect(at(d3, 0)).toBe(0);
+    // Closed forms, by Leibniz on sin x · (1/x).
+    const { sin, cos } = Math;
+    const closed = [
+      (x: number) => (x * cos(x) - sin(x)) / x ** 2,
+      (x: number) => -sin(x) / x - (2 * cos(x)) / x ** 2 + (2 * sin(x)) / x ** 3,
+      (x: number) => -cos(x) / x + (3 * sin(x)) / x ** 2 + (6 * cos(x)) / x ** 3 - (6 * sin(x)) / x ** 4,
+    ];
+    // Taylor series, where the closed forms cancel.
+    const series = [
+      (x: number) => -x / 3 + x ** 3 / 30 - x ** 5 / 840,
+      (x: number) => -1 / 3 + x ** 2 / 10 - x ** 4 / 168,
+      (x: number) => x / 5 - x ** 3 / 42,
+    ];
+    const ds = [d1, d2, d3];
+    for (const x of [0.7, -0.7, 0.5, 0.3, 0.21, 0.2, -0.19, -2]) {
+      ds.forEach((d, k) => expect(at(d, x)).toBeCloseTo(closed[k](x), 11));
+    }
+    for (const x of [1e-3, -1e-6, 1e-9]) {
+      ds.forEach((d, k) => expect(at(d, x)).toBeCloseTo(series[k](x), 14));
+    }
+    // And against a finite difference of the step below.
+    const h = 1e-5;
+    for (const [lo, hi] of [
+      [d1, d2],
+      [d2, d3],
+    ]) {
+      expect(at(hi, 0.7)).toBeCloseTo((at(lo, 0.7 + h) - at(lo, 0.7 - h)) / (2 * h), 8);
+    }
+  });
+
   it('differentiates min and max branchwise, as the chosen argument', () => {
     expect(ddx('min(x, 1)', { x: 0.5 })).toBe(1);
     expect(ddx('min(x, 1)', { x: 2 })).toBe(0);

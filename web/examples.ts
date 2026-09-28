@@ -129,6 +129,18 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['nephroid', '(3cos(2pi u) - cos(6pi u), 3sin(2pi u) - sin(6pi u))', 'parametric trig'],
       // The pen lifts at each pole rather than drawing a vertical asymptote.
       ['tangent, lifted at poles', '(4u - 2, tan(12u - 6))', 'parametric trig'],
+      // curvature, osculating and frame differentiate the curve along u; t
+      // as the point rides them round.
+      [
+        'osculating circle rides an ellipse',
+        'C = (3cos(2pi u), 1.5sin(2pi u)); C; osculating(C, t/10); frame(C, t/10); curvature(C, t/10)',
+        'parametric derivative geometry animated',
+      ],
+      [
+        'signed curvature flips at inflections (slide s)',
+        'view(x = -3..3, y = -2..2); s = clamp(0.1, 0, 1); C = (2sin(2pi u), sin(4pi u)); C; osculating(C, s); frame(C, s); curvature(C, s)',
+        'parametric derivative geometry slider',
+      ],
     ],
   ],
   [
@@ -522,6 +534,15 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['slope field', "y' = x - y", 'ode'],
       ['logistic growth', 'dy/dx = y(1 - y/4)', 'ode biology'],
       ['pendulum phase portrait', "(x', y') = (y, -sin(x))", 'ode physics'],
+      // The flow conserves the energy H = y²/2 + V(x), so it runs along H's
+      // level sets: the one through the saddles is the separatrix, between
+      // swinging (inside) and spinning or crossing over (outside).
+      ['pendulum separatrix', "view(x = -7..7, y = -4..4); (x', y') = (y, -sin(x)); y^2/2 - cos(x) = 1", 'ode physics'],
+      [
+        'double well (slide k)',
+        "view(x = -3..3, y = -2..2); k = clamp(1, 0.1, 2); (x', y') = (y, k x - x^3); y^2/2 + x^4/4 - k x^2/2 = 0",
+        'ode physics slider',
+      ],
       ['Lotka–Volterra', "view(x = -4..11, y = -1..6); (x', y') = (x - x y/2, x y/4 - y)", 'ode biology'],
       ['Van der Pol', "(x', y') = (y, (1 - x^2)y - x)", 'ode physics'],
       // A linear system as its literal matrix; drag the entries' sliders.
@@ -946,6 +967,19 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
       ['figure eight', 'tube(((2+cos(4pi u))cos(6pi u), (2+cos(4pi u))sin(6pi u), sin(8pi u)))', '3d parametric knot'],
       ['Viviani', 'tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)', '3d parametric'],
+      // T, N and B ride the curve; the osculating circle lies in the plane
+      // of T and N, and torsion is how fast that plane turns. A helix does
+      // not close up, so s runs up it and back down.
+      [
+        'Frenet frame on a helix',
+        'C = (2cos(4pi u), 2sin(4pi u), 3u - 1.5); s = (1 - cos(pi t/10))/2; C; frame(C, s); osculating(C, s); curvature(C, s); torsion(C, s)',
+        '3d parametric derivative animated',
+      ],
+      [
+        'Frenet frame on a trefoil',
+        'C = (sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u), -sin(6pi u)); C; frame(C, t/20); osculating(C, t/20); torsion(C, t/20)',
+        '3d parametric knot derivative animated',
+      ],
     ],
   ],
   [

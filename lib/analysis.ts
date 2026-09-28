@@ -506,6 +506,20 @@ function curveHint(object: MathObject, text: string): string | null {
   return `scalar field — for the curve write ${other} = ${text}`;
 }
 
+/**
+ * The operator of a row that is curvature(C) or torsion(C) along the curve
+ * (no point given), bare or with a number (1/curvature(C)) — unless the
+ * document defines its own.
+ */
+function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
+  const bare = (c: Expr): string | null =>
+    c.kind === 'call' && (c.name === 'curvature' || c.name === 'torsion') && c.args.length === 1 && !getFn(c.name)
+      ? c.name
+      : null;
+  if (e.kind === 'bin') return (e.a.kind === 'num' && bare(e.b)) || (e.b.kind === 'num' && bare(e.a)) || null;
+  return bare(e);
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   const rows = document.rows.map(row => ({ ...row }));
@@ -776,6 +790,15 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // object an expression in random variables already is, with u and v
       // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
       const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
+      // curvature(C) is κ along the curve, a number per u — which as such a
+      // row (or 1/curvature(C)) would draw the density of its values. Say
+      // how to show it.
+      const along = draws && alongCurve(rawParsed, getFn);
+      if (along) {
+        throw new Error(
+          `${along}(C) is a function of u along the curve: plot it with (u, ${along}(C)), or read it at a point with ${along}(C, 0.25).`,
+        );
+      }
       const known = draws ? new Set([...rvNames, ...Object.keys(draws.bases)]) : rvNames;
       if (draws) {
         for (const [name, dist] of Object.entries(draws.bases)) rvs.addAnonymous({ name, kind: 'base', dist });

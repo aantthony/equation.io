@@ -21,7 +21,7 @@ describe('contextual syntax help', () => {
   });
   it('distinguishes motion trails from matrix trace in suggestions and hints', () => {
     const suggestions = syntaxHelp('tra', 3, defs()).suggestions;
-    expect(suggestions.map(s => s.signature)).toEqual(['trace(M)', 'trail(point)']);
+    expect(suggestions.map(s => s.signature)).toEqual(['trace(M)', 'trail(point)', 'transpose(M)']);
     expect(syntaxHelp('trail(', 6, defs()).hint).toContain('Draw a moving point’s path');
     expect(syntaxHelp('TRAIL(', 6, defs()).hint).toContain('trail(point)');
     expect(syntaxHelp('trace(', 6, defs()).hint).toContain('Matrix trace');
@@ -144,7 +144,7 @@ describe('contextual syntax help', () => {
   });
   it('lists built-in functions for a \\word with their real signatures', () => {
     const h = syntaxHelp('\\tra', 4, defs());
-    expect(h.suggestions.map(s => s.name)).toEqual(['trace', 'trail']);
+    expect(h.suggestions.map(s => s.name)).toEqual(['trace', 'trail', 'transpose']);
     const trail = h.suggestions.find(s => s.name === 'trail')!;
     expect(trail.call).toBe(true); // accept adds parens, like plain completion
     expect(trail.insert).toBeUndefined();

@@ -92,6 +92,15 @@ describe('measureSet', () => {
   it('reads constants from the environment', () => {
     expect(measureSet([lt('x^2 + y^2 - a')], [], XY, PLANE, PLANE_HI, { a: 4 }).measure).toBeCloseTo(4 * Math.PI, 4);
   });
+  it('keeps a bound across the jump of sign', () => {
+    // Were sign flat either side of its jump, the mean-value bounds would
+    // take a cell across it as smooth: 1.3139, and 1.8906 with gap 0.
+    const line = measureSet([lt('x - 0.5 + 0.3 sign(x - 0.3)')], [], ['x'], [-1], [1], {});
+    expect(line.measure).toBeCloseTo(1.3, 4);
+    const plane = measureSet([lt('y - 0.5 sign(x - 0.1234)')], [], XY, [-1, -1], [1, 1], {});
+    expect(plane.measure).toBeCloseTo(1.8766, 3);
+    expect(plane.gap).toBeGreaterThan(0);
+  });
   it('intersects several conditions', () => {
     // The unit square's corner of the disc: a quarter disc.
     const quarter = measureSet([lt('x^2 + y^2 - 1'), lt('-x'), lt('-y')], [], XY, PLANE, PLANE_HI, {});

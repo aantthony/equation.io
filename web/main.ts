@@ -63,7 +63,14 @@ import { type VertexSampler, fanFillable, vertexSampler } from '../lib/figure-ve
 
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { type GridField, angularSpacing, sampleGradMag } from '../lib/grid.ts';
-import { CURVE_SAMPLES, type PathSampler, type RegionSampler, pathSampler, regionSampler } from '../lib/path.ts';
+import {
+  CURVE_SAMPLES,
+  type PathSampler,
+  type RegionSampler,
+  foldAllExcept,
+  pathSampler,
+  regionSampler,
+} from '../lib/path.ts';
 import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { mvOfNode } from '../lib/clifford.ts';
@@ -1224,33 +1231,54 @@ function render() {
   };
 
   // CPU sampling of parametric curves / points, with t bound to seconds.
-  const sampleCurve = (eq: Equation, dim: 2 | 3): number[] => {
+  // A plane curve (a complex path included): compiled, and broken at its
+  // jumps — branch cuts, steps, poles.
+  const sampleCurve = (eq: Equation): number[] => {
     const { comps } = eq.cpu! as { comps: Expr[] };
-    // A plane curve (a complex path included): compiled, and broken at its
-    // jumps — branch cuts, steps, poles.
-    if (dim === 2) {
-      let c = eq.pathCache;
-      if (c?.comps !== comps) c = eq.pathCache = { comps, sampler: pathSampler(comps), key: '', pts: [] };
-      const env: Record<string, number> = { ...constEnv, t: time };
-      const key = c.sampler.names.map(n => env[n]).join();
-      if (key !== c.key || !c.pts.length) {
-        c.key = key;
-        c.pts = c.sampler.sample(env);
-      }
-      return c.pts;
+    let c = eq.pathCache;
+    if (c?.comps !== comps) c = eq.pathCache = { comps, sampler: pathSampler(comps), key: '', pts: [] };
+    const env: Record<string, number> = { ...constEnv, t: time };
+    const key = c.sampler.names.map(n => env[n]).join();
+    if (key !== c.key || !c.pts.length) {
+      c.key = key;
+      c.pts = c.sampler.sample(env);
     }
-    const out: number[] = [];
-    for (let k = 0; k < CURVE_SAMPLES; k++) {
-      const u = k / (CURVE_SAMPLES - 1);
-      for (let c = 0; c < dim; c++) {
-        try {
-          out.push(evaluate(comps[c], { ...constEnv, u, t: time }));
-        } catch {
-          out.push(NaN);
-        }
+    return c.pts;
+  };
+
+  /**
+   * A space curve at the curve samples, and whichever of r′, r″, r‴ its tube
+   * or combs need (undefined where not asked for), as xyz triples; NaN where
+   * a sample does not evaluate. What does not move with u is worked out once
+   * for the frame, and once for all of them — an osculating circle's
+   * derivatives each repeat its whole centre — and what is left compiled.
+   */
+  const sampleSpaceCurve = (vecs: readonly (readonly Expr[] | undefined)[]): Array<Float32Array | undefined> => {
+    const frameEnv: Record<string, number> = { ...constEnv, t: time };
+    const along = foldAllExcept(
+      vecs.flatMap(es => es ?? []),
+      'u',
+      frameEnv,
+    );
+    let at = 0;
+    return vecs.map(es => {
+      if (!es) return undefined;
+      const out = new Float32Array(CURVE_SAMPLES * 3);
+      for (let c = 0; c < es.length; c++) {
+        const e = along[at++];
+        const sample =
+          compileSampler(e, 'u', [...freeVars(e)])?.(frameEnv) ??
+          ((u: number) => {
+            try {
+              return evaluate(e, { ...frameEnv, u });
+            } catch {
+              return NaN;
+            }
+          });
+        for (let k = 0; k < CURVE_SAMPLES; k++) out[k * 3 + c] = sample(k / (CURVE_SAMPLES - 1));
       }
-    }
-    return out;
+      return out;
+    });
   };
   // RK4 streamline of the normalized field through (x0, y0), both directions.
   // Normalizing makes it a direction field: uniform arc-length steps, and the
@@ -1283,23 +1311,6 @@ function render() {
     } catch {
       return null;
     }
-  };
-
-  // Evaluate a symbolic derivative vector at the curve samples; NaN on failure.
-  const sampleDeriv = (es: import('../lib/expr.ts').Expr[] | undefined): Float32Array | undefined => {
-    if (!es) return undefined;
-    const out = new Float32Array(CURVE_SAMPLES * 3);
-    for (let k = 0; k < CURVE_SAMPLES; k++) {
-      const u = k / (CURVE_SAMPLES - 1);
-      for (let c = 0; c < 3; c++) {
-        try {
-          out[k * 3 + c] = evaluate(es[c], { ...constEnv, u, t: time });
-        } catch {
-          out[k * 3 + c] = NaN;
-        }
-      }
-    }
-    return out;
   };
 
   /**
@@ -1693,15 +1704,6 @@ function render() {
             break;
           }
           case 'pcurve': {
-            const flat = sampleCurve(eq, plot.dim);
-            // A broken path carries extra (NaN) points at its jumps.
-            const count = flat.length / plot.dim;
-            const pts = new Float32Array(count * 3);
-            for (let k = 0; k < count; k++) {
-              pts[k * 3] = flat[k * plot.dim];
-              pts[k * 3 + 1] = flat[k * plot.dim + 1];
-              pts[k * 3 + 2] = plot.dim === 3 ? flat[k * plot.dim + 2] : 0;
-            }
             // Tubes are opt-in through tube(…): a bare curve stays a line, so
             // it never hides points or curves sharing the scene. The radius may
             // use sliders and t; while it evaluates ≤ 0 (say, mid slider drag)
@@ -1716,11 +1718,27 @@ function render() {
               }
             }
             const combs = plot.dim === 3 && (eq.combK || eq.combT);
-            if (radius <= 0 && !combs) {
+            const framed = radius > 0 || combs;
+            let pts: Float32Array, d1, d2, d3;
+            if (plot.dim === 3) {
+              [pts, d1, d2, d3] = sampleSpaceCurve([plot.comps, ...(framed ? [plot.d1, plot.d2, plot.d3] : [])]) as [
+                Float32Array,
+                ...Array<Float32Array | undefined>,
+              ];
+            } else {
+              // A broken path carries extra (NaN) points at its jumps.
+              const flat = sampleCurve(eq);
+              pts = new Float32Array((flat.length / 2) * 3);
+              for (let k = 0; k < flat.length / 2; k++) {
+                pts[k * 3] = flat[k * 2];
+                pts[k * 3 + 1] = flat[k * 2 + 1];
+              }
+            }
+            if (!framed) {
               scene.curves.push({ pts, color });
               break;
             }
-            const fr = curveFrames(pts, sampleDeriv(plot.d1), sampleDeriv(plot.d2), sampleDeriv(plot.d3));
+            const fr = curveFrames(pts, d1, d2, d3);
             if (radius > 0) {
               scene.tubes.push({ ...buildTube(pts, fr, radius, TUBE_SEGMENTS), color });
             } else {
@@ -1895,7 +1913,7 @@ function render() {
             break;
           }
           case 'pcurve':
-            extras.polylines.push({ pts: sampleCurve(eq, 2), color: css });
+            extras.polylines.push({ pts: sampleCurve(eq), color: css });
             break;
           case 'polygon': {
             let pts: number[];

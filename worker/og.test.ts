@@ -181,6 +181,18 @@ describe('og raster renderer', () => {
     expect(pixel(r, 80, 80)[0]).toBeGreaterThan(200);
   });
 
+  it('draws an osculating circle through its point', () => {
+    // The ellipse (2cos u, sin u) at u = 0: centre (1.5, 0), radius 0.5.
+    const rows = ['view(x = -3..3, y = -3..3)', 'osculating((2cos(u), sin(u)), 0)'];
+    expect(canRenderOg(rows)).toBe(true);
+    const r = renderRaster(rows, 120, 120);
+    const ink = (x: number, y: number) => Math.min(...pixel(r, x, y)) < 200;
+    // (1, 0) and (1.5, 0.5) on its rim; inside it, off the axis, clear.
+    expect([-1, 0, 1].some(d => ink(80 + d, 60))).toBe(true);
+    expect([-1, 0, 1].some(d => ink(90, 50 + d))).toBe(true);
+    expect(ink(88, 56)).toBe(false);
+  });
+
   it('fills regions for inequalities, including chains', () => {
     const grid = inkFraction(renderRaster([], 100, 100));
     const disc = inkFraction(renderRaster(['x^2 + y^2 <= 25'], 100, 100));

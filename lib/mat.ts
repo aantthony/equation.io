@@ -131,6 +131,8 @@ export function matMul(a: Mat, b: Mat): Mat {
   return mapMat(a, (_, r, c) => a[r].map((entry, k) => mul(entry, b[k][c])).reduce(add));
 }
 
+export const transposeOf = (m: Mat): Mat => m.map((row, r) => row.map((_, c) => m[c][r]));
+
 /** The inverse as adjugate / det — singular matrices give NaN at evaluation
  *  time, like solve. */
 export function inverseOf(m: Mat): Mat {
