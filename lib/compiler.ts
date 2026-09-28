@@ -397,9 +397,11 @@ function colorProgram(channels: readonly Expr[], params: readonly string[]): { f
     if (known) return known;
     let result: Expr;
     if (expr.kind === 'num') result = expr;
-    else if (expr.kind === 'var' || bindsVariable(expr)) result = sub(expr);
+    else if (expr.kind === 'var' || (bindsVariable(expr) && expr.kind !== 'loop')) result = sub(expr);
     else {
-      const lowered = mapChildren(expr, visit);
+      // A loop is interned whole, never entered: an escape count read by
+      // every channel then runs once per pixel.
+      const lowered = expr.kind === 'loop' ? sub(expr) : mapChildren(expr, visit);
       // Inequalities retain their boolean shape for piecewiseGLSL.
       if (expr.kind === 'ineq') result = lowered;
       else {
@@ -423,7 +425,9 @@ function colorProgram(channels: readonly Expr[], params: readonly string[]): { f
     return result;
   };
   const colors = channels.map(channel => compileTyped(visit(channel), bindings, complexLocals).code);
-  return { field: `vec3(${colors.join(', ')})`, locals: lines.join('\n') };
+  // The optional fourth channel is opacity; without one the field is opaque.
+  if (colors.length === 3) colors.push('1.0');
+  return { field: `vec4(${colors.join(', ')})`, locals: lines.join('\n') };
 }
 
 export function compileGpu(classified: Classified): GpuPlan {

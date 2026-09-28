@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { evaluate, Expr, freeVars, ISPRIME_MAX, LANCZOS, parseExpr } from './expr.ts';
+import { analyzeRows } from './analysis.ts';
 import { GLSL_PRELUDE, toGLSL } from './glsl.ts';
 
 function evalExpr(e: Expr, env: Record<string, number>): number {
@@ -586,5 +587,30 @@ describe('unicode input', () => {
 
   it('points a backslash at the editor escapes', () => {
     expect(() => parseExpr('\\nabla')).toThrow(/\\pi/);
+  });
+});
+
+describe('log2', () => {
+  it('is ln(x)/ln(2), so every backend reads it', () => {
+    expect(evaluate(parseExpr('log2(8)'), {})).toBeCloseTo(3);
+    expect(evaluate(parseExpr('Log2(1/4)'), {})).toBeCloseTo(-2);
+    expect(parseExpr('log2(x)')).toEqual(parseExpr('ln(x)/ln(2)'));
+    expect(() => parseExpr('log2(2, 3)')).toThrow(/one argument/);
+  });
+
+  it('yields to a document that defines log2 itself', () => {
+    const fn = analyzeRows(['log2(x) = x + 1', 'log2(8)']).rows;
+    expect(fn[0].error).toBeUndefined();
+    expect(evaluate((fn[1].cpu as { expr: Expr }).expr, {})).toBe(9);
+    const slider = analyzeRows(['log2 = 3', 'y = log2(x)']).rows;
+    expect(slider.map(r => r.error)).toEqual([undefined, undefined]);
+  });
+
+  it('yields to a user function of the same name', () => {
+    expect(parseExpr('log2(x)', new Set(['log2']))).toEqual({
+      kind: 'call',
+      name: 'log2',
+      args: [{ kind: 'var', name: 'x' }],
+    });
   });
 });

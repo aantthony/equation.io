@@ -76,6 +76,10 @@ describe('canRenderOg', () => {
     expect(canRenderOg(['hsl(2pi/3, 1, 0.5)'])).toBe(false);
     expect(canRenderOg(['oklch(0.7, 0.15, 2pi/3)'])).toBe(false);
     expect(canRenderOg(['iter(z^2 + w)'])).toBe(false);
+    // A recursion is a scalar field the preview draws, unless it may run too
+    // many passes per pixel for the CPU.
+    expect(canRenderOg(['M(z, k) = {|z| > 2: k, k >= 200: 0, M(z^2 + w, k + 1)}', 'M(w, 0)'])).toBe(true);
+    expect(canRenderOg(['M(z, k) = {|z| > 2: k, k >= 600: 0, M(z^2 + w, k + 1)}', 'M(w, 0)'])).toBe(false);
     expect(canRenderOg(['conformal(w^2/4)'])).toBe(false);
     expect(canRenderOg(['(-y, x)'])).toBe(true);
     expect(canRenderOg(['w^3 = 1', '1+2i'])).toBe(true);

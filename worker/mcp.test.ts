@@ -609,6 +609,14 @@ describe('graph previews', () => {
     expect(out.preview_omits[0].why).toContain('live app');
   });
 
+  it('says why a deep recursion gets no image', async () => {
+    const { body } = await call(['M(z, k) = {|z| > 2: k, k >= 600: 0, M(z^2 + w, k + 1)}', 'M(w, 0)']);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    const why = body.result.structuredContent.preview_omits[0].why;
+    expect(why).toContain('recursive');
+    expect(why).toContain('live app');
+  });
+
   it('never attaches the empty grid a general implicit 3D surface would render as', async () => {
     // The sphere is a 'draws' TYPE but not a drawable ROW (only z = f(x, y)
     // is); a blank "attached" image here would read as "3D failed" and teach
