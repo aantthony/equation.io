@@ -52,6 +52,7 @@ import {
   compFits,
   NONE,
   evaluate,
+  sameNumber,
   exactCase,
   originOf,
   freeVars,
@@ -131,6 +132,9 @@ interface Ctx {
   /** While a comparison lowers as a value, what each of its nodes lowered
    *  to: the multiset whose members it keeps is one of them (keptMembers). */
   lowered?: Map<Expr, Expr>;
+  /** Whether a member with no value ([none]) may be in reach: a guard
+   *  decided one, or a named list holding one was read. */
+  none?: boolean;
 }
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -617,9 +621,10 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
     // of a value, not a value that happens to differ. Otherwise the one
     // comparison that kept gaps would be the one written to exclude something.
     if (Number.isNaN(a) || Number.isNaN(b)) return false;
-    // Equal to within a part in 10^12 of their size, as a case's equation
-    // is (exactCase): 0.1 + 0.2 == 0.3, and 20000000 == 20000000.
-    const same = a === b || Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a), Math.abs(b));
+    // Equal to within rounding, as a case's equation is (lib/expr.ts
+    // sameNumber): 0.1 + 0.2 == 0.3, and two timestamps a millisecond apart
+    // are not.
+    const same = sameNumber(a, b);
     return cond.op === '==' ? same : !same;
   }
   return ineqComparisons(cond as Expr & { kind: 'ineq' }).every(({ op, l, r }) => {
@@ -660,6 +665,7 @@ function decideMembers(items: Expr[], axes: readonly Axis[], ctx: Ctx): Expr {
   const out = items.map((item): Expr => {
     if (item.kind !== 'piecewise') return item;
     const rest: Array<{ cond: Expr; value: Expr }> = [];
+    ctx.none = true;
     for (const c of item.cases) {
       const d = decide(c.cond);
       if (d === false) continue;
@@ -673,6 +679,10 @@ function decideMembers(items: Expr[], axes: readonly Axis[], ctx: Ctx): Expr {
   });
   return withAxes(listOf(out, ctx), axes);
 }
+
+/** Named lists that hold a member with no value: reading one brings
+ *  dropUndefined into reach (Ctx.none). */
+const holdsNone = new WeakSet<Expr>();
 
 /** A member a guard decided has no value: one holding [none], through any
  *  arithmetic or coordinate. (Not inside a case: a case that moves with t may
@@ -688,27 +698,38 @@ const undefinedMember = (e: Expr): boolean =>
  * a multiset of their own, as a filter's kept members are.
  */
 function dropUndefined(e: Expr, ctx: Ctx): Expr {
+  // Only a guard makes a member with no value: without one in reach, there
+  // is nothing to look for.
+  if (!ctx.none) return e;
   const cols = e.kind === 'vec' && e.items.every(isList) ? (e.items as (Expr & { kind: 'list' })[]) : null;
   const rows = isList(e) ? e.items : null;
-  const n = cols ? cols[0].items.length : (rows?.length ?? 0);
-  if (!n || (cols && cols.some(c => c.items.length !== n))) return e;
-  const keep = Array.from({ length: n }, (_, k) =>
-    cols ? !cols.some(c => undefinedMember(c.items[k])) : !undefinedMember(rows![k]),
+  const total = cols ? cols[0].items.length : (rows?.length ?? 0);
+  if (!total || (cols && cols.some(c => c.items.length !== total))) return e;
+  const own = axesOf((cols ? cols[0] : e) as Seq);
+  // A multiset of tuples, the positions stored innermost, goes a whole
+  // tuple at a time; a lone tuple keeps its order, as a filter of one does.
+  const positions = own.at(-1)?.ordered && own.length > 1 ? own.at(-1)! : null;
+  const width = positions ? positions.n : 1;
+  if (!positions && own.some(a => a.ordered) && own.length > 1) return e;
+  const n = total / width;
+  const at = (k: number) => (cols ? cols.map(c => c.items[k]) : [rows![k]]);
+  const keep = Array.from({ length: n }, (_, j) =>
+    Array.from({ length: width }, (_, w) => at(j * width + w)).every(xs => !xs.some(undefinedMember)),
   );
   if (keep.every(Boolean)) return e;
-  const own = axesOf((cols ? cols[0] : e) as Seq);
   const kept = keep.filter(Boolean).length;
-  // A tuple keeps its order, as a filter of one does (cutBy); a multiset of
-  // tuples is left whole.
   const tuple = own.length === 1 && own[0].ordered;
-  if (!tuple && own.some(a => a.ordered)) return e;
+  const members = positions ? own.slice(0, -1) : own;
   const cut: Axis[] = tuple
     ? [tupleAxis(kept)]
-    : [{ id: `${own.map(a => a.id).join('×')}{${keep.map(k => (k ? 1 : 0)).join('')}}`, n: kept }];
+    : [
+        { id: `${members.map(a => a.id).join('×')}{${keep.map(k => (k ? 1 : 0)).join('')}}`, n: kept },
+        ...(positions ? [positions] : []),
+      ];
   const pick = (l: Expr & { kind: 'list' }) =>
     withAxes(
       listOf(
-        l.items.filter((_, k) => keep[k]),
+        l.items.filter((_, k) => keep[Math.floor(k / width)]),
         ctx,
       ),
       cut,
@@ -1485,6 +1506,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
       // downstream can hold on to the array.
       // (A scatter of columns is a `vec`: a value to name, not a list.)
       if (!isSeq(hit)) return hit;
+      if (holdsNone.has(hit)) ctx.none = true;
       return withAxes(isList(hit) ? listOf([...hit.items], ctx) : { ...hit }, namedAxes(e.name, hit));
     }
     case 'neg': {
@@ -1558,7 +1580,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
         // A member with no value, in the list or its key, is left out of both.
         const [p, key] = args;
         // (Only a symbolic list can hold one: [none] is never packed.)
-        const none = [p, key].some(x => isList(x) && x.items.some(undefinedMember));
+        const none = ctx.none && [p, key].some(x => isList(x) && x.items.some(undefinedMember));
         if (none && isSeq(p) && isSeq(key) && seqLength(p) === seqLength(key)) {
           const both = dropUndefined(
             { kind: 'vec', items: [expand(settle(p, ctx), ctx), expand(settle(key, ctx), ctx)] },
@@ -1764,6 +1786,7 @@ export function lowerLists(
   // no value, so M zips with L as the guard written out does; wherever M is
   // collected, they are left out there.
   const out = packed ? lowered : named ? settle(lowered, ctx) : dropUndefined(settle(lowered, ctx), ctx);
+  if (named && ctx.none) holdsNone.add(out);
   if (isMask(out)) {
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
   }

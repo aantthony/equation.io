@@ -166,10 +166,21 @@ describe('§3 reductions see the whole multiset', () => {
     expect(last(['L = [4, 3, 2, 1]', 'count({sort(L) > 2: sort(L)})']).info).toBe('= 2');
     expect(last([L, 'hist({L > 2: L})']).error).toBeUndefined();
   });
-  it('an equation holds to a part in 10^12, over lists and numbers alike', () => {
+  it('an equation holds to within rounding, over lists and numbers alike', () => {
     expect(multiset(['L = [0.1, 0.2, 0.3]', '{L + 0.2 = 0.3: L}'])).toEqual([0.1]);
     expect(multiset(['{[0.1, 0.2, 0.3] + 0.2 = 0.3: 1}'])).toEqual([1]);
     expect(multiset(['{0.1 + 0.2 = 0.3: 1}'])).toEqual([1]);
+    // …and no further: timestamps a millisecond apart, and infinity.
+    const T = 'L = [1727000000000, 1727000000001, 1727000000002]';
+    expect(multiset([T, 'count({L = 1727000000001: L})'])).toEqual([1]);
+    expect(multiset([T, 'count(L[L == 1727000000001])'])).toEqual([1]);
+    expect(multiset(['L = [1, 2, 3, 1/0]', 'count({L = 5: L})'])).toEqual([0]);
+    // A list inside a reduction is one number: the row stays an equation.
+    expect(multiset(['L = [1, 2, 3, 4]', '{count(L) = 4: 1, 0}'])).toEqual([1]);
+    expect(multiset(['L = [1, 2, 3, 4]', '{max(L) = 4: 1, 0} + 1'])).toEqual([2]);
+  });
+  it('a guard leaves out whole tuples of a multiset of them', () => {
+    expect(multiset(['L = [1, 2, 3, 4]', 'count({L > 2: (L, 1, 2, 3)})'])).toEqual([2]);
   });
   it('a guard that moves with t stays a case, undefined where none holds', () => {
     const row = last(['L = [1, 2, 3, 4]', '{L > 2 + sin(t): L}']);

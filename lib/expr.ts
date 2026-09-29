@@ -1543,23 +1543,35 @@ export function structuralDiagnostic(e: Expr): string {
 /** (n = 0: a coordinate read, p.x, of a point of any dimension that has it.) */
 export const compArity = (fn: string, n: number): string =>
   n ? `${fn} takes ${n} arguments.` : `${fn} reads a coordinate of a point, and that is not one.`;
+/** Rounding one equation allows: a few units in the last place of the
+ *  larger side's size (at least 1). */
+const EQ_ULPS = 8 * Number.EPSILON;
+
+/** Two numbers equal to within rounding: 0.1 + 0.2 and 0.3 are, whole numbers
+ *  never are unless they are one number (to 2^49), and a value that is not
+ *  finite equals only itself. */
+export const sameNumber = (a: number, b: number): boolean =>
+  a === b ||
+  (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= EQ_ULPS * Math.max(1, Math.abs(a), Math.abs(b)));
+
 /** A piecewise case testing equality as an inequality every backend runs:
- *  r - ε < l < r + ε with ε a part in 10^12 of r's size (at least 1), so
- *  whole numbers (cells, vertices, the ends of arrows) are exact at any size
- *  and 0.1 + 0.2 = 0.3 holds, as `==` does over a list (lib/list.ts holds). */
+ *  r - ε < l < r + ε with ε the rounding sameNumber allows, scaled by the
+ *  larger side, so it decides as `==` does over a list (lib/list.ts holds). */
 export function exactCase(l: Expr, r: Expr): Expr {
   // Each side kept whole: over lists, a comparison whose one side mixes two
   // lists (abs(l - r) < ε) does not lower element by element.
+  const abs = (x: Expr): Expr => ({ kind: 'call', name: 'abs', args: [x] });
   const eps: Expr = {
     kind: 'bin',
     op: '*',
-    a: { kind: 'num', value: 1e-12 },
+    a: { kind: 'num', value: EQ_ULPS },
+    // (Two arguments at a time: the cell VM's max takes two.)
     b: {
       kind: 'call',
       name: 'max',
       args: [
         { kind: 'num', value: 1 },
-        { kind: 'call', name: 'abs', args: [r] },
+        { kind: 'call', name: 'max', args: [abs(l), abs(r)] },
       ],
     },
   };

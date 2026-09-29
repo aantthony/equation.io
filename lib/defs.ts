@@ -2084,7 +2084,12 @@ const COORDS = ['x', 'y', 'z'] as const;
  * (c(A, A) is the diagonal), a tuple gives up its items, and anything else
  * takes a component of that one node.
  */
-function coordParams(fn: { params: readonly string[]; body: Expr }, args: readonly Expr[], name: string) {
+function coordParams(
+  fn: { params: readonly string[]; body: Expr },
+  args: readonly Expr[],
+  name: string,
+  opts: ResolveOpts,
+) {
   const used = freeVars(fn.body);
   const env: Record<string, Expr> = {};
   fn.params.forEach((p, j) => {
@@ -2093,7 +2098,10 @@ function coordParams(fn: { params: readonly string[]; body: Expr }, args: readon
     if (!read.length) return;
     // (Arity 0: any point that has the coordinate, 2D or 3D alike.)
     for (const [v, k] of read) {
-      if (arg.kind === 'var') env[v] = { kind: 'var', name: `${arg.name}.${COORDS[k]}` };
+      // A list's coordinates are its dotted columns, which move with every
+      // other use of it (c(A, A) is the diagonal); anything else, a named
+      // point or a matrix included, is read as a component of that node.
+      if (arg.kind === 'var' && opts.isList?.(arg.name)) env[v] = { kind: 'var', name: `${arg.name}.${COORDS[k]}` };
       else if (arg.kind === 'vec') {
         if (k >= arg.items.length) throw new Error(compDims(name, 0, arg, arg.items.length));
         env[v] = arg.items[k];
@@ -2245,7 +2253,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         }
         return substVars(fn.body, {
           ...Object.fromEntries(fn.params.map((p, k) => [p, args[k]])),
-          ...coordParams(fn, args, e.name),
+          ...coordParams(fn, args, e.name, ctx.opts),
         });
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);

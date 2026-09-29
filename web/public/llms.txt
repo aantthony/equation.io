@@ -650,8 +650,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   arrows (matrix multiplication, as paths): `graph({A.y = B.x: A.x}, B.y)`,
   or with the composition named as above, `graph(c(A, B))`.
   Cases in graph rows may test equality. A panel of graphs has no grid.
-  Put a piecewise inside a function rather than inline over a list:
-  `c(m) = {mod(m, 2) = 0: m/2, 3m + 1}; k = [1..40]; graph(k, c(k))`.
+  A piecewise works inline over a list or through a function alike:
+  `k = [1..40]; graph(k, {mod(k, 2) = 0: k/2, 3k + 1})`.
 - `mark(v)` highlights vertex v in the graphs of its panel and reads v out;
   with a slider or t it walks, e.g. a state machine's run as a recursive
   function: `run(q, k, m) = {k >= m: q, run(step(q, digit(k)), k + 1, m)};

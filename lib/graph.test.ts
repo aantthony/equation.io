@@ -91,6 +91,8 @@ describe('graph rows', () => {
     // A coordinate read takes a point of any dimension that has it.
     const x = analyzeRows(['f(p) = p.x', 'P = [(1, 2, 5), (3, 4, 6)]', 'f(P + (0, 0, 0))'], { readouts: true });
     expect(x.rows.at(-1)!.info).toBe('= [1, 3]');
+    // A named point or a matrix gives its own coordinates.
+    expect(analyzeRows(['P = (1, 2)', 'f(p) = p.x + p.y', 'f(P)'], { readouts: true }).rows.at(-1)!.info).toBe('= 3');
     const z = analyzeRows(['f(p) = p.z', 'P = [(1, 2), (3, 4)]', 'f(P + (0, 0))']);
     expect(z.rows.at(-1)!.error).toMatch(/reads a coordinate that point does not have/);
   });

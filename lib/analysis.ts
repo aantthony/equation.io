@@ -44,11 +44,11 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { lowerGeom } from './geom.ts';
-import { lowerLists } from './list.ts';
+import { lowerLists, SCALAR_REDUCTIONS } from './list.ts';
 import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
 import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from './seq.ts';
@@ -805,15 +805,22 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         exact ? { ...ropts, exactConditions: true } : ropts,
       );
       if (exact && !graphArgs) {
-        if (exactCases(resolved.expr) !== resolved.expr && plane(resolved.expr))
+        // Over numbers a case is the tolerance form the evaluator runs; one
+        // whose side is a list stays an equation, for list lowering to decide
+        // member by member. (A list inside a reduction is one number.)
+        const isListReduction = (c: Expr & { kind: 'call' }): boolean =>
+          SCALAR_REDUCTIONS.has(c.name) || ((c.name === 'min' || c.name === 'max') && c.args.length === 1);
+        const listy = (side: Expr): boolean =>
+          side.kind === 'list' ||
+          side.kind === 'data' ||
+          (side.kind === 'var' && isListName(listNames, side.name)) ||
+          (!(side.kind === 'call' && isListReduction(side)) && childrenOf(side).some(listy));
+        const cases = exactCases(resolved.expr, listy);
+        if (cases !== resolved.expr && plane(resolved.expr))
           throw new Error(
             'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
           );
-        // Over numbers a case is the tolerance form the evaluator runs; one
-        // over a list stays an equation, for list lowering to decide exactly.
-        const listy = (side: Expr): boolean =>
-          side.kind === 'list' || [...freeVars(side)].some(v => listNames.has(v.split('.')[0]));
-        resolved.expr = exactCases(resolved.expr, listy);
+        resolved.expr = cases;
       }
       let parsed = resolved.expr;
       // A real row in u and v alone does not depend on the screen, so it is

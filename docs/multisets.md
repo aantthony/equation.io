@@ -133,7 +133,8 @@ written with binders, `p ∈ A` and `q ∈ A` (§0).
 A point parameter reads its coordinates as the argument's own:
 `c(p, q) = {p.y = q.x: (p.x, q.y)}` composes an arrow i → j with j → k, and
 `c(A, B)` takes `p.x` as `A.x`, so every coordinate of one arrow moves
-together.
+together; a named point or a matrix gives its own coordinates. (A recursive
+function's parameters are numbers, so it reads none: pass the coordinates.)
 
 ### Guards: a case that does not hold is no member
 
