@@ -176,13 +176,39 @@ describe('§3 reductions see the whole multiset', () => {
     expect(last(['total(t)']).error).toBeUndefined();
     expect(last(['total(Q)']).error).toMatch(/needs Q to be a list/);
   });
+  it('a map binds every list argument per member, and captures nothing', () => {
+    const LM = ['L = [1, 2, 3]', 'M = [10, 20]'];
+    const h = 'h(a, b) = total(L a) + b';
+    // The document's a is 5, whatever h calls its first parameter.
+    expect(multiset([...LM, 'a = 5', h, 'h(M, a)'])).toEqual([65, 125]);
+    // The same list twice zips, reduced or not.
+    expect(multiset([...LM, h, 'h(M, M)'])).toEqual([70, 140]);
+    // One name, one choice: the body's M is the member's own M.
+    expect(multiset([...LM, 'f(m) = M + total(L m)', 'f(M)'])).toEqual([70, 140]);
+    expect(multiset([...LM, 'f(m) = M + total(L m)', 'M + f(M)'])).toEqual([80, 160]);
+    // min and max of one argument map as the other reductions do.
+    expect(multiset([...LM, 'f(m) = max(L m)', 'f(M)'])).toEqual([30, 60]);
+    expect(multiset([...LM, 'f(m) = min(L m)', 'f(M)'])).toEqual([10, 20]);
+    // A wrapper reduces one member at a time, and says so where that fails.
+    expect(multiset([...LM, 'avg(s) = mean(s)', 'avg(L)'])).toEqual([1, 2, 3]);
+    expect(last([...LM, 'sd(s) = stdev(s)', 'sd(L)']).error).toMatch(/write the reduction in the row/);
+    // Too much work is refused at the first member, not after all of them.
+    const t0 = performance.now();
+    expect(last(['L = [1..2000]', 'M = [1..1200]', 'f(m) = total(L m)', 'total(f(M))']).error).toMatch(
+      /steps of list work/,
+    );
+    expect(performance.now() - t0).toBeLessThan(1000);
+  });
   it('a function applies per point of a list, reading its coordinates', () => {
     const L = 'L = [1, 2, 3]';
     const P = 'P = [(1, 2), (3, 4)]';
     expect(multiset([L, P, 'f(p) = total(L p.x)', 'f(P)'])).toEqual([6, 18]);
     expect(multiset([L, P, 'f(x, y) = total(L x)', 'f(P)'])).toEqual([6, 18]);
     expect(points([L, P, 'f(p) = (total(L p.x), p.y)', 'f(P)'])).toEqual(['18,4', '6,2']);
-    expect(last([L, P, 'f(m) = total(L m)', 'f(P)']).error).toMatch(/reads its coordinates: write m.x and m.y/);
+    expect(last([L, P, 'f(m) = total(L m)', 'f(P)']).error).toMatch(/reads its coordinates: write p.x and p.y/);
+    // A list of named points, and point-list arithmetic, as arguments.
+    expect(multiset([L, 'A = (1, 2)', 'B = (3, 4)', 'f(p) = total(L p.x)', 'f([A, B])'])).toEqual([6, 18]);
+    expect(multiset([L, P, 'f(p) = total(L p.x)', 'f(P + (1, 0))'])).toEqual([12, 24]);
   });
   it('a member no case holds for is not in the multiset', () => {
     const L = 'L = [1, 2, 3, 4]';
