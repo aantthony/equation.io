@@ -128,6 +128,12 @@ describe('equation-native regression', () => {
   });
 });
 
+describe('regression over binders', () => {
+  it('reads a ~ row over drawn names as a fit, not a distribution law', () => {
+    expect(scanRegressions(['X ∈ [1, 2, 3]', 'Y \\in [2, 4, 6]', 'Y ~ m X + b']).has(2)).toBe(true);
+  });
+});
+
 describe('fitting a list of points by its coordinates', () => {
   // Two separately written lists are independent and cross, so the examples
   // write their data as points: P.x and P.y pair up point by point.

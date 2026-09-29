@@ -846,11 +846,14 @@ export function scanDefinition(text: string): Definition | null {
  *  name: the name is the language's. Null when it is not such a row. */
 export function takenBinder(text: string): string | null {
   const m = DRAW_RE.exec(text);
-  if (!m || nameable(canonicalName(m[1]))) return null;
-  return (
-    `${m[1]} is taken by the language, so it cannot be drawn: x, y, z, t, u, v, w, d, e, i, pi, tau ` +
-    'and the built-in functions are. Draw with another name, like p ∈ A.'
-  );
+  const n = canonicalName(m?.[1] ?? '');
+  if (!m || nameable(n)) return null;
+  const why = n.startsWith('u_')
+    ? 'names starting u_ are'
+    : FUNCTIONS.has(n)
+      ? `${m[1]} is a built-in function`
+      : 'x, y, z, t, u, v, w, d, e, i, pi and tau are';
+  return `${m[1]} is taken by the language, so it cannot be drawn: ${why}. Draw with another name, like p ∈ A.`;
 }
 
 /**

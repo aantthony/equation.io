@@ -14,8 +14,8 @@ export interface RegressionRow {
   rhs: string;
 }
 
-/** `name = …` at the head of a row (see declaredNames). */
-const DECLARED_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)`);
+/** `name = …`, or a binder `name ∈ …`, at the head of a row (see declaredNames). */
+const DECLARED_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*(?:=(?!=)|∈|\\in\b)`);
 /** The first name of a ~ row's right side, possibly a distribution's. */
 const HEAD_RE = new RegExp(String.raw`^(${NAME_SRC})\s*(?:\(|$)`);
 
@@ -33,7 +33,7 @@ export function scanRegressions(texts: readonly string[]): Map<number, Regressio
   return out;
 }
 
-/** Names some row of the document defines (`name = …`), by text alone: a
+/** Names some row of the document defines (`name = …`, `name ∈ …`), by text alone: a
  *  definition that fails to parse still makes `name ~ …` a fit, not a law. */
 export function declaredNames(texts: readonly string[]): Set<string> {
   return new Set(

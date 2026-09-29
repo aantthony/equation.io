@@ -120,6 +120,12 @@ describe('§0 binders: p ∈ A draws from A', () => {
     for (const row of ['e ∈ D', 'e \\in D', 'u \\in D', 'x ∈ D', 'sin ∈ D'])
       expect(last(['D = [1, 2]', row]).error).toMatch(/is taken by the language, so it cannot be drawn/);
     expect(last(['D = [1, 2]', '2 ∈ D']).error).toMatch(/draws a name from a list/);
+    // The reason is the name's own.
+    expect(last(['D = [1, 2]', 'u_1 ∈ D']).error).toMatch(/drawn: names starting u_ are\./);
+    expect(last(['D = [1, 2]', 'sin ∈ D']).error).toMatch(/drawn: sin is a built-in function\./);
+    expect(last(['D = [1, 2]', 'e ∈ D']).error).toMatch(/drawn: x, y, z, t, u, v, w, d, e, i, pi and tau are\./);
+    // A built-in a document may shadow is a name like any other.
+    expect(last(['D = [1, 2]', 'total ∈ D']).error).toBeUndefined();
   });
   it('draws a scatter with a number beside its columns', () => {
     const tables = () => parseCsv('a\n1\n2\n3\n');

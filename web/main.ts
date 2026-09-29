@@ -5325,7 +5325,8 @@ function matchRows(texts: string[]): (Equation | undefined)[] {
     out[i] = eq;
     free.delete(eq);
   };
-  const lhs = (t: string) => /^([^=<>~]+?)\s*=(?!=)/.exec(stripNote(t))?.[1];
+  // The name a row defines, or draws (`p ∈ A`, `p \in A`).
+  const lhs = (t: string) => /^([^=<>~∈\\]+?)\s*(?:=(?!=)|∈|\\in\b)/.exec(stripNote(t))?.[1];
   texts.forEach((t, i) =>
     claim(
       i,
