@@ -73,7 +73,6 @@ import {
   orderMessage,
   namedAxes,
   plainFnName,
-  usesListReduction,
   withAxes,
 } from './list.ts';
 import type { Mat } from './mat.ts';
@@ -2078,6 +2077,28 @@ function mightBePoint(e: Expr, opts: ResolveOpts): boolean {
 
 const COORDS = ['x', 'y', 'z'] as const;
 
+/** Reductions a function body may take its parameter into: the ones that
+ *  count, sum or average members. (sort, like min and max over a whole box,
+ *  reads its order; a function wrapping it reads the argument whole.) */
+const MAPPED_REDUCTIONS = new Set(['count', 'total', 'mean', 'stdev', 'median']);
+
+/** The parameters a body reduces over: those inside a reduction's argument
+ *  (a dotted p.x counts as p). Only those make a call a map. */
+const reducedCache = new WeakMap<Expr, Set<string>>();
+function reducedParams(body: Expr): Set<string> {
+  let hit = reducedCache.get(body);
+  if (hit) return hit;
+  hit = new Set<string>();
+  const walk = (e: Expr): void => {
+    if (e.kind === 'call' && MAPPED_REDUCTIONS.has(e.name))
+      for (const a of e.args) for (const v of freeVars(a)) hit!.add(v.split('.')[0]);
+    childrenOf(e).forEach(walk);
+  };
+  walk(body);
+  reducedCache.set(body, hit);
+  return hit;
+}
+
 /** Whether a resolved argument may be a list: a literal, a column, or a
  *  name (or a dotted column of one) the document defines as a list. */
 function mayBeList(a: Expr, opts: ResolveOpts): boolean {
@@ -2275,7 +2296,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
           markOrigins(arg);
           if (arg.kind === 'vec' && arg.items.length !== n) throw new Error(compDims(e.name, n, arg, arg.items.length));
           // A body that reduces takes a list of points one point at a time.
-          if (usesListReduction(fn.body) && mayBeList(arg, ctx.opts))
+          if (fn.params.some(p => reducedParams(fn.body).has(p)) && mayBeList(arg, ctx.opts))
             return { kind: 'call', name: MAP, args: [fn.body, { kind: 'str', value: fn.params.join(',') }, arg] };
           const comp = (k: number): Expr =>
             arg.kind === 'vec' ? arg.items[k] : { kind: 'comp', value: arg, index: k, arity: n, functionName: e.name };
@@ -2288,7 +2309,8 @@ function rx(e: Expr, ctx: Ctx): Expr {
         // that only maps is that already, by substitution; one that reduces
         // would consume a list argument along with its own lists, so a list
         // argument is bound per member instead ([map], lib/list.ts).
-        const listArgs = usesListReduction(fn.body) ? fn.params.filter((_, k) => mayBeList(args[k], ctx.opts)) : [];
+        const reduced = reducedParams(fn.body);
+        const listArgs = fn.params.filter((p, k) => reduced.has(p) && mayBeList(args[k], ctx.opts));
         if (listArgs.length) {
           const scalar = fn.params.filter(p => !listArgs.includes(p));
           const keep = { params: scalar, body: fn.body };

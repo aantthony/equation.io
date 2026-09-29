@@ -1034,8 +1034,12 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     case 'call': {
       if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'qjulia')
         throw new Error(`${e.name}(…) must be a whole statement.`);
-      // A function applied per member of lists is list lowering's to run.
-      if (e.name === MAP) return sc(e);
+      // A function applied per member of lists is list lowering's to run;
+      // the point arithmetic in its body is lowered here, like any other.
+      if (e.name === MAP) {
+        const body = toExpr(lo(e.args[0]));
+        return sc(body === e.args[0] ? e : { ...e, args: [body, ...e.args.slice(1)] });
+      }
       if (e.name === 'trail') {
         const args = e.args.map(lo);
         const coords =

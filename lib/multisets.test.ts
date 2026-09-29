@@ -152,6 +152,30 @@ describe('§3 reductions see the whole multiset', () => {
     // A named number reduces as its one member.
     expect(multiset(['a = 3', 'mean(a)'])).toEqual([3]);
   });
+  it('only a parameter a reduction takes makes the call a map', () => {
+    const L = 'L = [1, 2, 3]';
+    const M = 'M = [10, 20]';
+    const P = 'P = [(1, 2), (3, 4)]';
+    // A reduction that never sees the parameter leaves the call as it was.
+    expect(points([L, P, 'f(p) = p + (total(L), 0)', 'f(P)'])).toEqual(['7,2', '9,4']);
+    expect(points([L, P, 'f(p) = mean(L) p', 'f(P)'])).toEqual(['2,4', '6,8']);
+    // Point arithmetic in a mapped body is lowered as anywhere else.
+    expect(multiset([L, M, 'A = (1, 2)', 'B = (4, 6)', 'f(m) = total(L m) |A - B|', 'f(M)'])).toEqual([300, 600]);
+    expect(last([L, M, 'f(m, n) = total(L m) + n', 'f(M, (1, 2))']).error).toMatch(/Cannot add a point and a number/);
+    // A member no case holds for is no member.
+    expect(multiset([L, M, 'f(m) = {m > 15: total(L m)}', 'f(M)'])).toEqual([120]);
+    expect(multiset([L, M, 'f(m) = {m > 15: total(L m)}', 'count(f(M))'])).toEqual([1]);
+    // A box of the body's own per member: poured together.
+    expect(multiset([L, M, 'k(m) = [m, 2m] + total(L m)', 'k(M)'])).toEqual([70, 80, 140, 160]);
+    // sort reads a box whole, by its order: a function wrapping it is not a map.
+    expect(points([L, 's(m) = sort(m)', 's(L)'])).toEqual(['1,2,3']);
+    // Work that does not depend on the member is done once; 400 × 400 fits.
+    expect(multiset(['L = [1..400]', 'M = [1..400]', 'f(m) = total(L m)', 'total(f(M))'])).toEqual([6432040000]);
+    // Any number reduces as its one member, t included; a name bound nowhere does not.
+    expect(last(['total(t + 1)']).error).toBeUndefined();
+    expect(last(['total(t)']).error).toBeUndefined();
+    expect(last(['total(Q)']).error).toMatch(/needs Q to be a list/);
+  });
   it('a function applies per point of a list, reading its coordinates', () => {
     const L = 'L = [1, 2, 3]';
     const P = 'P = [(1, 2), (3, 4)]';

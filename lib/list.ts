@@ -1247,7 +1247,7 @@ function bindMember(
  * (f(m) = L + total(L m)) adds its axes after the arguments'.
  */
 function lowerMap(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
-  const [body, ...rest] = e.args;
+  const [raw, ...rest] = e.args;
   const binds: Array<{ names: string[]; low: Expr }> = [];
   for (let k = 0; k < rest.length; k += 2) {
     const low = lower(rest[k + 1], ctx);
@@ -1256,41 +1256,78 @@ function lowerMap(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
       low: isDataScatter(low) ? scatterPoints(low) : low,
     });
   }
-  const fixed: Record<string, Expr> = {};
+  const params = new Set(binds.flatMap(b => b.names));
+  const mentions = (x: Expr) => [...freeVars(x)].some(v => params.has(v.split('.')[0]));
+  // A reduction that mentions no parameter is the same for every member:
+  // it is taken once, not once per member.
+  const hoist = (x: Expr): Expr => {
+    if (x.kind === 'call' && (SYMBOLIC_REDUCTIONS.has(x.name) || NUMERIC_REDUCTIONS.has(x.name)) && !mentions(x)) {
+      const low = lower(x, ctx);
+      if (!isSeq(low)) return low;
+    }
+    return mapChildren(x, hoist);
+  };
+  const body = hoist(raw);
   const bare = freeVars(body);
+  const fixed: Record<string, Expr> = {};
   for (const b of binds) if (!isSeq(b.low)) bindMember(fixed, b.names, b.low, bare);
   const seqs = binds.filter(b => isSeq(b.low));
-  if (!seqs.length) return lower(substVars(body, fixed), ctx);
+  if (!seqs.length) return decideOne(lower(substVars(body, fixed), ctx), ctx);
   const { parts, axes } = align(seqs.map(b => expand(settle(b.low, ctx), ctx)));
   const members = parts.map(p => (p as Expr & { kind: 'list' }).items);
   // The parameters are the body's own names: they shadow any document list
   // spelled the same, as a loop's do.
-  const shadow = new Set(binds.flatMap(b => b.names.flatMap(n => [n, `${n}.x`, `${n}.y`, `${n}.z`])));
+  const shadow = new Set([...params].flatMap(n => [n, `${n}.x`, `${n}.y`, `${n}.z`]));
   const { getList } = ctx;
   ctx.getList = name => (shadow.has(name) ? null : getList(name));
   const out: Expr[] = [];
   let inner: readonly Axis[] | null | undefined;
+  // Tuples meet by position, whichever member made them.
+  const shape = (as: readonly Axis[]) => as.map(a => (a.ordered ? `o${a.n}` : a.id)).join();
+  let work = 0;
+  let poured = false;
   try {
     for (let i = 0; i < members[0].length; i++) {
       const env = { ...fixed };
       seqs.forEach((b, j) => bindMember(env, b.names, members[j][i], bare));
-      const r = lower(substVars(body, env), ctx);
+      // What one member's body builds along the way is not kept: only the
+      // result counts against the budget, and the whole map against its own.
+      const { items, data } = ctx;
+      let r = decideOne(lower(substVars(body, env), ctx), ctx);
+      work += ctx.items - items + (ctx.data - data);
+      ctx.items = items;
+      ctx.data = data;
+      if (work > MAP_WORK)
+        throw new Error(`This function, applied per member, does more than ${MAP_WORK} steps of list work.`);
       const own = isSeq(r) ? axesOf(r) : null;
-      if (own?.some(a => a.ordered))
-        throw new Error('A function applied per member of a list cannot give a tuple for each yet.');
       if (inner !== undefined && (inner === null) !== (own === null))
         throw new Error('A function applied per member gives a list for some members and a number for others.');
-      if (inner && own && (inner.length !== own.length || inner.some((a, k) => a.id !== own[k].id)))
-        throw new Error('A function applied per member gives lists over different multisets for different members.');
-      inner = own;
-      if (own) out.push(...(expand(settle(r as Seq, ctx), ctx) as Expr & { kind: 'list' }).items);
-      else out.push(r);
+      // Lists of the body's own (a literal, a new box per member) share no
+      // instances across members: poured together, a multiset of their own.
+      if (inner && own && shape(inner) !== shape(own)) poured = true;
+      inner ??= own;
+      if (own) {
+        r = settle(r as Seq, ctx);
+        out.push(...(isData(r) ? Array.from(r.values, num) : (expand(r, ctx) as Expr & { kind: 'list' }).items));
+      } else out.push(r);
     }
   } finally {
     ctx.getList = getList;
   }
+  if (poured) return withAxes(listOf(out, ctx), [{ id: `#${++anonymous}`, n: out.length }]);
   return withAxes(listOf(out, ctx), inner ? [...(axes ?? []), ...inner] : axes);
 }
+
+/** A member's value decided where its cases are constant: the case that
+ *  holds, or [none] where none does, as over a list (decideMembers). */
+function decideOne(r: Expr, ctx: Ctx): Expr {
+  if (r.kind !== 'piecewise') return r;
+  const d = decideMembers([r], [{ id: '#member', n: 1 }], ctx);
+  return isList(d) ? d.items[0] : r;
+}
+
+/** Steps of list work one function map may take in all, across its members. */
+const MAP_WORK = 5_000_000;
 
 function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
@@ -1709,14 +1746,14 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
       ) {
         // A number is the one-member multiset (docs/multisets.md §0: 5 is
         // [5]), so a function's parameter reduces as its one member: mean(5)
-        // is 5. So does a named constant or slider; any other name is refused
-        // below, where it catches a list defined too late or misspelled.
+        // is 5. So does a named constant, slider or t; a name bound nowhere is
+        // refused below, where it catches a list defined too late or misspelled.
         const one = args.length === 1 && !isSeq(args[0]) ? args[0] : null;
         if (
           e.name !== 'sort' &&
           one &&
           one.kind !== 'vec' &&
-          (one.kind !== 'var' || ctx.opts.consts?.[one.name] !== undefined)
+          (one.kind !== 'var' || one.name === 't' || ctx.opts.consts?.[one.name] !== undefined)
         )
           args = [listOf([one], ctx)];
         if (args.length !== 1 || !isSeq(args[0])) {
