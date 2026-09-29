@@ -66,6 +66,34 @@ box's `+`, and a box's `+` is written with brackets, `[A, B]`.
 No new base element is needed for families: α already is the marker that
 turns a number into a member.
 
+### Our naturals are his, boxed once
+
+Wildberger's natural n is the box of n zeros, and his 0 is the empty box.
+We use the same naturals; a row's value is always a box **of** them, so a
+number in a row is the box holding one natural:
+
+| Here | His box | Polynumber | To him |
+|---|---|---|---|
+| `[]` | {} | 0 | his 0, the empty box |
+| `0`, `[0]` | {0} = {{}} | α⁰ | his 1 |
+| `2`, `[2]` | {2} = {{0, 0}} | α² | the box holding his 2 |
+| `n`, `[n]` | {n} | αⁿ | one copy of his n |
+| `[2, 3]` | {2, 3} | α² + α³ | a polynumber |
+| `[0, 0, 0]` | {0, 0, 0} | 3α⁰ | his 3 |
+
+So `2 === [2]`: a row has no bare number, only the one-member box, which
+is why a scalar can be replaced by a multiset anywhere (`a = 2` to
+`a = [2, 3]` turns a curve into a family and changes nothing else). The
+identities agree: our `0 + a = a` is his 1 × αᵃ = αᵃ (our additive unit is
+his multiplicative one, since our `+` is his × a level down), and our
+`[] + A = []` is his 0 × A = 0.
+
+The language has two 3s: `3` is {3} = α³, the member 3 once, and
+`[0, 0, 0]` is {0, 0, 0}, his natural 3, the member 0 three times. A
+reduction's reading up is the step between them: his N(A) is the box of
+zeros, and `count(A)` is that natural boxed once, [N(A)], a member again.
+Hence `count(A) + 1` is {3} and {1} under our `+`, α³·α¹ = α⁴: 4.
+
 ### Moving between the readings
 
 **A box opens into a family** where a name is used as a value. Today every
