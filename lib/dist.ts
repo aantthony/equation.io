@@ -729,7 +729,7 @@ export function scanRandomRows(texts: readonly (string | null)[]): {
   while (changed) {
     changed = false;
     for (const [i, c] of candidates) {
-      if (!(c.rhs.match(NAME_SCAN_RE) ?? []).some(t => names.has(canonicalName(t)))) continue;
+      if (!randomNameIn(c.rhs, names)) continue;
       candidates.delete(i);
       derived.set(i, c);
       names.add(c.name);
@@ -737,6 +737,13 @@ export function scanRandomRows(texts: readonly (string | null)[]): {
     }
   }
   return { base, derived };
+}
+
+/** The first random variable a row's text names, if any: the scan's own
+ *  identifier rule, so `2X` mentions X and `X2` does not. */
+export function randomNameIn(text: string, names: ReadonlySet<string>): string | null {
+  for (const t of text.match(NAME_SCAN_RE) ?? []) if (names.has(canonicalName(t))) return canonicalName(t);
+  return null;
 }
 
 /**

@@ -532,6 +532,30 @@ density, and the distribution code already follows §1:
 `x` is the same kind of object with length (Lebesgue) measure instead of
 probability.
 
+### A random variable is a weighted binder (to build)
+
+`X ~ D` is `X ∈ D` with the members weighted by D: a list is a sample
+whose multiplicities are counts, a distribution one whose multiplicities are
+a probability density. So everything a binder does, a random variable does,
+weighted:
+
+- `y = X` is a family, as `y = A` is: one line per member, each at its
+  weight. `X ~ Bernoulli(0.3)` draws y = 0 at 0.7 and y = 1 at 0.3;
+  `X ~ Uniform(0, 2)` draws the band 0 < y < 2; `X ~ Normal(0, 1)` a band
+  fading away from y = 0. Its picture is a density, which a field shader can
+  render, but it classifies as a family, not a scalar field.
+- The weight at (x, y) of `y = f(x, X)` is the density of `f(x, X)` at y:
+  for `y = X x`, `pdf_X(y/x)/|x|`, which crowds towards x = 0 where the
+  lines meet. That is defined for every explicit row, and a point `(1, X)` is
+  a smeared dot. An implicit `g(x, y, X) = 0` has no one measure to spread
+  its curves by, so it is left out at first.
+- `p ∈ X` is a second, independent draw with X's law, as `q ∈ A` is from A:
+  `X + X` is `2X`, `X + p` a convolution. For a derived `Y`, `p ∈ Y` draws
+  from Y's law, independent of Y. Until this is built, `p ∈ X` is an error
+  that points at `p ~ D` for a declared X.
+- `P(…)` and `E(…)` are reductions over the weighted draw, as `count` and
+  `mean` are over a list's (built).
+
 ### Multiplicity becomes measure
 
 Wildberger does not define infinite multisets (§5 warns that subtraction does

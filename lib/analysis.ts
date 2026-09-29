@@ -39,6 +39,7 @@ import {
   momentsReadout,
   readoutNumber,
   probabilityValue,
+  randomNameIn,
   regionExpr,
   scanRandomRows,
   toExpectation,
@@ -253,6 +254,19 @@ export function prepareDocument(
       row.dataLocal = message;
       row.needsFile = true;
     } else row.error = message;
+  }
+  // `p ∈ X` draws from a list, and a random variable is not one: say so,
+  // rather than that p may only use constants and t.
+  const rvNames = new Set([...rvScan.base.values(), ...rvScan.derived.values()].map(r => r.name));
+  for (const row of rows) {
+    if (row.def?.kind !== 'const' || !row.def.draw) continue;
+    const rv = randomNameIn(row.def.rhs, rvNames);
+    if (!rv) continue;
+    // A bare `p ∈ X` over a declared X has a spelling that works today.
+    const law = row.def.rhs.trim() === rv ? [...rvScan.base.values()].find(r => r.name === rv)?.rhs.trim() : undefined;
+    row.error =
+      `${row.def.name} ∈ … draws from a list; ${rv} is a random variable.` +
+      (law ? ` For an independent copy of ${rv}, write ${row.def.name} ~ ${law}.` : '');
   }
   for (const row of dupRows) {
     const { name, kind } = row.def!;

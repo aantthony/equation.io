@@ -134,6 +134,15 @@ describe('§0 binders: p ∈ A draws from A', () => {
     expect(last(['c ∈ (cos(u), sin(u))']).error).toMatch(/draws from a list; that is a curve/);
     expect(last(['p ∈ x', 'q = p + 1']).error).toMatch(/p has an error/);
   });
+  it('draws nothing from a random variable, and says how to copy one', () => {
+    expect(last(['X ~ Normal(0, 1)', 'p ∈ X']).error).toBe(
+      'p ∈ … draws from a list; X is a random variable. For an independent copy of X, write p ~ Normal(0, 1).',
+    );
+    expect(last(['X ~ Normal(0, 1)', 'Y = X + 1', 'p ∈ Y']).error).toBe(
+      'p ∈ … draws from a list; Y is a random variable.',
+    );
+    expect(last(['X ~ Normal(0, 1)', 'p ∈ 2X']).error).toBe('p ∈ … draws from a list; X is a random variable.');
+  });
   it('leaves a bare in to the user: only ∈ and \\in draw', () => {
     expect(multiset(['in = 2', 'k = 3', 'k in + 1'])).toEqual([7]);
   });
