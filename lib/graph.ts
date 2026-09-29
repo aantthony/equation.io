@@ -17,9 +17,27 @@ import { type Expr, evaluate, freeVars } from './expr.ts';
 import type { Classified } from './math-object.ts';
 import { type Prog, compileProg, run } from './vm.ts';
 
-export const GRAPH_RE = /^\s*graph\s*\(([\s\S]*)\)\s*$/;
-/** `mark(v)`: v's vertex highlighted in the graphs of the row's panel. */
-export const MARK_RE = /^\s*mark\s*\(([\s\S]*)\)\s*$/;
+/** The arguments of a row that is one call of `name` as a whole, as
+ *  `graph(…)` and `mark(v)` rows are (v's vertex highlighted in the graphs of
+ *  the row's panel). Null when the call's `)` is not the row's end, as in
+ *  `graph(1, 2) * (3)`. */
+export function wholeCall(name: string, text: string): string | null {
+  const head = new RegExp(String.raw`^\s*${name}\s*\(`).exec(text);
+  if (!head) return null;
+  let depth = 1;
+  let quote: string | null = null;
+  for (let k = head[0].length; k < text.length; k++) {
+    const c = text[k];
+    if (quote) {
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) {
+      return text.slice(k + 1).trim() ? null : text.slice(head[0].length, k);
+    }
+  }
+  return null;
+}
 
 /** The graph a `graph(…)` row denotes, from the classification of its tuple. */
 export function graphObject(cls: Classified): Classified {

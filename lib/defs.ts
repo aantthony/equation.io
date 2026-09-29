@@ -37,6 +37,7 @@ import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import {
   FUNCTIONS,
   GREEK_NAME_CHARS,
+  DRAW_OP_SRC,
   NAME_SRC,
   SHADOWABLE_FNS,
   SUM_MAX_TERMS,
@@ -65,6 +66,7 @@ import {
   NO_LIST_INSIDE,
   SCALAR_REDUCTIONS,
   axesOf,
+  copiedList,
   isDataScatter,
   isSeq,
   isTuple,
@@ -710,7 +712,7 @@ const FN_RE = new RegExp(
 );
 const CONST_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`);
 /** `p ∈ A` (or `p \in A`): a binder, a draw from A. */
-const DRAW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*(?:∈|\\in\b)\s*([\s\S]+)$`);
+const DRAW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*${DRAW_OP_SRC}\s*([\s\S]+)$`);
 const STATE_RE = new RegExp(String.raw`^\s*(${NAME_SRC})'\s*=(?!=)([\s\S]+)$`);
 const INIT_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$`);
 /**
@@ -2126,7 +2128,7 @@ function drawnFrom(name: string, e: Expr): Expr {
   const positions = own.filter(a => a.ordered);
   if (positions.length === own.length) return e;
   const n = own.filter(a => !a.ordered).reduce((size, a) => size * a.n, 1);
-  return withAxes({ ...e } as Seq, [{ id: `${name}∈`, n }, ...positions]);
+  return copiedList(e, withAxes({ ...e } as Seq, [{ id: `${name}∈`, n }, ...positions]));
 }
 
 /** The name a mapped parameter takes in its body: one no document can spell

@@ -853,6 +853,8 @@ export const WRITTEN_NAME_CHARS = `${NAME_START_CHARS}0-9₀₁₂₃₄₅₆�
  *  build on it and canonicalize what they capture, so a definition binds
  *  exactly the name the tokenizer produces. */
 export const NAME_SRC = `[${NAME_START_CHARS}][${WRITTEN_NAME_CHARS}]*`;
+/** Regex source for a binder's ∈, as written: `∈` or `\in`. */
+export const DRAW_OP_SRC = String.raw`(?:∈|\\in\b)`;
 
 /**
  * Standalone glyphs and the names they mean. Single characters only: a glyph

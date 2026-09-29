@@ -4,7 +4,7 @@
  */
 import { diff } from './diff.ts';
 import { distFamily, isModelName } from './dist-families.ts';
-import { NAME_SRC, type Expr, canonicalName, evaluate, freeVars } from './expr.ts';
+import { DRAW_OP_SRC, NAME_SRC, type Expr, canonicalName, evaluate, freeVars } from './expr.ts';
 import { VALUE_END } from './statements.ts';
 
 export interface RegressionRow {
@@ -15,7 +15,7 @@ export interface RegressionRow {
 }
 
 /** `name = …`, or a binder `name ∈ …`, at the head of a row (see declaredNames). */
-const DECLARED_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*(?:=(?!=)|∈|\\in\b)`);
+const DECLARED_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*(?:=(?!=)|${DRAW_OP_SRC})`);
 /** The first name of a ~ row's right side, possibly a distribution's. */
 const HEAD_RE = new RegExp(String.raw`^(${NAME_SRC})\s*(?:\(|$)`);
 

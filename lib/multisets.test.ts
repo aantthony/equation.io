@@ -127,6 +127,14 @@ describe('§0 binders: p ∈ A draws from A', () => {
     // A built-in a document may shadow is a name like any other.
     expect(last(['D = [1, 2]', 'total ∈ D']).error).toBeUndefined();
   });
+  it('draws only the members a guard keeps', () => {
+    for (const from of ['{A > 2: A}', 'M'])
+      for (const [row, info] of [
+        ['count(p)', '= 2'],
+        ['total(p)', '= 7'],
+      ])
+        expect(last(['A = [1, 2, 3, 4]', 'M = {A > 2: A}', `p ∈ ${from}`, row]).info, `${from} ${row}`).toBe(info);
+  });
   it('draws a scatter with a number beside its columns', () => {
     const tables = () => parseCsv('a\n1\n2\n3\n');
     const rows = analyzeRows(['T = open("t.csv")', 'P ∈ (T.a, 0)', 'P'], { readouts: true, tables }).rows;

@@ -55,7 +55,7 @@ import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
 import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from './seq.ts';
 import { classifyAutomatonRow, exactCases } from './automaton.ts';
-import { GRAPH_RE, MARK_RE, graphObject } from './graph.ts';
+import { graphObject, wholeCall } from './graph.ts';
 import { buildStateSystem, initialState } from './state.ts';
 import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
@@ -841,10 +841,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // graph(from, to, label) reads as the tuple of its arguments: one edge
       // per element of its multiset (lib/graph.ts).
       // (A document's own graph or mark function is that function.)
-      const graphArgs = fnNames.has('graph') ? null : GRAPH_RE.exec(row.text);
+      const graphArgs = fnNames.has('graph') ? null : wholeCall('graph', row.text);
       // mark(v) is v, highlighted in the panel's graphs.
-      const markArg = fnNames.has('mark') ? null : MARK_RE.exec(row.text);
-      const source = graphArgs ? `(${graphArgs[1]})` : markArg ? `(${markArg[1]})` : row.text;
+      const markArg = fnNames.has('mark') ? null : wholeCall('mark', row.text);
+      const source = graphArgs !== null ? `(${graphArgs})` : markArg !== null ? `(${markArg})` : row.text;
       const takenName = takenBinder(row.text);
       if (takenName) throw new Error(takenName);
       const rawParsed = parseExpr(source, fnNames, listNames, valueNames);
@@ -860,15 +860,15 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // with c(m) = {mod(m, 2) = 0: …}. Only a case at x, y or z is refused
       // (it would be a curve's sliver), here on the row that draws it.
       const plane = (e: Expr) => ['x', 'y', 'z'].some(v => freeVars(e).has(v));
-      const exact = !!graphArgs || !plane(rawParsed);
+      const exact = graphArgs !== null || !plane(rawParsed);
       const resolved = resolveRow(
-        graphArgs ? exactCases(rawParsed) : rawParsed,
+        graphArgs !== null ? exactCases(rawParsed) : rawParsed,
         getFn,
         exact ? { ...ropts, exactConditions: true } : ropts,
       );
       const note = perMemberNote(resolved.expr, ropts.isList ?? (() => false));
       if (note) memberNotes.set(row, note);
-      if (exact && !graphArgs) {
+      if (exact && graphArgs === null) {
         // Over numbers a case is the tolerance form the evaluator runs; one
         // whose side is a list stays an equation, for list lowering to decide
         // member by member. (A list inside a reduction is one number.)
@@ -927,11 +927,11 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
-      if (graphArgs) {
+      if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;
       }
-      if (markArg) {
+      if (markArg !== null) {
         if (row.cls.object.kind !== 'value')
           throw new Error('mark(v) highlights the vertex v of the graphs in its panel: give it one number.');
         row.mark = true;
@@ -985,20 +985,20 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
     }
   }
 
-  // A view naming one index axis (a panel sharing the other writes it so)
-  // needs a lattice in its panel with that axis; on the plane it is a slip
-  // for x or y.
+  // A view naming index axes (one, as a panel sharing the other writes it)
+  // needs a lattice in its panel with those axes; on the plane it is a slip
+  // for x and y: `view(X = -1..1, Y = -2..2)`.
   let panelAt = 0;
   const latticeAxes: string[][] = [[]];
-  const oneAxisViews: Array<[(typeof rows)[number], number]> = [];
+  const indexViews: Array<[(typeof rows)[number], number, string[]]> = [];
   for (const row of rows) {
     if (row.view?.kind === 'split') latticeAxes[++panelAt] = [];
     const cpu = row.cpu;
     if (cpu?.type === 'automaton' || cpu?.type === 'lattice') latticeAxes[panelAt].push(...cpu.axes);
-    if (row.view?.kind === 'view' && row.view.axes?.[1] === '') oneAxisViews.push([row, panelAt]);
+    if (row.view?.kind === 'view' && row.view.axes) indexViews.push([row, panelAt, row.view.axes.filter(Boolean)]);
   }
-  for (const [row, at] of oneAxisViews)
-    if (!latticeAxes[at].includes(row.view!.kind === 'view' ? row.view!.axes![0] : '')) {
+  for (const [row, at, axes] of indexViews)
+    if (!axes.every(a => latticeAxes[at].includes(a))) {
       row.error = 'view(…) frames the plane with x and y; an index axis names a lattice in this panel.';
       row.view = undefined;
     }
