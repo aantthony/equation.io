@@ -1544,12 +1544,25 @@ export function structuralDiagnostic(e: Expr): string {
 export const compArity = (fn: string, n: number): string =>
   n ? `${fn} takes ${n} arguments.` : `${fn} reads a coordinate of a point, and that is not one.`;
 /** A piecewise case testing equality as an inequality every backend runs:
- *  r - ε < l < r + ε, which on whole numbers (cells, vertices, the
- *  coordinates of arrows) is exact. */
+ *  r - ε < l < r + ε with ε a part in 10^12 of r's size (at least 1), so
+ *  whole numbers (cells, vertices, the ends of arrows) are exact at any size
+ *  and 0.1 + 0.2 = 0.3 holds, as `==` does over a list (lib/list.ts holds). */
 export function exactCase(l: Expr, r: Expr): Expr {
   // Each side kept whole: over lists, a comparison whose one side mixes two
   // lists (abs(l - r) < ε) does not lower element by element.
-  const eps: Expr = { kind: 'num', value: 1e-9 };
+  const eps: Expr = {
+    kind: 'bin',
+    op: '*',
+    a: { kind: 'num', value: 1e-12 },
+    b: {
+      kind: 'call',
+      name: 'max',
+      args: [
+        { kind: 'num', value: 1 },
+        { kind: 'call', name: 'abs', args: [r] },
+      ],
+    },
+  };
   return {
     kind: 'ineq',
     op: '<',

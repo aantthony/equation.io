@@ -617,7 +617,10 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
     // of a value, not a value that happens to differ. Otherwise the one
     // comparison that kept gaps would be the one written to exclude something.
     if (Number.isNaN(a) || Number.isNaN(b)) return false;
-    return cond.op === '==' ? a === b : a !== b;
+    // Equal to within a part in 10^12 of their size, as a case's equation
+    // is (exactCase): 0.1 + 0.2 == 0.3, and 20000000 == 20000000.
+    const same = a === b || Math.abs(a - b) <= 1e-12 * Math.max(1, Math.abs(a), Math.abs(b));
+    return cond.op === '==' ? same : !same;
   }
   return ineqComparisons(cond as Expr & { kind: 'ineq' }).every(({ op, l, r }) => {
     const a = evaluate(l, env);
@@ -636,44 +639,39 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
  */
 function decideMembers(items: Expr[], axes: readonly Axis[], ctx: Ctx): Expr {
   const env: Record<string, number> = {};
-  const decided: Expr[] = [];
-  // What stays a case evaluates as it runs, where a case is an inequality:
-  // an equality there is the tolerance form (lib/expr.ts exactCase).
-  const undecided = () =>
-    withAxes(
-      listOf(
-        items.map(it =>
-          it.kind !== 'piecewise'
-            ? it
-            : {
-                ...it,
-                cases: it.cases.map(c =>
-                  isEquality(c.cond) && c.cond.op === '==' ? { ...c, cond: exactCase(...c.cond.args) } : c,
-                ),
-              },
-        ),
-        ctx,
-      ),
-      axes,
-    );
-  for (const item of items) {
-    if (item.kind !== 'piecewise') return undecided();
-    let pick: Expr | undefined;
-    for (const c of item.cases) {
-      for (const fv of freeVars(c.cond)) {
-        const v = ctx.opts.consts?.[fv];
-        if (v === undefined) return undecided();
-        env[fv] = v;
-      }
-      if (c.cond.kind !== 'ineq' && !isEquality(c.cond)) return undecided();
-      if (holds(c.cond, env)) {
-        pick = c.value;
-        break;
-      }
+  const none: Expr = { kind: 'call', name: NONE, args: [] };
+  /** true or false where the case is decided now, 'none' where it reads a
+   *  member that has no value, null where it moves with t. */
+  const decide = (cond: Expr): boolean | 'none' | null => {
+    if (undefinedMember(cond)) return 'none';
+    if (cond.kind !== 'ineq' && !isEquality(cond)) return null;
+    for (const fv of freeVars(cond)) {
+      const v = ctx.opts.consts?.[fv];
+      if (v === undefined) return null;
+      env[fv] = v;
     }
-    decided.push(pick ?? item.otherwise ?? { kind: 'call', name: NONE, args: [] });
-  }
-  return withAxes(listOf(decided, ctx), axes);
+    return holds(cond, env);
+  };
+  // What stays a case evaluates as it runs, where a case is an inequality:
+  // an equality of numbers there is the tolerance form (lib/expr.ts
+  // exactCase). Text is always decided now: it never moves with t.
+  const running = (cond: Expr): Expr =>
+    isEquality(cond) && cond.op === '==' && !cond.args.some(a => a.kind === 'str') ? exactCase(...cond.args) : cond;
+  const out = items.map((item): Expr => {
+    if (item.kind !== 'piecewise') return item;
+    const rest: Array<{ cond: Expr; value: Expr }> = [];
+    for (const c of item.cases) {
+      const d = decide(c.cond);
+      if (d === false) continue;
+      // A condition on a member with no value has none either.
+      if (d === 'none') return rest.length ? { ...item, cases: rest, otherwise: none } : none;
+      if (d === true) return rest.length ? { ...item, cases: rest, otherwise: c.value } : c.value;
+      rest.push({ ...c, cond: running(c.cond) });
+    }
+    if (!rest.length) return item.otherwise ?? none;
+    return { ...item, cases: rest, otherwise: item.otherwise };
+  });
+  return withAxes(listOf(out, ctx), axes);
 }
 
 /** A member a guard decided has no value: one holding [none], through any
@@ -699,9 +697,14 @@ function dropUndefined(e: Expr, ctx: Ctx): Expr {
   );
   if (keep.every(Boolean)) return e;
   const own = axesOf((cols ? cols[0] : e) as Seq);
-  if (own.some(a => a.ordered)) return e;
   const kept = keep.filter(Boolean).length;
-  const cut: Axis[] = [{ id: `${own.map(a => a.id).join('×')}{${keep.map(k => (k ? 1 : 0)).join('')}}`, n: kept }];
+  // A tuple keeps its order, as a filter of one does (cutBy); a multiset of
+  // tuples is left whole.
+  const tuple = own.length === 1 && own[0].ordered;
+  if (!tuple && own.some(a => a.ordered)) return e;
+  const cut: Axis[] = tuple
+    ? [tupleAxis(kept)]
+    : [{ id: `${own.map(a => a.id).join('×')}{${keep.map(k => (k ? 1 : 0)).join('')}}`, n: kept }];
   const pick = (l: Expr & { kind: 'list' }) =>
     withAxes(
       listOf(
@@ -1530,7 +1533,10 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
         if (bins !== null && (bins < 2 || bins > 500)) {
           throw new Error('hist(…) takes 2 to 500 bins.');
         }
-        const arg = e.args[0] === undefined ? undefined : settle(lower(e.args[0], ctx), ctx);
+        const arg =
+          e.args[0] === undefined
+            ? undefined
+            : (dropUndefined(settle(lower(e.args[0], ctx), ctx), ctx) as Exclude<Expr, { kind: 'lazy' }>);
         if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
         if (isText(arg)) throw new Error('hist(…) counts numbers; that column holds text.');
         // Gaps go before the values are read, not after: `hist(person.age)`
@@ -1548,7 +1554,20 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
         return histogram(xs, bins, ctx);
       }
       const args = e.args.map(a => lower(a, ctx));
-      if (e.name === 'sort' && args.length === 2) return sortBy(args[0], args[1], ctx);
+      if (e.name === 'sort' && args.length === 2) {
+        // A member with no value, in the list or its key, is left out of both.
+        const [p, key] = args;
+        // (Only a symbolic list can hold one: [none] is never packed.)
+        const none = [p, key].some(x => isList(x) && x.items.some(undefinedMember));
+        if (none && isSeq(p) && isSeq(key) && seqLength(p) === seqLength(key)) {
+          const both = dropUndefined(
+            { kind: 'vec', items: [expand(settle(p, ctx), ctx), expand(settle(key, ctx), ctx)] },
+            ctx,
+          );
+          if (both.kind === 'vec') return sortBy(both.items[0], both.items[1], ctx);
+        }
+        return sortBy(p, key, ctx);
+      }
       const isMinMax = e.name === 'min' || e.name === 'max';
       if (
         SYMBOLIC_REDUCTIONS.has(e.name) ||
@@ -1672,27 +1691,18 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
     case 'ineq':
       return comparisonValue(e, ctx);
     case 'piecewise': {
-      // Over a list, a case may test equality, {A.y = B.x: …}, exactly:
-      // members are decided by `==` (decideMembers). (Whether a side is a
-      // list is a probe, so what it lowers is not charged twice.)
-      const listSide = (s: Expr): boolean => {
-        const { items, data } = ctx;
-        try {
-          return isSeq(lower(s, ctx));
-        } finally {
-          ctx.items = items;
-          ctx.data = data;
-        }
+      // Over a list, a case may test equality, {A.y = B.x: …}: members are
+      // decided by `==` (decideMembers). Each side lowers once, and a side
+      // that is a list makes it a test per member.
+      const cond = (c: Expr): Expr => {
+        if (c.kind !== 'eq') return lowerCond(c, ctx);
+        const l = lower(c.l, ctx);
+        const r = lower(c.r, ctx);
+        if (isSeq(l) || isSeq(r))
+          return zipN([expand(l, ctx), expand(r, ctx)], ([a, b]) => ({ kind: 'eqtest', op: '==', args: [a, b] }), ctx);
+        return ctx.opts.exactConditions ? exactCase(l, r) : { ...c, l, r };
       };
-      const exact = (c: Expr): Expr =>
-        c.kind !== 'eq'
-          ? c
-          : [c.l, c.r].some(listSide)
-            ? { kind: 'eqtest', op: '==', args: [c.l, c.r] }
-            : ctx.opts.exactConditions
-              ? exactCase(c.l, c.r)
-              : c;
-      const cases = e.cases.map(c => ({ cond: lowerCond(exact(c.cond), ctx), value: lower(c.value, ctx) }));
+      const cases = e.cases.map(c => ({ cond: cond(c.cond), value: lower(c.value, ctx) }));
       const otherwise = e.otherwise && lower(e.otherwise, ctx);
       const raw = [...cases.flatMap(c => [c.cond, c.value]), ...(otherwise ? [otherwise] : [])];
       if (!raw.some(isSeq)) return { kind: 'piecewise', cases, otherwise };
@@ -1749,7 +1759,11 @@ export function lowerLists(
 ): Expr {
   const ctx: Ctx = { getList, opts, items: 0, data: 0, hists: 0, comps: new WeakMap(), columns: 0 };
   const lowered = lower(e, ctx);
-  const out = packed ? lowered : dropUndefined(settle(lowered, ctx), ctx);
+  // A row collects its multiset, leaving out members no case holds for. A
+  // definition does not: `M = {L > 2: L}` is L's members, some of them with
+  // no value, so M zips with L as the guard written out does; wherever M is
+  // collected, they are left out there.
+  const out = packed ? lowered : named ? settle(lowered, ctx) : dropUndefined(settle(lowered, ctx), ctx);
   if (isMask(out)) {
     throw new Error('A comparison over a list is a filter, not a plot — put it in brackets, like L[L > 2].');
   }

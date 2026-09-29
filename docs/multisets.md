@@ -83,8 +83,14 @@ Identity through brackets:
   |---|---|---|
   | `n + 1`, `2n`, `f(n)` | no | n's: zips with n |
   | `[n]` | no: n poured alone | n's: `[n] + [n]` is `n + n` |
-  | `[n, 3, 5]`, `L[L > 2]`, `{L > 2: L}` | yes | a new one |
+  | `{L > 2: L}` | no: some have no value | L's: zips with L, named or not |
+  | `[n, 3, 5]`, `L[L > 2]` | yes | a new one |
   | a literal `[1, 2]` | its own | a new one each time it is written |
+
+  A name keeps what it is built from: `q = s^2` zips with `s`, and
+  `AB = c(A, B)` stays over A's and B's members, so a later `c(AB, B)`
+  pairs each arrow of AB with the B it came from. Composing AB with B
+  again takes a second draw from B, a binder.
 
   So `a = [n, 3, 5]` is equal to `n + [3 5]` but not identical to `n`, and
   `n + a` has 2 × 4 = 8 values. (The alternative, where `a`'s copy of `n`
@@ -146,7 +152,11 @@ count(AB)                                 # 7
 
 The whole combination goes, every coordinate at once, however many lists it
 was combined from: `({A.y = B.x: A.x}, B.y)` loses the pair, not just its x.
-The kept members are a multiset of their own, as a filter's are. Over lists,
+A guard is not a filter: its members are its source's, some of them with
+no value, so `M = {L > 2: L}` zips with L as the guard written out does
+(`M + L` is `[6 8]`), and its undefined members are left out wherever M is
+collected (`M` shows `[3 4]`, `count(M)` is 2). A case reading a member with
+no value has none either. Over lists,
 a case may test equality, `{A.y = B.x: …}`, since the members are counted
 things. A guard that moves with t cannot settle, as a filter cannot: it stays
 a case per member, undefined (and not drawn) where none holds.

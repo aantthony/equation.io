@@ -78,13 +78,11 @@ describe('graph rows', () => {
     expect(arrows(graphOf([...AB, c, 'graph(c(A, B))']))).toEqual(product);
     expect(arrows(graphOf([...AB, c, 'AB = c(A, B)', 'graph(AB)']))).toEqual(product);
     expect(arrows(graphOf([...AB, 'AB = {A.y = B.x: (A.x, B.y)}', 'graph(AB)']))).toEqual(product);
-    // ABB = [[2 3] [2 4]].
-    expect(arrows(graphOf([...AB, c, 'AB = c(A, B)', 'graph(c(AB, B))']))).toEqual([
-      '1>1:×2',
-      '1>2:×3',
-      '2>1:×2',
-      '2>2:×4',
-    ]);
+    // A named value stays tied to the lists it is built from: AB's arrows
+    // each keep the B arrow they came from, so c(AB, B) pairs each with that
+    // one (1→1 then 1→2 is 1→2; 2→2 then 2→2 twice). Composing AB with B
+    // again, ABB, takes a second draw from B: a binder, q ∈ B.
+    expect(arrows(graphOf([...AB, c, 'AB = c(A, B)', 'graph(c(AB, B))']))).toEqual(['1>2', '2>2:×2']);
     // One name is one choice: c(A, A) pairs each arrow with itself, the
     // loops, and so does c(A, [A]): [A] is A. (A², two independent draws
     // from A, is for binders, p ∈ A and q ∈ A: docs/multisets.md §0.)

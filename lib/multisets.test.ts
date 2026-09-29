@@ -153,6 +153,24 @@ describe('§3 reductions see the whole multiset', () => {
     const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
     expect(multiset([...AB, 'count({A.y = B.x: (A.x, B.y)})'])).toEqual([7]);
   });
+  it('a guard keeps its source: named or not, undefined members go where collected', () => {
+    const L = 'L = [1, 2, 3, 4]';
+    // Named, it still zips with L, as the guard written out does.
+    expect(multiset([L, 'M = {L > 2: L}', 'M + L'])).toEqual([6, 8]);
+    expect(multiset([L, '{L > 2: L} + L'])).toEqual([6, 8]);
+    expect(multiset([L, 'M = {L > 2: L}', 'M'])).toEqual([3, 4]);
+    // A case reading a member with no value has none either.
+    expect(multiset([L, '{ {L > 2: L} > 3: 1, 0 }'])).toEqual([0, 1]);
+    // sort, hist and a tuple leave them out too.
+    expect(points([L, 'sort({L > 2: L}, L)'])).toEqual(['3,4']);
+    expect(last(['L = [4, 3, 2, 1]', 'count({sort(L) > 2: sort(L)})']).info).toBe('= 2');
+    expect(last([L, 'hist({L > 2: L})']).error).toBeUndefined();
+  });
+  it('an equation holds to a part in 10^12, over lists and numbers alike', () => {
+    expect(multiset(['L = [0.1, 0.2, 0.3]', '{L + 0.2 = 0.3: L}'])).toEqual([0.1]);
+    expect(multiset(['{[0.1, 0.2, 0.3] + 0.2 = 0.3: 1}'])).toEqual([1]);
+    expect(multiset(['{0.1 + 0.2 = 0.3: 1}'])).toEqual([1]);
+  });
   it('a guard that moves with t stays a case, undefined where none holds', () => {
     const row = last(['L = [1, 2, 3, 4]', '{L > 2 + sin(t): L}']);
     expect(row.error).toBeUndefined();
