@@ -88,18 +88,17 @@ describe('§2 brackets are sums', () => {
     // n + a has 2 × 4 values: a is equal to n + [3 5], not identical to n.
     expect(multiset(['n = [1,2]', 'a = [n, 3, 5]', 'n + a'])).toHaveLength(8);
   });
-  it('a bracket around one multiset is a new one, equal but not identical', () => {
+  it('a multiset keeps its identity through anything that keeps its members', () => {
+    // [n] pours n alone: the same members, so the same multiset, as n + 1 is.
     expect(multiset(['n = [1,2]', 'n + n'])).toEqual([2, 4]);
-    expect(multiset(['n = [1,2]', 'n + [n]'])).toEqual([2, 3, 3, 4]);
-    expect(multiset(['n = [1,2]', '[n] + [n]'])).toEqual([2, 3, 3, 4]);
-    expect(multiset(['n = [1,2]', 'm = [n]', 'n + m'])).toEqual([2, 3, 3, 4]);
-    // …and it is equal: the same values, so a reduction cannot tell.
-    expect(multiset(['n = [1,2]', 'total([n])'])).toEqual([3]);
-  });
-  it('a bracket around one multiset copies it once, a column staying a column', () => {
-    // 90 000 members: counted once, not once for M and again for [M].
+    expect(multiset(['n = [1,2]', 'n + [n]'])).toEqual([2, 4]);
+    expect(multiset(['n = [1,2]', '[n] + [n]'])).toEqual([2, 4]);
+    expect(multiset(['n = [1,2]', 'm = [n]', 'n + m'])).toEqual([2, 4]);
+    expect(multiset(['n = [1,2]', 'n + (n + 1)'])).toEqual([3, 5]);
+    // Changing which members there are makes a new one.
+    expect(multiset(['n = [1,2]', 'n + [n, 3]'])).toHaveLength(6);
+    // A large one in its bracket is still that one, a column staying a column.
     expect(multiset(['L = [1..3000]', 'M = L + [1..30]', 'total([M])'])).toEqual([136440000]);
-    // An index bracket holds its index through any brackets around it.
     expect(multiset(['L = [1, 2, 3, 4]', 'L[[L > 2]]'])).toEqual([3, 4]);
   });
   it('a bracket around one number or expression is that value', () => {

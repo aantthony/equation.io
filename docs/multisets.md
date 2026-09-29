@@ -75,20 +75,24 @@ twice.
 
 Identity through brackets:
 
-- **Every bracket is a new multiset**, *equal* to what it holds but never
-  *identical* to it. `a = [n, 3, 5]` is equal to `n + [3 5]` but not
-  identical to `n`, so `n + a` has 2 × 4 = 8 values. (The alternative, where
-  `a`'s copy of `n` stays tied to `n`, is coherent but not a product; not
-  pursued.)
-- **One item is no exception.** `[n]` is a new multiset equal to `n`, so
-  `n + [n]` and `[n] + [n]` have 4 values where `n + n` has 2: Wildberger's
-  "an object, and that object in an mset, are two different things". This
-  is how to write a second, independent draw from a name: `c(A, [A])` is A
-  composed with itself where `c(A, A)` pairs each arrow of A with itself.
-  Equality is untouched, `[n] == n` and `1 == [1]`, and a bracket around a
-  single number or expression is that value, `[x + 1] 2 = 2x + 2`. Brackets
-  are not only grouping, though: `[P.x]` is cut loose from P, so
-  `graph([P.x], P.y)` crosses what `graph(P.x, P.y)` pairs.
+- **A multiset keeps its identity through anything that keeps its
+  members**, and anything that changes which members there are makes a new
+  one:
+
+  | Expression | Members change? | Identity |
+  |---|---|---|
+  | `n + 1`, `2n`, `f(n)` | no | n's: zips with n |
+  | `[n]` | no: n poured alone | n's: `[n] + [n]` is `n + n` |
+  | `[n, 3, 5]`, `L[L > 2]`, `{L > 2: L}` | yes | a new one |
+  | a literal `[1, 2]` | its own | a new one each time it is written |
+
+  So `a = [n, 3, 5]` is equal to `n + [3 5]` but not identical to `n`, and
+  `n + a` has 2 × 4 = 8 values. (The alternative, where `a`'s copy of `n`
+  stays tied to `n`, is coherent but not a product; not pursued.) A bracket
+  around one item is that item, a number, an expression or a multiset:
+  `[x + 1] 2 = 2x + 2`, and `1 == [1]`. Identity is ours, not Wildberger's
+  (his multisets have none), so it is never a bracket's to decide: two
+  independent draws from one name are binders, `p ∈ A` and `q ∈ A` (§0).
 
 Our `+` is not Wildberger's `+`. His adds multiplicities (the bracket above);
 ours is his direct product followed by addition of the elements.
@@ -118,7 +122,7 @@ the one below it lifted over every pair, and a row lifts any expression:
 Where the two differ is a repeated factor: his `A × A` chooses from each
 factor independently, and here one name is one choice, `f(A, A)` the
 diagonal, which is what families of graphs want. The independent draw is
-written with a bracket, `f(A, [A])` (§2).
+written with binders, `p ∈ A` and `q ∈ A` (§0).
 
 A point parameter reads its coordinates as the argument's own:
 `c(p, q) = {p.y = q.x: (p.x, q.y)}` composes an arrow i → j with j → k, and

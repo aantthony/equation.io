@@ -1642,23 +1642,6 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
       );
     }
     case 'list': {
-      // One item that is not a multiset is that item: [x + 1] groups, and
-      // [3] == 3. Around a multiset the bracket is a new one, below. (Only
-      // as written: a list lowered earlier, like a filter keeping one
-      // element, has its axes and stays a list.)
-      if (e.items.length === 1 && !e.axes && !isRange(e.items[0])) {
-        const only = lower(e.items[0], ctx);
-        if (!isSeq(only)) return only;
-        // A multiset in its own bracket is a new one: the same values (a
-        // column stays a column) over an origin of its own.
-        const flat = settle(only, ctx) as Seq;
-        if (!axesOf(flat).some(a => a.ordered)) {
-          const origin = originOf(e);
-          const own: Axis[] = [{ id: origin !== undefined ? `#o${origin}` : `#${++anonymous}`, n: seqLength(flat) }];
-          // (Lowering the item already made, and counted, its own copy.)
-          return withAxes({ ...flat } as Expr, own);
-        }
-      }
       // A literal is a new origin; a list lowered earlier (an index the
       // object pass settled first) keeps the instances it already had.
       // The origin is the literal itself, not this visit to it: expanding

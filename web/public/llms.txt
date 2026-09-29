@@ -269,10 +269,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `P.x` and `P.y` (and `P.z`) are the lists of their coordinates, paired the
   same way — `(P.x, 2 P.y)` is 3 points, not 9. Brackets add: a list
   inside a list contributes its elements, so with `n = [1,2]`, `[n, 3, 5]`
-  is `[1, 2, 3, 5]` (a new list, independent of `n`). So is `[n]`: equal
-  to `n` but a separate list, so `n + [n]` has 4 elements where `n + n` has
-  2 — the way to take a second, independent draw from one name. (Around a
-  single number or expression a bracket is just that value: `[x + 1] 2`.)
+  is `[1, 2, 3, 5]` (a new list, independent of `n`). A bracket around one
+  item is that item: `[n]` is `n` (so `n + [n]` has 2 elements, like
+  `n + n`), and `[x + 1] 2` groups.
   `[]` is the empty list: combined with anything it gives `[]`, and
   `count([])` and `total([])` are 0.
 - Cases over a list decide each element: `{L > 2: L}` with `L = [1..4]` is
@@ -282,8 +281,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   read coordinates as `p.x`, `p.y`, `p.z`: `c(p, q) = {p.y = q.x: (p.x,
   q.y)}` composes arrows i → j and j → k, and with lists of arrows `A`, `B`,
   `AB = c(A, B)` is the arrows that meet (their matrix product, as a multiset
-  of arrows), `c(A, A)` pairs each arrow with itself, and `c(A, [A])` is A
-  composed with A.
+  of arrows), and `c(A, A)` pairs each arrow with itself: one name is one
+  choice.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
   `stdev(L)` (sample), `median(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max

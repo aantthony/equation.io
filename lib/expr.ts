@@ -555,14 +555,6 @@ function eqItems(n: PNode): Array<Expr | PCase> {
   return [...l.slice(0, -1), joined, ...r.slice(1)];
 }
 
-/** What an index bracket holds: its index, through any brackets around it
- *  (L[[L > 2]] is L[L > 2]); a slice's range stays in its list. */
-function indexOf(b: PNode): Expr {
-  let n = b;
-  while (n.kind === 'list' && n.items.length === 1 && n.items[0].kind !== 'range') n = n.items[0];
-  return n === b ? asVecOrExpr(b) : (n as Expr);
-}
-
 const asVecOrExpr = (n: PNode): Expr =>
   n.kind === 'series' && (n.items.length === 2 || n.items.length === 3) ? seriesToVec(n.items) : asExpr(n);
 
@@ -653,12 +645,9 @@ const ops = operators<PNode>({
   }),
   ']': closer('[', (content, call) => {
     if (!content) throw new Error('Empty list.');
-    // A comma series is a data list. So is one item (docs/multisets.md §2):
-    // around a multiset, [A] is a new one, equal to A but not identical;
-    // list lowering gives anything else back as itself, a grouping.
+    // A comma series is a data list; a single item keeps its grouping
+    // meaning, and is that item: [n] is n (docs/multisets.md §2).
     if (content.kind === 'series') return { kind: 'list', items: content.items.map(asExpr) };
-    if (!call && content.kind !== 'range' && content.kind !== 'popen')
-      return { kind: 'list', items: [asExpr(content)] };
     // A lone range is a list too ([1..10] expands during resolution) — but
     // not in a call bracket, where int[a..b] / sum[n=1..N] own the range.
     if (!call && content.kind === 'range') {
@@ -747,11 +736,7 @@ const ops = operators<PNode>({
   // List indexing: `L[2]` for a known list name L (1-based; list.ts lowers
   // it), a sort(…) call, or a list literal right against its index (see
   // addImplicitTokens) — `x[2]` keeps meaning 2x.
-  // An index bracket holds its index, not a multiset: L[2], L[L > 2].
-  '[at]': BinaryInfix<PNode>((a, b): Expr => ({
-    kind: 'index',
-    args: [asExpr(a), indexOf(b)],
-  })),
+  '[at]': BinaryInfix<PNode>((a, b): Expr => ({ kind: 'index', args: [asExpr(a), asVecOrExpr(b)] })),
 
   // Column access: `person.age` is one name, not a product. Binding tighter
   // than everything else, it is purely a naming device — the dotted name
@@ -1820,9 +1805,6 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
     case 'vec':
       throw new Error('Vector in scalar context.');
     case 'list':
-      // [x + 1] groups: one item that is not a multiset is that item.
-      if (e.items.length === 1) return evaluate(e.items[0], env);
-      throw new Error('List in scalar context.');
     case 'data':
       throw new Error('List in scalar context.');
     case 'str':

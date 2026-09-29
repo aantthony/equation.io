@@ -86,14 +86,15 @@ describe('graph rows', () => {
       '2>2:×4',
     ]);
     // One name is one choice: c(A, A) pairs each arrow with itself, the
-    // loops. [A] is a new multiset, equal to A, so c(A, [A]) is A² = [[1 3] [0 4]].
+    // loops, and so does c(A, [A]): [A] is A. (A², two independent draws
+    // from A, is for binders, p ∈ A and q ∈ A: docs/multisets.md §0.)
     expect(arrows(graphOf([...AB, c, 'graph(c(A, A))']))).toEqual(['1>1', '2>2:×2']);
+    expect(arrows(graphOf([...AB, c, 'graph(c(A, [A]))']))).toEqual(['1>1', '2>2:×2']);
     // A coordinate read takes a point of any dimension that has it.
     const x = analyzeRows(['f(p) = p.x', 'P = [(1, 2, 5), (3, 4, 6)]', 'f(P + (0, 0, 0))'], { readouts: true });
     expect(x.rows.at(-1)!.info).toBe('= [1, 3]');
     const z = analyzeRows(['f(p) = p.z', 'P = [(1, 2), (3, 4)]', 'f(P + (0, 0))']);
     expect(z.rows.at(-1)!.error).toMatch(/reads a coordinate that point does not have/);
-    expect(arrows(graphOf([...AB, c, 'graph(c(A, [A]))']))).toEqual(['1>1', '1>2:×3', '2>2:×4']);
   });
 
   it('every step of the Collatz orbits of 1..50: recursion over two lists', () => {

@@ -305,7 +305,7 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
       [
         'matrix multiplication as arrows',
-        '# a matrix is a multiset of arrows i → j (Wildberger); A = [(1, 1), (1, 2), (2, 2), (2, 2)]; B = [(1, 2), (2, 1), (2, 2)]; graph(A); --- right; graph(B); --- below; # compose: i → j, then j → k, where they meet; c(p, q) = {p.y = q.x: (p.x, q.y)}; AB = c(A, B); graph(AB); --- right; # [A] is a second draw from A, so this is A²; graph(c(A, [A]))',
+        '# a matrix is a multiset of arrows i → j (Wildberger); A = [(1, 1), (1, 2), (2, 2), (2, 2)]; B = [(1, 2), (2, 1), (2, 2)]; graph(A); --- right; graph(B); --- below; # compose: i → j, then j → k, where they meet; c(p, q) = {p.y = q.x: (p.x, q.y)}; AB = c(A, B); graph(AB)',
         'graph matrix list split-view',
       ],
       [
