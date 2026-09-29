@@ -112,9 +112,8 @@ A2 = [c(p, q)]      # A composed with A, collected into a box
 
 A binder names a choice, so which choices are shared is written, not
 inferred: `c(A, A)` stays the diagonal (one binder, A), and two binders
-are his independent `A × A`. This replaces the `[A]` copy of §2 as the way
-to draw twice; once `∈` exists, whether `[A]` should go back to being `A`
-itself is to be decided on the examples.
+are his independent `A × A`. Binders are the only way to draw twice: a
+bracket never decides identity, so `[A]` is `A` (§2).
 
 **A family closes into a box** in exactly two places (built): `[ … ]`,
 and the parentheses of a reduction. Everything the enclosed expression
@@ -154,7 +153,7 @@ special cases:
 | **maxel** (matrix, MF165) | pixels (index pairs): `[(1, 1), (1, 2), …]` | product `c(A, B)`, transpose `(A.y, A.x)`, trace `count(A[A.x == A.y])` |
 | tensor | index tuples | the direct product `(a, b)` is a ⊗ b; contraction is a guard |
 | identity E_J (MF169) | `{J: (J, J)}` for a finite J | restriction to rows J is a filter |
-| zeta maxel of a poset (MF272) | its order pairs, by a guard: `D = [1, 2, 3, 4, 6, 12]`; `E = [D]`; `Z = {mod(E, D) = 0: (D, E)}` | `count(Z)` = 18 pairs; `c(Z, [Z])` counts the 40 chains i ∣ j ∣ k |
+| zeta maxel of a poset (MF272) | its order pairs, by a guard over two draws from the divisors: `D` and `E` both `[1, 2, 3, 4, 6, 12]`, written twice until binders; `Z = {mod(E, D) = 0: (D, E)}` | `count(Z)` = 18 pairs; its chains, Z composed with itself, need binders |
 
 A maxel has no size: any two multiply, with the pixel rule
 [k, l][m, n] = [k, n] if l = m and otherwise "a real nothing" (MF166,
