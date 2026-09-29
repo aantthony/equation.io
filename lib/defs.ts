@@ -709,8 +709,8 @@ const FN_RE = new RegExp(
   String.raw`^\s*(${NAME_SRC})\s*\(\s*(${NAME_SRC}(?:\s*,\s*${NAME_SRC})*)\s*\)\s*=(?!=)([\s\S]+)$`,
 );
 const CONST_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`);
-/** `p ∈ A` (or `p \in A`, `p in A`): a binder, a draw from A. */
-const DRAW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*(?:∈|\\in\b|\bin\b)\s*([\s\S]+)$`);
+/** `p ∈ A` (or `p \in A`): a binder, a draw from A. */
+const DRAW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*(?:∈|\\in\b)\s*([\s\S]+)$`);
 const STATE_RE = new RegExp(String.raw`^\s*(${NAME_SRC})'\s*=(?!=)([\s\S]+)$`);
 const INIT_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$`);
 /**
@@ -842,7 +842,7 @@ export function scanDefinition(text: string): Definition | null {
   return null;
 }
 
-/** Why a row that reads as a binder, `p ∈ A` (or `in`, `\\in`), binds no
+/** Why a row that reads as a binder, `p ∈ A` (or `\\in`), binds no
  *  name: the name is the language's. Null when it is not such a row. */
 export function takenBinder(text: string): string | null {
   const m = DRAW_RE.exec(text);

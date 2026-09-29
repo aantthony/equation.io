@@ -99,8 +99,7 @@ Hence `count(A) + 1` is {3} and {1} under our `+`, α³·α¹ = α⁴: 4.
 **A box opens into a family** where a name is used as a value. Today every
 multiset name is an implicit binder, `A` standing for "a member of A", and
 one name is one choice (§1) (built). The explicit form is Wildberger's
-set-builder binder (built), a row of its own, `p ∈ A` (or `p \in A`,
-`p in A`):
+set-builder binder (built), a row of its own, `p ∈ A` (or `p \in A`):
 
 ```
 a ∈ [2, 3]          # a family variable drawn from a box

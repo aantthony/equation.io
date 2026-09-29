@@ -87,7 +87,7 @@ describe('§0 binders: p ∈ A draws from A', () => {
     expect(multiset([n, 'p ∈ n', 'p + p'])).toEqual([2, 4]);
     expect(multiset([n, 'p ∈ n', 'p + n'])).toEqual([2, 3, 3, 4]);
     // …spelled ∈, \in or in.
-    expect(multiset([n, 'p in n', 'q \\in n', 'p + q'])).toEqual([2, 3, 3, 4]);
+    expect(multiset([n, 'p \\in n', 'q ∈ n', 'p + q'])).toEqual([2, 3, 3, 4]);
     // A number drawn is that number; a family variable draws a family.
     expect(multiset(['p ∈ 3', 'p + 1'])).toEqual([4]);
     const row = last(['a ∈ [2, 3]', 'y = a x']);
@@ -117,9 +117,12 @@ describe('§0 binders: p ∈ A draws from A', () => {
     expect(last(['r = interval(0, 1)', 'p ∈ r']).error).toMatch(/draws from a list; that is an interval/);
   });
   it('says what ∈ is where it cannot be one, in every spelling', () => {
-    for (const row of ['e ∈ D', 'e in D', 'u \\in D', 'x ∈ D', 'sin ∈ D'])
+    for (const row of ['e ∈ D', 'e \\in D', 'u \\in D', 'x ∈ D', 'sin ∈ D'])
       expect(last(['D = [1, 2]', row]).error).toMatch(/is taken by the language, so it cannot be drawn/);
     expect(last(['D = [1, 2]', '2 ∈ D']).error).toMatch(/draws a name from a list/);
+  });
+  it('leaves a bare in to the user: only ∈ and \\in draw', () => {
+    expect(multiset(['in = 2', 'k = 3', 'k in + 1'])).toEqual([7]);
   });
   it('makes no slider of a draw', () => {
     const a = analyzeRows(['p ∈ 3', 'k = 2', 'p + k']);

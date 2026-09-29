@@ -283,7 +283,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `AB = c(A, B)` is the arrows that meet (their matrix product, as a multiset
   of arrows), and `c(A, A)` pairs each arrow with itself: one name is one
   choice. Two independent draws from one list are binders, rows of their
-  own: `p ∈ A` (or `p in A`) names a choice from A, equal to A but never
+  own: `p ∈ A` (or `p \in A`) names a choice from A, equal to A but never
   identical, so with `p ∈ A` and `q ∈ A`, `c(p, q)` is A composed with
   itself (`p + p` still zips; `p + q` crosses). A binder cannot use a name
   the language has: x, y, z, t, u, v, w, d, e, i, pi, tau or a built-in
