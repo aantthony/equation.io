@@ -180,8 +180,6 @@ vector is a picture of a vexel, as a row or as a column alike (MF171).
 - **Readouts**: `matrix(M)` on his screen (rows down, the diagonal
   marked), a vexel's multiplicity list and back, `parity(L)` for his Boole
   algebra (MF267, MF269).
-- **Inline guards everywhere**: `{A.y = B.x: …}` on an unnamed row and
-  inside `count` (today only named rows and `graph` accept it).
 
 ## 1. The rule: equal vs identical
 
