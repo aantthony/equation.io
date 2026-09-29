@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { ENUM_STATS } from '../lib/dist.ts';
-import { analyze } from './graph.ts';
-import { OG_HEIGHT, OG_WIDTH, canRenderOg, encodePng, renderRaster } from './og.ts';
+import { ENUM_STATS } from '../../../lib/dist.ts';
+import { analyzeRows as analyze } from '../../../lib/analysis.ts';
+import { OG_HEIGHT, OG_WIDTH, canRenderOg, encodePng, renderRaster } from './index.ts';
 
 /** Fraction of pixels in a raster that differ from the white background. */
 function inkFraction(r: { w: number; h: number; px: Uint8ClampedArray }): number {

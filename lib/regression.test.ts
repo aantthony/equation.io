@@ -1,6 +1,6 @@
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { analyze } from '../worker/graph.ts';
+import { analyzeRows as analyze } from './analysis.ts';
 import { buildDefs, scanDefinition, type Definition } from './defs.ts';
 import { parseCsv } from './csv.ts';
 import { evaluate } from './expr.ts';

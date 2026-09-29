@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PointTrail } from './point-trail.ts';
-import { analyze } from '../worker/graph.ts';
-import { canRenderOg, previewGap } from '../worker/og.ts';
+import { analyzeRows as analyze } from './analysis.ts';
+import { canRenderOg, previewGap } from '../packages/og-renderer/src/index.ts';
 
 describe('trail(point)', () => {
   it('accepts literals, named point arithmetic, and 3D state vectors', () => {

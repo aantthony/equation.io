@@ -1,0 +1,15 @@
+{
+  "name": "@equation/og-renderer",
+  "version": "1.0.0",
+  "description": "CPU renderer for Equation.io link-preview images (og:image): graph rows in, PNG out.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --root ../.. packages/og-renderer",
+    "typecheck": "tsc -p . --noEmit"
+  }
+}

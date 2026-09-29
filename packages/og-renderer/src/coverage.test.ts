@@ -9,8 +9,8 @@
  * honest, and that callers act on it.
  */
 import { describe, expect, it } from 'vitest';
-import { OG_COVERAGE, canRenderOg, previewGap } from './og.ts';
-import { analyze } from './graph.ts';
+import { OG_COVERAGE, canRenderOg, previewGap } from './index.ts';
+import { analyzeRows as analyze } from '../../../lib/analysis.ts';
 
 describe('og renderer coverage', () => {
   it('draws the everyday 2D and 3D families', () => {

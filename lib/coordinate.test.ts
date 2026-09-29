@@ -7,7 +7,7 @@ import { solveSystem, traceSystem } from './solve.ts';
 import { complexParts } from './complex-parts.ts';
 import { diff } from './diff.ts';
 
-import { analyze } from '../worker/graph.ts';
+import { analyzeRows as analyze } from './analysis.ts';
 
 const polar = ['r = sqrt(x^2+y^2)', 'theta = atan2(y,x)'];
 const last = (rows: string[]) => {

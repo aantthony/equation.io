@@ -19,8 +19,8 @@ import { freeVars } from '../lib/expr.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { rowKind } from '../lib/row-kind.ts';
 import { splitStatements } from '../lib/statements.ts';
-import { analyze } from './graph.ts';
-import { MAX_PLOTS, previewGap } from './og.ts';
+import { analyzeRows as analyze } from '../lib/analysis.ts';
+import { MAX_PLOTS, previewGap } from '../packages/og-renderer/src/index.ts';
 import { GRAPH_UI_URI, graphResource, graphResourceContents } from './mcp-app.ts';
 import type { JsonSchema, ObjectSchema } from '../lib/json-schema.ts';
 
@@ -269,7 +269,7 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   // on the author's device, not in the link. Disclose them the same way.
   const dataLocalRows = analysis.rows.filter(r => r.dataLocal);
   const dataOmits = dataLocalRows.map(r => ({ row: r.text, why: r.dataLocal! }));
-  // Labels count as drawable (og.ts OG_COVERAGE) so the preview survives,
+  // Labels count as drawable (og-renderer OG_COVERAGE) so the preview survives,
   // but their text is not in it.
   const labelOmits = plotRows
     .filter(r => r.cpu?.type === 'label')

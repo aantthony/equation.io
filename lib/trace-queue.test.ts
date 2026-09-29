@@ -2,7 +2,7 @@ import { evaluateFrame } from './env.ts';
 import { expect, it } from 'vitest';
 import { TraceQueue, traceEnvironment, type TraceInput, type TraceMessage } from './trace-queue.ts';
 
-import { analyze } from '../worker/graph.ts';
+import { analyzeRows as analyze } from './analysis.ts';
 const input: TraceInput = { residuals: [], dim: 2, lo: [-1, -1], hi: [1, 1], env: {} };
 const result = { pts: [[1, 2]] };
 

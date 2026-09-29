@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { type Expr, evaluate } from '../lib/expr.ts';
-import { boundValue } from '../lib/intshade.ts';
-import { analyze } from './graph.ts';
-import { compileProg, run as runProg } from '../lib/vm.ts';
+import { type Expr, evaluate } from './expr.ts';
+import { boundValue } from './intshade.ts';
+import { analyzeRows as analyze } from './analysis.ts';
+import { compileProg, run as runProg } from './vm.ts';
 
 /** [error ?? plot type, readout] per row. */
 const out = (texts: string[]) => analyze(texts).rows.map(r => [r.error ?? r.cpu?.type ?? 'def', r.info]);

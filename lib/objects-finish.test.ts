@@ -1,7 +1,7 @@
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
-import { analyze } from '../worker/graph.ts';
-import { canRenderOg, renderRaster } from '../worker/og.ts';
+import { analyzeRows as analyze } from './analysis.ts';
+import { canRenderOg, renderRaster } from '../packages/og-renderer/src/index.ts';
 import { evaluate, parseExpr } from './expr.ts';
 
 import { fieldEvaluator, FLOW_GLYPH_N, FLOW_SEEDS, FLOW_STEPS, streamline, traceField } from './flow.ts';

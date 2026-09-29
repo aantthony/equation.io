@@ -2,7 +2,7 @@ import { compileCpu, type CpuPlan } from '../lib/compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { type Expr, evaluate, freeVars } from '../lib/expr.ts';
 import { classify, publicKind } from '../lib/plot.ts';
-import { analyze } from './graph.ts';
+import { analyzeRows as analyze } from '../lib/analysis.ts';
 import { PUBLIC_KIND_ROWS } from './typed-values.fixtures.ts';
 
 function successful(rows: string[]) {

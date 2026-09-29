@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { coordinateDragWriter, dragAxes, splitPair } from './drag.ts';
 import { definitionDependencies } from './defs.ts';
 import { freeVars, parseExpr } from './expr.ts';
-import { analyze } from '../worker/graph.ts';
+import { analyzeRows as analyze } from './analysis.ts';
 
 describe('splitPair', () => {
   it('splits a simple pair at the top-level comma', () => {

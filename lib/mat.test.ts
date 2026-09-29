@@ -1,6 +1,6 @@
 import { compileGpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
-import { analyze } from '../worker/graph.ts';
+import { analyzeRows as analyze } from './analysis.ts';
 import { type Definition, buildDefs, compsOf, scanDefinition } from './defs.ts';
 import { evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';

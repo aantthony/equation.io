@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { analyze } from '../worker/graph.ts';
+import { analyzeRows as analyze } from './analysis.ts';
 import { type Expr, evaluate } from './expr.ts';
-import { canRenderOg, renderRaster } from '../worker/og.ts';
+import { canRenderOg, renderRaster } from '../packages/og-renderer/src/index.ts';
 import { hull2, hull3, hullFaces, hullMesh } from './hull.ts';
 
 type P3 = [number, number, number];

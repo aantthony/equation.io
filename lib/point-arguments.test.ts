@@ -1,6 +1,6 @@
 /** f(P): a point (or a list of points) as the one argument of an n-parameter function. */
 import { describe, expect, it } from 'vitest';
-import { analyze } from '../worker/graph.ts';
+import { analyzeRows as analyze } from './analysis.ts';
 import { resolveExpr } from './defs.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { lowerGeom } from './geom.ts';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyze } from '../worker/graph.ts';
+import { analyzeRows as analyze } from './analysis.ts';
 import { assignColors, takesColor } from './palette.ts';
 
 /** Slots after coloring rows given as existing slots (-1 = new). */

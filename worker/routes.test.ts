@@ -4,7 +4,7 @@ import { APP_CSP, GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { LANDINGS } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import worker, { landingMeta, shareMeta } from './index.ts';
-import { canRenderOg } from './og.ts';
+import { canRenderOg } from '../packages/og-renderer/src/index.ts';
 
 const APP = '<!doctype html><html><head><title>Equation.io</title></head><body></body></html>';
 const LANDING = `<!doctype html><html><head>
