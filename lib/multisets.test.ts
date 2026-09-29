@@ -96,6 +96,12 @@ describe('§2 brackets are sums', () => {
     // …and it is equal: the same values, so a reduction cannot tell.
     expect(multiset(['n = [1,2]', 'total([n])'])).toEqual([3]);
   });
+  it('a bracket around one multiset copies it once, a column staying a column', () => {
+    // 90 000 members: counted once, not once for M and again for [M].
+    expect(multiset(['L = [1..3000]', 'M = L + [1..30]', 'total([M])'])).toEqual([136440000]);
+    // An index bracket holds its index through any brackets around it.
+    expect(multiset(['L = [1, 2, 3, 4]', 'L[[L > 2]]'])).toEqual([3, 4]);
+  });
   it('a bracket around one number or expression is that value', () => {
     expect(multiset(['[3] + [1,2]'])).toEqual([4, 5]);
     expect(multiset(['a = 2', '[a + 1] 2'])).toEqual([6]);
@@ -131,6 +137,22 @@ describe('§3 reductions see the whole multiset', () => {
     const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
     expect(multiset([...AB, 'c(p, q) = {p.y = q.x: (p.x, q.y)}', 'count(c(A, B))'])).toEqual([7]);
     expect(multiset([...AB, 'AB = {A.y = B.x: (A.x, B.y)}', 'count(AB)'])).toEqual([7]);
+  });
+  it('a member no case holds for stays out through any arithmetic on it', () => {
+    const L = 'L = [1, 2, 3, 4]';
+    expect(multiset([L, 'count({L > 2: L} + 1)'])).toEqual([2]);
+    expect(multiset([L, 'M = {L > 2: L} + 1', 'count(M)'])).toEqual([2]);
+    expect(multiset([L, '{L > 2: L} + [0, 10]'])).toEqual([3, 4, 13, 14]);
+    expect(multiset([L, 'count(sin({L > 2: L}))'])).toEqual([2]);
+    expect(multiset([L, 'count(-{L > 2: L})'])).toEqual([2]);
+  });
+  it('an equality guard over a list is exact, at any size', () => {
+    expect(multiset(['L = [20000000, 5]', '{L = 20000000: 1, 0}'])).toEqual([0, 1]);
+    expect(multiset(['L = [0.1, 5]', 'count({L = 0.1000000001: L})'])).toEqual([0]);
+    expect(multiset(['L = [1, 2, 3, 4]', '{L = 2: L}'])).toEqual([2]);
+    // …on a row of its own and inside a reduction, not only when named.
+    const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
+    expect(multiset([...AB, 'count({A.y = B.x: (A.x, B.y)})'])).toEqual([7]);
   });
   it('a guard that moves with t stays a case, undefined where none holds', () => {
     const row = last(['L = [1, 2, 3, 4]', '{L > 2 + sin(t): L}']);

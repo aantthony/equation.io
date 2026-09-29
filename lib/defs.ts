@@ -2091,13 +2091,13 @@ function coordParams(fn: { params: readonly string[]; body: Expr }, args: readon
     const arg = args[j];
     const read = COORDS.map((c, k) => [`${p}.${c}`, k] as const).filter(([v]) => used.has(v));
     if (!read.length) return;
-    const arity = used.has(`${p}.z`) ? 3 : 2;
+    // (Arity 0: any point that has the coordinate, 2D or 3D alike.)
     for (const [v, k] of read) {
       if (arg.kind === 'var') env[v] = { kind: 'var', name: `${arg.name}.${COORDS[k]}` };
       else if (arg.kind === 'vec') {
-        if (k >= arg.items.length) throw new Error(compDims(name, arity, arg, arg.items.length));
+        if (k >= arg.items.length) throw new Error(compDims(name, 0, arg, arg.items.length));
         env[v] = arg.items[k];
-      } else env[v] = { kind: 'comp', value: arg, index: k, arity, functionName: name };
+      } else env[v] = { kind: 'comp', value: arg, index: k, arity: 0, functionName: name };
     }
   });
   return env;

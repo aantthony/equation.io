@@ -49,6 +49,8 @@ import {
   type Expr,
   compArity,
   compDims,
+  compFits,
+  NONE,
   evaluate,
   exactCase,
   originOf,
@@ -625,17 +627,8 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
 }
 
 /**
- * Decide a mask, element by element.
- *
- * A filter has to settle at lowering time: the result is a list literal, and
- * a list whose LENGTH moved with t could not be one. So conditions read
- * constants and sliders (which recompile when dragged) but not t — the same
- * line ranges and indices draw. Comparisons against a missing cell (NaN) are
- * false, so filtering a column also drops its gaps.
- */
-/**
  * Settle a list of piecewise members whose conditions are constant: each
- * becomes the value of the case that holds, or NaN where none does. The
+ * becomes the value of the case that holds, or [none] where none does. The
  * members stay where they are, paired with everything beside them; it is
  * the multiset collecting them that leaves the undefined ones out
  * (dropUndefined). What depends on t stays a piecewise, as a filter could
@@ -644,29 +637,50 @@ function holds(cond: Expr, env: Record<string, number>): boolean {
 function decideMembers(items: Expr[], axes: readonly Axis[], ctx: Ctx): Expr {
   const env: Record<string, number> = {};
   const decided: Expr[] = [];
+  // What stays a case evaluates as it runs, where a case is an inequality:
+  // an equality there is the tolerance form (lib/expr.ts exactCase).
+  const undecided = () =>
+    withAxes(
+      listOf(
+        items.map(it =>
+          it.kind !== 'piecewise'
+            ? it
+            : {
+                ...it,
+                cases: it.cases.map(c =>
+                  isEquality(c.cond) && c.cond.op === '==' ? { ...c, cond: exactCase(...c.cond.args) } : c,
+                ),
+              },
+        ),
+        ctx,
+      ),
+      axes,
+    );
   for (const item of items) {
-    if (item.kind !== 'piecewise') return withAxes(listOf(items, ctx), axes);
+    if (item.kind !== 'piecewise') return undecided();
     let pick: Expr | undefined;
     for (const c of item.cases) {
       for (const fv of freeVars(c.cond)) {
         const v = ctx.opts.consts?.[fv];
-        if (v === undefined) return withAxes(listOf(items, ctx), axes);
+        if (v === undefined) return undecided();
         env[fv] = v;
       }
-      if (c.cond.kind !== 'ineq' && !isEquality(c.cond)) return withAxes(listOf(items, ctx), axes);
+      if (c.cond.kind !== 'ineq' && !isEquality(c.cond)) return undecided();
       if (holds(c.cond, env)) {
         pick = c.value;
         break;
       }
     }
-    decided.push(pick ?? item.otherwise ?? num(NaN));
+    decided.push(pick ?? item.otherwise ?? { kind: 'call', name: NONE, args: [] });
   }
   return withAxes(listOf(decided, ctx), axes);
 }
 
-/** A member a guard decided has no value: NaN, or a point with a NaN coordinate. */
+/** A member a guard decided has no value: one holding [none], through any
+ *  arithmetic or coordinate. (Not inside a case: a case that moves with t may
+ *  not reach it.) */
 const undefinedMember = (e: Expr): boolean =>
-  (e.kind === 'num' && Number.isNaN(e.value)) || (e.kind === 'vec' && e.items.some(undefinedMember));
+  (e.kind === 'call' && e.name === NONE) || (e.kind !== 'piecewise' && childrenOf(e).some(undefinedMember));
 
 /**
  * Collect a multiset: a member no case of a guard holds for is not in it —
@@ -699,6 +713,15 @@ function dropUndefined(e: Expr, ctx: Ctx): Expr {
   return cols ? { kind: 'vec', items: cols.map(pick) } : pick(e as Expr & { kind: 'list' });
 }
 
+/**
+ * Decide a mask, element by element.
+ *
+ * A filter has to settle at lowering time: the result is a list literal, and
+ * a list whose LENGTH moved with t could not be one. So conditions read
+ * constants and sliders (which recompile when dragged) but not t — the same
+ * line ranges and indices draw. Comparisons against a missing cell (NaN) are
+ * false, so filtering a column also drops its gaps.
+ */
 function maskValues(mask: Expr, opts: ResolveOpts): boolean[] | null {
   if (!isMask(mask)) return null;
   return mask.items.map(cond => {
@@ -1301,7 +1324,7 @@ function lowerComp(e: Expr & { kind: 'comp' }, ctx: Ctx): Expr {
   let low = ctx.comps.get(value);
   if (!low) ctx.comps.set(value, (low = lower(value, ctx)));
   const dims = (got: number): void => {
-    if (got !== n) throw new Error(compDims(fn, n, value, got));
+    if (!compFits(n, k, got)) throw new Error(compDims(fn, n, value, got));
   };
   // A template of points: its k-th coordinate is the template's.
   if (isLazy(low) && low.body.kind === 'vec') {
@@ -1626,6 +1649,15 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
       if (e.items.length === 1 && !e.axes && !isRange(e.items[0])) {
         const only = lower(e.items[0], ctx);
         if (!isSeq(only)) return only;
+        // A multiset in its own bracket is a new one: the same values (a
+        // column stays a column) over an origin of its own.
+        const flat = settle(only, ctx) as Seq;
+        if (!axesOf(flat).some(a => a.ordered)) {
+          const origin = originOf(e);
+          const own: Axis[] = [{ id: origin !== undefined ? `#o${origin}` : `#${++anonymous}`, n: seqLength(flat) }];
+          // (Lowering the item already made, and counted, its own copy.)
+          return withAxes({ ...flat } as Expr, own);
+        }
       }
       // A literal is a new origin; a list lowered earlier (an index the
       // object pass settled first) keeps the instances it already had.
@@ -1657,10 +1689,26 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
     case 'ineq':
       return comparisonValue(e, ctx);
     case 'piecewise': {
-      // Over a list, a case may test equality, {A.y = B.x: …}: members are
-      // counted things (vertices, the ends of arrows), so it is exact.
+      // Over a list, a case may test equality, {A.y = B.x: …}, exactly:
+      // members are decided by `==` (decideMembers). (Whether a side is a
+      // list is a probe, so what it lowers is not charged twice.)
+      const listSide = (s: Expr): boolean => {
+        const { items, data } = ctx;
+        try {
+          return isSeq(lower(s, ctx));
+        } finally {
+          ctx.items = items;
+          ctx.data = data;
+        }
+      };
       const exact = (c: Expr): Expr =>
-        c.kind === 'eq' && [c.l, c.r].some(s => isSeq(expand(lower(s, ctx), ctx))) ? exactCase(c.l, c.r) : c;
+        c.kind !== 'eq'
+          ? c
+          : [c.l, c.r].some(listSide)
+            ? { kind: 'eqtest', op: '==', args: [c.l, c.r] }
+            : ctx.opts.exactConditions
+              ? exactCase(c.l, c.r)
+              : c;
       const cases = e.cases.map(c => ({ cond: lowerCond(exact(c.cond), ctx), value: lower(c.value, ctx) }));
       const otherwise = e.otherwise && lower(e.otherwise, ctx);
       const raw = [...cases.flatMap(c => [c.cond, c.value]), ...(otherwise ? [otherwise] : [])];

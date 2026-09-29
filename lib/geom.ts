@@ -23,7 +23,7 @@ import { type FigureForm, mapChildren } from './expr.ts';
  * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import { ANGLE_FN, type Expr, compArity, compDims, isRecur, sameList } from './expr.ts';
+import { ANGLE_FN, type Expr, compArity, compDims, compFits, isRecur, sameList } from './expr.ts';
 import { SCALAR_REDUCTIONS, tupleAxis, withAxes } from './list.ts';
 import {
   type GetMat,
@@ -1009,7 +1009,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       // of 2 points IS a 2×2 matrix; f must not refuse it for that.)
       const m = !v && ((value.kind === 'var' ? getMat(value.name) : null) ?? matOf(value)?.m);
       if (m) {
-        if (m.length !== n) throw new Error(compDims(fn, n, value, m.length));
+        if (!compFits(n, k, m.length)) throw new Error(compDims(fn, n, value, m.length));
         const rows = rowsAsPoints(m, value.kind === 'var' ? value.name : undefined);
         compSeen.set(value, (v = { wait: rows }));
       }
@@ -1028,7 +1028,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       }
       if ('wait' in v) return sc({ ...e, value: v.wait });
       if (!v.vec) throw new Error(compArity(fn, n));
-      if (v.items.length !== n) throw new Error(compDims(fn, n, value, v.items.length));
+      if (!compFits(n, k, v.items.length)) throw new Error(compDims(fn, n, value, v.items.length));
       return sc(v.items[k]);
     }
     case 'call': {
@@ -1319,8 +1319,10 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
           })),
         );
       }
-      const cases = e.cases.map(c => ({ cond: one(c.cond), value: one(c.value) }));
-      const otherwise = e.otherwise && one(e.otherwise);
+      // (Every value is a scalar here: `values` already holds them lowered.)
+      const scalar = (v: LV) => (v as LV & { vec: false }).e;
+      const cases = e.cases.map((c, j) => ({ cond: one(c.cond), value: scalar(values[j]) }));
+      const otherwise = e.otherwise && scalar(values[e.cases.length]);
       if (
         otherwise === e.otherwise &&
         cases.every((c, k) => c.cond === e.cases[k].cond && c.value === e.cases[k].value)

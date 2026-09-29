@@ -805,12 +805,15 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         exact ? { ...ropts, exactConditions: true } : ropts,
       );
       if (exact && !graphArgs) {
-        const cases = exactCases(resolved.expr);
-        if (cases !== resolved.expr && plane(resolved.expr))
+        if (exactCases(resolved.expr) !== resolved.expr && plane(resolved.expr))
           throw new Error(
             'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
           );
-        resolved.expr = cases;
+        // Over numbers a case is the tolerance form the evaluator runs; one
+        // over a list stays an equation, for list lowering to decide exactly.
+        const listy = (side: Expr): boolean =>
+          side.kind === 'list' || [...freeVars(side)].some(v => listNames.has(v.split('.')[0]));
+        resolved.expr = exactCases(resolved.expr, listy);
       }
       let parsed = resolved.expr;
       // A real row in u and v alone does not depend on the screen, so it is

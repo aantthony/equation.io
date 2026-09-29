@@ -200,12 +200,17 @@ function unrollSum(e: Expr): Expr | null {
 }
 
 /** Every equality case below `e` as exactCase. */
-export function exactCases(e: Expr): Expr {
-  const inner = mapChildren(e, exactCases);
-  if (inner.kind !== 'piecewise' || !inner.cases.some(c => c.cond.kind === 'eq')) return inner;
+export function exactCases(e: Expr, keep: (side: Expr) => boolean = () => false): Expr {
+  const inner = mapChildren(e, x => exactCases(x, keep));
+  const rewrite = (c: Expr) => c.kind === 'eq' && !keep(c.l) && !keep(c.r);
+  if (inner.kind !== 'piecewise' || !inner.cases.some(c => rewrite(c.cond))) return inner;
   return {
     ...inner,
-    cases: inner.cases.map(c => (c.cond.kind === 'eq' ? { ...c, cond: exactCase(c.cond.l, c.cond.r) } : c)),
+    cases: inner.cases.map(c =>
+      rewrite(c.cond)
+        ? { ...c, cond: exactCase((c.cond as Expr & { kind: 'eq' }).l, (c.cond as Expr & { kind: 'eq' }).r) }
+        : c,
+    ),
   };
 }
 

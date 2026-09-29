@@ -8,7 +8,7 @@ import { exceedsNodes } from './size.ts';
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
 import { type ResolveOpts, compsOf, listGetter, tensorGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
-import { type Expr, type FigureForm, freeVars, sameList } from './expr.ts';
+import { type Expr, type FigureForm, compFits, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists, SCALAR_REDUCTIONS, unionAxes, withAxes } from './list.ts';
 
@@ -499,7 +499,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
           if (
             pts?.kind !== 'list' ||
             !pts.items.length ||
-            !pts.items.every(p => p.kind === 'vec' && p.items.length === dim)
+            !pts.items.every(p => p.kind === 'vec' && compFits(dim, n.index, p.items.length))
           )
             return call;
           const k = n.index;

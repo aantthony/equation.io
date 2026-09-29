@@ -161,6 +161,12 @@ export const INTERVAL = '[interval]';
 
 /** The self-call inside a `loop` body: its args are the next pass's params. */
 export const RECUR = '@recur';
+/** The member a guard leaves where no case holds, `[none]()`: the empty box
+ *  (docs/multisets.md §2). Collecting a multiset leaves out every member
+ *  holding one (lib/list.ts dropUndefined), whatever arithmetic reached it;
+ *  anything that still evaluates one gets NaN. Not a NaN itself, so a
+ *  missing cell in a data column (which is NaN) is never taken for one. */
+export const NONE = '[none]';
 /** Passes a tail-recursive function may take before it is undefined. Enough
  *  for every self-similar construction (each pass rescales) and a fold over
  *  a few hundred items; bounded so a pixel that never terminates costs about
@@ -549,6 +555,14 @@ function eqItems(n: PNode): Array<Expr | PCase> {
   return [...l.slice(0, -1), joined, ...r.slice(1)];
 }
 
+/** What an index bracket holds: its index, through any brackets around it
+ *  (L[[L > 2]] is L[L > 2]); a slice's range stays in its list. */
+function indexOf(b: PNode): Expr {
+  let n = b;
+  while (n.kind === 'list' && n.items.length === 1 && n.items[0].kind !== 'range') n = n.items[0];
+  return n === b ? asVecOrExpr(b) : (n as Expr);
+}
+
 const asVecOrExpr = (n: PNode): Expr =>
   n.kind === 'series' && (n.items.length === 2 || n.items.length === 3) ? seriesToVec(n.items) : asExpr(n);
 
@@ -736,10 +750,7 @@ const ops = operators<PNode>({
   // An index bracket holds its index, not a multiset: L[2], L[L > 2].
   '[at]': BinaryInfix<PNode>((a, b): Expr => ({
     kind: 'index',
-    args: [
-      asExpr(a),
-      b.kind === 'list' && b.items.length === 1 && b.items[0].kind !== 'range' ? b.items[0] : asVecOrExpr(b),
-    ],
+    args: [asExpr(a), indexOf(b)],
   })),
 
   // Column access: `person.age` is one name, not a product. Binding tighter
@@ -1544,7 +1555,9 @@ export function structuralDiagnostic(e: Expr): string {
   return `${e.kind === 'figure' ? e.form : e.kind}(…) must be the whole expression.`;
 }
 /** The messages of a `[comp]` whose value is not an n-component point. */
-export const compArity = (fn: string, n: number): string => `${fn} takes ${n} arguments.`;
+/** (n = 0: a coordinate read, p.x, of a point of any dimension that has it.) */
+export const compArity = (fn: string, n: number): string =>
+  n ? `${fn} takes ${n} arguments.` : `${fn} reads a coordinate of a point, and that is not one.`;
 /** A piecewise case testing equality as an inequality every backend runs:
  *  r - ε < l < r + ε, which on whole numbers (cells, vertices, the
  *  coordinates of arrows) is exact. */
@@ -1564,7 +1577,11 @@ export function exactCase(l: Expr, r: Expr): Expr {
  *  an ODE, a sampled body) — said in the user's terms, not the node's. */
 export const strayComp = (e: Expr): string | null => (e.kind === 'comp' ? compArity(e.functionName, e.arity) : null);
 export const compDims = (fn: string, n: number, value: Expr, got: number): string =>
-  `${fn} takes ${n} arguments, and ${value.kind === 'var' ? value.name : 'that point'} has ${got} components.`;
+  n
+    ? `${fn} takes ${n} arguments, and ${value.kind === 'var' ? value.name : 'that point'} has ${got} components.`
+    : `${fn} reads a coordinate ${value.kind === 'var' ? value.name : 'that point'} does not have: it has ${got}.`;
+/** Whether a point of `got` coordinates fills a comp of arity n reading index k. */
+export const compFits = (n: number, k: number, got: number): boolean => (n ? got === n : got > k);
 /** d/dp of [angle] is a difference of two of these, one per arm (lib/diff.ts):
  *  [angle′](v0, v1, w0, w1) is the turning rate of arm v moving with velocity w. */
 export const ANGLE_RATE_FN = '[angle′]';
@@ -1636,6 +1653,7 @@ export const sincFn = (x: number): number => (x === 0 ? 1 : Math.sin(x) / x);
 export const cothFn = (x: number): number => 1 / Math.tanh(x);
 
 export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
+  [NONE]: () => NaN,
   sin: Math.sin,
   cos: Math.cos,
   tan: Math.tan,
