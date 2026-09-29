@@ -178,6 +178,25 @@ const shift = (cells: string[], di: number, dj: number) =>
     .sort();
 
 describe('2D automata', () => {
+  it('steps a 5×5 neighbourhood without a table of 2^25 rules', () => {
+    // 25 cells read, two states each: past the memo's size the rule just runs.
+    const rows = ['L_0 = [(0, 0)]', 'L_{n+1}[i, j] = {sum(a=-2..2, sum(b=-2..2, L_n[i+a, j+b])) > 0: 1, 0}'];
+    expect(live(board(rows, 1).grid)).toHaveLength(25);
+    expect(live(board(rows, 2).grid)).toHaveLength(81);
+  });
+
+  it('reads t again as it moves (update), from the generation it is at', () => {
+    const analysis = analyzeRows(['L_0 = [(0, 0)]', 'L_{n+1}[i, j] = {t < 1: L_n[i, j], 0}']);
+    const row = analysis.rows.find(r => r.cpu?.type === 'automaton');
+    if (row?.cpu?.type !== 'automaton') throw new Error('no automaton row');
+    const b = runBoard(row.cpu, { ...analysis.constEnv, t: 0 });
+    b.advance(3);
+    expect(live(b.grid)).toEqual(['0,0']);
+    b.update({ t: 2 });
+    b.advance(4);
+    expect(live(b.grid)).toEqual([]);
+  });
+
   it('scans rule, seed and live-cell seed rows', () => {
     expect(scanSeqRec('L_{n+1}[i, j] = L_n[i, j]')).toMatchObject({ rec: true, name: 'L', cell: 'i', cell2: 'j' });
     expect(scanSeqRec('L_0[i, j] = 1')).toMatchObject({ seed: true, cell: 'i', cell2: 'j' });

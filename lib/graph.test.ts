@@ -38,6 +38,27 @@ describe('graph rows', () => {
     expect(arrows(graphOf(['graph(1, 2)']))).toEqual(['1>2']);
   });
 
+  it('a case may test equality in any row not drawn over the plane', () => {
+    const value = (rows: string[]) => {
+      const a = analyzeRows(rows, { readouts: true });
+      const row = a.rows.at(-1)!;
+      return row.error ?? row.info;
+    };
+    const c = 'c(m) = {mod(m, 2) = 0: m/2, 3m + 1}';
+    expect(value([c, 'c(4)'])).toBe('= 2');
+    expect(value([c, 'c(7)'])).toBe('= 22');
+    expect(value(['s = 3', '{s = 3: 1, 0}'])).toBe('= 1');
+    // At x it would be a curve's sliver: refused on the row that draws it.
+    expect(value(['y = {x = 0: 1, 0}'])).toMatch(/piecewise conditions are inequalities/);
+    expect(value(['f(x) = {x = 0: 1, sin(x)/x}', 'y = f(x)'])).toMatch(/inequalities/);
+  });
+
+  it('a document that defines graph or mark calls its own function', () => {
+    const value = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
+    expect(value(['graph(x) = x^2', 'graph(3)'])).toBe('= 9');
+    expect(value(['mark(x) = x + 1', 'mark(3)'])).toBe('= 4');
+  });
+
   it('matrix multiplication as composing arrows (Wildberger)', () => {
     // A = [[1 1] [0 2]] and B = [[0 1] [1 1]] as multisets of arrows i → j.
     const g = graphOf([

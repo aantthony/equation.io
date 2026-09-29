@@ -1,5 +1,6 @@
 import { type View2DSpec, scaleViewAt } from './view.ts';
 import { describe, expect, it } from 'vitest';
+import { analyzeRows } from './analysis.ts';
 import { fitView2D, formatCameraRow, formatViewRow, formatViewSpec, orientLattice, parseViewRow } from './view.ts';
 
 const parse = (text: string, env: Record<string, number> = {}) => parseViewRow(text, env);
@@ -39,7 +40,6 @@ describe('parseViewRow', () => {
 
   it('gives row-friendly errors for malformed viewport rows', () => {
     expect(() => parse('view()')).toThrow(/Expected view/);
-    expect(() => parse('view(z = 1..2)')).toThrow(/x and y/);
     expect(() => parse('view(x = 5..-5)')).toThrow(/lo < hi/);
     expect(() => parse('view(x = 1..2, x = 3..4)')).toThrow(/twice/);
     expect(() => parse('view(x = 1)')).toThrow(/Expected view/);
@@ -182,8 +182,21 @@ describe('lattice views', () => {
       x: [-60, 60],
       y: [-80, -0],
     });
-    expect(() => parse('view(i = 0..5)')).toThrow(/two index axes/);
-    expect(() => parse('view(x = 0..5, n = 0..5)')).toThrow(/two index axes/);
+    expect(() => parse('view(x = 0..5, n = 0..5)')).toThrow(/index axes/);
+  });
+
+  it('names one index axis, as a panel sharing the other writes it', () => {
+    // Which way it runs is the lattice's to say: across, or down.
+    const one = parse('view(n = 0..80)') as View2DSpec;
+    expect(orientLattice(one, ['i', 'n'])).toEqual({ kind: 'view', axes: ['i', 'n'], y: [-80, -0] });
+    expect(orientLattice(one, ['n', 'i'])).toEqual({ kind: 'view', axes: ['n', 'i'], x: [0, 80] });
+    // …and it is what a panel with its other axis shared writes back.
+    expect(formatViewSpec({ y: [-80, -0], axes: ['i', 'n'] })).toBe('view(n = 0..80)');
+    // A panel with that lattice takes it; on the plane it is a slip for x or y.
+    const err = (rows: string[]) => analyzeRows(rows).rows.at(-1)!.error;
+    expect(err(['T[i, n] = i + n', 'view(n = 0..80)'])).toBeUndefined();
+    expect(err(['view(z = 1..2)'])).toMatch(/x and y/);
+    expect(err(['T[i, n] = i + n', '--- right', 'view(n = 0..80)'])).toMatch(/x and y/);
   });
 
   it('swaps a view naming the axes the other way round', () => {

@@ -400,8 +400,10 @@ function memoRule(rule: Expr, slots: ReadonlyMap<string, number>, vars: Float64A
   const prog = compileProg(rule, slots);
   const stack = new Float64Array(Math.max(prog.depth, 1));
   const read = nbr.filter(slot => slot >= 0);
-  const base = Math.max(2, Math.floor(MEMO_SIZE ** (1 / Math.max(1, read.length))));
-  const memo = new Float64Array(base ** read.length);
+  // Two states a cell already spell 2^cells keys: past MEMO_SIZE (a 5×5
+  // neighbourhood is 2^25) there is no table, and the rule just runs.
+  const base = 2 ** read.length > MEMO_SIZE ? 0 : Math.floor(MEMO_SIZE ** (1 / Math.max(1, read.length)));
+  const memo = new Float64Array(base ? base ** read.length : 0);
   const stamps = new Uint32Array(memo.length);
   let stamp = 1;
   return {
@@ -511,6 +513,9 @@ export interface Board {
   readonly grid: CellGrid;
   /** Step to generation `n` (from the seed again when n is behind). */
   advance(n: number): void;
+  /** Read the values the rule names from `env` again (t, as it moves):
+   *  generations from here on use them. */
+  update(env: Record<string, number>): void;
 }
 
 export function runBoard(a: Pick<Automaton, 'rule' | 'radius' | 'seed'>, env: Record<string, number>): Board {
@@ -629,6 +634,63 @@ export function runBoard(a: Pick<Automaton, 'rule' | 'radius' | 'seed'>, env: Re
       if (target < generation) reset();
       while (generation < target) step();
     },
+    update(env: Record<string, number>) {
+      let changed = false;
+      for (const [name, k] of slots) {
+        if (name === STEP_VAR || name === CELL_VAR || name === CELL_VAR2 || !Object.hasOwn(env, name)) continue;
+        if (vars[k] !== env[name]) {
+          vars[k] = env[name];
+          changed = true;
+        }
+      }
+      if (changed) rule.retire();
+    },
+  };
+}
+
+/**
+ * The opening window of a lattice panel with no view row, w × h pixels: a
+ * 1D diagram from its first row down, centred; a board around its origin; a
+ * table from cell (0, 0) in the top-left corner, big enough to print its
+ * values (cells at least `cellPx`). The app and the share preview both open
+ * on it.
+ */
+export function latticeFrame(
+  cpu: { type: 'automaton'; dims: 1 | 2 } | ({ type: 'lattice' } & Pick<LatticeTable, 'expr'>) | undefined,
+  env: Record<string, number>,
+  w: number,
+  h: number,
+  cellPx: number,
+): { cx: number; cy: number; upp: number } {
+  if (cpu?.type === 'automaton' && cpu.dims === 1) {
+    const upp = 121 / w;
+    return { upp, cx: 0, cy: 1.5 - (h / 2) * upp };
+  }
+  if (cpu?.type === 'automaton') return { upp: 80 / Math.min(w, h), cx: 0, cy: 0 };
+  // A table fits the cells it defines near the origin (a Cayley table's
+  // n × n), with a cell of margin; one defined everywhere opens on (0, 0)
+  // with cells big enough to print values in.
+  let box = [0, 11, 0, 11];
+  if (cpu?.type === 'lattice') {
+    const R = 32;
+    try {
+      const g = evalTable(cpu, env, -R, -R, 2 * R + 1, 2 * R + 1);
+      let b = [Infinity, -Infinity, Infinity, -Infinity];
+      for (let y = 0; y < g.rows; y++)
+        for (let x = 0; x < g.width; x++)
+          if (Number.isFinite(g.values[y * g.width + x]))
+            b = [Math.min(b[0], x), Math.max(b[1], x), Math.min(b[2], y), Math.max(b[3], y)];
+      const edge = b[0] === 0 || b[1] === 2 * R || b[2] === 0 || b[3] === 2 * R;
+      if (!edge && b[0] <= b[1]) box = [b[0] - R, b[1] - R, b[2] - R, b[3] - R];
+    } catch {
+      /* the default corner */
+    }
+  }
+  const [i0, i1, k0, k1] = box;
+  return {
+    upp: Math.max((i1 - i0 + 3) / w, (k1 - k0 + 3) / h, 1 / cellPx),
+    cx: (i0 + i1) / 2,
+    cy: -(k0 + k1) / 2,
   };
 }
 

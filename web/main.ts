@@ -6,6 +6,7 @@ import {
   TABLE_MAX,
   cellShades,
   evalTable,
+  latticeFrame,
   runAutomaton,
   runBoard,
   tableShades,
@@ -173,7 +174,7 @@ interface Equation {
   cellCache?: { plan: CpuPlan; key: string; grid: CellGrid; cells: Cells2D };
   /** A 2D automaton's board (lib/automaton.ts runBoard), stepped on as t
    *  runs, and its shades at the generation last drawn. */
-  boardCache?: { plan: CpuPlan; key: string; board: Board; generation: number; cells: Cells2D };
+  boardCache?: { shape: string; key: string; board: Board; generation: number; cells: Cells2D };
   /** A table's cells over the window last drawn (the cellCache pattern). */
   tableCache?: { plan: CpuPlan; key: string; grid: CellGrid; cells: Cells2D };
   /** A graph's edges as last evaluated from `inputs` (the values it reads:
@@ -626,42 +627,10 @@ function syncPanels() {
  */
 function frameLattice(p: Panel, cells: Equation[]) {
   const { w, h } = p.layout.rect;
-  const cpu = cells[0]?.cpu;
+  const cpu = cells[0]?.cpu as Parameters<typeof latticeFrame>[0];
   const dpr = window.devicePixelRatio || 1;
-  const v = p.view;
-  delete v.ratio;
-  if (cpu?.type === 'automaton' && cpu.dims === 1) {
-    v.upp = 121 / w;
-    v.cx = 0;
-    v.cy = 1.5 - (h / 2) * v.upp;
-  } else if (cpu?.type === 'automaton') {
-    v.upp = 80 / Math.min(w, h);
-    v.cx = v.cy = 0;
-  } else {
-    // A table fits the cells it defines near the origin (a Cayley table's
-    // n × n), with a cell of margin; one defined everywhere opens on (0, 0)
-    // with cells a little over the size values print at.
-    let box = [Infinity, -Infinity, Infinity, -Infinity];
-    if (cpu?.type === 'lattice') {
-      const R = 32;
-      try {
-        const g = evalTable(cpu, constEnv, -R, -R, 2 * R + 1, 2 * R + 1);
-        for (let y = 0; y < g.rows; y++)
-          for (let x = 0; x < g.width; x++)
-            if (Number.isFinite(g.values[y * g.width + x]))
-              box = [Math.min(box[0], x), Math.max(box[1], x), Math.min(box[2], y), Math.max(box[3], y)];
-        const edge = box[0] === 0 || box[1] === 2 * R || box[2] === 0 || box[3] === 2 * R;
-        if (edge || box[0] > box[1]) box = [R, R + 11, R, R + 11];
-        box = [box[0] - R, box[1] - R, box[2] - R, box[3] - R];
-      } catch {
-        box = [0, 11, 0, 11];
-      }
-    } else box = [0, 11, 0, 11];
-    const [i0, i1, k0, k1] = box;
-    v.upp = Math.max((i1 - i0 + 3) / w, (k1 - k0 + 3) / h, 1 / ((LATTICE_VALUE_PX + 30) * dpr));
-    v.cx = (i0 + i1) / 2;
-    v.cy = -(k0 + k1) / 2;
-  }
+  delete p.view.ratio;
+  Object.assign(p.view, latticeFrame(cpu, constEnv, w, h, (LATTICE_VALUE_PX + 30) * dpr));
 }
 
 /** The panels owning panel p's shared axes (lib/panels.ts linkRoot); an
@@ -1118,6 +1087,19 @@ function writebackViewport(undo: boolean) {
 
 // Classification produces new AST objects even when only view(...) changed.
 // Compare mathematical content, computed once per classification, not identity.
+/** Generations a 2D board steps in one frame on its way to the one t asks for. */
+const BOARD_CATCH_UP = 40;
+const boardShapes = new WeakMap<object, string>();
+/** What a board is built from: the same rule in a new plan keeps its board. */
+function boardShape(plan: Extract<CpuPlan, { type: 'automaton' }>): string {
+  let key = boardShapes.get(plan);
+  if (key === undefined) {
+    key = JSON.stringify([plan.rule, plan.seed ?? null, plan.radius]);
+    boardShapes.set(plan, key);
+  }
+  return key;
+}
+
 const systemKeys = new WeakMap<CpuPlan, string>();
 const traceEnvironments = new WeakMap<Classified, ReturnType<typeof traceEnvironment>>();
 function systemKey(cpu: CpuPlan): string {
@@ -2127,14 +2109,23 @@ function render() {
           case 'automaton': {
             const params = (eq.cls?.params ?? []).map(p => env[p]);
             if (plot.dims === 2) {
-              // One generation of the board, 8 a second, stepped on from the last.
+              // One generation of the board, 8 a second, stepped on from the
+              // last. Kept while the rule is the same rule (classification
+              // makes a new plan for any edit), and caught up a few dozen
+              // generations a frame, so a jump to generation 1000 draws its
+              // way there instead of stopping the page.
               const key = JSON.stringify(params);
+              const shape = boardShape(plot);
               let c = eq.boardCache;
-              if (c?.plan !== plot || c.key !== key) {
+              if (c?.shape !== shape || c.key !== key) {
                 const board = runBoard(plot, env);
-                c = eq.boardCache = { plan: plot, key, board, generation: -1, cells: cellsOf(board.grid, BOARD_RUNS) };
+                c = eq.boardCache = { shape, key, board, generation: -1, cells: cellsOf(board.grid, BOARD_RUNS) };
               }
-              c.board.advance(Math.floor(time * 8) % (BOARD_STEPS + 1));
+              if (eq.cls?.animated) c.board.update(env);
+              const target = Math.floor(time * 8) % (BOARD_STEPS + 1);
+              const from = target < c.board.generation ? 0 : c.board.generation;
+              c.board.advance(Math.min(target, from + BOARD_CATCH_UP));
+              if (c.board.generation !== target) requestRender();
               if (c.generation !== c.board.generation) {
                 c.generation = c.board.generation;
                 c.cells = cellsOf(c.board.grid, BOARD_RUNS);

@@ -1485,7 +1485,7 @@ export function drawLabels2D(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
-    const bg = `rgb(${theme.bg.map(c => Math.round(c * 255)).join(', ')})`;
+    const bg = cssRgb(theme.bg);
     ctx.font = '12px ui-sans-serif, system-ui';
     for (const tag of extras.tags ?? []) {
       const sx = toScreenX(tag.x),

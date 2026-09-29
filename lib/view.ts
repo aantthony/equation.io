@@ -154,15 +154,23 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       else lattice.push([axis, [lo, hi]]);
     }
     if (lattice.length) {
-      if (spec.x || spec.y || lattice.length !== 2)
+      if (spec.x || spec.y || lattice.length > 2)
         throw new Error(
-          'A lattice view names its two index axes, across then down: view(i = -60..60, n = 0..80). ' +
+          'A lattice view names its index axes, across then down: view(i = -60..60, n = 0..80). ' +
             'The plane is framed with x and y.',
         );
-      const [[a, across], [b, down]] = lattice;
-      spec.axes = [a, b];
-      spec.x = across;
-      spec.y = [-down[1], -down[0]];
+      if (lattice.length === 1) {
+        // One axis, as a panel sharing the other writes it: taken as across
+        // here, and turned down by orientLattice when that is its axis.
+        const [[a, range]] = lattice;
+        spec.axes = [a, ''];
+        spec.x = range;
+      } else {
+        const [[a, across], [b, down]] = lattice;
+        spec.axes = [a, b];
+        spec.x = across;
+        spec.y = [-down[1], -down[0]];
+      }
     }
     if (!spec.x && !spec.y) throw new Error(usage);
     return spec;
@@ -274,6 +282,11 @@ export function formatViewRow(x0: number, x1: number, y0: number, y1: number, ra
  */
 export function orientLattice(spec: View2DSpec, axes: readonly [string, string]): View2DSpec {
   const [a, b] = spec.axes ?? [];
+  // One axis named (b empty): the lattice says which way it runs.
+  if (b === '' && spec.x && a) {
+    if (a === axes[1]) return { ...spec, axes: [axes[0], a], x: undefined, y: [-spec.x[1], -spec.x[0]] };
+    return { ...spec, axes: [a, axes[1]] };
+  }
   if (!spec.x || !spec.y || a !== axes[1] || b !== axes[0]) return spec;
   return { ...spec, axes: [b, a], x: [-spec.y[1], -spec.y[0]], y: [-spec.x[1], -spec.x[0]] };
 }

@@ -21,6 +21,7 @@ import {
   runAutomaton,
   runBoard,
   tableShades,
+  latticeFrame,
 } from '../lib/automaton.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { glyphScale } from '../lib/glyphs.ts';
@@ -29,7 +30,7 @@ import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler, regionSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
-import { type ViewSpec, clampPhi, fitPanelWindow, linkedWindow } from '../lib/view.ts';
+import { type ViewSpec, clampPhi, fitPanelWindow, linkedWindow, orientLattice } from '../lib/view.ts';
 import { type GridRowSpec, layoutPanels, linkRoot, panelIndices, splitsOf } from '../lib/panels.ts';
 import { LIGHT_PALETTE, assignColors, takesColor } from '../lib/palette.ts';
 import { noteColor } from '../lib/statements.ts';
@@ -87,6 +88,9 @@ function drawDisc(r: Raster, cx: number, cy: number, rad: number, c: [number, nu
 }
 
 // --- 2D view ---
+
+/** The smallest cell a lattice preview opens on: the app's value size (web/render2d.ts LATTICE_VALUE_PX) plus margin. */
+const LATTICE_CELL_PX = 48;
 
 interface View2D {
   ratio?: number;
@@ -1363,7 +1367,24 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
         x: root('x'),
         y: root('y'),
       });
-      const view: View2D = box ? fitPanelWindow(box, sub.w, sub.h, panel.shared, linked) : linked;
+      // A lattice panel as the app opens it (web/main.ts frameLattice): a
+      // view row naming its axes the other way round still frames them, and
+      // with no view row it opens on its cells.
+      const cells = rows.filter(r => r.cpu!.type === 'automaton' || r.cpu!.type === 'lattice');
+      const lattice = cells.length > 0 && cells.length === rows.filter(r => r.cpu!.type !== 'note').length;
+      const axes = (cells[0]?.cpu as { axes?: readonly [string, string] } | undefined)?.axes;
+      const framed = box?.kind === 'view' && axes ? orientLattice(box, axes) : box;
+      const view: View2D = framed
+        ? fitPanelWindow(framed, sub.w, sub.h, panel.shared, linked)
+        : lattice && !panel.shared.x && !panel.shared.y
+          ? latticeFrame(
+              cells[0].cpu as Parameters<typeof latticeFrame>[0],
+              envValues(env),
+              sub.w,
+              sub.h,
+              LATTICE_CELL_PX,
+            )
+          : linked;
       views[k] = view;
       if (gridMode !== 'off') drawGrid2D(sub, view, gridMode === 'axes');
       for (const row of rows) {

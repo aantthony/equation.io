@@ -780,9 +780,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       // graph(from, to, label) reads as the tuple of its arguments: one edge
       // per element of its multiset (lib/graph.ts).
-      const graphArgs = GRAPH_RE.exec(row.text);
+      // (A document's own graph or mark function is that function.)
+      const graphArgs = fnNames.has('graph') ? null : GRAPH_RE.exec(row.text);
       // mark(v) is v, highlighted in the panel's graphs.
-      const markArg = MARK_RE.exec(row.text);
+      const markArg = fnNames.has('mark') ? null : MARK_RE.exec(row.text);
       const source = graphArgs ? `(${graphArgs[1]})` : markArg ? `(${markArg[1]})` : row.text;
       const rawParsed = parseExpr(source, fnNames, listNames, valueNames);
       // `p(50..400)`: where p goes over that time — a range in call position,
@@ -792,12 +793,25 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
         continue;
       }
-      // A graph's vertices are whole numbers, so its cases may test equality.
+      // A graph's vertices are whole numbers, so its cases may test equality,
+      // and so may any row not drawn over the plane: `f(2)`, `mark(c(4))`
+      // with c(m) = {mod(m, 2) = 0: …}. Only a case at x, y or z is refused
+      // (it would be a curve's sliver), here on the row that draws it.
+      const plane = (e: Expr) => ['x', 'y', 'z'].some(v => freeVars(e).has(v));
+      const exact = !!graphArgs || !plane(rawParsed);
       const resolved = resolveRow(
         graphArgs ? exactCases(rawParsed) : rawParsed,
         getFn,
-        graphArgs ? { ...ropts, exactConditions: true } : ropts,
+        exact ? { ...ropts, exactConditions: true } : ropts,
       );
+      if (exact && !graphArgs) {
+        const cases = exactCases(resolved.expr);
+        if (cases !== resolved.expr && plane(resolved.expr))
+          throw new Error(
+            'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
+          );
+        resolved.expr = cases;
+      }
       let parsed = resolved.expr;
       // A real row in u and v alone does not depend on the screen, so it is
       // drawn as its values (docs/multisets.md §5): u and v are each [0, 1],
@@ -891,6 +905,24 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       row.gpu = undefined;
     }
   }
+
+  // A view naming one index axis (a panel sharing the other writes it so)
+  // needs a lattice in its panel with that axis; on the plane it is a slip
+  // for x or y.
+  let panelAt = 0;
+  const latticeAxes: string[][] = [[]];
+  const oneAxisViews: Array<[(typeof rows)[number], number]> = [];
+  for (const row of rows) {
+    if (row.view?.kind === 'split') latticeAxes[++panelAt] = [];
+    const cpu = row.cpu;
+    if (cpu?.type === 'automaton' || cpu?.type === 'lattice') latticeAxes[panelAt].push(...cpu.axes);
+    if (row.view?.kind === 'view' && row.view.axes?.[1] === '') oneAxisViews.push([row, panelAt]);
+  }
+  for (const [row, at] of oneAxisViews)
+    if (!latticeAxes[at].includes(row.view!.kind === 'view' ? row.view!.axes![0] : '')) {
+      row.error = 'view(…) frames the plane with x and y; an index axis names a lattice in this panel.';
+      row.view = undefined;
+    }
 
   try {
     constEnv = evaluateFrame(defs, time, stateVals);
