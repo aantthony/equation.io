@@ -574,6 +574,8 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     // Inside a recursive function's loop, its params are its own names, not
     // the document lists or matrices they may share a spelling with.
     let bound: ReadonlySet<string> = new Set();
+    /** Whether a [map] argument was expanded here (point-list arithmetic). */
+    let mapArgs = false;
     const mentionsBound = (node: Expr): boolean => bound.size > 0 && [...freeVars(node)].some(v => bound.has(v));
     // A matrix name is the matrix, not a list of row-points, along the row's
     // own algebra (2 M, M v). Those rows are a list only where a call asks for
@@ -635,10 +637,26 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
             ((node.name === 'min' || node.name === 'max') && node.args.length === 1)
           )
             return node;
-          // A function applied per member ([map]) is list lowering's to run,
-          // arguments and all: its body's lists are its own, and a member
-          // that is a list or tuple collects there (lowerMap).
-          if (node.name === MAP) return node;
+          // A function applied per member ([map]) is list lowering's to run:
+          // its body's lists are its own, and a member that is a list or tuple
+          // collects there (lowerMap). An argument that is point-list
+          // arithmetic (P + (1, 0)) is expanded here on its own, as its row
+          // would be.
+          if (node.name === MAP)
+            return {
+              ...node,
+              args: node.args.map((n, i) => {
+                if (i < 3 || i % 2 === 0) return n;
+                try {
+                  const low = lowerObjects(n, defs, opts);
+                  if (low.kind !== 'list') return n;
+                  mapArgs = true;
+                  return low;
+                } catch {
+                  return n;
+                }
+              }),
+            };
           return { ...node, args: node.args.map(n => visit(n, false)) };
         case 'comp':
           return { ...node, value: visit(node.value, false) };
@@ -664,6 +682,9 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     };
     const template = visit(source);
     if (!lists.length) {
+      // A [map] whose point-list argument was expanded here is no family:
+      // with that argument lowered, the row is ordinary again.
+      if (mapArgs) return ordinary(template);
       if (outside) return null;
       throw originalError ?? new Error('This expression cannot be expanded as an object family.');
     }

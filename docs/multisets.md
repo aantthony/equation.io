@@ -145,10 +145,15 @@ in the row, `L - mean(L)`. Over a list of points the body reads each
 point's coordinates, `p.x` and `p.y` or the spread form `f(x, y)`: point
 arithmetic is lowered before lists are, so a bare point parameter is
 refused there. Only a parameter a reduction takes (`count`, `total`,
-`mean`, `stdev`, `median`) makes the call a map; `sort` reads a box whole,
-so `s(m) = sort(m)` sorts its argument. A reduction in the body that
-mentions no parameter is taken once for all members, and a member no case
-holds for is no member, as over a list.
+`mean`, `stdev`, `median`, one-argument `min` and `max`) makes the call a
+map; `sort` reads a box whole, so `s(m) = sort(m)` sorts its argument.
+Once a call is a map, every list argument is bound per member, so the same
+list passed twice zips, and a list the call maps over, met again in the
+body, is the member's own (`f(m) = M + total(L m)`: `f(M)` is
+`[70 140]`). A reduction in the body that mentions no parameter is taken
+once for all members, and a member no case holds for is no member, as over
+a list. A wrapper such as `avg(s) = mean(s)` therefore gives each member
+back: to reduce the list itself, the reduction is written in the row.
 
 **Order-based readings are a separate, named family**: `min`, `max`,
 `median`, `sort`, `hist`, `polyline`, `hull`. They read a box by the order

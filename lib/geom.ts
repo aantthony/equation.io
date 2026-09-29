@@ -1036,9 +1036,19 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         throw new Error(`${e.name}(…) must be a whole statement.`);
       // A function applied per member of lists is list lowering's to run;
       // the point arithmetic in its body is lowered here, like any other.
+      // (Its arguments too: a list of named points is a list of points.)
       if (e.name === MAP) {
-        const body = toExpr(lo(e.args[0]));
-        return sc(body === e.args[0] ? e : { ...e, args: [body, ...e.args.slice(1)] });
+        const args = e.args.map((a, i) => {
+          if (i === 0 || (i > 1 && i % 2 === 0)) return a;
+          try {
+            return toExpr(lo(a));
+          } catch (err) {
+            // Point-list arithmetic is the object pass's (lib/object-lists.ts).
+            if (i === 1) throw err;
+            return a;
+          }
+        });
+        return sc(args.every((a, i) => a === e.args[i]) ? e : { ...e, args });
       }
       if (e.name === 'trail') {
         const args = e.args.map(lo);
