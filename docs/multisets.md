@@ -19,6 +19,141 @@ Decisions locked:
   else is drawn as its values. No implicit graph.
 - **Reductions over a filter use the geometric measure** (§5).
 - **A continuous interval is `interval(a, b)`** (§5).
+- **A multiset has two readings** (§0, 2026-09-29): a family in a row,
+  Wildberger's polynumber read through α, and a box inside `[ … ]` or a
+  reduction. Rows live at the exponent level; every function applies per
+  member; a reduction reads its closed box one level up.
+
+## 0. Two readings of one multiset: families and boxes
+
+Design agreed 2026-09-29, from Wildberger's Math Foundations lectures
+164–272 (maxels, box arithmetic, polynumbers). Status marks: **built**
+works today; **proposed** is the direction, not yet code.
+
+A multiset can be read two ways, and the language needs both:
+
+| Reading | What it is | Operations | Example |
+|---|---|---|---|
+| a **family** | a multi-value: one of its members at a time | anything applies per member; one name is one choice | `A = [2, 3]`; `y = A x` is two lines |
+| a **box** | Wildberger's object, the collection itself | pour, his ×, caret, anti, the maxel product | `P = [0, 0, 1, 3]` is 2 + α + α³ |
+
+The same object serves both. What changes is where it is used: as a value
+in a row it is a family; inside `[ … ]` or a reduction it is a box.
+
+### Families are polynumbers read through α
+
+A family is the polynumber whose exponents are its members. With
+α = {1} (Wildberger, MF227), the family `[2, 3]` is α² + α³, the box
+{2, 3}.
+
+| Row | Polynumber | Why |
+|---|---|---|
+| `[2, 3]` | α² + α³ | the members are exponents |
+| `1`, or `[1]` | α¹ | a lone number in a row is one member |
+| `A + B`, separate names | (Σ α^a)(Σ α^b) | exponents add: his × (§1 table) |
+| `f(A)` | Σ α^f(a) | a function maps the exponents |
+| `[A, B]` | Σ α^a + Σ α^b | his +, pour |
+| `count(A)` | Σ α⁰ | his N: every member to 0 |
+
+So the numbers written in a row live at the **exponent level**, one below
+the boxes. That is the level shift of §1 ("one level down") given its
+reason, and it is why `1 == [1]` holds in a row: both are α¹, the same
+member, not merely the same graph. It also says why `+` in a row is
+addition and not pour: `f(s) = s + s`; `y = f(A) x` must draw 4x and 6x
+(built), where pour would give `[2, 3, 2, 3]`, four lines. Pour is the
+box's `+`, and a box's `+` is written with brackets, `[A, B]`.
+
+No new base element is needed for families: α already is the marker that
+turns a number into a member.
+
+### Moving between the readings
+
+**A box opens into a family** where a name is used as a value. Today every
+multiset name is an implicit binder, `A` standing for "a member of A", and
+one name is one choice (§1) (built). The explicit form is Wildberger's
+set-builder binder (proposed):
+
+```
+a ∈ [2, 3]          # a family variable drawn from a box
+y = f(a) x          # two lines
+
+p ∈ A               # two binders over one box: two independent draws
+q ∈ A
+A2 = [c(p, q)]      # A composed with A, collected into a box
+```
+
+A binder names a choice, so which choices are shared is written, not
+inferred: `c(A, A)` stays the diagonal (one binder, A), and two binders
+are his independent `A × A`. This replaces the `[A]` copy of §2 as the way
+to draw twice; once `∈` exists, whether `[A]` should go back to being `A`
+itself is to be decided on the examples.
+
+**A family closes into a box** in exactly two places (built): `[ … ]`,
+and the parentheses of a reduction. Everything the enclosed expression
+iterates over is collected there, with multiplicity, and does not iterate
+outside it (§3: `M + count(L)` iterates M only).
+
+**A reduction is a per-member map, then its box read one level up.**
+`count` maps every member to 0, and the box of zeros is the number (his N,
+`N(A) = [Z(a) : a ∈ A]`). `total` pours the members together (his S). The
+reading up is the one step that sees a box whole, and it is Wildberger's
+own identification, *a natural number is a box of zeros*, applied where our
+two levels meet: its result is an exponent again, a value in the row, so
+`count(A) + 1` is 4, not the family `[1, 1, 1]` (built).
+
+**Every function applies per member** (proposed as a rule). User functions
+and numeric builtins take one member of each argument; none takes a
+multiset whole. New features that need a whole multiset are reductions,
+defined by their per-member map, or they are not added. This settles the
+gap of §3: `f(m) = total(L m)`; `f(M)` is `[f(10), f(20)]`, not `total`
+over M as well.
+
+**Order-based readings are a separate, named family**: `min`, `max`,
+`median`, `sort`, `hist`, `polyline`, `hull`. They read a box by the order
+or shape of its members, which no per-member map gives. `hist` is his
+multiplicity list (MF243).
+
+### Boxes: what the algebra is for
+
+Read as boxes, the same few objects are Wildberger's algebra, with no
+special cases:
+
+| Object | As a box | Built |
+|---|---|---|
+| polynumber 2 + α + α³ | exponents: `[0, 0, 1, 3]` | product `P + Q`, sum `[P, Q]`, value `total(x^P)` |
+| multinumber | exponent tuples: `[(2, 1), (0, 0)]` | product `M + N` |
+| **vexel** (vector) 3e₁ + 2e₃ | basis labels: `[1, 1, 1, 3, 3]` | sum `[a, b]`, component `count(a[a == 3])` |
+| **maxel** (matrix, MF165) | pixels (index pairs): `[(1, 1), (1, 2), …]` | product `c(A, B)`, transpose `(A.y, A.x)`, trace `count(A[A.x == A.y])` |
+| tensor | index tuples | the direct product `(a, b)` is a ⊗ b; contraction is a guard |
+| identity E_J (MF169) | `{J: (J, J)}` for a finite J | restriction to rows J is a filter |
+| zeta maxel of a poset (MF272) | its order pairs, by a guard: `D = [1, 2, 3, 4, 6, 12]`; `E = [D]`; `Z = {mod(E, D) = 0: (D, E)}` | `count(Z)` = 18 pairs; `c(Z, [Z])` counts the 40 chains i ∣ j ∣ k |
+
+A maxel has no size: any two multiply, with the pixel rule
+[k, l][m, n] = [k, n] if l = m and otherwise "a real nothing" (MF166,
+MF208), which is a guard that drops the member (built). Stored as its
+pixels, it is a sparse matrix in coordinate form; the matrix is only a
+picture of it ("a matrix is just a picture of a maxel", MF165), and a
+vector is a picture of a vexel, as a row or as a column alike (MF171).
+
+### Still to build
+
+- **`∈` binders**, above.
+- **Signed, compact multiplicities** (docs/maxels.md, to write): anti
+  elements (MF231–239), needed for differences 5V − U, rank (MF171),
+  q-series cancellation (MF239), the Möbius maxel μ = ζ⁻¹ (MF272) and the
+  dihedron algebra; counts stored with each distinct member rather than as
+  repeats; rational counts only where he needs them (inverses, MF272), real
+  weights as our own extension (§5's measure), marked as such. His −1 is
+  written 1̄.
+- **An indexed product**, a box product over an index (the fundamental
+  identity ^ₚ{1, p, p², …} = {1, 2, 3, …}, MF240; ∏(1 − αⁿ), MF239;
+  maxel powers), truncated exactly by his rule that only finitely many
+  picks are non-trivial.
+- **Readouts**: `matrix(M)` on his screen (rows down, the diagonal
+  marked), a vexel's multiplicity list and back, `parity(L)` for his Boole
+  algebra (MF267, MF269).
+- **Inline guards everywhere**: `{A.y = B.x: …}` on an unnamed row and
+  inside `count` (today only named rows and `graph` accept it).
 
 ## 1. The rule: equal vs identical
 
