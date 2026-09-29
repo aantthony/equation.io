@@ -167,6 +167,14 @@ export const RECUR = '@recur';
  *  anything that still evaluates one gets NaN. Not a NaN itself, so a
  *  missing cell in a data column (which is NaN) is never taken for one. */
 export const NONE = '[none]';
+/**
+ * A function applied per member of its list arguments (docs/multisets.md
+ * §0), where its body reduces: `[map](body, "m", M, …)` is the body once per
+ * member, with the parameter named by each string bound to that member of
+ * the argument after it ("x,y" spreads a point's coordinates). List
+ * lowering (lib/list.ts) evaluates it; nothing downstream sees it.
+ */
+export const MAP = '[map]';
 /** Passes a tail-recursive function may take before it is undefined. Enough
  *  for every self-similar construction (each pass rescales) and a fold over
  *  a few hundred items; bounded so a pixel that never terminates costs about

@@ -50,6 +50,7 @@ import {
   compArity,
   compDims,
   compFits,
+  MAP,
   NONE,
   evaluate,
   sameNumber,
@@ -1212,6 +1213,85 @@ function positionIn(idx: Expr, n: number, has: string, what: string, name: strin
   return k;
 }
 
+/** Bind a function's parameter(s) to one member: `p` (and `p.x`… of a
+ *  point), or "x,y" spread over a point's coordinates. */
+function bindMember(
+  env: Record<string, Expr>,
+  names: readonly string[],
+  member: Expr,
+  bare: ReadonlySet<string>,
+): void {
+  if (names.length === 1) {
+    const [p] = names;
+    // Point arithmetic is lowered before lists are, so a body applied per
+    // point works on its coordinates, not on the point whole.
+    if (member.kind === 'vec' && bare.has(p))
+      throw new Error(
+        `A function applied per point of a list reads its coordinates: write ${p}.x and ${p}.y, or take them as parameters, f(x, y).`,
+      );
+    env[p] = member;
+    if (member.kind === 'vec') member.items.forEach((c, k) => k < 3 && (env[`${p}.${'xyz'[k]}`] = c));
+    return;
+  }
+  if (member.kind !== 'vec' || member.items.length !== names.length)
+    throw new Error(`This takes a point of ${names.length} coordinates, one per parameter.`);
+  names.forEach((p, k) => (env[p] = member.items[k]));
+}
+
+/**
+ * A function applied per member of its list arguments ([map], lib/expr.ts
+ * MAP): the body once per combination of members, as any operation combines
+ * (the same list zips, separate ones cross), collected over those
+ * arguments' own instances. The body's own lists are its own: a reduction in
+ * it consumes them, never the argument. A body that is a list per member
+ * (f(m) = L + total(L m)) adds its axes after the arguments'.
+ */
+function lowerMap(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
+  const [body, ...rest] = e.args;
+  const binds: Array<{ names: string[]; low: Expr }> = [];
+  for (let k = 0; k < rest.length; k += 2) {
+    const low = lower(rest[k + 1], ctx);
+    binds.push({
+      names: (rest[k] as Expr & { kind: 'str' }).value.split(','),
+      low: isDataScatter(low) ? scatterPoints(low) : low,
+    });
+  }
+  const fixed: Record<string, Expr> = {};
+  const bare = freeVars(body);
+  for (const b of binds) if (!isSeq(b.low)) bindMember(fixed, b.names, b.low, bare);
+  const seqs = binds.filter(b => isSeq(b.low));
+  if (!seqs.length) return lower(substVars(body, fixed), ctx);
+  const { parts, axes } = align(seqs.map(b => expand(settle(b.low, ctx), ctx)));
+  const members = parts.map(p => (p as Expr & { kind: 'list' }).items);
+  // The parameters are the body's own names: they shadow any document list
+  // spelled the same, as a loop's do.
+  const shadow = new Set(binds.flatMap(b => b.names.flatMap(n => [n, `${n}.x`, `${n}.y`, `${n}.z`])));
+  const { getList } = ctx;
+  ctx.getList = name => (shadow.has(name) ? null : getList(name));
+  const out: Expr[] = [];
+  let inner: readonly Axis[] | null | undefined;
+  try {
+    for (let i = 0; i < members[0].length; i++) {
+      const env = { ...fixed };
+      seqs.forEach((b, j) => bindMember(env, b.names, members[j][i], bare));
+      const r = lower(substVars(body, env), ctx);
+      const own = isSeq(r) ? axesOf(r) : null;
+      if (own?.some(a => a.ordered))
+        throw new Error('A function applied per member of a list cannot give a tuple for each yet.');
+      if (inner !== undefined && (inner === null) !== (own === null))
+        throw new Error('A function applied per member gives a list for some members and a number for others.');
+      if (inner && own && (inner.length !== own.length || inner.some((a, k) => a.id !== own[k].id)))
+        throw new Error('A function applied per member gives lists over different multisets for different members.');
+      inner = own;
+      if (own) out.push(...(expand(settle(r as Seq, ctx), ctx) as Expr & { kind: 'list' }).items);
+      else out.push(r);
+    }
+  } finally {
+    ctx.getList = getList;
+  }
+  return withAxes(listOf(out, ctx), inner ? [...(axes ?? []), ...inner] : axes);
+}
+
 function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
   // Before anything is lowered, because lowering a column whose file is not
@@ -1566,6 +1646,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
     case 'comp':
       return lowerComp(e, ctx);
     case 'call': {
+      if (e.name === MAP) return lowerMap(e, ctx);
       if (e.name === 'hist') {
         // How many arguments there are, and what the bin count is, are
         // questions about the row — not about the file. Asked after the list
@@ -1605,7 +1686,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
             );
         return histogram(xs, bins, ctx);
       }
-      const args = e.args.map(a => lower(a, ctx));
+      let args = e.args.map(a => lower(a, ctx));
       if (e.name === 'sort' && args.length === 2) {
         // A member with no value, in the list or its key, is left out of both.
         const [p, key] = args;
@@ -1626,6 +1707,18 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
         NUMERIC_REDUCTIONS.has(e.name) ||
         (isMinMax && args.length === 1 && isSeq(args[0]))
       ) {
+        // A number is the one-member multiset (docs/multisets.md §0: 5 is
+        // [5]), so a function's parameter reduces as its one member: mean(5)
+        // is 5. So does a named constant or slider; any other name is refused
+        // below, where it catches a list defined too late or misspelled.
+        const one = args.length === 1 && !isSeq(args[0]) ? args[0] : null;
+        if (
+          e.name !== 'sort' &&
+          one &&
+          one.kind !== 'vec' &&
+          (one.kind !== 'var' || ctx.opts.consts?.[one.name] !== undefined)
+        )
+          args = [listOf([one], ctx)];
         if (args.length !== 1 || !isSeq(args[0])) {
           if (args.length === 1 && args[0].kind === 'var') {
             throw new Error(`${e.name}(${args[0].name}) needs ${args[0].name} to be a list defined above this row.`);
