@@ -1555,26 +1555,30 @@ export const sameNumber = (a: number, b: number): boolean =>
   (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= EQ_ULPS * Math.max(1, Math.abs(a), Math.abs(b)));
 
 /** A piecewise case testing equality as an inequality every backend runs:
- *  r - ε < l < r + ε with ε the rounding sameNumber allows, scaled by the
- *  larger side, so it decides as `==` does over a list (lib/list.ts holds). */
+ *  r - ε < l < r + ε with ε the rounding sameNumber allows, scaled by r,
+ *  so it decides as `==` does over a list (lib/list.ts holds). */
 export function exactCase(l: Expr, r: Expr): Expr {
   // Each side kept whole: over lists, a comparison whose one side mixes two
-  // lists (abs(l - r) < ε) does not lower element by element.
-  const abs = (x: Expr): Expr => ({ kind: 'call', name: 'abs', args: [x] });
-  const eps: Expr = {
-    kind: 'bin',
-    op: '*',
-    a: { kind: 'num', value: EQ_ULPS },
-    // (Two arguments at a time: the cell VM's max takes two.)
-    b: {
-      kind: 'call',
-      name: 'max',
-      args: [
-        { kind: 'num', value: 1 },
-        { kind: 'call', name: 'max', args: [abs(l), abs(r)] },
-      ],
-    },
-  };
+  // lists (abs(l - r) < ε) does not lower element by element. ε scales by
+  // r alone: where the sides are near enough to matter they are near in
+  // size too, so it decides as sameNumber does, and a constant r (the usual
+  // `mod(m, 2) = 0`) makes ε one number instead of work at every evaluation.
+  const eps: Expr =
+    r.kind === 'num'
+      ? { kind: 'num', value: EQ_ULPS * Math.max(1, Math.abs(r.value)) }
+      : {
+          kind: 'bin',
+          op: '*',
+          a: { kind: 'num', value: EQ_ULPS },
+          b: {
+            kind: 'call',
+            name: 'max',
+            args: [
+              { kind: 'num', value: 1 },
+              { kind: 'call', name: 'abs', args: [r] },
+            ],
+          },
+        };
   return {
     kind: 'ineq',
     op: '<',
