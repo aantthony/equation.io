@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
+import { runtimeSliderNames } from './runtime-sliders.ts';
 import { parseCsv } from './csv.ts';
 import { densityAt } from './dist.ts';
 import { evaluate, type Expr } from './expr.ts';
@@ -103,9 +104,26 @@ describe('§0 binders: p ∈ A draws from A', () => {
     expect(multiset([...Z, 'count(Z)'])).toEqual([18]);
     expect(multiset([...Z, c, 'r ∈ Z', 's ∈ Z', 'count(c(r, s))'])).toEqual([40]);
   });
-  it('says what ∈ is where it cannot be one', () => {
-    expect(last(['D = [1, 2]', 'e ∈ D']).error).toMatch(/draws a name from a list on a row of its own/);
+  it('composes a named product with its source again through a draw', () => {
+    // AB stays tied to A and B; a second draw from B composes it again.
+    const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
+    const c = 'c(p, q) = {p.y = q.x: (p.x, q.y)}';
+    // ABB = [[2 3] [2 4]]: 11 arrows.
+    expect(multiset([...AB, c, 'AB = c(A, B)', 'q ∈ B', 'count(c(AB, q))'])).toEqual([11]);
+  });
+  it('draws only from a list, and a tuple drawn is the tuple', () => {
+    expect(multiset(['T = sort([3, 1, 2, 5])', 'p ∈ T', 'count(p)'])).toEqual([4]);
+    expect(last(['M = ((1, 2), (3, 4))', 'p ∈ M']).error).toMatch(/draws from a list; that is a matrix/);
+    expect(last(['r = interval(0, 1)', 'p ∈ r']).error).toMatch(/draws from a list; that is an interval/);
+  });
+  it('says what ∈ is where it cannot be one, in every spelling', () => {
+    for (const row of ['e ∈ D', 'e in D', 'u \\in D', 'x ∈ D', 'sin ∈ D'])
+      expect(last(['D = [1, 2]', row]).error).toMatch(/is taken by the language, so it cannot be drawn/);
     expect(last(['D = [1, 2]', '2 ∈ D']).error).toMatch(/draws a name from a list/);
+  });
+  it('makes no slider of a draw', () => {
+    const a = analyzeRows(['p ∈ 3', 'k = 2', 'p + k']);
+    expect([...runtimeSliderNames(a)]).toEqual(['k']);
   });
 });
 

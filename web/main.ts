@@ -3109,7 +3109,8 @@ const fmtNum = (v: number) => String(parseFloat(v.toPrecision(6)));
 /** The slider a row's definition makes (lib/slider.ts), if any. */
 function sliderOf(eq: Equation): { def: NonNullable<Equation['def']>; rhs: string; form: SliderForm } | null {
   const def = eq.def;
-  if ((def?.kind !== 'const' && def?.kind !== 'init') || eq.error) return null;
+  // (A binder, p ∈ A, draws from its right side: no slider to drag.)
+  if ((def?.kind !== 'const' && def?.kind !== 'init') || eq.error || (def.kind === 'const' && def.draw)) return null;
   const rhs = def.rhs.trim();
   const form = sliderForm(rhs, new Set(defs.fns.keys()));
   return form ? { def, rhs, form } : null;
@@ -4593,6 +4594,8 @@ function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
 /** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
 const defPointWriter = (eq: Equation) => {
   const def = eq.def as Definition & { kind: 'const' };
+  // A binder's row is `p ∈ …`, never an assignment to rewrite.
+  if (def.draw) return null;
   return makePairWriter(def.rhs, p => {
     eq.text = keepNote(eq.text, `${def.name} = ${p}`);
   });
