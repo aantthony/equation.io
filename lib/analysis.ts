@@ -19,6 +19,7 @@ import {
   resolveRow,
   shadowedFnNames,
   scanDefinition,
+  takenBinder,
   takenDefinitionName,
   timeDifferentiator,
   type Definition,
@@ -830,6 +831,8 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // mark(v) is v, highlighted in the panel's graphs.
       const markArg = fnNames.has('mark') ? null : MARK_RE.exec(row.text);
       const source = graphArgs ? `(${graphArgs[1]})` : markArg ? `(${markArg[1]})` : row.text;
+      const takenName = takenBinder(row.text);
+      if (takenName) throw new Error(takenName);
       const rawParsed = parseExpr(source, fnNames, listNames, valueNames);
       // `p(50..400)`: where p goes over that time — a range in call position,
       // which nothing else accepts.

@@ -922,10 +922,7 @@ const syntax: PatternDict = {
     }
     // A binder is a row of its own (lib/defs.ts DRAW_RE); here it is inside
     // an expression, or binds a name the language has taken.
-    if (x === '∈')
-      throw new Error(
-        '∈ draws a name from a list on a row of its own, like p ∈ A — and not d, e, i or z, which are taken.',
-      );
+    if (x === '∈') throw new Error('∈ draws a name from a list on a row of its own, like p ∈ A.');
     throw new Error(`Invalid character: ${JSON.stringify(x)}.`);
   },
 };
