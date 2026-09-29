@@ -79,6 +79,36 @@ describe('§1 equal vs identical', () => {
   });
 });
 
+describe('§0 binders: p ∈ A draws from A', () => {
+  it('a draw is a choice of its own: equal to A, never identical', () => {
+    const n = 'n = [1, 2]';
+    expect(multiset([n, 'p ∈ n', 'q ∈ n', 'p + q'])).toEqual([2, 3, 3, 4]);
+    expect(multiset([n, 'p ∈ n', 'p + p'])).toEqual([2, 4]);
+    expect(multiset([n, 'p ∈ n', 'p + n'])).toEqual([2, 3, 3, 4]);
+    // …spelled ∈, \in or in.
+    expect(multiset([n, 'p in n', 'q \\in n', 'p + q'])).toEqual([2, 3, 3, 4]);
+    // A number drawn is that number; a family variable draws a family.
+    expect(multiset(['p ∈ 3', 'p + 1'])).toEqual([4]);
+    const row = last(['a ∈ [2, 3]', 'y = a x']);
+    expect((row.cls!.object as { members: unknown[] }).members).toHaveLength(2);
+  });
+  it('two draws compose a maxel with itself, and count chains of a poset', () => {
+    const A = 'A = [(1, 1), (1, 2), (2, 2), (2, 2)]';
+    const c = 'c(p, q) = {p.y = q.x: (p.x, q.y)}';
+    // A² = [[1 3] [0 4]]: 1→1, 1→2 three times, 2→2 four times.
+    expect(multiset([A, c, 'p ∈ A', 'q ∈ A', 'count(c(p, q))'])).toEqual([8]);
+    expect(multiset([A, c, 'p ∈ A', 'count(c(p, p))'])).toEqual([3]);
+    // The divisors of 12 as a poset: 18 pairs i ∣ j, 40 chains i ∣ j ∣ k.
+    const Z = ['D = [1, 2, 3, 4, 6, 12]', 'a ∈ D', 'b ∈ D', 'Z = {mod(b, a) = 0: (a, b)}'];
+    expect(multiset([...Z, 'count(Z)'])).toEqual([18]);
+    expect(multiset([...Z, c, 'r ∈ Z', 's ∈ Z', 'count(c(r, s))'])).toEqual([40]);
+  });
+  it('says what ∈ is where it cannot be one', () => {
+    expect(last(['D = [1, 2]', 'e ∈ D']).error).toMatch(/draws a name from a list on a row of its own/);
+    expect(last(['D = [1, 2]', '2 ∈ D']).error).toMatch(/draws a name from a list/);
+  });
+});
+
 describe('§2 brackets are sums', () => {
   it('nesting flattens', () => {
     expect(multiset(['n = [1,2]', 'a = [n, 3, 5]', 'a'])).toEqual([1, 2, 3, 5]);

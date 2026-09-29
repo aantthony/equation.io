@@ -99,7 +99,9 @@ const complexValued = (e: Expr): boolean => {
 
 export type Definition =
   | RegressionRow
-  | { kind: 'const'; name: string; rhs: string }
+  /** `draw`: `p ∈ A` — p ranges over A's members, a choice of its own
+   *  (docs/multisets.md §0): equal to A, never identical to it. */
+  | { kind: 'const'; name: string; rhs: string; draw?: true }
   | { kind: 'fn'; name: string; params: string[]; rhs: string }
   /** `a' = …` — da/dt, integrated forward in time. */
   | { kind: 'state'; name: string; rhs: string }
@@ -707,6 +709,8 @@ const FN_RE = new RegExp(
   String.raw`^\s*(${NAME_SRC})\s*\(\s*(${NAME_SRC}(?:\s*,\s*${NAME_SRC})*)\s*\)\s*=(?!=)([\s\S]+)$`,
 );
 const CONST_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`);
+/** `p ∈ A` (or `p \in A`, `p in A`): a binder, a draw from A. */
+const DRAW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*(?:∈|\\in\b|\bin\b)\s*([\s\S]+)$`);
 const STATE_RE = new RegExp(String.raw`^\s*(${NAME_SRC})'\s*=(?!=)([\s\S]+)$`);
 const INIT_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$`);
 /**
@@ -833,6 +837,8 @@ export function scanDefinition(text: string): Definition | null {
   }
   m = CONST_RE.exec(text);
   if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2] };
+  m = DRAW_RE.exec(text);
+  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
   return null;
 }
 
@@ -2095,6 +2101,14 @@ function reducedParams(body: Expr): Set<string> {
   return hit;
 }
 
+/** A list drawn by a binder: the same members, one axis of its own. */
+function drawnFrom(name: string, e: Seq): Seq {
+  const own = axesOf(e);
+  const positions = own.filter(a => a.ordered);
+  const n = own.filter(a => !a.ordered).reduce((size, a) => size * a.n, 1);
+  return withAxes({ ...e } as Seq, [{ id: `${name}∈`, n }, ...positions]);
+}
+
 /** The name a mapped parameter takes in its body: one no document can spell
  *  (so nothing is captured), the same every time the row resolves. */
 const mapName = (fn: string, k: number) => `@${fn}:${k}`;
@@ -2757,6 +2771,10 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           continue;
         }
         e = lowerLists(e, listGetter(defs), ropts, true);
+        // A draw is a choice of its own: A's members over an axis named for
+        // the binder, so `p ∈ A`, `q ∈ A` cross where A and A zip. (A tuple's
+        // positions stay positions.)
+        if (d.kind === 'const' && d.draw && isSeq(e)) e = drawnFrom(d.name, e);
         if (isSeq(e)) {
           // A named data list: scalar elements, or points for a named scatter.
           // A `data`/`text` value is a list too — a column, or arithmetic over

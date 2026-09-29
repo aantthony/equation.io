@@ -190,15 +190,18 @@ graph(B)
 c(p, q) = {p.y = q.x: (p.x, q.y)}         # i → j, then j → k, where they meet
 AB = c(A, B)                              # [[1 2] [2 2]], counts on the arrows
 graph(AB)
+--- right
+a ∈ A                                     # two draws from A
+b ∈ A
+graph(c(a, b))                            # A² = [[1 3] [0 4]]
 ```
 
 A and B are separate names, so `c(A, B)` takes every pair; a pair that does
 not meet is no member (docs/multisets.md, guards), so AB is a multiset of 7
 arrows and `count(AB)` is 7; equal arrows count. `c(A, A)` would pair each
-arrow with itself, one name being one choice; A composed with itself, two
-independent draws from A, waits for binders (`p ∈ A`, `q ∈ A`,
-docs/multisets.md §0). The graph-only spelling `graph({A.y = B.x: A.x}, B.y)`
-still works.
+arrow with itself, one name being one choice; A composed with itself takes
+two independent draws from A, binders (`a ∈ A`, `b ∈ A`, docs/multisets.md
+§0). The graph-only spelling `graph({A.y = B.x: A.x}, B.y)` still works.
 Still to do: `matrix(P)` (a multiset of pairs as a matrix readout) and its
 inverse, so both readings sit side by side.
 

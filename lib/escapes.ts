@@ -37,6 +37,7 @@ const SYMBOL_ESCAPES: readonly Escape[] = [
   { name: 'sum', text: 'Σ', description: 'Sum: Σ(n=1..N, …)' },
   { name: 'prod', text: 'Π', description: 'Product: Π(n=1..N, …)' },
   { name: 'int', text: '∫', description: 'Integral: ∫[a..b] f(x) dx' },
+  { name: 'in', text: '∈', description: 'Draw from a list, on a row of its own: p ∈ A' },
   { name: 'times', text: '×', description: 'Cross product (or multiplication)' },
   { name: 'cdot', text: '·', description: 'Dot product (or multiplication)' },
   { name: 'otimes', text: '⊗', description: 'Outer (tensor) product: a ⊗ b' },

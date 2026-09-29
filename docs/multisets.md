@@ -99,7 +99,8 @@ Hence `count(A) + 1` is {3} and {1} under our `+`, α³·α¹ = α⁴: 4.
 **A box opens into a family** where a name is used as a value. Today every
 multiset name is an implicit binder, `A` standing for "a member of A", and
 one name is one choice (§1) (built). The explicit form is Wildberger's
-set-builder binder (proposed):
+set-builder binder (built), a row of its own, `p ∈ A` (or `p \in A`,
+`p in A`):
 
 ```
 a ∈ [2, 3]          # a family variable drawn from a box
@@ -107,13 +108,15 @@ y = f(a) x          # two lines
 
 p ∈ A               # two binders over one box: two independent draws
 q ∈ A
-A2 = [c(p, q)]      # A composed with A, collected into a box
+A2 = c(p, q)        # A composed with A: [[1 3] [0 4]] for the arrows of §4
 ```
 
 A binder names a choice, so which choices are shared is written, not
 inferred: `c(A, A)` stays the diagonal (one binder, A), and two binders
-are his independent `A × A`. Binders are the only way to draw twice: a
-bracket never decides identity, so `[A]` is `A` (§2).
+are his independent `A × A`. A draw is A's members over an axis of its own,
+so it is equal to A and never identical to it: `p + p` zips, `p + q` and
+`p + A` cross. Binders are the only way to draw twice: a bracket never
+decides identity, so `[A]` is `A` (§2).
 
 **A family closes into a box** in exactly two places (built): `[ … ]`,
 and the parentheses of a reduction. Everything the enclosed expression
@@ -177,7 +180,7 @@ special cases:
 | **maxel** (matrix, MF165) | pixels (index pairs): `[(1, 1), (1, 2), …]` | product `c(A, B)`, transpose `(A.y, A.x)`, trace `count(A[A.x == A.y])` |
 | tensor | index tuples | the direct product `(a, b)` is a ⊗ b; contraction is a guard |
 | identity E_J (MF169) | `{J: (J, J)}` for a finite J | restriction to rows J is a filter |
-| zeta maxel of a poset (MF272) | its order pairs, by a guard over two draws from the divisors: `D` and `E` both `[1, 2, 3, 4, 6, 12]`, written twice until binders; `Z = {mod(E, D) = 0: (D, E)}` | `count(Z)` = 18 pairs; its chains, Z composed with itself, need binders |
+| zeta maxel of a poset (MF272) | its order pairs, by a guard over two draws from the divisors: `D = [1, 2, 3, 4, 6, 12]`; `a ∈ D`; `b ∈ D`; `Z = {mod(b, a) = 0: (a, b)}` | `count(Z)` = 18 pairs; with `r ∈ Z`, `s ∈ Z`, `count(c(r, s))` = 40 chains a ∣ b ∣ k |
 
 A maxel has no size: any two multiply, with the pixel rule
 [k, l][m, n] = [k, n] if l = m and otherwise "a real nothing" (MF166,
@@ -188,7 +191,6 @@ vector is a picture of a vexel, as a row or as a column alike (MF171).
 
 ### Still to build
 
-- **`∈` binders**, above.
 - **Signed, compact multiplicities** (docs/maxels.md, to write): anti
   elements (MF231–239), needed for differences 5V − U, rank (MF171),
   q-series cancellation (MF239), the Möbius maxel μ = ζ⁻¹ (MF272) and the

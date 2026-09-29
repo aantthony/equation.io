@@ -282,7 +282,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   q.y)}` composes arrows i → j and j → k, and with lists of arrows `A`, `B`,
   `AB = c(A, B)` is the arrows that meet (their matrix product, as a multiset
   of arrows), and `c(A, A)` pairs each arrow with itself: one name is one
-  choice.
+  choice. Two independent draws from one list are binders, rows of their
+  own: `p ∈ A` (or `p in A`) names a choice from A, equal to A but never
+  identical, so with `p ∈ A` and `q ∈ A`, `c(p, q)` is A composed with
+  itself (`p + p` still zips; `p + q` crosses). The names d, e, i and z are
+  taken.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
   `stdev(L)` (sample), `median(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
