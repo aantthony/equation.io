@@ -18,5 +18,5 @@
     "typescript/restrict-template-expressions": "off",
     "typescript/require-array-sort-compare": "off"
   },
-  "ignorePatterns": ["dist-web/**", "coverage/**", "worker-configuration.d.ts"]
+  "ignorePatterns": ["dist-web/**", "coverage/**", "worker-configuration.d.ts", "apps/desktop/src-tauri/target/**", "apps/desktop/src-tauri/gen/**"]
 }

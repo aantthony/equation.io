@@ -23,7 +23,8 @@
  *   page ← { type: 'image.done', id, error? }
  *   page ← { type: 'ended', reason }                    then closes
  */
-import { MAX_LEGEND_CHARS, SESSION_CONFIG, TOOLS } from '../lib/voice-agent.ts';
+import { SESSION_CONFIG } from '../packages/agent/src/realtime.ts';
+import { MAX_LEGEND_CHARS, TOOLS } from '../packages/agent/src/tools.ts';
 import { charge, claimCall, endCall, hashKey, isKeyShaped, reserveCall, usageCost } from './voice-credit.ts';
 
 export interface VoiceCallEnv {

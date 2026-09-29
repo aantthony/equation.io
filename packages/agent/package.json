@@ -1,0 +1,16 @@
+{
+  "name": "@equation/agent",
+  "version": "1.0.0",
+  "description": "The Equation.io graph agent: prompt, graph tools, tool runner and a streaming Responses API loop.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "test": "vitest run --root ../.. packages/agent",
+    "typecheck": "tsc -p . --noEmit"
+  }
+}

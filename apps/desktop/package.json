@@ -1,0 +1,17 @@
+{
+  "name": "@equation/desktop",
+  "version": "1.0.0",
+  "description": "Equation.io desktop: the web app in a Tauri shell, with Sign in with ChatGPT, a graph agent and voice mode.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "icons": "tauri icon ../../web/public/icon.svg && rm -rf src-tauri/icons/android src-tauri/icons/ios src-tauri/icons/Square*Logo.png src-tauri/icons/StoreLogo.png src-tauri/icons/64x64.png"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.0"
+  }
+}

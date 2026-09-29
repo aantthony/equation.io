@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The main window: core IPC only. Equation.io's own commands (lib.rs) need no plugin permissions; the opener plugin is used from Rust, not the page.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

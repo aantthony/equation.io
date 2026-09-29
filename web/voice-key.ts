@@ -1,5 +1,5 @@
 /**
- * Voice mode's credit key in this browser (web/voice.ts): small and loaded
+ * Web voice mode's credit key in this browser (web/voice-realtime.ts): small and loaded
  * with the app, so the page knows whether to fetch voice mode at all.
  */
 const STORE_KEY = 'voiceKey';

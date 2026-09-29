@@ -73,7 +73,7 @@ Remove each item from docs/clifford.md's "Not done" as it lands.
   tensors, multivectors become scalar expressions), classify (lib/plot.ts:
   a `MathObject`), compile (lib/compiler.ts: CPU plan + GPU plan), render
   (web/main.ts, web/render2d.ts, web/render3d.ts) and preview
-  (worker/og.ts, the static link image).
+  (packages/og-renderer, the static link image).
 - **Internal value nodes.** A value with no scalar form travels to
   classify as a call with a bracketed name: `[tensor]`, `[mv]`, `[action]`.
   Classify turns it into figures plus a readout (a `family` with
@@ -92,7 +92,7 @@ Remove each item from docs/clifford.md's "Not done" as it lands.
 - **Adding a kind:** `MathObject` and `publicKind` (lib/math-object.ts),
   CPU and GPU plans plus `shaderKey` and `cpuStructureKey`
   (lib/compiler.ts), `KIND_MEANINGS` (lib/row-kind.ts), a renderer layer,
-  worker/og.ts drawing and its readiness table, and a fixture row in
+  packages/og-renderer drawing and its readiness table, and a fixture row in
   worker/typed-values.fixtures.ts (a test counts the kinds). Typecheck
   finds the switches you missed.
 - **Syntax traps.** `a/2 e_xy` parses as `a/(2 e_xy)`: division by a

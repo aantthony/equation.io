@@ -1,10 +1,10 @@
 /**
- * Voice mode's server side (web/voice.ts is the client).
+ * Voice mode's server side (web/voice-realtime.ts is the client).
  *
  * The page never holds an OpenAI credential. It opens a control WebSocket to
  * /api/voice/connect and sends its WebRTC offer with a credit key; the Worker
  * checks the key's balance, creates the Realtime call with the server's key
- * and a fixed session (lib/voice-agent.ts), attaches a sideband that charges
+ * and a fixed session (packages/agent/src/realtime.ts), attaches a sideband that charges
  * every response to the key, and only then sends the SDP answer — so no call
  * goes unmetered. Audio then flows between the page and OpenAI directly. See
  * worker/voice-call.ts for the call itself.

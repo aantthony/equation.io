@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the bundle's Info.plist by the Tauri bundler. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Voice mode listens to your question so the graph agent can answer it.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Voice mode turns what you say into text for the graph agent.</string>
+</dict>
+</plist>

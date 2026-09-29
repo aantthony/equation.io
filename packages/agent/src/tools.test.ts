@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_LEGEND_CHARS, screenshotLegend } from './voice-agent.ts';
+import { MAX_LEGEND_CHARS, screenshotLegend } from './tools.ts';
 
 describe('screenshotLegend', () => {
   it('lists each row with its color and kind, and the window', () => {

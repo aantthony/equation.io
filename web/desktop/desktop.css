@@ -1,0 +1,208 @@
+/* The desktop agent panel (web/desktop/panel.ts): a card like the equations
+   panel, pinned to the window's right edge. Loaded only in the desktop app. */
+
+#agent {
+  position: fixed;
+  top: 12px;
+  right: calc(12px + var(--safe-area-right));
+  bottom: calc(12px + var(--panel-bottom-inset));
+  z-index: 6;
+  width: min(360px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  background: var(--panel-bg);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 20px var(--panel-shadow);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+#agent[hidden] {
+  display: none;
+}
+
+#agent header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#agent h2 {
+  margin: 0 auto 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+#agent button {
+  font: inherit;
+  cursor: pointer;
+}
+.agent-close,
+.agent-clear {
+  border: none;
+  background: none;
+  color: var(--muted);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.agent-close {
+  font-size: 18px;
+  line-height: 1;
+}
+.agent-close:hover,
+.agent-clear:hover {
+  background: var(--eq-focus);
+  color: var(--muted-hover);
+}
+
+.agent-account {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--divider);
+}
+.agent-account p {
+  margin: 0;
+}
+.agent-connect {
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--page-bg);
+  font-weight: 600;
+}
+.agent-connect:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+.agent-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.agent-plan {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--eq-focus);
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agent-model-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+}
+.agent-model {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+.agent-signout {
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  padding: 2px 8px;
+}
+.agent-signout:hover {
+  color: var(--muted-hover);
+}
+.agent-error {
+  color: var(--error);
+}
+.agent-error:empty {
+  display: none;
+}
+
+.agent-log {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-msg {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.agent-user {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--eq-focus);
+}
+.agent-spoken::before {
+  content: '🎙 ';
+  color: var(--muted);
+}
+.agent-tool {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+.agent-tool::before {
+  content: '↳ ';
+}
+
+.agent-compose {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+}
+.agent-input {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  color: var(--text);
+  background: var(--page-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.agent-input:focus {
+  outline: 1px solid var(--accent);
+}
+.agent-send {
+  border: none;
+  border-radius: 6px;
+  padding: 7px 12px;
+  background: var(--accent);
+  color: #fff;
+}
+.agent-send:disabled,
+.agent-input:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* One more footer link ("agent"): keep each on one line. */
+#panel-links {
+  gap: 7px;
+  white-space: nowrap;
+}
+
+/* The typed agent's orb sits where the idle voice orb rests: show one. */
+:root.agent-orb .voice-start {
+  visibility: hidden;
+}

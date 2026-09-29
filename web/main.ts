@@ -96,7 +96,8 @@ import {
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
 import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
-import type { GraphState, MoveViewTarget, RowStatus, VoiceHost } from './voice.ts';
+import type { GraphHost, GraphState, MoveViewTarget, RowStatus } from '../packages/agent/src/host.ts';
+import { isDesktop } from './platform.ts';
 import { readKey as readVoiceKey } from './voice-key.ts';
 import { ingest, listFiles, loadRefs, lookup as lookupFile, removeFile } from './filestore.ts';
 import { type Frame, fullscreenQuad } from './gl.ts';
@@ -5224,12 +5225,9 @@ function toClient(x: number, y: number, z = 0): { x: number; y: number } | null 
   });
 }
 
-// Before boot: boot canonicalizes the URL, which would drop the ?voice=
-// unlock before it could be read. Voice mode itself loads only for an
-// unlocked browser; everyone else never downloads it.
-const voiceBtn = document.getElementById('voice') as HTMLButtonElement | null;
-if (voiceBtn && !embedded && readVoiceKey()) {
-  const host: VoiceHost = {
+/** The live app as the agent's tools see it (packages/agent host.ts), for voice mode and the desktop agent. */
+function graphHost(): GraphHost {
+  return {
     graph: voiceGraph,
     setRows(rows) {
       // Like an edit, not like opening an example: rows keep their objects
@@ -5272,7 +5270,21 @@ if (voiceBtn && !embedded && readVoiceKey()) {
     },
     notice: showNotice,
   };
-  void import('./voice.ts').then(voice => voice.initVoice(voiceBtn, host));
+}
+
+// Before boot: boot canonicalizes the URL, which would drop the ?voice=
+// unlock before it could be read. The agent loads only where it can run: in
+// the desktop app, or for a browser unlocked for web voice; everyone else
+// never downloads it.
+const voiceBtn = document.getElementById('voice') as HTMLButtonElement | null;
+if (voiceBtn && !embedded) {
+  if (isDesktop()) {
+    void import('./desktop/index.ts').then(desktop => desktop.initDesktop(graphHost(), voiceBtn));
+  } else if (readVoiceKey()) {
+    void Promise.all([import('./voice.ts'), import('./voice-realtime.ts')]).then(([voice, realtime]) =>
+      voice.initVoice(voiceBtn, graphHost(), realtime.realtimeVoice),
+    );
+  }
 }
 
 // --- boot ---

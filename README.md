@@ -23,12 +23,17 @@ The old UI remains usable at [graph.equation.io](https://graph.equation.io).
 
 ## Architecture
 
-Deployed as a Cloudflare Worker.
+One graphing app, two ways to run it: the website (a Cloudflare Worker in
+front of static assets) and a desktop app (the same assets in a Tauri shell).
+Neither has its own copy of the grapher.
 
-- `lib/` — tokenizer, shunting-yard parser, symbolic expression core (`expr.ts`),
-  and a GLSL compiler (`glsl.ts`) used for plotting.
-- `web/` — the grapher. Every equation is compiled to a GLSL scalar field F whose
-  zero set is the graph:
+- `lib/` — the shared core: tokenizer, shunting-yard parser, symbolic
+  expression core (`expr.ts`), analysis, and a GLSL compiler (`glsl.ts`) used
+  for plotting.
+- `web/` — the grapher itself, shared by the website and the desktop app.
+  Platform differences sit behind [`web/platform.ts`](web/platform.ts); the
+  desktop-only code in `web/desktop/` is loaded only inside the Tauri shell.
+  Every equation is compiled to a GLSL scalar field F whose zero set is the graph:
   - **2D**: fullscreen-quad fragment shader; the curve is drawn where the
     distance estimate |F|/|∇F| is under a pixel, with a two-scale consistency
     test rejecting fake lines at poles/asymptotes (e.g. `y=tan(x)`).
@@ -36,6 +41,16 @@ Deployed as a Cloudflare Worker.
     sign-change detection along each ray, bisection refinement,
     finite-difference normals, `gl_FragDepth` so multiple surfaces intersect
     correctly. Equations without `z` extrude to their true locus in R³.
+- `worker/` — the Cloudflare Worker: a router ([`worker/index.ts`](worker/index.ts))
+  over the server-only routes (share-link and landing metadata, `/api/og/`,
+  `/mcp`, health, web voice call setup). The calculator never runs there.
+- `packages/og-renderer/` — the CPU link-preview renderer:
+  `renderOgPng(graph, options)` and `canRenderOg(graph)`, no Worker code.
+- `packages/agent/` — the graph agent shared by web voice and the desktop:
+  its prompt, its tools (`get_graph`, `set_graph`, `move_view`,
+  `look_at_graph`, `read_syntax`, …), the code that runs them against the
+  live app, and a streaming Responses API loop.
+- `apps/desktop/` — the Tauri 2 shell; see [Desktop app](#desktop-app).
 
 The whole graph state lives in the URL (`/g/eq1;eq2;…`, each equation
 percent-encoded via `lib/link.ts`, which also escapes parens so chat-app
@@ -58,15 +73,16 @@ Agent-facing surface:
 ```sh
 pnpm web        # dev server (grapher + worker API)
 pnpm test       # vitest
-pnpm typecheck  # lib + web + worker
+pnpm typecheck  # lib + web + worker + packages
 pnpm web:build  # build to dist-web/ (client + worker)
 pnpm deploy     # build and deploy to Cloudflare
+pnpm desktop    # the desktop app, against the dev server (needs Rust)
 ```
 
 ### Voice mode (credit keys)
 
-A mic button talks to an OpenAI Realtime model
-([`web/voice.ts`](web/voice.ts)) over WebRTC, and the model edits the graph
+On the website, a mic button talks to an OpenAI Realtime model
+([`web/voice-realtime.ts`](web/voice-realtime.ts)) over WebRTC, and the model edits the graph
 with `get_graph` / `set_graph` tools, which report each row's readouts (values,
 intercepts, extrema in view). `look_at_graph` puts a screenshot of the canvas
 into the conversation as an image.
@@ -92,6 +108,36 @@ Each `scripts/voice-key.ts` command takes `--remote` for the deployed database.
 Visit any page once with `#voice=<key>` to show the mic in that browser
 (`#voice=` forgets it). `?voice=<key>` works too, but a query string reaches
 the server, which may log it; the fragment never does.
+
+## Desktop app
+
+A free, open-source desktop build of Equation.io for macOS
+([`apps/desktop/`](apps/desktop)). It bundles the same web app and adds:
+
+- **Sign in with ChatGPT** — OAuth 2.0 with PKCE in the system browser, back
+  to a one-shot listener on `127.0.0.1`. Tokens go straight into the macOS
+  Keychain from Rust; the page never sees them, and there is no Equation.io
+  account.
+- **A graph agent on your own ChatGPT plan** — a panel (⌘J) where the agent
+  reads and edits the live graph with the same tools as voice mode. Requests
+  go from your Mac straight to OpenAI's Responses API (`store: false`,
+  `stream: true`), never through Equation.io's servers. Models come from your
+  account's own catalogue.
+- **Voice mode** — macOS speech recognition, the same agent, and spoken
+  replies. (OpenAI's Realtime API doesn't take ChatGPT-plan credentials, so
+  the plan pays for the thinking and the Mac does the listening and talking.)
+
+```sh
+pnpm desktop          # dev: the app against `pnpm web`'s dev server
+pnpm desktop:build    # a local .app/.dmg in apps/desktop/src-tauri/target/
+pnpm test:desktop     # the page side, with the Rust side mocked (Playwright)
+cd apps/desktop/src-tauri && cargo test   # OAuth, SSE, navigation rules
+```
+
+Releases are built, signed and notarized by
+[`desktop-release.yml`](.github/workflows/desktop-release.yml) and published
+to GitHub Releases. See [docs/desktop.md](docs/desktop.md) for the design,
+the OAuth configuration and the release secrets.
 
 ## Examples
 
@@ -297,11 +343,14 @@ You need Node 24 and pnpm. Run `pnpm install`, then `pnpm web` for the dev serve
 Before opening a PR, run the same checks CI runs:
 
 ```sh
-pnpm typecheck    # tsc over lib, web and worker
+pnpm typecheck    # tsc over lib, web, worker and packages
 pnpm lint         # Oxlint, including type-aware rules
 pnpm fmt:check    # Oxfmt (pnpm fmt rewrites files in place)
 pnpm vitest run   # unit tests
 ```
+
+For the desktop app, CI also runs `cargo fmt --check`, `cargo clippy` and
+`cargo test` in `apps/desktop/src-tauri`.
 
 `pnpm lint:fix` applies the fixes Oxlint can make automatically. In VS Code,
 install the recommended Oxc extension to see lint errors as you type.

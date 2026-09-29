@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedKey, testDb } from './d1.fixtures.ts';
-import { SESSION_CONFIG } from '../lib/voice-agent.ts';
+import { SESSION_CONFIG } from '../packages/agent/src/realtime.ts';
 import { MAX_CALL_MS, MAX_OPEN_CALLS, VoiceCall, hangUp, sessionIntact } from './voice-call.ts';
 import { hashKey } from './voice-credit.ts';
 

@@ -1,0 +1,66 @@
+# Builds the macOS desktop app from this repository, signs and notarizes it,
+# and publishes it to GitHub Releases. See docs/desktop.md for the secrets.
+#
+# A `desktop-v*` tag publishes a release; running it by hand makes a draft.
+name: Desktop release
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tauri.conf.json's beforeBuildCommand builds the shared web app
+      # (pnpm web:build) into dist-web/client, which the app bundles.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Baked into the binary (config.rs): the OAuth client OpenAI issued to Equation.io.
+          EQUATION_OPENAI_CLIENT_ID: ${{ vars.EQUATION_OPENAI_CLIENT_ID }}
+          # Signing and notarization; without them the build is unsigned.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: pnpm tauri
+          args: --target universal-apple-darwin
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v__VERSION__-{0}', github.run_number) }}
+          releaseName: Equation.io Desktop __VERSION__
+          releaseBody: |
+            Equation.io for macOS: the graphing calculator, with a graph agent and voice mode on your own ChatGPT plan.
+
+            Download the `.dmg`, open it and drag Equation.io to Applications.
+          releaseDraft: ${{ github.ref_type != 'tag' }}
+          prerelease: false

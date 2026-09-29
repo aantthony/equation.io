@@ -305,7 +305,7 @@ body {
 #rec[hidden] ~ #state-reset {
   right: 62px;
 }
-/* Voice mode (web/voice.ts) is private: the mic only appears on a browser
+/* Voice mode (web/voice.ts) is private on the web: the mic only appears on a browser
    that has been unlocked with the passphrase, and shifts state-reset left. */
 #voice {
   right: 90px;
@@ -1181,7 +1181,7 @@ html[data-embed][data-embed-boot] #panel {
   visibility: hidden;
 }
 
-/* Voice mode's orb (web/voice.ts): the assistant's presence and pointer. voice.ts
+/* The agent's orb (web/agent-orb.ts): the assistant's presence and pointer. agent-orb.ts
    drives --x/--y (page position; bottom centre, or pinned to a math point)
    and --level (0–1, the mic or the assistant's voice). */
 .voice-orb {
@@ -1286,7 +1286,7 @@ html[data-embed][data-embed-boot] #panel {
   }
 }
 
-/* Voice mode's way in (web/voice.ts idleOrb): a resting orb where the live
+/* Voice mode's way in (web/agent-orb.ts idleOrb): a resting orb where the live
    one appears (its centre 56px above the bottom), labelled underneath. Under
    the panel where they meet (#panel). */
 .voice-start {
@@ -1380,7 +1380,7 @@ html[data-embed][data-embed-boot] #panel {
   }
 }
 
-/* Voice mode's screenshot moment (Orb.absorb in web/voice.ts). */
+/* Voice mode's screenshot moment (Orb.absorb in web/agent-orb.ts). */
 .voice-flash {
   position: fixed;
   inset: 0;

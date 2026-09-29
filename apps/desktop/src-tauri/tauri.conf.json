@@ -1,0 +1,33 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Equation.io",
+  "version": "1.0.0",
+  "identifier": "io.equation.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../.. web",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm --dir ../.. web:build",
+    "frontendDist": "../../../dist-web/client"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'none'; script-src 'self'; script-src-attr 'none'; style-src 'self'; style-src-attr 'none'; img-src 'self'; font-src 'self'; connect-src 'self' ipc: http://ipc.localhost; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "category": "Education",
+    "shortDescription": "Graphing calculator with a graph agent on your ChatGPT plan",
+    "longDescription": "Equation.io is a free, open-source graphing calculator. The desktop app adds Sign in with ChatGPT, a graph agent that reads and edits your graph, and voice mode, all running on your own ChatGPT plan.",
+    "copyright": "MIT License",
+    "homepage": "https://equation.io/",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "entitlements": "./Entitlements.plist",
+      "hardenedRuntime": true
+    }
+  }
+}

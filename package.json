@@ -11,7 +11,7 @@
     "shots:examples": "node scripts/screenshots.ts --examples",
     "icons": "node scripts/icons.ts",
     "deploy": "wrangler types && vite build && wrangler deploy",
-    "typecheck": "wrangler types && tsc --noEmit && tsc -p web --noEmit && tsc -p worker --noEmit && tsc -p worker/tsconfig.test.json --noEmit && tsc -p packages/og-renderer --noEmit",
+    "typecheck": "wrangler types && tsc --noEmit && tsc -p web --noEmit && tsc -p worker --noEmit && tsc -p worker/tsconfig.test.json --noEmit && tsc -p packages/og-renderer --noEmit && tsc -p packages/agent --noEmit",
     "lint": "oxlint --type-aware --deny-warnings",
     "lint:fix": "oxlint --type-aware --fix",
     "fmt": "oxfmt",
@@ -21,7 +21,10 @@
     "test:swipe": "node scripts/swipe-test.ts",
     "bench": "vitest bench --run",
     "perf": "node scripts/perf.ts",
-    "perf:update": "node scripts/perf.ts --update"
+    "perf:update": "node scripts/perf.ts --update",
+    "desktop": "pnpm --filter @equation/desktop dev",
+    "desktop:build": "pnpm --filter @equation/desktop build",
+    "test:desktop": "node scripts/desktop-test.ts"
   },
   "private": true,
   "license": "MIT",
@@ -47,6 +50,7 @@
     "wrangler": "^4.131.1"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "^2.0.0"
+    "@modelcontextprotocol/ext-apps": "^2.0.0",
+    "@tauri-apps/api": "^2.12.0"
   }
 }
