@@ -144,7 +144,11 @@ number reduces as its one member (`mean(5) = 5`), and centring is written
 in the row, `L - mean(L)`. Over a list of points the body reads each
 point's coordinates, `p.x` and `p.y` or the spread form `f(x, y)`: point
 arithmetic is lowered before lists are, so a bare point parameter is
-refused there.
+refused there. Only a parameter a reduction takes (`count`, `total`,
+`mean`, `stdev`, `median`) makes the call a map; `sort` reads a box whole,
+so `s(m) = sort(m)` sorts its argument. A reduction in the body that
+mentions no parameter is taken once for all members, and a member no case
+holds for is no member, as over a list.
 
 **Order-based readings are a separate, named family**: `min`, `max`,
 `median`, `sort`, `hist`, `polyline`, `hull`. They read a box by the order

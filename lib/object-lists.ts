@@ -635,10 +635,10 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
             ((node.name === 'min' || node.name === 'max') && node.args.length === 1)
           )
             return node;
-          // A function applied per member ([map]): its body's lists are its
-          // own; only the arguments it maps over are the row's.
-          if (node.name === MAP)
-            return { ...node, args: node.args.map((n, i) => (i > 0 && i % 2 === 0 ? visit(n, false) : n)) };
+          // A function applied per member ([map]) is list lowering's to run,
+          // arguments and all: its body's lists are its own, and a member
+          // that is a list or tuple collects there (lowerMap).
+          if (node.name === MAP) return node;
           return { ...node, args: node.args.map(n => visit(n, false)) };
         case 'comp':
           return { ...node, value: visit(node.value, false) };
