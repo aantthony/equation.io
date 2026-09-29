@@ -23,7 +23,7 @@ import { type FigureForm, mapChildren } from './expr.ts';
  * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import { ANGLE_FN, type Expr, compArity, compDims, compFits, isRecur, sameList } from './expr.ts';
+import { ANGLE_FN, MAP, type Expr, compArity, compDims, compFits, isRecur, sameList } from './expr.ts';
 import { SCALAR_REDUCTIONS, tupleAxis, withAxes } from './list.ts';
 import {
   type GetMat,
@@ -1034,6 +1034,8 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     case 'call': {
       if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'qjulia')
         throw new Error(`${e.name}(…) must be a whole statement.`);
+      // A function applied per member of lists is list lowering's to run.
+      if (e.name === MAP) return sc(e);
       if (e.name === 'trail') {
         const args = e.args.map(lo);
         const coords =

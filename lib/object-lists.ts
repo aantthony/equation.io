@@ -8,7 +8,7 @@ import { exceedsNodes } from './size.ts';
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
 import { type ResolveOpts, compsOf, listGetter, tensorGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
-import { type Expr, type FigureForm, compFits, freeVars, sameList } from './expr.ts';
+import { MAP, type Expr, type FigureForm, compFits, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists, SCALAR_REDUCTIONS, unionAxes, withAxes } from './list.ts';
 
@@ -635,6 +635,10 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
             ((node.name === 'min' || node.name === 'max') && node.args.length === 1)
           )
             return node;
+          // A function applied per member ([map]): its body's lists are its
+          // own; only the arguments it maps over are the row's.
+          if (node.name === MAP)
+            return { ...node, args: node.args.map((n, i) => (i > 0 && i % 2 === 0 ? visit(n, false) : n)) };
           return { ...node, args: node.args.map(n => visit(n, false)) };
         case 'comp':
           return { ...node, value: visit(node.value, false) };
