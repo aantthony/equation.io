@@ -2117,6 +2117,8 @@ function reducedParams(body: Expr): Set<string> {
  *  one ordered value with no members to choose among, is itself. */
 function drawnFrom(name: string, e: Expr): Expr {
   if (e.kind === 'vec') return { ...e, items: e.items.map(c => drawnFrom(name, c)) };
+  // A number beside a scatter's columns, `(T.a, 0)`, is the same in every draw.
+  if (!isSeq(e)) return e;
   const own = axesOf(e as Seq);
   const positions = own.filter(a => a.ordered);
   if (positions.length === own.length) return e;
@@ -3312,6 +3314,17 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     } else continue;
     defs.points.delete(p);
     for (const c of pointComps(p, defs.pointDims.get(p))) defs.fields.delete(c);
+  }
+  // A binder draws from a list; one over position (or over u, v) is a field
+  // (or a curve), which has no members to draw.
+  for (const d of raw) {
+    if (d.kind !== 'const' || !d.draw) continue;
+    const comps = defs.points.has(d.name) ? pointComps(d.name, defs.pointDims.get(d.name)) : [d.name];
+    if (!comps.some(c => defs.fields.has(c))) continue;
+    const what = comps.some(c => paramNames.has(c)) ? 'a curve' : 'a field';
+    errors.set(d.name, `${d.name} ∈ … draws from a list; that is ${what}.`);
+    defs.points.delete(d.name);
+    for (const c of comps) defs.fields.delete(c);
   }
   // Grid families draw in definition order, not dependency-resolution order.
   const orderedFields = new Map<string, Expr>();

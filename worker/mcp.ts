@@ -238,6 +238,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
           ? row.def.rhs
           : null;
     if (pair === null) return undefined;
+    // A binder's point is a draw, not a position: the app gives it no handle.
+    if (row.def?.kind === 'const' && row.def.draw) return false;
     const pinned = coordinates
       ? definitionDependencies(
           coordinates.flatMap(c => [...freeVars(c)]),

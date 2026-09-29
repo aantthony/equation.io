@@ -121,6 +121,19 @@ describe('§0 binders: p ∈ A draws from A', () => {
       expect(last(['D = [1, 2]', row]).error).toMatch(/is taken by the language, so it cannot be drawn/);
     expect(last(['D = [1, 2]', '2 ∈ D']).error).toMatch(/draws a name from a list/);
   });
+  it('draws a scatter with a number beside its columns', () => {
+    const tables = () => parseCsv('a\n1\n2\n3\n');
+    const rows = analyzeRows(['T = open("t.csv")', 'P ∈ (T.a, 0)', 'P'], { readouts: true, tables }).rows;
+    expect(rows[1].error).toBeUndefined();
+    expect(rows[2].error).toBeUndefined();
+  });
+  it('draws nothing from a field or a curve', () => {
+    expect(last(['p ∈ x^2']).error).toMatch(/draws from a list; that is a field/);
+    expect(last(['f = x^2', 'p ∈ f + 1']).error).toMatch(/draws from a list; that is a field/);
+    expect(last(['P ∈ (x, y)']).error).toMatch(/draws from a list; that is a field/);
+    expect(last(['c ∈ (cos(u), sin(u))']).error).toMatch(/draws from a list; that is a curve/);
+    expect(last(['p ∈ x', 'q = p + 1']).error).toMatch(/p has an error/);
+  });
   it('leaves a bare in to the user: only ∈ and \\in draw', () => {
     expect(multiset(['in = 2', 'k = 3', 'k in + 1'])).toEqual([7]);
   });

@@ -527,6 +527,12 @@ describe('draggable points', () => {
     expect(rows[2]).toMatchObject({ kind: 'point', draggable: true });
   });
 
+  it('never marks a binder point draggable: the app gives it no handle', async () => {
+    const rows = await rowsFor(['a = 1', 'b = 2', 'P ∈ (a, b)', 'Q = (a, b)']);
+    expect(rows[2].draggable).toBe(false);
+    expect(rows[3].draggable).toBe(true);
+  });
+
   it('reports coordinate RHS dragging without making intersection rows draggable', async () => {
     const rows = await rowsFor([
       'r = sqrt(x^2+y^2)',
