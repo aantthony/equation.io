@@ -2084,7 +2084,9 @@ function pointCoord(name: string, opts: ResolveOpts): Expr | null {
   const k = dot > 0 ? COORDS.indexOf(name.slice(dot + 1) as (typeof COORDS)[number]) : -1;
   if (k < 0) return null;
   const base = name.slice(0, dot);
-  if (opts.isList?.(base)) return null;
+  // A parameter's coordinates are its argument's (coordParams), even where a
+  // point of the document has the same name.
+  if (opts.isList?.(base) || opts.params?.has(base)) return null;
   const comps = opts.comps?.(base);
   return comps && k < comps.length ? { kind: 'var', name: comps[k] } : null;
 }
@@ -2111,9 +2113,11 @@ function coordParams(
     // (Arity 0: any point that has the coordinate, 2D or 3D alike.)
     for (const [v, k] of read) {
       // A list's coordinates are its dotted columns, which move with every
-      // other use of it (c(A, A) is the diagonal); anything else, a named
-      // point or a matrix included, is read as a component of that node.
+      // other use of it (c(A, A) is the diagonal); a named point's are its
+      // own (P_x); anything else, a matrix included, is read as a component.
+      const own = arg.kind === 'var' ? pointCoord(`${arg.name}.${COORDS[k]}`, opts) : null;
       if (arg.kind === 'var' && opts.isList?.(arg.name)) env[v] = { kind: 'var', name: `${arg.name}.${COORDS[k]}` };
+      else if (own) env[v] = own;
       else if (arg.kind === 'vec') {
         if (k >= arg.items.length) throw new Error(compDims(name, 0, arg, arg.items.length));
         env[v] = arg.items[k];
@@ -2429,9 +2433,11 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     // A function's parameters are values in its body, f(frame) = frame(2),
     // and index too, p[2], since an argument may be a tuple or a multiset of
     // them (docs/multisets.md §3).
-    const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedFnNames(d.params)]) : valueNames;
-    const names = d.kind === 'fn' ? new Set([...indexNamesOf(defs), ...d.params]) : indexNamesOf(defs);
-    if (!p) parsed.set(key, (p = parseExpr(d.rhs, fnNames, names, values)));
+    if (!p) {
+      const values = d.kind === 'fn' ? new Set([...valueNames, ...shadowedFnNames(d.params)]) : valueNames;
+      const names = d.kind === 'fn' ? new Set([...indexNamesOf(defs), ...d.params]) : indexNamesOf(defs);
+      parsed.set(key, (p = parseExpr(d.rhs, fnNames, names, values)));
+    }
     return p;
   };
 

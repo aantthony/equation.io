@@ -220,6 +220,22 @@ describe('§3 order lives in tuples', () => {
     expect(multiset(['P = (3, 12, 5)', 'P.z'])).toEqual([5]);
     expect(multiset(['T = (3, 12, 6, 2)', 'T[4]'])).toEqual([2]);
   });
+  it('a parameter reads its argument, whatever a document point is called', () => {
+    // p is the parameter here, not the point p of the document.
+    expect(multiset(['p = (5, 6)', 'c(p) = p.x + 0', 'c((1, 2))'])).toEqual([1]);
+    expect(multiset(['P = (3, 12)', 'f(P) = P.x', 'f((1, 2))'])).toEqual([1]);
+    // A named point passed in gives its own coordinates.
+    expect(multiset(['P = (3, 12)', 'c(p) = p.x', 'c(P)'])).toEqual([3]);
+    expect(points(['Q = (5, 6)', 'c(p, q) = (p.x, q.y)', 'c(Q, (3, 4))'])).toEqual(['5,4']);
+  });
+  it('indexes a multiset of points by whole positions within each point', () => {
+    expect(last(['A = [(1, 2), (3, 4)]', 'A[1.5]']).error).toMatch(/whole numbers/);
+    expect(last(['A = [(1, 2), (3, 4)]', 'A[0]']).error).toMatch(/1-based: the first is A\[1\]/);
+    expect(last(['[(1, 2, 3), (4, 5)][3]']).error).toMatch(/same number of coordinates/);
+    expect(last(['T = [(1, 2, 3, 4), (5, 6, 7, 8)]', 'T[2.5]']).error).toMatch(/whole numbers/);
+    // A parameter called with a number has no position to read.
+    expect(last(['f(x) = x[2]', 'f(3)']).error).toMatch(/number, not a list or tuple/);
+  });
   it('a function takes tuples whole, and indexes its parameters', () => {
     expect(multiset(['c(p) = p[4]', 'c((3, 12, 6, 2))'])).toEqual([2]);
     expect(points(['c(p, q) = (p.x, q.y)', 'c((1, 2), (3, 4))'])).toEqual(['1,4']);
