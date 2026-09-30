@@ -696,6 +696,12 @@ function decideMembers(items: Expr[], axes: readonly Axis[], ctx: Ctx): Expr {
 /** Named lists that hold a member with no value: reading one brings
  *  dropUndefined into reach (Ctx.none). */
 const holdsNone = new WeakSet<Expr>();
+/** `to`, a copy of the named list `from` (a binder's draw), holding no value
+ *  where `from` does. */
+export function copiedList<T extends Expr>(from: Expr, to: T): T {
+  if (holdsNone.has(from)) holdsNone.add(to);
+  return to;
+}
 
 /** A member a guard decided has no value: one holding [none], through any
  *  arithmetic or coordinate. (Not inside a case: a case that moves with t may

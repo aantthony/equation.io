@@ -222,7 +222,11 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   const sliderRow = (name: string) =>
     analysis.rows.find(
       r =>
-        r.def?.kind === 'const' && r.def.name === name && !r.error && sliderForm(r.def.rhs, analysis.document.fnNames),
+        r.def?.kind === 'const' &&
+        r.def.name === name &&
+        !r.def.draw &&
+        !r.error &&
+        sliderForm(r.def.rhs, analysis.document.fnNames),
     );
   const draggable = (row: (typeof analysis.rows)[number]): boolean | undefined => {
     const coordinates = row.cpu?.type === 'system' ? row.cpu.coordinates : undefined;
@@ -234,6 +238,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
           ? row.def.rhs
           : null;
     if (pair === null) return undefined;
+    // A binder's point is a draw, not a position: the app gives it no handle.
+    if (row.def?.kind === 'const' && row.def.draw) return false;
     const pinned = coordinates
       ? definitionDependencies(
           coordinates.flatMap(c => [...freeVars(c)]),

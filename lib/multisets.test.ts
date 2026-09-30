@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
+import { runtimeSliderNames } from './runtime-sliders.ts';
 import { parseCsv } from './csv.ts';
 import { densityAt } from './dist.ts';
 import { evaluate, type Expr } from './expr.ts';
@@ -76,6 +77,100 @@ describe('§1 equal vs identical', () => {
     expect(collatz).toEqual(points(['k = [1..40]', 'c(m) = {mod(m, 2) < 0.5: m/2, 3m + 1}', '(k, c(k))']));
     expect(collatz).toContain('3,10');
     expect(collatz).toContain('4,2');
+  });
+});
+
+describe('§0 binders: p ∈ A draws from A', () => {
+  it('a draw is a choice of its own: equal to A, never identical', () => {
+    const n = 'n = [1, 2]';
+    expect(multiset([n, 'p ∈ n', 'q ∈ n', 'p + q'])).toEqual([2, 3, 3, 4]);
+    expect(multiset([n, 'p ∈ n', 'p + p'])).toEqual([2, 4]);
+    expect(multiset([n, 'p ∈ n', 'p + n'])).toEqual([2, 3, 3, 4]);
+    // …spelled ∈, \in or in.
+    expect(multiset([n, 'p \\in n', 'q ∈ n', 'p + q'])).toEqual([2, 3, 3, 4]);
+    // A number drawn is that number; a family variable draws a family.
+    expect(multiset(['p ∈ 3', 'p + 1'])).toEqual([4]);
+    const row = last(['a ∈ [2, 3]', 'y = a x']);
+    expect((row.cls!.object as { members: unknown[] }).members).toHaveLength(2);
+  });
+  it('two draws compose a maxel with itself, and count chains of a poset', () => {
+    const A = 'A = [(1, 1), (1, 2), (2, 2), (2, 2)]';
+    const c = 'c(p, q) = {p.y = q.x: (p.x, q.y)}';
+    // A² = [[1 3] [0 4]]: 1→1, 1→2 three times, 2→2 four times.
+    expect(multiset([A, c, 'p ∈ A', 'q ∈ A', 'count(c(p, q))'])).toEqual([8]);
+    expect(multiset([A, c, 'p ∈ A', 'count(c(p, p))'])).toEqual([3]);
+    // The divisors of 12 as a poset: 18 pairs i ∣ j, 40 chains i ∣ j ∣ k.
+    const Z = ['D = [1, 2, 3, 4, 6, 12]', 'a ∈ D', 'b ∈ D', 'Z = {mod(b, a) = 0: (a, b)}'];
+    expect(multiset([...Z, 'count(Z)'])).toEqual([18]);
+    expect(multiset([...Z, c, 'r ∈ Z', 's ∈ Z', 'count(c(r, s))'])).toEqual([40]);
+  });
+  it('composes a named product with its source again through a draw', () => {
+    // AB stays tied to A and B; a second draw from B composes it again.
+    const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
+    const c = 'c(p, q) = {p.y = q.x: (p.x, q.y)}';
+    // ABB = [[2 3] [2 4]]: 11 arrows.
+    expect(multiset([...AB, c, 'AB = c(A, B)', 'q ∈ B', 'count(c(AB, q))'])).toEqual([11]);
+  });
+  it('draws only from a list, and a tuple drawn is the tuple', () => {
+    expect(multiset(['T = sort([3, 1, 2, 5])', 'p ∈ T', 'count(p)'])).toEqual([4]);
+    expect(last(['M = ((1, 2), (3, 4))', 'p ∈ M']).error).toMatch(/draws from a list; that is a matrix/);
+    expect(last(['r = interval(0, 1)', 'p ∈ r']).error).toMatch(/draws from a list; that is an interval/);
+  });
+  it('notes that ∈ [a, b] is two members, not the interval', () => {
+    const note = "a is 0 or 10, the list's two members; for every number from 0 to 10, write a = interval(0, 10)";
+    expect(last(['a ∈ [0, 10]', 'y = a x']).info).toBeUndefined();
+    expect(analyzeRows(['a ∈ [0, 10]', 'y = a x'], { readouts: true }).rows[0].info).toBe(note);
+    expect(last(['a \\in [2, 3]']).info).toMatch(/^a is 2 or 3/);
+    for (const from of ['[3, 2]', '[0..10]', '[1, 2, 3]', 'interval(0, 1)'])
+      expect(last([`a ∈ ${from}`]).info ?? '', from).not.toMatch(/two members/);
+  });
+  it('says what ∈ is where it cannot be one, in every spelling', () => {
+    for (const row of ['e ∈ D', 'e \\in D', 'u \\in D', 'x ∈ D', 'sin ∈ D'])
+      expect(last(['D = [1, 2]', row]).error).toMatch(/is taken by the language, so it cannot be drawn/);
+    expect(last(['D = [1, 2]', '2 ∈ D']).error).toMatch(/draws a name from a list/);
+    // The reason is the name's own.
+    expect(last(['D = [1, 2]', 'u_1 ∈ D']).error).toMatch(/drawn: names starting u_ are\./);
+    expect(last(['D = [1, 2]', 'sin ∈ D']).error).toMatch(/drawn: sin is a built-in function\./);
+    expect(last(['D = [1, 2]', 'e ∈ D']).error).toMatch(/drawn: x, y, z, t, u, v, w, d, e, i, pi and tau are\./);
+    // A built-in a document may shadow is a name like any other.
+    expect(last(['D = [1, 2]', 'total ∈ D']).error).toBeUndefined();
+  });
+  it('draws only the members a guard keeps', () => {
+    for (const from of ['{A > 2: A}', 'M'])
+      for (const [row, info] of [
+        ['count(p)', '= 2'],
+        ['total(p)', '= 7'],
+      ])
+        expect(last(['A = [1, 2, 3, 4]', 'M = {A > 2: A}', `p ∈ ${from}`, row]).info, `${from} ${row}`).toBe(info);
+  });
+  it('draws a scatter with a number beside its columns', () => {
+    const tables = () => parseCsv('a\n1\n2\n3\n');
+    const rows = analyzeRows(['T = open("t.csv")', 'P ∈ (T.a, 0)', 'P'], { readouts: true, tables }).rows;
+    expect(rows[1].error).toBeUndefined();
+    expect(rows[2].error).toBeUndefined();
+  });
+  it('draws nothing from a field or a curve', () => {
+    expect(last(['p ∈ x^2']).error).toMatch(/draws from a list; that is a field/);
+    expect(last(['f = x^2', 'p ∈ f + 1']).error).toMatch(/draws from a list; that is a field/);
+    expect(last(['P ∈ (x, y)']).error).toMatch(/draws from a list; that is a field/);
+    expect(last(['c ∈ (cos(u), sin(u))']).error).toMatch(/draws from a list; that is a curve/);
+    expect(last(['p ∈ x', 'q = p + 1']).error).toMatch(/p has an error/);
+  });
+  it('draws nothing from a random variable, and says how to copy one', () => {
+    expect(last(['X ~ Normal(0, 1)', 'p ∈ X']).error).toBe(
+      'p ∈ … draws from a list; X is a random variable. For an independent copy of X, write p ~ Normal(0, 1).',
+    );
+    expect(last(['X ~ Normal(0, 1)', 'Y = X + 1', 'p ∈ Y']).error).toBe(
+      'p ∈ … draws from a list; Y is a random variable.',
+    );
+    expect(last(['X ~ Normal(0, 1)', 'p ∈ 2X']).error).toBe('p ∈ … draws from a list; X is a random variable.');
+  });
+  it('leaves a bare in to the user: only ∈ and \\in draw', () => {
+    expect(multiset(['in = 2', 'k = 3', 'k in + 1'])).toEqual([7]);
+  });
+  it('makes no slider of a draw', () => {
+    const a = analyzeRows(['p ∈ 3', 'k = 2', 'p + k']);
+    expect([...runtimeSliderNames(a)]).toEqual(['k']);
   });
 });
 

@@ -853,6 +853,8 @@ export const WRITTEN_NAME_CHARS = `${NAME_START_CHARS}0-9₀₁₂₃₄₅₆�
  *  build on it and canonicalize what they capture, so a definition binds
  *  exactly the name the tokenizer produces. */
 export const NAME_SRC = `[${NAME_START_CHARS}][${WRITTEN_NAME_CHARS}]*`;
+/** Regex source for a binder's ∈, as written: `∈` or `\in`. */
+export const DRAW_OP_SRC = String.raw`(?:∈|\\in\b)`;
 
 /**
  * Standalone glyphs and the names they mean. Single characters only: a glyph
@@ -920,6 +922,9 @@ const syntax: PatternDict = {
           ' — in the editor, typing \\pi, \\theta or \\nabla inserts it.',
       );
     }
+    // A binder is a row of its own (lib/defs.ts DRAW_RE); here it is inside
+    // an expression, or binds a name the language has taken.
+    if (x === '∈') throw new Error('∈ draws a name from a list on a row of its own, like p ∈ A.');
     throw new Error(`Invalid character: ${JSON.stringify(x)}.`);
   },
 };

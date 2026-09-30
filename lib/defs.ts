@@ -37,6 +37,7 @@ import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
 import {
   FUNCTIONS,
   GREEK_NAME_CHARS,
+  DRAW_OP_SRC,
   NAME_SRC,
   SHADOWABLE_FNS,
   SUM_MAX_TERMS,
@@ -65,6 +66,7 @@ import {
   NO_LIST_INSIDE,
   SCALAR_REDUCTIONS,
   axesOf,
+  copiedList,
   isDataScatter,
   isSeq,
   isTuple,
@@ -99,7 +101,9 @@ const complexValued = (e: Expr): boolean => {
 
 export type Definition =
   | RegressionRow
-  | { kind: 'const'; name: string; rhs: string }
+  /** `draw`: `p ∈ A` — p ranges over A's members, a choice of its own
+   *  (docs/multisets.md §0): equal to A, never identical to it. */
+  | { kind: 'const'; name: string; rhs: string; draw?: true }
   | { kind: 'fn'; name: string; params: string[]; rhs: string }
   /** `a' = …` — da/dt, integrated forward in time. */
   | { kind: 'state'; name: string; rhs: string }
@@ -707,6 +711,8 @@ const FN_RE = new RegExp(
   String.raw`^\s*(${NAME_SRC})\s*\(\s*(${NAME_SRC}(?:\s*,\s*${NAME_SRC})*)\s*\)\s*=(?!=)([\s\S]+)$`,
 );
 const CONST_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`);
+/** `p ∈ A` (or `p \in A`): a binder, a draw from A. */
+const DRAW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*${DRAW_OP_SRC}\s*([\s\S]+)$`);
 const STATE_RE = new RegExp(String.raw`^\s*(${NAME_SRC})'\s*=(?!=)([\s\S]+)$`);
 const INIT_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*\(\s*0\s*\)\s*=(?!=)([\s\S]+)$`);
 /**
@@ -833,7 +839,23 @@ export function scanDefinition(text: string): Definition | null {
   }
   m = CONST_RE.exec(text);
   if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2] };
+  m = DRAW_RE.exec(text);
+  if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
   return null;
+}
+
+/** Why a row that reads as a binder, `p ∈ A` (or `\\in`), binds no
+ *  name: the name is the language's. Null when it is not such a row. */
+export function takenBinder(text: string): string | null {
+  const m = DRAW_RE.exec(text);
+  const n = canonicalName(m?.[1] ?? '');
+  if (!m || nameable(n)) return null;
+  const why = n.startsWith('u_')
+    ? 'names starting u_ are'
+    : FUNCTIONS.has(n)
+      ? `${m[1]} is a built-in function`
+      : 'x, y, z, t, u, v, w, d, e, i, pi and tau are';
+  return `${m[1]} is taken by the language, so it cannot be drawn: ${why}. Draw with another name, like p ∈ A.`;
 }
 
 /**
@@ -2095,6 +2117,20 @@ function reducedParams(body: Expr): Set<string> {
   return hit;
 }
 
+/** A list drawn by a binder: the same members, one axis of its own. A
+ *  scatter of columns is drawn column by column, on that one axis; a tuple,
+ *  one ordered value with no members to choose among, is itself. */
+function drawnFrom(name: string, e: Expr): Expr {
+  if (e.kind === 'vec') return { ...e, items: e.items.map(c => drawnFrom(name, c)) };
+  // A number beside a scatter's columns, `(T.a, 0)`, is the same in every draw.
+  if (!isSeq(e)) return e;
+  const own = axesOf(e as Seq);
+  const positions = own.filter(a => a.ordered);
+  if (positions.length === own.length) return e;
+  const n = own.filter(a => !a.ordered).reduce((size, a) => size * a.n, 1);
+  return copiedList(e, withAxes({ ...e } as Seq, [{ id: `${name}∈`, n }, ...positions]));
+}
+
 /** The name a mapped parameter takes in its body: one no document can spell
  *  (so nothing is captured), the same every time the row resolves. */
 const mapName = (fn: string, k: number) => `@${fn}:${k}`;
@@ -2676,7 +2712,12 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         const resolved = resolveExpr(parse(d), getFn, ropts);
         // `r = interval(1, 2)`, or anything built from one: not a number but a
         // hidden parameter, which every row using the name shares.
+        // A binder draws from a list; the other named values below are not one.
+        const notDrawn = (what: string): void => {
+          if (d.draw) throw new Error(`${d.name} ∈ … draws from a list; that is ${what}.`);
+        };
         if (hasInterval(resolved)) {
+          notDrawn('an interval');
           defs.intervals.set(d.name, resolved);
           continue;
         }
@@ -2699,6 +2740,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
             isList,
           );
         if (computed) {
+          notDrawn('a matrix');
           defs.mats.set(d.name, computed);
           continue;
         }
@@ -2713,6 +2755,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
             isList,
           );
         if (tensor) {
+          notDrawn('a tensor');
           defs.tensors.set(d.name, tensor);
           continue;
         }
@@ -2732,6 +2775,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // `R = e^(-t/2 e_xy)`, `q = quat(1, 2, 3, 4)`: a multivector, written
         // into every row that names it.
         if (mvOfNode(e)) {
+          notDrawn('a multivector');
           defs.multivectors.set(d.name, e);
           continue;
         }
@@ -2739,6 +2783,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // tensors is one tensor, named as a matrix when it is square.
         const reduced = tensorOfNode(e);
         if (reduced && reduced.shape.length >= 2) {
+          notDrawn('a tensor');
           const m = toMat(reduced);
           if (m) defs.mats.set(d.name, m);
           else defs.tensors.set(d.name, reduced);
@@ -2747,6 +2792,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // `adults = person[person.age >= 18]` names a cut of a data file.
         const cut = filteredTable(e, defs, ropts);
         if (cut) {
+          notDrawn('a data file; draw one of its columns, p ∈ T.col');
           defs.tables.set(d.name, cut);
           // Registered first, so rows below report the file rather than
           // "unknown variable" — then the row says what is missing, exactly
@@ -2757,6 +2803,10 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           continue;
         }
         e = lowerLists(e, listGetter(defs), ropts, true);
+        // A draw is a choice of its own: A's members over an axis named for
+        // the binder, so `p ∈ A`, `q ∈ A` cross where A and A zip. (A tuple's
+        // positions stay positions.)
+        if (d.draw && (isSeq(e) || isDataScatter(e))) e = drawnFrom(d.name, e);
         if (isSeq(e)) {
           // A named data list: scalar elements, or points for a named scatter.
           // A `data`/`text` value is a list too — a column, or arithmetic over
@@ -3269,6 +3319,17 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     } else continue;
     defs.points.delete(p);
     for (const c of pointComps(p, defs.pointDims.get(p))) defs.fields.delete(c);
+  }
+  // A binder draws from a list; one over position (or over u, v) is a field
+  // (or a curve), which has no members to draw.
+  for (const d of raw) {
+    if (d.kind !== 'const' || !d.draw) continue;
+    const comps = defs.points.has(d.name) ? pointComps(d.name, defs.pointDims.get(d.name)) : [d.name];
+    if (!comps.some(c => defs.fields.has(c))) continue;
+    const what = comps.some(c => paramNames.has(c)) ? 'a curve' : 'a field';
+    errors.set(d.name, `${d.name} ∈ … draws from a list; that is ${what}.`);
+    defs.points.delete(d.name);
+    for (const c of comps) defs.fields.delete(c);
   }
   // Grid families draw in definition order, not dependency-resolution order.
   const orderedFields = new Map<string, Expr>();

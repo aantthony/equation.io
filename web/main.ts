@@ -64,7 +64,7 @@ import { compileSampler } from '../lib/vm.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
-import { type Expr, canonicalName, evaluate, freeVars, substVars } from '../lib/expr.ts';
+import { DRAW_OP_SRC, type Expr, canonicalName, evaluate, freeVars, substVars } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -632,6 +632,9 @@ function frameLattice(p: Panel, cells: Equation[]) {
   const cpu = cells[0]?.cpu as Parameters<typeof latticeFrame>[0];
   const dpr = window.devicePixelRatio || 1;
   delete p.view.ratio;
+  // This runs from syncCanvasSize, ahead of render's own constEnv, which may
+  // not yet hold the sliders a table reads (on first load it is empty).
+  constEnv = currentConstEnv(graphTime());
   Object.assign(p.view, latticeFrame(cpu, constEnv, w, h, (LATTICE_VALUE_PX + 30) * dpr));
 }
 
@@ -3113,7 +3116,8 @@ const fmtNum = (v: number) => String(parseFloat(v.toPrecision(6)));
 /** The slider a row's definition makes (lib/slider.ts), if any. */
 function sliderOf(eq: Equation): { def: NonNullable<Equation['def']>; rhs: string; form: SliderForm } | null {
   const def = eq.def;
-  if ((def?.kind !== 'const' && def?.kind !== 'init') || eq.error) return null;
+  // (A binder, p ∈ A, draws from its right side: no slider to drag.)
+  if ((def?.kind !== 'const' && def?.kind !== 'init') || eq.error || (def.kind === 'const' && def.draw)) return null;
   const rhs = def.rhs.trim();
   const form = sliderForm(rhs, new Set(defs.fns.keys()));
   return form ? { def, rhs, form } : null;
@@ -4597,6 +4601,8 @@ function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
 /** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
 const defPointWriter = (eq: Equation) => {
   const def = eq.def as Definition & { kind: 'const' };
+  // A binder's row is `p ∈ …`, never an assignment to rewrite.
+  if (def.draw) return null;
   return makePairWriter(def.rhs, p => {
     eq.text = keepNote(eq.text, `${def.name} = ${p}`);
   });
@@ -5307,6 +5313,9 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
   return row;
 }
 
+/** The name a row defines, or draws (`p ∈ A`, `p \in A`), as matchRows reads it. */
+const ROW_NAME_RE = new RegExp(String.raw`^([^=<>~]+?)\s*(?:=(?!=)|${DRAW_OP_SRC})`);
+
 /**
  * Which existing row each of set_graph's texts continues, so rows keep their
  * color and widgets when the model inserts or drops one: the same text first,
@@ -5322,7 +5331,7 @@ function matchRows(texts: string[]): (Equation | undefined)[] {
     out[i] = eq;
     free.delete(eq);
   };
-  const lhs = (t: string) => /^([^=<>~]+?)\s*=(?!=)/.exec(stripNote(t))?.[1];
+  const lhs = (t: string) => ROW_NAME_RE.exec(stripNote(t))?.[1];
   texts.forEach((t, i) =>
     claim(
       i,

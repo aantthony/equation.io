@@ -32,6 +32,7 @@ export function runtimeSliderNames(analysis: Analysis): Set<string> {
     rows.flatMap(row => {
       const d = row.def;
       return d?.kind === 'const' &&
+        !d.draw &&
         sliderForm(d.rhs, document.fnNames) &&
         !blocked.has(d.name) &&
         defs.consts.has(d.name)

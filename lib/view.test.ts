@@ -197,6 +197,11 @@ describe('lattice views', () => {
     expect(err(['T[i, n] = i + n', 'view(n = 0..80)'])).toBeUndefined();
     expect(err(['view(z = 1..2)'])).toMatch(/x and y/);
     expect(err(['T[i, n] = i + n', '--- right', 'view(n = 0..80)'])).toMatch(/x and y/);
+    // So are two: a capitalised x and y, or letters no lattice here uses.
+    expect(err(['y = x^2', 'view(X = -1..1, Y = -2..2)'])).toMatch(/x and y/);
+    expect(err(['y = x^2', 'view(a = 0..1, b = 0..2)'])).toMatch(/x and y/);
+    expect(err(['T[i, n] = i + n', 'view(i = 0..1, k = 0..2)'])).toMatch(/x and y/);
+    expect(err(['T[i, n] = i + n', 'view(n = 0..80, i = 0..10)'])).toBeUndefined();
   });
 
   it('swaps a view naming the axes the other way round', () => {

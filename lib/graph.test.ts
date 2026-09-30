@@ -38,6 +38,14 @@ describe('graph rows', () => {
     expect(arrows(graphOf(['graph(1, 2)']))).toEqual(['1>2']);
   });
 
+  it('is a graph row only when the call is the whole row', () => {
+    const graphed = (text: string) => analyzeRows([text]).rows[0].cpu?.type === 'graph';
+    expect(graphed('graph(1, 2)*(3)')).toBe(false);
+    expect(graphed('graph(1, 2) + graph(3, 4)')).toBe(false);
+    expect(graphed('mark(1) + (2)')).toBe(false);
+    expect(arrows(graphOf(['graph(1, (2))']))).toEqual(['1>2']);
+  });
+
   it('a case may test equality in any row not drawn over the plane', () => {
     const value = (rows: string[]) => {
       const a = analyzeRows(rows, { readouts: true });

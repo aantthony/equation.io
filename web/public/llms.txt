@@ -282,7 +282,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   q.y)}` composes arrows i → j and j → k, and with lists of arrows `A`, `B`,
   `AB = c(A, B)` is the arrows that meet (their matrix product, as a multiset
   of arrows), and `c(A, A)` pairs each arrow with itself: one name is one
-  choice.
+  choice. Two independent draws from one list are binders, rows of their
+  own: `p ∈ A` (or `p \in A`) names a choice from A, equal to A but never
+  identical, so with `p ∈ A` and `q ∈ A`, `c(p, q)` is A composed with
+  itself (`p + p` still zips; `p + q` crosses). A binder cannot use a name
+  the language has: x, y, z, t, u, v, w, d, e, i, pi, tau, a name starting
+  u_, or a built-in function such as sin. A binder draws members, not a
+  range: `a ∈ [0, 10]` is 0 or 10; every number from 0 to 10 is
+  `a = interval(0, 10)`, and the whole numbers are `a ∈ [0..10]`.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
   `stdev(L)` (sample), `median(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
@@ -401,7 +408,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `(r cos(2 pi u), r sin(2 pi u))` is a filled annulus, `(r, r^2)` a curve
   over [1, 2]. A row in x and y over one interval is a family, drawn as the
   region its members sweep: with `a = interval(1, 2)`, `y = sin(a x)` shades
-  every point some a ∈ [1, 2] puts on its curve, and `y < a x` every point
+  every point some a from 1 to 2 puts on its curve, and `y < a x` every point
   below some member. At most one interval in such a row, and a bare field
   (`sin(a x)`) is an error: set it equal to something. Alone, an interval row
   draws its values like `u` does, against length rather than probability:
