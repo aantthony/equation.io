@@ -3653,6 +3653,7 @@ function reconcile() {
       !!eq.def || structure || (drawn?.type === 'value' && !drawn.shade) || drawn?.type === 'note',
     );
     line.classList.toggle('is-divider', eq.viewSpec?.kind === 'split');
+    line.classList.toggle('is-view', !!eq.viewSpec && eq.viewSpec.kind !== 'split');
     line.classList.toggle('is-comment', !!eq.comment);
     line.classList.toggle('collapsed', !!(eq.comment && eq.collapsed));
     line.title = eq.error ?? (eq.comment ? 'Click the arrow to collapse or expand this group' : '');

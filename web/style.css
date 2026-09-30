@@ -56,13 +56,12 @@ body {
   --ex-hover-bg: rgba(0, 90, 200, 0.08);
   --ex-code: #999;
   --ex-code-hover: #667;
-  --syn-num: #a4560f;
-  --syn-str: #6f6a12;
-  --syn-fn: #2d6fb3;
-  --syn-const: #0d7a70;
-  --syn-coord: #3f7a23;
-  --syn-name: #8a3fae;
-  --syn-op: #888;
+  --syn-base: #555;
+  --syn-num: #8a5a2e;
+  --syn-str: #6b6540;
+  --syn-fn: #3d6390;
+  --syn-name: #111;
+  --syn-unbound: #9a9a9a;
 }
 
 :root[data-theme='dark'] {
@@ -90,13 +89,12 @@ body {
   --ex-hover-bg: rgba(90, 150, 255, 0.14);
   --ex-code: #767c88;
   --ex-code-hover: #97a3b8;
-  --syn-num: #e2a462;
-  --syn-str: #d4c374;
-  --syn-fn: #72a9f2;
-  --syn-const: #53c4b7;
-  --syn-coord: #93cf7c;
-  --syn-name: #c792ee;
-  --syn-op: #868d99;
+  --syn-base: #aeb4be;
+  --syn-num: #cfae88;
+  --syn-str: #bdb48c;
+  --syn-fn: #9db6d8;
+  --syn-name: #f4f5f7;
+  --syn-unbound: #767c88;
 }
 
 html,
@@ -473,8 +471,15 @@ body {
     sans-serif;
 }
 /* Syntax colour (web/highlight.ts): highlight ranges over the row text, so
-   the editable DOM stays plain text. */
-::highlight(eq-num) {
+   the editable DOM stays plain text. Quiet on purpose — hue already means
+   "this row is that curve" in the colour bars — so punctuation sits back,
+   names that resolve read brightest, names nothing binds yet go grey, and
+   only numbers and functions carry a faint tint. */
+#equations .eq-line:not(.is-comment, .is-divider, .is-view) {
+  color: var(--syn-base);
+}
+::highlight(eq-num),
+::highlight(eq-const) {
   color: var(--syn-num);
 }
 ::highlight(eq-str) {
@@ -483,17 +488,16 @@ body {
 ::highlight(eq-fn) {
   color: var(--syn-fn);
 }
-::highlight(eq-const) {
-  color: var(--syn-const);
-}
-::highlight(eq-coord) {
-  color: var(--syn-coord);
-}
+::highlight(eq-coord),
 ::highlight(eq-name) {
   color: var(--syn-name);
 }
-::highlight(eq-op) {
-  color: var(--syn-op);
+::highlight(eq-unbound) {
+  color: var(--syn-unbound);
+}
+/* A viewport row is written by panning: state, not math, so it recedes. */
+#equations .eq-line.is-view {
+  color: var(--muted);
 }
 ::highlight(eq-link) {
   text-decoration: underline;

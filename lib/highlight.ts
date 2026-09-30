@@ -5,13 +5,16 @@
  * finished yet. Names are coloured by what the document's built definitions
  * make of them, so `mean` is a function until a row binds `mean = [1, 2]`.
  */
+import { isViewportText } from './analysis.ts';
 import { type Binding, type Env, lookupValue } from './env.ts';
 import { CONSTANTS, GLYPH_CHARS, NAME_SRC, SUPERSCRIPT_CHARS, canonicalName, freeVars } from './expr.ts';
 import { familyOf } from './dist-families.ts';
 import { VALUE_END, noteStart } from './statements.ts';
 import { builtinHelp } from './syntax-help.ts';
 
-export type SpanClass = 'num' | 'str' | 'fn' | 'const' | 'coord' | 'name' | 'op';
+/** `name` is a name the document or the row binds; `unbound` one nothing
+ *  does yet — mid-typing, a typo, or a row that failed to define it. */
+export type SpanClass = 'num' | 'str' | 'fn' | 'const' | 'coord' | 'name' | 'unbound' | 'op';
 
 export interface Span {
   start: number;
@@ -35,6 +38,22 @@ const NUMBER_RE = /\d+(?:\.(?!\.)\d*)?|\.\d+/y;
 /** A range's `..`, consumed whole so `0..1` never reads `.1`. */
 const RANGE_RE = /\.\.+/y;
 const SUPERSCRIPT_RE = new RegExp(`[${SUPERSCRIPT_CHARS}]+`, 'y');
+/** A function row's parameters: `f(x, k) =`. */
+const PARAMS_RE = new RegExp(`^\\s*${NAME_SRC}\\s*\\(([^)]*)\\)\\s*=(?!=)`);
+/** An index a sum, product or list binds in place: `sum[n=1..N]`, `prod(k=1..N, k)`. */
+const INDEX_RE = new RegExp(`[[(,]\\s*(${NAME_SRC})\\s*=(?!=)`, 'g');
+/** Calculus notation: d/dx, the dx of an integral. */
+const DIFFERENTIAL_RE = /^d[xyztuvw]?$/;
+
+/** Names the row binds for itself, which no definition will ever claim. */
+function rowLocals(text: string): Set<string> {
+  const locals = new Set<string>();
+  const params = PARAMS_RE.exec(text);
+  for (const p of params?.[1].split(',') ?? []) if (p.trim()) locals.add(canonicalName(p.trim()));
+  for (const m of text.matchAll(INDEX_RE)) locals.add(canonicalName(m[1]));
+  return locals;
+}
+
 /** Relations and binders: where a row says what it is. Arithmetic stays plain. */
 const RELATION_RE = /<=|>=|:=|[=<>≤≥≠~∈:]/y;
 
@@ -43,16 +62,19 @@ function nameClass(name: string, env: Env, called: boolean): SpanClass | undefin
   if (binding) return binding.tag === 'fn' ? 'fn' : 'name';
   const dot = name.indexOf('.');
   if (dot > 0 && env.names.has(name.slice(0, dot))) return 'name';
+  // A sequence's terms: a_n, a_ before {n+1}, a_0.
+  const under = name.lastIndexOf('_');
+  if (under > 0 && [...env.sequences.values()].some(s => s.name === name.slice(0, under))) return 'name';
   if (Object.hasOwn(CONSTANTS, name) || name === 'i' || name === 'inf') return 'const';
   if (/^e_(?:x|y|z|xy|yz|zx|xyz)$/.test(name)) return 'const';
-  if (COORDS.has(name)) return 'coord';
+  if (COORDS.has(name) || DIFFERENTIAL_RE.test(name)) return 'coord';
   return builtinHelp(name, called) ? 'fn' : undefined;
 }
 
-/** Coloured spans of a row, in order. A `#` comment row and a trailing note
- *  have none: the stylesheet already sets them as prose. */
+/** Coloured spans of a row, in order. A `#` comment row, a trailing note and
+ *  a viewport row have none: the stylesheet sets them apart as a whole. */
 export function highlightSpans(text: string, env: Env): Span[] {
-  if (text.trimStart().startsWith('#')) return [];
+  if (text.trimStart().startsWith('#') || isViewportText(text.trim())) return [];
   const note = noteStart(text);
   const end = note < 0 ? text.length : note;
   const spans: Span[] = [];
@@ -60,6 +82,10 @@ export function highlightSpans(text: string, env: Env): Span[] {
     re.lastIndex = i;
     return re.exec(text)?.[0] ?? null;
   };
+  const locals = rowLocals(text.slice(0, end));
+  // A sequence's index (n in a_{n+1}) and a lattice's cells are names in every row that uses them.
+  for (const scan of env.sequences.values())
+    for (const idx of [scan.index, scan.cell, scan.cell2]) if (idx) locals.add(idx);
   let i = 0;
   while (i < end) {
     const c = text[i];
@@ -76,8 +102,8 @@ export function highlightSpans(text: string, env: Env): Span[] {
       const bare = word.replace(/'+/g, '');
       const name = canonicalName(bare);
       const called = /^\s*\(/.test(text.slice(stop, end));
-      const cls = nameClass(name, env, called);
-      if (cls) spans.push({ start: i, end: stop, cls, name, called });
+      const cls = nameClass(name, env, called) ?? (locals.has(name) ? 'name' : 'unbound');
+      spans.push({ start: i, end: stop, cls, name, called });
       i = stop;
       continue;
     }

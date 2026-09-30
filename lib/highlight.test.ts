@@ -17,25 +17,25 @@ describe('highlightSpans', () => {
     const rows = ['a = 2', 'f(x) = a x^2', 'A = (1, 2)'];
     expect(spans('y = f(x) + a', rows)).toEqual(['y:coord', '=:op', 'f:fn', 'x:coord', 'a:name']);
     expect(spans('A.x + A_y', rows)).toEqual(['A.x:name', 'A_y:name']);
-    // An undefined name has no colour: it is not yet anything.
-    expect(spans('b x', rows)).toEqual(['x:coord']);
+    // An undefined name is not yet anything: it greys until a row binds it.
+    expect(spans('b x', rows)).toEqual(['b:unbound', 'x:coord']);
   });
 
   it('lets a value shadow a shadowable builtin', () => {
-    expect(spans('mean(L)')).toEqual(['mean:fn']);
+    expect(spans('mean(L)', ['L = [1, 2]'])).toEqual(['mean:fn', 'L:name']);
     expect(spans('mean + 1', ['mean = [1, 4, 2]'])).toEqual(['mean:name', '1:num']);
   });
 
   it('keeps ranges, primes, text, glyphs and superscripts apart', () => {
-    expect(spans('[1..N]')).toEqual(['1:num']);
-    expect(spans('int[0..1] x dx')).toEqual(['int:fn', '0:num', '1:num', 'x:coord']);
+    expect(spans('[1..N]', ['N = 5'])).toEqual(['1:num', 'N:name']);
+    expect(spans('int[0..1] x dx')).toEqual(['int:fn', '0:num', '1:num', 'x:coord', 'dx:coord']);
     expect(spans('[.5..2]')).toEqual(['.5:num', '2:num']);
     // A sum's index is not Normal by its alias N, nor T the t distribution.
-    expect(spans('sum[n=1..3] n T')).toEqual(['sum:fn', '=:op', '1:num', '3:num']);
-    expect(spans("th' = om")).toEqual(['=:op']);
+    expect(spans('sum[n=1..3] n T')).toEqual(['sum:fn', 'n:name', '=:op', '1:num', '3:num', 'n:name', 'T:unbound']);
+    expect(spans("th' = om", ["th' = om", "om' = -th"])).toEqual(["th':name", '=:op', 'om:name']);
     expect(spans('label(A, "it\'s")', ['A = (0, 0)'])).toEqual(['label:fn', 'A:name', '"it\'s":str']);
-    expect(spans('2πr²')).toEqual(['2:num', 'π:const', '²:num']);
-    expect(spans('X ~ Normal(0, 1)')).toEqual(['~:op', 'Normal:fn', '0:num', '1:num']);
+    expect(spans('2πr²')).toEqual(['2:num', 'π:const', 'r:unbound', '²:num']);
+    expect(spans('X ~ Normal(0, 1)', ['X ~ Normal(0, 1)'])).toEqual(['X:name', '~:op', 'Normal:fn', '0:num', '1:num']);
     expect(spans('P(X < 1) + E(X)', ['X ~ Normal(0, 1)'])).toEqual([
       'P:fn',
       'X:name',
@@ -44,6 +44,28 @@ describe('highlightSpans', () => {
       'E:fn',
       'X:name',
     ]);
+  });
+
+  it('binds what a row binds for itself', () => {
+    expect(spans('g(x, k) = k x^2 + c')).toEqual([
+      'g:unbound',
+      'x:coord',
+      'k:name',
+      '=:op',
+      'k:name',
+      'x:coord',
+      '2:num',
+      'c:unbound',
+    ]);
+    expect(spans('prod(k=1..N, k)', ['N = 3'])).toEqual(['prod:fn', 'k:name', '=:op', '1:num', 'N:name', 'k:name']);
+    const seq = ['a_0 = 1', 'a_{n+1} = a_n / 2 + 1'];
+    expect(spans('a_{n+1} = a_n / 2', seq)).toEqual(['a_:name', 'n:name', '1:num', '=:op', 'a_n:name', '2:num']);
+    expect(spans('d/dx (x^3)')).toEqual(['d:coord', 'dx:coord', 'x:coord', '3:num']);
+  });
+
+  it('leaves viewport rows to the stylesheet', () => {
+    expect(spans('view(x = -2..2, y = -1..1)')).toEqual([]);
+    expect(spans('---')).toEqual([]);
   });
 
   it('leaves comments, notes and half-typed rows readable', () => {

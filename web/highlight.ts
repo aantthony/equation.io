@@ -11,7 +11,7 @@
 import type { Env } from '../lib/env.ts';
 import { type NameInfo, type Span, type SpanClass, describeName, highlightSpans } from '../lib/highlight.ts';
 
-const CLASSES: SpanClass[] = ['num', 'str', 'fn', 'const', 'coord', 'name', 'op'];
+const CLASSES: SpanClass[] = ['num', 'str', 'fn', 'const', 'coord', 'name', 'unbound', 'op'];
 /** The name under a ⌘/Ctrl hover, underlined as a link to its definition. */
 const LINK = 'eq-link';
 const HOVER_DELAY_MS = 350;
