@@ -59,10 +59,11 @@ describe('state families', () => {
     expect(analysis.rows[6].cls?.object.kind).toBe('point');
     expect(analysis.rows[7].info).toBe('= 0.625');
     expect(analysis.rows[8].error).toBeUndefined();
-    // …and from a multiset they are not: its runs have no first.
+    // …and from a multiset they are not: its runs have no first, so p[2]
+    // reaches into each state instead, the y of every run.
     const unordered = analyzeRows([...ROSSLER, 'p(0) = ([1..4]/4, 0, 0)', 'p', 'p[2]']);
     expect(unordered.rows[5].cls?.object.kind).toBe('list');
-    expect(unordered.rows[6].error).toMatch(/p\[2\] needs an order.*Start them from a tuple/);
+    expect(unordered.rows[6].error).toBeUndefined();
   });
 
   it('carries coupled states along with the family, through constants and matrices', () => {

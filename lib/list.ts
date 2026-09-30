@@ -1202,6 +1202,16 @@ function cutBy(low: Exclude<Seq, { kind: 'lazy' }>, keep: readonly boolean[], id
   );
 }
 
+/** Position k (1-based, whole) inside each of a multiset's tuples or points. */
+function positionIn(idx: Expr, n: number, has: string, what: string, name: string, ctx: Ctx): number {
+  const v = constVal(idx, ctx, 'A list index', true);
+  const k = Math.round(v);
+  if (Math.abs(v - k) > 1e-9) throw new Error('List indices must be whole numbers.');
+  if (k === 0) throw new Error(`Positions are 1-based: the first is ${name}[1].`);
+  if (k < 1 || k > n) throw new Error(`Index ${k} is out of range — ${has} ${n} ${what}.`);
+  return k;
+}
+
 function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
   // Before anything is lowered, because lowering a column whose file is not
@@ -1218,8 +1228,11 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
       : null;
   const low = (point ?? (isDataScatter(lowered) ? scatterPoints(lowered) : lowered)) as Exclude<Expr, { kind: 'lazy' }>;
   if (!isSeq(low)) {
-    const name = target.kind === 'var' ? target.name : 'this';
-    throw new Error(`${name} is not a list here — define it above where it is used.`);
+    // A function's parameter indexes (p[2]); called with a number, there is
+    // no position to read, and a product is written with a space.
+    if (target.kind !== 'var')
+      throw new Error('That is a number, not a list or tuple: [k] reads a position. For a product, write x 2.');
+    throw new Error(`${target.name} is not a list here — define it above where it is used.`);
   }
   const n = seqLength(low);
   const idxLow = lowerCond(idx, ctx);
@@ -1233,13 +1246,30 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   // Anything but a filter picks by position, and only a tuple has positions.
   const axes = axesOf(low);
   const ordered = axes.findIndex(a => a.ordered);
+  // A multiset of points has no k-th element, so [k] reaches into each
+  // point, as it does into longer tuples: A[1] is A.x, over A's own
+  // instances, so A[1] and A.y pair up.
+  const name = target.kind === 'var' ? target.name : 'P';
+  if (ordered < 0 && isList(low) && low.items.length && low.items.every(p => p.kind === 'vec')) {
+    if (isSeq(idxLow)) throw new Error(`A multiset of points takes one index at a time: ${name}[2].`);
+    const dims = (low.items[0] as Expr & { kind: 'vec' }).items.length;
+    if (low.items.some(p => (p as Expr & { kind: 'vec' }).items.length !== dims))
+      throw new Error('All points in a list need the same number of coordinates.');
+    const k = positionIn(idxLow, dims, 'each point has', 'coordinates', name, ctx);
+    return withAxes(
+      listOf(
+        low.items.map(p => (p as Expr & { kind: 'vec' }).items[k - 1]),
+        ctx,
+      ),
+      axes,
+    );
+  }
   if (ordered < 0) throw new Error(needsOrder(target, idx, low));
   if (axes.length > 1) {
     // A multiset of tuples: position k of each, over the multiset.
-    if (isSeq(idxLow)) throw new Error('A multiset of tuples takes one index at a time: T[2].');
+    if (isSeq(idxLow)) throw new Error(`A multiset of tuples takes one index at a time: ${name}[2].`);
     const n = axes[ordered].n;
-    const k = Math.round(constVal(idxLow, ctx, 'A list index', true));
-    if (k < 1 || k > n) throw new Error(`Index ${k} is out of range — each tuple has ${n} elements.`);
+    const k = positionIn(idxLow, n, 'each tuple has', 'elements', name, ctx);
     const inner = axes.slice(ordered + 1).reduce((size, a) => size * a.n, 1);
     const outer = axes.slice(0, ordered).reduce((size, a) => size * a.n, 1);
     const at = Array.from(

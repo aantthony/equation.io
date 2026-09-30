@@ -64,8 +64,8 @@ describe('distance / angle through analyze()', () => {
     expect(rows[3][0]).toBe('vlist');
     expect(rows[4][0]).toMatch(/distance takes two points/);
     expect(rows[5][0]).toBe('vlist');
-    // Only a tuple has positions (docs/multisets.md §3).
-    expect(rows[6][0]).toMatch(/P\[1\] needs an order/);
+    // A multiset of points has no first point: P[1] is every point's x.
+    expect(rows[6][0]).toMatch(/distance takes two points/);
     expect(rows[8]).toEqual(['value', '≈ 1.41421']);
   });
 
