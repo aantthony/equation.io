@@ -98,18 +98,28 @@ async function handleShare(request: Request, url: URL, env: Env): Promise<Respon
   const tags = meta
     .map(([p, c]) => `<meta ${p.startsWith('twitter:') ? 'name' : 'property'}="${p}" content="${escapeAttr(c)}">`)
     .join('\n  ');
-  return new HTMLRewriter()
-    .on('head', {
-      element(el) {
-        el.append(`${tags}\n  `, { html: true });
-      },
-    })
-    .on('title', {
-      element(el) {
-        el.setInnerContent(title);
-      },
-    })
-    .transform(shell);
+  return (
+    new HTMLRewriter()
+      // The shell carries the site's own og:/twitter: tags (the homepage card).
+      // Crawlers take the first og:image, so leaving them in would unfurl every
+      // graph as the site card; drop them and append the graph's.
+      .on('meta[property^="og:"], meta[name^="twitter:"]', {
+        element(el) {
+          el.remove();
+        },
+      })
+      .on('head', {
+        element(el) {
+          el.append(`${tags}\n  `, { html: true });
+        },
+      })
+      .on('title', {
+        element(el) {
+          el.setInnerContent(title);
+        },
+      })
+      .transform(shell)
+  );
 }
 
 /**
