@@ -535,6 +535,17 @@ function curveHint(object: MathObject, text: string): string | null {
  * wrapper for mean(L). A reduction that also takes a list of the body's own
  * (`f(m) = total(L m)`) is the rule's point, and says nothing.
  */
+/**
+ * A note for `p ∈ [a, b]` with a < b: the notation reads as the interval
+ * from a to b, and here it is the two members a and b. (A family of two is
+ * a fine thing to draw, so this is a note, not an error.)
+ */
+function pairDrawNote(name: string, rhs: string): string | null {
+  const m = /^\s*\[\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\]\s*$/.exec(rhs);
+  if (!m || !(Number(m[1]) < Number(m[2]))) return null;
+  return `${name} is ${m[1]} or ${m[2]}, the list's two members; for every number from ${m[1]} to ${m[2]}, write ${name} = interval(${m[1]}, ${m[2]})`;
+}
+
 /** A readout followed by the row's note. */
 export const withNote = (info: string | null | undefined, note: string | undefined): string | undefined =>
   note ? (info ? `${info} · ${note}` : note) : (info ?? undefined);
@@ -983,6 +994,13 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       row.cpu = undefined;
       row.gpu = undefined;
     }
+  }
+
+  // A binder has no readout of its own: its note is its info.
+  for (const row of rows) {
+    if (row.error || row.def?.kind !== 'const' || !row.def.draw) continue;
+    const note = pairDrawNote(row.def.name, row.def.rhs);
+    if (note) row.info = row.note = note;
   }
 
   // A view naming index axes (one, as a panel sharing the other writes it)

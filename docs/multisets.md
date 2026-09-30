@@ -116,6 +116,9 @@ are his independent `A × A`. A draw is A's members over an axis of its own,
 so it is equal to A and never identical to it: `p + p` zips, `p + q` and
 `p + A` cross. Binders are the only way to draw twice: a bracket never
 decides identity, so `[A]` is `A` (§2).
+`p ∈ [a, b]` with a < b reads as an interval in ordinary notation, so the
+row notes that p is a or b and gives `p = interval(a, b)` for the range; a
+family of two is still what it draws.
 
 **A family closes into a box** in exactly two places (built): `[ … ]`,
 and the parentheses of a reduction. Everything the enclosed expression

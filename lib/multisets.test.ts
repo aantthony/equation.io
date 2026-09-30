@@ -116,6 +116,14 @@ describe('§0 binders: p ∈ A draws from A', () => {
     expect(last(['M = ((1, 2), (3, 4))', 'p ∈ M']).error).toMatch(/draws from a list; that is a matrix/);
     expect(last(['r = interval(0, 1)', 'p ∈ r']).error).toMatch(/draws from a list; that is an interval/);
   });
+  it('notes that ∈ [a, b] is two members, not the interval', () => {
+    const note = "a is 0 or 10, the list's two members; for every number from 0 to 10, write a = interval(0, 10)";
+    expect(last(['a ∈ [0, 10]', 'y = a x']).info).toBeUndefined();
+    expect(analyzeRows(['a ∈ [0, 10]', 'y = a x'], { readouts: true }).rows[0].info).toBe(note);
+    expect(last(['a \\in [2, 3]']).info).toMatch(/^a is 2 or 3/);
+    for (const from of ['[3, 2]', '[0..10]', '[1, 2, 3]', 'interval(0, 1)'])
+      expect(last([`a ∈ ${from}`]).info ?? '', from).not.toMatch(/two members/);
+  });
   it('says what ∈ is where it cannot be one, in every spelling', () => {
     for (const row of ['e ∈ D', 'e \\in D', 'u \\in D', 'x ∈ D', 'sin ∈ D'])
       expect(last(['D = [1, 2]', row]).error).toMatch(/is taken by the language, so it cannot be drawn/);
