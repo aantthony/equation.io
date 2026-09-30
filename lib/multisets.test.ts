@@ -192,6 +192,20 @@ describe('§3 reductions see the whole multiset', () => {
     // A wrapper reduces one member at a time, and says so where that fails.
     expect(multiset([...LM, 'avg(s) = mean(s)', 'avg(L)'])).toEqual([1, 2, 3]);
     expect(last([...LM, 'sd(s) = stdev(s)', 'sd(L)']).error).toMatch(/write the reduction in the row/);
+    // …and says so where it works too, beside the values.
+    const note = /applies per member, so its mean sees one member at a time; for the whole list, write mean\(…\)/;
+    expect(last([...LM, 'avg(s) = mean(s)', 'avg(L)']).info).toMatch(note);
+    expect(last([...LM, 'cen(s) = s - mean(s)', 'cen(L)']).info).toMatch(/^= .* · cen applies per member/);
+    expect(last(['P = [(1, 2), (3, 4)]', 'g(p) = mean(p.x)', 'g(P)']).info).toMatch(/g applies per member/);
+    // A reduction over a list of the body's own is the rule's point: no note.
+    for (const rows of [
+      [...LM, 'f(m) = total(L m)', 'f(M)'],
+      [...LM, 'g(m) = total({L > 1: L m})', 'g(M)'],
+      [...LM, 'f(m) = total(L m)', 'total(f(M))'],
+      [...LM, 'avg(s) = mean(s)', 'avg(5)'],
+      [...LM, 'mean(L)'],
+    ])
+      expect(last(rows).info ?? '', rows.at(-1)).not.toMatch(/per member/);
     // Too much work is refused at the first member, not after all of them.
     const t0 = performance.now();
     expect(last(['L = [1..2000]', 'M = [1..1200]', 'f(m) = total(L m)', 'total(f(M))']).error).toMatch(

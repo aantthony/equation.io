@@ -153,7 +153,11 @@ body, is the member's own (`f(m) = M + total(L m)`: `f(M)` is
 `[70 140]`). A reduction in the body that mentions no parameter is taken
 once for all members, and a member no case holds for is no member, as over
 a list. A wrapper such as `avg(s) = mean(s)` therefore gives each member
-back: to reduce the list itself, the reduction is written in the row.
+back: to reduce the list itself, the reduction is written in the row. The
+row says so beside its values whenever a reduction in the body sees only
+the member (`avg applies per member, so its mean sees one member at a
+time`); one that also takes a list of the body's own, the rule's point,
+says nothing.
 
 **Order-based readings are a separate, named family**: `min`, `max`,
 `median`, `sort`, `hist`, `polyline`, `hull`. They read a box by the order
