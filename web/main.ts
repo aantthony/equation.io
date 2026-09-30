@@ -6603,7 +6603,7 @@ if (framed) {
   document.getElementById('panel-chip')!.classList.add('shown');
   document.documentElement.removeAttribute('data-embed-boot');
 }
-initPanelSwipe(
+const panelSwipe = initPanelSwipe(
   document.getElementById('panel')!,
   document.getElementById('panel-chip')!,
   document.getElementById('panel-grip')!,
@@ -7203,6 +7203,7 @@ if (mcpApp) {
           graphEdited = cb;
         },
         setVisible: setGraphVisible,
+        showPanel: panelSwipe.present,
         still: maxEdge =>
           (capture ??= attachCapture({ gl: canvas, overlay, render, requestRender, notice: showNotice })).still(
             maxEdge,

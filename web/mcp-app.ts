@@ -4,7 +4,7 @@ import {
   applyHostStyleVariables,
   type McpUiHostContext,
 } from '@modelcontextprotocol/ext-apps';
-import { encodePayload } from '../lib/link.ts';
+import { decodePayload, encodePayload } from '../lib/link.ts';
 import { setHostTheme } from './theme.ts';
 
 interface GraphEditor {
@@ -13,6 +13,8 @@ interface GraphEditor {
   onChange(callback: (rows: string[]) => void): void;
   onEdit(callback: () => void): void;
   setVisible(visible: boolean): void;
+  /** Bring the equation editor out from its chip. */
+  showPanel(): void;
   /** A fresh frame of the graph, longest edge at most maxEdge pixels. */
   still(maxEdge: number): HTMLCanvasElement;
   flush(): void;
@@ -28,6 +30,26 @@ const SNAPSHOT_EDGE = 1280;
 
 const strings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(row => typeof row === 'string');
+
+/** The app-relative URL a ChatGPT deep link opened the app at, if any. */
+const deepLinkUrl = (context: McpUiHostContext): string | undefined => {
+  const link = (context as Record<string, unknown>)['openai/deepLink'];
+  return link && typeof link === 'object' && typeof (link as { url?: unknown }).url === 'string'
+    ? (link as { url: string }).url
+    : undefined;
+};
+
+/** Rows from a deep link's path: the site's own /g/… or /#… graph URLs.
+ *  Any other path (the root, say) is a blank graph; undefined is a bad link. */
+function deepLinkRows(url: string): string[] | undefined {
+  try {
+    const { pathname, hash } = new URL(url, 'https://equation.io');
+    const payload = hash.length > 1 ? hash.slice(1) : pathname.startsWith('/g/') ? pathname.slice(3) : '';
+    return payload ? decodePayload(payload).filter(Boolean) : [];
+  } catch {
+    return;
+  }
+}
 
 // SDK validation can materialize omitted optional keys as undefined. They
 // are not resets: host-context notifications contain only changed fields.
@@ -71,6 +93,10 @@ export async function connectGraphApp(editor: GraphEditor) {
   let pendingPreview: string[] | undefined;
   let context: McpUiHostContext = {};
   let closing = false;
+  // Opened from ChatGPT's sidebar or a conversation panel (an empty tool
+  // result), rather than to show a graph the model made.
+  let launched = false;
+  let appliedDeepLink: string | undefined;
   let changingMode = false;
   let teardown: Promise<{}> | undefined;
   const events = new AbortController();
@@ -93,7 +119,8 @@ export async function connectGraphApp(editor: GraphEditor) {
   document.head.append(fonts);
 
   function link(rows: string[]) {
-    open.href = `${origin}/g/${encodePayload(rows)}`;
+    const payload = encodePayload(rows);
+    open.href = payload ? `${origin}/g/${payload}` : `${origin}/`;
   }
 
   function originalRows(): string[] | undefined {
@@ -108,7 +135,8 @@ export async function connectGraphApp(editor: GraphEditor) {
 
   function syncReset() {
     const original = originalRows();
-    reset.hidden = !original || JSON.stringify(editor.getRows()) === source;
+    // A blank calculator has nothing to go back to.
+    reset.hidden = !original?.length || JSON.stringify(editor.getRows()) === source;
   }
 
   function resetGraph() {
@@ -199,6 +227,7 @@ export async function connectGraphApp(editor: GraphEditor) {
       }
     }
     if (styles?.css?.fonts !== undefined) fonts.textContent = styles.css.fonts;
+    if (launched) openDeepLink();
     for (const edge of ['top', 'right', 'bottom', 'left'] as const) {
       const inset = context.safeAreaInsets?.[edge];
       root.style.setProperty(`--host-safe-${edge}`, `${Number.isFinite(inset) ? Math.max(0, inset!) : 0}px`);
@@ -214,6 +243,24 @@ export async function connectGraphApp(editor: GraphEditor) {
   }
 
   app.onhostcontextchanged = hostContext;
+  // A deep link names the graph to open, and becomes the original that Reset
+  // returns to. The model has not seen it, so it is published right away.
+  function openDeepLink(): boolean {
+    const url = deepLinkUrl(context);
+    if (url === undefined || url === appliedDeepLink) return false;
+    appliedDeepLink = url;
+    const rows = deepLinkRows(url);
+    if (!rows) status.textContent = 'Could not open that graph link.';
+    if (!rows?.length) return false;
+    source = JSON.stringify(rows);
+    const wanted = restored?.source === source && strings(restored.equations) ? restored.equations : rows;
+    editor.setRows(wanted);
+    link(wanted);
+    syncReset();
+    status.textContent = '';
+    void publish(wanted);
+    return true;
+  }
   function cancelPreview() {
     clearTimeout(previewTimer);
     previewTimer = undefined;
@@ -290,6 +337,22 @@ export async function connectGraphApp(editor: GraphEditor) {
       status.textContent = 'No graph equations received.';
       return;
     }
+    if (!rows.length) {
+      // An entrypoint launch: an empty calculator, ready to type in.
+      launched = true;
+      inputSource = undefined;
+      hasResult = true;
+      status.textContent = '';
+      editor.showPanel();
+      if (openDeepLink()) return;
+      source = '[]';
+      const saved = restored?.source === source && strings(restored.equations) ? restored.equations : [];
+      showRows(saved.length ? saved : ['']); // A line to type on, with its hint.
+      syncReset();
+      if (saved.length) void publish(saved);
+      return;
+    }
+    launched = false;
     source = JSON.stringify(rows);
     // Matching results confirm the already-rendered graph without resetting
     // animation, undo history, or slider edits made while validation ran.

@@ -57,6 +57,29 @@ Sandbox domain formats differ between hosts. We omit `ui.domain` so Claude
 uses its default sandbox, and provide `openai/widgetDomain` for ChatGPT's
 unique widget origin requirement using its supported compatibility alias.
 
+## ChatGPT sidebar and conversation panels
+
+`graphing_calculator` is the app's own entry point, per OpenAI's
+[MCP extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md):
+its `_meta["openai/ui"].entrypoints` list `global` (the ChatGPT sidebar) and
+`thread` (a panel beside a conversation). The host calls it with `{}` and it
+returns an empty graph, which the UI treats as a launch: the editor comes out
+on one empty line, and there is no Reset. Its `_meta.ui.visibility` is `["app"]`,
+so the model is never offered it; `show_graph` stays the model's way to draw.
+The sidebar title is the tool's `title` and its icon is `/mcp-icon.svg` (20×20,
+monochrome, `currentColor`), both from `tools/list`.
+
+A deep link opens a graph: the host passes the app-relative URL in
+`hostContext["openai/deepLink"].url`, at launch or later, and the site's own
+`/g/…` or `/#…` path loads those rows. That graph becomes the original Reset
+returns to, and is published to model context at once, since the model has
+not seen it. Any other path is a blank graph; a link that fails to decode
+leaves the graph alone and says so. The public link form is
+`https://chatgpt.com/plugins/<plugin-id>/app/graphing_calculator?path=<encoded /g/… path>`.
+
+Edits made in a sidebar or panel go to that thread's model context, picture
+included, as they do inline.
+
 ## Known gaps
 
 A central `app.onerror` handler is not implemented yet. Individual bridge calls
@@ -70,6 +93,7 @@ pnpm web:build
 pnpm exec wrangler dev --config dist-web/equation/wrangler.json --port 5196
 # In another terminal:
 node scripts/mcp-app-test.ts
+node scripts/mcp-sidebar-test.ts
 pnpm exec vitest run worker/mcp.test.ts
 pnpm typecheck
 ```
