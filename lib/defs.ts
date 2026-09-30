@@ -2075,6 +2075,42 @@ function mightBePoint(e: Expr, opts: ResolveOpts): boolean {
   return childrenOf(e).some(c => mightBePoint(c, opts));
 }
 
+const COORDS = ['x', 'y', 'z'] as const;
+
+/**
+ * The coordinates of point parameters a body reads, `p.x` in
+ * `c(p, q) = {p.y = q.x: (p.x, q.y)}`, as the argument's own: a name's
+ * coordinates are its dotted names, so they move with every other use of it
+ * (c(A, A) is the diagonal), a tuple gives up its items, and anything else
+ * takes a component of that one node.
+ */
+function coordParams(
+  fn: { params: readonly string[]; body: Expr },
+  args: readonly Expr[],
+  name: string,
+  opts: ResolveOpts,
+) {
+  const used = freeVars(fn.body);
+  const env: Record<string, Expr> = {};
+  fn.params.forEach((p, j) => {
+    const arg = args[j];
+    const read = COORDS.map((c, k) => [`${p}.${c}`, k] as const).filter(([v]) => used.has(v));
+    if (!read.length) return;
+    // (Arity 0: any point that has the coordinate, 2D or 3D alike.)
+    for (const [v, k] of read) {
+      // A list's coordinates are its dotted columns, which move with every
+      // other use of it (c(A, A) is the diagonal); anything else, a named
+      // point or a matrix included, is read as a component of that node.
+      if (arg.kind === 'var' && opts.isList?.(arg.name)) env[v] = { kind: 'var', name: `${arg.name}.${COORDS[k]}` };
+      else if (arg.kind === 'vec') {
+        if (k >= arg.items.length) throw new Error(compDims(name, 0, arg, arg.items.length));
+        env[v] = arg.items[k];
+      } else env[v] = { kind: 'comp', value: arg, index: k, arity: 0, functionName: name };
+    }
+  });
+  return env;
+}
+
 /**
  * Inline user-function calls, resolve d/dx derivative notation, and expand
  * Σ/Π sums and ∫ integrals (post-order).
@@ -2215,7 +2251,10 @@ function rx(e: Expr, ctx: Ctx): Expr {
         if (args.length !== n) {
           throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
         }
-        return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, args[k]])));
+        return substVars(fn.body, {
+          ...Object.fromEntries(fn.params.map((p, k) => [p, args[k]])),
+          ...coordParams(fn, args, e.name, ctx.opts),
+        });
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);

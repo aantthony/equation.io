@@ -32,7 +32,7 @@ export function graphObject(cls: Classified): Classified {
   if (edges.some(e => e.length < 2 || e.length > 3)) throw new Error(usage);
   // Vertices are whole numbers, so a case may test equality: an arrow of A
   // composes with one of B where they meet, {A.y = B.x: A.x}.
-  edges = edges.map(e => e.map(exactCases));
+  edges = edges.map(e => e.map(c => exactCases(c)));
   return { ...cls, object: { kind: 'graph', edges }, needs3D: false };
 }
 

@@ -75,15 +75,92 @@ twice.
 
 Identity through brackets:
 
-- **Several items make a new multiset.** `a = [n, 3, 5]` is *equal* to
-  `n + [3 5]` but not *identical* to `n`, so `n + a` has 2 × 4 = 8 values.
-  (The alternative, where `a`'s copy of `n` stays tied to `n`, is coherent but
-  not a product; not pursued.)
-- **One item is that item unchanged.** `[n] ≡ n`, so `[n] + [n]` has the same
-  2 values as `n + n`, and `1 == [1]` holds for names as well as numbers.
+- **A multiset keeps its identity through anything that keeps its
+  members**, and anything that changes which members there are makes a new
+  one:
+
+  | Expression | Members change? | Identity |
+  |---|---|---|
+  | `n + 1`, `2n`, `f(n)` | no | n's: zips with n |
+  | `[n]` | no: n poured alone | n's: `[n] + [n]` is `n + n` |
+  | `{L > 2: L}` | no: some have no value | L's: zips with L, named or not |
+  | `[n, 3, 5]`, `L[L > 2]` | yes | a new one |
+  | a literal `[1, 2]` | its own | a new one each time it is written |
+
+  A name keeps what it is built from: `q = s^2` zips with `s`, and
+  `AB = c(A, B)` stays over A's and B's members, so a later `c(AB, B)`
+  pairs each arrow of AB with the B it came from. Composing AB with B
+  again takes a second draw from B, a binder.
+
+  So `a = [n, 3, 5]` is equal to `n + [3 5]` but not identical to `n`, and
+  `n + a` has 2 × 4 = 8 values. (The alternative, where `a`'s copy of `n`
+  stays tied to `n`, is coherent but not a product; not pursued.) A bracket
+  around one item is that item, a number, an expression or a multiset:
+  `[x + 1] 2 = 2x + 2`, and `1 == [1]`. Identity is ours, not Wildberger's
+  (his multisets have none), so it is never a bracket's to decide: two
+  independent draws from one name are binders, `p ∈ A` and `q ∈ A` (§0).
 
 Our `+` is not Wildberger's `+`. His adds multiplicities (the bracket above);
 ours is his direct product followed by addition of the elements.
+
+### A row is a comprehension
+
+A name in a row does not stand for its multiset: the row **instances** from
+it. Each separate multiset the row mentions is a variable ranging over its
+elements, every mention of one name is the same variable, and the row's
+value is the multiset of results over every combination. That is
+Wildberger's set-builder notation, `{a + 1 : a ∈ A}` (Math Foundations
+229), with the binders left implicit: `1 + s` with `s = [1, 2]` is `[2 3]`,
+where his `1 + [1 2]` pours the boxes together, `[0] + [[0] [0 0]] =
+[0 [0] [0 0]]`.
+
+His lecture arithmetic (Math Foundations 227–238) is this, one level down,
+with numbers as atoms rather than boxes of zeros. Each of his operations is
+the one below it lifted over every pair, and a row lifts any expression:
+
+| Here | Wildberger |
+|---|---|
+| `[A, B]` | `A + B`, pour |
+| `A + B`, separate names | `A × B = [a + b]`, polynumber multiplication |
+| `A * B` | `A ^ B = [a × b]`, caret |
+| any row `f(A, B)` | `[f(a, b) : a ∈ A, b ∈ B]` |
+
+Where the two differ is a repeated factor: his `A × A` chooses from each
+factor independently, and here one name is one choice, `f(A, A)` the
+diagonal, which is what families of graphs want. The independent draw is
+written with binders, `p ∈ A` and `q ∈ A` (§0).
+
+A point parameter reads its coordinates as the argument's own:
+`c(p, q) = {p.y = q.x: (p.x, q.y)}` composes an arrow i → j with j → k, and
+`c(A, B)` takes `p.x` as `A.x`, so every coordinate of one arrow moves
+together; a named point or a matrix gives its own coordinates. (A recursive
+function's parameters are numbers, so it reads none: pass the coordinates.)
+
+### Guards: a case that does not hold is no member
+
+A piecewise over lists is one piecewise per combination, like any other
+operation. A combination no case holds for (and no otherwise catches) is not
+in the multiset at all: the empty box a pair that does not meet leaves, so
+matrix multiplication of arrow multisets is the arrows that meet,
+
+```
+A = [(1, 1), (1, 2), (2, 2), (2, 2)]      # [[1 1] [0 2]]
+B = [(1, 2), (2, 1), (2, 2)]              # [[0 1] [1 1]]
+c(p, q) = {p.y = q.x: (p.x, q.y)}         # i → j, then j → k
+AB = c(A, B)                              # 7 arrows: [[1 2] [2 2]]
+count(AB)                                 # 7
+```
+
+The whole combination goes, every coordinate at once, however many lists it
+was combined from: `({A.y = B.x: A.x}, B.y)` loses the pair, not just its x.
+A guard is not a filter: its members are its source's, some of them with
+no value, so `M = {L > 2: L}` zips with L as the guard written out does
+(`M + L` is `[6 8]`), and its undefined members are left out wherever M is
+collected (`M` shows `[3 4]`, `count(M)` is 2). A case reading a member with
+no value has none either. Over lists,
+a case may test equality, `{A.y = B.x: …}`, since the members are counted
+things. A guard that moves with t cannot settle, as a filter cannot: it stays
+a case per member, undefined (and not drawn) where none holds.
 
 ## 3. Where the whole multiset is used
 
@@ -93,6 +170,25 @@ Two places see a multiset as a whole rather than one element at a time:
 2. reductions: `count`, `total`, `mean`, `min`, `max`, `stdev`, `median`,
    `hist`, `hull`. All of them ignore order and count duplicates, so they
    respect `==`. `count([1,2] + [10,20,30]) = 6` is `|A × B| = |A| |B|`.
+
+A reduction is where the iteration stops: it evaluates its argument as a
+comprehension of its own and reads the whole result as one value. `count` is
+Wildberger's counting function N, `N(A) = [Z(a) : a ∈ A]`: every element
+replaced by 0, and that box of zeros is the number. `total` pours the
+elements together, his `+` one level up.
+
+So a reduction opens its own scope. With `L = [1 2 3]` and `M = [10 20]`:
+
+| Row | Value | Why |
+|---|---|---|
+| `M + count(L)` | `[13 23]` | L is consumed inside; M iterates outside |
+| `L + total(L)` | `[7 8 9]` | the reduction sees all of L though L iterates outside, so `L - mean(L)` centres |
+| `M + total(L M)` | `[190 200]` | M inside is consumed too, not tied to the outer M |
+
+To tie a reduction to the outer value, the rule says to pass it in: a
+function is a map (§1), so `f(m) = total(L m)`; `f(M)` should be `[70 140]`.
+It is `180` today, a gap: the call is inlined by substitution, and the
+reduction then consumes the M substituted into it.
 
 ### Order lives in tuples
 

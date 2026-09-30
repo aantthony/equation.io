@@ -269,9 +269,20 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `P.x` and `P.y` (and `P.z`) are the lists of their coordinates, paired the
   same way — `(P.x, 2 P.y)` is 3 points, not 9. Brackets add: a list
   inside a list contributes its elements, so with `n = [1,2]`, `[n, 3, 5]`
-  is `[1, 2, 3, 5]` (a new list, independent of `n`), while `[n]` is `n`
-  itself. `[]` is the empty list: combined with anything it gives `[]`, and
+  is `[1, 2, 3, 5]` (a new list, independent of `n`). A bracket around one
+  item is that item: `[n]` is `n` (so `n + [n]` has 2 elements, like
+  `n + n`), and `[x + 1] 2` groups.
+  `[]` is the empty list: combined with anything it gives `[]`, and
   `count([])` and `total([])` are 0.
+- Cases over a list decide each element: `{L > 2: L}` with `L = [1..4]` is
+  `[3, 4]`, and an element no case holds for (with no otherwise) is not in
+  the list at all, so `count({L > 2: L})` is 2. A whole point goes at once,
+  and over lists a case may test equality. A function's point parameters
+  read coordinates as `p.x`, `p.y`, `p.z`: `c(p, q) = {p.y = q.x: (p.x,
+  q.y)}` composes arrows i → j and j → k, and with lists of arrows `A`, `B`,
+  `AB = c(A, B)` is the arrows that meet (their matrix product, as a multiset
+  of arrows), and `c(A, A)` pairs each arrow with itself: one name is one
+  choice.
 - List reductions: `mean(L)`, `total(L)`, `count(L)`, `min(L)`, `max(L)`,
   `stdev(L)` (sample), `median(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
@@ -636,10 +647,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `graph(P)` takes a list of pairs, `graph([(1, 2), (2, 3)])`. An arrow
   listed twice is drawn once with its count (×2); an undefined vertex drops
   its arrow, so a case keeps the ones wanted — composing two multisets of
-  arrows (matrix multiplication, as paths): `graph({A.y = B.x: A.x}, B.y)`.
+  arrows (matrix multiplication, as paths): `graph({A.y = B.x: A.x}, B.y)`,
+  or with the composition named as above, `graph(c(A, B))`.
   Cases in graph rows may test equality. A panel of graphs has no grid.
-  Put a piecewise inside a function rather than inline over a list:
-  `c(m) = {mod(m, 2) = 0: m/2, 3m + 1}; k = [1..40]; graph(k, c(k))`.
+  A piecewise works inline over a list or through a function alike:
+  `k = [1..40]; graph(k, {mod(k, 2) = 0: k/2, 3k + 1})`.
 - `mark(v)` highlights vertex v in the graphs of its panel and reads v out;
   with a slider or t it walks, e.g. a state machine's run as a recursive
   function: `run(q, k, m) = {k >= m: q, run(step(q, digit(k)), k + 1, m)};

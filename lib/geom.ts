@@ -23,7 +23,7 @@ import { type FigureForm, mapChildren } from './expr.ts';
  * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import { ANGLE_FN, type Expr, compArity, compDims, isRecur, sameList } from './expr.ts';
+import { ANGLE_FN, type Expr, compArity, compDims, compFits, isRecur, sameList } from './expr.ts';
 import { SCALAR_REDUCTIONS, tupleAxis, withAxes } from './list.ts';
 import {
   type GetMat,
@@ -1009,7 +1009,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       // of 2 points IS a 2×2 matrix; f must not refuse it for that.)
       const m = !v && ((value.kind === 'var' ? getMat(value.name) : null) ?? matOf(value)?.m);
       if (m) {
-        if (m.length !== n) throw new Error(compDims(fn, n, value, m.length));
+        if (!compFits(n, k, m.length)) throw new Error(compDims(fn, n, value, m.length));
         const rows = rowsAsPoints(m, value.kind === 'var' ? value.name : undefined);
         compSeen.set(value, (v = { wait: rows }));
       }
@@ -1028,7 +1028,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       }
       if ('wait' in v) return sc({ ...e, value: v.wait });
       if (!v.vec) throw new Error(compArity(fn, n));
-      if (v.items.length !== n) throw new Error(compDims(fn, n, value, v.items.length));
+      if (!compFits(n, k, v.items.length)) throw new Error(compDims(fn, n, value, v.items.length));
       return sc(v.items[k]);
     }
     case 'call': {
@@ -1301,8 +1301,28 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         if (v.vec) throw new Error('Points cannot appear in a piecewise expression.');
         return v.e;
       };
-      const cases = e.cases.map(c => ({ cond: one(c.cond), value: one(c.value) }));
-      const otherwise = e.otherwise && one(e.otherwise);
+      // Point-valued cases are a point of cases, coordinate by coordinate:
+      // {c: (a, b), (p, q)} is ({c: a, p}, {c: b, q}). Where no case holds,
+      // every coordinate is undefined, so the point is.
+      const values = [...e.cases.map(c => lo(c.value)), ...(e.otherwise ? [lo(e.otherwise)] : [])];
+      if (values.some(v => v.vec)) {
+        const n = values[0].vec ? values[0].items.length : 0;
+        if (!values.every(v => v.vec && v.items.length === n))
+          throw new Error('Every case of a piecewise point must be a point of the same dimension.');
+        const conds = e.cases.map(c => one(c.cond));
+        const at = (v: LV, k: number): Expr => (v as LV & { vec: true }).items[k];
+        return vc(
+          ...Array.from({ length: n }, (_, k): Expr => ({
+            kind: 'piecewise',
+            cases: conds.map((cond, j) => ({ cond, value: at(values[j], k) })),
+            otherwise: e.otherwise && at(values[conds.length], k),
+          })),
+        );
+      }
+      // (Every value is a scalar here: `values` already holds them lowered.)
+      const scalar = (v: LV) => (v as LV & { vec: false }).e;
+      const cases = e.cases.map((c, j) => ({ cond: one(c.cond), value: scalar(values[j]) }));
+      const otherwise = e.otherwise && scalar(values[e.cases.length]);
       if (
         otherwise === e.otherwise &&
         cases.every((c, k) => c.cond === e.cases[k].cond && c.value === e.cases[k].value)

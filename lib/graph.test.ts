@@ -70,6 +70,33 @@ describe('graph rows', () => {
     expect(arrows(g)).toEqual(['1>1', '1>2:×2', '2>1:×2', '2>2:×2']);
   });
 
+  it('composition as a function of two arrows, named, chained and squared', () => {
+    const AB = ['A = [(1, 1), (1, 2), (2, 2), (2, 2)]', 'B = [(1, 2), (2, 1), (2, 2)]'];
+    // i → j then j → k is i → k; a pair that does not meet is no arrow.
+    const c = 'c(p, q) = {p.y = q.x: (p.x, q.y)}';
+    const product = ['1>1', '1>2:×2', '2>1:×2', '2>2:×2'];
+    expect(arrows(graphOf([...AB, c, 'graph(c(A, B))']))).toEqual(product);
+    expect(arrows(graphOf([...AB, c, 'AB = c(A, B)', 'graph(AB)']))).toEqual(product);
+    expect(arrows(graphOf([...AB, 'AB = {A.y = B.x: (A.x, B.y)}', 'graph(AB)']))).toEqual(product);
+    // A named value stays tied to the lists it is built from: AB's arrows
+    // each keep the B arrow they came from, so c(AB, B) pairs each with that
+    // one (1→1 then 1→2 is 1→2; 2→2 then 2→2 twice). Composing AB with B
+    // again, ABB, takes a second draw from B: a binder, q ∈ B.
+    expect(arrows(graphOf([...AB, c, 'AB = c(A, B)', 'graph(c(AB, B))']))).toEqual(['1>2', '2>2:×2']);
+    // One name is one choice: c(A, A) pairs each arrow with itself, the
+    // loops, and so does c(A, [A]): [A] is A. (A², two independent draws
+    // from A, is for binders, p ∈ A and q ∈ A: docs/multisets.md §0.)
+    expect(arrows(graphOf([...AB, c, 'graph(c(A, A))']))).toEqual(['1>1', '2>2:×2']);
+    expect(arrows(graphOf([...AB, c, 'graph(c(A, [A]))']))).toEqual(['1>1', '2>2:×2']);
+    // A coordinate read takes a point of any dimension that has it.
+    const x = analyzeRows(['f(p) = p.x', 'P = [(1, 2, 5), (3, 4, 6)]', 'f(P + (0, 0, 0))'], { readouts: true });
+    expect(x.rows.at(-1)!.info).toBe('= [1, 3]');
+    // A named point or a matrix gives its own coordinates.
+    expect(analyzeRows(['P = (1, 2)', 'f(p) = p.x + p.y', 'f(P)'], { readouts: true }).rows.at(-1)!.info).toBe('= 3');
+    const z = analyzeRows(['f(p) = p.z', 'P = [(1, 2), (3, 4)]', 'f(P + (0, 0))']);
+    expect(z.rows.at(-1)!.error).toMatch(/reads a coordinate that point does not have/);
+  });
+
   it('every step of the Collatz orbits of 1..50: recursion over two lists', () => {
     const g = graphOf([
       'c(m) = {mod(m, 2) = 0: m/2, 3m + 1}',

@@ -33,7 +33,7 @@
  */
 import { usesComplex } from './complex.ts';
 import { type GetFn, type ResolveOpts, resolveExpr } from './defs.ts';
-import { type Expr, evaluate, freeVars, mapChildren, parseExpr, substVars } from './expr.ts';
+import { type Expr, evaluate, exactCase, freeVars, mapChildren, parseExpr, substVars } from './expr.ts';
 import type { Classified, MathObject } from './math-object.ts';
 import type { SeqScan } from './seq.ts';
 import { compileProg, run } from './vm.ts';
@@ -199,22 +199,14 @@ function unrollSum(e: Expr): Expr | null {
   return acc ?? num(op === '+' ? 0 : 1);
 }
 
-/** A piecewise case testing equality as an inequality the evaluator runs:
- *  r - ε < l < r + ε, which on whole-number cells is exact. */
-export function exactCase(l: Expr, r: Expr): Expr {
-  // Each side kept whole: over lists, a comparison whose one side mixes two
-  // lists (abs(l - r) < ε) does not lower element by element.
-  const eps = num(1e-9);
-  return { kind: 'ineq', op: '<', l: { kind: 'ineq', op: '<', l: bin('-', r, eps), r: l }, r: bin('+', r, eps) };
-}
-
 /** Every equality case below `e` as exactCase. */
-export function exactCases(e: Expr): Expr {
-  const inner = mapChildren(e, exactCases);
-  if (inner.kind !== 'piecewise' || !inner.cases.some(c => c.cond.kind === 'eq')) return inner;
+export function exactCases(e: Expr, keep: (side: Expr) => boolean = () => false): Expr {
+  const inner = mapChildren(e, x => exactCases(x, keep));
+  const rewrite = (c: Expr): c is Expr & { kind: 'eq' } => c.kind === 'eq' && !keep(c.l) && !keep(c.r);
+  if (inner.kind !== 'piecewise' || !inner.cases.some(c => rewrite(c.cond))) return inner;
   return {
     ...inner,
-    cases: inner.cases.map(c => (c.cond.kind === 'eq' ? { ...c, cond: exactCase(c.cond.l, c.cond.r) } : c)),
+    cases: inner.cases.map(c => (rewrite(c.cond) ? { ...c, cond: exactCase(c.cond.l, c.cond.r) } : c)),
   };
 }
 

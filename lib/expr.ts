@@ -161,6 +161,12 @@ export const INTERVAL = '[interval]';
 
 /** The self-call inside a `loop` body: its args are the next pass's params. */
 export const RECUR = '@recur';
+/** The member a guard leaves where no case holds, `[none]()`: the empty box
+ *  (docs/multisets.md §2). Collecting a multiset leaves out every member
+ *  holding one (lib/list.ts dropUndefined), whatever arithmetic reached it;
+ *  anything that still evaluates one gets NaN. Not a NaN itself, so a
+ *  missing cell in a data column (which is NaN) is never taken for one. */
+export const NONE = '[none]';
 /** Passes a tail-recursive function may take before it is undefined. Enough
  *  for every self-similar construction (each pass rescales) and a fold over
  *  a few hundred items; bounded so a pixel that never terminates costs about
@@ -639,7 +645,8 @@ const ops = operators<PNode>({
   }),
   ']': closer('[', (content, call) => {
     if (!content) throw new Error('Empty list.');
-    // A comma series is a data list; a single item keeps its grouping meaning.
+    // A comma series is a data list; a single item keeps its grouping
+    // meaning, and is that item: [n] is n (docs/multisets.md §2).
     if (content.kind === 'series') return { kind: 'list', items: content.items.map(asExpr) };
     // A lone range is a list too ([1..10] expands during resolution) — but
     // not in a call bracket, where int[a..b] / sum[n=1..N] own the range.
@@ -1533,12 +1540,62 @@ export function structuralDiagnostic(e: Expr): string {
   return `${e.kind === 'figure' ? e.form : e.kind}(…) must be the whole expression.`;
 }
 /** The messages of a `[comp]` whose value is not an n-component point. */
-export const compArity = (fn: string, n: number): string => `${fn} takes ${n} arguments.`;
+/** (n = 0: a coordinate read, p.x, of a point of any dimension that has it.) */
+export const compArity = (fn: string, n: number): string =>
+  n ? `${fn} takes ${n} arguments.` : `${fn} reads a coordinate of a point, and that is not one.`;
+/** Rounding one equation allows: a few units in the last place of the
+ *  larger side's size (at least 1). */
+const EQ_ULPS = 8 * Number.EPSILON;
+
+/** Two numbers equal to within rounding: 0.1 + 0.2 and 0.3 are, whole numbers
+ *  never are unless they are one number (to 2^49), and a value that is not
+ *  finite equals only itself. */
+export const sameNumber = (a: number, b: number): boolean =>
+  a === b ||
+  (Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= EQ_ULPS * Math.max(1, Math.abs(a), Math.abs(b)));
+
+/** A piecewise case testing equality as an inequality every backend runs:
+ *  r - ε < l < r + ε with ε the rounding sameNumber allows, scaled by r,
+ *  so it decides as `==` does over a list (lib/list.ts holds). */
+export function exactCase(l: Expr, r: Expr): Expr {
+  // Each side kept whole: over lists, a comparison whose one side mixes two
+  // lists (abs(l - r) < ε) does not lower element by element. ε scales by
+  // r alone: where the sides are near enough to matter they are near in
+  // size too, so it decides as sameNumber does, and a constant r (the usual
+  // `mod(m, 2) = 0`) makes ε one number instead of work at every evaluation.
+  const eps: Expr =
+    r.kind === 'num'
+      ? { kind: 'num', value: EQ_ULPS * Math.max(1, Math.abs(r.value)) }
+      : {
+          kind: 'bin',
+          op: '*',
+          a: { kind: 'num', value: EQ_ULPS },
+          b: {
+            kind: 'call',
+            name: 'max',
+            args: [
+              { kind: 'num', value: 1 },
+              { kind: 'call', name: 'abs', args: [r] },
+            ],
+          },
+        };
+  return {
+    kind: 'ineq',
+    op: '<',
+    l: { kind: 'ineq', op: '<', l: { kind: 'bin', op: '-', a: r, b: eps }, r: l },
+    r: { kind: 'bin', op: '+', a: r, b: eps },
+  };
+}
+
 /** A `[comp]` that outlived lowering (a list of points where no list can go:
  *  an ODE, a sampled body) — said in the user's terms, not the node's. */
 export const strayComp = (e: Expr): string | null => (e.kind === 'comp' ? compArity(e.functionName, e.arity) : null);
 export const compDims = (fn: string, n: number, value: Expr, got: number): string =>
-  `${fn} takes ${n} arguments, and ${value.kind === 'var' ? value.name : 'that point'} has ${got} components.`;
+  n
+    ? `${fn} takes ${n} arguments, and ${value.kind === 'var' ? value.name : 'that point'} has ${got} components.`
+    : `${fn} reads a coordinate ${value.kind === 'var' ? value.name : 'that point'} does not have: it has ${got}.`;
+/** Whether a point of `got` coordinates fills a comp of arity n reading index k. */
+export const compFits = (n: number, k: number, got: number): boolean => (n ? got === n : got > k);
 /** d/dp of [angle] is a difference of two of these, one per arm (lib/diff.ts):
  *  [angle′](v0, v1, w0, w1) is the turning rate of arm v moving with velocity w. */
 export const ANGLE_RATE_FN = '[angle′]';
@@ -1610,6 +1667,7 @@ export const sincFn = (x: number): number => (x === 0 ? 1 : Math.sin(x) / x);
 export const cothFn = (x: number): number => 1 / Math.tanh(x);
 
 export const EVAL_FNS: Record<string, (...xs: number[]) => number> = {
+  [NONE]: () => NaN,
   sin: Math.sin,
   cos: Math.cos,
   tan: Math.tan,

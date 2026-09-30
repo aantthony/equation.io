@@ -183,15 +183,22 @@ j → k of B is an arrow i → k of AB, so (AB)_ik counts the two-step paths.
 ```
 A = [(1, 1), (1, 2), (2, 2), (2, 2)]      # [[1 1] [0 2]] as arrows
 B = [(1, 2), (2, 1), (2, 2)]              # [[0 1] [1 1]]
-graph(A.x, A.y)
+graph(A)
 --- right
-graph(B.x, B.y)
+graph(B)
 --- below
-graph({A.y = B.x: A.x}, B.y)              # AB = [[1 2] [2 2]], counts on the arrows
+c(p, q) = {p.y = q.x: (p.x, q.y)}         # i → j, then j → k, where they meet
+AB = c(A, B)                              # [[1 2] [2 2]], counts on the arrows
+graph(AB)
 ```
 
-A and B are separate names, so the tuple crosses them; the case keeps the
-pairs that meet (an undefined vertex drops the arrow); equal arrows count.
+A and B are separate names, so `c(A, B)` takes every pair; a pair that does
+not meet is no member (docs/multisets.md, guards), so AB is a multiset of 7
+arrows and `count(AB)` is 7; equal arrows count. `c(A, A)` would pair each
+arrow with itself, one name being one choice; A composed with itself, two
+independent draws from A, waits for binders (`p ∈ A`, `q ∈ A`,
+docs/multisets.md §0). The graph-only spelling `graph({A.y = B.x: A.x}, B.y)`
+still works.
 Still to do: `matrix(P)` (a multiset of pairs as a matrix readout) and its
 inverse, so both readings sit side by side.
 
