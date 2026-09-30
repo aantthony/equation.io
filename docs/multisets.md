@@ -128,12 +128,36 @@ own identification, *a natural number is a box of zeros*, applied where our
 two levels meet: its result is an exponent again, a value in the row, so
 `count(A) + 1` is 4, not the family `[1, 1, 1]` (built).
 
-**Every function applies per member** (proposed as a rule). User functions
-and numeric builtins take one member of each argument; none takes a
-multiset whole. New features that need a whole multiset are reductions,
-defined by their per-member map, or they are not added. This settles the
-gap of §3: `f(m) = total(L m)`; `f(M)` is `[f(10), f(20)]`, not `total`
-over M as well.
+**Every function applies per member** (built). User functions and numeric
+builtins take one member of each argument; none takes a multiset whole.
+New features that need a whole multiset are reductions, defined by their
+per-member map, or they are not added. A body that only maps is per member
+already, by substitution. One that reduces is evaluated once per member of
+each list argument (the same list zips, separate ones cross, as anywhere),
+and the results are collected over those arguments' own instances: with
+`L = [1 2 3]`, `M = [10 20]` and `f(m) = total(L m)`, `f(M)` is
+`[f(10), f(20)] = [60 120]`, `M + f(M)` is `[70 140]`, and `total(f(M))`,
+a reduction around the call, is `180`. The body's lists are its own, even
+the one the call maps over: `f(L)` is `[6 12 18]`. A function sees one
+member at a time, so `cen(s) = s - mean(s)`; `cen(L)` is `[0 0 0]`: a
+number reduces as its one member (`mean(5) = 5`), and centring is written
+in the row, `L - mean(L)`. Over a list of points the body reads each
+point's coordinates, `p.x` and `p.y` or the spread form `f(x, y)`: point
+arithmetic is lowered before lists are, so a bare point parameter is
+refused there. Only a parameter a reduction takes (`count`, `total`,
+`mean`, `stdev`, `median`, one-argument `min` and `max`) makes the call a
+map; `sort` reads a box whole, so `s(m) = sort(m)` sorts its argument.
+Once a call is a map, every list argument is bound per member, so the same
+list passed twice zips, and a list the call maps over, met again in the
+body, is the member's own (`f(m) = M + total(L m)`: `f(M)` is
+`[70 140]`). A reduction in the body that mentions no parameter is taken
+once for all members, and a member no case holds for is no member, as over
+a list. A wrapper such as `avg(s) = mean(s)` therefore gives each member
+back: to reduce the list itself, the reduction is written in the row. The
+row says so beside its values whenever a reduction in the body sees only
+the member (`avg applies per member, so its mean sees one member at a
+time`); one that also takes a list of the body's own, the rule's point,
+says nothing.
 
 **Order-based readings are a separate, named family**: `min`, `max`,
 `median`, `sort`, `hist`, `polyline`, `hull`. They read a box by the order
@@ -345,10 +369,9 @@ So a reduction opens its own scope. With `L = [1 2 3]` and `M = [10 20]`:
 | `L + total(L)` | `[7 8 9]` | the reduction sees all of L though L iterates outside, so `L - mean(L)` centres |
 | `M + total(L M)` | `[190 200]` | M inside is consumed too, not tied to the outer M |
 
-To tie a reduction to the outer value, the rule says to pass it in: a
-function is a map (§1), so `f(m) = total(L m)`; `f(M)` should be `[70 140]`.
-It is `180` today, a gap: the call is inlined by substitution, and the
-reduction then consumes the M substituted into it.
+To tie a reduction to the outer value, pass it in: a function is a map
+(§1, §0), so with `f(m) = total(L m)`, `f(M)` is `[60 120]`, once per member
+of M, and `M + f(M)` is `[70 140]`.
 
 ### Order lives in tuples
 

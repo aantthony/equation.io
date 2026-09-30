@@ -50,6 +50,7 @@ import {
   compArity,
   compDims,
   compFits,
+  MAP,
   NONE,
   evaluate,
   sameNumber,
@@ -88,6 +89,18 @@ export const SCALAR_REDUCTIONS = new Set(['mean', 'total', 'count', 'stdev', 'me
 const SYMBOLIC_REDUCTIONS = new Set(['mean', 'total', 'count']);
 /** Reductions that need numeric elements (ordering), so a constant list. */
 const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
+
+/**
+ * Whether a call reduces its argument's members to one value: count, total,
+ * mean, stdev, median, and min or max of one argument. A function taking its
+ * parameter into one applies per member ([map], docs/multisets.md §0).
+ * sort is not one: it reads a box whole, by its order, into a tuple.
+ */
+export const reducesMembers = (name: string, argc: number): boolean =>
+  SYMBOLIC_REDUCTIONS.has(name) ||
+  name === 'stdev' ||
+  name === 'median' ||
+  ((name === 'min' || name === 'max') && argc === 1);
 
 /** Whole-plot forms a list can never appear inside. Exported because the
  *  shape-only checks in defs.ts have to refuse the same ones without the
@@ -1212,6 +1225,158 @@ function positionIn(idx: Expr, n: number, has: string, what: string, name: strin
   return k;
 }
 
+/** Bind a function's parameter(s) to one member: `p` (and `p.x`… of a
+ *  point), or "x,y" spread over a point's coordinates. */
+function bindMember(
+  env: Record<string, Expr>,
+  names: readonly string[],
+  member: Expr,
+  bare: ReadonlySet<string>,
+): void {
+  if (names.length === 1) {
+    const [p] = names;
+    // Point arithmetic is lowered before lists are, so a body applied per
+    // point works on its coordinates, not on the point whole.
+    if (member.kind === 'vec' && bare.has(p))
+      throw new Error(
+        'A function applied per point of a list reads its coordinates: write p.x and p.y for a parameter p, or take them as parameters, f(x, y).',
+      );
+    env[p] = member;
+    if (member.kind === 'vec') member.items.forEach((c, k) => k < 3 && (env[`${p}.${'xyz'[k]}`] = c));
+    return;
+  }
+  if (member.kind !== 'vec' || member.items.length !== names.length)
+    throw new Error(`This takes a point of ${names.length} coordinates, one per parameter.`);
+  names.forEach((p, k) => (env[p] = member.items[k]));
+}
+
+/**
+ * A function applied per member of its list arguments ([map], lib/expr.ts
+ * MAP): the body once per combination of members, as any operation combines
+ * (the same list zips, separate ones cross), collected over those
+ * arguments' own instances. The body's own lists are its own: a reduction in
+ * it consumes them, never the argument. A body that is a list per member
+ * (f(m) = L + total(L m)) adds its axes after the arguments'; where one of
+ * them is a list the call maps over, one name is one choice in the row, so
+ * each member keeps its own element of it.
+ */
+function lowerMap(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
+  const [fnName, raw, ...rest] = e.args;
+  const fn = (fnName as Expr & { kind: 'str' }).value;
+  const binds: Array<{ names: string[]; low: Expr }> = [];
+  for (let k = 0; k < rest.length; k += 2) {
+    const low = lower(rest[k + 1], ctx);
+    binds.push({
+      names: (rest[k] as Expr & { kind: 'str' }).value.split(','),
+      low: isDataScatter(low) ? scatterPoints(low) : low,
+    });
+  }
+  const params = new Set(binds.flatMap(b => b.names));
+  const mentions = (x: Expr) => [...freeVars(x)].some(v => params.has(v.split('.')[0]));
+  // A reduction that mentions no parameter is the same for every member:
+  // it is taken once, not once per member.
+  const hoist = (x: Expr): Expr => {
+    if (x.kind === 'call' && reducesMembers(x.name, x.args.length) && !mentions(x)) {
+      const low = lower(x, ctx);
+      if (!isSeq(low)) return low;
+    }
+    return mapChildren(x, hoist);
+  };
+  // An error inside says where it happened, and what reduces the list itself.
+  const member = <T>(run: () => T): T => {
+    try {
+      return run();
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `${why} (${fn} applies per member of its list argument; to reduce the list itself, write the reduction in the row.)`,
+      );
+    }
+  };
+  const body = hoist(raw);
+  const bare = freeVars(body);
+  const fixed: Record<string, Expr> = {};
+  for (const b of binds) if (!isSeq(b.low)) bindMember(fixed, b.names, b.low, bare);
+  const seqs = binds.filter(b => isSeq(b.low));
+  if (!seqs.length) return member(() => decideOne(lower(substVars(body, fixed), ctx), ctx));
+  const { parts, axes: joined } = align(seqs.map(b => expand(settle(b.low, ctx), ctx)));
+  const axes = joined ?? [];
+  const members = parts.map(p => (p as Expr & { kind: 'list' }).items);
+  const argStride = axes.map((_, d) => axes.slice(d + 1).reduce((size, a) => size * a.n, 1));
+  // The parameters are names no document spells (lib/defs.ts mapName), so
+  // they shadow nothing; the lookups here are only for their coordinates.
+  const { getList } = ctx;
+  ctx.getList = name => (params.has(name.split('.')[0]) ? null : getList(name));
+  const out: Expr[] = [];
+  let inner: readonly Axis[] | null | undefined;
+  // Tuples meet by position, whichever member made them.
+  const shape = (as: readonly Axis[]) => as.map(a => (a.ordered ? `o${a.n}` : a.id)).join();
+  let work = 0;
+  let poured = false;
+  try {
+    for (let i = 0; i < members[0].length; i++) {
+      const env = { ...fixed };
+      seqs.forEach((b, j) => bindMember(env, b.names, members[j][i], bare));
+      // What one member's body builds along the way is not kept: only the
+      // result counts against the budget, and the whole map against its own.
+      const { items, data } = ctx;
+      let r = member(() => decideOne(lower(substVars(body, env), ctx), ctx));
+      work += ctx.items - items + (ctx.data - data);
+      ctx.items = items;
+      ctx.data = data;
+      // (The first member says what all of them will cost: refuse at once.)
+      if (work > MAP_WORK || (i === 0 && work * members[0].length > MAP_WORK))
+        throw new Error(`${fn}, applied per member, does more than ${MAP_WORK} steps of list work.`);
+      let own = isSeq(r) ? axesOf(r) : null;
+      let values: readonly Expr[] | null = null;
+      if (own) {
+        const flat = settle(r as Seq, ctx);
+        values = isData(flat) ? Array.from(flat.values, num) : (expand(flat, ctx) as Expr & { kind: 'list' }).items;
+        // A list the call maps over, met again in the body: this member's
+        // own element of it, not all of them.
+        const shared = own.map(a => axes.findIndex(x => x.id === a.id));
+        if (shared.some(d => d >= 0)) {
+          const ownStride = own.map((_, d) => own!.slice(d + 1).reduce((size, a) => size * a.n, 1));
+          const at = (d: number) => Math.floor(i / argStride[d]) % axes[d].n;
+          values = values.filter((_, j) =>
+            shared.every((d, k) => d < 0 || Math.floor(j / ownStride[k]) % own![k].n === at(d)),
+          );
+          own = own.filter((_, k) => shared[k] < 0);
+          if (!own.length) {
+            r = values![0];
+            own = null;
+            values = null;
+          }
+        }
+      }
+      if (inner !== undefined && (inner === null) !== (own === null))
+        throw new Error(`${fn} gives a list for some members and a number for others.`);
+      // Lists of the body's own (a literal, a new box per member) share no
+      // instances across members: poured together, a multiset of their own.
+      if (inner && own && shape(inner) !== shape(own)) poured = true;
+      inner ??= own;
+      if (values) out.push(...values);
+      else out.push(r);
+    }
+  } finally {
+    ctx.getList = getList;
+  }
+  if (poured) return withAxes(listOf(out, ctx), [{ id: `#${++anonymous}`, n: out.length }]);
+  return withAxes(listOf(out, ctx), inner ? [...axes, ...inner] : axes);
+}
+
+/** A member's value decided where its cases are constant: the case that
+ *  holds, or [none] where none does, as over a list (decideMembers). */
+function decideOne(r: Expr, ctx: Ctx): Expr {
+  if (r.kind !== 'piecewise') return r;
+  const d = decideMembers([r], [{ id: '#member', n: 1 }], ctx);
+  return isList(d) ? d.items[0] : r;
+}
+
+/** Steps of list work one function map may take in all, across its
+ *  members: ten times what one row may expand to (ITEMS_MAX). */
+const MAP_WORK = 10 * ITEMS_MAX;
+
 function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   const [target, idx] = e.args;
   // Before anything is lowered, because lowering a column whose file is not
@@ -1566,6 +1731,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
     case 'comp':
       return lowerComp(e, ctx);
     case 'call': {
+      if (e.name === MAP) return lowerMap(e, ctx);
       if (e.name === 'hist') {
         // How many arguments there are, and what the bin count is, are
         // questions about the row — not about the file. Asked after the list
@@ -1605,7 +1771,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
             );
         return histogram(xs, bins, ctx);
       }
-      const args = e.args.map(a => lower(a, ctx));
+      let args = e.args.map(a => lower(a, ctx));
       if (e.name === 'sort' && args.length === 2) {
         // A member with no value, in the list or its key, is left out of both.
         const [p, key] = args;
@@ -1626,6 +1792,18 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
         NUMERIC_REDUCTIONS.has(e.name) ||
         (isMinMax && args.length === 1 && isSeq(args[0]))
       ) {
+        // A number is the one-member multiset (docs/multisets.md §0: 5 is
+        // [5]), so a function's parameter reduces as its one member: mean(5)
+        // is 5. So does a named constant, slider or t; a name bound nowhere is
+        // refused below, where it catches a list defined too late or misspelled.
+        const one = args.length === 1 && !isSeq(args[0]) ? args[0] : null;
+        if (
+          e.name !== 'sort' &&
+          one &&
+          one.kind !== 'vec' &&
+          (one.kind !== 'var' || one.name === 't' || ctx.opts.consts?.[one.name] !== undefined)
+        )
+          args = [listOf([one], ctx)];
         if (args.length !== 1 || !isSeq(args[0])) {
           if (args.length === 1 && args[0].kind === 'var') {
             throw new Error(`${e.name}(${args[0].name}) needs ${args[0].name} to be a list defined above this row.`);

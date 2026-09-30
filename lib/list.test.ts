@@ -203,8 +203,9 @@ describe('reductions', () => {
   it('order-dependent reductions need a constant list', () => {
     expect(() => lowerRow('stdev([t, 1, 2])')).toThrow(/constant/);
   });
-  it('rejects a scalar argument', () => {
-    expect(() => lowerRow('mean(5)')).toThrow(/needs a list/);
+  it('reduces a number as its one member (docs/multisets.md §0: 5 is [5])', () => {
+    expect(evaluate(lowerRow('mean(5)'), {})).toBe(5);
+    expect(evaluate(lowerRow('count(5)'), {})).toBe(1);
   });
   it('flags rows for the readout', () => {
     expect(usesListReduction(parseExpr('mean([1,2])'))).toBe(true);

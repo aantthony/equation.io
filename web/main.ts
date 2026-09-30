@@ -20,7 +20,7 @@ import {
   compileGridGpu,
   cpuStructureKey,
 } from '../lib/compiler.ts';
-import { analyzePrepared, isViewportText, prepareDocument } from '../lib/analysis.ts';
+import { analyzePrepared, isViewportText, prepareDocument, withNote } from '../lib/analysis.ts';
 import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
 import { complexRootLabel } from '../lib/complex-label.ts';
 
@@ -203,6 +203,8 @@ interface Equation {
   needsFile?: boolean;
   /** Extra readout under the line (e.g. the numeric value of a P(…) row). */
   info?: string;
+  /** The row's note (lib/analysis.ts), kept after each frame's readout. */
+  note?: string;
   /** Set when the row is a definition (`a = 2`, `f(x) = …`) rather than a plot. */
   def?: Definition;
   /** Set when the row is a viewport row (`view(…)`, `camera(…)`, `grid(…)`, a `---` divider). */
@@ -1358,7 +1360,8 @@ function render() {
   for (const eq of equations) {
     if (!eq.cls || eq.error) continue;
     try {
-      const text = plotReadout(eq.cpu!, { ...constEnv, t: time });
+      const readout = plotReadout(eq.cpu!, { ...constEnv, t: time });
+      const text = readout === null ? null : withNote(readout, eq.note)!;
       if (text !== null && text !== eq.info) {
         eq.info = text;
         if (eq.infoEl) eq.infoEl.textContent = text;
@@ -2676,6 +2679,7 @@ function recompileAll() {
     eq.error = row.error ?? row.dataLocal;
     eq.needsFile = row.needsFile || !!row.dataLocal;
     eq.info = row.info;
+    eq.note = row.note;
     eq.def = row.def;
     eq.viewSpec = row.view;
     eq.comment = row.comment;

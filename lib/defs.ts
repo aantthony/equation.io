@@ -1,5 +1,5 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
-import { childrenOf, LOOP_LIMIT, LOOP_LIMIT_MAX, RECUR, isRecur, loopLeaves } from './expr.ts';
+import { MAP, childrenOf, LOOP_LIMIT, LOOP_LIMIT_MAX, RECUR, isRecur, loopLeaves } from './expr.ts';
 import { mapChildren, structuralDiagnostic, legacyCallArgs } from './expr.ts';
 import { exprKey, type ProductGlyph } from './expr.ts';
 /**
@@ -73,6 +73,7 @@ import {
   orderMessage,
   namedAxes,
   plainFnName,
+  reducesMembers,
   withAxes,
 } from './list.ts';
 import type { Mat } from './mat.ts';
@@ -2077,6 +2078,35 @@ function mightBePoint(e: Expr, opts: ResolveOpts): boolean {
 
 const COORDS = ['x', 'y', 'z'] as const;
 
+/** The parameters a body reduces over: those inside a reduction's argument
+ *  (a dotted p.x counts as p). Only those make a call a map. */
+const reducedCache = new WeakMap<Expr, Set<string>>();
+function reducedParams(body: Expr): Set<string> {
+  let hit = reducedCache.get(body);
+  if (hit) return hit;
+  hit = new Set<string>();
+  const walk = (e: Expr): void => {
+    if (e.kind === 'call' && reducesMembers(e.name, e.args.length))
+      for (const a of e.args) for (const v of freeVars(a)) hit!.add(v.split('.')[0]);
+    childrenOf(e).forEach(walk);
+  };
+  walk(body);
+  reducedCache.set(body, hit);
+  return hit;
+}
+
+/** The name a mapped parameter takes in its body: one no document can spell
+ *  (so nothing is captured), the same every time the row resolves. */
+const mapName = (fn: string, k: number) => `@${fn}:${k}`;
+
+/** Whether a resolved argument may be a list: a literal, a column, or a
+ *  name (or a dotted column of one) the document defines as a list. */
+function mayBeList(a: Expr, opts: ResolveOpts): boolean {
+  if (a.kind === 'list' || a.kind === 'data') return true;
+  if (a.kind === 'var') return !!opts.isList?.(a.name.split('.')[0]);
+  return childrenOf(a).some(c => mayBeList(c, opts));
+}
+
 /** `P.x` of one named point is its coordinate P_x, as `A.x` of a list of
  *  points is that list's (list lowering reads those). */
 function pointCoord(name: string, opts: ResolveOpts): Expr | null {
@@ -2265,12 +2295,56 @@ function rx(e: Expr, ctx: Ctx): Expr {
           const [arg] = args;
           markOrigins(arg);
           if (arg.kind === 'vec' && arg.items.length !== n) throw new Error(compDims(e.name, n, arg, arg.items.length));
+          // A body that reduces takes a list of points one point at a time.
+          if (fn.params.some(p => reducedParams(fn.body).has(p)) && mayBeList(arg, ctx.opts)) {
+            const names = fn.params.map((_, k) => mapName(e.name, k));
+            const body = substVars(
+              fn.body,
+              Object.fromEntries(fn.params.map((p, k) => [p, { kind: 'var', name: names[k] }])),
+            );
+            return {
+              kind: 'call',
+              name: MAP,
+              args: [{ kind: 'str', value: e.name }, body, { kind: 'str', value: names.join(',') }, arg],
+            };
+          }
           const comp = (k: number): Expr =>
             arg.kind === 'vec' ? arg.items[k] : { kind: 'comp', value: arg, index: k, arity: n, functionName: e.name };
           return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, comp(k)])));
         }
         if (args.length !== n) {
           throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
+        }
+        // Every function applies per member (docs/multisets.md §0). A body
+        // that only maps is that already, by substitution; one that reduces
+        // would consume a list argument along with its own lists, so a list
+        // argument is bound per member instead ([map], lib/list.ts).
+        // (Once it is one, every list argument is bound per member, so the
+        // same list passed twice zips; and all parameters are replaced in one
+        // step, the list ones by names no document can spell, so an argument
+        // mentioning a parameter's name is never captured by it.)
+        const reduced = reducedParams(fn.body);
+        const listy = fn.params.map((_, k) => mayBeList(args[k], ctx.opts));
+        if (fn.params.some((p, k) => reduced.has(p) && listy[k])) {
+          const scalar = fn.params.filter((_, k) => !listy[k]);
+          const env: Record<string, Expr> = {
+            ...Object.fromEntries(scalar.map(p => [p, args[fn.params.indexOf(p)]])),
+            ...coordParams(
+              { params: scalar, body: fn.body },
+              scalar.map(p => args[fn.params.indexOf(p)]),
+              e.name,
+              ctx.opts,
+            ),
+          };
+          const pairs: Expr[] = [];
+          fn.params.forEach((p, k) => {
+            if (!listy[k]) return;
+            const name = mapName(e.name, k);
+            env[p] = { kind: 'var', name };
+            for (const c of COORDS) env[`${p}.${c}`] = { kind: 'var', name: `${name}.${c}` };
+            pairs.push({ kind: 'str', value: name }, args[k]);
+          });
+          return { kind: 'call', name: MAP, args: [{ kind: 'str', value: e.name }, substVars(fn.body, env), ...pairs] };
         }
         return substVars(fn.body, {
           ...Object.fromEntries(fn.params.map((p, k) => [p, args[k]])),

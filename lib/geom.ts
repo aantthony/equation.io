@@ -23,7 +23,7 @@ import { type FigureForm, mapChildren } from './expr.ts';
  * into 2D points for compatibility.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import { ANGLE_FN, type Expr, compArity, compDims, compFits, isRecur, sameList } from './expr.ts';
+import { ANGLE_FN, MAP, type Expr, compArity, compDims, compFits, isRecur, sameList } from './expr.ts';
 import { SCALAR_REDUCTIONS, tupleAxis, withAxes } from './list.ts';
 import {
   type GetMat,
@@ -1034,6 +1034,22 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
     case 'call': {
       if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'qjulia')
         throw new Error(`${e.name}(…) must be a whole statement.`);
+      // A function applied per member of lists is list lowering's to run;
+      // the point arithmetic in its body is lowered here, like any other.
+      // (Its arguments too: a list of named points is a list of points.)
+      if (e.name === MAP) {
+        const args = e.args.map((a, i) => {
+          if (i === 0 || (i > 1 && i % 2 === 0)) return a;
+          try {
+            return toExpr(lo(a));
+          } catch (err) {
+            // Point-list arithmetic is the object pass's (lib/object-lists.ts).
+            if (i === 1) throw err;
+            return a;
+          }
+        });
+        return sc(args.every((a, i) => a === e.args[i]) ? e : { ...e, args });
+      }
       if (e.name === 'trail') {
         const args = e.args.map(lo);
         const coords =

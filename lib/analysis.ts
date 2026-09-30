@@ -44,11 +44,11 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { lowerGeom } from './geom.ts';
-import { lowerLists, SCALAR_REDUCTIONS } from './list.ts';
+import { lowerLists, reducesMembers, SCALAR_REDUCTIONS } from './list.ts';
 import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
 import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from './seq.ts';
@@ -91,6 +91,9 @@ export interface RowInfo extends RowSource {
   mark?: true;
   /** Readout shown under the row in the app (the numeric value of a P(…) or E(…) row). */
   info?: string;
+  /** A remark on how the row reads, kept after `info` as the readout changes
+   *  (a call applied per member that looks like a wrapper, perMemberNote). */
+  note?: string;
   /** Set when the row reads a local data file (`open(…)`) that is not on this
    *  machine: the row is valid, but nothing server-side can draw it. */
   dataLocal?: string;
@@ -511,6 +514,46 @@ function curveHint(object: MathObject, text: string): string | null {
 }
 
 /**
+ * A note for a call that applies per member ([map], docs/multisets.md §0)
+ * where a reduction in its body sees nothing but the member: `avg(s) =
+ * mean(s)`; `avg(L)` is L, each member reduced alone, which reads like a
+ * wrapper for mean(L). A reduction that also takes a list of the body's own
+ * (`f(m) = total(L m)`) is the rule's point, and says nothing.
+ */
+/** A readout followed by the row's note. */
+export const withNote = (info: string | null | undefined, note: string | undefined): string | undefined =>
+  note ? (info ? `${info} · ${note}` : note) : (info ?? undefined);
+
+function perMemberNote(e: Expr, isList: (name: string) => boolean): string | null {
+  if (e.kind === 'call' && e.name === MAP && e.args[0]?.kind === 'str') {
+    const members = new Set(e.args.slice(2).flatMap(a => (a.kind === 'str' ? a.value.split(',') : [])));
+    const listFree = (x: Expr): boolean =>
+      x.kind !== 'list' &&
+      x.kind !== 'data' &&
+      (x.kind !== 'var' || !isList(x.name.split('.')[0])) &&
+      childrenOf(x).every(listFree);
+    let lone: string | null = null;
+    const walk = (x: Expr): void => {
+      if (lone) return;
+      if (x.kind === 'call' && reducesMembers(x.name, x.args.length)) {
+        const vars = x.args.flatMap(a => [...freeVars(a)].map(v => v.split('.')[0]));
+        if (vars.some(v => members.has(v)) && x.args.every(listFree)) lone = x.name;
+        return;
+      }
+      childrenOf(x).forEach(walk);
+    };
+    walk(e.args[1]);
+    if (lone)
+      return `${e.args[0].value} applies per member, so its ${lone} sees one member at a time; for the whole list, write ${lone}(…) in the row`;
+  }
+  for (const c of childrenOf(e)) {
+    const note = perMemberNote(c, isList);
+    if (note) return note;
+  }
+  return null;
+}
+
+/**
  * The operator of a row that is curvature(C) or torsion(C) along the curve
  * (no point given), bare or with a number (1/curvature(C)) — unless the
  * document defines its own.
@@ -527,6 +570,8 @@ function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   const rows = document.rows.map(row => ({ ...row }));
+  /** Rows whose calls apply per member in a way that reads like a wrapper (perMemberNote). */
+  const memberNotes = new Map<(typeof rows)[number], string>();
   const { stateValues: stateVals = {}, time = 0, readouts = true, readoutPolicy = 'frame', backend = 'both' } = context;
   let constEnv: Record<string, number> = { ...stateVals };
   try {
@@ -804,6 +849,8 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         getFn,
         exact ? { ...ropts, exactConditions: true } : ropts,
       );
+      const note = perMemberNote(resolved.expr, ropts.isList ?? (() => false));
+      if (note) memberNotes.set(row, note);
       if (exact && !graphArgs) {
         // Over numbers a case is the tolerance form the evaluator runs; one
         // whose side is a list stays an equation, for list lowering to decide
@@ -908,6 +955,11 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         } catch {
           if (readoutPolicy === 'static' && row.cpu.type === 'value') row.info = '= …';
         }
+      }
+      const note = memberNotes.get(row);
+      if (note) {
+        row.note = note;
+        row.info = withNote(row.info, note);
       }
     } catch (error) {
       row.error = error instanceof Error ? error.message : String(error);

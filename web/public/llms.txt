@@ -287,7 +287,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `stdev(L)` (sample), `median(L)`. A row that reduces to a
   constant shows the numeric value as a readout. mean/total/count/min/max
   expand symbolically, so elements may animate (`mean([sin(t), 2])`);
-  stdev/median/sort need constant elements. Over a column, a missing cell is
+  stdev/median/sort need constant elements. A function applies to one
+  member of a list argument at a time, a reduction in its body included:
+  with `f(m) = total(L m)`, `f(M)` is one total per member of M (and
+  `total(f(M))` their total), a number reduces as its one member (`mean(5)`
+  is 5), so a wrapper `avg(s) = mean(s)` gives `avg(L)` = L back: reduce
+  a list in the row, `mean(L)`. Over a list of points the body reads `p.x`,
+  `p.y`. Over a column, a missing cell is
   left out of every reduction (as it is of `hist`) except `count(L)`, which
   answers how many rows there are.
 - `hist(L)` bins a list into a bar chart — `hist(L, 40)` sets the bin count
