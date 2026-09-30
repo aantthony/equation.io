@@ -24,6 +24,7 @@ import { analyzePrepared, isViewportText, prepareDocument, withNote } from '../l
 import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
 import { complexRootLabel } from '../lib/complex-label.ts';
 
+import { initHighlight } from './highlight.ts';
 import { initSyntaxHelp } from './syntax-help.ts';
 import { attachCapture } from './capture.ts';
 import { nextFeatured } from '../lib/featured.ts';
@@ -400,6 +401,8 @@ let nextId = 1;
 const equations: Equation[] = [];
 let mode: '2d' | '3d' = '2d';
 let defs: Env = emptyEnv();
+/** Recolours the editor's names when `defs` changes (set once the editor's highlighter exists). */
+let repaintHighlights = () => {};
 let defsAnimated = false;
 let constEnv: Record<string, number> = {};
 /** Constants used as Σ/Π bounds; their sliders snap to integer steps. */
@@ -2658,6 +2661,7 @@ function recompileAll() {
     },
   );
   defs = prepared.defs;
+  repaintHighlights();
   ensureTables(prepared.raw);
   sumBoundNames = prepared.sumBoundConsts;
   const wasKey = stateSys?.key;
@@ -3649,6 +3653,7 @@ function reconcile() {
       !!eq.def || structure || (drawn?.type === 'value' && !drawn.shade) || drawn?.type === 'note',
     );
     line.classList.toggle('is-divider', eq.viewSpec?.kind === 'split');
+    line.classList.toggle('is-view', !!eq.viewSpec && eq.viewSpec.kind !== 'split');
     line.classList.toggle('is-comment', !!eq.comment);
     line.classList.toggle('collapsed', !!(eq.comment && eq.collapsed));
     line.title = eq.error ?? (eq.comment ? 'Click the arrow to collapse or expand this group' : '');
@@ -5764,6 +5769,42 @@ if (mcpApp) {
 // Dev-only handle for driving/inspecting the view in automated tests.
 if (import.meta.env.DEV)
   (window as any).__eq = { view, camera, panels, equations, requestRender, flushViewportWriteback, capture };
+
+/** The row that defines `name`: its definition, or a `X ~ …` declaration,
+ *  a binder or a sequence's recurrence, which carry no Definition. */
+function definitionRow(name: string): number {
+  const byDef = equations.findIndex(eq => eq.def && eq.def.kind !== 'init' && eq.def.name === name);
+  if (byDef >= 0) return byDef;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const head = new RegExp(`^\\s*${escaped}\\s*(?:'|\\([^)]*\\)|_\\{[^}]*\\})?\\s*(?:=|~|∈|\\\\in\\b)`);
+  return equations.findIndex(eq => !eq.comment && head.test(canonicalName(stripNote(eq.text))));
+}
+
+// Colour, and hover cards that say what a name is; ⌘-click goes to its row.
+repaintHighlights = initHighlight(listEl, {
+  lines: lineEls,
+  lineText,
+  env: () => defs,
+  definitionRow,
+  goTo: row => {
+    // A definition inside a collapsed group opens the group.
+    for (let i = row; i >= 0; i--) {
+      if (!equations[i].comment) continue;
+      if (equations[i].collapsed) {
+        equations[i].collapsed = undefined;
+        reconcile();
+      }
+      break;
+    }
+    listEl.focus();
+    setCaret(row, equations[row].text.length);
+    const line = lineEls()[row];
+    line?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    line?.classList.remove('eq-flash');
+    void line?.offsetWidth; // restart the animation on a repeat jump
+    line?.classList.add('eq-flash');
+  },
+}).repaint;
 
 // Completion is an ordinary text edit, with the same undo and URL path as typing.
 initSyntaxHelp(listEl, {

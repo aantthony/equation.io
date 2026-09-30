@@ -56,6 +56,12 @@ body {
   --ex-hover-bg: rgba(0, 90, 200, 0.08);
   --ex-code: #999;
   --ex-code-hover: #667;
+  --syn-base: #555;
+  --syn-num: #8a5a2e;
+  --syn-str: #6b6540;
+  --syn-fn: #3d6390;
+  --syn-name: #111;
+  --syn-unbound: #9a9a9a;
 }
 
 :root[data-theme='dark'] {
@@ -83,6 +89,12 @@ body {
   --ex-hover-bg: rgba(90, 150, 255, 0.14);
   --ex-code: #767c88;
   --ex-code-hover: #97a3b8;
+  --syn-base: #aeb4be;
+  --syn-num: #cfae88;
+  --syn-str: #bdb48c;
+  --syn-fn: #9db6d8;
+  --syn-name: #f4f5f7;
+  --syn-unbound: #767c88;
 }
 
 html,
@@ -458,6 +470,101 @@ body {
     system-ui,
     sans-serif;
 }
+/* Syntax colour (web/highlight.ts): highlight ranges over the row text, so
+   the editable DOM stays plain text. Quiet on purpose — hue already means
+   "this row is that curve" in the colour bars — so punctuation sits back,
+   names that resolve read brightest, names nothing binds yet go grey, and
+   only numbers and functions carry a faint tint. */
+#equations .eq-line:not(.is-comment, .is-divider, .is-view) {
+  color: var(--syn-base);
+}
+::highlight(eq-num),
+::highlight(eq-const) {
+  color: var(--syn-num);
+}
+::highlight(eq-str) {
+  color: var(--syn-str);
+}
+::highlight(eq-fn) {
+  color: var(--syn-fn);
+}
+::highlight(eq-coord),
+::highlight(eq-name) {
+  color: var(--syn-name);
+}
+::highlight(eq-unbound) {
+  color: var(--syn-unbound);
+}
+/* A viewport row is written by panning: state, not math, so it recedes. */
+#equations .eq-line.is-view {
+  color: var(--muted);
+}
+::highlight(eq-link) {
+  text-decoration: underline;
+}
+#equations.eq-linking {
+  cursor: pointer;
+}
+/* A row just jumped to by ⌘-click on one of its names. */
+.eq-line.eq-flash {
+  animation: eq-flash 0.9s ease-out;
+}
+@keyframes eq-flash {
+  from {
+    background: var(--ex-hover-bg);
+  }
+}
+/* What a hovered name is: signature, type, and where it is defined. */
+#eq-hover {
+  position: fixed;
+  z-index: 100;
+  max-width: 340px;
+  pointer-events: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--page-bg);
+  color: var(--text);
+  box-shadow: 0 5px 24px var(--panel-shadow);
+  padding: 7px 10px;
+  font:
+    12px/1.45 system-ui,
+    sans-serif;
+  overflow-wrap: anywhere;
+}
+#eq-hover[hidden] {
+  display: none;
+}
+#eq-hover code {
+  font:
+    13px 'Eq Math Glyphs',
+    ui-monospace,
+    monospace;
+}
+.eq-hover-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.eq-hover-type {
+  color: var(--syn-fn);
+  font-size: 11px;
+  white-space: nowrap;
+}
+#eq-hover code.eq-hover-def {
+  display: block;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--divider);
+  color: var(--summary);
+  font-size: 12px;
+}
+.eq-hover-key {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 /* Rows inside a collapsed group; they stay in the DOM (copy/undo/share). */
 #equations .eq-hidden {
   display: none;
