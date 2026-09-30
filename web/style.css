@@ -56,6 +56,13 @@ body {
   --ex-hover-bg: rgba(0, 90, 200, 0.08);
   --ex-code: #999;
   --ex-code-hover: #667;
+  --syn-num: #a4560f;
+  --syn-str: #6f6a12;
+  --syn-fn: #2d6fb3;
+  --syn-const: #0d7a70;
+  --syn-coord: #3f7a23;
+  --syn-name: #8a3fae;
+  --syn-op: #888;
 }
 
 :root[data-theme='dark'] {
@@ -83,6 +90,13 @@ body {
   --ex-hover-bg: rgba(90, 150, 255, 0.14);
   --ex-code: #767c88;
   --ex-code-hover: #97a3b8;
+  --syn-num: #e2a462;
+  --syn-str: #d4c374;
+  --syn-fn: #72a9f2;
+  --syn-const: #53c4b7;
+  --syn-coord: #93cf7c;
+  --syn-name: #c792ee;
+  --syn-op: #868d99;
 }
 
 html,
@@ -458,6 +472,95 @@ body {
     system-ui,
     sans-serif;
 }
+/* Syntax colour (web/highlight.ts): highlight ranges over the row text, so
+   the editable DOM stays plain text. */
+::highlight(eq-num) {
+  color: var(--syn-num);
+}
+::highlight(eq-str) {
+  color: var(--syn-str);
+}
+::highlight(eq-fn) {
+  color: var(--syn-fn);
+}
+::highlight(eq-const) {
+  color: var(--syn-const);
+}
+::highlight(eq-coord) {
+  color: var(--syn-coord);
+}
+::highlight(eq-name) {
+  color: var(--syn-name);
+}
+::highlight(eq-op) {
+  color: var(--syn-op);
+}
+::highlight(eq-link) {
+  text-decoration: underline;
+}
+#equations.eq-linking {
+  cursor: pointer;
+}
+/* A row just jumped to by ⌘-click on one of its names. */
+.eq-line.eq-flash {
+  animation: eq-flash 0.9s ease-out;
+}
+@keyframes eq-flash {
+  from {
+    background: var(--ex-hover-bg);
+  }
+}
+/* What a hovered name is: signature, type, and where it is defined. */
+#eq-hover {
+  position: fixed;
+  z-index: 100;
+  max-width: 340px;
+  pointer-events: none;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--page-bg);
+  color: var(--text);
+  box-shadow: 0 5px 24px var(--panel-shadow);
+  padding: 7px 10px;
+  font:
+    12px/1.45 system-ui,
+    sans-serif;
+  overflow-wrap: anywhere;
+}
+#eq-hover[hidden] {
+  display: none;
+}
+#eq-hover code {
+  font:
+    13px 'Eq Math Glyphs',
+    ui-monospace,
+    monospace;
+}
+.eq-hover-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.eq-hover-type {
+  color: var(--syn-fn);
+  font-size: 11px;
+  white-space: nowrap;
+}
+#eq-hover code.eq-hover-def {
+  display: block;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--divider);
+  color: var(--summary);
+  font-size: 12px;
+}
+.eq-hover-key {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 /* Rows inside a collapsed group; they stay in the DOM (copy/undo/share). */
 #equations .eq-hidden {
   display: none;

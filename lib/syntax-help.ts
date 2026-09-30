@@ -161,6 +161,18 @@ const signatures: Record<string, [string, string]> = {
   E: ['E(X)', 'Expected value of a random variable or of an expression in them: E(X Y) — exact over discrete ones'],
 };
 
+/** A built-in function's signature and description, as autocomplete shows
+ *  them; case folds as the parser folds it (`Sin` is sin). The call forms
+ *  that are not functions — P(…), view(…), a distribution — only count when
+ *  `called`: bare, `n` is a sum's index, not Normal by its alias N. */
+export function builtinHelp(name: string, called = true): { signature: string; description: string } | null {
+  const key =
+    builtinFn(name) ?? (!called ? null : Object.hasOwn(signatures, name) ? name : (distFamily(name)?.name ?? null));
+  if (!key) return null;
+  const [signature, description] = signatures[key] ?? [`${key}(x)`, 'Built-in function'];
+  return { signature, description };
+}
+
 /** Distributions whose name folds case ANYWHERE in a row, not just at the
  *  head of a ~: all but the spellings that also mean something else (Gamma →
  *  the gamma function, Beta → a coefficient), which are laws only at the head. */
