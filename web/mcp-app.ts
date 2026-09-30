@@ -13,6 +13,8 @@ interface GraphEditor {
   onChange(callback: (rows: string[]) => void): void;
   onEdit(callback: () => void): void;
   setVisible(visible: boolean): void;
+  /** A fresh frame of the graph, longest edge at most maxEdge pixels. */
+  still(maxEdge: number): HTMLCanvasElement;
   flush(): void;
   dispose(): void;
 }
@@ -20,6 +22,9 @@ interface GraphEditor {
 interface WidgetState {
   privateContent?: { source?: string; equations?: unknown };
 }
+
+// Matches voice mode's look_at_graph: enough to read labels and shapes.
+const SNAPSHOT_EDGE = 1280;
 
 const strings = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every(row => typeof row === 'string');
@@ -116,9 +121,29 @@ export async function connectGraphApp(editor: GraphEditor) {
     void publish(rows);
   }
 
-  async function publish(rows: string[]) {
+  // The graph as the user left it, for hosts that take images as model
+  // context: the model can then see the picture, not just the equations.
+  // ChatGPT shows each block as a removable attachment under this title.
+  // Not while off-screen: drawing a frame would undo the render pause, and
+  // the equations still describe the graph. Teardown draws its last frame
+  // regardless; the renderer is released straight after.
+  function snapshot(): { type: 'image'; data: string; mimeType: string; _meta: Record<string, unknown> } | undefined {
+    if (!app.getHostCapabilities()?.updateModelContext?.image) return;
+    if (!closing && (!intersecting || document.hidden)) return;
+    try {
+      const url = editor.still(SNAPSHOT_EDGE).toDataURL('image/jpeg', 0.85);
+      const data = url.slice(url.indexOf(',') + 1);
+      if (!data) return;
+      return { type: 'image', data, mimeType: 'image/jpeg', _meta: { 'openai/title': 'Edited graph' } };
+    } catch {
+      return; // The equations and share link still describe the graph.
+    }
+  }
+
+  async function publish(rows: string[], image?: ReturnType<typeof snapshot>) {
     link(rows);
     if (!connected || !hasResult) return;
+    if (!closing) image = snapshot(); // Teardown passes one taken before disposal.
     const publishedSource = source;
     try {
       openai?.setWidgetState?.({ privateContent: { source, equations: rows } });
@@ -126,7 +151,10 @@ export async function connectGraphApp(editor: GraphEditor) {
       /* Persistence may be unavailable; the live graph still works. */
     }
     try {
-      await app.updateModelContext({ structuredContent: { equations: rows, share_url: open.href } });
+      await app.updateModelContext({
+        ...(image && { content: [image] }),
+        structuredContent: { equations: rows, share_url: open.href },
+      });
       if (!closing && hasResult && source === publishedSource) status.textContent = '';
     } catch {
       if (!closing && hasResult && source === publishedSource) status.textContent = 'Edits could not sync';
@@ -349,8 +377,10 @@ export async function connectGraphApp(editor: GraphEditor) {
       try {
         editor.flush();
         const rows = editor.getRows();
+        // Take the picture while the renderer still exists.
+        const image = connected && hasResult ? snapshot() : undefined;
         editor.dispose();
-        await publish(rows);
+        await publish(rows, image);
       } finally {
         editor.dispose();
         connected = false;

@@ -9,7 +9,12 @@ The UI uses `@modelcontextprotocol/ext-apps` for initialization, tool results,
 theme changes, fullscreen, external links, and model-context updates. Changes
 to equations and sliders are sent through `ui/update-model-context`, throttled
 by the editor's existing URL-save interval. This does not send a chat message
-or trigger a model response. ChatGPT's optional widget state stores edited rows
+or trigger a model response. Hosts that list `image` under
+`updateModelContext` also get a JPEG of the edited graph (longest edge 1280px,
+drawn fresh, as voice mode's look_at_graph does), so the model sees the picture
+and not only the equations. ChatGPT shows it as a removable attachment titled
+by `_meta["openai/title"]`. An off-screen graph skips the picture rather than
+break its render pause; teardown takes one before the renderer is released. ChatGPT's optional widget state stores edited rows
 for the matching original result. Graphs still have shareable URLs.
 
 Embedded graphs start with the equation editor collapsed. Host theme, color and

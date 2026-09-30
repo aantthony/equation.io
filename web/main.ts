@@ -7203,6 +7203,10 @@ if (mcpApp) {
           graphEdited = cb;
         },
         setVisible: setGraphVisible,
+        still: maxEdge =>
+          (capture ??= attachCapture({ gl: canvas, overlay, render, requestRender, notice: showNotice })).still(
+            maxEdge,
+          ),
         flush: flushViewportWriteback,
         dispose: () => {
           if (rendererDisposed) return;
