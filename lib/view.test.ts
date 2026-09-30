@@ -1,6 +1,7 @@
-import { scaleViewAt } from './view.ts';
+import { type View2DSpec, scaleViewAt } from './view.ts';
 import { describe, expect, it } from 'vitest';
-import { fitView2D, formatCameraRow, formatViewRow, parseViewRow } from './view.ts';
+import { analyzeRows } from './analysis.ts';
+import { fitView2D, formatCameraRow, formatViewRow, formatViewSpec, orientLattice, parseViewRow } from './view.ts';
 
 const parse = (text: string, env: Record<string, number> = {}) => parseViewRow(text, env);
 
@@ -39,7 +40,6 @@ describe('parseViewRow', () => {
 
   it('gives row-friendly errors for malformed viewport rows', () => {
     expect(() => parse('view()')).toThrow(/Expected view/);
-    expect(() => parse('view(z = 1..2)')).toThrow(/x and y/);
     expect(() => parse('view(x = 5..-5)')).toThrow(/lo < hi/);
     expect(() => parse('view(x = 1..2, x = 3..4)')).toThrow(/twice/);
     expect(() => parse('view(x = 1)')).toThrow(/Expected view/);
@@ -171,5 +171,47 @@ describe('independent axis scaling', () => {
     expect(scaled.cy - (50 * scaled.upp) / scaled.ratio).toBeCloseTo(-3);
     expect(scaled.ratio).toBe(20);
     expect(scaleViewAt(v, 0, 0, 2, 2).ratio).toBe(5);
+  });
+});
+
+describe('lattice views', () => {
+  it('names index axes, the second running down', () => {
+    expect(parse('view(i = -60..60, n = 0..80)')).toEqual({
+      kind: 'view',
+      axes: ['i', 'n'],
+      x: [-60, 60],
+      y: [-80, -0],
+    });
+    expect(() => parse('view(x = 0..5, n = 0..5)')).toThrow(/index axes/);
+  });
+
+  it('names one index axis, as a panel sharing the other writes it', () => {
+    // Which way it runs is the lattice's to say: across, or down.
+    const one = parse('view(n = 0..80)') as View2DSpec;
+    expect(orientLattice(one, ['i', 'n'])).toEqual({ kind: 'view', axes: ['i', 'n'], y: [-80, -0] });
+    expect(orientLattice(one, ['n', 'i'])).toEqual({ kind: 'view', axes: ['n', 'i'], x: [0, 80] });
+    // …and it is what a panel with its other axis shared writes back.
+    expect(formatViewSpec({ y: [-80, -0], axes: ['i', 'n'] })).toBe('view(n = 0..80)');
+    // A panel with that lattice takes it; on the plane it is a slip for x or y.
+    const err = (rows: string[]) => analyzeRows(rows).rows.at(-1)!.error;
+    expect(err(['T[i, n] = i + n', 'view(n = 0..80)'])).toBeUndefined();
+    expect(err(['view(z = 1..2)'])).toMatch(/x and y/);
+    expect(err(['T[i, n] = i + n', '--- right', 'view(n = 0..80)'])).toMatch(/x and y/);
+  });
+
+  it('swaps a view naming the axes the other way round', () => {
+    const spec = parse('view(i = 0..10, j = 0..20)') as View2DSpec;
+    expect(orientLattice(spec, ['i', 'j'])).toBe(spec);
+    expect(orientLattice(spec, ['j', 'i'])).toMatchObject({ axes: ['j', 'i'], x: [0, 20], y: [-10, -0] });
+  });
+
+  it('writes back in index names, in the order the row wrote them', () => {
+    const spec = {
+      axes: ['j', 'i'] as [string, string],
+      x: [0, 20] as [number, number],
+      y: [-10, 0] as [number, number],
+    };
+    expect(formatViewSpec(spec)).toBe('view(j = 0..20, i = 0..10)');
+    expect(formatViewSpec(spec, ['i', 'j'])).toBe('view(i = 0..10, j = 0..20)');
   });
 });

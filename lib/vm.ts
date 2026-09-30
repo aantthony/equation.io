@@ -11,6 +11,7 @@ import {
   BETA_PDF_FN,
   BINOM_PMF_FN,
   DUNIFORM_PMF_FN,
+  EVAL_FNS,
   type Expr,
   GAMMA_PDF_FN,
   NEGBINOM_PMF_FN,
@@ -96,6 +97,7 @@ const FN1: Record<string, (x: number) => number> = {
   factorial: factorialFn,
   sinc: sincFn,
   coth: cothFn,
+  isprime: EVAL_FNS.isprime,
 };
 
 const FN2: Record<string, (a: number, b: number) => number> = {
@@ -103,6 +105,7 @@ const FN2: Record<string, (a: number, b: number) => number> = {
   min: Math.min,
   max: Math.max,
   mod: (a, b) => a - Math.floor(a / b) * b,
+  gcd: EVAL_FNS.gcd,
   [T_PDF_FN]: studentTPdf,
   [POISSON_PMF_FN]: poissonPmf,
 };

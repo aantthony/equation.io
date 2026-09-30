@@ -13,7 +13,16 @@ import { traceField } from '../lib/flow.ts';
 import { type PmfStems, markerHeight, scaleCurve, scaleStems, shadePolygon, stemGeometry } from '../lib/dist.ts';
 import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
 import { type Expr, LOOP_LIMIT, evaluate, substVars } from '../lib/expr.ts';
-import { cellShades, runAutomaton } from '../lib/automaton.ts';
+import {
+  type CellGrid,
+  TABLE_MAX,
+  cellShades,
+  evalTable,
+  runAutomaton,
+  runBoard,
+  tableShades,
+  latticeFrame,
+} from '../lib/automaton.ts';
 import { arrowHead } from '../lib/geom.ts';
 import { glyphScale } from '../lib/glyphs.ts';
 import { hullFaces } from '../lib/hull.ts';
@@ -21,7 +30,7 @@ import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import { pathSampler, regionSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
-import { type ViewSpec, clampPhi, fitPanelWindow, linkedWindow } from '../lib/view.ts';
+import { type ViewSpec, clampPhi, fitPanelWindow, linkedWindow, orientLattice } from '../lib/view.ts';
 import { type GridRowSpec, layoutPanels, linkRoot, panelIndices, splitsOf } from '../lib/panels.ts';
 import { LIGHT_PALETTE, assignColors, takesColor } from '../lib/palette.ts';
 import { noteColor } from '../lib/statements.ts';
@@ -79,6 +88,9 @@ function drawDisc(r: Raster, cx: number, cy: number, rad: number, c: [number, nu
 }
 
 // --- 2D view ---
+
+/** The smallest cell a lattice preview opens on: the app's value size (web/render2d.ts LATTICE_VALUE_PX) plus margin. */
+const LATTICE_CELL_PX = 48;
 
 interface View2D {
   ratio?: number;
@@ -426,17 +438,31 @@ function renderRow2D(
   const { cls, cpu } = row;
   if (!cls || !cpu) return;
   const compile = (e: Expr) => compileFor(env, e);
-  if (cpu.type === 'automaton') {
-    // The same cells the app uploads as a texture, looked up per pixel.
-    const grid = runAutomaton(cpu, envValues(env));
-    const shades = cellShades(grid);
+  if (cpu.type === 'automaton' || cpu.type === 'lattice') {
+    // The same cells the app uploads as a texture, looked up per pixel: a 1D
+    // rule's space-time diagram, a board's first generation, or a table over
+    // the window. Cell (i, k) is centred on (i, -k).
     const upy = v.upp / (v.ratio ?? 1);
+    const vals = envValues(env);
+    let grid: CellGrid;
+    if (cpu.type === 'lattice') {
+      const i0 = Math.floor(v.cx - (r.w / 2) * v.upp);
+      const j0 = Math.floor(-v.cy - (r.h / 2) * upy);
+      const w = Math.min(TABLE_MAX, Math.ceil(r.w * v.upp) + 2);
+      const h = Math.min(TABLE_MAX, Math.ceil(r.h * upy) + 2);
+      grid = evalTable(cpu, vals, i0, j0, w, h);
+    } else grid = cpu.dims === 2 ? runBoard(cpu, vals).grid : runAutomaton(cpu, vals);
+    const shades = cpu.type === 'lattice' ? tableShades(grid) : cellShades(grid);
+    // A board's outer rows are background that runs on; a diagram starts at row 0.
+    const clampRows = cpu.type === 'automaton' && cpu.dims === 2;
     for (let y = 0; y < r.h; y++) {
-      const n = Math.floor(0.5 - (v.cy + (r.h / 2 - y - 0.5) * upy));
-      if (n < 0 || n >= grid.rows) continue;
+      let k = Math.floor(0.5 - (v.cy + (r.h / 2 - y - 0.5) * upy)) - grid.y0;
+      if (clampRows) k = Math.max(0, Math.min(grid.rows - 1, k));
+      else if (k < 0 || k >= grid.rows) continue;
       for (let x = 0; x < r.w; x++) {
-        const j = Math.max(0, Math.min(grid.width - 1, Math.floor(v.cx + (x + 0.5 - r.w / 2) * v.upp - grid.x0 + 0.5)));
-        const shade = shades[n * grid.width + j];
+        const col = Math.floor(v.cx + (x + 0.5 - r.w / 2) * v.upp - grid.x0 + 0.5);
+        if (cpu.type === 'lattice' && (col < 0 || col >= grid.width)) continue;
+        const shade = shades[k * grid.width + Math.max(0, Math.min(grid.width - 1, col))];
         if (shade) blend(r, x, y, color, (0.92 * shade) / 255);
       }
     }
@@ -1072,6 +1098,9 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   cobweb: 'draws',
   // Cells computed on the CPU in the app too (lib/automaton.ts), one lookup per pixel.
   automaton: 'draws',
+  lattice: 'draws',
+  // Laid out by a force simulation in the app (lib/graph.ts); not yet here.
+  graph: 'fallback',
   // Each of these needs a per-pixel shader — domain coloring, conformal grids,
   // escape-time iteration, line-integral convolution — that a scanline
   // rasterizer cannot reproduce faithfully at preview size. They get the
@@ -1338,7 +1367,24 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
         x: root('x'),
         y: root('y'),
       });
-      const view: View2D = box ? fitPanelWindow(box, sub.w, sub.h, panel.shared, linked) : linked;
+      // A lattice panel as the app opens it (web/main.ts frameLattice): a
+      // view row naming its axes the other way round still frames them, and
+      // with no view row it opens on its cells.
+      const cells = rows.filter(r => r.cpu!.type === 'automaton' || r.cpu!.type === 'lattice');
+      const lattice = cells.length > 0 && cells.length === rows.filter(r => r.cpu!.type !== 'note').length;
+      const axes = (cells[0]?.cpu as { axes?: readonly [string, string] } | undefined)?.axes;
+      const framed = box?.kind === 'view' && axes ? orientLattice(box, axes) : box;
+      const view: View2D = framed
+        ? fitPanelWindow(framed, sub.w, sub.h, panel.shared, linked)
+        : lattice && !panel.shared.x && !panel.shared.y
+          ? latticeFrame(
+              cells[0].cpu as Parameters<typeof latticeFrame>[0],
+              envValues(env),
+              sub.w,
+              sub.h,
+              LATTICE_CELL_PX,
+            )
+          : linked;
       views[k] = view;
       if (gridMode !== 'off') drawGrid2D(sub, view, gridMode === 'axes');
       for (const row of rows) {
