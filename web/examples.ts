@@ -310,7 +310,7 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
       [
         'Collatz graph',
-        'c(m) = {mod(m, 2) = 0: m/2, 3m + 1}; k = [1..40]; graph(k, c(k))',
+        'c(m) = {mod(m, 2) = 0: m/2, 3m + 1}; k = [1..12]; graph(k, c(k))',
         'graph number-theory recursion',
       ],
     ],
