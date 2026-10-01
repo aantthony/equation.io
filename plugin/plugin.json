@@ -1,6 +1,6 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "app-6aa7d183c6cc8191b7b1d2c5e37c0477",
+  "name": "equation-io",
   "version": "1.0.1",
   "description": "Interactive 2D and 3D graphs in the conversation, with editable equations, sliders, and shareable links.",
   "author": {
