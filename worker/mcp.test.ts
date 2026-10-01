@@ -84,6 +84,22 @@ describe('mcp endpoint', () => {
     expect(listing.displayName.length).toBeLessThanOrEqual(30);
     expect(listing.shortDescription.length).toBeLessThanOrEqual(30);
     expect(listing.longDescription.length).toBeLessThanOrEqual(4000);
+    // plugin_category_unknown in the submission error reference.
+    expect([
+      'Productivity',
+      'Creativity',
+      'Developer Tools',
+      'Business & Operations',
+      'Data & Analytics',
+      'Communication',
+      'Education & Research',
+      'Security',
+      'Finance',
+      'Healthcare',
+      'Travel',
+      'Entertainment',
+      'Other',
+    ]).toContain(listing.category);
     expect(review.test_cases.positive).toHaveLength(5);
     expect(review.test_cases.negative).toHaveLength(3);
     // Review cases name only tools the server lists.

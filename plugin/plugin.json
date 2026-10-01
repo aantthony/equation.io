@@ -25,7 +25,7 @@
         "shortDescription": "Interactive 2D and 3D graphs",
         "longDescription": "Equation.io brings interactive 2D and 3D graphing into your conversation. Plot curves, surfaces, and inequalities; edit equations directly in the graph; adjust parameter sliders; and pan, zoom, or rotate 3D views to explore the math. Animate graphs with time-dependent equations and expand the graph in hosts that support fullscreen. Equation and slider edits update the context available to the assistant for follow-up questions. Open or share the current graph in your browser, or bring an existing Equation.io graph link into the conversation to continue exploring. Graph equations are encoded in shareable URLs, so anyone with a link can read them. No account or API key is required.",
         "developerName": "Anthony Foster",
-        "category": "Education",
+        "category": "Education & Research",
         "capabilities": [
           "Graph 2D curves and regions",
           "Graph 3D surfaces",
