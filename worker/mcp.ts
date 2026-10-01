@@ -31,12 +31,13 @@ interface McpTool {
   name: string;
   title?: string;
   description: string;
-  annotations?: {
+  /** Every hint is explicit: ChatGPT's review rejects a hint left null. */
+  annotations: {
     title?: string;
-    readOnlyHint?: boolean;
-    destructiveHint?: boolean;
-    idempotentHint?: boolean;
-    openWorldHint?: boolean;
+    readOnlyHint: boolean;
+    destructiveHint: boolean;
+    idempotentHint: boolean;
+    openWorldHint: boolean;
   };
   inputSchema: ObjectSchema;
   outputSchema?: ObjectSchema;
@@ -102,7 +103,13 @@ const ENCODE_RESULT: ObjectSchema & { properties: Record<string, JsonSchema> } =
 const ENCODE_TOOL: McpTool = {
   name: 'encode_graph_url',
   title: 'Create a graph link',
-  annotations: { title: 'Create a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  annotations: {
+    title: 'Create a graph link',
+    readOnlyHint: true,
+    openWorldHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
   description: `Build an equation.io graph link, validating every row with the app's parser. Pass the COMPLETE graph in "equations": a flat array of strings, one equation or definition per string, in display order — when editing an existing graph (see decode_graph_url), include unchanged rows too.
 
 Rows can be: equations and inequalities in x,y (curves, regions; z makes it 3D), bare expressions in x, y (scalar fields — a curve is written y = f(x); complex plots via w), points (rows report "draggable"), parametric tuples in u,v — and definitions: "a = 2" (a draggable slider), "f(x) = x^3 - a x", coordinate fields like "r = sqrt(x^2+y^2)" for polar. t animates. Also derivatives d/dx, integrals int[a..b] f dx, sums sum[n=1..N], domain()/conformal()/iter() for complex plots, rgb()/hsl()/oklch() color fields, y' = … slope fields, random variables "X ~ Normal(m, s)"/"P(0<X<2)"/"E(X^2)", and "view(x = -5..5, y = -2..2)"/"camera(theta, phi)" framing rows. That is a menu, not the syntax: before your first non-trivial graph, read the "syntax" MCP resource (also at https://equation.io/llms.txt).
@@ -127,7 +134,13 @@ The result returns text and structured data only. "rows" gives each equation's v
 const DECODE_TOOL: McpTool = {
   name: 'decode_graph_url',
   title: 'Read a graph link',
-  annotations: { title: 'Read a graph link', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  annotations: {
+    title: 'Read a graph link',
+    readOnlyHint: true,
+    openWorldHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
   description:
     'Decode an equation.io link (either the #-fragment form or the /g/ share form) into its list of equation rows, so you can edit them and build a new link with encode_graph_url. The rows use the equation.io syntax documented in the "syntax" MCP resource (also at https://equation.io/llms.txt).',
   inputSchema: {
@@ -159,7 +172,13 @@ const SHOW_GRAPH_TOOL: McpTool = {
   ...ENCODE_TOOL,
   name: 'show_graph',
   title: 'Show an interactive graph',
-  annotations: { title: 'Show an interactive graph', readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+  annotations: {
+    title: 'Show an interactive graph',
+    readOnlyHint: true,
+    openWorldHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+  },
   description:
     'Display an interactive equation.io graph inside the conversation, with editable equations, sliders, pan/zoom, and 3D rotation. Use when the user asks to see or explore a graph. Pass the COMPLETE graph as "equations", one equation or definition per string, preserving unchanged rows when editing. For a slider use "a = 2" then "y = a sin(x)". For advanced syntax read the "syntax" resource (https://equation.io/llms.txt). Returns per-row validation and share links; a row with status "error" is not drawn until its text is corrected and the graph resubmitted. Use encode_graph_url for validation or link-only requests (including share-link preview notes). In clients without UI support, provide share_url.',
   outputSchema: {
@@ -370,7 +389,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
       return result({
         protocolVersion: PROTOCOL_VERSIONS.includes(requested ?? '') ? requested : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {}, resources: {} },
-        serverInfo: { name: 'equation', title: 'equation.io grapher', version: '1.0.0' },
+        serverInfo: { name: 'equation', title: 'Equation.io', version: '1.0.1' },
         instructions:
           'Graphing calculator whose entire state lives in the URL. show_graph displays an interactive graph in the conversation. encode_graph_url validates equations and creates a share link without displaying a widget. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
           origin +

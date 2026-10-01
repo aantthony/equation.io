@@ -1,0 +1,106 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "equation-io",
+  "version": "1.0.1",
+  "description": "Interactive 2D and 3D graphs in the conversation, with editable equations, sliders, and shareable links.",
+  "author": {
+    "name": "Anthony Foster",
+    "email": "support@equation.io",
+    "url": "https://equation.io"
+  },
+  "homepage": "https://equation.io",
+  "repository": "https://github.com/aantthony/equation.io",
+  "license": "MIT",
+  "keywords": [
+    "math",
+    "graphing",
+    "calculator",
+    "education",
+    "3d"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Equation.io",
+        "shortDescription": "Interactive 2D and 3D graphs",
+        "longDescription": "Equation.io brings interactive 2D and 3D graphing into your conversation. Plot curves, surfaces, and inequalities; edit equations directly in the graph; adjust parameter sliders; and pan, zoom, or rotate 3D views to explore the math. Animate graphs with time-dependent equations and expand the graph in hosts that support fullscreen. Equation and slider edits update the context available to the assistant for follow-up questions. Open or share the current graph in your browser, or bring an existing Equation.io graph link into the conversation to continue exploring. Graph equations are encoded in shareable URLs, so anyone with a link can read them. No account or API key is required.",
+        "developerName": "Anthony Foster",
+        "category": "Education",
+        "capabilities": [
+          "Graph 2D curves and regions",
+          "Graph 3D surfaces",
+          "Add parameter sliders",
+          "Animate graphs over time",
+          "Open and edit shared graph links"
+        ],
+        "websiteURL": "https://equation.io",
+        "supportURL": "https://github.com/aantthony/equation.io/issues",
+        "privacyPolicyURL": "https://equation.io/privacy/",
+        "termsOfServiceURL": "https://equation.io/terms/",
+        "defaultPrompt": [
+          "Show me a swinging pendulum and how its length affects its motion.",
+          "Graph x² + y² = 9 and explain why it makes a circle.",
+          "Show me a trefoil knot in 3D."
+        ],
+        "composerIcon": "./assets/icon.svg",
+        "logo": "./assets/icon.svg"
+      },
+      "review": {
+        "test_cases": {
+          "positive": [
+            {
+              "description": "Explore and edit two 2D curves in the conversation.",
+              "prompt": "Use Equation.io to show y = x^2 and y = sin(x) together in an interactive graph so I can zoom in and edit the equations.",
+              "tools_triggered": "show_graph",
+              "expected_behavior": "Displays an interactive graph in the conversation with both validated equations. The user can pan, zoom, and open the equation editor to change either curve. Edits update the graph and the context available to the assistant, and the share link opens the current graph in the browser."
+            },
+            {
+              "description": "Explore a 3D surface in the conversation.",
+              "prompt": "Use Equation.io to show x^2 + y^2 + z^2 = 9 as an interactive 3D graph that I can rotate and zoom.",
+              "tools_triggered": "show_graph",
+              "expected_behavior": "Displays a validated sphere of radius 3 in an interactive 3D graph in the conversation. The user can rotate and zoom the surface, expand the graph when the host supports fullscreen, and open the current graph in the browser."
+            },
+            {
+              "description": "Create a graph with an adjustable parameter.",
+              "prompt": "Use Equation.io to graph y = a sin(x), with a starting at 2 and adjustable using a slider.",
+              "tools_triggered": "show_graph",
+              "expected_behavior": "Displays an interactive graph in the conversation containing a = 2 and y = a sin(x). Moving the slider updates the curve and model context. The share link opens the current graph in the browser."
+            },
+            {
+              "description": "Open an existing graph, edit one curve, and explore the result.",
+              "prompt": "Use Equation.io to open https://equation.io/g/y%3Dx%5E2;y%3Dsin%28x%29 and replace y = x^2 with y = x^3, keeping the sine curve. Show me the updated interactive graph.",
+              "tools_triggered": "decode_graph_url, show_graph",
+              "expected_behavior": "Decodes both original rows, then displays an interactive graph containing validated y = x^3 and y = sin(x). The user can continue editing in the graph and share the updated graph; the original link remains unchanged."
+            },
+            {
+              "description": "Report an invalid equation without silently changing the user input.",
+              "prompt": "Use Equation.io to validate these exact two rows: y = x^2 and y = (. Do not fix the second row; tell me which one fails.",
+              "tools_triggered": "encode_graph_url",
+              "expected_behavior": "Reports that y = x^2 is valid and y = ( fails validation, preserves the exact input, and identifies the failing row without presenting the complete graph as valid."
+            }
+          ],
+          "negative": [
+            {
+              "description": "Do not invoke the graphing app for a conceptual math explanation without a graph.",
+              "prompt": "Explain what a derivative means in words only. Do not create a graph."
+            },
+            {
+              "description": "Do not invoke the app to retrieve live market data.",
+              "prompt": "What is the current trading price of Apple stock? I only need the price, not a chart."
+            },
+            {
+              "description": "Do not claim account-management or graph-deletion capabilities.",
+              "prompt": "Delete every saved graph from my Equation.io account."
+            }
+          ]
+        },
+        "demo_recording_url": "https://www.youtube.com/watch?v=iBu40nUsQM8",
+        "commerce": false,
+        "commerce_description": "Equation.io is free and does not sell products or process payments."
+      },
+      "publication": {
+        "release_notes": "Every tool now sets all four annotation hints explicitly (readOnlyHint, destructiveHint, idempotentHint, openWorldHint), and the server title matches the listing name, Equation.io."
+      }
+    }
+  }
+}
