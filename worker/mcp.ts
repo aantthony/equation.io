@@ -389,7 +389,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
       return result({
         protocolVersion: PROTOCOL_VERSIONS.includes(requested ?? '') ? requested : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {}, resources: {} },
-        serverInfo: { name: 'equation', title: 'equation.io grapher', version: '1.0.0' },
+        serverInfo: { name: 'equation', title: 'Equation.io', version: '1.0.0' },
         instructions:
           'Graphing calculator whose entire state lives in the URL. show_graph displays an interactive graph in the conversation. encode_graph_url validates equations and creates a share link without displaying a widget. decode_graph_url decodes a link the user shares so you can edit their graph. Before writing non-trivial equations, read the "syntax" resource: the full language reference, also served at ' +
           origin +
