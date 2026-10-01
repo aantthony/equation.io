@@ -110,6 +110,7 @@ describe('mcp endpoint', () => {
         readOnlyHint: true,
         openWorldHint: false,
         destructiveHint: false,
+        idempotentHint: true,
       });
     }
   });

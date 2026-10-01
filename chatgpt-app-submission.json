@@ -17,36 +17,42 @@
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "idempotentHint": true
       },
       "justifications": {
         "read_only_justification": "Computes equation validation and URL-encoded graph links without saving records or changing external state.",
         "open_world_justification": "Returns a shareable URL containing the supplied equations without uploading a saved graph or publishing content to another service.",
-        "destructive_justification": "Does not delete or overwrite existing graphs, send messages, or perform irreversible actions."
+        "destructive_justification": "Does not delete or overwrite existing graphs, send messages, or perform irreversible actions.",
+        "idempotent_justification": "Output depends only on the supplied equations: the same input always returns the same validation and link, and repeating the call has no further effect."
       }
     },
     "decode_graph_url": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "idempotentHint": true
       },
       "justifications": {
         "read_only_justification": "Decodes equation rows embedded in the supplied graph URL without fetching the URL or modifying data.",
         "open_world_justification": "Only parses the supplied URL and does not contact or change external systems.",
-        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions."
+        "destructive_justification": "Does not delete, overwrite, revoke access, or perform irreversible actions.",
+        "idempotent_justification": "Output depends only on the supplied URL: decoding the same link always returns the same rows, and repeating the call has no further effect."
       }
     },
     "show_graph": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": false,
+        "idempotentHint": true
       },
       "justifications": {
         "read_only_justification": "Validates supplied equations and returns an interactive graph UI and share links without changing external state.",
         "open_world_justification": "Returns a shareable URL containing the supplied equations without uploading a saved graph or publishing content to another service.",
-        "destructive_justification": "Does not delete or overwrite existing graphs, send messages, or perform irreversible actions."
+        "destructive_justification": "Does not delete or overwrite existing graphs, send messages, or perform irreversible actions.",
+        "idempotent_justification": "Output depends only on the supplied equations: the same input always returns the same validation, links, and graph, and repeating the call has no further effect."
       }
     }
   },
