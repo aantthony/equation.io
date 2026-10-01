@@ -3,6 +3,7 @@ import Ajv from 'ajv';
 import { handleMcp } from './mcp.ts';
 import { GRAPH_UI_URI } from './mcp-app.ts';
 import { DISTRIBUTION_MCP_KINDS, PUBLIC_KIND_ROWS } from './typed-values.fixtures.ts';
+import plugin from '../plugin/plugin.json' with { type: 'json' };
 
 const URL_BASE = 'https://equation.io/mcp';
 const ajv = new Ajv({ strict: true });
@@ -73,6 +74,24 @@ describe('mcp endpoint', () => {
     expect(body.result.protocolVersion).toBe('2025-06-18');
     expect(body.result.capabilities.tools).toBeDefined();
     expect(body.result.serverInfo.name).toBe('equation');
+  });
+
+  it('matches the plugin package uploaded to the OpenAI Plugins dashboard', async () => {
+    const { interface: listing, review } = plugin.extensions['com.openai'];
+    const init = await rpc('initialize', { protocolVersion: '2025-06-18' });
+    expect(init.body.result.serverInfo.title).toBe(listing.displayName);
+    // Submission limits the dashboard enforces only after upload.
+    expect(listing.displayName.length).toBeLessThanOrEqual(30);
+    expect(listing.shortDescription.length).toBeLessThanOrEqual(30);
+    expect(listing.longDescription.length).toBeLessThanOrEqual(4000);
+    expect(review.test_cases.positive).toHaveLength(5);
+    expect(review.test_cases.negative).toHaveLength(3);
+    // Review cases name only tools the server lists.
+    const { body } = await rpc('tools/list');
+    const names = body.result.tools.map((t: { name: string }) => t.name);
+    for (const c of review.test_cases.positive) {
+      for (const tool of c.tools_triggered.split(',')) expect(names).toContain(tool.trim());
+    }
   });
 
   it('falls back to its latest version for unknown requested versions', async () => {
