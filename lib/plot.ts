@@ -511,7 +511,7 @@ function classifyLowered(
       },
     };
   }
-  const misread = conditionAsValue(expr, fields);
+  const misread = hasConditions(fields) && conditionAsValue(expr, fields);
   if (misread) throw new Error(`${misread} is a condition, not a number — read it in braces, like {${misread}: 1}.`);
   const coordinate = coordinateRow(expr, fields);
   expr = lowerCoordinateFlow(expr, fields, timeDerivative);
@@ -1040,6 +1040,14 @@ function classifyLowered(
   if (vars.has('z')) return done({ kind: 'scalar-field', expr, dimension: 3 });
   if (hasSpace) return done({ kind: 'scalar-field', expr });
   return done({ kind: 'value', expr });
+}
+
+/** Whether a document's fields hold a named condition, asked once per document. */
+const conditionsIn = new WeakMap<object, boolean>();
+function hasConditions(fields: Record<string, Expr>): boolean {
+  let held = conditionsIn.get(fields);
+  if (held === undefined) conditionsIn.set(fields, (held = Object.values(fields).some(e => e.kind === 'ineq')));
+  return held;
 }
 
 /**

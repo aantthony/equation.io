@@ -63,9 +63,9 @@ const NEG_INF: Expr = { kind: 'neg', a: INF };
 export interface MeasureHost {
   /** Resolve a parsed expression (functions inlined, Σ/∫ expanded). */
   resolve(e: Expr): Expr;
-  /** The inequality a name or call stands for (`within = 0 < x < 1`), or
-   *  null: a filter reads it as if written there. */
-  condition?(e: Expr): Expr | null;
+  /** resolve, with a named condition (`within = 0 < x < 1`) written in: a
+   *  filter reads it as if written there. */
+  resolveCondition?(e: Expr): Expr;
   /** ∫ body dv from lo to hi as a verified closed form, or null when there
    *  is none; ±∞ bounds are `inf` / `-inf`. */
   integrate(body: Expr, v: string, lo: Expr, hi: Expr): Expr | null;
@@ -122,12 +122,12 @@ export function reduceOverSet(name: string, raw: Expr, host: MeasureHost): { exp
   let resolved: () => Expr;
   const filter = barePiecewise(raw);
   if (filter) {
-    conds = filter.conds.map(c => host.condition?.(c) ?? host.resolve(c));
+    conds = filter.conds.map(c => (host.resolveCondition ?? host.resolve)(c));
     value = host.resolve(filter.value);
     resolved = () => host.resolve(raw);
   } else {
     // count(within): a named condition alone is the filter it names.
-    const whole = host.condition?.(raw) ?? host.resolve(raw);
+    const whole = (host.resolveCondition ?? host.resolve)(raw);
     resolved = () => whole;
     // Or handed back by a function: f(k) = {0 < x < k, x > 1/2: x} is the
     // same filter in total(f(1)) as written out, since f(1) is its body.

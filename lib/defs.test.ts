@@ -374,6 +374,29 @@ describe('named conditions', () => {
     expect(info([...doc, 'total({within, x > 0.5: x})'])).toBe('= 0.375');
   });
 
+  it('is a value of its own, so what is built on a constant one stays constant', () => {
+    const doc = ['a = 1', 'ok = a < 2'];
+    const last = (rows: string[]) => analyzeRows([...doc, ...rows], { readouts: true }).rows.at(-1)!;
+    expect(last(['b = {ok: 3, 4}', 'L = [b, 2]', 'L']).info).toBe('= [3, 2]');
+    expect(last(['q(0) = 1', "q' = {ok: 1, -1}", 'q']).error).toBeUndefined();
+    expect(last(['f(p) = {ok: p, -p}', 'a_n = f(n)', 'a_3']).info).toBe('= 3');
+    expect(last(['b = {ok: 3, 4}', 'b = 3']).error).toBe('b is already defined.');
+  });
+
+  it('filters a reduction in a function body, unless a parameter would capture it', () => {
+    const info = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
+    // Above or below the function, the same.
+    expect(info(['within = 0 < x < 1', 'g(k) = total({within: k})', 'g(3)'])).toBe('= 3');
+    expect(info(['g(k) = total({within: k})', 'within = 0 < x < 1', 'g(3)'])).toBe('= 3');
+    for (const rows of [
+      ['within = 0 < x < y', 'g(y) = total({within: 1})'],
+      ['g(y) = total({within: 1})', 'within = 0 < x < y'],
+    ])
+      expect(analyzeRows(rows).rows.find(r => r.text.startsWith('g'))!.error).toBe(
+        "within reads y, which this function's parameter y would capture — rename the parameter.",
+      );
+  });
+
   it('is defined once', () => {
     expect(analyzeRows(['within = x < 1', 'within = x > 3']).rows[1].error).toBe('within is already defined.');
     expect(analyzeRows(['a = 1', 'ok = a < 2', 'ok = a > 5']).rows[2].error).toBe('ok is already defined.');
@@ -388,10 +411,11 @@ describe('named conditions', () => {
     // when a row reads it.
     expect(analyzeRows(['a = 1', 'g = {a: 1, 0}']).rows[1].error).toMatch(/^a is not a condition/);
     expect(analyzeRows(['f(p) = {p: 1, 0}', 'y = f(x)']).rows[1].error).toMatch(/^x is not a condition/);
-    // A condition read as a number says which it is.
-    expect(analyzeRows(['within = x < 1', 'y = 2 within']).rows[1].error).toBe(
-      'within is a condition, not a number — read it in braces, like {within: 1}.',
-    );
+    // A condition read as a number says which it is, in a row or a definition.
+    const asNumber = 'within is a condition, not a number — read it in braces, like {within: 1}.';
+    expect(analyzeRows(['within = x < 1', 'y = 2 within']).rows[1].error).toBe(asNumber);
+    expect(analyzeRows(['within = x < 1', 'g = within + 1']).rows[1].error).toBe(asNumber);
+    expect(analyzeRows(['within = x < 1', 'P = (within, 1)']).rows[1].error).toBe(asNumber);
     // A comparison over a list is the members it keeps (docs/multisets.md).
     const list = analyzeRows(['L = [1, 2, 3]', 'big = L > 1', '{big: L}', 'big']).rows;
     expect(list[2].error).toMatch(/^big is a list, not a condition/);

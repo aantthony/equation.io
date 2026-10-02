@@ -17,7 +17,7 @@ export type NumericBinding = Readonly<
   | { tag: 'scalar'; role: 'const' | 'field'; expr: Expr }
   /** `within = r < R`: an inequality with a name, written in wherever a
    *  condition reads it (`{within: 1}`). Not a field: it has no value. */
-  | { tag: 'scalar'; role: 'condition'; expr: Expr & { kind: 'ineq' } }
+  | { tag: 'scalar'; role: 'condition'; expr: Expr }
   | { tag: 'vector'; role: 'const' | 'field'; components: Components }
   | { tag: 'scalar'; role: 'state'; deriv: Expr; init: Expr }
   | { tag: 'vector'; role: 'state'; deriv: Components; init: Components }
@@ -263,6 +263,7 @@ export type ValueDefinitions = Pick<
   Env,
   | 'consts'
   | 'fields'
+  | 'conditions'
   | 'states'
   | 'fns'
   | 'mats'
