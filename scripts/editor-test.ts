@@ -928,13 +928,59 @@ await scenario('replacing the document resets the live view', async () => {
   await load(page, ['y = x^2', 'view(x = -0.5..0.5, y = -0.5..0.5)']);
   await page.waitForFunction(() => !!(window as unknown as { __eq?: { view: { upp: number } } }).__eq);
   const tight = await page.evaluate(() => (window as unknown as { __eq: { view: { upp: number } } }).__eq.view.upp);
-  await page.evaluate(() => {
-    const item = [...document.querySelectorAll('.ex-item')].find(el => el.childNodes[0]?.textContent === 'parabola');
-    (item as HTMLElement | undefined)?.click();
-  });
+  await page.click('#examples');
+  await page.locator('.exd-search').fill('parabola');
+  await page
+    .locator('.exd-card')
+    .filter({ has: page.locator('.exd-name', { hasText: /^parabola$/ }) })
+    .click();
   await page.waitForFunction(() => !decodeURIComponent(location.pathname).includes('view('));
   const open = await page.evaluate(() => (window as unknown as { __eq: { view: { upp: number } } }).__eq.view.upp);
   check('unframed example is not stuck in the previous window', open > tight * 2, `tight=${tight} open=${open}`);
+});
+
+await scenario('Fourier example links views and recomputes reconstruction from its slider', async () => {
+  await load(page, ['y = x']);
+  await page.click('#examples');
+  await page.locator('.exd-search').fill('signal spectrum reconstruction');
+  await page
+    .locator('.exd-card')
+    .filter({ has: page.locator('.exd-name', { hasText: /^signal, spectrum and reconstruction$/ }) })
+    .click();
+  const snapshot = () =>
+    page.evaluate(async () => {
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const { equations, panels } = (window as any).__eq;
+      return {
+        field: equations.find((e: any) => e.text === 'y = reconstruct(f, N)')?.gpu?.field ?? '',
+        linked:
+          panels.length === 3 && panels[1].view.cx === panels[2].view.cx && panels[1].view.upp === panels[2].view.upp,
+      };
+    });
+  const before = await snapshot();
+  check('Fourier example aligns the original and reconstructed x axes', before.linked);
+  const slider = page.locator('.eq-slider-range').first();
+  await slider.evaluate((el: HTMLInputElement) => {
+    el.value = '5';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const after = await snapshot();
+  check(
+    'harmonic slider adds the phase-shifted frequency to the shader',
+    !!before.field && before.field !== after.field && after.field.includes('sin('),
+  );
+  check('Fourier example has no row errors', (await page.locator('.eq-line.invalid').count()) === 0);
+  await page.waitForFunction(() => decodeURIComponent(location.pathname).includes('N = clamp(round(5)'));
+  await page.reload();
+  await page.waitForSelector('.eq-line');
+  const reloaded = await snapshot();
+  check(
+    'Fourier harmonic choice survives the share URL reload',
+    reloaded.field === after.field,
+    JSON.stringify({ after, reloaded }),
+  );
 });
 
 await scenario('png button downloads a screenshot', async () => {

@@ -66,6 +66,14 @@ const signatures: Record<string, [string, string]> = {
     'Number of elements in a list; of a filter its measure: count(L > 2), count(x^2 + y^2 < 1) = π, count(x^2 = 2) = 2',
   ],
   hist: ['hist(L)', 'Histogram of a numeric list'],
+  fourier: [
+    'fourier(signal, lo = 0, hi = 1, samples = 256)',
+    'One-sided amplitude spectrum of a real function or ordered samples; CSV: sort(data.signal, data.row). Frequency in cycles per x unit',
+  ],
+  reconstruct: [
+    'reconstruct(signal, N, lo = 0, hi = 1, samples = 256)',
+    'Periodic Fourier approximation in x, including the mean and the first N harmonics (0–128); sampled signals use their own sample count',
+  ],
   interval: [
     'interval(a, b)',
     'Every real number from a to b: r = interval(1, 2); (r cos(2pi u), r sin(2pi u)) fills an annulus',

@@ -118,6 +118,13 @@ and larger matrices.
 
 ### 7. Fourier analysis
 
+**Implemented (spectrum and reconstruction).** `fourier(signal, lo, hi,
+samples)` draws a one-sided amplitude spectrum, and `reconstruct(signal,
+N, lo, hi, samples)` returns a periodic expression in x with the signed mean
+and first N harmonics. Functions and ordered samples (including CSV columns
+sorted by row position) work; the examples show linked original/reconstructed
+signals and a spectrum. Deferred: epicycles and wavelets.
+
 - `fourier(f)` plots the spectrum of a function (or of a data column).
 - Epicycles: a closed path in u drawn by its chain of rotating circles,
   with N terms on a slider.

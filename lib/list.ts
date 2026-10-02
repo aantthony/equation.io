@@ -40,6 +40,15 @@ import { childrenOf, mapChildren, structuralDiagnostic } from './expr.ts';
  * figure through thousands of computed points).
  */
 import { add, div } from './diff.ts';
+import { inferScalarType } from './complex.ts';
+import {
+  FOURIER_SAMPLES,
+  FOURIER_MAX_SAMPLES,
+  FOURIER_MAX_HARMONICS,
+  realFourier,
+  spectrumPoints,
+  reconstructSeries,
+} from './fourier.ts';
 import type { ResolveOpts } from './defs.ts';
 import {
   EVAL_FNS,
@@ -821,6 +830,71 @@ function holdsGap(e: Expr): boolean {
 /** Numeric values of a constant list, for order-dependent reductions. */
 function numericItems(items: readonly Expr[], ctx: Ctx, name: string): number[] {
   return items.map(it => constVal(it, ctx, `${name}(…) needs a constant list, so each element`));
+}
+
+/** Fourier consumes a signal whole, rather than mapping over its samples.
+ * Lists are multisets: only an explicit tuple has a sampling order. CSV
+ * columns become one with sort(data.signal, data.row), keeping file order.
+ */
+function lowerFourier(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
+  const reconstruction = e.name === 'reconstruct';
+  const offset = reconstruction ? 2 : 1;
+  const usage = reconstruction
+    ? 'reconstruct(signal, N) or reconstruct(signal, N, lo, hi, samples)'
+    : 'fourier(signal) or fourier(signal, lo, hi, samples)';
+  if (![offset, offset + 2, offset + 3].includes(e.args.length)) throw new Error(`Use ${usage}.`);
+  const lo = e.args[offset] ? constVal(lower(e.args[offset], ctx), ctx, 'The Fourier interval start') : 0;
+  const hi = e.args[offset + 1] ? constVal(lower(e.args[offset + 1], ctx), ctx, 'The Fourier interval end') : 1;
+  const period = hi - lo;
+  if (!(period > 0) || !Number.isFinite(period) || !Number.isFinite((2 * Math.PI) / period)) {
+    throw new Error('The Fourier interval must have finite bounds with lo < hi and a finite frequency scale.');
+  }
+  const requested = reconstruction ? constVal(lower(e.args[1], ctx), ctx, 'The number of harmonics', true) : 0;
+  if (!Number.isInteger(requested) || requested < 0 || requested > FOURIER_MAX_HARMONICS) {
+    throw new Error(`reconstruct needs a whole number of harmonics from 0 to ${FOURIER_MAX_HARMONICS}.`);
+  }
+  // Validate options before reading a possibly device-local column.
+  const sampleArg = e.args[offset + 2];
+  const sampleCount = sampleArg
+    ? constVal(lower(sampleArg, ctx), ctx, 'The Fourier sample count', true)
+    : FOURIER_SAMPLES;
+  if (!Number.isInteger(sampleCount) || sampleCount < 2 || sampleCount > FOURIER_MAX_SAMPLES) {
+    throw new Error(`The Fourier sample count must be a whole number from 2 to ${FOURIER_MAX_SAMPLES}.`);
+  }
+  const signal = settle(lower(e.args[0], ctx), ctx);
+  let xs: Float64Array;
+  if (isSeq(signal) || signal.kind === 'vec') {
+    if (sampleArg) throw new Error('A sampled signal already has a sample count; omit the samples argument.');
+    if (isSeq(signal) && (!isTuple(signal) || axesOf(signal).length !== 1)) {
+      throw new Error('Fourier samples need an order: use a tuple, or sort(data.signal, data.row) for CSV row order.');
+    }
+    if (signal.kind === 'text') throw new Error('Fourier samples must be finite real numbers.');
+    const length = signal.kind === 'data' ? signal.values.length : signal.items.length;
+    if (length < 2 || length > FOURIER_MAX_SAMPLES)
+      throw new Error(`Fourier analysis needs 2 to ${FOURIER_MAX_SAMPLES} samples.`);
+    xs = signal.kind === 'data' ? signal.values : Float64Array.from(numericItems(signal.items, ctx, e.name));
+  } else {
+    if (inferScalarType(signal) !== 'real') throw new Error('Fourier analysis needs a real signal, not a complex one.');
+    const env: Record<string, number> = {};
+    for (const name of freeVars(signal)) {
+      if (name === 'x') continue;
+      const value = ctx.opts.consts?.[name];
+      if (value === undefined)
+        throw new Error(`Fourier signals must be static functions of x; "${name}" has no static value.`);
+      env[name] = value;
+    }
+    xs = new Float64Array(sampleCount);
+    for (let j = 0; j < sampleCount; j++) xs[j] = evaluate(signal, { ...env, x: lo + period * (j / sampleCount) });
+  }
+  if (!Number.isFinite((2 * Math.PI * Math.floor(xs.length / 2)) / period))
+    throw new Error('The Fourier frequency scale is not finite; use a wider interval.');
+  const max = Math.min(Math.floor(xs.length / 2), FOURIER_MAX_HARMONICS);
+  if (reconstruction && requested > max)
+    throw new Error(`This signal has only ${Math.floor(xs.length / 2)} harmonics; use N from 0 to ${max}.`);
+  const coefficients = realFourier(xs);
+  return reconstruction
+    ? reconstructSeries(coefficients, requested, lo, period)
+    : listOf(spectrumPoints(coefficients, period), ctx);
 }
 
 /**
@@ -1738,6 +1812,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
       return lowerComp(e, ctx);
     case 'call': {
       if (e.name === MAP) return lowerMap(e, ctx);
+      if (e.name === 'fourier' || e.name === 'reconstruct') return lowerFourier(e, ctx);
       if (e.name === 'hist') {
         // How many arguments there are, and what the bin count is, are
         // questions about the row — not about the file. Asked after the list
