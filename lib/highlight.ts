@@ -164,7 +164,7 @@ function bindingInfo(name: string, b: Binding): NameInfo {
       const over = overVars(paramsOf([b.expr]));
       return {
         signature: name,
-        type: b.expr.kind === 'ineq' ? 'condition' : 'field',
+        type: b.role === 'condition' ? 'condition' : 'field',
         description: over.length ? `Depends on ${over.join(', ')}` : undefined,
       };
     }

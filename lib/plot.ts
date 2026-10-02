@@ -511,6 +511,8 @@ function classifyLowered(
       },
     };
   }
+  const misread = conditionAsValue(expr, fields);
+  if (misread) throw new Error(`${misread} is a condition, not a number — read it in braces, like {${misread}: 1}.`);
   const coordinate = coordinateRow(expr, fields);
   expr = lowerCoordinateFlow(expr, fields, timeDerivative);
   const ode = matchODE(expr);
@@ -1038,6 +1040,27 @@ function classifyLowered(
   if (vars.has('z')) return done({ kind: 'scalar-field', expr, dimension: 3 });
   if (hasSpace) return done({ kind: 'scalar-field', expr });
   return done({ kind: 'value', expr });
+}
+
+/**
+ * A named condition (`within = r < R`, written in with the fields) read as a
+ * number — anywhere but a whole row or a piecewise case's condition — which
+ * would otherwise surface as a bare "Unexpected inequality" naming nothing.
+ */
+function conditionAsValue(e: Expr, fields: Record<string, Expr>, whole = true): string | null {
+  if (e.kind === 'var') return !whole && fields[e.name]?.kind === 'ineq' ? e.name : null;
+  const parts =
+    e.kind === 'piecewise'
+      ? [
+          ...e.cases.flatMap(c => (c.cond.kind === 'var' ? [c.value] : [c.cond, c.value])),
+          ...(e.otherwise ? [e.otherwise] : []),
+        ]
+      : childrenOf(e);
+  for (const part of parts) {
+    const hit = conditionAsValue(part, fields, false);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /** A stand-in for the integration variable while the integrand is lowered:

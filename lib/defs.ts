@@ -1,6 +1,6 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
 import { MAP, childrenOf, LOOP_LIMIT, LOOP_LIMIT_MAX, RECUR, isRecur, loopLeaves } from './expr.ts';
-import { mapChildren, structuralDiagnostic, legacyCallArgs } from './expr.ts';
+import { mapChildren, notACondition, structuralDiagnostic, legacyCallArgs } from './expr.ts';
 import { exprKey, type ProductGlyph } from './expr.ts';
 /**
  * User definitions and derivative syntax.
@@ -2203,22 +2203,34 @@ export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr
 }
 
 /**
- * A piecewise condition written as a name (`within = r < R`, then
- * `{within: 1}`) or a call: the inequality it stands for, written in here —
- * a named field is otherwise inlined only when the row classifies, and every
- * backend reads a condition by its shape. In a definition the name may be a
- * parameter, written in when the function is called.
+ * The inequality a resolved name or call stands for — a document's named
+ * condition (`within = r < R`), or a function body that is one — or null.
+ * A function's parameter is its argument, never the document's name.
+ */
+function conditionOf(resolved: Expr, ctx: Ctx): Expr | null {
+  if (resolved.kind === 'ineq' || resolved.kind === 'eq') return resolved;
+  if (resolved.kind !== 'var' || ctx.opts.params?.has(resolved.name)) return null;
+  const value = ctx.opts.definition?.(resolved.name);
+  return value?.kind === 'ineq' ? value : null;
+}
+
+/**
+ * A piecewise condition written as a name (`{within: 1}`) or a call: in a
+ * row, the inequality it stands for, written in here, since every backend
+ * reads a condition by its shape. In a definition the name stays as written,
+ * as a field's does, and is written in when a row reads it — so a function's
+ * x cannot capture the condition's x, and rows above and below the
+ * condition's definition read alike.
  */
 function namedCondition(raw: Expr, resolved: Expr, ctx: Ctx): Expr {
   if (raw.kind !== 'var' && raw.kind !== 'call') return resolved;
-  const value = resolved.kind === 'var' ? (ctx.opts.definition?.(resolved.name) ?? resolved) : resolved;
-  if (value.kind === 'ineq' || value.kind === 'eq') return value;
   if (ctx.opts.inDefinition) return resolved;
+  const value = conditionOf(resolved, ctx);
+  if (value) return value;
   // `big = L > 1` is the members it keeps (docs/multisets.md), a list.
   if (raw.kind === 'var' && ctx.opts.isList?.(raw.name))
     throw new Error(`${raw.name} is a list, not a condition; write the comparison itself in the braces.`);
-  const shown = raw.kind === 'var' ? raw.name : `${raw.name}(…)`;
-  throw new Error(`${shown} is not a condition; piecewise conditions are inequalities, like x < 0.`);
+  throw notACondition(raw);
 }
 
 function rx(e: Expr, ctx: Ctx): Expr {
@@ -2306,6 +2318,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (isReductionCall(e)) {
         const over = reduceOverSet(e.name, e.args[0], {
           resolve: x => rx(x, ctx),
+          condition: x => (x.kind === 'var' || x.kind === 'call' ? conditionOf(rx(x, ctx), ctx) : null),
           integrate: (body, v, lo, hi) => integral(body, v, lo, hi, ctx, true),
           consts: ctx.opts.consts,
           isList: ctx.opts.isList,
@@ -3665,7 +3678,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   ] as const) {
     for (const [name, expr] of store) {
       const owner = compOwner.get(name);
-      if (!owner) env.bind(name, { tag: 'scalar', role, expr });
+      if (!owner && expr.kind === 'ineq') env.bind(name, { tag: 'scalar', role: 'condition', expr });
+      else if (!owner) env.bind(name, { tag: 'scalar', role, expr });
       else if (!env.names.has(owner)) {
         env.bind(owner, {
           tag: 'vector',

@@ -352,11 +352,46 @@ describe('named conditions', () => {
     expect(row.cls?.object.kind).toBe('curve');
   });
 
+  it('is written into a function body when a row reads it, as a field is', () => {
+    // The body's x is the parameter; the condition's x is the plane's, in
+    // whichever order the rows come.
+    const inline = objects(['y = {x < 1: 2, 5}'])[0];
+    expect(objects(['k = x < 1', 'f(x) = {k: x, 5}', 'y = f(2)'])[2]).toBe(inline);
+    expect(objects(['f(x) = {k: x, 5}', 'k = x < 1', 'y = f(2)'])[2]).toBe(inline);
+    const disc = objects(['z = {x^2 + y^2 < 1: 1, 0}'])[0];
+    expect(objects(['inside = x^2 + y^2 < 1', 'g(x, y) = {inside: 1, 0}', 'z = g(x - 1, y)'])[2]).toBe(disc);
+    // A parameter is its argument, not the document's name.
+    expect(objects(['within = x < 1', 'f(within) = {within: 1, 0}', 'y = f(x > 2)'])[2]).toBe(
+      objects(['y = {x > 2: 1, 0}'])[0],
+    );
+  });
+
+  it('filters a reduction, alone or among other conditions', () => {
+    const info = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
+    const doc = ['within = 0 < x < 1'];
+    expect(info([...doc, 'mean({within: x})'])).toBe('= 0.5');
+    expect(info([...doc, 'count(within)'])).toBe('= 1');
+    expect(info([...doc, 'total({within, x > 0.5: x})'])).toBe('= 0.375');
+  });
+
+  it('is defined once', () => {
+    expect(analyzeRows(['within = x < 1', 'within = x > 3']).rows[1].error).toBe('within is already defined.');
+    expect(analyzeRows(['a = 1', 'ok = a < 2', 'ok = a > 5']).rows[2].error).toBe('ok is already defined.');
+  });
+
   it('says what a name is when it is not a condition', () => {
     expect(analyzeRows(['a = 1', 'y = {a: x}']).rows[1].error).toBe(
       'a is not a condition; piecewise conditions are inequalities, like x < 0.',
     );
     expect(analyzeRows(['y = {sin(x): 1}']).rows[0].error).toMatch(/^sin\(…\) is not a condition/);
+    // …in a definition too, and from a function body, where it is checked
+    // when a row reads it.
+    expect(analyzeRows(['a = 1', 'g = {a: 1, 0}']).rows[1].error).toMatch(/^a is not a condition/);
+    expect(analyzeRows(['f(p) = {p: 1, 0}', 'y = f(x)']).rows[1].error).toMatch(/^x is not a condition/);
+    // A condition read as a number says which it is.
+    expect(analyzeRows(['within = x < 1', 'y = 2 within']).rows[1].error).toBe(
+      'within is a condition, not a number — read it in braces, like {within: 1}.',
+    );
     // A comparison over a list is the members it keeps (docs/multisets.md).
     const list = analyzeRows(['L = [1, 2, 3]', 'big = L > 1', '{big: L}', 'big']).rows;
     expect(list[2].error).toMatch(/^big is a list, not a condition/);
