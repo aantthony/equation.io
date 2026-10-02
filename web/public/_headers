@@ -17,5 +17,12 @@
   Cache-Control: public, max-age=31536000, immutable
   Access-Control-Allow-Origin: *
 
+# The MCP App page loads these from the host's frame, and hosts keep old
+# copies of that page, so they must always fetch the current build's entries
+# (see mcpAppLoader in vite.config.ts).
+/mcp-app/*
+  Cache-Control: no-cache
+  Access-Control-Allow-Origin: *
+
 /.well-known/openai-apps-challenge
   Content-Type: text/plain; charset=utf-8

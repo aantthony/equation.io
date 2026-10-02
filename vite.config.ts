@@ -1,6 +1,52 @@
 import { fileURLToPath } from 'node:url';
 import { cloudflare } from '@cloudflare/vite-plugin';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+
+/**
+ * Hosts keep the MCP App page they were served: ChatGPT stores a copy with
+ * each conversation. A copy that names this build's hashed bundles runs this
+ * build forever, or nothing once a deploy removes them. So the built page
+ * names two stable files instead, /mcp-app/app.js and /mcp-app/app.css, which
+ * import the hashed entries. They are revalidated on every load (_headers),
+ * so any copy a host kept runs the current build.
+ */
+function mcpAppLoader(): Plugin {
+  return {
+    name: 'mcp-app-loader',
+    apply: 'build',
+    enforce: 'post',
+    generateBundle: {
+      order: 'post',
+      handler(_, bundle) {
+        const page = bundle['mcp-app/index.html'];
+        if (page?.type !== 'asset') return;
+        const scripts: string[] = [];
+        const styles: string[] = [];
+        const html = String(page.source)
+          .replace(/\n\s*<script type="module" crossorigin src="\/(assets\/[^"]+\.js)"><\/script>/g, (_, src) => {
+            scripts.push(src);
+            return '';
+          })
+          .replace(/\n\s*<link rel="stylesheet" crossorigin href="\/(assets\/[^"]+\.css)">/g, (_, href) => {
+            styles.push(href);
+            return '';
+          });
+        if (!scripts.length || html.includes('/assets/')) this.error('mcp-app/index.html: unexpected asset tags');
+        // Relative to /mcp-app/, so they resolve against our origin from
+        // inside the host's frame.
+        const js = scripts.map(src => `import '../${src}';\n`).join('');
+        const css = styles.map(href => `@import url('../${href}');\n`).join('');
+        this.emitFile({ type: 'asset', fileName: 'mcp-app/app.js', source: js });
+        this.emitFile({ type: 'asset', fileName: 'mcp-app/app.css', source: css });
+        page.source = html.replace(
+          '</head>',
+          '  <script type="module" crossorigin src="/mcp-app/app.js"></script>\n' +
+            '  <link rel="stylesheet" crossorigin href="/mcp-app/app.css">\n</head>',
+        );
+      },
+    },
+  };
+}
 
 export default defineConfig({
   root: 'web',
@@ -40,6 +86,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    mcpAppLoader(),
     cloudflare({
       configPath: '../wrangler.jsonc',
       // The repo root's .wrangler/state, where `wrangler d1 …` and

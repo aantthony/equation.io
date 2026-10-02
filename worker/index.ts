@@ -265,7 +265,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/.well-known' || url.pathname.startsWith('/.well-known/')) {
       const response = await env.ASSETS.fetch(request);
-      // This namespace serves machine-readable files, never the HTML SPA fallback.
+      // This namespace serves machine-readable files, never the HTML 404 page.
       if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() === 'text/html') {
         return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
       }

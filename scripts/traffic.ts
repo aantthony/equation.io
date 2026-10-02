@@ -7,10 +7,11 @@
  *
  * Site: unique IPs per day on each page, from the zone's HTTP analytics, using
  * GETs with a browser user agent only. The dashboard's "unique visitors" also
- * counts scanners probing /.env and the like (the single-page fallback answers
- * them 200), so it reads several times too high. This is still an upper bound
- * on people: a scanner claiming to be Chrome gets through, and a school behind
- * one IP counts once. IPs are fetched to be counted and never printed.
+ * counts scanners probing /.env and the like (a 404 since October 2026, the
+ * app before that), so it reads several times too high. This is still an
+ * upper bound on people: a scanner claiming to be Chrome gets through, and a
+ * school behind one IP counts once. IPs are fetched to be counted and never
+ * printed.
  *
  * MCP: POSTs to /mcp per day and by user agent, from the same analytics. Most
  * come from registries and liveness monitors, and one session is several
