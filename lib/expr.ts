@@ -1077,7 +1077,7 @@ function* mergeBracedSubscripts(bare: Iterable<Token>): Iterable<Token> {
  * Insert implicit multiplication tokens (2x, x(x+1), (x+1)(x-1), x y) and
  * rewrite unary +/- into a dedicated prefix operator. Touching factors get
  * [impl], which binds tighter than '/'; factors with a space between get
- * [spaced], which ranks with it.
+ * [spaced], which ranks with it — except in a Leibniz operand.
  */
 function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   let last: Token | null = null;
@@ -1088,8 +1088,18 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   const opened: (string | null)[] = [];
   /** What the bracket `last` closed was. */
   let closed: string | null = null;
+  /** Bracket depths where a Leibniz head (`d/dx`, `d^2/dx^2`) is taking its
+   *  operand. There every juxtaposition is [impl], spaced or not, so
+   *  `d/dx x sin(x)` is d / (dx · x · sin(x)) and differentiates the product;
+   *  the operand ends at the next operator or closing bracket at that depth,
+   *  so `(d/dx x^2) x`, `d/dx x * x` and `d/dx x^2 P · Q` keep x outside. */
+  const leibniz: number[] = [];
+  /** The last tokens emitted below, enough to spot `d / dx` and `d ^ k / dx`. */
+  const recent: string[] = [];
   for (const token of bare) {
     if (token.type === 'whitespace') continue;
+    while (leibniz.length && leibniz[leibniz.length - 1] > opened.length) leibniz.pop();
+    const inLeibniz = leibniz[leibniz.length - 1] === opened.length;
 
     // A postfix operator (per the ops table: '!') ends a value, so 5!x and
     // 3!(x+1) multiply implicitly.
@@ -1117,7 +1127,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         closed = opened.pop() ?? null;
       } else {
         barDepth++;
-        if (afterValue) yield op(last!.loc[1] === token.loc[0] ? '[impl]' : '[spaced]');
+        if (afterValue) yield op(inLeibniz || last!.loc[1] === token.loc[0] ? '[impl]' : '[spaced]');
         yield { ...token, type: 'symbol', str: 'abs' };
         yield op('[apply]');
         const open: Token = { ...token, type: 'parenopen', str: '(', call: true };
@@ -1171,7 +1181,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         last!.type === 'symbol' &&
         isFnName(last!.str);
       indexing = isIndex;
-      yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : touching ? '[impl]' : '[spaced]');
+      yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : inLeibniz || touching ? '[impl]' : '[spaced]');
       if (isFnCall) emit = { ...token, call: true };
     }
 
@@ -1182,6 +1192,13 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
       );
     }
     closed = emit.type === 'parenclose' ? (opened.pop() ?? null) : null;
+    if (inLeibniz && emit.type === 'operator' && emit.str !== '^' && emit.str !== '!' && emit.str !== '.')
+      leibniz.pop();
+    if (emit.type === 'symbol' && /^d[A-Za-z]$/.test(emit.str) && /(^| )d( \^ \d+)? \/$/.test(recent.join(' '))) {
+      leibniz.push(opened.length);
+    }
+    recent.push(emit.str);
+    if (recent.length > 4) recent.shift();
     yield emit;
     last = emit;
     path =

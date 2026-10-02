@@ -221,6 +221,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     `osculating(C, t/10)` (u0 past 1 is the same point again).
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
+  The operand is every factor written after `dx`, with or without spaces,
+  up to the next operator or closing bracket: `d/dx x sin(x)` is the
+  derivative of x sin(x), while `d/dx x^3/x` is 3x²/x, `d/dx x * x` is
+  1·x, and `(d/dx x^2) x` is 2x·x.
   Along x, y, or z it works through lists too: with `N = [1..4]`,
   `y = d/dx x^N` is a family of curves, and `y = d/dx [sin(x), x^2]` draws
   `y = cos(x)` and `y = 2x`.
