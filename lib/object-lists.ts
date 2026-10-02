@@ -4,6 +4,7 @@ import { lowerMatrix, rowsAsPoints } from './geom.ts';
 import { mapChildren } from './expr.ts';
 import { tensorNode, tensorOfNode } from './tensor.ts';
 import { exceedsNodes } from './size.ts';
+import { hasInterval } from './interval.ts';
 /** Lift lists in object positions before scalar geometry lowering. Existing
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
 import { type ResolveOpts, compsOf, listGetter, tensorGetter } from './defs.ts';
@@ -88,7 +89,15 @@ const holdsFigure = (e: Expr): boolean => {
 };
 
 export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts = {}, named = false): Expr {
-  const plotVariable = (v: string) => ['x', 'y', 'z', 'u', 'v'].includes(v) || defs.fields.has(v);
+  // A field over position or u, v — not a complex constant (`a = 1 + i`),
+  // which is written in like a field but is one value.
+  const positional = (f: Expr) => [...freeVars(f)].some(v => ['x', 'y', 'z', 'u', 'v', 'w'].includes(v));
+  const plotVariable = (v: string) =>
+    ['x', 'y', 'z', 'u', 'v'].includes(v) || (defs.fields.has(v) && positional(defs.fields.get(v)!));
+  // Drawn over something continuous: a plot variable, or an interval, which
+  // is swept as u is (lib/interval.ts) — so [(interval(0, 1), 1), …] is a
+  // family of segments, as [(u, 1), …] is of curves.
+  const continuous = (e: Expr) => [...freeVars(e)].some(plotVariable) || hasInterval(e);
   const baseGet = listGetter(defs);
   const get = (name: string): Expr | null =>
     baseGet(name) ?? (defs.mats.has(name) ? rowsAsPoints(defs.mats.get(name)!, name) : null);
@@ -320,7 +329,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       const value = ordinary(e);
       // Lists of functions/parametrics become families; constant lists retain
       // their existing dot/scatter representation and unbounded data path.
-      if (value.kind !== 'list' || !value.items.some(it => [...freeVars(it)].some(plotVariable))) return value;
+      if (value.kind !== 'list' || !value.items.some(continuous)) return value;
       break;
     } catch (err) {
       originalError ??= err;
@@ -743,8 +752,8 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       outside ||
       source.kind === 'eq' ||
       source.kind === 'ineq' ||
-      [...freeVars(source)].some(plotVariable) ||
-      lists.some(l => l.items.some(e => [...freeVars(e)].some(plotVariable))) ||
+      continuous(source) ||
+      lists.some(l => l.items.some(continuous)) ||
       (source.kind === 'call' && (GEOM_STATEMENTS.has(source.name) || WHOLE_EXPR_NAMES.has(source.name)));
     const limit =
       outside || (source.kind === 'call' && POINT_FIGURES.has(source.name)) ? FIGURE_FAMILY_MAX : FAMILY_MAX;
@@ -754,7 +763,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     );
     const valuesOnly = members.every(
       m =>
-        ![...freeVars(m)].some(plotVariable) &&
+        !continuous(m) &&
         !['figure', 'trail', 'label', 'hist', 'family'].includes(m.kind) &&
         m.kind !== 'eq' &&
         m.kind !== 'ineq' &&

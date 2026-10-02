@@ -40,8 +40,8 @@ import { childrenOf, mapChildren, structuralDiagnostic } from './expr.ts';
  * figure through thousands of computed points).
  */
 import { add, div } from './diff.ts';
-import { inferScalarType, usesComplex } from './complex.ts';
-import { complexParts } from './complex-parts.ts';
+import { isComplexValued } from './complex.ts';
+import { realValue } from './complex-parts.ts';
 import type { ResolveOpts } from './defs.ts';
 import {
   EVAL_FNS,
@@ -95,14 +95,7 @@ const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
 /** Members that are complex numbers, which have no order or spread along a
  *  line (`re(z)` only passes through them); lib/object-lists.ts rethrows this. */
 function refuseComplex(name: string, items: readonly Expr[]): void {
-  const complex = (it: Expr): boolean => {
-    try {
-      return usesComplex(it) && inferScalarType(it) === 'complex';
-    } catch {
-      return false;
-    }
-  };
-  if (items.some(complex))
+  if (items.some(isComplexValued))
     throw new Error(
       `${name}(…) takes real numbers, and these are complex: reduce them with abs(…), re(…) or im(…) first.`,
     );
@@ -480,10 +473,7 @@ const BIN_OPS: Record<string, (a: number, b: number) => number> = {
 function constVal(e: Expr, ctx: Ctx, what: string, whole = false): number {
   // A real value reached through complex ones (|1 + i|, re(e^(iπ/3))) is its
   // real part; i is the imaginary unit, not a constant to ask for.
-  if (freeVars(e).has('i')) {
-    if (inferScalarType(e) === 'complex') throw new Error(`${what} must be real — take re(…), im(…) or abs(…).`);
-    e = complexParts(e)[0];
-  }
+  e = realValue(e, what);
   const env: Record<string, number> = {};
   for (const fv of freeVars(e)) {
     const v = ctx.opts.consts?.[fv];
@@ -632,6 +622,17 @@ const isEquality = (e: Expr): e is Expr & { kind: 'eqtest' } => e.kind === 'eqte
 
 const isMask = (e: Expr): e is Expr & { kind: 'list' } =>
   isList(e) && e.items.length > 0 && e.items.every(it => it.kind === 'ineq' || isEquality(it));
+
+/** A comparison whose sides are real values reached through complex ones
+ *  (`re(L) > 0`), as their real parts (realValue). */
+function realSides(cond: Expr, what: string): Expr {
+  if (cond.kind === 'ineq') return { ...cond, l: realSides(cond.l, what), r: realSides(cond.r, what) };
+  if (isEquality(cond)) {
+    const real = (a: Expr) => (a.kind === 'str' ? a : realValue(a, what));
+    return { ...cond, args: [real(cond.args[0]), real(cond.args[1])] };
+  }
+  return realValue(cond, what);
+}
 
 /** Whether one comparison (or a chain like 18 <= a < 65) holds. */
 function holds(cond: Expr, env: Record<string, number>): boolean {
@@ -792,6 +793,7 @@ function dropUndefined(e: Expr, ctx: Ctx): Expr {
 function maskValues(mask: Expr, opts: ResolveOpts): boolean[] | null {
   if (!isMask(mask)) return null;
   return mask.items.map(cond => {
+    cond = realSides(cond, 'A filter');
     const env: Record<string, number> = {};
     for (const fv of freeVars(cond)) {
       const v = opts.consts?.[fv];
@@ -1084,6 +1086,7 @@ function sortKeys(key: Seq, ctx: Ctx): Float64Array {
   }
   return Float64Array.from(key.items, it => {
     if (it.kind === 'vec') throw new Error('A sort key has to be a number per element, like P.x.');
+    it = realValue(it, 'A sort key');
     bind(it);
     return evaluate(it, env);
   });

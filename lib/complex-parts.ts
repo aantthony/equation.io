@@ -1,6 +1,6 @@
 /** Real expression components for CPU solving and point rendering. */
 import { type Expr, RECUR, childrenOf, isRecur } from './expr.ts';
-import { usesComplex, inferScalarType, loopTypes, type ScalarType } from './complex.ts';
+import { usesComplex, inferScalarType, isComplexValued, loopTypes, type ScalarType } from './complex.ts';
 import { num, bin, call } from './coordinate.ts';
 import { add as realAdd, mul as realMul, pow } from './diff.ts';
 import { countNodes } from './size.ts';
@@ -18,6 +18,26 @@ const exp = (a: Pair): Pair => [
   bin('*', call('exp', a[0]), call('sin', a[1])),
 ];
 const ln = (a: Pair): Pair => [bin('/', call('ln', norm2(a)), num(2)), call('atan2', a[1], a[0])];
+
+/**
+ * A real value reached through complex ones (`|1 + i|`, `re(e^(iπ/3))`) as
+ * its real part, which a real evaluator can read — `e` itself when it meets
+ * none. A complex value has no real reading, and `what` says so. The split is
+ * bounded as a complex path's is (lib/path.ts).
+ */
+export function realValue(e: Expr, what: string): Expr {
+  if (!usesComplex(e) && !hasProjection(e)) return e;
+  if (isComplexValued(e)) throw new Error(`${what} must be real — take re(…), im(…) or abs(…).`);
+  try {
+    return complexParts(e, 10000)[0];
+  } catch (error) {
+    if (error instanceof SplitTooLarge)
+      throw new Error(
+        `${what} is too large once split into real and imaginary parts — reduce the nesting or the powers.`,
+      );
+    throw error;
+  }
+}
 
 function hasProjection(e: Expr): boolean {
   if (e.kind === 'call') return ['re', 'im', 'conj', 'arg'].includes(e.name) || e.args.some(hasProjection);

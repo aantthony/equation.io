@@ -5228,10 +5228,8 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
       if (b.role === 'state')
         return `defines ${name}: a scalar state, integrated forward in time from its derivative${quiet}`;
       if (b.role === 'field') {
-        // A complex constant, or a real one reached through it, is written in
-        // like a field but holds no position.
-        const value = describeName(name, defs)?.type;
-        if (value === 'complex number' || value === 'number') return `defines ${name}: a ${value}${quiet}`;
+        // A complex constant is written in like a field but holds no position.
+        if (describeName(name, defs)?.type === 'complex number') return `defines ${name}: a complex number${quiet}`;
         return `defines ${name}: a scalar field (a value at every point, e.g. a coordinate like r or theta)${quiet}`;
       }
       if (sliderOf(eq)) return `defines ${name}: a scalar constant with a slider${quiet}`;

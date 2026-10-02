@@ -81,8 +81,8 @@ import {
 import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
-import { inferScalarType } from './complex.ts';
-import { complexParts } from './complex-parts.ts';
+import { isComplexValued } from './complex.ts';
+import { realValue } from './complex-parts.ts';
 import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
@@ -92,13 +92,6 @@ const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
 const PARAMS: ReadonlySet<string> = new Set(['u', 'v']);
 /** Position: an axis variable, or w, the complex point x + iy. */
 const onPosition = (v: string): boolean => SPACE.has(v) || v === 'w';
-const complexValued = (e: Expr): boolean => {
-  try {
-    return inferScalarType(e) === 'complex';
-  } catch {
-    return false;
-  }
-};
 
 export type Definition =
   | RegressionRow
@@ -3185,13 +3178,37 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // So is one over the parameters u, v: `c = (cos(2pi u), sin(2pi u))`
   // names a curve that later rows inline, as they inline `s = (x, y)`.
   const fieldNames = new Set<string>();
-  // A complex constant (`a = e^(iπ/3)`) has no one number to hold either: it
-  // is written in wherever its name is read, as `q = x + iy` is. A real one
-  // reached through complex values (`b = re(e^(iπ/3))`) holds its real part.
+  // A complex constant (`a = e^(iπ/3)`, `c = 2a`) has no one number to hold
+  // either: it is written in wherever its name is read, as `q = x + iy` is.
+  const complexConsts = new Map<string, Expr>();
+  const writeComplex = (e: Expr): Expr => {
+    const refs = [...freeVars(e)].filter(v => complexConsts.has(v));
+    return refs.length ? substVars(e, Object.fromEntries(refs.map(r => [r, complexConsts.get(r)!]))) : e;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [name, e] of defs.consts) {
+      if (complexConsts.has(name)) continue;
+      const written = writeComplex(e);
+      if (isComplexValued(written)) {
+        complexConsts.set(name, written);
+        changed = true;
+      }
+    }
+  }
+  for (const name of complexConsts.keys()) fieldNames.add(name);
+  // A real one reached through complex values (`b = |a|`, `re(e^(iπ/3))`)
+  // holds its real part, and stays a constant: a slider bound, a range.
   for (const [name, e] of defs.consts) {
-    if (!freeVars(e).has('i')) continue;
-    if (complexValued(e)) fieldNames.add(name);
-    else defs.consts.set(name, complexParts(e)[0]);
+    if (complexConsts.has(name)) continue;
+    const written = writeComplex(e);
+    if (written === e && !freeVars(e).has('i')) continue;
+    try {
+      defs.consts.set(name, realValue(written, name));
+    } catch (err) {
+      errors.set(name, msg(err));
+      defs.consts.delete(name);
+    }
   }
   // The fields over u, v among them, so their errors speak of curves.
   const paramNames = new Set<string>();
@@ -3319,7 +3336,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (!comps.every(Boolean)) continue;
     const vars = comps.flatMap(e => [...freeVars(e!)]);
     const param = vars.find(fv => PARAMS.has(fv));
-    if (comps.some(e => complexValued(e!))) {
+    if (comps.some(e => isComplexValued(e!))) {
       errors.set(p, `${p} has a complex component; a vector's components are real — take re(…) or im(…).`);
     } else if (param && vars.some(onPosition)) {
       errors.set(
@@ -3375,7 +3392,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (seq.kind !== 'list') continue;
     for (const item of seq.items) {
       for (const fv of freeVars(item)) {
-        if (fv !== 't' && fv !== 'i' && !constNames.has(fv) && !stateNames.has(fv)) {
+        if (fv !== 't' && fv !== 'i' && !constNames.has(fv) && !complexConsts.has(fv) && !stateNames.has(fv)) {
           errors.set(name, `${name} is a list, so its elements may only use constants and t (found ${fv}).`);
           defs.lists.delete(name);
           continue outer;

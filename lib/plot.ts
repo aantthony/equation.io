@@ -17,7 +17,7 @@ import { exprKey } from './expr.ts';
  */
 import { coordinateRow, lowerCoordinateFlow } from './coordinate.ts';
 import { complexParts } from './complex-parts.ts';
-import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, inferScalarType, usesComplex } from './complex.ts';
+import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, inferScalarType, isComplexValued, usesComplex } from './complex.ts';
 import {
   ANGLE_FN,
   REVOLVE_AXES,
@@ -479,6 +479,12 @@ function classifyLowered(
     if (unsupported.has(first))
       throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
+    // `y = [1, i] x`: a complex member is a complex equation, solved for
+    // points, where the real ones draw curves.
+    if (odd >= 0 && usesComplex(expr.members[odd]) !== usesComplex(expr.members[0]))
+      throw new Error(
+        `Family element ${odd + 1} is complex where element 1 is not, so it draws a different kind of object — a list of complex numbers draws as points on a row of its own.`,
+      );
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
     // An implicit surface is raymarched across the whole screen, once per
     // member, and a curve of intersection or a field in space is traced on
@@ -799,11 +805,13 @@ function classifyLowered(
     // One complex member makes the list complex, as one complex term makes
     // a sum complex: the type is the list's, so 1 in [1, i] is 1 + 0i.
     // Members that only pass through complex values (re(…), |…|) are real.
-    const complexMember = (it: Expr) => it.kind !== 'vec' && usesComplex(it) && inferScalarType(it) === 'complex';
-    if (expr.items.some(complexMember)) {
+    if (expr.items.some(it => it.kind !== 'vec' && isComplexValued(it))) {
       if (expr.items.some(it => it.kind === 'vec')) throw new Error('Lists cannot mix complex numbers and points.');
       return done({ kind: 'list', element: 'complex', storage: 'expressions', values: expr.items });
     }
+    // A point's coordinates are real, in a list as on a row of its own.
+    if (expr.items.some(it => it.kind === 'vec' && it.items.some(isComplexValued)))
+      throw new Error('Complex values are not supported in vectors.');
     const vecs = expr.items.filter((it): it is Expr & { kind: 'vec' } => it.kind === 'vec');
     if (vecs.length === 0) return done({ kind: 'list', element: 'scalar', storage: 'expressions', values: expr.items });
     if (vecs.length !== expr.items.length) throw new Error('Lists cannot mix numbers and points.');

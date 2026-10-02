@@ -201,6 +201,51 @@ describe('complex lists', () => {
     );
   });
 
+  it('keeps a complex value that has no meaning to its own row', () => {
+    const rows = analyzeRows(['b = floor(1 + i)', 'y = x']).rows;
+    expect(rows[0].error).toBe('floor is not supported for complex values.');
+    expect(rows[1].error).toBeUndefined();
+  });
+
+  it('holds a real value through a named complex one as a constant', () => {
+    expect(last(['a = 3 + 4i', 'b = |a|', '[1..b]']).row.info).toBe('= [1, 2, 3, 4, 5]');
+    expect(last(['k = 2', 'a = k + i', 'b = re(a)', '[1..b]']).row.info).toBe('= [1, 2]');
+  });
+
+  it('lists named complex values', () => {
+    close(last(['a = 1 + i', 'S = [a, 1]', 'S']).pts, [
+      [1, 1],
+      [1, 0],
+    ]);
+    const { kind, pts } = last(['a = e^(i pi/3)', '[a, 2a]']);
+    expect(kind).toBe('plist');
+    close(pts, [
+      [0.5, Math.sqrt(3) / 2],
+      [1, Math.sqrt(3)],
+    ]);
+  });
+
+  it('reads real projections in reductions, filters and sort keys', () => {
+    expect(last(['median(re([3 + 4i, 1, 2]))']).row.info).toBe('= 2');
+    expect(last(['L = [1 + i, 2]', 'count(L[re(L) > 0])']).row.info).toBe('= 2');
+    expect(last(['L = [1 + i, 2]', 'L[L > 0]']).row.error).toBe('A filter must be real — take re(…), im(…) or abs(…).');
+    // Ordered by distance from -i: -1 (√2), 2 (√5), 3 (√10).
+    const sorted = last(['L = [3, -1, 2]', 'sort(L, |L + i|)']).row.cls!.object;
+    expect(sorted.kind === 'point' && sorted.source.representation === 'real').toBe(true);
+    const coords = (sorted as { source: { coordinates: Expr[] } }).source.coordinates;
+    expect(coords.map(c => evaluate(c, {}))).toEqual([-1, 2, 3]);
+  });
+
+  it('keeps a point real, in a list as on its own', () => {
+    expect(last(['S = [1, 2i]', '(S, 1)']).row.error).toBe('Complex values are not supported in vectors.');
+  });
+
+  it('says when a complex member draws a different kind than the real ones', () => {
+    expect(last(['y = [1, i] x']).row.error).toMatch(/^Family element 2 is complex where element 1 is not/);
+    // All complex, a family is fine: the roots of w^2 = 1 and of w^2 = i.
+    expect(last(['w^2 = [1, i]']).kind).toBe('family');
+  });
+
   it('names the variable a list may not use', () => {
     expect(last(['[w, 2w]']).row.error).toBe('A list may only use constants and t (found w).');
   });

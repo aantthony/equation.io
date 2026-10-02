@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { compileGpu } from './compiler.ts';
 import { buildDefs, resolveExpr, scanDefinition } from './defs.ts';
-import { parseExpr } from './expr.ts';
+import { evaluate, parseExpr } from './expr.ts';
 import { intervalsIn, sweep } from './interval.ts';
 import { regionSampler } from './path.ts';
 import { classify } from './plot.ts';
@@ -52,6 +52,33 @@ describe('hidden intervals', () => {
 });
 
 describe('drawing over an interval', () => {
+  it('crosses a list into a family, one curve per member, as u does', () => {
+    const members = (rows: string[]) => {
+      const object = analyzeRows(rows).rows.at(-1)!.cls!.object;
+      expect(object.kind).toBe('family');
+      return (object as Extract<typeof object, { kind: 'family' }>).members.map(m => {
+        const source = (m.object as { source: { coordinates: Parameters<typeof evaluate>[0][] } }).source;
+        return [0, 1].map(u => source.coordinates.map(c => evaluate(c, { u })));
+      });
+    };
+    // Two horizontal segments, from x = 0 to 1 at heights 1 and 2.
+    expect(members(['(interval(0, 1), 0) + (0, [1, 2])'])).toEqual([
+      [
+        [0, 1],
+        [1, 1],
+      ],
+      [
+        [0, 2],
+        [1, 2],
+      ],
+    ]);
+    // A name is one parameter, in every member.
+    expect(members(['a = interval(-1, 1)', '(a, [1, 2], a)'])[1]).toEqual([
+      [-1, 2, -1],
+      [1, 2, 1],
+    ]);
+  });
+
   it('a projected family searches u in its shader, with ∂F/∂u', () => {
     const row = analyzeRows(['a = interval(1, 2)', 'y = sin(a x)']).rows[1];
     expect(row.gpu).toMatchObject({
