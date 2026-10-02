@@ -95,8 +95,8 @@ Remove each item from docs/clifford.md's "Not done" as it lands.
   worker/og.ts drawing and its readiness table, and a fixture row in
   worker/typed-values.fixtures.ts (a test counts the kinds). Typecheck
   finds the switches you missed.
-- **Syntax traps.** `a/2 e_xy` parses as `a/(2 e_xy)`: division by a
-  multivector is refused for that reason — write `(a/2) e_xy`. `u`, `v`,
+- **Syntax traps.** `a/2e_xy` (touching) parses as `a/(2e_xy)`: division by
+  a multivector is refused for that reason — write `a/2 e_xy`. `u`, `v`,
   `x`, `y`, `z`, `t` are reserved names; an example cannot name a point `v`.
 - **Glyphs the system fonts lack** (`⟑`) are mapped by a `unicode-range`
   face in web/style.css and web/about/about.css; a new operator glyph

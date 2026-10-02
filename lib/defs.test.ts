@@ -1,3 +1,4 @@
+import { analyzeRows } from './analysis.ts';
 import { compileCpu, compileGpu } from './compiler.ts';
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
@@ -81,6 +82,28 @@ describe('d/dx derivative syntax', () => {
     expect(at('2 d/dx (x^2)', { x: 3 })).toBe(12);
     expect(at('-d/dx (x^2)', { x: 1 })).toBe(-2);
     expect(at('d/dx (x^2) + 1', { x: 1 })).toBe(3);
+  });
+
+  it('takes the juxtaposed factors after it, spaced or touching, up to an operator or bracket', () => {
+    // x sin(x) → sin x + x cos x, not (d/dx x) · sin(x).
+    const dxs = Math.sin(2) + 2 * Math.cos(2);
+    expect(at('d/dx x sin(x)', { x: 2 })).toBeCloseTo(dxs);
+    expect(at('d/dx(x) sin(x)', { x: 2 })).toBeCloseTo(dxs);
+    expect(at('2 d/dx x^2 y', { x: 3, y: 5 })).toBe(60);
+    expect(at('3 x d/dx x^2', { x: 2 })).toBe(24);
+    expect(at('1/2 d/dx x^2', { x: 3 })).toBe(3);
+    expect(at('-d/dx x^2', { x: 1 })).toBe(-2);
+    expect(at('d^2/dx^2 x^4', { x: 1 })).toBe(12);
+    // Each of these ends the operand: the x after it is not differentiated.
+    expect(at('(d/dx x^2) x', { x: 2 })).toBe(8);
+    expect(at('(d/dx)(x) sin(x)', { x: 2 })).toBeCloseTo(Math.sin(2));
+    expect(at('d/dx x * x', { x: 2 })).toBe(2);
+    expect(at('d/dx x^3/x', { x: 2 })).toBe(6);
+  });
+
+  it('leaves a dot product after the operand alone', () => {
+    const r = analyzeRows(['P = (3, 4)', 'Q = (1, 2)', 'd/dx x^2 P · Q']).rows[2];
+    expect(r.error).toBeUndefined();
   });
 
   it('supports higher orders and other variables', () => {

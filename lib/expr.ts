@@ -714,8 +714,15 @@ const ops = operators<PNode>({
   '/': asBin('/'),
   '÷': asBin('/'),
 
+  // Juxtaposition across a space multiplies at '/'s level, left to right
+  // (its precedence is set below), so what is written apart stays apart:
+  // `g/L sin(th)` is (g/L) sin(th) and `1/2 m v^2` is m v²/2.
+  '[spaced]': asBin('*'),
+
   '[neg]': Prefix<PNode>((a): Expr => ({ kind: 'neg', a: asVecOrExpr(a) })),
 
+  // Juxtaposition written touching binds tighter than '/': `1/2pi` is
+  // 1/(2π), `x^2/2s^2` is x²/(2s²) and `1/x(x+1)` is 1/(x(x+1)).
   '[impl]': asBin('*'),
 
   '^': BinaryRightInfix<PNode>((a, b): PNode => bin('^')(asVecOrExpr(a), asVecOrExpr(b))),
@@ -809,6 +816,10 @@ ops['[neg]'].prec = ops['^'].prec;
 // Indexing shares application's level (both associate left), so sort(L)[2]
 // indexes the call rather than calling sort on L[2].
 ops['[at]'].prec = ops['[apply]'].prec;
+
+// Sharing '/'s level (both associate left) is what makes `a/b c` (a/b)·c
+// and `a b/c` (a·b)/c.
+ops['[spaced]'].prec = ops['/'].prec;
 
 // All comparators share one precedence level so chains like 0 <= y < x
 // associate left: ((0 <= y) < x), the shape classify flattens.
@@ -1064,7 +1075,9 @@ function* mergeBracedSubscripts(bare: Iterable<Token>): Iterable<Token> {
 
 /**
  * Insert implicit multiplication tokens (2x, x(x+1), (x+1)(x-1), x y) and
- * rewrite unary +/- into a dedicated prefix operator.
+ * rewrite unary +/- into a dedicated prefix operator. Touching factors get
+ * [impl], which binds tighter than '/'; factors with a space between get
+ * [spaced], which ranks with it — except in a Leibniz operand.
  */
 function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   let last: Token | null = null;
@@ -1075,8 +1088,18 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
   const opened: (string | null)[] = [];
   /** What the bracket `last` closed was. */
   let closed: string | null = null;
+  /** Bracket depths where a Leibniz head (`d/dx`, `d^2/dx^2`) is taking its
+   *  operand. There every juxtaposition is [impl], spaced or not, so
+   *  `d/dx x sin(x)` is d / (dx · x · sin(x)) and differentiates the product;
+   *  the operand ends at the next operator or closing bracket at that depth,
+   *  so `(d/dx x^2) x`, `d/dx x * x` and `d/dx x^2 P · Q` keep x outside. */
+  const leibniz: number[] = [];
+  /** The last tokens emitted below, enough to spot `d / dx` and `d ^ k / dx`. */
+  const recent: string[] = [];
   for (const token of bare) {
     if (token.type === 'whitespace') continue;
+    while (leibniz.length && leibniz[leibniz.length - 1] > opened.length) leibniz.pop();
+    const inLeibniz = leibniz[leibniz.length - 1] === opened.length;
 
     // A postfix operator (per the ops table: '!') ends a value, so 5!x and
     // 3!(x+1) multiply implicitly.
@@ -1104,7 +1127,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         closed = opened.pop() ?? null;
       } else {
         barDepth++;
-        if (afterValue) yield op('[impl]');
+        if (afterValue) yield op(inLeibniz || last!.loc[1] === token.loc[0] ? '[impl]' : '[spaced]');
         yield { ...token, type: 'symbol', str: 'abs' };
         yield op('[apply]');
         const open: Token = { ...token, type: 'parenopen', str: '(', call: true };
@@ -1158,7 +1181,7 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
         last!.type === 'symbol' &&
         isFnName(last!.str);
       indexing = isIndex;
-      yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : '[impl]');
+      yield op(isFnCall ? '[apply]' : isIndex ? '[at]' : inLeibniz || touching ? '[impl]' : '[spaced]');
       if (isFnCall) emit = { ...token, call: true };
     }
 
@@ -1169,6 +1192,13 @@ function* addImplicitTokens(bare: Iterable<Token>): Iterable<Token> {
       );
     }
     closed = emit.type === 'parenclose' ? (opened.pop() ?? null) : null;
+    if (inLeibniz && emit.type === 'operator' && emit.str !== '^' && emit.str !== '!' && emit.str !== '.')
+      leibniz.pop();
+    if (emit.type === 'symbol' && /^d[A-Za-z]$/.test(emit.str) && /(^| )d( \^ \d+)? \/$/.test(recent.join(' '))) {
+      leibniz.push(opened.length);
+    }
+    recent.push(emit.str);
+    if (recent.length > 4) recent.shift();
     yield emit;
     last = emit;
     path =

@@ -80,6 +80,26 @@ describe('parseExpr', () => {
     expect(evl('2pi')).toBeCloseTo(Math.PI * 2);
   });
 
+  it('groups by spacing after a division: touching binds tighter than /, spaced does not', () => {
+    const env = { g: 9.8, L: 2, th: 0.9, m: 3, v: 2, x: 3, s: 2, a: 5, h: 0.5 };
+    // Touching: the whole product is the divisor.
+    expect(evl('1/2pi')).toBeCloseTo(1 / (2 * Math.PI));
+    expect(evl('1/2x', env)).toBeCloseTo(1 / 6);
+    expect(evl('x^2/2s^2', env)).toBeCloseTo(9 / 8);
+    expect(evl('1/x(x+1)', env)).toBeCloseTo(1 / 12);
+    expect(evl('1/2|x|', env)).toBeCloseTo(1 / 6);
+    // Spaced: ranks with /, left to right.
+    expect(evl('-g/L sin(th)', env)).toBeCloseTo((-9.8 / 2) * Math.sin(0.9));
+    expect(evl('1/2 m v^2', env)).toBeCloseTo(6);
+    expect(evl('(x - a)/h (x + 1)', env)).toBeCloseTo(-16);
+    expect(evl('1/2 (x+1)', env)).toBeCloseTo(2);
+    expect(evl('1/2 |x|', env)).toBeCloseTo(1.5);
+    expect(evl('a s/x', env)).toBeCloseTo(10 / 3);
+    // Mixed: a touching product is one factor of the spaced chain.
+    expect(evl('1/2 x(x+1)', env)).toBeCloseTo(6);
+    expect(evl('1/2pi x', env)).toBeCloseTo(3 / (2 * Math.PI));
+  });
+
   it('parses function calls', () => {
     expect(evl('sin(0)')).toBe(0);
     expect(evl('cos(0)')).toBe(1);

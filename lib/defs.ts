@@ -973,9 +973,10 @@ function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts, getFn?
 }
 
 /**
- * Rewrite a division that spells a Leibniz derivative. Implicit
- * multiplication binds tighter than '/', so `d/dx expr` parses as
- * d / (dx · expr): the operand is the tail of the denominator's product chain.
+ * Rewrite a division that spells a Leibniz derivative. Juxtaposition after
+ * a Leibniz head binds tighter than '/', spaced or not (addImplicitTokens),
+ * so `d/dx expr` parses as d / (dx · expr): the operand is the tail of the
+ * denominator's product chain.
  */
 function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts, getFn?: GetFn): Expr | null {
   const head = numeratorWrap(numr);
@@ -1457,10 +1458,10 @@ interface StripDx {
 
 /**
  * Split the integration variable off a body: the first d<letter> factor in
- * its multiplicative structure (`x^2 dx` → v = x, integrand x^2). Implicit
- * multiplication binds tighter than '/', so in `sin(t)/t dt` the dt sits
- * inside the denominator product — the measure is recognized on either side
- * and the rest of that denominator stays a true denominator. A tail after
+ * its multiplicative structure (`x^2 dx` → v = x, integrand x^2). Written
+ * touching, `1/(1+x^2)dx`, the dx binds tighter than '/' and sits inside the
+ * denominator product — the measure is recognized on either side and the
+ * rest of that denominator stays a true denominator. A tail after
  * the measure folds into the integrand (`∫ dx/(1+x^2)`) unless it carries
  * its own d-var, in which case it is the enclosing integral's (residual).
  * Sums integrate termwise, so every term must end in the same dx.

@@ -582,12 +582,12 @@ function lowerMv(e: Expr, lo: (n: Expr) => LV): Multivector | null {
             return geometric(any(e.a), any(e.b));
           }
           case '/': {
-            // Dividing by a multivector is refused, as by a matrix: a/2 e_xy
-            // reads as a/(2 e_xy), and e_xy⁻¹ = −e_xy would quietly flip it.
+            // Dividing by a multivector is refused, as by a matrix: a/2e_xy
+            // reads as a/(2e_xy), and e_xy⁻¹ = −e_xy would quietly flip it.
             const d = any(e.b);
             if (!isScalar(d)) {
               throw new Error(
-                'Cannot divide by a multivector — multiply by B^-1. (a/2 e_xy reads as a/(2 e_xy): write (a/2) e_xy.)',
+                'Cannot divide by a multivector — multiply by B^-1. (a/2e_xy reads as a/(2e_xy): write a/2 e_xy.)',
               );
             }
             return mvScale(any(e.a), div({ kind: 'num', value: 1 }, d.data[0]));
@@ -806,7 +806,7 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
             return matScale(b!, scalar(e.a, 'multiply'));
           case '/':
             if (!a || b)
-              throw new Error('Cannot divide by a matrix — multiply by M^-1. (a/2 J reads as a/(2 J): write (a/2) J.)');
+              throw new Error('Cannot divide by a matrix — multiply by M^-1. (a/2J reads as a/(2J): write a/2 J.)');
             return matScale(a, div({ kind: 'num', value: 1 }, scalar(e.b, 'divide')));
         }
         return null;

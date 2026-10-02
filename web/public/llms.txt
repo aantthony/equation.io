@@ -109,7 +109,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 ## Expression syntax
 
 - Operators: `+ - * / ^`, parentheses, unary minus. Multiplication is
-  implicit: `2x`, `x y`, `2cos(t)`, `a(x-1)` all work. `·` and `×` multiply
+  implicit: `2x`, `x y`, `2cos(t)`, `a(x-1)` all work. After a `/`, spacing
+  groups: factors written touching stay in the divisor (`1/2pi` is 1/(2π),
+  `x^2/2s^2` is x²/(2s²), `1/x(x+1)` is 1/(x(x+1))), while a space ends it
+  (`g/L sin(th)` is (g/L)·sin(th), `1/2 m v^2` is m v²/2, `(y - b)/h (x - a)`
+  is a slope times (x - a)). `·` and `×` multiply
   numbers too, and between two vectors are the dot and cross product (see
   Vector calculus); `⊗` and `∧` are the outer and wedge products (see
   Tensors). All four bind like `*`.
@@ -217,6 +221,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     `osculating(C, t/10)` (u0 past 1 is the same point again).
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
+  The operand is every factor written after `dx`, with or without spaces,
+  up to the next operator or closing bracket: `d/dx x sin(x)` is the
+  derivative of x sin(x), while `d/dx x^3/x` is 3x²/x, `d/dx x * x` is
+  1·x, and `(d/dx x^2) x` is 2x·x.
   Along x, y, or z it works through lists too: with `N = [1..4]`,
   `y = d/dx x^N` is a family of curves, and `y = d/dx [sin(x), x^2]` draws
   `y = cos(x)` and `y = 2x`.
@@ -1048,8 +1056,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A 2×2 matrix in x and y is a matrix field, `((x, y), (y, -x))`: a grid of
   glyphs, each the image of a small circle under the matrix there with a
   spoke to where e_x goes, drawn true size while small and a cell at most,
-  in the row colour's complement where det < 0. Note `a/2 J` reads as
-  `a/(2 J)`; write `(a/2) J`.
+  in the row colour's complement where det < 0. Note `a/2J`, touching,
+  reads as `a/(2J)`; write `a/2 J`.
 - Tensors: a rank-k tensor is k-deep nested tuples, and its shape is part of
   its value — `((1, 2, 3), (4, 5, 6))` is 2×3, `(((1, 2), (3, 4)), ((5, 6),
   (7, 8)))` is 2×2×2. A value that is also a tuple of 2D or 3D points and
@@ -1088,8 +1096,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   product too (`R p rev(R)`), `∧` is the outer product, and `+`, `−`, whole
   powers (`A^-1`, `A^3`) and `e^A` work; two plain vectors still need `⟑`
   (`e_x e_y` stays an error, `e_x ∧ e_y` the tensor wedge). Dividing by a
-  multivector is refused — `a/2 e_xy` would read as `a/(2 e_xy)` — so write
-  `(a/2) e_xy` or `e_xy a/2`, and `A B^-1`. `rev(A)` reverses, `conj(A)` is
+  multivector is refused — `a/2e_xy`, touching, would read as `a/(2e_xy)` —
+  so write `a/2 e_xy`, and `A B^-1`. `rev(A)` reverses, `conj(A)` is
   the Clifford conjugate, `dual(A)` is `A I⁻¹` (`dual(e_xy)` is `e_z`),
   `grade(A, k)` is the grade-k part, and `|A|` its size. A row that is a
   multivector draws it grade by grade — its vector an arrow, its bivector an
