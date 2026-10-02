@@ -26,7 +26,7 @@ import { MAX_PLOTS, previewGap } from './og.ts';
 import { GRAPH_UI_URI, graphResource, graphResourceContents } from './mcp-app.ts';
 import type { JsonSchema, ObjectSchema } from '../lib/json-schema.ts';
 
-const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+export const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 /** A tool as tools/list describes it. */
 interface McpTool {
