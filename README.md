@@ -96,7 +96,7 @@ the server, which may log it; the fragment never does.
 ### Traffic and MCP usage
 
 ```sh
-node scripts/traffic.ts 7     # needs `wrangler login`
+pnpm traffic 7     # needs `wrangler login`
 ```
 
 Site visitors come from Cloudflare's own zone analytics. The script counts

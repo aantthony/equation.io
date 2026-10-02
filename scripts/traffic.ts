@@ -1,7 +1,9 @@
+#!/usr/bin/env node
 /**
  * Who uses equation.io, from data Cloudflare already keeps.
  *
- *   node scripts/traffic.ts [days]        the last 7 days by default, at most 30
+ *   pnpm traffic [days]                   the last 7 days by default, at most 30
+ *   ./scripts/traffic.ts [days]           the same
  *
  * Site: unique IPs per day on each page, from the zone's HTTP analytics, using
  * GETs with a browser user agent only. The dashboard's "unique visitors" also
