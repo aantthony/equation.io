@@ -93,31 +93,21 @@ Visit any page once with `#voice=<key>` to show the mic in that browser
 (`#voice=` forgets it). `?voice=<key>` works too, but a query string reaches
 the server, which may log it; the fragment never does.
 
-### Usage events
-
-[`worker/events.ts`](worker/events.ts) writes one Workers Analytics Engine data
-point per event. Each point records the event, its param, a visitor hash
-(the IP mixed with a salt that rotates daily), the country, the browser and
-the device. Params come from fixed lists, so no equation text is stored.
-
-- `pageview`: [`web/pageview.js`](web/pageview.js) sends a beacon on every
-  page. The Worker takes the page from the Referer and stores `/g/` for share
-  links, without the payload.
-- `add_type`: the grapher reports each graph type the first time a document
-  draws it ([`lib/type-events.ts`](lib/type-events.ts)). Rows from an example
-  or the featured graph don't count until they're edited. Events are sent in
-  one beacon when the tab is hidden.
-- `mcp_show_type` / `mcp_encode_type`: the types that a `show_graph` or
-  `encode_graph_url` call draws.
-
-Embedded pages, the MCP app, and anything off `equation.io` send nothing.
+### Traffic and MCP usage
 
 ```sh
-wrangler d1 migrations apply DB --remote   # visit_salts
-CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/events.ts 30
+node scripts/traffic.ts 7     # needs `wrangler login`
 ```
 
-The token needs Account Analytics: Read.
+Site visitors come from Cloudflare's own zone analytics. The script counts
+unique IPs per day on each page, using browser user agents only, and lists
+`/mcp` POSTs by client. Nothing on the site collects this.
+
+MCP tool calls are the one thing Cloudflare can't see, because it doesn't
+record request bodies. [`worker/mcp-usage.ts`](worker/mcp-usage.ts) writes one
+Analytics Engine point per `tools/call`: the tool, the client, the graph types,
+and row and error counts, never equation text. Set `CLOUDFLARE_API_TOKEN`, with
+Account Analytics: Read, for the script to include them.
 
 ## Examples
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import Ajv from 'ajv';
 import { handleMcp } from './mcp.ts';
 import { GRAPH_UI_URI } from './mcp-app.ts';
+import { clientName } from './mcp-usage.ts';
 import { DISTRIBUTION_MCP_KINDS, PUBLIC_KIND_ROWS } from './typed-values.fixtures.ts';
 import plugin from '../plugin/plugin.json' with { type: 'json' };
 
@@ -14,9 +15,9 @@ const outputValidators = new Map<string, ReturnType<typeof ajv.compile>>();
 // real llms.txt actually documents the advanced syntax is guarded by
 // lib/llms-txt.test.ts (this tsconfig has no node:fs to read the file with).
 const SYNTAX_DOC = '# equation.io syntax sentinel';
-const events: AnalyticsEngineDataPoint[] = [];
+const usage: AnalyticsEngineDataPoint[] = [];
 const env = {
-  EVENTS: { writeDataPoint: (p: AnalyticsEngineDataPoint) => events.push(p) },
+  MCP_USAGE: { writeDataPoint: (p: AnalyticsEngineDataPoint) => usage.push(p) },
   ASSETS: {
     fetch: async (req: Request) =>
       new URL(req.url).pathname === '/llms.txt'
@@ -861,23 +862,41 @@ describe('syntax resource', () => {
   });
 });
 
-describe('usage events', () => {
-  it('records the types a call draws, once each, and never its equations', async () => {
-    events.length = 0;
-    await rpc('tools/call', {
-      name: 'show_graph',
-      arguments: { equations: ['y = sin(x)', 'y = cos(x)', 'x^2 + y^2 + z^2 = 1', 'a = 2', 'y = (x'] },
+describe('usage counts', () => {
+  const call = (name: string, args: object) => rpc('tools/call', { name, arguments: args });
+  const points = () => usage.map(p => ({ blobs: p.blobs, doubles: p.doubles ?? [] }));
+
+  it('records each call and the types it draws, never its equations', async () => {
+    usage.length = 0;
+    await call('show_graph', {
+      equations: ['y = sin(x)', 'y = cos(x)', 'x^2 + y^2 + z^2 = 1', 'a = 2', 'y = florb(x)'],
     });
-    await rpc('tools/call', { name: 'encode_graph_url', arguments: { equations: ['y = tan(x)'] } });
-    await rpc('tools/call', { name: 'decode_graph_url', arguments: { url: 'https://equation.io/g/y' } });
-    expect(events.map(p => p.blobs!.slice(0, 2))).toEqual([
-      ['mcp_show_type', 'implicit2d'],
-      ['mcp_show_type', 'implicit3d'],
-      ['mcp_encode_type', 'implicit2d'],
+    expect(points()).toEqual([
+      { blobs: ['call', 'show_graph', '', ''], doubles: [5, 1, 1, 0] },
+      { blobs: ['type', 'show_graph', '', 'implicit2d'], doubles: [] },
+      { blobs: ['type', 'show_graph', '', 'implicit3d'], doubles: [] },
     ]);
-    // No visitor or country: an MCP request comes from the AI provider's servers.
-    expect(events.every(p => p.blobs![2] === '' && p.blobs![3] === '')).toBe(true);
-    const stored = JSON.stringify(events);
-    for (const text of ['sin', 'cos', 'tan', 'a = 2']) expect(stored).not.toContain(text);
+    const stored = JSON.stringify(usage);
+    for (const text of ['sin', 'cos', 'a = 2', 'florb']) expect(stored).not.toContain(text);
+  });
+
+  it('counts former tool names as the tools they became, and rejected calls as failed', async () => {
+    usage.length = 0;
+    await call('create_graph', { equations: ['y = x'] });
+    await call('read_graph', { url: 'https://equation.io/g/y%3Dx;y%3D2x' });
+    await call('encode_graph_url', { rows: ['y = x'] });
+    await call('no_such_tool', {});
+    expect(points().filter(p => p.blobs![0] === 'call')).toEqual([
+      { blobs: ['call', 'encode_graph_url', '', ''], doubles: [1, 0, 0, 0] },
+      { blobs: ['call', 'decode_graph_url', '', ''], doubles: [2, 0, 0, 0] },
+      { blobs: ['call', 'encode_graph_url', '', ''], doubles: [0, 0, 0, 1] },
+    ]);
+  });
+
+  it('names the client by its User-Agent product', () => {
+    expect(clientName('Claude-User')).toBe('claude-user');
+    expect(clientName('Mozilla/5.0 (compatible; ChatGPT-User/1.0; +https://openai.com/bot)')).toBe('chatgpt-user');
+    expect(clientName('Python/3.11 aiohttp/3.14.3')).toBe('python');
+    expect(clientName('')).toBe('');
   });
 });

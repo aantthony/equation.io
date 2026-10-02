@@ -86,7 +86,6 @@ import {
 } from '../lib/path.ts';
 import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
-import { TypeEvents } from '../lib/type-events.ts';
 import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
@@ -1123,48 +1122,6 @@ const mcpApp = document.documentElement.hasAttribute('data-mcp-app');
 const framed = document.documentElement.hasAttribute('data-embed');
 /** MCP widget or a framed graph: no address-bar writes, no featured default. */
 const embedded = mcpApp || framed;
-
-/** add_type events (lib/type-events.ts), from the live site's own pages only. */
-const typeEvents = !embedded && location.hostname === 'equation.io' ? new TypeEvents() : null;
-/** A row typed out passes through other types on the way (`x^2+y^2+z^2`
- *  before its `= 1`), so a document's types are noted once it sits still. */
-const TYPE_SETTLE = 2000;
-let typeTimer: ReturnType<typeof setTimeout> | null = null;
-
-function noteTypes() {
-  if (typeTimer !== null) {
-    clearTimeout(typeTimer);
-    typeTimer = null;
-  }
-  typeEvents?.note(
-    equations.map(eq => ({ text: eq.text, type: eq.cls && !eq.error ? publicKind(eq.cls.object) : undefined })),
-  );
-}
-
-function scheduleTypeNote() {
-  if (!typeEvents) return;
-  if (typeTimer !== null) clearTimeout(typeTimer);
-  typeTimer = setTimeout(noteTypes, TYPE_SETTLE);
-}
-
-/** An example or the featured graph is about to replace the document. */
-function exampleOpened(rows: readonly string[]) {
-  noteTypes(); // the document it replaces counts as it stood
-  typeEvents?.opened(rows);
-}
-
-function sendTypeEvents() {
-  if (!typeEvents) return;
-  noteTypes();
-  const types = typeEvents.take();
-  if (!types.length) return;
-  try {
-    navigator.sendBeacon('/api/events', JSON.stringify({ events: types.map(param => ({ name: 'add_type', param })) }));
-  } catch {
-    /* a lost beacon is a lost count */
-  }
-}
-
 let graphChanged: ((rows: string[]) => void) | undefined;
 let graphEdited: (() => void) | undefined;
 let traceWorker: Worker | undefined;
@@ -2792,7 +2749,6 @@ function recompileAll() {
   );
   rvSys.prune(); // sample caches of variables that no longer exist
   invalidateDerivedState();
-  scheduleTypeNote();
   // A row that named a file with no hash and found it here gets pinned, on
   // this path as much as after a load from storage — otherwise a row typed
   // against a file already in memory would be shared unpinned, and open
@@ -3147,16 +3103,10 @@ function flushUrl() {
   writeUrl();
 }
 
-// Don't lose the last edit if the page goes away mid-interval. Hidden is
-// also when a session's add_type events go out: one beacon, not one per edit.
-addEventListener('pagehide', () => {
-  flushUrl();
-  sendTypeEvents();
-});
+// Don't lose the last edit if the page goes away mid-interval.
+addEventListener('pagehide', flushUrl);
 addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'hidden') return;
-  flushUrl();
-  sendTypeEvents();
+  if (document.visibilityState === 'hidden') flushUrl();
 });
 
 function addEquation(text: string, at = equations.length): Equation {
@@ -4512,11 +4462,12 @@ function openExample(text: string) {
   // An example is a fresh start: it replaces the whole document (undo brings
   // the old one back). Multi-row examples separate rows with ';' (the same
   // separator as the hash).
-  const rows = splitStatements(text)
-    .map(s => s.trim())
-    .filter(Boolean);
-  exampleOpened(rows);
-  replaceDocument(rows, true);
+  replaceDocument(
+    splitStatements(text)
+      .map(s => s.trim())
+      .filter(Boolean),
+    true,
+  );
 }
 
 function buildExamplesMenu() {
@@ -5670,7 +5621,6 @@ else if (!embedded) {
   } catch {
     emptyDefault = nextFeatured(null).eqs;
   }
-  typeEvents?.opened(emptyDefault);
   emptyDefault.forEach(t => addEquation(t));
 }
 recompileAll();
@@ -5697,7 +5647,6 @@ function loadFromUrl() {
   const wanted = rows.length ? rows : emptyDefault;
   const current = equations.map(e => e.text);
   if (wanted.length === current.length && wanted.every((t, i) => t === current[i])) return;
-  if (!rows.length) exampleOpened(emptyDefault);
   stopVoiceTweens();
   resetViewport();
   equations.length = 0;
@@ -5722,7 +5671,6 @@ if (!embedded) {
       store,
       equations.map(e => e.text),
     ).eqs;
-    exampleOpened(emptyDefault);
     replaceDocument(emptyDefault, true);
   });
 
