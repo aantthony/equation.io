@@ -111,3 +111,64 @@ groups.forEach((group, gi) => {
   section.append(head, grid);
   gallery.append(section);
 });
+
+// AI apps: one tab per app. Each panel's id is its link (/about/#claude), so a
+// button elsewhere can open the right tab; without this script every panel
+// shows, stacked under its own heading.
+const aiSection = document.getElementById('ai')!;
+const tabs = [...aiSection.querySelectorAll<HTMLAnchorElement>('[role="tab"]')];
+const panels = tabs.map(tab => document.getElementById(tab.getAttribute('aria-controls')!)!);
+
+function selectTab(index: number) {
+  tabs.forEach((tab, i) => {
+    const selected = i === index;
+    tab.setAttribute('aria-selected', String(selected));
+    tab.tabIndex = selected ? 0 : -1;
+    panels[i].hidden = !selected;
+  });
+}
+/** Open the tab the address names, landing on the section's heading and URL
+ * rather than on the panel itself, halfway down under the fixed nav. */
+function openFromHash() {
+  const index = panels.findIndex(panel => `#${panel.id}` === location.hash);
+  if (index < 0) return;
+  selectTab(index);
+  aiSection.scrollIntoView();
+}
+
+aiSection.classList.add('tabbed');
+aiSection.querySelector<HTMLElement>('[role="tablist"]')!.hidden = false;
+selectTab(0);
+openFromHash();
+// The browser scrolls to the fragment again once the page loads.
+addEventListener('load', openFromHash, { once: true });
+tabs.forEach((tab, i) => {
+  tab.addEventListener('click', event => {
+    event.preventDefault();
+    selectTab(i);
+    // Keep the link shareable without jumping the page to the panel.
+    history.replaceState(null, '', tab.hash);
+  });
+  tab.addEventListener('keydown', event => {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const next = (i + step + tabs.length) % tabs.length;
+    selectTab(next);
+    history.replaceState(null, '', tabs[next].hash);
+    tabs[next].focus();
+  });
+});
+addEventListener('hashchange', openFromHash);
+
+for (const button of document.querySelectorAll<HTMLButtonElement>('button[data-copy]')) {
+  button.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(button.dataset.copy!);
+      button.textContent = 'Copied';
+    } catch {
+      button.textContent = 'Select and copy';
+    }
+    setTimeout(() => (button.textContent = 'Copy'), 1600);
+  });
+}
