@@ -607,8 +607,10 @@ function bracePiecewise(content: PNode): PNode {
     }
     if (n.kind === 'pcase') {
       // An equation condition parses, and only a reduction accepts it
-      // (lib/measure.ts); the resolver refuses it anywhere else.
-      if (n.cond.kind !== 'ineq' && n.cond.kind !== 'eq')
+      // (lib/measure.ts); the resolver refuses it anywhere else. A name or
+      // a call may stand for a condition (`within = r < R`, `{within: 1}`):
+      // the resolver checks what it turns out to be.
+      if (n.cond.kind !== 'ineq' && n.cond.kind !== 'eq' && n.cond.kind !== 'var' && n.cond.kind !== 'call')
         throw new Error('Piecewise conditions must be inequalities, like x < 0.');
       if (otherwise) throw new Error('The default value must come last in {…}.');
       cases.push({ cond: n.cond, value: n.value });

@@ -2202,6 +2202,25 @@ export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr
   return rx(e, { getFn, opts, terms: 0 });
 }
 
+/**
+ * A piecewise condition written as a name (`within = r < R`, then
+ * `{within: 1}`) or a call: the inequality it stands for, written in here —
+ * a named field is otherwise inlined only when the row classifies, and every
+ * backend reads a condition by its shape. In a definition the name may be a
+ * parameter, written in when the function is called.
+ */
+function namedCondition(raw: Expr, resolved: Expr, ctx: Ctx): Expr {
+  if (raw.kind !== 'var' && raw.kind !== 'call') return resolved;
+  const value = resolved.kind === 'var' ? (ctx.opts.definition?.(resolved.name) ?? resolved) : resolved;
+  if (value.kind === 'ineq' || value.kind === 'eq') return value;
+  if (ctx.opts.inDefinition) return resolved;
+  // `big = L > 1` is the members it keeps (docs/multisets.md), a list.
+  if (raw.kind === 'var' && ctx.opts.isList?.(raw.name))
+    throw new Error(`${raw.name} is a list, not a condition; write the comparison itself in the braces.`);
+  const shown = raw.kind === 'var' ? raw.name : `${raw.name}(…)`;
+  throw new Error(`${shown} is not a condition; piecewise conditions are inequalities, like x < 0.`);
+}
+
 function rx(e: Expr, ctx: Ctx): Expr {
   const { getFn } = ctx;
   switch (e.kind) {
@@ -2468,7 +2487,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
       // filter, and a function may hand one to it.)
       return {
         kind: 'piecewise',
-        cases: e.cases.map(c => ({ ...c, cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
+        cases: e.cases.map(c => ({
+          ...c,
+          cond: namedCondition(c.cond, rx(c.cond, ctx), ctx),
+          value: rx(c.value, ctx),
+        })),
         otherwise: e.otherwise && rx(e.otherwise, ctx),
       };
     case 'loop':
@@ -3184,6 +3207,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // So is one over the parameters u, v: `c = (cos(2pi u), sin(2pi u))`
   // names a curve that later rows inline, as they inline `s = (x, y)`.
   const fieldNames = new Set<string>();
+  // So is a named condition, `within = r < R` or `ok = a < 2`: it has no
+  // number to hold, and is written in wherever its name is read.
+  for (const [name, e] of defs.consts) if (e.kind === 'ineq') fieldNames.add(name);
   // The fields over u, v among them, so their errors speak of curves.
   const paramNames = new Set<string>();
   for (let changed = true; changed;) {
@@ -3274,11 +3300,13 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         }
       }
       // Trial-evaluate to surface unsupported calls (re, im, …) now. A
-      // complex field has no real value; the rows using it check it.
+      // complex field has no real value; the rows using it check it. A named
+      // condition has none either, but its sides do.
       if (!vars.includes('i') && !vars.includes('w')) {
         const env: Record<string, number> = { x: 0.7, y: 0.4, z: 0.3, t: 0 };
         for (const fv of vars) env[fv] ??= 1;
-        evaluate(e, env);
+        const sides = e.kind === 'ineq' ? ineqComparisons(e).flatMap(c => [c.l, c.r]) : [e];
+        for (const side of sides) evaluate(side, env);
       }
       defs.fields.set(name, e);
       return e;

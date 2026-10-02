@@ -162,6 +162,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A bare condition is a case worth 1, as in Desmos: `{x > 0, 5}` is
   `{x > 0: 1, 5}`. Values may be complex (`{x > 0: w, conj(w)}`); the
   conditions themselves compare real values (`re(w) > 0`, `|w| < 1`).
+  A condition can be named and reused: `r = x^2 + y^2 + z^2`;
+  `within = r < 16`; `x + y = {within: 1}` — the name reads as the
+  inequality it stands for. The definition draws nothing; a row of just the
+  name draws what the inequality would. A function may return a condition
+  too: `inside(p) = p < 2`; `y = {inside(x): x^2}`.
 - Vector calculus: these operators expand symbolically like d/dx, so
   sliders and t work inside them.
   - `grad(f)` is the tuple (∂f/∂x, ∂f/∂y), plus ∂f/∂z when f uses z:

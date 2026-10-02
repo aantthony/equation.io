@@ -62,7 +62,8 @@ export function hasAtan2(e: Expr): boolean {
  *  complex one (`q = x + iy`), which has no real level sets. */
 export const planarField = (expr: Expr): boolean => {
   const vars = freeVars(expr);
-  return !vars.has('z') && !vars.has('i') && !vars.has('w') && !overParams(expr);
+  // A named condition (`within = r < R`) has no levels to draw.
+  return expr.kind !== 'ineq' && !vars.has('z') && !vars.has('i') && !vars.has('w') && !overParams(expr);
 };
 
 /** A field over the parameters u, v: a named curve or surface's value. */

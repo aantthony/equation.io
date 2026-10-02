@@ -305,6 +305,65 @@ describe('buildDefs', () => {
   });
 });
 
+describe('named conditions', () => {
+  /** The classified object of each row, to compare a name with what it names. */
+  const objects = (rows: string[]) =>
+    analyzeRows(rows).rows.map(r => (r.error ? `error: ${r.error}` : JSON.stringify(r.cls?.object ?? null)));
+
+  it('reads a named inequality wherever a condition goes, as if written there', () => {
+    const doc = ['r = x^2 + y^2 + z^2', 'R = 16', 'within = r < R'];
+    const [named, inline] = objects([...doc, 'x + y = {within: 1}', 'x + y = {r < R: 1}']).slice(3);
+    expect(named).toMatch(/^\{/);
+    expect(named).toBe(inline);
+    // Above its definition, and from inside another definition, too.
+    const [late, , inlineLate] = objects(['y = {inside: x}', 'inside = x^2 + y^2 < 4', 'y = {x^2 + y^2 < 4: x}']);
+    expect(late).toMatch(/^\{/);
+    expect(late).toBe(inlineLate);
+    const [, , g, inlineG] = objects([
+      'inside = x^2 + y^2 < 4',
+      'g = {inside: x, 0}',
+      'g = 1',
+      '{x^2 + y^2 < 4: x, 0} = 1',
+    ]);
+    expect(g).toMatch(/^\{/);
+    expect(g).toBe(inlineG);
+  });
+
+  it('defines without drawing: no grid of levels, no error', () => {
+    const a = analyzeRows(['r = x^2 + y^2', 'within = r < 4']);
+    expect(a.rows.map(r => r.error)).toEqual([undefined, undefined]);
+    expect(a.gridFields.map(f => f.name)).toEqual(['r']);
+  });
+
+  it('draws the region on a row of its own', () => {
+    const [, row] = analyzeRows(['within = x^2 + y^2 < 4', 'within']).rows;
+    expect(row.cls?.object.kind).toBe('region');
+  });
+
+  it('holds a comparison of constants, decided as the sliders move', () => {
+    const a = analyzeRows(['a = 1', 'ok = a < 2', 'y = {ok: x, -x}', 'ok']);
+    expect(a.rows[2].cls?.object.kind).toBe('curve');
+    expect(a.rows[3].info).toBe('True now (1 < 2)');
+  });
+
+  it('takes a function whose body is a condition', () => {
+    const [, row] = analyzeRows(['f(p) = p < 2', 'y = {f(x): 1}']).rows;
+    expect(row.error).toBeUndefined();
+    expect(row.cls?.object.kind).toBe('curve');
+  });
+
+  it('says what a name is when it is not a condition', () => {
+    expect(analyzeRows(['a = 1', 'y = {a: x}']).rows[1].error).toBe(
+      'a is not a condition; piecewise conditions are inequalities, like x < 0.',
+    );
+    expect(analyzeRows(['y = {sin(x): 1}']).rows[0].error).toMatch(/^sin\(…\) is not a condition/);
+    // A comparison over a list is the members it keeps (docs/multisets.md).
+    const list = analyzeRows(['L = [1, 2, 3]', 'big = L > 1', '{big: L}', 'big']).rows;
+    expect(list[2].error).toMatch(/^big is a list, not a condition/);
+    expect(list[3].info).toBe('= [2, 3]');
+  });
+});
+
 describe('classify with defined constants', () => {
   it('turns constants into u_ uniforms and reports them as params', () => {
     const cls = classify(resolve('y = a x^2'), new Set(['a']));
