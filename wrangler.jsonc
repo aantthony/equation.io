@@ -39,7 +39,7 @@
     "enabled": true
   },
   // The app's one database; tables are prefixed by feature (voice_…: voice
-  // mode credit, worker/voice-credit.ts; visit_…: worker/visits.ts). No database_id: `wrangler deploy`
+  // mode credit, worker/voice-credit.ts; visit_…: worker/events.ts). No database_id: `wrangler deploy`
   // provisions it on first deploy and records the id. Apply the schema with
   // `wrangler d1 migrations apply DB [--remote]`.
   "d1_databases": [
@@ -49,12 +49,13 @@
       "migrations_dir": "migrations"
     }
   ],
-  // Page visits (worker/visits.ts): page path and a daily-salted visitor
-  // hash. Read with scripts/visits.ts; Analytics Engine keeps three months.
+  // Usage events (worker/events.ts): pageviews and graph types, with a
+  // daily-salted visitor hash. Read with scripts/events.ts; Analytics Engine
+  // keeps three months.
   "analytics_engine_datasets": [
     {
-      "binding": "VISITS",
-      "dataset": "equation_visits"
+      "binding": "EVENTS",
+      "dataset": "equation_events"
     }
   ]
 }

@@ -93,18 +93,28 @@ Visit any page once with `#voice=<key>` to show the mic in that browser
 (`#voice=` forgets it). `?voice=<key>` works too, but a query string reaches
 the server, which may log it; the fragment never does.
 
-### Page visits
+### Usage events
 
-Each page loads [`web/visit.js`](web/visit.js), which sends an empty beacon to
-`/api/visit`. The Worker ([`worker/visits.ts`](worker/visits.ts)) writes the
-page's path to Workers Analytics Engine, along with a hash of the IP and a
-random salt that rotates daily. It stores neither the IP nor a `/g/` link's
-equations. Embedded pages, the MCP app, and anything off `equation.io` don't
-send the beacon.
+[`worker/events.ts`](worker/events.ts) writes one Workers Analytics Engine data
+point per event. Each point records the event, its param, a visitor hash
+(the IP mixed with a salt that rotates daily), the country, the browser and
+the device. Params come from fixed lists, so no equation text is stored.
+
+- `pageview`: [`web/pageview.js`](web/pageview.js) sends a beacon on every
+  page. The Worker takes the page from the Referer and stores `/g/` for share
+  links, without the payload.
+- `add_type`: the grapher reports each graph type the first time a document
+  draws it ([`lib/type-events.ts`](lib/type-events.ts)). Rows from an example
+  or the featured graph don't count until they're edited. Events are sent in
+  one beacon when the tab is hidden.
+- `mcp_show_type` / `mcp_encode_type`: the types that a `show_graph` or
+  `encode_graph_url` call draws.
+
+Embedded pages, the MCP app, and anything off `equation.io` send nothing.
 
 ```sh
 wrangler d1 migrations apply DB --remote   # visit_salts
-CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/visits.ts 30
+CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… node scripts/events.ts 30
 ```
 
 The token needs Account Analytics: Read.

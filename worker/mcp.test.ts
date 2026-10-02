@@ -14,7 +14,9 @@ const outputValidators = new Map<string, ReturnType<typeof ajv.compile>>();
 // real llms.txt actually documents the advanced syntax is guarded by
 // lib/llms-txt.test.ts (this tsconfig has no node:fs to read the file with).
 const SYNTAX_DOC = '# equation.io syntax sentinel';
+const events: AnalyticsEngineDataPoint[] = [];
 const env = {
+  EVENTS: { writeDataPoint: (p: AnalyticsEngineDataPoint) => events.push(p) },
   ASSETS: {
     fetch: async (req: Request) =>
       new URL(req.url).pathname === '/llms.txt'
@@ -856,5 +858,26 @@ describe('syntax resource', () => {
     }
     const create = body.result.tools.find((t: { name: string }) => t.name === 'encode_graph_url');
     expect(create.description).toContain('llms.txt'); // points at the full reference
+  });
+});
+
+describe('usage events', () => {
+  it('records the types a call draws, once each, and never its equations', async () => {
+    events.length = 0;
+    await rpc('tools/call', {
+      name: 'show_graph',
+      arguments: { equations: ['y = sin(x)', 'y = cos(x)', 'x^2 + y^2 + z^2 = 1', 'a = 2', 'y = (x'] },
+    });
+    await rpc('tools/call', { name: 'encode_graph_url', arguments: { equations: ['y = tan(x)'] } });
+    await rpc('tools/call', { name: 'decode_graph_url', arguments: { url: 'https://equation.io/g/y' } });
+    expect(events.map(p => p.blobs!.slice(0, 2))).toEqual([
+      ['mcp_show_type', 'implicit2d'],
+      ['mcp_show_type', 'implicit3d'],
+      ['mcp_encode_type', 'implicit2d'],
+    ]);
+    // No visitor or country: an MCP request comes from the AI provider's servers.
+    expect(events.every(p => p.blobs![2] === '' && p.blobs![3] === '')).toBe(true);
+    const stored = JSON.stringify(events);
+    for (const text of ['sin', 'cos', 'tan', 'a = 2']) expect(stored).not.toContain(text);
   });
 });

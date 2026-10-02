@@ -19,6 +19,8 @@ import { freeVars } from '../lib/expr.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { rowKind } from '../lib/row-kind.ts';
 import { splitStatements } from '../lib/statements.ts';
+import { publicKind } from '../lib/plot.ts';
+import { type EventName, recordMcpTypes } from './events.ts';
 import { analyze } from './graph.ts';
 import { MAX_PLOTS, previewGap } from './og.ts';
 import { GRAPH_UI_URI, graphResource, graphResourceContents } from './mcp-app.ts';
@@ -346,6 +348,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
         : {}),
       rows,
     },
+    /** What the rows draw, for usage events (worker/events.ts). */
+    types: analysis.rows.flatMap(r => (r.cls && !r.error ? [publicKind(r.cls.object)] : [])),
   };
 }
 
@@ -371,6 +375,7 @@ interface RpcContext {
   /** Reads the /llms.txt asset backing the "syntax" resource. */
   syntaxText: () => Promise<string>;
   graphHtml: () => Promise<string>;
+  recordTypes: (event: Extract<EventName, `mcp_${string}`>, types: string[]) => void;
 }
 
 async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | null> {
@@ -430,6 +435,7 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         // Accept former names for clients with cached tool definitions.
         if (name === 'encode_graph_url' || name === 'create_graph' || name === 'show_graph') {
           const made = await encodeGraphUrl(origin, args);
+          ctx.recordTypes(name === 'show_graph' ? 'mcp_show_type' : 'mcp_encode_type', made.types);
           if (name === 'show_graph') {
             const { preview: _preview, preview_omits: _omits, ...shown } = made.value;
             value = shown;
@@ -503,6 +509,7 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
 
   const ctx: RpcContext = {
     origin: url.origin,
+    recordTypes: (event, types) => recordMcpTypes(env, request, event, types),
     graphHtml: async () => {
       const res = await env.ASSETS.fetch(new Request(new URL('/mcp-app/', url)));
       const html = await res.text();
