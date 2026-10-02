@@ -60,6 +60,6 @@ describe('a path with no file', () => {
   // immutable for a year. The app lives at / and, through the Worker, /g/*.
   it('gets the 404 page, not the app', () => {
     expect(assets.not_found_handling).toBe('404-page');
-    expect(existsSync(new URL('../web/public/404.html', import.meta.url))).toBe(true);
+    expect(existsSync(new URL('../web/404.html', import.meta.url))).toBe(true);
   });
 });

@@ -1,0 +1,9 @@
+/* The 404 page wears the about page's hero. Imported rather than linked
+   beside this sheet: a stylesheet shared by two entries goes to a shared
+   chunk, which Vite links after this one and makes about.ts import. */
+@import './about/about.css';
+
+/* Smaller than the hero's, and on one line: "NOT FOUND" is ~7.8em wide. */
+.hero h1 {
+  font-size: min(calc((100vw - 2 * var(--gutter)) / 8), 120px);
+}

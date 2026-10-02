@@ -80,6 +80,7 @@ export default defineConfig({
             landing: fileURLToPath(new URL('web/landing/index.html', import.meta.url)),
             privacy: fileURLToPath(new URL('web/privacy/index.html', import.meta.url)),
             terms: fileURLToPath(new URL('web/terms/index.html', import.meta.url)),
+            notFound: fileURLToPath(new URL('web/404.html', import.meta.url)),
           },
         },
       },
