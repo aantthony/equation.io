@@ -36,6 +36,8 @@ describe('wrangler run_worker_first covers the worker routes', () => {
   // two text assets the Worker re-tags with a charset.
   it.each([
     ['/mcp'],
+    ['/mcp/server-card'],
+    ['/.well-known/ard.json'],
     ['/api/health'],
     ['/api/og/abc'],
     ['/g/y%20%3D%20x'],

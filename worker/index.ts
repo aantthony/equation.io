@@ -1,6 +1,7 @@
 import { GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { landingFromPath, graphUrl, type Landing } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
+import { handleDiscovery } from './discovery.ts';
 import { handleMcp } from './mcp.ts';
 import { OG_HEIGHT, OG_WIDTH, canRenderOg, renderOgPng } from './og.ts';
 import { handleVoiceConnect } from './voice.ts';
@@ -263,6 +264,8 @@ function withCsp(response: Response, policy: string): Response {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const discovery = handleDiscovery(request, url);
+    if (discovery) return discovery;
     if (url.pathname === '/.well-known' || url.pathname.startsWith('/.well-known/')) {
       const response = await env.ASSETS.fetch(request);
       // This namespace serves machine-readable files, never the HTML 404 page.

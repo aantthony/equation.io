@@ -52,6 +52,11 @@ Agent-facing surface:
   (validates rows, returns links), `decode_graph_url` (decodes links for editing),
   and `show_graph` (renders the interactive grapher inside MCP Apps hosts).
   See [MCP Apps integration and testing](docs/mcp-app.md).
+- `/.well-known/ard.json` (also at the older `/.well-known/ai-catalog.json`)
+  — [Agentic Resource Discovery](https://agenticresourcediscovery.org/spec/)
+  catalog listing the MCP server, and `/mcp/server-card` — its MCP Server
+  Card. Both are generated from [`server.json`](server.json) by
+  [`worker/discovery.ts`](worker/discovery.ts).
 
 ## Usage
 
