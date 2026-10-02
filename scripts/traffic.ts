@@ -53,7 +53,8 @@ const zone: string = zones[0].id;
 const account: string = zones[0].account.id;
 
 const until = new Date();
-const since = new Date(until.getTime() - days * 864e5);
+// Whole UTC days, today included, so only today's row is a partial day.
+const since = new Date(Date.UTC(until.getUTCFullYear(), until.getUTCMonth(), until.getUTCDate() - (days - 1)));
 
 /** httpRequestsAdaptiveGroups over the window, filtered and grouped as asked. */
 async function adaptive(filter: string, dimensions: string, extra = ''): Promise<Json[]> {
@@ -119,7 +120,7 @@ console.table(
     .map(day => Object.fromEntries([['day', day], ...columns.map(c => [c, ips.get(day)!.get(c)?.size ?? 0])])),
 );
 const week = new Set([...ips.values()].flatMap(byPage => [...(byPage.get('site') ?? [])]));
-console.log(`Distinct IPs across all ${days} days: ${week.size}`);
+console.log(`Distinct IPs across all ${days} days (UTC, today so far): ${week.size}`);
 
 // --- MCP traffic ---
 
@@ -152,7 +153,8 @@ async function sql(query: string): Promise<Json[]> {
 
 // blob1 kind, blob2 tool, blob3 client, blob4 type; double1 rows, double2
 // error rows, double3 invalid, double4 failed (worker/mcp-usage.ts).
-const calls = `FROM equation_mcp WHERE blob1 = 'call' AND timestamp > NOW() - INTERVAL '${days}' DAY`;
+const from = `timestamp >= toDateTime('${since.toISOString().slice(0, 19).replace('T', ' ')}')`;
+const calls = `FROM equation_mcp WHERE blob1 = 'call' AND ${from}`;
 const n = (v: unknown) => Number(v ?? 0);
 const [perDay, perTool, perClient, perType] = await Promise.all([
   sql(
@@ -169,7 +171,7 @@ const [perDay, perTool, perClient, perType] = await Promise.all([
   sql(`SELECT blob3 AS client, SUM(_sample_interval) AS calls ${calls} GROUP BY client ORDER BY calls DESC LIMIT 12`),
   sql(
     `SELECT blob4 AS type, SUM(_sample_interval) AS calls FROM equation_mcp
-     WHERE blob1 = 'type' AND timestamp > NOW() - INTERVAL '${days}' DAY GROUP BY type ORDER BY calls DESC`,
+     WHERE blob1 = 'type' AND ${from} GROUP BY type ORDER BY calls DESC`,
   ),
 ]);
 const pct = (part: unknown, whole: unknown) => (n(whole) ? `${Math.round((100 * n(part)) / n(whole))}%` : '');
