@@ -832,6 +832,26 @@ function numericItems(items: readonly Expr[], ctx: Ctx, name: string): number[] 
   return items.map(it => constVal(it, ctx, `${name}(…) needs a constant list, so each element`));
 }
 
+/** A named clamp keeps every slider input within the validated range. Its
+ * upper bound fixes the shader's size; the count itself stays a uniform.
+ * Unbounded counts keep the static path so invalid drags still diagnose.
+ */
+function harmonicClamp(count: Expr, ctx: Ctx): { definition: Expr; lo: number; hi: number } | null {
+  if (count.kind !== 'var') return null;
+  const definition = ctx.opts.definition?.(count.name);
+  let bound = definition;
+  while (bound?.kind === 'call' && ['round', 'floor', 'ceil'].includes(bound.name) && bound.args.length === 1)
+    bound = bound.args[0];
+  if (bound?.kind !== 'call' || bound.name !== 'min' || bound.args.length !== 2) return null;
+  const inside = bound.args[0];
+  if (inside.kind !== 'call' || inside.name !== 'max' || inside.args.length !== 2) return null;
+  const lo = constVal(lower(inside.args[1], ctx), ctx, 'The harmonic slider minimum');
+  const hi = constVal(lower(bound.args[1], ctx), ctx, 'The harmonic slider maximum');
+  return Number.isInteger(lo) && Number.isInteger(hi) && lo >= 0 && hi > lo && hi <= FOURIER_MAX_HARMONICS
+    ? { definition: definition!, lo, hi }
+    : null;
+}
+
 /** Fourier consumes a signal whole, rather than mapping over its samples.
  * Lists are multisets: only an explicit tuple has a sampling order. CSV
  * columns become one with sort(data.signal, data.row), keeping file order.
@@ -849,7 +869,15 @@ function lowerFourier(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   if (!(period > 0) || !Number.isFinite(period) || !Number.isFinite((2 * Math.PI) / period)) {
     throw new Error('The Fourier interval must have finite bounds with lo < hi and a finite frequency scale.');
   }
-  const requested = reconstruction ? constVal(lower(e.args[1], ctx), ctx, 'The number of harmonics', true) : 0;
+  const count = reconstruction ? e.args[1] : undefined;
+  const clamp = count ? harmonicClamp(count, ctx) : null;
+  // Validate against the declaration, without marking the count's current
+  // value as a structural input. Bounds and signal coefficients remain
+  // structural, and a fractional/invalid initial count is still refused.
+  const requested = count
+    ? constVal(lower(clamp?.definition ?? count, ctx), ctx, 'The number of harmonics', !clamp)
+    : 0;
+  if (clamp && count?.kind === 'var') ctx.opts.boundConsts?.add(count.name);
   if (!Number.isInteger(requested) || requested < 0 || requested > FOURIER_MAX_HARMONICS) {
     throw new Error(`reconstruct needs a whole number of harmonics from 0 to ${FOURIER_MAX_HARMONICS}.`);
   }
@@ -892,8 +920,12 @@ function lowerFourier(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   if (reconstruction && requested > max)
     throw new Error(`This signal has only ${Math.floor(xs.length / 2)} harmonics; use N from 0 to ${max}.`);
   const coefficients = realFourier(xs);
+  const live = clamp && clamp.hi <= max;
+  // A clamp extending past Nyquist cannot stay on the uniform path: moving
+  // it there must recompile to report the same out-of-range diagnostic.
+  if (clamp && !live) constVal(lower(count!, ctx), ctx, 'The number of harmonics', true);
   return reconstruction
-    ? reconstructSeries(coefficients, requested, lo, period)
+    ? reconstructSeries(coefficients, live ? clamp.hi : requested, lo, period, live ? count : undefined)
     : listOf(spectrumPoints(coefficients, period), ctx);
 }
 

@@ -939,7 +939,7 @@ await scenario('replacing the document resets the live view', async () => {
   check('unframed example is not stuck in the previous window', open > tight * 2, `tight=${tight} open=${open}`);
 });
 
-await scenario('Fourier example links views and recomputes reconstruction from its slider', async () => {
+await scenario('Fourier example links views and updates reconstruction from its slider', async () => {
   await load(page, ['y = x']);
   await page.click('#examples');
   await page.locator('.exd-search').fill('signal spectrum reconstruction');
@@ -953,7 +953,9 @@ await scenario('Fourier example links views and recomputes reconstruction from i
       await new Promise(requestAnimationFrame);
       const { equations, panels } = (window as any).__eq;
       return {
-        field: equations.find((e: any) => e.text === 'y = reconstruct(f, N)')?.gpu?.field ?? '',
+        field: equations.find((e: any) => e.text.trim() === 'y = reconstruct(f, N)')?.gpu?.field ?? '',
+        count: document.querySelector<HTMLInputElement>('.eq-slider-range')?.value,
+        compiles: (window as any).__glStats.compiles,
         linked:
           panels.length === 3 && panels[1].view.cx === panels[2].view.cx && panels[1].view.upp === panels[2].view.upp,
       };
@@ -968,8 +970,8 @@ await scenario('Fourier example links views and recomputes reconstruction from i
   });
   const after = await snapshot();
   check(
-    'harmonic slider adds the phase-shifted frequency to the shader',
-    !!before.field && before.field !== after.field && after.field.includes('sin('),
+    'harmonic slider updates the count without compiling a new shader',
+    !!before.field && before.field === after.field && after.count === '5' && after.compiles === before.compiles,
   );
   check('Fourier example has no row errors', (await page.locator('.eq-line.invalid').count()) === 0);
   await page.waitForFunction(() => decodeURIComponent(location.pathname).includes('N = clamp(round(5)'));
@@ -978,9 +980,42 @@ await scenario('Fourier example links views and recomputes reconstruction from i
   const reloaded = await snapshot();
   check(
     'Fourier harmonic choice survives the share URL reload',
-    reloaded.field === after.field,
+    reloaded.field === after.field && reloaded.count === after.count,
     JSON.stringify({ after, reloaded }),
   );
+});
+
+await scenario('square wave harmonic dragging retains its render plan across the whole range', async () => {
+  await load(page, ['y = x']);
+  await page.click('#examples');
+  await page.locator('.exd-search').fill('square wave reconstruction');
+  await page
+    .locator('.exd-card')
+    .filter({ has: page.locator('.exd-name', { hasText: /^square wave reconstruction$/ }) })
+    .click();
+  const sweep = await page.evaluate(async () => {
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    const curve = () => (window as any).__eq.equations.find((e: any) => e.text.trim() === 'y = reconstruct(f, N)');
+    const plan = curve()?.gpu;
+    const compiles = (window as any).__glStats.compiles;
+    const slider = document.querySelector<HTMLInputElement>('.eq-slider-range')!;
+    let retained = !!plan;
+    let valid = true;
+    for (let n = 0; n <= 48; n++) {
+      slider.value = String(n);
+      slider.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise(requestAnimationFrame);
+      retained &&= curve()?.gpu === plan;
+      valid &&= !document.querySelector('.eq-line.invalid');
+    }
+    slider.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(requestAnimationFrame);
+    return { retained, valid, compiles: (window as any).__glStats.compiles - compiles, count: slider.value };
+  });
+  check('square wave sweep compiles zero shaders', sweep.compiles === 0, JSON.stringify(sweep));
+  check('square wave sweep retains its render plan', sweep.retained);
+  check('square wave sweep remains valid through 48 harmonics', sweep.valid && sweep.count === '48');
 });
 
 await scenario('png button downloads a screenshot', async () => {

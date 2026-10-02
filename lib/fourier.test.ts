@@ -4,6 +4,9 @@ import { parseCsv } from './csv.ts';
 import { evaluate } from './expr.ts';
 import { realFourier, reconstructSeries } from './fourier.ts';
 import { runtimeSliderNames } from './runtime-sliders.ts';
+import { shaderKey } from './compiler.ts';
+import { diff } from './diff.ts';
+import { compileProg, run } from './vm.ts';
 
 describe('real Fourier coefficients', () => {
   it.each([8, 15, 31, 256])('recovers mean, amplitudes and phase with %i samples', n => {
@@ -102,6 +105,74 @@ describe('Fourier through document analysis and both backends', () => {
     expect(first(0.125, Math.SQRT2)).toBeCloseTo(0, 10);
     const second = approximation(rows.map(r => (r === 'N = 1' ? 'N = 2' : r)));
     expect(second(0.125, Math.SQRT2 + 1)).toBeCloseTo(0, 10);
+  });
+  it('keeps a bounded harmonic count live with identical shaders across the whole range', () => {
+    const rows = ['N = clamp(round(5), 0, 48)', 'f(s) = sign(sin(2pi s))', 'y = reconstruct(f, N)'];
+    const a = analyzeRows(rows);
+    const row = a.rows.at(-1)!;
+    expect(row.error).toBeUndefined();
+    expect(runtimeSliderNames(a).has('N')).toBe(true);
+    expect(a.document.structuralConsts.has('N')).toBe(false);
+    expect(a.document.sumBoundConsts.has('N')).toBe(true);
+    const o = row.cls!.object;
+    if (o.kind !== 'curve' || o.form !== 'graph') throw new Error(o.kind);
+    const program = compileProg(
+      o.rhs,
+      new Map([
+        ['x', 0],
+        ['N', 1],
+      ]),
+    );
+    const stack = new Float64Array(program.depth);
+    const derivative = diff(o.rhs, 'x');
+    const xs = Float64Array.from({ length: 256 }, (_, j) => Math.sign(Math.sin((2 * Math.PI * j) / 256)));
+    const coefficients = realFourier(xs);
+    for (const N of [0, 1, 2, 5, 24, 47, 48]) {
+      const rebuilt = analyzeRows(rows.map(r => (r.startsWith('N =') ? `N = clamp(round(${N}), 0, 48)` : r)));
+      expect(shaderKey(rebuilt.rows.at(-1)!.gpu!)).toBe(shaderKey(row.gpu!));
+      const expected = reconstructSeries(coefficients, N, 0, 1);
+      const expectedDerivative = diff(expected, 'x');
+      for (const x of [-0.1, 0, 0.125, 0.5, 0.9, 1.1]) {
+        const env = { x, N };
+        expect(evaluate(o.rhs, env)).toBeCloseTo(evaluate(expected, env), 10);
+        expect(run(program, [x, N], stack)).toBeCloseTo(evaluate(expected, env), 10);
+        expect(evaluate(derivative, env)).toBeCloseTo(evaluate(expectedDerivative, env), 8);
+      }
+    }
+  });
+  it('still recompiles coefficient and interval inputs when the count is live', () => {
+    const a = analyzeRows(['a = 2', 'b = 1', 'N = clamp(round(1), 0, 8)', 'y = reconstruct(a cos(2pi x), N, 0, b)']);
+    const live = runtimeSliderNames(a);
+    expect(live.has('N')).toBe(true);
+    expect(live.has('a')).toBe(false);
+    expect(live.has('b')).toBe(false);
+    expect(
+      runtimeSliderNames(analyzeRows(['N = clamp(round(1), 0, 8)', 'y = reconstruct(N cos(2pi x), N)'])).has('N'),
+    ).toBe(false);
+  });
+  it('keeps unsafe slider ranges structural so invalid values remain errors', () => {
+    for (const declaration of [
+      'N = 1',
+      'N = clamp(round(1), -1, 48)',
+      'N = clamp(round(1), 0, 129)',
+      'N = clamp(round(0), 0, 0)',
+    ]) {
+      expect(
+        runtimeSliderNames(analyzeRows([declaration, 'y = reconstruct(cos(2pi x), N)'])).has('N'),
+        declaration,
+      ).toBe(false);
+    }
+    const rows = ['N = clamp(round(1), 0, 48)', 'y = reconstruct((0, 1, 0, -1), N)'];
+    expect(runtimeSliderNames(analyzeRows(rows)).has('N')).toBe(false);
+    expect(analyzeRows(['N = clamp(round(3), 0, 48)', rows[1]]).rows.at(-1)?.error).toMatch(/only 2 harmonics/);
+    expect(analyzeRows(['N = clamp(1.5, 0, 48)', 'y = reconstruct(cos(2pi x), N)']).rows.at(-1)?.error).toMatch(
+      /whole number/,
+    );
+  });
+  it('recognizes rounding outside the clamp and treats range endpoints as structural', () => {
+    const a = analyzeRows(['limit = 8', 'N = round(clamp(1, 0, limit))', 'y = reconstruct(cos(2pi x), N)']);
+    expect(runtimeSliderNames(a).has('N')).toBe(true);
+    expect(runtimeSliderNames(a).has('limit')).toBe(false);
   });
   it('works with named spectra and stem geometry', () => {
     const a = analyzeRows(['S = fourier(sin(2pi x), 0, 1, 8)', 'segment((S.x, 0), S)']);

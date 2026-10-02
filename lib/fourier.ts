@@ -144,13 +144,34 @@ export function spectrumPoints(c: FourierCoefficients, period: number): Expr[] {
 
 /** The signed DC term is always included; N selects bins 1..N. Phase is
  * retained, so full reconstruction interpolates the original samples. */
-export function reconstructSeries(c: FourierCoefficients, harmonics: number, lo: number, period: number): Expr {
+export function reconstructSeries(
+  c: FourierCoefficients,
+  harmonics: number,
+  lo: number,
+  period: number,
+  count?: Expr,
+): Expr {
   let result: Expr = num(c.cosine[0]);
   const position = sub({ kind: 'var', name: 'x' }, num(lo));
   for (let k = 1; k <= harmonics; k++) {
     const angle = mul(num((2 * Math.PI * k) / period), position);
-    if (c.cosine[k]) result = add(result, mul(num(c.cosine[k]), { kind: 'call', name: 'cos', args: [angle] }));
-    if (c.sine[k]) result = add(result, mul(num(c.sine[k]), { kind: 'call', name: 'sin', args: [angle] }));
+    let term: Expr = num(0);
+    if (c.cosine[k]) term = add(term, mul(num(c.cosine[k]), { kind: 'call', name: 'cos', args: [angle] }));
+    if (c.sine[k]) term = add(term, mul(num(c.sine[k]), { kind: 'call', name: 'sin', args: [angle] }));
+    if (term.kind === 'num' && term.value === 0) continue;
+    // A bounded count is a uniform: the coefficient table and shader stay
+    // fixed across a drag. Each guard covers both phase components and its
+    // symbolic spatial derivative, skipping harmonics above the count.
+    result = add(
+      result,
+      count
+        ? {
+            kind: 'piecewise',
+            cases: [{ cond: { kind: 'ineq', op: '>=', l: count, r: num(k) }, value: term }],
+            otherwise: num(0),
+          }
+        : term,
+    );
   }
   return result;
 }
