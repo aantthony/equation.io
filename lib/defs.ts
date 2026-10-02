@@ -82,6 +82,7 @@ import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
 import { inferScalarType } from './complex.ts';
+import { complexParts } from './complex-parts.ts';
 import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
@@ -3184,6 +3185,14 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // So is one over the parameters u, v: `c = (cos(2pi u), sin(2pi u))`
   // names a curve that later rows inline, as they inline `s = (x, y)`.
   const fieldNames = new Set<string>();
+  // A complex constant (`a = e^(iπ/3)`) has no one number to hold either: it
+  // is written in wherever its name is read, as `q = x + iy` is. A real one
+  // reached through complex values (`b = re(e^(iπ/3))`) holds its real part.
+  for (const [name, e] of defs.consts) {
+    if (!freeVars(e).has('i')) continue;
+    if (complexValued(e)) fieldNames.add(name);
+    else defs.consts.set(name, complexParts(e)[0]);
+  }
   // The fields over u, v among them, so their errors speak of curves.
   const paramNames = new Set<string>();
   for (let changed = true; changed;) {
@@ -3356,7 +3365,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     }
   }
 
-  // A list holds data: its elements may only use constants, states, and t.
+  // A list holds data: its elements may only use constants, states, t and i.
   // (References to other lists never survive — lowering already inlined
   // any list defined above, and one defined below parses as a product and
   // lands in the constant check above.)
@@ -3366,7 +3375,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (seq.kind !== 'list') continue;
     for (const item of seq.items) {
       for (const fv of freeVars(item)) {
-        if (fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
+        if (fv !== 't' && fv !== 'i' && !constNames.has(fv) && !stateNames.has(fv)) {
           errors.set(name, `${name} is a list, so its elements may only use constants and t (found ${fv}).`);
           defs.lists.delete(name);
           continue outer;

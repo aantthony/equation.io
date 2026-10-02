@@ -40,6 +40,8 @@ import { childrenOf, mapChildren, structuralDiagnostic } from './expr.ts';
  * figure through thousands of computed points).
  */
 import { add, div } from './diff.ts';
+import { inferScalarType, usesComplex } from './complex.ts';
+import { complexParts } from './complex-parts.ts';
 import type { ResolveOpts } from './defs.ts';
 import {
   EVAL_FNS,
@@ -89,6 +91,22 @@ export const SCALAR_REDUCTIONS = new Set(['mean', 'total', 'count', 'stdev', 'me
 const SYMBOLIC_REDUCTIONS = new Set(['mean', 'total', 'count']);
 /** Reductions that need numeric elements (ordering), so a constant list. */
 const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
+
+/** Members that are complex numbers, which have no order or spread along a
+ *  line (`re(z)` only passes through them); lib/object-lists.ts rethrows this. */
+function refuseComplex(name: string, items: readonly Expr[]): void {
+  const complex = (it: Expr): boolean => {
+    try {
+      return usesComplex(it) && inferScalarType(it) === 'complex';
+    } catch {
+      return false;
+    }
+  };
+  if (items.some(complex))
+    throw new Error(
+      `${name}(…) takes real numbers, and these are complex: reduce them with abs(…), re(…) or im(…) first.`,
+    );
+}
 
 /**
  * Whether a call reduces its argument's members to one value: count, total,
@@ -460,6 +478,12 @@ const BIN_OPS: Record<string, (a: number, b: number) => number> = {
 /** Evaluate a subexpression that must be a known number (range bounds,
  *  indices) from constants and sliders, like Σ/Π bounds. */
 function constVal(e: Expr, ctx: Ctx, what: string, whole = false): number {
+  // A real value reached through complex ones (|1 + i|, re(e^(iπ/3))) is its
+  // real part; i is the imaginary unit, not a constant to ask for.
+  if (freeVars(e).has('i')) {
+    if (inferScalarType(e) === 'complex') throw new Error(`${what} must be real — take re(…), im(…) or abs(…).`);
+    e = complexParts(e)[0];
+  }
   const env: Record<string, number> = {};
   for (const fv of freeVars(e)) {
     const v = ctx.opts.consts?.[fv];
@@ -1763,6 +1787,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
             : (dropUndefined(settle(lower(e.args[0], ctx), ctx), ctx) as Exclude<Expr, { kind: 'lazy' }>);
         if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
         if (isText(arg)) throw new Error('hist(…) counts numbers; that column holds text.');
+        if (isList(arg)) refuseComplex('hist', arg.items);
         // Gaps go before the values are read, not after: `hist(person.age)`
         // skips them (histogram drops non-finite values), and one slider
         // later `hist(person.age k)` refused the whole row as "not finite".
@@ -1817,6 +1842,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
           throw new Error(`${e.name}(…) needs a list, like ${e.name}([1, 4, 2]).`);
         }
         const arg = dropUndefined(settle(args[0], ctx), ctx) as Seq;
+        if (!SYMBOLIC_REDUCTIONS.has(e.name) && isList(arg)) refuseComplex(e.name, arg.items);
         if (isText(arg)) {
           // count is the only reduction text has an answer for.
           if (e.name === 'count') return num(arg.values.length);

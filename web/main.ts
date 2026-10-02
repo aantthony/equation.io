@@ -66,6 +66,7 @@ import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
 import { DRAW_OP_SRC, type Expr, canonicalName, evaluate, freeVars, substVars } from '../lib/expr.ts';
+import { describeName } from '../lib/highlight.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -5226,8 +5227,13 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
     case 'scalar':
       if (b.role === 'state')
         return `defines ${name}: a scalar state, integrated forward in time from its derivative${quiet}`;
-      if (b.role === 'field')
+      if (b.role === 'field') {
+        // A complex constant, or a real one reached through it, is written in
+        // like a field but holds no position.
+        const value = describeName(name, defs)?.type;
+        if (value === 'complex number' || value === 'number') return `defines ${name}: a ${value}${quiet}`;
         return `defines ${name}: a scalar field (a value at every point, e.g. a coordinate like r or theta)${quiet}`;
+      }
       if (sliderOf(eq)) return `defines ${name}: a scalar constant with a slider${quiet}`;
       return `defines ${name}: a scalar constant${animated.has(name) ? ' that changes with time (t)' : ''}${quiet}`;
     case 'vector': {

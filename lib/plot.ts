@@ -791,9 +791,18 @@ function classifyLowered(
   }
 
   if (expr.kind === 'list') {
-    if (usesComplex(expr)) throw new Error('Complex values are not supported in lists.');
     for (const v of vars) {
-      if (v !== 't') throw new Error(`A list may only use constants and t (found ${v}).`);
+      // (w counts as x and y by now; name the one the row wrote.)
+      const found = freeVars(expr).has('w') ? 'w' : v;
+      if (v !== 't') throw new Error(`A list may only use constants and t (found ${found}).`);
+    }
+    // One complex member makes the list complex, as one complex term makes
+    // a sum complex: the type is the list's, so 1 in [1, i] is 1 + 0i.
+    // Members that only pass through complex values (re(…), |…|) are real.
+    const complexMember = (it: Expr) => it.kind !== 'vec' && usesComplex(it) && inferScalarType(it) === 'complex';
+    if (expr.items.some(complexMember)) {
+      if (expr.items.some(it => it.kind === 'vec')) throw new Error('Lists cannot mix complex numbers and points.');
+      return done({ kind: 'list', element: 'complex', storage: 'expressions', values: expr.items });
     }
     const vecs = expr.items.filter((it): it is Expr & { kind: 'vec' } => it.kind === 'vec');
     if (vecs.length === 0) return done({ kind: 'list', element: 'scalar', storage: 'expressions', values: expr.items });

@@ -338,7 +338,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   // own values (docs/multisets.md §2, §9).
   if (
     originalError instanceof Error &&
-    /A multiset (of \d+-tuples cannot|holds tuples)|of a multiset of \d+-tuples is not defined/.test(
+    /A multiset (of \d+-tuples cannot|holds tuples)|of a multiset of \d+-tuples is not defined|takes real numbers, and these are complex/.test(
       originalError.message,
     )
   ) {

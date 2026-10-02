@@ -706,6 +706,19 @@ describe('coordinate and complex previews', () => {
     ])
       expect(pixel(r, x, y)[0]).toBeLessThan(150);
   });
+  it('draws a list of complex numbers as Argand points', () => {
+    // e^(2πik/3) are the roots of unity, as a named list or not.
+    for (const rows of [['e^(2 pi i [0..2]/3)'], ['S = e^(2 pi i [0..2]/3)', 'S']]) {
+      const r = renderRaster([...rows, frame], 160, 160);
+      for (const [x, y] of [
+        [100, 80],
+        [70, 63],
+        [70, 97],
+      ])
+        expect(pixel(r, x, y)[0], `${rows.at(-1)} at ${x},${y}`).toBeLessThan(150);
+      expect(Math.min(...pixel(r, 85, 85))).toBeGreaterThan(200);
+    }
+  });
   it('draws a complex path in the same plane as Argand points and roots', () => {
     // The unit circle passes through all three roots of unity and through i.
     const r = renderRaster(['exp(i 2 pi u)', frame], 160, 160);

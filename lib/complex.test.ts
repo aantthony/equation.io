@@ -1,7 +1,9 @@
+import { analyzeRows } from './analysis.ts';
 import { compileGpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { compileTyped, usesComplex } from './complex.ts';
-import { parseExpr } from './expr.ts';
+import { type Expr, evaluate, parseExpr } from './expr.ts';
+import { publicKind } from './math-object.ts';
 import { classify } from './plot.ts';
 
 const typed = (s: string) => compileTyped(parseExpr(s));
@@ -110,5 +112,96 @@ describe('classify (special forms)', () => {
     const c = classify(parseExpr('iter(z^2 + a + b i)'), new Set(['a', 'b']));
     expect(c.params).toEqual(['a', 'b']);
     expect((compileGpu(c) as { step: string }).step).toContain('u_a');
+  });
+});
+
+describe('complex lists', () => {
+  /** The last row, and its members as numbers when it draws points. */
+  const last = (rows: string[], env: Record<string, number> = {}) => {
+    const row = analyzeRows(rows, { readouts: true }).rows.at(-1)!;
+    const cpu = row.cpu as { type: string; pts?: Expr[][] } | undefined;
+    const pts = cpu?.pts?.map(p => p.map(c => evaluate(c, env)));
+    return { row, kind: row.cls && publicKind(row.cls.object), pts };
+  };
+  const close = (pts: number[][] | undefined, want: number[][]) => {
+    expect(pts).toHaveLength(want.length);
+    pts!.forEach((p, k) => p.forEach((c, j) => expect(c, `member ${k}`).toBeCloseTo(want[k][j], 12)));
+  };
+
+  it('draws each member on the Argand plane, as one complex value draws', () => {
+    const { kind, pts } = last(['e^(i π [0..5]/5)']);
+    expect(kind).toBe('plist');
+    close(
+      pts,
+      [0, 1, 2, 3, 4, 5].map(k => [Math.cos((Math.PI * k) / 5), Math.sin((Math.PI * k) / 5)]),
+    );
+  });
+
+  it('is complex throughout when one member is: 1 in [1, i] is 1 + 0i', () => {
+    close(last(['[1, i, -1]']).pts, [
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+    ]);
+    expect(last(['[1 + i, (1, 2)]']).row.error).toBe('Lists cannot mix complex numbers and points.');
+  });
+
+  it('names a complex list, and a complex value', () => {
+    close(last(['S = e^(2 π i [0..2]/3)', 'S']).pts, [
+      [1, 0],
+      [-0.5, Math.sqrt(3) / 2],
+      [-0.5, -Math.sqrt(3) / 2],
+    ]);
+    expect(last(['a = e^(i π/3)', 'a']).kind).toBe('point');
+    // Through complex values to a real one: a number to read, and a constant.
+    expect(last(['a = e^(i π/3)', 'b = re(a)', 'b']).row.info).toBe('≈ 0.5');
+    expect(last(['b = |3 + 4i|', 'b']).row.info).toBe('= 5');
+    expect(last(['a = 2 + i', 'domain(w - a)']).row.error).toBeUndefined();
+  });
+
+  it('keeps real projections of the members real', () => {
+    expect(last(['re([1 + 2i, 3 - i])']).row.info).toBe('= [1, 3]');
+    expect(last(['|[3 + 4i, 5i]|']).row.info).toBe('= [5, 5]');
+    close(last(['L = e^(i π [0..2]/2)', '(re(L), im(L))']).pts, [
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+    ]);
+  });
+
+  it('moves with sliders and t', () => {
+    close(last(['k = 4', 'e^(2 π i [0..k-1]/k)'], { k: 4 }).pts, [
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+      [0, -1],
+    ]);
+    close(last(['e^(i (t + π [0, 1]))'], { t: Math.PI / 2 }).pts, [
+      [0, 1],
+      [0, -1],
+    ]);
+  });
+
+  it('reduces by sum and mean, and refuses an order it does not have', () => {
+    expect(last(['count(e^(i π [0..5]/5))']).row.info).toBe('= 6');
+    expect(last(['mean(e^(2 π i [0..4]/5))']).kind).toBe('point');
+    for (const f of ['sort', 'median', 'stdev', 'max', 'hist'])
+      expect(last([`${f}([2, i])`]).row.error).toBe(
+        `${f}(…) takes real numbers, and these are complex: reduce them with abs(…), re(…) or im(…) first.`,
+      );
+    expect(last(['max(abs([3, 4i, 1 + i]))']).row.info).toBe('= 4');
+    expect(last(['[1..i]']).row.error).toBe('A ".." range bound must be real — take re(…), im(…) or abs(…).');
+  });
+
+  it('bounds the split across every member', () => {
+    // Constant members fold to two numbers each.
+    expect(last(['e^(2 π i [0..4999]/5000)']).pts).toHaveLength(5000);
+    expect(last(['a = 0.4', '((a + i [0..4999]/4999)^5 + 1)^3']).row.error).toMatch(
+      /^This complex list is too large to draw/,
+    );
+  });
+
+  it('names the variable a list may not use', () => {
+    expect(last(['[w, 2w]']).row.error).toBe('A list may only use constants and t (found w).');
   });
 });
