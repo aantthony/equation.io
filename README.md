@@ -93,6 +93,22 @@ Visit any page once with `#voice=<key>` to show the mic in that browser
 (`#voice=` forgets it). `?voice=<key>` works too, but a query string reaches
 the server, which may log it; the fragment never does.
 
+### Traffic and MCP usage
+
+```sh
+pnpm traffic 7     # needs `wrangler login`
+```
+
+Site visitors come from Cloudflare's own zone analytics. The script counts
+unique IPs per day on each page, using browser user agents only, and lists
+`/mcp` POSTs by client. Nothing on the site collects this.
+
+MCP tool calls are the one thing Cloudflare can't see, because it doesn't
+record request bodies. [`worker/mcp-usage.ts`](worker/mcp-usage.ts) writes one
+Analytics Engine point per `tools/call`: the tool, the client, the graph types,
+and row and error counts, never equation text. Set `CLOUDFLARE_API_TOKEN`, with
+Account Analytics: Read, for the script to include them.
+
 ## Examples
 
 **Basics**

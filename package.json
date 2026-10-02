@@ -22,7 +22,8 @@
     "test:swipe": "node scripts/swipe-test.ts",
     "bench": "vitest bench --run",
     "perf": "node scripts/perf.ts",
-    "perf:update": "node scripts/perf.ts --update"
+    "perf:update": "node scripts/perf.ts --update",
+    "traffic": "node scripts/traffic.ts"
   },
   "private": true,
   "license": "MIT",

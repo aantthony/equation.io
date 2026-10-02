@@ -48,5 +48,14 @@
       "database_name": "equation",
       "migrations_dir": "migrations"
     }
+  ],
+  // MCP tool usage (worker/mcp-usage.ts): tool, client, graph types and row
+  // counts, never equation text. Read with scripts/traffic.ts; Analytics
+  // Engine keeps three months.
+  "analytics_engine_datasets": [
+    {
+      "binding": "MCP_USAGE",
+      "dataset": "equation_mcp"
+    }
   ]
 }

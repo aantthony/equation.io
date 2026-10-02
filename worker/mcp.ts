@@ -19,7 +19,9 @@ import { freeVars } from '../lib/expr.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import { rowKind } from '../lib/row-kind.ts';
 import { splitStatements } from '../lib/statements.ts';
+import { publicKind } from '../lib/plot.ts';
 import { analyze } from './graph.ts';
+import { type CallStats, type Tool, TOOL_NAMES, recordToolCall } from './mcp-usage.ts';
 import { MAX_PLOTS, previewGap } from './og.ts';
 import { GRAPH_UI_URI, graphResource, graphResourceContents } from './mcp-app.ts';
 import type { JsonSchema, ObjectSchema } from '../lib/json-schema.ts';
@@ -346,6 +348,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
         : {}),
       rows,
     },
+    /** What the rows draw, for usage counts (worker/mcp-usage.ts). */
+    types: analysis.rows.flatMap(r => (r.cls && !r.error ? [publicKind(r.cls.object)] : [])),
   };
 }
 
@@ -371,6 +375,7 @@ interface RpcContext {
   /** Reads the /llms.txt asset backing the "syntax" resource. */
   syntaxText: () => Promise<string>;
   graphHtml: () => Promise<string>;
+  recordCall: (tool: Tool, stats: CallStats) => void;
 }
 
 async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | null> {
@@ -424,25 +429,39 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
     }
     case 'tools/call': {
       const { name, arguments: args = {} } = params as { name?: string; arguments?: Record<string, unknown> };
+      // Accept former names for clients with cached tool definitions.
+      const tool: Tool | undefined =
+        name === 'create_graph'
+          ? 'encode_graph_url'
+          : name === 'read_graph'
+            ? 'decode_graph_url'
+            : TOOL_NAMES.find(t => t === name);
       try {
         let value: object;
         const content: object[] = [];
-        // Accept former names for clients with cached tool definitions.
-        if (name === 'encode_graph_url' || name === 'create_graph' || name === 'show_graph') {
+        if (tool === 'encode_graph_url' || tool === 'show_graph') {
           const made = await encodeGraphUrl(origin, args);
-          if (name === 'show_graph') {
+          ctx.recordCall(tool, {
+            rows: made.value.rows.length,
+            errorRows: made.value.rows.filter(r => r.status === 'error').length,
+            types: made.types,
+          });
+          if (tool === 'show_graph') {
             const { preview: _preview, preview_omits: _omits, ...shown } = made.value;
             value = shown;
           } else {
             value = made.value;
           }
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
-        } else if (name === 'decode_graph_url' || name === 'read_graph') {
-          value = decodeGraphUrl(args);
+        } else if (tool === 'decode_graph_url') {
+          const decoded = decodeGraphUrl(args);
+          ctx.recordCall(tool, { rows: decoded.equations.length, errorRows: 0, types: [] });
+          value = decoded;
           content.push({ type: 'text', text: JSON.stringify(value, null, 2) });
         } else return error(-32602, `Unknown tool: ${name}`);
         return result({ content, structuredContent: value });
       } catch (e) {
+        if (tool) ctx.recordCall(tool, { rows: 0, errorRows: 0, types: [], failed: true });
         return result({
           content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }],
           isError: true,
@@ -503,6 +522,7 @@ export async function handleMcp(request: Request, url: URL, env: Env): Promise<R
 
   const ctx: RpcContext = {
     origin: url.origin,
+    recordCall: (tool, stats) => recordToolCall(env, request, tool, stats),
     graphHtml: async () => {
       const res = await env.ASSETS.fetch(new Request(new URL('/mcp-app/', url)));
       const html = await res.text();
