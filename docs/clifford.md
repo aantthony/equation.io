@@ -30,8 +30,9 @@ Decisions locked:
   `e_xy`. Bivectors are spelled cyclically in readouts (`e_xy`, `e_yz`,
   `e_zx`), the duals of `e_z`, `e_x`, `e_y`; input takes any order with its
   sign.
-- **Division by a multivector is refused**, as by a matrix: `a/2 e_xy` reads
-  as `a/(2 e_xy)` and `e_xy⁻¹ = −e_xy` would flip it without a word. `B^-1`
+- **Division by a multivector is refused**, as by a matrix: `a/2e_xy`
+  (touching) reads as `a/(2e_xy)` and `e_xy⁻¹ = −e_xy` would flip it without
+  a word; `a/2 e_xy`, with a space, is `(a/2) e_xy`. `B^-1`
   is the inverse, exact for every invertible multivector (below).
 - **`e^A` of a bivector stays a rotor; `e^(θ B)` of a tensor bivector stays a
   matrix.** Both are the same rotation, so existing links keep their meaning.

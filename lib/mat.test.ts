@@ -278,7 +278,9 @@ describe('matrix algebra and the exponential', () => {
     expect(() => lowRow([M], 'M^0.5 (1, 0)')).toThrow(/e\^\(th J\)/);
     expect(() => lowRow([M], 'M + 1')).toThrow(/matrix and a number/);
     expect(() => lowRow([M], '2^M (1, 0)')).toThrow(/Only e/);
-    expect(() => lowRow([M], 'e^(a/2 M) (1, 0)')).toThrow(/\(a\/2\) J/);
+    // Written touching, 2M is the divisor; with a space, a/2 M is (a/2) M.
+    expect(() => lowRow([M], 'e^(a/2M) (1, 0)')).toThrow(/write a\/2 J/);
+    close(point([J], 'e^(pi/2 J) (1, 0)'), [0, 1]);
     // On a row of its own a matrix is read out, not drawn (docs/multisets.md §5).
     expect(analyze([M, '2 M']).rows[1].cls?.object).toMatchObject({ kind: 'tuple', shape: [2, 2] });
     expect(() => lowRow([M], 'sin(2 M)')).toThrow(/not a value on its own/);

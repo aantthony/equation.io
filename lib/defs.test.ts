@@ -83,6 +83,20 @@ describe('d/dx derivative syntax', () => {
     expect(at('d/dx (x^2) + 1', { x: 1 })).toBe(3);
   });
 
+  it('binds the rest of its product chain, spaced or touching', () => {
+    // x sin(x) → sin x + x cos x, not (d/dx x) · sin(x).
+    const dxs = Math.sin(2) + 2 * Math.cos(2);
+    expect(at('d/dx x sin(x)', { x: 2 })).toBeCloseTo(dxs);
+    expect(at('d/dx(x) sin(x)', { x: 2 })).toBeCloseTo(Math.sin(2));
+    expect(at('d/dx(x sin(x))', { x: 2 })).toBeCloseTo(dxs);
+    expect(at('2 d/dx x^2 y', { x: 3, y: 5 })).toBe(60);
+    expect(at('3 x d/dx x^2', { x: 2 })).toBe(24);
+    expect(at('-d/dx x^2', { x: 1 })).toBe(-2);
+    expect(at('d^2/dx^2 x^4', { x: 1 })).toBe(12);
+    // A division in the chain is part of the operand, as in a Σ body.
+    expect(at('d/dx x^2/2', { x: 3 })).toBe(3);
+  });
+
   it('supports higher orders and other variables', () => {
     expect(at('d^2/dx^2 (x^4)', { x: 1 })).toBe(12);
     expect(at('d/dq (q^2)', { q: 4 })).toBe(8);

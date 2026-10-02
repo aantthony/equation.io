@@ -53,8 +53,11 @@ describe('the geometric product', () => {
   it('keeps a document’s own e_xy', () => {
     expect(readout(['e_xy = 3', '2 e_xy'])).toBe('= 6');
   });
-  it('refuses division by a multivector, which a/2 e_xy would quietly be', () => {
-    expect(error(['-pi/4 e_xy'])).toMatch(/\(a\/2\) e_xy/);
+  it('refuses division by a multivector, which a/2e_xy would quietly be', () => {
+    expect(error(['-pi/4e_xy'])).toMatch(/write a\/2 e_xy/);
+    expect(error(['1/(2 e_xy)'])).toMatch(/multiply by B\^-1/);
+    // With a space the bivector is a factor, not part of the divisor.
+    expect(readout(['1/2 e_xy'])).toBe('= 0.5 e_xy');
     expect(readout(['A = 1 + e_xy', 'A A^-1'])).toBe('= 1');
     expect(readout(['e_xy / 2'])).toBe('= 0.5 e_xy');
   });

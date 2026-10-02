@@ -973,9 +973,10 @@ function applyDiff(e: Expr, v: string, order: number, opts?: ResolveOpts, getFn?
 }
 
 /**
- * Rewrite a division that spells a Leibniz derivative. Implicit
- * multiplication binds tighter than '/', so `d/dx expr` parses as
+ * Rewrite a division that spells a Leibniz derivative. Juxtaposition
+ * written touching binds tighter than '/', so `d/dx(expr)` parses as
  * d / (dx · expr): the operand is the tail of the denominator's product chain.
+ * (With a space, `d/dx expr` leads a product chain: splitDerivChain.)
  */
 function matchDeriv(numr: Expr, den: Expr, opts?: ResolveOpts, getFn?: GetFn): Expr | null {
   const head = numeratorWrap(numr);
@@ -1171,6 +1172,44 @@ function splitSumChain(e: Expr): { coeff: Expr | null; op: '*' | '/'; header: Ex
     coeff = coeff === null ? factors[k].e : { kind: 'bin', op: factors[k].op, a: coeff, b: factors[k].e };
   }
   return { coeff, op: factors[at].op, header: factors[at].e, body };
+}
+
+/**
+ * A Leibniz head leading a product chain binds the factors after it, as Σ
+ * and ∫ headers do: `d/dx x sin(x)` differentiates x sin(x) and the 2 in
+ * `2 d/dx f(x)` stays outside. Spaced juxtaposition ranks with '/', so
+ * `d/dx f(x)` arrives as the factors d, /dx, f(x); written touching,
+ * `d/dx(x^2)` puts its operand in the denominator instead (matchDeriv). A
+ * Σ/∫ header further left binds the head into its own body.
+ */
+function splitDerivChain(e: Expr): {
+  coeff: Expr | null;
+  op: '*' | '/';
+  wrap: (x: Expr) => Expr;
+  v: string;
+  order: number;
+  operand: Expr;
+} | null {
+  const factors: Array<{ e: Expr; op: '*' | '/' }> = [];
+  let node: Expr = e;
+  while (node.kind === 'bin' && (node.op === '*' || node.op === '/')) {
+    factors.unshift({ e: node.b, op: node.op });
+    node = node.a;
+  }
+  factors.unshift({ e: node, op: '*' });
+  for (let at = 0; at + 2 < factors.length; at++) {
+    const f = factors[at].e;
+    if (isSumHeader(f) || isIntHeader(f)) return null;
+    const head = numeratorWrap(f);
+    const dx = factors[at + 1].op === '/' ? dxOrder(factors[at + 1].e) : null;
+    if (!head || !dx || dx.order !== head.order || factors[at].op !== '*' || factors[at + 2].op !== '*') continue;
+    let operand = factors[at + 2].e;
+    for (const r of factors.slice(at + 3)) operand = { kind: 'bin', op: r.op, a: operand, b: r.e };
+    let coeff: Expr | null = null;
+    for (const c of factors.slice(0, at)) coeff = coeff === null ? c.e : { kind: 'bin', op: c.op, a: coeff, b: c.e };
+    return { coeff, op: factors[at].op, wrap: head.wrap, v: dx.v, order: dx.order, operand };
+  }
+  return null;
 }
 
 /** The bounds of an ∫ header, or null for the bare indefinite form. */
@@ -1457,10 +1496,10 @@ interface StripDx {
 
 /**
  * Split the integration variable off a body: the first d<letter> factor in
- * its multiplicative structure (`x^2 dx` → v = x, integrand x^2). Implicit
- * multiplication binds tighter than '/', so in `sin(t)/t dt` the dt sits
- * inside the denominator product — the measure is recognized on either side
- * and the rest of that denominator stays a true denominator. A tail after
+ * its multiplicative structure (`x^2 dx` → v = x, integrand x^2). Written
+ * touching, `1/(1+x^2)dx`, the dx binds tighter than '/' and sits inside the
+ * denominator product — the measure is recognized on either side and the
+ * rest of that denominator stays a true denominator. A tail after
  * the measure folds into the integrand (`∫ dx/(1+x^2)`) unless it carries
  * its own d-var, in which case it is the enclosing integral's (residual).
  * Sums integrate termwise, so every term must end in the same dx.
@@ -2221,6 +2260,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (e.op === '*' || e.op === '/') {
         const nabla = splitNablaChain(e, ctx);
         if (nabla) return rx(nabla, ctx);
+        const dm = splitDerivChain(e);
+        if (dm) {
+          const out = dm.wrap(applyDiff(rx(dm.operand, ctx), dm.v, dm.order, ctx.opts, ctx.getFn));
+          return dm.coeff ? { kind: 'bin', op: dm.op, a: rx(dm.coeff, ctx), b: out } : out;
+        }
         // Σ/∫ headers capture their trailing product chain before it
         // resolves, so `sum[n=1..N] sin(n x)/n` divides each term, not the
         // whole sum, and `int[0..1] x^2 dx` binds through to its dx.
@@ -2239,14 +2283,6 @@ function rx(e: Expr, ctx: Ctx): Expr {
         if (d) return d;
       }
       if (e.glyph) return { kind: 'bin', op: e.op, a, b, glyph: e.glyph };
-      if (e.op === '*' && a.kind === 'bin' && a.op === '/') {
-        // The parenthesized form (d/dx)(expr): the quotient is bare.
-        const head = numeratorWrap(a.a);
-        const dx = dxOrder(a.b);
-        if (head && dx && head.order === dx.order) {
-          return head.wrap(applyDiff(b, dx.v, head.order, ctx.opts, ctx.getFn));
-        }
-      }
       return { kind: 'bin', op: e.op, a, b };
     }
     case 'index': {
