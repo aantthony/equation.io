@@ -337,6 +337,7 @@ export function prepareDocument(
     comps: (n: string) => compsOf(defs, n),
     interval: (n: string) => defs.intervals.get(n),
     multivector: (n: string) => defs.multivectors.get(n),
+    complex: (n: string) => defs.complexes.get(n),
     documentNames: new Set([
       ...raw.map(d => d.name),
       ...[...rvScan.base.values()].map(s => s.name),

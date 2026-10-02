@@ -6,15 +6,6 @@ import { type Expr, evaluate, freeVars, mapChildren } from './expr.ts';
 import { compileProg, compileSampler, run } from './vm.ts';
 import { exceedsNodes } from './size.ts';
 
-/**
- * Nodes (lib/size.ts) evaluated for one sample of a split path. Splitting
- * duplicates subterms — every product uses both parts of both factors — so
- * nesting grows the tree geometrically (three deep of w^2 + w is ~5k nodes,
- * eight deep would be millions). The budget keeps a per-frame resample of an
- * animated path within a few milliseconds.
- */
-export const PATH_NODE_BUDGET = 10000;
-
 /** Points per parametric curve, shared by the app (2D and 3D) and the og
  *  rasterizer. */
 export const CURVE_SAMPLES = 400;

@@ -164,10 +164,7 @@ function bindingInfo(name: string, b: Binding): NameInfo {
       if (b.role === 'const') return { signature: name, type: 'number' };
       const over = overVars(paramsOf([b.expr]));
       const description = over.length ? `Depends on ${over.join(', ')}` : undefined;
-      // Written in where it is read, like a field, but over no position.
-      if (over.every(v => v === 't') && isComplexValued(b.expr))
-        return { signature: name, type: 'complex number', description };
-      return { signature: name, type: 'field', description };
+      return { signature: name, type: b.role === 'complex' ? 'complex number' : 'field', description };
     }
     case 'vector': {
       const dim = b.role === 'state' ? b.deriv.length : b.components.length;

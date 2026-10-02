@@ -628,6 +628,12 @@ const isMask = (e: Expr): e is Expr & { kind: 'list' } =>
 function realSides(cond: Expr, what: string): Expr {
   if (cond.kind === 'ineq') return { ...cond, l: realSides(cond.l, what), r: realSides(cond.r, what) };
   if (isEquality(cond)) {
+    const [l, r] = cond.args;
+    // Complex numbers are equal when their difference is 0: |l - r| == 0.
+    if (l.kind !== 'str' && r.kind !== 'str' && (isComplexValued(l) || isComplexValued(r))) {
+      const gap: Expr = { kind: 'call', name: 'abs', args: [{ kind: 'bin', op: '-', a: l, b: r }] };
+      return { ...cond, args: [realValue(gap, what), { kind: 'num', value: 0 }] };
+    }
     const real = (a: Expr) => (a.kind === 'str' ? a : realValue(a, what));
     return { ...cond, args: [real(cond.args[0]), real(cond.args[1])] };
   }
@@ -1076,11 +1082,12 @@ function sortKeys(key: Seq, ctx: Ctx): Float64Array {
     }
   };
   if (isLazy(key)) {
-    bind(key.body);
+    const body = realValue(key.body, 'A sort key');
+    bind(body);
     const out = new Float64Array(seqLength(key));
     for (let k = 0; k < out.length; k++) {
       for (const c of key.cols) env[c.name] = c.values[k];
-      out[k] = evaluate(key.body, env);
+      out[k] = evaluate(body, env);
     }
     return out;
   }

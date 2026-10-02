@@ -9,7 +9,7 @@ import { hasInterval } from './interval.ts';
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
 import { type ResolveOpts, compsOf, listGetter, tensorGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
-import { MAP, type Expr, type FigureForm, compFits, freeVars, sameList } from './expr.ts';
+import { MAP, type Expr, type FigureForm, childrenOf, compFits, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists, SCALAR_REDUCTIONS, unionAxes, withAxes } from './list.ts';
 
@@ -89,15 +89,13 @@ const holdsFigure = (e: Expr): boolean => {
 };
 
 export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts = {}, named = false): Expr {
-  // A field over position or u, v — not a complex constant (`a = 1 + i`),
-  // which is written in like a field but is one value.
-  const positional = (f: Expr) => [...freeVars(f)].some(v => ['x', 'y', 'z', 'u', 'v', 'w'].includes(v));
-  const plotVariable = (v: string) =>
-    ['x', 'y', 'z', 'u', 'v'].includes(v) || (defs.fields.has(v) && positional(defs.fields.get(v)!));
-  // Drawn over something continuous: a plot variable, or an interval, which
-  // is swept as u is (lib/interval.ts) — so [(interval(0, 1), 1), …] is a
-  // family of segments, as [(u, 1), …] is of curves.
-  const continuous = (e: Expr) => [...freeVars(e)].some(plotVariable) || hasInterval(e);
+  const plotVariable = (v: string) => ['x', 'y', 'z', 'u', 'v'].includes(v) || defs.fields.has(v);
+  // Drawn over something continuous: a plot variable, or an interval in a
+  // tuple, which traces as u does (lib/interval.ts) — so [(interval(0, 1),
+  // 1), …] is a family of segments, as [(u, 1), …] is of curves. (A bare
+  // interval is a number to draw the density of, and a list of them is not.)
+  const traced = (e: Expr): boolean => (e.kind === 'vec' && hasInterval(e)) || childrenOf(e).some(traced);
+  const continuous = (e: Expr) => [...freeVars(e)].some(plotVariable) || traced(e);
   const baseGet = listGetter(defs);
   const get = (name: string): Expr | null =>
     baseGet(name) ?? (defs.mats.has(name) ? rowsAsPoints(defs.mats.get(name)!, name) : null);

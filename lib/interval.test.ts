@@ -72,6 +72,8 @@ describe('drawing over an interval', () => {
         [1, 2],
       ],
     ]);
+    // A bare interval is a number, not a curve: a list of them is no family.
+    expect(analyzeRows(['interval(0, 1) + [1, 2]']).rows[0].error).toBe('A list can only be plotted as its own row.');
     // A name is one parameter, in every member.
     expect(members(['a = interval(-1, 1)', '(a, [1, 2], a)'])[1]).toEqual([
       [-1, 2, -1],

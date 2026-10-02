@@ -1,5 +1,5 @@
 /** Independent CPU projection and GPU compilation of immutable mathematical objects. */
-import { complexParts, SplitTooLarge } from './complex-parts.ts';
+import { splitWithin } from './complex-parts.ts';
 import { compileTyped, usesComplex, type Typed } from './complex.ts';
 import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
@@ -8,8 +8,7 @@ import { toGLSL, uniformName } from './glsl.ts';
 import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
-import { PATH_NODE_BUDGET } from './path.ts';
-import { countNodes } from './size.ts';
+import { FAMILY_NODES, countNodes } from './size.ts';
 
 export interface CpuGrid {
   name: string;
@@ -124,17 +123,6 @@ const equationOf = (residual: Expr): Expr => ({ kind: 'eq', l: residual, r: zero
 const graphEquation = (rhs: Expr): Expr => ({ kind: 'eq', l: { kind: 'var', name: 'y' }, r: rhs });
 const residualOf = (equation: Expr): Expr =>
   equation.kind === 'eq' ? { kind: 'bin', op: '-', a: equation.l, b: equation.r } : equation;
-const splitWithin = (expr: Expr, what: string, verb: string): [Expr, Expr] => {
-  try {
-    return complexParts(expr, PATH_NODE_BUDGET);
-  } catch (error) {
-    if (error instanceof SplitTooLarge)
-      throw new Error(
-        `This complex ${what} is too large to ${verb} once split into real and imaginary parts — reduce the nesting or the powers.`,
-      );
-    throw error;
-  }
-};
 /** CPU evaluators are real: real outputs containing complex subterms need projection too. */
 const real = (expr: Expr): Expr => (usesComplex(expr) ? splitWithin(expr, 'expression', 'evaluate')[0] : expr);
 const realEquation = (expr: Expr): Expr =>
@@ -146,7 +134,7 @@ const point = (source: PointSource, what: string): Expr[] =>
 /** Nodes across every member of a complex list once split into real and
  *  imaginary parts, as a figure family is limited: thousands of roots of
  *  unity, or some hundreds of a slider-dependent polynomial's values. */
-const COMPLEX_LIST_NODES = 1 << 21;
+const COMPLEX_LIST_NODES = FAMILY_NODES;
 const complexMembers = (values: readonly Expr[]): Expr[][] => {
   const sizes = new WeakMap<object, number>();
   let left = COMPLEX_LIST_NODES;

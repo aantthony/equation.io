@@ -483,8 +483,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - Complex point: a constant complex expression such as `1+2i` draws at (1, 2).
   Constants and t may animate its real and imaginary components. A named
   one, `a = e^(i pi/3)`, is written in wherever `a` is read (`a^2`,
-  `domain(w - a)`), and a real value reached through complex ones is a
-  constant like any other (`b = re(a)`, `r = |3 + 4i|`).
+  `domain(w - a)`, `[1..|a|]`), and a real value reached through complex
+  ones is a constant like any other (`b = re(a)`, `r = |3 + 4i|`).
 - Complex list: one complex member makes a list complex — `1` in
   `[1, i, -1]` is 1 + 0i — and it draws each member as a complex point:
   `n = 5; e^(2 pi i [0..n-1]/n)` is the fifth roots of unity, n on a
@@ -492,7 +492,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `abs(S)` and `(re(S), im(S))` are real. `total`, `mean` and `count`
   reduce it; `sort`, `median`, `stdev`, `min`, `max` and `hist` need real
   numbers, so take `abs`, `re` or `im` first (filters and sort keys too:
-  `S[re(S) > 0]`). Members are drawn split into
+  `S[re(S) > 0]`; equality needs neither, `S[S == 1]`). `sort(S, re(S))`
+  is S's members in order, a tuple, which has no picture yet: `T[k]` picks
+  one. Members are drawn split into
   real and imaginary parts, 2^21 nodes in all: constant members are two
   numbers each, but thousands of members of a slider-dependent polynomial
   are too many. A list cannot mix complex numbers with points, and a

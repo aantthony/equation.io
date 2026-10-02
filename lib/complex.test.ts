@@ -242,8 +242,41 @@ describe('complex lists', () => {
 
   it('says when a complex member draws a different kind than the real ones', () => {
     expect(last(['y = [1, i] x']).row.error).toMatch(/^Family element 2 is complex where element 1 is not/);
+    expect(last(['y = [i, 1] x']).row.error).toMatch(/^Family element 1 is complex where element 2 is not/);
     // All complex, a family is fine: the roots of w^2 = 1 and of w^2 = i.
     expect(last(['w^2 = [1, i]']).kind).toBe('family');
+  });
+
+  it('writes a named complex value in wherever it is read', () => {
+    const doc = ['a = 3 + 4i', 'L = [1, 5, 9]'];
+    expect(last([...doc, '[1..|a|]']).row.info).toBe('= [1, 2, 3, 4, 5]');
+    expect(last([...doc, 'L[L > re(a)]']).row.info).toBe('= [5, 9]');
+    // Packed lists too: the key's body is read through its real part.
+    // By distance from 6 + 2i: 5 (√5), 9 (√13), 1 (√29).
+    const sorted = last(['a = 6 + 2i', 'L = [1, 5, 9]', 'sort(L, |L - a|)']).row.cls!.object;
+    const coords = (sorted as { source: { coordinates: Expr[] } }).source.coordinates;
+    expect(coords.map(c => evaluate(c, {}))).toEqual([5, 9, 1]);
+  });
+
+  it('bounds complex constants written into one another', () => {
+    const chain = ['a0 = 1 + i', ...Array.from({ length: 24 }, (_, k) => `a${k + 1} = a${k} a${k}`), 'y = x'];
+    const started = performance.now();
+    const rows = analyzeRows(chain).rows;
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(rows.find(r => r.error)?.error).toMatch(/is too large with its complex constants written in/);
+    expect(rows.at(-1)!.error).toBeUndefined();
+  });
+
+  it('compares complex members for equality', () => {
+    const doc = ['S = e^(i pi [0..3]/2)'];
+    expect(last([...doc, 'count(S[S != 1])']).row.info).toBe('= 3');
+    expect(last([...doc, 'S[S == 1]']).pts).toHaveLength(1);
+  });
+
+  it('orders a complex list into a tuple, which says it has no picture yet', () => {
+    const doc = ['S = e^(i pi [0..3]/2)'];
+    expect(last([...doc, 'sort(S, re(S))']).row.error).toMatch(/^A tuple of complex numbers has no picture yet/);
+    expect(last([...doc, 'T = sort(S, re(S))', 'T[1]']).kind).toBe('point');
   });
 
   it('names the variable a list may not use', () => {
