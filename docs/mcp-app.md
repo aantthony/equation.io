@@ -36,7 +36,13 @@ Teardown saves pending edits and stops render timers, tracing work, the worker,
 and GPU resources.
 
 The Worker reads the built `/mcp-app/` HTML through `ASSETS` and resolves its
-asset URLs against the server origin. Hashed assets allow cross-origin reads;
+asset URLs against the server origin. The page names no hashed bundle: hosts
+keep the copy they were served (ChatGPT stores one with each conversation), so
+it loads `/mcp-app/app.js` and `/mcp-app/app.css`, stable files that import
+the current build's hashed entries and are revalidated on every load
+(`mcpAppLoader` in vite.config.ts). A kept copy therefore runs the current
+build rather than the one it was served with, or nothing once that build's
+bundles are gone. Hashed assets allow cross-origin reads;
 the website retains its existing CSP. The UI runs directly in the host's frame
 and does not embed another website. Its resource CSP allows only our assets
 and blob scripts for the background curve-tracing worker. It makes no API

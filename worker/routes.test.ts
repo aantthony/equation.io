@@ -37,7 +37,7 @@ const env = {
 const get = (path: string) => worker.fetch(new Request('https://equation.io' + path), env);
 
 describe('/.well-known files', () => {
-  it.each(['/.well-known', '/.well-known/', '/.well-known/missing'])('rejects the SPA fallback for %s', async path => {
+  it.each(['/.well-known', '/.well-known/', '/.well-known/missing'])('rejects an HTML page for %s', async path => {
     const response = await get(path);
     expect(response.status).toBe(404);
     expect(await response.text()).toBe('Not found');
@@ -52,10 +52,15 @@ describe('/.well-known files', () => {
     expect(await response.text()).toBe('verification');
   });
 
-  it('preserves the normal SPA fallback outside the namespace', async () => {
-    const response = await get('/some-app-path');
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe(APP);
+  it('passes the asset server’s 404 through outside the namespace', async () => {
+    const missing = {
+      ASSETS: {
+        fetch: async () =>
+          new Response('<h1>Not found</h1>', { status: 404, headers: { 'content-type': 'text/html' } }),
+      },
+    } as unknown as Env;
+    const response = await worker.fetch(new Request('https://equation.io/some-app-path'), missing);
+    expect(response.status).toBe(404);
   });
 });
 

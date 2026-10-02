@@ -5,14 +5,14 @@
   "compatibility_date": "2026-06-01",
   "assets": {
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
+    // A path with no file gets 404.html and a 404, never the app: the app is
+    // served only at / and, by the Worker, at /g/*. A missing hashed bundle
+    // 404s too, instead of answering a script request with HTML.
+    "not_found_handling": "404-page",
     // EVERY path worker/index.ts handles has to be listed here, including
     // each intent landing (lib/landings.ts landingWorkerPaths). Anything not
-    // listed is served by the asset server alone: with
-    // not_found_handling=single-page-application a GET then returns the app
-    // shell (HTTP 200!) and a POST returns 405, so a missing entry looks like
-    // a half-working route rather than a routing failure. worker/routes.test.ts
-    // keeps this list in sync with the handler.
+    // listed is served by the asset server alone, so a missing entry 404s.
+    // lib/deploy-config.test.ts keeps this list in sync with the handler.
     //
     // /llms.txt and /robots.txt are here for a different reason: deployed
     // static assets lose the charset on their Content-Type
