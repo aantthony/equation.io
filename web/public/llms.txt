@@ -453,19 +453,20 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `… = 0` for its surface.
 - `t`: time in seconds. Any row mentioning `t` animates, e.g.
   `y = sin(x - 2t)`.
-- `u`, `v`: parametric parameters, each ranging over (0, 1). A row whose value
-  is a point traces curves and surfaces, however it is written: `(u, u^2)`,
-  `(0,0,1) u` and `u e_z` are all curves; a complex expression in u alone is
-  a path (`exp(i 2 pi u)`). A bare real row in u and v alone does not depend
-  on the plane, so it draws its values: the numbers it takes as u and v run
-  over [0, 1], as a density curve, like a random variable — `u` is the flat
-  line at height 1 over [0, 1], `u^2` has density 1/(2√x), `u v` has −ln(x).
+- `u`, `v`: the parametric parameters, two intervals (below) that are
+  `u = interval(0, 1)` and `v = interval(0, 1)` unless a row redefines them
+  as another: with `u = interval(0, 2pi)`, `(cos(u), sin(u))` is the whole
+  circle. A row whose value is a point traces curves and surfaces, however
+  it is written: `(u, u^2)`, `(0,0,1) u` and `u e_z` are all curves; a
+  complex expression in u alone is a path (`exp(i 2 pi u)`). A bare real row
+  in u and v alone draws the values it takes as a density curve: `u^2` has
+  density 1/(2√x), `u v` has −ln(x).
 - `interval(a, b)`: every real number from a to b (a < b; the bounds may use
-  sliders and t). `[1..2]` is only the whole numbers 1 and 2. An interval is
-  a parameter like u and v, over [a, b]. Every mention of one name is the
-  same number, so with `r = interval(1, 2)`, `r + r` is 2r; each written
-  `interval(…)` is a separate one, so `interval(0, 1) + interval(0, 1)` is
-  the sum of two. In a tuple it traces with u and v:
+  sliders and t). `[1..2]` is only the whole numbers 1 and 2. Every mention
+  of one name is the same number, so with `r = interval(1, 2)`, `r + r` is
+  2r; each written `interval(…)` is a separate one, so
+  `interval(0, 1) + interval(0, 1)` is the sum of two. In a tuple it traces
+  with u and v:
   `(r cos(2 pi u), r sin(2 pi u))` is a filled annulus, `(r, r^2)` a curve
   over [1, 2]. With a list it crosses into one curve per member, as u does:
   `(interval(0, 1), 0) + (0, [1, 2])` is two segments, at heights 1 and 2.
@@ -474,9 +475,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   every point some a from 1 to 2 puts on its curve, and `y < a x` every point
   below some member. At most one interval in such a row, and a bare field
   (`sin(a x)`) is an error: set it equal to something. Alone, an interval row
-  draws its values like `u` does, against length rather than probability:
-  `interval(0, 10)` is the line at height 1 over [0, 10], and
-  `interval(0, 1)^2` has density 1/(2√x).
+  draws its values against length: `interval(0, 10)` is the line at height 1
+  over [0, 10].
 - Reductions over continuous sets are integrals: `count` is the measure,
   `total` the integral, `mean` their ratio. Over u, v and intervals the
   measure is length: `total(u^2)` is 1/3, `count(interval(1, 3))` is 2,
@@ -558,7 +558,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   polynomial label for remaining algebraic roots. The optional certification
   control proves completeness only when every region in its search box is settled.
 - Complex path: a complex-valued expression whose only variable is u (constants,
-  sliders and t aside) draws the path it traces over u in (0, 1), at
+  sliders and t aside) draws the path it traces over u, at
   (re, im) — the same plane as complex points and roots. `exp(i 2 pi u)` is
   the unit circle; with `f(w) = w^2 + w`, `f(exp(i 2 pi u))` is its image
   under f. Supported: arithmetic, powers, exp ln log sqrt, sin cos tan sinh
@@ -797,8 +797,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   readout under the row.
 - Expectation: `E(X)`, `E(X^2 + Y)` — the mean of any expression in random
   variables, shown as a readout under the row and marked on the density.
-- Parametric curve: components in u — `(2cos(2pi u), sin(4pi u))`; three
-  components make a 3D curve — `(2cos(6pi u), 2sin(6pi u), 4u - 2)`.
+- Parametric curve: components in u — `(2cos(2pi u), sin(4pi u))`, or with
+  `u = interval(0, 2pi)` above, `(2cos(u), sin(2u))`; three components make
+  a 3D curve — `(2cos(6pi u), 2sin(6pi u), 4u - 2)`.
   A plane curve lifts the pen where it jumps (a step, a pole, a branch cut)
   rather than bridging the gap: `(u, floor(3u))`, `(4u - 2, tan(12u - 6))`.
 - Tube: `tube((x(u), y(u), z(u)))` sweeps a 3D parametric curve into a lit

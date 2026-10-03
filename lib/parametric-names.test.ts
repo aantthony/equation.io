@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
+import { type Expr, evaluate } from './expr.ts';
 
 const kinds = (rows: string[]) => analyzeRows(rows).rows.map(r => r.error ?? r.cls?.object.kind ?? r.def?.kind);
 
@@ -41,5 +42,87 @@ describe('named curves and surfaces', () => {
     // A field over position keeps its level sets: r = 2 is a circle.
     expect(kinds(['r = sqrt(x^2 + y^2)', 'r = 2'])).toEqual(['const', 'curve']);
     expect(kinds(['rho = sqrt(x^2 + y^2 + z^2)', 'rho = 2'])).toEqual(['const', 'surface']);
+  });
+});
+
+describe('a range for u and v', () => {
+  const value = (rows: string[]): number => {
+    const a = analyzeRows(rows, { readouts: true });
+    const row = a.rows.at(-1)!;
+    if (row.error) throw new Error(row.error);
+    return evaluate((row.cls!.object as { expr: Expr }).expr, a.constEnv);
+  };
+
+  it('u = interval(a, b) is the range u runs over, (0, 1) when unset', () => {
+    // The whole circle: the default range scaled by 2pi.
+    const set = analyzeRows(['u = interval(0, 2pi)', '(cos(u), sin(u))']).rows[1].cls!.object;
+    const scaled = analyzeRows(['(cos((2pi - 0) u), sin((2pi - 0) u))']).rows[0].cls!.object;
+    expect(set).toEqual(scaled);
+    expect(kinds(['u = interval(0, 2pi)', 'v = interval(0, pi)', '(cos(u) sin(v), sin(u) sin(v), cos(v))'])).toEqual([
+      'const',
+      'const',
+      'surface',
+    ]);
+    expect(kinds(['v = interval(0, pi)', '(u, v)'])).toEqual(['const', 'region']);
+    expect(kinds(['a = 1', 'u = interval(-a, a)', '(u, u^2)'])).toEqual(['const', 'const', 'curve']);
+    expect(kinds(['u = interval(0, 2pi)', 'c = (cos(u), sin(u))', '2c'])).toEqual(['const', 'const', 'curve']);
+    expect(kinds(['u = interval(0, 2pi)', '(x, y) = (cos(u), sin(u))'])).toEqual(['const', 'system']);
+    expect(value(['u = interval(0, 2pi)', 'total(u)'])).toBeCloseTo(2 * Math.PI ** 2);
+    expect(value(['u = interval(0, 2pi)', 'count(u)'])).toBeCloseTo(2 * Math.PI);
+  });
+
+  it('only an interval redefines u', () => {
+    expect(analyzeRows(['u = 0.5']).rows[0].error).toMatch(/u = interval\(0, 2pi\)/);
+    expect(analyzeRows(['u = interval(0, 1)', 'u = interval(0, 2)']).rows[1].error).toBe('u is already defined.');
+    // A function's own u is still its parameter.
+    expect(kinds(['u = interval(0, 2pi)', 'f(u) = u^2', '(u, f(1))'])).toEqual(['const', 'fn', 'curve']);
+    expect(kinds(['u = Interval(0, 2pi)', '(cos(u), sin(u))'])).toEqual(['const', 'curve']);
+    for (const rows of [['u = interval(0, 1) + u'], ['u = interval(0, 1) + x'], ['u = 2 interval(0, 1)']]) {
+      expect(analyzeRows(rows).rows[0].error, rows[0]).toMatch(/u can only be defined as an interval/);
+    }
+    expect(analyzeRows(['u = interval(0, 1) + v', 'v = interval(0, 1) + u']).rows.map(r => r.error)).toEqual([
+      expect.stringMatching(/u can only be defined as an interval/),
+      expect.stringMatching(/v can only be defined as an interval/),
+    ]);
+  });
+
+  it('a system over two intervals is still a family, not u and v', () => {
+    expect(
+      analyzeRows(['s = interval(0, 1)', 'q = interval(0, 1)', '(x, y, z) = (s, q, s q)']).rows[2].error,
+    ).not.toMatch(/u\/v/);
+  });
+
+  it('curve operators read the curve at values of u in its range', () => {
+    expect(value(['u = interval(0, 2pi)', 'curvature((2cos(u), 2sin(u)), 1)'])).toBeCloseTo(0.5);
+    // The ellipse (cos u, 2 sin u) at u = 0: κ = a/b² = 1/4.
+    expect(value(['u = interval(0, 2pi)', 'C = (cos(u), 2sin(u))', 'curvature(C, 0)'])).toBeCloseTo(0.25);
+    expect(value(['u = interval(0, 2pi)', 'C = (cos(u), 2sin(u))', 'k(s) = curvature(C, s)', 'k(0)'])).toBeCloseTo(
+      0.25,
+    );
+    expect(value(['u = interval(0, 2pi)', 'C = (cos(u), sin(u), u)', 'torsion(C, 0)'])).toBeCloseTo(0.5);
+    expect(kinds(['u = interval(0, 2pi)', 'C = (cos(u), 2sin(u))', '(u, curvature(C))'])).toEqual([
+      'const',
+      'const',
+      'curve',
+    ]);
+    // A function operand is called at u's own interval, not a second u.
+    expect(kinds(['u = interval(0, 2pi)', 'c(s) = (cos(s), 2sin(s))', '(u, curvature(c))'])).toEqual([
+      'const',
+      'fn',
+      'curve',
+    ]);
+    expect(value(['u = interval(0, 2pi)', 'c(s) = (cos(s), 2sin(s))', 'curvature(c, 0)'])).toBeCloseTo(0.25);
+  });
+
+  it('another interval beside the curve parameter stays a family of curves', () => {
+    // As on main: circles of radius r in [1, 2], curvature 1/r.
+    expect(kinds(['r = interval(1, 2)', '(u, curvature((r cos(2pi u), r sin(2pi u))))'])).toEqual(['const', 'region']);
+    expect(kinds(['r = interval(1, 2)', 'curvature((r cos(2pi u), r sin(2pi u)), 0)'])).toEqual([
+      'const',
+      'distribution',
+    ]);
+    expect(
+      kinds(['u = interval(0, 2pi)', 'r = interval(1, 2)', 'C = (r cos(u), r sin(u))', 'curvature(C, 0)']),
+    ).toEqual(['const', 'const', 'const', 'distribution']);
   });
 });
