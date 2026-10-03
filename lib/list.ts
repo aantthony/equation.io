@@ -41,7 +41,8 @@ import { type HiddenInterval, intervalsIn, replaceIntervals } from './interval.t
  * figure through thousands of computed points).
  */
 import { add, div } from './diff.ts';
-import { inferScalarType } from './complex.ts';
+import { inferScalarType, isComplexValued } from './complex.ts';
+import { realValue } from './complex-parts.ts';
 import {
   FOURIER_SAMPLES,
   FOURIER_MAX_SAMPLES,
@@ -99,6 +100,15 @@ export const SCALAR_REDUCTIONS = new Set(['mean', 'total', 'count', 'stdev', 'me
 const SYMBOLIC_REDUCTIONS = new Set(['mean', 'total', 'count']);
 /** Reductions that need numeric elements (ordering), so a constant list. */
 const NUMERIC_REDUCTIONS = new Set(['stdev', 'median', 'sort']);
+
+/** Members that are complex numbers, which have no order or spread along a
+ *  line (`re(z)` only passes through them); lib/object-lists.ts rethrows this. */
+function refuseComplex(name: string, items: readonly Expr[]): void {
+  if (items.some(isComplexValued))
+    throw new Error(
+      `${name}(…) takes real numbers, and these are complex: reduce them with abs(…), re(…) or im(…) first.`,
+    );
+}
 
 /**
  * Whether a call reduces its argument's members to one value: count, total,
@@ -470,6 +480,9 @@ const BIN_OPS: Record<string, (a: number, b: number) => number> = {
 /** Evaluate a subexpression that must be a known number (range bounds,
  *  indices) from constants and sliders, like Σ/Π bounds. */
 function constVal(e: Expr, ctx: Ctx, what: string, whole = false): number {
+  // A real value reached through complex ones (|1 + i|, re(e^(iπ/3))) is its
+  // real part; i is the imaginary unit, not a constant to ask for.
+  e = realValue(e, what);
   const env: Record<string, number> = {};
   for (const fv of freeVars(e)) {
     const v = ctx.opts.consts?.[fv];
@@ -618,6 +631,23 @@ const isEquality = (e: Expr): e is Expr & { kind: 'eqtest' } => e.kind === 'eqte
 
 const isMask = (e: Expr): e is Expr & { kind: 'list' } =>
   isList(e) && e.items.length > 0 && e.items.every(it => it.kind === 'ineq' || isEquality(it));
+
+/** A comparison whose sides are real values reached through complex ones
+ *  (`re(L) > 0`), as their real parts (realValue). */
+function realSides(cond: Expr, what: string): Expr {
+  if (cond.kind === 'ineq') return { ...cond, l: realSides(cond.l, what), r: realSides(cond.r, what) };
+  if (isEquality(cond)) {
+    const [l, r] = cond.args;
+    // Complex numbers are equal when their difference is 0: |l - r| == 0.
+    if (l.kind !== 'str' && r.kind !== 'str' && (isComplexValued(l) || isComplexValued(r))) {
+      const gap: Expr = { kind: 'call', name: 'abs', args: [{ kind: 'bin', op: '-', a: l, b: r }] };
+      return { ...cond, args: [realValue(gap, what), { kind: 'num', value: 0 }] };
+    }
+    const real = (a: Expr) => (a.kind === 'str' ? a : realValue(a, what));
+    return { ...cond, args: [real(cond.args[0]), real(cond.args[1])] };
+  }
+  return realValue(cond, what);
+}
 
 /** Whether one comparison (or a chain like 18 <= a < 65) holds. */
 function holds(cond: Expr, env: Record<string, number>): boolean {
@@ -778,6 +808,7 @@ function dropUndefined(e: Expr, ctx: Ctx): Expr {
 function maskValues(mask: Expr, opts: ResolveOpts): boolean[] | null {
   if (!isMask(mask)) return null;
   return mask.items.map(cond => {
+    cond = realSides(cond, 'A filter');
     const env: Record<string, number> = {};
     for (const fv of freeVars(cond)) {
       const v = opts.consts?.[fv];
@@ -932,7 +963,12 @@ function lowerFourier(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
     }
     [lo, period] = spanOf(over[0]);
     const at = '@fourier';
-    const body = replaceIntervals(signal, () => ({ kind: 'var', name: at }));
+    // A real signal reached through complex values (|a| sin(2pi s) with a
+    // complex, re(e^(2pi i s))) is read as its real part.
+    const body = realValue(
+      replaceIntervals(signal, () => ({ kind: 'var', name: at })),
+      'A Fourier signal',
+    );
     const env: Record<string, number> = {};
     for (const name of freeVars(body)) {
       if (name === at) continue;
@@ -1194,16 +1230,18 @@ function sortKeys(key: Seq, ctx: Ctx): Float64Array {
     }
   };
   if (isLazy(key)) {
-    bind(key.body);
+    const body = realValue(key.body, 'A sort key');
+    bind(body);
     const out = new Float64Array(seqLength(key));
     for (let k = 0; k < out.length; k++) {
       for (const c of key.cols) env[c.name] = c.values[k];
-      out[k] = evaluate(key.body, env);
+      out[k] = evaluate(body, env);
     }
     return out;
   }
   return Float64Array.from(key.items, it => {
     if (it.kind === 'vec') throw new Error('A sort key has to be a number per element, like P.x.');
+    it = realValue(it, 'A sort key');
     bind(it);
     return evaluate(it, env);
   });
@@ -1908,6 +1946,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
             : (dropUndefined(settle(lower(e.args[0], ctx), ctx), ctx) as Exclude<Expr, { kind: 'lazy' }>);
         if (!arg || !isSeq(arg)) throw new Error('hist(…) needs a list, like hist(person.age).');
         if (isText(arg)) throw new Error('hist(…) counts numbers; that column holds text.');
+        if (isList(arg)) refuseComplex('hist', arg.items);
         // Gaps go before the values are read, not after: `hist(person.age)`
         // skips them (histogram drops non-finite values), and one slider
         // later `hist(person.age k)` refused the whole row as "not finite".
@@ -1962,6 +2001,7 @@ function lowerNode(e: Expr, ctx: Ctx): Expr {
           throw new Error(`${e.name}(…) needs a list, like ${e.name}([1, 4, 2]).`);
         }
         const arg = dropUndefined(settle(args[0], ctx), ctx) as Seq;
+        if (!SYMBOLIC_REDUCTIONS.has(e.name) && isList(arg)) refuseComplex(e.name, arg.items);
         if (isText(arg)) {
           // count is the only reduction text has an answer for.
           if (e.name === 'count') return num(arg.values.length);

@@ -1,4 +1,4 @@
-import { structuralDiagnostic } from './expr.ts';
+import { notACondition, structuralDiagnostic } from './expr.ts';
 import { diff } from './diff.ts';
 /**
  * Compile a symbolic Expr to a GLSL expression (float-valued).
@@ -270,7 +270,7 @@ vec2 c_tanh(vec2 z) { return c_div(c_sinh(z), c_cosh(z)); }
  * scalar emitter (toGLSL here; complex.ts passes its real-checked emitter).
  */
 export function condGLSL(cond: Expr, emit: (x: Expr) => string): string {
-  if (cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities, like x < 0.');
+  if (cond.kind !== 'ineq') throw notACondition(cond);
   return ineqComparisons(cond)
     .map(c => `(${emit(c.l)} ${c.op} ${emit(c.r)})`)
     .join(' && ');

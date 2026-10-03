@@ -297,7 +297,9 @@ export function prepareDocument(
 
   // Pass 2: viewport rows and plots. States are constants to every consumer.
   const constNames = new Set([...defs.consts.keys(), ...defs.states.keys()]);
-  const fieldEnv = Object.fromEntries(defs.fields);
+  // A named condition is written into a row as a field is (`{within: 1}`
+  // from a function body, `within` as a row of its own).
+  const fieldEnv = Object.fromEntries([...defs.fields, ...defs.conditions]);
   const fnNames = new Set(raw.filter(d => d.kind === 'fn').map(d => d.name));
   const listNames = listNamesOf(defs);
   // Names this document binds that a late-addition builtin would otherwise
@@ -333,10 +335,14 @@ export function prepareDocument(
     indexIssue: (idx: Expr, target: Expr) => indexIssue(idx, defs, target),
     // A state stands for itself: defined, and constant across space.
     definition: (n: string): Expr | undefined =>
-      defs.fields.get(n) ?? defs.consts.get(n) ?? (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
+      defs.fields.get(n) ??
+      defs.conditions.get(n) ??
+      defs.consts.get(n) ??
+      (defs.states.has(n) ? { kind: 'var', name: n } : undefined),
     comps: (n: string) => compsOf(defs, n),
     interval: (n: string) => defs.intervals.get(n),
     multivector: (n: string) => defs.multivectors.get(n),
+    complex: (n: string) => defs.complexes.get(n),
     documentNames: new Set([
       ...raw.map(d => d.name),
       ...[...rvScan.base.values()].map(s => s.name),

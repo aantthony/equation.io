@@ -1,6 +1,6 @@
 /** Real expression components for CPU solving and point rendering. */
 import { type Expr, RECUR, childrenOf, isRecur } from './expr.ts';
-import { usesComplex, inferScalarType, loopTypes, type ScalarType } from './complex.ts';
+import { usesComplex, inferScalarType, isComplexValued, loopTypes, type ScalarType } from './complex.ts';
 import { num, bin, call } from './coordinate.ts';
 import { add as realAdd, mul as realMul, pow } from './diff.ts';
 import { countNodes } from './size.ts';
@@ -18,6 +18,46 @@ const exp = (a: Pair): Pair => [
   bin('*', call('exp', a[0]), call('sin', a[1])),
 ];
 const ln = (a: Pair): Pair => [bin('/', call('ln', norm2(a)), num(2)), call('atan2', a[1], a[0])];
+
+/**
+ * Nodes (lib/size.ts) a split may grow to: one sample of a complex path, a
+ * list member, a real value read through complex ones. Splitting duplicates
+ * subterms — every product uses both parts of both factors — so nesting grows
+ * the tree geometrically (three deep of w^2 + w is ~5k nodes, eight deep
+ * would be millions). The budget keeps a per-frame resample of an animated
+ * path within a few milliseconds.
+ */
+export const SPLIT_NODE_BUDGET = 10000;
+
+/** What a split past SPLIT_NODE_BUDGET says, of `subject`. */
+export const splitTooLarge = (subject: string, verb: string): string =>
+  `${subject} is too large to ${verb} once split into real and imaginary parts — reduce the nesting or the powers.`;
+
+/** complexParts within SPLIT_NODE_BUDGET: "This complex `what` is too large…" past it. */
+export function splitWithin(e: Expr, what: string, verb: string): Pair {
+  try {
+    return complexParts(e, SPLIT_NODE_BUDGET);
+  } catch (error) {
+    if (error instanceof SplitTooLarge) throw new Error(splitTooLarge(`This complex ${what}`, verb));
+    throw error;
+  }
+}
+
+/**
+ * A real value reached through complex ones (`|1 + i|`, `re(e^(iπ/3))`) as
+ * its real part, which a real evaluator can read — `e` itself when it meets
+ * none. A complex value has no real reading, and `what` says so.
+ */
+export function realValue(e: Expr, what: string): Expr {
+  if (!usesComplex(e) && !hasProjection(e)) return e;
+  if (isComplexValued(e)) throw new Error(`${what} must be real — take re(…), im(…) or abs(…).`);
+  try {
+    return complexParts(e, SPLIT_NODE_BUDGET)[0];
+  } catch (error) {
+    if (error instanceof SplitTooLarge) throw new Error(splitTooLarge(what, 'evaluate'));
+    throw error;
+  }
+}
 
 function hasProjection(e: Expr): boolean {
   if (e.kind === 'call') return ['re', 'im', 'conj', 'arg'].includes(e.name) || e.args.some(hasProjection);

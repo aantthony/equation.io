@@ -1,6 +1,6 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
 import { MAP, childrenOf, LOOP_LIMIT, LOOP_LIMIT_MAX, RECUR, isRecur, loopLeaves } from './expr.ts';
-import { mapChildren, structuralDiagnostic, legacyCallArgs } from './expr.ts';
+import { mapChildren, notACondition, structuralDiagnostic, legacyCallArgs } from './expr.ts';
 import { exprKey, type ProductGlyph } from './expr.ts';
 /**
  * User definitions and derivative syntax.
@@ -81,7 +81,9 @@ import {
 import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
-import { inferScalarType } from './complex.ts';
+import { isComplexValued } from './complex.ts';
+import { SPLIT_NODE_BUDGET, realValue } from './complex-parts.ts';
+import { countNodes } from './size.ts';
 import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
@@ -91,13 +93,6 @@ const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
 const PARAMS: ReadonlySet<string> = new Set(['u', 'v']);
 /** Position: an axis variable, or w, the complex point x + iy. */
 const onPosition = (v: string): boolean => SPACE.has(v) || v === 'w';
-const complexValued = (e: Expr): boolean => {
-  try {
-    return inferScalarType(e) === 'complex';
-  } catch {
-    return false;
-  }
-};
 
 export type Definition =
   | RegressionRow
@@ -221,6 +216,10 @@ interface BindingDraft {
   sequencePrefix: string;
   consts: Map<string, Expr>;
   fields: Map<string, Expr>;
+  /** `a = e^(iπ/3)`: complex numbers with a name, bound as complex. */
+  complexes: Map<string, Expr>;
+  /** `within = r < R`: inequalities with a name, bound as conditions. */
+  conditions: Map<string, Expr>;
   fns: Map<string, FnDef>;
   points: Set<string>;
   pointDims: Map<string, number>;
@@ -247,6 +246,8 @@ const emptyDraft = (): BindingDraft => ({
   consts: new Map(),
   fns: new Map(),
   fields: new Map(),
+  complexes: new Map(),
+  conditions: new Map(),
   sequences: new Map(),
   sequencePrefix: 'eqioSeq',
   points: new Set(),
@@ -512,6 +513,8 @@ const draftNameTaken = (defs: ValueDefinitions, n: string): boolean =>
   defs.consts.has(n) ||
   defs.fns.has(n) ||
   defs.fields.has(n) ||
+  defs.complexes.has(n) ||
+  defs.conditions.has(n) ||
   defs.states.has(n) ||
   defs.points.has(n) ||
   defs.mats.has(n) ||
@@ -1096,6 +1099,12 @@ export interface ResolveOpts {
    * interval is (lib/clifford.ts). Undefined for anything else.
    */
   multivector?: (name: string) => Expr | undefined;
+  /**
+   * The value of a name defined as a complex number (`a = e^(iπ/3)`),
+   * written in wherever the name appears, as an interval is. Undefined for
+   * anything else.
+   */
+  complex?: (name: string) => Expr | undefined;
   /**
    * A function's parameters, while its body resolves: there `x` is the
    * argument, not the continuous multiset a reduction would integrate over
@@ -2202,6 +2211,69 @@ export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr
   return rx(e, { getFn, opts, terms: 0 });
 }
 
+/**
+ * The inequality a resolved name or call stands for — a document's named
+ * condition (`within = r < R`), or a function body that is one — or null.
+ * A function's parameter is its argument, never the document's name.
+ */
+function conditionOf(resolved: Expr, ctx: Ctx): Expr | null {
+  if (resolved.kind === 'ineq' || resolved.kind === 'eq') return resolved;
+  return (resolved.kind === 'var' && namedConditionOf(ctx)(resolved.name)) || null;
+}
+
+/** The document's condition of a name, unless a parameter shadows it. */
+const namedConditionOf =
+  (ctx: Ctx) =>
+  (name: string): Expr | undefined => {
+    if (ctx.opts.params?.has(name)) return undefined;
+    const value = ctx.opts.definition?.(name);
+    return value?.kind === 'ineq' ? value : undefined;
+  };
+
+/** What a condition's name says when it is read as a number. */
+const conditionAsNumber = (name: string): string =>
+  `${name} is a condition, not a number — read it in braces, like {${name}: 1}.`;
+
+/**
+ * Named conditions written in where a condition is read — a piecewise case's
+ * condition, or the whole expression — and nowhere else: one read as a number
+ * keeps its name, for the error that says so (conditionAsNumber).
+ */
+export function writeConditions(e: Expr, condition: (name: string) => Expr | undefined, whole = true): Expr {
+  if (e.kind === 'var') return (whole && condition(e.name)) || e;
+  if (e.kind !== 'piecewise') return mapChildren(e, c => writeConditions(c, condition, false));
+  let changed = false;
+  const write = (x: Expr, place: boolean): Expr => {
+    const next = writeConditions(x, condition, place);
+    if (next !== x) changed = true;
+    return next;
+  };
+  const cases = e.cases.map(c => ({ ...c, cond: write(c.cond, true), value: write(c.value, false) }));
+  const otherwise = e.otherwise && write(e.otherwise, false);
+  return changed ? { ...e, cases, otherwise } : e;
+}
+
+/**
+ * A piecewise condition written as a name (`{within: 1}`) or a call: the
+ * inequality it stands for, written in here, since every backend reads a
+ * condition by its shape. In a function body the name stays as written, and
+ * a call writes it in once the parameters are substituted (rx's call), so
+ * the body's x cannot capture the condition's x.
+ */
+function namedCondition(raw: Expr, resolved: Expr, ctx: Ctx): Expr {
+  if (raw.kind !== 'var' && raw.kind !== 'call') return resolved;
+  if (ctx.opts.params) return resolved;
+  const value = conditionOf(resolved, ctx);
+  if (value) return value;
+  // In a definition it may be named below: written in once every definition
+  // has resolved, or reported there.
+  if (ctx.opts.inDefinition) return resolved;
+  // `big = L > 1` is the members it keeps (docs/multisets.md), a list.
+  if (raw.kind === 'var' && ctx.opts.isList?.(raw.name))
+    throw new Error(`${raw.name} is a list, not a condition; write the comparison itself in the braces.`);
+  throw notACondition(raw);
+}
+
 function rx(e: Expr, ctx: Ctx): Expr {
   const { getFn } = ctx;
   switch (e.kind) {
@@ -2212,6 +2284,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         ctx.opts.sequenceTerm?.(e.name, undefined, ctx.opts.openVars) ??
         ctx.opts.interval?.(e.name) ??
         ctx.opts.multivector?.(e.name) ??
+        ctx.opts.complex?.(e.name) ??
         unitVector(e.name, ctx.opts) ??
         pointCoord(e.name, ctx.opts) ??
         e
@@ -2287,6 +2360,20 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (isReductionCall(e)) {
         const over = reduceOverSet(e.name, e.args[0], {
           resolve: x => rx(x, ctx),
+          // A reduction reads a condition by its shape, so even in a function
+          // body it is written in now — unless a parameter would capture it.
+          resolveCondition: x => {
+            const resolved = rx(x, ctx);
+            if (x.kind !== 'var' || resolved.kind !== 'var') return resolved;
+            const value = namedConditionOf(ctx)(resolved.name);
+            if (!value) return resolved;
+            const captured = [...freeVars(value)].find(v => ctx.opts.params?.has(v));
+            if (captured)
+              throw new Error(
+                `${resolved.name} reads ${captured}, which this function's parameter ${captured} would capture — rename the parameter.`,
+              );
+            return value;
+          },
           integrate: (body, v, lo, hi) => integral(body, v, lo, hi, ctx, true),
           consts: ctx.opts.consts,
           isList: ctx.opts.isList,
@@ -2383,10 +2470,14 @@ function rx(e: Expr, ctx: Ctx): Expr {
           });
           return { kind: 'call', name: MAP, args: [{ kind: 'str', value: e.name }, substVars(fn.body, env), ...pairs] };
         }
-        return substVars(fn.body, {
+        const inlined = substVars(fn.body, {
           ...Object.fromEntries(fn.params.map((p, k) => [p, args[k]])),
           ...coordParams(fn, args, e.name, ctx.opts),
         });
+        // The body's named conditions, now that its parameters are its
+        // arguments and cannot capture their variables (namedCondition). In
+        // another function's body they wait for that function's call.
+        return ctx.opts.params ? inlined : writeConditions(inlined, namedConditionOf(ctx));
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
@@ -2501,7 +2592,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
       // filter, and a function may hand one to it.)
       return {
         kind: 'piecewise',
-        cases: e.cases.map(c => ({ ...c, cond: rx(c.cond, ctx), value: rx(c.value, ctx) })),
+        cases: e.cases.map(c => ({
+          ...c,
+          cond: namedCondition(c.cond, rx(c.cond, ctx), ctx),
+          value: rx(c.value, ctx),
+        })),
         otherwise: e.otherwise && rx(e.otherwise, ctx),
       };
     case 'loop':
@@ -2560,11 +2655,13 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     indexIssue: (idx, target) => indexIssue(idx, defs, target),
     // Live too: definitions above this one (a point's components included).
     // A state stands for itself: defined, and constant across space.
-    definition: n => defs.consts.get(n) ?? (stateNames.has(n) ? { kind: 'var', name: n } : undefined),
+    definition: n =>
+      defs.conditions.get(n) ?? defs.consts.get(n) ?? (stateNames.has(n) ? { kind: 'var', name: n } : undefined),
     comps: n => compsOf(defs, n),
     documentNames: new Set(byName.keys()),
     interval: n => defs.intervals.get(n),
     multivector: n => defs.multivectors.get(n),
+    complex: n => defs.complexes.get(n),
   };
 
   const parsed = new Map<string, Expr>();
@@ -2608,6 +2705,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         ...ropts,
         interval: n => (d.params.includes(n) ? undefined : ropts.interval?.(n)),
         multivector: n => (d.params.includes(n) ? undefined : ropts.multivector?.(n)),
+        complex: n => (d.params.includes(n) ? undefined : ropts.complex?.(n)),
         documentNames: ropts.documentNames && new Set([...ropts.documentNames, ...d.params]),
         params: new Set(d.params),
       };
@@ -2628,6 +2726,22 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     new Set(raw.map(d => d.name)),
     (name, expr) => defs.consts.set(name, expr),
   );
+
+  // Named conditions (`within = r < R`), found before anything else
+  // resolves: a reduction in a function body reads one by its shape, and
+  // that must not depend on whether the condition's row is above the
+  // function's or below. The loop below settles each one (a comparison over
+  // a list is the list it keeps). Parsed afresh, not cached: list names
+  // that decide indexing are only known in definition order.
+  for (const d of raw) {
+    if (d.kind !== 'const' || d.draw) continue;
+    try {
+      const source = parseExpr(d.rhs, fnNames, indexNamesOf(defs), valueNames);
+      if (source.kind === 'ineq') defs.conditions.set(d.name, resolveExpr(source, getFn, ropts));
+    } catch {
+      /* reported where the loop below resolves it */
+    }
+  }
 
   // Resolved right-hand sides of `a' = …` and `a(0) = …`, validated below
   // once the constant/field split is known.
@@ -2744,6 +2858,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // Point-ness flows in definition order, so `C = B + D` needs B and D
         // defined above (a stray point name below is reported after the loop).
         const resolved = resolveExpr(parse(d), getFn, ropts);
+        defs.conditions.delete(d.name);
         // `r = interval(1, 2)`, or anything built from one: not a number but a
         // hidden parameter, which every row using the name shares.
         // A binder draws from a list; the other named values below are not one.
@@ -2857,6 +2972,14 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           defs.lists.set(d.name, e);
           continue;
         }
+        // `within = r < R`, or another name for one: a condition, written in
+        // wherever a condition reads it (namedCondition, writeConditions).
+        const alias = e.kind === 'var' ? defs.conditions.get(e.name) : undefined;
+        if (e.kind === 'ineq' || alias) {
+          notDrawn('a condition');
+          defs.conditions.set(d.name, alias ?? e);
+          continue;
+        }
         const store: Array<[string, Expr]> = [[d.name, e]];
         if (e.kind === 'vec') {
           // `P = (person.age, person.height)` names a SCATTER, whose
@@ -2921,6 +3044,17 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         }
       }
     }
+  }
+
+  // A condition named below a definition that reads it (an alias, `big =
+  // within`, is only known when its row is): written in now, as it is above
+  // — in condition places only: a definition that is a condition already
+  // moved to defs.conditions, and one read as a number is reported below.
+  if (defs.conditions.size) {
+    const write = (e: Expr): Expr => writeConditions(e, n => defs.conditions.get(n), false);
+    for (const [name, e] of defs.consts) defs.consts.set(name, write(e));
+    for (const [name, e] of derivs) derivs.set(name, write(e));
+    for (const [name, e] of inits) inits.set(name, write(e));
   }
 
   // A bare point name surviving in a resolved expression means the point was
@@ -3217,6 +3351,83 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // So is one over the parameters u, v: `c = (cos(2pi u), sin(2pi u))`
   // names a curve that later rows inline, as they inline `s = (x, y)`.
   const fieldNames = new Set<string>();
+  // A complex constant (`a = e^(iπ/3)`, `c = 2a`) has no one number to hold:
+  // it is written in wherever its name is read (ResolveOpts.complex), as an
+  // interval is. Written into one another they close; a chain that squares as
+  // it goes grows geometrically, so its size is checked before anything
+  // walks it.
+  const sizes = new WeakMap<object, number>();
+  const writeComplex = (e: Expr): Expr => {
+    const refs = [...freeVars(e)].filter(v => defs.complexes.has(v));
+    return refs.length ? substVars(e, Object.fromEntries(refs.map(r => [r, defs.complexes.get(r)!]))) : e;
+  };
+  const tooLarge = (name: string, e: Expr, written: Expr): boolean => {
+    if (written === e || countNodes(written, sizes) <= SPLIT_NODE_BUDGET) return false;
+    errors.set(name, `${name} is too large with its complex constants written in — reduce the nesting or the powers.`);
+    defs.consts.delete(name);
+    return true;
+  };
+  const overNothing = (e: Expr) => ![...freeVars(e)].some(v => onPosition(v) || PARAMS.has(v));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const [name, e] of defs.consts) {
+      const written = writeComplex(e);
+      if (tooLarge(name, e, written)) continue;
+      if (isComplexValued(written) && overNothing(written)) {
+        defs.complexes.set(name, written);
+        defs.consts.delete(name);
+        changed = true;
+      }
+    }
+  }
+  // What reads one is written through: a complex field (`q = w - a`) stays
+  // complex, and a real value (`b = |a|`, `re(e^(iπ/3))`) holds its real part
+  // and stays a constant — a slider bound, a range.
+  for (const [name, e] of defs.consts) {
+    const written = writeComplex(e);
+    if (written === e && !freeVars(e).has('i')) continue;
+    if (tooLarge(name, e, written)) continue;
+    try {
+      defs.consts.set(name, isComplexValued(written) ? written : realValue(written, name));
+    } catch (err) {
+      errors.set(name, msg(err));
+      defs.consts.delete(name);
+    }
+  }
+  for (const [name, l] of defs.lists) {
+    if (l.kind !== 'list') continue;
+    const items = l.items.map(writeComplex);
+    if (items.some((it, k) => it !== l.items[k])) defs.lists.set(name, { ...l, items });
+  }
+  // A condition compares real values: `ok = |a| < 2` reads |a| through its
+  // real part, and `ok = a < 2` has no order to compare.
+  const realSides = (c: Expr, name: string): Expr =>
+    c.kind === 'ineq'
+      ? { ...c, l: realSides(c.l, name), r: realSides(c.r, name) }
+      : realValue(c, `${name}'s comparison`);
+  for (const [name, c] of defs.conditions) {
+    const written = writeComplex(c);
+    if (written === c) continue;
+    try {
+      if (countNodes(written, sizes) > SPLIT_NODE_BUDGET)
+        throw new Error(
+          `${name} is too large with its complex constants written in — reduce the nesting or the powers.`,
+        );
+      defs.conditions.set(name, realSides(written, name));
+    } catch (err) {
+      errors.set(name, msg(err));
+      defs.conditions.delete(name);
+    }
+  }
+  // A function's parameter shadows one, as it does an interval.
+  for (const [name, fn] of defs.fns) {
+    const refs = [...freeVars(fn.body)].filter(v => defs.complexes.has(v) && !fn.params.includes(v));
+    if (refs.length)
+      defs.fns.set(name, {
+        ...fn,
+        body: substVars(fn.body, Object.fromEntries(refs.map(r => [r, defs.complexes.get(r)!]))),
+      });
+  }
   // The fields over u, v among them, so their errors speak of curves.
   const paramNames = new Set<string>();
   for (let changed = true; changed;) {
@@ -3246,7 +3457,14 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (comps.some(c => paramNames.has(c))) for (const c of comps) paramNames.add(c);
   }
 
-  const constNames = new Set(raw.filter(d => d.kind === 'const' && !fieldNames.has(d.name)).map(d => d.name));
+  const constNames = new Set(
+    raw
+      .filter(
+        d =>
+          d.kind === 'const' && !fieldNames.has(d.name) && !defs.conditions.has(d.name) && !defs.complexes.has(d.name),
+      )
+      .map(d => d.name),
+  );
   for (const name of fittedNames) constNames.add(name);
   for (const name of defs.consts.keys()) if (name.startsWith(defs.sequencePrefix + '_')) constNames.add(name);
   // Constant point rows resolve to their component constants; a vector
@@ -3343,7 +3561,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (!comps.every(Boolean)) continue;
     const vars = comps.flatMap(e => [...freeVars(e!)]);
     const param = vars.find(fv => PARAMS.has(fv));
-    if (comps.some(e => complexValued(e!))) {
+    if (comps.some(e => isComplexValued(e!))) {
       errors.set(p, `${p} has a complex component; a vector's components are real — take re(…) or im(…).`);
     } else if (param && vars.some(onPosition)) {
       errors.set(
@@ -3373,6 +3591,35 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   }
   defs.fields = orderedFields;
 
+  // A condition reads fields as a row does: closed over them here, so a row
+  // that writes one in has no field left in it to write. It may use what a
+  // field may, and its sides must evaluate.
+  for (const [name, written] of defs.conditions) {
+    try {
+      const refs = [...freeVars(written)].filter(v => defs.fields.has(v));
+      const c = refs.length ? substVars(written, Object.fromEntries(refs.map(r => [r, defs.fields.get(r)!]))) : written;
+      const vars = [...freeVars(c)];
+      for (const fv of vars) {
+        if (onPosition(fv) || PARAMS.has(fv) || fv === 't' || fv === 'i' || constNames.has(fv) || stateNames.has(fv))
+          continue;
+        throw new Error(
+          defs.conditions.has(fv)
+            ? conditionAsNumber(fv)
+            : `${name} is a condition, so it may only use x, y, z, u, v, t, constants and fields (found ${fv}).`,
+        );
+      }
+      if (!vars.includes('i') && !vars.includes('w')) {
+        const env: Record<string, number> = { x: 0.7, y: 0.4, z: 0.3, t: 0 };
+        for (const fv of vars) env[fv] ??= 1;
+        for (const side of ineqComparisons(c as Expr & { kind: 'ineq' }).flatMap(k => [k.l, k.r])) evaluate(side, env);
+      }
+      defs.conditions.set(name, c);
+    } catch (err) {
+      errors.set(name, msg(err));
+      defs.conditions.delete(name);
+    }
+  }
+
   // Constants may only depend on other constants, states, and time.
   for (const [name, e] of defs.consts) {
     for (const fv of freeVars(e)) {
@@ -3381,7 +3628,9 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           name,
           fv === 'inf'
             ? `inf only works as an ∫ bound — write it inline: int[-inf..x] f(x) dx.`
-            : `${name} can only depend on other constants and t (found ${fv}).`,
+            : defs.conditions.has(fv)
+              ? conditionAsNumber(fv)
+              : `${name} can only depend on other constants and t (found ${fv}).`,
         );
         defs.consts.delete(name);
         break;
@@ -3389,7 +3638,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     }
   }
 
-  // A list holds data: its elements may only use constants, states, and t.
+  // A list holds data: its elements may only use constants, states, t and i.
   // (References to other lists never survive — lowering already inlined
   // any list defined above, and one defined below parses as a product and
   // lands in the constant check above.)
@@ -3399,8 +3648,13 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (seq.kind !== 'list') continue;
     for (const item of seq.items) {
       for (const fv of freeVars(item)) {
-        if (fv !== 't' && !constNames.has(fv) && !stateNames.has(fv)) {
-          errors.set(name, `${name} is a list, so its elements may only use constants and t (found ${fv}).`);
+        if (fv !== 't' && fv !== 'i' && !constNames.has(fv) && !stateNames.has(fv)) {
+          errors.set(
+            name,
+            defs.conditions.has(fv)
+              ? conditionAsNumber(fv)
+              : `${name} is a list, so its elements may only use constants and t (found ${fv}).`,
+          );
           defs.lists.delete(name);
           continue outer;
         }
@@ -3427,7 +3681,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
               ? 'an interval'
               : null;
     if (!e && kind) throw new Error(`${name} is ${kind} — move its definition above where it is used.`);
-    if (!e) throw new Error(`${name} is not defined.`);
+    if (!e) throw new Error(errors.has(name) ? `${name} has an error in its definition.` : `${name} is not defined.`);
     if (visiting.has(name)) throw new Error(`${name} is defined in terms of itself.`);
     visiting.add(name);
     const env: Record<string, number> = { t: 0 };
@@ -3541,6 +3795,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     const present = (name: string): boolean =>
       defs.consts.has(name) ||
       defs.fields.has(name) ||
+      defs.complexes.has(name) ||
+      defs.conditions.has(name) ||
       defs.states.has(name) ||
       defs.points.has(name) ||
       defs.vecStates.has(name) ||
@@ -3600,6 +3856,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       } else {
         defs.consts.delete(name);
         defs.fields.delete(name);
+        defs.complexes.delete(name);
+        defs.conditions.delete(name);
         defs.states.delete(name);
         defs.fns.delete(name);
         defs.mats.delete(name);
@@ -3618,6 +3876,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       const candidates: Array<[string, readonly Expr[], readonly string[]]> = [
         ...[...defs.consts].map(([name, expr]): [string, Expr[], string[]] => [name, [expr], []]),
         ...[...defs.fields].map(([name, expr]): [string, Expr[], string[]] => [name, [expr], []]),
+        ...[...defs.complexes].map(([name, expr]): [string, Expr[], string[]] => [name, [expr], []]),
+        ...[...defs.conditions].map(([name, expr]): [string, Expr[], string[]] => [name, [expr], []]),
         ...[...defs.states].map(([name, state]): [string, Expr[], string[]] => [name, [state.deriv], []]),
         ...[...defs.fns].map(([name, fn]): [string, Expr[], string[]] => [name, [fn.body], fn.params]),
         ...[...defs.mats].map(([name, matrix]): [string, Expr[], string[]] => [name, matrix.flat(), []]),
@@ -3693,6 +3953,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       });
     }
   }
+  for (const [name, expr] of defs.complexes) env.bind(name, { tag: 'scalar', role: 'complex', expr });
+  for (const [name, expr] of defs.conditions) env.bind(name, { tag: 'scalar', role: 'condition', expr });
   for (const [name, fn] of defs.fns) env.bind(name, { tag: 'fn', fn });
   for (const [name, matrix] of defs.mats) env.bind(name, { tag: 'matrix', matrix });
   for (const [name, tensor] of defs.tensors) env.bind(name, { tag: 'tensor', tensor });

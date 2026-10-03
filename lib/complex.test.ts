@@ -1,7 +1,9 @@
+import { analyzeRows } from './analysis.ts';
 import { compileGpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { compileTyped, usesComplex } from './complex.ts';
-import { parseExpr } from './expr.ts';
+import { type Expr, evaluate, parseExpr } from './expr.ts';
+import { publicKind } from './math-object.ts';
 import { classify } from './plot.ts';
 
 const typed = (s: string) => compileTyped(parseExpr(s));
@@ -110,5 +112,183 @@ describe('classify (special forms)', () => {
     const c = classify(parseExpr('iter(z^2 + a + b i)'), new Set(['a', 'b']));
     expect(c.params).toEqual(['a', 'b']);
     expect((compileGpu(c) as { step: string }).step).toContain('u_a');
+  });
+});
+
+describe('complex lists', () => {
+  /** The last row, and its members as numbers when it draws points. */
+  const last = (rows: string[], env: Record<string, number> = {}) => {
+    const row = analyzeRows(rows, { readouts: true }).rows.at(-1)!;
+    const cpu = row.cpu as { type: string; pts?: Expr[][] } | undefined;
+    const pts = cpu?.pts?.map(p => p.map(c => evaluate(c, env)));
+    return { row, kind: row.cls && publicKind(row.cls.object), pts };
+  };
+  const close = (pts: number[][] | undefined, want: number[][]) => {
+    expect(pts).toHaveLength(want.length);
+    pts!.forEach((p, k) => p.forEach((c, j) => expect(c, `member ${k}`).toBeCloseTo(want[k][j], 12)));
+  };
+
+  it('draws each member on the Argand plane, as one complex value draws', () => {
+    const { kind, pts } = last(['e^(i π [0..5]/5)']);
+    expect(kind).toBe('plist');
+    close(
+      pts,
+      [0, 1, 2, 3, 4, 5].map(k => [Math.cos((Math.PI * k) / 5), Math.sin((Math.PI * k) / 5)]),
+    );
+  });
+
+  it('is complex throughout when one member is: 1 in [1, i] is 1 + 0i', () => {
+    close(last(['[1, i, -1]']).pts, [
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+    ]);
+    expect(last(['[1 + i, (1, 2)]']).row.error).toBe('Lists cannot mix complex numbers and points.');
+  });
+
+  it('names a complex list, and a complex value', () => {
+    close(last(['S = e^(2 π i [0..2]/3)', 'S']).pts, [
+      [1, 0],
+      [-0.5, Math.sqrt(3) / 2],
+      [-0.5, -Math.sqrt(3) / 2],
+    ]);
+    expect(last(['a = e^(i π/3)', 'a']).kind).toBe('point');
+    // Through complex values to a real one: a number to read, and a constant.
+    expect(last(['a = e^(i π/3)', 'b = re(a)', 'b']).row.info).toBe('≈ 0.5');
+    expect(last(['b = |3 + 4i|', 'b']).row.info).toBe('= 5');
+    expect(last(['a = 2 + i', 'domain(w - a)']).row.error).toBeUndefined();
+  });
+
+  it('keeps real projections of the members real', () => {
+    expect(last(['re([1 + 2i, 3 - i])']).row.info).toBe('= [1, 3]');
+    expect(last(['|[3 + 4i, 5i]|']).row.info).toBe('= [5, 5]');
+    close(last(['L = e^(i π [0..2]/2)', '(re(L), im(L))']).pts, [
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+    ]);
+  });
+
+  it('moves with sliders and t', () => {
+    close(last(['k = 4', 'e^(2 π i [0..k-1]/k)'], { k: 4 }).pts, [
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+      [0, -1],
+    ]);
+    close(last(['e^(i (t + π [0, 1]))'], { t: Math.PI / 2 }).pts, [
+      [0, 1],
+      [0, -1],
+    ]);
+  });
+
+  it('reduces by sum and mean, and refuses an order it does not have', () => {
+    expect(last(['count(e^(i π [0..5]/5))']).row.info).toBe('= 6');
+    expect(last(['mean(e^(2 π i [0..4]/5))']).kind).toBe('point');
+    for (const f of ['sort', 'median', 'stdev', 'max', 'hist'])
+      expect(last([`${f}([2, i])`]).row.error).toBe(
+        `${f}(…) takes real numbers, and these are complex: reduce them with abs(…), re(…) or im(…) first.`,
+      );
+    expect(last(['max(abs([3, 4i, 1 + i]))']).row.info).toBe('= 4');
+    expect(last(['[1..i]']).row.error).toBe('A ".." range bound must be real — take re(…), im(…) or abs(…).');
+  });
+
+  it('bounds the split across every member', () => {
+    // Constant members fold to two numbers each.
+    expect(last(['e^(2 π i [0..4999]/5000)']).pts).toHaveLength(5000);
+    expect(last(['a = 0.4', '((a + i [0..4999]/4999)^5 + 1)^3']).row.error).toMatch(
+      /^This complex list is too large to draw/,
+    );
+  });
+
+  it('keeps a complex value that has no meaning to its own row', () => {
+    const rows = analyzeRows(['b = floor(1 + i)', 'y = x']).rows;
+    expect(rows[0].error).toBe('floor is not supported for complex values.');
+    expect(rows[1].error).toBeUndefined();
+  });
+
+  it('holds a real value through a named complex one as a constant', () => {
+    expect(last(['a = 3 + 4i', 'b = |a|', '[1..b]']).row.info).toBe('= [1, 2, 3, 4, 5]');
+    expect(last(['k = 2', 'a = k + i', 'b = re(a)', '[1..b]']).row.info).toBe('= [1, 2]');
+  });
+
+  it('lists named complex values', () => {
+    close(last(['a = 1 + i', 'S = [a, 1]', 'S']).pts, [
+      [1, 1],
+      [1, 0],
+    ]);
+    const { kind, pts } = last(['a = e^(i pi/3)', '[a, 2a]']);
+    expect(kind).toBe('plist');
+    close(pts, [
+      [0.5, Math.sqrt(3) / 2],
+      [1, Math.sqrt(3)],
+    ]);
+  });
+
+  it('reads real projections in reductions, filters and sort keys', () => {
+    expect(last(['median(re([3 + 4i, 1, 2]))']).row.info).toBe('= 2');
+    expect(last(['L = [1 + i, 2]', 'count(L[re(L) > 0])']).row.info).toBe('= 2');
+    expect(last(['L = [1 + i, 2]', 'L[L > 0]']).row.error).toBe('A filter must be real — take re(…), im(…) or abs(…).');
+    // Ordered by distance from -i: -1 (√2), 2 (√5), 3 (√10).
+    const sorted = last(['L = [3, -1, 2]', 'sort(L, |L + i|)']).row.cls!.object;
+    expect(sorted.kind === 'point' && sorted.source.representation === 'real').toBe(true);
+    const coords = (sorted as { source: { coordinates: Expr[] } }).source.coordinates;
+    expect(coords.map(c => evaluate(c, {}))).toEqual([-1, 2, 3]);
+  });
+
+  it('keeps a point real, in a list as on its own', () => {
+    expect(last(['S = [1, 2i]', '(S, 1)']).row.error).toBe('Complex values are not supported in vectors.');
+  });
+
+  it('says when a complex member draws a different kind than the real ones', () => {
+    expect(last(['y = [1, i] x']).row.error).toMatch(/^Family element 2 is complex where element 1 is not/);
+    expect(last(['y = [i, 1] x']).row.error).toMatch(/^Family element 1 is complex where element 2 is not/);
+    // All complex, a family is fine: the roots of w^2 = 1 and of w^2 = i.
+    expect(last(['w^2 = [1, i]']).kind).toBe('family');
+  });
+
+  it('writes a named complex value in wherever it is read', () => {
+    const doc = ['a = 3 + 4i', 'L = [1, 5, 9]'];
+    expect(last([...doc, '[1..|a|]']).row.info).toBe('= [1, 2, 3, 4, 5]');
+    expect(last([...doc, 'L[L > re(a)]']).row.info).toBe('= [5, 9]');
+    // Packed lists too: the key's body is read through its real part.
+    // By distance from 6 + 2i: 5 (√5), 9 (√13), 1 (√29).
+    const sorted = last(['a = 6 + 2i', 'L = [1, 5, 9]', 'sort(L, |L - a|)']).row.cls!.object;
+    const coords = (sorted as { source: { coordinates: Expr[] } }).source.coordinates;
+    expect(coords.map(c => evaluate(c, {}))).toEqual([5, 9, 1]);
+  });
+
+  it('bounds complex constants written into one another', () => {
+    const chain = ['a0 = 1 + i', ...Array.from({ length: 24 }, (_, k) => `a${k + 1} = a${k} a${k}`), 'y = x'];
+    const started = performance.now();
+    const rows = analyzeRows(chain).rows;
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(rows.find(r => r.error)?.error).toMatch(/is too large with its complex constants written in/);
+    expect(rows.at(-1)!.error).toBeUndefined();
+  });
+
+  it('compares complex members for equality', () => {
+    const doc = ['S = e^(i pi [0..3]/2)'];
+    expect(last([...doc, 'count(S[S != 1])']).row.info).toBe('= 3');
+    expect(last([...doc, 'S[S == 1]']).pts).toHaveLength(1);
+  });
+
+  it('orders a complex list into a tuple, which says it has no picture yet', () => {
+    const doc = ['S = e^(i pi [0..3]/2)'];
+    expect(last([...doc, 'sort(S, re(S))']).row.error).toMatch(/^A tuple of complex numbers has no picture yet/);
+    expect(last([...doc, 'T = sort(S, re(S))', 'T[1]']).kind).toBe('point');
+  });
+
+  it('is read by a named condition through its real part', () => {
+    expect(last(['a = 3 + 4i', 'ok = |a| < 6', 'ok']).row.info).toBe('Always true (5 < 6)');
+    // Above or below the condition, the same.
+    expect(last(['near = x^2 + y^2 < |a|', 'a = 3 + 4i', 'near']).kind).toBe('ineq2d');
+    expect(last(['a = 3 + 4i', 'near = |w - a| < 1', 'domain({near: w, 0})']).row.error).toBeUndefined();
+    const rows = analyzeRows(['a = 3 + 4i', 'ok = a < 2']).rows;
+    expect(rows[1].error).toBe("ok's comparison must be real — take re(…), im(…) or abs(…).");
+  });
+
+  it('names the variable a list may not use', () => {
+    expect(last(['[w, 2w]']).row.error).toBe('A list may only use constants and t (found w).');
   });
 });

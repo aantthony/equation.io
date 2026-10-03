@@ -293,6 +293,12 @@ describe('Fourier through document analysis and both backends', () => {
   ])('reports an actionable error for %s', (text, pattern) => {
     expect(analyzeRows([text]).rows[0].error).toMatch(pattern);
   });
+  it('reads a real signal reached through complex values as its real part', () => {
+    expect(spectrum(['s = interval(0, 1)', 'fourier(re(e^(2pi i s)))'])[1]).toEqual([1, 1]);
+    const named = spectrum(['a = 3 + 4i', 's = interval(0, 1)', 'fourier(|a| sin(2pi s))']);
+    expect(named[1][1]).toBeCloseTo(5, 10);
+    expect(analyzeRows(['s = interval(0, 1)', 'fourier(e^(2pi i s))']).rows[1].error).toMatch(/real signal/);
+  });
   it('names the interval a function is read over, rather than binding x behind it', () => {
     expect(analyzeRows(['f(s) = cos(4pi s)', 'fourier(f)']).rows[1].error).toBe(
       'fourier reads a signal over an interval, which sets its period: fourier(f(interval(0, 1))).',

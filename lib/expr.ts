@@ -593,6 +593,17 @@ function seriesToVec(items: Array<Expr | PCase>): Expr {
   throw new Error('Expected 2 or 3 vector components.');
 }
 
+/** A piecewise condition that is not one, by name when it has one (a name
+ *  in a function body is written in only when a row reads it). */
+export function notACondition(cond: Expr): Error {
+  const named = cond.kind === 'var' ? cond.name : cond.kind === 'call' ? `${cond.name}(…)` : null;
+  return new Error(
+    named
+      ? `${named} is not a condition; piecewise conditions are inequalities, like x < 0.`
+      : 'Piecewise conditions must be inequalities, like x < 0.',
+  );
+}
+
 /** Assemble {…} content into a piecewise if it contains `cond: value` parts. */
 function bracePiecewise(content: PNode): PNode {
   const items = content.kind === 'series' || content.kind === 'peq' ? eqItems(content) : [content];
@@ -606,15 +617,20 @@ function bracePiecewise(content: PNode): PNode {
   const cases: Array<{ cond: Expr; value: Expr; bare?: true }> = [];
   let otherwise: Expr | undefined;
   items.forEach((n, k) => {
-    if ((n.kind === 'ineq' || n.kind === 'eq') && items.length > 1) {
+    // So is a name or call before the last part, once the braces are a
+    // piecewise: `{within, x > 0.5: x}`. (`{within, 5}` stays a tuple.)
+    const named = (n.kind === 'var' || n.kind === 'call') && k < items.length - 1;
+    if (((n.kind === 'ineq' || n.kind === 'eq') && items.length > 1) || named) {
       if (otherwise) throw new Error('The default value must come last in {…}.');
-      cases.push({ cond: n, value: num(1), bare: true });
+      cases.push({ cond: n as Expr, value: num(1), bare: true });
       return;
     }
     if (n.kind === 'pcase') {
       // An equation condition parses, and only a reduction accepts it
-      // (lib/measure.ts); the resolver refuses it anywhere else.
-      if (n.cond.kind !== 'ineq' && n.cond.kind !== 'eq')
+      // (lib/measure.ts); the resolver refuses it anywhere else. A name or
+      // a call may stand for a condition (`within = r < R`, `{within: 1}`):
+      // the resolver checks what it turns out to be.
+      if (n.cond.kind !== 'ineq' && n.cond.kind !== 'eq' && n.cond.kind !== 'var' && n.cond.kind !== 'call')
         throw new Error('Piecewise conditions must be inequalities, like x < 0.');
       if (otherwise) throw new Error('The default value must come last in {…}.');
       cases.push({ cond: n.cond, value: n.value });
@@ -1890,7 +1906,7 @@ export function evaluate(e: Expr, env: Record<string, number>): number {
       throw new Error('Text has no numeric value — it can only be compared, inside a filter.');
     case 'piecewise': {
       for (const c of e.cases) {
-        if (c.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities.');
+        if (c.cond.kind !== 'ineq') throw notACondition(c.cond);
         const holds = ineqComparisons(c.cond).every(({ op, l, r }) => {
           const a = evaluate(l, env);
           const b = evaluate(r, env);
@@ -1933,7 +1949,7 @@ function evalLoop(e: Expr & { kind: 'loop' }, env: Record<string, number>): numb
 function pickLeaf(body: Expr, env: Record<string, number>): Expr | null {
   if (body.kind !== 'piecewise') return body;
   for (const c of body.cases) {
-    if (c.cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities.');
+    if (c.cond.kind !== 'ineq') throw notACondition(c.cond);
     const holds = ineqComparisons(c.cond).every(({ op, l, r }) => {
       const a = evaluate(l, env);
       const b = evaluate(r, env);

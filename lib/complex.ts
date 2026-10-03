@@ -392,6 +392,16 @@ function realCondition(cond: Expr, env: Record<string, ScalarType>): void {
 }
 
 export type ScalarType = 'real' | 'complex';
+
+/** Whether `e` is a complex number — not merely passing through complex
+ *  values (`re(z)`, `|z|`), and not something typing refuses. */
+export function isComplexValued(e: Expr): boolean {
+  try {
+    return usesComplex(e) && inferScalarType(e) === 'complex';
+  } catch {
+    return false;
+  }
+}
 /** Result typing, independent of code generation and structural complex involvement. */
 export function inferScalarType(e: Expr, env: Record<string, ScalarType> = {}): ScalarType {
   const infer = (value: Expr) => inferScalarType(value, env);

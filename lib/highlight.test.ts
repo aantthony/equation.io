@@ -83,11 +83,22 @@ describe('describeName', () => {
     'c = (cos(2pi u), sin(2pi u))',
     'L = [3, 1, 4]',
     'M = ((1, 2), (3, 4))',
+    'within = x^2 + y^2 < a',
     "th' = om",
     "om' = -th",
     'X ~ Normal(0, 1)',
   ]);
   const type = (name: string) => describeName(name, env)?.type;
+
+  it('names a complex value, and a real one reached through it', () => {
+    const complex = envOf(['a = e^(i pi/3)', 'b = re(a)', 'S = e^(i pi [0..5]/5)', 'q = x + i y', 'R = [a, 1]']);
+    const typeIn = (name: string) => describeName(name, complex)?.type;
+    expect(typeIn('a')).toBe('complex number');
+    expect(typeIn('b')).toBe('number');
+    expect(typeIn('S')).toBe('list of 6 complex numbers');
+    expect(typeIn('q')).toBe('field');
+    expect(typeIn('R')).toBe('list of 2 complex numbers');
+  });
 
   it('names the type of a document value', () => {
     expect(type('a')).toBe('number');
@@ -96,6 +107,7 @@ describe('describeName', () => {
     expect(type('c')).toBe('curve (2D)');
     expect(type('L')).toBe('list of 3 numbers');
     expect(type('M')).toBe('matrix (2×2)');
+    expect(describeName('within', env)).toMatchObject({ type: 'condition', description: 'Depends on x, y' });
     expect(type('th')).toBe('state');
     expect(type('X')).toBe('random variable');
   });

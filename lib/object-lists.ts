@@ -4,11 +4,12 @@ import { lowerMatrix, rowsAsPoints } from './geom.ts';
 import { mapChildren } from './expr.ts';
 import { tensorNode, tensorOfNode } from './tensor.ts';
 import { exceedsNodes } from './size.ts';
+import { hasInterval } from './interval.ts';
 /** Lift lists in object positions before scalar geometry lowering. Existing
  * data/reduction paths get first refusal so large CSVs remain typed arrays. */
 import { type ResolveOpts, compsOf, listGetter, tensorGetter } from './defs.ts';
 import { WHOLE_EXPR_NAMES } from './complex.ts';
-import { MAP, type Expr, type FigureForm, compFits, freeVars, sameList } from './expr.ts';
+import { MAP, type Expr, type FigureForm, childrenOf, compFits, freeVars, sameList } from './expr.ts';
 import { GEOM_STATEMENTS, lowerGeom } from './geom.ts';
 import { type Axis, axesOf, isDataScatter, lowerLists, SCALAR_REDUCTIONS, unionAxes, withAxes } from './list.ts';
 
@@ -89,6 +90,12 @@ const holdsFigure = (e: Expr): boolean => {
 
 export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts = {}, named = false): Expr {
   const plotVariable = (v: string) => ['x', 'y', 'z', 'u', 'v'].includes(v) || defs.fields.has(v);
+  // Drawn over something continuous: a plot variable, or an interval in a
+  // tuple, which traces as u does (lib/interval.ts) — so [(interval(0, 1),
+  // 1), …] is a family of segments, as [(u, 1), …] is of curves. (A bare
+  // interval is a number to draw the density of, and a list of them is not.)
+  const traced = (e: Expr): boolean => (e.kind === 'vec' && hasInterval(e)) || childrenOf(e).some(traced);
+  const continuous = (e: Expr) => [...freeVars(e)].some(plotVariable) || traced(e);
   const baseGet = listGetter(defs);
   const get = (name: string): Expr | null =>
     baseGet(name) ?? (defs.mats.has(name) ? rowsAsPoints(defs.mats.get(name)!, name) : null);
@@ -320,7 +327,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       const value = ordinary(e);
       // Lists of functions/parametrics become families; constant lists retain
       // their existing dot/scatter representation and unbounded data path.
-      if (value.kind !== 'list' || !value.items.some(it => [...freeVars(it)].some(plotVariable))) return value;
+      if (value.kind !== 'list' || !value.items.some(continuous)) return value;
       break;
     } catch (err) {
       originalError ??= err;
@@ -338,7 +345,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   // own values (docs/multisets.md §2, §9).
   if (
     originalError instanceof Error &&
-    /A multiset (of \d+-tuples cannot|holds tuples)|of a multiset of \d+-tuples is not defined/.test(
+    /A multiset (of \d+-tuples cannot|holds tuples)|of a multiset of \d+-tuples is not defined|takes real numbers, and these are complex/.test(
       originalError.message,
     )
   ) {
@@ -743,8 +750,8 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
       outside ||
       source.kind === 'eq' ||
       source.kind === 'ineq' ||
-      [...freeVars(source)].some(plotVariable) ||
-      lists.some(l => l.items.some(e => [...freeVars(e)].some(plotVariable))) ||
+      continuous(source) ||
+      lists.some(l => l.items.some(continuous)) ||
       (source.kind === 'call' && (GEOM_STATEMENTS.has(source.name) || WHOLE_EXPR_NAMES.has(source.name)));
     const limit =
       outside || (source.kind === 'call' && POINT_FIGURES.has(source.name)) ? FIGURE_FAMILY_MAX : FAMILY_MAX;
@@ -754,7 +761,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     );
     const valuesOnly = members.every(
       m =>
-        ![...freeVars(m)].some(plotVariable) &&
+        !continuous(m) &&
         !['figure', 'trail', 'label', 'hist', 'family'].includes(m.kind) &&
         m.kind !== 'eq' &&
         m.kind !== 'ineq' &&

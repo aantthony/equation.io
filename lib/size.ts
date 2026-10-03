@@ -44,3 +44,8 @@ export function exceedsNodes(e: unknown, limit: number, leaf?: (x: object) => bo
   };
   return walk(e);
 }
+
+/** Nodes across every member of a family drawn as one object: 1024 cubes
+ *  turning about a fixed axis, or about a hundred about a slider-dependent
+ *  one (lib/plot.ts), or thousands of complex numbers (lib/compiler.ts). */
+export const FAMILY_NODES = 1 << 21;

@@ -1,7 +1,8 @@
 import { compileCpu } from './compiler.ts';
 import { describe, expect, it } from 'vitest';
 import { evaluate, parseExpr } from './expr.ts';
-import { CURVE_SAMPLES, PATH_NODE_BUDGET, foldAllExcept, pathSampler, samplePath } from './path.ts';
+import { CURVE_SAMPLES, foldAllExcept, pathSampler, samplePath } from './path.ts';
+import { SPLIT_NODE_BUDGET } from './complex-parts.ts';
 import { countNodes, exceedsNodes } from './size.ts';
 import { classify } from './plot.ts';
 
@@ -194,7 +195,7 @@ describe('countNodes', () => {
     const big = comps('sqrt(exp(i 2 pi u))')[0];
     expect(countNodes(big)).toBeGreaterThan(500);
     expect(countNodes(big, new WeakMap())).toBe(countNodes(big));
-    expect(PATH_NODE_BUDGET).toBeGreaterThan(countNodes(big));
+    expect(SPLIT_NODE_BUDGET).toBeGreaterThan(countNodes(big));
     // Sixty doublings: 2^60 nodes spelled by sixty objects.
     let e = parseExpr('u');
     for (let k = 0; k < 60; k++) e = { kind: 'bin', op: '*', a: e, b: e };

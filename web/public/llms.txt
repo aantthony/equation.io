@@ -162,6 +162,17 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A bare condition is a case worth 1, as in Desmos: `{x > 0, 5}` is
   `{x > 0: 1, 5}`. Values may be complex (`{x > 0: w, conj(w)}`); the
   conditions themselves compare real values (`re(w) > 0`, `|w| < 1`).
+  A condition can be named and reused: `r = x^2 + y^2 + z^2`;
+  `within = r < 16`; `x + y = {within: 1}` — the name reads as the
+  inequality it stands for, in a function body too (its x is the plane's,
+  not the function's parameter), and filters reductions: `count(within)`,
+  `mean({within: x})` (in a function body, a filter whose condition reads a
+  parameter's name is an error: rename the parameter). The definition draws nothing; a row of just the
+  name draws what the inequality would; arithmetic on it is an error. A
+  function may return a condition too: `inside(p) = p < 2`;
+  `y = {inside(x): x^2}`. A name as a bare condition needs a `cond: value`
+  part beside it, `{within, x > 0: 1}`: `{within, 5}` is a tuple, so write
+  `{within: 1, 5}`.
 - Vector calculus: these operators expand symbolically like d/dx, so
   sliders and t work inside them.
   - `grad(f)` is the tuple (∂f/∂x, ∂f/∂y), plus ∂f/∂z when f uses z:
@@ -456,7 +467,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `interval(…)` is a separate one, so `interval(0, 1) + interval(0, 1)` is
   the sum of two. In a tuple it traces with u and v:
   `(r cos(2 pi u), r sin(2 pi u))` is a filled annulus, `(r, r^2)` a curve
-  over [1, 2]. A row in x and y over one interval is a family, drawn as the
+  over [1, 2]. With a list it crosses into one curve per member, as u does:
+  `(interval(0, 1), 0) + (0, [1, 2])` is two segments, at heights 1 and 2.
+  A row in x and y over one interval is a family, drawn as the
   region its members sweep: with `a = interval(1, 2)`, `y = sin(a x)` shades
   every point some a from 1 to 2 puts on its curve, and `y < a x` every point
   below some member. At most one interval in such a row, and a bare field
@@ -521,7 +534,24 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   with the number in `value`. A number is not assumed to mean `y = number`:
   write `y = 4` for the horizontal line.
 - Complex point: a constant complex expression such as `1+2i` draws at (1, 2).
-  Constants and t may animate its real and imaginary components.
+  Constants and t may animate its real and imaginary components. A named
+  one, `a = e^(i pi/3)`, is written in wherever `a` is read (`a^2`,
+  `domain(w - a)`, `[1..|a|]`), and a real value reached through complex
+  ones is a constant like any other (`b = re(a)`, `r = |3 + 4i|`).
+- Complex list: one complex member makes a list complex — `1` in
+  `[1, i, -1]` is 1 + 0i — and it draws each member as a complex point:
+  `n = 5; e^(2 pi i [0..n-1]/n)` is the fifth roots of unity, n on a
+  slider. Name it like any list (`S = e^(i pi [0..5]/5)`); `re(S)`,
+  `abs(S)` and `(re(S), im(S))` are real. `total`, `mean` and `count`
+  reduce it; `sort`, `median`, `stdev`, `min`, `max` and `hist` need real
+  numbers, so take `abs`, `re` or `im` first (filters and sort keys too:
+  `S[re(S) > 0]`; equality needs neither, `S[S == 1]`). `sort(S, re(S))`
+  is S's members in order, a tuple, which has no picture yet: `T[k]` picks
+  one. Members are drawn split into
+  real and imaginary parts, 2^21 nodes in all: constant members are two
+  numbers each, but thousands of members of a slider-dependent polynomial
+  are too many. A list cannot mix complex numbers with points, and a
+  point's coordinates stay real (`(S, 1)` is an error).
 - Complex roots: `w^3 = 1` draws three solution points; equations in w become
   two real constraints. This is a numerical search over the visible window,
   with exact labels for rational/quadratic polynomial factors and a defining-
@@ -1071,7 +1101,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - List: `L = [3, 1, 4]` or `L = [1..100]` names a data list; rows below
   broadcast over it (`L^2`, `(L, L^2)`), reduce it (`mean(L)`), or filter
   it (`L[L > 2]`); to index it, sort it (`sort(L)[2]`, or `T = sort(L)`,
-  then `T[2]`). Elements may use constants, states, and t. A list of
+  then `T[2]`). Elements may use constants, states, t and i. A list of
   tuples names a scatter of points, whatever its shape: `[(1, 2), (3, 4)]`
   is two points, never a matrix.
 - Matrix: a tuple of rows, `M = ((a, b), (c, d))` or
