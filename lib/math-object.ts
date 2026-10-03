@@ -221,6 +221,9 @@ export type MathObject =
        *  value beside its grade glyphs, or action(M)'s matrix beside the
        *  image of the unit square (lib/glyphs.ts). */
       readonly readout?: Classified;
+      /** The members are the faces of one solid over three parameters
+       *  (lib/plot.ts solidFaces), drawn opaque so only its outside shows. */
+      readonly solid?: true;
     };
 
 export interface Classified {
@@ -266,6 +269,7 @@ export function publicKind(object: MathObject) {
       // One multivector or matrix drawn as several glyphs is not a list.
       if (object.readout)
         return object.readout.object.kind === 'tuple' && object.readout.object.blades ? 'multivector' : 'action';
+      if (object.solid) return 'solid';
       return 'family';
     case 'sequence':
       return object.form === 'explicit' ? 'sequence' : object.form;

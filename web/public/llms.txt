@@ -815,6 +815,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   trace — `(u cos(2 pi v), u sin(2 pi v))` is the unit disc, and with
   `r = interval(1, 2)`, `(r cos(2 pi u), r sin(2 pi u))` an annulus. In a 3D
   scene it lies in the plane z = 0.
+- Parametric solid: three components in three parameters (intervals, u and
+  v) fill the solid they trace — `(interval(0, 1), interval(0, 1),
+  interval(0, 1))` is the unit cube, and with `r = interval(0, 1)`,
+  `p = interval(0, pi)` and `q = interval(0, 2pi)`,
+  `(r sin(p) cos(q), r sin(p) sin(q), r cos(p))` the unit ball. It is drawn
+  opaque, as the faces of its parameter box. A map that folds over itself
+  inside the box (`s = interval(-1, 1)`; `(s^2, u, v)`) is an error: write
+  it over a range where it does not, like `interval(0, 1)`.
 - 3D surface: any equation in x, y, z.
 - Surface of revolution: `revolve(f)` turns the curve y = f(x) about the
   x-axis — `revolve(sqrt(x))`, `revolve(sin(x) + 2)`, or `revolve(f)` with

@@ -849,7 +849,64 @@ describe('§5 continuous intervals', () => {
     expect(kind(['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u))'])).toBe('pregion');
     expect(kind(['(u cos(2 pi v), u sin(2 pi v))'])).toBe('pregion');
     expect(kind(['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u), r)'])).toBe('psurface');
-    expect(last(['(u, v, interval(0, 1))']).error).toMatch(/at most two parameters/);
+    expect(last(['(u, v + interval(0, 1))']).error).toMatch(/at most two parameters/);
+    expect(last(['(u, v, interval(0, 1) + interval(0, 1))']).error).toMatch(/at most two parameters/);
+  });
+  describe('three parameters in a point in space are a solid', () => {
+    const faces = (rows: string[]) => {
+      const a = analyzeRows(rows, { readouts: true });
+      const row = a.rows.at(-1)!;
+      if (row.error) throw new Error(row.error);
+      const object = row.cls!.object;
+      if (object.kind !== 'family') throw new Error(object.kind);
+      return object.members.map(m => {
+        if (m.object.kind !== 'surface' || m.object.form !== 'parametric') throw new Error(m.object.kind);
+        const comps = m.object.coordinates;
+        return (u: number, v: number) => comps.map(c => evaluate(c, { ...a.constEnv, u, v }));
+      });
+    };
+    it('the unit cube is its six faces', () => {
+      const fs = faces(['(interval(0, 1), interval(0, 1), interval(0, 1))']);
+      expect(fs).toHaveLength(6);
+      // Each face holds one coordinate at 0 or 1; together, all six.
+      const held = fs.map(f => {
+        const [p, q] = [f(0.2, 0.7), f(0.6, 0.1)];
+        const k = p.findIndex((x, m) => x === q[m]);
+        return `${k}:${p[k]}`;
+      });
+      expect(held.sort()).toEqual(['0:0', '0:1', '1:0', '1:1', '2:0', '2:1']);
+    });
+    it('u, v and an interval mix, in any order', () => {
+      expect(faces(['(u, v, interval(0, 1))'])).toHaveLength(6);
+      expect(faces(['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u), v)'])).toHaveLength(6);
+    });
+    it('a ball in spherical coordinates has the sphere for a face', () => {
+      const fs = faces([
+        'r = interval(0, 1)',
+        'p = interval(0, pi)',
+        'q = interval(0, 2pi)',
+        '(r sin(p) cos(q), r sin(p) sin(q), r cos(p))',
+      ]);
+      const radii = fs.map(f => Math.hypot(...f(0.3, 0.6)));
+      expect(radii.some(r => Math.abs(r - 1) < 1e-12)).toBe(true);
+    });
+    it('a map that folds inside its box is an error', () => {
+      expect(() => faces(['s = interval(-1, 1)', '(s^2, u, v)'])).toThrow(/folds over itself/);
+      // Close to a face is still inside.
+      expect(() => faces(['s = interval(-0.06, 1)', '(s^2, u, v)'])).toThrow(/folds over itself/);
+    });
+    it('a flat solid is no fold, whatever the differencing noise', () => {
+      const flat = ['a = interval(0, 1)', 'b = interval(0, 1)', 'c = interval(0, 1)'];
+      expect(faces([...flat, '(a + 0.3 c, b, a + b + 0.3 c)'])).toHaveLength(6);
+      expect(faces([...flat, '(1000 (a + 0.3 c), 1000 b, 1000 (a + b + 0.3 c))'])).toHaveLength(6);
+    });
+    it('is a solid, with errors of its own', () => {
+      const row = last(['(interval(0, 1), interval(0, 1), interval(0, 1))']);
+      expect(row.cls?.object.kind === 'family' && row.cls.object.solid).toBe(true);
+      expect(last(['tube((u, v, interval(0, 1)), 0.1)']).error).toMatch(/tube\(…\) takes a curve/);
+      expect(last(['(u, v, interval(0, 1) + i)']).error).not.toMatch(/Family element/);
+      expect(last(['a = interval(0, 1)', '(a, u, v) [1, 2]']).error).toMatch(/list of solids/);
+    });
   });
   it('the annulus is the points at radius 1 to 2', () => {
     const cpu = last(['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u))']).cpu;

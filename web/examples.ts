@@ -1010,6 +1010,25 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'n = 5; th = 2pi [0..n-1]/n; hull(rotate((2, 0, [-1,1]), th, (0, 0, 1)))',
         '3d geometry slider',
       ],
+      // Three intervals in a point fill the solid they trace, drawn as the
+      // faces of their parameter box: a continuous cube beside the corners.
+      ['solid cube', '(interval(0, 1), interval(0, 1), interval(0, 1))', '3d parametric geometry'],
+      ['thick pipe', 'r = interval(0.7, 1); (r cos(2 pi u), r sin(2 pi u), 2v)', '3d parametric trig'],
+      [
+        'ball with a slice cut (slide k)',
+        'k = 0.75; r = interval(0, 1); p = interval(0, pi); q = interval(0, 2 pi k); (r sin(p) cos(q), r sin(p) sin(q), r cos(p))',
+        '3d parametric trig slider coordinates',
+      ],
+      [
+        'solid torus',
+        'r = interval(0, 0.5); ((2 + r cos(2 pi v)) cos(2 pi u), (2 + r cos(2 pi v)) sin(2 pi u), r sin(2 pi v))',
+        '3d parametric trig',
+      ],
+      [
+        'twisted bar',
+        'a = interval(-0.5, 0.5); b = interval(-0.5, 0.5); (a cos(3u) - b sin(3u), a sin(3u) + b cos(3u), 4u)',
+        '3d parametric trig',
+      ],
     ],
   ],
   [

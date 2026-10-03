@@ -32,6 +32,7 @@ export const PUBLIC_KIND_ROWS = {
   pcurve: ['(cos(u), sin(u), u)'],
   psurface: ['(u, v, u v)'],
   pregion: ['r = interval(1, 2)', '(r cos(2 pi u), r sin(2 pi u))'],
+  solid: ['(interval(0, 1), interval(0, 1), interval(0, 1))'],
   projected2d: ['a = interval(1, 2)', 'y = sin(a x)'],
   vlist: ['[1, 2, 3]'],
   tuple: ['sort([5, 3, 8, 1, 2])'],
