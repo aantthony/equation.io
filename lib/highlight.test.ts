@@ -83,6 +83,7 @@ describe('describeName', () => {
     'c = (cos(2pi u), sin(2pi u))',
     'L = [3, 1, 4]',
     'M = ((1, 2), (3, 4))',
+    'within = x^2 + y^2 < a',
     "th' = om",
     "om' = -th",
     'X ~ Normal(0, 1)',
@@ -96,6 +97,7 @@ describe('describeName', () => {
     expect(type('c')).toBe('curve (2D)');
     expect(type('L')).toBe('list of 3 numbers');
     expect(type('M')).toBe('matrix (2×2)');
+    expect(describeName('within', env)).toMatchObject({ type: 'condition', description: 'Depends on x, y' });
     expect(type('th')).toBe('state');
     expect(type('X')).toBe('random variable');
   });

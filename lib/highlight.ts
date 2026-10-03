@@ -162,7 +162,11 @@ function bindingInfo(name: string, b: Binding): NameInfo {
         return { signature: name, type: 'state', description: `Integrated forward in t from ${name}(0)` };
       if (b.role === 'const') return { signature: name, type: 'number' };
       const over = overVars(paramsOf([b.expr]));
-      return { signature: name, type: 'field', description: over.length ? `Depends on ${over.join(', ')}` : undefined };
+      return {
+        signature: name,
+        type: b.role === 'condition' ? 'condition' : 'field',
+        description: over.length ? `Depends on ${over.join(', ')}` : undefined,
+      };
     }
     case 'vector': {
       const dim = b.role === 'state' ? b.deriv.length : b.components.length;

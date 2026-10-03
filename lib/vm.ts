@@ -28,6 +28,7 @@ import {
   isRecur,
   normalcdf,
   normalpdf,
+  notACondition,
   plainFnName,
   realPow,
   sincFn,
@@ -224,7 +225,7 @@ export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
         // No jumps: every case value evaluates eagerly and Sel keeps the first
         // whose condition holds. A NaN in a discarded branch costs nothing.
         const emitCond = (cond: Expr): void => {
-          if (cond.kind !== 'ineq') throw new Error('Piecewise conditions must be inequalities.');
+          if (cond.kind !== 'ineq') throw notACondition(cond);
           ineqComparisons(cond).forEach(({ op, l, r }, k) => {
             emit(l);
             emit(r);

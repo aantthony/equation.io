@@ -5226,6 +5226,7 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
     case 'scalar':
       if (b.role === 'state')
         return `defines ${name}: a scalar state, integrated forward in time from its derivative${quiet}`;
+      if (b.role === 'condition') return `defines ${name}: a condition, read in braces like {${name}: 1}${quiet}`;
       if (b.role === 'field')
         return `defines ${name}: a scalar field (a value at every point, e.g. a coordinate like r or theta)${quiet}`;
       if (sliderOf(eq)) return `defines ${name}: a scalar constant with a slider${quiet}`;

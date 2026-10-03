@@ -305,6 +305,124 @@ describe('buildDefs', () => {
   });
 });
 
+describe('named conditions', () => {
+  /** The classified object of each row, to compare a name with what it names. */
+  const objects = (rows: string[]) =>
+    analyzeRows(rows).rows.map(r => (r.error ? `error: ${r.error}` : JSON.stringify(r.cls?.object ?? null)));
+
+  it('reads a named inequality wherever a condition goes, as if written there', () => {
+    const doc = ['r = x^2 + y^2 + z^2', 'R = 16', 'within = r < R'];
+    const [named, inline] = objects([...doc, 'x + y = {within: 1}', 'x + y = {r < R: 1}']).slice(3);
+    expect(named).toMatch(/^\{/);
+    expect(named).toBe(inline);
+    // Above its definition, and from inside another definition, too.
+    const [late, , inlineLate] = objects(['y = {inside: x}', 'inside = x^2 + y^2 < 4', 'y = {x^2 + y^2 < 4: x}']);
+    expect(late).toMatch(/^\{/);
+    expect(late).toBe(inlineLate);
+    const [, , g, inlineG] = objects([
+      'inside = x^2 + y^2 < 4',
+      'g = {inside: x, 0}',
+      'g = 1',
+      '{x^2 + y^2 < 4: x, 0} = 1',
+    ]);
+    expect(g).toMatch(/^\{/);
+    expect(g).toBe(inlineG);
+  });
+
+  it('defines without drawing: no grid of levels, no error', () => {
+    const a = analyzeRows(['r = x^2 + y^2', 'within = r < 4']);
+    expect(a.rows.map(r => r.error)).toEqual([undefined, undefined]);
+    expect(a.gridFields.map(f => f.name)).toEqual(['r']);
+  });
+
+  it('draws the region on a row of its own', () => {
+    const [, row] = analyzeRows(['within = x^2 + y^2 < 4', 'within']).rows;
+    expect(row.cls?.object.kind).toBe('region');
+  });
+
+  it('holds a comparison of constants, decided as the sliders move', () => {
+    const a = analyzeRows(['a = 1', 'ok = a < 2', 'y = {ok: x, -x}', 'ok']);
+    expect(a.rows[2].cls?.object.kind).toBe('curve');
+    expect(a.rows[3].info).toBe('True now (1 < 2)');
+  });
+
+  it('takes a function whose body is a condition', () => {
+    const [, row] = analyzeRows(['f(p) = p < 2', 'y = {f(x): 1}']).rows;
+    expect(row.error).toBeUndefined();
+    expect(row.cls?.object.kind).toBe('curve');
+  });
+
+  it('is written into a function body when a row reads it, as a field is', () => {
+    // The body's x is the parameter; the condition's x is the plane's, in
+    // whichever order the rows come.
+    const inline = objects(['y = {x < 1: 2, 5}'])[0];
+    expect(objects(['k = x < 1', 'f(x) = {k: x, 5}', 'y = f(2)'])[2]).toBe(inline);
+    expect(objects(['f(x) = {k: x, 5}', 'k = x < 1', 'y = f(2)'])[2]).toBe(inline);
+    const disc = objects(['z = {x^2 + y^2 < 1: 1, 0}'])[0];
+    expect(objects(['inside = x^2 + y^2 < 1', 'g(x, y) = {inside: 1, 0}', 'z = g(x - 1, y)'])[2]).toBe(disc);
+    // A parameter is its argument, not the document's name.
+    expect(objects(['within = x < 1', 'f(within) = {within: 1, 0}', 'y = f(x > 2)'])[2]).toBe(
+      objects(['y = {x > 2: 1, 0}'])[0],
+    );
+  });
+
+  it('filters a reduction, alone or among other conditions', () => {
+    const info = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
+    const doc = ['within = 0 < x < 1'];
+    expect(info([...doc, 'mean({within: x})'])).toBe('= 0.5');
+    expect(info([...doc, 'count(within)'])).toBe('= 1');
+    expect(info([...doc, 'total({within, x > 0.5: x})'])).toBe('= 0.375');
+  });
+
+  it('is a value of its own, so what is built on a constant one stays constant', () => {
+    const doc = ['a = 1', 'ok = a < 2'];
+    const last = (rows: string[]) => analyzeRows([...doc, ...rows], { readouts: true }).rows.at(-1)!;
+    expect(last(['b = {ok: 3, 4}', 'L = [b, 2]', 'L']).info).toBe('= [3, 2]');
+    expect(last(['q(0) = 1', "q' = {ok: 1, -1}", 'q']).error).toBeUndefined();
+    expect(last(['f(p) = {ok: p, -p}', 'a_n = f(n)', 'a_3']).info).toBe('= 3');
+    expect(last(['b = {ok: 3, 4}', 'b = 3']).error).toBe('b is already defined.');
+  });
+
+  it('filters a reduction in a function body, unless a parameter would capture it', () => {
+    const info = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!.info;
+    // Above or below the function, the same.
+    expect(info(['within = 0 < x < 1', 'g(k) = total({within: k})', 'g(3)'])).toBe('= 3');
+    expect(info(['g(k) = total({within: k})', 'within = 0 < x < 1', 'g(3)'])).toBe('= 3');
+    for (const rows of [
+      ['within = 0 < x < y', 'g(y) = total({within: 1})'],
+      ['g(y) = total({within: 1})', 'within = 0 < x < y'],
+    ])
+      expect(analyzeRows(rows).rows.find(r => r.text.startsWith('g'))!.error).toBe(
+        "within reads y, which this function's parameter y would capture — rename the parameter.",
+      );
+  });
+
+  it('is defined once', () => {
+    expect(analyzeRows(['within = x < 1', 'within = x > 3']).rows[1].error).toBe('within is already defined.');
+    expect(analyzeRows(['a = 1', 'ok = a < 2', 'ok = a > 5']).rows[2].error).toBe('ok is already defined.');
+  });
+
+  it('says what a name is when it is not a condition', () => {
+    expect(analyzeRows(['a = 1', 'y = {a: x}']).rows[1].error).toBe(
+      'a is not a condition; piecewise conditions are inequalities, like x < 0.',
+    );
+    expect(analyzeRows(['y = {sin(x): 1}']).rows[0].error).toMatch(/^sin\(…\) is not a condition/);
+    // …in a definition too, and from a function body, where it is checked
+    // when a row reads it.
+    expect(analyzeRows(['a = 1', 'g = {a: 1, 0}']).rows[1].error).toMatch(/^a is not a condition/);
+    expect(analyzeRows(['f(p) = {p: 1, 0}', 'y = f(x)']).rows[1].error).toMatch(/^x is not a condition/);
+    // A condition read as a number says which it is, in a row or a definition.
+    const asNumber = 'within is a condition, not a number — read it in braces, like {within: 1}.';
+    expect(analyzeRows(['within = x < 1', 'y = 2 within']).rows[1].error).toBe(asNumber);
+    expect(analyzeRows(['within = x < 1', 'g = within + 1']).rows[1].error).toBe(asNumber);
+    expect(analyzeRows(['within = x < 1', 'P = (within, 1)']).rows[1].error).toBe(asNumber);
+    // A comparison over a list is the members it keeps (docs/multisets.md).
+    const list = analyzeRows(['L = [1, 2, 3]', 'big = L > 1', '{big: L}', 'big']).rows;
+    expect(list[2].error).toMatch(/^big is a list, not a condition/);
+    expect(list[3].info).toBe('= [2, 3]');
+  });
+});
+
 describe('classify with defined constants', () => {
   it('turns constants into u_ uniforms and reports them as params', () => {
     const cls = classify(resolve('y = a x^2'), new Set(['a']));
