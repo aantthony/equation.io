@@ -892,6 +892,20 @@ describe('§5 continuous intervals', () => {
     });
     it('a map that folds inside its box is an error', () => {
       expect(() => faces(['s = interval(-1, 1)', '(s^2, u, v)'])).toThrow(/folds over itself/);
+      // Close to a face is still inside.
+      expect(() => faces(['s = interval(-0.06, 1)', '(s^2, u, v)'])).toThrow(/folds over itself/);
+    });
+    it('a flat solid is no fold, whatever the differencing noise', () => {
+      const flat = ['a = interval(0, 1)', 'b = interval(0, 1)', 'c = interval(0, 1)'];
+      expect(faces([...flat, '(a + 0.3 c, b, a + b + 0.3 c)'])).toHaveLength(6);
+      expect(faces([...flat, '(1000 (a + 0.3 c), 1000 b, 1000 (a + b + 0.3 c))'])).toHaveLength(6);
+    });
+    it('is a solid, with errors of its own', () => {
+      const row = last(['(interval(0, 1), interval(0, 1), interval(0, 1))']);
+      expect(row.cls?.object.kind === 'family' && row.cls.object.solid).toBe(true);
+      expect(last(['tube((u, v, interval(0, 1)), 0.1)']).error).toMatch(/tube\(…\) takes a curve/);
+      expect(last(['(u, v, interval(0, 1) + i)']).error).not.toMatch(/Family element/);
+      expect(last(['a = interval(0, 1)', '(a, u, v) [1, 2]']).error).toMatch(/list of solids/);
     });
   });
   it('the annulus is the points at radius 1 to 2', () => {

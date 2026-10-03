@@ -17,6 +17,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // Drawn member by member, like a family: their glyphs are figures.
   multivector: 'draws',
   action: 'draws',
+  // Its faces, as a family of parametric surfaces (wireframes in the preview).
+  solid: 'draws',
   vfield3d: 'draws',
   implicit2d: 'draws',
   ineq2d: 'draws',

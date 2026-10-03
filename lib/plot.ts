@@ -39,6 +39,7 @@ import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { SPLIT_NODE_BUDGET, complexParts, splitTooLarge } from './complex-parts.ts';
 import { FAMILY_NODES, exceedsNodes } from './size.ts';
+import { type Prog, compileProg, run } from './vm.ts';
 
 export { publicKind } from './math-object.ts';
 export type { Classified, MathObject } from './math-object.ts';
@@ -386,14 +387,19 @@ function familyTemplate(es: readonly Expr[], index: string): Expr {
  * inside the box takes part of its surface from the fold, which no face
  * draws, so a Jacobian that changes sign there is an error.
  */
-function solidFaces(expr: Expr & { kind: 'vec' }, hidden: readonly HiddenInterval[], vars: ReadonlySet<string>): Expr {
+function solidFaces(
+  expr: Expr & { kind: 'vec' },
+  hidden: readonly HiddenInterval[],
+  vars: ReadonlySet<string>,
+  defined: ReadonlySet<string>,
+): Expr {
   // Every parameter as a name over [0, 1]: u and v as they are, each
   // interval as a fresh one.
   const names = [...PARAM_VARS].filter(p => vars.has(p));
   const slot = new Map<string, string>();
   for (const h of hidden) {
     let name = `eqioSolid${names.length}`;
-    while (vars.has(name)) name += 'X';
+    while (vars.has(name) || defined.has(name)) name += 'X';
     slot.set(h.key, name);
     names.push(name);
   }
@@ -415,44 +421,50 @@ function solidFaces(expr: Expr & { kind: 'vec' }, hidden: readonly HiddenInterva
 
 /**
  * Whether the Jacobian of `items` over `names` (each in [0, 1]) changes sign
- * strictly inside the box, sampled on a grid by central differences. Zeros
- * on the faces (r = 0 or θ = 0 of a ball) are no fold, and neither is a
- * Jacobian that is zero throughout (a flat solid, whose faces still draw it).
+ * inside the box, sampled on a grid that reaches to just inside the faces, by
+ * central differences. The sign is read from det J / (|J₁| |J₂| |J₃|), the
+ * volume of the unit-scaled columns, so it does not depend on the map's size
+ * and differencing noise on a flat solid (det J zero throughout, whose faces
+ * still draw it) stays far below the threshold. Zeros on the faces (r = 0 or
+ * θ = 0 of a ball) are no fold. A fold narrower than the grid can be missed.
  * A map using sliders or t is not checked: their values are not known here.
  */
 function folds(items: readonly Expr[], names: readonly string[]): boolean {
-  const n = 8;
+  const n = 7;
+  const inset = 1e-3;
   const h = 1e-4;
-  let lo = 0;
-  let hi = 0;
-  const at = (p: readonly number[]): number[] => {
-    const env: Record<string, number> = {};
-    names.forEach((name, m) => (env[name] = p[m]));
-    return items.map(c => evaluate(c, env));
-  };
+  let progs: Prog[];
   try {
-    for (let i = 0; i < n; i++)
-      for (let j = 0; j < n; j++)
-        for (let k = 0; k < n; k++) {
-          const p = [(i + 0.5) / n, (j + 0.5) / n, (k + 0.5) / n];
-          const [a, b, c] = [0, 1, 2].map(d => {
-            const f = at(p.map((x, m) => (m === d ? x + h : x)));
-            const g = at(p.map((x, m) => (m === d ? x - h : x)));
-            return f.map((y, m) => (y - g[m]) / (2 * h));
-          });
-          const det =
-            a[0] * (b[1] * c[2] - b[2] * c[1]) -
-            a[1] * (b[0] * c[2] - b[2] * c[0]) +
-            a[2] * (b[0] * c[1] - b[1] * c[0]);
-          if (!Number.isFinite(det)) continue;
-          lo = Math.min(lo, det);
-          hi = Math.max(hi, det);
-        }
+    progs = items.map(c => compileProg(c, new Map(names.map((name, m) => [name, m]))));
   } catch {
     return false;
   }
-  const scale = Math.max(-lo, hi);
-  return lo < -1e-6 * scale && hi > 1e-6 * scale;
+  const stack = new Float64Array(Math.max(...progs.map(p => p.depth)));
+  const p = new Float64Array(3);
+  const col = (d: number): number[] => {
+    const x = p[d];
+    p[d] = x + h;
+    const f = progs.map(prog => run(prog, p, stack));
+    p[d] = x - h;
+    const g = progs.map(prog => run(prog, p, stack));
+    p[d] = x;
+    return f.map((y, m) => (y - g[m]) / (2 * h));
+  };
+  let negative = false;
+  let positive = false;
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < n; j++)
+      for (let k = 0; k < n; k++) {
+        [i, j, k].forEach((s, m) => (p[m] = inset + ((1 - 2 * inset) * s) / (n - 1)));
+        const [a, b, c] = [col(0), col(1), col(2)];
+        const det =
+          a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);
+        const volume = det / (Math.hypot(...a) * Math.hypot(...b) * Math.hypot(...c));
+        if (volume < -1e-6) negative = true;
+        if (volume > 1e-6) positive = true;
+        if (negative && positive) return true;
+      }
+  return false;
 }
 
 /**
@@ -552,6 +564,8 @@ function classifyLowered(
       throw new Error(
         'A family of scalar fields cannot be drawn — for curves write y = …, or pick one member, like L[k].',
       );
+    if (first === 'solid')
+      throw new Error('A list of solids cannot be drawn yet — write each solid on a row of its own.');
     if (first === 'scalar3d')
       throw new Error(
         'A family of fields in space cannot be drawn — for nested level surfaces write f(x, y, z) = [1..5], or pick one member, like L[k].',
@@ -680,8 +694,18 @@ function classifyLowered(
     if (expr.kind === 'list') throw new Error('An interval cannot be an item of a list — write it in a tuple.');
     const free = [...PARAM_VARS].filter(p => !vars.has(p));
     const swept = hidden.length + 2 - free.length;
-    if (swept === 3 && expr.kind === 'vec' && expr.items.length === 3)
-      return classifyLowered(solidFaces(expr, hidden, vars), defined, fields, timeDerivative);
+    if (swept === 3 && expr.kind === 'vec' && expr.items.length === 3) {
+      if (tube) throw new Error('tube(…) takes a curve; this is a solid over three parameters.');
+      // The faces are this row's own surfaces, not a family the user wrote:
+      // their errors are the row's.
+      let cls: Classified;
+      try {
+        cls = classifyLowered(solidFaces(expr, hidden, vars, defined), defined, fields, timeDerivative).cls;
+      } catch (err) {
+        throw new Error((err instanceof Error ? err.message : String(err)).replace(/^Family element \d+: /, ''));
+      }
+      return { cls: { ...cls, object: { ...(cls.object as MathObject & { kind: 'family' }), solid: true } } };
+    }
     if (hidden.length > free.length)
       throw new Error(
         `A row can sweep at most two parameters (intervals, u and v), or three in a point in space — this one has ${swept}.`,
