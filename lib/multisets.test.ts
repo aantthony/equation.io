@@ -895,6 +895,26 @@ describe('§5 continuous intervals', () => {
       // Close to a face is still inside.
       expect(() => faces(['s = interval(-0.06, 1)', '(s^2, u, v)'])).toThrow(/folds over itself/);
     });
+    it('a map undefined in part of its box is an error', () => {
+      const ball = ['r = interval(0, 1)', 'p = interval(0, pi)'];
+      const sphere = '(r sin(p) cos(q), r sin(p) sin(q), r cos(p))';
+      expect(() =>
+        faces([...ball, 'q = interval(0, 2 pi)', `${sphere} + ({mod(r+p+r, 1) < 0.5: 1}) (0.0001, 0, 0)`]),
+      ).toThrow(/undefined in part/);
+      // Over a slider, at its value.
+      expect(() =>
+        faces([
+          'k = 0.75',
+          ...ball,
+          'q = interval(0, 2 pi k)',
+          `${sphere} + ({mod(r+p+r, 1) < 0.5: 1}) (0.0001, 0, 0)`,
+        ]),
+      ).toThrow(/undefined in part/);
+      expect(() => faces(['s = interval(-1, 1)', '(sqrt(s), u, v)'])).toThrow(/undefined in part/);
+      // A default, or a condition that always holds, leaves it whole.
+      expect(faces(['s = interval(0, 1)', '({s < 0.5: s, s + 1}, u, v)'])).toHaveLength(6);
+      expect(faces(['s = interval(0, 1)', '({s <= 1: s}, u, v)'])).toHaveLength(6);
+    });
     it('a map over sliders is checked at their values', () => {
       // In the interval's bounds…
       expect(() => faces(['k = -0.5', 's = interval(k, 1)', '(s^2, u, v)'])).toThrow(/folds over itself/);
