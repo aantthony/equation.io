@@ -392,7 +392,7 @@ function solidFaces(
   hidden: readonly HiddenInterval[],
   vars: ReadonlySet<string>,
   defined: ReadonlySet<string>,
-): Expr {
+): { family: Expr; map: { items: Expr[]; params: string[] } } {
   // Every parameter as a name over [0, 1]: u and v as they are, each
   // interval as a fresh one.
   const names = [...PARAM_VARS].filter(p => vars.has(p));
@@ -404,8 +404,7 @@ function solidFaces(
     names.push(name);
   }
   const items = expr.items.map(c => replaceIntervals(c, h => sweep(h, slot.get(h.key)!)));
-  if (folds(items, names))
-    throw new Error('This solid folds over itself inside its parameter box, so its faces do not bound it.');
+  if (folds(items, names)) throw new Error(SOLID_FOLDS);
   const u: Expr = { kind: 'var', name: 'u' };
   const v: Expr = { kind: 'var', name: 'v' };
   const members: Expr[] = [];
@@ -416,7 +415,32 @@ function solidFaces(
       members.push({ kind: 'vec', items: items.map(c => substVars(c, env)) });
     }
   }
-  return { kind: 'family', members };
+  return { family: { kind: 'family', members }, map: { items, params: names } };
+}
+
+const SOLID_FOLDS = 'This solid folds over itself inside its parameter box, so its faces do not bound it.';
+
+/**
+ * The fold check for a solid whose map uses constants (sliders), which
+ * classification cannot evaluate: analysis runs it with their values, read
+ * through `consts` — the resolver's recording proxy, so a slider read here
+ * leaves the runtime set and a drag re-runs it. A name still unknown (t, an
+ * animated constant, a state) leaves the map unchecked.
+ */
+export function checkSolid(object: MathObject, consts: Readonly<Record<string, number>>): void {
+  if (object.kind !== 'family' || !object.solid) return;
+  const { items, params } = object.solid;
+  const env: Record<string, Expr> = {};
+  for (const name of new Set(items.flatMap(c => [...freeVars(c)])))
+    if (!params.includes(name) && Object.hasOwn(consts, name)) env[name] = { kind: 'num', value: consts[name] };
+  if (!Object.keys(env).length) return;
+  if (
+    folds(
+      items.map(c => substVars(c, env)),
+      params,
+    )
+  )
+    throw new Error(SOLID_FOLDS);
 }
 
 /**
@@ -427,7 +451,8 @@ function solidFaces(
  * and differencing noise on a flat solid (det J zero throughout, whose faces
  * still draw it) stays far below the threshold. Zeros on the faces (r = 0 or
  * θ = 0 of a ball) are no fold. A fold narrower than the grid can be missed.
- * A map using sliders or t is not checked: their values are not known here.
+ * A map using sliders or t does not compile here and is not checked; analysis
+ * checks a slider's value (checkSolid).
  */
 function folds(items: readonly Expr[], names: readonly string[]): boolean {
   const n = 7;
@@ -699,12 +724,15 @@ function classifyLowered(
       // The faces are this row's own surfaces, not a family the user wrote:
       // their errors are the row's.
       let cls: Classified;
+      let map: { items: Expr[]; params: string[] };
       try {
-        cls = classifyLowered(solidFaces(expr, hidden, vars, defined), defined, fields, timeDerivative).cls;
+        const faces = solidFaces(expr, hidden, vars, defined);
+        map = faces.map;
+        cls = classifyLowered(faces.family, defined, fields, timeDerivative).cls;
       } catch (err) {
         throw new Error((err instanceof Error ? err.message : String(err)).replace(/^Family element \d+: /, ''));
       }
-      return { cls: { ...cls, object: { ...(cls.object as MathObject & { kind: 'family' }), solid: true } } };
+      return { cls: { ...cls, object: { ...(cls.object as MathObject & { kind: 'family' }), solid: map } } };
     }
     if (hidden.length > free.length)
       throw new Error(

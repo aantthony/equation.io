@@ -222,8 +222,9 @@ export type MathObject =
        *  image of the unit square (lib/glyphs.ts). */
       readonly readout?: Classified;
       /** The members are the faces of one solid over three parameters
-       *  (lib/plot.ts solidFaces), drawn opaque so only its outside shows. */
-      readonly solid?: true;
+       *  (lib/plot.ts solidFaces), drawn opaque so only its outside shows;
+       *  this is its map, over `params` each in [0, 1], for checkSolid. */
+      readonly solid?: { readonly items: readonly Expr[]; readonly params: readonly string[] };
     };
 
 export interface Classified {

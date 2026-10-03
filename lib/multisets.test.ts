@@ -895,6 +895,21 @@ describe('§5 continuous intervals', () => {
       // Close to a face is still inside.
       expect(() => faces(['s = interval(-0.06, 1)', '(s^2, u, v)'])).toThrow(/folds over itself/);
     });
+    it('a map over sliders is checked at their values', () => {
+      // In the interval's bounds…
+      expect(() => faces(['k = -0.5', 's = interval(k, 1)', '(s^2, u, v)'])).toThrow(/folds over itself/);
+      expect(faces(['k = 0.1', 's = interval(k, 1)', '(s^2, u, v)'])).toHaveLength(6);
+      // …and in the row itself: s^2 + k s turns back where 2s + k = 0.
+      expect(() => faces(['k = 1', 's = interval(-1, 1)', '(s^2 + k s, u, v)'])).toThrow(/folds over itself/);
+      expect(faces(['k = 3', 's = interval(-1, 1)', '(s^2 + k s, u, v)'])).toHaveLength(6);
+    });
+    it('a slider in a solid is not a runtime uniform, so a drag re-checks it', () => {
+      expect(runtimeSliderNames(analyzeRows(['k = 3', 's = interval(-1, 1)', '(s^2 + k s, u, v)']))).not.toContain('k');
+      // A slider elsewhere stays one.
+      expect(
+        runtimeSliderNames(analyzeRows(['k = 3', 'j = 1', 's = interval(-1, 1)', '(s^2 + k s, u, v)', 'y = j x'])),
+      ).toContain('j');
+    });
     it('a flat solid is no fold, whatever the differencing noise', () => {
       const flat = ['a = interval(0, 1)', 'b = interval(0, 1)', 'c = interval(0, 1)'];
       expect(faces([...flat, '(a + 0.3 c, b, a + b + 0.3 c)'])).toHaveLength(6);
@@ -902,7 +917,7 @@ describe('§5 continuous intervals', () => {
     });
     it('is a solid, with errors of its own', () => {
       const row = last(['(interval(0, 1), interval(0, 1), interval(0, 1))']);
-      expect(row.cls?.object.kind === 'family' && row.cls.object.solid).toBe(true);
+      expect(row.cls?.object.kind === 'family' && !!row.cls.object.solid).toBe(true);
       expect(last(['tube((u, v, interval(0, 1)), 0.1)']).error).toMatch(/tube\(…\) takes a curve/);
       expect(last(['(u, v, interval(0, 1) + i)']).error).not.toMatch(/Family element/);
       expect(last(['a = interval(0, 1)', '(a, u, v) [1, 2]']).error).toMatch(/list of solids/);
