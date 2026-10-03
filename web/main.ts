@@ -787,9 +787,14 @@ function currentConstEnv(time: number): Record<string, number> {
   }
 }
 
-/** Send the state system back to its `a(0)` values, starting from now. */
+/**
+ * Send the state system back to its `a(0)` values, and `t` back to 0 with it:
+ * a derivative that reads `t` (a driving force) would otherwise restart at a
+ * different phase and the run would not retrace the first one.
+ */
 function resetState() {
   for (const eq of equations) eq.trail = undefined;
+  if (stateSys) restartGraphClock();
   stateVals = stateSys ? initialState(defs, stateSys) : {};
   stateTime = graphTime();
 }
