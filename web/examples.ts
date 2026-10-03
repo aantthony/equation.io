@@ -942,7 +942,7 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       [
         'three planes',
         'within = (x - 1.5)^2 + (y + 0.5)^2 + (z - 3)^2 < 4; x + y = {within: 1}; x - y = {within: 2}; z = {within: 3}; (x + y, x - y, z) = (1, 2, 3)',
-        '3d implicit',
+        '3d implicit piecewise',
       ],
       ['sphere meets plane', '(x^2 + y^2 + z^2, z) = (9, 1)', '3d conic'],
       // Alpöge's counterexample to the Jacobian conjecture (July 2026), found by

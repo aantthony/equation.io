@@ -678,19 +678,25 @@ const POINT_LIFT = 4;
  * A surface the point lies on (a plane, or three meeting at a system's
  * solution) used to cut the flat dot in half or hide it. Seen at an angle α
  * to the view, a plane through the point comes r / tan α nearer the eye
- * across the dot, so four radii clear every plane steeper than 14°; one at a
- * shallower angle draws as a thin band and covers little. A surface more
- * than that in front of the point still hides it. In perspective a radius in
- * world units is a fixed fraction of the distance to the eye,
- * POINT_PX tan(fov/2) / viewport height, so the lift is one uniform.
+ * across the dot, so a lift of L radii clears every plane steeper than
+ * atan(1 / L) (14° for 4); a shallower one draws as a thin band and covers
+ * little. A surface more than the lift in front of the point still hides it.
+ * In perspective a radius in world units is a fixed fraction of the distance
+ * to the eye, POINT_PX tan(fov/2) / viewport height, so the lift is one
+ * uniform: that fraction of the way to the eye, at most half of it.
+ *
+ * The lift is a screen-space stand-in for deciding visibility at the dot's
+ * centre alone: a surface in front of the point but within the lift (a
+ * sphere under ~4 dot radii on screen around it) does not hide it, and a
+ * thin object that close in front is drawn behind the dot.
  */
 const POINT_VERT = `#version 300 es
 layout(location=0) in vec3 aPos;
 uniform mat4 uVP;
 uniform vec3 uEye;
-uniform float uNear;
+uniform float uLift;
 void main() {
-  gl_Position = uVP * vec4(mix(aPos, uEye, uNear), 1.0);
+  gl_Position = uVP * vec4(mix(aPos, uEye, uLift), 1.0);
   gl_PointSize = ${POINT_PX.toFixed(1)};
 }
 `;
@@ -1371,7 +1377,8 @@ export class Renderer3D {
       // one draw, not 10 000. The dots are opaque, so order does not matter.
       setCommon(this.pointProgram);
       gl.uniform3f(gl.getUniformLocation(this.pointProgram, 'uEye'), ...eye);
-      gl.uniform1f(gl.getUniformLocation(this.pointProgram, 'uNear'), (POINT_LIFT * POINT_PX * Math.tan(FOV / 2)) / h);
+      const lift = (POINT_LIFT * POINT_PX * Math.tan(FOV / 2)) / h;
+      gl.uniform1f(gl.getUniformLocation(this.pointProgram, 'uLift'), Number.isFinite(lift) ? Math.min(lift, 0.5) : 0);
       const uColor = gl.getUniformLocation(this.pointProgram, 'uColor');
       const pos = new Float32Array(scene.points.length * 3);
       let start = 0;
