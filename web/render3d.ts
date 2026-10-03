@@ -305,6 +305,10 @@ void main() {
   float h = max(rayLen * 2e-3, uBoxR * 1e-4);
   vec3 n = normalize(gradF(p, h));
   if (any(isnan(n))) n = -rd;
+  // The checker is read half a cell along the gradient, before it turns to
+  // the viewer: a surface on a cell boundary (x = 0) would otherwise flip
+  // cells with the sign of the march's error, in rings around the camera.
+  vec3 pc = p + n * (uBoxR / 8.0);
   if (dot(n, rd) > 0.0) n = -n; // face the viewer
 
   vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
@@ -315,7 +319,7 @@ void main() {
 
   // Subtle checker so the surface reads as a grid.
   float cs = uBoxR / 4.0;
-  float checker = mod(floor(p.x / cs) + floor(p.y / cs) + floor(p.z / cs), 2.0);
+  float checker = mod(floor(pc.x / cs) + floor(pc.y / cs) + floor(pc.z / cs), 2.0);
   vec3 base = uColor * (0.92 + 0.08 * checker);
 
   vec3 col = base * (0.30 + 0.25 * sky + 0.50 * diffuse) + vec3(0.35) * spec;
