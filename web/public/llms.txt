@@ -28,11 +28,10 @@ Format:
   equation in half.
 - Every equation gets its own row and color. Definitions (constants,
   functions, coordinate fields) are rows too — order does not matter.
-- `/g/` links unfurl with a rendered preview image (og:image) in chat apps
-  and social cards; the image itself is served at
-  `https://equation.io/api/og/<same payload>`. An equivalent fragment form,
+- `/g/` links unfurl with the graph's title and description and a static
+  site image in chat apps and social cards. An equivalent fragment form,
   `https://equation.io/#<same payload>`, also opens the graph and keeps the
-  equations out of server logs, but gets no preview card.
+  equations out of the initial request's URL path.
 
 Examples (paste-ready):
 
@@ -69,17 +68,16 @@ Examples (paste-ready):
 - [Central limit theorem](https://equation.io/#X1%20~%20Uniform%280%2C%201%29;X2%20~%20Uniform%280%2C%201%29;X3%20~%20Uniform%280%2C%201%29;X4%20~%20Uniform%280%2C%201%29;S%20%3D%20X1%20%2B%20X2%20%2B%20X3%20%2B%20X4;Z%20~%20Normal%282%2C%20sqrt%281%2F3%29%29;P%28S%20%3E%203%29): `X1 ~ Uniform(0, 1); X2 ~ Uniform(0, 1); X3 ~ Uniform(0, 1); X4 ~ Uniform(0, 1); S = X1 + X2 + X3 + X4; Z ~ Normal(2, sqrt(1/3)); P(S > 3)` — the sum of four uniforms hugs the matching normal
 - [Conditional random variable](https://equation.io/#X%20~%20Normal%280%2C%201%29;Y%20%3D%20%7BX%20%3E%200%3A%20X%5E2%2C%201%7D;P%28Y%20%3E%200.5%29;P%28Y%20%3E%20X%29): `X ~ Normal(0, 1); Y = {X > 0: X^2, 1}; P(Y > 0.5); P(Y > X)` — a piecewise transform of X, with probabilities of derived and joint events
 
-## Share links with preview images (/g/)
+## Share links (/g/)
 
-The same payload also works as a path, and this form unfurls with a rendered
-preview image (og:image) in chat apps and social cards:
+The same payload also works as a path:
 
     https://equation.io/g/<equation>;<equation>;...
 
-Prefer the `/g/` form when the link will be posted somewhere that shows link
-previews; prefer the `#` form otherwise (it keeps the equations out of server
-logs). Both open the same app with the same graph. The preview image itself is
-served at `https://equation.io/api/og/<same payload>`.
+Prefer the `/g/` form when sharing a graph. It provides the graph's title and
+description with a static site image in chat apps and social cards. The `#`
+form keeps the equations out of the initial request's URL path. Both open the
+same app with the same graph. Graph-specific preview images are not generated.
 
 ## MCP server
 
@@ -88,19 +86,21 @@ An MCP endpoint (Streamable HTTP) lives at:
     https://equation.io/mcp
 
 Tools: `encode_graph_url` (validates each equation through the app's own parser,
-returns url/share_url plus per-row classification or errors, with text-only MCP responses. Share links still provide a PNG preview; rows the preview renderer cannot draw are
-listed in `preview_omits` with the reason — the live app renders more than
-the static preview, so an omission never means the row failed) and
+returns url/share_url plus per-row classification or errors, with text-only
+MCP responses) and
 `decode_graph_url` (decodes an existing link back into its equation rows so you can
 edit a user's graph and build a new link). This document is also served as
 the server's `syntax` MCP resource, so the full reference can be pulled on
 demand instead of living in a tool description. No authentication required.
 
+The `preview` and `preview_omits` result fields are retained for compatibility
+and describe the former static renderer; shared links now use a static site
+image.
+
 Use `show_graph` to display the interactive graph directly in an MCP Apps host
 such as ChatGPT web. It accepts the same `equations` array and returns per-row
-validation and share links plus an associated UI resource. It does not include
-`preview` / `preview_omits` — those describe the share-link card on
-`encode_graph_url`, not the widget.
+validation and share links plus an associated UI resource. Its result does not
+include `preview` or `preview_omits`.
 The widget supports editing, sliders, zoom, and 3D rotation; edits update the
 model's context with the complete current equations and share_url. Preserve
 those edited rows on follow-up requests. Use `encode_graph_url` for validation
@@ -512,7 +512,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   field can fade into the graph paper: `rgb(1, 0, 0, exp(-x^2-y^2))`.
   RGB, HSL and OKLCH rows share the same layer and draw in row order;
   curves and regions draw over them.
-  Static share-card previews use the site card; the live graph renders the field.
 - HSL color field: `hsl(hue, saturation, lightness)` uses hue in radians and
   saturation/lightness on a 0–1 scale (not CSS's percentages). Hue wraps
   around 2pi; saturation/lightness are clamped. `hsl(2pi/3, 1, 0.5)` is
@@ -1009,8 +1008,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   parsing (`1,5` is 1.5). Columns without comma-form numbers keep dot decimals
   (`1.234` is 1.234). The readout reports decimal-comma interpretation.
   Because the bytes never
-  enter the URL, opening the link on another device (or rendering it
-  server-side, as share-link previews do) reports the data as
+  enter the URL, opening the link on another device (or validating it
+  through MCP) reports the data as
   device-local instead of drawing it; dropping the same file there restores
   it. The row's readout opens a preview of the first rows as they parsed.
   `adults = person[person.age >= 18]` names a filtered copy of a file (see
@@ -1191,8 +1190,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   through the coordinate Jacobian; singular chart locations are undefined.
   In 2D, click to trace trajectories just as for Cartesian vector fields. A lone
   prime on a field is invalid; an otherwise unbound name still defines a state.
-  Static previews draw direction arrows for vector fields and points/curves
-  for coordinate and complex-root systems.
 
 - Surface intersections: `(x^2+y^2+z^2,z) = (9,1)` traces the circle where
   the sphere meets the plane. Bounded predictor–corrector continuation
@@ -1230,8 +1227,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   names the exact picture on screen. Without a viewport row, interaction
   stays ephemeral and the default framing applies.
 - Bounds and angles may use `pi` and defined constants, evaluated at load.
-- The /g/ preview card honors these
-  rows, so they show the framing you chose.
 - A trailing `locked` pins a window or camera (`view(x = -1..1, y = -1..1,
   locked)`, `camera(0.4, 0.3, 8, locked)`): dragging and zooming leave it
   where the row puts it.
@@ -1261,7 +1256,7 @@ panel under the pointer.
 - A 3D surface beside its contour map:
   `z = sin(x) cos(y); --- right; view(x = -4..4, y = -4..4); sin(x) cos(y)`
 - At most 8 panels. Options: order is free, commas optional
-  (`--- below 40%, shared x`). The /g/ preview draws the panels too.
+  (`--- below 40%, shared x`).
 
 ## Grid rows
 
@@ -1290,8 +1285,8 @@ panel under the pointer.
 - Prefer a slider constant (`a = 1; ...`) when the user may want to explore a
   parameter, and `t` when they ask for animation.
 - The graph state lives entirely in the link, and the link is the interface.
-  The only server endpoints are /mcp (an MCP server that validates equations
-  and emits links) and /api/og (link-preview images).
+  The /mcp endpoint validates equations and emits links or an interactive
+  widget. Share links use a static site image.
 - If you are unsure whether a form is supported, emit the link anyway.
   Unsupported input fails loudly and visibly (an inline error on the offending
   row), never silently — so a graph either renders correctly or tells the user
@@ -1341,9 +1336,9 @@ they declare a random variable. Bare distribution aliases are case-insensitive,
 including `exp`/`EXP`. For a declared data list, `Y ~ exp(a X)` is an
 exponential regression model in any capitalization; with an undeclared
 left-hand name, `Z ~ exp(2)` declares an exponential random variable.
-Missing CSV data stays device-local in MCP and
-previews, including curves that depend on its fitted coefficients. Fits over
-literal data and their model curves work in shared links and static previews.
+Missing CSV data stays device-local in MCP, including curves that depend on
+its fitted coefficients. Fits over literal data and their model curves work
+in shared links.
 
 ## Labels
 
@@ -1358,8 +1353,7 @@ color. Use it as a whole row. Examples:
 
 The point may be a tuple, a named point, or point arithmetic, in 2D or 3D, and
 may use constants, sliders, states, and `t`; it cannot use free x/y/z or u/v.
-The text is plain and fixed. The MCP classifies these rows as `label`; static
-previews draw the other rows but leave label text out (see preview_omits).
+The text is plain and fixed. The MCP classifies these rows as `label`.
 
 ## Motion trails
 
@@ -1382,5 +1376,4 @@ sampling at most 60 times a second. Undefined positions or pauses over half a
 second break the line instead of joining unobserved motion. Editing equations
 or restarting the simulation clears history; framing/comment edits preserve
 it. Trails start afresh on opening a graph and are not saved in shared URLs.
-The MCP classifies these rows as `trail`; static previews use the fallback
-card because a still image cannot reproduce accumulated live history.
+The MCP classifies these rows as `trail`.

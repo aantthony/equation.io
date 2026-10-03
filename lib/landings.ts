@@ -36,11 +36,9 @@ export interface Landing {
   /** Short label linked from that about-group heading. */
   nav: string;
   /**
-   * og:image. `preview` is /api/og/ of heroEqs (the CPU renderer must
-   * actually draw them). `shot` is the stable PNG at public/shots/<slug>.png
-   * for graphs that preview cannot draw (complex potentials, domain coloring).
+   * Static og:image: the site card or the PNG at public/shots/<slug>.png.
    */
-  og: 'preview' | 'shot';
+  og: 'site' | 'shot';
 }
 
 export const LANDINGS: readonly Landing[] = [
@@ -78,7 +76,7 @@ export const LANDINGS: readonly Landing[] = [
     related: ['moire', 'annulus', 'wave-band', 'piecewise'],
     group: 'Curves & regions',
     nav: 'Implicit grapher',
-    og: 'preview',
+    og: 'site',
   },
   {
     slug: 'slope-field',
@@ -114,7 +112,7 @@ export const LANDINGS: readonly Landing[] = [
     related: ['pendulum-phase', 'vector-swirl', 'double-pendulum'],
     group: 'Vector fields & ODEs',
     nav: 'Slope fields',
-    og: 'preview',
+    og: 'site',
   },
   {
     slug: 'complex',
