@@ -118,7 +118,17 @@ and larger matrices.
 
 ### 7. Fourier analysis
 
-- `fourier(f)` plots the spectrum of a function (or of a data column).
+**Implemented (spectrum and reconstruction).** `fourier(signal, samples)`
+draws a one-sided amplitude spectrum, and `reconstruct(signal, N, samples)`
+returns a periodic expression in x with the signed mean and first N
+harmonics. A continuous signal is read over the one interval in it, which is
+its variable and period (`s = interval(0, 1); fourier(f(s))`), so no name is
+bound implicitly; ordered samples (including CSV columns sorted by row
+position) span [0, 1) or a given interval. The examples show linked
+original/reconstructed signals and a spectrum. Deferred: epicycles and
+wavelets.
+
+- `fourier(f(s))` plots the spectrum of a function over an interval s (or of a data column).
 - Epicycles: a closed path in u drawn by its chain of rotating circles,
   with N terms on a slider.
 - Wavelets as a later extension (a scalogram is a scalar field).

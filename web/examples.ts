@@ -1070,6 +1070,29 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
     ],
   ],
+  [
+    'Fourier analysis',
+    [
+      [
+        'signal, spectrum and reconstruction',
+        'N = clamp(round(2), 0, 16); f(x) = 0.3 + cos(4pi x) + 0.5sin(10pi x + 0.6); s = interval(0, 1); ' +
+          '# amplitude spectrum of f over s (cycles per unit); view(x = -0.5..8, y = -0.1..1.2, ratio = 5); ' +
+          'S = fourier(f(s)); segment((S.x, 0), S); S; ' +
+          '--- right 65%; # original signal; view(x = -0.05..1.05, y = -1.6..2, ratio = 0.2); y = f(x); ' +
+          '--- below 50%, shared x; # reconstruction: increase N; view(y = -1.6..2, ratio = 0.2); y = reconstruct(f(s), N)',
+        'fourier series trig slider split-view',
+      ],
+      [
+        'square wave reconstruction',
+        'N = clamp(round(5), 0, 48); f(x) = sign(sin(2pi x)); s = interval(0, 1); ' +
+          '# amplitude spectrum: odd harmonics; view(x = -0.5..16, y = -0.1..1.5, ratio = 8); ' +
+          'S = fourier(f(s)); segment((S.x, 0), S); S; ' +
+          '--- right 65%; # original square wave; view(x = -0.05..1.05, y = -1.5..1.5, ratio = 0.2); y = f(x); ' +
+          '--- below 50%, shared x; # reconstruction: Gibbs overshoot at the jumps; view(y = -1.5..1.5, ratio = 0.2); y = reconstruct(f(s), N)',
+        'fourier series piecewise slider split-view',
+      ],
+    ],
+  ],
 ];
 
 /**

@@ -2481,6 +2481,39 @@ function rx(e: Expr, ctx: Ctx): Expr {
       }
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
+      if (e.name === 'fourier' || e.name === 'reconstruct') {
+        const params = ctx.opts.params;
+        const opts: ResolveOpts = params?.size
+          ? {
+              ...ctx.opts,
+              consts: new Proxy(ctx.opts.consts ?? {}, {
+                get: (target, name, receiver) =>
+                  typeof name === 'string' && params.has(name) ? undefined : Reflect.get(target, name, receiver),
+              }),
+              getList: n => (params.has(n) ? null : (ctx.opts.getList?.(n) ?? null)),
+              definition: n => (params.has(n) ? undefined : ctx.opts.definition?.(n)),
+            }
+          : ctx.opts;
+        let signal = args[0];
+        // A function is read over an interval its caller names, not over an
+        // x the document never wrote: f(interval(0, 1)).
+        if (signal?.kind === 'var' && !params?.has(signal.name) && getFn(signal.name))
+          throw new Error(
+            `${e.name} reads a signal over an interval, which sets its period: ${e.name}(${signal.name}(interval(0, 1))${e.name === 'reconstruct' ? ', N' : ''}).`,
+          );
+        // Coordinate fields can name a signal too. Scalar constants remain
+        // names so list lowering records every numeric dependency it reads.
+        if (signal) signal = throughFields(signal, opts, SPACE);
+        // Finish the numeric transform before a containing user function is
+        // inlined: g(x) = reconstruct(f, N); g(2x) scales the finished
+        // approximation, not the signal's sampling variable and interval.
+        return lowerLists(
+          { kind: 'call', name: e.name, args: signal ? [signal, ...args.slice(1)] : args },
+          opts.getList ?? (() => null),
+          opts,
+          true,
+        );
+      }
       // Keyed by the source node: a function body inlined twice holds the
       // same literal, and `f(interval(0, 1))` hands one to every use of x.
       if (e.name === 'interval') return hiddenInterval(e, args);

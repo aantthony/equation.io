@@ -1,4 +1,5 @@
 import { notACondition, structuralDiagnostic } from './expr.ts';
+import { diff } from './diff.ts';
 /**
  * Compile a symbolic Expr to a GLSL expression (float-valued).
  *
@@ -16,6 +17,8 @@ import {
   PMF_FNS,
   T_PDF_FN,
   WEIBULL_PDF_FN,
+  exprKey,
+  freeVars,
   ineqComparisons,
 } from './expr.ts';
 
@@ -291,30 +294,40 @@ export function piecewiseGLSL(
 }
 
 /**
- * Functions a compiled expression refers to beyond the prelude — a recursive
- * function's loop — by name. Names hash their own source, so equal loops
+ * Functions a compiled expression refers to beyond the prelude — recursive
+ * and Fourier loops — by name. Names hash their source and coefficient data, so equal loops
  * share a declaration and a shader's source alone identifies its program.
  * compileProgram (web/gl.ts) splices the declarations a shader refers to in
  * after the prelude with withHelpers(); nothing else needs to carry them.
  */
 const helpers = new Map<string, string>();
+const helperTables = new Map<string, Float32Array>();
 /** Each edit of a recursive function declares a fresh helper; keep the most
  * recently declared or spliced, well beyond the 64 programs a renderer
  * caches, so a live shader's helpers are still here when it recompiles. */
 const HELPER_LIMIT = 512;
 const HELPER_NAME = /\beq_loop_[0-9a-f]+\b/g;
-export function declareHelper(source: string): string {
+export function declareHelper(source: string, table?: Float32Array): string {
   // FNV-1a over the source with its own name blanked out.
   let hash = 0x811c9dc5;
   for (let k = 0; k < source.length; k++) hash = Math.imul(hash ^ source.charCodeAt(k), 0x01000193);
+  if (table) {
+    const bytes = new Uint8Array(table.buffer, table.byteOffset, table.byteLength);
+    for (const byte of bytes) hash = Math.imul(hash ^ byte, 0x01000193);
+  }
   const name = `eq_loop_${(hash >>> 0).toString(16)}`;
   helpers.delete(name); // re-insert at the recent end
   helpers.set(name, source.replaceAll(HELPER_SELF, name));
-  while (helpers.size > HELPER_LIMIT) helpers.delete(helpers.keys().next().value!);
+  if (table) helperTables.set(name, table);
+  while (helpers.size > HELPER_LIMIT) {
+    const oldest = helpers.keys().next().value!;
+    helpers.delete(oldest);
+    helperTables.delete(oldest);
+  }
   return name;
 }
 export const HELPER_SELF = '@self';
-export function withHelpers(shader: string): string {
+export function withHelpers(shader: string, tableBudget = Infinity): string {
   if (!shader.includes('eq_loop_')) return shader;
   const order: string[] = [];
   const seen = new Set<string>();
@@ -331,7 +344,33 @@ export function withHelpers(shader: string): string {
     }
   };
   visit(shader);
-  return shader.replace(GLSL_PRELUDE, `${GLSL_PRELUDE}\n${order.map(name => helpers.get(name)).join('\n')}\n`);
+  const slots = order.reduce((n, name) => n + (helperTables.get(name)?.length ?? 0) / 4, 0);
+  const declarations = order.map(name => {
+    const source = helpers.get(name)!;
+    const values = helperTables.get(name);
+    if (!values || slots <= tableBudget) return source;
+    // A row with many independent series can exceed a device's uniform
+    // budget. Keep the same loop, with a constant table on that device.
+    const rows = Array.from(
+      { length: values.length / 4 },
+      (_, k) => `vec4(${[...values.subarray(4 * k, 4 * k + 4)].map(fmt).join(', ')})`,
+    );
+    return source.replace(
+      `uniform vec4 ${name}_terms[${rows.length}];`,
+      `const vec4 ${name}_terms[${rows.length}] = vec4[${rows.length}](${rows.join(', ')});`,
+    );
+  });
+  return shader.replace(GLSL_PRELUDE, `${GLSL_PRELUDE}\n${declarations.join('\n')}\n`);
+}
+
+/** Immutable coefficient tables used by helpers in the fully linked source.
+ * The program uploads these once; slider uniforms are updated per draw.
+ */
+export function shaderTables(shader: string): Array<{ name: string; values: Float32Array }> {
+  return [...new Set(shader.match(HELPER_NAME))].flatMap(name => {
+    const values = helperTables.get(name);
+    return values ? [{ name: `${name}_terms`, values }] : [];
+  });
 }
 
 function fmt(value: number): string {
@@ -344,6 +383,128 @@ function fmt(value: number): string {
   }
   const s = String(value);
   return /[.e]/.test(s) ? s.replace('e', 'E') : `${s}.0`;
+}
+
+/** Recognize the ordinary gated sine/cosine sum emitted by reconstruction.
+ * Keep that AST for CPU evaluation, substitution and differentiation; only
+ * its shader spelling becomes a coefficient table and a runtime loop.
+ */
+function fourierLoop(e: Expr): { call: (reach: string) => string; position: Expr; count: Expr } | null {
+  if (e.kind !== 'bin' || e.op !== '+' || e.b.kind !== 'piecewise') return null;
+  const terms: Expr[] = [];
+  let base: Expr = e;
+  while (base.kind === 'bin' && base.op === '+') {
+    terms.push(base.b);
+    base = base.a;
+  }
+  if (base.kind === 'piecewise') {
+    terms.push(base);
+    base = { kind: 'num', value: 0 };
+  }
+  if (base.kind !== 'num' || terms.length < 4 || terms.length > 128) return null;
+  terms.reverse();
+  let count: Expr | undefined;
+  let position: Expr | undefined;
+  let countKey = '',
+    positionKey = '';
+  let last = 0;
+  const table: number[][] = [];
+  for (const term of terms) {
+    if (
+      term.kind !== 'piecewise' ||
+      term.cases.length !== 1 ||
+      term.otherwise?.kind !== 'num' ||
+      term.otherwise.value !== 0
+    )
+      return null;
+    const { cond, value } = term.cases[0];
+    if (
+      cond.kind !== 'ineq' ||
+      cond.op !== '>=' ||
+      cond.r.kind !== 'num' ||
+      !Number.isInteger(cond.r.value) ||
+      cond.r.value <= last ||
+      cond.r.value > 128
+    )
+      return null;
+    if (count && exprKey(cond.l) !== countKey) return null;
+    count = cond.l;
+    countKey = exprKey(count);
+    last = cond.r.value;
+    const components = value.kind === 'bin' && value.op === '+' ? [value.a, value.b] : [value];
+    let frequency: number | undefined;
+    let cosine = 0,
+      sine = 0;
+    for (let component of components) {
+      let coefficient = 1;
+      if (component.kind === 'bin' && component.op === '*' && component.a.kind === 'num') {
+        coefficient = component.a.value;
+        component = component.b;
+      }
+      if (component.kind !== 'call' || !['cos', 'sin'].includes(component.name) || component.args.length !== 1)
+        return null;
+      let angle = component.args[0];
+      let rate = 1;
+      if (angle.kind === 'bin' && angle.op === '*' && angle.a.kind === 'num') {
+        rate = angle.a.value;
+        angle = angle.b;
+      }
+      if ((frequency !== undefined && rate !== frequency) || (position && exprKey(angle) !== positionKey)) return null;
+      frequency = rate;
+      position = angle;
+      positionKey = exprKey(position);
+      if (component.name === 'cos') cosine += coefficient;
+      else sine += coefficient;
+    }
+    table.push([last, frequency!, cosine, sine]);
+  }
+  // (value, slope, lower, upper): the series and its derivative at the
+  // position, and the band it stays in within `reach` of it. Each harmonic
+  // moves at most its amplitude times its rate times the reach, and never
+  // past its amplitude, so a harmonic too fast to resolve at that scale
+  // spans its whole range while a slow one stays near its value.
+  const name = declareHelper(
+    `uniform vec4 ${HELPER_SELF}_terms[${table.length}];
+vec4 ${HELPER_SELF}(float position, float count, float reach) {
+  vec4 result = vec4(${fmt(base.value)}, 0.0, ${fmt(base.value)}, ${fmt(base.value)});
+  for (int j = 0; j < ${table.length} && count >= ${HELPER_SELF}_terms[j].x; ++j) {
+    vec4 term = ${HELPER_SELF}_terms[j];
+    float angle = term.y * position;
+    vec2 phase = vec2(cos(angle), sin(angle));
+    float value = dot(term.zw, phase);
+    float amplitude = length(term.zw);
+    float travel = amplitude * abs(term.y) * reach;
+    result += vec4(
+      value,
+      term.y * dot(term.zw, vec2(-phase.y, phase.x)),
+      max(value - travel, -amplitude),
+      min(value + travel, amplitude));
+  }
+  return result;
+}`,
+    Float32Array.from(table.flat()),
+  );
+  const call = (reach: string) => `${name}(${toGLSL(position!)}, ${toGLSL(count!)}, ${reach})`;
+  return { call, position: position!, count: count! };
+}
+
+/** Only a complete series at an affine position with a spatially constant
+ * count is smooth everywhere. More general compositions retain the renderer's
+ * two-scale finite differences and pole checks.
+ *
+ * `glsl` is a vec4 in x and `reach` (in x units): the value, the slope in
+ * the position, and the band the curve stays in within reach of x.
+ */
+export function fourierGraphGLSL(e: Expr): { glsl: string; slopeScale: number } | undefined {
+  const loop = fourierLoop(e);
+  if (!loop || freeVars(loop.count).has('x')) return;
+  try {
+    const derivative = diff(loop.position, 'x');
+    if (derivative.kind === 'num' && Number.isFinite(derivative.value))
+      return { glsl: loop.call(`${fmt(Math.abs(derivative.value))} * reach`), slopeScale: derivative.value };
+  } catch {
+    // A discontinuous or nonlinear position uses the general curve shader.
+  }
 }
 
 /**
@@ -385,6 +546,8 @@ export function toGLSL(e: Expr): string {
     case 'neg':
       return `(-${toGLSL(e.a)})`;
     case 'bin': {
+      const loop = fourierLoop(e);
+      if (loop) return `(${loop.call('0.0')}).x`;
       const a = toGLSL(e.a);
       const b = toGLSL(e.b);
       if (e.op === '^') {

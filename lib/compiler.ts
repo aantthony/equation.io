@@ -4,7 +4,7 @@ import { compileTyped, usesComplex, type Typed } from './complex.ts';
 import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
 import { type Column, type Expr, evaluate, exprKey, freeVars, mapChildren, substVars } from './expr.ts';
-import { toGLSL, uniformName } from './glsl.ts';
+import { fourierGraphGLSL, toGLSL, uniformName } from './glsl.ts';
 import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
@@ -97,7 +97,12 @@ export type CpuPlan =
 export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & (
   | { type: 'none' }
   | { type: 'family'; members: GpuPlan[] }
-  | { type: 'implicit2d'; field: string; levels?: GpuGrid }
+  | {
+      type: 'implicit2d';
+      field: string;
+      graphEval?: { glsl: string; slopeScale: number };
+      levels?: GpuGrid;
+    }
   | { type: 'implicit3d'; field: string; grad?: [string, string, string] }
   | { type: 'ineq2d'; field: string; edges: string[] }
   /** F(x, y, u) searched along u per pixel; `slope` is ∂F/∂u for an
@@ -488,6 +493,7 @@ export function compileGpu(classified: Classified): GpuPlan {
         type: 'implicit2d',
         params,
         field: scalar(object.form === 'graph' ? object.equation : (object.equation ?? object.residual)),
+        graphEval: object.form === 'graph' ? fourierGraphGLSL(sub(object.rhs)) : undefined,
         levels: object.levels ? compileGridGpu(object.levels) : undefined,
       };
     case 'surface':
@@ -627,6 +633,7 @@ export function shaderKey(plan: GpuPlan): string {
         plan.type,
         plan.params,
         plan.field,
+        plan.graphEval,
         plan.levels?.glsl,
         plan.levels?.gradGlsl,
         plan.levels?.params,

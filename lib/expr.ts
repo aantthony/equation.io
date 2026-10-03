@@ -241,6 +241,8 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'frame',
     // sort((s, sin(s)), s): the points to order, then their key.
     'sort',
+    'fourier',
+    'reconstruct',
   ]);
   return grouped.has(name) ? args : args.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
 }
@@ -357,6 +359,8 @@ export const FUNCTIONS = new Set([
   'torsion',
   'osculating',
   'frame',
+  'fourier',
+  'reconstruct',
   // Whole-expression plot modes (see classify): domain coloring, conformal
   // grids, escape-time iteration, swept tubes, motion trails, and surfaces
   // of revolution.
@@ -424,6 +428,8 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'osculating',
   'frame',
   'log2',
+  'fourier',
+  'reconstruct',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */

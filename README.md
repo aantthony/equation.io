@@ -282,6 +282,24 @@ Account Analytics: Read, for the script to include them.
   (2,000 for nonlinear models). Nonlinear fitting uses deterministic starts
   and reports a local fit; it does not guarantee a global optimum.
 
+**Fourier analysis**
+
+- `s = interval(0, 1); fourier(cos(4pi s) + 0.5sin(10pi s))` — a one-sided
+  amplitude spectrum. The interval is the signal's variable and its period,
+  so frequency is in cycles per unit of it; a function reads over one as
+  `fourier(f(s))`. 256 samples by default; `fourier(f(s), 512)` sets them.
+- `N = clamp(round(5), 0, 48); y = reconstruct(f(s), N)` — the signed mean
+  plus the first N harmonics, preserving phase. An optional sample count
+  follows N. The Fourier analysis examples show the original, spectrum and
+  reconstruction in linked views.
+- `S = sort(data.signal, data.row); fourier(S)` — equally spaced CSV samples
+  in file order, spanning [0, 1) or `fourier(S, interval(0, 10))`. Tuples
+  work too, `fourier((0, 1, 0, -1))`; bracket lists
+  have no order. Samples must be finite real numbers, with no gaps. Both
+  operations assume periodic continuation and static signals; coefficients
+  recompute when signal sliders change. Reconstruction supports up to 128
+  harmonics; sample counts range from 2 to 4096.
+
 **Contextual syntax help**
 
 The equation editor suggests functions, defined names, and loaded CSV columns
