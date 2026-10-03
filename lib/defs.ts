@@ -55,7 +55,7 @@ import {
   substVars,
 } from './expr.ts';
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
-import { hasInterval, hiddenInterval } from './interval.ts';
+import { hasInterval, hiddenInterval, intervalsIn, replaceIntervals } from './interval.ts';
 import { isReductionCall, reduceOverSet } from './measure.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
@@ -89,7 +89,8 @@ import { type RegressionRow, type FitResult, fitRegression } from './regression.
 
 /** The axis variables: a definition reaching one is a coordinate field. */
 const SPACE: ReadonlySet<string> = new Set(['x', 'y', 'z']);
-/** The parametric parameters, each ranging over (0, 1). */
+/** The parametric parameters, each ranging over (0, 1) unless a row
+ *  defines it as an interval (`u = interval(0, 2pi)`). */
 const PARAMS: ReadonlySet<string> = new Set(['u', 'v']);
 /** Position: an axis variable, or w, the complex point x + iy. */
 const onPosition = (v: string): boolean => SPACE.has(v) || v === 'w';
@@ -714,6 +715,8 @@ const FN_RE = new RegExp(
   String.raw`^\s*(${NAME_SRC})\s*\(\s*(${NAME_SRC}(?:\s*,\s*${NAME_SRC})*)\s*\)\s*=(?!=)([\s\S]+)$`,
 );
 const CONST_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`);
+/** The right side of `u = interval(0, 2pi)`: the one definition u and v take. */
+const INTERVAL_RHS_RE = /^\s*interval\s*\(/;
 /** `p ∈ A` (or `p \in A`): a binder, a draw from A. */
 const DRAW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*${DRAW_OP_SRC}\s*([\s\S]+)$`);
 const STATE_RE = new RegExp(String.raw`^\s*(${NAME_SRC})'\s*=(?!=)([\s\S]+)$`);
@@ -842,6 +845,8 @@ export function scanDefinition(text: string): Definition | null {
   }
   m = CONST_RE.exec(text);
   if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2] };
+  // `u = interval(0, 2pi)` sets the range u runs over, (0, 1) by default.
+  if (m && PARAMS.has(name(m)) && INTERVAL_RHS_RE.test(m[2])) return { kind: 'const', name: name(m), rhs: m[2] };
   m = DRAW_RE.exec(text);
   if (m && nameable(name(m))) return { kind: 'const', name: name(m), rhs: m[2], draw: true };
   return null;
@@ -1372,9 +1377,12 @@ const ALONG: ReadonlySet<string> = new Set(['u', ...SPACE]);
 /**
  * What a curve operator acts on, as its components in u: a tuple, a named
  * curve (c = (cos(2pi u), sin(2pi u)), written out through any scalar it
- * uses), or a function of one parameter, called at u.
+ * uses), or a function of one parameter, called at u. A curve over one
+ * interval instead (`u = interval(0, 2pi)` above, or `s = interval(…)`) is
+ * read over that interval's own values, written as u; `over` is the interval,
+ * to put back where the result is a function along the curve.
  */
-function curveOperand(name: string, arg: Expr, ctx: Ctx): readonly Expr[] {
+function curveOperand(name: string, arg: Expr, ctx: Ctx): { items: readonly Expr[]; over?: Expr } {
   const usage = `${name} takes a parametric curve in u, like ${CURVE_OP_EXAMPLE[name]} with C = (cos(2pi u), sin(2pi u)).`;
   let r: Expr = arg;
   if (arg.kind === 'var') {
@@ -1395,10 +1403,17 @@ function curveOperand(name: string, arg: Expr, ctx: Ctx): readonly Expr[] {
     }
   }
   if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
-  const vars = freeVars(r);
+  let vars = freeVars(r);
+  const hidden = intervalsIn(r);
+  let over: Expr | undefined;
+  if (!vars.has('u') && hidden.length === 1) {
+    over = hidden[0].node;
+    r = replaceIntervals(r, () => ({ kind: 'var', name: 'u' }));
+    vars = freeVars(r);
+  }
   if (!vars.has('u')) throw new Error(`${name} needs a curve, which moves with u — this is a fixed point. ${usage}`);
-  if (vars.has('v') || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
-  return r.items;
+  if (vars.has('v') || hasInterval(r) || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
+  return { items: (r as Expr & { kind: 'vec' }).items, over };
 }
 
 /** Whether e is a list: a literal, a data column or a named list, or one
@@ -1430,7 +1445,7 @@ function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
         : `${name} takes a curve, and optionally where on it: ${example}.`,
     );
   }
-  const r = curveOperand(name, args[0], ctx);
+  const { items: r, over } = curveOperand(name, args[0], ctx);
   const u0 = args[1];
   // κ(u) and τ(u) are functions of u, so k(u) = curvature(C, u) is κ; the
   // circle and frame are drawn over u of their own, which a u0 in u
@@ -1453,7 +1468,7 @@ function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   if (name === 'osculating') return osculatingOf(r, d, u0);
   if (name === 'frame') return frameOf(r, d, u0);
   const along = name === 'curvature' ? curvatureOf(r, d) : torsionOf(r, d);
-  return u0 ? substVars(along, { u: u0 }) : along;
+  return u0 ? substVars(along, { u: u0 }) : over ? substVars(along, { u: over }) : along;
 }
 
 interface StripDx {

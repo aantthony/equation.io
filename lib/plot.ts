@@ -587,7 +587,9 @@ function classifyLowered(
   const hidden = intervalsIn(expr);
   if (hidden.length) {
     if (special) throw new Error(`Cannot use an interval in ${special}(…).`);
-    if (vars.has('x') || vars.has('y') || vars.has('z')) {
+    // A parametric system, `(x, y) = (cos(s), sin(s))`, sweeps it as it does u.
+    const system = expr.kind === 'eq' && expr.l.kind === 'vec';
+    if (!system && (vars.has('x') || vars.has('y') || vars.has('z'))) {
       const object = projectedRegion(expr, hidden, vars);
       return { cls: { object, animated: vars.has('t'), needs3D: false, params } };
     }
@@ -945,7 +947,7 @@ function classifyLowered(
     throw new Error(
       hidden.length
         ? 'An interval traces a curve or region in a tuple, like (r cos(2 pi u), r sin(2 pi u)); a number alone draws its density.'
-        : 'u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v).',
+        : 'u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v); to set the range u runs over, define it as an interval: u = interval(0, 2pi).',
     );
 
   // A vector equation is a system, one residual per component: F(x,y,z) =

@@ -112,6 +112,7 @@ describe('llms.txt', () => {
       [[], 'y = x!', 'curve'],
       [[], 'sin(x)cos(y)', 'scalar-field'],
       [[], '(u, u^2)', 'curve'],
+      [['u = interval(0, 2pi)'], '(2cos(u), sin(2u))', 'curve'],
       [[], 'u^2', 'distribution'],
       [[], '[3, 1, 4, 4]', 'list'],
     ];

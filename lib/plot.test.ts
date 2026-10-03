@@ -99,7 +99,7 @@ describe('classify', () => {
     // Real in u: the classifier traces u only in a tuple (analysis reads a
     // bare real row in u as a random draw before it gets here).
     expect(() => cls('sin(u)')).toThrow(
-      'u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v).',
+      'u and v trace a curve or surface in a tuple, like (cos(u), sin(u)) or (u, v, u v); to set the range u runs over, define it as an interval: u = interval(0, 2pi).',
     );
     // Real for all its i: a number depending on u, which is no path — said so.
     for (const s of ['abs(exp(i u))', 're(exp(i 2 pi u))']) {
