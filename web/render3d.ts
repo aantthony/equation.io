@@ -303,12 +303,9 @@ void main() {
 
   vec3 p = ro + rd * tHit;
   float h = max(rayLen * 2e-3, uBoxR * 1e-4);
-  vec3 n = normalize(gradF(p, h));
-  if (any(isnan(n))) n = -rd;
-  // The checker is read half a cell along the gradient, before it turns to
-  // the viewer: a surface on a cell boundary (x = 0) would otherwise flip
-  // cells with the sign of the march's error, in rings around the camera.
-  vec3 pc = p + n * (uBoxR / 8.0);
+  vec3 g = normalize(gradF(p, h));
+  bool noGrad = any(isnan(g));
+  vec3 n = noGrad ? -rd : g;
   if (dot(n, rd) > 0.0) n = -n; // face the viewer
 
   vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
@@ -317,9 +314,17 @@ void main() {
   vec3 halfway = normalize(lightDir - rd);
   float spec = pow(max(dot(n, halfway), 0.0), 48.0);
 
-  // Subtle checker so the surface reads as a grid.
+  // Subtle checker so the surface reads as a grid: the product of each
+  // axis's alternating ±1 cells. Along an axis the surface is nearly normal
+  // to, it hardly moves, so that axis's cells change only with the march's
+  // error — on a cell boundary (x = 0) they flipped with its sign, in rings
+  // around the camera. Such an axis fades out of the product, by |n| alone,
+  // so the checker does not depend on how the equation is written.
   float cs = uBoxR / 4.0;
-  float checker = mod(floor(pc.x / cs) + floor(pc.y / cs) + floor(pc.z / cs), 2.0);
+  vec3 cell = 1.0 - 2.0 * mod(floor(p / cs), 2.0);
+  vec3 keep = 1.0 - smoothstep(0.95, 1.0, noGrad ? vec3(0.0) : abs(g));
+  vec3 f = 1.0 + keep * (cell - 1.0);
+  float checker = 0.5 - 0.5 * f.x * f.y * f.z;
   vec3 base = uColor * (0.92 + 0.08 * checker);
 
   vec3 col = base * (0.30 + 0.25 * sky + 0.50 * diffuse) + vec3(0.35) * spec;
