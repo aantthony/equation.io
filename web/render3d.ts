@@ -231,6 +231,7 @@ void main() {
   float vPrev = F(ro + rd * t0);
   bool hit = false;
   float tHit = 0.0;
+  float tErr = 0.0;
   // Domain edges. A no-default piecewise like {0 < x < 2: sqrt(x)} is NaN
   // outside its conditions, and a step that straddles that edge cannot be
   // tested for a crossing — so the surface within a step of the edge would be
@@ -281,6 +282,7 @@ void main() {
       bool jump = !(abs(vb - va) < ${JUMP_RATIO} * abs(v - vPrev));
       if (!jump || jumps >= ${JUMP_BUDGET}) {
         tHit = 0.5 * (a + b);
+        tErr = 0.5 * (b - a);
         hit = true;
         break;
       }
@@ -303,9 +305,8 @@ void main() {
 
   vec3 p = ro + rd * tHit;
   float h = max(rayLen * 2e-3, uBoxR * 1e-4);
-  vec3 g = normalize(gradF(p, h));
-  bool noGrad = any(isnan(g));
-  vec3 n = noGrad ? -rd : g;
+  vec3 n = normalize(gradF(p, h));
+  if (any(isnan(n))) n = -rd;
   if (dot(n, rd) > 0.0) n = -n; // face the viewer
 
   vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
@@ -315,16 +316,22 @@ void main() {
   float spec = pow(max(dot(n, halfway), 0.0), 48.0);
 
   // Subtle checker so the surface reads as a grid: the product of each
-  // axis's alternating ±1 cells. Along an axis the surface is nearly normal
-  // to, it hardly moves, so that axis's cells change only with the march's
-  // error — on a cell boundary (x = 0) they flipped with its sign, in rings
-  // around the camera. Such an axis fades out of the product, by |n| alone,
-  // so the checker does not depend on how the equation is written.
+  // axis's alternating ±1 cells, each box-filtered over what the pixel
+  // covers along that axis — its footprint on the surface, and the march's
+  // error along the ray. Unfiltered, a surface on a cell boundary flipped
+  // cells with the sign of that error, in rings around the camera, and far
+  // or grazing surfaces aliased into moiré; filtered, a boundary reads as an
+  // even mean and fine cells fade out. Cells are centred on the origin, so
+  // the coordinate planes, the usual planes, sit mid-cell.
   float cs = uBoxR / 4.0;
-  vec3 cell = 1.0 - 2.0 * mod(floor(p / cs), 2.0);
-  vec3 keep = 1.0 - smoothstep(0.95, 1.0, noGrad ? vec3(0.0) : abs(g));
-  vec3 f = 1.0 + keep * (cell - 1.0);
-  float checker = 0.5 - 0.5 * f.x * f.y * f.z;
+  vec2 ndc1 = ndc + vec2(2.0 / uRes.x, 0.0);
+  float pixAngle = length(normalize(unproject(vec3(ndc1, 1.0)) - unproject(vec3(ndc1, -1.0))) - rd);
+  float footprint = tHit * pixAngle / max(abs(dot(n, rd)), 0.05);
+  vec3 w = max((footprint * sqrt(max(1.0 - n * n, 0.0)) + 16.0 * tErr * abs(rd)) / cs, 1e-4);
+  vec3 q = p / cs + 0.5;
+  // The integral of the ±1 cells is a triangle wave; its difference across w is the box filter.
+  vec3 cell = 2.0 * (abs(fract((q - 0.5 * w) * 0.5) - 0.5) - abs(fract((q + 0.5 * w) * 0.5) - 0.5)) / w;
+  float checker = 0.5 - 0.5 * cell.x * cell.y * cell.z;
   vec3 base = uColor * (0.92 + 0.08 * checker);
 
   vec3 col = base * (0.30 + 0.25 * sky + 0.50 * diffuse) + vec3(0.35) * spec;
