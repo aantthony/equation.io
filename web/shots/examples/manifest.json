@@ -215,7 +215,7 @@
   "spherical-cylindrical/cylindrical-chart": "r = sqrt(x^2 + y^2); theta = atan2(y, x); r = 1.5 + sin(2 z)/2; (r, theta, z) = (2.5, 6 pi u, 6 u - 3)",
   "spherical-cylindrical/cylindrical-flow": "r = sqrt(x^2 + y^2); theta = atan2(y, x); (r', theta', z') = (0, 1, 0.5)",
   "systems/curve-intersection": "x^2 + y^2 = 4; x y = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0); count({x^2 + y^2 = 4, x y = 1})",
-  "systems/three-planes": "(x + y, x - y, z) = (1, 2, 3)",
+  "systems/three-planes": "within = (x - 1.5)^2 + (y + 0.5)^2 + (z - 3)^2 < 4; x + y = {within: 1}; x - y = {within: 2}; z = {within: 3}; (x + y, x - y, z) = (1, 2, 3)",
   "systems/sphere-meets-plane": "(x^2 + y^2 + z^2, z) = (9, 1)",
   "systems/jacobian-counterexample": "camera(0.6, 0.35, 14, (0, 0, 3)); c = -0.25; F = ((1 + x y)³ z + y² (1 + x y)(4 + 3x y), y + 3x (1 + x y)² z + 3x y² (4 + 3x y), 2x − 3x² y − x³ z); JF(x,y,z) = (∇F_x, ∇F_y, ∇F_z); det(JF(1, −1.5, 6.5)); (F_x, F_y, F_z) = (c, 0, 0)",
   "3d-surfaces/waves": "z = sin(x)cos(y)",

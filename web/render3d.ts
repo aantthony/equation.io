@@ -51,13 +51,16 @@ export function cameraEye(cam: Camera3D): [number, number, number] {
   ];
 }
 
+/** The camera's vertical field of view. */
+const FOV = Math.PI / 4;
+
 export function cameraMatrices(
   cam: Camera3D,
   aspect: number,
 ): { vp: Mat4; invVp: Mat4; eye: [number, number, number] } {
   const eye = cameraEye(cam);
   const view = lookAt(eye, cam.target, [0, 0, 1]);
-  const proj = perspective(Math.PI / 4, aspect, cam.radius * 0.01, cam.radius * 100);
+  const proj = perspective(FOV, aspect, cam.radius * 0.01, cam.radius * 100);
   const vp = multiply(proj, view);
   return { vp, invVp: invert(vp), eye };
 }
@@ -664,12 +667,37 @@ in float vProgress;
 void main() { outColor = vec4(uColor, uAlpha * mix(1.0, 0.15 + 0.85 * vProgress, uFade)); }
 `;
 
+/** A point's dot in framebuffer pixels. */
+const POINT_PX = 14;
+/** How far toward the eye a point's dot is depth-tested, in dot radii. */
+const POINT_LIFT = 4;
+
+/**
+ * A point's dot is depth-tested POINT_LIFT of its radii nearer the eye than
+ * the point — moved along its own sight line, so it lands on the same pixel.
+ * A surface the point lies on (a plane, or three meeting at a system's
+ * solution) used to cut the flat dot in half or hide it. Seen at an angle α
+ * to the view, a plane through the point comes r / tan α nearer the eye
+ * across the dot, so a lift of L radii clears every plane steeper than
+ * atan(1 / L) (14° for 4); a shallower one draws as a thin band and covers
+ * little. A surface more than the lift in front of the point still hides it.
+ * In perspective a radius in world units is a fixed fraction of the distance
+ * to the eye, POINT_PX tan(fov/2) / viewport height, so the lift is one
+ * uniform: that fraction of the way to the eye, at most half of it.
+ *
+ * The lift is a screen-space stand-in for deciding visibility at the dot's
+ * centre alone: a surface in front of the point but within the lift (a
+ * sphere under ~4 dot radii on screen around it) does not hide it, and a
+ * thin object that close in front is drawn behind the dot.
+ */
 const POINT_VERT = `#version 300 es
 layout(location=0) in vec3 aPos;
 uniform mat4 uVP;
+uniform vec3 uEye;
+uniform float uLift;
 void main() {
-  gl_Position = uVP * vec4(aPos, 1.0);
-  gl_PointSize = 14.0;
+  gl_Position = uVP * vec4(mix(aPos, uEye, uLift), 1.0);
+  gl_PointSize = ${POINT_PX.toFixed(1)};
 }
 `;
 
@@ -1348,6 +1376,9 @@ export class Renderer3D {
       // point list with one colour, so a 10 000-point cloud is one upload and
       // one draw, not 10 000. The dots are opaque, so order does not matter.
       setCommon(this.pointProgram);
+      gl.uniform3f(gl.getUniformLocation(this.pointProgram, 'uEye'), ...eye);
+      const lift = (POINT_LIFT * POINT_PX * Math.tan(FOV / 2)) / h;
+      gl.uniform1f(gl.getUniformLocation(this.pointProgram, 'uLift'), Number.isFinite(lift) ? Math.min(lift, 0.5) : 0);
       const uColor = gl.getUniformLocation(this.pointProgram, 'uColor');
       const pos = new Float32Array(scene.points.length * 3);
       let start = 0;
