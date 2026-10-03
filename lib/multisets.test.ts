@@ -911,6 +911,13 @@ describe('§5 continuous intervals', () => {
         ]),
       ).toThrow(/undefined in part/);
       expect(() => faces(['s = interval(-1, 1)', '(sqrt(s), u, v)'])).toThrow(/undefined in part/);
+      // A translation undefined at 0 (read as 0 in classification) hides no gap or fold.
+      for (const shift of ['1/k', 'log(k)'])
+        expect(() => faces(['k = 2', 's = interval(-1, 1)', `(sqrt(s), u, v) + (${shift}, 0, 0)`])).toThrow(
+          /undefined in part/,
+        );
+      // Overflow is a value, not a gap.
+      expect(faces(['s = interval(0, 1)', '(exp(800 s), u, v)'])).toHaveLength(6);
       // A default, or a condition that always holds, leaves it whole.
       expect(faces(['s = interval(0, 1)', '({s < 0.5: s, s + 1}, u, v)'])).toHaveLength(6);
       expect(faces(['s = interval(0, 1)', '({s <= 1: s}, u, v)'])).toHaveLength(6);

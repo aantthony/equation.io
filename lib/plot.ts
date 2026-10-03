@@ -431,9 +431,11 @@ interface SolidMap {
 const solidMaps = new WeakMap<MathObject, SolidMap>();
 
 /**
- * The fold check, split by what the Jacobian reads besides the params. Only
- * those names can fold the map: a translation (`… + k`) cannot, and is read
- * as 0. A Jacobian of numbers alone is checked in classification (`consts`
+ * The fold and gap check, split by what the Jacobian reads besides the
+ * params. Only those names can fold the map or move its gaps: a translation
+ * (`… + k`) can do neither, and is read as 0. One undefined there (`log(k)`)
+ * is ∞, which leaves the gaps NaN, so they still show; one NaN there
+ * (`sqrt(k - 1)`) leaves the whole map NaN, and unchecked. A Jacobian of numbers alone is checked in classification (`consts`
  * null). One reading sliders needs their values, which only analysis has: it
  * passes the resolver's recording proxy, so the sliders read here leave the
  * runtime-uniform set and a drag re-runs the check. A name with no value
@@ -469,12 +471,13 @@ export function checkSolid(object: MathObject, consts: Readonly<Record<string, n
 
 const SOLID_FOLDS = 'This solid folds over itself inside its parameter box, so its faces do not bound it.';
 const SOLID_PARTIAL =
-  'This solid is undefined in part of its parameter box, so its faces do not bound it — narrow its intervals instead.';
+  'This solid is undefined in part of its parameter box, so its faces do not bound it — give its {…} a default, or split it into solids over the parts where it is defined.';
 
 /**
  * Why the faces of `items` over `names` (each in [0, 1]) do not bound it, or
- * null: the map is undefined at some samples but not others, or its Jacobian
- * changes sign inside the box, sampled on a grid that reaches to just inside the faces, by
+ * null: the map is undefined (NaN; ∞ is a value too large to draw, not a
+ * gap) at some samples but not others, or its Jacobian changes sign inside
+ * the box, sampled on a grid that reaches to just inside the faces, by
  * central differences. The sign is read from det J / (|J₁| |J₂| |J₃|), the
  * volume of the unit-scaled columns, so it does not depend on the map's size
  * and differencing noise on a flat solid (det J zero throughout, whose faces
@@ -519,8 +522,11 @@ function solidDefect(
     for (let j = 0; j < n; j++)
       for (let k = 0; k < n; k++) {
         [i, j, k].forEach((s, m) => (p[m] = inset + ((1 - 2 * inset) * s) / (n - 1)));
-        if (progs.every(prog => Number.isFinite(run(prog, p, stack)))) defined = true;
-        else gap = true;
+        if (progs.some(prog => Number.isNaN(run(prog, p, stack)))) {
+          gap = true;
+          continue;
+        }
+        defined = true;
         const [a, b, c] = [col(0), col(1), col(2)];
         const det =
           a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0]);

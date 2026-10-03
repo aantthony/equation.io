@@ -824,7 +824,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   inside the box (`s = interval(-1, 1)`; `(s^2, u, v)`) is an error: write
   it over a range where it does not, like `interval(0, 1)`. So is one
   undefined in part of the box (a `{…}` with no default, `sqrt(s)` over
-  negative s): narrow its intervals instead of cutting it with a condition.
+  negative s): give the `{…}` a default, or split it into solids over the
+  parts where it is defined.
 - 3D surface: any equation in x, y, z.
 - Surface of revolution: `revolve(f)` turns the curve y = f(x) about the
   x-axis — `revolve(sqrt(x))`, `revolve(sin(x) + 2)`, or `revolve(f)` with
