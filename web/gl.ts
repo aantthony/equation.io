@@ -1,5 +1,5 @@
 /** Minimal WebGL2 helpers: program compilation with cache, fullscreen quad. */
-import { withHelpers } from '../lib/glsl.ts';
+import { shaderTables, withHelpers } from '../lib/glsl.ts';
 
 /**
  * Shader-compile counter, read by the perf harness (scripts/perf.ts) to
@@ -36,7 +36,11 @@ export function compileProgram(gl: WebGL2RenderingContext, vert: string, frag: s
     return sh;
   };
   const vs = compile(gl.VERTEX_SHADER, vert);
-  const fs = compile(gl.FRAGMENT_SHADER, withHelpers(frag));
+  const tableBudget = frag.includes('eq_loop_')
+    ? gl.getParameter(gl.MAX_FRAGMENT_UNIFORM_VECTORS) - (frag.match(/\buniform\b/g)?.length ?? 0)
+    : Infinity;
+  const fragment = withHelpers(frag, tableBudget);
+  const fs = compile(gl.FRAGMENT_SHADER, fragment);
   const prog = gl.createProgram()!;
   gl.attachShader(prog, vs);
   gl.attachShader(prog, fs);
@@ -47,6 +51,16 @@ export function compileProgram(gl: WebGL2RenderingContext, vert: string, frag: s
     const log = gl.getProgramInfoLog(prog);
     gl.deleteProgram(prog);
     throw new Error(`Program link error: ${log}`);
+  }
+  const tables = shaderTables(fragment);
+  if (tables.length) {
+    let previous = gl.getParameter(gl.CURRENT_PROGRAM) as WebGLProgram | null;
+    // Binding the new program releases an old one pending deletion; such a
+    // program cannot be rebound after the upload.
+    if (previous && gl.getProgramParameter(previous, gl.DELETE_STATUS)) previous = null;
+    gl.useProgram(prog);
+    for (const table of tables) gl.uniform4fv(gl.getUniformLocation(prog, `${table.name}[0]`), table.values);
+    gl.useProgram(previous);
   }
   return prog;
 }

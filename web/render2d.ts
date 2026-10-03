@@ -22,6 +22,8 @@ export interface View2D {
 export interface Curve2D {
   /** GLSL expression for F(x,y) in terms of floats x, y. */
   field: string;
+  /** A finite Fourier graph's value and analytic slope, evaluated together. */
+  graphEval?: { glsl: string; slopeScale: number };
   color: [number, number, number];
   /** User-defined constants the field references (as u_<name> uniforms). */
   params?: string[];
@@ -287,7 +289,7 @@ void main() {
 `;
 }
 
-function curveFrag(field: string, params?: string[]): string {
+function curveFrag(field: string, params?: string[], graphEval?: Curve2D['graphEval']): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -300,8 +302,20 @@ ${paramDecls(params)}
 out vec4 outColor;
 ${GLSL_PRELUDE}
 float F(float x, float y) { return ${field}; }
+${graphEval ? `vec2 G(float x) { return ${graphEval.glsl}; }` : ''}
 void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
+${
+  graphEval
+    ? `
+  vec2 signal = G(p.x);
+  float v = p.y - signal.x;
+  if (isnan(v) || isinf(v)) discard;
+  vec2 gradient = vec2(-signal.y * ${graphEval.slopeScale.toExponential()}, 1.0) * uUpp;
+  float distPx = abs(v) / max(length(gradient), 1e-24);
+  if (isnan(distPx) || isinf(distPx)) discard;
+`
+    : `
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
 
@@ -327,6 +341,8 @@ void main() {
     if (e2 > 1.6 * e1 || e1 > 1.6 * e2) discard;
     distPx = max(e1, e2);
   }
+`
+}
 
   float alpha = 1.0 - smoothstep(1.1, 2.1, distPx);
   if (alpha <= 0.0) discard;
@@ -1098,7 +1114,7 @@ export class Renderer2D {
     for (const b of layers.bifs ?? []) drawField(b, bifFrag);
     for (const s of layers.scalars ?? []) drawField(s, scalarFrag);
     for (const c of layers.complexes ?? []) drawField(c, complexFrag);
-    for (const c of layers.curves ?? []) drawField(c, curveFrag);
+    for (const c of layers.curves ?? []) drawField(c, (field, params) => curveFrag(field, params, c.graphEval));
   }
 
   /** Drop cell textures no render drew since the last call: once per frame,

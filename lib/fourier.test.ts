@@ -7,6 +7,7 @@ import { runtimeSliderNames } from './runtime-sliders.ts';
 import { shaderKey } from './compiler.ts';
 import { diff } from './diff.ts';
 import { compileProg, run } from './vm.ts';
+import { GLSL_PRELUDE, shaderTables, toGLSL, withHelpers } from './glsl.ts';
 
 describe('real Fourier coefficients', () => {
   it.each([8, 15, 31, 256])('recovers mean, amplitudes and phase with %i samples', n => {
@@ -149,6 +150,65 @@ describe('Fourier through document analysis and both backends', () => {
     expect(
       runtimeSliderNames(analyzeRows(['N = clamp(round(1), 0, 8)', 'y = reconstruct(N cos(2pi x), N)'])).has('N'),
     ).toBe(false);
+  });
+  it('emits one compact value/slope loop with coefficients outside its source', () => {
+    const a = analyzeRows(['N = clamp(round(5), 0, 48)', 'y = reconstruct(sign(sin(2pi x)), N)']);
+    const gpu = a.rows[1].gpu!;
+    if (gpu.type !== 'implicit2d') throw new Error(gpu.type);
+    expect(gpu.graphEval?.slopeScale).toBe(1);
+    const source = withHelpers(`${GLSL_PRELUDE}\n${gpu.field}`);
+    expect(source).toContain('for (int j = 0;');
+    expect(source).toContain('uniform vec4');
+    expect(source.length - GLSL_PRELUDE.length).toBeLessThan(1000);
+    const tables = shaderTables(source);
+    expect(tables).toHaveLength(1);
+    expect(tables[0].values.length).toBe(48 * 4);
+    const coefficients = realFourier(
+      Float64Array.from({ length: 256 }, (_, j) => Math.sign(Math.sin((2 * Math.PI * j) / 256))),
+    );
+    for (let k = 1; k <= 48; k++) {
+      expect([...tables[0].values.subarray(4 * (k - 1), 4 * k)]).toEqual([
+        k,
+        Math.fround(2 * Math.PI * k),
+        Math.fround(coefficients.cosine[k]),
+        Math.fround(coefficients.sine[k]),
+      ]);
+    }
+    const fallback = withHelpers(`${GLSL_PRELUDE}\n${gpu.field}`, 0);
+    expect(fallback).toContain('const vec4');
+    expect(fallback).not.toContain('uniform vec4');
+  });
+  it('includes coefficient values in helper identity and deduplicates table references', () => {
+    const count = { kind: 'var', name: 'N' } as const;
+    const coefficients = { cosine: Float64Array.of(3, 1, 2, 3, 4), sine: new Float64Array(5) };
+    const first = toGLSL(reconstructSeries(coefficients, 4, 0, 1, count));
+    const changed = toGLSL(
+      reconstructSeries({ ...coefficients, cosine: Float64Array.of(3, 2, 2, 3, 4) }, 4, 0, 1, count),
+    );
+    expect(changed).not.toBe(first);
+    expect(toGLSL(reconstructSeries(coefficients, 4, 0, 1, count))).toBe(first);
+    expect(shaderTables(withHelpers(`${GLSL_PRELUDE}\n${first} + ${first}`))).toHaveLength(1);
+  });
+  it('uses analytic graph slopes only for complete affine Fourier graphs', () => {
+    const rows = ['N = clamp(round(5), 0, 48)', 'f(s) = sign(sin(2pi s))', 'g(x) = reconstruct(f, N)'];
+    for (const [call, scale] of [
+      ['g(2x + 0.3)', 2],
+      ['g(-x)', -1],
+    ] as const) {
+      const row = analyzeRows([...rows, `y = ${call}`]).rows.at(-1)!;
+      expect(row.error).toBeUndefined();
+      const gpu = row.gpu!;
+      if (gpu.type !== 'implicit2d') throw new Error(gpu.type);
+      expect(gpu.graphEval?.slopeScale).toBe(scale);
+    }
+    for (const call of ['g(1/x)', 'g(floor(x))', '1/g(x)']) {
+      const row = analyzeRows([...rows, `y = ${call}`]).rows.at(-1)!;
+      expect(row.error).toBeUndefined();
+      const gpu = row.gpu!;
+      if (gpu.type !== 'implicit2d') throw new Error(gpu.type);
+      expect(gpu.field).toContain('eq_loop_');
+      expect(gpu.graphEval).toBeUndefined();
+    }
   });
   it('keeps unsafe slider ranges structural so invalid values remain errors', () => {
     for (const declaration of [

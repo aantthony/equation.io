@@ -119,6 +119,97 @@ try {
   await load(['iter({re(z)<0:re(z),im(z)})']);
   assert.deepEqual(errors, []);
   console.log('PASS piecewise iteration shader');
+  const fourier = await page.evaluate(async root => {
+    const { analyzeRows } = await import(`/@fs/${root}lib/analysis.ts`);
+    const { evaluate } = await import(`/@fs/${root}lib/expr.ts`);
+    const { diff } = await import(`/@fs/${root}lib/diff.ts`);
+    const { GLSL_PRELUDE, uniformName } = await import(`/@fs/${root}lib/glsl.ts`);
+    const { compileProgram, fullscreenQuad, QUAD_VERT } = await import('/gl.ts');
+    const gl = document.createElement('canvas').getContext('webgl2')!;
+    if (!gl.getExtension('EXT_color_buffer_float')) throw new Error('Float framebuffer unavailable');
+    const texture = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, null);
+    const target = gl.createFramebuffer()!;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE)
+      throw new Error('Incomplete framebuffer');
+    gl.viewport(0, 0, 1, 1);
+    const quad = fullscreenQuad(gl);
+    const pixel = new Float32Array(4);
+    const cases = [
+      { rows: ['y = reconstruct(sign(sin(2pi x)), N)'], max: 48 },
+      { rows: ['y = reconstruct((2, -3, 1, 5, -4, 0, 3, -1, 2), N, -3, 4)'], max: 4 },
+      { rows: ['y = reconstruct((2,-3,1,5,-4,0,3,-1,2,4,1,0,-2,5,3,1), N)'], max: 8 },
+      { rows: ['y = reconstruct(1+cos(8pi x)+2sin(12pi x+0.7)+0.4cos(26pi x)+sin(42pi x), N)'], max: 32 },
+      { rows: ['y = reconstruct(sign(sin(2pi x)), N)'], max: 128 },
+      { rows: ['f(s) = sign(sin(2pi s))', 'g(x) = reconstruct(f, N)', 'y = g(2x + 0.3)'], max: 48 },
+      { rows: ['y = reconstruct(sign(sin(2pi x)), N)'], max: 48, staticTable: true },
+    ];
+    let checked = 0,
+      maxError = 0,
+      maxSlopeError = 0;
+    for (const test of cases) {
+      const analyzed = analyzeRows([`N = clamp(round(1), 0, ${test.max})`, ...test.rows]);
+      const row = analyzed.rows.at(-1)!;
+      if (row.error) throw new Error(row.error);
+      if (!row.gpu.field.includes('eq_loop_')) throw new Error('Fourier loop was not emitted');
+      if (!row.gpu.graphEval) throw new Error('Fourier analytic graph evaluator was not emitted');
+      const derivative = diff(row.cls.object.rhs, 'x');
+      const getParameter = gl.getParameter.bind(gl);
+      // Exercise the fallback for a device with too few uniform slots.
+      if (test.staticTable)
+        gl.getParameter = parameter => (parameter === gl.MAX_FRAGMENT_UNIFORM_VECTORS ? 0 : getParameter(parameter));
+      const program = compileProgram(
+        gl,
+        QUAD_VERT,
+        `#version 300 es
+precision highp float;
+uniform float u_N;
+uniform float testX;
+out vec4 outColor;
+${GLSL_PRELUDE}
+void main() { float x = testX; vec2 signal = ${row.gpu.graphEval.glsl}; outColor = vec4(-signal.x, signal.y * ${row.gpu.graphEval.slopeScale.toExponential()}, 0.0, 1.0); }`,
+      );
+      gl.getParameter = getParameter;
+      gl.useProgram(program);
+      const nLocation = gl.getUniformLocation(program, uniformName('N'));
+      const xLocation = gl.getUniformLocation(program, 'testX');
+      const counts =
+        test.max === 128 ? [0, 1, 2, 5, 48, 96, 127, 128] : Array.from({ length: test.max + 1 }, (_, n) => n);
+      for (const N of counts) {
+        gl.uniform1f(nLocation, N);
+        for (const x of [-3, -0.1, 0, 0.000001, 0.125, 0.499, 0.5, 0.501, 0.9, 1, 2.37]) {
+          gl.uniform1f(xLocation, x);
+          quad.draw();
+          gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.FLOAT, pixel);
+          const expected = -evaluate(row.cls.object.rhs, { x, N });
+          const error = Math.abs(pixel[0] - expected);
+          maxError = Math.max(maxError, error);
+          if (!(error < 0.0003 * (1 + Math.abs(expected))))
+            throw new Error(`Fourier GPU mismatch: N=${N}, x=${x}, got=${pixel[0]}, expected=${expected}`);
+          const expectedSlope = evaluate(derivative, { x, N });
+          const slopeError = Math.abs(pixel[1] - expectedSlope);
+          maxSlopeError = Math.max(maxSlopeError, slopeError);
+          // Differentiation weights high bins by frequency, amplifying the
+          // GPU's float32 angle/trig roundoff near cancellation points.
+          if (!(slopeError < 0.02 + 0.0003 * Math.abs(expectedSlope)))
+            throw new Error(`Fourier GPU slope mismatch: N=${N}, x=${x}, got=${pixel[1]}, expected=${expectedSlope}`);
+          checked++;
+        }
+      }
+      gl.deleteProgram(program);
+    }
+    const error = gl.getError();
+    if (error !== gl.NO_ERROR) throw new Error(`Fourier GPU generated WebGL error ${error}`);
+    return { checked, maxError, maxSlopeError };
+  }, root);
+  assert.ok(fourier.checked > 1000);
+  assert.deepEqual(errors, []);
+  console.log(
+    `PASS Fourier loop GPU/CPU parity (${fourier.checked} values/slopes, max errors ${fourier.maxError.toPrecision(3)}/${fourier.maxSlopeError.toPrecision(3)})`,
+  );
 } finally {
   await browser?.close();
   server.kill();

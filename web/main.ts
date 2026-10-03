@@ -2057,7 +2057,7 @@ function render() {
         const { params, uniforms } = shaderBindings(eq.gpu);
         switch (plot.type) {
           case 'implicit2d':
-            layers.curves.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
+            layers.curves.push({ ...gpuFor(eq, 'implicit2d'), color, params, uniforms });
             if (eq.showLevels && plot.levels) {
               const f = plot.levels;
               const shader = gpuFor(eq, 'implicit2d').levels!;
