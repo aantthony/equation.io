@@ -140,6 +140,19 @@ const CHUNK_PIXEL =
 /** A sample's offset within its pixel, for antialiasing at rest. */
 const JITTER_DECL = 'uniform vec2 uJitter;';
 
+/** The one light every lit surface shares — implicit and parametric
+ *  surfaces, tubes and cones — so the same shape shades the same however it
+ *  is written: a fixed directional light, a sky term brighter facing up, and
+ *  a Blinn–Phong highlight. `n` faces the viewer, `rd` runs from the eye. */
+const SHADE = `
+vec3 shade(vec3 base, vec3 n, vec3 rd) {
+  vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
+  float diffuse = max(dot(n, lightDir), 0.0);
+  float sky = 0.5 + 0.5 * n.z;
+  float spec = pow(max(dot(n, normalize(lightDir - rd)), 0.0), 48.0);
+  return base * (0.30 + 0.25 * sky + 0.50 * diffuse) + vec3(0.35) * spec;
+}`;
+
 /** Writes a chunk pass into its cell of the full-resolution surface target. */
 const SCATTER_FRAG = `#version 300 es
 precision highp float;
@@ -197,6 +210,7 @@ ${paramDecls(params)}
 out vec4 outColor;
 ${GLSL_PRELUDE}
 ${MARCH_COMMON}
+${SHADE}
 
 float F(vec3 p) {
   float x = p.x, y = p.y, z = p.z;
@@ -309,12 +323,6 @@ void main() {
   if (any(isnan(n))) n = -rd;
   if (dot(n, rd) > 0.0) n = -n; // face the viewer
 
-  vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
-  float diffuse = max(dot(n, lightDir), 0.0);
-  float sky = 0.5 + 0.5 * n.z;
-  vec3 halfway = normalize(lightDir - rd);
-  float spec = pow(max(dot(n, halfway), 0.0), 48.0);
-
   // Subtle checker so the surface reads as a grid: the product of each
   // axis's alternating ±1 cells, each box-filtered over what the pixel
   // covers along that axis — its footprint on the surface, and the march's
@@ -343,7 +351,7 @@ void main() {
   float checker = 0.5 - 0.5 * cell.x * cell.y * cell.z;
   vec3 base = uColor * (0.92 + 0.08 * checker);
 
-  vec3 col = base * (0.30 + 0.25 * sky + 0.50 * diffuse) + vec3(0.35) * spec;
+  vec3 col = shade(base, n, rd);
   // Distance fade toward the box edge keeps clipped surfaces from popping.
   float edge = smoothstep(uBoxR, uBoxR * 0.96, max(max(abs(p.x), abs(p.y)), abs(p.z)));
   outColor = vec4(col, 0.6 + 0.4 * edge);
@@ -504,6 +512,7 @@ in vec2 vUV;
 in vec3 vPos;
 out vec4 outColor;
 ${GLSL_PRELUDE}
+${SHADE}
 ${tangents}
 
 void main() {
@@ -512,18 +521,11 @@ void main() {
   if (any(isnan(n))) n = -rd;
   if (dot(n, rd) > 0.0) n = -n;
 
-  vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
-  float diffuse = max(dot(n, lightDir), 0.0);
-  float sky = 0.5 + 0.5 * n.z;
-  vec3 halfway = normalize(lightDir - rd);
-  float spec = pow(max(dot(n, halfway), 0.0), 96.0);
-
   // Faint parameter checker so the (u,v) mapping reads.
   float checker = mod(floor(vUV.x * 8.0) + floor(vUV.y * 8.0), 2.0);
   vec3 base = uColor * (0.92 + 0.08 * checker);
 
-  vec3 col = base * (0.22 + 0.22 * sky + 0.42 * diffuse) + vec3(1.0) * spec * 0.85;
-  outColor = vec4(col, 1.0);
+  outColor = vec4(shade(base, n, rd), 1.0);
 }
 `;
 }
@@ -556,17 +558,12 @@ in vec3 vPos;
 in vec3 vNormal;
 in vec2 vUV;
 out vec4 outColor;
+${SHADE}
 void main() {
   vec3 n = normalize(vNormal);
   vec3 rd = normalize(vPos - uEye);
   if (any(isnan(n))) n = -rd;
   if (dot(n, rd) > 0.0) n = -n;
-
-  vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
-  float diffuse = max(dot(n, lightDir), 0.0);
-  float sky = 0.5 + 0.5 * n.z;
-  vec3 halfway = normalize(lightDir - rd);
-  float spec = pow(max(dot(n, halfway), 0.0), 96.0);
 
   // Material checker: cells are square-ish in world units and follow the
   // rotation-minimizing frame, so the pattern reads as painted on the tube.
@@ -578,8 +575,7 @@ void main() {
   // Slightly stronger than the psurface checker: tube cells are far smaller.
   vec3 base = uColor * (0.88 + 0.12 * checker);
 
-  vec3 col = base * (0.26 + 0.22 * sky + 0.46 * diffuse) + vec3(1.0) * spec * 0.7;
-  outColor = vec4(col, 1.0);
+  outColor = vec4(shade(base, n, rd), 1.0);
 }
 `;
 
@@ -628,6 +624,7 @@ in vec3 vZ;
 in vec2 vScale;
 in float vCap;
 out vec4 outColor;
+${SHADE}
 void main() {
   vec3 localN;
   if (vCap > 0.5) {
@@ -640,13 +637,7 @@ void main() {
   vec3 rd = normalize(vPos - uEye);
   if (any(isnan(n))) n = -rd;
   if (dot(n, rd) > 0.0) n = -n;
-  vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
-  float diffuse = max(dot(n, lightDir), 0.0);
-  float sky = 0.5 + 0.5 * n.z;
-  vec3 halfway = normalize(lightDir - rd);
-  float spec = pow(max(dot(n, halfway), 0.0), 96.0);
-  vec3 col = uColor * (0.26 + 0.22 * sky + 0.46 * diffuse) + vec3(1.0) * spec * 0.7;
-  outColor = vec4(col, 1.0);
+  outColor = vec4(shade(uColor, n, rd), 1.0);
 }
 `;
 
