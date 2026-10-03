@@ -284,15 +284,17 @@ Account Analytics: Read, for the script to include them.
 
 **Fourier analysis**
 
-- `f(s) = cos(4pi s) + 0.5sin(10pi s); fourier(f)` — a one-sided amplitude
-  spectrum with frequency in cycles per x unit. The default period is
-  [0, 1), sampled at 256 points; `fourier(f, lo, hi, samples)` sets both.
-- `N = clamp(round(5), 0, 48); y = reconstruct(f, N)` — the signed mean plus
-  the first N harmonics, preserving phase. Optional bounds/sample count
-  follow N. The Fourier analysis examples show the original, spectrum and
+- `s = interval(0, 1); fourier(cos(4pi s) + 0.5sin(10pi s))` — a one-sided
+  amplitude spectrum. The interval is the signal's variable and its period,
+  so frequency is in cycles per unit of it; a function reads over one as
+  `fourier(f(s))`. 256 samples by default; `fourier(f(s), 512)` sets them.
+- `N = clamp(round(5), 0, 48); y = reconstruct(f(s), N)` — the signed mean
+  plus the first N harmonics, preserving phase. An optional sample count
+  follows N. The Fourier analysis examples show the original, spectrum and
   reconstruction in linked views.
 - `S = sort(data.signal, data.row); fourier(S)` — equally spaced CSV samples
-  in file order. Tuples work too, `fourier((0, 1, 0, -1))`; bracket lists
+  in file order, spanning [0, 1) or `fourier(S, interval(0, 10))`. Tuples
+  work too, `fourier((0, 1, 0, -1))`; bracket lists
   have no order. Samples must be finite real numbers, with no gaps. Both
   operations assume periodic continuation and static signals; coefficients
   recompute when signal sliders change. Reconstruction supports up to 128

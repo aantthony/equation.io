@@ -68,36 +68,37 @@ function approximation(rows: string[]) {
 }
 
 describe('Fourier through document analysis and both backends', () => {
-  it('accepts a named function with any parameter name and reports cycles per x unit', () => {
-    const s = spectrum(['f(s) = -3 + 2cos(pi s) + 4sin(2pi s)', 'fourier(f, -1, 1, 16)']);
+  it('reads a signal over its interval, and reports cycles per unit of it', () => {
+    const s = spectrum(['f(s) = -3 + 2cos(pi s) + 4sin(2pi s)', 'fourier(f(interval(-1, 1)), 16)']);
     expect(s[0]).toEqual([0, 3]);
     expect(s[1][0]).toBe(0.5);
     expect(s[1][1]).toBeCloseTo(2, 10);
     expect(s[2][1]).toBeCloseTo(4, 10);
   });
-  it('accepts inline signals, named fields and explicitly ordered samples', () => {
+  it('accepts inline and named intervals, values built on them, and explicitly ordered samples', () => {
     for (const rows of [
-      ['fourier(sin(2pi x))'],
-      ['signal = sin(2pi x)', 'fourier(signal)'],
+      ['fourier(sin(2pi interval(0, 1)))'],
+      ['s = interval(0, 1)', 'fourier(sin(2pi s))'],
+      ['s = interval(0, 1)', 'signal = sin(2pi s)', 'fourier(signal)'],
       ['fourier((0, 1, 0, -1))'],
       ['S = (0, 1, 0, -1)', 'fourier(S)'],
     ])
       expect(spectrum(rows)[1]).toEqual([1, 1]);
   });
   it('keeps the signed mean and phase in a reconstruction', () => {
-    const at = approximation(['f(s) = -3 + 2cos(pi s) + 4sin(2pi s)', 'y = reconstruct(f, 2, -1, 1, 16)']);
+    const at = approximation(['f(s) = -3 + 2cos(pi s) + 4sin(2pi s)', 'y = reconstruct(f(interval(-1, 1)), 2, 16)']);
     for (const x of [-1, -0.7, 0, 0.3, 1, 3])
       expect(at(x, -3 + 2 * Math.cos(Math.PI * x) + 4 * Math.sin(2 * Math.PI * x))).toBeCloseTo(0, 10);
-    const dc = approximation(['y = reconstruct(-3 + sin(2pi x), 0)']);
+    const dc = approximation(['y = reconstruct(-3 + sin(2pi interval(0, 1)), 0)']);
     expect(dc(0.2, -3)).toBeCloseTo(0, 10);
   });
   it('scales the finished approximation when a user function is called at another argument', () => {
-    const at = approximation(['f(s) = cos(2pi s)', 'g(x) = reconstruct(f, 1)', 'y = g(2x)']);
+    const at = approximation(['f(s) = cos(2pi s)', 'g(x) = reconstruct(f(interval(0, 1)), 1)', 'y = g(2x)']);
     expect(at(0.125, 0)).toBeCloseTo(0, 10);
     expect(at(0.25, -1)).toBeCloseTo(0, 10);
   });
   it('selects harmonics with a slider and tracks all coefficient/bound dependencies', () => {
-    const rows = ['a = 2', 'b = 1', 'N = 1', 'y = reconstruct(a cos(2pi x) + sin(4pi x), N, 0, b)'];
+    const rows = ['a = 2', 'b = 1', 'N = 1', 's = interval(0, b)', 'y = reconstruct(a cos(2pi s) + sin(4pi s), N)'];
     const a = analyzeRows(rows);
     expect([...a.document.sumBoundConsts]).toContain('N');
     const runtime = runtimeSliderNames(a);
@@ -108,7 +109,7 @@ describe('Fourier through document analysis and both backends', () => {
     expect(second(0.125, Math.SQRT2 + 1)).toBeCloseTo(0, 10);
   });
   it('keeps a bounded harmonic count live with identical shaders across the whole range', () => {
-    const rows = ['N = clamp(round(5), 0, 48)', 'f(s) = sign(sin(2pi s))', 'y = reconstruct(f, N)'];
+    const rows = ['N = clamp(round(5), 0, 48)', 'f(s) = sign(sin(2pi s))', 'y = reconstruct(f(interval(0, 1)), N)'];
     const a = analyzeRows(rows);
     const row = a.rows.at(-1)!;
     expect(row.error).toBeUndefined();
@@ -142,17 +143,25 @@ describe('Fourier through document analysis and both backends', () => {
     }
   });
   it('still recompiles coefficient and interval inputs when the count is live', () => {
-    const a = analyzeRows(['a = 2', 'b = 1', 'N = clamp(round(1), 0, 8)', 'y = reconstruct(a cos(2pi x), N, 0, b)']);
+    const a = analyzeRows([
+      'a = 2',
+      'b = 1',
+      'N = clamp(round(1), 0, 8)',
+      's = interval(0, b)',
+      'y = reconstruct(a cos(2pi s), N)',
+    ]);
     const live = runtimeSliderNames(a);
     expect(live.has('N')).toBe(true);
     expect(live.has('a')).toBe(false);
     expect(live.has('b')).toBe(false);
     expect(
-      runtimeSliderNames(analyzeRows(['N = clamp(round(1), 0, 8)', 'y = reconstruct(N cos(2pi x), N)'])).has('N'),
+      runtimeSliderNames(
+        analyzeRows(['N = clamp(round(1), 0, 8)', 'y = reconstruct(N cos(2pi interval(0, 1)), N)']),
+      ).has('N'),
     ).toBe(false);
   });
   it('emits one compact value/slope loop with coefficients outside its source', () => {
-    const a = analyzeRows(['N = clamp(round(5), 0, 48)', 'y = reconstruct(sign(sin(2pi x)), N)']);
+    const a = analyzeRows(['N = clamp(round(5), 0, 48)', 'y = reconstruct(sign(sin(2pi interval(0, 1))), N)']);
     const gpu = a.rows[1].gpu!;
     if (gpu.type !== 'implicit2d') throw new Error(gpu.type);
     expect(gpu.graphEval?.slopeScale).toBe(1);
@@ -190,7 +199,7 @@ describe('Fourier through document analysis and both backends', () => {
     expect(shaderTables(withHelpers(`${GLSL_PRELUDE}\n${first} + ${first}`))).toHaveLength(1);
   });
   it('uses analytic graph slopes only for complete affine Fourier graphs', () => {
-    const rows = ['N = clamp(round(5), 0, 48)', 'f(s) = sign(sin(2pi s))', 'g(x) = reconstruct(f, N)'];
+    const rows = ['N = clamp(round(5), 0, 48)', 'f(s) = sign(sin(2pi s))', 'g(x) = reconstruct(f(interval(0, 1)), N)'];
     for (const [call, scale] of [
       ['g(2x + 0.3)', 2],
       ['g(-x)', -1],
@@ -218,24 +227,28 @@ describe('Fourier through document analysis and both backends', () => {
       'N = clamp(round(0), 0, 0)',
     ]) {
       expect(
-        runtimeSliderNames(analyzeRows([declaration, 'y = reconstruct(cos(2pi x), N)'])).has('N'),
+        runtimeSliderNames(analyzeRows([declaration, 'y = reconstruct(cos(2pi interval(0, 1)), N)'])).has('N'),
         declaration,
       ).toBe(false);
     }
     const rows = ['N = clamp(round(1), 0, 48)', 'y = reconstruct((0, 1, 0, -1), N)'];
     expect(runtimeSliderNames(analyzeRows(rows)).has('N')).toBe(false);
     expect(analyzeRows(['N = clamp(round(3), 0, 48)', rows[1]]).rows.at(-1)?.error).toMatch(/only 2 harmonics/);
-    expect(analyzeRows(['N = clamp(1.5, 0, 48)', 'y = reconstruct(cos(2pi x), N)']).rows.at(-1)?.error).toMatch(
-      /whole number/,
-    );
+    expect(
+      analyzeRows(['N = clamp(1.5, 0, 48)', 'y = reconstruct(cos(2pi interval(0, 1)), N)']).rows.at(-1)?.error,
+    ).toMatch(/whole number/);
   });
   it('recognizes rounding outside the clamp and treats range endpoints as structural', () => {
-    const a = analyzeRows(['limit = 8', 'N = round(clamp(1, 0, limit))', 'y = reconstruct(cos(2pi x), N)']);
+    const a = analyzeRows([
+      'limit = 8',
+      'N = round(clamp(1, 0, limit))',
+      'y = reconstruct(cos(2pi interval(0, 1)), N)',
+    ]);
     expect(runtimeSliderNames(a).has('N')).toBe(true);
     expect(runtimeSliderNames(a).has('limit')).toBe(false);
   });
   it('works with named spectra and stem geometry', () => {
-    const a = analyzeRows(['S = fourier(sin(2pi x), 0, 1, 8)', 'segment((S.x, 0), S)']);
+    const a = analyzeRows(['S = fourier(sin(2pi interval(0, 1)), 8)', 'segment((S.x, 0), S)']);
     expect(a.rows.map(r => r.error)).toEqual([undefined, undefined]);
     expect(a.rows[1].cls?.object.kind).toBe('family');
   });
@@ -254,28 +267,41 @@ describe('Fourier through document analysis and both backends', () => {
     expect(reconstruction.rows.at(-1)?.error).toBeUndefined();
   });
   it('refuses a function parameter as a static coefficient even if a global shares its name', () => {
-    const a = analyzeRows(['a = 2', 'g(a) = reconstruct(a cos(2pi x), 1)', 'y = g(3)']);
+    const a = analyzeRows(['a = 2', 'g(a) = reconstruct(a cos(2pi interval(0, 1)), 1)', 'y = g(3)']);
     expect(a.rows[1].error).toMatch(/no static value/);
   });
   it.each([
     ['fourier([0, 1, 0, -1])', /order/],
-    ['fourier(sin(x), 1, 0)', /interval/],
-    ['fourier(sin(x), 0, 1, 1)', /sample count/],
-    ['fourier(sin(x), 0, 1, 2.5)', /whole number/],
-    ['fourier(sin(x), 0, 1, 4097)', /sample count/],
-    ['fourier(sin(x + t))', /static/],
-    ['fourier(x + y)', /static/],
-    ['fourier(x i)', /real signal/],
-    ['fourier(1/x)', /finite real samples/],
-    ['fourier((0, 1, 0, -1), 0, 1, 4)', /already has a sample count/],
-    ['y = reconstruct(sin(x), -1)', /harmonics/],
-    ['y = reconstruct(sin(x), 1.5)', /harmonics/],
-    ['y = reconstruct(sin(x), 129)', /harmonics/],
+    ['fourier(sin(interval(1, 0)))', /needs a < b/],
+    ['fourier(sin(interval(0, 1)), 1)', /sample count/],
+    ['fourier(sin(interval(0, 1)), 2.5)', /whole number/],
+    ['fourier(sin(interval(0, 1)), 4097)', /sample count/],
+    ['fourier(sin(interval(0, 1) + t))', /static/],
+    ['fourier(interval(0, 1) + y)', /not y/],
+    ['fourier(interval(0, 1) i)', /real signal/],
+    ['fourier(1/interval(0, 1))', /finite real samples/],
+    ['fourier((0, 1, 0, -1), 4)', /its own count/],
+    ['fourier(sin(2pi x))', /read over an interval, which sets its period/],
+    ['fourier(interval(0, 1) + interval(0, 1))', /one interval; this one has 2/],
+    ['fourier(sin(interval(0, 1)), interval(0, 2))', /own interval sets its period/],
+    ['y = reconstruct(sin(interval(0, 1)), -1)', /harmonics/],
+    ['y = reconstruct(sin(interval(0, 1)), 1.5)', /harmonics/],
+    ['y = reconstruct(sin(interval(0, 1)), 129)', /harmonics/],
     ['y = reconstruct((0, 1, 0, -1), 3)', /only 2 harmonics/],
     ['fourier()', /Incomplete expression/],
     ['reconstruct(sin(x))', /Use reconstruct/],
   ])('reports an actionable error for %s', (text, pattern) => {
     expect(analyzeRows([text]).rows[0].error).toMatch(pattern);
+  });
+  it('names the interval a function is read over, rather than binding x behind it', () => {
+    expect(analyzeRows(['f(s) = cos(4pi s)', 'fourier(f)']).rows[1].error).toBe(
+      'fourier reads a signal over an interval, which sets its period: fourier(f(interval(0, 1))).',
+    );
+  });
+  it('spreads a tuple of samples over the interval given after it', () => {
+    const xs = [2, -3, 1, 5, -4, 0, 3, -1, 2];
+    const at = approximation([`y = reconstruct((${xs.join(', ')}), 4, interval(-3, 4))`]);
+    xs.forEach((v, j) => expect(at(-3 + (7 * j) / xs.length, v)).toBeCloseTo(0, 9));
   });
   it('preserves documents that define their own function or value with the new names', () => {
     const a = analyzeRows(['fourier(x) = x^2', 'reconstruct = 3', 'y = fourier(x) + reconstruct(x + 1)']);

@@ -2404,13 +2404,12 @@ function rx(e: Expr, ctx: Ctx): Expr {
             }
           : ctx.opts;
         let signal = args[0];
-        if (signal?.kind === 'var' && !params?.has(signal.name)) {
-          const f = getFn(signal.name);
-          if (f) {
-            if (f.params.length !== 1) throw new Error(`${e.name} needs a function of one variable.`);
-            signal = substVars(f.body, { [f.params[0]]: { kind: 'var', name: 'x' } });
-          }
-        }
+        // A function is read over an interval its caller names, not over an
+        // x the document never wrote: f(interval(0, 1)).
+        if (signal?.kind === 'var' && !params?.has(signal.name) && getFn(signal.name))
+          throw new Error(
+            `${e.name} reads a signal over an interval, which sets its period: ${e.name}(${signal.name}(interval(0, 1))${e.name === 'reconstruct' ? ', N' : ''}).`,
+          );
         // Coordinate fields can name a signal too. Scalar constants remain
         // names so list lowering records every numeric dependency it reads.
         if (signal) signal = throughFields(signal, opts, SPACE);

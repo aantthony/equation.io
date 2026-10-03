@@ -953,7 +953,7 @@ await scenario('Fourier example links views and updates reconstruction from its 
       await new Promise(requestAnimationFrame);
       const { equations, panels } = (window as any).__eq;
       return {
-        field: equations.find((e: any) => e.text.trim() === 'y = reconstruct(f, N)')?.gpu?.field ?? '',
+        field: equations.find((e: any) => e.text.trim() === 'y = reconstruct(f(s), N)')?.gpu?.field ?? '',
         count: document.querySelector<HTMLInputElement>('.eq-slider-range')?.value,
         compiles: (window as any).__glStats.compiles,
         linked:
@@ -996,7 +996,7 @@ await scenario('square wave harmonic dragging retains its render plan across the
   const sweep = await page.evaluate(async () => {
     await new Promise(requestAnimationFrame);
     await new Promise(requestAnimationFrame);
-    const curve = () => (window as any).__eq.equations.find((e: any) => e.text.trim() === 'y = reconstruct(f, N)');
+    const curve = () => (window as any).__eq.equations.find((e: any) => e.text.trim() === 'y = reconstruct(f(s), N)');
     const plan = curve()?.gpu;
     const compiles = (window as any).__glStats.compiles;
     const slider = document.querySelector<HTMLInputElement>('.eq-slider-range')!;

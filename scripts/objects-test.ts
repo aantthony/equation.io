@@ -139,13 +139,16 @@ try {
     const quad = fullscreenQuad(gl);
     const pixel = new Float32Array(4);
     const cases = [
-      { rows: ['y = reconstruct(sign(sin(2pi x)), N)'], max: 48 },
-      { rows: ['y = reconstruct((2, -3, 1, 5, -4, 0, 3, -1, 2), N, -3, 4)'], max: 4 },
+      { rows: ['y = reconstruct(sign(sin(2pi interval(0, 1))), N)'], max: 48 },
+      { rows: ['y = reconstruct((2, -3, 1, 5, -4, 0, 3, -1, 2), N, interval(-3, 4))'], max: 4 },
       { rows: ['y = reconstruct((2,-3,1,5,-4,0,3,-1,2,4,1,0,-2,5,3,1), N)'], max: 8 },
-      { rows: ['y = reconstruct(1+cos(8pi x)+2sin(12pi x+0.7)+0.4cos(26pi x)+sin(42pi x), N)'], max: 32 },
-      { rows: ['y = reconstruct(sign(sin(2pi x)), N)'], max: 128 },
-      { rows: ['f(s) = sign(sin(2pi s))', 'g(x) = reconstruct(f, N)', 'y = g(2x + 0.3)'], max: 48 },
-      { rows: ['y = reconstruct(sign(sin(2pi x)), N)'], max: 48, staticTable: true },
+      {
+        rows: ['s = interval(0, 1)', 'y = reconstruct(1+cos(8pi s)+2sin(12pi s+0.7)+0.4cos(26pi s)+sin(42pi s), N)'],
+        max: 32,
+      },
+      { rows: ['y = reconstruct(sign(sin(2pi interval(0, 1))), N)'], max: 128 },
+      { rows: ['f(s) = sign(sin(2pi s))', 'g(x) = reconstruct(f(interval(0, 1)), N)', 'y = g(2x + 0.3)'], max: 48 },
+      { rows: ['y = reconstruct(sign(sin(2pi interval(0, 1))), N)'], max: 48, staticTable: true },
     ];
     let checked = 0,
       maxError = 0,

@@ -1,4 +1,5 @@
 import { childrenOf, mapChildren, structuralDiagnostic } from './expr.ts';
+import { type HiddenInterval, intervalsIn, replaceIntervals } from './interval.ts';
 /**
  * List lowering — lists as values, by symbolic expansion.
  *
@@ -852,22 +853,25 @@ function harmonicClamp(count: Expr, ctx: Ctx): { definition: Expr; lo: number; h
     : null;
 }
 
-/** Fourier consumes a signal whole, rather than mapping over its samples.
- * Lists are multisets: only an explicit tuple has a sampling order. CSV
- * columns become one with sort(data.signal, data.row), keeping file order.
+/**
+ * Fourier consumes a signal whole, rather than mapping over its samples. A
+ * continuous signal is read over the one interval in it, which is both its
+ * variable and its period — `s = interval(0, 2pi); fourier(sin(3s))` — so no
+ * name is bound that the document did not write. Samples are a tuple (a list
+ * is a multiset: only a tuple has an order, and CSV columns become one with
+ * sort(data.signal, data.row)), spread over [0, 1) or the interval after them.
  */
 function lowerFourier(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   const reconstruction = e.name === 'reconstruct';
   const offset = reconstruction ? 2 : 1;
-  const usage = reconstruction
-    ? 'reconstruct(signal, N) or reconstruct(signal, N, lo, hi, samples)'
-    : 'fourier(signal) or fourier(signal, lo, hi, samples)';
-  if (![offset, offset + 2, offset + 3].includes(e.args.length)) throw new Error(`Use ${usage}.`);
-  const lo = e.args[offset] ? constVal(lower(e.args[offset], ctx), ctx, 'The Fourier interval start') : 0;
-  const hi = e.args[offset + 1] ? constVal(lower(e.args[offset + 1], ctx), ctx, 'The Fourier interval end') : 1;
-  const period = hi - lo;
-  if (!(period > 0) || !Number.isFinite(period) || !Number.isFinite((2 * Math.PI) / period)) {
-    throw new Error('The Fourier interval must have finite bounds with lo < hi and a finite frequency scale.');
+  const example = reconstruction
+    ? 's = interval(0, 1); y = reconstruct(sign(sin(2pi s)), N)'
+    : 's = interval(0, 1); fourier(sin(2pi s))';
+  if (e.args.length !== offset && e.args.length !== offset + 1) {
+    const n = reconstruction ? ', N' : '';
+    throw new Error(
+      `Use ${e.name}(signal${n}) or ${e.name}(signal${n}, samples), the signal over an interval: ${example}.`,
+    );
   }
   const count = reconstruction ? e.args[1] : undefined;
   const clamp = count ? harmonicClamp(count, ctx) : null;
@@ -881,18 +885,27 @@ function lowerFourier(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
   if (!Number.isInteger(requested) || requested < 0 || requested > FOURIER_MAX_HARMONICS) {
     throw new Error(`reconstruct needs a whole number of harmonics from 0 to ${FOURIER_MAX_HARMONICS}.`);
   }
-  // Validate options before reading a possibly device-local column.
-  const sampleArg = e.args[offset + 2];
-  const sampleCount = sampleArg
-    ? constVal(lower(sampleArg, ctx), ctx, 'The Fourier sample count', true)
-    : FOURIER_SAMPLES;
-  if (!Number.isInteger(sampleCount) || sampleCount < 2 || sampleCount > FOURIER_MAX_SAMPLES) {
-    throw new Error(`The Fourier sample count must be a whole number from 2 to ${FOURIER_MAX_SAMPLES}.`);
-  }
+  // The last argument: a continuous signal's sample count, or the interval a
+  // tuple of samples spans. Read before a possibly device-local column.
+  const option = e.args[offset] && lower(e.args[offset], ctx);
+  const spanOf = (h: HiddenInterval): [number, number] => {
+    const lo = constVal(lower(h.lo, ctx), ctx, 'The interval start');
+    const hi = constVal(lower(h.hi, ctx), ctx, 'The interval end');
+    return [lo, hi - lo];
+  };
+  const span = option && intervalsIn(option);
+  if (span?.length && (span.length !== 1 || span[0].node !== option))
+    throw new Error('The last argument is a sample count, or the interval a tuple of samples spans.');
   const signal = settle(lower(e.args[0], ctx), ctx);
   let xs: Float64Array;
+  let lo: number;
+  let period: number;
   if (isSeq(signal) || signal.kind === 'vec') {
-    if (sampleArg) throw new Error('A sampled signal already has a sample count; omit the samples argument.');
+    if (option && !span?.length)
+      throw new Error(
+        'A tuple of samples has its own count; give the interval it spans instead: fourier(S, interval(0, 10)).',
+      );
+    [lo, period] = span?.length ? spanOf(span[0]) : [0, 1];
     if (isSeq(signal) && (!isTuple(signal) || axesOf(signal).length !== 1)) {
       throw new Error('Fourier samples need an order: use a tuple, or sort(data.signal, data.row) for CSV row order.');
     }
@@ -902,17 +915,42 @@ function lowerFourier(e: Expr & { kind: 'call' }, ctx: Ctx): Expr {
       throw new Error(`Fourier analysis needs 2 to ${FOURIER_MAX_SAMPLES} samples.`);
     xs = signal.kind === 'data' ? signal.values : Float64Array.from(numericItems(signal.items, ctx, e.name));
   } else {
+    if (span?.length)
+      throw new Error("The signal's own interval sets its period; the last argument is its sample count.");
+    const sampleCount = option ? constVal(option, ctx, 'The Fourier sample count', true) : FOURIER_SAMPLES;
+    if (!Number.isInteger(sampleCount) || sampleCount < 2 || sampleCount > FOURIER_MAX_SAMPLES) {
+      throw new Error(`The Fourier sample count must be a whole number from 2 to ${FOURIER_MAX_SAMPLES}.`);
+    }
     if (inferScalarType(signal) !== 'real') throw new Error('Fourier analysis needs a real signal, not a complex one.');
+    const over = intervalsIn(signal);
+    if (over.length !== 1) {
+      throw new Error(
+        over.length
+          ? `A Fourier signal is read over one interval; this one has ${over.length}.`
+          : `A Fourier signal is read over an interval, which sets its period: ${example}.`,
+      );
+    }
+    [lo, period] = spanOf(over[0]);
+    const at = '@fourier';
+    const body = replaceIntervals(signal, () => ({ kind: 'var', name: at }));
     const env: Record<string, number> = {};
-    for (const name of freeVars(signal)) {
-      if (name === 'x') continue;
+    for (const name of freeVars(body)) {
+      if (name === at) continue;
       const value = ctx.opts.consts?.[name];
-      if (value === undefined)
-        throw new Error(`Fourier signals must be static functions of x; "${name}" has no static value.`);
+      if (value === undefined) {
+        throw new Error(
+          ['x', 'y', 'z', 'u', 'v', 'w'].includes(name)
+            ? `A Fourier signal is read over its interval, not ${name}: ${example}.`
+            : `Fourier signals must be static; "${name}" has no static value.`,
+        );
+      }
       env[name] = value;
     }
     xs = new Float64Array(sampleCount);
-    for (let j = 0; j < sampleCount; j++) xs[j] = evaluate(signal, { ...env, x: lo + period * (j / sampleCount) });
+    for (let j = 0; j < sampleCount; j++) xs[j] = evaluate(body, { ...env, [at]: lo + period * (j / sampleCount) });
+  }
+  if (!(period > 0) || !Number.isFinite(period) || !Number.isFinite((2 * Math.PI) / period)) {
+    throw new Error('A Fourier interval needs finite bounds, start before end, and a finite frequency scale.');
   }
   if (!Number.isFinite((2 * Math.PI * Math.floor(xs.length / 2)) / period))
     throw new Error('The Fourier frequency scale is not finite; use a wider interval.');

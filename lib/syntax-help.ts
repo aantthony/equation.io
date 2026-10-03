@@ -67,12 +67,12 @@ const signatures: Record<string, [string, string]> = {
   ],
   hist: ['hist(L)', 'Histogram of a numeric list'],
   fourier: [
-    'fourier(signal, lo = 0, hi = 1, samples = 256)',
-    'One-sided amplitude spectrum of a real function or ordered samples; CSV: sort(data.signal, data.row). Frequency in cycles per x unit',
+    'fourier(signal, samples = 256)',
+    'One-sided amplitude spectrum of a real signal over an interval (its period), s = interval(0, 1); fourier(sin(2pi s)), or of ordered samples; CSV: sort(data.signal, data.row)',
   ],
   reconstruct: [
-    'reconstruct(signal, N, lo = 0, hi = 1, samples = 256)',
-    'Periodic Fourier approximation in x, including the mean and the first N harmonics (0–128); sampled signals use their own sample count',
+    'reconstruct(signal, N, samples = 256)',
+    'Periodic Fourier approximation in x of a signal over an interval, including the mean and the first N harmonics (0–128); samples use their own count',
   ],
   interval: [
     'interval(a, b)',

@@ -191,39 +191,45 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     `·` binds like `*`, so `∇f · (1, 1)/sqrt(2)` is a directional
     derivative.
 - Fourier analysis: `fourier(signal)` draws a one-sided amplitude spectrum
-  as points (frequency, amplitude). The signal is a real function of one
-  variable (`f(s) = cos(4pi s); fourier(f)`), an expression in x
-  (`fourier(sin(2pi x))`), or ordered, equally spaced real samples
-  (`fourier((0, 1, 0, -1))`). A bracket list is an unordered multiset;
+  as points (frequency, amplitude). The signal is either a real expression
+  over one interval, which is its variable and its period —
+  `s = interval(0, 1); fourier(sin(2pi s))`, or `fourier(f(s))` for a
+  function f — or ordered, equally spaced real samples
+  (`fourier((0, 1, 0, -1))`). A signal in x (`fourier(sin(2pi x))`) or a
+  bare function name (`fourier(f)`) is an error that shows the interval
+  form: nothing binds x for you. A bracket list is an unordered multiset;
   give samples as a tuple. For CSV row order, use
   `S = sort(data.signal, data.row); fourier(S)`; rows must be equally spaced.
   `sort(data.signal)` sorts by VALUE and changes the signal.
-  - `fourier(signal, lo, hi)` analyzes one period [lo, hi), default [0, 1).
-    Frequency is cycles per x unit: bins k/(hi-lo), from DC through Nyquist.
+  - The interval interval(lo, hi) is one period [lo, hi): frequency is in
+    cycles per unit of it, bins k/(hi-lo), from DC through Nyquist.
     Amplitude is the sinusoid's peak amplitude; DC is the absolute mean,
     and DC and an even-length Nyquist bin are not doubled. No window is
     applied. A nonperiodic endpoint mismatch causes spectral leakage.
-  - Functions use 256 equally spaced samples; an optional fourth argument
-    sets a whole sample count from 2 to 4096:
-    `fourier(f, 0, 2pi, 512)`. The endpoint hi is excluded.
-    Sample tuples use their own length (2–4096); do not add a sample-count
-    argument. Odd lengths and lengths that are not powers of two work.
+  - A signal over an interval uses 256 equally spaced samples; an optional
+    second argument sets a whole sample count from 2 to 4096:
+    `s = interval(0, 2pi); fourier(sin(3s), 512)`. The endpoint hi is
+    excluded. Samples span [0, 1), or the interval given after them:
+    `fourier(S, interval(0, 10))`; they use their own length (2–4096), so
+    give no sample count. Odd lengths and non-powers of two work.
   - `reconstruct(signal, N)` returns a periodic real expression in x:
-    its signed mean plus frequency bins 1 through N, with phase preserved.
-    Draw it with `y = reconstruct(f, N)`. N is a whole number from 0 to
+    its signed mean plus frequency bins 1 through N, with phase preserved
+    and the signal's interval as the period. Draw it with
+    `y = reconstruct(f(s), N)`. N is a whole number from 0 to
     min(128, floor(sample count/2)); N = 0 is the mean. Use a bounded
     slider such as `N = clamp(round(5), 0, 48)` to add harmonics.
-    Optional bounds and sample count follow N:
-    `y = reconstruct(f, N, 0, 2pi, 512)`. Defaults match fourier.
+    The optional sample count, or a tuple's interval, follows N:
+    `y = reconstruct(f(s), N, 512)`. Defaults match fourier.
     At full available N, the reconstruction interpolates the samples;
     discontinuities can exhibit Gibbs overshoot.
   - Coefficients are numeric approximations computed when the document
-    changes. Static sliders in signals or bounds recompute them; signals
-    cannot depend on t or simulation states. Missing/nonfinite samples
-    are errors, rather than removed (removing them would change spacing).
-    CSV data stays device-local in shared links, like other data plots.
+    changes. Static sliders in signals or interval bounds recompute them;
+    signals cannot depend on t or simulation states. Missing/nonfinite
+    samples are errors, rather than removed (removing them would change
+    spacing). CSV data stays device-local in shared links, like other data
+    plots.
   - Name a spectrum to draw stems with existing geometry:
-    `S = fourier(f); segment((S.x, 0), S); S`. Use split views with a shared
+    `S = fourier(f(s)); segment((S.x, 0), S); S`. Use split views with a shared
     x axis for the original and reconstruction; the spectrum has its own
     frequency axis. The Fourier analysis examples demonstrate all three.
 - Curves: the differential geometry of a parametric curve in u — a tuple
