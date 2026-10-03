@@ -937,7 +937,13 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'x^2 + y^2 = 4; x y = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0); count({x^2 + y^2 = 4, x y = 1})',
         'implicit conic measure',
       ],
-      ['three planes', '(x + y, x - y, z) = (1, 2, 3)', '3d'],
+      // The planes are cut to a ball about where they meet, so the solution
+      // the system marks sits at the centre of what is drawn.
+      [
+        'three planes',
+        'within = (x - 1.5)^2 + (y + 0.5)^2 + (z - 3)^2 < 4; x + y = {within: 1}; x - y = {within: 2}; z = {within: 3}; (x + y, x - y, z) = (1, 2, 3)',
+        '3d implicit',
+      ],
       ['sphere meets plane', '(x^2 + y^2 + z^2, z) = (9, 1)', '3d conic'],
       // Alpöge's counterexample to the Jacobian conjecture (July 2026), found by
       // Fable: det JF = -2 everywhere, yet the fiber over (-1/4, 0, 0) holds the
