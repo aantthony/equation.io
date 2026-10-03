@@ -9,6 +9,7 @@ import { isViewportText } from './analysis.ts';
 import { type Binding, type Env, lookupValue } from './env.ts';
 import { CONSTANTS, GLYPH_CHARS, NAME_SRC, SUPERSCRIPT_CHARS, canonicalName, freeVars } from './expr.ts';
 import { familyOf } from './dist-families.ts';
+import { isComplexValued } from './complex.ts';
 import { VALUE_END, noteStart } from './statements.ts';
 import { builtinHelp } from './syntax-help.ts';
 
@@ -162,11 +163,9 @@ function bindingInfo(name: string, b: Binding): NameInfo {
         return { signature: name, type: 'state', description: `Integrated forward in t from ${name}(0)` };
       if (b.role === 'const') return { signature: name, type: 'number' };
       const over = overVars(paramsOf([b.expr]));
-      return {
-        signature: name,
-        type: b.role === 'condition' ? 'condition' : 'field',
-        description: over.length ? `Depends on ${over.join(', ')}` : undefined,
-      };
+      const description = over.length ? `Depends on ${over.join(', ')}` : undefined;
+      const type = b.role === 'complex' ? 'complex number' : b.role === 'condition' ? 'condition' : 'field';
+      return { signature: name, type, description };
     }
     case 'vector': {
       const dim = b.role === 'state' ? b.deriv.length : b.components.length;
@@ -187,7 +186,8 @@ function bindingInfo(name: string, b: Binding): NameInfo {
       if (b.value.representation === 'scatter') return { signature: name, type: 'list of points' };
       const s = b.value.sequence;
       const n = s.kind === 'list' ? s.items.length : s.kind === 'data' || s.kind === 'text' ? s.values.length : null;
-      const of = s.kind === 'text' ? 'text' : 'numbers';
+      const of =
+        s.kind === 'text' ? 'text' : s.kind === 'list' && s.items.some(isComplexValued) ? 'complex numbers' : 'numbers';
       return { signature: name, type: n === null ? 'list' : `list of ${n} ${of}` };
     }
     case 'table': {

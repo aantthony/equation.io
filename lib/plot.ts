@@ -16,8 +16,7 @@ import { exprKey } from './expr.ts';
  * - t is always allowed and means "animated": bound to seconds since start
  */
 import { coordinateRow, lowerCoordinateFlow } from './coordinate.ts';
-import { complexParts } from './complex-parts.ts';
-import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, inferScalarType, usesComplex } from './complex.ts';
+import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, inferScalarType, isComplexValued, usesComplex } from './complex.ts';
 import {
   ANGLE_FN,
   REVOLVE_AXES,
@@ -38,8 +37,8 @@ import { nestedText, tensorOfNode } from './tensor.ts';
 import { mvOfNode, mvText } from './clifford.ts';
 import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
-import { PATH_NODE_BUDGET } from './path.ts';
-import { exceedsNodes } from './size.ts';
+import { SPLIT_NODE_BUDGET, complexParts, splitTooLarge } from './complex-parts.ts';
+import { FAMILY_NODES, exceedsNodes } from './size.ts';
 
 export { publicKind } from './math-object.ts';
 export type { Classified, MathObject } from './math-object.ts';
@@ -91,7 +90,7 @@ function matchODE(e: Expr): (Expr & { kind: 'vec' }) | null {
 const DEFAULT_TUBE_RADIUS = 0.1;
 /** Nodes across every member of a figure family: 1024 cubes turning about a
  *  fixed axis, or about a hundred turning about a slider-dependent one. */
-const FIGURE_FAMILY_NODES = 1 << 21;
+const FIGURE_FAMILY_NODES = FAMILY_NODES;
 
 /** lowerGeom's figure calls: whether each closes (and fills), and how its
  *  vertices are named in an error, after the statement the user wrote. */
@@ -288,8 +287,7 @@ export function valueReadout(value: number): string {
   return `${shown === value ? '=' : '≈'} ${shown}`;
 }
 
-const tooLarge = (what: string, verb: string) =>
-  `This complex ${what} is too large to ${verb} once split into real and imaginary parts — reduce the nesting or the powers.`;
+const tooLarge = (what: string, verb: string) => splitTooLarge(`This complex ${what}`, verb);
 
 export function classify(
   expr: Expr,
@@ -479,6 +477,15 @@ function classifyLowered(
     if (unsupported.has(first))
       throw new Error(`Families of ${first} do not superimpose meaningfully — select a list element L[k] instead.`);
     const odd = members.findIndex(m => publicKind(m.object) !== first || m.needs3D !== members[0].needs3D);
+    // `y = [1, i] x`: a complex member is a complex equation, solved for
+    // points, where the real ones draw curves.
+    if (odd >= 0 && usesComplex(expr.members[odd]) !== usesComplex(expr.members[0])) {
+      const complex = usesComplex(expr.members[0]) ? 0 : odd;
+      const real = complex === 0 ? odd : 0;
+      throw new Error(
+        `Family element ${complex + 1} is complex where element ${real + 1} is not, so it draws a different kind of object — a list of complex numbers draws as points on a row of its own.`,
+      );
+    }
     if (odd >= 0) throw new Error(`Family element ${odd + 1} has a different object kind or dimension.`);
     // An implicit surface is raymarched across the whole screen, once per
     // member, and a curve of intersection or a field in space is traced on
@@ -793,10 +800,21 @@ function classifyLowered(
   }
 
   if (expr.kind === 'list') {
-    if (usesComplex(expr)) throw new Error('Complex values are not supported in lists.');
     for (const v of vars) {
-      if (v !== 't') throw new Error(`A list may only use constants and t (found ${v}).`);
+      // (w counts as x and y by now; name the one the row wrote.)
+      const found = freeVars(expr).has('w') ? 'w' : v;
+      if (v !== 't') throw new Error(`A list may only use constants and t (found ${found}).`);
     }
+    // One complex member makes the list complex, as one complex term makes
+    // a sum complex: the type is the list's, so 1 in [1, i] is 1 + 0i.
+    // Members that only pass through complex values (re(…), |…|) are real.
+    if (expr.items.some(it => it.kind !== 'vec' && isComplexValued(it))) {
+      if (expr.items.some(it => it.kind === 'vec')) throw new Error('Lists cannot mix complex numbers and points.');
+      return done({ kind: 'list', element: 'complex', storage: 'expressions', values: expr.items });
+    }
+    // A point's coordinates are real, in a list as on a row of its own.
+    if (expr.items.some(it => it.kind === 'vec' && it.items.some(isComplexValued)))
+      throw new Error('Complex values are not supported in vectors.');
     const vecs = expr.items.filter((it): it is Expr & { kind: 'vec' } => it.kind === 'vec');
     if (vecs.length === 0) return done({ kind: 'list', element: 'scalar', storage: 'expressions', values: expr.items });
     if (vecs.length !== expr.items.length) throw new Error('Lists cannot mix numbers and points.');
@@ -864,6 +882,11 @@ function classifyLowered(
   }
 
   if (expr.kind === 'vec') {
+    // sort(S, re(S)) of a complex list: its members in order, a tuple.
+    if (expr.items.every(isComplexValued))
+      throw new Error(
+        'A tuple of complex numbers has no picture yet — a list of them draws as points, and T[k] picks one.',
+      );
     if (usesComplex(expr)) throw new Error('Complex values are not supported in vectors.');
     // Longer than a point: values at positions, shown as a readout.
     if (expr.items.length > 3) {
@@ -907,7 +930,7 @@ function classifyLowered(
   if (complexPath) {
     // Sized before anything walks it: typing and splitting a huge inlined
     // composition would cost seconds just to learn it cannot be sampled.
-    if (exceedsNodes(expr, PATH_NODE_BUDGET)) throw new Error(tooLarge('path', 'sample'));
+    if (exceedsNodes(expr, SPLIT_NODE_BUDGET)) throw new Error(tooLarge('path', 'sample'));
     // An expression that mentions i but is real (|exp(i u)|) traces nothing
     // in the plane: it is a number for each u, and the row says so.
     if (inferScalarType(g) !== 'complex') {

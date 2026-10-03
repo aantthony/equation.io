@@ -90,6 +90,16 @@ describe('describeName', () => {
   ]);
   const type = (name: string) => describeName(name, env)?.type;
 
+  it('names a complex value, and a real one reached through it', () => {
+    const complex = envOf(['a = e^(i pi/3)', 'b = re(a)', 'S = e^(i pi [0..5]/5)', 'q = x + i y', 'R = [a, 1]']);
+    const typeIn = (name: string) => describeName(name, complex)?.type;
+    expect(typeIn('a')).toBe('complex number');
+    expect(typeIn('b')).toBe('number');
+    expect(typeIn('S')).toBe('list of 6 complex numbers');
+    expect(typeIn('q')).toBe('field');
+    expect(typeIn('R')).toBe('list of 2 complex numbers');
+  });
+
   it('names the type of a document value', () => {
     expect(type('a')).toBe('number');
     expect(describeName('f', env)).toMatchObject({ signature: 'f(x, k)', type: 'function', defined: 'f' });

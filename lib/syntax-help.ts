@@ -185,6 +185,7 @@ const definedNames = (defs: Env): ReadonlySet<string> =>
     ...defs.consts.keys(),
     ...defs.fns.keys(),
     ...defs.fields.keys(),
+    ...defs.complexes.keys(),
     ...defs.conditions.keys(),
     ...defs.states.keys(),
     ...defs.points,
@@ -268,6 +269,7 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
     'Coordinate field',
   );
   values(fields.filter(overParams), 'Parametric value');
+  values(defs.complexes.keys(), 'Defined complex number');
   values(defs.conditions.keys(), 'Condition, read in braces: {name: value}');
   values(
     [...defs.points].filter(p => !pointOverParams(p)),

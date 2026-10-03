@@ -151,6 +151,14 @@ export type MathObject =
       readonly dimension: 2 | 3;
       readonly values: ReadonlyArray<readonly Expr[]>;
     }
+  /** Complex numbers (`e^(iπ [0..5]/5)`), drawn on the Argand plane as one
+   *  complex value is: each member at (re, im). */
+  | {
+      readonly kind: 'list';
+      readonly element: 'complex';
+      readonly storage: 'expressions';
+      readonly values: readonly Expr[];
+    }
   | {
       readonly kind: 'list';
       readonly element: 'point';
