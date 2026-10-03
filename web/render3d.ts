@@ -231,6 +231,7 @@ void main() {
   float vPrev = F(ro + rd * t0);
   bool hit = false;
   float tHit = 0.0;
+  float tErr = 0.0;
   // Domain edges. A no-default piecewise like {0 < x < 2: sqrt(x)} is NaN
   // outside its conditions, and a step that straddles that edge cannot be
   // tested for a crossing — so the surface within a step of the edge would be
@@ -281,6 +282,7 @@ void main() {
       bool jump = !(abs(vb - va) < ${JUMP_RATIO} * abs(v - vPrev));
       if (!jump || jumps >= ${JUMP_BUDGET}) {
         tHit = 0.5 * (a + b);
+        tErr = 0.5 * (b - a);
         hit = true;
         break;
       }
@@ -313,9 +315,31 @@ void main() {
   vec3 halfway = normalize(lightDir - rd);
   float spec = pow(max(dot(n, halfway), 0.0), 48.0);
 
-  // Subtle checker so the surface reads as a grid.
+  // Subtle checker so the surface reads as a grid: the product of each
+  // axis's alternating ±1 cells, each box-filtered over what the pixel
+  // covers along that axis — its footprint on the surface, and the march's
+  // error along the ray. Unfiltered, a surface on a cell boundary flipped
+  // cells with the sign of that error, in rings around the camera, and far
+  // or grazing surfaces aliased into moiré; filtered, a boundary reads as an
+  // even mean and fine cells fade out. Cells are centred on the origin, so
+  // the coordinate planes, the usual planes, sit mid-cell.
   float cs = uBoxR / 4.0;
-  float checker = mod(floor(p.x / cs) + floor(p.y / cs) + floor(p.z / cs), 2.0);
+  // The footprint along each axis, from where the next pixels' rays (across
+  // and up) meet the surface's tangent plane; a ray parallel to it covers
+  // the whole axis.
+  vec3 footprint = vec3(0.0);
+  for (int k = 0; k < 2; k++) {
+    vec2 ndcK = ndc + (k == 0 ? vec2(2.0 / uRes.x, 0.0) : vec2(0.0, 2.0 / uRes.y));
+    vec3 roK = unproject(vec3(ndcK, -1.0));
+    vec3 rdK = unproject(vec3(ndcK, 1.0)) - roK;
+    vec3 dp = roK + rdK * (dot(p - roK, n) / dot(rdK, n)) - p;
+    footprint += all(lessThan(abs(dp), vec3(1e6))) ? abs(dp) : vec3(1e6);
+  }
+  vec3 w = max((footprint + 16.0 * tErr * abs(rd)) / cs, 1e-4);
+  vec3 q = p / cs + 0.5;
+  // The integral of the ±1 cells is a triangle wave; its difference across w is the box filter.
+  vec3 cell = 2.0 * (abs(fract((q - 0.5 * w) * 0.5) - 0.5) - abs(fract((q + 0.5 * w) * 0.5) - 0.5)) / w;
+  float checker = 0.5 - 0.5 * cell.x * cell.y * cell.z;
   vec3 base = uColor * (0.92 + 0.08 * checker);
 
   vec3 col = base * (0.30 + 0.25 * sky + 0.50 * diffuse) + vec3(0.35) * spec;
