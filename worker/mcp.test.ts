@@ -39,7 +39,7 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
   const res = await handleMcp(request, new URL(URL_BASE), env);
   const body = (res.status === 202 ? null : await res.json()) as any;
   // Validate real outputs throughout this suite, including invalid equations,
-  // device-local data, animation, and compatibility aliases.
+  // device-local data, animation, preview omissions, and compatibility aliases.
   if (method === 'tools/call' && body.result?.structuredContent) {
     if (!outputValidators.size) {
       const listed = await rpc('tools/list');
@@ -200,6 +200,10 @@ describe('mcp endpoint', () => {
       'cobweb',
       'point',
     ]);
+    // The static preview draws cobwebs, so nothing is omitted and the image
+    // attaches with the recurrence included.
+    expect(out.preview_omits).toBeUndefined();
+    expect(out.preview).toBe('not attached — available via share link');
   });
 
   it('validates random-variable rows like the app does (normal probability)', async () => {
@@ -217,6 +221,8 @@ describe('mcp endpoint', () => {
     ]);
     // The P row carries its numeric value, matching the app's row readout.
     expect(out.rows[3].value).toBe('≈ 0.9545');
+    // Density and shaded area both draw in the static preview.
+    expect(out.preview_omits).toBeUndefined();
   });
 
   it('expands slider-bounded sums like the app does (Fourier series)', async () => {
@@ -227,6 +233,7 @@ describe('mcp endpoint', () => {
     const out = body.result.structuredContent;
     expect(out.valid).toBe(true);
     expect(out.rows.map((r: { kind?: string }) => r.kind)).toEqual(['definition (const)', 'implicit2d']);
+    expect(out.preview_omits).toBeUndefined();
   });
 
   it('still rejects Σ bounds with no static value (animated constant)', async () => {
@@ -277,6 +284,7 @@ describe('mcp endpoint', () => {
     expect(out.rows[3].value).toMatch(/^≈ 0\.\d{3}$/);
     // X + X ~ Normal(0, 2), so P(X + X < 1) = Φ(1/2) exactly.
     expect(out.rows[5].value).toBe('≈ 0.6915');
+    expect(out.preview).toBe('not attached — available via share link');
   });
 
   it('names what a joined row actually holds, semicolon or line break', async () => {
@@ -417,6 +425,7 @@ describe('mcp endpoint', () => {
     expect(out.rows[3].value).toBe('≈ 5.0000');
     // E[X²] = μ² + σ² = 5, by quadrature against the base pdf.
     expect(out.rows[4].value).toBe('≈ 5.0000');
+    expect(out.preview).toBe('not attached — available via share link');
   });
 
   it('validates ∫ rows: exact readouts and non-elementary curves', async () => {
@@ -433,6 +442,7 @@ describe('mcp endpoint', () => {
     // Si(x) has no elementary form — the quadrature expansion still plots.
     expect(out.rows[1].kind).toBe('implicit2d');
     expect(out.rows[3].kind).toBe('implicit2d'); // slider bound stays symbolic
+    expect(out.preview).toBe('not attached — available via share link');
   });
 
   it('rejects malformed ∫ rows with a usable message', async () => {
@@ -620,59 +630,135 @@ describe('draggable points', () => {
   });
 });
 
-describe('graph link responses', () => {
+describe('graph previews', () => {
   const call = (equations: string[]) => rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
 
-  it.each([
-    ['y = sin(x)', 'y = x/2'],
-    ['y = sin(x - 2t)'],
-    ['iter(z^2 + w)'],
-    ['x^2 + y^2 + z^2 = 9'],
-    ['z = x^2 - y^2', 'label((0, 0, 0), "saddle")'],
-    ['label((1, 2), "peak")'],
-    ['a = 2', 'f(x) = a x'],
-  ])('returns validation and links without generated preview metadata for %j', async (...equations) => {
-    const { body } = await call(equations);
+  it('returns only text content for drawable graphs', async () => {
+    const { body } = await call(['y = sin(x)', 'y = x/2']);
     expect(body.result.content.map((c: { type: string }) => c.type)).toEqual(['text']);
-    const out = body.result.structuredContent;
-    expect(JSON.parse(body.result.content[0].text)).toEqual(out);
-    expect(out.valid).toBe(true);
-    expect(out.share_url).toContain('/g/');
-    expect(out).not.toHaveProperty('preview');
-    expect(out).not.toHaveProperty('preview_omits');
+    expect(JSON.parse(body.result.content[0].text)).toEqual(body.result.structuredContent);
   });
 
-  it('keeps device-local data notes on the affected rows', async () => {
+  it('notes that an animated graph is rendered at t = 0', async () => {
+    const { body } = await call(['y = sin(x - 2t)']);
+    expect(body.result.structuredContent.preview).toContain('t = 0');
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+  });
+
+  it('says why shader-only plots get no image instead of sending a wrong one', async () => {
+    const { body } = await call(['iter(z^2 + w)']);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    const out = body.result.structuredContent;
+    expect(out.preview).toContain('nothing about whether the graph works');
+    expect(out.preview_omits).toEqual([{ row: 'iter(z^2 + w)', why: expect.stringContaining('fractal2d') }]);
+    expect(out.preview_omits[0].why).toContain('live app');
+  });
+
+  it('says why a deep recursion gets no image', async () => {
+    const { body } = await call(['M(z, k) = {|z| > 2: k, k >= 600: 0, M(z^2 + w, k + 1)}', 'M(w, 0)']);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    const why = body.result.structuredContent.preview_omits[0].why;
+    expect(why).toContain('recursive');
+    expect(why).toContain('live app');
+  });
+
+  it('never attaches the empty grid a general implicit 3D surface would render as', async () => {
+    // The sphere is a 'draws' TYPE but not a drawable ROW (only z = f(x, y)
+    // is); a blank "attached" image here would read as "3D failed" and teach
+    // the caller to stop offering 3D graphs at all.
+    const { body } = await call(['x^2 + y^2 + z^2 = 9']);
+    expect(body.result.structuredContent.valid).toBe(true);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    const [omit] = body.result.structuredContent.preview_omits;
+    expect(omit.row).toBe('x^2 + y^2 + z^2 = 9');
+    expect(omit.why).toContain('live app renders general implicit surfaces');
+  });
+
+  it('discloses rows missing from a partial preview', async () => {
+    const { body } = await call(['z = x^2 + y^2', 'y = sin(x)']);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    const out = body.result.structuredContent;
+    expect(out.preview).toContain('1 of 2 plot rows missing');
+    expect(out.preview_omits).toEqual([{ row: 'y = sin(x)', why: expect.stringContaining('vertical sheets') }]);
+  });
+
+  it('lists a 3D label once, as text the preview leaves out', async () => {
+    const { body } = await call(['z = x^2 - y^2', 'label((0, 0, 0), "saddle")']);
+    const out = body.result.structuredContent;
+    expect(out.preview).not.toContain('missing');
+    expect(out.preview_omits).toEqual([
+      { row: 'label((0, 0, 0), "saddle")', why: expect.stringContaining('label text') },
+    ]);
+  });
+
+  it('attaches no preview for labels alone', async () => {
+    const { body } = await call(['label((1, 2), "peak")']);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    expect(body.result.structuredContent.preview).toMatch(/^none/);
+  });
+
+  it('skips the preview when there is nothing to draw', async () => {
+    const { body } = await call(['a = 2', 'f(x) = a x']);
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
+    expect(body.result.structuredContent.preview).toContain('no plot rows');
+  });
+
+  it('says a graph is fine when only the CSV is missing', async () => {
     const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'y = person.age']);
     const out = body.result.structuredContent;
     expect(out.valid).toBe(true);
-    expect(out.rows[1].note).toContain('not on this device');
+    expect(out.preview).toContain('the graph itself is fine');
+    expect(out.preview_omits).toEqual([{ row: 'y = person.age', why: expect.stringContaining('not on this device') }]);
   });
 
   it('does not call a row valid just because the file is elsewhere', async () => {
+    // `person.age[1 < 2]` is a filter no list reaches, which the app refuses
+    // once the bytes are here. Reporting it as merely device-local would make
+    // the same link valid in a preview and broken for its author.
     const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'person.age[1 < 2]']);
     const out = body.result.structuredContent;
     expect(out.valid).toBe(false);
     expect(out.rows[1].error).toMatch(/filter/);
   });
 
-  it('reports a broken row alongside device-local data', async () => {
+  it('does not call a graph fine while another row is broken', async () => {
+    // The device-local plot is the only thing the preview can say nothing
+    // about; a row that fails to parse is broken everywhere. Saying "the
+    // graph itself is fine" over the top of it sends the caller away from an
+    // error that `rows` — and only `rows` — is reporting.
     const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'y = person.age', 'y = florb(x)']);
     const out = body.result.structuredContent;
     expect(out.valid).toBe(false);
-    expect(out.rows[1].note).toContain('not on this device');
-    expect(out.rows[2].status).toBe('error');
+    expect(out.preview).not.toContain('the graph itself is fine');
+    expect(out.preview).toContain('other rows have errors');
+  });
+
+  it('does not call a definition-only document fine', async () => {
+    // `ages` draws nothing on any device, so "every plot row is device-local"
+    // would send the caller away satisfied with a graph that is simply empty.
+    const { body } = await call(['person = open("people.csv", 3a7f1b2c9d4e)', 'ages = person.age / 2']);
+    const out = body.result.structuredContent;
+    expect(out.preview).toContain('no plot rows');
+    expect(out.preview).not.toContain('the graph itself is fine');
+  });
+
+  it('describes preview availability for working rows of a partly-broken graph', async () => {
+    const { body } = await call(['y = x^2', 'y = florb(x)']);
+    expect(body.result.structuredContent.valid).toBe(false);
+    expect(body.result.structuredContent.preview).toBe('not attached — available via share link');
+    expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
   });
 });
 
 describe('viewport rows', () => {
   const call = (equations: string[]) => rpc('tools/call', { name: 'encode_graph_url', arguments: { equations } });
 
-  it('classifies viewport rows', async () => {
+  it('classifies viewport rows and describes the share-link preview', async () => {
     const { body } = await call(['view(x = 98..102)', 'y = (x - 100)^2']);
     const out = body.result.structuredContent;
     expect(out.valid).toBe(true);
     expect(out.rows[0]).toEqual({ text: 'view(x = 98..102)', status: 'ok', kind: 'viewport (view)' });
+    expect(out.preview).toBe('not attached — available via share link');
     expect(body.result.content.some((c: { type: string }) => c.type === 'image')).toBe(false);
   });
 
@@ -727,11 +813,13 @@ describe('syntax resource', () => {
     const args = { equations: ['a = 2', 'y = a sin(x)'] };
     const shown = await rpc('tools/call', { name: 'show_graph', arguments: args });
     const encoded = await rpc('tools/call', { name: 'encode_graph_url', arguments: args });
-    expect(shown.body.result.structuredContent).toEqual(encoded.body.result.structuredContent);
+    const { preview, preview_omits, ...encodedValue } = encoded.body.result.structuredContent;
+    expect(preview).toEqual(expect.any(String));
+    expect(preview_omits).toBeUndefined();
+    expect(shown.body.result.structuredContent).toEqual(encodedValue);
     expect(shown.body.result.structuredContent).not.toHaveProperty('preview');
     expect(shown.body.result.structuredContent).not.toHaveProperty('preview_omits');
     expect(JSON.parse(shown.body.result.content[0].text)).toEqual(shown.body.result.structuredContent);
-    expect(show.outputSchema).toEqual(listed.result.tools[0].outputSchema);
     expect(show.outputSchema.required).toEqual(['valid', 'url', 'share_url', 'rows']);
     expect(show.outputSchema.properties).not.toHaveProperty('preview');
     expect(show.outputSchema.properties).not.toHaveProperty('preview_omits');
