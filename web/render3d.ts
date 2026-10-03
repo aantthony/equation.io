@@ -142,15 +142,24 @@ const JITTER_DECL = 'uniform vec2 uJitter;';
 
 /** The one light every lit surface shares — implicit and parametric
  *  surfaces, tubes and cones — so the same shape shades the same however it
- *  is written: a fixed directional light, a sky term brighter facing up, and
- *  a Blinn–Phong highlight. `n` faces the viewer, `rd` runs from the eye. */
+ *  is written: a fixed key light with a Blinn–Phong highlight, a sky term
+ *  brighter facing up, and a dim fill from the eye. The fill tells apart
+ *  faces the key light misses at the same height (two sides of a cube seen
+ *  corner-on), darkening toward the silhouette as a lit object does. The
+ *  weights sum to 1, so a surface facing every light shows its own colour.
+ *  `rd` runs from the eye; `facing` turns a normal toward it first. */
 const SHADE = `
+const vec3 LIGHT_DIR = vec3(0.3546, 0.4876, 0.7978); // normalize(0.4, 0.55, 0.9)
+vec3 facing(vec3 n, vec3 rd) {
+  if (any(isnan(n))) return -rd;
+  return dot(n, rd) > 0.0 ? -n : n;
+}
 vec3 shade(vec3 base, vec3 n, vec3 rd) {
-  vec3 lightDir = normalize(vec3(0.4, 0.55, 0.9));
-  float diffuse = max(dot(n, lightDir), 0.0);
+  float diffuse = max(dot(n, LIGHT_DIR), 0.0);
   float sky = 0.5 + 0.5 * n.z;
-  float spec = pow(max(dot(n, normalize(lightDir - rd)), 0.0), 48.0);
-  return base * (0.30 + 0.25 * sky + 0.50 * diffuse) + vec3(0.35) * spec;
+  float fill = max(dot(n, -rd), 0.0);
+  float spec = pow(max(dot(n, normalize(LIGHT_DIR - rd)), 0.0), 48.0);
+  return base * (0.20 + 0.22 * sky + 0.46 * diffuse + 0.12 * fill) + vec3(0.35) * spec;
 }`;
 
 /** Writes a chunk pass into its cell of the full-resolution surface target. */
@@ -320,8 +329,7 @@ void main() {
   vec3 p = ro + rd * tHit;
   float h = max(rayLen * 2e-3, uBoxR * 1e-4);
   vec3 n = normalize(gradF(p, h));
-  if (any(isnan(n))) n = -rd;
-  if (dot(n, rd) > 0.0) n = -n; // face the viewer
+  n = facing(n, rd);
 
   // Subtle checker so the surface reads as a grid: the product of each
   // axis's alternating ±1 cells, each box-filtered over what the pixel
@@ -518,8 +526,7 @@ ${tangents}
 void main() {
   vec3 n = normalize(cross(Pu(vUV.x, vUV.y), Pv(vUV.x, vUV.y)));
   vec3 rd = normalize(vPos - uEye);
-  if (any(isnan(n))) n = -rd;
-  if (dot(n, rd) > 0.0) n = -n;
+  n = facing(n, rd);
 
   // Faint parameter checker so the (u,v) mapping reads.
   float checker = mod(floor(vUV.x * 8.0) + floor(vUV.y * 8.0), 2.0);
@@ -562,8 +569,7 @@ ${SHADE}
 void main() {
   vec3 n = normalize(vNormal);
   vec3 rd = normalize(vPos - uEye);
-  if (any(isnan(n))) n = -rd;
-  if (dot(n, rd) > 0.0) n = -n;
+  n = facing(n, rd);
 
   // Material checker: cells are square-ish in world units and follow the
   // rotation-minimizing frame, so the pattern reads as painted on the tube.
@@ -635,8 +641,7 @@ void main() {
   }
   vec3 n = normalize(vX * localN.x / vScale.x + vY * localN.y / vScale.x + vZ * localN.z / vScale.y);
   vec3 rd = normalize(vPos - uEye);
-  if (any(isnan(n))) n = -rd;
-  if (dot(n, rd) > 0.0) n = -n;
+  n = facing(n, rd);
   outColor = vec4(shade(uColor, n, rd), 1.0);
 }
 `;
