@@ -321,8 +321,9 @@ void main() {
   // error along the ray. Unfiltered, a surface on a cell boundary flipped
   // cells with the sign of that error, in rings around the camera, and far
   // or grazing surfaces aliased into moiré; filtered, a boundary reads as an
-  // even mean and fine cells fade out. Cells are centred on the origin, so
-  // the coordinate planes, the usual planes, sit mid-cell.
+  // even mean and fine cells fade out. Cell boundaries lie on the coordinate
+  // planes, so a sphere splits along its equator and meridians like a globe;
+  // a plane on a boundary (x = 0) reads flat, its mean.
   float cs = uBoxR / 4.0;
   // The footprint along each axis, from where the next pixels' rays (across
   // and up) meet the surface's tangent plane; a ray parallel to it covers
@@ -336,7 +337,7 @@ void main() {
     footprint += all(lessThan(abs(dp), vec3(1e6))) ? abs(dp) : vec3(1e6);
   }
   vec3 w = max((footprint + 16.0 * tErr * abs(rd)) / cs, 1e-4);
-  vec3 q = p / cs + 0.5;
+  vec3 q = p / cs;
   // The integral of the ±1 cells is a triangle wave; its difference across w is the box filter.
   vec3 cell = 2.0 * (abs(fract((q - 0.5 * w) * 0.5) - 0.5) - abs(fract((q + 0.5 * w) * 0.5) - 0.5)) / w;
   float checker = 0.5 - 0.5 * cell.x * cell.y * cell.z;
@@ -516,15 +517,12 @@ void main() {
   float sky = 0.5 + 0.5 * n.z;
   vec3 halfway = normalize(lightDir - rd);
   float spec = pow(max(dot(n, halfway), 0.0), 96.0);
-  float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
 
   // Faint parameter checker so the (u,v) mapping reads.
   float checker = mod(floor(vUV.x * 8.0) + floor(vUV.y * 8.0), 2.0);
   vec3 base = uColor * (0.92 + 0.08 * checker);
 
-  vec3 col = base * (0.22 + 0.22 * sky + 0.42 * diffuse)
-           + vec3(1.0) * spec * 0.85
-           + vec3(0.35, 0.4, 0.5) * fresnel * 0.35;
+  vec3 col = base * (0.22 + 0.22 * sky + 0.42 * diffuse) + vec3(1.0) * spec * 0.85;
   outColor = vec4(col, 1.0);
 }
 `;
@@ -569,7 +567,6 @@ void main() {
   float sky = 0.5 + 0.5 * n.z;
   vec3 halfway = normalize(lightDir - rd);
   float spec = pow(max(dot(n, halfway), 0.0), 96.0);
-  float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
 
   // Material checker: cells are square-ish in world units and follow the
   // rotation-minimizing frame, so the pattern reads as painted on the tube.
@@ -581,9 +578,7 @@ void main() {
   // Slightly stronger than the psurface checker: tube cells are far smaller.
   vec3 base = uColor * (0.88 + 0.12 * checker);
 
-  vec3 col = base * (0.26 + 0.22 * sky + 0.46 * diffuse)
-           + vec3(1.0) * spec * 0.7
-           + vec3(0.35, 0.4, 0.5) * fresnel * 0.3;
+  vec3 col = base * (0.26 + 0.22 * sky + 0.46 * diffuse) + vec3(1.0) * spec * 0.7;
   outColor = vec4(col, 1.0);
 }
 `;
@@ -650,10 +645,7 @@ void main() {
   float sky = 0.5 + 0.5 * n.z;
   vec3 halfway = normalize(lightDir - rd);
   float spec = pow(max(dot(n, halfway), 0.0), 96.0);
-  float fresnel = pow(1.0 - max(dot(n, -rd), 0.0), 3.0);
-  vec3 col = uColor * (0.26 + 0.22 * sky + 0.46 * diffuse)
-           + vec3(1.0) * spec * 0.7
-           + vec3(0.35, 0.4, 0.5) * fresnel * 0.3;
+  vec3 col = uColor * (0.26 + 0.22 * sky + 0.46 * diffuse) + vec3(1.0) * spec * 0.7;
   outColor = vec4(col, 1.0);
 }
 `;
