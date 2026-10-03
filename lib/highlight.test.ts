@@ -121,6 +121,12 @@ describe('describeName', () => {
     expect(describeName('sin', env)).toMatchObject({ signature: 'sin(x)', type: 'built-in' });
     expect(describeName('π', env)).toMatchObject({ type: 'constant' });
     expect(type('t')).toBe('time');
+    expect(describeName('u', env)).toMatchObject({ type: 'parameter', description: expect.stringMatching(/\(0, 1\)/) });
     expect(describeName('nope', env)).toBeNull();
+  });
+
+  it('points a redefined u at its range', () => {
+    const ranged = envOf(['u = interval(0, 2pi)', '(cos(u), sin(u))']);
+    expect(describeName('u', ranged)).toMatchObject({ signature: 'u', type: 'interval', defined: 'u' });
   });
 });
