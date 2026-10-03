@@ -585,6 +585,10 @@ describe('complex paths through analyze()', () => {
     };
     // The shared pipeline (inlining, lowering) is what a non-path row of the
     // same size costs; the path may not add a split of the whole tree on top.
+    // The path's own extra work (the larger inner term) runs ~3.4x the field,
+    // while a split of twelve nested products would be billions of nodes and
+    // never finish — so the bound is loose enough for a slow runner and still
+    // catches the split.
     const time = (row: string) => {
       const t0 = performance.now();
       const r = last(['f(w) = w*w + w', row]);
@@ -594,7 +598,7 @@ describe('complex paths through analyze()', () => {
     expect(field.error).toBeUndefined();
     const path = time(nest(12, 'exp(i 2 pi u)'));
     expect(path.error).toMatch(/too large to sample/);
-    expect(path.ms).toBeLessThan(3 * field.ms + 250);
+    expect(path.ms).toBeLessThan(10 * field.ms + 250);
   }, 60000);
 
   it('protects the other users of the split the same way: root systems and Argand points', () => {
