@@ -1,10 +1,9 @@
-/** End-to-end route behaviour for /g/, landings, and /api/og. */
+/** End-to-end route behaviour for /g/, landings, and API routes. */
 import { describe, expect, it } from 'vitest';
 import { APP_CSP, GRAPH_CSP, LANDING_CSP } from '../lib/csp.ts';
 import { LANDINGS } from '../lib/landings.ts';
 import { decodePayload, encodePayload } from '../lib/link.ts';
 import worker, { landingMeta, shareMeta } from './index.ts';
-import { canRenderOg } from './og.ts';
 
 const APP = '<!doctype html><html><head><title>Equation.io</title></head><body></body></html>';
 const LANDING = `<!doctype html><html><head>
@@ -65,30 +64,20 @@ describe('/.well-known files', () => {
 });
 
 describe('share meta tags', () => {
-  const keys = (rows: string[]) => shareMeta(rows, encodePayload(rows), 'https://equation.io').meta.map(([k]) => k);
-
-  it('advertises a rendered preview for a drawable graph', () => {
-    const k = keys(['y = sin(x)']);
-    expect(k).toContain('og:image');
-    expect(k).toContain('twitter:card');
-    expect(k).toContain('og:image:width');
-  });
-
-  it('advertises the preview without analyzing, leaving undrawable graphs to /api/og/', () => {
-    // A shader-only graph still points at /api/og/, which redirects it to the
-    // site card (see the /api/og tests); the page itself never analyzes.
-    const k = keys(['iter(z^2 + w)']);
-    expect(k).toContain('og:image');
-    expect(k).toContain('og:title');
-    expect(k).toContain('og:description');
-  });
-
-  it('builds share tags for a heavy graph without analyzing it', () => {
-    const rows = ['n = 101', 'm = [0..n(n-1)/2]', 'polyline(mod(m, n), mod(3m, n))'];
-    const started = performance.now();
-    expect(keys(rows)).toContain('og:image');
-    expect(performance.now() - started).toBeLessThan(50);
-  });
+  it.each([['y = sin(x)'], ['iter(z^2 + w)'], ['n = 101', 'm = [0..n(n-1)/2]', 'polyline(mod(m, n), mod(3m, n))']])(
+    'uses the static site card for %j',
+    (...rows) => {
+      const payload = encodePayload(rows);
+      const meta = Object.fromEntries(shareMeta(rows, payload, 'https://equation.io').meta);
+      expect(meta['og:image']).toBe('https://equation.io/shots/hero.png');
+      expect(meta['twitter:image']).toBe(meta['og:image']);
+      expect(meta['twitter:card']).toBe('summary_large_image');
+      expect(meta['og:image:width']).toBe('2880');
+      expect(meta['og:image:height']).toBe('1800');
+      expect(meta['og:url']).toBe(`https://equation.io/g/${payload}`);
+      expect(meta['og:description']).toContain('Interactive graph');
+    },
+  );
 
   it('titles the card with the first equation', () => {
     expect(shareMeta(['y = sin(x)'], 'p', 'https://equation.io').title).toBe('y = sin(x) — equation.io');
@@ -96,28 +85,15 @@ describe('share meta tags', () => {
   });
 });
 
-describe('/api/og images', () => {
-  it('renders a PNG for a drawable graph', async () => {
-    const res = await get('/api/og/' + encodePayload(['x^2 + y^2 = 9']));
-    expect(res.headers.get('content-type')).toBe('image/png');
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    expect([...bytes.slice(0, 4)]).toEqual([0x89, 0x50, 0x4e, 0x47]); // PNG magic
-  });
-
-  it('redirects to the static card rather than drawing an empty grid', async () => {
-    const res = await get('/api/og/' + encodePayload(['domain((w^3 - 1)/w)']));
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toContain('/shots/hero.png');
-  });
-
-  it('redirects for a general implicit 3D surface the renderer would draw as nothing', async () => {
-    const res = await get('/api/og/' + encodePayload(['x^2 + y^2 + z^2 = 9']));
-    expect(res.status).toBe(302);
-    expect(res.headers.get('location')).toContain('/shots/hero.png');
-  });
-
-  it('rejects an undecodable payload', async () => {
-    expect((await get('/api/og/%E0%A4%A')).status).toBe(400);
+describe('removed OG image endpoint', () => {
+  it.each([
+    '/api/og/' + encodePayload(['x^2 + y^2 = 9']),
+    '/api/og/' + encodePayload(['domain((w^3 - 1)/w)']),
+    '/api/og/%E0%A4%A',
+  ])('returns the normal API 404 for %s', async path => {
+    const res = await get(path);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
   });
 });
 
@@ -128,21 +104,25 @@ describe('intent landings', () => {
     expect(res.headers.get('location')).toBe('https://equation.io/implicit/');
   });
 
-  it('titles preview landings with a drawable /api/og/ image', () => {
+  it('uses the site card for landings without a dedicated screenshot', () => {
     const page = LANDINGS.find(l => l.slug === 'implicit')!;
     const { title, canonical, meta } = landingMeta(page, 'https://equation.io');
     const keys = Object.fromEntries(meta);
     expect(title).toBe('Implicit equation grapher — Equation.io');
     expect(canonical).toBe('https://equation.io/implicit/');
-    expect(keys['og:image']).toContain('/api/og/');
-    expect(canRenderOg(page.heroEqs)).toBe(true);
+    expect(keys['og:image']).toBe('https://equation.io/shots/hero.png');
+    expect(keys['twitter:image']).toBe(keys['og:image']);
+    expect(keys['og:image:width']).toBe('2880');
+    expect(keys['og:image:height']).toBe('1800');
   });
 
-  it('uses a stable PNG when the preview renderer cannot draw the hero', () => {
+  it('keeps a dedicated static landing screenshot', () => {
     const page = LANDINGS.find(l => l.slug === 'complex')!;
     const keys = Object.fromEntries(landingMeta(page, 'https://equation.io').meta);
     expect(keys['og:image']).toBe('https://equation.io/shots/complex.png');
-    expect(canRenderOg(page.heroEqs)).toBe(false);
+    expect(keys['twitter:image']).toBe(keys['og:image']);
+    expect(keys['og:image:width']).toBe('1800');
+    expect(keys['og:image:height']).toBe('1200');
   });
 
   const hasRewriter = typeof HTMLRewriter !== 'undefined';

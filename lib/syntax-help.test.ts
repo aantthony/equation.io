@@ -135,6 +135,15 @@ describe('contextual syntax help', () => {
     d.bind('e_x', { tag: 'scalar', role: 'const', expr: { kind: 'num', value: 3 } });
     expect(syntaxHelp('e_', 2, d).suggestions.find(s => s.name === 'e_x')?.description).toBe('Defined constant');
   });
+  it('suggests a named condition as a condition, not a field', () => {
+    const conditions = buildDefs(
+      ['radius = x^2 + y^2', 'within = radius < 4'].map(scanDefinition).filter((d): d is Definition => !!d),
+    ).defs;
+    const found = (prefix: string, name: string) =>
+      syntaxHelp(prefix, prefix.length, conditions).suggestions.find(s => s.name === name);
+    expect(found('wi', 'within')?.description).toBe('Condition, read in braces: {name: value}');
+    expect(found('rad', 'radius')?.description).toBe('Coordinate field');
+  });
   it('suggests symbol escapes for a \\word, replacing the backslash too', () => {
     const h = syntaxHelp('y = \\pi', 7, defs());
     expect(h.start).toBe(4); // covers the backslash

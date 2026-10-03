@@ -29,6 +29,7 @@
     <a class="brand" href="/about/">Equation<span>.io</span></a>
     <div class="nav-links">
       <a class="nav-link" href="#gallery">Gallery</a>
+      <a class="nav-link" href="#ai">AI apps</a>
       <a class="nav-link" href="#deep-links">Links</a>
       <a class="nav-link" href="https://github.com/aantthony/equation.io" title="Source code on GitHub" rel="noopener">GitHub</a>
       <button class="nav-link theme-toggle" id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">☾</button>
@@ -68,6 +69,88 @@
   <main id="gallery">
     <!-- sections are rendered from showcase.ts -->
   </main>
+
+  <!-- Each panel's id is its link: /about/#claude opens that tab. Without
+       script every panel shows, each under its own heading; about.ts turns
+       them into tabs. -->
+  <section class="ai" id="ai">
+    <p class="kicker">MCP&nbsp;/&nbsp;AI apps</p>
+    <h2 class="display small">Graphs <em>in</em> your AI chat</h2>
+    <p>
+      Connect Equation.io to your AI app, then ask for a graph. In Claude and
+      ChatGPT it appears right in the conversation — edit the equations, drag
+      the sliders, rotate it in 3D — and every graph comes with a link to open
+      it here. No account, no API key.
+    </p>
+    <div class="ai-url">
+      <code>https://equation.io/mcp</code>
+      <button class="copy" type="button" data-copy="https://equation.io/mcp">Copy</button>
+    </div>
+
+    <div class="ai-tabs" role="tablist" aria-label="AI app" hidden>
+      <a role="tab" id="tab-claude" href="#claude" aria-controls="claude">Claude</a>
+      <a role="tab" id="tab-chatgpt" href="#chatgpt" aria-controls="chatgpt">ChatGPT</a>
+      <a role="tab" id="tab-grok" href="#grok" aria-controls="grok">Grok</a>
+      <a role="tab" id="tab-other" href="#other" aria-controls="other">Other apps</a>
+    </div>
+
+    <div class="ai-panel" id="claude" role="tabpanel" aria-labelledby="tab-claude">
+      <h3>Claude</h3>
+      <ol>
+        <li>In the Claude desktop app or on claude.ai, open <a href="https://claude.ai/customize/connectors" rel="noopener"><b>Customize → Connectors</b></a>.</li>
+        <li>Click <b>Add custom connector</b>, name it <b>Equation.io</b>, paste <code>https://equation.io/mcp</code> and click <b>Add</b>.</li>
+        <li>Ask for a graph: <q>Show me a trefoil knot in 3D.</q> If Claude doesn't reach for it, turn it on under <b>+ → Connectors</b> in the chat.</li>
+      </ol>
+      <p class="note">
+        Works on every plan; the Free plan allows one custom connector. On Team
+        and Enterprise, an Owner adds it under <b>Organization settings →
+        Connectors</b>. Claude marks custom connectors as unverified —
+        Equation.io needs no sign-in, and its tools only make and read graphs.
+        <a href="https://claude.com/docs/connectors/custom/remote-mcp" rel="noopener">Anthropic's guide</a>
+      </p>
+    </div>
+
+    <div class="ai-panel" id="chatgpt" role="tabpanel" aria-labelledby="tab-chatgpt">
+      <h3>ChatGPT</h3>
+      <ol>
+        <li>On chatgpt.com, turn on <b>Settings → Security and login → Developer mode</b>.</li>
+        <li>Open <b>Plugins</b>, click <b>+</b>, name it <b>Equation.io</b>, paste <code>https://equation.io/mcp</code> with no authentication, and create it.</li>
+        <li>In a new chat, add Equation.io from the <b>+</b> menu and ask for a graph: <q>Graph y = a sin(x) with a slider for a.</q></li>
+      </ol>
+      <p class="note">
+        Developer mode is a beta on ChatGPT's paid plans, on the web, and ChatGPT
+        shows a warning for apps it hasn't reviewed.
+        <a href="https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt" rel="noopener">OpenAI's guide</a>
+      </p>
+    </div>
+
+    <div class="ai-panel" id="grok" role="tabpanel" aria-labelledby="tab-grok">
+      <h3>Grok</h3>
+      <ol>
+        <li>Open <a href="https://grok.com/connectors" rel="noopener"><b>grok.com/connectors</b></a>.</li>
+        <li>Click <b>New Connector</b>, choose <b>Custom</b>, paste <code>https://equation.io/mcp</code> and add it. There's nothing to sign in to.</li>
+        <li>Ask for a graph: <q>Plot the Lorenz attractor.</q> Grok replies with a link that opens it in Equation.io.</li>
+      </ol>
+      <p class="note">
+        On Grok Business and Enterprise, an admin adds the connector for the team first.
+        <a href="https://docs.x.ai/grok/connectors" rel="noopener">xAI's guide</a>
+      </p>
+    </div>
+
+    <div class="ai-panel" id="other" role="tabpanel" aria-labelledby="tab-other">
+      <h3>Other apps</h3>
+      <p>Any app that connects to remote MCP servers can use Equation.io:</p>
+      <dl>
+        <dt>Server URL</dt><dd><code>https://equation.io/mcp</code></dd>
+        <dt>Transport</dt><dd>Streamable HTTP</dd>
+        <dt>Authentication</dt><dd>None</dd>
+      </dl>
+      <p class="note">
+        No MCP? Any assistant that can read a web page can build graph links
+        itself — <a href="#deep-links">see below</a>.
+      </p>
+    </div>
+  </section>
 
   <section class="deeplinks" id="deep-links">
     <p class="kicker">URL&nbsp;/&nbsp;API</p>

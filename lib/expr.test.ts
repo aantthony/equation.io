@@ -445,7 +445,10 @@ describe('piecewise', () => {
   });
 
   it('rejects non-inequality conditions', () => {
-    expect(() => parseExpr('{x: 1, 2}')).toThrow(/inequalities/);
+    expect(() => parseExpr('{2: 1, 2}')).toThrow(/inequalities/);
+    expect(() => parseExpr('{x + 1: 1, 2}')).toThrow(/inequalities/);
+    // A name may stand for a condition, so the resolver judges it.
+    expect(analyzeRows(['y = {x: 1, 2}']).rows[0].error).toMatch(/x is not a condition/);
   });
 
   it('keeps plain braces as grouping', () => {

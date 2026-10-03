@@ -46,8 +46,7 @@ Agent-facing surface:
 - `/llms.txt` — link format + expression syntax reference
   ([`web/public/llms.txt`](web/public/llms.txt))
 - `/g/<eqs>` — share form of a graph link; the worker injects og:/twitter:
-  meta tags and `/api/og/<eqs>` renders the preview PNG on the CPU
-  (expressions compile to a stack machine — no WebGL in Workers)
+  meta tags with the graph title, description, and static site image
 - `/mcp` — stateless MCP server (Streamable HTTP) with `encode_graph_url`
   (validates rows, returns links), `decode_graph_url` (decodes links for editing),
   and `show_graph` (renders the interactive grapher inside MCP Apps hosts).

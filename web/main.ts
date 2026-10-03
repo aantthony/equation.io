@@ -3060,8 +3060,8 @@ function pickDataFiles() {
 }
 
 // The address bar shows the /g/ share form: it survives chat-app URL
-// linkifiers (lib/link.ts escapes parens etc.) and unfurls with a rendered
-// preview, so copying the URL is the share mechanism. /#payload links still
+// linkifiers (lib/link.ts escapes parens etc.) and unfurls with graph
+// metadata, so copying the URL is the share mechanism. /#payload links still
 // load (boot below) — they just normalize to /g/ on the next edit.
 function writeUrl() {
   if (embedded) {
@@ -5227,6 +5227,7 @@ function definitionMeaning(def: Definition, eq: Equation, animated: ReadonlySet<
       if (b.role === 'state')
         return `defines ${name}: a scalar state, integrated forward in time from its derivative${quiet}`;
       if (b.role === 'complex') return `defines ${name}: a complex number${quiet}`;
+      if (b.role === 'condition') return `defines ${name}: a condition, read in braces like {${name}: 1}${quiet}`;
       if (b.role === 'field')
         return `defines ${name}: a scalar field (a value at every point, e.g. a coordinate like r or theta)${quiet}`;
       if (sliderOf(eq)) return `defines ${name}: a scalar constant with a slider${quiet}`;

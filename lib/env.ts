@@ -18,6 +18,9 @@ export type NumericBinding = Readonly<
   /** `a = e^(iπ/3)`: a complex number with a name, written in wherever it is
    *  read. Not a constant (no one real value) and not a field (no position). */
   | { tag: 'scalar'; role: 'complex'; expr: Expr }
+  /** `within = r < R`: an inequality with a name, written in wherever a
+   *  condition reads it (`{within: 1}`). Not a field: it has no value. */
+  | { tag: 'scalar'; role: 'condition'; expr: Expr }
   | { tag: 'vector'; role: 'const' | 'field'; components: Components }
   | { tag: 'scalar'; role: 'state'; deriv: Expr; init: Expr }
   | { tag: 'vector'; role: 'state'; deriv: Components; init: Components }
@@ -172,6 +175,7 @@ export class Env {
   readonly consts = this.projection((_, b) => (b.tag === 'scalar' && b.role === 'const' ? b.expr : undefined), true);
   readonly fields = this.projection((_, b) => (b.tag === 'scalar' && b.role === 'field' ? b.expr : undefined), true);
   readonly complexes = this.projection((_, b) => (b.tag === 'scalar' && b.role === 'complex' ? b.expr : undefined));
+  readonly conditions = this.projection((_, b) => (b.tag === 'scalar' && b.role === 'condition' ? b.expr : undefined));
   readonly states: ReadonlyMap<string, StateDef> = this.projection(
     (_, b) => (b.tag === 'scalar' && b.role === 'state' ? { deriv: b.deriv, init: b.init } : undefined),
     true,
@@ -264,6 +268,7 @@ export type ValueDefinitions = Pick<
   | 'consts'
   | 'fields'
   | 'complexes'
+  | 'conditions'
   | 'states'
   | 'fns'
   | 'mats'

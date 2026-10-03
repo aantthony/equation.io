@@ -164,7 +164,8 @@ function bindingInfo(name: string, b: Binding): NameInfo {
       if (b.role === 'const') return { signature: name, type: 'number' };
       const over = overVars(paramsOf([b.expr]));
       const description = over.length ? `Depends on ${over.join(', ')}` : undefined;
-      return { signature: name, type: b.role === 'complex' ? 'complex number' : 'field', description };
+      const type = b.role === 'complex' ? 'complex number' : b.role === 'condition' ? 'condition' : 'field';
+      return { signature: name, type, description };
     }
     case 'vector': {
       const dim = b.role === 'state' ? b.deriv.length : b.components.length;

@@ -279,6 +279,15 @@ describe('complex lists', () => {
     expect(last([...doc, 'T = sort(S, re(S))', 'T[1]']).kind).toBe('point');
   });
 
+  it('is read by a named condition through its real part', () => {
+    expect(last(['a = 3 + 4i', 'ok = |a| < 6', 'ok']).row.info).toBe('Always true (5 < 6)');
+    // Above or below the condition, the same.
+    expect(last(['near = x^2 + y^2 < |a|', 'a = 3 + 4i', 'near']).kind).toBe('ineq2d');
+    expect(last(['a = 3 + 4i', 'near = |w - a| < 1', 'domain({near: w, 0})']).row.error).toBeUndefined();
+    const rows = analyzeRows(['a = 3 + 4i', 'ok = a < 2']).rows;
+    expect(rows[1].error).toBe("ok's comparison must be real — take re(…), im(…) or abs(…).");
+  });
+
   it('names the variable a list may not use', () => {
     expect(last(['[w, 2w]']).row.error).toBe('A list may only use constants and t (found w).');
   });
