@@ -15,13 +15,7 @@ export interface SyntaxEntry {
   text: string;
 }
 
-const SKIP_SECTIONS = new Set([
-  'Deep links',
-  'Share links with preview images (/g/)',
-  'MCP server',
-  'Guidance for assistants',
-  'More',
-]);
+const SKIP_SECTIONS = new Set(['Deep links', 'Share links (/g/)', 'MCP server', 'Guidance for assistants', 'More']);
 
 /** Splits the reference into searchable entries, in document order. */
 export function syntaxEntries(reference: string): SyntaxEntry[] {
