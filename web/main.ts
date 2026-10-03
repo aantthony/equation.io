@@ -3060,8 +3060,8 @@ function pickDataFiles() {
 }
 
 // The address bar shows the /g/ share form: it survives chat-app URL
-// linkifiers (lib/link.ts escapes parens etc.) and unfurls with a rendered
-// preview, so copying the URL is the share mechanism. /#payload links still
+// linkifiers (lib/link.ts escapes parens etc.) and unfurls with graph
+// metadata, so copying the URL is the share mechanism. /#payload links still
 // load (boot below) — they just normalize to /g/ on the next edit.
 function writeUrl() {
   if (embedded) {
