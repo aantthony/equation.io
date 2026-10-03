@@ -1,7 +1,7 @@
 import { Env, type Components, type ValueDefinitions, lowerValueRef } from './env.ts';
 import { MAP, childrenOf, LOOP_LIMIT, LOOP_LIMIT_MAX, RECUR, isRecur, loopLeaves } from './expr.ts';
 import { mapChildren, notACondition, structuralDiagnostic, legacyCallArgs } from './expr.ts';
-import { exprKey, type ProductGlyph } from './expr.ts';
+import { exprKey, INTERVAL, type ProductGlyph } from './expr.ts';
 /**
  * User definitions and derivative syntax.
  *
@@ -715,8 +715,9 @@ const FN_RE = new RegExp(
   String.raw`^\s*(${NAME_SRC})\s*\(\s*(${NAME_SRC}(?:\s*,\s*${NAME_SRC})*)\s*\)\s*=(?!=)([\s\S]+)$`,
 );
 const CONST_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*=(?!=)([\s\S]+)$`);
-/** The right side of `u = interval(0, 2pi)`: the one definition u and v take. */
-const INTERVAL_RHS_RE = /^\s*interval\s*\(/;
+/** A right side that may define u or v (`u = interval(0, 2pi)`); resolution
+ *  checks it is an interval and nothing else. */
+const INTERVAL_RHS_RE = /\binterval\s*\(/i;
 /** `p ∈ A` (or `p \in A`): a binder, a draw from A. */
 const DRAW_RE = new RegExp(String.raw`^\s*(${NAME_SRC})\s*${DRAW_OP_SRC}\s*([\s\S]+)$`);
 const STATE_RE = new RegExp(String.raw`^\s*(${NAME_SRC})'\s*=(?!=)([\s\S]+)$`);
@@ -1384,12 +1385,14 @@ const ALONG: ReadonlySet<string> = new Set(['u', ...SPACE]);
  */
 function curveOperand(name: string, arg: Expr, ctx: Ctx): { items: readonly Expr[]; over?: Expr } {
   const usage = `${name} takes a parametric curve in u, like ${CURVE_OP_EXAMPLE[name]} with C = (cos(2pi u), sin(2pi u)).`;
+  const U: Expr = { kind: 'var', name: 'u' };
+  const uInterval = ctx.opts.interval?.('u');
   let r: Expr = arg;
   if (arg.kind === 'var') {
     const fn = ctx.getFn(arg.name);
     if (fn) {
       if (fn.params.length !== 1 || fn.recursive) throw new Error(usage);
-      r = substVars(fn.body, { [fn.params[0]]: { kind: 'var', name: 'u' } });
+      r = substVars(fn.body, { [fn.params[0]]: uInterval ?? U });
     }
   }
   if (ctx.opts.comps) r = lowerGeom(r, ctx.opts.comps, () => null, ctx.opts.isList);
@@ -1402,18 +1405,19 @@ function curveOperand(name: string, arg: Expr, ctx: Ctx): { items: readonly Expr
       throw new Error(`${name}: ${n} is not a curve — define one first, like ${n} = (cos(2pi u), sin(2pi u)).`);
     }
   }
-  if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
-  let vars = freeVars(r);
+  // The interval the curve runs along, read at its own values as u: u's own
+  // (`u = interval(0, 2pi)`), or else the one interval of a curve without u.
+  // Any other interval stays, a family of curves.
   const hidden = intervalsIn(r);
-  let over: Expr | undefined;
-  if (!vars.has('u') && hidden.length === 1) {
-    over = hidden[0].node;
-    r = replaceIntervals(r, () => ({ kind: 'var', name: 'u' }));
-    vars = freeVars(r);
-  }
+  const uKey = uInterval && exprKey(uInterval);
+  const along =
+    hidden.find(h => h.key === uKey) ?? (hidden.length === 1 && !freeVars(r).has('u') ? hidden[0] : undefined);
+  if (along) r = replaceIntervals(r, h => (h.key === along.key ? U : h.node));
+  if (r.kind !== 'vec' || (r.items.length !== 2 && r.items.length !== 3)) throw new Error(usage);
+  const vars = freeVars(r);
   if (!vars.has('u')) throw new Error(`${name} needs a curve, which moves with u — this is a fixed point. ${usage}`);
-  if (vars.has('v') || hasInterval(r) || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
-  return { items: (r as Expr & { kind: 'vec' }).items, over };
+  if (vars.has('v') || [...SPACE].some(n => vars.has(n))) throw new Error(usage);
+  return { items: r.items, over: along?.node };
 }
 
 /** Whether e is a list: a literal, a data column or a named list, or one
@@ -2880,6 +2884,11 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         const notDrawn = (what: string): void => {
           if (d.draw) throw new Error(`${d.name} ∈ … draws from a list; that is ${what}.`);
         };
+        // u and v take only an interval: the range they run over.
+        if (PARAMS.has(d.name) && !(resolved.kind === 'call' && resolved.name === INTERVAL))
+          throw new Error(
+            `${d.name} can only be defined as an interval, the range it runs over: ${d.name} = interval(0, 2pi).`,
+          );
         if (hasInterval(resolved)) {
           notDrawn('an interval');
           defs.intervals.set(d.name, resolved);

@@ -76,6 +76,20 @@ describe('a range for u and v', () => {
     expect(analyzeRows(['u = interval(0, 1)', 'u = interval(0, 2)']).rows[1].error).toBe('u is already defined.');
     // A function's own u is still its parameter.
     expect(kinds(['u = interval(0, 2pi)', 'f(u) = u^2', '(u, f(1))'])).toEqual(['const', 'fn', 'curve']);
+    expect(kinds(['u = Interval(0, 2pi)', '(cos(u), sin(u))'])).toEqual(['const', 'curve']);
+    for (const rows of [['u = interval(0, 1) + u'], ['u = interval(0, 1) + x'], ['u = 2 interval(0, 1)']]) {
+      expect(analyzeRows(rows).rows[0].error, rows[0]).toMatch(/u can only be defined as an interval/);
+    }
+    expect(analyzeRows(['u = interval(0, 1) + v', 'v = interval(0, 1) + u']).rows.map(r => r.error)).toEqual([
+      expect.stringMatching(/u can only be defined as an interval/),
+      expect.stringMatching(/v can only be defined as an interval/),
+    ]);
+  });
+
+  it('a system over two intervals is still a family, not u and v', () => {
+    expect(
+      analyzeRows(['s = interval(0, 1)', 'q = interval(0, 1)', '(x, y, z) = (s, q, s q)']).rows[2].error,
+    ).not.toMatch(/u\/v/);
   });
 
   it('curve operators read the curve at values of u in its range', () => {
@@ -91,5 +105,24 @@ describe('a range for u and v', () => {
       'const',
       'curve',
     ]);
+    // A function operand is called at u's own interval, not a second u.
+    expect(kinds(['u = interval(0, 2pi)', 'c(s) = (cos(s), 2sin(s))', '(u, curvature(c))'])).toEqual([
+      'const',
+      'fn',
+      'curve',
+    ]);
+    expect(value(['u = interval(0, 2pi)', 'c(s) = (cos(s), 2sin(s))', 'curvature(c, 0)'])).toBeCloseTo(0.25);
+  });
+
+  it('another interval beside the curve parameter stays a family of curves', () => {
+    // As on main: circles of radius r in [1, 2], curvature 1/r.
+    expect(kinds(['r = interval(1, 2)', '(u, curvature((r cos(2pi u), r sin(2pi u))))'])).toEqual(['const', 'region']);
+    expect(kinds(['r = interval(1, 2)', 'curvature((r cos(2pi u), r sin(2pi u)), 0)'])).toEqual([
+      'const',
+      'distribution',
+    ]);
+    expect(
+      kinds(['u = interval(0, 2pi)', 'r = interval(1, 2)', 'C = (r cos(u), r sin(u))', 'curvature(C, 0)']),
+    ).toEqual(['const', 'const', 'const', 'distribution']);
   });
 });
