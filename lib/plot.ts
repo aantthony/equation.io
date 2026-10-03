@@ -19,6 +19,7 @@ import { coordinateRow, lowerCoordinateFlow } from './coordinate.ts';
 import { SPECIAL_FORMS, WHOLE_EXPR_NAMES, inferScalarType, isComplexValued, usesComplex } from './complex.ts';
 import {
   ANGLE_FN,
+  CONSTANTS,
   REVOLVE_AXES,
   legacyCallArgs,
   builtinFn,
@@ -29,6 +30,7 @@ import {
   ineqComparisons,
   substVars,
 } from './expr.ts';
+import { diff } from './diff.ts';
 import type { FigureName } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
@@ -404,7 +406,7 @@ function solidFaces(
     names.push(name);
   }
   const items = expr.items.map(c => replaceIntervals(c, h => sweep(h, slot.get(h.key)!)));
-  if (folds(items, names)) throw new Error(SOLID_FOLDS);
+  checkFolds({ items, params: names }, null);
   const u: Expr = { kind: 'var', name: 'u' };
   const v: Expr = { kind: 'var', name: 'v' };
   const members: Expr[] = [];
@@ -418,30 +420,51 @@ function solidFaces(
   return { family: { kind: 'family', members }, map: { items, params: names } };
 }
 
-const SOLID_FOLDS = 'This solid folds over itself inside its parameter box, so its faces do not bound it.';
+interface SolidMap {
+  readonly items: readonly Expr[];
+  readonly params: readonly string[];
+}
+
+/** Each solid's map, over its params in [0, 1], for its fold check in analysis. */
+const solidMaps = new WeakMap<MathObject, SolidMap>();
 
 /**
- * The fold check for a solid whose map uses constants (sliders), which
- * classification cannot evaluate: analysis runs it with their values, read
- * through `consts` — the resolver's recording proxy, so a slider read here
- * leaves the runtime set and a drag re-runs it. A name still unknown (t, an
- * animated constant, a state) leaves the map unchecked.
+ * The fold check, split by what the Jacobian reads besides the params. Only
+ * those names can fold the map: a translation (`… + k`) cannot, and is read
+ * as 0. A Jacobian of numbers alone is checked in classification (`consts`
+ * null). One reading sliders needs their values, which only analysis has: it
+ * passes the resolver's recording proxy, so the sliders read here leave the
+ * runtime-uniform set and a drag re-runs the check. A name with no value
+ * (t, an animated constant, a state) leaves the map unchecked, read nothing.
  */
-export function checkSolid(object: MathObject, consts: Readonly<Record<string, number>>): void {
-  if (object.kind !== 'family' || !object.solid) return;
-  const { items, params } = object.solid;
-  const env: Record<string, Expr> = {};
-  for (const name of new Set(items.flatMap(c => [...freeVars(c)])))
-    if (!params.includes(name) && Object.hasOwn(consts, name)) env[name] = { kind: 'num', value: consts[name] };
-  if (!Object.keys(env).length) return;
-  if (
-    folds(
-      items.map(c => substVars(c, env)),
-      params,
-    )
-  )
-    throw new Error(SOLID_FOLDS);
+function checkFolds(map: SolidMap, consts: Readonly<Record<string, number>> | null): void {
+  const { items, params } = map;
+  const valued = (n: string) => consts !== null && Object.hasOwn(consts, n);
+  // pi and e compile as themselves unless the document redefines them.
+  const free = new Set(
+    items
+      .flatMap(c => [...freeVars(c)])
+      .filter(n => !params.includes(n) && (valued(n) || !Object.hasOwn(CONSTANTS, n))),
+  );
+  let shaping: Set<string>;
+  try {
+    shaping = new Set(items.flatMap(c => params.flatMap(p => [...freeVars(diff(c, p))])).filter(n => free.has(n)));
+  } catch {
+    shaping = free;
+  }
+  if (consts === null ? shaping.size > 0 : shaping.size === 0 || ![...shaping].every(valued)) return;
+  const extra = [...free];
+  const values = extra.map(n => (shaping.has(n) ? consts![n] : 0));
+  if (folds(items, params, extra, values)) throw new Error(SOLID_FOLDS);
 }
+
+/** The fold check of a solid row whose map reads sliders, at their values (see checkFolds). */
+export function checkSolid(object: MathObject, consts: Readonly<Record<string, number>>): void {
+  const map = solidMaps.get(object);
+  if (map) checkFolds(map, consts);
+}
+
+const SOLID_FOLDS = 'This solid folds over itself inside its parameter box, so its faces do not bound it.';
 
 /**
  * Whether the Jacobian of `items` over `names` (each in [0, 1]) changes sign
@@ -451,21 +474,27 @@ export function checkSolid(object: MathObject, consts: Readonly<Record<string, n
  * and differencing noise on a flat solid (det J zero throughout, whose faces
  * still draw it) stays far below the threshold. Zeros on the faces (r = 0 or
  * θ = 0 of a ball) are no fold. A fold narrower than the grid can be missed.
- * A map using sliders or t does not compile here and is not checked; analysis
- * checks a slider's value (checkSolid).
+ * Other names in the map (`extra`) take `values`; a map that still does not
+ * compile is not checked.
  */
-function folds(items: readonly Expr[], names: readonly string[]): boolean {
+function folds(
+  items: readonly Expr[],
+  names: readonly string[],
+  extra: readonly string[] = [],
+  values: readonly number[] = [],
+): boolean {
   const n = 7;
   const inset = 1e-3;
   const h = 1e-4;
   let progs: Prog[];
   try {
-    progs = items.map(c => compileProg(c, new Map(names.map((name, m) => [name, m]))));
+    const slots = new Map([...names, ...extra].map((name, m) => [name, m]));
+    progs = items.map(c => compileProg(c, slots));
   } catch {
     return false;
   }
   const stack = new Float64Array(Math.max(...progs.map(p => p.depth)));
-  const p = new Float64Array(3);
+  const p = new Float64Array([0, 0, 0, ...values]);
   const col = (d: number): number[] => {
     const x = p[d];
     p[d] = x + h;
@@ -724,7 +753,7 @@ function classifyLowered(
       // The faces are this row's own surfaces, not a family the user wrote:
       // their errors are the row's.
       let cls: Classified;
-      let map: { items: Expr[]; params: string[] };
+      let map: SolidMap;
       try {
         const faces = solidFaces(expr, hidden, vars, defined);
         map = faces.map;
@@ -732,7 +761,9 @@ function classifyLowered(
       } catch (err) {
         throw new Error((err instanceof Error ? err.message : String(err)).replace(/^Family element \d+: /, ''));
       }
-      return { cls: { ...cls, object: { ...(cls.object as MathObject & { kind: 'family' }), solid: map } } };
+      const object: MathObject = { ...(cls.object as MathObject & { kind: 'family' }), solid: true };
+      solidMaps.set(object, map);
+      return { cls: { ...cls, object } };
     }
     if (hidden.length > free.length)
       throw new Error(

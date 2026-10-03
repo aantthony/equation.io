@@ -944,8 +944,6 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
-      // A solid over sliders is checked for folds at their values.
-      checkSolid(row.cls.object, ropts.consts!);
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;
@@ -956,6 +954,8 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.mark = true;
         continue;
       }
+      // A solid whose shape reads sliders is checked for folds at their values.
+      checkSolid(row.cls.object, ropts.consts!);
       const hint = curveHint(row.cls.object, row.text);
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
