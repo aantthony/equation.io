@@ -51,7 +51,7 @@ import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { lowerGeom } from './geom.ts';
 import { lowerLists, reducesMembers, SCALAR_REDUCTIONS } from './list.ts';
-import { type Classified, classify, classifyRow, plotReadout } from './plot.ts';
+import { type Classified, checkSolid, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
 import { type SeqScan, classifySeqRec, scanSequences, sequenceResolver } from './seq.ts';
 import { classifyAutomatonRow, exactCases } from './automaton.ts';
@@ -954,6 +954,8 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.mark = true;
         continue;
       }
+      // A solid whose shape reads sliders is checked for folds at their values.
+      checkSolid(row.cls.object, ropts.consts!);
       const hint = curveHint(row.cls.object, row.text);
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
