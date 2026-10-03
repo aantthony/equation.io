@@ -289,7 +289,10 @@ void main() {
 `;
 }
 
-function curveFrag(field: string, params?: string[], graphEval?: Curve2D['graphEval']): string {
+/** Pixels within this distance of a curve are drawn (smoothstep's upper edge below). */
+const CURVE_REACH_PX = 2.1;
+
+export function curveFrag(field: string, params?: string[], graphEval?: Curve2D['graphEval']): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -302,18 +305,24 @@ ${paramDecls(params)}
 out vec4 outColor;
 ${GLSL_PRELUDE}
 float F(float x, float y) { return ${field}; }
-${graphEval ? `vec2 G(float x) { return ${graphEval.glsl}; }` : ''}
+${graphEval ? `vec4 G(float x, float reach) { return ${graphEval.glsl}; }` : ''}
 void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
 ${
   graphEval
     ? `
-  vec2 signal = G(p.x);
+  vec4 signal = G(p.x, ${CURVE_REACH_PX.toFixed(1)} * uUpp.x);
   float v = p.y - signal.x;
   if (isnan(v) || isinf(v)) discard;
   vec2 gradient = vec2(-signal.y * ${graphEval.slopeScale.toExponential()}, 1.0) * uUpp;
   float distPx = abs(v) / max(length(gradient), 1e-24);
   if (isnan(distPx) || isinf(distPx)) discard;
+  // The slope's estimate trusts one slope across the pixel's reach, which
+  // harmonics too fast to resolve at this zoom break: zoomed out, their
+  // steep slope would put far pixels on the curve. Within the reach the
+  // curve stays in [signal.z, signal.w], so a pixel outside that band is at
+  // least that far away.
+  distPx = max(distPx, max(signal.z - p.y, p.y - signal.w) / uUpp.y);
 `
     : `
   float v = F(p.x, p.y);
@@ -344,7 +353,7 @@ ${
 `
 }
 
-  float alpha = 1.0 - smoothstep(1.1, 2.1, distPx);
+  float alpha = 1.0 - smoothstep(1.1, ${CURVE_REACH_PX.toFixed(1)}, distPx);
   if (alpha <= 0.0) discard;
   outColor = vec4(uColor, alpha);
 }
