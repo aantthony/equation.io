@@ -872,7 +872,7 @@ describe('usage counts', () => {
       equations: ['y = sin(x)', 'y = cos(x)', 'x^2 + y^2 + z^2 = 1', 'a = 2', 'y = florb(x)'],
     });
     expect(points()).toEqual([
-      { blobs: ['call', 'show_graph', '', ''], doubles: [5, 1, 1, 0] },
+      { blobs: ['call', 'show_graph', '', '', ''], doubles: [5, 1, 1, 0] },
       { blobs: ['type', 'show_graph', '', 'implicit2d'], doubles: [] },
       { blobs: ['type', 'show_graph', '', 'implicit3d'], doubles: [] },
     ]);
@@ -887,10 +887,20 @@ describe('usage counts', () => {
     await call('encode_graph_url', { rows: ['y = x'] });
     await call('no_such_tool', {});
     expect(points().filter(p => p.blobs![0] === 'call')).toEqual([
-      { blobs: ['call', 'encode_graph_url', '', ''], doubles: [1, 0, 0, 0] },
-      { blobs: ['call', 'decode_graph_url', '', ''], doubles: [2, 0, 0, 0] },
-      { blobs: ['call', 'encode_graph_url', '', ''], doubles: [0, 0, 0, 1] },
+      { blobs: ['call', 'encode_graph_url', '', '', ''], doubles: [1, 0, 0, 0] },
+      { blobs: ['call', 'decode_graph_url', '', '', ''], doubles: [2, 0, 0, 0] },
+      { blobs: ['call', 'encode_graph_url', '', '', 'arguments'], doubles: [0, 0, 0, 1] },
     ]);
+  });
+
+  it('records why a call was rejected, never the input or the message', async () => {
+    usage.length = 0;
+    await call('encode_graph_url', { equations: ['y = florb; y = 2'] });
+    await call('decode_graph_url', { url: 7 });
+    await call('decode_graph_url', { url: 'not a florb url' });
+    await call('decode_graph_url', { url: 'https://equation.io/about/' });
+    expect(points().map(p => p.blobs![4])).toEqual(['two-equations', 'arguments', 'bad-url', 'no-equations']);
+    expect(JSON.stringify(usage)).not.toContain('florb');
   });
 
   it('names the client by its User-Agent product', () => {

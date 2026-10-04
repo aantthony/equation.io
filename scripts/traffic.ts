@@ -32,8 +32,11 @@ if (!Number.isInteger(days) || days < 1 || days > 30) {
 
 type Json = Record<string, any>;
 
+// Without CLOUDFLARE_API_TOKEN, which wrangler would hand back instead of the login.
+const { CLOUDFLARE_API_TOKEN: _, ...loginEnv } = process.env;
 const login = execFileSync('npx', ['wrangler', 'auth', 'token'], {
   encoding: 'utf8',
+  env: loginEnv,
   stdio: ['ignore', 'pipe', 'inherit'],
 })
   .trim()
@@ -152,12 +155,12 @@ async function sql(query: string): Promise<Json[]> {
   return ((await res.json()) as { data: Json[] }).data;
 }
 
-// blob1 kind, blob2 tool, blob3 client, blob4 type; double1 rows, double2
+// blob1 kind, blob2 tool, blob3 client, blob4 type, blob5 failure reason; double1 rows, double2
 // error rows, double3 invalid, double4 failed (worker/mcp-usage.ts).
 const from = `timestamp >= toDateTime('${since.toISOString().slice(0, 19).replace('T', ' ')}')`;
 const calls = `FROM equation_mcp WHERE blob1 = 'call' AND ${from}`;
 const n = (v: unknown) => Number(v ?? 0);
-const [perDay, perTool, perClient, perType] = await Promise.all([
+const [perDay, perTool, perClient, perType, perReason] = await Promise.all([
   sql(
     `SELECT toStartOfDay(timestamp) AS day, SUM(_sample_interval) AS calls,
        SUM(_sample_interval * double3) AS invalid, SUM(_sample_interval * double4) AS failed
@@ -173,6 +176,10 @@ const [perDay, perTool, perClient, perType] = await Promise.all([
   sql(
     `SELECT blob4 AS type, SUM(_sample_interval) AS calls FROM equation_mcp
      WHERE blob1 = 'type' AND ${from} GROUP BY type ORDER BY calls DESC`,
+  ),
+  sql(
+    `SELECT blob2 AS tool, blob5 AS reason, SUM(_sample_interval) AS calls
+     ${calls} AND double4 = 1 GROUP BY tool, reason ORDER BY calls DESC`,
   ),
 ]);
 const pct = (part: unknown, whole: unknown) => (n(whole) ? `${Math.round((100 * n(part)) / n(whole))}%` : '');
@@ -198,3 +205,5 @@ console.table(
 console.table(perClient.map(r => ({ client: r.client || '?', calls: n(r.calls) })));
 console.log('Graph types in MCP calls (calls that drew each):');
 console.table(perType.map(r => ({ type: r.type, calls: n(r.calls) })));
+console.log('Rejected calls by reason ("?" predates recording reasons; internal is a bug on our side):');
+console.table(perReason.map(r => ({ tool: r.tool, reason: r.reason || '?', calls: n(r.calls) })));
