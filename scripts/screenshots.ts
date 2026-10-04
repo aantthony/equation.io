@@ -222,7 +222,7 @@ try {
       }),
     );
 
-    // Landing pages with a dedicated social card need a stable PNG
+    // Landing pages whose hero the OG renderer cannot draw need a stable PNG
     // at /shots/<slug>.png (the gallery file is WebP and content-hashed).
     for (const page of LANDINGS) {
       if (page.og !== 'shot') continue;

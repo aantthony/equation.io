@@ -1,6 +1,8 @@
 /**
  * Row colors: the palettes, which rows take a color from them, and which slot
- * each takes. The app (web/main.ts, web/theme.ts) colors through here.
+ * each takes. The app (web/main.ts, web/theme.ts) and the share image
+ * (worker/og.ts) both color through here, so a shared link opens in the
+ * colors its preview showed.
  */
 import type { CpuPlan } from './compiler.ts';
 import { noteColor } from './statements.ts';

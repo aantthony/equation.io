@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PointTrail } from './point-trail.ts';
 import { analyze } from '../worker/graph.ts';
+import { canRenderOg, previewGap } from '../worker/og.ts';
 
 describe('trail(point)', () => {
   it('accepts literals, named point arithmetic, and 3D state vectors', () => {
@@ -50,6 +51,12 @@ describe('trail(point)', () => {
     expect(graph.constEnv.b).toBe(7);
     expect(graph.defs.consts.has('a')).toBe(false);
     expect(graph.defs.fns.has('f')).toBe(false);
+  });
+
+  it('reports live history honestly to static preview consumers', () => {
+    const graph = analyze(['trail(cos(t), sin(t), t)']);
+    expect(canRenderOg(graph)).toBe(false);
+    expect(previewGap(graph.rows[0], true)).toContain('live motion history');
   });
 });
 

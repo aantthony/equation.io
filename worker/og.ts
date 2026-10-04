@@ -1,14 +1,1067 @@
 /**
- * Legacy preview metadata retained while the MCP app is in ChatGPT review.
- * The tool descriptions, schemas, and responses remain unchanged; OG image
- * generation has been removed. This module only classifies preview gaps.
+ * CPU renderer for /g/ link-preview images (og:image).
+ *
+ * Workers have no WebGL, so this rasterizes directly: expressions compile to
+ * stack programs (lib/vm.ts) and 2D plots sample per pixel — implicit curves via
+ * the same |F|/|∇F| distance estimate the shader uses, regions as fills,
+ * scalar fields as a colormap. 3D rows draw as projected wireframes
+ * (parametric surfaces/curves, z = f(x,y) heightmaps). Output is a PNG built
+ * with CompressionStream — no image library.
  */
-import { LOOP_LIMIT } from '../lib/expr.ts';
+import { traceIntersection } from '../lib/intersection.ts';
+import { traceField } from '../lib/flow.ts';
+import { type PmfStems, markerHeight, scaleCurve, scaleStems, shadePolygon, stemGeometry } from '../lib/dist.ts';
+import { evalSampler, minusTint, runPaths, shadeNames, shadeRuns } from '../lib/intshade.ts';
+import { type Expr, LOOP_LIMIT, evaluate, substVars } from '../lib/expr.ts';
+import {
+  type CellGrid,
+  TABLE_MAX,
+  cellShades,
+  evalTable,
+  runAutomaton,
+  runBoard,
+  tableShades,
+  latticeFrame,
+} from '../lib/automaton.ts';
+import { arrowHead } from '../lib/geom.ts';
+import { glyphScale } from '../lib/glyphs.ts';
+import { hullFaces } from '../lib/hull.ts';
+import { vertexSampler } from '../lib/figure-vertices.ts';
+import { solveSystem, traceSystem } from '../lib/solve.ts';
+import { pathSampler, regionSampler } from '../lib/path.ts';
 import type { PublicKind } from '../lib/math-object.ts';
-import type { RowInfo } from './graph.ts';
+import { type ViewSpec, clampPhi, fitPanelWindow, linkedWindow, orientLattice } from '../lib/view.ts';
+import { type GridRowSpec, layoutPanels, linkRoot, panelIndices, splitsOf } from '../lib/panels.ts';
+import { LIGHT_PALETTE, assignColors, takesColor } from '../lib/palette.ts';
+import { noteColor } from '../lib/statements.ts';
+import { type Analysis, type RowInfo, analyze } from './graph.ts';
+import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 
+export const OG_WIDTH = 600;
+export const OG_HEIGHT = 315;
 export const MAX_PLOTS = 6;
 
+interface Raster {
+  w: number;
+  h: number;
+  /** RGB, row-major. */
+  px: Uint8ClampedArray;
+}
+
+function blend(r: Raster, x: number, y: number, c: [number, number, number], a: number) {
+  if (x < 0 || y < 0 || x >= r.w || y >= r.h || a <= 0) return;
+  const i = (y * r.w + x) * 3;
+  r.px[i] += (c[0] * 255 - r.px[i]) * a;
+  r.px[i + 1] += (c[1] * 255 - r.px[i + 1]) * a;
+  r.px[i + 2] += (c[2] * 255 - r.px[i + 2]) * a;
+}
+
+/** 2px-wide line with round-ish ends, stepped in unit increments. */
+function drawLine(r: Raster, x0: number, y0: number, x1: number, y1: number, c: [number, number, number], a = 1) {
+  const dx = x1 - x0,
+    dy = y1 - y0;
+  const n = Math.max(1, Math.ceil(Math.max(Math.abs(dx), Math.abs(dy))));
+  if (n > 4000) return; // discontinuity in a sampled curve — don't draw across it
+  for (let i = 0; i <= n; i++) {
+    const x = x0 + (dx * i) / n,
+      y = y0 + (dy * i) / n;
+    const xi = Math.round(x),
+      yi = Math.round(y);
+    blend(r, xi, yi, c, a);
+    blend(r, xi + 1, yi, c, a * 0.6);
+    blend(r, xi, yi + 1, c, a * 0.6);
+    blend(r, xi + 1, yi + 1, c, a * 0.35);
+  }
+}
+
+/** A point list's dots: a handful read as points, a few hundred as a cloud,
+ *  where full-size dots would merge into one blot (the app thins them too). */
+const listDotRadius = (count: number) => (count > 200 ? 2 : 4.5);
+
+function drawDisc(r: Raster, cx: number, cy: number, rad: number, c: [number, number, number], a = 1) {
+  for (let y = Math.floor(cy - rad - 1); y <= cy + rad + 1; y++) {
+    for (let x = Math.floor(cx - rad - 1); x <= cx + rad + 1; x++) {
+      const d = Math.hypot(x - cx, y - cy);
+      blend(r, x, y, c, a * Math.max(0, Math.min(1, rad - d + 0.5)));
+    }
+  }
+}
+
+// --- 2D view ---
+
+/** The smallest cell a lattice preview opens on: the app's value size (web/render2d.ts LATTICE_VALUE_PX) plus margin. */
+const LATTICE_CELL_PX = 48;
+
+interface View2D {
+  ratio?: number;
+  cx: number;
+  cy: number;
+  /** World units per pixel. */
+  upp: number;
+}
+
+const toScreenX = (r: Raster, v: View2D, wx: number) => r.w / 2 + (wx - v.cx) / v.upp;
+const toScreenY = (r: Raster, v: View2D, wy: number) => r.h / 2 - (wy - v.cy) / (v.upp / (v.ratio ?? 1));
+
+function drawGrid2D(r: Raster, v: View2D, axesOnly = false) {
+  const minor: [number, number, number] = [0.92, 0.92, 0.92];
+  const axis: [number, number, number] = [0.65, 0.65, 0.65];
+  // With a viewport row the window is author-controlled: a zoomed-out view
+  // would paint one gridline per pixel (or worse), so drop the unit grid once
+  // it gets denser than ~3px and keep only the axes.
+  const x0 = v.cx - (r.w / 2) * v.upp,
+    x1 = v.cx + (r.w / 2) * v.upp;
+  const y0 = v.cy - (r.h / 2) * (v.upp / (v.ratio ?? 1)),
+    y1 = v.cy + (r.h / 2) * (v.upp / (v.ratio ?? 1));
+  const lines = (lo: number, hi: number, upp: number) =>
+    1 / upp >= 3 && !axesOnly
+      ? Array.from({ length: Math.max(0, Math.floor(hi) - Math.ceil(lo) + 1) }, (_, i) => Math.ceil(lo) + i)
+      : [0];
+  for (const wx of lines(x0, x1, v.upp)) {
+    const sx = Math.round(toScreenX(r, v, wx));
+    for (let y = 0; y < r.h; y++) blend(r, sx, y, wx === 0 ? axis : minor, 1);
+  }
+  for (const wy of lines(y0, y1, v.upp / (v.ratio ?? 1))) {
+    const sy = Math.round(toScreenY(r, v, wy));
+    for (let x = 0; x < r.w; x++) blend(r, x, sy, wy === 0 ? axis : minor, 1);
+  }
+}
+
+/** Sample prog over the pixel-corner grid: (w+1) x (h+1). */
+function sampleField(r: Raster, v: View2D, prog: Prog, env: EvalEnv): Float64Array {
+  const { w, h } = r;
+  const grid = new Float64Array((w + 1) * (h + 1));
+  const { vars, stack, slotX, slotY } = env;
+  for (let j = 0; j <= h; j++) {
+    const wy = v.cy + (h / 2 - j) * (v.upp / (v.ratio ?? 1));
+    vars[slotY] = wy;
+    for (let i = 0; i <= w; i++) {
+      vars[slotX] = v.cx + (i - w / 2) * v.upp;
+      grid[j * (w + 1) + i] = run(prog, vars, stack);
+    }
+  }
+  return grid;
+}
+
+/** Paint the zero set of a sampled field using a distance estimate. */
+function strokeZeroSet(r: Raster, grid: Float64Array, c: [number, number, number]) {
+  const { w, h } = r;
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const f00 = grid[j * (w + 1) + i],
+        f10 = grid[j * (w + 1) + i + 1];
+      const f01 = grid[(j + 1) * (w + 1) + i],
+        f11 = grid[(j + 1) * (w + 1) + i + 1];
+      const favg = (f00 + f10 + f01 + f11) / 4;
+      if (!Number.isFinite(favg)) continue;
+      const fx = (f10 + f11 - f00 - f01) / 2;
+      const fy = (f01 + f11 - f00 - f10) / 2;
+      const d = Math.abs(favg) / (Math.hypot(fx, fy) + 1e-12);
+      if (d < 1.6) blend(r, i, j, c, Math.max(0, Math.min(1, 1.6 - d)));
+    }
+  }
+}
+
+function fillNegative(r: Raster, grid: Float64Array, c: [number, number, number], a: number) {
+  const { w, h } = r;
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      if (grid[j * (w + 1) + i] < 0) blend(r, i, j, c, a);
+    }
+  }
+}
+
+/** Arrowhead length for vector(…) rows, in raster pixels (the og canvas is
+ *  about half the app's size, so this is smaller than render2d's 12). */
+const ARROW_HEAD_PX = 9;
+
+/**
+ * Scanline fill of a closed polygon given in screen coordinates, using the
+ * nonzero winding rule — the canvas default the live app fills with, so
+ * self-intersecting figures (a pentagram) fill the same way in both.
+ */
+function fillPolygon(r: Raster, sx: number[], sy: number[], c: [number, number, number], a: number) {
+  polygonSpans(r, sx, sy, (y, xa, xb) => {
+    for (let px = xa; px <= xb; px++) blend(r, px, y, c, a);
+  });
+}
+
+/** The pixel runs fillPolygon covers, row by row (nonzero rule). */
+function polygonSpans(r: Raster, sx: number[], sy: number[], span: (y: number, xa: number, xb: number) => void) {
+  const n = sx.length;
+  const y0 = Math.max(0, Math.floor(Math.min(...sy)));
+  const y1 = Math.min(r.h - 1, Math.ceil(Math.max(...sy)));
+  for (let y = y0; y <= y1; y++) {
+    const yc = y + 0.5;
+    const hits: [number, number][] = [];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const ya = sy[i],
+        yb = sy[j];
+      if (ya <= yc === yb <= yc) continue;
+      hits.push([sx[i] + ((yc - ya) / (yb - ya)) * (sx[j] - sx[i]), yb > ya ? 1 : -1]);
+    }
+    hits.sort((p, q) => p[0] - q[0]);
+    let wind = 0,
+      spanStart = 0;
+    for (const [x, dir] of hits) {
+      if (wind === 0) spanStart = x;
+      wind += dir;
+      if (wind !== 0) continue;
+      span(y, Math.max(0, Math.ceil(spanStart - 0.5)), Math.min(r.w - 1, Math.floor(x - 0.5)));
+    }
+  }
+}
+
+/** Blend each marked pixel once: a region drawn in pieces (triangles, or
+ *  one pass per sample of u) fills at one opacity, as the app's does. */
+function fillMask(r: Raster, mask: Uint8Array, c: [number, number, number], a: number) {
+  for (let i = 0; i < mask.length; i++) if (mask[i]) blend(r, i % r.w, Math.floor(i / r.w), c, a);
+}
+
+/** Steps of u per point for a family over an interval (the app takes 48,
+ *  searching 8x finer only where a member could cross between two), and the
+ *  pixels per side of a block the swept region is first judged on. */
+const PROJECTION_STEPS = 64;
+const PROJECTION_BLOCK = 8;
+
+/**
+ * The region a family over u ∈ [0, 1] sweeps, as a pixel mask — the app's
+ * projFrag on the CPU. A point is inside when F changes sign between two
+ * steps of u (an equation), or the constraints all hold at one
+ * (inequalities). Judged first at the corners of 8-px blocks: a block whose
+ * corners are all inside is filled whole, and one whose corners are all
+ * outside and agree in sign at every step has no member (at a step)
+ * crossing it, so it is skipped; only blocks along an edge are judged per
+ * pixel. That keeps the preview near a pass per 16 steps rather than a pass
+ * per step.
+ */
+function projectedMask(
+  r: Raster,
+  v: View2D,
+  env: EvalEnv,
+  slotU: number,
+  prog: Prog,
+  relation: 'eq' | 'ineq',
+): Uint8Array {
+  const { w, h } = r;
+  const { vars, stack, slotX, slotY } = env;
+  const uy = v.upp / (v.ratio ?? 1);
+  const M = PROJECTION_STEPS;
+  const at = (i: number, j: number) => {
+    vars[slotX] = v.cx + (i - w / 2) * v.upp;
+    vars[slotY] = v.cy + (h / 2 - j) * uy;
+  };
+  // Whether some u puts the pixel's centre on a member (or in the region):
+  // F changes sign between two of the M steps.
+  const inside = (i: number, j: number): boolean => {
+    at(i, j);
+    let prev = NaN;
+    for (let k = 0; k < M; k++) {
+      vars[slotU] = k / (M - 1);
+      const f = run(prog, vars, stack);
+      if (relation === 'ineq' ? f < 0 : f === 0 || prev * f < 0) return true;
+      prev = f;
+    }
+    return false;
+  };
+  // A block corner, judged at every sub-step (the samples a pixel refines
+  // to): bit k of `neg` is set when F < 0 at step k (of `bad`, when F is not
+  // finite there), a word per 32 steps.
+  const B = PROJECTION_BLOCK;
+  const words = Math.ceil(M / 32);
+  const cw = Math.ceil(w / B) + 1,
+    ch = Math.ceil(h / B) + 1;
+  const neg = new Uint32Array(cw * ch * words),
+    bad = new Uint32Array(cw * ch * words),
+    hit = new Uint8Array(cw * ch);
+  for (let c = 0; c < cw * ch; c++) {
+    at((c % cw) * B, Math.floor(c / cw) * B);
+    let prev = NaN;
+    for (let k = 0; k < M; k++) {
+      vars[slotU] = k / (M - 1);
+      const f = run(prog, vars, stack);
+      const bit = 1 << (k & 31);
+      if (!Number.isFinite(f)) bad[c * words + (k >> 5)] |= bit;
+      else if (f < 0 || (f === 0 && relation === 'eq')) neg[c * words + (k >> 5)] |= bit;
+      if (relation === 'ineq' ? f < 0 : f === 0 || prev * f < 0) hit[c] = 1;
+      prev = f;
+    }
+  }
+  // Corners outside that agree in sign at every step have no member at a
+  // step crossing the block between them.
+  const agree = (c: number[]) => {
+    for (const k of c) {
+      if (hit[k]) return false;
+      for (let q = 0; q < words; q++)
+        if (neg[k * words + q] !== neg[c[0] * words + q] || bad[k * words + q] !== bad[c[0] * words + q]) return false;
+    }
+    return true;
+  };
+  const mask = new Uint8Array(w * h);
+  for (let cj = 0; cj + 1 < ch; cj++)
+    for (let ci = 0; ci + 1 < cw; ci++) {
+      const c = [cj * cw + ci, cj * cw + ci + 1, (cj + 1) * cw + ci, (cj + 1) * cw + ci + 1];
+      const all = c.every(k => hit[k]);
+      if (!all && agree(c)) continue;
+      for (let j = cj * B; j < Math.min(h, (cj + 1) * B); j++)
+        for (let i = ci * B; i < Math.min(w, (ci + 1) * B); i++) {
+          if (all || inside(i, j)) mask[j * w + i] = 1;
+        }
+    }
+  return mask;
+}
+
+function shadeScalar(r: Raster, grid: Float64Array, c: [number, number, number]) {
+  const { w, h } = r;
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      const value = grid[j * (w + 1) + i];
+      if (!Number.isFinite(value)) continue;
+      // Signed shade: positive toward the row color, negative toward its complement.
+      const s = Math.tanh(value * 0.6);
+      const tint: [number, number, number] = s >= 0 ? c : [1 - c[0], 1 - c[1], 1 - c[2]];
+      blend(r, i, j, tint, Math.abs(s) * 0.55);
+    }
+  }
+}
+
+// --- evaluation env ---
+
+interface EvalEnv {
+  slots: Map<string, number>;
+  vars: Float64Array;
+  stack: Float64Array;
+  slotX: number;
+  slotY: number;
+}
+
+/** Slots for x, y, z, t, u, v plus every constant (bound to its t=0 value). */
+function makeEnv(constEnv: Record<string, number>): EvalEnv {
+  const slots = new Map<string, number>();
+  for (const name of ['x', 'y', 'z', 't', 'u', 'v']) slots.set(name, slots.size);
+  for (const name of Object.keys(constEnv)) if (!slots.has(name)) slots.set(name, slots.size);
+  const vars = new Float64Array(slots.size);
+  for (const [name, value] of Object.entries(constEnv)) vars[slots.get(name)!] = value;
+  return { slots, vars, stack: new Float64Array(64), slotX: 0, slotY: 1 };
+}
+
+/** The constants env binds, by name. */
+const envValues = (env: EvalEnv): Record<string, number> =>
+  Object.fromEntries([...env.slots].map(([name, slot]) => [name, env.vars[slot]]));
+
+/** Compile against env, growing the shared stack to the program's depth. */
+function compileFor(env: EvalEnv, e: Expr): Prog {
+  const p = compileProg(e, env.slots);
+  if (p.depth > env.stack.length) env.stack = new Float64Array(p.depth);
+  return p;
+}
+
+// --- 3D projection ---
+
+// Matches the app's default camera (web/main.ts): angles, and radius 14
+// corresponding to the h/14 projection scale.
+const THETA = -Math.PI / 3;
+const PHI = Math.PI / 5.5;
+const RADIUS = 14;
+
+interface View3D {
+  scale: number;
+  ox: number;
+  oy: number;
+  theta: number;
+  phi: number;
+  target: [number, number, number];
+}
+
+function project(v: View3D, p: [number, number, number]): [number, number] {
+  const x = p[0] - v.target[0],
+    y = p[1] - v.target[1],
+    z = p[2] - v.target[2];
+  const st = Math.sin(v.theta),
+    ct = Math.cos(v.theta);
+  const sp = Math.sin(v.phi),
+    cp = Math.cos(v.phi);
+  const rx = -st * x + ct * y;
+  const ry = -ct * sp * x - st * sp * y + cp * z;
+  return [v.ox + rx * v.scale, v.oy - ry * v.scale];
+}
+
+function drawGrid3D(r: Raster, v: View3D) {
+  const minor: [number, number, number] = [0.9, 0.9, 0.9];
+  const axis: [number, number, number] = [0.6, 0.6, 0.6];
+  const R = 6;
+  for (let k = -R; k <= R; k++) {
+    const c = k === 0 ? axis : minor;
+    const [ax, ay] = project(v, [k, -R, 0]);
+    const [bx, by] = project(v, [k, R, 0]);
+    drawLine(r, ax, ay, bx, by, c, 0.9);
+    const [cx2, cy2] = project(v, [-R, k, 0]);
+    const [dx2, dy2] = project(v, [R, k, 0]);
+    drawLine(r, cx2, cy2, dx2, dy2, c, 0.9);
+  }
+  const [zx0, zy0] = project(v, [0, 0, 0]);
+  const [zx1, zy1] = project(v, [0, 0, 4]);
+  drawLine(r, zx0, zy0, zx1, zy1, axis, 0.9);
+}
+
+function polyline3D(
+  r: Raster,
+  v: View3D,
+  c: [number, number, number],
+  n: number,
+  at: (i: number) => [number, number, number] | null,
+) {
+  let prev: [number, number] | null = null;
+  for (let i = 0; i <= n; i++) {
+    const p = at(i);
+    if (!p || p.some(x => !Number.isFinite(x))) {
+      prev = null;
+      continue;
+    }
+    const s = project(v, p);
+    if (prev) drawLine(r, prev[0], prev[1], s[0], s[1], c);
+    prev = s;
+  }
+}
+
+// --- per-row renderers ---
+
+function renderRow2D(
+  r: Raster,
+  v: View2D,
+  row: RowInfo,
+  env: EvalEnv,
+  color: [number, number, number],
+  analysis: Analysis,
+) {
+  const { cls, cpu } = row;
+  if (!cls || !cpu) return;
+  const compile = (e: Expr) => compileFor(env, e);
+  if (cpu.type === 'automaton' || cpu.type === 'lattice') {
+    // The same cells the app uploads as a texture, looked up per pixel: a 1D
+    // rule's space-time diagram, a board's first generation, or a table over
+    // the window. Cell (i, k) is centred on (i, -k).
+    const upy = v.upp / (v.ratio ?? 1);
+    const vals = envValues(env);
+    let grid: CellGrid;
+    if (cpu.type === 'lattice') {
+      const i0 = Math.floor(v.cx - (r.w / 2) * v.upp);
+      const j0 = Math.floor(-v.cy - (r.h / 2) * upy);
+      const w = Math.min(TABLE_MAX, Math.ceil(r.w * v.upp) + 2);
+      const h = Math.min(TABLE_MAX, Math.ceil(r.h * upy) + 2);
+      grid = evalTable(cpu, vals, i0, j0, w, h);
+    } else grid = cpu.dims === 2 ? runBoard(cpu, vals).grid : runAutomaton(cpu, vals);
+    const shades = cpu.type === 'lattice' ? tableShades(grid) : cellShades(grid);
+    // A board's outer rows are background that runs on; a diagram starts at row 0.
+    const clampRows = cpu.type === 'automaton' && cpu.dims === 2;
+    for (let y = 0; y < r.h; y++) {
+      let k = Math.floor(0.5 - (v.cy + (r.h / 2 - y - 0.5) * upy)) - grid.y0;
+      if (clampRows) k = Math.max(0, Math.min(grid.rows - 1, k));
+      else if (k < 0 || k >= grid.rows) continue;
+      for (let x = 0; x < r.w; x++) {
+        const col = Math.floor(v.cx + (x + 0.5 - r.w / 2) * v.upp - grid.x0 + 0.5);
+        if (cpu.type === 'lattice' && (col < 0 || col >= grid.width)) continue;
+        const shade = shades[k * grid.width + Math.max(0, Math.min(grid.width - 1, col))];
+        if (shade) blend(r, x, y, color, (0.92 * shade) / 255);
+      }
+    }
+    return;
+  }
+  if (cpu.type === 'value') {
+    // A definite-integral row shades the area it measures (the app's case
+    // 'value'): parts adding to the value in the row color, parts subtracting
+    // in its complement. Any other readout draws nothing, as in the app.
+    if (!cpu.shade) return;
+    const shade = cpu.shade;
+    const halfW = (r.w / 2) * v.upp;
+    const halfH = (r.h / 2) * (v.upp / (v.ratio ?? 1));
+    const sampler = compileSampler(shade.body, shade.v, shadeNames(shade)) ?? evalSampler(shade);
+    const runs = shadeRuns(shade, { ...analysis.constEnv, t: 0 }, v.cx - halfW, v.cx + halfW, sampler);
+    const minus = minusTint(color);
+    for (const run of runs) {
+      const c = run.sign > 0 ? color : minus;
+      const { fill, stroke } = runPaths(run, v.cy - halfH, v.cy + halfH);
+      const screen = (pts: number[]) => {
+        const sx: number[] = [],
+          sy: number[] = [];
+        for (let i = 0; i + 1 < pts.length; i += 2) {
+          sx.push(toScreenX(r, v, pts[i]));
+          sy.push(toScreenY(r, v, pts[i + 1]));
+        }
+        return [sx, sy];
+      };
+      const [fx, fy] = screen(fill);
+      fillPolygon(r, fx, fy, c, 0.16);
+      // Only real edges are stroked: not where the view cut the range.
+      const [sx, sy] = screen(stroke);
+      for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], c);
+    }
+    return;
+  }
+  if (cpu.type === 'pmf' || (cpu.type === 'prob' && cpu.shade && analysis.rvs.isDiscreteVar(cpu.shade.rv))) {
+    // A discrete variable's stems, or the ones a P(…) row selects (a band
+    // in the row's color) — the app's cases 'pmf' and 'prob'.
+    const shade = cpu.type === 'prob' ? cpu.shade! : undefined;
+    const name = cpu.type === 'pmf' ? cpu.rv : shade!.rv;
+    const halfW = (r.w / 2) * v.upp;
+    let runs: PmfStems[] | null;
+    try {
+      // The same runs the app draws (lib: pmfRuns) — a derived variable's
+      // atoms stand where they are, not at whole numbers.
+      runs = analysis.rvs.pmfRuns(name, analysis.constEnv, { lo: v.cx - halfW, hi: v.cx + halfW }, shade);
+      if (!runs) return;
+      if (cpu.type === 'pmf' && cpu.mass) {
+        const mass = evaluate(cpu.mass, analysis.constEnv);
+        runs = runs.map(run => scaleStems(run, mass));
+      }
+    } catch {
+      return; // a parameter with no value at t = 0
+    }
+    const clampY = (y: number) => Math.min(r.h + 8, Math.max(-8, y));
+    for (const run of runs) {
+      if (!run.ks.length) continue;
+      // What to draw is lib's (stemGeometry), exactly as in the app; a raster
+      // px stands for a CSS px.
+      const g = stemGeometry(run, !!shade, 1 / v.upp);
+      const sx: number[] = [],
+        sy: number[] = [];
+      for (let i = 0; i + 1 < g.lines.length; i += 2) {
+        sx.push(toScreenX(r, v, g.lines[i]));
+        sy.push(clampY(toScreenY(r, v, g.lines[i + 1])));
+      }
+      if (g.fill !== null) {
+        fillPolygon(r, sx, sy, color, g.fill);
+        for (let i = 0; i < sx.length; i++)
+          drawLine(r, sx[i], sy[i], sx[(i + 1) % sx.length], sy[(i + 1) % sx.length], color, g.alpha);
+        continue;
+      }
+      for (let i = 0; i + 1 < sx.length; i += 3) {
+        // [foot, top, pen-up] per stem
+        // drawLine is the 2px stroke; a wider (selected) stem is a filled band.
+        if (g.width <= 2) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color, g.alpha);
+        else {
+          const [a, b] = [sx[i] - g.width / 2 + 0.5, sx[i] + g.width / 2 + 0.5];
+          fillPolygon(r, [a, b, b, a], [sy[i], sy[i], sy[i + 1], sy[i + 1]], color, g.alpha);
+        }
+        if (g.dots) drawDisc(r, sx[i + 1] + 0.5, sy[i + 1], g.dots.r, color, g.alpha);
+      }
+    }
+    return;
+  }
+  if (cpu.type === 'density' || cpu.type === 'prob') {
+    // Sampled-density rows: the same estimator the app uses (lib/dist.ts),
+    // drawn as a polyline (density) or a filled area under it (P(…)).
+    const shade = cpu.type === 'prob' ? cpu.shade : undefined;
+    if (cpu.type === 'prob' && !shade) return; // readout-only row
+    const name = cpu.type === 'density' ? cpu.rv : shade!.rv;
+    let curve = analysis.rvs.curve(name, analysis.constEnv);
+    if (!curve) return;
+    if (cpu.type === 'density' && cpu.mass) curve = scaleCurve(curve, evaluate(cpu.mass, analysis.constEnv));
+    if (cpu.type === 'density') {
+      // Point masses draw as probability stems (height = mass, not density).
+      for (const a of curve.atoms ?? []) {
+        const ax = toScreenX(r, v, a.x);
+        drawLine(r, ax, toScreenY(r, v, 0), ax, toScreenY(r, v, a.p), color);
+        drawDisc(r, ax, toScreenY(r, v, a.p), 3.5, color);
+      }
+    }
+    if (curve.pts.length < 4) return;
+    const pts = shade
+      ? shadePolygon(
+          curve,
+          shade.lo ? evaluate(shade.lo, analysis.constEnv) : undefined,
+          shade.hi ? evaluate(shade.hi, analysis.constEnv) : undefined,
+        )
+      : curve.pts;
+    if (!pts) return;
+    const sx: number[] = [],
+      sy: number[] = [];
+    for (let i = 0; i + 1 < pts.length; i += 2) {
+      sx.push(toScreenX(r, v, pts[i]));
+      sy.push(toScreenY(r, v, pts[i + 1]));
+    }
+    if (shade) fillPolygon(r, sx, sy, color, 0.16);
+    for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color);
+    if (shade) drawLine(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);
+    return;
+  }
+  if (cpu.type === 'expect') {
+    // The mean marker the app draws: a stem from the axis to the density at
+    // x = E, capped with a dot (web/main.ts case 'expect').
+    const name = cpu.rv;
+    // Where and how high is lib's rule (markerHeight), shared with the app.
+    let mark: ReturnType<typeof markerHeight>;
+    try {
+      mark = markerHeight(analysis.rvs, name, analysis.constEnv);
+    } catch {
+      return;
+    }
+    if (!mark) return;
+    const mx = toScreenX(r, v, mark.x);
+    if (mark.h > 0) drawLine(r, mx, toScreenY(r, v, 0), mx, toScreenY(r, v, mark.h), color);
+    drawDisc(r, mx, toScreenY(r, v, mark.h), 3.5, color);
+    return;
+  }
+  if (cpu.type === 'cobweb') {
+    // A recurrence a_{n+1} = f(a_n) draws the same three pieces as the app
+    // (web/main.ts): the map's curve y = f(x), the y = x diagonal the orbit
+    // reflects off, and the iterated path from the CPU recurrence plan.
+    const { f, recVar, a0Name } = cpu;
+    const fx = substVars(f, { [recVar]: { kind: 'var', name: 'x' } });
+    strokeZeroSet(
+      r,
+      sampleField(r, v, compile({ kind: 'bin', op: '-', a: { kind: 'var', name: 'y' }, b: fx }), env),
+      color,
+    );
+    // y = x across the visible window, lighter than the axes.
+    const dLo = Math.max(v.cx - (r.w / 2) * v.upp, v.cy - (r.h / 2) * (v.upp / (v.ratio ?? 1)));
+    const dHi = Math.min(v.cx + (r.w / 2) * v.upp, v.cy + (r.h / 2) * (v.upp / (v.ratio ?? 1)));
+    if (dHi > dLo) {
+      drawLine(
+        r,
+        toScreenX(r, v, dLo),
+        toScreenY(r, v, dLo),
+        toScreenX(r, v, dHi),
+        toScreenY(r, v, dHi),
+        [0.65, 0.65, 0.65],
+        0.45,
+      );
+    }
+    const prog = compile(fx);
+    const seedSlot = a0Name === undefined ? undefined : env.slots.get(a0Name);
+    const seed = seedSlot === undefined ? 0.5 : env.vars[seedSlot];
+    let a = seed;
+    let ax = toScreenX(r, v, seed),
+      ay = toScreenY(r, v, seed);
+    for (let k = 0; k < 80; k++) {
+      env.vars[env.slotX] = a;
+      const b = run(prog, env.vars, env.stack);
+      if (!Number.isFinite(b) || Math.abs(b) > 1e9) break;
+      const bx = toScreenX(r, v, b),
+        by = toScreenY(r, v, b);
+      drawLine(r, ax, ay, ax, by, color); // vertically to the curve
+      drawLine(r, ax, by, bx, by, color); // across to the diagonal
+      a = b;
+      ax = bx;
+      ay = by;
+    }
+    drawDisc(r, toScreenX(r, v, seed), toScreenY(r, v, seed), 3.5, color);
+    return;
+  }
+  switch (cpu.type) {
+    case 'implicit2d': {
+      strokeZeroSet(r, sampleField(r, v, compile(cpu.residual), env), color);
+      return;
+    }
+    case 'ineq2d': {
+      const parts = cpu.constraints.map(c => ({ field: c.residual, edge: !c.strict }));
+      let combined = parts[0].field;
+      for (let k = 1; k < parts.length; k++) {
+        combined = { kind: 'call', name: 'max', args: [combined, parts[k].field] };
+      }
+      fillNegative(r, sampleField(r, v, compile(combined), env), color, 0.18);
+      for (const part of parts) {
+        if (part.edge) strokeZeroSet(r, sampleField(r, v, compile(part.field), env), color);
+      }
+      return;
+    }
+    case 'scalar2d':
+      shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color);
+      return;
+    case 'pregion': {
+      // The app's fill (web/render2d.ts regions): the sampled triangles'
+      // union, at the inequality fill's opacity, with no outline.
+      const tris = regionSampler(cpu.comps).sample(envValues(env));
+      const mask = new Uint8Array(r.w * r.h);
+      for (let i = 0; i + 5 < tris.length; i += 6) {
+        const sx = [0, 2, 4].map(k => toScreenX(r, v, tris[i + k]));
+        const sy = [1, 3, 5].map(k => toScreenY(r, v, tris[i + k]));
+        polygonSpans(r, sx, sy, (y, xa, xb) => mask.fill(1, y * r.w + xa, y * r.w + xb + 1));
+      }
+      fillMask(r, mask, color, 0.18);
+      return;
+    }
+    case 'projected2d': {
+      // The union over samples of u, as the app's projFrag (projectedMask).
+      const slotU = env.slots.get('u')!;
+      const field: Expr =
+        cpu.constraints.length === 1
+          ? cpu.constraints[0].residual
+          : cpu.constraints
+              .slice(1)
+              .reduce<Expr>(
+                (m, c) => ({ kind: 'call', name: 'max', args: [m, c.residual] }),
+                cpu.constraints[0].residual,
+              );
+      const mask = projectedMask(r, v, env, slotU, compile(field), cpu.relation);
+      fillMask(r, mask, color, 0.18);
+      return;
+    }
+    case 'point': {
+      if (cpu.dim !== 2) return;
+      const [px, py] = cpu.coords.map(c2 => run(compile(c2), env.vars, env.stack));
+      drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), 4.5, color);
+      return;
+    }
+    case 'plist': {
+      if (cpu.dim !== 2) return;
+      const rad = listDotRadius(cpu.pts.length);
+      for (const p of cpu.pts) {
+        const [px, py] = p.map(c2 => run(compile(c2), env.vars, env.stack));
+        if (isFinite(px) && isFinite(py)) drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), rad, color);
+      }
+      return;
+    }
+    case 'system': {
+      const plot = cpu;
+      if (plot.dim !== 2) return;
+      const lo = [v.cx - (r.w * v.upp) / 2, v.cy - (r.h * (v.upp / (v.ratio ?? 1))) / 2];
+      const hi = [v.cx + (r.w * v.upp) / 2, v.cy + (r.h * (v.upp / (v.ratio ?? 1))) / 2];
+      const systemEnv = { ...analysis.constEnv, t: 0 };
+      if (plot.parametric) {
+        for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, systemEnv, 256, plot.angular)) {
+          for (let i = 1; i < path.length; i++) {
+            const a = path[i - 1],
+              b = path[i];
+            drawLine(
+              r,
+              toScreenX(r, v, a[0]),
+              toScreenY(r, v, a[1]),
+              toScreenX(r, v, b[0]),
+              toScreenY(r, v, b[1]),
+              color,
+            );
+          }
+        }
+      } else {
+        for (const p of solveSystem(plot.residuals, ['x', 'y'], lo, hi, { env: systemEnv, angular: plot.angular })) {
+          drawDisc(r, toScreenX(r, v, p[0]), toScreenY(r, v, p[1]), 4.5, color);
+        }
+      }
+      return;
+    }
+    case 'vfield2d': {
+      const progs = cpu.comps.map(compile);
+      for (let sy = 12; sy < r.h; sy += 22)
+        for (let sx = 12; sx < r.w; sx += 22) {
+          env.vars[env.slotX] = v.cx + (sx - r.w / 2) * v.upp;
+          env.vars[env.slotY] = v.cy - (sy - r.h / 2) * (v.upp / (v.ratio ?? 1));
+          const dx = run(progs[0], env.vars, env.stack),
+            dy = -run(progs[1], env.vars, env.stack) * (v.ratio ?? 1);
+          const length = Math.hypot(dx, dy);
+          if (!(length > 0) || !Number.isFinite(length)) continue;
+          const ux = dx / length,
+            uy = dy / length;
+          drawLine(r, sx - 6 * ux, sy - 6 * uy, sx + 6 * ux, sy + 6 * uy, color, 0.7);
+          drawLine(r, sx + 6 * ux, sy + 6 * uy, sx + 2 * ux - 3 * uy, sy + 2 * uy + 3 * ux, color, 0.7);
+        }
+      return;
+    }
+    case 'tfield2d': {
+      // The app's glyphs (web/render2d.ts tfieldFrag) as outlines: the image
+      // of a circle under M at each cell's centre, and the spoke M e_x.
+      const progs = cpu.entries.map(compile);
+      const cell = 36;
+      const ratio = v.ratio ?? 1;
+      for (let sy = cell / 2; sy < r.h; sy += cell)
+        for (let sx = cell / 2; sx < r.w; sx += cell) {
+          env.vars[env.slotX] = v.cx + (sx - r.w / 2) * v.upp;
+          env.vars[env.slotY] = v.cy - (sy - r.h / 2) * (v.upp / ratio);
+          const [a, b, c, d] = progs.map(p => run(p, env.vars, env.stack));
+          const scale = glyphScale(a, b, c, d) * cell * 0.42;
+          if (!(scale > 0)) continue;
+          // The same map in pixels, D⁻¹ M D with D = diag(1, 1/ratio), as the
+          // shader draws it; screen y points down, so the second row flips.
+          const at = (u: number, w: number): [number, number] => [
+            sx + scale * (a * u + (b / ratio) * w),
+            sy - scale * (c * ratio * u + d * w),
+          ];
+          // A map that reverses orientation draws in the complementary colour.
+          const ink: [number, number, number] = a * d - b * c < 0 ? [1 - color[0], 1 - color[1], 1 - color[2]] : color;
+          let last = at(1, 0);
+          for (let k = 1; k <= 24; k++) {
+            const th = (2 * Math.PI * k) / 24;
+            const next = at(Math.cos(th), Math.sin(th));
+            drawLine(r, last[0], last[1], next[0], next[1], ink, 0.8);
+            last = next;
+          }
+          const tip = at(1, 0);
+          drawLine(r, sx, sy, tip[0], tip[1], ink, 0.8);
+        }
+      return;
+    }
+    case 'pcurve': {
+      if (cpu.dim !== 2) return;
+      // Sampled as the app samples it (lib/path.ts), pen up at the jumps. A
+      // complex path is not a vec row: its components are the split parts.
+      const pts = pathSampler(cpu.comps).sample({ ...analysis.constEnv, t: 0 });
+      let last: [number, number] | null = null;
+      for (let i = 0; i + 1 < pts.length; i += 2) {
+        if (!Number.isFinite(pts[i]) || !Number.isFinite(pts[i + 1])) {
+          last = null;
+          continue;
+        }
+        const s: [number, number] = [toScreenX(r, v, pts[i]), toScreenY(r, v, pts[i + 1])];
+        if (last) drawLine(r, last[0], last[1], s[0], s[1], color);
+        last = s;
+      }
+      return;
+    }
+    case 'polygon': {
+      // Flat scalar vertex list [x0, y0, x1, y1, …], constant by
+      // classification; like the app, a single non-finite vertex drops the row.
+      const given = vertexSampler(cpu.pts, cpu.over)(envValues(env));
+      if (given.length < 4 || !given.every(Number.isFinite)) return;
+      const vals = cpu.hull ? hullFaces(given, 2)[0].outline.flatMap(p => [p[0], p[1]]) : given;
+      const sx: number[] = [],
+        sy: number[] = [];
+      for (let i = 0; i + 1 < vals.length; i += 2) {
+        sx.push(toScreenX(r, v, vals[i]));
+        sy.push(toScreenY(r, v, vals[i + 1]));
+      }
+      const { closed, arrow } = cpu;
+      if (closed) fillPolygon(r, sx, sy, color, 0.16);
+      // vector(): a solid head at the last vertex, fixed in pixels like the
+      // app's; the shaft stops inside it so the tip stays sharp.
+      const n = sx.length;
+      const head = arrow ? arrowHead(sx[n - 2], sy[n - 2], sx[n - 1], sy[n - 1], ARROW_HEAD_PX) : null;
+      if (head) {
+        // drawLine inks pixels round(c) and round(c) + 1, so in fillPolygon's
+        // pixel-center coordinates the stroke's axis runs through round(c) + 1:
+        // shift the head by that much, snapped at the tip, to sit on the shaft.
+        const ox = Math.round(head.tip[0]) + 1 - head.tip[0];
+        const oy = Math.round(head.tip[1]) + 1 - head.tip[1];
+        const tri = [head.tip, head.left, head.right];
+        fillPolygon(
+          r,
+          tri.map(p => p[0] + ox),
+          tri.map(p => p[1] + oy),
+          color,
+          1,
+        );
+        [sx[n - 1], sy[n - 1]] = head.shaftEnd;
+      }
+      for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color);
+      if (closed) drawLine(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);
+      return;
+    }
+  }
+}
+
+function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [number, number, number]) {
+  const { cls, cpu } = row;
+  if (!cls || !cpu) return;
+  const compile = (e: Expr) => compileFor(env, e);
+  const slotU = env.slots.get('u')!,
+    slotV = env.slots.get('v')!;
+  switch (cpu.type) {
+    case 'psurface':
+    case 'pregion': {
+      // A planar region lies in z = 0 of the scene, drawn as the app draws it: a surface.
+      const progs = (cpu.type === 'pregion' ? [...cpu.comps, { kind: 'num', value: 0 } as Expr] : cpu.comps).map(
+        compile,
+      );
+      const at = (): [number, number, number] => [
+        run(progs[0], env.vars, env.stack),
+        run(progs[1], env.vars, env.stack),
+        run(progs[2], env.vars, env.stack),
+      ];
+      const LINES = 16,
+        SEGS = 64;
+      for (let a = 0; a <= LINES; a++) {
+        polyline3D(r, v, color, SEGS, i => {
+          env.vars[slotU] = a / LINES;
+          env.vars[slotV] = i / SEGS;
+          return at();
+        });
+        polyline3D(r, v, color, SEGS, i => {
+          env.vars[slotU] = i / SEGS;
+          env.vars[slotV] = a / LINES;
+          return at();
+        });
+      }
+      return;
+    }
+    case 'system': {
+      const p = cpu;
+      const radius = Math.max(r.w, r.h) / (2 * v.scale);
+      const vars = p.dim === 3 ? ['x', 'y', 'z'] : ['x', 'y'];
+      const lo = v.target.slice(0, p.dim).map(c => c - radius);
+      const hi = v.target.slice(0, p.dim).map(c => c + radius);
+      const values = Object.fromEntries([...env.slots].map(([name, slot]) => [name, env.vars[slot]]));
+      if (p.parametric) {
+        for (const path of traceSystem(p.residuals, vars, lo, hi, values, 256, p.angular)) {
+          polyline3D(r, v, color, path.length - 1, i => [path[i][0], path[i][1], path[i][2] ?? 0]);
+        }
+      } else {
+        for (const point of solveSystem(p.residuals, vars, lo, hi, { env: values, angular: p.angular })) {
+          const [sx, sy] = project(v, [point[0], point[1], point[2] ?? 0]);
+          drawDisc(r, sx, sy, 4.5, color);
+        }
+      }
+      return;
+    }
+    case 'spacecurve':
+    case 'vfield3d': {
+      const radius = Math.max(r.w, r.h) / (2 * v.scale);
+      const lo = v.target.map(c => c - radius),
+        hi = v.target.map(c => c + radius);
+      const values = Object.fromEntries([...env.slots].map(([name, slot]) => [name, env.vars[slot]]));
+      for (const path of cpu.type === 'spacecurve'
+        ? traceIntersection(cpu.residuals, lo, hi, values)
+        : traceField(cpu.comps, lo, hi, values)) {
+        polyline3D(r, v, color, path.length - 1, i => path[i] as [number, number, number]);
+      }
+      return;
+    }
+    case 'polygon': {
+      const p = cpu,
+        dim = p.dim ?? 2;
+      const vals = vertexSampler(p.pts, p.over)(envValues(env));
+      if (!vals.every(Number.isFinite)) return;
+      if (p.hull) {
+        // A convex solid needs no depth sort: the faces turned toward the
+        // (orthographic) camera are exactly the visible ones. Lit like the
+        // app's solids — same light, same ambient/sky/diffuse mix.
+        const faces = hullFaces(vals, dim);
+        const toCamera = [Math.cos(v.theta) * Math.cos(v.phi), Math.sin(v.theta) * Math.cos(v.phi), Math.sin(v.phi)];
+        const light = [0.4, 0.55, 0.9].map(c => c / Math.hypot(0.4, 0.55, 0.9));
+        const dot3 = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        for (const face of faces) {
+          const at = face.outline.map(q => project(v, q));
+          if (face.triangles.length) {
+            const [o, a, b] = face.outline;
+            const u = [a[0] - o[0], a[1] - o[1], a[2] - o[2]],
+              w = [b[0] - o[0], b[1] - o[1], b[2] - o[2]];
+            let n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+            const len = Math.hypot(n[0], n[1], n[2]) || 1;
+            n = n.map(c => c / len);
+            // A flat figure has one face and no inside: show whichever side faces us.
+            if (dot3(n, toCamera) < 0) {
+              if (faces.length > 1) continue;
+              n = n.map(c => -c);
+            }
+            const lit = 0.88 * (0.26 + 0.22 * (0.5 + 0.5 * n[2]) + 0.46 * Math.max(0, dot3(n, light)));
+            fillPolygon(
+              r,
+              at.map(q => q[0]),
+              at.map(q => q[1]),
+              color.map(c => c * lit) as [number, number, number],
+              1,
+            );
+          }
+          for (let k = 0; k < at.length; k++) drawLine(r, ...at[k], ...at[(k + 1) % at.length], color);
+        }
+        return;
+      }
+      const pts: Array<[number, number]> = [];
+      for (let k = 0; k < vals.length; k += dim)
+        pts.push(project(v, [vals[k], vals[k + 1], dim === 3 ? vals[k + 2] : 0]));
+      if (p.closed && pts.length === 3)
+        fillPolygon(
+          r,
+          pts.map(p => p[0]),
+          pts.map(p => p[1]),
+          color,
+          0.16,
+        );
+      if (p.closed) pts.push(pts[0]);
+      for (let k = 1; k < pts.length; k++) drawLine(r, ...pts[k - 1], ...pts[k], color);
+      if (p.arrow && pts.length >= 2) {
+        const head = arrowHead(...pts[pts.length - 2], ...pts[pts.length - 1], ARROW_HEAD_PX);
+        if (head) {
+          const tri = [head.tip, head.left, head.right];
+          fillPolygon(
+            r,
+            tri.map(p => p[0]),
+            tri.map(p => p[1]),
+            color,
+            1,
+          );
+        }
+      }
+      return;
+    }
+    case 'pcurve': {
+      if (cpu.dim !== 3) return;
+      const progs = cpu.comps.map(compile);
+      polyline3D(r, v, color, 800, i => {
+        env.vars[slotU] = i / 800;
+        return [
+          run(progs[0], env.vars, env.stack),
+          run(progs[1], env.vars, env.stack),
+          run(progs[2], env.vars, env.stack),
+        ];
+      });
+      return;
+    }
+    case 'point': {
+      if (cpu.dim !== 3) return;
+      const p = cpu.coords.map(c2 => run(compile(c2), env.vars, env.stack)) as [number, number, number];
+      const [sx, sy] = project(v, p);
+      drawDisc(r, sx, sy, 4.5, color);
+      return;
+    }
+    case 'plist': {
+      // A 2D list sits on the z = 0 plane, as the live app draws it.
+      const rad = listDotRadius(cpu.pts.length);
+      for (const p of cpu.pts) {
+        const [px, py, pz = 0] = p.map(c2 => run(compile(c2), env.vars, env.stack));
+        if (!isFinite(px) || !isFinite(py) || !isFinite(pz)) continue;
+        const [sx, sy] = project(v, [px, py, pz]);
+        drawDisc(r, sx, sy, rad, color);
+      }
+      return;
+    }
+    case 'implicit3d': {
+      // Only the z = f(x, y) heightmap form draws (as a wireframe); general
+      // implicit surfaces would need a raymarcher, too slow on CPU here.
+      // previewGap() reports this gap to callers — keep them in sync.
+      const g = cpu.heightmap;
+      if (!g) return;
+      let prog: Prog;
+      try {
+        prog = compile(g);
+      } catch {
+        return;
+      }
+      const slotX = env.slots.get('x')!,
+        slotY = env.slots.get('y')!;
+      const R = 6,
+        LINES = 12,
+        SEGS = 60;
+      for (let a = 0; a <= LINES; a++) {
+        const fixed = -R + (2 * R * a) / LINES;
+        polyline3D(r, v, color, SEGS, i => {
+          env.vars[slotX] = fixed;
+          env.vars[slotY] = -R + (2 * R * i) / SEGS;
+          return [env.vars[slotX], env.vars[slotY], run(prog, env.vars, env.stack)];
+        });
+        polyline3D(r, v, color, SEGS, i => {
+          env.vars[slotX] = -R + (2 * R * i) / SEGS;
+          env.vars[slotY] = fixed;
+          return [env.vars[slotX], env.vars[slotY], run(prog, env.vars, env.stack)];
+        });
+      }
+      return;
+    }
+  }
+}
+
+/**
+ * Whether this renderer draws each plot type.
+ *
+ * It is a second, CPU-only backend for the same lib/ classifier the GPU app
+ * uses, so it necessarily lags. Typing this as a total Record over
+ * PublicKind means adding a plot family to lib/plot.ts FAILS TO COMPILE
+ * until it is classified here — the drift cannot be silent, and tsc catches a
+ * stale entry too.
+ *
+ * The cost of getting it wrong is a preview showing an empty grid, which reads
+ * as "this graph is broken" — worse than no preview at all. Callers use
+ * canRenderOg() and fall back to the site's static card instead.
+ */
 export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   spacecurve: 'draws',
   note: 'draws',
@@ -178,4 +1231,241 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
       // "renders in the app", which would be false here.
       return `${type} rows are not drawn in a 3D scene (the live app skips them there too)`;
   }
+}
+
+/**
+ * True when every plot row in the graph is one this renderer draws. False for
+ * an empty graph too, and for one of labels alone, whose text is left out: a
+ * bare grid is not worth an image.
+ */
+export function canRenderOg(texts: string[]): boolean {
+  let analysis: Analysis;
+  try {
+    analysis = analyze(texts, { readouts: false, backend: 'cpu' }); // drawn, not read out: see AnalyzeOpts
+  } catch {
+    return false;
+  }
+  // A row whose CPU plan failed to compile keeps its object with an error
+  // and no plan: it is not a plot this renderer can draw (nor one whose
+  // dimension should pick the scene), exactly as an unclassifiable row.
+  const plots = analysis.rows.filter(r => r.cls && r.cpu);
+  if (plots.every(r => r.cpu!.type === 'label')) return false;
+  // Each panel of a split view is 2D or 3D on its own.
+  const panel = panelIndices(analysis.rows);
+  const needs3D = new Set(analysis.rows.flatMap((r, i) => (r.cls?.needs3D && r.cpu ? [panel[i]] : [])));
+  return plots.every(r => previewGap(r, needs3D.has(panel[analysis.rows.indexOf(r)])) === null);
+}
+
+/** Copy a panel's raster into place, with a hairline along its edges. */
+function blitPanel(r: Raster, sub: Raster, at: { x: number; y: number }, inset: boolean) {
+  for (let y = 0; y < sub.h; y++) {
+    const from = y * sub.w * 3;
+    r.px.set(sub.px.subarray(from, from + sub.w * 3), ((at.y + y) * r.w + at.x) * 3);
+  }
+  const edge: [number, number, number] = [0.7, 0.7, 0.7];
+  const [x0, y0, x1, y1] = [at.x, at.y, at.x + sub.w - 1, at.y + sub.h - 1];
+  if (inset || x0 > 0) for (let y = y0; y <= y1; y++) blend(r, x0, y, edge, 1);
+  if (inset || y0 > 0) for (let x = x0; x <= x1; x++) blend(r, x, y0, edge, 1);
+  if (inset) {
+    for (let y = y0; y <= y1; y++) blend(r, x1, y, edge, 1);
+    for (let x = x0; x <= x1; x++) blend(r, x, y1, edge, 1);
+  }
+}
+
+/** Render equations to a raw RGB raster (exported for tests). */
+export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Raster {
+  const raster: Raster = { w, h, px: new Uint8ClampedArray(w * h * 3).fill(255) };
+  let analysis: Analysis;
+  try {
+    analysis = analyze(texts, { readouts: false, backend: 'cpu' }); // drawn, not read out: see AnalyzeOpts
+  } catch {
+    return raster;
+  }
+  const env = makeEnv(analysis.constEnv);
+  const parents = new Map<RowInfo, RowInfo>();
+  const plotRows = analysis.rows
+    .filter(r => r.cls && r.cpu)
+    .slice(0, MAX_PLOTS)
+    .flatMap(row => {
+      if (row.cpu!.type !== 'family') return [row];
+      return row.cpu!.members.map(m => {
+        const child = { ...row, cls: m.cls, cpu: m.cpu };
+        parents.set(child, row);
+        return child;
+      });
+    });
+
+  // Rows take palette slots as the app gives them when it opens the link
+  // (lib/palette.ts), unless the row's note names a color (`y = x #e24`).
+  // Analysis rows are the input rows, in order.
+  const slots = analysis.rows.map(() => ({ colorIndex: -1 }));
+  // Analysis strips a row's note, so whether it names a color is read from the input.
+  assignColors(
+    slots,
+    analysis.rows.map((row, i) =>
+      takesColor({
+        ...row,
+        text: texts[i] ?? '',
+        point: row.def?.kind === 'const' && analysis.defs.points.has(row.def.name),
+      }),
+    ),
+    LIGHT_PALETTE.length,
+  );
+  const colorOf = (row: RowInfo) => {
+    const i = analysis.rows.indexOf(parents.get(row) ?? row);
+    return noteColor(texts[i] ?? '') ?? LIGHT_PALETTE[Math.max(0, slots[i].colorIndex)];
+  };
+
+  // A split view (`---` rows) draws each panel into its own raster, laid out
+  // as the app lays it out, and copies it into place.
+  const panelOfRow = panelIndices(analysis.rows);
+  const panelOf = (row: RowInfo) => panelOfRow[analysis.rows.indexOf(parents.get(row) ?? row)];
+  const layout = layoutPanels(splitsOf(analysis.rows), w, h, 6);
+  const views: View2D[] = [];
+  layout.forEach((panel, k) => {
+    const { rect } = panel;
+    if (!rect.w || !rect.h) return;
+    const sub: Raster =
+      layout.length === 1 ? raster : { w: rect.w, h: rect.h, px: new Uint8ClampedArray(rect.w * rect.h * 3).fill(255) };
+    const inPanel = analysis.rows.filter((_, i) => panelOfRow[i] === k);
+    // Honor viewport rows: the author's framing is document state, so the
+    // preview draws the window the app would open with.
+    const spec = <K extends ViewSpec['kind']>(kind: K) =>
+      inPanel.find(r => r.view?.kind === kind)?.view as Extract<ViewSpec, { kind: K }> | undefined;
+    const rows = plotRows.filter(r => panelOf(r) === k);
+    const grid = spec('grid') as GridRowSpec | undefined;
+    const gridMode = grid?.mode === 'off' ? 'off' : grid?.mode === 'axes' ? 'axes' : 'on';
+    if (rows.some(r => r.cls!.needs3D)) {
+      const cam = spec('camera');
+      const s3 = sub.h;
+      const view: View3D =
+        cam?.kind === 'camera'
+          ? {
+              scale: s3 / (cam.radius ?? RADIUS),
+              ox: sub.w / 2,
+              oy: s3 / 2 + s3 / RADIUS,
+              theta: cam.theta,
+              phi: clampPhi(cam.phi),
+              target: cam.target ?? [0, 0, 0],
+            }
+          : { scale: s3 / RADIUS, ox: sub.w / 2, oy: s3 / 2 + s3 / RADIUS, theta: THETA, phi: PHI, target: [0, 0, 0] };
+      if (gridMode !== 'off') drawGrid3D(sub, view);
+      for (const row of rows) {
+        try {
+          renderRow3D(sub, view, row, env, colorOf(row));
+        } catch {
+          /* skip row */
+        }
+      }
+    } else {
+      // Shared axes come from the panels owning them, as in the app
+      // (web/main.ts applyViewportRows); the view row frames the rest.
+      const box = spec('view');
+      const root = (axis: 'x' | 'y') => {
+        const r = linkRoot(layout, k, axis);
+        return r === k ? undefined : views[r];
+      };
+      const linked = linkedWindow({ cx: 0, cy: 0, upp: 12 / Math.min(sub.w, sub.h) }, panel.shared, {
+        x: root('x'),
+        y: root('y'),
+      });
+      // A lattice panel as the app opens it (web/main.ts frameLattice): a
+      // view row naming its axes the other way round still frames them, and
+      // with no view row it opens on its cells.
+      const cells = rows.filter(r => r.cpu!.type === 'automaton' || r.cpu!.type === 'lattice');
+      const lattice = cells.length > 0 && cells.length === rows.filter(r => r.cpu!.type !== 'note').length;
+      const axes = (cells[0]?.cpu as { axes?: readonly [string, string] } | undefined)?.axes;
+      const framed = box?.kind === 'view' && axes ? orientLattice(box, axes) : box;
+      const view: View2D = framed
+        ? fitPanelWindow(framed, sub.w, sub.h, panel.shared, linked)
+        : lattice && !panel.shared.x && !panel.shared.y
+          ? latticeFrame(
+              cells[0].cpu as Parameters<typeof latticeFrame>[0],
+              envValues(env),
+              sub.w,
+              sub.h,
+              LATTICE_CELL_PX,
+            )
+          : linked;
+      views[k] = view;
+      if (gridMode !== 'off') drawGrid2D(sub, view, gridMode === 'axes');
+      for (const row of rows) {
+        try {
+          renderRow2D(sub, view, row, env, colorOf(row), analysis);
+        } catch {
+          /* skip row */
+        }
+      }
+    }
+    if (sub !== raster) blitPanel(raster, sub, rect, panel.inset);
+  });
+  return raster;
+}
+
+// --- PNG encoding ---
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c;
+  }
+  return t;
+})();
+
+function crc32(...parts: Uint8Array[]): number {
+  let c = 0xffffffff;
+  for (const p of parts) for (let i = 0; i < p.length; i++) c = CRC_TABLE[(c ^ p[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function chunk(type: string, data: Uint8Array): Uint8Array {
+  const t = new TextEncoder().encode(type);
+  const out = new Uint8Array(12 + data.length);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, data.length);
+  out.set(t, 4);
+  out.set(data, 8);
+  dv.setUint32(8 + data.length, crc32(t, data));
+  return out;
+}
+
+async function deflate(data: Uint8Array): Promise<Uint8Array> {
+  // 'deflate' is zlib-wrapped (RFC 1950), which is what PNG IDAT requires.
+  const cs = new CompressionStream('deflate');
+  const writer = cs.writable.getWriter();
+  const written = writer.write(data).then(() => writer.close());
+  const out = new Uint8Array(await new Response(cs.readable).arrayBuffer());
+  await written;
+  return out;
+}
+
+export async function encodePng(r: Raster): Promise<Uint8Array> {
+  const { w, h, px } = r;
+  const raw = new Uint8Array((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[y * (w * 3 + 1)] = 0; // filter: none
+    raw.set(px.subarray(y * w * 3, (y + 1) * w * 3), y * (w * 3 + 1) + 1);
+  }
+  const ihdr = new Uint8Array(13);
+  const dv = new DataView(ihdr.buffer);
+  dv.setUint32(0, w);
+  dv.setUint32(4, h);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = 2; // color type: RGB
+  const idat = await deflate(raw);
+  const sig = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  const parts = [sig, chunk('IHDR', ihdr), chunk('IDAT', idat), chunk('IEND', new Uint8Array(0))];
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let off = 0;
+  for (const p of parts) {
+    out.set(p, off);
+    off += p.length;
+  }
+  return out;
+}
+
+export async function renderOgPng(texts: string[]): Promise<Uint8Array> {
+  return encodePng(renderRaster(texts));
 }

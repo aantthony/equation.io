@@ -377,7 +377,7 @@ void main() {
   vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
   float v = F(p.x, p.y);
   if (isnan(v) || isinf(v)) discard;
-  // Signed shade:
+  // Signed shade, as in the static preview (worker/og.ts shadeScalar):
   // positive toward the row color, negative toward its complement, so a
   // field that changes sign (sin(x), or plain x) reads on both sides of 0.
   float s = tanh(v * 0.6);

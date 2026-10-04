@@ -47,7 +47,7 @@ describe('llms.txt', () => {
   });
 
   it('describes the MCP server its resource is served from', () => {
-    for (const marker of ['encode_graph_url', 'decode_graph_url', '`syntax` MCP resource', 'static site image']) {
+    for (const marker of ['encode_graph_url', 'decode_graph_url', '`syntax` MCP resource', 'PNG preview']) {
       expect(llms).toContain(marker);
     }
   });
