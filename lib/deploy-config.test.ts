@@ -39,6 +39,7 @@ describe('wrangler run_worker_first covers the worker routes', () => {
     ['/mcp/server-card'],
     ['/.well-known/ard.json'],
     ['/api/health'],
+    ['/api/og/abc'],
     ['/g/y%20%3D%20x'],
     ...landingWorkerPaths().map(p => [p]),
     ['/llms.txt'],

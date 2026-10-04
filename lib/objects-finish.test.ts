@@ -1,6 +1,7 @@
 import { evaluateFrame } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { analyze } from '../worker/graph.ts';
+import { canRenderOg, renderRaster } from '../worker/og.ts';
 import { evaluate, parseExpr } from './expr.ts';
 
 import { fieldEvaluator, FLOW_GLYPH_N, FLOW_SEEDS, FLOW_STEPS, streamline, traceField } from './flow.ts';
@@ -310,5 +311,20 @@ describe('solver extensions and comparison notes', () => {
     // Derivatives and names merely starting with d are unaffected.
     const ok = runRows(['dx = 1', 'y = d/dx (x^2)', 'y = d^2/dx^2 (x^3)']).rows;
     expect(ok.map(r => r.error)).toEqual([undefined, undefined, undefined]);
+  });
+  it('has real preview paths or explicit fallback for new objects', () => {
+    for (const rows of [
+      ['A=(1,2,3)', 'vector(A)'],
+      ["(x',y',z')=(-y,x,0)"],
+      ['y=[1,2,3]x'],
+      ['(x^2+y^2+z^2,z)=(9,1)'],
+    ]) {
+      expect(canRenderOg(rows), rows.join()).toBe(true);
+      const r = renderRaster(rows, 160, 120);
+      expect(r.px.some(v => v < 100)).toBe(true);
+    }
+    const one = renderRaster(['y=x'], 160, 120),
+      family = renderRaster(['y=[1,2,3]x'], 160, 120);
+    expect(family.px).not.toEqual(one.px);
   });
 });
