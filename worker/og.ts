@@ -24,7 +24,7 @@ import {
   latticeFrame,
 } from '../lib/automaton.ts';
 import { arrowHead } from '../lib/geom.ts';
-import { glyphScale } from '../lib/glyphs.ts';
+import { glyphScale, majorAngle } from '../lib/glyphs.ts';
 import { hullFaces } from '../lib/hull.ts';
 import { vertexSampler } from '../lib/figure-vertices.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
@@ -759,6 +759,51 @@ function renderRow2D(
       return;
     }
     case 'tfield2d': {
+      if (cpu.streamlines) {
+        // streamlines(M): short tensor lines through a grid of seeds, the
+        // static counterpart of the app's LIC (web/render2d.ts tlinesFrag).
+        // A line has no sign, so each step continues the last direction.
+        const progs = cpu.entries.map(compile);
+        const ratio = v.ratio ?? 1;
+        let det = 0;
+        const dir = (px: number, py: number, prev: [number, number]): [number, number] | null => {
+          env.vars[env.slotX] = v.cx + (px - r.w / 2) * v.upp;
+          env.vars[env.slotY] = v.cy - (py - r.h / 2) * (v.upp / ratio);
+          const [a, b, c, d] = progs.map(p => run(p, env.vars, env.stack));
+          det = a * d - b * c;
+          const th = majorAngle(a, b, c, d);
+          if (!Number.isFinite(th)) return null;
+          // The plane direction in pixels: screen y points down.
+          const ex = Math.cos(th),
+            ey = -Math.sin(th) * ratio;
+          const len = Math.hypot(ex, ey);
+          const s = ex * prev[0] + ey * prev[1] < 0 ? -1 / len : 1 / len;
+          return [ex * s, ey * s];
+        };
+        const cell = 18;
+        const step = 2;
+        for (let sy = cell / 2; sy < r.h; sy += cell)
+          for (let sx = cell / 2; sx < r.w; sx += cell) {
+            const d0 = dir(sx, sy, [1, 0]);
+            if (!d0) continue;
+            // An orientation-reversing M draws in the complement, as in the app.
+            const ink: [number, number, number] = det < 0 ? [1 - color[0], 1 - color[1], 1 - color[2]] : color;
+            for (const sign of [1, -1]) {
+              let px = sx,
+                py = sy;
+              let d: [number, number] = [sign * d0[0], sign * d0[1]];
+              for (let k = 0; k < 4; k++) {
+                const next = dir(px, py, d);
+                if (!next) break;
+                d = next;
+                drawLine(r, px, py, px + step * d[0], py + step * d[1], ink, 0.6);
+                px += step * d[0];
+                py += step * d[1];
+              }
+            }
+          }
+        return;
+      }
       // The app's glyphs (web/render2d.ts tfieldFrag) as outlines: the image
       // of a circle under M at each cell's centre, and the spoke M e_x.
       const progs = cpu.entries.map(compile);

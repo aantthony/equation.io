@@ -64,7 +64,7 @@ export type CpuPlan =
       coordinates?: Expr[];
     }
   | { type: 'vfield2d'; comps: [Expr, Expr] }
-  | { type: 'tfield2d'; entries: [Expr, Expr, Expr, Expr] }
+  | { type: 'tfield2d'; entries: [Expr, Expr, Expr, Expr]; streamlines?: true }
   | { type: 'vfield3d'; comps: Expr[] }
   | { type: 'pcurve'; dim: 2 | 3; comps: Expr[]; tube?: Expr; d1?: Expr[]; d2?: Expr[]; d3?: Expr[] }
   | { type: 'psurface'; comps: [Expr, Expr, Expr] }
@@ -258,7 +258,11 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'color-field':
       return { type: `${object.space}2d`, channels: [...object.channels] };
     case 'tensor-field':
-      return { type: 'tfield2d', entries: object.entries.map(real) as [Expr, Expr, Expr, Expr] };
+      return {
+        type: 'tfield2d',
+        entries: object.entries.map(real) as [Expr, Expr, Expr, Expr],
+        ...(object.streamlines && { streamlines: true as const }),
+      };
     case 'vector-field':
       return object.components.length === 2
         ? { type: 'vfield2d', comps: object.components.map(real) as [Expr, Expr] }
