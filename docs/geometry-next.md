@@ -49,12 +49,8 @@ meet/join; `line(A, B)` becomes a value; conformal GA out of scope).
 2. **`action` over a multiset of matrices.** Same shape of change in the
    `acting` block of lib/plot.ts (currently an error "one matrix at a
    time"). Quick.
-3. **Tensor streamlines for 2×2 fields.** Integral curves of the major
-   eigenvector, as an option on the row like `showStreamlines`. An
-   eigenvector field is a line field (no sign), so the integrator must
-   keep orientation continuous between steps (flip when the dot product
-   with the previous direction is negative). The LIC shader in
-   web/render2d.ts `vfieldFrag` is the template. Medium.
+3. ~~Tensor streamlines for 2×2 fields.~~ Done: the `streamlines` row
+   toggle (render2d.ts `tlinesFrag`).
 4. **3×3 matrix fields as ellipsoid glyphs.** A new kind (`tfield3d`),
    drawn on the CPU as a lattice of small meshes (image of a sphere under
    M), like the 3D arrow lattice for `vfield3d`. Every kind needs the

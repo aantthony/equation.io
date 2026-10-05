@@ -67,6 +67,8 @@ export interface TField2D {
   entries: [string, string, string, string];
   color: [number, number, number];
   params?: string[];
+  /** Streamlines of the major eigenvector (tlinesFrag) instead of glyphs. */
+  streamlines?: boolean;
 }
 
 export interface Fractal2D {
@@ -572,6 +574,97 @@ void main() {
   if (alpha < 0.004) discard;
   float sense = m[0][0] * m[1][1] - m[1][0] * m[0][1];
   outColor = vec4(sense < 0.0 ? vec3(1.0) - uColor : uColor, alpha);
+}
+`;
+}
+
+/**
+ * A matrix field as tensor streamlines: line integral convolution, as in
+ * vfieldFrag, along the major eigenvector of the symmetric part of M (lib/
+ * glyphs.ts majorAngle). An eigenvector has no sign, so the field is a line
+ * field: each step takes whichever of ±e continues the previous one, and
+ * with no direction to drift in, the texture holds still. Streaks fade
+ * where they are cut short — at the degenerate points where S is isotropic
+ * and the direction is undefined, and at the domain's edge. As with the
+ * glyphs, det M < 0 draws in the complement of the row colour.
+ */
+function tlinesFrag(entries: [string, string, string, string], params?: string[]): string {
+  return `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform vec2 uOrigin;
+uniform vec3 uColor;
+uniform float t;
+${paramDecls(params)}
+out vec4 outColor;
+${GLSL_PRELUDE}
+// Row-major ((a, b), (c, d)) as a vec4.
+vec4 M(float x, float y) { return vec4(${entries[0]}, ${entries[1]}, ${entries[2]}, ${entries[3]}); }
+
+float tlNoise(vec2 spx) {
+  return fract(sin(dot(floor(spx / 2.0), vec2(127.1, 311.7))) * 43758.5453);
+}
+
+const int   N    = 24;   // integration steps each direction
+const float STEP = 1.6;  // step length in pixels
+
+// The major eigenvector of (M + Mᵀ)/2 at q, scaled to one pixel of travel,
+// signed to agree with prev; zero where it is undefined (an isotropic or
+// non-finite tensor). Half the angle of (a − d, b + c) is its direction.
+vec2 E(vec2 q, vec2 prev) {
+  vec4 m = M(q.x, q.y);
+  float h = 0.5 * (m.x - m.w);
+  float o = 0.5 * (m.y + m.z);
+  float r = length(vec2(h, o));
+  if (isnan(r) || isinf(r) || !(r > 1e-5 * (abs(m.x) + abs(m.w) + abs(o)))) return vec2(0.0);
+  float th = 0.5 * atan(o, h);
+  vec2 e = vec2(cos(th), sin(th));
+  e /= length(e / uUpp);
+  return dot(e, prev) < 0.0 ? -e : e;
+}
+
+float weight(float s) {
+  return 0.5 + 0.5 * cos(3.14159265 * s / (float(N) * STEP));
+}
+
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
+  vec4 m0 = M(p.x, p.y);
+  if (any(isnan(m0)) || any(isinf(m0))) discard;
+  vec2 e0 = E(p, vec2(1.0, 0.0));
+
+  float w0 = weight(0.0);
+  float sum = w0 * tlNoise(gl_FragCoord.xy - uOrigin);
+  float wsum = w0;
+  float travel = 0.0;
+
+  // Midpoint rule forward (+e0) and backward (−e0), as in vfieldFrag, with
+  // each direction oriented to continue the last.
+  for (int side = 0; side < 2; side++) {
+    vec2 d = side == 0 ? e0 : -e0;
+    if (d == vec2(0.0)) break;
+    vec2 q = p;
+    for (int i = 1; i <= N; i++) {
+      vec2 d1 = E(q, d);
+      if (d1 == vec2(0.0)) break;
+      vec2 dm = E(q + 0.5 * STEP * d1, d1);
+      d = dm == vec2(0.0) ? d1 : dm;
+      q += STEP * d;
+      float w = weight(float(i) * STEP);
+      sum += w * tlNoise((q - uCenter) / uUpp + 0.5 * uRes);
+      wsum += w;
+      travel += STEP;
+    }
+  }
+
+  float v = sum / max(wsum, 1e-6);
+  float a = clamp(0.5 + (v - 0.5) * 6.0, 0.0, 1.0);
+  a *= 0.45 * smoothstep(0.1, 0.55, travel / (2.0 * float(N) * STEP));
+  if (a < 0.004) discard;
+  float sense = m0.x * m0.w - m0.y * m0.z;
+  outColor = vec4(sense < 0.0 ? vec3(1.0) - uColor : uColor, a);
 }
 `;
 }
@@ -1117,7 +1210,10 @@ export class Renderer2D {
     for (const c of layers.colors ?? []) drawField(c, (field, params) => colorFrag(field, params, c.locals, c.space));
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
     for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
-    for (const f of layers.tfields ?? []) drawProgram(tfieldFrag(f.entries, f.params), f.color, f.params, f.uniforms);
+    for (const f of layers.tfields ?? []) {
+      const frag = (f.streamlines ? tlinesFrag : tfieldFrag)(f.entries, f.params);
+      drawProgram(frag, f.color, f.params, f.uniforms);
+    }
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
     for (const q of layers.projections ?? []) drawField(q, (f, ps) => projFrag(f, q.relation, q.slope, ps));
     for (const b of layers.bifs ?? []) drawField(b, bifFrag);

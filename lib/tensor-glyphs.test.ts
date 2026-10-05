@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { evaluate, type Expr } from './expr.ts';
-import { glyphScale, largestSingular } from './glyphs.ts';
+import { glyphScale, largestSingular, majorAngle } from './glyphs.ts';
 import { plotReadout } from './plot.ts';
 
 /** Tensors drawn by what they do: action(M), matrix fields, jacobian and hessian. */
@@ -73,5 +73,41 @@ describe('glyph scale', () => {
     expect(glyphScale(0.01, 0, 0, 0.01)).toBeCloseTo(1, 3);
     expect(glyphScale(100, 0, 0, 1) * 100).toBeCloseTo(1);
     expect(glyphScale(0, 0, 0, 0)).toBe(1);
+  });
+});
+
+describe('tensor streamlines', () => {
+  /** S e = λ e for e at angle θ, S the symmetric part, λ its larger eigenvalue. */
+  function isMajor(a: number, b: number, c: number, d: number) {
+    const th = majorAngle(a, b, c, d);
+    const o = (b + c) / 2;
+    const [ex, ey] = [Math.cos(th), Math.sin(th)];
+    const lam = (a + d) / 2 + Math.hypot((a - d) / 2, o);
+    expect(a * ex + o * ey).toBeCloseTo(lam * ex, 9);
+    expect(o * ex + d * ey).toBeCloseTo(lam * ey, 9);
+    expect(th).toBeGreaterThan(-Math.PI / 2 - 1e-12);
+    expect(th).toBeLessThanOrEqual(Math.PI / 2);
+  }
+  it('follows the eigenvector of the larger signed eigenvalue', () => {
+    expect(majorAngle(2, 0, 0, -2)).toBeCloseTo(0);
+    expect(majorAngle(-2, 0, 0, 2)).toBeCloseTo(Math.PI / 2);
+    expect(majorAngle(0, 1, 1, 0)).toBeCloseTo(Math.PI / 4);
+    for (const m of [
+      [1, 2, 2, -3],
+      [-5, 0.3, 0.3, -1],
+      [0.2, -4, -4, 0.1],
+      [3, 1, -2, 0],
+    ] as const)
+      isMajor(...m);
+  });
+  it('reads a non-symmetric matrix by its symmetric part', () => {
+    // A pure rotation has an isotropic (zero) symmetric part.
+    expect(majorAngle(0, -1, 1, 0)).toBeNaN();
+    expect(majorAngle(1, 3, -1, 0)).toBeCloseTo(majorAngle(1, 1, 1, 0));
+  });
+  it('is undefined where the tensor is isotropic', () => {
+    expect(majorAngle(2, 0, 0, 2)).toBeNaN();
+    expect(majorAngle(0, 0, 0, 0)).toBeNaN();
+    expect(majorAngle(1, 1e-12, 0, 1)).toBeNaN();
   });
 });

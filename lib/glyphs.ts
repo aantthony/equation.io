@@ -256,3 +256,24 @@ export function largestSingular(a: number, b: number, c: number, d: number): num
   const half = (p + q) / 2;
   return Math.sqrt(half + Math.sqrt(Math.max(0, ((p - q) / 2) ** 2 + r * r)));
 }
+
+/**
+ * The line a tensor streamline follows through ((a, b), (c, d)): the major
+ * eigenvector of its symmetric part S = (M + Mᵀ)/2, the one of the larger
+ * (signed) eigenvalue, as an angle in (−π/2, π/2] — a line has no sign, so θ
+ * and θ + π are one direction. NaN where S is isotropic (a multiple of I),
+ * where every direction is an eigenvector and the line field is undefined.
+ * For a symmetric M (a hessian, a stress) S is M itself; for a jacobian it
+ * is the strain rate, whose major direction is the one stretched fastest.
+ * (The same formula is written in GLSL in web/render2d.ts tlinesFrag.)
+ */
+export function majorAngle(a: number, b: number, c: number, d: number): number {
+  const half = (a - d) / 2;
+  const off = (b + c) / 2;
+  const r = Math.hypot(half, off);
+  if (!(r > ISOTROPIC * (Math.abs(a) + Math.abs(d) + Math.abs(off)))) return NaN;
+  return Math.atan2(off, half) / 2;
+}
+/** Anisotropy below which a tensor counts as isotropic, relative to its
+ *  size, so rounding in a field like 2 I draws no direction. */
+const ISOTROPIC = 1e-5;

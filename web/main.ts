@@ -155,7 +155,8 @@ interface Equation {
   familyParent?: Equation;
   familyShade?: number;
   showArrows?: boolean;
-  /** A 3D vector field drawn as animated streamlines instead of trajectories. */
+  /** A 3D vector field drawn as animated streamlines instead of trajectories;
+   *  a 2D matrix field as streamlines of its major eigenvector, not glyphs. */
   showStreamlines?: boolean;
   certify?: boolean;
   trail?: PointTrail;
@@ -2107,7 +2108,13 @@ function render() {
             layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
             break;
           case 'tfield2d':
-            layers.tfields.push({ ...gpuFor(eq, 'tfield2d'), color, params, uniforms });
+            layers.tfields.push({
+              ...gpuFor(eq, 'tfield2d'),
+              color,
+              params,
+              uniforms,
+              streamlines: !!eq.showStreamlines,
+            });
             break;
           case 'vfield2d': {
             layers.vfields.push({ ...gpuFor(eq, 'vfield2d'), color, params, uniforms });
@@ -3543,6 +3550,15 @@ function rowToggle(eq: Equation): RowToggle | null {
         on: !!eq.partialSum,
         flip: () => {
           eq.partialSum = !eq.partialSum;
+        },
+      };
+    case 'tfield2d':
+      return {
+        label: 'streamlines',
+        title: 'Trace the major eigenvector of the symmetric part instead of drawing glyphs',
+        on: !!eq.showStreamlines,
+        flip: () => {
+          eq.showStreamlines = !eq.showStreamlines;
         },
       };
     default:

@@ -100,6 +100,11 @@ two in plane units, so glyphs pan with the plane — and tests the ring
 |adj(A) q| = |det A| in pixel space, which also draws a singular matrix's
 segment. The glyph scale is tanh(σ₁)/σ₁ (glyphs.ts `glyphScale`): true size
 while small, one cell at most; det < 0 draws in the complement colour.
+The row's `streamlines` toggle swaps the glyphs for tensor streamlines
+(render2d.ts `tlinesFrag`): the vector-field LIC, along the major eigenvector
+of the symmetric part, half the angle of (a − d, b + c) (glyphs.ts
+`majorAngle`). An eigenvector has no sign, so each step takes the ±e that
+continues the last; streaks fade where the part is isotropic.
 `jacobian` and `hessian` expand beside grad/div/curl.
 
 The quaternion Julia set is written in user space: a recursive function
@@ -118,8 +123,7 @@ Planned in docs/geometry-next.md (PGA itself in docs/pga.md).
 
 - Multivector fields (a multivector in x, y, z, u or v) have no picture;
   take a part (`grade(A, 1)`) to draw a field or curve.
-- A 3×3 matrix field (ellipsoid glyphs) and tensor streamlines along the
-  major eigenvector.
+- A 3×3 matrix field (ellipsoid glyphs).
 - Projective and conformal geometric algebra (points, lines, circles as
   blades; meet and join).
 - A multiset of multivectors reads out but draws nothing; `action` takes one
