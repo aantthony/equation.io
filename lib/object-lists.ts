@@ -27,6 +27,15 @@ const REDUCES_POINTS = new Set(['count', 'total', 'mean']);
 /** Reductions that need an order or a scale, which a tensor has not. */
 const TENSOR_REFUSED = new Set(['min', 'max', 'median', 'stdev']);
 
+/** Points that meet, project and reflect made, as the tuples they are; any
+ *  other item as it stands. */
+function tupleItems(items: readonly Expr[]): Expr[] {
+  return items.map(it => {
+    const f = flatOfNode(it);
+    return f && isPoint(f) ? { kind: 'vec', items: pointCoords(f) } : it;
+  });
+}
+
 /** Figures that are just their points: moving the points moves the figure. */
 const POINT_FIGURES = new Set(['segment', 'polyline', 'polygon', 'vector', 'hull']);
 
@@ -309,7 +318,7 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     const computed = (arg: Expr): ListValue | null => {
       try {
         const value = lowerObjects(arg, defs, opts, true);
-        return value.kind === 'list' ? { items: value.items, axes: axesOf(value) } : null;
+        return value.kind === 'list' ? { items: tupleItems(value.items), axes: axesOf(value) } : null;
       } catch {
         return null;
       }
@@ -544,12 +553,9 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
             // and planes count, but have no total or mean.
             const flats = pts?.kind === 'list' ? pts.items.map(flatOfNode) : [];
             if (pts?.kind === 'list' && flats.length && flats.every(f => f)) {
-              if (flats.every(f => isPoint(f!))) {
-                pts = withAxes<Expr>(
-                  { kind: 'list', items: flats.map(f => ({ kind: 'vec', items: pointCoords(f!) })) },
-                  axesOf(pts),
-                );
-              } else if (n.name === 'count') return num(flats.length);
+              if (flats.every(f => isPoint(f!)))
+                pts = withAxes<Expr>({ kind: 'list', items: tupleItems(pts.items) }, axesOf(pts));
+              else if (n.name === 'count') return num(flats.length);
               else throw new Error(`${n.name} is not defined for lines and planes — count takes them.`);
             }
             if (pts?.kind === 'list' && pts.items.length && pts.items.every(p => p.kind === 'vec')) {

@@ -180,6 +180,10 @@ describe('multisets of flats (docs/multisets.md)', () => {
     expect(value([...rows, 'R = reflect(Q, L)', 'total(R.x)'])).toBe(4);
     expect(drawn([...rows, 'R = reflect(Q, L)', 'polygon(sort(R, R.x))'])).toEqual(['polygon']);
   });
+  it('hand a computed list of points to a figure whole', () => {
+    const W = 'W = [(0, 0, 1), (1, 0, 1), (0, 1, 1), (1, 1, 2)]';
+    expect(drawn([W, 'hull(project(W, plane((0, 0, 0), (0, 0, 1))))'])).toEqual(['polygon']);
+  });
   it('name a list of lines written with line(…)', () => {
     expect(readout([...P, 'N = line(P, C)', 'N'])).toBe('= [y = x; y = 0]');
   });

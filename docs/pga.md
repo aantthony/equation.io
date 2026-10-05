@@ -198,6 +198,11 @@ could ship as one PR.
 - **Measures.** distance from a point to a line or plane, and between
   flats (0 where they cross, the gap where parallel, |L ∨ M|/|d × e| for
   skew lines); angle between lines and planes is the acute angle.
+- **Examples** (web/examples.ts): the orthocentre and Desargues' theorem
+  under "geometry", and a turning cube's shadow (`hull(project(W, G))`)
+  under "matrices, rotations + hulls". The two planes' line waits for planes
+  that draw translucent — opaque, they hide the line — and the screw motion
+  for motors (phase 4).
 - **Multisets** work through the existing object-list expansion: a list
   of lines or planes is a list of `[pga]` nodes, a name moves together
   (`L = join(P, C); meet(L, L)` gives two results), `count` takes lines and
