@@ -89,7 +89,7 @@ import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
-import { type SpecialPoint, specialPoints } from '../lib/special.ts';
+import { type SpecialPoint, curveTracer, fmtTraced, specialPoints } from '../lib/special.ts';
 
 import { type StateSystem, advanceState, initialState } from '../lib/state.ts';
 import { type OrbitInput, orbitInput } from '../lib/orbit.ts';
@@ -240,8 +240,10 @@ interface Equation {
   infoEl?: HTMLElement;
   /** Data rows: the collapsible grid of the file's first rows. */
   tableUI?: TableUI;
-  /** Cached hover points (axis intercepts/roots) for the cached view range. */
+  /** Cached hover points (intercepts, extrema) for the cached view range. */
   spCache?: { text: string; env: string; xlo: number; xhi: number; ylo: number; yhi: number; pts: SpecialPoint[] };
+  /** Projects the pointer onto the curve, for the constants it was built at. */
+  tracer?: { text: string; env: string; fn: ReturnType<typeof curveTracer> };
   toggleUI?: { box: HTMLElement; btns: HTMLButtonElement[] };
   /** Cached system solutions for the box and constants they were solved at. */
   traceTarget?: string;
@@ -2647,6 +2649,7 @@ function resetEditedTrails() {
 function invalidateDerivedState() {
   for (const eq of equations) {
     eq.spCache = undefined;
+    eq.tracer = undefined;
     eq.traceTarget = undefined;
   }
   spGen++; // queued hover recomputes predate this change: drop them
@@ -4677,7 +4680,7 @@ function movePoint(pt: Grabbable, x: number, y: number) {
   requestRender();
 }
 
-// --- hover: intercepts and roots ---
+// --- hover: intercepts, extrema and tracing ---
 
 let hover: { pt: SpecialPoint; color: string; panel: Panel } | null = null;
 
@@ -4802,8 +4805,24 @@ function pointsFor(eq: Equation): SpecialPoint[] {
   return c && c.text === eq.text && c.env === envKey ? c.pts : [];
 }
 
+/** eq's curve tracer, rebuilt when its text or constants change. Cheap to
+ *  build (a compile, no search), so unlike spCache it is made on demand. */
+function tracerFor(eq: Equation): ReturnType<typeof curveTracer> {
+  const cls = eq.cls;
+  if (!cls || eq.error || !eq.cpu || eq.cpu.type !== 'implicit2d' || cls.animated) return null;
+  const env = hoverEnvKey(cls);
+  if (eq.tracer?.text !== eq.text || eq.tracer.env !== env) {
+    const values = Object.fromEntries(cls.params.map(p => [p, constEnv[p] ?? 0]));
+    eq.tracer = { text: eq.text, env, fn: curveTracer(eq.cpu.equation, values) };
+  }
+  return eq.tracer.fn;
+}
+
 function setHover(next: { pt: SpecialPoint; color: string; panel: Panel } | null) {
-  if (hover?.pt === next?.pt && hover?.color === next?.color) return;
+  const same =
+    hover?.pt === next?.pt ||
+    (hover && next && hover.pt.x === next.pt.x && hover.pt.y === next.pt.y && hover.pt.lines[0] === next.pt.lines[0]);
+  if (same && hover?.color === next?.color) return;
   hover = next;
   if (!hover) {
     tooltip.style.display = 'none';
@@ -4836,6 +4855,24 @@ function updateHover(clientX: number, clientY: number) {
       if (d < bestD) {
         bestD = d;
         best = { pt, color: cssColor(baseColor(eq)), panel: cur };
+      }
+    }
+  }
+  // No notable point near: trace the nearest curve instead, reading (x, y)
+  // off wherever the pointer sits along it.
+  if (!best) {
+    const uppCss = view.upp * (window.devicePixelRatio || 1);
+    const sx = uppCss;
+    const sy = uppCss / (view.ratio ?? 1);
+    const [wx, wy] = toMath(clientX, clientY);
+    let bestT = 10; // CSS px: tighter than a point, so the points stay easy to hit
+    for (const eq of equations) {
+      if (panelOf(eq) !== here) continue;
+      const hit = tracerFor(eq)?.(wx, wy, sx, sy);
+      if (hit && hit.dist < bestT) {
+        bestT = hit.dist;
+        const lines = ['on curve', `x = ${fmtTraced(hit.x, sx)}`, `y = ${fmtTraced(hit.y, sy)}`];
+        best = { pt: { x: hit.x, y: hit.y, lines }, color: cssColor(baseColor(eq)), panel: cur };
       }
     }
   }
