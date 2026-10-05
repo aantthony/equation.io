@@ -107,18 +107,17 @@ function indexedNames(e: Expr, out = new Set<string>()): Set<string> {
 }
 
 /** `[term]("…_a_", k)` at a whole k, once a step's n is a number: the chain
- *  constant itself, which a constant (unlike a plotted term) can depend on. */
-function pinTerms(e: Expr): Expr {
+ *  constant itself, which a constant (unlike a plotted term) can depend on.
+ *  `at` gives it, computing it first if the chain does not hold it yet. */
+function pinTerms(e: Expr, at: (chain: string, k: number) => Expr): Expr {
   if (e.kind === 'call' && e.name === TERM_AT_FN) {
-    const [chain, at] = e.args;
-    if (chain.kind === 'str' && freeVars(at).size === 0) {
-      const k = evaluate(at, {});
-      return Number.isInteger(k) && k >= 0 && k <= SEQ_MAX
-        ? { kind: 'var', name: `${chain.value}${k}` }
-        : { kind: 'num', value: NaN };
+    const [chain, index] = e.args;
+    if (chain.kind === 'str' && freeVars(index).size === 0) {
+      const k = evaluate(index, {});
+      return Number.isInteger(k) && k >= 0 && k <= SEQ_MAX ? at(chain.value, k) : { kind: 'num', value: NaN };
     }
   }
-  return mapChildren(e, pinTerms);
+  return mapChildren(e, c => pinTerms(c, at));
 }
 
 /** Detect a sequence/recurrence row before definition scanning. */
@@ -351,6 +350,20 @@ export function sequenceResolver(
         : null;
       const openIndexed = open ? indexedNames(open) : new Set<string>();
       const byIndexAlone = open && ![...freeVars(open)].some(v => openIndexed.has(v) || !!opts.isList?.(v));
+      if (byIndexAlone)
+        for (const v of freeVars(open)) {
+          if (v !== recVar && v !== scan.index && !isConstant(v) && !v.startsWith(`${defs.sequencePrefix}_`))
+            throw new Error(`Sequence ${name} terms need constant parameters (found ${v}).`);
+        }
+      /** Another recurrence's term k, read from its chain: built now if it
+       *  is not there yet, so a chain that stops early (a run off the end of
+       *  its tuple) says why rather than naming a missing constant. */
+      const chainTerm = (chain: string, k: number): Expr => {
+        const other = chain.slice(defs.sequencePrefix.length + 1, -1);
+        return defs.consts.has(`${chain}${k}`) || !defs.sequences.has(other)
+          ? { kind: 'var', name: `${chain}${k}` }
+          : term(other, k);
+      };
       /** Step i of a recurrence that reads n: its source at n = i − 1, resolved
        *  and its tuple positions read, so each term is its own expression. */
       const stepAt = (i: number): Expr => {
@@ -360,6 +373,7 @@ export function sequenceResolver(
               [recVar]: { kind: 'var', name: chained(name, i - 1) },
               [scan.index]: { kind: 'num', value: i - 1 },
             }),
+            chainTerm,
           );
         const at = substIdx(substVars(parsed, { [recVar]: { kind: 'var', name: chained(name, i - 1) } }), scan.index, {
           kind: 'num',
@@ -392,7 +406,9 @@ export function sequenceResolver(
           try {
             value = stepAt(i);
           } catch (err) {
-            if (!partial) throw err;
+            // Only a run off the end of a tuple (its own, or one another
+            // sequence it reads steps over) ends the chain quietly.
+            if (!partial || !/out of range/.test((err as Error).message)) throw err;
             return { kind: 'num', value: NaN };
           }
         defineConstant(internal, value);

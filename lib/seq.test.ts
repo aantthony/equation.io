@@ -392,6 +392,22 @@ describe('recurrences that read n and tuples', () => {
     expect(drawn([...doubling, 'a_0 = 0', 'a_{n+1} = a_n + b_n'], 3, 4)).toEqual([0, 1, 3, 7, 15]);
   });
 
+  it('stops a recurrence that reads another where that one runs out', () => {
+    const rows = ['D = (1, 1, 0, 1)', 'q_0 = 0', 'q_{n+1} = q_n + D[n + 1]', 'b_0 = 0', 'b_{n+1} = b_n + q_n'];
+    expect(drawn(rows, 2, 4)).toEqual([0, 1, 2, 2, 3]); // q, unharmed by b
+    expect(drawn(rows, 4, 6).slice(0, 6)).toEqual([0, 0, 1, 3, 5, 8]);
+    expect(drawn(rows, 4, 6)[6]).toBeNaN();
+    expect(analyzeRows([...rows, 'g = b_6']).rows[5].error).toMatch(/out of range/);
+  });
+
+  it('still reports what is not a run off a tuple', () => {
+    expect(analyzeRows(['r = [1..3]', 'a_0 = 0.5', 'a_{n+1} = a_n + r']).rows[2].error).toMatch(/one number/);
+    const unknown = analyzeRows(['a_0 = 0', 'a_{n+1} = a_n + n + zz', 'c = a_3']).rows;
+    expect(unknown[1].error).toMatch(/Unknown variable: zz/);
+    expect(unknown[2].error).toMatch(/constant parameters \(found zz\)/);
+    expect(analyzeRows(['a_0 = 0', 'a_{n+1} = a_n + n + y', 'c = a_3']).rows[2].error).toMatch(/found y/);
+  });
+
   it('keeps an autonomous recurrence a cobweb', () => {
     expect(compileCpu(values(['a_0 = 0.2', 'a_{n+1} = a_n/2 + 1']).out[1].cls!).type).toBe('cobweb');
   });
