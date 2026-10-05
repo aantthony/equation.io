@@ -118,6 +118,14 @@ describe('drawing', () => {
     // An item that reduced to a number is still one of the multiset.
     expect(readout(['[e_xy, e_x ⟑ e_x]'])).toBe('= [e_xy, 1]');
   });
+  it('draws a multiset of multivectors, each as on a row of its own', () => {
+    expect(kinds(['[1, 2] e_xy'])).toEqual(['polygon', 'vector', 'polygon', 'vector']);
+    // A plane member lifts into space beside a solid one.
+    expect(kinds(['[e_x, e_xyz]'])).toEqual(['vector', 'hull']);
+    expect(row(['[e_x, e_xyz]']).r.cls!.needs3D).toBe(true);
+    // A member that reduced to a number draws nothing, and the rest still draw.
+    expect(kinds(['[e_xy, e_x ⟑ e_x]'])).toEqual(['polygon', 'vector']);
+  });
   it('animates and follows sliders by its value, not only by what it draws', () => {
     expect(row(['cos(t) + e_xyz']).r.cls!.animated).toBe(true);
     expect(row(['a = 1', 'a + e_xyz']).r.cls!.params).toEqual(['a']);
