@@ -61,6 +61,7 @@ import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
+import { type AxisMaps, mapRowExpr, unmappedObject } from './axis-map.ts';
 
 export interface RowSource {
   id?: string | number;
@@ -699,6 +700,23 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       },
     );
 
+  // Each panel's axis maps, from its view(…) row wherever in the panel it
+  // sits (lib/axis-map.ts); a malformed row is reported by the loop below.
+  const panelMaps: AxisMaps[] = [];
+  {
+    let at = 0;
+    for (const row of rows) {
+      if (!row.text || row.def || row.comment) continue;
+      if (isDividerRow(row.text)) at++;
+      else if (/^\s*view\s*\(/.test(row.text) && !fnNames.has('view'))
+        try {
+          const spec = parseViewRow(row.text, ropts.consts!);
+          if (spec?.kind === 'view' && spec.maps) panelMaps[at] ??= spec.maps;
+        } catch {
+          /* the row's own error */
+        }
+    }
+  }
   const seenViewKinds = new Set<string>();
   let panel = 0;
   for (const [ri, row] of rows.entries()) {
@@ -943,7 +961,20 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // into scalar expressions; a point name A becomes (A_x, A_y).
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
-      row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
+      const maps = panelMaps[panel];
+      if (maps) {
+        // A mapped panel draws the row in its screen coordinates.
+        const mapped = classifyRow(
+          { ...resolved, integral: null },
+          e => mapRowExpr(lower(e), maps),
+          constNames,
+          fieldEnv,
+          timeDifferentiator(defs),
+        ).cls;
+        const problem = unmappedObject(mapped.object);
+        if (problem) throw new Error(problem);
+        row.cls = mapped;
+      } else row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;

@@ -1303,6 +1303,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 - `view(x = -5..5, y = -2..2)` sets the 2D window; either axis alone works
   (`view(x = 0..0.01)`), the other is centered at 0 and sized by the canvas
   aspect. The whole box is always visible (uniform scale).
+- A log axis is a map from the screen: `view(x = 1..1000, x = 10^X)` makes x
+  equal 10^X, where X is the panel's linear screen coordinate (Y for y), so
+  `view(x = 0.1..100, y = 0.01..10000, x = 10^X, y = 10^Y)` is log-log and a
+  power law draws as a straight line. The window stays in x units. Any
+  increasing map built from exp, ln, log, powers, sqrt, sinh and arithmetic
+  works (`y = sinh(Y)` is a symlog axis). It applies to its own panel only.
+  Graphs, implicit curves, regions and fields are drawn on mapped axes;
+  points, parametric curves and geometry are not yet, and the grid labels
+  still count X rather than x.
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
   A trailing `spin = rate` keeps it orbiting about the vertical axis at that

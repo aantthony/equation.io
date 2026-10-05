@@ -1054,6 +1054,7 @@ function panelViewText(p: Panel): { eq: Equation; text: string } | null {
         y: sy ? undefined : [v.cy - hh, v.cy + hh],
         ratio: sx || sy ? undefined : v.ratio,
         axes: p.lattice?.axes as [string, string] | undefined,
+        maps: (eq.viewSpec as View2DSpec).maps,
       },
       p.lattice?.written,
     );
