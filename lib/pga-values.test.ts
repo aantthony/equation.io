@@ -173,6 +173,13 @@ describe('multisets of flats (docs/multisets.md)', () => {
     if (o.kind === 'point' && o.source.representation === 'real')
       expect(o.source.coordinates.map((c: Expr) => evaluate(c, env))).toEqual([2, 2, 2]);
   });
+  it('name a list of points that reflect, project and meet made, as points', () => {
+    const rows = ['L = line((0, 0), (1, 1))', 'Q = [(1, 1), (2, 3), (4, 0)]'];
+    expect(readout([...rows, 'R = reflect(Q, L)', 'R.x'])).toBe('= [1, 3, 0]');
+    expect(readout([...rows, 'S = project(Q, L)', 'S.y'])).toBe('= [1, 2.5, 2]');
+    expect(value([...rows, 'R = reflect(Q, L)', 'total(R.x)'])).toBe(4);
+    expect(drawn([...rows, 'R = reflect(Q, L)', 'polygon(sort(R, R.x))'])).toEqual(['polygon']);
+  });
   it('name a list of lines written with line(…)', () => {
     expect(readout([...P, 'N = line(P, C)', 'N'])).toBe('= [y = x; y = 0]');
   });
