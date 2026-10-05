@@ -7,7 +7,7 @@
  * - the extrema: for a graph y = f(x) the roots of f′ (same machinery, so
  *   polynomial extrema get exact forms) and the inflection points, the roots
  *   of f″ where it changes sign; for any other curve the horizontal tangents
- *   F = ∂F/∂x = 0, found by the seeded search in solve.ts.
+ *   F = ∂F/∂x = 0, found by a budgeted seeded Newton search.
  *
  * curveTracer covers the rest of the curve: it projects the pointer onto it.
  */
@@ -16,7 +16,6 @@ import { diff } from './diff.ts';
 import { type Expr, evaluate, freeVars, substVars } from './expr.ts';
 import { fieldEvaluator } from './flow.ts';
 import { type FoundRoot, findRoots } from './roots.ts';
-import { solveSystem } from './solve.ts';
 
 export interface SpecialPoint {
   x: number;
@@ -226,75 +225,126 @@ function graphExtrema(f: Expr, xlo: number, xhi: number, ylo: number, yhi: numbe
   return out;
 }
 
-/** Horizontal tangents of F(x, y) = 0 that are local extrema of y:
- *  F = Fx = 0 with Fy ≠ 0, so y″ = −Fxx/Fy decides which. */
+/** Lattice divisions per axis for the horizontal-tangent search. */
+const EXTREMA_LATTICE = 24;
+/** Field evaluations the search may spend before it gives up on the row. */
+const EXTREMA_BUDGET = 40000;
+/** More horizontal tangents than this in view: too many to hover, and the
+ *  search can no longer claim to have found them all. */
+const MAX_EXTREMA = 64;
+
+/** Deterministic jitter in [0, 1) for seed i (the same every run, so the
+ *  markers never shuffle between recomputes). */
+function jitter(i: number): number {
+  let h = Math.imul(i + 1, 0x9e3779b1);
+  h ^= h >>> 15;
+  h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13;
+  return (h >>> 0) / 4294967296;
+}
+
+/**
+ * Horizontal tangents of F(x, y) = 0 that are local extrema of y:
+ * F = Fx = 0 with Fy ≠ 0, so y″ = −Fxx/Fy decides which.
+ *
+ * Damped Newton on (F, Fx) from a lattice of seeds, on compiled programs and
+ * under a fixed evaluation budget, so a hard curve costs a bounded few
+ * milliseconds. All or nothing: a search that runs out of budget, or finds
+ * more than MAX_EXTREMA points, returns none rather than whichever part of
+ * the view its seeds happened to reach first.
+ */
 function implicitExtrema(R: Expr, xlo: number, xhi: number, ylo: number, yhi: number): SpecialPoint[] {
   const vars = freeVars(R);
   if (![...vars].every(v => v === 'x' || v === 'y') || !vars.has('x') || !vars.has('y')) return [];
-  let Fx: Expr, Fy: Expr, Fxx: Expr, Fxy: Expr;
+  let field: (p: number[]) => number[];
   try {
-    Fx = diff(R, 'x');
-    Fy = diff(R, 'y');
-    Fxx = diff(Fx, 'x');
-    Fxy = diff(Fx, 'y');
+    const Fx = diff(R, 'x');
+    const Fy = diff(R, 'y');
+    field = fieldEvaluator([R, Fx, Fy, diff(Fx, 'x'), diff(Fx, 'y'), diff(Fy, 'y')]);
   } catch {
     return [];
   }
-  let sols: number[][];
-  try {
-    sols = solveSystem([R, Fx], ['x', 'y'], [xlo, ylo], [xhi, yhi], { margin: 0 });
-  } catch {
-    return [];
-  }
-  const out: SpecialPoint[] = [];
-  for (const sol of sols) {
-    const [x, y] = polish(
-      sol,
-      [R, Fx],
-      [
-        [Fx, Fy],
-        [Fxx, Fxy],
-      ],
-    );
+  let budget = EXTREMA_BUDGET;
+  const at = (x: number, y: number): number[] | null => {
+    if (--budget < 0) return null;
+    const v = field([x, y]);
+    return v.every(isFinite) ? v : null;
+  };
+
+  /** Newton from a seed to F = Fx = 0; null when it fails or wanders off. */
+  const refine = (x: number, y: number): [number, number] | null => {
+    let v = at(x, y);
+    if (!v) return null;
+    let rn = Math.hypot(v[0], v[1]);
+    // Few iterations: a regular root converges quadratically well within
+    // them, while seeds drawn to a singular point (the folium's node)
+    // crawl in linearly and would spend the budget.
+    for (let it = 0; it < 24; it++) {
+      if (rn === 0) return [x, y];
+      const [f, fx, fy, fxx, fxy] = v;
+      const det = fx * fxy - fy * fxx;
+      if (!det) return null;
+      const dx = (fxy * f - fy * fx) / det;
+      const dy = (fx * fx - fxx * f) / det;
+      let scale = 1;
+      let next: number[] | null = null;
+      for (let k = 0; k < 10; k++, scale /= 2) {
+        const nv = at(x - scale * dx, y - scale * dy);
+        if (budget < 0) return null;
+        if (nv && Math.hypot(nv[0], nv[1]) < rn) {
+          next = nv;
+          break;
+        }
+      }
+      const small = Math.hypot(dx, dy) <= 1e-12 * (1 + Math.hypot(x, y));
+      if (!next) return small ? [x, y] : null;
+      x -= scale * dx;
+      y -= scale * dy;
+      v = next;
+      rn = Math.hypot(v[0], v[1]);
+      if (small) return [x, y];
+      if (x < xlo - (xhi - xlo) || x > xhi + (xhi - xlo) || y < ylo - (yhi - ylo) || y > yhi + (yhi - ylo)) return null;
+    }
+    return null;
+  };
+
+  const n = EXTREMA_LATTICE;
+  const found: Array<[number, number]> = [];
+  const same = (a: number, b: number) => Math.abs(a - b) <= 1e-7 * (1 + Math.max(Math.abs(a), Math.abs(b)));
+  for (let i = 0; i < n * n; i++) {
+    const sx = xlo + ((xhi - xlo) * ((i % n) + 0.5 + 0.32 * (jitter(2 * i) - 0.5))) / n;
+    const sy = ylo + ((yhi - ylo) * (Math.floor(i / n) + 0.5 + 0.32 * (jitter(2 * i + 1) - 0.5))) / n;
+    const sol = refine(sx, sy);
+    if (budget < 0) return [];
+    if (!sol) continue;
+    const [x, y] = sol;
     if (x < xlo || x > xhi || y < ylo || y > yhi) continue;
-    const env = { x, y };
-    const fy = evalAt(Fy, env);
-    const fxx = evalAt(Fxx, env);
-    // Fy ≈ 0 too is a singular point (a cusp or crossing), not an extremum.
-    if (!isFinite(fy) || !isFinite(fxx) || Math.abs(fy) < 1e-9 || fxx === 0) continue;
-    const curv = -fxx / fy;
-    const num = (v: number): FoundRoot => ({ x: v, mult: 1, exact: false });
+    if (found.some(([fx, fy]) => same(fx, x) && same(fy, y))) continue;
+    found.push(sol);
+    if (found.length > MAX_EXTREMA) return [];
+  }
+
+  const out: SpecialPoint[] = [];
+  const num = (v: number): FoundRoot => ({ x: v, mult: 1, exact: false });
+  for (const [x, y] of found.sort((a, b) => a[0] - b[0] || a[1] - b[1])) {
+    const v = field([x, y]);
+    const [, , fy, fxx, fxy, fyy] = v;
+    // A crossing or cusp has Fy = 0 as well. Newton cannot pin such a point
+    // exactly (the system is singular there), so Fy is judged against the
+    // curvature of F, not against an absolute zero.
+    const curvature = (Math.abs(fxx) + 2 * Math.abs(fxy) + Math.abs(fyy)) * Math.max(1, Math.abs(x), Math.abs(y));
+    if (!v.every(isFinite) || fxx === 0 || Math.abs(fy) <= 1e-6 * curvature) continue;
     out.push({
       x,
       y,
-      lines: [curv < 0 ? 'local maximum' : 'local minimum', ...valueLines('x', num(x)), ...valueLines('y', num(y))],
+      lines: [
+        -fxx / fy < 0 ? 'local maximum' : 'local minimum',
+        ...valueLines('x', num(x)),
+        ...valueLines('y', num(y)),
+      ],
     });
   }
   return out;
-}
-
-/** A few full Newton steps on a 2×2 system: the seeded search stops at a
- *  residual tolerance that still shows in a 12-digit label. Each step is
- *  kept only while it shrinks the residual. */
-function polish(p: number[], F: Expr[], J: Expr[][]): number[] {
-  let [x, y] = p;
-  const norm = (x: number, y: number) => Math.hypot(...F.map(f => evalAt(f, { x, y })));
-  let r = norm(x, y);
-  for (let i = 0; i < 6 && r > 0; i++) {
-    const env = { x, y };
-    const [f, g] = F.map(e => evalAt(e, env));
-    const [[a, b], [c, d]] = J.map(row => row.map(e => evalAt(e, env)));
-    const det = a * d - b * c;
-    if (!isFinite(det) || det === 0) break;
-    const nx = x - (d * f - b * g) / det;
-    const ny = y - (a * g - c * f) / det;
-    const nr = norm(nx, ny);
-    if (!(nr < r)) break;
-    x = nx;
-    y = ny;
-    r = nr;
-  }
-  return [x, y];
 }
 
 /** A point traced on a curve: the pointer projected onto it. */
@@ -313,8 +363,9 @@ export interface TracedPoint {
  * the curve, then slides along the tangent towards the pointer and projects
  * again until the foot point settles.
  *
- * For a graph y = f(x) the traced x is rounded to a tenth of a pixel and y is
- * f of that rounded x: the readout is an exact pair, not two rounded ones.
+ * For a graph y = f(x) the traced x is rounded to the digits fmtTraced shows
+ * and y is f of that rounded x: the readout is an exact pair, not two rounded
+ * ones.
  */
 export function curveTracer(
   F: Expr,
@@ -322,33 +373,33 @@ export function curveTracer(
 ): ((mx: number, my: number, sx: number, sy: number) => TracedPoint | null) | null {
   if (usesComplex(F)) return null;
   const R = residualOf(F);
-  let field: (p: number[]) => number[];
+  let field: ((p: number[]) => number[]) | null;
   try {
-    let grad: Expr[] | null;
-    try {
-      grad = [diff(R, 'x'), diff(R, 'y')];
-    } catch {
-      grad = null;
-    }
-    if (grad) {
-      const ev = fieldEvaluator([R, ...grad], env);
-      field = p => ev(p);
-    } else {
-      const ev = fieldEvaluator([R], env);
-      field = ([x, y]) => {
-        const f = ev([x, y])[0];
-        const hx = 1e-6 * (1 + Math.abs(x));
-        const hy = 1e-6 * (1 + Math.abs(y));
-        return [
-          f,
-          (ev([x + hx, y])[0] - ev([x - hx, y])[0]) / (2 * hx),
-          (ev([x, y + hy])[0] - ev([x, y - hy])[0]) / (2 * hy),
-        ];
-      };
-    }
+    field = fieldEvaluator([R, diff(R, 'x'), diff(R, 'y')], env);
   } catch {
-    return null;
+    // No symbolic gradient, or one too large to compile: central
+    // differences of F alone.
+    field = null;
   }
+  if (!field) {
+    let ev: (p: number[]) => number[];
+    try {
+      ev = fieldEvaluator([R], env);
+    } catch {
+      return null;
+    }
+    field = ([x, y]) => {
+      const f = ev([x, y])[0];
+      const hx = 1e-6 * (1 + Math.abs(x));
+      const hy = 1e-6 * (1 + Math.abs(y));
+      return [
+        f,
+        (ev([x + hx, y])[0] - ev([x - hx, y])[0]) / (2 * hx),
+        (ev([x, y + hy])[0] - ev([x, y - hy])[0]) / (2 * hy),
+      ];
+    };
+  }
+  const evalField = field;
   const rhs = graphRhs(F);
   let graph: ((x: number) => number) | null = null;
   if (rhs) {
@@ -367,7 +418,7 @@ export function curveTracer(
     /** Newton onto F = 0 in pixel units; false when it fails or wanders. */
     const project = (): boolean => {
       for (let i = 0; i < 24; i++) {
-        const [f, fx, fy] = field([x, y]);
+        const [f, fx, fy] = evalField([x, y]);
         const gx = fx * sx;
         const gy = fy * sy;
         const g2 = gx * gx + gy * gy;
@@ -378,12 +429,12 @@ export function curveTracer(
         if (Math.abs(k) * Math.sqrt(g2) < 1e-7) return true;
         if (Math.hypot((x - mx) / sx, (y - my) / sy) > 400) return false;
       }
-      const [f, fx, fy] = field([x, y]);
+      const [f, fx, fy] = evalField([x, y]);
       return Math.abs(f) / Math.hypot(fx * sx, fy * sy) < 0.05;
     };
     if (!project()) return null;
     for (let i = 0; i < 6; i++) {
-      const [, fx, fy] = field([x, y]);
+      const [, fx, fy] = evalField([x, y]);
       const gx = fx * sx;
       const gy = fy * sy;
       const g = Math.hypot(gx, gy);
@@ -404,9 +455,8 @@ export function curveTracer(
       }
     }
     if (graph) {
-      const step = sx / 10;
-      const xr = Math.round(x / step) * step;
-      const xs = parseFloat(xr.toPrecision(15));
+      // x exactly as the tooltip shows it, and y = f of that x.
+      const xs = roundTraced(x, sx);
       const ys = graph(xs);
       if (isFinite(ys) && Math.abs(ys - y) / sy < 1) {
         x = xs;
@@ -418,14 +468,25 @@ export function curveTracer(
   };
 }
 
-/** A traced coordinate at the view's precision: one digit finer than a
- *  pixel (unit = world units per pixel), trailing zeros trimmed. */
+/**
+ * A traced coordinate at the view's precision: one digit finer than a pixel
+ * (unit = world units per pixel), trailing zeros trimmed. Anything under a
+ * twentieth of a pixel from zero reads 0, whatever its exponent.
+ */
 export function fmtTraced(v: number, unit: number): string {
-  if (v === 0 || !isFinite(unit) || !(unit > 0)) return fmtRoot(v);
+  if (!isFinite(v) || !isFinite(unit) || !(unit > 0)) return fmtRoot(v);
   const a = Math.abs(v);
-  if (a >= 1e9 || a < 1e-6) return fmtRoot(v);
-  const decimals = Math.min(14, Math.max(0, Math.ceil(-Math.log10(unit)) + 1));
-  const s = v.toFixed(decimals);
-  const t = decimals ? s.replace(/\.?0+$/, '') : s;
-  return t === '-0' ? '0' : t;
+  if (a < unit / 20) return '0';
+  const decimals = Math.ceil(-Math.log10(unit)) + 1;
+  if (decimals <= 14 && a < 1e15) {
+    const s = v.toFixed(Math.max(0, decimals));
+    return decimals > 0 ? s.replace(/\.?0+$/, '') : s;
+  }
+  // Pixels finer than toFixed reaches, or huge values: significant digits
+  // down to the same tenth of a pixel.
+  const digits = Math.min(15, Math.max(1, Math.ceil(Math.log10(a / unit)) + 1));
+  return String(parseFloat(v.toPrecision(digits)));
 }
+
+/** v rounded to exactly what fmtTraced shows. */
+export const roundTraced = (v: number, unit: number): number => parseFloat(fmtTraced(v, unit));

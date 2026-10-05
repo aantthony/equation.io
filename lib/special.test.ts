@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseExpr } from './expr.ts';
-import { curveTracer, fmtTraced, specialPoints } from './special.ts';
+import { curveTracer, fmtTraced, roundTraced, specialPoints } from './special.ts';
 
 function points(s: string, r = 10) {
   return specialPoints(parseExpr(s), -r, r, -r, r);
@@ -123,6 +123,42 @@ describe('extrema', () => {
     }
   });
 
+  it('does not call the crossings of a curve extrema', () => {
+    // sin(xy) = cos(x) crosses itself at x = kπ, y = (n + ½)/k: F, Fx and Fy
+    // all vanish there, and the Hessian is indefinite.
+    const pts = points('sin(x y) = cos(x)', 10).filter(p => p.lines[0].includes('local'));
+    for (const p of pts) {
+      const fy = p.x * Math.cos(p.x * p.y);
+      expect(Math.abs(fy)).toBeGreaterThan(1e-3);
+    }
+  });
+
+  it('reports only genuine extrema on a curve too dense to search fully', () => {
+    // Hundreds of horizontal tangents in view: the seeded search finds some,
+    // never past the cap, and every one it reports is real.
+    const pts = points('sin(x^2 + y^2) = cos(x y)', 30).filter(p => p.lines[0].includes('local'));
+    expect(pts.length).toBeLessThanOrEqual(64);
+    for (const { x, y } of pts) {
+      expect(Math.abs(Math.sin(x * x + y * y) - Math.cos(x * y))).toBeLessThan(1e-9);
+      expect(Math.abs(2 * x * Math.cos(x * x + y * y) + y * Math.sin(x * y))).toBeLessThan(1e-6);
+    }
+  });
+
+  it('finds the extremum of a curve with a singular point', () => {
+    // Seeds drawn to the folium's node at the origin must not spend the
+    // budget before one reaches the top of the loop at (∛2, ∛4).
+    const max = points('x^3 + y^3 = 3x y', 3).filter(p => p.lines[0] === 'local maximum');
+    expect(max.length).toBe(1);
+    expect(max[0].x).toBeCloseTo(Math.cbrt(2), 12);
+    expect(max[0].y).toBeCloseTo(Math.cbrt(4), 12);
+  });
+
+  it('bounds the work on a curve with no extrema', () => {
+    const t0 = performance.now();
+    points('tan(x y) = 1', 10);
+    expect(performance.now() - t0).toBeLessThan(150);
+  });
+
   it('skips the horizontal tangents outside the view', () => {
     expect(find('y = x^3 - 2x', 'local', 0.5)).toEqual([]);
   });
@@ -152,6 +188,18 @@ describe('curveTracer', () => {
     expect(p.y).toBe(p.x * p.x);
   });
 
+  it('reads off an x the tooltip shows exactly', () => {
+    // A pixel of 0.0123 is not a decimal grid: x must land on the displayed
+    // digits, or y = f(x) reads one unit off in its last place.
+    const trace = curveTracer(parseExpr('y = 3x'))!;
+    for (const mx of [0.1, 2.5, -1.37]) {
+      const p = trace(mx, 3 * mx, 0.0123, 0.0123)!;
+      const sx = fmtTraced(p.x, 0.0123);
+      expect(p.x).toBe(parseFloat(sx));
+      expect(p.y).toBe(3 * p.x);
+    }
+  });
+
   it('uses the given constants', () => {
     const trace = curveTracer(parseExpr('y = a x'), { a: 3 })!;
     const p = trace(1, 3, 0.01, 0.01)!;
@@ -170,5 +218,22 @@ describe('fmtTraced', () => {
     expect(fmtTraced(1.5, 0.01)).toBe('1.5');
     expect(fmtTraced(1234.5678, 2)).toBe('1234.6');
     expect(fmtTraced(-0.00001, 0.01)).toBe('0');
+  });
+
+  it('reads 0 under a twentieth of a pixel, whatever the exponent', () => {
+    expect(fmtTraced(8.3e-7, 0.01)).toBe('0');
+    expect(fmtTraced(9.95e-10, 0.01)).toBe('0');
+    // On a fine enough view the same value is a real reading.
+    expect(fmtTraced(8.3e-7, 1e-9)).toBe('0.00000083');
+  });
+
+  it('round-trips through roundTraced', () => {
+    for (const [v, u] of [
+      [1.23456789, 0.01],
+      [123456.789, 0.5],
+      [3.3e-9, 1e-11],
+      [-7.25, 0.0123],
+    ])
+      expect(fmtTraced(roundTraced(v, u), u)).toBe(fmtTraced(v, u));
   });
 });

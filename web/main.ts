@@ -4822,7 +4822,7 @@ function setHover(next: { pt: SpecialPoint; color: string; panel: Panel } | null
   const same =
     hover?.pt === next?.pt ||
     (hover && next && hover.pt.x === next.pt.x && hover.pt.y === next.pt.y && hover.pt.lines[0] === next.pt.lines[0]);
-  if (same && hover?.color === next?.color) return;
+  if (same && hover?.color === next?.color && hover?.panel === next?.panel) return;
   hover = next;
   if (!hover) {
     tooltip.style.display = 'none';
