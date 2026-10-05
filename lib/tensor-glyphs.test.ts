@@ -47,6 +47,7 @@ describe('action(M)', () => {
     expect(error(['action(3)'])).toMatch(/2×2 or 3×3 matrix/);
     expect(error(['2 action(((1, 0), (0, 1)))'])).toMatch(/whole statement/);
     expect(error(['action(((x, 0), (0, 1)))'])).toMatch(/constant matrix/);
+    expect(error(['a = [1..300]', 'action(((a, 0), (0, 1)))'])).toMatch(/at most 256 2×2 matrices at once \(got 300\)/);
   });
 });
 

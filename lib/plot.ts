@@ -41,6 +41,7 @@ import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { SPLIT_NODE_BUDGET, complexParts, splitTooLarge } from './complex-parts.ts';
 import { FAMILY_NODES, exceedsNodes } from './size.ts';
+import { FIGURE_FAMILY_MAX } from './object-lists.ts';
 import { type Prog, compileProg, run } from './vm.ts';
 
 export { publicKind } from './math-object.ts';
@@ -834,12 +835,12 @@ function classifyLowered(
       shape: [n, n],
       ...(expr.kind === 'list' && { count: ms.length }),
     });
-    const drawn = classifyLowered(
-      { kind: 'family', members: ms.flatMap(actionGlyphs) },
-      defined,
-      fields,
-      timeDerivative,
-    ).cls;
+    const glyphs = ms.map(m => actionGlyphs(m));
+    if (glyphs.flat().length > FIGURE_FAMILY_MAX) {
+      const most = Math.floor(FIGURE_FAMILY_MAX / glyphs[0].length);
+      throw new Error(`action draws at most ${most} ${n}×${n} matrices at once (got ${ms.length}).`);
+    }
+    const drawn = classifyLowered({ kind: 'family', members: glyphs.flat() }, defined, fields, timeDerivative).cls;
     return withReadout(drawn, readout.cls);
   }
 
