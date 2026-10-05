@@ -284,6 +284,10 @@ export function traceSystem(
   let active: number[][][] = [];
   const scale = Math.hypot(...hi.map((v, k) => v - lo[k]));
   const maxStep = scale / 16;
+  // How far a chord may stray from the curve. The app traces a box padded
+  // past the view and reuses it until a zoom of about 4×, so this keeps the
+  // error under a pixel there (and a quarter pixel on a fresh trace).
+  const flatness = scale / 8000;
 
   // A small step on a curved path can hide a still smaller jump. Retain the
   // discrete operations so an interval crossing one receives extra continuity
@@ -364,8 +368,11 @@ export function traceSystem(
 
   // A large step can be ordinary motion in a zoomed-in view. Follow it at
   // intermediate parameter values before deciding the branch has jumped.
+  // A chord already certified continuous is then refined until it hugs the
+  // curve, so many turns per sample step still draw smooth (issue #49).
   const bridge = (a: number[], b: number[], u0: number, u1: number): number[][] | null => {
     let remaining = 96; // bound work when several branches compete for a match
+    let refining = 128; // separately bounded, so refinement never breaks a path
     const minDepth = discreteProbes.some(probe => {
       const before = discreteValue(probe, a, u0);
       const after = discreteValue(probe, b, u1);
@@ -380,10 +387,14 @@ export function traceSystem(
       t1: number,
       depth: number,
       parentDeviation?: number,
+      refine = false,
     ): number[][] | null => {
-      if (remaining-- <= 0) return null;
+      // Refinement only adds points to a certified chord, so it gives up by
+      // keeping the chord, never by breaking the path.
+      const fail = refine ? [] : null;
+      if (refine ? refining-- <= 0 : remaining-- <= 0) return fail;
       const t = (t0 + t1) / 2;
-      if (t === t0 || t === t1) return null;
+      if (t === t0 || t === t1) return fail;
       const center = start.map((v, k) => (v + end[k]) / 2);
       const distance = Math.hypot(...start.map((v, k) => v - end[k]));
       const mids = solveSystem(residuals, vars, lo, hi, {
@@ -401,17 +412,25 @@ export function traceSystem(
         // step limit so jumps smaller than maxStep can still break the path.
         const deviation = Math.hypot(...mid.map((v, k) => v - center[k]));
         if (
-          distance < maxStep &&
-          depth >= minDepth &&
-          (deviation <= 1e-12 * (1 + distance) || (parentDeviation !== undefined && deviation < 0.5 * parentDeviation))
-        )
-          return [];
+          refine ||
+          (distance < maxStep &&
+            depth >= minDepth &&
+            (deviation <= 1e-12 * (1 + distance) ||
+              (parentDeviation !== undefined && deviation < 0.5 * parentDeviation)))
+        ) {
+          // A midpoint further off than the chord is long belongs to some
+          // other branch, not to this smooth arc.
+          if (deviation <= flatness || deviation > distance) return [];
+          const left = subdivide(start, mid, t0, t, depth + 1, deviation, true)!;
+          const right = subdivide(mid, end, t, t1, depth + 1, deviation, true)!;
+          return [...left, mid, ...right];
+        }
         const left = subdivide(start, mid, t0, t, depth + 1, deviation);
         if (!left) continue;
         const right = subdivide(mid, end, t, t1, depth + 1, deviation);
-        if (right) return distance < maxStep ? [] : [...left, mid, ...right];
+        if (right) return distance < maxStep && deviation <= flatness ? [] : [...left, mid, ...right];
       }
-      return null;
+      return fail;
     };
     return subdivide(a, b, u0, u1, 0);
   };
