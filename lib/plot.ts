@@ -36,7 +36,7 @@ import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
-import { mvOfNode, mvText } from './clifford.ts';
+import { type Multivector, mvOfNode, mvText } from './clifford.ts';
 import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { SPLIT_NODE_BUDGET, complexParts, splitTooLarge } from './complex-parts.ts';
@@ -845,7 +845,7 @@ function classifyLowered(
   }
 
   // A multivector on a row of its own draws grade by grade, and reads out its
-  // value (docs/clifford.md); a multiset of them reads out each.
+  // value (docs/clifford.md); a multiset of them draws and reads out each.
   const mvs = expr.kind === 'list' && expr.items.length ? expr.items.map(mvOfNode) : [mvOfNode(expr)];
   if (mvs.every(m => m !== null)) {
     if (hasSpace || hasParam) {
@@ -855,16 +855,22 @@ function classifyLowered(
     }
     const dim = mvs.some(m => m.dim === 3) ? 3 : 2;
     const quat = mvs.every(m => m.quat);
-    const values = mvs.flatMap(m => Array.from({ length: 1 << dim }, (_, k) => m.data[k] ?? { kind: 'num', value: 0 }));
+    // A plane member lifts into space unchanged: its blades keep their bitmasks.
+    const lifted = mvs.map((m): Multivector => ({
+      ...m,
+      dim,
+      data: Array.from({ length: 1 << dim }, (_, k): Expr => m.data[k] ?? { kind: 'num', value: 0 }),
+    }));
+    const values = lifted.flatMap(m => m.data);
     const readout = done({
       kind: 'tuple',
       values,
       blades: { dim, ...(quat ? { quat: true as const } : {}) },
       ...(expr.kind === 'list' && { count: mvs.length }),
     });
-    if (expr.kind === 'list') return readout;
+    // Each member draws as it would on a row of its own, over one another.
     // A quaternion that is only a number (i i = -1) has nothing to draw.
-    const glyphs = multivectorGlyphs(mvs[0]);
+    const glyphs = lifted.flatMap(m => multivectorGlyphs(m));
     if (!glyphs.length) return readout;
     const drawn = classifyLowered({ kind: 'family', members: glyphs }, defined, fields, timeDerivative).cls;
     return withReadout(drawn, readout.cls);
