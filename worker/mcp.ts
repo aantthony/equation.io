@@ -21,7 +21,7 @@ import { rowKind } from '../lib/row-kind.ts';
 import { splitStatements } from '../lib/statements.ts';
 import { publicKind } from '../lib/plot.ts';
 import { analyze } from './graph.ts';
-import { type CallStats, type Tool, TOOL_NAMES, recordToolCall } from './mcp-usage.ts';
+import { type CallStats, type Tool, TOOL_NAMES, ToolError, recordToolCall } from './mcp-usage.ts';
 import { MAX_PLOTS, previewGap } from './og.ts';
 import { GRAPH_UI_URI, graphResource, graphResourceContents } from './mcp-app.ts';
 import type { JsonSchema, ObjectSchema } from '../lib/json-schema.ts';
@@ -214,7 +214,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
     // and it is what this tool calls the per-equation results it returns.
     const got = Object.keys(args).filter(k => k !== 'equations');
     const hint = got.length ? ` Received ${got.map(k => `"${k}"`).join(', ')} instead.` : '';
-    throw new Error(
+    throw new ToolError(
+      'arguments',
       `encode_graph_url takes "equations": a flat array of strings, one per equation, e.g. ` +
         `{"equations": ["y = x^2", "y = sin(x)"]}.${hint}`,
     );
@@ -228,7 +229,8 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
   // that may not be in it.
   const bad = texts.find(t => splitStatements(t).length > 1);
   if (bad) {
-    throw new Error(
+    throw new ToolError(
+      'two-equations',
       `Row ${JSON.stringify(bad)} holds more than one equation` +
         " (';' and line breaks each separate rows) — send each as its own array item.",
     );
@@ -354,11 +356,20 @@ async function encodeGraphUrl(origin: string, args: Record<string, unknown>) {
 }
 
 function decodeGraphUrl(args: Record<string, unknown>) {
-  if (typeof args.url !== 'string') throw new Error('url must be a string');
-  const url = new URL(args.url);
+  if (typeof args.url !== 'string') throw new ToolError('arguments', 'url must be a string');
+  let url: URL;
+  try {
+    url = new URL(args.url);
+  } catch {
+    throw new ToolError('bad-url', `Not a URL: ${args.url}`);
+  }
   const payload = url.hash.length > 1 ? url.hash.slice(1) : url.pathname.startsWith('/g/') ? url.pathname.slice(3) : '';
-  if (!payload) throw new Error('No equations found in that URL (expected /#... or /g/... form).');
-  return { equations: decodePayload(payload) };
+  if (!payload) throw new ToolError('no-equations', 'No equations found in that URL (expected /#... or /g/... form).');
+  try {
+    return { equations: decodePayload(payload) };
+  } catch (e) {
+    throw new ToolError('bad-payload', e instanceof Error ? e.message : String(e));
+  }
 }
 
 // --- JSON-RPC plumbing ---
@@ -461,7 +472,13 @@ async function handleRpc(req: RpcRequest, ctx: RpcContext): Promise<object | nul
         } else return error(-32602, `Unknown tool: ${name}`);
         return result({ content, structuredContent: value });
       } catch (e) {
-        if (tool) ctx.recordCall(tool, { rows: 0, errorRows: 0, types: [], failed: true });
+        if (tool)
+          ctx.recordCall(tool, {
+            rows: 0,
+            errorRows: 0,
+            types: [],
+            failed: e instanceof ToolError ? e.reason : 'internal',
+          });
         return result({
           content: [{ type: 'text', text: e instanceof Error ? e.message : String(e) }],
           isError: true,
