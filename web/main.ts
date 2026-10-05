@@ -2107,15 +2107,17 @@ function render() {
           case 'fractal2d':
             layers.fractals.push({ ...gpuFor(eq, 'fractal2d'), color, params, uniforms });
             break;
-          case 'tfield2d':
+          case 'tfield2d': {
+            const gpu = gpuFor(eq, 'tfield2d');
             layers.tfields.push({
-              ...gpuFor(eq, 'tfield2d'),
+              ...gpu,
               color,
               params,
               uniforms,
-              streamlines: !!eq.showStreamlines,
+              streamlines: !!eq.showStreamlines || !!gpu.streamlines,
             });
             break;
+          }
           case 'vfield2d': {
             layers.vfields.push({ ...gpuFor(eq, 'vfield2d'), color, params, uniforms });
             drops.forEach((d, i) => {
@@ -3553,6 +3555,8 @@ function rowToggle(eq: Equation): RowToggle | null {
         },
       };
     case 'tfield2d':
+      // streamlines(M) asks for them in the text; nothing to toggle.
+      if (eq.gpu?.type === 'tfield2d' && eq.gpu.streamlines) return null;
       return {
         label: 'streamlines',
         title: 'Trace the major eigenvector of the symmetric part instead of drawing glyphs',

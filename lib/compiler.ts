@@ -116,7 +116,7 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'conformal2d'; field: string }
   | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'vfield2d'; fx: string; fy: string }
-  | { type: 'tfield2d'; entries: [string, string, string, string] }
+  | { type: 'tfield2d'; entries: [string, string, string, string]; streamlines?: true }
   | { type: 'vfield3d'; comps: [string, string, string] }
   | { type: 'psurface'; comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] }
   | { type: 'cobweb'; curveField: string }
@@ -541,6 +541,7 @@ export function compileGpu(classified: Classified): GpuPlan {
         type: 'tfield2d',
         params,
         entries: object.entries.map(e => toGLSL(sub(e))) as [string, string, string, string],
+        ...(object.streamlines && { streamlines: true as const }),
       };
     case 'color-field':
       return { type: `${object.space}2d`, space: object.space, params, ...colorProgram(object.channels, params) };
@@ -659,7 +660,7 @@ export function shaderKey(plan: GpuPlan): string {
     case 'vfield2d':
       return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy]);
     case 'tfield2d':
-      return JSON.stringify([plan.type, plan.params, plan.entries]);
+      return JSON.stringify([plan.type, plan.params, plan.entries, !!plan.streamlines]);
     case 'vfield3d':
       return JSON.stringify([plan.type, plan.params, plan.comps]);
     case 'psurface':

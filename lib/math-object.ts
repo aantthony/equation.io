@@ -66,7 +66,12 @@ export type MathObject =
   | { readonly kind: 'vector-field'; readonly components: Components }
   /** A 2×2 matrix over the plane, row-major: each glyph is the image of a
    *  small circle under the matrix there, with a spoke where e_x goes. */
-  | { readonly kind: 'tensor-field'; readonly entries: readonly [Expr, Expr, Expr, Expr] }
+  | {
+      readonly kind: 'tensor-field';
+      readonly entries: readonly [Expr, Expr, Expr, Expr];
+      /** streamlines(M): drawn along the major eigenvector, not as glyphs. */
+      readonly streamlines?: true;
+    }
   | { readonly kind: 'complex-field'; readonly form: 'potential' | 'domain' | 'conformal'; readonly expr: Expr }
   | {
       readonly kind: 'complex-field';

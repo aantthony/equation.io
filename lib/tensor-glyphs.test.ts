@@ -66,6 +66,28 @@ describe('matrix fields', () => {
   });
 });
 
+describe('streamlines(M)', () => {
+  it('marks a matrix field to draw along its major eigenvector', () => {
+    for (const rows of [
+      ['streamlines(((x, y), (y, -x)))'],
+      ['f(x, y) = x^3 - 3 x y^2', 'streamlines(hessian(f))'],
+      ['M = ((x, y), (y, -x))', 'streamlines(M)'],
+    ]) {
+      const o = row(rows).r.cls!.object;
+      if (o.kind !== 'tensor-field') throw new Error(o.kind);
+      expect(o.streamlines).toBe(true);
+    }
+    const plain = row(['((x, y), (y, -x))']).r.cls!.object;
+    expect(plain.kind === 'tensor-field' && plain.streamlines).toBeFalsy();
+  });
+  it('takes one matrix field, on a row of its own', () => {
+    expect(error(['streamlines((x, y))'])).toMatch(/2×2 matrix in x and y/);
+    expect(error(['streamlines(((1, 2), (3, 4)))'])).toMatch(/2×2 matrix in x and y/);
+    expect(error(['streamlines(((x, 0), (0, y)), 2)'])).toMatch(/2×2 matrix in x and y/);
+    expect(error(['2 streamlines(((x, y), (y, -x)))'])).toMatch(/whole statement/);
+  });
+});
+
 describe('glyph scale', () => {
   it('is the true size while small and saturates', () => {
     expect(largestSingular(3, 0, 0, 1)).toBeCloseTo(3);

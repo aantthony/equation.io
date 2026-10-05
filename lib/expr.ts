@@ -231,6 +231,7 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'vec',
     // A matrix or a map, whole: action(((1, 1), (0, 1))), jacobian((x y, x + y)).
     'action',
+    'streamlines',
     'jacobian',
     'hessian',
     'transpose',
@@ -339,8 +340,9 @@ export const FUNCTIONS = new Set([
   'slerp',
   'vec',
   // A matrix drawn by what it does (lib/glyphs.ts), and a quaternion's
-  // Julia set (lib/clifford.ts juliaSurface).
+  // Julia set (lib/clifford.ts juliaSurface); a matrix field as streamlines.
   'action',
+  'streamlines',
   'qjulia',
   // Not real functions: Σ/Π/∫ binders and the ∇ operators, expanded
   // symbolically by resolveExpr.
@@ -418,6 +420,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'quat',
   'slerp',
   'action',
+  'streamlines',
   'jacobian',
   'hessian',
   'qjulia',

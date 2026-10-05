@@ -100,7 +100,8 @@ two in plane units, so glyphs pan with the plane — and tests the ring
 |adj(A) q| = |det A| in pixel space, which also draws a singular matrix's
 segment. The glyph scale is tanh(σ₁)/σ₁ (glyphs.ts `glyphScale`): true size
 while small, one cell at most; det < 0 draws in the complement colour.
-The row's `streamlines` toggle swaps the glyphs for tensor streamlines
+`streamlines(M)` (lowered to `[streamlines]`, unwrapped in classify) or
+the row's toggle swaps the glyphs for tensor streamlines
 (render2d.ts `tlinesFrag`): the vector-field LIC, along the major eigenvector
 of the symmetric part, half the angle of (a − d, b + c) (glyphs.ts
 `majorAngle`). An eigenvector has no sign, so each step takes the ±e that

@@ -1032,7 +1032,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       return sc(v.items[k]);
     }
     case 'call': {
-      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'qjulia')
+      if (GEOM_STATEMENTS.has(e.name) || e.name === 'action' || e.name === 'streamlines' || e.name === 'qjulia')
         throw new Error(`${e.name}(…) must be a whole statement.`);
       // A function applied per member of lists is list lowering's to run;
       // the point arithmetic in its body is lowered here, like any other.
@@ -1481,6 +1481,11 @@ export function lowerTensorValue(
   return t && t.shape.length >= 2 && !toMat(t) && !points ? t : null;
 }
 
+/** The internal call streamlines(M) lowers to, around the lowered matrix. */
+export const STREAMLINES_CALL = '[streamlines]';
+export const STREAMLINES_USAGE =
+  'streamlines takes one 2×2 matrix in x and y — streamlines(((x, y), (y, -x))) traces its major eigenvector.';
+
 /** Lower a whole statement: desugar a root-level geometry form, expand all
  *  point arithmetic, and return an expression classify already understands. */
 export function lowerGeom(
@@ -1505,6 +1510,13 @@ function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsL
     const slice = e.args[1] ? lo(e.args[1]) : sc({ kind: 'num', value: 0 });
     if (slice.vec) throw new Error(usage);
     return juliaSurface(quaternionParts(c), slice.e);
+  }
+  // streamlines(M): a matrix field drawn along its major eigenvector rather
+  // than as glyphs. The matrix lowers as a row of its own would, inside a
+  // marker classify unwraps (lib/plot.ts).
+  if (e.kind === 'call' && e.name === 'streamlines') {
+    if (e.args.length !== 1) throw new Error(STREAMLINES_USAGE);
+    return { kind: 'call', name: STREAMLINES_CALL, args: [lowerStatement(e.args[0], getComps, getMat, isList)] };
   }
   // action(M): the matrix drawn by what it does (lib/glyphs.ts).
   if (e.kind === 'call' && e.name === 'action') {
