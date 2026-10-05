@@ -895,6 +895,22 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['log-polar', 'rho = ln(x^2 + y^2)/2; theta = atan2(y, x)', 'coordinates'],
       ['hyperbolic grid', 'p = x y; q = (x^2 - y^2)/2', 'coordinates'],
       ['hyperbolic pair', 'p = x y; q = (x^2 - y^2)/2; (p, q) = (1, 0)', 'coordinates'],
+      // An axis map: the screen's X and Y are linear, x = 10^X is not.
+      [
+        'log-log power laws',
+        'view(x = 0.1..1000, y = 0.01..100000, x = 10^X, y = 10^Y); y = x^2; y = sqrt(x); y = 10/x',
+        'coordinates polynomial',
+      ],
+      [
+        'semi-log growth (slide k)',
+        'view(x = 0..10, y = 1..100000, y = 10^Y); k = 1; y = e^(k x); y = x^4',
+        'coordinates slider',
+      ],
+      [
+        'symlog axis',
+        'view(x = -1000..1000, y = -2..2, x = sinh(X)); y = cos(ln(abs(x))); y = tanh(x/50)',
+        'coordinates trig',
+      ],
     ],
   ],
   [
