@@ -293,7 +293,24 @@ describe('parametric system branches', () => {
       256,
     );
     expect(paths).toHaveLength(1);
-    expect(paths[0]).toHaveLength(257);
+    // Every sample, plus the points refinement adds around the steep corner.
+    expect(paths[0].length).toBeGreaterThanOrEqual(257);
+  });
+  it('refines a many-turn spiral until its chords hug the curve', () => {
+    // θ = r over 16 turns: one sample step sweeps 0.4 rad at the rim (#49).
+    const p = last([...polar, '(r, theta) = (100u, 100u)']);
+    if (p.type !== 'system') throw new Error('expected system');
+    const paths = traceSystem(p.residuals, ['x', 'y'], [-100, -100], [100, 100], {}, 256, p.angular);
+    expect(paths).toHaveLength(1);
+    const path = paths[0];
+    for (let k = 1; k < path.length; k++) {
+      const [ax, ay] = path[k - 1];
+      const [bx, by] = path[k];
+      const radius = Math.hypot(bx, by);
+      const sweep = Math.abs(Math.atan2(ax * by - ay * bx, ax * bx + ay * by));
+      // How far the chord sags from the arc it stands in for.
+      expect(radius * (1 - Math.cos(sweep / 2))).toBeLessThan(0.05);
+    }
   });
 });
 
