@@ -519,6 +519,13 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       // cell; a conformal map's Jacobian gives circles everywhere.
       ['Jacobian of z²: conformal circles', 'jacobian((x^2 - y^2, 2 x y)/4)', 'derivative complex conformal'],
       ['Hessian: curvature glyphs', 'f(x, y) = sin(x) cos(y); f(x, y); hessian(f)', 'derivative scalar-field'],
+      // streamlines(M) traces the major eigenvector instead: here the
+      // direction of greatest curvature, round the saddle's degenerate point.
+      [
+        'monkey saddle: Hessian streamlines',
+        'f(x, y) = x^3 - 3 x y^2; f(x, y) = [-6..6]; streamlines(hessian(f))',
+        'tensor derivative scalar-field',
+      ],
     ],
   ],
   // Multivectors draw grade by grade: vectors as arrows, bivectors as

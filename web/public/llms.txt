@@ -1142,7 +1142,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A 2×2 matrix in x and y is a matrix field, `((x, y), (y, -x))`: a grid of
   glyphs, each the image of a small circle under the matrix there with a
   spoke to where e_x goes, drawn true size while small and a cell at most,
-  in the row colour's complement where det < 0. Note `a/2J`, touching,
+  in the row colour's complement where det < 0. `streamlines(M)` (or the
+  row's `streamlines` toggle) draws it instead as streaks along the major
+  eigenvector of its symmetric part (M + Mᵀ)/2 — a line field, with no
+  arrowhead and no drift, fading at the degenerate points where that part
+  is a multiple of I: `streamlines(hessian(x^3 - 3 x y^2))`.
+  Note `a/2J`, touching,
   reads as `a/(2J)`; write `a/2 J`.
 - Tensors: a rank-k tensor is k-deep nested tuples, and its shape is part of
   its value — `((1, 2, 3), (4, 5, 6))` is 2×3, `(((1, 2), (3, 4)), ((5, 6),

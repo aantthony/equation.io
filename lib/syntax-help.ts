@@ -124,6 +124,10 @@ const signatures: Record<string, [string, string]> = {
   wedge: ['wedge(a, b) or a ∧ b', 'Wedge product a ⊗ b − b ⊗ a: a bivector, read out as its antisymmetric matrix'],
   contract: ['contract(T, i, j)', 'Sum a tensor over indices i = j (1-based): contract(M, 1, 2) is trace(M)'],
   action: ['action(M)', 'Draw what a 2×2 or 3×3 matrix does to the unit square, circle and axes'],
+  streamlines: [
+    'streamlines(M)',
+    'Draw a 2×2 matrix field in x, y as streamlines of its major eigenvector instead of glyphs',
+  ],
   jacobian: ['jacobian((f, g))', 'The matrix of partial derivatives of a map; a 2×2 in x, y draws as glyphs'],
   hessian: ['hessian(f)', 'The matrix of second partial derivatives of a scalar field'],
   curvature: [

@@ -153,6 +153,16 @@ describe('og raster renderer', () => {
     expect(pixel(ring, 119, 50)).not.toEqual(pixel(base, 119, 50));
   });
 
+  it('previews streamlines(M) as tensor lines, not glyphs', () => {
+    const grid = inkFraction(renderRaster([], 100, 100));
+    const glyphs = renderRaster(['((x, y), (y, -x))'], 100, 100);
+    const lines = renderRaster(['streamlines(((x, y), (y, -x)))'], 100, 100);
+    expect(inkFraction(lines)).toBeGreaterThan(grid + 0.01);
+    expect(lines.px).not.toEqual(glyphs.px);
+    // An isotropic field has no direction to trace.
+    expect(inkFraction(renderRaster(['streamlines(((1 + x^2, 0), (0, 1 + x^2)))'], 100, 100))).toBe(grid);
+  });
+
   it('previews a swept region at a fraction of a pass per sample', () => {
     const rows = ['a = interval(1, 20)', 'y = sin(a x) + cos(a y)'];
     renderRaster(rows);

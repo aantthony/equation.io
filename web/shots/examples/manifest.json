@@ -119,6 +119,7 @@
   "tensors/action-of-a-turn-and-a-stretch": "J = ((0, -1), (1, 0)); action(e^(t J) ((1.5, 0), (0, 0.6)))",
   "tensors/jacobian-of-z2-conformal-circles": "jacobian((x^2 - y^2, 2 x y)/4)",
   "tensors/hessian-curvature-glyphs": "f(x, y) = sin(x) cos(y); f(x, y); hessian(f)",
+  "tensors/monkey-saddle-hessian-streamlines": "f(x, y) = x^3 - 3 x y^2; f(x, y) = [-6..6]; streamlines(hessian(f))",
   "geometric-algebra-quaternions/bivector-an-oriented-area": "a = (2, 0); b = (1, 1.5); vector(a); vector(b); polygon((0, 0), a, a + b, b); grade(a ⟑ b, 2)",
   "geometric-algebra-quaternions/geometric-product-twice-the-turn-from-a-to-b": "a = (2, 0.5); b = (0.5, 1.5); vector(a); vector(b); b ⟑ a; vector(rotate(a, b ⟑ a))",
   "geometric-algebra-quaternions/a-rotor-turns-a-vector": "camera(-pi/3, 0.6, 5); R = e^(-(t/2) e_xy); p = (1, 0, 0.8); vector(p); vector(rotate(p, R)); R",

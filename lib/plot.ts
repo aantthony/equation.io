@@ -31,7 +31,7 @@ import {
   substVars,
 } from './expr.ts';
 import { diff } from './diff.ts';
-import type { FigureName } from './geom.ts';
+import { type FigureName, STREAMLINES_CALL, STREAMLINES_USAGE } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
@@ -590,6 +590,13 @@ function classifyLowered(
   fields: Record<string, Expr>,
   timeDerivative?: (e: Expr) => Expr,
 ): { cls: Classified } {
+  // streamlines(M): the matrix field it wraps, drawn along its major
+  // eigenvector. Nothing else has streamlines to draw.
+  if (expr.kind === 'call' && expr.name === STREAMLINES_CALL) {
+    const { cls } = classifyLowered(expr.args[0], defined, fields, timeDerivative);
+    if (cls.object.kind !== 'tensor-field') throw new Error(STREAMLINES_USAGE);
+    return { cls: { ...cls, object: { ...cls.object, streamlines: true } } };
+  }
   if (expr.kind === 'family') {
     // Figures are CPU-drawn from a few numbers each; everything else is a draw
     // call (or a shader pass) per member.
