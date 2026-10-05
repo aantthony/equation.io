@@ -845,7 +845,15 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (seq) {
         const first = document.seqScans.findIndex(s => s?.name === seq.name);
         if (first < ri) throw new Error(`Sequence ${seq.name} is already defined.`);
-        row.cls = classifySeqRec(seq, fnNames, getFn, constNames, ropts, new Set(defs.sequences.keys()));
+        row.cls = classifySeqRec(
+          seq,
+          fnNames,
+          getFn,
+          constNames,
+          ropts,
+          new Set(defs.sequences.keys()),
+          document.listNames,
+        );
         continue;
       }
       // `d = 1` is no definition (d starts d/dx), and would otherwise fail

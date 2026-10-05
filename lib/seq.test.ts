@@ -106,8 +106,10 @@ describe('classifySeqRec', () => {
     expect(() => cls('a_{n+1} = y a_n')).toThrow(/x-axis/);
   });
 
-  it('rejects the bare index inside a recurrence', () => {
-    expect(() => cls('a_{n+1} = a_n + n')).toThrow(/not n itself/);
+  it('draws a recurrence that reads its index as its terms, not a map', () => {
+    // Alone it has no chain to read; analyzeRows gives it one (below).
+    expect(() => cls('a_{n+1} = a_n + n')).toThrow(/needs the rest of the document/);
+    expect(() => cls('a_{n+1} = x a_n + n')).toThrow(/cannot also take x/);
   });
 
   it('rejects unknown variables with the slider hint', () => {
@@ -265,9 +267,8 @@ describe('sequences built from other sequences', () => {
     expect(at([...doubling, 'b_n = a_n + 1'], 4)).toBe(17);
     // Past the chain (1000 terms), or off the whole numbers: no term.
     expect(at([...doubling, 'd_n = a_{n+1} - a_n'], 1000)).toBeNaN();
-    // A recurrence still steps from its own term alone: drawn as a map, it
-    // has no index to read another sequence at.
-    expect(errorsOf(['b_n = n', 'a_0 = 1', 'a_{n+1} = a_n + b_n'])[2]).toMatch(/cannot use b_n/);
+    // A recurrence may read another sequence at its own index too.
+    expect(at(['b_n = n', 'a_0 = 1', 'a_{n+1} = a_n + b_n', 'd_n = a_n'], 4)).toBe(7);
   });
 
   it('depends on what the recurrence depends on', () => {
@@ -330,5 +331,84 @@ describe('subscripts in braces and parens', () => {
       ),
     ).toBe(7);
     expect(values([...b, 'a_n = b_{n+1} - b_n', 'c = a_{3}', 'k = 2', 'p = b_{k}'])).toMatchObject({ c: 7, p: 4 });
+  });
+});
+
+describe('recurrences that read n and tuples', () => {
+  const values = (rows: string[]) => {
+    const { rows: out, constEnv } = analyzeRows(rows);
+    expect(out.map(r => r.error)).toEqual(rows.map(() => undefined));
+    return { out, constEnv };
+  };
+  /** The terms a recurrence row draws, n = 0..last. */
+  const drawn = (rows: string[], row: number, last: number) => {
+    const { out, constEnv } = values(rows);
+    const plot = compileCpu(out[row].cls!) as { type: string; term: Expr; index: string };
+    expect(plot.type).toBe('sequence');
+    return Array.from({ length: last + 1 }, (_, n) => evaluate(plot.term, { ...constEnv, [plot.index]: n }));
+  };
+
+  it('reads n: each step is the source at that n', () => {
+    expect(values(['a_0 = 1', 'a_{n+1} = (n + 1) a_n', 'c = a_5']).constEnv.c).toBe(120);
+    expect(values(['a_0 = 0', 'a_{n+1} = a_n + 2n + 1', 'c = a_7']).constEnv.c).toBe(49);
+    expect(values(['a_0 = 1', 'a_{n+1} = (n + 1) a_(n)', 'c = a_{4}']).constEnv.c).toBe(24);
+    // Drawn as dots, one per term (there is no single map for a cobweb).
+    expect(drawn(['a_0 = 1', 'a_{n+1} = (n + 1) a_n'], 1, 4)).toEqual([1, 1, 2, 6, 24]);
+  });
+
+  it('reads a slider, t and its seed as before', () => {
+    const { constEnv } = values(['r = 2', 'a_0 = 3', 'a_{n+1} = r a_n + n', 'c = a_3']);
+    expect(constEnv.c).toBe(28); // 3 → 6 → 13 → 28
+    expect(analyzeRows(['r = 2', 'a_{n+1} = r a_n + n']).rows[1].cls).toMatchObject({ params: ['r'] });
+    expect(analyzeRows(['a_{n+1} = a_n + n t']).rows[0].cls).toMatchObject({ animated: true });
+  });
+
+  it('reads a tuple at a position that moves with n: a state machine run', () => {
+    const machine = [
+      'D = (1, 1, 0, 1)', // 13 in binary
+      'q_0 = 0',
+      'step(q, s) = mod(2q + s, 3)',
+      'q_{n+1} = step(q_n, D[n + 1])',
+    ];
+    // The remainder mod 3 of 1, 11, 110, 1101: 1, 0, 0, 1.
+    expect(drawn(machine, 3, 4)).toEqual([0, 1, 0, 0, 1]);
+    const { out, constEnv } = values([...machine, 'N = 3', 'c = q_4', 'mark(q_N)']);
+    expect(constEnv.c).toBe(1);
+    expect(out[6].mark).toBe(true);
+    if (out[6].cpu?.type !== 'value') throw new Error('not a value');
+    expect(evaluate(out[6].cpu.expr, constEnv)).toBe(0);
+    // The run stops where the tuple does: drawn, the terms past it are
+    // missing; asked for by number, it says why.
+    expect(drawn(machine, 3, 6).slice(5).every(Number.isNaN)).toBe(true);
+    expect(analyzeRows([...machine, 'c = q_5']).rows[4].error).toMatch(/out of range/);
+  });
+
+  it('reads a sorted list, and another sequence at n', () => {
+    expect(values(['T = sort([1..5])', 'a_0 = 0', 'a_{n+1} = a_n + T[n + 1]', 'c = a_5']).constEnv.c).toBe(15);
+    expect(values(['b_n = n^2', 'a_0 = 0', 'a_{n+1} = a_n + b_n', 'c = a_4']).constEnv.c).toBe(14);
+    // Another recurrence at n: the sum of its terms, 1 + 2 + 4 + 8.
+    const doubling = ['b_0 = 1', 'b_{n+1} = 2 b_n'];
+    expect(values([...doubling, 'a_0 = 0', 'a_{n+1} = a_n + b_n', 'c = a_4']).constEnv.c).toBe(15);
+    expect(drawn([...doubling, 'a_0 = 0', 'a_{n+1} = a_n + b_n'], 3, 4)).toEqual([0, 1, 3, 7, 15]);
+  });
+
+  it('stops a recurrence that reads another where that one runs out', () => {
+    const rows = ['D = (1, 1, 0, 1)', 'q_0 = 0', 'q_{n+1} = q_n + D[n + 1]', 'b_0 = 0', 'b_{n+1} = b_n + q_n'];
+    expect(drawn(rows, 2, 4)).toEqual([0, 1, 2, 2, 3]); // q, unharmed by b
+    expect(drawn(rows, 4, 6).slice(0, 6)).toEqual([0, 0, 1, 3, 5, 8]);
+    expect(drawn(rows, 4, 6)[6]).toBeNaN();
+    expect(analyzeRows([...rows, 'g = b_6']).rows[5].error).toMatch(/out of range/);
+  });
+
+  it('still reports what is not a run off a tuple', () => {
+    expect(analyzeRows(['r = [1..3]', 'a_0 = 0.5', 'a_{n+1} = a_n + r']).rows[2].error).toMatch(/one number/);
+    const unknown = analyzeRows(['a_0 = 0', 'a_{n+1} = a_n + n + zz', 'c = a_3']).rows;
+    expect(unknown[1].error).toMatch(/Unknown variable: zz/);
+    expect(unknown[2].error).toMatch(/constant parameters \(found zz\)/);
+    expect(analyzeRows(['a_0 = 0', 'a_{n+1} = a_n + n + y', 'c = a_3']).rows[2].error).toMatch(/found y/);
+  });
+
+  it('keeps an autonomous recurrence a cobweb', () => {
+    expect(compileCpu(values(['a_0 = 0.2', 'a_{n+1} = a_n/2 + 1']).out[1].cls!).type).toBe('cobweb');
   });
 });

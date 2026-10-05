@@ -153,24 +153,45 @@ over states × symbols:
 Q = [0..2]; S = [0, 1]
 step(q, s) = mod(2q + s, 3)                  # remainder mod 3 of a binary number
 graph(Q, step(Q, S), S)                      # Q and S separate: every transition
-digit(k) = mod(floor(13 / 2^(3 - k)), 2)     # 13 = 1101, one digit at a time
-run(q, k, m) = {k >= m: q, run(step(q, digit(k)), k + 1, m)}
+D = (1, 1, 0, 1)                             # 13 = 1101, one digit at a time
+q_0 = 0
 N = floor(clamp(0, 0, 4))
-mark(run(0, 0, N))                           # the state after N digits
+mark(q_N)                                    # the state after N digits
+--- right
+q_{n+1} = step(q_n, D[n + 1])                # the run, drawn as its terms
 ```
 
-The run is a tail-recursive function (a bounded loop), so dragging N walks the
-marked state through the machine; `run(0, 0, 4)` reads 1 (13 mod 3).
+The run is a recurrence over the input word, a tuple, so dragging N walks the
+marked state through the machine; `q_4` is 1 (13 mod 3). Beside the machine
+its row draws the run as dots, the states 0, 1, 0, 0, 1.
 
-A recurrence would read better, `q_{n+1} = step(q_n, w[n+1])`, but sequences
-do not allow that yet: a recurrence may not use n, and its parameters must
-be scalars (not the tuple `w`). Lifting both is the natural next step.
+### Recurrences that read n and tuples (built)
+
+A recurrence used to step from its own term alone (`a_{n+1} = f(a_n)`), the
+map a cobweb draws. Its step may now also read:
+
+- **n**: `a_{n+1} = (n + 1) a_n` is n!.
+- **another sequence at n**: `a_{n+1} = a_n + b_n` with `b_n = n^2` sums
+  squares.
+- **a tuple at a position in n**: `q_{n+1} = step(q_n, D[n + 1])`. A sorted
+  list indexes too (`T = sort([1..5])`).
+
+Such a step is no single map, so the row draws its terms as dots, as an
+explicit sequence does; one that reads none of these is a cobweb as before
+(and with x, a bifurcation diagram; a stepped one cannot take x). Terms are
+still a chain of constants from the seed (lib/seq.ts), each step the source
+resolved at its own n, with its tuple positions read. A run over a tuple stops
+where the tuple does: drawn, the terms past it are missing; asked for by
+number (`q_5`), it is an error saying the index is out of range.
+
+One snag: `w` is the complex variable, so `w = (1, 1, 0, 1)` is not a tuple;
+name the input word anything else.
 
 ### Pushdown automata (sketch)
 
 A PDA is a state machine plus a stack. The stack is a tuple, so it needs
-tuple-valued recurrences (`s_{n+1} = push(s_n, a)`), which sequences do not
-have. Drawn as a graph panel (the control, with `mark` on the state) beside a
+tuple-valued recurrences (`s_{n+1} = push(s_n, a)`): recurrences read
+tuples now, but their terms are still numbers. Drawn as a graph panel (the control, with `mark` on the state) beside a
 lattice panel of the stack over time — `S[n, h]`, the symbol at height h after
 n steps, which is a table, so the drawing is free once tuple recurrences exist.
 
@@ -218,12 +239,16 @@ inverse, so both readings sit side by side.
   list lowering, and not specific to graphs.
 - **Function parameters and document lists.** With a list `k` defined, a
   function `run(q, k, m)` sees the list, not its parameter.
+- **An explicit term at a tuple position.** `a_n = T[n]` with a tuple T is
+  refused as a row (it draws over an open n, which a tuple cannot be indexed
+  at), though `a_3` reads T[3]. The recurrence form computes term by term
+  and does not have the problem.
 
 ## Order of work
 
 1. Lattice panels, tables, 2D automata — built.
 2. `graph(…)` rows, graph panels, `mark(…)` — built.
-3. Recurrences that read n and tuples (state machine runs as sequences).
+3. Recurrences that read n and tuples (state machine runs as sequences) — built.
 4. `matrix(P)` from a multiset of pairs, and pairs from a matrix.
 5. Tuple-valued recurrences, then PDAs.
 6. A growing 2D board; draggable graph vertices; graphs in the /g/ preview.

@@ -698,8 +698,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   reads the term at a slider `k`, and `a_N` one term per element of a list
   `N`. A term may use another sequence at its own index —
   `a_n = b_n + 1`, `b_[n+1] - b_n`, `sum(k=1..n, b_k)` — including a
-  recurrence's terms (`d_n = a_{n+1} - a_n`, up to index 1000). A recurrence
-  itself steps from its own term alone. A sequence's index may also go in
+  recurrence's terms (`d_n = a_{n+1} - a_n`, up to index 1000). A
+  recurrence that steps from its own term alone draws a cobweb (or, with x,
+  a bifurcation diagram). One whose step also reads n, another sequence at
+  n, or a tuple at a position in n draws its terms as dots instead:
+  `a_{n+1} = (n + 1) a_n` (factorials), `q_{n+1} = step(q_n, D[n + 1])`
+  with `D = (1, 1, 0, 1)` (a state machine's run over the digits of D). Its
+  terms stop where the tuple does. A sequence's index may also go in
   braces or parens, as its recurrence row is written: `b_{n+1}`, `a_(n-1)`,
   and the rows `a_{n} = 1/n` and `a_{0} = 1`. Each letter is one sequence: beside
   `a_n = 1/n`, `a_k = 7` is a constant named a_k. Indices
@@ -754,9 +759,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A piecewise works inline over a list or through a function alike:
   `k = [1..40]; graph(k, {mod(k, 2) = 0: k/2, 3k + 1})`.
 - `mark(v)` highlights vertex v in the graphs of its panel and reads v out;
-  with a slider or t it walks, e.g. a state machine's run as a recursive
-  function: `run(q, k, m) = {k >= m: q, run(step(q, digit(k)), k + 1, m)};
-  mark(run(0, 0, N))`.
+  with a slider or t it walks, e.g. a state machine's run as a recurrence
+  over a tuple of input symbols: `D = (1, 1, 0, 1); q_0 = 0;
+  q_{n+1} = step(q_n, D[n + 1]); mark(q_N)`.
 - Lattice panels: a panel whose rows are all automata and tables (or whose
   view row names index axes) is a lattice. Its grid runs between cells, its
   edges are numbered by index (whole numbers only), and zoomed in far enough

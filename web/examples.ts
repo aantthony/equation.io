@@ -300,8 +300,8 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
       [
         'state machine: divisible by 3',
-        '# the remainder mod 3 of a binary number, read left to right; Q = [0..2]; S = [0, 1]; step(q, s) = mod(2q + s, 3); graph(Q, step(Q, S), S); # read 13 = 1101, one digit at a time; digit(k) = mod(floor(13 / 2^(3 - k)), 2); run(q, k, m) = {k >= m: q, run(step(q, digit(k)), k + 1, m)}; N = floor(clamp(0, 0, 4)); mark(run(0, 0, N))',
-        'graph slider recursion',
+        '# the remainder mod 3 of a binary number, read left to right; Q = [0..2]; S = [0, 1]; step(q, s) = mod(2q + s, 3); graph(Q, step(Q, S), S); # read 13 = 1101, one digit at a time; D = (1, 1, 0, 1); q_0 = 0; N = floor(clamp(0, 0, 4)); mark(q_N); --- right; # the run: the state after n digits; q_{n+1} = step(q_n, D[n + 1])',
+        'graph slider sequence',
       ],
       [
         'matrix multiplication as arrows',
