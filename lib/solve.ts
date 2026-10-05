@@ -28,6 +28,8 @@ const MAX_BACKTRACK = 24;
 const LATTICE = { 2: 24, 3: 6 } as const;
 /** Solutions returned at most, so a degenerate system cannot flood the scene. */
 const MAX_SOLUTIONS = 64;
+/** Midpoint solves spent refining one traced chord until it hugs the curve. */
+const REFINE_BUDGET = 128;
 
 export interface SolveOptions {
   /** Extra values in scope (constants, t). Unknowns are overwritten per step. */
@@ -366,13 +368,26 @@ export function traceSystem(
     return at(probe);
   };
 
+  // Solutions at parameter t, nearest the chord's centre first.
+  const midpoints = (start: number[], end: number[], t: number): number[][] => {
+    const center = start.map((v, k) => (v + end[k]) / 2);
+    const mids = solveSystem(residuals, vars, lo, hi, {
+      env: { ...env, u: t },
+      angular,
+      seeds: [center, start, end],
+      lattice: false,
+    });
+    return mids.sort(
+      (p, q) => Math.hypot(...p.map((v, k) => v - center[k])) - Math.hypot(...q.map((v, k) => v - center[k])),
+    );
+  };
+
   // A large step can be ordinary motion in a zoomed-in view. Follow it at
   // intermediate parameter values before deciding the branch has jumped.
-  // A chord already certified continuous is then refined until it hugs the
-  // curve, so many turns per sample step still draw smooth (issue #49).
-  const bridge = (a: number[], b: number[], u0: number, u1: number): number[][] | null => {
+  // Kept midpoints carry their parameter so the winner can be refined.
+  type Mid = { point: number[]; t: number };
+  const bridge = (a: number[], b: number[], u0: number, u1: number): Mid[] | null => {
     let remaining = 96; // bound work when several branches compete for a match
-    let refining = 128; // separately bounded, so refinement never breaks a path
     const minDepth = discreteProbes.some(probe => {
       const before = discreteValue(probe, a, u0);
       const after = discreteValue(probe, b, u1);
@@ -387,52 +402,61 @@ export function traceSystem(
       t1: number,
       depth: number,
       parentDeviation?: number,
-      refine = false,
-    ): number[][] | null => {
-      // Refinement only adds points to a certified chord, so it gives up by
-      // keeping the chord, never by breaking the path.
-      const fail = refine ? [] : null;
-      if (refine ? refining-- <= 0 : remaining-- <= 0) return fail;
+    ): Mid[] | null => {
+      if (remaining-- <= 0) return null;
       const t = (t0 + t1) / 2;
-      if (t === t0 || t === t1) return fail;
+      if (t === t0 || t === t1) return null;
       const center = start.map((v, k) => (v + end[k]) / 2);
       const distance = Math.hypot(...start.map((v, k) => v - end[k]));
-      const mids = solveSystem(residuals, vars, lo, hi, {
-        env: { ...env, u: t },
-        angular,
-        seeds: [center, start, end],
-        lattice: false,
-      });
-      mids.sort(
-        (p, q) => Math.hypot(...p.map((v, k) => v - center[k])) - Math.hypot(...q.map((v, k) => v - center[k])),
-      );
-      for (const mid of mids) {
+      for (const mid of midpoints(start, end, t)) {
         // Smooth curvature shrinks under subdivision; a jump's deviation does
         // not. Compare successive midpoints independently of the view-scaled
         // step limit so jumps smaller than maxStep can still break the path.
         const deviation = Math.hypot(...mid.map((v, k) => v - center[k]));
         if (
-          refine ||
-          (distance < maxStep &&
-            depth >= minDepth &&
-            (deviation <= 1e-12 * (1 + distance) ||
-              (parentDeviation !== undefined && deviation < 0.5 * parentDeviation)))
-        ) {
-          // A midpoint further off than the chord is long belongs to some
-          // other branch, not to this smooth arc.
-          if (deviation <= flatness || deviation > distance) return [];
-          const left = subdivide(start, mid, t0, t, depth + 1, deviation, true)!;
-          const right = subdivide(mid, end, t, t1, depth + 1, deviation, true)!;
-          return [...left, mid, ...right];
-        }
+          distance < maxStep &&
+          depth >= minDepth &&
+          (deviation <= 1e-12 * (1 + distance) || (parentDeviation !== undefined && deviation < 0.5 * parentDeviation))
+        )
+          return [];
         const left = subdivide(start, mid, t0, t, depth + 1, deviation);
         if (!left) continue;
         const right = subdivide(mid, end, t, t1, depth + 1, deviation);
-        if (right) return distance < maxStep && deviation <= flatness ? [] : [...left, mid, ...right];
+        if (right) return distance < maxStep ? [] : [...left, { point: mid, t }, ...right];
       }
-      return fail;
+      return null;
     };
     return subdivide(a, b, u0, u1, 0);
+  };
+
+  // Split a chord the bridge already certified until it hugs the curve, so
+  // many turns per sample step still draw smooth (issue #49). Each half gets
+  // its own share of the budget, and running out keeps the chord rather than
+  // breaking the path.
+  const refine = (
+    start: number[],
+    end: number[],
+    t0: number,
+    t1: number,
+    budget: number,
+    parentDeviation?: number,
+  ): number[][] => {
+    const t = (t0 + t1) / 2;
+    if (budget <= 0 || t === t0 || t === t1) return [];
+    const center = start.map((v, k) => (v + end[k]) / 2);
+    const distance = Math.hypot(...start.map((v, k) => v - end[k]));
+    for (const mid of midpoints(start, end, t)) {
+      const deviation = Math.hypot(...mid.map((v, k) => v - center[k]));
+      if (deviation <= flatness) return [];
+      // A smooth arc's deviation falls about fourfold per split. One that
+      // does not, or lies further off than the chord is long, is on another
+      // branch.
+      if (deviation > distance || (parentDeviation !== undefined && deviation > 0.5 * parentDeviation)) continue;
+      const rest = budget - 1;
+      const half = Math.floor(rest / 2);
+      return [...refine(start, mid, t0, t, half, deviation), mid, ...refine(mid, end, t, t1, rest - half, deviation)];
+    }
+    return [];
   };
 
   for (let i = 0; i <= samples; i++) {
@@ -450,7 +474,7 @@ export function traceSystem(
     const available = new Set(active);
     active = points.map(point => {
       let best: number[][] | undefined;
-      let bestBridge: number[][] = [];
+      let bestBridge: Mid[] = [];
       let distance = Infinity;
       for (const path of available) {
         const last = path[path.length - 1];
@@ -465,7 +489,13 @@ export function traceSystem(
       }
       if (best) {
         available.delete(best);
-        best.push(...bestBridge, point);
+        // Refine only the winner's chords, not every candidate's.
+        const chain = [...bestBridge, { point, t: i / samples }];
+        let prev: Mid = { point: best[best.length - 1], t: (i - 1) / samples };
+        for (const next of chain) {
+          best.push(...refine(prev.point, next.point, prev.t, next.t, REFINE_BUDGET), next.point);
+          prev = next;
+        }
         return best;
       }
       const path = [point];
