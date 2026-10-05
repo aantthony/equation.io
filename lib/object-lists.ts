@@ -3,6 +3,7 @@ import type { Mat } from './mat.ts';
 import { lowerMatrix, rowsAsPoints } from './geom.ts';
 import { mapChildren } from './expr.ts';
 import { tensorNode, tensorOfNode } from './tensor.ts';
+import { flatOfNode, isPoint, pointCoords } from './pga.ts';
 import { exceedsNodes } from './size.ts';
 import { hasInterval } from './interval.ts';
 /** Lift lists in object positions before scalar geometry lowering. Existing
@@ -538,6 +539,18 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
               pts = lowerObjects(n.args[0], defs, opts, true);
             } catch {
               pts = null;
+            }
+            // Points that meet and join made are the tuples they are; lines
+            // and planes count, but have no total or mean.
+            const flats = pts?.kind === 'list' ? pts.items.map(flatOfNode) : [];
+            if (pts?.kind === 'list' && flats.length && flats.every(f => f)) {
+              if (flats.every(f => isPoint(f!))) {
+                pts = withAxes<Expr>(
+                  { kind: 'list', items: flats.map(f => ({ kind: 'vec', items: pointCoords(f!) })) },
+                  axesOf(pts),
+                );
+              } else if (n.name === 'count') return num(flats.length);
+              else throw new Error(`${n.name} is not defined for lines and planes — count takes them.`);
             }
             if (pts?.kind === 'list' && pts.items.length && pts.items.every(p => p.kind === 'vec')) {
               settledLists.add(pts);

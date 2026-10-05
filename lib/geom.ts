@@ -67,6 +67,23 @@ import {
 } from './tensor.ts';
 import { actionNode } from './glyphs.ts';
 import {
+  type Flat,
+  PGA_CALL,
+  flatAngle,
+  flatDistance,
+  flatName,
+  flatNode,
+  flatOfNode,
+  hyperplane,
+  isPoint,
+  outerPga,
+  pointCoords,
+  pointPga,
+  project,
+  reflect,
+  regressivePga,
+} from './pga.ts';
+import {
   type Multivector,
   MV_CALL,
   conjugate,
@@ -283,6 +300,8 @@ let compSeen = new WeakMap<Expr, LV | { wait: Expr }>();
 let tenSeen = new WeakMap<Expr, Tensor | null>();
 /** Multivector-valued subexpressions met during one lowerGeom (see lowerMv). */
 let mvSeen = new WeakMap<Expr, Multivector | null>();
+/** Points, lines and planes met during one lowerGeom (see lowerFlat). */
+let flatSeen = new WeakMap<Expr, Flat | null>();
 /** Named tensors for the lowering under way. Like the caches above it lives
  *  for one call: lowering is synchronous, and threading it through every
  *  recursive call would touch every caller of lower() for one lookup. */
@@ -294,6 +313,7 @@ function fresh(getTensor: GetTensor, isList: IsList, possible: boolean): void {
   compSeen = new WeakMap();
   tenSeen = new WeakMap();
   mvSeen = new WeakMap();
+  flatSeen = new WeakMap();
   tensorNamed = getTensor;
   listNamed = isList;
   matsPossible = possible;
@@ -686,6 +706,160 @@ function sandwiched(e: Expr, m: Multivector, any: (n: Expr) => Multivector): Mul
   return gradePart(m, 1);
 }
 
+/** The calls that make or take points, lines and planes of projective
+ *  geometry (lib/pga.ts). `line` is one only inside another expression: a
+ *  row of its own keeps drawing as the implicit line it always has. */
+const FLAT_FNS = new Set(['meet', 'join', 'plane', 'project', 'reflect', 'line', PGA_CALL]);
+
+const flatMark = new WeakMap<Expr, boolean>();
+function flatIn(e: Expr): boolean {
+  const hit = flatMark.get(e);
+  if (hit !== undefined) return hit;
+  let found = false;
+  switch (e.kind) {
+    case 'call':
+      found = FLAT_FNS.has(e.name) || e.args.some(flatIn);
+      break;
+    case 'bin':
+      found = flatIn(e.a) || flatIn(e.b);
+      break;
+    case 'neg':
+      found = flatIn(e.a);
+      break;
+  }
+  flatMark.set(e, found);
+  return found;
+}
+
+const JOIN_USAGE =
+  'join takes points, or in space a point and a line: join(A, B) is the line through A and B, join(A, B, C) the plane through three points.';
+const MEET_USAGE =
+  'meet takes two lines of the plane, or in space two planes or a line and a plane: meet(L, M) is where they cross.';
+const PLANE_USAGE = 'plane takes three points of space — plane(A, B, C) — or a point and a normal: plane(P, n).';
+
+/** What a flat is called in a message: "a line", "a plane", "a point". */
+const aFlat = (f: Flat): string => `a ${flatName(f.dim, f.grade) ?? 'flat'}`;
+
+/**
+ * A point, line or plane of projective geometry, or null: line(A, B),
+ * plane(…), join, meet, project, reflect and a `[pga]` node written in for
+ * a name. Points enter as the tuples they are (docs/pga.md); arithmetic on
+ * a line or plane is not defined, so only these calls make one.
+ */
+function lowerFlat(e: Expr, lo: (n: Expr) => LV): Flat | null {
+  if (e.kind !== 'call' || !FLAT_FNS.has(e.name)) return null;
+  if (flatSeen.has(e)) return flatSeen.get(e)!;
+  flatSeen.set(e, null);
+  const point = (n: Expr, usage: string): Flat => {
+    const v = lo(n);
+    if (!v.vec || (v.items.length !== 2 && v.items.length !== 3)) throw new Error(usage);
+    return { ...pointPga(v.items), grade: v.items.length };
+  };
+  const arg = (n: Expr, usage: string): Flat => lowerFlat(n, lo) ?? point(n, usage);
+  const sameDim = (fs: Flat[], usage: string) => {
+    if (fs.some(f => f.dim !== fs[0].dim)) throw new Error(`${usage} (One is in the plane and one in space.)`);
+  };
+  const join = (a: Flat, b: Flat): Flat => {
+    const grade = a.grade + b.grade - (a.dim + 1);
+    if (grade < 1) throw new Error(JOIN_USAGE);
+    return { ...regressivePga(a, b), grade };
+  };
+  const found = ((): Flat => {
+    const args = e.args;
+    switch (e.name) {
+      case PGA_CALL:
+        return flatOfNode(e)!;
+      case 'line': {
+        const usage = 'line takes two points: line(A, B) is the line through A and B.';
+        // Older links write the coordinates loose, line(0, 0, 1, 2), as a
+        // row of its own still may: they pair into points.
+        const pts = legacyPointArgs(args.map(lo), usage);
+        if (pts.length !== 2 || pts.some(p => p.length !== 2 && p.length !== 3)) throw new Error(usage);
+        const [a, b] = pts.map((p): Flat => ({ ...pointPga(p), grade: p.length }));
+        sameDim([a, b], usage);
+        return join(a, b);
+      }
+      case 'join': {
+        if (args.length !== 2 && args.length !== 3) throw new Error(JOIN_USAGE);
+        const fs = args.map(n => arg(n, JOIN_USAGE));
+        sameDim(fs, JOIN_USAGE);
+        return fs.slice(1).reduce(join, fs[0]);
+      }
+      case 'plane': {
+        if (args.length === 3) {
+          const fs = args.map(n => point(n, PLANE_USAGE));
+          if (fs.some(f => f.dim !== 3)) throw new Error(PLANE_USAGE);
+          return fs.slice(1).reduce(join, fs[0]);
+        }
+        if (args.length !== 2) throw new Error(PLANE_USAGE);
+        const [p, n] = args.map(lo);
+        if (!p.vec || !n.vec || p.items.length !== 3 || n.items.length !== 3) throw new Error(PLANE_USAGE);
+        // n · (X − P) = 0.
+        const offset = neg(p.items.reduce<Expr>((s, c, k) => add(s, mul(c, n.items[k])), { kind: 'num', value: 0 }));
+        return { ...hyperplane(n.items, offset), grade: 1 };
+      }
+      case 'meet': {
+        if (args.length !== 2) throw new Error(MEET_USAGE);
+        const [a, b] = args.map(n => arg(n, MEET_USAGE));
+        sameDim([a, b], MEET_USAGE);
+        if (isPoint(a) || isPoint(b))
+          throw new Error(`${MEET_USAGE} A point meets nothing more: it is already a point.`);
+        const grade = a.grade + b.grade;
+        if (grade > a.dim) {
+          throw new Error(
+            'Two lines in space seldom cross, so meet does not take them — meet a line with a plane, or join(L, P) to span them.',
+          );
+        }
+        return { ...outerPga(a, b), grade };
+      }
+      case 'project':
+      case 'reflect': {
+        const usage =
+          e.name === 'project'
+            ? 'project takes what to project and what onto: project(P, L) is the point of L nearest P.'
+            : 'reflect takes what to reflect and what in: reflect(P, L) mirrors P in the line or plane L, or in a point.';
+        if (args.length !== 2) throw new Error(usage);
+        const [a, b] = args.map(n => arg(n, usage));
+        sameDim([a, b], usage);
+        return { ...(e.name === 'project' ? project(a, b) : reflect(a, b)), grade: a.grade };
+      }
+    }
+    return null as never;
+  })();
+  flatSeen.set(e, found);
+  return found;
+}
+
+/** A flat where a number or a point is wanted: a point is its tuple, and
+ *  a line or plane is refused, saying what to do with it. */
+function flatValue(f: Flat): LV {
+  if (isPoint(f)) return vc(...pointCoords(f));
+  throw new Error(
+    `${aFlat(f).replace('a', 'A')} is not a number or a point here — meet(L, M) is where two cross, distance(P, L) how far a point is from one; or give it a row of its own to draw it.`,
+  );
+}
+
+/** distance and angle where a line or plane is involved, or null. */
+function flatMeasure(e: Expr & { kind: 'call' }, lo: (n: Expr) => LV): LV | null {
+  if ((e.name !== 'distance' && e.name !== 'angle') || e.args.length !== 2) return null;
+  const fs = e.args.map(n => lowerFlat(n, lo));
+  if (!fs.some(f => f && !isPoint(f))) return null;
+  const usage =
+    e.name === 'distance'
+      ? 'distance takes two points, lines or planes: distance(P, L).'
+      : 'angle takes three points, two vectors, or two lines or planes: angle(L, M).';
+  const [a, b] = e.args.map((n, k): Flat => {
+    if (fs[k]) return fs[k];
+    const v = lo(n);
+    if (!v.vec || (v.items.length !== 2 && v.items.length !== 3)) throw new Error(usage);
+    return { ...pointPga(v.items), grade: v.items.length };
+  });
+  if (a.dim !== b.dim) throw new Error(`${usage} (One is in the plane and one in space.)`);
+  if (e.name === 'distance') return sc(flatDistance(a, b));
+  if (isPoint(a) || isPoint(b)) throw new Error(usage);
+  return sc(flatAngle(a, b));
+}
+
 /** Any value read as a multivector: a number is grade 0, a point grade 1. */
 function anyMv(n: Expr, lo: (n: Expr) => LV): Multivector {
   const m = lowerMv(n, lo);
@@ -860,6 +1034,14 @@ function turnMatrix(r: Multivector, dim: 2 | 3): Expr[][] {
 function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV {
   const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
   const matOf = (n: Expr): MatValue | null => lowerMat(n, lo, getMat);
+  // A point that projective geometry made is its tuple; a line or plane
+  // only goes where meet, join and the measures take it.
+  if (e.kind === 'call' && flatIn(e)) {
+    const measured = flatMeasure(e, lo);
+    if (measured) return measured;
+    const f = lowerFlat(e, lo);
+    if (f) return flatValue(f);
+  }
   // A multivector — or a number or vector that one reduces to — first: its
   // ⟑, ∧ and products are its own, not matrix algebra's.
   if (e.kind === 'bin' || e.kind === 'neg' || e.kind === 'call') {
@@ -1305,6 +1487,13 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       if (e.items.some(a => !plainValue(lowerMv(a, lo)))) {
         return sc(sameList(e, { kind: 'list', items: e.items.map(a => mvNode(anyMv(a, lo))) }));
       }
+      // A list holding lines or planes is a multiset of them (docs/pga.md).
+      const flats = e.items.map(a => (a.kind === 'call' && flatIn(a) ? lowerFlat(a, lo) : null));
+      if (flats.some(f => f && !isPoint(f))) {
+        if (!flats.every(f => f && !isPoint(f) && f.grade === flats[0]?.grade && f.dim === flats[0]?.dim))
+          throw new Error('A list of lines or planes holds only lines, or only planes, of the plane or of space.');
+        return sc(sameList(e, { kind: 'list', items: flats.map(f => flatNode(f!)) }));
+      }
       // Items lower independently; a named point becomes its (A_x, A_y) vec,
       // so [A, B] scatters named points like [(1, 2), (3, 4)] does literals.
       const items = e.items.map(a => toExpr(lo(a)));
@@ -1498,6 +1687,25 @@ export function lowerGeom(
   return withMatrices(getTensor, isList, () => lowerStatement(e, getComps, getMat, isList));
 }
 
+/**
+ * `L = line(A, B)`: the line as the value it is (lib/pga.ts), which a
+ * definition names — where a row of its own draws line(A, B) as the
+ * implicit line it always has. Null for anything else.
+ */
+export function lowerLineValue(
+  e: Expr,
+  getComps: GetComps,
+  getMat: GetMat = () => null,
+  isList: IsList = () => false,
+  getTensor: GetTensor = () => null,
+): Expr | null {
+  if (e.kind !== 'call' || e.name !== 'line') return null;
+  return withMatrices(getTensor, isList, () => {
+    const f = lowerFlat(e, n => lower(n, getComps, getMat, isList));
+    return f && flatNode(f);
+  });
+}
+
 function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): Expr {
   // qjulia(c[, s]): the quaternion Julia set of c, sliced at k = s.
   if (e.kind === 'call' && e.name === 'qjulia') {
@@ -1527,6 +1735,12 @@ function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsL
     const m = lowerMat(e.args[0], n => lower(n, getComps, getMat, isList), getMat)?.m;
     if (!m) throw new Error(usage);
     return actionNode(m);
+  }
+  // A point, line or plane on a row of its own draws, and reads out what it
+  // is (docs/pga.md). line(A, B) of the plane stays the implicit line below.
+  if (e.kind === 'call' && e.name !== 'line' && flatIn(e)) {
+    const f = lowerFlat(e, n => lower(n, getComps, getMat, isList));
+    if (f) return flatNode(f);
   }
   // A multivector on a row of its own draws by grade (docs/clifford.md); one
   // that is only a number or a vector lowers as that number or vector. A
@@ -1588,6 +1802,10 @@ function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsL
     const pts = legacyPointArgs(args, `${e.name} takes points with matching dimensions.`);
     if (!pts.length || ![2, 3].includes(pts[0].length) || pts.some(p => p.length !== pts[0].length))
       throw new Error(`${e.name} needs points with matching dimensions.`);
+    if (pts[0].length === 3 && e.name === 'line' && pts.length === 2) {
+      // A line of space is a value of projective geometry (lib/pga.ts).
+      return flatNode({ ...regressivePga(pointPga(pts[0]), pointPga(pts[1])), grade: 2 });
+    }
     if (pts[0].length === 3 && (e.name === 'line' || e.name === 'square'))
       throw new Error(`${e.name} is only defined for 2D points.`);
     if (e.name === 'line') {

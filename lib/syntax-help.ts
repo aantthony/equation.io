@@ -93,7 +93,15 @@ const signatures: Record<string, [string, string]> = {
   segment: ['segment(A, B)', 'Segment joining two 2D or 3D points'],
   polyline: ['polyline(A, B, C, …)', 'Open path through 2D/3D points; also polyline(T) for a tuple, like sort(P, P.x)'],
   vector: ['vector(A, B) or vector(V)', 'Arrow from A to B, or from the origin to V'],
-  line: ['line(A, B)', 'Line through two points'],
+  line: ['line(A, B)', 'Line through two points, in the plane or in space'],
+  join: [
+    'join(A, B) or join(A, B, C)',
+    'The line through two points, or the plane through three (or a point and a line)',
+  ],
+  meet: ['meet(L, M)', 'Where two lines of the plane cross; in space where a line meets a plane, or two planes cross'],
+  plane: ['plane(A, B, C) or plane(P, n)', 'The plane through three points, or through P with normal n'],
+  project: ['project(P, L)', 'The point of a line or plane nearest P'],
+  reflect: ['reflect(P, L)', 'P mirrored in a line, a plane or a point'],
   circle: ['circle(A, r)', 'Circle with center A and radius r'],
   polygon: [
     'polygon(A, B, C, …)',
@@ -101,10 +109,10 @@ const signatures: Record<string, [string, string]> = {
   ],
   square: ['square(A, B)', 'Square erected to the left of side A → B'],
   midpoint: ['midpoint(A, B)', 'Midpoint of two points'],
-  distance: ['distance(A, B)', 'Distance between two points, |A - B|'],
+  distance: ['distance(A, B)', 'Distance between two points, |A - B|, or from a point to a line or plane'],
   angle: [
-    'angle(A, B, C) or angle(U, V)',
-    'Angle at B, or between U and V: signed in 2D (−π, π], unsigned in 3D [0, pi]',
+    'angle(A, B, C) or angle(U, V); angle(L, M)',
+    'Angle at B, or between U and V: signed in 2D (−π, π], unsigned in 3D [0, pi]; between lines or planes, acute',
   ],
   dot: ['dot(A, B)', 'Vector dot product'],
   cross: [

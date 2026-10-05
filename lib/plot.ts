@@ -37,6 +37,7 @@ import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep 
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
 import { type Multivector, mvOfNode, mvText } from './clifford.ts';
+import { flatFigure, flatOfNode, flatText } from './pga.ts';
 import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { SPLIT_NODE_BUDGET, complexParts, splitTooLarge } from './complex-parts.ts';
@@ -883,6 +884,34 @@ function classifyLowered(
     return withReadout(drawn, readout.cls);
   }
 
+  // A point, line or plane of projective geometry draws as the set of points
+  // it is, and reads out what it is (docs/pga.md); a multiset of them draws
+  // each.
+  const flats = expr.kind === 'list' && expr.items.length ? expr.items.map(flatOfNode) : [flatOfNode(expr)];
+  if (flats.every(f => f !== null)) {
+    if (hasSpace || hasParam) {
+      throw new Error(
+        'A point, line or plane in x, y, z, u or v has no picture — build it from points, sliders and t.',
+      );
+    }
+    const [{ dim, grade }] = flats;
+    if (flats.some(f => f.dim !== dim || f.grade !== grade))
+      throw new Error('A multiset mixes points, lines or planes — give each kind a row of its own.');
+    const readout = done({
+      kind: 'tuple',
+      values: flats.flatMap(f => f.data),
+      flat: { dim, grade },
+      ...(expr.kind === 'list' && { count: flats.length }),
+    });
+    const drawn = classifyLowered(
+      { kind: 'family', members: flats.map(flatFigure) },
+      defined,
+      fields,
+      timeDerivative,
+    ).cls;
+    return withReadout(drawn, readout.cls);
+  }
+
   // A matrix or tensor on a row of its own — or a multiset of them — has no
   // position, so it is drawn as its values: a readout (docs/multisets.md §5).
   const tensors = expr.kind === 'list' && expr.items.length ? expr.items.map(tensorOfNode) : [tensorOfNode(expr)];
@@ -1479,6 +1508,24 @@ export function plotReadout(plot: CpuPlan, env: Record<string, number>): string 
     const prefix = approx ? '≈' : '=';
     if (plot.count === undefined) return `${prefix} ${parts[0]}`;
     return `${prefix} [${parts.join(', ')}${count > shown ? ', …' : ''}]`;
+  }
+  if (plot.type === 'tuple' && plot.flat) {
+    // A point, line or plane reads as what it is, a multiset of them as a list.
+    const each = 1 << (plot.flat.dim + 1);
+    const count = plot.count ?? 1;
+    const shown = Math.min(count, 8);
+    let approx = false;
+    const parts = Array.from({ length: shown }, (_, k) => {
+      const values = plot.values.slice(k * each, (k + 1) * each).map(e => evaluate(e, env));
+      return flatText(plot.flat!, values, v => {
+        const r = valueReadout(v);
+        if (r.startsWith('≈')) approx = true;
+        return r.replace(/^[=≈] /, '');
+      });
+    });
+    const prefix = approx ? '≈' : '=';
+    if (plot.count === undefined) return `${prefix} ${parts[0]}`;
+    return `${prefix} [${parts.join('; ')}${count > shown ? '; …' : ''}]`;
   }
   if (plot.type === 'tuple') {
     // A tensor's values nest as the tuples that write it; a multiset of

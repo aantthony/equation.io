@@ -238,3 +238,209 @@ export function flatName(dim: Dim, grade: number): 'point' | 'line' | 'plane' | 
   if (dim === 2) return grade === 1 ? 'line' : grade === 2 ? 'point' : null;
   return grade === 1 ? 'plane' : grade === 2 ? 'line' : grade === 3 ? 'point' : null;
 }
+
+/** A point, line or plane: an element of the algebra with the grade that
+ *  says which. The grade comes from how it was made, never from which
+ *  coefficients happen to be zero, so dragging never changes what it is. */
+export interface Flat extends Pga {
+  readonly grade: number;
+}
+
+/** The internal call a flat travels in, from lowering to classify: its
+ *  dimension, its grade, then its coefficients. As a call, a list in a
+ *  coefficient broadcasts over it like any other. */
+export const PGA_CALL = '[pga]';
+export function flatNode(f: Flat): Expr {
+  return { kind: 'call', name: PGA_CALL, args: [num(f.dim), num(f.grade), ...f.data] };
+}
+export function flatOfNode(e: Expr): Flat | null {
+  if (e.kind !== 'call' || e.name !== PGA_CALL) return null;
+  const at = (k: number) => {
+    const a = e.args[k];
+    return a.kind === 'num' ? a.value : NaN;
+  };
+  return { dim: at(0) as Dim, grade: at(1), data: e.args.slice(2) };
+}
+export const isPoint = (f: Flat): boolean => f.grade === f.dim;
+
+/**
+ * What draws a flat, as an ordinary row would write it: a point its tuple
+ * (an ideal one divides by 0 and draws nothing), a line of the plane or a
+ * plane its implicit equation, a line of space the curve where two planes
+ * through it cross. The two planes hold the line and the axis least along
+ * it, and the direction perpendicular to both, so they never coincide.
+ */
+export function flatFigure(f: Flat): Expr {
+  const v = (name: string): Expr => ({ kind: 'var', name });
+  const xyz = ['x', 'y', 'z'].slice(0, f.dim).map(v);
+  // Every coordinate stays in a flat of space, even times a 0: a line of
+  // space whose equations had lost z would read as a point of the plane.
+  const term = (c: Expr, k: number): Expr => (f.dim === 3 ? { kind: 'bin', op: '*', a: c, b: xyz[k] } : mul(c, xyz[k]));
+  const zeroEq = (p: Pga): Expr => {
+    const { normal, offset } = hyperplaneParts(p);
+    return normal.reduce<Expr>(
+      (s, c, k) => (f.dim === 3 ? { kind: 'bin', op: '+', a: s, b: term(c, k) } : add(s, term(c, k))),
+      offset,
+    );
+  };
+  if (isPoint(f)) return { kind: 'vec', items: pointCoords(f) };
+  if (f.grade === 1) return { kind: 'eq', l: zeroEq(f), r: ZERO };
+  // The axis d is least along: x when |d_x| is at most |d_y| and |d_z|,
+  // else y when |d_y| is at most |d_z|, else z.
+  const abs = lineDirection(f).map(c => call('abs', c));
+  const pick = (conds: Expr[][], k: number): Expr =>
+    conds.reduceRight<Expr>(
+      (inner, [l, r]) => ({
+        kind: 'piecewise',
+        cases: [{ cond: { kind: 'ineq', op: '<=', l, r }, value: inner }],
+        otherwise: ZERO,
+      }),
+      num(k),
+    );
+  const ax = pick(
+    [
+      [abs[0], abs[1]],
+      [abs[0], abs[2]],
+    ],
+    1,
+  );
+  const ay = mul(sub(num(1), ax), pick([[abs[1], abs[2]]], 1));
+  const axis = [ax, ay, sub(sub(num(1), ax), ay)];
+  const first = regressivePga(f, idealPointPga(axis));
+  const normal = hyperplaneParts(first).normal;
+  const second = regressivePga(f, idealPointPga(normal));
+  return {
+    kind: 'eq',
+    l: { kind: 'vec', items: [zeroEq(first), zeroEq(second)] },
+    r: { kind: 'vec', items: [ZERO, ZERO] },
+  };
+}
+
+/** `2x - y + 1`: a linear form from its coefficients, zero terms left out. */
+function linearText(terms: ReadonlyArray<[number, string]>, constant: number, format: (v: number) => string): string {
+  let out = '';
+  const push = (value: number, name: string) => {
+    if (value === 0) return;
+    const mag = Math.abs(value);
+    const body = name ? (mag === 1 ? name : `${format(mag)}${name}`) : format(mag);
+    out += out ? (value < 0 ? ` - ${body}` : ` + ${body}`) : value < 0 ? `-${body}` : body;
+  };
+  for (const [value, name] of terms) push(value, name);
+  push(constant, '');
+  return out || '0';
+}
+
+/**
+ * A flat read out from its coefficients' values: a point as (x, y), or `at
+ * infinity, direction (1, 2)` when its weight is 0; a line of the plane as
+ * y = m x + k (or x = k); a plane as z = … (or y = …, x = …); a line of
+ * space by its point nearest the origin and its direction. Rounding leaves
+ * 1e-17 where a coefficient cancels: a value that small beside the largest
+ * is zero.
+ */
+export function flatText(
+  f: { dim: Dim; grade: number },
+  values: readonly number[],
+  format: (v: number) => string,
+): string {
+  const floor = 1e-12 * Math.max(0, ...values.map(Math.abs).filter(Number.isFinite));
+  const clean = values.map(v => (Math.abs(v) <= floor ? 0 : v));
+  if (clean.some(v => !Number.isFinite(v))) return 'undefined';
+  if (clean.every(v => v === 0)) return 'undefined';
+  const flat: Flat = { ...f, data: clean.map(num) };
+  const tuple = (vs: readonly number[]) => `(${vs.map(v => (v < 0 ? `-${format(-v)}` : format(v))).join(', ')})`;
+  const read = (e: Expr): number => (e.kind === 'num' ? e.value : NaN);
+  const small = (vs: readonly number[]) => {
+    const top = Math.max(...vs.map(Math.abs));
+    return vs.map(v => (Math.abs(v) <= 1e-12 * top ? 0 : v));
+  };
+  if (isPoint(flat)) {
+    const { coords, weight: w } = pointParts(flat);
+    const c = coords.map(read);
+    if (read(w) === 0) {
+      // A direction has no size: scaled so its first component is 1.
+      const lead = c.find(v => v !== 0) ?? 1;
+      return `at infinity, direction ${tuple(small(c.map(v => v / lead)))}`;
+    }
+    return tuple(c.map(v => v / read(w)));
+  }
+  if (f.grade === 1) {
+    const { normal, offset } = hyperplaneParts(flat);
+    const n = normal.map(read);
+    const d = read(offset);
+    const names = ['x', 'y', 'z'].slice(0, f.dim);
+    // Solve for the last axis the normal has: z = …, then y = …, then x = ….
+    const k = n.reduce((last, c, j) => (c !== 0 ? j : last), -1);
+    if (k < 0) return 'at infinity';
+    const terms = n.flatMap((c, j): Array<[number, string]> => (j < k ? [[-c / n[k], names[j]]] : []));
+    return `${names[k]} = ${linearText(terms, -d / n[k], format)}`;
+  }
+  const dir = small(lineDirection(flat).map(read));
+  if (dir.every(v => v === 0)) return 'at infinity';
+  const at = small(pointCoords(nearestOrigin(flat)).map(read));
+  return `through ${tuple(at)}, direction ${tuple(dir)}`;
+}
+
+const sqrt = (e: Expr): Expr => call('sqrt', e);
+const dotOf = (u: readonly Expr[], v: readonly Expr[]): Expr => u.reduce<Expr>((s, c, k) => add(s, mul(c, v[k])), ZERO);
+/** |u × v|: of 2D vectors the size of their 2D cross product. */
+function crossSize(u: readonly Expr[], v: readonly Expr[]): Expr {
+  if (u.length === 2) return call('abs', sub(mul(u[0], v[1]), mul(u[1], v[0])));
+  const c = [0, 1, 2].map(k => sub(mul(u[(k + 1) % 3], v[(k + 2) % 3]), mul(u[(k + 2) % 3], v[(k + 1) % 3])));
+  return sqrt(dotOf(c, c));
+}
+/** `cond ? yes : no`, where cond is `l > r`. */
+const above = (l: Expr, r: Expr, yes: Expr, no: Expr): Expr => ({
+  kind: 'piecewise',
+  cases: [{ cond: { kind: 'ineq', op: '>', l, r }, value: yes }],
+  otherwise: no,
+});
+/** Whether a flat's sizes say it is ideal, relative to the sizes it came from. */
+const PARALLEL = 1e-18;
+
+/** The direction a flat runs in that an angle is measured by: a line's
+ *  direction, a hyperplane's normal. */
+const heading = (f: Flat): Expr[] => (f.grade === 1 ? hyperplaneParts(f).normal : lineDirection(f));
+
+/**
+ * The distance between two flats, one of which may be a point: from a
+ * point, the size of its join with the other over both weights; between
+ * skew lines of space, |L ∨ M| over |d × e|; between flats that cross, 0,
+ * and between parallel ones the distance from the first's point nearest
+ * the origin to the second.
+ */
+export function flatDistance(a: Flat, b: Flat): Expr {
+  if (isPoint(b) && !isPoint(a)) return flatDistance(b, a);
+  if (isPoint(a)) {
+    if (isPoint(b)) {
+      const [p, q] = [pointCoords(a), pointCoords(b)];
+      return sqrt(p.reduce<Expr>((s, c, k) => add(s, mul(sub(c, q[k]), sub(c, q[k]))), ZERO));
+    }
+    const w = call('abs', weight(a));
+    const j = regressivePga(a, b);
+    // A hyperplane: the join is a number. A line of space: a plane, by its size.
+    const size = b.grade === 1 ? call('abs', j.data[0]) : sqrt(euclideanNormSq(j));
+    return div(size, mul(w, sqrt(euclideanNormSq(b))));
+  }
+  const apart = flatDistance({ ...nearestOrigin(a), grade: a.dim }, b);
+  if (a.dim === 3 && a.grade === 2 && b.grade === 2) {
+    const [d, e] = [lineDirection(a), lineDirection(b)];
+    const sin = crossSize(d, e);
+    const skew = div(call('abs', regressivePga(a, b).data[0]), sin);
+    return above(mul(sin, sin), mul(num(PARALLEL), mul(dotOf(d, d), dotOf(e, e))), skew, apart);
+  }
+  // Two flats that are not both lines of space meet in something finite
+  // unless they are parallel.
+  const m = outerPga(a, b);
+  return above(euclideanNormSq(m), mul(num(PARALLEL), mul(euclideanNormSq(a), euclideanNormSq(b))), ZERO, apart);
+}
+
+/** The acute angle between two lines or planes, 0 to π/2: between their
+ *  directions or normals, and from π/2 down for a line and a plane. */
+export function flatAngle(a: Flat, b: Flat): Expr {
+  const [u, v] = [heading(a), heading(b)];
+  const between = call('atan2', crossSize(u, v), call('abs', dotOf(u, v)));
+  // A line of space against a plane: the normal's angle, turned to the plane's.
+  const mixed = a.dim === 3 && a.grade !== b.grade;
+  return mixed ? sub(num(Math.PI / 2), between) : between;
+}

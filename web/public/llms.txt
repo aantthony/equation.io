@@ -654,9 +654,34 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `vector` accept matching 2D or 3D points, including tuple literals. 3D
   triangles fill; larger 3D polygons draw their outline. `cross` returns a
   vector in 3D. 3D `angle` is unsigned in [0, pi]; zero arms are undefined.
-  `perp`, `line`, `square`, and `circle` remain planar; 3D dragging is not defined.
+  `line(A, B)` of 3D points is the infinite line through them, drawn across
+  the view box. `perp`, `square`, and `circle` remain planar; 3D dragging is not defined.
   Point lists draw as dots in space too: `[0,1] e_x + [0,1] e_y` is 4 points,
   `[e_x, e_z]` 2, and `([0,1],[0,1],[0,1])` the 8 corners of a cube.
+- Projective geometry (lines and planes as values): `join(A, B)` (or
+  `line(A, B)`) is the line through two points, in the plane or in space;
+  `join(A, B, C)` (or `plane(A, B, C)`) the plane through three points of
+  space, and `plane(P, n)` the plane through P with normal n. `meet(L, M)`
+  is where two lines of the plane cross, and in space where a line goes
+  through a plane (a point) or two planes cross (a line); two lines of space
+  do not meet. A meet is a point like any other — `X = meet(L, M)` names it,
+  `polygon(meet(…), B, C)` and `midpoint(meet(…), A)` take it. Parallel
+  lines meet at an ideal point, which draws nothing and reads out `at
+  infinity, direction (1, 2)`. `project(P, L)` is the point of the line or
+  plane L nearest P (or a line's shadow on a plane), and `reflect(P, L)`
+  mirrors P in a line, a plane or a point. `distance(P, L)` measures from a
+  point to a line or plane, and between lines or planes (0 where they cross);
+  `angle(L, M)` is the acute angle between two lines or planes, in [0, π/2].
+  A row holding a line or plane draws it — a line of the plane as its
+  implicit line, a line of space across the view box, a plane as a surface —
+  and reads out its equation: `= y = 2x + 1`, `= z = -x - y + 1`, or `=
+  through (0, 0, 1), direction (1, 1, 0)` for a line of space. Name one
+  (`L = join(A, B)`) to pass it on; the definition itself draws nothing, the
+  row `L` does. A line or plane is no number or point, so `2 L` is an error.
+  Lists broadcast as everywhere else: with `P = [A, B]`, `join(P, C)` is two
+  lines, `L = join(P, C); meet(L, L)` pairs each line with itself, and
+  `meet(K, H)` for a line K and a list of planes H is the list of crossing
+  points, which `count`, `mean` and `total` take.
 - Convex hulls: `hull(A, B, C, …)` or `hull(P)` for a whole point list draws
   the convex hull — a filled polygon in 2D, a lit opaque solid with flat-shaded faces and outlined edges in 3D
   (coplanar facets merge, so a cube shows six squares). Interior and repeated
