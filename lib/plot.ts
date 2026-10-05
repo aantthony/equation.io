@@ -36,11 +36,12 @@ import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
-import { mvOfNode, mvText } from './clifford.ts';
+import { type Multivector, mvOfNode, mvText } from './clifford.ts';
 import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { SPLIT_NODE_BUDGET, complexParts, splitTooLarge } from './complex-parts.ts';
 import { FAMILY_NODES, exceedsNodes } from './size.ts';
+import { FIGURE_FAMILY_MAX } from './object-lists.ts';
 import { type Prog, compileProg, run } from './vm.ts';
 
 export { publicKind } from './math-object.ts';
@@ -824,24 +825,34 @@ function classifyLowered(
   });
 
   // action(M): what the matrix does to the unit square, circle and axes,
-  // drawn, with the matrix read out.
-  const acting = expr.kind === 'list' ? null : actionOfNode(expr);
-  if (acting || (expr.kind === 'list' && expr.items.some(it => actionOfNode(it)))) {
-    if (!acting) throw new Error('action draws one matrix at a time — pick one, like M[1], or fix its entries.');
+  // drawn, with the matrix read out; over a multiset of matrices, each one's
+  // picture in one figure family, and each matrix read out.
+  const acting = expr.kind === 'list' ? expr.items.map(actionOfNode) : [actionOfNode(expr)];
+  if (acting.some(m => m !== null)) {
+    if (acting.some(m => m === null)) throw new Error('action draws matrices only — every element must be one.');
+    const ms = acting as Expr[][][];
+    const n = ms[0].length;
+    if (ms.some(m => m.length !== n))
+      throw new Error('action draws a multiset of one size — all 2×2 or all 3×3, not both.');
     if (hasSpace || hasParam)
       throw new Error('action takes a constant matrix — sliders and t are fine, x, y, u and v are not.');
-    const readout = done({ kind: 'tuple', values: acting.flat(), shape: [acting.length, acting.length] });
-    const drawn = classifyLowered(
-      { kind: 'family', members: actionGlyphs(acting) },
-      defined,
-      fields,
-      timeDerivative,
-    ).cls;
+    const readout = done({
+      kind: 'tuple',
+      values: ms.flatMap(m => m.flat()),
+      shape: [n, n],
+      ...(expr.kind === 'list' && { count: ms.length }),
+    });
+    const glyphs = ms.map(m => actionGlyphs(m));
+    if (glyphs.flat().length > FIGURE_FAMILY_MAX) {
+      const most = Math.floor(FIGURE_FAMILY_MAX / glyphs[0].length);
+      throw new Error(`action draws at most ${most} ${n}×${n} matrices at once (got ${ms.length}).`);
+    }
+    const drawn = classifyLowered({ kind: 'family', members: glyphs.flat() }, defined, fields, timeDerivative).cls;
     return withReadout(drawn, readout.cls);
   }
 
   // A multivector on a row of its own draws grade by grade, and reads out its
-  // value (docs/clifford.md); a multiset of them reads out each.
+  // value (docs/clifford.md); a multiset of them draws and reads out each.
   const mvs = expr.kind === 'list' && expr.items.length ? expr.items.map(mvOfNode) : [mvOfNode(expr)];
   if (mvs.every(m => m !== null)) {
     if (hasSpace || hasParam) {
@@ -851,16 +862,22 @@ function classifyLowered(
     }
     const dim = mvs.some(m => m.dim === 3) ? 3 : 2;
     const quat = mvs.every(m => m.quat);
-    const values = mvs.flatMap(m => Array.from({ length: 1 << dim }, (_, k) => m.data[k] ?? { kind: 'num', value: 0 }));
+    // A plane member lifts into space unchanged: its blades keep their bitmasks.
+    const lifted = mvs.map((m): Multivector => ({
+      ...m,
+      dim,
+      data: Array.from({ length: 1 << dim }, (_, k): Expr => m.data[k] ?? { kind: 'num', value: 0 }),
+    }));
+    const values = lifted.flatMap(m => m.data);
     const readout = done({
       kind: 'tuple',
       values,
       blades: { dim, ...(quat ? { quat: true as const } : {}) },
       ...(expr.kind === 'list' && { count: mvs.length }),
     });
-    if (expr.kind === 'list') return readout;
+    // Each member draws as it would on a row of its own, over one another.
     // A quaternion that is only a number (i i = -1) has nothing to draw.
-    const glyphs = multivectorGlyphs(mvs[0]);
+    const glyphs = lifted.flatMap(m => multivectorGlyphs(m));
     if (!glyphs.length) return readout;
     const drawn = classifyLowered({ kind: 'family', members: glyphs }, defined, fields, timeDerivative).cls;
     return withReadout(drawn, readout.cls);

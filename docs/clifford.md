@@ -93,7 +93,9 @@ sin θ (`over`), so a large coefficient (a slerp's) is written once rather
 than per vertex.
 
 `action(M)` lowers to `[action]`, drawn as the filled image of the unit
-square (cube), the image of the unit circle and the columns as arrows. A
+square (cube), the image of the unit circle and the columns as arrows; a
+multiset of matrices (`action(M)` with a list in an entry) draws each one's
+glyphs in one figure family and reads each matrix out. A
 2×2 matrix in x and y is a `tensor-field` (public kind `tfield2d`): the
 shader (render2d.ts `tfieldFrag`) finds each fragment's cell — a power of
 two in plane units, so glyphs pan with the plane — and tests the ring
@@ -127,7 +129,6 @@ Planned in docs/geometry-next.md (PGA itself in docs/pga.md).
 - A 3×3 matrix field (ellipsoid glyphs).
 - Projective and conformal geometric algebra (points, lines, circles as
   blades; meet and join).
-- A multiset of multivectors reads out but draws nothing; `action` takes one
-  matrix at a time.
+- A multiset of multivectors reads out but draws nothing.
 - `⟑` needs a math font for its dot: style.css maps U+27D1 alone to STIX
   Two Math / Cambria Math / Noto Sans Math where the system has one.

@@ -33,10 +33,21 @@ describe('action(M)', () => {
     const o = row(['action(((1, 0, 0), (0, 2, 0), (0, 0, 1)))']).r.cls!;
     expect(o.needs3D).toBe(true);
   });
+  it('draws each matrix of a multiset, and reads each out', () => {
+    const { r, env } = row(['a = [1, 2]', 'M = ((a, 0), (0, 1))', 'action(M)']);
+    const o = r.cls!.object;
+    if (o.kind !== 'family') throw new Error(o.kind);
+    expect(o.members).toHaveLength(8);
+    const square = (o.members[4].object as { vertices: Expr[] }).vertices.map(v => evaluate(v, env));
+    expect(square).toEqual([0, 0, 2, 0, 2, 1, 0, 1]);
+    expect(plotReadout(r.cpu!, env)).toBe('= [((1, 0), (0, 1)), ((2, 0), (0, 1))]');
+    expect(row(['a = [1, 2]', 'action(((a, 0, 0), (0, 1, 0), (0, 0, 1)))']).r.cls!.needs3D).toBe(true);
+  });
   it('takes a matrix only, on a row of its own', () => {
     expect(error(['action(3)'])).toMatch(/2×2 or 3×3 matrix/);
     expect(error(['2 action(((1, 0), (0, 1)))'])).toMatch(/whole statement/);
     expect(error(['action(((x, 0), (0, 1)))'])).toMatch(/constant matrix/);
+    expect(error(['a = [1..300]', 'action(((a, 0), (0, 1)))'])).toMatch(/at most 256 2×2 matrices at once \(got 300\)/);
   });
 });
 

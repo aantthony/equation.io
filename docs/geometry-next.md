@@ -46,9 +46,7 @@ meet/join; `line(A, B)` becomes a value; conformal GA out of scope).
    `[mv]` nodes (`if (expr.kind === 'list') return readout;`). Draw one
    glyph family per element (lib/glyphs.ts `multivectorGlyphs`), flattened
    into one figure family, within `FIGURE_FAMILY_NODES`. Quick.
-2. **`action` over a multiset of matrices.** Same shape of change in the
-   `acting` block of lib/plot.ts (currently an error "one matrix at a
-   time"). Quick.
+2. ~~`action` over a multiset of matrices.~~ Done.
 3. ~~Tensor streamlines for 2×2 fields.~~ Done: `streamlines(M)` and
    a row toggle (render2d.ts `tlinesFrag`).
 4. **3×3 matrix fields as ellipsoid glyphs.** A new kind (`tfield3d`),
