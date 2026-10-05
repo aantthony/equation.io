@@ -1309,9 +1309,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   power law draws as a straight line. The window stays in x units. Any
   increasing map built from exp, ln, log, powers, sqrt, sinh and arithmetic
   works (`y = sinh(Y)` is a symlog axis). It applies to its own panel only.
+  The grid and its labels follow the map: decades on a log axis (1, 2, 3, 5
+  between them when zoomed in), and a zero line where the map reaches 0.
   Graphs, implicit curves, regions and fields are drawn on mapped axes;
-  points, parametric curves and geometry are not yet, and the grid labels
-  still count X rather than x.
+  points, parametric curves and geometry are not yet, and a mapped panel
+  shows no coordinate-field grid.
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
   A trailing `spin = rate` keeps it orbiting about the vertical axis at that

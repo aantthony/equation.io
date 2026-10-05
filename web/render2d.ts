@@ -10,6 +10,8 @@ import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
+import type { AxisMaps } from '../lib/axis-map.ts';
+import { type AxisTicks, axisTicks } from '../lib/axis-ticks.ts';
 
 export interface View2D {
   cx: number;
@@ -251,6 +253,79 @@ ${blocks}
   outColor = vec4(col, 1.0);
 }
 `;
+}
+
+/** Most lines a mapped axis draws (lib/axis-ticks.ts), per kind. Packed
+ *  four to a vec4: a float array takes a whole uniform vector per entry,
+ *  and WebGL2 promises only 224 vectors. Multiples of 4. */
+const MAX_MAJOR_TICKS = 64;
+const MAX_MINOR_TICKS = 192;
+
+/**
+ * Grid lines of mapped axes at the screen coordinates their ticks chose,
+ * blended over the grid pass: on `x = 10^X` the lines are not evenly
+ * spaced, so they are a list rather than a level set. Each axis also draws
+ * its zero line where the map reaches 0.
+ */
+function tickFrag(axes: ReadonlyArray<'x' | 'y'>): string {
+  const decls = axes
+    .map(
+      a => `uniform vec4 uMaj${a}[${MAX_MAJOR_TICKS / 4}];
+uniform int uNMaj${a};
+uniform vec4 uMin${a}[${MAX_MINOR_TICKS / 4}];
+uniform int uNMin${a};
+uniform float uZero${a};
+uniform int uHasZero${a};`,
+    )
+    .join('\n');
+  const blocks = axes
+    .map(a => {
+      const c = `p.${a}`;
+      const px = `uUpp.${a}`;
+      return `
+  for (int i = 0; i < ${MAX_MINOR_TICKS}; i++) {
+    if (i >= uNMin${a}) break;
+    minorA = max(minorA, tickLine(abs(${c} - uMin${a}[i / 4][i % 4]) / ${px}));
+  }
+  for (int i = 0; i < ${MAX_MAJOR_TICKS}; i++) {
+    if (i >= uNMaj${a}) break;
+    majorA = max(majorA, tickLine(abs(${c} - uMaj${a}[i / 4][i % 4]) / ${px}));
+  }
+  if (uHasZero${a} == 1) axisA = max(axisA, 1.0 - smoothstep(0.9, 1.9, abs(${c} - uZero${a}) / ${px}));`;
+    })
+    .join('');
+  return `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform vec2 uOrigin;
+${decls}
+out vec4 outColor;
+float tickLine(float distPx) { return 1.0 - smoothstep(0.5, 1.5, distPx); }
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
+  float minorA = 0.0;
+  float majorA = 0.0;
+  float axisA = 0.0;
+${blocks}
+  vec3 col = ${glslVec3(theme.gridMinor)};
+  float a = minorA;
+  if (majorA > 0.0) { col = mix(col, ${glslVec3(theme.gridMajor)}, majorA); a = max(a, majorA); }
+  if (axisA > 0.0) { col = mix(col, ${glslVec3(theme.axis)}, axisA); a = max(a, axisA); }
+  if (a < 0.004) discard;
+  outColor = vec4(col, a);
+}
+`;
+}
+
+/** Each mapped axis's ticks in view, in screen units (lib/axis-ticks.ts). */
+export function mappedTicks(view: View2D, w: number, h: number, maps: AxisMaps): Partial<Record<'x' | 'y', AxisTicks>> {
+  const uppY = view.upp / (view.ratio ?? 1);
+  const out: Partial<Record<'x' | 'y', AxisTicks>> = {};
+  if (maps.x) out.x = axisTicks(maps.x, view.cx - (w / 2) * view.upp, view.cx + (w / 2) * view.upp, 1 / view.upp);
+  if (maps.y) out.y = axisTicks(maps.y, view.cy - (h / 2) * uppY, view.cy + (h / 2) * uppY, 1 / uppY);
+  return out;
 }
 
 /**
@@ -1021,15 +1096,18 @@ export class Renderer2D {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     const grid = frame.grid ?? 'on';
+    const maps = frame.maps ?? {};
     let specs = grid === 'off' ? [] : gridSpecs;
     if (grid !== 'off' && !specs?.length && frame.lattice) specs = latticeGrid(view);
     else if (grid !== 'off' && !specs?.length) {
       const spacing = niceSpacing(view.upp, 90);
       const spacingY = niceSpacing(view.upp / (view.ratio ?? 1), 90);
-      specs = [
+      // A mapped axis is gridded at its ticks below, not evenly here.
+      const cartesian: GridSpec[] = [
         { glsl: 'x', gradGlsl: ['1.0', '0.0'], params: [], major: spacing.major, minor: spacing.minor },
         { glsl: 'y', gradGlsl: ['0.0', '1.0'], params: [], major: spacingY.major, minor: spacingY.minor },
       ];
+      specs = cartesian.filter(s => !maps[s.glsl as 'x' | 'y']);
     }
     try {
       const gridSpecsDrawn = specs ?? [];
@@ -1050,6 +1128,35 @@ export class Renderer2D {
         }
       });
       this.quad.draw();
+      const mapped = (['x', 'y'] as const).filter(a => maps[a]);
+      if (grid !== 'off' && mapped.length && !frame.lattice) {
+        const ticks = mappedTicks(view, w, h, maps);
+        const tp = this.cache.get(QUAD_VERT, tickFrag(mapped));
+        gl.useProgram(tp);
+        gl.uniform2f(gl.getUniformLocation(tp, 'uCenter'), view.cx, view.cy);
+        gl.uniform2f(gl.getUniformLocation(tp, 'uUpp'), view.upp, view.upp / (view.ratio ?? 1));
+        gl.uniform2f(gl.getUniformLocation(tp, 'uRes'), w, h);
+        gl.uniform2f(gl.getUniformLocation(tp, 'uOrigin'), ox, oy);
+        for (const a of mapped) {
+          const t = ticks[a]!;
+          const axesOnly = grid === 'axes';
+          const major = axesOnly ? [] : t.major.slice(0, MAX_MAJOR_TICKS).map(m => m.at);
+          const minor = axesOnly ? [] : t.minor.slice(0, MAX_MINOR_TICKS);
+          // Padded to whole vec4s; entries past the count are never read.
+          const packed = (v: number[]) => {
+            const out = new Float32Array(Math.ceil(v.length / 4) * 4);
+            out.set(v);
+            return out;
+          };
+          if (major.length) gl.uniform4fv(gl.getUniformLocation(tp, `uMaj${a}`), packed(major));
+          if (minor.length) gl.uniform4fv(gl.getUniformLocation(tp, `uMin${a}`), packed(minor));
+          gl.uniform1i(gl.getUniformLocation(tp, `uNMaj${a}`), major.length);
+          gl.uniform1i(gl.getUniformLocation(tp, `uNMin${a}`), minor.length);
+          gl.uniform1f(gl.getUniformLocation(tp, `uZero${a}`), t.zero ?? 0);
+          gl.uniform1i(gl.getUniformLocation(tp, `uHasZero${a}`), t.zero === null ? 0 : 1);
+        }
+        this.quad.draw();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -1338,6 +1445,7 @@ export function drawLabels2D(
   numbers = true,
   box?: OverlayBox,
   lattice?: LatticeLabels,
+  maps: AxisMaps = {},
 ): void {
   const { w, h } = beginOverlay(ctx, dpr, box);
   ctx.font = '11px ui-sans-serif, system-ui';
@@ -1359,20 +1467,31 @@ export function drawLabels2D(
 
   if (lattice) drawLatticeLabels(ctx, lattice, numbers, view, w, h, upp, uppY, toScreenX, toScreenY);
   else if (numbers) {
-    const axisY = Math.min(Math.max(toScreenY(0), 12), h - 6);
-    const axisX = Math.min(Math.max(toScreenX(0), 4), w - 30);
+    // A mapped axis is labelled at its ticks, in its own units; its zero
+    // (none on a log axis) is where the other axis's labels run, or else
+    // they run along the panel's edge.
+    const ticks = mappedTicks(view, w * dpr, h * dpr, maps);
+    const zeroX = maps.x ? (ticks.x!.zero ?? -Infinity) : 0;
+    const zeroY = maps.y ? (ticks.y!.zero ?? -Infinity) : 0;
+    const axisY = Math.min(Math.max(toScreenY(zeroY), 12), h - 6);
+    const axisX = Math.min(Math.max(toScreenX(zeroX), 4), w - 30);
+    const xLabel = (x: number, at: number) =>
+      ctx.fillText(fmt(x), toScreenX(at) + 2, axisY + 13 <= h ? axisY + 13 : axisY - 4);
+    const yLabel = (y: number, at: number) => ctx.fillText(fmt(y), axisX + 4, toScreenY(at) - 3);
 
-    const x0 = Math.ceil((view.cx - (w / 2) * upp) / major) * major;
-    const x1 = view.cx + (w / 2) * upp;
-    for (let x = x0; x <= x1; x += major) {
-      if (Math.abs(x) < major / 2) continue;
-      ctx.fillText(fmt(x), toScreenX(x) + 2, axisY + 13 <= h ? axisY + 13 : axisY - 4);
+    if (ticks.x) {
+      for (const t of ticks.x.major) if (t.value !== 0) xLabel(t.value, t.at);
+    } else {
+      const x0 = Math.ceil((view.cx - (w / 2) * upp) / major) * major;
+      const x1 = view.cx + (w / 2) * upp;
+      for (let x = x0; x <= x1; x += major) if (Math.abs(x) >= major / 2) xLabel(x, x);
     }
-    const y0 = Math.ceil((view.cy - (h / 2) * uppY) / majorY) * majorY;
-    const y1 = view.cy + (h / 2) * uppY;
-    for (let y = y0; y <= y1; y += majorY) {
-      if (Math.abs(y) < majorY / 2) continue;
-      ctx.fillText(fmt(y), axisX + 4, toScreenY(y) - 3);
+    if (ticks.y) {
+      for (const t of ticks.y.major) if (t.value !== 0) yLabel(t.value, t.at);
+    } else {
+      const y0 = Math.ceil((view.cy - (h / 2) * uppY) / majorY) * majorY;
+      const y1 = view.cy + (h / 2) * uppY;
+      for (let y = y0; y <= y1; y += majorY) if (Math.abs(y) >= majorY / 2) yLabel(y, y);
     }
   }
 

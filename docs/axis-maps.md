@@ -1,6 +1,6 @@
 # Axis maps: log scales and beyond (#71)
 
-Status: **step 1 implemented** (lib/axis-map.ts); the rest are notes.
+Status: **steps 1 and 2 implemented** (lib/axis-map.ts, lib/axis-ticks.ts); the rest are notes.
 
 ## The idea
 
@@ -26,11 +26,15 @@ symlog (`y = sinh(Y)`) all come from one feature.
    writes back in x units. Anything that places points is refused in a
    mapped panel rather than drawn in the wrong place; integral shading is
    dropped there.
-2. **Grid and labels.** lib/grid.ts draws level sets at even spacing, which
-   on a log axis counts X (0, 1, 2, 3) rather than x (1, 10, 100, 1000).
-   Needs a tick chooser that knows the map: decades with 2..9 minor lines,
-   labels like 10³; for other maps, nice x values pulled back through the
-   inverse.
+2. **Done.** Grid and labels. lib/axis-ticks.ts picks ticks where they
+   land on screen: from the nicest number in view, each next tick is the
+   nicest (0, fewest significant digits, a last digit of 5 or even, a
+   leading 1, 5, 2) between 90 and 225 px on. That is decades on a log
+   axis, 1, 2, 3, 5, 10 zoomed in, and even steps on a near-linear map;
+   panning at one zoom keeps them put. render2d draws them as a list of
+   lines (a log axis is not a level set at even spacing), and a mapped
+   panel draws no coordinate-field grid, since fields are written in x and
+   y rather than its screen coordinates.
 3. **Points and parametric objects.** Points, parametric curves, segments,
    polygons, data and regressions, labels: apply the inverse to each
    produced position. Dragging writes back through the forward map; hover

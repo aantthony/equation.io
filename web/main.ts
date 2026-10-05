@@ -1714,10 +1714,12 @@ function render() {
       : graphs
         ? 'off'
         : 'on';
+    const viewSpec = viewportRow('view', panel)?.viewSpec;
     const frame: Frame = {
       vp: { x: r.x, y: canvas.height - r.y - r.h, w: r.w, h: r.h },
       grid: gridMode,
       lattice: !!panel.lattice,
+      ...(viewSpec?.kind === 'view' && viewSpec.maps ? { maps: viewSpec.maps } : {}),
     };
     const box = split ? { x: r.x / dpr, y: r.y / dpr, w: r.w / dpr, h: r.h / dpr } : undefined;
     if (split) {
@@ -2564,7 +2566,9 @@ function render() {
         );
       }
       let gridSpecs: GridSpec[] | undefined;
-      const families = frame.grid === 'on' ? panelGridFields(panel) : [];
+      // Coordinate fields are written in x and y, not a mapped panel's screen
+      // coordinates: a mapped panel grids its axes at their ticks instead.
+      const families = frame.grid === 'on' && !frame.maps ? panelGridFields(panel) : [];
       if (families.length) {
         gridSpecs = families.map(f => {
           if (f === 'x' || f === 'y') {
@@ -2585,6 +2589,7 @@ function render() {
         frame.grid !== 'off' && !gridSpecs,
         box,
         panel.lattice ? lattice : undefined,
+        frame.maps,
       );
       drawHoverMarker(dpr);
     }
