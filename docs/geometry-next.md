@@ -46,9 +46,7 @@ meet/join; `line(A, B)` becomes a value; conformal GA out of scope).
    `[mv]` nodes (`if (expr.kind === 'list') return readout;`). Draw one
    glyph family per element (lib/glyphs.ts `multivectorGlyphs`), flattened
    into one figure family, within `FIGURE_FAMILY_NODES`. Quick.
-2. **`action` over a multiset of matrices.** Same shape of change in the
-   `acting` block of lib/plot.ts (currently an error "one matrix at a
-   time"). Quick.
+2. ~~`action` over a multiset of matrices.~~ Done.
 3. **Tensor streamlines for 2×2 fields.** Integral curves of the major
    eigenvector, as an option on the row like `showStreamlines`. An
    eigenvector field is a line field (no sign), so the integrator must

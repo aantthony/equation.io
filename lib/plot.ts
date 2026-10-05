@@ -817,15 +817,25 @@ function classifyLowered(
   });
 
   // action(M): what the matrix does to the unit square, circle and axes,
-  // drawn, with the matrix read out.
-  const acting = expr.kind === 'list' ? null : actionOfNode(expr);
-  if (acting || (expr.kind === 'list' && expr.items.some(it => actionOfNode(it)))) {
-    if (!acting) throw new Error('action draws one matrix at a time — pick one, like M[1], or fix its entries.');
+  // drawn, with the matrix read out; over a multiset of matrices, each one's
+  // picture in one figure family, and each matrix read out.
+  const acting = expr.kind === 'list' ? expr.items.map(actionOfNode) : [actionOfNode(expr)];
+  if (acting.some(m => m !== null)) {
+    if (acting.some(m => m === null)) throw new Error('action draws matrices only — every element must be one.');
+    const ms = acting as Expr[][][];
+    const n = ms[0].length;
+    if (ms.some(m => m.length !== n))
+      throw new Error('action draws a multiset of one size — all 2×2 or all 3×3, not both.');
     if (hasSpace || hasParam)
       throw new Error('action takes a constant matrix — sliders and t are fine, x, y, u and v are not.');
-    const readout = done({ kind: 'tuple', values: acting.flat(), shape: [acting.length, acting.length] });
+    const readout = done({
+      kind: 'tuple',
+      values: ms.flatMap(m => m.flat()),
+      shape: [n, n],
+      ...(expr.kind === 'list' && { count: ms.length }),
+    });
     const drawn = classifyLowered(
-      { kind: 'family', members: actionGlyphs(acting) },
+      { kind: 'family', members: ms.flatMap(actionGlyphs) },
       defined,
       fields,
       timeDerivative,
