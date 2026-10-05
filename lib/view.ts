@@ -16,7 +16,7 @@
  */
 import { evaluate, parseExpr } from './expr.ts';
 import { type GridRowSpec, type SplitSpec, parseDividerRow, parseGridRow } from './panels.ts';
-import { type AxisMaps, SCREEN, parseAxisMap, toWorld, windowToScreen } from './axis-map.ts';
+import { type AxisMaps, SCREEN, parseAxisMap, screenWindowOk, toWorld, windowToScreen } from './axis-map.ts';
 
 export interface View2DSpec {
   kind: 'view';
@@ -194,8 +194,15 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
         const range = spec[axis];
         if (map && range) spec[axis] = windowToScreen(map, range[0], range[1]);
       }
-      // A map alone frames its axis around the screen's origin.
-      if (!spec.x && !spec.y) spec[maps.x ? 'x' : 'y'] = [-5, 5];
+      // A map alone frames its axis around the screen's origin, when it can.
+      if (!spec.x && !spec.y) {
+        const map = (maps.x ?? maps.y)!;
+        if (!screenWindowOk(map, -5, 5))
+          throw new Error(
+            `Give ${map.axis} a range that ${map.axis} = ${map.text} can show, like ${map.axis} = 1..10.`,
+          );
+        spec[map.axis] = [-5, 5];
+      }
     }
     if (!spec.x && !spec.y) throw new Error(usage);
     return spec;
@@ -321,13 +328,15 @@ export function orientLattice(spec: View2DSpec, axes: readonly [string, string])
 export function formatViewSpec(spec: Omit<View2DSpec, 'kind'>, order?: readonly [string, string]): string {
   const parts: string[] = [];
   const [across, down] = spec.axes ?? ['x', 'y'];
-  // A mapped axis's window is held in screen units and written in its own.
-  const world = (axis: 'x' | 'y', [lo, hi]: [number, number]): [number, number] => {
+  // A mapped axis's window is held in screen units and written in its own,
+  // each end to six significant digits: on a log axis 0.00001 is a real
+  // bound, not float dust beside 100000, and 0 is no bound at all.
+  const range = (axis: 'x' | 'y', [lo, hi]: [number, number]): string => {
     const map = spec.maps?.[axis];
-    return map ? [toWorld(map, lo), toWorld(map, hi)] : [lo, hi];
+    return map ? `${fmt(toWorld(map, lo))}..${fmt(toWorld(map, hi))}` : fmtRange(lo, hi);
   };
-  if (spec.x) parts.push(`${across} = ${fmtRange(...world('x', spec.x))}`);
-  if (spec.y) parts.push(`${down} = ${spec.axes ? fmtRange(-spec.y[1], -spec.y[0]) : fmtRange(...world('y', spec.y))}`);
+  if (spec.x) parts.push(`${across} = ${range('x', spec.x)}`);
+  if (spec.y) parts.push(`${down} = ${spec.axes ? fmtRange(-spec.y[1], -spec.y[0]) : range('y', spec.y)}`);
   for (const map of Object.values(spec.maps ?? {})) parts.push(`${map.axis} = ${map.text}`);
   if (spec.axes && parts.length === 2 && order?.[0] === down && order[1] === across) parts.reverse();
   if (spec.ratio !== undefined && spec.ratio !== 1) parts.push(`ratio = ${fmt(spec.ratio)}`);

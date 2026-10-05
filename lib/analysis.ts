@@ -61,7 +61,7 @@ import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
-import { type AxisMaps, mapRowExpr, unmappedObject } from './axis-map.ts';
+import { type AxisMaps, inlineFields, mapRowExpr, unmappedObject } from './axis-map.ts';
 
 export interface RowSource {
   id?: string | number;
@@ -966,7 +966,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         // A mapped panel draws the row in its screen coordinates.
         const mapped = classifyRow(
           { ...resolved, integral: null },
-          e => mapRowExpr(lower(e), maps),
+          e => mapRowExpr(inlineFields(lower(e), fieldEnv), maps),
           constNames,
           fieldEnv,
           timeDifferentiator(defs),

@@ -1061,6 +1061,13 @@ function panelViewText(p: Panel): { eq: Equation; text: string } | null {
   } else {
     text = formatCameraRow({ ...p.camera, spin: p.spin });
   }
+  // A mapped axis panned past what its map can name (ln(X) left of X = 0)
+  // has no row to write: the row keeps the last window it could.
+  try {
+    parseViewRow(text, {});
+  } catch {
+    return null;
+  }
   text = keepNote(eq.text, text);
   return text === eq.text ? null : { eq, text };
 }

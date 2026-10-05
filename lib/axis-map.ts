@@ -100,7 +100,27 @@ export function parseAxisMap(axis: Axis, src: string): AxisMap {
       `${axis} = ${src.trim()} has no inverse that can be worked out, and the axis needs one: ` +
         `build it from exp, ln, log, powers, sqrt, sinh and arithmetic.`,
     );
-  return { axis, text: src.trim(), forward, inverse };
+  const map: AxisMap = { axis, text: src.trim(), forward, inverse };
+  if (!increasing(map)) throw new Error(`${axis} = ${map.text} must increase with ${screen} wherever it is defined.`);
+  return map;
+}
+
+/**
+ * Whether the map increases, and its inverse undoes it, at every sampled
+ * screen coordinate where it is defined: the peeled inverse takes one branch,
+ * so X^2 is undone only for X ≥ 0, and -X runs the window backwards. Where
+ * the map is undefined (ln(X) for X ≤ 0) is the window's business.
+ */
+function increasing(map: AxisMap): boolean {
+  let last = -Infinity;
+  for (let k = -100; k <= 100; k++) {
+    const s = k / 10;
+    const v = toWorld(map, s);
+    if (!isFinite(v)) continue;
+    if (v <= last || !(Math.abs(toScreen(map, v) - s) <= 1e-6 * Math.max(1, Math.abs(s)))) return false;
+    last = v;
+  }
+  return isFinite(last);
 }
 
 /** The screen coordinate showing world value v, NaN when none does. */
@@ -133,6 +153,25 @@ export function windowToScreen(map: AxisMap, lo: number, hi: number): [number, n
     throw new Error(`view ${map.axis} range ${lo}..${hi} reaches past what ${map.axis} = ${map.text} can show.`);
   if (a >= b) throw new Error(`${map.axis} = ${map.text} must increase with ${SCREEN[map.axis]}.`);
   return [a, b];
+}
+
+/** Whether screen window [a, b] shows only world values the map can name:
+ *  a pan past ln(X)'s X = 0 has no x to write. */
+export function screenWindowOk(map: AxisMap, a: number, b: number): boolean {
+  return [a, b].every(s => isFinite(toWorld(map, s))) && toWorld(map, a) < toWorld(map, b);
+}
+
+/**
+ * Write the document's coordinate fields (`r = sqrt(x^2 + y^2)`, which may be
+ * built from other fields) into a row, so the map reaches the x and y inside
+ * them. The renderer would otherwise put them in later, unmapped.
+ */
+export function inlineFields(e: Expr, fields: Record<string, Expr>): Expr {
+  for (let depth = 0; depth < 32; depth++) {
+    if (![...freeVars(e)].some(n => Object.hasOwn(fields, n))) return e;
+    e = substVars(e, fields);
+  }
+  throw new Error('The coordinate fields this row uses refer to each other in a loop.');
 }
 
 /** The map's world coordinate written in the screen one, with the screen

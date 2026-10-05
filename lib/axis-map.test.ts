@@ -27,6 +27,12 @@ describe('axis maps', () => {
     }
   });
 
+  it('refuse a map that does not increase wherever it is defined', () => {
+    expect(() => parseAxisMap('x', '-X')).toThrow(/must increase/);
+    expect(() => parseAxisMap('x', 'X^2')).toThrow(/must increase/);
+    expect(() => parseAxisMap('x', 'ln(X)')).not.toThrow();
+  });
+
   it('refuse a map that cannot be inverted or uses more than the screen', () => {
     expect(() => parseAxisMap('x', 'X + sin(X)')).toThrow(/no inverse/);
     expect(() => parseAxisMap('x', 'a^X')).toThrow(/only X and numbers \(found a\)/);
@@ -43,8 +49,19 @@ describe('a mapped view row', () => {
     expect(formatViewSpec(spec)).toBe('view(x = 1..1000, y = -1..1, x = 10^X)');
   });
 
-  it('frames a map given alone', () => {
+  it('frames a map given alone, when it can', () => {
     expect(view('view(y = 10^Y)').y).toEqual([-5, 5]);
+    expect(() => view('view(x = ln(X))')).toThrow(/Give x a range/);
+    expect(view('view(x = 1..10, x = ln(X))').x![0]).toBeCloseTo(Math.E, 9);
+  });
+
+  it('writes back tiny bounds of a log axis as they are, not as 0', () => {
+    for (const text of ['view(x = 10^X)', 'view(x = 1..1000, x = 10^X)']) {
+      const spec = { ...view(text), x: [-7, 3] as [number, number] };
+      const back = formatViewSpec(spec);
+      expect(back).toBe('view(x = 0.0000001..1000, x = 10^X)');
+      expect(view(back).x![0]).toBeCloseTo(-7, 9);
+    }
   });
 
   it('says when the window lies outside the map', () => {
@@ -73,6 +90,13 @@ describe('rows in a mapped panel', () => {
     expect(region.kind).toBe('region');
     const field = object([...rows, 'x y']);
     expect(field.kind === 'scalar-field' && at(field.expr, 2, 3)).toBeCloseTo(300, 9);
+  });
+
+  it('put the map into coordinate fields too', () => {
+    const o = object(['r = sqrt(x^2 + y^2)', 'view(x = 1..100, x = 10^X)', 'r < 50']);
+    const [{ residual }] = (o as { constraints: Array<{ residual: Expr }> }).constraints;
+    // At screen X = 1, x = 10, so r - 50 = -40.
+    expect(at(residual, 1)).toBeCloseTo(-40, 9);
   });
 
   it('use functions defined anywhere in the document', () => {
