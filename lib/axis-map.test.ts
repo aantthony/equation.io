@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { axisMapping, parseAxisMap, toScreen, toWorld } from './axis-map.ts';
 import { type Expr, evaluate } from './expr.ts';
+import type { Components } from './math-object.ts';
+import { mappedSpecialPoints } from './special.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
 const view = (text: string) => parseViewRow(text, {}) as View2DSpec;
@@ -133,10 +135,65 @@ describe('rows in a mapped panel', () => {
     ]);
   });
 
+  it('rewrite a system, so its solver searches the screen', () => {
+    const rows = ['view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)', '(x y, x/y) = (100, 4)'];
+    const [, sys] = analyzeRows(rows).rows;
+    expect(sys.error).toBeUndefined();
+    const o = sys.cls!.object as { source: { residuals: Components } };
+    // x = 20, y = 5 solves it: at screen (log 20, log 5) both residuals vanish.
+    const at = { x: Math.log10(20), y: Math.log10(5) };
+    for (const r of o.source.residuals) expect(evaluate(r, at)).toBeCloseTo(0, 9);
+  });
+
+  it('find hover points on the screen and read them in x and y', () => {
+    const hover = (rows: string[], box: [number, number, number, number]) => {
+      const a = analyzeRows(rows);
+      const maps = (a.rows[0].view as View2DSpec).maps!;
+      const o = a.rows.at(-1)!.cls!.object as { equation: Expr };
+      return mappedSpecialPoints(o.equation, maps, ...box).map(p => [p.lines.join('; '), p.x]);
+    };
+    // A minimum stays one through an increasing map, placed on the screen.
+    const [[min, at]] = hover(
+      ['view(x = 0.1..100, y = 0.1..100, x = 10^X, y = 10^Y)', 'y = (x - 3)^2 + 1'],
+      [-1, 2, -1, 2],
+    );
+    expect(min).toBe('local minimum; x = 3; y = 1');
+    expect(at).toBeCloseTo(Math.log10(3), 9);
+    const lines = (rows: string[], box: [number, number, number, number]) => hover(rows, box).map(([l]) => l);
+    // A log axis shows no x = 0, so no y-intercept; y is plain, so the
+    // x-intercept stays.
+    expect(lines(['view(x = 0.1..100, y = -5..5, x = 10^X)', 'y = x - 2'], [-1, 2, -5, 5])).toEqual([
+      'x-intercept; x = 2; y = 0',
+    ]);
+    // Nor y = 0 on a log y axis — but the y-intercept at the screen's
+    // origin stays.
+    expect(lines(['view(x = -5..5, y = 0.1..100, y = 10^Y)', 'y = x + 1'], [-5, 5, -1, 2])).toEqual([
+      'y-intercept; x = 0; y = 1',
+    ]);
+    // A map that moves x = 0 off the screen's axis is searched where it is.
+    expect(lines(['view(x = -5..5, y = -5..5, x = X + 1)', 'y = x - 2'], [-6, 4, -5, 5])).toEqual([
+      'x-intercept; x = 2; y = 0',
+      'y-intercept; x = 0; y = -2',
+    ]);
+    // Symlog reaches 0: both intercepts read where they are; the curve's bend
+    // there is the screen's, not an inflection of y = x - 2.
+    expect(lines(['view(x = -10..10, y = -5..5, x = sinh(X))', 'y = x - 2'], [-3, 3, -5, 5])).toEqual([
+      'x-intercept; x = 2; y = 0',
+      'y-intercept; x = 0; y = -2',
+    ]);
+    // x = X^3 flattens y = x at 0 on the screen: no stationary point there.
+    expect(lines(['view(x = -8..8, y = -8..8, x = X^3)', 'y = x'], [-2, 2, -8, 8])).toEqual([
+      'x-intercept, y-intercept; x = 0; y = 0',
+    ]);
+    // A tangent root keeps its multiplicity; a parabola keeps no inflection.
+    expect(lines(['view(x = 0.1..100, y = -5..5, x = 10^X)', 'y = (x - 2)^2'], [-1, 2, -5, 5])).toEqual([
+      'x-intercept, local minimum; x = 2; y = 0; double root',
+    ]);
+  });
+
   it('refuse what the map cannot carry, rather than drawing it in the wrong place', () => {
-    // A system's solver searches the window as if it were x and y; a 3D
-    // point would turn the panel 3D under rows written for its screen.
-    for (const row of ['(-y, x)', 'hist([1, 2, 2, 3])', '(x + y, x - y) = (30, 10)', '(1, 2, 3)']) {
+    // A 3D point would turn the panel 3D under rows written for its screen.
+    for (const row of ['(-y, x)', 'hist([1, 2, 2, 3])', '(1, 2, 3)']) {
       const [, r] = analyzeRows(['view(x = 1..100, x = 10^X)', row]).rows;
       expect(r.error, row).toMatch(/maps its axes/);
     }
