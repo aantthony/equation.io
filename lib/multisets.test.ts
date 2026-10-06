@@ -1391,7 +1391,8 @@ describe('§5 a row in u is drawn by its value type', () => {
       expect(point[2]).toBeCloseTo(0);
     }
     // A misused rotate says how to use it rather than drawing a density.
-    expect(last(['rotate((1, 0), u, (1, 2, 3))']).error).toMatch(/rotate takes/);
+    for (const row of ['rotate((1, 0), u, (1, 2, 3))', 'rotate((1, 0), (1, 2))', 'rotate(1, (1, 0, 0))'])
+      expect(last([row]).error).toMatch(/rotate takes/);
   });
   it('a number-valued row keeps its density, even with a tuple inside', () => {
     for (const row of ['u^2', 'abs((u, v))', 'dot((1,2),(u,v))']) expect(plan([row]).type).toBe('density');

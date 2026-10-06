@@ -1273,8 +1273,9 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         // e^(a cross(axis/|axis|)) P, and a 3D P with no axis turns about z —
         // the turn rotate(P, a) makes in the xy-plane. Flattened tuples are
         // told apart by count.
-        const flat = e.args.map(lo).flatMap(a => (a.vec ? a.items : [a.e]));
-        if (flat.length === 4 && e.args.length === 2)
+        const parts = e.args.map(lo);
+        const flat = parts.flatMap(a => (a.vec ? a.items : [a.e]));
+        if (parts.length === 2 && parts[0].vec && parts[0].items.length === 3 && !parts[1].vec)
           flat.push({ kind: 'num', value: 0 }, { kind: 'num', value: 0 }, { kind: 'num', value: 1 });
         if (flat.length === 7) {
           const axis = flat.slice(4);
