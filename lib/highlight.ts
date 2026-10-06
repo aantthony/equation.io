@@ -5,6 +5,7 @@
  * finished yet. Names are coloured by what the document's built definitions
  * make of them, so `mean` is a function until a row binds `mean = [1, 2]`.
  */
+import { flatName, flatOfNode } from './pga.ts';
 import { isViewportText } from './analysis.ts';
 import { type Binding, type Env, lookupValue } from './env.ts';
 import { CONSTANTS, GLYPH_CHARS, NAME_SRC, SUPERSCRIPT_CHARS, canonicalName, freeVars } from './expr.ts';
@@ -210,8 +211,11 @@ function bindingInfo(name: string, b: Binding): NameInfo {
       return { signature: name, type: b.list ? 'list (unavailable)' : 'value (unavailable)', description: b.message };
     case 'interval':
       return { signature: name, type: 'interval' };
-    case 'multivector':
-      return { signature: name, type: 'multivector' };
+    case 'multivector': {
+      // A line or plane is written in as a multivector is, but is not one.
+      const flat = flatOfNode(b.value);
+      return { signature: name, type: (flat && flatName(flat.dim, flat.grade)) ?? 'multivector' };
+    }
   }
 }
 

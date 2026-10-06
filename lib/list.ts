@@ -1078,6 +1078,13 @@ function reduce(name: string, all: readonly Expr[], ctx: Ctx): Expr {
   // `count` asks how many, not what they are — it never looks inside an
   // element, so a list of points answers it as readily as a list of numbers.
   if (name === 'count') return num(all.length);
+  // A multivector, line or plane travels as an internal call: its
+  // coefficients are no number to add or order.
+  const inner = all.find(it => it.kind === 'call' && (it.name === '[mv]' || it.name === '[pga]'));
+  if (inner?.kind === 'call') {
+    const what = inner.name === '[mv]' ? 'multivectors' : 'lines and planes';
+    throw new Error(`${name} is not defined for ${what} — count takes them.`);
+  }
   if (all.some(it => it.kind === 'vec')) {
     if (name === 'sort') throw new Error(SORT_POINTS);
     // A total or mean of points is taken coordinate by coordinate.

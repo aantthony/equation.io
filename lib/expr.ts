@@ -229,6 +229,12 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'dual',
     'slerp',
     'vec',
+    // Points of projective geometry are tuples, whole: join((0, 0), (1, 1)).
+    'meet',
+    'join',
+    'plane',
+    'project',
+    'reflect',
     // A matrix or a map, whole: action(((1, 1), (0, 1))), jacobian((x y, x + y)).
     'action',
     'streamlines',
@@ -339,6 +345,12 @@ export const FUNCTIONS = new Set([
   'quat',
   'slerp',
   'vec',
+  // Points, lines and planes of projective geometry (see pga.ts).
+  'meet',
+  'join',
+  'plane',
+  'project',
+  'reflect',
   // A matrix drawn by what it does (lib/glyphs.ts), and a quaternion's
   // Julia set (lib/clifford.ts juliaSurface); a matrix field as streamlines.
   'action',
@@ -433,6 +445,11 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'log2',
   'fourier',
   'reconstruct',
+  'meet',
+  'join',
+  'plane',
+  'project',
+  'reflect',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */

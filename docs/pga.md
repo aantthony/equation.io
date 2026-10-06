@@ -8,7 +8,8 @@ hand-written formulas, and rigid motions compose and interpolate.
 Status: **agreed 2026-09-27** — the three open questions below were
 settled as recommended: the algebra stays hidden behind meet/join,
 `line(A, B)` becomes a value (consistent with docs/multisets.md), and
-conformal GA is out of scope.
+conformal GA is out of scope. **Phases 1–3 built 2026-10-05** (see "As
+built" at the end); phases 4–5 (motors as user syntax, examples) remain.
 
 ## Why
 
@@ -158,3 +159,52 @@ could ship as one PR.
 - **2D `line` regressions.** It is used in examples and saved links; the
   phase 2 tests must pin that every existing `line(A, B)` row draws the
   same GLSL.
+
+## As built (phases 1–3)
+
+- **lib/pga.ts** holds the algebra (blades as bitmasks, e0 the bit above
+  the axes), the complement J and the regressive product, points as
+  J(x, y, z, 1), project, reflect, and the motor exp in closed form: for a
+  bivector B with Euclidean size a and B² = −a² + π I, e^B = cos a +
+  sinc(a) B + (π/2)(sinc(a) I + h(a) B I), the dual-number form of the screw
+  (lib/pga.test.ts checks it against the series). Motors are not yet user
+  syntax (phase 4).
+- **Values.** A flat travels as `[pga](dim, grade, …coefficients)`; the
+  grade comes from the construction, never from which coefficients are
+  zero. lib/geom.ts `lowerFlat` builds them from `line`, `join`, `meet`,
+  `plane`, `project`, `reflect` and written-in nodes; a point is converted
+  to its tuple wherever a value is wanted (`flatValue`), so `midpoint`,
+  `polygon` and naming (`X = meet(…)` names a point) all take it. A line or
+  plane in arithmetic is an error that says what it is.
+- **line(A, B) on a row of its own** keeps the old implicit-line path, and
+  lib/pga-values.test.ts pins its GLSL against shader keys recorded on main
+  (lib/pga-line-glsl.fixtures.ts). A named `L = line(A, B)` becomes a line
+  value (lib/geom.ts `lowerLineValue`), so the row `L` draws the same line
+  by the new formula. In space `line(A, B)` is now allowed.
+- **Named lines and planes** are stored with the named multivectors
+  (`defs.multivectors`, written in by name) — they are internal nodes the
+  same way; row-kind and highlight label them by their grade.
+- **Drawing** (lib/pga.ts `flatFigure`): a point its tuple; a line of the
+  plane or a plane its implicit equation; a line of space the curve where
+  two planes through it cross (the planes through the line and the axis it
+  is least along, and through the line and that plane's normal), each
+  term kept even when its coefficient is the literal 0, so a constant line
+  still mentions z. Planes draw as the app's implicit surfaces, so the
+  translucent quad of the table above is not built; the /g/ preview falls
+  back to the static card for a plane, as for any implicit surface that is
+  not z = f(x, y).
+- **Readouts** (lib/pga.ts `flatText`) through a `flat` flag on the tuple
+  readout; the public kind is `flat`.
+- **Measures.** distance from a point to a line or plane, and between
+  flats (0 where they cross, the gap where parallel, |L ∨ M|/|d × e| for
+  skew lines); angle between lines and planes is the acute angle.
+- **Examples** (web/examples.ts): the orthocentre and Desargues' theorem
+  under "geometry", and a turning cube's shadow (`hull(project(W, G))`)
+  under "matrices, rotations + hulls". The two planes' line waits for planes
+  that draw translucent — opaque, they hide the line — and the screw motion
+  for motors (phase 4).
+- **Multisets** work through the existing object-list expansion: a list
+  of lines or planes is a list of `[pga]` nodes, a name moves together
+  (`L = join(P, C); meet(L, L)` gives two results), `count` takes lines and
+  planes, `mean`/`total` take a multiset of meets as points, and other
+  reductions refuse lines, planes and (newly) multivectors with a message.

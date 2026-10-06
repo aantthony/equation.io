@@ -59,7 +59,15 @@ import { hasInterval, hiddenInterval, intervalsIn, replaceIntervals } from './in
 import { isReductionCall, reduceOverSet } from './measure.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
-import { lowerGeom, lowerMatrix, lowerTensorValue, pointComps, rowsAsPoints, vecStateComps } from './geom.ts';
+import {
+  lowerGeom,
+  lowerLineValue,
+  lowerMatrix,
+  lowerTensorValue,
+  pointComps,
+  rowsAsPoints,
+  vecStateComps,
+} from './geom.ts';
 import {
   type GetList,
   type Seq,
@@ -81,6 +89,7 @@ import {
 import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
+import { flatName, flatOfNode, isPoint, pointCoords } from './pga.ts';
 import { isComplexValued } from './complex.ts';
 import { SPLIT_NODE_BUDGET, realValue } from './complex-parts.ts';
 import { countNodes } from './size.ts';
@@ -2935,15 +2944,39 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         let e: Expr;
         try {
           if (ofPoints) throw new Error('points');
-          e = lowerGeom(
-            resolved,
-            n => compsOf(defs, n),
-            n => defs.mats.get(n) ?? null,
-            isList,
-            tensorGetter(defs),
-          );
+          e =
+            lowerLineValue(
+              resolved,
+              n => compsOf(defs, n),
+              n => defs.mats.get(n) ?? null,
+              isList,
+              tensorGetter(defs),
+            ) ??
+            lowerGeom(
+              resolved,
+              n => compsOf(defs, n),
+              n => defs.mats.get(n) ?? null,
+              isList,
+              tensorGetter(defs),
+            );
         } catch {
-          e = lowerObjects(resolved, defs, ropts, true);
+          // `N = line(P, A)` over a list names the lines, as join does.
+          const named = resolved.kind === 'call' && resolved.name === 'line' ? { ...resolved, name: 'join' } : resolved;
+          e = lowerObjects(named, defs, ropts, true);
+        }
+        // `X = meet(L, M)` names the point it is; `L = join(A, B)` names a
+        // line, written into every row that names it as a multivector is.
+        const flat = flatOfNode(e);
+        if (flat && isPoint(flat)) e = { kind: 'vec', items: pointCoords(flat) };
+        // `R = reflect(Q, L)` over a list of points names those points.
+        if (e.kind === 'list' && e.items.length) {
+          const pts = e.items.map(flatOfNode);
+          if (pts.every(f => f && isPoint(f)))
+            e = sameList(e, { kind: 'list', items: pts.map((f): Expr => ({ kind: 'vec', items: pointCoords(f!) })) });
+        } else if (flat) {
+          notDrawn(`a ${flatName(flat.dim, flat.grade) ?? 'flat'}`);
+          defs.multivectors.set(d.name, e);
+          continue;
         }
         // `R = e^(-t/2 e_xy)`, `q = quat(1, 2, 3, 4)`: a multivector, written
         // into every row that names it.

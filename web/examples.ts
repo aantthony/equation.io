@@ -404,6 +404,24 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'geometry draggable',
       ],
       [
+        'orthocentre (meet of altitudes)',
+        '# a triangle; A = (-3, -1); B = (3, -1.5); C = (0.5, 2.5); polygon(A, B, C); ' +
+          '# its altitudes, as lines; ha = join(A, A + perp(C - B)); hb = join(B, B + perp(A - C)); ' +
+          'hc = join(C, C + perp(B - A)); ha; hb; hc; ' +
+          '# any two meet at the same point; meet(ha, hb); meet(hb, hc)',
+        'geometry draggable',
+      ],
+      [
+        'Desargues’ theorem',
+        '# two triangles in perspective from O; O = (-3, 0); A = (-0.5, 0.6); B = (-2.2, -0.8); C = (1.1, 0); ' +
+          'a = 1.6; b = 2.3; c = 1.4; P = O + a (A - O); Q = O + b (B - O); R = O + c (C - O); ' +
+          'polygon(A, B, C); polygon(P, Q, R); segment(O, P); segment(O, Q); segment(O, R); ' +
+          '# their sides, extended; [join(A, B), join(B, C), join(C, A)]; [join(P, Q), join(Q, R), join(R, P)]; ' +
+          '# corresponding sides meet on one line; X = meet(join(A, B), join(P, Q)); ' +
+          'Y = meet(join(B, C), join(Q, R)); Z = meet(join(C, A), join(R, P)); join(X, Y); [X, Y, Z]',
+        'geometry draggable slider',
+      ],
+      [
         'Bézier curve',
         'A = (-3, -1); B = (-1, 2); C = (1, 2); D = (3, -1); polyline(A, B, C, D); ' +
           '(1-u)^3 A + 3(1-u)^2 u B + 3(1-u) u^2 C + u^3 D',
@@ -451,6 +469,12 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'convex hull of moving points',
         'P = [(-3, -1), (-1, 2), (0.5, -2), (2, 1.5), (3, -0.5), (0, 0.3), (1, 0.5 + 2sin(t))]; hull(P); P',
         'geometry list animated',
+      ],
+      [
+        'shadow of a turning cube',
+        '# a cube, turning; V = ([-1, 1], [-1, 1], [-1, 1]); W = rotate(V, t/2, (1, 2, 3)) + (0, 0, 3); hull(W); ' +
+          '# its shadow on the floor, under the noon sun; G = plane((0, 0, 0), (0, 0, 1)); hull(project(W, G))',
+        'geometry 3d animated',
       ],
       [
         'exact linear flow: e^(tA)',

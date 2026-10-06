@@ -7,6 +7,8 @@ import type { Definition } from './defs.ts';
 import type { PublicKind } from './math-object.ts';
 import { type Classified, publicKind } from './plot.ts';
 import type { ViewSpec } from './view.ts';
+import type { Expr } from './expr.ts';
+import { flatName, flatOfNode } from './pga.ts';
 
 export interface KindSource {
   comment?: boolean;
@@ -33,7 +35,7 @@ export interface KindNames {
   intervals?: { has(name: string): boolean };
   mats?: { has(name: string): boolean };
   tensors?: { has(name: string): boolean };
-  multivectors?: { has(name: string): boolean };
+  multivectors?: { has(name: string): boolean; get?(name: string): Expr | undefined };
   lists?: { has(name: string): boolean };
   points?: { has(name: string): boolean };
 }
@@ -86,6 +88,7 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   family: 'one copy of the row per list element',
   multivector:
     'multivector or quaternion, like e_xy or quat(1, 2, 3, 4): its grades drawn as arrows, oriented discs and cubes (a rotor as the turn it makes), its value read out',
+  flat: "point, line or plane of projective geometry, like join(A, B) or meet(L, M): drawn, with its equation (or an ideal point's direction) read out",
   action: 'action(M): where a matrix sends the unit square, circle and axes, with the matrix read out',
   complex2d: 'complex function shown on the plane',
   domain2d: 'domain colouring of a complex function',
@@ -119,7 +122,11 @@ function constKind(name: string, names: KindNames): string {
   if (names.intervals?.has(name)) return 'interval';
   if (names.mats?.has(name)) return 'matrix';
   if (names.tensors?.has(name)) return 'tensor';
-  if (names.multivectors?.has(name)) return 'multivector';
+  if (names.multivectors?.has(name)) {
+    // A line or plane is written in as a multivector is, but is not one.
+    const flat = flatOfNode(names.multivectors.get?.(name) ?? { kind: 'num', value: 0 });
+    return (flat && flatName(flat.dim, flat.grade)) ?? 'multivector';
+  }
   if (names.points?.has(name)) return 'point';
   if (names.lists?.has(name)) return 'list';
   return 'const';

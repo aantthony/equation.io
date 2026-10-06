@@ -1115,6 +1115,9 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // Drawn member by member, like a family: their glyphs are figures.
   multivector: 'draws',
   action: 'draws',
+  // A point, its implicit line or plane, or a line of space as two planes'
+  // curve of intersection — each drawn as such rows are.
+  flat: 'draws',
   // Its faces, as a family of parametric surfaces (wireframes in the preview).
   solid: 'draws',
   vfield3d: 'draws',

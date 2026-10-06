@@ -207,6 +207,10 @@ export type MathObject =
       /** The values are a multivector's coefficients, by blade bitmask, read
        *  out as `1 + 2 e_xy` (or in i, j, k) rather than as a tuple. */
       readonly blades?: { readonly dim: 2 | 3; readonly quat?: true };
+      /** The values are the coefficients of a point, line or plane of
+       *  projective geometry (lib/pga.ts), `grade` saying which, read out
+       *  as the point or the equation it is rather than as a tuple. */
+      readonly flat?: { readonly dim: 2 | 3; readonly grade: number };
     }
   // `constant`: the row reads like a slider named e, pi or tau (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
@@ -272,6 +276,7 @@ export function publicKind(object: MathObject) {
       return 'polygon';
     case 'family':
       // One multivector or matrix drawn as several glyphs is not a list.
+      if (object.readout?.object.kind === 'tuple' && object.readout.object.flat) return 'flat';
       if (object.readout)
         return object.readout.object.kind === 'tuple' && object.readout.object.blades ? 'multivector' : 'action';
       if (object.solid) return 'solid';
