@@ -8,6 +8,7 @@ import type { Seq } from './list.ts';
 import { classify, plotReadout } from './plot.ts';
 import { analyzeRows } from './analysis.ts';
 import { advanceState, buildStateSystem, initialState } from './state.ts';
+import { evaluateFrame } from './env.ts';
 
 /** A named list's elements (always symbolic here — no data file in sight). */
 const items = (seq: Seq): readonly unknown[] => {
@@ -186,7 +187,10 @@ describe('matrices with states', () => {
 describe('matrix algebra and the exponential', () => {
   const J = 'J = ((0, -1), (1, 0))';
   const point = (defRows: string[], text: string, env: Record<string, number> = {}): number[] => {
-    const { lowered } = lowRow(defRows, text);
+    const { lowered, defs } = lowRow(defRows, text);
+    // A named matrix's entries are constants of their own, per frame
+    // (docs/frame-constants-plan.md): evaluated with the sliders as given.
+    env = { ...evaluateFrame(defs, 0, env), ...env };
     if (lowered.kind !== 'vec') throw new Error(`expected a point, got ${lowered.kind}`);
     return lowered.items.map(c => at(c, { e: Math.E, pi: Math.PI, ...env }));
   };
