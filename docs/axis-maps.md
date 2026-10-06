@@ -55,11 +55,14 @@ symlog (`y = sinh(Y)`) all come from one feature.
    certificate, which would prove roots in screen coordinates, and its
    solutions are not dragged. Hover points are found on the rewritten row,
    on the screen and so evenly on a log axis (lib/special.ts
-   mappedSpecialPoints): an increasing map keeps extrema extrema, and
-   inflections are where the drawn curve bends; the tooltip reads x and y.
-   Intercepts stay only where the screen's axis is x = 0 or y = 0, and exact
-   forms (√2) give way to decimals. The curve tracer projects on the screen
-   and reads off x and y, rounded to the pixel there.
+   mappedSpecialPoints): intercepts are roots where the screen shows x = 0
+   or y = 0, wherever the map puts them (a log axis shows neither), with
+   their multiplicity where the map has a slope; extrema are the drawn
+   curve's local minima and maxima, which an increasing map keeps, while
+   its inflections are the screen's bends and are not shown. The tooltip
+   reads x and y, in decimals (exact forms like √2 are of screen values).
+   The curve tracer projects on the screen and reads off x and y, rounded
+   to the pixel there.
 5. **Sliders in maps** (`x = b^X`): the write-back reparses the row without
    constants today, so maps take numbers only.
 

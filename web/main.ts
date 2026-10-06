@@ -890,6 +890,21 @@ function runTweens(now: number) {
 // spin never rewrites the URL. A panel's spinScale eases a new spin in from rest.
 let lastSpinAt: number | null = null;
 
+/**
+ * Whether eq's system is being certified. A mapped panel solves its systems
+ * rewritten in screen coordinates (lib/axis-map.ts), where a certificate
+ * would prove roots in those, so it offers none, and a row certified before
+ * its panel was mapped stops certifying for good rather than resuming
+ * unseen when the map goes.
+ */
+function certifying(eq: Equation): boolean {
+  if (eq.certify && panelMaps(panels[panelOf(eq)])) {
+    eq.certify = false;
+    eq.info = undefined;
+  }
+  return !!eq.certify;
+}
+
 /** The axis maps of panel p's view(…) row (lib/axis-map.ts), if it has any. */
 function panelMaps(p: Panel | undefined): AxisMaps | undefined {
   const spec = p && viewportRow('view', p)?.viewSpec;
@@ -1621,9 +1636,7 @@ function render() {
     }
     const traceTime = eq.cpu!.type === 'vfield3d' ? Math.floor(time * 20) / 20 : time;
     const { env: envKey, stableEnv } = environment(constEnv, traceTime);
-    // A mapped panel solves its systems rewritten in screen coordinates
-    // (lib/axis-map.ts), where a certificate would prove roots in those.
-    const certify = !!eq.certify && !panelMaps(panels[panelOf(eq)]);
+    const certify = certifying(eq);
     const key = systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + certify;
     const c = eq.sysCache;
     if (
@@ -1680,11 +1693,7 @@ function render() {
         },
         result => {
           // A result for edited/deleted math must never restore an old curve.
-          if (
-            !liveRow(eq) ||
-            !eq.cls ||
-            systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + (!!eq.certify && !panelMaps(panels[panelOf(eq)])) !== key
-          )
+          if (!liveRow(eq) || !eq.cls || systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + certifying(eq) !== key)
             return;
           // A trace from a briefly zoomed-in view must not replace the full
           // curve after the user zooms back out. Only moving values may lag.
@@ -4961,8 +4970,13 @@ function updateHover(clientX: number, clientY: number) {
     // On a mapped panel the curve is traced on the screen, and read in x and
     // y, to the pixel there (lib/axis-map.ts).
     const maps = panelMaps(cur);
-    const read = (map: AxisMap | undefined, v: number, step: number) =>
-      map ? fmtTraced(toWorld(map, v), Math.abs(toWorld(map, v + step) - toWorld(map, v))) : fmtTraced(v, step);
+    const read = (map: AxisMap | undefined, v: number, step: number) => {
+      if (!map) return fmtTraced(v, step);
+      // A pixel in x there: one-sided where the other side leaves the map.
+      const w = toWorld(map, v);
+      const ahead = Math.abs(toWorld(map, v + step) - w);
+      return fmtTraced(w, isFinite(ahead) ? ahead : Math.abs(w - toWorld(map, v - step)));
+    };
     for (const eq of equations) {
       if (panelOf(eq) !== here) continue;
       const hit = tracerFor(eq)?.(wx, wy, sx, sy);

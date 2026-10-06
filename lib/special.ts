@@ -11,7 +11,7 @@
  *
  * curveTracer covers the rest of the curve: it projects the pointer onto it.
  */
-import { type AxisMap, type AxisMaps, toWorld } from './axis-map.ts';
+import { type AxisMap, type AxisMaps, toScreen, toWorld } from './axis-map.ts';
 import { usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import { type Expr, evaluate, freeVars, substVars } from './expr.ts';
@@ -492,24 +492,56 @@ export function fmtTraced(v: number, unit: number): string {
 /** v rounded to exactly what fmtTraced shows. */
 export const roundTraced = (v: number, unit: number): number => parseFloat(fmtTraced(v, unit));
 
+/** What survives an increasing map: a local extremum of the drawn curve is
+ *  one of x and y. A stationary or ordinary inflection is the drawn curve's
+ *  bend (x = X^3 makes y = x stationary at 0), so it is not shown. */
+const MAPPED_HEADINGS: ReadonlySet<string> = new Set(['local minimum', 'local maximum']);
+
 /**
- * A mapped panel's row (lib/axis-map.ts) is drawn rewritten in screen
- * coordinates, and searched there too, evenly as a log axis needs: an
- * increasing map keeps extrema extrema, while inflection points are the
- * drawn curve's (where it bends on the screen). Positions stay on the
- * screen; the tooltip reads x and y. An intercept is kept only where the
- * screen's axis is x = 0 or y = 0 (on a log axis neither shows).
+ * Hover points of a row on a mapped panel (lib/axis-map.ts), which is drawn
+ * rewritten in screen coordinates: `expr` is that row, the window is in
+ * screen units, and so are the points' positions; the tooltips read x and y.
+ *
+ * - Intercepts are the roots where the screen shows y = 0 and x = 0
+ *   (wherever the map puts them, if it reaches them: a log axis does not),
+ *   found evenly on the screen, multiplicity kept.
+ * - Extrema are the drawn curve's local minima and maxima, which an
+ *   increasing map keeps.
+ *
+ * Exact forms (√2) are of screen values, so they give way to decimals.
  */
 export function mappedSpecialPoints(expr: Expr, maps: AxisMaps, xlo: number, xhi: number, ylo: number, yhi: number) {
-  const atZero = (map: AxisMap | undefined) => !map || Math.abs(toWorld(map, 0)) < 1e-12;
-  const shown: Record<string, boolean> = { 'x-intercept': atZero(maps.y), 'y-intercept': atZero(maps.x) };
-  return specialPoints(expr, xlo, xhi, ylo, yhi).flatMap((p): SpecialPoint[] => {
+  if (usesComplex(expr)) return [];
+  const world = (map: AxisMap | undefined, v: number) => (map ? toWorld(map, v) : v);
+  const zero = (map: AxisMap | undefined) => (map ? toScreen(map, 0) : 0);
+  const at = (heading: string, x: number, y: number, extra: string[] = []): SpecialPoint | null => {
+    const [wx, wy] = [world(maps.x, x), world(maps.y, y)];
+    if (!isFinite(wx) || !isFinite(wy)) return null;
+    return { x, y, lines: [heading, `x = ${fmtRoot(wx)}`, `y = ${fmtRoot(wy)}`, ...extra] };
+  };
+  const pts: SpecialPoint[] = [];
+  const add = (p: SpecialPoint | null) => p && mergePoint(pts, p, xhi - xlo, yhi - ylo);
+  const intercepts = (axis: 'x' | 'y', other: number, lo: number, hi: number) => {
+    if (!isFinite(other)) return;
+    const along = axis === 'x' ? 'y' : 'x';
+    const rs = rootsOf(substVars(expr, { [along]: { kind: 'num', value: other } }), axis, lo, hi);
+    const map = maps[axis];
+    for (const r of rs) {
+      // A root's multiplicity carries over where the map has a slope; where
+      // it is flat (x = X^3 at 0) the screen's triple root is a simple one.
+      const flat = map && !(Math.abs(toWorld(map, r.x + 1e-6) - toWorld(map, r.x - 1e-6)) > 1e-9);
+      const m = flat ? null : multText(r.mult);
+      add(at(`${axis}-intercept`, axis === 'x' ? r.x : other, axis === 'x' ? other : r.x, m ? [m] : []));
+    }
+  };
+  intercepts('x', zero(maps.y), xlo, xhi);
+  intercepts('y', zero(maps.x), ylo, yhi);
+  for (const p of extremaPoints(expr, xlo, xhi, ylo, yhi)) {
     const heading = p.lines[0]
       .split(', ')
-      .filter(h => shown[h] ?? true)
+      .filter(h => MAPPED_HEADINGS.has(h))
       .join(', ');
-    const [x, y] = [maps.x ? toWorld(maps.x, p.x) : p.x, maps.y ? toWorld(maps.y, p.y) : p.y];
-    if (!heading || !isFinite(x) || !isFinite(y)) return [];
-    return [{ ...p, lines: [heading, `x = ${fmtRoot(x)}`, `y = ${fmtRoot(y)}`] }];
-  });
+    if (heading) add(at(heading, p.x, p.y));
+  }
+  return pts;
 }

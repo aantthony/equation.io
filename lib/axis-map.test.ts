@@ -159,15 +159,36 @@ describe('rows in a mapped panel', () => {
     );
     expect(min).toBe('local minimum; x = 3; y = 1');
     expect(at).toBeCloseTo(Math.log10(3), 9);
+    const lines = (rows: string[], box: [number, number, number, number]) => hover(rows, box).map(([l]) => l);
     // A log axis shows no x = 0, so no y-intercept; y is plain, so the
     // x-intercept stays.
-    expect(hover(['view(x = 0.1..100, y = -5..5, x = 10^X)', 'y = x - 2'], [-1, 2, -5, 5]).map(([l]) => l)).toEqual([
+    expect(lines(['view(x = 0.1..100, y = -5..5, x = 10^X)', 'y = x - 2'], [-1, 2, -5, 5])).toEqual([
       'x-intercept; x = 2; y = 0',
     ]);
-    // Symlog reaches 0: both intercepts read where they are. An inflection
-    // is the drawn curve's: y = x - 2 bends there on a symlog axis.
-    const sym = hover(['view(x = -10..10, y = -5..5, x = sinh(X))', 'y = x - 2'], [-3, 3, -5, 5]).map(([l]) => l);
-    expect(sym).toEqual(['x-intercept; x = 2; y = 0', 'y-intercept, inflection point; x = 0; y = -2']);
+    // Nor y = 0 on a log y axis — but the y-intercept at the screen's
+    // origin stays.
+    expect(lines(['view(x = -5..5, y = 0.1..100, y = 10^Y)', 'y = x + 1'], [-5, 5, -1, 2])).toEqual([
+      'y-intercept; x = 0; y = 1',
+    ]);
+    // A map that moves x = 0 off the screen's axis is searched where it is.
+    expect(lines(['view(x = -5..5, y = -5..5, x = X + 1)', 'y = x - 2'], [-6, 4, -5, 5])).toEqual([
+      'x-intercept; x = 2; y = 0',
+      'y-intercept; x = 0; y = -2',
+    ]);
+    // Symlog reaches 0: both intercepts read where they are; the curve's bend
+    // there is the screen's, not an inflection of y = x - 2.
+    expect(lines(['view(x = -10..10, y = -5..5, x = sinh(X))', 'y = x - 2'], [-3, 3, -5, 5])).toEqual([
+      'x-intercept; x = 2; y = 0',
+      'y-intercept; x = 0; y = -2',
+    ]);
+    // x = X^3 flattens y = x at 0 on the screen: no stationary point there.
+    expect(lines(['view(x = -8..8, y = -8..8, x = X^3)', 'y = x'], [-2, 2, -8, 8])).toEqual([
+      'x-intercept, y-intercept; x = 0; y = 0',
+    ]);
+    // A tangent root keeps its multiplicity; a parabola keeps no inflection.
+    expect(lines(['view(x = 0.1..100, y = -5..5, x = 10^X)', 'y = (x - 2)^2'], [-1, 2, -5, 5])).toEqual([
+      'x-intercept, local minimum; x = 2; y = 0; double root',
+    ]);
   });
 
   it('refuse what the map cannot carry, rather than drawing it in the wrong place', () => {

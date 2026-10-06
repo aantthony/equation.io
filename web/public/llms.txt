@@ -1352,9 +1352,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   points, parametric curves and regions, segments and polygons (bent as a
   straight line in x and y is on a log axis), point lists and labels are
   placed through it, and named points drag in x and y. Systems are solved
-  through it too (not certified or dragged there). Hovering shows extrema,
-  the drawn curve's inflections and any intercepts with x = 0 or y = 0,
-  read in x and y, and traces curves in x and y. What the map cannot
+  through it too (not certified or dragged there). Hovering shows local
+  minima and maxima and any intercepts with x = 0 or y = 0 the map shows,
+  read in x and y (no inflection points), and traces curves in x and y. What the map cannot
   show (x <= 0 on a log axis) is left out. Vector and tensor fields,
   histograms, complex systems, 3D and integral shading are not drawn on
   mapped axes, and a mapped panel shows no coordinate-field grid.

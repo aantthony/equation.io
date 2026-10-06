@@ -106,7 +106,7 @@ export function axisTicks(map: AxisMap, lo: number, hi: number, pxPerUnit: numbe
   const shown = shownRange(map, lo, hi);
   if (!shown) return empty;
   const [a, b] = shown.screen;
-  const anchorValue = nicestIn(world(a), world(b));
+  const anchorValue = nicestIn(...shown.world);
   if (anchorValue === null) return empty;
   const anchor = screen(anchorValue);
   const majors = [anchor, ...walk(anchor, a, b)].sort((p, q) => p - q);
