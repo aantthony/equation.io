@@ -4,3 +4,5 @@ allowBuilds:
 overrides:
   # miniflare pins undici 7.29.0 (GHSA-3wwx-pv8p-q78v); drop once it moves past.
   undici: ^7.29.1
+  # miniflare pins sharp 0.35.4 (GHSA-wq5f-xc86-pv6w); drop once it moves past.
+  sharp: ^0.35.5
