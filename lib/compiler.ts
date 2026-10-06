@@ -104,7 +104,7 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
       graphEval?: { glsl: string; slopeScale: number };
       levels?: GpuGrid;
     }
-  | { type: 'implicit3d'; field: string; grad?: [string, string, string] }
+  | { type: 'implicit3d'; field: string; grad?: [string, string, string]; plane?: [string, string, string, string] }
   | { type: 'ineq2d'; field: string; edges: string[] }
   /** F(x, y, u) searched along u per pixel; `slope` is ∂F/∂u for an
    *  equation (absent when it has no symbolic derivative). */
@@ -515,7 +515,14 @@ export function compileGpu(classified: Classified): GpuPlan {
         } catch {
           /* finite differences */
         }
-        return { type: 'implicit3d', params, field: scalar(object.equation ?? object.residual), grad };
+        const plane = object.plane && (object.plane.map(scalar) as [string, string, string, string]);
+        return {
+          type: 'implicit3d',
+          params,
+          field: scalar(object.equation ?? object.residual),
+          grad,
+          ...(plane ? { plane } : {}),
+        };
       }
     case 'region': {
       // In a 3D scene a planar region lies in z = 0, drawn like any surface.
@@ -646,7 +653,7 @@ export function shaderKey(plan: GpuPlan): string {
         plan.levels?.params,
       ]);
     case 'implicit3d':
-      return JSON.stringify([plan.type, plan.params, plan.field, plan.grad]);
+      return JSON.stringify([plan.type, plan.params, plan.field, plan.grad, plan.plane]);
     case 'ineq2d':
       return JSON.stringify([plan.type, plan.params, plan.field, plan.edges]);
     case 'projected2d':

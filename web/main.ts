@@ -1779,9 +1779,13 @@ function render() {
           case 'implicit2d': // extrudes to its true locus (a vertical sheet)
             scene.implicits.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
             break;
-          case 'implicit3d':
-            scene.implicits.push({ ...gpuFor(eq, 'implicit3d'), color, params, uniforms });
+          case 'implicit3d': {
+            const gpu = gpuFor(eq, 'implicit3d');
+            // A plane of projective geometry draws translucent, as a plane.
+            if (gpu.plane) (scene.planes ??= []).push({ coeffs: gpu.plane, color, params, uniforms });
+            else scene.implicits.push({ ...gpu, color, params, uniforms });
             break;
+          }
           case 'scalar3d': {
             const env = { ...constEnv, t: time };
             // The largest the field has been since the view or a slider last

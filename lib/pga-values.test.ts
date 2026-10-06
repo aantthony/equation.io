@@ -91,6 +91,14 @@ describe('join and meet', () => {
     );
     expect(readout(['meet(line((0, 0, 0), (1, 1, 1)), plane((0, 0, 2), (0, 0, 1)))'])).toBe('= (2, 2, 2)');
   });
+  it('draw a plane as a plane: translucent, from its coefficients', () => {
+    const { r } = row(['a = 1', 'plane((0, 0, a), (0, 1, 1))']);
+    const gpu = r.gpu!;
+    expect(gpu.type).toBe('family');
+    const member = gpu.type === 'family' ? gpu.members[0] : gpu;
+    // y + z - a = 0, with a a slider's uniform.
+    expect(member.type === 'implicit3d' && member.plane).toEqual(['0.0', '1.0', '1.0', '(-u_a)']);
+  });
   it('draw a line of space as a curve of intersection, whatever its direction', () => {
     expect(readout(['line((0, 0, 0), (2, 1, 1))'])).toBe('= through (0, 0, 0), direction (2, 1, 1)');
     expect(drawn(['line((0, 0, 0), (2, 1, 1))'])).toEqual(['spacecurve']);
