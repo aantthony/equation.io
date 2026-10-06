@@ -220,10 +220,40 @@ describe('rows in a mapped panel', () => {
   });
 
   it('refuse what the map cannot carry, rather than drawing it in the wrong place', () => {
-    // A 3D point would turn the panel 3D under rows written for its screen.
-    for (const row of ['(-y, x)', 'hist([1, 2, 2, 3])', '(1, 2, 3)']) {
+    // A 3D point would turn the panel 3D under rows written for its screen;
+    // a tensor's glyphs need more than a substitution.
+    for (const row of ['((x, y), (y, -x))', 'hist([1, 2, 2, 3])', '(1, 2, 3)']) {
       const [, r] = analyzeRows(['view(x = 1..100, x = 10^X)', row]).rows;
       expect(r.error, row).toMatch(/maps its axes/);
     }
+  });
+
+  it("carry a flow to the screen through the map's slope", () => {
+    // x' = x is uniform motion on a log x axis: X' = 1/ln 10 everywhere.
+    const field = object(['view(x = 1..100, x = 10^X)', '(x, 0)']);
+    expect(field.kind).toBe('vector-field');
+    const [P, Q] = (field as { components: Components }).components;
+    for (const X of [0, 1, 2]) expect(at(P, X)).toBeCloseTo(1 / Math.LN10, 9);
+    expect(at(Q, 1)).toBe(0);
+    // A slope field too: y' = 2y on a log y axis is the slope 2/ln 10.
+    const slope = object(['view(x = 0..5, y = 1..100, y = 10^Y)', "y' = 2y"]);
+    const [dX, dY] = (slope as { components: Components }).components;
+    for (const Y of [0, 1, 2])
+      expect(evaluate(dY, { x: 1, y: Y }) / evaluate(dX, { x: 1, y: Y })).toBeCloseTo(2 / Math.LN10, 9);
+    // A coordinate flow is lowered to x' and y' first: a rotation in polar
+    // coordinates is (-y, x), whichever way it is written.
+    const view = 'view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)';
+    const polar = object(['r = sqrt(x^2 + y^2)', 'theta = atan2(y, x)', view, "(r', theta') = (0, 1)"]);
+    const plain = object([view, "(x', y') = (-y, x)"]);
+    for (const [k, c] of (polar as { components: Components }).components.entries())
+      expect(evaluate(c, { x: 0.5, y: 1.2 })).toBeCloseTo(
+        evaluate((plain as { components: Components }).components[k], { x: 0.5, y: 1.2 }),
+        9,
+      );
+    // And the phase plane, with both axes mapped: x' = x, y' = -y.
+    const phase = object(['view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)', "(x', y') = (x, -y)"]);
+    const [u, v] = (phase as { components: Components }).components;
+    expect(evaluate(u, { x: 1, y: 1 })).toBeCloseTo(1 / Math.LN10, 9);
+    expect(evaluate(v, { x: 1, y: 1 })).toBeCloseTo(-1 / Math.LN10, 9);
   });
 });
