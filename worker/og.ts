@@ -37,7 +37,7 @@ import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 import { type AxisMap, type AxisMaps, axisMapping, shownRange, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
-import { type ScreenBox, planeInverse, planeWorldBox } from '../lib/plane-map.ts';
+import { type ScreenBox, planeInverse, planeShapes, planeWorldBox } from '../lib/plane-map.ts';
 import { axisTicks } from '../lib/axis-ticks.ts';
 
 export const OG_WIDTH = 600;
@@ -135,27 +135,42 @@ const screenBoxOf = (r: Raster, v: View2D): ScreenBox => {
   return { lo: [v.cx - hw, v.cy - hh], hi: [v.cx + hw, v.cy + hh] };
 };
 
-/**
- * Carries world points to pixels, for a row placed on its panel. Through a
- * plane map (lib/plane-map.ts) each point is followed on from the last one
- * carried, so a line stays on one copy of the plane, until `restart()`; a
- * point the map cannot show (or follow) is NaN.
- */
-function pixelCarrier(r: Raster, v: View2D): { at: (x: number, y: number) => [number, number]; restart: () => void } {
-  const plane = v.maps?.plane;
-  if (!plane) return { at: (x, y) => [toScreenX(r, v, x), toScreenY(r, v, y)], restart: () => {} };
+/** The way back through the view's plane map, if it has one. */
+const inverseOf = (r: Raster, v: View2D) => (v.maps?.plane ? planeInverse(v.maps.plane, screenBoxOf(r, v)) : null);
+
+/** A screen point (X, Y) of a plane-mapped view as a pixel. */
+const screenPixel = (r: Raster, v: View2D, [X, Y]: readonly [number, number]): [number, number] => {
   const plain: View2D = { ...v, maps: undefined };
-  const inverse = planeInverse(plane, screenBoxOf(r, v));
-  let follow = inverse.follower();
-  return {
-    at: (x, y) => {
-      const [X, Y] = follow(x, y);
-      return [toScreenX(r, plain, X), toScreenY(r, plain, Y)];
-    },
-    restart: () => {
-      follow = inverse.follower();
-    },
-  };
+  return [toScreenX(r, plain, X), toScreenY(r, plain, Y)];
+};
+
+/** Every pixel showing world point (x, y): one, or through a plane map one
+ *  per copy of the plane on the screen, as the app draws a point. */
+function pixelsOf(r: Raster, v: View2D, x: number, y: number): Array<[number, number]> {
+  const inverse = inverseOf(r, v);
+  if (!inverse) return [[toScreenX(r, v, x), toScreenY(r, v, y)]];
+  return inverse.all(x, y).map(p => screenPixel(r, v, p));
+}
+
+/** A world polyline (flat, NaN pairs for breaks) as pixels, NaN where it
+ *  breaks; through a plane map as the app carries it (PlaneInverse.line). */
+function pixelPath(r: Raster, v: View2D, pts: ArrayLike<number>, closed = false, margin?: number): number[] {
+  const inverse = inverseOf(r, v);
+  const out: number[] = [];
+  if (!inverse) {
+    for (let i = 0; i + 1 < pts.length; i += 2) out.push(toScreenX(r, v, pts[i]), toScreenY(r, v, pts[i + 1]));
+    return out;
+  }
+  const screen = inverse.line(pts.length / 2, k => [pts[2 * k], pts[2 * k + 1]], closed, margin);
+  for (let i = 0; i + 1 < screen.length; i += 2) out.push(...screenPixel(r, v, [screen[i], screen[i + 1]]));
+  return out;
+}
+
+/** Stroke a pixel path, lifting the pen at NaN. */
+function strokePath(r: Raster, px: number[], color: [number, number, number]) {
+  for (let i = 0; i + 3 < px.length; i += 2)
+    if ([px[i], px[i + 1], px[i + 2], px[i + 3]].every(Number.isFinite))
+      drawLine(r, px[i], px[i + 1], px[i + 2], px[i + 3], color);
 }
 
 /** A straight run from a to b, cut into this many pieces through a plane
@@ -763,10 +778,15 @@ function renderRow2D(
       // union, at the inequality fill's opacity, with no outline.
       const tris = regionSampler(cpu.comps).sample(envValues(env));
       const mask = new Uint8Array(r.w * r.h);
-      const carrier = pixelCarrier(r, v);
-      for (let i = 0; i + 5 < tris.length; i += 6) {
-        carrier.restart();
-        const corners = [0, 2, 4].map(k => carrier.at(tris[i + k], tris[i + k + 1]));
+      // Through a plane map, as the app carries them (PlaneInverse.triangles).
+      const inverse = inverseOf(r, v);
+      const shown = inverse ? inverse.triangles(tris) : tris;
+      for (let i = 0; i + 5 < shown.length; i += 6) {
+        const corners = [0, 2, 4].map(k =>
+          inverse
+            ? screenPixel(r, v, [shown[i + k], shown[i + k + 1]])
+            : [toScreenX(r, v, shown[i + k]), toScreenY(r, v, shown[i + k + 1])],
+        );
         if (!corners.flat().every(Number.isFinite)) continue;
         const sx = corners.map(c => c[0]);
         const sy = corners.map(c => c[1]);
@@ -794,17 +814,15 @@ function renderRow2D(
     case 'point': {
       if (cpu.dim !== 2) return;
       const [px, py] = cpu.coords.map(c2 => run(compile(c2), env.vars, env.stack));
-      drawDisc(r, ...pixelCarrier(r, v).at(px, py), 4.5, color);
+      for (const p of pixelsOf(r, v, px, py)) drawDisc(r, ...p, 4.5, color);
       return;
     }
     case 'plist': {
       if (cpu.dim !== 2) return;
       const rad = listDotRadius(cpu.pts.length);
-      const carrier = pixelCarrier(r, v);
       for (const p of cpu.pts) {
         const [px, py] = p.map(c2 => run(compile(c2), env.vars, env.stack));
-        carrier.restart();
-        if (isFinite(px) && isFinite(py)) drawDisc(r, ...carrier.at(px, py), rad, color);
+        if (isFinite(px) && isFinite(py)) for (const q of pixelsOf(r, v, px, py)) drawDisc(r, ...q, rad, color);
       }
       return;
     }
@@ -820,7 +838,6 @@ function renderRow2D(
         if (!world) return;
         [lo[0], lo[1], hi[0], hi[1]] = [...world.lo, ...world.hi];
       }
-      const carrier = pixelCarrier(r, v);
       for (const [k, map] of [v.maps?.x, v.maps?.y].entries()) {
         if (!map) continue;
         const shown = shownRange(map, lo[k], hi[k]);
@@ -829,20 +846,11 @@ function renderRow2D(
       }
       const systemEnv = { ...analysis.constEnv, t: 0 };
       if (plot.parametric) {
-        for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, systemEnv, 256, plot.angular)) {
-          carrier.restart();
-          let last = carrier.at(path[0][0], path[0][1]);
-          for (let i = 1; i < path.length; i++) {
-            const next = carrier.at(path[i][0], path[i][1]);
-            drawLine(r, last[0], last[1], next[0], next[1], color);
-            last = next;
-          }
-        }
+        for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, systemEnv, 256, plot.angular))
+          strokePath(r, pixelPath(r, v, path.flat()), color);
       } else {
-        for (const p of solveSystem(plot.residuals, ['x', 'y'], lo, hi, { env: systemEnv, angular: plot.angular })) {
-          carrier.restart();
-          drawDisc(r, ...carrier.at(p[0], p[1]), 4.5, color);
-        }
+        for (const p of solveSystem(plot.residuals, ['x', 'y'], lo, hi, { env: systemEnv, angular: plot.angular }))
+          for (const q of pixelsOf(r, v, p[0], p[1])) drawDisc(r, ...q, 4.5, color);
       }
       return;
     }
@@ -962,18 +970,7 @@ function renderRow2D(
       // Sampled as the app samples it (lib/path.ts), pen up at the jumps. A
       // complex path is not a vec row: its components are the split parts.
       const pts = pathSampler(cpu.comps).sample({ ...analysis.constEnv, t: 0 });
-      const carrier = pixelCarrier(r, v);
-      let last: [number, number] | null = null;
-      for (let i = 0; i + 1 < pts.length; i += 2) {
-        if (!Number.isFinite(pts[i]) || !Number.isFinite(pts[i + 1])) {
-          last = null;
-          carrier.restart();
-          continue;
-        }
-        const s = carrier.at(pts[i], pts[i + 1]);
-        if (last) drawLine(r, last[0], last[1], s[0], s[1], color);
-        last = Number.isFinite(s[0]) && Number.isFinite(s[1]) ? s : null;
-      }
+      strokePath(r, pixelPath(r, v, pts), color);
       return;
     }
     case 'polygon': {
@@ -982,26 +979,42 @@ function renderRow2D(
       const given = vertexSampler(cpu.pts, cpu.over)(envValues(env));
       if (given.length < 4 || !given.every(Number.isFinite)) return;
       const vals = cpu.hull ? hullFaces(given, 2)[0].outline.flatMap(p => [p[0], p[1]]) : given;
-      const sx: number[] = [],
-        sy: number[] = [];
       // Through a plane map each edge bends, so it is cut into pieces.
       const pieces = v.maps?.plane ? PLANE_PIECES : 1;
-      const carrier = pixelCarrier(r, v);
       const count = vals.length / 2;
+      const world: number[] = [];
       for (let i = 0; i < count; i++) {
         const j = cpu.closed ? (i + 1) % count : i + 1;
         const steps = j < count ? pieces : 1;
         for (let k = 0; k < steps; k++) {
           const t = k / steps;
-          const x = vals[2 * i] + (j < count ? (vals[2 * j] - vals[2 * i]) * t : 0);
-          const y = vals[2 * i + 1] + (j < count ? (vals[2 * j + 1] - vals[2 * i + 1]) * t : 0);
-          const [px, py] = carrier.at(x, y);
-          sx.push(px);
-          sy.push(py);
+          world.push(
+            vals[2 * i] + (j < count ? (vals[2 * j] - vals[2 * i]) * t : 0),
+            vals[2 * i + 1] + (j < count ? (vals[2 * j + 1] - vals[2 * i + 1]) * t : 0),
+          );
         }
       }
       const { closed, arrow } = cpu;
-      if (closed) fillPolygon(r, sx, sy, color, 0.16);
+      // A shape to fill is drawn whole on each copy of the plane it shows
+      // on, as in the app.
+      const inverse = inverseOf(r, v);
+      if (closed && inverse) {
+        for (const shape of planeShapes(inverse, world.length / 2, k => [world[2 * k], world[2 * k + 1]])) {
+          const px: number[] = [];
+          for (let i = 0; i + 1 < shape.pts.length; i += 2)
+            px.push(...screenPixel(r, v, [shape.pts[i], shape.pts[i + 1]]));
+          const [sx, sy] = [px.filter((_, i) => i % 2 === 0), px.filter((_, i) => i % 2 === 1)];
+          if (shape.closed && px.every(Number.isFinite)) fillPolygon(r, sx, sy, color, 0.16);
+          strokePath(r, shape.closed ? [...px, px[0], px[1]] : px, color);
+        }
+        return;
+      }
+      const px = pixelPath(r, v, world, closed);
+      // Broken (it crosses the seam of an angle): its outline only, as in the app.
+      const whole = px.every(Number.isFinite);
+      const sx = px.filter((_, i) => i % 2 === 0);
+      const sy = px.filter((_, i) => i % 2 === 1);
+      if (closed && whole) fillPolygon(r, sx, sy, color, 0.16);
       // vector(): a solid head at the last vertex, fixed in pixels like the
       // app's; the shaft stops inside it so the tip stays sharp.
       const n = sx.length;
@@ -1022,8 +1035,10 @@ function renderRow2D(
         );
         [sx[n - 1], sy[n - 1]] = head.shaftEnd;
       }
-      for (let i = 0; i + 1 < sx.length; i++) drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color);
-      if (closed) drawLine(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);
+      for (let i = 0; i + 1 < sx.length; i++)
+        if ([sx[i], sy[i], sx[i + 1], sy[i + 1]].every(Number.isFinite))
+          drawLine(r, sx[i], sy[i], sx[i + 1], sy[i + 1], color);
+      if (closed && whole) drawLine(r, sx[sx.length - 1], sy[sy.length - 1], sx[0], sy[0], color);
       return;
     }
   }

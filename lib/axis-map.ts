@@ -380,5 +380,9 @@ export function axisMapping(object: MathObject, maps?: AxisMaps): AxisMapping | 
   return null;
 }
 
+/** Why a plane-mapped panel draws no histogram. */
+export const PLANE_BARS_MESSAGE =
+  "This panel's view(…) maps (x, y) together, which bends the line y = 0 that histogram bars stand on: draw it in a panel without one.";
+
 export const UNMAPPED_MESSAGE =
   "This panel's view(…) maps its axes, which draw curves, regions, fields, points, figures and histograms — not this yet.";

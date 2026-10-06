@@ -62,7 +62,15 @@ import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
-import { type AxisMaps, UNMAPPED_MESSAGE, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
+import {
+  type AxisMaps,
+  PLANE_BARS_MESSAGE,
+  UNMAPPED_MESSAGE,
+  axisMapping,
+  inlineFields,
+  mapRowExpr,
+  tensorJacobian,
+} from './axis-map.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -987,7 +995,8 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         // carries what places points there as it is drawn (lib/axis-map.ts).
         const plain = row.cls;
         const how = plain.needs3D ? null : axisMapping(plain.object, maps);
-        if (!how) throw new Error(UNMAPPED_MESSAGE);
+        if (!how)
+          throw new Error(maps.plane && plain.object.kind === 'histogram' ? PLANE_BARS_MESSAGE : UNMAPPED_MESSAGE);
         if (how === 'substitute')
           row.cls = classifyRow(
             { ...resolved, integral: null },

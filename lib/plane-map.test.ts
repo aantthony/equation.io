@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { axisMapping, mapRowExpr } from './axis-map.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
+import { regionSampler } from './path.ts';
 import type { Components } from './math-object.ts';
-import { type PlaneMap, parsePlaneMap, planeInverse, planeToWorld, planeWorldBox } from './plane-map.ts';
+import { type PlaneMap, parsePlaneMap, planeInverse, planeShapes, planeToWorld, planeWorldBox } from './plane-map.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
 const POLAR = 'view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..5)';
@@ -85,6 +86,111 @@ describe('a plane map', () => {
     expect(out[3][0]).toBeCloseTo(3.5 - 2 * Math.PI, 6);
   });
 
+  it('carries a line across the seam without a gap, and an exit only once', () => {
+    const inverse = planeInverse(polar(), box);
+    // The circle r = 2 from angle 2.5 to 4.1, across the seam at π.
+    const n = 400;
+    const circle = (k: number): [number, number] => {
+      const a = 2.5 + (1.6 * k) / (n - 1);
+      return [2 * Math.cos(a), 2 * Math.sin(a)];
+    };
+    const out = inverse.line(n, circle, false);
+    const runs: number[][] = [[]];
+    for (let i = 0; i + 1 < out.length; i += 2)
+      if (Number.isNaN(out[i])) runs.push([]);
+      else runs[runs.length - 1].push(out[i]);
+    const shown = runs.filter(r => r.some(X => Math.abs(X) <= Math.PI));
+    expect(shown.length).toBe(2);
+    // One leaves at the right edge, the other comes back in at the left.
+    expect(Math.max(...shown[0])).toBeGreaterThanOrEqual(Math.PI);
+    expect(Math.min(...shown[1])).toBeLessThanOrEqual(-Math.PI + 0.02);
+    // Leaving through an edge with no seam (out past r = 5): drawn once.
+    const exit = inverse.line(
+      3,
+      k =>
+        [
+          [1, 0.5],
+          [6, 0.5],
+          [6, 1],
+        ][k] as [number, number],
+      false,
+    );
+    const inside = [];
+    for (let i = 0; i + 1 < exit.length; i += 2) if (inverse.inside(exit[i], exit[i + 1])) inside.push(exit[i]);
+    expect(inside.length).toBe(1);
+  });
+
+  it('carries triangles at the window’s edge, and across the seam on both sides', () => {
+    const inverse = planeInverse(polar(), box);
+    // Its corners just past r = 5, the top edge: kept, not dropped.
+    const edge = inverse.triangles([4.8, 0, 5.6, 0, 4.8 * Math.cos(0.2), 4.8 * Math.sin(0.2)]);
+    expect(edge.length).toBe(6);
+    // Across the negative x axis: one copy at each edge.
+    const seam = inverse.triangles([-2, 0.3, -2, -0.3, -3, 0]);
+    expect(seam.length).toBe(12);
+    const firsts = [seam[0], seam[6]].sort((p, q) => p - q);
+    expect(firsts[0]).toBeLessThan(0);
+    expect(firsts[1]).toBeGreaterThan(0);
+  });
+
+  it('fills a region larger than the window, once, with no holes', () => {
+    const tris = regionSampler([parseExpr('6u cos(2pi v)'), parseExpr('6u sin(2pi v)')]).sample({});
+    const covered = (out: Float64Array, px: number, py: number) => {
+      let n = 0;
+      for (let k = 0; k + 5 < out.length; k += 6) {
+        const [ax, ay, bx, by, cx, cy] = out.subarray(k, k + 6);
+        const d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
+        const d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
+        const d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
+        if (!((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))) n++;
+      }
+      return n;
+    };
+    // The window, and one wider than a full turn, which shows it twice.
+    for (const w of [Math.PI, 6.9]) {
+      const out = planeInverse(polar(), { lo: [-w, 0], hi: [w, 5] }).triangles(tris);
+      for (let X = -w + 0.03; X < w; X += 0.4)
+        for (const Y of [0.05, 0.13, 1.7, 4.9]) {
+          // Inside the disc of radius 6: covered, and not over and over.
+          const n = covered(out, X, Y);
+          expect(n, `${w}: ${X}, ${Y}`).toBeGreaterThan(0);
+          expect(n, `${w}: ${X}, ${Y}`).toBeLessThanOrEqual(2);
+        }
+    }
+  });
+
+  it('fills a shape on each copy it shows on, and one round the origin not at all', () => {
+    const inverse = planeInverse(polar(), box);
+    const shape = (pts: number[][]) => planeShapes(inverse, pts.length, k => pts[k] as [number, number]);
+    // Across the negative x axis: whole, and filled, at each edge.
+    const seam = shape([
+      [-4, 1],
+      [-4, -1],
+      [-2, 0],
+    ]);
+    expect(seam.map(s => s.closed)).toEqual([true, true]);
+    // Starting at the origin, which the screen shows all along Y = 0: one.
+    expect(
+      shape([
+        [0, 0],
+        [6, 0],
+        [6, 1],
+      ]).map(s => s.closed),
+    ).toEqual([true]);
+    // Round the origin, it does not close on the screen: an outline only.
+    const square = shape([
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ]);
+    expect(square.map(s => s.closed)).toEqual([false]);
+  });
+
+  it('takes a map defined only away from the origin', () => {
+    expect(() => parsePlaneMap('(ln(X - 10) cos(Y), ln(X - 10) sin(Y))')).not.toThrow();
+  });
+
   it('bounds what the window shows in x and y', () => {
     const world = planeWorldBox(polar(), box)!;
     expect(world.lo[0]).toBeCloseTo(-5, 6);
@@ -137,7 +243,7 @@ describe('rows through a plane map', () => {
     const a = analyzeRows(rows).rows;
     const maps = { plane: map() };
     expect(a.slice(1, 4).map(r => axisMapping(r.cls!.object, maps))).toEqual(['place', 'place', 'place']);
-    expect(a[4].error).toMatch(/maps its axes/);
+    expect(a[4].error).toMatch(/bends the line y = 0/);
     // An integral is still a value, but there is no y = 0 line to shade to.
     expect(a[5].error).toBeUndefined();
     expect(a[5].cls!.object).not.toHaveProperty('shade');

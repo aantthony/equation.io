@@ -77,17 +77,22 @@ export function parsePlaneMap(src: string, env: Record<string, number> = {}): Pl
 /** Whether the map spreads some part of the screen over an area of the
  *  plane: a map whose Jacobian vanishes everywhere shows a curve at most. */
 function opens(map: PlaneMap): boolean {
-  for (let i = -5; i <= 5; i++)
-    for (let j = -5; j <= 5; j++) {
-      const [a, b, c, d] = planeJacobian(map, i + 0.37, j + 0.61);
-      if (Math.abs(a * d - b * c) > 1e-9) return true;
-    }
+  // Near the origin, and far out, for a map defined only there (ln(X - 10)).
+  for (const scale of [1, 30])
+    for (let i = -5; i <= 5; i++)
+      for (let j = -5; j <= 5; j++) {
+        const [a, b, c, d] = planeJacobian(map, scale * (i + 0.37), scale * (j + 0.61));
+        if (Math.abs(a * d - b * c) > 1e-9) return true;
+      }
   return false;
 }
 
 interface Compiled {
   f: (X: number, Y: number) => [number, number];
   j: (X: number, Y: number) => [number, number, number, number];
+  /** f and j into `out`, for the solver's inner loop: no arrays made. */
+  fInto: (X: number, Y: number, out: Float64Array) => void;
+  jInto: (X: number, Y: number, out: Float64Array) => void;
 }
 const compiledMaps = new WeakMap<PlaneMap, Compiled>();
 const SLOTS: ReadonlyMap<string, number> = new Map([
@@ -144,6 +149,15 @@ function compiled(map: PlaneMap): Compiled {
         const v = at(X, Y);
         return [js[0](v), js[1](v), js[2](v), js[3](v)];
       },
+      fInto: (X, Y, out) => {
+        const v = at(X, Y);
+        out[0] = fx(v);
+        out[1] = fy(v);
+      },
+      jInto: (X, Y, out) => {
+        const v = at(X, Y);
+        for (let k = 0; k < 4; k++) out[k] = js[k](v);
+      },
     };
     compiledMaps.set(map, c);
   }
@@ -193,6 +207,11 @@ export const FOLLOW_MARGIN = 0.02;
 const SEEDS = 24;
 /** How many of the nearest seeds a fresh search starts from. */
 const STARTS = 8;
+/** A region's triangles search for copies of the plane at one in this many
+ *  (PlaneInverse.triangles); the rest try the copies found. */
+const SEARCH_EVERY = 16;
+/** How many searches a window remembers. */
+const MEMO = 1 << 17;
 
 /**
  * The way back from the plane to one screen window. Built per window (a pan
@@ -240,7 +259,7 @@ export class PlaneInverse {
 
   /** Whether (X, Y) is in the window, or within `margin` of it (a share of
    *  its size). */
-  private inside(X: number, Y: number, margin: number): boolean {
+  inside(X: number, Y: number, margin = 0): boolean {
     const { lo, hi } = this.box;
     const [mx, my] = [margin * (hi[0] - lo[0]), margin * (hi[1] - lo[1])];
     return X >= lo[0] - mx && X <= hi[0] + mx && Y >= lo[1] - my && Y <= hi[1] + my;
@@ -253,19 +272,22 @@ export class PlaneInverse {
    * there further than `margin` (a share of the window) past its edges.
    */
   solve(x: number, y: number, from: readonly [number, number], margin = FOLLOW_MARGIN): [number, number] | null {
-    const { f, j } = this.c;
+    const { fInto, jInto } = this.c;
+    const [v, J] = [this.v, this.J];
     let [X, Y] = from;
-    let [fx, fy] = f(X, Y);
-    let [rx, ry] = [fx - x, fy - y];
+    fInto(X, Y, v);
+    let rx = v[0] - x;
+    let ry = v[1] - y;
     let err = rx * rx + ry * ry;
     if (!isFinite(err)) return null;
     const scale = this.worldScale + Math.abs(x) + Math.abs(y);
-    const done = (1e-11 * scale) ** 2;
+    const done = (1e-10 * scale) ** 2;
     const reach = 0.5 * this.screenScale;
     let lambda = 1e-3;
     for (let it = 0; it < 60 && err > done; it++) {
-      const [a, b, c, d] = j(X, Y);
-      if (![a, b, c, d].every(isFinite)) return null;
+      jInto(X, Y, J);
+      const [a, b, c, d] = J;
+      if (!(isFinite(a) && isFinite(b) && isFinite(c) && isFinite(d))) return null;
       // Normal equations of the step: (JᵀJ + λ diag) δ = −Jᵀr.
       const A00 = a * a + c * c;
       const A01 = a * b + c * d;
@@ -282,12 +304,18 @@ export class PlaneInverse {
         let dY = -(m00 * g1 - A01 * g0) / det;
         // No leaping across the screen: a branch far off is not this one.
         const len = Math.hypot(dX, dY);
-        if (len > reach) [dX, dY] = [(dX * reach) / len, (dY * reach) / len];
-        const [nX, nY] = [X + dX, Y + dY];
-        const [nx, ny] = f(nX, nY);
-        const nerr = (nx - x) ** 2 + (ny - y) ** 2;
+        if (len > reach) {
+          dX *= reach / len;
+          dY *= reach / len;
+        }
+        fInto(X + dX, Y + dY, v);
+        const nrx = v[0] - x;
+        const nry = v[1] - y;
+        const nerr = nrx * nrx + nry * nry;
         if (isFinite(nerr) && nerr < err) {
-          [X, Y, rx, ry, err] = [nX, nY, nx - x, ny - y, nerr];
+          X += dX;
+          Y += dY;
+          [rx, ry, err] = [nrx, nry, nerr];
           lambda = Math.max(lambda / 3, 1e-12);
           stepped = true;
           break;
@@ -295,13 +323,39 @@ export class PlaneInverse {
         lambda *= 4;
       }
       // Wandering far off: whatever it finds there is not near this window.
-      if (!stepped || !this.inside(X, Y, 2)) break;
+      if (!stepped || !this.inside(X, Y, margin + 0.5)) break;
     }
     return err <= (1e-7 * scale) ** 2 && this.inside(X, Y, margin) ? [X, Y] : null;
   }
 
+  /** The solver's scratch: the map's value and Jacobian at a point. */
+  private readonly v = new Float64Array(2);
+  private readonly J = new Float64Array(4);
+
+  /** Whether the map folds at screen point (X, Y), showing one point of the
+   *  plane all along a line there (the polar origin, along Y = 0). */
+  folds(X: number, Y: number): boolean {
+    const [a, b, c, d] = this.c.j(X, Y);
+    return !(Math.abs(a * d - b * c) > 1e-6 * (a * a + b * b + c * c + d * d));
+  }
+
+  /** all(), remembered while the window stays: a still picture redraws its
+   *  points without solving for them again. */
+  private readonly memo = new Map<string, Array<[number, number]>>();
+
   /** Every screen point in or just around the window showing (x, y). */
   all(x: number, y: number): Array<[number, number]> {
+    const key = `${x},${y}`;
+    let hit = this.memo.get(key);
+    if (!hit) {
+      hit = this.search(x, y);
+      if (this.memo.size >= MEMO) this.memo.clear();
+      this.memo.set(key, hit);
+    }
+    return hit;
+  }
+
+  private search(x: number, y: number): Array<[number, number]> {
     const near: Array<[number, number]> = [];
     for (let k = 0; k < this.count; k++) {
       const dist = (this.seeds[4 * k + 2] - x) ** 2 + (this.seeds[4 * k + 3] - y) ** 2;
@@ -349,6 +403,246 @@ export class PlaneInverse {
       return s ?? [NaN, NaN];
     };
   }
+
+  /**
+   * Triangles [x0, y0, x1, y1, x2, y2, …] carried to the screen: each on
+   * the copy of the plane its neighbour was on, its corners followed on from
+   * the first, well off the screen; and on every other copy the screen
+   * shows, so a region across the seam of an angle fills both sides, and a
+   * window wider than a full turn shows it twice.
+   */
+  triangles(tris: ArrayLike<number>): Float64Array {
+    // Corners are shared between neighbouring triangles: each is carried
+    // once, followed on from the corner before it (a neighbour, in a
+    // sampled grid), and once more per copy of the plane found.
+    const ids = new Map<number, Map<number, number>>();
+    const xy: number[] = [];
+    const corner = new Int32Array(tris.length / 2);
+    for (let k = 0; k < corner.length; k++) {
+      const [x, y] = [tris[2 * k], tris[2 * k + 1]];
+      let row = ids.get(x);
+      if (!row) ids.set(x, (row = new Map()));
+      let id = row.get(y);
+      if (id === undefined) {
+        row.set(y, (id = xy.length / 2));
+        xy.push(x, y);
+      }
+      corner[k] = id;
+    }
+    const count = xy.length / 2;
+    const same = (p: readonly [number, number], q: readonly [number, number]) =>
+      Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) < 1e-6 * (1 + Math.abs(p[0]) + Math.abs(p[1]));
+    // Each corner on the copy its neighbour is on, well off the screen, and
+    // the screen offsets of the other copies found by searching now and
+    // then: on the polar screen, 2π along X.
+    const main = new Float64Array(2 * count).fill(NaN);
+    const offsets: Array<[number, number]> = [];
+    // An offset found, and its opposite: copies of a turn lie both ways.
+    const record = (d: [number, number]) => {
+      for (const o of [d, [-d[0], -d[1]] as [number, number]])
+        if (offsets.length < 8 && !offsets.some(p => same(p, o))) offsets.push(o);
+    };
+    // Where the map folds (the polar origin, which the screen shows all
+    // along Y = 0) one corner has no one place: it is placed per triangle,
+    // from a corner that has, and says nothing of where the copies are.
+    const folded = new Uint8Array(count);
+    let prev: [number, number] | null = null;
+    for (let i = 0; i < count; i++) {
+      const [x, y] = [xy[2 * i], xy[2 * i + 1]];
+      let s: [number, number] | null = prev && this.solve(x, y, prev, 1);
+      // Followed off the window, onto a copy the screen does not show, when
+      // it shows another (across the seam of an angle, or polar's copy at
+      // (X + π, −Y)): that one.
+      if (!s || !this.inside(s[0], s[1])) {
+        const found = this.first(x, y);
+        if (isFinite(found[0]) && (!s || this.inside(found[0], found[1]))) {
+          // Where it came back is how far apart those copies are.
+          if (s) record([found[0] - s[0], found[1] - s[1]]);
+          s = found;
+        }
+      }
+      if (!s) continue;
+      [main[2 * i], main[2 * i + 1], prev] = [s[0], s[1], s];
+      folded[i] = this.folds(s[0], s[1]) ? 1 : 0;
+      if (folded[i] || i % SEARCH_EVERY) continue;
+      for (const other of this.all(x, y))
+        // Kept only if it shows on the screen: polar's copy at (X + π, −Y)
+        // lies below it, at an offset that changes with Y.
+        if (!same(other, s) && this.inside(other[0], other[1])) record([other[0] - s[0], other[1] - s[1]]);
+    }
+    const copies = offsets.map(([dX, dY]) => {
+      const at = new Float64Array(2 * count).fill(NaN);
+      for (let i = 0; i < count; i++) {
+        const [X, Y] = [main[2 * i] + dX, main[2 * i + 1] + dY];
+        // A copy off past the margin is none the screen shows.
+        if (!this.inside(X, Y, MARGIN)) continue;
+        const s = this.solve(xy[2 * i], xy[2 * i + 1], [X, Y], MARGIN);
+        if (s && !same(s, [main[2 * i], main[2 * i + 1]])) [at[2 * i], at[2 * i + 1]] = s;
+      }
+      return at;
+    });
+    // A triangle whose corners were followed onto different copies spans
+    // the screen: its corners are followed on from one of them instead.
+    const far = 0.25 * this.screenScale;
+    const out: number[] = [];
+    // Each triangle's copies drawn so far, by first corner: two copies of the
+    // plane can carry it to the same place.
+    let drawn: Array<readonly [number, number]> = [];
+    const emit = (on: Float64Array, k: number, first: boolean) => {
+      const ids = [corner[k], corner[k + 1], corner[k + 2]];
+      const anchor = ids.findIndex(i => !folded[i] && isFinite(on[2 * i]));
+      if (anchor < 0) return;
+      const pa: [number, number] = [on[2 * ids[anchor]], on[2 * ids[anchor] + 1]];
+      const placed = ids.map((i, n): [number, number] | null => {
+        if (n === anchor) return pa;
+        const p: [number, number] = [on[2 * i], on[2 * i + 1]];
+        if (!folded[i] && Math.abs(p[0] - pa[0]) + Math.abs(p[1] - pa[1]) < far) return p;
+        return this.solve(xy[2 * i], xy[2 * i + 1], pa, 1);
+      });
+      if (placed.some(p => !p)) return;
+      const tri = placed as Array<[number, number]>;
+      if (!first && !tri.some(p => this.inside(p[0], p[1]))) return;
+      if (drawn.some(p => same(p, tri[0]))) return;
+      drawn.push(tri[0]);
+      out.push(...tri.flat());
+      // A folded corner is a whole edge on the screen (the polar origin, all
+      // along Y = 0 between its neighbours' angles): the triangle is a quad,
+      // that corner placed from each of the other two.
+      const fold = ids.findIndex(i => folded[i]);
+      if (fold < 0 || ids.filter(i => folded[i]).length > 1) return;
+      const [next, other] = [(fold + 1) % 3, (fold + 2) % 3];
+      const from = next === anchor ? other : next;
+      const again = this.solve(xy[2 * ids[fold]], xy[2 * ids[fold] + 1], tri[from], 1);
+      if (again && !same(again, tri[fold])) out.push(...tri[fold], ...tri[from], ...again);
+    };
+    for (let k = 0; k + 2 < corner.length; k += 3) {
+      drawn = [];
+      emit(main, k, true);
+      for (const at of copies) emit(at, k, false);
+    }
+    return Float64Array.from(out);
+  }
+
+  /**
+   * A polyline's vertices carried to the screen, NaN pairs where it breaks.
+   * Each run is followed on from the last point and cut just past the
+   * window's edge (or `margin` past it: a filled shape is followed far off
+   * the screen, so it stays one shape to fill). Where a run is cut but its
+   * end is on the screen after all, it crossed the seam of an angle and
+   * comes back at the other edge: it is traced back from there, through
+   * earlier segments, until it leaves the window, so it re-enters at the
+   * edge. `segment` carries one straight run a → b, a included and b not,
+   * from a's neighbour `from`, handing back b carried; by default its ends
+   * only (a renderer cuts the run where the map bends it).
+   */
+  line(
+    count: number,
+    vertex: (k: number) => [number, number],
+    closed: boolean,
+    margin = FOLLOW_MARGIN,
+    segment?: Segment,
+    start?: readonly [number, number],
+  ): number[] {
+    const shown = (p?: readonly [number, number] | null): p is [number, number] =>
+      !!p && isFinite(p[0]) && isFinite(p[1]);
+    const carry = (x: number, y: number, hint?: readonly [number, number]): [number, number] =>
+      hint ? (this.solve(x, y, hint, margin) ?? [NaN, NaN]) : this.first(x, y);
+    const seg: Segment =
+      segment ??
+      ((a, b, map, from) => {
+        const pa = map(a[0], a[1], shown(from) ? from : undefined);
+        return [[...pa], map(b[0], b[1], shown(pa) ? pa : undefined)];
+      });
+    const out: number[] = [];
+    const runs = closed ? count : count - 1;
+    let last: [number, number] | undefined = start ? [start[0], start[1]] : undefined;
+    for (let k = 0; k < runs; k++) {
+      const [a, b] = [vertex(k), vertex((k + 1) % count)];
+      // A line starts on the copy its next point is on, followed back: where
+      // the screen shows its start along a whole line (the polar origin, at
+      // every angle), that picks the angle it leaves at.
+      if (!last) {
+        const next = this.first(...b);
+        last = (shown(next) && this.solve(a[0], a[1], next, margin)) || undefined;
+      }
+      const [piece, end] = seg(a, b, carry, last);
+      out.push(...piece);
+      last = shown(end) ? end : undefined;
+      if (last) continue;
+      // Back on the screen on another copy (the same copy, just off it, is
+      // no re-entry): traced back to where it comes in.
+      const back = this.first(...b);
+      if (!shown(back) || !this.inside(back[0], back[1], FOLLOW_MARGIN)) continue;
+      const rev: number[] = [];
+      let from: [number, number] = back;
+      for (let j = k, steps = 0; steps < count && (closed || j >= 0); j--, steps++) {
+        const i = (j + count) % count;
+        const [p, e] = seg(vertex((i + 1) % count), vertex(i), carry, from);
+        rev.push(...p);
+        if (!shown(e)) break;
+        // Back at the line's start: that point too, then stop.
+        if (!closed && i === 0) {
+          rev.push(...e);
+          break;
+        }
+        from = e;
+      }
+      out.push(NaN, NaN);
+      // Reversed, without b itself, which the next run starts with.
+      for (let i = rev.length - 2; i >= 2; i -= 2) out.push(rev[i], rev[i + 1]);
+      last = back;
+    }
+    if (!closed && count) out.push(...(count > 1 && last ? last : carry(...vertex(count - 1))));
+    return out;
+  }
+}
+
+/** Carries a straight run a → b (see PlaneInverse.line). */
+export type Segment = (
+  a: [number, number],
+  b: [number, number],
+  map: (x: number, y: number, hint?: readonly [number, number]) => [number, number],
+  from?: readonly [number, number],
+) => [number[], [number, number]];
+
+/**
+ * A closed shape to fill, carried to the screen whole on each copy of the
+ * plane it shows on: followed on from each place the screen shows its first
+ * vertex, well off the screen (PlaneInverse.line, margin 1), so a shape
+ * across the seam of an angle fills at both edges. One that does not close
+ * on the screen (round a point the map folds at) is an outline only.
+ */
+export function planeShapes(
+  inverse: PlaneInverse,
+  count: number,
+  vertex: (k: number) => [number, number],
+  segment?: Segment,
+): Array<{ pts: number[]; closed: boolean }> {
+  const out: Array<{ pts: number[]; closed: boolean }> = [];
+  // From a vertex the screen shows at points apart, not along a whole line
+  // (the polar origin): the shape's outline is the same from any vertex.
+  let from = 0;
+  while (from < count - 1 && inverse.folds(...inverse.first(...vertex(from)))) from++;
+  const turned = (k: number) => vertex((k + from) % count);
+  for (const start of inverse.all(...turned(0))) {
+    const pts = inverse.line(count, turned, true, 1, segment, start);
+    let shows = false;
+    for (let i = 0; i + 1 < pts.length && !shows; i += 2) shows = inverse.inside(pts[i], pts[i + 1]);
+    if (!shows) continue;
+    // Round a point the map folds at (a square about the polar origin), the
+    // outline does not come back to where it started: it is open on the
+    // screen, a curve with nothing inside it to fill.
+    const back = inverse.solve(...turned(0), [pts[pts.length - 2], pts[pts.length - 1]], 1);
+    const closes =
+      !!back &&
+      Math.abs(back[0] - start[0]) + Math.abs(back[1] - start[1]) <
+        1e-6 * (1 + Math.abs(start[0]) + Math.abs(start[1]));
+    // Drawn as a line instead, cut at the edges and picked up where it comes
+    // back, once.
+    if (!closes) return [{ pts: inverse.line(count, turned, true, FOLLOW_MARGIN, segment), closed: false }];
+    out.push({ pts, closed: true });
+  }
+  return out;
 }
 
 const inverses = new WeakMap<PlaneMap, { key: string; inverse: PlaneInverse }>();

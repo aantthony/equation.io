@@ -11,7 +11,7 @@ import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
 import { type AxisMap, type AxisMaps, toScreen as mapToScreen, toScreenOrEdge } from '../lib/axis-map.ts';
-import { type PlaneInverse, type ScreenBox, planeInverse } from '../lib/plane-map.ts';
+import { FOLLOW_MARGIN, type PlaneInverse, type ScreenBox, planeInverse, planeShapes } from '../lib/plane-map.ts';
 import { type AxisTicks, axisTicks } from '../lib/axis-ticks.ts';
 
 export interface View2D {
@@ -1654,59 +1654,49 @@ function mapPolylines(o: Overlay2D, mark: OverlayMark, map: Carry): void {
 function planeOverlay(o: Overlay2D, mark: OverlayMark, inverse: PlaneInverse): void {
   const kept = o.points.slice(mark.points).flatMap(p => inverse.all(p.x, p.y).map(([x, y]) => ({ ...p, x, y })));
   o.points.splice(mark.points, Infinity, ...kept);
-  for (const c of o.clouds?.slice(mark.clouds) ?? []) {
-    const [xs, ys] = [new Float64Array(c.xs.length), new Float64Array(c.xs.length)];
-    for (let k = 0; k < xs.length; k++) [xs[k], ys[k]] = inverse.first(c.xs[k], c.ys[k]);
-    [c.xs, c.ys] = [xs, ys];
-  }
-  const carry: Carry = (x, y, hint) => (hint ? (inverse.solve(x, y, hint) ?? [NaN, NaN]) : inverse.first(x, y));
-  const shown = (p: readonly [number, number]) => isFinite(p[0]) && isFinite(p[1]);
+  for (const c of o.clouds?.slice(mark.clouds) ?? []) [c.xs, c.ys] = planeCloud(c.xs, c.ys, inverse);
   for (const l of o.polylines.slice(mark.polylines)) {
     const { pts } = l;
-    const n = pts.length / 2;
-    const out: number[] = [];
-    const vertex = (k: number): [number, number] => [pts[(2 * k) % pts.length], pts[(2 * k + 1) % pts.length]];
-    let last: [number, number] | undefined;
-    for (let k = 0; k < (l.closed ? n : n - 1); k++) {
-      const [a, b] = [vertex(k), vertex(k + 1)];
-      // A line starts on the copy its next point is on, followed back: where
-      // the screen shows its start along a whole line (the polar origin, at
-      // every angle), that picks the angle it leaves at.
-      if (!last) {
-        const next = inverse.first(...b);
-        last = (shown(next) && inverse.solve(a[0], a[1], next)) || undefined;
-      }
-      const [piece, end] = mappedSegment(a, b, carry, last);
-      out.push(...piece);
-      last = end;
-      if (shown(end)) continue;
-      // The run left the window. Where b is on the screen after all (it
-      // crossed the seam of an angle, and comes back at the other edge),
-      // trace the run back from there, so it re-enters at the edge.
-      const back = inverse.first(...b);
-      if (!shown(back)) continue;
-      const [rev] = mappedSegment(b, a, carry, back);
-      out.push(NaN, NaN);
-      for (let i = rev.length - 2; i >= 2; i -= 2) out.push(rev[i], rev[i + 1]);
-      last = back;
+    const vertex = (k: number): [number, number] => [pts[2 * k], pts[2 * k + 1]];
+    if (!(l.fill && l.closed)) {
+      l.pts = inverse.line(pts.length / 2, vertex, !!l.closed, FOLLOW_MARGIN, mappedSegment);
+      continue;
     }
-    // The last vertex, unless closing back to the first draws it.
-    if (!l.closed && n) out.push(...(n > 1 && last ? last : carry(...vertex(n - 1))));
-    l.pts = out;
+    // A shape to fill stays one shape, on each copy of the plane it shows on.
+    const [first, ...more] = planeShapes(inverse, pts.length / 2, vertex, mappedSegment).map(shape =>
+      shape.closed ? { ...l, pts: shape.pts } : { ...l, pts: shape.pts, closed: false, fill: undefined },
+    );
+    Object.assign(l, first ?? { pts: [] });
+    o.polylines.push(...more);
   }
-  for (const r of o.regions?.slice(mark.regions) ?? []) {
-    const tris: number[] = [];
-    // Each triangle on one copy: its corners followed on from its first.
-    for (let k = 0; k + 5 < r.tris.length; k += 6) {
-      const a = inverse.first(r.tris[k], r.tris[k + 1]);
-      if (!isFinite(a[0])) continue;
-      const b = inverse.solve(r.tris[k + 2], r.tris[k + 3], a);
-      const c = b && inverse.solve(r.tris[k + 4], r.tris[k + 5], b);
-      if (b && c) tris.push(...a, ...b, ...c);
-    }
-    r.tris = Float64Array.from(tris);
-  }
+  for (const r of o.regions?.slice(mark.regions) ?? []) r.tris = planeTriangles(r.tris, inverse);
   for (const t of o.texts?.slice(mark.texts) ?? []) [t.x, t.y] = inverse.first(t.x, t.y);
+}
+
+/** A cloud's columns through a plane map, kept while the columns and the
+ *  window stay (a CSV column is reused frame after frame). */
+const planeClouds = new WeakMap<
+  Float64Array,
+  { ys: Float64Array; inverse: PlaneInverse; out: [Float64Array, Float64Array] }
+>();
+function planeCloud(xs: Float64Array, ys: Float64Array, inverse: PlaneInverse): [Float64Array, Float64Array] {
+  const hit = planeClouds.get(xs);
+  if (hit?.ys === ys && hit.inverse === inverse) return hit.out;
+  const out: [Float64Array, Float64Array] = [new Float64Array(xs.length), new Float64Array(xs.length)];
+  for (let k = 0; k < xs.length; k++) [out[0][k], out[1][k]] = inverse.first(xs[k], ys[k]);
+  planeClouds.set(xs, { ys, inverse, out });
+  return out;
+}
+
+/** A region's triangles through a plane map (PlaneInverse.triangles), kept
+ *  while the triangles and the window stay. */
+const planeRegions = new WeakMap<Float64Array, { inverse: PlaneInverse; out: Float64Array }>();
+function planeTriangles(tris: Float64Array, inverse: PlaneInverse): Float64Array {
+  const hit = planeRegions.get(tris);
+  if (hit?.inverse === inverse) return hit.out;
+  const out = inverse.triangles(tris);
+  planeRegions.set(tris, { inverse, out });
+  return out;
 }
 
 /** A graph vertex's radius in CSS px. */

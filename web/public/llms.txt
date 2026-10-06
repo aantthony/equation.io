@@ -1394,9 +1394,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Any smooth map works, with sliders. Every row is drawn through it:
   curves, regions, fields, flows and matrix fields (carried by its
   Jacobian), real systems, and points, parametric curves, figures, labels
-  and complex roots, placed where the screen shows them (a point at each
-  place, on an angle range wider than 2π; a line on one, picking up at the
-  other edge where it crosses the seam). Named points drag in x and y. The
+  and complex roots, placed where the screen shows them (a point, a filled
+  shape or a region at each place, on an angle range wider than 2π; a line
+  on one, picking up at the other edge where it crosses the seam; a shape
+  round the origin, which unrolls into an open curve, as an outline). Named points drag in x and y. The
   grid is the screen's; `grid(x, y)` or coordinate fields (r, theta) draw
   their level lines through the map. Histograms are refused, integrals
   are readouts without shading, and hovering shows no intercepts or extrema

@@ -108,13 +108,25 @@ symlog (`y = sinh(Y)`) all come from one feature.
      (tensor-field `jacobian`, row-major).
    - The way back has no peeling in general, so it is numerical:
      Levenberg–Marquardt from the nearest of a 25 × 25 grid of samples over
-     the window (and a quarter past it), or from a line's last point. A map
-     may show a point more than once; a point is drawn at each, while a line
-     follows the copy it started on and is cut just past the window's edge
-     (FOLLOW_MARGIN). Where it is cut but its end is still on the screen
-     (it crossed an angle's seam) it is traced back from there, so it
-     re-enters at the other edge. On a window wider than a full turn, where
-     two copies of a line are on screen at once, one is drawn.
+     the window (and a quarter past it), or from a neighbour already carried
+     (PlaneInverse). A map may show a point more than once:
+     - a point is drawn at each place;
+     - a line follows the copy it started on and is cut just past the
+       window's edge (FOLLOW_MARGIN); where its end is on the screen after
+       all (it crossed an angle's seam) it is traced back from there,
+       through earlier segments, so it re-enters at the other edge
+       (PlaneInverse.line);
+     - a shape to fill is followed well off the screen, whole, from each
+       place the screen shows a vertex where the map does not fold
+       (planeShapes); one round a fold (a square about the polar origin)
+       does not close on the screen and is an outline only;
+     - a region's corners are carried once each, on the copy their
+       neighbour is on and at the offsets between copies found by
+       searching now and then; a corner where the map folds is placed per
+       triangle, and that triangle becomes the quad it is on the screen
+       (PlaneInverse.triangles).
+     On a window wider than a full turn a line is drawn on one copy, while
+     points, fills and regions are drawn on each.
    - The window is the screen's (X, Y), since a rectangle of x and y is no
      rectangle on it; the grid and labels are the screen's, and `grid(x, y)`
      or coordinate fields draw their level lines through the map.
