@@ -1905,7 +1905,7 @@ function render() {
             for (let k = 0; k < xs.length; k++) {
               const z = zs ? zs[k] : 0;
               if (isFinite(xs[k]) && isFinite(ys[k]) && isFinite(z)) {
-                scene.points.push({ pos: [xs[k], ys[k], z], color });
+                scene.points.push({ pos: [xs[k], ys[k], z], color, group: eq });
               }
             }
             break;
@@ -1915,7 +1915,7 @@ function render() {
             for (const comps of plot.pts) {
               try {
                 const p = comps.map(c => evaluate(c, env));
-                if (p.every(isFinite)) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+                if (p.every(isFinite)) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, group: eq });
               } catch {
                 /* skip unevaluable points */
               }
@@ -1948,7 +1948,7 @@ function render() {
           case 'trail': {
             scene.curves.push({ pts: new Float32Array(eq.trail!.coordinates(3)), color });
             const p = eq.trail!.head;
-            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, group: eq });
             break;
           }
           case 'pcurve': {
@@ -2015,7 +2015,7 @@ function render() {
           }
           case 'point': {
             const p = samplePoint(eq);
-            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name });
+            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name, group: eq });
             break;
           }
           case 'system':
@@ -2024,8 +2024,10 @@ function render() {
               scene.curves.push({ pts: new Float32Array(pts), color });
               break;
             }
+            // Each solution its own group: discrete answers, solid and full
+            // size, not a cloud to shade by depth.
             for (const p of solveFor(eq, plot.dim, plot.residuals)) {
-              scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+              scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, group: p });
             }
             break;
         }

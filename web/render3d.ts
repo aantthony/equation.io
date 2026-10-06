@@ -65,11 +65,129 @@ export function cameraMatrices(
   return { vp, invVp: invert(vp), eye };
 }
 
+/** How far `p` is in front of the eye under `vp`: its clip w, the view depth. */
+export const viewDepth = (vp: Mat4, p: readonly number[]): number =>
+  vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+
+/** How many points pointSpacing measures from. */
+const SPACING_SAMPLES = 64;
+
+/**
+ * The typical distance from a point to its nearest neighbour in `pos` (xyz
+ * triples): the median over up to SPACING_SAMPLES points spread through the
+ * list, each against all the others. Infinity for fewer than two points.
+ */
+export function pointSpacing(pos: Float32Array): number {
+  const n = pos.length / 3;
+  if (n < 2) return Infinity;
+  const samples = Math.min(n, SPACING_SAMPLES);
+  const nearest: number[] = [];
+  for (let s = 0; s < samples; s++) {
+    const i = Math.floor((s * n) / samples) * 3;
+    let best = Infinity;
+    for (let j = 0; j < pos.length; j += 3) {
+      if (j === i) continue;
+      const dx = pos[j] - pos[i];
+      const dy = pos[j + 1] - pos[i + 1];
+      const dz = pos[j + 2] - pos[i + 2];
+      const d = dx * dx + dy * dy + dz * dz;
+      // A repeated point is not a neighbour: it would size the whole run to nothing.
+      if (d > 0 && d < best) best = d;
+    }
+    nearest.push(best);
+  }
+  nearest.sort((a, b) => a - b);
+  return Math.sqrt(nearest[samples >> 1]);
+}
+
+/** pointSpacing by the bits of the positions: the scene is rebuilt every
+ *  frame, but a cloud's points rarely move, and hashing them is a 64th of
+ *  measuring them. */
+const spacingCache = new Map<string, number>();
+function cachedSpacing(pos: Float32Array): number {
+  let hash = 0x811c9dc5;
+  const bits = new Uint32Array(pos.buffer, pos.byteOffset, pos.length);
+  for (let i = 0; i < bits.length; i++) hash = Math.imul(hash ^ bits[i], 0x01000193);
+  const key = `${pos.length}:${hash >>> 0}`;
+  let spacing = spacingCache.get(key);
+  if (spacing === undefined) {
+    // Oldest first: a Map iterates in insertion order.
+    if (spacingCache.size >= 256) spacingCache.delete(spacingCache.keys().next().value!);
+    spacing = pointSpacing(pos);
+    spacingCache.set(key, spacing);
+  }
+  return spacing;
+}
+
+/** Floats per point vertex (see POINT_VERT): position, colour, then world
+ *  diameter, fade start depth and fade span (0: no fade). */
+export const POINT_STRIDE = 9;
+
+/**
+ * The point dots as POINT_STRIDE vertices, farthest from the eye first, so
+ * translucent dots blend over the ones behind them (see POINT_VERT).
+ *
+ * Points form runs: consecutive points of one row (`group`) and colour. A
+ * run of several is a cloud: its dots are POINT_SPACING of its spacing
+ * across, between `minD` and `loneD`, and fade with depth from its own
+ * nearest point over its depth range or `minSpan`, whichever is more. A lone
+ * point is `loneD` across and never fades.
+ */
+export function pointVertices(
+  vp: Mat4,
+  points: Scene3D['points'],
+  { loneD, minD, minSpan }: { loneD: number; minD: number; minSpan: number },
+): Float32Array {
+  const n = points.length;
+  const out = new Float32Array(n * POINT_STRIDE);
+  const depth = new Float64Array(n);
+  const pos = new Float32Array(n * 3);
+  for (let k = 0; k < n; k++) {
+    const p = points[k].pos;
+    pos.set(p, k * 3);
+    depth[k] = viewDepth(vp, p);
+  }
+  let start = 0;
+  for (let k = 1; k <= n; k++) {
+    const run = points[start];
+    const p = points[k];
+    if (p && p.group === run.group && p.color.every((c, i) => c === run.color[i])) continue;
+    const cloud = k - start > 1;
+    const d = cloud
+      ? Math.min(loneD, Math.max(minD, POINT_SPACING * cachedSpacing(pos.subarray(start * 3, k * 3))))
+      : loneD;
+    let near = Infinity;
+    let far = -Infinity;
+    for (let i = start; i < k; i++) {
+      if (!(depth[i] > 0)) continue;
+      near = Math.min(near, depth[i]);
+      far = Math.max(far, depth[i]);
+    }
+    const span = cloud && near <= far ? Math.max(far - near, minSpan) : 0;
+    for (let i = start; i < k; i++) {
+      const o = i * POINT_STRIDE;
+      out.set(points[i].pos, o);
+      out.set(points[i].color, o + 3);
+      out[o + 6] = d;
+      out[o + 7] = span ? near : 0;
+      out[o + 8] = span;
+    }
+    start = k;
+  }
+  // Farthest first. Points behind the eye sort last; the GPU clips them.
+  const order = Uint32Array.from({ length: n }, (_, i) => i).sort((a, b) => (depth[b] || 0) - (depth[a] || 0));
+  const sorted = new Float32Array(out.length);
+  order.forEach((from, to) =>
+    sorted.set(out.subarray(from * POINT_STRIDE, (from + 1) * POINT_STRIDE), to * POINT_STRIDE),
+  );
+  return sorted;
+}
+
 /** Where a world point lands in a w×h viewport under `vp`, or null behind the camera. */
 export function projectToScreen(vp: Mat4, p: readonly number[], w: number, h: number): [number, number] | null {
   const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
   const cy = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
-  const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+  const cw = viewDepth(vp, p);
   if (cw <= 0) return null;
   return [((cx / cw) * 0.5 + 0.5) * w, (0.5 - (cy / cw) * 0.5) * h];
 }
@@ -667,10 +785,25 @@ in float vProgress;
 void main() { outColor = vec4(uColor, uAlpha * mix(1.0, 0.15 + 0.85 * vProgress, uFade)); }
 `;
 
-/** A point's dot in framebuffer pixels. */
+/** A point's dot in framebuffer pixels at the camera's target distance, at
+ *  most: a dense cloud's dots are smaller (see POINT_VERT). */
 const POINT_PX = 14;
+/** A cloud's dots, as a fraction of the spacing between its points. */
+const POINT_SPACING = 0.5;
+/** The least a cloud's dots are at the target distance, in framebuffer
+ *  pixels, however close its points: two roots a hair apart, or a tight
+ *  cluster setting the spacing, would otherwise size every dot to nothing. */
+const POINT_CLOUD_MIN_PX = 3;
+/** The smallest and largest a dot is drawn, in framebuffer pixels. Below the
+ *  smallest a dot keeps that size and fades by the area it lost instead, so a
+ *  far cloud thins rather than shimmering on and off between pixels. The
+ *  largest is also held to what the device can draw (uMaxPx). */
+const POINT_MIN_PX = 2;
+const POINT_MAX_PX = 64;
 /** How far toward the eye a point's dot is depth-tested, in dot radii. */
 const POINT_LIFT = 4;
+/** What a cloud's dot fades to at the far end of its depth (see POINT_VERT). */
+const POINT_FAR_ALPHA = 0.25;
 
 /**
  * A point's dot is depth-tested POINT_LIFT of its radii nearer the eye than
@@ -681,37 +814,80 @@ const POINT_LIFT = 4;
  * across the dot, so a lift of L radii clears every plane steeper than
  * atan(1 / L) (14° for 4); a shallower one draws as a thin band and covers
  * little. A surface more than the lift in front of the point still hides it.
- * In perspective a radius in world units is a fixed fraction of the distance
- * to the eye, POINT_PX tan(fov/2) / viewport height, so the lift is one
- * uniform: that fraction of the way to the eye, at most half of it.
+ * In perspective a dot of px pixels has a radius in world units that is a
+ * fixed fraction of the distance to the eye, px tan(fov/2) / viewport height,
+ * so the lift is that fraction (uLiftK × px) of the way to the eye, at most
+ * half of it.
  *
  * The lift is a screen-space stand-in for deciding visibility at the dot's
  * centre alone: a surface in front of the point but within the lift (a
  * sphere under ~4 dot radii on screen around it) does not hide it, and a
  * thin object that close in front is drawn behind the dot.
+ *
+ * A dot is a ball of fixed size in the world, aDot.x across, so in
+ * perspective it is aDot.x × uPxK / depth pixels: bigger nearer the eye,
+ * smaller farther off, and growing as the camera zooms in. A cloud's dots
+ * are POINT_SPACING of its points' spacing (see pointVertices), so a dense
+ * cloud's dots stay apart and its shape shows; a lone point's, and any dot's
+ * at most, are POINT_PX at the camera's target distance, as before.
+ *
+ * A cloud's dots fade with depth across (aDot.y, aDot.y + aDot.z): full at
+ * its nearest point's depth, down to POINT_FAR_ALPHA at the far end, so it
+ * reads front to back. A lone point is drawn solid wherever it is, until it
+ * is under POINT_MIN_PX and fades by area like any dot.
+ *
+ * Translucent dots are drawn farthest first without writing depth, so each
+ * blends over what is behind it — other dots included — and still hides
+ * behind surfaces. A second pass (uDepthPass) then writes depth for the
+ * mostly-opaque core of each dot alone, so what is drawn later (the grid)
+ * stays behind a solid dot but shows through a faint one or its soft edge.
  */
 const POINT_VERT = `#version 300 es
 layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aColor;
+layout(location=2) in vec3 aDot;
 uniform mat4 uVP;
 uniform vec3 uEye;
-uniform float uLift;
+uniform float uLiftK;
+uniform float uPxK;
+uniform float uMaxPx;
+out vec3 vColor;
+out float vAlpha;
+out float vSize;
 void main() {
-  gl_Position = uVP * vec4(mix(aPos, uEye, uLift), 1.0);
-  gl_PointSize = ${POINT_PX.toFixed(1)};
+  float depth = max((uVP * vec4(aPos, 1.0)).w, 1e-6);
+  float size = clamp(aDot.x * uPxK / depth, ${POINT_MIN_PX.toFixed(1)}, uMaxPx);
+  float px = min(aDot.x * uPxK / depth, size);
+  float cover = px * px / (size * size);
+  float far = aDot.z > 0.0 ? smoothstep(0.0, 1.0, (depth - aDot.y) / aDot.z) : 0.0;
+  vColor = aColor;
+  vAlpha = cover * mix(1.0, ${POINT_FAR_ALPHA.toFixed(2)}, far);
+  vSize = size;
+  gl_Position = uVP * vec4(mix(aPos, uEye, min(uLiftK * size, 0.5)), 1.0);
+  gl_PointSize = size;
 }
 `;
 
 const POINT_FRAG = `#version 300 es
 precision highp float;
-uniform vec3 uColor;
+uniform bool uDepthPass;
+in vec3 vColor;
+in float vAlpha;
+in float vSize;
 out vec4 outColor;
 void main() {
   vec2 q = gl_PointCoord - 0.5;
   float r = length(q);
   if (r > 0.5) discard;
-  float rim = smoothstep(0.5, 0.38, r);
-  vec3 col = mix(vec3(1.0), uColor, rim);
-  outColor = vec4(col, 1.0);
+  // Edges a pixel wide at any size. The white rim is part of the dot's look
+  // up close; on a dot a few pixels across it would be all rim, so it goes.
+  float px = 1.0 / vSize;
+  float edge = 1.0 - smoothstep(0.5 - px, 0.5, r);
+  float rim = vSize < 4.0 ? 1.0 : 1.0 - smoothstep(0.38 - px, 0.5 - px, r);
+  vec3 col = mix(mix(vec3(1.0), vColor, rim), vColor, 1.0 - smoothstep(4.0, 10.0, vSize));
+  float alpha = vAlpha * edge;
+  if (uDepthPass && alpha < 0.5) discard;
+  outColor = vec4(col, alpha);
 }
 `;
 
@@ -926,7 +1102,9 @@ export interface Scene3D {
     /** All four geometry arrays are immutable and can keep their GPU buffers. */
     retained?: boolean;
   }>;
-  points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string }>;
+  /** Dots. `group` is the row a point came from: consecutive points of one
+   *  group (and colour) are a cloud, sized and faded together. */
+  points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string; group?: unknown }>;
   /** Planes a x + b y + c z + d = 0, the GLSL of [a, b, c, d]: drawn
    *  translucent over everything opaque, outlined where they meet the box. */
   planes?: Array<{
@@ -1035,6 +1213,10 @@ export class Renderer3D {
   private tubeProgram: WebGLProgram;
   private dynVao: WebGLVertexArrayObject;
   private dynBuf: WebGLBuffer;
+  private pointVao: WebGLVertexArrayObject;
+  private pointBuf: WebGLBuffer;
+  /** The largest dot the device draws, held to POINT_MAX_PX. */
+  private maxPointPx: number;
   private tubeVao: WebGLVertexArrayObject;
   private tubePosBuf: WebGLBuffer;
   private tubeNrmBuf: WebGLBuffer;
@@ -1067,6 +1249,19 @@ export class Renderer3D {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
+
+    // Point dots: position, colour and size/fade, interleaved (see pointVertices).
+    this.pointVao = gl.createVertexArray()!;
+    this.pointBuf = gl.createBuffer()!;
+    gl.bindVertexArray(this.pointVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.pointBuf);
+    for (let i = 0; i < 3; i++) {
+      gl.enableVertexAttribArray(i);
+      gl.vertexAttribPointer(i, 3, gl.FLOAT, false, POINT_STRIDE * 4, i * 12);
+    }
+    gl.bindVertexArray(null);
+    const sizes = gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE) as Float32Array | null;
+    this.maxPointPx = Math.max(POINT_MIN_PX, Math.min(POINT_MAX_PX, sizes?.[1] ?? POINT_MAX_PX));
 
     // Dynamic indexed mesh (curve tubes): separate position/normal/uv buffers.
     this.tubeProgram = compileProgram(gl, TUBE_VERT, TUBE_FRAG);
@@ -1422,32 +1617,34 @@ export class Renderer3D {
       }
       gl.drawArrays(gl.LINES, 0, s.pts.length / 3);
     }
-    gl.bindVertexArray(this.dynVao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.dynBuf);
     if (scene.points.length) {
-      // One draw per run of same-coloured points: a row pushes its whole
-      // point list with one colour, so a 10 000-point cloud is one upload and
-      // one draw, not 10 000. The dots are opaque, so order does not matter.
+      // One upload and two draws for every point in the scene: a 10 000-point
+      // cloud is not 10 000 draws (see POINT_VERT for the two passes).
       setCommon(this.pointProgram);
       gl.uniform3f(gl.getUniformLocation(this.pointProgram, 'uEye'), ...eye);
-      const lift = (POINT_LIFT * POINT_PX * Math.tan(FOV / 2)) / h;
-      gl.uniform1f(gl.getUniformLocation(this.pointProgram, 'uLift'), Number.isFinite(lift) ? Math.min(lift, 0.5) : 0);
-      const uColor = gl.getUniformLocation(this.pointProgram, 'uColor');
-      const pos = new Float32Array(scene.points.length * 3);
-      let start = 0;
-      for (let k = 0; k <= scene.points.length; k++) {
-        const p = scene.points[k];
-        const run = scene.points[start];
-        if (p && p.color.every((c, i) => c === run.color[i])) {
-          pos.set(p.pos, k * 3);
-          continue;
-        }
-        gl.uniform3f(uColor, ...run.color);
-        gl.bufferData(gl.ARRAY_BUFFER, pos.subarray(start * 3, k * 3), gl.DYNAMIC_DRAW);
-        gl.drawArrays(gl.POINTS, 0, k - start);
-        if (p) pos.set(p.pos, k * 3);
-        start = k;
-      }
+      const liftK = (POINT_LIFT * Math.tan(FOV / 2)) / h;
+      gl.uniform1f(gl.getUniformLocation(this.pointProgram, 'uLiftK'), Number.isFinite(liftK) ? liftK : 0);
+      // Framebuffer pixels per world unit, times the depth.
+      const pxK = h / (2 * Math.tan(FOV / 2));
+      gl.uniform1f(gl.getUniformLocation(this.pointProgram, 'uPxK'), pxK);
+      gl.uniform1f(gl.getUniformLocation(this.pointProgram, 'uMaxPx'), this.maxPointPx);
+      const verts = pointVertices(vp, scene.points, {
+        loneD: (POINT_PX * cam.radius) / pxK,
+        minD: (POINT_CLOUD_MIN_PX * cam.radius) / pxK,
+        minSpan: boxR,
+      });
+      gl.bindVertexArray(this.pointVao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.pointBuf);
+      gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+      const uDepthPass = gl.getUniformLocation(this.pointProgram, 'uDepthPass');
+      gl.uniform1i(uDepthPass, 0);
+      gl.depthMask(false);
+      gl.drawArrays(gl.POINTS, 0, scene.points.length);
+      gl.depthMask(true);
+      gl.uniform1i(uDepthPass, 1);
+      gl.colorMask(false, false, false, false);
+      gl.drawArrays(gl.POINTS, 0, scene.points.length);
+      gl.colorMask(true, true, true, true);
     }
     gl.bindVertexArray(null);
 
@@ -1809,19 +2006,32 @@ export function drawLabels3D(
     ['y', [0, boxR * 1.04, 0], '#4a4'],
     ['z', [0, 0, boxR * 1.04], '#46a'],
   ];
-  const labels: Array<[string, number[], string]> = [
+  const labels: Array<[string, number[], string, boolean?]> = [
     ...(axes ? axisLabels : []),
     ...points
       .filter(p => p.label)
       .map(
-        p => [p.label!, p.pos, `rgb(${p.color.map(c => Math.round(c * 255)).join(',')})`] as [string, number[], string],
+        p =>
+          [p.label!, p.pos, `rgb(${p.color.map(c => Math.round(c * 255)).join(',')})`, true] as [
+            string,
+            number[],
+            string,
+            boolean,
+          ],
       ),
   ];
-  for (const [text, p, color] of labels) {
+  for (const [text, p, color, dot] of labels) {
     const at = projectToScreen(vp, p, w, h);
     if (!at) continue;
+    // Clear of the dot, which grows nearer the eye (see POINT_VERT): 7px
+    // beside one of POINT_PX at the target distance.
+    let off = 7;
+    if (dot) {
+      const depth = viewDepth(vp, p);
+      off = 7 * Math.min(Math.max(cam.radius / depth, 0.6), POINT_MAX_PX / POINT_PX);
+    }
     ctx.fillStyle = color;
-    ctx.fillText(text, at[0] + 7, at[1] - 7);
+    ctx.fillText(text, at[0] + off, at[1] - off);
   }
   for (const { pos, text, color } of texts) {
     const at = projectToScreen(vp, pos, w, h);
