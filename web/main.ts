@@ -107,6 +107,7 @@ import {
   orientLattice,
   parseViewRow,
 } from '../lib/view.ts';
+import { type AxisMap, type AxisMaps, axisMapping, toScreen, toWorld } from '../lib/axis-map.ts';
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
 import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
@@ -131,6 +132,8 @@ import {
   Renderer2D,
   type View2D,
   drawLabels2D,
+  mapOverlay,
+  markOverlay,
   GRAPH_NODE_PX,
   LATTICE_VALUE_PX,
   type LatticeLabels,
@@ -887,6 +890,12 @@ function runTweens(now: number) {
 // spin never rewrites the URL. A panel's spinScale eases a new spin in from rest.
 let lastSpinAt: number | null = null;
 
+/** The axis maps of panel p's view(…) row (lib/axis-map.ts), if it has any. */
+function panelMaps(p: Panel | undefined): AxisMaps | undefined {
+  const spec = p && viewportRow('view', p)?.viewSpec;
+  return spec?.kind === 'view' ? spec.maps : undefined;
+}
+
 /** The current panel's viewport row of the given kind, if any (duplicates carry errors). */
 function viewportRow(kind: ViewSpec['kind'], p: Panel = cur): Equation | undefined {
   const i = panels.indexOf(p);
@@ -1057,11 +1066,19 @@ function panelViewText(p: Panel): { eq: Equation; text: string } | null {
         y: sy ? undefined : [v.cy - hh, v.cy + hh],
         ratio: sx || sy ? undefined : v.ratio,
         axes: p.lattice?.axes as [string, string] | undefined,
+        maps: (eq.viewSpec as View2DSpec).maps,
       },
       p.lattice?.written,
     );
   } else {
     text = formatCameraRow({ ...p.camera, spin: p.spin });
+  }
+  // A mapped axis panned past what its map can name (ln(X) left of X = 0)
+  // has no row to write: the row keeps the last window it could.
+  try {
+    parseViewRow(text, {});
+  } catch {
+    return null;
   }
   text = keepNote(eq.text, text);
   return text === eq.text ? null : { eq, text };
@@ -1709,10 +1726,12 @@ function render() {
       : graphs
         ? 'off'
         : 'on';
+    const maps = panelMaps(panel);
     const frame: Frame = {
       vp: { x: r.x, y: canvas.height - r.y - r.h, w: r.w, h: r.h },
       grid: gridMode,
       lattice: !!panel.lattice,
+      ...(maps ? { maps } : {}),
     };
     const box = split ? { x: r.x / dpr, y: r.y / dpr, w: r.w / dpr, h: r.h / dpr } : undefined;
     if (split) {
@@ -2058,11 +2077,32 @@ function render() {
         const cupp = sampleGradMag(f, viewPts, env, view.upp * 4, view.ratio) * view.upp;
         return f.angular ? angularSpacing(cupp, 90) : niceSpacing(cupp, 90);
       };
+      // A mapped panel (lib/axis-map.ts) carries what a placing row adds to
+      // the overlay, and the points it lets you grab, to its screen.
+      const maps = frame.maps;
+      const placed = (eq: Equation) => !!maps && !!eq.cls && axisMapping(eq.cls.object) === 'place';
+      const since = (eq: Equation) => (placed(eq) ? { overlay: markOverlay(extras), grabs: grabs.length } : null);
+      const carry = (mark: ReturnType<typeof since>) => {
+        if (!mark || !maps) return;
+        mapOverlay(extras, mark.overlay, maps);
+        for (const g of grabs.splice(mark.grabs)) {
+          const [x, y] = [maps.x ? toScreen(maps.x, g.x) : g.x, maps.y ? toScreen(maps.y, g.y) : g.y];
+          if (!isFinite(x) || !isFinite(y)) continue;
+          const set = g.set;
+          grabs.push({
+            ...g,
+            x,
+            y,
+            set: (sx, sy) => set(dragTo(maps.x, sx, 0), dragTo(maps.y, sy, 1)),
+          });
+        }
+      };
       for (const eq of rows) {
         const color = rowColor(eq);
         const css = cssColor(color);
         const plot = eq.cpu!;
         const { params, uniforms } = shaderBindings(eq.gpu);
+        const mark = since(eq);
         switch (plot.type) {
           case 'implicit2d':
             layers.curves.push({ ...gpuFor(eq, 'implicit2d'), color, params, uniforms });
@@ -2529,6 +2569,7 @@ function render() {
             }
             break;
         }
+        carry(mark);
       }
       // Named points (`A = (0, 0)` rows) draw labeled with their name, in the
       // panel their row is in; rows whose components are plain numbers or
@@ -2541,6 +2582,7 @@ function render() {
         const py = constEnv[cy];
         if (!isFinite(px) || !isFinite(py)) continue;
         const key = `def${eq.id}`;
+        const mark = maps ? { overlay: markOverlay(extras), grabs: grabs.length } : null;
         extras.points.push({
           x: px,
           y: py,
@@ -2550,6 +2592,7 @@ function render() {
         });
         const set = defPointWriter(eq);
         if (set) grabs.push({ key, x: px, y: py, edits: true, set });
+        carry(mark);
       }
       // A seed is one grabbable point however many fields trace a curve from it.
       if (layers.vfields.length) {
@@ -2567,7 +2610,9 @@ function render() {
         );
       }
       let gridSpecs: GridSpec[] | undefined;
-      const families = frame.grid === 'on' ? panelGridFields(panel) : [];
+      // Coordinate fields are written in x and y, not a mapped panel's screen
+      // coordinates: a mapped panel grids its axes at their ticks instead.
+      const families = frame.grid === 'on' && !frame.maps ? panelGridFields(panel) : [];
       if (families.length) {
         gridSpecs = families.map(f => {
           if (f === 'x' || f === 'y') {
@@ -2588,6 +2633,7 @@ function render() {
         frame.grid !== 'off' && !gridSpecs,
         box,
         panel.lattice ? lattice : undefined,
+        frame.maps,
       );
       drawHoverMarker(dpr);
     }
@@ -4539,6 +4585,16 @@ function buildExamplesMenu() {
   });
 }
 
+/** Where a drag to screen coordinate s puts a point on a mapped axis: s
+ *  rounded to a pixel there (where pixels are even), then to five figures,
+ *  so a log axis writes 0.00005 or 116.59, never a pixel-sized 0. */
+function dragTo(map: AxisMap | undefined, s: number, axis: number): number {
+  if (!map) return s;
+  const upp = view.upp / (axis === 1 ? (view.ratio ?? 1) : 1);
+  const step = Math.pow(10, Math.floor(Math.log10(upp * 3)));
+  return parseFloat(toWorld(map, Math.round(s / step) * step).toPrecision(5));
+}
+
 // --- draggable points ---
 //
 // A point row whose coordinates are plain numbers or bare slider names can be
@@ -4549,8 +4605,11 @@ function buildExamplesMenu() {
 // coordinates can move is decided by lib/drag.ts, shared with the MCP server
 // so its "draggable" report matches what the app actually does.
 
-/** Round to roughly a pixel, so dragging writes short, readable numbers. */
+/** Round to roughly a pixel, so dragging writes short, readable numbers.
+ *  A mapped axis's pixels are not even in its own units, so its value was
+ *  rounded on the screen already (dragTo) and is left as it is. */
 function snapToPixel(v: number, axis = 0): number {
+  if (panelMaps(cur)?.[axis === 1 ? 'y' : 'x']) return v;
   const upp = view.upp / (axis === 1 ? (view.ratio ?? 1) : 1);
   const step = Math.pow(10, Math.floor(Math.log10(upp * 3)));
   return Math.round(v / step) * step;
@@ -4805,6 +4864,9 @@ function computeSpecialPoints(eq: Equation) {
 function pointsFor(eq: Equation): SpecialPoint[] {
   const cls = eq.cls;
   if (!cls || eq.error || !eq.cpu || eq.cpu.type !== 'implicit2d' || cls.animated) return [];
+  // A mapped panel's rows are written in its screen coordinates, where roots
+  // and intercepts are not the ones its x and y have (lib/axis-map.ts).
+  if (panelMaps(panels[panelOf(eq)])) return [];
   const { halfW, halfH } = hoverHalfSpan();
   const envKey = hoverEnvKey(cls);
   const c = eq.spCache;

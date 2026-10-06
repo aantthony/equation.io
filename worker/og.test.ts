@@ -45,6 +45,14 @@ describe('og raster renderer', () => {
     expect(own.px.subarray(row, 100 * row)).not.toEqual(own.px.subarray(101 * row, 200 * row));
   });
 
+  it('places a point on a mapped axis through the map, as the app does', () => {
+    // x = 10 on x = 10^X is screen X = 1, where x = 1 sits on a plain axis.
+    const mapped = renderRaster(['view(x = 1..100, y = -1..1, x = 10^X)', 'grid(off)', '(10, 0.5) #e24'], 100, 100);
+    const plain = renderRaster(['view(x = 0..2, y = -1..1)', 'grid(off)', '(1, 0.5) #e24'], 100, 100);
+    expect(inkFraction(plain)).toBeGreaterThan(0);
+    expect(mapped.px).toEqual(plain.px);
+  });
+
   it("lets one panel be 3D without dropping another panel's 2D-only rows", () => {
     expect(canRenderOg(['z = x y', '--- right', 'y < sin(x)'])).toBe(true);
     expect(canRenderOg(['z = x y', 'y < sin(x)'])).toBe(false);

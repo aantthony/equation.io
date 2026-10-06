@@ -10,6 +10,8 @@ import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
+import { type AxisMap, type AxisMaps, toScreen as mapToScreen } from '../lib/axis-map.ts';
+import { type AxisTicks, axisTicks } from '../lib/axis-ticks.ts';
 
 export interface View2D {
   cx: number;
@@ -253,6 +255,79 @@ ${blocks}
   outColor = vec4(col, 1.0);
 }
 `;
+}
+
+/** Most lines a mapped axis draws (lib/axis-ticks.ts), per kind. Packed
+ *  four to a vec4: a float array takes a whole uniform vector per entry,
+ *  and WebGL2 promises only 224 vectors. Multiples of 4. */
+const MAX_MAJOR_TICKS = 64;
+const MAX_MINOR_TICKS = 192;
+
+/**
+ * Grid lines of mapped axes at the screen coordinates their ticks chose,
+ * blended over the grid pass: on `x = 10^X` the lines are not evenly
+ * spaced, so they are a list rather than a level set. Each axis also draws
+ * its zero line where the map reaches 0.
+ */
+function tickFrag(axes: ReadonlyArray<'x' | 'y'>): string {
+  const decls = axes
+    .map(
+      a => `uniform vec4 uMaj${a}[${MAX_MAJOR_TICKS / 4}];
+uniform int uNMaj${a};
+uniform vec4 uMin${a}[${MAX_MINOR_TICKS / 4}];
+uniform int uNMin${a};
+uniform float uZero${a};
+uniform int uHasZero${a};`,
+    )
+    .join('\n');
+  const blocks = axes
+    .map(a => {
+      const c = `p.${a}`;
+      const px = `uUpp.${a}`;
+      return `
+  for (int i = 0; i < ${MAX_MINOR_TICKS}; i++) {
+    if (i >= uNMin${a}) break;
+    minorA = max(minorA, tickLine(abs(${c} - uMin${a}[i / 4][i % 4]) / ${px}));
+  }
+  for (int i = 0; i < ${MAX_MAJOR_TICKS}; i++) {
+    if (i >= uNMaj${a}) break;
+    majorA = max(majorA, tickLine(abs(${c} - uMaj${a}[i / 4][i % 4]) / ${px}));
+  }
+  if (uHasZero${a} == 1) axisA = max(axisA, 1.0 - smoothstep(0.9, 1.9, abs(${c} - uZero${a}) / ${px}));`;
+    })
+    .join('');
+  return `#version 300 es
+precision highp float;
+uniform vec2 uCenter;
+uniform vec2 uUpp;
+uniform vec2 uRes;
+uniform vec2 uOrigin;
+${decls}
+out vec4 outColor;
+float tickLine(float distPx) { return 1.0 - smoothstep(0.5, 1.5, distPx); }
+void main() {
+  vec2 p = uCenter + (gl_FragCoord.xy - uOrigin - 0.5 * uRes) * uUpp;
+  float minorA = 0.0;
+  float majorA = 0.0;
+  float axisA = 0.0;
+${blocks}
+  vec3 col = ${glslVec3(theme.gridMinor)};
+  float a = minorA;
+  if (majorA > 0.0) { col = mix(col, ${glslVec3(theme.gridMajor)}, majorA); a = max(a, majorA); }
+  if (axisA > 0.0) { col = mix(col, ${glslVec3(theme.axis)}, axisA); a = max(a, axisA); }
+  if (a < 0.004) discard;
+  outColor = vec4(col, a);
+}
+`;
+}
+
+/** Each mapped axis's ticks in view, in screen units (lib/axis-ticks.ts). */
+export function mappedTicks(view: View2D, w: number, h: number, maps: AxisMaps): Partial<Record<'x' | 'y', AxisTicks>> {
+  const uppY = view.upp / (view.ratio ?? 1);
+  const out: Partial<Record<'x' | 'y', AxisTicks>> = {};
+  if (maps.x) out.x = axisTicks(maps.x, view.cx - (w / 2) * view.upp, view.cx + (w / 2) * view.upp, 1 / view.upp);
+  if (maps.y) out.y = axisTicks(maps.y, view.cy - (h / 2) * uppY, view.cy + (h / 2) * uppY, 1 / uppY);
+  return out;
 }
 
 /**
@@ -1114,15 +1189,18 @@ export class Renderer2D {
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     const grid = frame.grid ?? 'on';
+    const maps = frame.maps ?? {};
     let specs = grid === 'off' ? [] : gridSpecs;
     if (grid !== 'off' && !specs?.length && frame.lattice) specs = latticeGrid(view);
     else if (grid !== 'off' && !specs?.length) {
       const spacing = niceSpacing(view.upp, 90);
       const spacingY = niceSpacing(view.upp / (view.ratio ?? 1), 90);
-      specs = [
+      // A mapped axis is gridded at its ticks below, not evenly here.
+      const cartesian: GridSpec[] = [
         { glsl: 'x', gradGlsl: ['1.0', '0.0'], params: [], major: spacing.major, minor: spacing.minor },
         { glsl: 'y', gradGlsl: ['0.0', '1.0'], params: [], major: spacingY.major, minor: spacingY.minor },
       ];
+      specs = cartesian.filter(s => !maps[s.glsl as 'x' | 'y']);
     }
     try {
       const gridSpecsDrawn = specs ?? [];
@@ -1143,6 +1221,35 @@ export class Renderer2D {
         }
       });
       this.quad.draw();
+      const mapped = (['x', 'y'] as const).filter(a => maps[a]);
+      if (grid !== 'off' && mapped.length && !frame.lattice) {
+        const ticks = mappedTicks(view, w, h, maps);
+        const tp = this.cache.get(QUAD_VERT, tickFrag(mapped));
+        gl.useProgram(tp);
+        gl.uniform2f(gl.getUniformLocation(tp, 'uCenter'), view.cx, view.cy);
+        gl.uniform2f(gl.getUniformLocation(tp, 'uUpp'), view.upp, view.upp / (view.ratio ?? 1));
+        gl.uniform2f(gl.getUniformLocation(tp, 'uRes'), w, h);
+        gl.uniform2f(gl.getUniformLocation(tp, 'uOrigin'), ox, oy);
+        for (const a of mapped) {
+          const t = ticks[a]!;
+          const axesOnly = grid === 'axes';
+          const major = axesOnly ? [] : t.major.slice(0, MAX_MAJOR_TICKS).map(m => m.at);
+          const minor = axesOnly ? [] : t.minor.slice(0, MAX_MINOR_TICKS);
+          // Padded to whole vec4s; entries past the count are never read.
+          const packed = (v: number[]) => {
+            const out = new Float32Array(Math.ceil(v.length / 4) * 4);
+            out.set(v);
+            return out;
+          };
+          if (major.length) gl.uniform4fv(gl.getUniformLocation(tp, `uMaj${a}`), packed(major));
+          if (minor.length) gl.uniform4fv(gl.getUniformLocation(tp, `uMin${a}`), packed(minor));
+          gl.uniform1i(gl.getUniformLocation(tp, `uNMaj${a}`), major.length);
+          gl.uniform1i(gl.getUniformLocation(tp, `uNMin${a}`), minor.length);
+          gl.uniform1f(gl.getUniformLocation(tp, `uZero${a}`), t.zero ?? 0);
+          gl.uniform1i(gl.getUniformLocation(tp, `uHasZero${a}`), t.zero === null ? 0 : 1);
+        }
+        this.quad.draw();
+      }
     } catch (e) {
       console.error(e);
     }
@@ -1360,6 +1467,124 @@ export interface Overlay2D {
   tags?: Array<{ x: number; y: number; text: string; color: string }>;
 }
 
+/** Where an overlay's lists end, so what one row adds can be told apart. */
+export interface OverlayMark {
+  points: number;
+  clouds: number;
+  polylines: number;
+  regions: number;
+  texts: number;
+}
+
+export function markOverlay(o: Overlay2D): OverlayMark {
+  return {
+    points: o.points.length,
+    clouds: o.clouds?.length ?? 0,
+    polylines: o.polylines.length,
+    regions: o.regions?.length ?? 0,
+    texts: o.texts?.length ?? 0,
+  };
+}
+
+/** A straight segment is cut until each mapped piece strays from its chord
+ *  by under this fraction of the segment's mapped length (a straight run in
+ *  x and y is a curve on a log axis), into at most 2^depth pieces. A sampled
+ *  curve's short segments are already straight on screen, so most cost one
+ *  extra evaluation. */
+const MAPPED_BEND = 0.0005;
+const MAPPED_DEPTH = 12;
+
+/** Mapped points of the straight segment a → b, a included, b not. */
+function mappedSegment(
+  a: [number, number],
+  b: [number, number],
+  map: (x: number, y: number) => [number, number],
+): number[] {
+  const out: number[] = [];
+  const pa = map(...a);
+  const pb = map(...b);
+  const shown = (p: [number, number]) => isFinite(p[0]) && isFinite(p[1]);
+  const tol = MAPPED_BEND * Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+  const split = (t0: number, p0: [number, number], t1: number, p1: [number, number], depth: number) => {
+    const t = (t0 + t1) / 2;
+    const pm = map(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+    // Where the map stops (one end shown, one not) the piece is cut as far
+    // as depth allows, so the line breaks close to the edge; a piece shown
+    // at both ends is cut while it bends; one shown at neither is a gap.
+    let cut: boolean;
+    if (shown(p0) !== shown(p1)) cut = true;
+    else if (!shown(p0)) cut = false;
+    else {
+      const [dx, dy] = [p1[0] - p0[0], p1[1] - p0[1]];
+      const off = Math.abs((pm[0] - p0[0]) * dy - (pm[1] - p0[1]) * dx) / (Math.hypot(dx, dy) || 1);
+      // With an end past the map the segment has no mapped length: the
+      // piece's own stands in, which shrinks as it is cut.
+      cut = !shown(pm) || off > (isFinite(tol) ? tol : 4 * MAPPED_BEND * Math.hypot(dx, dy));
+    }
+    if (depth < MAPPED_DEPTH && cut) {
+      split(t0, p0, t, pm, depth + 1);
+      split(t, pm, t1, p1, depth + 1);
+    } else out.push(...p0);
+  };
+  split(0, pa, 1, pb, 0);
+  return out;
+}
+
+/** A cloud's mapped columns, kept while its arrays and the map are the same
+ *  (a CSV column is reused frame after frame). */
+const mappedColumns = new WeakMap<Float64Array, { map: AxisMap | undefined; out: Float64Array }>();
+function mappedColumn(col: Float64Array, map: AxisMap | undefined): Float64Array {
+  if (!map) return col;
+  const hit = mappedColumns.get(col);
+  if (hit?.map === map) return hit.out;
+  const out = col.map(v => mapToScreen(map, v));
+  mappedColumns.set(col, { map, out });
+  return out;
+}
+
+/**
+ * Carry what a row added to the overlay since `mark` from x and y to a mapped
+ * panel's screen coordinates (lib/axis-map.ts). Positions the map cannot
+ * show (x ≤ 0 on a log axis) become NaN: points there are dropped, and lines
+ * break there, as they do at any other gap.
+ */
+export function mapOverlay(o: Overlay2D, mark: OverlayMark, maps: AxisMaps): void {
+  const mx = maps.x ? (v: number) => mapToScreen(maps.x!, v) : (v: number) => v;
+  const my = maps.y ? (v: number) => mapToScreen(maps.y!, v) : (v: number) => v;
+  const kept = o.points.slice(mark.points).flatMap(p => {
+    const [x, y] = [mx(p.x), my(p.y)];
+    return isFinite(x) && isFinite(y) ? [{ ...p, x, y }] : [];
+  });
+  o.points.splice(mark.points, Infinity, ...kept);
+  for (const c of o.clouds?.slice(mark.clouds) ?? []) {
+    c.xs = mappedColumn(c.xs, maps.x);
+    c.ys = mappedColumn(c.ys, maps.y);
+  }
+  const both = (x: number, y: number): [number, number] => [mx(x), my(y)];
+  for (const l of o.polylines.slice(mark.polylines)) {
+    const { pts } = l;
+    const n = pts.length / 2;
+    const out: number[] = [];
+    const vertex = (k: number): [number, number] => [pts[(2 * k) % pts.length], pts[(2 * k + 1) % pts.length]];
+    for (let k = 0; k < (l.closed ? n : n - 1); k++) out.push(...mappedSegment(vertex(k), vertex(k + 1), both));
+    // The last vertex, unless closing back to the first draws it.
+    if (!l.closed && n) out.push(...both(...vertex(n - 1)));
+    l.pts = out;
+  }
+  for (const r of o.regions?.slice(mark.regions) ?? []) {
+    const tris = new Float64Array(r.tris.length);
+    for (let k = 0; k + 1 < tris.length; k += 2) {
+      tris[k] = mx(r.tris[k]);
+      tris[k + 1] = my(r.tris[k + 1]);
+    }
+    r.tris = tris;
+  }
+  for (const t of o.texts?.slice(mark.texts) ?? []) {
+    t.x = mx(t.x);
+    t.y = my(t.y);
+  }
+}
+
 /** A graph vertex's radius in CSS px. */
 export const GRAPH_NODE_PX = 13;
 
@@ -1434,6 +1659,7 @@ export function drawLabels2D(
   numbers = true,
   box?: OverlayBox,
   lattice?: LatticeLabels,
+  maps: AxisMaps = {},
 ): void {
   const { w, h } = beginOverlay(ctx, dpr, box);
   ctx.font = '11px ui-sans-serif, system-ui';
@@ -1455,20 +1681,31 @@ export function drawLabels2D(
 
   if (lattice) drawLatticeLabels(ctx, lattice, numbers, view, w, h, upp, uppY, toScreenX, toScreenY);
   else if (numbers) {
-    const axisY = Math.min(Math.max(toScreenY(0), 12), h - 6);
-    const axisX = Math.min(Math.max(toScreenX(0), 4), w - 30);
+    // A mapped axis is labelled at its ticks, in its own units; its zero
+    // (none on a log axis) is where the other axis's labels run, or else
+    // they run along the panel's edge.
+    const ticks = mappedTicks(view, w * dpr, h * dpr, maps);
+    const zeroX = maps.x ? (ticks.x!.zero ?? -Infinity) : 0;
+    const zeroY = maps.y ? (ticks.y!.zero ?? -Infinity) : 0;
+    const axisY = Math.min(Math.max(toScreenY(zeroY), 12), h - 6);
+    const axisX = Math.min(Math.max(toScreenX(zeroX), 4), w - 30);
+    const xLabel = (x: number, at: number) =>
+      ctx.fillText(fmt(x), toScreenX(at) + 2, axisY + 13 <= h ? axisY + 13 : axisY - 4);
+    const yLabel = (y: number, at: number) => ctx.fillText(fmt(y), axisX + 4, toScreenY(at) - 3);
 
-    const x0 = Math.ceil((view.cx - (w / 2) * upp) / major) * major;
-    const x1 = view.cx + (w / 2) * upp;
-    for (let x = x0; x <= x1; x += major) {
-      if (Math.abs(x) < major / 2) continue;
-      ctx.fillText(fmt(x), toScreenX(x) + 2, axisY + 13 <= h ? axisY + 13 : axisY - 4);
+    if (ticks.x) {
+      for (const t of ticks.x.major) if (t.value !== 0) xLabel(t.value, t.at);
+    } else {
+      const x0 = Math.ceil((view.cx - (w / 2) * upp) / major) * major;
+      const x1 = view.cx + (w / 2) * upp;
+      for (let x = x0; x <= x1; x += major) if (Math.abs(x) >= major / 2) xLabel(x, x);
     }
-    const y0 = Math.ceil((view.cy - (h / 2) * uppY) / majorY) * majorY;
-    const y1 = view.cy + (h / 2) * uppY;
-    for (let y = y0; y <= y1; y += majorY) {
-      if (Math.abs(y) < majorY / 2) continue;
-      ctx.fillText(fmt(y), axisX + 4, toScreenY(y) - 3);
+    if (ticks.y) {
+      for (const t of ticks.y.major) if (t.value !== 0) yLabel(t.value, t.at);
+    } else {
+      const y0 = Math.ceil((view.cy - (h / 2) * uppY) / majorY) * majorY;
+      const y1 = view.cy + (h / 2) * uppY;
+      for (let y = y0; y <= y1; y += majorY) if (Math.abs(y) >= majorY / 2) yLabel(y, y);
     }
   }
 

@@ -1,5 +1,6 @@
 /** Minimal WebGL2 helpers: program compilation with cache, fullscreen quad. */
 import { shaderTables, withHelpers } from '../lib/glsl.ts';
+import type { AxisMaps } from '../lib/axis-map.ts';
 
 /**
  * Shader-compile counter, read by the perf harness (scripts/perf.ts) to
@@ -20,6 +21,8 @@ export interface Frame {
   grid?: 'on' | 'off' | 'axes';
   /** A lattice panel (docs/discrete.md): the grid runs between cells. */
   lattice?: boolean;
+  /** Axes the panel's view(…) maps (lib/axis-map.ts): gridded at their ticks. */
+  maps?: AxisMaps;
 }
 
 export function compileProgram(gl: WebGL2RenderingContext, vert: string, frag: string): WebGLProgram {
