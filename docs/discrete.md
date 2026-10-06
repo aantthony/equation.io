@@ -200,9 +200,12 @@ s_0 = ()                                  # the empty tuple (also the default)
 s_{n+1} = push(s_n, n^2)                  # (), (0), (0, 1), (0, 1, 4), …
 ```
 
-A recurrence is **tuple-valued** when its seed is a tuple (`s_0 = ()`,
-`s_0 = (1, 2, 3, 4)`, a point) or its step, or a function it calls, uses
-`push` or `pop`. Three builtins treat a tuple as a stack: `push(s, a, …)`
+A recurrence is **tuple-valued** when it starts from the empty tuple
+(`s_0 = ()`), or when its step, or a function it calls, uses `push` or `pop`
+or has a tuple as its value (`p_{n+1} = (…, …)`, or arithmetic on one). Its
+seed may then be any tuple (`s_0 = (1, 2, 3, 4)`, a point). A tuple seed
+alone is not enough: `a_0 = (0.1, 0.2); a_{n+1} = 3 a_n (1 - a_n)` steps
+each element, a cobweb per element, as it did before. Three builtins treat a tuple as a stack: `push(s, a, …)`
 appends, `pop(s)` drops the last element, `top(s)` reads it; `count(s)` is
 the length and `s[h]` element h, as for any tuple.
 

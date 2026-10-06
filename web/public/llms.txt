@@ -739,11 +739,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (default 0.5); terms compute as a bounded chain of scalar constants, so
   sliders and t remain live. A recurrence using x as a bifurcation parameter
   cannot also supply constant terms without binding that parameter.
-- Tuple-valued recurrences: a recurrence whose seed is a tuple, or whose
-  step calls `push(s, a)` (s with a appended), `pop(s)` (s without its last
-  element) or `top(s)` (its last element), has tuples as terms — a stack.
-  `s_0 = ()` starts it from the empty tuple (the default); `count(s_n)` is
-  its length and `s_n[h]` its h-th element. Only the case that holds is run,
+- Tuple-valued recurrences: a recurrence whose step calls `push(s, a)` (s
+  with a appended) or `pop(s)` (s without its last element), or whose value
+  is a tuple, has tuples as terms — a stack. `top(s)` reads the last
+  element. `s_0 = ()` starts it from the empty tuple (the default), and any
+  tuple may be its seed; a tuple seed with a step that makes no tuple
+  (`a_0 = (0.1, 0.2); a_{n+1} = 3 a_n (1 - a_n)`) steps each element instead.
+  `count(s_n)` is its length and `s_n[h]` its h-th element; a number with a
+  tuple applies to each element (`1 + p_n`, `s_n/2`). Only the case that holds is run,
   so cases may differ in length: with `D = (1, 1, 2, 2)`,
   `s_{n+1} = {D[n + 1] = 1: push(s_n, 1), pop(s_n)}`. The run stops where
   it pops or reads the top of the empty tuple, or where no case holds (a

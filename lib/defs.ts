@@ -2246,6 +2246,9 @@ function coordParams(
  * Inline user-function calls, resolve d/dx derivative notation, and expand
  * Σ/Π sums and ∫ integrals (post-order).
  */
+/** A name with a subscript, a_3 or s_n: the only kind a term can have. */
+const SUBSCRIPTED = /^[^_]+_[^_]/;
+
 /** A tuple read as a stack (docs/discrete.md, pushdown automata). */
 export const STACK_FNS: ReadonlySet<string> = new Set(['push', 'pop', 'top']);
 
@@ -2410,7 +2413,10 @@ function rx(e: Expr, ctx: Ctx): Expr {
         const term = ctx.opts.sequenceTerm?.(e.args[0].name, e.args[1], ctx.opts.openVars);
         if (term) return term;
         // s_3[2]: position 2 of a tuple-valued recurrence's term (lib/seq.ts).
-        const whole = ctx.opts.sequenceTerm?.(e.args[0].name, undefined, ctx.opts.openVars);
+        // Only a subscripted name can be a term: D[n + 1] asks no more.
+        const whole = SUBSCRIPTED.test(e.args[0].name)
+          ? ctx.opts.sequenceTerm?.(e.args[0].name, undefined, ctx.opts.openVars)
+          : null;
         const tuple = whole && literalTuple(whole);
         if (tuple) {
           const at = rx(e.args[1], ctx);
@@ -2456,8 +2462,6 @@ function rx(e: Expr, ctx: Ctx): Expr {
       }
       // A reduction over x, u, an interval or a filter is an integral against
       // its measure (docs/multisets.md §5); over a list it lowers later.
-      // A stack read whole: the empty tuple counts 0 (a tuple-valued
-      // recurrence's term, lib/seq.ts), which no list or point can be.
       // A tuple-valued recurrence's term counts its elements (lib/seq.ts),
       // the empty tuple among them, which no list or point can be.
       if (e.name === 'count' && e.args.length === 1) {
@@ -2468,8 +2472,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
             : arg.kind === 'index' && arg.args[0].kind === 'var'
               ? ctx.opts.sequenceTerm?.(arg.args[0].name, arg.args[1], ctx.opts.openVars)
               : null;
-        const tuple =
-          term && arg.kind === 'var' ? literalTuple(term) : term?.kind === 'vec' ? literalTuple(term) : null;
+        const tuple = term && literalTuple(term);
         if (tuple) return { kind: 'num', value: tuple.length };
       }
       if (isReductionCall(e)) {

@@ -864,7 +864,13 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         continue;
       }
       // `s_0 = ()`: the empty tuple its recurrence starts from, drawn there.
-      if (seq?.emptyTuple) continue;
+      // A recurrence has one seed: not this and a constant s_0 too.
+      if (seq?.emptyTuple) {
+        const seed = `${seq.name}_0`;
+        const earlier = document.seqScans.findIndex(s => s?.emptyTuple && s.name === seq.name) < ri;
+        if (earlier || document.raw.some(d => d.name === seed)) throw new Error(`${seed} is already defined.`);
+        continue;
+      }
       if (seq) {
         const first = document.seqScans.findIndex(s => s?.name === seq.name && !s.emptyTuple);
         if (first < ri) throw new Error(`Sequence ${seq.name} is already defined.`);

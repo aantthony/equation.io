@@ -682,6 +682,27 @@ export function shaderKey(plan: GpuPlan): string {
  * current frame/sample values. Packed data identity belongs to the runtime
  * that owns those buffers; only their layout affects this structural key.
  */
+/** A fingerprint of computed lattice rows (a tuple-valued recurrence's
+ *  terms, up to millions of numbers): FNV-1a over each row's length and
+ *  each value's bits, so equal runs agree without spelling them out. */
+function rowsKey(rows: readonly (readonly number[])[]): string {
+  const bits = new Float64Array(1);
+  const words = new Uint32Array(bits.buffer);
+  let h = 0x811c9dc5;
+  const mix = (w: number) => {
+    h = Math.imul(h ^ w, 0x01000193);
+  };
+  for (const row of rows) {
+    mix(row.length);
+    for (const v of row) {
+      bits[0] = v;
+      mix(words[0]);
+      mix(words[1]);
+    }
+  }
+  return `${rows.length}:${(h >>> 0).toString(36)}`;
+}
+
 export function cpuStructureKey(plan: CpuPlan): string {
   const expressions = (values: Expr[]) => values.map(exprKey);
   let structure: unknown;
@@ -790,7 +811,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = [exprKey(plan.rule), plan.radius, plan.seed && exprKey(plan.seed), plan.dims, ...plan.axes];
       break;
     case 'lattice':
-      structure = [exprKey(plan.expr), ...plan.axes, plan.rows && JSON.stringify(plan.rows)];
+      structure = [exprKey(plan.expr), ...plan.axes, plan.rows && rowsKey(plan.rows)];
       break;
     case 'graph':
       structure = plan.edges.map(row => row.map(exprKey).join('|'));

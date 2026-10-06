@@ -516,9 +516,41 @@ describe('tuple-valued recurrences', () => {
     expect(values([...henon, 'c = p_2[1]']).constEnv.c).toBeCloseTo(-0.4);
   });
 
+  it('leaves a recurrence from a tuple seed a map of each element', () => {
+    // Only pushing, popping or a step that writes a tuple makes one
+    // tuple-valued: these step each element of the seed, as they always did.
+    for (const rows of [
+      ['a_0 = (0.1, 0.2, 0.3, 0.4)', 'a_{n+1} = 3 a_n (1 - a_n)'],
+      ['p_0 = (1, 0)', 'p_{n+1} = 1 + p_n'],
+      ['p_0 = (1, 0)', 'p_{n+1} = p_n/2 + t'],
+    ])
+      expect(compileCpu(values(rows).out[1].cls!).type).toBe('cobweb');
+  });
+
+  it('applies a number to each element of a tuple', () => {
+    const rows = ['p_0 = (1, 0)', 'p_{n+1} = (p_n[1], p_n[2]) + 1'];
+    const plot = compileCpu(values(rows).out[1].cls!);
+    if (plot.type !== 'dscatter') throw new Error(`not points: ${plot.type}`);
+    expect(Array.from(plot.coords[0].slice(0, 3))).toEqual([1, 2, 3]);
+    expect(stack(['s_0 = (4, 6, 8, 10)', 's_{n+1} = pop(s_n - 1) / 2'], 1).slice(0, 2)).toEqual([
+      [4, 6, 8, 10],
+      [1.5, 2.5, 3.5],
+    ]);
+  });
+
+  it('depends on the sliders its functions read', () => {
+    const { out } = values(['k = 2', 'f(s) = push(s, k)', 's_0 = ()', 's_{n+1} = f(s_n)']);
+    expect(out[3].cls?.params).toEqual(['k']);
+  });
+
+  it('has one seed', () => {
+    const rows = analyzeRows(['s_0 = ()', 's_0 = 5', 's_{n+1} = push(s_n, 1)']).rows;
+    expect(rows[0].error).toMatch(/s_0 is already defined/);
+  });
+
   it('says what it cannot do', () => {
     expect(analyzeRows(['s_{n+1} = push(s_n, t)']).rows[0].error).toMatch(/cannot read t/);
-    expect(analyzeRows(['s_0 = (1, 2, 3, 4)', 's_{n+1} = s_n + 1']).rows[1].error).toMatch(/scales by a number/);
+    expect(analyzeRows(['s_0 = (1, 2, 3, 4)', 's_{n+1} = push(s_n, 1) + (1, 2)']).rows[1].error).toMatch(/same length/);
     expect(analyzeRows(['s_{n+1} = push(s_n, 1)', 'd_n = count(s_n)']).rows[1].error).toMatch(/s's terms are tuples/);
   });
 });
