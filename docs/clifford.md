@@ -129,7 +129,7 @@ Planned in docs/geometry-next.md (PGA itself in docs/pga.md).
 - A 3×3 matrix field (ellipsoid glyphs).
 - Conformal geometric algebra (circles and spheres as blades). Projective
   geometry — points, lines and planes with meet and join — is built
-  (docs/pga.md); its motors are not yet user syntax.
+  (docs/pga.md), motors included.
 - A multiset of multivectors reads out but draws nothing.
 - `⟑` needs a math font for its dot: style.css maps U+27D1 alone to STIX
   Two Math / Cambria Math / Noto Sans Math where the system has one.

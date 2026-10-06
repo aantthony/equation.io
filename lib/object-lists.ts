@@ -318,12 +318,13 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
     const computed = (arg: Expr): ListValue | null => {
       try {
         const value = lowerObjects(arg, defs, opts, true);
-        return value.kind === 'list' ? { items: tupleItems(value.items), axes: axesOf(value) } : null;
+        return value.kind === 'list' ? { items: value.items, axes: axesOf(value) } : null;
       } catch {
         return null;
       }
     };
-    const pts = asMatrix ?? listValue(arg) ?? computed(arg);
+    const found = asMatrix ?? listValue(arg) ?? computed(arg);
+    const pts = found && { ...found, items: tupleItems(found.items) };
     if (pts) {
       if (!pts.items.every(p => p.kind === 'vec')) throw new Error(`${e.name} needs a list of points.`);
       inOrder(pts.axes);
@@ -431,7 +432,8 @@ export function lowerObjects(e: Expr, defs: ValueDefinitions, opts: ResolveOpts 
   /** A connected figure through a template of points: the template is its one
    *  vertex, evaluated once per element of the columns (see `over`). */
   function packedFigure(form: 'polyline' | 'polygon' | 'hull', points: Expr & { kind: 'lazy' }): Expr {
-    const vertex = points.body;
+    // (A point that a motor or meet made is the tuple it is.)
+    const [vertex] = tupleItems([points.body]);
     if (vertex.kind !== 'vec' || (vertex.items.length !== 2 && vertex.items.length !== 3))
       throw new Error(`${form} needs a list of points.`);
     const n = points.cols[0].values.length;

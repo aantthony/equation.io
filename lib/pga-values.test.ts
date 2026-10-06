@@ -80,6 +80,8 @@ describe('join and meet', () => {
     if (o.kind === 'point' && o.source.representation === 'real')
       expect(o.source.coordinates.map((c: Expr) => evaluate(c, env))).toEqual([1.5, 3]);
     expect(drawn([...ABCD, 'polygon(meet(join(A, B), join(C, D)), A, C)'])).toEqual(['polygon']);
+    // Named, it is a point like any other, with components.
+    expect(value([...ABCD, X, 'X_y'])).toBe(6);
   });
   it('make planes, and lines of space where planes cross', () => {
     expect(readout(['plane((1, 0, 0), (0, 1, 0), (0, 0, 1))'])).toBe('= z = -x - y + 1');
@@ -90,6 +92,14 @@ describe('join and meet', () => {
       '= through (0, 0, 1), direction (0, -1, 0)',
     );
     expect(readout(['meet(line((0, 0, 0), (1, 1, 1)), plane((0, 0, 2), (0, 0, 1)))'])).toBe('= (2, 2, 2)');
+  });
+  it('draw a plane as a plane: translucent, from its coefficients', () => {
+    const { r } = row(['a = 1', 'plane((0, 0, a), (0, 1, 1))']);
+    const gpu = r.gpu!;
+    expect(gpu.type).toBe('family');
+    const member = gpu.type === 'family' ? gpu.members[0] : gpu;
+    // y + z - a = 0, with a a slider's uniform.
+    expect(member.type === 'implicit3d' && member.plane).toEqual(['0.0', '1.0', '1.0', '(-u_a)']);
   });
   it('draw a line of space as a curve of intersection, whatever its direction', () => {
     expect(readout(['line((0, 0, 0), (2, 1, 1))'])).toBe('= through (0, 0, 0), direction (2, 1, 1)');
@@ -193,5 +203,46 @@ describe('multisets of flats (docs/multisets.md)', () => {
       '= [at infinity, direction (1, 2); at infinity, direction (1, 2)]',
     );
     expect(value([...rows, 'count(meet(join(A, B), join(Q, Q + B - A)))'])).toBe(2);
+  });
+});
+
+describe('motors', () => {
+  const Z = ['L = line((0, 0, 0), (0, 0, 1))', 'M = motor(L, pi/2, 2)'];
+  it('read out what they do, and draw their axis', () => {
+    expect(readout([...Z, 'M'])).toBe('≈ turn 1.5708 about the line through (0, 0, 0), direction (0, 0, 1), slide 2');
+    expect(readout(['motor((1, 1), -pi/2)'])).toBe('≈ turn -1.5708 about (1, 1)');
+    expect(readout([Z[0], 'motor(L, 0, 3)'])).toBe('= slide (0, 0, 3)');
+    expect(readout(['motor((0, 0), 0)'])).toBe('= no motion');
+    expect(drawn([...Z, 'M'])).toEqual(['spacecurve']);
+    expect(publicKind(row([...Z, 'M']).r.cls!.object)).toBe('flat');
+  });
+  it('move points, lists, lines, planes and figures', () => {
+    expect(readout([...Z, 'rotate((1, 0, 0), M)'])).toBe('= (0, 1, 2)');
+    expect(readout([...Z, 'P = [(1, 0, 0), (2, 0, 0)]', 'rotate(P, M)'])).toBe('= [(0, 1, 2); (0, 2, 2)]');
+    expect(readout([...Z, 'rotate(line((1, 0, 0), (1, 1, 0)), M)'])).toBe('= through (0, 1, 2), direction (-1, 0, 0)');
+    expect(readout([...Z, 'rotate(plane((1, 0, 0), (1, 0, 0)), M)'])).toBe('= y = 1');
+    expect(drawn([...Z, 'rotate(hull(([0, 1], [0, 1], [0, 1])), M)'])).toEqual(['polygon']);
+    expect(readout(['rotate((2, 1), motor((1, 1), pi/2))'])).toBe('= (1, 2)');
+  });
+  it('screw a solid about an axis through draggable points', () => {
+    const rows = ['A = (1, 0, 0)', 'B = (1, 1, 1)', 'S = motor(line(A, B), t, t/4)'];
+    expect(drawn([...rows, 'rotate(hull(([0, 1], [0, 1], [0, 1])), S)'])).toEqual(['polygon']);
+    expect(drawn([...rows, 'S'])).toEqual(['spacecurve']);
+  });
+  it('slerp between fixed motors at constant speed', () => {
+    const rows = [...Z, 'N = motor(L, 0, 0)'];
+    expect(readout([...rows, 'rotate((1, 0, 0), slerp(N, M, 0.5))'])).toBe('≈ (0.707107, 0.707107, 1)');
+    expect(readout([...rows, 'slerp(N, M, 0.5)'])).toBe(
+      '≈ turn 0.785398 about the line through (0, 0, 0), direction (0, 0, 1), slide 1',
+    );
+    expect(error([...rows, 'K = motor(line((t, 0, 0), (0, 1, t)), 1, 1)', 'slerp(M, K, 0.5)'])).toMatch(
+      /slerp of motors takes two that stay fixed/,
+    );
+  });
+  it('are no number or point, and say how to use them', () => {
+    expect(error([...Z, '2 M'])).toMatch(/A motor is not a number or a point here/);
+    expect(error([...Z, 'meet(M, L)'])).toMatch(/A motor moves things/);
+    expect(error([Z[0], 'motor(L)'])).toMatch(/motor takes an axis and a turn/);
+    expect(error(['motor(line((0, 0), (1, 1)), 1)'])).toMatch(/motor takes an axis and a turn/);
   });
 });

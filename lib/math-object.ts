@@ -39,7 +39,16 @@ export type MathObject =
       readonly levels?: LevelSetSpec;
     }
   | { readonly kind: 'curve'; readonly form: 'parametric'; readonly source: PointSource; readonly tube?: Expr }
-  | { readonly kind: 'surface'; readonly form: 'implicit'; readonly residual: Expr; readonly equation?: Expr }
+  | {
+      readonly kind: 'surface';
+      readonly form: 'implicit';
+      readonly residual: Expr;
+      readonly equation?: Expr;
+      /** A plane of projective geometry (lib/pga.ts): a x + b y + c z + d = 0
+       *  as [a, b, c, d], which the renderer draws translucent and outlined
+       *  where it meets the box, rather than raymarching the residual. */
+      readonly plane?: readonly [Expr, Expr, Expr, Expr];
+    }
   | { readonly kind: 'surface'; readonly form: 'parametric'; readonly coordinates: readonly [Expr, Expr, Expr] }
   | { readonly kind: 'intersection'; readonly residuals: readonly [Expr, Expr] }
   | {

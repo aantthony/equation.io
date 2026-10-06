@@ -38,7 +38,7 @@ import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep 
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
 import { type Multivector, mvOfNode, mvText } from './clifford.ts';
-import { flatFigure, flatOfNode, flatText } from './pga.ts';
+import { flatFigure, flatOfNode, flatText, hyperplaneParts, motorOf } from './pga.ts';
 import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { SPLIT_NODE_BUDGET, complexParts, splitTooLarge } from './complex-parts.ts';
@@ -900,16 +900,27 @@ function classifyLowered(
       throw new Error('A multiset mixes points, lines or planes — give each kind a row of its own.');
     const readout = done({
       kind: 'tuple',
-      values: flats.flatMap(f => f.data),
+      // A motor reads out as one element of the algebra, its slide in it.
+      values: flats.flatMap(f => motorOf(f).data),
       flat: { dim, grade },
       ...(expr.kind === 'list' && { count: flats.length }),
     });
-    const drawn = classifyLowered(
+    let drawn = classifyLowered(
       { kind: 'family', members: flats.map(flatFigure) },
       defined,
       fields,
       timeDerivative,
     ).cls;
+    // A plane of space is drawn translucent, as a plane (web/render3d.ts).
+    if (dim === 3 && grade === 1 && drawn.object.kind === 'family' && drawn.object.members.length === flats.length) {
+      const members = drawn.object.members.map((m, k): Classified => {
+        if (m.object.kind !== 'surface' || m.object.form !== 'implicit') return m;
+        const { normal, offset } = hyperplaneParts(flats[k]);
+        return { ...m, object: { ...m.object, plane: [normal[0], normal[1], normal[2], offset] } };
+      });
+      // Each compiles on its own: the shared template would drop the plane.
+      drawn = { ...drawn, object: { ...drawn.object, members, shared: undefined } };
+    }
     return withReadout(drawn, readout.cls);
   }
 

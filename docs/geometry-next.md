@@ -17,9 +17,9 @@ Background reading, in order:
 
 ### A. Projective geometric algebra (docs/pga.md) — do first
 
-**PR 1 (phases 1–3) is built**, with three of the five examples — see "As
-built" in docs/pga.md. PR 2 (motors, the screw-motion and two-planes
-examples, translucent planes) is next.
+**PR 1 (phases 1–3) and PR 2 (phases 4–5) are built** — see the "As
+built" sections of docs/pga.md. Left open: exposing the algebra itself
+(e_0 blades, products on flats), and slerp between motors that move.
 
 The user agreed the plan and its three decisions (algebra hidden behind
 meet/join; `line(A, B)` becomes a value; conformal GA out of scope).
