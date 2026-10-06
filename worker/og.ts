@@ -36,7 +36,7 @@ import { LIGHT_PALETTE, assignColors, takesColor } from '../lib/palette.ts';
 import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
-import { type AxisMap, type AxisMaps, axisMapping, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
+import { type AxisMap, type AxisMaps, axisMapping, shownRange, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
 import { axisTicks } from '../lib/axis-ticks.ts';
 
 export const OG_WIDTH = 600;
@@ -756,6 +756,14 @@ function renderRow2D(
       if (plot.dim !== 2) return;
       const lo = [v.cx - (r.w * v.upp) / 2, v.cy - (r.h * (v.upp / (v.ratio ?? 1))) / 2];
       const hi = [v.cx + (r.w * v.upp) / 2, v.cy + (r.h * (v.upp / (v.ratio ?? 1))) / 2];
+      // A system placed on a mapped panel (a complex one) solves in x and y,
+      // over the part of the window the maps show, as the app does.
+      for (const [k, map] of [v.maps?.x, v.maps?.y].entries()) {
+        if (!map) continue;
+        const shown = shownRange(map, lo[k], hi[k]);
+        if (!shown) return;
+        [lo[k], hi[k]] = shown.world;
+      }
       const systemEnv = { ...analysis.constEnv, t: 0 };
       if (plot.parametric) {
         for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, systemEnv, 256, plot.angular)) {

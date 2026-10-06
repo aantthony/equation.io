@@ -316,4 +316,19 @@ describe('an integral on mapped axes', () => {
     expect(toScreenOrEdge(y, -5)).toBe(-Infinity);
     expect(toScreenOrEdge(parseAxisMap('y', 'sinh(Y)'), 0)).toBe(0);
   });
+
+  it('does not take what the map never reaches for what it shows', () => {
+    // y = sqrt(Y) has the inverse Y = y^2, which sends y = -3 to 9.
+    const y = parseAxisMap('y', 'sqrt(Y)');
+    expect(toScreen(y, -3)).toBeNaN();
+    expect(toScreenOrEdge(y, -3)).toBe(-Infinity);
+    const [run] = shadeRuns(shade('-3', '0', '1'), {}, 0, 2, undefined, { y });
+    expect(run.sign).toBe(-1);
+    expect(run.pts[1]).toBe(-Infinity);
+    // And x from -4 is shaded from x = 0, where the axis starts.
+    const x = parseAxisMap('x', 'sqrt(X)');
+    const [whole] = shadeRuns(shade('1', '-4', '9'), {}, 0, 100, undefined, { x });
+    expect(whole.pts[0]).toBe(0);
+    expect(whole.pts.at(-2)).toBeCloseTo(81, 9);
+  });
 });

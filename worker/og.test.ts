@@ -71,6 +71,13 @@ describe('og raster renderer', () => {
     );
     // The area under 1/2 from x = 10 to 100 is screen X = 1 to 2.
     same(['int[10..100] 1/2 dx #e24'], ['int[1..2] 1/2 dx #e24']);
+    // A complex system's roots are solved in x and y, and placed: x = 50 is
+    // X = log 50, past the screen box [0, 2] read as x.
+    const root = Math.log10(50).toFixed(15);
+    same(
+      ['(w - 50)(w - (20 + 0.5i)) = 0 #e24'],
+      [`(w - ${root})(w - (${Math.log10(20).toFixed(15)} + 0.5i)) = 0 #e24`],
+    );
   });
 
   it("lets one panel be 3D without dropping another panel's 2D-only rows", () => {

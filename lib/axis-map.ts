@@ -141,13 +141,18 @@ function increasing(map: AxisMap): boolean {
   return isFinite(last);
 }
 
-/** The screen coordinate showing world value v, NaN when none does. */
+/** The screen coordinate showing world value v, NaN when none does. The
+ *  inverse may name values the map never reaches (y = sqrt(Y) has Y = y^2,
+ *  which sends y = -3 to 9): only a round trip shows v is there. */
 export function toScreen(map: AxisMap, v: number): number {
+  let at: number;
   try {
-    return evaluate(map.inverse, { [map.axis]: v });
+    at = evaluate(map.inverse, { [map.axis]: v });
   } catch {
     return NaN;
   }
+  if (!isFinite(at)) return at;
+  return Math.abs(toWorld(map, at) - v) <= 1e-9 * Math.max(1, Math.abs(v)) ? at : NaN;
 }
 
 /**
