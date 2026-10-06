@@ -149,7 +149,8 @@ type IsList = (name: string) => boolean;
 
 /** Functions over points, by how many point arguments they take. */
 const POINT_FNS: Record<string, number> = { dot: 2, cross: 2, midpoint: 2, perp: 1, unit: 1 };
-const ROTATE_USAGE = 'rotate takes rotate(P, angle), rotate(P, angle, center) in 2D, or rotate(P, angle, axis) in 3D.';
+const ROTATE_USAGE =
+  'rotate takes rotate(P, angle), rotate(P, angle, center) in 2D, or rotate(P, angle) about z and rotate(P, angle, axis) in 3D.';
 
 const sq = (e: Expr): Expr => mul(e, e);
 const lenOfN = (items: Expr[]): Expr => {
@@ -1269,8 +1270,12 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       if (matOf(e)) throw new Error(NOT_A_VALUE);
       if (e.name === 'rotate') {
         // rotate(P, a[, center]) ≡ C + e^(a J) (P − C); rotate(P, a, axis) ≡
-        // e^(a cross(axis/|axis|)) P. Flattened tuples are told apart by count.
+        // e^(a cross(axis/|axis|)) P, and a 3D P with no axis turns about z —
+        // the turn rotate(P, a) makes in the xy-plane. Flattened tuples are
+        // told apart by count.
         const flat = e.args.map(lo).flatMap(a => (a.vec ? a.items : [a.e]));
+        if (flat.length === 4 && e.args.length === 2)
+          flat.push({ kind: 'num', value: 0 }, { kind: 'num', value: 0 }, { kind: 'num', value: 1 });
         if (flat.length === 7) {
           const axis = flat.slice(4);
           const turn = expOf(matScale({ m: hatOf(axis) }, div(flat[3], lenOfN(axis))));

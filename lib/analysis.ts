@@ -503,13 +503,14 @@ function uniformDraws(
 
 /** Whether a row's value is a point, points, or a figure through them —
  *  anything classify draws by position rather than as numbers. A row that
- *  does not lower is left to the density path, which reports it. */
+ *  does not lower is not one the density path can draw either: classify
+ *  reports why (a misused rotate is its usage, not a distribution). */
 function pointValued(e: Expr, lower: (e: Expr) => Expr): boolean {
   let value: Expr;
   try {
     value = lower(e);
   } catch {
-    return false;
+    return true;
   }
   switch (value.kind) {
     case 'vec':

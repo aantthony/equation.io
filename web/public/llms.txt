@@ -635,7 +635,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A→B), and `circle(center, radius)` draw figures that follow their points. Point arithmetic works anywhere: `A + B`, `2A`,
   `(A + B)/2`, `midpoint(A, B)`, `perp(A)` (rotate 90° counterclockwise),
   `rotate(P, a)` (turn by a about the origin; `rotate(P, a, C)` about C; in
-  3D `rotate(P, a, axis)`),
+  3D `rotate(P, a)` turns about z and `rotate(P, a, axis)` about axis),
   `unit(A)`, `dot(A, B)`, `cross(A, B)`, `|A - B|` (distance). Measurements:
   `distance(A, B)` is `|A - B|`; `angle(A, B, C)` is the angle at B, turning
   from B→A to B→C — signed, counterclockwise positive, in radians in (−π, π]
