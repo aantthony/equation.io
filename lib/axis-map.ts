@@ -17,6 +17,8 @@
  */
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import type { MathObject } from './math-object.ts';
+import { diff } from './diff.ts';
+import { matchODE } from './ode.ts';
 
 export type Axis = 'x' | 'y';
 
@@ -29,6 +31,9 @@ export interface AxisMap {
   forward: Expr;
   /** The screen coordinate in terms of the world one (x or y). */
   inverse: Expr;
+  /** d(world)/d(screen), in the screen coordinate: how fast x moves per X,
+   *  which divides a velocity in x into one on the screen. */
+  slope: Expr;
 }
 
 export type AxisMaps = Partial<Record<Axis, AxisMap>>;
@@ -113,7 +118,7 @@ export function parseAxisMap(axis: Axis, src: string, env: Record<string, number
       `${axis} = ${src.trim()} has no inverse that can be worked out, and the axis needs one: ` +
         `build it from exp, ln, log, powers, sqrt, sinh and arithmetic.`,
     );
-  const map: AxisMap = { axis, text: src.trim(), forward, inverse };
+  const map: AxisMap = { axis, text: src.trim(), forward, inverse, slope: diff(forward, screen) };
   if (!increasing(map)) throw new Error(`${axis} = ${map.text} must increase with ${screen} wherever it is defined.`);
   return map;
 }
@@ -209,6 +214,9 @@ export function shownRange(
 const forwardIn = (map: AxisMap): Expr =>
   substVars(map.forward, { [SCREEN[map.axis]]: { kind: 'var', name: map.axis } });
 
+/** The map's slope with the screen coordinate called by the world's name. */
+const slopeIn = (map: AxisMap): Expr => substVars(map.slope, { [SCREEN[map.axis]]: { kind: 'var', name: map.axis } });
+
 /** g⁻¹(e) for map g: the screen coordinate at which the world one is e. */
 const inverseOf = (map: AxisMap, e: Expr): Expr => substVars(map.inverse, { [map.axis]: e });
 
@@ -219,9 +227,22 @@ const isVar = (e: Expr, name: string) => e.kind === 'var' && e.name === name;
  * graph y = f keeps its shape, y = g⁻¹(f(…)), and so does x = f; everything
  * else has x and y replaced by the map.
  */
-export function mapRowExpr(e: Expr, maps: AxisMaps): Expr {
+export function mapRowExpr(e: Expr, maps: AxisMaps, flow = false): Expr {
   const env: Record<string, Expr> = {};
   for (const map of Object.values(maps)) env[map.axis] = forwardIn(map);
+  if (flow) {
+    // A velocity in x and y is one on the screen times the map's slope
+    // there: x = g(X) moves at g'(X) dX/dt. So arrows, streamlines and traced
+    // trajectories all run on the screen as they do anywhere else.
+    const v = planeFlow(e);
+    if (!v) throw new Error(UNMAPPED_MESSAGE);
+    const items = (['x', 'y'] as const).map((axis, k): Expr => {
+      const item = substVars(v.items[k], env);
+      const map = maps[axis];
+      return map ? { kind: 'bin', op: '/', a: item, b: slopeIn(map) } : item;
+    });
+    return { kind: 'vec', items };
+  }
   if (e.kind === 'eq')
     for (const axis of ['y', 'x'] as const) {
       const [lhs, rhs] = isVar(e.l, axis) ? [e.l, e.r] : isVar(e.r, axis) ? [e.r, e.l] : [null, null];
@@ -232,6 +253,13 @@ export function mapRowExpr(e: Expr, maps: AxisMaps): Expr {
       return { ...e, l: lhs, r: map ? inverseOf(map, side) : side };
     }
   return substVars(e, env);
+}
+
+/** The velocities of a 2D flow row: a tuple in x and y, or a slope field
+ *  or system spelled as an ODE (`y' = f`, `(x', y') = (P, Q)`). */
+function planeFlow(e: Expr): (Expr & { kind: 'vec' }) | null {
+  const v = e.kind === 'vec' ? e : matchODE(e);
+  return v?.items.length === 2 ? v : null;
 }
 
 /**
@@ -246,8 +274,9 @@ export function mapRowExpr(e: Expr, maps: AxisMaps): Expr {
  *   carried to the screen by the inverse (web/render2d.ts mapOverlay);
  * - `none`: nothing drawn (a value, a note).
  *
- * What is left (vector and tensor fields, whose arrows would need the
- * map's Jacobian; histograms, whose bars stand on y = 0; complex systems;
+ * What is left (tensor fields, whose glyphs would need the map's
+ * Jacobian; histograms, whose bars stand on y = 0;
+ * complex systems;
  * graphs, sequences, 3D) is refused rather than drawn in the wrong place.
  */
 export type AxisMapping = 'substitute' | 'place' | 'none';
@@ -266,6 +295,9 @@ export function axisMapping(object: MathObject): AxisMapping | null {
       return object.form === 'projected' ? null : object.form === 'parametric' ? 'place' : 'substitute';
     case 'scalar-field':
       return object.dimension === 3 ? null : 'substitute';
+    case 'vector-field':
+      // Rewritten with the map's slope (mapRowExpr): a 2D flow only.
+      return object.components.length === 2 ? 'substitute' : null;
     case 'point':
     case 'trail':
     case 'label':

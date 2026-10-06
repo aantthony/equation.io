@@ -1,6 +1,6 @@
 # Axis maps: log scales and beyond (#71)
 
-Status: **steps 1–5 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
+Status: **steps 1–6 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
 
 ## The idea
 
@@ -46,8 +46,8 @@ symlog (`y = sinh(Y)`) all come from one feature.
    and a drag writes back through the forward map. Positions the map
    cannot show are dropped (points) or break the line. The link preview
    (worker/og.ts) carries placed rows and draws the ticks' grid the same
-   way. Still not drawn on mapped axes: vector and tensor fields (their
-   arrows need the map's Jacobian), histograms (bars stand on y = 0),
+   way. Still not drawn on mapped axes: tensor fields (their glyphs need
+   the map's Jacobian), histograms (bars stand on y = 0),
    complex systems, 3D and integral shading.
 4. **Done.** Hover and systems. A real system is rewritten like a curve, so
    its solver searches the window in screen coordinates (evenly, as a log
@@ -70,6 +70,17 @@ symlog (`y = sinh(Y)`) all come from one feature.
    new b is a new screen window for the same x; the app reframes on it
    (web/main.ts viewKey), and parses write-backs with its constants. A
    value that stops the map increasing (b ≤ 1) is the view row's error.
+6. **Done.** Vector fields. A velocity in x is one on the screen times the
+   map's slope (x = g(X) moves at g'(X) dX/dt), so a 2D field, slope field
+   or `(x', y') = (P, Q)` flow is rewritten as (P / gₓ'(X), Q / gᵧ'(Y)) in
+   screen coordinates (lib/axis-map.ts mapRowExpr), and its arrows,
+   streamlines and traced trajectories run on the screen as anywhere else.
+   A coordinate flow (`(r', theta') = …`) is lowered to `(x', y')` through
+   its fields' Jacobian first, so it is carried the same way. Analysis
+   tells the rewrite the row is a flow, so one that arrives in another
+   shape is an error rather than drawn without the slope. Seeds dropped by
+   clicking are kept on the screen, so moving a slider in the map moves
+   them in x and y.
 
 ## Later: equations on a surface
 
