@@ -84,6 +84,7 @@ import {
   namedAxes,
   plainFnName,
   reducesMembers,
+  tupleAxis,
   withAxes,
 } from './list.ts';
 import type { Mat } from './mat.ts';
@@ -1057,6 +1058,9 @@ export interface ResolveOpts {
   /** A sequence term by name (a_3, a_k) or index (a_[…]). `open` are the
    *  names still unbound here — a sequence row's own index. */
   sequenceTerm?: (name: string, index: Expr | undefined, open: ReadonlySet<string> | undefined) => Expr | null;
+  /** A tuple-valued recurrence's terms, as far as its run goes (lib/seq.ts);
+   *  null for any other name. */
+  tupleRun?: (name: string) => import('./seq.ts').TupleRun | null;
   /** Definition values cannot contain row-only motion trails. */
   inDefinition?: boolean;
   /** Numeric constant values, used to evaluate Σ/Π bounds at expansion time. */
@@ -2242,6 +2246,49 @@ function coordParams(
  * Inline user-function calls, resolve d/dx derivative notation, and expand
  * Σ/Π sums and ∫ integrals (post-order).
  */
+/** A tuple read as a stack (docs/discrete.md, pushdown automata). */
+export const STACK_FNS: ReadonlySet<string> = new Set(['push', 'pop', 'top']);
+
+/** The numbers of a tuple written out: a tuple of numbers, the empty tuple,
+ *  or one number (a 1-tuple is its element). Null for anything else. */
+export function literalTuple(e: Expr): number[] | null {
+  if (e.kind === 'num') return [e.value];
+  if ((e.kind === 'vec' || (e.kind === 'list' && isTuple(e))) && e.items.every(x => x.kind === 'num'))
+    return e.items.map(x => (x as Expr & { kind: 'num' }).value);
+  return null;
+}
+
+/** A tuple as an expression, as the document writes one: one number is a
+ *  number, two or three a point, any other length a tuple. */
+export function tupleExpr(values: readonly number[]): Expr {
+  if (values.length === 1) return { kind: 'num', value: values[0] };
+  const items = values.map((value): Expr => ({ kind: 'num', value }));
+  return values.length === 2 || values.length === 3
+    ? { kind: 'vec', items }
+    : withAxes({ kind: 'list', items }, [tupleAxis(values.length)]);
+}
+
+/**
+ * push(s, a, …), pop(s), top(s) on a tuple of numbers, computed now; null
+ * while s is not one yet (a parameter, or a step of a tuple-valued
+ * recurrence that lib/seq.ts runs). Off the end of a stack is out of range,
+ * the way a run off the end of its input is.
+ */
+export function stackCall(name: string, args: readonly Expr[]): Expr | null {
+  if (!args.length) throw new Error(`${name} takes a tuple: ${name === 'push' ? 'push(s, a)' : `${name}(s)`}.`);
+  const s = literalTuple(args[0]);
+  if (name !== 'push' && args.length !== 1) throw new Error(`${name} takes one tuple: ${name}(s).`);
+  if (name === 'push') {
+    const rest = args.slice(1).map(literalTuple);
+    if (!s || rest.some(r => !r)) return null;
+    return tupleExpr([...s, ...rest.flatMap(r => r!)]);
+  }
+  // The empty tuple's top is not an error yet: the case that reads it may
+  // not be the one that holds (lib/seq.ts runs only that one).
+  if (!s?.length) return null;
+  return name === 'top' ? { kind: 'num', value: s[s.length - 1] } : tupleExpr(s.slice(0, -1));
+}
+
 export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr {
   return rx(e, { getFn, opts, terms: 0 });
 }
@@ -2362,6 +2409,23 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (e.args[0]?.kind === 'var') {
         const term = ctx.opts.sequenceTerm?.(e.args[0].name, e.args[1], ctx.opts.openVars);
         if (term) return term;
+        // s_3[2]: position 2 of a tuple-valued recurrence's term (lib/seq.ts).
+        const whole = ctx.opts.sequenceTerm?.(e.args[0].name, undefined, ctx.opts.openVars);
+        const tuple = whole && literalTuple(whole);
+        if (tuple) {
+          const at = rx(e.args[1], ctx);
+          const consts = ctx.opts.consts ?? {};
+          const vars = [...freeVars(at)];
+          if (at.kind !== 'list' && at.kind !== 'range' && vars.every(v => consts[v] !== undefined)) {
+            for (const v of vars) ctx.opts.boundConsts?.add(v);
+            const k = evaluate(at, consts);
+            if (!Number.isInteger(k) || k < 1 || k > tuple.length)
+              throw new Error(
+                `${e.args[0].name}[${k}] is out of range: ${e.args[0].name} has ${tuple.length} element${tuple.length === 1 ? '' : 's'}.`,
+              );
+            return { kind: 'num', value: tuple[k - 1] };
+          }
+        }
       }
       return mapChildren(e, x => rx(x, ctx));
     }
@@ -2392,6 +2456,22 @@ function rx(e: Expr, ctx: Ctx): Expr {
       }
       // A reduction over x, u, an interval or a filter is an integral against
       // its measure (docs/multisets.md §5); over a list it lowers later.
+      // A stack read whole: the empty tuple counts 0 (a tuple-valued
+      // recurrence's term, lib/seq.ts), which no list or point can be.
+      // A tuple-valued recurrence's term counts its elements (lib/seq.ts),
+      // the empty tuple among them, which no list or point can be.
+      if (e.name === 'count' && e.args.length === 1) {
+        const arg = e.args[0];
+        const term =
+          arg.kind === 'var'
+            ? ctx.opts.sequenceTerm?.(arg.name, undefined, ctx.opts.openVars)
+            : arg.kind === 'index' && arg.args[0].kind === 'var'
+              ? ctx.opts.sequenceTerm?.(arg.args[0].name, arg.args[1], ctx.opts.openVars)
+              : null;
+        const tuple =
+          term && arg.kind === 'var' ? literalTuple(term) : term?.kind === 'vec' ? literalTuple(term) : null;
+        if (tuple) return { kind: 'num', value: tuple.length };
+      }
       if (isReductionCall(e)) {
         const over = reduceOverSet(e.name, e.args[0], {
           resolve: x => rx(x, ctx),
@@ -2514,6 +2594,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         // another function's body they wait for that function's call.
         return ctx.opts.params ? inlined : writeConditions(inlined, namedConditionOf(ctx));
       }
+      if (STACK_FNS.has(e.name)) return stackCall(e.name, args) ?? { kind: 'call', name: e.name, args };
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
       if (e.name === 'fourier' || e.name === 'reconstruct') {

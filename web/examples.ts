@@ -228,6 +228,12 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
       ['logistic bifurcation', 'a_{n+1} = x a_n (1 - a_n)', 'sequence recursion chaos'],
       ['Newton’s method for √2', 'a_0 = 3; a_{n+1} = a_n - (a_n^2 - 2)/(2 a_n); y = sqrt(2)', 'sequence recursion'],
+      // A recurrence whose terms are points draws its orbit (lib/seq.ts).
+      [
+        'Hénon map',
+        'view(x = -1.5..1.5, y = -0.5..0.5); a = 1.4; b = 0.3; p_0 = (0, 0); p_{n+1} = (1 - a p_n[1]^2 + p_n[2], b p_n[1])',
+        'sequence recursion chaos slider',
+      ],
       ['Fourier square wave', 'N = 3; y = (4/pi) sum(n=1..N, sin((2n-1)x)/(2n-1))', 'fourier series trig slider'],
       ['Fourier sawtooth', 'N = 5; y = 2 sum[n=1..N] (-1)^(n+1) sin(n x)/n', 'fourier series trig slider'],
       // A list bound draws every partial sum at once: one curve per element.
@@ -302,6 +308,17 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'state machine: divisible by 3',
         '# the remainder mod 3 of a binary number, read left to right; Q = [0..2]; S = [0, 1]; step(q, s) = mod(2q + s, 3); graph(Q, step(Q, S), S); # read 13 = 1101, one digit at a time; D = (1, 1, 0, 1); q_0 = 0; N = floor(clamp(0, 0, 4)); mark(q_N); --- right; # the run: the state after n digits; q_{n+1} = step(q_n, D[n + 1])',
         'graph slider sequence',
+      ],
+      // A stack is a tuple-valued recurrence, drawn row by row (lib/seq.ts).
+      [
+        'pushdown automaton: aⁿbⁿ',
+        '# a = 1 pushes and b = 2 pops: state 0 reads a’s, 1 reads b’s, 2 rejects; Q = [0..2]; S = [1, 2]; step(q, a) = {q = 0: {a = 1: 0, 1}, q = 1: {a = 2: 1, 2}, 2}; graph(Q, step(Q, S), S); D = (1, 1, 1, 2, 2, 2); q_0 = 0; N = floor(clamp(0, 0, 6)); mark(q_N); --- right; # the stack after n symbols: empty at the end, so aaabbb is accepted; s_0 = (); s_{n+1} = {D[n + 1] = 1: push(s_n, 1), pop(s_n)}; --- below; # the state after n symbols; q_{n+1} = step(q_n, D[n + 1])',
+        'graph slider sequence split-view',
+      ],
+      [
+        'stack of brackets',
+        '# ( = 1 and [ = 2 push, ) = 3 and ] = 4 pop their match, or the run stops; D = (1, 2, 1, 3, 4, 2, 2, 4, 4, 3); s_0 = (); s_{n+1} = {D[n + 1] <= 2: push(s_n, D[n + 1]), top(s_n) = D[n + 1] - 2: pop(s_n)}',
+        'sequence',
       ],
       [
         'matrix multiplication as arrows',

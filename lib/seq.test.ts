@@ -3,6 +3,7 @@ import { Env } from './env.ts';
 import { describe, expect, it } from 'vitest';
 import { evaluate, type Expr } from './expr.ts';
 import { classifySeqRec, scanSeqRec, scanSequences, sequenceResolver } from './seq.ts';
+import { evalTable } from './automaton.ts';
 import { analyzeRows } from './analysis.ts';
 import { resolveExpr, scanDefinition } from './defs.ts';
 import { parseExpr } from './expr.ts';
@@ -410,5 +411,140 @@ describe('recurrences that read n and tuples', () => {
 
   it('keeps an autonomous recurrence a cobweb', () => {
     expect(compileCpu(values(['a_0 = 0.2', 'a_{n+1} = a_n/2 + 1']).out[1].cls!).type).toBe('cobweb');
+  });
+});
+
+describe('tuple-valued recurrences', () => {
+  const values = (rows: string[]) => {
+    const { rows: out, constEnv } = analyzeRows(rows);
+    expect(out.map(r => r.error)).toEqual(rows.map(() => undefined));
+    return { out, constEnv };
+  };
+  /** The terms a tuple-valued recurrence's row draws, one lattice row each. */
+  const stack = (rows: string[], row: number) => {
+    const plot = compileCpu(values(rows).out[row].cls!);
+    if (plot.type !== 'lattice' || !plot.rows) throw new Error(`not a stack: ${plot.type}`);
+    return plot.rows;
+  };
+
+  it('pushes onto the empty tuple, and reads its terms by number', () => {
+    const rows = ['s_0 = ()', 's_{n+1} = push(s_n, n^2)'];
+    expect(stack(rows, 1).slice(0, 4)).toEqual([[], [0], [0, 1], [0, 1, 4]]);
+    const { constEnv } = values([...rows, 'c = count(s_3)', 'g = top(s_3)', 'h = s_3[2]', 'm = count(s_0)']);
+    expect(constEnv).toMatchObject({ c: 3, g: 4, h: 1, m: 0 });
+    // A slider picks the term, as for any sequence.
+    expect(values([...rows, 'k = 4', 'c = top(s_k)']).constEnv.c).toBe(9);
+    // No seed row: the empty tuple, a stack's usual start.
+    expect(stack(['s_{n+1} = push(s_n, 1)'], 0)[2]).toEqual([1, 1]);
+  });
+
+  it('draws its terms as rows of a lattice: row n, position h', () => {
+    const { out } = values(['s_0 = ()', 's_{n+1} = push(s_n, n + 1)']);
+    expect(out[1].cls?.object).toMatchObject({ kind: 'lattice', axes: ['h', 'n'] });
+    const plot = compileCpu(out[1].cls!) as Parameters<typeof evalTable>[0];
+    // Rows 0..2, positions 0..3: position 0 and those past a term are empty.
+    const grid = evalTable(plot, {}, 0, 0, 4, 3);
+    expect(Array.from(grid.values)).toEqual([NaN, NaN, NaN, NaN, NaN, 1, NaN, NaN, NaN, 1, 2, NaN]);
+  });
+
+  it('starts from any tuple, and its step may change its length either way', () => {
+    expect(stack(['s_0 = (1, 2, 3, 4)', 's_{n+1} = pop(s_n)'], 1)).toEqual([[1, 2, 3, 4], [1, 2, 3], [1, 2], [1], []]);
+    // A number seed is a 1-tuple; s_n[1] reads its first element.
+    expect(stack(['s_0 = 7', 's_{n+1} = push(s_n, s_n[1] + n)'], 1).slice(0, 3)).toEqual([[7], [7, 7], [7, 7, 8]]);
+  });
+
+  it('runs only the case that holds, so cases may differ in length', () => {
+    // Balanced brackets: 1 opens, 2 closes.
+    const rows = ['D = (1, 1, 2, 1, 2, 2)', 's_0 = ()', 's_{n+1} = {D[n + 1] = 1: push(s_n, 1), pop(s_n)}'];
+    expect(stack(rows, 2)).toEqual([[], [1], [1, 1], [1], [1, 1], [1], []]);
+    expect(values([...rows, 'c = count(s_6)']).constEnv.c).toBe(0);
+    // The same step written as a function of the stack.
+    const act = [
+      'act(s, a) = {a = 1: push(s, 1), pop(s)}',
+      'D = (1, 1, 2, 2)',
+      's_0 = ()',
+      's_{n+1} = act(s_n, D[n + 1])',
+    ];
+    expect(stack(act, 3)).toEqual([[], [1], [1, 1], [1], []]);
+  });
+
+  it('stops where it pops the empty tuple, or no case holds', () => {
+    // A closing bracket with nothing open: the run ends at s_2.
+    const rows = ['D = (1, 2, 2, 1)', 's_0 = ()', 's_{n+1} = {D[n + 1] = 1: push(s_n, 1), pop(s_n)}'];
+    expect(stack(rows, 2)).toEqual([[], [1], []]);
+    expect(analyzeRows([...rows, 'c = count(s_3)']).rows[3].error).toMatch(/empty tuple is out of range/);
+    const stuck = ['D = (1, 3)', 's_0 = ()', 's_{n+1} = {D[n + 1] = 1: push(s_n, 1), D[n + 1] = 2: pop(s_n)}'];
+    expect(stack(stuck, 2)).toEqual([[], [1]]);
+    expect(analyzeRows([...stuck, 'c = s_2']).rows[3].error).toMatch(/No case of s's step holds at n = 1/);
+  });
+
+  it('is read by a recurrence that it reads: a pushdown automaton', () => {
+    // a^n b^n: state 0 pushes each a (1), state 1 pops one per b (2); a b
+    // before the a's are done moves to state 1.
+    const pda = [
+      'D = (1, 1, 1, 2, 2, 2)',
+      'q_0 = 0',
+      's_0 = ()',
+      'q_{n+1} = {D[n + 1] = 2: 1, q_n}',
+      's_{n+1} = {q_n = 0: {D[n + 1] = 1: push(s_n, 1), pop(s_n)}, pop(s_n)}',
+      // Accepted: the input read, with the stack empty.
+      'left = count(s_6)',
+    ];
+    expect(stack(pda, 4)).toEqual([[], [1], [1, 1], [1, 1, 1], [1, 1], [1], []]);
+    expect(values(pda).constEnv.left).toBe(0);
+    // The state reads the stack's top in turn: two sequences that read each
+    // other, stepped together.
+    const mutual = [
+      'D = (1, 1, 2, 2)',
+      'q_0 = 0',
+      's_0 = ()',
+      'q_{n+1} = {count(s_n) = 0: 0, top(s_n)}',
+      's_{n+1} = {D[n + 1] = 1: push(s_n, q_n + 2), pop(s_n)}',
+      'c = q_3',
+    ];
+    // q: 0, 0 (s_0 is empty), then the tops of s_1 and s_2, 2 and 2.
+    expect(stack(mutual, 4)).toEqual([[], [2], [2, 2], [2], []]);
+    expect(values(mutual).constEnv.c).toBe(2);
+  });
+
+  it('draws a point-valued recurrence as its orbit', () => {
+    const henon = ['p_0 = (0, 0)', 'p_{n+1} = (1 - 1.4 p_n[1]^2 + p_n[2], 0.3 p_n[1])'];
+    const plot = compileCpu(values(henon).out[1].cls!);
+    if (plot.type !== 'dscatter') throw new Error(`not points: ${plot.type}`);
+    expect(Array.from(plot.coords[0].slice(0, 3))).toEqual([0, 1, -0.3999999999999999]);
+    expect(Array.from(plot.coords[1].slice(0, 3))).toEqual([0, 0, 0.3]);
+    expect(values([...henon, 'c = p_2[1]']).constEnv.c).toBeCloseTo(-0.4);
+  });
+
+  it('says what it cannot do', () => {
+    expect(analyzeRows(['s_{n+1} = push(s_n, t)']).rows[0].error).toMatch(/cannot read t/);
+    expect(analyzeRows(['s_0 = (1, 2, 3, 4)', 's_{n+1} = s_n + 1']).rows[1].error).toMatch(/scales by a number/);
+    expect(analyzeRows(['s_{n+1} = push(s_n, 1)', 'd_n = count(s_n)']).rows[1].error).toMatch(/s's terms are tuples/);
+  });
+});
+
+describe('recurrences that read each other', () => {
+  it('steps both together', () => {
+    const { rows, constEnv } = analyzeRows([
+      'q_0 = 0',
+      'r_0 = 1',
+      'q_{n+1} = q_n + r_n',
+      'r_{n+1} = r_n + q_n + 1',
+      'c = q_4',
+    ]);
+    expect(rows.map(r => r.error)).toEqual(rows.map(() => undefined));
+    expect(constEnv.c).toBe(15); // q: 0, 1, 3, 7, 15
+  });
+
+  it('tests equality in a case, at whole n', () => {
+    const { rows, constEnv } = analyzeRows([
+      'a_n = {mod(n, 2) = 0: 1, 0}',
+      'c = a_4',
+      'b_0 = 0',
+      'b_{n+1} = {b_n = 0: 1, 0}',
+      'g = b_3',
+    ]);
+    expect(rows.map(r => r.error)).toEqual(rows.map(() => undefined));
+    expect(constEnv).toMatchObject({ c: 1, g: 1 });
   });
 });

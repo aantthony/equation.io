@@ -38,8 +38,9 @@ describe('examples menu', () => {
       const rows = splitStatements(text)
         .map(s => s.trim())
         .filter(Boolean);
-      // An automaton's seed row `c_0[i] = …` draws through its rule row.
-      const seeds = scanSequences(rows).map(s => !!s?.seed);
+      // An automaton's seed row `c_0[i] = …` draws through its rule row, and
+      // a stack's `s_0 = ()` through its recurrence.
+      const seeds = scanSequences(rows).map(s => !!s?.seed || !!s?.emptyTuple);
       const problems = analyzeRows(rows).rows.flatMap((r, i) =>
         r.error
           ? [`${r.text}: ${r.error}`]

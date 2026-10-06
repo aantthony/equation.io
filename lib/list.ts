@@ -1582,10 +1582,14 @@ function lowerIndex(e: Expr & { kind: 'index' }, ctx: Ctx): Expr {
   const lowered = settle(lower(target, ctx), ctx);
   // A point is a tuple of its coordinates (docs/multisets.md §3): a named
   // one, T = (3, 1, 2), reaches here as (T_x, T_y, T_z) and T[2] is T_y.
-  const point =
+  // Read before geometry lowering has written it out (a recurrence's step,
+  // D[n + 1] with D = (1, 0, 1)), it is still its name: its coordinates.
+  const comps = lowered.kind === 'var' ? ctx.opts.comps?.(lowered.name) : null;
+  const items =
     lowered.kind === 'vec' && !isSeq(lowered) && lowered.items.every(it => it.kind !== 'vec' && !isSeq(it))
-      ? withAxes<Expr>({ kind: 'list', items: lowered.items }, [tupleAxis(lowered.items.length)])
-      : null;
+      ? lowered.items
+      : comps?.map((name): Expr => ({ kind: 'var', name }));
+  const point = items ? withAxes<Expr>({ kind: 'list', items }, [tupleAxis(items.length)]) : null;
   const low = (point ?? (isDataScatter(lowered) ? scatterPoints(lowered) : lowered)) as Exclude<Expr, { kind: 'lazy' }>;
   if (!isSeq(low)) {
     // A function's parameter indexes (p[2]); called with a number, there is

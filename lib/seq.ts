@@ -18,9 +18,11 @@ import { Env, type ValueDefinitions } from './env.ts';
  * The whole subscripted symbol (`a_n`) is one token, so these rows are
  * recognized by regex before definition scanning, like defs.ts does.
  */
+import { exactCases } from './automaton.ts';
 import { usesComplex } from './complex.ts';
-import { type GetFn, RESERVED, type ResolveOpts, resolveExpr, substIdx } from './defs.ts';
-import { axesOf, lowerLists, withAxes } from './list.ts';
+import { type GetFn, RESERVED, type ResolveOpts, STACK_FNS, resolveExpr, substIdx, tupleExpr } from './defs.ts';
+import { pointComps } from './geom.ts';
+import { axesOf, isTuple, lowerLists, withAxes } from './list.ts';
 import { indexNamesOf, listGetter } from './defs.ts';
 import {
   GREEK_NAME_CHARS,
@@ -31,7 +33,9 @@ import {
   mapChildren,
   evaluate,
   freeVars,
+  ineqComparisons,
   parseExpr,
+  sameNumber,
   substVars,
 } from './expr.ts';
 import { type Classified } from './math-object.ts';
@@ -57,6 +61,10 @@ export interface SeqScan {
   seedList?: true;
   /** A table `T[i, j] = …`: a function on the integer lattice. */
   table?: true;
+  /** On a recurrence: its seed row is `s_0 = ()`, the empty tuple. */
+  emptySeed?: true;
+  /** The row `s_0 = ()` itself, which only a tuple-valued recurrence reads. */
+  emptyTuple?: true;
 }
 
 /** A sequence letter: one Latin or Greek letter (a_n, θ_n). */
@@ -81,11 +89,133 @@ const CELL_SEED_RE = new RegExp(String.raw`^\s*(${L})_(?:0|\{\s*0\s*\}|\(\s*0\s*
 /** L_0 = [(0, 0), (1, 0)]: a seed as the multiset of its live cells. Only an
  *  automaton's seed when the letter has a rule (scanSequences). */
 const CELL_SET_RE = new RegExp(String.raw`^\s*(${L})_(?:0|\{\s*0\s*\}|\(\s*0\s*\))\s*=(?!=)\s*(\[[\s\S]*)$`);
+/** s_0 = (): a tuple-valued recurrence starting from the empty tuple. */
+const EMPTY_SEED_RE = new RegExp(String.raw`^\s*(${L})_(?:0|\{\s*0\s*\}|\(\s*0\s*\))\s*=(?!=)\s*\(\s*\)\s*$`);
 /** T[i, j] = …: a function on the integer lattice. */
 const TABLE_RE = new RegExp(String.raw`^\s*(${L})\s*\[\s*(${L})\s*,\s*(${L})\s*\]\s*=(?!=)([\s\S]+)$`);
 
 /** The last term a sequence computes. */
 const SEQ_MAX = 1000;
+/** The longest tuple a tuple-valued recurrence's term may be. */
+const TUPLE_MAX = 10000;
+
+/** A tuple-valued recurrence's terms, computed as numbers from its seed on
+ *  (ResolveOpts.tupleRun). `point` is its seed's dimension when the seed is
+ *  a point, (0.5, 0) or (1, 2, 3). */
+export interface TupleRun {
+  readonly terms: readonly (readonly number[])[];
+  readonly point?: 2 | 3;
+}
+
+/** A value inside a tuple-valued recurrence's step: one number, or a tuple. */
+type TupleValue = number | number[];
+
+/** A run stopped by its own rules rather than broken: off the end of its
+ *  input or its stack, or at a step with no case that holds (a machine with
+ *  no move). Drawn, the run just ends there. */
+const HALTS = /out of range|no case/i;
+
+/** Whether `e` is built from tuples: a tuple, push or pop. */
+const tupleish = (e: Expr): boolean =>
+  e.kind === 'vec' ||
+  (e.kind === 'list' && isTuple(e)) ||
+  (e.kind === 'call' && STACK_FNS.has(e.name)) ||
+  childrenOf(e).some(tupleish);
+
+/** Whether `e` still holds a stack call: one on a tuple not known yet when
+ *  it resolved, or on the empty tuple in a case that may not hold. */
+const stackCalls = (e: Expr): boolean => (e.kind === 'call' && STACK_FNS.has(e.name)) || childrenOf(e).some(stackCalls);
+
+/**
+ * A tuple-valued recurrence's step, resolved at one n, run to its value.
+ * Tuples are numbers here, so a case may hold tuples of different lengths
+ * and only the case that holds is run (a stack that grows on one symbol and
+ * shrinks on another). What no tuple touches goes to `leaf`, one number.
+ */
+function runTuple(e: Expr, leaf: (e: Expr) => TupleValue): TupleValue {
+  // Terms already computed arrive as numbers: read them as they are.
+  if (e.kind === 'num') return e.value;
+  if (!tupleish(e)) return leaf(e);
+  const one = (x: Expr): number => {
+    const v = runTuple(x, leaf);
+    if (typeof v !== 'number')
+      throw new Error('A tuple is not one number: read one element of it, like top(s) or s[1].');
+    return v;
+  };
+  const tuple = (x: Expr): number[] => {
+    const v = runTuple(x, leaf);
+    return typeof v === 'number' ? [v] : v;
+  };
+  const holds = (cond: Expr): boolean => {
+    if (cond.kind === 'eq') return sameNumber(one(cond.l), one(cond.r));
+    if (cond.kind === 'ineq')
+      return ineqComparisons(cond).every(({ op, l, r }) => {
+        const [a, b] = [one(l), one(r)];
+        return op === '<' ? a < b : op === '<=' ? a <= b : op === '>' ? a > b : a >= b;
+      });
+    return (
+      leaf({
+        kind: 'piecewise',
+        cases: [{ cond, value: { kind: 'num', value: 1 } }],
+        otherwise: { kind: 'num', value: 0 },
+      }) === 1
+    );
+  };
+  switch (e.kind) {
+    case 'vec':
+    case 'list':
+      return e.items.map(one);
+    case 'piecewise': {
+      for (const c of e.cases) if (holds(c.cond)) return runTuple(c.value, leaf);
+      if (e.otherwise) return runTuple(e.otherwise, leaf);
+      throw new Error('No case of the step holds.');
+    }
+    case 'call': {
+      if (e.name === 'push') {
+        if (!e.args.length) throw new Error('push takes a tuple and what to push onto it: push(s, a).');
+        return [...tuple(e.args[0]), ...e.args.slice(1).flatMap(tuple)];
+      }
+      if (e.name === 'pop' || e.name === 'top' || e.name === 'count') {
+        if (e.args.length !== 1) throw new Error(`${e.name} takes one tuple: ${e.name}(s).`);
+        const s = tuple(e.args[0]);
+        if (e.name === 'count') return s.length;
+        if (!s.length) throw new Error(`${e.name}(…) of the empty tuple is out of range.`);
+        return e.name === 'top' ? s[s.length - 1] : s.slice(0, -1);
+      }
+      return evaluate({ ...e, args: e.args.map((a): Expr => ({ kind: 'num', value: one(a) })) }, {});
+    }
+    case 'index': {
+      const s = tuple(e.args[0]);
+      const k = one(e.args[1]);
+      if (!Number.isInteger(k) || k < 1 || k > s.length)
+        throw new Error(
+          `Position ${k} is out of range: the tuple has ${s.length} element${s.length === 1 ? '' : 's'}.`,
+        );
+      return s[k - 1];
+    }
+    case 'neg': {
+      const a = runTuple(e.a, leaf);
+      return typeof a === 'number' ? -a : a.map(x => -x);
+    }
+    case 'bin': {
+      const a = runTuple(e.a, leaf);
+      const b = runTuple(e.b, leaf);
+      const op = (x: number, y: number) =>
+        evaluate({ kind: 'bin', op: e.op, a: { kind: 'num', value: x }, b: { kind: 'num', value: y } }, {});
+      if (typeof a === 'number' && typeof b === 'number') return op(a, b);
+      if (typeof a !== 'number' && typeof b !== 'number') {
+        if ((e.op !== '+' && e.op !== '-') || a.length !== b.length)
+          throw new Error('Tuples add and subtract position by position, and only when they are the same length.');
+        return a.map((x, k) => op(x, b[k]));
+      }
+      if (typeof a === 'number' && e.op === '*') return (b as number[]).map(y => op(a, y));
+      if (typeof b === 'number' && (e.op === '*' || e.op === '/')) return (a as number[]).map(x => op(x, b));
+      throw new Error('A tuple scales by a number (2 s, s/2); push(s, a) adds to it.');
+    }
+    default:
+      throw new Error(`A tuple cannot be read here: ${e.kind}.`);
+  }
+}
 
 /** Indices that read as a sequence on sight, so `a_n = 5` is the constant
  *  sequence rather than a constant named a_n. */
@@ -173,13 +303,24 @@ export function scanSequences(texts: readonly string[]): (SeqScan | null)[] {
   const owners = new Set(scans.filter(s => s && (s.rec || usesIndex(s.rhs, s.index))).map(s => s!.name));
   // `L_0 = [(0, 0), …]` is the constant L_0 unless L is an automaton.
   const automata = new Set(scans.filter(s => s?.cell && s.rec).map(s => s!.name));
+  // `s_0 = ()` is no constant (there is no empty value to name) but the
+  // empty tuple a recurrence s starts from.
+  const recurrences = new Set(scans.filter(s => s?.rec && !s.lattice).map(s => s!.name));
+  const empty = new Set(
+    texts.flatMap(t => {
+      const m = EMPTY_SEED_RE.exec(t);
+      return m && recurrences.has(m[1]) ? [m[1]] : [];
+    }),
+  );
   return scans.map((s, k) => {
     if (!s) {
       const m = CELL_SET_RE.exec(texts[k]);
-      return m && automata.has(m[1])
-        ? { rec: false, lattice: true, seed: true, seedList: true, name: m[1], index: '', rhs: m[2] }
-        : null;
+      if (m && automata.has(m[1]))
+        return { rec: false, lattice: true, seed: true, seedList: true, name: m[1], index: '', rhs: m[2] };
+      const e = EMPTY_SEED_RE.exec(texts[k]);
+      return e && empty.has(e[1]) ? { rec: false, emptyTuple: true, name: e[1], index: '', rhs: '()' } : null;
     }
+    if (s.rec && !s.lattice && empty.has(s.name)) return { ...s, emptySeed: true };
     return !s.rec && !s.lattice && owners.has(s.name) && !usesIndex(s.rhs, s.index) ? null : s;
   });
 }
@@ -199,6 +340,8 @@ export function classifySeqRec(
   if (RESERVED.has(index)) {
     throw new Error(`"${index}" is reserved; index sequences with n, k, or m.`);
   }
+  const run = scan.rec ? ropts.tupleRun?.(name) : null;
+  if (run) return classifyTupleRun(scan, run, fnNames, constNames);
   // Σ/Π with constant bounds expand here, as anywhere else. A bound that uses
   // the index (a_n = Σ(s=1..n, s)) stays a sum; evaluate() runs it at each n.
   const openVars = new Set(ropts.openVars);
@@ -215,7 +358,8 @@ export function classifySeqRec(
             ? { kind: 'var', name: recVar }
             : lookup(symbol, at, open)
       : lookup;
-  const parsed = resolveExpr(source, getFn, { ...ropts, openVars, sequenceTerm });
+  // Terms are at whole n, so a case may test equality: {mod(n, 2) = 0: …}.
+  const parsed = exactCases(resolveExpr(source, getFn, { ...ropts, openVars, sequenceTerm, exactConditions: true }));
   // A list may be named w, which is otherwise the complex variable.
   const lists = [...freeVars(parsed)].filter(v => ropts.isList?.(v) || indexedNames(parsed).has(v));
   const zeroLists = Object.fromEntries(lists.map(v => [v, { kind: 'num', value: 0 } as Expr]));
@@ -239,6 +383,11 @@ export function classifySeqRec(
   if (!scan.rec) {
     vars.delete(index);
     for (const v of vars) {
+      const tuple = v.endsWith('_') && sequences.has(v.slice(0, -1)) ? v.slice(0, -1) : null;
+      if (tuple)
+        throw new Error(
+          `${tuple}'s terms are tuples, with no formula in ${index} to draw: read one at a number (count(${tuple}_3), top(${tuple}_k)), or in a recurrence's step (q_{${index}+1} = f(q_${index}, top(${tuple}_${index}))).`,
+        );
       throw new Error(`A sequence term may only use ${index}, t, and constants (found ${v}).`);
     }
     params.sort();
@@ -285,6 +434,45 @@ export function classifySeqRec(
   };
 }
 
+/**
+ * A tuple-valued recurrence's row: its terms, one per row of a lattice (row
+ * n, position h across, from 1), as a stack is drawn over time — or, when it
+ * starts from a point and every term is one, the points of its orbit.
+ */
+function classifyTupleRun(
+  scan: SeqScan,
+  run: TupleRun,
+  fnNames: ReadonlySet<string>,
+  constNames: ReadonlySet<string>,
+): Classified {
+  const { name, index } = scan;
+  // The run is computed once, at these values: a slider recomputes it.
+  const params = [...freeVars(parseExpr(scan.rhs, fnNames))].filter(v => constNames.has(v));
+  if (constNames.has(`${name}_0`)) params.push(`${name}_0`);
+  params.sort();
+  const { terms, point } = run;
+  if (point && terms.length && terms.every(t => t.length === point))
+    return {
+      object: {
+        kind: 'list',
+        element: 'point',
+        storage: 'packed',
+        dimension: point,
+        coordinates: Array.from({ length: point }, (_, c) => Float64Array.from(terms, t => t[c])),
+      },
+      animated: false,
+      needs3D: point === 3,
+      params,
+    };
+  const across = index === 'h' ? 'k' : 'h';
+  return {
+    object: { kind: 'lattice', expr: { kind: 'num', value: NaN }, axes: [across, index], rows: terms },
+    animated: false,
+    needs3D: false,
+    params,
+  };
+}
+
 /** Sequence values share the same scalar/list pipeline as CSV columns.
  * Recurrences form a linear chain of computed constants rather than an
  * exponentially duplicated expression. Those constants become uniforms. */
@@ -300,7 +488,136 @@ export function sequenceResolver(
   },
 ) {
   const resolving = new Set<string>();
+  /** A sequence's source resolved: at whole n, a case may test equality. */
+  const resolveSeq = (e: Expr, extra: ResolveOpts = {}): Expr =>
+    exactCases(resolveExpr(e, getFn, { ...opts, ...extra, exactConditions: true }));
   const chained = (name: string, i: number) => `${defs.sequencePrefix}_${name}_${i}`;
+
+  /** Whether recurrence `name` is tuple-valued: it starts from a tuple
+   *  (`s_0 = ()`, `p_0 = (0.1, 0)`) or its step pushes or pops. */
+  const tupleValued = new Map<string, boolean>();
+  const usesStack = (e: Expr, seen: Set<string>): boolean => {
+    if (e.kind === 'call' && (e.name === 'push' || e.name === 'pop')) return true;
+    if (e.kind === 'call' && !seen.has(e.name)) {
+      seen.add(e.name);
+      try {
+        const fn = getFn(e.name);
+        if (fn && usesStack(fn.body, seen)) return true;
+      } catch {
+        /* a broken function says so where it is called */
+      }
+    }
+    return childrenOf(e).some(c => usesStack(c, seen));
+  };
+  const isTupleSeq = (name: string): boolean => {
+    const known = tupleValued.get(name);
+    if (known !== undefined) return known;
+    const scan = defs.sequences.get(name);
+    let tuple = false;
+    if (scan?.rec && !scan.lattice) {
+      const seed = `${name}_0`;
+      const list = defs.lists.get(seed);
+      tuple = !!scan.emptySeed || defs.pointDims.has(seed) || (!!list && isTuple(list));
+      if (!tuple)
+        try {
+          tuple = usesStack(parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames()), new Set());
+        } catch {
+          /* its row reports the parse error */
+        }
+    }
+    tupleValued.set(name, tuple);
+    return tuple;
+  };
+  /** Tuple-valued recurrences' terms so far, and the error a run stopped at. */
+  const runs = new Map<string, { terms: number[][]; end?: Error }>();
+  const computing = new Set<string>();
+  /** One number a tuple-valued step reads, with every name a constant. */
+  const tupleLeaf =
+    (name: string) =>
+    (e: Expr): TupleValue => {
+      const value = lowerLists(exactCases(e), listGetter(defs), opts);
+      const env = opts.consts ?? {};
+      for (const v of freeVars(value)) {
+        if (v === 't')
+          throw new Error(`${name}'s step reads a tuple, so it runs once, not over time: it cannot read t.`);
+        if (env[v] === undefined) throw new Error(`Sequence ${name} terms need constant parameters (found ${v}).`);
+      }
+      // A tuple the document names (D, sort(L)) is a tuple here too.
+      if ((value.kind === 'list' || value.kind === 'data') && isTuple(value))
+        return value.kind === 'data' ? Array.from(value.values) : value.items.map(x => evaluate(x, env));
+      if (value.kind === 'list' || value.kind === 'data')
+        throw new Error(`Each element of ${name}'s terms must be one number, not a list.`);
+      return evaluate(value, env);
+    };
+  /** The tuple a tuple-valued recurrence starts from: its seed `s_0`, or the
+   *  empty tuple. */
+  const tupleSeed = (name: string): number[] => {
+    const seed = `${name}_0`;
+    const scan = defs.sequences.get(name)!;
+    if (scan.emptySeed) return [];
+    const leaf = tupleLeaf(name);
+    const dim = defs.pointDims.get(seed);
+    if (dim) return pointComps(seed, dim).flatMap(c => leaf({ kind: 'var', name: c }));
+    if (defs.lists.has(seed) || defs.consts.has(seed)) {
+      const value = leaf({ kind: 'var', name: seed });
+      return typeof value === 'number' ? [value] : value;
+    }
+    if (protectedNames.has(seed)) throw new Error(`${seed} has an error in its definition.`);
+    return [];
+  };
+  /** Term k of tuple-valued recurrence `name`, as numbers: null past where
+   *  its run stops when `partial`, else that stop's error. */
+  const tupleTerm = (name: string, k: number, partial = false): number[] | null => {
+    let run = runs.get(name);
+    if (!run) runs.set(name, (run = { terms: [] }));
+    if (k < run.terms.length) return run.terms[k];
+    if (run.end) {
+      if (partial) return null;
+      throw run.end;
+    }
+    if (computing.has(name)) throw new Error(`Sequence ${name} depends on itself outside its recurrence.`);
+    computing.add(name);
+    try {
+      const scan = defs.sequences.get(name)!;
+      const leaf = tupleLeaf(name);
+      while (run.terms.length <= k) {
+        const i = run.terms.length;
+        let next: number[];
+        try {
+          if (i === 0) next = tupleSeed(name);
+          else {
+            // The step at n = i − 1: its own s_n is the term just computed,
+            // read (like any term at a number) through term() below.
+            const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames());
+            const at = substIdx(parsed, scan.index, { kind: 'num', value: i - 1 });
+            const value = runTuple(resolveSeq(at), leaf);
+            next = typeof value === 'number' ? [value] : value;
+          }
+          if (next.length > TUPLE_MAX) throw new Error(`${name}_${i} is longer than ${TUPLE_MAX} elements.`);
+        } catch (err) {
+          if (!(err instanceof Error) || !HALTS.test(err.message)) throw err;
+          const why = err.message.startsWith('No case')
+            ? new Error(
+                `No case of ${name}'s step holds at ${scan.index} = ${i - 1}, so its run stops at ${name}_${i - 1}.`,
+              )
+            : err;
+          run.end = why;
+          if (partial) return null;
+          throw why;
+        }
+        run.terms.push(next);
+      }
+      return run.terms[k];
+    } finally {
+      computing.delete(name);
+    }
+  };
+  const tupleRun = (name: string): TupleRun | null => {
+    if (!isTupleSeq(name)) return null;
+    tupleTerm(name, SEQ_MAX, true);
+    const dim = defs.pointDims.get(`${name}_0`);
+    return { terms: runs.get(name)!.terms, ...(dim === 2 || dim === 3 ? { point: dim } : {}) };
+  };
   /** Term k of sequence `name`. `partial`: a recurrence whose chain breaks
    *  before k (its step reads past the end of a tuple) stops there, and the
    *  terms after it are missing rather than an error. */
@@ -308,6 +625,12 @@ export function sequenceResolver(
     if (!Number.isInteger(k) || k < 0 || k > SEQ_MAX)
       throw new Error(`Sequence indices must be whole numbers from 0 to ${SEQ_MAX}.`);
     const scan = defs.sequences.get(name)!;
+    // A tuple-valued recurrence's terms are numbers once computed: the term
+    // is the tuple itself, as numbers (or missing, past where it stops).
+    if (isTupleSeq(name)) {
+      const value = tupleTerm(name, k, partial);
+      return value ? tupleExpr(value) : { kind: 'num', value: NaN };
+    }
     const key = `${name}_${k}`;
     if (protectedNames.has(key) || defs.consts.has(key)) return { kind: 'var', name: key };
     // A term the chain already holds: how a step that reads n, resolved term
@@ -323,10 +646,10 @@ export function sequenceResolver(
         // not a sum node, and the term sees exactly what the plot row sees: a
         // second pass over an already-resolved body would re-apply the
         // tuple-call splat to vectors that functions computed.
-        return resolveExpr(substIdx(parsed, scan.index, { kind: 'num', value: k }), getFn, opts);
+        return resolveSeq(substIdx(parsed, scan.index, { kind: 'num', value: k }));
       }
       const recVar = `${name}_${scan.index}`;
-      const body = resolveExpr(parsed, getFn, opts);
+      const body = resolveSeq(parsed);
       const isConstant = (v: string) => v === 't' || known.has(v) || defs.consts.has(v);
       const stepped = steps(name, body);
       if (!stepped)
@@ -339,8 +662,7 @@ export function sequenceResolver(
       // and is that expression at each n. A tuple position cannot be read at
       // an open n, so a step that reads one resolves its source per term.
       const open: Expr | null = stepped
-        ? resolveExpr(parsed, getFn, {
-            ...opts,
+        ? resolveSeq(parsed, {
             openVars: new Set([...(opts.openVars ?? []), scan.index]),
             sequenceTerm: (symbol, at, vars) =>
               symbol === recVar || (symbol === `${name}_` && at?.kind === 'var' && at.name === scan.index)
@@ -379,7 +701,15 @@ export function sequenceResolver(
           kind: 'num',
           value: i - 1,
         });
-        const value = lowerLists(resolveExpr(at, getFn, opts), listGetter(defs), opts);
+        const resolved = resolveSeq(at);
+        // A step reading a stack runs as a tuple-valued one does: only the
+        // case that holds, so {count(s_n) = 0: 0, top(s_n)} is safe.
+        if (stackCalls(resolved)) {
+          const value = runTuple(resolved, tupleLeaf(name));
+          if (typeof value !== 'number') throw new Error(`Each term of ${name} must be one number, not a tuple.`);
+          return { kind: 'num', value };
+        }
+        const value = lowerLists(resolved, listGetter(defs), opts);
         if (value.kind === 'list' || value.kind === 'data')
           throw new Error(`Each term of ${name} must be one number, not a list.`);
         for (const v of freeVars(value)) {
@@ -408,7 +738,7 @@ export function sequenceResolver(
           } catch (err) {
             // Only a run off the end of a tuple (its own, or one another
             // sequence it reads steps over) ends the chain quietly.
-            if (!partial || !/out of range/.test((err as Error).message)) throw err;
+            if (!partial || !HALTS.test((err as Error).message)) throw err;
             return { kind: 'num', value: NaN };
           }
         defineConstant(internal, value);
@@ -449,11 +779,16 @@ export function sequenceResolver(
    */
   const inline = (name: string, at: Expr, open: ReadonlySet<string>): Expr => {
     const scan = defs.sequences.get(name)!;
+    // A tuple at an open n has no expression in n: left as the term it is,
+    // s_[n], which a step reading it resolves term by term (stepAt).
+    if (isTupleSeq(name)) return { kind: 'index', args: [{ kind: 'var', name: `${name}_` }, at] };
     if (scan.rec) {
       // No closed form: read the chain that computes its terms, all of them
-      // (or up to where a step that reads a tuple runs off its end).
-      term(name, SEQ_MAX, true);
-      const body = resolveExpr(parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames()), getFn, opts);
+      // (or up to where a step that reads a tuple runs off its end). Read
+      // from another recurrence's step, it is read term by term instead, as
+      // that chain grows — so two recurrences may read each other.
+      if (!resolving.size) term(name, SEQ_MAX, true);
+      const body = resolveSeq(parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames()));
       // The trailing inputs are names the row depends on: the step's
       // constants, not its index, its own term, lists or other sequences'.
       const stepped = steps(name, body);
@@ -485,7 +820,7 @@ export function sequenceResolver(
     resolving.add(name);
     try {
       const parsed = parseExpr(scan.rhs, new Set(defs.fns.keys()), indexNames());
-      return resolveExpr(substIdx(parsed, scan.index, at), getFn, { ...opts, openVars: open });
+      return resolveSeq(substIdx(parsed, scan.index, at), { openVars: open });
     } finally {
       resolving.delete(name);
     }
@@ -527,5 +862,5 @@ export function sequenceResolver(
       return withAxes({ kind: 'list', items: Array.from(indices.values, k => term(name, k)) }, axesOf(indices));
     return one(indices);
   };
-  return resolve;
+  return Object.assign(resolve, { tupleRun });
 }

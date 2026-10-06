@@ -77,7 +77,7 @@ export type CpuPlan =
   | { type: 'cobweb'; f: Expr; recVar: string; a0Name?: string }
   | { type: 'bifurcation'; expr: Expr; recVar: string; a0Name?: string }
   | { type: 'automaton'; rule: Expr; radius: number; seed?: Expr; dims: 1 | 2; axes: readonly [string, string] }
-  | { type: 'lattice'; expr: Expr; axes: readonly [string, string] }
+  | { type: 'lattice'; expr: Expr; axes: readonly [string, string]; rows?: readonly (readonly number[])[] }
   | { type: 'graph'; edges: Expr[][] }
   | { type: 'density'; rv: string; mass?: Expr }
   | { type: 'pmf'; rv: string; mass?: Expr }
@@ -346,7 +346,7 @@ export function compileCpu(classified: Classified): CpuPlan {
         axes: object.axes,
       };
     case 'lattice':
-      return { type: 'lattice', expr: object.expr, axes: object.axes };
+      return { type: 'lattice', expr: object.expr, axes: object.axes, ...(object.rows ? { rows: object.rows } : {}) };
     case 'graph':
       return { type: 'graph', edges: object.edges.map(row => row.map(real)) };
     case 'list':
@@ -790,7 +790,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = [exprKey(plan.rule), plan.radius, plan.seed && exprKey(plan.seed), plan.dims, ...plan.axes];
       break;
     case 'lattice':
-      structure = [exprKey(plan.expr), ...plan.axes];
+      structure = [exprKey(plan.expr), ...plan.axes, plan.rows && JSON.stringify(plan.rows)];
       break;
     case 'graph':
       structure = plan.edges.map(row => row.map(exprKey).join('|'));
