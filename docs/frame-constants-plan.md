@@ -1,7 +1,7 @@
 # Frame constants: computing named values once per frame
 
-Plan, 2026-10-06. Status: **stage 1 built** (branch `frame-constants`; see
-"As built" at the end). Stage 2 open.
+Plan, 2026-10-06. Status: **stages 1 and 2 built** (see "As built" at the
+end of each).
 
 ## The problem
 
@@ -77,13 +77,14 @@ a slider at 0; a row animates through a hidden constant that depends on
 autocomplete; uniform counts of the screw example's shaders; every
 existing example identical except where a row names one of these values.
 
-## Stage 2 — inline intermediates (later)
+## Stage 2 — inline intermediates
 
 Unnamed heavy pieces inside one row — the relative motor of an inline
 `slerp`, `motor(…)` written straight into `rotate(…)` — need lowering to
 register hidden constants itself (a callback like `getComps`) and those to
-join the per-frame evaluation for that row. More invasive; until then the
-message for an oversized value suggests naming it.
+join the per-frame evaluation for that row. (The plan said that until then
+the message for an oversized value suggested naming it. No message ever
+did; see "As built (stage 2)".)
 
 ## Risks
 
@@ -137,3 +138,69 @@ for colour fields (lib/compiler.ts). Separate work.
   moving axes, and a slider moving a hidden constant's value. Test helpers
   that evaluate a row with a hand-made env take hidden constants from
   `evaluateFrame` (lib/mat.test.ts).
+
+## As built (stage 2)
+
+- **Where they live.** In the document Env, like the named ones. While
+  `analyzePrepared` (lib/analysis.ts) lowers each row, `withHoisting`
+  (lib/pga.ts) is set to a hoister that binds a frame-constant coefficient
+  as the constant `#id.k` (the row's id, or its index, and a counter) and
+  adds it to `constNames`, so the row's `params` name it and the compiler
+  binds it as a uniform. A leading `#` keeps row names apart from a named
+  value's `M#3`, and from each other across rows. Everything that evaluates
+  a frame reads the same Env: the app (`currentConstEnv`, slider and drag
+  rebinds), readouts (the frame is re-evaluated after the rows), the /g/
+  preview (worker/og.ts, from `analysis.constEnv`), certification and
+  traces.
+- **What is handed over.** A motor's coefficients and slide (`motorPga`),
+  a moved line or plane (`moveFlat`), the affine map that moves points
+  (`movePoint`'s origin, columns and slide offset), slerp's intermediates
+  and result, a rotor's turn matrix (`turnMatrix`, lib/geom.ts) and a
+  matrix applied to a point (`M v`, `rotate(P, θ, axis)`). The same steps
+  hoist while a named value is lowered (stage 1's `withHoisting`).
+- **What is not.** frameConstant (lib/defs.ts) is stage 1's test, shared:
+  no number or single name (structural zeros stay), nothing over a list,
+  data column, interval, position or parameter. Intermediates must also be
+  over `HOIST_NODES` (6) nodes: `cos(t)` costs less inline than as a
+  uniform. A named value's own coefficients keep stage 1's rule.
+- **One name per coefficient.** `frameHoister` keeps one name per distinct
+  coefficient (by `exprKey`), so the map that moves eight vertices of a
+  hull, or 200 cubes turned by one matrix, is twelve or nine constants.
+- **Pruning and repeat analysis.** After the rows, row constants that no
+  row's classified object reads — directly or through another hidden
+  constant — are dropped (a row that failed after lowering, say). Each
+  `analyzePrepared` first drops the previous run's, so re-analysing a
+  prepared document gives the same names and no duplicates.
+- **Measured** (rows with `A`, `B` draggable, `S = motor(line(A, B), t,
+  t/4)`, `N = motor(line(A, (0, 0, 1)), 1, 0.5)`):
+
+  | row | before | after |
+  |---|---|---|
+  | `rotate((0, 0, 0), slerp(N, S, 0.5))` | refused | 47 nodes |
+  | `rotate(line((0, 0, 0), (1, 0, 0)), S)` | too large | 1,180 |
+  | `rotate(hull(cube), motor(line(A, B), t, t/4))` | 5,200 | 125 |
+  | `rotate((0, 0, 0), S)` | 1,003 | 197 |
+  | a cube turned by a product of five rotors in sliders and t | 24,697 | 52 |
+  | a point moved by three matrix exponentials about slider axes | 13,391 | 29 |
+
+  Inline and named forms give the same readouts at every t.
+- **Messages.** Naming no longer helps for any of the steps above: a row
+  hoists what a definition would. It can still help for multivector or
+  matrix algebra written out by hand (`R ⟑ v ⟑ ~R` rather than
+  `rotate(v, R)`), since a named multivector or matrix stores every
+  coefficient. The size messages do not suggest it: the check that fires
+  (8192 nodes per element) cannot tell which piece of a tree is
+  frame-constant, and for a field or anything over x, y naming does
+  nothing.
+- **Compatibility.** Every built-in example and featured graph gives the
+  same errors, kinds and readouts as main. Fourteen rows' shaders changed,
+  all reading a motor, rotor or matrix; the most parameters any row reads is
+  still 300. Two tests that pinned the old limits now pin the new reach:
+  inline slerp between moving motors matches the named one
+  (lib/pga-values.test.ts), and 200 cubes about a slider axis draw, sharing
+  nine constants (lib/hull.test.ts).
+- **Tests** (lib/frame-constants.test.ts, "inline intermediates"): the three
+  cases above against their named forms, rotors and matrices, structural
+  zeros under a slider at 0, nothing hoisted over a list or position,
+  pruning and repeat analysis, hidden names in no autocomplete or message.
+  worker/og.test.ts draws a row through its own constants in the preview.

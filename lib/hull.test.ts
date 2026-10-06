@@ -257,14 +257,16 @@ describe('hull(…) rows', () => {
     expect(members(['e^(t cross((1, 1, 1)/sqrt(3))) hull(([-1,1], [-1,1], [-1,1])) + (0, 0, 3[1..200])'])).toHaveLength(
       200,
     );
-    // A slider-dependent axis stays symbolic, and large, but a few dozen draw;
-    // past the family's budget in all, it says so.
+    // A slider-dependent axis is a matrix computed once per frame
+    // (docs/frame-constants-plan.md), shared by every cube: hundreds draw.
     const turning = (n: number) => [
       'a = 1',
       `e^(t cross((1, 1, a)/sqrt(2+a^2))) hull(([-1,1], [-1,1], [-1,1])) + (0, 0, 3[1..${n}])`,
     ];
     expect(members(turning(30))).toHaveLength(30);
-    expect(analyze(turning(200)).rows[1].error).toMatch(/too large to render .* in all/);
+    expect(members(turning(200))).toHaveLength(200);
+    // (Its nine entries, read by every member.)
+    expect(analyze(turning(200)).rows[1].cls!.params).toHaveLength(9);
     // …while a list INSIDE the figure is its points.
     const whole = plot(['J=((0,-1),(1,0))', 'th=2pi [0..2]/3', P, 'hull(e^(th J) P)']);
     if (whole.cpu.type !== 'polygon') throw new Error(whole.cpu.type);

@@ -92,7 +92,7 @@ import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
 import { flatName, flatOfNode, isPoint, pointCoords, withHoisting } from './pga.ts';
 import { isComplexValued } from './complex.ts';
 import { SPLIT_NODE_BUDGET, realValue } from './complex-parts.ts';
-import { countNodes } from './size.ts';
+import { countNodes, exceedsNodes } from './size.ts';
 import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
@@ -2787,32 +2787,19 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
    * depends only on constants, states and t as a hidden constant `M#k`,
    * evaluated once per frame like a named point's components, and the value
    * written into rows refers to it — so algebra over it multiplies names, not
-   * formulas. A number or a single name stays as it is (a literal 0 is a
-   * structural zero kinds depend on), as does a coefficient of numbers
-   * alone, and anything over a list, a data column or an interval.
+   * formulas. (See frameConstant for what stays as it is.)
    */
-  const frameConstant = (e: Expr): boolean => {
-    if (e.kind === 'num' || e.kind === 'var') return false;
-    let plain = true;
-    (function walk(n: Expr): void {
-      if (!plain) return;
-      if (n.kind === 'list' || n.kind === 'data' || n.kind === 'lazy' || n.kind === 'range') plain = false;
-      else childrenOf(n).forEach(walk);
-    })(e);
-    if (!plain) return false;
-    // A coefficient of numbers alone (-0.2) folds where it is: nothing to share.
-    const names = freeVars(e);
-    if (!names.size) return false;
-    for (const v of names) if (v !== 't' && !defs.consts.has(v) && !derivs.has(v)) return false;
-    return true;
-  };
   let hidden = 0;
-  const hoist = (owner: string, e: Expr): Expr => {
-    if (!frameConstant(e)) return e;
+  const frameName = (v: string) => v === 't' || defs.consts.has(v) || derivs.has(v);
+  const bindHidden = (owner: string, e: Expr) => {
     const name = `${owner}#${hidden++}`;
     defs.consts.set(name, e);
-    return { kind: 'var', name };
+    return name;
   };
+  const hoist = frameHoister(frameName, bindHidden);
+  // The steps on the way to it — a slerp's relative motor, the map moving a
+  // point — as a row's are (HOIST_NODES).
+  const hoistStep = frameHoister(frameName, bindHidden, HOIST_NODES);
   /** A `[pga]` or `[mv]` node with its coefficients (after the two tags) hoisted. */
   const hoistNode = (owner: string, e: Expr): Expr =>
     e.kind === 'call' ? { ...e, args: e.args.map((a, k) => (k < 2 ? a : hoist(owner, a))) } : e;
@@ -2991,7 +2978,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           if (ofPoints) throw new Error('points');
           // (A slerp's intermediates become hidden constants of this name too.)
           e = withHoisting(
-            c => hoist(d.name, c),
+            c => hoistStep(d.name, c),
             () =>
               lowerLineValue(
                 resolved,
@@ -3575,7 +3562,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   for (const name of fittedNames) constNames.add(name);
   for (const name of defs.consts.keys()) if (name.startsWith(defs.sequencePrefix + '_')) constNames.add(name);
   // A named value's hidden coefficients (M#3) are constants by construction.
-  for (const name of defs.consts.keys()) if (name.includes('#')) constNames.add(name);
+  for (const name of defs.consts.keys()) if (isHiddenName(name)) constNames.add(name);
   // Constant point rows resolve to their component constants; a vector
   // field's components are fields, not uniforms.
   for (const p of defs.points) {
@@ -4084,6 +4071,59 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
     if (!defs.tables.has(name)) env.bind(name, { tag: 'missing', ...missing });
   }
   return { defs: env, fits, errors, needsFile, sumBoundConsts: ropts.boundConsts! };
+}
+
+/** A hidden constant: a frame-constant coefficient of a named value (`M#3`)
+ *  or of a row (`#4.0`), never written by a row nor shown to anyone
+ *  (docs/frame-constants-plan.md). The tokenizer never produces `#`. */
+export const isHiddenName = (name: string): boolean => name.includes('#');
+
+/**
+ * Whether a coefficient can be a constant of its own, computed once per
+ * frame: its free variables are all constants, states or t (`isConst`) and it
+ * holds no list, data column or interval. A number or a single name stays as
+ * it is (a literal 0 is a structural zero kinds depend on), as does a
+ * coefficient of numbers alone (-0.2 folds where it is: nothing to share).
+ */
+export function frameConstant(e: Expr, isConst: (name: string) => boolean): boolean {
+  if (e.kind === 'num' || e.kind === 'var') return false;
+  let plain = true;
+  (function walk(n: Expr): void {
+    if (!plain) return;
+    if (n.kind === 'list' || n.kind === 'data' || n.kind === 'lazy' || n.kind === 'range') plain = false;
+    else childrenOf(n).forEach(walk);
+  })(e);
+  if (!plain) return false;
+  const names = freeVars(e);
+  if (!names.size) return false;
+  for (const v of names) if (!isConst(v)) return false;
+  return true;
+}
+
+/** How large an intermediate coefficient — of a row, or on the way to a named
+ *  value — is before it becomes a constant of its own: not one as small as
+ *  cos(t), whose uniform would cost more than it saves. */
+export const HOIST_NODES = 6;
+
+/**
+ * Hoisting as a function of an owner and a coefficient: a frame-constant one
+ * of more than `minNodes` nodes becomes the name `bind` gives it, anything
+ * else stays. One name per distinct coefficient, so the affine map moving
+ * each vertex of a hull, or a motor read twice, is computed once.
+ */
+export function frameHoister(
+  isConst: (name: string) => boolean,
+  bind: (owner: string, e: Expr) => string,
+  minNodes = 0,
+): (owner: string, e: Expr) => Expr {
+  const seen = new Map<string, string>();
+  return (owner, e) => {
+    if (!exceedsNodes(e, minNodes) || !frameConstant(e, isConst)) return e;
+    const key = exprKey(e);
+    let name = seen.get(key);
+    if (name === undefined) seen.set(key, (name = bind(owner, e)));
+    return { kind: 'var', name };
+  };
 }
 
 /**

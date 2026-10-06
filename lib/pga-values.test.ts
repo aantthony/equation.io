@@ -235,9 +235,9 @@ describe('motors', () => {
     expect(readout([...rows, 'slerp(N, M, 0.5)'])).toBe(
       '≈ turn 0.785398 about the line through (0, 0, 0), direction (0, 0, 1), slide 1',
     );
-    expect(error([...rows, 'K = motor(line((t, 0, 0), (0, 1, t)), 1, 1)', 'slerp(M, K, 0.5)'])).toMatch(
-      /slerp of motors takes two that stay fixed/,
-    );
+    // Inline, between motors that move, as named (docs/frame-constants-plan.md).
+    const moving = [...rows, 'K = motor(line((t, 0, 0), (0, 1, t)), 1, 1)'];
+    expect(readout([...moving, 'slerp(M, K, 0.5)'])).toBe(readout([...moving, 'J = slerp(M, K, 0.5)', 'J']));
   });
   it('are no number or point, and say how to use them', () => {
     expect(error([...Z, '2 M'])).toMatch(/A motor is not a number or a point here/);
