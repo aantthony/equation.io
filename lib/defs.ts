@@ -3862,14 +3862,29 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         if (known.has(head) && !present(head)) return ownerOf(head);
       }
     };
+    const forget = (name: string): void => {
+      defs.consts.delete(name);
+      defs.fields.delete(name);
+      defs.complexes.delete(name);
+      defs.conditions.delete(name);
+      defs.states.delete(name);
+      defs.fns.delete(name);
+      defs.mats.delete(name);
+      defs.tensors.delete(name);
+      defs.multivectors.delete(name);
+      defs.intervals.delete(name);
+      defs.lists.delete(name);
+      defs.tables.delete(name);
+      defs.missingData.delete(name);
+    };
     const remove = (name: string): void => {
       const owner = ownerOf(name);
       if (compOwner.has(name)) {
         defs.points.delete(owner);
-        for (const alias of pointComps(owner, defs.pointDims.get(owner))) {
-          defs.consts.delete(alias);
-          defs.fields.delete(alias);
-        }
+        // Every store `present` reads: a component left in any of them (a
+        // complex one sits in `complexes`) stays present, and the fixpoint
+        // below would remove it again forever.
+        for (const alias of pointComps(owner, defs.pointDims.get(owner))) forget(alias);
       } else if (vecOwnerKey.has(name)) {
         // The dimension map may have been removed by earlier validation.
         for (const [alias, state] of vecOwnerKey) if (state === owner) defs.states.delete(alias);
@@ -3877,21 +3892,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       } else if (fitOwner.has(name)) {
         for (const [parameter, fit] of fitOwner) if (fit === owner) defs.consts.delete(parameter);
         fits.delete(owner);
-      } else {
-        defs.consts.delete(name);
-        defs.fields.delete(name);
-        defs.complexes.delete(name);
-        defs.conditions.delete(name);
-        defs.states.delete(name);
-        defs.fns.delete(name);
-        defs.mats.delete(name);
-        defs.tensors.delete(name);
-        defs.multivectors.delete(name);
-        defs.intervals.delete(name);
-        defs.lists.delete(name);
-        defs.tables.delete(name);
-        defs.missingData.delete(name);
-      }
+      } else forget(name);
     };
     // Runtime formulas and original sources both matter: generated sequence
     // constants have no source row; inlined fields may have no free names.
