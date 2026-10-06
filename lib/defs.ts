@@ -2975,15 +2975,16 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // line, written into every row that names it as a multivector is.
         const flat = flatOfNode(e);
         if (flat && isPoint(flat)) e = { kind: 'vec', items: pointCoords(flat) };
+        else if (flat) {
+          notDrawn(`a ${flatName(flat.dim, flat.grade) ?? 'flat'}`);
+          defs.multivectors.set(d.name, e);
+          continue;
+        }
         // `R = reflect(Q, L)` over a list of points names those points.
         if (e.kind === 'list' && e.items.length) {
           const pts = e.items.map(flatOfNode);
           if (pts.every(f => f && isPoint(f)))
             e = sameList(e, { kind: 'list', items: pts.map((f): Expr => ({ kind: 'vec', items: pointCoords(f!) })) });
-        } else if (flat) {
-          notDrawn(`a ${flatName(flat.dim, flat.grade) ?? 'flat'}`);
-          defs.multivectors.set(d.name, e);
-          continue;
         }
         // `R = e^(-t/2 e_xy)`, `q = quat(1, 2, 3, 4)`: a multivector, written
         // into every row that names it.

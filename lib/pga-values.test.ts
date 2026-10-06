@@ -80,6 +80,8 @@ describe('join and meet', () => {
     if (o.kind === 'point' && o.source.representation === 'real')
       expect(o.source.coordinates.map((c: Expr) => evaluate(c, env))).toEqual([1.5, 3]);
     expect(drawn([...ABCD, 'polygon(meet(join(A, B), join(C, D)), A, C)'])).toEqual(['polygon']);
+    // Named, it is a point like any other, with components.
+    expect(value([...ABCD, X, 'X_y'])).toBe(6);
   });
   it('make planes, and lines of space where planes cross', () => {
     expect(readout(['plane((1, 0, 0), (0, 1, 0), (0, 0, 1))'])).toBe('= z = -x - y + 1');
