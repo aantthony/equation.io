@@ -150,6 +150,15 @@ describe('dependency retention after a failed definition', () => {
     expect(rows[2].error).toBeDefined();
   });
 
+  it('drops a point whose complex component references the failed name', () => {
+    // The component lives in `complexes`; dropping it only from consts and
+    // fields left it present, and the cleanup fixpoint never terminated.
+    const { rows } = analyzeRows(['n = m', 'P = (n i, 1, 2)', 'P']);
+    expect(rows[0].error).toBeDefined();
+    expect(rows[1].error).toMatch(/\bn\b/);
+    expect(rows[2].error).toBeDefined();
+  });
+
   it('reads a sequence term exactly as its plot row: a computed vector is never splatted', () => {
     const { rows } = analyzeRows(['g(u) = (u, 2u)', 'a_n = atan(g(n))', 'a_3']);
     const term = (rows[1].cpu as { term: Expr }).term;
