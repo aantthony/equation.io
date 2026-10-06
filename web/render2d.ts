@@ -10,7 +10,7 @@ import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
-import { type AxisMap, type AxisMaps, toScreen as mapToScreen } from '../lib/axis-map.ts';
+import { type AxisMap, type AxisMaps, toScreen as mapToScreen, toScreenOrEdge } from '../lib/axis-map.ts';
 import { type AxisTicks, axisTicks } from '../lib/axis-ticks.ts';
 
 export interface View2D {
@@ -71,7 +71,14 @@ export interface TField2D {
   params?: string[];
   /** Streamlines of the major eigenvector (tlinesFrag) instead of glyphs. */
   streamlines?: boolean;
+  /** On mapped axes, GLSL for the maps' slopes (gₓ'(x), gᵧ'(y)), with the
+   *  entries read at the screen point (lib/math-object.ts tensor-field). */
+  slope?: [string, string];
 }
+
+/** The tensor shaders' J(x, y): the axis maps' slopes, or none. */
+const slopeGLSL = (slope?: [string, string]) =>
+  `vec2 J(float x, float y) { return ${slope ? `vec2(${slope[0]}, ${slope[1]})` : 'vec2(1.0)'}; }`;
 
 export interface Fractal2D {
   uniforms?: Record<string, number>;
@@ -457,7 +464,7 @@ void main() {
   // Signed shade, as in the static preview (worker/og.ts shadeScalar):
   // positive toward the row color, negative toward its complement, so a
   // field that changes sign (sin(x), or plain x) reads on both sides of 0.
-  float s = tanh(v * 0.6);
+  float s = eq_tanh(v * 0.6);
   float a = 0.55 * abs(s);
   if (a < 0.004) discard;
   outColor = vec4(s >= 0.0 ? uColor : vec3(1.0) - uColor, a);
@@ -596,7 +603,7 @@ void main() {
  * and |adj(A) q| − |det A| vanishes on it, so even a singular M (a segment)
  * draws.
  */
-function tfieldFrag(entries: [string, string, string, string], params?: string[]): string {
+function tfieldFrag(entries: [string, string, string, string], params?: string[], slope?: [string, string]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -608,9 +615,12 @@ uniform float t;
 ${paramDecls(params)}
 out vec4 outColor;
 ${GLSL_PRELUDE}
+${slopeGLSL(slope)}
 mat2 M(float x, float y) {
-  // Column-major: mat2(m00, m10, m01, m11).
-  return mat2(${entries[0]}, ${entries[2]}, ${entries[1]}, ${entries[3]});
+  // Column-major: mat2(m00, m10, m01, m11). On mapped axes, the same map in
+  // screen coordinates: J⁻¹ M J, J = diag of the maps' slopes.
+  vec2 j = J(x, y);
+  return mat2(${entries[0]}, (${entries[2]}) * j.x / j.y, (${entries[1]}) * j.y / j.x, ${entries[3]});
 }
 const float CELL = 72.0;
 float sigma1(mat2 m) {
@@ -629,7 +639,7 @@ void main() {
   mat2 m = M(c.x, c.y);
   if (any(isnan(m[0])) || any(isnan(m[1])) || any(isinf(m[0])) || any(isinf(m[1]))) discard;
   float s1 = sigma1(m);
-  float s = s1 < 1e-9 ? 1.0 : tanh(s1) / s1;
+  float s = s1 < 1e-9 ? 1.0 : eq_tanh(s1) / s1;
   // The same map in pixels: D⁻¹ M D with D = diag(uUpp).
   mat2 mp = mat2(m[0][0], m[0][1] * uUpp.x / uUpp.y, m[1][0] * uUpp.y / uUpp.x, m[1][1]);
   float radius = 0.42 * wx / uUpp.x;
@@ -663,7 +673,7 @@ void main() {
  * and the direction is undefined, and at the domain's edge. As with the
  * glyphs, det M < 0 draws in the complement of the row colour.
  */
-function tlinesFrag(entries: [string, string, string, string], params?: string[]): string {
+function tlinesFrag(entries: [string, string, string, string], params?: string[], slope?: [string, string]): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -677,6 +687,7 @@ out vec4 outColor;
 ${GLSL_PRELUDE}
 // Row-major ((a, b), (c, d)) as a vec4.
 vec4 M(float x, float y) { return vec4(${entries[0]}, ${entries[1]}, ${entries[2]}, ${entries[3]}); }
+${slopeGLSL(slope)}
 
 float tlNoise(vec2 spx) {
   return fract(sin(dot(floor(spx / 2.0), vec2(127.1, 311.7))) * 43758.5453);
@@ -695,8 +706,10 @@ vec2 E(vec2 q, vec2 prev) {
   float r = length(vec2(h, o));
   if (isnan(r) || isinf(r) || !(r > 1e-5 * (abs(m.x) + abs(m.w) + abs(o)))) return vec2(0.0);
   float th = 0.5 * atan(o, h);
-  vec2 e = vec2(cos(th), sin(th));
+  // On mapped axes the direction is x and y's, carried to the screen.
+  vec2 e = vec2(cos(th), sin(th)) / J(q.x, q.y);
   e /= length(e / uUpp);
+  if (any(isnan(e)) || any(isinf(e))) return vec2(0.0);
   return dot(e, prev) < 0.0 ? -e : e;
 }
 
@@ -1318,7 +1331,7 @@ export class Renderer2D {
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
     for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
     for (const f of layers.tfields ?? []) {
-      const frag = (f.streamlines ? tlinesFrag : tfieldFrag)(f.entries, f.params);
+      const frag = (f.streamlines ? tlinesFrag : tfieldFrag)(f.entries, f.params, f.slope);
       drawProgram(frag, f.color, f.params, f.uniforms);
     }
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
@@ -1456,8 +1469,9 @@ export interface Overlay2D {
    *  counter-clockwise (lib/path.ts regionSampler), filled as one path by the
    *  nonzero rule, so overlaps show once. No outline. */
   regions?: Array<{ tris: Float64Array; fill: string }>;
-  /** Vertical bars from y = 0, halfWidth in math units (histograms). */
-  bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
+  /** Vertical bars from y = 0, or from `base` (±Infinity: the window's
+   *  bottom or top edge), halfWidth in math units (histograms). */
+  bars?: Array<{ x: number; y: number; halfWidth: number; color: string; base?: number }>;
   /** `label(point, "text")` rows: text beside a math point, drawn above everything. */
   texts?: Array<{ x: number; y: number; text: string; color: string }>;
   /** A graph's vertices (lib/graph.ts): a ring of GRAPH_NODE_PX with the
@@ -1474,6 +1488,7 @@ export interface OverlayMark {
   polylines: number;
   regions: number;
   texts: number;
+  bars: number;
 }
 
 export function markOverlay(o: Overlay2D): OverlayMark {
@@ -1483,6 +1498,7 @@ export function markOverlay(o: Overlay2D): OverlayMark {
     polylines: o.polylines.length,
     regions: o.regions?.length ?? 0,
     texts: o.texts?.length ?? 0,
+    bars: o.bars?.length ?? 0,
   };
 }
 
@@ -1582,6 +1598,16 @@ export function mapOverlay(o: Overlay2D, mark: OverlayMark, maps: AxisMaps): voi
   for (const t of o.texts?.slice(mark.texts) ?? []) {
     t.x = mx(t.x);
     t.y = my(t.y);
+  }
+  // A bar keeps its edges, and stands on y = 0 where the map shows it; a log
+  // axis does not, so there it rises from the window's edge, as y = 0 lies
+  // past every value the axis shows.
+  for (const b of o.bars?.slice(mark.bars) ?? []) {
+    const [l, r] = [mx(b.x - b.halfWidth), mx(b.x + b.halfWidth)];
+    b.x = (l + r) / 2;
+    b.halfWidth = (r - l) / 2;
+    if (maps.y) b.base = toScreenOrEdge(maps.y, b.base ?? 0);
+    b.y = my(b.y);
   }
 }
 
@@ -1730,9 +1756,10 @@ export function drawLabels2D(
     }
     for (const bar of extras.bars ?? []) {
       const sx = toScreenX(bar.x);
-      const sy0 = toScreenY(0);
+      // A base past the window's edge (a log axis's y = 0) is just beyond it.
+      const sy0 = Math.min(Math.max(toScreenY(bar.base ?? 0), -2), h + 2);
       const sy = toScreenY(bar.y);
-      if (!isFinite(sx) || !isFinite(sy)) continue;
+      if (!isFinite(sx) || !isFinite(sy) || !isFinite(sy0)) continue;
       const hw = bar.halfWidth / upp;
       ctx.globalAlpha = 0.3;
       ctx.fillStyle = bar.color;

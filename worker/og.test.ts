@@ -53,6 +53,26 @@ describe('og raster renderer', () => {
     expect(mapped.px).toEqual(plain.px);
   });
 
+  it('carries a tensor field and an integral onto mapped axes, as the app does', () => {
+    // On x = 10^X, a shear by x is one by x / (x ln 10) = 1/ln 10 on the
+    // screen: J⁻¹ M J with J = diag(x ln 10, 1), the diagonal kept.
+    const same = (mapped: string[], plain: string[]) => {
+      const a = renderRaster(['view(x = 1..100, y = -1..1, x = 10^X)', 'grid(off)', ...mapped], 100, 100);
+      const b = renderRaster(['view(x = 0..2, y = -1..1)', 'grid(off)', ...plain], 100, 100);
+      expect(inkFraction(b)).toBeGreaterThan(0);
+      expect(a.px).toEqual(b.px);
+    };
+    same(['((x/50, x), (0, 1)) #e24'], ['((10^x/50, 1/ln(10)), (0, 1)) #e24']);
+    // Streamlines follow the major eigenvector in x and y, here (1, 1), which
+    // the screen shows as (1/(x ln 10), 1): that of the plain matrix below.
+    same(
+      ['streamlines(((2x, x), (x, 2x))) #e24'],
+      ['streamlines(((1/(ln(10) 10^x)^2 + 1, 1/(ln(10) 10^x)), (1/(ln(10) 10^x), 2))) #e24'],
+    );
+    // The area under 1/2 from x = 10 to 100 is screen X = 1 to 2.
+    same(['int[10..100] 1/2 dx #e24'], ['int[1..2] 1/2 dx #e24']);
+  });
+
   it("lets one panel be 3D without dropping another panel's 2D-only rows", () => {
     expect(canRenderOg(['z = x y', '--- right', 'y < sin(x)'])).toBe(true);
     expect(canRenderOg(['z = x y', 'y < sin(x)'])).toBe(false);

@@ -10,6 +10,7 @@
  */
 import type { Expr } from './expr.ts';
 import { evaluate, freeVars } from './expr.ts';
+import { type AxisMaps, toScreenOrEdge, toWorld } from './axis-map.ts';
 
 /** What a `value` row carries when it is exactly one definite integral. */
 export interface IntShade {
@@ -260,10 +261,16 @@ export function integralRuns(
  * keeps a pole's spike, or a far-off axis, drawable. Cheap enough per frame,
  * so a vertical pan never resamples the integrand.
  */
-export function runPaths(run: ShadeRun, ymin: number, ymax: number): { fill: number[]; stroke: number[] } {
+export function runPaths(
+  run: ShadeRun,
+  ymin: number,
+  ymax: number,
+  /** Where y = 0 is drawn: elsewhere on a mapped axis, or past an edge. */
+  zero = 0,
+): { fill: number[]; stroke: number[] } {
   const pad = ymax - ymin;
   const clampY = (y: number) => Math.min(Math.max(y, ymin - pad), ymax + pad);
-  const base = clampY(0);
+  const base = clampY(zero);
   const p = run.pts;
   const curve: number[] = [];
   for (let i = 0; i < p.length; i += 2) curve.push(p[i], clampY(p[i + 1]));
@@ -313,6 +320,19 @@ export function shadeRuns(
   xmin: number,
   xmax: number,
   sampler: ShadeSampler = evalSampler(shade),
+  maps: AxisMaps = {},
 ): ShadeRun[] {
-  return integralRuns(sampler(env), boundValue(shade.lo, env), boundValue(shade.hi, env), xmin, xmax);
+  const { x: mx, y: my } = maps;
+  const f = sampler(env);
+  const [lo, hi] = [boundValue(shade.lo, env), boundValue(shade.hi, env)];
+  if (!mx && !my) return integralRuns(f, lo, hi, xmin, xmax);
+  // On mapped axes (lib/axis-map.ts) the area is sampled along the screen,
+  // evenly on a log axis, and its signs read from y before y is mapped; a
+  // value the y axis cannot show (≤ 0 on a log axis) lies past its edge.
+  const runs = mx
+    ? integralRuns(X => f(toWorld(mx, X)), toScreenOrEdge(mx, lo), toScreenOrEdge(mx, hi), xmin, xmax)
+    : integralRuns(f, lo, hi, xmin, xmax);
+  if (my)
+    for (const run of runs) for (let i = 1; i < run.pts.length; i += 2) run.pts[i] = toScreenOrEdge(my, run.pts[i]);
+  return runs;
 }

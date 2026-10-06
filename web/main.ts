@@ -107,7 +107,15 @@ import {
   orientLattice,
   parseViewRow,
 } from '../lib/view.ts';
-import { type AxisMap, type AxisMaps, axisMapping, toScreen, toWorld } from '../lib/axis-map.ts';
+import {
+  type AxisMap,
+  type AxisMaps,
+  axisMapping,
+  shownRange,
+  toScreen,
+  toScreenOrEdge,
+  toWorld,
+} from '../lib/axis-map.ts';
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
 import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
@@ -166,7 +174,15 @@ interface Equation {
   /** A definite-integral row's shaded area: the integrand compiled once per
    *  shade, and resampled only when the x-window or a value it reads (bounds,
    *  sliders, states, t) changes. */
-  shadeCache?: { shade: IntShade; names: string[]; sampler: ShadeSampler; key: string; runs: ShadeRun[] };
+  shadeCache?: {
+    shade: IntShade;
+    names: string[];
+    sampler: ShadeSampler;
+    key: string;
+    runs: ShadeRun[];
+    /** The panel's axis maps the runs were drawn on. */
+    maps?: AxisMaps;
+  };
   /** A 2D parametric curve's compiled sampler (lib/path.ts) and its last
    *  polyline, resampled only when a value it reads (sliders, states, t)
    *  changes — the shadeCache pattern. */
@@ -890,15 +906,20 @@ function runTweens(now: number) {
 // spin never rewrites the URL. A panel's spinScale eases a new spin in from rest.
 let lastSpinAt: number | null = null;
 
+/** Whether eq is a real system on a mapped panel, solved rewritten in its
+ *  screen coordinates (lib/axis-map.ts); a complex one solves in x and y. */
+function solvedOnScreen(eq: Equation): boolean {
+  return !!eq.cls && !!panelMaps(panels[panelOf(eq)]) && axisMapping(eq.cls.object) === 'substitute';
+}
+
 /**
- * Whether eq's system is being certified. A mapped panel solves its systems
- * rewritten in screen coordinates (lib/axis-map.ts), where a certificate
- * would prove roots in those, so it offers none, and a row certified before
- * its panel was mapped stops certifying for good rather than resuming
- * unseen when the map goes.
+ * Whether eq's system is being certified. A real system on a mapped panel is
+ * solved in screen coordinates, where a certificate would prove roots in
+ * those, so it offers none, and a row certified before its panel was mapped
+ * stops certifying for good rather than resuming unseen when the map goes.
  */
 function certifying(eq: Equation): boolean {
-  if (eq.certify && panelMaps(panels[panelOf(eq)])) {
+  if (eq.certify && solvedOnScreen(eq)) {
     eq.certify = false;
     eq.info = undefined;
   }
@@ -1638,6 +1659,16 @@ function render() {
       const halfH = (panelH() / 2) * (view.upp / (view.ratio ?? 1));
       vlo = [view.cx - halfW, view.cy - halfH];
       vhi = [view.cx + halfW, view.cy + halfH];
+      // A system whose solutions are placed on a mapped panel (a complex one,
+      // in w) solves in x and y: over the part of the window the maps show.
+      const maps = panelMaps(panels[panelOf(eq)]);
+      if (maps && axisMapping(cls.object) === 'place')
+        for (const [k, map] of [maps.x, maps.y].entries()) {
+          if (!map) continue;
+          const shown = shownRange(map, vlo[k], vhi[k]);
+          if (!shown) return [];
+          [vlo[k], vhi[k]] = shown.world;
+        }
     }
     const pad = vhi.map((v, k) => 0.25 * (v - vlo[k]));
     const lo = vlo.map((v, k) => v - pad[k]);
@@ -2523,15 +2554,18 @@ function render() {
               c = eq.shadeCache = { shade: plot.shade, names, sampler, key: '', runs: [] };
             }
             const key = [xmin, xmax, ...c.names.map(n => env[n])].join();
-            if (key !== c.key) {
+            if (key !== c.key || c.maps !== maps) {
               c.key = key;
-              c.runs = shadeRuns(plot.shade, env, xmin, xmax, c.sampler);
+              c.maps = maps;
+              // On mapped axes, in the panel's screen coordinates already.
+              c.runs = shadeRuns(plot.shade, env, xmin, xmax, c.sampler, maps);
             }
             const minus = minusTint(color);
+            const zero = maps?.y ? toScreenOrEdge(maps.y, 0) : 0;
             for (const run of c.runs) {
               // Only real edges are stroked: not where the window cut the range.
               const tint = run.sign > 0 ? color : minus;
-              const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH);
+              const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH, zero);
               extras.polylines.push({
                 pts: fill,
                 color: cssColor(tint),
@@ -2603,9 +2637,10 @@ function render() {
                 extras.polylines.push({ pts: points.flat(), color: css });
                 break;
               }
-              // Its solutions are on the screen of a mapped panel, and a
-              // coordinate writer reads x and y: no drag there.
-              const set = maps ? null : coordinatePointWriter(eq, plot.coordinates);
+              // A real system's solutions are on the screen of a mapped
+              // panel, and a coordinate writer reads x and y: no drag there. A
+              // complex one's are in x and y, carried there like any point.
+              const set = maps && !plot.complexEquation ? null : coordinatePointWriter(eq, plot.coordinates);
               points.forEach((p, i) => {
                 const key = `sys${eq.id}:${i}`;
                 extras.points.push({
@@ -3631,9 +3666,9 @@ function rowToggles(eq: Equation): RowToggle[] {
 }
 
 function rowToggle(eq: Equation): RowToggle | null {
-  // On a mapped panel a system is solved rewritten in screen coordinates
-  // (lib/axis-map.ts): a certificate there would prove roots in those.
-  const mapped = !!panelMaps(panels[panelOf(eq)]);
+  // On a mapped panel a real system is solved rewritten in screen
+  // coordinates (lib/axis-map.ts): a certificate there would prove roots in those.
+  const mapped = solvedOnScreen(eq);
   if (eq.cpu?.type === 'system' && !eq.cpu!.parametric && !eq.cpu!.angular?.some(Boolean) && !mapped)
     return {
       label: 'certify search box',

@@ -1,6 +1,6 @@
 # Axis maps: log scales and beyond (#71)
 
-Status: **steps 1–6 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
+Status: **steps 1–7 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
 
 ## The idea
 
@@ -46,9 +46,7 @@ symlog (`y = sinh(Y)`) all come from one feature.
    and a drag writes back through the forward map. Positions the map
    cannot show are dropped (points) or break the line. The link preview
    (worker/og.ts) carries placed rows and draws the ticks' grid the same
-   way. Still not drawn on mapped axes: tensor fields (their glyphs need
-   the map's Jacobian), histograms (bars stand on y = 0),
-   complex systems, 3D and integral shading.
+   way. 3D is not drawn on mapped axes; the rest came in step 7.
 4. **Done.** Hover and systems. A real system is rewritten like a curve, so
    its solver searches the window in screen coordinates (evenly, as a log
    axis needs) and its solutions land there; a mapped panel offers no
@@ -81,6 +79,24 @@ symlog (`y = sinh(Y)`) all come from one feature.
    shape is an error rather than drawn without the slope. Seeds dropped by
    clicking are kept on the screen, so moving a slider in the map moves
    them in x and y.
+7. **Done.** The rest of 2D.
+   - Tensor fields. A matrix M acting on x and y is J⁻¹ M J on the screen,
+     J = diag(gₓ'(X), gᵧ'(Y)), so the entries are read at the screen point
+     and the maps' slopes ride along (tensor-field `slope`): the glyphs draw
+     J⁻¹ M J, and streamlines follow the major eigenvector e of M's
+     symmetric part in x and y, shown as J⁻¹e. (The symmetric part of
+     J⁻¹ M J has other eigenvectors: a stress's principal directions are
+     those of x and y, not of the screen.)
+   - Histograms and integral shading stand on y = 0. Where the map cannot
+     show y = 0 (a log axis), they rise from the edge it lies past, which
+     is the usual picture of a histogram on log axes (lib/axis-map.ts
+     toScreenOrEdge). Bars are placed like points; an integral's area is
+     sampled along the screen, so evenly on a log x axis, its signs read
+     before y is mapped (lib/intshade.ts shadeRuns).
+   - Complex systems solve in w, which no rewrite of x and y reaches, so
+     they solve in x and y over the part of the window the maps show and
+     their roots are placed (and can be certified and dragged, as
+     anywhere).
 
 ## Later: equations on a surface
 

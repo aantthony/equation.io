@@ -36,7 +36,7 @@ import { LIGHT_PALETTE, assignColors, takesColor } from '../lib/palette.ts';
 import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
-import { type AxisMap, type AxisMaps, axisMapping, toScreen } from '../lib/axis-map.ts';
+import { type AxisMap, type AxisMaps, axisMapping, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
 import { axisTicks } from '../lib/axis-ticks.ts';
 
 export const OG_WIDTH = 600;
@@ -512,17 +512,20 @@ function renderRow2D(
     const halfW = (r.w / 2) * v.upp;
     const halfH = (r.h / 2) * (v.upp / (v.ratio ?? 1));
     const sampler = compileSampler(shade.body, shade.v, shadeNames(shade)) ?? evalSampler(shade);
-    const runs = shadeRuns(shade, { ...analysis.constEnv, t: 0 }, v.cx - halfW, v.cx + halfW, sampler);
+    // On mapped axes the runs come in screen coordinates (lib/intshade.ts).
+    const runs = shadeRuns(shade, { ...analysis.constEnv, t: 0 }, v.cx - halfW, v.cx + halfW, sampler, v.maps);
+    const zero = v.maps?.y ? toScreenOrEdge(v.maps.y, 0) : 0;
+    const plain: View2D = { ...v, maps: undefined };
     const minus = minusTint(color);
     for (const run of runs) {
       const c = run.sign > 0 ? color : minus;
-      const { fill, stroke } = runPaths(run, v.cy - halfH, v.cy + halfH);
+      const { fill, stroke } = runPaths(run, v.cy - halfH, v.cy + halfH, zero);
       const screen = (pts: number[]) => {
         const sx: number[] = [],
           sy: number[] = [];
         for (let i = 0; i + 1 < pts.length; i += 2) {
-          sx.push(toScreenX(r, v, pts[i]));
-          sy.push(toScreenY(r, v, pts[i + 1]));
+          sx.push(toScreenX(r, plain, pts[i]));
+          sy.push(toScreenY(r, plain, pts[i + 1]));
         }
         return [sx, sy];
       };
@@ -794,6 +797,11 @@ function renderRow2D(
       return;
     }
     case 'tfield2d': {
+      // On mapped axes, the maps' slopes at the point set by env (as
+      // web/render2d.ts slopeGLSL): they carry M and its directions onto the screen.
+      const slopes = cpu.slope?.map(compile);
+      const jac = (): [number, number] =>
+        slopes ? [run(slopes[0], env.vars, env.stack), run(slopes[1], env.vars, env.stack)] : [1, 1];
       if (cpu.streamlines) {
         // streamlines(M): short tensor lines through a grid of seeds, the
         // static counterpart of the app's LIC (web/render2d.ts tlinesFrag).
@@ -809,9 +817,11 @@ function renderRow2D(
           const th = majorAngle(a, b, c, d);
           if (!Number.isFinite(th)) return null;
           // The plane direction in pixels: screen y points down.
-          const ex = Math.cos(th),
-            ey = -Math.sin(th) * ratio;
+          const [jx, jy] = jac();
+          const ex = Math.cos(th) / jx,
+            ey = (-Math.sin(th) / jy) * ratio;
           const len = Math.hypot(ex, ey);
+          if (!(len > 0) || !Number.isFinite(len)) return null;
           const s = ex * prev[0] + ey * prev[1] < 0 ? -1 / len : 1 / len;
           return [ex * s, ey * s];
         };
@@ -848,7 +858,11 @@ function renderRow2D(
         for (let sx = cell / 2; sx < r.w; sx += cell) {
           env.vars[env.slotX] = v.cx + (sx - r.w / 2) * v.upp;
           env.vars[env.slotY] = v.cy - (sy - r.h / 2) * (v.upp / ratio);
-          const [a, b, c, d] = progs.map(p => run(p, env.vars, env.stack));
+          const [jx, jy] = jac();
+          // J⁻¹ M J: the same map in screen coordinates on mapped axes.
+          const [a, b0, c0, d] = progs.map(p => run(p, env.vars, env.stack));
+          const b = (b0 * jy) / jx,
+            c = (c0 * jx) / jy;
           const scale = glyphScale(a, b, c, d) * cell * 0.42;
           if (!(scale > 0)) continue;
           // The same map in pixels, D⁻¹ M D with D = diag(1, 1/ratio), as the
@@ -1475,7 +1489,8 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
       if (gridMode !== 'off') drawGrid2D(sub, view, gridMode === 'axes', maps);
       for (const row of rows) {
         try {
-          const placed = maps && axisMapping(row.cls!.object) === 'place';
+          // A shaded integral (a value row) samples its area on the screen itself.
+          const placed = maps && (axisMapping(row.cls!.object) === 'place' || row.cls!.object.kind === 'value');
           renderRow2D(sub, placed ? { ...view, maps } : view, row, env, colorOf(row), analysis);
         } catch {
           /* skip row */

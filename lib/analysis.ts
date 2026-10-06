@@ -62,7 +62,7 @@ import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
-import { type AxisMaps, UNMAPPED_MESSAGE, axisMapping, inlineFields, mapRowExpr } from './axis-map.ts';
+import { type AxisMaps, UNMAPPED_MESSAGE, axisMapping, inlineFields, mapRowExpr, tensorSlope } from './axis-map.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -973,13 +973,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       const maps = panelMaps[panel];
-      row.cls = classifyRow(
-        maps ? { ...resolved, integral: null } : resolved,
-        lower,
-        constNames,
-        fieldEnv,
-        timeDifferentiator(defs),
-      ).cls;
+      row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
       if (maps) {
         // A mapped panel draws per-pixel rows in its screen coordinates, and
         // carries what places points there as it is drawn (lib/axis-map.ts).
@@ -1001,6 +995,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
             fieldEnv,
             timeDifferentiator(defs),
           ).cls;
+        // A matrix is read at the screen point, and carried onto the screen
+        // by the maps' slopes as it is drawn.
+        if (row.cls.object.kind === 'tensor-field')
+          row.cls = { ...row.cls, object: { ...row.cls.object, slope: tensorSlope(maps) } };
       }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);

@@ -953,6 +953,11 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'coordinates slider',
       ],
       [
+        'area on log-log (ln 100)',
+        'view(x = 0.5..2000, y = 0.001..10, x = 10^X, y = 10^Y); y = 1/x; int[1..100] 1/x dx',
+        'coordinates integral',
+      ],
+      [
         'symlog axis',
         'view(x = -1000..1000, y = -2..2, x = sinh(X)); y = cos(ln(abs(x))); y = tanh(x/50)',
         'coordinates trig',
