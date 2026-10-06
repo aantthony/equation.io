@@ -3,6 +3,7 @@ import { analyzeRows } from './analysis.ts';
 import { axisMapping, parseAxisMap, toScreen, toWorld } from './axis-map.ts';
 import { type Expr, evaluate } from './expr.ts';
 import type { Components } from './math-object.ts';
+import { runtimeSliderNames } from './runtime-sliders.ts';
 import { mappedSpecialPoints } from './special.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
@@ -37,8 +38,35 @@ describe('axis maps', () => {
 
   it('refuse a map that cannot be inverted or uses more than the screen', () => {
     expect(() => parseAxisMap('x', 'X + sin(X)')).toThrow(/no inverse/);
-    expect(() => parseAxisMap('x', 'a^X')).toThrow(/only X and numbers \(found a\)/);
+    expect(() => parseAxisMap('x', 'a^X')).toThrow(/sliders; a has no fixed value/);
     expect(() => parseAxisMap('y', '10^X')).toThrow(/in terms of the screen's Y/);
+  });
+});
+
+describe('a map with a slider', () => {
+  it('reads the slider at its value', () => {
+    const a = analyzeRows(['b = 2', 'view(x = 1..1024, x = b^X)', 'y = x']);
+    expect(a.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
+    const spec = a.rows[1].view as View2DSpec;
+    expect(spec.x![1]).toBeCloseTo(10, 9);
+    expect(formatViewSpec(spec)).toBe('view(x = 1..1024, x = b^X)');
+    // y = x is Y = 2^X on the screen.
+    expect(evaluate((a.rows[2].cls!.object as { rhs: Expr }).rhs, { x: 3 })).toBeCloseTo(8, 9);
+  });
+
+  it('reanalyses when the slider moves, rather than passing it to the shader alone', () => {
+    // The window is in screen units, which the slider changes.
+    expect(runtimeSliderNames(analyzeRows(['b = 2', 'view(x = 1..1024, x = b^X)', 'y = sin(x)']))).not.toContain('b');
+  });
+
+  it('says why a map cannot use what changes with t', () => {
+    const [, , r] = analyzeRows(['b = 2 + sin(t)', 'y = b', 'view(x = 1..100, x = b^X)']).rows;
+    expect(r.error).toMatch(/b has no fixed value here \(not defined, or it changes with t\)/);
+  });
+
+  it('says when the slider makes the map stop increasing', () => {
+    const [, r] = analyzeRows(['b = 0.5', 'view(x = 1..1024, x = b^X)']).rows;
+    expect(r.error).toMatch(/must increase/);
   });
 });
 

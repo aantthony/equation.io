@@ -155,7 +155,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       // `x = 10^X`: no range, and the screen's X, so a map from the screen to x.
       if (!range && (axis === 'x' || axis === 'y') && new RegExp(`\\b${SCREEN[axis]}\\b`).test(named[2])) {
         if (maps[axis]) throw new Error(`view(...) maps ${axis} twice.`);
-        maps[axis] = parseAxisMap(axis, named[2]);
+        maps[axis] = parseAxisMap(axis, named[2], env);
         continue;
       }
       if (spec[axis as 'x'] || lattice.some(([a]) => a === axis)) throw new Error(`view(...) sets ${axis} twice.`);

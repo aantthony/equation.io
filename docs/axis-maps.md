@@ -1,6 +1,6 @@
 # Axis maps: log scales and beyond (#71)
 
-Status: **steps 1–4 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
+Status: **steps 1–5 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
 
 ## The idea
 
@@ -63,8 +63,13 @@ symlog (`y = sinh(Y)`) all come from one feature.
    reads x and y, in decimals (exact forms like √2 are of screen values).
    The curve tracer projects on the screen and reads off x and y, rounded
    to the pixel there.
-5. **Sliders in maps** (`x = b^X`): the write-back reparses the row without
-   constants today, so maps take numbers only.
+5. **Done.** Sliders in maps (`x = b^X`). parseAxisMap reads a slider at
+   its value through the view row's constants, so the map is numbers from
+   there on, and reading it marks the slider structural (a move reanalyses
+   rather than only updating a uniform). The window stays in x units, so a
+   new b is a new screen window for the same x; the app reframes on it
+   (web/main.ts viewKey), and parses write-backs with its constants. A
+   value that stops the map increasing (b ≤ 1) is the view row's error.
 
 ## Later: equations on a surface
 
