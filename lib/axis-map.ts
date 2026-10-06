@@ -19,6 +19,7 @@ import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import type { MathObject } from './math-object.ts';
 import { diff } from './diff.ts';
 import { matchODE } from './ode.ts';
+import { type PlaneMap, planeIn } from './plane-map.ts';
 
 export type Axis = 'x' | 'y';
 
@@ -36,7 +37,13 @@ export interface AxisMap {
   slope: Expr;
 }
 
-export type AxisMaps = Partial<Record<Axis, AxisMap>>;
+/** A panel's maps: x and y each on their own, or both at once through a
+ *  plane map (lib/plane-map.ts), which a view row never mixes with them. */
+export interface AxisMaps {
+  x?: AxisMap;
+  y?: AxisMap;
+  plane?: PlaneMap;
+}
 
 export const SCREEN: Record<Axis, string> = { x: 'X', y: 'Y' };
 
@@ -166,10 +173,13 @@ export function toScreenOrEdge(map: AxisMap, v: number): number {
   return toWorld(map, 0) > v ? -Infinity : Infinity;
 }
 
-/** The maps' slopes (gₓ'(x), gᵧ'(y)) with the screen coordinates called x
- *  and y, as a mapped tensor field carries them (lib/math-object.ts). */
-export function tensorSlope(maps: AxisMaps): [Expr, Expr] {
-  return [maps.x ? slopeIn(maps.x) : { kind: 'num', value: 1 }, maps.y ? slopeIn(maps.y) : { kind: 'num', value: 1 }];
+/** The maps' Jacobian ∂(x, y)/∂(X, Y), row-major, with the screen
+ *  coordinates called x and y, as a mapped tensor field carries it
+ *  (lib/math-object.ts): diag(gₓ'(x), gᵧ'(y)) for axes mapped one by one. */
+export function tensorJacobian(maps: AxisMaps): [Expr, Expr, Expr, Expr] {
+  if (maps.plane) return planeIn(maps.plane).jacobian;
+  const [zero, one]: Expr[] = [num(0), num(1)];
+  return [maps.x ? slopeIn(maps.x) : one, zero, zero, maps.y ? slopeIn(maps.y) : one];
 }
 
 /** The world value at screen coordinate s. */
@@ -250,8 +260,9 @@ const isVar = (e: Expr, name: string) => e.kind === 'var' && e.name === name;
  * else has x and y replaced by the map.
  */
 export function mapRowExpr(e: Expr, maps: AxisMaps, flow = false): Expr {
+  if (maps.plane) return mapPlaneExpr(e, maps.plane, flow);
   const env: Record<string, Expr> = {};
-  for (const map of Object.values(maps)) env[map.axis] = forwardIn(map);
+  for (const map of [maps.x, maps.y]) if (map) env[map.axis] = forwardIn(map);
   if (flow) {
     // A velocity in x and y is one on the screen times the map's slope
     // there: x = g(X) moves at g'(X) dX/dt. So arrows, streamlines and traced
@@ -277,6 +288,29 @@ export function mapRowExpr(e: Expr, maps: AxisMaps, flow = false): Expr {
   return substVars(e, env);
 }
 
+/**
+ * mapRowExpr through a plane map: x and y replaced by the map everywhere, a
+ * graph included (on the unrolled polar screen, y = x^2 is no graph of
+ * anything). A velocity is carried back by the Jacobian, J⁻¹ (P, Q).
+ */
+function mapPlaneExpr(e: Expr, plane: PlaneMap, flow: boolean): Expr {
+  const { forward, jacobian } = planeIn(plane);
+  const env = { x: forward[0], y: forward[1] };
+  if (!flow) return substVars(e, env);
+  const v = planeFlow(e);
+  if (!v) throw new Error(UNMAPPED_MESSAGE);
+  const [P, Q] = v.items.map(item => substVars(item, env));
+  const [a, b, c, d] = jacobian;
+  const det = bin('-', bin('*', a, d), bin('*', b, c));
+  return {
+    kind: 'vec',
+    items: [
+      bin('/', bin('-', bin('*', d, P), bin('*', b, Q)), det),
+      bin('/', bin('-', bin('*', a, Q), bin('*', c, P)), det),
+    ],
+  };
+}
+
 /** The velocities of a 2D flow row: a tuple in x and y, or a slope field
  *  or system spelled as an ODE (`y' = f`, `(x', y') = (P, Q)`). */
 function planeFlow(e: Expr): (Expr & { kind: 'vec' }) | null {
@@ -291,7 +325,7 @@ function planeFlow(e: Expr): (Expr & { kind: 'vec' }) | null {
  *   regions, fields), or solved for (real systems), so the row is rewritten
  *   by mapRowExpr and the shader or solver sees screen coordinates; a
  *   tensor field is read there too, and carried by the maps' slopes
- *   (tensorSlope);
+ *   (tensorJacobian);
  * - `place`: it puts things at positions (points, parametric curves and
  *   regions, figures, point lists, labels, histogram bars, a complex
  *   system's roots), so it is computed in x and y as anywhere else and each
@@ -305,7 +339,9 @@ function planeFlow(e: Expr): (Expr & { kind: 'vec' }) | null {
  */
 export type AxisMapping = 'substitute' | 'place' | 'none';
 
-export function axisMapping(object: MathObject): AxisMapping | null {
+export function axisMapping(object: MathObject, maps?: AxisMaps): AxisMapping | null {
+  // Bars stand on y = 0, which a plane map bends into a curve.
+  if (maps?.plane && object.kind === 'histogram') return null;
   switch (object.kind) {
     case 'value':
     case 'note':

@@ -1,6 +1,6 @@
 # Axis maps: log scales and beyond (#71)
 
-Status: **steps 1–7 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
+Status: **steps 1–8 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
 
 ## The idea
 
@@ -97,6 +97,30 @@ symlog (`y = sinh(Y)`) all come from one feature.
      they solve in x and y over the part of the window the maps show and
      their roots are placed (and can be certified and dragged, as
      anywhere).
+8. **Done.** Plane maps (lib/plane-map.ts): `view((x, y) = (Y cos(X),
+   Y sin(X)), X = -pi..pi, Y = 0..5)`, one map for both coordinates, so
+   the screen can show the plane in polar or log-polar form.
+   - Per pixel it is the same substitution, x and y both from (X, Y). A
+     graph is no longer a graph on the screen (y = x² unrolled is no
+     function of X), so every row is substituted whole.
+   - Flows and matrices are carried by the Jacobian J = ∂(x, y)/∂(X, Y):
+     J⁻¹ (P, Q), J⁻¹ M J and J⁻¹e, the diagonal J of step 6–7 in general
+     (tensor-field `jacobian`, row-major).
+   - The way back has no peeling in general, so it is numerical:
+     Levenberg–Marquardt from the nearest of a 25 × 25 grid of samples over
+     the window (and a quarter past it), or from a line's last point. A map
+     may show a point more than once; a point is drawn at each, while a line
+     follows the copy it started on and is cut just past the window's edge
+     (FOLLOW_MARGIN). Where it is cut but its end is still on the screen
+     (it crossed an angle's seam) it is traced back from there, so it
+     re-enters at the other edge. On a window wider than a full turn, where
+     two copies of a line are on screen at once, one is drawn.
+   - The window is the screen's (X, Y), since a rectangle of x and y is no
+     rectangle on it; the grid and labels are the screen's, and `grid(x, y)`
+     or coordinate fields draw their level lines through the map.
+   - Not drawn: histograms (refused) and integral shading (a readout only),
+     both standing on y = 0, a curve here; hover intercepts and extrema,
+     which are not features of the screen's curve.
 
 ## Later: equations on a surface
 

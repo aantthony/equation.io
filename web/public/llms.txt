@@ -1385,6 +1385,22 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Histogram bars and a definite integral's shaded area stand on y = 0, or
   rise from the bottom edge of a log y axis, which cannot show y = 0. 3D is
   not drawn on mapped axes, and a mapped panel shows no coordinate-field grid.
+- A plane map writes x and y together from the screen's X and Y:
+  `view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..5)` unrolls the
+  plane in polar form — angle across, radius up — so circles about the
+  origin are level lines and spirals rise in steps;
+  `(x, y) = (exp(Y) cos(X), exp(Y) sin(X))` is log-polar, where equiangular
+  spirals are straight. The window is the screen's, X and Y (not x and y).
+  Any smooth map works, with sliders. Every row is drawn through it:
+  curves, regions, fields, flows and matrix fields (carried by its
+  Jacobian), real systems, and points, parametric curves, figures, labels
+  and complex roots, placed where the screen shows them (a point at each
+  place, on an angle range wider than 2π; a line on one, picking up at the
+  other edge where it crosses the seam). Named points drag in x and y. The
+  grid is the screen's; `grid(x, y)` or coordinate fields (r, theta) draw
+  their level lines through the map. Histograms are refused, integrals
+  are readouts without shading, and hovering shows no intercepts or extrema
+  (they are not features of the screen's curve).
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
   A trailing `spin = rate` keeps it orbiting about the vertical axis at that

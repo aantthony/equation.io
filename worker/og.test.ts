@@ -80,6 +80,27 @@ describe('og raster renderer', () => {
     );
   });
 
+  it('draws through a plane map as the app does', () => {
+    // The unrolled polar screen: the circle r = 2 is the line Y = 2, the
+    // point (0, 3) sits at angle π/2, radius 3, and w^3 = 8's root 2 at (0, 2).
+    const same = (mapped: string, plain: string[]) => {
+      const a = renderRaster(
+        ['view((x, y) = (Y cos(X), Y sin(X)), X = -2..2, Y = 0..4)', 'grid(off)', mapped],
+        100,
+        100,
+      );
+      const b = renderRaster(['view(x = -2..2, y = 0..4)', 'grid(off)', ...plain], 100, 100);
+      expect(inkFraction(b), mapped).toBeGreaterThan(0);
+      expect(a.px, mapped).toEqual(b.px);
+    };
+    // (y² for the radius², as the map makes the residual: the same edge.)
+    same('x^2 + y^2 = 4 #e24', ['y^2 = 4 #e24']);
+    same('(0, 3) #e24', [`(${(Math.PI / 2).toFixed(15)}, 3) #e24`]);
+    // Its other roots, at angles ±2π/3, just past the window's edges.
+    const third = ((2 * Math.PI) / 3).toFixed(15);
+    same('w^3 = 8 #e24', ['(0, 2) #e24', `(${third}, 2) #e24`, `(-${third}, 2) #e24`]);
+  });
+
   it("lets one panel be 3D without dropping another panel's 2D-only rows", () => {
     expect(canRenderOg(['z = x y', '--- right', 'y < sin(x)'])).toBe(true);
     expect(canRenderOg(['z = x y', 'y < sin(x)'])).toBe(false);

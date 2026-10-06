@@ -37,6 +37,7 @@ import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 import { type AxisMap, type AxisMaps, axisMapping, shownRange, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
+import { type ScreenBox, planeInverse, planeWorldBox } from '../lib/plane-map.ts';
 import { axisTicks } from '../lib/axis-ticks.ts';
 
 export const OG_WIDTH = 600;
@@ -106,10 +107,60 @@ interface View2D {
   maps?: AxisMaps;
 }
 
+/** J⁻¹ M J for row-major 2×2 M and J: M as it acts on a mapped screen. */
+function conjugate(
+  m: [number, number, number, number],
+  j?: [number, number, number, number],
+): [number, number, number, number] {
+  if (!j) return m;
+  const [a, b, c, d] = j;
+  const det = a * d - b * c;
+  const mj = [m[0] * a + m[1] * c, m[0] * b + m[1] * d, m[2] * a + m[3] * c, m[2] * b + m[3] * d];
+  return [
+    (d * mj[0] - b * mj[2]) / det,
+    (d * mj[1] - b * mj[3]) / det,
+    (a * mj[2] - c * mj[0]) / det,
+    (a * mj[3] - c * mj[1]) / det,
+  ];
+}
+
 const toScreenX = (r: Raster, v: View2D, wx: number) =>
   r.w / 2 + ((v.maps?.x ? toScreen(v.maps.x, wx) : wx) - v.cx) / v.upp;
 const toScreenY = (r: Raster, v: View2D, wy: number) =>
   r.h / 2 - ((v.maps?.y ? toScreen(v.maps.y, wy) : wy) - v.cy) / (v.upp / (v.ratio ?? 1));
+
+/** The screen window a view shows, in its own (screen) coordinates. */
+const screenBoxOf = (r: Raster, v: View2D): ScreenBox => {
+  const [hw, hh] = [(r.w / 2) * v.upp, (r.h / 2) * (v.upp / (v.ratio ?? 1))];
+  return { lo: [v.cx - hw, v.cy - hh], hi: [v.cx + hw, v.cy + hh] };
+};
+
+/**
+ * Carries world points to pixels, for a row placed on its panel. Through a
+ * plane map (lib/plane-map.ts) each point is followed on from the last one
+ * carried, so a line stays on one copy of the plane, until `restart()`; a
+ * point the map cannot show (or follow) is NaN.
+ */
+function pixelCarrier(r: Raster, v: View2D): { at: (x: number, y: number) => [number, number]; restart: () => void } {
+  const plane = v.maps?.plane;
+  if (!plane) return { at: (x, y) => [toScreenX(r, v, x), toScreenY(r, v, y)], restart: () => {} };
+  const plain: View2D = { ...v, maps: undefined };
+  const inverse = planeInverse(plane, screenBoxOf(r, v));
+  let follow = inverse.follower();
+  return {
+    at: (x, y) => {
+      const [X, Y] = follow(x, y);
+      return [toScreenX(r, plain, X), toScreenY(r, plain, Y)];
+    },
+    restart: () => {
+      follow = inverse.follower();
+    },
+  };
+}
+
+/** A straight run from a to b, cut into this many pieces through a plane
+ *  map, which bends it. */
+const PLANE_PIECES = 24;
 
 function drawGrid2D(r: Raster, v: View2D, axesOnly = false, maps: AxisMaps = {}) {
   const minor: [number, number, number] = [0.92, 0.92, 0.92];
@@ -712,9 +763,13 @@ function renderRow2D(
       // union, at the inequality fill's opacity, with no outline.
       const tris = regionSampler(cpu.comps).sample(envValues(env));
       const mask = new Uint8Array(r.w * r.h);
+      const carrier = pixelCarrier(r, v);
       for (let i = 0; i + 5 < tris.length; i += 6) {
-        const sx = [0, 2, 4].map(k => toScreenX(r, v, tris[i + k]));
-        const sy = [1, 3, 5].map(k => toScreenY(r, v, tris[i + k]));
+        carrier.restart();
+        const corners = [0, 2, 4].map(k => carrier.at(tris[i + k], tris[i + k + 1]));
+        if (!corners.flat().every(Number.isFinite)) continue;
+        const sx = corners.map(c => c[0]);
+        const sy = corners.map(c => c[1]);
         polygonSpans(r, sx, sy, (y, xa, xb) => mask.fill(1, y * r.w + xa, y * r.w + xb + 1));
       }
       fillMask(r, mask, color, 0.18);
@@ -739,15 +794,17 @@ function renderRow2D(
     case 'point': {
       if (cpu.dim !== 2) return;
       const [px, py] = cpu.coords.map(c2 => run(compile(c2), env.vars, env.stack));
-      drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), 4.5, color);
+      drawDisc(r, ...pixelCarrier(r, v).at(px, py), 4.5, color);
       return;
     }
     case 'plist': {
       if (cpu.dim !== 2) return;
       const rad = listDotRadius(cpu.pts.length);
+      const carrier = pixelCarrier(r, v);
       for (const p of cpu.pts) {
         const [px, py] = p.map(c2 => run(compile(c2), env.vars, env.stack));
-        if (isFinite(px) && isFinite(py)) drawDisc(r, toScreenX(r, v, px), toScreenY(r, v, py), rad, color);
+        carrier.restart();
+        if (isFinite(px) && isFinite(py)) drawDisc(r, ...carrier.at(px, py), rad, color);
       }
       return;
     }
@@ -758,6 +815,12 @@ function renderRow2D(
       const hi = [v.cx + (r.w * v.upp) / 2, v.cy + (r.h * (v.upp / (v.ratio ?? 1))) / 2];
       // A system placed on a mapped panel (a complex one) solves in x and y,
       // over the part of the window the maps show, as the app does.
+      if (v.maps?.plane) {
+        const world = planeWorldBox(v.maps.plane, { lo: [lo[0], lo[1]], hi: [hi[0], hi[1]] });
+        if (!world) return;
+        [lo[0], lo[1], hi[0], hi[1]] = [...world.lo, ...world.hi];
+      }
+      const carrier = pixelCarrier(r, v);
       for (const [k, map] of [v.maps?.x, v.maps?.y].entries()) {
         if (!map) continue;
         const shown = shownRange(map, lo[k], hi[k]);
@@ -767,22 +830,18 @@ function renderRow2D(
       const systemEnv = { ...analysis.constEnv, t: 0 };
       if (plot.parametric) {
         for (const path of traceSystem(plot.residuals, ['x', 'y'], lo, hi, systemEnv, 256, plot.angular)) {
+          carrier.restart();
+          let last = carrier.at(path[0][0], path[0][1]);
           for (let i = 1; i < path.length; i++) {
-            const a = path[i - 1],
-              b = path[i];
-            drawLine(
-              r,
-              toScreenX(r, v, a[0]),
-              toScreenY(r, v, a[1]),
-              toScreenX(r, v, b[0]),
-              toScreenY(r, v, b[1]),
-              color,
-            );
+            const next = carrier.at(path[i][0], path[i][1]);
+            drawLine(r, last[0], last[1], next[0], next[1], color);
+            last = next;
           }
         }
       } else {
         for (const p of solveSystem(plot.residuals, ['x', 'y'], lo, hi, { env: systemEnv, angular: plot.angular })) {
-          drawDisc(r, toScreenX(r, v, p[0]), toScreenY(r, v, p[1]), 4.5, color);
+          carrier.restart();
+          drawDisc(r, ...carrier.at(p[0], p[1]), 4.5, color);
         }
       }
       return;
@@ -805,11 +864,16 @@ function renderRow2D(
       return;
     }
     case 'tfield2d': {
-      // On mapped axes, the maps' slopes at the point set by env (as
-      // web/render2d.ts slopeGLSL): they carry M and its directions onto the screen.
-      const slopes = cpu.slope?.map(compile);
-      const jac = (): [number, number] =>
-        slopes ? [run(slopes[0], env.vars, env.stack), run(slopes[1], env.vars, env.stack)] : [1, 1];
+      // On mapped axes, the maps' Jacobian J at the point set by env (as
+      // web/render2d.ts jacobianGLSL): it carries M and its directions onto
+      // the screen, as J⁻¹ M J and J⁻¹ e.
+      const jacs = cpu.jacobian?.map(compile);
+      const jacInv = (): [number, number, number, number] => {
+        if (!jacs) return [1, 0, 0, 1];
+        const [a, b, c, d] = jacs.map(p => run(p, env.vars, env.stack));
+        const det = a * d - b * c;
+        return [d / det, -b / det, -c / det, a / det];
+      };
       if (cpu.streamlines) {
         // streamlines(M): short tensor lines through a grid of seeds, the
         // static counterpart of the app's LIC (web/render2d.ts tlinesFrag).
@@ -825,9 +889,9 @@ function renderRow2D(
           const th = majorAngle(a, b, c, d);
           if (!Number.isFinite(th)) return null;
           // The plane direction in pixels: screen y points down.
-          const [jx, jy] = jac();
-          const ex = Math.cos(th) / jx,
-            ey = (-Math.sin(th) / jy) * ratio;
+          const [p, q, s0, t] = jacInv();
+          const ex = p * Math.cos(th) + q * Math.sin(th),
+            ey = -(s0 * Math.cos(th) + t * Math.sin(th)) * ratio;
           const len = Math.hypot(ex, ey);
           if (!(len > 0) || !Number.isFinite(len)) return null;
           const s = ex * prev[0] + ey * prev[1] < 0 ? -1 / len : 1 / len;
@@ -866,11 +930,11 @@ function renderRow2D(
         for (let sx = cell / 2; sx < r.w; sx += cell) {
           env.vars[env.slotX] = v.cx + (sx - r.w / 2) * v.upp;
           env.vars[env.slotY] = v.cy - (sy - r.h / 2) * (v.upp / ratio);
-          const [jx, jy] = jac();
           // J⁻¹ M J: the same map in screen coordinates on mapped axes.
-          const [a, b0, c0, d] = progs.map(p => run(p, env.vars, env.stack));
-          const b = (b0 * jy) / jx,
-            c = (c0 * jx) / jy;
+          const [a, b, c, d] = conjugate(
+            progs.map(p => run(p, env.vars, env.stack)) as [number, number, number, number],
+            jacs?.map(p => run(p, env.vars, env.stack)) as [number, number, number, number] | undefined,
+          );
           const scale = glyphScale(a, b, c, d) * cell * 0.42;
           if (!(scale > 0)) continue;
           // The same map in pixels, D⁻¹ M D with D = diag(1, 1/ratio), as the
@@ -898,15 +962,17 @@ function renderRow2D(
       // Sampled as the app samples it (lib/path.ts), pen up at the jumps. A
       // complex path is not a vec row: its components are the split parts.
       const pts = pathSampler(cpu.comps).sample({ ...analysis.constEnv, t: 0 });
+      const carrier = pixelCarrier(r, v);
       let last: [number, number] | null = null;
       for (let i = 0; i + 1 < pts.length; i += 2) {
         if (!Number.isFinite(pts[i]) || !Number.isFinite(pts[i + 1])) {
           last = null;
+          carrier.restart();
           continue;
         }
-        const s: [number, number] = [toScreenX(r, v, pts[i]), toScreenY(r, v, pts[i + 1])];
+        const s = carrier.at(pts[i], pts[i + 1]);
         if (last) drawLine(r, last[0], last[1], s[0], s[1], color);
-        last = s;
+        last = Number.isFinite(s[0]) && Number.isFinite(s[1]) ? s : null;
       }
       return;
     }
@@ -918,9 +984,21 @@ function renderRow2D(
       const vals = cpu.hull ? hullFaces(given, 2)[0].outline.flatMap(p => [p[0], p[1]]) : given;
       const sx: number[] = [],
         sy: number[] = [];
-      for (let i = 0; i + 1 < vals.length; i += 2) {
-        sx.push(toScreenX(r, v, vals[i]));
-        sy.push(toScreenY(r, v, vals[i + 1]));
+      // Through a plane map each edge bends, so it is cut into pieces.
+      const pieces = v.maps?.plane ? PLANE_PIECES : 1;
+      const carrier = pixelCarrier(r, v);
+      const count = vals.length / 2;
+      for (let i = 0; i < count; i++) {
+        const j = cpu.closed ? (i + 1) % count : i + 1;
+        const steps = j < count ? pieces : 1;
+        for (let k = 0; k < steps; k++) {
+          const t = k / steps;
+          const x = vals[2 * i] + (j < count ? (vals[2 * j] - vals[2 * i]) * t : 0);
+          const y = vals[2 * i + 1] + (j < count ? (vals[2 * j + 1] - vals[2 * i + 1]) * t : 0);
+          const [px, py] = carrier.at(x, y);
+          sx.push(px);
+          sy.push(py);
+        }
       }
       const { closed, arrow } = cpu;
       if (closed) fillPolygon(r, sx, sy, color, 0.16);

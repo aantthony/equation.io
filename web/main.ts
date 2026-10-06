@@ -116,6 +116,15 @@ import {
   toScreenOrEdge,
   toWorld,
 } from '../lib/axis-map.ts';
+import {
+  type PlaneMap,
+  type ScreenBox,
+  planeIn,
+  planeInverse,
+  planeJacobian,
+  planeToWorld,
+  planeWorldBox,
+} from '../lib/plane-map.ts';
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
 import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
@@ -909,7 +918,8 @@ let lastSpinAt: number | null = null;
 /** Whether eq is a real system on a mapped panel, solved rewritten in its
  *  screen coordinates (lib/axis-map.ts); a complex one solves in x and y. */
 function solvedOnScreen(eq: Equation): boolean {
-  return !!eq.cls && !!panelMaps(panels[panelOf(eq)]) && axisMapping(eq.cls.object) === 'substitute';
+  const maps = panelMaps(panels[panelOf(eq)]);
+  return !!eq.cls && !!maps && axisMapping(eq.cls.object, maps) === 'substitute';
 }
 
 /**
@@ -1313,10 +1323,33 @@ const liveRow = (eq: Equation) =>
 
 /** Which grid families draw behind a 2D panel: those its grid(…) row names,
  *  or else the coordinate fields defined among its rows. Empty is Cartesian. */
-function panelGridFields(p: Panel): Array<GridField | 'x' | 'y'> {
+/** Coordinate grids through plane maps, compiled once per field and map. */
+const planeGrids = new WeakMap<PlaneMap, Map<GridField | 'x' | 'y', GridField>>();
+
+/** A coordinate field (or x or y itself) as a plane-mapped panel grids it:
+ *  its level lines, drawn on the screen through the map. */
+function planeGridField(f: GridField | 'x' | 'y', plane: PlaneMap): GridField {
+  let fields = planeGrids.get(plane);
+  if (!fields) planeGrids.set(plane, (fields = new Map()));
+  let out = fields.get(f);
+  if (!out) {
+    const [x, y] = planeIn(plane).forward;
+    const spec =
+      f === 'x' || f === 'y'
+        ? { name: f, expr: f === 'x' ? x : y, params: [] }
+        : { name: f.name, expr: substVars(f.expr, { x, y }), params: f.params };
+    out = { ...compileGridCpu(spec), ...compileGridGpu(spec) };
+    fields.set(f, out);
+  }
+  return out;
+}
+
+function panelGridFields(p: Panel, plane?: PlaneMap): Array<GridField | 'x' | 'y'> {
   const coords = p.grid?.mode === 'coords' ? p.grid.coords! : null;
   if (coords) {
-    if (coords.length === 2 && coords.includes('x') && coords.includes('y')) return [];
+    // grid(x, y) is the plain grid, except through a plane map, where x and
+    // y are curves on the screen.
+    if (!plane && coords.length === 2 && coords.includes('x') && coords.includes('y')) return [];
     return coords.flatMap<GridField | 'x' | 'y'>(name =>
       name === 'x' || name === 'y' ? [name] : gridFields.filter(f => f.name === name),
     );
@@ -1662,7 +1695,11 @@ function render() {
       // A system whose solutions are placed on a mapped panel (a complex one,
       // in w) solves in x and y: over the part of the window the maps show.
       const maps = panelMaps(panels[panelOf(eq)]);
-      if (maps && axisMapping(cls.object) === 'place')
+      if (maps?.plane && axisMapping(cls.object, maps) === 'place') {
+        const world = planeWorldBox(maps.plane, { lo: [vlo[0], vlo[1]], hi: [vhi[0], vhi[1]] });
+        if (!world) return [];
+        [vlo, vhi] = [[...world.lo], [...world.hi]];
+      } else if (maps && axisMapping(cls.object) === 'place')
         for (const [k, map] of [maps.x, maps.y].entries()) {
           if (!map) continue;
           const shown = shownRange(map, vlo[k], vhi[k]);
@@ -2160,20 +2197,27 @@ function render() {
       // A mapped panel (lib/axis-map.ts) carries what a placing row adds to
       // the overlay, and the points it lets you grab, to its screen.
       const maps = frame.maps;
-      const placed = (eq: Equation) => !!maps && !!eq.cls && axisMapping(eq.cls.object) === 'place';
+      const placed = (eq: Equation) => !!maps && !!eq.cls && axisMapping(eq.cls.object, maps) === 'place';
       const since = (eq: Equation) => (placed(eq) ? { overlay: markOverlay(extras), grabs: grabs.length } : null);
+      // The screen window, which a plane map's way back is built over.
+      const screenBox: ScreenBox = { lo: [xmin, view.cy - halfH], hi: [xmax, view.cy + halfH] };
       const carry = (mark: ReturnType<typeof since>) => {
         if (!mark || !maps) return;
-        mapOverlay(extras, mark.overlay, maps);
+        mapOverlay(extras, mark.overlay, maps, screenBox);
+        const plane = maps.plane;
         for (const g of grabs.splice(mark.grabs)) {
-          const [x, y] = [maps.x ? toScreen(maps.x, g.x) : g.x, maps.y ? toScreen(maps.y, g.y) : g.y];
+          const [x, y] = plane
+            ? planeInverse(plane, screenBox).first(g.x, g.y)
+            : [maps.x ? toScreen(maps.x, g.x) : g.x, maps.y ? toScreen(maps.y, g.y) : g.y];
           if (!isFinite(x) || !isFinite(y)) continue;
           const set = g.set;
           grabs.push({
             ...g,
             x,
             y,
-            set: (sx, sy) => set(dragTo(maps.x, sx, 0), dragTo(maps.y, sy, 1)),
+            set: plane
+              ? (sx, sy) => set(...dragToPlane(plane, sx, sy))
+              : (sx, sy) => set(dragTo(maps.x, sx, 0), dragTo(maps.y, sy, 1)),
           });
         }
       };
@@ -2697,8 +2741,13 @@ function render() {
       }
       let gridSpecs: GridSpec[] | undefined;
       // Coordinate fields are written in x and y, not a mapped panel's screen
-      // coordinates: a mapped panel grids its axes at their ticks instead.
-      const families = frame.grid === 'on' && !frame.maps ? panelGridFields(panel) : [];
+      // coordinates: a panel with its axes mapped grids them at their ticks
+      // instead, and one with a plane map draws them through it, x and y too.
+      const plane = frame.maps?.plane;
+      const families =
+        frame.grid === 'on' && (!frame.maps || plane)
+          ? panelGridFields(panel, plane).map(f => (plane ? planeGridField(f, plane) : f))
+          : [];
       if (families.length) {
         gridSpecs = families.map(f => {
           if (f === 'x' || f === 'y') {
@@ -4684,6 +4733,21 @@ function dragTo(map: AxisMap | undefined, s: number, axis: number): number {
   return parseFloat(toWorld(map, Math.round(s / step) * step).toPrecision(5));
 }
 
+/** dragTo through a plane map: the screen point carried to x and y, each
+ *  rounded to about a pixel there — the pixel's size in x and y, from the
+ *  map's Jacobian — as snapToPixel rounds on a plain panel. */
+function dragToPlane(plane: PlaneMap, sx: number, sy: number): [number, number] {
+  const [x, y] = planeToWorld(plane, sx, sy);
+  const [a, b, c, d] = planeJacobian(plane, sx, sy);
+  const [ux, uy] = [view.upp, view.upp / (view.ratio ?? 1)];
+  const round = (v: number, pixel: number) => {
+    if (!(pixel > 0) || !isFinite(pixel)) return parseFloat(v.toPrecision(5));
+    const step = Math.pow(10, Math.floor(Math.log10(pixel * 3)));
+    return parseFloat((Math.round(v / step) * step).toPrecision(12));
+  };
+  return [round(x, Math.hypot(a * ux, b * uy)), round(y, Math.hypot(c * ux, d * uy))];
+}
+
 // --- draggable points ---
 //
 // A point row whose coordinates are plain numbers or bare slider names can be
@@ -4698,7 +4762,8 @@ function dragTo(map: AxisMap | undefined, s: number, axis: number): number {
  *  A mapped axis's pixels are not even in its own units, so its value was
  *  rounded on the screen already (dragTo) and is left as it is. */
 function snapToPixel(v: number, axis = 0): number {
-  if (panelMaps(cur)?.[axis === 1 ? 'y' : 'x']) return v;
+  const maps = panelMaps(cur);
+  if (maps?.plane || maps?.[axis === 1 ? 'y' : 'x']) return v;
   const upp = view.upp / (axis === 1 ? (view.ratio ?? 1) : 1);
   const step = Math.pow(10, Math.floor(Math.log10(upp * 3)));
   return Math.round(v / step) * step;
@@ -4941,7 +5006,13 @@ function computeSpecialPoints(eq: Equation) {
   const ylo = view.cy - halfH * 1.5;
   const yhi = view.cy + halfH * 1.5;
   const maps = panelMaps(panels[panelOf(eq)]);
-  const pts = maps ? mappedSpecialPoints(expr, maps, xlo, xhi, ylo, yhi) : specialPoints(expr, xlo, xhi, ylo, yhi);
+  // Through a plane map no intercept or extremum of x and y is a feature
+  // of the screen's curve: none are shown there.
+  const pts = maps?.plane
+    ? []
+    : maps
+      ? mappedSpecialPoints(expr, maps, xlo, xhi, ylo, yhi)
+      : specialPoints(expr, xlo, xhi, ylo, yhi);
   eq.spCache = { text: eq.text, env: hoverEnvKey(cls), xlo, xhi, ylo, yhi, pts };
 }
 
@@ -5050,12 +5121,23 @@ function updateHover(clientX: number, clientY: number) {
       const hit = tracerFor(eq)?.(wx, wy, sx, sy);
       if (hit && hit.dist < bestT) {
         bestT = hit.dist;
-        const lines = ['on curve', `x = ${read(maps?.x, hit.x, sx)}`, `y = ${read(maps?.y, hit.y, sy)}`];
+        const lines = maps?.plane
+          ? ['on curve', ...readPlane(maps.plane, hit.x, hit.y, sx, sy)]
+          : ['on curve', `x = ${read(maps?.x, hit.x, sx)}`, `y = ${read(maps?.y, hit.y, sy)}`];
         best = { pt: { x: hit.x, y: hit.y, lines }, color: cssColor(baseColor(eq)), panel: cur };
       }
     }
   }
   setHover(best);
+}
+
+/** A traced screen point (X, Y) read in x and y through a plane map, each to
+ *  the pixel there (sx, sy screen units a pixel), from the map's Jacobian. */
+function readPlane(plane: PlaneMap, X: number, Y: number, sx: number, sy: number): string[] {
+  const [x, y] = planeToWorld(plane, X, Y);
+  const [a, b, c, d] = planeJacobian(plane, X, Y);
+  const step = (p: number, q: number) => Math.hypot(p * sx, q * sy) || sx;
+  return [`x = ${fmtTraced(x, step(a, b))}`, `y = ${fmtTraced(y, step(c, d))}`];
 }
 
 /** Marker for the hovered point, drawn over the axis labels. */

@@ -257,17 +257,19 @@ describe('rows in a mapped panel', () => {
     expect(evaluate(v, { x: 1, y: 1 })).toBeCloseTo(-1 / Math.LN10, 9);
   });
 
-  it('read a tensor field at the screen point, and carry it by the slopes', () => {
+  it('read a tensor field at the screen point, and carry it by the Jacobian', () => {
     const rows = ['view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)', '((x, y), (1, 2))'];
-    const tensor = object(rows) as { entries: Expr[]; slope: Expr[] };
+    const tensor = object(rows) as { entries: Expr[]; jacobian: Expr[] };
     const at = { x: 1, y: 2 };
     // x = 10 and y = 100 at the screen point (1, 2).
     expect(tensor.entries.map(e => evaluate(e, at))).toEqual([10, 100, 1, 2]);
-    // x = 10^X moves at ln 10 · 10^X.
-    expect(evaluate(tensor.slope[0], at)).toBeCloseTo(Math.LN10 * 10, 9);
-    expect(evaluate(tensor.slope[1], at)).toBeCloseTo(Math.LN10 * 100, 9);
+    // x = 10^X moves at ln 10 · 10^X, and not with Y.
+    const [a, b, c, d] = tensor.jacobian.map(e => evaluate(e, at));
+    expect(a).toBeCloseTo(Math.LN10 * 10, 9);
+    expect([b, c]).toEqual([0, 0]);
+    expect(d).toBeCloseTo(Math.LN10 * 100, 9);
     // Unmapped, it carries none.
-    expect(object(['((x, y), (1, 2))'])).not.toHaveProperty('slope');
+    expect(object(['((x, y), (1, 2))'])).not.toHaveProperty('jacobian');
   });
 
   it('place histogram bars and a complex system’s roots, and keep an integral’s shade', () => {

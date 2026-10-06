@@ -957,6 +957,17 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'view(x = 0.5..2000, y = 0.001..10, x = 10^X, y = 10^Y); y = 1/x; int[1..100] 1/x dx',
         'coordinates integral',
       ],
+      // A plane map: the screen shows the plane through (x, y) = F(X, Y).
+      [
+        'polar, unrolled',
+        'r = sqrt(x^2 + y^2); theta = atan2(y, x); view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..4); r = 2 + cos(3 theta); (x - 1)^2 + y^2 < 1; (3u cos(4pi u), 3u sin(4pi u))',
+        'coordinates parametric',
+      ],
+      [
+        'log-polar: spirals go straight',
+        'view((x, y) = (exp(Y) cos(X), exp(Y) sin(X)), X = -pi..pi, Y = -2..2); u = interval(-8, 8); (exp(u/4) cos(u), exp(u/4) sin(u)); x^2 + y^2 = 1; y = x; w^3 = 1',
+        'coordinates complex',
+      ],
       [
         'symlog axis',
         'view(x = -1000..1000, y = -2..2, x = sinh(X)); y = cos(ln(abs(x))); y = tanh(x/50)',
