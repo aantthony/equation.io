@@ -653,7 +653,8 @@ export function shaderKey(plan: GpuPlan): string {
         plan.levels?.params,
       ]);
     case 'implicit3d':
-      return JSON.stringify([plan.type, plan.params, plan.field, plan.grad, plan.plane]);
+      // (A plane's coefficients only where it has them: other surfaces keep their keys.)
+      return JSON.stringify([plan.type, plan.params, plan.field, plan.grad, ...(plan.plane ? [plan.plane] : [])]);
     case 'ineq2d':
       return JSON.stringify([plan.type, plan.params, plan.field, plan.edges]);
     case 'projected2d':
