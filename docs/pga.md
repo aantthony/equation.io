@@ -9,7 +9,8 @@ Status: **agreed 2026-09-27** — the three open questions below were
 settled as recommended: the algebra stays hidden behind meet/join,
 `line(A, B)` becomes a value (consistent with docs/multisets.md), and
 conformal GA is out of scope. **Phases 1–3 built 2026-10-05** (see "As
-built" at the end); phases 4–5 (motors as user syntax, examples) remain.
+built" at the end); **phases 4–5 built 2026-10-06** ("As built (phases
+4–5)"). The algebra itself (e_0 blades, ⟑ on flats) stays hidden.
 
 ## Why
 
@@ -189,10 +190,9 @@ could ship as one PR.
   two planes through it cross (the planes through the line and the axis it
   is least along, and through the line and that plane's normal), each
   term kept even when its coefficient is the literal 0, so a constant line
-  still mentions z. Planes draw as the app's implicit surfaces, so the
-  translucent quad of the table above is not built; the /g/ preview falls
-  back to the static card for a plane, as for any implicit surface that is
-  not z = f(x, y).
+  still mentions z. Planes draw translucent (see phases 4–5); the /g/
+  preview falls back to the static card for a plane, as for any implicit
+  surface that is not z = f(x, y).
 - **Readouts** (lib/pga.ts `flatText`) through a `flat` flag on the tuple
   readout; the public kind is `flat`.
 - **Measures.** distance from a point to a line or plane, and between
@@ -200,11 +200,45 @@ could ship as one PR.
   skew lines); angle between lines and planes is the acute angle.
 - **Examples** (web/examples.ts): the orthocentre and Desargues' theorem
   under "geometry", and a turning cube's shadow (`hull(project(W, G))`)
-  under "matrices, rotations + hulls". The two planes' line waits for planes
-  that draw translucent — opaque, they hide the line — and the screw motion
-  for motors (phase 4).
+  under "matrices, rotations + hulls"; the other two came with phases 4–5.
 - **Multisets** work through the existing object-list expansion: a list
   of lines or planes is a list of `[pga]` nodes, a name moves together
   (`L = join(P, C); meet(L, L)` gives two results), `count` takes lines and
   planes, `mean`/`total` take a multiset of meets as points, and other
   reductions refuse lines, planes and (newly) multivectors with a message.
+
+## As built (phases 4–5)
+
+- **Motors** (lib/pga.ts `motorPga`): `motor(L, θ, d)` turns right-handed
+  about the line L's direction and slides d along it; `motor(P, θ)` turns
+  the plane counterclockwise about P. A motor travels as a `[pga]` node of
+  grade `MOTOR` (−1).
+- **Size, which decided the design.** Generic PGA products of a motor about
+  an axis through draggable points ran to 10⁵ nodes. So a motor is built
+  homogeneously in closed form (cos + sin·L, no normalising sqrt per
+  coefficient), keeps its slide as a second factor in the node, moves a
+  point by its affine map (sandwiches of the origin and the axis directions,
+  combined linearly, all divided by the origin's weight, which a motion
+  keeps) and a line or plane by linearity in its coefficients, and folds
+  every constant subexpression to a number. A screw about a draggable axis
+  moves a point in about 5k nodes, under the 8192 limit.
+- **rotate(X, M)** moves points, lists, lines, planes and figures (through
+  the existing figure-transform push-down).
+- **slerp(M1, M2, s)**: M1 e^(s log(M̃1 M2)), with `logMotor` the
+  closed-form inverse of the screw exp (shorter way round). Its log
+  repeats its argument many times, so slerp takes motors that stay fixed
+  (they fold to numbers) and refuses others with a message.
+- **Drawing and readout.** A motor row draws its axis — read straight off
+  its bivector part, with the slide's multiple of B_E I taken out, no log —
+  and reads out what it does (`turn θ about the line through …, direction
+  …, slide d`, `turn θ about (x, y)`, `slide (…)`, `no motion`), worked out
+  numerically from where it moves test points.
+- **Translucent planes.** A plane's implicit surface carries its
+  coefficients; web/render3d.ts meets each ray with it analytically
+  (`planeSheetFrag`) and blends a translucent sheet, depth-tested but
+  writing no depth, with a solid rim where it crosses the box. A family of
+  planes compiles member by member, since the shared template would drop
+  the coefficients. Not the motor table's sector and slide arrow: a motor
+  draws its axis only.
+- **Examples:** a cube screwing about an axis (with one corner's trail) and
+  two planes with their line and angle.

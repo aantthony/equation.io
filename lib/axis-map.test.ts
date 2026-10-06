@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { axisMapping, parseAxisMap, toScreen, toWorld } from './axis-map.ts';
 import { type Expr, evaluate } from './expr.ts';
+import type { Components } from './math-object.ts';
+import { runtimeSliderNames } from './runtime-sliders.ts';
+import { mappedSpecialPoints } from './special.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
 const view = (text: string) => parseViewRow(text, {}) as View2DSpec;
@@ -35,8 +38,35 @@ describe('axis maps', () => {
 
   it('refuse a map that cannot be inverted or uses more than the screen', () => {
     expect(() => parseAxisMap('x', 'X + sin(X)')).toThrow(/no inverse/);
-    expect(() => parseAxisMap('x', 'a^X')).toThrow(/only X and numbers \(found a\)/);
+    expect(() => parseAxisMap('x', 'a^X')).toThrow(/sliders; a has no fixed value/);
     expect(() => parseAxisMap('y', '10^X')).toThrow(/in terms of the screen's Y/);
+  });
+});
+
+describe('a map with a slider', () => {
+  it('reads the slider at its value', () => {
+    const a = analyzeRows(['b = 2', 'view(x = 1..1024, x = b^X)', 'y = x']);
+    expect(a.rows.map(r => r.error)).toEqual([undefined, undefined, undefined]);
+    const spec = a.rows[1].view as View2DSpec;
+    expect(spec.x![1]).toBeCloseTo(10, 9);
+    expect(formatViewSpec(spec)).toBe('view(x = 1..1024, x = b^X)');
+    // y = x is Y = 2^X on the screen.
+    expect(evaluate((a.rows[2].cls!.object as { rhs: Expr }).rhs, { x: 3 })).toBeCloseTo(8, 9);
+  });
+
+  it('reanalyses when the slider moves, rather than passing it to the shader alone', () => {
+    // The window is in screen units, which the slider changes.
+    expect(runtimeSliderNames(analyzeRows(['b = 2', 'view(x = 1..1024, x = b^X)', 'y = sin(x)']))).not.toContain('b');
+  });
+
+  it('says why a map cannot use what changes with t', () => {
+    const [, , r] = analyzeRows(['b = 2 + sin(t)', 'y = b', 'view(x = 1..100, x = b^X)']).rows;
+    expect(r.error).toMatch(/b has no fixed value here \(not defined, or it changes with t\)/);
+  });
+
+  it('says when the slider makes the map stop increasing', () => {
+    const [, r] = analyzeRows(['b = 0.5', 'view(x = 1..1024, x = b^X)']).rows;
+    expect(r.error).toMatch(/must increase/);
   });
 });
 
@@ -133,12 +163,97 @@ describe('rows in a mapped panel', () => {
     ]);
   });
 
+  it('rewrite a system, so its solver searches the screen', () => {
+    const rows = ['view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)', '(x y, x/y) = (100, 4)'];
+    const [, sys] = analyzeRows(rows).rows;
+    expect(sys.error).toBeUndefined();
+    const o = sys.cls!.object as { source: { residuals: Components } };
+    // x = 20, y = 5 solves it: at screen (log 20, log 5) both residuals vanish.
+    const at = { x: Math.log10(20), y: Math.log10(5) };
+    for (const r of o.source.residuals) expect(evaluate(r, at)).toBeCloseTo(0, 9);
+  });
+
+  it('find hover points on the screen and read them in x and y', () => {
+    const hover = (rows: string[], box: [number, number, number, number]) => {
+      const a = analyzeRows(rows);
+      const maps = (a.rows[0].view as View2DSpec).maps!;
+      const o = a.rows.at(-1)!.cls!.object as { equation: Expr };
+      return mappedSpecialPoints(o.equation, maps, ...box).map(p => [p.lines.join('; '), p.x]);
+    };
+    // A minimum stays one through an increasing map, placed on the screen.
+    const [[min, at]] = hover(
+      ['view(x = 0.1..100, y = 0.1..100, x = 10^X, y = 10^Y)', 'y = (x - 3)^2 + 1'],
+      [-1, 2, -1, 2],
+    );
+    expect(min).toBe('local minimum; x = 3; y = 1');
+    expect(at).toBeCloseTo(Math.log10(3), 9);
+    const lines = (rows: string[], box: [number, number, number, number]) => hover(rows, box).map(([l]) => l);
+    // A log axis shows no x = 0, so no y-intercept; y is plain, so the
+    // x-intercept stays.
+    expect(lines(['view(x = 0.1..100, y = -5..5, x = 10^X)', 'y = x - 2'], [-1, 2, -5, 5])).toEqual([
+      'x-intercept; x = 2; y = 0',
+    ]);
+    // Nor y = 0 on a log y axis — but the y-intercept at the screen's
+    // origin stays.
+    expect(lines(['view(x = -5..5, y = 0.1..100, y = 10^Y)', 'y = x + 1'], [-5, 5, -1, 2])).toEqual([
+      'y-intercept; x = 0; y = 1',
+    ]);
+    // A map that moves x = 0 off the screen's axis is searched where it is.
+    expect(lines(['view(x = -5..5, y = -5..5, x = X + 1)', 'y = x - 2'], [-6, 4, -5, 5])).toEqual([
+      'x-intercept; x = 2; y = 0',
+      'y-intercept; x = 0; y = -2',
+    ]);
+    // Symlog reaches 0: both intercepts read where they are; the curve's bend
+    // there is the screen's, not an inflection of y = x - 2.
+    expect(lines(['view(x = -10..10, y = -5..5, x = sinh(X))', 'y = x - 2'], [-3, 3, -5, 5])).toEqual([
+      'x-intercept; x = 2; y = 0',
+      'y-intercept; x = 0; y = -2',
+    ]);
+    // x = X^3 flattens y = x at 0 on the screen: no stationary point there.
+    expect(lines(['view(x = -8..8, y = -8..8, x = X^3)', 'y = x'], [-2, 2, -8, 8])).toEqual([
+      'x-intercept, y-intercept; x = 0; y = 0',
+    ]);
+    // A tangent root keeps its multiplicity; a parabola keeps no inflection.
+    expect(lines(['view(x = 0.1..100, y = -5..5, x = 10^X)', 'y = (x - 2)^2'], [-1, 2, -5, 5])).toEqual([
+      'x-intercept, local minimum; x = 2; y = 0; double root',
+    ]);
+  });
+
   it('refuse what the map cannot carry, rather than drawing it in the wrong place', () => {
-    // A system's solver searches the window as if it were x and y; a 3D
-    // point would turn the panel 3D under rows written for its screen.
-    for (const row of ['(-y, x)', 'hist([1, 2, 2, 3])', '(x + y, x - y) = (30, 10)', '(1, 2, 3)']) {
+    // A 3D point would turn the panel 3D under rows written for its screen;
+    // a tensor's glyphs need more than a substitution.
+    for (const row of ['((x, y), (y, -x))', 'hist([1, 2, 2, 3])', '(1, 2, 3)']) {
       const [, r] = analyzeRows(['view(x = 1..100, x = 10^X)', row]).rows;
       expect(r.error, row).toMatch(/maps its axes/);
     }
+  });
+
+  it("carry a flow to the screen through the map's slope", () => {
+    // x' = x is uniform motion on a log x axis: X' = 1/ln 10 everywhere.
+    const field = object(['view(x = 1..100, x = 10^X)', '(x, 0)']);
+    expect(field.kind).toBe('vector-field');
+    const [P, Q] = (field as { components: Components }).components;
+    for (const X of [0, 1, 2]) expect(at(P, X)).toBeCloseTo(1 / Math.LN10, 9);
+    expect(at(Q, 1)).toBe(0);
+    // A slope field too: y' = 2y on a log y axis is the slope 2/ln 10.
+    const slope = object(['view(x = 0..5, y = 1..100, y = 10^Y)', "y' = 2y"]);
+    const [dX, dY] = (slope as { components: Components }).components;
+    for (const Y of [0, 1, 2])
+      expect(evaluate(dY, { x: 1, y: Y }) / evaluate(dX, { x: 1, y: Y })).toBeCloseTo(2 / Math.LN10, 9);
+    // A coordinate flow is lowered to x' and y' first: a rotation in polar
+    // coordinates is (-y, x), whichever way it is written.
+    const view = 'view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)';
+    const polar = object(['r = sqrt(x^2 + y^2)', 'theta = atan2(y, x)', view, "(r', theta') = (0, 1)"]);
+    const plain = object([view, "(x', y') = (-y, x)"]);
+    for (const [k, c] of (polar as { components: Components }).components.entries())
+      expect(evaluate(c, { x: 0.5, y: 1.2 })).toBeCloseTo(
+        evaluate((plain as { components: Components }).components[k], { x: 0.5, y: 1.2 }),
+        9,
+      );
+    // And the phase plane, with both axes mapped: x' = x, y' = -y.
+    const phase = object(['view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)', "(x', y') = (x, -y)"]);
+    const [u, v] = (phase as { components: Components }).components;
+    expect(evaluate(u, { x: 1, y: 1 })).toBeCloseTo(1 / Math.LN10, 9);
+    expect(evaluate(v, { x: 1, y: 1 })).toBeCloseTo(-1 / Math.LN10, 9);
   });
 });

@@ -1377,6 +1377,23 @@ describe('§5 a row in u is drawn by its value type', () => {
     // The same curve as the tuple written out.
     expect(plan(['(0,0,1) u'])).toEqual(plan(['(0,0,u)']));
   });
+  it('a turned point is a curve, not the density of its angle', () => {
+    expect(plan(['rotate((1, 0), u)'])).toMatchObject({ type: 'pcurve', dim: 2 });
+    expect(plan(['rotate((1, 0, 0), 2u)'])).toMatchObject({ type: 'pcurve', dim: 3 });
+    expect(plan(['rotate((1, 0, 0), 2pi u, (0, 1, 0))'])).toMatchObject({ type: 'pcurve', dim: 3 });
+    // A 3D point with no axis turns about z: the unit circle in the xy-plane.
+    const object = last(['rotate((1, 0, 0), 2pi u)']).cls?.object;
+    if (object?.kind !== 'curve' || object.form !== 'parametric') throw new Error('not a parametric curve');
+    for (const u of [0, 0.125, 0.25, 0.6]) {
+      const point = object.source.coordinates.map(c => evaluate(c, { u }));
+      expect(point[0]).toBeCloseTo(Math.cos(2 * Math.PI * u));
+      expect(point[1]).toBeCloseTo(Math.sin(2 * Math.PI * u));
+      expect(point[2]).toBeCloseTo(0);
+    }
+    // A misused rotate says how to use it rather than drawing a density.
+    for (const row of ['rotate((1, 0), u, (1, 2, 3))', 'rotate((1, 0), (1, 2))', 'rotate(1, (1, 0, 0))'])
+      expect(last([row]).error).toMatch(/rotate takes/);
+  });
   it('a number-valued row keeps its density, even with a tuple inside', () => {
     for (const row of ['u^2', 'abs((u, v))', 'dot((1,2),(u,v))']) expect(plan([row]).type).toBe('density');
   });

@@ -90,7 +90,7 @@ import {
 import type { Mat } from './mat.ts';
 import { type GetTensor, type Tensor, stack, tensorOfNode, toMat, vectorTensor } from './tensor.ts';
 import { bladeByName, mvNode, mvOfNode } from './clifford.ts';
-import { flatName, flatOfNode, isPoint, pointCoords } from './pga.ts';
+import { flatName, flatOfNode, isPoint, pointCoords, withHoisting } from './pga.ts';
 import { isComplexValued } from './complex.ts';
 import { SPLIT_NODE_BUDGET, realValue } from './complex-parts.ts';
 import { countNodes } from './size.ts';
@@ -2865,6 +2865,41 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   // Resolved right-hand sides of `a' = …` and `a(0) = …`, validated below
   // once the constant/field split is known.
   const derivs = new Map<string, Expr>();
+  /**
+   * A named value's coefficients as constants of their own (docs/frame-
+   * constants-plan.md): `M = motor(L, t, 1)` stores each coefficient that
+   * depends only on constants, states and t as a hidden constant `M#k`,
+   * evaluated once per frame like a named point's components, and the value
+   * written into rows refers to it — so algebra over it multiplies names, not
+   * formulas. A number or a single name stays as it is (a literal 0 is a
+   * structural zero kinds depend on), as does a coefficient of numbers
+   * alone, and anything over a list, a data column or an interval.
+   */
+  const frameConstant = (e: Expr): boolean => {
+    if (e.kind === 'num' || e.kind === 'var') return false;
+    let plain = true;
+    (function walk(n: Expr): void {
+      if (!plain) return;
+      if (n.kind === 'list' || n.kind === 'data' || n.kind === 'lazy' || n.kind === 'range') plain = false;
+      else childrenOf(n).forEach(walk);
+    })(e);
+    if (!plain) return false;
+    // A coefficient of numbers alone (-0.2) folds where it is: nothing to share.
+    const names = freeVars(e);
+    if (!names.size) return false;
+    for (const v of names) if (v !== 't' && !defs.consts.has(v) && !derivs.has(v)) return false;
+    return true;
+  };
+  let hidden = 0;
+  const hoist = (owner: string, e: Expr): Expr => {
+    if (!frameConstant(e)) return e;
+    const name = `${owner}#${hidden++}`;
+    defs.consts.set(name, e);
+    return { kind: 'var', name };
+  };
+  /** A `[pga]` or `[mv]` node with its coefficients (after the two tags) hoisted. */
+  const hoistNode = (owner: string, e: Expr): Expr =>
+    e.kind === 'call' ? { ...e, args: e.args.map((a, k) => (k < 2 ? a : hoist(owner, a))) } : e;
   const inits = new Map<string, Expr>();
 
   for (const d of raw) {
@@ -3014,7 +3049,10 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           );
         if (computed) {
           notDrawn('a matrix');
-          defs.mats.set(d.name, computed);
+          defs.mats.set(
+            d.name,
+            computed.map(row => row.map(c => hoist(d.name, c))),
+          );
           continue;
         }
         // `T = e_x ⊗ e_y ⊗ e_z`: a tensor of any other shape.
@@ -3029,27 +3067,31 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           );
         if (tensor) {
           notDrawn('a tensor');
-          defs.tensors.set(d.name, tensor);
+          defs.tensors.set(d.name, { ...tensor, data: tensor.data.map(c => hoist(d.name, c)) });
           continue;
         }
         let e: Expr;
         try {
           if (ofPoints) throw new Error('points');
-          e =
-            lowerLineValue(
-              resolved,
-              n => compsOf(defs, n),
-              n => defs.mats.get(n) ?? null,
-              isList,
-              tensorGetter(defs),
-            ) ??
-            lowerGeom(
-              resolved,
-              n => compsOf(defs, n),
-              n => defs.mats.get(n) ?? null,
-              isList,
-              tensorGetter(defs),
-            );
+          // (A slerp's intermediates become hidden constants of this name too.)
+          e = withHoisting(
+            c => hoist(d.name, c),
+            () =>
+              lowerLineValue(
+                resolved,
+                n => compsOf(defs, n),
+                n => defs.mats.get(n) ?? null,
+                isList,
+                tensorGetter(defs),
+              ) ??
+              lowerGeom(
+                resolved,
+                n => compsOf(defs, n),
+                n => defs.mats.get(n) ?? null,
+                isList,
+                tensorGetter(defs),
+              ),
+          );
         } catch {
           // `N = line(P, A)` over a list names the lines, as join does.
           const named = resolved.kind === 'call' && resolved.name === 'line' ? { ...resolved, name: 'join' } : resolved;
@@ -3059,21 +3101,22 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
         // line, written into every row that names it as a multivector is.
         const flat = flatOfNode(e);
         if (flat && isPoint(flat)) e = { kind: 'vec', items: pointCoords(flat) };
+        else if (flat) {
+          notDrawn(`a ${flatName(flat.dim, flat.grade) ?? 'flat'}`);
+          defs.multivectors.set(d.name, hoistNode(d.name, e));
+          continue;
+        }
         // `R = reflect(Q, L)` over a list of points names those points.
         if (e.kind === 'list' && e.items.length) {
           const pts = e.items.map(flatOfNode);
           if (pts.every(f => f && isPoint(f)))
             e = sameList(e, { kind: 'list', items: pts.map((f): Expr => ({ kind: 'vec', items: pointCoords(f!) })) });
-        } else if (flat) {
-          notDrawn(`a ${flatName(flat.dim, flat.grade) ?? 'flat'}`);
-          defs.multivectors.set(d.name, e);
-          continue;
         }
         // `R = e^(-t/2 e_xy)`, `q = quat(1, 2, 3, 4)`: a multivector, written
         // into every row that names it.
         if (mvOfNode(e)) {
           notDrawn('a multivector');
-          defs.multivectors.set(d.name, e);
+          defs.multivectors.set(d.name, hoistNode(d.name, e));
           continue;
         }
         // `C = mean((P - m) ⊗ (P - m))`: a reduction over a multiset of
@@ -3615,6 +3658,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   );
   for (const name of fittedNames) constNames.add(name);
   for (const name of defs.consts.keys()) if (name.startsWith(defs.sequencePrefix + '_')) constNames.add(name);
+  // A named value's hidden coefficients (M#3) are constants by construction.
+  for (const name of defs.consts.keys()) if (name.includes('#')) constNames.add(name);
   // Constant point rows resolve to their component constants; a vector
   // field's components are fields, not uniforms.
   for (const p of defs.points) {

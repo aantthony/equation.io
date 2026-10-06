@@ -17,6 +17,8 @@
  */
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import type { MathObject } from './math-object.ts';
+import { diff } from './diff.ts';
+import { matchODE } from './ode.ts';
 
 export type Axis = 'x' | 'y';
 
@@ -29,6 +31,9 @@ export interface AxisMap {
   forward: Expr;
   /** The screen coordinate in terms of the world one (x or y). */
   inverse: Expr;
+  /** d(world)/d(screen), in the screen coordinate: how fast x moves per X,
+   *  which divides a velocity in x into one on the screen. */
+  slope: Expr;
 }
 
 export type AxisMaps = Partial<Record<Axis, AxisMap>>;
@@ -81,7 +86,7 @@ function solveFor(f: Expr, s: string, target: Expr): Expr | null {
 }
 
 /** Parse the right side of `x = 10^X` in a view row. */
-export function parseAxisMap(axis: Axis, src: string): AxisMap {
+export function parseAxisMap(axis: Axis, src: string, env: Record<string, number> = {}): AxisMap {
   const screen = SCREEN[axis];
   const usage = `An axis map writes ${axis} in terms of the screen's ${screen}, like ${axis} = 10^${screen}.`;
   let forward: Expr;
@@ -92,15 +97,28 @@ export function parseAxisMap(axis: Axis, src: string): AxisMap {
   }
   const free = [...freeVars(forward)].filter(n => n !== 'pi' && n !== 'e' && n !== 'tau');
   if (!free.includes(screen)) throw new Error(usage);
-  const other = free.find(n => n !== screen);
-  if (other) throw new Error(`${usage} It can use only ${screen} and numbers (found ${other}).`);
+  // A slider (`x = b^X`) is read at its value, so the map is plain numbers
+  // from here on; reading it through env marks it as one a slider move
+  // reanalyses for (lib/analysis.ts structuralConsts), which reframes the axis.
+  const values: Record<string, Expr> = {};
+  for (const name of free) {
+    if (name === screen) continue;
+    const v = env[name];
+    if (typeof v !== 'number' || !isFinite(v))
+      throw new Error(
+        `${usage} It can use ${screen}, numbers and sliders; ${name} has no fixed value here ` +
+          `(not defined, or it changes with t).`,
+      );
+    values[name] = num(v);
+  }
+  forward = substVars(forward, values);
   const inverse = solveFor(forward, screen, { kind: 'var', name: axis });
   if (!inverse)
     throw new Error(
       `${axis} = ${src.trim()} has no inverse that can be worked out, and the axis needs one: ` +
         `build it from exp, ln, log, powers, sqrt, sinh and arithmetic.`,
     );
-  const map: AxisMap = { axis, text: src.trim(), forward, inverse };
+  const map: AxisMap = { axis, text: src.trim(), forward, inverse, slope: diff(forward, screen) };
   if (!increasing(map)) throw new Error(`${axis} = ${map.text} must increase with ${screen} wherever it is defined.`);
   return map;
 }
@@ -174,10 +192,30 @@ export function inlineFields(e: Expr, fields: Record<string, Expr>): Expr {
   throw new Error('The coordinate fields this row uses refer to each other in a loop.');
 }
 
+/**
+ * The part of screen window [lo, hi] the map can show, as world values
+ * (ln(X) shows nothing left of X = 0), or null when it shows none of it.
+ */
+export function shownRange(
+  map: AxisMap,
+  lo: number,
+  hi: number,
+): { screen: [number, number]; world: [number, number] } | null {
+  const n = 64;
+  let [a, b] = [lo, hi];
+  for (let k = 0; k <= n && !isFinite(toWorld(map, a)); k++) a = lo + ((hi - lo) * k) / n;
+  for (let k = 0; k <= n && !isFinite(toWorld(map, b)); k++) b = hi - ((hi - lo) * k) / n;
+  if (!(a < b) || !isFinite(toWorld(map, a)) || !isFinite(toWorld(map, b))) return null;
+  return { screen: [a, b], world: [toWorld(map, a), toWorld(map, b)] };
+}
+
 /** The map's world coordinate written in the screen one, with the screen
  *  coordinate called by the world's name — the renderer's x is the screen. */
 const forwardIn = (map: AxisMap): Expr =>
   substVars(map.forward, { [SCREEN[map.axis]]: { kind: 'var', name: map.axis } });
+
+/** The map's slope with the screen coordinate called by the world's name. */
+const slopeIn = (map: AxisMap): Expr => substVars(map.slope, { [SCREEN[map.axis]]: { kind: 'var', name: map.axis } });
 
 /** g⁻¹(e) for map g: the screen coordinate at which the world one is e. */
 const inverseOf = (map: AxisMap, e: Expr): Expr => substVars(map.inverse, { [map.axis]: e });
@@ -189,9 +227,22 @@ const isVar = (e: Expr, name: string) => e.kind === 'var' && e.name === name;
  * graph y = f keeps its shape, y = g⁻¹(f(…)), and so does x = f; everything
  * else has x and y replaced by the map.
  */
-export function mapRowExpr(e: Expr, maps: AxisMaps): Expr {
+export function mapRowExpr(e: Expr, maps: AxisMaps, flow = false): Expr {
   const env: Record<string, Expr> = {};
   for (const map of Object.values(maps)) env[map.axis] = forwardIn(map);
+  if (flow) {
+    // A velocity in x and y is one on the screen times the map's slope
+    // there: x = g(X) moves at g'(X) dX/dt. So arrows, streamlines and traced
+    // trajectories all run on the screen as they do anywhere else.
+    const v = planeFlow(e);
+    if (!v) throw new Error(UNMAPPED_MESSAGE);
+    const items = (['x', 'y'] as const).map((axis, k): Expr => {
+      const item = substVars(v.items[k], env);
+      const map = maps[axis];
+      return map ? { kind: 'bin', op: '/', a: item, b: slopeIn(map) } : item;
+    });
+    return { kind: 'vec', items };
+  }
   if (e.kind === 'eq')
     for (const axis of ['y', 'x'] as const) {
       const [lhs, rhs] = isVar(e.l, axis) ? [e.l, e.r] : isVar(e.r, axis) ? [e.r, e.l] : [null, null];
@@ -204,22 +255,29 @@ export function mapRowExpr(e: Expr, maps: AxisMaps): Expr {
   return substVars(e, env);
 }
 
+/** The velocities of a 2D flow row: a tuple in x and y, or a slope field
+ *  or system spelled as an ODE (`y' = f`, `(x', y') = (P, Q)`). */
+function planeFlow(e: Expr): (Expr & { kind: 'vec' }) | null {
+  const v = e.kind === 'vec' ? e : matchODE(e);
+  return v?.items.length === 2 ? v : null;
+}
+
 /**
  * How a mapped panel draws an object, or null when it cannot:
  *
  * - `substitute`: drawn per pixel from x and y (graphs, implicit curves,
- *   regions, fields), so the row is rewritten by mapRowExpr and the shader
- *   sees screen coordinates;
+ *   regions, fields), or solved for (real systems), so the row is rewritten
+ *   by mapRowExpr and the shader or solver sees screen coordinates;
  * - `place`: it puts things at positions (points, parametric curves and
  *   regions, figures, point lists, labels), so it is
  *   computed in x and y as anywhere else and each position it produces is
  *   carried to the screen by the inverse (web/render2d.ts mapOverlay);
  * - `none`: nothing drawn (a value, a note).
  *
- * What is left (vector and tensor fields, whose arrows would need the
- * map's Jacobian; histograms, whose bars stand on y = 0; systems, whose
- * solver searches the window as if it were x and y; graphs, sequences, 3D)
- * is refused rather than drawn in the wrong place.
+ * What is left (tensor fields, whose glyphs would need the map's
+ * Jacobian; histograms, whose bars stand on y = 0;
+ * complex systems;
+ * graphs, sequences, 3D) is refused rather than drawn in the wrong place.
  */
 export type AxisMapping = 'substitute' | 'place' | 'none';
 
@@ -237,10 +295,18 @@ export function axisMapping(object: MathObject): AxisMapping | null {
       return object.form === 'projected' ? null : object.form === 'parametric' ? 'place' : 'substitute';
     case 'scalar-field':
       return object.dimension === 3 ? null : 'substitute';
+    case 'vector-field':
+      // Rewritten with the map's slope (mapRowExpr): a 2D flow only.
+      return object.components.length === 2 ? 'substitute' : null;
     case 'point':
     case 'trail':
     case 'label':
       return 'place';
+    case 'system':
+      // Its residuals rewritten like a curve's, the solver searches the
+      // window in screen coordinates, evenly, and its solutions are there.
+      // A complex system solves in w, which no rewrite of x and y reaches.
+      return object.source.representation === 'real' ? 'substitute' : null;
     case 'figure':
       return object.dimension === 2 ? 'place' : null;
     case 'list':

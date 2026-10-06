@@ -635,7 +635,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   A→B), and `circle(center, radius)` draw figures that follow their points. Point arithmetic works anywhere: `A + B`, `2A`,
   `(A + B)/2`, `midpoint(A, B)`, `perp(A)` (rotate 90° counterclockwise),
   `rotate(P, a)` (turn by a about the origin; `rotate(P, a, C)` about C; in
-  3D `rotate(P, a, axis)`),
+  3D `rotate(P, a)` turns about z and `rotate(P, a, axis)` about axis),
   `unit(A)`, `dot(A, B)`, `cross(A, B)`, `|A - B|` (distance). Measurements:
   `distance(A, B)` is `|A - B|`; `angle(A, B, C)` is the angle at B, turning
   from B→A to B→C — signed, counterclockwise positive, in radians in (−π, π]
@@ -681,7 +681,25 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Lists broadcast as everywhere else: with `P = [A, B]`, `join(P, C)` is two
   lines, `L = join(P, C); meet(L, L)` pairs each line with itself, and
   `meet(K, H)` for a line K and a list of planes H is the list of crossing
-  points, which `count`, `mean` and `total` take.
+  points, which `count`, `mean` and `total` take. A plane draws as a
+  translucent sheet, outlined where it meets the view box, so a line in it
+  or behind it shows through.
+- Rigid motions (motors): `motor(L, th, d)` turns by th about the line L of
+  space — right-handed about L's direction, A → B for `line(A, B)` — while
+  sliding d along it (a screw; d may be left out); `motor(P, th)` turns the
+  plane counterclockwise about the point P. `rotate(X, M)` moves a point, a
+  list of points, a line, a plane or a figure by it:
+  `rotate(hull(([0,1],[0,1],[0,1])), motor(line(A, B), t, t/4))` screws a
+  cube along the axis through A and B, which stay draggable.
+  `slerp(M1, M2, s)` is the rigid motion s of the way from M1 to M2, at
+  constant speed along the screw between them — for motors that stay fixed
+  (fixed axes, turns and slides), with the motion in s:
+  `rotate(X, slerp(M1, M2, (1 - cos(t))/2))`. A row holding a motor draws
+  its axis (or its centre, in the plane) and reads out what it does: `=
+  turn 1.5708 about the line through (0, 0, 0), direction (0, 0, 1), slide
+  2`, `turn 1.5708 about (1, 1)` or `slide (0, 0, 3)` — a motor and its
+  opposite are one motion, read the shorter way round. A motor is no number
+  or point: name it (`M = motor(L, t, 1)`) and pass it to rotate or slerp.
 - Convex hulls: `hull(A, B, C, …)` or `hull(P)` for a whole point list draws
   the convex hull — a filled polygon in 2D, a lit opaque solid with flat-shaded faces and outlined edges in 3D
   (coplanar facets merge, so a cube shows six squares). Interior and repeated
@@ -1367,16 +1385,25 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `view(x = 0.1..100, y = 0.01..10000, x = 10^X, y = 10^Y)` is log-log and a
   power law draws as a straight line. The window stays in x units. Any
   increasing map built from exp, ln, log, powers, sqrt, sinh and arithmetic
-  works (`y = sinh(Y)` is a symlog axis). It applies to its own panel only.
+  works (`y = sinh(Y)` is a symlog axis). A map may use sliders: with
+  `b = 10`, `x = b^X` is a log axis whose base slides, and the window keeps
+  its x range as b moves. It applies to its own panel only.
   The grid and its labels follow the map: decades on a log axis (1, 2, 3, 5
   between them when zoomed in), and a zero line where the map reaches 0.
   Graphs, implicit curves, regions and fields are drawn through the map;
   points, parametric curves and regions, segments and polygons (bent as a
   straight line in x and y is on a log axis), point lists and labels are
-  placed through it, and named points drag in x and y. What the map cannot
-  show (x <= 0 on a log axis) is left out. Vector and tensor fields,
-  histograms, systems, 3D and integral shading are not drawn on mapped axes, hovering shows no roots or intercepts there, and a mapped
-  panel shows no coordinate-field grid.
+  placed through it, and named points drag in x and y. Systems are solved
+  through it too (not certified or dragged there). Hovering shows local
+  minima and maxima and any intercepts with x = 0 or y = 0 the map shows,
+  read in x and y (no inflection points), and traces curves in x and y. What the map cannot
+  show (x <= 0 on a log axis) is left out. 2D vector fields, slope fields
+  and `(x', y') = (P, Q)` flows are carried through it too: their arrows,
+  streamlines and traced trajectories follow x and y (Lotka-Volterra's
+  orbits close on log-log axes), coordinate flows like `(r', theta') = …`
+  included. Tensor fields, histograms, complex systems, 3D and integral
+  shading are not drawn on
+  mapped axes, and a mapped panel shows no coordinate-field grid.
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
   A trailing `spin = rate` keeps it orbiting about the vertical axis at that

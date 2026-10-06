@@ -63,6 +63,7 @@ import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, UNMAPPED_MESSAGE, axisMapping, inlineFields, mapRowExpr } from './axis-map.ts';
+import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
   id?: string | number;
@@ -506,13 +507,14 @@ function uniformDraws(
 
 /** Whether a row's value is a point, points, or a figure through them —
  *  anything classify draws by position rather than as numbers. A row that
- *  does not lower is left to the density path, which reports it. */
+ *  does not lower is not one the density path can draw either: classify
+ *  reports why (a misused rotate is its usage, not a distribution). */
 function pointValued(e: Expr, lower: (e: Expr) => Expr): boolean {
   let value: Expr;
   try {
     value = lower(e);
   } catch {
-    return false;
+    return true;
   }
   switch (value.kind) {
     case 'vec':
@@ -991,12 +993,20 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (maps) {
         // A mapped panel draws per-pixel rows in its screen coordinates, and
         // carries what places points there as it is drawn (lib/axis-map.ts).
-        const how = row.cls.needs3D ? null : axisMapping(row.cls.object);
+        const plain = row.cls;
+        const how = plain.needs3D ? null : axisMapping(plain.object);
         if (!how) throw new Error(UNMAPPED_MESSAGE);
         if (how === 'substitute')
           row.cls = classifyRow(
             { ...resolved, integral: null },
-            e => mapRowExpr(inlineFields(lower(e), fieldEnv), maps),
+            // A coordinate flow is lowered to (x', y') first, so the map
+            // carries its velocities like any other flow.
+            e =>
+              mapRowExpr(
+                inlineFields(lowerCoordinateFlow(lower(e), fieldEnv, timeDifferentiator(defs)), fieldEnv),
+                maps,
+                plain.object.kind === 'vector-field',
+              ),
             constNames,
             fieldEnv,
             timeDifferentiator(defs),

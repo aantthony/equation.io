@@ -445,6 +445,13 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'geometry draggable parametric polynomial',
       ],
       [
+        'two planes and their line',
+        '# two planes, one tilted by a; a = 0.6; p = plane((0, 0, 0), (0, sin(a), cos(a))); ' +
+          'q = plane((1, 0, 0), (1, 0, 0.5)); p; q; # where they cross, and at what angle; meet(p, q); angle(p, q); ' +
+          'camera(-0.6, 0.5, 18)',
+        'geometry 3d slider',
+      ],
+      [
         '3D triangle and its normal',
         'A = (0, 0, 0); B = (3, 0, 1); C = (0, 2, 2); polygon(A, B, C); vector(A, cross(B - A, C - A)/3); angle(B - A, C - A)',
         'geometry draggable 3d vector',
@@ -486,6 +493,14 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'convex hull of moving points',
         'P = [(-3, -1), (-1, 2), (0.5, -2), (2, 1.5), (3, -0.5), (0, 0.3), (1, 0.5 + 2sin(t))]; hull(P); P',
         'geometry list animated',
+      ],
+      [
+        'screw motion (motor)',
+        '# an axis through two points; A = (2.5, -2, -2); B = (2.5, 2, 2); L = line(A, B); L; ' +
+          '# a screw about it: turn th, slide th/4; th = 2pi sin(t/2); S = motor(L, th, th/4); S; ' +
+          "# a cube screwing along it, and one corner's path; V = ([-1, 1], [-1, 1], [-1, 1]); hull(rotate(V, S)); " +
+          'trail(rotate((1, 1, 1), S)); camera(-0.5, 0.45, 16)',
+        'geometry 3d animated geometric-algebra',
       ],
       [
         'shadow of a turning cube',

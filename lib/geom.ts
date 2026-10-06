@@ -76,6 +76,11 @@ import {
   flatOfNode,
   hyperplane,
   isPoint,
+  MOTOR,
+  motorPga,
+  moveFlat,
+  movePoint,
+  slerpMotor,
   outerPga,
   pointCoords,
   pointPga,
@@ -149,7 +154,8 @@ type IsList = (name: string) => boolean;
 
 /** Functions over points, by how many point arguments they take. */
 const POINT_FNS: Record<string, number> = { dot: 2, cross: 2, midpoint: 2, perp: 1, unit: 1 };
-const ROTATE_USAGE = 'rotate takes rotate(P, angle), rotate(P, angle, center) in 2D, or rotate(P, angle, axis) in 3D.';
+const ROTATE_USAGE =
+  'rotate takes rotate(P, angle), rotate(P, angle, center) in 2D, or rotate(P, angle) about z and rotate(P, angle, axis) in 3D.';
 
 const sq = (e: Expr): Expr => mul(e, e);
 const lenOfN = (items: Expr[]): Expr => {
@@ -709,7 +715,10 @@ function sandwiched(e: Expr, m: Multivector, any: (n: Expr) => Multivector): Mul
 /** The calls that make or take points, lines and planes of projective
  *  geometry (lib/pga.ts). `line` is one only inside another expression: a
  *  row of its own keeps drawing as the implicit line it always has. */
-const FLAT_FNS = new Set(['meet', 'join', 'plane', 'project', 'reflect', 'line', PGA_CALL]);
+const FLAT_FNS = new Set(['meet', 'join', 'plane', 'project', 'reflect', 'line', 'motor', 'rotate', 'slerp', PGA_CALL]);
+
+const MOTOR_USAGE =
+  'motor takes an axis and a turn: motor(L, th, d) turns by th about the line L of space and slides d along it; motor(P, th) turns the plane about the point P.';
 
 const flatMark = new WeakMap<Expr, boolean>();
 function flatIn(e: Expr): boolean {
@@ -755,7 +764,22 @@ function lowerFlat(e: Expr, lo: (n: Expr) => LV): Flat | null {
     if (!v.vec || (v.items.length !== 2 && v.items.length !== 3)) throw new Error(usage);
     return { ...pointPga(v.items), grade: v.items.length };
   };
-  const arg = (n: Expr, usage: string): Flat => lowerFlat(n, lo) ?? point(n, usage);
+  const arg = (n: Expr, usage: string): Flat => {
+    const f = lowerFlat(n, lo) ?? point(n, usage);
+    if (f.grade === MOTOR)
+      throw new Error(`${usage} A motor moves things rather than being one: rotate(X, M) applies it.`);
+    return f;
+  };
+  const scalar = (n: Expr, usage: string): Expr => {
+    const v = lo(n);
+    if (v.vec) throw new Error(usage);
+    return v.e;
+  };
+  /** A motor argument, or null when the argument is something else. */
+  const motorArg = (n: Expr): Flat | null => {
+    const f = lowerFlat(n, lo);
+    return f?.grade === MOTOR ? f : null;
+  };
   const sameDim = (fs: Flat[], usage: string) => {
     if (fs.some(f => f.dim !== fs[0].dim)) throw new Error(`${usage} (One is in the plane and one in space.)`);
   };
@@ -764,7 +788,7 @@ function lowerFlat(e: Expr, lo: (n: Expr) => LV): Flat | null {
     if (grade < 1) throw new Error(JOIN_USAGE);
     return { ...regressivePga(a, b), grade };
   };
-  const found = ((): Flat => {
+  const found = ((): Flat | null => {
     const args = e.args;
     switch (e.name) {
       case PGA_CALL:
@@ -823,8 +847,38 @@ function lowerFlat(e: Expr, lo: (n: Expr) => LV): Flat | null {
         sameDim([a, b], usage);
         return { ...(e.name === 'project' ? project(a, b) : reflect(a, b)), grade: a.grade };
       }
+      case 'motor': {
+        if (args.length !== 2 && args.length !== 3) throw new Error(MOTOR_USAGE);
+        const axis = arg(args[0], MOTOR_USAGE);
+        const fine = axis.dim === 3 ? axis.grade === 2 : isPoint(axis) && args.length === 2;
+        if (!fine) throw new Error(MOTOR_USAGE);
+        const turn = scalar(args[1], MOTOR_USAGE);
+        const slide = args[2] ? scalar(args[2], MOTOR_USAGE) : undefined;
+        return motorPga(axis, turn, slide);
+      }
+      case 'rotate': {
+        // rotate(X, M): a motor moving a point, line or plane — the
+        // sandwich M X M̃. Any other rotate is a turn by an angle or a rotor.
+        const m = args.length === 2 ? motorArg(args[1]) : null;
+        if (!m) return null;
+        const usage = 'rotate(X, M) moves a point, line or plane X by the motor M.';
+        const x = arg(args[0], usage);
+        sameDim([x, m], usage);
+        // A point is moved by the motor's affine map, which stays small.
+        if (isPoint(x)) return { ...pointPga(movePoint(m, pointCoords(x))), grade: x.grade };
+        return { ...moveFlat(m, x), grade: x.grade };
+      }
+      case 'slerp': {
+        // slerp(M1, M2, u): the rigid motion u of the way from one to the other.
+        const [a, b] = args.length === 3 ? args.slice(0, 2).map(motorArg) : [null, null];
+        if (!a && !b) return null;
+        const usage = 'slerp takes two motors and how far along: slerp(M1, M2, u), u from 0 to 1.';
+        if (!a || !b) throw new Error(usage);
+        sameDim([a, b], usage);
+        return slerpMotor(a, b, scalar(args[2], usage));
+      }
     }
-    return null as never;
+    return null;
   })();
   flatSeen.set(e, found);
   return found;
@@ -834,6 +888,11 @@ function lowerFlat(e: Expr, lo: (n: Expr) => LV): Flat | null {
  *  a line or plane is refused, saying what to do with it. */
 function flatValue(f: Flat): LV {
   if (isPoint(f)) return vc(...pointCoords(f));
+  if (f.grade === MOTOR) {
+    throw new Error(
+      'A motor is not a number or a point here — rotate(X, M) moves X by it; or give it a row of its own to draw its axis.',
+    );
+  }
   throw new Error(
     `${aFlat(f).replace('a', 'A')} is not a number or a point here — meet(L, M) is where two cross, distance(P, L) how far a point is from one; or give it a row of its own to draw it.`,
   );
@@ -1269,8 +1328,13 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
       if (matOf(e)) throw new Error(NOT_A_VALUE);
       if (e.name === 'rotate') {
         // rotate(P, a[, center]) ≡ C + e^(a J) (P − C); rotate(P, a, axis) ≡
-        // e^(a cross(axis/|axis|)) P. Flattened tuples are told apart by count.
-        const flat = e.args.map(lo).flatMap(a => (a.vec ? a.items : [a.e]));
+        // e^(a cross(axis/|axis|)) P, and a 3D P with no axis turns about z —
+        // the turn rotate(P, a) makes in the xy-plane. Flattened tuples are
+        // told apart by count.
+        const parts = e.args.map(lo);
+        const flat = parts.flatMap(a => (a.vec ? a.items : [a.e]));
+        if (parts.length === 2 && parts[0].vec && parts[0].items.length === 3 && !parts[1].vec)
+          flat.push({ kind: 'num', value: 0 }, { kind: 'num', value: 0 }, { kind: 'num', value: 1 });
         if (flat.length === 7) {
           const axis = flat.slice(4);
           const turn = expOf(matScale({ m: hatOf(axis) }, div(flat[3], lenOfN(axis))));

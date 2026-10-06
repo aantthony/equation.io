@@ -89,7 +89,7 @@ import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
-import { type SpecialPoint, curveTracer, fmtTraced, specialPoints } from '../lib/special.ts';
+import { type SpecialPoint, curveTracer, fmtTraced, mappedSpecialPoints, specialPoints } from '../lib/special.ts';
 
 import { type StateSystem, advanceState, initialState } from '../lib/state.ts';
 import { type OrbitInput, orbitInput } from '../lib/orbit.ts';
@@ -890,6 +890,41 @@ function runTweens(now: number) {
 // spin never rewrites the URL. A panel's spinScale eases a new spin in from rest.
 let lastSpinAt: number | null = null;
 
+/**
+ * Whether eq's system is being certified. A mapped panel solves its systems
+ * rewritten in screen coordinates (lib/axis-map.ts), where a certificate
+ * would prove roots in those, so it offers none, and a row certified before
+ * its panel was mapped stops certifying for good rather than resuming
+ * unseen when the map goes.
+ */
+function certifying(eq: Equation): boolean {
+  if (eq.certify && panelMaps(panels[panelOf(eq)])) {
+    eq.certify = false;
+    eq.info = undefined;
+  }
+  return !!eq.certify;
+}
+
+/** Each parsed view row's window, as applyViewportRows compares it. */
+const viewKeys = new WeakMap<ViewSpec, string>();
+
+/**
+ * The window a view row frames its panel to. A panel reframes when this
+ * changes, not its text: a slider the row reads (`x = 0..a`, or a map's
+ * `x = b^X`, which moves the screen window for the same x) changes the
+ * window without changing a character.
+ */
+function viewKey(eq: Equation): string | null {
+  const spec = eq.viewSpec;
+  if (spec?.kind !== 'view') return null;
+  let key = viewKeys.get(spec);
+  if (key === undefined) {
+    key = JSON.stringify([spec.x, spec.y, spec.ratio ?? 1, spec.axes ?? null]);
+    viewKeys.set(spec, key);
+  }
+  return key;
+}
+
 /** The axis maps of panel p's view(…) row (lib/axis-map.ts), if it has any. */
 function panelMaps(p: Panel | undefined): AxisMaps | undefined {
   const spec = p && viewportRow('view', p)?.viewSpec;
@@ -906,8 +941,14 @@ function applyViewportRows() {
   for (const p of panels) {
     const vRow = viewportRow('view', p);
     if (!vRow) p.appliedViewText = null;
-    else if (vRow.text !== p.appliedViewText && vRow.viewSpec!.kind === 'view' && p.layout.rect.w) {
-      p.appliedViewText = vRow.text;
+    // A pan waiting to be written back is the window; the row catches up.
+    else if (
+      viewKey(vRow) !== p.appliedViewText &&
+      vRow.viewSpec!.kind === 'view' &&
+      p.layout.rect.w &&
+      !movedPanels.has(p)
+    ) {
+      p.appliedViewText = viewKey(vRow);
       // Shared axes come from the panels that own them, which are earlier in
       // the list and already framed; the row frames the rest.
       const roots = linkRoots(p);
@@ -1041,8 +1082,9 @@ function ensureViewRow() {
     ratio: view.ratio,
     axes: cur.lattice?.axes as [string, string] | undefined,
   });
-  cur.appliedViewText = addEquation(text, panelRowEnd(cur)).text;
+  const added = addEquation(text, panelRowEnd(cur));
   recompileAll();
+  cur.appliedViewText = viewKey(added);
   renderAll();
   saveUrl();
 }
@@ -1076,7 +1118,7 @@ function panelViewText(p: Panel): { eq: Equation; text: string } | null {
   // A mapped axis panned past what its map can name (ln(X) left of X = 0)
   // has no row to write: the row keeps the last window it could.
   try {
-    parseViewRow(text, {});
+    parseViewRow(text, constEnv);
   } catch {
     return null;
   }
@@ -1097,8 +1139,7 @@ function writebackViewport(undo: boolean) {
   if (undo) pushUndo(`viewport:${changes[0].eq.id}`);
   let failed = false;
   for (const { p, eq, text } of changes) {
-    if (p.mode === '2d') p.appliedViewText = text;
-    else p.appliedCameraText = text;
+    if (p.mode !== '2d') p.appliedCameraText = text;
     eq.text = text;
     const line = lineEls()[equations.indexOf(eq)];
     if (line) setLineText(line, text);
@@ -1108,10 +1149,11 @@ function writebackViewport(undo: boolean) {
     // as this row's error, the way a typed view(...) does.
     try {
       // The row's `# note` is prose, not part of the viewport.
-      eq.viewSpec = parseViewRow(stripNote(text), {}) ?? undefined;
+      eq.viewSpec = parseViewRow(stripNote(text), constEnv) ?? undefined;
     } catch {
       failed = true;
     }
+    if (p.mode === '2d') p.appliedViewText = viewKey(eq);
   }
   if (failed) recompileAll();
   reconcile();
@@ -1621,7 +1663,8 @@ function render() {
     }
     const traceTime = eq.cpu!.type === 'vfield3d' ? Math.floor(time * 20) / 20 : time;
     const { env: envKey, stableEnv } = environment(constEnv, traceTime);
-    const key = systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + !!eq.certify;
+    const certify = certifying(eq);
+    const key = systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + certify;
     const c = eq.sysCache;
     if (
       c &&
@@ -1639,20 +1682,20 @@ function render() {
       (eq.cpu!.type === 'system' && eq.cpu!.parametric) ||
       eq.cpu!.type === 'vfield3d' ||
       eq.cpu!.type === 'spacecurve' ||
-      (eq.cpu!.type === 'system' && eq.certify)
+      (eq.cpu!.type === 'system' && certify)
     ) {
       const jobKey = JSON.stringify([key, envKey, lo, hi]);
       const target = JSON.stringify([key, stableEnv, lo, hi]);
       const retraceMs = eq.cpu!.type === 'vfield3d' ? 50 : 250;
       if (
-        (eq.cpu!.type === 'vfield3d' || eq.certify) &&
+        (eq.cpu!.type === 'vfield3d' || certify) &&
         eq.traceTarget === target &&
         performance.now() - (eq.traceClock ?? -Infinity) < retraceMs
       )
         return c && c.stableEnv === stableEnv ? c.pts : [];
       eq.traceTarget = target;
       eq.traceClock = performance.now();
-      if (eq.certify && eq.info !== 'Certifying search box…') {
+      if (certify && eq.info !== 'Certifying search box…') {
         eq.info = 'Certifying search box…';
         reconcile();
       }
@@ -1665,7 +1708,7 @@ function render() {
           lo,
           hi,
           env: { ...constEnv, t: traceTime },
-          kind: eq.certify
+          kind: certify
             ? 'certify'
             : eq.cpu!.type === 'spacecurve'
               ? 'intersection'
@@ -1677,7 +1720,7 @@ function render() {
         },
         result => {
           // A result for edited/deleted math must never restore an old curve.
-          if (!liveRow(eq) || !eq.cls || systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + !!eq.certify !== key)
+          if (!liveRow(eq) || !eq.cls || systemKey(eq.cpu!) + ':' + !!eq.showArrows + ':' + certifying(eq) !== key)
             return;
           // A trace from a briefly zoomed-in view must not replace the full
           // curve after the user zooms back out. Only moving values may lag.
@@ -1798,9 +1841,13 @@ function render() {
           case 'implicit2d': // extrudes to its true locus (a vertical sheet)
             scene.implicits.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
             break;
-          case 'implicit3d':
-            scene.implicits.push({ ...gpuFor(eq, 'implicit3d'), color, params, uniforms });
+          case 'implicit3d': {
+            const gpu = gpuFor(eq, 'implicit3d');
+            // A plane of projective geometry draws translucent, as a plane.
+            if (gpu.plane) (scene.planes ??= []).push({ coeffs: gpu.plane, color, params, uniforms });
+            else scene.implicits.push({ ...gpu, color, params, uniforms });
             break;
+          }
           case 'scalar3d': {
             const env = { ...constEnv, t: time };
             // The largest the field has been since the view or a slider last
@@ -1885,7 +1932,7 @@ function render() {
             for (let k = 0; k < xs.length; k++) {
               const z = zs ? zs[k] : 0;
               if (isFinite(xs[k]) && isFinite(ys[k]) && isFinite(z)) {
-                scene.points.push({ pos: [xs[k], ys[k], z], color });
+                scene.points.push({ pos: [xs[k], ys[k], z], color, group: eq });
               }
             }
             break;
@@ -1895,7 +1942,7 @@ function render() {
             for (const comps of plot.pts) {
               try {
                 const p = comps.map(c => evaluate(c, env));
-                if (p.every(isFinite)) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+                if (p.every(isFinite)) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, group: eq });
               } catch {
                 /* skip unevaluable points */
               }
@@ -1928,7 +1975,7 @@ function render() {
           case 'trail': {
             scene.curves.push({ pts: new Float32Array(eq.trail!.coordinates(3)), color });
             const p = eq.trail!.head;
-            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, group: eq });
             break;
           }
           case 'pcurve': {
@@ -1995,7 +2042,7 @@ function render() {
           }
           case 'point': {
             const p = samplePoint(eq);
-            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name });
+            if (p) scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, label: eq.def?.name, group: eq });
             break;
           }
           case 'system':
@@ -2004,8 +2051,10 @@ function render() {
               scene.curves.push({ pts: new Float32Array(pts), color });
               break;
             }
+            // Each solution its own group: discrete answers, solid and full
+            // size, not a cloud to shade by depth.
             for (const p of solveFor(eq, plot.dim, plot.residuals)) {
-              scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color });
+              scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, group: p });
             }
             break;
         }
@@ -2554,7 +2603,9 @@ function render() {
                 extras.polylines.push({ pts: points.flat(), color: css });
                 break;
               }
-              const set = coordinatePointWriter(eq, plot.coordinates);
+              // Its solutions are on the screen of a mapped panel, and a
+              // coordinate writer reads x and y: no drag there.
+              const set = maps ? null : coordinatePointWriter(eq, plot.coordinates);
               points.forEach((p, i) => {
                 const key = `sys${eq.id}:${i}`;
                 extras.points.push({
@@ -3580,7 +3631,10 @@ function rowToggles(eq: Equation): RowToggle[] {
 }
 
 function rowToggle(eq: Equation): RowToggle | null {
-  if (eq.cpu?.type === 'system' && !eq.cpu!.parametric && !eq.cpu!.angular?.some(Boolean))
+  // On a mapped panel a system is solved rewritten in screen coordinates
+  // (lib/axis-map.ts): a certificate there would prove roots in those.
+  const mapped = !!panelMaps(panels[panelOf(eq)]);
+  if (eq.cpu?.type === 'system' && !eq.cpu!.parametric && !eq.cpu!.angular?.some(Boolean) && !mapped)
     return {
       label: 'certify search box',
       title: 'Prove roots and completeness in the bounded search box; unsupported functions remain unresolved',
@@ -4851,7 +4905,8 @@ function computeSpecialPoints(eq: Equation) {
   const xhi = view.cx + halfW * 1.5;
   const ylo = view.cy - halfH * 1.5;
   const yhi = view.cy + halfH * 1.5;
-  const pts = specialPoints(expr, xlo, xhi, ylo, yhi);
+  const maps = panelMaps(panels[panelOf(eq)]);
+  const pts = maps ? mappedSpecialPoints(expr, maps, xlo, xhi, ylo, yhi) : specialPoints(expr, xlo, xhi, ylo, yhi);
   eq.spCache = { text: eq.text, env: hoverEnvKey(cls), xlo, xhi, ylo, yhi, pts };
 }
 
@@ -4864,9 +4919,6 @@ function computeSpecialPoints(eq: Equation) {
 function pointsFor(eq: Equation): SpecialPoint[] {
   const cls = eq.cls;
   if (!cls || eq.error || !eq.cpu || eq.cpu.type !== 'implicit2d' || cls.animated) return [];
-  // A mapped panel's rows are written in its screen coordinates, where roots
-  // and intercepts are not the ones its x and y have (lib/axis-map.ts).
-  if (panelMaps(panels[panelOf(eq)])) return [];
   const { halfW, halfH } = hoverHalfSpan();
   const envKey = hoverEnvKey(cls);
   const c = eq.spCache;
@@ -4948,12 +5000,22 @@ function updateHover(clientX: number, clientY: number) {
     const sy = uppCss / (view.ratio ?? 1);
     const [wx, wy] = toMath(clientX, clientY);
     let bestT = 10; // CSS px: tighter than a point, so the points stay easy to hit
+    // On a mapped panel the curve is traced on the screen, and read in x and
+    // y, to the pixel there (lib/axis-map.ts).
+    const maps = panelMaps(cur);
+    const read = (map: AxisMap | undefined, v: number, step: number) => {
+      if (!map) return fmtTraced(v, step);
+      // A pixel in x there: one-sided where the other side leaves the map.
+      const w = toWorld(map, v);
+      const ahead = Math.abs(toWorld(map, v + step) - w);
+      return fmtTraced(w, isFinite(ahead) ? ahead : Math.abs(w - toWorld(map, v - step)));
+    };
     for (const eq of equations) {
       if (panelOf(eq) !== here) continue;
       const hit = tracerFor(eq)?.(wx, wy, sx, sy);
       if (hit && hit.dist < bestT) {
         bestT = hit.dist;
-        const lines = ['on curve', `x = ${fmtTraced(hit.x, sx)}`, `y = ${fmtTraced(hit.y, sy)}`];
+        const lines = ['on curve', `x = ${read(maps?.x, hit.x, sx)}`, `y = ${read(maps?.y, hit.y, sy)}`];
         best = { pt: { x: hit.x, y: hit.y, lines }, color: cssColor(baseColor(eq)), panel: cur };
       }
     }
@@ -5295,10 +5357,13 @@ function visiblePoints(eq: Equation): string[] {
   if (!eq.cls || eq.error || eq.cpu?.type !== 'implicit2d' || eq.cls.animated || mode !== '2d') return [];
   computeSpecialPoints(eq);
   const { halfW, halfH } = hoverHalfSpan();
+  // Cached on the screen; a mapped panel's points read in x and y.
+  const maps = panelMaps(panels[panelOf(eq)]);
+  const world = (map: AxisMap | undefined, v: number) => (map ? toWorld(map, v) : v);
   return (eq.spCache?.pts ?? [])
     .filter(p => Math.abs(p.x - view.cx) <= halfW && Math.abs(p.y - view.cy) <= halfH)
     .slice(0, MAX_VOICE_POINTS)
-    .map(p => `(${round6(p.x)}, ${round6(p.y)}): ${p.lines.join(', ')}`);
+    .map(p => `(${round6(world(maps?.x, p.x))}, ${round6(world(maps?.y, p.y))}): ${p.lines.join(', ')}`);
 }
 
 /**
