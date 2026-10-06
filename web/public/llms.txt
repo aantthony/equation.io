@@ -1363,7 +1363,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `view(x = 0.1..100, y = 0.01..10000, x = 10^X, y = 10^Y)` is log-log and a
   power law draws as a straight line. The window stays in x units. Any
   increasing map built from exp, ln, log, powers, sqrt, sinh and arithmetic
-  works (`y = sinh(Y)` is a symlog axis). It applies to its own panel only.
+  works (`y = sinh(Y)` is a symlog axis). A map may use sliders: with
+  `b = 10`, `x = b^X` is a log axis whose base slides, and the window keeps
+  its x range as b moves. It applies to its own panel only.
   The grid and its labels follow the map: decades on a log axis (1, 2, 3, 5
   between them when zoomed in), and a zero line where the map reaches 0.
   Graphs, implicit curves, regions and fields are drawn through the map;

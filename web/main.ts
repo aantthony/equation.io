@@ -905,6 +905,26 @@ function certifying(eq: Equation): boolean {
   return !!eq.certify;
 }
 
+/** Each parsed view row's window, as applyViewportRows compares it. */
+const viewKeys = new WeakMap<ViewSpec, string>();
+
+/**
+ * The window a view row frames its panel to. A panel reframes when this
+ * changes, not its text: a slider the row reads (`x = 0..a`, or a map's
+ * `x = b^X`, which moves the screen window for the same x) changes the
+ * window without changing a character.
+ */
+function viewKey(eq: Equation): string | null {
+  const spec = eq.viewSpec;
+  if (spec?.kind !== 'view') return null;
+  let key = viewKeys.get(spec);
+  if (key === undefined) {
+    key = JSON.stringify([spec.x, spec.y, spec.ratio ?? 1, spec.axes ?? null]);
+    viewKeys.set(spec, key);
+  }
+  return key;
+}
+
 /** The axis maps of panel p's view(…) row (lib/axis-map.ts), if it has any. */
 function panelMaps(p: Panel | undefined): AxisMaps | undefined {
   const spec = p && viewportRow('view', p)?.viewSpec;
@@ -921,8 +941,14 @@ function applyViewportRows() {
   for (const p of panels) {
     const vRow = viewportRow('view', p);
     if (!vRow) p.appliedViewText = null;
-    else if (vRow.text !== p.appliedViewText && vRow.viewSpec!.kind === 'view' && p.layout.rect.w) {
-      p.appliedViewText = vRow.text;
+    // A pan waiting to be written back is the window; the row catches up.
+    else if (
+      viewKey(vRow) !== p.appliedViewText &&
+      vRow.viewSpec!.kind === 'view' &&
+      p.layout.rect.w &&
+      !movedPanels.has(p)
+    ) {
+      p.appliedViewText = viewKey(vRow);
       // Shared axes come from the panels that own them, which are earlier in
       // the list and already framed; the row frames the rest.
       const roots = linkRoots(p);
@@ -1056,8 +1082,9 @@ function ensureViewRow() {
     ratio: view.ratio,
     axes: cur.lattice?.axes as [string, string] | undefined,
   });
-  cur.appliedViewText = addEquation(text, panelRowEnd(cur)).text;
+  const added = addEquation(text, panelRowEnd(cur));
   recompileAll();
+  cur.appliedViewText = viewKey(added);
   renderAll();
   saveUrl();
 }
@@ -1091,7 +1118,7 @@ function panelViewText(p: Panel): { eq: Equation; text: string } | null {
   // A mapped axis panned past what its map can name (ln(X) left of X = 0)
   // has no row to write: the row keeps the last window it could.
   try {
-    parseViewRow(text, {});
+    parseViewRow(text, constEnv);
   } catch {
     return null;
   }
@@ -1112,8 +1139,7 @@ function writebackViewport(undo: boolean) {
   if (undo) pushUndo(`viewport:${changes[0].eq.id}`);
   let failed = false;
   for (const { p, eq, text } of changes) {
-    if (p.mode === '2d') p.appliedViewText = text;
-    else p.appliedCameraText = text;
+    if (p.mode !== '2d') p.appliedCameraText = text;
     eq.text = text;
     const line = lineEls()[equations.indexOf(eq)];
     if (line) setLineText(line, text);
@@ -1123,10 +1149,11 @@ function writebackViewport(undo: boolean) {
     // as this row's error, the way a typed view(...) does.
     try {
       // The row's `# note` is prose, not part of the viewport.
-      eq.viewSpec = parseViewRow(stripNote(text), {}) ?? undefined;
+      eq.viewSpec = parseViewRow(stripNote(text), constEnv) ?? undefined;
     } catch {
       failed = true;
     }
+    if (p.mode === '2d') p.appliedViewText = viewKey(eq);
   }
   if (failed) recompileAll();
   reconcile();

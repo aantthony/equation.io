@@ -81,7 +81,7 @@ function solveFor(f: Expr, s: string, target: Expr): Expr | null {
 }
 
 /** Parse the right side of `x = 10^X` in a view row. */
-export function parseAxisMap(axis: Axis, src: string): AxisMap {
+export function parseAxisMap(axis: Axis, src: string, env: Record<string, number> = {}): AxisMap {
   const screen = SCREEN[axis];
   const usage = `An axis map writes ${axis} in terms of the screen's ${screen}, like ${axis} = 10^${screen}.`;
   let forward: Expr;
@@ -92,8 +92,21 @@ export function parseAxisMap(axis: Axis, src: string): AxisMap {
   }
   const free = [...freeVars(forward)].filter(n => n !== 'pi' && n !== 'e' && n !== 'tau');
   if (!free.includes(screen)) throw new Error(usage);
-  const other = free.find(n => n !== screen);
-  if (other) throw new Error(`${usage} It can use only ${screen} and numbers (found ${other}).`);
+  // A slider (`x = b^X`) is read at its value, so the map is plain numbers
+  // from here on; reading it through env marks it as one a slider move
+  // reanalyses for (lib/analysis.ts structuralConsts), which reframes the axis.
+  const values: Record<string, Expr> = {};
+  for (const name of free) {
+    if (name === screen) continue;
+    const v = env[name];
+    if (typeof v !== 'number' || !isFinite(v))
+      throw new Error(
+        `${usage} It can use ${screen}, numbers and sliders; ${name} has no fixed value here ` +
+          `(not defined, or it changes with t).`,
+      );
+    values[name] = num(v);
+  }
+  forward = substVars(forward, values);
   const inverse = solveFor(forward, screen, { kind: 'var', name: axis });
   if (!inverse)
     throw new Error(
