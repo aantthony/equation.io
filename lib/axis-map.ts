@@ -205,28 +205,49 @@ export function mapRowExpr(e: Expr, maps: AxisMaps): Expr {
 }
 
 /**
- * Why a mapped panel cannot draw this object yet, or null when it can. What
- * is drawn per pixel from x and y (graphs, implicit curves, regions, fields)
- * is mapped by mapRowExpr; what places points — points, parametric curves,
- * geometry, data — would need the inverse at every point, which is not built
- * yet, and drawing it unmapped would put it in the wrong place.
+ * How a mapped panel draws an object, or null when it cannot:
+ *
+ * - `substitute`: drawn per pixel from x and y (graphs, implicit curves,
+ *   regions, fields), so the row is rewritten by mapRowExpr and the shader
+ *   sees screen coordinates;
+ * - `place`: it puts things at positions (points, parametric curves and
+ *   regions, figures, point lists, labels), so it is
+ *   computed in x and y as anywhere else and each position it produces is
+ *   carried to the screen by the inverse (web/render2d.ts mapOverlay);
+ * - `none`: nothing drawn (a value, a note).
+ *
+ * What is left (vector and tensor fields, whose arrows would need the
+ * map's Jacobian; histograms, whose bars stand on y = 0; systems, whose
+ * solver searches the window as if it were x and y; graphs, sequences, 3D)
+ * is refused rather than drawn in the wrong place.
  */
-export function unmappedObject(object: MathObject): string | null {
+export type AxisMapping = 'substitute' | 'place' | 'none';
+
+export function axisMapping(object: MathObject): AxisMapping | null {
   switch (object.kind) {
     case 'value':
     case 'note':
     case 'tuple':
+      return 'none';
     case 'color-field':
-      return null;
+      return 'substitute';
     case 'curve':
-      if (object.form === 'graph' || object.form === 'implicit') return null;
-      break;
+      return object.form === 'parametric' ? 'place' : 'substitute';
     case 'region':
-      if (!object.form) return null;
-      break;
+      return object.form === 'projected' ? null : object.form === 'parametric' ? 'place' : 'substitute';
     case 'scalar-field':
-      if (object.dimension !== 3) return null;
-      break;
+      return object.dimension === 3 ? null : 'substitute';
+    case 'point':
+    case 'trail':
+    case 'label':
+      return 'place';
+    case 'figure':
+      return object.dimension === 2 ? 'place' : null;
+    case 'list':
+      return object.element === 'point' && object.dimension === 2 ? 'place' : null;
   }
-  return "This panel's view(…) maps its axes, and only graphs, implicit curves, regions and fields are drawn on mapped axes so far.";
+  return null;
 }
+
+export const UNMAPPED_MESSAGE =
+  "This panel's view(…) maps its axes, which draw curves, regions, fields, points and figures — not this yet.";

@@ -1311,9 +1311,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   works (`y = sinh(Y)` is a symlog axis). It applies to its own panel only.
   The grid and its labels follow the map: decades on a log axis (1, 2, 3, 5
   between them when zoomed in), and a zero line where the map reaches 0.
-  Graphs, implicit curves, regions and fields are drawn on mapped axes;
-  points, parametric curves and geometry are not yet, and a mapped panel
-  shows no coordinate-field grid.
+  Graphs, implicit curves, regions and fields are drawn through the map;
+  points, parametric curves and regions, segments and polygons (bent as a
+  straight line in x and y is on a log axis), point lists and labels are
+  placed through it, and named points drag in x and y. What the map cannot
+  show (x <= 0 on a log axis) is left out. Vector and tensor fields,
+  histograms, systems, 3D and integral shading are not drawn on mapped axes, hovering shows no roots or intercepts there, and a mapped
+  panel shows no coordinate-field grid.
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
   A trailing `spin = rate` keeps it orbiting about the vertical axis at that

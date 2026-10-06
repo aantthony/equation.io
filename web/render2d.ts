@@ -10,7 +10,7 @@ import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
-import type { AxisMaps } from '../lib/axis-map.ts';
+import { type AxisMap, type AxisMaps, toScreen as mapToScreen } from '../lib/axis-map.ts';
 import { type AxisTicks, axisTicks } from '../lib/axis-ticks.ts';
 
 export interface View2D {
@@ -1369,6 +1369,124 @@ export interface Overlay2D {
   nodes?: Array<{ x: number; y: number; text: string; color: string; mark?: boolean }>;
   /** Small text centred on a math point, haloed: a graph edge's labels. */
   tags?: Array<{ x: number; y: number; text: string; color: string }>;
+}
+
+/** Where an overlay's lists end, so what one row adds can be told apart. */
+export interface OverlayMark {
+  points: number;
+  clouds: number;
+  polylines: number;
+  regions: number;
+  texts: number;
+}
+
+export function markOverlay(o: Overlay2D): OverlayMark {
+  return {
+    points: o.points.length,
+    clouds: o.clouds?.length ?? 0,
+    polylines: o.polylines.length,
+    regions: o.regions?.length ?? 0,
+    texts: o.texts?.length ?? 0,
+  };
+}
+
+/** A straight segment is cut until each mapped piece strays from its chord
+ *  by under this fraction of the segment's mapped length (a straight run in
+ *  x and y is a curve on a log axis), into at most 2^depth pieces. A sampled
+ *  curve's short segments are already straight on screen, so most cost one
+ *  extra evaluation. */
+const MAPPED_BEND = 0.0005;
+const MAPPED_DEPTH = 12;
+
+/** Mapped points of the straight segment a → b, a included, b not. */
+function mappedSegment(
+  a: [number, number],
+  b: [number, number],
+  map: (x: number, y: number) => [number, number],
+): number[] {
+  const out: number[] = [];
+  const pa = map(...a);
+  const pb = map(...b);
+  const shown = (p: [number, number]) => isFinite(p[0]) && isFinite(p[1]);
+  const tol = MAPPED_BEND * Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+  const split = (t0: number, p0: [number, number], t1: number, p1: [number, number], depth: number) => {
+    const t = (t0 + t1) / 2;
+    const pm = map(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+    // Where the map stops (one end shown, one not) the piece is cut as far
+    // as depth allows, so the line breaks close to the edge; a piece shown
+    // at both ends is cut while it bends; one shown at neither is a gap.
+    let cut: boolean;
+    if (shown(p0) !== shown(p1)) cut = true;
+    else if (!shown(p0)) cut = false;
+    else {
+      const [dx, dy] = [p1[0] - p0[0], p1[1] - p0[1]];
+      const off = Math.abs((pm[0] - p0[0]) * dy - (pm[1] - p0[1]) * dx) / (Math.hypot(dx, dy) || 1);
+      // With an end past the map the segment has no mapped length: the
+      // piece's own stands in, which shrinks as it is cut.
+      cut = !shown(pm) || off > (isFinite(tol) ? tol : 4 * MAPPED_BEND * Math.hypot(dx, dy));
+    }
+    if (depth < MAPPED_DEPTH && cut) {
+      split(t0, p0, t, pm, depth + 1);
+      split(t, pm, t1, p1, depth + 1);
+    } else out.push(...p0);
+  };
+  split(0, pa, 1, pb, 0);
+  return out;
+}
+
+/** A cloud's mapped columns, kept while its arrays and the map are the same
+ *  (a CSV column is reused frame after frame). */
+const mappedColumns = new WeakMap<Float64Array, { map: AxisMap | undefined; out: Float64Array }>();
+function mappedColumn(col: Float64Array, map: AxisMap | undefined): Float64Array {
+  if (!map) return col;
+  const hit = mappedColumns.get(col);
+  if (hit?.map === map) return hit.out;
+  const out = col.map(v => mapToScreen(map, v));
+  mappedColumns.set(col, { map, out });
+  return out;
+}
+
+/**
+ * Carry what a row added to the overlay since `mark` from x and y to a mapped
+ * panel's screen coordinates (lib/axis-map.ts). Positions the map cannot
+ * show (x ≤ 0 on a log axis) become NaN: points there are dropped, and lines
+ * break there, as they do at any other gap.
+ */
+export function mapOverlay(o: Overlay2D, mark: OverlayMark, maps: AxisMaps): void {
+  const mx = maps.x ? (v: number) => mapToScreen(maps.x!, v) : (v: number) => v;
+  const my = maps.y ? (v: number) => mapToScreen(maps.y!, v) : (v: number) => v;
+  const kept = o.points.slice(mark.points).flatMap(p => {
+    const [x, y] = [mx(p.x), my(p.y)];
+    return isFinite(x) && isFinite(y) ? [{ ...p, x, y }] : [];
+  });
+  o.points.splice(mark.points, Infinity, ...kept);
+  for (const c of o.clouds?.slice(mark.clouds) ?? []) {
+    c.xs = mappedColumn(c.xs, maps.x);
+    c.ys = mappedColumn(c.ys, maps.y);
+  }
+  const both = (x: number, y: number): [number, number] => [mx(x), my(y)];
+  for (const l of o.polylines.slice(mark.polylines)) {
+    const { pts } = l;
+    const n = pts.length / 2;
+    const out: number[] = [];
+    const vertex = (k: number): [number, number] => [pts[(2 * k) % pts.length], pts[(2 * k + 1) % pts.length]];
+    for (let k = 0; k < (l.closed ? n : n - 1); k++) out.push(...mappedSegment(vertex(k), vertex(k + 1), both));
+    // The last vertex, unless closing back to the first draws it.
+    if (!l.closed && n) out.push(...both(...vertex(n - 1)));
+    l.pts = out;
+  }
+  for (const r of o.regions?.slice(mark.regions) ?? []) {
+    const tris = new Float64Array(r.tris.length);
+    for (let k = 0; k + 1 < tris.length; k += 2) {
+      tris[k] = mx(r.tris[k]);
+      tris[k + 1] = my(r.tris[k + 1]);
+    }
+    r.tris = tris;
+  }
+  for (const t of o.texts?.slice(mark.texts) ?? []) {
+    t.x = mx(t.x);
+    t.y = my(t.y);
+  }
 }
 
 /** A graph vertex's radius in CSS px. */

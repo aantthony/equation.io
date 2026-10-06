@@ -61,7 +61,7 @@ import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
-import { type AxisMaps, inlineFields, mapRowExpr, unmappedObject } from './axis-map.ts';
+import { type AxisMaps, UNMAPPED_MESSAGE, axisMapping, inlineFields, mapRowExpr } from './axis-map.ts';
 
 export interface RowSource {
   id?: string | number;
@@ -962,19 +962,27 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       const maps = panelMaps[panel];
+      row.cls = classifyRow(
+        maps ? { ...resolved, integral: null } : resolved,
+        lower,
+        constNames,
+        fieldEnv,
+        timeDifferentiator(defs),
+      ).cls;
       if (maps) {
-        // A mapped panel draws the row in its screen coordinates.
-        const mapped = classifyRow(
-          { ...resolved, integral: null },
-          e => mapRowExpr(inlineFields(lower(e), fieldEnv), maps),
-          constNames,
-          fieldEnv,
-          timeDifferentiator(defs),
-        ).cls;
-        const problem = unmappedObject(mapped.object);
-        if (problem) throw new Error(problem);
-        row.cls = mapped;
-      } else row.cls = classifyRow(resolved, lower, constNames, fieldEnv, timeDifferentiator(defs)).cls;
+        // A mapped panel draws per-pixel rows in its screen coordinates, and
+        // carries what places points there as it is drawn (lib/axis-map.ts).
+        const how = row.cls.needs3D ? null : axisMapping(row.cls.object);
+        if (!how) throw new Error(UNMAPPED_MESSAGE);
+        if (how === 'substitute')
+          row.cls = classifyRow(
+            { ...resolved, integral: null },
+            e => mapRowExpr(inlineFields(lower(e), fieldEnv), maps),
+            constNames,
+            fieldEnv,
+            timeDifferentiator(defs),
+          ).cls;
+      }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;

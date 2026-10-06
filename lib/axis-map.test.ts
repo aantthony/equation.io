@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
-import { parseAxisMap, toScreen, toWorld } from './axis-map.ts';
+import { axisMapping, parseAxisMap, toScreen, toWorld } from './axis-map.ts';
 import { type Expr, evaluate } from './expr.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
@@ -111,8 +111,34 @@ describe('rows in a mapped panel', () => {
     expect(at((a[3].cls!.object as { rhs: Expr }).rhs, 2)).toBe(2);
   });
 
-  it('refuse what places points, rather than drawing it in the wrong place', () => {
-    const [, point] = analyzeRows(['view(x = 1..100, x = 10^X)', '(10, 1)']).rows;
-    expect(point.error).toMatch(/only graphs, implicit curves, regions and fields/);
+  it('keep what places points in x and y, for the renderer to carry over', () => {
+    const rows = [
+      'view(x = 1..100, x = 10^X)',
+      '(10, 1)',
+      '(u, u^2)',
+      'A = (2, 3)',
+      'segment(A, (50, 1))',
+      '[(1, 2), (3, 4)]',
+    ];
+    const a = analyzeRows(rows).rows;
+    expect(a.map(r => r.error)).toEqual(rows.map(() => undefined));
+    const point = a[1].cls!.object as { source: { coordinates: Expr[] } };
+    // Not log(10): the point's own coordinates, mapped as it is drawn.
+    expect(evaluate(point.source.coordinates[0], {})).toBe(10);
+    expect(a.slice(1).flatMap(r => (r.cls ? [axisMapping(r.cls.object)] : []))).toEqual([
+      'place',
+      'place',
+      'place',
+      'place',
+    ]);
+  });
+
+  it('refuse what the map cannot carry, rather than drawing it in the wrong place', () => {
+    // A system's solver searches the window as if it were x and y; a 3D
+    // point would turn the panel 3D under rows written for its screen.
+    for (const row of ['(-y, x)', 'hist([1, 2, 2, 3])', '(x + y, x - y) = (30, 10)', '(1, 2, 3)']) {
+      const [, r] = analyzeRows(['view(x = 1..100, x = 10^X)', row]).rows;
+      expect(r.error, row).toMatch(/maps its axes/);
+    }
   });
 });

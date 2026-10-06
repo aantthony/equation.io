@@ -36,6 +36,8 @@ import { LIGHT_PALETTE, assignColors, takesColor } from '../lib/palette.ts';
 import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
+import { type AxisMap, type AxisMaps, axisMapping, toScreen } from '../lib/axis-map.ts';
+import { axisTicks } from '../lib/axis-ticks.ts';
 
 export const OG_WIDTH = 600;
 export const OG_HEIGHT = 315;
@@ -98,14 +100,47 @@ interface View2D {
   cy: number;
   /** World units per pixel. */
   upp: number;
+  /** Set for a row that places things on a mapped panel (lib/axis-map.ts):
+   *  its x and y go through the map on their way to the screen. Rows drawn
+   *  per pixel are already written in the screen's coordinates. */
+  maps?: AxisMaps;
 }
 
-const toScreenX = (r: Raster, v: View2D, wx: number) => r.w / 2 + (wx - v.cx) / v.upp;
-const toScreenY = (r: Raster, v: View2D, wy: number) => r.h / 2 - (wy - v.cy) / (v.upp / (v.ratio ?? 1));
+const toScreenX = (r: Raster, v: View2D, wx: number) =>
+  r.w / 2 + ((v.maps?.x ? toScreen(v.maps.x, wx) : wx) - v.cx) / v.upp;
+const toScreenY = (r: Raster, v: View2D, wy: number) =>
+  r.h / 2 - ((v.maps?.y ? toScreen(v.maps.y, wy) : wy) - v.cy) / (v.upp / (v.ratio ?? 1));
 
-function drawGrid2D(r: Raster, v: View2D, axesOnly = false) {
+function drawGrid2D(r: Raster, v: View2D, axesOnly = false, maps: AxisMaps = {}) {
   const minor: [number, number, number] = [0.92, 0.92, 0.92];
   const axis: [number, number, number] = [0.65, 0.65, 0.65];
+  if (maps.x || maps.y) {
+    // A mapped panel's lines at its axes' ticks (lib/axis-ticks.ts), in
+    // screen units, and its zero where the map reaches 0.
+    const upy = v.upp / (v.ratio ?? 1);
+    const at = (s: number, vertical: boolean, c: [number, number, number]) => {
+      if (vertical) {
+        const sx = Math.round(r.w / 2 + (s - v.cx) / v.upp);
+        for (let y = 0; y < r.h; y++) blend(r, sx, y, c, 1);
+      } else {
+        const sy = Math.round(r.h / 2 - (s - v.cy) / upy);
+        for (let x = 0; x < r.w; x++) blend(r, x, sy, c, 1);
+      }
+    };
+    const axisLines = (map: AxisMap | undefined, lo: number, hi: number, px: number, vertical: boolean) => {
+      if (!map) {
+        if (!axesOnly && px >= 3) for (let k = Math.ceil(lo); k <= Math.floor(hi); k++) at(k, vertical, minor);
+        if (lo <= 0 && hi >= 0) at(0, vertical, axis);
+        return;
+      }
+      const t = axisTicks(map, lo, hi, px);
+      if (!axesOnly) for (const m of t.major) at(m.at, vertical, minor);
+      if (t.zero !== null) at(t.zero, vertical, axis);
+    };
+    axisLines(maps.x, v.cx - (r.w / 2) * v.upp, v.cx + (r.w / 2) * v.upp, 1 / v.upp, true);
+    axisLines(maps.y, v.cy - (r.h / 2) * upy, v.cy + (r.h / 2) * upy, 1 / upy, false);
+    return;
+  }
   // With a viewport row the window is author-controlled: a zoomed-out view
   // would paint one gridline per pixel (or worse), so drop the unit grid once
   // it gets denser than ~3px and keep only the axes.
@@ -1388,10 +1423,12 @@ export function renderRaster(texts: string[], w = OG_WIDTH, h = OG_HEIGHT): Rast
             )
           : linked;
       views[k] = view;
-      if (gridMode !== 'off') drawGrid2D(sub, view, gridMode === 'axes');
+      const maps = box?.kind === 'view' ? box.maps : undefined;
+      if (gridMode !== 'off') drawGrid2D(sub, view, gridMode === 'axes', maps);
       for (const row of rows) {
         try {
-          renderRow2D(sub, view, row, env, colorOf(row), analysis);
+          const placed = maps && axisMapping(row.cls!.object) === 'place';
+          renderRow2D(sub, placed ? { ...view, maps } : view, row, env, colorOf(row), analysis);
         } catch {
           /* skip row */
         }

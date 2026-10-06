@@ -1,6 +1,6 @@
 # Axis maps: log scales and beyond (#71)
 
-Status: **steps 1 and 2 implemented** (lib/axis-map.ts, lib/axis-ticks.ts); the rest are notes.
+Status: **steps 1–3 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
 
 ## The idea
 
@@ -35,11 +35,23 @@ symlog (`y = sinh(Y)`) all come from one feature.
    lines (a log axis is not a level set at even spacing), and a mapped
    panel draws no coordinate-field grid, since fields are written in x and
    y rather than its screen coordinates.
-3. **Points and parametric objects.** Points, parametric curves, segments,
-   polygons, data and regressions, labels: apply the inverse to each
-   produced position. Dragging writes back through the forward map; hover
-   and intersection readouts report x, not X. Values outside the map's
-   range (x ≤ 0 on a log axis) are hidden with a note.
+3. **Done.** Points and parametric objects. lib/axis-map.ts axisMapping
+   sorts what a row draws: per-pixel kinds are rewritten (step 1); kinds
+   that place things — points, parametric curves and regions, figures,
+   point lists, labels — are computed in x and y as
+   anywhere else, and web/render2d.ts mapOverlay carries what each such row
+   adds to the overlay through the inverse as it is drawn. A figure's
+   straight segments are cut adaptively first, since a straight run in x
+   and y is curved on a log axis. Grabbed points are carried the same way,
+   and a drag writes back through the forward map. Positions the map
+   cannot show are dropped (points) or break the line. The link preview
+   (worker/og.ts) carries placed rows and draws the ticks' grid the same
+   way. Still not drawn on mapped axes: vector and tensor fields (their
+   arrows need the map's Jacobian), histograms (bars stand on y = 0),
+   systems (the solver searches the window as if it were x and y), 3D and
+   integral shading.
+   Hovering shows no roots or intercepts in a mapped panel: they are found
+   on the rewritten row, in screen coordinates, so would be the wrong ones.
 4. **Sliders in maps** (`x = b^X`): the write-back reparses the row without
    constants today, so maps take numbers only.
 
