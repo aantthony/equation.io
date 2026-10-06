@@ -281,7 +281,11 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values(['e_yz'], 'Bivector e_y ⟑ e_z');
   values(['e_zx'], 'Bivector e_z ⟑ e_x');
   values(['e_xyz'], 'Pseudoscalar e_x ⟑ e_y ⟑ e_z: the unit volume');
-  values(defs.consts.keys(), 'Defined constant');
+  // (Not a named value's hidden coefficients, M#3: no row can write them.)
+  values(
+    [...defs.consts.keys()].filter(n => !n.includes('#')),
+    'Defined constant',
+  );
   values(defs.states.keys(), 'Simulation state');
   values(defs.vecStates.keys(), 'Vector state');
   // A field over u, v is a named curve or surface (`c = (cos(2pi u), …)`).

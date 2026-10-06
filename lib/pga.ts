@@ -555,12 +555,12 @@ export function logMotor(motor: Pga): Pga {
 /** The rigid motion u of the way from a to b: a e^(u log(ã b)), along the
  *  screw that carries one to the other, at constant speed. */
 export function slerpMotor(a: Flat, b: Flat, u: Expr): Flat {
-  const [ma, mb] = [settlePga(unitMotor(motorOf(a))), settlePga(unitMotor(motorOf(b)))];
-  const relative = settlePga(geometricPga(reversePga(ma), mb));
+  const [ma, mb] = [held(settlePga(unitMotor(motorOf(a)))), held(settlePga(unitMotor(motorOf(b))))];
+  const relative = held(settlePga(geometricPga(reversePga(ma), mb)));
   // The log repeats its argument's coefficients many times over: only a
   // modest one (a fixed axis, a slider or t in the turn) is taken.
   if (exceedsNodes(relative.data, SLERP_NODES / 16)) throw new Error(SLERP_TOO_LARGE);
-  const step = settlePga(logMotor(relative));
+  const step = held(settlePga(logMotor(relative)));
   const out = settlePga(geometricPga(ma, expPga(scalePga(step, u))));
   if (exceedsNodes(out.data, SLERP_NODES)) throw new Error(SLERP_TOO_LARGE);
   return { ...out, grade: MOTOR };
@@ -679,6 +679,26 @@ function settle(e: Expr): Expr {
   }
 }
 const settlePga = <T extends Pga>(a: T): T => ({ ...a, data: a.data.map(settle) });
+
+/**
+ * While a named value is lowered, a frame-constant coefficient can become a
+ * hidden constant of its own (lib/defs.ts, docs/frame-constants-plan.md):
+ * slerp hands its intermediates — the unit motors, their relative motor and
+ * its log — to it, so each step multiplies names rather than formulas.
+ * Elsewhere they stay as they are. One lowering at a time, like the caches
+ * in lib/geom.ts.
+ */
+let hoister: ((e: Expr) => Expr) | null = null;
+export function withHoisting<T>(hoist: (e: Expr) => Expr, run: () => T): T {
+  const outer = hoister;
+  hoister = hoist;
+  try {
+    return run();
+  } finally {
+    hoister = outer;
+  }
+}
+const held = <T extends Pga>(a: T): T => (hoister ? { ...a, data: a.data.map(hoister) } : a);
 
 /** How large a slerp of motors may grow before it is refused: one about
  *  axes through draggable points, rather than fixed ones. */
