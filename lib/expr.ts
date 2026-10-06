@@ -235,6 +235,7 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'plane',
     'project',
     'reflect',
+    'motor',
     // A matrix or a map, whole: action(((1, 1), (0, 1))), jacobian((x y, x + y)).
     'action',
     'streamlines',
@@ -351,6 +352,7 @@ export const FUNCTIONS = new Set([
   'plane',
   'project',
   'reflect',
+  'motor',
   // A matrix drawn by what it does (lib/glyphs.ts), and a quaternion's
   // Julia set (lib/clifford.ts juliaSurface); a matrix field as streamlines.
   'action',
@@ -450,6 +452,7 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'plane',
   'project',
   'reflect',
+  'motor',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */

@@ -715,6 +715,51 @@ void main() {
 }
 `;
 
+/**
+ * A plane a x + b y + c z + d = 0, met analytically along each ray: a
+ * translucent sheet clipped to the box, its rim — where it crosses the
+ * box's faces — drawn solid, with the depth of the point hit so what lies in
+ * front of it hides it. It writes no depth, so whatever lies behind it — the
+ * line where two planes cross, a point in it — shows through.
+ */
+function planeSheetFrag(coeffs: [string, string, string, string], params?: string[]): string {
+  return `#version 300 es
+precision highp float;
+uniform vec3 uColor;
+${paramDecls(params)}
+out vec4 outColor;
+${GLSL_PRELUDE}
+${MARCH_COMMON}
+
+void main() {
+  vec2 ndc = ((gl_FragCoord.xy - uOrigin) / uRes) * 2.0 - 1.0;
+  vec3 ro = unproject(vec3(ndc, -1.0));
+  vec3 far = unproject(vec3(ndc, 1.0));
+  vec3 rd = normalize(far - ro);
+  vec3 n = vec3(${coeffs[0]}, ${coeffs[1]}, ${coeffs[2]});
+  float d = ${coeffs[3]};
+  float den = dot(n, rd);
+  if (!(abs(den) > 1e-12 * length(n))) discard;
+  float hitT = -(dot(n, ro) + d) / den;
+  vec2 span = boxSpan(ro, rd);
+  if (!(hitT >= max(span.x, 0.0) && hitT <= span.y)) discard;
+  vec3 p = ro + rd * hitT;
+  // How far inside the box, against a width that stays about constant on screen.
+  float inside = uBoxR - max(max(abs(p.x), abs(p.y)), abs(p.z));
+  float w = hitT * 0.0015;
+  float rim = 1.0 - smoothstep(w, 2.0 * w, inside);
+  // Seen edge-on a sheet thins to nothing, so it takes a touch more colour.
+  float facing = abs(den) / length(n);
+  float a = mix(${PLANE_ALPHA.toFixed(3)} + 0.12 * (1.0 - facing), 0.95, rim);
+  outColor = vec4(uColor, a);
+  gl_FragDepth = depthOf(p);
+}
+`;
+}
+/** How opaque a plane's sheet is: enough to read as a surface, little
+ *  enough that a line in it or behind it shows. */
+const PLANE_ALPHA = 0.22;
+
 /** The z=0 reference plane with the same adaptive grid as the 2D view. */
 const planeFrag = (): string => `#version 300 es
 precision highp float;
@@ -882,6 +927,14 @@ export interface Scene3D {
     retained?: boolean;
   }>;
   points: Array<{ pos: [number, number, number]; color: [number, number, number]; label?: string }>;
+  /** Planes a x + b y + c z + d = 0, the GLSL of [a, b, c, d]: drawn
+   *  translucent over everything opaque, outlined where they meet the box. */
+  planes?: Array<{
+    coeffs: [string, string, string, string];
+    color: [number, number, number];
+    params?: string[];
+    uniforms?: Record<string, number>;
+  }>;
   /** `label(point, "text")` rows: text only, no point sprite. */
   texts?: Array<{ pos: [number, number, number]; text: string; color: [number, number, number] }>;
   /** Fields in space, drawn as clouds (see volumeFrag); `scale` is the size
@@ -1397,6 +1450,23 @@ export class Renderer3D {
       }
     }
     gl.bindVertexArray(null);
+
+    // Planes over everything opaque, translucent: depth-tested, writing none.
+    for (const s of scene.planes ?? []) {
+      let prog: WebGLProgram;
+      try {
+        prog = this.cache.get(QUAD_VERT, planeSheetFrag(s.coeffs, s.params));
+      } catch (e) {
+        console.error(e);
+        continue;
+      }
+      setCommon(prog);
+      setParams(prog, s.params, s.uniforms);
+      gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
+      gl.depthMask(false);
+      this.quad.draw();
+      gl.depthMask(true);
+    }
 
     // Clouds over everything opaque, raymarched like the surfaces — as
     // costly, so drawn progressively the same way, into targets of their own:

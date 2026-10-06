@@ -17,7 +17,8 @@
  * the scalar expressions of the result's coefficients.
  */
 import { add, div, mul, neg, sub } from './diff.ts';
-import type { Expr } from './expr.ts';
+import { type Expr, evaluate } from './expr.ts';
+import { exceedsNodes } from './size.ts';
 
 export type Dim = 2 | 3;
 
@@ -215,16 +216,7 @@ export function expPga(b: Pga): Pga {
   let out = addPga(fromEntries(dim, [[0, call('cos', a)]]), scalePga(biv, sinc));
   const pi = dim === 3 ? geometricPga(biv, biv).data[size(dim) - 1] : ZERO;
   if (!isZero(pi)) {
-    const h: Expr = {
-      kind: 'piecewise',
-      cases: [
-        {
-          cond: { kind: 'ineq', op: '>', l: a, r: num(1e-3) },
-          value: div(sub(call('sin', a), mul(a, call('cos', a))), mul(a, mul(a, a))),
-        },
-      ],
-      otherwise: sub(num(1 / 3), div(mul(a, a), num(30))),
-    };
+    const h = hOf(a);
     const i = pseudoscalar(dim);
     const dual = addPga(scalePga(i, sinc), scalePga(geometricPga(biv, i), h));
     out = addPga(out, scalePga(dual, div(pi, num(2))));
@@ -234,7 +226,8 @@ export function expPga(b: Pga): Pga {
 const euclidSum = (cs: readonly Expr[]): Expr => cs.reduce<Expr>((s, c) => add(s, mul(c, c)), ZERO);
 
 /** What a flat of a given grade is, in the plane or in space. */
-export function flatName(dim: Dim, grade: number): 'point' | 'line' | 'plane' | null {
+export function flatName(dim: Dim, grade: number): 'point' | 'line' | 'plane' | 'motor' | null {
+  if (grade === MOTOR) return 'motor';
   if (dim === 2) return grade === 1 ? 'line' : grade === 2 ? 'point' : null;
   return grade === 1 ? 'plane' : grade === 2 ? 'line' : grade === 3 ? 'point' : null;
 }
@@ -244,6 +237,12 @@ export function flatName(dim: Dim, grade: number): 'point' | 'line' | 'plane' | 
  *  coefficients happen to be zero, so dragging never changes what it is. */
 export interface Flat extends Pga {
   readonly grade: number;
+  /** A motor made by motor(L, θ, d) keeps its slide apart, applied first:
+   *  `data` turns about the axis and `slide` (a translation along it) moves,
+   *  so the motion is X ↦ data (slide X slide~) data~. Kept as two factors,
+   *  each stays small where their product, for an axis through draggable
+   *  points, would not (motorOf multiplies them where the whole is needed). */
+  readonly slide?: readonly Expr[];
 }
 
 /** The internal call a flat travels in, from lowering to classify: its
@@ -251,7 +250,7 @@ export interface Flat extends Pga {
  *  coefficient broadcasts over it like any other. */
 export const PGA_CALL = '[pga]';
 export function flatNode(f: Flat): Expr {
-  return { kind: 'call', name: PGA_CALL, args: [num(f.dim), num(f.grade), ...f.data] };
+  return { kind: 'call', name: PGA_CALL, args: [num(f.dim), num(f.grade), ...f.data, ...(f.slide ?? [])] };
 }
 export function flatOfNode(e: Expr): Flat | null {
   if (e.kind !== 'call' || e.name !== PGA_CALL) return null;
@@ -259,7 +258,10 @@ export function flatOfNode(e: Expr): Flat | null {
     const a = e.args[k];
     return a.kind === 'num' ? a.value : NaN;
   };
-  return { dim: at(0) as Dim, grade: at(1), data: e.args.slice(2) };
+  const dim = at(0) as Dim;
+  const end = 2 + size(dim);
+  const slide = e.args.length > end ? { slide: e.args.slice(end) } : {};
+  return { dim, grade: at(1), data: e.args.slice(2, end), ...slide };
 }
 export const isPoint = (f: Flat): boolean => f.grade === f.dim;
 
@@ -283,6 +285,7 @@ export function flatFigure(f: Flat): Expr {
       offset,
     );
   };
+  if (f.grade === MOTOR) return flatFigure(motorAxis(f));
   if (isPoint(f)) return { kind: 'vec', items: pointCoords(f) };
   if (f.grade === 1) return { kind: 'eq', l: zeroEq(f), r: ZERO };
   // The axis d is least along: x when |d_x| is at most |d_y| and |d_z|,
@@ -348,6 +351,7 @@ export function flatText(
   if (clean.some(v => !Number.isFinite(v))) return 'undefined';
   if (clean.every(v => v === 0)) return 'undefined';
   const flat: Flat = { ...f, data: clean.map(num) };
+  if (f.grade === MOTOR) return motorText(flat, format);
   const tuple = (vs: readonly number[]) => `(${vs.map(v => (v < 0 ? `-${format(-v)}` : format(v))).join(', ')})`;
   const read = (e: Expr): number => (e.kind === 'num' ? e.value : NaN);
   const small = (vs: readonly number[]) => {
@@ -444,3 +448,240 @@ export function flatAngle(a: Flat, b: Flat): Expr {
   const mixed = a.dim === 3 && a.grade !== b.grade;
   return mixed ? sub(num(Math.PI / 2), between) : between;
 }
+
+/** The grade a motor travels under in a `[pga]` node: it has no single
+ *  grade (it is even — a number, a bivector and, in space, I), so it is
+ *  tagged apart from points, lines and planes. */
+export const MOTOR = -1;
+
+/**
+ * The motor that turns by `turn` about `axis` — a line of space or a point
+ * of the plane — counterclockwise in the plane, and in space right-handed
+ * about the axis's direction (join(A, B)'s A → B) while sliding `slide`
+ * along it. For a unit line L̂ (L̂² = −1) e^(θ/2 L̂) is cos(θ/2) + sin(θ/2) L̂
+ * exactly, and the slide is the product of two planes normal to the axis,
+ * slide/2 apart; the two commute, being about one axis.
+ *
+ * It is built homogeneously — scaled by |L| for each factor, rather than
+ * dividing L by its size — since a motion is the same at any scale (M X M̃
+ * scales X, which a point divides out): the coefficients stay a few dozen
+ * nodes for an axis through draggable points. A unit motor, where one is
+ * needed (log, slerp), is unitMotor of it.
+ */
+export function motorPga(axis: Pga, turnIn: Expr, slideIn: Expr = ZERO): Flat {
+  const [turn, slide] = [settle(turnIn), settle(slideIn)];
+  const size = axis.dim === 2 ? weight(axis) : sqrt(euclideanNormSq(axis));
+  const half = div(turn, num(2));
+  // A unit point of the plane and a unit line of space turn opposite ways
+  // under the sandwich at one sign.
+  const sin = call('sin', half);
+  const turning = addPga(
+    fromEntries(axis.dim, [[0, mul(size, call('cos', half))]]),
+    scalePga(axis, axis.dim === 2 ? neg(sin) : sin),
+  );
+  if (axis.dim === 2 || isZero(slide)) return { ...settlePga(turning), grade: MOTOR };
+  // Reflecting in dir·x = 0 and then in dir·x = slide |dir|/2 slides by slide along dir.
+  const dir = lineDirection(axis);
+  const sliding = geometricPga(hyperplane(dir, neg(div(mul(slide, size), num(2)))), hyperplane(dir, ZERO));
+  return { ...settlePga(turning), grade: MOTOR, slide: sliding.data.map(settle) };
+}
+
+/** A motor as one element of the algebra: its turn times its slide. */
+export const motorOf = (m: Flat): Pga => (m.slide ? geometricPga(m, { dim: m.dim, data: m.slide }) : m);
+
+/**
+ * A line or plane moved by a motor: slid, then turned. The sandwich is
+ * linear in what it moves, so this is the sum of the blades' images, each
+ * a sandwich of a constant, scaled by X's coefficients — rather than the
+ * generic sandwich, which repeats the motor's coefficients in every product.
+ */
+export function moveFlat(m: Flat, x: Pga): Pga {
+  const linear = (r: Pga, at: Pga): Pga =>
+    at.data.reduce<Pga>((acc, c, k) => {
+      if (isZero(c)) return acc;
+      const image = settlePga(sandwich(r, fromEntries(r.dim, [[k, num(1)]])));
+      return addPga(acc, scalePga(image, c));
+    }, zeroPga(r.dim));
+  const slid = m.slide ? linear({ dim: m.dim, data: m.slide }, x) : x;
+  return linear(m, slid);
+}
+
+/** A motor scaled to M M̃ = 1. */
+export const unitMotor = (m: Pga): Pga => scalePga(m, div(num(1), sqrt(geometricPga(m, reversePga(m)).data[0])));
+
+/** sin(a)/a's companion h(a) = (sin a − a cos a)/a³, which tends to 1/3. */
+const hOf = (a: Expr): Expr => ({
+  kind: 'piecewise',
+  cases: [
+    {
+      cond: { kind: 'ineq', op: '>', l: a, r: num(1e-3) },
+      value: div(sub(call('sin', a), mul(a, call('cos', a))), mul(a, mul(a, a))),
+    },
+  ],
+  otherwise: sub(num(1 / 3), div(mul(a, a), num(30))),
+});
+
+/**
+ * The bivector B with e^B = M, for a unit motor M — the inverse of expPga,
+ * taking the shorter way round (M and −M move alike, so M is turned to a
+ * non-negative scalar part first, and the half-angle a stays in [0, π/2]).
+ * From M = cos a + sinc(a) B + (π/2)(sinc(a) I + h(a) B I): a from the
+ * scalar part, π from the I part, B's Euclidean part from the bivector's,
+ * and its ideal part once B_E I is taken out.
+ */
+export function logMotor(motor: Pga): Pga {
+  const m = unitMotor(motor);
+  const dim = m.dim;
+  const e0 = e0Bit(dim);
+  const side: Expr = {
+    kind: 'piecewise',
+    cases: [{ cond: { kind: 'ineq', op: '<', l: m.data[0], r: ZERO }, value: num(-1) }],
+    otherwise: num(1),
+  };
+  const turned = scalePga(m, side);
+  const a = call('acos', call('min', turned.data[0], num(1)));
+  const sinc = call('sinc', a);
+  const biv = gradePartPga(turned, 2);
+  const euclid: Pga = { dim, data: biv.data.map((c, k) => (k & e0 ? ZERO : div(c, sinc))) };
+  let ideal: Pga = { dim, data: biv.data.map((c, k) => (k & e0 ? c : ZERO)) };
+  if (dim === 3) {
+    const pi = div(mul(num(2), turned.data[size(dim) - 1]), sinc);
+    const dual = geometricPga(euclid, pseudoscalar(dim));
+    ideal = addPga(ideal, scalePga(dual, mul(div(pi, num(2)), hOf(a))), true);
+  }
+  return addPga(euclid, scalePga(ideal, div(num(1), sinc)));
+}
+
+/** The rigid motion u of the way from a to b: a e^(u log(ã b)), along the
+ *  screw that carries one to the other, at constant speed. */
+export function slerpMotor(a: Flat, b: Flat, u: Expr): Flat {
+  const [ma, mb] = [settlePga(unitMotor(motorOf(a))), settlePga(unitMotor(motorOf(b)))];
+  const relative = settlePga(geometricPga(reversePga(ma), mb));
+  // The log repeats its argument's coefficients many times over: only a
+  // modest one (a fixed axis, a slider or t in the turn) is taken.
+  if (exceedsNodes(relative.data, SLERP_NODES / 16)) throw new Error(SLERP_TOO_LARGE);
+  const step = settlePga(logMotor(relative));
+  const out = settlePga(geometricPga(ma, expPga(scalePga(step, u))));
+  if (exceedsNodes(out.data, SLERP_NODES)) throw new Error(SLERP_TOO_LARGE);
+  return { ...out, grade: MOTOR };
+}
+
+/**
+ * What a motor screws about, from its bivector part B = sinc(a) B_E + (the
+ * ideal part, which also holds the slide as a multiple of B_E I): in space
+ * B with that multiple taken out — the moment of a line is perpendicular to
+ * its direction, so what is left is the axis — and in the plane B itself, a
+ * point (ideal for a translation, which has no centre). Unlike the log this
+ * needs no normalising, so it stays small.
+ */
+export function motorAxis(m: Pga): Flat {
+  const b = gradePartPga(m, 2);
+  if (m.dim === 2) return { ...b, grade: 2 };
+  const e0 = e0Bit(m.dim);
+  const euclid: Pga = { dim: m.dim, data: b.data.map((c, k) => (k & e0 ? ZERO : c)) };
+  const dual = geometricPga(euclid, pseudoscalar(m.dim));
+  const dot = (x: Pga, y: Pga) => x.data.reduce<Expr>((acc, c, k) => add(acc, mul(c, y.data[k])), ZERO);
+  return { ...addPga(b, scalePga(dual, div(dot(b, dual), dot(dual, dual))), true), grade: 2 };
+}
+
+/**
+ * A motor read out from its values by what it does: in the plane `turn θ
+ * about (x, y)` (counterclockwise positive) or `slide (dx, dy)`; in space
+ * `turn θ about the line through …, direction …, slide s`, θ from 0 to π
+ * right-handed about that direction — a motor and its negative are one
+ * motion, read the shorter way round — or `slide (dx, dy, dz)`.
+ */
+function motorText(motor: Flat, format: (v: number) => string): string {
+  const m: Flat = { ...motorOf(motor), grade: MOTOR };
+  const read = (e: Expr): number => evaluate(e, {});
+  const signedText = (v: number) => (v < 0 ? `-${format(-v)}` : format(v));
+  const tuple = (vs: readonly number[]) => `(${vs.map(signedText).join(', ')})`;
+  const move = (p: readonly number[]): number[] => pointCoords(moveFlat(motor, pointPga(p.map(num)))).map(read);
+  const tidy = (vs: number[]) => vs.map(v => (Math.abs(v) < 1e-12 ? 0 : v));
+  const axis = motorAxis(m);
+  const origin = Array.from({ length: m.dim }, () => 0);
+  const slideBy = (): string => {
+    const d = tidy(move(origin));
+    return d.every(v => v === 0) ? 'no motion' : `slide ${tuple(d)}`;
+  };
+  if (m.dim === 2) {
+    const { coords, weight: w } = pointParts(axis);
+    if (!(Math.abs(read(w)) > 1e-12)) return slideBy();
+    const c = coords.map(e => read(e) / read(w));
+    const q = move([c[0] + 1, c[1]]);
+    return `turn ${signedText(Math.atan2(q[1] - c[1], q[0] - c[0]))} about ${tuple(tidy(c))}`;
+  }
+  const dir = lineDirection(axis).map(read);
+  const len = Math.hypot(...dir);
+  if (!(len > 1e-12)) return slideBy();
+  const u = dir.map(v => v / len);
+  const p = pointCoords(nearestOrigin(axis)).map(read);
+  const slide = move(p).reduce((acc, v, k) => acc + (v - p[k]) * u[k], 0);
+  // A unit vector across the axis, and where the turn takes it.
+  const least = u.map(Math.abs).indexOf(Math.min(...u.map(Math.abs)));
+  const e = [0, 1, 2].map(k => (k === least ? 1 : 0));
+  const cross = (a: number[], b: number[]) =>
+    [0, 1, 2].map(k => a[(k + 1) % 3] * b[(k + 2) % 3] - a[(k + 2) % 3] * b[(k + 1) % 3]);
+  const across = cross(u, e);
+  const v = across.map(c => c / Math.hypot(...across));
+  const w = move(p.map((c, k) => c + v[k])).map((c, k) => c - p[k] - slide * u[k]);
+  const turn = Math.atan2(
+    cross(v, w).reduce((acc, c, k) => acc + c * u[k], 0),
+    v.reduce((acc, c, k) => acc + c * w[k], 0),
+  );
+  const about = `the line through ${tuple(tidy(p))}, direction ${tuple(tidy(u))}`;
+  const along = Math.abs(slide) > 1e-12 ? `, slide ${signedText(slide)}` : '';
+  return `turn ${signedText(turn)} about ${about}${along}`;
+}
+
+/**
+ * The point `coords` moved by the motor m, as its coordinates. The
+ * sandwich is linear in what it moves, and a point is linear in its
+ * coordinates — J(x e_x + y e_y + z e_z + e0) — so this is m O m̃ plus
+ * x m E_x m̃ + …, where O is the origin and E_x the ideal point along x:
+ * sandwiches of constants only, quadratic in m's coefficients. The generic
+ * sandwich of a symbolic point repeats m's coefficients in every product,
+ * which for a motor about a draggable axis runs to tens of thousands of nodes.
+ */
+export function movePoint(m: Flat, coords: readonly Expr[]): Expr[] {
+  const zero = coords.map(() => ZERO);
+  // The slide is a translation a + b_k e_k0 (motorPga's two planes): it
+  // moves every point by 2 b / a.
+  const slide = m.slide;
+  const offset = slide && coords.map((_, k) => div(mul(num(2), slide[(1 << k) | e0Bit(m.dim)]), slide[0]));
+  const at = offset ? coords.map((c, k) => add(c, offset[k])) : coords;
+  const origin = pointParts(settlePga(sandwich(m, pointPga(zero))));
+  const columns = at.map(
+    (_, j) => pointParts(settlePga(sandwich(m, idealPointPga(zero.map((z, k) => (k === j ? num(1) : z)))))).coords,
+  );
+  // A motion keeps every point's weight, so all divide by the origin's.
+  return origin.coords.map((o, i) =>
+    div(
+      at.reduce((acc, c, j) => add(acc, mul(c, columns[j][i])), o),
+      origin.weight,
+    ),
+  );
+}
+
+/**
+ * A coefficient with nothing left to vary — `cos(pi/4) 2`, a motor about a
+ * fixed axis — as the number it is. Products of motors otherwise keep every
+ * cos and sqrt of a constant as a tree, and the log of a motor (acos, sinc,
+ * a piecewise) multiplies them past any useful size.
+ */
+function settle(e: Expr): Expr {
+  if (e.kind === 'num' || e.kind === 'var') return e;
+  try {
+    const v = evaluate(e, {});
+    return Number.isFinite(v) ? num(v) : e;
+  } catch {
+    return e;
+  }
+}
+const settlePga = <T extends Pga>(a: T): T => ({ ...a, data: a.data.map(settle) });
+
+/** How large a slerp of motors may grow before it is refused: one about
+ *  axes through draggable points, rather than fixed ones. */
+const SLERP_NODES = 1 << 15;
+const SLERP_TOO_LARGE =
+  'slerp of motors takes two that stay fixed — fixed axes, turns and slides — and varies how far along: slerp(M1, M2, (1 - cos(t))/2).';
