@@ -30,6 +30,7 @@ import {
   ineqComparisons,
   substVars,
 } from './expr.ts';
+import { takenNameHint } from './defs.ts';
 import { diff } from './diff.ts';
 import { type FigureName, STREAMLINES_CALL, STREAMLINES_USAGE } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
@@ -1482,9 +1483,7 @@ export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env:
   const verdict = `${plot.variable ? (truth ? 'True now' : 'False now') : truth ? 'Always true' : 'Never true'} (${values})`;
   // `e = 0.6` meant as a slider: the constant cannot be one, so say why the
   // row became a (false) claim instead.
-  return plot.constant && !truth
-    ? `${verdict} — ${plot.constant} is a constant; name a slider something else`
-    : verdict;
+  return plot.constant && !truth ? `${verdict} — ${takenNameHint(plot.constant)}` : verdict;
 }
 
 /** One readout per source row, including lists and families of readouts. */
@@ -1549,8 +1548,16 @@ export function plotReadout(plot: CpuPlan, env: Record<string, number>): string 
   }
   if (plot.type === 'family') {
     if (plot.readout) return plotReadout(plot.readout, env);
-    const parts = plot.members.map(m => plotReadout(m.cpu, env));
-    if (parts.every(p => p !== null)) return `[${parts.slice(0, 8).join('; ')}${parts.length > 8 ? '; …' : ''}]`;
+    // `i = [0..9]`: claims about a taken name explain it once, not per member.
+    const first = plot.members[0]?.cpu;
+    const taken = first?.type === 'note' ? first.constant : undefined;
+    const parts = plot.members.map(m =>
+      plotReadout(taken && m.cpu.type === 'note' ? { ...m.cpu, constant: undefined } : m.cpu, env),
+    );
+    if (parts.every(p => p !== null)) {
+      const list = `[${parts.slice(0, 8).join('; ')}${parts.length > 8 ? '; …' : ''}]`;
+      return taken && parts.some(p => /^(Never true|False now)/.test(p)) ? `${list} — ${takenNameHint(taken)}` : list;
+    }
   }
   return null;
 }

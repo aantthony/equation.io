@@ -879,14 +879,21 @@ export function takenBinder(text: string): string | null {
 /**
  * The name a row tried to define when that name is taken by the language:
  * `e = 0.6` or `d(x) = …` look like a slider or a function but are not one,
- * since `d` starts `d/dx` and `e`, `pi` and `tau` are constants. Such a row
- * still means what it says (`e = 2` is a false claim, and says so); this is
- * only for explaining why no slider appeared.
+ * since `d` starts `d/dx`, `e`, `pi` and `tau` are constants and `i` is the
+ * imaginary unit. Such a row still means what it says (`e = 2` is a false
+ * claim, and says so); this is only for explaining why no slider appeared.
  */
-export function takenDefinitionName(text: string): 'd' | 'e' | 'pi' | 'tau' | null {
+export function takenDefinitionName(text: string): 'd' | 'e' | 'pi' | 'tau' | 'i' | null {
   const m = FN_RE.exec(text) ?? CONST_RE.exec(text);
   const n = m && canonicalName(m[1]);
-  return n === 'd' || n === 'e' || n === 'pi' || n === 'tau' ? n : null;
+  return n === 'd' || n === 'e' || n === 'pi' || n === 'tau' || n === 'i' ? n : null;
+}
+
+/** Why a name from takenDefinitionName (other than `d`) names no value. */
+export function takenNameHint(name: string): string {
+  return name === 'i'
+    ? 'i is the imaginary unit; name it something else, like k'
+    : `${name} is a constant; name a slider something else`;
 }
 
 export type GetFn = (name: string) => FnDef | undefined;

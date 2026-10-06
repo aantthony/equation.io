@@ -304,6 +304,14 @@ describe('solver extensions and comparison notes', () => {
     expect(e.info).toBe('Never true (2.71828 ≠ 0.6) — e is a constant; name a slider something else');
     expect(tau.info).toMatch(/— tau is a constant/);
     expect(pi.info).toBe('Always true (3.14159 = 3.14159)');
+    // `i` is the imaginary unit: an index named i is a claim about it, as a
+    // number, as a family of claims (once, not per member), or as a family
+    // too large to draw.
+    const hint = 'i is the imaginary unit; name it something else, like k';
+    expect(runRows(['i = 2']).rows[0].info).toBe(`Never true (0+1i ≠ 2) — ${hint}`);
+    expect(runRows(['i = [0..1]']).rows[0].info).toBe(`[Never true (0+1i ≠ 0); Never true (0+1i ≠ 1)] — ${hint}`);
+    expect(analyze(['i = [0..239]']).rows[0].error).toBe(`An object family needs 1–32 members (got 240) — ${hint}.`);
+    expect(runRows(['i = i']).rows[0].info).toBe('Always true (0+1i = 0+1i)');
     // `d` starts d/dx: the definition row itself says so, as a function too.
     for (const row of ['d = 1', 'd(x) = x^2']) {
       expect(analyze([row]).rows[0].error, row).toMatch(/^d is taken by derivatives/);
