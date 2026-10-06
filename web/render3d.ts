@@ -65,6 +65,10 @@ export function cameraMatrices(
   return { vp, invVp: invert(vp), eye };
 }
 
+/** How far `p` is in front of the eye under `vp`: its clip w, the view depth. */
+export const viewDepth = (vp: Mat4, p: readonly number[]): number =>
+  vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+
 /** How many points pointSpacing measures from. */
 const SPACING_SAMPLES = 64;
 
@@ -107,7 +111,8 @@ function cachedSpacing(pos: Float32Array): number {
   const key = `${pos.length}:${hash >>> 0}`;
   let spacing = spacingCache.get(key);
   if (spacing === undefined) {
-    if (spacingCache.size > 64) spacingCache.clear();
+    // Oldest first: a Map iterates in insertion order.
+    if (spacingCache.size >= 256) spacingCache.delete(spacingCache.keys().next().value!);
     spacing = pointSpacing(pos);
     spacingCache.set(key, spacing);
   }
@@ -140,7 +145,7 @@ export function pointVertices(
   for (let k = 0; k < n; k++) {
     const p = points[k].pos;
     pos.set(p, k * 3);
-    depth[k] = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+    depth[k] = viewDepth(vp, p);
   }
   let start = 0;
   for (let k = 1; k <= n; k++) {
@@ -170,7 +175,7 @@ export function pointVertices(
     start = k;
   }
   // Farthest first. Points behind the eye sort last; the GPU clips them.
-  const order = Array.from({ length: n }, (_, i) => i).sort((a, b) => (depth[b] || 0) - (depth[a] || 0));
+  const order = Uint32Array.from({ length: n }, (_, i) => i).sort((a, b) => (depth[b] || 0) - (depth[a] || 0));
   const sorted = new Float32Array(out.length);
   order.forEach((from, to) =>
     sorted.set(out.subarray(from * POINT_STRIDE, (from + 1) * POINT_STRIDE), to * POINT_STRIDE),
@@ -182,7 +187,7 @@ export function pointVertices(
 export function projectToScreen(vp: Mat4, p: readonly number[], w: number, h: number): [number, number] | null {
   const cx = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
   const cy = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
-  const cw = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+  const cw = viewDepth(vp, p);
   if (cw <= 0) return null;
   return [((cx / cw) * 0.5 + 0.5) * w, (0.5 - (cy / cw) * 0.5) * h];
 }
@@ -828,7 +833,8 @@ const POINT_FAR_ALPHA = 0.25;
  *
  * A cloud's dots fade with depth across (aDot.y, aDot.y + aDot.z): full at
  * its nearest point's depth, down to POINT_FAR_ALPHA at the far end, so it
- * reads front to back. A lone point is drawn solid wherever it is.
+ * reads front to back. A lone point is drawn solid wherever it is, until it
+ * is under POINT_MIN_PX and fades by area like any dot.
  *
  * Translucent dots are drawn farthest first without writing depth, so each
  * blends over what is behind it — other dots included — and still hides
@@ -877,7 +883,7 @@ void main() {
   // up close; on a dot a few pixels across it would be all rim, so it goes.
   float px = 1.0 / vSize;
   float edge = 1.0 - smoothstep(0.5 - px, 0.5, r);
-  float rim = 1.0 - smoothstep(max(0.38 - px, 0.0), max(0.5 - px, 0.0), r);
+  float rim = vSize < 4.0 ? 1.0 : 1.0 - smoothstep(0.38 - px, 0.5 - px, r);
   vec3 col = mix(mix(vec3(1.0), vColor, rim), vColor, 1.0 - smoothstep(4.0, 10.0, vSize));
   float alpha = vAlpha * edge;
   if (uDepthPass && alpha < 0.5) discard;
@@ -1558,8 +1564,6 @@ export class Renderer3D {
       }
       gl.drawArrays(gl.LINES, 0, s.pts.length / 3);
     }
-    gl.bindVertexArray(this.dynVao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.dynBuf);
     if (scene.points.length) {
       // One upload and two draws for every point in the scene: a 10 000-point
       // cloud is not 10 000 draws (see POINT_VERT for the two passes).
@@ -1953,7 +1957,7 @@ export function drawLabels3D(
     // beside one of POINT_PX at the target distance.
     let off = 7;
     if (dot) {
-      const depth = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+      const depth = viewDepth(vp, p);
       off = 7 * Math.min(Math.max(cam.radius / depth, 0.6), POINT_MAX_PX / POINT_PX);
     }
     ctx.fillStyle = color;

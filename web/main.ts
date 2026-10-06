@@ -2004,8 +2004,10 @@ function render() {
               scene.curves.push({ pts: new Float32Array(pts), color });
               break;
             }
+            // Each solution its own group: discrete answers, solid and full
+            // size, not a cloud to shade by depth.
             for (const p of solveFor(eq, plot.dim, plot.residuals)) {
-              scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, group: eq });
+              scene.points.push({ pos: [p[0], p[1], p[2] ?? 0], color, group: p });
             }
             break;
         }
