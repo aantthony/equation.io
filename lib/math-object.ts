@@ -146,8 +146,15 @@ export type MathObject =
       readonly axes: readonly [string, string];
     }
   /** A function on the integer lattice, `T[i, j] = …` (lib/automaton.ts):
-   *  `expr` reads CELL_VAR and CELL_VAR2. */
-  | { readonly kind: 'lattice'; readonly expr: Expr; readonly axes: readonly [string, string] }
+   *  `expr` reads CELL_VAR and CELL_VAR2. Or, with `rows`, cells already
+   *  computed: row k's position h (from 1) is rows[k][h − 1] — a
+   *  tuple-valued recurrence's terms (lib/seq.ts). */
+  | {
+      readonly kind: 'lattice';
+      readonly expr: Expr;
+      readonly axes: readonly [string, string];
+      readonly rows?: readonly (readonly number[])[];
+    }
   /** `graph(from, to)` / `graph(from, to, label)` (lib/graph.ts): one edge
    *  per element of the tuple's multiset, each [from, to] or [from, to, label]. */
   | { readonly kind: 'graph'; readonly edges: ReadonlyArray<readonly Expr[]> }

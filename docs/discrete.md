@@ -14,7 +14,7 @@ The proposal: discrete objects get viewports of their own, in two shapes.
 
 | Viewport    | Coordinates                                                   | Draws                                                   | Examples                                                 |
 | ----------- | ------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------- |
-| **lattice** | integer cells, named by the rows' own indices (`i`, `j`, `n`) | cells shaded by value; values printed when zoomed in    | Rule 30, Game of Life, Pascal mod m, Cayley tables, gcd  |
+| **lattice** | integer cells, named by the rows' own indices (`i`, `j`, `n`) | cells shaded by value; values printed when zoomed in    | Rule 30, Game of Life, Pascal mod m, Cayley tables, gcd, stacks |
 | **graph**   | none: positions come from a layout                            | vertices, arrows with labels and counts, marked vertices | Cayley graphs, state machines, matrices as arrows, Collatz |
 
 Both are split-view panels (`---`, lib/panels.ts), so a lattice or a graph
@@ -185,15 +185,86 @@ where the tuple does: drawn, the terms past it are missing; asked for by
 number (`q_5`), it is an error saying the index is out of range.
 
 One snag: `w` is the complex variable, so `w = (1, 1, 0, 1)` is not a tuple;
-name the input word anything else.
+name the input word anything else. (A word of 2 or 3 symbols is a point,
+which now indexes at n too.)
 
-### Pushdown automata (sketch)
+Two recurrences may read each other at n, `q_{n+1} = q_n + r_n` beside
+`r_{n+1} = r_n + q_n + 1`: each builds the other's chain term by term as its
+own grows, so neither needs the other's whole run first. And since terms are
+at whole n, a case in a sequence row may test equality, as in lattice rows.
 
-A PDA is a state machine plus a stack. The stack is a tuple, so it needs
-tuple-valued recurrences (`s_{n+1} = push(s_n, a)`): recurrences read
-tuples now, but their terms are still numbers. Drawn as a graph panel (the control, with `mark` on the state) beside a
-lattice panel of the stack over time — `S[n, h]`, the symbol at height h after
-n steps, which is a table, so the drawing is free once tuple recurrences exist.
+### Tuple-valued recurrences (built)
+
+```
+s_0 = ()                                  # the empty tuple (also the default)
+s_{n+1} = push(s_n, n^2)                  # (), (0), (0, 1), (0, 1, 4), …
+```
+
+A recurrence is **tuple-valued** when it starts from the empty tuple
+(`s_0 = ()`), or when its step, or a function it calls, uses `push` or `pop`
+or has a tuple as its value (`p_{n+1} = (…, …)`, or arithmetic on one). Its
+seed may then be any tuple (`s_0 = (1, 2, 3, 4)`, a point). A tuple seed
+alone is not enough: `a_0 = (0.1, 0.2); a_{n+1} = 3 a_n (1 - a_n)` steps
+each element, a cobweb per element, as it did before. Three builtins treat a tuple as a stack: `push(s, a, …)`
+appends, `pop(s)` drops the last element, `top(s)` reads it; `count(s)` is
+the length and `s[h]` element h, as for any tuple.
+
+- **Terms are numbers.** Each term is computed once, from the seed, as a
+  tuple of numbers (lib/seq.ts tupleTerm); a slider recomputes the run, as it
+  recompiles any document with sequences. So the step cannot read t.
+- **Only the case that holds runs.** The step resolves at each n as a
+  stepped recurrence's does (n a number, `s_n` the term before as numbers),
+  and then runs (runTuple): a case's condition is decided first, and only
+  its value is computed. So cases may be tuples of different lengths, and a
+  case that pops the empty tuple is harmless until it holds. Elsewhere a
+  piecewise point needs one dimension in every case.
+- **A run stops** where it pops, or reads the top of, the empty tuple, or
+  at a step whose cases all fail (a machine with no move) — the way a run
+  off the end of its input word does. Drawn, the terms past it are missing;
+  read by number, the row says why.
+- **Drawn** as a lattice: row n holds term n, position h (from 1) across, so
+  a stack grows to the right and time runs down, in a lattice panel of its
+  own (axes `h → n ↓`). A run that starts from a point and stays one is an
+  orbit instead, and draws its points: the Hénon map is
+  `p_0 = (0, 0); p_{n+1} = (1 - 1.4 p_n[1]^2 + p_n[2], 0.3 p_n[1])`.
+- **Read** by number or slider anywhere — `s_3`, `count(s_3)`, `top(s_k)`,
+  `s_3[2]` — and at n in another recurrence's step, which then runs the same
+  way (only the case that holds). An explicit sequence over n,
+  `d_n = count(s_n)`, cannot read one: it has no expression in n, and the
+  row says to read it in a recurrence's step instead.
+
+The doc's sketch had the stack drawn by a table, `S[n, h] = s_n[h]`. The
+row draws itself instead: a table's cells are computed by the compiled VM
+from an expression in its indices, which a run of tuples is not.
+
+### Pushdown automata (built)
+
+A PDA is a state machine plus a stack: two recurrences over the input word,
+the state and the stack, each free to read the other at n.
+
+```
+# aⁿbⁿ: a = 1 pushes, b = 2 pops; state 0 reads a's, 1 reads b's, 2 rejects
+Q = [0..2]; S = [1, 2]
+step(q, a) = {q = 0: {a = 1: 0, 1}, q = 1: {a = 2: 1, 2}, 2}
+graph(Q, step(Q, S), S)                    # the control
+D = (1, 1, 1, 2, 2, 2)                     # aaabbb
+q_0 = 0
+N = floor(clamp(0, 0, 6))
+mark(q_N)                                  # the state after N symbols
+--- right
+s_0 = ()
+s_{n+1} = {D[n + 1] = 1: push(s_n, 1), pop(s_n)}   # the stack, row n
+--- below
+q_{n+1} = step(q_n, D[n + 1])              # the run's states, as dots
+```
+
+The stack grows to three cells and empties at the last b: accepted. An extra
+b pops the empty stack, so the run stops there: rejected. A stack symbol
+that decides the move is read with `top(s_n)`; the brackets example matches
+each closing bracket against it, `{D[n + 1] <= 2: push(s_n, D[n + 1]),
+top(s_n) = D[n + 1] - 2: pop(s_n)}`, and stops at a mismatch, where no case
+holds. A state that reads the stack, `q_{n+1} = step(q_n, D[n + 1],
+top(s_n))`, steps together with the stack that reads the state.
 
 ## 5. Matrices as multisets (built as graphs; readout a sketch)
 
@@ -242,7 +313,18 @@ inverse, so both readings sit side by side.
 - **An explicit term at a tuple position.** `a_n = T[n]` with a tuple T is
   refused as a row (it draws over an open n, which a tuple cannot be indexed
   at), though `a_3` reads T[3]. The recurrence form computes term by term
-  and does not have the problem.
+  and does not have the problem. The same holds for an explicit term reading
+  a tuple-valued recurrence, `d_n = count(s_n)`.
+- **A short input word.** `D = (1, 0, 1)` is a point, and `D[n + 1]` in a
+  recurrence's step said D was not a list: the step is list-lowered before
+  geometry writes a named point out as its coordinates. List lowering now
+  reads a named point's coordinates itself (lib/list.ts lowerIndex).
+- **Recurrences reading each other** failed: building one's chain to the end
+  built the other's, which needed the first. Read from another recurrence's
+  step, a recurrence is now read term by term as its chain grows.
+- **Equality in sequence rows.** `{q_n = 0: …}` in a recurrence's step was
+  refused as a filter's condition; sequence rows now test equality as lattice
+  rows do (exactCases).
 
 ## Order of work
 
@@ -250,5 +332,7 @@ inverse, so both readings sit side by side.
 2. `graph(…)` rows, graph panels, `mark(…)` — built.
 3. Recurrences that read n and tuples (state machine runs as sequences) — built.
 4. `matrix(P)` from a multiset of pairs, and pairs from a matrix.
-5. Tuple-valued recurrences, then PDAs.
+5. Tuple-valued recurrences, then PDAs — built.
 6. A growing 2D board; draggable graph vertices; graphs in the /g/ preview.
+7. Marking the stack's row n beside `mark(q_N)`; an explicit sequence over a
+   tuple-valued recurrence (`d_n = count(s_n)`), computed term by term.

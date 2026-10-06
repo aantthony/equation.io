@@ -747,14 +747,36 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   n, or a tuple at a position in n draws its terms as dots instead:
   `a_{n+1} = (n + 1) a_n` (factorials), `q_{n+1} = step(q_n, D[n + 1])`
   with `D = (1, 1, 0, 1)` (a state machine's run over the digits of D). Its
-  terms stop where the tuple does. A sequence's index may also go in
-  braces or parens, as its recurrence row is written: `b_{n+1}`, `a_(n-1)`,
+  terms stop where the tuple does. Two recurrences may read each other at n
+  (`q_{n+1} = q_n + r_n` beside `r_{n+1} = r_n + q_n`), and a case in a
+  sequence row may test equality (`{mod(n, 2) = 0: 1, 0}`). A sequence's
+  index may also go in braces or parens, as its recurrence row is written: `b_{n+1}`, `a_(n-1)`,
   and the rows `a_{n} = 1/n` and `a_{0} = 1`. Each letter is one sequence: beside
   `a_n = 1/n`, `a_k = 7` is a constant named a_k. Indices
   must be whole numbers from 0 to 1000. Recurrences use their `a_0` seed
   (default 0.5); terms compute as a bounded chain of scalar constants, so
   sliders and t remain live. A recurrence using x as a bifurcation parameter
   cannot also supply constant terms without binding that parameter.
+- Tuple-valued recurrences: a recurrence whose step calls `push(s, a)` (s
+  with a appended) or `pop(s)` (s without its last element), or whose value
+  is a tuple, has tuples as terms — a stack. `top(s)` reads the last
+  element. `s_0 = ()` starts it from the empty tuple (the default), and any
+  tuple may be its seed; a tuple seed with a step that makes no tuple
+  (`a_0 = (0.1, 0.2); a_{n+1} = 3 a_n (1 - a_n)`) steps each element instead.
+  `count(s_n)` is its length and `s_n[h]` its h-th element; a number with a
+  tuple applies to each element (`1 + p_n`, `s_n/2`). Only the case that holds is run,
+  so cases may differ in length: with `D = (1, 1, 2, 2)`,
+  `s_{n+1} = {D[n + 1] = 1: push(s_n, 1), pop(s_n)}`. The run stops where
+  it pops or reads the top of the empty tuple, or where no case holds (a
+  machine with no move). The row draws its terms as rows of a lattice: row
+  n, position h. A pushdown automaton is a state recurrence and a stack
+  recurrence reading each other: `q_{n+1} = step(q_n, D[n + 1], top(s_n))`.
+  One that starts from a point (`p_0 = (0, 0)`,
+  `p_{n+1} = (1 - 1.4 p_n[1]^2 + p_n[2], 0.3 p_n[1])`, the Hénon map) and
+  stays one draws its orbit as points. Other rows read its terms at a number
+  or a slider (`s_3`, `top(s_k)`); an explicit sequence `d_n = count(s_n)`
+  cannot (read it in a recurrence's step instead). Its terms are computed
+  once, so its step cannot read t.
 - Cellular automaton (1D): `c_{n+1}[i] = …` is a rule for a row of cells,
   reading the previous row at fixed offsets — `c_n[i-1]`, `c_n[i]`,
   `c_n[i+2]` — plus n, t and constants (not i itself). `c_0[i] = …` is the
@@ -805,7 +827,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   with a slider or t it walks, e.g. a state machine's run as a recurrence
   over a tuple of input symbols: `D = (1, 1, 0, 1); q_0 = 0;
   q_{n+1} = step(q_n, D[n + 1]); mark(q_N)`.
-- Lattice panels: a panel whose rows are all automata and tables (or whose
+- Lattice panels: a panel whose rows are all automata, tables and stacks (or whose
   view row names index axes) is a lattice. Its grid runs between cells, its
   edges are numbered by index (whole numbers only), and zoomed in far enough
   each cell prints its value. `view(i = -60..60, n = 0..80)` frames one by

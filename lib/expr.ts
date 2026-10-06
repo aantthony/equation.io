@@ -251,6 +251,10 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'sort',
     'fourier',
     'reconstruct',
+    // A stack is a tuple, whole: push((1, 2), 3) is (1, 2, 3).
+    'push',
+    'pop',
+    'top',
   ]);
   return grouped.has(name) ? args : args.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
 }
@@ -308,6 +312,11 @@ export const FUNCTIONS = new Set([
   'median',
   'sort',
   'hist',
+  // A tuple as a stack: push(s, a) appends, pop(s) drops the last, top(s)
+  // reads it (a tuple-valued recurrence's step, lib/seq.ts).
+  'push',
+  'pop',
+  'top',
   // A continuous interval, resolved into a hidden parameter (lib/interval.ts).
   'interval',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
@@ -453,6 +462,9 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'project',
   'reflect',
   'motor',
+  'push',
+  'pop',
+  'top',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
@@ -513,6 +525,10 @@ let activeValueNames: ReadonlySet<string> = new Set();
  */
 const indexes = (name: string): boolean => {
   if (activeListNames.has(name)) return true;
+  // A sequence's term indexes too, s_n[2], s_3[1]: a tuple-valued
+  // recurrence's terms are tuples (lib/seq.ts).
+  const sub = name.indexOf('_');
+  if (sub > 0 && sub < name.length - 1 && activeListNames.has(name.slice(0, sub + 1))) return true;
   const dot = name.indexOf('.');
   return dot > 0 && activeListNames.has(name.slice(0, dot));
 };

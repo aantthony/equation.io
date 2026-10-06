@@ -648,7 +648,7 @@ export function runBoard(a: Pick<Automaton, 'rule' | 'radius' | 'seed'>, env: Re
  * on it.
  */
 export function latticeFrame(
-  cpu: { type: 'automaton'; dims: 1 | 2 } | ({ type: 'lattice' } & Pick<LatticeTable, 'expr'>) | undefined,
+  cpu: { type: 'automaton'; dims: 1 | 2 } | ({ type: 'lattice' } & Pick<LatticeTable, 'expr' | 'rows'>) | undefined,
   env: Record<string, number>,
   w: number,
   h: number,
@@ -694,13 +694,23 @@ export const TABLE_MAX = 512;
  * undefined values (a piecewise with no case) are NaN.
  */
 export function evalTable(
-  t: Pick<LatticeTable, 'expr'>,
+  t: Pick<LatticeTable, 'expr' | 'rows'>,
   env: Record<string, number>,
   i0: number,
   j0: number,
   width: number,
   rows: number,
 ): CellGrid {
+  if (t.rows) {
+    // Computed already: row k's position h is rows[k][h - 1].
+    const values = new Float32Array(width * rows).fill(NaN);
+    for (let y = 0; y < rows; y++) {
+      const row = t.rows[j0 + y];
+      if (!row) continue;
+      for (let x = Math.max(0, 1 - i0); x < width && i0 + x <= row.length; x++) values[y * width + x] = row[i0 + x - 1];
+    }
+    return { values, width, rows, x0: i0, y0: j0 };
+  }
   const { slots, vars } = slotsFor([t.expr], env);
   const prog = compileProg(t.expr, slots);
   const stack = new Float64Array(Math.max(prog.depth, 1));
