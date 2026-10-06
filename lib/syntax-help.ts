@@ -121,8 +121,8 @@ const signatures: Record<string, [string, string]> = {
   ],
   hull: ['hull(A, B, C, …) or hull(P)', 'Convex hull of points or a point list: a filled polygon in 2D, a solid in 3D'],
   rotate: [
-    'rotate(P, angle), rotate(P, angle, center) or rotate(P, angle, axis)',
-    'Turn a point: about the origin or a center in 2D, about an axis in 3D',
+    'rotate(P, angle), rotate(P, angle, center), rotate(P, angle, axis) or rotate(X, M)',
+    'Turn a point: about the origin or a center in 2D, about an axis in 3D; or move X by the motor M',
   ],
   det: ['det(M)', 'Matrix determinant'],
   trace: ['trace(M)', 'Matrix trace'],
@@ -151,7 +151,14 @@ const signatures: Record<string, [string, string]> = {
   dual: ['dual(A)', 'The dual A I⁻¹: dual(e_xy) is e_z'],
   vec: ['vec(q)', 'A quaternion’s vector part (x, y, z), as a point'],
   quat: ['quat(w, x, y, z)', 'The quaternion w + x i + y j + z k; quat(cos(a/2), sin(a/2) n) turns by a about n'],
-  slerp: ['slerp(q1, q2, s)', 'Turn from rotation q1 to q2 at constant speed, s from 0 to 1'],
+  slerp: [
+    'slerp(q1, q2, s)',
+    'Turn from rotation q1 to q2 at constant speed, s from 0 to 1 — or move from motor M1 to M2 along their screw',
+  ],
+  motor: [
+    'motor(L, angle, slide) or motor(P, angle)',
+    'A rigid motion: turn about the line L and slide along it (a screw), or turn the plane about P; rotate(X, M) applies it',
+  ],
   sum: ['sum(n=1..N, expression)', 'Finite sum'],
   prod: ['prod(n=1..N, expression)', 'Finite product'],
   int: ['int[a..b] f(x) dx', 'Definite integral; bounds may be omitted. Alone on a row it shades its signed area'],

@@ -10,6 +10,12 @@ import {
   hyperplane,
   idealPointPga,
   lineDirection,
+  logMotor,
+  motorAxis,
+  motorOf,
+  motorPga,
+  moveFlat,
+  movePoint,
   outerPga,
   pointCoords,
   pointPga,
@@ -20,7 +26,9 @@ import {
   regressivePga,
   sandwich,
   scalePga,
+  slerpMotor,
   uncomplement,
+  unitMotor,
   weight,
 } from './pga.ts';
 
@@ -199,5 +207,55 @@ describe('motors', () => {
       expect(Math.hypot(c[0], c[1])).toBeCloseTo(1, 12);
       expect(Math.abs(Math.atan2(c[1], c[0]))).toBeCloseTo(2 * a, 12);
     }
+  });
+});
+
+describe('motor(L, θ, d) and what it moves', () => {
+  const axis = regressivePga(pt(1, 2, 0), pt(1, 2, 1)); // the vertical line through (1, 2), pointing up
+  const v = (name: string): Expr => ({ kind: 'var', name });
+  const env = { th: 0.9, d: 1.7, px: 0.3, py: -1.2, pz: 2.5 };
+  it('turns right-handed about the axis and slides along it', () => {
+    const m = motorPga(axis, n(Math.PI / 2), n(3));
+    // (2, 2, 0) is 1 along x from the axis: a quarter turn up z takes it to (1, 3), then up 3.
+    close(
+      movePoint(m, [n(2), n(2), n(0)]).map(c => val(c)),
+      [1, 3, 3],
+    );
+    close(
+      movePoint(motorPga(pt(1, 1), n(Math.PI / 2)), [n(2), n(1)]).map(c => val(c)),
+      [1, 2],
+    );
+  });
+  it('moves a point and a line as the whole sandwich does, from its two factors', () => {
+    const m = motorPga(axis, v('th'), v('d'));
+    const whole = motorOf(m);
+    const p = [v('px'), v('py'), v('pz')];
+    close(
+      movePoint(m, p).map(c => val(c, env)),
+      pointCoords(sandwich(whole, pointPga(p))).map(c => val(c, env)),
+    );
+    const line = regressivePga(pt(0, 1, 2), pt(3, -1, 1));
+    const a = nums(moveFlat(m, line), env);
+    const b = nums(sandwich(whole, line), env);
+    const scale = b.find(x => Math.abs(x) > 1e-9)! / a.find(x => Math.abs(x) > 1e-9)!;
+    close(
+      a.map(x => x * scale),
+      b,
+    );
+  });
+  it('has a log that exp undoes, and an axis that is the line it screws about', () => {
+    const m = unitMotor(motorOf(motorPga(axis, n(2.2), n(-0.8))));
+    close(nums(expPga(logMotor(m))), nums(m));
+    const found = motorAxis(motorPga(axis, n(2.2), n(-0.8)));
+    expect(isNull(regressivePga(found, pt(1, 2, 7)))).toBe(true);
+    expect(isNull(regressivePga(found, pt(2, 2, 0)))).toBe(false);
+  });
+  it('slerps along the screw: halfway is half the turn and half the slide', () => {
+    const still = motorPga(axis, n(0), n(0));
+    const half = slerpMotor(still, motorPga(axis, n(1.4), n(2)), n(0.5));
+    close(
+      movePoint(half, [n(2), n(2), n(0)]).map(c => val(c)),
+      movePoint(motorPga(axis, n(0.7), n(1)), [n(2), n(2), n(0)]).map(c => val(c)),
+    );
   });
 });

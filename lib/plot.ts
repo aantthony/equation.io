@@ -38,7 +38,7 @@ import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep 
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
 import { nestedText, tensorOfNode } from './tensor.ts';
 import { type Multivector, mvOfNode, mvText } from './clifford.ts';
-import { flatFigure, flatOfNode, flatText, hyperplaneParts } from './pga.ts';
+import { flatFigure, flatOfNode, flatText, hyperplaneParts, motorOf } from './pga.ts';
 import { actionGlyphs, actionOfNode, multivectorGlyphs } from './glyphs.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import { SPLIT_NODE_BUDGET, complexParts, splitTooLarge } from './complex-parts.ts';
@@ -900,7 +900,8 @@ function classifyLowered(
       throw new Error('A multiset mixes points, lines or planes — give each kind a row of its own.');
     const readout = done({
       kind: 'tuple',
-      values: flats.flatMap(f => f.data),
+      // A motor reads out as one element of the algebra, its slide in it.
+      values: flats.flatMap(f => motorOf(f).data),
       flat: { dim, grade },
       ...(expr.kind === 'list' && { count: flats.length }),
     });
