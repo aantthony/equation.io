@@ -21,6 +21,7 @@ import {
   scanDefinition,
   takenBinder,
   takenDefinitionName,
+  takenNameHint,
   timeDifferentiator,
   type Definition,
   type TableSource,
@@ -967,9 +968,14 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       const hint = curveHint(row.cls.object, row.text);
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
-      const taken = row.cls.object.kind === 'note' ? takenDefinitionName(row.text) : null;
-      if (taken && row.cls.object.kind === 'note')
-        row.cls = { ...row.cls, object: { ...row.cls.object, constant: taken } };
+      // `i = [0..9]` is a family of such claims, one per member.
+      const taken = takenDefinitionName(row.text);
+      const object = row.cls.object;
+      if (taken && object.kind === 'note') row.cls = { ...row.cls, object: { ...object, constant: taken } };
+      else if (taken && object.kind === 'family' && object.members.every(m => m.object.kind === 'note')) {
+        const members = object.members.map(m => ({ ...m, object: { ...m.object, constant: taken } as MathObject }));
+        row.cls = { ...row.cls, object: { ...object, members } };
+      }
     } catch (e) {
       // A row reading a dropped CSV is not broken here — the bytes simply
       // live on the device that made the graph, and never travelled in the
@@ -977,7 +983,13 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (e instanceof MissingDataError) {
         row.dataLocal = e.message;
         row.needsFile = true;
-      } else row.error = e instanceof Error ? e.message : String(e);
+      } else {
+        row.error = e instanceof Error ? e.message : String(e);
+        // `i = [0..239]` fails as a claim about i (too many members); the
+        // author meant a definition, so say why it is not one.
+        const taken = takenDefinitionName(row.text);
+        if (taken && taken !== 'd') row.error = `${row.error.replace(/\.$/, '')} — ${takenNameHint(taken)}.`;
+      }
     }
   }
 

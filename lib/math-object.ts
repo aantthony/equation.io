@@ -208,7 +208,7 @@ export type MathObject =
        *  out as `1 + 2 e_xy` (or in i, j, k) rather than as a tuple. */
       readonly blades?: { readonly dim: 2 | 3; readonly quat?: true };
     }
-  // `constant`: the row reads like a slider named e, pi or tau (see
+  // `constant`: the row reads like a slider named e, pi, tau or i (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
   | {

@@ -1385,6 +1385,9 @@ panel under the pointer.
   — with `a` as a draggable slider so the point of tangency stays explorable.
 - Prefer a slider constant (`a = 1; ...`) when the user may want to explore a
   parameter, and `t` when they ask for animation.
+- Don't name a slider, list or index `i`, `e`, `pi`, `tau` or `d`: they are
+  taken (`i` is the imaginary unit), so `i = [0..9]` is a claim about i, not
+  a definition, and every later `i` stays complex. Use `k = [0..9]`.
 - The graph state lives entirely in the link, and the link is the interface.
   The only server endpoints are /mcp (an MCP server that validates equations
   and emits links) and /api/og (link-preview images).
