@@ -118,11 +118,6 @@ function num(src: string, env: Record<string, number>, what: string): number {
   return numExpr(parsed, env, what);
 }
 
-/**
- * Parse a viewport row. Returns null when the text is not one (so ordinary
- * rows fall through to the expression parser); throws a row-friendly error
- * when it is one but malformed. `env` supplies constant values (t = 0).
- */
 /** A view row with a plane map: its window is the screen's, X and Y. */
 function planeView(spec: View2DSpec, maps: AxisMaps, ranges: Array<[string, [number, number]]>): View2DSpec {
   if (maps.x || maps.y)
@@ -144,6 +139,11 @@ function planeView(spec: View2DSpec, maps: AxisMaps, ranges: Array<[string, [num
   return { ...spec, maps: { plane: maps.plane } };
 }
 
+/**
+ * Parse a viewport row. Returns null when the text is not one (so ordinary
+ * rows fall through to the expression parser); throws a row-friendly error
+ * when it is one but malformed. `env` supplies constant values (t = 0).
+ */
 export function parseViewRow(text: string, env: Record<string, number>): ViewSpec | null {
   const split = parseDividerRow(text);
   if (split) return split;

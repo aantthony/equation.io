@@ -1695,11 +1695,12 @@ function render() {
       // A system whose solutions are placed on a mapped panel (a complex one,
       // in w) solves in x and y: over the part of the window the maps show.
       const maps = panelMaps(panels[panelOf(eq)]);
-      if (maps?.plane && axisMapping(cls.object, maps) === 'place') {
+      const placed = !!maps && axisMapping(cls.object, maps) === 'place';
+      if (placed && maps.plane) {
         const world = planeWorldBox(maps.plane, { lo: [vlo[0], vlo[1]], hi: [vhi[0], vhi[1]] });
         if (!world) return [];
         [vlo, vhi] = [[...world.lo], [...world.hi]];
-      } else if (maps && axisMapping(cls.object) === 'place')
+      } else if (placed)
         for (const [k, map] of [maps.x, maps.y].entries()) {
           if (!map) continue;
           const shown = shownRange(map, vlo[k], vhi[k]);

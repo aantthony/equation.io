@@ -71,21 +71,6 @@ describe('a plane map', () => {
     expect(inverse.first(100, 100).every(Number.isNaN)).toBe(true);
   });
 
-  it('follows a line on the copy it started on, and cuts it just past the edge', () => {
-    const inverse = planeInverse(polar(), box);
-    const follow = inverse.follower();
-    // Round the circle r = 2 from angle 3: across the seam at π, and back.
-    const angles = [3, 3.1, 3.4, 3.5];
-    const out = angles.map(a => follow(2 * Math.cos(a), 2 * Math.sin(a)));
-    expect(out[0][0]).toBeCloseTo(3, 6);
-    expect(out[1][0]).toBeCloseTo(3.1, 6);
-    // 3.4 is past the window's edge (π) by more than the follow margin, 2%
-    // of the window (0.126): cut.
-    expect(out[2].every(Number.isNaN)).toBe(true);
-    // Then it starts afresh where the screen shows it, at the other edge.
-    expect(out[3][0]).toBeCloseTo(3.5 - 2 * Math.PI, 6);
-  });
-
   it('carries a line across the seam without a gap, and an exit only once', () => {
     const inverse = planeInverse(polar(), box);
     // The circle r = 2 from angle 2.5 to 4.1, across the seam at π.
@@ -185,6 +170,24 @@ describe('a plane map', () => {
       [-1, 1],
     ]);
     expect(square.map(s => s.closed)).toEqual([false]);
+  });
+
+  it('draws what crosses the screen between ends far off it', () => {
+    const inverse = planeInverse(polar(), box);
+    // A chord from (-10, 0.5) to (10, 0.5): over the screen near angle π/2.
+    const chord = inverse.line(2, k => (k ? [10, 0.5] : [-10, 0.5]) as [number, number], false);
+    const shown = [];
+    for (let i = 0; i + 1 < chord.length; i += 2) if (inverse.inside(chord[i], chord[i + 1])) shown.push(chord[i]);
+    expect(shown.length).toBeGreaterThan(2);
+    // A square far round the screen: the screen is inside it, filled.
+    const square = [
+      [-10, -10],
+      [10, -10],
+      [10, 10],
+      [-10, 10],
+    ];
+    const fill = planeShapes(inverse, 4, k => square[k] as [number, number]);
+    expect(fill.map(s => s.closed)).toEqual([true]);
   });
 
   it('takes a map defined only away from the origin', () => {

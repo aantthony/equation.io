@@ -207,6 +207,8 @@ export const FOLLOW_MARGIN = 0.02;
 const SEEDS = 24;
 /** How many of the nearest seeds a fresh search starts from. */
 const STARTS = 8;
+/** Points tried along a long run between ends off the screen. */
+const PROBES = 32;
 /** A region's triangles search for copies of the plane at one in this many
  *  (PlaneInverse.triangles); the rest try the copies found. */
 const SEARCH_EVERY = 16;
@@ -229,7 +231,7 @@ export class PlaneInverse {
   private readonly worldScale: number;
   private readonly screenScale: number;
   private readonly center: [number, number];
-  private readonly box: ScreenBox;
+  readonly box: ScreenBox;
 
   constructor(map: PlaneMap, box: ScreenBox) {
     this.c = compiled(map);
@@ -332,6 +334,40 @@ export class PlaneInverse {
   private readonly v = new Float64Array(2);
   private readonly J = new Float64Array(4);
 
+  /**
+   * A polyline with a point added where a long run crosses the screen
+   * between ends the screen does not show (a chord across the window, its
+   * ends far off): carried as it is, that run would be a gap.
+   */
+  through(
+    count: number,
+    vertex: (k: number) => [number, number],
+    closed: boolean,
+  ): [number, (k: number) => [number, number]] {
+    const long = 0.1 * this.worldScale;
+    const off = (p: [number, number]) => !isFinite(this.first(...p)[0]);
+    let out: Array<[number, number]> | null = null;
+    for (let k = 0; k < (closed ? count : count - 1); k++) {
+      const [a, b] = [vertex(k), vertex((k + 1) % count)];
+      const added: Array<[number, number]> = [];
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > long && off(a) && off(b))
+        for (let i = 1; i < PROBES; i++) {
+          const p: [number, number] = [a[0] + ((b[0] - a[0]) * i) / PROBES, a[1] + ((b[1] - a[1]) * i) / PROBES];
+          if (!off(p)) added.push(p);
+        }
+      if (added.length && !out) out = Array.from({ length: k + 1 }, (_, i) => vertex(i));
+      if (out) out.push(...added, ...(k + 1 < count ? [b] : []));
+    }
+    if (!out) return [count, vertex];
+    const pts = out;
+    return [pts.length, k => pts[k]];
+  }
+
+  /** The world point at screen point (X, Y). */
+  world(X: number, Y: number): [number, number] {
+    return this.c.f(X, Y);
+  }
+
   /** Whether the map folds at screen point (X, Y), showing one point of the
    *  plane all along a line there (the polar origin, along Y = 0). */
   folds(X: number, Y: number): boolean {
@@ -360,8 +396,10 @@ export class PlaneInverse {
     for (let k = 0; k < this.count; k++) {
       const dist = (this.seeds[4 * k + 2] - x) ** 2 + (this.seeds[4 * k + 3] - y) ** 2;
       if (near.length < STARTS || dist < near[near.length - 1][1]) {
-        near.push([k, dist]);
-        near.sort((p, q) => p[1] - q[1]);
+        // Kept in order: inserted where it belongs, the furthest dropped.
+        let at = near.length;
+        while (at > 0 && near[at - 1][1] > dist) at--;
+        near.splice(at, 0, [k, dist]);
         if (near.length > STARTS) near.pop();
       }
     }
@@ -386,22 +424,6 @@ export class PlaneInverse {
       if (score < bestScore) [best, bestScore] = [s, score];
     }
     return best;
-  }
-
-  /**
-   * A carrier for a line: each point is followed on from the last one
-   * carried, so the line stays on the copy it started on, and is cut (NaN)
-   * just past the window's edge. After a cut it starts afresh, on the copy
-   * in the window if there is one: where a line crossing the seam of an
-   * angle comes back.
-   */
-  follower(): (x: number, y: number) => [number, number] {
-    let last: [number, number] | null = null;
-    return (x, y) => {
-      const s = last ? this.solve(x, y, last) : this.first(x, y);
-      last = s && isFinite(s[0]) && this.inside(s[0], s[1], FOLLOW_MARGIN) ? s : null;
-      return s ?? [NaN, NaN];
-    };
   }
 
   /**
@@ -543,6 +565,7 @@ export class PlaneInverse {
     segment?: Segment,
     start?: readonly [number, number],
   ): number[] {
+    [count, vertex] = this.through(count, vertex, closed);
     const shown = (p?: readonly [number, number] | null): p is [number, number] =>
       !!p && isFinite(p[0]) && isFinite(p[1]);
     const carry = (x: number, y: number, hint?: readonly [number, number]): [number, number] =>
@@ -619,11 +642,14 @@ export function planeShapes(
   segment?: Segment,
 ): Array<{ pts: number[]; closed: boolean }> {
   const out: Array<{ pts: number[]; closed: boolean }> = [];
+  // Edges crossing the screen between far-off vertices have a point there.
+  [count, vertex] = inverse.through(count, vertex, true);
   // From a vertex the screen shows at points apart, not along a whole line
   // (the polar origin): the shape's outline is the same from any vertex.
   let from = 0;
   while (from < count - 1 && inverse.folds(...inverse.first(...vertex(from)))) from++;
   const turned = (k: number) => vertex((k + from) % count);
+  let open = false;
   for (const start of inverse.all(...turned(0))) {
     const pts = inverse.line(count, turned, true, 1, segment, start);
     let shows = false;
@@ -633,16 +659,37 @@ export function planeShapes(
     // outline does not come back to where it started: it is open on the
     // screen, a curve with nothing inside it to fill.
     const back = inverse.solve(...turned(0), [pts[pts.length - 2], pts[pts.length - 1]], 1);
-    const closes =
-      !!back &&
-      Math.abs(back[0] - start[0]) + Math.abs(back[1] - start[1]) <
-        1e-6 * (1 + Math.abs(start[0]) + Math.abs(start[1]));
-    // Drawn as a line instead, cut at the edges and picked up where it comes
-    // back, once.
-    if (!closes) return [{ pts: inverse.line(count, turned, true, FOLLOW_MARGIN, segment), closed: false }];
-    out.push({ pts, closed: true });
+    if (
+      back &&
+      Math.abs(back[0] - start[0]) + Math.abs(back[1] - start[1]) < 1e-6 * (1 + Math.abs(start[0]) + Math.abs(start[1]))
+    )
+      out.push({ pts, closed: true });
+    else open = true;
+  }
+  // Drawn as a line instead, cut at the edges and picked up where it comes
+  // back, once.
+  if (open) out.push({ pts: inverse.line(count, turned, true, FOLLOW_MARGIN, segment), closed: false });
+  // Nothing of it on the screen, but the screen inside it: filled edge to
+  // edge, its outline (just past them) out of sight.
+  if (!out.length && contains(count, vertex, inverse.world(...centre(inverse.box)))) {
+    const { lo, hi } = inverse.box;
+    const [mx, my] = [0.01 * (hi[0] - lo[0]), 0.01 * (hi[1] - lo[1])];
+    const [x0, y0, x1, y1] = [lo[0] - mx, lo[1] - my, hi[0] + mx, hi[1] + my];
+    out.push({ pts: [x0, y0, x1, y0, x1, y1, x0, y1], closed: true });
   }
   return out;
+}
+
+const centre = ({ lo, hi }: ScreenBox): [number, number] => [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2];
+
+/** Whether polygon `vertex` contains point p (even–odd). */
+function contains(count: number, vertex: (k: number) => [number, number], [x, y]: [number, number]): boolean {
+  let inside = false;
+  for (let i = 0, j = count - 1; i < count; j = i++) {
+    const [a, b] = [vertex(i), vertex(j)];
+    if (a[1] > y !== b[1] > y && x < ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]) + a[0]) inside = !inside;
+  }
+  return inside;
 }
 
 const inverses = new WeakMap<PlaneMap, { key: string; inverse: PlaneInverse }>();
