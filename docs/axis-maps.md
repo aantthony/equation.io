@@ -1,6 +1,6 @@
 # Axis maps: log scales and beyond (#71)
 
-Status: **steps 1–3 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
+Status: **steps 1–4 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
 
 ## The idea
 
@@ -48,11 +48,19 @@ symlog (`y = sinh(Y)`) all come from one feature.
    (worker/og.ts) carries placed rows and draws the ticks' grid the same
    way. Still not drawn on mapped axes: vector and tensor fields (their
    arrows need the map's Jacobian), histograms (bars stand on y = 0),
-   systems (the solver searches the window as if it were x and y), 3D and
-   integral shading.
-   Hovering shows no roots or intercepts in a mapped panel: they are found
-   on the rewritten row, in screen coordinates, so would be the wrong ones.
-4. **Sliders in maps** (`x = b^X`): the write-back reparses the row without
+   complex systems, 3D and integral shading.
+4. **Done.** Hover and systems. A real system is rewritten like a curve, so
+   its solver searches the window in screen coordinates (evenly, as a log
+   axis needs) and its solutions land there; a mapped panel offers no
+   certificate, which would prove roots in screen coordinates, and its
+   solutions are not dragged. Hover points are found on the rewritten row,
+   on the screen and so evenly on a log axis (lib/special.ts
+   mappedSpecialPoints): an increasing map keeps extrema extrema, and
+   inflections are where the drawn curve bends; the tooltip reads x and y.
+   Intercepts stay only where the screen's axis is x = 0 or y = 0, and exact
+   forms (√2) give way to decimals. The curve tracer projects on the screen
+   and reads off x and y, rounded to the pixel there.
+5. **Sliders in maps** (`x = b^X`): the write-back reparses the row without
    constants today, so maps take numbers only.
 
 ## Later: equations on a surface

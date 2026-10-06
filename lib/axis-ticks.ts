@@ -13,7 +13,7 @@
  * The walk starts from the nicest number in view and goes both ways, so
  * while panning (same zoom) the ticks stay put until that number leaves.
  */
-import { type AxisMap, toScreen, toWorld } from './axis-map.ts';
+import { type AxisMap, shownRange, toScreen, toWorld } from './axis-map.ts';
 
 export interface AxisTicks {
   /** Screen coordinates of the labelled lines, with their world values. */
@@ -103,11 +103,9 @@ export function axisTicks(map: AxisMap, lo: number, hi: number, pxPerUnit: numbe
   };
   const empty: AxisTicks = { major: [], minor: [], zero: null };
   // The window may reach past the map (ln(X) left of 0): tick what it can show.
-  let [a, b] = [lo, hi];
-  const n = 64;
-  for (let k = 0; k <= n && !isFinite(world(a)); k++) a = lo + ((hi - lo) * k) / n;
-  for (let k = 0; k <= n && !isFinite(world(b)); k++) b = hi - ((hi - lo) * k) / n;
-  if (!(a < b)) return empty;
+  const shown = shownRange(map, lo, hi);
+  if (!shown) return empty;
+  const [a, b] = shown.screen;
   const anchorValue = nicestIn(world(a), world(b));
   if (anchorValue === null) return empty;
   const anchor = screen(anchorValue);

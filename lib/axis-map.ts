@@ -174,6 +174,23 @@ export function inlineFields(e: Expr, fields: Record<string, Expr>): Expr {
   throw new Error('The coordinate fields this row uses refer to each other in a loop.');
 }
 
+/**
+ * The part of screen window [lo, hi] the map can show, as world values
+ * (ln(X) shows nothing left of X = 0), or null when it shows none of it.
+ */
+export function shownRange(
+  map: AxisMap,
+  lo: number,
+  hi: number,
+): { screen: [number, number]; world: [number, number] } | null {
+  const n = 64;
+  let [a, b] = [lo, hi];
+  for (let k = 0; k <= n && !isFinite(toWorld(map, a)); k++) a = lo + ((hi - lo) * k) / n;
+  for (let k = 0; k <= n && !isFinite(toWorld(map, b)); k++) b = hi - ((hi - lo) * k) / n;
+  if (!(a < b) || !isFinite(toWorld(map, a)) || !isFinite(toWorld(map, b))) return null;
+  return { screen: [a, b], world: [toWorld(map, a), toWorld(map, b)] };
+}
+
 /** The map's world coordinate written in the screen one, with the screen
  *  coordinate called by the world's name — the renderer's x is the screen. */
 const forwardIn = (map: AxisMap): Expr =>
@@ -208,8 +225,8 @@ export function mapRowExpr(e: Expr, maps: AxisMaps): Expr {
  * How a mapped panel draws an object, or null when it cannot:
  *
  * - `substitute`: drawn per pixel from x and y (graphs, implicit curves,
- *   regions, fields), so the row is rewritten by mapRowExpr and the shader
- *   sees screen coordinates;
+ *   regions, fields), or solved for (real systems), so the row is rewritten
+ *   by mapRowExpr and the shader or solver sees screen coordinates;
  * - `place`: it puts things at positions (points, parametric curves and
  *   regions, figures, point lists, labels), so it is
  *   computed in x and y as anywhere else and each position it produces is
@@ -217,9 +234,8 @@ export function mapRowExpr(e: Expr, maps: AxisMaps): Expr {
  * - `none`: nothing drawn (a value, a note).
  *
  * What is left (vector and tensor fields, whose arrows would need the
- * map's Jacobian; histograms, whose bars stand on y = 0; systems, whose
- * solver searches the window as if it were x and y; graphs, sequences, 3D)
- * is refused rather than drawn in the wrong place.
+ * map's Jacobian; histograms, whose bars stand on y = 0; complex systems;
+ * graphs, sequences, 3D) is refused rather than drawn in the wrong place.
  */
 export type AxisMapping = 'substitute' | 'place' | 'none';
 
@@ -241,6 +257,11 @@ export function axisMapping(object: MathObject): AxisMapping | null {
     case 'trail':
     case 'label':
       return 'place';
+    case 'system':
+      // Its residuals rewritten like a curve's, the solver searches the
+      // window in screen coordinates, evenly, and its solutions are there.
+      // A complex system solves in w, which no rewrite of x and y reaches.
+      return object.source.representation === 'real' ? 'substitute' : null;
     case 'figure':
       return object.dimension === 2 ? 'place' : null;
     case 'list':

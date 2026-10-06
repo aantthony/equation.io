@@ -11,6 +11,7 @@
  *
  * curveTracer covers the rest of the curve: it projects the pointer onto it.
  */
+import { type AxisMap, type AxisMaps, toWorld } from './axis-map.ts';
 import { usesComplex } from './complex.ts';
 import { diff } from './diff.ts';
 import { type Expr, evaluate, freeVars, substVars } from './expr.ts';
@@ -490,3 +491,25 @@ export function fmtTraced(v: number, unit: number): string {
 
 /** v rounded to exactly what fmtTraced shows. */
 export const roundTraced = (v: number, unit: number): number => parseFloat(fmtTraced(v, unit));
+
+/**
+ * A mapped panel's row (lib/axis-map.ts) is drawn rewritten in screen
+ * coordinates, and searched there too, evenly as a log axis needs: an
+ * increasing map keeps extrema extrema, while inflection points are the
+ * drawn curve's (where it bends on the screen). Positions stay on the
+ * screen; the tooltip reads x and y. An intercept is kept only where the
+ * screen's axis is x = 0 or y = 0 (on a log axis neither shows).
+ */
+export function mappedSpecialPoints(expr: Expr, maps: AxisMaps, xlo: number, xhi: number, ylo: number, yhi: number) {
+  const atZero = (map: AxisMap | undefined) => !map || Math.abs(toWorld(map, 0)) < 1e-12;
+  const shown: Record<string, boolean> = { 'x-intercept': atZero(maps.y), 'y-intercept': atZero(maps.x) };
+  return specialPoints(expr, xlo, xhi, ylo, yhi).flatMap((p): SpecialPoint[] => {
+    const heading = p.lines[0]
+      .split(', ')
+      .filter(h => shown[h] ?? true)
+      .join(', ');
+    const [x, y] = [maps.x ? toWorld(maps.x, p.x) : p.x, maps.y ? toWorld(maps.y, p.y) : p.y];
+    if (!heading || !isFinite(x) || !isFinite(y)) return [];
+    return [{ ...p, lines: [heading, `x = ${fmtRoot(x)}`, `y = ${fmtRoot(y)}`] }];
+  });
+}

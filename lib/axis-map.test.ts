@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { axisMapping, parseAxisMap, toScreen, toWorld } from './axis-map.ts';
 import { type Expr, evaluate } from './expr.ts';
+import type { Components } from './math-object.ts';
+import { mappedSpecialPoints } from './special.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
 const view = (text: string) => parseViewRow(text, {}) as View2DSpec;
@@ -133,10 +135,44 @@ describe('rows in a mapped panel', () => {
     ]);
   });
 
+  it('rewrite a system, so its solver searches the screen', () => {
+    const rows = ['view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)', '(x y, x/y) = (100, 4)'];
+    const [, sys] = analyzeRows(rows).rows;
+    expect(sys.error).toBeUndefined();
+    const o = sys.cls!.object as { source: { residuals: Components } };
+    // x = 20, y = 5 solves it: at screen (log 20, log 5) both residuals vanish.
+    const at = { x: Math.log10(20), y: Math.log10(5) };
+    for (const r of o.source.residuals) expect(evaluate(r, at)).toBeCloseTo(0, 9);
+  });
+
+  it('find hover points on the screen and read them in x and y', () => {
+    const hover = (rows: string[], box: [number, number, number, number]) => {
+      const a = analyzeRows(rows);
+      const maps = (a.rows[0].view as View2DSpec).maps!;
+      const o = a.rows.at(-1)!.cls!.object as { equation: Expr };
+      return mappedSpecialPoints(o.equation, maps, ...box).map(p => [p.lines.join('; '), p.x]);
+    };
+    // A minimum stays one through an increasing map, placed on the screen.
+    const [[min, at]] = hover(
+      ['view(x = 0.1..100, y = 0.1..100, x = 10^X, y = 10^Y)', 'y = (x - 3)^2 + 1'],
+      [-1, 2, -1, 2],
+    );
+    expect(min).toBe('local minimum; x = 3; y = 1');
+    expect(at).toBeCloseTo(Math.log10(3), 9);
+    // A log axis shows no x = 0, so no y-intercept; y is plain, so the
+    // x-intercept stays.
+    expect(hover(['view(x = 0.1..100, y = -5..5, x = 10^X)', 'y = x - 2'], [-1, 2, -5, 5]).map(([l]) => l)).toEqual([
+      'x-intercept; x = 2; y = 0',
+    ]);
+    // Symlog reaches 0: both intercepts read where they are. An inflection
+    // is the drawn curve's: y = x - 2 bends there on a symlog axis.
+    const sym = hover(['view(x = -10..10, y = -5..5, x = sinh(X))', 'y = x - 2'], [-3, 3, -5, 5]).map(([l]) => l);
+    expect(sym).toEqual(['x-intercept; x = 2; y = 0', 'y-intercept, inflection point; x = 0; y = -2']);
+  });
+
   it('refuse what the map cannot carry, rather than drawing it in the wrong place', () => {
-    // A system's solver searches the window as if it were x and y; a 3D
-    // point would turn the panel 3D under rows written for its screen.
-    for (const row of ['(-y, x)', 'hist([1, 2, 2, 3])', '(x + y, x - y) = (30, 10)', '(1, 2, 3)']) {
+    // A 3D point would turn the panel 3D under rows written for its screen.
+    for (const row of ['(-y, x)', 'hist([1, 2, 2, 3])', '(1, 2, 3)']) {
       const [, r] = analyzeRows(['view(x = 1..100, x = 10^X)', row]).rows;
       expect(r.error, row).toMatch(/maps its axes/);
     }
