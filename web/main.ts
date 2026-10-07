@@ -121,7 +121,7 @@ import {
   type ScreenBox,
   planeIn,
   planeInverse,
-  planeJacobian,
+  pixelSpan,
   planeToWorld,
   planeWorldBox,
 } from '../lib/plane-map.ts';
@@ -4739,14 +4739,13 @@ function dragTo(map: AxisMap | undefined, s: number, axis: number): number {
  *  map's Jacobian — as snapToPixel rounds on a plain panel. */
 function dragToPlane(plane: PlaneMap, sx: number, sy: number): [number, number] {
   const [x, y] = planeToWorld(plane, sx, sy);
-  const [a, b, c, d] = planeJacobian(plane, sx, sy);
-  const [ux, uy] = [view.upp, view.upp / (view.ratio ?? 1)];
+  const [px, py] = pixelSpan(plane, sx, sy, view.upp, view.upp / (view.ratio ?? 1));
   const round = (v: number, pixel: number) => {
     if (!(pixel > 0) || !isFinite(pixel)) return parseFloat(v.toPrecision(5));
     const step = Math.pow(10, Math.floor(Math.log10(pixel * 3)));
     return parseFloat((Math.round(v / step) * step).toPrecision(12));
   };
-  return [round(x, Math.hypot(a * ux, b * uy)), round(y, Math.hypot(c * ux, d * uy))];
+  return [round(x, px), round(y, py)];
 }
 
 // --- draggable points ---
@@ -5136,9 +5135,8 @@ function updateHover(clientX: number, clientY: number) {
  *  the pixel there (sx, sy screen units a pixel), from the map's Jacobian. */
 function readPlane(plane: PlaneMap, X: number, Y: number, sx: number, sy: number): string[] {
   const [x, y] = planeToWorld(plane, X, Y);
-  const [a, b, c, d] = planeJacobian(plane, X, Y);
-  const step = (p: number, q: number) => Math.hypot(p * sx, q * sy) || sx;
-  return [`x = ${fmtTraced(x, step(a, b))}`, `y = ${fmtTraced(y, step(c, d))}`];
+  const [px, py] = pixelSpan(plane, X, Y, sx, sy);
+  return [`x = ${fmtTraced(x, px || sx)}`, `y = ${fmtTraced(y, py || sx)}`];
 }
 
 /** Marker for the hovered point, drawn over the axis labels. */

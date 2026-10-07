@@ -4,7 +4,16 @@ import { axisMapping, mapRowExpr } from './axis-map.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { regionSampler } from './path.ts';
 import type { Components } from './math-object.ts';
-import { type PlaneMap, parsePlaneMap, planeInverse, planeShapes, planeToWorld, planeWorldBox } from './plane-map.ts';
+import {
+  type PlaneMap,
+  invert2,
+  parsePlaneMap,
+  pixelSpan,
+  planeInverse,
+  planeShapes,
+  planeToWorld,
+  planeWorldBox,
+} from './plane-map.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
 const POLAR = 'view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..5)';
@@ -188,6 +197,14 @@ describe('a plane map', () => {
     ];
     const fill = planeShapes(inverse, 4, k => square[k] as [number, number]);
     expect(fill.map(s => s.closed)).toEqual([true]);
+  });
+
+  it('inverts the Jacobian, and sizes a pixel in x and y', () => {
+    expect(invert2([2, 0, 0, 4])).toEqual([0.5, -0, -0, 0.25]);
+    // At angle π/2, radius 2: a step along X moves x by −2, along Y moves y.
+    const [px, py] = pixelSpan(polar(), Math.PI / 2, 2, 0.01, 0.02);
+    expect(px).toBeCloseTo(0.02, 9);
+    expect(py).toBeCloseTo(0.02, 9);
   });
 
   it('takes a map defined only away from the origin', () => {
