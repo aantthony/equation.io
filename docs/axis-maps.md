@@ -161,11 +161,20 @@ the ranges given, and sliders in it are read at their value.
   point lists, labels and named points — is carried point by point through
   the surface (surfacePoint), lifted a little toward the eye so the surface
   does not hide it; straight edges are cut into pieces first so they bend
-  with the surface.
+  with the surface. Figures (polygons, hulls) draw as outlines: a flat fill
+  would cut through the surface rather than lie on it, and an inequality
+  paints the same area exactly. Where the surface is undefined (1/x at
+  x = 0) nothing carried is drawn.
+- Families draw as their members.
 - Paints draw after the surface with a polygon offset and no depth writes,
   so they sit on it without fighting it.
 - Rows in space (3D) draw in the panel as in any 3D panel. 2D rows with no
-  picture on a surface (vector fields, complex rows, histograms) are refused
-  with a message saying so.
+  picture on a surface yet (vector and matrix fields, complex rows, colour
+  fields, parametric and projected regions, histograms) are refused with a
+  message saying so.
+- The surface is drawn by the GPU, so it must be written in what the
+  shaders take; a surface they cannot draw is refused at its row. Its
+  tangents are exact where they are cheap and finite differences otherwise
+  (mod, gamma).
 - Not drawn: hover readouts on the painted rows, and link previews (a panel
   on a surface gets the generic card).

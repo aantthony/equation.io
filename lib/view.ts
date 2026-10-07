@@ -185,7 +185,11 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
   const lockAt = args.findIndex(a => /^locked$/i.test(a));
   const locked = lockAt >= 0;
   if (locked) args.splice(lockAt, 1);
-  if (m[1] === 'on') return parseSurfaceRow(args, env);
+  if (m[1] === 'on') {
+    // The camera frames the panel: lock it there.
+    if (locked) throw new Error('on(…) takes no locked: put it on the panel’s camera(…) row.');
+    return parseSurfaceRow(args, env);
+  }
   if (m[1] === 'view') {
     const usage = 'Expected view(x = lo..hi, y = lo..hi, ratio = 1, locked) — either axis alone works.';
     const spec: View2DSpec = { kind: 'view' };

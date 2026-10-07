@@ -688,7 +688,24 @@ vec3 Pv(float u, float v) { return (P(u, v + 1e-3) - P(u, v - 1e-3)) * 500.0; }`
   const body =
     paint.kind === 'curve'
       ? `
-  float d = abs(f) / max(fwidth(f), 1e-24);
+  // |F| over its change across a pixel, from differences at two steps (a
+  // pixel's reach in x and y) as the 2D curve shader takes them: they agree
+  // at a true zero and disagree at a pole (tan(x) at π/2, 1/x at 0), where
+  // F only jumps sign. A step off F's domain (past sqrt's edge, onto a
+  // pole) is left out: the slope comes from the other side.
+  vec2 h = max(vec2(fwidth(x), fwidth(y)), vec2(1e-12));
+  vec2 fm = vec2(F(x - h.x, y), F(x, y - h.y)), fp = vec2(F(x + h.x, y), F(x, y + h.y));
+  vec2 g1 = vec2(slope(fm.x, f, fp.x, 1.0), slope(fm.y, f, fp.y, 1.0));
+  // Across a pixel F is near linear at a true zero; at a pole it bends
+  // by more than it changes, which the two steps can miss at some offsets.
+  vec2 bend = fp - 2.0 * f + fm;
+  if (!any(isnan(bend)) && !any(isinf(bend)) && length(bend) > length(fp - fm)) discard;
+  vec2 g2 = vec2(slope(F(x - 0.5 * h.x, y), f, F(x + 0.5 * h.x, y), 0.5),
+                 slope(F(x, y - 0.5 * h.y), f, F(x, y + 0.5 * h.y), 0.5));
+  float e1 = abs(f) / max(length(g1), 1e-24);
+  float e2 = abs(f) / max(length(g2), 1e-24);
+  if (e2 > 1.6 * e1 || e1 > 1.6 * e2) discard;
+  float d = max(e1, e2);
   float alpha = 1.0 - smoothstep(0.6, 1.6, d);
   vec3 base = uColor;`
       : paint.kind === 'region'
@@ -700,7 +717,8 @@ ${edges
     (_, i) => `  {
     float e = E${i}(x, y);
     float w = abs(e) / max(fwidth(e), 1e-24);
-    alpha = max(alpha, 0.9 * (1.0 - smoothstep(0.5, 1.5, w)) * (1.0 - smoothstep(-aa, aa, f - 1e-6 * aa)));
+    // An edge undefined here (log(x) at x <= 0) draws nothing here.
+    if (!isnan(w) && !isinf(w)) alpha = max(alpha, 0.9 * (1.0 - smoothstep(0.5, 1.5, w)) * (1.0 - smoothstep(-aa, aa, f - 1e-6 * aa)));
   }`,
   )
   .join('\n')}
@@ -722,6 +740,12 @@ ${GLSL_PRELUDE}
 ${SHADE}
 ${tangents}
 float F(float x, float y) { return ${paint.field}; }
+// F's change over a pixel from samples a step s (in pixels) either side of
+// f: central where both are defined, one-sided where only one is.
+float slope(float fm, float f, float fp, float s) {
+  bool m = !isnan(fm) && !isinf(fm), p = !isnan(fp) && !isinf(fp);
+  return m && p ? (fp - fm) / (2.0 * s) : p ? (fp - f) / s : m ? (f - fm) / s : 0.0;
+}
 ${edges.map((e, i) => `float E${i}(float x, float y) { return ${e}; }`).join('\n')}
 
 void main() {

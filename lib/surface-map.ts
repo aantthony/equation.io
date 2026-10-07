@@ -11,8 +11,8 @@
  * places things (points, parametric curves, figures, labels) is carried
  * point by point (surfacePoint). See docs/axis-maps.md.
  */
-import { diff } from './diff.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { toGLSL } from './glsl.ts';
 import type { MathObject } from './math-object.ts';
 import { type Prog, compileProg, run } from './vm.ts';
 
@@ -70,6 +70,13 @@ export function parseSurfaceMap(
   if (!uses) throw new Error(USAGE);
   const embed = parsed.items.map(e => substVars(e, values)) as [Expr, Expr, Expr];
   const map: SurfaceMap = { text: src.trim(), embed, x, y };
+  // The surface and what is painted on it are drawn on the GPU.
+  for (const e of embed)
+    try {
+      toGLSL(e);
+    } catch (err) {
+      throw new Error(`The surface cannot be drawn: ${(err as Error).message}`);
+    }
   if (!spreads(map))
     throw new Error(`(X, Y, Z) = ${map.text} is no surface over these x and y: it is a curve or a point.`);
   return map;
@@ -89,7 +96,8 @@ function spreads(map: SurfaceMap): boolean {
       const a = px.map((v, k) => v - p[k]);
       const b = py.map((v, k) => v - p[k]);
       const n = Math.hypot(a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]);
-      if (n > 1e-14) return true;
+      // Apart relative to their lengths, so a small surface counts.
+      if (n > 1e-9 * Math.hypot(...a) * Math.hypot(...b)) return true;
     }
   return false;
 }
@@ -105,14 +113,16 @@ export function surfacePoint(map: SurfaceMap, x: number, y: number): [number, nu
   let f = compiled.get(map);
   if (!f) {
     const vars = new Float64Array(2);
-    const stack = new Float64Array(64);
-    const fns = map.embed.map(e => {
-      let prog: Prog | null = null;
+    const progs = map.embed.map(e => {
       try {
-        prog = compileProg(e, SLOTS);
+        return compileProg(e, SLOTS);
       } catch {
-        /* evaluated */
+        return null; // evaluated
       }
+    });
+    const stack = new Float64Array(Math.max(1, ...progs.map(p => p?.depth ?? 0)));
+    const fns = map.embed.map((e, k) => {
+      const prog: Prog | null = progs[k];
       return prog
         ? () => {
             try {
@@ -146,8 +156,6 @@ export function surfacePoint(map: SurfaceMap, x: number, y: number): [number, nu
  */
 export function surfaceInUV(map: SurfaceMap): {
   comps: [Expr, Expr, Expr];
-  du: [Expr, Expr, Expr];
-  dv: [Expr, Expr, Expr];
   uv: { x: Expr; y: Expr };
 } {
   const sweep = ([lo, hi]: readonly [number, number], p: string): Expr => ({
@@ -158,12 +166,7 @@ export function surfaceInUV(map: SurfaceMap): {
   });
   const uv = { x: sweep(map.x, 'u'), y: sweep(map.y, 'v') };
   const comps = map.embed.map(e => substVars(e, uv)) as [Expr, Expr, Expr];
-  return {
-    comps,
-    du: comps.map(e => diff(e, 'u')) as [Expr, Expr, Expr],
-    dv: comps.map(e => diff(e, 'v')) as [Expr, Expr, Expr],
-    uv,
-  };
+  return { comps, uv };
 }
 
 /**
@@ -195,6 +198,11 @@ export function surfaceMapping(object: MathObject): SurfaceMapping | null {
     case 'trail':
     case 'label':
       return 'carry';
+    case 'family': {
+      // A family draws as its members, each drawn as it is.
+      const each = object.members.map(m => surfaceMapping(m.object));
+      return each.every(Boolean) ? (each[0] ?? 'none') : null;
+    }
     case 'figure':
       return object.dimension === 2 ? 'carry' : null;
     case 'list':
@@ -204,4 +212,4 @@ export function surfaceMapping(object: MathObject): SurfaceMapping | null {
 }
 
 export const OFF_SURFACE_MESSAGE =
-  'This panel draws its rows on a surface (its on(…) row), which takes curves, regions, scalar fields, points, parametric curves and figures in x and y — not this.';
+  'This panel draws its rows on a surface (its on(…) row), which takes curves, inequalities, scalar fields, points, parametric curves and figures in x and y — not this.';

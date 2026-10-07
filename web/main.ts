@@ -19,6 +19,7 @@ import {
   compileGridCpu,
   compileGridGpu,
   cpuStructureKey,
+  parametricGLSL,
 } from '../lib/compiler.ts';
 import { analyzePrepared, isViewportText, prepareDocument, withNote } from '../lib/analysis.ts';
 import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
@@ -981,15 +982,8 @@ const surfaceGLSLs = new WeakMap<
 function surfaceGLSL(surface: SurfaceMap) {
   let out = surfaceGLSLs.get(surface);
   if (!out) {
-    const { comps, du, dv, uv } = surfaceInUV(surface);
-    const glsl = (es: Expr[]) => es.map(e => toGLSL(e)) as [string, string, string];
-    let tangents: { du?: [string, string, string]; dv?: [string, string, string] } = {};
-    try {
-      tangents = { du: glsl(du), dv: glsl(dv) };
-    } catch {
-      /* finite differences */
-    }
-    out = { comps: glsl(comps), ...tangents, xy: [toGLSL(uv.x), toGLSL(uv.y)] };
+    const { comps, uv } = surfaceInUV(surface);
+    out = { ...parametricGLSL(comps), xy: [toGLSL(uv.x), toGLSL(uv.y)] };
     surfaceGLSLs.set(surface, out);
   }
   return out;
@@ -1050,7 +1044,9 @@ function carryOntoSurface(scene: Scene3D, mark: ReturnType<typeof markScene>, su
       for (let k = 0; k < steps; k++) {
         const t = k / steps;
         const [x, y] = next && steps > 1 ? [x0 + (pts[i + 3] - x0) * t, y0 + (pts[i + 4] - y0) * t] : [x0, y0];
-        out.push(...(Number.isFinite(x) && Number.isFinite(y) ? onto(x, y) : [NaN, NaN, NaN]));
+        const q = Number.isFinite(x) && Number.isFinite(y) ? onto(x, y) : null;
+        // A gap where the surface is undefined, as in a sampled curve.
+        out.push(...(q?.every(Number.isFinite) ? q : [NaN, NaN, NaN]));
       }
     }
     return Float32Array.from(out);
@@ -1061,13 +1057,21 @@ function carryOntoSurface(scene: Scene3D, mark: ReturnType<typeof markScene>, su
     const out: number[] = [];
     for (let i = 0; i + 5 < s.pts.length; i += 6) {
       const piece = line([s.pts[i], s.pts[i + 1], 0, s.pts[i + 3], s.pts[i + 4], 0], SURFACE_PIECES);
-      for (let k = 0; k + 5 < piece.length; k += 3) out.push(...piece.subarray(k, k + 6));
+      for (let k = 0; k + 5 < piece.length; k += 3) {
+        const seg = piece.subarray(k, k + 6);
+        if (seg.every(Number.isFinite)) out.push(...seg);
+      }
     }
     s.pts = Float32Array.from(out);
     s.retained = false;
   }
-  for (const p of scene.points.slice(mark.points)) p.pos = onto(p.pos[0], p.pos[1]);
-  for (const t of scene.texts?.slice(mark.texts) ?? []) t.pos = onto(t.pos[0], t.pos[1]);
+  // A point where the surface is undefined (1/x at x = 0) is not drawn.
+  const placed = <T extends { pos: [number, number, number] }>(items: T[], from: number) => {
+    const kept = items.slice(from).filter(it => (it.pos = onto(it.pos[0], it.pos[1])).every(Number.isFinite));
+    items.splice(from, items.length - from, ...kept);
+  };
+  placed(scene.points, mark.points);
+  if (scene.texts) placed(scene.texts, mark.texts);
 }
 
 /** The axis maps of panel p's view(…) row (lib/axis-map.ts), if it has any. */
@@ -2100,10 +2104,13 @@ function render() {
               const geometry = sample(constEnv, time);
               if (!geometry) break;
               const { mesh, edges } = geometry;
-              if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
+              // On a surface a hull is its outline: a flat fill would cut
+              // through the surface rather than lie on it.
+              const solid = mesh.indices.length > 0 && on !== 'carry';
+              if (solid) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
               scene.segments.push({
                 pts: edges,
-                color: mesh.indices.length ? edgeShade(color) : color,
+                color: solid ? edgeShade(color) : color,
                 retained: true,
               });
               break;
@@ -2115,7 +2122,9 @@ function render() {
             // A closed polygon fills translucently when a fan from its first
             // vertex covers it exactly: triangles, convex outlines, and the
             // discs and sectors multivectors draw (lib/glyphs.ts).
-            const fill = plot.closed && fanFillable(pts);
+            // On a surface it is an outline: the fan's flat triangles would
+            // be chords under the surface (fill a region with an inequality).
+            const fill = plot.closed && on !== 'carry' && fanFillable(pts);
             if (plot.closed) pts.push(...pts.slice(0, 3));
             scene.curves.push({ pts: new Float32Array(pts), color, arrow: plot.arrow, fill });
             break;
@@ -5750,11 +5759,12 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
               (eq.cls.animated ? '; moves with time t' : '')
             : undefined;
   // A 3D scene leaves 2D-only plots out (render()), however valid they are.
+  const surface = panels[panelOf(eq)] && panelSurface(panels[panelOf(eq)]);
   const skipped =
     panels[panelOf(eq)]?.mode === '3d' &&
     !!eq.cls &&
     !eq.def &&
-    renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type));
+    renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type) && !(surface && m.cls && surfaceMapping(m.cls.object)));
   if (skipped) {
     row.warning = 'not drawn: another row makes this graph 3D, and a 3D scene leaves out 2D-only plots like this one';
   }
