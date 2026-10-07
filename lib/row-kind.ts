@@ -124,66 +124,6 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   expect: 'expected value readout, marked on the density',
 };
 
-/** Each kind's smallest form and what it draws in a few words: the Apple
- *  app's list_kinds (lib/assistant-tools.ts). A form of several rows splits
- *  on `;`, and its last row is the kind; assistant-tools.test.ts analyzes each.
- *  Common kinds first: the model reads this list top down. Plain shapes at
- *  unit size, so the model adapts a form rather than copying an answer. */
-export const KIND_FORMS: Record<PublicKind, readonly [form: string, meaning: string]> = {
-  implicit2d: ['x^2 + y^2 = 9', '2D curve: y = f(x), or any equation in x, y'],
-  ineq2d: ['y < x^2', 'shaded 2D region'],
-  pcurve: ['(cos(2pi u), sin(2pi u))', 'parametric curve, u from 0 to 1; 3 components for 3D'],
-  point: ['(1, 2)', 'point; A = (1, 2) names it and makes it draggable'],
-  polygon: [
-    'polygon((0, 0), (2, 0), (1, 2))',
-    'figure: segment, vector, polygon, circle, …; hull of 3D points is a solid',
-  ],
-  label: ['label((1, 2), "text")', 'text beside a point'],
-  value: ['int[0..pi] sin(x) dx', 'number readout; a definite integral also shades its area'],
-  family: ['y = x^[1, 2, 3]', 'one copy of the row per list element'],
-  implicit3d: ['z = sin(x) cos(y)', '3D surface: z = f(x, y), or an equation in x, y, z'],
-  psurface: ['(sin(pi v)cos(2pi u), sin(pi v)sin(2pi u), cos(pi v))', 'parametric surface, u and v from 0 to 1'],
-  solid: ['(interval(0, 1), interval(0, 2), interval(0, 3))', 'solid in 3D filled by three parameters or intervals'],
-  spacecurve: ['(x^2 + y^2 + z^2, z) = (9, 1)', '3D curve where two surfaces meet'],
-  vfield2d: ['(x, -y)', '2D vector field, as streamlines'],
-  vfield3d: ['(-y, x, 0.5)', '3D vector field'],
-  scalar2d: ['sin(x) cos(y)', 'expression in x, y, shaded by its value'],
-  scalar3d: ['exp(-(x^2 + y^2 + z^2))', 'expression in x, y, z, drawn as a cloud'],
-  trail: ['A = (2cos(3t), 2sin(2t)); trail(A)', 'path behind a moving point'],
-  pregion: ['r = interval(1, 2); (r cos(2pi u), r sin(2pi u))', 'filled 2D region traced by two parameters'],
-  projected2d: ['a = interval(1, 2); y = sin(a x)', 'region swept by a curve as a runs over an interval'],
-  system: ['(x^2 + y^2, y) = (4, x)', 'solutions of simultaneous equations'],
-  note: ['1 < 2', 'true/false readout'],
-  tuple: ['sort([5, 3, 1, 4, 2])', 'readout of a tuple of more than 3 numbers'],
-  sequence: ['a_n = 1/n', 'sequence, as dots at whole numbers n'],
-  cobweb: ['a_0 = 0.2; a_{n+1} = 3.2 a_n (1 - a_n)', 'cobweb diagram of a recurrence'],
-  bifurcation: ['a_{n+1} = x a_n (1 - a_n)', 'orbit diagram of a recurrence as x varies'],
-  orbit: ["th' = om; om' = -sin(th); th(0) = 1; th(0..20)", 'a simulated state over a time range'],
-  vlist: ['[1, 2, 2, 3]', 'list of numbers, as a dot plot'],
-  plist: ['[(1, 2), (2, 3), (3, 5)]', 'list of points'],
-  histogram: ['hist([1, 2, 2, 3])', 'histogram of a list'],
-  dlist: ['data = open("file.csv"); data.height', 'data column, as a dot plot'],
-  dscatter: ['data = open("file.csv"); (data.age, data.height)', 'scatter plot of data'],
-  density: ['X ~ Normal(0, 1)', 'density curve of a random variable'],
-  pmf: ['K ~ Binomial(10, 0.5)', 'stems of a discrete random variable'],
-  prob: ['X ~ Normal(0, 1); P(X < 1)', 'probability, shaded, with its value'],
-  expect: ['X ~ Normal(0, 1); E(X)', 'expected value readout'],
-  complex2d: ['ln(w)', 'complex function of w = x + iy'],
-  domain2d: ['domain(w^2 - 1)', 'domain colouring of a complex function'],
-  conformal2d: ['conformal(w^2)', 'image of a grid under a complex function'],
-  fractal2d: ['iter(z^2 + w)', 'escape-time fractal'],
-  rgb2d: ['rgb(x/4, y/4, 0.5)', 'colour field (RGB) filling the plane'],
-  hsl2d: ['hsl(atan2(y, x), 1, 0.5)', 'colour field (HSL) filling the plane'],
-  oklch2d: ['oklch(0.7, 0.15, atan2(y, x))', 'colour field (OKLCH) filling the plane'],
-  tfield2d: ['jacobian((x^2 - y^2, 2x y))', '2D matrix field, as glyphs'],
-  multivector: ['gp(e_x, e_y)', 'multivector or quaternion, drawn by grade'],
-  flat: ['join((0, 0), (1, 1))', 'projective point, line or plane'],
-  action: ['action(((1, 1), (0, 1)))', 'what a matrix does to the unit square'],
-  automaton: ['c_0[i] = {i = 0: 1, 0}; c_{n+1}[i] = mod(c_n[i-1] + c_n[i+1], 2)', 'cellular automaton'],
-  graph: ['k = [0..5]; graph(k, mod(k + 1, 6))', 'node-link graph of (from, to) edges'],
-  lattice: ['T[i, j] = {i > 0: {j > 0: gcd(i, j)}}', 'table of values on the integer lattice'],
-};
-
 function constKind(name: string, names: KindNames): string {
   // `adults = person[…]` scans as a constant, but what it defines is another data file.
   if (names.tables.has(name)) return 'filtered data';

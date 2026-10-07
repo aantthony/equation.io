@@ -4,6 +4,9 @@
  * list_kinds and kind_examples. The app's renderer answers them through its
  * bridge (web/native-app.ts), and the evals' service (apple/evals) with this
  * same code. Every answer is short: the on-device model has 8K tokens.
+ * The kinds, forms, examples and notes they answer from are the reference's
+ * (docs/reference, lib/reference.ts assistantData), which the app bundles as
+ * assistant.json.
  *
  * Also here: a row's status and meaning from the analyzer alone, as voice
  * mode's get_graph reports it (web/main.ts rowStatus), which check answers
@@ -16,7 +19,9 @@ import { type Definition, animatedConstNames, definitionDependencies } from './d
 import { canonicalName } from './expr.ts';
 import type { PublicKind } from './math-object.ts';
 import { publicKind } from './plot.ts';
-import { KIND_FORMS, KIND_MEANINGS, rowKind } from './row-kind.ts';
+import { LOOKUP_HINT, type Variant } from './assistant-instructions.ts';
+import type { AssistantData, LabelledRows } from './reference.ts';
+import { KIND_MEANINGS, rowKind } from './row-kind.ts';
 import { sliderForm } from './slider.ts';
 import { splitStatements, stripNote } from './statements.ts';
 import { builtinHelp, builtinNames } from './syntax-help.ts';
@@ -78,8 +83,13 @@ export function sliderOf(analysis: Analysis, eq: RowInfo) {
   return form ? { def, rhs, form } : null;
 }
 
-/** Row `index` of `texts`, as web/main.ts rowStatus reports it. */
-export function describeRow(analysis: Analysis, texts: readonly string[], index: number): RowReport {
+/** Row `index` of `texts`, as web/main.ts rowStatus reports it; a hint names the `variant`'s lookup. */
+export function describeRow(
+  analysis: Analysis,
+  texts: readonly string[],
+  index: number,
+  variant: Variant = 'text',
+): RowReport {
   const eq = analysis.rows[index];
   const text = texts[index];
   const { defs } = analysis;
@@ -90,7 +100,7 @@ export function describeRow(analysis: Analysis, texts: readonly string[], index:
     const call = unknown && new RegExp(`(?<![\\w])${unknown}\\s*\\(`);
     const fns = analysis.rows.filter(o => o.def?.kind === 'fn').map(o => o.text);
     if (call && [text, ...fns].some(t => call.test(stripNote(t)))) {
-      row.hint = `${unknown}(…) is not a built-in function; call search_functions to find the right form`;
+      row.hint = `${unknown}(…) is not a built-in function; ${LOOKUP_HINT[variant]}`;
     }
     return row;
   }
@@ -225,11 +235,11 @@ export interface CheckedRow {
  * check(rows): what these rows would draw, without drawing them. The same
  * reading set_graph gives back, less the colors.
  */
-export function checkRows(rows: readonly string[]): CheckedRow[] {
+export function checkRows(rows: readonly string[], variant: Variant = 'text'): CheckedRow[] {
   const texts = rows.map(r => r.trim()).filter(Boolean);
   const analysis = analyzeRows(texts, { readouts: true });
   return texts.map((row, i) => {
-    const { kind, meaning, value, error, hint, warning } = describeRow(analysis, texts, i);
+    const { kind, meaning, value, error, hint, warning } = describeRow(analysis, texts, i, variant);
     return { row, kind, meaning, value, error, hint, warning };
   });
 }
@@ -245,34 +255,25 @@ export function kindOf(row: RowInfo): PublicKind | undefined {
   return row.cls ? publicKind(row.cls.object) : undefined;
 }
 
-/** Kinds list_kinds names without their forms, by topic, to keep it short: kind_examples has the rest. */
-const SPECIALISED: Record<string, PublicKind[]> = {
-  'sequences and simulations': ['sequence', 'cobweb', 'bifurcation', 'orbit', 'automaton'],
-  'lists and data': ['vlist', 'plist', 'histogram', 'dlist', 'dscatter', 'tuple'],
-  probability: ['density', 'pmf', 'prob', 'expect'],
-  'complex functions': ['complex2d', 'domain2d', 'conformal2d', 'fractal2d'],
-  'colour fields': ['rgb2d', 'hsl2d', 'oklch2d'],
-  algebra: ['tfield2d', 'multivector', 'flat', 'action', 'graph', 'lattice'],
-};
-
-/** list_kinds: every kind; the common ones with their smallest form and a few words. */
-export function listKinds(): string {
-  const specialised = new Set(Object.values(SPECIALISED).flat());
-  const common = (Object.keys(KIND_FORMS) as PublicKind[]).filter(kind => !specialised.has(kind));
+/**
+ * list_kinds: every kind; the common ones with their smallest form and a few
+ * words, the rest by topic (the reference's groups, docs/reference/index.md).
+ */
+export function listKinds(data: AssistantData): string {
   return [
     'One shape per row. kind: smallest form (; separates rows) | what it draws',
-    ...common.map(kind => `${kind}: ${KIND_FORMS[kind][0]} | ${KIND_FORMS[kind][1]}`),
+    ...data.groups.filter(g => !g.brief).flatMap(g => g.kinds.map(k => `${k.kind}: ${k.form} | ${k.short}`)),
     'Definitions draw nothing themselves: a = 2 (a slider), f(x) = x^2 (add y = f(x) to draw it), A = (1, 2) (a draggable point).',
     'More kinds:',
-    ...Object.entries(SPECIALISED).map(([topic, kinds]) => `${topic}: ${kinds.join(', ')}`),
+    ...data.groups.filter(g => g.brief).map(g => `${g.name.toLowerCase()}: ${g.kinds.map(k => k.kind).join(', ')}`),
     'kind_examples(kind) gives any kind with worked examples.',
   ].join('\n');
 }
 
-/** Worked examples, by kind and by function: generated from the examples menu (examplesIndex). */
+/** The examples menu's examples, by the kinds they draw and the functions they call (examplesIndex). */
 export interface ExamplesIndex {
-  kinds: Record<string, { label: string; rows: string[] }[]>;
-  functions: Record<string, { label: string; rows: string[] }[]>;
+  kinds: Record<string, LabelledRows[]>;
+  functions: Record<string, LabelledRows[]>;
 }
 
 /** Longest example (its rows' text) worth showing a model with 8K tokens. */
@@ -324,30 +325,30 @@ export function examplesIndex(examples: Iterable<readonly [label: string, text: 
 }
 
 // The rows first and the label after: a label first ("solid cube: […]") was copied into a row.
-const exampleLines = (list: { label: string; rows: string[] }[] = []) =>
+const exampleLines = (list: LabelledRows[] = []) =>
   list.map(({ label, rows }) => `- ${JSON.stringify(rows)} (${label})`);
 
 /** The kind a model means: a name from list_kinds, or a kind as get_graph reports it ("pcurve", "parametric curve"). */
-function findKind(query: string): PublicKind | undefined {
+function findKind(data: AssistantData, query: string) {
   const q = query.trim().toLowerCase();
-  const kinds = Object.keys(KIND_FORMS) as PublicKind[];
+  const kinds = data.groups.flatMap(g => g.kinds);
   return (
-    kinds.find(k => k === q) ??
-    kinds.find(k => q.startsWith(k)) ??
-    kinds.find(k => KIND_FORMS[k][1].toLowerCase().startsWith(q) || KIND_MEANINGS[k].toLowerCase().startsWith(q))
+    kinds.find(k => k.kind === q) ??
+    kinds.find(k => q.startsWith(k.kind)) ??
+    kinds.find(k => k.short.toLowerCase().startsWith(q) || KIND_MEANINGS[k.kind].toLowerCase().startsWith(q))
   );
 }
 
 /** kind_examples(kind): what a kind draws, its smallest form, and worked examples, each a whole graph. */
-export function kindExamples(index: ExamplesIndex, query: string): string {
-  const kind = findKind(query);
-  if (!kind) return `No kind "${query}". Kinds: ${Object.keys(KIND_FORMS).join(', ')}.`;
-  const [form] = KIND_FORMS[kind];
+export function kindExamples(data: AssistantData, query: string): string {
+  const found = findKind(data, query);
+  if (!found) return `No kind "${query}". Kinds: ${data.groups.flatMap(g => g.kinds.map(k => k.kind)).join(', ')}.`;
+  const { kind, form } = found;
   return [
     `${kind}: ${KIND_MEANINGS[kind]}`,
     `smallest: ${JSON.stringify(splitStatements(form).map(s => s.trim()))}`,
-    ...(index.kinds[kind]?.length ? ['examples (each a whole graph, one entry per row):'] : []),
-    ...exampleLines(index.kinds[kind]),
+    ...(data.kinds[kind]?.length ? ['examples (each a whole graph, one entry per row):'] : []),
+    ...exampleLines(data.kinds[kind]),
   ].join('\n');
 }
 
@@ -387,17 +388,20 @@ export function searchFunctions(query: string, limit = 6): string {
     .join('\n');
 }
 
-/** function_doc(name): a built-in function's signature, what it does, and an example or two that use it. */
-export function functionDoc(index: ExamplesIndex, name: string): string {
+/** function_doc(name): a built-in function's signature, what it does, the reference's note, and an example or two that use it. */
+export function functionDoc(data: AssistantData, name: string): string {
   const bare = name.trim().replace(/\s*\(.*$/, '');
   const help = builtinHelp(bare);
   if (!help) {
     const near = searchFunctions(bare, 3);
     return `${bare} is not a built-in function.${near.startsWith('No ') ? '' : ` Close:\n${near}`}`;
   }
-  const examples = index.functions[bare] ?? index.functions[bare.toLowerCase()];
+  const key = data.functions[bare] ? bare : bare.toLowerCase();
+  const examples = data.functions[key];
+  const note = data.notes[bare] ?? data.notes[bare.toLowerCase()];
   return [
     `${help.signature}: ${help.description}`,
+    ...(note ? [note] : []),
     ...(examples?.length ? ['examples (each a whole graph):'] : []),
     ...exampleLines(examples),
   ].join('\n');

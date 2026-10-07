@@ -11,6 +11,7 @@
  * are assigned afresh, in document order).
  */
 import { type Analysis, type RowInfo, analyzeRows } from '../../lib/analysis.ts';
+import type { Variant } from '../../lib/assistant-instructions.ts';
 import { describeRow, is3D, sliderOf } from '../../lib/assistant-tools.ts';
 import { LIGHT_PALETTE, assignColors, takesColor } from '../../lib/palette.ts';
 import { writeSlider } from '../../lib/slider.ts';
@@ -51,7 +52,11 @@ export class EvalGraph {
   window = { x: [...START_WINDOW.x] as [number, number], y: [...START_WINDOW.y] as [number, number] };
   camera = { ...START_CAMERA, target: [...START_CAMERA.target] };
 
-  constructor(rows: string[]) {
+  /** Whose assistant reads it: a row's hint names that variant's lookup. */
+  constructor(
+    rows: string[],
+    readonly variant: Variant = 'text',
+  ) {
     this.set(rows);
   }
 
@@ -122,7 +127,7 @@ export class EvalGraph {
   }
 
   private rowStatus(eq: RowInfo, index: number, color?: string): RowStatus {
-    const { status, ...report } = describeRow(this.analysis, this.rows, index);
+    const { status, ...report } = describeRow(this.analysis, this.rows, index, this.variant);
     const row: RowStatus = { index, text: this.rows[index], status, ...report };
     const draws = !!eq.cls && !eq.def && !eq.comment && !eq.view && !report.warning?.startsWith('not drawn');
     if (status === 'ok' && draws && color) row.color = color;

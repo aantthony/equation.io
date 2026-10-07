@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EXAMPLES } from '../web/examples.ts';
+import { readReference } from '../scripts/reference.ts';
 import { analyzeRows } from './analysis.ts';
 import {
   checkRows,
@@ -10,9 +11,8 @@ import {
   listKinds,
   searchFunctions,
 } from './assistant-tools.ts';
-import { parseCsv } from './csv.ts';
-import { KIND_FORMS, KIND_MEANINGS } from './row-kind.ts';
-import { splitStatements } from './statements.ts';
+import { assistantData } from './reference.ts';
+import { KIND_MEANINGS } from './row-kind.ts';
 
 describe('check', () => {
   it('reads each row as set_graph would, without a graph', () => {
@@ -41,20 +41,14 @@ describe('check', () => {
 });
 
 const index = examplesIndex(EXAMPLES.flatMap(([, items]) => items.map(([label, text]) => [label, text] as const)));
+const data = assistantData(readReference(), index);
 
 describe('list_kinds', () => {
-  it('names every kind', () => {
-    const text = listKinds();
-    for (const kind of Object.keys(KIND_FORMS)) expect(text).toMatch(new RegExp(`\\b${kind}\\b`));
-  });
-  it('gives each kind a form the analyzer reads as that kind, with no error', () => {
-    const tables = () => parseCsv('age,height\n20,170\n30,180\n40,175');
-    for (const [kind, [form]] of Object.entries(KIND_FORMS)) {
-      const rows = splitStatements(form).map(s => s.trim());
-      const analysis = analyzeRows(rows, { readouts: true, tables });
-      expect(analysis.rows.map(r => r.error).filter(Boolean), form).toEqual([]);
-      expect(kindOf(analysis.rows.at(-1)!), form).toBe(kind);
-    }
+  it('names every kind, the common ones with their smallest form', () => {
+    const text = listKinds(data);
+    for (const kind of Object.keys(KIND_MEANINGS)) expect(text).toMatch(new RegExp(`\\b${kind}\\b`));
+    expect(text).toContain('solid: (interval(0, 1), interval(0, 2), interval(0, 3)) | ');
+    expect(text).toContain('probability: density, pmf, prob, expect');
   });
 });
 
@@ -73,16 +67,26 @@ describe('kind_examples', () => {
     const dims = index.kinds.pcurve.map(e => analyzeRows(e.rows).rows.some(r => r.cls?.needs3D));
     expect(dims).toContain(true);
     expect(dims).toContain(false);
-    // Kinds no short example draws: kind_examples gives only their smallest form.
-    expect(Object.keys(KIND_FORMS).filter(kind => !index.kinds[kind])).toEqual(['label', 'dlist']);
+    // Kinds no short menu example draws: the reference's examples stand alone.
+    expect(Object.keys(KIND_MEANINGS).filter(kind => !index.kinds[kind])).toEqual(['label', 'dlist']);
+  });
+  it("leads with the reference's examples, then the menu's, three in all", () => {
+    for (const [kind, examples] of Object.entries(data.kinds)) {
+      expect(examples.length, kind).toBeGreaterThan(0);
+      expect(examples.length, kind).toBeLessThanOrEqual(3);
+    }
+    expect(data.kinds.solid[0]).toEqual({
+      label: 'unit cube',
+      rows: ['(interval(0, 1), interval(0, 1), interval(0, 1))'],
+    });
   });
   it('answers with the meaning, the smallest form and examples, by name or by meaning', () => {
-    const answer = kindExamples(index, 'solid');
+    const answer = kindExamples(data, 'solid');
     expect(answer).toContain(KIND_MEANINGS.solid);
     // Rows first, then the label: a label first was copied into a row.
-    expect(answer).toContain('- ["(interval(0, 1), interval(0, 1), interval(0, 1))"] (solid cube)');
-    expect(kindExamples(index, 'parametric curve')).toMatch(/^pcurve:/);
-    expect(kindExamples(index, 'cube')).toContain('No kind');
+    expect(answer).toContain('- ["(interval(0, 1), interval(0, 1), interval(0, 1))"] (unit cube)');
+    expect(kindExamples(data, 'parametric curve')).toMatch(/^pcurve:/);
+    expect(kindExamples(data, 'cube')).toContain('No kind');
   });
 });
 
@@ -91,10 +95,11 @@ describe('functions', () => {
     expect(searchFunctions('convex hull')).toMatch(/^hull\(/);
     expect(searchFunctions('inverse sine')).toMatch(/^asin\(/);
   });
-  it('documents a function with examples that call it', () => {
-    expect(functionDoc(index, 'interval')).toMatch(/^interval\(a, b\)/);
-    expect(functionDoc(index, 'interval')).toContain('examples');
-    expect(functionDoc(index, 'Sin(x)')).toMatch(/^sin\(x\)/);
-    expect(functionDoc(index, 'surface')).toContain('surface is not a built-in function');
+  it("documents a function with the reference's note and examples that call it", () => {
+    expect(functionDoc(data, 'interval')).toMatch(/^interval\(a, b\)/);
+    expect(functionDoc(data, 'interval')).toContain('Every mention of one named interval is the same number');
+    expect(functionDoc(data, 'interval')).toContain('examples');
+    expect(functionDoc(data, 'Sin(x)')).toMatch(/^sin\(x\)/);
+    expect(functionDoc(data, 'surface')).toContain('surface is not a built-in function');
   });
 });

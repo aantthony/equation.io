@@ -17,7 +17,6 @@
 
 import {
   type CheckedRow,
-  type ExamplesIndex,
   checkRows,
   functionDoc,
   kindExamples,
@@ -25,6 +24,7 @@ import {
   searchFunctions,
 } from '../lib/assistant-tools.ts';
 import type { SpanClass } from '../lib/highlight.ts';
+import type { AssistantData } from '../lib/reference.ts';
 import type { GraphState, MoveViewTarget } from './voice.ts';
 
 export interface NativeRow {
@@ -83,7 +83,7 @@ declare global {
       check(rows: string[]): CheckedRow[];
       searchFunctions(query: string): string;
       functionDoc(name: string): Promise<string>;
-      listKinds(): string;
+      listKinds(): Promise<string>;
       kindExamples(kind: string): Promise<string>;
     };
   }
@@ -104,19 +104,19 @@ export function connectNativeApp(graph: NativeGraph): void {
     animateSlider: (name, to, seconds, from) => graph.animateSlider(name, to, seconds, from),
     check: rows => checkRows(rows),
     searchFunctions: query => searchFunctions(query),
-    functionDoc: async name => functionDoc(await examples(), name),
-    listKinds: () => listKinds(),
-    kindExamples: async kind => kindExamples(await examples(), kind),
+    functionDoc: async name => functionDoc(await assistantData(), name),
+    listKinds: async () => listKinds(await assistantData()),
+    kindExamples: async kind => kindExamples(await assistantData(), kind),
   };
   post({ type: 'ready' });
 }
 
-let index: Promise<ExamplesIndex> | undefined;
+let data: Promise<AssistantData> | undefined;
 
-/** The examples menu indexed by kind and by function, built with the app (apple/vite.config.ts), read once. */
-function examples(): Promise<ExamplesIndex> {
-  index ??= fetch('/assistant.json').then(res =>
-    res.ok ? (res.json() as Promise<ExamplesIndex>) : Promise.reject(new Error(`HTTP ${res.status}`)),
+/** What the lookups answer from: the reference's kinds and notes, with examples, built with the app (apple/vite.config.ts), read once. */
+function assistantData(): Promise<AssistantData> {
+  data ??= fetch('/assistant.json').then(res =>
+    res.ok ? (res.json() as Promise<AssistantData>) : Promise.reject(new Error(`HTTP ${res.status}`)),
   );
-  return index;
+  return data;
 }

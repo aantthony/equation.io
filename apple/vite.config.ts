@@ -2,7 +2,9 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { EXAMPLES } from '../web/examples.ts';
 import { examplesIndex } from '../lib/assistant-tools.ts';
+import { assistantData } from '../lib/reference.ts';
 import { splitStatements } from '../lib/statements.ts';
+import { readReference } from '../scripts/reference.ts';
 
 /**
  * The examples menu for the app's menu bar (apple/Equation Examples.swift):
@@ -24,12 +26,12 @@ function examplesJson(): Plugin {
         })),
       }));
       this.emitFile({ type: 'asset', fileName: 'examples.json', source: JSON.stringify(categories) });
-      // The same examples by what they draw and the functions they call, for
-      // the chat's kind_examples and function_doc (lib/assistant-tools.ts).
-      const index = examplesIndex(
-        EXAMPLES.flatMap(([, items]) => items.map(([label, rows]) => [label, rows] as const)),
-      );
-      this.emitFile({ type: 'asset', fileName: 'assistant.json', source: JSON.stringify(index) });
+      // What the chat's lookups answer from (lib/assistant-tools.ts): the
+      // reference's kinds, forms, examples and notes (docs/reference), with
+      // the same menu examples by what they draw and the functions they call.
+      const menu = examplesIndex(EXAMPLES.flatMap(([, items]) => items.map(([label, rows]) => [label, rows] as const)));
+      const data = assistantData(readReference(), menu);
+      this.emitFile({ type: 'asset', fileName: 'assistant.json', source: JSON.stringify(data) });
     },
   };
 }

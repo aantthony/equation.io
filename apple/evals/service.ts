@@ -3,7 +3,8 @@
  * JSON request per line on stdin, one JSON answer per line on stdout.
  *
  *   {"cmd": "tasks"}                          → {tasks: [{id, tags, rows, request}]}
- *   {"cmd": "start", "task": id}              → {rows, status}: the starting graph, as the app's editor reports it
+ *   {"cmd": "start", "task": id, "variant"?}  → {rows, status}: the starting graph, as the app's editor reports it
+ *                                               (variant: whose instructions, lib/assistant-instructions.ts)
  *   {"cmd": "tool", "name": …, "args": {…}}   → {output}: the tool's answer, as the app's bridge returns it
  *   {"cmd": "grade", "reply": …}              → {pass, checks, rows, calls}
  *   {"cmd": "report", "path": …}              → {text}: the summary of a results file (report.ts)
@@ -27,7 +28,7 @@ function answer(request: Record<string, unknown>): unknown {
       const found = TASKS.find(t => t.id === request.task);
       if (!found) return { error: `no task ${String(request.task)}` };
       task = found;
-      episode = new Episode(task.rows);
+      episode = new Episode(task.rows, request.variant === 'reference' ? 'reference' : 'text');
       // Chat.swift's RowStatus: the fields the prompt's row report reads, and the rest it decodes.
       const status = episode.graph
         .nativeStatus()

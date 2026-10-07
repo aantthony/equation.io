@@ -3,7 +3,6 @@
  * makes on it (answered as the app answers), and the grade at the end.
  */
 import {
-  type ExamplesIndex,
   checkRows,
   examplesIndex,
   functionDoc,
@@ -11,7 +10,10 @@ import {
   listKinds,
   searchFunctions,
 } from '../../lib/assistant-tools.ts';
+import type { Variant } from '../../lib/assistant-instructions.ts';
+import { type AssistantData, assistantData } from '../../lib/reference.ts';
 import { EXAMPLES } from '../../web/examples.ts';
+import { readReference } from '../../scripts/reference.ts';
 import type { MoveViewTarget } from '../../web/voice.ts';
 import { type Check, type Outcome, type ToolCall, grade } from './checks.ts';
 import { EvalGraph, readSyntax } from './graph.ts';
@@ -19,18 +21,21 @@ import { EvalGraph, readSyntax } from './graph.ts';
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const text = (v: unknown): string => (typeof v === 'string' ? v : '');
 
-/** The examples menu by kind and function, as the app bundles it (apple/vite.config.ts). */
-let index: ExamplesIndex | undefined;
-const examples = () =>
-  (index ??= examplesIndex(EXAMPLES.flatMap(([, items]) => items.map(([label, rows]) => [label, rows] as const))));
+/** What the lookups answer from, as the app bundles it (apple/vite.config.ts). */
+let data: AssistantData | undefined;
+const lookups = () =>
+  (data ??= assistantData(
+    readReference(),
+    examplesIndex(EXAMPLES.flatMap(([, items]) => items.map(([label, rows]) => [label, rows] as const))),
+  ));
 
 export class Episode {
   readonly graph: EvalGraph;
   readonly start;
   readonly calls: ToolCall[] = [];
 
-  constructor(rows: string[]) {
-    this.graph = new EvalGraph(rows);
+  constructor(rows: string[], variant: Variant = 'text') {
+    this.graph = new EvalGraph(rows, variant);
     this.start = this.graph.graph().rows;
   }
 
@@ -47,7 +52,7 @@ export class Episode {
     else if (tool === 'set_graph') {
       this.graph.set(rows.map(r => r.trim()).filter(Boolean));
       result = this.graph.graph();
-    } else if (tool === 'check') result = checkRows(rows);
+    } else if (tool === 'check') result = checkRows(rows, this.graph.variant);
     else if (tool === 'move_view') {
       const { seconds, ...target } = args;
       result = this.graph.moveView(target as MoveViewTarget, num(seconds) ? seconds : 1.5);
@@ -58,9 +63,9 @@ export class Episode {
           ? this.graph.animateSlider(name, to, num(seconds) ? seconds : 3, num(from) ? from : undefined)
           : { error: 'name must be a string, to and from numbers' };
     } else if (tool === 'search_functions') result = searchFunctions(text(args.query));
-    else if (tool === 'function_doc') result = functionDoc(examples(), text(args.name));
-    else if (tool === 'list_kinds') result = listKinds();
-    else if (tool === 'kind_examples') result = kindExamples(examples(), text(args.kind));
+    else if (tool === 'function_doc') result = functionDoc(lookups(), text(args.name));
+    else if (tool === 'list_kinds') result = listKinds(lookups());
+    else if (tool === 'kind_examples') result = kindExamples(lookups(), text(args.kind));
     else if (tool === 'read_syntax') result = readSyntax(text(args.query));
     else result = { error: `unknown tool ${tool}` };
     this.calls.push({ tool, args, result });
