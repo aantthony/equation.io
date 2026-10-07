@@ -118,21 +118,28 @@ symlog (`y = sinh(Y)`) all come from one feature.
        (PlaneInverse.line);
      - a shape to fill is followed well off the screen, whole, from each
        place the screen shows a vertex where the map does not fold
-       (planeShapes); one round a fold (a square about the polar origin)
-       does not close on the screen and is an outline only;
+       (planeShapes); one round a point the map folds at (a square about
+       the polar origin) unrolls into a curve across a full turn, its
+       outline drawn as a line and what it encloses filled down to the line
+       the fold is shown along, a turn at a time (foldFills, foldPoints);
      - a region's corners are carried once each, on the copy their
        neighbour is on and at the offsets between copies found by
        searching now and then; a corner where the map folds is placed per
        triangle, and that triangle becomes the quad it is on the screen
        (PlaneInverse.triangles).
-     On a window wider than a full turn a line is drawn on one copy, while
-     points, fills and regions are drawn on each.
+     A search starts from the nearest samples and the best of each block of
+     the window, so every copy on the screen is found. On a window wider
+     than a full turn, a line is followed on one copy in each of the
+     window's tiles, cut too small to show a point twice and clipped so the
+     pieces meet (PlaneInverse.tiles, planeLines): every copy is drawn.
    - The window is the screen's (X, Y), since a rectangle of x and y is no
      rectangle on it; the grid and labels are the screen's, and `grid(x, y)`
      or coordinate fields draw their level lines through the map.
+   - Hover finds a curve's intercepts and extrema in x and y, as the row
+     is written (Classified.world), over what the window shows, and places
+     each wherever the screen shows it.
    - Not drawn: histograms (refused) and integral shading (a readout only),
-     both standing on y = 0, a curve here; hover intercepts and extrema,
-     which are not features of the screen's curve.
+     both standing on y = 0, a curve here.
 
 ## Later: equations on a surface
 

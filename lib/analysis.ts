@@ -1022,6 +1022,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
             fieldEnv,
             timeDifferentiator(defs),
           ).cls;
+        if (how === 'substitute' && maps.plane) row.cls = { ...row.cls, world: plain.object };
         // A matrix is read at the screen point, and carried onto the screen
         // by the maps' Jacobian as it is drawn.
         if (row.cls.object.kind === 'tensor-field')

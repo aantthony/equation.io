@@ -4,7 +4,15 @@ import { axisMapping, mapRowExpr } from './axis-map.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { regionSampler } from './path.ts';
 import type { Components } from './math-object.ts';
-import { type PlaneMap, parsePlaneMap, planeInverse, planeShapes, planeToWorld, planeWorldBox } from './plane-map.ts';
+import {
+  type PlaneMap,
+  parsePlaneMap,
+  planeLines,
+  planeInverse,
+  planeShapes,
+  planeToWorld,
+  planeWorldBox,
+} from './plane-map.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
 const POLAR = 'view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..5)';
@@ -162,14 +170,51 @@ describe('a plane map', () => {
         [6, 1],
       ]).map(s => s.closed),
     ).toEqual([true]);
-    // Round the origin, it does not close on the screen: an outline only.
+    // Round the origin it does not close on the screen: its outline is a
+    // line, and what it encloses is filled down to the fold, Y = 0, a turn
+    // at a time, with no outline of its own.
     const square = shape([
       [-1, -1],
       [1, -1],
       [1, 1],
       [-1, 1],
     ]);
-    expect(square.map(s => s.closed)).toEqual([false]);
+    const fills = square.filter(s => s.closed);
+    expect(fills.every(s => s.stroke === false)).toBe(true);
+    expect(square.filter(s => !s.closed).length).toBe(1);
+    // Filled under the scallops across the screen, and not above them.
+    const filled = (X: number, Y: number) => fills.some(f => inPolygon(f.pts, X, Y));
+    for (const X of [-3, -1.5, 0.3, 2.9]) {
+      expect(filled(X, 0.5), `${X}`).toBe(true);
+      expect(filled(X, 2), `${X}`).toBe(false);
+    }
+  });
+
+  it('finds the points the map folds at', () => {
+    const folds = planeInverse(polar(), box).foldPoints();
+    expect(folds.length).toBe(1);
+    expect(Math.hypot(...folds[0])).toBeLessThan(1e-9);
+  });
+
+  it('finds every copy, and draws a line on each, in a window wider than a turn', () => {
+    const wide = planeInverse(polar(), { lo: [-8, -2.5], hi: [8, 7.5] });
+    // (−4, 1) at angle 2.897 + 2πk, radius 4.12, and at angle −0.245 + 2πk,
+    // radius −4.12: seven of them in and around the window.
+    expect(wide.all(-4, 1).length).toBe(7);
+    // The circle r = 2, round from angle 0 to 2π: on the screen, Y = 2 all
+    // across, X from −8 to 8 — on more than one copy.
+    const n = 200;
+    const circle = (k: number): [number, number] => [
+      2 * Math.cos((2 * Math.PI * k) / n),
+      2 * Math.sin((2 * Math.PI * k) / n),
+    ];
+    const lines = planeLines(wide, n, circle, true);
+    const xs: number[] = [];
+    for (const line of lines)
+      for (let i = 0; i + 1 < line.length; i += 2)
+        if (Number.isFinite(line[i]) && Math.abs(line[i + 1] - 2) < 1e-6) xs.push(line[i]);
+    expect(Math.min(...xs)).toBeLessThan(-7.9);
+    expect(Math.max(...xs)).toBeGreaterThan(7.9);
   });
 
   it('draws what crosses the screen between ends far off it', () => {
@@ -252,3 +297,14 @@ describe('rows through a plane map', () => {
     expect(a[5].cls!.object).not.toHaveProperty('shade');
   });
 });
+
+/** Whether (X, Y) is inside polygon pts (flat, even–odd). */
+function inPolygon(pts: number[], X: number, Y: number): boolean {
+  let inside = false;
+  const n = pts.length / 2;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const [ax, ay, bx, by] = [pts[2 * i], pts[2 * i + 1], pts[2 * j], pts[2 * j + 1]];
+    if (ay > Y !== by > Y && X < ((bx - ax) * (Y - ay)) / (by - ay) + ax) inside = !inside;
+  }
+  return inside;
+}

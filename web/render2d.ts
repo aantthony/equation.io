@@ -11,7 +11,14 @@ import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
 import { type AxisMap, type AxisMaps, toScreen as mapToScreen, toScreenOrEdge } from '../lib/axis-map.ts';
-import { FOLLOW_MARGIN, type PlaneInverse, type ScreenBox, planeInverse, planeShapes } from '../lib/plane-map.ts';
+import {
+  type PlaneInverse,
+  type PlaneShape,
+  type ScreenBox,
+  planeInverse,
+  planeLines,
+  planeShapes,
+} from '../lib/plane-map.ts';
 import { type AxisTicks, axisTicks } from '../lib/axis-ticks.ts';
 
 export interface View2D {
@@ -1663,25 +1670,31 @@ function planeOverlay(o: Overlay2D, mark: OverlayMark, inverse: PlaneInverse): v
     const vertex = (k: number): [number, number] => [pts[2 * k], pts[2 * k + 1]];
     const fill = !!(l.fill && l.closed);
     const key = `${fill}${!!l.closed}`;
-    let shapes = planeLines.get(pts);
+    let shapes = planeLineCache.get(pts);
     if (shapes?.inverse !== inverse || shapes.key !== key) {
       shapes = {
         inverse,
         key,
         // A shape to fill stays one shape, on each copy of the plane it shows on.
+        // A line on each copy the window shows.
         out: fill
           ? planeShapes(inverse, pts.length / 2, vertex, mappedSegment)
-          : [
-              {
-                pts: inverse.line(pts.length / 2, vertex, !!l.closed, FOLLOW_MARGIN, mappedSegment),
-                closed: !!l.closed,
-              },
-            ],
+          : planeLines(inverse, pts.length / 2, vertex, !!l.closed, mappedSegment).map(line => ({
+              pts: line,
+              // Cut into pieces, it no longer closes on itself.
+              closed: !!l.closed && line.every(Number.isFinite),
+            })),
       };
-      planeLines.set(pts, shapes);
+      planeLineCache.set(pts, shapes);
     }
     const [first, ...more] = shapes.out.map(shape =>
-      !fill || shape.closed ? { ...l, pts: shape.pts } : { ...l, pts: shape.pts, closed: false, fill: undefined },
+      !fill
+        ? { ...l, pts: shape.pts, closed: shape.closed }
+        : !shape.closed
+          ? { ...l, pts: shape.pts, closed: false, fill: undefined }
+          : shape.stroke === false
+            ? { ...l, pts: shape.pts, noStroke: true }
+            : { ...l, pts: shape.pts },
     );
     Object.assign(l, first ?? { pts: [] });
     o.polylines.push(...more);
@@ -1692,10 +1705,7 @@ function planeOverlay(o: Overlay2D, mark: OverlayMark, inverse: PlaneInverse): v
 
 /** Lines and shapes through a plane map, kept while their points and the
  *  window stay (a sampled curve's points are reused frame after frame). */
-const planeLines = new WeakMap<
-  number[],
-  { inverse: PlaneInverse; key: string; out: Array<{ pts: number[]; closed: boolean }> }
->();
+const planeLineCache = new WeakMap<number[], { inverse: PlaneInverse; key: string; out: PlaneShape[] }>();
 
 /** A cloud's columns through a plane map, kept while the columns and the
  *  window stay (a CSV column is reused frame after frame). */

@@ -37,7 +37,7 @@ import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 import { type AxisMap, type AxisMaps, axisMapping, shownRange, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
-import { type ScreenBox, planeInverse, planeShapes, planeWorldBox } from '../lib/plane-map.ts';
+import { type ScreenBox, planeInverse, planeLines, planeShapes, planeWorldBox } from '../lib/plane-map.ts';
 import { axisTicks } from '../lib/axis-ticks.ts';
 
 export const OG_WIDTH = 600;
@@ -161,8 +161,16 @@ function pixelPath(r: Raster, v: View2D, pts: ArrayLike<number>, closed = false,
     for (let i = 0; i + 1 < pts.length; i += 2) out.push(toScreenX(r, v, pts[i]), toScreenY(r, v, pts[i + 1]));
     return out;
   }
-  const screen = inverse.line(pts.length / 2, k => [pts[2 * k], pts[2 * k + 1]], closed, margin);
-  for (let i = 0; i + 1 < screen.length; i += 2) out.push(...screenPixel(r, v, [screen[i], screen[i + 1]]));
+  // A line on each copy the window shows, as in the app; pieces apart.
+  const vertex = (k: number): [number, number] => [pts[2 * k], pts[2 * k + 1]];
+  const lines =
+    margin === undefined
+      ? planeLines(inverse, pts.length / 2, vertex, closed)
+      : [inverse.line(pts.length / 2, vertex, closed, margin)];
+  for (const screen of lines) {
+    if (out.length) out.push(NaN, NaN);
+    for (let i = 0; i + 1 < screen.length; i += 2) out.push(...screenPixel(r, v, [screen[i], screen[i + 1]]));
+  }
   return out;
 }
 
@@ -1005,7 +1013,8 @@ function renderRow2D(
             px.push(...screenPixel(r, v, [shape.pts[i], shape.pts[i + 1]]));
           const [sx, sy] = [px.filter((_, i) => i % 2 === 0), px.filter((_, i) => i % 2 === 1)];
           if (shape.closed && px.every(Number.isFinite)) fillPolygon(r, sx, sy, color, 0.16);
-          strokePath(r, shape.closed ? [...px, px[0], px[1]] : px, color);
+          // A fill round a fold has its outline drawn by another shape.
+          if (shape.stroke !== false) strokePath(r, shape.closed ? [...px, px[0], px[1]] : px, color);
         }
         return;
       }
