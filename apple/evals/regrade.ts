@@ -16,7 +16,7 @@ for (const task of results.tasks) {
   const found = TASKS.find(t => t.id === task.id);
   if (!found) continue;
   for (const run of task.runs) {
-    const episode = new Episode(found.rows);
+    const episode = new Episode(found.rows, results.knowledge === 'reference' ? 'reference' : 'text');
     for (const call of run.calls) episode.call(call.tool, call.args as Record<string, unknown>);
     const { pass, checks } = episode.grade(found.checks, run.reply);
     run.checks = checks;

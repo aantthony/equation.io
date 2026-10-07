@@ -33,6 +33,9 @@ export interface Results {
   /** Tokens the instructions and tool definitions take before any request. */
   instructionsTokens?: number;
   toolsTokens?: number;
+  /** What the model knew the language from: the app's lookup tools, or a whole reference in its instructions (Runner.swift --reference). */
+  knowledge?: 'tools' | 'reference';
+  reference?: { path: string; bytes: number };
   tasks: { id: string; request: string; runs: RunResult[] }[];
 }
 
@@ -42,6 +45,18 @@ const sd = (xs: number[]) => {
   return Math.sqrt(mean(xs.map(x => (x - m) ** 2)));
 };
 const pct = (x: number) => `${Math.round(x * 100)}%`;
+
+/** gpt-5.5's price per million tokens: input, cached input, output (third-party listings; see RESULTS.md). */
+const PRICE = { input: 5, cached: 0.5, output: 30 };
+
+/** What a hosted run cost, from its token counts; undefined for the on-device model. */
+export function cost(runs: RunResult[]): number | undefined {
+  if (!runs.some(r => r.cachedInputTokens !== undefined)) return undefined;
+  const sum = (f: (r: RunResult) => number | undefined) => runs.reduce((s, r) => s + (f(r) ?? 0), 0);
+  const cached = sum(r => r.cachedInputTokens);
+  const input = sum(r => r.inputTokens) - cached;
+  return (input * PRICE.input + cached * PRICE.cached + sum(r => r.outputTokens) * PRICE.output) / 1e6;
+}
 const fixed = (x: number, digits = 1) => (Number.isFinite(x) ? x.toFixed(digits) : '–');
 
 /** Overall pass rate, and its spread across repetitions (each repetition runs every task once). */
@@ -81,8 +96,12 @@ function commonFailure(runs: RunResult[]): string {
 export function report(results: Results): string {
   const { rate, sd: spread, runs } = overall(results);
   const all = results.tasks.flatMap(t => t.runs);
+  const spent = cost(all);
   const lines = [
-    `${results.modelId ?? results.model}, ${results.date}: ${results.tasks.length} tasks × ${results.runs} runs`,
+    `${results.modelId ?? results.model}, ${results.date}: ${results.tasks.length} tasks × ${results.runs} runs` +
+      (results.knowledge === 'reference'
+        ? `, the reference in context (${results.reference?.path}, ${results.reference?.bytes} bytes)`
+        : ''),
     `Pass rate ${pct(rate)} (${all.filter(r => r.pass).length}/${runs}), ±${pct(spread)} across repetitions`,
     `Per run: ${fixed(mean(all.map(r => r.calls.length)))} tool calls, ` +
       `${fixed(mean(all.flatMap(r => r.inputTokens ?? [])), 0)} input + ${fixed(mean(all.flatMap(r => r.outputTokens ?? [])), 0)} output tokens, ` +
@@ -93,7 +112,8 @@ export function report(results: Results): string {
       (results.instructionsTokens !== undefined
         ? `; instructions ${results.instructionsTokens} + tools ${results.toolsTokens} tokens of ${results.contextSize}`
         : ''),
-    `Context overflows: ${all.filter(overflowed).length}. Calls per run by tool: ${callsByTool(all)}`,
+    `Context overflows: ${all.filter(overflowed).length}. Calls per run by tool: ${callsByTool(all)}` +
+      (spent === undefined ? '' : `. Cost about $${spent.toFixed(2)}`),
     '',
     '| task | pass | calls | tokens in/out | most common failure |',
     '| --- | --- | --- | --- | --- |',

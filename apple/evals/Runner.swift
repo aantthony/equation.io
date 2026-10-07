@@ -11,6 +11,9 @@ import FoundationModels
 //   pnpm app:eval --runs 1 --task unit-cube --task slider-amplitude
 //
 //   pnpm app:eval --model openai          # a hosted baseline (gpt-5.5; --openai-model to change)
+//   pnpm app:eval --model openai --reference web/public/llms.txt
+//                                          # the whole reference in its instructions, in place
+//                                          # of the lookup tools (too long for the device's 8K)
 //
 // Results land in apple/evals/results/, one JSON file per invocation.
 
@@ -134,20 +137,26 @@ struct OnDeviceModel: EvalModel {
 /// An OpenAI model through Chat Completions, as a hosted baseline: the app's
 /// instructions, and its tools with their schemas (each tool's @Generable
 /// arguments, encoded as JSON Schema) and their own code, so a call is
-/// trimmed and clamped as in the app.
+/// trimmed and clamped as in the app. With a `reference`, the instructions
+/// are referenceInstructions followed by the whole reference, and the
+/// lookup tools are left out.
 struct OpenAIModel: EvalModel {
   let model: String
   let key: String
-  var name: String { "openai-\(model)" }
+  var reference: String?
+  var name: String { "openai-\(model)\(reference == nil ? "" : "-reference")" }
+  /// The tools a model with the reference in its instructions keeps: the graph's, and check.
+  static let referenceTools: Set<String> = ["get_graph", "set_graph", "move_view", "animate_slider", "check"]
   // Hosted reasoning takes longer a round than the device; a stuck run still ends.
   var timeout: Duration { .seconds(600) }
   /// Model calls in one request; a run still calling tools after this many fails.
   let maxRounds = 20
 
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
-    let tools = ChatModel.tools(graph)
+    let tools = ChatModel.tools(graph).filter { reference == nil || Self.referenceTools.contains($0.name) }
+    let instructions = reference.map { "\(ChatModel.referenceInstructions)\n\n\($0)" } ?? ChatModel.instructions
     var messages: [[String: Any]] = [
-      ["role": "system", "content": ChatModel.instructions], ["role": "user", "content": prompt],
+      ["role": "system", "content": instructions], ["role": "user", "content": prompt],
     ]
     var turn = Turn(reply: "", inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0)
     for _ in 0..<maxRounds {
@@ -260,10 +269,12 @@ enum ModelChoice: String {
   case onDevice = "on-device"
   case openAI = "openai"
 
-  func make(openAIModel: String) throws -> any EvalModel {
+  func make(openAIModel: String, reference: String?) throws -> any EvalModel {
     switch self {
-    case .onDevice: OnDeviceModel()
-    case .openAI: OpenAIModel(model: openAIModel, key: try OpenAIModel.key())
+    case .onDevice:
+      guard reference == nil else { throw RunnerError("the reference doesn't fit the on-device model's 8K context") }
+      return OnDeviceModel()
+    case .openAI: return OpenAIModel(model: openAIModel, key: try OpenAIModel.key(), reference: reference)
     }
   }
 }
@@ -288,6 +299,7 @@ struct Runner {
     var only: [String] = []
     var choice = ModelChoice.onDevice
     var openAIModel = "gpt-5.5"
+    var referencePath: String?
     var arguments = CommandLine.arguments.dropFirst()
     while let flag = arguments.popFirst() {
       switch flag {
@@ -297,11 +309,14 @@ struct Runner {
         guard let model = ModelChoice(rawValue: arguments.popFirst() ?? "") else { throw RunnerError("unknown model") }
         choice = model
       case "--openai-model": openAIModel = arguments.popFirst() ?? openAIModel
+      case "--reference": referencePath = arguments.popFirst()
       default:
-        throw RunnerError("usage: runner [--runs N] [--task id]… [--model on-device|openai] [--openai-model id]")
+        throw RunnerError(
+          "usage: runner [--runs N] [--task id]… [--model on-device|openai] [--openai-model id] [--reference llms.txt]")
       }
     }
-    let model = try choice.make(openAIModel: openAIModel)
+    let reference = try referencePath.map { try String(contentsOfFile: $0, encoding: .utf8) }
+    let model = try choice.make(openAIModel: openAIModel, reference: reference)
     let service = try Service()
     let graph = ServiceGraph(service)
     let all = try service.request(["cmd": "tasks"])["tasks"] as? [[String: Any]] ?? []
@@ -309,7 +324,9 @@ struct Runner {
 
     var results: [String: Any] = [
       "model": model.name, "date": ISO8601DateFormatter().string(from: .now), "runs": runs,
+      "knowledge": reference == nil ? "tools" : "reference",
     ]
+    if let referencePath, let reference { results["reference"] = ["path": referencePath, "bytes": reference.utf8.count] }
     if choice == .onDevice {
       let system = SystemLanguageModel.default
       results["contextSize"] = system.contextSize
@@ -323,7 +340,10 @@ struct Runner {
       let request = task["request"] as? String ?? ""
       var taskRuns: [[String: Any]] = []
       for k in 0..<runs {
-        taskRuns.append(try await runOnce(id: id, request: request, model: model, service: service, graph: graph))
+        taskRuns.append(
+          try await runOnce(
+            id: id, request: request, variant: reference == nil ? "text" : "reference", model: model, service: service,
+            graph: graph))
         let run = taskRuns[k]
         let failed = (run["checks"] as? [[String: Any]] ?? []).filter { $0["pass"] as? Bool == false }
         let why = run["error"] as? String ?? failed.map { "\($0["name"] ?? ""): \($0["why"] ?? "")" }.joined(separator: "; ")
@@ -348,9 +368,9 @@ struct Runner {
 
   /// One task, once: a fresh graph and conversation, the request, then the grade.
   static func runOnce(
-    id: String, request: String, model: any EvalModel, service: Service, graph: ServiceGraph
+    id: String, request: String, variant: String, model: any EvalModel, service: Service, graph: ServiceGraph
   ) async throws -> [String: Any] {
-    let start = try service.request(["cmd": "start", "task": id])
+    let start = try service.request(["cmd": "start", "task": id, "variant": variant])
     let rows = start["rows"] as? [String] ?? []
     let statusData = try JSONSerialization.data(withJSONObject: start["status"] ?? [])
     let status = try JSONDecoder().decode([RowStatus].self, from: statusData)

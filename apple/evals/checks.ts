@@ -2,7 +2,9 @@
  * What an eval task checks, against what a run left behind: the graph's rows
  * as the analyzer reads them, every tool call in order, and the reply.
  */
+import { analyzeRows } from '../../lib/analysis.ts';
 import type { CpuPlan } from '../../lib/compiler.ts';
+import { complexParts } from '../../lib/complex-parts.ts';
 import { type Expr, evaluate } from '../../lib/expr.ts';
 import type { RowStatus } from '../../web/voice.ts';
 import type { EvalGraph } from './graph.ts';
@@ -114,7 +116,7 @@ export const value = (expected: number, tolerance = 1e-3) =>
   check(`a readout ≈ ${expected}`, o => {
     const values = o.rows.flatMap(r => (r.value ? [r.value] : []));
     const near = values.some(v => {
-      const n = parseFloat(v.replace(/^=\s*/, ''));
+      const n = parseFloat(v.replace(/^[=≈]\s*/, ''));
       return Math.abs(n - expected) <= tolerance * Math.max(1, Math.abs(expected));
     });
     return near ? true : `readouts: ${values.join(', ') || 'none'}`;
@@ -172,7 +174,11 @@ export const replySays = (pattern: RegExp) =>
   check(`reply says ${pattern}`, o => (pattern.test(o.reply) ? true : `reply: ${JSON.stringify(o.reply)}`));
 
 /** The env a row's plan evaluates in: its constants at t = 0. */
-const env = (o: Outcome, vars: Record<string, number>) => ({ ...o.graph.analysis.constEnv, t: 0, ...vars });
+const env = (o: Outcome, vars: Record<string, number>): Record<string, number> => ({
+  ...o.graph.analysis.constEnv,
+  t: 0,
+  ...vars,
+});
 const plans = (o: Outcome) =>
   o.graph.analysis.rows.flatMap((r, i) => (r.error || !r.cpu ? [] : [{ text: o.graph.rows[i], cpu: r.cpu }]));
 const tryEval = (f: () => number) => {
@@ -183,27 +189,116 @@ const tryEval = (f: () => number) => {
   }
 };
 
+/** Whether a 2D curve's plan passes within `tolerance` of a point: an implicit curve's residual vanishes there. */
+function onCurve(cpu: CpuPlan, vars: Record<string, number>, [x, y]: number[], tolerance: number): boolean {
+  if (cpu.type === 'implicit2d') return Math.abs(tryEval(() => evaluate(cpu.residual, { ...vars, x, y }))) < tolerance;
+  if (cpu.type === 'pcurve' && cpu.dim === 2)
+    return Array.from({ length: 2001 }, (_, k) =>
+      cpu.comps.map(c => tryEval(() => evaluate(c, { ...vars, u: k / 2000 }))),
+    ).some(([sx, sy]) => Math.hypot(sx - x, sy - y) < Math.max(tolerance, 0.02));
+  return false;
+}
+
 /**
  * Some 2D curve passes through every point: an implicit curve's residual
  * vanishes there, or a parametric curve comes within `tolerance` of it.
  */
 export const curveThrough = (what: string, points: [number, number][], tolerance = 1e-3) =>
+  check(what, o =>
+    plans(o).some(p => points.every(pt => onCurve(p.cpu, env(o, {}), pt, tolerance)))
+      ? true
+      : `no curve through ${JSON.stringify(points)}`,
+  );
+
+/** No 2D curve passes through any of the points (a piece drawn past where it should stop). */
+export const curveAvoids = (what: string, points: [number, number][], tolerance = 1e-3) =>
   check(what, o => {
-    const on = (cpu: CpuPlan) => {
-      if (cpu.type === 'implicit2d')
-        return points.every(([x, y]) => Math.abs(tryEval(() => evaluate(cpu.residual, env(o, { x, y })))) < tolerance);
-      if (cpu.type === 'pcurve' && cpu.dim === 2) {
-        const samples = Array.from({ length: 2001 }, (_, k) =>
-          cpu.comps.map(c => tryEval(() => evaluate(c, env(o, { u: k / 2000 })))),
-        );
-        return points.every(([x, y]) =>
-          samples.some(([sx, sy]) => Math.hypot(sx - x, sy - y) < Math.max(tolerance, 0.02)),
-        );
-      }
-      return false;
-    };
-    return plans(o).some(p => on(p.cpu)) ? true : `no curve through ${JSON.stringify(points)}`;
+    const hit = plans(o).find(p => points.some(pt => onCurve(p.cpu, env(o, {}), pt, tolerance)));
+    return hit ? `${JSON.stringify(hit.text)} passes through one of ${JSON.stringify(points)}` : true;
   });
+
+/** Where a plan's `coords` (a point or a label) evaluate to. */
+const coordsAt = (o: Outcome, coords: Expr[]) => coords.map(c => tryEval(() => evaluate(c, env(o, {}))));
+const near = (p: number[], q: number[], tolerance = 1e-6) =>
+  p.length === q.length && p.every((v, i) => Math.abs(v - q[i]) < tolerance);
+
+/** A point is drawn at `p`: a point row, or a named point. */
+export const pointAt = (what: string, p: number[]) =>
+  check(what, o => {
+    const rows = plans(o).some(({ cpu }) => cpu.type === 'point' && near(coordsAt(o, cpu.coords), p));
+    const vars = env(o, {});
+    const named = [...o.graph.analysis.defs.points.keys()].some(n =>
+      near(
+        ['x', 'y', 'z'].slice(0, p.length).map(c => vars[`${n}_${c}`]),
+        p,
+      ),
+    );
+    return rows || named ? true : `no point at ${JSON.stringify(p)}`;
+  });
+
+/** A label is written at `p`. */
+export const labelAt = (what: string, p: number[]) =>
+  check(what, o => {
+    const labels = plans(o).filter(({ cpu }) => cpu.type === 'label');
+    return labels.some(({ cpu }) => cpu.type === 'label' && near(coordsAt(o, cpu.coords), p))
+      ? true
+      : `labels at ${JSON.stringify(labels.map(({ cpu }) => (cpu.type === 'label' ? coordsAt(o, cpu.coords) : [])))}`;
+  });
+
+/**
+ * A slider and a 2D curve that follows it as `curve(value)` says: the curve
+ * passes through the points `curve` gives for the slider's value, and for
+ * another value once the slider row is changed and the rows read again.
+ */
+export const curveFollowsSlider = (what: string, curve: (value: number) => [number, number][]) =>
+  check(what, o => {
+    const texts = o.graph.rows;
+    for (const [i, row] of o.graph.analysis.rows.entries()) {
+      const def = row.def;
+      if (def?.kind !== 'const' || !o.rows[i]?.meaning?.includes('with a slider')) continue;
+      const value = o.graph.analysis.constEnv[def.name];
+      const follows = (analysis: typeof o.graph.analysis, v: number) =>
+        analysis.rows.some(
+          r => !r.error && r.cpu && curve(v).every(pt => onCurve(r.cpu!, { ...analysis.constEnv, t: 0 }, pt, 1e-3)),
+        );
+      const moved = value + 0.7;
+      const again = analyzeRows(
+        texts.map((t, k) => (k === i ? `${def.name} = ${moved}` : t)),
+        { readouts: true },
+      );
+      if (follows(o.graph.analysis, value) && follows(again, moved)) return true;
+    }
+    return 'no curve that follows a slider';
+  });
+
+/**
+ * A complex function of w drawn as `kind` (domain2d, conformal2d, complex2d)
+ * whose value matches `f` at a few points of the plane.
+ */
+export const complexFunction = (what: string, kind: CpuPlan['type'], f: (x: number, y: number) => [number, number]) =>
+  check(what, o => {
+    const fits = (cpu: CpuPlan) => {
+      if (cpu.type !== kind || !('expr' in cpu)) return false;
+      const [re, im] = complexParts(cpu.expr as Expr);
+      return [
+        [0.7, 0.4],
+        [-1.3, 0.9],
+        [0.2, -2.1],
+      ].every(([x, y]) => near([evaluate(re, env(o, { x, y })), evaluate(im, env(o, { x, y }))], f(x, y), 1e-6));
+    };
+    return plans(o).some(p => fits(p.cpu)) ? true : `no ${kind} row matches`;
+  });
+
+/** Some 3D shape (a parametric surface, a solid's faces, a hull) whose sampled points pass `test`. */
+export const shape3D = (what: string, test: (samples: number[][]) => boolean) =>
+  check(what, o =>
+    plans(o).some(p => {
+      const samples = shapePoints(o, p.cpu, 21);
+      return samples.length > 0 && samples.every(s => s.length === 3) && test(samples);
+    })
+      ? true
+      : 'no 3D shape fits',
+  );
 
 /** Some parametric curve (2D or 3D), sampled over u in [0, 1], passes `test`. */
 export const parametricCurve = (what: string, test: (samples: number[][]) => boolean, dim?: 2 | 3) =>
@@ -223,12 +318,14 @@ export const parametric = (what: string, test: (p: number[]) => boolean, dim?: 2
   parametricCurve(what, samples => samples.every(test), dim);
 
 /** The points a solid's faces or a 3D polygon's vertices reach (finite ones), sampled. */
-function shapePoints(o: Outcome, cpu: CpuPlan): number[][] {
+function shapePoints(o: Outcome, cpu: CpuPlan, n = 11): number[][] {
   const at = (exprs: Expr[], vars: Record<string, number>) => exprs.map(e => tryEval(() => evaluate(e, env(o, vars))));
   let pts: number[][] = [];
-  if (cpu.type === 'family') return cpu.members.flatMap(m => shapePoints(o, m.cpu));
+  if (cpu.type === 'family') return cpu.members.flatMap(m => shapePoints(o, m.cpu, n));
   if (cpu.type === 'psurface')
-    pts = Array.from({ length: 11 * 11 }, (_, k) => at(cpu.comps, { u: (k % 11) / 10, v: Math.floor(k / 11) / 10 }));
+    pts = Array.from({ length: n * n }, (_, k) =>
+      at(cpu.comps, { u: (k % n) / (n - 1), v: Math.floor(k / n) / (n - 1) }),
+    );
   if (cpu.type === 'polygon' && cpu.dim === 3) {
     const { over } = cpu;
     pts = over
@@ -279,10 +376,12 @@ const CLAIMS: [RegExp, string[]][] = [
   // Not motion: "goes round in a circle", "orbits the unit circle".
   [
     /(?<!\b(in|round|around|along|orbits?|orbiting) (a|the) (unit )?)\bcircle\b/i,
-    ['implicit2d', 'pcurve', 'polygon', 'pregion'],
+    ['implicit2d', 'pcurve', 'polygon', 'pregion', 'spacecurve'],
   ],
   [/\b(torus|donut|doughnut)\b/i, ['psurface', 'implicit3d', 'solid']],
-  [/\b(surface|saddle|paraboloid)\b/i, ['implicit3d', 'psurface']],
+  [/\b(surface|paraboloid)\b/i, ['implicit3d', 'psurface']],
+  // A flow has saddles too: "the circles open into a saddle".
+  [/\bsaddle\b/i, ['implicit3d', 'psurface', 'vfield2d', 'vfield3d']],
   [/\b(vector field|streamlines?)\b/i, ['vfield2d', 'vfield3d']],
   [/\blabel(led|s)?\b/i, ['label']],
   // Not "the point where they cross", or "the curve, showing the points where…".
@@ -313,8 +412,18 @@ export const honestReply = () =>
     return true;
   });
 
+/**
+ * The reply is plain text: the app shows it as it is, so LaTeX (`\(x^2\)`,
+ * `\pi`, `$x$`) shows its backslashes and dollars.
+ */
+export const plainReply = () =>
+  check('reply has no LaTeX', o => {
+    const latex = /\\[()[\]]|\\[a-zA-Z]+|\$[^$\s][^$]*\$/.exec(o.reply);
+    return latex ? `reply has ${JSON.stringify(latex[0])}` : true;
+  });
+
 /** Applies to every task. */
-export const ALWAYS: Check[] = [clean(), oneShapePerRow(), honestReply()];
+export const ALWAYS: Check[] = [clean(), oneShapePerRow(), honestReply(), plainReply()];
 
 export function grade(
   checks: Check[],

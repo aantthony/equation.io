@@ -41,6 +41,10 @@
               "why": "says \"cube\", but the rows are implicit3d, implicit2d, implicit2d"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, implicit2d, implicit2d"
@@ -186,6 +190,10 @@
               "why": "says \"cube\", but the rows are definition (point), implicit3d, view(...) sets x twice., implicit2d, implicit2d, label"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: definition (point), implicit3d, view(...) sets x twice., implicit2d, implicit2d, label"
@@ -261,6 +269,10 @@
               "why": "says \"cube\", but the rows are definition (point), implicit3d"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: definition (point), implicit3d"
@@ -313,6 +325,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -554,6 +570,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: definition (point), hull needs a list of points."
@@ -615,6 +635,10 @@
               "name": "reply names only what was drawn",
               "pass": false,
               "why": "says \"cube\", but the rows are implicit3d, vlist"
+            },
+            {
+              "name": "reply has no LaTeX",
+              "pass": true
             },
             {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
@@ -813,6 +837,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, plist, hull takes points with matching dimensions."
@@ -871,6 +899,10 @@
               "name": "reply names only what was drawn",
               "pass": false,
               "why": "says \"cube\", but the rows are implicit3d, tuple"
+            },
+            {
+              "name": "reply has no LaTeX",
+              "pass": true
             },
             {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
@@ -952,6 +984,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, Independent lists combine every value with every other — that is 531441 combinations. Name one list and reuse it to pair values up instead."
@@ -1017,6 +1053,10 @@
               "why": "says \"cube\", but the rows are implicit3d, plist"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, plist"
@@ -1077,6 +1117,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1128,6 +1172,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1172,6 +1220,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1222,6 +1274,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1266,6 +1322,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1343,6 +1403,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1402,6 +1466,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1472,6 +1540,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1522,6 +1594,10 @@
               "name": "reply names only what was drawn",
               "pass": false,
               "why": "says \"slider\", but the rows are implicit2d, definition (const)"
+            },
+            {
+              "name": "reply has no LaTeX",
+              "pass": true
             },
             {
               "name": "a slider that a drawn row uses",
@@ -1583,6 +1659,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1648,6 +1728,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1724,6 +1808,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /sin/ moves with t",
               "pass": true
             },
@@ -1779,6 +1867,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1846,6 +1938,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /sin/ moves with t",
               "pass": false,
               "why": "animated: []"
@@ -1907,6 +2003,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1995,6 +2095,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": false,
               "why": "animated: []"
@@ -2065,6 +2169,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2146,6 +2254,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2233,6 +2345,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2384,6 +2500,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": false,
               "why": "animated: []"
@@ -2441,6 +2561,10 @@
               "name": "reply names only what was drawn",
               "pass": false,
               "why": "says \"slider\", but the rows are implicit2d"
+            },
+            {
+              "name": "reply has no LaTeX",
+              "pass": true
             },
             {
               "name": "a slider that a drawn row uses",
@@ -2526,6 +2650,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -2589,6 +2717,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2666,6 +2798,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -2732,6 +2868,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2807,6 +2947,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "animate_slider: glides a to 3",
               "pass": true
             },
@@ -2863,6 +3007,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "animate_slider: glides a to 3",
               "pass": true
             },
@@ -2916,6 +3064,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2976,6 +3128,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "animate_slider: glides a to 3",
               "pass": true
             },
@@ -3029,6 +3185,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3090,6 +3250,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "2 drawn rows",
               "pass": true
             },
@@ -3142,6 +3306,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "2 drawn rows",
               "pass": true
             },
@@ -3191,6 +3359,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3257,6 +3429,10 @@
               "why": "says \"slider\", but the rows are definition (const), implicit2d"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "2 drawn rows",
               "pass": false,
               "why": "1 drawn rows (implicit2d)"
@@ -3309,6 +3485,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3377,6 +3557,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
@@ -3423,6 +3607,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3475,6 +3663,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
@@ -3521,6 +3713,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3573,6 +3769,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3629,6 +3829,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3692,6 +3896,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a readout ≈ 2",
               "pass": true
             },
@@ -3752,6 +3960,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a readout ≈ 2",
               "pass": true
             },
@@ -3801,6 +4013,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3864,6 +4080,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a readout ≈ 2",
               "pass": true
             },
@@ -3918,6 +4138,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3978,6 +4202,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a readout ≈ 9",
               "pass": true
             },
@@ -4028,6 +4256,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4083,6 +4315,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a readout ≈ 9",
               "pass": true
             },
@@ -4134,6 +4370,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4415,6 +4655,10 @@
               "why": "says \"area between\", but the rows are implicit2d"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4577,6 +4821,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4904,6 +5152,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4955,6 +5207,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5261,6 +5517,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -5333,6 +5593,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": false,
               "why": "rows now [\"y = x^3 - 3x\",\"y = x^3 - 3x #e21\"]"
@@ -5385,6 +5649,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5454,6 +5722,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": false,
               "why": "rows now [\"y = x^3 - 3x\",\"y = x^3 #e2f\"]"
@@ -5500,6 +5772,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5566,6 +5842,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5639,6 +5919,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -5698,6 +5982,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5763,6 +6051,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -5822,6 +6114,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5887,6 +6183,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -5945,6 +6245,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the rose r = sin(4θ)",
               "pass": true
             }
@@ -5993,6 +6297,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the rose r = sin(4θ)",
               "pass": true
             }
@@ -6038,6 +6346,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6090,6 +6402,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the rose r = sin(4θ)",
               "pass": true
             }
@@ -6135,6 +6451,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6192,6 +6512,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
               "why": "no parametric curve fits"
@@ -6240,6 +6564,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6293,6 +6621,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
               "why": "no parametric curve fits"
@@ -6342,6 +6674,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
               "why": "no parametric curve fits"
@@ -6388,6 +6724,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6446,6 +6786,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a circle of radius 3",
               "pass": false,
               "why": "no parametric curve fits"
@@ -6492,6 +6836,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6544,6 +6892,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a circle of radius 3",
               "pass": false,
               "why": "no parametric curve fits"
@@ -6590,6 +6942,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6782,6 +7138,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a circle of radius 3",
               "pass": false,
               "why": "no parametric curve fits"
@@ -6842,6 +7202,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 2D curve that is not an ellipse (its frequencies differ)",
               "pass": true
             }
@@ -6890,6 +7254,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6943,6 +7311,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 2D curve that is not an ellipse (its frequencies differ)",
               "pass": true
             }
@@ -6993,6 +7365,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 2D curve that is not an ellipse (its frequencies differ)",
               "pass": true
             }
@@ -7039,6 +7415,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7144,6 +7524,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7358,6 +7742,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a sphere of radius 2",
               "pass": false,
               "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
@@ -7528,6 +7916,10 @@
               "why": "says \"sphere\", but the rows are Incomplete expression., Incomplete expression., Incomplete expression., Incomplete expression., Incomplete expression., Incomplete expression., pcurve"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a sphere of radius 2",
               "pass": false,
               "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
@@ -7583,6 +7975,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a sphere of radius 2",
               "pass": false,
               "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
@@ -7633,6 +8029,10 @@
               "why": "says \"sphere\", but the rows are pcurve"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a sphere of radius 2",
               "pass": false,
               "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
@@ -7675,6 +8075,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7744,6 +8148,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the saddle z = x² − y²",
               "pass": false,
               "why": "no surface through [[1,0,1],[0,1,-1],[2,1,3]]"
@@ -7787,6 +8195,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the saddle z = x² − y²",
               "pass": true
             }
@@ -7826,6 +8238,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7881,6 +8297,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7975,6 +8395,10 @@
               "why": "says \"torus\", but the rows are A point cannot be a component of a vector."
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a psurface or implicit3d or solid row",
               "pass": false,
               "why": "kinds: A point cannot be a component of a vector."
@@ -8042,6 +8466,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8189,6 +8617,10 @@
               "why": "says \"torus\", but the rows are family"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a psurface or implicit3d or solid row",
               "pass": false,
               "why": "kinds: family"
@@ -8233,6 +8665,10 @@
               "name": "reply names only what was drawn",
               "pass": false,
               "why": "says \"circle\", but the rows are psurface"
+            },
+            {
+              "name": "reply has no LaTeX",
+              "pass": true
             },
             {
               "name": "a psurface or implicit3d or solid row",
@@ -8299,6 +8735,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8375,6 +8815,10 @@
               "name": "reply names only what was drawn",
               "pass": false,
               "why": "says \"circle\", but the rows are family"
+            },
+            {
+              "name": "reply has no LaTeX",
+              "pass": true
             },
             {
               "name": "a cone",
@@ -8464,6 +8908,10 @@
               "why": "says \"shaded\", but the rows are definition (interval), projected2d, projected2d, implicit3d"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a cone",
               "pass": false,
               "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: definition (interval), projected2d, projected2d, implicit3d"
@@ -8510,6 +8958,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8573,6 +9025,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a cone",
               "pass": false,
               "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: pcurve"
@@ -8620,6 +9076,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8679,6 +9139,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a vfield2d row",
               "pass": true
             }
@@ -8724,6 +9188,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8775,6 +9243,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a vfield2d row",
               "pass": true
             }
@@ -8823,6 +9295,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a vfield2d row",
               "pass": true
             }
@@ -8868,6 +9344,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -9360,6 +9840,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a plist or point or definition (point) row",
               "pass": true
             },
@@ -9414,6 +9898,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -9862,6 +10350,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a plist or point or definition (point) row",
               "pass": true
             },
@@ -9979,6 +10471,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10221,6 +10717,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a plist or point or definition (point) row",
               "pass": false,
               "why": "kinds: definition (const), A is already defined., A is already defined., A is already defined., A is already defined., A is already defined., A is already defined., A is already defined., A is already defined., A is already defined., A is already defined."
@@ -10301,6 +10801,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a definition (point) or point row like /\\(\\s*2\\s*,\\s*3\\s*\\)/",
               "pass": true
             },
@@ -10355,6 +10859,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10415,6 +10923,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a definition (point) or point row like /\\(\\s*2\\s*,\\s*3\\s*\\)/",
               "pass": true
             },
@@ -10472,6 +10984,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a definition (point) or point row like /\\(\\s*2\\s*,\\s*3\\s*\\)/",
               "pass": true
             },
@@ -10526,6 +11042,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10597,6 +11117,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10911,6 +11435,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*A\\s*=/",
               "pass": true
             },
@@ -10965,6 +11493,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -11027,6 +11559,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -11122,6 +11658,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*A\\s*=/",
               "pass": true
             },
@@ -11197,6 +11737,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a label row like /label\\s*\\(\\s*\\(\\s*(2\\s*,\\s*4|0\\s*,\\s*0)\\s*\\)/",
               "pass": true
             },
@@ -11253,6 +11797,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -11316,6 +11864,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a label row like /label\\s*\\(\\s*\\(\\s*(2\\s*,\\s*4|0\\s*,\\s*0)\\s*\\)/",
               "pass": false,
               "why": "kinds: implicit2d, implicit2d, label"
@@ -11376,6 +11928,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a label row like /label\\s*\\(\\s*\\(\\s*(2\\s*,\\s*4|0\\s*,\\s*0)\\s*\\)/",
               "pass": true
             },
@@ -11433,6 +11989,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -11500,6 +12060,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*y\\s*=\\s*x\\^2\\s*#([0-9a-f]{3}|[0-9a-f]{6})\\b/i",
               "pass": true
             },
@@ -11555,6 +12119,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -11621,6 +12189,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*y\\s*=\\s*x\\^2\\s*#([0-9a-f]{3}|[0-9a-f]{6})\\b/i",
               "pass": false,
               "why": "0: []"
@@ -11684,6 +12256,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*y\\s*=\\s*x\\^2\\s*#([0-9a-f]{3}|[0-9a-f]{6})\\b/i",
               "pass": true
             },
@@ -11738,6 +12314,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -11812,6 +12392,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -11896,6 +12480,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps f(x) = x^3 - x",
               "pass": true
             },
@@ -11950,6 +12538,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -12009,6 +12601,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -12143,6 +12739,10 @@
               "why": "says \"slider\", but the rows are definition (const), Unknown variable: A. Define \"A = 1\" to make a slider., implicit2d, implicit2d, implicit2d"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps f(x) = x^3 - x",
               "pass": false,
               "why": "\"f(x) = x^3 - x\" was changed or removed"
@@ -12210,6 +12810,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the parabola x² − 4",
               "pass": true
             }
@@ -12245,6 +12849,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -12291,6 +12899,10 @@
               "why": "says \"shaded\", but the rows are implicit2d"
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the parabola x² − 4",
               "pass": true
             }
@@ -12330,6 +12942,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -12381,6 +12997,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -12437,6 +13057,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -12679,6 +13303,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps y = x^2",
               "pass": true
             },
@@ -12741,6 +13369,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps y = x^2",
               "pass": true
             },
@@ -12798,6 +13430,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -12866,6 +13502,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps y = x^2",
               "pass": true
             },
@@ -12928,6 +13568,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 drawn rows",
               "pass": true
             },
@@ -12978,6 +13622,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 drawn rows",
               "pass": true
             },
@@ -13018,6 +13666,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -13067,6 +13719,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 drawn rows",
               "pass": false,
               "why": "2 drawn rows (implicit2d, implicit2d)"
@@ -13108,6 +13764,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -13168,6 +13828,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "only the parabola is left",
               "pass": true
             }
@@ -13212,6 +13876,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -13262,6 +13930,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "only the parabola is left",
               "pass": true
             }
@@ -13306,6 +13978,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -13356,6 +14032,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "only the parabola is left",
               "pass": true
             }
@@ -13401,6 +14081,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -13455,6 +14139,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a ineq2d row like /y\\s*>=?\\s*x\\^2|x\\^2\\s*<=?\\s*y/",
               "pass": true
             }
@@ -13494,6 +14182,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -13540,6 +14232,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a ineq2d row like /y\\s*>=?\\s*x\\^2|x\\^2\\s*<=?\\s*y/",
               "pass": false,
               "why": "kinds: ineq2d"
@@ -13583,6 +14279,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a ineq2d row like /y\\s*>=?\\s*x\\^2|x\\^2\\s*<=?\\s*y/",
               "pass": false,
               "why": "kinds: ineq2d"
@@ -13601,5 +14301,5 @@
     }
   ],
   "toolsTokens": 942,
-  "regraded": "2026-10-07T21:41:10.640Z"
+  "regraded": "2026-10-07T22:32:12.216Z"
 }

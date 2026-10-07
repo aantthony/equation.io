@@ -8,23 +8,30 @@
  * so a task that can't be passed, or a check that misses the failure it was
  * written for, shows up before any model runs.
  */
+import { evaluate } from '../../lib/expr.ts';
 import { START_WINDOW } from './graph.ts';
 import {
   type Check,
   animated,
   anyOf,
   called,
+  complexFunction,
+  curveAvoids,
+  curveFollowsSlider,
   curveThrough,
   drawnCount,
   hasKind,
   keeps,
+  labelAt,
   noFailedCalls,
   type Outcome,
   parametric,
   parametricCurve,
   parametricSurface,
+  pointAt,
   replySays,
   rowsLike,
+  shape3D,
   unitCube,
   sliderUsed,
   surfaceThrough,
@@ -251,7 +258,11 @@ export const TASKS: EvalTask[] = [
     request: "What's the integral of x² from 0 to 3?",
     checks: [value(9), replySays(/\b9\b/)],
     good: [answer('It is 9: the shaded area under x² from 0 to 3.', set('int[0..3] x^2 dx'))],
-    bad: [answer('It is 27.', set('int[0..3] x^2 dx'))],
+    bad: [
+      answer('It is 27.', set('int[0..3] x^2 dx')),
+      // The app shows a reply as plain text: LaTeX would show its backslashes.
+      answer('It is \\(9\\): the area under \\(x^2\\).', set('int[0..3] x^2 dx')),
+    ],
   },
   {
     id: 'zoom-zero',
@@ -687,5 +698,314 @@ export const TASKS: EvalTask[] = [
     checks: [hasKind('ineq2d', /y\s*>=?\s*x\^2|x\^2\s*<=?\s*y/)],
     good: [answer('Shaded the region above the parabola.', set('y > x^2'))],
     bad: [answer('Shaded the region.', set('y < x^2'))],
+  },
+
+  // Harder tasks (step 3): less common kinds, and requests of several steps.
+  // gpt-5.5 passed every task above every time, so these are what separate
+  // one way of giving it the language from another.
+  {
+    id: 'regression-line',
+    tags: ['regression', 'hard'],
+    rows: ['P = [(0, 1), (1, 3), (2, 4), (3, 7)]'],
+    request: 'Fit a straight line to these points and draw it',
+    checks: [
+      keeps('P = [(0, 1), (1, 3), (2, 4), (3, 7)]'),
+      hasKind('definition (regression)'),
+      // The least-squares line is y = 1.9x + 0.9.
+      curveThrough('the fitted line y = 1.9x + 0.9', [
+        [0, 0.9],
+        [3, 6.6],
+      ]),
+    ],
+    good: [
+      answer(
+        'Fitted y = m x + b to the points: m ≈ 1.9, b ≈ 0.9.',
+        set('P = [(0, 1), (1, 3), (2, 4), (3, 7)]', 'P.y ~ m P.x + b', 'y = m x + b'),
+      ),
+    ],
+    bad: [
+      // Through the end points, not fitted.
+      answer('The line through the points.', set('P = [(0, 1), (1, 3), (2, 4), (3, 7)]', 'y = 2x + 1')),
+      // Fitted, but not drawn.
+      answer('Fitted the line.', set('P = [(0, 1), (1, 3), (2, 4), (3, 7)]', 'P.y ~ m P.x + b')),
+    ],
+  },
+  {
+    id: 'label-vertex',
+    tags: ['labels', 'points', 'hard'],
+    rows: ['y = x^2 - 4x + 3'],
+    request: 'Mark the vertex of the parabola with a point and label it',
+    checks: [
+      keeps('y = x^2 - 4x + 3'),
+      pointAt('a point at the vertex (2, −1)', [2, -1]),
+      labelAt('a label at the vertex', [2, -1]),
+    ],
+    good: [
+      answer('Marked the vertex V at (2, −1).', set('y = x^2 - 4x + 3', 'V = (2, -1)', 'label(V, "vertex")')),
+      answer('The vertex is at (2, −1).', set('y = x^2 - 4x + 3', '(2, -1)', 'label((2, -1), "vertex (2, −1)")')),
+    ],
+    bad: [
+      answer('Marked the vertex.', set('y = x^2 - 4x + 3', 'V = (2, 1)', 'label(V, "vertex")')),
+      // A point, but no label.
+      answer('Marked the vertex.', set('y = x^2 - 4x + 3', 'V = (2, -1)')),
+    ],
+  },
+  {
+    id: 'motion-trail',
+    tags: ['trail', 'animation', 'hard'],
+    rows: ['A = (2cos(t), sin(2t))'],
+    request: 'Show the path the point leaves behind as it moves',
+    checks: [
+      rowsLike(/^\s*A\s*=/, 1),
+      keeps('A = (2cos(t), sin(2t))'),
+      hasKind('trail', /trail\s*\(\s*(A\s*\)|\(\s*2\s*cos\s*\(\s*t\s*\)\s*,\s*sin\s*\(\s*2\s*t\s*\)\s*\)\s*\))/),
+    ],
+    good: [answer('A now leaves a trail behind it.', set('A = (2cos(t), sin(2t))', 'trail(A)'))],
+    bad: [
+      // The whole path at once, not the trail it leaves.
+      answer('Here is the path.', set('A = (2cos(t), sin(2t))', '(2cos(2pi u), sin(4pi u))')),
+      answer('A now leaves a trail.', set('A = (2cos(t), sin(2t))', 'trail((cos(t), sin(t)))')),
+    ],
+  },
+  {
+    id: 'hyperboloid',
+    tags: ['3d', 'hard'],
+    rows: [],
+    request: 'Draw a hyperboloid of one sheet whose waist is a circle of radius 2',
+    checks: [
+      anyOf(
+        'x² + y² − z² = 4',
+        surfaceThrough(
+          'as an equation',
+          [
+            [2, 0, 0],
+            [0, -2, 0],
+            [Math.sqrt(8), 0, 2],
+            [0, Math.sqrt(8), -2],
+          ],
+          [0, 0, 0],
+        ),
+        parametricSurface(
+          'as a parametric surface',
+          samples =>
+            samples.every(([x, y, z]) => Math.abs(x * x + y * y - z * z - 4) < 1e-6) &&
+            samples.some(p => p[2] > 1) &&
+            samples.some(p => p[2] < -1),
+        ),
+      ),
+    ],
+    good: [
+      answer('A hyperboloid of one sheet, waist radius 2.', set('x^2 + y^2 - z^2 = 4')),
+      answer(
+        'A hyperboloid of one sheet, waist radius 2.',
+        set('(2cosh(4v - 2) cos(2pi u), 2cosh(4v - 2) sin(2pi u), 2sinh(4v - 2))'),
+      ),
+    ],
+    bad: [
+      // Two sheets.
+      answer('A hyperboloid.', set('z^2 - x^2 - y^2 = 4')),
+      // Waist radius 1.
+      answer('A hyperboloid of one sheet.', set('x^2 + y^2 - z^2 = 1')),
+    ],
+  },
+  {
+    id: 'vector-field-slider',
+    tags: ['vector field', 'slider', 'animation', 'order', 'hard'],
+    rows: [],
+    request: 'Show the vector field (−y, a·x) with a slider for a, then animate a from 1 to −1',
+    checks: [
+      hasKind('vfield2d', /\(\s*-\s*y\s*,\s*[a-z]\w*\s*\*?\s*x\s*\)/),
+      sliderUsed(),
+      noFailedCalls('animate_slider'),
+      called('animate_slider', 'glides the slider to −1', a => a.to === -1),
+    ],
+    good: [
+      answer('As a goes from 1 to −1 the circles open into a saddle.', set('a = 1', '(-y, a x)'), animate('a', -1, 1)),
+    ],
+    bad: [
+      // Animated before the slider exists.
+      answer('As a goes from 1 to −1 the flow changes.', animate('a', -1, 1), set('a = 1', '(-y, a x)')),
+      // No slider in the field.
+      answer('The field (−y, x).', set('a = 1', '(-y, x)'), animate('a', -1, 1)),
+    ],
+  },
+  {
+    id: 'solid-of-revolution',
+    tags: ['3d', 'hard'],
+    rows: [],
+    request: 'Draw the solid formed by rotating y = √x, for x from 0 to 4, about the x-axis',
+    checks: [
+      anyOf(
+        'the paraboloid y² + z² = x, from x = 0 to 4',
+        // As an equation: on it at x = 1, 2.25 and 4, and not past x = 4.
+        surfaceThrough('as an equation', [
+          [1, 1, 0],
+          [2.25, 0, -1.5],
+          [3.24, 0, 1.8],
+        ]),
+        // As a parametric surface or solid: inside y² + z² ≤ x over [0, 4],
+        // and on it at the rim (x = 4) and halfway (x = 2).
+        shape3D('as a surface or solid', samples => {
+          const gap = ([x, y, z]: number[]) => y * y + z * z - x;
+          return (
+            samples.every(p => p[0] > -1e-6 && p[0] < 4 + 1e-6 && gap(p) < 1e-6) &&
+            samples.some(p => Math.abs(p[0] - 4) < 1e-6 && Math.abs(gap(p)) < 1e-6) &&
+            samples.some(p => Math.abs(p[0] - 2) < 0.25 && Math.abs(gap(p)) < 1e-6)
+          );
+        }),
+      ),
+      {
+        name: 'stops at x = 4',
+        test: o =>
+          o.graph.analysis.rows.some(
+            r =>
+              r.cpu?.type === 'implicit3d' &&
+              Math.abs(evaluate(r.cpu.residual, { ...o.graph.analysis.constEnv, x: 6, y: Math.sqrt(6), z: 0 })) < 1e-3,
+          )
+            ? 'the surface goes on past x = 4'
+            : true,
+      },
+    ],
+    good: [
+      answer('The solid of revolution of √x from 0 to 4.', set('revolve({0 < x < 4: sqrt(x)})')),
+      answer(
+        'The solid of revolution of √x from 0 to 4.',
+        set('s = interval(0, 4)', 'r = interval(0, 1)', '(s, r sqrt(s) cos(2pi u), r sqrt(s) sin(2pi u))'),
+      ),
+      answer('The surface of revolution of √x, 0 ≤ x ≤ 4.', set('(4v, 2sqrt(v) cos(2pi u), 2sqrt(v) sin(2pi u))')),
+    ],
+    bad: [
+      // Not stopped at x = 4.
+      answer('The solid of revolution of √x.', set('revolve(sqrt(x))')),
+      // A cone, through the same rim.
+      answer('The solid of revolution.', set('(4v, 2v cos(2pi u), 2v sin(2pi u))')),
+    ],
+  },
+  {
+    id: 'piecewise',
+    tags: ['2d', 'piecewise', 'hard'],
+    rows: [],
+    request: 'Graph f(x) = x² for x < 0 and x + 1 for x ≥ 0',
+    checks: [
+      curveThrough('one curve through both pieces', [
+        [-1, 1],
+        [-2, 4],
+        [0.5, 1.5],
+        [2, 3],
+      ]),
+      curveAvoids('neither piece past x = 0', [
+        [1, 1],
+        [2, 4],
+        [-1, 0],
+        [-2, -1],
+      ]),
+    ],
+    good: [
+      answer('The piecewise function: x² left of 0, x + 1 from 0 on.', set('y = {x < 0: x^2, x + 1}')),
+      answer('f, drawn piece by piece.', set('f(x) = {x < 0: x^2, x >= 0: x + 1}', 'y = f(x)')),
+    ],
+    bad: [
+      answer('The two pieces.', set('y = x^2', 'y = x + 1')),
+      answer('The piecewise function.', set('y = {x < 0: x + 1, x^2}')),
+    ],
+  },
+  {
+    id: 'domain-colouring',
+    tags: ['complex', 'hard'],
+    rows: [],
+    request: 'Show the domain colouring of f(z) = (z² − 1)/(z² + 1)',
+    checks: [
+      complexFunction('(z² − 1)/(z² + 1), coloured', 'domain2d', (x, y) => {
+        const [a, b] = [x * x - y * y, 2 * x * y];
+        const den = (a + 1) ** 2 + b * b;
+        return [((a - 1) * (a + 1) + b * b) / den, (b * (a + 1) - (a - 1) * b) / den];
+      }),
+    ],
+    good: [
+      answer('Zeros at ±1 (black), poles at ±i (white).', set('domain((w^2 - 1)/(w^2 + 1))')),
+      answer('The domain colouring of f.', set('f(z) = (z^2 - 1)/(z^2 + 1)', 'domain(f(w))')),
+    ],
+    bad: [
+      // z is the 3D axis: an error.
+      answer('The domain colouring.', set('domain((z^2 - 1)/(z^2 + 1))')),
+      answer('The domain colouring.', set('domain((w^2 + 1)/(w^2 - 1))')),
+    ],
+  },
+  {
+    id: 'tangent-slider',
+    tags: ['functions', 'slider', 'keep', 'hard'],
+    rows: ['f(x) = x^3 - 3x', 'y = f(x)'],
+    request: 'Add a tangent line at x = a, with a slider for a',
+    checks: [
+      keeps('f(x) = x^3 - 3x', 'y = f(x)'),
+      // f(a) = a³ − 3a and f′(a) = 3a² − 3.
+      curveFollowsSlider('the tangent at a, following the slider', a => {
+        const [fa, slope] = [a ** 3 - 3 * a, 3 * a * a - 3];
+        return [
+          [a, fa],
+          [a + 1, fa + slope],
+          [a - 2, fa - 2 * slope],
+        ];
+      }),
+    ],
+    good: [
+      answer(
+        'Drag a to move the tangent along the curve.',
+        set('f(x) = x^3 - 3x', 'y = f(x)', 'g(x) = d/dx f(x)', 'a = 1.5', 'y = f(a) + g(a)(x - a)'),
+      ),
+      answer('Drag a.', set('f(x) = x^3 - 3x', 'y = f(x)', 'a = 1.5', 'y = f(a) + (3a^2 - 3)(x - a)')),
+    ],
+    bad: [
+      // d/dx f(a) differentiates a constant: a flat line through (a, f(a)).
+      answer('Drag a.', set('f(x) = x^3 - 3x', 'y = f(x)', 'a = 1.5', 'y = f(a) + d/dx f(a) (x - a)')),
+      // The tangent at 1.5, which doesn't follow the slider.
+      answer('Drag a.', set('f(x) = x^3 - 3x', 'y = f(x)', 'a = 1.5', 'y = 3.75x - 6.75')),
+    ],
+  },
+  {
+    id: 'normal-probability',
+    tags: ['probability', 'integral', 'hard'],
+    rows: [],
+    request: 'Shade the probability that a standard normal variable lies within one standard deviation of its mean',
+    checks: [hasKind('probability (shaded area)'), value(0.6827, 1e-3)],
+    good: [
+      answer('About 68% of the area lies within one standard deviation.', set('X ~ Normal(0, 1)', 'P(-1 < X < 1)')),
+    ],
+    bad: [
+      answer('About 68%.', set('X ~ Normal(0, 1)', 'P(X < 1)')),
+      answer('About 68%.', set('y = normalpdf(x, 0, 1)', '-1 < x < 1')),
+    ],
+  },
+  {
+    id: 'intersection-curve',
+    tags: ['3d', 'keep', 'hard'],
+    rows: ['x^2 + y^2 + z^2 = 9', 'z = 2'],
+    request: 'Draw the curve where the sphere meets the plane',
+    checks: [
+      keeps('x^2 + y^2 + z^2 = 9', 'z = 2'),
+      anyOf(
+        'the circle x² + y² = 5 at z = 2',
+        hasKind('spacecurve'),
+        parametric(
+          'as a parametric curve',
+          ([x, y, z]) => Math.abs(x * x + y * y - 5) < 1e-6 && Math.abs(z - 2) < 1e-6,
+          3,
+        ),
+      ),
+    ],
+    good: [
+      answer(
+        'The circle where they meet, radius √5 at height 2.',
+        set('x^2 + y^2 + z^2 = 9', 'z = 2', '(x^2 + y^2 + z^2, z) = (9, 2)'),
+      ),
+      answer(
+        'The circle where they meet.',
+        set('x^2 + y^2 + z^2 = 9', 'z = 2', '(sqrt(5) cos(2pi u), sqrt(5) sin(2pi u), 2)'),
+      ),
+    ],
+    bad: [
+      answer('The circle where they meet.', set('x^2 + y^2 + z^2 = 9', 'z = 2', '(3cos(2pi u), 3sin(2pi u), 2)')),
+      answer('The circle where they meet.', set('x^2 + y^2 + z^2 = 9', 'z = 2', 'x^2 + y^2 = 5')),
+    ],
   },
 ];

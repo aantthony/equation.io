@@ -45,12 +45,14 @@ pnpm swift:test    # re-record the corpus from the TypeScript suite, then swift 
 pnpm app:eval                     # every task in apple/evals/tasks.ts, 5 runs each, on-device
 pnpm app:eval --runs 1 --task unit-cube
 pnpm app:eval --model openai              # hosted baseline, gpt-5.5 (--openai-model to change)
+pnpm app:eval --model openai --reference web/public/llms.txt   # the whole reference in context, no lookups
 node --experimental-transform-types apple/evals/report.ts apple/evals/results/a.json apple/evals/results/b.json
 ```
 
 A Swift runner (`apple/evals/Runner.swift`) asks the on-device model each
 task's request with the app's own instructions and tools
-(`Equation/Sources/Assistant.swift`); the tools act on a Node service
+(`Equation/Sources/Assistant.swift`, and Instructions.swift, which `pnpm
+reference` writes from lib/assistant-instructions.ts); the tools act on a Node service
 (`apple/evals/service.ts`) running the real analyzer, which also grades the
 result. Results are saved in `apple/evals/results/`; see
 `apple/evals/RESULTS.md`.
@@ -60,6 +62,9 @@ Chat Completions API: each tool's schema is its `@Generable` arguments
 encoded as JSON Schema, and each call runs the tool's own code. The key is
 `OPENAI_API_KEY` from the environment, or that line of the checkout's
 `.dev.vars` (a worktree reads the main checkout's). Rate limits and server
-errors are retried with backoff. A full run (175 episodes) costs a few
+errors are retried with backoff. With `--reference <file>` the model gets that
+file after the app's instructions (`referenceInstructions`) in place of the
+lookup tools, keeping get_graph, set_graph, move_view, animate_slider and
+check; it doesn't fit the on-device model's 8K context. A full run (175 episodes) costs a few
 dollars; the results record each run's tokens, cached and reasoning tokens
 included, and the model's snapshot id.

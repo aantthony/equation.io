@@ -59,6 +59,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
@@ -126,6 +130,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -199,6 +207,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
@@ -269,6 +281,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
@@ -336,6 +352,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -416,6 +436,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
@@ -492,6 +516,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
@@ -565,6 +593,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -648,6 +680,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
@@ -724,6 +760,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
@@ -790,6 +830,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -838,6 +882,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -901,6 +949,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -961,6 +1013,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1018,6 +1074,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1087,6 +1147,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1145,6 +1209,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1209,6 +1277,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1270,6 +1342,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1326,6 +1402,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -1375,6 +1455,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1437,6 +1521,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /sin/ moves with t",
               "pass": true
             },
@@ -1479,6 +1567,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1527,6 +1619,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /sin/ moves with t",
               "pass": true
             },
@@ -1569,6 +1665,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1637,6 +1737,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": true
             },
@@ -1693,6 +1797,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1755,6 +1863,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": true
             },
@@ -1814,6 +1926,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": true
             },
@@ -1870,6 +1986,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -1945,6 +2065,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2031,6 +2155,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -2111,6 +2239,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2196,6 +2328,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -2278,6 +2414,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a slider that a drawn row uses",
               "pass": true
             },
@@ -2301,7 +2442,7 @@
           "inputTokens": 7090,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 227,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 101,
           "reply": "I added a frequency slider: as \\(k\\) increases, the sine wave’s peaks get closer together.",
           "rows": [
@@ -2340,6 +2481,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2403,6 +2548,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "animate_slider: glides a to 3",
               "pass": true
             },
@@ -2451,6 +2600,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2505,6 +2658,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "animate_slider: glides a to 3",
               "pass": true
             },
@@ -2553,6 +2710,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2627,6 +2788,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "2 drawn rows",
               "pass": true
             },
@@ -2689,6 +2854,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2757,6 +2926,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "2 drawn rows",
               "pass": true
             },
@@ -2772,7 +2946,7 @@
           "inputTokens": 5214,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 89,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I drew the radius-2 circle and the line \\(y=x\\), framed so you can see their intersections.",
           "rows": [
@@ -2822,6 +2996,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "2 drawn rows",
               "pass": true
             },
@@ -2837,7 +3016,7 @@
           "inputTokens": 5238,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 93,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I drew the radius-2 circle and the line \\(y=x\\), framed around the origin.",
           "rows": [
@@ -2884,6 +3063,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -2968,6 +3151,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 3D curve, not a flat one",
               "pass": true
             }
@@ -3031,6 +3218,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3100,6 +3291,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 3D curve, not a flat one",
               "pass": true
             }
@@ -3163,6 +3358,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3232,6 +3431,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 3D curve, not a flat one",
               "pass": true
             }
@@ -3291,6 +3494,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3359,6 +3566,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a readout ≈ 2",
               "pass": true
             },
@@ -3421,6 +3632,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3489,6 +3704,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a readout ≈ 2",
               "pass": true
             },
@@ -3551,6 +3770,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3624,6 +3847,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a readout ≈ 9",
               "pass": true
             },
@@ -3635,7 +3863,7 @@
           "inputTokens": 5166,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 148,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 52,
           "reply": "The shaded area under \\(y=x^2\\) from 0 to 3 is \\(9\\).",
           "rows": [
@@ -3681,6 +3909,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3746,6 +3978,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a readout ≈ 9",
               "pass": true
             },
@@ -3808,6 +4044,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a readout ≈ 9",
               "pass": true
             },
@@ -3819,7 +4060,7 @@
           "inputTokens": 5302,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 169,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 54,
           "reply": "I shaded the area under \\(y=x^2\\) from 0 to 3. Its value is \\(9\\).",
           "rows": [
@@ -3866,6 +4107,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -3935,6 +4180,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -3994,6 +4243,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4049,6 +4302,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4101,6 +4358,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4163,6 +4424,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4174,7 +4440,7 @@
           "inputTokens": 5117,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 82,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I zoomed in on the crossing at the origin, where \\(x^3+x=0\\).",
           "rows": [
@@ -4221,6 +4487,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4276,6 +4546,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4338,6 +4612,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4397,6 +4675,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4453,6 +4735,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4518,6 +4804,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4571,6 +4861,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4630,6 +4924,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4686,6 +4984,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "rows unchanged",
               "pass": true
             },
@@ -4739,6 +5041,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -4817,6 +5123,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the rose r = sin(4θ)",
               "pass": true
             }
@@ -4882,6 +5192,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the rose r = sin(4θ)",
               "pass": true
             }
@@ -4889,7 +5204,7 @@
           "inputTokens": 12222,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 265,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 99,
           "reply": "I drew \\(r=\\sin(4\\theta)\\) as an 8-petal polar rose, centered at the origin.",
           "rows": [
@@ -4947,6 +5262,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the rose r = sin(4θ)",
               "pass": true
             }
@@ -4954,7 +5274,7 @@
           "inputTokens": 12222,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 216,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 52,
           "reply": "I drew the polar rose \\(r=\\sin(4\\theta)\\), giving 8 petals centered at the origin.",
           "rows": [
@@ -5002,6 +5322,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the rose r = sin(4θ)",
               "pass": true
             }
@@ -5009,7 +5334,7 @@
           "inputTokens": 5206,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 203,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 80,
           "reply": "I drew the polar rose \\(r=\\sin(4\\theta)\\), with \\(\\theta\\) running once around the circle.",
           "rows": [
@@ -5067,6 +5392,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the rose r = sin(4θ)",
               "pass": true
             }
@@ -5074,7 +5404,7 @@
           "inputTokens": 12222,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 243,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 82,
           "reply": "I drew \\(r=\\sin(4\\theta)\\) as an 8-petal polar rose.",
           "rows": [
@@ -5144,6 +5474,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the cardioid r = 1 + cos θ",
               "pass": true
             }
@@ -5151,7 +5486,7 @@
           "inputTokens": 13040,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 276,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 72,
           "reply": "I plotted the cardioid \\(r=1+\\cos\\theta\\), with its cusp at the origin and widest point to the right.",
           "rows": [
@@ -5199,6 +5534,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the cardioid r = 1 + cos θ",
               "pass": true
             }
@@ -5206,7 +5546,7 @@
           "inputTokens": 5226,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 219,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 91,
           "reply": "I drew the cardioid \\(r=1+\\cos\\theta\\), with its cusp at the origin and lobe opening right.",
           "rows": [
@@ -5264,6 +5604,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the cardioid r = 1 + cos θ",
               "pass": true
             }
@@ -5271,7 +5616,7 @@
           "inputTokens": 12248,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 290,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 116,
           "reply": "I plotted the cardioid \\(r=1+\\cos\\theta\\), with its cusp at the origin and bulge to the right.",
           "rows": [
@@ -5329,6 +5674,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the cardioid r = 1 + cos θ",
               "pass": true
             }
@@ -5336,7 +5686,7 @@
           "inputTokens": 12240,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 231,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 59,
           "reply": "I plotted the cardioid \\(r=1+\\cos\\theta\\), with its cusp at the origin and bulge to the right.",
           "rows": [
@@ -5398,6 +5748,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the cardioid r = 1 + cos θ",
               "pass": true
             }
@@ -5405,7 +5760,7 @@
           "inputTokens": 12419,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 356,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 146,
           "reply": "I plotted the cardioid \\(r=1+\\cos\\theta\\), with its cusp at the origin and widest point to the right.",
           "rows": [
@@ -5460,6 +5815,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5519,6 +5878,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5587,6 +5950,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a circle of radius 3",
               "pass": true
             }
@@ -5639,6 +6006,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5698,6 +6069,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5772,6 +6147,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 2D curve that is not an ellipse (its frequencies differ)",
               "pass": true
             }
@@ -5834,6 +6213,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -5902,6 +6285,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 2D curve that is not an ellipse (its frequencies differ)",
               "pass": true
             }
@@ -5967,6 +6354,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a 2D curve that is not an ellipse (its frequencies differ)",
               "pass": true
             }
@@ -6029,6 +6420,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6104,6 +6499,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a sphere of radius 2",
               "pass": true
             }
@@ -6167,6 +6566,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6236,6 +6639,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a sphere of radius 2",
               "pass": true
             }
@@ -6299,6 +6706,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6368,6 +6779,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a sphere of radius 2",
               "pass": true
             }
@@ -6430,6 +6845,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "the saddle z = x² − y²",
               "pass": true
             }
@@ -6483,6 +6902,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6542,6 +6965,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the saddle z = x² − y²",
               "pass": true
             }
@@ -6549,7 +6977,7 @@
           "inputTokens": 5199,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 161,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 45,
           "reply": "I plotted the saddle surface \\(z=x^2-y^2\\) and set it slowly spinning so you can see both upward and downward curves.",
           "rows": [
@@ -6595,6 +7023,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6651,6 +7083,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6726,6 +7162,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a psurface or implicit3d or solid row",
               "pass": true
             }
@@ -6789,6 +7229,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -6858,6 +7302,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a psurface or implicit3d or solid row",
               "pass": true
             }
@@ -6924,6 +7372,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a psurface or implicit3d or solid row",
               "pass": true
             }
@@ -6987,6 +7439,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7062,6 +7518,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a cone",
               "pass": true
             }
@@ -7125,6 +7585,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7194,6 +7658,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a cone",
               "pass": true
             }
@@ -7247,6 +7715,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7316,6 +7788,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a cone",
               "pass": true
             }
@@ -7381,6 +7857,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a vfield2d row",
               "pass": true
             }
@@ -7388,7 +7869,7 @@
           "inputTokens": 9205,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 133,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 27,
           "reply": "I drew the field \\((-y,x)\\); the streamlines rotate counterclockwise around the origin.",
           "rows": [
@@ -7446,6 +7927,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a vfield2d row",
               "pass": true
             }
@@ -7453,7 +7939,7 @@
           "inputTokens": 11972,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 156,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 30,
           "reply": "Here is the vector field \\((-y, x)\\), showing counterclockwise rotation around the origin.",
           "rows": [
@@ -7511,6 +7997,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a vfield2d row",
               "pass": true
             }
@@ -7518,7 +8009,7 @@
           "inputTokens": 11976,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 149,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 22,
           "reply": "I drew the vector field \\((-y,x)\\): it rotates counterclockwise around the origin.",
           "rows": [
@@ -7576,6 +8067,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a vfield2d row",
               "pass": true
             }
@@ -7583,7 +8079,7 @@
           "inputTokens": 11980,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 150,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 22,
           "reply": "Here is the vector field \\((-y, x)\\): it rotates counterclockwise around the origin.",
           "rows": [
@@ -7641,6 +8137,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a vfield2d row",
               "pass": true
             }
@@ -7648,7 +8149,7 @@
           "inputTokens": 11980,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 148,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 21,
           "reply": "I drew the vector field \\((-y,x)\\); it rotates counterclockwise around the origin.",
           "rows": [
@@ -7701,6 +8202,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7775,6 +8280,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a plist or point or definition (point) row",
               "pass": true
             },
@@ -7843,6 +8352,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -7917,6 +8430,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a plist or point or definition (point) row",
               "pass": true
             },
@@ -7988,6 +8505,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a plist or point or definition (point) row",
               "pass": true
             },
@@ -8050,6 +8571,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a definition (point) or point row like /\\(\\s*2\\s*,\\s*3\\s*\\)/",
               "pass": true
             },
@@ -8094,6 +8619,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8144,6 +8673,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a definition (point) or point row like /\\(\\s*2\\s*,\\s*3\\s*\\)/",
               "pass": true
             },
@@ -8191,6 +8724,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a definition (point) or point row like /\\(\\s*2\\s*,\\s*3\\s*\\)/",
               "pass": true
             },
@@ -8235,6 +8772,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8304,6 +8845,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "1 row like /^\\s*A\\s*=/",
               "pass": true
             },
@@ -8319,7 +8865,7 @@
           "inputTokens": 5122,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 154,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 60,
           "reply": "I made A orbit the unit circle once every \\(2\\pi\\) seconds.",
           "rows": [
@@ -8365,6 +8911,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8433,6 +8983,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*A\\s*=/",
               "pass": true
             },
@@ -8498,6 +9052,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "1 row like /^\\s*A\\s*=/",
               "pass": true
             },
@@ -8513,7 +9072,7 @@
           "inputTokens": 5256,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 277,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 169,
           "reply": "I made A orbit the unit circle once every \\(2\\pi\\) seconds.",
           "rows": [
@@ -8560,6 +9119,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8636,6 +9199,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a label row like /label\\s*\\(\\s*\\(\\s*(2\\s*,\\s*4|0\\s*,\\s*0)\\s*\\)/",
               "pass": true
             },
@@ -8698,6 +9265,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8766,6 +9337,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a label row like /label\\s*\\(\\s*\\(\\s*(2\\s*,\\s*4|0\\s*,\\s*0)\\s*\\)/",
               "pass": true
             },
@@ -8828,6 +9403,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -8896,6 +9475,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a label row like /label\\s*\\(\\s*\\(\\s*(2\\s*,\\s*4|0\\s*,\\s*0)\\s*\\)/",
               "pass": true
             },
@@ -8950,6 +9533,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*y\\s*=\\s*x\\^2\\s*#([0-9a-f]{3}|[0-9a-f]{6})\\b/i",
               "pass": true
             },
@@ -8996,6 +9583,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -9048,6 +9639,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*y\\s*=\\s*x\\^2\\s*#([0-9a-f]{3}|[0-9a-f]{6})\\b/i",
               "pass": true
             },
@@ -9097,6 +9692,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 row like /^\\s*y\\s*=\\s*x\\^2\\s*#([0-9a-f]{3}|[0-9a-f]{6})\\b/i",
               "pass": true
             },
@@ -9143,6 +9742,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -9217,6 +9820,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps f(x) = x^3 - x",
               "pass": true
             },
@@ -9285,6 +9892,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -9359,6 +9970,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps f(x) = x^3 - x",
               "pass": true
             },
@@ -9430,6 +10045,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps f(x) = x^3 - x",
               "pass": true
             },
@@ -9498,6 +10117,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -9577,6 +10200,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the parabola x² − 4",
               "pass": true
             }
@@ -9584,7 +10212,7 @@
           "inputTokens": 5251,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 103,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I graphed \\(g(x)=x^2-4\\), a parabola opening upward with vertex at \\((0,-4)\\).",
           "rows": [
@@ -9634,6 +10262,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the parabola x² − 4",
               "pass": true
             }
@@ -9641,7 +10274,7 @@
           "inputTokens": 5235,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 100,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I graphed \\(g(x)=x^2-4\\), a parabola opening upward with vertex at \\((0,-4)\\).",
           "rows": [
@@ -9691,6 +10324,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the parabola x² − 4",
               "pass": true
             }
@@ -9698,7 +10336,7 @@
           "inputTokens": 5235,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 97,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I drew \\(g(x)=x^2-4\\), a parabola with vertex at \\((0,-4)\\).",
           "rows": [
@@ -9748,6 +10386,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the parabola x² − 4",
               "pass": true
             }
@@ -9755,7 +10398,7 @@
           "inputTokens": 5235,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 100,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I graphed \\(g(x)=x^2-4\\), a parabola opening upward with vertex at \\((0,-4)\\).",
           "rows": [
@@ -9805,6 +10448,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "the parabola x² − 4",
               "pass": true
             }
@@ -9812,7 +10460,7 @@
           "inputTokens": 5251,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 97,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I graphed \\(g(x)=x^2-4\\), a parabola shifted down 4 units.",
           "rows": [
@@ -9865,6 +10513,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -9931,6 +10583,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10002,6 +10658,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps y = x^2",
               "pass": true
             },
@@ -10067,6 +10727,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10137,6 +10801,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "keeps y = x^2",
               "pass": true
             },
@@ -10194,6 +10862,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "1 drawn rows",
               "pass": true
             },
@@ -10205,7 +10878,7 @@
           "inputTokens": 3323,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 51,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "Shifted the parabola up 3 units; its vertex is now at \\((0,3)\\).",
           "rows": [
@@ -10236,6 +10909,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10298,6 +10975,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "1 drawn rows",
               "pass": true
             },
@@ -10357,6 +11038,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "1 drawn rows",
               "pass": true
             },
@@ -10368,7 +11054,7 @@
           "inputTokens": 5102,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 83,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I shifted the parabola up 3 units, so its vertex is now at \\((0,3)\\).",
           "rows": [
@@ -10413,6 +11099,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10467,6 +11157,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "only the parabola is left",
               "pass": true
             }
@@ -10505,6 +11199,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10549,6 +11247,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "only the parabola is left",
               "pass": true
             }
@@ -10590,6 +11292,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "only the parabola is left",
               "pass": true
             }
@@ -10628,6 +11334,10 @@
             },
             {
               "name": "reply names only what was drawn",
+              "pass": true
+            },
+            {
+              "name": "reply has no LaTeX",
               "pass": true
             },
             {
@@ -10692,6 +11402,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a ineq2d row like /y\\s*>=?\\s*x\\^2|x\\^2\\s*<=?\\s*y/",
               "pass": true
             }
@@ -10699,7 +11414,7 @@
           "inputTokens": 5113,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 92,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 0,
           "reply": "I shaded the region above the parabola \\(y=x^2\\), where \\(y\\) is greater than \\(x^2\\).",
           "rows": [
@@ -10747,6 +11462,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a ineq2d row like /y\\s*>=?\\s*x\\^2|x\\^2\\s*<=?\\s*y/",
               "pass": true
             }
@@ -10754,7 +11474,7 @@
           "inputTokens": 5089,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 109,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 31,
           "reply": "I shaded the region above the parabola \\(y=x^2\\).",
           "rows": [
@@ -10802,6 +11522,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a ineq2d row like /y\\s*>=?\\s*x\\^2|x\\^2\\s*<=?\\s*y/",
               "pass": true
             }
@@ -10809,7 +11534,7 @@
           "inputTokens": 5119,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 152,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 68,
           "reply": "I shaded the region above the parabola \\(y=x^2\\).",
           "rows": [
@@ -10857,6 +11582,11 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": false,
+              "why": "reply has \"\\\\(\""
+            },
+            {
               "name": "a ineq2d row like /y\\s*>=?\\s*x\\^2|x\\^2\\s*<=?\\s*y/",
               "pass": true
             }
@@ -10864,7 +11594,7 @@
           "inputTokens": 5103,
           "modelId": "gpt-5.5-2026-04-23",
           "outputTokens": 116,
-          "pass": true,
+          "pass": false,
           "reasoningTokens": 35,
           "reply": "I shaded the region above the parabola \\(y=x^2\\).",
           "rows": [
@@ -10912,6 +11642,10 @@
               "pass": true
             },
             {
+              "name": "reply has no LaTeX",
+              "pass": true
+            },
+            {
               "name": "a ineq2d row like /y\\s*>=?\\s*x\\^2|x\\^2\\s*<=?\\s*y/",
               "pass": true
             }
@@ -10930,5 +11664,5 @@
       ]
     }
   ],
-  "regraded": "2026-10-07T21:41:14.805Z"
+  "regraded": "2026-10-07T22:32:16.686Z"
 }
