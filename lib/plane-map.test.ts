@@ -6,6 +6,7 @@ import { regionSampler } from './path.ts';
 import type { Components } from './math-object.ts';
 import {
   type PlaneMap,
+  type Segment,
   parsePlaneMap,
   planeLines,
   planeInverse,
@@ -338,6 +339,60 @@ describe('a plane map', () => {
         ys.some(X => Math.abs(X - 2 * Math.PI * k) < 0.1),
         `turn ${k}`,
       ).toBe(true);
+  });
+
+  it('draws a run across the screen however few of its vertices it shows', () => {
+    const inverse = planeInverse(polar(), box);
+    const shown = (lines: number[][]) =>
+      lines.flat().filter((v, i, a) => i % 2 === 0 && inverse.inside(v, a[i + 1])).length;
+    // Each run carried in steps, as the renderers do.
+    const steps: Segment = (a, b, map, from) => {
+      const out: number[] = [];
+      let at = from;
+      for (let i = 0; i < 64; i++) {
+        const t = i / 64;
+        const p = map(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, at && isFinite(at[0]) ? at : undefined);
+        out.push(...p);
+        at = isFinite(p[0]) ? p : undefined;
+      }
+      return [out, map(b[0], b[1], at)];
+    };
+    // Its ends just off the screen (radius 6.1, past Y = 5), and a triangle
+    // with corners there: what crosses the screen is drawn.
+    expect(
+      shown(planeLines(inverse, 2, k => (k ? [5, 3.5] : [-5, 3.5]) as [number, number], false, steps)),
+    ).toBeGreaterThan(0);
+    const r = 5.8;
+    const tri = (k: number): [number, number] => [
+      r * Math.cos((2 * Math.PI * k) / 3 + 0.3),
+      r * Math.sin((2 * Math.PI * k) / 3 + 0.3),
+    ];
+    expect(shown(planeLines(inverse, 3, tri, true, steps))).toBeGreaterThan(0);
+    // A dense line dipping onto a low window for a few vertices: y = 0.99,
+    // shown near angle π/2 up to radius 1.
+    for (let shift = 0; shift < 20; shift++) {
+      const low = planeInverse(polar(), { lo: [-Math.PI + shift * 0.01, 0], hi: [Math.PI + shift * 0.01, 1] });
+      const n = 2000;
+      const lines = planeLines(low, n, k => [-50 + (100 * k) / n + shift * 0.003, 0.99], false);
+      expect(
+        lines.flat().some((v, i, a) => i % 2 === 0 && low.inside(v, a[i + 1])),
+        `${shift}`,
+      ).toBe(true);
+    }
+  });
+
+  it('finds the turn of a window many turns wide, and no fold where there is none', () => {
+    for (const W of [75, 200]) {
+      const wide = planeInverse(polar(), { lo: [-W, 0], hi: [W, 5] });
+      expect(wide.turns()[0][0]).toBeCloseTo(2 * Math.PI, 6);
+      const t = 1.1;
+      const expected = Math.floor((W - t) / (2 * Math.PI)) + Math.floor((W + t) / (2 * Math.PI)) + 1;
+      expect(wide.all(2 * Math.cos(t), 2 * Math.sin(t)).filter(p => wide.inside(p[0], p[1])).length).toBe(expected);
+    }
+    // det J only falls off toward one edge (log-polar), or along one axis:
+    // no fold point.
+    for (const map of ['(exp(Y) cos(X), exp(Y) sin(X))', '(exp(X), Y)'])
+      expect(planeInverse(parsePlaneMap(map), { lo: [-3, -5], hi: [3, 5] }).foldPoints(), map).toEqual([]);
   });
 
   it('finds a branch point of z², and fills round it, wherever the window is', () => {
