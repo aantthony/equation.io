@@ -1,39 +1,6 @@
 import SwiftUI
 import WebKit
 
-/// What the renderer reports about each row (web/native-app.ts `NativeRowStatus`).
-struct RowStatus: Decodable, Equatable {
-  /// 0–1 RGB, or nil when the row draws nothing in a color of its own.
-  var color: [Double]?
-  var error: String?
-  var info: String?
-  /// A `# heading` row.
-  var comment: Bool
-  /// A viewport row, written by panning.
-  var view: Bool
-  /// A `---` row, splitting the graph into panels.
-  var divider: Bool
-  /// Where the trailing `# note` starts, in UTF-16 offsets.
-  var note: Int?
-  /// Syntax colors over the row's text, in UTF-16 offsets.
-  var spans: [Span]
-  var slider: Slider?
-
-  struct Span: Decodable, Equatable {
-    var start: Int
-    var end: Int
-    /// num, str, fn, const, coord, name, unbound or op (lib/highlight.ts).
-    var cls: String
-  }
-
-  struct Slider: Decodable, Equatable {
-    var min: Double
-    var max: Double
-    var step: Double
-    var value: Double
-  }
-}
-
 /// The renderer's side of one open document: what it says about the rows,
 /// and the way to move a slider it owns.
 @MainActor @Observable
