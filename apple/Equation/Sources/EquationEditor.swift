@@ -28,6 +28,7 @@ struct EquationEditor {
   #if os(iOS)
     /// The card the equations sit in on iPhone, which a pull at their top moves.
     @Environment(\.panelDrag) private var panelDrag
+    @Environment(\.editorBottomInset) private var bottomInset
   #endif
 
   func makeCoordinator() -> EditorController { EditorController() }
@@ -38,6 +39,7 @@ struct EquationEditor {
     controller.slide = slide
     #if os(iOS)
       controller.panelDrag = panelDrag
+      controller.bottomInset = bottomInset
     #endif
     controller.show(text: document.wrappedValue.text, status: status)
   }
@@ -66,6 +68,12 @@ struct EquationEditor {
     func updateUIView(_ view: EquationTextView, context: Context) { update(context.coordinator) }
   }
 #endif
+
+extension EnvironmentValues {
+  /// How far the equations run on below the screen (the iPhone card's
+  /// overhang), which their scrolling keeps the last row above.
+  @Entry var editorBottomInset: CGFloat = 0
+}
 
 /// The text view, telling its controller when its width changes (which
 /// rewraps the rows and resizes what sits under them).
@@ -170,6 +178,17 @@ final class EditorController: NSObject {
   #if os(iOS)
     /// The card the equations sit in, on iPhone; nil beside the graph.
     var panelDrag: PanelDrag?
+    /// How far the view runs on below the screen, which its scrolling keeps
+    /// the last row above (with the home indicator).
+    var bottomInset: CGFloat = 0 {
+      didSet { if bottomInset != oldValue { applyBottomInset() } }
+    }
+
+    fileprivate func applyBottomInset() {
+      let room = bottomInset > 0 ? bottomInset + (textView.window?.safeAreaInsets.bottom ?? 0) : 0
+      textView.contentInset.bottom = room
+      textView.verticalScrollIndicatorInsets.bottom = room
+    }
     /// Whether the current drag is moving the card rather than the text.
     fileprivate var cardHasPan = false
     fileprivate var cardPanStart: CGFloat = 0
@@ -220,7 +239,12 @@ final class EditorController: NSObject {
       view.keyboardDismissMode = .interactive
       view.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 12)
     #endif
-    view.onResize = { [weak self] in self?.restyle() }
+    view.onResize = { [weak self] in
+      #if os(iOS)
+        self?.applyBottomInset()  // the window, and its home indicator, are known by now
+      #endif
+      self?.restyle()
+    }
     #if os(iOS)
       view.panGestureRecognizer.addTarget(self, action: #selector(followPan(_:)))
     #endif

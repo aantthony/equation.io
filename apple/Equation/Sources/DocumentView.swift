@@ -189,7 +189,10 @@ struct DocumentView: View {
             )
             editor
               .environment(\.panelDrag, drag)
-              .padding(.bottom, Self.overhang + home)
+              // The equations fill the card, overhang and all, so a drag
+              // anywhere on it reaches them; their scrolling keeps the last
+              // row above the screen's edge instead.
+              .environment(\.editorBottomInset, Self.overhang)
           }
           .frame(height: height + Self.overhang, alignment: .top)
           .clipShape(.rect(cornerRadius: 36))
@@ -202,9 +205,8 @@ struct DocumentView: View {
         .ignoresSafeArea(.container, edges: .bottom)
       }
       .background {
-        Color.clear
-          .ignoresSafeArea(.keyboard)
-          .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { home = $0 }
+        // From the window, which the keyboard doesn't change.
+        HomeIndicatorReader { height in if home != height { home = height } }
       }
     }
 
@@ -213,6 +215,31 @@ struct DocumentView: View {
       drag.moved = { dy in dragged = dy }
       drag.ended = { extra in settle(base - dragged - extra) }
       drag.canGrow = { base - dragged < top - 1 }
+    }
+
+    /// Reports the window's bottom safe area: the home indicator's height.
+    private struct HomeIndicatorReader: UIViewRepresentable {
+      var report: (CGFloat) -> Void
+
+      func makeUIView(context: Context) -> Probe {
+        let probe = Probe()
+        probe.isUserInteractionEnabled = false
+        probe.report = report
+        return probe
+      }
+
+      func updateUIView(_ probe: Probe, context: Context) { probe.report = report }
+
+      final class Probe: UIView {
+        var report: (CGFloat) -> Void = { _ in }
+        override func didMoveToWindow() { send() }
+        override func safeAreaInsetsDidChange() { send() }
+        private func send() {
+          let height = window?.safeAreaInsets.bottom ?? 0
+          // Not during the layout pass that asked.
+          DispatchQueue.main.async { [report] in report(height) }
+        }
+      }
     }
 
     /// Just the header (above the home indicator), a few rows, half, and
