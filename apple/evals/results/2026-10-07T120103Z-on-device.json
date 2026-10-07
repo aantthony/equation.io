@@ -41,7 +41,7 @@
               "why": "says \"cube\", but the rows are implicit3d, implicit2d, implicit2d"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, implicit2d, implicit2d"
             },
@@ -186,7 +186,7 @@
               "why": "says \"cube\", but the rows are definition (point), implicit3d, view(...) sets x twice., implicit2d, implicit2d, label"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: definition (point), implicit3d, view(...) sets x twice., implicit2d, implicit2d, label"
             },
@@ -261,7 +261,7 @@
               "why": "says \"cube\", but the rows are definition (point), implicit3d"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: definition (point), implicit3d"
             },
@@ -316,7 +316,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: definition (point), implicit3d"
             },
@@ -554,7 +554,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: definition (point), hull needs a list of points."
             },
@@ -617,7 +617,7 @@
               "why": "says \"cube\", but the rows are implicit3d, vlist"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, vlist"
             },
@@ -813,7 +813,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, plist, hull takes points with matching dimensions."
             },
@@ -873,7 +873,7 @@
               "why": "says \"cube\", but the rows are implicit3d, tuple"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, tuple"
             },
@@ -952,7 +952,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, Independent lists combine every value with every other — that is 531441 combinations. Name one list and reuse it to pair values up instead."
             },
@@ -1017,7 +1017,7 @@
               "why": "says \"cube\", but the rows are implicit3d, plist"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, plist"
             },
@@ -3377,7 +3377,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3426,7 +3426,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3475,7 +3475,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3524,7 +3524,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3576,7 +3576,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -13601,5 +13601,5 @@
     }
   ],
   "toolsTokens": 942,
-  "regraded": "2026-10-07T13:06:20.229Z"
+  "regraded": "2026-10-07T13:36:12.300Z"
 }

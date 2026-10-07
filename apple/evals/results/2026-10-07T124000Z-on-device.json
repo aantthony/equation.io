@@ -49,7 +49,7 @@
               "why": "says \"cube\", but the rows are polygon"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: polygon"
             },
@@ -103,7 +103,7 @@
               "why": "says \"cube\", but the rows are polygon"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: polygon"
             },
@@ -160,7 +160,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
             {
@@ -228,7 +228,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
             {
@@ -317,7 +317,7 @@
               "why": "says \"cube\", but the rows are Incomplete expression., implicit2d, implicit2d"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: Incomplete expression., implicit2d, implicit2d"
             },
@@ -384,7 +384,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
             {
@@ -485,7 +485,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, definition (const), scalar2d"
             },
@@ -549,7 +549,7 @@
               "why": "says \"surface\", but the rows are solid"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
             {
@@ -612,7 +612,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
             {
@@ -696,7 +696,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
             {
@@ -3481,7 +3481,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3534,7 +3534,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3587,7 +3587,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3640,7 +3640,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3693,7 +3693,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -12520,5 +12520,5 @@
     }
   ],
   "toolsTokens": 1218,
-  "regraded": "2026-10-07T13:06:21.138Z"
+  "regraded": "2026-10-07T13:36:13.211Z"
 }

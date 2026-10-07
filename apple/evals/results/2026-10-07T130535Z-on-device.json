@@ -45,7 +45,7 @@
               "why": "says \"cube\", but the rows are psurface"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: psurface"
             },
@@ -98,7 +98,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
             {
@@ -154,7 +154,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": true
             },
             {
@@ -207,7 +207,7 @@
               "why": "says \"cube\", but the rows are polygon"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: polygon"
             },
@@ -278,7 +278,7 @@
               "why": "says \"cube\", but the rows are Incomplete expression."
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: Incomplete expression."
             },
@@ -350,7 +350,7 @@
               "why": "says \"cube\", but the rows are implicit3d, A \"condition: value\" pair is only valid inside {…}."
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, A \"condition: value\" pair is only valid inside {…}."
             },
@@ -421,7 +421,7 @@
               "why": "says \"cube\", but the rows are implicit3d, A \"condition: value\" pair is only valid inside {…}."
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, A \"condition: value\" pair is only valid inside {…}."
             },
@@ -492,7 +492,7 @@
               "why": "says \"cube\", but the rows are implicit3d, A \"condition: value\" pair is only valid inside {…}."
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, A \"condition: value\" pair is only valid inside {…}."
             },
@@ -742,7 +742,7 @@
               "pass": true
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d, ∈ draws a name from a list on a row of its own, like p ∈ A."
             },
@@ -802,7 +802,7 @@
               "why": "says \"cube\", but the rows are implicit3d"
             },
             {
-              "name": "a solid or 3D polygon row",
+              "name": "a unit cube (a solid or 3D hull, edges 1)",
               "pass": false,
               "why": "kinds: implicit3d"
             },
@@ -3173,7 +3173,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3222,7 +3222,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3271,7 +3271,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3324,7 +3324,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -3377,7 +3377,7 @@
               "pass": true
             },
             {
-              "name": "a 3D curve",
+              "name": "a 3D curve, not a flat one",
               "pass": false,
               "why": "no parametric curve fits"
             }
@@ -10891,5 +10891,5 @@
     }
   ],
   "toolsTokens": 1218,
-  "regraded": "2026-10-07T13:06:22.059Z"
+  "regraded": "2026-10-07T13:36:14.132Z"
 }

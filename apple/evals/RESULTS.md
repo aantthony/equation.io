@@ -195,7 +195,7 @@ gone; in its place four lookups (lib/assistant-tools.ts), answered as text:
 
 | tool | what it returns | typical size |
 | --- | --- | --- |
-| list_kinds | 21 common kinds as `kind: smallest form \| what it draws`, the other 27 by topic, and a line on definitions | 806 tokens (2,200 characters), fixed |
+| list_kinds | 21 common kinds as `kind: smallest form \| what it draws`, the other 27 by topic, and a line on definitions | 800 tokens (2,172 characters), fixed |
 | kind_examples(kind) | the kind's KIND_MEANINGS line, its smallest form, and up to 3 whole graphs from the examples menu that draw it (the analyzer labels each menu row by kind; fewest rows first) | 133 tokens on average over the 49 kinds, 345 at most (automaton) |
 | search_functions(query) | up to 6 `signature: description` lines, only the strong matches | 73 tokens on average over 7 sample queries, 187 at most |
 | function_doc(name) | the signature and description, and up to 2 menu examples that call it | 78 tokens on average over all 139 names, 272 at most (fourier) |
@@ -353,3 +353,79 @@ current window.
 rows they then passed to set_graph. "Check before claiming" didn't stop
 replies like "a 3D cone-like surface" over a sphere: the meaning said
 "parametric surface over u and v in 0..1", which is true of both.
+
+## Step 2d: kind examples rows first, in 2D and 3D (2026-10-08)
+
+`results/2026-10-07T133425Z-on-device.json`, at 463eee8. Two changes to
+what kind_examples (and function_doc) return, both from 2b and 2c's runs:
+- Each example is written rows first, label after:
+  `- ["(interval(0, 1), interval(0, 1), interval(0, 1))"] (solid cube)`,
+  in place of `- solid cube: [...]`, which 4 of 5 runs of
+  unit-cube-beside-sphere copied into a row in 2c.
+- A kind that draws in 2D and 3D shows an example of each where the menu
+  has one. pcurve's examples were three plane curves (lissajous, spiral,
+  rose); now lissajous, helix, spiral. Every "draw a helix" run in 2b
+  and 2c had copied a plane circle.
+
+Sizes barely change: kind_examples averages 136 tokens (348 at most).
+Instructions and tool definitions are as in 2c.
+
+**Two more check fixes, and every file regraded again.** This run showed
+two more checks too lenient, both exploited by copying:
+- The unit-cube tasks took any solid. Four of five unit-cube runs wrote
+  list_kinds' solid form, `(interval(0, 1), interval(0, 2), interval(0,
+  3))`, a 1 × 2 × 3 box, and called it "a unit cube". The check now
+  samples the solid's faces (or the hull's vertices) and wants an extent
+  of 1 along each axis; the box and a 2 × 2 × 2 hull are known-bad answers.
+- The helix task took any 3D parametric curve. One run drew the circle
+  `(cos(2pi u), sin(2pi u), 0)` and replied "a 3D helix". The check now
+  wants a curve no plane holds (its samples' covariance is not singular);
+  that circle and a tilted circle are known-bad answers, and a helix
+  along x known-good.
+
+Regraded: baseline 43%, 2a 36%, 2b 44%, 2c 43%, all unchanged; this run
+went from 49% (86/175) to 46%.
+
+**Pass rate 46% (81/175), against 43% (76/175) at the baseline.**
+Repetitions 17, 17, 18, 15, 14 (±4%). 3.4 tool calls a run, 8,630 input
+tokens a session on average, 3 context overflows.
+
+- Against 2c: honest-reply-helix 0 → 3 (`(2cos(6pi u), 2sin(6pi u), 4u -
+  2)`, the menu's helix, from kind_examples("pcurve")), unit-cube-beside-
+  sphere 0 → 2 (no label copied into a row), vector-field 3 → 5,
+  function-draws 1 → 3, sphere 2 → 3, saddle 2 → 3 up; zoom-zero, unit-cube,
+  torus, lissajous, label-crossing, derivative and animate-existing-slider
+  down by 1 each.
+- lissajous 1/5: four runs called kind_examples("psurface") and drew the
+  menu's torus as "a 3D Lissajous figure".
+- The 1 × 2 × 3 box is the solid form in list_kinds because it isn't a
+  task's answer (list_kinds' forms are plain shapes at unit size, so the
+  model has to adapt one); the model copied it as "a unit cube" anyway.
+
+## Step 2: summary
+
+| step | pass | ± across repetitions | tool calls a run | input tokens a session | overflows | fixed tokens (instructions + tools) |
+| --- | --- | --- | --- | --- | --- | --- |
+| baseline | 43% (76/175) | 4% | 3.6 | 6,840 | 6 | 874 + 820 |
+| 2a check | 36% (63/175) | 5% | 4.6 | 8,950 | 10 | 874 + 942 |
+| 2b lookups | 44% (77/175) | 4% | 4.5 | 10,080 | 6 | 883 + 1,218 |
+| 2c primer | 43% (76/175) | 1% | 3.3 | 8,810 | 3 | 806 + 1,218 |
+| 2d examples | 46% (81/175) | 4% | 3.4 | 8,630 | 3 | 806 + 1,218 |
+
+With 175 runs a step, a difference of 5 points is about one standard
+error: no step has moved the overall rate measurably. What the steps did
+change is which tasks pass. The cube, sphere, torus and helix tasks went
+from 0–1 of 5 to 1–4 of 5 through kind_examples. polar-rose went from 5/5
+to 0/5 from 2b on: in 2b the model looked up psurface and lifted the
+instructions' rose into 3D; from 2c the instructions hold a template, not
+the rose, and it isn't filled in. The model copies whatever form is
+nearest, now from the lookups. The model also
+uses the lookups on the wrong requests: kind_examples("psurface") for
+"a Lissajous figure", "a polar rose", "a cardioid" and "a cone".
+
+What the next step should test, from these runs: smallest forms that
+can't be copied as an answer (a form with its parameters named, like
+`r = 2` then `(r cos(2pi u), r sin(2pi u))`); a kind lookup that matches
+the request's words to example labels ("helix", "torus", "cube") rather
+than relying on the model to pick a kind; and the slider and "change the
+row" failures, which no lookup touches.

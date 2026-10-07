@@ -25,7 +25,7 @@ import {
   parametricSurface,
   replySays,
   rowsLike,
-  solid3D,
+  unitCube,
   sliderUsed,
   surfaceThrough,
   unchanged,
@@ -63,6 +63,20 @@ const width = (r: unknown) => (Array.isArray(r) && r.length === 2 ? (r[1] as num
 const contains = (r: unknown, v: number) => Array.isArray(r) && r.length === 2 && r[0] < v && v < r[1];
 const START_WIDTH = START_WINDOW.x[1] - START_WINDOW.x[0];
 
+/** Points that no plane holds: their covariance matrix is not singular. */
+const notPlanar = (samples: number[][]) => {
+  const n = samples.length;
+  const mean = [0, 1, 2].map(i => samples.reduce((s, p) => s + p[i], 0) / n);
+  const c = [0, 1, 2].map(i =>
+    [0, 1, 2].map(j => samples.reduce((s, p) => s + (p[i] - mean[i]) * (p[j] - mean[j]), 0) / n),
+  );
+  const det =
+    c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1]) -
+    c[0][1] * (c[1][0] * c[2][2] - c[1][2] * c[2][0]) +
+    c[0][2] * (c[1][0] * c[2][1] - c[1][1] * c[2][0]);
+  return det > 1e-6;
+};
+
 export const TASKS: EvalTask[] = [
   // The observed failures.
   {
@@ -70,7 +84,7 @@ export const TASKS: EvalTask[] = [
     tags: ['3d', 'observed'],
     rows: [],
     request: 'Draw a unit cube',
-    checks: [solid3D(), drawnCount(1, 1)],
+    checks: [unitCube(), drawnCount(1, 1)],
     good: [
       answer('Here is the unit cube.', set('(interval(0, 1), interval(0, 1), interval(0, 1))')),
       answer('A unit cube, drawn as the hull of its corners.', set('hull(([0,1],[0,1],[0,1]))')),
@@ -81,6 +95,9 @@ export const TASKS: EvalTask[] = [
       answer('I drew a unit cube.', set('(2cos(6pi u), 2sin(6pi u), 4u - 2)')),
       // A 2D triangle: list_kinds' polygon form, copied.
       answer('I drew a unit cube as a polygon.', set('polygon((0, 0), (2, 0), (1, 2))')),
+      // A 1 × 2 × 3 box: list_kinds' solid form, copied.
+      answer('I drew a unit cube as a solid.', set('(interval(0, 1), interval(0, 2), interval(0, 3))')),
+      answer('A unit cube.', set('hull(([0,2],[0,2],[0,2]))')),
     ],
   },
   {
@@ -88,7 +105,7 @@ export const TASKS: EvalTask[] = [
     tags: ['3d', 'observed', 'keep'],
     rows: ['x^2 + y^2 + z^2 = 4'],
     request: 'Add a unit cube',
-    checks: [solid3D(), keeps('x^2 + y^2 + z^2 = 4'), drawnCount(2, 2)],
+    checks: [unitCube(), keeps('x^2 + y^2 + z^2 = 4'), drawnCount(2, 2)],
     good: [
       answer(
         'Added a unit cube inside the sphere.',
@@ -195,9 +212,18 @@ export const TASKS: EvalTask[] = [
     tags: ['3d', 'observed', 'reply'],
     rows: [],
     request: 'Draw a helix',
-    checks: [parametric('a 3D curve', () => true, 3)],
-    good: [answer('Here is a helix winding up the z-axis.', set('(2cos(6pi u), 2sin(6pi u), 4u - 2)'))],
-    bad: [answer('Here is a helix.', set('x^2 + y^2 = 4'))],
+    // A helix leaves every plane; a circle drawn in 3D (z = 0, or tilted) doesn't.
+    checks: [parametricCurve('a 3D curve, not a flat one', notPlanar, 3)],
+    good: [
+      answer('Here is a helix winding up the z-axis.', set('(2cos(6pi u), 2sin(6pi u), 4u - 2)')),
+      answer('A helix along x.', set('(u, cos(8pi u), sin(8pi u))')),
+    ],
+    bad: [
+      answer('Here is a helix.', set('x^2 + y^2 = 4')),
+      // Observed: a circle in the plane z = 0, called a 3D helix.
+      answer('I drew a 3D helix.', set('(cos(2pi u), sin(2pi u), 0)')),
+      answer('A helix.', set('(cos(2pi u), sin(2pi u), cos(2pi u))')),
+    ],
   },
 
   // Common requests.

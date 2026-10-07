@@ -3,7 +3,7 @@
  * as the analyzer reads them, every tool call in order, and the reply.
  */
 import type { CpuPlan } from '../../lib/compiler.ts';
-import { evaluate } from '../../lib/expr.ts';
+import { type Expr, evaluate } from '../../lib/expr.ts';
 import type { RowStatus } from '../../web/voice.ts';
 import type { EvalGraph } from './graph.ts';
 
@@ -69,13 +69,28 @@ export const drawnCount = (min: number, max = Infinity) =>
 /** Whether a row draws in 3D: a 2D figure in a 3D scene stays in the plane z = 0. */
 const in3D = (o: Outcome, r: RowStatus) => !!o.graph.analysis.rows[r.index]?.cls?.needs3D;
 
-/** A cube's kinds: a solid, or a polygon in 3D (a hull of 3D points); not a 2D figure. */
-export const solid3D = () =>
-  check('a solid or 3D polygon row', o =>
-    o.rows.some(r => r.status === 'ok' && (r.kind === 'solid' || (r.kind === 'polygon' && in3D(o, r))))
+/**
+ * A unit cube: a solid, or a polygon in 3D (a hull of 3D points), whose
+ * extent is 1 along each axis. Not a 2D figure, and not a 1 × 2 × 3 box.
+ */
+export const unitCube = () =>
+  check('a unit cube (a solid or 3D hull, edges 1)', o => {
+    const shapes = o.rows.filter(
+      r => r.status === 'ok' && (r.kind === 'solid' || (r.kind === 'polygon' && in3D(o, r))),
+    );
+    if (!shapes.length) return `kinds: ${kinds(o.rows)}`;
+    const extents = shapes.map(r => {
+      const cpu = o.graph.analysis.rows[r.index].cpu;
+      const pts = cpu ? shapePoints(o, cpu) : [];
+      return [0, 1, 2].map(axis => {
+        const xs = pts.map(p => p[axis]);
+        return Math.max(...xs) - Math.min(...xs);
+      });
+    });
+    return extents.some(e => e.every(d => Math.abs(d - 1) < 1e-6))
       ? true
-      : `kinds: ${kinds(o.rows)}`,
-  );
+      : `extents ${extents.map(e => e.map(d => +d.toFixed(3)).join(' × ')).join(', ')}`;
+  });
 
 /** Some row (matching `text`, if given) is of one of these kinds. */
 export const hasKind = (wanted: string | string[], text?: RegExp) => {
@@ -206,6 +221,24 @@ export const parametricCurve = (what: string, test: (samples: number[][]) => boo
 /** Some parametric curve (2D or 3D) has every sample satisfying `test`. */
 export const parametric = (what: string, test: (p: number[]) => boolean, dim?: 2 | 3) =>
   parametricCurve(what, samples => samples.every(test), dim);
+
+/** The points a solid's faces or a 3D polygon's vertices reach (finite ones), sampled. */
+function shapePoints(o: Outcome, cpu: CpuPlan): number[][] {
+  const at = (exprs: Expr[], vars: Record<string, number>) => exprs.map(e => tryEval(() => evaluate(e, env(o, vars))));
+  let pts: number[][] = [];
+  if (cpu.type === 'family') return cpu.members.flatMap(m => shapePoints(o, m.cpu));
+  if (cpu.type === 'psurface')
+    pts = Array.from({ length: 11 * 11 }, (_, k) => at(cpu.comps, { u: (k % 11) / 10, v: Math.floor(k / 11) / 10 }));
+  if (cpu.type === 'polygon' && cpu.dim === 3) {
+    const { over } = cpu;
+    pts = over
+      ? Array.from({ length: over[0]?.values.length ?? 0 }, (_, k) =>
+          at(cpu.pts, Object.fromEntries(over.map(c => [c.name, c.values[k]]))),
+        )
+      : Array.from({ length: cpu.pts.length / 3 }, (_, k) => at(cpu.pts.slice(3 * k, 3 * k + 3), {}));
+  }
+  return pts.filter(p => p.every(Number.isFinite));
+}
 
 /** Some 3D implicit surface's residual vanishes at every point (and not at `off`). */
 export const surfaceThrough = (what: string, points: [number, number, number][], off?: [number, number, number]) =>
