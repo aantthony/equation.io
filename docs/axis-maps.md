@@ -127,11 +127,14 @@ symlog (`y = sinh(Y)`) all come from one feature.
        searching now and then; a corner where the map folds is placed per
        triangle, and that triangle becomes the quad it is on the screen
        (PlaneInverse.triangles).
-     A search starts from the nearest samples and the best of each block of
-     the window, so every copy on the screen is found. On a window wider
-     than a full turn, a line is followed on one copy in each of the
-     window's tiles, cut too small to show a point twice and clipped so the
-     pieces meet (PlaneInverse.tiles, planeLines): every copy is drawn.
+     A search starts from the nearest samples and from the best of each
+     block of the window they do not reach, so every copy on the screen is
+     found. On a window wider than a full turn, a line is followed from each
+     place in the window the screen shows its first point (a closed one both
+     ways round), so every copy is drawn (planeLines); a fill round a fold
+     is repeated a turn on only when the map really shows the same plane
+     there (PlaneInverse.symmetric), and each other branch (polar's copy at
+     (X + π, −Y)) is filled from its own start.
    - The window is the screen's (X, Y), since a rectangle of x and y is no
      rectangle on it; the grid and labels are the screen's, and `grid(x, y)`
      or coordinate fields draw their level lines through the map.

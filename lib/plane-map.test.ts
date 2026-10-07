@@ -190,6 +190,38 @@ describe('a plane map', () => {
     }
   });
 
+  it('fills round a fold only where the screen shows it', () => {
+    const square = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+    const vertex = (k: number) => square[k] as [number, number];
+    // z²: no turn repeats it, so nothing lands past where the square's
+    // preimage lies (radius under 1.2), stepped across the screen.
+    const z2 = parsePlaneMap('(X^2 - Y^2, 2 X Y)');
+    for (const shape of planeShapes(planeInverse(z2, { lo: [-2, -2], hi: [2, 2] }), 4, vertex))
+      for (let i = 0; i + 1 < shape.pts.length; i += 2)
+        expect(Math.hypot(shape.pts[i], shape.pts[i + 1])).toBeLessThan(1.3);
+    // Polar, with the window reaching below Y = 0, where it shows the square
+    // again (the copy at (X + π, −Y)): filled on both sides.
+    const both = planeShapes(planeInverse(polar(), { lo: [-Math.PI, -0.5], hi: [Math.PI, 5.5] }), 4, vertex);
+    const fills = both.filter(s => s.closed);
+    for (const [X, Y] of [
+      [0.3, 0.5],
+      [0.3, -0.3],
+      [-2, -0.3],
+    ])
+      expect(
+        fills.some(f => inPolygon(f.pts, X, Y)),
+        `${X}, ${Y}`,
+      ).toBe(true);
+    // Zoomed in by the origin, a shape broken off is never filled.
+    for (const shape of planeShapes(planeInverse(polar(), { lo: [-1, 0.2], hi: [1, 1.2] }), 4, vertex))
+      if (shape.closed) expect(shape.pts.every(Number.isFinite)).toBe(true);
+  });
+
   it('finds the points the map folds at', () => {
     const folds = planeInverse(polar(), box).foldPoints();
     expect(folds.length).toBe(1);
@@ -215,6 +247,34 @@ describe('a plane map', () => {
         if (Number.isFinite(line[i]) && Math.abs(line[i + 1] - 2) < 1e-6) xs.push(line[i]);
     expect(Math.min(...xs)).toBeLessThan(-7.9);
     expect(Math.max(...xs)).toBeGreaterThan(7.9);
+    // Coarse, its straight runs cover the window with no gaps between copies.
+    const m = 24;
+    const coarse = (k: number): [number, number] => [
+      2 * Math.cos((2 * Math.PI * k) / m),
+      2 * Math.sin((2 * Math.PI * k) / m),
+    ];
+    const runs: Array<[number, number]> = [];
+    for (const line of planeLines(wide, m, coarse, true))
+      for (let i = 0; i + 3 < line.length; i += 2)
+        if ([line[i], line[i + 1], line[i + 2], line[i + 3]].every(Number.isFinite) && Math.abs(line[i + 1] - 2) < 1e-6)
+          runs.push([Math.min(line[i], line[i + 2]), Math.max(line[i], line[i + 2])]);
+    runs.sort((p, q) => p[0] - q[0]);
+    let reach = -8;
+    for (const [a, b] of runs) {
+      expect(a, `gap before ${a}`).toBeLessThanOrEqual(reach + 1e-9);
+      reach = Math.max(reach, b);
+      if (reach >= 8) break;
+    }
+    expect(reach).toBeGreaterThanOrEqual(8);
+    // A shape round the origin there: its outline on each copy too.
+    const square = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+    const outlines = planeShapes(wide, 4, k => square[k] as [number, number]).filter(s => !s.closed);
+    expect(outlines.length).toBeGreaterThan(1);
   });
 
   it('draws what crosses the screen between ends far off it', () => {

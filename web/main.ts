@@ -5033,7 +5033,11 @@ function planeSpecialPoints(cls: Classified, plane: PlaneMap, halfW: number, hal
     : world.equation;
   // The window the overlay carries through, so the way back is shared.
   const box: ScreenBox = { lo: [view.cx - halfW, view.cy - halfH], hi: [view.cx + halfW, view.cy + halfH] };
-  const shown = planeWorldBox(plane, box);
+  // Over the padded window the cache stands for, as anywhere else.
+  const shown = planeWorldBox(plane, {
+    lo: [view.cx - 1.5 * halfW, view.cy - 1.5 * halfH],
+    hi: [view.cx + 1.5 * halfW, view.cy + 1.5 * halfH],
+  });
   if (!shown) return [];
   const inverse = planeInverse(plane, box);
   return specialPoints(expr, shown.lo[0], shown.hi[0], shown.lo[1], shown.hi[1]).flatMap(p =>

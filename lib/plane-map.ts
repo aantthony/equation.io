@@ -238,10 +238,7 @@ export class PlaneInverse {
   private readonly center: [number, number];
   readonly box: ScreenBox;
 
-  constructor(
-    private readonly map: PlaneMap,
-    box: ScreenBox,
-  ) {
+  constructor(map: PlaneMap, box: ScreenBox) {
     this.c = compiled(map);
     this.box = box;
     const w = box.hi[0] - box.lo[0];
@@ -341,6 +338,25 @@ export class PlaneInverse {
     return err <= (1e-7 * scale) ** 2 && this.inside(X, Y, margin) ? [X, Y] : null;
   }
 
+  /**
+   * solve, along the straight path in x and y from where `from` shows to
+   * (x, y): in steps short enough that each starts near its answer. A line
+   * is that path, and one long step can land on another copy of the plane
+   * (across a fold, or a turn away) rather than follow it.
+   */
+  follow(x: number, y: number, from: readonly [number, number], margin = FOLLOW_MARGIN): [number, number] | null {
+    const [x0, y0] = this.c.f(from[0], from[1]);
+    const steps = Math.min(64, Math.ceil(Math.hypot(x - x0, y - y0) / (0.02 * this.worldScale)));
+    if (!(steps > 1)) return this.solve(x, y, from, margin);
+    let at: [number, number] | null = [from[0], from[1]];
+    for (let k = 1; k <= steps && at; k++) {
+      const t = k / steps;
+      // Off the screen on the way is no matter, so long as it comes back.
+      at = this.solve(x0 + (x - x0) * t, y0 + (y - y0) * t, at, k === steps ? margin : Math.max(margin, 1));
+    }
+    return at;
+  }
+
   /** The solver's scratch: the map's value and Jacobian at a point. */
   private readonly v = new Float64Array(2);
   private readonly J = new Float64Array(4);
@@ -377,6 +393,23 @@ export class PlaneInverse {
   /** The world point at screen point (X, Y). */
   world(X: number, Y: number): [number, number] {
     return this.c.f(X, Y);
+  }
+
+  /** Whether shifting the screen by d shows the same plane: the map at
+   *  (X, Y) + d is the map at (X, Y), sampled across the window. */
+  symmetric(d: readonly [number, number]): boolean {
+    const { lo, hi } = this.box;
+    const tol = 1e-7 * (1 + this.worldScale);
+    let seen = 0;
+    for (let i = 0; i < 5; i++)
+      for (let j = 0; j < 5; j++) {
+        const [X, Y] = [lo[0] + ((hi[0] - lo[0]) * (i + 0.37)) / 5, lo[1] + ((hi[1] - lo[1]) * (j + 0.61)) / 5];
+        const [p, q] = [this.c.f(X, Y), this.c.f(X + d[0], Y + d[1])];
+        if (![...p, ...q].every(isFinite)) continue;
+        if (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) > tol) return false;
+        seen++;
+      }
+    return seen > 0;
   }
 
   /**
@@ -423,43 +456,6 @@ export class PlaneInverse {
   }
   private folds_?: Array<[number, number]>;
 
-  /**
-   * The window cut into tiles each too small to show a point twice, when the
-   * window shows some points twice (an angle range wider than 2π): a line is
-   * followed on one copy per tile, so every copy on the screen is drawn.
-   * Just the window when it shows each point once.
-   */
-  tiles(): PlaneInverse[] {
-    if (this.tiles_) return this.tiles_;
-    const { lo, hi } = this.box;
-    const [w, h] = [hi[0] - lo[0], hi[1] - lo[1]];
-    // How close two places showing one point come, sampled across the window.
-    let apart = Infinity;
-    for (let i = 1; i < 6; i++)
-      for (let j = 1; j < 6; j++) {
-        const [x, y] = this.c.f(lo[0] + (w * i) / 6, lo[1] + (h * j) / 6);
-        const shown = this.all(x, y).filter(p => this.inside(p[0], p[1]));
-        for (let a = 0; a < shown.length; a++)
-          for (let b = a + 1; b < shown.length; b++)
-            apart = Math.min(apart, Math.hypot(shown[a][0] - shown[b][0], shown[a][1] - shown[b][1]));
-      }
-    // A tile's diagonal under that: no two copies of a point in one tile.
-    const side = (0.65 * apart) / Math.SQRT2;
-    const [nx, ny] = [Math.min(8, Math.ceil(w / side)), Math.min(8, Math.ceil(h / side))];
-    if (!isFinite(apart) || nx * ny <= 1) return (this.tiles_ = [this]);
-    const tiles: PlaneInverse[] = [];
-    for (let i = 0; i < nx; i++)
-      for (let j = 0; j < ny; j++)
-        tiles.push(
-          new PlaneInverse(this.map, {
-            lo: [lo[0] + (w * i) / nx, lo[1] + (h * j) / ny],
-            hi: [lo[0] + (w * (i + 1)) / nx, lo[1] + (h * (j + 1)) / ny],
-          }),
-        );
-    return (this.tiles_ = tiles);
-  }
-  private tiles_?: PlaneInverse[];
-
   /** Whether the map folds at screen point (X, Y), showing one point of the
    *  plane all along a line there (the polar origin, along Y = 0). */
   folds(X: number, Y: number): boolean {
@@ -501,9 +497,19 @@ export class PlaneInverse {
     }
     // And each block's best, when it comes near: a copy elsewhere on the
     // screen, which the nearest seeds overall can all miss.
+    // Only from blocks away from those: the nearest seeds already search
+    // round where they are.
     const close = (0.1 * this.worldScale) ** 2;
-    for (let b = 0; b < best.length; b++)
-      if (bestAt[b] >= 0 && best[b] < close && !near.some(([k]) => k === bestAt[b])) near.push([bestAt[b], best[b]]);
+    const [bw, bh] = [(this.hi[0] - this.lo[0]) / BLOCKS, (this.hi[1] - this.lo[1]) / BLOCKS];
+    const covered = near.map(([k]) => [this.seeds[4 * k], this.seeds[4 * k + 1]]);
+    for (let b = 0; b < best.length; b++) {
+      const k = bestAt[b];
+      if (k < 0 || !(best[b] < close)) continue;
+      const [X, Y] = [this.seeds[4 * k], this.seeds[4 * k + 1]];
+      if (covered.some(([cX, cY]) => Math.abs(cX - X) < bw && Math.abs(cY - Y) < bh)) continue;
+      near.push([k, best[b]]);
+      covered.push([X, Y]);
+    }
     const out: Array<[number, number]> = [];
     const same = 1e-6 * this.screenScale;
     for (const [k] of near) {
@@ -572,7 +578,7 @@ export class PlaneInverse {
     let prev: [number, number] | null = null;
     for (let i = 0; i < count; i++) {
       const [x, y] = [xy[2 * i], xy[2 * i + 1]];
-      let s: [number, number] | null = prev && this.solve(x, y, prev, 1);
+      let s: [number, number] | null = prev && this.follow(x, y, prev, 1);
       // Followed off the window, onto a copy the screen does not show, when
       // it shows another (across the seam of an angle, or polar's copy at
       // (X + π, −Y)): that one.
@@ -620,7 +626,7 @@ export class PlaneInverse {
         if (n === anchor) return pa;
         const p: [number, number] = [on[2 * i], on[2 * i + 1]];
         if (!folded[i] && Math.abs(p[0] - pa[0]) + Math.abs(p[1] - pa[1]) < far) return p;
-        return this.solve(xy[2 * i], xy[2 * i + 1], pa, 1);
+        return this.follow(xy[2 * i], xy[2 * i + 1], pa, 1);
       });
       if (placed.some(p => !p)) return;
       const tri = placed as Array<[number, number]>;
@@ -635,7 +641,7 @@ export class PlaneInverse {
       if (fold < 0 || ids.filter(i => folded[i]).length > 1) return;
       const [next, other] = [(fold + 1) % 3, (fold + 2) % 3];
       const from = next === anchor ? other : next;
-      const again = this.solve(xy[2 * ids[fold]], xy[2 * ids[fold] + 1], tri[from], 1);
+      const again = this.follow(xy[2 * ids[fold]], xy[2 * ids[fold] + 1], tri[from], 1);
       if (again && !same(again, tri[fold])) out.push(...tri[fold], ...tri[from], ...again);
     };
     for (let k = 0; k + 2 < corner.length; k += 3) {
@@ -670,7 +676,7 @@ export class PlaneInverse {
     const shown = (p?: readonly [number, number] | null): p is [number, number] =>
       !!p && isFinite(p[0]) && isFinite(p[1]);
     const carry = (x: number, y: number, hint?: readonly [number, number]): [number, number] =>
-      hint ? (this.solve(x, y, hint, margin) ?? [NaN, NaN]) : this.first(x, y);
+      hint ? (this.follow(x, y, hint, margin) ?? [NaN, NaN]) : this.first(x, y);
     const seg: Segment =
       segment ??
       ((a, b, map, from) => {
@@ -687,7 +693,7 @@ export class PlaneInverse {
       // every angle), that picks the angle it leaves at.
       if (!last) {
         const next = this.first(...b);
-        last = (shown(next) && this.solve(a[0], a[1], next, margin)) || undefined;
+        last = (shown(next) && this.follow(a[0], a[1], next, margin)) || undefined;
       }
       const [piece, end] = seg(a, b, carry, last);
       out.push(...piece);
@@ -750,28 +756,49 @@ export function planeShapes(
   let from = 0;
   while (from < count - 1 && inverse.folds(...inverse.first(...vertex(from)))) from++;
   const turned = (k: number) => vertex((k + from) % count);
-  let open: { pts: number[]; start: readonly [number, number] } | null = null;
+  const opens: Array<{ pts: number[]; start: readonly [number, number] }> = [];
   for (const start of inverse.all(...turned(0))) {
     const pts = inverse.line(count, turned, true, 1, segment, start);
     let shows = false;
     for (let i = 0; i + 1 < pts.length && !shows; i += 2) shows = inverse.inside(pts[i], pts[i + 1]);
-    if (!shows) continue;
     // Round a point the map folds at (a square about the polar origin), the
     // outline does not come back to where it started: it is open on the
-    // screen, a curve with nothing inside it to fill.
-    const back = inverse.solve(...turned(0), [pts[pts.length - 2], pts[pts.length - 1]], 1);
-    if (
-      back &&
-      Math.abs(back[0] - start[0]) + Math.abs(back[1] - start[1]) < 1e-6 * (1 + Math.abs(start[0]) + Math.abs(start[1]))
-    )
-      out.push({ pts, closed: true });
-    else open ??= { pts, start };
+    // screen. Broken, it is no outline to fill either.
+    const back = inverse.follow(...turned(0), [pts[pts.length - 2], pts[pts.length - 1]], 1);
+    const closes =
+      pts.every(Number.isFinite) &&
+      !!back &&
+      Math.abs(back[0] - start[0]) + Math.abs(back[1] - start[1]) <
+        1e-6 * (1 + Math.abs(start[0]) + Math.abs(start[1]));
+    // An open one may fill the screen from off it (down to a fold in view).
+    if (closes) {
+      if (shows) out.push({ pts, closed: true });
+    } else opens.push({ pts, start });
   }
-  if (open) {
-    out.push(...foldFills(inverse, count, turned, open.pts));
+  if (opens.length) {
+    // Each branch filled once: one a whole number of turns from a branch
+    // already filled is that branch again.
+    const filled: Array<{ start: readonly [number, number]; turn: readonly [number, number] | null }> = [];
+    for (const open of opens) {
+      const again = filled.some(({ start, turn }) => {
+        if (!turn) return false;
+        const k = Math.round(
+          ((open.start[0] - start[0]) * turn[0] + (open.start[1] - start[1]) * turn[1]) / (turn[0] ** 2 + turn[1] ** 2),
+        );
+        return (
+          Math.abs(open.start[0] - start[0] - k * turn[0]) + Math.abs(open.start[1] - start[1] - k * turn[1]) <
+          1e-6 * (1 + Math.abs(open.start[0]) + Math.abs(open.start[1]))
+        );
+      });
+      if (again) continue;
+      const fill = foldFills(inverse, count, turned, open.pts);
+      if (!fill) continue;
+      out.push(...fill.shapes);
+      filled.push({ start: open.start, turn: fill.turn });
+    }
     // Its outline drawn as a line, cut at the edges and picked up where it
-    // comes back, once.
-    out.push({ pts: inverse.line(count, turned, true, FOLLOW_MARGIN, segment), closed: false });
+    // comes back, on each copy the window shows.
+    for (const pts of planeLines(inverse, count, turned, true, segment)) out.push({ pts, closed: false });
   }
   // Nothing of it on the screen, but the screen inside it: filled edge to
   // edge, its outline (just past them) out of sight.
@@ -785,10 +812,13 @@ export function planeShapes(
 }
 
 /**
- * A line on every copy of the plane the window shows: followed on one copy
- * in each of the window's tiles (PlaneInverse.tiles), each clipped to its
- * tile, so they meet at the tiles' edges without overlapping. One piece
- * when the window shows each point once.
+ * A line on every copy of the plane the window shows: followed from each
+ * place in the window the screen shows its first point (two, on an angle
+ * range wider than 2π), each picked up across the seam as one line is.
+ * A closed line is followed both ways round. One trace when the window
+ * shows its start once, or its start is a point
+ * the map folds at (the polar origin, shown all along Y = 0), where a copy
+ * cannot be told by where it starts.
  */
 export function planeLines(
   inverse: PlaneInverse,
@@ -797,51 +827,16 @@ export function planeLines(
   closed: boolean,
   segment?: Segment,
 ): number[][] {
-  const tiles = inverse.tiles();
-  if (tiles.length === 1) return [inverse.line(count, vertex, closed, FOLLOW_MARGIN, segment)];
-  return tiles.map(tile => clip(tile.line(count, vertex, closed, FOLLOW_MARGIN, segment), tile.box));
-}
-
-/** A polyline (NaN pairs for breaks) cut to what lies in `box`. */
-function clip(pts: number[], { lo, hi }: ScreenBox): number[] {
-  const out: number[] = [];
-  const brk = () => {
-    if (out.length && !Number.isNaN(out[out.length - 1])) out.push(NaN, NaN);
-  };
-  for (let i = 0; i + 3 < pts.length; i += 2) {
-    const [x0, y0, x1, y1] = [pts[i], pts[i + 1], pts[i + 2], pts[i + 3]];
-    if (![x0, y0, x1, y1].every(Number.isFinite)) {
-      brk();
-      continue;
-    }
-    // Liang–Barsky: the part of the segment inside the box, as t in [a, b].
-    let [a, b] = [0, 1];
-    const [dx, dy] = [x1 - x0, y1 - y0];
-    for (const [p, q] of [
-      [-dx, x0 - lo[0]],
-      [dx, hi[0] - x0],
-      [-dy, y0 - lo[1]],
-      [dy, hi[1] - y0],
-    ]) {
-      if (p === 0) {
-        if (q < 0) b = -1;
-      } else if (p < 0) a = Math.max(a, q / p);
-      else b = Math.min(b, q / p);
-    }
-    if (a > b) {
-      brk();
-      continue;
-    }
-    const [sx, sy, ex, ey] = [x0 + a * dx, y0 + a * dy, x0 + b * dx, y0 + b * dy];
-    const last = out.length >= 2 && Math.abs(out[out.length - 2] - sx) + Math.abs(out[out.length - 1] - sy) < 1e-12;
-    if (!last) {
-      brk();
-      out.push(sx, sy);
-    }
-    out.push(ex, ey);
-    if (b < 1) brk();
-  }
-  return out;
+  const starts = count ? inverse.all(...vertex(0)).filter(p => inverse.inside(p[0], p[1])) : [];
+  if (starts.length <= 1 || starts.some(p => inverse.folds(p[0], p[1])))
+    return [inverse.line(count, vertex, closed, FOLLOW_MARGIN, segment)];
+  // A closed line goes both ways from each start: the copy before the
+  // first start in the window ends there, on its way round.
+  const back = (k: number) => vertex((count - k) % count);
+  return starts.flatMap(start => [
+    inverse.line(count, vertex, closed, FOLLOW_MARGIN, segment, start),
+    ...(closed ? [inverse.line(count, back, closed, FOLLOW_MARGIN, segment, start)] : []),
+  ]);
 }
 
 /** A shape carried to the screen (planeShapes): an outline to fill, or not
@@ -858,46 +853,55 @@ export interface PlaneShape {
  * square unrolls into a curve across a full turn, from its start S to its
  * end E, the same point a turn on; what it encloses is the screen between
  * that curve and the line the origin is shown along. So: the trace `pts`,
- * then the fold point placed from E and from S, closed — and again a turn
- * on either way (E − S) while the screen shows it. Nothing when the shape
- * contains no fold point (or the trace broke), and it stays an outline.
+ * then the fold point placed from E and from S, closed. When a turn on
+ * (E − S) is a symmetry of the map — the screen shows the same plane there,
+ * as polar does 2π along X — it is filled again a turn on either way while
+ * the screen shows it; otherwise once (z², whose other half is another
+ * branch, filled from its own start). Null when the shape contains no
+ * isolated fold point (the map folds along a curve there, or not at all) or
+ * the trace broke: it stays an outline.
  */
 function foldFills(
   inverse: PlaneInverse,
   count: number,
   vertex: (k: number) => [number, number],
   pts: number[],
-): PlaneShape[] {
-  if (!pts.every(Number.isFinite) || pts.length < 4) return [];
-  const fold = inverse.foldPoints().find(f => contains(count, vertex, f));
-  if (!fold) return [];
+): { shapes: PlaneShape[]; turn: [number, number] | null } | null {
+  if (!pts.every(Number.isFinite) || pts.length < 4) return null;
+  const folds = inverse.foldPoints();
+  // A fold along a curve shows up as points all along it: no point to fill round.
+  if (folds.length > 2) return null;
+  const fold = folds.find(f => contains(count, vertex, f));
+  if (!fold) return null;
   const S: [number, number] = [pts[0], pts[1]];
   const E: [number, number] = [pts[pts.length - 2], pts[pts.length - 1]];
   // The trace ends one segment short of its start, a turn on: E is where
   // the start vertex is shown from there.
-  const end = inverse.solve(...vertex(0), E, 1);
-  const atE = end && inverse.solve(...fold, end, 1);
-  const atS = inverse.solve(...fold, S, 1);
-  if (!end || !atE || !atS) return [];
+  const end = inverse.follow(...vertex(0), E, 1);
+  const atE = end && inverse.follow(...fold, end, 1);
+  const atS = inverse.follow(...fold, S, 1);
+  if (!end || !atE || !atS) return null;
   const fill = [...pts, ...end, ...atE, ...atS];
-  const [dX, dY] = [end[0] - S[0], end[1] - S[1]];
+  const turn: [number, number] = [end[0] - S[0], end[1] - S[1]];
   const { lo, hi } = inverse.box;
-  // A turn on is a way across the screen, not back where it started.
-  if (!(Math.hypot(dX, dY) > 0.05 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1]))) return [];
-  const out: PlaneShape[] = [];
-  // Each turn while some of it is on the screen: enough turns either way to
-  // cross the window.
+  const shapes: PlaneShape[] = [{ pts: fill, closed: true, stroke: false }];
+  // A turn on, a way across the screen, and the same plane there.
+  const across = Math.hypot(turn[0], turn[1]) > 0.05 * Math.hypot(hi[0] - lo[0], hi[1] - lo[1]);
+  if (!across || !inverse.symmetric(turn)) return { shapes, turn: null };
   const turns = Math.min(
     40,
-    Math.ceil(Math.max((hi[0] - lo[0]) / Math.abs(dX || Infinity), (hi[1] - lo[1]) / Math.abs(dY || Infinity))) + 1,
+    Math.ceil(
+      Math.max((hi[0] - lo[0]) / Math.abs(turn[0] || Infinity), (hi[1] - lo[1]) / Math.abs(turn[1] || Infinity)),
+    ) + 1,
   );
+  shapes.length = 0;
   for (let k = -turns; k <= turns; k++) {
-    const moved = fill.map((v, i) => v + k * (i % 2 ? dY : dX));
+    const moved = fill.map((v, i) => v + k * turn[i % 2]);
     let shows = false;
     for (let i = 0; i + 1 < moved.length && !shows; i += 2) shows = inverse.inside(moved[i], moved[i + 1], 0.5);
-    if (shows) out.push({ pts: moved, closed: true, stroke: false });
+    if (shows) shapes.push({ pts: moved, closed: true, stroke: false });
   }
-  return out;
+  return { shapes, turn };
 }
 
 const centre = ({ lo, hi }: ScreenBox): [number, number] => [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2];
