@@ -1431,8 +1431,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (and families of them) and scalar fields are painted on the surface per pixel;
   points, parametric curves, point lists, labels and figures are carried
   onto it, figures as outlines (paint an area with an inequality). 3D rows
-  draw as usual; other 2D rows (vector fields, complex rows, colour fields,
-  parametric regions) are refused. Any
+  draw as usual; other 2D rows (e.g. vector fields, complex rows, colour
+  fields, parametric regions, histograms) are refused. Any
   smooth surface works, with sliders: a torus is
   `on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi)`.
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —

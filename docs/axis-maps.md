@@ -154,8 +154,10 @@ the ranges given, and sliders in it are read at their value.
 - **Painted**: what 2D draws per pixel from x and y — implicit curves,
   regions and scalar fields — is drawn per pixel on the surface's mesh: the
   fragment shader (web/render3d.ts paintFrag) reads x and y from the mesh's
-  (u, v) and draws a line where |F|/fwidth(F) is small, a fill where the
-  inequality holds, a colour scale for a field. Exact at any zoom, through
+  (u, v) and draws a line where |F| over its change across a pixel
+  (sampled along the screen's two directions) is small, but not where F
+  jumps sign at a pole; a fill where the inequality holds; a colour scale
+  for a field. Exact at any zoom, through
   the poles and seams, with no tracing.
 - **Carried**: what places things — points, parametric curves, figures,
   point lists, labels and named points — is carried point by point through
@@ -170,8 +172,8 @@ the ranges given, and sliders in it are read at their value.
   so they sit on it without fighting it.
 - Rows in space (3D) draw in the panel as in any 3D panel. Other 2D rows
   have no picture on a surface yet (among them vector and matrix fields,
-  complex rows, colour fields, parametric and projected regions, families
-  of scalar fields, histograms, sequences and systems) and are refused with a
+  complex rows, colour fields, parametric and projected regions,
+  histograms, sequences and systems) and are refused with a
   message saying so.
 - The surface is drawn by the GPU, so it must be written in what the
   shaders take; a surface they cannot draw is refused at its row. Its
