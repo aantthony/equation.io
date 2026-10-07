@@ -86,20 +86,42 @@ struct DocumentView: View {
 }
 
 #if os(iOS)
-  /// iPhone: the equations in a glass card floating over the graph, whose
-  /// header drags it between three heights — the look of a sheet, but part
-  /// of the window: a sheet presented as the document opens stalls the open.
+  /// The equations card's drag, for the text inside it: a pull down from the
+  /// top of the equations moves the card, as a sheet takes over from its
+  /// scroll view, and a push up grows it before the equations scroll.
+  @MainActor final class PanelDrag {
+    /// The card follows a drag: points moved down since the card took it.
+    var moved: (CGFloat) -> Void = { _ in }
+    /// The drag let go; the argument is how much further a flick would carry it.
+    var ended: (CGFloat) -> Void = { _ in }
+    /// Whether the card can still grow, so a push up moves it instead of scrolling.
+    var canGrow: () -> Bool = { false }
+  }
+
+  extension EnvironmentValues {
+    @Entry var panelDrag: PanelDrag? = nil
+  }
+
+  /// iPhone: the equations in a glass card floating over the graph — the look
+  /// of a sheet, but part of the window: a sheet presented as the document
+  /// opens stalls the open. Its header, or a pull on the equations when they
+  /// are scrolled to the top, drags it between its stops, the lowest of which
+  /// leaves only the header showing.
   private struct StackedLayout<Graph: View, Header: View, Editor: View>: View {
     @ViewBuilder var graph: Graph
     @ViewBuilder var header: Header
     @ViewBuilder var editor: Editor
 
-    /// The card's settled height, or nil for the smallest stop.
-    @State private var settled: CGFloat?
-    @GestureState private var dragged: CGFloat = 0
+    /// The card's settled stop, as an index into `stops`.
+    @State private var stop = 1
+    /// How far the current drag has pulled the card down from its stop.
+    @State private var dragged: CGFloat = 0
+    @State private var drag = PanelDrag()
 
     /// The card's inset from the screen's edges, as a floating sheet sits.
     private static var margin: CGFloat { 8 }
+    /// The card's height with only its header showing.
+    private static var headerHeight: CGFloat { 58 }
 
     var body: some View {
       ZStack(alignment: .bottom) {
@@ -107,7 +129,15 @@ struct DocumentView: View {
           .ignoresSafeArea()
         GeometryReader { geometry in
           let stops = Self.stops(in: geometry.size.height)
-          let height = Self.clamp((settled ?? stops[0]) - dragged, in: geometry.size.height)
+          let base = stops[min(stop, stops.count - 1)]
+          let height = min(max(base - dragged, Self.headerHeight), stops[stops.count - 1])
+          let settle = { (target: CGFloat) in
+            withAnimation(.snappy) {
+              stop = stops.indices.min { abs(stops[$0] - target) < abs(stops[$1] - target) } ?? 1
+              dragged = 0
+            }
+          }
+          let _ = configure(drag, base: base, top: stops[stops.count - 1], settle: settle)
           VStack(spacing: 0) {
             VStack(spacing: 6) {
               Capsule()
@@ -118,21 +148,25 @@ struct DocumentView: View {
             }
             .padding(.top, 8)
             .padding(.bottom, 6)
+            .frame(height: Self.headerHeight, alignment: .top)
             .contentShape(Rectangle())
+            .onTapGesture {
+              // A tap on a collapsed card's header brings the equations back.
+              if stop == 0 { withAnimation(.snappy) { stop = 1 } }
+            }
             .gesture(
               DragGesture()
-                .updating($dragged) { value, state, _ in state = value.translation.height }
+                .onChanged { value in dragged = value.translation.height }
                 .onEnded { value in
                   // Settle on the stop nearest where a flick would carry it.
-                  let target = height - value.predictedEndTranslation.height + value.translation.height
-                  withAnimation(.snappy) {
-                    settled = stops.min { abs($0 - target) < abs($1 - target) }
-                  }
+                  settle(base - value.predictedEndTranslation.height)
                 }
             )
             editor
+              .environment(\.panelDrag, drag)
           }
-          .frame(height: height)
+          .frame(height: height, alignment: .top)
+          .clipShape(.rect(cornerRadius: 36))
           .glassEffect(.regular, in: .rect(cornerRadius: 36))
           .padding(.horizontal, Self.margin)
           .frame(maxHeight: .infinity, alignment: .bottom)
@@ -143,13 +177,16 @@ struct DocumentView: View {
       }
     }
 
-    /// Small (a few rows), half, and nearly all of the window.
-    private static func stops(in total: CGFloat) -> [CGFloat] {
-      [190, total * 0.5, total - 60].map { clamp($0, in: total) }
+    /// Point the equations' drag at this card as it is laid out now.
+    private func configure(_ drag: PanelDrag, base: CGFloat, top: CGFloat, settle: @escaping (CGFloat) -> Void) {
+      drag.moved = { dy in dragged = dy }
+      drag.ended = { extra in settle(base - dragged - extra) }
+      drag.canGrow = { base - dragged < top - 1 }
     }
 
-    private static func clamp(_ height: CGFloat, in total: CGFloat) -> CGFloat {
-      min(max(height, 120), max(120, total - 40))
+    /// Just the header, a few rows, half, and nearly all of the window.
+    private static func stops(in total: CGFloat) -> [CGFloat] {
+      [headerHeight, 190, total * 0.5, total - 60].map { min(max($0, headerHeight), max(headerHeight, total - 40)) }
     }
   }
 #endif

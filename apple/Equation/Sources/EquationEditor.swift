@@ -25,6 +25,10 @@ struct EquationEditor {
   @Binding var document: GraphDocument
   var status: [RowStatus]
   var slide: @MainActor (Int, Double) -> Void
+  #if os(iOS)
+    /// The card the equations sit in on iPhone, which a pull at their top moves.
+    @Environment(\.panelDrag) private var panelDrag
+  #endif
 
   func makeCoordinator() -> EditorController { EditorController() }
 
@@ -32,6 +36,9 @@ struct EquationEditor {
     let document = $document
     controller.onEdit = { lines in document.wrappedValue.setLines(lines) }
     controller.slide = slide
+    #if os(iOS)
+      controller.panelDrag = panelDrag
+    #endif
     controller.show(text: document.wrappedValue.text, status: status)
   }
 }
@@ -160,6 +167,14 @@ final class EditorController: NSObject {
   let textView = EquationTextView(usingTextLayoutManager: true)
   var onEdit: ([String]) -> Void = { _ in }
   var slide: @MainActor (Int, Double) -> Void = { _, _ in }
+  #if os(iOS)
+    /// The card the equations sit in, on iPhone; nil beside the graph.
+    var panelDrag: PanelDrag?
+    /// Whether the current drag is moving the card rather than the text.
+    fileprivate var cardHasPan = false
+    fileprivate var cardPanStart: CGFloat = 0
+    fileprivate var lastPanY: CGFloat = 0
+  #endif
 
   private var status: [RowStatus] = []
   /// Each row's color bar, and what sits under it, by line.
@@ -206,6 +221,9 @@ final class EditorController: NSObject {
       view.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 12)
     #endif
     view.onResize = { [weak self] in self?.restyle() }
+    #if os(iOS)
+      view.panGestureRecognizer.addTarget(self, action: #selector(followPan(_:)))
+    #endif
   }
 
   private var storage: NSTextStorage {
@@ -424,6 +442,60 @@ final class EditorController: NSObject {
 #else
   extension EditorController: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) { edited() }
+
+    /// A drag the card took ends with the equations still at their top, not
+    /// coasting on the drag's speed.
+    func scrollViewWillEndDragging(
+      _ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+      targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+      if cardHasPan { targetContentOffset.pointee.y = -scrollView.adjustedContentInset.top }
+    }
+
+    /// Share one drag between the equations and their card, as a sheet does
+    /// with its scroll view: a pull down at the top of the equations, or a
+    /// push up while the card can still grow, moves the card (the equations
+    /// held at their top); anything else scrolls them. Ownership is decided
+    /// afresh as the drag goes, so scrolling up to the top and pulling on
+    /// carries straight into moving the card.
+    @objc func followPan(_ pan: UIPanGestureRecognizer) {
+      guard let card = panelDrag else { return }
+      // In the window's space: the text view moves with the card.
+      let y = pan.translation(in: nil).y
+      let top = -textView.adjustedContentInset.top
+      switch pan.state {
+      case .began:
+        cardHasPan = false
+        lastPanY = y
+      case .changed:
+        let down = y > lastPanY
+        let up = y < lastPanY
+        lastPanY = y
+        if !cardHasPan {
+          let atTop = textView.contentOffset.y <= top + 0.5
+          if (down && atTop) || (up && card.canGrow()) {
+            cardHasPan = true
+            cardPanStart = y
+          }
+        } else if up && !card.canGrow() && cardPanStart - y > 0 {
+          // Grown all the way: the rest of the push scrolls the equations.
+          card.ended(0)
+          cardHasPan = false
+        }
+        if cardHasPan {
+          textView.contentOffset.y = top
+          card.moved(y - cardPanStart)
+        }
+      case .ended, .cancelled, .failed:
+        if cardHasPan {
+          // How much further a flick would carry the card.
+          card.ended(pan.velocity(in: nil).y * 0.18)
+          textView.contentOffset.y = top
+        }
+      default:
+        break
+      }
+    }
   }
 #endif
 
