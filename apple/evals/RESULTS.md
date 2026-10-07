@@ -548,3 +548,120 @@ OpenAI's own page). About 2.7 cents a run.
   want to keep as they were.
 - **move_view in 81% of runs,** often a slow 3D spin. That is the
   instructions' "teach by showing", not an error.
+
+## Step 3: one reference, three outputs (2026-10-08)
+
+`results/2026-10-07T230237Z-on-device.json`, at a5afc3f. The language
+now has one human-written source, `docs/reference/` (an index of the 49
+kinds by group, a page per kind with its forms, examples, pitfalls and
+details, general pages, notes on functions), and three outputs generated
+from it: the site's `/docs/` pages, `web/public/llms.txt`, and the app's
+`assistant.json` (list_kinds, kind_examples, function_doc). The app's and
+the voice prototype's instructions come from one file,
+`lib/assistant-instructions.ts` (Instructions.swift is generated). What
+the model sees changed in three ways:
+
+- **Instructions**: the slider line now has a non-sine example ("r = 2"
+  and "x^2 + y^2 = r^2", the radius of a circle), the polar line says why
+  a bare `r = …` draws nothing, and replies are asked for in plain text,
+  with no LaTeX. 885 tokens (806 in 2d); tool definitions unchanged
+  (1,218).
+- **list_kinds** follows the reference's groups, so its order changed:
+  pregion now sits right after pcurve. The forms are the same.
+- **kind_examples** leads with the reference's own examples (named, one
+  shape each, checked by the analyzer to draw the kind), topped up to
+  three from the menu. **function_doc** adds the reference's note where
+  there is one (28 functions).
+
+**A new common check, and every file regraded.** gpt-5.5 wrote LaTeX
+(`\(y=x^2\)`) in 34 of 175 replies, which the app shows raw. Every task
+now fails a reply with `\(`, `\[`, a `\command` or `$…$`. Regraded with
+regrade.ts: gpt-5.5 100% → 81% (141/175; the 34 runs, nothing else). No
+on-device run changed (43%, 36%, 44%, 43%, 46%, run for run): the device
+never wrote LaTeX. Three other check fixes, found by the new tasks'
+known-good answers, changed no grade in any file: a readout written
+"≈ 0.6827" was read as no number (the value check stripped only "="); a
+reply calling a flow's fixed point a "saddle" failed the reply check
+(saddle now also allows a vector field); "circle" for a curve of
+intersection failed it too (now allowed).
+
+**11 harder tasks (46 in all)**, because gpt-5.5 passed all 35: a fitted
+regression line, a labelled vertex, a motion trail, a hyperboloid of one
+sheet with waist radius 2, a vector field (−y, a·x) with a slider animated
+from 1 to −1, the solid of revolution of √x on [0, 4] (bounded), a
+piecewise function, the domain colouring of a function written in z (the
+app's complex variable is w), a tangent that follows a slider (the
+analyzer reads `d/dx f(a)` as a flat line), a normal probability within
+one standard deviation, and the curve where a sphere meets a plane. Each
+has known-good and known-bad answers, all rendered and read
+(tasks.test.ts runs them through the analyzer).
+
+### On-device, after the switch
+
+**On the same 35 tasks: 41% (72/175), against 46% (81/175) in 2d.**
+Repetitions 16, 15, 13, 14, 14 (±1 task). The 9 runs lost are under two
+standard errors of the difference. 5.3 tool calls a run (3.4), 10,925
+input tokens a session (8,626), 14.2 s (8.8); context overflows 9 of the
+10 in all were polar-rose and cardioid loops.
+
+- Up: tangent-line 0 → 4 (every pass `y = 2x - 1` with no lookup),
+  honest-reply-helix 3 → 5, saddle 3 → 5, torus 4 → 5.
+- Down: sphere 3 → 0, circle-and-line 3 → 0, function-draws 3 → 0,
+  unit-cube-beside-sphere 2 → 0, zoom-out 3 → 1.
+- **The new list_kinds order sent it to pregion.** kind_examples was
+  called with "pregion" 20 times (psurface 31, pcurve 15): for "a sphere
+  of radius 2" 3 runs copied its first example, the annulus
+  `r = interval(1, 2); (r cos(2pi u), r sin(2pi u))`, and replied "a
+  sphere of radius 2"; the circle, rose and cardioid runs did the same.
+  The model picks a kind by its place in the list as much as by meaning.
+- **It still copies the nearest example.** "A circle of radius 3 as a
+  parametric curve": 5/5 wrote pcurve's first reference example,
+  `(2cos(2pi u), 2sin(2pi u))`, "a circle of radius 2" (no longer
+  hidden: the reply says 2). "A hyperboloid": the psurface page's
+  helicoid, verbatim. "The curve where the sphere meets the plane z = 2":
+  the spacecurve form `(x^2 + y^2 + z^2, z) = (9, 1)`, with 1 for 2.
+- **The radius slider didn't take.** slider-radius stays 0/5: the runs
+  added `r = 2` beside `x^2 + y^2 = 4` without using it, or a pregion.
+  The new example is in the instructions, two lines from the amplitude
+  one; the model doesn't adapt either.
+
+**On the 11 harder tasks: 4% (2/55).** domain-colouring and
+intersection-curve passed once each. The failures are the same kind as
+above: an amplitude slider and a sine wave for the regression line and
+the tangent slider, an annulus for the normal probability, the vertex at
+(2, −2), `z = (x^(1/2))^2` for the solid of revolution.
+
+### gpt-5.5: not measured
+
+The OpenAI account has no credits: every request since 2026-10-07
+22:30 UTC fails with "You have no credits remaining" (HTTP 429), so the
+gpt-5.5 runs with tools, with the old llms.txt (15b3d4e, 113,073 bytes)
+and with the new one (148,557 bytes) on the 46 tasks could not run. Spend
+in this step: $0. The runner is ready:
+
+```sh
+git show 15b3d4e:web/public/llms.txt > apple/evals/.build/llms-15b3d4e.txt
+pnpm app:eval --model openai                                              # tools
+pnpm app:eval --model openai --reference apple/evals/.build/llms-15b3d4e.txt   # old llms.txt
+pnpm app:eval --model openai --reference web/public/llms.txt              # new llms.txt
+```
+
+At 5 runs a task, each llms.txt run sends roughly 30–37K tokens of
+reference per model call, about 230 runs × 3 calls: some 20–25M input
+tokens, mostly cached, about $10–15 a run at the prices above; the tools
+run about $6. All three fit the $30 cap only at 3 runs a task for the two
+llms.txt runs.
+
+### Summary on the 46 tasks
+
+| | on-device (step 3) | gpt-5.5 tools | gpt-5.5 old llms.txt | gpt-5.5 new llms.txt |
+| --- | --- | --- | --- | --- |
+| pass, 46 tasks | 32% (74/230) | not run | not run | not run |
+| ± across repetitions | 3% | | | |
+| pass, first 35 tasks | 41% (72/175) | 81% (141/175)¹ | not run | not run |
+| tool calls a run | 5.4 | | | |
+| input tokens a session | 12,463 | | | |
+| context overflows | 10 | | | |
+
+¹ The 2026-10-07 run, with step 2's instructions and data, regraded with
+the LaTeX check.
