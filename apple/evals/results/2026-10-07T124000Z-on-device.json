@@ -1938,7 +1938,7 @@
               "pass": true
             },
             {
-              "name": "a row like /x\\^2|x\\s*\\*\\s*x/ moves with t",
+              "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": false,
               "why": "animated: []"
             },
@@ -2010,7 +2010,7 @@
               "pass": true
             },
             {
-              "name": "a row like /x\\^2|x\\s*\\*\\s*x/ moves with t",
+              "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": false,
               "why": "animated: []"
             },
@@ -2082,7 +2082,7 @@
               "pass": true
             },
             {
-              "name": "a row like /x\\^2|x\\s*\\*\\s*x/ moves with t",
+              "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": false,
               "why": "animated: []"
             },
@@ -2153,7 +2153,7 @@
               "pass": true
             },
             {
-              "name": "a row like /x\\^2|x\\s*\\*\\s*x/ moves with t",
+              "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": false,
               "why": "animated: []"
             },
@@ -2224,7 +2224,7 @@
               "pass": true
             },
             {
-              "name": "a row like /x\\^2|x\\s*\\*\\s*x/ moves with t",
+              "name": "a row like /x\\^2|x\\s*\\*\\s*x|(?<![a-z])\\(\\s*x\\s*[-+].*?\\)\\s*\\^\\s*2/ moves with t",
               "pass": false,
               "why": "animated: []"
             },
@@ -12520,5 +12520,5 @@
     }
   ],
   "toolsTokens": 1218,
-  "regraded": "2026-10-07T13:36:13.211Z"
+  "regraded": "2026-10-07T21:41:11.697Z"
 }

@@ -429,3 +429,122 @@ can't be copied as an answer (a form with its parameters named, like
 the request's words to example labels ("helix", "torus", "cube") rather
 than relying on the model to pick a kind; and the slider and "change the
 row" failures, which no lookup touches.
+
+## Hosted baseline: OpenAI gpt-5.5 (2026-10-08)
+
+`results/2026-10-07T214025Z-openai-gpt-5.5.json`, with the app's
+instructions and tools as in 2d (463eee8): `pnpm app:eval --model openai`.
+The runner sends the same instructions (as the system message), the same
+per-turn prompt (the rows, then the request) and the same nine tools to
+OpenAI's Chat Completions API. Each tool's parameters are its `@Generable`
+arguments encoded as JSON Schema (`GenerationSchema` is `Encodable`), so
+names, descriptions and argument schemas can't drift from the app's, and
+each call runs the tool's own `call` (trimming, clamping) against the same
+eval service. The API answered as `gpt-5.5-2026-04-23`, at its default
+reasoning effort (55 reasoning tokens a run on average). Its context is not
+8K, so this measures the model with the app's knowledge and tools, not the
+app's budget.
+
+**Three check fixes, and every file regraded.** gpt-5.5 failed 8 of 175
+runs on first grading (95%, ±1%). All 8 were correct answers that a check
+rejected, so the checks are fixed and every results file regraded with
+regrade.ts:
+- animate-parabola (5 runs): `y = (x - t)^2`, the parabola sliding right,
+  failed the check's text pattern, which only took a literal `x^2` or
+  `x*x`. It now also takes a shifted square, `(x - …)^2`, but not
+  `sin(x - t)^2`. tasks.ts has `y = (x - t)^2` and `y = (x - sin(t))^2`
+  as known-good answers and `y = sin(x - t)^2` as known-bad.
+- tangent-line (2 runs): `y = x^2`, `y = 2x - 1` and a point or label at
+  (1, 1) failed "2 drawn rows". Marking the point of tangency is good
+  teaching. The count now leaves out points and labels, so a second line
+  still fails (a known-bad answer).
+- moving-point (1 run): the reply "I made A orbit the unit circle" failed
+  the reply check ("circle" with no circle row). Like "goes round in a
+  circle", that names the motion, not a shape, and the check's exceptions
+  now include "orbits the (unit) circle".
+
+No on-device run changed grade (baseline 43%, 2a 36%, 2b 44%, 2c 43%, 2d
+46%, run for run as before). gpt-5.5 went from 95% to 100%.
+
+**Pass rate 100% (175/175), ±0% across repetitions, against 46% (81/175)
+±4% on-device.** Every answer was read, not just its grade. The cube is
+`(interval(0, 1), interval(0, 1), interval(0, 1))`, or centred at the
+origin inside the sphere. The rose is `(sin(8pi u) cos(2pi u), sin(8pi u)
+sin(2pi u))`, the instructions' template with r = sin(4θ) filled in, and
+the cardioid `((1 + cos(2pi u)) cos(2pi u), …)`. The cone is
+`((1 - v) cos(2pi u), (1 - v) sin(2pi u), 2v)` or `z = sqrt(x^2 + y^2)`,
+the frequency slider `k = 4`, `y = sin(k x)` animated from 1, and the
+moving point `A = (cos(t), sin(t))` with no copy left behind.
+
+| | on-device (2d) | gpt-5.5 |
+| --- | --- | --- |
+| pass | 46% (81/175) | 100% (175/175) |
+| ± across repetitions | 4% | 0% |
+| tool calls a run | 3.4 | 2.5 (5 at most) |
+| failed tool calls | 40, in 11 runs | 0 |
+| runs that looked a kind up | 70 | 51 |
+| check / function_doc and search_functions calls | 62 / 5 | 0 / 0 |
+| input tokens a session | 8,630 | 7,020 (3,005 from cache) |
+| output tokens a session | 120 | 166 (55 reasoning) |
+| seconds a run | 8.8 | 5.8 |
+| runs that ended in an error | 3 (context overflows) | 0 |
+
+Per task, on-device (2d) against gpt-5.5, out of 5:
+
+| task | on-device | gpt-5.5 |
+| --- | --- | --- |
+| slider-amplitude, make-it-move, area-under-sin, integral-value, spin-3d, vector-field, named-point, color-red, shift-up, remove-row | 5 | 5 |
+| torus | 4 | 5 |
+| circle-and-line, honest-reply-helix, zoom-out, sphere, saddle, function-draws | 3 | 5 |
+| unit-cube-beside-sphere, animate-existing-slider | 2 | 5 |
+| unit-cube, zoom-zero, lissajous, label-crossing, derivative | 1 | 5 |
+| slider-radius, animate-parabola, show-frequency, polar-rose, cardioid, parametric-circle, cone, points, moving-point, tangent-line, shade-region | 0 | 5 |
+
+**Cost.** 1,228,316 input tokens (525,952 of them cached) and 29,063
+output tokens for the 175 runs: about $4.65 at $5 / $0.50 cached / $30
+per million (third-party listings of gpt-5.5's price; not confirmed on
+OpenAI's own page). About 2.7 cents a run.
+
+### What this says about the gap
+
+- **No task fails on both.** With the same instructions, tools and
+  lookups, gpt-5.5 passes every task every time, so nothing in the suite
+  is beyond the knowledge the app gives the model. The 11 tasks the
+  on-device model fails 5/5 (sliders, animating the parabola, polar
+  curves, cone, points, the moving point, the tangent, shading) are the
+  on-device model failing to use what it is given, not missing knowledge
+  or broken tools.
+- **The instructions already hold the answers the device misses.** For
+  the slider, parabola, moving-point, points, tangent and shading tasks
+  ("change the row rather than adding a near copy", `y < x^2`, `A = (1,
+  2)` in the primer) gpt-5.5 called no lookup at all, and passed. The
+  rose and cardioid come from the polar template (it also looked up
+  pcurve in 4 of 5 runs each). The device's failures there are copying
+  the nearest example instead of adapting it, as recorded in steps 1 to
+  2d.
+- **The lookups work when the model picks the right kind.** gpt-5.5 called
+  list_kinds then kind_examples only on the 3D, parametric, polar and
+  vector-field tasks (51 runs, all on those 11 tasks), with the right
+  kind: "solid" for the cubes, "pcurve" for the helix, rose, cardioid and
+  Lissajous (one cardioid run tried "curve" first), "psurface" for the
+  sphere, torus and cone, "vfield2d" for the field. It adapted the
+  example (radius 2, a 3:4 Lissajous of its own) rather than copying it.
+  The device called a lookup in more runs (70), often with the wrong kind
+  (psurface for a Lissajous, a rose, a cardioid).
+- **So the remaining work is fitting the device.** Since a capable model
+  scores 100% on this knowledge, the next steps should make it easier for
+  a small model to use: fewer, more direct forms; examples that can't be
+  copied as an answer; and changes the device can act on in one step. The
+  suite no longer separates good knowledge from bad at the top: harder
+  tasks are needed for a hosted model, or for Private Cloud Compute later.
+
+### What gpt-5.5 does that the checks don't grade
+
+- **LaTeX in replies:** 34 of 175 replies wrote `\(y=x^2\)` or
+  `\(2\pi\)`. The app shows the reply as plain text, so these would show
+  their backslashes. The on-device model never did.
+- **Colors unasked:** most rows carry a hex color the request didn't ask
+  for (`#e24`, `#2563eb`). Harmless, but it changes rows the person may
+  want to keep as they were.
+- **move_view in 81% of runs,** often a slow 3D spin. That is the
+  instructions' "teach by showing", not an error.

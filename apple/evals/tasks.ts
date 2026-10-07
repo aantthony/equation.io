@@ -149,9 +149,17 @@ export const TASKS: EvalTask[] = [
     tags: ['animation', 'observed'],
     rows: ['y = x^2'],
     request: 'Animate it',
-    checks: [animated(/x\^2|x\s*\*\s*x/), drawnCount(1, 1)],
-    good: [answer('The parabola now rises and falls.', set('y = x^2 + sin(t)'))],
-    bad: [answer('Animated.', set('y = x^2', 'y = x^2 + sin(t)'))],
+    // Still a parabola: x^2, x*x, or a shifted (x - …)^2, but not sin(x - t)^2.
+    checks: [animated(/x\^2|x\s*\*\s*x|(?<![a-z])\(\s*x\s*[-+].*?\)\s*\^\s*2/), drawnCount(1, 1)],
+    good: [
+      answer('The parabola now rises and falls.', set('y = x^2 + sin(t)')),
+      answer('The parabola now slides to the right.', set('y = (x - t)^2')),
+      answer('The parabola now sways side to side.', set('y = (x - sin(t))^2')),
+    ],
+    bad: [
+      answer('Animated.', set('y = x^2', 'y = x^2 + sin(t)')),
+      answer('The parabola now moves.', set('y = sin(x - t)^2')),
+    ],
   },
   {
     id: 'show-frequency',
@@ -525,7 +533,10 @@ export const TASKS: EvalTask[] = [
     rows: ['A = (1, 0)'],
     request: 'Make the point go round in a circle',
     checks: [rowsLike(/^\s*A\s*=/, 1), rowsLike(/^\s*A\s*=.*\bt\b/, 1), hasKind('definition (point)')],
-    good: [answer('A now goes round in a circle, once every 2π seconds.', set('A = (cos(t), sin(t))'))],
+    good: [
+      answer('A now goes round in a circle, once every 2π seconds.', set('A = (cos(t), sin(t))')),
+      answer('I made A orbit the unit circle once every 2π seconds.', set('A = (cos(t), sin(t))')),
+    ],
     bad: [answer('A goes round in a circle.', set('A = (1, 0)', 'B = (cos(t), sin(t))'))],
   },
   {
@@ -619,15 +630,22 @@ export const TASKS: EvalTask[] = [
     request: 'Add the tangent line at x = 1',
     checks: [
       keeps('y = x^2'),
-      drawnCount(2, 2),
+      // Marking the point of tangency is fine; a second line isn't.
+      drawnCount(2, 2, ['point', 'label']),
       curveThrough('the tangent y = 2x − 1', [
         [1, 1],
         [3, 5],
         [-2, -5],
       ]),
     ],
-    good: [answer('The tangent at x = 1 is y = 2x − 1.', set('y = x^2', 'y = 2x - 1'))],
-    bad: [answer('The tangent line at x = 1.', set('y = x^2', 'y = 2x'))],
+    good: [
+      answer('The tangent at x = 1 is y = 2x − 1.', set('y = x^2', 'y = 2x - 1')),
+      answer('The tangent at (1, 1) is y = 2x − 1.', set('y = x^2', 'y = 2x - 1', '(1, 1)', 'label((1, 1), "x = 1")')),
+    ],
+    bad: [
+      answer('The tangent line at x = 1.', set('y = x^2', 'y = 2x')),
+      answer('The tangent line at x = 1.', set('y = x^2', 'y = 2x - 1', 'y = 2x')),
+    ],
   },
   {
     id: 'shift-up',

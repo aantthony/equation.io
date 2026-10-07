@@ -59,11 +59,11 @@ export const unchanged = () =>
       : `rows now ${JSON.stringify(o.rows.map(r => r.text))}`,
   );
 
-/** Between min and max rows draw something. */
-export const drawnCount = (min: number, max = Infinity) =>
+/** Between min and max rows draw something, not counting rows of the `besides` kinds (a marked point, a label). */
+export const drawnCount = (min: number, max = Infinity, besides: string[] = []) =>
   check(`${min}${max === min ? '' : max === Infinity ? '+' : `–${max}`} drawn rows`, o => {
-    const n = drawn(o).length;
-    return n >= min && n <= max ? true : `${n} drawn rows (${kinds(drawn(o))})`;
+    const rows = drawn(o).filter(r => !besides.includes(r.kind ?? ''));
+    return rows.length >= min && rows.length <= max ? true : `${rows.length} drawn rows (${kinds(rows)})`;
   });
 
 /** Whether a row draws in 3D: a 2D figure in a 3D scene stays in the plane z = 0. */
@@ -276,8 +276,11 @@ const CLAIMS: [RegExp, string[]][] = [
   [/\b(cube|box|cuboid)\b/i, ['solid', 'polygon in 3D']],
   [/\b(sphere|ball)\b/i, ['implicit3d', 'psurface', 'solid']],
   [/\b(helix|spiral)\b/i, ['pcurve']],
-  // Not motion: "goes round in a circle".
-  [/(?<!\b(in|round|around|along) (a|the) )\bcircle\b/i, ['implicit2d', 'pcurve', 'polygon', 'pregion']],
+  // Not motion: "goes round in a circle", "orbits the unit circle".
+  [
+    /(?<!\b(in|round|around|along|orbits?|orbiting) (a|the) (unit )?)\bcircle\b/i,
+    ['implicit2d', 'pcurve', 'polygon', 'pregion'],
+  ],
   [/\b(torus|donut|doughnut)\b/i, ['psurface', 'implicit3d', 'solid']],
   [/\b(surface|saddle|paraboloid)\b/i, ['implicit3d', 'psurface']],
   [/\b(vector field|streamlines?)\b/i, ['vfield2d', 'vfield3d']],
