@@ -60,7 +60,7 @@
               "why": "says \"cube\", but the rows are definition (point), implicit3d"
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: definition (point), implicit3d"
             },
@@ -118,7 +118,7 @@
               "why": "says \"cube\", but the rows are definition (point), Cannot add a point and a number., A is already defined."
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: definition (point), Cannot add a point and a number., A is already defined."
             },
@@ -178,7 +178,7 @@
               "why": "says \"cube\", but the rows are implicit3d"
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: implicit3d"
             },
@@ -234,7 +234,7 @@
               "why": "says \"cube\", but the rows are definition (list), implicit3d"
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: definition (list), implicit3d"
             },
@@ -305,7 +305,7 @@
               "why": "says \"cube\", but the rows are implicit3d, vfield3d, implicit3d"
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: implicit3d, vfield3d, implicit3d"
             },
@@ -369,7 +369,7 @@
               "why": "says \"cube\", but the rows are implicit3d, tuple"
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: implicit3d, tuple"
             },
@@ -430,7 +430,7 @@
               "why": "says \"cube\", but the rows are implicit3d, vlist"
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: implicit3d, vlist"
             },
@@ -476,7 +476,7 @@
               "pass": true
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: implicit3d"
             },
@@ -535,7 +535,7 @@
               "why": "says \"cube\", but the rows are implicit3d, plist"
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: implicit3d, plist"
             },
@@ -590,7 +590,7 @@
               "pass": true
             },
             {
-              "name": "a solid or polygon row",
+              "name": "a solid or 3D polygon row",
               "pass": false,
               "why": "kinds: implicit3d, value"
             },
@@ -6286,7 +6286,7 @@
             {
               "name": "a sphere of radius 2",
               "pass": false,
-              "why": "no surface through [[2,0,0],[0,0,-2]]"
+              "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
             }
           ],
           "inputTokens": 6394,
@@ -6327,7 +6327,7 @@
             {
               "name": "a sphere of radius 2",
               "pass": false,
-              "why": "no surface through [[2,0,0],[0,0,-2]]"
+              "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
             }
           ],
           "inputTokens": 3490,
@@ -6379,7 +6379,7 @@
             {
               "name": "a sphere of radius 2",
               "pass": false,
-              "why": "no surface through [[2,0,0],[0,0,-2]]"
+              "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
             }
           ],
           "inputTokens": 10177,
@@ -6433,7 +6433,7 @@
             {
               "name": "a sphere of radius 2",
               "pass": false,
-              "why": "no surface through [[2,0,0],[0,0,-2]]"
+              "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
             }
           ],
           "inputTokens": 7307,
@@ -6570,7 +6570,7 @@
             {
               "name": "a sphere of radius 2",
               "pass": false,
-              "why": "no surface through [[2,0,0],[0,0,-2]]"
+              "why": "no surface through [[2,0,0],[0,0,-2]]; no parametric surface fits"
             }
           ],
           "inputTokens": 15220,
@@ -12314,5 +12314,5 @@
     }
   ],
   "toolsTokens": 820,
-  "regraded": "2026-10-07T11:00:22.351Z"
+  "regraded": "2026-10-07T12:42:29.128Z"
 }

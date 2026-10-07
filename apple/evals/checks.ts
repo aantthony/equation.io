@@ -66,6 +66,17 @@ export const drawnCount = (min: number, max = Infinity) =>
     return n >= min && n <= max ? true : `${n} drawn rows (${kinds(drawn(o))})`;
   });
 
+/** Whether a row draws in 3D: a 2D figure in a 3D scene stays in the plane z = 0. */
+const in3D = (o: Outcome, r: RowStatus) => !!o.graph.analysis.rows[r.index]?.cls?.needs3D;
+
+/** A cube's kinds: a solid, or a polygon in 3D (a hull of 3D points); not a 2D figure. */
+export const solid3D = () =>
+  check('a solid or 3D polygon row', o =>
+    o.rows.some(r => r.status === 'ok' && (r.kind === 'solid' || (r.kind === 'polygon' && in3D(o, r))))
+      ? true
+      : `kinds: ${kinds(o.rows)}`,
+  );
+
 /** Some row (matching `text`, if given) is of one of these kinds. */
 export const hasKind = (wanted: string | string[], text?: RegExp) => {
   const list = [wanted].flat();
@@ -206,6 +217,20 @@ export const surfaceThrough = (what: string, points: [number, number, number][],
     return plans(o).some(p => fits(p.cpu)) ? true : `no surface through ${JSON.stringify(points)}`;
   });
 
+/** Some parametric surface, sampled over u and v in [0, 1], passes `test` (given every finite sample). */
+export const parametricSurface = (what: string, test: (samples: number[][]) => boolean) =>
+  check(what, o => {
+    const fits = (cpu: CpuPlan) => {
+      if (cpu.type !== 'psurface') return false;
+      const grid = Array.from({ length: 21 * 21 }, (_, k) => ({ u: (k % 21) / 20, v: Math.floor(k / 21) / 20 }));
+      const samples = grid
+        .map(uv => cpu.comps.map(c => tryEval(() => evaluate(c, env(o, uv)))))
+        .filter(p => p.every(Number.isFinite));
+      return samples.length > 0 && test(samples);
+    };
+    return plans(o).some(p => fits(p.cpu)) ? true : `no parametric surface fits`;
+  });
+
 /** Passes when any of the checks does. */
 export const anyOf = (name: string, ...checks: Check[]) =>
   check(name, o => {
@@ -215,7 +240,7 @@ export const anyOf = (name: string, ...checks: Check[]) =>
 
 /** Words in a reply that name a shape, and the kinds that would draw it. */
 const CLAIMS: [RegExp, string[]][] = [
-  [/\b(cube|box|cuboid)\b/i, ['solid', 'polygon']],
+  [/\b(cube|box|cuboid)\b/i, ['solid', 'polygon in 3D']],
   [/\b(sphere|ball)\b/i, ['implicit3d', 'psurface', 'solid']],
   [/\b(helix|spiral)\b/i, ['pcurve']],
   // Not motion: "goes round in a circle".
@@ -243,7 +268,8 @@ const CLAIMS: [RegExp, string[]][] = [
  */
 export const honestReply = () =>
   check('reply names only what was drawn', o => {
-    const present = new Set(o.rows.filter(r => r.status === 'ok' && !r.warning).map(r => r.kind));
+    const shown = o.rows.filter(r => r.status === 'ok' && !r.warning);
+    const present = new Set([...shown.map(r => r.kind), ...shown.filter(r => in3D(o, r)).map(r => `${r.kind} in 3D`)]);
     for (const [word, wanted] of CLAIMS) {
       const said = word.exec(o.reply);
       if (said && !wanted.some(k => present.has(k))) return `says "${said[0]}", but the rows are ${kinds(o.rows)}`;

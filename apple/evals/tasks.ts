@@ -22,8 +22,10 @@ import {
   type Outcome,
   parametric,
   parametricCurve,
+  parametricSurface,
   replySays,
   rowsLike,
+  solid3D,
   sliderUsed,
   surfaceThrough,
   unchanged,
@@ -68,7 +70,7 @@ export const TASKS: EvalTask[] = [
     tags: ['3d', 'observed'],
     rows: [],
     request: 'Draw a unit cube',
-    checks: [hasKind(['solid', 'polygon']), drawnCount(1, 1)],
+    checks: [solid3D(), drawnCount(1, 1)],
     good: [
       answer('Here is the unit cube.', set('(interval(0, 1), interval(0, 1), interval(0, 1))')),
       answer('A unit cube, drawn as the hull of its corners.', set('hull(([0,1],[0,1],[0,1]))')),
@@ -77,6 +79,8 @@ export const TASKS: EvalTask[] = [
       // The observed mash-up of the reference's helix and cube examples.
       answer('I drew a unit cube as a solid.', set('(interval(0,1), 0, 0), (2cos(6pi u), 2sin(6pi u), 2u - 2)')),
       answer('I drew a unit cube.', set('(2cos(6pi u), 2sin(6pi u), 4u - 2)')),
+      // A 2D triangle: list_kinds' polygon form, copied.
+      answer('I drew a unit cube as a polygon.', set('polygon((0, 0), (2, 0), (1, 2))')),
     ],
   },
   {
@@ -84,14 +88,17 @@ export const TASKS: EvalTask[] = [
     tags: ['3d', 'observed', 'keep'],
     rows: ['x^2 + y^2 + z^2 = 4'],
     request: 'Add a unit cube',
-    checks: [hasKind(['solid', 'polygon']), keeps('x^2 + y^2 + z^2 = 4'), drawnCount(2, 2)],
+    checks: [solid3D(), keeps('x^2 + y^2 + z^2 = 4'), drawnCount(2, 2)],
     good: [
       answer(
         'Added a unit cube inside the sphere.',
         set('x^2 + y^2 + z^2 = 4', '(interval(0, 1), interval(0, 1), interval(0, 1))'),
       ),
     ],
-    bad: [answer('Added a unit cube.', set('(interval(0, 1), interval(0, 1), interval(0, 1))'))],
+    bad: [
+      answer('Added a unit cube.', set('(interval(0, 1), interval(0, 1), interval(0, 1))')),
+      answer('Added a unit cube.', set('x^2 + y^2 + z^2 = 4', 'polygon((0, 0), (1, 0), (1, 1), (0, 1))')),
+    ],
   },
   {
     id: 'slider-amplitude',
@@ -338,17 +345,36 @@ export const TASKS: EvalTask[] = [
     rows: [],
     request: 'Draw a sphere of radius 2',
     checks: [
-      surfaceThrough(
+      anyOf(
         'a sphere of radius 2',
-        [
-          [2, 0, 0],
-          [0, 0, -2],
-        ],
-        [0, 0, 0],
+        surfaceThrough(
+          'a sphere of radius 2',
+          [
+            [2, 0, 0],
+            [0, 0, -2],
+          ],
+          [0, 0, 0],
+        ),
+        // Every sample 2 from the origin, and reaching both poles and both sides: not a cap or a band.
+        parametricSurface('a parametric sphere of radius 2', samples => {
+          const reach = (axis: number, sign: number) => samples.some(p => Math.abs(p[axis] - 2 * sign) < 0.05);
+          return (
+            samples.every(p => Math.abs(Math.hypot(...p) - 2) < 1e-6) &&
+            [0, 2].every(axis => reach(axis, 1) && reach(axis, -1))
+          );
+        }),
       ),
     ],
-    good: [answer('A sphere of radius 2, centred at the origin.', set('x^2 + y^2 + z^2 = 4'))],
-    bad: [answer('A sphere of radius 2.', set('x^2 + y^2 = 4'))],
+    good: [
+      answer('A sphere of radius 2, centred at the origin.', set('x^2 + y^2 + z^2 = 4')),
+      answer('A sphere of radius 2.', set('(2sin(pi v)cos(2pi u), 2sin(pi v)sin(2pi u), 2cos(pi v))')),
+    ],
+    bad: [
+      answer('A sphere of radius 2.', set('x^2 + y^2 = 4')),
+      answer('A sphere of radius 2.', set('(sin(pi v)cos(2pi u), sin(pi v)sin(2pi u), cos(pi v))')),
+      // The top half only.
+      answer('A sphere of radius 2.', set('(2sin(pi v/2)cos(2pi u), 2sin(pi v/2)sin(2pi u), 2cos(pi v/2))')),
+    ],
   },
   {
     id: 'saddle',

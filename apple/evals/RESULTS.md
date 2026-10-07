@@ -187,3 +187,77 @@ help to this model:
   cube", then `["A = (1, 1, 1)", "z = x * y"]` and "I drew a 3D cube"),
   make-it-move, animate-parabola, show-frequency, cardioid, sphere, cone,
   color-red all 0/5. The reply check failed in 19 runs (18 before).
+
+## Step 2b: list_kinds, kind_examples, search_functions, function_doc (2026-10-07)
+
+`results/2026-10-07T124000Z-on-device.json`, at e25469d. read_syntax is
+gone; in its place four lookups (lib/assistant-tools.ts), answered as text:
+
+| tool | what it returns | typical size |
+| --- | --- | --- |
+| list_kinds | 21 common kinds as `kind: smallest form \| what it draws`, the other 27 by topic, and a line on definitions | 806 tokens (2,200 characters), fixed |
+| kind_examples(kind) | the kind's KIND_MEANINGS line, its smallest form, and up to 3 whole graphs from the examples menu that draw it (the analyzer labels each menu row by kind; fewest rows first) | 133 tokens on average over the 49 kinds, 345 at most (automaton) |
+| search_functions(query) | up to 6 `signature: description` lines, only the strong matches | 73 tokens on average over 7 sample queries, 187 at most |
+| function_doc(name) | the signature and description, and up to 2 menu examples that call it | 78 tokens on average over all 139 names, 272 at most (fourier) |
+| check(rows) | as in 2a | about 40 tokens a row |
+
+Sizes are the on-device tokenizer's (`SystemLanguageModel.tokenCount`).
+The instructions changed by one line (read_syntax → "call list_kinds
+first, then kind_examples or function_doc"). The tool definitions are now
+1,218 tokens (820 at the baseline) and the instructions 883.
+
+**Check fixes, and every file regraded.** This step's runs showed two
+checks wrong, one each way. Both are fixed in this commit, and the
+baseline, 2a and 2b files were regraded with regrade.ts:
+- The unit-cube tasks (task and reply check) took any `polygon` row as a
+  cube. Two 2b runs copied list_kinds' polygon form,
+  `polygon((0, 0), (2, 0), (1, 2))`, a 2D triangle, and replied "a unit
+  cube as a polygon". They passed. A polygon now counts only when it
+  draws in 3D (a hull of 3D points), and a solid always counts.
+- The sphere task only took an implicit surface through (2, 0, 0) and
+  (0, 0, −2). Two 2b runs drew the menu's correct parametric sphere,
+  `(2sin(pi v)cos(2pi u), 2sin(pi v)sin(2pi u), 2cos(pi v))`, and failed.
+  A parametric surface now passes when every sample is 2 from the origin
+  and it reaches both poles and both sides (a cap or a unit sphere still
+  fails; tasks.ts has both as known-bad answers).
+
+No baseline or 2a run changed grade (43% and 36% as before). 2b went from
+44% to 44%: unit-cube 4/5 → 2/5, sphere 0/5 → 2/5.
+
+**Pass rate 44% (77/175), against 43% (76/175).** Repetitions 17, 13, 17,
+15, 15 (±4%). Context overflows 6, as at the baseline. Tool calls 4.5 a
+run (3.6), input tokens 10,080 a session on average (6,840).
+
+The overall rate hides large moves both ways:
+- Up: unit-cube 0 → 2, unit-cube-beside-sphere 0 → 3, sphere 0 → 2, torus
+  1 → 4, lissajous 3 → 4, tangent-line 2 → 4. These are retrieval: the
+  runs called list_kinds, then kind_examples("solid") or ("psurface"),
+  and adapted (or copied) a menu example. The solid cube
+  `(interval(0, 1), interval(0, 1), interval(0, 1))` came straight from
+  kind_examples("solid"); three of four torus passes copied the menu's
+  "breathing torus", which moves with t, unasked.
+- Also up, with no lookups in those runs: make-it-move 0 → 5 (every run
+  now writes `y = sin(x - t)`) and color-red 0 → 4 (`y = x^2 #e24`). The
+  instructions' own examples cover both, unchanged since the baseline, so
+  this is the model's sensitivity to the rest of its prompt (the tool
+  list), not knowledge. Per-task moves of 2 or 3 of 5 need that caveat.
+- Down: polar-rose 5 → 0. All five runs called list_kinds, then
+  kind_examples("psurface"), and turned the instructions' rose into a 3D
+  curve: `(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u), cos(8pi u))`,
+  "a 3D polar rose". derivative 4 → 1: four runs left `f(x) = x^3 - x`
+  undrawn beside `y = d/dx f(x)`. spin-3d 5 → 2: runs wrote the camera
+  into a row, `"spin:0.3"`, and looped on set_graph until the context ran
+  out. function-draws 4 → 2: `x^2 - 4` as a bare row (a scalar field),
+  replied as "a shaded region".
+- Lookups: list_kinds in 63 runs, kind_examples in 64 (psurface 21, pcurve
+  15, implicit2d 9, solid 8, …), check in 46, function_doc twice (both
+  `"psurface"`, a kind), search_functions never. Runs that looked a kind
+  up passed 33% (21/64); they are the harder requests.
+- The model now copies list_kinds' smallest forms as it copied the
+  instructions' examples before. "Draw a helix": 5/5 wrote the unit
+  circle `(cos(2pi u), sin(2pi u))`, the pcurve form, and called it a
+  helix. "A circle of radius 3 as a parametric curve": 4/5 wrote that same
+  unit circle. "The cardioid r = 1 + cos θ": 2/5 wrote the psurface form,
+  a unit sphere, as "a 3D cardioid surface". "A cone": the unit circle,
+  `x^2 + y^2 = 9`, a paraboloid and a saddle. All four tasks stay 0/5, as
+  do slider-radius, animate-parabola, show-frequency and moving-point.
