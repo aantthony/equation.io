@@ -134,19 +134,26 @@ struct DocumentView: View {
     @State private var dragged: CGFloat = 0
     @State private var drag = PanelDrag()
 
-    /// The card's inset from the screen's edges, as a floating sheet sits.
+    /// The home indicator's height, kept clear below the header and the equations.
+    @State private var home: CGFloat = 0
+
+    /// The card's inset from the screen's sides.
     private static var margin: CGFloat { 8 }
-    /// The card's height with only its header showing.
+    /// The header's height: the grab bar, the title and its buttons.
     private static var headerHeight: CGFloat { 58 }
+    /// How far the card runs on below the screen, so its bottom edge and
+    /// corners never show, even as a drag pulls it up.
+    private static var overhang: CGFloat { 80 }
 
     var body: some View {
       ZStack(alignment: .bottom) {
         graph
           .ignoresSafeArea()
         GeometryReader { geometry in
-          let stops = Self.stops(in: geometry.size.height)
+          let stops = Self.stops(in: geometry.size.height, home: home)
           let base = stops[min(stop, stops.count - 1)]
-          let height = min(max(base - dragged, Self.headerHeight), stops[stops.count - 1])
+          // The card's visible height, from its top to the screen's bottom.
+          let height = min(max(base - dragged, stops[0]), stops[stops.count - 1])
           let settle = { (target: CGFloat) in
             withAnimation(.snappy) {
               stop = stops.indices.min { abs(stops[$0] - target) < abs(stops[$1] - target) } ?? 1
@@ -182,16 +189,22 @@ struct DocumentView: View {
             )
             editor
               .environment(\.panelDrag, drag)
+              .padding(.bottom, Self.overhang + home)
           }
-          .frame(height: height, alignment: .top)
+          .frame(height: height + Self.overhang, alignment: .top)
           .clipShape(.rect(cornerRadius: 36))
           .glassEffect(.regular, in: .rect(cornerRadius: 36))
           .padding(.horizontal, Self.margin)
+          .offset(y: Self.overhang)
           .frame(maxHeight: .infinity, alignment: .bottom)
         }
-        .padding(.bottom, Self.margin)
-        // Down to the screen's edge, but above the keyboard when it is up.
+        // Down past the screen's edge, but above the keyboard when it is up.
         .ignoresSafeArea(.container, edges: .bottom)
+      }
+      .background {
+        Color.clear
+          .ignoresSafeArea(.keyboard)
+          .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { home = $0 }
       }
     }
 
@@ -202,9 +215,11 @@ struct DocumentView: View {
       drag.canGrow = { base - dragged < top - 1 }
     }
 
-    /// Just the header, a few rows, half, and nearly all of the window.
-    private static func stops(in total: CGFloat) -> [CGFloat] {
-      [headerHeight, 190, total * 0.5, total - 60].map { min(max($0, headerHeight), max(headerHeight, total - 40)) }
+    /// Just the header (above the home indicator), a few rows, half, and
+    /// nearly all of the window.
+    private static func stops(in total: CGFloat, home: CGFloat) -> [CGFloat] {
+      let low = headerHeight + home
+      return [low, 190 + home, total * 0.5, total - 60].map { min(max($0, low), max(low, total - 40)) }
     }
   }
 #endif
