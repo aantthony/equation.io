@@ -8379,7 +8379,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; kinds: family"
+              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: family"
             }
           ],
           "inputTokens": 16523,
@@ -8466,7 +8466,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; kinds: definition (interval), projected2d, projected2d, implicit3d"
+              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: definition (interval), projected2d, projected2d, implicit3d"
             }
           ],
           "inputTokens": 22426,
@@ -8515,7 +8515,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; kinds: pcurve, pcurve"
+              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: pcurve, pcurve"
             }
           ],
           "inputTokens": 7394,
@@ -8575,7 +8575,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; kinds: pcurve"
+              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: pcurve"
             }
           ],
           "inputTokens": 10288,
@@ -8625,7 +8625,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; kinds: definition (interval), pcurve"
+              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: definition (interval), pcurve"
             }
           ],
           "inputTokens": 7529,
@@ -13601,5 +13601,5 @@
     }
   ],
   "toolsTokens": 942,
-  "regraded": "2026-10-07T12:42:29.613Z"
+  "regraded": "2026-10-07T13:06:20.229Z"
 }

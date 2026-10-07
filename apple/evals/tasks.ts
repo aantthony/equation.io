@@ -422,19 +422,39 @@ export const TASKS: EvalTask[] = [
           ],
           [0, 0, 1],
         ),
-        // A parametric cone or solid isn't checked for its shape.
-        hasKind(['psurface', 'solid']),
+        // A parametric cone about a vertical axis: the distance from the axis
+        // grows in step with z (r = a + b z, b not 0), or with |z| (a double
+        // cone). A solid isn't checked for its shape.
+        parametricSurface('a parametric cone', samples => {
+          const fits = (f: (z: number) => number) => {
+            const pts = samples.map(([x, y, z]) => [f(z), Math.hypot(x, y)]);
+            const n = pts.length;
+            const mz = pts.reduce((s, p) => s + p[0], 0) / n;
+            const mr = pts.reduce((s, p) => s + p[1], 0) / n;
+            const szz = pts.reduce((s, p) => s + (p[0] - mz) ** 2, 0);
+            if (szz < 1e-9) return false;
+            const b = pts.reduce((s, p) => s + (p[0] - mz) * (p[1] - mr), 0) / szz;
+            return Math.abs(b) > 0.05 && pts.every(([z, r]) => Math.abs(mr + b * (z - mz) - r) < 1e-6);
+          };
+          return fits(z => z) || fits(Math.abs);
+        }),
+        hasKind('solid'),
       ),
     ],
     good: [
       answer('A double cone, z² = x² + y².', set('z^2 = x^2 + y^2')),
       answer('A cone opening upward.', set('z = sqrt(x^2 + y^2)')),
+      answer('A cone.', set('(2v cos(2pi u), 2v sin(2pi u), 3v)')),
+      answer('A double cone.', set('((2v - 1) cos(2pi u), (2v - 1) sin(2pi u), 2v - 1)')),
     ],
     bad: [
       answer('A cone.', set('y = abs(x)')),
       // Observed: a saddle, called a cone.
       answer('Here is a 3D cone surface.', set('z = x^2 - y^2')),
       answer('A 3D cone.', set('z = sqrt(x^2 - y^2)')),
+      // Observed: list_kinds' unit sphere, called a cone.
+      answer('A cone-shaped surface.', set('(sin(pi v)cos(2pi u), sin(pi v)sin(2pi u), cos(pi v))')),
+      answer('A cone.', set('(cos(2pi u), sin(2pi u), v)')),
     ],
   },
   {

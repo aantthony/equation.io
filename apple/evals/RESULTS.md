@@ -261,3 +261,95 @@ The overall rate hides large moves both ways:
   a unit sphere, as "a 3D cardioid surface". "A cone": the unit circle,
   `x^2 + y^2 = 9`, a paraboloid and a saddle. All four tasks stay 0/5, as
   do slider-radius, animate-parabola, show-frequency and moving-point.
+
+## Step 2c: the instructions as a primer (2026-10-07)
+
+`results/2026-10-07T130535Z-on-device.json`, at e6fce0e. The instructions
+are rewritten (Assistant.swift `ChatModel.instructions`): a short primer
+of the commonest forms; the voice prototype's rules (polar through u, as a
+template `(f(2pi u) cos(2pi u), f(2pi u) sin(2pi u))` instead of the rose;
+a function definition draws nothing; reserved names); "for any other
+shape, call list_kinds, then kind_examples for the kind you need, and
+adapt an example"; and two new rules, "one shape per row" and "check
+before claiming". **Fixed overhead: 806 instruction tokens and 1,218
+tool-definition tokens, 2,024 in all**, against 874 + 820 = 1,694 at the
+baseline: the four lookups and check cost 398 tokens of definitions, the
+shorter primer saves 68.
+
+**Another check fix, and every file regraded again.** The cone task took
+any parametric surface or solid unchecked. In this run all five cone runs
+copied list_kinds' psurface form, a unit sphere, called it "a cone-like
+surface", and passed. A parametric surface now passes only when its
+distance from the z-axis is a linear function of z or of |z| (a cone or a
+double cone, not a cylinder); tasks.ts has the copied sphere and a
+cylinder as known-bad answers, and two parametric cones as known-good. A
+solid still isn't checked for its shape. Regraded: the baseline, 2a and
+2b files are unchanged (43%, 36%, 44%; no earlier run drew a parametric
+surface for a cone); this run went from 46% (81/175) to 43%.
+
+**Pass rate 43% (76/175), against 43% at the baseline and 44% after 2b.**
+The repetitions are much steadier: 15, 16, 15, 15, 15 (±1%, against ±4%).
+Tool calls 3.3 a run (3.6 at the baseline, 4.5 after 2b), input tokens
+8,810 a session on average, context overflows 3 (6 at the baseline and
+after 2b). The reply check failed in 21 runs (18 at the baseline).
+
+Against 2b:
+- Up: spin-3d 2 → 5 and shift-up 2 → 5 (no more camera rows like
+  `"spin:0.3"`, no loops), named-point 3 → 5, torus 4 → 5 (all five copy
+  the menu's breathing torus, which moves with t).
+- Down: unit-cube-beside-sphere 3 → 0. Four of five runs copied
+  kind_examples' label into the row:
+  `"solid cube: (interval(0, 1), interval(0, 1), interval(0, 1))"`, an
+  error, then answered without fixing it ("the second row should define a
+  solid cube"). saddle 5 → 2: three runs wrote list_kinds' psurface form,
+  the unit sphere, as "a 3D saddle". tangent-line 4 → 0: every run wrote
+  the derivative, `y = 2x`, as the tangent. lissajous 4 → 2.
+
+Against the baseline the totals are level, but which tasks pass has
+changed: color-red 0 → 5, make-it-move 0 → 4, torus 1 → 5, unit-cube
+0 → 2, sphere 0 → 2 up; polar-rose 5 → 0, tangent-line 2 → 0, saddle
+5 → 2, derivative 4 → 2, function-draws 4 → 1, vector-field 5 → 3 down.
+
+### What still fails, and why (after 2c)
+
+**Copying the nearest form, now from the lookups.** The model calls
+list_kinds and kind_examples (68 and 72 of 175 runs) and then, as at the
+baseline, writes the first form it sees with the request's name on it:
+- `(sin(pi v)cos(2pi u), sin(pi v)sin(2pi u), cos(pi v))`, list_kinds'
+  psurface form (a unit sphere), for "a cone" (5/5), "the cardioid r = 1 +
+  cos θ" (4/5, "a cardioid as a parametric surface"), "the saddle z = x² −
+  y²" (3/5) and once for the polar rose.
+- The unit circle `(cos(2pi u), sin(2pi u))`, the pcurve form, for "a
+  helix" and "a circle of radius 3" (both 0/5, every step).
+- kind_examples' labels: `"solid cube: (interval(0, 1), …)"` as a row.
+
+**The polar template isn't instantiated.** polar-rose 0/5 in 2b and 2c,
+after 5/5 at the baseline, where the instructions held the rose itself.
+With the template, runs wrote `(sin(2pi u) cos(4pi u), sin(2pi u) sin(4pi
+u))` (θ and r swapped), or kept a bare `r = sin(4θ)` row beside it. The
+cardioid is 0/5 at every step.
+
+**It adds instead of changing, and every slider is the amplitude.**
+slider-radius, animate-parabola and show-frequency are 0/5 at every step,
+and all three get the instructions' own example back: `A = 2` and
+`y = A sin(x)` beside the circle for "a slider for the radius" (or `a = 4`
+used by nothing); the parabola replaced by `a = 2`, `y = a sin(x)` for
+"animate it"; an amplitude slider for "show me what changing the
+frequency does". moving-point is 0/5 at every step: `A = (1, 0)` stays
+put beside new rows (a parametric circle in 2b; `x = u`, `y = a cos(u)`
+or `y = (1 - t)^2` in 2c) and the reply says the point moves.
+
+**Points with names.** "Plot the points (1, 2), (3, 4) and (5, 1)" is 0/5:
+`A = 2`, `A = 3`, `A = 1`, or one point `A = (1, 2)` after
+"A is already defined" errors.
+
+**Camera and window.** zoom-zero and zoom-out pass 2/5 and 3/5: runs
+never call move_view and say they zoomed, send the window they are
+already on (x = [-8, 8]) as the "wider" one, or send 3D arguments (`phi`,
+`radius`, `spin`) to a 2D graph. Only get_graph tells the model the
+current window.
+
+**check is used as a dry run.** 52 runs called it; most sent exactly the
+rows they then passed to set_graph. "Check before claiming" didn't stop
+replies like "a 3D cone-like surface" over a sphere: the meaning said
+"parametric surface over u and v in 0..1", which is true of both.
