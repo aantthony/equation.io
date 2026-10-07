@@ -56,7 +56,8 @@ function commonFailure(runs: RunResult[]): string {
     for (const c of run.checks) if (!c.pass) counts.set(c.name, (counts.get(c.name) ?? 0) + 1);
   }
   const top = [...counts].sort((a, b) => b[1] - a[1])[0];
-  return top ? `${top[0]} (${top[1]}/${runs.length})` : '';
+  // A check named by a regex may hold a |, which would split the table cell.
+  return top ? `${top[0].replaceAll('|', '\\|')} (${top[1]}/${runs.length})` : '';
 }
 
 export function report(results: Results): string {

@@ -21,6 +21,7 @@ import {
   noFailedCalls,
   type Outcome,
   parametric,
+  parametricCurve,
   replySays,
   rowsLike,
   sliderUsed,
@@ -136,6 +137,8 @@ export const TASKS: EvalTask[] = [
     checks: [
       sliderUsed(),
       rowsLike(/sin/, 1),
+      // A frequency, not an amplitude: the slider multiplies x inside sin.
+      rowsLike(/sin\(\s*([a-z]\w*\s*\*?\s*x|x\s*\*?\s*[a-z]\w*)\s*\)/i, 1),
       noFailedCalls('animate_slider'),
       called('animate_slider', 'glides a slider'),
     ],
@@ -143,6 +146,8 @@ export const TASKS: EvalTask[] = [
     bad: [
       // Animating the slider before creating it.
       answer('As k grows the waves bunch up.', animate('k', 3), set('k = 1', 'y = sin(k x)')),
+      // Observed: an amplitude slider for a frequency request.
+      answer('Watch the wave stretch as A grows.', set('A = 1', 'y = A sin(x)'), animate('A', 2)),
     ],
   },
   {
@@ -308,9 +313,24 @@ export const TASKS: EvalTask[] = [
     tags: ['parametric'],
     rows: [],
     request: 'Draw a Lissajous figure',
-    checks: [hasKind('pcurve')],
+    checks: [
+      parametricCurve(
+        'a 2D curve that is not an ellipse (its frequencies differ)',
+        samples => {
+          const a = Math.max(...samples.map(([x]) => Math.abs(x)));
+          const b = Math.max(...samples.map(([, y]) => Math.abs(y)));
+          return a > 0 && b > 0 && samples.some(([x, y]) => Math.abs((x / a) ** 2 + (y / b) ** 2 - 1) > 0.05);
+        },
+        2,
+      ),
+    ],
     good: [answer('A 3:2 Lissajous figure.', set('(sin(6pi u), sin(4pi u))'))],
-    bad: [answer('A Lissajous figure.', set('y = sin(3x)'))],
+    bad: [
+      answer('A Lissajous figure.', set('y = sin(3x)')),
+      // Observed: a circle and an ellipse.
+      answer('A Lissajous figure.', set('(2cos(2pi u), 2sin(2pi u))')),
+      answer('A Lissajous figure.', set('(2cos(2pi u), sin(2pi u))')),
+    ],
   },
   {
     id: 'sphere',
@@ -364,9 +384,32 @@ export const TASKS: EvalTask[] = [
     tags: ['3d'],
     rows: [],
     request: 'Draw a cone',
-    checks: [hasKind(['implicit3d', 'psurface', 'solid'])],
-    good: [answer('A double cone, z² = x² + y².', set('z^2 = x^2 + y^2'))],
-    bad: [answer('A cone.', set('y = abs(x)'))],
+    checks: [
+      anyOf(
+        'a cone',
+        surfaceThrough(
+          'a cone about the z-axis',
+          [
+            [1, 0, 1],
+            [0, 2, 2],
+            [3, 4, 5],
+          ],
+          [0, 0, 1],
+        ),
+        // A parametric cone or solid isn't checked for its shape.
+        hasKind(['psurface', 'solid']),
+      ),
+    ],
+    good: [
+      answer('A double cone, z² = x² + y².', set('z^2 = x^2 + y^2')),
+      answer('A cone opening upward.', set('z = sqrt(x^2 + y^2)')),
+    ],
+    bad: [
+      answer('A cone.', set('y = abs(x)')),
+      // Observed: a saddle, called a cone.
+      answer('Here is a 3D cone surface.', set('z = x^2 - y^2')),
+      answer('A 3D cone.', set('z = sqrt(x^2 - y^2)')),
+    ],
   },
   {
     id: 'vector-field',
@@ -424,6 +467,10 @@ export const TASKS: EvalTask[] = [
         'Labelled the crossings at (0, 0) and (2, 4).',
         set('y = x^2', 'y = 2x', 'label((0, 0), "cross")', 'label((2, 4), "cross")'),
       ),
+      answer(
+        'I drew the two curves, framed their crossing point at (2, 4), and labelled it.',
+        set('y = x^2', 'y = 2x', 'label((2, 4), "they cross here")'),
+      ),
     ],
     bad: [answer('Labelled the crossing.', set('y = x^2', 'y = 2x', 'label((1, 1), "cross")'))],
   },
@@ -444,7 +491,12 @@ export const TASKS: EvalTask[] = [
         },
       },
     ],
-    good: [answer('The parabola is red now.', set('y = x^2 #e24'))],
+    good: [
+      answer(
+        'I drew the red parabola, showing the points where the curve satisfies the equation.',
+        set('y = x^2 #e24'),
+      ),
+    ],
     bad: [answer('The parabola is red now.', set('y = x^2 #24e')), answer('Red.', set('y = x^2', 'y = x^2 #f00'))],
   },
   {

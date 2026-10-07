@@ -133,6 +133,8 @@ let timeout: Duration = .seconds(180)
 @main @MainActor
 struct Runner {
   static func main() async {
+    // A line per run as it finishes, even into a pipe or a log file.
+    setvbuf(stdout, nil, _IOLBF, 0)
     do {
       try await run()
     } catch {

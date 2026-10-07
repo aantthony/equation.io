@@ -179,19 +179,22 @@ export const curveThrough = (what: string, points: [number, number][], tolerance
     return plans(o).some(p => on(p.cpu)) ? true : `no curve through ${JSON.stringify(points)}`;
   });
 
-/** Some parametric curve (2D or 3D) has every sample satisfying `test`. */
-export const parametric = (what: string, test: (p: number[]) => boolean, dim?: 2 | 3) =>
+/** Some parametric curve (2D or 3D), sampled over u in [0, 1], passes `test`. */
+export const parametricCurve = (what: string, test: (samples: number[][]) => boolean, dim?: 2 | 3) =>
   check(what, o => {
     const fits = (cpu: CpuPlan) => {
       if (cpu.type !== 'pcurve' || (dim && cpu.dim !== dim)) return false;
-      return Array.from({ length: 201 }, (_, k) =>
+      const samples = Array.from({ length: 201 }, (_, k) =>
         cpu.comps.map(c => tryEval(() => evaluate(c, env(o, { u: k / 200 })))),
-      )
-        .filter(p => p.every(Number.isFinite))
-        .every(test);
+      ).filter(p => p.every(Number.isFinite));
+      return samples.length > 0 && test(samples);
     };
     return plans(o).some(p => fits(p.cpu)) ? true : `no parametric curve fits`;
   });
+
+/** Some parametric curve (2D or 3D) has every sample satisfying `test`. */
+export const parametric = (what: string, test: (p: number[]) => boolean, dim?: 2 | 3) =>
+  parametricCurve(what, samples => samples.every(test), dim);
 
 /** Some 3D implicit surface's residual vanishes at every point (and not at `off`). */
 export const surfaceThrough = (what: string, points: [number, number, number][], off?: [number, number, number]) =>
@@ -221,11 +224,15 @@ const CLAIMS: [RegExp, string[]][] = [
   [/\b(surface|saddle|paraboloid)\b/i, ['implicit3d', 'psurface']],
   [/\b(vector field|streamlines?)\b/i, ['vfield2d', 'vfield3d']],
   [/\blabel(led|s)?\b/i, ['label']],
-  // Not "the point where they cross".
-  [/\b(plotted|drew|added|placed|marked)\b[^.]*\bpoints?\b/i, ['point', 'plist', 'definition (point)', 'system']],
+  // Not "the point where they cross", or "the curve, showing the points where…".
+  [
+    /\b(plotted|drew|added|placed|marked)\s+(\w+\s+){0,2}points?\b/i,
+    ['point', 'plist', 'definition (point)', 'system'],
+  ],
   [/\bslider\b/i, ['definition (const)']],
   [/\b(rose|petals?|cardioid)\b/i, ['pcurve', 'implicit2d']],
-  [/\b(shaded|shade|area|region)\b/i, ['ineq2d', 'value', 'pregion', 'projected2d', 'prob']],
+  // Not "framed the area around them".
+  [/\b(shaded|shade|area under|area between|region where)\b/i, ['ineq2d', 'value', 'pregion', 'projected2d', 'prob']],
   [/\btangent\b/i, ['implicit2d', 'polygon']],
 ];
 
