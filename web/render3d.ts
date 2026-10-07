@@ -658,6 +658,88 @@ void main() {
 `;
 }
 
+/**
+ * A 2D row painted on a surface (lib/surface-map.ts): the surface's own mesh
+ * (psurfVert), with x and y read at each fragment from its (u, v) — `xy` is
+ * their GLSL in u and v — and the row shaded there as the 2D renderer
+ * shades it: a curve as a line about two pixels wide (|F| over its change
+ * across a pixel, so it stays that wide however the surface turns), a
+ * region as a tint with its edges, a field signed toward the row colour or
+ * its complement. Lit as the surface is, so it reads as printed on it.
+ */
+function paintFrag(
+  comps: [string, string, string],
+  du: [string, string, string] | undefined,
+  dv: [string, string, string] | undefined,
+  xy: [string, string],
+  paint: SurfacePaint['paint'],
+  params?: string[],
+): string {
+  const tangents =
+    du && dv
+      ? `
+vec3 Pu(float u, float v) { return vec3(${du[0]}, ${du[1]}, ${du[2]}); }
+vec3 Pv(float u, float v) { return vec3(${dv[0]}, ${dv[1]}, ${dv[2]}); }`
+      : `
+vec3 P(float u, float v) { return vec3(${comps[0]}, ${comps[1]}, ${comps[2]}); }
+vec3 Pu(float u, float v) { return (P(u + 1e-3, v) - P(u - 1e-3, v)) * 500.0; }
+vec3 Pv(float u, float v) { return (P(u, v + 1e-3) - P(u, v - 1e-3)) * 500.0; }`;
+  const edges = paint.kind === 'region' ? paint.edges : [];
+  const body =
+    paint.kind === 'curve'
+      ? `
+  float d = abs(f) / max(fwidth(f), 1e-24);
+  float alpha = 1.0 - smoothstep(0.6, 1.6, d);
+  vec3 base = uColor;`
+      : paint.kind === 'region'
+        ? `
+  float aa = max(fwidth(f), 1e-24);
+  float alpha = (1.0 - smoothstep(-aa, aa, f)) * 0.35;
+${edges
+  .map(
+    (_, i) => `  {
+    float e = E${i}(x, y);
+    float w = abs(e) / max(fwidth(e), 1e-24);
+    alpha = max(alpha, 0.9 * (1.0 - smoothstep(0.5, 1.5, w)) * (1.0 - smoothstep(-aa, aa, f - 1e-6 * aa)));
+  }`,
+  )
+  .join('\n')}
+  vec3 base = uColor;`
+        : `
+  float s = eq_tanh(f * 0.6);
+  float alpha = 0.7 * abs(s);
+  vec3 base = s >= 0.0 ? uColor : vec3(1.0) - uColor;`;
+  return `#version 300 es
+precision highp float;
+uniform vec3 uColor;
+uniform vec3 uEye;
+uniform float t;
+${paramDecls(params)}
+in vec2 vUV;
+in vec3 vPos;
+out vec4 outColor;
+${GLSL_PRELUDE}
+${SHADE}
+${tangents}
+float F(float x, float y) { return ${paint.field}; }
+${edges.map((e, i) => `float E${i}(float x, float y) { return ${e}; }`).join('\n')}
+
+void main() {
+  float u = vUV.x, v = vUV.y;
+  float x = ${xy[0]};
+  float y = ${xy[1]};
+  float f = F(x, y);
+  if (isnan(f) || isinf(f)) discard;
+${body}
+  if (alpha < 0.004) discard;
+  vec3 n = normalize(cross(Pu(u, v), Pv(u, v)));
+  vec3 rd = normalize(vPos - uEye);
+  n = facing(n, rd);
+  outColor = vec4(shade(base, n, rd), alpha);
+}
+`;
+}
+
 /** CPU-built tube meshes (curve framing): position+normal lighting with a
  * material checker in (arclength × ring angle) coordinates, the same faint
  * grid parametric surfaces get — but painted on the tube's own material. */
@@ -1068,7 +1150,26 @@ void main() {
 }
 `;
 
+/** A 2D row painted on a surface: the surface as a parametric surface's
+ *  GLSL in u and v, the GLSL of x and y in u and v, and the row. */
+export interface SurfacePaint {
+  comps: [string, string, string];
+  du?: [string, string, string];
+  dv?: [string, string, string];
+  xy: [string, string];
+  /** A curve F = 0, a region F < 0 (edges its constraints'), a field F. */
+  paint:
+    | { kind: 'curve'; field: string }
+    | { kind: 'region'; field: string; edges: string[] }
+    | { kind: 'scalar'; field: string };
+  color: [number, number, number];
+  params?: string[];
+  uniforms?: Record<string, number>;
+}
+
 export interface Scene3D {
+  /** 2D rows painted on a panel's surface (lib/surface-map.ts). */
+  paints?: SurfacePaint[];
   implicits: Array<Surface3D & { grad?: [string, string, string] }>;
   psurfaces: Array<{
     uniforms?: Record<string, number>;
@@ -1515,6 +1616,32 @@ export class Renderer3D {
       gl.bindVertexArray(this.gridVao);
       gl.drawElements(gl.TRIANGLES, this.gridIndexCount, gl.UNSIGNED_INT, 0);
       gl.bindVertexArray(null);
+    }
+
+    // Rows painted on a surface: over it, pulled a hair toward the eye so
+    // they win its depth test, and translucent, so they leave depth alone.
+    if (scene.paints?.length) {
+      gl.enable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(-1, -4);
+      gl.depthMask(false);
+      for (const s of scene.paints) {
+        let prog: WebGLProgram;
+        try {
+          prog = this.cache.get(psurfVert(s.comps, s.params), paintFrag(s.comps, s.du, s.dv, s.xy, s.paint, s.params));
+        } catch (e) {
+          console.error(e);
+          continue;
+        }
+        setCommon(prog);
+        setParams(prog, s.params, s.uniforms);
+        gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
+        gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
+        gl.bindVertexArray(this.gridVao);
+        gl.drawElements(gl.TRIANGLES, this.gridIndexCount, gl.UNSIGNED_INT, 0);
+        gl.bindVertexArray(null);
+      }
+      gl.depthMask(true);
+      gl.disable(gl.POLYGON_OFFSET_FILL);
     }
 
     // CPU-built lit meshes: tubes and hull solids. Pushed a hair back so a

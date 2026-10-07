@@ -1424,6 +1424,15 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   their level lines through the map. Histograms are refused, integrals
   are readouts without shading, and hovering shows no intercepts or extrema
   (they are not features of the screen's curve).
+- `on((X, Y, Z) = (3cos(y) cos(x), 3cos(y) sin(x), 3sin(y)), x = -pi..pi,
+  y = -pi/2..pi/2)` draws its panel's 2D rows on a surface in space — here
+  the sphere, x as longitude and y as latitude. The panel is 3D (frame it
+  with `camera(…)`, not `view(…)`). Curves, regions and scalar fields in x
+  and y are painted on the surface per pixel; points, parametric curves,
+  figures, point lists and labels are carried onto it. 3D rows draw as
+  usual; other 2D rows (vector fields, complex rows) are refused. Any
+  smooth surface works, with sliders: a torus is
+  `on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi)`.
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
   A trailing `spin = rate` keeps it orbiting about the vertical axis at that

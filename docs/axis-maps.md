@@ -134,33 +134,38 @@ symlog (`y = sinh(Y)`) all come from one feature.
      both standing on y = 0, a curve here; hover intercepts and extrema,
      which are not features of the screen's curve.
 
-## Later: equations on a surface
+## Equations on a surface
 
-The same substitution, aimed at a 3D panel, would print a panel's 2D rows
-onto a surface — the 2-sphere with x as longitude and y as latitude. This
-already works by hand with coordinate fields and surface intersections:
+A panel row `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)` prints the panel's
+2D rows onto a surface in space (lib/surface-map.ts):
 
 ```
-rho = sqrt(x^2+y^2+z^2)
-lon = atan2(y, x)
-lat = asin(z/rho)
-rho = 0.99
-(rho, lat) = (1, sin(3 lon)/2)
-(rho, lon^2 + (2lat)^2) = (1, 1)
+on((X, Y, Z) = (3cos(y) cos(x), 3cos(y) sin(x), 3sin(y)), x = -pi..pi, y = -pi/2..pi/2)
+y = sin(3x)/2
+x^2 + (2y)^2 < 1
 ```
 
-`F(x, y) = c` becomes `(rho, F(lon, lat)) = (1, c)`, traced where the
-sphere meets the surface F(lon, lat) = c. (The sphere is drawn at 0.99
-because a curve exactly on a surface is hidden by it; a depth bias for
-curves lying on a surface would fix that.)
+is the sphere with x as longitude and y as latitude, a sine wave round it
+and a filled ellipse on it. X, Y and Z are the scene's coordinates; x and y
+are the rows'. The panel is 3D and framed with `camera(…)` (a `view(…)` in
+it is refused); the surface itself is drawn as a parametric surface over
+the ranges given, and sliders in it are read at their value.
 
-What a panel row like `on(rho = 1, x = lon, y = lat)` would add:
-
-- Curves: rewrite the panel's 2D equations into that system automatically.
-  Cheap — the tracer exists.
-- Regions and fields painted onto the surface: needs the 3D renderer to
-  colour a surface by a field per pixel, which it does not do today.
-
-Limits inherited from the tracer: numerical (at most 24 branches), not the
-per-pixel exact rendering 2D curves get, and curves break where the chart
-is singular (the poles, the atan2 cut at longitude ±π).
+- **Painted**: what 2D draws per pixel from x and y — implicit curves,
+  regions and scalar fields — is drawn per pixel on the surface's mesh: the
+  fragment shader (web/render3d.ts paintFrag) reads x and y from the mesh's
+  (u, v) and draws a line where |F|/fwidth(F) is small, a fill where the
+  inequality holds, a colour scale for a field. Exact at any zoom, through
+  the poles and seams, with no tracing.
+- **Carried**: what places things — points, parametric curves, figures,
+  point lists, labels and named points — is carried point by point through
+  the surface (surfacePoint), lifted a little toward the eye so the surface
+  does not hide it; straight edges are cut into pieces first so they bend
+  with the surface.
+- Paints draw after the surface with a polygon offset and no depth writes,
+  so they sit on it without fighting it.
+- Rows in space (3D) draw in the panel as in any 3D panel. 2D rows with no
+  picture on a surface (vector fields, complex rows, histograms) are refused
+  with a message saying so.
+- Not drawn: hover readouts on the painted rows, and link previews (a panel
+  on a surface gets the generic card).
