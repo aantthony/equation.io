@@ -155,7 +155,9 @@ struct DocumentView: View {
               if stop == 0 { withAnimation(.snappy) { stop = 1 } }
             }
             .gesture(
-              DragGesture()
+              // Measured on the screen, not the header: the header moves with
+              // the card, so its own space would feed the drag back into itself.
+              DragGesture(coordinateSpace: .global)
                 .onChanged { value in dragged = value.translation.height }
                 .onEnded { value in
                   // Settle on the stop nearest where a flick would carry it.
