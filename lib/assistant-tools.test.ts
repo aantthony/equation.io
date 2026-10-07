@@ -69,13 +69,18 @@ describe('kind_examples', () => {
         expect(analysis.rows.map(kindOf)).toContain(kind);
       }
     }
+    // A kind drawn in 2D and 3D shows both: a helix beside the plane curves.
+    const dims = index.kinds.pcurve.map(e => analyzeRows(e.rows).rows.some(r => r.cls?.needs3D));
+    expect(dims).toContain(true);
+    expect(dims).toContain(false);
     // Kinds no short example draws: kind_examples gives only their smallest form.
     expect(Object.keys(KIND_FORMS).filter(kind => !index.kinds[kind])).toEqual(['label', 'dlist']);
   });
   it('answers with the meaning, the smallest form and examples, by name or by meaning', () => {
     const answer = kindExamples(index, 'solid');
     expect(answer).toContain(KIND_MEANINGS.solid);
-    expect(answer).toContain('solid cube');
+    // Rows first, then the label: a label first was copied into a row.
+    expect(answer).toContain('- ["(interval(0, 1), interval(0, 1), interval(0, 1))"] (solid cube)');
     expect(kindExamples(index, 'parametric curve')).toMatch(/^pcurve:/);
     expect(kindExamples(index, 'cube')).toContain('No kind');
   });

@@ -281,12 +281,13 @@ const EXAMPLE_CHARS = 200;
 /**
  * Index the examples menu (web/examples.ts) by what each example draws: the
  * analyzer labels every row with its kind, and each kind keeps the examples
- * with the fewest rows, the menu's order (simplest first) breaking ties. Each
- * function, likewise, the examples that call it.
+ * with the fewest rows, the menu's order (simplest first) breaking ties, and
+ * one in 2D and one in 3D where the kind draws in both (a helix beside the
+ * plane curves). Each function, likewise, the examples that call it.
  * Viewport rows and headings are left out: the model frames with move_view.
  */
 export function examplesIndex(examples: Iterable<readonly [label: string, text: string]>, per = 3): ExamplesIndex {
-  type Example = { label: string; rows: string[] };
+  type Example = { label: string; rows: string[]; in3D?: boolean };
   const byKind = new Map<string, Example[]>();
   const byFunction = new Map<string, Example[]>();
   const names = builtinNames().filter(name => /^[a-z]\w*$/.test(name));
@@ -300,7 +301,8 @@ export function examplesIndex(examples: Iterable<readonly [label: string, text: 
     if (!rows.length || rows.length > 8 || rows.join('; ').length > EXAMPLE_CHARS) continue;
     const entry = { label, rows };
     for (const kind of new Set(analysis.rows.map(kindOf))) {
-      if (kind) byKind.set(kind, [...(byKind.get(kind) ?? []), entry]);
+      const in3D = analysis.rows.some(r => kindOf(r) === kind && r.cls?.needs3D);
+      if (kind) byKind.set(kind, [...(byKind.get(kind) ?? []), { ...entry, in3D }]);
     }
     const body = rows.map(r => stripNote(r).replace(/"[^"]*"/g, '""')).join('\n');
     for (const name of names) {
@@ -308,15 +310,22 @@ export function examplesIndex(examples: Iterable<readonly [label: string, text: 
         byFunction.set(name, [...(byFunction.get(name) ?? []), entry]);
     }
   }
-  const fewestRows = (map: Map<string, Example[]>, n: number) =>
-    Object.fromEntries(
-      [...map].map(([key, list]) => [key, list.sort((a, b) => a.rows.length - b.rows.length).slice(0, n)]),
-    );
-  return { kinds: fewestRows(byKind, per), functions: fewestRows(byFunction, 2) };
+  const pick = (list: Example[], n: number) => {
+    const sorted = list.sort((a, b) => a.rows.length - b.rows.length);
+    const other = sorted.find(e => e.in3D !== sorted[0].in3D);
+    const chosen = [sorted[0], ...(other ? [other] : [])];
+    return [...chosen, ...sorted.filter(e => !chosen.includes(e))]
+      .slice(0, n)
+      .map(({ label, rows }) => ({ label, rows }));
+  };
+  const index = (map: Map<string, Example[]>, n: number) =>
+    Object.fromEntries([...map].map(([key, list]) => [key, pick(list, n)]));
+  return { kinds: index(byKind, per), functions: index(byFunction, 2) };
 }
 
+// The rows first and the label after: a label first ("solid cube: […]") was copied into a row.
 const exampleLines = (list: { label: string; rows: string[] }[] = []) =>
-  list.map(({ label, rows }) => `- ${label}: ${JSON.stringify(rows)}`);
+  list.map(({ label, rows }) => `- ${JSON.stringify(rows)} (${label})`);
 
 /** The kind a model means: a name from list_kinds, or a kind as get_graph reports it ("pcurve", "parametric curve"). */
 function findKind(query: string): PublicKind | undefined {
