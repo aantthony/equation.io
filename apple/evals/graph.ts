@@ -38,7 +38,7 @@ const hexColor = (rgb: [number, number, number]) =>
 
 let reference: ReturnType<typeof syntaxEntries> | undefined;
 
-/** read_syntax as the app answers it (web/native-app.ts): 4 entries, 2,500 characters. */
+/** read_syntax as the app answered it until list_kinds and the rest replaced it: 4 entries, 2,500 characters. */
 export function readSyntax(query: string): string {
   reference ??= syntaxEntries(readFileSync(new URL('../../web/public/llms.txt', import.meta.url), 'utf8'));
   return searchSyntax(reference, query, 4, 2500);

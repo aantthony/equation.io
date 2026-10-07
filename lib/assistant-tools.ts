@@ -1,9 +1,9 @@
 /**
  * The Apple app's Ask tools that answer from the language, not the graph
- * (apple/Equation Assistant.swift): check. The app's renderer answers it
- * through its bridge (web/native-app.ts), and the evals' service
- * (apple/evals) with this same code. Every answer is short: the on-device
- * model has 8K tokens.
+ * (apple/Equation Assistant.swift): check, search_functions, function_doc,
+ * list_kinds and kind_examples. The app's renderer answers them through its
+ * bridge (web/native-app.ts), and the evals' service (apple/evals) with this
+ * same code. Every answer is short: the on-device model has 8K tokens.
  *
  * Also here: a row's status and meaning from the analyzer alone, as voice
  * mode's get_graph reports it (web/main.ts rowStatus), which check answers
@@ -14,10 +14,12 @@ import { mvOfNode } from './clifford.ts';
 import type { CpuPlan } from './compiler.ts';
 import { type Definition, animatedConstNames, definitionDependencies } from './defs.ts';
 import { canonicalName } from './expr.ts';
+import type { PublicKind } from './math-object.ts';
 import { publicKind } from './plot.ts';
-import { KIND_MEANINGS, rowKind } from './row-kind.ts';
+import { KIND_FORMS, KIND_MEANINGS, rowKind } from './row-kind.ts';
 import { sliderForm } from './slider.ts';
-import { stripNote } from './statements.ts';
+import { splitStatements, stripNote } from './statements.ts';
+import { builtinHelp, builtinNames } from './syntax-help.ts';
 
 // MARK: rows, as get_graph and check describe them
 
@@ -88,7 +90,7 @@ export function describeRow(analysis: Analysis, texts: readonly string[], index:
     const call = unknown && new RegExp(`(?<![\\w])${unknown}\\s*\\(`);
     const fns = analysis.rows.filter(o => o.def?.kind === 'fn').map(o => o.text);
     if (call && [text, ...fns].some(t => call.test(stripNote(t)))) {
-      row.hint = `${unknown}(…) is not a built-in function; call read_syntax to find the right form`;
+      row.hint = `${unknown}(…) is not a built-in function; call search_functions to find the right form`;
     }
     return row;
   }
@@ -230,4 +232,164 @@ export function checkRows(rows: readonly string[]): CheckedRow[] {
     const { kind, meaning, value, error, hint, warning } = describeRow(analysis, texts, i);
     return { row, kind, meaning, value, error, hint, warning };
   });
+}
+
+// MARK: kinds
+
+const DIST_KINDS = { density: 'density', pmf: 'pmf', probability: 'prob', expectation: 'expect' } as const;
+
+/** The render kind a row draws as, by KIND_MEANINGS' names; undefined for definitions and the like. */
+export function kindOf(row: RowInfo): PublicKind | undefined {
+  if (row.error || row.def || row.comment || row.view) return undefined;
+  if (row.dist) return DIST_KINDS[row.dist];
+  return row.cls ? publicKind(row.cls.object) : undefined;
+}
+
+/** Kinds list_kinds names without their forms, by topic, to keep it short: kind_examples has the rest. */
+const SPECIALISED: Record<string, PublicKind[]> = {
+  'sequences and simulations': ['sequence', 'cobweb', 'bifurcation', 'orbit', 'automaton'],
+  'lists and data': ['vlist', 'plist', 'histogram', 'dlist', 'dscatter', 'tuple'],
+  probability: ['density', 'pmf', 'prob', 'expect'],
+  'complex functions': ['complex2d', 'domain2d', 'conformal2d', 'fractal2d'],
+  'colour fields': ['rgb2d', 'hsl2d', 'oklch2d'],
+  algebra: ['tfield2d', 'multivector', 'flat', 'action', 'graph', 'lattice'],
+};
+
+/** list_kinds: every kind; the common ones with their smallest form and a few words. */
+export function listKinds(): string {
+  const specialised = new Set(Object.values(SPECIALISED).flat());
+  const common = (Object.keys(KIND_FORMS) as PublicKind[]).filter(kind => !specialised.has(kind));
+  return [
+    'One shape per row. kind: smallest form (; separates rows) | what it draws',
+    ...common.map(kind => `${kind}: ${KIND_FORMS[kind][0]} | ${KIND_FORMS[kind][1]}`),
+    'Definitions draw nothing themselves: a = 2 (a slider), f(x) = x^2 (add y = f(x) to draw it), A = (1, 2) (a draggable point).',
+    'More kinds:',
+    ...Object.entries(SPECIALISED).map(([topic, kinds]) => `${topic}: ${kinds.join(', ')}`),
+    'kind_examples(kind) gives any kind with worked examples.',
+  ].join('\n');
+}
+
+/** Worked examples, by kind and by function: generated from the examples menu (examplesIndex). */
+export interface ExamplesIndex {
+  kinds: Record<string, { label: string; rows: string[] }[]>;
+  functions: Record<string, { label: string; rows: string[] }[]>;
+}
+
+/** Longest example (its rows' text) worth showing a model with 8K tokens. */
+const EXAMPLE_CHARS = 200;
+
+/**
+ * Index the examples menu (web/examples.ts) by what each example draws: the
+ * analyzer labels every row with its kind, and each kind keeps the examples
+ * with the fewest rows, the menu's order (simplest first) breaking ties. Each
+ * function, likewise, the examples that call it.
+ * Viewport rows and headings are left out: the model frames with move_view.
+ */
+export function examplesIndex(examples: Iterable<readonly [label: string, text: string]>, per = 3): ExamplesIndex {
+  type Example = { label: string; rows: string[] };
+  const byKind = new Map<string, Example[]>();
+  const byFunction = new Map<string, Example[]>();
+  const names = builtinNames().filter(name => /^[a-z]\w*$/.test(name));
+  for (const [label, text] of examples) {
+    const all = splitStatements(text)
+      .map(s => s.trim())
+      .filter(Boolean);
+    const analysis = analyzeRows(all);
+    if (analysis.rows.some(r => r.error)) continue;
+    const rows = all.filter((_, i) => !analysis.rows[i].view && !analysis.rows[i].comment);
+    if (!rows.length || rows.length > 8 || rows.join('; ').length > EXAMPLE_CHARS) continue;
+    const entry = { label, rows };
+    for (const kind of new Set(analysis.rows.map(kindOf))) {
+      if (kind) byKind.set(kind, [...(byKind.get(kind) ?? []), entry]);
+    }
+    const body = rows.map(r => stripNote(r).replace(/"[^"]*"/g, '""')).join('\n');
+    for (const name of names) {
+      if (new RegExp(`(?<![\\w.])${name}\\s*\\(`).test(body))
+        byFunction.set(name, [...(byFunction.get(name) ?? []), entry]);
+    }
+  }
+  const fewestRows = (map: Map<string, Example[]>, n: number) =>
+    Object.fromEntries(
+      [...map].map(([key, list]) => [key, list.sort((a, b) => a.rows.length - b.rows.length).slice(0, n)]),
+    );
+  return { kinds: fewestRows(byKind, per), functions: fewestRows(byFunction, 2) };
+}
+
+const exampleLines = (list: { label: string; rows: string[] }[] = []) =>
+  list.map(({ label, rows }) => `- ${label}: ${JSON.stringify(rows)}`);
+
+/** The kind a model means: a name from list_kinds, or a kind as get_graph reports it ("pcurve", "parametric curve"). */
+function findKind(query: string): PublicKind | undefined {
+  const q = query.trim().toLowerCase();
+  const kinds = Object.keys(KIND_FORMS) as PublicKind[];
+  return (
+    kinds.find(k => k === q) ??
+    kinds.find(k => q.startsWith(k)) ??
+    kinds.find(k => KIND_FORMS[k][1].toLowerCase().startsWith(q) || KIND_MEANINGS[k].toLowerCase().startsWith(q))
+  );
+}
+
+/** kind_examples(kind): what a kind draws, its smallest form, and worked examples, each a whole graph. */
+export function kindExamples(index: ExamplesIndex, query: string): string {
+  const kind = findKind(query);
+  if (!kind) return `No kind "${query}". Kinds: ${Object.keys(KIND_FORMS).join(', ')}.`;
+  const [form] = KIND_FORMS[kind];
+  return [
+    `${kind}: ${KIND_MEANINGS[kind]}`,
+    `smallest: ${JSON.stringify(splitStatements(form).map(s => s.trim()))}`,
+    ...(index.kinds[kind]?.length ? ['examples (each a whole graph, one entry per row):'] : []),
+    ...exampleLines(index.kinds[kind]),
+  ].join('\n');
+}
+
+// MARK: functions
+
+const STOP_WORDS = new Set(['a', 'an', 'the', 'of', 'to', 'in', 'on', 'and', 'or', 'for', 'with', 'function', 'by']);
+
+/** search_functions(query): the built-in functions that best match a few words, a line each. */
+export function searchFunctions(query: string, limit = 6): string {
+  const words = query
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}_]+/u)
+    .filter(w => w && !STOP_WORDS.has(w))
+    .map(w => w.replace(/(?<=..)s$/, ''));
+  if (!words.length) return 'Give a few words, e.g. "inverse sine" or "convex hull".';
+  const scored = builtinNames().flatMap(name => {
+    const help = builtinHelp(name);
+    if (!help) return [];
+    const lower = name.toLowerCase();
+    const text = `${help.signature} ${help.description}`.toLowerCase();
+    let score = 0;
+    for (const w of words) {
+      if (lower === w) score += 10;
+      else if (lower.startsWith(w)) score += 4;
+      if (new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(text)) score += 2;
+    }
+    return score ? [{ name, help, score }] : [];
+  });
+  if (!scored.length) return `No built-in function matches "${query}".`;
+  // Only the strong matches: one word in common with many descriptions ("3D") is noise.
+  const best = Math.max(...scored.map(s => s.score));
+  return scored
+    .filter(s => s.score * 2 > best)
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+    .slice(0, limit)
+    .map(({ help }) => `${help.signature}: ${help.description}`)
+    .join('\n');
+}
+
+/** function_doc(name): a built-in function's signature, what it does, and an example or two that use it. */
+export function functionDoc(index: ExamplesIndex, name: string): string {
+  const bare = name.trim().replace(/\s*\(.*$/, '');
+  const help = builtinHelp(bare);
+  if (!help) {
+    const near = searchFunctions(bare, 3);
+    return `${bare} is not a built-in function.${near.startsWith('No ') ? '' : ` Close:\n${near}`}`;
+  }
+  const examples = index.functions[bare] ?? index.functions[bare.toLowerCase()];
+  return [
+    `${help.signature}: ${help.description}`,
+    ...(examples?.length ? ['examples (each a whole graph):'] : []),
+    ...exampleLines(examples),
+  ].join('\n');
 }

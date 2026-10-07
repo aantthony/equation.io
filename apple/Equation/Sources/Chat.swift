@@ -42,9 +42,21 @@ import SwiftUI
       ?? #"{"error":"the graph isn't ready"}"#
   }
 
-  func readSyntax(_ query: String) async -> String {
-    return await model?.ask("return window.equationApp.readSyntax(query)", ["query": query])
-      ?? #"{"error":"the reference isn't ready"}"#
+  func listKinds() async -> String { await text("return window.equationApp.listKinds()") }
+  func kindExamples(_ kind: String) async -> String {
+    await text("return window.equationApp.kindExamples(kind)", ["kind": kind])
+  }
+  func searchFunctions(_ query: String) async -> String {
+    await text("return window.equationApp.searchFunctions(query)", ["query": query])
+  }
+  func functionDoc(_ name: String) async -> String {
+    await text("return window.equationApp.functionDoc(name)", ["name": name])
+  }
+
+  /// A tool whose answer is text: the page's string, which ask() hands back as JSON.
+  private func text(_ body: String, _ arguments: [String: Any] = [:]) async -> String {
+    guard let json = await model?.ask(body, arguments) else { return #"{"error":"the graph isn't ready"}"# }
+    return (try? JSONDecoder().decode(String.self, from: Data(json.utf8))) ?? json
   }
 }
 

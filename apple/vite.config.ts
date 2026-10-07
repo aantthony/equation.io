@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { EXAMPLES } from '../web/examples.ts';
+import { examplesIndex } from '../lib/assistant-tools.ts';
 import { splitStatements } from '../lib/statements.ts';
 
 /**
@@ -24,12 +24,12 @@ function examplesJson(): Plugin {
         })),
       }));
       this.emitFile({ type: 'asset', fileName: 'examples.json', source: JSON.stringify(categories) });
-      // The language reference, which the app's chat looks syntax up in (Chat.swift).
-      this.emitFile({
-        type: 'asset',
-        fileName: 'llms.txt',
-        source: readFileSync(new URL('../web/public/llms.txt', import.meta.url), 'utf8'),
-      });
+      // The same examples by what they draw and the functions they call, for
+      // the chat's kind_examples and function_doc (lib/assistant-tools.ts).
+      const index = examplesIndex(
+        EXAMPLES.flatMap(([, items]) => items.map(([label, rows]) => [label, rows] as const)),
+      );
+      this.emitFile({ type: 'asset', fileName: 'assistant.json', source: JSON.stringify(index) });
     },
   };
 }

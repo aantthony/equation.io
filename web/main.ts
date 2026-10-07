@@ -6897,7 +6897,9 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
     const unknown = /^Unknown variable: (\w+)\./.exec(eq.error)?.[1];
     const call = unknown && new RegExp(`(?<![\\w])${unknown}\\s*\\(`);
     if (call && [eq, ...equations.filter(o => o.def?.kind === 'fn')].some(o => call.test(stripNote(o.text)))) {
-      row.hint = `${unknown}(…) is not a built-in function; call read_syntax to find the right form`;
+      // The app's chat looks functions up with search_functions (lib/assistant-tools.ts), voice with read_syntax.
+      const lookup = nativeApp ? 'search_functions' : 'read_syntax';
+      row.hint = `${unknown}(…) is not a built-in function; call ${lookup} to find the right form`;
     }
     return row;
   }

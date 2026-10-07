@@ -98,8 +98,8 @@ enum ChatModel {
     - Labels: label((2, 4), "they cross here"). Colors: end a row with a hex \
     color, e.g. "y = x^2 #e24".
     - Don't name anything i, e, pi, tau or d: they are taken.
-    - Anything beyond these forms: call read_syntax first. Never invent \
-    function names.
+    - Anything beyond these forms: call list_kinds first, then kind_examples \
+    or function_doc. Never invent function names.
 
     Changing the graph:
     - set_graph replaces the graph: pass the COMPLETE list of rows. Change the \
@@ -126,7 +126,8 @@ enum ChatModel {
   static func tools(_ graph: any GraphTools) -> [any Tool] {
     [
       GetGraph(access: graph), SetGraph(access: graph), MoveView(access: graph),
-      AnimateSlider(access: graph), Check(access: graph), ReadSyntax(access: graph),
+      AnimateSlider(access: graph), Check(access: graph), ListKinds(access: graph),
+      KindExamples(access: graph), SearchFunctions(access: graph), FunctionDoc(access: graph),
     ]
   }
 
@@ -167,7 +168,11 @@ enum ChatModel {
   func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String
   /// What rows would draw, without drawing them (lib/assistant-tools.ts checkRows).
   func check(_ rows: [String]) async -> String
-  func readSyntax(_ query: String) async -> String
+  // What the language has (lib/assistant-tools.ts), as text.
+  func listKinds() async -> String
+  func kindExamples(_ kind: String) async -> String
+  func searchFunctions(_ query: String) async -> String
+  func functionDoc(_ name: String) async -> String
 }
 
 /// Seconds a tool may take: long enough to see, short enough that a slip
@@ -302,20 +307,71 @@ struct Check: Tool {
   }
 }
 
-struct ReadSyntax: Tool {
+struct ListKinds: Tool {
   let access: any GraphTools
-  let name = "read_syntax"
+  let name = "list_kinds"
   let description = """
-    Look up Equation.io syntax in its reference manual. Returns the matching \
-    entries with examples. Use it before writing any form not in your \
-    instructions, and after any row error.
+    List every kind of shape a row can draw (curve, region, surface, solid, \
+    point, …), each with its smallest form. Read it before writing a kind of \
+    row you haven't written in this conversation.
     """
 
   @Generable
   struct Arguments {
-    @Guide(description: "A few words naming what you want to write, e.g. \"parametric surface\", \"vector field\".")
+    @Guide(description: "Why you are reading it, in a few words.")
+    var reason: String
+  }
+
+  func call(arguments: Arguments) async throws -> String { await access.listKinds() }
+}
+
+struct KindExamples: Tool {
+  let access: any GraphTools
+  let name = "kind_examples"
+  let description = """
+    Worked examples of one kind from list_kinds: what it draws, its smallest \
+    form, and whole graphs that draw it, one entry per row.
+    """
+
+  @Generable
+  struct Arguments {
+    @Guide(description: "A kind from list_kinds, e.g. \"psurface\".")
+    var kind: String
+  }
+
+  func call(arguments: Arguments) async throws -> String { await access.kindExamples(arguments.kind) }
+}
+
+struct SearchFunctions: Tool {
+  let access: any GraphTools
+  let name = "search_functions"
+  let description = """
+    Find built-in functions by what they do. Returns each match's signature \
+    and a line on what it does.
+    """
+
+  @Generable
+  struct Arguments {
+    @Guide(description: "A few words saying what the function does, e.g. \"convex hull\", \"inverse sine\".")
     var query: String
   }
 
-  func call(arguments: Arguments) async throws -> String { await access.readSyntax(arguments.query) }
+  func call(arguments: Arguments) async throws -> String { await access.searchFunctions(arguments.query) }
+}
+
+struct FunctionDoc: Tool {
+  let access: any GraphTools
+  let name = "function_doc"
+  let description = """
+    Look up one built-in function by name: its signature, what it does, and \
+    examples that use it. Use it before calling a function you aren't sure of.
+    """
+
+  @Generable
+  struct Arguments {
+    @Guide(description: "The function's name, e.g. \"hull\".")
+    var name: String
+  }
+
+  func call(arguments: Arguments) async throws -> String { await access.functionDoc(arguments.name) }
 }

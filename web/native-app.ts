@@ -10,13 +10,21 @@
  *   status  {rows}     each row's color, error, readout and slider, once current
  *
  * The app's chat calls the voice prototype's graph tools here too (graph,
- * moveView, animateSlider, readSyntax), and the app's own (check, from
- * lib/assistant-tools.ts), and awaits what they return.
+ * moveView, animateSlider), and its own (check, searchFunctions,
+ * functionDoc, listKinds, kindExamples, from lib/assistant-tools.ts), and
+ * awaits what they return.
  */
 
-import { type CheckedRow, checkRows } from '../lib/assistant-tools.ts';
+import {
+  type CheckedRow,
+  type ExamplesIndex,
+  checkRows,
+  functionDoc,
+  kindExamples,
+  listKinds,
+  searchFunctions,
+} from '../lib/assistant-tools.ts';
 import type { SpanClass } from '../lib/highlight.ts';
-import { type SyntaxEntry, searchSyntax, syntaxEntries } from '../lib/syntax-search.ts';
 import type { GraphState, MoveViewTarget } from './voice.ts';
 
 export interface NativeRow {
@@ -71,10 +79,12 @@ declare global {
       NativeGraph,
       'loadRows' | 'editRows' | 'setSlider' | 'zoom' | 'setTheme' | 'graph' | 'moveView' | 'animateSlider'
     > & {
-      /** The syntax reference's entries that match a query, as the voice prototype reads them. */
-      readSyntax(query: string): Promise<string>;
       /** What rows would draw, without drawing them. */
       check(rows: string[]): CheckedRow[];
+      searchFunctions(query: string): string;
+      functionDoc(name: string): Promise<string>;
+      listKinds(): string;
+      kindExamples(kind: string): Promise<string>;
     };
   }
 }
@@ -92,19 +102,21 @@ export function connectNativeApp(graph: NativeGraph): void {
     graph: () => graph.graph(),
     moveView: (target, seconds) => graph.moveView(target, seconds),
     animateSlider: (name, to, seconds, from) => graph.animateSlider(name, to, seconds, from),
-    // Shorter than the voice prototype's: the on-device model's context is 8K tokens.
-    readSyntax: async query => searchSyntax(await syntax(), query, 4, 2500),
     check: rows => checkRows(rows),
+    searchFunctions: query => searchFunctions(query),
+    functionDoc: async name => functionDoc(await examples(), name),
+    listKinds: () => listKinds(),
+    kindExamples: async kind => kindExamples(await examples(), kind),
   };
   post({ type: 'ready' });
 }
 
-let reference: Promise<SyntaxEntry[]> | undefined;
+let index: Promise<ExamplesIndex> | undefined;
 
-/** The bundled llms.txt, read once, as searchable entries. */
-function syntax(): Promise<SyntaxEntry[]> {
-  reference ??= fetch('/llms.txt')
-    .then(res => (res.ok ? res.text() : Promise.reject(new Error(`HTTP ${res.status}`))))
-    .then(syntaxEntries);
-  return reference;
+/** The examples menu indexed by kind and by function, built with the app (apple/vite.config.ts), read once. */
+function examples(): Promise<ExamplesIndex> {
+  index ??= fetch('/assistant.json').then(res =>
+    res.ok ? (res.json() as Promise<ExamplesIndex>) : Promise.reject(new Error(`HTTP ${res.status}`)),
+  );
+  return index;
 }

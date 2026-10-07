@@ -81,7 +81,10 @@ struct RunnerError: Error, CustomStringConvertible {
     return tool("animate_slider", args)
   }
   func check(_ rows: [String]) async -> String { tool("check", ["equations": rows]) }
-  func readSyntax(_ query: String) async -> String { tool("read_syntax", ["query": query]) }
+  func listKinds() async -> String { tool("list_kinds", [:]) }
+  func kindExamples(_ kind: String) async -> String { tool("kind_examples", ["kind": kind]) }
+  func searchFunctions(_ query: String) async -> String { tool("search_functions", ["query": query]) }
+  func functionDoc(_ name: String) async -> String { tool("function_doc", ["name": name]) }
 }
 
 // MARK: - Models
@@ -224,6 +227,9 @@ struct Runner {
       }
     } catch LanguageModelError.contextSizeExceeded {
       failure = "context size exceeded"
+    } catch let error as LanguageModelSession.ToolCallError {
+      // The tool's whole description would push out why its call failed.
+      failure = "tool call \(error.tool.name): \(error.underlyingError)".prefix(300).description
     } catch {
       failure = String(describing: error).prefix(300).description
     }
