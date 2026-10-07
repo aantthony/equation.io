@@ -11,17 +11,12 @@
  * are assigned afresh, in document order).
  */
 import { type Analysis, type RowInfo, analyzeRows } from '../../lib/analysis.ts';
-import type { CpuPlan } from '../../lib/compiler.ts';
-import { type Definition, animatedConstNames, definitionDependencies } from '../../lib/defs.ts';
-import { canonicalName } from '../../lib/expr.ts';
-import { mvOfNode } from '../../lib/clifford.ts';
+import { describeRow, is3D, sliderOf } from '../../lib/assistant-tools.ts';
 import { LIGHT_PALETTE, assignColors, takesColor } from '../../lib/palette.ts';
-import { publicKind } from '../../lib/plot.ts';
-import { KIND_MEANINGS, rowKind } from '../../lib/row-kind.ts';
-import { sliderForm, writeSlider } from '../../lib/slider.ts';
-import { noteColor, stripNote } from '../../lib/statements.ts';
+import { writeSlider } from '../../lib/slider.ts';
+import { noteColor } from '../../lib/statements.ts';
 import { searchSyntax, syntaxEntries } from '../../lib/syntax-search.ts';
-import type { GraphState, MoveViewTarget, RowStatus } from '../../web/voice.ts';
+import type { GraphState, RowStatus, MoveViewTarget } from '../../web/voice.ts';
 import { readFileSync } from 'node:fs';
 
 /** The window a fresh 2D graph opens on in the app's window (12 units on the short side). */
@@ -29,35 +24,6 @@ export const START_WINDOW = { x: [-8, 8] as [number, number], y: [-6, 6] as [num
 const ASPECT = 16 / 12;
 /** web/main.ts defaultCamera. */
 const START_CAMERA = { theta: -Math.PI / 3, phi: Math.PI / 5.5, radius: 14, target: [0, 0, 0], spin: 0 };
-
-/** 2D-only plots a 3D scene leaves out (web/main.ts SKIPPED_IN_3D). */
-const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
-  'scalar2d',
-  'complex2d',
-  'domain2d',
-  'rgb2d',
-  'hsl2d',
-  'oklch2d',
-  'conformal2d',
-  'fractal2d',
-  'ineq2d',
-  'projected2d',
-  'vfield2d',
-  'tfield2d',
-  'vlist',
-  'dlist',
-  'histogram',
-  'sequence',
-  'cobweb',
-  'bifurcation',
-  'automaton',
-  'lattice',
-  'graph',
-  'density',
-  'pmf',
-  'prob',
-  'expect',
-]);
 
 const round6 = (v: number) => parseFloat(v.toPrecision(6));
 const hexColor = (rgb: [number, number, number]) =>
@@ -96,13 +62,12 @@ export class EvalGraph {
   }
 
   get mode(): '2d' | '3d' {
-    return this.analysis.rows.some(r => !r.error && r.cls?.needs3D) ? '3d' : '2d';
+    return is3D(this.analysis) ? '3d' : '2d';
   }
 
   /** voice mode's get_graph (web/main.ts voiceGraph). */
   graph(): GraphState {
     const mode = this.mode;
-    const animated = animatedConstNames(this.analysis.defs);
     const colors = this.colors();
     return {
       mode,
@@ -122,7 +87,7 @@ export class EvalGraph {
               spin: this.camera.spin,
             },
           }),
-      rows: this.analysis.rows.map((row, i) => this.rowStatus(row, i, animated, colors[i])),
+      rows: this.analysis.rows.map((row, i) => this.rowStatus(row, i, colors[i])),
     };
   }
 
@@ -156,143 +121,17 @@ export class EvalGraph {
     });
   }
 
-  private rowStatus(eq: RowInfo, index: number, animated: ReadonlySet<string>, color?: string): RowStatus {
-    const text = this.rows[index];
-    const { defs } = this.analysis;
-    if (eq.error) {
-      const row: RowStatus = { index, text, status: 'error', error: eq.error };
-      const unknown = /^Unknown variable: (\w+)\./.exec(eq.error)?.[1];
-      const call = unknown && new RegExp(`(?<![\\w])${unknown}\\s*\\(`);
-      const fns = this.analysis.rows.filter(o => o.def?.kind === 'fn').map(o => o.text);
-      if (call && [text, ...fns].some(t => call.test(stripNote(t)))) {
-        row.hint = `${unknown}(…) is not a built-in function; call read_syntax to find the right form`;
-      }
-      return row;
-    }
-    const row: RowStatus = { index, text, status: 'ok' };
-    if (!text.trim()) return row;
-    row.kind = rowKind(eq, defs);
-    row.meaning = eq.comment
-      ? 'group heading; draws nothing'
-      : eq.def
-        ? this.definitionMeaning(eq.def, eq, animated)
-        : eq.view
-          ? {
-              view: 'sets the 2D window',
-              camera: 'sets the 3D camera',
-              grid: "sets what draws behind its panel's plots",
-              split: 'starts a new panel; the rows below it draw there',
-            }[eq.view.kind]
-          : eq.dist
-            ? row.kind
-            : eq.cls
-              ? KIND_MEANINGS[publicKind(eq.cls.object)] +
-                (eq.cls.needs3D && !KIND_MEANINGS[publicKind(eq.cls.object)].includes('3D') ? ' (in 3D)' : '') +
-                (eq.cls.animated ? '; moves with time t' : '')
-              : undefined;
-    const members = eq.cpu?.type === 'family' ? eq.cpu.members.map(m => m.cpu) : eq.cpu ? [eq.cpu] : [];
-    const skipped = this.mode === '3d' && !!eq.cls && !eq.def && members.every(m => SKIPPED_IN_3D.has(m.type));
-    if (skipped) {
-      row.warning = 'not drawn: another row makes this graph 3D, and a 3D scene leaves out 2D-only plots like this one';
-    }
-    const draws = eq.cls && !eq.def && !eq.comment && !eq.view && !skipped;
-    if (draws && color) row.color = color;
-    if (eq.info) row.value = eq.info;
-    else if (eq.def?.kind === 'const' && this.analysis.constEnv[eq.def.name] !== undefined)
-      row.value = String(round6(this.analysis.constEnv[eq.def.name]));
-    if (eq.cls?.animated) row.animated = true;
-    const def = eq.def;
-    if (
-      (def?.kind === 'const' || def?.kind === 'fn') &&
-      !defs.points.has(def.name) &&
-      !this.usedElsewhere(index, def.name)
-    ) {
-      row.warning = `this defines ${def.name}, but no other row uses it, so nothing is drawn`;
-    }
+  private rowStatus(eq: RowInfo, index: number, color?: string): RowStatus {
+    const { status, ...report } = describeRow(this.analysis, this.rows, index);
+    const row: RowStatus = { index, text: this.rows[index], status, ...report };
+    const draws = !!eq.cls && !eq.def && !eq.comment && !eq.view && !report.warning?.startsWith('not drawn');
+    if (status === 'ok' && draws && color) row.color = color;
     return row;
-  }
-
-  /** web/main.ts usedElsewhere: whether any other row reads `name`. */
-  private usedElsewhere(index: number, name: string): boolean {
-    const others = this.analysis.rows.filter((other, i) => i !== index && !other.comment && !other.view);
-    const read = definitionDependencies(
-      others.flatMap(other => other.cls?.params ?? []),
-      this.analysis.defs,
-    );
-    if (read.has(name)) return true;
-    const word = new RegExp(`(?<![\\p{L}_])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\p{L}\\p{N}_])`, 'u');
-    return this.rows
-      .filter((_, i) => i !== index && !this.analysis.rows[i].comment && !this.analysis.rows[i].view)
-      .some(other => word.test(canonicalName(stripNote(other).replace(/"[^"]*"/g, '""'))));
-  }
-
-  /** web/main.ts definitionMeaning: what a definition row makes. */
-  private definitionMeaning(def: Definition, eq: RowInfo, animated: ReadonlySet<string>): string {
-    const { name } = def;
-    const { defs } = this.analysis;
-    switch (def.kind) {
-      case 'init':
-        return `sets where the state ${name} starts (its value at t = 0)`;
-      case 'table':
-        return `opens the data file ${def.file} as the table ${name}`;
-      case 'regression':
-        return `fits the model ${def.lhs} ~ ${def.rhs} to data, defining its parameters`;
-      case 'fn':
-        return `defines the function ${name}(${def.params.join(', ')}); draws nothing until another row uses it${
-          def.params.length === 1 && def.params[0] === 'x' ? `, e.g. y = ${name}(x)` : ''
-        }`;
-    }
-    const entry = defs.names.get(name);
-    const b = entry?.kind === 'binding' ? entry.binding : undefined;
-    const quiet = '; draws nothing by itself';
-    if (!b) return `defines ${name}${quiet}`;
-    switch (b.tag) {
-      case 'scalar':
-        if (b.role === 'state')
-          return `defines ${name}: a scalar state, integrated forward in time from its derivative${quiet}`;
-        if (b.role === 'complex') return `defines ${name}: a complex number${quiet}`;
-        if (b.role === 'condition') return `defines ${name}: a condition, read in braces like {${name}: 1}${quiet}`;
-        if (b.role === 'field')
-          return `defines ${name}: a scalar field (a value at every point, e.g. a coordinate like r or theta)${quiet}`;
-        if (this.slider(eq)) return `defines ${name}: a scalar constant with a slider${quiet}`;
-        return `defines ${name}: a scalar constant${animated.has(name) ? ' that changes with time (t)' : ''}${quiet}`;
-      case 'vector': {
-        const dim = b.role === 'state' ? b.init.length : b.components.length;
-        if (b.role === 'state')
-          return `defines ${name}: a ${dim}D vector state, integrated forward in time from its derivative${quiet}; a row "${name}" draws it as a moving point`;
-        if (b.role === 'field') return `defines ${name}: a ${dim}D vector field${quiet}`;
-        return defs.points.has(name)
-          ? `defines ${name}: a named ${dim}D point, drawn on the graph`
-          : `defines ${name}: a ${dim}D vector${quiet}`;
-      }
-      case 'fn':
-        return `defines the function ${name}${quiet}`;
-      case 'matrix':
-        return `defines ${name}: a matrix${quiet}`;
-      case 'tensor':
-        return `defines ${name}: a ${b.tensor.shape.join('×')} tensor${quiet}`;
-      case 'seq':
-        return `defines ${name}: a list${quiet}`;
-      case 'table':
-        return `defines ${name}: a data table${quiet}`;
-      case 'rv':
-        return `defines ${name}: a random variable`;
-      case 'missing':
-        return `defines ${name} from a data file that is not on this device`;
-      case 'multivector':
-        return `defines ${name}: a ${mvOfNode(b.value)?.quat ? 'quaternion' : 'multivector'}${quiet}`;
-      case 'interval':
-        return `defines ${name}: a continuous interval, one hidden parameter shared by every row that uses ${name}${quiet}`;
-    }
   }
 
   /** web/main.ts sliderOf: the slider a row's definition makes, if any. */
   slider(eq: RowInfo) {
-    const def = eq.def;
-    if ((def?.kind !== 'const' && def?.kind !== 'init') || eq.error || (def.kind === 'const' && def.draw)) return null;
-    const rhs = def.rhs.trim();
-    const form = sliderForm(rhs, new Set(this.analysis.defs.fns.keys()));
-    return form ? { def, rhs, form } : null;
+    return sliderOf(this.analysis, eq);
   }
 
   /**

@@ -2,6 +2,7 @@
  * One run of one task: the graph it starts from, every tool call the model
  * makes on it (answered as the app answers), and the grade at the end.
  */
+import { checkRows } from '../../lib/assistant-tools.ts';
 import type { MoveViewTarget } from '../../web/voice.ts';
 import { type Check, type Outcome, type ToolCall, grade } from './checks.ts';
 import { EvalGraph, readSyntax } from './graph.ts';
@@ -24,14 +25,13 @@ export class Episode {
    */
   call(tool: string, args: Record<string, unknown>): string {
     let result: unknown;
+    const rows = Array.isArray(args.equations) ? args.equations.filter((e): e is string => typeof e === 'string') : [];
     if (tool === 'get_graph') result = this.graph.graph();
     else if (tool === 'set_graph') {
-      const rows = Array.isArray(args.equations)
-        ? args.equations.filter((e): e is string => typeof e === 'string')
-        : [];
       this.graph.set(rows.map(r => r.trim()).filter(Boolean));
       result = this.graph.graph();
-    } else if (tool === 'move_view') {
+    } else if (tool === 'check') result = checkRows(rows);
+    else if (tool === 'move_view') {
       const { seconds, ...target } = args;
       result = this.graph.moveView(target as MoveViewTarget, num(seconds) ? seconds : 1.5);
     } else if (tool === 'animate_slider') {

@@ -10,9 +10,11 @@
  *   status  {rows}     each row's color, error, readout and slider, once current
  *
  * The app's chat calls the voice prototype's graph tools here too (graph,
- * moveView, animateSlider, readSyntax), and awaits what they return.
+ * moveView, animateSlider, readSyntax), and the app's own (check, from
+ * lib/assistant-tools.ts), and awaits what they return.
  */
 
+import { type CheckedRow, checkRows } from '../lib/assistant-tools.ts';
 import type { SpanClass } from '../lib/highlight.ts';
 import { type SyntaxEntry, searchSyntax, syntaxEntries } from '../lib/syntax-search.ts';
 import type { GraphState, MoveViewTarget } from './voice.ts';
@@ -71,6 +73,8 @@ declare global {
     > & {
       /** The syntax reference's entries that match a query, as the voice prototype reads them. */
       readSyntax(query: string): Promise<string>;
+      /** What rows would draw, without drawing them. */
+      check(rows: string[]): CheckedRow[];
     };
   }
 }
@@ -90,6 +94,7 @@ export function connectNativeApp(graph: NativeGraph): void {
     animateSlider: (name, to, seconds, from) => graph.animateSlider(name, to, seconds, from),
     // Shorter than the voice prototype's: the on-device model's context is 8K tokens.
     readSyntax: async query => searchSyntax(await syntax(), query, 4, 2500),
+    check: rows => checkRows(rows),
   };
   post({ type: 'ready' });
 }

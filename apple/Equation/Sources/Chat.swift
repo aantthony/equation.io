@@ -37,6 +37,11 @@ import SwiftUI
     return await model?.ask(body, arguments) ?? #"{"error":"the graph isn't ready"}"#
   }
 
+  func check(_ rows: [String]) async -> String {
+    return await model?.ask("return window.equationApp.check(rows)", ["rows": rows])
+      ?? #"{"error":"the graph isn't ready"}"#
+  }
+
   func readSyntax(_ query: String) async -> String {
     return await model?.ask("return window.equationApp.readSyntax(query)", ["query": query])
       ?? #"{"error":"the reference isn't ready"}"#

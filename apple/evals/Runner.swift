@@ -80,6 +80,7 @@ struct RunnerError: Error, CustomStringConvertible {
     if let from { args["from"] = from }
     return tool("animate_slider", args)
   }
+  func check(_ rows: [String]) async -> String { tool("check", ["equations": rows]) }
   func readSyntax(_ query: String) async -> String { tool("read_syntax", ["query": query]) }
 }
 

@@ -126,7 +126,7 @@ enum ChatModel {
   static func tools(_ graph: any GraphTools) -> [any Tool] {
     [
       GetGraph(access: graph), SetGraph(access: graph), MoveView(access: graph),
-      AnimateSlider(access: graph), ReadSyntax(access: graph),
+      AnimateSlider(access: graph), Check(access: graph), ReadSyntax(access: graph),
     ]
   }
 
@@ -165,6 +165,8 @@ enum ChatModel {
   func set(_ rows: [String]) async -> String
   func moveView(_ target: [String: Any], seconds: Double) async -> String
   func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String
+  /// What rows would draw, without drawing them (lib/assistant-tools.ts checkRows).
+  func check(_ rows: [String]) async -> String
   func readSyntax(_ query: String) async -> String
 }
 
@@ -277,6 +279,26 @@ struct AnimateSlider: Tool {
 
   func call(arguments a: Arguments) async throws -> String {
     await access.animateSlider(a.name, to: a.to, from: a.from, seconds: seconds(a.seconds, default: 3))
+  }
+}
+
+struct Check: Tool {
+  let access: any GraphTools
+  let name = "check"
+  let description = """
+    Read rows without drawing them: what each row would be (its kind and \
+    meaning), its value, and any error or warning. Pass the complete list, as \
+    for set_graph. The graph doesn't change.
+    """
+
+  @Generable
+  struct Arguments {
+    @Guide(description: "One equation or definition per entry, e.g. [\"a = 2\", \"y = a sin(x)\"].")
+    var equations: [String]
+  }
+
+  func call(arguments: Arguments) async throws -> String {
+    await access.check(arguments.equations.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
   }
 }
 
