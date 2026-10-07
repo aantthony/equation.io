@@ -11,19 +11,36 @@ enum Main {
         return
       }
     #endif
+    #if os(macOS)
+      // Launch into a new graph, not the Open panel.
+      UserDefaults.standard.register(defaults: ["NSShowAppCentricOpenPanelInsteadOfUntitledFile": false])
+    #endif
     EquationApp.main()
   }
 }
 
 struct EquationApp: App {
   var body: some Scene {
-    DocumentGroup(newDocument: GraphDocument()) { file in
-      DocumentView(document: file.$document)
-    }
-    .commands {
-      ZoomCommands()
-      ExamplesCommands()
-    }
+    #if os(iOS)
+      // Straight into a new graph: the system document browser's import
+      // step made every new graph wait (GraphLibrary.swift).
+      WindowGroup {
+        GraphLibraryRoot()
+      }
+      .commands {
+        LibraryCommands()
+        ZoomCommands()
+        ExamplesCommands()
+      }
+    #else
+      DocumentGroup(newDocument: GraphDocument()) { file in
+        DocumentView(document: file.$document)
+      }
+      .commands {
+        ZoomCommands()
+        ExamplesCommands()
+      }
+    #endif
   }
 }
 
@@ -40,9 +57,9 @@ struct EquationApp: App {
         DocumentView(document: $document)
       }
       .commands {
-      ZoomCommands()
-      ExamplesCommands()
-    }
+        ZoomCommands()
+        ExamplesCommands()
+      }
     }
   }
 

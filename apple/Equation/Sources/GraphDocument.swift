@@ -31,17 +31,32 @@ struct GraphDocument: FileDocument {
   }
 
   init(configuration: ReadConfiguration) throws {
-    timing.debug("document: read")
     guard let data = configuration.file.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
-    let file = try JSONDecoder().decode(File.self, from: data)
-    self.init(rows: file.rows)
+    try self.init(data: data)
   }
 
   func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+    FileWrapper(regularFileWithContents: try encoded())
+  }
+
+  /// A graph from a file's bytes.
+  init(data: Data) throws {
+    timing.debug("document: read")
+    self.init(rows: try JSONDecoder().decode(File.self, from: data).rows)
+  }
+
+  /// The file's bytes.
+  func encoded() throws -> Data {
     timing.debug("document: write")
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
-    return FileWrapper(regularFileWithContents: try encoder.encode(File(rows: rows.map(\.text))))
+    return try encoder.encode(File(rows: rows.map(\.text)))
+  }
+
+  /// Shown in place of `previous`: the renderer opens it as a new graph
+  /// (reframed), not as an edit to the one before.
+  mutating func follow(_ previous: GraphDocument) {
+    generation = previous.generation + 1
   }
 
   private struct File: Codable {

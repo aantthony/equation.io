@@ -5,6 +5,8 @@ import SwiftUI
 /// in a glass card over it on iPhone.
 struct DocumentView: View {
   @Binding var document: GraphDocument
+  /// The app's own graph handling, on iPhone and iPad; nil in a document window.
+  var library: LibraryActions? = nil
   @State private var model = GraphModel()
   #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
@@ -14,6 +16,7 @@ struct DocumentView: View {
     content
       .focusedSceneValue(\.graphDocument, $document)
       .focusedSceneValue(\.graphModel, model)
+      .focusedSceneValue(\.graphLibrary, library)
       .onAppear { timing.debug("window: appeared") }
   }
 
@@ -23,8 +26,11 @@ struct DocumentView: View {
         StackedLayout {
           GraphView(document: $document, model: model)
         } header: {
-          Text("Equations").font(.headline)
+          Text(title).font(.headline).lineLimit(1)
           Spacer()
+          if let library {
+            Button("Open", systemImage: "folder", action: library.open).labelStyle(.iconOnly)
+          }
           examples.labelStyle(.iconOnly)
           share.labelStyle(.iconOnly)
         } editor: {
@@ -49,9 +55,13 @@ struct DocumentView: View {
   /// The examples, where there is no menu bar (iPhone, an iPad without a keyboard).
   private var examples: some View {
     Menu("Examples", systemImage: "books.vertical") {
-      ExamplesMenu { rows in document.replace(with: rows) }
+      ExamplesMenu { rows in
+        if let library { library.example(rows) } else { document.replace(with: rows) }
+      }
     }
   }
+
+  private var title: String { library?.title ?? "Equations" }
 
   /// Shares the graph as its equation.io link, which opens (and unfurls
   /// with a preview) anywhere, app or not; the share sheet has Copy.
@@ -66,10 +76,16 @@ struct DocumentView: View {
   private var split: some View {
     NavigationSplitView {
       editor
-        .navigationTitle("Equations")
+        .navigationTitle(title)
         .navigationSplitViewColumnWidth(min: 260, ideal: 340, max: 520)
         #if os(iOS)
-          .toolbar { ToolbarItem { examples } }
+          .toolbar {
+            if let library {
+              ToolbarItem { Button("Open", systemImage: "folder", action: library.open) }
+              ToolbarItem { Button("New Graph", systemImage: "square.and.pencil", action: library.new) }
+            }
+            ToolbarItem { examples }
+          }
         #endif
     } detail: {
       // Laid out beside the sidebar, not under it, so splits, centering and
