@@ -55,6 +55,12 @@ final class GraphModel {
 
   func reported() { statusReports += 1 }
 
+  /// Ask the renderer something (`body` returns the answer) and wait for
+  /// it, as JSON text.
+  func ask(_ body: String, _ arguments: [String: Any] = [:]) async -> String? {
+    await bridge?.ask(body, arguments)
+  }
+
   /// The renderer's status for `rows`, once it has drawn them: waits for a
   /// report after this call that covers that many rows (or gives up after a
   /// couple of seconds and returns what it has).
@@ -195,13 +201,19 @@ final class GraphBridge: NSObject, WKScriptMessageHandler {
   }
 
   func call(_ body: String, _ arguments: [String: Any]) {
-    guard let web else { return }
-    Task {
-      do {
-        _ = try await web.callAsyncJavaScript(body, arguments: arguments, contentWorld: .page)
-      } catch {
-        print("Renderer call failed: \(body): \(error)")
-      }
+    Task { _ = await ask(body, arguments) }
+  }
+
+  /// Run `body` in the page and wait for its result (a promise's, once it
+  /// settles), as JSON text; nil if the page isn't there or the call threw.
+  func ask(_ body: String, _ arguments: [String: Any]) async -> String? {
+    guard let web, ready else { return nil }
+    do {
+      let wrapped = "return JSON.stringify(await (async () => { \(body) })())"
+      return try await web.callAsyncJavaScript(wrapped, arguments: arguments, contentWorld: .page) as? String
+    } catch {
+      print("Renderer call failed: \(body): \(error)")
+      return nil
     }
   }
 

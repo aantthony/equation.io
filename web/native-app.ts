@@ -8,9 +8,14 @@
  *   ready              the page can take a document
  *   rows    {rows}     the graph rewrote rows itself (a slider, a dragged point)
  *   status  {rows}     each row's color, error, readout and slider, once current
+ *
+ * The app's chat calls the voice prototype's graph tools here too (graph,
+ * moveView, animateSlider, readSyntax), and awaits what they return.
  */
 
 import type { SpanClass } from '../lib/highlight.ts';
+import { type SyntaxEntry, searchSyntax, syntaxEntries } from '../lib/syntax-search.ts';
+import type { GraphState, MoveViewTarget } from './voice.ts';
 
 export interface NativeRow {
   /** The native editor's id for the row, stable across edits and moves. */
@@ -44,6 +49,12 @@ interface NativeGraph {
   setSlider(index: number, value: number): void;
   /** Glide the zoom about the graph's center: below 1 zooms in, above 1 out. */
   zoom(factor: number): void;
+  /** Every row's status and meaning, and the window or camera (the voice prototype's get_graph). */
+  graph(): GraphState;
+  /** Ease to a new framing; settles once it has arrived. */
+  moveView(target: MoveViewTarget, seconds: number): object | Promise<object>;
+  /** Glide a slider to a value. */
+  animateSlider(name: string, to: number, seconds: number, from?: number): object;
   onChange(callback: (rows: string[]) => void): void;
   onStatus(callback: (rows: NativeRowStatus[]) => void): void;
   setTheme(mode: 'light' | 'dark'): void;
@@ -54,7 +65,13 @@ type Message = { type: 'ready' } | { type: 'rows'; rows: string[] } | { type: 's
 declare global {
   interface Window {
     webkit?: { messageHandlers?: { equation?: { postMessage(message: Message): void } } };
-    equationApp?: Pick<NativeGraph, 'loadRows' | 'editRows' | 'setSlider' | 'zoom' | 'setTheme'>;
+    equationApp?: Pick<
+      NativeGraph,
+      'loadRows' | 'editRows' | 'setSlider' | 'zoom' | 'setTheme' | 'graph' | 'moveView' | 'animateSlider'
+    > & {
+      /** The syntax reference's entries that match a query, as the voice prototype reads them. */
+      readSyntax(query: string): Promise<string>;
+    };
   }
 }
 
@@ -68,6 +85,21 @@ export function connectNativeApp(graph: NativeGraph): void {
     setSlider: (index, value) => graph.setSlider(index, value),
     zoom: factor => graph.zoom(factor),
     setTheme: mode => graph.setTheme(mode),
+    graph: () => graph.graph(),
+    moveView: (target, seconds) => graph.moveView(target, seconds),
+    animateSlider: (name, to, seconds, from) => graph.animateSlider(name, to, seconds, from),
+    // Shorter than the voice prototype's: the on-device model's context is 8K tokens.
+    readSyntax: async query => searchSyntax(await syntax(), query, 4, 2500),
   };
   post({ type: 'ready' });
+}
+
+let reference: Promise<SyntaxEntry[]> | undefined;
+
+/** The bundled llms.txt, read once, as searchable entries. */
+function syntax(): Promise<SyntaxEntry[]> {
+  reference ??= fetch('/llms.txt')
+    .then(res => (res.ok ? res.text() : Promise.reject(new Error(`HTTP ${res.status}`))))
+    .then(syntaxEntries);
+  return reference;
 }

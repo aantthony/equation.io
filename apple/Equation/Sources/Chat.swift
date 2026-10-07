@@ -23,49 +23,67 @@ enum ChatModel {
   static var unavailableReason: String? {
     switch SystemLanguageModel.default.availability {
     case .available: nil
-    case .unavailable(.deviceNotEligible): "This device can't run Apple Intelligence, which the chat needs."
-    case .unavailable(.appleIntelligenceNotEnabled): "Turn on Apple Intelligence in Settings to use the chat."
+    case .unavailable(.deviceNotEligible): "This device can't run Apple Intelligence, which Ask needs."
+    case .unavailable(.appleIntelligenceNotEnabled): "Turn on Apple Intelligence in Settings to use Ask."
     case .unavailable(.modelNotReady): "Apple Intelligence is still getting ready. Try again in a little while."
-    case .unavailable: "The chat isn't available on this device."
+    case .unavailable: "Ask isn't available on this device."
     }
   }
 
-  /// What the model is told before any conversation: the app, the tools and
-  /// a primer of the language (the full reference is a tool call away).
+  /// The voice prototype's tutor (lib/voice-agent.ts), for a typed request
+  /// whose reply shows briefly over the graph: show, don't tell.
   static let instructions = """
-    You are the assistant inside Equation.io, a graphing calculator. The user's \
-    graph is a list of rows; each row is one equation, inequality, definition, \
-    point or comment, drawn in its own color. Each message tells you the graph's \
-    rows as they are now.
+    You are a maths tutor inside Equation.io, a graphing calculator. The user \
+    types a request; you change and show things on the graph with tools, then \
+    reply in one or two short sentences, which appear briefly over the graph. \
+    Teach by showing: draw it, frame it, animate it.
 
-    To change the graph, call set_rows with the complete new list of rows. \
-    Change the row the request is about rather than adding a near copy of it, \
-    and keep every other row as it is, in order. set_rows reports any row with \
-    an error: fix those and call it again. Never just describe a change; make \
-    it. Then reply in one short sentence, without listing the rows.
+    How the graph works:
+    - The graph is a list of rows. Each message starts with the rows as they are \
+    now, with any row's error. Verified forms:
+      - Curves and regions: "y = sin(x)", "x^2 + y^2 = 4", "y < x^2" (shaded \
+    region), "z = x^2 - y^2" (3D surface).
+      - Sliders: "a = 2" makes a slider; then "y = a sin(x)" uses it.
+      - Functions: "f(x) = x^3 - x" only DEFINES f and draws nothing; add \
+    "y = f(x)" to draw it, and "y = d/dx f(x)" for its derivative.
+      - Areas: "int[0..pi] sin(x) dx" shades the area under sin from 0 to pi \
+    and shows its value.
+      - Points: "A = (1, 2)" is a draggable named point.
+      - Parametric curves use u, which runs from 0 to 1 (not t): \
+    "(2cos(2pi u), 2sin(2pi u))" is a circle of radius 2.
+      - Polar curves r = f(theta): write them parametrically with \
+    theta = 2pi u: the rose r = sin(4 theta) is "(sin(8pi u) cos(2pi u), \
+    sin(8pi u) sin(2pi u))". Never write a bare "r = …" row.
+      - t is time in seconds and makes things move: "y = sin(x - t)" is a \
+    travelling wave.
+    - Implicit multiplication works: "2x", "a sin(x)". Use ^ for powers, \
+    sqrt(), abs(), ln(), exp(), pi.
+    - Labels: label((2, 4), "they cross here"). Colors: end a row with a hex \
+    color, e.g. "y = x^2 #e24".
+    - Don't name anything i, e, pi, tau or d: they are taken.
+    - Anything beyond these forms: call read_syntax first. Never invent \
+    function names.
 
-    Each row is its own string in the list. Examples of set_rows calls, when \
-    the graph's only row is "y = sin(x)":
-    - "add a slider for the amplitude": rows ["A = 1", "y = A sin(x)"]
-    - "make it move": rows ["y = sin(x - t)"]
-    - "draw the derivative too": rows ["y = sin(x)", "y = d/dx sin(x)"]
-    - "shade the area under it from 0 to π": rows ["y = sin(x)", "int[0..pi] sin(x) dx"]
-    - "add a tangent line at x = 1": rows ["f(x) = sin(x)", "g(x) = d/dx f(x)", \
-    "a = 1", "y = f(x)", "y = f(a) + g(a)(x - a)"]
+    Changing the graph:
+    - set_graph replaces the graph: pass the COMPLETE list of rows. Change the \
+    row a request is about rather than adding a near copy, and keep every other \
+    row exactly as it was. "Make it move" turns y = sin(x) into y = sin(x - t); \
+    "a slider for the amplitude" turns it into A = 1 and y = A sin(x).
+    - set_graph and get_graph return each row's status and meaning (what the \
+    row actually is). Check every meaning matches what you meant. If a row has \
+    an error or a warning, fix it and call set_graph again before answering. \
+    Never say you drew something the result doesn't show.
 
-    Writing rows:
-    - y = x^2 is a curve; x^2 + y^2 = 4 an implicit curve; y < sin(x) a shaded region.
-    - a = 2 is a number the user can drag as a slider; then y = sin(a x).
-    - f(x) = x^3 - 2x defines a function; d/dx f(x) is its derivative.
-    - int[0..2] f(x) dx shades that area and shows its value.
-    - t is time in seconds: y = sin(x - 2t) animates.
-    - Parametric curves use u from 0 to 1: (2cos(2pi u), sin(2pi u)).
-    - z makes it 3D: z = x^2 - y^2 is a surface.
-    - (-y, x) is a vector field. A = (1, 2) is a draggable point.
-    - sum[n=1..N] f(n) is a sum. # Title is a heading row; y = x # note adds a note.
-    - Multiply by writing things side by side: 2x, a x, 2pi u.
-    - Don't name things i, e, pi, tau or d; they are taken.
-    Only for something these don't cover, call look_up_syntax first.
+    Showing:
+    - move_view frames what matters: zoom into an intersection, out to see end \
+    behaviour. In 3D, a slow spin (0.3) shows a shape from every side.
+    - animate_slider glides a slider so the change can be seen: to show what a \
+    does, first add the slider row with set_graph, then animate it over 3 to 6 \
+    seconds.
+    - Order matters: change the graph first, then frame and animate what it drew.
+
+    Replies: one or two short sentences saying what you drew, not the syntax. \
+    If a request is ambiguous, draw your best guess and say what you chose.
     """
 }
 
@@ -76,132 +94,191 @@ enum ChatModel {
   var rows: () -> [String] = { [] }
   var apply: ([String]) -> Void = { _ in }
   weak var model: GraphModel?
+  /// What the chat is doing, for the reply over the graph.
+  var activity: (String?) -> Void = { _ in }
 
-  /// Change the graph and say how each row drew.
-  func set(_ rows: [String]) async -> String {
-    apply(rows)
-    let status = await model?.status(after: rows) ?? []
-    return Self.report(rows, status)
+  /// The voice prototype's get_graph: every row's status and meaning, and the window or camera.
+  func graph() async -> String {
+    await model?.ask("return window.equationApp.graph()") ?? #"{"error":"the graph isn't ready"}"#
   }
 
-  /// The rows, numbered, each with what the graph says about it.
+  /// Change the graph, wait for the renderer to draw it, and read it back.
+  func set(_ rows: [String]) async -> String {
+    activity("Changing the graph…")
+    apply(rows)
+    _ = await model?.status(after: rows)
+    return await graph()
+  }
+
+  func moveView(_ target: [String: Any], seconds: Double) async -> String {
+    activity("Moving the view…")
+    return await model?.ask(
+      "return window.equationApp.moveView(target, seconds)", ["target": target, "seconds": seconds])
+      ?? #"{"error":"the graph isn't ready"}"#
+  }
+
+  func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String {
+    activity("Animating \(name)…")
+    var arguments: [String: Any] = ["name": name, "to": to, "seconds": seconds]
+    if let from { arguments["from"] = from }
+    let body =
+      from == nil
+      ? "return window.equationApp.animateSlider(name, to, seconds)"
+      : "return window.equationApp.animateSlider(name, to, seconds, from)"
+    return await model?.ask(body, arguments) ?? #"{"error":"the graph isn't ready"}"#
+  }
+
+  func readSyntax(_ query: String) async -> String {
+    activity("Looking up \(query)…")
+    return await model?.ask("return window.equationApp.readSyntax(query)", ["query": query])
+      ?? #"{"error":"the reference isn't ready"}"#
+  }
+
+  /// The rows, numbered, each with its error or readout: what each message starts with.
   static func report(_ rows: [String], _ status: [RowStatus]) -> String {
     if rows.isEmpty { return "The graph is empty." }
-    var errors = 0
-    let lines = rows.enumerated().map { k, row in
+    return rows.enumerated().map { k, row in
       var line = "\(k + 1). \(row)"
       if k < status.count {
         if let error = status[k].error {
-          errors += 1
           line += "   <- ERROR: \(error)"
         } else if let info = status[k].info {
           line += "   (= \(info))"
         }
       }
       return line
-    }
-    let verdict =
-      errors == 0
-      ? "Every row draws."
-      : "\(errors) row\(errors == 1 ? " has an error" : "s have errors"): fix \(errors == 1 ? "it" : "them") with set_rows."
-    return lines.joined(separator: "\n") + "\n" + verdict
+    }.joined(separator: "\n")
   }
 }
 
-// MARK: - Tools
+/// Seconds a tool may take: long enough to see, short enough that a slip
+/// can't hold the view for minutes (as in web/voice.ts).
+private func seconds(_ value: Double?, default fallback: Double) -> Double {
+  guard let value, value.isFinite else { return fallback }
+  return min(30, max(0, value))
+}
 
-/// Replaces the graph's rows, and reports back how each one drew.
-struct SetRows: Tool {
+// MARK: - Tools (the voice prototype's, lib/voice-agent.ts)
+
+struct GetGraph: Tool {
   let access: GraphAccess
-  let name = "set_rows"
+  let name = "get_graph"
   let description = """
-    Replace the graph with these rows, in order: one equation, inequality, \
-    definition, point or comment per row. Returns each row with its error, if any.
+    Read the graph: the visible window (2D) or camera (3D), and for every row \
+    its text, status, meaning, color, readout value, and (2D curves) axis \
+    intercepts in view.
     """
 
   @Generable
   struct Arguments {
-    @Guide(description: "Every row of the new graph, in order. Keep the rows the user didn't ask to change.")
-    var rows: [String]
+    @Guide(description: "Why you are reading it, in a few words.")
+    var reason: String
+  }
+
+  func call(arguments: Arguments) async throws -> String { await access.graph() }
+}
+
+struct SetGraph: Tool {
+  let access: GraphAccess
+  let name = "set_graph"
+  let description = """
+    Replace the whole graph. Pass every row that should be on screen, \
+    including unchanged ones. Returns the new graph as get_graph does.
+    """
+
+  @Generable
+  struct Arguments {
+    @Guide(description: "One equation or definition per entry, e.g. [\"a = 2\", \"y = a sin(x)\"].")
+    var equations: [String]
   }
 
   func call(arguments: Arguments) async throws -> String {
-    let rows = arguments.rows.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    let rows = arguments.equations.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
     return await access.set(rows)
   }
 }
 
-/// Searches the language reference (llms.txt, bundled by pnpm app:web).
-struct LookUpSyntax: Tool {
-  let name = "look_up_syntax"
+struct MoveView: Tool {
+  let access: GraphAccess
+  let name = "move_view"
   let description = """
-    Look up how to write something in Equation.io: a function, a kind of plot, \
-    or a feature. Returns the matching parts of the language reference.
+    Smoothly pan and zoom to a new framing. In 2D give x and/or y ranges. In 3D \
+    give any of theta, phi, radius, target, and spin to keep the camera orbiting.
     """
 
   @Generable
   struct Arguments {
-    @Guide(description: "What to look up, in a few words, like \"parametric curve\" or \"slider range\".")
-    var topic: String
+    @Guide(description: "2D: the x range to show, [low, high].")
+    var x: [Double]?
+    @Guide(description: "2D: the y range to show, [low, high].")
+    var y: [Double]?
+    @Guide(description: "3D: azimuth in radians.")
+    var theta: Double?
+    @Guide(description: "3D: elevation in radians, -pi/2 to pi/2.")
+    var phi: Double?
+    @Guide(description: "3D: distance from the target.")
+    var radius: Double?
+    @Guide(description: "3D: the point looked at, [x, y, z].")
+    var target: [Double]?
+    @Guide(description: "3D: keep orbiting at this many radians per second afterwards (0.3 is slow; 0 stops).")
+    var spin: Double?
+    @Guide(description: "How long the move takes. Default 1.5.")
+    var seconds: Double?
   }
 
-  func call(arguments: Arguments) async throws -> String {
-    Reference.search(arguments.topic)
+  func call(arguments a: Arguments) async throws -> String {
+    var target: [String: Any] = [:]
+    if let x = a.x, x.count == 2 { target["x"] = x }
+    if let y = a.y, y.count == 2 { target["y"] = y }
+    if let theta = a.theta { target["theta"] = theta }
+    if let phi = a.phi { target["phi"] = phi }
+    if let radius = a.radius, radius > 0 { target["radius"] = radius }
+    if let point = a.target, point.count == 3 { target["target"] = point }
+    if let spin = a.spin { target["spin"] = min(10, max(-10, spin)) }
+    return await access.moveView(target, seconds: seconds(a.seconds, default: 1.5))
   }
 }
 
-/// The language reference, in passages: each bullet or paragraph, under its section.
-enum Reference {
-  struct Passage {
-    var section: String
-    var text: String
+struct AnimateSlider: Tool {
+  let access: GraphAccess
+  let name = "animate_slider"
+  let description = """
+    Glide a slider (a constant row like "a = 2") to a new value at a steady \
+    rate, so the change can be watched. The final value is saved in the row.
+    """
+
+  @Generable
+  struct Arguments {
+    @Guide(description: "The slider's name, e.g. \"a\".")
+    var name: String
+    var to: Double
+    @Guide(description: "Jump here first. Default: the current value.")
+    var from: Double?
+    @Guide(description: "Default 3.")
+    var seconds: Double?
   }
 
-  static let passages: [Passage] = {
-    guard let url = Bundle.main.resourceURL?.appending(path: "Web/llms.txt"),
-      let text = try? String(contentsOf: url, encoding: .utf8)
-    else { return [] }
-    var passages: [Passage] = []
-    var section = ""
-    var current = ""
-    func close() {
-      let body = current.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !body.isEmpty { passages.append(Passage(section: section, text: body)) }
-      current = ""
-    }
-    for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-      if line.hasPrefix("## ") {
-        close()
-        section = String(line.dropFirst(3))
-      } else if line.isEmpty || line.hasPrefix("- ") {
-        close()
-        current = String(line)
-      } else {
-        current += "\n" + line
-      }
-    }
-    close()
-    return passages
-  }()
-
-  /// The passages that best match the topic's words, up to about 2,500 characters.
-  static func search(_ topic: String) -> String {
-    let words = topic.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count > 1 }
-    guard !words.isEmpty else { return "Say what to look up." }
-    let scored = passages.compactMap { passage -> (Int, Passage)? in
-      let haystack = (passage.section + " " + passage.text).lowercased()
-      let score = words.reduce(0) { $0 + haystack.components(separatedBy: $1).count - 1 }
-      return score > 0 ? (score, passage) : nil
-    }
-    .sorted { $0.0 > $1.0 }
-    var out = ""
-    for (_, passage) in scored.prefix(6) {
-      let piece = "[\(passage.section)]\n\(passage.text)\n\n"
-      if out.count + piece.count > 2500 { break }
-      out += piece
-    }
-    return out.isEmpty ? "Nothing in the reference matches \"\(topic)\"." : out
+  func call(arguments a: Arguments) async throws -> String {
+    await access.animateSlider(a.name, to: a.to, from: a.from, seconds: seconds(a.seconds, default: 3))
   }
+}
+
+struct ReadSyntax: Tool {
+  let access: GraphAccess
+  let name = "read_syntax"
+  let description = """
+    Look up Equation.io syntax in its reference manual. Returns the matching \
+    entries with examples. Use it before writing any form not in your \
+    instructions, and after any row error.
+    """
+
+  @Generable
+  struct Arguments {
+    @Guide(description: "A few words naming what you want to write, e.g. \"parametric surface\", \"vector field\".")
+    var query: String
+  }
+
+  func call(arguments: Arguments) async throws -> String { await access.readSyntax(arguments.query) }
 }
 
 // MARK: - The conversation
@@ -217,11 +294,24 @@ final class GraphChat {
 
   private(set) var messages: [Message] = []
   private(set) var isResponding = false
+  /// What the model is doing right now (a tool), while it responds.
+  private(set) var activity: String?
   /// The graph as it was before the last reply changed it, for Undo.
   private(set) var undoRows: [String]?
+  /// Whether the reply over the graph is showing.
+  var showsReply = false
 
   @ObservationIgnored let access = GraphAccess()
   @ObservationIgnored private var session: LanguageModelSession?
+  @ObservationIgnored private var hideReply: Task<Void, Never>?
+
+  init() {
+    access.activity = { [weak self] text in self?.activity = text }
+  }
+
+  /// The request and reply the graph shows: the last exchange.
+  var lastRequest: String? { messages.last { $0.role == .user }?.text }
+  var lastReply: Message? { messages.last.flatMap { $0.role == .user ? nil : $0 } }
 
   func send(_ text: String) {
     let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -232,12 +322,22 @@ final class GraphChat {
   private func respond(to text: String) async {
     messages.append(Message(role: .user, text: text))
     isResponding = true
-    defer { isResponding = false }
+    activity = "Thinking…"
+    showReply(stay: true)
+    defer {
+      isResponding = false
+      activity = nil
+      showReply(stay: false)
+    }
     let before = access.rows()
     let session =
       self.session
       ?? LanguageModelSession(
-        model: ChatModel.make(), tools: [SetRows(access: access), LookUpSyntax()],
+        model: ChatModel.make(),
+        tools: [
+          GetGraph(access: access), SetGraph(access: access), MoveView(access: access),
+          AnimateSlider(access: access), ReadSyntax(access: access),
+        ],
         instructions: ChatModel.instructions)
     self.session = session
     let prompt = "The graph's rows now:\n\(GraphAccess.report(before, access.model?.status ?? []))\n\n\(text)"
@@ -246,6 +346,7 @@ final class GraphChat {
     do {
       for try await snapshot in session.streamResponse(to: prompt) {
         messages[reply].text = snapshot.content
+        if !snapshot.content.isEmpty { activity = nil }
       }
     } catch LanguageModelError.contextSizeExceeded {
       self.session = nil
@@ -257,12 +358,31 @@ final class GraphChat {
     if access.rows() != before { undoRows = before }
   }
 
+  /// Show the reply over the graph: for good while `stay`, else for a few
+  /// seconds from now.
+  func showReply(stay: Bool) {
+    hideReply?.cancel()
+    showsReply = true
+    guard !stay else { return }
+    hideReply = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(8))
+      guard !Task.isCancelled else { return }
+      withAnimation { self?.showsReply = false }
+    }
+  }
+
+  func dismissReply() {
+    hideReply?.cancel()
+    withAnimation { showsReply = false }
+  }
+
   /// Put the graph back as it was before the last reply changed it.
   func undo() {
     guard let rows = undoRows else { return }
     access.apply(rows)
     undoRows = nil
     messages.append(Message(role: .note, text: "Put the graph back as it was."))
+    showReply(stay: false)
   }
 
   /// Forget the conversation (the graph stays as it is).
@@ -270,12 +390,14 @@ final class GraphChat {
     session = nil
     messages = []
     undoRows = nil
+    dismissReply()
   }
 }
 
-// MARK: - The view
+// MARK: - Views
 
-/// Ask for a change to the graph in words.
+/// Ask for a change in words. Sending goes straight back to the graph,
+/// where the reply shows (ChatReply).
 struct ChatView: View {
   var chat: GraphChat
   @State private var draft = ""
@@ -283,10 +405,10 @@ struct ChatView: View {
   @Environment(\.dismiss) private var dismiss
 
   private let suggestions = [
-    "Add a slider for the amplitude",
+    "Add a slider for the amplitude and show what it does",
     "Draw the derivative too",
     "Shade the area under the curve from 0 to π",
-    "Animate it over time",
+    "Zoom in on where it crosses zero",
   ]
 
   var body: some View {
@@ -297,16 +419,13 @@ struct ChatView: View {
             LazyVStack(alignment: .leading, spacing: 12) {
               if chat.messages.isEmpty { intro }
               ForEach(chat.messages) { message in
-                bubble(message).id(message.id)
-              }
-              if chat.isResponding && chat.messages.last?.text.isEmpty != false {
-                ProgressView().padding(.leading, 4)
+                ChatBubble(message: message).id(message.id)
               }
             }
             .padding()
           }
-          .onChange(of: chat.messages.last?.text) {
-            if let last = chat.messages.last { withAnimation { scroll.scrollTo(last.id, anchor: .bottom) } }
+          .onAppear {
+            if let last = chat.messages.last { scroll.scrollTo(last.id, anchor: .bottom) }
           }
         }
         composer
@@ -317,18 +436,16 @@ struct ChatView: View {
       #endif
       .toolbar {
         ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-        ToolbarItemGroup(placement: .primaryAction) {
-          if chat.undoRows != nil {
-            Button("Undo Change", systemImage: "arrow.uturn.backward") { chat.undo() }
-          }
-          if !chat.messages.isEmpty {
+        if !chat.messages.isEmpty {
+          ToolbarItem(placement: .primaryAction) {
             Button("New Conversation", systemImage: "square.and.pencil") { chat.reset() }
           }
         }
       }
+      .onAppear { focused = true }
     }
     #if os(macOS)
-      .frame(minWidth: 420, minHeight: 480)
+      .frame(minWidth: 420, minHeight: 420)
     #endif
   }
 
@@ -339,13 +456,41 @@ struct ChatView: View {
       Text("Ask for a change to the graph in your own words.")
         .foregroundStyle(.secondary)
       ForEach(suggestions, id: \.self) { suggestion in
-        Button(suggestion) { chat.send(suggestion) }
+        Button(suggestion) { send(suggestion) }
           .buttonStyle(.bordered)
       }
     }
   }
 
-  @ViewBuilder private func bubble(_ message: GraphChat.Message) -> some View {
+  private var composer: some View {
+    HStack(alignment: .bottom, spacing: 8) {
+      TextField("Ask to change the graph…", text: $draft, axis: .vertical)
+        .lineLimit(1...4)
+        .focused($focused)
+        .onSubmit { send(draft) }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.quaternary, in: .rect(cornerRadius: 18))
+      Button("Send", systemImage: "arrow.up.circle.fill") { send(draft) }
+        .labelStyle(.iconOnly)
+        .font(.title2)
+        .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || chat.isResponding)
+    }
+    .padding()
+  }
+
+  /// Send, and go back to the graph to watch it happen.
+  private func send(_ text: String) {
+    chat.send(text)
+    draft = ""
+    dismiss()
+  }
+}
+
+private struct ChatBubble: View {
+  var message: GraphChat.Message
+
+  var body: some View {
     switch message.role {
     case .user:
       Text(message.text)
@@ -359,26 +504,58 @@ struct ChatView: View {
       Text(message.text).font(.footnote).foregroundStyle(.secondary)
     }
   }
+}
 
-  private var composer: some View {
-    HStack(alignment: .bottom, spacing: 8) {
-      TextField("Ask to change the graph…", text: $draft, axis: .vertical)
-        .lineLimit(1...4)
-        .focused($focused)
-        .onSubmit(send)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.quaternary, in: .rect(cornerRadius: 18))
-      Button("Send", systemImage: "arrow.up.circle.fill", action: send)
-        .labelStyle(.iconOnly)
-        .font(.title2)
-        .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || chat.isResponding)
+/// The reply, over the top of the graph: what's happening while the model
+/// works, then what it says, with Undo and Reply. It fades a few seconds
+/// after the reply ends; tapping it keeps it.
+struct ChatReply: View {
+  var chat: GraphChat
+  var reply: () -> Void
+
+  var body: some View {
+    if chat.showsReply, chat.lastRequest != nil {
+      VStack(alignment: .leading, spacing: 8) {
+        if let request = chat.lastRequest {
+          Text(request)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+          if let activity = chat.activity {
+            ProgressView().controlSize(.small)
+            Text(activity).foregroundStyle(.secondary)
+          } else if let message = chat.lastReply {
+            Image(systemName: message.role == .note ? "exclamationmark.circle" : "sparkles")
+              .foregroundStyle(message.role == .note ? Color.secondary : Color.accentColor)
+            Text(message.text)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+          Spacer(minLength: 0)
+        }
+        if !chat.isResponding {
+          HStack(spacing: 16) {
+            if chat.undoRows != nil {
+              Button("Undo", systemImage: "arrow.uturn.backward") { chat.undo() }
+            }
+            Button("Reply", systemImage: "text.bubble", action: reply)
+            Spacer()
+            Button("Close", systemImage: "xmark") { chat.dismissReply() }
+              .labelStyle(.iconOnly)
+          }
+          .font(.subheadline)
+          .buttonStyle(.borderless)
+        }
+      }
+      .padding(14)
+      .frame(maxWidth: 480)
+      .glassEffect(.regular, in: .rect(cornerRadius: 22))
+      .padding(.horizontal, 12)
+      .padding(.top, 8)
+      // Reading it keeps it up; it goes once left alone again.
+      .onTapGesture { chat.showReply(stay: true) }
+      .transition(.move(edge: .top).combined(with: .opacity))
     }
-    .padding()
-  }
-
-  private func send() {
-    chat.send(draft)
-    draft = ""
   }
 }

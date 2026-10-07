@@ -7371,6 +7371,10 @@ if (nativeApp) {
         renderAll();
         requestRender();
       },
+      // The voice prototype's graph tools, for the app's chat (apple/Equation Chat.swift).
+      graph: voiceGraph,
+      moveView,
+      animateSlider,
       zoom(factor) {
         const rect = canvas.getBoundingClientRect();
         zoomGlide(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
