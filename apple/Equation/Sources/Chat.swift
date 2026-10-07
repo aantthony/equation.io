@@ -94,8 +94,6 @@ enum ChatModel {
   var rows: () -> [String] = { [] }
   var apply: ([String]) -> Void = { _ in }
   weak var model: GraphModel?
-  /// What the chat is doing, for the reply over the graph.
-  var activity: (String?) -> Void = { _ in }
 
   /// The voice prototype's get_graph: every row's status and meaning, and the window or camera.
   func graph() async -> String {
@@ -104,21 +102,18 @@ enum ChatModel {
 
   /// Change the graph, wait for the renderer to draw it, and read it back.
   func set(_ rows: [String]) async -> String {
-    activity("Changing the graph…")
     apply(rows)
     _ = await model?.status(after: rows)
     return await graph()
   }
 
   func moveView(_ target: [String: Any], seconds: Double) async -> String {
-    activity("Moving the view…")
     return await model?.ask(
       "return window.equationApp.moveView(target, seconds)", ["target": target, "seconds": seconds])
       ?? #"{"error":"the graph isn't ready"}"#
   }
 
   func animateSlider(_ name: String, to: Double, from: Double?, seconds: Double) async -> String {
-    activity("Animating \(name)…")
     var arguments: [String: Any] = ["name": name, "to": to, "seconds": seconds]
     if let from { arguments["from"] = from }
     let body =
@@ -129,7 +124,6 @@ enum ChatModel {
   }
 
   func readSyntax(_ query: String) async -> String {
-    activity("Looking up \(query)…")
     return await model?.ask("return window.equationApp.readSyntax(query)", ["query": query])
       ?? #"{"error":"the reference isn't ready"}"#
   }
@@ -294,7 +288,8 @@ final class GraphChat {
 
   private(set) var messages: [Message] = []
   private(set) var isResponding = false
-  /// What the model is doing right now (a tool), while it responds.
+  /// "Thinking…" until the reply starts. Never what a tool is doing: the
+  /// graph moving, changing or animating says that itself.
   private(set) var activity: String?
   /// The graph as it was before the last reply changed it, for Undo.
   private(set) var undoRows: [String]?
@@ -304,10 +299,6 @@ final class GraphChat {
   @ObservationIgnored let access = GraphAccess()
   @ObservationIgnored private var session: LanguageModelSession?
   @ObservationIgnored private var hideReply: Task<Void, Never>?
-
-  init() {
-    access.activity = { [weak self] text in self?.activity = text }
-  }
 
   /// The request and reply the graph shows: the last exchange.
   var lastRequest: String? { messages.last { $0.role == .user }?.text }
