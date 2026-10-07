@@ -1,3 +1,4 @@
+import EquationCore
 import SwiftUI
 
 /// A graph document's window: the rows beside the graph on iPad and Mac, and
@@ -48,8 +49,22 @@ struct DocumentView: View {
             ExamplesMenu { rows in document.replace(with: rows) }
           }
         }
+        // On iPhone the graph has no toolbar of its own: share from here.
+        if sizeClass == .compact {
+          ToolbarItem { share }
+        }
       }
     #endif
+  }
+
+  /// Shares the graph as its equation.io link, which opens (and unfurls
+  /// with a preview) anywhere, app or not; the share sheet has Copy.
+  private var share: some View {
+    ShareLink(
+      item: URL(string: graphLink(document.rows.map(\.text)))!,
+      subject: Text("Equation.io graph"),
+      preview: SharePreview("Equation.io graph")
+    )
   }
 
   private var graph: some View {
@@ -68,6 +83,9 @@ struct DocumentView: View {
       GraphView(document: $document, model: model)
         .backgroundExtensionEffect()
         .ignoresSafeArea(edges: .vertical)
+        .toolbar {
+          ToolbarItem(placement: .primaryAction) { share }
+        }
     }
   }
 }

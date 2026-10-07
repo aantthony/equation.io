@@ -7,6 +7,7 @@
  */
 import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { parseExpr } from '../../lib/expr.ts';
+import { encodePayload } from '../../lib/link.ts';
 
 const out = new URL('./out/', import.meta.url);
 const fixtures = new URL('../EquationCore/Tests/EquationCoreTests/Fixtures/', import.meta.url);
@@ -63,6 +64,22 @@ for (const e of entries) {
 const prefixList = [...prefixes.values()];
 writeFileSync(new URL('parse-prefixes.json', fixtures), JSON.stringify(prefixList) + '\n');
 console.log(`${prefixList.length} prefixes, ${prefixList.filter(e => e.error !== undefined).length} errors`);
+
+// Share links: each input alone, runs of three as one graph, and the cases
+// the codec exists for (a `;` or `%` inside a row, blank rows, unicode).
+const sources = entries.map(e => e.src);
+const graphs = [
+  ...sources.map(s => [s]),
+  ...sources.flatMap((_, k) => (k % 3 === 0 ? [sources.slice(k, k + 3)] : [])),
+  ['people[people.city == "a;b"]', 'y = x'],
+  ['y = 50% x', 'a = 2; b = 3'],
+  ['  y = x  ', '', '\t', 'y = sin(x) # a (note)!'],
+  ["y = x'", 'θ = π/4', 'f(x) = x² · e^x', '🙂 = 1'],
+  [],
+];
+const links = graphs.map(rows => ({ rows, payload: encodePayload(rows) }));
+writeFileSync(new URL('link-corpus.json', fixtures), JSON.stringify(links) + '\n');
+console.log(`${links.length} share links`);
 
 const errors = entries.filter(e => e.error !== undefined);
 const types = Object.groupBy(errors, e => e.errorType ?? '?');
