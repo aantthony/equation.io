@@ -23,7 +23,10 @@
     "bench": "vitest bench --run",
     "perf": "node scripts/perf.ts",
     "perf:update": "node scripts/perf.ts --update",
-    "traffic": "node scripts/traffic.ts"
+    "traffic": "node scripts/traffic.ts",
+    "swift:corpus": "vitest run -c apple/corpus/vitest.config.ts --silent && node apple/corpus/build.ts",
+    "swift:test": "pnpm swift:corpus && swift test --package-path apple/EquationCore",
+    "app:web": "vite build -c apple/vite.config.ts"
   },
   "private": true,
   "license": "MIT",

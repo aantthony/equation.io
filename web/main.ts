@@ -27,6 +27,7 @@ import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
 import { complexRootLabel } from '../lib/complex-label.ts';
 
 import { initHighlight } from './highlight.ts';
+import { highlightSpans } from '../lib/highlight.ts';
 import { initSyntaxHelp } from './syntax-help.ts';
 import { attachCapture } from './capture.ts';
 import { nextFeatured } from '../lib/featured.ts';
@@ -220,7 +221,8 @@ import {
 } from '../lib/tidal.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
-import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
+import { initTheme, onThemeChange, setHostTheme, theme, toggleTheme } from './theme.ts';
+import type { NativeRowStatus } from './native-app.ts';
 
 interface Equation {
   familyParent?: Equation;
@@ -1454,10 +1456,14 @@ function systemKey(cpu: CpuPlan): string {
 }
 const mcpApp = document.documentElement.hasAttribute('data-mcp-app');
 const framed = document.documentElement.hasAttribute('data-embed');
-/** MCP widget or a framed graph: no address-bar writes, no featured default. */
-const embedded = mcpApp || framed;
+/** The renderer inside the Apple app, whose rows a native editor owns (web/native-app.ts). */
+const nativeApp = document.documentElement.hasAttribute('data-native-app');
+/** MCP widget, a framed graph or the Apple app: no address-bar writes, no featured default. */
+const embedded = mcpApp || framed || nativeApp;
 let graphChanged: ((rows: string[]) => void) | undefined;
 let graphEdited: (() => void) | undefined;
+/** Called once the rows' readouts are current (end of reconcile). */
+let rowsReconciled: (() => void) | undefined;
 let traceWorker: Worker | undefined;
 const traceQueue = new TraceQueue((message: TraceMessage) => {
   if (rendererDisposed) return;
@@ -1467,11 +1473,13 @@ const traceQueue = new TraceQueue((message: TraceMessage) => {
     traceQueue.complete(message.token, { pts: [], error });
   };
   try {
-    // The chat iframe is cross-origin; its worker must be created locally.
-    // Framed /g/ pages load their worker from their own origin.
-    traceWorker ??= mcpApp
-      ? new EmbeddedTraceWorker()
-      : new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
+    // The chat iframe is cross-origin and the Apple app serves a custom
+    // scheme; their worker must be created locally. Framed /g/ pages load
+    // their worker from their own origin.
+    traceWorker ??=
+      mcpApp || nativeApp
+        ? new EmbeddedTraceWorker()
+        : new Worker(new URL('./trace-worker.ts', import.meta.url), { type: 'module' });
     traceWorker.onmessage = (event: MessageEvent<{ token: number; result: TraceResult }>) => {
       traceQueue.complete(event.data.token, event.data.result);
     };
@@ -4167,6 +4175,11 @@ let urlLastWrite = 0;
 
 function saveUrl() {
   graphEdited?.();
+  // The native editor follows a drag as it happens; no address bar to rate-limit.
+  if (nativeApp) {
+    writeUrl();
+    return;
+  }
   urlPending = true;
   const wait = URL_INTERVAL - (performance.now() - urlLastWrite);
   if (wait <= 0) {
@@ -4761,36 +4774,17 @@ function reconcile() {
     const wanted: HTMLElement[] = [];
     // Initial values get a slider too: dragging one relaunches the system
     // from there, which is the whole point of `a(0)` in a chaotic system.
-    const slider = sliderOf(eq);
+    const slider = sliderRange(eq);
     if (slider) {
-      const { form } = slider;
+      const { lo, hi, step, value } = slider;
       eq.sliderUI ??= makeSlider(eq);
       const { min, range, max } = eq.sliderUI;
-      const bounds = sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()));
-      let v = form.literal;
-      let lo: number, hi: number;
-      if (bounds) {
-        [lo, hi] = bounds;
-        v = sliderValue(form, v, bounds);
-      } else {
-        // No written range: one that fits the value, widened as it grows.
-        if (eq.sliderMin === undefined || eq.sliderMax === undefined) {
-          eq.sliderMin = Math.min(-10, Math.floor(v));
-          eq.sliderMax = Math.max(10, Math.ceil(v));
-        }
-        if (v < eq.sliderMin) eq.sliderMin = v;
-        if (v > eq.sliderMax) eq.sliderMax = v;
-        lo = eq.sliderMin;
-        hi = eq.sliderMax;
-      }
       if (document.activeElement !== min) min.value = fmtNum(lo);
       if (document.activeElement !== max) max.value = fmtNum(hi);
       range.min = String(lo);
       range.max = String(hi);
-      // Whole-number sliders step one at a time; otherwise a round step
-      // (1, 2 or 5 × 10^k), so round values sit on it.
-      range.step = sliderWhole(eq) ? '1' : String(niceSpacing((hi - lo) / 400, 1).major);
-      range.value = String(v);
+      range.step = String(step);
+      range.value = String(value);
       wanted.push(eq.sliderUI.box);
     }
     // `f(x,y) = c` rows can draw the whole contour stack of f, not just the
@@ -4917,6 +4911,70 @@ function reconcile() {
     el.classList.toggle('eq-hidden', hide);
   }
   badge();
+  rowsReconciled?.();
+}
+
+/** A slider row's range, step and value, as its slider shows them. */
+function sliderRange(eq: Equation): { lo: number; hi: number; step: number; value: number } | null {
+  const slider = sliderOf(eq);
+  if (!slider) return null;
+  const { form } = slider;
+  const bounds = sliderBounds(form, sliderEnv(), new Set(defs.fns.keys()));
+  let value = form.literal;
+  let lo: number, hi: number;
+  if (bounds) {
+    [lo, hi] = bounds;
+    value = sliderValue(form, value, bounds);
+  } else {
+    // No written range: one that fits the value, widened as it grows.
+    if (eq.sliderMin === undefined || eq.sliderMax === undefined) {
+      eq.sliderMin = Math.min(-10, Math.floor(value));
+      eq.sliderMax = Math.max(10, Math.ceil(value));
+    }
+    if (value < eq.sliderMin) eq.sliderMin = value;
+    if (value > eq.sliderMax) eq.sliderMax = value;
+    lo = eq.sliderMin;
+    hi = eq.sliderMax;
+  }
+  // Whole-number sliders step one at a time; otherwise a round step
+  // (1, 2 or 5 × 10^k), so round values sit on it.
+  const step = sliderWhole(eq) ? 1 : niceSpacing((hi - lo) / 400, 1).major;
+  return { lo, hi, step, value };
+}
+
+/** A row's syntax colors, as the web editor paints them (web/highlight.ts). */
+function rowSpans(text: string): NativeRowStatus['spans'] {
+  try {
+    return highlightSpans(text, defs).map(({ start, end, cls }) => ({ start, end, cls }));
+  } catch {
+    return []; // colour is never worth an exception in the editor
+  }
+}
+
+/** What the native editor shows under each row: its color, readout and slider. */
+function nativeRowStatus(): NativeRowStatus[] {
+  return equations.map(eq => {
+    const drawn = eq.error ? undefined : eq.cpu;
+    const plain =
+      !!eq.def ||
+      eq.viewSpec?.kind === 'split' ||
+      eq.viewSpec?.kind === 'grid' ||
+      (drawn?.type === 'value' && !drawn.shade) ||
+      drawn?.type === 'note';
+    const colored = !plain && (eq.colorIndex >= 0 || !!noteColor(eq.text));
+    const slider = sliderRange(eq);
+    return {
+      color: colored ? baseColor(eq) : null,
+      error: eq.error ?? null,
+      info: eq.info ?? null,
+      comment: !!eq.comment,
+      view: !!eq.viewSpec && eq.viewSpec.kind !== 'split',
+      divider: eq.viewSpec?.kind === 'split',
+      note: noteStart(eq.text) < 0 ? null : noteStart(eq.text),
+      spans: rowSpans(eq.text),
+      slider: slider && { min: slider.lo, max: slider.hi, step: slider.step, value: slider.value },
+    };
+  });
 }
 
 /** Full rebuild of the editable DOM from state (loses caret; callers restore). */
@@ -7175,27 +7233,73 @@ if (!embedded) {
     });
 }
 
+/** A host's whole new document: replaces the rows, view and undo history.
+ *  Pending gestures belong to the old document, not the incoming rows. */
+function loadHostDocument(rows: string[]) {
+  resetViewport();
+  restartGraphClock();
+  if (urlTimer !== null) clearTimeout(urlTimer);
+  urlTimer = null;
+  urlPending = false;
+  undoStack.length = redoStack.length = 0;
+  equations.length = 0;
+  rows.forEach(t => addEquation(t));
+  recompileAll();
+  resetState();
+  renderAll();
+  requestRender();
+}
+
+if (nativeApp) {
+  /** The native editor's row ids, so an edit keeps each row's color, slider range and caches. */
+  const byNativeId = new Map<number, Equation>();
+  void import('./native-app.ts').then(({ connectNativeApp }) =>
+    connectNativeApp({
+      loadRows(rows) {
+        byNativeId.clear();
+        loadHostDocument(rows.map(r => r.text));
+        rows.forEach((r, i) => byNativeId.set(r.id, equations[i]));
+      },
+      editRows(rows) {
+        stopVoiceTweens();
+        const next = rows.map(r => {
+          const eq = byNativeId.get(r.id) ?? { id: nextId++, text: '', colorIndex: -1 };
+          eq.text = r.text;
+          return eq;
+        });
+        byNativeId.clear();
+        rows.forEach((r, i) => byNativeId.set(r.id, next[i]));
+        equations.length = 0;
+        equations.push(...next);
+        recompileAll();
+        renderAll();
+        requestRender();
+      },
+      setSlider(index, value) {
+        const eq = equations[index];
+        if (eq) setSlider(eq, value);
+      },
+      onChange: cb => {
+        graphChanged = cb;
+      },
+      onStatus: cb => {
+        rowsReconciled = () => cb(nativeRowStatus());
+      },
+      setTheme(mode) {
+        setHostTheme(mode);
+        // The palette changed with it.
+        rowsReconciled?.();
+      },
+    }),
+  );
+}
+
 if (mcpApp) {
   void import('./mcp-app.ts')
     .then(({ connectGraphApp }) =>
       connectGraphApp({
         getRows: () => equations.map(e => e.text),
-        setRows: rows => {
-          // A new tool result replaces the document, including its undo history.
-          // Pending gestures belong to the old document, not the incoming rows.
-          resetViewport();
-          restartGraphClock();
-          if (urlTimer !== null) clearTimeout(urlTimer);
-          urlTimer = null;
-          urlPending = false;
-          undoStack.length = redoStack.length = 0;
-          equations.length = 0;
-          rows.forEach(t => addEquation(t));
-          recompileAll();
-          resetState();
-          renderAll();
-          requestRender();
-        },
+        setRows: loadHostDocument,
         onChange: cb => {
           graphChanged = cb;
         },
