@@ -2,7 +2,7 @@ import EquationCore
 import SwiftUI
 
 /// A graph document's window: the rows beside the graph on iPad and Mac, and
-/// below it on iPhone.
+/// in a glass card over it on iPhone.
 struct DocumentView: View {
   @Binding var document: GraphDocument
   @State private var model = GraphModel()
@@ -86,36 +86,38 @@ struct DocumentView: View {
 }
 
 #if os(iOS)
-  /// iPhone: the graph above, the equations below in a panel whose header
-  /// drags it between three heights. Part of the window, not a sheet: a sheet
-  /// presented as the document opens stalls the open, and would cover the
-  /// graph rather than give it the space above.
+  /// iPhone: the equations in a glass card floating over the graph, whose
+  /// header drags it between three heights — the look of a sheet, but part
+  /// of the window: a sheet presented as the document opens stalls the open.
   private struct StackedLayout<Graph: View, Header: View, Editor: View>: View {
     @ViewBuilder var graph: Graph
     @ViewBuilder var header: Header
     @ViewBuilder var editor: Editor
 
-    /// The panel's settled height, or nil for the smallest stop.
+    /// The card's settled height, or nil for the smallest stop.
     @State private var settled: CGFloat?
     @GestureState private var dragged: CGFloat = 0
 
+    /// The card's inset from the screen's edges, as a floating sheet sits.
+    private static var margin: CGFloat { 8 }
+
     var body: some View {
-      GeometryReader { geometry in
-        let stops = Self.stops(in: geometry.size.height)
-        let height = Self.clamp((settled ?? stops[0]) - dragged, in: geometry.size.height)
-        VStack(spacing: 0) {
-          graph
-            .ignoresSafeArea(edges: .top)
+      ZStack(alignment: .bottom) {
+        graph
+          .ignoresSafeArea()
+        GeometryReader { geometry in
+          let stops = Self.stops(in: geometry.size.height)
+          let height = Self.clamp((settled ?? stops[0]) - dragged, in: geometry.size.height)
           VStack(spacing: 0) {
             VStack(spacing: 6) {
               Capsule()
                 .fill(.secondary.opacity(0.5))
                 .frame(width: 36, height: 5)
               HStack(spacing: 16) { header }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 20)
             }
-            .padding(.top, 6)
-            .padding(.bottom, 8)
+            .padding(.top, 8)
+            .padding(.bottom, 6)
             .contentShape(Rectangle())
             .gesture(
               DragGesture()
@@ -128,22 +130,26 @@ struct DocumentView: View {
                   }
                 }
             )
-            Divider()
             editor
           }
           .frame(height: height)
-          .background(.bar)
+          .glassEffect(.regular, in: .rect(cornerRadius: 36))
+          .padding(.horizontal, Self.margin)
+          .frame(maxHeight: .infinity, alignment: .bottom)
         }
+        .padding(.bottom, Self.margin)
+        // Down to the screen's edge, but above the keyboard when it is up.
+        .ignoresSafeArea(.container, edges: .bottom)
       }
     }
 
     /// Small (a few rows), half, and nearly all of the window.
     private static func stops(in total: CGFloat) -> [CGFloat] {
-      [180, total * 0.5, total - 120].map { clamp($0, in: total) }
+      [190, total * 0.5, total - 60].map { clamp($0, in: total) }
     }
 
     private static func clamp(_ height: CGFloat, in total: CGFloat) -> CGFloat {
-      min(max(height, 120), max(120, total - 80))
+      min(max(height, 120), max(120, total - 40))
     }
   }
 #endif
