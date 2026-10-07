@@ -15,6 +15,9 @@ export interface RunResult {
   /** The session's input and output tokens, where the model reports them. */
   inputTokens?: number;
   outputTokens?: number;
+  /** Hosted models: input served from the prompt cache, and output spent reasoning. */
+  cachedInputTokens?: number;
+  reasoningTokens?: number;
   seconds: number;
   /** The model failed (context overflow, guardrail, timeout) before replying. */
   error?: string;
@@ -22,6 +25,8 @@ export interface RunResult {
 
 export interface Results {
   model: string;
+  /** A hosted model's exact snapshot, as its API named it. */
+  modelId?: string;
   date: string;
   runs: number;
   contextSize?: number;
@@ -77,10 +82,13 @@ export function report(results: Results): string {
   const { rate, sd: spread, runs } = overall(results);
   const all = results.tasks.flatMap(t => t.runs);
   const lines = [
-    `${results.model}, ${results.date}: ${results.tasks.length} tasks × ${results.runs} runs`,
+    `${results.modelId ?? results.model}, ${results.date}: ${results.tasks.length} tasks × ${results.runs} runs`,
     `Pass rate ${pct(rate)} (${all.filter(r => r.pass).length}/${runs}), ±${pct(spread)} across repetitions`,
     `Per run: ${fixed(mean(all.map(r => r.calls.length)))} tool calls, ` +
       `${fixed(mean(all.flatMap(r => r.inputTokens ?? [])), 0)} input + ${fixed(mean(all.flatMap(r => r.outputTokens ?? [])), 0)} output tokens, ` +
+      (all.some(r => r.cachedInputTokens !== undefined)
+        ? `(${fixed(mean(all.flatMap(r => r.cachedInputTokens ?? [])), 0)} cached, ${fixed(mean(all.flatMap(r => r.reasoningTokens ?? [])), 0)} reasoning), `
+        : '') +
       `${fixed(mean(all.map(r => r.seconds)))} s` +
       (results.instructionsTokens !== undefined
         ? `; instructions ${results.instructionsTokens} + tools ${results.toolsTokens} tokens of ${results.contextSize}`

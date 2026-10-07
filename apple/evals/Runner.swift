@@ -10,6 +10,8 @@ import FoundationModels
 //   pnpm app:eval                          # every task, 5 runs each
 //   pnpm app:eval --runs 1 --task unit-cube --task slider-amplitude
 //
+//   pnpm app:eval --model openai          # a hosted baseline (gpt-5.5; --openai-model to change)
+//
 // Results land in apple/evals/results/, one JSON file per invocation.
 
 // MARK: - The service
@@ -94,13 +96,25 @@ struct Turn {
   var reply: String
   var inputTokens: Int?
   var outputTokens: Int?
+  /// Of the input, tokens the API served from its prompt cache (billed less).
+  var cachedInputTokens: Int?
+  /// Of the output, tokens spent reasoning rather than replying or calling tools.
+  var reasoningTokens: Int?
+  /// The model's exact id, where the API names it (e.g. a dated snapshot).
+  var modelID: String?
 }
 
-/// A model the evals can run: the app's (on-device) today; a Claude baseline can join it.
+/// A model the evals can run: the app's (on-device), or a hosted baseline.
 protocol EvalModel: Sendable {
   var name: String { get }
+  /// Gives up on a run that takes longer than this (a model stuck calling tools).
+  var timeout: Duration { get }
   /// A fresh conversation's answer to one request, using the app's tools on `graph`.
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn
+}
+
+extension EvalModel {
+  var timeout: Duration { .seconds(180) }
 }
 
 /// Apple's on-device model, as the app's Ask uses it (never Private Cloud Compute here).
@@ -117,22 +131,144 @@ struct OnDeviceModel: EvalModel {
   }
 }
 
+/// An OpenAI model through Chat Completions, as a hosted baseline: the app's
+/// instructions, and its tools with their schemas (each tool's @Generable
+/// arguments, encoded as JSON Schema) and their own code, so a call is
+/// trimmed and clamped as in the app.
+struct OpenAIModel: EvalModel {
+  let model: String
+  let key: String
+  var name: String { "openai-\(model)" }
+  // Hosted reasoning takes longer a round than the device; a stuck run still ends.
+  var timeout: Duration { .seconds(600) }
+  /// Model calls in one request; a run still calling tools after this many fails.
+  let maxRounds = 20
+
+  func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
+    let tools = ChatModel.tools(graph)
+    var messages: [[String: Any]] = [
+      ["role": "system", "content": ChatModel.instructions], ["role": "user", "content": prompt],
+    ]
+    var turn = Turn(reply: "", inputTokens: 0, outputTokens: 0, cachedInputTokens: 0, reasoningTokens: 0)
+    for _ in 0..<maxRounds {
+      let body: [String: Any] = ["model": model, "messages": messages, "tools": try tools.map(Self.function)]
+      let response = try await post(body)
+      let usage = response["usage"] as? [String: Any] ?? [:]
+      turn.inputTokens! += usage["prompt_tokens"] as? Int ?? 0
+      turn.outputTokens! += usage["completion_tokens"] as? Int ?? 0
+      turn.cachedInputTokens! += (usage["prompt_tokens_details"] as? [String: Any])?["cached_tokens"] as? Int ?? 0
+      turn.reasoningTokens! += (usage["completion_tokens_details"] as? [String: Any])?["reasoning_tokens"] as? Int ?? 0
+      turn.modelID = response["model"] as? String
+      guard let message = ((response["choices"] as? [[String: Any]])?.first)?["message"] as? [String: Any] else {
+        throw RunnerError("no message in the response")
+      }
+      let calls = message["tool_calls"] as? [[String: Any]] ?? []
+      if calls.isEmpty {
+        turn.reply = message["content"] as? String ?? ""
+        return turn
+      }
+      messages.append(message.filter { $0.value is NSNull == false })
+      // In the order given: a slider has to exist before it's animated.
+      for call in calls {
+        let function = call["function"] as? [String: Any] ?? [:]
+        let name = function["name"] as? String ?? ""
+        let arguments = function["arguments"] as? String ?? "{}"
+        var output: String
+        if let tool = tools.first(where: { $0.name == name }) {
+          do { output = try await Self.call(tool, arguments) } catch { output = #"{"error":"\#(error)"}"# }
+        } else {
+          output = #"{"error":"no tool named \#(name)"}"#
+        }
+        messages.append(["role": "tool", "tool_call_id": call["id"] as? String ?? "", "content": output])
+      }
+    }
+    throw RunnerError("still calling tools after \(maxRounds) rounds")
+  }
+
+  /// A tool as Chat Completions takes it: name, description, and the argument schema.
+  static func function(_ tool: any Tool) throws -> [String: Any] {
+    var schema = try JSONSerialization.jsonObject(with: JSONEncoder().encode(tool.parameters)) as? [String: Any] ?? [:]
+    // FoundationModels' own keys; the API doesn't need them.
+    schema["title"] = nil
+    schema["x-order"] = nil
+    return ["type": "function", "function": ["name": tool.name, "description": tool.description, "parameters": schema]]
+  }
+
+  /// Runs the app's tool on the model's JSON arguments.
+  static func call<T: Tool>(_ tool: T, _ json: String) async throws -> String {
+    let output = try await tool.call(arguments: T.Arguments(GeneratedContent(json: json)))
+    return output as? String ?? "\(output)"
+  }
+
+  /// One Chat Completions request, retried with backoff on rate limits, server errors and dropped connections.
+  func post(_ body: [String: Any]) async throws -> [String: Any] {
+    var request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.httpBody = try JSONSerialization.data(withJSONObject: body)
+    request.timeoutInterval = 300
+    var attempt = 0
+    while true {
+      attempt += 1
+      var wait = min(60, pow(2, Double(attempt)))
+      do {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 200, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] { return object }
+        let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
+          .flatMap { ($0["error"] as? [String: Any])?["message"] as? String } ?? "HTTP \(status)"
+        guard status == 429 || status >= 500, attempt < 8 else { throw RunnerError("OpenAI: \(message)") }
+        if let after = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "retry-after").flatMap(Double.init) {
+          wait = max(wait, after)
+        }
+        FileHandle.standardError.write(Data("OpenAI \(status), retrying in \(Int(wait)) s\n".utf8))
+      } catch let error as URLError where attempt < 8 {
+        FileHandle.standardError.write(Data("OpenAI \(error.code.rawValue), retrying in \(Int(wait)) s\n".utf8))
+      }
+      try await Task.sleep(for: .seconds(wait))
+    }
+  }
+
+  /// OPENAI_API_KEY from the environment, or from the checkout's .dev.vars
+  /// (gitignored; a worktree reads the main checkout's).
+  static func key() throws -> String {
+    if let key = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !key.isEmpty { return key }
+    let git = Process()
+    let out = Pipe()
+    git.executableURL = URL(filePath: "/usr/bin/env")
+    git.arguments = ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]
+    git.standardOutput = out
+    try? git.run()
+    git.waitUntilExit()
+    let common = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    var files = [URL(filePath: ".dev.vars")]
+    if !common.isEmpty { files.append(URL(filePath: common).deletingLastPathComponent().appending(path: ".dev.vars")) }
+    for file in files {
+      guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+      for line in text.split(whereSeparator: \.isNewline) where line.hasPrefix("OPENAI_API_KEY=") {
+        let key = line.dropFirst("OPENAI_API_KEY=".count).trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+        if !key.isEmpty { return key }
+      }
+    }
+    throw RunnerError("set OPENAI_API_KEY, or add it to .dev.vars")
+  }
+}
+
 enum ModelChoice: String {
   case onDevice = "on-device"
-  case claude
+  case openAI = "openai"
 
-  func make() throws -> any EvalModel {
+  func make(openAIModel: String) throws -> any EvalModel {
     switch self {
     case .onDevice: OnDeviceModel()
-    case .claude: throw RunnerError("the Claude baseline isn't written yet")
+    case .openAI: OpenAIModel(model: openAIModel, key: try OpenAIModel.key())
     }
   }
 }
 
 // MARK: - Running
-
-/// Gives up on a run that takes longer than this (a model stuck calling tools).
-let timeout: Duration = .seconds(180)
 
 @main @MainActor
 struct Runner {
@@ -151,6 +287,7 @@ struct Runner {
     var runs = 5
     var only: [String] = []
     var choice = ModelChoice.onDevice
+    var openAIModel = "gpt-5.5"
     var arguments = CommandLine.arguments.dropFirst()
     while let flag = arguments.popFirst() {
       switch flag {
@@ -159,10 +296,12 @@ struct Runner {
       case "--model":
         guard let model = ModelChoice(rawValue: arguments.popFirst() ?? "") else { throw RunnerError("unknown model") }
         choice = model
-      default: throw RunnerError("usage: runner [--runs N] [--task id]… [--model on-device|claude]")
+      case "--openai-model": openAIModel = arguments.popFirst() ?? openAIModel
+      default:
+        throw RunnerError("usage: runner [--runs N] [--task id]… [--model on-device|openai] [--openai-model id]")
       }
     }
-    let model = try choice.make()
+    let model = try choice.make(openAIModel: openAIModel)
     let service = try Service()
     let graph = ServiceGraph(service)
     let all = try service.request(["cmd": "tasks"])["tasks"] as? [[String: Any]] ?? []
@@ -193,6 +332,10 @@ struct Runner {
       taskResults.append(["id": id, "request": request, "runs": taskRuns])
     }
     results["tasks"] = taskResults
+    // The snapshot the API answered with, e.g. gpt-5.5-2026-04-23.
+    if let id = taskResults.flatMap({ $0["runs"] as? [[String: Any]] ?? [] }).lazy.compactMap({ $0["modelId"] }).first {
+      results["modelId"] = id
+    }
 
     let folder = URL(filePath: "apple/evals/results")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -219,7 +362,7 @@ struct Runner {
       turn = try await withThrowingTaskGroup(of: Turn.self) { group in
         group.addTask { try await model.respond(to: prompt, graph: graph) }
         group.addTask {
-          try await Task.sleep(for: timeout)
+          try await Task.sleep(for: model.timeout)
           throw RunnerError("timed out")
         }
         defer { group.cancelAll() }
@@ -239,6 +382,9 @@ struct Runner {
     result["seconds"] = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
     if let tokens = turn.inputTokens { result["inputTokens"] = tokens }
     if let tokens = turn.outputTokens { result["outputTokens"] = tokens }
+    if let tokens = turn.cachedInputTokens { result["cachedInputTokens"] = tokens }
+    if let tokens = turn.reasoningTokens { result["reasoningTokens"] = tokens }
+    if let id = turn.modelID { result["modelId"] = id }
     if let failure {
       // The person sees an error instead of an answer: a failed run, whatever the graph shows.
       result["error"] = failure

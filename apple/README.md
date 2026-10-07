@@ -44,6 +44,7 @@ pnpm swift:test    # re-record the corpus from the TypeScript suite, then swift 
 ```sh
 pnpm app:eval                     # every task in apple/evals/tasks.ts, 5 runs each, on-device
 pnpm app:eval --runs 1 --task unit-cube
+pnpm app:eval --model openai              # hosted baseline, gpt-5.5 (--openai-model to change)
 node --experimental-transform-types apple/evals/report.ts apple/evals/results/a.json apple/evals/results/b.json
 ```
 
@@ -53,3 +54,12 @@ task's request with the app's own instructions and tools
 (`apple/evals/service.ts`) running the real analyzer, which also grades the
 result. Results are saved in `apple/evals/results/`; see
 `apple/evals/RESULTS.md`.
+
+`--model openai` runs the same instructions, prompts and tools on OpenAI's
+Chat Completions API: each tool's schema is its `@Generable` arguments
+encoded as JSON Schema, and each call runs the tool's own code. The key is
+`OPENAI_API_KEY` from the environment, or that line of the checkout's
+`.dev.vars` (a worktree reads the main checkout's). Rate limits and server
+errors are retried with backoff. A full run (175 episodes) costs a few
+dollars; the results record each run's tokens, cached and reasoning tokens
+included, and the model's snapshot id.
