@@ -8,12 +8,23 @@ struct DocumentView: View {
   /// The app's own graph handling, on iPhone and iPad; nil in a document window.
   var library: LibraryActions? = nil
   @State private var model = GraphModel()
+  @State private var chat = GraphChat()
+  @State private var asking = false
   #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
   #endif
 
   var body: some View {
+    let _ = connectChat()
     content
+      .sheet(isPresented: $asking) {
+        ChatView(chat: chat)
+          #if os(iOS)
+            // The graph stays in view, and live, above a half-height chat.
+            .presentationDetents([.medium, .large])
+            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+          #endif
+      }
       .focusedSceneValue(\.graphDocument, $document)
       .focusedSceneValue(\.graphModel, model)
       .focusedSceneValue(\.graphLibrary, library)
@@ -32,6 +43,7 @@ struct DocumentView: View {
             Button("Open", systemImage: "folder", action: library.open).labelStyle(.iconOnly)
           }
           examples.labelStyle(.iconOnly)
+          ask.labelStyle(.iconOnly)
           share.labelStyle(.iconOnly)
         } editor: {
           editor
@@ -62,6 +74,19 @@ struct DocumentView: View {
   }
 
   private var title: String { library?.title ?? "Equations" }
+
+  /// Opens the chat, which changes the graph from a request in words.
+  private var ask: some View {
+    Button("Ask", systemImage: "sparkles") { asking = true }
+  }
+
+  /// Point the chat's tools at this window's graph.
+  private func connectChat() {
+    let document = $document
+    chat.access.rows = { document.wrappedValue.rows.map(\.text) }
+    chat.access.apply = { rows in document.wrappedValue.setLines(rows) }
+    chat.access.model = model
+  }
 
   /// Shares the graph as its equation.io link, which opens (and unfurls
   /// with a preview) anywhere, app or not; the share sheet has Copy.
@@ -95,6 +120,7 @@ struct DocumentView: View {
         .backgroundExtensionEffect()
         .ignoresSafeArea(edges: .vertical)
         .toolbar {
+          ToolbarItem(placement: .primaryAction) { ask }
           ToolbarItem(placement: .primaryAction) { share }
         }
     }

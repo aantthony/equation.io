@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import { EXAMPLES } from '../web/examples.ts';
@@ -23,6 +24,12 @@ function examplesJson(): Plugin {
         })),
       }));
       this.emitFile({ type: 'asset', fileName: 'examples.json', source: JSON.stringify(categories) });
+      // The language reference, which the app's chat looks syntax up in (Chat.swift).
+      this.emitFile({
+        type: 'asset',
+        fileName: 'llms.txt',
+        source: readFileSync(new URL('../web/public/llms.txt', import.meta.url), 'utf8'),
+      });
     },
   };
 }

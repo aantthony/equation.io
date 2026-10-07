@@ -7,8 +7,8 @@ name: Equation
 options:
   bundleIdPrefix: io.equation
   deploymentTarget:
-    iOS: "26.0"
-    macOS: "26.0"
+    iOS: "27.0"
+    macOS: "27.0"
 packages:
   EquationCore:
     path: ../EquationCore

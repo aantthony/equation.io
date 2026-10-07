@@ -40,6 +40,8 @@ struct RowStatus: Decodable, Equatable {
 final class GraphModel {
   /// Index-aligned with the rows the renderer last drew.
   var status: [RowStatus] = []
+  /// Counts the renderer's reports, so a change can wait for its verdict.
+  @ObservationIgnored private(set) var statusReports = 0
   fileprivate weak var bridge: GraphBridge?
 
   func setSlider(row index: Int, to value: Double) {
@@ -49,6 +51,20 @@ final class GraphModel {
   /// Glide the zoom about the graph's center: below 1 zooms in, above 1 out.
   func zoom(by factor: Double) {
     bridge?.call("window.equationApp.zoom(factor)", ["factor": factor])
+  }
+
+  func reported() { statusReports += 1 }
+
+  /// The renderer's status for `rows`, once it has drawn them: waits for a
+  /// report after this call that covers that many rows (or gives up after a
+  /// couple of seconds and returns what it has).
+  func status(after rows: [String]) async -> [RowStatus] {
+    let start = statusReports
+    for _ in 0..<40 {
+      if statusReports > start && status.count == rows.count { break }
+      try? await Task.sleep(for: .milliseconds(50))
+    }
+    return status
   }
 }
 
@@ -109,7 +125,10 @@ struct GraphView {
     let document = $document
     let model = model
     bridge.onRows = { texts in document.wrappedValue.setLines(texts) }
-    bridge.onStatus = { status in if model.status != status { model.status = status } }
+    bridge.onStatus = { status in
+      if model.status != status { model.status = status }
+      model.reported()
+    }
     bridge.sync(
       rows: document.wrappedValue.rows, generation: document.wrappedValue.generation, dark: colorScheme == .dark)
   }
