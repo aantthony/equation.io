@@ -20,7 +20,10 @@ struct EquationApp: App {
     DocumentGroup(newDocument: GraphDocument()) { file in
       DocumentView(document: file.$document)
     }
-    .commands { ExamplesCommands() }
+    .commands {
+      ZoomCommands()
+      ExamplesCommands()
+    }
   }
 }
 
@@ -36,7 +39,10 @@ struct EquationApp: App {
       WindowGroup {
         DocumentView(document: $document)
       }
-      .commands { ExamplesCommands() }
+      .commands {
+      ZoomCommands()
+      ExamplesCommands()
+    }
     }
   }
 

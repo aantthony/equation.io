@@ -45,6 +45,11 @@ final class GraphModel {
   func setSlider(row index: Int, to value: Double) {
     bridge?.call("window.equationApp.setSlider(index, value)", ["index": index, "value": value])
   }
+
+  /// Glide the zoom about the graph's center: below 1 zooms in, above 1 out.
+  func zoom(by factor: Double) {
+    bridge?.call("window.equationApp.zoom(factor)", ["factor": factor])
+  }
 }
 
 /// The graph itself: the web renderer (web/native-app) in a WKWebView,

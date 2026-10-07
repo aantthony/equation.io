@@ -6377,6 +6377,8 @@ let dragging = false;
 let lastX = 0;
 let lastY = 0;
 let panning = false;
+/** A Shift-drag in the app: the vertical motion zooms. */
+let zooming = false;
 let scaling = false;
 const pointers = new Map<number, { x: number; y: number }>();
 let pinchDist = 0;
@@ -6468,7 +6470,9 @@ canvas.addEventListener('pointerdown', e => {
       canvas.style.cursor = 'grabbing';
     }
     dragging = !hit;
-    panning = e.button === 2 || e.shiftKey;
+    // In the app Shift-drag zooms; right-drag and two-finger scrolling pan.
+    zooming = nativeApp && e.button === 0 && e.shiftKey && !scaling;
+    panning = !zooming && (e.button === 2 || e.shiftKey);
     lastX = e.clientX;
     lastY = e.clientY;
     downX = e.clientX;
@@ -6476,6 +6480,7 @@ canvas.addEventListener('pointerdown', e => {
     dragMoved = false;
   } else if (pointers.size === 2) {
     scaling = false;
+    zooming = false;
     // Second finger: switch from drag to pinch, anchored at the midpoint.
     dragging = false;
     grab = null;
@@ -6550,6 +6555,11 @@ canvas.addEventListener('pointermove', e => {
   const dpr = window.devicePixelRatio || 1;
   // A locked panel's view(…, locked) or camera(…, locked) row holds it still.
   if (cur.locked) return;
+  if (zooming) {
+    // Up zooms in, down out, about where the drag began.
+    zoomAt(downX, downY, Math.exp(dy * 0.01));
+    return;
+  }
   if (mode === '2d' && scaling) {
     if (!dragMoved) return;
     ensureViewRow();
@@ -6575,6 +6585,7 @@ const endPointer = (e: PointerEvent) => {
     const [p] = pointers.values();
     dragging = true;
     panning = false;
+    zooming = false;
     lastX = p.x;
     lastY = p.y;
   } else if (pointers.size === 0) {
@@ -7354,6 +7365,10 @@ if (nativeApp) {
         recompileAll();
         renderAll();
         requestRender();
+      },
+      zoom(factor) {
+        const rect = canvas.getBoundingClientRect();
+        zoomGlide(rect.left + rect.width / 2, rect.top + rect.height / 2, factor);
       },
       setSlider(index, value) {
         const eq = equations[index];

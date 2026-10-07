@@ -23,11 +23,6 @@ struct ExampleCategory: Decodable, Identifiable {
   }()
 }
 
-extension FocusedValues {
-  /// The document in the key window, for menu commands.
-  @Entry var graphDocument: Binding<GraphDocument>?
-}
-
 /// The examples, a submenu per category. Opening one replaces the graph in
 /// the front window, as on the site; undo brings the old one back.
 struct ExamplesMenu: View {
@@ -44,13 +39,3 @@ struct ExamplesMenu: View {
   }
 }
 
-struct ExamplesCommands: Commands {
-  @FocusedValue(\.graphDocument) private var document
-
-  var body: some Commands {
-    CommandMenu("Examples") {
-      ExamplesMenu { rows in document?.wrappedValue.replace(with: rows) }
-        .disabled(document == nil)
-    }
-  }
-}

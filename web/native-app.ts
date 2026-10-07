@@ -42,6 +42,8 @@ interface NativeGraph {
   /** An edit to the open document: the view stays where it is. */
   editRows(rows: NativeRow[]): void;
   setSlider(index: number, value: number): void;
+  /** Glide the zoom about the graph's center: below 1 zooms in, above 1 out. */
+  zoom(factor: number): void;
   onChange(callback: (rows: string[]) => void): void;
   onStatus(callback: (rows: NativeRowStatus[]) => void): void;
   setTheme(mode: 'light' | 'dark'): void;
@@ -52,7 +54,7 @@ type Message = { type: 'ready' } | { type: 'rows'; rows: string[] } | { type: 's
 declare global {
   interface Window {
     webkit?: { messageHandlers?: { equation?: { postMessage(message: Message): void } } };
-    equationApp?: Pick<NativeGraph, 'loadRows' | 'editRows' | 'setSlider' | 'setTheme'>;
+    equationApp?: Pick<NativeGraph, 'loadRows' | 'editRows' | 'setSlider' | 'zoom' | 'setTheme'>;
   }
 }
 
@@ -64,6 +66,7 @@ export function connectNativeApp(graph: NativeGraph): void {
     loadRows: rows => graph.loadRows(rows),
     editRows: rows => graph.editRows(rows),
     setSlider: (index, value) => graph.setSlider(index, value),
+    zoom: factor => graph.zoom(factor),
     setTheme: mode => graph.setTheme(mode),
   };
   post({ type: 'ready' });

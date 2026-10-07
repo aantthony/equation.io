@@ -10,7 +10,9 @@ struct DocumentView: View {
   #endif
 
   var body: some View {
-    content.focusedSceneValue(\.graphDocument, $document)
+    content
+      .focusedSceneValue(\.graphDocument, $document)
+      .focusedSceneValue(\.graphModel, model)
   }
 
   @ViewBuilder private var content: some View {
