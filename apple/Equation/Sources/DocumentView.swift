@@ -10,11 +10,15 @@ struct DocumentView: View {
   #endif
 
   var body: some View {
+    content.focusedSceneValue(\.graphDocument, $document)
+  }
+
+  @ViewBuilder private var content: some View {
     #if os(iOS)
       if sizeClass == .compact {
         graph
           .sheet(isPresented: .constant(true)) {
-            editor
+            NavigationStack { editor.navigationBarTitleDisplayMode(.inline) }
               .presentationDetents([.height(180), .medium, .large])
               .presentationBackgroundInteraction(.enabled(upThrough: .medium))
               .interactiveDismissDisabled()
@@ -34,6 +38,16 @@ struct DocumentView: View {
       slide: { [model] row, value in model.setSlider(row: row, to: value) }
     )
     .navigationTitle("Equations")
+    #if os(iOS)
+      // No menu bar on iPhone, and none showing on an iPad without a keyboard.
+      .toolbar {
+        ToolbarItem {
+          Menu("Examples", systemImage: "books.vertical") {
+            ExamplesMenu { rows in document.replace(with: rows) }
+          }
+        }
+      }
+    #endif
   }
 
   private var graph: some View {

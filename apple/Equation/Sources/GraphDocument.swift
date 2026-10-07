@@ -19,6 +19,9 @@ struct GraphDocument: FileDocument {
   static let readableContentTypes: [UTType] = [.equationGraph]
 
   var rows: [GraphRow]
+  /// Counts whole-document replacements (an example), which the renderer
+  /// opens as a new graph — reframed — rather than as an edit. Not saved.
+  private(set) var generation = 0
   private var nextID: Int
 
   init(rows: [String] = ["y = sin(x)"]) {
@@ -45,6 +48,16 @@ struct GraphDocument: FileDocument {
 
   /// The document as the editor shows it: one row per line.
   var text: String { rows.map(\.text).joined(separator: "\n") }
+
+  /// A different graph in this document, as opening an example does: the
+  /// rows are all new, and undo brings the old ones back.
+  mutating func replace(with lines: [String]) {
+    rows = lines.map { text in
+      defer { nextID += 1 }
+      return GraphRow(id: nextID, text: text)
+    }
+    generation += 1
+  }
 
   /// New row texts, from the editor or from the renderer (a slider, a
   /// dragged point). Rows keep their ids where they line up with the old

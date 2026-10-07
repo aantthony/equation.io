@@ -1,9 +1,35 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+import { EXAMPLES } from '../web/examples.ts';
+import { splitStatements } from '../lib/statements.ts';
+
+/**
+ * The examples menu for the app's menu bar (apple/Equation Examples.swift):
+ * web/examples.ts as data, rows split the way the web menu splits them.
+ */
+function examplesJson(): Plugin {
+  return {
+    name: 'examples-json',
+    apply: 'build',
+    generateBundle() {
+      const categories = EXAMPLES.map(([name, items]) => ({
+        name,
+        examples: items.map(([label, rows, tags]) => ({
+          label,
+          rows: splitStatements(rows)
+            .map(s => s.trim())
+            .filter(Boolean),
+          tags: tags.split(' ').filter(Boolean),
+        })),
+      }));
+      this.emitFile({ type: 'asset', fileName: 'examples.json', source: JSON.stringify(categories) });
+    },
+  };
+}
 
 /**
  * The renderer page the Apple app bundles (web/native-app). The app serves
- * it from its own scheme, app://equation/, so absolute paths resolve there.
+ * it from its own scheme, equation://app/, so absolute paths resolve there.
  *
  *   pnpm app:web
  */
@@ -19,4 +45,5 @@ export default defineConfig({
       input: { native: fileURLToPath(new URL('../web/native-app/index.html', import.meta.url)) },
     },
   },
+  plugins: [examplesJson()],
 });

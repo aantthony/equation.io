@@ -103,7 +103,8 @@ struct GraphView {
     let model = model
     bridge.onRows = { texts in document.wrappedValue.setLines(texts) }
     bridge.onStatus = { status in if model.status != status { model.status = status } }
-    bridge.sync(rows: document.wrappedValue.rows, dark: colorScheme == .dark)
+    bridge.sync(
+      rows: document.wrappedValue.rows, generation: document.wrappedValue.generation, dark: colorScheme == .dark)
   }
 }
 
@@ -129,17 +130,20 @@ final class GraphBridge: NSObject, WKScriptMessageHandler {
 
   /// What the renderer should show: the document's rows and the theme.
   private var rows: [GraphRow] = []
+  private var generation = 0
   private var dark = false
 
   private var ready = false
   /// The rows and theme the renderer has.
   private var shownRows: [GraphRow]?
+  private var shownGeneration = 0
   private var shownDark: Bool?
   /// Texts the renderer just wrote itself, which must not be sent back to it.
   private var echo: [String]?
 
-  func sync(rows: [GraphRow], dark: Bool) {
+  func sync(rows: [GraphRow], generation: Int, dark: Bool) {
     self.rows = rows
+    self.generation = generation
     self.dark = dark
     flush()
   }
@@ -150,17 +154,18 @@ final class GraphBridge: NSObject, WKScriptMessageHandler {
       shownDark = dark
       call("window.equationApp.setTheme(mode)", ["mode": dark ? "dark" : "light"])
     }
-    guard rows != shownRows else { return }
+    guard rows != shownRows || generation != shownGeneration else { return }
     if let echo, echo == rows.map(\.text) {
       self.echo = nil
       shownRows = rows
       return
     }
     let payload = rows.map { ["id": $0.id, "text": $0.text] as [String: Any] }
-    // The first rows are a document opening; after that, edits keep the view.
-    let method = shownRows == nil ? "loadRows" : "editRows"
+    // The first rows, or a replaced document, open a graph; edits keep the view.
+    let method = shownRows == nil || generation != shownGeneration ? "loadRows" : "editRows"
     call("window.equationApp.\(method)(rows)", ["rows": payload])
     shownRows = rows
+    shownGeneration = generation
   }
 
   func call(_ body: String, _ arguments: [String: Any]) {
