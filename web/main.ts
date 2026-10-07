@@ -6650,9 +6650,9 @@ canvas.addEventListener(
     cancelTween('view');
     setHover(null);
     if (!pointers.size) activate(panelAtClient(e.clientX, e.clientY));
-    // The app scrolls like Maps: two fingers (or a wheel) pan. A pinch that
-    // arrives as ctrl+wheel, and ctrl-scrolling, still zoom.
-    if (nativeApp && !e.ctrlKey) {
+    // The app scrolls like Maps: two fingers (or a wheel) pan. With Shift
+    // (as Shift-drag does), or as a pinch arriving as ctrl+wheel, it zooms.
+    if (nativeApp && !e.ctrlKey && !e.shiftKey) {
       if (cur.locked) return;
       const lines = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
       panBy(-e.deltaX * lines, -e.deltaY * lines);
@@ -6660,7 +6660,10 @@ canvas.addEventListener(
       scheduleViewportWriteback();
       return;
     }
-    const factor = Math.exp(Math.max(-60, Math.min(60, e.deltaY)) * 0.002);
+    // macOS turns a Shift+wheel turn into horizontal scrolling: its motion
+    // arrives as deltaX, so a mouse wheel zooms with Shift held too.
+    const delta = nativeApp && e.shiftKey && !e.deltaY ? e.deltaX : e.deltaY;
+    const factor = Math.exp(Math.max(-60, Math.min(60, delta)) * 0.002);
     zoomAt(e.clientX, e.clientY, factor);
   },
   { passive: false },
