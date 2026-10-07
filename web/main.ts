@@ -6449,6 +6449,8 @@ function zoomGlide(clientX: number, clientY: number, factor: number) {
 let lastDropAt = -Infinity;
 
 canvas.addEventListener('pointerdown', e => {
+  // In the app a right-drag does nothing (for now): scrolling pans there.
+  if (nativeApp && e.button === 2) return;
   cancelTween('view'); // the user's hand beats a voice-mode camera move
   setHover(null); // a tooltip must not survive the gesture that moves the plot
   lastHoverAt = null; // nor may a deferred recompute re-pick mid-gesture
@@ -6470,7 +6472,7 @@ canvas.addEventListener('pointerdown', e => {
       canvas.style.cursor = 'grabbing';
     }
     dragging = !hit;
-    // In the app Shift-drag zooms; right-drag and two-finger scrolling pan.
+    // In the app Shift-drag zooms, and two-finger scrolling pans.
     zooming = nativeApp && e.button === 0 && e.shiftKey && !scaling;
     panning = !zooming && (e.button === 2 || e.shiftKey);
     lastX = e.clientX;
