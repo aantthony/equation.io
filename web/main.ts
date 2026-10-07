@@ -6404,6 +6404,48 @@ function zoomAt(clientX: number, clientY: number, factor: number) {
   scheduleViewportWriteback();
 }
 
+/** Move the view as if the plot were dragged by (dx, dy) CSS pixels: in 3D,
+ *  the camera's target slides in its screen plane. */
+function panBy(dx: number, dy: number) {
+  if (mode === '2d') {
+    const dpr = window.devicePixelRatio || 1;
+    view.cx -= dx * dpr * view.upp;
+    view.cy += dy * dpr * (view.upp / (view.ratio ?? 1));
+    return;
+  }
+  const s = camera.radius * 0.0022;
+  const ct = Math.cos(camera.theta),
+    st = Math.sin(camera.theta);
+  const sp = Math.sin(camera.phi),
+    cp = Math.cos(camera.phi);
+  // right = (-sinθ, cosθ, 0); up = (-cosθ·sinφ, -sinθ·sinφ, cosφ)
+  camera.target[0] += (st * dx + ct * sp * dy) * s;
+  camera.target[1] += (-ct * dx + st * sp * dy) * s;
+  camera.target[2] += cp * dy * s;
+}
+
+/** Glide the zoom by `factor` about a point, as a double-click does. */
+function zoomGlide(clientX: number, clientY: number, factor: number) {
+  const panel = panelAtClient(clientX, clientY);
+  if (withPanel(panel, () => cur.locked)) return;
+  const total = Math.log(factor);
+  let applied = 0;
+  tween(
+    'view',
+    0.25,
+    easeInOut,
+    k => {
+      const step = total * k - applied;
+      applied = total * k;
+      withPanel(panel, () => zoomAt(clientX, clientY, Math.exp(step)));
+    },
+    () => flushViewportWriteback(),
+  );
+}
+
+/** When the last click dropped an integral-curve seed, so a double-click can take it back. */
+let lastDropAt = -Infinity;
+
 canvas.addEventListener('pointerdown', e => {
   cancelTween('view'); // the user's hand beats a voice-mode camera move
   setHover(null); // a tooltip must not survive the gesture that moves the plot
@@ -6516,20 +6558,8 @@ canvas.addEventListener('pointermove', e => {
     const py = (rect.height / 2 - (downY - rect.top)) * dpr;
     const next = scaleViewAt(view, px, py, Math.exp(-dx * 0.01), Math.exp(dy * 0.01));
     Object.assign(view, next);
-  } else if (mode === '2d') {
-    view.cx -= dx * dpr * view.upp;
-    view.cy += dy * dpr * (view.upp / (view.ratio ?? 1));
-  } else if (panning) {
-    // Pan the target in the camera's screen plane.
-    const s = camera.radius * 0.0022;
-    const ct = Math.cos(camera.theta),
-      st = Math.sin(camera.theta);
-    const sp = Math.sin(camera.phi),
-      cp = Math.cos(camera.phi);
-    // right = (-sinθ, cosθ, 0); up = (-cosθ·sinφ, -sinθ·sinφ, cosφ)
-    camera.target[0] += (st * dx + ct * sp * dy) * s;
-    camera.target[1] += (-ct * dx + st * sp * dy) * s;
-    camera.target[2] += cp * dy * s;
+  } else if (mode === '2d' || panning) {
+    panBy(dx, dy);
   } else {
     camera.theta -= dx * 0.008;
     camera.phi = clampPhi(camera.phi + dy * 0.008);
@@ -6567,10 +6597,13 @@ canvas.addEventListener('pointerup', e => {
   // vector fields; right/shift clicks are pan gestures, not seeds.
   if (scaling || e.altKey || dragMoved || pointers.size || mode !== '2d' || e.button !== 0 || e.shiftKey) return;
   if (!equations.some(q => !q.error && q.cpu?.type === 'vfield2d')) return;
+  // In the app a double-click zooms: its second click drops nothing.
+  if (nativeApp && e.detail >= 2) return;
   // Each seed costs an RK4 integration per field per frame; keep the newest.
   if (drops.length >= MAX_DROPS) drops.shift();
   const [mx, my] = toMath(e.clientX, e.clientY);
   drops.push({ x: mx, y: my });
+  lastDropAt = performance.now();
   requestRender();
 });
 canvas.addEventListener('pointercancel', e => {
@@ -6585,7 +6618,15 @@ canvas.addEventListener('pointerleave', () => {
   setHot(null);
   canvas.style.cursor = '';
 });
-canvas.addEventListener('dblclick', () => {
+canvas.addEventListener('dblclick', e => {
+  // The app follows Maps: a double-click zooms in about the pointer, with
+  // Option out. Its first click may have dropped a seed; take that back.
+  if (nativeApp) {
+    if (performance.now() - lastDropAt < 600 && drops.pop()) requestRender();
+    lastDropAt = -Infinity;
+    zoomGlide(e.clientX, e.clientY, e.altKey ? 2 : 0.5);
+    return;
+  }
   if (!drops.length) return;
   drops.length = 0;
   requestRender();
@@ -6598,11 +6639,50 @@ canvas.addEventListener(
     cancelTween('view');
     setHover(null);
     if (!pointers.size) activate(panelAtClient(e.clientX, e.clientY));
+    // The app scrolls like Maps: two fingers (or a wheel) pan. A pinch that
+    // arrives as ctrl+wheel, and ctrl-scrolling, still zoom.
+    if (nativeApp && !e.ctrlKey) {
+      if (cur.locked) return;
+      const lines = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : 1;
+      panBy(-e.deltaX * lines, -e.deltaY * lines);
+      requestRender();
+      scheduleViewportWriteback();
+      return;
+    }
     const factor = Math.exp(Math.max(-60, Math.min(60, e.deltaY)) * 0.002);
     zoomAt(e.clientX, e.clientY, factor);
   },
   { passive: false },
 );
+
+/**
+ * A trackpad pinch (Mac, or an iPad's trackpad), which WebKit reports as
+ * gesture events rather than pointers or ctrl+wheel. A touch pinch also
+ * fires them, but its two pointers are down and drive the zoom themselves.
+ */
+interface WebKitGestureEvent extends UIEvent {
+  scale: number;
+  clientX: number;
+  clientY: number;
+}
+let gestureScale = 1;
+canvas.addEventListener('gesturestart', e => {
+  if (pointers.size) return;
+  const g = e as WebKitGestureEvent;
+  gestureScale = 1;
+  cancelTween('view');
+  setHover(null);
+  activate(panelAtClient(g.clientX, g.clientY));
+});
+canvas.addEventListener('gesturechange', e => {
+  const g = e as WebKitGestureEvent;
+  if (pointers.size || !(g.scale > 0)) return;
+  zoomAt(g.clientX, g.clientY, gestureScale / g.scale);
+  gestureScale = g.scale;
+});
+canvas.addEventListener('gestureend', () => {
+  if (!pointers.size) flushViewportWriteback();
+});
 
 // touch-action stops the viewport pinch-zoom everywhere it is honored, but
 // WebKit still runs its own two-finger zoom off these non-standard gesture
