@@ -601,8 +601,9 @@ has known-good and known-bad answers, all rendered and read
 **On the same 35 tasks: 41% (72/175), against 46% (81/175) in 2d.**
 Repetitions 16, 15, 13, 14, 14 (±1 task). The 9 runs lost are under two
 standard errors of the difference. 5.3 tool calls a run (3.4), 10,925
-input tokens a session (8,626), 14.2 s (8.8); context overflows 9 of the
-10 in all were polar-rose and cardioid loops.
+input tokens a session (8,626), 14.2 s (8.8); context overflows 8 (3 in
+2d), all set_graph loops: polar-rose 3, cardioid 2, label-crossing 2,
+slider-radius 1 (and 2 more on the new tasks).
 
 - Up: tangent-line 0 → 4 (every pass `y = 2x - 1` with no lookup),
   honest-reply-helix 3 → 5, saddle 3 → 5, torus 4 → 5.
