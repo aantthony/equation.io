@@ -28,6 +28,14 @@ targets:
         # Files ▸ On My iPhone ▸ Equation: where new documents go when there
         # is no iCloud Drive (a simulator, a signed-out device).
         UIFileSharingEnabled: true
+        # Every orientation, so iPad multitasking can size the app freely.
+        UISupportedInterfaceOrientations:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UISupportsDocumentBrowser: true
         UILaunchScreen: {}
         CFBundleDocumentTypes:
