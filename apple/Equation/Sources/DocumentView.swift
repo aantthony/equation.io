@@ -62,7 +62,12 @@ struct DocumentView: View {
       editor
         .navigationSplitViewColumnWidth(min: 260, ideal: 340, max: 520)
     } detail: {
-      graph
+      // Laid out beside the sidebar, not under it, so splits, centering and
+      // zoom use the graph you can see; the system mirrors and blurs its edge
+      // under the sidebar's glass. Top and bottom still run to the edges.
+      GraphView(document: $document, model: model)
+        .backgroundExtensionEffect()
+        .ignoresSafeArea(edges: .vertical)
     }
   }
 }
