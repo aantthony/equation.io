@@ -396,94 +396,164 @@ final class GraphChat {
 
 // MARK: - Views
 
-/// Ask for a change in words. Sending goes straight back to the graph,
-/// where the reply shows (ChatReply).
-struct ChatView: View {
+/// Ask, over the graph: a glass field to type a request into, and above it
+/// the latest thing the model said (or is doing). Clicking that, or the
+/// chevron, opens the whole conversation.
+struct ChatOverlay: View {
   var chat: GraphChat
-  @State private var draft = ""
-  @FocusState private var focused: Bool
-  @Environment(\.dismiss) private var dismiss
+  /// Bumped to put the cursor in the field (the toolbar's Ask, ⌘K).
+  var focusRequest: Int
+  /// Where the overlay sits: the conversation opens away from that edge.
+  var edge: VerticalEdge = .bottom
 
-  private let suggestions = [
-    "Add a slider for the amplitude and show what it does",
-    "Draw the derivative too",
-    "Shade the area under the curve from 0 to π",
-    "Zoom in on where it crosses zero",
-  ]
+  @State private var draft = ""
+  @State private var expanded = false
+  @FocusState private var focused: Bool
 
   var body: some View {
-    NavigationStack {
-      VStack(spacing: 0) {
-        ScrollViewReader { scroll in
-          ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-              if chat.messages.isEmpty { intro }
-              ForEach(chat.messages) { message in
-                ChatBubble(message: message).id(message.id)
-              }
-            }
-            .padding()
-          }
-          .onAppear {
-            if let last = chat.messages.last { scroll.scrollTo(last.id, anchor: .bottom) }
-          }
-        }
-        composer
+    VStack(spacing: 8) {
+      if edge == .top { field }
+      if expanded {
+        conversation
+      } else if chat.showsReply {
+        latest
       }
-      .navigationTitle("Ask")
-      #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-      #endif
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } }
-        if !chat.messages.isEmpty {
-          ToolbarItem(placement: .primaryAction) {
-            Button("New Conversation", systemImage: "square.and.pencil") { chat.reset() }
-          }
-        }
-      }
-      .onAppear { focused = true }
+      if edge == .bottom { field }
     }
+    .frame(maxWidth: 560)
+    .padding(.horizontal, 16)
+    .padding(edge == .bottom ? .bottom : .top, 14)
+    .animation(.snappy, value: expanded)
+    .animation(.snappy, value: chat.showsReply)
+    .onChange(of: focusRequest) { focused = true }
     #if os(macOS)
-      .frame(minWidth: 420, minHeight: 420)
+      .onExitCommand {
+        if expanded { expanded = false } else { focused = false }
+      }
     #endif
   }
 
-  @ViewBuilder private var intro: some View {
-    if let reason = ChatModel.unavailableReason {
-      Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary)
-    } else {
-      Text("Ask for a change to the graph in your own words.")
+  // MARK: The field
+
+  private var field: some View {
+    HStack(spacing: 10) {
+      Image(systemName: "sparkles")
+        .foregroundStyle(.tint)
+      TextField(placeholder, text: $draft, axis: .vertical)
+        .textFieldStyle(.plain)
+        .lineLimit(1...5)
+        .focused($focused)
+        .onSubmit(send)
+        .disabled(ChatModel.unavailableReason != nil)
+      if chat.isResponding {
+        ProgressView().controlSize(.small)
+      } else if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
+        Button("Send", systemImage: "arrow.up.circle.fill", action: send)
+          .labelStyle(.iconOnly)
+          .font(.title2)
+          .buttonStyle(.borderless)
+          .keyboardShortcut(.defaultAction)
+      }
+      if !chat.messages.isEmpty {
+        Button(expanded ? "Hide Conversation" : "Show Conversation", systemImage: "chevron.up") {
+          expanded.toggle()
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.borderless)
+        .rotationEffect(.degrees((expanded ? 180 : 0) + (edge == .top ? 180 : 0)))
         .foregroundStyle(.secondary)
-      ForEach(suggestions, id: \.self) { suggestion in
-        Button(suggestion) { send(suggestion) }
-          .buttonStyle(.bordered)
       }
     }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 10)
+    .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22))
   }
 
-  private var composer: some View {
-    HStack(alignment: .bottom, spacing: 8) {
-      TextField("Ask to change the graph…", text: $draft, axis: .vertical)
-        .lineLimit(1...4)
-        .focused($focused)
-        .onSubmit { send(draft) }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.quaternary, in: .rect(cornerRadius: 18))
-      Button("Send", systemImage: "arrow.up.circle.fill") { send(draft) }
-        .labelStyle(.iconOnly)
-        .font(.title2)
-        .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty || chat.isResponding)
-    }
-    .padding()
+  private var placeholder: String {
+    ChatModel.unavailableReason ?? "Ask to change the graph…"
   }
 
-  /// Send, and go back to the graph to watch it happen.
-  private func send(_ text: String) {
+  private func send() {
+    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !text.isEmpty, !chat.isResponding else { return }
     chat.send(text)
     draft = ""
-    dismiss()
+  }
+
+  // MARK: The latest message
+
+  /// What the model is doing, or the last thing it said; a click opens the
+  /// conversation.
+  private var latest: some View {
+    HStack(alignment: .firstTextBaseline, spacing: 10) {
+      if let activity = chat.activity {
+        ProgressView().controlSize(.small)
+        Text(activity).foregroundStyle(.secondary)
+      } else if let message = chat.lastReply {
+        Image(systemName: message.role == .note ? "exclamationmark.circle" : "sparkles")
+          .foregroundStyle(message.role == .note ? Color.secondary : Color.accentColor)
+        Text(message.text)
+          .lineLimit(4)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      Spacer(minLength: 0)
+      if chat.undoRows != nil && !chat.isResponding {
+        Button("Undo", systemImage: "arrow.uturn.backward") { chat.undo() }
+          .buttonStyle(.borderless)
+      }
+    }
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
+    .glassEffect(.regular, in: .rect(cornerRadius: 18))
+    .contentShape(.rect)
+    .onTapGesture { expanded = true }
+    .transition(.move(edge: edge == .bottom ? .bottom : .top).combined(with: .opacity))
+  }
+
+  // MARK: The conversation
+
+  private var conversation: some View {
+    VStack(spacing: 0) {
+      HStack {
+        Text("Ask").font(.headline)
+        Spacer()
+        if chat.undoRows != nil && !chat.isResponding {
+          Button("Undo Change", systemImage: "arrow.uturn.backward") { chat.undo() }
+        }
+        Button("New Conversation", systemImage: "square.and.pencil") {
+          chat.reset()
+          expanded = false
+        }
+        .labelStyle(.iconOnly)
+      }
+      .buttonStyle(.borderless)
+      .padding(.horizontal, 16)
+      .padding(.vertical, 10)
+      Divider()
+      ScrollViewReader { scroll in
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 12) {
+            ForEach(chat.messages) { message in
+              ChatBubble(message: message).id(message.id)
+            }
+            if let activity = chat.activity {
+              HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text(activity).foregroundStyle(.secondary)
+              }
+            }
+          }
+          .padding(16)
+        }
+        .defaultScrollAnchor(.bottom)
+        .onChange(of: chat.messages.last?.text) {
+          if let last = chat.messages.last { scroll.scrollTo(last.id, anchor: .bottom) }
+        }
+      }
+    }
+    .frame(maxHeight: 360)
+    .glassEffect(.regular, in: .rect(cornerRadius: 22))
+    .transition(.move(edge: edge == .bottom ? .bottom : .top).combined(with: .opacity))
   }
 }
 
@@ -502,60 +572,6 @@ private struct ChatBubble: View {
       Text(message.text).textSelection(.enabled)
     case .note:
       Text(message.text).font(.footnote).foregroundStyle(.secondary)
-    }
-  }
-}
-
-/// The reply, over the top of the graph: what's happening while the model
-/// works, then what it says, with Undo and Reply. It fades a few seconds
-/// after the reply ends; tapping it keeps it.
-struct ChatReply: View {
-  var chat: GraphChat
-  var reply: () -> Void
-
-  var body: some View {
-    if chat.showsReply, chat.lastRequest != nil {
-      VStack(alignment: .leading, spacing: 8) {
-        if let request = chat.lastRequest {
-          Text(request)
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-        }
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-          if let activity = chat.activity {
-            ProgressView().controlSize(.small)
-            Text(activity).foregroundStyle(.secondary)
-          } else if let message = chat.lastReply {
-            Image(systemName: message.role == .note ? "exclamationmark.circle" : "sparkles")
-              .foregroundStyle(message.role == .note ? Color.secondary : Color.accentColor)
-            Text(message.text)
-              .fixedSize(horizontal: false, vertical: true)
-          }
-          Spacer(minLength: 0)
-        }
-        if !chat.isResponding {
-          HStack(spacing: 16) {
-            if chat.undoRows != nil {
-              Button("Undo", systemImage: "arrow.uturn.backward") { chat.undo() }
-            }
-            Button("Reply", systemImage: "text.bubble", action: reply)
-            Spacer()
-            Button("Close", systemImage: "xmark") { chat.dismissReply() }
-              .labelStyle(.iconOnly)
-          }
-          .font(.subheadline)
-          .buttonStyle(.borderless)
-        }
-      }
-      .padding(14)
-      .frame(maxWidth: 480)
-      .glassEffect(.regular, in: .rect(cornerRadius: 22))
-      .padding(.horizontal, 12)
-      .padding(.top, 8)
-      // Reading it keeps it up; it goes once left alone again.
-      .onTapGesture { chat.showReply(stay: true) }
-      .transition(.move(edge: .top).combined(with: .opacity))
     }
   }
 }

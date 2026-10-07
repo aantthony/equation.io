@@ -9,7 +9,8 @@ struct DocumentView: View {
   var library: LibraryActions? = nil
   @State private var model = GraphModel()
   @State private var chat = GraphChat()
-  @State private var asking = false
+  /// Bumped to put the cursor in Ask's field.
+  @State private var askFocus = 0
   #if os(iOS)
     @Environment(\.horizontalSizeClass) private var sizeClass
   #endif
@@ -17,14 +18,6 @@ struct DocumentView: View {
   var body: some View {
     let _ = connectChat()
     content
-      .sheet(isPresented: $asking) {
-        ChatView(chat: chat)
-          #if os(iOS)
-            // The graph stays in view, and live, above a half-height chat.
-            .presentationDetents([.medium, .large])
-            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-          #endif
-      }
       .focusedSceneValue(\.graphDocument, $document)
       .focusedSceneValue(\.graphModel, model)
       .focusedSceneValue(\.graphLibrary, library)
@@ -48,7 +41,10 @@ struct DocumentView: View {
         } editor: {
           editor
         }
-        .overlay(alignment: .top) { reply }
+        .overlay(alignment: .top) {
+          // The equations card has the bottom: Ask sits at the top.
+          ChatOverlay(chat: chat, focusRequest: askFocus, edge: .top)
+        }
       } else {
         split
       }
@@ -76,15 +72,10 @@ struct DocumentView: View {
 
   private var title: String { library?.title ?? "Equations" }
 
-  /// Opens the chat, which changes the graph from a request in words.
+  /// Puts the cursor in Ask's field, which changes the graph from a request in words.
   private var ask: some View {
-    Button("Ask", systemImage: "sparkles") { asking = true }
-  }
-
-  /// What the chat is doing and saying, over the graph it is changing.
-  private var reply: some View {
-    ChatReply(chat: chat) { asking = true }
-      .animation(.snappy, value: chat.showsReply)
+    Button("Ask", systemImage: "sparkles") { askFocus += 1 }
+      .keyboardShortcut("k")
   }
 
   /// Point the chat's tools at this window's graph.
@@ -123,11 +114,11 @@ struct DocumentView: View {
       // Laid out beside the sidebar, not under it, so splits, centering and
       // zoom use the graph you can see; the system mirrors and blurs its edge
       // under the sidebar's glass. Top and bottom still run to the edges.
-      ZStack(alignment: .top) {
+      ZStack(alignment: .bottom) {
         GraphView(document: $document, model: model)
           .backgroundExtensionEffect()
           .ignoresSafeArea(edges: .vertical)
-        reply
+        ChatOverlay(chat: chat, focusRequest: askFocus)
       }
       .toolbar {
           ToolbarItem(placement: .primaryAction) { ask }
