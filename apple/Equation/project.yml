@@ -46,8 +46,7 @@ targets:
         SWIFT_VERSION: "6.0"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
-        # Run locally on the Mac without a team; set DEVELOPMENT_TEAM to ship.
-        CODE_SIGN_IDENTITY[sdk=macosx*]: "-"
+        DEVELOPMENT_TEAM: 5X6237AEMK
         ENABLE_APP_SANDBOX: YES
         ENABLE_USER_SELECTED_FILES: readwrite
         ENABLE_OUTGOING_NETWORK_CONNECTIONS: YES
