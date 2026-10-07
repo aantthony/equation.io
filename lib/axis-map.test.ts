@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
-import { axisMapping, parseAxisMap, toScreen, toWorld } from './axis-map.ts';
-import { type Expr, evaluate } from './expr.ts';
+import { axisMapping, parseAxisMap, toScreen, toScreenOrEdge, toWorld } from './axis-map.ts';
+import { runPaths, shadeRuns } from './intshade.ts';
+import { type Expr, evaluate, parseExpr } from './expr.ts';
 import type { Components } from './math-object.ts';
 import { runtimeSliderNames } from './runtime-sliders.ts';
 import { mappedSpecialPoints } from './special.ts';
@@ -220,9 +221,8 @@ describe('rows in a mapped panel', () => {
   });
 
   it('refuse what the map cannot carry, rather than drawing it in the wrong place', () => {
-    // A 3D point would turn the panel 3D under rows written for its screen;
-    // a tensor's glyphs need more than a substitution.
-    for (const row of ['((x, y), (y, -x))', 'hist([1, 2, 2, 3])', '(1, 2, 3)']) {
+    // A 3D point would turn the panel 3D under rows written for its screen.
+    for (const row of ['(1, 2, 3)', 'x^2 + y^2 + z^2 = 1']) {
       const [, r] = analyzeRows(['view(x = 1..100, x = 10^X)', row]).rows;
       expect(r.error, row).toMatch(/maps its axes/);
     }
@@ -255,5 +255,82 @@ describe('rows in a mapped panel', () => {
     const [u, v] = (phase as { components: Components }).components;
     expect(evaluate(u, { x: 1, y: 1 })).toBeCloseTo(1 / Math.LN10, 9);
     expect(evaluate(v, { x: 1, y: 1 })).toBeCloseTo(-1 / Math.LN10, 9);
+  });
+
+  it('read a tensor field at the screen point, and carry it by the Jacobian', () => {
+    const rows = ['view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)', '((x, y), (1, 2))'];
+    const tensor = object(rows) as { entries: Expr[]; jacobian: Expr[] };
+    const at = { x: 1, y: 2 };
+    // x = 10 and y = 100 at the screen point (1, 2).
+    expect(tensor.entries.map(e => evaluate(e, at))).toEqual([10, 100, 1, 2]);
+    // x = 10^X moves at ln 10 · 10^X, and not with Y.
+    const [a, b, c, d] = tensor.jacobian.map(e => evaluate(e, at));
+    expect(a).toBeCloseTo(Math.LN10 * 10, 9);
+    expect([b, c]).toEqual([0, 0]);
+    expect(d).toBeCloseTo(Math.LN10 * 100, 9);
+    // Unmapped, it carries none.
+    expect(object(['((x, y), (1, 2))'])).not.toHaveProperty('jacobian');
+  });
+
+  it('place histogram bars and a complex system’s roots, and keep an integral’s shade', () => {
+    const rows = [
+      'view(x = 1..100, y = 1..100, x = 10^X, y = 10^Y)',
+      'hist([1, 2, 2, 3])',
+      'w^2 = -4',
+      'int[1..10] x dx',
+    ];
+    const a = analyzeRows(rows).rows;
+    expect(a.map(r => r.error)).toEqual(rows.map(() => undefined));
+    expect(a.slice(1, 3).map(r => axisMapping(r.cls!.object))).toEqual(['place', 'place']);
+    expect(a[3].cls!.object).toHaveProperty('shade');
+  });
+});
+
+describe('an integral on mapped axes', () => {
+  const log = (axis: 'x' | 'y') => parseAxisMap(axis, axis === 'x' ? '10^X' : '10^Y');
+  const shade = (body: string, lo: string, hi: string) => ({
+    body: parseExpr(body),
+    v: 'x',
+    lo: parseExpr(lo),
+    hi: parseExpr(hi),
+  });
+
+  it('samples evenly along a log x axis and reads its signs before y is mapped', () => {
+    const runs = shadeRuns(shade('x - 10', '1', '100'), {}, 0, 2, undefined, { x: log('x') });
+    // Below the axis left of x = 10 (X = 1), above it right of there.
+    expect(runs.map(r => r.sign)).toEqual([-1, 1]);
+    expect(runs[0].pts[0]).toBeCloseTo(0, 9);
+    expect(runs[1].pts.at(-2)).toBeCloseTo(2, 9);
+    expect(runs[0].pts.at(-2)).toBeCloseTo(1, 3);
+  });
+
+  it('stands on the bottom edge of a log y axis, which cannot show y = 0', () => {
+    const y = log('y');
+    const [run] = shadeRuns(shade('x', '1', '100'), {}, 0, 200, undefined, { y });
+    // y = x read on the log y axis: at x = 100, Y = 2.
+    expect(run.pts.at(-1)).toBeCloseTo(2, 9);
+    expect(toScreenOrEdge(y, 0)).toBe(-Infinity);
+    const { fill } = runPaths(run, 0, 3, toScreenOrEdge(y, 0));
+    // The fill closes along the bottom, past the window, not at NaN.
+    expect(fill[1]).toBe(-3);
+    expect(fill.every(Number.isFinite)).toBe(true);
+    // A value the axis cannot show lies past the same edge.
+    expect(toScreenOrEdge(y, -5)).toBe(-Infinity);
+    expect(toScreenOrEdge(parseAxisMap('y', 'sinh(Y)'), 0)).toBe(0);
+  });
+
+  it('does not take what the map never reaches for what it shows', () => {
+    // y = sqrt(Y) has the inverse Y = y^2, which sends y = -3 to 9.
+    const y = parseAxisMap('y', 'sqrt(Y)');
+    expect(toScreen(y, -3)).toBeNaN();
+    expect(toScreenOrEdge(y, -3)).toBe(-Infinity);
+    const [run] = shadeRuns(shade('-3', '0', '1'), {}, 0, 2, undefined, { y });
+    expect(run.sign).toBe(-1);
+    expect(run.pts[1]).toBe(-Infinity);
+    // And x from -4 is shaded from x = 0, where the axis starts.
+    const x = parseAxisMap('x', 'sqrt(X)');
+    const [whole] = shadeRuns(shade('1', '-4', '9'), {}, 0, 100, undefined, { x });
+    expect(whole.pts[0]).toBe(0);
+    expect(whole.pts.at(-2)).toBeCloseTo(81, 9);
   });
 });

@@ -17,6 +17,7 @@
 import { evaluate, parseExpr } from './expr.ts';
 import { type GridRowSpec, type SplitSpec, parseDividerRow, parseGridRow } from './panels.ts';
 import { type AxisMaps, SCREEN, parseAxisMap, screenWindowOk, toWorld, windowToScreen } from './axis-map.ts';
+import { parsePlaneMap } from './plane-map.ts';
 
 export interface View2DSpec {
   kind: 'view';
@@ -117,6 +118,27 @@ function num(src: string, env: Record<string, number>, what: string): number {
   return numExpr(parsed, env, what);
 }
 
+/** A view row with a plane map: its window is the screen's, X and Y. */
+function planeView(spec: View2DSpec, maps: AxisMaps, ranges: Array<[string, [number, number]]>): View2DSpec {
+  if (maps.x || maps.y)
+    throw new Error('A view maps (x, y) together or x and y one at a time, not both: drop the x = … or y = … map.');
+  if (spec.x || spec.y)
+    throw new Error(
+      'With (x, y) mapped, the window is the screen’s, which x and y need not frame: give X = lo..hi, Y = lo..hi.',
+    );
+  for (const [axis, range] of ranges) {
+    if (axis !== 'X' && axis !== 'Y') throw new Error(`A view mapping (x, y) is framed by X and Y, not ${axis}.`);
+    spec[axis === 'X' ? 'x' : 'y'] = range;
+  }
+  // A map alone frames the screen around its origin.
+  if (!spec.x && !spec.y)
+    [spec.x, spec.y] = [
+      [-5, 5],
+      [-5, 5],
+    ];
+  return { ...spec, maps: { plane: maps.plane } };
+}
+
 /**
  * Parse a viewport row. Returns null when the text is not one (so ordinary
  * rows fall through to the expression parser); throws a row-friendly error
@@ -142,6 +164,13 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
     const maps: AxisMaps = {};
     const lattice: Array<[string, [number, number]]> = [];
     for (const arg of args) {
+      // `(x, y) = (Y cos X, Y sin X)`: both coordinates from the screen at once.
+      const plane = /^\(\s*x\s*,\s*y\s*\)\s*=\s*([\s\S]+)$/.exec(arg);
+      if (plane) {
+        if (maps.plane) throw new Error('view(...) maps (x, y) twice.');
+        maps.plane = parsePlaneMap(plane[1], env);
+        continue;
+      }
       const named = /^([A-Za-z]\w*)\s*=\s*([\s\S]+)$/.exec(arg);
       if (!named) throw new Error(usage);
       const axis = named[1];
@@ -167,6 +196,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       if (axis === 'x' || axis === 'y') spec[axis] = [lo, hi];
       else lattice.push([axis, [lo, hi]]);
     }
+    if (maps.plane) return planeView(spec, maps, lattice);
     if (lattice.length) {
       if (spec.x || spec.y || lattice.length > 2)
         throw new Error(
@@ -327,6 +357,15 @@ export function orientLattice(spec: View2DSpec, axes: readonly [string, string])
  *  A lattice view's axes go in `order` when given (as its row wrote them). */
 export function formatViewSpec(spec: Omit<View2DSpec, 'kind'>, order?: readonly [string, string]): string {
   const parts: string[] = [];
+  if (spec.maps?.plane) {
+    // The window is the screen's, written as it is held.
+    parts.push(`(x, y) = ${spec.maps.plane.text}`);
+    if (spec.x) parts.push(`X = ${fmtRange(...spec.x)}`);
+    if (spec.y) parts.push(`Y = ${fmtRange(...spec.y)}`);
+    if (spec.ratio !== undefined && spec.ratio !== 1) parts.push(`ratio = ${fmt(spec.ratio)}`);
+    if (spec.locked) parts.push('locked');
+    return `view(${parts.join(', ')})`;
+  }
   const [across, down] = spec.axes ?? ['x', 'y'];
   // A mapped axis's window is held in screen units and written in its own,
   // each end to six significant digits: on a log axis 0.00001 is a real
@@ -337,7 +376,7 @@ export function formatViewSpec(spec: Omit<View2DSpec, 'kind'>, order?: readonly 
   };
   if (spec.x) parts.push(`${across} = ${range('x', spec.x)}`);
   if (spec.y) parts.push(`${down} = ${spec.axes ? fmtRange(-spec.y[1], -spec.y[0]) : range('y', spec.y)}`);
-  for (const map of Object.values(spec.maps ?? {})) parts.push(`${map.axis} = ${map.text}`);
+  for (const map of [spec.maps?.x, spec.maps?.y]) if (map) parts.push(`${map.axis} = ${map.text}`);
   if (spec.axes && parts.length === 2 && order?.[0] === down && order[1] === across) parts.reverse();
   if (spec.ratio !== undefined && spec.ratio !== 1) parts.push(`ratio = ${fmt(spec.ratio)}`);
   if (spec.locked) parts.push('locked');

@@ -53,6 +53,54 @@ describe('og raster renderer', () => {
     expect(mapped.px).toEqual(plain.px);
   });
 
+  it('carries a tensor field and an integral onto mapped axes, as the app does', () => {
+    // On x = 10^X, a shear by x is one by x / (x ln 10) = 1/ln 10 on the
+    // screen: J⁻¹ M J with J = diag(x ln 10, 1), the diagonal kept.
+    const same = (mapped: string[], plain: string[]) => {
+      const a = renderRaster(['view(x = 1..100, y = -1..1, x = 10^X)', 'grid(off)', ...mapped], 100, 100);
+      const b = renderRaster(['view(x = 0..2, y = -1..1)', 'grid(off)', ...plain], 100, 100);
+      expect(inkFraction(b)).toBeGreaterThan(0);
+      expect(a.px).toEqual(b.px);
+    };
+    same(['((x/50, x), (0, 1)) #e24'], ['((10^x/50, 1/ln(10)), (0, 1)) #e24']);
+    // Streamlines follow the major eigenvector in x and y, here (1, 1), which
+    // the screen shows as (1/(x ln 10), 1): that of the plain matrix below.
+    same(
+      ['streamlines(((2x, x), (x, 2x))) #e24'],
+      ['streamlines(((1/(ln(10) 10^x)^2 + 1, 1/(ln(10) 10^x)), (1/(ln(10) 10^x), 2))) #e24'],
+    );
+    // The area under 1/2 from x = 10 to 100 is screen X = 1 to 2.
+    same(['int[10..100] 1/2 dx #e24'], ['int[1..2] 1/2 dx #e24']);
+    // A complex system's roots are solved in x and y, and placed: x = 50 is
+    // X = log 50, past the screen box [0, 2] read as x.
+    const root = Math.log10(50).toFixed(15);
+    same(
+      ['(w - 50)(w - (20 + 0.5i)) = 0 #e24'],
+      [`(w - ${root})(w - (${Math.log10(20).toFixed(15)} + 0.5i)) = 0 #e24`],
+    );
+  });
+
+  it('draws through a plane map as the app does', () => {
+    // The unrolled polar screen: the circle r = 2 is the line Y = 2, the
+    // point (0, 3) sits at angle π/2, radius 3, and w^3 = 8's root 2 at (0, 2).
+    const same = (mapped: string, plain: string[]) => {
+      const a = renderRaster(
+        ['view((x, y) = (Y cos(X), Y sin(X)), X = -2..2, Y = 0..4)', 'grid(off)', mapped],
+        100,
+        100,
+      );
+      const b = renderRaster(['view(x = -2..2, y = 0..4)', 'grid(off)', ...plain], 100, 100);
+      expect(inkFraction(b), mapped).toBeGreaterThan(0);
+      expect(a.px, mapped).toEqual(b.px);
+    };
+    // (y² for the radius², as the map makes the residual: the same edge.)
+    same('x^2 + y^2 = 4 #e24', ['y^2 = 4 #e24']);
+    same('(0, 3) #e24', [`(${(Math.PI / 2).toFixed(15)}, 3) #e24`]);
+    // Its other roots, at angles ±2π/3, just past the window's edges.
+    const third = ((2 * Math.PI) / 3).toFixed(15);
+    same('w^3 = 8 #e24', ['(0, 2) #e24', `(${third}, 2) #e24`, `(-${third}, 2) #e24`]);
+  });
+
   it("lets one panel be 3D without dropping another panel's 2D-only rows", () => {
     expect(canRenderOg(['z = x y', '--- right', 'y < sin(x)'])).toBe(true);
     expect(canRenderOg(['z = x y', 'y < sin(x)'])).toBe(false);

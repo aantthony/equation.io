@@ -1393,17 +1393,37 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Graphs, implicit curves, regions and fields are drawn through the map;
   points, parametric curves and regions, segments and polygons (bent as a
   straight line in x and y is on a log axis), point lists and labels are
-  placed through it, and named points drag in x and y. Systems are solved
-  through it too (not certified or dragged there). Hovering shows local
+  placed through it, and named points drag in x and y. Real systems are
+  solved through it too (not certified or dragged there); a complex system
+  like `w^3 = 8i` is solved in x and y and its roots placed. Hovering shows local
   minima and maxima and any intercepts with x = 0 or y = 0 the map shows,
   read in x and y (no inflection points), and traces curves in x and y. What the map cannot
   show (x <= 0 on a log axis) is left out. 2D vector fields, slope fields
   and `(x', y') = (P, Q)` flows are carried through it too: their arrows,
   streamlines and traced trajectories follow x and y (Lotka-Volterra's
   orbits close on log-log axes), coordinate flows like `(r', theta') = …`
-  included. Tensor fields, histograms, complex systems, 3D and integral
-  shading are not drawn on
-  mapped axes, and a mapped panel shows no coordinate-field grid.
+  included. A 2×2 matrix field's glyphs are the matrix as it acts on the
+  screen, and its streamlines follow its major eigenvector in x and y.
+  Histogram bars and a definite integral's shaded area stand on y = 0, or
+  rise from the bottom edge of a log y axis, which cannot show y = 0. 3D is
+  not drawn on mapped axes, and a mapped panel shows no coordinate-field grid.
+- A plane map writes x and y together from the screen's X and Y:
+  `view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..5)` unrolls the
+  plane in polar form — angle across, radius up — so circles about the
+  origin are level lines and spirals rise in steps;
+  `(x, y) = (exp(Y) cos(X), exp(Y) sin(X))` is log-polar, where equiangular
+  spirals are straight. The window is the screen's, X and Y (not x and y).
+  Any smooth map works, with sliders. Every row is drawn through it:
+  curves, regions, fields, flows and matrix fields (carried by its
+  Jacobian), real systems, and points, parametric curves, figures, labels
+  and complex roots, placed where the screen shows them (a point, a filled
+  shape or a region at each place, on an angle range wider than 2π; a line
+  on one, picking up at the other edge where it crosses the seam; a shape
+  round the origin, which unrolls into an open curve, as an outline). Named points drag in x and y. The
+  grid is the screen's; `grid(x, y)` or coordinate fields (r, theta) draw
+  their level lines through the map. Histograms are refused, integrals
+  are readouts without shading, and hovering shows no intercepts or extrema
+  (they are not features of the screen's curve).
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
   A trailing `spin = rate` keeps it orbiting about the vertical axis at that

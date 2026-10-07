@@ -62,7 +62,15 @@ import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
-import { type AxisMaps, UNMAPPED_MESSAGE, axisMapping, inlineFields, mapRowExpr } from './axis-map.ts';
+import {
+  type AxisMaps,
+  PLANE_BARS_MESSAGE,
+  UNMAPPED_MESSAGE,
+  axisMapping,
+  inlineFields,
+  mapRowExpr,
+  tensorJacobian,
+} from './axis-map.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -983,8 +991,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Lists then broadcast/reduce away (mirror of web/main.ts).
       const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
       const maps = panelMaps[panel];
+      // An integral's area stands on y = 0, which a plane map bends into a
+      // curve: there it is a readout only.
       row.cls = classifyRow(
-        maps ? { ...resolved, integral: null } : resolved,
+        maps?.plane ? { ...resolved, integral: null } : resolved,
         lower,
         constNames,
         fieldEnv,
@@ -994,8 +1004,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         // A mapped panel draws per-pixel rows in its screen coordinates, and
         // carries what places points there as it is drawn (lib/axis-map.ts).
         const plain = row.cls;
-        const how = plain.needs3D ? null : axisMapping(plain.object);
-        if (!how) throw new Error(UNMAPPED_MESSAGE);
+        const how = plain.needs3D ? null : axisMapping(plain.object, maps);
+        if (!how)
+          throw new Error(maps.plane && plain.object.kind === 'histogram' ? PLANE_BARS_MESSAGE : UNMAPPED_MESSAGE);
         if (how === 'substitute')
           row.cls = classifyRow(
             { ...resolved, integral: null },
@@ -1011,6 +1022,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
             fieldEnv,
             timeDifferentiator(defs),
           ).cls;
+        // A matrix is read at the screen point, and carried onto the screen
+        // by the maps' Jacobian as it is drawn.
+        if (row.cls.object.kind === 'tensor-field')
+          row.cls = { ...row.cls, object: { ...row.cls.object, jacobian: tensorJacobian(maps) } };
       }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);

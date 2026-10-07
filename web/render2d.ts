@@ -10,7 +10,8 @@ import { arrowHead } from '../lib/geom.ts';
 import { GLSL_PRELUDE, uniformName } from '../lib/glsl.ts';
 import { type Frame, ProgramCache, QUAD_VERT } from './gl.ts';
 import { glslVec3, theme } from './theme.ts';
-import { type AxisMap, type AxisMaps, toScreen as mapToScreen } from '../lib/axis-map.ts';
+import { type AxisMap, type AxisMaps, toScreen as mapToScreen, toScreenOrEdge } from '../lib/axis-map.ts';
+import { FOLLOW_MARGIN, type PlaneInverse, type ScreenBox, planeInverse, planeShapes } from '../lib/plane-map.ts';
 import { type AxisTicks, axisTicks } from '../lib/axis-ticks.ts';
 
 export interface View2D {
@@ -71,7 +72,15 @@ export interface TField2D {
   params?: string[];
   /** Streamlines of the major eigenvector (tlinesFrag) instead of glyphs. */
   streamlines?: boolean;
+  /** On mapped axes, GLSL for the maps' Jacobian ∂(x, y)/∂(X, Y), row-major,
+   *  with the entries read at the screen point (lib/math-object.ts
+   *  tensor-field). */
+  jacobian?: [string, string, string, string];
 }
+
+/** The tensor shaders' J(x, y): the axis maps' Jacobian, or none. */
+const jacobianGLSL = (j?: [string, string, string, string]) =>
+  `mat2 J(float x, float y) { return ${j ? `mat2(${j[0]}, ${j[2]}, ${j[1]}, ${j[3]})` : 'mat2(1.0)'}; }`;
 
 export interface Fractal2D {
   uniforms?: Record<string, number>;
@@ -457,7 +466,7 @@ void main() {
   // Signed shade, as in the static preview (worker/og.ts shadeScalar):
   // positive toward the row color, negative toward its complement, so a
   // field that changes sign (sin(x), or plain x) reads on both sides of 0.
-  float s = tanh(v * 0.6);
+  float s = eq_tanh(v * 0.6);
   float a = 0.55 * abs(s);
   if (a < 0.004) discard;
   outColor = vec4(s >= 0.0 ? uColor : vec3(1.0) - uColor, a);
@@ -596,7 +605,11 @@ void main() {
  * and |adj(A) q| − |det A| vanishes on it, so even a singular M (a segment)
  * draws.
  */
-function tfieldFrag(entries: [string, string, string, string], params?: string[]): string {
+function tfieldFrag(
+  entries: [string, string, string, string],
+  params?: string[],
+  jacobian?: [string, string, string, string],
+): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -608,9 +621,12 @@ uniform float t;
 ${paramDecls(params)}
 out vec4 outColor;
 ${GLSL_PRELUDE}
+${jacobianGLSL(jacobian)}
 mat2 M(float x, float y) {
-  // Column-major: mat2(m00, m10, m01, m11).
-  return mat2(${entries[0]}, ${entries[2]}, ${entries[1]}, ${entries[3]});
+  // Column-major: mat2(m00, m10, m01, m11). On mapped axes, the same map in
+  // screen coordinates: J⁻¹ M J, J the maps' Jacobian.
+  mat2 j = J(x, y);
+  return inverse(j) * mat2(${entries[0]}, ${entries[2]}, ${entries[1]}, ${entries[3]}) * j;
 }
 const float CELL = 72.0;
 float sigma1(mat2 m) {
@@ -629,7 +645,7 @@ void main() {
   mat2 m = M(c.x, c.y);
   if (any(isnan(m[0])) || any(isnan(m[1])) || any(isinf(m[0])) || any(isinf(m[1]))) discard;
   float s1 = sigma1(m);
-  float s = s1 < 1e-9 ? 1.0 : tanh(s1) / s1;
+  float s = s1 < 1e-9 ? 1.0 : eq_tanh(s1) / s1;
   // The same map in pixels: D⁻¹ M D with D = diag(uUpp).
   mat2 mp = mat2(m[0][0], m[0][1] * uUpp.x / uUpp.y, m[1][0] * uUpp.y / uUpp.x, m[1][1]);
   float radius = 0.42 * wx / uUpp.x;
@@ -663,7 +679,11 @@ void main() {
  * and the direction is undefined, and at the domain's edge. As with the
  * glyphs, det M < 0 draws in the complement of the row colour.
  */
-function tlinesFrag(entries: [string, string, string, string], params?: string[]): string {
+function tlinesFrag(
+  entries: [string, string, string, string],
+  params?: string[],
+  jacobian?: [string, string, string, string],
+): string {
   return `#version 300 es
 precision highp float;
 uniform vec2 uCenter;
@@ -677,6 +697,7 @@ out vec4 outColor;
 ${GLSL_PRELUDE}
 // Row-major ((a, b), (c, d)) as a vec4.
 vec4 M(float x, float y) { return vec4(${entries[0]}, ${entries[1]}, ${entries[2]}, ${entries[3]}); }
+${jacobianGLSL(jacobian)}
 
 float tlNoise(vec2 spx) {
   return fract(sin(dot(floor(spx / 2.0), vec2(127.1, 311.7))) * 43758.5453);
@@ -695,8 +716,10 @@ vec2 E(vec2 q, vec2 prev) {
   float r = length(vec2(h, o));
   if (isnan(r) || isinf(r) || !(r > 1e-5 * (abs(m.x) + abs(m.w) + abs(o)))) return vec2(0.0);
   float th = 0.5 * atan(o, h);
-  vec2 e = vec2(cos(th), sin(th));
+  // On mapped axes the direction is x and y's, carried to the screen.
+  vec2 e = inverse(J(q.x, q.y)) * vec2(cos(th), sin(th));
   e /= length(e / uUpp);
+  if (any(isnan(e)) || any(isinf(e))) return vec2(0.0);
   return dot(e, prev) < 0.0 ? -e : e;
 }
 
@@ -1318,7 +1341,7 @@ export class Renderer2D {
     for (const c of layers.conformals ?? []) drawField(c, conformalFrag);
     for (const f of layers.vfields ?? []) drawProgram(vfieldFrag(f.fx, f.fy, f.params), f.color, f.params, f.uniforms);
     for (const f of layers.tfields ?? []) {
-      const frag = (f.streamlines ? tlinesFrag : tfieldFrag)(f.entries, f.params);
+      const frag = (f.streamlines ? tlinesFrag : tfieldFrag)(f.entries, f.params, f.jacobian);
       drawProgram(frag, f.color, f.params, f.uniforms);
     }
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
@@ -1456,8 +1479,9 @@ export interface Overlay2D {
    *  counter-clockwise (lib/path.ts regionSampler), filled as one path by the
    *  nonzero rule, so overlaps show once. No outline. */
   regions?: Array<{ tris: Float64Array; fill: string }>;
-  /** Vertical bars from y = 0, halfWidth in math units (histograms). */
-  bars?: Array<{ x: number; y: number; halfWidth: number; color: string }>;
+  /** Vertical bars from y = 0, or from `base` (±Infinity: the window's
+   *  bottom or top edge), halfWidth in math units (histograms). */
+  bars?: Array<{ x: number; y: number; halfWidth: number; color: string; base?: number }>;
   /** `label(point, "text")` rows: text beside a math point, drawn above everything. */
   texts?: Array<{ x: number; y: number; text: string; color: string }>;
   /** A graph's vertices (lib/graph.ts): a ring of GRAPH_NODE_PX with the
@@ -1474,6 +1498,7 @@ export interface OverlayMark {
   polylines: number;
   regions: number;
   texts: number;
+  bars: number;
 }
 
 export function markOverlay(o: Overlay2D): OverlayMark {
@@ -1483,6 +1508,7 @@ export function markOverlay(o: Overlay2D): OverlayMark {
     polylines: o.polylines.length,
     regions: o.regions?.length ?? 0,
     texts: o.texts?.length ?? 0,
+    bars: o.bars?.length ?? 0,
   };
 }
 
@@ -1494,20 +1520,28 @@ export function markOverlay(o: Overlay2D): OverlayMark {
 const MAPPED_BEND = 0.0005;
 const MAPPED_DEPTH = 12;
 
-/** Mapped points of the straight segment a → b, a included, b not. */
+/** Carries a point to the screen; a plane map follows on from `hint`, the
+ *  screen point of a neighbour, so a line stays on one copy of the plane. */
+type Carry = (x: number, y: number, hint?: readonly [number, number]) => [number, number];
+
+/** Mapped points of the straight segment a → b, a included, b not, and b
+ *  mapped, to follow the next segment on from. `from` is a's neighbour. */
 function mappedSegment(
   a: [number, number],
   b: [number, number],
-  map: (x: number, y: number) => [number, number],
-): number[] {
+  map: Carry,
+  from?: readonly [number, number],
+): [number[], [number, number]] {
   const out: number[] = [];
-  const pa = map(...a);
-  const pb = map(...b);
-  const shown = (p: [number, number]) => isFinite(p[0]) && isFinite(p[1]);
+  const shown = (p: readonly [number, number]) => isFinite(p[0]) && isFinite(p[1]);
+  const pa = map(a[0], a[1], from && shown(from) ? from : undefined);
+  const pb = map(b[0], b[1], shown(pa) ? pa : undefined);
   const tol = MAPPED_BEND * Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
   const split = (t0: number, p0: [number, number], t1: number, p1: [number, number], depth: number) => {
     const t = (t0 + t1) / 2;
-    const pm = map(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+    const hint: [number, number] | undefined =
+      shown(p0) && shown(p1) ? [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2] : shown(p0) ? p0 : shown(p1) ? p1 : undefined;
+    const pm = map(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, hint);
     // Where the map stops (one end shown, one not) the piece is cut as far
     // as depth allows, so the line breaks close to the edge; a piece shown
     // at both ends is cut while it bends; one shown at neither is a gap.
@@ -1527,7 +1561,7 @@ function mappedSegment(
     } else out.push(...p0);
   };
   split(0, pa, 1, pb, 0);
-  return out;
+  return [out, pb];
 }
 
 /** A cloud's mapped columns, kept while its arrays and the map are the same
@@ -1548,7 +1582,14 @@ function mappedColumn(col: Float64Array, map: AxisMap | undefined): Float64Array
  * show (x ≤ 0 on a log axis) become NaN: points there are dropped, and lines
  * break there, as they do at any other gap.
  */
-export function mapOverlay(o: Overlay2D, mark: OverlayMark, maps: AxisMaps): void {
+export function mapOverlay(o: Overlay2D, mark: OverlayMark, maps: AxisMaps, box?: ScreenBox): void {
+  if (maps.plane) {
+    // Its way back is built over the window: without one, nothing could be
+    // placed, and drawing x and y as the screen's X and Y would be wrong.
+    if (!box) throw new Error('mapOverlay needs the screen window to carry rows through a plane map.');
+    planeOverlay(o, mark, planeInverse(maps.plane, box));
+    return;
+  }
   const mx = maps.x ? (v: number) => mapToScreen(maps.x!, v) : (v: number) => v;
   const my = maps.y ? (v: number) => mapToScreen(maps.y!, v) : (v: number) => v;
   const kept = o.points.slice(mark.points).flatMap(p => {
@@ -1561,16 +1602,7 @@ export function mapOverlay(o: Overlay2D, mark: OverlayMark, maps: AxisMaps): voi
     c.ys = mappedColumn(c.ys, maps.y);
   }
   const both = (x: number, y: number): [number, number] => [mx(x), my(y)];
-  for (const l of o.polylines.slice(mark.polylines)) {
-    const { pts } = l;
-    const n = pts.length / 2;
-    const out: number[] = [];
-    const vertex = (k: number): [number, number] => [pts[(2 * k) % pts.length], pts[(2 * k + 1) % pts.length]];
-    for (let k = 0; k < (l.closed ? n : n - 1); k++) out.push(...mappedSegment(vertex(k), vertex(k + 1), both));
-    // The last vertex, unless closing back to the first draws it.
-    if (!l.closed && n) out.push(...both(...vertex(n - 1)));
-    l.pts = out;
-  }
+  mapPolylines(o, mark, both);
   for (const r of o.regions?.slice(mark.regions) ?? []) {
     const tris = new Float64Array(r.tris.length);
     for (let k = 0; k + 1 < tris.length; k += 2) {
@@ -1583,6 +1615,112 @@ export function mapOverlay(o: Overlay2D, mark: OverlayMark, maps: AxisMaps): voi
     t.x = mx(t.x);
     t.y = my(t.y);
   }
+  // A bar keeps its edges, and stands on y = 0 where the map shows it; a log
+  // axis does not, so there it rises from the window's edge, as y = 0 lies
+  // past every value the axis shows.
+  for (const b of o.bars?.slice(mark.bars) ?? []) {
+    const [l, r] = [mx(b.x - b.halfWidth), mx(b.x + b.halfWidth)];
+    b.x = (l + r) / 2;
+    b.halfWidth = (r - l) / 2;
+    if (maps.y) b.base = toScreenOrEdge(maps.y, b.base ?? 0);
+    b.y = my(b.y);
+  }
+}
+
+/** Carry each polyline added since `mark`, its straight runs cut where the
+ *  map bends them, each segment followed on from the last. */
+function mapPolylines(o: Overlay2D, mark: OverlayMark, map: Carry): void {
+  for (const l of o.polylines.slice(mark.polylines)) {
+    const { pts } = l;
+    const n = pts.length / 2;
+    const out: number[] = [];
+    const vertex = (k: number): [number, number] => [pts[(2 * k) % pts.length], pts[(2 * k + 1) % pts.length]];
+    let last: [number, number] | undefined;
+    for (let k = 0; k < (l.closed ? n : n - 1); k++) {
+      const [piece, end] = mappedSegment(vertex(k), vertex(k + 1), map, last);
+      out.push(...piece);
+      last = end;
+    }
+    // The last vertex, unless closing back to the first draws it.
+    if (!l.closed && n) out.push(...(n > 1 && last ? last : map(...vertex(n - 1))));
+    l.pts = out;
+  }
+}
+
+/**
+ * mapOverlay through a plane map (lib/plane-map.ts), whose way back is found
+ * numerically. A point is drawn wherever the screen shows it (twice, on an
+ * angle range wider than 2π); a line, a region's triangle and a cloud's dot
+ * at one place, a line followed along from its start and cut where it
+ * cannot be (the seam of an angle).
+ */
+function planeOverlay(o: Overlay2D, mark: OverlayMark, inverse: PlaneInverse): void {
+  const kept = o.points.slice(mark.points).flatMap(p => inverse.all(p.x, p.y).map(([x, y]) => ({ ...p, x, y })));
+  o.points.splice(mark.points, Infinity, ...kept);
+  for (const c of o.clouds?.slice(mark.clouds) ?? []) [c.xs, c.ys] = planeCloud(c.xs, c.ys, inverse);
+  for (const l of o.polylines.slice(mark.polylines)) {
+    const { pts } = l;
+    const vertex = (k: number): [number, number] => [pts[2 * k], pts[2 * k + 1]];
+    const fill = !!(l.fill && l.closed);
+    const key = `${fill}${!!l.closed}`;
+    let shapes = planeLines.get(pts);
+    if (shapes?.inverse !== inverse || shapes.key !== key) {
+      shapes = {
+        inverse,
+        key,
+        // A shape to fill stays one shape, on each copy of the plane it shows on.
+        out: fill
+          ? planeShapes(inverse, pts.length / 2, vertex, mappedSegment)
+          : [
+              {
+                pts: inverse.line(pts.length / 2, vertex, !!l.closed, FOLLOW_MARGIN, mappedSegment),
+                closed: !!l.closed,
+              },
+            ],
+      };
+      planeLines.set(pts, shapes);
+    }
+    const [first, ...more] = shapes.out.map(shape =>
+      !fill || shape.closed ? { ...l, pts: shape.pts } : { ...l, pts: shape.pts, closed: false, fill: undefined },
+    );
+    Object.assign(l, first ?? { pts: [] });
+    o.polylines.push(...more);
+  }
+  for (const r of o.regions?.slice(mark.regions) ?? []) r.tris = planeTriangles(r.tris, inverse);
+  for (const t of o.texts?.slice(mark.texts) ?? []) [t.x, t.y] = inverse.first(t.x, t.y);
+}
+
+/** Lines and shapes through a plane map, kept while their points and the
+ *  window stay (a sampled curve's points are reused frame after frame). */
+const planeLines = new WeakMap<
+  number[],
+  { inverse: PlaneInverse; key: string; out: Array<{ pts: number[]; closed: boolean }> }
+>();
+
+/** A cloud's columns through a plane map, kept while the columns and the
+ *  window stay (a CSV column is reused frame after frame). */
+const planeClouds = new WeakMap<
+  Float64Array,
+  { ys: Float64Array; inverse: PlaneInverse; out: [Float64Array, Float64Array] }
+>();
+function planeCloud(xs: Float64Array, ys: Float64Array, inverse: PlaneInverse): [Float64Array, Float64Array] {
+  const hit = planeClouds.get(xs);
+  if (hit?.ys === ys && hit.inverse === inverse) return hit.out;
+  const out: [Float64Array, Float64Array] = [new Float64Array(xs.length), new Float64Array(xs.length)];
+  for (let k = 0; k < xs.length; k++) [out[0][k], out[1][k]] = inverse.first(xs[k], ys[k]);
+  planeClouds.set(xs, { ys, inverse, out });
+  return out;
+}
+
+/** A region's triangles through a plane map (PlaneInverse.triangles), kept
+ *  while the triangles and the window stay. */
+const planeRegions = new WeakMap<Float64Array, { inverse: PlaneInverse; out: Float64Array }>();
+function planeTriangles(tris: Float64Array, inverse: PlaneInverse): Float64Array {
+  const hit = planeRegions.get(tris);
+  if (hit?.inverse === inverse) return hit.out;
+  const out = inverse.triangles(tris);
+  planeRegions.set(tris, { inverse, out });
+  return out;
 }
 
 /** A graph vertex's radius in CSS px. */
@@ -1730,9 +1868,10 @@ export function drawLabels2D(
     }
     for (const bar of extras.bars ?? []) {
       const sx = toScreenX(bar.x);
-      const sy0 = toScreenY(0);
+      // A base past the window's edge (a log axis's y = 0) is just beyond it.
+      const sy0 = Math.min(Math.max(toScreenY(bar.base ?? 0), -2), h + 2);
       const sy = toScreenY(bar.y);
-      if (!isFinite(sx) || !isFinite(sy)) continue;
+      if (!isFinite(sx) || !isFinite(sy) || !isFinite(sy0)) continue;
       const hw = bar.halfWidth / upp;
       ctx.globalAlpha = 0.3;
       ctx.fillStyle = bar.color;

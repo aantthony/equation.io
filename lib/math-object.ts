@@ -80,6 +80,11 @@ export type MathObject =
       readonly entries: readonly [Expr, Expr, Expr, Expr];
       /** streamlines(M): drawn along the major eigenvector, not as glyphs. */
       readonly streamlines?: true;
+      /** On mapped axes (lib/axis-map.ts), the entries are read at the
+       *  screen point and this is the maps' Jacobian ∂(x, y)/∂(X, Y) there,
+       *  row-major, which carries the matrix and its eigenvectors onto the
+       *  screen. */
+      readonly jacobian?: readonly [Expr, Expr, Expr, Expr];
     }
   | { readonly kind: 'complex-field'; readonly form: 'potential' | 'domain' | 'conformal'; readonly expr: Expr }
   | {
