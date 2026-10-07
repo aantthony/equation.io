@@ -48,6 +48,19 @@ export function overall(results: Results) {
   return { rate: mean(all.map(r => (r.pass ? 1 : 0))), sd: sd(byRepetition), runs: all.length };
 }
 
+/** Runs the 8K context ran out in: the framework says so in two ways. */
+const overflowed = (run: RunResult) => /context size exceeded|maximum allowed is/.test(run.error ?? '');
+
+/** Tool calls per run, by tool, most used first. */
+function callsByTool(runs: RunResult[]): string {
+  const counts = new Map<string, number>();
+  for (const call of runs.flatMap(r => r.calls)) counts.set(call.tool, (counts.get(call.tool) ?? 0) + 1);
+  return [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .map(([tool, n]) => `${tool} ${fixed(n / runs.length, 2)}`)
+    .join(', ');
+}
+
 /** The check a task fails most often, and how often. */
 function commonFailure(runs: RunResult[]): string {
   const counts = new Map<string, number>();
@@ -72,6 +85,7 @@ export function report(results: Results): string {
       (results.instructionsTokens !== undefined
         ? `; instructions ${results.instructionsTokens} + tools ${results.toolsTokens} tokens of ${results.contextSize}`
         : ''),
+    `Context overflows: ${all.filter(overflowed).length}. Calls per run by tool: ${callsByTool(all)}`,
     '',
     '| task | pass | calls | tokens in/out | most common failure |',
     '| --- | --- | --- | --- | --- |',
@@ -91,9 +105,11 @@ export function report(results: Results): string {
 export function compare(before: Results, after: Results): string {
   const a = overall(before);
   const b = overall(after);
+  const runsOf = (r: Results) => r.tasks.flatMap(t => t.runs);
   const lines = [
     `${before.model} ${before.date} → ${after.model} ${after.date}`,
     `Pass rate ${pct(a.rate)} ±${pct(a.sd)} → ${pct(b.rate)} ±${pct(b.sd)}`,
+    `Context overflows ${runsOf(before).filter(overflowed).length} → ${runsOf(after).filter(overflowed).length}`,
     '',
     '| task | before | after |',
     '| --- | --- | --- |',

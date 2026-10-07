@@ -150,3 +150,40 @@ tokens in a session.
   end on. The app's window depends on its size; the evals use 16 × 12 units.
 - get_graph and set_graph leave out each row's notable points (intercepts in
   view), which the app adds from its hover cache.
+
+## Step 2a: check (2026-10-07)
+
+`results/2026-10-07T120103Z-on-device.json`, at 4235a81. A `check(rows)`
+tool (lib/assistant-tools.ts `checkRows`, on the bridge as
+`window.equationApp.check`): each proposed row's kind, meaning, value,
+error and warning, without changing the graph. The instructions were not
+changed; the model learns of it from its description. The tool
+definitions grew from 820 to 942 tokens.
+
+**Pass rate 36% (63/175), against 43% (76/175).** The repetitions passed
+15, 14, 10, 12 and 12 tasks (±5%, against ±4%). The 13 runs lost are about
+two standard errors of the difference, so check on its own is at best no
+help to this model:
+
+- Tool calls rose from 3.6 to 4.6 a run, and input tokens from 6,840 to
+  8,950 (summed over a session's model calls). Context overflows rose from
+  6 to 10.
+- The model called check in 68 runs (119 calls), and 47 of those calls were
+  followed by a set_graph of exactly the same rows: it used check as a
+  dry run of what it was about to send anyway, not to compare a meaning
+  with its intent. Runs that called check passed 41% (28/68); runs that
+  didn't, 33% (35/107).
+- Down: slider-amplitude 4/5 → 0/5, of which 4 runs failed with a tool-call
+  error: after set_graph, the model's arguments for animate_slider didn't
+  match the tool's schema ("GeneratedContent does not …", cut short by the
+  runner). zoom-out 3/5 → 0/5 (all 5 runs sent the window they were
+  already on, x = [-8, 8], as the "wider" window), tangent-line 2/5 → 0/5
+  (`y = 2x - 2`, `y = 2x`, and a run that set the row
+  `"tangent line at x = 1"`, then `frame(y = 2x - 1, (1, 1), color:#e24)`,
+  until the context ran out).
+- Up: shade-region 0/5 → 1/5, points 0/5 → 1/5, animate-existing-slider
+  4/5 → 5/5.
+- Unchanged: unit-cube 0/5 (10.8 calls a run, read_syntax "3D surface
+  cube", then `["A = (1, 1, 1)", "z = x * y"]` and "I drew a 3D cube"),
+  make-it-move, animate-parabola, show-frequency, cardioid, sphere, cone,
+  color-red all 0/5. The reply check failed in 19 runs (18 before).
