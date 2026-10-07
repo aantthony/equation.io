@@ -452,9 +452,78 @@ export class PlaneInverse {
           const w = this.c.f((p[0] + q[0]) / 2, (p[1] + q[1]) / 2);
           if (w.every(isFinite) && !found.some(f => Math.abs(f[0] - w[0]) + Math.abs(f[1] - w[1]) < tol)) found.push(w);
         }
+    // And where it touches 0 without changing sign: a branch point of a
+    // conformal map (z², at 0), where det J = 4|z|² ≥ 0. From each sample
+    // lower than its neighbours, |det J| is walked down to its least; a
+    // point it reaches 0 at, against the window's typical size of J, is one.
+    const size: number[] = [];
+    const grid: number[] = [];
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++) {
+        const [a, b, c, d] = this.c.j(...at(i, j));
+        grid.push(Math.abs(a * d - b * c));
+        size.push(a * a + b * b + c * c + d * d);
+      }
+    const typical = size.filter(isFinite).sort((a, b) => a - b)[size.length >> 1];
+    const g = (i: number, j: number) => (i < 0 || j < 0 || i > n || j > n ? Infinity : grid[i * (n + 1) + j]);
+    const lows: Array<[number, number]> = [];
+    for (let i = 0; i <= n; i++)
+      for (let j = 0; j <= n; j++) {
+        const v = g(i, j);
+        if (
+          isFinite(v) &&
+          v < 0.05 * typical &&
+          v <= g(i - 1, j) &&
+          v <= g(i + 1, j) &&
+          v <= g(i, j - 1) &&
+          v <= g(i, j + 1)
+        )
+          lows.push([i, j]);
+      }
+    lows.sort((p, q) => g(...p) - g(...q));
+    for (const [i, j] of lows.slice(0, 4)) {
+      let p = at(i, j);
+      let dp = det(...p);
+      let step = [(this.hi[0] - this.lo[0]) / n, (this.hi[1] - this.lo[1]) / n];
+      for (let k = 0; k < 60; k++) {
+        let moved = false;
+        for (const [u, v] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+          [1, 1],
+          [-1, -1],
+          [1, -1],
+          [-1, 1],
+        ]) {
+          const q: [number, number] = [p[0] + u * step[0], p[1] + v * step[1]];
+          const dq = det(...q);
+          if (Math.abs(dq) < Math.abs(dp)) [p, dp, moved] = [q, dq, true];
+        }
+        if (!moved) step = [step[0] / 2, step[1] / 2];
+      }
+      if (!(Math.abs(dp) < 1e-9 * typical)) continue;
+      const w = this.c.f(...p);
+      if (w.every(isFinite) && !found.some(f => Math.abs(f[0] - w[0]) + Math.abs(f[1] - w[1]) < tol)) found.push(w);
+    }
     return (this.folds_ = found);
   }
   private folds_?: Array<[number, number]>;
+
+  /** Whether the map folds at world point w alone, the plane round it shown
+   *  where it does not fold: not a point of a fold along a curve (a curve
+   *  clipped by the window's corner shows one or two points), nor the edge
+   *  of what the map reaches. */
+  isolated(w: readonly [number, number]): boolean {
+    const r = 0.01 * this.worldScale;
+    for (let k = 0; k < 8; k++) {
+      const a = (2 * Math.PI * (k + 0.5)) / 8;
+      const s = this.first(w[0] + r * Math.cos(a), w[1] + r * Math.sin(a));
+      if (!isFinite(s[0]) || this.folds(s[0], s[1])) return false;
+    }
+    return true;
+  }
 
   /** Whether the map folds at screen point (X, Y), showing one point of the
    *  plane all along a line there (the polar origin, along Y = 0). */
@@ -479,7 +548,72 @@ export class PlaneInverse {
     return hit;
   }
 
+  /** search, and every copy a turn of the map (turns) from what it found
+   *  that the window shows. */
   private search(x: number, y: number): Array<[number, number]> {
+    const out = this.searchSeeds(x, y);
+    const turns = this.turns();
+    if (!turns.length) return out;
+    const same = 1e-6 * this.screenScale;
+    const known = (p: readonly [number, number]) => out.some(o => Math.abs(o[0] - p[0]) + Math.abs(o[1] - p[1]) < same);
+    for (let i = 0; i < out.length && out.length < 64; i++)
+      for (const [dX, dY] of turns)
+        for (const sign of [1, -1]) {
+          const c: [number, number] = [out[i][0] + sign * dX, out[i][1] + sign * dY];
+          if (!this.inside(c[0], c[1], MARGIN) || known(c)) continue;
+          const s = this.solve(x, y, c, MARGIN);
+          if (s && !known(s)) out.push(s);
+        }
+    return out;
+  }
+
+  /**
+   * The shifts of the screen that show the same plane (2π along X, on the
+   * polar screen), as at most two shortest ones: found from where a few
+   * points' copies lie apart, and checked across the window (symmetric).
+   * A search that misses a copy finds it a turn from one it did not miss.
+   */
+  turns(): Array<[number, number]> {
+    if (this.turns_) return this.turns_;
+    const found: Array<[number, number]> = [];
+    this.turns_ = found;
+    const { lo, hi } = this.box;
+    const apart: Array<[number, number]> = [];
+    for (const [u, v] of [
+      [0.5, 0.5],
+      [0.23, 0.31],
+      [0.77, 0.69],
+      [0.31, 0.77],
+      [0.69, 0.23],
+    ]) {
+      const p: [number, number] = [lo[0] + (hi[0] - lo[0]) * u, lo[1] + (hi[1] - lo[1]) * v];
+      const w = this.c.f(...p);
+      if (!w.every(isFinite) || this.folds(...p)) continue;
+      const copies = this.searchSeeds(w[0], w[1]);
+      for (const a of copies) for (const b of copies) if (a !== b) apart.push([b[0] - a[0], b[1] - a[1]]);
+    }
+    const small = 1e-6 * this.screenScale;
+    apart.sort((a, b) => Math.hypot(...a) - Math.hypot(...b));
+    for (const d of apart) {
+      const len = Math.hypot(...d);
+      if (len < small || found.length >= 2) continue;
+      // Not one found already, or a whole number of it, or (with two) a sum.
+      const along = found.some(g => Math.abs(d[0] * g[1] - d[1] * g[0]) < 1e-6 * len * Math.hypot(...g));
+      if (along || found.length === 2) continue;
+      // A copy two turns on, its neighbour missed: the turn is a part of it.
+      for (let k = 6; k >= 1; k--) {
+        const t: [number, number] = [d[0] / k, d[1] / k];
+        if (Math.hypot(...t) > small && this.symmetric(t)) {
+          found.push(t);
+          break;
+        }
+      }
+    }
+    return found;
+  }
+  private turns_?: Array<[number, number]>;
+
+  private searchSeeds(x: number, y: number): Array<[number, number]> {
     const near: Array<[number, number]> = [];
     const best = new Float64Array(BLOCKS * BLOCKS).fill(Infinity);
     const bestAt = new Int32Array(BLOCKS * BLOCKS).fill(-1);
@@ -653,6 +787,140 @@ export class PlaneInverse {
   }
 
   /**
+   * A polyline on every copy of the plane the window shows, each run on
+   * each copy once. The places the screen shows a vertex are its copies:
+   * searched for (all) at every few vertices, and carried on from the
+   * vertex before along each run (follow), so a copy one search missed
+   * comes from its neighbour. A copy found with nothing leading into it
+   * came onto the screen from off it: traced back to where it did. Each
+   * chain of runs is one entry, cut just past the window's edge.
+   */
+  lines(count: number, vertex: (k: number) => [number, number], closed: boolean, segment?: Segment): number[][] {
+    [count, vertex] = this.through(count, vertex, closed);
+    const runs = closed ? count : count - 1;
+    if (runs < 1) return count ? [this.line(count, vertex, closed, FOLLOW_MARGIN, segment)] : [];
+    const margin = FOLLOW_MARGIN;
+    const shown = (p?: readonly [number, number] | null): p is [number, number] =>
+      !!p && isFinite(p[0]) && isFinite(p[1]);
+    const carry = (x: number, y: number, hint?: readonly [number, number]): [number, number] =>
+      hint ? (this.follow(x, y, hint, margin) ?? [NaN, NaN]) : this.first(x, y);
+    const seg: Segment =
+      segment ??
+      ((a, b, map, from) => {
+        const pa = map(a[0], a[1], shown(from) ? from : undefined);
+        return [[...pa], map(b[0], b[1], shown(pa) ? pa : undefined)];
+      });
+    interface Node {
+      p: [number, number];
+      /** The run on to the next vertex, from p; `to` the copy it reaches
+       *  there, or −1 off the screen. */
+      pts?: number[];
+      to?: number;
+      into: boolean;
+    }
+    const nodes: Node[] = [];
+    const at: number[][] = Array.from({ length: count }, () => []);
+    const tol = 1e-6 * this.screenScale;
+    const find = (k: number, p: readonly [number, number]) =>
+      at[k].find(id => Math.abs(nodes[id].p[0] - p[0]) + Math.abs(nodes[id].p[1] - p[1]) < tol) ?? -1;
+    const add = (k: number, p: [number, number]) => {
+      let id = find(k, p);
+      if (id < 0) {
+        id = nodes.length;
+        nodes.push({ p, into: false });
+        at[k].push(id);
+      }
+      return id;
+    };
+    // Searched at about a hundred vertices along it, and every vertex of a
+    // short one (a polygon's edges are long).
+    const every = Math.max(1, Math.floor(count / 96));
+    const turns = this.turns();
+    const step = (k: number, id: number) => {
+      const n = nodes[id];
+      if (n.pts) return;
+      const next = (k + 1) % count;
+      // A copy a turn from one carried whole is that run, moved.
+      for (const [dX, dY] of turns)
+        for (const sign of [1, -1]) {
+          const m = find(k, [n.p[0] - sign * dX, n.p[1] - sign * dY]);
+          const o = m >= 0 ? nodes[m] : undefined;
+          if (!o?.pts || o.to === undefined || o.to < 0) continue;
+          n.pts = o.pts.map((v, i) => v + sign * (i % 2 ? dY : dX));
+          const end: [number, number] = [nodes[o.to].p[0] + sign * dX, nodes[o.to].p[1] + sign * dY];
+          n.to = this.inside(end[0], end[1], margin) ? add(next, end) : -1;
+          if (n.to < 0) n.pts.push(...end);
+          else nodes[n.to].into = true;
+          return;
+        }
+      const [piece, end] = seg(vertex(k), vertex(next), carry, n.p);
+      n.pts = piece;
+      n.to = shown(end) ? add(next, end) : -1;
+      if (n.to >= 0) nodes[n.to].into = true;
+    };
+    for (let k = 0; k < runs; k++) {
+      if (k % every === 0 || k === count - 1)
+        for (const p of this.all(...vertex(k)))
+          // Not where the map folds: the polar origin is shown all along Y = 0.
+          if (this.inside(p[0], p[1], margin) && !this.folds(p[0], p[1])) add(k, p);
+      for (let i = 0; i < at[k].length; i++) step(k, at[k][i]);
+    }
+    if (!closed)
+      for (const p of this.all(...vertex(count - 1)))
+        if (this.inside(p[0], p[1], margin) && !this.folds(p[0], p[1])) add(count - 1, p);
+    // Closed: copies reached round the end, or found there, carried on.
+    for (let pass = 0, more = closed; more && pass < count; pass++) {
+      more = false;
+      for (let k = 0; k < runs; k++)
+        for (let i = 0; i < at[k].length; i++)
+          if (!nodes[at[k][i]].pts) {
+            step(k, at[k][i]);
+            more = true;
+          }
+    }
+    // Where each copy with nothing leading into it came onto the screen.
+    const kOf = new Int32Array(nodes.length);
+    at.forEach((ids, k) => ids.forEach(id => (kOf[id] = k)));
+    const lead = (id: number): number[] => {
+      const rev: number[] = [];
+      let [k, from] = [kOf[id], nodes[id].p];
+      for (let steps = 0; steps < count && (closed || k > 0); steps++) {
+        const prev = (k - 1 + count) % count;
+        const [piece, end] = seg(vertex(k), vertex(prev), carry, from);
+        rev.push(...piece.slice(2));
+        if (!shown(end)) break;
+        rev.push(...end);
+        // Into a copy already drawn: joined there.
+        if (find(prev, end) >= 0) break;
+        [k, from] = [prev, end];
+      }
+      const out: number[] = [];
+      for (let i = rev.length - 2; i >= 0; i -= 2) out.push(rev[i], rev[i + 1]);
+      return out;
+    };
+    const done = new Uint8Array(nodes.length);
+    const chains: number[][] = [];
+    const walk = (id: number, out: number[]) => {
+      for (let cur = id; cur >= 0 && !done[cur];) {
+        done[cur] = 1;
+        const n = nodes[cur];
+        if (!n.pts) {
+          out.push(...n.p);
+          break;
+        }
+        out.push(...n.pts);
+        cur = n.to ?? -1;
+        if (cur >= 0 && done[cur]) out.push(...nodes[cur].p);
+      }
+      if (out.length >= 4) chains.push(out);
+    };
+    for (let id = 0; id < nodes.length; id++) if (!nodes[id].into && !done[id]) walk(id, lead(id));
+    // What is left goes round and round: a closed line on one copy.
+    for (let id = 0; id < nodes.length; id++) if (!done[id]) walk(id, []);
+    return chains;
+  }
+
+  /**
    * A polyline's vertices carried to the screen, NaN pairs where it breaks.
    * Each run is followed on from the last point and cut just past the
    * window's edge (or `margin` past it: a filled shape is followed far off
@@ -811,15 +1079,7 @@ export function planeShapes(
   return out;
 }
 
-/**
- * A line on every copy of the plane the window shows: followed from each
- * place in the window the screen shows its first point (two, on an angle
- * range wider than 2π), each picked up across the seam as one line is.
- * A closed line is followed both ways round. One trace when the window
- * shows its start once, or its start is a point
- * the map folds at (the polar origin, shown all along Y = 0), where a copy
- * cannot be told by where it starts.
- */
+/** A line on every copy of the plane the window shows (PlaneInverse.lines). */
 export function planeLines(
   inverse: PlaneInverse,
   count: number,
@@ -827,16 +1087,7 @@ export function planeLines(
   closed: boolean,
   segment?: Segment,
 ): number[][] {
-  const starts = count ? inverse.all(...vertex(0)).filter(p => inverse.inside(p[0], p[1])) : [];
-  if (starts.length <= 1 || starts.some(p => inverse.folds(p[0], p[1])))
-    return [inverse.line(count, vertex, closed, FOLLOW_MARGIN, segment)];
-  // A closed line goes both ways from each start: the copy before the
-  // first start in the window ends there, on its way round.
-  const back = (k: number) => vertex((count - k) % count);
-  return starts.flatMap(start => [
-    inverse.line(count, vertex, closed, FOLLOW_MARGIN, segment, start),
-    ...(closed ? [inverse.line(count, back, closed, FOLLOW_MARGIN, segment, start)] : []),
-  ]);
+  return inverse.lines(count, vertex, closed, segment);
 }
 
 /** A shape carried to the screen (planeShapes): an outline to fill, or not
@@ -871,8 +1122,10 @@ function foldFills(
   const folds = inverse.foldPoints();
   // A fold along a curve shows up as points all along it: no point to fill round.
   if (folds.length > 2) return null;
-  const fold = folds.find(f => contains(count, vertex, f));
-  if (!fold) return null;
+  // One fold point inside: round two, the trace's ends say nothing of either.
+  const inside = folds.filter(f => contains(count, vertex, f));
+  if (inside.length !== 1 || !inverse.isolated(inside[0])) return null;
+  const fold = inside[0];
   const S: [number, number] = [pts[0], pts[1]];
   const E: [number, number] = [pts[pts.length - 2], pts[pts.length - 1]];
   // The trace ends one segment short of its start, a turn on: E is where

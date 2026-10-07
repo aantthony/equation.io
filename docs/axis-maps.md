@@ -111,11 +111,12 @@ symlog (`y = sinh(Y)`) all come from one feature.
      the window (and a quarter past it), or from a neighbour already carried
      (PlaneInverse). A map may show a point more than once:
      - a point is drawn at each place;
-     - a line follows the copy it started on and is cut just past the
-       window's edge (FOLLOW_MARGIN); where its end is on the screen after
-       all (it crossed an angle's seam) it is traced back from there,
-       through earlier segments, so it re-enters at the other edge
-       (PlaneInverse.line);
+     - a line is drawn on each copy, each run once: the places the screen
+       shows a vertex are searched for every few vertices and carried on
+       from the vertex before along each run, so a copy one search missed
+       comes from its neighbour, and one with nothing leading into it is
+       traced back to where it came onto the screen; each is cut just past
+       the window's edge (PlaneInverse.lines, FOLLOW_MARGIN);
      - a shape to fill is followed well off the screen, whole, from each
        place the screen shows a vertex where the map does not fold
        (planeShapes); one round a point the map folds at (a square about
@@ -128,13 +129,19 @@ symlog (`y = sinh(Y)`) all come from one feature.
        triangle, and that triangle becomes the quad it is on the screen
        (PlaneInverse.triangles).
      A search starts from the nearest samples and from the best of each
-     block of the window they do not reach, so every copy on the screen is
-     found. On a window wider than a full turn, a line is followed from each
-     place in the window the screen shows its first point (a closed one both
-     ways round), so every copy is drawn (planeLines); a fill round a fold
-     is repeated a turn on only when the map really shows the same plane
-     there (PlaneInverse.symmetric), and each other branch (polar's copy at
-     (X + π, −Y)) is filled from its own start.
+     block of the window they do not reach; the shifts that show the same
+     plane (2π along X, on the polar screen) are found once per window
+     (PlaneInverse.turns, checked by PlaneInverse.symmetric), and every
+     copy a turn from one found is added, so a search that misses a copy
+     finds it from another. A line's copy a turn from one already carried
+     is that run moved. A fill round a fold is repeated a turn on only when
+     the map really shows the same plane there, and each other branch
+     (polar's copy at (X + π, −Y)) is filled from its own start. The fold
+     points are where the Jacobian's determinant changes sign, or touches
+     0 (a branch point: z², at 0); a fill goes round one only when it is
+     the shape's only one and the map does not fold all round it
+     (PlaneInverse.isolated). Where a line runs exactly through a fold, it
+     may leave on either branch.
    - The window is the screen's (X, Y), since a rectangle of x and y is no
      rectangle on it; the grid and labels are the screen's, and `grid(x, y)`
      or coordinate fields draw their level lines through the map.

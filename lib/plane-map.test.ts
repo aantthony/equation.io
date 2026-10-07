@@ -226,6 +226,10 @@ describe('a plane map', () => {
     const folds = planeInverse(polar(), box).foldPoints();
     expect(folds.length).toBe(1);
     expect(Math.hypot(...folds[0])).toBeLessThan(1e-9);
+    // The polar origin is a point alone; (X, Y²) folds along all of y = 0,
+    // the edge of what it reaches, so no point of it is.
+    expect(planeInverse(polar(), box).isolated([0, 0])).toBe(true);
+    expect(planeInverse(parsePlaneMap('(X, Y^2)'), box).isolated([0.5, 0])).toBe(false);
   });
 
   it('finds every copy, and draws a line on each, in a window wider than a turn', () => {
@@ -275,6 +279,84 @@ describe('a plane map', () => {
     ];
     const outlines = planeShapes(wide, 4, k => square[k] as [number, number]).filter(s => !s.closed);
     expect(outlines.length).toBeGreaterThan(1);
+  });
+
+  it('finds every copy and draws each once, whatever it starts from', () => {
+    const wide = planeInverse(polar(), { lo: [-3 * Math.PI, 0], hi: [3 * Math.PI, 5] });
+    // A point's copies in the window: one per turn its angle fits.
+    let seed = 7;
+    const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    for (let i = 0; i < 400; i++) {
+      const [r, t] = [0.2 + 4.6 * rand(), 2 * Math.PI * rand() - Math.PI];
+      const expected = [-1, 0, 1].filter(k => Math.abs(t + 2 * Math.PI * k) <= 3 * Math.PI).length;
+      const inWindow = wide.all(r * Math.cos(t), r * Math.sin(t)).filter(p => wide.inside(p[0], p[1]));
+      expect(inWindow.length, `${r}, ${t}`).toBe(expected);
+    }
+    // How long a polyline is on the screen.
+    const drawn = (lines: number[][]) => {
+      let len = 0;
+      for (const l of lines)
+        for (let i = 0; i + 3 < l.length; i += 2)
+          if (wide.inside(l[i], l[i + 1]) && wide.inside(l[i + 2], l[i + 3]))
+            len += Math.hypot(l[i + 2] - l[i], l[i + 3] - l[i + 1]);
+      return len;
+    };
+    // y = 1 from x = −7.5 to 7.5, its start off the screen, either way
+    // along: r = 1/sin θ on each of the three turns, each once.
+    const n = 300;
+    const flat = (k: number): [number, number] => [-7.5 + (15 * k) / n, 1];
+    const once = drawn(planeLines(wide, n, flat, false));
+    const back = drawn(planeLines(wide, n, k => flat(n - k), false));
+    const onScreen = (() => {
+      // The same, laid out by hand: θ from atan2(1, 7.5) to π − that, r ≤ 5.
+      let len = 0;
+      const m = 4000;
+      let last: [number, number] | null = null;
+      for (let i = 0; i <= m; i++) {
+        const x = -7.5 + (15 * i) / m;
+        const p: [number, number] = [Math.atan2(1, x), Math.hypot(x, 1)];
+        if (last && p[1] <= 5 && last[1] <= 5) len += Math.hypot(p[0] - last[0], p[1] - last[1]);
+        last = p;
+      }
+      return 3 * len;
+    })();
+    expect(once / onScreen).toBeCloseTo(1, 1);
+    expect(back / onScreen).toBeCloseTo(1, 1);
+    // A closed circle, r = 2: Y = 2 across the window, once.
+    const circle = (k: number): [number, number] => [
+      2 * Math.cos((2 * Math.PI * k) / n),
+      2 * Math.sin((2 * Math.PI * k) / n),
+    ];
+    expect(drawn(planeLines(wide, n, circle, true)) / (6 * Math.PI)).toBeCloseTo(1, 1);
+    // Many turns: a copy on each.
+    const wider = planeInverse(polar(), { lo: [-10 * Math.PI, 0], hi: [10 * Math.PI, 5] });
+    const ys = planeLines(wider, n, circle, true).flatMap(l =>
+      l.filter((_, i) => i % 2 === 0 && Number.isFinite(l[i])),
+    );
+    for (let k = -4; k <= 4; k++)
+      expect(
+        ys.some(X => Math.abs(X - 2 * Math.PI * k) < 0.1),
+        `turn ${k}`,
+      ).toBe(true);
+  });
+
+  it('finds a branch point of z², and fills round it, wherever the window is', () => {
+    const z2 = parsePlaneMap('(X^2 - Y^2, 2 X Y)');
+    const square = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ];
+    for (const shift of [0, 0.013, 0.3]) {
+      const inverse = planeInverse(z2, { lo: [-2 + shift, -2], hi: [2 + shift, 2] });
+      expect(
+        inverse.foldPoints().some(f => Math.hypot(...f) < 1e-6),
+        `${shift}`,
+      ).toBe(true);
+      const shapes = planeShapes(inverse, 4, k => square[k] as [number, number]);
+      expect(shapes.filter(s => s.closed).length, `${shift}`).toBeGreaterThan(0);
+    }
   });
 
   it('draws what crosses the screen between ends far off it', () => {

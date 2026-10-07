@@ -153,8 +153,8 @@ function pixelsOf(r: Raster, v: View2D, x: number, y: number): Array<[number, nu
 }
 
 /** A world polyline (flat, NaN pairs for breaks) as pixels, NaN where it
- *  breaks; through a plane map as the app carries it (PlaneInverse.line). */
-function pixelPath(r: Raster, v: View2D, pts: ArrayLike<number>, closed = false, margin?: number): number[] {
+ *  breaks; through a plane map as the app carries it (planeLines). */
+function pixelPath(r: Raster, v: View2D, pts: ArrayLike<number>, closed = false): number[] {
   const inverse = inverseOf(r, v);
   const out: number[] = [];
   if (!inverse) {
@@ -163,11 +163,7 @@ function pixelPath(r: Raster, v: View2D, pts: ArrayLike<number>, closed = false,
   }
   // A line on each copy the window shows, as in the app; pieces apart.
   const vertex = (k: number): [number, number] => [pts[2 * k], pts[2 * k + 1]];
-  const lines =
-    margin === undefined
-      ? planeLines(inverse, pts.length / 2, vertex, closed)
-      : [inverse.line(pts.length / 2, vertex, closed, margin)];
-  for (const screen of lines) {
+  for (const screen of planeLines(inverse, pts.length / 2, vertex, closed)) {
     if (out.length) out.push(NaN, NaN);
     for (let i = 0; i + 1 < screen.length; i += 2) out.push(...screenPixel(r, v, [screen[i], screen[i + 1]]));
   }
