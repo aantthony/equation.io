@@ -35,6 +35,8 @@ export interface Results {
   toolsTokens?: number;
   /** What the model knew the language from: the app's lookup tools, or a whole reference in its instructions (Runner.swift --reference). */
   knowledge?: 'tools' | 'reference';
+  /** Saved before the run finished: some tasks are missing. */
+  partial?: boolean;
   reference?: { path: string; bytes: number };
   tasks: { id: string; request: string; runs: RunResult[] }[];
 }

@@ -334,7 +334,21 @@ struct Runner {
       results["toolsTokens"] = try? await system.tokenCount(for: ChatModel.tools(graph))
     }
 
+    // Saved after every task, so a run cut short keeps what it finished ("partial": true until the end).
+    let folder = URL(filePath: "apple/evals/results")
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let stamp = ISO8601DateFormatter().string(from: .now).replacing(":", with: "")
+    let file = folder.appending(path: "\(stamp)-\(model.name).json")
     var taskResults: [[String: Any]] = []
+    func save(partial: Bool) throws {
+      results["tasks"] = taskResults
+      results["partial"] = partial ? true : nil
+      // The snapshot the API answered with, e.g. gpt-5.5-2026-04-23.
+      if let id = taskResults.flatMap({ $0["runs"] as? [[String: Any]] ?? [] }).lazy.compactMap({ $0["modelId"] }).first {
+        results["modelId"] = id
+      }
+      try JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted, .sortedKeys]).write(to: file)
+    }
     for task in tasks {
       let id = task["id"] as? String ?? "?"
       let request = task["request"] as? String ?? ""
@@ -350,18 +364,9 @@ struct Runner {
         print("\(id) #\(k + 1): \(run["pass"] as? Bool == true ? "pass" : "FAIL") \(why)")
       }
       taskResults.append(["id": id, "request": request, "runs": taskRuns])
+      try save(partial: true)
     }
-    results["tasks"] = taskResults
-    // The snapshot the API answered with, e.g. gpt-5.5-2026-04-23.
-    if let id = taskResults.flatMap({ $0["runs"] as? [[String: Any]] ?? [] }).lazy.compactMap({ $0["modelId"] }).first {
-      results["modelId"] = id
-    }
-
-    let folder = URL(filePath: "apple/evals/results")
-    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    let stamp = ISO8601DateFormatter().string(from: .now).replacing(":", with: "")
-    let file = folder.appending(path: "\(stamp)-\(model.name).json")
-    try JSONSerialization.data(withJSONObject: results, options: [.prettyPrinted, .sortedKeys]).write(to: file)
+    try save(partial: false)
     print("\nSaved \(file.relativePath)\n")
     print(try service.request(["cmd": "report", "path": file.path])["text"] as? String ?? "")
   }
