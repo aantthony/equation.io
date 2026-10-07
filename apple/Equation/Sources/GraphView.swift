@@ -63,6 +63,8 @@ struct GraphView {
   func makeCoordinator() -> GraphBridge { GraphBridge() }
 
   @MainActor private func makeWebView(_ bridge: GraphBridge) -> WKWebView {
+    timing.debug("graph: making web view")
+    defer { timing.debug("graph: web view made") }
     let config = WKWebViewConfiguration()
     config.setURLSchemeHandler(BundleSchemeHandler(), forURLScheme: BundleSchemeHandler.scheme)
     config.userContentController.add(WeakMessageHandler(bridge), name: "equation")
@@ -192,6 +194,7 @@ final class GraphBridge: NSObject, WKScriptMessageHandler {
     guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
     switch type {
     case "ready":
+      timing.debug("graph: renderer ready")
       // A (re)loaded page has nothing: send everything.
       ready = true
       shownRows = nil

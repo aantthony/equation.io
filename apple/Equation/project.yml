@@ -25,6 +25,9 @@ targets:
       properties:
         CFBundleDisplayName: Equation
         LSSupportsOpeningDocumentsInPlace: true
+        # Files ▸ On My iPhone ▸ Equation: where new documents go when there
+        # is no iCloud Drive (a simulator, a signed-out device).
+        UIFileSharingEnabled: true
         UISupportsDocumentBrowser: true
         UILaunchScreen: {}
         CFBundleDocumentTypes:

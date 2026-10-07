@@ -14,6 +14,7 @@ struct DocumentView: View {
     content
       .focusedSceneValue(\.graphDocument, $document)
       .focusedSceneValue(\.graphModel, model)
+      .onAppear { timing.debug("window: appeared") }
   }
 
   @ViewBuilder private var content: some View {

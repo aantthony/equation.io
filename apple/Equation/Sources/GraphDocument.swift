@@ -25,17 +25,20 @@ struct GraphDocument: FileDocument {
   private var nextID: Int
 
   init(rows: [String] = ["y = sin(x)"]) {
+    timing.debug("document: new")
     self.rows = rows.enumerated().map { GraphRow(id: $0.offset, text: $0.element) }
     nextID = rows.count
   }
 
   init(configuration: ReadConfiguration) throws {
+    timing.debug("document: read")
     guard let data = configuration.file.regularFileContents else { throw CocoaError(.fileReadCorruptFile) }
     let file = try JSONDecoder().decode(File.self, from: data)
     self.init(rows: file.rows)
   }
 
   func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+    timing.debug("document: write")
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
     return FileWrapper(regularFileWithContents: try encoder.encode(File(rows: rows.map(\.text))))

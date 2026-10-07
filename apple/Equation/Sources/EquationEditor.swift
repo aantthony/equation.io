@@ -169,6 +169,7 @@ final class EditorController: NSObject {
 
   override init() {
     super.init()
+    timing.debug("editor: made")
     let view = textView
     view.typingAttributes = Style.typing
     view.backgroundColor = .clear
