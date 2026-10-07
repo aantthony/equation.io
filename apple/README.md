@@ -38,3 +38,18 @@ the `equation` message handler. See `web/native-app.ts`.
 ```sh
 pnpm swift:test    # re-record the corpus from the TypeScript suite, then swift test
 ```
+
+## Ask evals
+
+```sh
+pnpm app:eval                     # every task in apple/evals/tasks.ts, 5 runs each, on-device
+pnpm app:eval --runs 1 --task unit-cube
+node --experimental-transform-types apple/evals/report.ts apple/evals/results/a.json apple/evals/results/b.json
+```
+
+A Swift runner (`apple/evals/Runner.swift`) asks the on-device model each
+task's request with the app's own instructions and tools
+(`Equation/Sources/Assistant.swift`); the tools act on a Node service
+(`apple/evals/service.ts`) running the real analyzer, which also grades the
+result. Results are saved in `apple/evals/results/`; see
+`apple/evals/RESULTS.md`.
