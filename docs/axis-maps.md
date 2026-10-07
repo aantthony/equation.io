@@ -168,9 +168,10 @@ the ranges given, and sliders in it are read at their value.
 - Families draw as their members.
 - Paints draw after the surface with a polygon offset and no depth writes,
   so they sit on it without fighting it.
-- Rows in space (3D) draw in the panel as in any 3D panel. 2D rows with no
-  picture on a surface yet (vector and matrix fields, complex rows, colour
-  fields, parametric and projected regions, histograms) are refused with a
+- Rows in space (3D) draw in the panel as in any 3D panel. Other 2D rows
+  have no picture on a surface yet (among them vector and matrix fields,
+  complex rows, colour fields, parametric and projected regions, families
+  of scalar fields, histograms, sequences and systems) and are refused with a
   message saying so.
 - The surface is drawn by the GPU, so it must be written in what the
   shaders take; a surface they cannot draw is refused at its row. Its

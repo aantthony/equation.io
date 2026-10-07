@@ -688,20 +688,19 @@ vec3 Pv(float u, float v) { return (P(u, v + 1e-3) - P(u, v - 1e-3)) * 500.0; }`
   const body =
     paint.kind === 'curve'
       ? `
-  // |F| over its change across a pixel, from differences at two steps (a
-  // pixel's reach in x and y) as the 2D curve shader takes them: they agree
-  // at a true zero and disagree at a pole (tan(x) at π/2, 1/x at 0), where
-  // F only jumps sign. A step off F's domain (past sqrt's edge, onto a
-  // pole) is left out: the slope comes from the other side.
-  vec2 h = max(vec2(fwidth(x), fwidth(y)), vec2(1e-12));
-  vec2 fm = vec2(F(x - h.x, y), F(x, y - h.y)), fp = vec2(F(x + h.x, y), F(x, y + h.y));
-  vec2 g1 = vec2(slope(fm.x, f, fp.x, 1.0), slope(fm.y, f, fp.y, 1.0));
-  // Across a pixel F is near linear at a true zero; at a pole it bends
-  // by more than it changes, which the two steps can miss at some offsets.
-  vec2 bend = fp - 2.0 * f + fm;
-  if (!any(isnan(bend)) && !any(isinf(bend)) && length(bend) > length(fp - fm)) discard;
-  vec2 g2 = vec2(slope(F(x - 0.5 * h.x, y), f, F(x + 0.5 * h.x, y), 0.5),
-                 slope(F(x, y - 0.5 * h.y), f, F(x, y + 0.5 * h.y), 0.5));
+  // |F| over its change across a pixel, from samples a pixel and half a
+  // pixel either way along the screen's two directions — stepping x and y
+  // as they change from pixel to pixel there, so exact for an F linear
+  // across it however the surface is turned. The two steps agree at a true
+  // zero, as in the 2D curve shader; a step off F's domain (past sqrt's
+  // edge, onto a pole) is left out, the slope coming from the other side.
+  float ax[5] = float[5](F(x - jx.x, y - jx.y), F(x - 0.5 * jx.x, y - 0.5 * jx.y), f,
+                         F(x + 0.5 * jx.x, y + 0.5 * jx.y), F(x + jx.x, y + jx.y));
+  float ay[5] = float[5](F(x - jy.x, y - jy.y), F(x - 0.5 * jy.x, y - 0.5 * jy.y), f,
+                         F(x + 0.5 * jy.x, y + 0.5 * jy.y), F(x + jy.x, y + jy.y));
+  if (pole(ax) || pole(ay)) discard;
+  vec2 g1 = vec2(slope(ax[0], f, ax[4], 1.0), slope(ay[0], f, ay[4], 1.0));
+  vec2 g2 = vec2(slope(ax[1], f, ax[3], 0.5), slope(ay[1], f, ay[3], 0.5));
   float e1 = abs(f) / max(length(g1), 1e-24);
   float e2 = abs(f) / max(length(g2), 1e-24);
   if (e2 > 1.6 * e1 || e1 > 1.6 * e2) discard;
@@ -710,13 +709,12 @@ vec3 Pv(float u, float v) { return (P(u, v + 1e-3) - P(u, v - 1e-3)) * 500.0; }`
   vec3 base = uColor;`
       : paint.kind === 'region'
         ? `
-  float aa = max(fwidth(f), 1e-24);
+  float aa = max(fw, 1e-24);
   float alpha = (1.0 - smoothstep(-aa, aa, f)) * 0.35;
 ${edges
   .map(
     (_, i) => `  {
-    float e = E${i}(x, y);
-    float w = abs(e) / max(fwidth(e), 1e-24);
+    float w = abs(ev[${i}]) / max(ew[${i}], 1e-24);
     // An edge undefined here (log(x) at x <= 0) draws nothing here.
     if (!isnan(w) && !isinf(w)) alpha = max(alpha, 0.9 * (1.0 - smoothstep(0.5, 1.5, w)) * (1.0 - smoothstep(-aa, aa, f - 1e-6 * aa)));
   }`,
@@ -746,6 +744,15 @@ float slope(float fm, float f, float fp, float s) {
   bool m = !isnan(fm) && !isinf(fm), p = !isnan(fp) && !isinf(fp);
   return m && p ? (fp - fm) / (2.0 * s) : p ? (fp - f) / s : m ? (f - fm) / s : 0.0;
 }
+// Whether F changes sign between samples s (in order across the pixel) by
+// a pole, not a zero: toward a zero |F| falls from both sides, toward a
+// pole (tan(x) at π/2, 1/x at 0) it rises.
+bool pole(float s[5]) {
+  for (int i = 0; i < 4; i++)
+    if (s[i] * s[i + 1] < 0.0 || isinf(s[i]) || isinf(s[i + 1]))
+      return (i == 0 || abs(s[i]) > abs(s[i - 1])) && (i == 3 || abs(s[i + 1]) > abs(s[i + 2]));
+  return false;
+}
 ${edges.map((e, i) => `float E${i}(float x, float y) { return ${e}; }`).join('\n')}
 
 void main() {
@@ -753,6 +760,11 @@ void main() {
   float x = ${xy[0]};
   float y = ${xy[1]};
   float f = F(x, y);
+  // Derivatives before any discard, in uniform flow: how x and y change
+  // from pixel to pixel, and F and the region's edges across one.
+  vec2 jx = vec2(dFdx(x), dFdx(y)), jy = vec2(dFdy(x), dFdy(y));
+  float fw = fwidth(f);
+${edges.length ? `  float ev[${edges.length}] = float[${edges.length}](${edges.map((_, i) => `E${i}(x, y)`).join(', ')});\n  float ew[${edges.length}] = float[${edges.length}](${edges.map((_, i) => `fwidth(ev[${i}])`).join(', ')});` : ''}
   if (isnan(f) || isinf(f)) discard;
 ${body}
   if (alpha < 0.004) discard;

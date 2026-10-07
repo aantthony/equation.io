@@ -75,7 +75,12 @@ export function parseSurfaceMap(
     try {
       toGLSL(e);
     } catch (err) {
-      throw new Error(`The surface cannot be drawn: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      // Rows have their sums expanded first (lib/defs.ts); a surface not yet.
+      const sum = /^(Σ|Π) must be expanded/.exec(message);
+      throw new Error(
+        sum ? `A surface cannot take ${sum[1]} yet: write its terms out.` : `The surface cannot be drawn: ${message}`,
+      );
     }
   if (!spreads(map))
     throw new Error(`(X, Y, Z) = ${map.text} is no surface over these x and y: it is a curve or a point.`);

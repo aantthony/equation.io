@@ -31,6 +31,7 @@ describe('a surface map', () => {
       ['on((X, Y, Z) = (x, x, x), x = 0..1, y = 0..1)', /no surface/],
       ['on((X, Y, Z) = (x, y, 0), x = 1..0, y = 0..1)', /lo < hi/],
       ['on((X, Y, Z) = (x, y, 0), x = 0..1, y = 0..1, locked)', /camera/],
+      ['on((X, Y, Z) = (x, y, sum(n=1..3, x^n)), x = 0..1, y = 0..1)', /cannot take Σ yet: write its terms out/],
     ] as const)
       expect(() => parseViewRow(row, {}), row).toThrow(message);
   });
