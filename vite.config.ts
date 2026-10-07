@@ -1,6 +1,8 @@
 import { fileURLToPath } from 'node:url';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import { defineConfig, type Plugin } from 'vite';
+import { REFERENCE_DIR, readReference } from './scripts/reference.ts';
+import { docsPages } from './web/docs/pages.ts';
 
 /**
  * Hosts keep the MCP App page they were served: ChatGPT stores a copy with
@@ -48,6 +50,68 @@ function mcpAppLoader(): Plugin {
   };
 }
 
+/**
+ * The docs pages (equation.io/docs/…), written from the language reference
+ * (docs/reference) by web/docs/pages.ts: built as pages of the site, and in
+ * dev served fresh, reloading when the reference changes. They exist only
+ * here, never as files under web/.
+ */
+function docs(): Plugin {
+  const root = fileURLToPath(new URL('web/', import.meta.url));
+  const reference = fileURLToPath(REFERENCE_DIR);
+  let pages = docsPages(readReference());
+  /** The page a request or module id names: `docs/curve/index.html`. */
+  const page = (path: string) => {
+    const rel = path.startsWith(root) ? path.slice(root.length) : path.replace(/^\//, '');
+    return pages.has(rel) ? rel : undefined;
+  };
+  return {
+    name: 'docs-pages',
+    config: () => ({
+      environments: {
+        client: {
+          build: {
+            rollupOptions: {
+              input: Object.fromEntries(
+                [...pages.keys()].map(path => [path.replace(/\/index\.html$/, '').replace(/\//g, '-'), root + path]),
+              ),
+            },
+          },
+        },
+      },
+    }),
+    resolveId: id => (page(id) ? root + page(id) : undefined),
+    load: id => {
+      const rel = page(id);
+      return rel ? pages.get(rel) : undefined;
+    },
+    configureServer(server) {
+      server.watcher.add(reference);
+      server.watcher.on('change', file => {
+        if (!file.startsWith(reference)) return;
+        pages = docsPages(readReference());
+        server.ws.send({ type: 'full-reload' });
+      });
+      server.middlewares.use((req, res, next) => {
+        const path = (req.url ?? '').split(/[?#]/)[0];
+        if (/^\/docs(\/[\w-]+)?$/.test(path)) {
+          res.writeHead(301, { Location: `${path}/` });
+          return res.end();
+        }
+        const rel = /^\/docs\/([\w-]+\/)?$/.test(path) ? page(`${path.slice(1)}index.html`) : undefined;
+        if (!rel) return next();
+        server
+          .transformIndexHtml(path, pages.get(rel)!)
+          .then(html => {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            res.end(html);
+          })
+          .catch(next);
+      });
+    },
+  };
+}
+
 export default defineConfig({
   root: 'web',
   html: {
@@ -88,6 +152,7 @@ export default defineConfig({
   },
   plugins: [
     mcpAppLoader(),
+    docs(),
     cloudflare({
       configPath: '../wrangler.jsonc',
       // The repo root's .wrangler/state, where `wrangler d1 …` and

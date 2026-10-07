@@ -1,0 +1,497 @@
+/* The docs pages (pages.ts): the legal pages' type and colours (legal.css),
+   with the contents beside the page on a wide screen and folded above it on
+   a phone. */
+@import '@fontsource-variable/archivo/wdth.css';
+@import '@fontsource-variable/jetbrains-mono/index.css';
+
+/* Light by default. theme.js sets data-theme from the app's saved choice
+   before first paint; without it, the system setting decides. */
+:root {
+  color-scheme: light;
+  --bg: #fbfaf7;
+  --surface: #ffffff;
+  --ink: #161a22;
+  --muted: #5b6472;
+  --accent: #9c5710;
+  --gold: #e39b45;
+  --line: #e4e1da;
+  --code: #f3f1ec;
+  --grid: rgba(20, 30, 50, 0.06);
+  --grid-major: rgba(20, 30, 50, 0.1);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg: #07090e;
+    --surface: #10141d;
+    --ink: #eef0f4;
+    --muted: #98a1b0;
+    --accent: #f0ad5c;
+    --gold: #f0ad5c;
+    --line: rgba(255, 255, 255, 0.1);
+    --code: #151a25;
+    --grid: rgba(150, 170, 210, 0.05);
+    --grid-major: rgba(150, 170, 210, 0.1);
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #07090e;
+  --surface: #10141d;
+  --ink: #eef0f4;
+  --muted: #98a1b0;
+  --accent: #f0ad5c;
+  --gold: #f0ad5c;
+  --line: rgba(255, 255, 255, 0.1);
+  --code: #151a25;
+  --grid: rgba(150, 170, 210, 0.05);
+  --grid-major: rgba(150, 170, 210, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  position: relative;
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font:
+    16.5px/1.65 ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+/* Graph paper behind the header and title, fading into the page. */
+body::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 360px;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    linear-gradient(var(--grid-major) 1px, transparent 1px) 0 0 / 60px 60px,
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px) 0 0 / 60px 60px,
+    linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 12px 12px,
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 12px 12px;
+  -webkit-mask-image: linear-gradient(#000 30%, transparent);
+  mask-image: linear-gradient(#000 30%, transparent);
+}
+header,
+.docs,
+footer {
+  width: min(100% - 32px, 1160px);
+  margin-inline: auto;
+}
+.mono,
+header nav,
+.crumb,
+.kind,
+.label,
+.open,
+.group,
+.nav-title,
+footer {
+  font-family: 'JetBrains Mono Variable', ui-monospace, Menlo, monospace;
+}
+a {
+  color: var(--accent);
+  text-underline-offset: 3px;
+}
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* Header: the brand, then the site's links. */
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  padding-block: 20px;
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  color: var(--ink);
+  font-family: 'Archivo Variable', system-ui, sans-serif;
+  font-stretch: 112%;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  text-decoration: none;
+}
+.brand span {
+  color: var(--gold);
+}
+header nav {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 13px;
+}
+header nav a {
+  text-decoration: none;
+}
+header nav a:hover {
+  text-decoration: underline;
+}
+.theme-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 16px;
+  cursor: pointer;
+}
+.cta {
+  padding: 7px 12px;
+  border-radius: 6px;
+  background: var(--ink);
+  color: var(--bg);
+  font-weight: 600;
+}
+.cta:hover {
+  text-decoration: none !important;
+  opacity: 0.85;
+}
+
+/* Contents: folded above the page on a phone, a sticky column on a wide screen. */
+.contents {
+  margin-top: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.contents summary {
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.contents nav {
+  padding: 4px 14px 14px;
+  font-size: 14.5px;
+}
+.contents ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.contents li {
+  margin: 0;
+}
+.contents a {
+  display: block;
+  padding: 2px 0;
+  color: var(--ink);
+  text-decoration: none;
+}
+.contents a:hover {
+  color: var(--accent);
+}
+.contents a[aria-current='page'] {
+  color: var(--accent);
+  font-weight: 650;
+}
+.contents .kinds > li {
+  margin-bottom: 10px;
+}
+.group,
+.nav-title {
+  display: block;
+  margin: 10px 0 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.nav-title a {
+  color: var(--muted);
+}
+@media (min-width: 960px) {
+  .docs {
+    display: grid;
+    grid-template-columns: 230px minmax(0, 1fr);
+    gap: 56px;
+  }
+  .contents {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    max-height: 100vh;
+    overflow-y: auto;
+    margin-top: 0;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    padding-block: 28px;
+  }
+  .contents summary {
+    display: none;
+  }
+  .contents nav {
+    padding: 0;
+  }
+}
+
+/* The page. */
+main {
+  min-width: 0;
+  max-width: 760px;
+  padding-block: 28px 64px;
+}
+.crumb {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+}
+.crumb a {
+  color: var(--muted);
+}
+h1,
+h2,
+h3 {
+  font-family: 'Archivo Variable', system-ui, sans-serif;
+  text-wrap: balance;
+}
+h1 {
+  margin: 0 0 6px;
+  font-size: clamp(30px, 6vw, 46px);
+  font-stretch: 118%;
+  font-weight: 850;
+  line-height: 1.05;
+  letter-spacing: -0.015em;
+}
+h2 {
+  margin: 44px 0 12px;
+  font-size: 22px;
+  font-stretch: 112%;
+  font-weight: 750;
+  line-height: 1.3;
+}
+h3 {
+  margin: 28px 0 8px;
+  font-size: 17px;
+  font-weight: 700;
+}
+.kind {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.lede,
+p.lede {
+  font-size: 18.5px;
+  line-height: 1.6;
+}
+.lede p {
+  margin: 0 0 14px;
+}
+p {
+  margin: 0 0 16px;
+}
+ul,
+ol {
+  padding-left: 22px;
+}
+li {
+  margin-bottom: 8px;
+}
+li::marker {
+  color: var(--gold);
+}
+li ul {
+  margin-top: 8px;
+}
+blockquote {
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  border-left: 4px solid var(--gold);
+  background: var(--surface);
+}
+blockquote p {
+  margin: 0;
+}
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--code);
+  font:
+    0.86em 'JetBrains Mono Variable',
+    ui-monospace,
+    Menlo,
+    monospace;
+  overflow-wrap: anywhere;
+}
+pre {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--code);
+  overflow-x: auto;
+  line-height: 1.55;
+}
+pre code {
+  padding: 0;
+  background: none;
+  font-size: 14px;
+  overflow-wrap: normal;
+}
+
+/* The smallest form, and each example: rows, then a link that opens them. */
+.smallest {
+  margin: 8px 0 8px;
+}
+.label {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.smallest pre,
+.examples pre {
+  margin-bottom: 6px;
+}
+.open {
+  margin: 0;
+  font-size: 13px;
+}
+.open a {
+  text-decoration: none;
+}
+.open a:hover {
+  text-decoration: underline;
+}
+.muted {
+  color: var(--muted);
+}
+.examples {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.examples > li {
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.examples h3 {
+  margin: 0 0 8px;
+}
+.note {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* The index: a card per kind. */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cards li {
+  margin: 0;
+}
+.cards a {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+.cards a:hover {
+  border-color: var(--accent);
+}
+.cards .title {
+  font-weight: 700;
+}
+.cards .short {
+  color: var(--muted);
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+.cards code {
+  align-self: flex-start;
+  max-width: 100%;
+  margin-top: auto;
+}
+
+/* Functions: a signature, what it does, the reference's note. */
+.functions div {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.functions dt {
+  margin-bottom: 4px;
+}
+.functions dd {
+  margin: 0;
+}
+.functions .note {
+  margin: 6px 0 0;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.pager a[rel='prev']::before {
+  content: '← ';
+}
+.pager a[rel='next']::after {
+  content: ' →';
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-block: 22px 34px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+footer a {
+  color: var(--muted);
+}
+
+@media (max-width: 560px) {
+  header nav a[href='/about/'] {
+    display: none;
+  }
+}
+@media print {
+  .contents,
+  .theme-toggle,
+  .open {
+    display: none;
+  }
+  body::before {
+    display: none;
+  }
+}
