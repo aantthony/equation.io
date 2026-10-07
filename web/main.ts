@@ -97,6 +97,7 @@ import {
 } from '../lib/path.ts';
 import { type Classified, dotPlot, plotReadout, publicKind, valueReadout } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
+import { LOOKUP_HINT } from '../lib/assistant-instructions.ts';
 import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
@@ -6897,9 +6898,8 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
     const unknown = /^Unknown variable: (\w+)\./.exec(eq.error)?.[1];
     const call = unknown && new RegExp(`(?<![\\w])${unknown}\\s*\\(`);
     if (call && [eq, ...equations.filter(o => o.def?.kind === 'fn')].some(o => call.test(stripNote(o.text)))) {
-      // The app's chat looks functions up with search_functions (lib/assistant-tools.ts), voice with read_syntax.
-      const lookup = nativeApp ? 'search_functions' : 'read_syntax';
-      row.hint = `${unknown}(…) is not a built-in function; call ${lookup} to find the right form`;
+      // Each assistant's own lookup (lib/assistant-instructions.ts): the app's chat, or voice.
+      row.hint = `${unknown}(…) is not a built-in function; ${LOOKUP_HINT[nativeApp ? 'text' : 'voice']}`;
     }
     return row;
   }

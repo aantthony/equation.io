@@ -44,7 +44,10 @@ of equations is linkable and the address bar is the share mechanism.
 Agent-facing surface:
 
 - `/llms.txt` — link format + expression syntax reference
-  ([`web/public/llms.txt`](web/public/llms.txt))
+  ([`web/public/llms.txt`](web/public/llms.txt)), and `/docs/`, the same
+  reference as pages for people: both generated from
+  [`docs/reference/`](docs/reference) (`pnpm reference` rewrites llms.txt;
+  [`web/docs/pages.ts`](web/docs/pages.ts) writes the pages at build time)
 - `/g/<eqs>` — share form of a graph link; the worker injects og:/twitter:
   meta tags and `/api/og/<eqs>` renders the preview PNG on the CPU
   (expressions compile to a stack machine — no WebGL in Workers)

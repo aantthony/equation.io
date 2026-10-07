@@ -10,6 +10,39 @@
 > lives in the URL fragment, so you can construct a link that opens the app
 > with any set of equations already rendered.
 
+## Guidance for assistants
+
+- To show a user a graph, emit a single https://equation.io/g/... link built
+  as Deep links below describes; the graph renders immediately on load, no
+  interaction needed.
+- To edit a graph the user already has, decode their link (or call the MCP
+  `decode_graph_url` tool), transform the rows, and emit a new link. Prefer
+  restructuring into named definitions: e.g. given `y = x^2 - 2x`, "add a
+  tangent line at x = 3" becomes
+  `f(x) = x^2 - 2x; g(x) = d/dx f(x); a = 3; y = f(x); y = f(a) + g(a)(x - a)`
+  — with `a` as a draggable slider so the point of tangency stays explorable.
+- Prefer a slider constant (`a = 1; ...`) when the user may want to explore a
+  parameter, and `t` when they ask for animation.
+- Don't name a slider, list or index `i`, `e`, `pi` or `d`: they are
+  taken (`i` is the imaginary unit), so `i = [0..9]` is a claim about i, not
+  a definition, and every later `i` stays complex. Use `k = [0..9]`.
+- The graph state lives entirely in the link, and the link is the interface.
+  The only server endpoints are /mcp (an MCP server that validates equations
+  and emits links) and /api/og (link-preview images).
+- If you are unsure whether a form is supported, emit the link anyway.
+  Unsupported input fails loudly and visibly (an inline error on the offending
+  row), never silently — so a graph either renders correctly or tells the user
+  what to fix. There is no wrong-but-silent output to worry about.
+- Write one shape per row: a circle and a line are two rows, not one row
+  holding both. Each kind of row has its own section under Row types below,
+  its name first, then its forms, worked examples and pitfalls; read the one
+  for the shape you are drawing, and adapt an example rather than copying it.
+- Polar curves r = f(θ) are traced parametrically with θ = 2πu:
+  `(f(2pi u) cos(2pi u), f(2pi u) sin(2pi u))` (see
+  Parametric curve). Parametric curves and surfaces run over u
+  and v from 0 to 1, not t: t is time, and makes a row move.
+- `f(x) = …` only defines f and draws nothing: add `y = f(x)` to draw it.
+
 ## Deep links
 
 Format:
@@ -595,11 +628,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `p.y`. Over a column, a missing cell is
   left out of every reduction (as it is of `hist`) except `count(L)`, which
   answers how many rows there are.
-- `hist(L)` bins a list into a bar chart — `hist(L, 40)` sets the bin count
-  (default ≈ √n, between 5 and 60). It is a whole row, not a value, and the
-  one thing you may do to it is scale it: the plane has a single scale for
-  both axes, so counts in the thousands need `hist(L, 40) / 800` to share a
-  view with values in the units. Missing values are left out.
 - Order lives in tuples. A list `[ … ]` has no order — `[3, 1, 2]` and
   `[1, 2, 3]` are the same list — so anything that needs one takes a tuple
   `( … )`. `sort(L)` is L's values in ascending order, as a tuple, and
@@ -680,7 +708,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   not a curve: write `y = sin(x)` for the graph.
 - `z`: using z switches to 3D. `z = sin(x)cos(y)` is a surface;
   `x^2+y^2+z^2=9` is an implicit 3D surface. A bare expression in x, y, z is
-  a field in space, drawn as a translucent cloud (see Scalar field); write
+  a field in space, drawn as a translucent cloud (see Scalar field in space); write
   `… = 0` for its surface.
 - `t`: time in seconds. Any row mentioning `t` animates, e.g.
   `y = sin(x - 2t)`.
@@ -736,58 +764,218 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 
 ## Row types
 
-- Curve: an equation in x and y — `y = x^2`, `(x^2+y^2)^2 = 8(x^2-y^2)`.
-- Region: inequalities, including chains — `y < x/2 + 1`,
-  `4 <= x^2 + y^2 <= 9`. Non-strict comparisons draw a solid boundary.
-- Scalar field: a bare expression in x and/or y — `sin(x)cos(y)`, or `sin(x)`
-  (constant along y) — shaded by value: the row color where it is positive,
-  the color's complement where negative, stronger the larger it is. There is
-  no implicit graph; a row in x alone reads out how to write its curve
-  (`y = sin(x)`). A list of fields (`a = [1, 2]; sin(a x)`) is an error: write
-  `y = sin(a x)` for the curves.
-- Scalar field in space: a bare expression in x, y and z — `x y z`,
-  `z exp(-sqrt(x^2 + y^2 + z^2)/2)` — is a translucent cloud, tinted the same
-  way (row color positive, complement negative) and denser where the field is
-  larger. The density is relative: the scale is what |f| typically reaches in
-  the view, so `x y z` and a tiny orbital both show, and a slider that only
-  multiplies the field changes nothing. The cloud fills a soft ball around
-  the view's center, fading out before the camera; a field that dies away
-  (an orbital) shows whole, and zooming out shows more of one that does not
-  (`x y z`). An implicit surface in the same
-  graph is seen through the cloud in front of it, so
-  `f(x, y, z) = …; f(x, y, z); f(x, y, z) = 0.5` draws a level surface inside
-  its field. For nested level surfaces instead, write
-  `f(x, y, z) = [1..5]`.
-- Value: a bare expression with no plot coordinate — `2+2`, `sqrt(a)` with a
-  slider a, `|A - B|` between named points, `int[0..1] x^2 dx`, `sin(t)` —
-  draws nothing (a lone definite integral shades its area) and reads out `= 4` (or `≈ 1.41421`) under the row, live as
-  sliders, states and t move. The tool result reports it as kind `value`
-  with the number in `value`. A number is not assumed to mean `y = number`:
-  write `y = 4` for the horizontal line.
-- Complex point: a constant complex expression such as `1+2i` draws at (1, 2).
-  Constants and t may animate its real and imaginary components. A named
-  one, `a = e^(i pi/3)`, is written in wherever `a` is read (`a^2`,
-  `domain(w - a)`, `[1..|a|]`), and a real value reached through complex
-  ones is a constant like any other (`b = re(a)`, `r = |3 + 4i|`).
-- Complex list: one complex member makes a list complex — `1` in
-  `[1, i, -1]` is 1 + 0i — and it draws each member as a complex point:
-  `n = 5; e^(2 pi i [0..n-1]/n)` is the fifth roots of unity, n on a
-  slider. Name it like any list (`S = e^(i pi [0..5]/5)`); `re(S)`,
-  `abs(S)` and `(re(S), im(S))` are real. `total`, `mean` and `count`
-  reduce it; `sort`, `median`, `stdev`, `min`, `max` and `hist` need real
-  numbers, so take `abs`, `re` or `im` first (filters and sort keys too:
-  `S[re(S) > 0]`; equality needs neither, `S[S == 1]`). `sort(S, re(S))`
-  is S's members in order, a tuple, which has no picture yet: `T[k]` picks
-  one. Members are drawn split into
-  real and imaginary parts, 2^21 nodes in all: constant members are two
-  numbers each, but thousands of members of a slider-dependent polynomial
-  are too many. A list cannot mix complex numbers with points, and a
-  point's coordinates stay real (`(S, 1)` is an error).
-- Complex roots: `w^3 = 1` draws three solution points; equations in w become
-  two real constraints. This is a numerical search over the visible window,
-  with exact labels for rational/quadratic polynomial factors and a defining-
-  polynomial label for remaining algebraic roots. The optional certification
-  control proves completeness only when every region in its search box is settled.
+A graph is a list of rows, and each row draws one kind of thing: a curve, a
+shaded region, a surface, a point, a readout. The analyzer names that kind
+(`implicit2d`, `psurface`, …); the MCP tools and the app's assistant report
+it for every row, with what it means. Below, every kind by group: its name,
+its kind, its smallest form and what it draws, then a section on each with
+its forms, worked examples (each one shape) and pitfalls. Definitions
+(sliders, functions, named points; see Definitions) set rows up and draw
+nothing themselves.
+
+2D curves and regions:
+
+- Curve (`implicit2d`): `x^2 + y^2 = 9` — 2D curve: y = f(x), or any equation in x, y
+- Region (`ineq2d`): `y < x^2` — shaded 2D region
+- Parametric curve (`pcurve`): `(cos(2pi u), sin(2pi u))` — parametric curve, u from 0 to 1; 3 components for 3D
+- Parametric region (`pregion`): `r = interval(1, 2); (r cos(2pi u), r sin(2pi u))` — filled 2D region traced by two parameters
+- Swept region (`projected2d`): `a = interval(1, 2); y = sin(a x)` — region swept by a curve as a runs over an interval
+- System of equations (`system`): `(x^2 + y^2, y) = (4, x)` — solutions of simultaneous equations
+
+Points, figures and labels:
+
+- Point (`point`): `(1, 2)` — point; A = (1, 2) names it and makes it draggable
+- Geometric figure (`polygon`): `polygon((0, 0), (2, 0), (1, 2))` — figure: segment, vector, polygon, circle, …; hull of 3D points is a solid
+- Label (`label`): `label((1, 2), "text")` — text beside a point
+- Motion trail (`trail`): `A = (2cos(3t), 2sin(2t)); trail(A)` — path behind a moving point
+
+Readouts and families:
+
+- Value readout (`value`): `int[0..pi] sin(x) dx` — number readout; a definite integral also shades its area
+- True/false readout (`note`): `1 < 2` — true/false readout
+- Family (`family`): `y = x^[1, 2, 3]` — one copy of the row per list element
+
+3D:
+
+- Surface (`implicit3d`): `z = sin(x) cos(y)` — 3D surface: z = f(x, y), or an equation in x, y, z
+- Parametric surface (`psurface`): `(sin(pi v)cos(2pi u), sin(pi v)sin(2pi u), cos(pi v))` — parametric surface, u and v from 0 to 1
+- Parametric solid (`solid`): `(interval(0, 1), interval(0, 2), interval(0, 3))` — solid in 3D filled by three parameters or intervals
+- Curve of intersection (`spacecurve`): `(x^2 + y^2 + z^2, z) = (9, 1)` — 3D curve where two surfaces meet
+
+Curvature and spacetime:
+
+- Geodesic (`geodesic`): `S = (cos(u), sin(u), v); geodesic(S, (0, 0.5), (1, 1))` — straightest path on a surface, or under a ds² metric
+- Metric (`metric`): `ds^2 = (dx^2 + dy^2)/y^2` — a panel's own ds² metric; draws nothing
+- Light cone (`lightcone`): `ds^2 = -dy^2 + dx^2; lightcones` — light cones of the panel's ds² metric
+- Tidal forces (`tidal`): `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; tidal` — tidal stretch and squeeze of the panel's ds² metric
+
+Fields:
+
+- Vector field (`vfield2d`): `(x, -y)` — 2D vector field, as streamlines
+- Vector field in space (`vfield3d`): `(-y, x, 0.5)` — 3D vector field
+- Scalar field (`scalar2d`): `sin(x) cos(y)` — expression in x, y, shaded by its value
+- Scalar field in space (`scalar3d`): `exp(-(x^2 + y^2 + z^2))` — expression in x, y, z, drawn as a cloud
+
+Sequences and simulations:
+
+- Sequence (`sequence`): `a_n = 1/n` — sequence, as dots at whole numbers n
+- Cobweb diagram (`cobweb`): `a_0 = 0.2; a_{n+1} = 3.2 a_n (1 - a_n)` — cobweb diagram of a recurrence
+- Bifurcation diagram (`bifurcation`): `a_{n+1} = x a_n (1 - a_n)` — orbit diagram of a recurrence as x varies
+- Orbit (`orbit`): `th' = om; om' = -sin(th); th(0) = 1; th(0..20)` — a simulated state over a time range
+- Cellular automaton (`automaton`): `c_0[i] = {i = 0: 1, 0}; c_{n+1}[i] = mod(c_n[i-1] + c_n[i+1], 2)` — cellular automaton
+
+Lists and data:
+
+- Number list (`vlist`): `[1, 2, 2, 3]` — list of numbers, as a dot plot
+- Point list (`plist`): `[(1, 2), (2, 3), (3, 5)]` — list of points
+- Histogram (`histogram`): `hist([1, 2, 2, 3])` — histogram of a list
+- Data column (`dlist`): `data = open("file.csv"); data.height` — data column, as a dot plot
+- Data scatter (`dscatter`): `data = open("file.csv"); (data.age, data.height)` — scatter plot of data
+- Tuple readout (`tuple`): `sort([5, 3, 1, 4, 2])` — readout of a tuple of more than 3 numbers
+
+Probability:
+
+- Random variable (`density`): `X ~ Normal(0, 1)` — density curve of a random variable
+- Discrete random variable (`pmf`): `K ~ Binomial(10, 0.5)` — stems of a discrete random variable
+- Probability (`prob`): `X ~ Normal(0, 1); P(X < 1)` — probability, shaded, with its value
+- Expectation (`expect`): `X ~ Normal(0, 1); E(X)` — expected value readout
+
+Complex functions:
+
+- Complex function (`complex2d`): `ln(w)` — complex function of w = x + iy
+- Domain colouring (`domain2d`): `domain(w^2 - 1)` — domain colouring of a complex function
+- Conformal map (`conformal2d`): `conformal(w^2)` — image of a grid under a complex function
+- Escape-time fractal (`fractal2d`): `iter(z^2 + w)` — escape-time fractal
+
+Colour fields:
+
+- RGB colour field (`rgb2d`): `rgb(x/4, y/4, 0.5)` — colour field (RGB) filling the plane
+- HSL colour field (`hsl2d`): `hsl(atan2(y, x), 1, 0.5)` — colour field (HSL) filling the plane
+- OKLCH colour field (`oklch2d`): `oklch(0.7, 0.15, atan2(y, x))` — colour field (OKLCH) filling the plane
+
+Algebra:
+
+- Matrix field (`tfield2d`): `jacobian((x^2 - y^2, 2x y))` — 2D matrix field, as glyphs
+- Multivector (`multivector`): `gp(e_x, e_y)` — multivector or quaternion, drawn by grade
+- Line or plane (`flat`): `join((0, 0), (1, 1))` — projective point, line or plane
+- Matrix action (`action`): `action(((1, 1), (0, 1)))` — what a matrix does to the unit square
+- Graph (network) (`graph`): `k = [0..5]; graph(k, mod(k + 1, 6))` — node-link graph of (from, to) edges
+- Table (`lattice`): `T[i, j] = {i > 0: {j > 0: gcd(i, j)}}` — table of values on the integer lattice
+
+### Curve (`implicit2d`)
+
+A 2D curve: the points (x, y) that satisfy an equation. `y = f(x)` is the
+graph of a function; any other equation in x and y draws implicitly, with no
+need to solve it for y.
+
+Forms:
+
+- `y = f(x)` (or `x = f(y)`): the graph of a function.
+- Any equation in x and y: `x^2 + y^2 = 9`.
+- A curve on part of its domain: `y = {0 < x < 2: x^2}` (see Piecewise,
+  under Expression syntax).
+- In polar coordinates, after the coordinate fields `r = sqrt(x^2+y^2)` and
+  `theta = atan2(y,x)`: `r = 2(1 + cos(theta))`, drawn where r ≥ 0 (see
+  Coordinate field, under Definitions). A polar curve that goes negative
+  draws whole as a parametric curve.
+
+Examples:
+
+- Parabola: `y = x^2`
+- Circle of radius 3: `x^2 + y^2 = 9`
+- Wave with an amplitude slider: `A = 2; y = A sin(x)` — drag A, or animate it
+- Circle with a radius slider: `r = 2; x^2 + y^2 = r^2`
+- Lemniscate: `(x^2+y^2)^2 = 8(x^2-y^2)`
+- Travelling wave: `y = sin(x - 2t)`
+- Cardioid in polar coordinates: `r = sqrt(x^2+y^2); theta = atan2(y,x); r = 2(1 + cos(theta))`
+- Circle through a draggable point: `C = (0, 0); P = (2, 1); circle(C, |P - C|)` — `circle` and `line` (see Geometric figure) draw as curves
+
+Pitfalls:
+
+- A bare expression, `sin(x)`, is a scalar field, not a curve:
+  write `y = sin(x)`.
+- `f(x) = x^3 - x` defines f and draws nothing: add `y = f(x)`.
+- A number alone is a readout; write `y = 4` for the horizontal
+  line.
+- An equation that holds everywhere (`sin(x)^2 + cos(x)^2 = 1`) is read out
+  as an identity, not drawn (see True/false readout).
+
+### Region (`ineq2d`)
+
+A shaded 2D region: the points where an inequality in x and y holds.
+
+Forms:
+
+- An inequality: `y < f(x)`, `x^2 + y^2 <= 9`.
+- A chain: `4 <= x^2 + y^2 <= 9`, `-1 <= y - x/2 < 1`.
+- Non-strict comparisons (`<=`, `>=`) draw a solid boundary.
+
+Examples:
+
+- Below a line: `y < x/2 + 1`
+- Annulus: `4 <= x^2 + y^2 <= 9`
+- Band between two lines: `-1 <= y - x/2 < 1`
+- Koch snowflake: `f(z) = {re(z) >= 1: 1, f(4 - 3(z^6)^(1/6))}; f(x i - |y|) >= 0` — a tail-recursive function shades where its recursion terminates (see Recursive function, under Definitions)
+
+Pitfalls:
+
+- Shade under a curve between two x values with a definite integral,
+  `int[0..pi] sin(x) dx`, which also reads out the area (see
+  Value readout), or with a chain: `0 < y < sin(x)`.
+
+### Parametric curve (`pcurve`)
+
+A curve traced by a point whose coordinates are functions of u, as u runs
+from 0 to 1: two components draw in the plane, three in space.
+
+Forms:
+
+- `(f(u), g(u))` in the plane, `(f(u), g(u), h(u))` in space. u runs from 0
+  to 1, so a whole turn is `2pi u`.
+- A polar curve r = f(θ), traced with θ = 2πu:
+  `(f(2pi u) cos(2pi u), f(2pi u) sin(2pi u))`. Unlike a polar coordinate
+  field, this draws where r goes negative too.
+- With `u = interval(0, 2pi)` defined above, u runs over that range instead.
+- A named curve, `C = (…)` in u, draws nothing itself; a row `C` draws it.
+- `tube((f(u), g(u), h(u)), r)`: a 3D curve as a solid tube.
+
+Examples:
+
+- Circle of radius 2: `(2cos(2pi u), 2sin(2pi u))`
+- Helix: `(2cos(6pi u), 2sin(6pi u), 4u - 2)`
+- Rose r = sin(4θ), all 8 petals: `(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))`
+- Figure eight: `(2cos(2pi u), sin(4pi u))`
+- Limaçon r = 1 + 2cos(θ): `((1 + 2cos(2pi u)) cos(2pi u), (1 + 2cos(2pi u)) sin(2pi u))`
+- Circle with a radius slider: `r = 2; (r cos(2pi u), r sin(2pi u))`
+- Trefoil knot as a tube: `tube((sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u), -sin(6pi u)))`
+
+Pitfalls:
+
+- u runs from 0 to 1, not 0 to 2π: `(cos(u), sin(u))` is only about a sixth of a
+  circle. Multiply by `2pi`.
+- t is time, not the parameter: `(cos(t), sin(t))` is a point
+  moving round a circle, not the circle.
+- Two components in two parameters (u and v, or an interval) fill a
+  region; three components in u and v draw a
+  surface.
+- Never write a bare `r = f(theta)` row for a polar curve without the
+  coordinate fields above it: alone, `r = …` defines a constant r and draws
+  nothing.
+
+Details:
+
+- Parametric curve: components in u — `(2cos(2pi u), sin(4pi u))`, or with
+  `u = interval(0, 2pi)` above, `(2cos(u), sin(2u))`; three components make
+  a 3D curve — `(2cos(6pi u), 2sin(6pi u), 4u - 2)`.
+  A plane curve lifts the pen where it jumps (a step, a pole, a branch cut)
+  rather than bridging the gap: `(u, floor(3u))`, `(4u - 2, tan(12u - 6))`.
+- Tube: `tube((x(u), y(u), z(u)))` sweeps a 3D parametric curve into a lit
+  solid tube — `tube((sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u),
+  -sin(6pi u)))` is a trefoil knot. An optional last argument sets the radius
+  (default 0.1): `tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)`. It
+  must be the whole row; without it a 3D curve stays a thin line. The curve
+  needs exactly three components: `tube((a, b), r)` does not tube a plane
+  curve, it reads as the 3D curve (a, b, r).
 - Complex path: a complex-valued expression whose only variable is u (constants,
   sliders and t aside) draws the path it traces over u, at
   (re, im) — the same plane as complex points and roots. `exp(i 2 pi u)` is
@@ -799,65 +987,189 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   and imaginary parts is too large (deeply nested products). An expression
   that mentions i but is real for every u (`abs(exp(i u))`) is not a path
   and says so.
-- Complex plot: a complex expression in `w` — `w + 4/w`.
-- RGB color field: `rgb(red, green, blue)` fills the 2D plane with a color at
-  each (x, y). Channels are real expressions on the 0–1 scale (not CSS's
-  0–255); values outside that range are clamped, so `rgb(255, 128, 0)` is
-  white, not orange. `rgb(1, 0, 0)` fills the plane red. Expressions may
-  use x, y, t, sliders, coordinate fields, and real projections of w such as
-  `arg(w)` or `abs(w)`. For example,
-  `rgb(cos(arg(w)/2)^2, cos(arg(w)/2+1)^2, cos(arg(w)/2+2)^2)`.
-  This is a whole-row plot mode, not a color value for styling another row;
-  it cannot be nested in arithmetic or lists and does not take u, v, or z.
-  A pixel with any undefined or infinite channel is transparent, so a partial
-  piecewise channel can restrict the field: `rgb({x>0:1}, 0, 0)`. An
-  optional fourth argument is the opacity, 0–1 (clamped; default 1), so a
-  field can fade into the graph paper: `rgb(1, 0, 0, exp(-x^2-y^2))`.
-  RGB, HSL and OKLCH rows share the same layer and draw in row order;
-  curves and regions draw over them.
-  Static share-card previews use the site card; the live graph renders the field.
-- HSL color field: `hsl(hue, saturation, lightness)` uses hue in radians and
-  saturation/lightness on a 0–1 scale (not CSS's percentages). Hue wraps
-  around 2pi; saturation/lightness are clamped. `hsl(2pi/3, 1, 0.5)` is
-  green. An animated wheel is `hsl(arg(w)+t/3, 1, 0.5)`.
-- OKLCH color field: `oklch(lightness, chroma, hue)` uses lightness 0–1,
-  nonnegative chroma (typically 0–0.4), and hue in radians. Lightness is
-  clamped, negative chroma becomes zero and hue wraps around 2pi. Zero chroma
-  is neutral gray; lightness 0 and 1 give black and white. Colors outside
-  sRGB are mapped by reducing chroma at fixed lightness and hue, then encoded
-  as sRGB. This is strict chroma reduction, not CSS's local-MINDE algorithm
-  or wide-gamut output. Try `oklch(0.72, 0.16, arg(w)+t/3)` for a wheel
-  with more even perceived lightness than HSL. HSL and OKLCH have the same
-  real-channel, whole-row and transparency rules as RGB; all three accept
-  equations, sliders and time. Every channel is 0–1 except hue (radians,
-  like trig functions and `arg`, so `arg(w)` is a hue directly) and chroma.
-  To port a CSS color, divide 0–255 channels by 255, percentages by 100, and
-  write a degree hue as `h pi/180`.
-- Domain coloring: `domain(f)` where f is complex — `domain(w^2 + 1)`. Hue is
-  arg f, brightness |f|; zeros render black and poles white.
-- Conformal map: `conformal(f)` — `conformal(w^2/4)` — draws the image of the
-  coordinate grid under f (the level curves of re f and im f).
-- Fractal: `iter(step)` iterates `z ↦ step`, coloring by escape time. Inside
-  `iter` only, `z` is the iterate. If the step mentions the plane (`w`, `x`,
-  `y`) iteration starts at 0, so `iter(z^2 + w)` is the Mandelbrot set; with a
-  fixed constant the pixel is the starting point, so `iter(z^2 - 0.8 + 0.156i)`
-  is a Julia set. An optional second argument sets the iteration count,
-  `iter(z^2 + w, 600)` (default 250, max 5000). Any expression works:
-  `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship.
-  `iter` is for the plane; an escape-time fractal in space (the Mandelbulb,
-  a quaternion Julia set) is a recursive function — see "Recursive
-  function" below.
-- Point: `(2, 3)`; animate with t: `(2cos(t), 2sin(t))`.
-- Data list: `[3, 1, 4, 4]` is a dot plot on the number line — a dot at each
-  value on the x axis, copies stacked upward, so 4 has dots at (4, 1) and
-  (4, 2). A list has no order, so no index is drawn (a sequence `a_n` does
-  draw at n). Values closer than a dot's width at the current zoom share a
-  column, so a long list (`sin(L)` for `L = [1..300]`, a CSV column of
-  thousands) stacks into the shape of its distribution rather than one row of
-  overlapping dots; zoom in and they separate. `[(1, 2), (3, 4)]` draws a
-  scatter of points.
-  Any list-valued expression plots the same way (`L^2 + 1`,
-  `(L, L^2)` with `L` defined above, or a CSV column: `person.age`).
+
+### Parametric region (`pregion`)
+
+A filled 2D region: two components in two parameters (u and v, or
+intervals), each over its range, fill everything they trace.
+
+Forms:
+
+- `(f(u, v), g(u, v))`, u and v each from 0 to 1.
+- With an interval, `s = interval(a, b)`, in place of one parameter.
+
+Examples:
+
+- Unit disc: `(u cos(2 pi v), u sin(2 pi v))`
+- Annulus: `r = interval(1, 2); (r cos(2 pi u), r sin(2 pi u))`
+- Area under a sine arch: `s = interval(0, pi); (s, u sin(s))`
+
+Pitfalls:
+
+- One parameter traces a curve; three components in two
+  parameters draw a surface in 3D.
+
+Details:
+
+- Parametric region: two components in two parameters fill the region they
+  trace — `(u cos(2 pi v), u sin(2 pi v))` is the unit disc, and with
+  `r = interval(1, 2)`, `(r cos(2 pi u), r sin(2 pi u))` an annulus. In a 3D
+  scene it lies in the plane z = 0.
+
+### Swept region (`projected2d`)
+
+A shaded 2D region swept by a family: a row in x and y that reads one
+interval draws every point some member of the family puts on its curve (or,
+for an inequality, in its region).
+
+Forms:
+
+- `a = interval(lo, hi)` above, then an equation or inequality in x, y and a.
+- At most one interval in the row.
+
+Examples:
+
+- Band of sine curves: `a = interval(1, 2); y = sin(a x)`
+- Fan of lines: `a = interval(1, 2); y < a x`
+- Parabolas shifted up by up to 1: `c = interval(0, 1); y = x^2 + c`
+
+Pitfalls:
+
+- A bare field over an interval (`sin(a x)`) is an error: set it equal to
+  something.
+- For a few separate curves, a list (`a = [1, 2]`) draws one curve each:
+  see Family.
+
+Details:
+
+See `interval(a, b)` under Variables: with `a = interval(1, 2)`, `y = sin(a x)`
+shades every point some a from 1 to 2 puts on its curve, and `y < a x` every
+point below some member.
+
+### System of equations (`system`)
+
+The solutions of a system of equations: two equations in x and y written as
+one tuple equation draw their common points; with u they trace a curve.
+Complex equations in w draw their roots.
+
+Forms:
+
+- `(f, g) = (a, b)`: f = a and g = b together.
+- An equation in w, the complex plane point: `w^3 = 1`.
+- In coordinates defined above: `(r, theta) = (2, pi/4)`.
+
+Examples:
+
+- Where a circle meets a line: `(x^2 + y^2, y) = (4, x)`
+- Cube roots of unity: `w^3 = 1`
+- A point in polar coordinates: `r = sqrt(x^2+y^2); theta = atan2(y,x); (r, theta) = (2, pi/4)`
+- Spiral in polar coordinates: `r = sqrt(x^2+y^2); theta = atan2(y,x); (r, theta) = (3u, 6pi u)`
+
+Pitfalls:
+
+- Two separate rows `x^2 + y^2 = 4` and `y = x` draw the circle and the
+  line; the tuple form draws only where they meet.
+
+Details:
+
+- Complex roots: `w^3 = 1` draws three solution points; equations in w become
+  two real constraints. This is a numerical search over the visible window,
+  with exact labels for rational/quadratic polynomial factors and a defining-
+  polynomial label for remaining algebraic roots. The optional certification
+  control proves completeness only when every region in its search box is settled.
+- Coordinate points: after defining r and theta above, `(r, theta) = (2, pi/4)`
+  draws the point satisfying both coordinates. Angles in atan2-valued left
+  components wrap modulo 2pi, so 9pi/4 and pi/4 name the same position.
+  Bare tuples remain Cartesian. Non-injective charts draw multiple points:
+  `p = x y; q = (x^2-y^2)/2; (p, q) = (1, 0)` draws two.
+  In 2D, RHS literals or slider names can be dragged; the pointer position
+  is evaluated in the named coordinates and written back to those values.
+- Parametric systems: `(r, theta) = (3u, 6pi u)` traces a three-turn spiral,
+  u in [0,1]. General square systems with u work too, including in 3D.
+  A bounded numerical continuation follows branches, periodically searches
+  for others, and breaks lines at missing/discontinuous solutions. Small
+  branches can be missed; this is not certified exhaustive tracing.
+- Certified point solving: a square system's “certify search box” control
+  runs outward-rounded interval subdivision and Krawczyk tests in the worker.
+  Its readout distinguishes proved roots, unresolved regions, and completeness
+  of that finite search box. Existing numeric points remain visible.
+  Certification currently supports finite constants, +, −, ×, / away from
+  zero denominators, and integer powers up to 32; other functions, singular
+  roots and exhausted budgets remain unresolved. Wrapped angular systems
+  are excluded. Proofs concern real arithmetic on the input binary64 literals
+  and parameter values, not a claim of completeness over all space.
+
+### Point (`point`)
+
+A point. Named, `A = (1, 2)`, it is labelled and draggable, and every row
+that uses A follows it.
+
+Forms:
+
+- `(x0, y0)` or `(x0, y0, z0)`.
+- `A = (1, 2)`: a named point, drawn and draggable (see Point and Dragging,
+  under Definitions).
+- Moving with time: `(2cos(t), 2sin(t))`.
+- A complex number: `1+2i` draws at (1, 2).
+
+Examples:
+
+- Point: `(2, 3)`
+- Named draggable point: `A = (1, 2)`
+- Point circling the origin: `A = (2cos(t), 2sin(t))` — moves with time; computed, so not draggable
+- Point that slides along y = x² with a slider: `a = 1; (a, a^2)`
+- Complex number as a point: `1+2i`
+
+Pitfalls:
+
+- Several points: one row each, with different names (`A = (1, 2)`,
+  `B = (3, 4)`), or a list of them in one row: `[(1, 2), (3, 4), (5, 1)]`
+  (see Point list). Redefining one name (`A = 1`, then `A = 2`)
+  is an error.
+- To make a point move, change its own row (`A = (cos(t), sin(t))`) rather
+  than adding a moving copy beside it.
+
+Details:
+
+- Complex point: a constant complex expression such as `1+2i` draws at (1, 2).
+  Constants and t may animate its real and imaginary components. A named
+  one, `a = e^(i pi/3)`, is written in wherever `a` is read (`a^2`,
+  `domain(w - a)`, `[1..|a|]`), and a real value reached through complex
+  ones is a constant like any other (`b = re(a)`, `r = |3 + 4i|`).
+
+### Geometric figure (`polygon`)
+
+A figure built from points: a segment, an open path, a vector arrow, a line,
+a filled polygon, a square, a circle, or the convex hull of points (a solid
+in 3D). Figures follow their points as they move or are dragged.
+
+Forms:
+
+- `segment(A, B)`, `polyline(A, B, C, …)`, `vector(A, B)` or `vector(V)`,
+  `polygon(A, B, C, …)`, `square(A, B)`.
+- `circle(center, radius)` and `line(A, B)` follow their points too, but
+  draw (and report) as curves.
+- `hull(A, B, C, …)` or `hull(P)` of a point list: a filled polygon in 2D,
+  an opaque solid in 3D.
+- Points may be named rows above, tuples, or point arithmetic.
+
+Examples:
+
+- Triangle: `A = (0, 0); B = (4, 0); C = (1, 3); polygon(A, B, C)`
+- Vector arrow: `vector((2, 1))`
+- Segment: `segment((0, 0), (3, 2))`
+- Square on a side: `square((0, 0), (2, 0))`
+- Solid cube, as a hull: `hull(([0,1],[0,1],[0,1]))`
+- Icosahedron: `phi = (1+sqrt(5))/2; k = 2pi [0..2]/3; hull(rotate((0, [-1,1], [-phi,phi]), k, (1,1,1)))`
+
+Pitfalls:
+
+- `polygon` in 3D fills only triangles; a solid needs `hull` of its corners
+  or a parametric solid.
+- `circle`, `square` and `perp` are planar.
+
+Details:
+
 - Geometry: with points defined in rows above (`A = (0, 0)`), `segment(A, B)`,
   `polyline(A, B, C, …)` (an open path through the points, not filled),
   `vector(A, B)` (an arrow from A to B; `vector(V)` draws V from the origin —
@@ -889,48 +1201,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   the view box. `perp`, `square`, and `circle` remain planar; 3D dragging is not defined.
   Point lists draw as dots in space too: `[0,1] e_x + [0,1] e_y` is 4 points,
   `[e_x, e_z]` 2, and `([0,1],[0,1],[0,1])` the 8 corners of a cube.
-- Projective geometry (lines and planes as values): `join(A, B)` (or
-  `line(A, B)`) is the line through two points, in the plane or in space;
-  `join(A, B, C)` (or `plane(A, B, C)`) the plane through three points of
-  space, and `plane(P, n)` the plane through P with normal n. `meet(L, M)`
-  is where two lines of the plane cross, and in space where a line goes
-  through a plane (a point) or two planes cross (a line); two lines of space
-  do not meet. A meet is a point like any other — `X = meet(L, M)` names it,
-  `polygon(meet(…), B, C)` and `midpoint(meet(…), A)` take it. Parallel
-  lines meet at an ideal point, which draws nothing and reads out `at
-  infinity, direction (1, 2)`. `project(P, L)` is the point of the line or
-  plane L nearest P (or a line's shadow on a plane), and `reflect(P, L)`
-  mirrors P in a line, a plane or a point. `distance(P, L)` measures from a
-  point to a line or plane, and between lines or planes (0 where they cross);
-  `angle(L, M)` is the acute angle between two lines or planes, in [0, π/2].
-  A row holding a line or plane draws it — a line of the plane as its
-  implicit line, a line of space across the view box, a plane as a surface —
-  and reads out its equation: `= y = 2x + 1`, `= z = -x - y + 1`, or `=
-  through (0, 0, 1), direction (1, 1, 0)` for a line of space. Name one
-  (`L = join(A, B)`) to pass it on; the definition itself draws nothing, the
-  row `L` does. A line or plane is no number or point, so `2 L` is an error.
-  Lists broadcast as everywhere else: with `P = [A, B]`, `join(P, C)` is two
-  lines, `L = join(P, C); meet(L, L)` pairs each line with itself, and
-  `meet(K, H)` for a line K and a list of planes H is the list of crossing
-  points, which `count`, `mean` and `total` take. A plane draws as a
-  translucent sheet, outlined where it meets the view box, so a line in it
-  or behind it shows through.
-- Rigid motions (motors): `motor(L, th, d)` turns by th about the line L of
-  space — right-handed about L's direction, A → B for `line(A, B)` — while
-  sliding d along it (a screw; d may be left out); `motor(P, th)` turns the
-  plane counterclockwise about the point P. `rotate(X, M)` moves a point, a
-  list of points, a line, a plane or a figure by it:
-  `rotate(hull(([0,1],[0,1],[0,1])), motor(line(A, B), t, t/4))` screws a
-  cube along the axis through A and B, which stay draggable.
-  `slerp(M1, M2, s)` is the rigid motion s of the way from M1 to M2, at
-  constant speed along the screw between them — for motors that stay fixed
-  (fixed axes, turns and slides), with the motion in s:
-  `rotate(X, slerp(M1, M2, (1 - cos(t))/2))`. A row holding a motor draws
-  its axis (or its centre, in the plane) and reads out what it does: `=
-  turn 1.5708 about the line through (0, 0, 0), direction (0, 0, 1), slide
-  2`, `turn 1.5708 about (1, 1)` or `slide (0, 0, 3)` — a motor and its
-  opposite are one motion, read the shorter way round. A motor is no number
-  or point: name it (`M = motor(L, t, 1)`) and pass it to rotate or slerp.
 - Convex hulls: `hull(A, B, C, …)` or `hull(P)` for a whole point list draws
   the convex hull — a filled polygon in 2D, a lit opaque solid with flat-shaded faces and outlined edges in 3D
   (coplanar facets merge, so a cube shows six squares). Interior and repeated
@@ -948,6 +1218,182 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `hull(([0,1],[0,1],[0,1]))` is a solid cube, `hull(([-1,1],[-2,2]))` a
   rectangle, and `phi = (1+sqrt(5))/2; k = 2pi [0..2]/3;
   hull(rotate((0, [-1,1], [-phi,phi]), k, (1,1,1)))` a solid icosahedron.
+
+### Label (`label`)
+
+Text written beside a point on the graph, in the row's colour.
+
+Forms:
+
+- `label(point, "text")`, as a whole row.
+
+Examples:
+
+- Label at a point: `label((2, 4), "the curves cross here")`
+- Label on a named point: `A = (1, 1); label(A, "vertex")`
+- Label that follows a slider: `a = 2; label((a, a^2), "moves with the slider")`
+
+Pitfalls:
+
+- Keep the text to a few words, and inside its quotes: the whole call is
+  one row.
+
+Details:
+
+`label(point, "text")` writes text beside a point on the graph, in the row's
+color. Use it as a whole row. Examples:
+
+    label((2, 4), "the curves cross here")
+    A = (1, 1)
+    label(A, "vertex")
+    a = 2
+    label((a, a^2), "moves with the slider")
+
+The point may be a tuple, a named point, or point arithmetic, in 2D or 3D, and
+may use constants, sliders, states, and `t`; it cannot use free x/y/z or u/v.
+The text is plain and fixed. The MCP classifies these rows as `label`; static
+previews draw the other rows but leave label text out (see preview_omits).
+
+### Motion trail (`trail`)
+
+A live trail of a moving point's positions, with a dot where it is now.
+
+Forms:
+
+- `trail(A)` for a named point that moves with t, or a vector state.
+- `trail((f(t), g(t)))` or `trail((f(t), g(t), h(t)))` for a tuple.
+
+Examples:
+
+- Point circling the origin, with its trail: `A = (cos(t), sin(t)); trail(A)`
+- Rising spiral: `trail((cos(t), sin(t), t/5))`
+- Lissajous path: `A = (2cos(3t), 2sin(2t)); trail(A)`
+
+Pitfalls:
+
+- The point must move with t (or be a state): a trail of a fixed point is a
+  dot.
+- For the whole path at once, draw it as a parametric curve in u.
+
+Details:
+
+`trail(A)` leaves a live trail of a point's observed positions, with a dot at
+its current position. Use it as a whole row. Examples:
+
+    A = (cos(t), sin(t))
+    trail(A)
+
+    trail((cos(t), sin(t), t/5))
+
+A named 2D point, point arithmetic such as `trail(2A)`, or a 2D/3D vector state
+can be traced. Components may use constants, sliders, states, and `t`; they
+cannot use free x/y/z or u/v. `trail(cos(t), sin(t))` is equivalent to the
+parenthesized tuple spelling. Matrix `trace(M)` keeps its existing meaning
+(the sum of the diagonal), including inside other expressions.
+
+The live browser retains at most 30 seconds and 2048 samples per trail,
+sampling at most 60 times a second. Undefined positions or pauses over half a
+second break the line instead of joining unobserved motion. Editing equations
+or restarting the simulation clears history; framing/comment edits preserve
+it. Trails start afresh on opening a graph and are not saved in shared URLs.
+The MCP classifies these rows as `trail`; static previews use the fallback
+card because a still image cannot reproduce accumulated live history.
+
+### Value readout (`value`)
+
+A number, read out under the row: a row with no plot coordinate draws
+nothing on the graph, except a lone definite integral, which also shades the
+area it measures.
+
+Forms:
+
+- Any expression with no x, y or z: `2+2`, `sqrt(a)`, `|A - B|`.
+- `int[a..b] f(x) dx`: the value, and the area shaded between f and the axis
+  over [a, b].
+- Reductions and measurements: `mean(L)`, `distance(A, B)`, `angle(A, B, C)`.
+
+Examples:
+
+- Arithmetic: `2+2`
+- Area under one arch of sin: `int[0..pi] sin(x) dx`
+- Distance between two points: `A = (0, 0); B = (3, 4); |A - B|`
+- Mean of a list: `L = [2, 4, 9]; mean(L)`
+
+Pitfalls:
+
+- A number is not assumed to mean `y = number`: write `y = 4` for the line.
+- Shading needs the integral alone on its row: `2 int[0..1] x dx`, a sum of
+  integrals or a definition (`A = int[0..1] x^2 dx`) is a plain number.
+
+Details:
+
+- Value: a bare expression with no plot coordinate — `2+2`, `sqrt(a)` with a
+  slider a, `|A - B|` between named points, `int[0..1] x^2 dx`, `sin(t)` —
+  draws nothing (a lone definite integral shades its area) and reads out `= 4` (or `≈ 1.41421`) under the row, live as
+  sliders, states and t move. The tool result reports it as kind `value`
+  with the number in `value`. A number is not assumed to mean `y = number`:
+  write `y = 4` for the horizontal line.
+
+### True/false readout (`note`)
+
+A true/false readout under the row: a comparison with no plot coordinate,
+or an identity that holds everywhere. Draws nothing on the graph.
+
+Examples:
+
+- Decided comparison: `1 < 2`
+- Comparison that follows a slider: `a = 2; a^2 > 3`
+- Identity: `sin(x)^2 + cos(x)^2 = 1`
+
+Pitfalls:
+
+- An identity is checked numerically at random points: evidence, not a
+  proof. An equation that does not quite hold (`= 1.0001`) stays an
+  (empty) implicit curve.
+
+Details:
+
+- Decided comparisons: `2+2=4` reads “Always true (4 = 4)”; `e=2` reads
+  “Never true (2.71828 ≠ 2)”. Comparisons involving sliders/time say
+  “True now” or “False now”. They draw no degenerate implicit curve.
+- Identities: an equation in x, y, z and t whose two sides agree everywhere
+  reads “Holds everywhere (checked numerically)” instead of drawing a curve.
+  The check compares both sides at many random points, for any slider
+  values, so it is evidence, not a proof. `sin(x)^2 + cos(x)^2 = 1` holds;
+  `sin(x)^2 + cos(x)^2 = 1.0001` does not, and stays an (empty) implicit
+  curve. The wave equation for d'Alembert's solution:
+  `c = 1; g(s) = exp(-s^2); f(x, t) = (g(x - c t) + g(x + c t))/2;
+  y = f(x, t); d^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)`. The pulse splits in two
+  and the last row holds everywhere. (u and w are the parametric and
+  complex variables, so they cannot name the solution.)
+
+### Family (`family`)
+
+One copy of the row per element of a list: a list in a number's place
+draws a family of curves, figures or surfaces.
+
+Forms:
+
+- A list in the row: `y = [1,2,3] x`, `circle((0,0), [1,2,3])`.
+- A named list, which every use shares: `m = [1, 2]` then `y = m x + m`.
+
+Examples:
+
+- Three lines through the origin: `y = [1,2,3] x`
+- Concentric circles: `circle((0,0), [1,2,3])`
+- Powers of x: `y = x^[1, 2, 3]`
+- Two sine waves from a named list: `m = [1, 2]; y = sin(m x)`
+
+Pitfalls:
+
+- A family is one row drawing several shapes on purpose. To draw two
+  different shapes, write two rows: a circle and a line are
+  `x^2 + y^2 = 4` and `y = x`, not one row holding both.
+- A single slider, `a = 2`, makes one curve that moves; a list makes a fixed
+  set of copies.
+
+Details:
+
 - Object families: a list in a scalar position draws one object per element:
   `y = [1,2,3] x`, `circle((0,0), [1,2,3])`, `(cos(u),sin(u),[1,2,3])`.
   Uses of the same named list move together (`m = [1,2]`, `y = m x + m` is 2
@@ -967,6 +1413,364 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `polyline(sort((data.x, data.y), data.x))`; a list `[ … ]` has no order to
   walk. `hull(P)` takes any list.
   Range bounds may use sliders, but not t; families re-expand on bound changes.
+
+### Surface (`implicit3d`)
+
+A 3D surface: the points (x, y, z) satisfying an equation. Any row using z
+makes the graph 3D.
+
+Forms:
+
+- `z = f(x, y)`: a graph over the plane.
+- Any equation in x, y and z: `x^2 + y^2 + z^2 = 9`.
+- `revolve(f)`: the surface of revolution of y = f(x) about the x-axis.
+- In spherical coordinates defined above: `rho = 2` (see Coordinate fields
+  in space, under Definitions).
+
+Examples:
+
+- Egg-crate surface: `z = sin(x) cos(y)`
+- Sphere of radius 3: `x^2 + y^2 + z^2 = 9`
+- Paraboloid: `z = (x^2 + y^2)/4`
+- Surface of revolution: `revolve(sqrt(x))`
+- Sphere in spherical coordinates: `rho = sqrt(x^2+y^2+z^2); rho = 3`
+
+Pitfalls:
+
+- A bare expression in x, y and z (`x y z`) is a
+  field in space, drawn as a cloud: write `… = 0` for its
+  surface.
+- 2D-only rows (regions, 2D fields) are left out of a 3D graph.
+
+Details:
+
+- Surface of revolution: `revolve(f)` turns the curve y = f(x) about the
+  x-axis — `revolve(sqrt(x))`, `revolve(sin(x) + 2)`, or `revolve(f)` with
+  `f(x) = …` defined above. A second argument names another axis:
+  `revolve(y^2, y)` revolves a profile in y about the y-axis (`z` likewise).
+  The profile may use only its axis variable, plus sliders and t. It is
+  exactly the implicit surface `y^2 + z^2 = f(x)^2`, so a negative f draws
+  the same surface as |f|, and a piecewise f with no default bounds the
+  solid: `revolve({0 < x < 3: sqrt(x)})`. It must be the whole row.
+
+### Parametric surface (`psurface`)
+
+A surface traced by three components in u and v, each running from 0 to 1.
+
+Forms:
+
+- `(f(u, v), g(u, v), h(u, v))`: a bare triple, with no wrapper function.
+- A sphere of radius R: `(R sin(pi v) cos(2pi u), R sin(pi v) sin(2pi u), R cos(pi v))`.
+- A surface of revolution about z of a profile (r(v), z(v)):
+  `(r(v) cos(2pi u), r(v) sin(2pi u), z(v))`.
+
+Examples:
+
+- Torus: `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`
+- Sphere of radius 3: `(3sin(pi v)cos(2pi u), 3sin(pi v)sin(2pi u), 3cos(pi v))`
+- Helicoid: `(2v cos(4pi u), 2v sin(4pi u), 3u)`
+
+Pitfalls:
+
+- There is no `surface(…)` or `plot3d(…)`: the triple is the whole row.
+- u and v run from 0 to 1: scale them (`2pi u`) for angles.
+- Two components in u and v fill a flat region, not a surface.
+
+Details:
+
+- Parametric surface: three components in u and v —
+  `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`.
+
+### Parametric solid (`solid`)
+
+A solid in 3D: three components in three parameters (intervals, u and v)
+fill the solid they trace, drawn opaque as the faces of their parameter box.
+
+Forms:
+
+- `(interval(a, b), interval(c, d), interval(e, f))`: a box.
+- Named intervals for curved solids: `r = interval(0, 1)` above, then a
+  triple in r, u and v.
+
+Examples:
+
+- Unit cube: `(interval(0, 1), interval(0, 1), interval(0, 1))`
+- Unit ball: `r = interval(0, 1); p = interval(0, pi); q = interval(0, 2pi); (r sin(p) cos(q), r sin(p) sin(q), r cos(p))`
+- Solid cylinder: `r = interval(0, 1); h = interval(0, 2); (r cos(2pi u), r sin(2pi u), h)`
+
+Pitfalls:
+
+- The convex hull of the corners, `hull(([0,1],[0,1],[0,1]))`, is also a
+  solid cube (see Geometric figure).
+
+Details:
+
+- Parametric solid: three components in three parameters (intervals, u and
+  v) fill the solid they trace — `(interval(0, 1), interval(0, 1),
+  interval(0, 1))` is the unit cube, and with `r = interval(0, 1)`,
+  `p = interval(0, pi)` and `q = interval(0, 2pi)`,
+  `(r sin(p) cos(q), r sin(p) sin(q), r cos(p))` the unit ball. It is drawn
+  opaque, as the faces of its parameter box. A map that folds over itself
+  inside the box (`s = interval(-1, 1)`; `(s^2, u, v)`) is an error: write
+  it over a range where it does not, like `interval(0, 1)`. So is one
+  undefined in part of the box (a `{…}` with no default, `sqrt(s)` over
+  negative s): give the `{…}` a default, or split it into solids over the
+  parts where it is defined.
+
+### Curve of intersection (`spacecurve`)
+
+A 3D curve where surfaces meet: two equations in x, y and z, written as one
+tuple equation.
+
+Examples:
+
+- Where a sphere meets a plane: `(x^2+y^2+z^2, z) = (9, 1)`
+- Where two cylinders meet: `(x^2 + y^2, x^2 + z^2) = (1, 1)`
+
+Pitfalls:
+
+- Two separate rows draw the two surfaces; the tuple form draws only the
+  curve they share.
+
+Details:
+
+- Surface intersections: `(x^2+y^2+z^2,z) = (9,1)` traces the circle where
+  the sphere meets the plane. Bounded predictor–corrector continuation
+  follows the Jacobian null space, with at most 24 branches and 512 steps
+  per direction. Singularities stop a trace; tiny or isolated branches may
+  be missed. This numerical tracing does not certify branch completeness.
+
+### Geodesic (`geodesic`)
+
+A geodesic from a start point in a direction: integrated along a parametric
+surface, or in the plane under its panel's `ds^2` metric (a massive
+particle's path in a spacetime, or a light ray from `lightray(…)`).
+
+Forms:
+
+- `geodesic(S, (u0, v0), (du, dv))` on a surface S, with an optional length.
+- `geodesic(P, (dx, dy))` and `lightray(P, (dx, dy))` in a panel with a
+  `ds^2` row (Metric), or on an `on(…)` panel.
+
+Examples:
+
+- Helix on a cylinder: `S = (cos(u), sin(u), v); geodesic(S, (0, 0.5), (1, 1))`
+- Great circle on a sphere: `S = (cos(v) cos(u), cos(v) sin(u), sin(v)); geodesic(S, (0, 0), (1, 1))`
+- Poincaré half-plane: `ds^2 = (dx^2 + dy^2)/y^2; geodesic((0, 1), (1, 0))` — the unit circle
+- Orbit round a black hole: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; geodesic((10, 0), (0, sqrt(1/10)))` — a circular orbit
+- Bent light: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; lightray((-30, 6), (1, 0))` — passes the hole, bent
+
+Details:
+
+See Surfaces and Metrics, under Syntax.
+
+### Metric (`metric`)
+
+A panel's own metric, `ds^2 = …` in the differentials of its coordinates. It
+draws nothing; geodesic, light cone and
+tidal rows in the panel follow it, and `gaussian(x, y)` paints its
+curvature.
+
+Examples:
+
+- Poincaré half-plane: `ds^2 = (dx^2 + dy^2)/y^2`
+- Schwarzschild, equatorial: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2`
+- Minkowski spacetime diagram: `ds^2 = -dy^2 + dx^2` — y up as time
+
+Pitfalls:
+
+- Define the coordinates first: `dr` and `dphi` with no `r = …` and
+  `phi = …` rows are refused.
+- One `ds^2` row a panel; a metric using t is refused (time-dependent
+  metrics are not supported yet).
+
+Details:
+
+See Metrics, under Syntax.
+
+### Light cone (`lightcone`)
+
+Light cones of the panel's `ds^2` metric (Metric): `lightcones`
+draws them over the panel, `lightcone(P)` one at a point. On a spacetime
+diagram each is the two null directions, a wedge opening to the future; with
+a time beside x and y, the ellipse of the coordinate velocities light can
+have.
+
+Examples:
+
+- Minkowski: `ds^2 = -dy^2 + dx^2; lightcones`
+- Closing up at a horizon: `M = 1; ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x); lightcones`
+- One cone at a point: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; P = (4, 0); lightcone(P)`
+
+Pitfalls:
+
+- Refused with no metric, or a Riemannian one.
+
+Details:
+
+See Light cones, under Syntax.
+
+### Tidal forces (`tidal`)
+
+Tidal forces of the panel's `ds^2` metric (Metric) on an observer
+held at rest: `tidal` draws them over the panel, `tidal(P)` at a point —
+crossed bars along the directions a small cloud of free particles is
+stretched (arrowheads out) or squeezed (arrowheads in), as long as the tide
+is strong.
+
+Examples:
+
+- Round a black hole: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; tidal`
+- At a point: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; P = (5, 0); tidal(P)`
+
+Pitfalls:
+
+- Refused with no metric, or a Riemannian one: tidal forces need a time, so
+  write the ds² with a dt term.
+
+Details:
+
+See Tidal forces, under Syntax.
+
+### Vector field (`vfield2d`)
+
+A 2D vector field, drawn as animated streamlines: a pair of expressions in x
+and y, a slope field `y' = f(x, y)`, or a system `(x', y') = (…)`.
+
+Forms:
+
+- `(P(x, y), Q(x, y))`: the field (P, Q).
+- `y' = f(x, y)` (or `dy/dx = …`): the slope field (1, f).
+- `(x', y') = (P, Q)`: the phase portrait of a system.
+- `grad(f)` of a scalar f in x and y.
+
+Examples:
+
+- Saddle flow: `(x, -y)`
+- Slope field: `y' = x - y`
+- Pendulum phase portrait: `(x', y') = (y, -sin(x))`
+- Field with a slider: `a = 1; (y, -a x)`
+- Gradient field: `grad(x^2 - y^2)`
+
+Pitfalls:
+
+- A prime on x, y or z makes a field; a prime on a name of your own makes a
+  simulated state (see State, under Definitions).
+
+Details:
+
+- Vector field: a 2-tuple in x, y — `(-y, x)` — drawn as animated streamlines
+  (line-integral convolution); clicking the canvas traces integral curves.
+- ODE / slope field: `dy/dx = x y` or `y' = sin(x) - y` plots the direction
+  field (1, f); a system `(x', y') = (y, -sin(x))` plots its phase portrait.
+  (Primes on x/y/z mean this. A prime on a name of your own is a state — see
+  State, under Definitions — so `y' = -y` is a slope field while `th' = -th` is a simulation.)
+  A system that conserves an energy H(x, y) flows along its level sets, so
+  a row `H = c` draws an orbit: beside the pendulum `(x', y') = (y, -sin(x))`,
+  `y^2/2 - cos(x) = 1` is its separatrix, the level through the saddles at
+  ±π, with swinging inside and spinning outside.
+- Coordinate flows: `(r', theta') = (r(1-r), 1)` draws a polar limit cycle.
+  Both distinct coordinate names must have primes. Velocities are transformed
+  through the coordinate Jacobian; singular chart locations are undefined.
+  In 2D, click to trace trajectories just as for Cartesian vector fields. A lone
+  prime on a field is invalid; an otherwise unbound name still defines a state.
+  Static previews draw direction arrows for vector fields and points/curves
+  for coordinate and complex-root systems.
+
+### Vector field in space (`vfield3d`)
+
+A 3D vector field, drawn as trajectories through space: a triple of
+expressions in x, y and z, or a system `(x', y', z') = (…)`.
+
+Examples:
+
+- Swirl: `(-y, x, 0.5)`
+- Lorenz system: `(x',y',z') = (10(y-x), x(28-z)-y, x y-8z/3)`
+- Curl of a field: `curl((y z, -x z, 0))`
+
+Details:
+
+A 3-tuple in x/y/z, or `(x',y',z') = (10(y-x), x(28-z)-y, x y-8z/3)`, draws
+32 deterministic auto-seeded trajectories in space. Traces run in a worker
+with bounded RK4 steps and a directional fade. Moving fields are retraced at
+most four times per second. The arrows control switches to a 5×5×5 lattice
+of direction glyphs; there is no ambiguous 3D click-to-seed.
+
+### Scalar field (`scalar2d`)
+
+A 2D scalar field: a bare expression in x and y, shaded by sign and size —
+the row's colour where it is positive, its complement where negative.
+
+Examples:
+
+- Checkerboard waves: `sin(x) cos(y)`
+- Animated ripples: `sin(x^2+y^2-4t)/2`
+- Distance from a circle: `sqrt(x^2 + y^2) - 2`
+
+Pitfalls:
+
+- `sin(x)` alone is a field, constant along y: write `y = sin(x)` for the
+  curve.
+
+Details:
+
+- Scalar field: a bare expression in x and/or y — `sin(x)cos(y)`, or `sin(x)`
+  (constant along y) — shaded by value: the row color where it is positive,
+  the color's complement where negative, stronger the larger it is. There is
+  no implicit graph; a row in x alone reads out how to write its curve
+  (`y = sin(x)`). A list of fields (`a = [1, 2]; sin(a x)`) is an error: write
+  `y = sin(a x)` for the curves.
+
+### Scalar field in space (`scalar3d`)
+
+A scalar field in space: a bare expression in x, y and z, drawn as a
+translucent cloud, denser where the field is larger.
+
+Examples:
+
+- Gaussian blob: `exp(-(x^2 + y^2 + z^2))`
+- Octants by sign: `x y z`
+- Orbital: `z exp(-sqrt(x^2 + y^2 + z^2)/2)`
+
+Pitfalls:
+
+- For a surface, set the expression equal to something: `x y z = 1` is an
+  implicit surface.
+
+Details:
+
+- Scalar field in space: a bare expression in x, y and z — `x y z`,
+  `z exp(-sqrt(x^2 + y^2 + z^2)/2)` — is a translucent cloud, tinted the same
+  way (row color positive, complement negative) and denser where the field is
+  larger. The density is relative: the scale is what |f| typically reaches in
+  the view, so `x y z` and a tiny orbital both show, and a slider that only
+  multiplies the field changes nothing. The cloud fills a soft ball around
+  the view's center, fading out before the camera; a field that dies away
+  (an orbital) shows whole, and zooming out shows more of one that does not
+  (`x y z`). An implicit surface in the same
+  graph is seen through the cloud in front of it, so
+  `f(x, y, z) = …; f(x, y, z); f(x, y, z) = 0.5` draws a level surface inside
+  its field. For nested level surfaces instead, write
+  `f(x, y, z) = [1..5]`.
+
+### Sequence (`sequence`)
+
+A sequence, drawn as dots at the whole numbers n: an explicit `a_n = …`, or
+a recurrence whose step reads n or other sequences.
+
+Examples:
+
+- Harmonic sequence: `a_n = 1/n`
+- Primes: `a_n = isprime(n)`
+- Factorials: `a_0 = 1; a_{n+1} = (n + 1) a_n`
+
+Pitfalls:
+
+- A recurrence that steps from its own term alone draws a
+  cobweb, or with x a bifurcation diagram.
+
+Details:
+
 - Sequence values: `a_n = 1/n` defines `a_3` as a scalar and `a_[1..10]`
   as a list, usable in sums, scatters, histograms and regression. `a_k`
   reads the term at a slider `k`, and `a_N` one term per element of a list
@@ -1008,12 +1812,82 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   or a slider (`s_3`, `top(s_k)`); an explicit sequence `d_n = count(s_n)`
   cannot (read it in a recurrence's step instead). Its terms are computed
   once, so its step cannot read t.
+
+### Cobweb diagram (`cobweb`)
+
+A cobweb diagram: a recurrence that steps from its own term alone, drawn as
+the staircase between its map and the line y = x.
+
+Examples:
+
+- Logistic map: `a_0 = 0.2; a_{n+1} = 3.2 a_n (1 - a_n)`
+- Logistic map with a slider: `r = 3.5; a_{n+1} = r a_n (1 - a_n)`
+
+Details:
+
+See Sequence values, under Sequence: recurrences use their `a_0` seed (default 0.5).
+
+### Bifurcation diagram (`bifurcation`)
+
+A bifurcation (orbit) diagram: a recurrence whose step uses x as its
+parameter, drawn as where its orbit settles for each x.
+
+Examples:
+
+- Logistic map: `a_{n+1} = x a_n (1 - a_n)`
+
+Pitfalls:
+
+- A recurrence using x as a bifurcation parameter cannot also supply
+  constant terms without binding that parameter (see Sequence).
+
+### Orbit (`orbit`)
+
+The path a simulated state takes over a range of time, integrated ahead with
+the live simulation's own steps.
+
+Forms:
+
+- `p(start..end)` for a state p defined by `p' = …` (see State, under
+  Definitions); a scalar state plots against time.
+
+Examples:
+
+- Pendulum angle over time: `th' = om; om' = -sin(th); th(0) = 1; th(0..20)`
+- Planet's path: `r' = vel; vel' = -r/|r|^3; r(0) = (1, 0); vel(0) = (0, 1.2); r(0..20)`
+
+Details:
+
+- Orbit: `p(50..400)` draws the path the state takes from t = 50 to t = 400,
+  integrated ahead of time from p(0) with the live simulation's own steps —
+  the moving point rides exactly along it. Start after 0 to skip the
+  transient onto an attractor. A family draws one path per run (keep it to
+  a few, or pick one of runs in order: `p[1](50..400)`); a scalar state plots against time,
+  `th(0..20)` being the curve (t, th). The range must be constant (sliders
+  are fine; the orbit re-integrates when they move), 0 <= start < end; anything
+  drawn from states works too, like `b2(0..30)` for a pendulum bob. Orbit
+  plus family is how to draw a strange attractor with particles on it.
+
+### Cellular automaton (`automaton`)
+
+A cellular automaton on the integer lattice: a 1D rule draws its space-time
+diagram (cells across, steps down), a 2D rule one generation of its board,
+stepping with t.
+
+Examples:
+
+- Rule 90: `c_0[i] = {i = 0: 1, 0}; c_{n+1}[i] = mod(c_n[i-1] + c_n[i+1], 2)`
+- Every elementary rule on a slider: `r = 30; c_{n+1}[i] = mod(floor(r / 2^(4 c_n[i-1] + 2 c_n[i] + c_n[i+1])), 2)`
+- Conway's Life, from a glider: `life(c, s) = {s = 3: 1, s = 4: c, 0}; L_0 = [(0, 1), (1, 2), (2, 0), (2, 1), (2, 2)]; L_{n+1}[i, j] = life(L_n[i, j], sum(a=-1..1, sum(b=-1..1, L_n[i+a, j+b])))`
+
+Details:
+
 - Cellular automaton (1D): `c_{n+1}[i] = …` is a rule for a row of cells,
   reading the previous row at fixed offsets — `c_n[i-1]`, `c_n[i]`,
   `c_n[i+2]` — plus n, t and constants (not i itself). `c_0[i] = …` is the
   starting row as any expression in i; without it the start is a single 1
   at i = 0 on a background of 0s. The rule row draws the space-time diagram
-  in a lattice panel (below): i across, n down, for 1000 steps. The lattice
+  in a lattice panel (see Table): i across, n down, for 1000 steps. The lattice
   is unbounded: each side's background steps by the rule too, so rule 1
   (000 → 1) flips the whole background every row. Values shade the row's
   colour from 0 (empty) to the largest value (solid), so k-state rules work
@@ -1033,110 +1907,154 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `life(c, s) = {s = 3: 1, s = 4: c, 0}` then
   `L_{n+1}[i, j] = life(L_n[i, j], sum(a=-1..1, sum(b=-1..1, L_n[i+a, j+b])))`
   (s counts the cell itself).
-- Table: `T[i, j] = …` is a function on the integer lattice, drawn as cells
-  shaded by value: row i, column j, as a Cayley table or a matrix is read.
-  Undefined values leave a cell empty, so nested cases bound it:
-  `n = 6; T[i, j] = {0 <= i < n: {0 <= j < n: mod(i + j, n)}}` is the
-  addition table of ℤ/n. Only the cells in view are computed, so a table
-  may be unbounded (`T[i, j] = gcd(i, j)`).
-- Graph: `graph(from, to)` or `graph(from, to, label)` draws arrows between
-  numbered vertices, laid out automatically. Its arguments are read as one
-  tuple whose elements are the arrows, so lists combine by the usual rule:
-  with `k = [0..11]; g = [1, 4]`, `graph(k, mod(k + g, 12), g)` is the Cayley
-  graph of ℤ/12 by 1 and 4 (both k's chosen together, g crossing them), and
-  with `Q = [0..2]; S = [0, 1]` and a transition function `step(q, s)`,
-  `graph(Q, step(Q, S), S)` is every transition of a state machine.
-  `graph(P)` takes a list of pairs, `graph([(1, 2), (2, 3)])`. An arrow
-  listed twice is drawn once with its count (×2); an undefined vertex drops
-  its arrow, so a case keeps the ones wanted — composing two multisets of
-  arrows (matrix multiplication, as paths): `graph({A.y = B.x: A.x}, B.y)`,
-  or with the composition named as above, `graph(c(A, B))`.
-  Cases in graph rows may test equality. A panel of graphs has no grid.
-  A piecewise works inline over a list or through a function alike:
-  `k = [1..40]; graph(k, {mod(k, 2) = 0: k/2, 3k + 1})`.
-- `mark(v)` highlights vertex v in the graphs of its panel and reads v out;
-  with a slider or t it walks, e.g. a state machine's run as a recurrence
-  over a tuple of input symbols: `D = (1, 1, 0, 1); q_0 = 0;
-  q_{n+1} = step(q_n, D[n + 1]); mark(q_N)`.
-- Lattice panels: a panel whose rows are all automata, tables and stacks (or whose
-  view row names index axes) is a lattice. Its grid runs between cells, its
-  edges are numbered by index (whole numbers only), and zoomed in far enough
-  each cell prints its value. `view(i = -60..60, n = 0..80)` frames one by
-  its index names, in either order; panning rewrites it in those names.
-- Decided comparisons: `2+2=4` reads “Always true (4 = 4)”; `e=2` reads
-  “Never true (2.71828 ≠ 2)”. Comparisons involving sliders/time say
-  “True now” or “False now”. They draw no degenerate implicit curve.
-- Identities: an equation in x, y, z and t whose two sides agree everywhere
-  reads “Holds everywhere (checked numerically)” instead of drawing a curve.
-  The check compares both sides at many random points, for any slider
-  values, so it is evidence, not a proof. `sin(x)^2 + cos(x)^2 = 1` holds;
-  `sin(x)^2 + cos(x)^2 = 1.0001` does not, and stays an (empty) implicit
-  curve. The wave equation for d'Alembert's solution:
-  `c = 1; g(s) = exp(-s^2); f(x, t) = (g(x - c t) + g(x + c t))/2;
-  y = f(x, t); d^2/dt^2 f(x, t) = c^2 ∇^2 f(x, t)`. The pulse splits in two
-  and the last row holds everywhere. (u and w are the parametric and
-  complex variables, so they cannot name the solution.)
-- Vector field: a 2-tuple in x, y — `(-y, x)` — drawn as animated streamlines
-  (line-integral convolution); clicking the canvas traces integral curves.
-  A 3-tuple in x/y/z, or `(x',y',z') = (10(y-x), x(28-z)-y, x y-8z/3)`,
-  draws 32 deterministic auto-seeded trajectories in space. Traces run in a
-  worker with bounded RK4 steps and a directional fade. Moving fields are
-  retraced at most four times per second. The arrows control switches to a
-  5×5×5 lattice of direction glyphs; there is no ambiguous 3D click-to-seed.
-- ODE / slope field: `dy/dx = x y` or `y' = sin(x) - y` plots the direction
-  field (1, f); a system `(x', y') = (y, -sin(x))` plots its phase portrait.
-  (Primes on x/y/z mean this. A prime on a name of your own is a state — see
-  below — so `y' = -y` is a slope field while `th' = -th` is a simulation.)
-  A system that conserves an energy H(x, y) flows along its level sets, so
-  a row `H = c` draws an orbit: beside the pendulum `(x', y') = (y, -sin(x))`,
-  `y^2/2 - cos(x) = 1` is its separatrix, the level through the saddles at
-  ±π, with swinging inside and spinning outside.
+
+### Number list (`vlist`)
+
+A list of numbers, drawn as a dot plot on the number line: each value at
+x = value, copies stacked upward.
+
+Examples:
+
+- Dot plot: `[3, 1, 4, 4]`
+- Distribution of a long list: `L = [1..300]; sin(L)`
+
+Pitfalls:
+
+- A list has no order, so no index is drawn; a sequence `a_n`
+  draws at n.
+
+Details:
+
+- Data list: `[3, 1, 4, 4]` is a dot plot on the number line — a dot at each
+  value on the x axis, copies stacked upward, so 4 has dots at (4, 1) and
+  (4, 2). A list has no order, so no index is drawn (a sequence `a_n` does
+  draw at n). Values closer than a dot's width at the current zoom share a
+  column, so a long list (`sin(L)` for `L = [1..300]`, a CSV column of
+  thousands) stacks into the shape of its distribution rather than one row of
+  overlapping dots; zoom in and they separate. `[(1, 2), (3, 4)]` draws a
+  scatter of points.
+  Any list-valued expression plots the same way (`L^2 + 1`,
+  `(L, L^2)` with `L` defined above, or a CSV column: `person.age`).
+
+### Point list (`plist`)
+
+A list of points, drawn as dots: written out, built from crossing lists, or
+a list of complex numbers.
+
+Examples:
+
+- Three points: `[(1, 2), (3, 4), (5, 1)]`
+- Grid of four points: `[0,1] e_x + [0,1] e_y`
+- Fifth roots of unity: `n = 5; e^(2 pi i [0..n-1]/n)`
+- Amplitude spectrum: `fourier((0, 1, 0, -1))`
+
+Pitfalls:
+
+- Two separately defined lists cross: with `X = [1, 2]` and `Y = [3, 4]`,
+  `(X, Y)` is 4 points. Pair values by writing the points out.
+
+Details:
+
+- Complex list: one complex member makes a list complex — `1` in
+  `[1, i, -1]` is 1 + 0i — and it draws each member as a complex point:
+  `n = 5; e^(2 pi i [0..n-1]/n)` is the fifth roots of unity, n on a
+  slider. Name it like any list (`S = e^(i pi [0..5]/5)`); `re(S)`,
+  `abs(S)` and `(re(S), im(S))` are real. `total`, `mean` and `count`
+  reduce it; `sort`, `median`, `stdev`, `min`, `max` and `hist` need real
+  numbers, so take `abs`, `re` or `im` first (filters and sort keys too:
+  `S[re(S) > 0]`; equality needs neither, `S[S == 1]`). `sort(S, re(S))`
+  is S's members in order, a tuple, which has no picture yet: `T[k]` picks
+  one. Members are drawn split into
+  real and imaginary parts, 2^21 nodes in all: constant members are two
+  numbers each, but thousands of members of a slider-dependent polynomial
+  are too many. A list cannot mix complex numbers with points, and a
+  point's coordinates stay real (`(S, 1)` is an error).
+
+### Histogram (`histogram`)
+
+A histogram: a list's values binned into a bar chart.
+
+Examples:
+
+- Histogram of a few values: `hist([1, 2, 2, 3, 3, 3, 4])`
+- Histogram with 20 bins: `L = [1..200]; hist(sin(L), 20)`
+
+Details:
+
+- `hist(L)` bins a list into a bar chart — `hist(L, 40)` sets the bin count
+  (default ≈ √n, between 5 and 60). It is a whole row, not a value, and the
+  one thing you may do to it is scale it: the plane has a single scale for
+  both axes, so counts in the thousands need `hist(L, 40) / 800` to share a
+  view with values in the units. Missing values are left out.
+
+### Data column (`dlist`)
+
+A column of a data file, drawn as a dot plot on the number line like any
+number list.
+
+Examples:
+
+- Ages from a CSV file: `person = open("people.csv", 3a7f9c1d2e4b); person.age`
+
+Pitfalls:
+
+- The data stays on the device that dropped the file: elsewhere the row
+  reports it as device-local (see Data file, under Definitions).
+
+### Data scatter (`dscatter`)
+
+A scatter plot of data: two (or three) columns of one data file as points,
+paired row by row.
+
+Examples:
+
+- Height against age: `person = open("people.csv", 3a7f9c1d2e4b); (person.age, person.height)`
+- Hénon map orbit: `p_0 = (0, 0); p_{n+1} = (1 - 1.4 p_n[1]^2 + p_n[2], 0.3 p_n[1])`
+
+Pitfalls:
+
+- A three-column scatter draws in 3D, capped at 10 000 points (see Data
+  file, under Definitions).
+
+### Tuple readout (`tuple`)
+
+A tuple of more than 3 numbers, or a matrix or tensor on its own row: read
+out under the row; draws nothing.
+
+Examples:
+
+- Sorted values: `sort([5, 3, 8, 1, 2])`
+- A matrix: `M = ((1, 2), (3, 4)); M`
+
+Pitfalls:
+
+- A tuple of 2 or 3 numbers is a point: `sort([3, 1, 2])` draws
+  (1, 2, 3).
+
+Details:
+
+See Order lives in tuples, under Expression syntax.
+
+### Random variable (`density`)
+
+A random variable, drawn as its probability density curve: `X ~ Normal(0, 1)`
+declares X, and arithmetic over random variables declares new ones.
+
+Examples:
+
+- Standard normal: `X ~ Normal(0, 1)`
+- Normal with sliders: `m = 1; s = 0.5; X ~ Normal(m, s)`
+- Square of a normal: `X ~ Normal(0, 1); Y = X^2`
+
+Pitfalls:
+
+- `P(…)` and `E(…)` rows need the variable declared in a row of its own.
+
+Details:
+
 - Random variable: `X ~ Normal(mean, sd)` declares X and plots its density
   curve. Parameters may use sliders and t, so `X ~ Normal(0, a)` follows the
   slider live.
-- Probability: `P(X < 2)`, `P(X > 0)` or `P(0 < X < 2)` shades that area
-  under X's density and shows the numeric probability (normal CDF) as a
-  readout under the row.
-- Expectation: `E(X)`, `E(X^2 + Y)` — the mean of any expression in random
-  variables, shown as a readout under the row and marked on the density.
-- Parametric curve: components in u — `(2cos(2pi u), sin(4pi u))`, or with
-  `u = interval(0, 2pi)` above, `(2cos(u), sin(2u))`; three components make
-  a 3D curve — `(2cos(6pi u), 2sin(6pi u), 4u - 2)`.
-  A plane curve lifts the pen where it jumps (a step, a pole, a branch cut)
-  rather than bridging the gap: `(u, floor(3u))`, `(4u - 2, tan(12u - 6))`.
-- Tube: `tube((x(u), y(u), z(u)))` sweeps a 3D parametric curve into a lit
-  solid tube — `tube((sin(2pi u) + 2sin(4pi u), cos(2pi u) - 2cos(4pi u),
-  -sin(6pi u)))` is a trefoil knot. An optional last argument sets the radius
-  (default 0.1): `tube((1+cos(4pi u), sin(4pi u), 2sin(2pi u)), 0.06)`. It
-  must be the whole row; without it a 3D curve stays a thin line. The curve
-  needs exactly three components: `tube((a, b), r)` does not tube a plane
-  curve, it reads as the 3D curve (a, b, r).
-- Parametric surface: three components in u and v —
-  `(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))`.
-- Parametric region: two components in two parameters fill the region they
-  trace — `(u cos(2 pi v), u sin(2 pi v))` is the unit disc, and with
-  `r = interval(1, 2)`, `(r cos(2 pi u), r sin(2 pi u))` an annulus. In a 3D
-  scene it lies in the plane z = 0.
-- Parametric solid: three components in three parameters (intervals, u and
-  v) fill the solid they trace — `(interval(0, 1), interval(0, 1),
-  interval(0, 1))` is the unit cube, and with `r = interval(0, 1)`,
-  `p = interval(0, pi)` and `q = interval(0, 2pi)`,
-  `(r sin(p) cos(q), r sin(p) sin(q), r cos(p))` the unit ball. It is drawn
-  opaque, as the faces of its parameter box. A map that folds over itself
-  inside the box (`s = interval(-1, 1)`; `(s^2, u, v)`) is an error: write
-  it over a range where it does not, like `interval(0, 1)`. So is one
-  undefined in part of the box (a `{…}` with no default, `sqrt(s)` over
-  negative s): give the `{…}` a default, or split it into solids over the
-  parts where it is defined.
-- 3D surface: any equation in x, y, z.
-- Surface of revolution: `revolve(f)` turns the curve y = f(x) about the
-  x-axis — `revolve(sqrt(x))`, `revolve(sin(x) + 2)`, or `revolve(f)` with
-  `f(x) = …` defined above. A second argument names another axis:
-  `revolve(y^2, y)` revolves a profile in y about the y-axis (`z` likewise).
-  The profile may use only its axis variable, plus sliders and t. It is
-  exactly the implicit surface `y^2 + z^2 = f(x)^2`, so a negative f draws
-  the same surface as |f|, and a piecewise f with no default bounds the
-  solid: `revolve({0 < x < 3: sqrt(x)})`. It must be the whole row.
 - Random variable: `X ~ Normal(mean, sd)` — also `Uniform(lo, hi)` and
   `Exponential(rate)`, with short aliases `N`, `U`, `Exp`; a bare name means
   the standard parameters (`X ~ N` is Normal(0, 1)). The row plots the exact
@@ -1156,6 +2074,61 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   parameter (`Gamma(shape, rate) needs shape > 0.`). Densities with a pole at
   the support edge (`Gamma` with shape < 1, `ChiSquared(1)`, `Beta` with
   a or b < 1, `Weibull` with shape < 1) draw and shade up to the pole.
+- Discrete mixed with continuous (`N ~ Poisson(3); Z ~ Normal(0, 1);
+  Y = N + Z`, `N Z`, `P(N > Z)`, `E(N + Z)`) is a continuous MIXTURE: a density
+  row, estimated from the joint sample like any other sampled density (an
+  atom such as `N Z = 0` stays a stem). A point event needs discrete
+  variables throughout: `P(Y = 3)`, `P(N = Z)`, `P(Z = 1)` are errors naming
+  the continuous variable (the value would be 0).
+- Derived random variable: `Y = X^2`, `S = X1 + X2` — arithmetic over
+  declared random variables declares a new one, including piecewise
+  conditionals: `Y = {X > 0: X^2, 1}`. Distinct names are independent, so
+  `S = X1 + X2` is the convolution; the same name stays dependent, so
+  `X + X` is exactly 2X. A bare expression in random variables (`X + Y` as
+  its own row) plots that density without naming it. Affine forms stay
+  exact: combinations of normals (`Z = (X + Y)/2`) are the exact normal, a
+  scaled/shifted uniform is a uniform, and sums of uniforms (`S = X1 + X2`,
+  the central-limit demo) draw their exact piecewise-polynomial convolution —
+  the triangle's apex is a true corner. Independent Gamma-family terms
+  (Gamma, ChiSquared, Exponential) with positive number coefficients whose
+  scaled rates agree sum to the exact Gamma (`X1 + X2` of two `Gamma(·, 3)`,
+  `2X`, a sum of chi-squareds), and the square of a standard normal
+  (`Z ~ Normal(0, 1); Z^2`) is the exact `ChiSquared(1)`. Any affine
+  combination of independent Cauchys with nonzero number coefficients is the
+  exact Cauchy (locations add, scales add through |c|: `X + 1`, `-3X`,
+  `X + C`; a slider coefficient estimates instead, since at 0 the variable
+  is a constant), and a LogNormal times a
+  positive number is the LogNormal with mu + ln c. These rows report exact
+  μ and σ where those exist.
+  Everything else (products, nonlinear or piecewise transforms, mixed
+  families) is estimated from 131072 joint samples and reports μ, σ as `≈`.
+  A variable with heavy tails — anything that passes the tail of a `Cauchy`
+  or a `StudentT` with df ≤ 2 through, like `X + 1` — reports
+  `median ≈ …, IQR ≈ …` instead: its σ (and for df ≤ 1 its mean) does not
+  exist, and a sample estimate of it would be noise. Whether the mean
+  exists is read off the tails (it does when they decay faster than 1/x,
+  with a two-standard-error margin — and a wider one over a `Cauchy` or
+  `StudentT(df ≤ 1)` base — so a mean that only just exists reads as
+  unstable), and a mean that numeric integration certifies always counts, so
+  `E(X^2)` over `StudentT(3)` is 3 although its σ is infinite, while
+  `E(X^2 + Y)` over `StudentT(2)` has no value.
+  Point masses are detected and drawn as probability stems (height = mass):
+  `Y = {X > 0: 1, 2}` is two stems, `floor(4X)` four, and a mixed result
+  like `{X > 0: X^2, 1}` draws its stem plus the continuous density.
+
+### Discrete random variable (`pmf`)
+
+A discrete random variable, drawn as its probability mass function: a stem
+at each value it takes.
+
+Examples:
+
+- Binomial: `K ~ Binomial(10, 0.5)`
+- Poisson with a slider: `m = 4; X ~ Poisson(m)`
+- Sum of two dice: `X ~ DiscreteUniform(1, 6); Y ~ DiscreteUniform(1, 6); X + Y`
+
+Details:
+
 - Discrete random variable: `X ~ Binomial(n, p)`, `Poisson(mean)`,
   `Geometric(p)`, `NegativeBinomial(r, p)`, `Bernoulli(p)`,
   `DiscreteUniform(a, b)` (aliases `Binom`, `Pois`, `Geom`, `NegBin`;
@@ -1217,53 +2190,43 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   histogram on the values' own lattice with heavy atoms (the 0 of
   `L B`, B Bernoulli) kept as stems; values on no lattice read `(sampled: too
   many distinct values to resolve the pmf)`.
-- Discrete mixed with continuous (`N ~ Poisson(3); Z ~ Normal(0, 1);
-  Y = N + Z`, `N Z`, `P(N > Z)`, `E(N + Z)`) is a continuous MIXTURE: a density
-  row, estimated from the joint sample like any other sampled density (an
-  atom such as `N Z = 0` stays a stem). A point event needs discrete
-  variables throughout: `P(Y = 3)`, `P(N = Z)`, `P(Z = 1)` are errors naming
-  the continuous variable (the value would be 0).
-- Derived random variable: `Y = X^2`, `S = X1 + X2` — arithmetic over
-  declared random variables declares a new one, including piecewise
-  conditionals: `Y = {X > 0: X^2, 1}`. Distinct names are independent, so
-  `S = X1 + X2` is the convolution; the same name stays dependent, so
-  `X + X` is exactly 2X. A bare expression in random variables (`X + Y` as
-  its own row) plots that density without naming it. Affine forms stay
-  exact: combinations of normals (`Z = (X + Y)/2`) are the exact normal, a
-  scaled/shifted uniform is a uniform, and sums of uniforms (`S = X1 + X2`,
-  the central-limit demo) draw their exact piecewise-polynomial convolution —
-  the triangle's apex is a true corner. Independent Gamma-family terms
-  (Gamma, ChiSquared, Exponential) with positive number coefficients whose
-  scaled rates agree sum to the exact Gamma (`X1 + X2` of two `Gamma(·, 3)`,
-  `2X`, a sum of chi-squareds), and the square of a standard normal
-  (`Z ~ Normal(0, 1); Z^2`) is the exact `ChiSquared(1)`. Any affine
-  combination of independent Cauchys with nonzero number coefficients is the
-  exact Cauchy (locations add, scales add through |c|: `X + 1`, `-3X`,
-  `X + C`; a slider coefficient estimates instead, since at 0 the variable
-  is a constant), and a LogNormal times a
-  positive number is the LogNormal with mu + ln c. These rows report exact
-  μ and σ where those exist.
-  Everything else (products, nonlinear or piecewise transforms, mixed
-  families) is estimated from 131072 joint samples and reports μ, σ as `≈`.
-  A variable with heavy tails — anything that passes the tail of a `Cauchy`
-  or a `StudentT` with df ≤ 2 through, like `X + 1` — reports
-  `median ≈ …, IQR ≈ …` instead: its σ (and for df ≤ 1 its mean) does not
-  exist, and a sample estimate of it would be noise. Whether the mean
-  exists is read off the tails (it does when they decay faster than 1/x,
-  with a two-standard-error margin — and a wider one over a `Cauchy` or
-  `StudentT(df ≤ 1)` base — so a mean that only just exists reads as
-  unstable), and a mean that numeric integration certifies always counts, so
-  `E(X^2)` over `StudentT(3)` is 3 although its σ is infinite, while
-  `E(X^2 + Y)` over `StudentT(2)` has no value.
-  Point masses are detected and drawn as probability stems (height = mass):
-  `Y = {X > 0: 1, 2}` is two stems, `floor(4X)` four, and a mixed result
-  like `{X > 0: X^2, 1}` draws its stem plus the continuous density.
+
+### Probability (`prob`)
+
+A probability: `P(…)` of an event, shaded under the density (or the stems
+it counts highlighted) with its value as a readout.
+
+Examples:
+
+- Normal between 0 and 2: `X ~ Normal(1, 0.5); P(0 < X < 2)`
+- Poisson at most 3: `X ~ Poisson(4); P(X <= 3)`
+
+Details:
+
+- Probability: `P(X < 2)`, `P(X > 0)` or `P(0 < X < 2)` shades that area
+  under X's density and shows the numeric probability (normal CDF) as a
+  readout under the row.
 - Probability: `P(X < 2)`, `P(-1 < X < 2)`, and bounds around one expression
   like `P(0.5 < X + Y < 1.5)` — exact (closed-form CDF or polynomial
   integration) with the area under the density shaded, whenever the bounded
   variable or expression has an exact law. Any other inequality —
   `P(Y > 0.5)` for a nonlinear Y, `P(Y > X)` — is estimated from the joint
   samples; the row shows the value as `≈`.
+
+### Expectation (`expect`)
+
+An expected value: `E(…)` of an expression in random variables, read out and
+marked on the density.
+
+Examples:
+
+- Mean of an exponential: `X ~ Exponential(2); E(X)`
+- Mean of a sum of dice: `X ~ DiscreteUniform(1, 6); Y ~ DiscreteUniform(1, 6); E(X + Y)`
+
+Details:
+
+- Expectation: `E(X)`, `E(X^2 + Y)` — the mean of any expression in random
+  variables, shown as a readout under the row and marked on the density.
 - Expectation: `E(X)`, `E(2X + 3)`, `E(X^2 + Y)` — the mean of any
   expression in the declared variables, exact whenever the expression has an
   exact law (closed-form pdfs, affine combinations of normals, uniform sums)
@@ -1272,6 +2235,361 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   the mean does not exist (`E(X)` for a Cauchy or `StudentT(1)`, `E(X^2)`
   for a Cauchy) the readout is `no stable mean (heavy tails)` and no marker
   is drawn.
+
+### Complex function (`complex2d`)
+
+A complex function of w = x + iy, shown on the plane as field lines and
+equipotentials.
+
+Examples:
+
+- Dipole: `ln(w-2) - ln(w+2)`
+- Joukowski map: `w + 4/w`
+
+Pitfalls:
+
+- `domain(…)` and `conformal(…)` show the same function as a
+  domain colouring or a conformal map.
+
+### Domain colouring (`domain2d`)
+
+Domain colouring of a complex function: hue is its argument, brightness its
+size.
+
+Examples:
+
+- Roots and a pole: `domain((w^3 - 1)/w)`
+- Two zeros: `domain(w^2 + 1)`
+
+Details:
+
+- Domain coloring: `domain(f)` where f is complex — `domain(w^2 + 1)`. Hue is
+  arg f, brightness |f|; zeros render black and poles white.
+
+### Conformal map (`conformal2d`)
+
+A conformal map: the image of the coordinate grid under a complex function.
+
+Examples:
+
+- Squaring map: `conformal(w^2/4)`
+
+Details:
+
+- Conformal map: `conformal(f)` — `conformal(w^2/4)` — draws the image of the
+  coordinate grid under f (the level curves of re f and im f).
+
+### Escape-time fractal (`fractal2d`)
+
+An escape-time fractal: `iter(step)` iterates z ↦ step for every point of
+the plane, coloured by how fast it escapes.
+
+Examples:
+
+- Mandelbrot set: `iter(z^2 + w)`
+- Julia set: `iter(z^2 - 0.7269 + 0.1889i)`
+- Burning ship: `iter((|re(z)| - i |im(z)|)^2 + w)`
+
+Details:
+
+- Fractal: `iter(step)` iterates `z ↦ step`, coloring by escape time. Inside
+  `iter` only, `z` is the iterate. If the step mentions the plane (`w`, `x`,
+  `y`) iteration starts at 0, so `iter(z^2 + w)` is the Mandelbrot set; with a
+  fixed constant the pixel is the starting point, so `iter(z^2 - 0.8 + 0.156i)`
+  is a Julia set. An optional second argument sets the iteration count,
+  `iter(z^2 + w, 600)` (default 250, max 5000). Any expression works:
+  `iter((|re(z)| - i |im(z)|)^2 + w)` is the burning ship.
+  `iter` is for the plane; an escape-time fractal in space (the Mandelbulb,
+  a quaternion Julia set) is a recursive function — see Recursive
+  function, under Definitions.
+
+### RGB colour field (`rgb2d`)
+
+A colour field filling the plane: red, green and blue (0 to 1) at every
+point (x, y).
+
+Examples:
+
+- Gradient: `rgb(x/4, y/4, 0.5)`
+- Colour wheel: `rgb(cos(arg(w)/2)^2, cos(arg(w)/2+1)^2, cos(arg(w)/2+2)^2)`
+- Red glow fading out: `rgb(1, 0, 0, exp(-x^2-y^2))`
+
+Details:
+
+- RGB color field: `rgb(red, green, blue)` fills the 2D plane with a color at
+  each (x, y). Channels are real expressions on the 0–1 scale (not CSS's
+  0–255); values outside that range are clamped, so `rgb(255, 128, 0)` is
+  white, not orange. `rgb(1, 0, 0)` fills the plane red. Expressions may
+  use x, y, t, sliders, coordinate fields, and real projections of w such as
+  `arg(w)` or `abs(w)`. For example,
+  `rgb(cos(arg(w)/2)^2, cos(arg(w)/2+1)^2, cos(arg(w)/2+2)^2)`.
+  This is a whole-row plot mode, not a color value for styling another row;
+  it cannot be nested in arithmetic or lists and does not take u, v, or z.
+  A pixel with any undefined or infinite channel is transparent, so a partial
+  piecewise channel can restrict the field: `rgb({x>0:1}, 0, 0)`. An
+  optional fourth argument is the opacity, 0–1 (clamped; default 1), so a
+  field can fade into the graph paper: `rgb(1, 0, 0, exp(-x^2-y^2))`.
+  RGB, HSL and OKLCH rows share the same layer and draw in row order;
+  curves and regions draw over them.
+  Static share-card previews use the site card; the live graph renders the field.
+
+### HSL colour field (`hsl2d`)
+
+A colour field filling the plane from hue (radians), saturation and
+lightness (0 to 1).
+
+Examples:
+
+- Hue wheel: `hsl(atan2(y, x), 1, 0.5)`
+- Turning wheel: `hsl(arg(w)+t/3, 1, 0.5)`
+
+Details:
+
+- HSL color field: `hsl(hue, saturation, lightness)` uses hue in radians and
+  saturation/lightness on a 0–1 scale (not CSS's percentages). Hue wraps
+  around 2pi; saturation/lightness are clamped. `hsl(2pi/3, 1, 0.5)` is
+  green. An animated wheel is `hsl(arg(w)+t/3, 1, 0.5)`.
+
+### OKLCH colour field (`oklch2d`)
+
+A colour field filling the plane from lightness, chroma and hue (radians),
+with more even perceived lightness than HSL.
+
+Examples:
+
+- Hue wheel: `oklch(0.7, 0.15, atan2(y, x))`
+- Turning wheel: `oklch(0.72, 0.16, arg(w)+t/3)`
+
+Details:
+
+- OKLCH color field: `oklch(lightness, chroma, hue)` uses lightness 0–1,
+  nonnegative chroma (typically 0–0.4), and hue in radians. Lightness is
+  clamped, negative chroma becomes zero and hue wraps around 2pi. Zero chroma
+  is neutral gray; lightness 0 and 1 give black and white. Colors outside
+  sRGB are mapped by reducing chroma at fixed lightness and hue, then encoded
+  as sRGB. This is strict chroma reduction, not CSS's local-MINDE algorithm
+  or wide-gamut output. Try `oklch(0.72, 0.16, arg(w)+t/3)` for a wheel
+  with more even perceived lightness than HSL. HSL and OKLCH have the same
+  real-channel, whole-row and transparency rules as RGB; all three accept
+  equations, sliders and time. Every channel is 0–1 except hue (radians,
+  like trig functions and `arg`, so `arg(w)` is a hue directly) and chroma.
+  To port a CSS color, divide 0–255 channels by 255, percentages by 100, and
+  write a degree hue as `h pi/180`.
+
+### Matrix field (`tfield2d`)
+
+A 2D matrix (tensor) field, drawn as a grid of glyphs: each the image of a
+small circle under the matrix there, with a spoke where e_x goes;
+`streamlines(M)`, or a toggle, traces its major eigenvector instead.
+
+Examples:
+
+- Matrix field: `((x, y), (y, -x))`
+- Jacobian of a conformal map: `jacobian((x^2 - y^2, 2x y))`
+- Hessian as streamlines: `streamlines(hessian(x^3 - 3 x y^2))`
+
+Details:
+
+A 2×2 matrix in x and y is a matrix field, `((x, y), (y, -x))`: a grid of
+glyphs, each the image of a small circle under the matrix there with a
+spoke to where e_x goes, drawn true size while small and a cell at most,
+in the row colour's complement where det < 0. `streamlines(M)` (or the
+row's `streamlines` toggle) draws it instead as streaks along the major
+eigenvector of its symmetric part (M + Mᵀ)/2 — a line field, with no
+arrowhead and no drift, fading at the degenerate points where that part
+is a multiple of I: `streamlines(hessian(x^3 - 3 x y^2))`. See Matrix, under
+Definitions.
+
+### Multivector (`multivector`)
+
+A multivector or quaternion: its grades drawn as arrows, oriented discs and
+cubes (a rotor as the turn it makes), its value read out.
+
+Examples:
+
+- Bivector: `gp(e_x, e_y)`
+- Quaternion: `quat(1, 2, 3, 4)`
+- Rotor making a quarter turn: `e^(-(pi/4) e_xy)`
+
+Details:
+
+- Multivectors (geometric algebra, Cl(2) and Cl(3), Euclidean): `a ⟑ b`
+  (type `\gp`, or `gp(a, b)`) is the geometric product, `e_x ⟑ e_y` is the
+  bivector `e_xy`, and `e_x ⟑ e_x` is 1. The blades are built in, like
+  `e_x`: `e_xy`, `e_yz`, `e_zx` (and any reordering, `e_yx = −e_xy`) and
+  `e_xyz`; they are always 3D, while `(1, 0) ⟑ (0, 1)` is the plane's own
+  e_xy. Once one side is a multivector, juxtaposition is the geometric
+  product too (`R p rev(R)`), `∧` is the outer product, and `+`, `−`, whole
+  powers (`A^-1`, `A^3`) and `e^A` work; two plain vectors still need `⟑`
+  (`e_x e_y` stays an error, `e_x ∧ e_y` the tensor wedge). Dividing by a
+  multivector is refused — `a/2e_xy`, touching, would read as `a/(2e_xy)` —
+  so write `a/2 e_xy`, and `A B^-1`. `rev(A)` reverses, `conj(A)` is
+  the Clifford conjugate, `dual(A)` is `A I⁻¹` (`dual(e_xy)` is `e_z`),
+  `grade(A, k)` is the grade-k part, and `|A|` its size. A row that is a
+  multivector draws it grade by grade — its vector an arrow, its bivector an
+  oriented disc of that area in its plane with an arrow round the rim, its
+  trivector a cube of that volume — and reads out `= 1 + 2 e_xy`. A
+  quaternion, or a rotor (a scalar and a bivector), draws as the rotation it
+  makes: an arrow along the axis, |q| long, and a sector of radius |q|
+  sweeping the angle 2 atan2(|v|, w), so its scalar part moves the picture. A result
+  written only as a number or a vector is that number or vector
+  (`grade(R ⟑ v ⟑ rev(R), 1)` is a point), and a row may name a multivector
+  (`R = e^(-(t/2) e_xy)`). Rotors: `e^(-(th/2) B)` for a unit bivector B
+  turns by th in B's plane, `R p rev(R)` applies it, and `rotate(X, R)` turns
+  a point, a list of points or a figure by it: `rotate(hull(P), R)`.
+- Quaternions: `quat(w, x, y, z)` (or `quat(w, v)` with v a 3D vector) is
+  w + x i + y j + z k, read out that way. They are the even multivectors of
+  space (i = e_zy, j = e_xz, k = e_yx), so they multiply by juxtaposition
+  (`quat(0,1,0,0) quat(0,0,1,0)` is `k`), invert with `q^-1`, conjugate
+  with `conj(q)`, and the unit quaternion `quat(cos(th/2), sin(th/2) n)`
+  turns by th about the unit axis n: `rotate(P, q)`. `grade(q, 0)` is its
+  w, and `vec(q)` its vector part (x, y, z), a point. `slerp(q1, q2, s)`
+  runs the shorter arc between two rotations at constant speed, s from 0 to
+  1: `rotate(hull(P), slerp(q1, q2, (1 - cos(t))/2))` rocks a solid between
+  two orientations. A quaternion passed to a recursive function's self-call
+  spreads into four parameters, so an orbit is written in quaternion
+  algebra — the quaternion Julia set of C, sliced at k = s (see Recursive
+  function, under Definitions): `C = quat(-0.2, 0.8, 0, 0); s = 0;
+  Q(a, b, c, d, k) = {|quat(a, b, c, d)| > 2: ln(|quat(a, b, c, d)|)/2^k,
+  k >= 12: ln(|quat(a, b, c, d)|)/2^k, Q(quat(a, b, c, d)^2 + C, k + 1)};
+  Q(x, y, z, s, 0) = 0.001`, framed with `camera(-pi/3, 0.5, 3)`. Older
+  links write the same surface as `qjulia(C, s)`; it still draws, but new
+  graphs should spell the orbit out as above.
+
+### Line or plane (`flat`)
+
+A point, line or plane of projective geometry, like `join(A, B)` or
+`meet(L, M)`: drawn, with its equation (or an ideal point's direction) read
+out.
+
+Examples:
+
+- Line through two points: `join((0, 0), (1, 1))`
+- Plane through three points: `A = (0, 0, 0); B = (1, 0, 0); C = (0, 1, 1); plane(A, B, C)`
+- Where two lines cross: `meet(join((0, 0), (1, 1)), join((0, 2), (2, 0)))`
+
+Details:
+
+- Projective geometry (lines and planes as values): `join(A, B)` (or
+  `line(A, B)`) is the line through two points, in the plane or in space;
+  `join(A, B, C)` (or `plane(A, B, C)`) the plane through three points of
+  space, and `plane(P, n)` the plane through P with normal n. `meet(L, M)`
+  is where two lines of the plane cross, and in space where a line goes
+  through a plane (a point) or two planes cross (a line); two lines of space
+  do not meet. A meet is a point like any other — `X = meet(L, M)` names it,
+  `polygon(meet(…), B, C)` and `midpoint(meet(…), A)` take it. Parallel
+  lines meet at an ideal point, which draws nothing and reads out `at
+  infinity, direction (1, 2)`. `project(P, L)` is the point of the line or
+  plane L nearest P (or a line's shadow on a plane), and `reflect(P, L)`
+  mirrors P in a line, a plane or a point. `distance(P, L)` measures from a
+  point to a line or plane, and between lines or planes (0 where they cross);
+  `angle(L, M)` is the acute angle between two lines or planes, in [0, π/2].
+  A row holding a line or plane draws it — a line of the plane as its
+  implicit line, a line of space across the view box, a plane as a surface —
+  and reads out its equation: `= y = 2x + 1`, `= z = -x - y + 1`, or `=
+  through (0, 0, 1), direction (1, 1, 0)` for a line of space. Name one
+  (`L = join(A, B)`) to pass it on; the definition itself draws nothing, the
+  row `L` does. A line or plane is no number or point, so `2 L` is an error.
+  Lists broadcast as everywhere else: with `P = [A, B]`, `join(P, C)` is two
+  lines, `L = join(P, C); meet(L, L)` pairs each line with itself, and
+  `meet(K, H)` for a line K and a list of planes H is the list of crossing
+  points, which `count`, `mean` and `total` take. A plane draws as a
+  translucent sheet, outlined where it meets the view box, so a line in it
+  or behind it shows through.
+- Rigid motions (motors): `motor(L, th, d)` turns by th about the line L of
+  space — right-handed about L's direction, A → B for `line(A, B)` — while
+  sliding d along it (a screw; d may be left out); `motor(P, th)` turns the
+  plane counterclockwise about the point P. `rotate(X, M)` moves a point, a
+  list of points, a line, a plane or a figure by it:
+  `rotate(hull(([0,1],[0,1],[0,1])), motor(line(A, B), t, t/4))` screws a
+  cube along the axis through A and B, which stay draggable.
+  `slerp(M1, M2, s)` is the rigid motion s of the way from M1 to M2, at
+  constant speed along the screw between them — for motors that stay fixed
+  (fixed axes, turns and slides), with the motion in s:
+  `rotate(X, slerp(M1, M2, (1 - cos(t))/2))`. A row holding a motor draws
+  its axis (or its centre, in the plane) and reads out what it does: `=
+  turn 1.5708 about the line through (0, 0, 0), direction (0, 0, 1), slide
+  2`, `turn 1.5708 about (1, 1)` or `slide (0, 0, 3)` — a motor and its
+  opposite are one motion, read the shorter way round. A motor is no number
+  or point: name it (`M = motor(L, t, 1)`) and pass it to rotate or slerp.
+
+### Matrix action (`action`)
+
+`action(M)`: where a matrix sends the unit square, the unit circle and the
+axes, with the matrix read out.
+
+Examples:
+
+- Shear: `action(((1, 1), (0, 1)))`
+- Rotation with time: `J = ((0, -1), (1, 0)); action(e^(t J))`
+- Three stretches: `a = [1, 2, 3]; action(((a, 0), (0, 1)))`
+
+Details:
+
+A matrix on a row of its own draws nothing (see Matrix, under Definitions);
+`action(M)` draws what it does — the image of the unit square (filled; its
+signed area is det M), of the unit circle (an ellipse whose axes are the
+singular vectors) and the arrows M e_x, M e_y, its columns; for a 3×3, the
+image of the unit cube and three arrows. `action(e^(t J))` turns the square
+with t. Over a list of matrices it draws each one's picture and reads each
+out: with `a = [1, 2, 3]`, `action(((a, 0), (0, 1)))` draws three stretches.
+
+### Graph (network) (`graph`)
+
+A graph drawn node-link: one arrow per (from, to) element, parallel edges
+counted, labels on edges, laid out automatically.
+
+Examples:
+
+- Cycle: `k = [0..5]; graph(k, mod(k + 1, 6))`
+- Cayley graph of ℤ/12: `k = [0..11]; g = [1, 4]; graph(k, mod(k + g, 12), g)`
+- Collatz arrows: `k = [1..40]; graph(k, {mod(k, 2) = 0: k/2, 3k + 1})`
+
+Details:
+
+- Graph: `graph(from, to)` or `graph(from, to, label)` draws arrows between
+  numbered vertices, laid out automatically. Its arguments are read as one
+  tuple whose elements are the arrows, so lists combine by the usual rule:
+  with `k = [0..11]; g = [1, 4]`, `graph(k, mod(k + g, 12), g)` is the Cayley
+  graph of ℤ/12 by 1 and 4 (both k's chosen together, g crossing them), and
+  with `Q = [0..2]; S = [0, 1]` and a transition function `step(q, s)`,
+  `graph(Q, step(Q, S), S)` is every transition of a state machine.
+  `graph(P)` takes a list of pairs, `graph([(1, 2), (2, 3)])`. An arrow
+  listed twice is drawn once with its count (×2); an undefined vertex drops
+  its arrow, so a case keeps the ones wanted — composing two multisets of
+  arrows (matrix multiplication, as paths): `graph({A.y = B.x: A.x}, B.y)`,
+  or with the composition named as above, `graph(c(A, B))`.
+  Cases in graph rows may test equality. A panel of graphs has no grid.
+  A piecewise works inline over a list or through a function alike:
+  `k = [1..40]; graph(k, {mod(k, 2) = 0: k/2, 3k + 1})`.
+- `mark(v)` highlights vertex v in the graphs of its panel and reads v out;
+  with a slider or t it walks, e.g. a state machine's run as a recurrence
+  over a tuple of input symbols: `D = (1, 1, 0, 1); q_0 = 0;
+  q_{n+1} = step(q_n, D[n + 1]); mark(q_N)`.
+
+### Table (`lattice`)
+
+A table of values on the integer lattice: one cell per (i, j), shaded by
+value and printed when zoomed in.
+
+Examples:
+
+- Greatest common divisors: `T[i, j] = {i > 0: {j > 0: gcd(i, j)}}`
+- Addition table of ℤ/6: `n = 6; T[i, j] = {0 <= i < n: {0 <= j < n: mod(i + j, n)}}`
+
+Details:
+
+- Table: `T[i, j] = …` is a function on the integer lattice, drawn as cells
+  shaded by value: row i, column j, as a Cayley table or a matrix is read.
+  Undefined values leave a cell empty, so nested cases bound it:
+  `n = 6; T[i, j] = {0 <= i < n: {0 <= j < n: mod(i + j, n)}}` is the
+  addition table of ℤ/n. Only the cells in view are computed, so a table
+  may be unbounded (`T[i, j] = gcd(i, j)`).
+- Lattice panels: a panel whose rows are all automata, tables and stacks (or whose
+  view row names index axes) is a lattice. Its grid runs between cells, its
+  edges are numbered by index (whole numbers only), and zoomed in far enough
+  each cell prints its value. `view(i = -60..60, n = 0..80)` frames one by
+  its index names, in either order; panning rewrites it in those names.
 
 ## Definitions (extra rows that set up the others)
 
@@ -1372,6 +2690,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   segment() and polygon() all accept state-valued coordinates. Use this for
   anything with no closed form — coupled oscillators, a double pendulum,
   Lorenz.
+  Name states for what they are (`th`/`om` for angle and angular velocity,
+  `pos`/`vel` for a spring — the plane's own x/y/z are reserved). A
+  derivative may use t, constants and other states (not x/y); an initial
+  value must be constant, and gets a slider that relaunches the run when
+  dragged. A ↻ button in the panel restarts it.
 - Vector state: a state whose derivative (or starting value) is a 2- or
   3-vector integrates componentwise: `r' = vel; vel' = -r/|r|^3;
   r(0) = (1, 0); vel(0) = (0, 1)` is an orbit. Components are `r_1`, `r_2`
@@ -1387,15 +2710,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   (`mean(p_1)`), and figures built from the state (`segment((0, 0), b1)`)
   draw one per run. Started from a tuple, `p(0) = (sort([0..99])/10, 0, 0)`,
   the runs are in order and `p[1]` is the first run.
-- Orbit: `p(50..400)` draws the path the state takes from t = 50 to t = 400,
-  integrated ahead of time from p(0) with the live simulation's own steps —
-  the moving point rides exactly along it. Start after 0 to skip the
-  transient onto an attractor. A family draws one path per run (keep it to
-  a few, or pick one of runs in order: `p[1](50..400)`); a scalar state plots against time,
-  `th(0..20)` being the curve (t, th). The range must be constant (sliders
-  are fine; the orbit re-integrates when they move), 0 <= start < end; anything
-  drawn from states works too, like `b2(0..30)` for a pendulum bob. Orbit
-  plus family is how to draw a strange attractor with particles on it.
 - Data file: `person = open("people.csv", 3a7f9c1d2e4b)` names a CSV dropped
   onto the app. Drag a .csv/.tsv anywhere in the window and this row (plus a
   scatter of its first two numeric columns) is written for you; the file is
@@ -1412,8 +2726,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   server-side, as share-link previews do) reports the data as
   device-local instead of drawing it; dropping the same file there restores
   it. The row's readout opens a preview of the first rows as they parsed.
-  `adults = person[person.age >= 18]` names a filtered copy of a file (see
-  Filters above). Size: a column and constant arithmetic over it (`col/2`,
+  `adults = person[person.age >= 18]` names a filtered copy of a file (see the
+  filters under Expression syntax). Size: a column and constant arithmetic over it (`col/2`,
   `sin(col)`, `(a, b)`, reductions, `hist`) stay a single array and plot to
   200 000 rows; combining a column with t, a slider, or a comparison needs
   one expression per row, and a row may build 100 000 of those in total —
@@ -1448,20 +2762,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `M^-1`, `transpose(M)` — and a row may name the result (`R = M N`). A matrix has no
   position, so on a row of its own it draws nothing and reads out its value,
   `= ((1, 2), (3, 4))`: apply it to a vector to draw, or write `action(M)`
-  to draw what it does — the image of the unit square (filled; its signed
-  area is det M), of the unit circle (an ellipse whose axes are the singular
-  vectors) and the arrows M e_x, M e_y, its columns; for a 3×3, the image of
-  the unit cube and three arrows. `action(e^(t J))` turns the square with t.
-  Over a list of matrices it draws each one's picture and reads each out:
-  with `a = [1, 2, 3]`, `action(((a, 0), (0, 1)))` draws three stretches.
-  A 2×2 matrix in x and y is a matrix field, `((x, y), (y, -x))`: a grid of
-  glyphs, each the image of a small circle under the matrix there with a
-  spoke to where e_x goes, drawn true size while small and a cell at most,
-  in the row colour's complement where det < 0. `streamlines(M)` (or the
-  row's `streamlines` toggle) draws it instead as streaks along the major
-  eigenvector of its symmetric part (M + Mᵀ)/2 — a line field, with no
-  arrowhead and no drift, fading at the degenerate points where that part
-  is a multiple of I: `streamlines(hessian(x^3 - 3 x y^2))`.
+  to draw what it does (see Matrix action). A 2×2 matrix in x
+  and y is a matrix field (see Matrix field).
   Note `a/2J`, touching,
   reads as `a/(2J)`; write `a/2 J`.
 - Tensors: a rank-k tensor is k-deep nested tuples, and its shape is part of
@@ -1493,48 +2795,6 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     is the covariance matrix, and `C (x, y)` applies it.
   - A bivector `a ∧ b` of 3D vectors, named or written out, generates the
     rotation in their plane: `e^(t a ∧ b) P`.
-- Multivectors (geometric algebra, Cl(2) and Cl(3), Euclidean): `a ⟑ b`
-  (type `\gp`, or `gp(a, b)`) is the geometric product, `e_x ⟑ e_y` is the
-  bivector `e_xy`, and `e_x ⟑ e_x` is 1. The blades are built in, like
-  `e_x`: `e_xy`, `e_yz`, `e_zx` (and any reordering, `e_yx = −e_xy`) and
-  `e_xyz`; they are always 3D, while `(1, 0) ⟑ (0, 1)` is the plane's own
-  e_xy. Once one side is a multivector, juxtaposition is the geometric
-  product too (`R p rev(R)`), `∧` is the outer product, and `+`, `−`, whole
-  powers (`A^-1`, `A^3`) and `e^A` work; two plain vectors still need `⟑`
-  (`e_x e_y` stays an error, `e_x ∧ e_y` the tensor wedge). Dividing by a
-  multivector is refused — `a/2e_xy`, touching, would read as `a/(2e_xy)` —
-  so write `a/2 e_xy`, and `A B^-1`. `rev(A)` reverses, `conj(A)` is
-  the Clifford conjugate, `dual(A)` is `A I⁻¹` (`dual(e_xy)` is `e_z`),
-  `grade(A, k)` is the grade-k part, and `|A|` its size. A row that is a
-  multivector draws it grade by grade — its vector an arrow, its bivector an
-  oriented disc of that area in its plane with an arrow round the rim, its
-  trivector a cube of that volume — and reads out `= 1 + 2 e_xy`. A
-  quaternion, or a rotor (a scalar and a bivector), draws as the rotation it
-  makes: an arrow along the axis, |q| long, and a sector of radius |q|
-  sweeping the angle 2 atan2(|v|, w), so its scalar part moves the picture. A result
-  written only as a number or a vector is that number or vector
-  (`grade(R ⟑ v ⟑ rev(R), 1)` is a point), and a row may name a multivector
-  (`R = e^(-(t/2) e_xy)`). Rotors: `e^(-(th/2) B)` for a unit bivector B
-  turns by th in B's plane, `R p rev(R)` applies it, and `rotate(X, R)` turns
-  a point, a list of points or a figure by it: `rotate(hull(P), R)`.
-- Quaternions: `quat(w, x, y, z)` (or `quat(w, v)` with v a 3D vector) is
-  w + x i + y j + z k, read out that way. They are the even multivectors of
-  space (i = e_zy, j = e_xz, k = e_yx), so they multiply by juxtaposition
-  (`quat(0,1,0,0) quat(0,0,1,0)` is `k`), invert with `q^-1`, conjugate
-  with `conj(q)`, and the unit quaternion `quat(cos(th/2), sin(th/2) n)`
-  turns by th about the unit axis n: `rotate(P, q)`. `grade(q, 0)` is its
-  w, and `vec(q)` its vector part (x, y, z), a point. `slerp(q1, q2, s)`
-  runs the shorter arc between two rotations at constant speed, s from 0 to
-  1: `rotate(hull(P), slerp(q1, q2, (1 - cos(t))/2))` rocks a solid between
-  two orientations. A quaternion passed to a recursive function's self-call
-  spreads into four parameters, so an orbit is written in quaternion
-  algebra — the quaternion Julia set of C, sliced at k = s (see "Recursive
-  function"): `C = quat(-0.2, 0.8, 0, 0); s = 0;
-  Q(a, b, c, d, k) = {|quat(a, b, c, d)| > 2: ln(|quat(a, b, c, d)|)/2^k,
-  k >= 12: ln(|quat(a, b, c, d)|)/2^k, Q(quat(a, b, c, d)^2 + C, k + 1)};
-  Q(x, y, z, s, 0) = 0.001`, framed with `camera(-pi/3, 0.5, 3)`. Older
-  links write the same surface as `qjulia(C, s)`; it still draws, but new
-  graphs should spell the orbit out as above.
 - Rotations are matrix exponentials: with `J = ((0, -1), (1, 0))`,
   `e^(a J) P` (or `exp(a J) P`) turns P by a, and in 3D `e^(a cross(n)) P`
   turns P by a about the axis n — `cross(n)` alone is the matrix of
@@ -1547,11 +2807,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   icosahedron (independent lists cross, the named turn list zips). `e^M` works
   for ANY 2×2 — `e^(t A) (x0, y0)` is the exact solution of
   `(x', y') = A (x, y)`, spiral, saddle or node — but a 3×3 must be a rotation
-  generator (skew-symmetric). Name states for what they are (`th`/`om` for angle and angular
-  velocity, `pos`/`vel` for a spring — the plane's own x/y/z are reserved). A
-  derivative may use t, constants and other states (not x/y); an initial
-  value must be constant, and gets a slider that relaunches the run when
-  dragged. A ↻ button in the panel restarts it.
+  generator (skew-symmetric).
 - Coordinate field: a definition that depends on the plane, e.g.
   `r = sqrt(x^2+y^2); theta = atan2(y,x)`. Its level sets draw as a grid, and
   later rows may use it: adding `r = 2(1 + cos(theta))` plots a cardioid in
@@ -1580,40 +2836,44 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Points in space are not draggable. Three primed coordinates define a 3D
   chart flow, e.g. `(rho',theta',phi') = (0,1,0)`, transformed by the
   symbolic 3×3 Jacobian and drawn with trajectories or arrow glyphs.
-- Coordinate points: after defining r and theta above, `(r, theta) = (2, pi/4)`
-  draws the point satisfying both coordinates. Angles in atan2-valued left
-  components wrap modulo 2pi, so 9pi/4 and pi/4 name the same position.
-  Bare tuples remain Cartesian. Non-injective charts draw multiple points:
-  `p = x y; q = (x^2-y^2)/2; (p, q) = (1, 0)` draws two.
-  In 2D, RHS literals or slider names can be dragged; the pointer position
-  is evaluated in the named coordinates and written back to those values.
-- Parametric systems: `(r, theta) = (3u, 6pi u)` traces a three-turn spiral,
-  u in [0,1]. General square systems with u work too, including in 3D.
-  A bounded numerical continuation follows branches, periodically searches
-  for others, and breaks lines at missing/discontinuous solutions. Small
-  branches can be missed; this is not certified exhaustive tracing.
-- Coordinate flows: `(r', theta') = (r(1-r), 1)` draws a polar limit cycle.
-  Both distinct coordinate names must have primes. Velocities are transformed
-  through the coordinate Jacobian; singular chart locations are undefined.
-  In 2D, click to trace trajectories just as for Cartesian vector fields. A lone
-  prime on a field is invalid; an otherwise unbound name still defines a state.
-  Static previews draw direction arrows for vector fields and points/curves
-  for coordinate and complex-root systems.
 
-- Surface intersections: `(x^2+y^2+z^2,z) = (9,1)` traces the circle where
-  the sphere meets the plane. Bounded predictor–corrector continuation
-  follows the Jacobian null space, with at most 24 branches and 512 steps
-  per direction. Singularities stop a trace; tiny or isolated branches may
-  be missed. This numerical tracing does not certify branch completeness.
-- Certified point solving: a square system's “certify search box” control
-  runs outward-rounded interval subdivision and Krawczyk tests in the worker.
-  Its readout distinguishes proved roots, unresolved regions, and completeness
-  of that finite search box. Existing numeric points remain visible.
-  Certification currently supports finite constants, +, −, ×, / away from
-  zero denominators, and integer powers up to 32; other functions, singular
-  roots and exhausted budgets remain unresolved. Wrapped angular systems
-  are excluded. Proofs concern real arithmetic on the input binary64 literals
-  and parameter values, not a claim of completeness over all space.
+## Regression
+
+Write `P = [(0,1),(1,3),(2,5),(3,7)]; P.y ~ m P.x + b` to fit a line through
+the points: `P.x` and `P.y` are their coordinates, paired point by point.
+(Write the data as points, or as columns of one CSV file: two separately
+defined lists `X = […]`, `Y = […]` are independent, so `(X, Y)` would plot
+their grid.) The left side is a numeric list (defined above the fit), an
+explicit list, or a CSV column. The right side is a model over equally long lists, or a
+scalar broadcast to the observations. Unbound scalar names are fitted
+coefficients; already defined constants stay fixed. Data and fixed constants
+must be static and defined above the fit. Coefficients are reusable values:
+`y = m x + b` draws the model, `f(x) = m x + b` names it, and
+`(P.x, P.y - f(P.x))` draws residuals. No fit settings exist outside the equations.
+
+Examples: `P.y ~ a P.x^2 + b P.x + c` (polynomial), `P.y ~ a exp(b P.x)` (nonlinear),
+`data.height ~ m data.age + b` (CSV). A fit row reports coefficients, RMSE,
+R² when the observations have nonzero variance, and observation count.
+Changing fixed constants or data refits the model. Missing/nonfinite pairs
+are skipped with a visible count. Unequal lengths, rank-deficient models,
+and too few finite observations are errors. At most 8 coefficients and
+10,000 observations, or 2,000 observations for nonlinear models.
+Nonlinear models must be differentiable in fitted coefficients; bounded,
+deterministic multistart fitting reports a local fit or an error, not a
+guaranteed global optimum. Fitting does not depend on t or simulation states.
+
+`X ~ Normal(...)`, `X ~ Uniform(...)`, `X ~ Exponential(...)`, and the
+unambiguous family names (`ChiSquared`, `StudentT`, `LogNormal`, `Cauchy`,
+`Weibull`) retain their random-variable meanings. `Gamma`, `Beta` and `T`
+follow the `exp` rule below — over a declared data list they are a model
+(`Y ~ gamma(a X)`, `Y ~ beta (X - 1)`); with an undeclared left-hand name
+they declare a random variable. Bare distribution aliases are case-insensitive,
+including `exp`/`EXP`. For a declared data list, `Y ~ exp(a X)` is an
+exponential regression model in any capitalization; with an undeclared
+left-hand name, `Z ~ exp(2)` declares an exponential random variable.
+Missing CSV data stays device-local in MCP and
+previews, including curves that depend on its fitted coefficients. Fits over
+literal data and their model curves work in shared links and static previews.
 
 ## Viewport rows (framing)
 
@@ -1747,28 +3007,160 @@ panel under the pointer.
   panel's Cartesian grid (so `grid(x, y)` is how to define r and theta for
   later rows without drawing them).
 
-## Guidance for assistants
+## Functions
 
-- To show a user a graph, emit a single https://equation.io/g/... link built
-  as above; the graph renders immediately on load, no interaction needed.
-- To edit a graph the user already has, decode their link (or call the MCP
-  `decode_graph_url` tool), transform the rows, and emit a new link. Prefer
-  restructuring into named definitions: e.g. given `y = x^2 - 2x`, "add a
-  tangent line at x = 3" becomes
-  `f(x) = x^2 - 2x; g(x) = d/dx f(x); a = 3; y = f(x); y = f(a) + g(a)(x - a)`
-  — with `a` as a draggable slider so the point of tangency stays explorable.
-- Prefer a slider constant (`a = 1; ...`) when the user may want to explore a
-  parameter, and `t` when they ask for animation.
-- Don't name a slider, list or index `i`, `e`, `pi` or `d`: they are
-  taken (`i` is the imaginary unit), so `i = [0..9]` is a claim about i, not
-  a definition, and every later `i` stays complex. Use `k = [0..9]`.
-- The graph state lives entirely in the link, and the link is the interface.
-  The only server endpoints are /mcp (an MCP server that validates equations
-  and emits links) and /api/og (link-preview images).
-- If you are unsure whether a form is supported, emit the link anyway.
-  Unsupported input fails loudly and visibly (an inline error on the offending
-  row), never silently — so a graph either renders correctly or tells the user
-  what to fix. There is no wrong-but-silent output to worry about.
+Every built-in function, with its signature. Names are case-insensitive
+(`Sin(x)` is `sin(x)`), and arguments always take parentheses: `sin(x)`, not
+`sin x`. Derivatives (`d/dx`), integrals (`int[a..b] … dx`), sums and
+products have forms of their own (see Expression syntax). There is no
+`plot(…)`, `surface(…)` or `plot3d(…)`: what a row draws comes from what it
+is (see Row types).
+
+- `abs(x) or |x|`
+- `acos(x)`
+- `acosh(x)`
+- `action(M)`
+- `angle(A, B, C) or angle(U, V); angle(L, M)`
+- `arg(w)`
+- `asin(x)`
+- `asinh(x)`
+- `atan(x)`
+- `atan2(y, x)`
+- `atanh(x)`
+- `X ~ Bernoulli(p)`
+- `X ~ Beta(a, b)`
+- `X ~ Binomial(n, p)`
+- `X ~ Cauchy(location, scale)`
+- `ceil(x)`
+- `X ~ ChiSquared(df)`
+- `circle(A, r)`
+- `clamp(x, lo, hi)`
+- `conformal(f(w))`
+- `conj(w)`
+- `contract(T, i, j)`
+- `cos(x)`
+- `cosh(x)`
+- `coth(x)`
+- `count(L)`
+- `cross(A, B) or cross(n)`
+- `curl(F) or ∇×F`
+- `curvature(C) or curvature(C, u0)`
+- `det(M)`
+- `X ~ DiscreteUniform(a, b)`
+- `distance(A, B)`
+- `div(F) or ∇·F`
+- `domain(f(w))`
+- `dot(A, B)`
+- `dual(A)`
+- `E(X)`
+- `erf(x)`
+- `exp(x) or e^x`
+- `X ~ Exponential(rate)`
+- `factorial(n) or n!`
+- `floor(x)`
+- `fourier(signal, samples = 256)`
+- `fract(x)`
+- `frame(C, u0)`
+- `gamma(x)`
+- `gaussian(S) or gaussian(S, u0, v0)`
+- `gcd(a, b)`
+- `geodesic(S, (u0, v0), (du, dv)) or geodesic(S, P, d, length)`
+- `X ~ Geometric(p)`
+- `gp(a, b) or a ⟑ b`
+- `grad(f) or ∇f`
+- `grade(A, k)`
+- `graph(from, to) or graph(from, to, label)`
+- `grid(off | axes | r, theta)`
+- `hessian(f)`
+- `hist(L)`
+- `hsl(hue, saturation, lightness, opacity?)`
+- `hull(A, B, C, …) or hull(P)`
+- `im(w)`
+- `int[a..b] f(x) dx`
+- `interval(a, b)`
+- `isprime(n)`
+- `iter(w^2 + c)`
+- `jacobian((f, g))`
+- `join(A, B) or join(A, B, C)`
+- `label(point, "text")`
+- `laplacian(f) or ∇²f`
+- `lightcone(P)`
+- `lightray(P, (dx, dy)) or lightray(P, d, length)`
+- `line(A, B)`
+- `ln(x)`
+- `log(x)`
+- `log2(x)`
+- `X ~ LogNormal(mu, sigma)`
+- `mark(v)`
+- `max(a, b) or max(L)`
+- `mean(L)`
+- `meancurvature(S) or meancurvature(S, u0, v0)`
+- `median(L)`
+- `meet(L, M)`
+- `midpoint(A, B)`
+- `min(a, b) or min(L)`
+- `mod(a, b)`
+- `motor(L, angle, slide) or motor(P, angle)`
+- `X ~ NegativeBinomial(r, p)`
+- `X ~ Normal(mean, sd)`
+- `normalcdf(x, mean, sd)`
+- `normalpdf(x, mean, sd)`
+- `oklch(lightness, chroma, hue, opacity?)`
+- `data = open("file.csv")`
+- `osculating(C, u0)`
+- `outer(a, b) or a ⊗ b`
+- `P(X < b)`
+- `perp(P)`
+- `plane(A, B, C) or plane(P, n)`
+- `X ~ Poisson(mean)`
+- `polygon(A, B, C, …)`
+- `polyline(A, B, C, …)`
+- `pop(s)`
+- `prod(n=1..N, expression)`
+- `project(P, L)`
+- `push(s, a)`
+- `qjulia(C, s)`
+- `quat(w, x, y, z)`
+- `re(w)`
+- `reconstruct(signal, N, samples = 256)`
+- `reflect(P, L)`
+- `rev(A)`
+- `revolve(f(x))`
+- `rgb(red, green, blue, opacity?)`
+- `rotate(P, angle), rotate(P, angle, center), rotate(P, angle, axis) or rotate(X, M)`
+- `round(x)`
+- `sech(x)`
+- `segment(A, B)`
+- `sign(x)`
+- `sin(x)`
+- `sinc(x)`
+- `sinh(x)`
+- `slerp(q1, q2, s)`
+- `solve(M, v)`
+- `sort(L) or sort(P, P.x)`
+- `sqrt(x)`
+- `square(A, B)`
+- `stdev(L)`
+- `streamlines(M)`
+- `X ~ StudentT(df)`
+- `sum(n=1..N, expression)`
+- `tan(x)`
+- `tanh(x)`
+- `tidal(P)`
+- `top(s)`
+- `torsion(C) or torsion(C, u0)`
+- `total(L)`
+- `trace(M)`
+- `trail(point)`
+- `transpose(M)`
+- `tube((x(u), y(u), z(u)))`
+- `X ~ Uniform(lo, hi)`
+- `unit(P)`
+- `vec(q)`
+- `vector(A, B) or vector(V)`
+- `view(x = lo..hi, y = lo..hi, ratio = 1)`
+- `wedge(a, b) or a ∧ b`
+- `X ~ Weibull(shape, scale)`
 
 ## More
 
@@ -1779,81 +3171,3 @@ panel under the pointer.
 - [Complex function plotter](https://equation.io/complex/): f(w), domain coloring, conformal maps
 - [Source code](https://github.com/aantthony/equation.io): open source (MIT); bug reports via GitHub issues
 - [robots.txt](https://equation.io/robots.txt): crawling policy
-
-## Regression
-
-Write `P = [(0,1),(1,3),(2,5),(3,7)]; P.y ~ m P.x + b` to fit a line through
-the points: `P.x` and `P.y` are their coordinates, paired point by point.
-(Write the data as points, or as columns of one CSV file: two separately
-defined lists `X = […]`, `Y = […]` are independent, so `(X, Y)` would plot
-their grid.) The left side is a numeric list (defined above the fit), an
-explicit list, or a CSV column. The right side is a model over equally long lists, or a
-scalar broadcast to the observations. Unbound scalar names are fitted
-coefficients; already defined constants stay fixed. Data and fixed constants
-must be static and defined above the fit. Coefficients are reusable values:
-`y = m x + b` draws the model, `f(x) = m x + b` names it, and
-`(P.x, P.y - f(P.x))` draws residuals. No fit settings exist outside the equations.
-
-Examples: `P.y ~ a P.x^2 + b P.x + c` (polynomial), `P.y ~ a exp(b P.x)` (nonlinear),
-`data.height ~ m data.age + b` (CSV). A fit row reports coefficients, RMSE,
-R² when the observations have nonzero variance, and observation count.
-Changing fixed constants or data refits the model. Missing/nonfinite pairs
-are skipped with a visible count. Unequal lengths, rank-deficient models,
-and too few finite observations are errors. At most 8 coefficients and
-10,000 observations, or 2,000 observations for nonlinear models.
-Nonlinear models must be differentiable in fitted coefficients; bounded,
-deterministic multistart fitting reports a local fit or an error, not a
-guaranteed global optimum. Fitting does not depend on t or simulation states.
-
-`X ~ Normal(...)`, `X ~ Uniform(...)`, `X ~ Exponential(...)`, and the
-unambiguous family names (`ChiSquared`, `StudentT`, `LogNormal`, `Cauchy`,
-`Weibull`) retain their random-variable meanings. `Gamma`, `Beta` and `T`
-follow the `exp` rule below — over a declared data list they are a model
-(`Y ~ gamma(a X)`, `Y ~ beta (X - 1)`); with an undeclared left-hand name
-they declare a random variable. Bare distribution aliases are case-insensitive,
-including `exp`/`EXP`. For a declared data list, `Y ~ exp(a X)` is an
-exponential regression model in any capitalization; with an undeclared
-left-hand name, `Z ~ exp(2)` declares an exponential random variable.
-Missing CSV data stays device-local in MCP and
-previews, including curves that depend on its fitted coefficients. Fits over
-literal data and their model curves work in shared links and static previews.
-
-## Labels
-
-`label(point, "text")` writes text beside a point on the graph, in the row's
-color. Use it as a whole row. Examples:
-
-    label((2, 4), "the curves cross here")
-    A = (1, 1)
-    label(A, "vertex")
-    a = 2
-    label((a, a^2), "moves with the slider")
-
-The point may be a tuple, a named point, or point arithmetic, in 2D or 3D, and
-may use constants, sliders, states, and `t`; it cannot use free x/y/z or u/v.
-The text is plain and fixed. The MCP classifies these rows as `label`; static
-previews draw the other rows but leave label text out (see preview_omits).
-
-## Motion trails
-
-`trail(A)` leaves a live trail of a point's observed positions, with a dot at
-its current position. Use it as a whole row. Examples:
-
-    A = (cos(t), sin(t))
-    trail(A)
-
-    trail((cos(t), sin(t), t/5))
-
-A named 2D point, point arithmetic such as `trail(2A)`, or a 2D/3D vector state
-can be traced. Components may use constants, sliders, states, and `t`; they
-cannot use free x/y/z or u/v. `trail(cos(t), sin(t))` is equivalent to the
-parenthesized tuple spelling. Matrix `trace(M)` keeps its existing meaning
-(the sum of the diagonal), including inside other expressions.
-
-The live browser retains at most 30 seconds and 2048 samples per trail,
-sampling at most 60 times a second. Undefined positions or pauses over half a
-second break the line instead of joining unobserved motion. Editing equations
-or restarting the simulation clears history; framing/comment edits preserve
-it. Trails start afresh on opening a graph and are not saved in shared URLs.
-The MCP classifies these rows as `trail`; static previews use the fallback
-card because a still image cannot reproduce accumulated live history.

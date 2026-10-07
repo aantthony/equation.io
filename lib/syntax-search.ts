@@ -5,9 +5,10 @@
  * surface", "vector field") and gets back the handful of entries that match.
  *
  * An entry is one top-level bullet (with its continuation lines) or one
- * paragraph, tagged with its `## ` section. Sections about links, the MCP
- * server and other assistants are left out: a voice session edits the graph
- * directly and never builds a URL.
+ * paragraph, tagged with its `## ` section, or its `### ` one within that
+ * (`Row types › Curve (implicit2d)`: a kind's section). Sections about links,
+ * the MCP server and other assistants are left out: a voice session edits
+ * the graph directly and never builds a URL.
  */
 
 export interface SyntaxEntry {
@@ -26,17 +27,21 @@ const SKIP_SECTIONS = new Set([
 /** Splits the reference into searchable entries, in document order. */
 export function syntaxEntries(reference: string): SyntaxEntry[] {
   const entries: SyntaxEntry[] = [];
+  let top = '';
   let section = '';
   let current: string[] = [];
   const flush = () => {
     const text = current.join('\n').trim();
-    if (text && section && !SKIP_SECTIONS.has(section)) entries.push({ section, text });
+    if (text && section && !SKIP_SECTIONS.has(top)) entries.push({ section, text });
     current = [];
   };
   for (const line of reference.split('\n')) {
     if (line.startsWith('## ')) {
       flush();
-      section = line.slice(3).trim();
+      section = top = line.slice(3).trim();
+    } else if (line.startsWith('### ')) {
+      flush();
+      section = `${top} › ${line.slice(4).replace(/`/g, '').trim()}`;
     } else if (line.startsWith('- ') || line.trim() === '') {
       // A new top-level bullet or a blank line ends the entry; indented lines continue it.
       flush();

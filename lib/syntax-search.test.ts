@@ -10,6 +10,8 @@ describe('syntax search over llms.txt', () => {
     expect(entries.length).toBeGreaterThan(50);
     const sections = new Set(entries.map(e => e.section));
     expect(sections.has('Row types')).toBe(true);
+    // A kind's own section, under Row types.
+    expect(sections.has('Row types › Parametric surface (psurface)')).toBe(true);
     expect(sections.has('Deep links')).toBe(false);
     expect(sections.has('MCP server')).toBe(false);
   });

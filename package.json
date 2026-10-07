@@ -27,7 +27,8 @@
     "swift:corpus": "vitest run -c apple/corpus/vitest.config.ts --silent && node apple/corpus/build.ts",
     "swift:test": "pnpm swift:corpus && swift test --package-path apple/EquationCore",
     "app:web": "vite build -c apple/vite.config.ts",
-    "app:eval": "mkdir -p apple/evals/.build && swiftc -swift-version 6 -O -parse-as-library apple/Equation/Sources/Assistant.swift apple/evals/Runner.swift -o apple/evals/.build/runner && apple/evals/.build/runner"
+    "reference": "node --experimental-transform-types --no-warnings scripts/reference.ts",
+    "app:eval": "mkdir -p apple/evals/.build && swiftc -swift-version 6 -O -parse-as-library apple/Equation/Sources/Assistant.swift apple/Equation/Sources/Instructions.swift apple/evals/Runner.swift -o apple/evals/.build/runner && apple/evals/.build/runner"
   },
   "private": true,
   "license": "MIT",
