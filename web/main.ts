@@ -99,7 +99,14 @@ import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
 import { TraceQueue, traceEnvironment, type TraceMessage, type TraceResult } from '../lib/trace-queue.ts';
-import { type SpecialPoint, curveTracer, fmtTraced, mappedSpecialPoints, specialPoints } from '../lib/special.ts';
+import {
+  type SpecialPoint,
+  curveTracer,
+  fmtRoot,
+  fmtTraced,
+  mappedSpecialPoints,
+  specialPoints,
+} from '../lib/special.ts';
 
 import { type StateSystem, advanceState, initialState } from '../lib/state.ts';
 import { type OrbitInput, orbitInput } from '../lib/orbit.ts';
@@ -6023,6 +6030,42 @@ function tracerFor(eq: Equation): ReturnType<typeof curveTracer> {
   return eq.tracer.fn;
 }
 
+/** The points a 2D system's row draws, from its last solve, where the
+ *  screen shows them and read in x and y; none for a parametric system,
+ *  which draws a curve. */
+function systemSolutions(eq: Equation): SpecialPoint[] {
+  const cpu = eq.cpu;
+  if (eq.error || !eq.cls || cpu?.type !== 'system' || cpu.parametric || eq.sysCache?.text !== eq.text) return [];
+  const pts = eq.sysCache.pts.filter(p => p.length === 2);
+  const at = (sx: number, sy: number, x: number, y: number): SpecialPoint => ({
+    x: sx,
+    y: sy,
+    lines: ['solution', `x = ${fmtRoot(x)}`, `y = ${fmtRoot(y)}`],
+  });
+  const maps = panelMaps(panels[panelOf(eq)]);
+  if (!maps) return pts.map(([x, y]) => at(x, y, x, y));
+  // A real system solves on the screen (lib/axis-map.ts): its solutions
+  // read back in x and y.
+  if (axisMapping(eq.cls.object, maps) !== 'place')
+    return pts.map(([X, Y]) => {
+      const [x, y] = maps.plane
+        ? planeToWorld(maps.plane, X, Y)
+        : [maps.x ? toWorld(maps.x, X) : X, maps.y ? toWorld(maps.y, Y) : Y];
+      return at(X, Y, x, y);
+    });
+  // A complex one solves in x and y, and its roots are placed where the
+  // screen shows them: through a plane map, every copy.
+  const { halfW, halfH } = hoverHalfSpan();
+  const box: ScreenBox = { lo: [view.cx - halfW, view.cy - halfH], hi: [view.cx + halfW, view.cy + halfH] };
+  return pts.flatMap(([x, y]) =>
+    maps.plane
+      ? planeInverse(maps.plane, box)
+          .all(x, y)
+          .map(([X, Y]) => at(X, Y, x, y))
+      : [at(maps.x ? toScreen(maps.x, x) : x, maps.y ? toScreen(maps.y, y) : y, x, y)],
+  );
+}
+
 function setHover(next: Hover | null) {
   const same =
     hover?.pt === next?.pt ||
@@ -6075,9 +6118,18 @@ function updateHover(clientX: number, clientY: number) {
   let best: Hover | null = null;
   let bestD = 16; // CSS px pick radius
   const here = panels.indexOf(cur);
+  const maps = panelMaps(cur);
   for (const eq of equations) {
     if (panelOf(eq) !== here) continue;
     for (const pt of pointsFor(eq)) {
+      const d = Math.hypot(toSx(pt.x) - mx, toSy(pt.y) - my);
+      if (d < bestD) {
+        bestD = d;
+        best = { pt, color: cssColor(baseColor(eq)), panel: cur };
+      }
+    }
+    // A system's solutions, as last drawn.
+    for (const pt of systemSolutions(eq)) {
       const d = Math.hypot(toSx(pt.x) - mx, toSy(pt.y) - my);
       if (d < bestD) {
         bestD = d;
@@ -6095,7 +6147,6 @@ function updateHover(clientX: number, clientY: number) {
     let bestT = 10; // CSS px: tighter than a point, so the points stay easy to hit
     // On a mapped panel the curve is traced on the screen, and read in x and
     // y, to the pixel there (lib/axis-map.ts).
-    const maps = panelMaps(cur);
     const read = (map: AxisMap | undefined, v: number, step: number) => {
       if (!map) return fmtTraced(v, step);
       // A pixel in x there: one-sided where the other side leaves the map.
