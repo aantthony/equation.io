@@ -172,6 +172,17 @@ describe('rows on a surface', () => {
     expect(surfaceArrows(torus, () => [0, 0])).toEqual([]);
   });
 
+  it('holds a field still on a surface unless it moves with t', () => {
+    // In 2D a field's streaks always move; on a surface it is arrows.
+    expect(analyzeRows(['(-y, x)']).rows[0].cls!.animated).toBe(true);
+    const a = analyzeRows([SPHERE, '(-y, x)', '(-y t, x)', '(-y, x) [1, 2]', 'y = x']).rows;
+    expect(a.slice(1).map(r => r.cls!.animated)).toEqual([false, true, false, false]);
+    // Its arrows are traced on the CPU: one too large to trace says so.
+    const tree = (d: number): string => (d ? `sin(${tree(d - 1)}) + cos(${tree(d - 1)})` : 'x');
+    const big = tree(12);
+    expect(analyzeRows([SPHERE, `(${big}, x)`]).rows[1].error).toMatch(/too large to draw on a surface/);
+  });
+
   it('carries a parametric region’s own mesh onto the surface', () => {
     // The disc of radius 1/2 about (0, 0), round the sphere's (1, 0, 0).
     const [, region] = analyzeRows([SPHERE, '(u cos(2 pi v) / 2, u sin(2 pi v) / 2)']).rows;

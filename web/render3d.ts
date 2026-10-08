@@ -596,11 +596,33 @@ void main() {
  * differentiated tangents ∂P/∂u × ∂P/∂v — finite differences only when a
  * component has no smooth derivative.
  */
-function psurfVert(comps: [string, string, string], params?: string[]): string {
+function psurfVert(comps: [string, string, string], params?: string[], lift = false): string {
+  // A mesh that lies on another surface (SurfacePaint lift) is raised off
+  // it toward the eye, along its normal, by more than its flat cells sag
+  // below the curved surface between vertices: a quarter of the second
+  // differences across a cell, along the normal (the sag is an eighth).
+  const main = lift
+    ? `
+  const float h = ${(1 / (GRID_N - 1)).toFixed(8)};
+  float u = aUV.x, v = aUV.y;
+  vec3 p = P(u, v);
+  vec3 pu = P(u + h, v), mu = P(u - h, v), pv = P(u, v + h), mv = P(u, v - h);
+  vec3 n = cross(pu - mu, pv - mv);
+  float len = length(n);
+  if (len > 0.0 && !isinf(len)) {
+    n /= len;
+    if (dot(n, uEye - p) < 0.0) n = -n;
+    float sag = abs(dot(pu + mu - 2.0 * p, n)) + abs(dot(pv + mv - 2.0 * p, n));
+    if (!isnan(sag) && !isinf(sag)) p += 0.25 * sag * n;
+  }
+  vPos = p;`
+    : `
+  vPos = P(aUV.x, aUV.y);`;
   return `#version 300 es
 layout(location=0) in vec2 aUV;
 uniform mat4 uVP;
 uniform float t;
+${lift ? 'uniform vec3 uEye;' : ''}
 ${paramDecls(params)}
 out vec2 vUV;
 out vec3 vPos;
@@ -609,8 +631,7 @@ vec3 P(float u, float v) {
   return vec3(${comps[0]}, ${comps[1]}, ${comps[2]});
 }
 void main() {
-  vUV = aUV;
-  vPos = P(aUV.x, aUV.y);
+  vUV = aUV;${main}
   gl_Position = uVP * vec4(vPos, 1.0);
 }
 `;
@@ -1201,6 +1222,10 @@ export interface SurfacePaint {
   color: [number, number, number];
   params?: string[];
   uniforms?: Record<string, number>;
+  /** A mesh of its own over the surface (a parametric region's), coarser
+   *  or finer than the surface's: raised off it so it is not lost under
+   *  the surface's facets (psurfVert). */
+  lift?: boolean;
 }
 
 export interface Scene3D {
@@ -1663,7 +1688,10 @@ export class Renderer3D {
       for (const s of scene.paints) {
         let prog: WebGLProgram;
         try {
-          prog = this.cache.get(psurfVert(s.comps, s.params), paintFrag(s.comps, s.du, s.dv, s.xy, s.paint, s.params));
+          prog = this.cache.get(
+            psurfVert(s.comps, s.params, s.lift),
+            paintFrag(s.comps, s.du, s.dv, s.xy, s.paint, s.params),
+          );
         } catch (e) {
           console.error(e);
           continue;

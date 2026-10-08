@@ -189,7 +189,11 @@ which axis and plane maps share), so its bounds must be numbers or sliders.
 - **Parametric regions** come with their own parametrisation, so the
   surface is composed with it (surfaceOver): X, Y and Z in the region's u
   and v, a mesh that lies on the surface and is painted as a fill, like an
-  inequality's area. A region that covers itself twice shows darker there.
+  inequality's area. Its mesh is not the surface's, so its flat cells can
+  sag below the surface's between vertices; each vertex is raised toward
+  the eye along the normal by a quarter of the mesh's second differences
+  there (twice the sag), which the polygon offset alone does not cover. A
+  region that covers itself twice shows darker there.
 - **Vector fields** draw as arrows, as a 3D panel's arrows do: the field
   (u, v) at (x, y) is the tangent u ∂P/∂x + v ∂P/∂y of the surface P
   (surfaceTangents, from its derivatives; central differences where it has
@@ -198,7 +202,10 @@ which axis and plane maps share), so its bounds must be numbers or sliders.
   Each arrow is the image of a 2D arrow 0.7 of its cell long in x and y, so
   the arrows show direction, not size, and shrink where the surface crowds
   the cells (toward a sphere's poles). There are no streamlines and no
-  click-to-trace curves on a surface.
+  click-to-trace curves on a surface, so a field there is still unless it
+  reads t (onSurface; in 2D every field's streaks move), and its arrows are
+  kept until the surface, the field or a value it reads changes. A field
+  too large to trace (over 8192 nodes a component) is refused at its row.
 - Families draw as their members.
 - Paints draw after the surface with a polygon offset and no depth writes,
   so they sit on it without fighting it.

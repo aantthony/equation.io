@@ -63,7 +63,7 @@ import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
-import { OFF_SURFACE_MESSAGE, type SurfaceMap, surfaceMapping } from './surface-map.ts';
+import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -1030,8 +1030,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       // A panel on a surface paints or carries its 2D rows onto it; a row
       // in space draws as it would in any 3D panel.
-      if (panelSurfaces[panel] && !row.cls.needs3D && !surfaceMapping(row.cls.object))
-        throw new Error(OFF_SURFACE_MESSAGE);
+      if (panelSurfaces[panel] && !row.cls.needs3D) {
+        if (!surfaceMapping(row.cls.object)) throw new Error(OFF_SURFACE_MESSAGE);
+        row.cls = onSurface(row.cls);
+      }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;

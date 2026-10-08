@@ -1108,6 +1108,35 @@ function surfaceRegionGLSL(surface: SurfaceMap, comps: readonly [Expr, Expr], pa
   return out;
 }
 
+/** A vector field's arrows on a surface, before their lift toward the eye:
+ *  kept until the surface, the field or a value it reads (a slider, t)
+ *  changes, so a still field costs nothing per frame. */
+const surfaceFieldArrows = new WeakMap<
+  readonly Expr[],
+  { surface: SurfaceMap; reads: string[]; key: string | null; arrows: number[] }
+>();
+function fieldArrows(surface: SurfaceMap, comps: readonly Expr[], env: Record<string, number>): number[] {
+  let c = surfaceFieldArrows.get(comps);
+  if (c?.surface !== surface) {
+    const reads = new Set(comps.flatMap(e => [...freeVars(e)]));
+    reads.delete('x');
+    reads.delete('y');
+    c = { surface, reads: [...reads], key: null, arrows: [] };
+    surfaceFieldArrows.set(comps, c);
+  }
+  const key = c.reads.map(n => env[n]).join();
+  if (key !== c.key) {
+    c.key = key;
+    try {
+      const field = fieldEvaluator([...comps], env);
+      c.arrows = surfaceArrows(surface, (x, y) => field([x, y]));
+    } catch {
+      c.arrows = []; // too large to trace: refused at its row
+    }
+  }
+  return c.arrows;
+}
+
 /** A parametric region's fill on a surface: all of its mesh, as an
  *  inequality's area is painted. */
 const REGION_FILL: SurfacePaint['paint'] = { kind: 'region', field: '-1.0', edges: [] };
@@ -2082,18 +2111,20 @@ function render() {
         if (on === 'carry' && plot.type === 'pregion') {
           const mesh = surfaceRegionGLSL(surface!, plot.comps, params);
           if (mesh)
-            (scene.paints ??= []).push({ ...mesh, xy: ['u', 'v'], paint: REGION_FILL, color, params, uniforms });
+            (scene.paints ??= []).push({
+              ...mesh,
+              xy: ['u', 'v'],
+              paint: REGION_FILL,
+              color,
+              params,
+              uniforms,
+              lift: true,
+            });
           continue;
         }
         if (on === 'carry' && plot.type === 'vfield2d') {
-          let field: (p: number[]) => number[];
-          try {
-            field = fieldEvaluator(plot.comps, { ...constEnv, ...eq.gpu?.uniforms, t: time });
-          } catch {
-            continue; // too large to trace
-          }
           const lifted = towardEye(camera);
-          const arrows = surfaceArrows(surface!, (x, y) => field([x, y]));
+          const arrows = fieldArrows(surface!, plot.comps, { ...constEnv, ...eq.gpu?.uniforms, t: time });
           const pts = new Float32Array(arrows.length);
           for (let k = 0; k + 2 < arrows.length; k += 3) pts.set(lifted(arrows.slice(k, k + 3)), k);
           if (pts.length) scene.curves.push({ pts, color, arrow: true });

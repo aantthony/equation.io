@@ -17,7 +17,9 @@ import { diff } from './diff.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { type MapDoc, expandMapSums } from './defs.ts';
 import { toGLSL } from './glsl.ts';
-import type { MathObject } from './math-object.ts';
+import { FLOW_NODE_LIMIT } from './flow.ts';
+import type { Classified, MathObject } from './math-object.ts';
+import { exceedsNodes } from './size.ts';
 import { type Prog, compileProg, run } from './vm.ts';
 
 export interface SurfaceMap {
@@ -311,6 +313,26 @@ export function surfaceMapping(object: MathObject): SurfaceMapping | null {
       return object.element === 'point' && object.dimension === 2 ? 'carry' : null;
   }
   return null;
+}
+
+/**
+ * A 2D row as a surface panel draws it. A 2D vector field is marked
+ * animated for its moving streaks (lib/plot.ts); on a surface it is still
+ * arrows, which move only with t. Its arrows are traced on the CPU, so a
+ * field too large to trace is refused here rather than left undrawn.
+ */
+export function onSurface(cls: Classified): Classified {
+  const { object } = cls;
+  if (object.kind === 'family') {
+    const members = object.members.map(onSurface);
+    if (members.every((m, k) => m === object.members[k])) return cls;
+    return { ...cls, object: { ...object, members }, animated: members.some(m => m.animated) };
+  }
+  if (object.kind !== 'vector-field' || object.components.length !== 2) return cls;
+  if (object.components.some(c => exceedsNodes(c, FLOW_NODE_LIMIT)))
+    throw new Error(`This field is too large to draw on a surface (${FLOW_NODE_LIMIT} nodes per component).`);
+  const animated = object.components.some(c => freeVars(c).has('t'));
+  return animated === cls.animated ? cls : { ...cls, animated };
 }
 
 export const OFF_SURFACE_MESSAGE =
