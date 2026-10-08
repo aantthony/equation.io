@@ -218,5 +218,15 @@ which axis and plane maps share), so its bounds must be numbers or sliders.
   shaders take; a surface they cannot draw is refused at its row. Its
   tangents are exact where they are cheap and finite differences otherwise
   (mod, gamma).
-- Not drawn: hover readouts on the painted rows, and link previews (a panel
-  on a surface gets the generic card).
+- Hovering: the ray from the eye through the pointer is met with the
+  surface (lib/surface-pick.ts: a coarse mesh of it first, then Newton on
+  P(x, y) = eye + t·ray from the triangle hit), and the readout gives x and
+  y there, to the pixel. Near a painted curve it traces the curve as 2D
+  hover does ("on curve"), within the surface's x and y ranges; near a
+  carried dot it reads the dot's x and y (and name). Each readout also
+  gives the scalar fields' values and the vector fields' (u, v) at its x
+  and y. It is read again as the camera spins or moves under a still
+  pointer. Named points drag along the surface, in x and y, except through
+  a slider the surface itself reads. Dots on the far side, hidden by the
+  surface, are not picked.
+- Not drawn: link previews (a panel on a surface gets the generic card).

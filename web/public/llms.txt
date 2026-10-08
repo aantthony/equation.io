@@ -1438,7 +1438,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   tangent to the surface (the field (u, v) at (x, y) is the tangent
   u ∂P/∂x + v ∂P/∂y), each about a lattice cell long. 3D rows draw as usual;
   other 2D rows (e.g. matrix fields, complex rows, colour fields,
-  histograms) are refused. Any
+  histograms) are refused. Hovering the surface reads x and y there,
+  with scalar and vector fields' values; near a painted curve it traces it
+  ("on curve"), near a point it reads that point; named points drag along
+  the surface. Any
   smooth surface works, with sliders and sums over fixed bounds: a torus is
   `on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi)`.
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
