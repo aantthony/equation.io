@@ -254,6 +254,9 @@ export type MathObject =
   // `constant`: the row reads like a slider named e, pi, tau or i (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
+  /** A plane panel's metric, a `ds^2 = …` row (lib/metric.ts): it draws
+   *  nothing itself; geodesic and lightray rows in its panel trace it. */
+  | { readonly kind: 'metric'; readonly n: 2 | 3; readonly coords: readonly string[] }
   | {
       readonly kind: 'note';
       readonly expr: Expr;
@@ -346,6 +349,7 @@ export function publicKind(object: MathObject) {
     case 'value':
     case 'tuple':
     case 'note':
+    case 'metric':
     case 'automaton':
     case 'lattice':
     case 'graph':
@@ -404,6 +408,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'value':
     case 'tuple':
     case 'note':
+    case 'metric':
       return false;
   }
 }

@@ -27,10 +27,10 @@ self.onmessage = (event: MessageEvent<TraceMessage>) => {
       return;
     }
     if (input.kind === 'geodesic') {
-      const { spec, env: values, maxSteps, ms, maxPoints } = input.geodesic!;
+      const { spec, env: values, maxSteps, ms, maxPoints, window } = input.geodesic!;
       const deadline = performance.now() + ms;
       const ended: GeodesicEnd = { length: 0, asked: 0, budget: false };
-      const flat = Float32Array.from(geodesicPath(spec, values, { maxSteps, deadline, maxPoints, ended }));
+      const flat = Float32Array.from(geodesicPath(spec, values, { maxSteps, deadline, maxPoints, ended, window }));
       const info = geodesicCutNote(ended) ?? undefined;
       self.postMessage({ token, result: { pts: [], flat, info } }, { transfer: [flat.buffer] });
       return;

@@ -266,3 +266,15 @@ which axis and plane maps share), so its bounds must be numbers or sliders.
   a slider the surface itself reads. Dots on the far side, hidden by the
   surface, are not picked.
 - Not drawn: link previews (a panel on a surface gets the generic card).
+
+## A metric of a panel's own
+
+A plane panel can instead carry a metric that comes from no embedding: a
+`ds^2 = …` row (lib/metric.ts, docs/math-map-ideas.md §1). It is written in
+the panel's coordinates — x and y, or coordinate fields like r and phi — and
+pulled back to x and y through their Jacobian, so its geodesics
+(`geodesic(P, d)`, and `lightray(P, d)` in a spacetime) are traced and drawn
+in x and y like any other placed curve, over a box round the window. A panel
+on a surface has the surface's metric, so a ds² row is refused there, and on
+a panel whose view(…) maps its axes, whose window is no rectangle in x and y
+(not yet).

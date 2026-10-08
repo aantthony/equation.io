@@ -1104,6 +1104,40 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
     ],
   ],
   [
+    'curved space + spacetime',
+    [
+      // The upper half-plane with ds² = (dx² + dy²)/y² is the hyperbolic
+      // plane: its geodesics are half-circles standing on y = 0 (and vertical
+      // lines), which is infinitely far away. Drag P.
+      [
+        'Poincaré half-plane geodesics (drag P)',
+        'view(x = -3..3, y = -0.4..3.6); ds^2 = (dx^2 + dy^2)/y^2; y < 0; P = (0, 1); a = [0..17] pi/9; geodesic(P, (cos(a), sin(a)))',
+        'draggable geometry coordinates',
+      ],
+      // A particle round a black hole, in the equatorial plane of the
+      // Schwarzschild metric: speed is its coordinate velocity dφ/dt r, across
+      // the line to P. Each orbit's nearest point moves on by about
+      // 2π((1 − 6M/r)^−½ − 1); slow it below about 0.16 and it falls in.
+      // The horizon r = 2M is shaded and the photon sphere r = 3M drawn.
+      [
+        'Schwarzschild orbit precession (slide speed, drag P)',
+        'view(x = -26..26, y = -20..20); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
+          'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; r < 2M; r = 3M; P = (20, 0); speed = 0.18; ' +
+          'geodesic(P, speed (-P.y, P.x)/sqrt(P.x^2 + P.y^2), 1600)',
+        'slider draggable coordinates physics',
+      ],
+      // Parallel light rays past a black hole: far out they bend by about
+      // 4M/b, those within b = 3√3 M fall in, and those near it wind round
+      // the photon sphere r = 3M before leaving.
+      [
+        'light bending around a black hole',
+        'view(x = -16..16, y = -12..12); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
+          'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; r < 2M; r = 3M; b = [-16..16]/2; lightray((-30, b), (1, 0))',
+        'slider coordinates physics',
+      ],
+    ],
+  ],
+  [
     'systems',
     [
       [
@@ -1339,6 +1373,7 @@ export const COVERS: Record<string, string> = {
   'polar + plane coordinates': 'spiral traced in (r, θ)',
   'spherical + cylindrical': 'cylindrical chart',
   'drawing on surfaces': 'globe: a field, a loxodrome and a cap',
+  'curved space + spacetime': 'light bending around a black hole',
   '3D surfaces': 'gyroid',
   'fields in space': 'hydrogen 2p orbital',
   solids: 'icosahedron',

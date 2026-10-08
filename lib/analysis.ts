@@ -67,7 +67,8 @@ import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
 import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
-import { type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
+import { type MetricSpec, type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
+import { METRIC_ROW, type PanelMetric, parseMetric } from './metric.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { exceedsNodes } from './size.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
@@ -616,6 +617,14 @@ const GEODESIC_USAGE =
   'geodesic takes a surface, where to start on it and which way: geodesic(S, (0.5, 0.5), (1, 0)) with S = (u, v, u^2 - v^2), and optionally how far, geodesic(S, P, (1, 0), 4).';
 const PANEL_GEODESIC_USAGE =
   'On a panel drawn on a surface, geodesic takes where to start and which way, in x and y: geodesic((0, 0.5), (1, 0)) or geodesic(P, (1, 1), 6).';
+const METRIC_GEODESIC_USAGE =
+  'On a panel with a metric (a ds^2 row), geodesic takes where to start and which way in x and y — for a particle in a spacetime, its velocity d(x, y)/dt: geodesic((10, 0), (0, 0.3)), or with how far, geodesic(P, v, 200).';
+const LIGHTRAY_USAGE =
+  'lightray takes where a light ray starts and which way, in x and y: lightray((-30, 4), (1, 0)), or with how far, lightray(P, d, 60).';
+
+/** A panel's metric for its geodesic rows: what its ds^2 row gives, or why
+ *  that row is in error. */
+type PanelMetricState = { metric: PanelMetric } | { error: string };
 
 /**
  * A geodesic row: geodesic(S, (u0, v0), (du, dv)[, L]), or on a panel drawn
@@ -626,10 +635,17 @@ const PANEL_GEODESIC_USAGE =
  * traced in the trace worker, so the start, direction and length may move
  * with sliders, t and named points. A list of starts, directions or lengths draws one
  * geodesic per element, a family.
+ *
+ * On a plane panel with a metric (a ds^2 row, lib/metric.ts),
+ * geodesic(P, d[, L]) follows that metric in x and y — at unit speed, or, in
+ * a spacetime, as a massive particle with coordinate velocity d — and
+ * lightray(P, d[, L]) is a light ray in it.
  */
 function classifyGeodesic(
+  name: 'geodesic' | 'lightray',
   args: readonly Expr[],
   surface: SurfaceMap | undefined,
+  metricState: PanelMetricState | undefined,
   getFn: GetFn,
   ropts: ResolveOpts,
   lower: (e: Expr) => Expr,
@@ -638,7 +654,7 @@ function classifyGeodesic(
 ): Classified {
   let operand: ReturnType<typeof surfaceOperand> | null = null;
   let failure: unknown = null;
-  if (args.length >= 3) {
+  if (name === 'geodesic' && args.length >= 3) {
     try {
       // The surface as the resolver writes it — a named one or a tuple, over
       // u's and v's intervals where they are ones; a function of two
@@ -650,28 +666,68 @@ function classifyGeodesic(
       failure = err;
     }
   }
-  const onPanel = !operand && !!surface && (args.length === 2 || args.length === 3);
-  if (!operand && !onPanel) {
-    if (args.length === 2 && !surface)
+  const panelForm = !operand && (args.length === 2 || args.length === 3);
+  const onPanel = panelForm && !!surface;
+  const onMetric = panelForm && !surface && !!metricState;
+  if (name === 'lightray') {
+    if (!metricState || surface)
       throw new Error(
-        `geodesic(P, d) draws on its panel's surface (an on(…) row), and this panel has none. ${GEODESIC_USAGE}`,
+        `lightray(P, d) traces a light ray of its panel's metric, a ds^2 row (like ds^2 = -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2), and this panel has none. ${LIGHTRAY_USAGE}`,
+      );
+    if (!panelForm) throw new Error(LIGHTRAY_USAGE);
+  }
+  if (!operand && !onPanel && !onMetric) {
+    if (args.length === 2)
+      throw new Error(
+        `geodesic(P, d) draws on its panel's surface (an on(…) row) or under its metric (a ds^2 row), and this panel has neither. ${GEODESIC_USAGE}`,
       );
     throw failure instanceof Error && args.length >= 3 ? failure : new Error(GEODESIC_USAGE);
   }
   if (operand && args.length > 4) throw new Error(GEODESIC_USAGE);
-  const usage = onPanel ? PANEL_GEODESIC_USAGE : GEODESIC_USAGE;
-  const params: Params = onPanel ? ['x', 'y'] : ['u', 'v'];
-  const items: readonly Expr[] = operand ? operand.items : surface!.embed;
+  let metric: MetricSpec | undefined;
+  if (onMetric) {
+    if ('error' in metricState!) throw new Error("This panel's metric (its ds^2 row) has an error.");
+    const m = metricState!.metric;
+    if (name === 'lightray' && m.n === 2)
+      throw new Error(
+        `lightray needs a spacetime: a metric with a time coordinate, like ds^2 = -dt^2 + dx^2 + dy^2. This one, in ${m.coords.join(' and ')}, has no time; draw its geodesics with geodesic(P, d).`,
+      );
+    metric = {
+      n: m.n,
+      components: m.components,
+      derivatives: m.derivatives,
+      ...(m.jacobian ? { jacobian: m.jacobian } : {}),
+      motion: m.n === 2 ? 'riemannian' : name === 'lightray' ? 'null' : 'timelike',
+      ...(m.time !== undefined ? { time: m.time } : {}),
+    };
+  }
+  const usage =
+    name === 'lightray'
+      ? LIGHTRAY_USAGE
+      : onMetric
+        ? METRIC_GEODESIC_USAGE
+        : onPanel
+          ? PANEL_GEODESIC_USAGE
+          : GEODESIC_USAGE;
+  const params: Params = onPanel || onMetric ? ['x', 'y'] : ['u', 'v'];
   const num = (value: number): Expr => ({ kind: 'num', value });
+  const items: readonly Expr[] = operand
+    ? operand.items
+    : onPanel
+      ? surface!.embed
+      : [{ kind: 'var', name: 'x' }, { kind: 'var', name: 'y' }, num(0)];
   // The parameters' ranges: u's and v's intervals where they are defined as
-  // ones, else [0, 1]; the panel's x and y ranges.
+  // ones, else [0, 1]; the panel's x and y ranges. A metric's geodesic is
+  // traced over the window it is drawn in.
   const range = (over: Expr | undefined): Expr[] =>
     over?.kind === 'call' ? [over.args[0], over.args[1]] : [num(0), num(1)];
   const domain: Expr[] = operand
     ? [...range(operand.over.u), ...range(operand.over.v)]
-    : [...surface!.x, ...surface!.y].map(num);
+    : onPanel
+      ? [...surface!.x, ...surface!.y].map(num)
+      : [];
   // The connection is formed from these at each point as it is traced.
-  const derivatives = surfaceDerivatives(items, smoothPartial, params);
+  const derivatives = metric ? [] : surfaceDerivatives(items, smoothPartial, params);
   if (exceedsNodes(derivatives, 4 * FLOW_NODE_LIMIT))
     throw new Error('This surface is too large to trace geodesics on.');
   // Where it starts, which way and how far, each one value or a list.
@@ -682,31 +738,32 @@ function classifyGeodesic(
     return each.map(item => {
       const parts = size === 1 ? [item] : item.kind === 'vec' ? item.items : [];
       if (parts.length !== size || parts.some(p => p.kind === 'vec' || p.kind === 'list'))
-        throw new Error(`geodesic: ${what} is ${size === 1 ? 'one number' : 'a pair, like (1, 0)'}. ${usage}`);
+        throw new Error(`${name}: ${what} is ${size === 1 ? 'one number' : 'a pair, like (1, 0)'}. ${usage}`);
       for (const p of parts)
         for (const n of freeVars(p))
           if (n !== 't' && !constNames.has(n))
             throw new Error(
-              `geodesic: ${what} is numbers, sliders, t and named points${n === params[0] || n === params[1] ? `, not ${n}` : ` (found ${n})`}. ${usage}`,
+              `${name}: ${what} is numbers, sliders, t and named points${n === params[0] || n === params[1] ? `, not ${n}` : ` (found ${n})`}. ${usage}`,
             );
       return parts;
     });
   };
   const starts = elements(rest[0], 2, 'where it starts');
-  const directions = elements(rest[1], 2, 'its direction');
+  const directions = elements(rest[1], 2, metric?.motion === 'timelike' ? 'its velocity' : 'its direction');
   const lengths = rest[2] ? elements(rest[2], 1, 'its length') : [[]];
   const n = Math.max(starts.length, directions.length, lengths.length);
   for (const list of [starts, directions, lengths])
     if (list.length !== 1 && list.length !== n)
       throw new Error(
-        'geodesic: lists of starts, directions and lengths go element by element, so they must be as long.',
+        `${name}: lists of starts, directions and lengths go element by element, so they must be as long.`,
       );
-  if (n > 64) throw new Error('A family of geodesics has at most 64 members.');
+  if (n > 64)
+    throw new Error(`A family of ${name === 'lightray' ? 'light rays' : 'geodesics'} has at most 64 members.`);
   const member = (k: number): Classified => {
     const pick = <T>(list: readonly T[]) => list[list.length === 1 ? 0 : k];
     const object: MathObject = {
       kind: 'geodesic',
-      dim: onPanel ? 2 : 3,
+      dim: operand ? 3 : 2,
       params,
       surface: items,
       derivatives,
@@ -714,14 +771,23 @@ function classifyGeodesic(
       direction: pick(directions),
       ...(rest[2] ? { length: pick(lengths)[0] } : {}),
       domain,
+      ...(metric ? { metric } : {}),
     };
     const used = new Set<string>();
-    for (const e of [...items, ...derivatives, ...domain, ...pick(starts), ...pick(directions), ...pick(lengths)])
+    for (const e of [
+      ...items,
+      ...derivatives,
+      ...domain,
+      ...pick(starts),
+      ...pick(directions),
+      ...pick(lengths),
+      ...(metric ? [...metric.components, ...metric.derivatives, ...(metric.jacobian ?? [])] : []),
+    ])
       for (const name of freeVars(e)) used.add(name);
     return {
       object,
       animated: [...used].some(name => name === 't' || moving.has(name)),
-      needs3D: !onPanel,
+      needs3D: !!operand,
       params: [...used].filter(name => constNames.has(name)).sort(),
     };
   };
@@ -730,7 +796,7 @@ function classifyGeodesic(
   return {
     object: { kind: 'family', members },
     animated: members.some(m => m.animated),
-    needs3D: !onPanel,
+    needs3D: !!operand,
     params: [...new Set(members.flatMap(m => m.params))].sort(),
   };
 }
@@ -856,11 +922,15 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   const panelMaps: AxisMaps[] = [];
   // And the surface a panel's rows are drawn on (lib/surface-map.ts).
   const panelSurfaces: SurfaceMap[] = [];
+  // And the rows that give a panel a metric (`ds^2 = …`, lib/metric.ts).
+  const panelMetricRows: number[][] = [];
+  const metricRow = (text: string) => METRIC_ROW.test(text) && !ropts.documentNames?.has('ds');
   {
     let at = 0;
-    for (const row of rows) {
+    for (const [ri, row] of rows.entries()) {
       if (!row.text || row.def || row.comment) continue;
       if (isDividerRow(row.text)) at++;
+      else if (metricRow(row.text)) (panelMetricRows[at] ??= []).push(ri);
       else if (/^\s*(view|on)\s*\(/.exec(row.text) && !fnNames.has(/^\s*(\w+)/.exec(row.text)![1]))
         try {
           const spec = parseViewRow(row.text, ropts.consts!, viewDoc);
@@ -871,6 +941,39 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         }
     }
   }
+  // Each panel's metric, from its first ds^2 row, worked out when a row of
+  // the panel first asks for it.
+  const panelMetrics: (PanelMetricState | undefined)[] = [];
+  const metricOf = (at: number): PanelMetricState | undefined => {
+    const ri = panelMetricRows[at]?.[0];
+    if (ri === undefined) return undefined;
+    const known = panelMetrics[at];
+    if (known) return known;
+    let state: PanelMetricState;
+    try {
+      if (panelSurfaces[at])
+        throw new Error(
+          'This panel is drawn on a surface, which gives it its metric: a ds^2 row is for a plane panel.',
+        );
+      if (panelMaps[at])
+        throw new Error(
+          "This panel's view(…) maps its axes, and a ds^2 metric is traced on a panel without one, for now.",
+        );
+      const parsed = parseExpr(rows[ri].text, fnNames, listNames, valueNames);
+      if (parsed.kind !== 'eq') throw new Error('A metric row is ds^2 = … in the differentials of its coordinates.');
+      const metric = parseMetric(parsed.r, {
+        resolve: e => inlineFields(lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts), fieldEnv),
+        fields: fieldEnv,
+        isDefined: n => !!ropts.documentNames?.has(n),
+        constNames,
+        values: constEnv,
+      });
+      state = { metric };
+    } catch (err) {
+      state = { error: err instanceof Error ? err.message : String(err) };
+    }
+    return (panelMetrics[at] = state);
+  };
   const seenViewKinds = new Set<string>();
   let panel = 0;
   for (const [ri, row] of rows.entries()) {
@@ -909,6 +1012,17 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           throw new Error('This panel draws on a surface (on(…)), so it is 3D: frame it with camera(…), not view(…).');
         seenViewKinds.add(view.kind);
         row.view = view;
+        continue;
+      }
+      // ds^2 = …: the panel's metric, which its geodesic and lightray rows
+      // follow. It draws nothing itself.
+      if (metricRow(row.text)) {
+        if (panelMetricRows[panel]?.[0] !== ri)
+          throw new Error('This panel already has a metric: one ds^2 row a panel (a --- row starts a new panel).');
+        const state = metricOf(panel)!;
+        if ('error' in state) throw new Error(state.error);
+        const { n, coords } = state.metric;
+        row.cls = { object: { kind: 'metric', n, coords }, animated: false, needs3D: false, params: [] };
         continue;
       }
       // `P(…)` shades an area under a declared density — unless the user has
@@ -1063,11 +1177,26 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
         continue;
       }
-      // geodesic(S, start, direction): traced as it is drawn.
-      if (rawParsed.kind === 'call' && rawParsed.name === 'geodesic' && !fnNames.has('geodesic')) {
+      // geodesic(S, start, direction), or lightray(P, d) under the panel's
+      // metric: traced as it is drawn.
+      if (
+        rawParsed.kind === 'call' &&
+        (rawParsed.name === 'geodesic' || rawParsed.name === 'lightray') &&
+        !fnNames.has(rawParsed.name)
+      ) {
         const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
         const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
-        row.cls = classifyGeodesic(rawParsed.args, panelSurfaces[panel], getFn, ropts, lower, constNames, moving);
+        row.cls = classifyGeodesic(
+          rawParsed.name,
+          rawParsed.args,
+          panelSurfaces[panel],
+          metricOf(panel),
+          getFn,
+          ropts,
+          lower,
+          constNames,
+          moving,
+        );
         continue;
       }
       // A graph's vertices are whole numbers, so its cases may test equality,

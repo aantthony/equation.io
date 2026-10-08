@@ -1512,6 +1512,7 @@ export function comparisonReadout(plot: Extract<CpuPlan, { type: 'note' }>, env:
 export function plotReadout(plot: CpuPlan, env: Record<string, number>): string | null {
   if (plot.type === 'value') return valueReadout(evaluate(plot.expr, env));
   if (plot.type === 'note') return comparisonReadout(plot, env);
+  if (plot.type === 'metric') return plot.text;
   if (plot.type === 'tuple' && plot.blades) {
     // A multivector reads as its blades, a multiset of them as a list.
     const each = 1 << plot.blades.dim;

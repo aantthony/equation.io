@@ -154,7 +154,11 @@ const signatures: Record<string, [string, string]> = {
   ],
   geodesic: [
     'geodesic(S, (u0, v0), (du, dv)) or geodesic(S, P, d, length)',
-    'The geodesic of a surface in u, v from a point in a direction; on an on(…) panel: geodesic(P, (dx, dy))',
+    'The geodesic of a surface in u, v from a point in a direction; on an on(…) panel, or under a ds^2 = … metric row, geodesic(P, (dx, dy)) — in a spacetime (dx, dy) is the velocity d(x, y)/dt',
+  ],
+  lightray: [
+    'lightray(P, (dx, dy)) or lightray(P, d, length)',
+    'A light ray of the panel’s spacetime metric (a ds^2 = … row with a time, like -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2) from P in a direction',
   ],
   meancurvature: [
     'meancurvature(S) or meancurvature(S, u0, v0)',
@@ -296,6 +300,11 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values(['e_yz'], 'Bivector e_y ⟑ e_z');
   values(['e_zx'], 'Bivector e_z ⟑ e_x');
   values(['e_xyz'], 'Pseudoscalar e_x ⟑ e_y ⟑ e_z: the unit volume');
+  // The head of a metric row (lib/metric.ts), not a value of its own.
+  values(
+    ['ds'],
+    'ds^2 = …: the panel’s own metric, in differentials like dx, dr or dt; its geodesic and lightray rows follow it',
+  );
   // (Not a named value's hidden coefficients, M#3: no row can write them.)
   values(
     [...defs.consts.keys()].filter(n => !n.includes('#')),

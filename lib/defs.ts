@@ -2824,6 +2824,8 @@ function rx(e: Expr, ctx: Ctx): Expr {
         throw new Error(
           'geodesic(S, (u0, v0), (du, dv)) draws a curve, so it must be the whole row — on a panel drawn on a surface, geodesic(P, (dx, dy)).',
         );
+      if (e.name === 'lightray')
+        throw new Error('lightray(P, (dx, dy)) draws a light ray, so it must be the whole row.');
       if (e.name === 'fourier' || e.name === 'reconstruct') {
         const params = ctx.opts.params;
         const opts: ResolveOpts = params?.size

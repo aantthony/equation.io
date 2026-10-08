@@ -189,6 +189,7 @@ import {
   geodesicPlanKey,
   GEODESIC_MAX_STEPS,
   numericIn,
+  traceWindow,
 } from '../lib/surface-geometry.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
@@ -1613,12 +1614,22 @@ function geodesicNote(row: Equation, members: number) {
     if (Number(member) >= members) geodesicSlots.delete(name);
     else if (slot.note) notes.push(slot.note);
   }
+  // Budget cuts, and members that could not start (faster than light).
+  const cuts = notes.filter(n => n.startsWith('cut short at '));
+  const others = notes.filter(n => !n.startsWith('cut short at '));
   const note =
     notes.length === 0
       ? undefined
       : members === 1
         ? notes[0]
-        : `${notes.length} of ${members} cut short by the family's budget (one at ${notes[0].replace(/^cut short at /, '')})`;
+        : [
+            others.length ? `${others.length} of ${members}: ${others[0]}` : '',
+            cuts.length
+              ? `${cuts.length} of ${members} cut short by the family's budget (one at ${cuts[0].replace(/^cut short at /, '')})`
+              : '',
+          ]
+            .filter(Boolean)
+            .join('; ');
   // (A reanalysis clears the row's info, so it is compared with that.)
   if (note === row.info) return;
   row.info = note;
@@ -1631,12 +1642,18 @@ function geodesicNote(row: Equation, members: number) {
  * point — and never on this thread. The last one traced keeps drawing until
  * the next arrives, so dragging stays smooth while the worker catches up.
  */
-function geodesicFor(eq: Equation, env: Record<string, number>): Float32Array {
+function geodesicFor(
+  eq: Equation,
+  env: Record<string, number>,
+  /** The box a metric's geodesic is traced over (traceWindow). */
+  window?: GeodesicOptions['domain'],
+): Float32Array {
   const plot = eq.cpu as Extract<CpuPlan, { type: 'geodesic' }>;
   let names = geodesicReads.get(plot);
   if (!names) {
     const exprs = [...plot.surface, ...plot.derivatives, ...plot.start, ...plot.direction, ...plot.domain];
     if (plot.length) exprs.push(plot.length);
+    if (plot.metric) exprs.push(...plot.metric.components, ...plot.metric.derivatives, ...(plot.metric.jacobian ?? []));
     names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => !plot.params.includes(n));
     geodesicReads.set(plot, names);
   }
@@ -1661,7 +1678,7 @@ function geodesicFor(eq: Equation, env: Record<string, number>): Float32Array {
   // The plan is in the key, so an edit to a row it reads (S, the list of
   // directions, the panel's surface) traces it again; the last path keeps
   // drawing until the new one arrives.
-  const key = `${plan}\n${member}\n${JSON.stringify(names.map(n => env[n]))}`;
+  const key = `${plan}\n${member}\n${JSON.stringify(names.map(n => env[n]))}${window ? `\n${JSON.stringify(window)}` : ''}`;
   if (slot.key === key || slot.pending === key) return slot.pts;
   slot.pending = key;
   const { type: _, ...spec } = plot;
@@ -1678,6 +1695,7 @@ function geodesicFor(eq: Equation, env: Record<string, number>): Float32Array {
         maxSteps: Math.min(GEODESIC_MAX_STEPS, Math.ceil(GEODESIC_FAMILY_STEPS / members)),
         ms: GEODESIC_FAMILY_MS / members,
         maxPoints: Math.min(GEODESIC_MAX_POINTS, Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members))),
+        ...(window ? { window } : {}),
       },
       residuals: [],
       dim: plot.dim,
@@ -2782,6 +2800,16 @@ function render() {
           case 'orbit':
             extras.polylines.push({ pts: orbitFor(eq).flat(), color: css });
             break;
+          // A geodesic of the panel's metric (a ds^2 row), traced in the
+          // worker over a box round the window and drawn in x and y.
+          case 'geodesic': {
+            const box = traceWindow([xmin, view.cy - halfH], [xmax, view.cy + halfH]);
+            const pts = geodesicFor(eq, env, box);
+            const xy: number[] = [];
+            for (let k = 0; k + 2 < pts.length; k += 3) xy.push(pts[k], pts[k + 1]);
+            if (xy.length >= 4) extras.polylines.push({ pts: xy, color: css });
+            break;
+          }
           case 'automaton': {
             const params = (eq.cls?.params ?? []).map(p => env[p]);
             if (plot.dims === 2) {
