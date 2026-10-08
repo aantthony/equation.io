@@ -469,6 +469,200 @@ describe('a plane map', () => {
       expect(planeInverse(parsePlaneMap(map), { lo: [-3, -5], hi: [3, 5] }).foldPoints(), map).toEqual([]);
   });
 
+  it('draws a window many turns wide as each turn of it alone', () => {
+    // How long a polyline is on the screen between X = a and b, cut there.
+    const drawn = (lines: number[][], a: number, b: number) => {
+      let len = 0;
+      for (const l of lines)
+        for (let i = 0; i + 3 < l.length; i += 2) {
+          const [X0, Y0, X1, Y1] = l.slice(i, i + 4);
+          if (![X0, Y0, X1, Y1].every(Number.isFinite)) continue;
+          // Liang–Barsky: the part of the run in [a, b] × [0, 5].
+          let [t0, t1] = [0, 1];
+          for (const [p, q] of [
+            [X0 - X1, X0 - a],
+            [X1 - X0, b - X0],
+            [Y0 - Y1, Y0],
+            [Y1 - Y0, 5 - Y0],
+          ]) {
+            if (p === 0 && q < 0) t0 = 2;
+            else if (p < 0) t0 = Math.max(t0, q / p);
+            else if (p > 0) t1 = Math.min(t1, q / p);
+          }
+          if (t1 > t0) len += (t1 - t0) * Math.hypot(X1 - X0, Y1 - Y0);
+        }
+      return len;
+    };
+    const n = 600;
+    const curves: Array<[string, (k: number) => [number, number], (x: number, y: number) => number]> = [
+      ['y = 1', k => [-7.5 + (15 * k) / n, 1], (_, y) => y - 1],
+      [
+        'y = 3 sin 2x',
+        k => [-6 + (12 * k) / n, 3 * Math.sin(2 * (-6 + (12 * k) / n))],
+        (x, y) => y - 3 * Math.sin(2 * x),
+      ],
+    ];
+    const wide = planeInverse(polar(), { lo: [-7 * Math.PI, 0], hi: [7 * Math.PI, 5] });
+    for (const [name, curve, off] of curves) {
+      const lines = planeLines(wide, n + 1, curve, false);
+      // Every point drawn shows a point of the line, a run moved by turns
+      // as well as one solved for.
+      for (const l of lines)
+        for (let i = 0; i + 1 < l.length; i += 2)
+          if (wide.inside(l[i], l[i + 1]))
+            expect(Math.abs(off(...wide.world(l[i], l[i + 1]))), name).toBeLessThan(1e-6);
+      // And each turn of the window draws what a window of that turn alone
+      // does.
+      for (let k = -3; k <= 3; k++) {
+        const [a, b] = [(2 * k - 1) * Math.PI, (2 * k + 1) * Math.PI];
+        const one = planeLines(planeInverse(polar(), { lo: [a, 0], hi: [b, 5] }), n + 1, curve, false);
+        expect(drawn(lines, a, b) / drawn(one, a, b), `${name}, turn ${k}`).toBeCloseTo(1, 9);
+      }
+    }
+  });
+
+  it('finds the true turn, and draws a line, in a window hundreds of turns wide', () => {
+    const n = 150;
+    const flat = (k: number): [number, number] => [-7.5 + (15 * k) / n, 1];
+    // How long a polyline is in the window.
+    const drawn = (inverse: ReturnType<typeof planeInverse>, lines: number[][]) => {
+      let len = 0;
+      for (const l of lines)
+        for (let i = 0; i + 3 < l.length; i += 2)
+          if (inverse.inside(l[i], l[i + 1]) && inverse.inside(l[i + 2], l[i + 3]))
+            len += Math.hypot(l[i + 2] - l[i], l[i + 3] - l[i + 1]);
+      return len;
+    };
+    for (const [map, turns, y] of [
+      ['(Y cos(X), Y sin(X))', 400, [0, 5]],
+      ['(exp(Y) cos(X), exp(Y) sin(X))', 600, [-2, 2]],
+    ] as const) {
+      const plane = parsePlaneMap(map);
+      // One turn's worth, from a window a few turns wide.
+      const few = planeInverse(plane, { lo: [-5 * Math.PI, y[0]], hi: [5 * Math.PI, y[1]] });
+      const perTurn = drawn(few, planeLines(few, n + 1, flat, false)) / 5;
+      // A grid of seeds across it steps whole turns at a time: polar's 6π,
+      // or nothing on the screen at all.
+      const wide = planeInverse(plane, { lo: [(-turns / 2) * Math.PI, y[0]], hi: [(turns / 2) * Math.PI, y[1]] });
+      expect(Math.abs(wide.turns()[0][0]), map).toBeCloseTo(2 * Math.PI, 9);
+      expect(drawn(wide, planeLines(wide, n + 1, flat, false)) / (perTurn * (turns / 2)), map).toBeCloseTo(1, 2);
+    }
+  });
+
+  it('draws a line once per turn in a window tall in log-polar Y', () => {
+    // e^Y runs to e^22 up the window: no false turn a hair's breadth long,
+    // and no copy accepted well off the point wanted.
+    const logPolar = parsePlaneMap('(exp(Y) cos(X), exp(Y) sin(X))');
+    const n = 101;
+    const line = (k: number): [number, number] => [-4 + (8 * k) / (n - 1), -3 + (6.5 * k) / (n - 1)];
+    const perTurn = (lo: [number, number], hi: [number, number]) => {
+      const inverse = planeInverse(logPolar, { lo, hi });
+      let len = 0;
+      for (const l of planeLines(inverse, n, line, false))
+        for (let i = 0; i + 3 < l.length; i += 2)
+          if (inverse.inside(l[i], l[i + 1]) && inverse.inside(l[i + 2], l[i + 3]))
+            len += Math.hypot(l[i + 2] - l[i], l[i + 3] - l[i + 1]);
+      return len / ((hi[0] - lo[0]) / (2 * Math.PI));
+    };
+    const one = perTurn([-2 * Math.PI, -3], [2 * Math.PI, 3]);
+    expect(one).toBeGreaterThan(7);
+    for (const [X, top] of [
+      [2, 9.5],
+      [4, 10],
+      [2, 22],
+      [20, 9.5],
+    ])
+      expect(perTurn([-X * Math.PI, -3], [X * Math.PI, top]) / one, `±${X}π, Y to ${top}`).toBeCloseTo(1, 3);
+  });
+
+  it('draws in a window one turn wide all a wider one does there', () => {
+    // Twisted log-polar spreads the triangle's long edge wider than the
+    // window and its margin: a copy of it crosses the window between ends
+    // shown only on other copies, past the margin either side.
+    const twisted = parsePlaneMap('(exp(Y) cos(X + 6 sin(Y)), exp(Y) sin(X + 6 sin(Y)))');
+    const tri = [
+      [0.3, 0.2],
+      [6, 0.5],
+      [0.2, 5],
+    ] as Array<[number, number]>;
+    // Each run cut where it bends, as the renderer does (web/render2d.ts
+    // mappedSegment): followed in even steps, a run this curved jumps copies.
+    const bends: Segment = (a, b, map, from) => {
+      const out: number[] = [];
+      const shown = (p: readonly [number, number]) => isFinite(p[0]) && isFinite(p[1]);
+      const pa = map(a[0], a[1], from && shown(from) ? from : undefined);
+      const pb = map(b[0], b[1], shown(pa) ? pa : undefined);
+      const tol = 0.0005 * Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+      const split = (t0: number, p0: [number, number], t1: number, p1: [number, number], depth: number) => {
+        const t = (t0 + t1) / 2;
+        const hint: [number, number] | undefined =
+          shown(p0) && shown(p1)
+            ? [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2]
+            : shown(p0)
+              ? p0
+              : shown(p1)
+                ? p1
+                : undefined;
+        const pm = map(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, hint);
+        let cut = shown(p0) !== shown(p1);
+        if (shown(p0) && shown(p1)) {
+          const [dx, dy] = [p1[0] - p0[0], p1[1] - p0[1]];
+          const off = Math.abs((pm[0] - p0[0]) * dy - (pm[1] - p0[1]) * dx) / (Math.hypot(dx, dy) || 1);
+          cut = !shown(pm) || off > (isFinite(tol) ? tol : 0.002 * Math.hypot(dx, dy));
+        }
+        if (depth < 12 && cut) {
+          split(t0, p0, t, pm, depth + 1);
+          split(t, pm, t1, p1, depth + 1);
+        } else out.push(...p0);
+      };
+      split(0, pa, 1, pb, 0);
+      return [out, pb];
+    };
+    // How long the lines are in [−π, π] × [−1, 2], cut at its edges.
+    const strip = (lines: number[][]) => {
+      let len = 0;
+      for (const l of lines)
+        for (let i = 0; i + 3 < l.length; i += 2) {
+          const [X0, Y0, X1, Y1] = l.slice(i, i + 4);
+          if (![X0, Y0, X1, Y1].every(Number.isFinite)) continue;
+          // Liang–Barsky: the part of the run in the strip.
+          let [t0, t1] = [0, 1];
+          for (const [p, q] of [
+            [X0 - X1, X0 + Math.PI],
+            [X1 - X0, Math.PI - X0],
+            [Y0 - Y1, Y0 + 1],
+            [Y1 - Y0, 2 - Y0],
+          ]) {
+            if (p === 0 && q < 0) t0 = 2;
+            else if (p < 0) t0 = Math.max(t0, q / p);
+            else if (p > 0) t1 = Math.min(t1, q / p);
+          }
+          if (t1 > t0) len += (t1 - t0) * Math.hypot(X1 - X0, Y1 - Y0);
+        }
+      return len;
+    };
+    const lines = (W: number) =>
+      strip(planeLines(planeInverse(twisted, { lo: [-W, -1], hi: [W, 2] }), 3, k => tri[k], true, bends));
+    expect(lines(Math.PI) / lines(3 * Math.PI)).toBeCloseTo(1, 2);
+  });
+
+  it('finds the whole lattice a map repeats on, not part of it', () => {
+    for (const map of ['(cos(X), sin(Y))', '(sin(X) + 0.3 sin(Y), sin(Y))', '(cos(X), sin(Y) + 0.2 cos(X))'])
+      for (const W of [10, 30]) {
+        const turns = planeInverse(parsePlaneMap(map), { lo: [-W, -W], hi: [W, W] }).turns();
+        expect(turns.length, `${map} ±${W}`).toBe(2);
+        // Two shortest: 2π along each axis.
+        const sorted = turns.map(t => t.map(v => Math.abs(v))).sort((p, q) => p[0] - q[0]);
+        [0, 2 * Math.PI, 2 * Math.PI, 0].forEach((v, i) =>
+          expect(sorted[i >> 1][i & 1], `${map} ±${W}`).toBeCloseTo(v, 6),
+        );
+      }
+    // Skewed: (2π, 0) and (π, 2π).
+    const skew = planeInverse(parsePlaneMap('(cos(X - Y/2), sin(Y))'), { lo: [-10, -10], hi: [10, 10] }).turns();
+    const det = Math.abs(skew[0][0] * skew[1][1] - skew[0][1] * skew[1][0]);
+    expect(det).toBeCloseTo(4 * Math.PI ** 2, 6);
+  });
+
   it('finds a branch point of z², and fills round it, wherever the window is', () => {
     const z2 = parsePlaneMap('(X^2 - Y^2, 2 X Y)');
     const square = [

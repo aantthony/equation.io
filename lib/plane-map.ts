@@ -231,6 +231,9 @@ const PROBES = 32;
 /** A region's triangles search for copies of the plane at one in this many
  *  (PlaneInverse.triangles); the rest try the copies found. */
 const SEARCH_EVERY = 16;
+/** Seeds move onto one turn of a window holding at least this many
+ *  (PlaneInverse.reseed). */
+const RESEED = 16;
 /** How many searches a window remembers. */
 const MEMO = 1 << 17;
 
@@ -241,17 +244,17 @@ const MEMO = 1 << 17;
 export class PlaneInverse {
   private readonly c: Compiled;
   /** X, Y, x, y per seed. */
-  private readonly seeds: Float64Array;
-  private readonly count: number;
+  private seeds: Float64Array;
+  private count: number;
   /** Which of the BLOCKS² blocks of the window each seed is in. */
-  private readonly blocks: Int32Array;
+  private blocks: Int32Array;
   /** How far in x and y each seed's cell reaches (mayShow). */
-  private readonly reach: Float64Array;
+  private reach: Float64Array;
   /** The window with its margin. */
   private readonly lo: [number, number];
   private readonly hi: [number, number];
   /** How big the window looks in x and y, and on the screen. */
-  private readonly worldScale: number;
+  private worldScale: number;
   private readonly screenScale: number;
   private readonly center: [number, number];
   readonly box: ScreenBox;
@@ -265,23 +268,38 @@ export class PlaneInverse {
     this.hi = [box.hi[0] + MARGIN * w, box.hi[1] + MARGIN * h];
     this.center = [(box.lo[0] + box.hi[0]) / 2, (box.lo[1] + box.hi[1]) / 2];
     this.screenScale = Math.hypot(w, h);
+    [this.seeds, this.blocks, this.reach, this.count, this.worldScale] = this.plant(
+      this.lo,
+      [this.hi[0] - this.lo[0], 0],
+      [0, this.hi[1] - this.lo[1]],
+    );
+  }
+
+  /**
+   * Seeds on a grid over the parallelogram from `origin` along a and b:
+   * each seed's X, Y, x, y, its block, how far its cell reaches, how many
+   * there are, and how big what they show is in x and y.
+   */
+  private plant(
+    origin: readonly [number, number],
+    a: readonly [number, number],
+    b: readonly [number, number],
+  ): [Float64Array, Int32Array, Float64Array, number, number] {
     const seeds = new Float64Array(4 * (SEEDS + 1) ** 2);
     const blocks = new Int32Array((SEEDS + 1) ** 2);
     const reach = new Float64Array((SEEDS + 1) ** 2);
     const side = SEEDS + 1;
     const grid = new Float64Array(2 * side * side);
-    for (let i = 0; i < side; i++)
-      for (let j = 0; j < side; j++) {
-        const X = this.lo[0] + ((this.hi[0] - this.lo[0]) * (i + 0.5)) / side;
-        const Y = this.lo[1] + ((this.hi[1] - this.lo[1]) * (j + 0.5)) / side;
-        grid.set(this.c.f(X, Y), 2 * (i * side + j));
-      }
+    const at = (i: number, j: number): [number, number] => {
+      const [u, v] = [(i + 0.5) / side, (j + 0.5) / side];
+      return [origin[0] + a[0] * u + b[0] * v, origin[1] + a[1] * u + b[1] * v];
+    };
+    for (let i = 0; i < side; i++) for (let j = 0; j < side; j++) grid.set(this.c.f(...at(i, j)), 2 * (i * side + j));
     let n = 0;
     let [xlo, ylo, xhi, yhi] = [Infinity, Infinity, -Infinity, -Infinity];
     for (let i = 0; i < side; i++)
       for (let j = 0; j < side; j++) {
-        const X = this.lo[0] + ((this.hi[0] - this.lo[0]) * (i + 0.5)) / side;
-        const Y = this.lo[1] + ((this.hi[1] - this.lo[1]) * (j + 0.5)) / side;
+        const [X, Y] = at(i, j);
         const [x, y] = [grid[2 * (i * side + j)], grid[2 * (i * side + j) + 1]];
         if (!isFinite(x) || !isFinite(y)) continue;
         // How far the plane its cell shows reaches from it: to its
@@ -293,9 +311,9 @@ export class PlaneInverse {
           [0, 1],
           [0, -1],
         ]) {
-          const [a, b] = [i + di, j + dj];
-          if (a < 0 || b < 0 || a >= side || b >= side) continue;
-          const d = Math.hypot(grid[2 * (a * side + b)] - x, grid[2 * (a * side + b) + 1] - y);
+          const [p, q] = [i + di, j + dj];
+          if (p < 0 || q < 0 || p >= side || q >= side) continue;
+          const d = Math.hypot(grid[2 * (p * side + q)] - x, grid[2 * (p * side + q) + 1] - y);
           if (isFinite(d)) r = Math.max(r, d);
         }
         blocks[n] = Math.floor((i * BLOCKS) / side) * BLOCKS + Math.floor((j * BLOCKS) / side);
@@ -303,11 +321,7 @@ export class PlaneInverse {
         seeds.set([X, Y, x, y], 4 * n++);
         [xlo, ylo, xhi, yhi] = [Math.min(xlo, x), Math.min(ylo, y), Math.max(xhi, x), Math.max(yhi, y)];
       }
-    this.seeds = seeds;
-    this.blocks = blocks;
-    this.reach = reach;
-    this.count = n;
-    this.worldScale = n ? Math.hypot(xhi - xlo, yhi - ylo) : 1;
+    return [seeds, blocks, reach, n, n ? Math.hypot(xhi - xlo, yhi - ylo) : 1];
   }
 
   /** Whether the window (with its margin) may show (x, y): near the point
@@ -344,7 +358,10 @@ export class PlaneInverse {
     let ry = v[1] - y;
     let err = rx * rx + ry * ry;
     if (!isFinite(err)) return null;
-    const scale = this.worldScale + Math.abs(x) + Math.abs(y);
+    // Against the size of the point, not of all the window shows: where
+    // the map grows fast (log-polar's e^Y, a window tall in Y) that would
+    // pass points well off the one wanted, as copies of it.
+    const scale = Math.min(this.worldScale, 1) + Math.abs(x) + Math.abs(y);
     const done = (1e-10 * scale) ** 2;
     const reach = 0.5 * this.screenScale;
     let lambda = 1e-3;
@@ -418,20 +435,35 @@ export class PlaneInverse {
   /**
    * A polyline with a point added where a long run crosses the screen
    * between ends the screen does not show (a chord across the window, its
-   * ends far off): carried as it is, that run would be a gap.
+   * ends far off): carried as it is, that run would be a gap. With `copies`
+   * (PlaneInverse.lines, on a map with turns), also where a run carried on
+   * the screen spans more than the window and its margin: a copy of it can
+   * cross the window between ends past the margin on either side, shown
+   * only on other copies (log-polar twisted by 6 sin Y, a window one turn
+   * wide).
    */
   through(
     count: number,
     vertex: (k: number) => [number, number],
     closed: boolean,
+    copies = false,
   ): [number, (k: number) => [number, number]] {
     const long = 0.1 * this.worldScale;
     const off = (p: [number, number]) => !isFinite(this.first(...p)[0]);
+    // Whether the run a → b, followed on the screen from a, spans more
+    // than the window and its margin.
+    const wide = (a: [number, number], b: [number, number]) => {
+      const pa = this.first(...a);
+      const pb = isFinite(pa[0]) ? this.follow(...b, pa, 1e6) : null;
+      return (
+        !!pb && (Math.abs(pb[0] - pa[0]) > this.hi[0] - this.lo[0] || Math.abs(pb[1] - pa[1]) > this.hi[1] - this.lo[1])
+      );
+    };
     let out: Array<[number, number]> | null = null;
     for (let k = 0; k < (closed ? count : count - 1); k++) {
       const [a, b] = [vertex(k), vertex((k + 1) % count)];
       const added: Array<[number, number]> = [];
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > long && off(a) && off(b))
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > long && ((off(a) && off(b)) || (copies && wide(a, b))))
         for (let i = 1; i < PROBES; i++) {
           const p: [number, number] = [a[0] + ((b[0] - a[0]) * i) / PROBES, a[1] + ((b[1] - a[1]) * i) / PROBES];
           if (!off(p)) added.push(p);
@@ -453,13 +485,16 @@ export class PlaneInverse {
    *  (X, Y) + d is the map at (X, Y), sampled across the window. */
   symmetric(d: readonly [number, number]): boolean {
     const { lo, hi } = this.box;
-    const tol = 1e-7 * (1 + this.worldScale);
     let seen = 0;
     for (let i = 0; i < 5; i++)
       for (let j = 0; j < 5; j++) {
         const [X, Y] = [lo[0] + ((hi[0] - lo[0]) * (i + 0.37)) / 5, lo[1] + ((hi[1] - lo[1]) * (j + 0.61)) / 5];
         const [p, q] = [this.c.f(X, Y), this.c.f(X + d[0], Y + d[1])];
         if (![...p, ...q].every(isFinite)) continue;
+        // Against the point's own size, not the window's: where the map
+        // grows fast (log-polar's e^Y) a window-wide tolerance passes a
+        // shift that moves the small points it shows a long way.
+        const tol = 1e-7 * (1 + Math.abs(p[0]) + Math.abs(p[1]));
         if (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) > tol) return false;
         seen++;
       }
@@ -617,8 +652,9 @@ export class PlaneInverse {
   /** search, and every copy a turn of the map (turns) from what it found
    *  that the window shows. */
   private search(x: number, y: number): Array<[number, number]> {
-    const out = this.searchSeeds(x, y);
+    // The turns first: finding them may move the seeds (reseed).
     const turns = this.turns();
+    const out = this.searchSeeds(x, y);
     if (!turns.length) return out;
     const same = 1e-6 * this.screenScale;
     const known = (p: readonly [number, number]) => out.some(o => Math.abs(o[0] - p[0]) + Math.abs(o[1] - p[1]) < same);
@@ -670,13 +706,18 @@ export class PlaneInverse {
       const u = [d[0] / len, d[1] / len];
       if (common.some(c => Math.abs(c[0] * u[1] - c[1] * u[0]) < 1e-6 * Math.hypot(...c))) continue;
       let g = len;
+      let far = 0;
       for (const e of apart) {
         const t = e[0] * u[0] + e[1] * u[1];
         if (Math.abs(e[0] * u[1] - e[1] * u[0]) > 1e-6 * Math.abs(t) || Math.abs(t) < small) continue;
         let [a, b] = [g, Math.abs(t)];
         for (let it = 0; it < 64 && b > small; it++) [a, b] = [b, Math.abs(a - Math.round(a / b) * b)];
         if (a > small) g = a;
+        far = Math.max(far, Math.abs(t));
       }
+      // As the longest over the number of turns it spans: its error shared
+      // among them, so a copy many turns off moved by it lands on its own.
+      if (far > g) g = far / Math.round(far / g);
       common.push([g * u[0], g * u[1]]);
     }
     for (const d of [...common, ...apart]) {
@@ -694,9 +735,107 @@ export class PlaneInverse {
         }
       }
     }
+    this.primitive(found);
+    // Each pointing up the screen's X (or up Y, along it): either way is a
+    // turn, and one way is easier to read.
+    for (const t of found)
+      if (t[0] < -1e-9 * Math.hypot(...t) || (!(t[0] > 1e-9 * Math.hypot(...t)) && t[1] < 0))
+        [t[0], t[1]] = [-t[0], -t[1]];
+    this.reseed(found);
     return found;
   }
   private turns_?: Array<[number, number]>;
+
+  /**
+   * The turns found, made the shortest that show the same plane: one found
+   * may be a whole number of the true turn (in a window many turns wide the
+   * copies found from its seeds can all lie that far apart: polar's 6π for
+   * 2π), and two may span only part of the lattice the map repeats on
+   * ((cos X, sin Y)'s (2π, ±2π) for 2π along each). Each is divided by a
+   * small prime while the map is the same a part on; two, by the p + 1 ways
+   * to add a p-th of them, then made short and square (Lagrange).
+   */
+  private primitive(found: Array<[number, number]>) {
+    const small = 1e-6 * this.screenScale;
+    const ok = (t: readonly [number, number]) => Math.hypot(...t) > small && this.symmetric(t);
+    if (found.length === 1)
+      for (let more = true; more;) {
+        more = false;
+        for (const p of [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]) {
+          const t: [number, number] = [found[0][0] / p, found[0][1] / p];
+          if (ok(t)) [found[0], more] = [t, true];
+        }
+      }
+    if (found.length === 1 && !(Math.hypot(...found[0]) > 1e-3 * this.screenScale)) found.length = 0;
+    if (found.length !== 2) return;
+    for (let more = true; more;) {
+      more = false;
+      const [t1, t2] = found;
+      for (const p of [2, 3, 5, 7])
+        for (let a = 0; a <= p && !more; a++) {
+          // t1 / p, or (a t1 + t2) / p in place of t2.
+          const v: [number, number] =
+            a === p ? [t1[0] / p, t1[1] / p] : [(a * t1[0] + t2[0]) / p, (a * t1[1] + t2[1]) / p];
+          if (!ok(v)) continue;
+          found.splice(0, 2, ...(a === p ? [v, t2] : [t1, v]));
+          more = true;
+        }
+      // Lagrange: the shorter first, the other less a whole number of it.
+      for (let it = 0; it < 64; it++) {
+        const [u, w] = Math.hypot(...found[0]) <= Math.hypot(...found[1]) ? found : [found[1], found[0]];
+        const m = Math.round((u[0] * w[0] + u[1] * w[1]) / (u[0] ** 2 + u[1] ** 2));
+        const r: [number, number] = [w[0] - m * u[0], w[1] - m * u[1]];
+        found.splice(0, 2, u, r);
+        if (!m) break;
+      }
+    }
+    // What is left checked again: two nearly the same way are one, and
+    // neither may be so short the window holds thousands (a false turn).
+    const [t1, t2] = found;
+    const cross = Math.abs(t1[0] * t2[1] - t1[1] * t2[0]);
+    const keep = found.filter(
+      t =>
+        Math.hypot(...t) > 1e-3 * this.screenScale &&
+        ok(t) &&
+        !(t === t2 && cross < 1e-3 * Math.hypot(...t1) * Math.hypot(...t2)),
+    );
+    found.splice(0, 2, ...keep);
+  }
+
+  /**
+   * In a window many turns wide, its seeds moved onto one turn of it: a grid
+   * over the whole window can step a whole number of turns from seed to
+   * seed and so show the plane at only a few angles (polar's, across 200π),
+   * where one turn across shows all of it, as closely as one turn would.
+   * The turn's copies of what its seeds find are added by search.
+   */
+  private reseed(found: Array<[number, number]>) {
+    if (!found.length) return;
+    const [W, H] = [this.hi[0] - this.lo[0], this.hi[1] - this.lo[1]];
+    const [t1] = found;
+    // The other side: a second turn, or across the window the other way.
+    const t2: [number, number] =
+      found[1] ?? (Math.abs(t1[0]) / W >= Math.abs(t1[1]) / H ? [0, 0.999 * H] : [0.999 * W, 0]);
+    // Only where the window holds many of them, but no more than a search
+    // finds copies (all), and one fits in it.
+    const cell = Math.abs(t1[0] * t2[1] - t1[1] * t2[0]);
+    if (cell * RESEED > W * H || cell * 1024 < W * H) return;
+    const mid = [(this.lo[0] + this.hi[0]) / 2, (this.lo[1] + this.hi[1]) / 2];
+    const origin: [number, number] = [mid[0] - (t1[0] + t2[0]) / 2, mid[1] - (t1[1] + t2[1]) / 2];
+    for (const [u, v] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ]) {
+      const [X, Y] = [origin[0] + u * t1[0] + v * t2[0], origin[1] + u * t1[1] + v * t2[1]];
+      if (X < this.lo[0] || X > this.hi[0] || Y < this.lo[1] || Y > this.hi[1]) return;
+    }
+    const scale = this.worldScale;
+    [this.seeds, this.blocks, this.reach, this.count, this.worldScale] = this.plant(origin, t1, t2);
+    this.worldScale = Math.max(scale, this.worldScale);
+    this.memo.clear();
+  }
 
   private searchSeeds(x: number, y: number): Array<[number, number]> {
     const near: Array<[number, number]> = [];
@@ -881,7 +1020,7 @@ export class PlaneInverse {
    * chain of runs is one entry, cut just past the window's edge.
    */
   lines(count: number, vertex: (k: number) => [number, number], closed: boolean, segment?: Segment): number[][] {
-    [count, vertex] = this.through(count, vertex, closed);
+    [count, vertex] = this.through(count, vertex, closed, this.turns().length > 0);
     const runs = closed ? count : count - 1;
     if (runs < 1) return count ? [this.line(count, vertex, closed, FOLLOW_MARGIN, segment)] : [];
     // As far past the window as a search looks (all), so a run between
@@ -897,50 +1036,77 @@ export class PlaneInverse {
         const pa = map(a[0], a[1], shown(from) ? from : undefined);
         return [[...pa], map(b[0], b[1], shown(pa) ? pa : undefined)];
       });
-    interface Node {
-      p: [number, number];
-      /** The run on to the next vertex, from p; `to` the copy it reaches
-       *  there, or −1 off the screen. */
-      pts?: number[];
-      to?: number;
-      into: boolean;
-    }
-    const nodes: Node[] = [];
+    // The copies of each vertex the screen shows, `size` of them, in typed
+    // arrays (one per field, not an object per copy: a wide window has tens
+    // of thousands), doubled when full. A copy is at (px, py), of vertex
+    // kOf. Its run on to the next vertex, once carried, is pts moved by (dX,
+    // dY): a run moved by a turn shares the one it was moved from. `to` is
+    // the copy that run reaches there, or −1 off the screen, (endX, endY)
+    // then where if it was moved; `into` whether a run reaches it.
+    let size = 0;
+    let [px, py, dX, dY, endX, endY] = Array.from({ length: 6 }, () => new Float64Array(1024));
+    let [kOf, to, into, link] = Array.from({ length: 4 }, () => new Int32Array(1024));
+    const pts: Array<number[] | undefined> = [];
+    const wider = <T extends Float64Array | Int32Array>(a: T, b: T): T => {
+      b.set(a);
+      return b;
+    };
     const at: number[][] = Array.from({ length: count }, () => []);
     const tol = 1e-6 * this.screenScale;
     // Each vertex's copies by cell, a thousand tolerances a side: one is
-    // found among its cell's and the neighbours'.
-    const cells: Array<Map<number, number[]> | undefined> = new Array(count);
+    // found among its cell's and the neighbours'. Each vertex has `slots`
+    // slots of `table` side by side (kept together in memory, as a vertex's
+    // copies are looked for together), a cell hashed to one of them: the
+    // first copy there, the rest a list through `link`, told apart by
+    // place. The slots double when a vertex fills half of them, up to 256
+    // a vertex: past that, its lists grow longer instead.
+    let slots = 4;
+    let table = new Int32Array(slots * count).fill(-1);
     const cell = 1000 * tol;
-    const key = (i: number, j: number) => i * 4194304 + j;
-    const find = (k: number, p: readonly [number, number]) => {
-      const map = cells[k];
-      if (!map) return -1;
-      const [u, v] = [p[0] / cell, p[1] / cell];
-      const [ci, cj] = [Math.floor(u), Math.floor(v)];
+    const slot = (k: number, i: number, j: number) => {
+      const h = Math.imul(i, 0x85ebca6b) ^ Math.imul(j, 0xc2b2ae35);
+      return k * slots + ((h ^ (h >>> 15)) & (slots - 1));
+    };
+    const enter = (id: number) => {
+      const c = slot(kOf[id], Math.floor(px[id] / cell), Math.floor(py[id] / cell));
+      link[id] = table[c];
+      table[c] = id;
+    };
+    const find = (k: number, x: number, y: number) => {
+      const u = x / cell;
+      const v = y / cell;
+      const ci = Math.floor(u);
+      const cj = Math.floor(v);
       // The neighbours only within a tolerance (a thousandth) of an edge.
-      const [i0, i1] = [u - ci < 0.01 ? ci - 1 : ci, u - ci > 0.99 ? ci + 1 : ci];
-      const [j0, j1] = [v - cj < 0.01 ? cj - 1 : cj, v - cj > 0.99 ? cj + 1 : cj];
-      for (let i = i0; i <= i1; i++)
-        for (let j = j0; j <= j1; j++) {
-          const list = map.get(key(i, j));
-          if (list)
-            for (const id of list)
-              if (Math.abs(nodes[id].p[0] - p[0]) + Math.abs(nodes[id].p[1] - p[1]) < tol) return id;
-        }
+      for (let i = u - ci < 0.01 ? ci - 1 : ci; i <= (u - ci > 0.99 ? ci + 1 : ci); i++)
+        for (let j = v - cj < 0.01 ? cj - 1 : cj; j <= (v - cj > 0.99 ? cj + 1 : cj); j++)
+          for (let id = table[slot(k, i, j)]; id >= 0; id = link[id])
+            if (Math.abs(px[id] - x) + Math.abs(py[id] - y) < tol) return id;
       return -1;
     };
-    const add = (k: number, p: [number, number]) => {
-      let id = find(k, p);
+    const add = (k: number, x: number, y: number) => {
+      let id = find(k, x, y);
       if (id < 0) {
-        id = nodes.length;
-        nodes.push({ p, into: false });
+        id = size++;
+        if (size > px.length) {
+          const n = 2 * px.length;
+          [px, py, dX, dY, endX, endY] = [px, py, dX, dY, endX, endY].map(a => wider(a, new Float64Array(n)));
+          [kOf, to, into, link] = [kOf, to, into, link].map(a => wider(a, new Int32Array(n)));
+        }
+        px[id] = x;
+        py[id] = y;
+        kOf[id] = k;
+        dX[id] = dY[id] = 0;
+        endX[id] = endY[id] = NaN;
+        to[id] = -1;
+        into[id] = 0;
+        pts.push(undefined);
         at[k].push(id);
-        const map = (cells[k] ??= new Map());
-        const c = key(Math.floor(p[0] / cell), Math.floor(p[1] / cell));
-        const list = map.get(c);
-        if (list) list.push(id);
-        else map.set(c, [id]);
+        if (2 * at[k].length > slots && slots < 256) {
+          table = new Int32Array(2 * table.length).fill(-1);
+          slots *= 2;
+          for (let i = 0; i < size; i++) enter(i);
+        } else enter(id);
       }
       return id;
     };
@@ -948,38 +1114,72 @@ export class PlaneInverse {
     // short one (a polygon's edges are long).
     const every = Math.max(1, Math.floor(count / 96));
     const turns = this.turns();
+    const [t1, t2] = turns;
+    const det = t1 && t2 ? t1[0] * t2[1] - t1[1] * t2[0] : 0;
+    // Each vertex's first copy carried by solving with its end shown: the
+    // others are that run moved, however many turns from it they are.
+    const solved = new Int32Array(count).fill(-1);
+    const carried = (m: number) => m >= 0 && !!pts[m] && to[m] >= 0;
+    // The run from `id` reaches (x, y) of vertex k: set once that copy is
+    // added, as adding may move the arrays.
+    const reach = (id: number, k: number, x: number, y: number) => {
+      const j = add(k, x, y);
+      to[id] = j;
+      into[j] = 1;
+    };
     const step = (k: number, id: number) => {
-      const n = nodes[id];
-      if (n.pts) return;
+      if (pts[id]) return;
       const next = (k + 1) % count;
-      // A copy a turn from one carried whole is that run, moved.
-      for (const [dX, dY] of turns)
-        for (const sign of [1, -1]) {
-          const m = find(k, [n.p[0] - sign * dX, n.p[1] - sign * dY]);
-          const o = m >= 0 ? nodes[m] : undefined;
-          if (!o?.pts || o.to === undefined || o.to < 0) continue;
-          n.pts = o.pts.map((v, i) => v + sign * (i % 2 ? dY : dX));
-          const end: [number, number] = [nodes[o.to].p[0] + sign * dX, nodes[o.to].p[1] + sign * dY];
-          n.to = this.inside(end[0], end[1], margin) ? add(next, end) : -1;
-          if (n.to < 0) n.pts.push(...end);
-          else nodes[n.to].into = true;
-          return;
-        }
-      const [piece, end] = seg(vertex(k), vertex(next), carry, n.p);
-      n.pts = piece;
-      n.to = shown(end) ? add(next, end) : -1;
-      if (n.to >= 0) nodes[n.to].into = true;
-      else if (turns.length) {
+      // A copy a turn from one carried whole is that run, moved: any number
+      // of turns from the one solved, else a turn either way, found by its
+      // cell. The shift is rounded to whole turns, so the run moves exactly.
+      let from = -1;
+      let sX = 0;
+      let sY = 0;
+      const base = t1 ? solved[k] : -1;
+      if (carried(base)) {
+        const eX = px[id] - px[base];
+        const eY = py[id] - py[base];
+        const a = Math.round(
+          t2 ? (eX * t2[1] - eY * t2[0]) / det : (eX * t1[0] + eY * t1[1]) / (t1[0] ** 2 + t1[1] ** 2),
+        );
+        const b = t2 ? Math.round((t1[0] * eY - t1[1] * eX) / det) : 0;
+        sX = a * t1[0] + (t2 ? b * t2[0] : 0);
+        sY = a * t1[1] + (t2 ? b * t2[1] : 0);
+        if ((a || b) && Math.abs(eX - sX) + Math.abs(eY - sY) < tol) from = base;
+      }
+      for (let i = 0; from < 0 && i < 2 * turns.length; i++) {
+        const sign = i % 2 ? -1 : 1;
+        const [tX, tY] = turns[i >> 1];
+        const m = find(k, px[id] - sign * tX, py[id] - sign * tY);
+        if (carried(m)) [from, sX, sY] = [m, sign * tX, sign * tY];
+      }
+      if (from >= 0) {
+        pts[id] = pts[from];
+        dX[id] = dX[from] + sX;
+        dY[id] = dY[from] + sY;
+        const eX = px[to[from]] + sX;
+        const eY = py[to[from]] + sY;
+        if (this.inside(eX, eY, margin)) reach(id, next, eX, eY);
+        else [endX[id], endY[id]] = [eX, eY];
+        return;
+      }
+      const [piece, end] = seg(vertex(k), vertex(next), carry, [px[id], py[id]]);
+      pts[id] = piece;
+      if (shown(end)) {
+        reach(id, next, ...end);
+        if (solved[k] < 0) solved[k] = id;
+      } else if (turns.length) {
         // Off the screen across the seam of an angle: the copy a turn back
         // comes on at the other edge, traced back to there (lead).
-        const off = this.follow(...vertex(next), n.p, 1);
+        const off = this.follow(...vertex(next), [px[id], py[id]], 1);
         if (off)
-          for (const [dX, dY] of turns)
+          for (const [tX, tY] of turns)
             for (const sign of [1, -1]) {
-              const c: [number, number] = [off[0] + sign * dX, off[1] + sign * dY];
+              const c: [number, number] = [off[0] + sign * tX, off[1] + sign * tY];
               if (!this.inside(c[0], c[1], margin)) continue;
               const s = this.solve(...vertex(next), c, margin);
-              if (s) add(next, s);
+              if (s) add(next, ...s);
             }
       }
     };
@@ -993,7 +1193,7 @@ export class PlaneInverse {
       if (!near || (was && k % every !== 0 && k !== count - 1)) return;
       for (const p of this.all(...vertex(k)))
         // Not where the map folds: the polar origin is shown all along Y = 0.
-        if (this.inside(p[0], p[1], margin) && !this.folds(p[0], p[1])) add(k, p);
+        if (this.inside(p[0], p[1], margin) && !this.folds(p[0], p[1])) add(k, ...p);
     };
     for (let k = 0; k < runs; k++) {
       search(k);
@@ -1005,17 +1205,15 @@ export class PlaneInverse {
       more = false;
       for (let k = 0; k < runs; k++)
         for (let i = 0; i < at[k].length; i++)
-          if (!nodes[at[k][i]].pts) {
+          if (!pts[at[k][i]]) {
             step(k, at[k][i]);
             more = true;
           }
     }
     // Where each copy with nothing leading into it came onto the screen.
-    const kOf = new Int32Array(nodes.length);
-    at.forEach((ids, k) => ids.forEach(id => (kOf[id] = k)));
     const lead = (id: number): number[] => {
       const rev: number[] = [];
-      let [k, from] = [kOf[id], nodes[id].p];
+      let [k, from]: [number, [number, number]] = [kOf[id], [px[id], py[id]]];
       for (let steps = 0; steps < count && (closed || k > 0); steps++) {
         const prev = (k - 1 + count) % count;
         const [piece, end] = seg(vertex(k), vertex(prev), carry, from);
@@ -1023,32 +1221,33 @@ export class PlaneInverse {
         if (!shown(end)) break;
         rev.push(...end);
         // Into a copy already drawn: joined there.
-        if (find(prev, end) >= 0) break;
+        if (find(prev, ...end) >= 0) break;
         [k, from] = [prev, end];
       }
       const out: number[] = [];
       for (let i = rev.length - 2; i >= 0; i -= 2) out.push(rev[i], rev[i + 1]);
       return out;
     };
-    const done = new Uint8Array(nodes.length);
+    const done = new Uint8Array(size);
     const chains: number[][] = [];
     const walk = (id: number, out: number[]) => {
       for (let cur = id; cur >= 0 && !done[cur];) {
         done[cur] = 1;
-        const n = nodes[cur];
-        if (!n.pts) {
-          out.push(...n.p);
+        const run = pts[cur];
+        if (!run) {
+          out.push(px[cur], py[cur]);
           break;
         }
-        out.push(...n.pts);
-        cur = n.to ?? -1;
-        if (cur >= 0 && done[cur]) out.push(...nodes[cur].p);
+        for (let i = 0; i + 1 < run.length; i += 2) out.push(run[i] + dX[cur], run[i + 1] + dY[cur]);
+        if (isFinite(endX[cur])) out.push(endX[cur], endY[cur]);
+        cur = to[cur];
+        if (cur >= 0 && done[cur]) out.push(px[cur], py[cur]);
       }
       if (out.length >= 4) chains.push(out);
     };
-    for (let id = 0; id < nodes.length; id++) if (!nodes[id].into && !done[id]) walk(id, lead(id));
+    for (let id = 0; id < size; id++) if (!into[id] && !done[id]) walk(id, lead(id));
     // What is left goes round and round: a closed line on one copy.
-    for (let id = 0; id < nodes.length; id++) if (!done[id]) walk(id, []);
+    for (let id = 0; id < size; id++) if (!done[id]) walk(id, []);
     return chains;
   }
 

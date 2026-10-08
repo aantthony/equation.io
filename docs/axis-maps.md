@@ -133,8 +133,30 @@ symlog (`y = sinh(Y)`) all come from one feature.
      plane (2π along X, on the polar screen) are found once per window
      (PlaneInverse.turns, checked by PlaneInverse.symmetric), and every
      copy a turn from one found is added, so a search that misses a copy
-     finds it from another. A line's copy a turn from one already carried
-     is that run moved. A fill round a fold is repeated a turn on only when
+     finds it from another; the turn is taken as the longest difference
+     between copies over the number of turns it spans, so it is good to
+     many places. A turn found that is a whole number of the true one
+     (copies found far apart) is divided by small primes while the map is
+     the same that far on, and two turns spanning only part of the lattice
+     the map repeats on ((cos X, sin Y)'s (2π, ±2π)) are filled out to it
+     and made short (PlaneInverse.primitive). In a window sixteen or more
+     turns across, the seeds move onto one turn of it in its middle
+     (PlaneInverse.reseed): a grid over the whole window can step whole
+     turns from seed to seed and see the plane at only a few angles
+     (polar across 200π drew nothing), and search adds each copy a turn
+     from what they find. The solver and the check of a turn measure
+     their error against the size of the point, not of all the window shows:
+     a window tall in log-polar Y shows e^Y up to millions, and against
+     that a shift a hair's breadth long passed as a turn and points well off
+     the one wanted as copies of it. A long run a window with turns shows
+     more of than its width and margin hold gets points added where it
+     crosses the screen (PlaneInverse.through): a copy of it can cross
+     between ends past the margin either side, shown only on other copies.
+     A line is solved for on one copy per vertex: every copy
+     a whole number of turns from it (or a turn from another carried) is
+     that run moved, so a window many turns wide costs little more than one
+     turn, and the copies are kept in typed arrays, found by a hash of
+     their cell. A fill round a fold is repeated a turn on only when
      the map really shows the same plane there, and each other branch
      (polar's copy at (X + π, −Y)) is filled from its own start. The fold
      points are where the Jacobian's determinant changes sign, or touches
