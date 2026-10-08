@@ -18,6 +18,7 @@ extension ChatModel {
     - Use ^ for powers; "2x" and "a sin(x)" multiply. Color a row by ending it with a hex color: "y = x^2 #e24". Labels: label((2, 4), "text").
     - Don't name anything i, e, pi, tau or d: they are taken.
 
+    A shape with a well-known equation (circle, ellipse, sphere, cone, hyperboloid, paraboloid) is simplest written as that equation, an implicit curve or surface: an ellipse is x^2/9 + y^2/4 = 1. Use a parametric form only when asked for one, or when the shape has no equation.
     What to write: for any other shape, call kind_examples for the kind you need (listed below; list_kinds gives each one's smallest form), and adapt an example. function_doc and search_functions look up built-in functions; never invent one.
     Kinds: a row's kind comes from its form. Below, xy is any expression in x and y (xyz: in x, y and z), and 0 any number or defined constant. u and v run from 0 to 1; a third parameter needs its own: s = interval(0, 1).
 
