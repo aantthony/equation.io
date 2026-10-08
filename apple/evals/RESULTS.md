@@ -944,3 +944,16 @@ chart's example `(y, x)` passed for "(−y, x)", and so did `(x, -y)` in earlier
 runs. It now requires `(-y, x)`. On-device files moved by up to 5 runs (the
 step 3 run 74 → 69, the kind chart run 75 → 71, the no-example run 85 → 81);
 the comparisons above use the regraded numbers.
+
+### set_graph's intent
+
+`dd5d6857` adds an `intent` argument to set_graph, generated before the rows
+("what the rows will draw, and which kind of row each one is"), as a stand-in
+for reasoning, which the on-device model doesn't support.
+`results/2026-10-08T113304Z-on-device.json`: 42% ±2% → 40% ±3%, noise, for 35
+more tool-definition tokens. The intents mostly restate the request rather than
+plan the rows ("Draw a unit cube in 3D with edges from 0 to 1 in all
+directions" → `z = x^2 - y^2`, `x = 0`, `y = 0`, `z = 0`), and rows often
+contradict them ("Add two curves: the cubic and its derivative" →
+`f(x) = x^3 - x`, `y = d/dx f(x)`, one curve). unit-cube 4 → 1, derivative
+5 → 1; parametric-circle 1 → 4.
