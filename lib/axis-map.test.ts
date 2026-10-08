@@ -42,6 +42,15 @@ describe('axis maps', () => {
     expect(() => parseAxisMap('x', 'a^X')).toThrow(/sliders; a has no fixed value/);
     expect(() => parseAxisMap('y', '10^X')).toThrow(/in terms of the screen's Y/);
   });
+
+  it('write out Σ and Π, with fixed bounds', () => {
+    const map = parseAxisMap('x', '10^(X/sum(n=1..N, n))', { N: 3 });
+    expect(toWorld(map, 6)).toBeCloseTo(10, 12);
+    expect(toScreen(map, 100)).toBeCloseTo(12, 9);
+    expect(toWorld(parseAxisMap('x', 'prod(n=1..3, n) X'), 1)).toBe(6);
+    expect(() => parseAxisMap('x', 'sum(n=1..X, n)')).toThrow(/fixed numbers or sliders; X changes/);
+    expect(() => parseAxisMap('x', 'exp X')).toThrow(/exp is a function/);
+  });
 });
 
 describe('a map with a slider', () => {

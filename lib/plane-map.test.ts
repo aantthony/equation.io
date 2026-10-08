@@ -45,6 +45,74 @@ describe('a plane map', () => {
     expect(() => parsePlaneMap('(k Y, X)')).toThrow(/k has no fixed value/);
   });
 
+  it('writes out Σ and Π, as a row does', () => {
+    const row = 'view((x, y) = (sum(n=1..3, Y^n/n) cos(X), Y sin(X)), X = -pi..pi, Y = 0..2)';
+    const map = (parseViewRow(row, {}) as View2DSpec).maps!.plane!;
+    const by = parsePlaneMap('((Y + Y^2/2 + Y^3/3) cos(X), Y sin(X))');
+    const window = { lo: [-Math.PI, 0] as const, hi: [Math.PI, 2] as const };
+    for (const [X, Y] of [
+      [0.4, 1.2],
+      [-2, 0.5],
+    ]) {
+      const [x, y] = planeToWorld(map, X, Y);
+      expect([x, y]).toEqual(planeToWorld(by, X, Y));
+      const [X2, Y2] = planeInverse(map, window).first(x, y);
+      expect(X2).toBeCloseTo(X, 6);
+      expect(Y2).toBeCloseTo(Y, 6);
+    }
+    // A slider in a bound, and a product.
+    const prod = parsePlaneMap('(prod(k=1..K, 1 + Y/k) cos(X), Y sin(X))', { K: 2 });
+    expect(planeToWorld(prod, 0, 1)[0]).toBeCloseTo(3, 12);
+    expect(analyzeRows(['K = 2', `view((x, y) = (prod(k=1..K, 1 + Y/k) X, Y))`]).rows[1].error).toBeUndefined();
+  });
+
+  it('writes out a header sum, and nested sums whose index shadows X', () => {
+    const header = parsePlaneMap('(2 sum[n=1..3] Y^n/n, X)');
+    expect(planeToWorld(header, 0, 1)[0]).toBeCloseTo(2 * (1 + 1 / 2 + 1 / 3), 12);
+    // The outer index is X: the inner bound is a number at each term.
+    const nested = parsePlaneMap('(sum(X=1..2, sum(k=1..X, k)) + X, Y)');
+    expect(planeToWorld(nested, 0.5, 0)[0]).toBeCloseTo(1 + 3 + 0.5, 12);
+    expect(() => parsePlaneMap('(sum(n=1..100, sum(k=1..100, k)) + X, Y)')).toThrow(/too many terms \(limit/);
+  });
+
+  it('counts the terms of a whole row against one limit, as a row tuple is', () => {
+    const big = 'sum(n=1..300, sum(k=1..4, k Y))';
+    const tuple = analyzeRows([`(${big} + X, ${big.replace('Y', 'X')} + Y)`]).rows[0].error;
+    expect(tuple).toMatch(/too many terms \(limit 2000 total\)/);
+    expect(() => parseViewRow(`view((x, y) = (${big} + X, ${big.replace('Y', 'X')} + Y))`, {})).toThrow(
+      /too many terms \(limit 2000 total\)/,
+    );
+    expect(() => parseViewRow(`view((x, y) = (${big} + X, Y))`, {})).not.toThrow();
+  });
+
+  it('says a Σ bound cannot use the document’s functions or lists', () => {
+    const fn = analyzeRows(['f(s) = s + 1', 'view((x, y) = (sum(n=1..f(2), Y^n) + X, Y))']).rows[1].error;
+    expect(fn).toMatch(/Σ in a map takes numbers and sliders as bounds; it cannot call f yet/);
+    const list = analyzeRows(['L = [1, 2, 3]', 'view((x, y) = (sum(n=1..L, Y^n) + X, Y))']).rows[1].error;
+    expect(list).toMatch(/Σ in a map needs each bound to be one number, not a list/);
+  });
+
+  it('says a sum has no body as a row does', () => {
+    for (const row of ['view((x, y) = (sum(n=1..3) + X, Y))', 'view((x, y) = (X sum[n=1..3], Y))'])
+      expect(() => parseViewRow(row, {}), row).toThrow('Σ needs a body: write sum(n=1..N, …) or sum[n=1..N] (…).');
+  });
+
+  it('snaps a slider used as a Σ bound to whole numbers, as a row does', () => {
+    const a = analyzeRows(['N = 2.5', 'view((x, y) = (sum(n=1..N, Y^n) + X, Y))']);
+    expect(a.rows[1].error).toBeUndefined();
+    expect([...a.document.sumBoundConsts]).toEqual(['N']);
+  });
+
+  it('reads a defined name that is also a function as a value, not as a missing parenthesis', () => {
+    // gamma changes with t, beta with x: neither has a fixed value, but both are defined.
+    for (const rows of [
+      ['gamma = t', 'view((x, y) = (gamma X, Y))'],
+      ['beta = x^2', 'view((x, y) = (beta X, Y))'],
+    ])
+      expect(analyzeRows(rows).rows[1].error).toMatch(/(gamma|beta) has no fixed value here/);
+    expect(analyzeRows(['view((x, y) = (gamma X, Y))']).rows[0].error).toMatch(/gamma is a function/);
+  });
+
   it('says what is wrong with a row it cannot use', () => {
     for (const [row, message] of [
       ['view((x, y) = (X, X))', /flattens the screen/],
@@ -52,6 +120,10 @@ describe('a plane map', () => {
       ['view((x, y) = (X, Y), x = 0..1)', /give X = lo..hi/],
       ['view((x, y) = (X, Y), x = 10^X)', /not both/],
       ['view((x, y) = (X, Y), i = 0..1)', /framed by X and Y/],
+      ['view((x, y) = (sum(n=1..X, Y^n), Y))', /Σ needs bounds that are fixed numbers or sliders; X changes/],
+      ['view((x, y) = (prod(n=1..t, Y), X))', /Π bounds cannot depend on t/],
+      // Not a name with no value: a function written without its parentheses.
+      ['view((x, y) = (Y cos X, Y sin X))', /cos is a function — write it with parentheses, e\.g\. cos\(X\)/],
     ] as const)
       expect(() => parseViewRow(row, {}), row).toThrow(message);
   });

@@ -1446,6 +1446,9 @@ export function canRenderOg(texts: string[]): boolean {
   // dimension should pick the scene), exactly as an unclassifiable row.
   const plots = analysis.rows.filter(r => r.cls && r.cpu);
   if (plots.every(r => r.cpu!.type === 'label')) return false;
+  // A panel drawing its rows on a surface (on(…)) paints them per pixel in
+  // 3D, which this renderer does not: the generic card instead.
+  if (analysis.rows.some(r => r.view?.kind === 'surface')) return false;
   // Each panel of a split view is 2D or 3D on its own.
   const panel = panelIndices(analysis.rows);
   const needs3D = new Set(analysis.rows.flatMap((r, i) => (r.cls?.needs3D && r.cpu ? [panel[i]] : [])));

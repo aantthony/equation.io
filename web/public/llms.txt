@@ -1413,7 +1413,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   origin are level lines and spirals rise in steps;
   `(x, y) = (exp(Y) cos(X), exp(Y) sin(X))` is log-polar, where equiangular
   spirals are straight. The window is the screen's, X and Y (not x and y).
-  Any smooth map works, with sliders. Every row is drawn through it:
+  Any smooth map works, with sliders, and sums or products over fixed
+  bounds (`sum(n=1..3, Y^n/n)`). Write functions with parentheses: `cos(X)`,
+  not `cos X`. Every row is drawn through it:
   curves, regions, fields, flows and matrix fields (carried by its
   Jacobian), real systems, and points, parametric curves, figures, labels
   and complex roots, placed wherever the screen shows them (every copy, on
@@ -1424,6 +1426,17 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   The grid is the screen's; `grid(x, y)` or coordinate fields (r, theta)
   draw their level lines through the map. Histograms are refused, and
   integrals are readouts without shading.
+- `on((X, Y, Z) = (3cos(y) cos(x), 3cos(y) sin(x), 3sin(y)), x = -pi..pi,
+  y = -pi/2..pi/2)` draws its panel's 2D rows on a surface in space — here
+  the sphere, x as longitude and y as latitude. The panel is 3D (frame it
+  with `camera(…)`, not `view(…)`). Curves and inequalities in x and y
+  (and families of them) and scalar fields are painted on the surface per pixel;
+  points, parametric curves, point lists, labels and figures are carried
+  onto it, figures as outlines (paint an area with an inequality). 3D rows
+  draw as usual; other 2D rows (e.g. vector fields, complex rows, colour
+  fields, parametric regions, histograms) are refused. Any
+  smooth surface works, with sliders and sums over fixed bounds: a torus is
+  `on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi)`.
 - `camera(theta, phi, radius, (tx, ty, tz))` aims the 3D orbit camera —
   angles in radians (`camera(-pi/3, 0.6)`), radius and target optional.
   A trailing `spin = rate` keeps it orbiting about the vertical axis at that

@@ -20,6 +20,7 @@ import {
   compileCpu,
   compileGridGpu,
   cpuStructureKey,
+  parametricGLSL,
 } from '../lib/compiler.ts';
 import { analyzePrepared, isViewportText, prepareDocument, withNote } from '../lib/analysis.ts';
 import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
@@ -162,12 +163,16 @@ import {
   type Camera3D,
   Renderer3D,
   type Scene3D,
+  type SurfacePaint,
   cameraBoxR,
+  cameraEye,
   cameraMatrices,
   drawLabels3D,
   projectToScreen,
 } from './render3d.ts';
 import { assignColors, takesColor } from '../lib/palette.ts';
+import { type SurfaceMap, surfaceInUV, surfaceMapping, surfacePoint } from '../lib/surface-map.ts';
+import { toGLSL } from '../lib/glsl.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -635,6 +640,8 @@ function syncPanels() {
     const p = panels[eq.panel ?? 0] ?? panels[0];
     if (eq.cls?.needs3D) p.mode = '3d';
     const spec = eq.viewSpec;
+    // A panel drawing on a surface (on(…)) is 3D.
+    if (spec?.kind === 'surface') p.mode = '3d';
     if (spec?.kind === 'grid') p.grid = spec;
     if ((spec?.kind === 'view' || spec?.kind === 'camera') && spec.locked) p.locked = true;
   }
@@ -955,6 +962,117 @@ function viewKey(eq: Equation): string | null {
     viewKeys.set(spec, key);
   }
   return key;
+}
+
+/** The surface panel p's 2D rows are drawn on (its on(…) row), if any. */
+function panelSurface(p: Panel): SurfaceMap | undefined {
+  const spec = viewportRow('surface', p)?.viewSpec;
+  return spec?.kind === 'surface' ? spec.surface : undefined;
+}
+
+/** A surface's mesh GLSL, and its x and y, in the mesh's u and v. */
+const surfaceGLSLs = new WeakMap<
+  SurfaceMap,
+  {
+    comps: [string, string, string];
+    du?: [string, string, string];
+    dv?: [string, string, string];
+    xy: [string, string];
+  }
+>();
+function surfaceGLSL(surface: SurfaceMap) {
+  let out = surfaceGLSLs.get(surface);
+  if (!out) {
+    const { comps, uv } = surfaceInUV(surface);
+    out = { ...parametricGLSL(comps), xy: [toGLSL(uv.x), toGLSL(uv.y)] };
+    surfaceGLSLs.set(surface, out);
+  }
+  return out;
+}
+
+/** The bare surface's colour: between the page and its axes, so rows read
+ *  on it in either theme. */
+const surfaceShade = (): [number, number, number] =>
+  theme.bg.map((b, k) => 0.65 * b + 0.35 * theme.axis[k]) as [number, number, number];
+
+/** A 2D row as a surface paints it (web/render3d.ts paintFrag). */
+function paintOf(eq: Equation): SurfacePaint['paint'] | null {
+  switch (eq.gpu?.type) {
+    case 'implicit2d':
+      return { kind: 'curve', field: eq.gpu.field };
+    case 'ineq2d':
+      return { kind: 'region', field: eq.gpu.field, edges: eq.gpu.edges };
+    case 'scalar2d':
+      return { kind: 'scalar', field: eq.gpu.field };
+  }
+  return null;
+}
+
+/** Where a scene stood before a row added to it. */
+function markScene(scene: Scene3D) {
+  return {
+    curves: scene.curves.length,
+    points: scene.points.length,
+    texts: scene.texts?.length ?? 0,
+    segments: scene.segments.length,
+  };
+}
+
+/** Steps a straight run in x and y is cut into on the surface, which bends it. */
+const SURFACE_PIECES = 24;
+
+/**
+ * Carry what a 2D row added to the scene since `mark` — placed in the plane
+ * z = 0 — onto the surface: each point to the surface point at its x and y,
+ * each line cut into pieces first (a straight run in x and y is a curve on
+ * the surface). Everything is lifted a hair toward the eye so the surface
+ * does not hide what lies exactly on it.
+ */
+function carryOntoSurface(scene: Scene3D, mark: ReturnType<typeof markScene>, surface: SurfaceMap, cam: Camera3D) {
+  const eye = cameraEye(cam);
+  const lift = 0.004 * cam.radius;
+  const onto = (x: number, y: number): [number, number, number] => {
+    const p = surfacePoint(surface, x, y);
+    const d = Math.hypot(eye[0] - p[0], eye[1] - p[1], eye[2] - p[2]) || 1;
+    return [0, 1, 2].map(k => p[k] + (lift * (eye[k] - p[k])) / d) as [number, number, number];
+  };
+  const line = (pts: ArrayLike<number>, pieces: number): Float32Array => {
+    const out: number[] = [];
+    for (let i = 0; i + 2 < pts.length; i += 3) {
+      const [x0, y0] = [pts[i], pts[i + 1]];
+      const next = i + 5 < pts.length;
+      const steps = next && Number.isFinite(pts[i + 3]) ? pieces : 1;
+      for (let k = 0; k < steps; k++) {
+        const t = k / steps;
+        const [x, y] = next && steps > 1 ? [x0 + (pts[i + 3] - x0) * t, y0 + (pts[i + 4] - y0) * t] : [x0, y0];
+        const q = Number.isFinite(x) && Number.isFinite(y) ? onto(x, y) : null;
+        // A gap where the surface is undefined, as in a sampled curve.
+        out.push(...(q?.every(Number.isFinite) ? q : [NaN, NaN, NaN]));
+      }
+    }
+    return Float32Array.from(out);
+  };
+  // A sampled curve is short steps already; a figure's edges are long.
+  for (const c of scene.curves.slice(mark.curves)) c.pts = line(c.pts, c.pts.length > 300 ? 1 : SURFACE_PIECES);
+  for (const s of scene.segments.slice(mark.segments)) {
+    const out: number[] = [];
+    for (let i = 0; i + 5 < s.pts.length; i += 6) {
+      const piece = line([s.pts[i], s.pts[i + 1], 0, s.pts[i + 3], s.pts[i + 4], 0], SURFACE_PIECES);
+      for (let k = 0; k + 5 < piece.length; k += 3) {
+        const seg = piece.subarray(k, k + 6);
+        if (seg.every(Number.isFinite)) out.push(...seg);
+      }
+    }
+    s.pts = Float32Array.from(out);
+    s.retained = false;
+  }
+  // A point where the surface is undefined (1/x at x = 0) is not drawn.
+  const placed = <T extends { pos: [number, number, number] }>(items: T[], from: number) => {
+    const kept = items.slice(from).filter(it => (it.pos = onto(it.pos[0], it.pos[1])).every(Number.isFinite));
+    items.splice(from, items.length - from, ...kept);
+  };
+  placed(scene.points, mark.points);
+  if (scene.texts) placed(scene.texts, mark.texts);
 }
 
 /** The axis maps of panel p's view(…) row (lib/axis-map.ts), if it has any. */
@@ -1902,8 +2020,23 @@ function render() {
   ) {
     if (mode === '3d') {
       const scene: Scene3D = { implicits: [], psurfaces: [], curves: [], segments: [], tubes: [], points: [] };
+      // A panel drawing its 2D rows on a surface (lib/surface-map.ts): the
+      // surface first, then each 2D row painted on it or carried onto it.
+      const surface = panelSurface(panel);
+      if (surface) scene.psurfaces.push({ ...surfaceGLSL(surface), color: surfaceShade() });
       for (const eq of rows) {
-        if (SKIPPED_IN_3D.has(eq.cpu!.type)) continue;
+        const on = surface && eq.cls && !eq.cls.needs3D ? surfaceMapping(eq.cls.object) : null;
+        if (on === 'paint') {
+          const paint = paintOf(eq);
+          if (paint) {
+            const { comps, du, dv, xy } = surfaceGLSL(surface!);
+            const { params, uniforms } = shaderBindings(eq.gpu);
+            (scene.paints ??= []).push({ comps, du, dv, xy, paint, color: rowColor(eq), params, uniforms });
+          }
+          continue;
+        }
+        if (SKIPPED_IN_3D.has(eq.cpu!.type) && on !== 'carry') continue;
+        const mark = on === 'carry' ? markScene(scene) : null;
         const color = rowColor(eq);
         const plot = eq.cpu!;
         const { params, uniforms } = shaderBindings(eq.gpu);
@@ -1972,10 +2105,13 @@ function render() {
               const geometry = sample(constEnv, time);
               if (!geometry) break;
               const { mesh, edges } = geometry;
-              if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
+              // On a surface a hull is its outline: a flat fill would cut
+              // through the surface rather than lie on it.
+              const solid = mesh.indices.length > 0 && on !== 'carry';
+              if (solid) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
               scene.segments.push({
                 pts: edges,
-                color: mesh.indices.length ? edgeShade(color) : color,
+                color: solid ? edgeShade(color) : color,
                 retained: true,
               });
               break;
@@ -1987,7 +2123,9 @@ function render() {
             // A closed polygon fills translucently when a fan from its first
             // vertex covers it exactly: triangles, convex outlines, and the
             // discs and sectors multivectors draw (lib/glyphs.ts).
-            const fill = plot.closed && fanFillable(pts);
+            // On a surface it is an outline: the fan's flat triangles would
+            // be chords under the surface (fill a region with an inequality).
+            const fill = plot.closed && on !== 'carry' && fanFillable(pts);
             if (plot.closed) pts.push(...pts.slice(0, 3));
             scene.curves.push({ pts: new Float32Array(pts), color, arrow: plot.arrow, fill });
             break;
@@ -2128,7 +2266,21 @@ function render() {
             }
             break;
         }
+        // What a 2D row placed in the plane z = 0, carried onto the surface.
+        if (mark) carryOntoSurface(scene, mark, surface!, camera);
       }
+      // Named points in x and y (`A = (0.5, 1)`) sit on the surface, labelled.
+      if (surface)
+        for (const eq of equations) {
+          if (eq.def?.kind !== 'const' || eq.error || !defs.points.has(eq.def.name)) continue;
+          if (panelOf(eq) !== index || defs.pointDims.get(eq.def.name) !== 2) continue;
+          const [cx, cy] = pointComps(eq.def.name);
+          const [px, py] = [constEnv[cx], constEnv[cy]];
+          if (!isFinite(px) || !isFinite(py)) continue;
+          const mark = markScene(scene);
+          scene.points.push({ pos: [px, py, 0], color: baseColor(eq), label: eq.def.name, group: eq });
+          carryOntoSurface(scene, mark, surface, camera);
+        }
       r3d.render(camera, scene, time, constEnv, frame);
       drawLabels3D(overlayCtx, camera, dpr, scene.points, scene.texts, box, frame.grid !== 'off');
     } else {
@@ -2921,7 +3073,9 @@ function recompileAll() {
   // all, so a 200 000-point CSV beside one `z = …` row is 200 000 projected,
   // depth-sorted sprites. Whether a panel is 3D is only known once every
   // row has classified, which is why this waits for the loop to finish.
-  const panels3D = new Set(equations.filter(e => e.cls && !e.error && e.cls.needs3D).map(e => e.panel));
+  const panels3D = new Set(
+    equations.filter(e => !e.error && (e.cls?.needs3D || e.viewSpec?.kind === 'surface')).map(e => e.panel),
+  );
   for (const eq of equations) {
     if (!eq.cls || eq.error || !panels3D.has(eq.panel)) continue;
     const points = cloudPoints(eq.cpu!);
@@ -5626,6 +5780,7 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
             camera: 'sets the 3D camera',
             grid: "sets what draws behind its panel's plots",
             split: 'starts a new panel; the rows below it draw there',
+            surface: "sets the surface its panel's rows are drawn on, in 3D",
           }[eq.viewSpec.kind]
         : eq.dist
           ? row.kind
@@ -5635,11 +5790,12 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
               (eq.cls.animated ? '; moves with time t' : '')
             : undefined;
   // A 3D scene leaves 2D-only plots out (render()), however valid they are.
+  const surface = panels[panelOf(eq)] && panelSurface(panels[panelOf(eq)]);
   const skipped =
     panels[panelOf(eq)]?.mode === '3d' &&
     !!eq.cls &&
     !eq.def &&
-    renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type));
+    renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type) && !(surface && m.cls && surfaceMapping(m.cls.object)));
   if (skipped) {
     row.warning = 'not drawn: another row makes this graph 3D, and a 3D scene leaves out 2D-only plots like this one';
   }

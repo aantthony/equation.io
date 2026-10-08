@@ -471,38 +471,46 @@ function colorProgram(channels: readonly Expr[], params: readonly string[]): { f
   return { field: `vec4(${colors.join(', ')})`, locals: lines.join('\n') };
 }
 
+/**
+ * P(u, v)'s GLSL with its tangents, when they are cheaper than the
+ * renderer's finite differences (four more evaluations of P per pixel).
+ * Differentiating repeats every inlined definition in each product- and
+ * chain-rule term, so a long P can have tangents many times its size: the
+ * belt trick's are 12×. They are built a component at a time and abandoned
+ * once over budget, or when P cannot be differentiated (mod, gamma).
+ */
+export function parametricGLSL(
+  coordinates: readonly Expr[],
+  sub: (e: Expr) => Expr = e => e,
+): { comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] } {
+  const comps = coordinates.map(e => toGLSL(sub(e))) as [string, string, string];
+  let budget = Math.max(4096, 4 * comps.reduce((n, c) => n + c.length, 0));
+  const tangent = (variable: string): [string, string, string] | undefined => {
+    const glsl: string[] = [];
+    try {
+      for (const e of coordinates) {
+        const code = toGLSL(sub(diff(e, variable)));
+        budget -= code.length;
+        if (budget < 0) return undefined;
+        glsl.push(code);
+      }
+    } catch {
+      return undefined;
+    }
+    return glsl as [string, string, string];
+  };
+  const du = tangent('u');
+  const dv = du && tangent('v');
+  return du && dv ? { comps, du, dv } : { comps };
+}
+
 export function compileGpu(classified: Classified): GpuPlan {
   const { object } = classified;
   const params = [...classified.params];
   const sub = uniformSub(params);
   const typed = (expr: Expr) => compileTyped(sub(expr));
   const scalar = (expr: Expr) => typed(expr).code;
-  // P(u, v) with its tangents, when they are cheaper than the renderer's
-  // finite differences (four more evaluations of P per pixel). Differentiating
-  // repeats every inlined definition in each product- and chain-rule term, so
-  // a long P can have tangents many times its size: the belt trick's are 12×.
-  // They are built a component at a time and abandoned once over budget.
-  const parametric = (coordinates: readonly Expr[]) => {
-    const comps = coordinates.map(e => toGLSL(sub(e))) as [string, string, string];
-    let budget = Math.max(4096, 4 * comps.reduce((n, c) => n + c.length, 0));
-    const tangent = (variable: string): [string, string, string] | undefined => {
-      const glsl: string[] = [];
-      try {
-        for (const e of coordinates) {
-          const code = toGLSL(sub(diff(e, variable)));
-          budget -= code.length;
-          if (budget < 0) return undefined;
-          glsl.push(code);
-        }
-      } catch {
-        return undefined;
-      }
-      return glsl as [string, string, string];
-    };
-    const du = tangent('u');
-    const dv = du && tangent('v');
-    return du && dv ? { comps, du, dv } : { comps };
-  };
+  const parametric = (coordinates: readonly Expr[]) => parametricGLSL(coordinates, sub);
   switch (object.kind) {
     case 'curve':
       if (object.form === 'parametric') break;
