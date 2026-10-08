@@ -63,6 +63,7 @@ import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
+import { OFF_SURFACE_MESSAGE, type SurfaceMap, surfaceMapping } from './surface-map.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -170,7 +171,7 @@ export interface Analysis {
 /** A viewport row by its text: a `---` divider, or a view/camera/grid call
  *  that is not the definition of a function by that name (`grid(x) = …`). */
 export const isViewportText = (text: string): boolean =>
-  isDividerRow(text) || (/^(view|camera|grid)\s*\(/i.test(text) && !scanDefinition(text));
+  isDividerRow(text) || (/^(view|camera|grid|on)\s*\(/i.test(text) && !scanDefinition(text));
 
 /** No source splitting here: one input row remains one result, including blanks. */
 export function prepareDocument(
@@ -708,15 +709,18 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   // Each panel's axis maps, from its view(…) row wherever in the panel it
   // sits (lib/axis-map.ts); a malformed row is reported by the loop below.
   const panelMaps: AxisMaps[] = [];
+  // And the surface a panel's rows are drawn on (lib/surface-map.ts).
+  const panelSurfaces: SurfaceMap[] = [];
   {
     let at = 0;
     for (const row of rows) {
       if (!row.text || row.def || row.comment) continue;
       if (isDividerRow(row.text)) at++;
-      else if (/^\s*view\s*\(/.test(row.text) && !fnNames.has('view'))
+      else if (/^\s*(view|on)\s*\(/.exec(row.text) && !fnNames.has(/^\s*(\w+)/.exec(row.text)![1]))
         try {
           const spec = parseViewRow(row.text, ropts.consts!);
           if (spec?.kind === 'view' && spec.maps) panelMaps[at] ??= spec.maps;
+          if (spec?.kind === 'surface') panelSurfaces[at] ??= spec.surface;
         } catch {
           /* the row's own error */
         }
@@ -737,7 +741,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       const badRow = badTableRow(row.text);
       if (badRow) throw new Error(badRow);
       // A call to the user's own view/camera/grid function is theirs.
-      const head = /^\s*(view|camera|grid)\s*\(/.exec(row.text);
+      const head = /^\s*(view|camera|grid|on)\s*\(/.exec(row.text);
       const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!);
       if (view) {
         // Each panel frames itself: a divider starts a fresh set.
@@ -755,6 +759,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
             const problem = gridCoordinateProblem(name, gridFields, defs.fields);
             if (problem) throw new Error(problem);
           }
+        // A panel on a surface is 3D: framed by a camera, not a 2D window.
+        if ((view.kind === 'surface' && seenViewKinds.has('view')) || (view.kind === 'view' && panelSurfaces[panel]))
+          throw new Error('This panel draws on a surface (on(…)), so it is 3D: frame it with camera(…), not view(…).');
         seenViewKinds.add(view.kind);
         row.view = view;
         continue;
@@ -1019,6 +1026,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         if (row.cls.object.kind === 'tensor-field')
           row.cls = { ...row.cls, object: { ...row.cls.object, jacobian: tensorJacobian(maps) } };
       }
+      // A panel on a surface paints or carries its 2D rows onto it; a row
+      // in space draws as it would in any 3D panel.
+      if (panelSurfaces[panel] && !row.cls.needs3D && !surfaceMapping(row.cls.object))
+        throw new Error(OFF_SURFACE_MESSAGE);
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;

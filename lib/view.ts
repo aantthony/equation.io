@@ -18,6 +18,7 @@ import { evaluate, parseExpr } from './expr.ts';
 import { type GridRowSpec, type SplitSpec, parseDividerRow, parseGridRow } from './panels.ts';
 import { type AxisMaps, SCREEN, parseAxisMap, screenWindowOk, toWorld, windowToScreen } from './axis-map.ts';
 import { parsePlaneMap } from './plane-map.ts';
+import { type SurfaceSpec, parseSurfaceMap } from './surface-map.ts';
 
 export interface View2DSpec {
   kind: 'view';
@@ -60,9 +61,9 @@ export interface Camera3DSpec {
 
 /** Viewport rows: the framing rows, plus the split-view rows of lib/panels.ts
  *  (a `---` divider, a `grid(…)`), which are document structure the same way. */
-export type ViewSpec = View2DSpec | Camera3DSpec | SplitSpec | GridRowSpec;
+export type ViewSpec = View2DSpec | Camera3DSpec | SplitSpec | GridRowSpec | SurfaceSpec;
 
-const HEAD_RE = /^\s*(view|camera)\s*\(([\s\S]*)\)\s*$/;
+const HEAD_RE = /^\s*(view|camera|on)\s*\(([\s\S]*)\)\s*$/;
 
 /** Split on top-level commas only, so a (tx, ty, tz) target stays one arg. */
 function splitArgs(s: string): string[] {
@@ -118,6 +119,34 @@ function num(src: string, env: Record<string, number>, what: string): number {
   return numExpr(parsed, env, what);
 }
 
+/** `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)`: the surface the panel's
+ *  2D rows are drawn on (lib/surface-map.ts). */
+function parseSurfaceRow(args: string[], env: Record<string, number>): SurfaceSpec {
+  const usage =
+    'Expected on((X, Y, Z) = (cos(y) cos(x), cos(y) sin(x), sin(y)), x = -pi..pi, y = -pi/2..pi/2): the surface the panel’s rows are drawn on, and the x and y it spans.';
+  let src: string | null = null;
+  const ranges: Partial<Record<'x' | 'y', [number, number]>> = {};
+  for (const arg of args) {
+    const embed = /^\(\s*X\s*,\s*Y\s*,\s*Z\s*\)\s*=\s*([\s\S]+)$/.exec(arg);
+    if (embed) {
+      if (src !== null) throw new Error('on(…) gives the surface twice.');
+      src = embed[1];
+      continue;
+    }
+    const named = /^([xy])\s*=\s*([\s\S]+)$/.exec(arg);
+    const range = named && splitRange(named[2]);
+    if (!named || !range) throw new Error(usage);
+    const axis = named[1] as 'x' | 'y';
+    if (ranges[axis]) throw new Error(`on(…) sets ${axis} twice.`);
+    const lo = num(range[0], env, `${axis} lower bound`);
+    const hi = num(range[1], env, `${axis} upper bound`);
+    if (lo >= hi) throw new Error(`The ${axis} range needs lo < hi (got ${lo}..${hi}).`);
+    ranges[axis] = [lo, hi];
+  }
+  if (src === null || !ranges.x || !ranges.y) throw new Error(usage);
+  return { kind: 'surface', surface: parseSurfaceMap(src, ranges.x, ranges.y, env) };
+}
+
 /** A view row with a plane map: its window is the screen's, X and Y. */
 function planeView(spec: View2DSpec, maps: AxisMaps, ranges: Array<[string, [number, number]]>): View2DSpec {
   if (maps.x || maps.y)
@@ -156,6 +185,11 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
   const lockAt = args.findIndex(a => /^locked$/i.test(a));
   const locked = lockAt >= 0;
   if (locked) args.splice(lockAt, 1);
+  if (m[1] === 'on') {
+    // The camera frames the panel: lock it there.
+    if (locked) throw new Error('on(…) takes no locked: put it on the panel’s camera(…) row.');
+    return parseSurfaceRow(args, env);
+  }
   if (m[1] === 'view') {
     const usage = 'Expected view(x = lo..hi, y = lo..hi, ratio = 1, locked) — either axis alone works.';
     const spec: View2DSpec = { kind: 'view' };
