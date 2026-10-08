@@ -31,6 +31,31 @@ describe('a surface map', () => {
     expect(() => parseViewRow('on((X, Y, Z) = (R x, y, 0), x = 0..1, y = 0..1)', {})).toThrow(/R has no fixed value/);
   });
 
+  it('writes out Σ and Π, with sliders in their bounds', () => {
+    const spec = parseViewRow('on((X, Y, Z) = (x, y, sum(n=1..N, x^n/n)), x = 0..1, y = 0..1)', {
+      N: 3,
+    }) as SurfaceSpec;
+    const by = parseViewRow('on((X, Y, Z) = (x, y, x + x^2/2 + x^3/3), x = 0..1, y = 0..1)', {}) as SurfaceSpec;
+    for (const [x, y] of [
+      [0.3, 0.1],
+      [0.9, 0.7],
+    ])
+      expect(surfacePoint(spec.surface, x, y)[2]).toBeCloseTo(surfacePoint(by.surface, x, y)[2], 12);
+    // Drawn on the GPU as plain arithmetic.
+    expect(parametricGLSL(surfaceInUV(spec.surface).comps).comps[2]).not.toMatch(/sum/);
+    const prod = parseViewRow('on((X, Y, Z) = (x, y, prod(k=1..3, 1 + x/k)), x = 0..1, y = 0..1)', {}) as SurfaceSpec;
+    expect(surfacePoint(prod.surface, 0.5, 0)[2]).toBeCloseTo(1.5 * 1.25 * (1 + 0.5 / 3), 12);
+  });
+
+  it('expands only the sums: a derivative is refused with a sum or without', () => {
+    for (const row of [
+      'on((X, Y, Z) = (x, y, d/dx(x^3)), x = 0..1, y = 0..1)',
+      'on((X, Y, Z) = (x, y, d/dx(x^3) + sum(n=1..2, y^n)), x = 0..1, y = 0..1)',
+      'on((X, Y, Z) = (x, y, sum(n=1..2, d/dx(x^n))), x = 0..1, y = 0..1)',
+    ])
+      expect(() => parseViewRow(row, {}), row).toThrow(/d has no fixed value/);
+  });
+
   it('says what is wrong with a row it cannot use', () => {
     for (const [row, message] of [
       ['on((X, Y, Z) = (x, y, 0))', /x = -pi..pi/],
@@ -38,7 +63,13 @@ describe('a surface map', () => {
       ['on((X, Y, Z) = (x, x, x), x = 0..1, y = 0..1)', /no surface/],
       ['on((X, Y, Z) = (x, y, 0), x = 1..0, y = 0..1)', /lo < hi/],
       ['on((X, Y, Z) = (x, y, 0), x = 0..1, y = 0..1, locked)', /camera/],
-      ['on((X, Y, Z) = (x, y, sum(n=1..3, x^n)), x = 0..1, y = 0..1)', /cannot take Σ yet: write its terms out/],
+      [
+        'on((X, Y, Z) = (x, y, sum(n=1..y, x^n)), x = 0..1, y = 0..1)',
+        /Σ needs bounds that are fixed numbers or sliders; y changes/,
+      ],
+      ['on((X, Y, Z) = (x, y, sum(n=1..N, x^n)), x = 0..1, y = 0..1)', /Σ bounds must be constant/],
+      ['on((X, Y, Z) = (x, y, sum(n=1..10^6, x^n)), x = 0..1, y = 0..1)', /Σ expands to 1000000 terms \(limit/],
+      ['on((X, Y, Z) = (x, y, cos x), x = 0..1, y = 0..1)', /cos is a function — write it with parentheses/],
     ] as const)
       expect(() => parseViewRow(row, {}), row).toThrow(message);
   });
