@@ -433,13 +433,25 @@ describe('second review fixes', () => {
     expect(Math.hypot(...pts.at(-1)!)).toBeLessThan(2.01);
   });
 
-  it('reads dτ after a number, and leaves a longer name alone', () => {
+  it('reads dτ as any other differential, a time like dt', () => {
     expect(last(['ds^2 = -2dτ^2 + dx^2 + dy^2']).cls!.object).toMatchObject({
       kind: 'metric',
       coords: ['τ', 'x', 'y'],
     });
-    // dτx is d τ x, as before, not a coordinate named taux.
-    expect(errorOf(['ds^2 = -dτx^2 + dx^2 + dy^2'])).toMatch(/Unknown variable: d\b/);
+    // dτx is one name: the differential of τx, not of τ.
+    expect(last(['ds^2 = -dτx^2 + dx^2 + dy^2']).cls!.object).toMatchObject({ coords: ['τx', 'x', 'y'] });
+    // A component reading the time τ is time-dependent, as one reading t.
+    expect(errorOf(['ds^2 = -(1 + τ/10) dτ^2 + dx^2 + dy^2'])).toMatch(
+      /depends on τ: metrics that change with time are not supported yet/,
+    );
+    // A slider named τ (or dτ) elsewhere leaves dτ the time's differential,
+    // as a slider named dt does dt; reading τ there is still refused.
+    expect(errorOf(['τ = 2', 'ds^2 = -dτ^2 + dx^2 + dy^2'])).toBeUndefined();
+    expect(errorOf(['dτ = 0.1', 'ds^2 = -dτ^2 + dx^2 + dy^2'])).toBeUndefined();
+    expect(errorOf(['τ = 2', 'ds^2 = -(1 + τ/10) dτ^2 + dx^2 + dy^2'])).toMatch(/depends on τ/);
+    expect(errorOf(['tau = 2', 'ds^2 = -dtau^2 + dx^2 + dy^2'])).toMatch(/tau is not a coordinate/);
+    // And τ the slider still works in other rows.
+    expect(errorOf(['τ = 2', 'ds^2 = -dτ^2 + dx^2 + dy^2', 'y = τ x'])).toBeUndefined();
   });
 
   it('says when every point checked is inside a horizon', () => {

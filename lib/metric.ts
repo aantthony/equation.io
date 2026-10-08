@@ -186,16 +186,12 @@ function sampleCounts(
   return counts;
 }
 
+/** The names of a time: d<name> is its differential in a ds^2 row even
+ *  where the document defines d<name> or the name itself. */
+const TIME_NAMES: ReadonlySet<string> = new Set(['t', 'τ']);
+
 /** Names a differential cannot be of: constants and the imaginary unit. */
 const NOT_COORDINATES: ReadonlySet<string> = new Set(['pi', 'e', 'i', 'inf']);
-
-/**
- * A ds^2 row's text with `dτ` spelled `dtau`: τ alone is the glyph for the
- * constant tau, so `dτ` would read as d times τ.
- */
-export function metricText(text: string): string {
-  return text.replace(/(?<![\p{L}_'])dτ(?![\p{L}\p{N}_'])/gu, 'dtau');
-}
 
 /**
  * The metric of a `ds^2 = rhs` row, or an error saying what is wrong with it:
@@ -216,14 +212,13 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   const names = new Map<string, string>();
   for (const name of freeVars(rhs)) {
     if (name.length < 2 || name[0] !== 'd') continue;
-    const written = name.slice(1);
-    const of = written === 'tau' ? 'τ' : written;
+    const of = name.slice(1);
     if (PANEL.has(of) || Object.hasOwn(ctx.fields, of)) {
       panel.push(of);
       names.set(name, of);
       continue;
     }
-    if (of !== 't' && of !== 'τ' && ctx.isDefined(name)) {
+    if (!TIME_NAMES.has(of) && ctx.isDefined(name)) {
       shadowed.push(name);
       continue;
     }
@@ -231,7 +226,8 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
       throw new Error(
         `ds^2: ${name} is no differential — ${of} is ${builtinFn(of) ? 'a function' : 'a constant'}, not a coordinate.`,
       );
-    if (ctx.isDefined(of))
+    // A time keeps its name inside ds^2 even beside a slider τ elsewhere.
+    if (ctx.isDefined(of) && !TIME_NAMES.has(of))
       throw new Error(
         `ds^2: ${of} is not a coordinate, so ${name} is no differential — define ${of} from x and y (like r = sqrt(x^2 + y^2)), or use a coordinate of its own, like dt.`,
       );
@@ -241,7 +237,7 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   const listed = (list: readonly string[]) => list.map(n => `d${n}`).join(', ');
   if (panel.length < 2) {
     // dr and dphi with no r and phi defined read as coordinates of their own.
-    const loose = extra.filter(n => n !== 't' && n !== 'τ');
+    const loose = extra.filter(n => !TIME_NAMES.has(n));
     throw new Error(
       `ds^2 needs the differentials of both of the panel's coordinates — dx and dy, or of two coordinates defined from x and y${panel.length ? ` (it has only ${listed(panel)})` : ''}. ` +
         (loose.length
@@ -269,13 +265,15 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   // What the components may read: x, y, the differentials and constants.
   const vars = [...coords.map(c => slot.get(c)!)];
   for (const v of freeVars(Q)) {
-    if (PANEL.has(v) || vars.includes(v) || ctx.constNames.has(v)) continue;
+    // The extra coordinate first: a slider of the same name (τ = 2) is not
+    // what a component in the time τ reads.
     if (v === time)
       throw new Error(
-        v === 't'
-          ? 'ds^2 depends on t: metrics that change with time are not supported yet (inside ds^2, dt is the differential of the time coordinate t).'
+        TIME_NAMES.has(v)
+          ? `ds^2 depends on ${v}: metrics that change with time are not supported yet (inside ds^2, d${v} is the differential of the time coordinate ${v}).`
           : `ds^2 depends on ${v}: its coordinate besides the panel's two must be cyclic — no component may depend on it.`,
       );
+    if (PANEL.has(v) || vars.includes(v) || ctx.constNames.has(v)) continue;
     throw new Error(`Unknown variable: ${v}. Define "${v} = 1" to make a slider.`);
   }
 
