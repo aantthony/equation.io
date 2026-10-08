@@ -2297,6 +2297,36 @@ export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr
 }
 
 /**
+ * A map's expression — a view's axis or plane map, an on(…) surface — with
+ * its Σ/Π written out term by term as a row's are, under the same limits, so
+ * the GPU and the CPU both see plain arithmetic. Bounds may use numbers and
+ * the sliders in `consts`; not `coords`, the map's own coordinates, which
+ * change from point to point. A bare function name (`cos X`) is caught here
+ * too, where it would otherwise read as a name with no value.
+ */
+export function expandMapSums(e: Expr, coords: readonly string[], consts: Record<string, number>): Expr {
+  let sums = false;
+  const check = (e: Expr): void => {
+    if (e.kind === 'call' && (e.name === 'sum' || e.name === 'prod')) {
+      sums = true;
+      for (const b of e.args.slice(1, 3))
+        for (const v of freeVars(b))
+          if (coords.includes(v))
+            throw new Error(
+              `${e.name === 'sum' ? 'Σ' : 'Π'} needs bounds that are fixed numbers or sliders; ${v} changes across the map.`,
+            );
+    }
+    childrenOf(e).forEach(check);
+  };
+  check(e);
+  const out = sums ? resolveExpr(e, () => undefined, { consts }) : e;
+  for (const v of freeVars(out))
+    if (builtinFn(v) && !(v in consts))
+      throw new Error(`${v} is a function — write it with parentheses, e.g. ${v}(${coords[0]}).`);
+  return out;
+}
+
+/**
  * The inequality a resolved name or call stands for — a document's named
  * condition (`within = r < R`), or a function body that is one — or null.
  * A function's parameter is its argument, never the document's name.

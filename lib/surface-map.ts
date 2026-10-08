@@ -12,6 +12,7 @@
  * point by point (surfacePoint). See docs/axis-maps.md.
  */
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
+import { expandMapSums } from './defs.ts';
 import { toGLSL } from './glsl.ts';
 import type { MathObject } from './math-object.ts';
 import { type Prog, compileProg, run } from './vm.ts';
@@ -53,9 +54,10 @@ export function parseSurfaceMap(
     throw new Error(USAGE);
   }
   if (parsed.kind !== 'vec' || parsed.items.length !== 3) throw new Error(USAGE);
+  const items = parsed.items.map(e => expandMapSums(e, ['x', 'y'], env));
   const values: Record<string, Expr> = {};
   let uses = false;
-  for (const name of freeVars(parsed)) {
+  for (const name of freeVars({ kind: 'vec', items })) {
     if (name === 'x' || name === 'y') uses = true;
     else if (!CONSTANTS.has(name)) {
       const v = env[name];
@@ -68,19 +70,14 @@ export function parseSurfaceMap(
     }
   }
   if (!uses) throw new Error(USAGE);
-  const embed = parsed.items.map(e => substVars(e, values)) as [Expr, Expr, Expr];
+  const embed = items.map(e => substVars(e, values)) as [Expr, Expr, Expr];
   const map: SurfaceMap = { text: src.trim(), embed, x, y };
   // The surface and what is painted on it are drawn on the GPU.
   for (const e of embed)
     try {
       toGLSL(e);
     } catch (err) {
-      const message = (err as Error).message;
-      // Rows have their sums expanded first (lib/defs.ts); a surface not yet.
-      const sum = /^(Σ|Π) must be expanded/.exec(message);
-      throw new Error(
-        sum ? `A surface cannot take ${sum[1]} yet: write its terms out.` : `The surface cannot be drawn: ${message}`,
-      );
+      throw new Error(`The surface cannot be drawn: ${(err as Error).message}`);
     }
   if (!spreads(map))
     throw new Error(`(X, Y, Z) = ${map.text} is no surface over these x and y: it is a curve or a point.`);

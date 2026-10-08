@@ -45,6 +45,27 @@ describe('a plane map', () => {
     expect(() => parsePlaneMap('(k Y, X)')).toThrow(/k has no fixed value/);
   });
 
+  it('writes out Σ and Π, as a row does', () => {
+    const row = 'view((x, y) = (sum(n=1..3, Y^n/n) cos(X), Y sin(X)), X = -pi..pi, Y = 0..2)';
+    const map = (parseViewRow(row, {}) as View2DSpec).maps!.plane!;
+    const by = parsePlaneMap('((Y + Y^2/2 + Y^3/3) cos(X), Y sin(X))');
+    const window = { lo: [-Math.PI, 0] as const, hi: [Math.PI, 2] as const };
+    for (const [X, Y] of [
+      [0.4, 1.2],
+      [-2, 0.5],
+    ]) {
+      const [x, y] = planeToWorld(map, X, Y);
+      expect([x, y]).toEqual(planeToWorld(by, X, Y));
+      const [X2, Y2] = planeInverse(map, window).first(x, y);
+      expect(X2).toBeCloseTo(X, 6);
+      expect(Y2).toBeCloseTo(Y, 6);
+    }
+    // A slider in a bound, and a product.
+    const prod = parsePlaneMap('(prod(k=1..K, 1 + Y/k) cos(X), Y sin(X))', { K: 2 });
+    expect(planeToWorld(prod, 0, 1)[0]).toBeCloseTo(3, 12);
+    expect(analyzeRows(['K = 2', `view((x, y) = (prod(k=1..K, 1 + Y/k) X, Y))`]).rows[1].error).toBeUndefined();
+  });
+
   it('says what is wrong with a row it cannot use', () => {
     for (const [row, message] of [
       ['view((x, y) = (X, X))', /flattens the screen/],
@@ -52,6 +73,10 @@ describe('a plane map', () => {
       ['view((x, y) = (X, Y), x = 0..1)', /give X = lo..hi/],
       ['view((x, y) = (X, Y), x = 10^X)', /not both/],
       ['view((x, y) = (X, Y), i = 0..1)', /framed by X and Y/],
+      ['view((x, y) = (sum(n=1..X, Y^n), Y))', /Σ needs bounds that are fixed numbers or sliders; X changes/],
+      ['view((x, y) = (prod(n=1..t, Y), X))', /Π bounds cannot depend on t/],
+      // Not a name with no value: a function written without its parentheses.
+      ['view((x, y) = (Y cos X, Y sin X))', /cos is a function — write it with parentheses, e\.g\. cos\(X\)/],
     ] as const)
       expect(() => parseViewRow(row, {}), row).toThrow(message);
   });
