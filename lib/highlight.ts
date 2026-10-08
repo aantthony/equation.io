@@ -31,7 +31,7 @@ export interface Span {
 /** The plot's own variables: meaningful in any row without a definition. */
 const COORDS = new Set(['x', 'y', 'z', 't', 'u', 'v', 'w']);
 
-const GLYPH_CLASS: Record<string, SpanClass> = { π: 'const', τ: 'const', '∞': 'const' };
+const GLYPH_CLASS: Record<string, SpanClass> = { π: 'const', '∞': 'const' };
 
 /** A name, its primes, and any dotted members: `f''`, `person.age`, `A.x`. */
 const NAME_RE = new RegExp(`${NAME_SRC}'*(?:\\.${NAME_SRC})*`, 'y');
@@ -221,7 +221,6 @@ function bindingInfo(name: string, b: Binding): NameInfo {
 
 const BUILTIN_VALUES: Record<string, [string, string]> = {
   pi: ['constant', 'π ≈ 3.14159'],
-  tau: ['constant', 'τ = 2π ≈ 6.28319'],
   e: ['constant', 'e ≈ 2.71828'],
   i: ['constant', 'The imaginary unit, i² = −1'],
   inf: ['constant', 'Infinity'],
@@ -267,7 +266,6 @@ export function describeName(name: string, env: Env, called = false): NameInfo |
   }
   const glyph = {
     π: 'pi',
-    τ: 'tau',
     '∞': 'inf',
     Σ: 'sum',
     '∑': 'sum',

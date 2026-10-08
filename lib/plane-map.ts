@@ -35,7 +35,7 @@ export interface ScreenBox {
 }
 
 const USAGE = 'A plane map writes x and y in terms of the screen’s X and Y: (x, y) = (Y cos(X), Y sin(X)).';
-const CONSTANTS = new Set(['pi', 'e', 'tau']);
+const CONSTANTS = new Set(['pi', 'e']);
 
 /** Parse the right side of `(x, y) = (Y cos X, Y sin X)` in a view row. */
 export function parsePlaneMap(src: string, env: Record<string, number> = {}, doc: MapDoc = {}): PlaneMap {

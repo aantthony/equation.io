@@ -119,7 +119,7 @@ Account Analytics: Read, for the script to include them.
 **Basics**
 
 - `y = x^2` · `x^2+y^2=4` · `y = tan(x)` — 2D curves
-- `y = sin(2πx)` · `θ = 1; r = θ x` · `y = x³` — unicode input: π and τ,
+- `y = sin(2πx)` · `θ = 1; r = θ x` · `y = x³` — unicode input: π,
   Greek-letter names, superscript exponents, subscripts (`T₀` ≡ `T_0`, so
   `a₃` is a sequence term), and `·`/`×`/`÷`/`≤`/`≥`/`≠`;
   in the editor, typing `\pi`, `\theta`, `\nabla`, … inserts the symbol, and

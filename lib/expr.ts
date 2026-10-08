@@ -508,7 +508,6 @@ export function ineqComparisons(e: Expr & { kind: 'ineq' }): Array<{ op: IneqOp;
 
 export const CONSTANTS: Record<string, number> = {
   pi: Math.PI,
-  tau: Math.PI * 2,
   e: Math.E,
 };
 
@@ -915,12 +914,12 @@ const MULTI_CHAR_OPS = Object.keys(ops).filter(o => o.length > 1);
  * a name is, but only as the unicode spelling of the `_` subscript the
  * language already has (see canonicalName): T₀ is T_0, never a name of its
  * own. Excluded are the glyphs that stand for
- * something by themselves — π and τ (constants) and the operator-like
+ * something by themselves — π (the constant) and the operator-like
  * Σ Π ∫ ∞ ∇ — which tokenize as standalone glyph tokens so πr means π·r
  * (see GLYPH_ALIASES). µ is the micro sign Mac keyboards type for mu; it is
  * just a name character of its own.
  */
-export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςσυφχψω' + 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩ' + 'ϑϕϖϱϵµ';
+export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςστυφχψω' + 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩ' + 'ϑϕϖϱϵµ';
 /** Regex character-class fragment for a name's first character. */
 export const NAME_START_CHARS = `A-Za-z_${GREEK_NAME_CHARS}`;
 /**
@@ -955,7 +954,6 @@ const GLYPH_ALIASES: Record<string, string> = {
   '∞': 'inf',
   '∇': 'grad',
   π: 'pi',
-  τ: 'tau',
 };
 export const GLYPH_CHARS = Object.keys(GLYPH_ALIASES).join('');
 

@@ -558,12 +558,19 @@ describe('number theory', () => {
 });
 
 describe('unicode input', () => {
-  it('reads π and τ as the constants, standing alone in a product', () => {
+  it('reads π as the constant, standing alone in a product', () => {
     expect(evl('π')).toBeCloseTo(Math.PI, 12);
     expect(evl('2π')).toBeCloseTo(2 * Math.PI, 12);
     expect(evl('πr', { r: 3 })).toBeCloseTo(3 * Math.PI, 12); // π never glues to a name
-    expect(evl('τ')).toBeCloseTo(2 * Math.PI, 12);
     expect(evl('sin(π/2)')).toBe(1);
+  });
+
+  it('reads τ and tau as ordinary names, with no built-in value', () => {
+    expect(evl('τ', { τ: 3 })).toBe(3);
+    expect(evl('tau', { tau: 4 })).toBe(4);
+    expect(evl('2τ', { τ: 3 })).toBe(6);
+    expect(() => evl('τ')).toThrow();
+    expect(() => evl('tau')).toThrow();
   });
 
   it('reads superscript digits as exponents', () => {

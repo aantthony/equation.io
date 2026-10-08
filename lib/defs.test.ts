@@ -463,9 +463,22 @@ describe('unicode names in definitions', () => {
     expect(scanDefinition('u₂ = 3')).toBeNull();
   });
 
-  it('π and τ stay constants: their rows are equations, not definitions', () => {
+  it('π stays a constant: its row is an equation, not a definition', () => {
     expect(scanDefinition('π = 3')).toBeNull();
-    expect(scanDefinition('τ = 6')).toBeNull();
+  });
+
+  it('τ and tau are free names: the user defines them', () => {
+    for (const text of ['τ = 6', 'tau = 2pi']) {
+      const def = scanDefinition(text);
+      expect(def).not.toBeNull();
+      const { defs, errors } = buildDefs([def!]);
+      expect(errors.size).toBe(0);
+      const name = text.split(' ')[0];
+      expect(evaluate(resolveExpr(parseExpr(name), noFns), evaluateFrame(defs))).toBeCloseTo(
+        name === 'τ' ? 6 : 2 * Math.PI,
+        12,
+      );
+    }
   });
 
   it('resolves a Greek definition wherever the name appears', () => {

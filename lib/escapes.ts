@@ -30,7 +30,7 @@ export interface Escape {
 const SYMBOL_ESCAPES: readonly Escape[] = [
   { name: 'pi', text: 'π', description: 'The constant π' },
   { name: 'theta', text: 'θ', description: 'Greek letter' },
-  { name: 'tau', text: 'τ', description: 'The constant τ = 2π' },
+  { name: 'tau', text: 'τ', description: 'Greek letter' },
   { name: 'nabla', text: '∇', description: 'Nabla: ∇f, ∇·F, ∇×F, ∇²f' },
   { name: 'infty', text: '∞', description: 'Infinity' },
   { name: 'inf', text: '∞', description: 'Infinity' },
