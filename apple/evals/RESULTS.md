@@ -893,3 +893,15 @@ The chart's ids made kind_examples("psurface"), the tool description's
 example, the default lookup (72 of 111 calls). Measure again after that
 example changes before judging the chart itself; the colon form also wants a
 watch, as unit-cube copied it twice in five.
+
+### No example kind in kind_examples' argument
+
+`5f894353` changed the argument's description from `A kind from list_kinds, e.g.
+"psurface".` to `A kind from the Kinds list in the instructions.`; nothing else.
+`results/2026-10-08T070319Z-on-device.json`, 46 tasks × 5, against the kind
+chart run (`2026-10-08T060822Z`): 33% ±4% → **37% ±3%** (85/230; 80/175 on the
+first 35 tasks), within noise. "psurface" lookups fell from 72 of 111 to 21 of
+120. Overflows rose from 9 to 15; tool calls a run from 3.5 to 4.9.
+Up: saddle 2 → 5, circle-and-line 1 → 3, points 1 → 3, shade-region 1 → 3.
+Down: derivative 4 → 1, zoom-out 3 → 0. Still 0/5: unit-cube, slider-radius,
+parametric-circle, polar-rose, cardioid, sphere, cone, moving-point.
