@@ -284,7 +284,7 @@ struct KindExamples: Tool {
 
   @Generable
   struct Arguments {
-    @Guide(description: "A kind from list_kinds, e.g. \"psurface\".")
+    @Guide(description: "A kind from the Kinds list in the instructions.")
     var kind: String
   }
 
