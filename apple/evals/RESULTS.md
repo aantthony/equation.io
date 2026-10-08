@@ -905,3 +905,12 @@ first 35 tasks), within noise. "psurface" lookups fell from 72 of 111 to 21 of
 Up: saddle 2 → 5, circle-and-line 1 → 3, points 1 → 3, shade-region 1 → 3.
 Down: derivative 4 → 1, zoom-out 3 → 0. Still 0/5: unit-cube, slider-radius,
 parametric-circle, polar-rose, cardioid, sphere, cone, moving-point.
+
+### A 12-call cap in the runner
+
+`ac3f28a6`: a run fails at its 13th tool call (evals only; the app has no
+limit). `results/2026-10-08T084753Z-on-device.json`, same knowledge as the run
+before it (`2026-10-08T070319Z`): 37% ±3% → 34% ±3% (85 → 78 of 230), 23 runs
+stopped by the cap, overflows 15 → 1, and the suite took **38 minutes instead
+of 58**. Nothing the model sees changed, so the 3-point drop is run-to-run
+noise: a useful reminder that two runs of identical code differ by that much.
