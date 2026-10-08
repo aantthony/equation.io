@@ -1758,6 +1758,52 @@ function surfaceFieldGain(
   return gain;
 }
 
+/** The 90th percentile of |f| at the centres of a 25 × 25 grid over the
+ *  box (as divergingGain samples), or 0 where f is nowhere finite. */
+function typicalSize(f: (x: number, y: number) => number, [[x0, x1], [y0, y1]]: GeodesicOptions['domain']): number {
+  const n = 24;
+  const sizes: number[] = [];
+  for (let i = 0; i <= n; i++)
+    for (let j = 0; j <= n; j++) {
+      const v = Math.abs(f(x0 + ((x1 - x0) * (i + 0.5)) / (n + 1), y0 + ((y1 - y0) * (j + 0.5)) / (n + 1)));
+      if (Number.isFinite(v)) sizes.push(v);
+    }
+  if (!sizes.length) return 0;
+  sizes.sort((a, b) => a - b);
+  return sizes[Math.floor(0.9 * (sizes.length - 1))];
+}
+
+/**
+ * The gain gaussian(x, y) on a plane panel with a metric (a ds^2 row) is
+ * shaded with: its typical size over the view brought to about 1, as on a
+ * surface (divergingGain), kept until the view or a value it reads changes.
+ * A field that is a tiny part of the terms it is the difference of
+ * (`rounding`: a flat metric written in polar coordinates) is rounding, and
+ * gets 0: nothing painted, as 0 is everywhere else.
+ */
+const viewGains = new WeakMap<CpuPlan, { key: string; gain: number }>();
+function viewFieldGain(
+  plot: Extract<CpuPlan, { type: 'scalar2d' }>,
+  env: Record<string, number>,
+  box: GeodesicOptions['domain'],
+): number {
+  const exprs = plot.rounding ? [plot.expr, plot.rounding] : [plot.expr];
+  const names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
+  const key = JSON.stringify([box, names.map(n => env[n])]);
+  const last = viewGains.get(plot);
+  if (last?.key === key) return last.gain;
+  const one = new Float64Array(1);
+  const at = (e: Expr) => {
+    const f = numericIn([e], ['x', 'y'], env);
+    return (x: number, y: number) => (f(x, y, one), one[0]);
+  };
+  const typical = typicalSize(at(plot.expr), box);
+  const floor = plot.rounding ? 1e-6 * typicalSize(at(plot.rounding), box) : 0;
+  const gain = typical > floor ? 1.5 / typical : 0;
+  viewGains.set(plot, { key, gain });
+  return gain;
+}
+
 /** The gain a surface coloured by its curvature (gaussian(S)) shades it
  *  with, kept until a value it reads (a slider, t) changes. */
 const paintGains = new WeakMap<CpuPlan, { key: string; gain: number }>();
@@ -2773,9 +2819,25 @@ function render() {
           case 'pregion':
             (extras.regions ??= []).push({ tris: sampleRegion(eq, plot.comps), fill: cssColorA(color, 0.22) });
             break;
-          case 'scalar2d':
-            layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms });
+          case 'scalar2d': {
+            // gaussian(x, y) under a metric: shaded to its own size in view.
+            let gain: number | undefined;
+            if (plot.autoscale) {
+              const { halfW, halfH } = hoverHalfSpan();
+              gain = viewFieldGain(plot, { ...constEnv, ...eq.gpu?.uniforms, t: time }, [
+                [view.cx - halfW, view.cx + halfW],
+                [view.cy - halfH, view.cy + halfH],
+              ]);
+            }
+            layers.scalars.push({
+              ...gpuFor(eq, 'scalar2d'),
+              color,
+              params,
+              uniforms,
+              ...(gain !== undefined ? { gain } : {}),
+            });
             break;
+          }
           case 'complex2d':
             layers.complexes.push({ ...gpuFor(eq, 'complex2d'), color, params, uniforms });
             break;
@@ -5759,6 +5821,35 @@ function updateHover(clientX: number, clientY: number) {
           : ['on curve', `x = ${read(maps?.x, hit.x, sx)}`, `y = ${read(maps?.y, hit.y, sy)}`];
         best = { pt: { x: hit.x, y: hit.y, lines }, color: cssColor(baseColor(eq)), panel: cur };
       }
+    }
+  }
+  // Nor a curve: over a panel painted by its metric's curvature
+  // (gaussian(x, y)), K under the pointer.
+  if (!best && !panelMaps(cur)) {
+    const [wx, wy] = toMath(clientX, clientY);
+    const env = { ...constEnv, t: graphTime(), x: wx, y: wy };
+    const uppCss = view.upp * (window.devicePixelRatio || 1);
+    for (const eq of equations) {
+      const plot = eq.cpu;
+      if (panelOf(eq) !== here || eq.error || plot?.type !== 'scalar2d' || !plot.autoscale) continue;
+      let value: number;
+      try {
+        value = evaluate(plot.expr, env);
+      } catch {
+        continue;
+      }
+      if (!Number.isFinite(value)) continue;
+      const name = eq.text.length > 24 ? `${eq.text.slice(0, 23)}…` : eq.text;
+      best ??= {
+        pt: {
+          x: wx,
+          y: wy,
+          lines: ['curvature', `x = ${fmtTraced(wx, uppCss)}`, `y = ${fmtTraced(wy, uppCss / (view.ratio ?? 1))}`],
+        },
+        color: cssColor(baseColor(eq)),
+        panel: cur,
+      };
+      best.pt.lines.push(`${name} ${valueReadout(value)}`);
     }
   }
   setHover(best);

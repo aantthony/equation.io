@@ -152,11 +152,35 @@ at sample points over scales from 0.001 to 100 000 round the origin, so a
 disc of radius 0.1 and a hole of mass 10 000 both pass; a small feature far
 from the origin could still be missed. Follow-ups: light
 cones and their tilt,
-tidal glyphs (the geodesic deviation tensor), painting a metric's
-curvature, time-dependent metrics (τ not cyclic: a third coordinate in the
+tidal glyphs (the geodesic deviation tensor), time-dependent metrics (τ not cyclic: a third coordinate in the
 state, and t meaning both), more coordinates (3D slices, Kerr off the
 equator), metrics on mapped (`view`) panels, hover readouts along a
 geodesic, and the link preview, which falls back for these rows.
+
+**Implemented (curvature of a metric).** On a panel with a ds^2 row,
+`gaussian(x, y)` alone on a row paints the metric's Gaussian curvature K on
+the diverging scale of #255's surfaces, per pixel, with a gain from the
+90th percentile of |K| over the view (kept until the view or a value it
+reads changes); hovering where no curve is near reads K. `gaussian(P)` is
+the number at a point (lib/metric-curvature.ts). K is Brioschi's formula,
+from E, F, G and their first and second derivatives with no square root,
+which is R₁₂₁₂/det g for any signature: for a 2D Lorentzian metric K = R/2
+(de Sitter-like positive, 2M/r³ for Schwarzschild's (t, r) plane). It is
+taken in the coordinates the metric is written in (r and phi, with other
+coordinate fields written in them) and then composed with the coordinate
+map, since K is a scalar: the pull-back to x and y would need the map's
+third derivatives, and in float32 a flat `dr^2 + r^2 dphi^2` read that way
+is noise. Only a metric mixing x and y with fields of them is pulled back
+first. With a time it is K of the slice t = constant (g's spatial block),
+the curvature of space at one instant — Flamm's −M/r³ for Schwarzschild —
+masked where the slice is not positive definite (inside a horizon). A flat
+metric whose K is rounding (below 10⁻⁶ of the terms it is the difference
+of, carried as `rounding` beside the field) gets gain 0 rather than its
+noise amplified; a constant K is one even tint. Follow-ups: the Riemann
+and Ricci tensors for 3+ dimensions (a 3D slice, Kerr off the equator),
+tidal glyphs (the geodesic deviation tensor, from R^a_bcd), the scalar
+curvature of a 2D Lorentzian panel once those exist (the formula already
+holds), and a K readout in the link preview.
 
 - `curvature(C)` and `torsion(C)` of a parametric curve in u, as a
   scalar along the curve (color the curve by it, or read out at a point).
