@@ -378,7 +378,10 @@ export function traceGeodesic(
   const { domain, spacing, deadline, drawSpacing, drawnLimit } = opts;
   const flow = typeof sys === 'function' ? surfaceFlow(sys) : sys;
   const maxSteps = opts.maxSteps ?? GEODESIC_MAX_STEPS;
-  const maxPoints = opts.maxPoints ?? Infinity;
+  // Past maxPoints, the points so far are thinned to every other one and
+  // later ones drawn half as densely, so it is a real cap.
+  const maxPoints = Math.max(opts.maxPoints ?? Infinity, 2);
+  let sparse = 1;
   const periodic = opts.periodic ?? [false, false];
   const back = opts.length < 0;
   const total = Math.abs(opts.length);
@@ -501,25 +504,23 @@ export function traceGeodesic(
     steps++;
     // The points between, along the step's interpolant (its velocity ends
     // as integrated, before it is put back to unit length).
-    const pieces =
-      out.length >= maxPoints
-        ? 1
-        : drawSpacing
-          ? Math.max(
-              1,
-              Math.min(
-                256,
-                Math.ceil(
-                  Math.hypot(next[0] - y[0], next[1] - y[1]) /
-                    (!opts.fine || inBox(opts.fine, y) || inBox(opts.fine, next)
-                      ? drawSpacing
-                      : Math.max(8 * drawSpacing, fromBox(opts.fine, next) / 100)),
-                ),
-              ),
-            )
-          : spacing
-            ? Math.min(256, Math.ceil(h / spacing))
-            : 1;
+    const pieces = drawSpacing
+      ? Math.max(
+          1,
+          Math.min(
+            256,
+            Math.ceil(
+              Math.hypot(next[0] - y[0], next[1] - y[1]) /
+                (sparse *
+                  (!opts.fine || inBox(opts.fine, y) || inBox(opts.fine, next)
+                    ? drawSpacing
+                    : Math.max(8 * drawSpacing, fromBox(opts.fine, next) / 100))),
+            ),
+          ),
+        )
+      : spacing
+        ? Math.min(256, Math.ceil(h / (sparse * spacing)))
+        : 1;
     const from = y;
     const along = (t: number): [number, number] => [hermite(from, next, h, 0, t), hermite(from, next, h, 1, t)];
     if (!inside(next[0], next[1])) {
@@ -563,6 +564,10 @@ export function traceGeodesic(
     s += h;
     out.push([y[0], y[1]]);
     velocities?.push([y[2], y[3]]);
+    if (out.length > maxPoints && !velocities) {
+      thin(out);
+      sparse *= 2;
+    }
     if (drawnLimit !== undefined) {
       if (drawn >= drawnLimit) break;
       if (steps % 32 === 0) {
@@ -577,7 +582,16 @@ export function traceGeodesic(
     h = h * Math.min(5, 0.9 * Math.max(err, 1e-10) ** -0.2);
   }
   if (opts.ended) Object.assign(opts.ended, { length: s, asked: total, budget: outOfBudget });
+  while (out.length > maxPoints && !velocities) thin(out);
   return out;
+}
+
+/** Every other point of a path, its ends kept: one past its maxPoints. */
+function thin(out: [number, number][]): void {
+  const last = out.length - 1;
+  let k = 0;
+  for (let i = 0; i <= last; i++) if (i % 2 === 0 || i === last) out[k++] = out[i];
+  out.length = k;
 }
 
 /** Whether the surface P repeats across each parameter's range: P(p + span,
@@ -1065,8 +1079,12 @@ export function metricAcceleration(
 const METRIC_RANGE = 1e8;
 
 /** How many times its starting rate τ may come to run per step of the
- *  geodesic's own parameter before it is taken to be at a horizon. */
-const TIME_RUNAWAY = 1e4;
+ *  geodesic's own parameter, while the metric degenerates (|det g| / size³
+ *  falling DEGENERATE-fold), before it is taken to be at a horizon. A rate
+ *  that runs away where the metric stays sound (a conformally flat metric's
+ *  light ray far out) is no horizon. */
+const TIME_RUNAWAY = 1e3;
+const DEGENERATE = 1e-4;
 
 /** The largest |g_ij|. */
 function metricSize(g: readonly (readonly number[])[]): number {
@@ -1093,7 +1111,10 @@ function det3(g: readonly (readonly number[])[]): number {
 /** Whether a 3 × 3 metric is Lorentzian with x and y space: its x, y block
  *  positive definite and its determinant negative. Inside a horizon x and y
  *  are no longer space; in an ergoregion they still are, though g_ττ > 0. */
-function spacetime(g: readonly (readonly number[])[], size: number): boolean {
+function spacetime(g: readonly (readonly number[])[]): boolean {
+  // Against its own size here, not the start's: a metric shrinking
+  // everywhere (a conformal factor far out) is still sound.
+  const size = metricSize(g);
   return positive(g, 1) && det3(g) < -1e-12 * size * size * size;
 }
 
@@ -1163,12 +1184,21 @@ export function metricStart(
     };
     return { flow, velocity: [sign * a, sign * b] };
   }
-  if (!spacetime(g, size0))
+  if (!spacetime(g))
     return {
       problem: positive(g, 1)
         ? 'the metric is not Lorentzian at the start'
         : `x and y are not space at the start (inside a horizon?), so ${time} is no time there`,
     };
+  /** |det g| against its size: falls toward 0 where it degenerates. */
+  const soundness = (g: readonly (readonly number[])[]) => Math.abs(det3(g)) / metricSize(g) ** 3;
+  const sound0 = soundness(g);
+  // The velocity's heading as it turns, and where the current turn began.
+  let lastHeading = NaN;
+  let lastAt = [p, q];
+  let lapAt = [p, q];
+  let turned = 0;
+  let lap = 0;
   const gtt = g[0][0];
   const beta = (u: number, v: number) => g[0][1] * u + g[0][2] * v;
   const h = (u: number, v: number) => g[1][1] * u * u + 2 * g[1][2] * u * v + g[2][2] * v * v;
@@ -1226,15 +1256,36 @@ export function metricStart(
     },
     holds(p, q) {
       const { g } = read(p, q);
-      return inRange(g) && spacetime(g, size0);
+      return inRange(g) && spacetime(g);
     },
     normalize(y) {
       const { g } = read(y[0], y[1]);
-      if (!inRange(g) || !spacetime(g, size0)) return false;
+      if (!inRange(g) || !spacetime(g)) return false;
       // Where τ's rate runs off, these coordinates freeze at a horizon: a
       // ray falling in only creeps round it from here (round a spinning
       // hole, for tens of thousands of steps), drawing nothing new.
-      if (!(Math.abs(y[4]) < TIME_RUNAWAY * Math.max(1, Math.abs(ut)))) return false;
+      if (!(Math.abs(y[4]) < TIME_RUNAWAY * Math.max(1, Math.abs(ut))) && soundness(g) < DEGENERATE * sound0)
+        return false;
+      // Winding round a horizon: once τ's rate has grown tenfold, a whole
+      // turn of the velocity that ends hardly a hundredth of the turn's
+      // length from where it began is a ray creeping round a spinning hole
+      // (a stable orbit keeps its rate).
+      const heading = Math.atan2(y[3], y[2]);
+      if (Number.isFinite(lastHeading)) {
+        let turn = heading - lastHeading;
+        turn -= 2 * Math.PI * Math.round(turn / (2 * Math.PI));
+        turned += turn;
+        lap += Math.hypot(y[0] - lastAt[0], y[1] - lastAt[1]);
+      }
+      lastHeading = heading;
+      lastAt = [y[0], y[1]];
+      if (Math.abs(turned) >= 2 * Math.PI) {
+        const chord = Math.hypot(y[0] - lapAt[0], y[1] - lapAt[1]);
+        if (chord < 0.01 * lap && Math.abs(y[4]) > 10 * Math.max(1, Math.abs(ut))) return false;
+        turned = 0;
+        lap = 0;
+        lapAt = [y[0], y[1]];
+      }
       const [w1, w2, rate] = [y[2], y[3], y[4]];
       const B = g[0][1] * w1 + g[0][2] * w2;
       const C = g[1][1] * w1 * w1 + 2 * g[1][2] * w1 * w2 + g[2][2] * w2 * w2;

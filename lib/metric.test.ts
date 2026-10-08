@@ -449,7 +449,11 @@ describe('second review fixes', () => {
     expect(errorOf(['τ = 2', 'ds^2 = -dτ^2 + dx^2 + dy^2'])).toBeUndefined();
     expect(errorOf(['dτ = 0.1', 'ds^2 = -dτ^2 + dx^2 + dy^2'])).toBeUndefined();
     expect(errorOf(['τ = 2', 'ds^2 = -(1 + τ/10) dτ^2 + dx^2 + dy^2'])).toMatch(/depends on τ/);
-    expect(errorOf(['tau = 2', 'ds^2 = -dtau^2 + dx^2 + dy^2'])).toMatch(/tau is not a coordinate/);
+    // tau is a time's name as t and τ are.
+    expect(errorOf(['tau = 2', 'ds^2 = -dtau^2 + dx^2 + dy^2'])).toBeUndefined();
+    expect(errorOf(['ds^2 = -(1 + tau/10) dtau^2 + dx^2 + dy^2'])).toMatch(
+      /depends on tau: metrics that change with time/,
+    );
     // And τ the slider still works in other rows.
     expect(errorOf(['τ = 2', 'ds^2 = -dτ^2 + dx^2 + dy^2', 'y = τ x'])).toBeUndefined();
   });
@@ -459,5 +463,66 @@ describe('second review fixes', () => {
       /not space anywhere it was checked.*inside a horizon everywhere there\?/,
     );
     expect(errorOf(['ds^2 = -dt^2 - dx^2 + dy^2'])).toMatch(/one minus sign, for dt/);
+  });
+});
+
+describe('third review fixes', () => {
+  const POLAR = ['r = sqrt(x^2 + y^2)', 'phi = atan2(y, x)'];
+  it('runs a light ray on where its rate grows but the metric stays sound', () => {
+    // Conformally flat: light goes straight, dt/dλ ∝ 1 + x² + y² grows
+    // without bound, and there is no horizon.
+    const window = traceWindow([-500, -375], [500, 375]);
+    const { pts } = traced(['ds^2 = (-dt^2 + dx^2 + dy^2)/(1 + x^2 + y^2)', 'lightray((0, 0.5), (1, 0))'], window);
+    expect(pts.at(-1)![0]).toBeGreaterThan(500);
+    for (const [, y] of pts) expect(y).toBeCloseTo(0.5, 6);
+  });
+
+  it('still stops at horizons: Rindler’s, and a spinning hole’s near-extremal one', () => {
+    const rindler = traced(['ds^2 = -x^2 dt^2 + dx^2 + dy^2', 'lightray((1, 0), (-1, 0))'], box(4));
+    expect(rindler.ended.budget).toBe(false);
+    expect(rindler.pts.at(-1)![0]).toBeLessThan(0.02);
+    expect(rindler.pts.at(-1)![0]).toBeGreaterThan(0);
+    const kerr = [
+      'a = 0.998',
+      ...POLAR,
+      'ds^2 = -(1 - 2/r) dt^2 - (4a/r) dt dphi + r^2/(r^2 - 2r + a^2) dr^2 + (r^2 + a^2 + 2a^2/r) dphi^2',
+    ];
+    // A ray that winds in: it ends at the horizon within a few thousand
+    // steps rather than creeping round it.
+    const analysis = analyzeRows([...kerr, 'lightray((-30, -2), (1, 0))']);
+    const o = analysis.rows.at(-1)!.cls!.object;
+    if (o.kind !== 'geodesic') throw new Error(o.kind);
+    const ended: GeodesicEnd = { length: 0, asked: 0, budget: false };
+    const flat = geodesicPath(o, analysis.constEnv, { window: traceWindow([-8, -6], [8, 6]), ended, maxSteps: 3000 });
+    expect(ended.budget).toBe(false);
+    expect(Math.hypot(flat.at(-3)!, flat.at(-2)!)).toBeLessThan(1.2);
+  });
+
+  it('stops anti-de Sitter’s light ray at the edge of the box', () => {
+    const ads = traced(
+      [...POLAR, 'ds^2 = -(1 + r^2) dt^2 + dr^2/(1 + r^2) + r^2 dphi^2', 'lightray((0.5, 0), (1, 0))'],
+      box(8),
+    );
+    expect(ads.ended.budget).toBe(false);
+    expect(Math.hypot(...ads.pts.at(-1)!)).toBeGreaterThan(7.99);
+  });
+
+  it('holds a geodesic to its points', () => {
+    const analysis = analyzeRows([...SCHWARZSCHILD, 'geodesic((20, 0), (0, 0.2), 20000)']);
+    const o = analysis.rows.at(-1)!.cls!.object;
+    if (o.kind !== 'geodesic') throw new Error(o.kind);
+    const flat = geodesicPath(o, analysis.constEnv, { window: box(64), maxPoints: 300 });
+    expect(flat.length / 3).toBeLessThanOrEqual(300);
+    expect(flat.length / 3).toBeGreaterThan(100);
+  });
+
+  it('reads out its coordinates time first, then x before y and fields as defined', () => {
+    const kerr = last([
+      ...POLAR,
+      'ds^2 = -(1 - 2/r) dt^2 - (3.6/r) dt dphi + r^2/(r^2 - 2r + 0.81) dr^2 + (r^2 + 0.81 + 1.62/r) dphi^2',
+    ]);
+    expect(kerr.cls!.object).toMatchObject({ coords: ['t', 'r', 'phi'] });
+    expect(plotReadout(kerr.cpu!, {})).toMatch(/^Lorentzian metric in t; r, phi/);
+    expect(last(['ds^2 = dy^2 + dx^2']).cls!.object).toMatchObject({ coords: ['x', 'y'] });
   });
 });

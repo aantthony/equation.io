@@ -188,7 +188,7 @@ function sampleCounts(
 
 /** The names of a time: d<name> is its differential in a ds^2 row even
  *  where the document defines d<name> or the name itself. */
-const TIME_NAMES: ReadonlySet<string> = new Set(['t', 'τ']);
+const TIME_NAMES: ReadonlySet<string> = new Set(['t', 'τ', 'tau']);
 
 /** Names a differential cannot be of: constants and the imaginary unit. */
 const NOT_COORDINATES: ReadonlySet<string> = new Set(['pi', 'e', 'i', 'inf']);
@@ -253,7 +253,11 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
     throw new Error(
       `ds^2 is drawn on the plane, in two of the panel's coordinates: ${listed(panel)} are ${panel.length}.`,
     );
-  // τ first, then the panel's two, in the order written (freeVars keeps it).
+  // τ first, then the panel's two: x before y, coordinate fields in the
+  // order they are defined (r before phi).
+  const fieldOrder = Object.keys(ctx.fields);
+  const rank = (c: string) => (c === 'x' ? -2 : c === 'y' ? -1 : fieldOrder.indexOf(c));
+  panel.sort((a, b) => rank(a) - rank(b));
   const coords = [...extra, ...panel];
   const time = extra[0];
   const n = coords.length as 2 | 3;

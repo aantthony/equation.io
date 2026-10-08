@@ -338,8 +338,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     `ds^2 = (dx^2 + dy^2)/y^2` (the Poincaré half-plane) or `M = 1`,
     `ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2` (Schwarzschild,
     in its equatorial plane). Define r and phi first: `dr` and `dphi` with
-    no such coordinates are refused. Inside ds² `dt` (or `dτ`) is a
-    differential even beside a slider named dt, dτ or τ; another defined
+    no such coordinates are refused. Inside ds² `dt` (or `dτ`, `dtau`) is
+    a differential even beside a slider named dt, dτ or τ; another defined
     name like `dw` keeps its value there. A component using t (or τ, when
     dτ is the time) is refused
     (time-dependent metrics are not supported yet), as is one using the
