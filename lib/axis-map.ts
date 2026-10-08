@@ -104,7 +104,7 @@ export function parseAxisMap(axis: Axis, src: string, env: Record<string, number
     throw new Error(usage);
   }
   forward = expandMapSums(forward, [screen], env, doc);
-  const free = [...freeVars(forward)].filter(n => n !== 'pi' && n !== 'e' && n !== 'tau');
+  const free = [...freeVars(forward)].filter(n => n !== 'pi' && n !== 'e');
   if (!free.includes(screen)) throw new Error(usage);
   // A slider (`x = b^X`) is read at its value, so the map is plain numbers
   // from here on; reading it through env marks it as one a slider move

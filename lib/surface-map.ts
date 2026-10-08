@@ -39,7 +39,7 @@ export interface SurfaceSpec {
 
 const USAGE =
   'Expected on((X, Y, Z) = (cos(y) cos(x), cos(y) sin(x), sin(y)), x = lo..hi, y = lo..hi): the surface the panel’s rows are drawn on.';
-const CONSTANTS = new Set(['pi', 'e', 'tau']);
+const CONSTANTS = new Set(['pi', 'e']);
 
 /**
  * Parse the right side of `(X, Y, Z) = (…)` in an on(…) row, with the

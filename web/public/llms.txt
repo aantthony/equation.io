@@ -126,12 +126,13 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   braces is the same subscript: `T_{c}` is `T_c`, `a_{10}` is `a_10`.
   `·`, `⋅`, `×`, `÷`, `−`, `≤`,
   `≥`, `≠` mean their ASCII counterparts (`⊗` is `outer(a, b)`, `∧` is
-  `wedge(a, b)`; the editor types them from `\otimes` and `\wedge`). π and τ never join a longer name,
+  `wedge(a, b)`; the editor types them from `\otimes` and `\wedge`). π never joins a longer name,
   so `2πr` is 2·π·r. In the editor, typing `\pi`, `\theta`, `\nabla`, …
   inserts the symbol itself, and a `\` before any built-in function name
   simply drops (`\sin(x)` → `sin(x)`, `\trail` → `trail`), so `\` also works
   as a function search.
-- Constants: `pi`, `tau`, `e` (π and τ also parse directly), and the unit
+- Constants: `pi`, `e` (π also parses directly; τ and `tau` are ordinary
+  names, free to define), and the unit
   vectors `e_x`, `e_y`, `e_z` = `(1,0,0)`, `(0,1,0)`, `(0,0,1)` (always 3D,
   so a row using one is a 3D scene; defining `e_x` yourself replaces it).
   Imaginary unit `i` in complex expressions.
@@ -451,7 +452,7 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   own: `p ∈ A` (or `p \in A`) names a choice from A, equal to A but never
   identical, so with `p ∈ A` and `q ∈ A`, `c(p, q)` is A composed with
   itself (`p + p` still zips; `p + q` crosses). A binder cannot use a name
-  the language has: x, y, z, t, u, v, w, d, e, i, pi, tau, a name starting
+  the language has: x, y, z, t, u, v, w, d, e, i, pi, a name starting
   u_, or a built-in function such as sin. A binder draws members, not a
   range: `a ∈ [0, 10]` is 0 or 10; every number from 0 to 10 is
   `a = interval(0, 10)`, and the whole numbers are `a ∈ [0..10]`.
@@ -1618,7 +1619,7 @@ panel under the pointer.
   — with `a` as a draggable slider so the point of tangency stays explorable.
 - Prefer a slider constant (`a = 1; ...`) when the user may want to explore a
   parameter, and `t` when they ask for animation.
-- Don't name a slider, list or index `i`, `e`, `pi`, `tau` or `d`: they are
+- Don't name a slider, list or index `i`, `e`, `pi` or `d`: they are
   taken (`i` is the imaginary unit), so `i = [0..9]` is a claim about i, not
   a definition, and every later `i` stays complex. Use `k = [0..9]`.
 - The graph state lives entirely in the link, and the link is the interface.

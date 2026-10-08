@@ -131,7 +131,7 @@ describe('§0 binders: p ∈ A draws from A', () => {
     // The reason is the name's own.
     expect(last(['D = [1, 2]', 'u_1 ∈ D']).error).toMatch(/drawn: names starting u_ are\./);
     expect(last(['D = [1, 2]', 'sin ∈ D']).error).toMatch(/drawn: sin is a built-in function\./);
-    expect(last(['D = [1, 2]', 'e ∈ D']).error).toMatch(/drawn: x, y, z, t, u, v, w, d, e, i, pi and tau are\./);
+    expect(last(['D = [1, 2]', 'e ∈ D']).error).toMatch(/drawn: x, y, z, t, u, v, w, d, e, i and pi are\./);
     // A built-in a document may shadow is a name like any other.
     expect(last(['D = [1, 2]', 'total ∈ D']).error).toBeUndefined();
   });

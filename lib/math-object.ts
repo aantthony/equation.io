@@ -251,7 +251,7 @@ export type MathObject =
        *  as the point or the equation it is rather than as a tuple. */
       readonly flat?: { readonly dim: 2 | 3; readonly grade: number };
     }
-  // `constant`: the row reads like a slider named e, pi, tau or i (see
+  // `constant`: the row reads like a slider named e, pi or i (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
   /** A plane panel's metric, a `ds^2 = …` row (lib/metric.ts): it draws

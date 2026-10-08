@@ -1445,7 +1445,7 @@ function lowerShade(int: IntShade, lower: (e: Expr) => Expr, known: ReadonlySet<
  * fails too, since the tolerance is relative rounding error, not 1e-4.
  */
 export function holdsEverywhere(e: Expr & { kind: 'eq' }): boolean {
-  const names = [...freeVars(e)].filter(n => n !== 'pi' && n !== 'e' && n !== 'tau');
+  const names = [...freeVars(e)].filter(n => n !== 'pi' && n !== 'e');
   let seed = 0x9e3779b9;
   const random = (): number => {
     seed = (seed + 0x6d2b79f5) | 0;
