@@ -4,6 +4,7 @@ import { type Definition, animatedConstNames, buildDefs, scanDefinition } from '
 import { evaluate, freeVars } from './expr.ts';
 import { publicKind } from './math-object.ts';
 import { plotReadout } from './plot.ts';
+import { runtimeSliderNames } from './runtime-sliders.ts';
 import { countNodes } from './size.ts';
 import { syntaxHelp } from './syntax-help.ts';
 
@@ -166,6 +167,29 @@ describe('inline intermediates', () => {
     const first = rowHidden(analyzePrepared(document));
     expect(first.length).toBeGreaterThan(0);
     expect(rowHidden(analyzePrepared(document))).toEqual(first);
+  });
+  it('checks a solid moved by a slider-dependent turn for folds, and keeps its sliders structural', () => {
+    const solid = (k: number) => [
+      `k = ${k}`,
+      'a = 1',
+      's = interval(-1, 1)',
+      'rotate((s^2 + k s, u, v), a, (1, 2, 3))',
+    ];
+    expect(analyzeRows(solid(1)).rows.at(-1)!.error).toMatch(/folds over itself/);
+    const fine = analyzeRows(solid(3));
+    expect(rowHidden(fine).length).toBeGreaterThan(0);
+    // The check read k and a, through the turn's hidden entries: a drag re-runs it.
+    expect([...runtimeSliderNames(fine)]).toEqual([]);
+  });
+  it('takes back what a definition that fails had hoisted', () => {
+    expect(hidden(...MOVING, 'Q = rotate(line(A, B), S) + 1').filter(n => n.startsWith('Q#'))).toEqual([]);
+  });
+  it('leaves a row in random variables as it was', () => {
+    const analysis = analyzeRows([...MOVING, 'X ~ Normal(0, 1)', '(1, 0, 0) · rotate((X, 1, 0), S)']);
+    const r = analysis.rows.at(-1)!;
+    expect(r.error).toBeUndefined();
+    expect(r.dist).toBe('density');
+    expect(rowHidden(analysis)).toEqual([]);
   });
   it('never shows a hidden name in autocomplete or a message', () => {
     const analysis = analyzeRows([...MOVING, 'rotate((0, 0, 0), slerp(N, S, 0.5))', 'rotate(S, S)']);

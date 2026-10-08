@@ -9,6 +9,7 @@ import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
 import { FAMILY_NODES, countNodes } from './size.ts';
+import type { GeodesicSpec } from './surface-geometry.ts';
 
 export interface CpuGrid {
   name: string;
@@ -32,7 +33,7 @@ export type CpuPlan =
   | { type: 'pregion'; comps: [Expr, Expr] }
   /** The region a family over u ∈ [0, 1] sweeps (see MathObject). */
   | { type: 'projected2d'; relation: 'eq' | 'ineq'; constraints: Array<{ residual: Expr; strict: boolean }> }
-  | { type: 'scalar2d'; expr: Expr }
+  | { type: 'scalar2d'; expr: Expr; autoscale?: true }
   | { type: 'scalar3d'; expr: Expr }
   | { type: `${ColorSpace}2d`; channels: Expr[] }
   | { type: 'complex2d'; expr: Expr }
@@ -43,6 +44,7 @@ export type CpuPlan =
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   | { type: 'label'; dim: 2 | 3; coords: Expr[]; text: string }
   | { type: 'orbit'; dim: 2 | 3; paths: Expr[][]; series: boolean; from: Expr; to: Expr }
+  | ({ type: 'geodesic' } & GeodesicSpec)
   /** `pts` flat, or with `over` one vertex template run over the columns. */
   | {
       type: 'polygon';
@@ -64,10 +66,15 @@ export type CpuPlan =
       coordinates?: Expr[];
     }
   | { type: 'vfield2d'; comps: [Expr, Expr] }
-  | { type: 'tfield2d'; entries: [Expr, Expr, Expr, Expr]; streamlines?: true }
+  | {
+      type: 'tfield2d';
+      entries: [Expr, Expr, Expr, Expr];
+      streamlines?: true;
+      jacobian?: [Expr, Expr, Expr, Expr];
+    }
   | { type: 'vfield3d'; comps: Expr[] }
   | { type: 'pcurve'; dim: 2 | 3; comps: Expr[]; tube?: Expr; d1?: Expr[]; d2?: Expr[]; d3?: Expr[] }
-  | { type: 'psurface'; comps: [Expr, Expr, Expr] }
+  | { type: 'psurface'; comps: [Expr, Expr, Expr]; paint?: Expr }
   | { type: 'vlist'; values: Expr[] }
   | { type: 'plist'; dim: 2 | 3; pts: Expr[][] }
   | { type: 'dlist'; values: Float64Array }
@@ -77,7 +84,7 @@ export type CpuPlan =
   | { type: 'cobweb'; f: Expr; recVar: string; a0Name?: string }
   | { type: 'bifurcation'; expr: Expr; recVar: string; a0Name?: string }
   | { type: 'automaton'; rule: Expr; radius: number; seed?: Expr; dims: 1 | 2; axes: readonly [string, string] }
-  | { type: 'lattice'; expr: Expr; axes: readonly [string, string] }
+  | { type: 'lattice'; expr: Expr; axes: readonly [string, string]; rows?: readonly (readonly number[])[] }
   | { type: 'graph'; edges: Expr[][] }
   | { type: 'density'; rv: string; mass?: Expr }
   | { type: 'pmf'; rv: string; mass?: Expr }
@@ -117,9 +124,21 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
   | { type: 'conformal2d'; field: string }
   | { type: 'fractal2d'; step: string; seed: 'pixel' | 'zero'; maxIter: number }
   | { type: 'vfield2d'; fx: string; fy: string }
-  | { type: 'tfield2d'; entries: [string, string, string, string]; streamlines?: true }
+  | {
+      type: 'tfield2d';
+      entries: [string, string, string, string];
+      streamlines?: true;
+      jacobian?: [string, string, string, string];
+    }
   | { type: 'vfield3d'; comps: [string, string, string] }
-  | { type: 'psurface'; comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] }
+  | {
+      type: 'psurface';
+      comps: [string, string, string];
+      du?: [string, string, string];
+      dv?: [string, string, string];
+      /** The scalar in u and v it is coloured by (gaussian(S)). */
+      paint?: string;
+    }
   | { type: 'cobweb'; curveField: string }
   | { type: 'bifurcation'; field: string }
 );
@@ -225,7 +244,11 @@ export function compileCpu(classified: Classified): CpuPlan {
       }
     case 'surface':
       if (object.form === 'parametric')
-        return { type: 'psurface', comps: object.coordinates.map(real) as [Expr, Expr, Expr] };
+        return {
+          type: 'psurface',
+          comps: object.coordinates.map(real) as [Expr, Expr, Expr],
+          ...(object.paint ? { paint: real(object.paint) } : {}),
+        };
       else {
         const equation = realEquation(object.equation ?? equationOf(object.residual));
         const height =
@@ -254,7 +277,9 @@ export function compileCpu(classified: Classified): CpuPlan {
         : { type: 'ineq2d', constraints };
     }
     case 'scalar-field':
-      return { type: object.dimension === 3 ? 'scalar3d' : 'scalar2d', expr: real(object.expr) };
+      return object.dimension === 3
+        ? { type: 'scalar3d', expr: real(object.expr) }
+        : { type: 'scalar2d', expr: real(object.expr), ...(object.autoscale ? { autoscale: true as const } : {}) };
     // Like domain coloring, these expressions are rendered per pixel on the GPU.
     case 'color-field':
       return { type: `${object.space}2d`, channels: [...object.channels] };
@@ -263,6 +288,7 @@ export function compileCpu(classified: Classified): CpuPlan {
         type: 'tfield2d',
         entries: object.entries.map(real) as [Expr, Expr, Expr, Expr],
         ...(object.streamlines && { streamlines: true as const }),
+        ...(object.jacobian && { jacobian: object.jacobian.map(real) as [Expr, Expr, Expr, Expr] }),
       };
     case 'vector-field':
       return object.components.length === 2
@@ -297,6 +323,10 @@ export function compileCpu(classified: Classified): CpuPlan {
         from: object.from,
         to: object.to,
       };
+    case 'geodesic': {
+      const { kind: _, ...spec } = object;
+      return { type: 'geodesic', ...spec };
+    }
     case 'figure':
       return {
         type: 'polygon',
@@ -346,7 +376,7 @@ export function compileCpu(classified: Classified): CpuPlan {
         axes: object.axes,
       };
     case 'lattice':
-      return { type: 'lattice', expr: object.expr, axes: object.axes };
+      return { type: 'lattice', expr: object.expr, axes: object.axes, ...(object.rows ? { rows: object.rows } : {}) };
     case 'graph':
       return { type: 'graph', edges: object.edges.map(row => row.map(real)) };
     case 'list':
@@ -460,38 +490,46 @@ function colorProgram(channels: readonly Expr[], params: readonly string[]): { f
   return { field: `vec4(${colors.join(', ')})`, locals: lines.join('\n') };
 }
 
+/**
+ * P(u, v)'s GLSL with its tangents, when they are cheaper than the
+ * renderer's finite differences (four more evaluations of P per pixel).
+ * Differentiating repeats every inlined definition in each product- and
+ * chain-rule term, so a long P can have tangents many times its size: the
+ * belt trick's are 12×. They are built a component at a time and abandoned
+ * once over budget, or when P cannot be differentiated (mod, gamma).
+ */
+export function parametricGLSL(
+  coordinates: readonly Expr[],
+  sub: (e: Expr) => Expr = e => e,
+): { comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] } {
+  const comps = coordinates.map(e => toGLSL(sub(e))) as [string, string, string];
+  let budget = Math.max(4096, 4 * comps.reduce((n, c) => n + c.length, 0));
+  const tangent = (variable: string): [string, string, string] | undefined => {
+    const glsl: string[] = [];
+    try {
+      for (const e of coordinates) {
+        const code = toGLSL(sub(diff(e, variable)));
+        budget -= code.length;
+        if (budget < 0) return undefined;
+        glsl.push(code);
+      }
+    } catch {
+      return undefined;
+    }
+    return glsl as [string, string, string];
+  };
+  const du = tangent('u');
+  const dv = du && tangent('v');
+  return du && dv ? { comps, du, dv } : { comps };
+}
+
 export function compileGpu(classified: Classified): GpuPlan {
   const { object } = classified;
   const params = [...classified.params];
   const sub = uniformSub(params);
   const typed = (expr: Expr) => compileTyped(sub(expr));
   const scalar = (expr: Expr) => typed(expr).code;
-  // P(u, v) with its tangents, when they are cheaper than the renderer's
-  // finite differences (four more evaluations of P per pixel). Differentiating
-  // repeats every inlined definition in each product- and chain-rule term, so
-  // a long P can have tangents many times its size: the belt trick's are 12×.
-  // They are built a component at a time and abandoned once over budget.
-  const parametric = (coordinates: readonly Expr[]) => {
-    const comps = coordinates.map(e => toGLSL(sub(e))) as [string, string, string];
-    let budget = Math.max(4096, 4 * comps.reduce((n, c) => n + c.length, 0));
-    const tangent = (variable: string): [string, string, string] | undefined => {
-      const glsl: string[] = [];
-      try {
-        for (const e of coordinates) {
-          const code = toGLSL(sub(diff(e, variable)));
-          budget -= code.length;
-          if (budget < 0) return undefined;
-          glsl.push(code);
-        }
-      } catch {
-        return undefined;
-      }
-      return glsl as [string, string, string];
-    };
-    const du = tangent('u');
-    const dv = du && tangent('v');
-    return du && dv ? { comps, du, dv } : { comps };
-  };
+  const parametric = (coordinates: readonly Expr[]) => parametricGLSL(coordinates, sub);
   switch (object.kind) {
     case 'curve':
       if (object.form === 'parametric') break;
@@ -503,7 +541,13 @@ export function compileGpu(classified: Classified): GpuPlan {
         levels: object.levels ? compileGridGpu(object.levels) : undefined,
       };
     case 'surface':
-      if (object.form === 'parametric') return { type: 'psurface', params, ...parametric(object.coordinates) };
+      if (object.form === 'parametric')
+        return {
+          type: 'psurface',
+          params,
+          ...parametric(object.coordinates),
+          ...(object.paint ? { paint: scalar(object.paint) } : {}),
+        };
       else {
         let grad: [string, string, string] | undefined;
         try {
@@ -555,6 +599,9 @@ export function compileGpu(classified: Classified): GpuPlan {
         params,
         entries: object.entries.map(e => toGLSL(sub(e))) as [string, string, string, string],
         ...(object.streamlines && { streamlines: true as const }),
+        ...(object.jacobian && {
+          jacobian: object.jacobian.map(e => toGLSL(sub(e))) as [string, string, string, string],
+        }),
       };
     case 'color-field':
       return { type: `${object.space}2d`, space: object.space, params, ...colorProgram(object.channels, params) };
@@ -619,6 +666,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'trail':
     case 'label':
     case 'orbit':
+    case 'geodesic':
     case 'figure':
     case 'system':
     case 'list':
@@ -674,11 +722,11 @@ export function shaderKey(plan: GpuPlan): string {
     case 'vfield2d':
       return JSON.stringify([plan.type, plan.params, plan.fx, plan.fy]);
     case 'tfield2d':
-      return JSON.stringify([plan.type, plan.params, plan.entries, !!plan.streamlines]);
+      return JSON.stringify([plan.type, plan.params, plan.entries, !!plan.streamlines, plan.jacobian]);
     case 'vfield3d':
       return JSON.stringify([plan.type, plan.params, plan.comps]);
     case 'psurface':
-      return JSON.stringify([plan.type, plan.params, plan.comps, plan.du, plan.dv]);
+      return JSON.stringify([plan.type, plan.params, plan.comps, plan.du, plan.dv, plan.paint]);
     case 'cobweb':
       return JSON.stringify([plan.type, plan.params, plan.curveField]);
     case 'bifurcation':
@@ -690,8 +738,29 @@ export function shaderKey(plan: GpuPlan): string {
  * current frame/sample values. Packed data identity belongs to the runtime
  * that owns those buffers; only their layout affects this structural key.
  */
+/** A fingerprint of computed lattice rows (a tuple-valued recurrence's
+ *  terms, up to millions of numbers): FNV-1a over each row's length and
+ *  each value's bits, so equal runs agree without spelling them out. */
+function rowsKey(rows: readonly (readonly number[])[]): string {
+  const bits = new Float64Array(1);
+  const words = new Uint32Array(bits.buffer);
+  let h = 0x811c9dc5;
+  const mix = (w: number) => {
+    h = Math.imul(h ^ w, 0x01000193);
+  };
+  for (const row of rows) {
+    mix(row.length);
+    for (const v of row) {
+      bits[0] = v;
+      mix(words[0]);
+      mix(words[1]);
+    }
+  }
+  return `${rows.length}:${(h >>> 0).toString(36)}`;
+}
+
 export function cpuStructureKey(plan: CpuPlan): string {
-  const expressions = (values: Expr[]) => values.map(exprKey);
+  const expressions = (values: readonly Expr[]) => values.map(exprKey);
   let structure: unknown;
   switch (plan.type) {
     case 'family':
@@ -740,6 +809,14 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'orbit':
       structure = [plan.series, plan.paths.map(expressions), exprKey(plan.from), exprKey(plan.to)];
       break;
+    case 'geodesic':
+      structure = [
+        plan.dim,
+        plan.params,
+        ...[plan.surface, plan.derivatives, plan.start, plan.direction, plan.domain].map(expressions),
+        plan.length && exprKey(plan.length),
+      ];
+      break;
     case 'polygon':
       structure = [
         plan.dim,
@@ -758,11 +835,13 @@ export function cpuStructureKey(plan: CpuPlan): string {
       break;
     case 'vfield2d':
     case 'vfield3d':
-    case 'psurface':
       structure = expressions(plan.comps);
       break;
+    case 'psurface':
+      structure = [expressions(plan.comps), plan.paint && exprKey(plan.paint)];
+      break;
     case 'tfield2d':
-      structure = expressions(plan.entries);
+      structure = [expressions(plan.entries), plan.jacobian && expressions(plan.jacobian)];
       break;
     case 'pcurve':
       structure = [expressions(plan.comps), plan.tube && exprKey(plan.tube)];
@@ -798,7 +877,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = [exprKey(plan.rule), plan.radius, plan.seed && exprKey(plan.seed), plan.dims, ...plan.axes];
       break;
     case 'lattice':
-      structure = [exprKey(plan.expr), ...plan.axes];
+      structure = [exprKey(plan.expr), ...plan.axes, plan.rows && rowsKey(plan.rows)];
       break;
     case 'graph':
       structure = plan.edges.map(row => row.map(exprKey).join('|'));

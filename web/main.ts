@@ -17,8 +17,10 @@ import {
   type CpuPlan,
   type GpuPlan,
   compileGridCpu,
+  compileCpu,
   compileGridGpu,
   cpuStructureKey,
+  parametricGLSL,
 } from '../lib/compiler.ts';
 import { analyzePrepared, isViewportText, prepareDocument, withNote } from '../lib/analysis.ts';
 import { runtimeSliderNames } from '../lib/runtime-sliders.ts';
@@ -65,7 +67,7 @@ import { compileSampler } from '../lib/vm.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
-import { DRAW_OP_SRC, type Expr, canonicalName, evaluate, freeVars, substVars } from '../lib/expr.ts';
+import { DRAW_OP_SRC, type Expr, canonicalName, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -84,7 +86,7 @@ import {
   pathSampler,
   regionSampler,
 } from '../lib/path.ts';
-import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
+import { type Classified, dotPlot, plotReadout, publicKind, valueReadout } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
@@ -107,7 +109,24 @@ import {
   orientLattice,
   parseViewRow,
 } from '../lib/view.ts';
-import { type AxisMap, type AxisMaps, axisMapping, toScreen, toWorld } from '../lib/axis-map.ts';
+import {
+  type AxisMap,
+  type AxisMaps,
+  axisMapping,
+  shownRange,
+  toScreen,
+  toScreenOrEdge,
+  toWorld,
+} from '../lib/axis-map.ts';
+import {
+  type PlaneMap,
+  type ScreenBox,
+  planeIn,
+  planeInverse,
+  pixelSpan,
+  planeToWorld,
+  planeWorldBox,
+} from '../lib/plane-map.ts';
 import { type Table, tableNameFor } from '../lib/csv.ts';
 import { shortHash } from '../lib/hash.ts';
 import EmbeddedTraceWorker from './trace-worker.ts?worker&inline';
@@ -144,12 +163,33 @@ import {
   type Camera3D,
   Renderer3D,
   type Scene3D,
+  type SurfacePaint,
   cameraBoxR,
+  cameraEye,
   cameraMatrices,
   drawLabels3D,
   projectToScreen,
 } from './render3d.ts';
 import { assignColors, takesColor } from '../lib/palette.ts';
+import {
+  type SurfaceMap,
+  surfaceArrows,
+  surfaceInUV,
+  surfaceMapping,
+  surfaceOver,
+  surfacePoint,
+} from '../lib/surface-map.ts';
+import { toGLSL, uniformName } from '../lib/glsl.ts';
+import { onSurface, raySurface, surfacePixel } from '../lib/surface-pick.ts';
+import {
+  type GeodesicOptions,
+  defaultGeodesicLength,
+  divergingGain,
+  GEODESIC_MAX_POINTS,
+  geodesicPlanKey,
+  GEODESIC_MAX_STEPS,
+  numericIn,
+} from '../lib/surface-geometry.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -166,7 +206,15 @@ interface Equation {
   /** A definite-integral row's shaded area: the integrand compiled once per
    *  shade, and resampled only when the x-window or a value it reads (bounds,
    *  sliders, states, t) changes. */
-  shadeCache?: { shade: IntShade; names: string[]; sampler: ShadeSampler; key: string; runs: ShadeRun[] };
+  shadeCache?: {
+    shade: IntShade;
+    names: string[];
+    sampler: ShadeSampler;
+    key: string;
+    runs: ShadeRun[];
+    /** The panel's axis maps the runs were drawn on. */
+    maps?: AxisMaps;
+  };
   /** A 2D parametric curve's compiled sampler (lib/path.ts) and its last
    *  polyline, resampled only when a value it reads (sliders, states, t)
    *  changes — the shadeCache pattern. */
@@ -270,6 +318,14 @@ interface Grabbable {
   /** True when `set` rewrites row text (so the drag is undoable and re-saved). */
   edits: boolean;
   set: (x: number, y: number) => void;
+}
+
+/** A dot on a surface panel's surface, at x and y there. */
+interface SurfaceDot {
+  x: number;
+  y: number;
+  color: [number, number, number];
+  label?: string;
 }
 
 /** Read-only preview of a data file, under its `open(…)` row. */
@@ -486,8 +542,12 @@ interface Panel {
   spinScale: number;
   /** Click-dropped seeds for integral curves through vector fields / ODEs. */
   drops: Array<{ x: number; y: number }>;
-  /** What the pointer can grab, in math coords; rebuilt by every 2D frame. */
+  /** What the pointer can grab, in math coords (x and y on a surface);
+   *  rebuilt by every 2D or surface frame. */
   grabs: Grabbable[];
+  /** The dots a surface panel carries onto its surface, in x and y, for
+   *  hover; rebuilt by every frame. */
+  surfaceDots: SurfaceDot[];
   /** Set until the panel has a size, when its opening zoom is picked. */
   fresh: boolean;
 }
@@ -512,6 +572,7 @@ function makePanel(key: number): Panel {
     spinScale: 1,
     drops: [],
     grabs: [],
+    surfaceDots: [],
     fresh: true,
   };
 }
@@ -609,6 +670,8 @@ function syncPanels() {
     const p = panels[eq.panel ?? 0] ?? panels[0];
     if (eq.cls?.needs3D) p.mode = '3d';
     const spec = eq.viewSpec;
+    // A panel drawing on a surface (on(…)) is 3D.
+    if (spec?.kind === 'surface') p.mode = '3d';
     if (spec?.kind === 'grid') p.grid = spec;
     if ((spec?.kind === 'view' || spec?.kind === 'camera') && spec.locked) p.locked = true;
   }
@@ -890,15 +953,21 @@ function runTweens(now: number) {
 // spin never rewrites the URL. A panel's spinScale eases a new spin in from rest.
 let lastSpinAt: number | null = null;
 
+/** Whether eq is a real system on a mapped panel, solved rewritten in its
+ *  screen coordinates (lib/axis-map.ts); a complex one solves in x and y. */
+function solvedOnScreen(eq: Equation): boolean {
+  const maps = panelMaps(panels[panelOf(eq)]);
+  return !!eq.cls && !!maps && axisMapping(eq.cls.object, maps) === 'substitute';
+}
+
 /**
- * Whether eq's system is being certified. A mapped panel solves its systems
- * rewritten in screen coordinates (lib/axis-map.ts), where a certificate
- * would prove roots in those, so it offers none, and a row certified before
- * its panel was mapped stops certifying for good rather than resuming
- * unseen when the map goes.
+ * Whether eq's system is being certified. A real system on a mapped panel is
+ * solved in screen coordinates, where a certificate would prove roots in
+ * those, so it offers none, and a row certified before its panel was mapped
+ * stops certifying for good rather than resuming unseen when the map goes.
  */
 function certifying(eq: Equation): boolean {
-  if (eq.certify && panelMaps(panels[panelOf(eq)])) {
+  if (eq.certify && solvedOnScreen(eq)) {
     eq.certify = false;
     eq.info = undefined;
   }
@@ -924,6 +993,176 @@ function viewKey(eq: Equation): string | null {
   }
   return key;
 }
+
+/** The surface panel p's 2D rows are drawn on (its on(…) row), if any. */
+function panelSurface(p: Panel): SurfaceMap | undefined {
+  const spec = viewportRow('surface', p)?.viewSpec;
+  return spec?.kind === 'surface' ? spec.surface : undefined;
+}
+
+/** A surface's mesh GLSL, and its x and y, in the mesh's u and v. */
+const surfaceGLSLs = new WeakMap<
+  SurfaceMap,
+  {
+    comps: [string, string, string];
+    du?: [string, string, string];
+    dv?: [string, string, string];
+    xy: [string, string];
+  }
+>();
+function surfaceGLSL(surface: SurfaceMap) {
+  let out = surfaceGLSLs.get(surface);
+  if (!out) {
+    const { comps, uv } = surfaceInUV(surface);
+    out = { ...parametricGLSL(comps), xy: [toGLSL(uv.x), toGLSL(uv.y)] };
+    surfaceGLSLs.set(surface, out);
+  }
+  return out;
+}
+
+/** The bare surface's colour: between the page and its axes, so rows read
+ *  on it in either theme. */
+const surfaceShade = (): [number, number, number] =>
+  theme.bg.map((b, k) => 0.65 * b + 0.35 * theme.axis[k]) as [number, number, number];
+
+/** A 2D row as a surface paints it (web/render3d.ts paintFrag). */
+function paintOf(eq: Equation): SurfacePaint['paint'] | null {
+  switch (eq.gpu?.type) {
+    case 'implicit2d':
+      return { kind: 'curve', field: eq.gpu.field };
+    case 'ineq2d':
+      return { kind: 'region', field: eq.gpu.field, edges: eq.gpu.edges };
+    case 'scalar2d':
+      return { kind: 'scalar', field: eq.gpu.field };
+  }
+  return null;
+}
+
+/** Where a scene stood before a row added to it. */
+function markScene(scene: Scene3D) {
+  return {
+    curves: scene.curves.length,
+    points: scene.points.length,
+    texts: scene.texts?.length ?? 0,
+    segments: scene.segments.length,
+  };
+}
+
+/** Steps a straight run in x and y is cut into on the surface, which bends it. */
+const SURFACE_PIECES = 24;
+
+/**
+ * Carry what a 2D row added to the scene since `mark` — placed in the plane
+ * z = 0 — onto the surface: each point to the surface point at its x and y,
+ * each line cut into pieces first (a straight run in x and y is a curve on
+ * the surface). Everything is lifted a hair toward the eye so the surface
+ * does not hide what lies exactly on it.
+ */
+function carryOntoSurface(scene: Scene3D, mark: ReturnType<typeof markScene>, surface: SurfaceMap, cam: Camera3D) {
+  const lifted = towardEye(cam);
+  const onto = (x: number, y: number) => lifted(surfacePoint(surface, x, y));
+  const line = (pts: ArrayLike<number>, pieces: number): Float32Array => {
+    const out: number[] = [];
+    for (let i = 0; i + 2 < pts.length; i += 3) {
+      const [x0, y0] = [pts[i], pts[i + 1]];
+      const next = i + 5 < pts.length;
+      const steps = next && Number.isFinite(pts[i + 3]) ? pieces : 1;
+      for (let k = 0; k < steps; k++) {
+        const t = k / steps;
+        const [x, y] = next && steps > 1 ? [x0 + (pts[i + 3] - x0) * t, y0 + (pts[i + 4] - y0) * t] : [x0, y0];
+        const q = Number.isFinite(x) && Number.isFinite(y) ? onto(x, y) : null;
+        // A gap where the surface is undefined, as in a sampled curve.
+        out.push(...(q?.every(Number.isFinite) ? q : [NaN, NaN, NaN]));
+      }
+    }
+    return Float32Array.from(out);
+  };
+  // A sampled curve is short steps already; a figure's edges are long.
+  for (const c of scene.curves.slice(mark.curves)) c.pts = line(c.pts, c.pts.length > 300 ? 1 : SURFACE_PIECES);
+  for (const s of scene.segments.slice(mark.segments)) {
+    const out: number[] = [];
+    for (let i = 0; i + 5 < s.pts.length; i += 6) {
+      const piece = line([s.pts[i], s.pts[i + 1], 0, s.pts[i + 3], s.pts[i + 4], 0], SURFACE_PIECES);
+      for (let k = 0; k + 5 < piece.length; k += 3) {
+        const seg = piece.subarray(k, k + 6);
+        if (seg.every(Number.isFinite)) out.push(...seg);
+      }
+    }
+    s.pts = Float32Array.from(out);
+    s.retained = false;
+  }
+  // A point where the surface is undefined (1/x at x = 0) is not drawn.
+  const placed = <T extends { pos: [number, number, number] }>(items: T[], from: number) => {
+    const kept = items.slice(from).filter(it => (it.pos = onto(it.pos[0], it.pos[1])).every(Number.isFinite));
+    items.splice(from, items.length - from, ...kept);
+  };
+  placed(scene.points, mark.points);
+  if (scene.texts) placed(scene.texts, mark.texts);
+}
+
+/** A point on a surface moved a hair toward the eye, so the surface does
+ *  not hide what lies exactly on it. */
+function towardEye(cam: Camera3D): (p: readonly number[]) => [number, number, number] {
+  const eye = cameraEye(cam);
+  const lift = 0.004 * cam.radius;
+  return p => {
+    const d = Math.hypot(eye[0] - p[0], eye[1] - p[1], eye[2] - p[2]) || 1;
+    return [0, 1, 2].map(k => p[k] + (lift * (eye[k] - p[k])) / d) as [number, number, number];
+  };
+}
+
+/** A parametric region carried onto a surface: the GLSL of its mesh there,
+ *  in the region's u and v, its sliders read as uniforms; null if the
+ *  shaders cannot take it. */
+const surfaceRegions = new WeakMap<SurfaceMap, WeakMap<readonly Expr[], ReturnType<typeof parametricGLSL> | null>>();
+function surfaceRegionGLSL(surface: SurfaceMap, comps: readonly [Expr, Expr], params: readonly string[]) {
+  let byRegion = surfaceRegions.get(surface);
+  if (!byRegion) surfaceRegions.set(surface, (byRegion = new WeakMap()));
+  let out = byRegion.get(comps);
+  if (out === undefined) {
+    const names = Object.fromEntries(params.map(p => [p, { kind: 'var', name: uniformName(p) } as Expr]));
+    try {
+      out = parametricGLSL(surfaceOver(surface, comps), e => substVars(e, names));
+    } catch {
+      out = null;
+    }
+    byRegion.set(comps, out);
+  }
+  return out;
+}
+
+/** A vector field's arrows on a surface, before their lift toward the eye:
+ *  kept until the surface, the field or a value it reads (a slider, t)
+ *  changes, so a still field costs nothing per frame. */
+const surfaceFieldArrows = new WeakMap<
+  readonly Expr[],
+  { surface: SurfaceMap; reads: string[]; key: string | null; arrows: number[] }
+>();
+function fieldArrows(surface: SurfaceMap, comps: readonly Expr[], env: Record<string, number>): number[] {
+  let c = surfaceFieldArrows.get(comps);
+  if (c?.surface !== surface) {
+    const reads = new Set(comps.flatMap(e => [...freeVars(e)]));
+    reads.delete('x');
+    reads.delete('y');
+    c = { surface, reads: [...reads], key: null, arrows: [] };
+    surfaceFieldArrows.set(comps, c);
+  }
+  const key = c.reads.map(n => env[n]).join();
+  if (key !== c.key) {
+    c.key = key;
+    try {
+      const field = fieldEvaluator([...comps], env);
+      c.arrows = surfaceArrows(surface, (x, y) => field([x, y]));
+    } catch {
+      c.arrows = []; // too large to trace: refused at its row
+    }
+  }
+  return c.arrows;
+}
+
+/** A parametric region's fill on a surface: all of its mesh, as an
+ *  inequality's area is painted. */
+const REGION_FILL: SurfacePaint['paint'] = { kind: 'region', field: '-1.0', edges: [] };
 
 /** The axis maps of panel p's view(…) row (lib/axis-map.ts), if it has any. */
 function panelMaps(p: Panel | undefined): AxisMaps | undefined {
@@ -1292,10 +1531,33 @@ const liveRow = (eq: Equation) =>
 
 /** Which grid families draw behind a 2D panel: those its grid(…) row names,
  *  or else the coordinate fields defined among its rows. Empty is Cartesian. */
-function panelGridFields(p: Panel): Array<GridField | 'x' | 'y'> {
+/** Coordinate grids through plane maps, compiled once per field and map. */
+const planeGrids = new WeakMap<PlaneMap, Map<GridField | 'x' | 'y', GridField>>();
+
+/** A coordinate field (or x or y itself) as a plane-mapped panel grids it:
+ *  its level lines, drawn on the screen through the map. */
+function planeGridField(f: GridField | 'x' | 'y', plane: PlaneMap): GridField {
+  let fields = planeGrids.get(plane);
+  if (!fields) planeGrids.set(plane, (fields = new Map()));
+  let out = fields.get(f);
+  if (!out) {
+    const [x, y] = planeIn(plane).forward;
+    const spec =
+      f === 'x' || f === 'y'
+        ? { name: f, expr: f === 'x' ? x : y, params: [] }
+        : { name: f.name, expr: substVars(f.expr, { x, y }), params: f.params };
+    out = { ...compileGridCpu(spec), ...compileGridGpu(spec) };
+    fields.set(f, out);
+  }
+  return out;
+}
+
+function panelGridFields(p: Panel, plane?: PlaneMap): Array<GridField | 'x' | 'y'> {
   const coords = p.grid?.mode === 'coords' ? p.grid.coords! : null;
   if (coords) {
-    if (coords.length === 2 && coords.includes('x') && coords.includes('y')) return [];
+    // grid(x, y) is the plain grid, except through a plane map, where x and
+    // y are curves on the screen.
+    if (!plane && coords.length === 2 && coords.includes('x') && coords.includes('y')) return [];
     return coords.flatMap<GridField | 'x' | 'y'>(name =>
       name === 'x' || name === 'y' ? [name] : gridFields.filter(f => f.name === name),
     );
@@ -1306,6 +1568,191 @@ function panelGridFields(p: Panel): Array<GridField | 'x' | 'y'> {
 
 /** Each cloud's scale (lib/volume.ts) and the view and sliders it was read under. */
 const volumeScales = new WeakMap<CpuPlan, { key: string; scale: number }>();
+
+/** The names a geodesic reads besides its parameters: what it is traced
+ *  again for when they change. */
+const geodesicReads = new WeakMap<CpuPlan, string[]>();
+/** A family of geodesics shares this budget, each member a share of it. */
+const GEODESIC_FAMILY_STEPS = 200000;
+const GEODESIC_FAMILY_MS = 1000;
+/** …and draws with this many points in all: each is carried onto its
+ *  surface every frame. */
+const GEODESIC_FAMILY_POINTS = 48000;
+
+/**
+ * Where each geodesic's traced points are kept: by its row and, in a family,
+ * its member — not on the member rows themselves, which are made afresh each
+ * time the row is reanalysed (every move of a dragged point it reads), so
+ * the last geodesic keeps drawing through a drag. `id` is the trace queue's
+ * row for it, likewise stable, so a newer request replaces an older one
+ * still waiting rather than queueing behind it.
+ */
+/** When the last frame was drawn, and the frame a traced geodesic asks for
+ *  if none comes by itself within GEODESIC_FRAME_MS. */
+let lastRenderAt = 0;
+let geodesicFrame: ReturnType<typeof setTimeout> | undefined;
+const GEODESIC_FRAME_MS = 50;
+const geodesicSlots = new Map<
+  string,
+  { id: number; key?: string; pending?: string; pts: Float32Array; note?: string }
+>();
+/** Each geodesic plan's geodesicPlanKey, worked out once. */
+const geodesicPlans = new WeakMap<CpuPlan, string>();
+let geodesicIds = -1e9;
+
+/**
+ * A geodesic row's note, from its members' traces: where its budget cut one
+ * short, or how many of a family it cut. Slots of members a shorter list no
+ * longer has are let go here.
+ */
+function geodesicNote(row: Equation, members: number) {
+  const notes: string[] = [];
+  for (const [name, slot] of geodesicSlots) {
+    const [id, member] = name.split(':');
+    if (id !== `${row.id}`) continue;
+    if (Number(member) >= members) geodesicSlots.delete(name);
+    else if (slot.note) notes.push(slot.note);
+  }
+  const note =
+    notes.length === 0
+      ? undefined
+      : members === 1
+        ? notes[0]
+        : `${notes.length} of ${members} cut short by the family's budget (one at ${notes[0].replace(/^cut short at /, '')})`;
+  // (A reanalysis clears the row's info, so it is compared with that.)
+  if (note === row.info) return;
+  row.info = note;
+  reconcile();
+}
+
+/**
+ * A geodesic's points, traced in the trace worker (lib/surface-geometry.ts
+ * geodesicPath) whenever a value it reads changes — a slider, t, a dragged
+ * point — and never on this thread. The last one traced keeps drawing until
+ * the next arrives, so dragging stays smooth while the worker catches up.
+ */
+function geodesicFor(eq: Equation, env: Record<string, number>): Float32Array {
+  const plot = eq.cpu as Extract<CpuPlan, { type: 'geodesic' }>;
+  let names = geodesicReads.get(plot);
+  if (!names) {
+    const exprs = [...plot.surface, ...plot.derivatives, ...plot.start, ...plot.direction, ...plot.domain];
+    if (plot.length) exprs.push(plot.length);
+    names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => !plot.params.includes(n));
+    geodesicReads.set(plot, names);
+  }
+  const row = eq.familyParent ?? eq;
+  const family = row.cpu?.type === 'family' ? row.cpu.members : null;
+  const member = family ? family.findIndex(m => m.cpu === plot) : 0;
+  const slotName = `${row.id}:${member}`;
+  let slot = geodesicSlots.get(slotName);
+  if (!slot) {
+    // Forget the rows that are gone, now and then.
+    if (geodesicSlots.size > 256) {
+      const live = new Set(equations.map(e => `${e.id}`));
+      for (const name of geodesicSlots.keys()) if (!live.has(name.split(':')[0])) geodesicSlots.delete(name);
+    }
+    geodesicSlots.set(slotName, (slot = { id: geodesicIds--, pts: new Float32Array() }));
+  }
+  let plan = geodesicPlans.get(plot);
+  if (plan === undefined) geodesicPlans.set(plot, (plan = geodesicPlanKey(plot)));
+  const members = family?.length ?? 1;
+  // Its note: how its members' budgets cut them short, if they did.
+  geodesicNote(row, members);
+  // The plan is in the key, so an edit to a row it reads (S, the list of
+  // directions, the panel's surface) traces it again; the last path keeps
+  // drawing until the new one arrives.
+  const key = `${plan}\n${member}\n${JSON.stringify(names.map(n => env[n]))}`;
+  if (slot.key === key || slot.pending === key) return slot.pts;
+  slot.pending = key;
+  const { type: _, ...spec } = plot;
+  const values = Object.fromEntries(names.map(n => [n, env[n]]));
+  const target = slot;
+  traceQueue.request(
+    slot.id,
+    key,
+    {
+      kind: 'geodesic',
+      geodesic: {
+        spec,
+        env: values,
+        maxSteps: Math.min(GEODESIC_MAX_STEPS, Math.ceil(GEODESIC_FAMILY_STEPS / members)),
+        ms: GEODESIC_FAMILY_MS / members,
+        maxPoints: Math.min(GEODESIC_MAX_POINTS, Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members))),
+      },
+      residuals: [],
+      dim: plot.dim,
+      lo: [],
+      hi: [],
+      env: {},
+    },
+    result => {
+      if (!equations.includes(row) || geodesicSlots.get(slotName) !== target) return;
+      if (target.pending === key) target.pending = undefined;
+      // Kept even when a newer one is on its way: while P is dragged the
+      // drawn geodesic follows a frame or two behind rather than not at all.
+      target.key = key;
+      target.pts = result.flat ?? new Float32Array();
+      target.note = result.info;
+      geodesicNote(row, members);
+      // A frame of its own only when none comes anyway: a drag or t brings
+      // frames that draw whatever has arrived, and a frame per result on top
+      // of those would halve their rate where drawing is slow.
+      clearTimeout(geodesicFrame);
+      geodesicFrame = setTimeout(() => {
+        if (performance.now() - lastRenderAt > GEODESIC_FRAME_MS) requestRender();
+      }, GEODESIC_FRAME_MS);
+    },
+  );
+  return slot.pts;
+}
+
+/** The gain a field painted on a surface's panel (gaussian(x, y)) is shaded
+ *  with, kept until the surface or a value it reads (a slider, t) changes. */
+const fieldGains = new WeakMap<CpuPlan, { key: string; surface: SurfaceMap; gain: number }>();
+function surfaceFieldGain(
+  surface: SurfaceMap,
+  plot: Extract<CpuPlan, { type: 'scalar2d' }>,
+  env: Record<string, number>,
+): number {
+  const names = [...freeVars(plot.expr)].filter(n => n !== 'x' && n !== 'y');
+  const key = JSON.stringify(names.map(n => env[n]));
+  const last = fieldGains.get(plot);
+  if (last?.key === key && last.surface === surface) return last.gain;
+  const f = numericIn([plot.expr], ['x', 'y'], env);
+  const one = new Float64Array(1);
+  const size = defaultGeodesicLength((x, y) => surfacePoint(surface, x, y), [surface.x, surface.y]) / 2;
+  const gain = divergingGain(
+    (x, y) => (f(x, y, one), one[0]),
+    [surface.x, surface.y],
+    1e-9 * Math.min(1 / size, 1 / size ** 2),
+  );
+  fieldGains.set(plot, { key, surface, gain });
+  return gain;
+}
+
+/** The gain a surface coloured by its curvature (gaussian(S)) shades it
+ *  with, kept until a value it reads (a slider, t) changes. */
+const paintGains = new WeakMap<CpuPlan, { key: string; gain: number }>();
+function paintGain(plot: Extract<CpuPlan, { type: 'psurface' }>, env: Record<string, number>): number {
+  const paint = plot.paint!;
+  const names = [...freeVars({ kind: 'vec', items: [...plot.comps, paint] })].filter(n => n !== 'u' && n !== 'v');
+  const key = JSON.stringify(names.map(n => env[n]));
+  const last = paintGains.get(plot);
+  if (last?.key === key) return last.gain;
+  const unit: GeodesicOptions['domain'] = [
+    [0, 1],
+    [0, 1],
+  ];
+  const f = numericIn([paint], ['u', 'v'], env);
+  const P = numericIn(plot.comps, ['u', 'v'], env);
+  const out = new Float64Array(3);
+  // Rounding, not curvature, below 1e-9 of the surface's own size.
+  const size = defaultGeodesicLength((u, v) => (P(u, v, out), [...out]), unit) / 2;
+  const one = new Float64Array(1);
+  const gain = divergingGain((u, v) => (f(u, v, one), one[0]), unit, 1e-9 * Math.min(1 / size, 1 / size ** 2));
+  paintGains.set(plot, { key, gain });
+  return gain;
+}
 
 /** 2D-only plots (densities, flows, sequences, planar fields) a 3D scene leaves out. */
 const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
@@ -1417,6 +1864,7 @@ function cellsOf(g: CellGrid, runs: Cells2D['runs'], shades = cellShades(g)): Ce
 }
 
 function render() {
+  lastRenderAt = performance.now();
   if (!syncCanvasSize()) return;
   applyViewportRows();
   syncLinks(null);
@@ -1428,6 +1876,7 @@ function render() {
   // States carry between frames, so they are integrated up to now before
   // anything reads them; the constants may then be formulas in those states.
   constEnv = currentConstEnv(time);
+  followSurfaceHover();
 
   // Readouts belong to the source row, even when its family has many draws.
   for (const eq of equations) {
@@ -1638,6 +2087,21 @@ function render() {
       const halfH = (panelH() / 2) * (view.upp / (view.ratio ?? 1));
       vlo = [view.cx - halfW, view.cy - halfH];
       vhi = [view.cx + halfW, view.cy + halfH];
+      // A system whose solutions are placed on a mapped panel (a complex one,
+      // in w) solves in x and y: over the part of the window the maps show.
+      const maps = panelMaps(panels[panelOf(eq)]);
+      const placed = !!maps && axisMapping(cls.object, maps) === 'place';
+      if (placed && maps.plane) {
+        const world = planeWorldBox(maps.plane, { lo: [vlo[0], vlo[1]], hi: [vhi[0], vhi[1]] });
+        if (!world) return [];
+        [vlo, vhi] = [[...world.lo], [...world.hi]];
+      } else if (placed)
+        for (const [k, map] of [maps.x, maps.y].entries()) {
+          if (!map) continue;
+          const shown = shownRange(map, vlo[k], vhi[k]);
+          if (!shown) return [];
+          [vlo[k], vhi[k]] = shown.world;
+        }
     }
     const pad = vhi.map((v, k) => 0.25 * (v - vlo[k]));
     const lo = vlo.map((v, k) => v - pad[k]);
@@ -1832,11 +2296,74 @@ function render() {
   ) {
     if (mode === '3d') {
       const scene: Scene3D = { implicits: [], psurfaces: [], curves: [], segments: [], tubes: [], points: [] };
+      // A panel drawing its 2D rows on a surface (lib/surface-map.ts): the
+      // surface first, then each 2D row painted on it or carried onto it.
+      const surface = panelSurface(panel);
+      if (surface) scene.psurfaces.push({ ...surfaceGLSL(surface), color: surfaceShade() });
+      // Carried dots are kept in x and y too, for hover.
+      const dots: SurfaceDot[] = [];
+      const carry = (mark: ReturnType<typeof markScene>) => {
+        for (const { pos, color, label } of scene.points.slice(mark.points))
+          dots.push({ x: pos[0], y: pos[1], color, label });
+        carryOntoSurface(scene, mark, surface!, camera);
+      };
       for (const eq of rows) {
-        if (SKIPPED_IN_3D.has(eq.cpu!.type)) continue;
+        const on = surface && eq.cls && !eq.cls.needs3D ? surfaceMapping(eq.cls.object) : null;
+        if (on === 'paint') {
+          let paint = paintOf(eq);
+          // gaussian(x, y): shaded to its own size on the surface.
+          if (paint?.kind === 'scalar' && eq.cpu?.type === 'scalar2d' && eq.cpu.autoscale)
+            paint = {
+              ...paint,
+              gain: surfaceFieldGain(surface!, eq.cpu, { ...constEnv, ...eq.gpu?.uniforms, t: time }),
+            };
+          if (paint) {
+            const { comps, du, dv, xy } = surfaceGLSL(surface!);
+            const { params, uniforms } = shaderBindings(eq.gpu);
+            (scene.paints ??= []).push({ comps, du, dv, xy, paint, color: rowColor(eq), params, uniforms });
+          }
+          continue;
+        }
+        if (SKIPPED_IN_3D.has(eq.cpu!.type) && on !== 'carry') continue;
+        const mark = on === 'carry' ? markScene(scene) : null;
         const color = rowColor(eq);
         const plot = eq.cpu!;
         const { params, uniforms } = shaderBindings(eq.gpu);
+        // A parametric region's own mesh, carried onto the surface whole;
+        // a vector field as arrows along the surface's tangents.
+        if (on === 'carry' && plot.type === 'pregion') {
+          const mesh = surfaceRegionGLSL(surface!, plot.comps, params);
+          if (mesh)
+            (scene.paints ??= []).push({
+              ...mesh,
+              xy: ['u', 'v'],
+              paint: REGION_FILL,
+              color,
+              params,
+              uniforms,
+              lift: true,
+            });
+          continue;
+        }
+        // A geodesic, on its surface already (the worker places its points
+        // there, a panel's surface included): lifted a hair toward the eye so
+        // the surface does not hide it.
+        if (plot.type === 'geodesic') {
+          const pts = geodesicFor(eq, { ...constEnv, t: time });
+          const lifted = towardEye(camera);
+          const raised = new Float32Array(pts.length);
+          for (let k = 0; k + 2 < pts.length; k += 3) raised.set(lifted([pts[k], pts[k + 1], pts[k + 2]]), k);
+          if (raised.length >= 6) scene.curves.push({ pts: raised, color });
+          continue;
+        }
+        if (on === 'carry' && plot.type === 'vfield2d') {
+          const lifted = towardEye(camera);
+          const arrows = fieldArrows(surface!, plot.comps, { ...constEnv, ...eq.gpu?.uniforms, t: time });
+          const pts = new Float32Array(arrows.length);
+          for (let k = 0; k + 2 < arrows.length; k += 3) pts.set(lifted(arrows.slice(k, k + 3)), k);
+          if (pts.length) scene.curves.push({ pts, color, arrow: true });
+          continue;
+        }
         switch (plot.type) {
           case 'implicit2d': // extrudes to its true locus (a vertical sheet)
             scene.implicits.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
@@ -1902,10 +2429,13 @@ function render() {
               const geometry = sample(constEnv, time);
               if (!geometry) break;
               const { mesh, edges } = geometry;
-              if (mesh.indices.length) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
+              // On a surface a hull is its outline: a flat fill would cut
+              // through the surface rather than lie on it.
+              const solid = mesh.indices.length > 0 && on !== 'carry';
+              if (solid) scene.tubes.push({ ...mesh, cells: [1, 1], color, retained: true });
               scene.segments.push({
                 pts: edges,
-                color: mesh.indices.length ? edgeShade(color) : color,
+                color: solid ? edgeShade(color) : color,
                 retained: true,
               });
               break;
@@ -1917,7 +2447,9 @@ function render() {
             // A closed polygon fills translucently when a fan from its first
             // vertex covers it exactly: triangles, convex outlines, and the
             // discs and sectors multivectors draw (lib/glyphs.ts).
-            const fill = plot.closed && fanFillable(pts);
+            // On a surface it is an outline: the fan's flat triangles would
+            // be chords under the surface (fill a region with an inequality).
+            const fill = plot.closed && on !== 'carry' && fanFillable(pts);
             if (plot.closed) pts.push(...pts.slice(0, 3));
             scene.curves.push({ pts: new Float32Array(pts), color, arrow: plot.arrow, fill });
             break;
@@ -1951,9 +2483,12 @@ function render() {
           }
           case 'psurface':
           // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
-          case 'pregion':
-            scene.psurfaces.push({ ...gpuFor(eq, 'psurface'), color, params, uniforms });
+          case 'pregion': {
+            const gpu = gpuFor(eq, 'psurface');
+            const gain = plot.type === 'psurface' && plot.paint ? paintGain(plot, { ...constEnv, t: time }) : undefined;
+            scene.psurfaces.push({ ...gpu, color, params, uniforms, gain });
             break;
+          }
           case 'orbit': {
             let path: number[] = [];
             const flush = () => {
@@ -2058,9 +2593,29 @@ function render() {
             }
             break;
         }
+        // What a 2D row placed in the plane z = 0, carried onto the surface.
+        if (mark) carry(mark);
       }
+      // Named points in x and y (`A = (0.5, 1)`) sit on the surface, labelled.
+      if (surface)
+        for (const eq of equations) {
+          if (eq.def?.kind !== 'const' || eq.error || !defs.points.has(eq.def.name)) continue;
+          if (panelOf(eq) !== index || defs.pointDims.get(eq.def.name) !== 2) continue;
+          const [cx, cy] = pointComps(eq.def.name);
+          const [px, py] = [constEnv[cx], constEnv[cy]];
+          if (!isFinite(px) || !isFinite(py)) continue;
+          const mark = markScene(scene);
+          scene.points.push({ pos: [px, py, 0], color: baseColor(eq), label: eq.def.name, group: eq });
+          carry(mark);
+          // Dragged along the surface, in x and y (see surfaceAt); not by a
+          // slider the surface itself reads, which would move it under the drag.
+          const set = defPointWriter(eq, surfaceReads(surface));
+          if (set) grabs.push({ key: `def${eq.id}`, x: px, y: py, edits: true, set });
+        }
+      panel.surfaceDots = dots;
       r3d.render(camera, scene, time, constEnv, frame);
       drawLabels3D(overlayCtx, camera, dpr, scene.points, scene.texts, box, frame.grid !== 'off');
+      drawHoverMarker(dpr);
     } else {
       const layers: Required<Layers2D> = {
         levels: [],
@@ -2129,20 +2684,27 @@ function render() {
       // A mapped panel (lib/axis-map.ts) carries what a placing row adds to
       // the overlay, and the points it lets you grab, to its screen.
       const maps = frame.maps;
-      const placed = (eq: Equation) => !!maps && !!eq.cls && axisMapping(eq.cls.object) === 'place';
+      const placed = (eq: Equation) => !!maps && !!eq.cls && axisMapping(eq.cls.object, maps) === 'place';
       const since = (eq: Equation) => (placed(eq) ? { overlay: markOverlay(extras), grabs: grabs.length } : null);
+      // The screen window, which a plane map's way back is built over.
+      const screenBox: ScreenBox = { lo: [xmin, view.cy - halfH], hi: [xmax, view.cy + halfH] };
       const carry = (mark: ReturnType<typeof since>) => {
         if (!mark || !maps) return;
-        mapOverlay(extras, mark.overlay, maps);
+        mapOverlay(extras, mark.overlay, maps, screenBox);
+        const plane = maps.plane;
         for (const g of grabs.splice(mark.grabs)) {
-          const [x, y] = [maps.x ? toScreen(maps.x, g.x) : g.x, maps.y ? toScreen(maps.y, g.y) : g.y];
+          const [x, y] = plane
+            ? planeInverse(plane, screenBox).first(g.x, g.y)
+            : [maps.x ? toScreen(maps.x, g.x) : g.x, maps.y ? toScreen(maps.y, g.y) : g.y];
           if (!isFinite(x) || !isFinite(y)) continue;
           const set = g.set;
           grabs.push({
             ...g,
             x,
             y,
-            set: (sx, sy) => set(dragTo(maps.x, sx, 0), dragTo(maps.y, sy, 1)),
+            set: plane
+              ? (sx, sy) => set(...dragToPlane(plane, sx, sy))
+              : (sx, sy) => set(dragTo(maps.x, sx, 0), dragTo(maps.y, sy, 1)),
           });
         }
       };
@@ -2523,15 +3085,18 @@ function render() {
               c = eq.shadeCache = { shade: plot.shade, names, sampler, key: '', runs: [] };
             }
             const key = [xmin, xmax, ...c.names.map(n => env[n])].join();
-            if (key !== c.key) {
+            if (key !== c.key || c.maps !== maps) {
               c.key = key;
-              c.runs = shadeRuns(plot.shade, env, xmin, xmax, c.sampler);
+              c.maps = maps;
+              // On mapped axes, in the panel's screen coordinates already.
+              c.runs = shadeRuns(plot.shade, env, xmin, xmax, c.sampler, maps);
             }
             const minus = minusTint(color);
+            const zero = maps?.y ? toScreenOrEdge(maps.y, 0) : 0;
             for (const run of c.runs) {
               // Only real edges are stroked: not where the window cut the range.
               const tint = run.sign > 0 ? color : minus;
-              const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH);
+              const { fill, stroke } = runPaths(run, view.cy - halfH, view.cy + halfH, zero);
               extras.polylines.push({
                 pts: fill,
                 color: cssColor(tint),
@@ -2603,9 +3168,10 @@ function render() {
                 extras.polylines.push({ pts: points.flat(), color: css });
                 break;
               }
-              // Its solutions are on the screen of a mapped panel, and a
-              // coordinate writer reads x and y: no drag there.
-              const set = maps ? null : coordinatePointWriter(eq, plot.coordinates);
+              // A real system's solutions are on the screen of a mapped
+              // panel, and a coordinate writer reads x and y: no drag there. A
+              // complex one's are in x and y, carried there like any point.
+              const set = maps && !plot.complexEquation ? null : coordinatePointWriter(eq, plot.coordinates);
               points.forEach((p, i) => {
                 const key = `sys${eq.id}:${i}`;
                 extras.points.push({
@@ -2662,8 +3228,13 @@ function render() {
       }
       let gridSpecs: GridSpec[] | undefined;
       // Coordinate fields are written in x and y, not a mapped panel's screen
-      // coordinates: a mapped panel grids its axes at their ticks instead.
-      const families = frame.grid === 'on' && !frame.maps ? panelGridFields(panel) : [];
+      // coordinates: a panel with its axes mapped grids them at their ticks
+      // instead, and one with a plane map draws them through it, x and y too.
+      const plane = frame.maps?.plane;
+      const families =
+        frame.grid === 'on' && (!frame.maps || plane)
+          ? panelGridFields(panel, plane).map(f => (plane ? planeGridField(f, plane) : f))
+          : [];
       if (families.length) {
         gridSpecs = families.map(f => {
           if (f === 'x' || f === 'y') {
@@ -2835,7 +3406,9 @@ function recompileAll() {
   // all, so a 200 000-point CSV beside one `z = …` row is 200 000 projected,
   // depth-sorted sprites. Whether a panel is 3D is only known once every
   // row has classified, which is why this waits for the loop to finish.
-  const panels3D = new Set(equations.filter(e => e.cls && !e.error && e.cls.needs3D).map(e => e.panel));
+  const panels3D = new Set(
+    equations.filter(e => !e.error && (e.cls?.needs3D || e.viewSpec?.kind === 'surface')).map(e => e.panel),
+  );
   for (const eq of equations) {
     if (!eq.cls || eq.error || !panels3D.has(eq.panel)) continue;
     const points = cloudPoints(eq.cpu!);
@@ -3631,9 +4204,9 @@ function rowToggles(eq: Equation): RowToggle[] {
 }
 
 function rowToggle(eq: Equation): RowToggle | null {
-  // On a mapped panel a system is solved rewritten in screen coordinates
-  // (lib/axis-map.ts): a certificate there would prove roots in those.
-  const mapped = !!panelMaps(panels[panelOf(eq)]);
+  // On a mapped panel a real system is solved rewritten in screen
+  // coordinates (lib/axis-map.ts): a certificate there would prove roots in those.
+  const mapped = solvedOnScreen(eq);
   if (eq.cpu?.type === 'system' && !eq.cpu!.parametric && !eq.cpu!.angular?.some(Boolean) && !mapped)
     return {
       label: 'certify search box',
@@ -4649,6 +5222,20 @@ function dragTo(map: AxisMap | undefined, s: number, axis: number): number {
   return parseFloat(toWorld(map, Math.round(s / step) * step).toPrecision(5));
 }
 
+/** dragTo through a plane map: the screen point carried to x and y, each
+ *  rounded to about a pixel there — the pixel's size in x and y, from the
+ *  map's Jacobian — as snapToPixel rounds on a plain panel. */
+function dragToPlane(plane: PlaneMap, sx: number, sy: number): [number, number] {
+  const [x, y] = planeToWorld(plane, sx, sy);
+  const [px, py] = pixelSpan(plane, sx, sy, view.upp, view.upp / (view.ratio ?? 1));
+  const round = (v: number, pixel: number) => {
+    if (!(pixel > 0) || !isFinite(pixel)) return parseFloat(v.toPrecision(5));
+    const step = Math.pow(10, Math.floor(Math.log10(pixel * 3)));
+    return parseFloat((Math.round(v / step) * step).toPrecision(12));
+  };
+  return [round(x, px), round(y, py)];
+}
+
 // --- draggable points ---
 //
 // A point row whose coordinates are plain numbers or bare slider names can be
@@ -4659,12 +5246,18 @@ function dragTo(map: AxisMap | undefined, s: number, axis: number): number {
 // coordinates can move is decided by lib/drag.ts, shared with the MCP server
 // so its "draggable" report matches what the app actually does.
 
+/** While a point is dragged on a surface, x and y's change across a pixel there. */
+let surfaceSnap: [number, number] | null = null;
+
 /** Round to roughly a pixel, so dragging writes short, readable numbers.
  *  A mapped axis's pixels are not even in its own units, so its value was
  *  rounded on the screen already (dragTo) and is left as it is. */
 function snapToPixel(v: number, axis = 0): number {
-  if (panelMaps(cur)?.[axis === 1 ? 'y' : 'x']) return v;
-  const upp = view.upp / (axis === 1 ? (view.ratio ?? 1) : 1);
+  const maps = panelMaps(cur);
+  if (maps?.plane || maps?.[axis === 1 ? 'y' : 'x']) return v;
+  // On a surface, to the pixel there (as it is when that is unknown).
+  const upp = mode === '3d' ? (surfaceSnap?.[axis] ?? NaN) : view.upp / (axis === 1 ? (view.ratio ?? 1) : 1);
+  if (!(upp > 0)) return v;
   const step = Math.pow(10, Math.floor(Math.log10(upp * 3)));
   return Math.round(v / step) * step;
 }
@@ -4744,15 +5337,32 @@ function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
   );
 }
 
-/** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
-const defPointWriter = (eq: Equation) => {
+/** Writer for a named-point row `A = (…)`: rewrites the pair after the '='.
+ *  Names in `pinned` are held still. */
+const defPointWriter = (eq: Equation, pinned?: ReadonlySet<string>) => {
   const def = eq.def as Definition & { kind: 'const' };
   // A binder's row is `p ∈ …`, never an assignment to rewrite.
   if (def.draw) return null;
-  return makePairWriter(def.rhs, p => {
-    eq.text = keepNote(eq.text, `${def.name} = ${p}`);
-  });
+  return makePairWriter(
+    def.rhs,
+    p => {
+      eq.text = keepNote(eq.text, `${def.name} = ${p}`);
+    },
+    undefined,
+    pinned,
+  );
 };
+
+/** The names a surface reads (its sliders, and what they are made of). */
+const surfaceReadsOf = new WeakMap<SurfaceMap, Set<string>>();
+function surfaceReads(surface: SurfaceMap): Set<string> {
+  let reads = surfaceReadsOf.get(surface);
+  if (!reads) {
+    reads = definitionDependencies(freeVars(parseExpr(surface.text)), defs);
+    surfaceReadsOf.set(surface, reads);
+  }
+  return reads;
+}
 
 /** Push text a drag rewrote back into the editor lines. */
 function syncLineTexts() {
@@ -4779,7 +5389,8 @@ function toMath(clientX: number, clientY: number): [number, number] {
 
 /** The nearest grabbable point within GRAB_PX of a client position. */
 function pointAt(clientX: number, clientY: number): Grabbable | null {
-  if (mode !== '2d' || !grabbable.length) return null;
+  if (mode === '3d') return surfaceGrabAt(clientX, clientY);
+  if (!grabbable.length) return null;
   const [mx, my] = toMath(clientX, clientY);
   const dpr = window.devicePixelRatio || 1;
   let best: Grabbable | null = null;
@@ -4789,6 +5400,26 @@ function pointAt(clientX: number, clientY: number): Grabbable | null {
     if (d <= bestDist) {
       bestDist = d;
       best = p;
+    }
+  }
+  return best;
+}
+
+/** The nearest grabbable point within GRAB_PX of a client position on a
+ *  surface panel, and in sight there. */
+function surfaceGrabAt(clientX: number, clientY: number): Grabbable | null {
+  const on = grabbable.length ? surfaceAt(clientX, clientY) : null;
+  if (!on) return null;
+  const rect = canvas.getBoundingClientRect();
+  let best: Grabbable | null = null;
+  let bestDist = GRAB_PX;
+  for (const g of grabbable) {
+    const p = surfacePoint(on.surface, g.x, g.y);
+    const at = p.every(isFinite) ? on.toCanvas(p) : null;
+    const d = at ? Math.hypot(at[0] - (clientX - rect.left), at[1] - (clientY - rect.top)) : Infinity;
+    if (d <= bestDist && on.seen(p)) {
+      bestDist = d;
+      best = g;
     }
   }
   return best;
@@ -4815,7 +5446,17 @@ function movePoint(pt: Grabbable, x: number, y: number) {
 
 // --- hover: intercepts, extrema and tracing ---
 
-let hover: { pt: SpecialPoint; color: string; panel: Panel } | null = null;
+/** What hovering shows: a point and its readout. `at` is where it is on
+ *  the canvas (CSS pixels from its corner) when not at x and y in a 2D
+ *  window — on a surface. */
+interface Hover {
+  pt: SpecialPoint;
+  color: string;
+  panel: Panel;
+  at?: [number, number];
+}
+
+let hover: Hover | null = null;
 
 const tooltip = document.createElement('div');
 tooltip.id = 'tooltip';
@@ -4906,8 +5547,41 @@ function computeSpecialPoints(eq: Equation) {
   const ylo = view.cy - halfH * 1.5;
   const yhi = view.cy + halfH * 1.5;
   const maps = panelMaps(panels[panelOf(eq)]);
-  const pts = maps ? mappedSpecialPoints(expr, maps, xlo, xhi, ylo, yhi) : specialPoints(expr, xlo, xhi, ylo, yhi);
+  const pts = maps?.plane
+    ? planeSpecialPoints(cls, maps.plane, halfW, halfH)
+    : maps
+      ? mappedSpecialPoints(expr, maps, xlo, xhi, ylo, yhi)
+      : specialPoints(expr, xlo, xhi, ylo, yhi);
   eq.spCache = { text: eq.text, env: hoverEnvKey(cls), xlo, xhi, ylo, yhi, pts };
+}
+
+/**
+ * A curve's intercepts and extrema through a plane map: found in x and y, as
+ * the row is written (Classified.world), over the part of the plane the
+ * window shows, and placed wherever the screen shows each one. They read in
+ * x and y as anywhere else.
+ */
+function planeSpecialPoints(cls: Classified, plane: PlaneMap, halfW: number, halfH: number): SpecialPoint[] {
+  const world = cls.world && compileCpu({ ...cls, object: cls.world });
+  if (world?.type !== 'implicit2d') return [];
+  const expr = cls.params.length
+    ? substVars(
+        world.equation,
+        Object.fromEntries(cls.params.map(p => [p, { kind: 'num', value: constEnv[p] ?? 0 } as Expr])),
+      )
+    : world.equation;
+  // The window the overlay carries through, so the way back is shared.
+  const box: ScreenBox = { lo: [view.cx - halfW, view.cy - halfH], hi: [view.cx + halfW, view.cy + halfH] };
+  // Over the padded window the cache stands for, as anywhere else.
+  const shown = planeWorldBox(plane, {
+    lo: [view.cx - 1.5 * halfW, view.cy - 1.5 * halfH],
+    hi: [view.cx + 1.5 * halfW, view.cy + 1.5 * halfH],
+  });
+  if (!shown) return [];
+  const inverse = planeInverse(plane, box);
+  return specialPoints(expr, shown.lo[0], shown.hi[0], shown.lo[1], shown.hi[1]).flatMap(p =>
+    inverse.all(p.x, p.y).map(([x, y]) => ({ ...p, x, y })),
+  );
 }
 
 /**
@@ -4952,34 +5626,56 @@ function tracerFor(eq: Equation): ReturnType<typeof curveTracer> {
   return eq.tracer.fn;
 }
 
-function setHover(next: { pt: SpecialPoint; color: string; panel: Panel } | null) {
+function setHover(next: Hover | null) {
   const same =
     hover?.pt === next?.pt ||
     (hover && next && hover.pt.x === next.pt.x && hover.pt.y === next.pt.y && hover.pt.lines[0] === next.pt.lines[0]);
-  if (same && hover?.color === next?.color && hover?.panel === next?.panel) return;
+  const still = hover?.at?.[0] === next?.at?.[0] && hover?.at?.[1] === next?.at?.[1];
+  if (same && still && hover?.color === next?.color && hover?.panel === next?.panel) return;
   hover = next;
   if (!hover) {
     tooltip.style.display = 'none';
   } else {
     const { rect, toSx, toSy } = screenMap();
-    tooltip.textContent = hover.pt.lines.join('\n');
+    const [sx, sy] = hover.at ?? [toSx(hover.pt.x), toSy(hover.pt.y)];
+    // The first line a muted heading: a span, as ::first-line's smaller
+    // font would size the whole box (Chromium) and clip a longer line.
+    const [head, ...rest] = hover.pt.lines;
+    const heading = document.createElement('span');
+    heading.className = 'tip-head';
+    heading.textContent = head;
+    tooltip.replaceChildren(heading, ...rest.map(line => `\n${line}`));
     tooltip.style.borderColor = hover.color;
-    tooltip.style.left = `${rect.left + toSx(hover.pt.x) + 14}px`;
-    tooltip.style.top = `${rect.top + toSy(hover.pt.y) + 12}px`;
+    tooltip.style.left = `${rect.left + sx + 14}px`;
+    tooltip.style.top = `${rect.top + sy + 12}px`;
     tooltip.style.display = 'block';
   }
   requestRender();
 }
 
+/** The camera a surface's hover was last read under (see followSurfaceHover). */
+let hoverCamera = '';
+const cameraKey = (c: Camera3D) => `${c.theta},${c.phi},${c.radius},${c.target}`;
+
+/** A surface's hover read again under a still pointer when the camera
+ *  moves (a spin, a tween), so it stays on what is under the pointer. */
+function followSurfaceHover() {
+  if (!lastHoverAt || pointers.size) return;
+  const p = panelAtClient(lastHoverAt.x, lastHoverAt.y);
+  if (p.mode !== '3d' || !panelSurface(p) || cameraKey(p.camera) === hoverCamera) return;
+  withPanel(p, () => updateHover(lastHoverAt!.x, lastHoverAt!.y));
+}
+
 function updateHover(clientX: number, clientY: number) {
   if (mode !== '2d') {
-    setHover(null);
+    hoverCamera = cameraKey(camera);
+    setHover(surfaceHover(clientX, clientY));
     return;
   }
   const { rect, toSx, toSy } = screenMap();
   const mx = clientX - rect.left;
   const my = clientY - rect.top;
-  let best: { pt: SpecialPoint; color: string; panel: Panel } | null = null;
+  let best: Hover | null = null;
   let bestD = 16; // CSS px pick radius
   const here = panels.indexOf(cur);
   for (const eq of equations) {
@@ -5015,7 +5711,9 @@ function updateHover(clientX: number, clientY: number) {
       const hit = tracerFor(eq)?.(wx, wy, sx, sy);
       if (hit && hit.dist < bestT) {
         bestT = hit.dist;
-        const lines = ['on curve', `x = ${read(maps?.x, hit.x, sx)}`, `y = ${read(maps?.y, hit.y, sy)}`];
+        const lines = maps?.plane
+          ? ['on curve', ...readPlane(maps.plane, hit.x, hit.y, sx, sy)]
+          : ['on curve', `x = ${read(maps?.x, hit.x, sx)}`, `y = ${read(maps?.y, hit.y, sy)}`];
         best = { pt: { x: hit.x, y: hit.y, lines }, color: cssColor(baseColor(eq)), panel: cur };
       }
     }
@@ -5023,12 +5721,140 @@ function updateHover(clientX: number, clientY: number) {
   setHover(best);
 }
 
+/** A traced screen point (X, Y) read in x and y through a plane map, each to
+ *  the pixel there (sx, sy screen units a pixel), from the map's Jacobian. */
+function readPlane(plane: PlaneMap, X: number, Y: number, sx: number, sy: number): string[] {
+  const [x, y] = planeToWorld(plane, X, Y);
+  const [px, py] = pixelSpan(plane, X, Y, sx, sy);
+  return [`x = ${fmtTraced(x, px || sx)}`, `y = ${fmtTraced(y, py || sx)}`];
+}
+
+/**
+ * The surface of the current panel (if it draws on one) under a client
+ * position: the ray from the eye through it met with the surface
+ * (lib/surface-pick.ts). With where a point in space lands on the canvas
+ * (CSS pixels from its corner), how much x and y change across a pixel at
+ * a point on the surface, and whether a point there is in sight.
+ */
+function surfaceAt(clientX: number, clientY: number) {
+  const surface = mode === '3d' ? panelSurface(cur) : undefined;
+  if (!surface) return null;
+  const rect = canvas.getBoundingClientRect();
+  const box = panelClientRect();
+  const { vp, invVp, eye } = cameraMatrices(camera, box.width / box.height);
+  // The pixel on the far plane, back into space.
+  const nx = ((clientX - box.left) / box.width) * 2 - 1;
+  const ny = 1 - ((clientY - box.top) / box.height) * 2;
+  const w = invVp[3] * nx + invVp[7] * ny + invVp[11] + invVp[15];
+  const dir = [0, 1, 2].map(k => (invVp[k] * nx + invVp[4 + k] * ny + invVp[8 + k] + invVp[12 + k]) / w - eye[k]);
+  const toCanvas = (p: readonly number[]): [number, number] | null => {
+    const at = projectToScreen(vp, p, box.width, box.height);
+    return at && [at[0] + box.left - rect.left, at[1] + box.top - rect.top];
+  };
+  return {
+    surface,
+    hit: raySurface(surface, eye, dir),
+    toCanvas,
+    units: (x: number, y: number) => surfacePixel(surface, x, y, toCanvas),
+    // Nothing of the surface nearer along the ray to it.
+    seen: (p: readonly number[]) => {
+      const h = raySurface(
+        surface,
+        eye,
+        p.map((v, k) => v - eye[k]),
+      );
+      return !h || h.t > 0.999;
+    },
+  };
+}
+
+/**
+ * Hovering a surface: a dot there reads its x and y (and name); near a
+ * painted curve, the point traced along it, as in 2D; anywhere else on the
+ * surface, x and y there. Each with the scalar and vector fields' values
+ * there.
+ */
+function surfaceHover(clientX: number, clientY: number): Hover | null {
+  const on = surfaceAt(clientX, clientY);
+  if (!on) return null;
+  const { surface, hit, toCanvas, units, seen } = on;
+  const rect = canvas.getBoundingClientRect();
+  const mx = clientX - rect.left;
+  const my = clientY - rect.top;
+  const read = (x: number, y: number) => {
+    const [ux, uy] = units(x, y);
+    return [`x = ${fmtTraced(x, ux)}`, `y = ${fmtTraced(y, uy)}`];
+  };
+  const near = (x: number, y: number) => {
+    const p = surfacePoint(surface, x, y);
+    const at = p.every(isFinite) ? toCanvas(p) : null;
+    return at ? { p, at, dist: Math.hypot(at[0] - mx, at[1] - my) } : null;
+  };
+  let best: Hover | null = null;
+  let bestD = 16; // CSS px, as in 2D
+  for (const d of cur.surfaceDots) {
+    const n = near(d.x, d.y);
+    if (!n || n.dist >= bestD || !seen(n.p)) continue;
+    bestD = n.dist;
+    const lines = [...(d.label ? [d.label] : []), ...read(d.x, d.y)];
+    best = { pt: { x: d.x, y: d.y, lines }, color: cssColor(d.color), panel: cur, at: n.at };
+  }
+  const here = panels.indexOf(cur);
+  const drawn = equations.filter(eq => panelOf(eq) === here && !eq.error && eq.cls && !eq.cls.needs3D);
+  const painted = drawn.filter(eq => surfaceMapping(eq.cls!.object) === 'paint');
+  // A painted curve near: traced in x and y to the pixel there. The trace
+  // may step off the surface's ranges (near a pole a pixel spans much of
+  // x), where the surface repeats but nothing is painted.
+  if (!best && hit) {
+    const [ux, uy] = units(hit.x, hit.y);
+    let bestT = 10; // CSS px: tighter than a dot, as in 2D
+    for (const eq of painted) {
+      const h = tracerFor(eq)?.(hit.x, hit.y, ux, uy);
+      const n = h && onSurface(surface, h.x, h.y) && near(h.x, h.y);
+      if (!h || !n || n.dist >= bestT) continue;
+      bestT = n.dist;
+      best = {
+        pt: { x: h.x, y: h.y, lines: ['on curve', ...read(h.x, h.y)] },
+        color: cssColor(baseColor(eq)),
+        panel: cur,
+        at: n.at,
+      };
+    }
+    best ??= {
+      pt: { x: hit.x, y: hit.y, lines: ['on surface', ...read(hit.x, hit.y)] },
+      color: cssColor(theme.axis),
+      panel: cur,
+      at: toCanvas(hit.point) ?? [mx, my],
+    };
+  }
+  if (!best) return null;
+  // Each scalar or vector field's value there, named by its row.
+  const env = { ...constEnv, t: graphTime(), x: best.pt.x, y: best.pt.y };
+  const short = (v: number) => valueReadout(v).replace(/^[=≈] /, '');
+  for (const eq of drawn) {
+    const plot = eq.cpu;
+    if (plot?.type !== 'scalar2d' && plot?.type !== 'vfield2d') continue;
+    if (!surfaceMapping(eq.cls!.object)) continue;
+    let value: string;
+    try {
+      value =
+        plot.type === 'scalar2d'
+          ? valueReadout(evaluate(plot.expr, env))
+          : `= (${plot.comps.map(c => short(evaluate(c, env))).join(', ')})`;
+    } catch {
+      continue;
+    }
+    const name = eq.text.length > 24 ? `${eq.text.slice(0, 23)}…` : eq.text;
+    best.pt.lines.push(`${name} ${value}`);
+  }
+  return best;
+}
+
 /** Marker for the hovered point, drawn over the axis labels. */
 function drawHoverMarker(dpr: number) {
-  if (!hover || mode !== '2d' || hover.panel !== cur) return;
+  if (!hover || hover.panel !== cur || (mode !== '2d' && !hover.at)) return;
   const { toSx, toSy } = screenMap();
-  const sx = toSx(hover.pt.x);
-  const sy = toSy(hover.pt.y);
+  const [sx, sy] = hover.at ?? [toSx(hover.pt.x), toSy(hover.pt.y)];
   const ctx = overlayCtx;
   ctx.save();
   ctx.scale(dpr, dpr);
@@ -5094,7 +5920,8 @@ canvas.addEventListener('pointerdown', e => {
     scaling = mode === '2d' && e.button === 0 && e.altKey;
     const hit = e.button === 0 && !e.shiftKey && !scaling ? pointAt(e.clientX, e.clientY) : null;
     if (hit) {
-      const [mx, my] = toMath(e.clientX, e.clientY);
+      // On a surface the point goes where the pointer meets it (surfaceAt).
+      const [mx, my] = mode === '3d' ? [hit.x, hit.y] : toMath(e.clientX, e.clientY);
       grab = { pt: hit, dx: hit.x - mx, dy: hit.y - my };
       setHot(hit.key);
       canvas.style.cursor = 'grabbing';
@@ -5150,6 +5977,16 @@ canvas.addEventListener('pointermove', e => {
     return;
   }
   if (grab) {
+    if (mode === '3d') {
+      // Along the surface, to the pixel there; held where the pointer leaves it.
+      const on = surfaceAt(e.clientX, e.clientY);
+      if (on?.hit) {
+        surfaceSnap = on.units(on.hit.x, on.hit.y);
+        movePoint(grab.pt, on.hit.x, on.hit.y);
+        surfaceSnap = null;
+      }
+      return;
+    }
     const [mx, my] = toMath(e.clientX, e.clientY);
     movePoint(grab.pt, mx + grab.dx, my + grab.dy);
     return;
@@ -5360,10 +6197,15 @@ function visiblePoints(eq: Equation): string[] {
   // Cached on the screen; a mapped panel's points read in x and y.
   const maps = panelMaps(panels[panelOf(eq)]);
   const world = (map: AxisMap | undefined, v: number) => (map ? toWorld(map, v) : v);
+  const read = (p: SpecialPoint): [number, number] =>
+    maps?.plane ? planeToWorld(maps.plane, p.x, p.y) : [world(maps?.x, p.x), world(maps?.y, p.y)];
   return (eq.spCache?.pts ?? [])
     .filter(p => Math.abs(p.x - view.cx) <= halfW && Math.abs(p.y - view.cy) <= halfH)
     .slice(0, MAX_VOICE_POINTS)
-    .map(p => `(${round6(world(maps?.x, p.x))}, ${round6(world(maps?.y, p.y))}): ${p.lines.join(', ')}`);
+    .map(p => {
+      const [x, y] = read(p);
+      return `(${round6(x)}, ${round6(y)}): ${p.lines.join(', ')}`;
+    });
 }
 
 /**
@@ -5477,6 +6319,7 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
             camera: 'sets the 3D camera',
             grid: "sets what draws behind its panel's plots",
             split: 'starts a new panel; the rows below it draw there',
+            surface: "sets the surface its panel's rows are drawn on, in 3D",
           }[eq.viewSpec.kind]
         : eq.dist
           ? row.kind
@@ -5486,11 +6329,12 @@ function rowStatus(eq: Equation, index: number, animated: ReadonlySet<string>): 
               (eq.cls.animated ? '; moves with time t' : '')
             : undefined;
   // A 3D scene leaves 2D-only plots out (render()), however valid they are.
+  const surface = panels[panelOf(eq)] && panelSurface(panels[panelOf(eq)]);
   const skipped =
     panels[panelOf(eq)]?.mode === '3d' &&
     !!eq.cls &&
     !eq.def &&
-    renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type));
+    renderMembers(eq).every(m => SKIPPED_IN_3D.has(m.cpu!.type) && !(surface && m.cls && surfaceMapping(m.cls.object)));
   if (skipped) {
     row.warning = 'not drawn: another row makes this graph 3D, and a 3D scene leaves out 2D-only plots like this one';
   }

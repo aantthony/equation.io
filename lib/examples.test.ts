@@ -38,8 +38,9 @@ describe('examples menu', () => {
       const rows = splitStatements(text)
         .map(s => s.trim())
         .filter(Boolean);
-      // An automaton's seed row `c_0[i] = …` draws through its rule row.
-      const seeds = scanSequences(rows).map(s => !!s?.seed);
+      // An automaton's seed row `c_0[i] = …` draws through its rule row, and
+      // a stack's `s_0 = ()` through its recurrence.
+      const seeds = scanSequences(rows).map(s => !!s?.seed || !!s?.emptyTuple);
       const problems = analyzeRows(rows).rows.flatMap((r, i) =>
         r.error
           ? [`${r.text}: ${r.error}`]
@@ -114,7 +115,13 @@ describe('examples menu', () => {
 
   it('finds tags by word, and exactly with #', () => {
     const labels = (q: string) => searchExamples(q).map(e => e.label);
-    expect(labels('#knot')).toEqual(['trefoil', 'torus knot (2,5)', 'figure eight', 'Frenet frame on a trefoil']);
+    expect(labels('#knot')).toEqual([
+      'torus knot as a line (slide p, q)',
+      'trefoil',
+      'torus knot (2,5)',
+      'figure eight',
+      'Frenet frame on a trefoil',
+    ]);
     // `knot` alone also finds the category's name in the rows' category.
     expect(labels('knot')).toContain('helix');
     expect(labels('#biology')).toEqual(['logistic growth', 'Lotka–Volterra', 'SIR epidemic']);

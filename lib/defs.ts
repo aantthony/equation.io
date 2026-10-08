@@ -84,6 +84,7 @@ import {
   namedAxes,
   plainFnName,
   reducesMembers,
+  tupleAxis,
   withAxes,
 } from './list.ts';
 import type { Mat } from './mat.ts';
@@ -94,6 +95,7 @@ import { isComplexValued } from './complex.ts';
 import { SPLIT_NODE_BUDGET, realValue } from './complex-parts.ts';
 import { countNodes, exceedsNodes } from './size.ts';
 import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
+import { type Params, gaussianOf, meanCurvatureOf } from './surface-geometry.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -718,7 +720,7 @@ export const pointComponentNames = (defs: ValueDefinitions): Set<string> => {
  * graph that says `open(f) = f` keeps its function; only the quoted-file-name
  * shape belongs to the data syntax.
  */
-export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi', 'tau']);
+export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi']);
 
 const FN_RE = new RegExp(
   String.raw`^\s*(${NAME_SRC})\s*\(\s*(${NAME_SRC}(?:\s*,\s*${NAME_SRC})*)\s*\)\s*=(?!=)([\s\S]+)$`,
@@ -872,21 +874,21 @@ export function takenBinder(text: string): string | null {
     ? 'names starting u_ are'
     : FUNCTIONS.has(n)
       ? `${m[1]} is a built-in function`
-      : 'x, y, z, t, u, v, w, d, e, i, pi and tau are';
+      : 'x, y, z, t, u, v, w, d, e, i and pi are';
   return `${m[1]} is taken by the language, so it cannot be drawn: ${why}. Draw with another name, like p ∈ A.`;
 }
 
 /**
  * The name a row tried to define when that name is taken by the language:
  * `e = 0.6` or `d(x) = …` look like a slider or a function but are not one,
- * since `d` starts `d/dx`, `e`, `pi` and `tau` are constants and `i` is the
+ * since `d` starts `d/dx`, `e` and `pi` are constants and `i` is the
  * imaginary unit. Such a row still means what it says (`e = 2` is a false
  * claim, and says so); this is only for explaining why no slider appeared.
  */
-export function takenDefinitionName(text: string): 'd' | 'e' | 'pi' | 'tau' | 'i' | null {
+export function takenDefinitionName(text: string): 'd' | 'e' | 'pi' | 'i' | null {
   const m = FN_RE.exec(text) ?? CONST_RE.exec(text);
   const n = m && canonicalName(m[1]);
-  return n === 'd' || n === 'e' || n === 'pi' || n === 'tau' || n === 'i' ? n : null;
+  return n === 'd' || n === 'e' || n === 'pi' || n === 'i' ? n : null;
 }
 
 /** Why a name from takenDefinitionName (other than `d`) names no value. */
@@ -898,7 +900,9 @@ export function takenNameHint(name: string): string {
 
 export type GetFn = (name: string) => FnDef | undefined;
 
-const dVarName = (n: Expr): string | null => (n.kind === 'var' && /^d[A-Za-z]$/.test(n.name) ? n.name.slice(1) : null);
+/** A differential's name: d and one letter, Latin or Greek (dx, dθ, dτ). */
+const D_VAR = new RegExp(`^d[A-Za-z${GREEK_NAME_CHARS}]$`);
+const dVarName = (n: Expr): string | null => (n.kind === 'var' && D_VAR.test(n.name) ? n.name.slice(1) : null);
 
 /** Match `d` or `d^k` (the numerator of a Leibniz derivative). */
 function dOrder(n: Expr): number | null {
@@ -1057,6 +1061,9 @@ export interface ResolveOpts {
   /** A sequence term by name (a_3, a_k) or index (a_[…]). `open` are the
    *  names still unbound here — a sequence row's own index. */
   sequenceTerm?: (name: string, index: Expr | undefined, open: ReadonlySet<string> | undefined) => Expr | null;
+  /** A tuple-valued recurrence's terms, as far as its run goes (lib/seq.ts);
+   *  null for any other name. */
+  tupleRun?: (name: string) => import('./seq.ts').TupleRun | null;
   /** Definition values cannot contain row-only motion trails. */
   inDefinition?: boolean;
   /** Numeric constant values, used to evaluate Σ/Π bounds at expansion time. */
@@ -1133,6 +1140,12 @@ export interface ResolveOpts {
    * (lib/measure.ts).
    */
   params?: ReadonlySet<string>;
+  /**
+   * The surface a panel's rows are drawn on (an on(…) row, lib/surface-map.ts):
+   * there gaussian(x, y) and meancurvature(x, y) read it, in the panel's x
+   * and y.
+   */
+  surface?: { readonly embed: readonly [Expr, Expr, Expr] };
 }
 
 /**
@@ -1489,6 +1502,129 @@ function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   if (name === 'frame') return frameOf(r, d, u0);
   const along = name === 'curvature' ? curvatureOf(r, d) : torsionOf(r, d);
   return u0 ? substVars(along, { u: u0 }) : over ? substVars(along, { u: over }) : along;
+}
+
+/** The operators on a parametric surface in u and v (lib/surface-geometry.ts). */
+const SURFACE_OPS: ReadonlySet<string> = new Set(['gaussian', 'meancurvature']);
+const SURFACE_PARAMS: ReadonlySet<string> = new Set(['u', 'v', ...SPACE]);
+
+/** Whether a surface operator's first argument names or writes a surface,
+ *  rather than a point of the panel's surface. */
+function surfaceLike(arg: Expr, ctx: Ctx): boolean {
+  if (arg.kind === 'vec') return arg.items.length === 3;
+  if (arg.kind !== 'var') return false;
+  const fn = ctx.getFn(arg.name);
+  if (fn) return fn.params.length === 2;
+  const { opts } = ctx;
+  return (
+    !!opts.documentNames?.has(arg.name) &&
+    (opts.comps?.(arg.name)?.length ?? 0) !== 2 &&
+    opts.consts?.[arg.name] === undefined &&
+    !opts.isList?.(arg.name)
+  );
+}
+
+/**
+ * What a surface operator acts on, as its components in u and v: a tuple, a
+ * named surface (S = (u, v, u v)) or a function of two parameters, called at
+ * u and v. A surface over intervals (`u = interval(0, 2pi)` above) is read
+ * over their values, written as u and v; `over` holds them, to put back
+ * where the result is a function on the surface.
+ */
+export function surfaceOperand(
+  name: string,
+  arg: Expr,
+  getFn: GetFn,
+  opts: ResolveOpts,
+): { items: [Expr, Expr, Expr]; over: { u?: Expr; v?: Expr } } {
+  const usage = `${name} takes a parametric surface in u and v, like ${name}(S) with S = (u, v, u^2 - v^2).`;
+  const U: Expr = { kind: 'var', name: 'u' };
+  const V: Expr = { kind: 'var', name: 'v' };
+  const uInterval = opts.interval?.('u');
+  const vInterval = opts.interval?.('v');
+  let r: Expr = arg;
+  if (arg.kind === 'var') {
+    const fn = getFn(arg.name);
+    if (fn) {
+      if (fn.params.length !== 2 || fn.recursive) throw new Error(usage);
+      r = substVars(fn.body, { [fn.params[0]]: uInterval ?? U, [fn.params[1]]: vInterval ?? V });
+    }
+  }
+  if (opts.comps) r = lowerGeom(r, opts.comps, () => null, opts.isList);
+  r = throughFields(r, opts, SURFACE_PARAMS);
+  if (r.kind === 'var' && arg.kind === 'var' && !opts.documentNames?.has(arg.name))
+    throw new Error(`${name}: ${arg.name} is not a surface — define one first, like ${arg.name} = (u, v, u^2 - v^2).`);
+  const keys = { u: uInterval && exprKey(uInterval), v: vInterval && exprKey(vInterval) };
+  const hidden = intervalsIn(r);
+  const over: { u?: Expr; v?: Expr } = {};
+  for (const h of hidden) {
+    if (h.key === keys.u) over.u = h.node;
+    else if (h.key === keys.v) over.v = h.node;
+    else throw new Error(`${name} reads a surface over u and v; this one sweeps another interval. ${usage}`);
+  }
+  if (hidden.length) r = replaceIntervals(r, h => (h.key === keys.u ? U : V));
+  if (r.kind !== 'vec' || r.items.length !== 3) throw new Error(usage);
+  const vars = freeVars(r);
+  if (!vars.has('u') || !vars.has('v'))
+    throw new Error(`${name} needs a surface, which moves with both u and v. ${usage}`);
+  if ([...SPACE].some(n => vars.has(n))) throw new Error(usage);
+  return { items: r.items as [Expr, Expr, Expr], over };
+}
+
+/** A point's two coordinates from a surface operator's trailing arguments:
+ *  (u0, v0) as one tuple or a named point, or as two numbers. */
+function pointArgs(name: string, args: readonly Expr[], ctx: Ctx, example: string): [Expr, Expr] {
+  if (args.length === 2 && args.every(a => a.kind !== 'vec')) return [args[0], args[1]];
+  if (args.length === 1) {
+    const [p] = args;
+    if (p.kind === 'vec' && p.items.length === 2) return [p.items[0], p.items[1]];
+    const comps = p.kind === 'var' ? ctx.opts.comps?.(p.name) : null;
+    if (comps?.length === 2) return comps.map(c => ({ kind: 'var', name: c }) as Expr) as [Expr, Expr];
+  }
+  throw new Error(`${name}: where on the surface is two numbers, a point or a tuple: ${example}.`);
+}
+
+/**
+ * gaussian(S) and meancurvature(S): K and H of the surface, functions of u
+ * and v, or read at a point of it, gaussian(S, u0, v0). On a panel drawn on
+ * a surface (on(…)) the surface is the panel's, in its x and y:
+ * gaussian(x, y) is K over it, a field the panel paints on the surface.
+ */
+function surfaceGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
+  const panel = ctx.opts.surface;
+  const onPanel = !!panel && args.length > 0 && !surfaceLike(args[0], ctx);
+  const example = onPanel ? `${name}(x, y) or ${name}(P)` : `${name}(S) or ${name}(S, 0.5, 0.25)`;
+  if (!args.length) throw new Error(`${name} takes a surface, and optionally where on it: ${example}.`);
+  let r: readonly Expr[];
+  let params: Params;
+  let point: [Expr, Expr] | null;
+  let over: { u?: Expr; v?: Expr } = {};
+  if (onPanel) {
+    r = panel.embed;
+    params = ['x', 'y'];
+    point = pointArgs(name, args, ctx, example);
+  } else {
+    if (args.length > 3) throw new Error(`${name} takes a surface, and optionally where on it: ${example}.`);
+    // gaussian(x, y) or gaussian((1, 2)): a point of a surface the panel lacks.
+    const named = args[0].kind === 'var' && (!!ctx.getFn(args[0].name) || !!ctx.opts.documentNames?.has(args[0].name));
+    const pointOnly =
+      (args.length === 2 && args.every(a => a.kind !== 'vec') && !named) ||
+      (args[0].kind === 'vec' && args[0].items.length === 2);
+    if (!panel && pointOnly)
+      throw new Error(
+        `${name}(x, y) reads the surface of its panel's on(…) row, and this panel has none: write ${name}(S) with S = (u, v, u^2 - v^2).`,
+      );
+    ({ items: r, over } = surfaceOperand(name, args[0], ctx.getFn, ctx.opts));
+    params = ['u', 'v'];
+    point = args.length > 1 ? pointArgs(name, args.slice(1), ctx, example) : null;
+  }
+  const d = (e: Expr, v: string): Expr => applyDiff(e, v, 1, ctx.opts, ctx.getFn);
+  const field = name === 'gaussian' ? gaussianOf(r, d, params) : meanCurvatureOf(r, d, params);
+  if (point) return substVars(field, { [params[0]]: point[0], [params[1]]: point[1] });
+  const back: Record<string, Expr> = {};
+  if (over.u) back.u = over.u;
+  if (over.v) back.v = over.v;
+  return Object.keys(back).length ? substVars(field, back) : field;
 }
 
 interface StripDx {
@@ -2242,8 +2378,143 @@ function coordParams(
  * Inline user-function calls, resolve d/dx derivative notation, and expand
  * Σ/Π sums and ∫ integrals (post-order).
  */
+/** A name with a subscript, a_3 or s_n: the only kind a term can have. */
+const SUBSCRIPTED = /^[^_]+_[^_]/;
+
+/** A tuple read as a stack (docs/discrete.md, pushdown automata). */
+export const STACK_FNS: ReadonlySet<string> = new Set(['push', 'pop', 'top']);
+
+/** The numbers of a tuple written out: a tuple of numbers, the empty tuple,
+ *  or one number (a 1-tuple is its element). Null for anything else. */
+export function literalTuple(e: Expr): number[] | null {
+  if (e.kind === 'num') return [e.value];
+  if ((e.kind === 'vec' || (e.kind === 'list' && isTuple(e))) && e.items.every(x => x.kind === 'num'))
+    return e.items.map(x => (x as Expr & { kind: 'num' }).value);
+  return null;
+}
+
+/** A tuple as an expression, as the document writes one: one number is a
+ *  number, two or three a point, any other length a tuple. */
+export function tupleExpr(values: readonly number[]): Expr {
+  if (values.length === 1) return { kind: 'num', value: values[0] };
+  const items = values.map((value): Expr => ({ kind: 'num', value }));
+  return values.length === 2 || values.length === 3
+    ? { kind: 'vec', items }
+    : withAxes({ kind: 'list', items }, [tupleAxis(values.length)]);
+}
+
+/**
+ * push(s, a, …), pop(s), top(s) on a tuple of numbers, computed now; null
+ * while s is not one yet (a parameter, or a step of a tuple-valued
+ * recurrence that lib/seq.ts runs). Off the end of a stack is out of range,
+ * the way a run off the end of its input is.
+ */
+export function stackCall(name: string, args: readonly Expr[]): Expr | null {
+  if (!args.length) throw new Error(`${name} takes a tuple: ${name === 'push' ? 'push(s, a)' : `${name}(s)`}.`);
+  const s = literalTuple(args[0]);
+  if (name !== 'push' && args.length !== 1) throw new Error(`${name} takes one tuple: ${name}(s).`);
+  if (name === 'push') {
+    const rest = args.slice(1).map(literalTuple);
+    if (!s || rest.some(r => !r)) return null;
+    return tupleExpr([...s, ...rest.flatMap(r => r!)]);
+  }
+  // The empty tuple's top is not an error yet: the case that reads it may
+  // not be the one that holds (lib/seq.ts runs only that one).
+  if (!s?.length) return null;
+  return name === 'top' ? { kind: 'num', value: s[s.length - 1] } : tupleExpr(s.slice(0, -1));
+}
+
 export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr {
   return rx(e, { getFn, opts, terms: 0 });
+}
+
+/** What a map's row knows of its document: the names it defines, its
+ *  functions and lists (which a map's Σ/Π bound cannot use: it is parsed
+ *  without them), and where to note a slider used as a bound (so it steps in
+ *  whole numbers). `budget` counts
+ *  the terms written out so far, shared by a row's maps and components
+ *  under one limit as a row's tuple is. */
+export type MapDoc = Pick<ResolveOpts, 'documentNames' | 'boundConsts' | 'isList' | 'getList'> & {
+  fnNames?: ReadonlySet<string>;
+  budget?: { terms: number };
+};
+
+/**
+ * A map's expression — a view's axis or plane map, an on(…) surface — with
+ * its Σ/Π written out term by term, so the GPU and the CPU both see plain
+ * arithmetic. Only the sums are expanded: the rest stays as written (a d/dx
+ * in a map is refused inside a sum or out). Each sum's bounds go through
+ * expandSum as a row's do, so they read the sliders in `consts` under the
+ * same limits, counted across all of `e` and doc.budget; a bound in `coords`, the map's own coordinates, is refused,
+ * as they change from point to point. A bare function name (`cos X`) is
+ * caught here too, where it would otherwise read as a name with no value.
+ */
+export function expandMapSums(
+  e: Expr,
+  coords: readonly string[],
+  consts: Record<string, number>,
+  doc: MapDoc = {},
+): Expr {
+  const budget = doc.budget ?? { terms: 0 };
+  const expand = (call: SumCall, body: Expr): Expr => {
+    const sym = call.name === 'sum' ? 'Σ' : 'Π';
+    for (const b of call.args.slice(1, 3))
+      for (const v of freeVars(b))
+        if (coords.includes(v))
+          throw new Error(`${sym} needs bounds that are fixed numbers or sliders; ${v} changes across the map.`);
+        else if (doc.fnNames?.has(v))
+          throw new Error(`${sym} in a map takes numbers and sliders as bounds; it cannot call ${v} yet.`);
+    // Expanded with a marker for a body, which says which indices the bounds
+    // take; the body itself is written in at each, unresolved.
+    const idx = call.args[0];
+    const marker = (k: Expr): Expr => ({ kind: 'call', name: 'floor', args: [k] });
+    const marked = resolveExpr({ ...call, args: [...call.args.slice(0, 3), marker(idx)] }, () => undefined, {
+      consts,
+      boundConsts: doc.boundConsts,
+      isList: doc.isList,
+      getList: doc.getList,
+    });
+    const at: number[] = [];
+    const read = (m: Expr): void => {
+      if (m.kind === 'call' && m.name === 'floor' && m.args[0].kind === 'num') at.push(m.args[0].value);
+      else if (m.kind === 'bin' && m.op === (call.name === 'sum' ? '+' : '*')) {
+        read(m.a);
+        read(m.b);
+      } else if (!(m.kind === 'num' && at.length === 0))
+        // A list bound makes a family of sums, one per element.
+        throw new Error(`${sym} in a map needs each bound to be one number, not a list.`);
+    };
+    read(marked);
+    budget.terms += at.length;
+    if (budget.terms > SUM_MAX_TOTAL)
+      throw new Error(`Nested ${sym} expand to too many terms (limit ${SUM_MAX_TOTAL} total).`);
+    // expandSum has refused any index but a name.
+    const name = (idx as Expr & { kind: 'var' }).name;
+    const combine = call.name === 'sum' ? add : mul;
+    let acc: Expr | null = null;
+    for (const k of at) {
+      const term = foldNums(walk(substIdx(body, name, num(k))));
+      acc = acc === null ? term : combine(acc, term);
+    }
+    return acc ?? num(call.name === 'sum' ? 0 : 1);
+  };
+  const walk = (e: Expr): Expr => {
+    if (e.kind === 'call' && (e.name === 'sum' || e.name === 'prod'))
+      // Without a body, resolving says so as it does in a row.
+      return e.args.length === 4 ? expand(e as SumCall, e.args[3]) : resolveExpr(e, () => undefined);
+    // `2 sum[n=1..3] Y^n/n`: the header binds the rest of its product.
+    const chain = e.kind === 'bin' ? splitSumChain(e) : null;
+    if (chain && isSumHeader(chain.header)) {
+      const sum = expand(chain.header, chain.body);
+      return chain.coeff ? { kind: 'bin', op: chain.op, a: walk(chain.coeff), b: sum } : sum;
+    }
+    return mapChildren(e, walk);
+  };
+  const out = walk(e);
+  for (const v of freeVars(out))
+    if (builtinFn(v) === v && !(v in consts) && !doc.documentNames?.has(v))
+      throw new Error(`${v} is a function — write it with parentheses, e.g. ${v}(${coords[0]}).`);
+  return out;
 }
 
 /**
@@ -2362,6 +2633,26 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (e.args[0]?.kind === 'var') {
         const term = ctx.opts.sequenceTerm?.(e.args[0].name, e.args[1], ctx.opts.openVars);
         if (term) return term;
+        // s_3[2]: position 2 of a tuple-valued recurrence's term (lib/seq.ts).
+        // Only a subscripted name can be a term: D[n + 1] asks no more.
+        const whole = SUBSCRIPTED.test(e.args[0].name)
+          ? ctx.opts.sequenceTerm?.(e.args[0].name, undefined, ctx.opts.openVars)
+          : null;
+        const tuple = whole && literalTuple(whole);
+        if (tuple) {
+          const at = rx(e.args[1], ctx);
+          const consts = ctx.opts.consts ?? {};
+          const vars = [...freeVars(at)];
+          if (at.kind !== 'list' && at.kind !== 'range' && vars.every(v => consts[v] !== undefined)) {
+            for (const v of vars) ctx.opts.boundConsts?.add(v);
+            const k = evaluate(at, consts);
+            if (!Number.isInteger(k) || k < 1 || k > tuple.length)
+              throw new Error(
+                `${e.args[0].name}[${k}] is out of range: ${e.args[0].name} has ${tuple.length} element${tuple.length === 1 ? '' : 's'}.`,
+              );
+            return { kind: 'num', value: tuple[k - 1] };
+          }
+        }
       }
       return mapChildren(e, x => rx(x, ctx));
     }
@@ -2392,6 +2683,19 @@ function rx(e: Expr, ctx: Ctx): Expr {
       }
       // A reduction over x, u, an interval or a filter is an integral against
       // its measure (docs/multisets.md §5); over a list it lowers later.
+      // A tuple-valued recurrence's term counts its elements (lib/seq.ts),
+      // the empty tuple among them, which no list or point can be.
+      if (e.name === 'count' && e.args.length === 1) {
+        const arg = e.args[0];
+        const term =
+          arg.kind === 'var'
+            ? ctx.opts.sequenceTerm?.(arg.name, undefined, ctx.opts.openVars)
+            : arg.kind === 'index' && arg.args[0].kind === 'var'
+              ? ctx.opts.sequenceTerm?.(arg.args[0].name, arg.args[1], ctx.opts.openVars)
+              : null;
+        const tuple = term && literalTuple(term);
+        if (tuple) return { kind: 'num', value: tuple.length };
+      }
       if (isReductionCall(e)) {
         const over = reduceOverSet(e.name, e.args[0], {
           resolve: x => rx(x, ctx),
@@ -2514,8 +2818,14 @@ function rx(e: Expr, ctx: Ctx): Expr {
         // another function's body they wait for that function's call.
         return ctx.opts.params ? inlined : writeConditions(inlined, namedConditionOf(ctx));
       }
+      if (STACK_FNS.has(e.name)) return stackCall(e.name, args) ?? { kind: 'call', name: e.name, args };
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
+      if (SURFACE_OPS.has(e.name)) return surfaceGeometry(e.name, args, ctx);
+      if (e.name === 'geodesic')
+        throw new Error(
+          'geodesic(S, (u0, v0), (du, dv)) draws a curve, so it must be the whole row — on a panel drawn on a surface, geodesic(P, (dx, dy)).',
+        );
       if (e.name === 'fourier' || e.name === 'reconstruct') {
         const params = ctx.opts.params;
         const opts: ResolveOpts = params?.size
@@ -2790,10 +3100,16 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
    * formulas. (See frameConstant for what stays as it is.)
    */
   let hidden = 0;
-  const frameName = (v: string) => v === 't' || defs.consts.has(v) || derivs.has(v);
+  const frameName = (v: string) => defs.consts.has(v) || derivs.has(v);
+  // Every hidden name made, so a lowering that fails can take back its own.
+  const made: string[] = [];
+  const dropMade = (since: number) => {
+    for (const name of made.splice(since)) defs.consts.delete(name);
+  };
   const bindHidden = (owner: string, e: Expr) => {
     const name = `${owner}#${hidden++}`;
     defs.consts.set(name, e);
+    made.push(name);
     return name;
   };
   const hoist = frameHoister(frameName, bindHidden);
@@ -2806,6 +3122,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
   const inits = new Map<string, Expr>();
 
   for (const d of raw) {
+    const madeBefore = made.length;
     try {
       if (d.kind === 'regression') {
         const lhsSource = parseExpr(d.lhs, fnNames, indexNamesOf(defs), valueNames);
@@ -2974,6 +3291,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
           continue;
         }
         let e: Expr;
+        const lowering = made.length;
         try {
           if (ofPoints) throw new Error('points');
           // (A slerp's intermediates become hidden constants of this name too.)
@@ -2996,6 +3314,8 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
               ),
           );
         } catch {
+          // (Nothing the failed attempt hoisted is read.)
+          dropMade(lowering);
           // `N = line(P, A)` over a list names the lines, as join does.
           const named = resolved.kind === 'call' && resolved.name === 'line' ? { ...resolved, name: 'join' } : resolved;
           e = lowerObjects(named, defs, ropts, true);
@@ -3119,6 +3439,7 @@ export function buildDefs(raw: Definition[], tables?: TableSource, sequences: Se
       }
     } catch (e) {
       errors.set(defKey(d), msg(e));
+      dropMade(madeBefore);
       if (e instanceof MissingDataError) {
         needsFile.add(defKey(d));
         // The name still means something — a value whose file is elsewhere.
@@ -4080,7 +4401,7 @@ export const isHiddenName = (name: string): boolean => name.includes('#');
 
 /**
  * Whether a coefficient can be a constant of its own, computed once per
- * frame: its free variables are all constants, states or t (`isConst`) and it
+ * frame: its free variables are all t or constants and states (`isConst`) and it
  * holds no list, data column or interval. A number or a single name stays as
  * it is (a literal 0 is a structural zero kinds depend on), as does a
  * coefficient of numbers alone (-0.2 folds where it is: nothing to share).
@@ -4096,7 +4417,7 @@ export function frameConstant(e: Expr, isConst: (name: string) => boolean): bool
   if (!plain) return false;
   const names = freeVars(e);
   if (!names.size) return false;
-  for (const v of names) if (!isConst(v)) return false;
+  for (const v of names) if (v !== 't' && !isConst(v)) return false;
   return true;
 }
 
@@ -4116,13 +4437,21 @@ export function frameHoister(
   bind: (owner: string, e: Expr) => string,
   minNodes = 0,
 ): (owner: string, e: Expr) => Expr {
-  const seen = new Map<string, string>();
+  const byKey = new Map<string, string>();
+  // The same entry object comes back for every vertex a map moves: met
+  // again, it costs no walk.
+  const byNode = new WeakMap<Expr, Expr>();
   return (owner, e) => {
+    const met = byNode.get(e);
+    // (A name taken back since — see dropMade in buildDefs — is made again.)
+    if (met?.kind === 'var' && isConst(met.name)) return met;
     if (!exceedsNodes(e, minNodes) || !frameConstant(e, isConst)) return e;
     const key = exprKey(e);
-    let name = seen.get(key);
-    if (name === undefined) seen.set(key, (name = bind(owner, e)));
-    return { kind: 'var', name };
+    let name = byKey.get(key);
+    if (name === undefined || !isConst(name)) byKey.set(key, (name = bind(owner, e)));
+    const out: Expr = { kind: 'var', name };
+    byNode.set(e, out);
+    return out;
   };
 }
 

@@ -17,6 +17,9 @@
 import { evaluate, parseExpr } from './expr.ts';
 import { type GridRowSpec, type SplitSpec, parseDividerRow, parseGridRow } from './panels.ts';
 import { type AxisMaps, SCREEN, parseAxisMap, screenWindowOk, toWorld, windowToScreen } from './axis-map.ts';
+import { parsePlaneMap } from './plane-map.ts';
+import { type SurfaceSpec, parseSurfaceMap } from './surface-map.ts';
+import type { MapDoc } from './defs.ts';
 
 export interface View2DSpec {
   kind: 'view';
@@ -59,9 +62,9 @@ export interface Camera3DSpec {
 
 /** Viewport rows: the framing rows, plus the split-view rows of lib/panels.ts
  *  (a `---` divider, a `grid(…)`), which are document structure the same way. */
-export type ViewSpec = View2DSpec | Camera3DSpec | SplitSpec | GridRowSpec;
+export type ViewSpec = View2DSpec | Camera3DSpec | SplitSpec | GridRowSpec | SurfaceSpec;
 
-const HEAD_RE = /^\s*(view|camera)\s*\(([\s\S]*)\)\s*$/;
+const HEAD_RE = /^\s*(view|camera|on)\s*\(([\s\S]*)\)\s*$/;
 
 /** Split on top-level commas only, so a (tx, ty, tz) target stays one arg. */
 function splitArgs(s: string): string[] {
@@ -117,12 +120,64 @@ function num(src: string, env: Record<string, number>, what: string): number {
   return numExpr(parsed, env, what);
 }
 
+/** `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)`: the surface the panel's
+ *  2D rows are drawn on (lib/surface-map.ts). */
+function parseSurfaceRow(args: string[], env: Record<string, number>, doc: MapDoc): SurfaceSpec {
+  const usage =
+    'Expected on((X, Y, Z) = (cos(y) cos(x), cos(y) sin(x), sin(y)), x = -pi..pi, y = -pi/2..pi/2): the surface the panel’s rows are drawn on, and the x and y it spans.';
+  let src: string | null = null;
+  const ranges: Partial<Record<'x' | 'y', [number, number]>> = {};
+  for (const arg of args) {
+    const embed = /^\(\s*X\s*,\s*Y\s*,\s*Z\s*\)\s*=\s*([\s\S]+)$/.exec(arg);
+    if (embed) {
+      if (src !== null) throw new Error('on(…) gives the surface twice.');
+      src = embed[1];
+      continue;
+    }
+    const named = /^([xy])\s*=\s*([\s\S]+)$/.exec(arg);
+    const range = named && splitRange(named[2]);
+    if (!named || !range) throw new Error(usage);
+    const axis = named[1] as 'x' | 'y';
+    if (ranges[axis]) throw new Error(`on(…) sets ${axis} twice.`);
+    const lo = num(range[0], env, `${axis} lower bound`);
+    const hi = num(range[1], env, `${axis} upper bound`);
+    if (lo >= hi) throw new Error(`The ${axis} range needs lo < hi (got ${lo}..${hi}).`);
+    ranges[axis] = [lo, hi];
+  }
+  if (src === null || !ranges.x || !ranges.y) throw new Error(usage);
+  return { kind: 'surface', surface: parseSurfaceMap(src, ranges.x, ranges.y, env, doc) };
+}
+
+/** A view row with a plane map: its window is the screen's, X and Y. */
+function planeView(spec: View2DSpec, maps: AxisMaps, ranges: Array<[string, [number, number]]>): View2DSpec {
+  if (maps.x || maps.y)
+    throw new Error('A view maps (x, y) together or x and y one at a time, not both: drop the x = … or y = … map.');
+  if (spec.x || spec.y)
+    throw new Error(
+      'With (x, y) mapped, the window is the screen’s, which x and y need not frame: give X = lo..hi, Y = lo..hi.',
+    );
+  for (const [axis, range] of ranges) {
+    if (axis !== 'X' && axis !== 'Y') throw new Error(`A view mapping (x, y) is framed by X and Y, not ${axis}.`);
+    spec[axis === 'X' ? 'x' : 'y'] = range;
+  }
+  // A map alone frames the screen around its origin.
+  if (!spec.x && !spec.y)
+    [spec.x, spec.y] = [
+      [-5, 5],
+      [-5, 5],
+    ];
+  return { ...spec, maps: { plane: maps.plane } };
+}
+
 /**
  * Parse a viewport row. Returns null when the text is not one (so ordinary
  * rows fall through to the expression parser); throws a row-friendly error
- * when it is one but malformed. `env` supplies constant values (t = 0).
+ * when it is one but malformed. `env` supplies constant values (t = 0); `doc`
+ * what a map's Σ bounds and names need of the document (lib/defs.ts MapDoc).
  */
-export function parseViewRow(text: string, env: Record<string, number>): ViewSpec | null {
+export function parseViewRow(text: string, env: Record<string, number>, doc: MapDoc = {}): ViewSpec | null {
+  // The row's maps write out their sums under one limit, as a row's tuple does.
+  doc = { ...doc, budget: { terms: 0 } };
   const split = parseDividerRow(text);
   if (split) return split;
   const grid = parseGridRow(text);
@@ -134,6 +189,11 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
   const lockAt = args.findIndex(a => /^locked$/i.test(a));
   const locked = lockAt >= 0;
   if (locked) args.splice(lockAt, 1);
+  if (m[1] === 'on') {
+    // The camera frames the panel: lock it there.
+    if (locked) throw new Error('on(…) takes no locked: put it on the panel’s camera(…) row.');
+    return parseSurfaceRow(args, env, doc);
+  }
   if (m[1] === 'view') {
     const usage = 'Expected view(x = lo..hi, y = lo..hi, ratio = 1, locked) — either axis alone works.';
     const spec: View2DSpec = { kind: 'view' };
@@ -142,6 +202,13 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
     const maps: AxisMaps = {};
     const lattice: Array<[string, [number, number]]> = [];
     for (const arg of args) {
+      // `(x, y) = (Y cos X, Y sin X)`: both coordinates from the screen at once.
+      const plane = /^\(\s*x\s*,\s*y\s*\)\s*=\s*([\s\S]+)$/.exec(arg);
+      if (plane) {
+        if (maps.plane) throw new Error('view(...) maps (x, y) twice.');
+        maps.plane = parsePlaneMap(plane[1], env, doc);
+        continue;
+      }
       const named = /^([A-Za-z]\w*)\s*=\s*([\s\S]+)$/.exec(arg);
       if (!named) throw new Error(usage);
       const axis = named[1];
@@ -155,7 +222,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       // `x = 10^X`: no range, and the screen's X, so a map from the screen to x.
       if (!range && (axis === 'x' || axis === 'y') && new RegExp(`\\b${SCREEN[axis]}\\b`).test(named[2])) {
         if (maps[axis]) throw new Error(`view(...) maps ${axis} twice.`);
-        maps[axis] = parseAxisMap(axis, named[2], env);
+        maps[axis] = parseAxisMap(axis, named[2], env, doc);
         continue;
       }
       if (spec[axis as 'x'] || lattice.some(([a]) => a === axis)) throw new Error(`view(...) sets ${axis} twice.`);
@@ -167,6 +234,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       if (axis === 'x' || axis === 'y') spec[axis] = [lo, hi];
       else lattice.push([axis, [lo, hi]]);
     }
+    if (maps.plane) return planeView(spec, maps, lattice);
     if (lattice.length) {
       if (spec.x || spec.y || lattice.length > 2)
         throw new Error(
@@ -327,6 +395,15 @@ export function orientLattice(spec: View2DSpec, axes: readonly [string, string])
  *  A lattice view's axes go in `order` when given (as its row wrote them). */
 export function formatViewSpec(spec: Omit<View2DSpec, 'kind'>, order?: readonly [string, string]): string {
   const parts: string[] = [];
+  if (spec.maps?.plane) {
+    // The window is the screen's, written as it is held.
+    parts.push(`(x, y) = ${spec.maps.plane.text}`);
+    if (spec.x) parts.push(`X = ${fmtRange(...spec.x)}`);
+    if (spec.y) parts.push(`Y = ${fmtRange(...spec.y)}`);
+    if (spec.ratio !== undefined && spec.ratio !== 1) parts.push(`ratio = ${fmt(spec.ratio)}`);
+    if (spec.locked) parts.push('locked');
+    return `view(${parts.join(', ')})`;
+  }
   const [across, down] = spec.axes ?? ['x', 'y'];
   // A mapped axis's window is held in screen units and written in its own,
   // each end to six significant digits: on a log axis 0.00001 is a real
@@ -337,7 +414,7 @@ export function formatViewSpec(spec: Omit<View2DSpec, 'kind'>, order?: readonly 
   };
   if (spec.x) parts.push(`${across} = ${range('x', spec.x)}`);
   if (spec.y) parts.push(`${down} = ${spec.axes ? fmtRange(-spec.y[1], -spec.y[0]) : range('y', spec.y)}`);
-  for (const map of Object.values(spec.maps ?? {})) parts.push(`${map.axis} = ${map.text}`);
+  for (const map of [spec.maps?.x, spec.maps?.y]) if (map) parts.push(`${map.axis} = ${map.text}`);
   if (spec.axes && parts.length === 2 && order?.[0] === down && order[1] === across) parts.reverse();
   if (spec.ratio !== undefined && spec.ratio !== 1) parts.push(`ratio = ${fmt(spec.ratio)}`);
   if (spec.locked) parts.push('locked');

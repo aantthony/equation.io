@@ -20,6 +20,9 @@ import {
   MissingDataError,
   resolveExpr,
   resolveRow,
+  type GetFn,
+  type ResolveOpts,
+  surfaceOperand,
   shadowedFnNames,
   scanDefinition,
   takenBinder,
@@ -50,10 +53,10 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, MAP, childrenOf, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
-import { lowerGeom } from './geom.ts';
+import { PAINT_CALL, lowerGeom } from './geom.ts';
 import { withHoisting } from './pga.ts';
 import { lowerLists, reducesMembers, SCALAR_REDUCTIONS } from './list.ts';
 import { type Classified, checkSolid, classify, classifyRow, plotReadout } from './plot.ts';
@@ -66,7 +69,11 @@ import { stripNote } from './statements.ts';
 import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
-import { type AxisMaps, UNMAPPED_MESSAGE, axisMapping, inlineFields, mapRowExpr } from './axis-map.ts';
+import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
+import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
+import { type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
+import { FLOW_NODE_LIMIT } from './flow.ts';
+import { exceedsNodes } from './size.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -174,7 +181,7 @@ export interface Analysis {
 /** A viewport row by its text: a `---` divider, or a view/camera/grid call
  *  that is not the definition of a function by that name (`grid(x) = …`). */
 export const isViewportText = (text: string): boolean =>
-  isDividerRow(text) || (/^(view|camera|grid)\s*\(/i.test(text) && !scanDefinition(text));
+  isDividerRow(text) || (/^(view|camera|grid|on)\s*\(/i.test(text) && !scanDefinition(text));
 
 /** No source splitting here: one input row remains one result, including blanks. */
 export function prepareDocument(
@@ -244,7 +251,7 @@ export function prepareDocument(
   const built = buildDefs(
     raw,
     tables,
-    seqScans.filter((s): s is SeqScan => s !== null && !s.lattice),
+    seqScans.filter((s): s is SeqScan => s !== null && !s.lattice && !s.emptyTuple),
   );
   const defs = built.defs;
   for (const [key, fit] of built.fits) {
@@ -356,7 +363,9 @@ export function prepareDocument(
       ...[...rvScan.derived.values()].map(s => s.name),
     ]),
   };
-  ropts.sequenceTerm = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
+  const sequences = sequenceResolver(defs, getFn, ropts, constNames, new Set(raw.map(d => d.name)));
+  ropts.sequenceTerm = sequences;
+  ropts.tupleRun = sequences.tupleRun;
 
   const { declarations, ...builtRVs } = buildRVDeclarations(rvScan, {
     fnNames,
@@ -607,8 +616,147 @@ function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
   return bare(e);
 }
 
+const GEODESIC_USAGE =
+  'geodesic takes a surface, where to start on it and which way: geodesic(S, (0.5, 0.5), (1, 0)) with S = (u, v, u^2 - v^2), and optionally how far, geodesic(S, P, (1, 0), 4).';
+const PANEL_GEODESIC_USAGE =
+  'On a panel drawn on a surface, geodesic takes where to start and which way, in x and y: geodesic((0, 0.5), (1, 0)) or geodesic(P, (1, 1), 6).';
+
+/**
+ * A geodesic row: geodesic(S, (u0, v0), (du, dv)[, L]), or on a panel drawn
+ * on a surface (an on(…) row) geodesic((x0, y0), (dx, dy)[, L]) on that
+ * surface, in the panel's x and y. The surface's first and second
+ * derivatives are expanded here (lib/surface-geometry.ts surfaceDerivatives),
+ * and the Christoffel symbols formed from them at each point as the curve is
+ * traced in the trace worker, so the start, direction and length may move
+ * with sliders, t and named points. A list of starts, directions or lengths draws one
+ * geodesic per element, a family.
+ */
+function classifyGeodesic(
+  args: readonly Expr[],
+  surface: SurfaceMap | undefined,
+  getFn: GetFn,
+  ropts: ResolveOpts,
+  lower: (e: Expr) => Expr,
+  constNames: ReadonlySet<string>,
+  moving: ReadonlySet<string>,
+): Classified {
+  let operand: ReturnType<typeof surfaceOperand> | null = null;
+  let failure: unknown = null;
+  if (args.length >= 3) {
+    try {
+      // The surface as the resolver writes it — a named one or a tuple, over
+      // u's and v's intervals where they are ones; a function of two
+      // parameters as is, for surfaceOperand to call at them.
+      const [arg] = args;
+      const written = arg.kind === 'var' && getFn(arg.name) ? arg : resolveRow(arg, getFn, ropts).expr;
+      operand = surfaceOperand('geodesic', written, getFn, ropts);
+    } catch (err) {
+      failure = err;
+    }
+  }
+  const onPanel = !operand && !!surface && (args.length === 2 || args.length === 3);
+  if (!operand && !onPanel) {
+    if (args.length === 2 && !surface)
+      throw new Error(
+        `geodesic(P, d) draws on its panel's surface (an on(…) row), and this panel has none. ${GEODESIC_USAGE}`,
+      );
+    throw failure instanceof Error && args.length >= 3 ? failure : new Error(GEODESIC_USAGE);
+  }
+  if (operand && args.length > 4) throw new Error(GEODESIC_USAGE);
+  const usage = onPanel ? PANEL_GEODESIC_USAGE : GEODESIC_USAGE;
+  const params: Params = onPanel ? ['x', 'y'] : ['u', 'v'];
+  const items: readonly Expr[] = operand ? operand.items : surface!.embed;
+  const num = (value: number): Expr => ({ kind: 'num', value });
+  // The parameters' ranges: u's and v's intervals where they are defined as
+  // ones, else [0, 1]; the panel's x and y ranges.
+  const range = (over: Expr | undefined): Expr[] =>
+    over?.kind === 'call' ? [over.args[0], over.args[1]] : [num(0), num(1)];
+  const domain: Expr[] = operand
+    ? [...range(operand.over.u), ...range(operand.over.v)]
+    : [...surface!.x, ...surface!.y].map(num);
+  // The connection is formed from these at each point as it is traced.
+  const derivatives = surfaceDerivatives(items, smoothPartial, params);
+  if (exceedsNodes(derivatives, 4 * FLOW_NODE_LIMIT))
+    throw new Error('This surface is too large to trace geodesics on.');
+  // Where it starts, which way and how far, each one value or a list.
+  const rest = operand ? args.slice(1) : args;
+  const elements = (e: Expr, size: number, what: string): (readonly Expr[])[] => {
+    const lowered = lower(e);
+    const each = lowered.kind === 'list' ? lowered.items : [lowered];
+    return each.map(item => {
+      const parts = size === 1 ? [item] : item.kind === 'vec' ? item.items : [];
+      if (parts.length !== size || parts.some(p => p.kind === 'vec' || p.kind === 'list'))
+        throw new Error(`geodesic: ${what} is ${size === 1 ? 'one number' : 'a pair, like (1, 0)'}. ${usage}`);
+      for (const p of parts)
+        for (const n of freeVars(p))
+          if (n !== 't' && !constNames.has(n))
+            throw new Error(
+              `geodesic: ${what} is numbers, sliders, t and named points${n === params[0] || n === params[1] ? `, not ${n}` : ` (found ${n})`}. ${usage}`,
+            );
+      return parts;
+    });
+  };
+  const starts = elements(rest[0], 2, 'where it starts');
+  const directions = elements(rest[1], 2, 'its direction');
+  const lengths = rest[2] ? elements(rest[2], 1, 'its length') : [[]];
+  const n = Math.max(starts.length, directions.length, lengths.length);
+  for (const list of [starts, directions, lengths])
+    if (list.length !== 1 && list.length !== n)
+      throw new Error(
+        'geodesic: lists of starts, directions and lengths go element by element, so they must be as long.',
+      );
+  if (n > 64) throw new Error('A family of geodesics has at most 64 members.');
+  const member = (k: number): Classified => {
+    const pick = <T>(list: readonly T[]) => list[list.length === 1 ? 0 : k];
+    const object: MathObject = {
+      kind: 'geodesic',
+      dim: onPanel ? 2 : 3,
+      params,
+      surface: items,
+      derivatives,
+      start: pick(starts),
+      direction: pick(directions),
+      ...(rest[2] ? { length: pick(lengths)[0] } : {}),
+      domain,
+    };
+    const used = new Set<string>();
+    for (const e of [...items, ...derivatives, ...domain, ...pick(starts), ...pick(directions), ...pick(lengths)])
+      for (const name of freeVars(e)) used.add(name);
+    return {
+      object,
+      animated: [...used].some(name => name === 't' || moving.has(name)),
+      needs3D: !onPanel,
+      params: [...used].filter(name => constNames.has(name)).sort(),
+    };
+  };
+  const members = Array.from({ length: n }, (_, k) => member(k));
+  if (n === 1) return members[0];
+  return {
+    object: { kind: 'family', members },
+    animated: members.some(m => m.animated),
+    needs3D: !onPanel,
+    params: [...new Set(members.flatMap(m => m.params))].sort(),
+  };
+}
+
+/**
+ * The surface of a row that is gaussian(S) or meancurvature(S) alone — which
+ * draws S coloured by it — or null: for any other row, for one of the
+ * document's own functions of those names, and for a point of a panel's
+ * surface, gaussian(P), which is a number.
+ */
+function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (name: string) => boolean): Expr | null {
+  if (e.kind !== 'call' || (e.name !== 'gaussian' && e.name !== 'meancurvature') || fnNames.has(e.name)) return null;
+  if (e.args.length !== 1) return null;
+  const [arg] = e.args;
+  if ((arg.kind === 'vec' && arg.items.length === 2) || (arg.kind === 'var' && isPoint(arg.name))) return null;
+  return arg;
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
+  // A map's Σ bounds are told the document's functions and lists, to refuse them.
+  const viewDoc = { ...ropts, fnNames };
   const rows = document.rows.map(row => ({ ...row }));
   /** Rows whose calls apply per member in a way that reads like a wrapper (perMemberNote). */
   const memberNotes = new Map<(typeof rows)[number], string>();
@@ -718,15 +866,18 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   // Each panel's axis maps, from its view(…) row wherever in the panel it
   // sits (lib/axis-map.ts); a malformed row is reported by the loop below.
   const panelMaps: AxisMaps[] = [];
+  // And the surface a panel's rows are drawn on (lib/surface-map.ts).
+  const panelSurfaces: SurfaceMap[] = [];
   {
     let at = 0;
     for (const row of rows) {
       if (!row.text || row.def || row.comment) continue;
       if (isDividerRow(row.text)) at++;
-      else if (/^\s*view\s*\(/.test(row.text) && !fnNames.has('view'))
+      else if (/^\s*(view|on)\s*\(/.exec(row.text) && !fnNames.has(/^\s*(\w+)/.exec(row.text)![1]))
         try {
-          const spec = parseViewRow(row.text, ropts.consts!);
+          const spec = parseViewRow(row.text, ropts.consts!, viewDoc);
           if (spec?.kind === 'view' && spec.maps) panelMaps[at] ??= spec.maps;
+          if (spec?.kind === 'surface') panelSurfaces[at] ??= spec.surface;
         } catch {
           /* the row's own error */
         }
@@ -734,354 +885,414 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   }
   const seenViewKinds = new Set<string>();
   let panel = 0;
-  // Frame-constant intermediates of a row — an inline motor, a line it
-  // moves, slerp's relative motor — become hidden constants `#id.k` of the
-  // document, evaluated once per frame with the named ones
-  // (docs/frame-constants-plan.md, stage 2). Those no drawn row reads are
-  // dropped after the loop.
+  // Frame-constant intermediates of a drawn row — an inline motor, a line
+  // it moves, slerp's relative motor, a matrix turning a hull — become hidden
+  // constants `#id.k` of the document, evaluated once per frame with the
+  // named ones (docs/frame-constants-plan.md, stage 2). They are held here
+  // and bound after the loop, those some row reads.
   let owner = '';
   const counts = new Map<string, number>();
+  const pending = new Map<string, Expr>();
+  const frameConsts = new Set([...defs.consts.keys(), ...defs.states.keys()]);
   const hoistRow = frameHoister(
-    v => v === 't' || defs.consts.has(v) || defs.states.has(v),
+    v => frameConsts.has(v) || pending.has(v),
     (key, e) => {
       const k = counts.get(key) ?? 0;
       counts.set(key, k + 1);
       const name = `#${key}.${k}`;
-      defs.bind(name, { tag: 'scalar', role: 'const', expr: e });
+      pending.set(name, e);
       constNames.add(name);
       return name;
     },
     HOIST_NODES,
   );
-  withHoisting(
-    c => hoistRow(owner, c),
-    () => {
-      for (const [ri, row] of rows.entries()) {
-        owner = `${row.id ?? ri}`;
-        if (row.def && !row.error && defs.pointDims.get(row.def.name) === 3) {
-          const comps = compsOf(defs, row.def.name)!;
-          if (comps.every(c => constNames.has(c))) {
-            const expr: Expr = { kind: 'vec', items: comps.map(name => ({ kind: 'var', name })) };
-            row.cls = classify(expr, constNames);
-          }
-        }
-        if (row.def || row.comment || row.error || row.cls || !row.text) continue;
-        try {
-          const badRow = badTableRow(row.text);
-          if (badRow) throw new Error(badRow);
-          // A call to the user's own view/camera/grid function is theirs.
-          const head = /^\s*(view|camera|grid)\s*\(/.exec(row.text);
-          const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!);
-          if (view) {
-            // Each panel frames itself: a divider starts a fresh set.
-            if (view.kind === 'split') {
-              if (++panel >= MAX_PANELS) throw new Error(`A graph splits into at most ${MAX_PANELS} panels.`);
-              seenViewKinds.clear();
-            } else if (seenViewKinds.has(view.kind)) {
-              throw new Error(
-                `${view.kind} is already set by another row${panel ? ' in this panel' : ''}` +
-                  (panel ? '.' : ' — a --- row starts a new panel with its own.'),
-              );
-            }
-            if (view.kind === 'grid')
-              for (const name of view.coords ?? []) {
-                const problem = gridCoordinateProblem(name, gridFields, defs.fields);
-                if (problem) throw new Error(problem);
-              }
-            seenViewKinds.add(view.kind);
-            row.view = view;
-            continue;
-          }
-          // `P(…)` shades an area under a declared density — unless the user has
-          // defined P themselves as something P(…) could apply (a number, a
-          // function, a matrix or a tensor), in which case the row is theirs. (A
-          // list or point named P leaves P(X > 1) the probability it reads as.)
-          const userDefined = (n: string) =>
-            defs.consts.has(n) || defs.fns.has(n) || defs.mats.has(n) || defs.tensors.has(n);
-          const probBody = userDefined('P') ? null : matchProbability(row.text);
-          if (probBody !== null) {
-            if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-            const p = toProbability(parseRowBody(probBody, lowerProbBody), rvNames);
-            for (const name of p.rvs) {
-              if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
-            }
-            // Point events only of discrete variables.
-            rvs.checkProbability(p);
-            row.dist = 'probability';
-            // Inline bounded expressions become anonymous derived variables, so
-            // shading and exact laws apply — mirror of web/main.ts.
-            let single = p.single;
-            if (!single && p.inline) {
-              checkDerived(p.inline.e, rvNames, constNames);
-              const anon = `@P${row.id ?? ri}`;
-              rvs.addAnonymous({ name: anon, kind: 'derived', expr: p.inline.e });
-              const { e: _body, ...bounds } = p.inline;
-              single = { rv: anon, ...bounds };
-            }
-            // Constant bounds on one variable with a closed form get the exact
-            // CDF and the shader-drawn region; the rest estimate over samples.
-            const exact = single ? rvs.exactDist(single.rv) : null;
-            if (single && exact) {
-              const region = regionExpr(exact, single.lo, single.hi);
-              row.cls = classify(region, constNames);
-              if (readouts)
-                try {
-                  const value = probabilityValue(exact, single.lo, single.hi, readoutEnv);
-                  if (isFinite(value)) row.info = `≈ ${value.toFixed(4)}`;
-                } catch {
-                  // Not numerically computable at t = 0 (e.g. animated); no readout.
-                }
-            } else {
-              const ps = rvs.bodyParams(p.body);
-              row.cls = {
-                object: { kind: 'distribution', form: 'prob', body: p.body, shade: single },
-                animated: ps.has('t'),
-                needs3D: false,
-                params: [...ps].filter(v => v !== 't'),
-              };
-              if (readouts)
-                try {
-                  // A uniform-sum law still gets its exact value, and an event over
-                  // discrete variables is enumerated (mirror of the app's readout);
-                  // everything else estimates over joint samples.
-                  const { value, exact: settled } = rvs.eventProbability(p.body, single, readoutEnv);
-                  if (isFinite(value)) row.info = `≈ ${value.toFixed(settled ? 4 : 3)}`;
-                } catch {
-                  /* animated or broken: no readout */
-                }
-            }
-            continue;
-          }
-          // `E(…)` is the mean of an expression in random variables — unless the
-          // user has defined E themselves. Mirror of web/main.ts.
-          const expectBody = userDefined('E') ? null : matchExpectation(row.text);
-          if (expectBody !== null) {
-            if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
-            const ex = toExpectation(parseRowBody(expectBody), rvNames);
-            for (const name of ex.rvs) {
-              if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
-            }
-            row.dist = 'expectation';
-            // A bare name is the variable itself; anything else registers as an
-            // anonymous derived variable, so exact laws apply unchanged.
-            let name: string;
-            if (ex.body.kind === 'var' && rvs.has(ex.body.name)) {
-              name = ex.body.name;
-            } else {
-              checkDerived(ex.body, rvNames, constNames);
-              name = `@E${row.id ?? ri}`;
-              rvs.addAnonymous({ name, kind: 'derived', expr: ex.body });
-            }
-            const ps = rvs.bodyParams(ex.body);
-            row.cls = {
-              object: { kind: 'distribution', form: 'expect', rv: name },
-              animated: ps.has('t'),
-              needs3D: false,
-              params: [...ps].filter(p => p !== 't'),
-            };
-            if (readouts)
-              try {
-                // Closed form and quadrature both earn full display precision;
-                // only the Monte Carlo fallback rounds to its noise floor.
-                const m = rvs.exactMoments(name, readoutEnv) ?? rvs.quadMoments(name, readoutEnv);
-                const value = m ? m.mean : rvs.mean(name, readoutEnv);
-                if (isFinite(value)) row.info = `≈ ${readoutNumber(value, m ? 4 : 3)}`;
-                else if (rvs.meanUnstable(name, readoutEnv)) row.info = NO_MEAN_INFO;
-              } catch {
-                /* animated or broken: no readout */
-              }
-            continue;
-          }
-          const seq = document.seqScans[ri];
-          if (seq?.lattice) {
-            const cls = classifyAutomatonRow(document.seqScans, ri, fnNames, getFn, constNames, ropts);
-            if (cls) row.cls = cls;
-            continue;
-          }
-          if (seq) {
-            const first = document.seqScans.findIndex(s => s?.name === seq.name);
-            if (first < ri) throw new Error(`Sequence ${seq.name} is already defined.`);
-            row.cls = classifySeqRec(
-              seq,
-              fnNames,
-              getFn,
-              constNames,
-              ropts,
-              new Set(defs.sequences.keys()),
-              document.listNames,
-            );
-            continue;
-          }
-          // `d = 1` is no definition (d starts d/dx), and would otherwise fail
-          // with advice about derivatives that the author never wrote.
-          if (takenDefinitionName(row.text) === 'd') {
-            throw new Error(
-              'd is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.',
-            );
-          }
-          // graph(from, to, label) reads as the tuple of its arguments: one edge
-          // per element of its multiset (lib/graph.ts).
-          // (A document's own graph or mark function is that function.)
-          const graphArgs = fnNames.has('graph') ? null : wholeCall('graph', row.text);
-          // mark(v) is v, highlighted in the panel's graphs.
-          const markArg = fnNames.has('mark') ? null : wholeCall('mark', row.text);
-          const source = graphArgs !== null ? `(${graphArgs})` : markArg !== null ? `(${markArg})` : row.text;
-          const takenName = takenBinder(row.text);
-          if (takenName) throw new Error(takenName);
-          const rawParsed = parseExpr(source, fnNames, listNames, valueNames);
-          // `p(50..400)`: where p goes over that time — a range in call position,
-          // which nothing else accepts.
-          if (rawParsed.kind === 'bin' && rawParsed.op === '*' && rawParsed.b.kind === 'range') {
-            const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
-            row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
-            continue;
-          }
-          // A graph's vertices are whole numbers, so its cases may test equality,
-          // and so may any row not drawn over the plane: `f(2)`, `mark(c(4))`
-          // with c(m) = {mod(m, 2) = 0: …}. Only a case at x, y or z is refused
-          // (it would be a curve's sliver), here on the row that draws it.
-          const plane = (e: Expr) => ['x', 'y', 'z'].some(v => freeVars(e).has(v));
-          const exact = graphArgs !== null || !plane(rawParsed);
-          const resolved = resolveRow(
-            graphArgs !== null ? exactCases(rawParsed) : rawParsed,
-            getFn,
-            exact ? { ...ropts, exactConditions: true } : ropts,
+  const hiddenDefinition = (n: string) => pending.get(n) ?? defs.consts.get(n);
+  // A solid's fold check reads a hidden constant's value from what it is
+  // made of, so the sliders it reads still leave the runtime-uniform set.
+  const solidConsts = throughHidden(ropts.consts!, hiddenDefinition);
+  for (const [ri, row] of rows.entries()) {
+    owner = `${row.id ?? ri}`;
+    if (row.def && !row.error && defs.pointDims.get(row.def.name) === 3) {
+      const comps = compsOf(defs, row.def.name)!;
+      if (comps.every(c => constNames.has(c))) {
+        const expr: Expr = { kind: 'vec', items: comps.map(name => ({ kind: 'var', name })) };
+        row.cls = classify(expr, constNames);
+      }
+    }
+    if (row.def || row.comment || row.error || row.cls || !row.text) continue;
+    try {
+      const badRow = badTableRow(row.text);
+      if (badRow) throw new Error(badRow);
+      // A call to the user's own view/camera/grid function is theirs.
+      const head = /^\s*(view|camera|grid|on)\s*\(/.exec(row.text);
+      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!, viewDoc);
+      if (view) {
+        // Each panel frames itself: a divider starts a fresh set.
+        if (view.kind === 'split') {
+          if (++panel >= MAX_PANELS) throw new Error(`A graph splits into at most ${MAX_PANELS} panels.`);
+          seenViewKinds.clear();
+        } else if (seenViewKinds.has(view.kind)) {
+          throw new Error(
+            `${view.kind} is already set by another row${panel ? ' in this panel' : ''}` +
+              (panel ? '.' : ' — a --- row starts a new panel with its own.'),
           );
-          const note = perMemberNote(resolved.expr, ropts.isList ?? (() => false));
-          if (note) memberNotes.set(row, note);
-          if (exact && graphArgs === null) {
-            // Over numbers a case is the tolerance form the evaluator runs; one
-            // whose side is a list stays an equation, for list lowering to decide
-            // member by member. (A list inside a reduction is one number.)
-            const isListReduction = (c: Expr & { kind: 'call' }): boolean =>
-              SCALAR_REDUCTIONS.has(c.name) || ((c.name === 'min' || c.name === 'max') && c.args.length === 1);
-            const listy = (side: Expr): boolean =>
-              side.kind === 'list' ||
-              side.kind === 'data' ||
-              (side.kind === 'var' && isListName(listNames, side.name)) ||
-              (!(side.kind === 'call' && isListReduction(side)) && childrenOf(side).some(listy));
-            const cases = exactCases(resolved.expr, listy);
-            if (cases !== resolved.expr && plane(resolved.expr))
-              throw new Error(
-                'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
-              );
-            resolved.expr = cases;
+        }
+        if (view.kind === 'grid')
+          for (const name of view.coords ?? []) {
+            const problem = gridCoordinateProblem(name, gridFields, defs.fields);
+            if (problem) throw new Error(problem);
           }
-          let parsed = resolved.expr;
-          // A real row in u and v alone does not depend on the screen, so it is
-          // drawn as its values (docs/multisets.md §5): u and v are each [0, 1],
-          // and the row is a multiset of numbers with a density. That is the
-          // object an expression in random variables already is, with u and v
-          // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
-          const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
-          // curvature(C) is κ along the curve, a number per u — which as such a
-          // row (or 1/curvature(C)) would draw the density of its values. Say
-          // how to show it.
-          const along = draws && alongCurve(rawParsed, getFn);
-          if (along) {
-            throw new Error(
-              `${along}(C) is a function of u along the curve: plot it with (u, ${along}(C)), or read it at a point with ${along}(C, 0.25).`,
-            );
-          }
-          const known = draws ? new Set([...rvNames, ...Object.keys(draws.bases)]) : rvNames;
-          if (draws) {
-            for (const [name, dist] of Object.entries(draws.bases)) rvs.addAnonymous({ name, kind: 'base', dist });
-            parsed = draws.expr;
-          }
-          // A bare expression in random variables plots that derived density.
-          const rvRefs = [...freeVars(parsed)].filter(n => known.has(n));
-          if (rvRefs.length) {
-            for (const n of rvRefs) {
-              if (!rvs.has(n)) throw new Error(`${n} has an error in its definition.`);
+        // A panel on a surface is 3D: framed by a camera, not a 2D window.
+        if ((view.kind === 'surface' && seenViewKinds.has('view')) || (view.kind === 'view' && panelSurfaces[panel]))
+          throw new Error('This panel draws on a surface (on(…)), so it is 3D: frame it with camera(…), not view(…).');
+        seenViewKinds.add(view.kind);
+        row.view = view;
+        continue;
+      }
+      // `P(…)` shades an area under a declared density — unless the user has
+      // defined P themselves as something P(…) could apply (a number, a
+      // function, a matrix or a tensor), in which case the row is theirs. (A
+      // list or point named P leaves P(X > 1) the probability it reads as.)
+      const userDefined = (n: string) =>
+        defs.consts.has(n) || defs.fns.has(n) || defs.mats.has(n) || defs.tensors.has(n);
+      const probBody = userDefined('P') ? null : matchProbability(row.text);
+      if (probBody !== null) {
+        if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
+        const p = toProbability(parseRowBody(probBody, lowerProbBody), rvNames);
+        for (const name of p.rvs) {
+          if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
+        }
+        // Point events only of discrete variables.
+        rvs.checkProbability(p);
+        row.dist = 'probability';
+        // Inline bounded expressions become anonymous derived variables, so
+        // shading and exact laws apply — mirror of web/main.ts.
+        let single = p.single;
+        if (!single && p.inline) {
+          checkDerived(p.inline.e, rvNames, constNames);
+          const anon = `@P${row.id ?? ri}`;
+          rvs.addAnonymous({ name: anon, kind: 'derived', expr: p.inline.e });
+          const { e: _body, ...bounds } = p.inline;
+          single = { rv: anon, ...bounds };
+        }
+        // Constant bounds on one variable with a closed form get the exact
+        // CDF and the shader-drawn region; the rest estimate over samples.
+        const exact = single ? rvs.exactDist(single.rv) : null;
+        if (single && exact) {
+          const region = regionExpr(exact, single.lo, single.hi);
+          row.cls = classify(region, constNames);
+          if (readouts)
+            try {
+              const value = probabilityValue(exact, single.lo, single.hi, readoutEnv);
+              if (isFinite(value)) row.info = `≈ ${value.toFixed(4)}`;
+            } catch {
+              // Not numerically computable at t = 0 (e.g. animated); no readout.
             }
-            if (parsed.kind === 'ineq') {
-              throw new Error(`An inequality in random variables is a probability: try P(${row.text}).`);
+        } else {
+          const ps = rvs.bodyParams(p.body);
+          row.cls = {
+            object: { kind: 'distribution', form: 'prob', body: p.body, shade: single },
+            animated: ps.has('t'),
+            needs3D: false,
+            params: [...ps].filter(v => v !== 't'),
+          };
+          if (readouts)
+            try {
+              // A uniform-sum law still gets its exact value, and an event over
+              // discrete variables is enumerated (mirror of the app's readout);
+              // everything else estimates over joint samples.
+              const { value, exact: settled } = rvs.eventProbability(p.body, single, readoutEnv);
+              if (isFinite(value)) row.info = `≈ ${value.toFixed(settled ? 4 : 3)}`;
+            } catch {
+              /* animated or broken: no readout */
             }
-            checkDerived(parsed, known, constNames);
-            const name = `@${row.id ?? ri}`;
-            rvs.addAnonymous({ name, kind: 'derived', expr: parsed });
-            classifyVariable(row, name, draws?.mass);
-            continue;
+        }
+        continue;
+      }
+      // `E(…)` is the mean of an expression in random variables — unless the
+      // user has defined E themselves. Mirror of web/main.ts.
+      const expectBody = userDefined('E') ? null : matchExpectation(row.text);
+      if (expectBody !== null) {
+        if (!rvNames.size) throw new Error('Define a random variable first, e.g. X ~ Normal(0, 1).');
+        const ex = toExpectation(parseRowBody(expectBody), rvNames);
+        for (const name of ex.rvs) {
+          if (!rvs.has(name)) throw new Error(`${name} has an error in its definition.`);
+        }
+        row.dist = 'expectation';
+        // A bare name is the variable itself; anything else registers as an
+        // anonymous derived variable, so exact laws apply unchanged.
+        let name: string;
+        if (ex.body.kind === 'var' && rvs.has(ex.body.name)) {
+          name = ex.body.name;
+        } else {
+          checkDerived(ex.body, rvNames, constNames);
+          name = `@E${row.id ?? ri}`;
+          rvs.addAnonymous({ name, kind: 'derived', expr: ex.body });
+        }
+        const ps = rvs.bodyParams(ex.body);
+        row.cls = {
+          object: { kind: 'distribution', form: 'expect', rv: name },
+          animated: ps.has('t'),
+          needs3D: false,
+          params: [...ps].filter(p => p !== 't'),
+        };
+        if (readouts)
+          try {
+            // Closed form and quadrature both earn full display precision;
+            // only the Monte Carlo fallback rounds to its noise floor.
+            const m = rvs.exactMoments(name, readoutEnv) ?? rvs.quadMoments(name, readoutEnv);
+            const value = m ? m.mean : rvs.mean(name, readoutEnv);
+            if (isFinite(value)) row.info = `≈ ${readoutNumber(value, m ? 4 : 3)}`;
+            else if (rvs.meanUnstable(name, readoutEnv)) row.info = NO_MEAN_INFO;
+          } catch {
+            /* animated or broken: no readout */
           }
-          // Expand point arithmetic and geometry statements (segment, polygon, …)
-          // into scalar expressions; a point name A becomes (A_x, A_y).
-          // Lists then broadcast/reduce away (mirror of web/main.ts).
-          const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
-          const maps = panelMaps[panel];
+        continue;
+      }
+      const seq = document.seqScans[ri];
+      if (seq?.lattice) {
+        const cls = classifyAutomatonRow(document.seqScans, ri, fnNames, getFn, constNames, ropts);
+        if (cls) row.cls = cls;
+        continue;
+      }
+      // `s_0 = ()`: the empty tuple its recurrence starts from, drawn there.
+      // A recurrence has one seed: not this and a constant s_0 too.
+      if (seq?.emptyTuple) {
+        const seed = `${seq.name}_0`;
+        const earlier = document.seqScans.findIndex(s => s?.emptyTuple && s.name === seq.name) < ri;
+        if (earlier || document.raw.some(d => d.name === seed)) throw new Error(`${seed} is already defined.`);
+        continue;
+      }
+      if (seq) {
+        const first = document.seqScans.findIndex(s => s?.name === seq.name && !s.emptyTuple);
+        if (first < ri) throw new Error(`Sequence ${seq.name} is already defined.`);
+        row.cls = classifySeqRec(
+          seq,
+          fnNames,
+          getFn,
+          constNames,
+          ropts,
+          new Set(defs.sequences.keys()),
+          document.listNames,
+        );
+        continue;
+      }
+      // `d = 1` is no definition (d starts d/dx), and would otherwise fail
+      // with advice about derivatives that the author never wrote.
+      if (takenDefinitionName(row.text) === 'd') {
+        throw new Error(
+          'd is taken by derivatives (d/dx), so it cannot name a slider or function. Pick another name, like k.',
+        );
+      }
+      // graph(from, to, label) reads as the tuple of its arguments: one edge
+      // per element of its multiset (lib/graph.ts).
+      // (A document's own graph or mark function is that function.)
+      const graphArgs = fnNames.has('graph') ? null : wholeCall('graph', row.text);
+      // mark(v) is v, highlighted in the panel's graphs.
+      const markArg = fnNames.has('mark') ? null : wholeCall('mark', row.text);
+      const source = graphArgs !== null ? `(${graphArgs})` : markArg !== null ? `(${markArg})` : row.text;
+      const takenName = takenBinder(row.text);
+      if (takenName) throw new Error(takenName);
+      const rawParsed = parseExpr(source, fnNames, listNames, valueNames);
+      // `p(50..400)`: where p goes over that time — a range in call position,
+      // which nothing else accepts.
+      if (rawParsed.kind === 'bin' && rawParsed.op === '*' && rawParsed.b.kind === 'range') {
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
+        continue;
+      }
+      // geodesic(S, start, direction): traced as it is drawn.
+      if (rawParsed.kind === 'call' && rawParsed.name === 'geodesic' && !fnNames.has('geodesic')) {
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
+        row.cls = classifyGeodesic(rawParsed.args, panelSurfaces[panel], getFn, ropts, lower, constNames, moving);
+        continue;
+      }
+      // A graph's vertices are whole numbers, so its cases may test equality,
+      // and so may any row not drawn over the plane: `f(2)`, `mark(c(4))`
+      // with c(m) = {mod(m, 2) = 0: …}. Only a case at x, y or z is refused
+      // (it would be a curve's sliver), here on the row that draws it.
+      const plane = (e: Expr) => ['x', 'y', 'z'].some(v => freeVars(e).has(v));
+      const exact = graphArgs !== null || !plane(rawParsed);
+      // On a panel drawn on a surface, gaussian(x, y) reads that surface.
+      const surface = panelSurfaces[panel];
+      const rowOpts = surface ? { ...ropts, surface } : ropts;
+      // gaussian(S) alone: S coloured by its curvature (lib/plot.ts PAINT_CALL).
+      const painted = curvaturePaint(rawParsed, fnNames, n => defs.pointDims.get(n) === 2);
+      const resolved = resolveRow(
+        graphArgs !== null
+          ? exactCases(rawParsed)
+          : painted
+            ? { kind: 'call', name: PAINT_CALL, args: [painted, rawParsed] }
+            : rawParsed,
+        getFn,
+        exact ? { ...rowOpts, exactConditions: true } : rowOpts,
+      );
+      const note = perMemberNote(resolved.expr, ropts.isList ?? (() => false));
+      if (note) memberNotes.set(row, note);
+      if (exact && graphArgs === null) {
+        // Over numbers a case is the tolerance form the evaluator runs; one
+        // whose side is a list stays an equation, for list lowering to decide
+        // member by member. (A list inside a reduction is one number.)
+        const isListReduction = (c: Expr & { kind: 'call' }): boolean =>
+          SCALAR_REDUCTIONS.has(c.name) || ((c.name === 'min' || c.name === 'max') && c.args.length === 1);
+        const listy = (side: Expr): boolean =>
+          side.kind === 'list' ||
+          side.kind === 'data' ||
+          (side.kind === 'var' && isListName(listNames, side.name)) ||
+          (!(side.kind === 'call' && isListReduction(side)) && childrenOf(side).some(listy));
+        const cases = exactCases(resolved.expr, listy);
+        if (cases !== resolved.expr && plane(resolved.expr))
+          throw new Error(
+            'A condition like y = x^2 is a filter for a reduction, like count({y = x^2, 0 < x < 1}); piecewise conditions are inequalities.',
+          );
+        resolved.expr = cases;
+      }
+      let parsed = resolved.expr;
+      // A real row in u and v alone does not depend on the screen, so it is
+      // drawn as its values (docs/multisets.md §5): u and v are each [0, 1],
+      // and the row is a multiset of numbers with a density. That is the
+      // object an expression in random variables already is, with u and v
+      // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
+      const draws = painted
+        ? null
+        : uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
+      // curvature(C) is κ along the curve, a number per u — which as such a
+      // row (or 1/curvature(C)) would draw the density of its values. Say
+      // how to show it.
+      const along = draws && alongCurve(rawParsed, getFn);
+      if (along) {
+        throw new Error(
+          `${along}(C) is a function of u along the curve: plot it with (u, ${along}(C)), or read it at a point with ${along}(C, 0.25).`,
+        );
+      }
+      const known = draws ? new Set([...rvNames, ...Object.keys(draws.bases)]) : rvNames;
+      if (draws) {
+        for (const [name, dist] of Object.entries(draws.bases)) rvs.addAnonymous({ name, kind: 'base', dist });
+        parsed = draws.expr;
+      }
+      // A bare expression in random variables plots that derived density.
+      const rvRefs = [...freeVars(parsed)].filter(n => known.has(n));
+      if (rvRefs.length) {
+        for (const n of rvRefs) {
+          if (!rvs.has(n)) throw new Error(`${n} has an error in its definition.`);
+        }
+        if (parsed.kind === 'ineq') {
+          throw new Error(`An inequality in random variables is a probability: try P(${row.text}).`);
+        }
+        checkDerived(parsed, known, constNames);
+        const name = `@${row.id ?? ri}`;
+        rvs.addAnonymous({ name, kind: 'derived', expr: parsed });
+        classifyVariable(row, name, draws?.mass);
+        continue;
+      }
+      // Expand point arithmetic and geometry statements (segment, polygon, …)
+      // into scalar expressions; a point name A becomes (A_x, A_y).
+      // Lists then broadcast/reduce away (mirror of web/main.ts).
+      const lower = (e: Expr): Expr =>
+        withHoisting(
+          c => hoistRow(owner, c),
+          () => lowerObjects(e, defs, ropts),
+        );
+      const maps = panelMaps[panel];
+      // An integral's area stands on y = 0, which a plane map bends into a
+      // curve: there it is a readout only.
+      row.cls = classifyRow(
+        maps?.plane ? { ...resolved, integral: null } : resolved,
+        lower,
+        constNames,
+        fieldEnv,
+        timeDifferentiator(defs),
+      ).cls;
+      if (maps) {
+        // A mapped panel draws per-pixel rows in its screen coordinates, and
+        // carries what places points there as it is drawn (lib/axis-map.ts).
+        const plain = row.cls;
+        const how = plain.needs3D ? null : axisMapping(plain.object, maps);
+        if (!how) throw new Error(unmappedReason(plain.object, maps));
+        if (how === 'substitute')
           row.cls = classifyRow(
-            maps ? { ...resolved, integral: null } : resolved,
-            lower,
+            { ...resolved, integral: null },
+            // A coordinate flow is lowered to (x', y') first, so the map
+            // carries its velocities like any other flow.
+            e =>
+              mapRowExpr(
+                inlineFields(lowerCoordinateFlow(lower(e), fieldEnv, timeDifferentiator(defs)), fieldEnv),
+                maps,
+                plain.object.kind === 'vector-field',
+              ),
             constNames,
             fieldEnv,
             timeDifferentiator(defs),
           ).cls;
-          if (maps) {
-            // A mapped panel draws per-pixel rows in its screen coordinates, and
-            // carries what places points there as it is drawn (lib/axis-map.ts).
-            const plain = row.cls;
-            const how = plain.needs3D ? null : axisMapping(plain.object);
-            if (!how) throw new Error(UNMAPPED_MESSAGE);
-            if (how === 'substitute')
-              row.cls = classifyRow(
-                { ...resolved, integral: null },
-                // A coordinate flow is lowered to (x', y') first, so the map
-                // carries its velocities like any other flow.
-                e =>
-                  mapRowExpr(
-                    inlineFields(lowerCoordinateFlow(lower(e), fieldEnv, timeDifferentiator(defs)), fieldEnv),
-                    maps,
-                    plain.object.kind === 'vector-field',
-                  ),
-                constNames,
-                fieldEnv,
-                timeDifferentiator(defs),
-              ).cls;
-          }
-          if (graphArgs !== null) {
-            row.cls = graphObject(row.cls);
-            continue;
-          }
-          if (markArg !== null) {
-            if (row.cls.object.kind !== 'value')
-              throw new Error('mark(v) highlights the vertex v of the graphs in its panel: give it one number.');
-            row.mark = true;
-            continue;
-          }
-          // A solid whose shape reads sliders is checked for folds at their values.
-          checkSolid(row.cls.object, ropts.consts!);
-          const hint = curveHint(row.cls.object, row.text);
-          if (hint) row.info = hint;
-          // `e = 0.6` parsed with e already a number; only the text still says e.
-          // `i = [0..9]` is a family of such claims, one per member.
-          const taken = takenDefinitionName(row.text);
-          const object = row.cls.object;
-          if (taken && object.kind === 'note') row.cls = { ...row.cls, object: { ...object, constant: taken } };
-          else if (taken && object.kind === 'family' && object.members.every(m => m.object.kind === 'note')) {
-            const members = object.members.map(m => ({ ...m, object: { ...m.object, constant: taken } as MathObject }));
-            row.cls = { ...row.cls, object: { ...object, members } };
-          }
-        } catch (e) {
-          // A row reading a dropped CSV is not broken here — the bytes simply
-          // live on the device that made the graph, and never travelled in the
-          // link. Report that as a gap in this render, not as a bad row.
-          if (e instanceof MissingDataError) {
-            row.dataLocal = e.message;
-            row.needsFile = true;
-          } else {
-            row.error = e instanceof Error ? e.message : String(e);
-            // `i = [0..239]` fails as a claim about i (too many members); the
-            // author meant a definition, so say why it is not one.
-            const taken = takenDefinitionName(row.text);
-            if (taken && taken !== 'd') row.error = `${row.error.replace(/\.$/, '')} — ${takenNameHint(taken)}.`;
-          }
-        }
+        if (how === 'substitute' && maps.plane) row.cls = { ...row.cls, world: plain.object };
+        // A matrix is read at the screen point, and carried onto the screen
+        // by the maps' Jacobian as it is drawn.
+        if (row.cls.object.kind === 'tensor-field')
+          row.cls = { ...row.cls, object: { ...row.cls.object, jacobian: tensorJacobian(maps) } };
       }
-    },
-  );
-  if (counts.size) {
-    pruneRowHidden(defs, constNames, rows);
-    frame();
+      // A panel on a surface paints or carries its 2D rows onto it; a row
+      // in space draws as it would in any 3D panel.
+      if (panelSurfaces[panel] && !row.cls.needs3D) {
+        if (!surfaceMapping(row.cls.object)) throw new Error(OFF_SURFACE_MESSAGE);
+        row.cls = onSurface(row.cls);
+        // gaussian(x, y): the surface's curvature, shaded to its own size.
+        const object = row.cls.object;
+        if (
+          object.kind === 'scalar-field' &&
+          rawParsed.kind === 'call' &&
+          (rawParsed.name === 'gaussian' || rawParsed.name === 'meancurvature') &&
+          !fnNames.has(rawParsed.name)
+        )
+          row.cls = { ...row.cls, object: { ...object, autoscale: true } };
+      }
+      if (graphArgs !== null) {
+        row.cls = graphObject(row.cls);
+        continue;
+      }
+      if (markArg !== null) {
+        if (row.cls.object.kind !== 'value')
+          throw new Error('mark(v) highlights the vertex v of the graphs in its panel: give it one number.');
+        row.mark = true;
+        continue;
+      }
+      // A solid whose shape reads sliders is checked for folds at their values.
+      checkSolid(row.cls.object, solidConsts);
+      const hint = curveHint(row.cls.object, row.text);
+      if (hint) row.info = hint;
+      // `e = 0.6` parsed with e already a number; only the text still says e.
+      // `i = [0..9]` is a family of such claims, one per member.
+      const taken = takenDefinitionName(row.text);
+      const object = row.cls.object;
+      if (taken && object.kind === 'note') row.cls = { ...row.cls, object: { ...object, constant: taken } };
+      else if (taken && object.kind === 'family' && object.members.every(m => m.object.kind === 'note')) {
+        const members = object.members.map(m => ({ ...m, object: { ...m.object, constant: taken } as MathObject }));
+        row.cls = { ...row.cls, object: { ...object, members } };
+      }
+    } catch (e) {
+      // A row reading a dropped CSV is not broken here — the bytes simply
+      // live on the device that made the graph, and never travelled in the
+      // link. Report that as a gap in this render, not as a bad row.
+      if (e instanceof MissingDataError) {
+        row.dataLocal = e.message;
+        row.needsFile = true;
+      } else {
+        row.error = e instanceof Error ? e.message : String(e);
+        // `i = [0..239]` fails as a claim about i (too many members); the
+        // author meant a definition, so say why it is not one.
+        const taken = takenDefinitionName(row.text);
+        if (taken && taken !== 'd') row.error = `${row.error.replace(/\.$/, '')} — ${takenNameHint(taken)}.`;
+      }
+    }
   }
+  // Bound at once, and only those a drawn row reads (a row that failed after
+  // lowering leaves its own behind): each binding rebuilds the Env's views.
+  const reached = pending.size ? hiddenReached(rows, hiddenDefinition) : new Set<string>();
+  for (const [name, e] of pending) {
+    if (reached.has(name)) defs.bind(name, { tag: 'scalar', role: 'const', expr: e });
+    else constNames.delete(name);
+  }
+  if (reached.size) frame();
 
   // Backend compilation is explicit and never changes the semantic object.
   // OG requests only CPU plans; readouts do not enter compilation identity.
@@ -1139,11 +1350,12 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       row.view = undefined;
     }
 
-  try {
-    constEnv = evaluateFrame(defs, time, stateVals);
-  } catch {
-    /* row errors already reported */
-  }
+  if (!reached.size)
+    try {
+      constEnv = evaluateFrame(defs, time, stateVals);
+    } catch {
+      /* row errors already reported */
+    }
   rvs.prune();
   return { rows, defs, constEnv, rvs, rvNames, gridFields, document };
 }
@@ -1151,30 +1363,60 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
 /** A row's hidden constant (`#4.0`), as against a named value's (`M#3`). */
 const isRowHidden = (name: string): boolean => name.startsWith('#');
 
-/** Drops the rows' hidden constants that no drawn row reads, directly or
- *  through another hidden constant: those of a row that failed after
- *  lowering, say. */
-function pruneRowHidden(defs: Env, constNames: Set<string>, rows: readonly RowInfo[]): void {
-  const used = new Set<string>();
-  const seen = new WeakSet<object>();
-  const visit = (value: unknown): void => {
-    if (typeof value !== 'object' || value === null || seen.has(value)) return;
-    seen.add(value);
-    if (Array.isArray(value)) value.forEach(visit);
-    else if ((value as Expr).kind === 'var' && typeof (value as { name?: unknown }).name === 'string') {
-      const { name } = value as Expr & { kind: 'var' };
-      if (isHiddenName(name) && !used.has(name)) {
-        used.add(name);
-        visit(defs.consts.get(name));
-      }
-    } else for (const v of Object.values(value)) visit(v);
+/** The hidden constants the drawn rows read — their params, and what those
+ *  are made of in turn. */
+function hiddenReached(rows: readonly RowInfo[], definition: (n: string) => Expr | undefined): Set<string> {
+  const out = new Set<string>();
+  const visit = (name: string): void => {
+    if (!isHiddenName(name) || out.has(name)) return;
+    out.add(name);
+    const e = definition(name);
+    if (e) for (const v of freeVars(e)) visit(v);
   };
-  for (const row of rows) if (row.cls && !row.error) visit(row.cls);
-  for (const name of [...defs.consts.keys()])
-    if (isRowHidden(name) && !used.has(name)) {
-      defs.drop(name);
-      constNames.delete(name);
+  for (const row of rows) if (row.cls && !row.error) row.cls.params.forEach(visit);
+  return out;
+}
+
+/**
+ * `consts` with each hidden constant valued from its definition, reading the
+ * names it is made of through `consts` — so a recording proxy sees the
+ * sliders themselves. One made of t, a state or an animated constant has no
+ * value, as those have none.
+ */
+function throughHidden(
+  consts: Readonly<Record<string, number>>,
+  definition: (n: string) => Expr | undefined,
+): Readonly<Record<string, number>> {
+  const memo = new Map<string, number | undefined>();
+  const value = (n: string): number | undefined => {
+    const e = isHiddenName(n) ? definition(n) : undefined;
+    if (!e) return Object.hasOwn(consts, n) ? consts[n] : undefined;
+    if (memo.has(n)) return memo.get(n);
+    memo.set(n, undefined);
+    let v: number | undefined;
+    const vars: Record<string, number> = {};
+    for (const f of freeVars(e)) {
+      const x = value(f);
+      if (x !== undefined) vars[f] = x;
     }
+    try {
+      // (A name left out — t, say — throws: no value.)
+      v = evaluate(e, vars);
+    } catch {
+      /* no value */
+    }
+    memo.set(n, v);
+    return v;
+  };
+  return new Proxy(consts, {
+    get: (target, n, receiver) =>
+      typeof n === 'string' && isHiddenName(n) ? value(n) : Reflect.get(target, n, receiver),
+    getOwnPropertyDescriptor: (target, n) => {
+      if (typeof n !== 'string' || !isHiddenName(n)) return Reflect.getOwnPropertyDescriptor(target, n);
+      const v = value(n);
+      return v === undefined ? undefined : { value: v, writable: false, enumerable: true, configurable: true };
+    },
+  });
 }
 
 /** Worker/preview convenience: initial state at t=0, with a fresh sampler. */

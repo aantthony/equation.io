@@ -228,6 +228,12 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ],
       ['logistic bifurcation', 'a_{n+1} = x a_n (1 - a_n)', 'sequence recursion chaos'],
       ['Newton’s method for √2', 'a_0 = 3; a_{n+1} = a_n - (a_n^2 - 2)/(2 a_n); y = sqrt(2)', 'sequence recursion'],
+      // A recurrence whose terms are points draws its orbit (lib/seq.ts).
+      [
+        'Hénon map',
+        'view(x = -1.5..1.5, y = -0.5..0.5); a = 1.4; b = 0.3; p_0 = (0, 0); p_{n+1} = (1 - a p_n[1]^2 + p_n[2], b p_n[1])',
+        'sequence recursion chaos slider',
+      ],
       ['Fourier square wave', 'N = 3; y = (4/pi) sum(n=1..N, sin((2n-1)x)/(2n-1))', 'fourier series trig slider'],
       ['Fourier sawtooth', 'N = 5; y = 2 sum[n=1..N] (-1)^(n+1) sin(n x)/n', 'fourier series trig slider'],
       // A list bound draws every partial sum at once: one curve per element.
@@ -302,6 +308,17 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'state machine: divisible by 3',
         '# the remainder mod 3 of a binary number, read left to right; Q = [0..2]; S = [0, 1]; step(q, s) = mod(2q + s, 3); graph(Q, step(Q, S), S); # read 13 = 1101, one digit at a time; D = (1, 1, 0, 1); q_0 = 0; N = floor(clamp(0, 0, 4)); mark(q_N); --- right; # the run: the state after n digits; q_{n+1} = step(q_n, D[n + 1])',
         'graph slider sequence',
+      ],
+      // A stack is a tuple-valued recurrence, drawn row by row (lib/seq.ts).
+      [
+        'pushdown automaton: aⁿbⁿ',
+        '# a = 1 pushes and b = 2 pops: state 0 reads a’s, 1 reads b’s, 2 rejects; Q = [0..2]; S = [1, 2]; step(q, a) = {q = 0: {a = 1: 0, 1}, q = 1: {a = 2: 1, 2}, 2}; graph(Q, step(Q, S), S); D = (1, 1, 1, 2, 2, 2); q_0 = 0; N = floor(clamp(0, 0, 6)); mark(q_N); --- right; # the stack after n symbols: empty at the end, so aaabbb is accepted; s_0 = (); s_{n+1} = {D[n + 1] = 1: push(s_n, 1), pop(s_n)}; --- below; # the state after n symbols; q_{n+1} = step(q_n, D[n + 1])',
+        'graph slider sequence split-view',
+      ],
+      [
+        'stack of brackets',
+        '# ( = 1 and [ = 2 push, ) = 3 and ] = 4 pop their match, or the run stops; D = (1, 2, 1, 3, 4, 2, 2, 4, 4, 3); s_0 = (); s_{n+1} = {D[n + 1] <= 2: push(s_n, D[n + 1]), top(s_n) = D[n + 1] - 2: pop(s_n)}',
+        'sequence',
       ],
       [
         'matrix multiplication as arrows',
@@ -953,6 +970,43 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'coordinates slider',
       ],
       [
+        'area on log-log (ln 100)',
+        'view(x = 0.5..2000, y = 0.001..10, x = 10^X, y = 10^Y); y = 1/x; int[1..100] 1/x dx',
+        'coordinates integral',
+      ],
+      // A log frequency axis: a resonance peak of 20 log(Q) dB, then -40 dB a decade.
+      [
+        'Bode plot (slide Q)',
+        'view(x = 0.01..100, y = -65..30, x = 10^X, ratio = 0.03); Q = clamp(4, 0.5, 20); ' +
+          'y = -10 log((1 - x^2)^2 + (x/Q)^2); y = {x < 1: 0, -40 log(x)}',
+        'coordinates physics slider',
+      ],
+      // A plane map: the screen shows the plane through (x, y) = F(X, Y).
+      [
+        'polar, unrolled',
+        'r = sqrt(x^2 + y^2); theta = atan2(y, x); view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..4); r = 2 + cos(3 theta); (x - 1)^2 + y^2 < 1; (3u cos(4pi u), 3u sin(4pi u))',
+        'coordinates parametric',
+      ],
+      [
+        'log-polar: spirals go straight',
+        'view((x, y) = (exp(Y) cos(X), exp(Y) sin(X)), X = -pi..pi, Y = -2..2); u = interval(-8, 8); (exp(u/4) cos(u), exp(u/4) sin(u)); x^2 + y^2 = 1; y = x; w^3 = 1',
+        'coordinates complex',
+      ],
+      // z² shows each point of the plane twice: the disk and the point appear
+      // in both copies, and the lines x = k and y = k become hyperbolas.
+      [
+        'z²: the plane shown twice',
+        'view((x, y) = (X^2 - Y^2, 2 X Y), X = -2..2, Y = -1.5..1.5); grid(off); ' +
+          'sin(pi x) = 0; sin(pi y) = 0; (x - 1)^2 + y^2 < 0.5; (2, 1.5)',
+        'coordinates conformal',
+      ],
+      [
+        'inversion: lines become circles',
+        'view((x, y) = (X/(X^2 + Y^2), Y/(X^2 + Y^2)), X = -2..2, Y = -1.5..1.5); grid(off); ' +
+          'sin(pi x) = 0; sin(pi y) = 0; y = 1; (2, 1)',
+        'coordinates conformal geometry',
+      ],
+      [
         'symlog axis',
         'view(x = -1000..1000, y = -2..2, x = sinh(X)); y = cos(ln(abs(x))); y = tanh(x/50)',
         'coordinates trig',
@@ -988,6 +1042,64 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'cylindrical flow',
         "r = sqrt(x^2 + y^2); theta = atan2(y, x); (r', theta', z') = (0, 1, 0.5)",
         'coordinates 3d ode',
+      ],
+    ],
+  ],
+  [
+    // `on((X, Y, Z) = …)` draws the panel's 2D rows on a surface: x and y are
+    // the rows' coordinates, X, Y and Z the scene's (lib/surface-map.ts).
+    'drawing on surfaces',
+    [
+      // Longitude x, latitude y. A loxodrome crosses every meridian at one
+      // angle: x = 4 asinh(tan(y)), a straight line on a Mercator map. The cap
+      // holds the points within 0.35 radians of (-0.8, 0.5), by their dot product.
+      [
+        'globe: a field, a loxodrome and a cap',
+        'camera(-pi/4, 0.4, 7, spin = 0.2); on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); ' +
+          '4cos(y)^3 cos(3x); sin((x - 4 asinh(tan(y)))/2) = 0; cos(y) cos(0.5) cos(x + 0.8) + sin(y) sin(0.5) > cos(0.35)',
+        '3d surface scalar-field coordinates',
+      ],
+      // The great circle whose highest point is P.
+      [
+        'great circle through P (drag it)',
+        'camera(-pi/4, 0.4, 7); on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); ' +
+          'P = (-0.5, 0.6); tan(y) = tan(P.y) cos(x - P.x); y = 0; x = P.x',
+        '3d draggable geometry',
+      ],
+      // A spin about the axis tilted a from the pole, as (x', y') in
+      // longitude and latitude; its arrows wind round the two fixed points.
+      [
+        'rotation about a tilted axis (slide a)',
+        'camera(-pi/4, 0.4, 7); a = clamp(0.6, 0, pi); on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); ' +
+          '(cos(a) - sin(a) tan(y) cos(x), sin(a) sin(x)); (0, pi/2 - a); (pi, a - pi/2)',
+        '3d vector-field slider',
+      ],
+      // The line of slope q/p, wrapped round both of the torus's circles, is
+      // the (p, q) torus knot: p y - q x is a multiple of 2π along it. With
+      // gcd(p, q) > 1 it is a torus link of gcd(p, q) loops instead.
+      [
+        'torus knot as a line (slide p, q)',
+        'camera(-pi/3, 0.8, 11); p = clamp(round(3), 1, 9); q = clamp(round(4), 1, 9); ' +
+          'on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); sin((p y - q x)/2) = 0',
+        '3d knot slider',
+      ],
+      // Geodesics fan out from P: the straightest curves on the torus, which
+      // swing round the hole where K < 0 (the complement colour) and pass
+      // over the top where K > 0. Drag P along the surface.
+      [
+        'geodesics from P on a torus (drag it)',
+        'camera(-0.3, 0.7, 11); on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); ' +
+          'gaussian(x, y); P = (-0.5, 0.3); a = [0..7] pi/4; geodesic(P, (cos(a), sin(a)), 10)',
+        '3d draggable surface derivative',
+      ],
+      // A Σ in the surface: the disk's height is r times a square wave's
+      // Fourier partial sum in the angle, overshooting at each jump (Gibbs).
+      [
+        'Gibbs fan (slide N)',
+        'camera(-pi/4, 0.5, 12); N = clamp(round(5), 1, 20); ' +
+          'on((X, Y, Z) = (x cos(y), x sin(y), x sum[n=1..N] sin((2n - 1) y)/(2n - 1)), x = 0..2.5, y = -pi..pi); ' +
+          'sin(y) > 0; sin(2pi x) = 0',
+        '3d surface fourier series slider',
       ],
     ],
   ],
@@ -1034,6 +1146,23 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['vase (revolve)', 'a = 1; revolve({-3 < y < 3: 1.5 + a sin(y) / 2}, y)', '3d surface slider'],
       ['torus', '(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))', '3d surface parametric'],
       ['sphere (u,v)', '(2sin(pi v)cos(2pi u), 2sin(pi v)sin(2pi u), 2cos(pi v))', '3d surface parametric'],
+      // K = cos(v)/(3 + cos(v)): positive (row colour) round the outside,
+      // negative (its complement) round the hole, 0 on the top and bottom
+      // circles where the two meet.
+      [
+        'Gaussian curvature of a torus',
+        'camera(-0.9, 0.7, 11); u = interval(0, 2pi); v = interval(0, 2pi); S = ((3 + cos(v)) cos(u), (3 + cos(v)) sin(u), sin(v)); gaussian(S); gaussian(S, 0, 0); gaussian(S, 0, pi)',
+        '3d surface parametric derivative',
+      ],
+      // Flamm's paraboloid, the spatial slice of a Schwarzschild black hole
+      // (horizon radius 2): geodesics sent inward from the rim bend round the
+      // throat, or fall into it, by how far off-centre they are aimed.
+      [
+        'geodesics on Flamm’s paraboloid (slide b)',
+        'camera(-0.9, 0.6, 22); b = 0.1; S = ((2 + 6u) cos(2pi v), (2 + 6u) sin(2pi v), 2sqrt(2(6u))); S; ' +
+          'k = b ([0..8]/4 - 1); geodesic(S, (1, 0), (-1, k), 60)',
+        '3d surface parametric slider physics',
+      ],
       // The tube radius swells and shrinks with t (shifting v by t would
       // only slide the same torus along itself).
       [
@@ -1209,6 +1338,7 @@ export const COVERS: Record<string, string> = {
   complex: 'domain coloring',
   'polar + plane coordinates': 'spiral traced in (r, θ)',
   'spherical + cylindrical': 'cylindrical chart',
+  'drawing on surfaces': 'globe: a field, a loxodrome and a cap',
   '3D surfaces': 'gyroid',
   'fields in space': 'hydrogen 2p orbital',
   solids: 'icosahedron',

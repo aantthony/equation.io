@@ -38,6 +38,7 @@ export const FN_GLSL: Record<string, string> = {
   factorial: 'eq_factorial',
   sinc: 'eq_sinc',
   coth: 'eq_coth',
+  tanh: 'eq_tanh',
   [ANGLE_FN]: 'eq_angle',
   [ANGLE_RATE_FN]: 'eq_angle_rate',
   [GAMMA_PDF_FN]: 'eq_gammapdf',
@@ -184,9 +185,12 @@ float eq_weibullpdf(float x, float shape, float scale) {
   return min((shape / scale) * exp((shape - 1.0) * lr - exp(e)), EQ_BIG);
 }
 float eq_sinc(float x) { return x == 0.0 ? 1.0 : sin(x) / x; }
-// 1/tanh, not cosh/sinh: the latter is Inf/Inf = NaN for |x| > ~89 where
-// coth is ±1 (and the cothFn() CPU twin says so).
-float eq_coth(float x) { return 1.0 / tanh(x); }
+// GLSL's tanh is allowed to be (and on many GPUs is) Inf/Inf = NaN for
+// |x| > ~89, where tanh is ±1: in float, it is ±1 from |x| = 9.1 on.
+float eq_tanh(float x) { return tanh(clamp(x, -20.0, 20.0)); }
+// 1/tanh, not cosh/sinh, which overflow the same way; coth is ±1 there too
+// (and the cothFn() CPU twin says so).
+float eq_coth(float x) { return 1.0 / eq_tanh(x); }
 // angleFn in lib/expr.ts: the signed angle from arm u to arm v in (-pi, pi],
 // NaN for a zero-length arm. Arms are scaled by their largest component so
 // float32 products cannot underflow near the vertex, and the straight angle

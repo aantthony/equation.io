@@ -1,6 +1,6 @@
 # Axis maps: log scales and beyond (#71)
 
-Status: **steps 1–6 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
+Status: **steps 1–8 implemented** (lib/axis-map.ts, lib/axis-ticks.ts, web/render2d.ts mapOverlay); the rest are notes.
 
 ## The idea
 
@@ -46,9 +46,7 @@ symlog (`y = sinh(Y)`) all come from one feature.
    and a drag writes back through the forward map. Positions the map
    cannot show are dropped (points) or break the line. The link preview
    (worker/og.ts) carries placed rows and draws the ticks' grid the same
-   way. Still not drawn on mapped axes: tensor fields (their glyphs need
-   the map's Jacobian), histograms (bars stand on y = 0),
-   complex systems, 3D and integral shading.
+   way. 3D is not drawn on mapped axes; the rest came in step 7.
 4. **Done.** Hover and systems. A real system is rewritten like a curve, so
    its solver searches the window in screen coordinates (evenly, as a log
    axis needs) and its solutions land there; a mapped panel offers no
@@ -81,34 +79,190 @@ symlog (`y = sinh(Y)`) all come from one feature.
    shape is an error rather than drawn without the slope. Seeds dropped by
    clicking are kept on the screen, so moving a slider in the map moves
    them in x and y.
+7. **Done.** The rest of 2D.
+   - Tensor fields. A matrix M acting on x and y is J⁻¹ M J on the screen,
+     J = diag(gₓ'(X), gᵧ'(Y)), so the entries are read at the screen point
+     and the maps' slopes ride along (tensor-field `slope`): the glyphs draw
+     J⁻¹ M J, and streamlines follow the major eigenvector e of M's
+     symmetric part in x and y, shown as J⁻¹e. (The symmetric part of
+     J⁻¹ M J has other eigenvectors: a stress's principal directions are
+     those of x and y, not of the screen.)
+   - Histograms and integral shading stand on y = 0. Where the map cannot
+     show y = 0 (a log axis), they rise from the edge it lies past, which
+     is the usual picture of a histogram on log axes (lib/axis-map.ts
+     toScreenOrEdge). Bars are placed like points; an integral's area is
+     sampled along the screen, so evenly on a log x axis, its signs read
+     before y is mapped (lib/intshade.ts shadeRuns).
+   - Complex systems solve in w, which no rewrite of x and y reaches, so
+     they solve in x and y over the part of the window the maps show and
+     their roots are placed (and can be certified and dragged, as
+     anywhere).
+8. **Done.** Plane maps (lib/plane-map.ts): `view((x, y) = (Y cos(X),
+   Y sin(X)), X = -pi..pi, Y = 0..5)`, one map for both coordinates, so
+   the screen can show the plane in polar or log-polar form.
+   - Per pixel it is the same substitution, x and y both from (X, Y). A
+     graph is no longer a graph on the screen (y = x² unrolled is no
+     function of X), so every row is substituted whole.
+   - Flows and matrices are carried by the Jacobian J = ∂(x, y)/∂(X, Y):
+     J⁻¹ (P, Q), J⁻¹ M J and J⁻¹e, the diagonal J of step 6–7 in general
+     (tensor-field `jacobian`, row-major).
+   - The way back has no peeling in general, so it is numerical:
+     Levenberg–Marquardt from the nearest of a 25 × 25 grid of samples over
+     the window (and a quarter past it), or from a neighbour already carried
+     (PlaneInverse). A map may show a point more than once:
+     - a point is drawn at each place;
+     - a line is drawn on each copy, each run once: the places the screen
+       shows a vertex are searched for every few vertices and carried on
+       from the vertex before along each run, so a copy one search missed
+       comes from its neighbour, and one with nothing leading into it is
+       traced back to where it came onto the screen; each is cut just past
+       the window's edge (PlaneInverse.lines, FOLLOW_MARGIN);
+     - a shape to fill is followed well off the screen, whole, from each
+       place the screen shows a vertex where the map does not fold
+       (planeShapes); one round a point the map folds at (a square about
+       the polar origin) unrolls into a curve across a full turn, its
+       outline drawn as a line and what it encloses filled down to the line
+       the fold is shown along, a turn at a time (foldFills, foldPoints);
+     - a region's corners are carried once each, on the copy their
+       neighbour is on and at the offsets between copies found by
+       searching now and then; a corner where the map folds is placed per
+       triangle, and that triangle becomes the quad it is on the screen
+       (PlaneInverse.triangles).
+     A search starts from the nearest samples and from the best of each
+     block of the window they do not reach; the shifts that show the same
+     plane (2π along X, on the polar screen) are found once per window
+     (PlaneInverse.turns, checked by PlaneInverse.symmetric), and every
+     copy a turn from one found is added, so a search that misses a copy
+     finds it from another; the turn is taken as the longest difference
+     between copies over the number of turns it spans, so it is good to
+     many places. A turn found that is a whole number of the true one
+     (copies found far apart) is divided by small primes while the map is
+     the same that far on, and two turns spanning only part of the lattice
+     the map repeats on ((cos X, sin Y)'s (2π, ±2π)) are filled out to it
+     and made short (PlaneInverse.primitive). In a window sixteen or more
+     turns across, the seeds move onto one turn of it in its middle
+     (PlaneInverse.reseed): a grid over the whole window can step whole
+     turns from seed to seed and see the plane at only a few angles
+     (polar across 200π drew nothing), and search adds each copy a turn
+     from what they find. The solver and the check of a turn measure
+     their error against the size of the point, not of all the window shows:
+     a window tall in log-polar Y shows e^Y up to millions, and against
+     that a shift a hair's breadth long passed as a turn and points well off
+     the one wanted as copies of it. A long run a window with turns shows
+     more of than its width and margin hold gets points added where it
+     crosses the screen (PlaneInverse.through): a copy of it can cross
+     between ends past the margin either side, shown only on other copies.
+     A line is solved for on one copy per vertex: every copy
+     a whole number of turns from it (or a turn from another carried) is
+     that run moved, so a window many turns wide costs little more than one
+     turn, and the copies are kept in typed arrays, found by a hash of
+     their cell. A fill round a fold is repeated a turn on only when
+     the map really shows the same plane there, and each other branch
+     (polar's copy at (X + π, −Y)) is filled from its own start. The fold
+     points are where the Jacobian's determinant changes sign, or touches
+     0 (a branch point: z², at 0); a fill goes round one only when it is
+     the shape's only one and the map does not fold all round it
+     (PlaneInverse.isolated). Where a line runs exactly through a fold, it
+     may leave on either branch.
+   - The window is the screen's (X, Y), since a rectangle of x and y is no
+     rectangle on it; the grid and labels are the screen's, and `grid(x, y)`
+     or coordinate fields draw their level lines through the map.
+   - Hover finds a curve's intercepts and extrema in x and y, as the row
+     is written (Classified.world), over what the window shows, and places
+     each wherever the screen shows it.
+   - Not drawn: histograms (refused) and integral shading (a readout only),
+     both standing on y = 0, a curve here.
 
-## Later: equations on a surface
+## Equations on a surface
 
-The same substitution, aimed at a 3D panel, would print a panel's 2D rows
-onto a surface — the 2-sphere with x as longitude and y as latitude. This
-already works by hand with coordinate fields and surface intersections:
+A panel row `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)` prints the panel's
+2D rows onto a surface in space (lib/surface-map.ts):
 
 ```
-rho = sqrt(x^2+y^2+z^2)
-lon = atan2(y, x)
-lat = asin(z/rho)
-rho = 0.99
-(rho, lat) = (1, sin(3 lon)/2)
-(rho, lon^2 + (2lat)^2) = (1, 1)
+on((X, Y, Z) = (3cos(y) cos(x), 3cos(y) sin(x), 3sin(y)), x = -pi..pi, y = -pi/2..pi/2)
+y = sin(3x)/2
+x^2 + (2y)^2 < 1
 ```
 
-`F(x, y) = c` becomes `(rho, F(lon, lat)) = (1, c)`, traced where the
-sphere meets the surface F(lon, lat) = c. (The sphere is drawn at 0.99
-because a curve exactly on a surface is hidden by it; a depth bias for
-curves lying on a surface would fix that.)
+is the sphere with x as longitude and y as latitude, a sine wave round it
+and a filled ellipse on it. X, Y and Z are the scene's coordinates; x and y
+are the rows'. The panel is 3D and framed with `camera(…)` (a `view(…)` in
+it is refused); the surface itself is drawn as a parametric surface over
+the ranges given, and sliders in it are read at their value. A Σ or Π in
+it is written out term by term as a row's is (lib/defs.ts expandMapSums,
+which axis and plane maps share), so its bounds must be numbers or sliders.
 
-What a panel row like `on(rho = 1, x = lon, y = lat)` would add:
-
-- Curves: rewrite the panel's 2D equations into that system automatically.
-  Cheap — the tracer exists.
-- Regions and fields painted onto the surface: needs the 3D renderer to
-  colour a surface by a field per pixel, which it does not do today.
-
-Limits inherited from the tracer: numerical (at most 24 branches), not the
-per-pixel exact rendering 2D curves get, and curves break where the chart
-is singular (the poles, the atan2 cut at longitude ±π).
+- **Painted**: what 2D draws per pixel from x and y — implicit curves,
+  regions and scalar fields — is drawn per pixel on the surface's mesh: the
+  fragment shader (web/render3d.ts paintFrag) reads x and y from the mesh's
+  (u, v) and draws a line where |F| over its change across a pixel
+  (sampled along the screen's two directions) is small, but not where F
+  jumps sign at a pole; a fill where the inequality holds; a colour scale
+  for a field. Exact at any zoom, through
+  the poles and seams, with no tracing.
+- **Carried**: what places things — points, parametric curves, figures,
+  point lists, labels and named points — is carried point by point through
+  the surface (surfacePoint), lifted a little toward the eye so the surface
+  does not hide it; straight edges are cut into pieces first so they bend
+  with the surface. Figures (polygons, hulls) draw as outlines: a flat fill
+  would cut through the surface rather than lie on it, and an inequality
+  paints the same area exactly. Where the surface is undefined (1/x at
+  x = 0) nothing carried is drawn.
+- **Parametric regions** come with their own parametrisation, so the
+  surface is composed with it (surfaceOver): X, Y and Z in the region's u
+  and v, a mesh that lies on the surface and is painted as a fill, like an
+  inequality's area. Its mesh is not the surface's, so its flat cells can
+  sag below the surface's between vertices; each vertex is raised toward
+  the eye along the normal by a quarter of the mesh's second differences
+  there (twice the sag), which the polygon offset alone does not cover. A
+  region that covers itself twice shows darker there.
+- **Vector fields** draw as arrows, as a 3D panel's arrows do: the field
+  (u, v) at (x, y) is the tangent u ∂P/∂x + v ∂P/∂y of the surface P
+  (surfaceTangents, from its derivatives; central differences where it has
+  none), drawn from P(x, y) at the centres of a lattice whose cells are
+  near square on the surface, 24 along its longer side (surfaceArrows).
+  Each arrow is the image of a 2D arrow 0.7 of its cell long in x and y, so
+  the arrows show direction, not size, and shrink where the surface crowds
+  the cells (toward a sphere's poles). There are no streamlines and no
+  click-to-trace curves on a surface, so a field there is still unless it
+  reads t (onSurface; in 2D every field's streaks move), and its arrows are
+  kept until the surface, the field or a value it reads changes. A field
+  too large to trace (over 8192 nodes a component) is refused at its row.
+- **Curvature**: `gaussian(x, y)` and `meancurvature(x, y)` are K and H of
+  the panel's own surface in its x and y (lib/defs.ts surfaceGeometry, from
+  lib/surface-geometry.ts, with the surface passed to the resolver as
+  `ResolveOpts.surface`), so they are scalar fields painted as any field
+  is — but shaded to their own size: a gain of 1.5 over the 90th
+  percentile of |K| over the surface (divergingGain) replaces the fixed 0.6
+  a field is shaded with, since a sphere of radius 3 has K = 0.11 and would
+  barely tint. `gaussian(P)` is K at a point, a number.
+- **Geodesics**: `geodesic((x0, y0), (dx, dy))` traces the surface's
+  geodesic in its x and y (lib/analysis.ts classifyGeodesic, from the
+  Christoffel symbols of the embedding in x and y) and is carried like a
+  parametric curve. Across a range the surface repeats over (periodicAxes:
+  P(x + span, y) = P(x, y) at a spread of points) it runs on past the edge,
+  since carrying a point needs only P(x, y), not x in range.
+- Families draw as their members.
+- Paints draw after the surface with a polygon offset and no depth writes,
+  so they sit on it without fighting it.
+- Rows in space (3D) draw in the panel as in any 3D panel. Other 2D rows
+  have no picture on a surface yet (among them matrix fields, complex
+  rows, colour fields, projected regions, histograms, sequences and
+  systems) and are refused with a
+  message saying so.
+- The surface is drawn by the GPU, so it must be written in what the
+  shaders take; a surface they cannot draw is refused at its row. Its
+  tangents are exact where they are cheap and finite differences otherwise
+  (mod, gamma).
+- Hovering: the ray from the eye through the pointer is met with the
+  surface (lib/surface-pick.ts: a coarse mesh of it first, then Newton on
+  P(x, y) = eye + t·ray from the triangle hit), and the readout gives x and
+  y there, to the pixel. Near a painted curve it traces the curve as 2D
+  hover does ("on curve"), within the surface's x and y ranges; near a
+  carried dot it reads the dot's x and y (and name). Each readout also
+  gives the scalar fields' values and the vector fields' (u, v) at its x
+  and y. It is read again as the camera spins or moves under a still
+  pointer. Named points drag along the surface, in x and y, except through
+  a slider the surface itself reads. Dots on the far side, hidden by the
+  surface, are not picked.
+- Not drawn: link previews (a panel on a surface gets the generic card).

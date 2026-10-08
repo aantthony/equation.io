@@ -80,6 +80,7 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   label: 'text label at a point',
   trail: 'motion trail behind a moving point',
   orbit: 'path of a simulated state over a time range',
+  geodesic: 'geodesic of a parametric surface from a start point in a direction, integrated along the surface',
   system: 'solutions of a system of equations (points or curves)',
   value:
     'number readout under the row; draws nothing on the graph, except a definite integral, which shades the area it measures',

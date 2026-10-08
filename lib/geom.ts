@@ -1742,6 +1742,10 @@ export function lowerTensorValue(
 
 /** The internal call streamlines(M) lowers to, around the lowered matrix. */
 export const STREAMLINES_CALL = '[streamlines]';
+/** `[paint](S, f)`: the surface S coloured by f, a scalar in the same u and
+ *  v — gaussian(S) alone on a row (lib/analysis.ts), which classify unwraps
+ *  (lib/plot.ts paintedSurface). */
+export const PAINT_CALL = '[paint]';
 export const STREAMLINES_USAGE =
   'streamlines takes one 2×2 matrix in x and y — streamlines(((x, y), (y, -x))) traces its major eigenvector.';
 
@@ -1795,6 +1799,10 @@ function lowerStatement(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsL
   if (e.kind === 'call' && e.name === 'streamlines') {
     if (e.args.length !== 1) throw new Error(STREAMLINES_USAGE);
     return { kind: 'call', name: STREAMLINES_CALL, args: [lowerStatement(e.args[0], getComps, getMat, isList)] };
+  }
+  if (e.kind === 'call' && e.name === PAINT_CALL) {
+    const lo = (n: Expr): Expr => toExpr(lower(n, getComps, getMat, isList));
+    return { kind: 'call', name: PAINT_CALL, args: e.args.map(lo) };
   }
   // action(M): the matrix drawn by what it does (lib/glyphs.ts).
   if (e.kind === 'call' && e.name === 'action') {

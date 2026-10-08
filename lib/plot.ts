@@ -33,7 +33,7 @@ import {
 import { takenNameHint } from './defs.ts';
 import { diff } from './diff.ts';
 import { matchODE } from './ode.ts';
-import { type FigureName, STREAMLINES_CALL, STREAMLINES_USAGE } from './geom.ts';
+import { type FigureName, PAINT_CALL, STREAMLINES_CALL, STREAMLINES_USAGE } from './geom.ts';
 import { HULL_3D_MAX } from './hull.ts';
 import { type HiddenInterval, hasInterval, intervalsIn, replaceIntervals, sweep } from './interval.ts';
 import { packedTuple, tupleMultiset, tupleRow } from './list.ts';
@@ -557,6 +557,40 @@ function projectedRegion(expr: Expr, hidden: readonly HiddenInterval[], vars: Re
   );
 }
 
+/**
+ * A parametric surface coloured by a scalar on it. Both are written in u and
+ * v, or in the intervals u and v were defined as, which are swept here as
+ * classify sweeps them, the same interval to the same parameter in both.
+ */
+function paintedSurface(
+  [surface, paint]: readonly Expr[],
+  defined: ReadonlySet<string>,
+  fields: Record<string, Expr>,
+  timeDerivative?: (e: Expr) => Expr,
+): { cls: Classified } {
+  const usage = 'gaussian(S) and meancurvature(S) alone on a row colour one parametric surface S in u and v.';
+  const both: Expr = { kind: 'vec', items: [surface, paint] };
+  const hidden = intervalsIn(both);
+  if (hidden.length) {
+    const used = freeVars(both);
+    const free = [...PARAM_VARS].filter(p => !used.has(p));
+    if (hidden.length > free.length) throw new Error(usage);
+    const slot = new Map(hidden.map((h, k) => [h.key, free[k]]));
+    const by = (h: HiddenInterval) => sweep(h, slot.get(h.key)!);
+    [surface, paint] = [replaceIntervals(surface, by), replaceIntervals(paint, by)];
+  }
+  if (paint.kind === 'list' || surface.kind === 'list') throw new Error(usage);
+  const { cls } = classifyLowered(surface, defined, fields, timeDerivative);
+  const { object } = cls;
+  if (object.kind !== 'surface' || object.form !== 'parametric') throw new Error(usage);
+  const vars = freeVars(paint);
+  if ([...SPACE_VARS].some(v => vars.has(v))) throw new Error(usage);
+  const params = [...new Set([...cls.params, ...[...vars].filter(v => defined.has(v))])].sort();
+  return {
+    cls: { ...cls, object: { ...object, paint }, params, animated: cls.animated || vars.has('t') },
+  };
+}
+
 /** classify, also handing back the equation a revolve(…) row desugared to
  *  (`surface`) — the one place that desugaring happens, after coordinate
  *  fields have expanded, so a field hiding y or z is seen for what it is. */
@@ -568,6 +602,9 @@ function classifyLowered(
 ): { cls: Classified } {
   // streamlines(M): the matrix field it wraps, drawn along its major
   // eigenvector. Nothing else has streamlines to draw.
+  // gaussian(S) alone on a row: the surface S, coloured by its curvature.
+  if (expr.kind === 'call' && expr.name === PAINT_CALL)
+    return paintedSurface(expr.args, defined, fields, timeDerivative);
   if (expr.kind === 'call' && expr.name === STREAMLINES_CALL) {
     const { cls } = classifyLowered(expr.args[0], defined, fields, timeDerivative);
     if (cls.object.kind !== 'tensor-field') throw new Error(STREAMLINES_USAGE);
@@ -1408,7 +1445,7 @@ function lowerShade(int: IntShade, lower: (e: Expr) => Expr, known: ReadonlySet<
  * fails too, since the tolerance is relative rounding error, not 1e-4.
  */
 export function holdsEverywhere(e: Expr & { kind: 'eq' }): boolean {
-  const names = [...freeVars(e)].filter(n => n !== 'pi' && n !== 'e' && n !== 'tau');
+  const names = [...freeVars(e)].filter(n => n !== 'pi' && n !== 'e');
   let seed = 0x9e3779b9;
   const random = (): number => {
     seed = (seed + 0x6d2b79f5) | 0;

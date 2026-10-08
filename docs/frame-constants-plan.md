@@ -142,11 +142,13 @@ for colour fields (lib/compiler.ts). Separate work.
 ## As built (stage 2)
 
 - **Where they live.** In the document Env, like the named ones. While
-  `analyzePrepared` (lib/analysis.ts) lowers each row, `withHoisting`
-  (lib/pga.ts) is set to a hoister that binds a frame-constant coefficient
-  as the constant `#id.k` (the row's id, or its index, and a counter) and
-  adds it to `constNames`, so the row's `params` name it and the compiler
-  binds it as a uniform. A leading `#` keeps row names apart from a named
+  `analyzePrepared` (lib/analysis.ts) lowers a drawn row (`classifyRow`'s
+  `lowerObjects`), `withHoisting` (lib/pga.ts) is set to a hoister that names
+  a frame-constant coefficient `#id.k` (the row's id, or its index, and a
+  counter) and adds it to `constNames`, so the row's `params` name it and the
+  compiler binds it as a uniform. They are held aside during the loop and
+  bound in one go after it (each binding rebuilds the Env's views). Rows in
+  random variables, P(…), E(…), orbits and sequences lower as before. A leading `#` keeps row names apart from a named
   value's `M#3`, and from each other across rows. Everything that evaluates
   a frame reads the same Env: the app (`currentConstEnv`, slider and drag
   rebinds), readouts (the frame is re-evaluated after the rows), the /g/
@@ -165,12 +167,19 @@ for colour fields (lib/compiler.ts). Separate work.
   uniform. A named value's own coefficients keep stage 1's rule.
 - **One name per coefficient.** `frameHoister` keeps one name per distinct
   coefficient (by `exprKey`), so the map that moves eight vertices of a
-  hull, or 200 cubes turned by one matrix, is twelve or nine constants.
-- **Pruning and repeat analysis.** After the rows, row constants that no
-  row's classified object reads — directly or through another hidden
-  constant — are dropped (a row that failed after lowering, say). Each
-  `analyzePrepared` first drops the previous run's, so re-analysing a
-  prepared document gives the same names and no duplicates.
+  hull, or 200 cubes turned by one matrix, is twelve or nine constants. An
+  entry object met again (a turn matrix's, for every vertex) is looked up
+  by identity, without a walk.
+- **Pruning and repeat analysis.** Only row constants some row's `params`
+  read — directly or through another hidden constant — are bound (not those
+  of a row that failed after lowering, say). Each `analyzePrepared` first
+  drops the previous run's, so re-analysing a prepared document gives the
+  same names and no duplicates. A named value whose lowering fails, or
+  whose definition errors, takes back the hidden constants it had made.
+- **Fold check.** A solid's fold check (`checkSolid`) reads its sliders'
+  values; a hidden constant is valued from its definition through the same
+  recording proxy, so a solid turned by a slider-dependent motor or matrix
+  is still checked, and its sliders still leave the runtime-uniform set.
 - **Measured** (rows with `A`, `B` draggable, `S = motor(line(A, B), t,
   t/4)`, `N = motor(line(A, (0, 0, 1)), 1, 0.5)`):
 

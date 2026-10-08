@@ -17,8 +17,10 @@
  */
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import type { MathObject } from './math-object.ts';
+import { type MapDoc, expandMapSums } from './defs.ts';
 import { diff } from './diff.ts';
 import { matchODE } from './ode.ts';
+import { type PlaneMap, planeIn } from './plane-map.ts';
 
 export type Axis = 'x' | 'y';
 
@@ -36,7 +38,13 @@ export interface AxisMap {
   slope: Expr;
 }
 
-export type AxisMaps = Partial<Record<Axis, AxisMap>>;
+/** A panel's maps: x and y each on their own, or both at once through a
+ *  plane map (lib/plane-map.ts), which a view row never mixes with them. */
+export interface AxisMaps {
+  x?: AxisMap;
+  y?: AxisMap;
+  plane?: PlaneMap;
+}
 
 export const SCREEN: Record<Axis, string> = { x: 'X', y: 'Y' };
 
@@ -86,7 +94,7 @@ function solveFor(f: Expr, s: string, target: Expr): Expr | null {
 }
 
 /** Parse the right side of `x = 10^X` in a view row. */
-export function parseAxisMap(axis: Axis, src: string, env: Record<string, number> = {}): AxisMap {
+export function parseAxisMap(axis: Axis, src: string, env: Record<string, number> = {}, doc: MapDoc = {}): AxisMap {
   const screen = SCREEN[axis];
   const usage = `An axis map writes ${axis} in terms of the screen's ${screen}, like ${axis} = 10^${screen}.`;
   let forward: Expr;
@@ -95,7 +103,8 @@ export function parseAxisMap(axis: Axis, src: string, env: Record<string, number
   } catch {
     throw new Error(usage);
   }
-  const free = [...freeVars(forward)].filter(n => n !== 'pi' && n !== 'e' && n !== 'tau');
+  forward = expandMapSums(forward, [screen], env, doc);
+  const free = [...freeVars(forward)].filter(n => n !== 'pi' && n !== 'e');
   if (!free.includes(screen)) throw new Error(usage);
   // A slider (`x = b^X`) is read at its value, so the map is plain numbers
   // from here on; reading it through env marks it as one a slider move
@@ -141,13 +150,38 @@ function increasing(map: AxisMap): boolean {
   return isFinite(last);
 }
 
-/** The screen coordinate showing world value v, NaN when none does. */
+/** The screen coordinate showing world value v, NaN when none does. The
+ *  inverse may name values the map never reaches (y = sqrt(Y) has Y = y^2,
+ *  which sends y = -3 to 9): only a round trip shows v is there. */
 export function toScreen(map: AxisMap, v: number): number {
+  let at: number;
   try {
-    return evaluate(map.inverse, { [map.axis]: v });
+    at = evaluate(map.inverse, { [map.axis]: v });
   } catch {
     return NaN;
   }
+  if (!isFinite(at)) return at;
+  return Math.abs(toWorld(map, at) - v) <= 1e-9 * Math.max(1, Math.abs(v)) ? at : NaN;
+}
+
+/**
+ * Where the screen shows world value v, or the edge (±Infinity) past which it
+ * lies when the map cannot show it: y = 0 on a log axis is below every value
+ * it shows. Bars and integrals stand on y = 0 there.
+ */
+export function toScreenOrEdge(map: AxisMap, v: number): number {
+  const at = toScreen(map, v);
+  if (isFinite(at) || Number.isNaN(v)) return at;
+  return toWorld(map, 0) > v ? -Infinity : Infinity;
+}
+
+/** The maps' Jacobian ∂(x, y)/∂(X, Y), row-major, with the screen
+ *  coordinates called x and y, as a mapped tensor field carries it
+ *  (lib/math-object.ts): diag(gₓ'(x), gᵧ'(y)) for axes mapped one by one. */
+export function tensorJacobian(maps: AxisMaps): [Expr, Expr, Expr, Expr] {
+  if (maps.plane) return planeIn(maps.plane).jacobian;
+  const [zero, one]: Expr[] = [num(0), num(1)];
+  return [maps.x ? slopeIn(maps.x) : one, zero, zero, maps.y ? slopeIn(maps.y) : one];
 }
 
 /** The world value at screen coordinate s. */
@@ -228,8 +262,9 @@ const isVar = (e: Expr, name: string) => e.kind === 'var' && e.name === name;
  * else has x and y replaced by the map.
  */
 export function mapRowExpr(e: Expr, maps: AxisMaps, flow = false): Expr {
+  if (maps.plane) return mapPlaneExpr(e, maps.plane, flow);
   const env: Record<string, Expr> = {};
-  for (const map of Object.values(maps)) env[map.axis] = forwardIn(map);
+  for (const map of [maps.x, maps.y]) if (map) env[map.axis] = forwardIn(map);
   if (flow) {
     // A velocity in x and y is one on the screen times the map's slope
     // there: x = g(X) moves at g'(X) dX/dt. So arrows, streamlines and traced
@@ -255,6 +290,29 @@ export function mapRowExpr(e: Expr, maps: AxisMaps, flow = false): Expr {
   return substVars(e, env);
 }
 
+/**
+ * mapRowExpr through a plane map: x and y replaced by the map everywhere, a
+ * graph included (on the unrolled polar screen, y = x^2 is no graph of
+ * anything). A velocity is carried back by the Jacobian, J⁻¹ (P, Q).
+ */
+function mapPlaneExpr(e: Expr, plane: PlaneMap, flow: boolean): Expr {
+  const { forward, jacobian } = planeIn(plane);
+  const env = { x: forward[0], y: forward[1] };
+  if (!flow) return substVars(e, env);
+  const v = planeFlow(e);
+  if (!v) throw new Error(UNMAPPED_MESSAGE);
+  const [P, Q] = v.items.map(item => substVars(item, env));
+  const [a, b, c, d] = jacobian;
+  const det = bin('-', bin('*', a, d), bin('*', b, c));
+  return {
+    kind: 'vec',
+    items: [
+      bin('/', bin('-', bin('*', d, P), bin('*', b, Q)), det),
+      bin('/', bin('-', bin('*', a, Q), bin('*', c, P)), det),
+    ],
+  };
+}
+
 /** The velocities of a 2D flow row: a tuple in x and y, or a slope field
  *  or system spelled as an ODE (`y' = f`, `(x', y') = (P, Q)`). */
 function planeFlow(e: Expr): (Expr & { kind: 'vec' }) | null {
@@ -267,21 +325,25 @@ function planeFlow(e: Expr): (Expr & { kind: 'vec' }) | null {
  *
  * - `substitute`: drawn per pixel from x and y (graphs, implicit curves,
  *   regions, fields), or solved for (real systems), so the row is rewritten
- *   by mapRowExpr and the shader or solver sees screen coordinates;
+ *   by mapRowExpr and the shader or solver sees screen coordinates; a
+ *   tensor field is read there too, and carried by the maps' slopes
+ *   (tensorJacobian);
  * - `place`: it puts things at positions (points, parametric curves and
- *   regions, figures, point lists, labels), so it is
- *   computed in x and y as anywhere else and each position it produces is
- *   carried to the screen by the inverse (web/render2d.ts mapOverlay);
- * - `none`: nothing drawn (a value, a note).
+ *   regions, figures, point lists, labels, histogram bars, a complex
+ *   system's roots), so it is computed in x and y as anywhere else and each
+ *   position it produces is carried to the screen by the inverse
+ *   (web/render2d.ts mapOverlay);
+ * - `none`: nothing drawn, or drawn by its own rule (a value, whose integral
+ *   is shaded on the screen by lib/intshade.ts shadeRuns; a note).
  *
- * What is left (tensor fields, whose glyphs would need the map's
- * Jacobian; histograms, whose bars stand on y = 0;
- * complex systems;
- * graphs, sequences, 3D) is refused rather than drawn in the wrong place.
+ * What is left (graphs, sequences, distributions, 3D) is refused rather than
+ * drawn in the wrong place.
  */
 export type AxisMapping = 'substitute' | 'place' | 'none';
 
-export function axisMapping(object: MathObject): AxisMapping | null {
+export function axisMapping(object: MathObject, maps?: AxisMaps): AxisMapping | null {
+  // Bars stand on y = 0, which a plane map bends into a curve.
+  if (maps?.plane && object.kind === 'histogram') return null;
   switch (object.kind) {
     case 'value':
     case 'note':
@@ -298,6 +360,10 @@ export function axisMapping(object: MathObject): AxisMapping | null {
     case 'vector-field':
       // Rewritten with the map's slope (mapRowExpr): a 2D flow only.
       return object.components.length === 2 ? 'substitute' : null;
+    case 'tensor-field':
+      return 'substitute';
+    case 'histogram':
+      return 'place';
     case 'point':
     case 'trail':
     case 'label':
@@ -305,8 +371,9 @@ export function axisMapping(object: MathObject): AxisMapping | null {
     case 'system':
       // Its residuals rewritten like a curve's, the solver searches the
       // window in screen coordinates, evenly, and its solutions are there.
-      // A complex system solves in w, which no rewrite of x and y reaches.
-      return object.source.representation === 'real' ? 'substitute' : null;
+      // A complex system solves in w, which no rewrite of x and y reaches,
+      // so it solves in x and y and its roots are placed.
+      return object.source.representation === 'real' ? 'substitute' : 'place';
     case 'figure':
       return object.dimension === 2 ? 'place' : null;
     case 'list':
@@ -315,5 +382,14 @@ export function axisMapping(object: MathObject): AxisMapping | null {
   return null;
 }
 
+/** Why a mapped panel refuses an object axisMapping has no way to draw. */
+export function unmappedReason(object: MathObject, maps: AxisMaps): string {
+  return maps.plane && object.kind === 'histogram' ? PLANE_BARS_MESSAGE : UNMAPPED_MESSAGE;
+}
+
+/** Why a plane-mapped panel draws no histogram. */
+const PLANE_BARS_MESSAGE =
+  "This panel's view(…) maps (x, y) together, which bends the line y = 0 that histogram bars stand on: draw it in a panel without one.";
+
 export const UNMAPPED_MESSAGE =
-  "This panel's view(…) maps its axes, which draw curves, regions, fields, points and figures — not this yet.";
+  "This panel's view(…) maps its axes, which draw curves, regions, fields, points, figures and histograms — not this yet.";

@@ -596,11 +596,33 @@ void main() {
  * differentiated tangents ∂P/∂u × ∂P/∂v — finite differences only when a
  * component has no smooth derivative.
  */
-function psurfVert(comps: [string, string, string], params?: string[]): string {
+function psurfVert(comps: [string, string, string], params?: string[], lift = false): string {
+  // A mesh that lies on another surface (SurfacePaint lift) is raised off
+  // it toward the eye, along its normal, by more than its flat cells sag
+  // below the curved surface between vertices: a quarter of the second
+  // differences across a cell, along the normal (the sag is an eighth).
+  const main = lift
+    ? `
+  const float h = ${(1 / (GRID_N - 1)).toFixed(8)};
+  float u = aUV.x, v = aUV.y;
+  vec3 p = P(u, v);
+  vec3 pu = P(u + h, v), mu = P(u - h, v), pv = P(u, v + h), mv = P(u, v - h);
+  vec3 n = cross(pu - mu, pv - mv);
+  float len = length(n);
+  if (len > 0.0 && !isinf(len)) {
+    n /= len;
+    if (dot(n, uEye - p) < 0.0) n = -n;
+    float sag = abs(dot(pu + mu - 2.0 * p, n)) + abs(dot(pv + mv - 2.0 * p, n));
+    if (!isnan(sag) && !isinf(sag)) p += 0.25 * sag * n;
+  }
+  vPos = p;`
+    : `
+  vPos = P(aUV.x, aUV.y);`;
   return `#version 300 es
 layout(location=0) in vec2 aUV;
 uniform mat4 uVP;
 uniform float t;
+${lift ? 'uniform vec3 uEye;' : ''}
 ${paramDecls(params)}
 out vec2 vUV;
 out vec3 vPos;
@@ -609,8 +631,7 @@ vec3 P(float u, float v) {
   return vec3(${comps[0]}, ${comps[1]}, ${comps[2]});
 }
 void main() {
-  vUV = aUV;
-  vPos = P(aUV.x, aUV.y);
+  vUV = aUV;${main}
   gl_Position = uVP * vec4(vPos, 1.0);
 }
 `;
@@ -621,6 +642,7 @@ function psurfFrag(
   du?: [string, string, string],
   dv?: [string, string, string],
   params?: string[],
+  paint?: string,
 ): string {
   const tangents =
     du && dv
@@ -636,6 +658,7 @@ precision highp float;
 uniform vec3 uColor;
 uniform vec3 uEye;
 uniform float t;
+${paint ? 'uniform float uGain;' : ''}
 ${paramDecls(params)}
 in vec2 vUV;
 in vec3 vPos;
@@ -643,6 +666,7 @@ out vec4 outColor;
 ${GLSL_PRELUDE}
 ${SHADE}
 ${tangents}
+${paint ? `float K(float u, float v) { return ${paint}; }` : ''}
 
 void main() {
   vec3 n = normalize(cross(Pu(vUV.x, vUV.y), Pv(vUV.x, vUV.y)));
@@ -651,9 +675,139 @@ void main() {
 
   // Faint parameter checker so the (u,v) mapping reads.
   float checker = mod(floor(vUV.x * 8.0) + floor(vUV.y * 8.0), 2.0);
-  vec3 base = uColor * (0.92 + 0.08 * checker);
+${
+  paint
+    ? `  // Coloured by a scalar (its curvature), diverging about 0 as a scalar
+  // field is shaded: toward the row colour where it is positive, toward its
+  // complement where negative, grey at 0 and where it is undefined. uGain
+  // scales the surface's typical size of it to about 1.
+  float k = K(vUV.x, vUV.y);
+  float s = isnan(k) || isinf(k) ? 0.0 : eq_tanh(k * uGain);
+  vec3 tint = s >= 0.0 ? uColor : vec3(1.0) - uColor;
+  vec3 base = mix(vec3(0.8), tint, abs(s)) * (0.92 + 0.08 * checker);`
+    : `  vec3 base = uColor * (0.92 + 0.08 * checker);`
+}
 
   outColor = vec4(shade(base, n, rd), 1.0);
+}
+`;
+}
+
+/**
+ * A 2D row painted on a surface (lib/surface-map.ts): the surface's own mesh
+ * (psurfVert), with x and y read at each fragment from its (u, v) — `xy` is
+ * their GLSL in u and v — and the row shaded there as the 2D renderer
+ * shades it: a curve as a line about two pixels wide (|F| over its change
+ * across a pixel, so it stays that wide however the surface turns), a
+ * region as a tint with its edges, a field signed toward the row colour or
+ * its complement. Lit as the surface is, so it reads as printed on it.
+ */
+function paintFrag(
+  comps: [string, string, string],
+  du: [string, string, string] | undefined,
+  dv: [string, string, string] | undefined,
+  xy: [string, string],
+  paint: SurfacePaint['paint'],
+  params?: string[],
+): string {
+  const tangents =
+    du && dv
+      ? `
+vec3 Pu(float u, float v) { return vec3(${du[0]}, ${du[1]}, ${du[2]}); }
+vec3 Pv(float u, float v) { return vec3(${dv[0]}, ${dv[1]}, ${dv[2]}); }`
+      : `
+vec3 P(float u, float v) { return vec3(${comps[0]}, ${comps[1]}, ${comps[2]}); }
+vec3 Pu(float u, float v) { return (P(u + 1e-3, v) - P(u - 1e-3, v)) * 500.0; }
+vec3 Pv(float u, float v) { return (P(u, v + 1e-3) - P(u, v - 1e-3)) * 500.0; }`;
+  const edges = paint.kind === 'region' ? paint.edges : [];
+  const body =
+    paint.kind === 'curve'
+      ? `
+  // |F| over its change across a pixel, from samples a pixel and half a
+  // pixel either way along the screen's two directions — stepping x and y
+  // as they change from pixel to pixel there, so exact for an F linear
+  // across it however the surface is turned. The two steps agree at a true
+  // zero, as in the 2D curve shader; a step off F's domain (past sqrt's
+  // edge, onto a pole) is left out, the slope coming from the other side.
+  float ax[5] = float[5](F(x - jx.x, y - jx.y), F(x - 0.5 * jx.x, y - 0.5 * jx.y), f,
+                         F(x + 0.5 * jx.x, y + 0.5 * jx.y), F(x + jx.x, y + jx.y));
+  float ay[5] = float[5](F(x - jy.x, y - jy.y), F(x - 0.5 * jy.x, y - 0.5 * jy.y), f,
+                         F(x + 0.5 * jy.x, y + 0.5 * jy.y), F(x + jy.x, y + jy.y));
+  if (pole(ax) || pole(ay)) discard;
+  vec2 g1 = vec2(slope(ax[0], f, ax[4], 1.0), slope(ay[0], f, ay[4], 1.0));
+  vec2 g2 = vec2(slope(ax[1], f, ax[3], 0.5), slope(ay[1], f, ay[3], 0.5));
+  float e1 = abs(f) / max(length(g1), 1e-24);
+  float e2 = abs(f) / max(length(g2), 1e-24);
+  if (e2 > 1.6 * e1 || e1 > 1.6 * e2) discard;
+  float d = max(e1, e2);
+  float alpha = 1.0 - smoothstep(0.6, 1.6, d);
+  vec3 base = uColor;`
+      : paint.kind === 'region'
+        ? `
+  float aa = max(fw, 1e-24);
+  float alpha = (1.0 - smoothstep(-aa, aa, f)) * 0.35;
+${edges
+  .map(
+    (_, i) => `  {
+    float w = abs(ev[${i}]) / max(ew[${i}], 1e-24);
+    // An edge undefined here (log(x) at x <= 0) draws nothing here.
+    if (!isnan(w) && !isinf(w)) alpha = max(alpha, 0.9 * (1.0 - smoothstep(0.5, 1.5, w)) * (1.0 - smoothstep(-aa, aa, f - 1e-6 * aa)));
+  }`,
+  )
+  .join('\n')}
+  vec3 base = uColor;`
+        : `
+  float s = eq_tanh(f * uGain);
+  float alpha = 0.7 * abs(s);
+  vec3 base = s >= 0.0 ? uColor : vec3(1.0) - uColor;`;
+  return `#version 300 es
+precision highp float;
+uniform vec3 uColor;
+uniform vec3 uEye;
+uniform float t;
+${paint.kind === 'scalar' ? 'uniform float uGain;' : ''}
+${paramDecls(params)}
+in vec2 vUV;
+in vec3 vPos;
+out vec4 outColor;
+${GLSL_PRELUDE}
+${SHADE}
+${tangents}
+float F(float x, float y) { return ${paint.field}; }
+// F's change over a pixel from samples a step s (in pixels) either side of
+// f: central where both are defined, one-sided where only one is.
+float slope(float fm, float f, float fp, float s) {
+  bool m = !isnan(fm) && !isinf(fm), p = !isnan(fp) && !isinf(fp);
+  return m && p ? (fp - fm) / (2.0 * s) : p ? (fp - f) / s : m ? (f - fm) / s : 0.0;
+}
+// Whether F changes sign between samples s (in order across the pixel) by
+// a pole, not a zero: toward a zero |F| falls from both sides, toward a
+// pole (tan(x) at π/2, 1/x at 0) it rises.
+bool pole(float s[5]) {
+  for (int i = 0; i < 4; i++)
+    if (s[i] * s[i + 1] < 0.0 || isinf(s[i]) || isinf(s[i + 1]))
+      return (i == 0 || abs(s[i]) > abs(s[i - 1])) && (i == 3 || abs(s[i + 1]) > abs(s[i + 2]));
+  return false;
+}
+${edges.map((e, i) => `float E${i}(float x, float y) { return ${e}; }`).join('\n')}
+
+void main() {
+  float u = vUV.x, v = vUV.y;
+  float x = ${xy[0]};
+  float y = ${xy[1]};
+  float f = F(x, y);
+  // Derivatives before any discard, in uniform flow: how x and y change
+  // from pixel to pixel, and F and the region's edges across one.
+  vec2 jx = vec2(dFdx(x), dFdx(y)), jy = vec2(dFdy(x), dFdy(y));
+  float fw = fwidth(f);
+${edges.length ? `  float ev[${edges.length}] = float[${edges.length}](${edges.map((_, i) => `E${i}(x, y)`).join(', ')});\n  float ew[${edges.length}] = float[${edges.length}](${edges.map((_, i) => `fwidth(ev[${i}])`).join(', ')});` : ''}
+  if (isnan(f) || isinf(f)) discard;
+${body}
+  if (alpha < 0.004) discard;
+  vec3 n = normalize(cross(Pu(u, v), Pv(u, v)));
+  vec3 rd = normalize(vPos - uEye);
+  n = facing(n, rd);
+  outColor = vec4(shade(base, n, rd), alpha);
 }
 `;
 }
@@ -1068,7 +1222,31 @@ void main() {
 }
 `;
 
+/** A 2D row painted on a surface: the surface as a parametric surface's
+ *  GLSL in u and v, the GLSL of x and y in u and v, and the row. */
+export interface SurfacePaint {
+  comps: [string, string, string];
+  du?: [string, string, string];
+  dv?: [string, string, string];
+  xy: [string, string];
+  /** A curve F = 0, a region F < 0 (edges its constraints'), a field F. */
+  paint:
+    | { kind: 'curve'; field: string }
+    | { kind: 'region'; field: string; edges: string[] }
+    /** `gain` multiplies F before it is shaded (0.6, as in 2D, without). */
+    | { kind: 'scalar'; field: string; gain?: number };
+  color: [number, number, number];
+  params?: string[];
+  uniforms?: Record<string, number>;
+  /** A mesh of its own over the surface (a parametric region's), coarser
+   *  or finer than the surface's: raised off it so it is not lost under
+   *  the surface's facets (psurfVert). */
+  lift?: boolean;
+}
+
 export interface Scene3D {
+  /** 2D rows painted on a panel's surface (lib/surface-map.ts). */
+  paints?: SurfacePaint[];
   implicits: Array<Surface3D & { grad?: [string, string, string] }>;
   psurfaces: Array<{
     uniforms?: Record<string, number>;
@@ -1077,6 +1255,10 @@ export interface Scene3D {
     dv?: [string, string, string];
     color: [number, number, number];
     params?: string[];
+    /** A scalar in u and v the surface is coloured by, and the gain that
+     *  brings its typical size to about 1. */
+    paint?: string;
+    gain?: number;
   }>;
   curves: Array<{
     pts: Float32Array;
@@ -1503,7 +1685,7 @@ export class Renderer3D {
     for (const s of scene.psurfaces) {
       let prog: WebGLProgram;
       try {
-        prog = this.cache.get(psurfVert(s.comps, s.params), psurfFrag(s.comps, s.du, s.dv, s.params));
+        prog = this.cache.get(psurfVert(s.comps, s.params), psurfFrag(s.comps, s.du, s.dv, s.params, s.paint));
       } catch (e) {
         console.error(e);
         continue;
@@ -1512,9 +1694,40 @@ export class Renderer3D {
       setParams(prog, s.params, s.uniforms);
       gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
       gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
+      if (s.paint) gl.uniform1f(gl.getUniformLocation(prog, 'uGain'), s.gain ?? 1);
       gl.bindVertexArray(this.gridVao);
       gl.drawElements(gl.TRIANGLES, this.gridIndexCount, gl.UNSIGNED_INT, 0);
       gl.bindVertexArray(null);
+    }
+
+    // Rows painted on a surface: over it, pulled a hair toward the eye so
+    // they win its depth test, and translucent, so they leave depth alone.
+    if (scene.paints?.length) {
+      gl.enable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(-1, -4);
+      gl.depthMask(false);
+      for (const s of scene.paints) {
+        let prog: WebGLProgram;
+        try {
+          prog = this.cache.get(
+            psurfVert(s.comps, s.params, s.lift),
+            paintFrag(s.comps, s.du, s.dv, s.xy, s.paint, s.params),
+          );
+        } catch (e) {
+          console.error(e);
+          continue;
+        }
+        setCommon(prog);
+        setParams(prog, s.params, s.uniforms);
+        gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
+        gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
+        if (s.paint.kind === 'scalar') gl.uniform1f(gl.getUniformLocation(prog, 'uGain'), s.paint.gain ?? 0.6);
+        gl.bindVertexArray(this.gridVao);
+        gl.drawElements(gl.TRIANGLES, this.gridIndexCount, gl.UNSIGNED_INT, 0);
+        gl.bindVertexArray(null);
+      }
+      gl.depthMask(true);
+      gl.disable(gl.POLYGON_OFFSET_FILL);
     }
 
     // CPU-built lit meshes: tubes and hull solids. Pushed a hair back so a

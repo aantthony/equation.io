@@ -7,6 +7,7 @@
 import type { Column, Expr } from './expr.ts';
 import type { ProbBounds } from './dist.ts';
 import type { IntShade } from './intshade.ts';
+import type { GeodesicSpec } from './surface-geometry.ts';
 
 export type ColorSpace = 'rgb' | 'hsl' | 'oklch';
 
@@ -49,7 +50,14 @@ export type MathObject =
        *  where it meets the box, rather than raymarching the residual. */
       readonly plane?: readonly [Expr, Expr, Expr, Expr];
     }
-  | { readonly kind: 'surface'; readonly form: 'parametric'; readonly coordinates: readonly [Expr, Expr, Expr] }
+  | {
+      readonly kind: 'surface';
+      readonly form: 'parametric';
+      readonly coordinates: readonly [Expr, Expr, Expr];
+      /** A scalar in u and v the surface is coloured by, diverging about 0
+       *  (gaussian(S) alone on a row). */
+      readonly paint?: Expr;
+    }
   | { readonly kind: 'intersection'; readonly residuals: readonly [Expr, Expr] }
   | {
       readonly kind: 'region';
@@ -70,7 +78,14 @@ export type MathObject =
     }
   /** A bare expression in the plane, or in space (`dimension: 3`), drawn as
    *  a shade or a translucent cloud. */
-  | { readonly kind: 'scalar-field'; readonly expr: Expr; readonly dimension?: 3 }
+  | {
+      readonly kind: 'scalar-field';
+      readonly expr: Expr;
+      readonly dimension?: 3;
+      /** Shaded with a gain that brings its typical size on the panel's
+       *  surface to about 1, rather than as it stands: gaussian(x, y). */
+      readonly autoscale?: true;
+    }
   | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly Expr[] }
   | { readonly kind: 'vector-field'; readonly components: Components }
   /** A 2×2 matrix over the plane, row-major: each glyph is the image of a
@@ -80,6 +95,11 @@ export type MathObject =
       readonly entries: readonly [Expr, Expr, Expr, Expr];
       /** streamlines(M): drawn along the major eigenvector, not as glyphs. */
       readonly streamlines?: true;
+      /** On mapped axes (lib/axis-map.ts), the entries are read at the
+       *  screen point and this is the maps' Jacobian ∂(x, y)/∂(X, Y) there,
+       *  row-major, which carries the matrix and its eigenvectors onto the
+       *  screen. */
+      readonly jacobian?: readonly [Expr, Expr, Expr, Expr];
     }
   | { readonly kind: 'complex-field'; readonly form: 'potential' | 'domain' | 'conformal'; readonly expr: Expr }
   | {
@@ -102,6 +122,9 @@ export type MathObject =
       readonly from: Expr;
       readonly to: Expr;
     }
+  /** A geodesic of a parametric surface from a start in a direction,
+   *  integrated as it is drawn (lib/surface-geometry.ts geodesicPath). */
+  | ({ readonly kind: 'geodesic' } & GeodesicSpec)
   /** `vertices` flat, or with `over` one vertex template run over the columns. */
   | {
       readonly kind: 'figure';
@@ -146,8 +169,15 @@ export type MathObject =
       readonly axes: readonly [string, string];
     }
   /** A function on the integer lattice, `T[i, j] = …` (lib/automaton.ts):
-   *  `expr` reads CELL_VAR and CELL_VAR2. */
-  | { readonly kind: 'lattice'; readonly expr: Expr; readonly axes: readonly [string, string] }
+   *  `expr` reads CELL_VAR and CELL_VAR2. Or, with `rows`, cells already
+   *  computed: row k's position h (from 1) is rows[k][h − 1] — a
+   *  tuple-valued recurrence's terms (lib/seq.ts). */
+  | {
+      readonly kind: 'lattice';
+      readonly expr: Expr;
+      readonly axes: readonly [string, string];
+      readonly rows?: readonly (readonly number[])[];
+    }
   /** `graph(from, to)` / `graph(from, to, label)` (lib/graph.ts): one edge
    *  per element of the tuple's multiset, each [from, to] or [from, to, label]. */
   | { readonly kind: 'graph'; readonly edges: ReadonlyArray<readonly Expr[]> }
@@ -221,7 +251,7 @@ export type MathObject =
        *  as the point or the equation it is rather than as a tuple. */
       readonly flat?: { readonly dim: 2 | 3; readonly grade: number };
     }
-  // `constant`: the row reads like a slider named e, pi, tau or i (see
+  // `constant`: the row reads like a slider named e, pi or i (see
   // takenDefinitionName), which the readout explains. `identity`: an equation
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
   | {
@@ -249,6 +279,10 @@ export interface Classified {
   readonly animated: boolean;
   readonly needs3D: boolean;
   readonly params: readonly string[];
+  /** On a plane-mapped panel (lib/plane-map.ts), the row as written, in x
+   *  and y, before the map was put in: what hover reads intercepts and
+   *  extrema from, placing them on the screen through the map. */
+  readonly world?: MathObject;
 }
 
 /** Stable public compatibility API; backend selection never changes it. */
@@ -306,6 +340,7 @@ export function publicKind(object: MathObject) {
     case 'trail':
     case 'label':
     case 'orbit':
+    case 'geodesic':
     case 'system':
     case 'histogram':
     case 'value':
@@ -346,6 +381,8 @@ export function objectNeeds3D(object: MathObject): boolean {
       return object.coordinates.length === 3;
     case 'orbit':
       return !object.series && object.paths[0]?.length === 3;
+    case 'geodesic':
+      return object.dim === 3;
     case 'figure':
       return object.dimension === 3;
     case 'system':

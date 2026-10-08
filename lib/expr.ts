@@ -247,10 +247,19 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'torsion',
     'osculating',
     'frame',
+    // A surface, whole: gaussian((u, v, u v), (0.5, 0.5)), and a geodesic's
+    // start and direction.
+    'gaussian',
+    'meancurvature',
+    'geodesic',
     // sort((s, sin(s)), s): the points to order, then their key.
     'sort',
     'fourier',
     'reconstruct',
+    // A stack is a tuple, whole: push((1, 2), 3) is (1, 2, 3).
+    'push',
+    'pop',
+    'top',
   ]);
   return grouped.has(name) ? args : args.flatMap(x => (x.kind === 'vec' ? x.items : [x]));
 }
@@ -308,6 +317,11 @@ export const FUNCTIONS = new Set([
   'median',
   'sort',
   'hist',
+  // A tuple as a stack: push(s, a) appends, pop(s) drops the last, top(s)
+  // reads it (a tuple-valued recurrence's step, lib/seq.ts).
+  'push',
+  'pop',
+  'top',
   // A continuous interval, resolved into a hidden parameter (lib/interval.ts).
   'interval',
   // Point (2D vector) helpers and geometry statements, lowered symbolically
@@ -375,6 +389,11 @@ export const FUNCTIONS = new Set([
   'torsion',
   'osculating',
   'frame',
+  // And of a surface in u and v (see surface-geometry.ts); a geodesic is
+  // traced as it is drawn (lib/analysis.ts classifyGeodesic).
+  'gaussian',
+  'meancurvature',
+  'geodesic',
   'fourier',
   'reconstruct',
   // Whole-expression plot modes (see classify): domain coloring, conformal
@@ -444,6 +463,9 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'torsion',
   'osculating',
   'frame',
+  'gaussian',
+  'meancurvature',
+  'geodesic',
   'log2',
   'fourier',
   'reconstruct',
@@ -453,6 +475,9 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'project',
   'reflect',
   'motor',
+  'push',
+  'pop',
+  'top',
 ]);
 
 /** The axes revolve(f, axis) turns a profile about. */
@@ -483,7 +508,6 @@ export function ineqComparisons(e: Expr & { kind: 'ineq' }): Array<{ op: IneqOp;
 
 export const CONSTANTS: Record<string, number> = {
   pi: Math.PI,
-  tau: Math.PI * 2,
   e: Math.E,
 };
 
@@ -513,6 +537,10 @@ let activeValueNames: ReadonlySet<string> = new Set();
  */
 const indexes = (name: string): boolean => {
   if (activeListNames.has(name)) return true;
+  // A sequence's term indexes too, s_n[2], s_3[1]: a tuple-valued
+  // recurrence's terms are tuples (lib/seq.ts).
+  const sub = name.indexOf('_');
+  if (sub > 0 && sub < name.length - 1 && activeListNames.has(name.slice(0, sub + 1))) return true;
   const dot = name.indexOf('.');
   return dot > 0 && activeListNames.has(name.slice(0, dot));
 };
@@ -886,12 +914,12 @@ const MULTI_CHAR_OPS = Object.keys(ops).filter(o => o.length > 1);
  * a name is, but only as the unicode spelling of the `_` subscript the
  * language already has (see canonicalName): T₀ is T_0, never a name of its
  * own. Excluded are the glyphs that stand for
- * something by themselves — π and τ (constants) and the operator-like
+ * something by themselves — π (the constant) and the operator-like
  * Σ Π ∫ ∞ ∇ — which tokenize as standalone glyph tokens so πr means π·r
  * (see GLYPH_ALIASES). µ is the micro sign Mac keyboards type for mu; it is
  * just a name character of its own.
  */
-export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςσυφχψω' + 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩ' + 'ϑϕϖϱϵµ';
+export const GREEK_NAME_CHARS = 'αβγδεζηθικλμνξορςστυφχψω' + 'ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΡΤΥΦΧΨΩ' + 'ϑϕϖϱϵµ';
 /** Regex character-class fragment for a name's first character. */
 export const NAME_START_CHARS = `A-Za-z_${GREEK_NAME_CHARS}`;
 /**
@@ -926,7 +954,6 @@ const GLYPH_ALIASES: Record<string, string> = {
   '∞': 'inf',
   '∇': 'grad',
   π: 'pi',
-  τ: 'tau',
 };
 export const GLYPH_CHARS = Object.keys(GLYPH_ALIASES).join('');
 
