@@ -966,3 +966,26 @@ from `z = x^2 - y^2` to `z = x y`, and `da191b86` drops a trailing comma from a
 row. `results/2026-10-08T210936Z-on-device.json`: 42% ±2% → **44% ±5%**, noise,
 but the best so far. parametric-circle 1 → 5, zoom-zero 0 → 3; sphere 3 → 0,
 motion-trail 2 → 0. saddle still passes (its request gives the equation).
+
+### The primer without task answers, 10 runs a task
+
+`9374ea55` replaced three primer examples that were eval answers verbatim:
+`x^2 + y^2 = 4` (circle-and-line), `y < x^2` (the mirror of shade-region's
+`y > x^2`) and `int[0..pi] sin(x) dx` (area-under-sin). Instructions 1,528 →
+1,526 tokens. `results/2026-10-08T220125Z-on-device.json`, **10 runs a task**
+(460 runs), against `2026-10-08T210936Z` (5 runs a task, 230):
+44% ±5% (101/230) → **44% ±5% (203/460)**; tasks passed per repetition 17–25.
+3.2 tool calls a run (3.5), 9,389 input tokens a session (8,717), 9.4 s a run
+(11.8), one context overflow in each.
+
+The three tasks didn't need the answers in the primer: circle-and-line 5/5 →
+10/10 (`circle((0,0),2)` 7 times, `x^2 + y^2 = 4` 3), shade-region 5/5 → 10/10
+(`y > x^2` every run), area-under-sin 4/5 → 10/10 (`int[0..π] sin(x) dx` 9
+times: the analyzer reads π). Other differences are within what 5 runs can
+tell: saddle 4/5 → 10/10, torus 4/5 → 10/10, label-vertex 1/5 → 6/10, zoom-out
+4/5 → 2/10, parametric-circle 5/5 → 7/10. Named shapes stay the weak spot:
+polar-rose 0/10, lissajous 0/10, cone 0/10, hyperboloid 0/10, cardioid 1/10,
+sphere 1/10, honest-reply-helix 2/10.
+
+Verdict: removing the answers cost nothing, and this run is the baseline (10
+runs a task) for the next change.
