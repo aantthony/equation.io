@@ -298,6 +298,11 @@ describe('solver extensions and comparison notes', () => {
     expect(runRows(['2=[1,2]']).rows[0].info).toMatch(/Never true.*Always true/);
     // Repeated constant definitions still follow definition ownership.
   });
+  it('takes Greek differentials: ∫ … dτ and ∫ … dθ', () => {
+    for (const row of ['y = int[0..x] sin(τ) dτ', 'y = int[0..x] cos(θ) dθ']) {
+      expect(runRows([row]).rows[0].error).toBeUndefined();
+    }
+  });
   it('explains a slider named after a constant or d', () => {
     // Still a claim about e, but one that says why no slider appeared.
     const [e, pi] = runRows(['e = 0.6', 'pi = pi']).rows;

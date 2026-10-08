@@ -900,7 +900,9 @@ export function takenNameHint(name: string): string {
 
 export type GetFn = (name: string) => FnDef | undefined;
 
-const dVarName = (n: Expr): string | null => (n.kind === 'var' && /^d[A-Za-z]$/.test(n.name) ? n.name.slice(1) : null);
+/** A differential's name: d and one letter, Latin or Greek (dx, dθ, dτ). */
+const D_VAR = new RegExp(`^d[A-Za-z${GREEK_NAME_CHARS}]$`);
+const dVarName = (n: Expr): string | null => (n.kind === 'var' && D_VAR.test(n.name) ? n.name.slice(1) : null);
 
 /** Match `d` or `d^k` (the numerator of a Leibniz derivative). */
 function dOrder(n: Expr): number | null {
