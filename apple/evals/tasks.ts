@@ -522,10 +522,7 @@ export const TASKS: EvalTask[] = [
       answer('The rotational field (−y, x), flowing in circles.', set('(-y, x)')),
       answer('The streamlines circle around the origin.', set('(-y, x)')),
     ],
-    bad: [
-      answer('The vector field.', set('(-1, 1)')),
-      answer('The rotational field (−y, x).', set('(y, x)')),
-    ],
+    bad: [answer('The vector field.', set('(-1, 1)')), answer('The rotational field (−y, x).', set('(y, x)'))],
   },
   {
     id: 'points',
