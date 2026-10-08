@@ -840,3 +840,56 @@ ended in a loop of 20–45 set_graph calls until the 8K context overflowed. In
 honest-reply-helix four runs called kind_examples("helix"), which isn't a kind
 name: the tool answered "No kind" with the list of ids, and the model then wrote
 rows like `u = 0` and `x = cos(u)` and called them a helix.
+
+## Kind chart in the instructions (2026-10-08)
+
+The change (940d45b3): the 2D and 3D lines of the kind-name list became a
+chart of each kind's id, as check and set_graph report it, and its form in
+placeholder syntax (`- psurface: (uv, uv, uv)`, `- ineq2d: xy > 0, xy >= 0`),
+with slider, family and motion lines; the other six groups stay as names under
+"Other kinds (names only):". A test draws an instance of every chart line as
+its kind (lib/assistant-instructions.test.ts). Instructions 1,106 → 1,401
+tokens (+295; tools 1,218).
+
+unit-cube alone (`results/2026-10-08T060509Z-on-device.json`): 0/5, as before.
+Two runs copied the chart's notation into rows: `psurface: (uv, uv, uv)`,
+then seven set_graph calls nesting it until the context overflowed, and
+`psurface((0,0,0), (0,0,0), (0,0,0))`. Two looked up psurface and drew the
+example's sphere; one drew `z = x^2 - y^2` and three planes.
+
+Full suite, `results/2026-10-08T060822Z-on-device.json`:
+
+| | before names | kind names | kind chart |
+| --- | --- | --- | --- |
+| pass | 32% ±3% (74) | 36% ±3% (83) | 33% ±4% (75) |
+| first 35 tasks | 72/175 | 82/175 | 72/175 |
+| overflows | 10 | 17 | 9 |
+| input tokens a session | 12,463 | 10,575 | 9,402 |
+| tool calls a run | 5.4 | 4.8 | 3.5 |
+| kind_examples("psurface") | 31 of 104 | 43 of 105 | 72 of 111 |
+
+Down against kind names: parametric-circle 4 → 0, circle-and-line 4 → 1,
+saddle 5 → 2, honest-reply-helix 1 → 0 (5/5 before names), motion-trail
+1 → 0. Up: zoom-out 1 → 3, label-vertex 0 → 2.
+
+The losses share a cause: with kinds now named by id, the model asks
+kind_examples for "psurface", the id in that tool's description, whatever the
+request. It did so in 19 tasks. parametric-circle 5/5 looked up psurface and
+drew the example sphere, "I drew a sphere of radius 3 as a parametric
+surface"; honest-reply-helix 5/5 drew the helicoid
+`(2v cos(4pi u), 2v sin(4pi u), 3u)`; saddle 3/5 drew the example sphere
+and called it the saddle; motion-trail 4/5 looked up psurface and left
+`A = (2cos(t), sin(2t))` without a trail. Copying the notation itself was
+rare in the suite: `solid: (interval(0, 1), …)` twice in
+unit-cube-beside-sphere, `pregion: (r, 1)` once in normal-probability.
+circle-and-line's losses are `A = 2` and `r = 2 (cos(u), sin(u))` for the
+circle. The gains are a point and its label kept with the parabola
+(label-vertex) and wider windows (zoom-out), neither near the chart.
+
+Verdict: no gain. 33% is within noise of both earlier runs, and the first 35
+tasks fell back from 82 to 72 of 175. Sessions are shorter (fewer calls and
+overflows, 1,173 fewer input tokens) despite 295 more instruction tokens.
+The chart's ids made kind_examples("psurface"), the tool description's
+example, the default lookup (72 of 111 calls). Measure again after that
+example changes before judging the chart itself; the colon form also wants a
+watch, as unit-cube copied it twice in five.
