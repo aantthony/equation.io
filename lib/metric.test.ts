@@ -312,7 +312,7 @@ describe('the connection of a metric', () => {
     const num = g.map(row => row.map(e => evaluate(e, at)));
     const d = ['x', 'y'].map(v => g.map(row => row.map(e => evaluate(smoothPartial(e, v), at))));
     const U = [1.3, -0.4, 0.6];
-    const [ax, ay] = metricAcceleration(num, d, U);
+    const [, ax, ay] = metricAcceleration(num, d, U);
     const want = [1, 2].map(i => {
       let sum = 0;
       for (let m = 0; m < 3; m++) for (let n = 0; n < 3; n++) sum -= evaluate(symbols[i][m][n], at) * U[m] * U[n];
@@ -331,5 +331,84 @@ describe('traceWindow', () => {
     expect(traceWindow([-9, -6], [11, 6])).toEqual(w);
     expect(traceWindow([-11, -7], [11, 7])).toEqual(w);
     expect(traceWindow([-40, -6], [40, 6])).not.toEqual(w);
+  });
+});
+describe('review fixes', () => {
+  it('traces a ray that starts outside the window it is drawn in (zoomed in on the hole)', () => {
+    const window = traceWindow([-2, -1.5], [2, 1.5]);
+    const { pts } = traced([...SCHWARZSCHILD, 'lightray((-30, 1), (1, 0))'], window);
+    expect(pts[0]).toEqual([-30, 1]);
+    // It reaches the window and falls in there.
+    expect(pts.some(([x, y]) => Math.abs(x) < 2 && Math.abs(y) < 1.5)).toBe(true);
+    expect(Math.hypot(...pts.at(-1)!)).toBeLessThan(2.01);
+    // One passing wide still bends and leaves.
+    const wide = traced([...SCHWARZSCHILD, 'lightray((-30, 7), (1, 0))'], window).pts;
+    expect(wide.at(-1)![0]).toBeGreaterThan(window[0][1] - 1e-9);
+  });
+
+  it('checks metrics at large and small scales', () => {
+    const heavy = ['M = 40', ...SCHWARZSCHILD.slice(1)];
+    expect(errorOf(heavy)).toBeUndefined();
+    const v = Math.sqrt(40 / 400);
+    const { pts } = traced([...heavy, `geodesic((400, 0), (0, ${v}), 20000)`], box(1024));
+    for (const p of pts) expect(Math.abs(Math.hypot(...p) - 400)).toBeLessThan(0.05);
+    expect(errorOf(['ds^2 = (dx^2 + dy^2)/(0.01 - x^2 - y^2)'])).toBeUndefined();
+    const disc = traced(['ds^2 = (dx^2 + dy^2)/(0.01 - x^2 - y^2)', 'geodesic((0, 0), (1, 0.3))'], box(0.25)).pts;
+    expect(disc.length).toBeGreaterThan(10);
+    for (const p of disc) expect(Math.hypot(...p)).toBeLessThan(0.1);
+  });
+
+  it('lets a particle go from nearly at rest', () => {
+    for (const speed of ['10^-9', '10^-12', '0']) {
+      const { pts } = traced([...SCHWARZSCHILD, `geodesic((10, 0), (0, ${speed}))`], box(64));
+      expect(Math.hypot(...pts.at(-1)!)).toBeLessThan(2.01);
+    }
+  });
+
+  describe('a spinning black hole (Kerr, in its equatorial plane)', () => {
+    // M = 1, a = 0.9: the horizon is at r = 1 + sqrt(1 − a²) = 1.436, the
+    // ergosurface, where g_tt = 0, at r = 2.
+    const KERR = [
+      'a = 0.9',
+      'r = sqrt(x^2 + y^2)',
+      'phi = atan2(y, x)',
+      'ds^2 = -(1 - 2/r) dt^2 - (4a/r) dt dphi + r^2/(r^2 - 2r + a^2) dr^2 + (r^2 + a^2 + 2a^2/r) dphi^2',
+    ];
+    const horizon = 1 + Math.sqrt(1 - 0.81);
+    it('traces into the ergoregion, down to the horizon', () => {
+      expect(errorOf(KERR)).toBeUndefined();
+      const { pts } = traced([...KERR, 'lightray((10, 0), (-1, 0))'], box(16));
+      const end = Math.hypot(...pts.at(-1)!);
+      expect(end).toBeLessThan(horizon + 0.05);
+      expect(end).toBeGreaterThan(horizon - 0.01);
+      // Dragged round with the hole as it falls.
+      const turned = Math.atan2(pts.at(-1)![1], pts.at(-1)![0]);
+      expect(Math.abs(turned)).toBeGreaterThan(0.1);
+    });
+    it('starts light in the ergoregion, but nothing standing still', () => {
+      const ray = traced([...KERR, 'lightray((1.9, 0), (0, 1), 2)'], box(16));
+      expect(ray.ended.problem).toBeUndefined();
+      expect(ray.pts.length).toBeGreaterThan(5);
+      const still = traced([...KERR, 'geodesic((1.9, 0), (0, 0))'], box(16));
+      expect(geodesicCutNote(still.ended)).toMatch(/nothing can stand still here \(inside an ergoregion/);
+      const inside = traced([...KERR, 'geodesic((1.2, 0), (0, 0.1))'], box(16));
+      expect(geodesicCutNote(inside.ended)).toMatch(/not space at the start \(inside a horizon\?\)/);
+    });
+  });
+
+  it('reads dt as a differential beside a dt slider, and says when a d-name is a value', () => {
+    expect(errorOf(['dt = 0.1', ...SCHWARZSCHILD])).toBeUndefined();
+    expect(errorOf(['dw = 2', 'ds^2 = -dw^2 + dx^2 + dy^2'])).toMatch(
+      /quadratic form.*dw is defined elsewhere in the document, so it is that value here/,
+    );
+  });
+
+  it('says what a metric’s differentials need', () => {
+    expect(errorOf(['M = 1', 'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2'])).toMatch(
+      /dr, dphi are differentials of no coordinate yet: define r and phi from x and y first/,
+    );
+    expect(last(['ds^2 = -dτ^2 + dx^2 + dy^2']).cls!.object).toMatchObject({ kind: 'metric', coords: ['τ', 'x', 'y'] });
+    expect(errorOf(['ds^2 = dpi^2 + dx^2 + dy^2'])).toMatch(/dpi is no differential — pi is a constant/);
+    expect(errorOf(['ds^2 = de^2 + dx^2 + dy^2'])).toMatch(/de is no differential — e is a constant/);
   });
 });

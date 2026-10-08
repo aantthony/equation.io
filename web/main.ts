@@ -1693,7 +1693,9 @@ function geodesicFor(
         spec,
         env: values,
         maxSteps: Math.min(GEODESIC_MAX_STEPS, Math.ceil(GEODESIC_FAMILY_STEPS / members)),
-        ms: GEODESIC_FAMILY_MS / members,
+        // A metric's family shares more time: its members may each cross
+        // a wide box, and a gallery fan of 33 should draw whole when cold.
+        ms: plot.metric ? Math.max(GEODESIC_FAMILY_MS / members, 60) : GEODESIC_FAMILY_MS / members,
         maxPoints: Math.min(GEODESIC_MAX_POINTS, Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members))),
         ...(window ? { window } : {}),
       },
@@ -2367,7 +2369,12 @@ function render() {
         // there, a panel's surface included): lifted a hair toward the eye so
         // the surface does not hide it.
         if (plot.type === 'geodesic') {
-          const pts = geodesicFor(eq, { ...constEnv, t: time });
+          // A metric's (in a 3D panel, on z = 0): over a box round what the
+          // camera looks at, as wide as it stands off.
+          const [tx, ty] = camera.target;
+          const reach = camera.radius;
+          const box = plot.metric ? traceWindow([tx - reach, ty - reach], [tx + reach, ty + reach]) : undefined;
+          const pts = geodesicFor(eq, { ...constEnv, t: time }, box);
           const lifted = towardEye(camera);
           const raised = new Float32Array(pts.length);
           for (let k = 0; k + 2 < pts.length; k += 3) raised.set(lifted([pts[k], pts[k + 1], pts[k + 2]]), k);

@@ -1117,7 +1117,7 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       // A particle round a black hole, in the equatorial plane of the
       // Schwarzschild metric: speed is its coordinate velocity dφ/dt r, across
       // the line to P. Each orbit's nearest point moves on by about
-      // 2π((1 − 6M/r)^−½ − 1); slow it below about 0.16 and it falls in.
+      // 2π((1 − 6M/r)^−½ − 1); slow it below about 0.172 and it falls in.
       // The horizon r = 2M is shaded and the photon sphere r = 3M drawn.
       [
         'Schwarzschild orbit precession (slide speed, drag P)',

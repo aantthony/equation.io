@@ -209,19 +209,23 @@ export type GeodesicSystem = (p: number, q: number, out: Float64Array) => void;
 
 /**
  * What a geodesic is integrated from, in its two drawn coordinates (p, q):
- * a surface's connection (surfaceFlow), or a metric's with a cyclic time
- * coordinate eliminated through its conserved energy (lib/metric.ts
- * metricFlow).
+ * a surface's connection (surfaceFlow), or a metric's (metricStart). The
+ * state is [p, q, p′, q′, …extras]: a metric with a time coordinate τ
+ * carries U^τ as an extra.
  */
 export interface GeodesicFlow {
-  /** (d²p/ds², d²q/ds²) at (p, q) with velocity (w1, w2), written to `out`. */
-  accel(p: number, q: number, w1: number, w2: number, out: number[]): void;
+  /** The extras' starting values (none for a surface). */
+  readonly extras?: readonly number[];
+  /** The rates of the velocity and the extras at state y: (d²p/ds²,
+   *  d²q/ds², …) written to `out`. */
+  accel(y: readonly number[], out: number[]): void;
   /**
-   * The velocity put back on the geodesic's constraint at (p, q) — unit
-   * speed, or the speed its energy sets — so drift does not build up; null
-   * where the metric degenerates or blows up there (a pole, a horizon).
+   * The velocity (and extras) of state y put back on the geodesic's
+   * constraint — unit speed, or g(U, U) = −1 or 0 — in place, so drift does
+   * not build up; false where the metric degenerates or blows up there (a
+   * pole, a horizon).
    */
-  normalize(p: number, q: number, w1: number, w2: number): [number, number] | null;
+  normalize(y: number[]): boolean;
   /** Whether the flow holds at (p, q) (normalize would not refuse it there),
    *  checked at each stage of a step, when the metric can stay finite past
    *  where it stops being one (a horizon). */
@@ -232,21 +236,24 @@ export interface GeodesicFlow {
 export function surfaceFlow(sys: GeodesicSystem): GeodesicFlow {
   const g = new Float64Array(10);
   return {
-    accel(p, q, w1, w2, out) {
-      sys(p, q, g);
-      const [a1, a2] = geodesicAcceleration(g, w1, w2);
+    accel(y, out) {
+      sys(y[0], y[1], g);
+      const [a1, a2] = geodesicAcceleration(g, y[2], y[3]);
       out[0] = a1;
       out[1] = a2;
     },
-    normalize(p, q, w1, w2) {
-      sys(p, q, g);
+    normalize(y) {
+      sys(y[0], y[1], g);
       const [E, F, G, det] = [g[6], g[7], g[8], g[9]];
       const scale = Math.max(Math.abs(E), Math.abs(G));
-      if (!(det > 1e-12 * scale * scale) || !Number.isFinite(det)) return null;
+      if (!(det > 1e-12 * scale * scale) || !Number.isFinite(det)) return false;
+      const [w1, w2] = [y[2], y[3]];
       const s2 = E * w1 * w1 + 2 * F * w1 * w2 + G * w2 * w2;
-      if (!(s2 > 0) || !Number.isFinite(s2)) return null;
+      if (!(s2 > 0) || !Number.isFinite(s2)) return false;
       const s = Math.sqrt(s2);
-      return [w1 / s, w2 / s];
+      y[2] = w1 / s;
+      y[3] = w2 / s;
+      return true;
     },
   };
 }
@@ -273,6 +280,9 @@ export interface GeodesicOptions {
    * (the plane a metric's geodesic is drawn on), rather than in arc length.
    */
   drawSpacing?: number;
+  /** Where drawSpacing and maxStride hold; outside it, points are eight
+   *  times sparser and steps may be eight times longer. */
+  fine?: GeodesicOptions['domain'];
   /**
    * Where a geodesic with no length of its own stops: after this much drawn
    * length in p and q. It also stops once it makes no visible headway (64
@@ -327,6 +337,10 @@ const A = [
 const B5 = A[6].concat(0);
 const B4 = [5179 / 57600, 0, 7571 / 16695, 393 / 640, -92097 / 339200, 187 / 2100, 1 / 40];
 
+/** Whether (p, q), the start of `y`, is in the box. */
+const inBox = (box: GeodesicOptions['domain'], y: readonly number[]) =>
+  y[0] >= box[0][0] && y[0] <= box[0][1] && y[1] >= box[1][0] && y[1] <= box[1][1];
+
 /** Coordinate c of the cubic Hermite interpolant of a step of length h from
  *  y to z (position and velocity, [p, q, p′, q′]), at the fraction t. */
 function hermite(y: readonly number[], z: readonly number[], h: number, c: number, t: number): number {
@@ -370,81 +384,95 @@ export function traceGeodesic(
     (periodic[1] || (q >= domain[1][0] && q <= domain[1][1]));
   if (!Number.isFinite(p0) || !Number.isFinite(q0) || !inside(p0, q0)) return out;
   const sign = back ? -1 : 1;
-  const w0 = flow.normalize(p0, q0, sign * opts.direction[0], sign * opts.direction[1]);
+  // The state: position, velocity, then whatever else the flow carries.
+  const extras = flow.extras ?? [];
+  const D = 4 + extras.length;
+  let y = [p0, q0, sign * opts.direction[0], sign * opts.direction[1], ...extras];
+  const started = flow.normalize(y);
   out.push([p0, q0]);
   if (opts.ended) Object.assign(opts.ended, { length: 0, asked: total, budget: false });
-  if (!w0 || !(total > 0)) return out;
-  velocities?.push(w0);
-  const acc = [0, 0];
+  if (!started || !(total > 0)) return out;
+  velocities?.push([y[2], y[3]]);
+  const rates = new Array<number>(D - 2).fill(0);
   const f = (y: readonly number[], k: number[]) => {
-    flow.accel(y[0], y[1], y[2], y[3], acc);
+    flow.accel(y, rates);
     k[0] = y[2];
     k[1] = y[3];
-    k[2] = acc[0];
-    k[3] = acc[1];
+    for (let c = 2; c < D; c++) k[c] = rates[c - 2];
   };
+  const ks = Array.from({ length: 7 }, () => new Array<number>(D).fill(0));
+  const tmp = new Array<number>(D).fill(0);
+  f(y, ks[0]);
   // Tolerances: the parameters against their ranges, the velocity against
   // its starting size.
   const span = [domain[0][1] - domain[0][0], domain[1][1] - domain[1][0]].map(s =>
     Number.isFinite(s) && s > 0 ? s : 1,
   );
-  // (A particle let go from rest starts with none: then 1.)
-  const speed = Math.max(Math.abs(w0[0]), Math.abs(w0[1])) || 1;
-  const atol = [TOLERANCE * span[0], TOLERANCE * span[1], TOLERANCE * speed, TOLERANCE * speed];
+  const speed = Math.max(Math.abs(y[2]), Math.abs(y[3]));
+  const accel = Math.hypot(ks[0][2], ks[0][3]);
   // With no length of its own, the step sizes start from the arc it takes
-  // to cross the drawn limit at the starting speed.
-  const reach = Number.isFinite(total)
-    ? total
-    : drawnLimit !== undefined
-      ? drawnLimit / (Math.hypot(w0[0], w0[1]) || 1)
-      : 1;
+  // to cross the drawn limit: at its starting speed, or, for one starting
+  // (nearly) at rest, falling from it.
+  const reaches = [
+    total,
+    ...(drawnLimit !== undefined ? [drawnLimit / speed, Math.sqrt((2 * drawnLimit) / accel)] : []),
+  ].filter(r => Number.isFinite(r) && r > 0);
+  const reach = reaches.length ? Math.min(...reaches) : 1;
+  // A velocity from (nearly) nothing is measured against what it gains.
+  const vscale = Math.max(speed, drawnLimit !== undefined && Number.isFinite(accel) ? accel * reach : 0) || 1;
+  const atol = [TOLERANCE * span[0], TOLERANCE * span[1], TOLERANCE * vscale, TOLERANCE * vscale];
+  for (let c = 4; c < D; c++) atol.push(TOLERANCE * (Math.abs(y[c]) || 1));
   const hMin = reach * 1e-12;
-  let y = [p0, q0, w0[0], w0[1]];
   let s = 0;
   // A first step a hundredth of the way; the controller takes it from there.
   let h = reach / 100;
-  const ks = Array.from({ length: 7 }, () => [0, 0, 0, 0]);
-  const tmp = [0, 0, 0, 0];
-  f(y, ks[0]);
   let steps = 0;
   let outOfBudget = false;
-  // Drawn length so far, and where it stood 64 steps ago (a stall).
+  // Drawn length so far, and where it stood 32 steps ago (a stall).
   let drawn = 0;
   let mark = [p0, q0];
-  const still = 1e-6 * Math.hypot(span[0], span[1]);
+  const still = 1e-5 * Math.hypot(span[0], span[1]);
   while (s < total) {
     if (steps >= maxSteps || (deadline !== undefined && (steps & 15) === 15 && performance.now() > deadline)) {
       outOfBudget = true;
       break;
     }
     h = Math.min(h, total - s);
-    if (opts.maxStride) h = Math.min(h, opts.maxStride / (Math.hypot(y[2], y[3]) || 1));
+    if (opts.maxStride) {
+      // (Longer outside the fine box, which holds what is looked at.)
+      const stride = opts.fine && !inBox(opts.fine, y) ? 8 * opts.maxStride : opts.maxStride;
+      h = Math.min(h, stride / (Math.hypot(y[2], y[3]) || 1));
+    }
     // A stage where the flow does not hold (across a horizon, where the
     // metric is finite but no longer Lorentzian) rejects the step, as one
     // off the domain of definition does: the step shortens toward it.
     let off = false;
     for (let i = 1; i < 7; i++) {
-      for (let c = 0; c < 4; c++) {
+      for (let c = 0; c < D; c++) {
         let acc = y[c];
         for (let j = 0; j < i; j++) acc += h * A[i][j] * ks[j][c];
         tmp[c] = acc;
       }
-      if (flow.holds && !flow.holds(tmp[0], tmp[1])) off = true;
+      if (flow.holds && !flow.holds(tmp[0], tmp[1])) {
+        off = true;
+        break;
+      }
       f(tmp, ks[i]);
     }
-    const next = [0, 0, 0, 0];
+    const next = new Array<number>(D).fill(0);
     let err = 0;
-    for (let c = 0; c < 4; c++) {
-      let hi = y[c];
-      let e = 0;
-      for (let j = 0; j < 7; j++) {
-        hi += h * B5[j] * ks[j][c];
-        e += h * (B5[j] - B4[j]) * ks[j][c];
+    if (!off)
+      for (let c = 0; c < D; c++) {
+        let hi = y[c];
+        let e = 0;
+        for (let j = 0; j < 7; j++) {
+          hi += h * B5[j] * ks[j][c];
+          e += h * (B5[j] - B4[j]) * ks[j][c];
+        }
+        next[c] = hi;
+        const sc = atol[c] + TOLERANCE * Math.max(Math.abs(y[c]), Math.abs(hi));
+        err = Math.max(err, Math.abs(e) / sc);
       }
-      next[c] = hi;
-      const sc = atol[c] + TOLERANCE * Math.max(Math.abs(y[c]), Math.abs(hi));
-      err = Math.max(err, Math.abs(e) / sc);
-    }
     if (off || !Number.isFinite(err)) {
       // Off the surface's domain of definition: shorten toward it, and stop
       // once the step is nothing.
@@ -464,11 +492,21 @@ export function traceGeodesic(
       out.length >= maxPoints
         ? 1
         : drawSpacing
-          ? Math.max(1, Math.min(256, Math.ceil(Math.hypot(next[0] - y[0], next[1] - y[1]) / drawSpacing)))
+          ? Math.max(
+              1,
+              Math.min(
+                256,
+                Math.ceil(
+                  Math.hypot(next[0] - y[0], next[1] - y[1]) /
+                    (!opts.fine || inBox(opts.fine, y) || inBox(opts.fine, next) ? drawSpacing : 8 * drawSpacing),
+                ),
+              ),
+            )
           : spacing
             ? Math.min(256, Math.ceil(h / spacing))
             : 1;
-    const along = (t: number): [number, number] => [hermite(y, next, h, 0, t), hermite(y, next, h, 1, t)];
+    const from = y;
+    const along = (t: number): [number, number] => [hermite(from, next, h, 0, t), hermite(from, next, h, 1, t)];
     if (!inside(next[0], next[1])) {
       // Cut at the first edge it crosses: the first piece that leaves, then
       // bisection along the interpolant within it.
@@ -499,20 +537,20 @@ export function traceGeodesic(
       out.push(edge);
       break;
     }
-    // Back to unit speed: the drift is rounding and truncation, and the
-    // arc length s is then the parameter the steps are taken in.
-    const w = flow.normalize(next[0], next[1], next[2], next[3]);
-    // Where the metric degenerates (a pole), end at the last good point.
-    if (!w) break;
+    // Back on the constraint: the drift is rounding and truncation, and the
+    // arc length s is then the parameter the steps are taken in. Where the
+    // metric degenerates (a pole), end at the last good point.
+    const settled = [...next];
+    if (!flow.normalize(settled)) break;
     for (let k = 1; k < pieces; k++) out.push(along(k / pieces));
     if (drawnLimit !== undefined) drawn += Math.hypot(next[0] - y[0], next[1] - y[1]);
-    y = [next[0], next[1], w[0], w[1]];
+    y = settled;
     s += h;
     out.push([y[0], y[1]]);
     velocities?.push([y[2], y[3]]);
     if (drawnLimit !== undefined) {
       if (drawn >= drawnLimit) break;
-      if (steps % 64 === 0) {
+      if (steps % 32 === 0) {
         if (Math.hypot(y[0] - mark[0], y[1] - mark[1]) < still) break;
         mark = [y[0], y[1]];
       }
@@ -834,29 +872,22 @@ export function geodesicPath(
  * them at each point and raised by solving g z = (…), as connectionAt does
  * for a surface.
  *
- * τ is eliminated: its momentum E = −g_τμ U^μ is conserved, so
- * U^τ = −(E + g_τi U^i)/g_ττ, and the state is the position and velocity in
- * x and y alone. The constraint g(U, U) = κ (−1 for a massive particle, 0
- * for light) then fixes the spatial speed: γ(U, U) = κ + E²/(−g_ττ), with
- * γ_ij = g_ij − g_τi g_τj / g_ττ the metric of space, and the velocity is put
- * back to it after every step, as a surface's is put back to unit speed.
+ * With τ, the state carries U^τ beside the velocity in x and y (τ itself is
+ * never needed: nothing depends on it), and after every step U is put back
+ * on g(U, U) = κ — rescaled for a massive particle (κ = −1), U^τ re-solved
+ * for light (κ = 0) — as a surface's is put back to unit speed. Carrying U^τ
+ * rather than solving it from the conserved energy keeps g_ττ out of any
+ * denominator, so a geodesic runs on into an ergoregion (g_ττ > 0 outside a
+ * spinning hole's horizon) and stops only where x and y stop being space:
+ * at a horizon.
  */
 
 /** A metric's components (MetricSpec.components), then their x and y
  *  derivatives, then its Jacobian's 12 numbers if it has one, at (x, y). */
 export type MetricSystem = (p: number, q: number, out: Float64Array) => void;
 
-/** a b c for n × n matrices (b and c may be transposed: `ta`). */
-function times(a: number[][], b: number[][], ta = false): number[][] {
-  const n = b.length;
-  return b.map((_, i) =>
-    b.map((_, j) => {
-      let sum = 0;
-      for (let k = 0; k < n; k++) sum += (ta ? a[k][i] : a[i][k]) * b[k][j];
-      return sum;
-    }),
-  );
-}
+/** An n × n matrix of numbers, to fill in place. */
+const square = (n: number) => Array.from({ length: n }, () => new Array<number>(n).fill(0));
 
 /**
  * g and ∂g/∂x, ∂g/∂y in x and y as symmetric matrices at a point, read
@@ -864,18 +895,39 @@ function times(a: number[][], b: number[][], ta = false): number[][] {
  * twice); pulled back through the Jacobian J when `pulled`:
  * g = Jᵀ g_AB J, ∂g = ∂Jᵀ g_AB J + Jᵀ ∂g_AB J + Jᵀ g_AB ∂J, with
  * ∂g_AB/∂x as compiled (the components are functions of x and y already).
+ * It allocates nothing per point: the matrices it returns are its own, and
+ * change on the next read.
  */
 function metricReader(sys: MetricSystem, n: 2 | 3, pulled = false) {
   const m = (n * (n + 1)) / 2;
   const buf = new Float64Array(3 * m + (pulled ? 12 : 0));
-  const square = () => Array.from({ length: n }, () => new Array<number>(n).fill(0));
-  let g = square();
-  let d = [square(), square()];
+  // As written (in the coordinates A, B), and as returned (in x and y).
+  const gw = square(n);
+  const dw = [square(n), square(n)];
+  const g = pulled ? square(n) : gw;
+  const d = pulled ? [square(n), square(n)] : dw;
+  // The full Jacobian, τ to itself, its derivatives, and g_AB J.
   const s0 = n - 2;
-  // The full Jacobian, τ to itself, and its derivatives.
-  const J = square();
-  const dJ = [square(), square()];
+  const J = square(n);
+  const dJ = [square(n), square(n)];
+  const gJ = square(n);
+  const dgJ = square(n);
   if (s0) J[0][0] = 1;
+  /** out = Jᵀ M J, M J going through `t`. */
+  const congruence = (out: number[][], M: number[][], t: number[][]) => {
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        let sum = 0;
+        for (let k = 0; k < n; k++) sum += M[i][k] * J[k][j];
+        t[i][j] = sum;
+      }
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        let sum = 0;
+        for (let k = 0; k < n; k++) sum += J[k][i] * t[k][j];
+        out[i][j] = sum;
+      }
+  };
   let lp = NaN;
   let lq = NaN;
   return (p: number, q: number) => {
@@ -886,9 +938,9 @@ function metricReader(sys: MetricSystem, n: 2 | 3, pulled = false) {
       let k = 0;
       for (let i = 0; i < n; i++)
         for (let j = i; j < n; j++, k++) {
-          g[i][j] = g[j][i] = buf[k];
-          d[0][i][j] = d[0][j][i] = buf[m + k];
-          d[1][i][j] = d[1][j][i] = buf[2 * m + k];
+          gw[i][j] = gw[j][i] = buf[k];
+          dw[0][i][j] = dw[0][j][i] = buf[m + k];
+          dw[1][i][j] = dw[1][j][i] = buf[2 * m + k];
         }
       if (pulled) {
         for (let a = 0; a < 2; a++)
@@ -897,14 +949,18 @@ function metricReader(sys: MetricSystem, n: 2 | 3, pulled = false) {
             dJ[0][s0 + a][s0 + i] = buf[3 * m + 4 + 2 * a + i];
             dJ[1][s0 + a][s0 + i] = buf[3 * m + 8 + 2 * a + i];
           }
-        const gJ = times(g, J);
-        const pulledG = times(J, gJ, true);
-        d = [0, 1].map(v => {
-          const one = times(dJ[v], gJ, true);
-          const two = times(J, times(d[v], J), true);
-          return one.map((row, i) => row.map((x, j) => x + one[j][i] + two[i][j]));
-        });
-        g = pulledG;
+        congruence(g, gw, gJ);
+        for (let v = 0; v < 2; v++) {
+          congruence(d[v], dw[v], dgJ);
+          // + ∂Jᵀ (g J) and its transpose.
+          for (let i = 0; i < n; i++)
+            for (let j = 0; j < n; j++) {
+              let sum = 0;
+              for (let c = 0; c < n; c++) sum += dJ[v][c][i] * gJ[c][j];
+              dgJ[i][j] = sum;
+            }
+          for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) d[v][i][j] += dgJ[i][j] + dgJ[j][i];
+        }
       }
     }
     return { g, d };
@@ -924,11 +980,13 @@ export function metricAt(
   return { g: g.map(row => [...row]), d: d.map(m => m.map(row => [...row])) };
 }
 
-/** z with g z = a, g symmetric 2 × 2 or 3 × 3. */
-function solveSymmetric(g: readonly (readonly number[])[], a: readonly number[]): number[] {
+/** z with g z = a, g symmetric 2 × 2 or 3 × 3, into `z`. */
+function solveSymmetric(g: readonly (readonly number[])[], a: readonly number[], z: number[]): void {
   if (g.length === 2) {
     const det = g[0][0] * g[1][1] - g[0][1] * g[0][1];
-    return [(g[1][1] * a[0] - g[0][1] * a[1]) / det, (g[0][0] * a[1] - g[0][1] * a[0]) / det];
+    z[0] = (g[1][1] * a[0] - g[0][1] * a[1]) / det;
+    z[1] = (g[0][0] * a[1] - g[0][1] * a[0]) / det;
+    return;
   }
   const [[A, B, C], [, D, E], [, , F]] = g;
   const c00 = D * F - E * E;
@@ -938,26 +996,27 @@ function solveSymmetric(g: readonly (readonly number[])[], a: readonly number[])
   const c12 = B * C - A * E;
   const c22 = A * D - B * B;
   const det = A * c00 + B * c01 + C * c02;
-  return [
-    (c00 * a[0] + c01 * a[1] + c02 * a[2]) / det,
-    (c01 * a[0] + c11 * a[1] + c12 * a[2]) / det,
-    (c02 * a[0] + c12 * a[1] + c22 * a[2]) / det,
-  ];
+  z[0] = (c00 * a[0] + c01 * a[1] + c02 * a[2]) / det;
+  z[1] = (c01 * a[0] + c11 * a[1] + c12 * a[2]) / det;
+  z[2] = (c02 * a[0] + c12 * a[1] + c22 * a[2]) / det;
 }
 
 /**
- * −Γ^i_μν U^μ U^ν for the two drawn coordinates i, from g and its x and y
+ * −Γ^k_μν U^μ U^ν for every coordinate k, from g and its x and y
  * derivatives (no coordinate but x and y is differentiated: τ is cyclic).
- * U is (U^τ, U^x, U^y), or (U^x, U^y) for a metric in x and y alone.
+ * U is (U^τ, U^x, U^y), or (U^x, U^y) for a metric in x and y alone. Into
+ * `out` when given.
  */
 export function metricAcceleration(
   g: readonly (readonly number[])[],
   d: readonly (readonly (readonly number[])[])[],
   U: readonly number[],
-): [number, number] {
+  out: number[] = new Array<number>(g.length),
+  lower: number[] = new Array<number>(g.length),
+): number[] {
   const n = g.length;
   const s0 = n - 2;
-  const lower = new Array<number>(n).fill(0);
+  lower.fill(0);
   for (let k = 0; k < 2; k++) {
     const dk = d[k];
     const uk = U[s0 + k];
@@ -970,43 +1029,51 @@ export function metricAcceleration(
     }
     lower[s0 + k] -= quad / 2;
   }
-  const z = solveSymmetric(g, lower);
-  return [-z[s0], -z[s0 + 1]];
+  solveSymmetric(g, lower, out);
+  for (let k = 0; k < n; k++) out[k] = -out[k];
+  return out;
 }
 
 /** How much more than its size at the start a metric may grow (or less it
- *  may shrink to) before a geodesic is taken to have met a singularity. */
-const METRIC_RANGE = 1e12;
+ *  may shrink to) before a geodesic is taken to have met a singularity: a
+ *  horizon, or an ideal boundary like the half-plane's y = 0. */
+const METRIC_RANGE = 1e8;
 
 /** The largest |g_ij|. */
-const metricSize = (g: readonly (readonly number[])[]) => Math.max(...g.flat().map(Math.abs));
-
-/** The metric of space γ_ij = g_ij − g_τi g_τj / g_ττ of a 3 × 3 metric, as
- *  [γ_xx, γ_xy, γ_yy], or null unless g_ττ < 0 and γ is positive definite
- *  (a Lorentzian metric with τ timelike). */
-function spaceMetric(g: readonly (readonly number[])[], size: number): [number, number, number] | null {
-  const gtt = g[0][0];
-  if (!(gtt < -size / METRIC_RANGE)) return null;
-  const a = g[1][1] - (g[0][1] * g[0][1]) / gtt;
-  const b = g[1][2] - (g[0][1] * g[0][2]) / gtt;
-  const c = g[2][2] - (g[0][2] * g[0][2]) / gtt;
-  const scale = Math.max(Math.abs(a), Math.abs(c));
-  if (!(a > 0) || !(a * c - b * b > 1e-12 * scale * scale)) return null;
-  return [a, b, c];
+function metricSize(g: readonly (readonly number[])[]): number {
+  let size = 0;
+  for (const row of g) for (const v of row) size = Math.max(size, Math.abs(v));
+  return size;
 }
 
-/** Whether a 2 × 2 metric is positive definite (and not nearly degenerate). */
-function positive(g: readonly (readonly number[])[]): boolean {
-  const [[E, F], [, G]] = g;
+/** Whether the 2 × 2 block of g from row and column s on is positive
+ *  definite (and not nearly degenerate): a Riemannian metric, or the
+ *  panel's coordinates being space. */
+function positive(g: readonly (readonly number[])[], s = 0): boolean {
+  const [E, F, G] = [g[s][s], g[s][s + 1], g[s + 1][s + 1]];
   const scale = Math.max(Math.abs(E), Math.abs(G));
   return E > 0 && E * G - F * F > 1e-12 * scale * scale;
+}
+
+/** det g of a 3 × 3 metric. */
+function det3(g: readonly (readonly number[])[]): number {
+  const [[A, B, C], [, D, E], [, , F]] = g;
+  return A * (D * F - E * E) - B * (B * F - C * E) + C * (B * E - C * D);
+}
+
+/** Whether a 3 × 3 metric is Lorentzian with x and y space: its x, y block
+ *  positive definite and its determinant negative. Inside a horizon x and y
+ *  are no longer space; in an ergoregion they still are, though g_ττ > 0. */
+function spacetime(g: readonly (readonly number[])[], size: number): boolean {
+  return positive(g, 1) && det3(g) < -1e-12 * size * size * size;
 }
 
 const short = (x: number) => Number(x.toPrecision(3));
 
 /**
  * The flow of a metric's geodesic from (p, q), set off with `direction` in x
- * and y, and the velocity it starts with — or why it cannot start there.
+ * and y, and the velocity (with U^τ after it) it starts with — or why it
+ * cannot start there.
  *
  * - riemannian: at unit speed; only the direction matters.
  * - timelike: `direction` is the coordinate velocity d(x, y)/dτ, so its
@@ -1014,8 +1081,8 @@ const short = (x: number) => Number(x.toPrecision(3));
  * - null: only the direction matters; U^τ = 1 at the start, so the affine
  *   parameter runs like τ there.
  *
- * `sign` −1 runs it back (U and E reversed). Null when there is nothing to
- * trace (a light ray with no direction).
+ * `sign` −1 runs it back (U reversed). Null when there is nothing to trace
+ * (a light ray with no direction).
  */
 export function metricStart(
   sys: MetricSystem,
@@ -1033,92 +1100,130 @@ export function metricStart(
   if (!Number.isFinite(size0) || !(size0 > 0)) return { problem: 'the metric is not defined at the start' };
   const inRange = (g: readonly (readonly number[])[]) => {
     const size = metricSize(g);
-    return size < size0 * METRIC_RANGE && Number.isFinite(size);
+    return size < size0 * METRIC_RANGE && size > size0 / METRIC_RANGE && Number.isFinite(size);
   };
+  const U = new Array<number>(n).fill(0);
+  const acc = new Array<number>(n).fill(0);
+  const lower = new Array<number>(n).fill(0);
   if (n === 2) {
     if (!positive(g)) return { problem: 'the metric is not positive definite at the start' };
     const flow: GeodesicFlow = {
-      accel(p, q, w1, w2, out) {
-        const { g, d } = read(p, q);
-        [out[0], out[1]] = metricAcceleration(g, d, [w1, w2]);
+      accel(y, out) {
+        const { g, d } = read(y[0], y[1]);
+        U[0] = y[2];
+        U[1] = y[3];
+        metricAcceleration(g, d, U, acc, lower);
+        out[0] = acc[0];
+        out[1] = acc[1];
       },
       holds(p, q) {
         const { g } = read(p, q);
         return inRange(g) && positive(g);
       },
-      normalize(p, q, w1, w2) {
-        const { g } = read(p, q);
-        if (!inRange(g) || !positive(g)) return null;
+      normalize(y) {
+        const { g } = read(y[0], y[1]);
+        if (!inRange(g) || !positive(g)) return false;
+        const [w1, w2] = [y[2], y[3]];
         const s2 = g[0][0] * w1 * w1 + 2 * g[0][1] * w1 * w2 + g[1][1] * w2 * w2;
-        if (!(s2 > 0) || !Number.isFinite(s2)) return null;
+        if (!(s2 > 0) || !Number.isFinite(s2)) return false;
         const s = Math.sqrt(s2);
-        return [w1 / s, w2 / s];
+        y[2] = w1 / s;
+        y[3] = w2 / s;
+        return true;
       },
     };
     return { flow, velocity: [sign * a, sign * b] };
   }
-  const gamma = spaceMetric(g, size0);
-  if (!gamma)
+  if (!spacetime(g, size0))
     return {
-      problem:
-        g[0][0] >= 0
-          ? `${time} is not timelike at the start: g_${time}${time} ≥ 0 there (inside a horizon?)`
-          : 'the metric is not Lorentzian at the start',
+      problem: positive(g, 1)
+        ? 'the metric is not Lorentzian at the start'
+        : `x and y are not space at the start (inside a horizon?), so ${time} is no time there`,
     };
   const gtt = g[0][0];
   const beta = (u: number, v: number) => g[0][1] * u + g[0][2] * v;
   const h = (u: number, v: number) => g[1][1] * u * u + 2 * g[1][2] * u * v + g[2][2] * v * v;
-  /** The rate of τ a light ray moving along (u, v) has: g(U, U) = 0 with
-   *  U = (rate, u, v), the root moving forward in τ. */
-  const lightRate = (u: number, v: number) => {
-    const bd = beta(u, v);
-    const disc = bd * bd - gtt * h(u, v);
-    return (bd + Math.sqrt(Math.max(disc, 0))) / -gtt;
-  };
+  const ergo = gtt >= 0 ? ' (inside an ergoregion, where nothing stands still)' : '';
   let w: [number, number];
   let ut: number;
   if (motion === 'null') {
     if (a === 0 && b === 0) return null;
-    const rate = lightRate(a, b);
+    // g(U, U) = 0 with U = (rate, a, b): the root moving forward in τ that
+    // continues the one outside an ergoregion.
+    const bd = beta(a, b);
+    const disc = bd * bd - gtt * h(a, b);
+    const rate = Math.abs(gtt) < 1e-12 * size0 ? -h(a, b) / (2 * bd) : (-bd - Math.sqrt(Math.max(disc, 0))) / gtt;
+    if (!(rate > 0) || !Number.isFinite(rate)) return { problem: `light cannot move this way here${ergo}` };
     w = [a / rate, b / rate];
     ut = 1;
   } else {
     const gvv = gtt + 2 * beta(a, b) + h(a, b);
     if (!(gvv < 0)) {
+      // The speeds s along this direction g(U, U) < 0 allows: between the
+      // roots of g_ττ + 2 β s + h s² = 0.
       const len = Math.hypot(a, b);
-      const c = 1 / lightRate(a / len, b / len);
-      return { problem: `faster than light here: at most ≈ ${short(c)} in this direction` };
+      if (len === 0) return { problem: `nothing can stand still here${ergo}` };
+      const [u, v] = [a / len, b / len];
+      const [B, H] = [beta(u, v), h(u, v)];
+      const disc = B * B - H * gtt;
+      const hi = (-B + Math.sqrt(Math.max(disc, 0))) / H;
+      const lo = (-B - Math.sqrt(Math.max(disc, 0))) / H;
+      return {
+        problem:
+          disc < 0 || !(hi > 0)
+            ? `no particle can move this way here${ergo}`
+            : lo > 0
+              ? `a particle here must move between ≈ ${short(lo)} and ${short(hi)} in this direction${ergo}`
+              : `faster than light here: at most ≈ ${short(hi)} in this direction`,
+      };
     }
     ut = 1 / Math.sqrt(-gvv);
     w = [ut * a, ut * b];
   }
-  // τ's momentum, conserved along it.
-  const E = -sign * (gtt * ut + beta(w[0], w[1]));
-  const kappa = motion === 'null' ? 0 : -1;
   const flow: GeodesicFlow = {
-    accel(p, q, w1, w2, out) {
-      const { g, d } = read(p, q);
-      const rate = -(E + g[0][1] * w1 + g[0][2] * w2) / g[0][0];
-      [out[0], out[1]] = metricAcceleration(g, d, [rate, w1, w2]);
+    extras: [sign * ut],
+    accel(y, out) {
+      const { g, d } = read(y[0], y[1]);
+      U[0] = y[4];
+      U[1] = y[2];
+      U[2] = y[3];
+      metricAcceleration(g, d, U, acc, lower);
+      out[0] = acc[1];
+      out[1] = acc[2];
+      out[2] = acc[0];
     },
     holds(p, q) {
       const { g } = read(p, q);
-      return inRange(g) && !!spaceMetric(g, size0);
+      return inRange(g) && spacetime(g, size0);
     },
-    normalize(p, q, w1, w2) {
-      const { g } = read(p, q);
-      if (!inRange(g)) return null;
-      const gamma = spaceMetric(g, size0);
-      if (!gamma) return null;
-      const target = kappa + (E * E) / -g[0][0];
-      const now = gamma[0] * w1 * w1 + 2 * gamma[1] * w1 * w2 + gamma[2] * w2 * w2;
-      // Near a turning point at rest both are nearly 0, and their ratio is
-      // rounding: left alone there.
-      if (target > 0 && now > 0) {
-        const k = Math.sqrt(target / now);
-        if (Math.abs(k - 1) < 0.1) return [w1 * k, w2 * k];
+    normalize(y) {
+      const { g } = read(y[0], y[1]);
+      if (!inRange(g) || !spacetime(g, size0)) return false;
+      const [w1, w2, rate] = [y[2], y[3], y[4]];
+      const B = g[0][1] * w1 + g[0][2] * w2;
+      const C = g[1][1] * w1 * w1 + 2 * g[1][2] * w1 * w2 + g[2][2] * w2 * w2;
+      const A = g[0][0];
+      if (motion === 'null') {
+        // U^τ re-solved from g(U, U) = 0: the root nearest the one carried.
+        const disc = B * B - A * C;
+        if (disc >= 0) {
+          const roots =
+            Math.abs(A) < 1e-12 * size0 ? [-C / (2 * B)] : [(-B - Math.sqrt(disc)) / A, (-B + Math.sqrt(disc)) / A];
+          const best = roots.reduce((x, r) => (Math.abs(r - rate) < Math.abs(x - rate) ? r : x), Infinity);
+          if (Math.abs(best - rate) < 0.1 * Math.abs(rate)) y[4] = best;
+        }
+      } else {
+        const s = A * rate * rate + 2 * B * rate + C;
+        if (s < 0) {
+          const k = 1 / Math.sqrt(-s);
+          if (Math.abs(k - 1) < 0.1) {
+            y[2] = w1 * k;
+            y[3] = w2 * k;
+            y[4] = rate * k;
+          }
+        }
       }
-      return Number.isFinite(w1) && Number.isFinite(w2) ? [w1, w2] : null;
+      return Number.isFinite(y[2]) && Number.isFinite(y[3]) && Number.isFinite(y[4]);
     },
   };
   return { flow, velocity: [sign * w[0], sign * w[1]] };
@@ -1167,7 +1272,14 @@ function metricPath(
   if (!Number.isFinite(x0) || !Number.isFinite(y0)) return [];
   const length = spec.length ? L : Infinity;
   if (Number.isNaN(length) || !Number.isFinite(a) || !Number.isFinite(b)) return [x0, y0, 0];
-  const domain = window ?? traceWindow([x0 - 10, y0 - 10], [x0 + 10, y0 + 10]);
+  // The box round the window, grown to take in the start: a ray sent in
+  // from far off still crosses a window zoomed in on the hole.
+  const box = window ?? traceWindow([x0 - 10, y0 - 10], [x0 + 10, y0 + 10]);
+  const margin = (box[0][1] - box[0][0]) / 8;
+  const domain: GeodesicOptions['domain'] = [
+    [Math.min(box[0][0], x0 - margin), Math.max(box[0][1], x0 + margin)],
+    [Math.min(box[1][0], y0 - margin), Math.max(box[1][1], y0 + margin)],
+  ];
   const sys = numericIn([...metric.components, ...metric.derivatives, ...(metric.jacobian ?? [])], ['x', 'y'], env);
   const start = metricStart(
     sys,
@@ -1185,16 +1297,18 @@ function metricPath(
     if (ended) ended.problem = start.problem;
     return [x0, y0, 0];
   }
-  const diagonal = Math.hypot(domain[0][1] - domain[0][0], domain[1][1] - domain[1][0]);
-  // With no length of its own, as far as the box is across.
-  const drawnLimit = spec.length ? undefined : diagonal;
+  // Drawn and stepped finely for the window's box; with no length of its
+  // own, run as far as the whole domain is across.
+  const diagonal = Math.hypot(box[0][1] - box[0][0], box[1][1] - box[1][0]);
+  const drawnLimit = spec.length ? undefined : Math.hypot(domain[0][1] - domain[0][0], domain[1][1] - domain[1][0]);
   const path = traceGeodesic(start.flow, {
     start: [x0, y0],
     direction: start.velocity,
     length: Math.abs(length),
     domain,
     drawSpacing: Math.max(diagonal / 1500, (drawnLimit ?? 0) / maxPoints),
-    maxStride: diagonal / 500,
+    fine: box,
+    maxStride: diagonal / 400,
     drawnLimit,
     maxPoints,
     ended,

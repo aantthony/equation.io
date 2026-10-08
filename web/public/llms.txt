@@ -336,15 +336,20 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     and sliders; cross terms (`2 a dt dphi`) are allowed:
     `ds^2 = (dx^2 + dy^2)/y^2` (the Poincaré half-plane) or `M = 1`,
     `ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2` (Schwarzschild,
-    in its equatorial plane). Inside ds² `dt` is a differential; a component
-    using t is refused (time-dependent metrics are not supported yet), as is
-    one using the extra coordinate, a missing differential of the panel's
-    coordinates, two extra coordinates, a term not quadratic in the
-    differentials, and a metric with no usable signature: with no extra
-    coordinate it must be positive definite; with one, that coordinate is a
-    time (g < 0 there) and the panel's are space. One ds² row a panel; not on
-    an `on(…)` panel or one whose `view(…)` maps its axes. The row reads out
-    its signature and coordinates and draws nothing.
+    in its equatorial plane). Define r and phi first: `dr` and `dphi` with
+    no such coordinates are refused. Inside ds² `dt` (or `dτ`) is a
+    differential even beside a slider named dt; another defined name like
+    `dw` keeps its value there. A component using t is refused
+    (time-dependent metrics are not supported yet), as is one using the
+    extra coordinate, a missing differential of the panel's coordinates, two
+    extra coordinates, `dpi` or `de` (constants are no coordinates), a term
+    not quadratic in the differentials, and a metric with no usable
+    signature (checked over scales from 0.001 to 100 000 round the origin):
+    with no extra coordinate it must be positive definite; with one, the
+    panel's coordinates are space and det g < 0, so the other is a time.
+    One ds² row a panel; not on an `on(…)` panel or one whose `view(…)` maps
+    its axes. The row reads out its signature and coordinates and draws
+    nothing.
   - Points and directions are in the panel's x and y, like any point (named
     points drag); the metric is pulled back to x and y through the
     coordinates' Jacobian, and the curve is drawn there.
@@ -356,17 +361,21 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     Schwarzschild with M = 1, `geodesic((10, 0), (0, sqrt(1/10)))` is a
     circular orbit — and the length is proper time. Faster than light at P
     draws nothing and the row's note says how fast it may go ("faster than
-    light here: at most ≈ 0.894 in this direction").
+    light here: at most ≈ 0.894 in this direction"). A spinning hole works
+    too (equatorial Kerr, with a `dt dphi` term): geodesics run on into the
+    ergoregion, where g_tt > 0 and nothing can stand still, down to the
+    horizon.
   - `lightray(P, (dx, dy))` is a light ray: only the direction matters, and
     its length runs in the affine parameter that moves like t at the start.
     `b = [-6..6]` and `lightray((-30, b), (1, 0))` bend round a black hole;
     those with |b| < 3√3 M fall in.
   - Without a length they run until they leave a box round the window (four
-    times its size, kept through small pans and zooms) or have drawn as far
-    as it is across. They stop where the metric degenerates or blows up — a
-    horizon (r = 2M), an ideal boundary (y = 0) — and lists fan out as for
-    surfaces. The particle's energy is conserved exactly, so orbits precess
-    as they should: 2π((1 − 6M/r)^−½ − 1) an orbit near a circle of radius r.
+    times its size, kept through small pans and zooms, and grown to take in
+    the start, so a ray sent in from far off still crosses a zoomed window)
+    or have drawn as far as that is across. They stop where the metric
+    degenerates or blows up — a horizon (r = 2M), an ideal boundary
+    (y = 0) — and lists fan out as for surfaces. Orbits precess as they
+    should: 2π((1 − 6M/r)^−½ − 1) an orbit near a circle of radius r.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   The operand is every factor written after `dx`, with or without spaces,

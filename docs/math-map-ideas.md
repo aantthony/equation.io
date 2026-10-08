@@ -108,22 +108,31 @@ the inverse of r, phi(x, y) that the document never states; the pullback
 g_xy = Jᵀ g J and its derivatives are formed in numbers at each point
 (metricReader), several times cheaper than writing them out symbolically.
 The integrator is lib/surface-geometry.ts traceGeodesic, generalised to a
-GeodesicFlow (a surface's connection, or a metric's): τ is eliminated through
-its conserved energy E = −g_τμ U^μ, so the state stays position and velocity
-in x and y, and after each step the velocity is put back on g(U, U) = κ
-(1, −1 or 0) by rescaling it in the metric of space γ = g − g_τ g_τ/g_ττ, so
-energy is exact and orbits precess as they should (tests:
+GeodesicFlow (a surface's connection, or a metric's) whose state may carry
+more than position and velocity: a metric with τ carries U^τ (τ itself is
+never needed). After each step U is put back on g(U, U) = κ (1, −1 or 0):
+rescaled for unit speed or a massive particle, U^τ re-solved for light.
+Solving U^τ from the conserved energy E = −g_τμ U^μ instead (a first
+version) divides by g_ττ, so it stopped at a spinning hole's ergosurface,
+where g_ττ = 0, rather than its horizon. Orbits precess as they should (tests:
 2π((1 − 6M/r)^−½ − 1) per orbit near a circle, which is 6πM/r to first
 order; the photon sphere; 4M/b deflection; Poincaré geodesics on the unit
-circle). It stops where the metric stops being Riemannian or Lorentzian with
-τ timelike — checked at every stage of a step, as a horizon is finite but
-wrong inside — or grows 10¹² times, where it makes no headway (a ray
-crawling into a horizon, toward y = 0 in the half-plane), at a box round the
-window (traceWindow: four times the window, on a lattice, so small pans and
-zooms keep the trace), and, with no length given, once it has drawn as far
-as that box is across. Steps are held to 1/500 of the box so none strides
-over a black hole between stages. It runs in the trace worker on the same
-budgets as surface geodesics. Follow-ups: light cones and their tilt,
+circle; equatorial Kerr into its ergoregion and down to its horizon). It
+stops where the metric stops being Riemannian, or stops having x and y as
+space with det g < 0 — checked at every stage of a step, as a horizon is
+finite but wrong inside — or grows or shrinks 10⁸ times, where it makes no
+headway (a ray crawling into a horizon, toward y = 0 in the half-plane), at
+a box round the window (traceWindow: four times the window, on a lattice,
+so small pans and zooms keep the trace) grown to take in the start, and,
+with no length given, once it has drawn as far as that is across. Inside
+the window's box steps are held to 1/400 of it, so none strides over a
+black hole between stages, and points are drawn finely; outside it, eight
+times coarser. The reader allocates nothing per point. It runs in the trace
+worker; a metric's family member gets at least 60 ms. A metric is checked
+at sample points over scales from 0.001 to 100 000 round the origin, so a
+disc of radius 0.1 and a hole of mass 10 000 both pass; a small feature far
+from the origin could still be missed. Follow-ups: light
+cones and their tilt,
 tidal glyphs (the geodesic deviation tensor), painting a metric's
 curvature, time-dependent metrics (τ not cyclic: a third coordinate in the
 state, and t meaning both), more coordinates (3D slices, Kerr off the

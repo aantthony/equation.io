@@ -18,7 +18,7 @@
  * from x and y are all the document says).
  */
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { type Expr, evaluate, freeVars, substVars } from './expr.ts';
+import { type Expr, builtinFn, evaluate, freeVars, substVars } from './expr.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { exceedsNodes } from './size.ts';
 import { smoothPartial } from './surface-geometry.ts';
@@ -93,13 +93,25 @@ function partial(e: Expr, v: string): Expr {
 }
 
 /** Sample points of the plane a metric is checked at: rings round the
- *  origin from 0.37 to 77 across, off the axes. */
-const SAMPLES: readonly [number, number][] = [0.37, 1.3, 2.9, 4.6, 7.7, 13, 31, 77].flatMap(r =>
+ *  origin, four a decade from 0.001 to 100 000 across, off the axes — so a
+ *  black hole of mass 0.01 or 10 000, or a disc of radius 0.1, is seen. */
+const SAMPLES: readonly [number, number][] = Array.from({ length: 33 }, (_, i) => 10 ** (-3 + i / 4)).flatMap((r, i) =>
   Array.from({ length: 7 }, (_, k) => {
-    const a = 0.3 + (2 * Math.PI * k) / 7;
+    const a = 0.3 + 0.37 * i + (2 * Math.PI * k) / 7;
     return [r * Math.cos(a), r * Math.sin(a)] as [number, number];
   }),
 );
+
+/** Names a differential cannot be of: constants and the imaginary unit. */
+const NOT_COORDINATES: ReadonlySet<string> = new Set(['pi', 'e', 'i', 'inf']);
+
+/**
+ * A ds^2 row's text with `dτ` spelled `dtau`: τ alone is the glyph for the
+ * constant tau, so `dτ` would read as d times τ.
+ */
+export function metricText(text: string): string {
+  return text.replace(/(?<![\p{L}\p{N}_'])dτ/gu, 'dtau');
+}
 
 /**
  * The metric of a `ds^2 = rhs` row, or an error saying what is wrong with it:
@@ -111,34 +123,51 @@ const SAMPLES: readonly [number, number][] = [0.37, 1.3, 2.9, 4.6, 7.7, 13, 31, 
  * one).
  */
 export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
-  // The differentials: d<name> for x, y and coordinate fields always; for
-  // any other name only when d<name> is not itself something defined.
+  // The differentials: d<name> for x, y, coordinate fields and t (τ)
+  // always; for any other name only when d<name> is not itself something
+  // the document defines, which then keeps its value here (`shadowed`).
   const panel: string[] = [];
   const extra: string[] = [];
+  const shadowed: string[] = [];
   const names = new Map<string, string>();
   for (const name of freeVars(rhs)) {
     if (name.length < 2 || name[0] !== 'd') continue;
-    const of = name.slice(1);
+    const written = name.slice(1);
+    const of = written === 'tau' ? 'τ' : written;
     if (PANEL.has(of) || Object.hasOwn(ctx.fields, of)) {
       panel.push(of);
       names.set(name, of);
-    } else if (!ctx.isDefined(name)) {
-      if (ctx.isDefined(of))
-        throw new Error(
-          `ds^2: ${of} is not a coordinate, so ${name} is no differential — define ${of} from x and y (like r = sqrt(x^2 + y^2)), or use a coordinate of its own, like dt.`,
-        );
-      extra.push(of);
-      names.set(name, of);
+      continue;
     }
+    if (of !== 't' && of !== 'τ' && ctx.isDefined(name)) {
+      shadowed.push(name);
+      continue;
+    }
+    if (NOT_COORDINATES.has(of) || builtinFn(of))
+      throw new Error(
+        `ds^2: ${name} is no differential — ${of} is ${builtinFn(of) ? 'a function' : 'a constant'}, not a coordinate.`,
+      );
+    if (ctx.isDefined(of))
+      throw new Error(
+        `ds^2: ${of} is not a coordinate, so ${name} is no differential — define ${of} from x and y (like r = sqrt(x^2 + y^2)), or use a coordinate of its own, like dt.`,
+      );
+    extra.push(of);
+    names.set(name, of);
   }
   const listed = (list: readonly string[]) => list.map(n => `d${n}`).join(', ');
+  if (panel.length < 2) {
+    // dr and dphi with no r and phi defined read as coordinates of their own.
+    const loose = extra.filter(n => n !== 't' && n !== 'τ');
+    throw new Error(
+      `ds^2 needs the differentials of both of the panel's coordinates — dx and dy, or of two coordinates defined from x and y${panel.length ? ` (it has only ${listed(panel)})` : ''}. ` +
+        (loose.length
+          ? `${listed(loose)} ${loose.length === 1 ? 'is the differential' : 'are differentials'} of no coordinate yet: define ${loose.join(' and ')} from x and y first, like r = sqrt(x^2 + y^2) and phi = atan2(y, x).`
+          : `Write it ${EXAMPLE}.`),
+    );
+  }
   if (extra.length > 1)
     throw new Error(
       `ds^2 takes the panel's two coordinates and at most one more, a time no component depends on: ${listed(extra)} are ${extra.length}.`,
-    );
-  if (panel.length < 2)
-    throw new Error(
-      `ds^2 needs the differentials of both of the panel's coordinates — dx and dy, or of two coordinates defined from x and y, like r = sqrt(x^2 + y^2) and phi = atan2(y, x)${panel.length ? ` (it has only ${listed(panel)})` : ''}: ${EXAMPLE}.`,
     );
   if (panel.length > 2)
     throw new Error(
@@ -168,7 +197,10 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
 
   // g_ij = ½ ∂²Q/∂dᵢ∂dⱼ, each free of the differentials, and Q = gᵢⱼ dⁱ dʲ.
   const notQuadratic = new Error(
-    'ds^2 is a quadratic form in the differentials: each term a coefficient times two of them, like r^2 dphi^2 or 2 a dt dphi.',
+    'ds^2 is a quadratic form in the differentials: each term a coefficient times two of them, like r^2 dphi^2 or 2 a dt dphi.' +
+      (shadowed.length
+        ? ` (${shadowed.join(', ')} ${shadowed.length === 1 ? 'is' : 'are'} defined elsewhere in the document, so ${shadowed.length === 1 ? 'it is' : 'they are'} that value here, not a differential: rename the definition to use ${shadowed.length === 1 ? 'it' : 'them'} as one.)`
+        : ''),
   );
   const g: Expr[][] = [];
   try {
@@ -211,7 +243,7 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   let defined = 0;
   let independent = 0;
   let traceable = 0;
-  let timelike = 0;
+  let space = 0;
   for (const [k, [x, y]] of SAMPLES.entries()) {
     const w = vars.map((_, i) => Math.sin(1.7 * k + 2.3 * i + 0.4));
     const env: Record<string, number> = { x, y };
@@ -232,10 +264,15 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
     if (Math.abs(j[0][0] * j[1][1] - j[0][1] * j[1][0]) > 1e-12 * Math.max(...j.flat().map(Math.abs))) independent++;
     if (n === 2) {
       if (G[0][0] > 0 && G[0][0] * G[1][1] - G[0][1] ** 2 > 0) traceable++;
-    } else if (G[0][0] < 0) {
-      timelike++;
-      const s = (a: number, b: number) => G[a][b] - (G[0][a] * G[0][b]) / G[0][0];
-      if (s(1, 1) > 0 && s(1, 1) * s(2, 2) - s(1, 2) ** 2 > 0) traceable++;
+    } else if (G[1][1] > 0 && G[1][1] * G[2][2] - G[1][2] ** 2 > 0) {
+      // The panel's coordinates are space here; with det g < 0, the other
+      // is a time (in an ergoregion too, where g_ττ > 0).
+      space++;
+      const det =
+        G[0][0] * (G[1][1] * G[2][2] - G[1][2] ** 2) -
+        G[0][1] * (G[0][1] * G[2][2] - G[0][2] * G[1][2]) +
+        G[0][2] * (G[0][1] * G[1][2] - G[0][2] * G[1][1]);
+      if (det < 0) traceable++;
     }
   }
   if (defined && !independent && !spatial.every(c => PANEL.has(c)))
@@ -246,9 +283,9 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
     throw new Error(
       n === 2
         ? 'ds^2 with no time must be positive for every direction (a Riemannian metric, like (dx^2 + dy^2)/y^2); a spacetime has a time coordinate too, like -dt^2 + dx^2 + dy^2.'
-        : timelike
-          ? `ds^2 must have one minus sign, for d${time}: the panel's coordinates are space.`
-          : `ds^2: ${time} must be a time, with g_${time}${time} < 0 somewhere, like -dt^2 + dx^2 + dy^2.`,
+        : space
+          ? `ds^2: ${time} must be a time, with one minus sign, like -dt^2 + dx^2 + dy^2.`
+          : `ds^2 must have one minus sign, for d${time}: the panel's coordinates are space.`,
     );
 
   // g as written, its x and y derivatives, and — unless it is written in x
