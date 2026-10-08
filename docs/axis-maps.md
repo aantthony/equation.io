@@ -166,7 +166,9 @@ is the sphere with x as longitude and y as latitude, a sine wave round it
 and a filled ellipse on it. X, Y and Z are the scene's coordinates; x and y
 are the rows'. The panel is 3D and framed with `camera(…)` (a `view(…)` in
 it is refused); the surface itself is drawn as a parametric surface over
-the ranges given, and sliders in it are read at their value.
+the ranges given, and sliders in it are read at their value. A Σ or Π in
+it is written out term by term as a row's is (lib/defs.ts expandMapSums,
+which axis and plane maps share), so its bounds must be numbers or sliders.
 
 - **Painted**: what 2D draws per pixel from x and y — implicit curves,
   regions and scalar fields — is drawn per pixel on the surface's mesh: the
