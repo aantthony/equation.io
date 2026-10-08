@@ -2,7 +2,7 @@ import { certifySystem } from '../lib/certify.ts';
 import { traceIntersection } from '../lib/intersection.ts';
 import { traceField } from '../lib/flow.ts';
 import { traceOrbit } from '../lib/orbit.ts';
-import { geodesicPath } from '../lib/surface-geometry.ts';
+import { type GeodesicEnd, geodesicCutNote, geodesicPath } from '../lib/surface-geometry.ts';
 import { solveSystem, traceSystem } from '../lib/solve.ts';
 import type { TraceMessage, TraceResult } from '../lib/trace-queue.ts';
 
@@ -29,8 +29,10 @@ self.onmessage = (event: MessageEvent<TraceMessage>) => {
     if (input.kind === 'geodesic') {
       const { spec, env: values, maxSteps, ms, maxPoints } = input.geodesic!;
       const deadline = performance.now() + ms;
-      const flat = Float32Array.from(geodesicPath(spec, values, { maxSteps, deadline, maxPoints }));
-      self.postMessage({ token, result: { pts: [], flat } }, { transfer: [flat.buffer] });
+      const ended: GeodesicEnd = { length: 0, asked: 0, budget: false };
+      const flat = Float32Array.from(geodesicPath(spec, values, { maxSteps, deadline, maxPoints, ended }));
+      const info = geodesicCutNote(ended) ?? undefined;
+      self.postMessage({ token, result: { pts: [], flat, info } }, { transfer: [flat.buffer] });
       return;
     }
     if (input.kind === 'orbit') {

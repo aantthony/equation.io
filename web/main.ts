@@ -186,6 +186,7 @@ import {
   defaultGeodesicLength,
   divergingGain,
   GEODESIC_MAX_POINTS,
+  geodesicPlanKey,
   GEODESIC_MAX_STEPS,
   numericIn,
 } from '../lib/surface-geometry.ts';
@@ -1591,8 +1592,38 @@ const GEODESIC_FAMILY_POINTS = 48000;
 let lastRenderAt = 0;
 let geodesicFrame: ReturnType<typeof setTimeout> | undefined;
 const GEODESIC_FRAME_MS = 50;
-const geodesicSlots = new Map<string, { id: number; key?: string; pending?: string; pts: Float32Array }>();
+const geodesicSlots = new Map<
+  string,
+  { id: number; key?: string; pending?: string; pts: Float32Array; note?: string }
+>();
+/** Each geodesic plan's geodesicPlanKey, worked out once. */
+const geodesicPlans = new WeakMap<CpuPlan, string>();
 let geodesicIds = -1e9;
+
+/**
+ * A geodesic row's note, from its members' traces: where its budget cut one
+ * short, or how many of a family it cut. Slots of members a shorter list no
+ * longer has are let go here.
+ */
+function geodesicNote(row: Equation, members: number) {
+  const notes: string[] = [];
+  for (const [name, slot] of geodesicSlots) {
+    const [id, member] = name.split(':');
+    if (id !== `${row.id}`) continue;
+    if (Number(member) >= members) geodesicSlots.delete(name);
+    else if (slot.note) notes.push(slot.note);
+  }
+  const note =
+    notes.length === 0
+      ? undefined
+      : members === 1
+        ? notes[0]
+        : `${notes.length} of ${members} cut short by the family's budget (one at ${notes[0].replace(/^cut short at /, '')})`;
+  // (A reanalysis clears the row's info, so it is compared with that.)
+  if (note === row.info) return;
+  row.info = note;
+  reconcile();
+}
 
 /**
  * A geodesic's points, traced in the trace worker (lib/surface-geometry.ts
@@ -1622,10 +1653,17 @@ function geodesicFor(eq: Equation, env: Record<string, number>): Float32Array {
     }
     geodesicSlots.set(slotName, (slot = { id: geodesicIds--, pts: new Float32Array() }));
   }
-  const key = `${eq.text}\n${member}\n${JSON.stringify(names.map(n => env[n]))}`;
+  let plan = geodesicPlans.get(plot);
+  if (plan === undefined) geodesicPlans.set(plot, (plan = geodesicPlanKey(plot)));
+  const members = family?.length ?? 1;
+  // Its note: how its members' budgets cut them short, if they did.
+  geodesicNote(row, members);
+  // The plan is in the key, so an edit to a row it reads (S, the list of
+  // directions, the panel's surface) traces it again; the last path keeps
+  // drawing until the new one arrives.
+  const key = `${plan}\n${member}\n${JSON.stringify(names.map(n => env[n]))}`;
   if (slot.key === key || slot.pending === key) return slot.pts;
   slot.pending = key;
-  const members = family?.length ?? 1;
   const { type: _, ...spec } = plot;
   const values = Object.fromEntries(names.map(n => [n, env[n]]));
   const target = slot;
@@ -1654,6 +1692,8 @@ function geodesicFor(eq: Equation, env: Record<string, number>): Float32Array {
       // drawn geodesic follows a frame or two behind rather than not at all.
       target.key = key;
       target.pts = result.flat ?? new Float32Array();
+      target.note = result.info;
+      geodesicNote(row, members);
       // A frame of its own only when none comes anyway: a drag or t brings
       // frames that draw whatever has arrived, and a frame per result on top
       // of those would halve their rate where drawing is slow.

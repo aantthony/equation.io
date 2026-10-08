@@ -316,7 +316,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     dragging P moves a `geodesic(S, P, …)`; a list draws a fan:
     `a = [0..11] pi/6` and `geodesic(S, (0, 0), (cos(a), sin(a)))`. It must be
     the whole row. A fan of very long geodesics shares a fixed amount of
-    work, so its members may end short of the length asked for. On a sphere
+    work, so its members may end short of the length asked for; the row's
+    note then says so ("cut short at L ≈ 472 of 1000"). On a sphere
     they are great circles, on a cylinder helices,
     on a plane straight lines; on a surface of revolution r cos ψ is constant
     along one (Clairaut).

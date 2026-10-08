@@ -3,6 +3,9 @@ import { analyzeRows } from './analysis.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { plotReadout } from './plot.ts';
 import {
+  type GeodesicEnd,
+  geodesicCutNote,
+  geodesicPlanKey,
   christoffelFromMetric,
   christoffelOf,
   defaultGeodesicLength,
@@ -524,5 +527,67 @@ describe('geodesic rows over intervals', () => {
     expect(inline.pts).toEqual(named.pts);
     const end = inline.pts.slice(-3);
     expect(end[2]).toBeCloseTo(0.5 + 10 * (0.02 / Math.hypot(1, 0.02)), 6);
+  });
+});
+
+describe('geodesic trace keys and notes', () => {
+  /** Each member's plan key for a document's last row. */
+  const keys = (rows: string[]) => {
+    const r = analyzeRows(rows).rows.at(-1)!;
+    if (r.error) throw new Error(r.error);
+    const o = r.cls!.object;
+    const members = o.kind === 'family' ? o.members.map(m => m.object) : [o];
+    return members.map(m => {
+      if (m.kind !== 'geodesic') throw new Error(m.kind);
+      return geodesicPlanKey(m);
+    });
+  };
+  it('change with an edit to a row the geodesic reads', () => {
+    const fan = (S: string, a: string) => [`S = ${S}`, `a = ${a}`, 'geodesic(S, (0.2, 0.3), (cos(a), sin(a)))'];
+    const base = keys(fan(SPHERE, '[0..3] pi/2'));
+    expect(keys(fan(SPHERE, '[0..3] pi/2'))).toEqual(base);
+    // S moved up: the same names and values, another surface.
+    const moved = keys(fan('(3cos(v) cos(u), 3cos(v) sin(u), 3sin(v) + 3)', '[0..3] pi/2'));
+    moved.forEach((k, i) => expect(k).not.toBe(base[i]));
+    // The list of directions, inlined into each member.
+    const turned = keys(fan(SPHERE, '[0..3] pi/8'));
+    turned.slice(1).forEach((k, i) => expect(k).not.toBe(base[i + 1]));
+    // The panel's surface.
+    const on = (surface: string) => [
+      `on((X, Y, Z) = ${surface}, x = -pi..pi, y = -pi/2..pi/2)`,
+      'geodesic((0.2, 0.3), (1, 1))',
+    ];
+    expect(keys(on('(cos(y) cos(x), cos(y) sin(x), sin(y))'))).not.toEqual(
+      keys(on('(2cos(y) cos(x), 2cos(y) sin(x), sin(y))')),
+    );
+  });
+  it('say where a budget cut a geodesic short, and not where it ended by itself', () => {
+    const sys = geodesicSystem(surfaceDerivatives(surface(TORUS), smoothPartial));
+    const opts = {
+      start: [0, 0.3] as [number, number],
+      direction: [0.2, 1] as [number, number],
+      length: 1000,
+      domain: [
+        [-Math.PI, Math.PI],
+        [-Math.PI, Math.PI],
+      ] as [[number, number], [number, number]],
+      periodic: [true, true] as [boolean, boolean],
+    };
+    const cut: GeodesicEnd = { length: 0, asked: 0, budget: false };
+    traceGeodesic(sys, { ...opts, maxSteps: 50, ended: cut });
+    expect(cut.budget).toBe(true);
+    expect(cut.asked).toBe(1000);
+    expect(cut.length).toBeGreaterThan(0);
+    expect(geodesicCutNote(cut)).toBe(`cut short at L ≈ ${Number(cut.length.toPrecision(3))} of 1000`);
+    const whole: GeodesicEnd = { length: 0, asked: 0, budget: false };
+    traceGeodesic(sys, { ...opts, length: 5, ended: whole });
+    expect(whole).toMatchObject({ budget: false, asked: 5 });
+    expect(whole.length).toBeCloseTo(5, 12);
+    expect(geodesicCutNote(whole)).toBeNull();
+    // A domain's edge ends it with no note.
+    const edge: GeodesicEnd = { length: 0, asked: 0, budget: false };
+    traceGeodesic(sys, { ...opts, periodic: [false, false], ended: edge });
+    expect(edge.length).toBeLessThan(1000);
+    expect(geodesicCutNote(edge)).toBeNull();
   });
 });

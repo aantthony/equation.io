@@ -39,7 +39,7 @@
  * check that both agree).
  */
 import { NonSmoothError, add, diff, div, mul, pow, sub } from './diff.ts';
-import { type Expr, evaluate, freeVars, substVars } from './expr.ts';
+import { type Expr, evaluate, exprKey, freeVars, substVars } from './expr.ts';
 import { type Prog, compileProg, run } from './vm.ts';
 
 /** ∂e/∂v, as the resolver takes it (symbolic, with its fallbacks). */
@@ -228,6 +228,17 @@ export interface GeodesicOptions {
   maxSteps?: number;
   /** A performance.now() past which it stops where it has got to. */
   deadline?: number;
+  /** Filled in with how far it ran, and whether its budget (maxSteps or
+   *  deadline) is what stopped it short of `length`. */
+  ended?: GeodesicEnd;
+}
+
+/** How a geodesic ended: the arc length it ran, out of `asked`, and whether
+ *  it ran out of its budget rather than reached an end of its own. */
+export interface GeodesicEnd {
+  length: number;
+  asked: number;
+  budget: boolean;
 }
 
 /** Steps a geodesic takes at most. */
@@ -329,8 +340,13 @@ export function traceGeodesic(
   const ks = Array.from({ length: 7 }, () => [0, 0, 0, 0]);
   const tmp = [0, 0, 0, 0];
   f(y, ks[0]);
-  for (let steps = 0; steps < maxSteps && s < total;) {
-    if (deadline !== undefined && (steps & 15) === 15 && performance.now() > deadline) break;
+  let steps = 0;
+  let outOfBudget = false;
+  while (s < total) {
+    if (steps >= maxSteps || (deadline !== undefined && (steps & 15) === 15 && performance.now() > deadline)) {
+      outOfBudget = true;
+      break;
+    }
     h = Math.min(h, total - s);
     for (let i = 1; i < 7; i++) {
       for (let c = 0; c < 4; c++) {
@@ -413,6 +429,7 @@ export function traceGeodesic(
     f(y, ks[0]);
     h = h * Math.min(5, 0.9 * Math.max(err, 1e-10) ** -0.2);
   }
+  if (opts.ended) Object.assign(opts.ended, { length: s, asked: total, budget: outOfBudget });
   return out;
 }
 
@@ -581,6 +598,29 @@ export interface GeodesicSpec {
 
 const NAN: Expr = { kind: 'num', value: NaN };
 
+/**
+ * What a geodesic's trace depends on besides the values of the names it
+ * reads, as a string: its plan — the surface, start, direction, length and
+ * domain as written in, after lists and definitions are inlined, which an
+ * edit to another row (S's formula, a list of directions, the panel's
+ * surface) changes. It is traced again when this or those values change.
+ */
+export function geodesicPlanKey(spec: GeodesicSpec): string {
+  return JSON.stringify([
+    spec.dim,
+    spec.params,
+    ...[spec.surface, spec.start, spec.direction, spec.domain].map(list => list.map(exprKey)),
+    spec.length ? exprKey(spec.length) : null,
+  ]);
+}
+
+/** The note for a geodesic its budget stopped short, or null. */
+export function geodesicCutNote(end: GeodesicEnd): string | null {
+  if (!end.budget || !(end.length < end.asked)) return null;
+  const n = (x: number) => Number(x.toPrecision(3));
+  return `cut short at L ≈ ${n(end.length)} of ${n(end.asked)}`;
+}
+
 /** Points a geodesic is drawn with along the size of its surface's box, at
  *  least where its length allows. */
 const DRAWN_ACROSS = 150;
@@ -599,7 +639,10 @@ export const GEODESIC_MAX_POINTS = 4000;
 export function geodesicPath(
   spec: GeodesicSpec,
   env: Readonly<Record<string, number>>,
-  { maxPoints = GEODESIC_MAX_POINTS, ...budget }: { maxSteps?: number; deadline?: number; maxPoints?: number } = {},
+  {
+    maxPoints = GEODESIC_MAX_POINTS,
+    ...budget
+  }: { maxSteps?: number; deadline?: number; maxPoints?: number; ended?: GeodesicEnd } = {},
 ): number[] {
   const values = new Float64Array(9);
   numericIn([...spec.start, ...spec.direction, ...spec.domain, spec.length ?? NAN], spec.params, env)(NaN, NaN, values);

@@ -73,7 +73,10 @@ longitude), where it runs on; where det g falls below 1e-12 of max(E, G)²
 or a step stops being finite (a pole), ending at its last good point; and
 where its budget runs out. A family shares 200 000 steps, 1 s of worker
 time and 48 000 drawn points among its members (at most 64), so a fan of
-long geodesics comes out shorter rather than holding the worker. The last
+long geodesics comes out shorter rather than holding the worker, and the
+row's note says where (geodesicCutNote). A trace is keyed by the plan as
+well as the values it reads (geodesicPlanKey), so an edit to S, to a list
+of directions or to the panel's surface traces it again. The last
 traced geodesic keeps drawing until the next arrives, and a traced one asks
 for a frame of its own only when none comes within 50 ms anyway, so a drag
 or t does not pay for extra frames. The default length is twice the
