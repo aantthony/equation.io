@@ -328,12 +328,13 @@ export function examplesIndex(examples: Iterable<readonly [label: string, text: 
 const exampleLines = (list: LabelledRows[] = []) =>
   list.map(({ label, rows }) => `- ${JSON.stringify(rows)} (${label})`);
 
-/** The kind a model means: a name from list_kinds, or a kind as get_graph reports it ("pcurve", "parametric curve"). */
+/** The kind a model means: a name from list_kinds or the instructions, or a kind as get_graph reports it ("pcurve", "parametric curve"). */
 function findKind(data: AssistantData, query: string) {
   const q = query.trim().toLowerCase();
   const kinds = data.groups.flatMap(g => g.kinds);
   return (
     kinds.find(k => k.kind === q) ??
+    kinds.find(k => k.title.toLowerCase() === q) ??
     kinds.find(k => q.startsWith(k.kind)) ??
     kinds.find(k => k.short.toLowerCase().startsWith(q) || KIND_MEANINGS[k.kind].toLowerCase().startsWith(q))
   );

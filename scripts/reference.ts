@@ -18,7 +18,7 @@
  */
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { swiftInstructions } from '../lib/assistant-instructions.ts';
-import { type Reference, llmsTxt, parseReference } from '../lib/reference.ts';
+import { type Reference, kindNames, llmsTxt, parseReference } from '../lib/reference.ts';
 
 export const REFERENCE_DIR = new URL('../docs/reference/', import.meta.url);
 export const LLMS_TXT = new URL('../web/public/llms.txt', import.meta.url);
@@ -39,6 +39,6 @@ export function readReference(): Reference {
 
 if (import.meta.main) {
   writeFileSync(LLMS_TXT, llmsTxt(readReference()));
-  writeFileSync(SWIFT_INSTRUCTIONS, swiftInstructions());
+  writeFileSync(SWIFT_INSTRUCTIONS, swiftInstructions(kindNames(readReference())));
   console.log('Wrote web/public/llms.txt and apple/Equation/Sources/Instructions.swift');
 }

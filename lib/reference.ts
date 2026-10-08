@@ -230,6 +230,17 @@ export const LLMS_ORDER = [
   'more',
 ] as const;
 
+/** A kind's name in running text: its title, lower case but for acronyms ("motion trail", "RGB colour field"). */
+export const kindName = (title: string) => title.replace(/^[A-Z](?![A-Z])/, c => c.toLowerCase());
+
+/**
+ * Every kind by name, a line per group, for the app's instructions
+ * (lib/assistant-instructions.ts): a model that knows the names asks
+ * kind_examples for one, where a request alone wouldn't send it to list_kinds.
+ */
+export const kindNames = (ref: Reference) =>
+  ref.groups.map(g => `- ${g.name}: ${g.kinds.map(k => kindName(ref.kinds.get(k)!.title)).join(', ')}`).join('\n');
+
 /** One kind's line in an index: its name, kind, smallest form and what it draws. */
 const kindLine = (page: KindPage) => `- ${page.title} (\`${page.kind}\`): \`${page.form}\` — ${page.short}`;
 
@@ -288,7 +299,7 @@ export interface LabelledRows {
  * functions.
  */
 export interface AssistantData {
-  groups: { name: string; brief: boolean; kinds: { kind: PublicKind; form: string; short: string }[] }[];
+  groups: { name: string; brief: boolean; kinds: { kind: PublicKind; title: string; form: string; short: string }[] }[];
   kinds: Record<string, LabelledRows[]>;
   functions: Record<string, LabelledRows[]>;
   notes: Record<string, string>;
@@ -319,8 +330,8 @@ export function assistantData(
       name: g.name,
       brief: g.brief,
       kinds: g.kinds.map(kind => {
-        const { form, short } = ref.kinds.get(kind)!;
-        return { kind, form, short };
+        const { title, form, short } = ref.kinds.get(kind)!;
+        return { kind, title: kindName(title), form, short };
       }),
     })),
     kinds,

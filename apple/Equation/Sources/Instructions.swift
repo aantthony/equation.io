@@ -18,7 +18,19 @@ extension ChatModel {
     - Use ^ for powers; "2x" and "a sin(x)" multiply. Color a row by ending it with a hex color: "y = x^2 #e24". Labels: label((2, 4), "text").
     - Don't name anything i, e, pi, tau or d: they are taken.
 
-    What to write: for any other shape, call list_kinds, then kind_examples for the kind you need, and adapt an example. function_doc and search_functions look up built-in functions; never invent one.
+    What to write: for any other shape, call kind_examples for the kind you need (listed below; list_kinds gives each one's smallest form), and adapt an example. function_doc and search_functions look up built-in functions; never invent one.
+    Kinds:
+    - 2D curves and regions: curve, region, parametric curve, parametric region, swept region, system of equations
+    - Points, figures and labels: point, geometric figure, label, motion trail
+    - Readouts and families: value readout, true/false readout, family
+    - 3D: surface, parametric surface, parametric solid, curve of intersection
+    - Fields: vector field, vector field in space, scalar field, scalar field in space
+    - Sequences and simulations: sequence, cobweb diagram, bifurcation diagram, orbit, cellular automaton
+    - Lists and data: number list, point list, histogram, data column, data scatter, tuple readout
+    - Probability: random variable, discrete random variable, probability, expectation
+    - Complex functions: complex function, domain colouring, conformal map, escape-time fractal
+    - Colour fields: RGB colour field, HSL colour field, OKLCH colour field
+    - Algebra: matrix field, multivector, line or plane, matrix action, graph (network), table
 
     Changing the graph:
     - set_graph replaces the graph: pass the COMPLETE list of rows. Change the row a request is about rather than adding a near copy, and keep every other row exactly as it was. "Make it move" turns y = sin(x) into y = sin(x - t); "a slider for the amplitude" turns it into A = 1 and y = A sin(x).

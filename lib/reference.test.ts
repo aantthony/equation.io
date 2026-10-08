@@ -6,7 +6,7 @@ import { swiftInstructions } from './assistant-instructions.ts';
 import { kindOf } from './assistant-tools.ts';
 import { parseCsv } from './csv.ts';
 import { builtinHelp } from './syntax-help.ts';
-import { llmsTxt } from './reference.ts';
+import { kindNames, llmsTxt } from './reference.ts';
 import { KIND_MEANINGS, rowKind } from './row-kind.ts';
 import { splitStatements } from './statements.ts';
 
@@ -55,7 +55,7 @@ describe('the reference', () => {
 
   it('has written web/public/llms.txt and Instructions.swift (pnpm reference)', () => {
     expect(readFileSync(LLMS_TXT, 'utf8')).toBe(llmsTxt(ref));
-    expect(readFileSync(SWIFT_INSTRUCTIONS, 'utf8')).toBe(swiftInstructions());
+    expect(readFileSync(SWIFT_INSTRUCTIONS, 'utf8')).toBe(swiftInstructions(kindNames(ref)));
   });
 
   it('keeps one kind per heading in llms.txt, its name first, and More last', () => {

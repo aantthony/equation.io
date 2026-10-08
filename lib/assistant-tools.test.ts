@@ -87,6 +87,9 @@ describe('kind_examples', () => {
     expect(answer).toContain('- ["(interval(0, 1), interval(0, 1), interval(0, 1))"] (unit cube)');
     expect(kindExamples(data, 'parametric curve')).toMatch(/^pcurve:/);
     expect(kindExamples(data, 'cube')).toContain('No kind');
+    // By its name in the instructions, for every kind.
+    for (const { kind, title } of data.groups.flatMap(g => g.kinds))
+      expect(kindExamples(data, title).startsWith(`${kind}:`), title).toBe(true);
   });
 });
 
