@@ -23,33 +23,33 @@ type Part = string | Partial<Record<Variant | 'typed', string | null>>;
  * lib/assistant-instructions.test.ts draws an instance of every line. The
  * reference groups it covers are CHARTED_GROUPS; the rest follow by name.
  */
-export const KIND_CHART = `Kinds: a row's kind comes from its form. Below, xy is any expression in x and y (xyz: in x, y and z), and 0 any number or defined constant. u and v run from 0 to 1; a third parameter needs its own: s = interval(0, 1).
+export const KIND_CHART = `Kinds: a row's kind comes from its form; each line has one example. u and v run from 0 to 1; a third parameter needs its own: s = interval(0, 1).
 
 Any graph:
-- slider: a = 0
+- slider: a = 2, then use a in other rows
 - family: a = [1..5], then use a (one copy per value, at most 32)
 - motion: t is seconds, in any row
 
 2D (in a 3D graph, ineq2d, scalar2d and vfield2d are not drawn):
-- point: (0, 0); named, draggable: A = (0, 0)
-- label: label((0, 0), "text")
-- implicit2d: xy = 0; circle((0, 0), 1) is one too
-- ineq2d: xy > 0, xy >= 0
-- pcurve: (u, u)
-- pregion: (uv, uv)
-- system: (xy, xy) = (0, 0)
+- point: (1, 2); named, draggable: A = (1, 2)
+- label: label((1, 2), "text")
+- implicit2d, an equation in x and y: x + y = 1; circle((0, 0), 1) is one too
+- ineq2d, an inequality in x and y: y > x + 1
+- pcurve: (u, u^2)
+- pregion: (u, v u)
+- system: (x + y, x - y) = (1, 0)
 - trail: trail(A), A a moving point
-- scalar2d: xy
-- vfield2d: (xy, xy)
+- scalar2d, an expression in x and y alone: x y
+- vfield2d, a pair of expressions in x and y: (y, x)
 
 3D:
-- point: (0, 0, 0)
-- implicit3d: xyz = 0
-- pcurve: (u, u, u)
-- psurface: (uv, uv, uv)
-- solid: (uvs, uvs, uvs) with s = interval(0, 1)
-- scalar3d: xyz
-- vfield3d: (xyz, xyz, xyz)`;
+- point: (1, 2, 3)
+- implicit3d, an equation in x, y and z: x + y + z = 1
+- pcurve: (u, u^2, u^3)
+- psurface: (u, v, u v)
+- solid: (u, v, s u) with s = interval(0, 1)
+- scalar3d, an expression in x, y and z alone: x y z
+- vfield3d, three expressions in x, y and z: (y, z, x)`;
 
 /** The reference's groups (docs/reference) whose kinds KIND_CHART covers. */
 export const CHARTED_GROUPS = [
