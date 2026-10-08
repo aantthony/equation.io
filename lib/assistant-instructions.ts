@@ -76,7 +76,7 @@ const lines: Part[][] = [
       typed:
         "The graph is a list of rows, one shape per row. Each message starts with the rows as they are now, with any row's error.",
     },
-    '- "y = sin(x)" and "x^2 + y^2 = 4" are curves, "y < x^2" a shaded region, "z = x^2 - y^2" a 3D surface. "int[0..pi] sin(x) dx" shades an area and shows its value. "A = (1, 2)" is a draggable point.',
+    '- "y = sin(x)" and "x^2 + y^2 = 4" are curves, "y < x^2" a shaded region, "z = x y" a 3D surface. "int[0..pi] sin(x) dx" shades an area and shows its value. "A = (1, 2)" is a draggable point.',
     '- "a = 2" makes a slider for other rows to use: "y = a sin(x)" (the amplitude of a sine), or "r = 2" and "x^2 + y^2 = r^2" (the radius of a circle).',
     '- "f(x) = x^3 - x" only DEFINES f and draws nothing: add "y = f(x)" to draw it, "y = d/dx f(x)" for its derivative.',
     {
