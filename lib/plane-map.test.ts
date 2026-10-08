@@ -75,6 +75,28 @@ describe('a plane map', () => {
     expect(() => parsePlaneMap('(sum(n=1..100, sum(k=1..100, k)) + X, Y)')).toThrow(/too many terms \(limit/);
   });
 
+  it('counts the terms of a whole row against one limit, as a row tuple is', () => {
+    const big = 'sum(n=1..300, sum(k=1..4, k Y))';
+    const tuple = analyzeRows([`(${big} + X, ${big.replace('Y', 'X')} + Y)`]).rows[0].error;
+    expect(tuple).toMatch(/too many terms \(limit 2000 total\)/);
+    expect(() => parseViewRow(`view((x, y) = (${big} + X, ${big.replace('Y', 'X')} + Y))`, {})).toThrow(
+      /too many terms \(limit 2000 total\)/,
+    );
+    expect(() => parseViewRow(`view((x, y) = (${big} + X, Y))`, {})).not.toThrow();
+  });
+
+  it('says a Σ bound cannot use the document’s functions or lists', () => {
+    const fn = analyzeRows(['f(s) = s + 1', 'view((x, y) = (sum(n=1..f(2), Y^n) + X, Y))']).rows[1].error;
+    expect(fn).toMatch(/Σ in a map takes numbers and sliders as bounds; it cannot call f yet/);
+    const list = analyzeRows(['L = [1, 2, 3]', 'view((x, y) = (sum(n=1..L, Y^n) + X, Y))']).rows[1].error;
+    expect(list).toMatch(/Σ in a map needs each bound to be one number, not a list/);
+  });
+
+  it('says a sum has no body as a row does', () => {
+    for (const row of ['view((x, y) = (sum(n=1..3) + X, Y))', 'view((x, y) = (X sum[n=1..3], Y))'])
+      expect(() => parseViewRow(row, {}), row).toThrow('Σ needs a body: write sum(n=1..N, …) or sum[n=1..N] (…).');
+  });
+
   it('snaps a slider used as a Σ bound to whole numbers, as a row does', () => {
     const a = analyzeRows(['N = 2.5', 'view((x, y) = (sum(n=1..N, Y^n) + X, Y))']);
     expect(a.rows[1].error).toBeUndefined();

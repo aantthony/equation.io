@@ -2296,9 +2296,16 @@ export function resolveExpr(e: Expr, getFn: GetFn, opts: ResolveOpts = {}): Expr
   return rx(e, { getFn, opts, terms: 0 });
 }
 
-/** What a map's row knows of its document: the names it defines, and where
- *  to note a slider used as a Σ/Π bound (so it steps in whole numbers). */
-export type MapDoc = Pick<ResolveOpts, 'documentNames' | 'boundConsts'>;
+/** What a map's row knows of its document: the names it defines, its
+ *  functions and lists (which a map's Σ/Π bound cannot use: it is parsed
+ *  without them), and where to note a slider used as a bound (so it steps in
+ *  whole numbers). `budget` counts
+ *  the terms written out so far, shared by a row's maps and components
+ *  under one limit as a row's tuple is. */
+export type MapDoc = Pick<ResolveOpts, 'documentNames' | 'boundConsts' | 'isList' | 'getList'> & {
+  fnNames?: ReadonlySet<string>;
+  budget?: { terms: number };
+};
 
 /**
  * A map's expression — a view's axis or plane map, an on(…) surface — with
@@ -2306,7 +2313,7 @@ export type MapDoc = Pick<ResolveOpts, 'documentNames' | 'boundConsts'>;
  * arithmetic. Only the sums are expanded: the rest stays as written (a d/dx
  * in a map is refused inside a sum or out). Each sum's bounds go through
  * expandSum as a row's do, so they read the sliders in `consts` under the
- * same limits; a bound in `coords`, the map's own coordinates, is refused,
+ * same limits, counted across all of `e` and doc.budget; a bound in `coords`, the map's own coordinates, is refused,
  * as they change from point to point. A bare function name (`cos X`) is
  * caught here too, where it would otherwise read as a name with no value.
  */
@@ -2316,19 +2323,25 @@ export function expandMapSums(
   consts: Record<string, number>,
   doc: MapDoc = {},
 ): Expr {
-  let terms = 0;
+  const budget = doc.budget ?? { terms: 0 };
   const expand = (call: SumCall, body: Expr): Expr => {
     const sym = call.name === 'sum' ? 'Σ' : 'Π';
     for (const b of call.args.slice(1, 3))
       for (const v of freeVars(b))
         if (coords.includes(v))
           throw new Error(`${sym} needs bounds that are fixed numbers or sliders; ${v} changes across the map.`);
+        else if (doc.fnNames?.has(v))
+          throw new Error(`${sym} in a map takes numbers and sliders as bounds; it cannot call ${v} yet.`);
     // Expanded with a marker for a body, which says which indices the bounds
     // take; the body itself is written in at each, unresolved.
     const idx = call.args[0];
     const marker = (k: Expr): Expr => ({ kind: 'call', name: 'floor', args: [k] });
-    const opts = { consts, boundConsts: doc.boundConsts };
-    const marked = resolveExpr({ ...call, args: [...call.args.slice(0, 3), marker(idx)] }, () => undefined, opts);
+    const marked = resolveExpr({ ...call, args: [...call.args.slice(0, 3), marker(idx)] }, () => undefined, {
+      consts,
+      boundConsts: doc.boundConsts,
+      isList: doc.isList,
+      getList: doc.getList,
+    });
     const at: number[] = [];
     const read = (m: Expr): void => {
       if (m.kind === 'call' && m.name === 'floor' && m.args[0].kind === 'num') at.push(m.args[0].value);
@@ -2336,24 +2349,27 @@ export function expandMapSums(
         read(m.a);
         read(m.b);
       } else if (!(m.kind === 'num' && at.length === 0))
-        throw new Error(`${sym} in a map needs bounds that are numbers or sliders.`);
+        // A list bound makes a family of sums, one per element.
+        throw new Error(`${sym} in a map needs each bound to be one number, not a list.`);
     };
     read(marked);
-    terms += at.length;
-    if (terms > SUM_MAX_TOTAL)
+    budget.terms += at.length;
+    if (budget.terms > SUM_MAX_TOTAL)
       throw new Error(`Nested ${sym} expand to too many terms (limit ${SUM_MAX_TOTAL} total).`);
-    if (idx.kind !== 'var') return marked;
+    // expandSum has refused any index but a name.
+    const name = (idx as Expr & { kind: 'var' }).name;
     const combine = call.name === 'sum' ? add : mul;
     let acc: Expr | null = null;
     for (const k of at) {
-      const term = foldNums(walk(substIdx(body, idx.name, num(k))));
+      const term = foldNums(walk(substIdx(body, name, num(k))));
       acc = acc === null ? term : combine(acc, term);
     }
     return acc ?? num(call.name === 'sum' ? 0 : 1);
   };
   const walk = (e: Expr): Expr => {
-    if (e.kind === 'call' && (e.name === 'sum' || e.name === 'prod') && e.args.length === 4)
-      return expand(e as SumCall, e.args[3]);
+    if (e.kind === 'call' && (e.name === 'sum' || e.name === 'prod'))
+      // Without a body, resolving says so as it does in a row.
+      return e.args.length === 4 ? expand(e as SumCall, e.args[3]) : resolveExpr(e, () => undefined);
     // `2 sum[n=1..3] Y^n/n`: the header binds the rest of its product.
     const chain = e.kind === 'bin' ? splitSumChain(e) : null;
     if (chain && isSumHeader(chain.header)) {

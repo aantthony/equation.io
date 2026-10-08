@@ -608,6 +608,8 @@ function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
+  // A map's Σ bounds are told the document's functions and lists, to refuse them.
+  const viewDoc = { ...ropts, fnNames };
   const rows = document.rows.map(row => ({ ...row }));
   /** Rows whose calls apply per member in a way that reads like a wrapper (perMemberNote). */
   const memberNotes = new Map<(typeof rows)[number], string>();
@@ -718,7 +720,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (isDividerRow(row.text)) at++;
       else if (/^\s*(view|on)\s*\(/.exec(row.text) && !fnNames.has(/^\s*(\w+)/.exec(row.text)![1]))
         try {
-          const spec = parseViewRow(row.text, ropts.consts!, ropts);
+          const spec = parseViewRow(row.text, ropts.consts!, viewDoc);
           if (spec?.kind === 'view' && spec.maps) panelMaps[at] ??= spec.maps;
           if (spec?.kind === 'surface') panelSurfaces[at] ??= spec.surface;
         } catch {
@@ -742,7 +744,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (badRow) throw new Error(badRow);
       // A call to the user's own view/camera/grid function is theirs.
       const head = /^\s*(view|camera|grid|on)\s*\(/.exec(row.text);
-      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!, ropts);
+      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!, viewDoc);
       if (view) {
         // Each panel frames itself: a divider starts a fresh set.
         if (view.kind === 'split') {

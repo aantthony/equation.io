@@ -176,6 +176,8 @@ function planeView(spec: View2DSpec, maps: AxisMaps, ranges: Array<[string, [num
  * what a map's Σ bounds and names need of the document (lib/defs.ts MapDoc).
  */
 export function parseViewRow(text: string, env: Record<string, number>, doc: MapDoc = {}): ViewSpec | null {
+  // The row's maps write out their sums under one limit, as a row's tuple does.
+  doc = { ...doc, budget: { terms: 0 } };
   const split = parseDividerRow(text);
   if (split) return split;
   const grid = parseGridRow(text);

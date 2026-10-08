@@ -46,7 +46,8 @@ export function parsePlaneMap(src: string, env: Record<string, number> = {}, doc
     throw new Error(USAGE);
   }
   if (parsed.kind !== 'vec' || parsed.items.length !== 2) throw new Error(USAGE);
-  const items = parsed.items.map(e => expandMapSums(e, ['X', 'Y'], env, doc));
+  const shared = { ...doc, budget: doc.budget ?? { terms: 0 } };
+  const items = parsed.items.map(e => expandMapSums(e, ['X', 'Y'], env, shared));
   // Sliders are read at their value, as an axis map reads them.
   const values: Record<string, Expr> = {};
   let screen = false;

@@ -55,7 +55,8 @@ export function parseSurfaceMap(
     throw new Error(USAGE);
   }
   if (parsed.kind !== 'vec' || parsed.items.length !== 3) throw new Error(USAGE);
-  const items = parsed.items.map(e => expandMapSums(e, ['x', 'y'], env, doc));
+  const shared = { ...doc, budget: doc.budget ?? { terms: 0 } };
+  const items = parsed.items.map(e => expandMapSums(e, ['x', 'y'], env, shared));
   const values: Record<string, Expr> = {};
   let uses = false;
   for (const name of freeVars({ kind: 'vec', items })) {
