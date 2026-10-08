@@ -105,6 +105,8 @@ struct Turn {
   var reasoningTokens: Int?
   /// The model's exact id, where the API names it (e.g. a dated snapshot).
   var modelID: String?
+  /// What each set_graph call said it would draw (its intent argument).
+  var intents: [String]?
 }
 
 /// A model the evals can run: the app's (on-device), or a hosted baseline.
@@ -130,9 +132,12 @@ struct TooManyToolCalls: Error, CustomStringConvertible {
   var description: String { "more than \(toolCallLimit) tool calls" }
 }
 
-/// One run's tool calls so far.
+/// One run's tool calls so far, and the intents its set_graph calls gave.
 @MainActor final class ToolBudget {
   private var used = 0
+  private(set) var intents: [String] = []
+
+  func note(_ intent: String) { intents.append(intent) }
 
   func spend() throws {
     used += 1
@@ -154,13 +159,17 @@ struct Capped<Base: Tool>: Tool {
 
   func call(arguments: Arguments) async throws -> Output {
     try await budget.spend()
+    if let content = arguments as? any ConvertibleToGeneratedContent,
+      let intent = try? content.generatedContent.value(String.self, forProperty: "intent")
+    {
+      await budget.note(intent)
+    }
     return try await base.call(arguments: arguments)
   }
 }
 
 /// The app's tools for one run, sharing one budget.
-func cappedTools(_ graph: any GraphTools) -> [any Tool] {
-  let budget = ToolBudget()
+func cappedTools(_ graph: any GraphTools, _ budget: ToolBudget = ToolBudget()) -> [any Tool] {
   func cap<T: Tool>(_ tool: T) -> any Tool { Capped(base: tool, budget: budget) }
   return ChatModel.tools(graph).map { cap($0) }
 }
@@ -170,12 +179,13 @@ struct OnDeviceModel: EvalModel {
   let name = "on-device"
 
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
+    let budget = ToolBudget()
     let session = LanguageModelSession(
-      model: SystemLanguageModel.default, tools: cappedTools(graph), instructions: ChatModel.instructions)
+      model: SystemLanguageModel.default, tools: cappedTools(graph, budget), instructions: ChatModel.instructions)
     let response = try await session.respond(to: prompt)
     return Turn(
       reply: response.content, inputTokens: session.usage.input.totalTokenCount,
-      outputTokens: session.usage.output.totalTokenCount)
+      outputTokens: session.usage.output.totalTokenCount, intents: await budget.intents)
   }
 }
 
@@ -465,6 +475,7 @@ struct Runner {
     if let tokens = turn.cachedInputTokens { result["cachedInputTokens"] = tokens }
     if let tokens = turn.reasoningTokens { result["reasoningTokens"] = tokens }
     if let id = turn.modelID { result["modelId"] = id }
+    if let intents = turn.intents, !intents.isEmpty { result["intents"] = intents }
     if let failure {
       // The person sees an error instead of an answer: a failed run, whatever the graph shows.
       result["error"] = failure
