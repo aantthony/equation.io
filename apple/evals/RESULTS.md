@@ -925,3 +925,22 @@ helicoid, but 4 of 5 single-task runs copied the chart's placeholder `xy = 0`
 as a row (a constant named xy). color-red fell 5 → 0 because every run wrote
 `#ff`, a two-digit color the renderer silently ignores; nothing in this change
 touches colors.
+
+### The kind chart with real examples
+
+`93020f27` replaces the chart's placeholders (`xy = 0`, `(uv, uv, uv)`) with a
+small real example per kind (`x + y = 1`, `(u, v, u v)`), none a task's answer.
+`results/2026-10-08T105415Z-on-device.json`: **42% (97/230)**, against 33%
+(77/230) for the run before it, the largest on-device gain so far and about
+twice the 4-point spread between two runs of identical code (`084753Z`,
+`070319Z`). unit-cube went 0 → 4 of 5, every pass
+`(interval(0, 1), interval(0, 1), interval(0, 1))` (the fifth had a trailing
+comma). color-red 0 → 5 and shade-region 1 → 4. The model still copies the
+chart: hyperboloid drew `x + y + z = 1`, and 2 vector-field runs wrote
+`vfield2d = x`.
+
+**Check fix, all files regraded.** vector-field only checked the kind, so the
+chart's example `(y, x)` passed for "(−y, x)", and so did `(x, -y)` in earlier
+runs. It now requires `(-y, x)`. On-device files moved by up to 5 runs (the
+step 3 run 74 → 69, the kind chart run 75 → 71, the no-example run 85 → 81);
+the comparisons above use the regraded numbers.

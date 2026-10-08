@@ -7862,7 +7862,7 @@
               "why": "reply has \"\\\\(\""
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": true
             }
           ],
@@ -7932,7 +7932,7 @@
               "why": "reply has \"\\\\(\""
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": true
             }
           ],
@@ -8002,7 +8002,7 @@
               "why": "reply has \"\\\\(\""
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": true
             }
           ],
@@ -8072,7 +8072,7 @@
               "why": "reply has \"\\\\(\""
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": true
             }
           ],
@@ -8142,7 +8142,7 @@
               "why": "reply has \"\\\\(\""
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": true
             }
           ],
@@ -11664,5 +11664,5 @@
       ]
     }
   ],
-  "regraded": "2026-10-08T03:07:12.219Z"
+  "regraded": "2026-10-08T11:29:35.330Z"
 }

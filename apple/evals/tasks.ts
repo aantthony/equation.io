@@ -516,12 +516,16 @@ export const TASKS: EvalTask[] = [
     tags: ['vector field'],
     rows: [],
     request: 'Show the vector field (−y, x)',
-    checks: [hasKind('vfield2d')],
+    // The field asked for, not just any field: the kind chart's own example is (y, x).
+    checks: [hasKind('vfield2d', /\(\s*-\s*y\s*,\s*x\s*\)/)],
     good: [
       answer('The rotational field (−y, x), flowing in circles.', set('(-y, x)')),
       answer('The streamlines circle around the origin.', set('(-y, x)')),
     ],
-    bad: [answer('The vector field.', set('(-1, 1)'))],
+    bad: [
+      answer('The vector field.', set('(-1, 1)')),
+      answer('The rotational field (−y, x).', set('(y, x)')),
+    ],
   },
   {
     id: 'points',

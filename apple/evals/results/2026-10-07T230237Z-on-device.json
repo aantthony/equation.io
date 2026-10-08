@@ -10756,13 +10756,14 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
-              "pass": true
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
+              "pass": false,
+              "why": "kinds: vfield2d"
             }
           ],
           "inputTokens": 11266,
           "outputTokens": 108,
-          "pass": true,
+          "pass": false,
           "reply": "I drew a 2D vector field with streamlines flowing as (x, -y). The field moves with time t.",
           "rows": [
             "(x, -y)"
@@ -10812,13 +10813,14 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
-              "pass": true
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
+              "pass": false,
+              "why": "kinds: vfield2d"
             }
           ],
           "inputTokens": 11318,
           "outputTokens": 126,
-          "pass": true,
+          "pass": false,
           "reply": "I drew a 2D vector field using moving streamlines, coloured in blue, showing how the field behaves across the window.",
           "rows": [
             "(x, -y)"
@@ -10876,13 +10878,14 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
-              "pass": true
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
+              "pass": false,
+              "why": "kinds: vfield2d"
             }
           ],
           "inputTokens": 17836,
           "outputTokens": 152,
-          "pass": true,
+          "pass": false,
           "reply": "I drew a 2D vector field with moving streamlines. The flow is shown as a coloured grid, moving with time.",
           "rows": [
             "(x, -y)"
@@ -10928,13 +10931,14 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
-              "pass": true
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
+              "pass": false,
+              "why": "kinds: vfield2d"
             }
           ],
           "inputTokens": 11248,
           "outputTokens": 108,
-          "pass": true,
+          "pass": false,
           "reply": "I drew a 2D vector field using (x, -y) as flowing streamlines. The field is visible over the full window.",
           "rows": [
             "(x, -y)"
@@ -10980,13 +10984,14 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
-              "pass": true
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
+              "pass": false,
+              "why": "kinds: vfield2d"
             }
           ],
           "inputTokens": 11266,
           "outputTokens": 114,
-          "pass": true,
+          "pass": false,
           "reply": "I drew a 2D vector field where each point’s arrow is (−y, x). The arrows flow outward from the centre.",
           "rows": [
             "(x, -y)"
@@ -20245,5 +20250,5 @@
     }
   ],
   "toolsTokens": 1218,
-  "regraded": "2026-10-08T03:07:13.326Z"
+  "regraded": "2026-10-08T11:29:36.328Z"
 }

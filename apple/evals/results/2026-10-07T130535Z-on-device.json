@@ -7685,7 +7685,7 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": true
             }
           ],
@@ -7733,7 +7733,7 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": false,
               "why": "kinds: implicit2d, implicit3d"
             }
@@ -7795,7 +7795,7 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": true
             }
           ],
@@ -7847,7 +7847,7 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": true
             }
           ],
@@ -7903,7 +7903,7 @@
               "pass": true
             },
             {
-              "name": "a vfield2d row",
+              "name": "a vfield2d row like /\\(\\s*-\\s*y\\s*,\\s*x\\s*\\)/",
               "pass": false,
               "why": "kinds: One side is a point and the other is a number."
             }
@@ -11591,5 +11591,5 @@
     }
   ],
   "toolsTokens": 1218,
-  "regraded": "2026-10-08T03:07:10.127Z"
+  "regraded": "2026-10-08T11:29:33.461Z"
 }
