@@ -974,6 +974,13 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'view(x = 0.5..2000, y = 0.001..10, x = 10^X, y = 10^Y); y = 1/x; int[1..100] 1/x dx',
         'coordinates integral',
       ],
+      // A log frequency axis: a resonance peak of 20 log(Q) dB, then -40 dB a decade.
+      [
+        'Bode plot (slide Q)',
+        'view(x = 0.01..100, y = -65..25, x = 10^X, ratio = 0.05); Q = clamp(4, 0.5, 20); ' +
+          'y = -10 log((1 - x^2)^2 + (x/Q)^2); y = {x < 1: 0, -40 log(x)}',
+        'coordinates physics slider',
+      ],
       // A plane map: the screen shows the plane through (x, y) = F(X, Y).
       [
         'polar, unrolled',
@@ -984,6 +991,20 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'log-polar: spirals go straight',
         'view((x, y) = (exp(Y) cos(X), exp(Y) sin(X)), X = -pi..pi, Y = -2..2); u = interval(-8, 8); (exp(u/4) cos(u), exp(u/4) sin(u)); x^2 + y^2 = 1; y = x; w^3 = 1',
         'coordinates complex',
+      ],
+      // z² shows each point of the plane twice: the disk and the point appear
+      // in both copies, and the lines x = k and y = k become hyperbolas.
+      [
+        'z²: the plane shown twice',
+        'view((x, y) = (X^2 - Y^2, 2 X Y), X = -2..2, Y = -1.5..1.5); grid(off); ' +
+          'sin(pi x) = 0; sin(pi y) = 0; (x - 1)^2 + y^2 < 0.5; (2, 1.5)',
+        'coordinates conformal',
+      ],
+      [
+        'inversion: lines become circles',
+        'view((x, y) = (X/(X^2 + Y^2), Y/(X^2 + Y^2)), X = -2..2, Y = -1.5..1.5); grid(off); ' +
+          'sin(pi x) = 0; sin(pi y) = 0; y = 1; (2, 1)',
+        'coordinates conformal geometry',
       ],
       [
         'symlog axis',
@@ -1021,6 +1042,53 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'cylindrical flow',
         "r = sqrt(x^2 + y^2); theta = atan2(y, x); (r', theta', z') = (0, 1, 0.5)",
         'coordinates 3d ode',
+      ],
+    ],
+  ],
+  [
+    // `on((X, Y, Z) = …)` draws the panel's 2D rows on a surface: x and y are
+    // the rows' coordinates, X, Y and Z the scene's (lib/surface-map.ts).
+    'drawing on surfaces',
+    [
+      // Longitude x, latitude y. A loxodrome crosses every meridian at one
+      // angle: x = 4 asinh(tan(y)), a straight line on a Mercator map.
+      [
+        'globe: a field, a loxodrome and a cap',
+        'camera(-pi/4, 0.4, 7, spin = 0.2); on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); ' +
+          'cos(y)^3 cos(3x); sin((x - 4 asinh(tan(y)))/2) = 0; (x + 0.8)^2 + (y - 0.5)^2 < 0.1',
+        '3d surface scalar-field coordinates',
+      ],
+      // The great circle whose highest point is P.
+      [
+        'great circle through P (drag it)',
+        'camera(-pi/4, 0.4, 7); on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); ' +
+          'P = (-0.5, 0.6); tan(y) = tan(P.y) cos(x - P.x); y = 0; x = P.x',
+        '3d draggable geometry',
+      ],
+      // A spin about the axis tilted a from the pole, as (x', y') in
+      // longitude and latitude; its arrows wind round the two fixed points.
+      [
+        'rotation about a tilted axis (slide a)',
+        'camera(-pi/4, 0.4, 7); a = clamp(0.6, 0, pi); on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); ' +
+          '(cos(a) - sin(a) tan(y) cos(x), sin(a) sin(x)); (0, pi/2 - a); (pi, a - pi/2)',
+        '3d vector-field slider',
+      ],
+      // The line of slope q/p, wrapped round both of the torus's circles, is
+      // the (p, q) torus knot: p y - q x is a multiple of 2π along it.
+      [
+        'torus knot as a line (slide p, q)',
+        'camera(-pi/3, 0.8, 11); p = clamp(round(2), 1, 9); q = clamp(round(5), 1, 9); ' +
+          'on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); sin((p y - q x)/2) = 0',
+        '3d knot slider',
+      ],
+      // A Σ in the surface: the disk's height is r times a square wave's
+      // Fourier partial sum in the angle, overshooting at each jump (Gibbs).
+      [
+        'Gibbs fan (slide N)',
+        'camera(-pi/4, 0.5, 12); N = clamp(round(5), 1, 20); ' +
+          'on((X, Y, Z) = (x cos(y), x sin(y), x sum[n=1..N] sin((2n - 1) y)/(2n - 1)), x = 0..2.5, y = -pi..pi); ' +
+          'sin(y) > 0; sin(2pi x) = 0',
+        '3d surface fourier series slider',
       ],
     ],
   ],
@@ -1242,6 +1310,7 @@ export const COVERS: Record<string, string> = {
   complex: 'domain coloring',
   'polar + plane coordinates': 'spiral traced in (r, θ)',
   'spherical + cylindrical': 'cylindrical chart',
+  'drawing on surfaces': 'torus knot as a line (slide p, q)',
   '3D surfaces': 'gyroid',
   'fields in space': 'hydrogen 2p orbital',
   solids: 'icosahedron',
