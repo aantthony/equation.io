@@ -196,5 +196,12 @@ the ranges given, and sliders in it are read at their value.
   shaders take; a surface they cannot draw is refused at its row. Its
   tangents are exact where they are cheap and finite differences otherwise
   (mod, gamma).
-- Not drawn: hover readouts on the painted rows, and link previews (a panel
-  on a surface gets the generic card).
+- Hovering: the ray from the eye through the pointer is met with the
+  surface (lib/surface-pick.ts: a coarse mesh of it first, then Newton on
+  P(x, y) = eye + t·ray from the triangle hit), and the readout gives x and
+  y there, to the pixel, with each painted scalar field's value. Near a
+  painted curve it traces the curve as 2D hover does ("on curve"); near a
+  carried dot it reads the dot's x and y (and name). Named points drag
+  along the surface, in x and y. Dots on the far side, hidden by the
+  surface, are not picked.
+- Not drawn: link previews (a panel on a surface gets the generic card).

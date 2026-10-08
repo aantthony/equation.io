@@ -86,7 +86,7 @@ import {
   pathSampler,
   regionSampler,
 } from '../lib/path.ts';
-import { type Classified, dotPlot, plotReadout, publicKind } from '../lib/plot.ts';
+import { type Classified, dotPlot, plotReadout, publicKind, valueReadout } from '../lib/plot.ts';
 import { KIND_MEANINGS, rowKind } from '../lib/row-kind.ts';
 import { mvOfNode } from '../lib/clifford.ts';
 import { solveSystem } from '../lib/solve.ts';
@@ -172,6 +172,7 @@ import {
 } from './render3d.ts';
 import { assignColors, takesColor } from '../lib/palette.ts';
 import { type SurfaceMap, surfaceInUV, surfaceMapping, surfacePoint } from '../lib/surface-map.ts';
+import { raySurface, surfacePixel } from '../lib/surface-pick.ts';
 import { toGLSL } from '../lib/glsl.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
@@ -301,6 +302,14 @@ interface Grabbable {
   /** True when `set` rewrites row text (so the drag is undoable and re-saved). */
   edits: boolean;
   set: (x: number, y: number) => void;
+}
+
+/** A dot on a surface panel's surface, at x and y there. */
+interface SurfaceDot {
+  x: number;
+  y: number;
+  color: [number, number, number];
+  label?: string;
 }
 
 /** Read-only preview of a data file, under its `open(…)` row. */
@@ -517,8 +526,12 @@ interface Panel {
   spinScale: number;
   /** Click-dropped seeds for integral curves through vector fields / ODEs. */
   drops: Array<{ x: number; y: number }>;
-  /** What the pointer can grab, in math coords; rebuilt by every 2D frame. */
+  /** What the pointer can grab, in math coords (x and y on a surface);
+   *  rebuilt by every 2D or surface frame. */
   grabs: Grabbable[];
+  /** The dots a surface panel carries onto its surface, in x and y, for
+   *  hover; rebuilt by every frame. */
+  surfaceDots: SurfaceDot[];
   /** Set until the panel has a size, when its opening zoom is picked. */
   fresh: boolean;
 }
@@ -543,6 +556,7 @@ function makePanel(key: number): Panel {
     spinScale: 1,
     drops: [],
     grabs: [],
+    surfaceDots: [],
     fresh: true,
   };
 }
@@ -2024,6 +2038,13 @@ function render() {
       // surface first, then each 2D row painted on it or carried onto it.
       const surface = panelSurface(panel);
       if (surface) scene.psurfaces.push({ ...surfaceGLSL(surface), color: surfaceShade() });
+      // Carried dots are kept in x and y too, for hover.
+      const dots: SurfaceDot[] = [];
+      const carry = (mark: ReturnType<typeof markScene>) => {
+        for (const { pos, color, label } of scene.points.slice(mark.points))
+          dots.push({ x: pos[0], y: pos[1], color, label });
+        carryOntoSurface(scene, mark, surface!, camera);
+      };
       for (const eq of rows) {
         const on = surface && eq.cls && !eq.cls.needs3D ? surfaceMapping(eq.cls.object) : null;
         if (on === 'paint') {
@@ -2267,7 +2288,7 @@ function render() {
             break;
         }
         // What a 2D row placed in the plane z = 0, carried onto the surface.
-        if (mark) carryOntoSurface(scene, mark, surface!, camera);
+        if (mark) carry(mark);
       }
       // Named points in x and y (`A = (0.5, 1)`) sit on the surface, labelled.
       if (surface)
@@ -2279,10 +2300,15 @@ function render() {
           if (!isFinite(px) || !isFinite(py)) continue;
           const mark = markScene(scene);
           scene.points.push({ pos: [px, py, 0], color: baseColor(eq), label: eq.def.name, group: eq });
-          carryOntoSurface(scene, mark, surface, camera);
+          carry(mark);
+          // Dragged along the surface, in x and y (see surfaceAt).
+          const set = defPointWriter(eq);
+          if (set) grabs.push({ key: `def${eq.id}`, x: px, y: py, edits: true, set });
         }
+      panel.surfaceDots = dots;
       r3d.render(camera, scene, time, constEnv, frame);
       drawLabels3D(overlayCtx, camera, dpr, scene.points, scene.texts, box, frame.grid !== 'off');
+      drawHoverMarker(dpr);
     } else {
       const layers: Required<Layers2D> = {
         levels: [],
@@ -4913,13 +4939,18 @@ function dragToPlane(plane: PlaneMap, sx: number, sy: number): [number, number] 
 // coordinates can move is decided by lib/drag.ts, shared with the MCP server
 // so its "draggable" report matches what the app actually does.
 
+/** While a point is dragged on a surface, x and y's change across a pixel there. */
+let surfaceSnap: [number, number] | null = null;
+
 /** Round to roughly a pixel, so dragging writes short, readable numbers.
  *  A mapped axis's pixels are not even in its own units, so its value was
  *  rounded on the screen already (dragTo) and is left as it is. */
 function snapToPixel(v: number, axis = 0): number {
   const maps = panelMaps(cur);
   if (maps?.plane || maps?.[axis === 1 ? 'y' : 'x']) return v;
-  const upp = view.upp / (axis === 1 ? (view.ratio ?? 1) : 1);
+  // On a surface, to the pixel there (as it is when that is unknown).
+  const upp = mode === '3d' ? (surfaceSnap?.[axis] ?? NaN) : view.upp / (axis === 1 ? (view.ratio ?? 1) : 1);
+  if (!(upp > 0)) return v;
   const step = Math.pow(10, Math.floor(Math.log10(upp * 3)));
   return Math.round(v / step) * step;
 }
@@ -5034,7 +5065,8 @@ function toMath(clientX: number, clientY: number): [number, number] {
 
 /** The nearest grabbable point within GRAB_PX of a client position. */
 function pointAt(clientX: number, clientY: number): Grabbable | null {
-  if (mode !== '2d' || !grabbable.length) return null;
+  if (mode === '3d') return surfaceGrabAt(clientX, clientY);
+  if (!grabbable.length) return null;
   const [mx, my] = toMath(clientX, clientY);
   const dpr = window.devicePixelRatio || 1;
   let best: Grabbable | null = null;
@@ -5044,6 +5076,26 @@ function pointAt(clientX: number, clientY: number): Grabbable | null {
     if (d <= bestDist) {
       bestDist = d;
       best = p;
+    }
+  }
+  return best;
+}
+
+/** The nearest grabbable point within GRAB_PX of a client position on a
+ *  surface panel, and in sight there. */
+function surfaceGrabAt(clientX: number, clientY: number): Grabbable | null {
+  const on = grabbable.length ? surfaceAt(clientX, clientY) : null;
+  if (!on) return null;
+  const rect = canvas.getBoundingClientRect();
+  let best: Grabbable | null = null;
+  let bestDist = GRAB_PX;
+  for (const g of grabbable) {
+    const p = surfacePoint(on.surface, g.x, g.y);
+    const at = p.every(isFinite) ? on.toCanvas(p) : null;
+    const d = at ? Math.hypot(at[0] - (clientX - rect.left), at[1] - (clientY - rect.top)) : Infinity;
+    if (d <= bestDist && on.seen(p)) {
+      bestDist = d;
+      best = g;
     }
   }
   return best;
@@ -5070,7 +5122,17 @@ function movePoint(pt: Grabbable, x: number, y: number) {
 
 // --- hover: intercepts, extrema and tracing ---
 
-let hover: { pt: SpecialPoint; color: string; panel: Panel } | null = null;
+/** What hovering shows: a point and its readout. `at` is where it is on
+ *  the canvas (CSS pixels from its corner) when not at x and y in a 2D
+ *  window — on a surface. */
+interface Hover {
+  pt: SpecialPoint;
+  color: string;
+  panel: Panel;
+  at?: [number, number];
+}
+
+let hover: Hover | null = null;
 
 const tooltip = document.createElement('div');
 tooltip.id = 'tooltip';
@@ -5240,7 +5302,7 @@ function tracerFor(eq: Equation): ReturnType<typeof curveTracer> {
   return eq.tracer.fn;
 }
 
-function setHover(next: { pt: SpecialPoint; color: string; panel: Panel } | null) {
+function setHover(next: Hover | null) {
   const same =
     hover?.pt === next?.pt ||
     (hover && next && hover.pt.x === next.pt.x && hover.pt.y === next.pt.y && hover.pt.lines[0] === next.pt.lines[0]);
@@ -5250,10 +5312,17 @@ function setHover(next: { pt: SpecialPoint; color: string; panel: Panel } | null
     tooltip.style.display = 'none';
   } else {
     const { rect, toSx, toSy } = screenMap();
-    tooltip.textContent = hover.pt.lines.join('\n');
+    const [sx, sy] = hover.at ?? [toSx(hover.pt.x), toSy(hover.pt.y)];
+    // The first line a muted heading: a span, as ::first-line's smaller
+    // font would size the whole box (Chromium) and clip a longer line.
+    const [head, ...rest] = hover.pt.lines;
+    const heading = document.createElement('span');
+    heading.className = 'tip-head';
+    heading.textContent = head;
+    tooltip.replaceChildren(heading, ...rest.map(line => `\n${line}`));
     tooltip.style.borderColor = hover.color;
-    tooltip.style.left = `${rect.left + toSx(hover.pt.x) + 14}px`;
-    tooltip.style.top = `${rect.top + toSy(hover.pt.y) + 12}px`;
+    tooltip.style.left = `${rect.left + sx + 14}px`;
+    tooltip.style.top = `${rect.top + sy + 12}px`;
     tooltip.style.display = 'block';
   }
   requestRender();
@@ -5261,13 +5330,13 @@ function setHover(next: { pt: SpecialPoint; color: string; panel: Panel } | null
 
 function updateHover(clientX: number, clientY: number) {
   if (mode !== '2d') {
-    setHover(null);
+    setHover(surfaceHover(clientX, clientY));
     return;
   }
   const { rect, toSx, toSy } = screenMap();
   const mx = clientX - rect.left;
   const my = clientY - rect.top;
-  let best: { pt: SpecialPoint; color: string; panel: Panel } | null = null;
+  let best: Hover | null = null;
   let bestD = 16; // CSS px pick radius
   const here = panels.indexOf(cur);
   for (const eq of equations) {
@@ -5321,12 +5390,123 @@ function readPlane(plane: PlaneMap, X: number, Y: number, sx: number, sy: number
   return [`x = ${fmtTraced(x, px || sx)}`, `y = ${fmtTraced(y, py || sx)}`];
 }
 
+/**
+ * The surface of the current panel (if it draws on one) under a client
+ * position: the ray from the eye through it met with the surface
+ * (lib/surface-pick.ts). With where a point in space lands on the canvas
+ * (CSS pixels from its corner), how much x and y change across a pixel at
+ * a point on the surface, and whether a point there is in sight.
+ */
+function surfaceAt(clientX: number, clientY: number) {
+  const surface = mode === '3d' ? panelSurface(cur) : undefined;
+  if (!surface) return null;
+  const rect = canvas.getBoundingClientRect();
+  const box = panelClientRect();
+  const { vp, invVp, eye } = cameraMatrices(camera, box.width / box.height);
+  // The pixel on the far plane, back into space.
+  const nx = ((clientX - box.left) / box.width) * 2 - 1;
+  const ny = 1 - ((clientY - box.top) / box.height) * 2;
+  const w = invVp[3] * nx + invVp[7] * ny + invVp[11] + invVp[15];
+  const dir = [0, 1, 2].map(k => (invVp[k] * nx + invVp[4 + k] * ny + invVp[8 + k] + invVp[12 + k]) / w - eye[k]);
+  const toCanvas = (p: readonly number[]): [number, number] | null => {
+    const at = projectToScreen(vp, p, box.width, box.height);
+    return at && [at[0] + box.left - rect.left, at[1] + box.top - rect.top];
+  };
+  return {
+    surface,
+    hit: raySurface(surface, eye, dir),
+    toCanvas,
+    units: (x: number, y: number) => surfacePixel(surface, x, y, toCanvas),
+    // Nothing of the surface nearer along the ray to it.
+    seen: (p: readonly number[]) => {
+      const h = raySurface(
+        surface,
+        eye,
+        p.map((v, k) => v - eye[k]),
+      );
+      return !h || h.t > 0.999;
+    },
+  };
+}
+
+/**
+ * Hovering a surface: a dot there reads its x and y (and name); near a
+ * painted curve, the point traced along it, as in 2D; anywhere else on the
+ * surface, x and y there. Each with the painted scalar fields' values.
+ */
+function surfaceHover(clientX: number, clientY: number): Hover | null {
+  const on = surfaceAt(clientX, clientY);
+  if (!on) return null;
+  const { surface, hit, toCanvas, units, seen } = on;
+  const rect = canvas.getBoundingClientRect();
+  const mx = clientX - rect.left;
+  const my = clientY - rect.top;
+  const read = (x: number, y: number) => {
+    const [ux, uy] = units(x, y);
+    return [`x = ${fmtTraced(x, ux)}`, `y = ${fmtTraced(y, uy)}`];
+  };
+  const near = (x: number, y: number) => {
+    const p = surfacePoint(surface, x, y);
+    const at = p.every(isFinite) ? toCanvas(p) : null;
+    return at ? { p, at, dist: Math.hypot(at[0] - mx, at[1] - my) } : null;
+  };
+  let best: Hover | null = null;
+  let bestD = 16; // CSS px, as in 2D
+  for (const d of cur.surfaceDots) {
+    const n = near(d.x, d.y);
+    if (!n || n.dist >= bestD || !seen(n.p)) continue;
+    bestD = n.dist;
+    const lines = [...(d.label ? [d.label] : []), ...read(d.x, d.y)];
+    best = { pt: { x: d.x, y: d.y, lines }, color: cssColor(d.color), panel: cur, at: n.at };
+  }
+  if (best) return best;
+  if (!hit) return null;
+  const here = panels.indexOf(cur);
+  const painted = equations.filter(
+    eq => panelOf(eq) === here && !eq.error && eq.cls && !eq.cls.needs3D && surfaceMapping(eq.cls.object) === 'paint',
+  );
+  // A painted curve near: traced in x and y to the pixel there.
+  const [ux, uy] = units(hit.x, hit.y);
+  let bestT = 10; // CSS px: tighter than a dot, as in 2D
+  for (const eq of painted) {
+    const h = tracerFor(eq)?.(hit.x, hit.y, ux, uy);
+    const n = h && near(h.x, h.y);
+    if (!h || !n || n.dist >= bestT) continue;
+    bestT = n.dist;
+    best = {
+      pt: { x: h.x, y: h.y, lines: ['on curve', ...read(h.x, h.y)] },
+      color: cssColor(baseColor(eq)),
+      panel: cur,
+      at: n.at,
+    };
+  }
+  best ??= {
+    pt: { x: hit.x, y: hit.y, lines: ['on surface', ...read(hit.x, hit.y)] },
+    color: cssColor(theme.axis),
+    panel: cur,
+    at: toCanvas(hit.point) ?? [mx, my],
+  };
+  // Each scalar field's value there, named by its row.
+  const env = { ...constEnv, t: graphTime(), x: best.pt.x, y: best.pt.y };
+  for (const eq of painted) {
+    if (eq.cpu?.type !== 'scalar2d') continue;
+    let value: number;
+    try {
+      value = evaluate(eq.cpu.expr, env);
+    } catch {
+      continue;
+    }
+    const name = eq.text.length > 24 ? `${eq.text.slice(0, 23)}…` : eq.text;
+    best.pt.lines.push(`${name} ${valueReadout(value)}`);
+  }
+  return best;
+}
+
 /** Marker for the hovered point, drawn over the axis labels. */
 function drawHoverMarker(dpr: number) {
-  if (!hover || mode !== '2d' || hover.panel !== cur) return;
+  if (!hover || hover.panel !== cur || (mode !== '2d' && !hover.at)) return;
   const { toSx, toSy } = screenMap();
-  const sx = toSx(hover.pt.x);
-  const sy = toSy(hover.pt.y);
+  const [sx, sy] = hover.at ?? [toSx(hover.pt.x), toSy(hover.pt.y)];
   const ctx = overlayCtx;
   ctx.save();
   ctx.scale(dpr, dpr);
@@ -5392,7 +5572,8 @@ canvas.addEventListener('pointerdown', e => {
     scaling = mode === '2d' && e.button === 0 && e.altKey;
     const hit = e.button === 0 && !e.shiftKey && !scaling ? pointAt(e.clientX, e.clientY) : null;
     if (hit) {
-      const [mx, my] = toMath(e.clientX, e.clientY);
+      // On a surface the point goes where the pointer meets it (surfaceAt).
+      const [mx, my] = mode === '3d' ? [hit.x, hit.y] : toMath(e.clientX, e.clientY);
       grab = { pt: hit, dx: hit.x - mx, dy: hit.y - my };
       setHot(hit.key);
       canvas.style.cursor = 'grabbing';
@@ -5448,6 +5629,16 @@ canvas.addEventListener('pointermove', e => {
     return;
   }
   if (grab) {
+    if (mode === '3d') {
+      // Along the surface, to the pixel there; held where the pointer leaves it.
+      const on = surfaceAt(e.clientX, e.clientY);
+      if (on?.hit) {
+        surfaceSnap = on.units(on.hit.x, on.hit.y);
+        movePoint(grab.pt, on.hit.x, on.hit.y);
+        surfaceSnap = null;
+      }
+      return;
+    }
     const [mx, my] = toMath(e.clientX, e.clientY);
     movePoint(grab.pt, mx + grab.dx, my + grab.dy);
     return;
