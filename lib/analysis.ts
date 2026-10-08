@@ -67,7 +67,7 @@ import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
 import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
-import { type Params, christoffelOf, smoothPartial } from './surface-geometry.ts';
+import { type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { exceedsNodes } from './size.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
@@ -620,10 +620,11 @@ const PANEL_GEODESIC_USAGE =
 /**
  * A geodesic row: geodesic(S, (u0, v0), (du, dv)[, L]), or on a panel drawn
  * on a surface (an on(…) row) geodesic((x0, y0), (dx, dy)[, L]) on that
- * surface, in the panel's x and y. The Christoffel symbols are expanded
- * here (lib/surface-geometry.ts christoffelOf); the curve is integrated as
- * it is drawn, so the start, direction and length may move with sliders, t
- * and named points. A list of starts, directions or lengths draws one
+ * surface, in the panel's x and y. The surface's first and second
+ * derivatives are expanded here (lib/surface-geometry.ts surfaceDerivatives),
+ * and the Christoffel symbols formed from them at each point as the curve is
+ * traced in the trace worker, so the start, direction and length may move
+ * with sliders, t and named points. A list of starts, directions or lengths draws one
  * geodesic per element, a family.
  */
 function classifyGeodesic(
@@ -639,11 +640,12 @@ function classifyGeodesic(
   let failure: unknown = null;
   if (args.length >= 3) {
     try {
-      // A named surface as the resolver writes it in (over u's and v's
-      // intervals, where they are ones); a function of two parameters as is.
+      // The surface as the resolver writes it — a named one or a tuple, over
+      // u's and v's intervals where they are ones; a function of two
+      // parameters as is, for surfaceOperand to call at them.
       const [arg] = args;
-      const named = arg.kind === 'var' && !getFn(arg.name) ? resolveRow(arg, getFn, ropts).expr : arg;
-      operand = surfaceOperand('geodesic', named, getFn, ropts);
+      const written = arg.kind === 'var' && getFn(arg.name) ? arg : resolveRow(arg, getFn, ropts).expr;
+      operand = surfaceOperand('geodesic', written, getFn, ropts);
     } catch (err) {
       failure = err;
     }
@@ -668,10 +670,9 @@ function classifyGeodesic(
   const domain: Expr[] = operand
     ? [...range(operand.over.u), ...range(operand.over.v)]
     : [...surface!.x, ...surface!.y].map(num);
-  const connection = christoffelOf(items, smoothPartial, params);
-  const symbols = connection.symbols;
-  const metric = [...connection.metric, connection.det];
-  if (exceedsNodes([...symbols, ...metric], 4 * FLOW_NODE_LIMIT))
+  // The connection is formed from these at each point as it is traced.
+  const derivatives = surfaceDerivatives(items, smoothPartial, params);
+  if (exceedsNodes(derivatives, 4 * FLOW_NODE_LIMIT))
     throw new Error('This surface is too large to trace geodesics on.');
   // Where it starts, which way and how far, each one value or a list.
   const rest = operand ? args.slice(1) : args;
@@ -708,23 +709,14 @@ function classifyGeodesic(
       dim: onPanel ? 2 : 3,
       params,
       surface: items,
-      symbols,
-      metric,
+      derivatives,
       start: pick(starts),
       direction: pick(directions),
       ...(rest[2] ? { length: pick(lengths)[0] } : {}),
       domain,
     };
     const used = new Set<string>();
-    for (const e of [
-      ...items,
-      ...symbols,
-      ...metric,
-      ...domain,
-      ...pick(starts),
-      ...pick(directions),
-      ...pick(lengths),
-    ])
+    for (const e of [...items, ...derivatives, ...domain, ...pick(starts), ...pick(directions), ...pick(lengths)])
       for (const name of freeVars(e)) used.add(name);
     return {
       object,

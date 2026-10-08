@@ -155,6 +155,46 @@ export function christoffelFromMetric(E: Expr, F: Expr, G: Expr, d: Partial, [a,
   return { symbols: raise(first, E, F, G, det), metric: [E, F, G], det };
 }
 
+/**
+ * The surface's first and second partial derivatives, the 15 numbers a
+ * geodesic is integrated from: r_u, r_v, r_uu, r_uv, r_vv, three components
+ * each. Everything else — E, F, G, EG − F² and the Christoffel symbols — is
+ * formed from them in plain arithmetic at each point (connectionAt), rather
+ * than compiled as six symbols that would each repeat the metric.
+ */
+export function surfaceDerivatives(r: readonly Expr[], d: Partial, params: Params = UV): Expr[] {
+  check(r);
+  const { ru, rv, ruu, ruv, rvv } = forms(r, d, params);
+  return [...ru, ...rv, ...ruu, ...ruv, ...rvv];
+}
+
+/**
+ * The connection at a point from surfaceDerivatives' 15 numbers there:
+ * `out` gets Γᵘ_uu, Γᵘ_uv, Γᵘ_vv, Γᵛ_uu, Γᵛ_uv, Γᵛ_vv (SYMBOLS), then E, F, G
+ * and EG − F² (from the cross product), as christoffelOf writes them.
+ */
+export function connectionAt(r: ArrayLike<number>, out: Float64Array): void {
+  const [ux, uy, uz, vx, vy, vz] = [r[0], r[1], r[2], r[3], r[4], r[5]];
+  const E = ux * ux + uy * uy + uz * uz;
+  const F = ux * vx + uy * vy + uz * vz;
+  const G = vx * vx + vy * vy + vz * vz;
+  const nx = uy * vz - uz * vy;
+  const ny = uz * vx - ux * vz;
+  const nz = ux * vy - uy * vx;
+  const det = nx * nx + ny * ny + nz * nz;
+  for (let ij = 0; ij < 3; ij++) {
+    const k = 6 + 3 * ij;
+    const a = r[k] * ux + r[k + 1] * uy + r[k + 2] * uz;
+    const b = r[k] * vx + r[k + 1] * vy + r[k + 2] * vz;
+    out[ij] = (G * a - F * b) / det;
+    out[3 + ij] = (E * b - F * a) / det;
+  }
+  out[6] = E;
+  out[7] = F;
+  out[8] = G;
+  out[9] = det;
+}
+
 /** −Γᵏ_ij w^i w^j: the parameter acceleration of a geodesic at velocity w. */
 export function geodesicAcceleration(g: ArrayLike<number>, w1: number, w2: number): [number, number] {
   const a = w1 * w1;
@@ -163,13 +203,9 @@ export function geodesicAcceleration(g: ArrayLike<number>, w1: number, w2: numbe
   return [-(g[0] * a + g[1] * b + g[2] * c), -(g[3] * a + g[4] * b + g[5] * c)];
 }
 
-/** A surface's connection as numbers at (p, q). */
-export interface GeodesicSystem {
-  /** Γ in the order of SYMBOLS, written into `out`. */
-  symbols(p: number, q: number, out: Float64Array): void;
-  /** [E, F, G, EG − F²] at (p, q), written into `out`. */
-  metric(p: number, q: number, out: Float64Array): void;
-}
+/** A surface's connection as numbers: at (p, q), connectionAt's ten
+ *  numbers written into `out`. */
+export type GeodesicSystem = (p: number, q: number, out: Float64Array) => void;
 
 export interface GeodesicOptions {
   start: readonly [number, number];
@@ -181,13 +217,23 @@ export interface GeodesicOptions {
   domain: readonly [readonly [number, number], readonly [number, number]];
   /** …unless the surface repeats across it (a torus's angles). */
   periodic?: readonly [boolean, boolean];
+  /**
+   * The longest gap between drawn points, in arc length: each step, which
+   * the controller makes as long as the accuracy allows, is filled in by
+   * its cubic Hermite interpolant (from the point and velocity at both ends,
+   * no more evaluations). Without it, only the steps' own points.
+   */
+  spacing?: number;
+  /** Steps to take at most (GEODESIC_MAX_STEPS). */
+  maxSteps?: number;
+  /** A performance.now() past which it stops where it has got to. */
+  deadline?: number;
 }
 
-/** Steps a geodesic takes at least over its length, so its chords on the
- *  surface (which it runs at unit speed) are short enough to draw. */
-export const GEODESIC_MIN_STEPS = 400;
 /** Steps a geodesic takes at most. */
 export const GEODESIC_MAX_STEPS = 20000;
+/** Relative accuracy each step is held to. */
+const TOLERANCE = 1e-9;
 
 // Dormand–Prince 5(4): the stages' coefficients, and the weights of the
 // fifth-order step and of the fourth-order one it is checked against.
@@ -203,23 +249,37 @@ const A = [
 const B5 = A[6].concat(0);
 const B4 = [5179 / 57600, 0, 7571 / 16695, 393 / 640, -92097 / 339200, 187 / 2100, 1 / 40];
 
+/** Coordinate c of the cubic Hermite interpolant of a step of length h from
+ *  y to z (position and velocity, [p, q, p′, q′]), at the fraction t. */
+function hermite(y: readonly number[], z: readonly number[], h: number, c: number, t: number): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return (
+    (2 * t3 - 3 * t2 + 1) * y[c] +
+    (t3 - 2 * t2 + t) * h * y[c + 2] +
+    (-2 * t3 + 3 * t2) * z[c] +
+    (t3 - t2) * h * z[c + 2]
+  );
+}
+
 /**
  * The geodesic from `start` in `direction`, as parameter points (p, q), from
  * the start to where it ends: after `length` of arc, where it leaves the
- * domain (cut at the edge), or where the metric degenerates (a sphere's pole,
- * a cone's apex: EG − F² falls to nothing beside E and G) or stops being
- * defined. It runs at unit speed — the velocity is put back to length 1 in
- * the metric after every step — with adaptive Dormand–Prince steps no longer
- * than length/GEODESIC_MIN_STEPS, so consecutive points are at most that far
- * apart on the surface.
+ * domain (cut at the edge), where the metric degenerates (a sphere's pole, a
+ * cone's apex: EG − F² falls to nothing beside E and G) or stops being
+ * defined, or when its step or time budget runs out. It runs at unit speed —
+ * the velocity is put back to length 1 in the metric after every step — with
+ * adaptive Dormand–Prince steps, so the arc length is the step variable.
  */
 export function traceGeodesic(
   sys: GeodesicSystem,
   opts: GeodesicOptions,
-  /** Filled with the unit velocity (dp/ds, dq/ds) at each point but a cut end. */
+  /** Filled with the unit velocity (dp/ds, dq/ds) at each point but a cut
+   *  end — without `spacing`, so each point is a step's. */
   velocities?: [number, number][],
 ): [number, number][] {
-  const { domain } = opts;
+  const { domain, spacing, deadline } = opts;
+  const maxSteps = opts.maxSteps ?? GEODESIC_MAX_STEPS;
   const periodic = opts.periodic ?? [false, false];
   const back = opts.length < 0;
   const total = Math.abs(opts.length);
@@ -229,12 +289,11 @@ export function traceGeodesic(
     (periodic[0] || (p >= domain[0][0] && p <= domain[0][1])) &&
     (periodic[1] || (q >= domain[1][0] && q <= domain[1][1]));
   if (!Number.isFinite(p0) || !Number.isFinite(q0) || !inside(p0, q0)) return out;
-  const m = new Float64Array(4);
-  const g = new Float64Array(6);
+  const g = new Float64Array(10);
   /** The velocity w scaled to unit length in the metric at (p, q), or null. */
   const unit = (p: number, q: number, w1: number, w2: number): [number, number] | null => {
-    sys.metric(p, q, m);
-    const [E, F, G, det] = m;
+    sys(p, q, g);
+    const [E, F, G, det] = [g[6], g[7], g[8], g[9]];
     const scale = Math.max(Math.abs(E), Math.abs(G));
     if (!(det > 1e-12 * scale * scale) || !Number.isFinite(det)) return null;
     const s2 = E * w1 * w1 + 2 * F * w1 * w2 + G * w2 * w2;
@@ -248,7 +307,7 @@ export function traceGeodesic(
   if (!w0 || !(total > 0)) return out;
   velocities?.push(w0);
   const f = (y: readonly number[], k: number[]) => {
-    sys.symbols(y[0], y[1], g);
+    sys(y[0], y[1], g);
     const [a1, a2] = geodesicAcceleration(g, y[2], y[3]);
     k[0] = y[2];
     k[1] = y[3];
@@ -261,16 +320,17 @@ export function traceGeodesic(
     Number.isFinite(s) && s > 0 ? s : 1,
   );
   const speed = Math.max(Math.abs(w0[0]), Math.abs(w0[1]));
-  const atol = [1e-9 * span[0], 1e-9 * span[1], 1e-9 * speed, 1e-9 * speed];
-  const hMax = total / GEODESIC_MIN_STEPS;
+  const atol = [TOLERANCE * span[0], TOLERANCE * span[1], TOLERANCE * speed, TOLERANCE * speed];
   const hMin = total * 1e-12;
   let y = [p0, q0, w0[0], w0[1]];
   let s = 0;
-  let h = hMax;
+  // A first step a hundredth of the way; the controller takes it from there.
+  let h = total / 100;
   const ks = Array.from({ length: 7 }, () => [0, 0, 0, 0]);
   const tmp = [0, 0, 0, 0];
   f(y, ks[0]);
-  for (let steps = 0; steps < GEODESIC_MAX_STEPS && s < total;) {
+  for (let steps = 0; steps < maxSteps && s < total;) {
+    if (deadline !== undefined && (steps & 15) === 15 && performance.now() > deadline) break;
     h = Math.min(h, total - s);
     for (let i = 1; i < 7; i++) {
       for (let c = 0; c < 4; c++) {
@@ -290,11 +350,11 @@ export function traceGeodesic(
         e += h * (B5[j] - B4[j]) * ks[j][c];
       }
       next[c] = hi;
-      const sc = atol[c] + 1e-9 * Math.max(Math.abs(y[c]), Math.abs(hi));
+      const sc = atol[c] + TOLERANCE * Math.max(Math.abs(y[c]), Math.abs(hi));
       err = Math.max(err, Math.abs(e) / sc);
     }
     if (!Number.isFinite(err)) {
-      // Off the surface's domain of definition: halve toward it, and stop
+      // Off the surface's domain of definition: shorten toward it, and stop
       // once the step is nothing.
       h /= 4;
       if (h < hMin) break;
@@ -306,31 +366,52 @@ export function traceGeodesic(
       continue;
     }
     steps++;
+    // The points between, along the step's interpolant (its velocity ends
+    // as integrated, before it is put back to unit length).
+    const pieces = spacing ? Math.min(256, Math.ceil(h / spacing)) : 1;
+    const along = (t: number): [number, number] => [hermite(y, next, h, 0, t), hermite(y, next, h, 1, t)];
+    if (!inside(next[0], next[1])) {
+      // Cut at the first edge it crosses: the first piece that leaves, then
+      // bisection along the interpolant within it.
+      let t0 = 0;
+      let t1 = 1;
+      for (let k = 1; k <= pieces; k++) {
+        const t = k / pieces;
+        if (!inside(...along(t))) {
+          t1 = t;
+          break;
+        }
+        t0 = t;
+        out.push(along(t));
+      }
+      for (let i = 0; i < 50; i++) {
+        const t = (t0 + t1) / 2;
+        if (inside(...along(t))) t0 = t;
+        else t1 = t;
+      }
+      // On the edge exactly, in the coordinate that crossed it.
+      const edge = along(t0);
+      for (let c = 0; c < 2; c++) {
+        if (periodic[c]) continue;
+        const crossed = along(t1)[c];
+        if (crossed < domain[c][0]) edge[c] = domain[c][0];
+        else if (crossed > domain[c][1]) edge[c] = domain[c][1];
+      }
+      out.push(edge);
+      break;
+    }
     // Back to unit speed: the drift is rounding and truncation, and the
     // arc length s is then the parameter the steps are taken in.
     const w = unit(next[0], next[1], next[2], next[3]);
-    if (!inside(next[0], next[1])) {
-      // Cut at the edge it crossed, along the step's chord.
-      let t = 1;
-      for (let c = 0; c < 2; c++) {
-        if (periodic[c]) continue;
-        const [lo, hiEdge] = domain[c];
-        const edge = next[c] < lo ? lo : next[c] > hiEdge ? hiEdge : null;
-        if (edge !== null) t = Math.min(t, (edge - y[c]) / (next[c] - y[c]));
-      }
-      if (t > 0 && t < 1) out.push([y[0] + t * (next[0] - y[0]), y[1] + t * (next[1] - y[1])]);
-      break;
-    }
-    if (!w) {
-      // The metric degenerates here (a pole): end at the last good point.
-      break;
-    }
+    // Where the metric degenerates (a pole), end at the last good point.
+    if (!w) break;
+    for (let k = 1; k < pieces; k++) out.push(along(k / pieces));
     y = [next[0], next[1], w[0], w[1]];
     s += h;
     out.push([y[0], y[1]]);
     velocities?.push([y[2], y[3]]);
     f(y, ks[0]);
-    h = Math.min(hMax, h * Math.min(5, 0.9 * Math.max(err, 1e-10) ** -0.2));
+    h = h * Math.min(5, 0.9 * Math.max(err, 1e-10) ** -0.2);
   }
   return out;
 }
@@ -440,15 +521,19 @@ export function numericIn(
   };
 }
 
-/** A connection as numbers, its sliders read from `env`. */
+/** A surface's connection as numbers, from its surfaceDerivatives, its
+ *  sliders read from `env`: one evaluation of the 15 derivatives a point. */
 export function geodesicSystem(
-  conn: Connection,
+  derivatives: readonly Expr[],
   params: Params = UV,
   env: Readonly<Record<string, number>> = {},
 ): GeodesicSystem {
-  const symbols = numericIn(conn.symbols, params, env);
-  const metric = numericIn([...conn.metric, conn.det], params, env);
-  return { symbols, metric };
+  const at = numericIn(derivatives, params, env);
+  const r = new Float64Array(15);
+  return (p, q, out) => {
+    at(p, q, r);
+    connectionAt(r, out);
+  };
 }
 
 /**
@@ -484,9 +569,8 @@ export interface GeodesicSpec {
   readonly params: Params;
   /** The surface in the parameters. */
   readonly surface: readonly Expr[];
-  /** christoffelOf's symbols, and its metric E, F, G with their determinant. */
-  readonly symbols: readonly Expr[];
-  readonly metric: readonly Expr[];
+  /** Its first and second derivatives (surfaceDerivatives). */
+  readonly derivatives: readonly Expr[];
   readonly start: readonly Expr[];
   readonly direction: readonly Expr[];
   /** Arc length; when absent, defaultGeodesicLength. */
@@ -497,13 +581,26 @@ export interface GeodesicSpec {
 
 const NAN: Expr = { kind: 'num', value: NaN };
 
+/** Points a geodesic is drawn with along the size of its surface's box, at
+ *  least where its length allows. */
+const DRAWN_ACROSS = 150;
+/** Points a geodesic is drawn with at most, unless its budget says fewer. */
+export const GEODESIC_MAX_POINTS = 4000;
+
 /**
  * The geodesic a row draws, at the values in `env` (sliders, t, a named
- * point's coordinates): its points in space, or (p, q, 0) for dim 2, flat.
+ * point's coordinates): its points on the surface in space, flat — for a
+ * panel's surface too (dim 2), which so need not carry them itself.
  * Empty when its domain cannot be had; the start alone when it has no
- * direction.
+ * direction. `budget` caps its steps and the time it may take
+ * (traceGeodesic), and the points it is drawn with, so a long one, or many,
+ * cannot run on unbounded.
  */
-export function geodesicPath(spec: GeodesicSpec, env: Readonly<Record<string, number>>): number[] {
+export function geodesicPath(
+  spec: GeodesicSpec,
+  env: Readonly<Record<string, number>>,
+  { maxPoints = GEODESIC_MAX_POINTS, ...budget }: { maxSteps?: number; deadline?: number; maxPoints?: number } = {},
+): number[] {
   const values = new Float64Array(9);
   numericIn([...spec.start, ...spec.direction, ...spec.domain, spec.length ?? NAN], spec.params, env)(NaN, NaN, values);
   const v = [...values];
@@ -515,23 +612,19 @@ export function geodesicPath(spec: GeodesicSpec, env: Readonly<Record<string, nu
   const embed = numericIn(spec.surface, spec.params, env);
   const out = new Float64Array(3);
   const P = (p: number, q: number): number[] => (embed(p, q, out), [out[0], out[1], out[2]]);
-  const length = spec.length ? v[8] : defaultGeodesicLength(P, domain);
+  const size = defaultGeodesicLength(P, domain);
+  const length = spec.length ? v[8] : size;
   if (!Number.isFinite(length)) return [];
-  const sys: GeodesicSystem = {
-    symbols: numericIn(spec.symbols, spec.params, env),
-    metric: numericIn(spec.metric, spec.params, env),
-  };
-  const path = traceGeodesic(sys, {
+  const path = traceGeodesic(geodesicSystem(spec.derivatives, spec.params, env), {
     start: [v[0], v[1]],
     direction: [v[2], v[3]],
     length,
     domain,
     periodic: periodicAxes(P, domain),
+    spacing: Math.max(size / 2 / DRAWN_ACROSS, Math.abs(length) / maxPoints),
+    ...budget,
   });
   const pts: number[] = [];
-  for (const [p, q] of path) {
-    if (spec.dim === 2) pts.push(p, q, 0);
-    else pts.push(...P(p, q));
-  }
+  for (const [p, q] of path) pts.push(...P(p, q));
   return pts;
 }

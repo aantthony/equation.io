@@ -13,6 +13,8 @@ import {
   numericIn,
   periodicAxes,
   smoothPartial,
+  surfaceDerivatives,
+  connectionAt,
   traceGeodesic,
 } from './surface-geometry.ts';
 
@@ -132,8 +134,8 @@ function geodesic(
   periodic: [boolean, boolean] = [false, false],
 ) {
   const r = surface(src);
-  const sys = geodesicSystem(christoffelOf(r, smoothPartial));
-  const uv = traceGeodesic(sys, { start, direction, length, domain, periodic });
+  const sys = geodesicSystem(surfaceDerivatives(r, smoothPartial));
+  const uv = traceGeodesic(sys, { start, direction, length, domain, periodic, spacing: Math.abs(length) / 2000 });
   const P = numericIn(r, ['u', 'v']);
   const out = new Float64Array(3);
   const xyz = uv.map(([u, v]) => {
@@ -171,7 +173,7 @@ describe('geodesics', () => {
     expect(Math.hypot(...d)).toBeCloseTo(2, 6);
     // Polar coordinates on the plane: a straight line that misses the origin.
     const polar = geodesic('(u cos(v), u sin(v), 0)', [1, 0], [0, 1], 3);
-    for (const p of polar.xyz) expect(p[0]).toBeCloseTo(1, 7);
+    for (const p of polar.xyz) expect(p[0]).toBeCloseTo(1, 6);
   });
   it('are helices on a cylinder: straight in the unrolled chart', () => {
     // Unrolled, the cylinder of radius 2 is the plane (2u, v).
@@ -182,7 +184,7 @@ describe('geodesics', () => {
   it('keep Clairaut’s r cos ψ on a surface of revolution', () => {
     // A torus, revolved about z: r = 3 + cos v the distance from the axis,
     // ψ the angle to the parallel. At unit speed r cos ψ = r · r du/ds.
-    const sys = geodesicSystem(christoffelOf(surface(TORUS), smoothPartial));
+    const sys = geodesicSystem(surfaceDerivatives(surface(TORUS), smoothPartial));
     const velocities: [number, number][] = [];
     const uv = traceGeodesic(
       sys,
@@ -391,7 +393,7 @@ describe('geodesic rows', () => {
     expect(arc(pts)).toBeGreaterThan(6 * Math.PI);
   });
   it('runs as far as asked, and stops at the edge of u and v’s ranges', () => {
-    expect(arc(traced([...SPHERE_UV, 'geodesic(S, (0.2, 0.3), (1, 0.5), 2)']))).toBeCloseTo(2, 6);
+    expect(arc(traced([...SPHERE_UV, 'geodesic(S, (0.2, 0.3), (1, 0.5), 2)']))).toBeCloseTo(2, 4);
     // Without intervals u and v run over [0, 1]: a saddle patch, left at its edge.
     const pts = traced(['S = (u, v, u^2 - v^2)', 'geodesic(S, (0.5, 0.5), (1, 0.2))']);
     const end = pts.at(-1)!;
@@ -407,7 +409,7 @@ describe('geodesic rows', () => {
     const b = traced(rows('(0.4, 0.3)'));
     expect(a[0]).not.toEqual(b[0]);
     expect(a[0][0]).toBeCloseTo(3 * Math.cos(0.3) * Math.cos(0.2), 9);
-    expect(arc(a)).toBeCloseTo(2, 6);
+    expect(arc(a)).toBeCloseTo(2, 4);
   });
   it('draws a fan from a list of directions', () => {
     const rows = [...SPHERE_UV, 'a = [0..5] pi/3', 'geodesic(S, (0, 0.4), (cos(a), sin(a)), 3)'];
@@ -424,22 +426,24 @@ describe('geodesic rows', () => {
       /as long/,
     );
   });
-  it('draws on a panel’s surface in its x and y, carried onto it', () => {
+  it('draws on a panel’s surface, traced in its x and y', () => {
     const rows = [ON_TORUS, 'P = (0.5, 0.3)', 'geodesic(P, (1, 0.3), 30)'];
     const { r } = analyze(rows);
     expect(r.cls).toMatchObject({ needs3D: false, object: { kind: 'geodesic', dim: 2, params: ['x', 'y'] } });
+    // Its points are on the surface already, starting at P's.
     const pts = traced(rows);
-    expect(pts[0]).toEqual([0.5, 0.3, 0]);
-    // The torus repeats across its angles, so the geodesic runs on past the
-    // edge of x, round the hole.
-    expect(Math.max(...pts.map(p => p[0]))).toBeGreaterThan(Math.PI);
-    const embed = (x: number, y: number) => [
+    const at = (x: number, y: number) => [
       (3 + Math.cos(y)) * Math.cos(x),
       (3 + Math.cos(y)) * Math.sin(x),
       Math.sin(y),
     ];
-    const onSurface = pts.map(([x, y]) => embed(x, y));
-    expect(arc(onSurface)).toBeCloseTo(30, 2);
+    at(0.5, 0.3).forEach((c, k) => expect(pts[0][k]).toBeCloseTo(c, 6));
+    for (const [X, Y, Z] of pts) expect(Math.hypot(Math.hypot(X, Y) - 3, Z)).toBeCloseTo(1, 5);
+    // The torus repeats across its angles, so the geodesic runs on past the
+    // edge of x, round the hole: all the way round it.
+    const turned = new Set(pts.map(([X, Y]) => Math.floor((Math.atan2(Y, X) + Math.PI) / (Math.PI / 4))));
+    expect(turned.size).toBe(8);
+    expect(arc(pts)).toBeCloseTo(30, 2);
   });
   it('says what it needs', () => {
     expect(analyze(['geodesic((0.2, 0.3), (1, 1))']).r.error).toMatch(/this panel has none/);
@@ -449,5 +453,76 @@ describe('geodesic rows', () => {
     expect(analyze(['geodesic(T, (0.2, 0.3), (1, 1))']).r.error).toMatch(/T is not a surface/);
     expect(analyze([`S = ${SPHERE}`, 'geodesic(S, (0.2, 0.3), 1)']).r.error).toMatch(/a pair/);
     expect(analyze([ON_TORUS, 'geodesic(1, 2)']).r.error).toMatch(/a pair/);
+  });
+});
+
+describe('geodesic tracing cost', () => {
+  it('forms the connection from the 15 derivatives as christoffelOf writes it', () => {
+    for (const src of [TORUS, SPHERE, '(u, v, u^2 v - sin(v))', '(u + v^2, v, u v)']) {
+      const r = surface(src);
+      const { symbols, metric, det } = christoffelOf(r, smoothPartial);
+      const sys = geodesicSystem(surfaceDerivatives(r, smoothPartial));
+      const out = new Float64Array(10);
+      sys(0.4, 0.3, out);
+      [...symbols, ...metric, det].forEach((e, k) => expect(out[k]).toBeCloseTo(at(e, 0.4, 0.3), 10));
+      const derivatives = new Float64Array(15);
+      numericIn(surfaceDerivatives(r, smoothPartial), ['u', 'v'])(0.4, 0.3, derivatives);
+      const again = new Float64Array(10);
+      connectionAt(derivatives, again);
+      expect([...again]).toEqual([...out]);
+    }
+  });
+  it('lets the step size follow the curvature, filling in what it draws', () => {
+    // A straight line on a plane is one step's worth of work.
+    const r = surface('(u, v, 0)');
+    const sys = geodesicSystem(surfaceDerivatives(r, smoothPartial));
+    const domain: [[number, number], [number, number]] = [
+      [-10, 10],
+      [-10, 10],
+    ];
+    const steps = traceGeodesic(sys, { start: [0, 0], direction: [1, 1], length: 5, domain });
+    expect(steps.length).toBeLessThan(30);
+    const drawn = traceGeodesic(sys, { start: [0, 0], direction: [1, 1], length: 5, domain, spacing: 0.01 });
+    expect(drawn.length).toBeGreaterThan(300);
+    for (const [u, v] of drawn) expect(u).toBeCloseTo(v, 12);
+    expect(drawn.at(-1)![0]).toBeCloseTo(5 / Math.SQRT2, 12);
+  });
+  it('stops where its step or time budget runs out', () => {
+    const sys = geodesicSystem(surfaceDerivatives(surface(TORUS), smoothPartial));
+    const opts = {
+      start: [0, 0.3] as [number, number],
+      direction: [0.2, 1] as [number, number],
+      length: 1000,
+      domain: [
+        [-Math.PI, Math.PI],
+        [-Math.PI, Math.PI],
+      ] as [[number, number], [number, number]],
+      periodic: [true, true] as [boolean, boolean],
+    };
+    expect(traceGeodesic(sys, { ...opts, maxSteps: 50 }).length).toBe(51);
+    const t0 = performance.now();
+    traceGeodesic(sys, { ...opts, deadline: t0 + 20 });
+    expect(performance.now() - t0).toBeLessThan(200);
+  });
+});
+
+describe('geodesic rows over intervals', () => {
+  it('read a tuple surface over u’s and v’s intervals, as a named one', () => {
+    const rows = (surfaceText: string) => {
+      const analysis = analyzeRows(['u = interval(0, 2pi)', ...surfaceText.split('; ')], { readouts: true });
+      const r = analysis.rows.at(-1)!;
+      if (r.error) throw new Error(r.error);
+      const o = r.cls!.object;
+      if (o.kind !== 'geodesic') throw new Error(o.kind);
+      return { o, pts: geodesicPath(o, { ...analysis.constEnv, t: 0 }) };
+    };
+    const inline = rows('geodesic((cos(u), sin(u), v), (0.5, 0.5), (1, 0.02), 10)');
+    const named = rows('S = (cos(u), sin(u), v); geodesic(S, (0.5, 0.5), (1, 0.02), 10)');
+    expect(inline.o.domain.map(e => evaluate(e, {}))).toEqual([0, 2 * Math.PI, 0, 1]);
+    // Round the cylinder past u = 2π, as far as asked: a helix.
+    expect(inline.pts.length).toBeGreaterThan(100);
+    expect(inline.pts).toEqual(named.pts);
+    const end = inline.pts.slice(-3);
+    expect(end[2]).toBeCloseTo(0.5 + 10 * (0.02 / Math.hypot(1, 0.02)), 6);
   });
 });

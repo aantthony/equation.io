@@ -53,24 +53,35 @@ surface, painted as a field with the same gain (docs/axis-maps.md).
 
 **Implemented (geodesics).** `geodesic(S, (u0, v0), (du, dv)[, L])` is a
 whole row, classified in lib/analysis.ts (as an orbit is) rather than
-expanded: the Christoffel symbols Γᵏ_ij = gᵏˡ (S_ij · S_l) are expanded
-symbolically (the same as ½gᵏˡ(∂_i g_jl + ∂_j g_il − ∂_l g_ij), which the
-tests check) and the curve is traced as it is drawn — not run as a state,
-so it is a whole curve at once and moves with sliders, t and a dragged
-start point. lib/surface-geometry.ts traceGeodesic integrates
-u″ = −Γᵘ_ij u′ⁱu′ʲ with adaptive Dormand–Prince 5(4) steps, putting the
-velocity back to unit length in the metric after each, so the arc length is
-the step variable and the drawn length is the one asked for; steps are at
-most L/400 so it draws smoothly. It stops where it leaves the parameter
-ranges (cut at the edge), unless the surface repeats across that range,
-found numerically (a torus, a sphere's longitude), where it runs on; and
-where det g falls below 1e-12 of max(E, G)² or a step stops being finite (a
-pole), ending at its last good point. The default length is twice the
+expanded, and traced in the trace worker — not run as a state, so it is a
+whole curve at once and moves with sliders, t and a dragged start point.
+Only S's first and second derivatives (15 components) are expanded
+symbolically; at each point E, F, G, EG − F² and the Christoffel symbols
+Γᵏ_ij = gᵏˡ (S_ij · S_l) are formed from those numbers in plain arithmetic
+(connectionAt — the same as ½gᵏˡ(∂_i g_jl + ∂_j g_il − ∂_l g_ij), which the
+tests check against christoffelOf). Compiling the six symbols separately
+repeated the metric in each, and cost ~20× as much per step.
+lib/surface-geometry.ts traceGeodesic integrates u″ = −Γᵘ_ij u′ⁱu′ʲ with
+adaptive Dormand–Prince 5(4) steps, as long as the accuracy allows (a plane
+is a handful), putting the velocity back to unit length in the metric after
+each, so the arc length is the step variable and the drawn length is the
+one asked for; each step is filled in for drawing by its cubic Hermite
+interpolant (dense output, no more evaluations). It stops where it leaves
+the parameter ranges (cut at the edge, along the interpolant), unless the
+surface repeats across that range, found numerically (a torus, a sphere's
+longitude), where it runs on; where det g falls below 1e-12 of max(E, G)²
+or a step stops being finite (a pole), ending at its last good point; and
+where its budget runs out. A family shares 200 000 steps, 1 s of worker
+time and 48 000 drawn points among its members (at most 64), so a fan of
+long geodesics comes out shorter rather than holding the worker. The last
+traced geodesic keeps drawing until the next arrives, and a traced one asks
+for a frame of its own only when none comes within 50 ms anyway, so a drag
+or t does not pay for extra frames. The default length is twice the
 diagonal of the surface's bounding box: a little more than once round a
-sphere. A list of starts, directions or lengths draws a family (at most 64).
-On an `on(…)` panel `geodesic(P, d)` takes the panel's surface and is
-traced in x and y, then carried onto it. Deferred: geodesic circles and the
-exponential map, parallel transport, and colouring a curve by κ.
+sphere. On an `on(…)` panel `geodesic(P, d)` takes the panel's surface and
+is traced in x and y; the worker places its points on the surface, so the
+panel need not carry them. Deferred: geodesic circles and the exponential
+map, parallel transport, and colouring a curve by κ.
 
 - `curvature(C)` and `torsion(C)` of a parametric curve in u, as a
   scalar along the curve (color the curve by it, or read out at a point).

@@ -302,7 +302,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     hover; `gaussian(P)` or `gaussian(0.5, 1)` is the number at a point.
   - `geodesic(S, (u0, v0), (du, dv))` draws the geodesic of S — the
     straightest curve on it — from the point at (u0, v0) in the direction
-    (du, dv), given in u and v. It is integrated as it is drawn, at unit
+    (du, dv), given in u and v. It is integrated in the background as it is
+    drawn (the last one stays on screen until the next is ready), at unit
     speed along the surface, from the geodesic equations with the
     Christoffel symbols of S's metric (expanded symbolically). A fourth
     argument is its length on the surface (`geodesic(S, P, (1, 0), 5)`;
@@ -314,7 +315,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     start, direction and length may use sliders, t and named points, so
     dragging P moves a `geodesic(S, P, …)`; a list draws a fan:
     `a = [0..11] pi/6` and `geodesic(S, (0, 0), (cos(a), sin(a)))`. It must be
-    the whole row. On a sphere they are great circles, on a cylinder helices,
+    the whole row. A fan of very long geodesics shares a fixed amount of
+    work, so its members may end short of the length asked for. On a sphere
+    they are great circles, on a cylinder helices,
     on a plane straight lines; on a surface of revolution r cos ψ is constant
     along one (Clairaut).
   - On a panel drawn on a surface, `geodesic((x0, y0), (dx, dy))` (or

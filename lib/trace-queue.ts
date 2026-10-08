@@ -2,6 +2,7 @@ import { type Env } from './env.ts';
 import { exprKey } from './expr.ts';
 import type { Expr } from './expr.ts';
 import type { OrbitInput } from './orbit.ts';
+import type { GeodesicSpec } from './surface-geometry.ts';
 import { animatedConstNames, definitionDependencies } from './defs.ts';
 
 /** Separate moving values from the definitions and fixed inputs of a trace.
@@ -18,7 +19,7 @@ export function traceEnvironment(params: readonly string[], animated: boolean, d
 }
 
 export interface TraceInput {
-  kind?: 'system' | 'field' | 'intersection' | 'certify' | 'orbit';
+  kind?: 'system' | 'field' | 'intersection' | 'certify' | 'orbit' | 'geodesic';
   glyphs?: boolean;
   residuals: Expr[];
   dim: 2 | 3;
@@ -27,8 +28,17 @@ export interface TraceInput {
   env: Record<string, number>;
   angular?: boolean[];
   orbit?: OrbitInput;
+  /** A geodesic to trace (lib/surface-geometry.ts geodesicPath), the values
+   *  it reads, and how many steps and milliseconds it may take. */
+  geodesic?: { spec: GeodesicSpec; env: Record<string, number>; maxSteps: number; ms: number; maxPoints: number };
 }
-export type TraceResult = { pts: number[][]; info?: string; error?: string };
+export type TraceResult = {
+  pts: number[][];
+  /** A geodesic's points as x, y, z triples, transferred rather than copied. */
+  flat?: Float32Array;
+  info?: string;
+  error?: string;
+};
 export type TraceMessage = { token: number; input: TraceInput };
 interface Job extends TraceMessage {
   row: number;

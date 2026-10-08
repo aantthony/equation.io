@@ -813,7 +813,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
       structure = [
         plan.dim,
         plan.params,
-        ...[plan.surface, plan.symbols, plan.metric, plan.start, plan.direction, plan.domain].map(expressions),
+        ...[plan.surface, plan.derivatives, plan.start, plan.direction, plan.domain].map(expressions),
         plan.length && exprKey(plan.length),
       ];
       break;
