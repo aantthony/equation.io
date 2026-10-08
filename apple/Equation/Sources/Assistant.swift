@@ -161,10 +161,6 @@ struct SetGraph: Tool {
 
   @Generable
   struct Arguments {
-    // Written first, so the model says what it means to draw before the rows;
-    // the graph doesn't use it.
-    @Guide(description: "First, in a few words: what the rows will draw, and which kind of row each one is.")
-    var intent: String
     @Guide(description: "One equation or definition per entry, e.g. [\"a = 2\", \"y = a sin(x)\"].")
     var equations: [String]
   }
