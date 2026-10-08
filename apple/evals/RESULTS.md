@@ -632,37 +632,144 @@ above: an amplitude slider and a sine wave for the regression line and
 the tangent slider, an annulus for the normal probability, the vertex at
 (2, −2), `z = (x^(1/2))^2` for the solid of revolution.
 
-### gpt-5.5: not measured
+### gpt-5.5: tools, old llms.txt, new llms.txt (2026-10-08)
 
-The OpenAI account has no credits: every request since 2026-10-07
-22:30 UTC fails with "You have no credits remaining" (HTTP 429), so the
-gpt-5.5 runs with tools, with the old llms.txt (15b3d4e, 113,073 bytes)
-and with the new one (148,557 bytes) on the 46 tasks could not run. Spend
-in this step: $0. The runner is ready:
+Three runs on the same 46 tasks, the app's knowledge unchanged from the
+on-device run above (measurement only):
 
-```sh
-git show 15b3d4e:web/public/llms.txt > apple/evals/.build/llms-15b3d4e.txt
-pnpm app:eval --model openai                                              # tools
-pnpm app:eval --model openai --reference apple/evals/.build/llms-15b3d4e.txt   # old llms.txt
-pnpm app:eval --model openai --reference web/public/llms.txt              # new llms.txt
-```
+- `results/2026-10-08T000204Z-openai-gpt-5.5.json`: the app's
+  instructions and tools, 5 runs a task.
+- `results/2026-10-08T024726Z-openai-gpt-5.5-reference.json`: the old
+  llms.txt (15b3d4e, 113,073 bytes) after `referenceInstructions`, with
+  get_graph, set_graph, move_view, animate_slider and check, 3 runs a task.
+- `results/2026-10-08T002920Z-openai-gpt-5.5-reference.json`: the same
+  with the new llms.txt (148,557 bytes), 3 runs a task. The account ran
+  out of credit partway: 38 runs of 14 tasks failed with "no credits
+  remaining". Those 14 tasks were rerun whole (3 runs each) once it was
+  topped up, and their results replace the failed ones (the file's
+  `rerun` field lists them).
 
-At 5 runs a task, each llms.txt run sends roughly 30–37K tokens of
-reference per model call, about 230 runs × 3 calls: some 20–25M input
-tokens, mostly cached, about $10–15 a run at the prices above; the tools
-run about $6. All three fit the $30 cap only at 3 runs a task for the two
-llms.txt runs.
+All answered as `gpt-5.5-2026-04-23`.
+
+**Check fixes, and every file regraded again.** Reading the failures
+showed checks rejecting correct answers in ten places, listed below. All
+are fixed, most with the rejected answer added to tasks.ts as known-good;
+the known-bad answers still fail. No earlier file changed grade, run for run (on-device 43%,
+36%, 44%, 43%, 46%, 32%; the first gpt-5.5 run 81%). The three new files
+went from their graded-at-run-time 206, 125 and 122+40 to the numbers
+below.
+- The reply check took "shaded" to need a `prob` row, but rows report
+  probabilities as "probability (shaded area)". Every correct
+  normal-probability answer failed.
+- "circle" failed a hyperboloid's "waist is a circle of radius 2" and a
+  field whose "streamlines circle the origin". "surface" failed a solid
+  ("the filled volume, not just the surface"). "marked both intersection
+  points" failed when labels mark them.
+- A viewport row counted as a drawn row and as a change to the rows: a
+  saved `camera(…, spin = 0.3)` failed spin-3d and unit-cube.
+- label-vertex wanted the label exactly on the vertex. A label set beside
+  it (0.15 off) is how labels are placed; within 0.5 now passes.
+- hyperboloid wanted x² + y² − z² = 4 exactly. The request fixes only
+  the waist (`x^2/4 + y^2/4 - z^2/9 = 1` and `2cosh(2v−1)…` are right).
+  The check now wants the waist circle of radius 2, nothing else in that
+  plane nearby, and a radius past 2 at z = ±2. A cylinder of radius 2 and
+  the old known-bad answers still fail.
+- piecewise wanted one row through both pieces. Two bounded rows draw
+  the same graph. Each point must now be on some curve, and neither
+  piece may run on past 0.
+- normal-probability wanted a `P(…)` row. The integral of the density,
+  `int[-1..1] normalpdf(x, 0, 1) dx`, shades the same area with the same
+  value, so either now passes.
+- regression-line wanted a `~` fit row. The least-squares line worked
+  out (`y = 1.9x + 0.9`) is the same line, so only the line is checked.
+
+One false positive is left as it is: "every arrow is tangent to a circle"
+fails the reply check ("tangent" with no tangent line). It is 1 run, in
+the old-llms.txt run on vector-field. A keyword check will always have
+some.
+
+**Spend: about $27.60**, from the runs' token counts at $5 / $0.50 cached
+/ $30 per million:
+
+| run | cost |
+| --- | --- |
+| smoke tests (3 one-run tasks) | $0.48 |
+| tools, 230 runs | $5.80 |
+| new llms.txt, 138 runs | $8.69 |
+| new llms.txt, rerun of 14 tasks, 42 runs | $3.41 |
+| old llms.txt, 138 runs | $9.21 |
+
+The failed runs cost nothing. An llms.txt run is about $0.065: 1.8 calls
+of about 145K tokens (new) or 108K (old), 99% from the prompt cache.
 
 ### Summary on the 46 tasks
 
 | | on-device (step 3) | gpt-5.5 tools | gpt-5.5 old llms.txt | gpt-5.5 new llms.txt |
 | --- | --- | --- | --- | --- |
-| pass, 46 tasks | 32% (74/230) | not run | not run | not run |
-| ± across repetitions | 3% | | | |
-| pass, first 35 tasks | 41% (72/175) | 81% (141/175)¹ | not run | not run |
-| tool calls a run | 5.4 | | | |
-| input tokens a session | 12,463 | | | |
-| context overflows | 10 | | | |
+| runs a task | 5 | 5 | 3 | 3 |
+| pass, 46 tasks | 32% (74/230) | 96% (221/230) | 98% (135/138) | 96% (133/138) |
+| tasks passed per repetition | 16, 16, 13, 14, 15 | 45, 45, 43, 44, 44 | 45, 45, 45 | 44, 44, 45 |
+| first 35 tasks | 41% (72/175) | 100% (175/175) | 97% (102/105) | 98% (103/105) |
+| 11 harder tasks | 4% (2/55) | 84% (46/55) | 100% (33/33) | 91% (30/33) |
+| tool calls a run | 5.4 | 2.7 | 1.8 | 1.8 |
+| input tokens a session (cached) | 11,867 | 8,031 (4,795) | 107,579 (105,790) | 145,160 (143,897) |
+| output tokens a run | 154 | 221 | 164 | 170 |
+| seconds a run | 14.4 | 7.1 | 5.7 | 6.7 |
+| runs that ended in an error | 11 (overflows, tool errors) | 0 | 0 | 0 |
+| spend | – | $5.80 | $9.21 | $12.10 |
 
-¹ The 2026-10-07 run, with step 2's instructions and data, regraded with
-the LaTeX check.
+No gpt-5.5 reply in these runs wrote LaTeX (34 of 175 did before the
+instructions asked for plain text).
+
+Per task, where any column missed:
+
+| task | on-device | tools | old llms.txt | new llms.txt |
+| --- | --- | --- | --- | --- |
+| tangent-line | 4/5 | 5/5 | 1/3 | 1/3 |
+| vector-field | 5/5 | 5/5 | 2/3 | 3/3 |
+| intersection-curve | 1/5 | 5/5 | 3/3 | 1/3 |
+| regression-line | 0/5 | 2/5 | 3/3 | 2/3 |
+| motion-trail | 0/5 | 0/5 | 3/3 | 3/3 |
+| tangent-slider | 0/5 | 4/5 | 3/3 | 3/3 |
+
+**Old against new llms.txt: no difference that shows at 3 runs.**
+135 against 133 of 138. Every per-task difference is one run, or two in
+intersection-curve:
+- intersection-curve 3 → 1: two new-llms.txt runs replaced the sphere
+  and the plane with `(x^2 + y^2 + z^2, z) = (9, 2)`, "I replaced the
+  two surfaces with their intersection curve". The curve is right; the
+  rows the request didn't touch were dropped. A model slip. Nothing in
+  either file says to replace rows, and the same mistake doesn't appear
+  elsewhere.
+- regression-line 3 → 2: one run wrote the data row without its closing
+  `]`, a typo.
+- vector-field 2 → 3: the old run's "tangent to a circle" false positive
+  (above).
+- tangent-line 1/3 in both: the runs restructured `y = x^2` into
+  `f(x) = x^2; y = f(x)` before adding the tangent. Both files' guidance
+  for assistants says to do exactly that ("prefer restructuring into named
+  definitions"), and the app's instructions say to keep every other row.
+  A knowledge conflict that the new file keeps. The one old-file run that
+  also failed the line wrote `(d/dx f(x))(a)`, a product with a.
+
+What the new file was meant to fix (a name before every formula, one
+shape per example, guidance first) didn't move gpt-5.5, which already
+read the old file correctly. It costs 35% more tokens a call. The
+on-device copying failures it was aimed at aren't measurable with a
+reference this size: it doesn't fit 8K.
+
+**What gpt-5.5 still fails on the harder tasks (with tools):**
+- motion-trail 0/5 is knowledge. Every run drew the whole path as a
+  parametric curve, `(2cos(2pi u), sin(4pi u))`, "the full trail of the
+  moving point". With either llms.txt in context all 6 runs wrote
+  `trail(A)`. With tools it never looked a kind up: the instructions don't
+  mention trails, and list_kinds is only consulted for shapes it doesn't
+  know.
+- regression-line 2/5 is model. All 5 runs worked out the right line,
+  y = 1.9x + 0.9, by hand. 3 left the data list `P` undrawn, which the
+  app warns about ("this defines P, but no other row uses it").
+- tangent-slider 4/5 is model, a valid-but-wrong formula: one run wrote
+  `y = f(a) + (d/dx f(a))(x - a)`, which differentiates a constant, so
+  the line is flat. The other four wrote the slope out, `(3a^2 - 3)`.
+- label-vertex, hyperboloid, piecewise and normal-probability failed
+  only on the check fixes above, and all pass now.

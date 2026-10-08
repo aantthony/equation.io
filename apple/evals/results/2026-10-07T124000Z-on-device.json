@@ -573,8 +573,7 @@
             },
             {
               "name": "reply names only what was drawn",
-              "pass": false,
-              "why": "says \"surface\", but the rows are solid"
+              "pass": true
             },
             {
               "name": "reply has no LaTeX",
@@ -13220,5 +13219,5 @@
     }
   ],
   "toolsTokens": 1218,
-  "regraded": "2026-10-07T22:32:13.335Z"
+  "regraded": "2026-10-08T03:07:09.073Z"
 }

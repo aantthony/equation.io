@@ -35,8 +35,9 @@ const check = (name: string, test: Check['test']): Check => ({ name, test });
 const same = (a: string, b: string) => a.replace(/\s+/g, '') === b.replace(/\s+/g, '');
 const failed = (result: unknown) => !!result && typeof result === 'object' && 'error' in result;
 /** Rows that put something on the graph (not definitions, comments or views). */
-export const drawn = (o: Outcome) =>
-  o.rows.filter(r => r.status === 'ok' && r.kind && !r.kind.startsWith('definition') && !r.kind.startsWith('comment'));
+export const drawn = (o: Outcome) => o.rows.filter(r => r.status === 'ok' && r.kind && !framing(r));
+/** A definition, heading, viewport, grid or panel row: it sets the graph up and draws nothing itself. */
+const framing = (r: RowStatus) => /^(definition|comment|viewport|grid|panel divider)/.test(r.kind ?? '');
 const kinds = (rows: RowStatus[]) => rows.map(r => r.kind ?? r.error ?? '?').join(', ') || 'no rows';
 
 /** No row has an error or a warning (a definition nothing uses, a 2D plot left out of 3D). */
@@ -53,13 +54,14 @@ export const keeps = (...texts: string[]) =>
     return lost ? `${JSON.stringify(lost)} was changed or removed` : true;
   });
 
-/** The rows are exactly the starting rows. */
+/** The rows are exactly the starting rows, besides framing (a camera row saving a spin). */
 export const unchanged = () =>
-  check('rows unchanged', o =>
-    o.rows.length === o.start.length && o.rows.every((r, i) => same(r.text, o.start[i].text))
+  check('rows unchanged', o => {
+    const rows = o.rows.filter(r => !/^(viewport|grid)/.test(r.kind ?? ''));
+    return rows.length === o.start.length && rows.every((r, i) => same(r.text, o.start[i].text))
       ? true
-      : `rows now ${JSON.stringify(o.rows.map(r => r.text))}`,
-  );
+      : `rows now ${JSON.stringify(o.rows.map(r => r.text))}`;
+  });
 
 /** Between min and max rows draw something, not counting rows of the `besides` kinds (a marked point, a label). */
 export const drawnCount = (min: number, max = Infinity, besides: string[] = []) =>
@@ -210,6 +212,13 @@ export const curveThrough = (what: string, points: [number, number][], tolerance
       : `no curve through ${JSON.stringify(points)}`,
   );
 
+/** Every point is on some 2D curve, not necessarily the same one (a function drawn piece by piece). */
+export const curvesThrough = (what: string, points: [number, number][], tolerance = 1e-3) =>
+  check(what, o => {
+    const missed = points.find(pt => !plans(o).some(p => onCurve(p.cpu, env(o, {}), pt, tolerance)));
+    return missed ? `no curve through ${JSON.stringify(missed)}` : true;
+  });
+
 /** No 2D curve passes through any of the points (a piece drawn past where it should stop). */
 export const curveAvoids = (what: string, points: [number, number][], tolerance = 1e-3) =>
   check(what, o => {
@@ -236,11 +245,11 @@ export const pointAt = (what: string, p: number[]) =>
     return rows || named ? true : `no point at ${JSON.stringify(p)}`;
   });
 
-/** A label is written at `p`. */
-export const labelAt = (what: string, p: number[]) =>
+/** A label is written at `p`, or beside it (within `tolerance`: a label set off its point so the two don't overlap). */
+export const labelAt = (what: string, p: number[], tolerance = 0.5) =>
   check(what, o => {
     const labels = plans(o).filter(({ cpu }) => cpu.type === 'label');
-    return labels.some(({ cpu }) => cpu.type === 'label' && near(coordsAt(o, cpu.coords), p))
+    return labels.some(({ cpu }) => cpu.type === 'label' && near(coordsAt(o, cpu.coords), p, tolerance))
       ? true
       : `labels at ${JSON.stringify(labels.map(({ cpu }) => (cpu.type === 'label' ? coordsAt(o, cpu.coords) : [])))}`;
   });
@@ -373,13 +382,16 @@ const CLAIMS: [RegExp, string[]][] = [
   [/\b(cube|box|cuboid)\b/i, ['solid', 'polygon in 3D']],
   [/\b(sphere|ball)\b/i, ['implicit3d', 'psurface', 'solid']],
   [/\b(helix|spiral)\b/i, ['pcurve']],
-  // Not motion: "goes round in a circle", "orbits the unit circle".
+  // Not motion: "goes round in a circle", "orbits the unit circle"; nor a
+  // surface's section: "its waist is a circle of radius 2".
   [
-    /(?<!\b(in|round|around|along|orbits?|orbiting) (a|the) (unit )?)\bcircle\b/i,
-    ['implicit2d', 'pcurve', 'polygon', 'pregion', 'spacecurve'],
+    /(?<!\b(in|round|around|along|orbits?|orbiting) (a|the) (unit )?|\b(waist|cross-section|section)\b[^.]{0,40})\bcircle\b/i,
+    // A rotational field's streamlines are circles: "the streamlines circle the origin".
+    ['implicit2d', 'pcurve', 'polygon', 'pregion', 'spacecurve', 'vfield2d'],
   ],
   [/\b(torus|donut|doughnut)\b/i, ['psurface', 'implicit3d', 'solid']],
-  [/\b(surface|paraboloid)\b/i, ['implicit3d', 'psurface']],
+  // A solid has a surface: "the filled volume, not just the surface".
+  [/\b(surface|paraboloid)\b/i, ['implicit3d', 'psurface', 'solid']],
   // A flow has saddles too: "the circles open into a saddle".
   [/\bsaddle\b/i, ['implicit3d', 'psurface', 'vfield2d', 'vfield3d']],
   [/\b(vector field|streamlines?)\b/i, ['vfield2d', 'vfield3d']],
@@ -387,12 +399,16 @@ const CLAIMS: [RegExp, string[]][] = [
   // Not "the point where they cross", or "the curve, showing the points where…".
   [
     /\b(plotted|drew|added|placed|marked)\s+(\w+\s+){0,2}points?\b/i,
-    ['point', 'plist', 'definition (point)', 'system'],
+    // Labels mark points too: "marked both intersection points" with a label at each.
+    ['point', 'plist', 'definition (point)', 'system', 'label'],
   ],
   [/\bslider\b/i, ['definition (const)']],
   [/\b(rose|petals?|cardioid)\b/i, ['pcurve', 'implicit2d']],
   // Not "framed the area around them".
-  [/\b(shaded|shade|area under|area between|region where)\b/i, ['ineq2d', 'value', 'pregion', 'projected2d', 'prob']],
+  [
+    /\b(shaded|shade|area under|area between|region where)\b/i,
+    ['ineq2d', 'value', 'pregion', 'projected2d', 'probability (shaded area)'],
+  ],
   [/\btangent\b/i, ['implicit2d', 'polygon']],
 ];
 

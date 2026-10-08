@@ -19,6 +19,7 @@ import {
   curveAvoids,
   curveFollowsSlider,
   curveThrough,
+  curvesThrough,
   drawnCount,
   hasKind,
   keeps,
@@ -294,7 +295,15 @@ export const TASKS: EvalTask[] = [
       unchanged(),
       called('move_view', 'a slow spin', a => typeof a.spin === 'number' && a.spin > 0 && a.spin <= 1),
     ],
-    good: [answer('The saddle surface is turning slowly.', move({ spin: 0.3 }))],
+    good: [
+      answer('The saddle surface is turning slowly.', move({ spin: 0.3 })),
+      // A camera row keeps the spin in the graph: framing, not a change to its rows.
+      answer(
+        'The saddle is turning slowly.',
+        set('z = x^2 - y^2', 'camera(-pi/3, 0.5, 7, spin = 0.3)'),
+        move({ spin: 0.3 }),
+      ),
+    ],
     bad: [answer('Spinning.', move({ x: [-5, 5] }))],
   },
   {
@@ -508,7 +517,10 @@ export const TASKS: EvalTask[] = [
     rows: [],
     request: 'Show the vector field (−y, x)',
     checks: [hasKind('vfield2d')],
-    good: [answer('The rotational field (−y, x), flowing in circles.', set('(-y, x)'))],
+    good: [
+      answer('The rotational field (−y, x), flowing in circles.', set('(-y, x)')),
+      answer('The streamlines circle around the origin.', set('(-y, x)')),
+    ],
     bad: [answer('The vector field.', set('(-1, 1)'))],
   },
   {
@@ -710,8 +722,7 @@ export const TASKS: EvalTask[] = [
     request: 'Fit a straight line to these points and draw it',
     checks: [
       keeps('P = [(0, 1), (1, 3), (2, 4), (3, 7)]'),
-      hasKind('definition (regression)'),
-      // The least-squares line is y = 1.9x + 0.9.
+      // The least-squares line is y = 1.9x + 0.9, fitted by a regression row or worked out.
       curveThrough('the fitted line y = 1.9x + 0.9', [
         [0, 0.9],
         [3, 6.6],
@@ -721,6 +732,10 @@ export const TASKS: EvalTask[] = [
       answer(
         'Fitted y = m x + b to the points: m ≈ 1.9, b ≈ 0.9.',
         set('P = [(0, 1), (1, 3), (2, 4), (3, 7)]', 'P.y ~ m P.x + b', 'y = m x + b'),
+      ),
+      answer(
+        'The least-squares line is y = 1.9x + 0.9.',
+        set('P = [(0, 1), (1, 3), (2, 4), (3, 7)]', 'P', 'y = 1.9x + 0.9'),
       ),
     ],
     bad: [
@@ -774,28 +789,54 @@ export const TASKS: EvalTask[] = [
     request: 'Draw a hyperboloid of one sheet whose waist is a circle of radius 2',
     checks: [
       anyOf(
-        'x² + y² − z² = 4',
-        surfaceThrough(
-          'as an equation',
-          [
-            [2, 0, 0],
-            [0, -2, 0],
-            [Math.sqrt(8), 0, 2],
-            [0, Math.sqrt(8), -2],
-          ],
-          [0, 0, 0],
-        ),
-        parametricSurface(
-          'as a parametric surface',
-          samples =>
-            samples.every(([x, y, z]) => Math.abs(x * x + y * y - z * z - 4) < 1e-6) &&
+        'a hyperboloid of one sheet, waist radius 2',
+        // As an equation: on the circle of radius 2 at z = 0 and nowhere else
+        // in that plane nearby, and wider (a radius past 2) at z = ±2.
+        {
+          name: 'as an equation',
+          test: o =>
+            o.graph.analysis.rows.some(r => {
+              if (r.cpu?.type !== 'implicit3d') return false;
+              const cpu = r.cpu;
+              const f = (x: number, y: number, z: number) =>
+                evaluate(cpu.residual, { ...o.graph.analysis.constEnv, t: 0, x, y, z });
+              const zero = (v: number) => Math.abs(v) < 1e-3;
+              const widens = (z: number) =>
+                Array.from({ length: 560 }, (_, k) => 2.05 + k * 0.05).some(
+                  (x, k, xs) => k > 0 && Math.sign(f(xs[k - 1], 0, z)) !== Math.sign(f(x, 0, z)),
+                );
+              return (
+                zero(f(2, 0, 0)) &&
+                zero(f(0, 2, 0)) &&
+                zero(f(-Math.SQRT2, -Math.SQRT2, 0)) &&
+                ![0, 1.5, 2.5].some(x => zero(f(x, 0, 0))) &&
+                widens(2) &&
+                widens(-2)
+              );
+            })
+              ? true
+              : 'no such surface',
+        },
+        // As a parametric surface: never inside radius 2, radius 2 at z = 0,
+        // and wider away from it, both ways.
+        parametricSurface('as a parametric surface', samples => {
+          const r = ([x, y]: number[]) => Math.hypot(x, y);
+          return (
+            samples.every(p => r(p) > 2 - 1e-6) &&
+            samples.some(p => Math.abs(p[2]) < 0.05 && Math.abs(r(p) - 2) < 0.05) &&
             samples.some(p => p[2] > 1) &&
-            samples.some(p => p[2] < -1),
-        ),
+            samples.some(p => p[2] < -1) &&
+            samples.filter(p => Math.abs(p[2]) > 1).every(p => r(p) > 2.01)
+          );
+        }),
       ),
     ],
     good: [
       answer('A hyperboloid of one sheet, waist radius 2.', set('x^2 + y^2 - z^2 = 4')),
+      answer(
+        'A hyperboloid of one sheet: its waist is the circle of radius 2 at z = 0.',
+        set('x^2/4 + y^2/4 - z^2/9 = 1'),
+      ),
       answer(
         'A hyperboloid of one sheet, waist radius 2.',
         set('(2cosh(4v - 2) cos(2pi u), 2cosh(4v - 2) sin(2pi u), 2sinh(4v - 2))'),
@@ -806,6 +847,9 @@ export const TASKS: EvalTask[] = [
       answer('A hyperboloid.', set('z^2 - x^2 - y^2 = 4')),
       // Waist radius 1.
       answer('A hyperboloid of one sheet.', set('x^2 + y^2 - z^2 = 1')),
+      // A cylinder of radius 2.
+      answer('A hyperboloid of one sheet.', set('x^2 + y^2 = 4 + 0z')),
+      answer('A hyperboloid of one sheet.', set('(2cos(2pi u), 2sin(2pi u), 4v - 2)')),
     ],
   },
   {
@@ -887,7 +931,8 @@ export const TASKS: EvalTask[] = [
     rows: [],
     request: 'Graph f(x) = x² for x < 0 and x + 1 for x ≥ 0',
     checks: [
-      curveThrough('one curve through both pieces', [
+      // Drawn as one row, or piece by piece.
+      curvesThrough('both pieces', [
         [-1, 1],
         [-2, 4],
         [0.5, 1.5],
@@ -903,6 +948,7 @@ export const TASKS: EvalTask[] = [
     good: [
       answer('The piecewise function: x² left of 0, x + 1 from 0 on.', set('y = {x < 0: x^2, x + 1}')),
       answer('f, drawn piece by piece.', set('f(x) = {x < 0: x^2, x >= 0: x + 1}', 'y = f(x)')),
+      answer('The two pieces.', set('y = {x < 0: x^2}', 'y = {x >= 0: x + 1}')),
     ],
     bad: [
       answer('The two pieces.', set('y = x^2', 'y = x + 1')),
@@ -967,9 +1013,18 @@ export const TASKS: EvalTask[] = [
     tags: ['probability', 'integral', 'hard'],
     rows: [],
     request: 'Shade the probability that a standard normal variable lies within one standard deviation of its mean',
-    checks: [hasKind('probability (shaded area)'), value(0.6827, 1e-3)],
+    // P(…) of a declared variable, or the integral of the density, which shades it too.
+    checks: [
+      anyOf('the probability, shaded', hasKind('probability (shaded area)'), hasKind('value', /int/)),
+      value(0.6827, 1e-3),
+    ],
     good: [
       answer('About 68% of the area lies within one standard deviation.', set('X ~ Normal(0, 1)', 'P(-1 < X < 1)')),
+      answer(
+        'I shaded the area within one standard deviation: about 68%.',
+        set('y = normalpdf(x, 0, 1)', 'int[-1..1] normalpdf(x, 0, 1) dx'),
+      ),
+      answer('I shaded P(−1 < X < 1) ≈ 0.6827.', set('X ~ Normal(0, 1)', 'P(-1 < X < 1)')),
     ],
     bad: [
       answer('About 68%.', set('X ~ Normal(0, 1)', 'P(X < 1)')),
