@@ -390,7 +390,9 @@ describe('review fixes', () => {
       expect(ray.ended.problem).toBeUndefined();
       expect(ray.pts.length).toBeGreaterThan(5);
       const still = traced([...KERR, 'geodesic((1.9, 0), (0, 0))'], box(16));
-      expect(geodesicCutNote(still.ended)).toMatch(/nothing can stand still here \(inside an ergoregion/);
+      expect(geodesicCutNote(still.ended)).toMatch(
+        /nothing can stand still here: inside an ergoregion everything is dragged round/,
+      );
       const inside = traced([...KERR, 'geodesic((1.2, 0), (0, 0.1))'], box(16));
       expect(geodesicCutNote(inside.ended)).toMatch(/not space at the start \(inside a horizon\?\)/);
     });
@@ -410,5 +412,40 @@ describe('review fixes', () => {
     expect(last(['ds^2 = -dτ^2 + dx^2 + dy^2']).cls!.object).toMatchObject({ kind: 'metric', coords: ['τ', 'x', 'y'] });
     expect(errorOf(['ds^2 = dpi^2 + dx^2 + dy^2'])).toMatch(/dpi is no differential — pi is a constant/);
     expect(errorOf(['ds^2 = de^2 + dx^2 + dy^2'])).toMatch(/de is no differential — e is a constant/);
+  });
+});
+
+describe('second review fixes', () => {
+  it('keeps tracing a ray slow round the hole when zoomed far out', () => {
+    for (const half of [3e5, 1e6]) {
+      const window = traceWindow([-half, -half / 1.5], [half, half / 1.5]);
+      const { pts } = traced([...SCHWARZSCHILD, 'lightray((-30, 6), (1, 0))'], window);
+      expect(Math.hypot(...pts.at(-1)!)).toBeGreaterThan(100);
+    }
+  });
+
+  it('brings a ray in from far off to a small window, and lets it fall in there', () => {
+    const window = traceWindow([-16, -12], [16, 12]);
+    const { pts, ended } = traced([...SCHWARZSCHILD, 'lightray((-100000, 1), (1, 0))'], window);
+    expect(ended.budget).toBe(false);
+    expect(pts.length).toBeLessThan(6000);
+    expect(pts.some(([x, y]) => Math.abs(x) < 16 && Math.abs(y) < 12)).toBe(true);
+    expect(Math.hypot(...pts.at(-1)!)).toBeLessThan(2.01);
+  });
+
+  it('reads dτ after a number, and leaves a longer name alone', () => {
+    expect(last(['ds^2 = -2dτ^2 + dx^2 + dy^2']).cls!.object).toMatchObject({
+      kind: 'metric',
+      coords: ['τ', 'x', 'y'],
+    });
+    // dτx is d τ x, as before, not a coordinate named taux.
+    expect(errorOf(['ds^2 = -dτx^2 + dx^2 + dy^2'])).toMatch(/Unknown variable: d\b/);
+  });
+
+  it('says when every point checked is inside a horizon', () => {
+    expect(errorOf(['M = 60000', ...SCHWARZSCHILD.slice(1)])).toMatch(
+      /not space anywhere it was checked.*inside a horizon everywhere there\?/,
+    );
+    expect(errorOf(['ds^2 = -dt^2 - dx^2 + dy^2'])).toMatch(/one minus sign, for dt/);
   });
 });

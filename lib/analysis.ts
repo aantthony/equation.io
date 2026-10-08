@@ -959,7 +959,8 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         throw new Error(
           "This panel's view(…) maps its axes, and a ds^2 metric is traced on a panel without one, for now.",
         );
-      const parsed = parseExpr(metricText(rows[ri].text), fnNames, listNames, valueNames);
+      const text = metricText(rows[ri].text);
+      const parsed = parseExpr(text, fnNames, listNames, valueNames);
       if (parsed.kind !== 'eq') throw new Error('A metric row is ds^2 = … in the differentials of its coordinates.');
       const metric = parseMetric(parsed.r, {
         resolve: e => inlineFields(lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts), fieldEnv),

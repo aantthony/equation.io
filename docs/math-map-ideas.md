@@ -124,10 +124,17 @@ finite but wrong inside — or grows or shrinks 10⁸ times, where it makes no
 headway (a ray crawling into a horizon, toward y = 0 in the half-plane), at
 a box round the window (traceWindow: four times the window, on a lattice,
 so small pans and zooms keep the trace) grown to take in the start, and,
-with no length given, once it has drawn as far as that is across. Inside
+with no length given, once it has drawn as far as that is across, or once
+32 steps move it less than a thousandth of the most any of the four
+stretches of 32 before did (a crawl into a horizon, whatever the zoom), or
+once dτ/dλ has grown 10⁴-fold — the coordinates freezing at a horizon,
+round which a ray falling into a spinning hole would otherwise creep for
+tens of thousands of steps. Inside
 the window's box steps are held to 1/400 of it, so none strides over a
 black hole between stages, and points are drawn finely; outside it, eight
-times coarser. The reader allocates nothing per point. It runs in the trace
+times coarser, and further off coarser still in proportion to the distance
+(steps a fiftieth of it), so a ray sent from 10⁵ away arrives in a few
+hundred steps. The reader allocates nothing per point. It runs in the trace
 worker; a metric's family member gets at least 60 ms. A metric is checked
 at sample points over scales from 0.001 to 100 000 round the origin, so a
 disc of radius 0.1 and a hole of mass 10 000 both pass; a small feature far

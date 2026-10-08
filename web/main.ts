@@ -1695,7 +1695,7 @@ function geodesicFor(
         maxSteps: Math.min(GEODESIC_MAX_STEPS, Math.ceil(GEODESIC_FAMILY_STEPS / members)),
         // A metric's family shares more time: its members may each cross
         // a wide box, and a gallery fan of 33 should draw whole when cold.
-        ms: plot.metric ? Math.max(GEODESIC_FAMILY_MS / members, 60) : GEODESIC_FAMILY_MS / members,
+        ms: plot.metric ? Math.max(GEODESIC_FAMILY_MS / members, 150) : GEODESIC_FAMILY_MS / members,
         maxPoints: Math.min(GEODESIC_MAX_POINTS, Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members))),
         ...(window ? { window } : {}),
       },

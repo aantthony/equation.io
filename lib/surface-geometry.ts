@@ -281,7 +281,8 @@ export interface GeodesicOptions {
    */
   drawSpacing?: number;
   /** Where drawSpacing and maxStride hold; outside it, points are eight
-   *  times sparser and steps may be eight times longer. */
+   *  times sparser and steps may be eight times longer, and further still
+   *  in proportion to the distance from it. */
   fine?: GeodesicOptions['domain'];
   /**
    * Where a geodesic with no length of its own stops: after this much drawn
@@ -340,6 +341,10 @@ const B4 = [5179 / 57600, 0, 7571 / 16695, 393 / 640, -92097 / 339200, 187 / 210
 /** Whether (p, q), the start of `y`, is in the box. */
 const inBox = (box: GeodesicOptions['domain'], y: readonly number[]) =>
   y[0] >= box[0][0] && y[0] <= box[0][1] && y[1] >= box[1][0] && y[1] <= box[1][1];
+
+/** How far (p, q), the start of `y`, is outside the box (0 inside). */
+const fromBox = (box: GeodesicOptions['domain'], y: readonly number[]) =>
+  Math.hypot(Math.max(box[0][0] - y[0], 0, y[0] - box[0][1]), Math.max(box[1][0] - y[1], 0, y[1] - box[1][1]));
 
 /** Coordinate c of the cubic Hermite interpolant of a step of length h from
  *  y to z (position and velocity, [p, q, p′, q′]), at the fraction t. */
@@ -428,10 +433,15 @@ export function traceGeodesic(
   let h = reach / 100;
   let steps = 0;
   let outOfBudget = false;
-  // Drawn length so far, and where it stood 32 steps ago (a stall).
+  // Drawn length so far, where it stood 32 steps ago, and how far it moved
+  // in each of the four stretches of 32 before: a stall is a stretch moving
+  // it less than a thousandth of the most of those — one crawling into a
+  // horizon or toward an ideal boundary, its steps shrinking with no end —
+  // whatever the size of the box (a ray slow round a hole in a window zoomed
+  // far out moves about as far each stretch).
   let drawn = 0;
   let mark = [p0, q0];
-  const still = 1e-5 * Math.hypot(span[0], span[1]);
+  const headway: number[] = [];
   while (s < total) {
     if (steps >= maxSteps || (deadline !== undefined && (steps & 15) === 15 && performance.now() > deadline)) {
       outOfBudget = true;
@@ -440,7 +450,10 @@ export function traceGeodesic(
     h = Math.min(h, total - s);
     if (opts.maxStride) {
       // (Longer outside the fine box, which holds what is looked at.)
-      const stride = opts.fine && !inBox(opts.fine, y) ? 8 * opts.maxStride : opts.maxStride;
+      // Far from it, a fiftieth of the way back to it: a ray sent in from
+      // 10⁵ away arrives in a few hundred steps.
+      const stride =
+        opts.fine && !inBox(opts.fine, y) ? Math.max(8 * opts.maxStride, fromBox(opts.fine, y) / 50) : opts.maxStride;
       h = Math.min(h, stride / (Math.hypot(y[2], y[3]) || 1));
     }
     // A stage where the flow does not hold (across a horizon, where the
@@ -498,7 +511,9 @@ export function traceGeodesic(
                 256,
                 Math.ceil(
                   Math.hypot(next[0] - y[0], next[1] - y[1]) /
-                    (!opts.fine || inBox(opts.fine, y) || inBox(opts.fine, next) ? drawSpacing : 8 * drawSpacing),
+                    (!opts.fine || inBox(opts.fine, y) || inBox(opts.fine, next)
+                      ? drawSpacing
+                      : Math.max(8 * drawSpacing, fromBox(opts.fine, next) / 100)),
                 ),
               ),
             )
@@ -551,7 +566,10 @@ export function traceGeodesic(
     if (drawnLimit !== undefined) {
       if (drawn >= drawnLimit) break;
       if (steps % 32 === 0) {
-        if (Math.hypot(y[0] - mark[0], y[1] - mark[1]) < still) break;
+        const moved = Math.hypot(y[0] - mark[0], y[1] - mark[1]);
+        if (headway.length === 4 && moved < 1e-3 * Math.max(...headway)) break;
+        headway.push(moved);
+        if (headway.length > 4) headway.shift();
         mark = [y[0], y[1]];
       }
     }
@@ -820,10 +838,14 @@ export function geodesicPath(
   {
     maxPoints = GEODESIC_MAX_POINTS,
     window,
+    ms,
     ...budget
   }: {
     maxSteps?: number;
     deadline?: number;
+    /** Milliseconds it may take, counted once it is set up (its programs
+     *  compiled), so a cold start does not eat into the trace. */
+    ms?: number;
     maxPoints?: number;
     ended?: GeodesicEnd;
     /** Where a metric's geodesic is traced: the box round the window it is
@@ -831,7 +853,7 @@ export function geodesicPath(
     window?: GeodesicOptions['domain'];
   } = {},
 ): number[] {
-  if (spec.metric) return metricPath(spec, spec.metric, env, { maxPoints, window, ...budget });
+  if (spec.metric) return metricPath(spec, spec.metric, env, { maxPoints, window, ms, ...budget });
   const values = new Float64Array(9);
   numericIn([...spec.start, ...spec.direction, ...spec.domain, spec.length ?? NAN], spec.params, env)(NaN, NaN, values);
   const v = [...values];
@@ -846,7 +868,9 @@ export function geodesicPath(
   const size = defaultGeodesicLength(P, domain);
   const length = spec.length ? v[8] : size;
   if (!Number.isFinite(length)) return [];
-  const path = traceGeodesic(geodesicSystem(spec.derivatives, spec.params, env), {
+  const sys = geodesicSystem(spec.derivatives, spec.params, env);
+  const deadline = budget.deadline ?? (ms === undefined ? undefined : performance.now() + ms);
+  const path = traceGeodesic(sys, {
     start: [v[0], v[1]],
     direction: [v[2], v[3]],
     length,
@@ -854,6 +878,7 @@ export function geodesicPath(
     periodic: periodicAxes(P, domain),
     spacing: Math.max(size / 2 / DRAWN_ACROSS, Math.abs(length) / maxPoints),
     ...budget,
+    deadline,
   });
   const pts: number[] = [];
   for (const [p, q] of path) pts.push(...P(p, q));
@@ -1039,6 +1064,10 @@ export function metricAcceleration(
  *  horizon, or an ideal boundary like the half-plane's y = 0. */
 const METRIC_RANGE = 1e8;
 
+/** How many times its starting rate τ may come to run per step of the
+ *  geodesic's own parameter before it is taken to be at a horizon. */
+const TIME_RUNAWAY = 1e4;
+
 /** The largest |g_ij|. */
 function metricSize(g: readonly (readonly number[])[]): number {
   let size = 0;
@@ -1143,7 +1172,7 @@ export function metricStart(
   const gtt = g[0][0];
   const beta = (u: number, v: number) => g[0][1] * u + g[0][2] * v;
   const h = (u: number, v: number) => g[1][1] * u * u + 2 * g[1][2] * u * v + g[2][2] * v * v;
-  const ergo = gtt >= 0 ? ' (inside an ergoregion, where nothing stands still)' : '';
+  const ergo = gtt >= 0 ? ' (inside an ergoregion)' : '';
   let w: [number, number];
   let ut: number;
   if (motion === 'null') {
@@ -1162,7 +1191,10 @@ export function metricStart(
       // The speeds s along this direction g(U, U) < 0 allows: between the
       // roots of g_ττ + 2 β s + h s² = 0.
       const len = Math.hypot(a, b);
-      if (len === 0) return { problem: `nothing can stand still here${ergo}` };
+      if (len === 0)
+        return {
+          problem: `nothing can stand still here${gtt >= 0 ? ': inside an ergoregion everything is dragged round' : ''}`,
+        };
       const [u, v] = [a / len, b / len];
       const [B, H] = [beta(u, v), h(u, v)];
       const disc = B * B - H * gtt;
@@ -1199,6 +1231,10 @@ export function metricStart(
     normalize(y) {
       const { g } = read(y[0], y[1]);
       if (!inRange(g) || !spacetime(g, size0)) return false;
+      // Where τ's rate runs off, these coordinates freeze at a horizon: a
+      // ray falling in only creeps round it from here (round a spinning
+      // hole, for tens of thousands of steps), drawing nothing new.
+      if (!(Math.abs(y[4]) < TIME_RUNAWAY * Math.max(1, Math.abs(ut)))) return false;
       const [w1, w2, rate] = [y[2], y[3], y[4]];
       const B = g[0][1] * w1 + g[0][2] * w2;
       const C = g[1][1] * w1 * w1 + 2 * g[1][2] * w1 * w2 + g[2][2] * w2 * w2;
@@ -1257,10 +1293,12 @@ function metricPath(
     maxPoints,
     window,
     ended,
+    ms,
     ...budget
   }: {
     maxSteps?: number;
     deadline?: number;
+    ms?: number;
     maxPoints: number;
     ended?: GeodesicEnd;
     window?: GeodesicOptions['domain'];
@@ -1313,6 +1351,7 @@ function metricPath(
     maxPoints,
     ended,
     ...budget,
+    deadline: budget.deadline ?? (ms === undefined ? undefined : performance.now() + ms),
   });
   const pts: number[] = [];
   for (const [p, q] of path) pts.push(p, q, 0);

@@ -18,7 +18,7 @@
  * from x and y are all the document says).
  */
 import { NonSmoothError, add, diff, div, mul, neg, pow, sub } from './diff.ts';
-import { type Expr, builtinFn, evaluate, freeVars, substVars } from './expr.ts';
+import { type Expr, builtinFn, evaluate, exprKey, freeVars, substVars } from './expr.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { exceedsNodes } from './size.ts';
 import { smoothPartial } from './surface-geometry.ts';
@@ -102,6 +102,90 @@ const SAMPLES: readonly [number, number][] = Array.from({ length: 33 }, (_, i) =
   }),
 );
 
+/** What sampled found, by the metric's structure and the values it reads:
+ *  a reanalysis (a slider elsewhere moving) does not check it again. */
+const sampleCache = new Map<string, ReturnType<typeof sampleCounts>>();
+
+/**
+ * A metric checked at the sample points, with its sliders at their values:
+ * whether the form is g's everywhere it is defined (`quadratic`), and at how
+ * many points it is defined, its coordinates are independent, it can be
+ * traced in (positive definite, or x and y space with det g < 0), the
+ * panel's coordinates are space, and det g < 0.
+ */
+function sampled(
+  Q: Expr,
+  g: readonly (readonly Expr[])[],
+  J: readonly (readonly Expr[])[],
+  vars: readonly string[],
+  values: Readonly<Record<string, number>>,
+) {
+  const all = [Q, ...g.flat(), ...J.flat()];
+  const names = [...new Set(all.flatMap(e => [...freeVars(e)]))].sort();
+  const key = JSON.stringify([all.map(exprKey), vars, names.map(n => values[n] ?? null)]);
+  let hit = sampleCache.get(key);
+  if (!hit) {
+    hit = sampleCounts(Q, g, J, vars, values);
+    if (sampleCache.size > 64) sampleCache.clear();
+    sampleCache.set(key, hit);
+  }
+  return hit;
+}
+
+function sampleCounts(
+  Q: Expr,
+  g: readonly (readonly Expr[])[],
+  J: readonly (readonly Expr[])[],
+  vars: readonly string[],
+  values: Readonly<Record<string, number>>,
+) {
+  const n = g.length;
+  const at = (e: Expr, env: Record<string, number>) => {
+    try {
+      return evaluate(e, { ...values, ...env });
+    } catch {
+      return NaN;
+    }
+  };
+  const counts = { quadratic: true, defined: 0, independent: 0, traceable: 0, space: 0, lorentz: 0 };
+  for (const [k, [x, y]] of SAMPLES.entries()) {
+    const w = vars.map((_, i) => Math.sin(1.7 * k + 2.3 * i + 0.4));
+    const env: Record<string, number> = { x, y };
+    vars.forEach((v, i) => (env[v] = w[i]));
+    const q = at(Q, env);
+    const G = g.map(row => row.map(e => at(e, env)));
+    if (!Number.isFinite(q) || !G.flat().every(Number.isFinite)) continue;
+    counts.defined++;
+    let sum = 0;
+    let size = Math.abs(q);
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        sum += G[i][j] * w[i] * w[j];
+        size += Math.abs(G[i][j] * w[i] * w[j]);
+      }
+    if (Math.abs(sum - q) > 1e-7 * size) return { ...counts, quadratic: false };
+    const j = J.map(row => row.map(e => at(e, env)));
+    if (Math.abs(j[0][0] * j[1][1] - j[0][1] * j[1][0]) > 1e-12 * Math.max(...j.flat().map(Math.abs)))
+      counts.independent++;
+    if (n === 2) {
+      if (G[0][0] > 0 && G[0][0] * G[1][1] - G[0][1] ** 2 > 0) counts.traceable++;
+      continue;
+    }
+    const det =
+      G[0][0] * (G[1][1] * G[2][2] - G[1][2] ** 2) -
+      G[0][1] * (G[0][1] * G[2][2] - G[0][2] * G[1][2]) +
+      G[0][2] * (G[0][1] * G[1][2] - G[0][2] * G[1][1]);
+    if (det < 0) counts.lorentz++;
+    // The panel's coordinates are space here; with det g < 0, the other is
+    // a time (in an ergoregion too, where g_ττ > 0).
+    if (G[1][1] > 0 && G[1][1] * G[2][2] - G[1][2] ** 2 > 0) {
+      counts.space++;
+      if (det < 0) counts.traceable++;
+    }
+  }
+  return counts;
+}
+
 /** Names a differential cannot be of: constants and the imaginary unit. */
 const NOT_COORDINATES: ReadonlySet<string> = new Set(['pi', 'e', 'i', 'inf']);
 
@@ -110,7 +194,7 @@ const NOT_COORDINATES: ReadonlySet<string> = new Set(['pi', 'e', 'i', 'inf']);
  * constant tau, so `dτ` would read as d times τ.
  */
 export function metricText(text: string): string {
-  return text.replace(/(?<![\p{L}\p{N}_'])dτ/gu, 'dtau');
+  return text.replace(/(?<![\p{L}_'])dτ(?![\p{L}\p{N}_'])/gu, 'dtau');
 }
 
 /**
@@ -233,48 +317,8 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   // Checked at sample points (with the sliders at their values): the form is
   // g's, the coordinates are independent, and the signature is one a
   // geodesic can be traced in somewhere.
-  const at = (e: Expr, env: Record<string, number>) => {
-    try {
-      return evaluate(e, { ...ctx.values, ...env });
-    } catch {
-      return NaN;
-    }
-  };
-  let defined = 0;
-  let independent = 0;
-  let traceable = 0;
-  let space = 0;
-  for (const [k, [x, y]] of SAMPLES.entries()) {
-    const w = vars.map((_, i) => Math.sin(1.7 * k + 2.3 * i + 0.4));
-    const env: Record<string, number> = { x, y };
-    vars.forEach((v, i) => (env[v] = w[i]));
-    const q = at(Q, env);
-    const G = g.map(row => row.map(e => at(e, env)));
-    if (!Number.isFinite(q) || !G.flat().every(Number.isFinite)) continue;
-    defined++;
-    let sum = 0;
-    let size = Math.abs(q);
-    for (let i = 0; i < n; i++)
-      for (let j = 0; j < n; j++) {
-        sum += G[i][j] * w[i] * w[j];
-        size += Math.abs(G[i][j] * w[i] * w[j]);
-      }
-    if (Math.abs(sum - q) > 1e-7 * size) throw notQuadratic;
-    const j = J.map(row => row.map(e => at(e, env)));
-    if (Math.abs(j[0][0] * j[1][1] - j[0][1] * j[1][0]) > 1e-12 * Math.max(...j.flat().map(Math.abs))) independent++;
-    if (n === 2) {
-      if (G[0][0] > 0 && G[0][0] * G[1][1] - G[0][1] ** 2 > 0) traceable++;
-    } else if (G[1][1] > 0 && G[1][1] * G[2][2] - G[1][2] ** 2 > 0) {
-      // The panel's coordinates are space here; with det g < 0, the other
-      // is a time (in an ergoregion too, where g_ττ > 0).
-      space++;
-      const det =
-        G[0][0] * (G[1][1] * G[2][2] - G[1][2] ** 2) -
-        G[0][1] * (G[0][1] * G[2][2] - G[0][2] * G[1][2]) +
-        G[0][2] * (G[0][1] * G[1][2] - G[0][2] * G[1][1]);
-      if (det < 0) traceable++;
-    }
-  }
+  const { defined, independent, traceable, space, lorentz, quadratic } = sampled(Q, g, J, vars, ctx.values);
+  if (!quadratic) throw notQuadratic;
   if (defined && !independent && !spatial.every(c => PANEL.has(c)))
     throw new Error(
       `ds^2: ${spatial.join(' and ')} do not make coordinates on the plane — their Jacobian in x and y vanishes.`,
@@ -285,7 +329,9 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
         ? 'ds^2 with no time must be positive for every direction (a Riemannian metric, like (dx^2 + dy^2)/y^2); a spacetime has a time coordinate too, like -dt^2 + dx^2 + dy^2.'
         : space
           ? `ds^2: ${time} must be a time, with one minus sign, like -dt^2 + dx^2 + dy^2.`
-          : `ds^2 must have one minus sign, for d${time}: the panel's coordinates are space.`,
+          : lorentz
+            ? `ds^2: the panel's coordinates are not space anywhere it was checked, at distances from 0.001 to 100 000 from the origin — inside a horizon everywhere there?`
+            : `ds^2 must have one minus sign, for d${time}: the panel's coordinates are space.`,
     );
 
   // g as written, its x and y derivatives, and — unless it is written in x
