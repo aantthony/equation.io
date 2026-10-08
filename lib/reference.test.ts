@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { LLMS_TXT, SWIFT_INSTRUCTIONS, readReference, referenceFiles } from '../scripts/reference.ts';
 import { analyzeRows } from './analysis.ts';
-import { swiftInstructions } from './assistant-instructions.ts';
+import { CHARTED_GROUPS, swiftInstructions } from './assistant-instructions.ts';
 import { kindOf } from './assistant-tools.ts';
 import { parseCsv } from './csv.ts';
 import { builtinHelp } from './syntax-help.ts';
@@ -55,7 +55,7 @@ describe('the reference', () => {
 
   it('has written web/public/llms.txt and Instructions.swift (pnpm reference)', () => {
     expect(readFileSync(LLMS_TXT, 'utf8')).toBe(llmsTxt(ref));
-    expect(readFileSync(SWIFT_INSTRUCTIONS, 'utf8')).toBe(swiftInstructions(kindNames(ref)));
+    expect(readFileSync(SWIFT_INSTRUCTIONS, 'utf8')).toBe(swiftInstructions(kindNames(ref, CHARTED_GROUPS)));
   });
 
   it('keeps one kind per heading in llms.txt, its name first, and More last', () => {

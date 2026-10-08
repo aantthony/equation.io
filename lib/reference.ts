@@ -234,12 +234,16 @@ export const LLMS_ORDER = [
 export const kindName = (title: string) => title.replace(/^[A-Z](?![A-Z])/, c => c.toLowerCase());
 
 /**
- * Every kind by name, a line per group, for the app's instructions
- * (lib/assistant-instructions.ts): a model that knows the names asks
- * kind_examples for one, where a request alone wouldn't send it to list_kinds.
+ * Every kind by name, a line per group but the groups in `skip`, for the
+ * app's instructions (lib/assistant-instructions.ts, whose kind chart covers
+ * those): a model that knows the names asks kind_examples for one, where a
+ * request alone wouldn't send it to list_kinds.
  */
-export const kindNames = (ref: Reference) =>
-  ref.groups.map(g => `- ${g.name}: ${g.kinds.map(k => kindName(ref.kinds.get(k)!.title)).join(', ')}`).join('\n');
+export const kindNames = (ref: Reference, skip: readonly string[] = []) =>
+  ref.groups
+    .filter(g => !skip.includes(g.name))
+    .map(g => `- ${g.name}: ${g.kinds.map(k => kindName(ref.kinds.get(k)!.title)).join(', ')}`)
+    .join('\n');
 
 /** One kind's line in an index: its name, kind, smallest form and what it draws. */
 const kindLine = (page: KindPage) => `- ${page.title} (\`${page.kind}\`): \`${page.form}\` — ${page.short}`;

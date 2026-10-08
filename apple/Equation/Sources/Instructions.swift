@@ -19,12 +19,35 @@ extension ChatModel {
     - Don't name anything i, e, pi, tau or d: they are taken.
 
     What to write: for any other shape, call kind_examples for the kind you need (listed below; list_kinds gives each one's smallest form), and adapt an example. function_doc and search_functions look up built-in functions; never invent one.
-    Kinds:
-    - 2D curves and regions: curve, region, parametric curve, parametric region, swept region, system of equations
-    - Points, figures and labels: point, geometric figure, label, motion trail
-    - Readouts and families: value readout, true/false readout, family
-    - 3D: surface, parametric surface, parametric solid, curve of intersection
-    - Fields: vector field, vector field in space, scalar field, scalar field in space
+    Kinds: a row's kind comes from its form. Below, xy is any expression in x and y (xyz: in x, y and z), and 0 any number or defined constant. u and v run from 0 to 1; a third parameter needs its own: s = interval(0, 1).
+
+    Any graph:
+    - slider: a = 0
+    - family: a = [1..5], then use a (one copy per value, at most 32)
+    - motion: t is seconds, in any row
+
+    2D (in a 3D graph, ineq2d, scalar2d and vfield2d are not drawn):
+    - point: (0, 0); named, draggable: A = (0, 0)
+    - label: label((0, 0), "text")
+    - implicit2d: xy = 0; circle((0, 0), 1) is one too
+    - ineq2d: xy > 0, xy >= 0
+    - pcurve: (u, u)
+    - pregion: (uv, uv)
+    - system: (xy, xy) = (0, 0)
+    - trail: trail(A), A a moving point
+    - scalar2d: xy
+    - vfield2d: (xy, xy)
+
+    3D:
+    - point: (0, 0, 0)
+    - implicit3d: xyz = 0
+    - pcurve: (u, u, u)
+    - psurface: (uv, uv, uv)
+    - solid: (uvs, uvs, uvs) with s = interval(0, 1)
+    - scalar3d: xyz
+    - vfield3d: (xyz, xyz, xyz)
+
+    Other kinds (names only):
     - Sequences and simulations: sequence, cobweb diagram, bifurcation diagram, orbit, cellular automaton
     - Lists and data: number list, point list, histogram, data column, data scatter, tuple readout
     - Probability: random variable, discrete random variable, probability, expectation

@@ -17,7 +17,7 @@
  * (vite.config.ts, apple/vite.config.ts).
  */
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { swiftInstructions } from '../lib/assistant-instructions.ts';
+import { CHARTED_GROUPS, swiftInstructions } from '../lib/assistant-instructions.ts';
 import { type Reference, kindNames, llmsTxt, parseReference } from '../lib/reference.ts';
 
 export const REFERENCE_DIR = new URL('../docs/reference/', import.meta.url);
@@ -39,6 +39,6 @@ export function readReference(): Reference {
 
 if (import.meta.main) {
   writeFileSync(LLMS_TXT, llmsTxt(readReference()));
-  writeFileSync(SWIFT_INSTRUCTIONS, swiftInstructions(kindNames(readReference())));
+  writeFileSync(SWIFT_INSTRUCTIONS, swiftInstructions(kindNames(readReference(), CHARTED_GROUPS)));
   console.log('Wrote web/public/llms.txt and apple/Equation/Sources/Instructions.swift');
 }
