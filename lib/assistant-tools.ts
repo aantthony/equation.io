@@ -1,7 +1,7 @@
 /**
  * The Apple app's Ask tools that answer from the language, not the graph
  * (apple/Equation Assistant.swift): check, search_functions, function_doc,
- * list_kinds and kind_examples. The app's renderer answers them through its
+ * list_kinds, kind_examples and shape. The app's renderer answers them through its
  * bridge (web/native-app.ts), and the evals' service (apple/evals) with this
  * same code. Every answer is short: the on-device model has 8K tokens.
  * The kinds, forms, examples and notes they answer from are the reference's
@@ -405,5 +405,81 @@ export function functionDoc(data: AssistantData, name: string): string {
     ...(note ? [note] : []),
     ...(examples?.length ? ['examples (each a whole graph):'] : []),
     ...exampleLines(examples),
+  ].join('\n');
+}
+
+// MARK: named shapes
+
+/** A name as shape() compares it: lower case, no accents or punctuation, no leading article. */
+const shapeKey = (name: string) =>
+  name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/^(?:a|an|the) /, '');
+
+/** Edits (insert, delete, change a letter) between two strings. */
+function editDistance(a: string, b: string): number {
+  let row = Array.from({ length: b.length + 1 }, (_, k) => k);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++)
+      next[j] = Math.min(row[j] + 1, next[j - 1] + 1, row[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length];
+}
+
+type ShapeData = AssistantData['shapes'][number];
+
+/**
+ * The shape a request names: by name or alias, exactly; else the longest
+ * name inside the request ("a sphere of radius 2"); else a near spelling
+ * ("cardiod"); else a word of a name ("lissajous", "knot").
+ */
+function findShape(shapes: readonly ShapeData[], query: string): ShapeData | undefined {
+  const q = shapeKey(query);
+  if (!q) return undefined;
+  const names = shapes.flatMap(shape => [shape.name, ...shape.aliases].map(name => ({ shape, key: shapeKey(name) })));
+  const exact = names.find(n => n.key === q);
+  if (exact) return exact.shape;
+  const inside = names
+    .filter(n => new RegExp(`(?:^| )${n.key}(?:e?s)?(?: |$)`).test(q))
+    .sort((a, b) => b.key.length - a.key.length)[0];
+  if (inside) return inside.shape;
+  const words = q.split(' ');
+  const near = names
+    .map(n => {
+      const size = n.key.split(' ').length;
+      const windows = words
+        .slice(0, Math.max(1, words.length - size + 1))
+        .map((_, k) => words.slice(k, k + size).join(' '));
+      return { ...n, distance: Math.min(...windows.map(w => editDistance(w, n.key))) };
+    })
+    .filter(n => n.distance <= Math.floor(n.key.length / 5))
+    .sort((a, b) => a.distance - b.distance)[0];
+  if (near) return near.shape;
+  return names.find(n => n.key.split(' ').some(w => w.length > 3 && words.includes(w)))?.shape;
+}
+
+/**
+ * shape(name): a named curve or surface's forms in this language, each with
+ * its parameters and one instance, from the reference (docs/reference/shapes.md);
+ * on a miss, every name.
+ */
+export function shape(data: AssistantData, name: string): string {
+  const found = findShape(data.shapes, name);
+  if (!found) return `No shape "${name.trim()}". Shapes: ${data.shapes.map(s => s.name.toLowerCase()).join(', ')}.`;
+  const rows = (list: string[]) => JSON.stringify(list);
+  return [
+    `${found.name}${found.aliases.length ? ` (also ${found.aliases.join(', ')})` : ''}: ${found.intro.replace(/\s+/g, ' ')}`,
+    ...found.forms.flatMap(form => [
+      `${form.kind}: ${rows(form.rows)}${form.note ? ` — ${form.note}` : ''}`,
+      ...form.params.map(([param, meaning]) => `  ${param}: ${meaning}`),
+      `  e.g. ${rows(form.example.rows)}${form.example.note ? ` — ${form.example.note}` : ''}`,
+    ]),
+    ...(found.pitfall ? [`Pitfall: ${found.pitfall}`] : []),
   ].join('\n');
 }

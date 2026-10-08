@@ -10,6 +10,7 @@ import {
   kindOf,
   listKinds,
   searchFunctions,
+  shape,
 } from './assistant-tools.ts';
 import { assistantData } from './reference.ts';
 import { KIND_MEANINGS } from './row-kind.ts';
@@ -104,5 +105,31 @@ describe('functions', () => {
     expect(functionDoc(data, 'interval')).toContain('examples');
     expect(functionDoc(data, 'Sin(x)')).toMatch(/^sin\(x\)/);
     expect(functionDoc(data, 'surface')).toContain('surface is not a built-in function');
+  });
+});
+
+describe('shape', () => {
+  it('finds a shape by name, alias, a name inside the request, a near spelling or a word of its name', () => {
+    const first = (name: string) => shape(data, name).split(/[(:]/)[0].trim();
+    expect(first('Torus')).toBe('Torus');
+    expect(first('hyperboloid')).toBe('Hyperboloid of one sheet');
+    expect(first('a hyperboloid of two sheets')).toBe('Hyperboloid of two sheets');
+    expect(first('polar rose')).toBe('Rose');
+    expect(first('sphere of radius 2')).toBe('Sphere');
+    expect(first('unit cube')).toBe('Cube');
+    expect(first('cardiod')).toBe('Cardioid');
+    expect(first('Mobius strip')).toBe('Möbius strip');
+    expect(first('lissajous')).toBe('Lissajous curve');
+    expect(first('limacon')).toBe('Limaçon');
+  });
+  it('answers with the forms, their parameters and an instance; on a miss, every name', () => {
+    const answer = shape(data, 'cardioid');
+    expect(answer).toContain('pcurve: ["(a(1 + cos(2pi u)) cos(2pi u), a(1 + cos(2pi u)) sin(2pi u))"]');
+    expect(answer).toContain('  a: ');
+    expect(answer).toContain('  e.g. ["(2(1 + cos(2pi u)) cos(2pi u), 2(1 + cos(2pi u)) sin(2pi u))"]');
+    expect(answer.split('\n').length).toBeLessThan(12);
+    const miss = shape(data, 'kidney bean');
+    expect(miss).toMatch(/^No shape "kidney bean"\. Shapes: circle, /);
+    expect(miss).toContain('torus');
   });
 });

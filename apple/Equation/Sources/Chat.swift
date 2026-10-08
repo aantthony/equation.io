@@ -46,6 +46,9 @@ import SwiftUI
   func kindExamples(_ kind: String) async -> String {
     await text("return window.equationApp.kindExamples(kind)", ["kind": kind])
   }
+  func shape(_ name: String) async -> String {
+    await text("return window.equationApp.shape(name)", ["name": name])
+  }
   func searchFunctions(_ query: String) async -> String {
     await text("return window.equationApp.searchFunctions(query)", ["query": query])
   }

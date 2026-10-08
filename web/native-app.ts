@@ -11,7 +11,7 @@
  *
  * The app's chat calls the voice prototype's graph tools here too (graph,
  * moveView, animateSlider), and its own (check, searchFunctions,
- * functionDoc, listKinds, kindExamples, from lib/assistant-tools.ts), and
+ * functionDoc, listKinds, kindExamples, shape, from lib/assistant-tools.ts), and
  * awaits what they return.
  */
 
@@ -22,6 +22,7 @@ import {
   kindExamples,
   listKinds,
   searchFunctions,
+  shape,
 } from '../lib/assistant-tools.ts';
 import type { SpanClass } from '../lib/highlight.ts';
 import type { AssistantData } from '../lib/reference.ts';
@@ -85,6 +86,7 @@ declare global {
       functionDoc(name: string): Promise<string>;
       listKinds(): Promise<string>;
       kindExamples(kind: string): Promise<string>;
+      shape(name: string): Promise<string>;
     };
   }
 }
@@ -107,13 +109,14 @@ export function connectNativeApp(graph: NativeGraph): void {
     functionDoc: async name => functionDoc(await assistantData(), name),
     listKinds: async () => listKinds(await assistantData()),
     kindExamples: async kind => kindExamples(await assistantData(), kind),
+    shape: async name => shape(await assistantData(), name),
   };
   post({ type: 'ready' });
 }
 
 let data: Promise<AssistantData> | undefined;
 
-/** What the lookups answer from: the reference's kinds and notes, with examples, built with the app (apple/vite.config.ts), read once. */
+/** What the lookups answer from: the reference's kinds, notes and shapes, with examples, built with the app (apple/vite.config.ts), read once. */
 function assistantData(): Promise<AssistantData> {
   data ??= fetch('/assistant.json').then(res =>
     res.ok ? (res.json() as Promise<AssistantData>) : Promise.reject(new Error(`HTTP ${res.status}`)),

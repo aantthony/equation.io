@@ -76,7 +76,8 @@ enum ChatModel {
     [
       GetGraph(access: graph), SetGraph(access: graph), MoveView(access: graph),
       AnimateSlider(access: graph), Check(access: graph), ListKinds(access: graph),
-      KindExamples(access: graph), SearchFunctions(access: graph), FunctionDoc(access: graph),
+      KindExamples(access: graph), ShapeLookup(access: graph), SearchFunctions(access: graph),
+      FunctionDoc(access: graph),
     ]
   }
 
@@ -120,6 +121,7 @@ enum ChatModel {
   // What the language has (lib/assistant-tools.ts), as text.
   func listKinds() async -> String
   func kindExamples(_ kind: String) async -> String
+  func shape(_ name: String) async -> String
   func searchFunctions(_ query: String) async -> String
   func functionDoc(_ name: String) async -> String
 }
@@ -297,6 +299,25 @@ struct KindExamples: Tool {
   }
 
   func call(arguments: Arguments) async throws -> String { await access.kindExamples(arguments.kind) }
+}
+
+/// shape: not `Shape`, which SwiftUI's protocol is in the app.
+struct ShapeLookup: Tool {
+  let access: any GraphTools
+  let name = "shape"
+  let description = """
+    The equation of a named curve or surface (cardioid, hyperboloid, torus, …), \
+    in this language's syntax, with its parameters.
+    """
+
+  @Generable
+  struct Arguments {
+    // No example value: an example in an argument's description gets copied (apple/evals/RESULTS.md).
+    @Guide(description: "The shape's name, as the request gives it.")
+    var name: String
+  }
+
+  func call(arguments: Arguments) async throws -> String { await access.shape(arguments.name) }
 }
 
 struct SearchFunctions: Tool {
