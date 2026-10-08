@@ -228,6 +228,20 @@ which axis and plane maps share), so its bounds must be numbers or sliders.
   reads t (onSurface; in 2D every field's streaks move), and its arrows are
   kept until the surface, the field or a value it reads changes. A field
   too large to trace (over 8192 nodes a component) is refused at its row.
+- **Curvature**: `gaussian(x, y)` and `meancurvature(x, y)` are K and H of
+  the panel's own surface in its x and y (lib/defs.ts surfaceGeometry, from
+  lib/surface-geometry.ts, with the surface passed to the resolver as
+  `ResolveOpts.surface`), so they are scalar fields painted as any field
+  is — but shaded to their own size: a gain of 1.5 over the 90th
+  percentile of |K| over the surface (divergingGain) replaces the fixed 0.6
+  a field is shaded with, since a sphere of radius 3 has K = 0.11 and would
+  barely tint. `gaussian(P)` is K at a point, a number.
+- **Geodesics**: `geodesic((x0, y0), (dx, dy))` traces the surface's
+  geodesic in its x and y (lib/analysis.ts classifyGeodesic, from the
+  Christoffel symbols of the embedding in x and y) and is carried like a
+  parametric curve. Across a range the surface repeats over (periodicAxes:
+  P(x + span, y) = P(x, y) at a spread of points) it runs on past the edge,
+  since carrying a point needs only P(x, y), not x in range.
 - Families draw as their members.
 - Paints draw after the surface with a polygon offset and no depth writes,
   so they sit on it without fighting it.

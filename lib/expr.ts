@@ -247,6 +247,11 @@ export function legacyCallArgs(name: string, args: readonly Expr[]): readonly Ex
     'torsion',
     'osculating',
     'frame',
+    // A surface, whole: gaussian((u, v, u v), (0.5, 0.5)), and a geodesic's
+    // start and direction.
+    'gaussian',
+    'meancurvature',
+    'geodesic',
     // sort((s, sin(s)), s): the points to order, then their key.
     'sort',
     'fourier',
@@ -384,6 +389,11 @@ export const FUNCTIONS = new Set([
   'torsion',
   'osculating',
   'frame',
+  // And of a surface in u and v (see surface-geometry.ts); a geodesic is
+  // traced as it is drawn (lib/analysis.ts classifyGeodesic).
+  'gaussian',
+  'meancurvature',
+  'geodesic',
   'fourier',
   'reconstruct',
   // Whole-expression plot modes (see classify): domain coloring, conformal
@@ -453,6 +463,9 @@ export const SHADOWABLE_FNS: ReadonlySet<string> = new Set([
   'torsion',
   'osculating',
   'frame',
+  'gaussian',
+  'meancurvature',
+  'geodesic',
   'log2',
   'fourier',
   'reconstruct',

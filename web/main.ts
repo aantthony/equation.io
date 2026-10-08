@@ -181,6 +181,15 @@ import {
 } from '../lib/surface-map.ts';
 import { toGLSL, uniformName } from '../lib/glsl.ts';
 import { onSurface, raySurface, surfacePixel } from '../lib/surface-pick.ts';
+import {
+  type GeodesicOptions,
+  defaultGeodesicLength,
+  divergingGain,
+  GEODESIC_MAX_POINTS,
+  geodesicPlanKey,
+  GEODESIC_MAX_STEPS,
+  numericIn,
+} from '../lib/surface-geometry.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1560,6 +1569,191 @@ function panelGridFields(p: Panel, plane?: PlaneMap): Array<GridField | 'x' | 'y
 /** Each cloud's scale (lib/volume.ts) and the view and sliders it was read under. */
 const volumeScales = new WeakMap<CpuPlan, { key: string; scale: number }>();
 
+/** The names a geodesic reads besides its parameters: what it is traced
+ *  again for when they change. */
+const geodesicReads = new WeakMap<CpuPlan, string[]>();
+/** A family of geodesics shares this budget, each member a share of it. */
+const GEODESIC_FAMILY_STEPS = 200000;
+const GEODESIC_FAMILY_MS = 1000;
+/** …and draws with this many points in all: each is carried onto its
+ *  surface every frame. */
+const GEODESIC_FAMILY_POINTS = 48000;
+
+/**
+ * Where each geodesic's traced points are kept: by its row and, in a family,
+ * its member — not on the member rows themselves, which are made afresh each
+ * time the row is reanalysed (every move of a dragged point it reads), so
+ * the last geodesic keeps drawing through a drag. `id` is the trace queue's
+ * row for it, likewise stable, so a newer request replaces an older one
+ * still waiting rather than queueing behind it.
+ */
+/** When the last frame was drawn, and the frame a traced geodesic asks for
+ *  if none comes by itself within GEODESIC_FRAME_MS. */
+let lastRenderAt = 0;
+let geodesicFrame: ReturnType<typeof setTimeout> | undefined;
+const GEODESIC_FRAME_MS = 50;
+const geodesicSlots = new Map<
+  string,
+  { id: number; key?: string; pending?: string; pts: Float32Array; note?: string }
+>();
+/** Each geodesic plan's geodesicPlanKey, worked out once. */
+const geodesicPlans = new WeakMap<CpuPlan, string>();
+let geodesicIds = -1e9;
+
+/**
+ * A geodesic row's note, from its members' traces: where its budget cut one
+ * short, or how many of a family it cut. Slots of members a shorter list no
+ * longer has are let go here.
+ */
+function geodesicNote(row: Equation, members: number) {
+  const notes: string[] = [];
+  for (const [name, slot] of geodesicSlots) {
+    const [id, member] = name.split(':');
+    if (id !== `${row.id}`) continue;
+    if (Number(member) >= members) geodesicSlots.delete(name);
+    else if (slot.note) notes.push(slot.note);
+  }
+  const note =
+    notes.length === 0
+      ? undefined
+      : members === 1
+        ? notes[0]
+        : `${notes.length} of ${members} cut short by the family's budget (one at ${notes[0].replace(/^cut short at /, '')})`;
+  // (A reanalysis clears the row's info, so it is compared with that.)
+  if (note === row.info) return;
+  row.info = note;
+  reconcile();
+}
+
+/**
+ * A geodesic's points, traced in the trace worker (lib/surface-geometry.ts
+ * geodesicPath) whenever a value it reads changes — a slider, t, a dragged
+ * point — and never on this thread. The last one traced keeps drawing until
+ * the next arrives, so dragging stays smooth while the worker catches up.
+ */
+function geodesicFor(eq: Equation, env: Record<string, number>): Float32Array {
+  const plot = eq.cpu as Extract<CpuPlan, { type: 'geodesic' }>;
+  let names = geodesicReads.get(plot);
+  if (!names) {
+    const exprs = [...plot.surface, ...plot.derivatives, ...plot.start, ...plot.direction, ...plot.domain];
+    if (plot.length) exprs.push(plot.length);
+    names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => !plot.params.includes(n));
+    geodesicReads.set(plot, names);
+  }
+  const row = eq.familyParent ?? eq;
+  const family = row.cpu?.type === 'family' ? row.cpu.members : null;
+  const member = family ? family.findIndex(m => m.cpu === plot) : 0;
+  const slotName = `${row.id}:${member}`;
+  let slot = geodesicSlots.get(slotName);
+  if (!slot) {
+    // Forget the rows that are gone, now and then.
+    if (geodesicSlots.size > 256) {
+      const live = new Set(equations.map(e => `${e.id}`));
+      for (const name of geodesicSlots.keys()) if (!live.has(name.split(':')[0])) geodesicSlots.delete(name);
+    }
+    geodesicSlots.set(slotName, (slot = { id: geodesicIds--, pts: new Float32Array() }));
+  }
+  let plan = geodesicPlans.get(plot);
+  if (plan === undefined) geodesicPlans.set(plot, (plan = geodesicPlanKey(plot)));
+  const members = family?.length ?? 1;
+  // Its note: how its members' budgets cut them short, if they did.
+  geodesicNote(row, members);
+  // The plan is in the key, so an edit to a row it reads (S, the list of
+  // directions, the panel's surface) traces it again; the last path keeps
+  // drawing until the new one arrives.
+  const key = `${plan}\n${member}\n${JSON.stringify(names.map(n => env[n]))}`;
+  if (slot.key === key || slot.pending === key) return slot.pts;
+  slot.pending = key;
+  const { type: _, ...spec } = plot;
+  const values = Object.fromEntries(names.map(n => [n, env[n]]));
+  const target = slot;
+  traceQueue.request(
+    slot.id,
+    key,
+    {
+      kind: 'geodesic',
+      geodesic: {
+        spec,
+        env: values,
+        maxSteps: Math.min(GEODESIC_MAX_STEPS, Math.ceil(GEODESIC_FAMILY_STEPS / members)),
+        ms: GEODESIC_FAMILY_MS / members,
+        maxPoints: Math.min(GEODESIC_MAX_POINTS, Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members))),
+      },
+      residuals: [],
+      dim: plot.dim,
+      lo: [],
+      hi: [],
+      env: {},
+    },
+    result => {
+      if (!equations.includes(row) || geodesicSlots.get(slotName) !== target) return;
+      if (target.pending === key) target.pending = undefined;
+      // Kept even when a newer one is on its way: while P is dragged the
+      // drawn geodesic follows a frame or two behind rather than not at all.
+      target.key = key;
+      target.pts = result.flat ?? new Float32Array();
+      target.note = result.info;
+      geodesicNote(row, members);
+      // A frame of its own only when none comes anyway: a drag or t brings
+      // frames that draw whatever has arrived, and a frame per result on top
+      // of those would halve their rate where drawing is slow.
+      clearTimeout(geodesicFrame);
+      geodesicFrame = setTimeout(() => {
+        if (performance.now() - lastRenderAt > GEODESIC_FRAME_MS) requestRender();
+      }, GEODESIC_FRAME_MS);
+    },
+  );
+  return slot.pts;
+}
+
+/** The gain a field painted on a surface's panel (gaussian(x, y)) is shaded
+ *  with, kept until the surface or a value it reads (a slider, t) changes. */
+const fieldGains = new WeakMap<CpuPlan, { key: string; surface: SurfaceMap; gain: number }>();
+function surfaceFieldGain(
+  surface: SurfaceMap,
+  plot: Extract<CpuPlan, { type: 'scalar2d' }>,
+  env: Record<string, number>,
+): number {
+  const names = [...freeVars(plot.expr)].filter(n => n !== 'x' && n !== 'y');
+  const key = JSON.stringify(names.map(n => env[n]));
+  const last = fieldGains.get(plot);
+  if (last?.key === key && last.surface === surface) return last.gain;
+  const f = numericIn([plot.expr], ['x', 'y'], env);
+  const one = new Float64Array(1);
+  const size = defaultGeodesicLength((x, y) => surfacePoint(surface, x, y), [surface.x, surface.y]) / 2;
+  const gain = divergingGain(
+    (x, y) => (f(x, y, one), one[0]),
+    [surface.x, surface.y],
+    1e-9 * Math.min(1 / size, 1 / size ** 2),
+  );
+  fieldGains.set(plot, { key, surface, gain });
+  return gain;
+}
+
+/** The gain a surface coloured by its curvature (gaussian(S)) shades it
+ *  with, kept until a value it reads (a slider, t) changes. */
+const paintGains = new WeakMap<CpuPlan, { key: string; gain: number }>();
+function paintGain(plot: Extract<CpuPlan, { type: 'psurface' }>, env: Record<string, number>): number {
+  const paint = plot.paint!;
+  const names = [...freeVars({ kind: 'vec', items: [...plot.comps, paint] })].filter(n => n !== 'u' && n !== 'v');
+  const key = JSON.stringify(names.map(n => env[n]));
+  const last = paintGains.get(plot);
+  if (last?.key === key) return last.gain;
+  const unit: GeodesicOptions['domain'] = [
+    [0, 1],
+    [0, 1],
+  ];
+  const f = numericIn([paint], ['u', 'v'], env);
+  const P = numericIn(plot.comps, ['u', 'v'], env);
+  const out = new Float64Array(3);
+  // Rounding, not curvature, below 1e-9 of the surface's own size.
+  const size = defaultGeodesicLength((u, v) => (P(u, v, out), [...out]), unit) / 2;
+  const one = new Float64Array(1);
+  const gain = divergingGain((u, v) => (f(u, v, one), one[0]), unit, 1e-9 * Math.min(1 / size, 1 / size ** 2));
+  paintGains.set(plot, { key, gain });
+  return gain;
+}
+
 /** 2D-only plots (densities, flows, sequences, planar fields) a 3D scene leaves out. */
 const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'scalar2d',
@@ -1670,6 +1864,7 @@ function cellsOf(g: CellGrid, runs: Cells2D['runs'], shades = cellShades(g)): Ce
 }
 
 function render() {
+  lastRenderAt = performance.now();
   if (!syncCanvasSize()) return;
   applyViewportRows();
   syncLinks(null);
@@ -2115,7 +2310,13 @@ function render() {
       for (const eq of rows) {
         const on = surface && eq.cls && !eq.cls.needs3D ? surfaceMapping(eq.cls.object) : null;
         if (on === 'paint') {
-          const paint = paintOf(eq);
+          let paint = paintOf(eq);
+          // gaussian(x, y): shaded to its own size on the surface.
+          if (paint?.kind === 'scalar' && eq.cpu?.type === 'scalar2d' && eq.cpu.autoscale)
+            paint = {
+              ...paint,
+              gain: surfaceFieldGain(surface!, eq.cpu, { ...constEnv, ...eq.gpu?.uniforms, t: time }),
+            };
           if (paint) {
             const { comps, du, dv, xy } = surfaceGLSL(surface!);
             const { params, uniforms } = shaderBindings(eq.gpu);
@@ -2142,6 +2343,17 @@ function render() {
               uniforms,
               lift: true,
             });
+          continue;
+        }
+        // A geodesic, on its surface already (the worker places its points
+        // there, a panel's surface included): lifted a hair toward the eye so
+        // the surface does not hide it.
+        if (plot.type === 'geodesic') {
+          const pts = geodesicFor(eq, { ...constEnv, t: time });
+          const lifted = towardEye(camera);
+          const raised = new Float32Array(pts.length);
+          for (let k = 0; k + 2 < pts.length; k += 3) raised.set(lifted([pts[k], pts[k + 1], pts[k + 2]]), k);
+          if (raised.length >= 6) scene.curves.push({ pts: raised, color });
           continue;
         }
         if (on === 'carry' && plot.type === 'vfield2d') {
@@ -2271,9 +2483,12 @@ function render() {
           }
           case 'psurface':
           // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
-          case 'pregion':
-            scene.psurfaces.push({ ...gpuFor(eq, 'psurface'), color, params, uniforms });
+          case 'pregion': {
+            const gpu = gpuFor(eq, 'psurface');
+            const gain = plot.type === 'psurface' && plot.paint ? paintGain(plot, { ...constEnv, t: time }) : undefined;
+            scene.psurfaces.push({ ...gpu, color, params, uniforms, gain });
             break;
+          }
           case 'orbit': {
             let path: number[] = [];
             const flush = () => {

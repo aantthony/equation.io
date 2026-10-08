@@ -642,6 +642,7 @@ function psurfFrag(
   du?: [string, string, string],
   dv?: [string, string, string],
   params?: string[],
+  paint?: string,
 ): string {
   const tangents =
     du && dv
@@ -657,6 +658,7 @@ precision highp float;
 uniform vec3 uColor;
 uniform vec3 uEye;
 uniform float t;
+${paint ? 'uniform float uGain;' : ''}
 ${paramDecls(params)}
 in vec2 vUV;
 in vec3 vPos;
@@ -664,6 +666,7 @@ out vec4 outColor;
 ${GLSL_PRELUDE}
 ${SHADE}
 ${tangents}
+${paint ? `float K(float u, float v) { return ${paint}; }` : ''}
 
 void main() {
   vec3 n = normalize(cross(Pu(vUV.x, vUV.y), Pv(vUV.x, vUV.y)));
@@ -672,7 +675,18 @@ void main() {
 
   // Faint parameter checker so the (u,v) mapping reads.
   float checker = mod(floor(vUV.x * 8.0) + floor(vUV.y * 8.0), 2.0);
-  vec3 base = uColor * (0.92 + 0.08 * checker);
+${
+  paint
+    ? `  // Coloured by a scalar (its curvature), diverging about 0 as a scalar
+  // field is shaded: toward the row colour where it is positive, toward its
+  // complement where negative, grey at 0 and where it is undefined. uGain
+  // scales the surface's typical size of it to about 1.
+  float k = K(vUV.x, vUV.y);
+  float s = isnan(k) || isinf(k) ? 0.0 : eq_tanh(k * uGain);
+  vec3 tint = s >= 0.0 ? uColor : vec3(1.0) - uColor;
+  vec3 base = mix(vec3(0.8), tint, abs(s)) * (0.92 + 0.08 * checker);`
+    : `  vec3 base = uColor * (0.92 + 0.08 * checker);`
+}
 
   outColor = vec4(shade(base, n, rd), 1.0);
 }
@@ -743,7 +757,7 @@ ${edges
   .join('\n')}
   vec3 base = uColor;`
         : `
-  float s = eq_tanh(f * 0.6);
+  float s = eq_tanh(f * uGain);
   float alpha = 0.7 * abs(s);
   vec3 base = s >= 0.0 ? uColor : vec3(1.0) - uColor;`;
   return `#version 300 es
@@ -751,6 +765,7 @@ precision highp float;
 uniform vec3 uColor;
 uniform vec3 uEye;
 uniform float t;
+${paint.kind === 'scalar' ? 'uniform float uGain;' : ''}
 ${paramDecls(params)}
 in vec2 vUV;
 in vec3 vPos;
@@ -1218,7 +1233,8 @@ export interface SurfacePaint {
   paint:
     | { kind: 'curve'; field: string }
     | { kind: 'region'; field: string; edges: string[] }
-    | { kind: 'scalar'; field: string };
+    /** `gain` multiplies F before it is shaded (0.6, as in 2D, without). */
+    | { kind: 'scalar'; field: string; gain?: number };
   color: [number, number, number];
   params?: string[];
   uniforms?: Record<string, number>;
@@ -1239,6 +1255,10 @@ export interface Scene3D {
     dv?: [string, string, string];
     color: [number, number, number];
     params?: string[];
+    /** A scalar in u and v the surface is coloured by, and the gain that
+     *  brings its typical size to about 1. */
+    paint?: string;
+    gain?: number;
   }>;
   curves: Array<{
     pts: Float32Array;
@@ -1665,7 +1685,7 @@ export class Renderer3D {
     for (const s of scene.psurfaces) {
       let prog: WebGLProgram;
       try {
-        prog = this.cache.get(psurfVert(s.comps, s.params), psurfFrag(s.comps, s.du, s.dv, s.params));
+        prog = this.cache.get(psurfVert(s.comps, s.params), psurfFrag(s.comps, s.du, s.dv, s.params, s.paint));
       } catch (e) {
         console.error(e);
         continue;
@@ -1674,6 +1694,7 @@ export class Renderer3D {
       setParams(prog, s.params, s.uniforms);
       gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
       gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
+      if (s.paint) gl.uniform1f(gl.getUniformLocation(prog, 'uGain'), s.gain ?? 1);
       gl.bindVertexArray(this.gridVao);
       gl.drawElements(gl.TRIANGLES, this.gridIndexCount, gl.UNSIGNED_INT, 0);
       gl.bindVertexArray(null);
@@ -1700,6 +1721,7 @@ export class Renderer3D {
         setParams(prog, s.params, s.uniforms);
         gl.uniform3f(gl.getUniformLocation(prog, 'uColor'), ...s.color);
         gl.uniform3f(gl.getUniformLocation(prog, 'uEye'), ...eye);
+        if (s.paint.kind === 'scalar') gl.uniform1f(gl.getUniformLocation(prog, 'uGain'), s.paint.gain ?? 0.6);
         gl.bindVertexArray(this.gridVao);
         gl.drawElements(gl.TRIANGLES, this.gridIndexCount, gl.UNSIGNED_INT, 0);
         gl.bindVertexArray(null);

@@ -9,6 +9,7 @@ import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
 import { FAMILY_NODES, countNodes } from './size.ts';
+import type { GeodesicSpec } from './surface-geometry.ts';
 
 export interface CpuGrid {
   name: string;
@@ -32,7 +33,7 @@ export type CpuPlan =
   | { type: 'pregion'; comps: [Expr, Expr] }
   /** The region a family over u ∈ [0, 1] sweeps (see MathObject). */
   | { type: 'projected2d'; relation: 'eq' | 'ineq'; constraints: Array<{ residual: Expr; strict: boolean }> }
-  | { type: 'scalar2d'; expr: Expr }
+  | { type: 'scalar2d'; expr: Expr; autoscale?: true }
   | { type: 'scalar3d'; expr: Expr }
   | { type: `${ColorSpace}2d`; channels: Expr[] }
   | { type: 'complex2d'; expr: Expr }
@@ -43,6 +44,7 @@ export type CpuPlan =
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   | { type: 'label'; dim: 2 | 3; coords: Expr[]; text: string }
   | { type: 'orbit'; dim: 2 | 3; paths: Expr[][]; series: boolean; from: Expr; to: Expr }
+  | ({ type: 'geodesic' } & GeodesicSpec)
   /** `pts` flat, or with `over` one vertex template run over the columns. */
   | {
       type: 'polygon';
@@ -72,7 +74,7 @@ export type CpuPlan =
     }
   | { type: 'vfield3d'; comps: Expr[] }
   | { type: 'pcurve'; dim: 2 | 3; comps: Expr[]; tube?: Expr; d1?: Expr[]; d2?: Expr[]; d3?: Expr[] }
-  | { type: 'psurface'; comps: [Expr, Expr, Expr] }
+  | { type: 'psurface'; comps: [Expr, Expr, Expr]; paint?: Expr }
   | { type: 'vlist'; values: Expr[] }
   | { type: 'plist'; dim: 2 | 3; pts: Expr[][] }
   | { type: 'dlist'; values: Float64Array }
@@ -129,7 +131,14 @@ export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & 
       jacobian?: [string, string, string, string];
     }
   | { type: 'vfield3d'; comps: [string, string, string] }
-  | { type: 'psurface'; comps: [string, string, string]; du?: [string, string, string]; dv?: [string, string, string] }
+  | {
+      type: 'psurface';
+      comps: [string, string, string];
+      du?: [string, string, string];
+      dv?: [string, string, string];
+      /** The scalar in u and v it is coloured by (gaussian(S)). */
+      paint?: string;
+    }
   | { type: 'cobweb'; curveField: string }
   | { type: 'bifurcation'; field: string }
 );
@@ -235,7 +244,11 @@ export function compileCpu(classified: Classified): CpuPlan {
       }
     case 'surface':
       if (object.form === 'parametric')
-        return { type: 'psurface', comps: object.coordinates.map(real) as [Expr, Expr, Expr] };
+        return {
+          type: 'psurface',
+          comps: object.coordinates.map(real) as [Expr, Expr, Expr],
+          ...(object.paint ? { paint: real(object.paint) } : {}),
+        };
       else {
         const equation = realEquation(object.equation ?? equationOf(object.residual));
         const height =
@@ -264,7 +277,9 @@ export function compileCpu(classified: Classified): CpuPlan {
         : { type: 'ineq2d', constraints };
     }
     case 'scalar-field':
-      return { type: object.dimension === 3 ? 'scalar3d' : 'scalar2d', expr: real(object.expr) };
+      return object.dimension === 3
+        ? { type: 'scalar3d', expr: real(object.expr) }
+        : { type: 'scalar2d', expr: real(object.expr), ...(object.autoscale ? { autoscale: true as const } : {}) };
     // Like domain coloring, these expressions are rendered per pixel on the GPU.
     case 'color-field':
       return { type: `${object.space}2d`, channels: [...object.channels] };
@@ -308,6 +323,10 @@ export function compileCpu(classified: Classified): CpuPlan {
         from: object.from,
         to: object.to,
       };
+    case 'geodesic': {
+      const { kind: _, ...spec } = object;
+      return { type: 'geodesic', ...spec };
+    }
     case 'figure':
       return {
         type: 'polygon',
@@ -522,7 +541,13 @@ export function compileGpu(classified: Classified): GpuPlan {
         levels: object.levels ? compileGridGpu(object.levels) : undefined,
       };
     case 'surface':
-      if (object.form === 'parametric') return { type: 'psurface', params, ...parametric(object.coordinates) };
+      if (object.form === 'parametric')
+        return {
+          type: 'psurface',
+          params,
+          ...parametric(object.coordinates),
+          ...(object.paint ? { paint: scalar(object.paint) } : {}),
+        };
       else {
         let grad: [string, string, string] | undefined;
         try {
@@ -641,6 +666,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'trail':
     case 'label':
     case 'orbit':
+    case 'geodesic':
     case 'figure':
     case 'system':
     case 'list':
@@ -700,7 +726,7 @@ export function shaderKey(plan: GpuPlan): string {
     case 'vfield3d':
       return JSON.stringify([plan.type, plan.params, plan.comps]);
     case 'psurface':
-      return JSON.stringify([plan.type, plan.params, plan.comps, plan.du, plan.dv]);
+      return JSON.stringify([plan.type, plan.params, plan.comps, plan.du, plan.dv, plan.paint]);
     case 'cobweb':
       return JSON.stringify([plan.type, plan.params, plan.curveField]);
     case 'bifurcation':
@@ -734,7 +760,7 @@ function rowsKey(rows: readonly (readonly number[])[]): string {
 }
 
 export function cpuStructureKey(plan: CpuPlan): string {
-  const expressions = (values: Expr[]) => values.map(exprKey);
+  const expressions = (values: readonly Expr[]) => values.map(exprKey);
   let structure: unknown;
   switch (plan.type) {
     case 'family':
@@ -783,6 +809,14 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'orbit':
       structure = [plan.series, plan.paths.map(expressions), exprKey(plan.from), exprKey(plan.to)];
       break;
+    case 'geodesic':
+      structure = [
+        plan.dim,
+        plan.params,
+        ...[plan.surface, plan.derivatives, plan.start, plan.direction, plan.domain].map(expressions),
+        plan.length && exprKey(plan.length),
+      ];
+      break;
     case 'polygon':
       structure = [
         plan.dim,
@@ -801,8 +835,10 @@ export function cpuStructureKey(plan: CpuPlan): string {
       break;
     case 'vfield2d':
     case 'vfield3d':
-    case 'psurface':
       structure = expressions(plan.comps);
+      break;
+    case 'psurface':
+      structure = [expressions(plan.comps), plan.paint && exprKey(plan.paint)];
       break;
     case 'tfield2d':
       structure = [expressions(plan.entries), plan.jacobian && expressions(plan.jacobian)];

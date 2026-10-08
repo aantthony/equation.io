@@ -95,6 +95,7 @@ import { isComplexValued } from './complex.ts';
 import { SPLIT_NODE_BUDGET, realValue } from './complex-parts.ts';
 import { countNodes } from './size.ts';
 import { curvatureOf, frameOf, osculatingOf, torsionOf } from './curves.ts';
+import { type Params, gaussianOf, meanCurvatureOf } from './surface-geometry.ts';
 import { type RegressionRow, type FitResult, fitRegression } from './regression.ts';
 
 /** The axis variables: a definition reaching one is a coordinate field. */
@@ -1137,6 +1138,12 @@ export interface ResolveOpts {
    * (lib/measure.ts).
    */
   params?: ReadonlySet<string>;
+  /**
+   * The surface a panel's rows are drawn on (an on(…) row, lib/surface-map.ts):
+   * there gaussian(x, y) and meancurvature(x, y) read it, in the panel's x
+   * and y.
+   */
+  surface?: { readonly embed: readonly [Expr, Expr, Expr] };
 }
 
 /**
@@ -1493,6 +1500,129 @@ function curveGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   if (name === 'frame') return frameOf(r, d, u0);
   const along = name === 'curvature' ? curvatureOf(r, d) : torsionOf(r, d);
   return u0 ? substVars(along, { u: u0 }) : over ? substVars(along, { u: over }) : along;
+}
+
+/** The operators on a parametric surface in u and v (lib/surface-geometry.ts). */
+const SURFACE_OPS: ReadonlySet<string> = new Set(['gaussian', 'meancurvature']);
+const SURFACE_PARAMS: ReadonlySet<string> = new Set(['u', 'v', ...SPACE]);
+
+/** Whether a surface operator's first argument names or writes a surface,
+ *  rather than a point of the panel's surface. */
+function surfaceLike(arg: Expr, ctx: Ctx): boolean {
+  if (arg.kind === 'vec') return arg.items.length === 3;
+  if (arg.kind !== 'var') return false;
+  const fn = ctx.getFn(arg.name);
+  if (fn) return fn.params.length === 2;
+  const { opts } = ctx;
+  return (
+    !!opts.documentNames?.has(arg.name) &&
+    (opts.comps?.(arg.name)?.length ?? 0) !== 2 &&
+    opts.consts?.[arg.name] === undefined &&
+    !opts.isList?.(arg.name)
+  );
+}
+
+/**
+ * What a surface operator acts on, as its components in u and v: a tuple, a
+ * named surface (S = (u, v, u v)) or a function of two parameters, called at
+ * u and v. A surface over intervals (`u = interval(0, 2pi)` above) is read
+ * over their values, written as u and v; `over` holds them, to put back
+ * where the result is a function on the surface.
+ */
+export function surfaceOperand(
+  name: string,
+  arg: Expr,
+  getFn: GetFn,
+  opts: ResolveOpts,
+): { items: [Expr, Expr, Expr]; over: { u?: Expr; v?: Expr } } {
+  const usage = `${name} takes a parametric surface in u and v, like ${name}(S) with S = (u, v, u^2 - v^2).`;
+  const U: Expr = { kind: 'var', name: 'u' };
+  const V: Expr = { kind: 'var', name: 'v' };
+  const uInterval = opts.interval?.('u');
+  const vInterval = opts.interval?.('v');
+  let r: Expr = arg;
+  if (arg.kind === 'var') {
+    const fn = getFn(arg.name);
+    if (fn) {
+      if (fn.params.length !== 2 || fn.recursive) throw new Error(usage);
+      r = substVars(fn.body, { [fn.params[0]]: uInterval ?? U, [fn.params[1]]: vInterval ?? V });
+    }
+  }
+  if (opts.comps) r = lowerGeom(r, opts.comps, () => null, opts.isList);
+  r = throughFields(r, opts, SURFACE_PARAMS);
+  if (r.kind === 'var' && arg.kind === 'var' && !opts.documentNames?.has(arg.name))
+    throw new Error(`${name}: ${arg.name} is not a surface — define one first, like ${arg.name} = (u, v, u^2 - v^2).`);
+  const keys = { u: uInterval && exprKey(uInterval), v: vInterval && exprKey(vInterval) };
+  const hidden = intervalsIn(r);
+  const over: { u?: Expr; v?: Expr } = {};
+  for (const h of hidden) {
+    if (h.key === keys.u) over.u = h.node;
+    else if (h.key === keys.v) over.v = h.node;
+    else throw new Error(`${name} reads a surface over u and v; this one sweeps another interval. ${usage}`);
+  }
+  if (hidden.length) r = replaceIntervals(r, h => (h.key === keys.u ? U : V));
+  if (r.kind !== 'vec' || r.items.length !== 3) throw new Error(usage);
+  const vars = freeVars(r);
+  if (!vars.has('u') || !vars.has('v'))
+    throw new Error(`${name} needs a surface, which moves with both u and v. ${usage}`);
+  if ([...SPACE].some(n => vars.has(n))) throw new Error(usage);
+  return { items: r.items as [Expr, Expr, Expr], over };
+}
+
+/** A point's two coordinates from a surface operator's trailing arguments:
+ *  (u0, v0) as one tuple or a named point, or as two numbers. */
+function pointArgs(name: string, args: readonly Expr[], ctx: Ctx, example: string): [Expr, Expr] {
+  if (args.length === 2 && args.every(a => a.kind !== 'vec')) return [args[0], args[1]];
+  if (args.length === 1) {
+    const [p] = args;
+    if (p.kind === 'vec' && p.items.length === 2) return [p.items[0], p.items[1]];
+    const comps = p.kind === 'var' ? ctx.opts.comps?.(p.name) : null;
+    if (comps?.length === 2) return comps.map(c => ({ kind: 'var', name: c }) as Expr) as [Expr, Expr];
+  }
+  throw new Error(`${name}: where on the surface is two numbers, a point or a tuple: ${example}.`);
+}
+
+/**
+ * gaussian(S) and meancurvature(S): K and H of the surface, functions of u
+ * and v, or read at a point of it, gaussian(S, u0, v0). On a panel drawn on
+ * a surface (on(…)) the surface is the panel's, in its x and y:
+ * gaussian(x, y) is K over it, a field the panel paints on the surface.
+ */
+function surfaceGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
+  const panel = ctx.opts.surface;
+  const onPanel = !!panel && args.length > 0 && !surfaceLike(args[0], ctx);
+  const example = onPanel ? `${name}(x, y) or ${name}(P)` : `${name}(S) or ${name}(S, 0.5, 0.25)`;
+  if (!args.length) throw new Error(`${name} takes a surface, and optionally where on it: ${example}.`);
+  let r: readonly Expr[];
+  let params: Params;
+  let point: [Expr, Expr] | null;
+  let over: { u?: Expr; v?: Expr } = {};
+  if (onPanel) {
+    r = panel.embed;
+    params = ['x', 'y'];
+    point = pointArgs(name, args, ctx, example);
+  } else {
+    if (args.length > 3) throw new Error(`${name} takes a surface, and optionally where on it: ${example}.`);
+    // gaussian(x, y) or gaussian((1, 2)): a point of a surface the panel lacks.
+    const named = args[0].kind === 'var' && (!!ctx.getFn(args[0].name) || !!ctx.opts.documentNames?.has(args[0].name));
+    const pointOnly =
+      (args.length === 2 && args.every(a => a.kind !== 'vec') && !named) ||
+      (args[0].kind === 'vec' && args[0].items.length === 2);
+    if (!panel && pointOnly)
+      throw new Error(
+        `${name}(x, y) reads the surface of its panel's on(…) row, and this panel has none: write ${name}(S) with S = (u, v, u^2 - v^2).`,
+      );
+    ({ items: r, over } = surfaceOperand(name, args[0], ctx.getFn, ctx.opts));
+    params = ['u', 'v'];
+    point = args.length > 1 ? pointArgs(name, args.slice(1), ctx, example) : null;
+  }
+  const d = (e: Expr, v: string): Expr => applyDiff(e, v, 1, ctx.opts, ctx.getFn);
+  const field = name === 'gaussian' ? gaussianOf(r, d, params) : meanCurvatureOf(r, d, params);
+  if (point) return substVars(field, { [params[0]]: point[0], [params[1]]: point[1] });
+  const back: Record<string, Expr> = {};
+  if (over.u) back.u = over.u;
+  if (over.v) back.v = over.v;
+  return Object.keys(back).length ? substVars(field, back) : field;
 }
 
 interface StripDx {
@@ -2689,6 +2819,11 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (STACK_FNS.has(e.name)) return stackCall(e.name, args) ?? { kind: 'call', name: e.name, args };
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
+      if (SURFACE_OPS.has(e.name)) return surfaceGeometry(e.name, args, ctx);
+      if (e.name === 'geodesic')
+        throw new Error(
+          'geodesic(S, (u0, v0), (du, dv)) draws a curve, so it must be the whole row — on a panel drawn on a surface, geodesic(P, (dx, dy)).',
+        );
       if (e.name === 'fourier' || e.name === 'reconstruct') {
         const params = ctx.opts.params;
         const opts: ResolveOpts = params?.size

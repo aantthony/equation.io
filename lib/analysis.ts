@@ -17,6 +17,9 @@ import {
   MissingDataError,
   resolveExpr,
   resolveRow,
+  type GetFn,
+  type ResolveOpts,
+  surfaceOperand,
   shadowedFnNames,
   scanDefinition,
   takenBinder,
@@ -50,7 +53,7 @@ import {
 import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
-import { lowerGeom } from './geom.ts';
+import { PAINT_CALL, lowerGeom } from './geom.ts';
 import { lowerLists, reducesMembers, SCALAR_REDUCTIONS } from './list.ts';
 import { type Classified, checkSolid, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
@@ -64,6 +67,9 @@ import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
 import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
+import { type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
+import { FLOW_NODE_LIMIT } from './flow.ts';
+import { exceedsNodes } from './size.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -606,6 +612,143 @@ function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
   return bare(e);
 }
 
+const GEODESIC_USAGE =
+  'geodesic takes a surface, where to start on it and which way: geodesic(S, (0.5, 0.5), (1, 0)) with S = (u, v, u^2 - v^2), and optionally how far, geodesic(S, P, (1, 0), 4).';
+const PANEL_GEODESIC_USAGE =
+  'On a panel drawn on a surface, geodesic takes where to start and which way, in x and y: geodesic((0, 0.5), (1, 0)) or geodesic(P, (1, 1), 6).';
+
+/**
+ * A geodesic row: geodesic(S, (u0, v0), (du, dv)[, L]), or on a panel drawn
+ * on a surface (an on(…) row) geodesic((x0, y0), (dx, dy)[, L]) on that
+ * surface, in the panel's x and y. The surface's first and second
+ * derivatives are expanded here (lib/surface-geometry.ts surfaceDerivatives),
+ * and the Christoffel symbols formed from them at each point as the curve is
+ * traced in the trace worker, so the start, direction and length may move
+ * with sliders, t and named points. A list of starts, directions or lengths draws one
+ * geodesic per element, a family.
+ */
+function classifyGeodesic(
+  args: readonly Expr[],
+  surface: SurfaceMap | undefined,
+  getFn: GetFn,
+  ropts: ResolveOpts,
+  lower: (e: Expr) => Expr,
+  constNames: ReadonlySet<string>,
+  moving: ReadonlySet<string>,
+): Classified {
+  let operand: ReturnType<typeof surfaceOperand> | null = null;
+  let failure: unknown = null;
+  if (args.length >= 3) {
+    try {
+      // The surface as the resolver writes it — a named one or a tuple, over
+      // u's and v's intervals where they are ones; a function of two
+      // parameters as is, for surfaceOperand to call at them.
+      const [arg] = args;
+      const written = arg.kind === 'var' && getFn(arg.name) ? arg : resolveRow(arg, getFn, ropts).expr;
+      operand = surfaceOperand('geodesic', written, getFn, ropts);
+    } catch (err) {
+      failure = err;
+    }
+  }
+  const onPanel = !operand && !!surface && (args.length === 2 || args.length === 3);
+  if (!operand && !onPanel) {
+    if (args.length === 2 && !surface)
+      throw new Error(
+        `geodesic(P, d) draws on its panel's surface (an on(…) row), and this panel has none. ${GEODESIC_USAGE}`,
+      );
+    throw failure instanceof Error && args.length >= 3 ? failure : new Error(GEODESIC_USAGE);
+  }
+  if (operand && args.length > 4) throw new Error(GEODESIC_USAGE);
+  const usage = onPanel ? PANEL_GEODESIC_USAGE : GEODESIC_USAGE;
+  const params: Params = onPanel ? ['x', 'y'] : ['u', 'v'];
+  const items: readonly Expr[] = operand ? operand.items : surface!.embed;
+  const num = (value: number): Expr => ({ kind: 'num', value });
+  // The parameters' ranges: u's and v's intervals where they are defined as
+  // ones, else [0, 1]; the panel's x and y ranges.
+  const range = (over: Expr | undefined): Expr[] =>
+    over?.kind === 'call' ? [over.args[0], over.args[1]] : [num(0), num(1)];
+  const domain: Expr[] = operand
+    ? [...range(operand.over.u), ...range(operand.over.v)]
+    : [...surface!.x, ...surface!.y].map(num);
+  // The connection is formed from these at each point as it is traced.
+  const derivatives = surfaceDerivatives(items, smoothPartial, params);
+  if (exceedsNodes(derivatives, 4 * FLOW_NODE_LIMIT))
+    throw new Error('This surface is too large to trace geodesics on.');
+  // Where it starts, which way and how far, each one value or a list.
+  const rest = operand ? args.slice(1) : args;
+  const elements = (e: Expr, size: number, what: string): (readonly Expr[])[] => {
+    const lowered = lower(e);
+    const each = lowered.kind === 'list' ? lowered.items : [lowered];
+    return each.map(item => {
+      const parts = size === 1 ? [item] : item.kind === 'vec' ? item.items : [];
+      if (parts.length !== size || parts.some(p => p.kind === 'vec' || p.kind === 'list'))
+        throw new Error(`geodesic: ${what} is ${size === 1 ? 'one number' : 'a pair, like (1, 0)'}. ${usage}`);
+      for (const p of parts)
+        for (const n of freeVars(p))
+          if (n !== 't' && !constNames.has(n))
+            throw new Error(
+              `geodesic: ${what} is numbers, sliders, t and named points${n === params[0] || n === params[1] ? `, not ${n}` : ` (found ${n})`}. ${usage}`,
+            );
+      return parts;
+    });
+  };
+  const starts = elements(rest[0], 2, 'where it starts');
+  const directions = elements(rest[1], 2, 'its direction');
+  const lengths = rest[2] ? elements(rest[2], 1, 'its length') : [[]];
+  const n = Math.max(starts.length, directions.length, lengths.length);
+  for (const list of [starts, directions, lengths])
+    if (list.length !== 1 && list.length !== n)
+      throw new Error(
+        'geodesic: lists of starts, directions and lengths go element by element, so they must be as long.',
+      );
+  if (n > 64) throw new Error('A family of geodesics has at most 64 members.');
+  const member = (k: number): Classified => {
+    const pick = <T>(list: readonly T[]) => list[list.length === 1 ? 0 : k];
+    const object: MathObject = {
+      kind: 'geodesic',
+      dim: onPanel ? 2 : 3,
+      params,
+      surface: items,
+      derivatives,
+      start: pick(starts),
+      direction: pick(directions),
+      ...(rest[2] ? { length: pick(lengths)[0] } : {}),
+      domain,
+    };
+    const used = new Set<string>();
+    for (const e of [...items, ...derivatives, ...domain, ...pick(starts), ...pick(directions), ...pick(lengths)])
+      for (const name of freeVars(e)) used.add(name);
+    return {
+      object,
+      animated: [...used].some(name => name === 't' || moving.has(name)),
+      needs3D: !onPanel,
+      params: [...used].filter(name => constNames.has(name)).sort(),
+    };
+  };
+  const members = Array.from({ length: n }, (_, k) => member(k));
+  if (n === 1) return members[0];
+  return {
+    object: { kind: 'family', members },
+    animated: members.some(m => m.animated),
+    needs3D: !onPanel,
+    params: [...new Set(members.flatMap(m => m.params))].sort(),
+  };
+}
+
+/**
+ * The surface of a row that is gaussian(S) or meancurvature(S) alone — which
+ * draws S coloured by it — or null: for any other row, for one of the
+ * document's own functions of those names, and for a point of a panel's
+ * surface, gaussian(P), which is a number.
+ */
+function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (name: string) => boolean): Expr | null {
+  if (e.kind !== 'call' || (e.name !== 'gaussian' && e.name !== 'meancurvature') || fnNames.has(e.name)) return null;
+  if (e.args.length !== 1) return null;
+  const [arg] = e.args;
+  if ((arg.kind === 'vec' && arg.items.length === 2) || (arg.kind === 'var' && isPoint(arg.name))) return null;
+  return arg;
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   // A map's Σ bounds are told the document's functions and lists, to refuse them.
@@ -920,16 +1063,32 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
         continue;
       }
+      // geodesic(S, start, direction): traced as it is drawn.
+      if (rawParsed.kind === 'call' && rawParsed.name === 'geodesic' && !fnNames.has('geodesic')) {
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
+        row.cls = classifyGeodesic(rawParsed.args, panelSurfaces[panel], getFn, ropts, lower, constNames, moving);
+        continue;
+      }
       // A graph's vertices are whole numbers, so its cases may test equality,
       // and so may any row not drawn over the plane: `f(2)`, `mark(c(4))`
       // with c(m) = {mod(m, 2) = 0: …}. Only a case at x, y or z is refused
       // (it would be a curve's sliver), here on the row that draws it.
       const plane = (e: Expr) => ['x', 'y', 'z'].some(v => freeVars(e).has(v));
       const exact = graphArgs !== null || !plane(rawParsed);
+      // On a panel drawn on a surface, gaussian(x, y) reads that surface.
+      const surface = panelSurfaces[panel];
+      const rowOpts = surface ? { ...ropts, surface } : ropts;
+      // gaussian(S) alone: S coloured by its curvature (lib/plot.ts PAINT_CALL).
+      const painted = curvaturePaint(rawParsed, fnNames, n => defs.pointDims.get(n) === 2);
       const resolved = resolveRow(
-        graphArgs !== null ? exactCases(rawParsed) : rawParsed,
+        graphArgs !== null
+          ? exactCases(rawParsed)
+          : painted
+            ? { kind: 'call', name: PAINT_CALL, args: [painted, rawParsed] }
+            : rawParsed,
         getFn,
-        exact ? { ...ropts, exactConditions: true } : ropts,
+        exact ? { ...rowOpts, exactConditions: true } : rowOpts,
       );
       const note = perMemberNote(resolved.expr, ropts.isList ?? (() => false));
       if (note) memberNotes.set(row, note);
@@ -957,7 +1116,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // and the row is a multiset of numbers with a density. That is the
       // object an expression in random variables already is, with u and v
       // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
-      const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
+      const draws = painted
+        ? null
+        : uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
       // curvature(C) is κ along the curve, a number per u — which as such a
       // row (or 1/curvature(C)) would draw the density of its values. Say
       // how to show it.
@@ -1033,6 +1194,15 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (panelSurfaces[panel] && !row.cls.needs3D) {
         if (!surfaceMapping(row.cls.object)) throw new Error(OFF_SURFACE_MESSAGE);
         row.cls = onSurface(row.cls);
+        // gaussian(x, y): the surface's curvature, shaded to its own size.
+        const object = row.cls.object;
+        if (
+          object.kind === 'scalar-field' &&
+          rawParsed.kind === 'call' &&
+          (rawParsed.name === 'gaussian' || rawParsed.name === 'meancurvature') &&
+          !fnNames.has(rawParsed.name)
+        )
+          row.cls = { ...row.cls, object: { ...object, autoscale: true } };
       }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);

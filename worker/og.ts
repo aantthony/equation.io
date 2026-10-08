@@ -1287,6 +1287,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   label: 'draws',
   // Integrated in the app's worker; the preview would have to integrate too.
   orbit: 'fallback',
+  // Integrated as the app draws it (lib/surface-geometry.ts); not here yet.
+  geodesic: 'fallback',
   pcurve: 'draws',
   psurface: 'draws',
   implicit3d: 'draws',

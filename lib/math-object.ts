@@ -7,6 +7,7 @@
 import type { Column, Expr } from './expr.ts';
 import type { ProbBounds } from './dist.ts';
 import type { IntShade } from './intshade.ts';
+import type { GeodesicSpec } from './surface-geometry.ts';
 
 export type ColorSpace = 'rgb' | 'hsl' | 'oklch';
 
@@ -49,7 +50,14 @@ export type MathObject =
        *  where it meets the box, rather than raymarching the residual. */
       readonly plane?: readonly [Expr, Expr, Expr, Expr];
     }
-  | { readonly kind: 'surface'; readonly form: 'parametric'; readonly coordinates: readonly [Expr, Expr, Expr] }
+  | {
+      readonly kind: 'surface';
+      readonly form: 'parametric';
+      readonly coordinates: readonly [Expr, Expr, Expr];
+      /** A scalar in u and v the surface is coloured by, diverging about 0
+       *  (gaussian(S) alone on a row). */
+      readonly paint?: Expr;
+    }
   | { readonly kind: 'intersection'; readonly residuals: readonly [Expr, Expr] }
   | {
       readonly kind: 'region';
@@ -70,7 +78,14 @@ export type MathObject =
     }
   /** A bare expression in the plane, or in space (`dimension: 3`), drawn as
    *  a shade or a translucent cloud. */
-  | { readonly kind: 'scalar-field'; readonly expr: Expr; readonly dimension?: 3 }
+  | {
+      readonly kind: 'scalar-field';
+      readonly expr: Expr;
+      readonly dimension?: 3;
+      /** Shaded with a gain that brings its typical size on the panel's
+       *  surface to about 1, rather than as it stands: gaussian(x, y). */
+      readonly autoscale?: true;
+    }
   | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly Expr[] }
   | { readonly kind: 'vector-field'; readonly components: Components }
   /** A 2×2 matrix over the plane, row-major: each glyph is the image of a
@@ -107,6 +122,9 @@ export type MathObject =
       readonly from: Expr;
       readonly to: Expr;
     }
+  /** A geodesic of a parametric surface from a start in a direction,
+   *  integrated as it is drawn (lib/surface-geometry.ts geodesicPath). */
+  | ({ readonly kind: 'geodesic' } & GeodesicSpec)
   /** `vertices` flat, or with `over` one vertex template run over the columns. */
   | {
       readonly kind: 'figure';
@@ -322,6 +340,7 @@ export function publicKind(object: MathObject) {
     case 'trail':
     case 'label':
     case 'orbit':
+    case 'geodesic':
     case 'system':
     case 'histogram':
     case 'value':
@@ -362,6 +381,8 @@ export function objectNeeds3D(object: MathObject): boolean {
       return object.coordinates.length === 3;
     case 'orbit':
       return !object.series && object.paths[0]?.length === 3;
+    case 'geodesic':
+      return object.dim === 3;
     case 'figure':
       return object.dimension === 3;
     case 'system':
