@@ -549,6 +549,103 @@ describe('a plane map', () => {
     }
   });
 
+  it('draws a line once per turn in a window tall in log-polar Y', () => {
+    // e^Y runs to e^22 up the window: no false turn a hair's breadth long,
+    // and no copy accepted well off the point wanted.
+    const logPolar = parsePlaneMap('(exp(Y) cos(X), exp(Y) sin(X))');
+    const n = 101;
+    const line = (k: number): [number, number] => [-4 + (8 * k) / (n - 1), -3 + (6.5 * k) / (n - 1)];
+    const perTurn = (lo: [number, number], hi: [number, number]) => {
+      const inverse = planeInverse(logPolar, { lo, hi });
+      let len = 0;
+      for (const l of planeLines(inverse, n, line, false))
+        for (let i = 0; i + 3 < l.length; i += 2)
+          if (inverse.inside(l[i], l[i + 1]) && inverse.inside(l[i + 2], l[i + 3]))
+            len += Math.hypot(l[i + 2] - l[i], l[i + 3] - l[i + 1]);
+      return len / ((hi[0] - lo[0]) / (2 * Math.PI));
+    };
+    const one = perTurn([-2 * Math.PI, -3], [2 * Math.PI, 3]);
+    expect(one).toBeGreaterThan(7);
+    for (const [X, top] of [
+      [2, 9.5],
+      [4, 10],
+      [2, 22],
+      [20, 9.5],
+    ])
+      expect(perTurn([-X * Math.PI, -3], [X * Math.PI, top]) / one, `±${X}π, Y to ${top}`).toBeCloseTo(1, 3);
+  });
+
+  it('draws in a window one turn wide all a wider one does there', () => {
+    // Twisted log-polar spreads the triangle's long edge wider than the
+    // window and its margin: a copy of it crosses the window between ends
+    // shown only on other copies, past the margin either side.
+    const twisted = parsePlaneMap('(exp(Y) cos(X + 6 sin(Y)), exp(Y) sin(X + 6 sin(Y)))');
+    const tri = [
+      [0.3, 0.2],
+      [6, 0.5],
+      [0.2, 5],
+    ] as Array<[number, number]>;
+    // Each run cut where it bends, as the renderer does (web/render2d.ts
+    // mappedSegment): followed in even steps, a run this curved jumps copies.
+    const bends: Segment = (a, b, map, from) => {
+      const out: number[] = [];
+      const shown = (p: readonly [number, number]) => isFinite(p[0]) && isFinite(p[1]);
+      const pa = map(a[0], a[1], from && shown(from) ? from : undefined);
+      const pb = map(b[0], b[1], shown(pa) ? pa : undefined);
+      const tol = 0.0005 * Math.hypot(pb[0] - pa[0], pb[1] - pa[1]);
+      const split = (t0: number, p0: [number, number], t1: number, p1: [number, number], depth: number) => {
+        const t = (t0 + t1) / 2;
+        const hint: [number, number] | undefined =
+          shown(p0) && shown(p1)
+            ? [(p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2]
+            : shown(p0)
+              ? p0
+              : shown(p1)
+                ? p1
+                : undefined;
+        const pm = map(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, hint);
+        let cut = shown(p0) !== shown(p1);
+        if (shown(p0) && shown(p1)) {
+          const [dx, dy] = [p1[0] - p0[0], p1[1] - p0[1]];
+          const off = Math.abs((pm[0] - p0[0]) * dy - (pm[1] - p0[1]) * dx) / (Math.hypot(dx, dy) || 1);
+          cut = !shown(pm) || off > (isFinite(tol) ? tol : 0.002 * Math.hypot(dx, dy));
+        }
+        if (depth < 12 && cut) {
+          split(t0, p0, t, pm, depth + 1);
+          split(t, pm, t1, p1, depth + 1);
+        } else out.push(...p0);
+      };
+      split(0, pa, 1, pb, 0);
+      return [out, pb];
+    };
+    // How long the lines are in [−π, π] × [−1, 2], cut at its edges.
+    const strip = (lines: number[][]) => {
+      let len = 0;
+      for (const l of lines)
+        for (let i = 0; i + 3 < l.length; i += 2) {
+          const [X0, Y0, X1, Y1] = l.slice(i, i + 4);
+          if (![X0, Y0, X1, Y1].every(Number.isFinite)) continue;
+          // Liang–Barsky: the part of the run in the strip.
+          let [t0, t1] = [0, 1];
+          for (const [p, q] of [
+            [X0 - X1, X0 + Math.PI],
+            [X1 - X0, Math.PI - X0],
+            [Y0 - Y1, Y0 + 1],
+            [Y1 - Y0, 2 - Y0],
+          ]) {
+            if (p === 0 && q < 0) t0 = 2;
+            else if (p < 0) t0 = Math.max(t0, q / p);
+            else if (p > 0) t1 = Math.min(t1, q / p);
+          }
+          if (t1 > t0) len += (t1 - t0) * Math.hypot(X1 - X0, Y1 - Y0);
+        }
+      return len;
+    };
+    const lines = (W: number) =>
+      strip(planeLines(planeInverse(twisted, { lo: [-W, -1], hi: [W, 2] }), 3, k => tri[k], true, bends));
+    expect(lines(Math.PI) / lines(3 * Math.PI)).toBeCloseTo(1, 2);
+  });
+
   it('finds the whole lattice a map repeats on, not part of it', () => {
     for (const map of ['(cos(X), sin(Y))', '(sin(X) + 0.3 sin(Y), sin(Y))', '(cos(X), sin(Y) + 0.2 cos(X))'])
       for (const W of [10, 30]) {

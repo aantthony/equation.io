@@ -358,7 +358,10 @@ export class PlaneInverse {
     let ry = v[1] - y;
     let err = rx * rx + ry * ry;
     if (!isFinite(err)) return null;
-    const scale = this.worldScale + Math.abs(x) + Math.abs(y);
+    // Against the size of the point, not of all the window shows: where
+    // the map grows fast (log-polar's e^Y, a window tall in Y) that would
+    // pass points well off the one wanted, as copies of it.
+    const scale = Math.min(this.worldScale, 1) + Math.abs(x) + Math.abs(y);
     const done = (1e-10 * scale) ** 2;
     const reach = 0.5 * this.screenScale;
     let lambda = 1e-3;
@@ -432,20 +435,35 @@ export class PlaneInverse {
   /**
    * A polyline with a point added where a long run crosses the screen
    * between ends the screen does not show (a chord across the window, its
-   * ends far off): carried as it is, that run would be a gap.
+   * ends far off): carried as it is, that run would be a gap. With `copies`
+   * (PlaneInverse.lines, on a map with turns), also where a run carried on
+   * the screen spans more than the window and its margin: a copy of it can
+   * cross the window between ends past the margin on either side, shown
+   * only on other copies (log-polar twisted by 6 sin Y, a window one turn
+   * wide).
    */
   through(
     count: number,
     vertex: (k: number) => [number, number],
     closed: boolean,
+    copies = false,
   ): [number, (k: number) => [number, number]] {
     const long = 0.1 * this.worldScale;
     const off = (p: [number, number]) => !isFinite(this.first(...p)[0]);
+    // Whether the run a → b, followed on the screen from a, spans more
+    // than the window and its margin.
+    const wide = (a: [number, number], b: [number, number]) => {
+      const pa = this.first(...a);
+      const pb = isFinite(pa[0]) ? this.follow(...b, pa, 1e6) : null;
+      return (
+        !!pb && (Math.abs(pb[0] - pa[0]) > this.hi[0] - this.lo[0] || Math.abs(pb[1] - pa[1]) > this.hi[1] - this.lo[1])
+      );
+    };
     let out: Array<[number, number]> | null = null;
     for (let k = 0; k < (closed ? count : count - 1); k++) {
       const [a, b] = [vertex(k), vertex((k + 1) % count)];
       const added: Array<[number, number]> = [];
-      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > long && off(a) && off(b))
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > long && ((off(a) && off(b)) || (copies && wide(a, b))))
         for (let i = 1; i < PROBES; i++) {
           const p: [number, number] = [a[0] + ((b[0] - a[0]) * i) / PROBES, a[1] + ((b[1] - a[1]) * i) / PROBES];
           if (!off(p)) added.push(p);
@@ -467,13 +485,16 @@ export class PlaneInverse {
    *  (X, Y) + d is the map at (X, Y), sampled across the window. */
   symmetric(d: readonly [number, number]): boolean {
     const { lo, hi } = this.box;
-    const tol = 1e-7 * (1 + this.worldScale);
     let seen = 0;
     for (let i = 0; i < 5; i++)
       for (let j = 0; j < 5; j++) {
         const [X, Y] = [lo[0] + ((hi[0] - lo[0]) * (i + 0.37)) / 5, lo[1] + ((hi[1] - lo[1]) * (j + 0.61)) / 5];
         const [p, q] = [this.c.f(X, Y), this.c.f(X + d[0], Y + d[1])];
         if (![...p, ...q].every(isFinite)) continue;
+        // Against the point's own size, not the window's: where the map
+        // grows fast (log-polar's e^Y) a window-wide tolerance passes a
+        // shift that moves the small points it shows a long way.
+        const tol = 1e-7 * (1 + Math.abs(p[0]) + Math.abs(p[1]));
         if (Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) > tol) return false;
         seen++;
       }
@@ -715,6 +736,11 @@ export class PlaneInverse {
       }
     }
     this.primitive(found);
+    // Each pointing up the screen's X (or up Y, along it): either way is a
+    // turn, and one way is easier to read.
+    for (const t of found)
+      if (t[0] < -1e-9 * Math.hypot(...t) || (!(t[0] > 1e-9 * Math.hypot(...t)) && t[1] < 0))
+        [t[0], t[1]] = [-t[0], -t[1]];
     this.reseed(found);
     return found;
   }
@@ -740,6 +766,7 @@ export class PlaneInverse {
           if (ok(t)) [found[0], more] = [t, true];
         }
       }
+    if (found.length === 1 && !(Math.hypot(...found[0]) > 1e-3 * this.screenScale)) found.length = 0;
     if (found.length !== 2) return;
     for (let more = true; more;) {
       more = false;
@@ -762,6 +789,17 @@ export class PlaneInverse {
         if (!m) break;
       }
     }
+    // What is left checked again: two nearly the same way are one, and
+    // neither may be so short the window holds thousands (a false turn).
+    const [t1, t2] = found;
+    const cross = Math.abs(t1[0] * t2[1] - t1[1] * t2[0]);
+    const keep = found.filter(
+      t =>
+        Math.hypot(...t) > 1e-3 * this.screenScale &&
+        ok(t) &&
+        !(t === t2 && cross < 1e-3 * Math.hypot(...t1) * Math.hypot(...t2)),
+    );
+    found.splice(0, 2, ...keep);
   }
 
   /**
@@ -778,8 +816,10 @@ export class PlaneInverse {
     // The other side: a second turn, or across the window the other way.
     const t2: [number, number] =
       found[1] ?? (Math.abs(t1[0]) / W >= Math.abs(t1[1]) / H ? [0, 0.999 * H] : [0.999 * W, 0]);
-    // Only where the window holds many of them, and one fits in it.
-    if (Math.abs(t1[0] * t2[1] - t1[1] * t2[0]) * RESEED > W * H) return;
+    // Only where the window holds many of them, but no more than a search
+    // finds copies (all), and one fits in it.
+    const cell = Math.abs(t1[0] * t2[1] - t1[1] * t2[0]);
+    if (cell * RESEED > W * H || cell * 1024 < W * H) return;
     const mid = [(this.lo[0] + this.hi[0]) / 2, (this.lo[1] + this.hi[1]) / 2];
     const origin: [number, number] = [mid[0] - (t1[0] + t2[0]) / 2, mid[1] - (t1[1] + t2[1]) / 2];
     for (const [u, v] of [
@@ -980,7 +1020,7 @@ export class PlaneInverse {
    * chain of runs is one entry, cut just past the window's edge.
    */
   lines(count: number, vertex: (k: number) => [number, number], closed: boolean, segment?: Segment): number[][] {
-    [count, vertex] = this.through(count, vertex, closed);
+    [count, vertex] = this.through(count, vertex, closed, this.turns().length > 0);
     const runs = closed ? count : count - 1;
     if (runs < 1) return count ? [this.line(count, vertex, closed, FOLLOW_MARGIN, segment)] : [];
     // As far past the window as a search looks (all), so a run between

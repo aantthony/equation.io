@@ -144,7 +144,15 @@ symlog (`y = sinh(Y)`) all come from one feature.
      (PlaneInverse.reseed): a grid over the whole window can step whole
      turns from seed to seed and see the plane at only a few angles
      (polar across 200π drew nothing), and search adds each copy a turn
-     from what they find. A line is solved for on one copy per vertex: every copy
+     from what they find. The solver and the check of a turn measure
+     their error against the size of the point, not of all the window shows:
+     a window tall in log-polar Y shows e^Y up to millions, and against
+     that a shift a hair's breadth long passed as a turn and points well off
+     the one wanted as copies of it. A long run a window with turns shows
+     more of than its width and margin hold gets points added where it
+     crosses the screen (PlaneInverse.through): a copy of it can cross
+     between ends past the margin either side, shown only on other copies.
+     A line is solved for on one copy per vertex: every copy
      a whole number of turns from it (or a turn from another carried) is
      that run moved, so a window many turns wide costs little more than one
      turn, and the copies are kept in typed arrays, found by a hash of
