@@ -1137,6 +1137,14 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       ['vase (revolve)', 'a = 1; revolve({-3 < y < 3: 1.5 + a sin(y) / 2}, y)', '3d surface slider'],
       ['torus', '(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))', '3d surface parametric'],
       ['sphere (u,v)', '(2sin(pi v)cos(2pi u), 2sin(pi v)sin(2pi u), 2cos(pi v))', '3d surface parametric'],
+      // K = cos(v)/(3 + cos(v)): positive (row colour) round the outside,
+      // negative (its complement) round the hole, 0 on the top and bottom
+      // circles where the two meet.
+      [
+        'Gaussian curvature of a torus',
+        'camera(-0.9, 0.7, 11); u = interval(0, 2pi); v = interval(0, 2pi); S = ((3 + cos(v)) cos(u), (3 + cos(v)) sin(u), sin(v)); gaussian(S); gaussian(S, 0, 0); gaussian(S, 0, pi)',
+        '3d surface parametric derivative',
+      ],
       // The tube radius swells and shrinks with t (shifting v by t would
       // only slide the same torus along itself).
       [

@@ -50,7 +50,7 @@ import {
 import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
-import { lowerGeom } from './geom.ts';
+import { PAINT_CALL, lowerGeom } from './geom.ts';
 import { lowerLists, reducesMembers, SCALAR_REDUCTIONS } from './list.ts';
 import { type Classified, checkSolid, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
@@ -606,6 +606,20 @@ function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
   return bare(e);
 }
 
+/**
+ * The surface of a row that is gaussian(S) or meancurvature(S) alone — which
+ * draws S coloured by it — or null: for any other row, for one of the
+ * document's own functions of those names, and for a point of a panel's
+ * surface, gaussian(P), which is a number.
+ */
+function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (name: string) => boolean): Expr | null {
+  if (e.kind !== 'call' || (e.name !== 'gaussian' && e.name !== 'meancurvature') || fnNames.has(e.name)) return null;
+  if (e.args.length !== 1) return null;
+  const [arg] = e.args;
+  if ((arg.kind === 'vec' && arg.items.length === 2) || (arg.kind === 'var' && isPoint(arg.name))) return null;
+  return arg;
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   // A map's Σ bounds are told the document's functions and lists, to refuse them.
@@ -926,10 +940,19 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // (it would be a curve's sliver), here on the row that draws it.
       const plane = (e: Expr) => ['x', 'y', 'z'].some(v => freeVars(e).has(v));
       const exact = graphArgs !== null || !plane(rawParsed);
+      // On a panel drawn on a surface, gaussian(x, y) reads that surface.
+      const surface = panelSurfaces[panel];
+      const rowOpts = surface ? { ...ropts, surface } : ropts;
+      // gaussian(S) alone: S coloured by its curvature (lib/plot.ts PAINT_CALL).
+      const painted = curvaturePaint(rawParsed, fnNames, n => defs.pointDims.get(n) === 2);
       const resolved = resolveRow(
-        graphArgs !== null ? exactCases(rawParsed) : rawParsed,
+        graphArgs !== null
+          ? exactCases(rawParsed)
+          : painted
+            ? { kind: 'call', name: PAINT_CALL, args: [painted, rawParsed] }
+            : rawParsed,
         getFn,
-        exact ? { ...ropts, exactConditions: true } : ropts,
+        exact ? { ...rowOpts, exactConditions: true } : rowOpts,
       );
       const note = perMemberNote(resolved.expr, ropts.isList ?? (() => false));
       if (note) memberNotes.set(row, note);
@@ -957,7 +980,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // and the row is a multiset of numbers with a density. That is the
       // object an expression in random variables already is, with u and v
       // independent Uniform(0, 1) draws — so `u` draws height 1 over [0, 1].
-      const draws = uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
+      const draws = painted
+        ? null
+        : uniformDraws(parsed, constNames, rvNames, `${row.id ?? ri}`, e => lowerObjects(e, defs, ropts));
       // curvature(C) is κ along the curve, a number per u — which as such a
       // row (or 1/curvature(C)) would draw the density of its values. Say
       // how to show it.
@@ -1033,6 +1058,15 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (panelSurfaces[panel] && !row.cls.needs3D) {
         if (!surfaceMapping(row.cls.object)) throw new Error(OFF_SURFACE_MESSAGE);
         row.cls = onSurface(row.cls);
+        // gaussian(x, y): the surface's curvature, shaded to its own size.
+        const object = row.cls.object;
+        if (
+          object.kind === 'scalar-field' &&
+          rawParsed.kind === 'call' &&
+          (rawParsed.name === 'gaussian' || rawParsed.name === 'meancurvature') &&
+          !fnNames.has(rawParsed.name)
+        )
+          row.cls = { ...row.cls, object: { ...object, autoscale: true } };
       }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);

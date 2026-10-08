@@ -248,6 +248,7 @@
   "3d-surfaces/vase-revolve": "a = 1; revolve({-3 < y < 3: 1.5 + a sin(y) / 2}, y)",
   "3d-surfaces/torus": "(cos(2pi u)(2+cos(2pi v)), sin(2pi u)(2+cos(2pi v)), sin(2pi v))",
   "3d-surfaces/sphere-u-v": "(2sin(pi v)cos(2pi u), 2sin(pi v)sin(2pi u), 2cos(pi v))",
+  "3d-surfaces/gaussian-curvature-of-a-torus": "camera(-0.9, 0.7, 11); u = interval(0, 2pi); v = interval(0, 2pi); S = ((3 + cos(v)) cos(u), (3 + cos(v)) sin(u), sin(v)); gaussian(S); gaussian(S, 0, 0); gaussian(S, 0, pi)",
   "3d-surfaces/breathing-torus": "(cos(2pi u)(2+(1+sin(t)/2)cos(2pi v)), sin(2pi u)(2+(1+sin(t)/2)cos(2pi v)), (1+sin(t)/2)sin(2pi v))",
   "fields-in-space/gaussian-cloud": "exp(-(x^2 + y^2 + z^2)/4)",
   "fields-in-space/octants-of-x-y-z": "x y z",

@@ -6,7 +6,7 @@ against web/public/llms.txt. Each idea below is a candidate, not a plan:
 one that gets picked up should get its own doc (as docs/pga.md did).
 
 Status: **ideas** — nothing here is agreed, except 1 and 5, which are
-implemented, and 2, which was tried and dropped in favour of existing rows
+implemented (1 for curves and surfaces), and 2, which was tried and dropped in favour of existing rows
 (the "suggested first three"; marked below).
 
 ## Already covered
@@ -33,8 +33,24 @@ plane), `torsion(C)`/`torsion(C, u0)`, `osculating(C, u0)` and
 `frame(C, u0)` expand symbolically in lib/curves.ts, called from lib/defs.ts
 like grad. Without u0 the scalars are functions of u, plotted with
 `(u, curvature(C))`; colouring the curve by κ is not done (3D curves already
-have κ/τ combs). Deferred: surfaces coloured by Gaussian or mean curvature,
-and geodesics.
+have κ/τ combs).
+
+**Implemented (surface curvature).** `gaussian(S)` and `meancurvature(S)`
+expand in lib/surface-geometry.ts, called from lib/defs.ts as the curve
+operators are: K = (L′N′ − M′²)/W⁴ and H = (EN′ − 2FM′ + GL′)/(2W³), with
+n = S_u × S_v not made unit, L′ = S_uu · n (and so on) and W² = n · n taken
+from the cross product rather than EG − F² (the reason curves.ts takes κ
+from r′ × r″), so K needs no square root. H's sign is n's: negative where
+the surface bends away from S_u × S_v. `gaussian(S, u0, v0)` reads a
+number. `mean` was taken (the mean of a list), hence `meancurvature`.
+Alone on a row, `gaussian(S)` is rewritten to `[paint](S, K)` (lib/geom.ts
+PAINT_CALL), which classify unwraps into the parametric surface with a
+`paint` scalar; the surface shader colours it on a diverging scale (row
+colour for K > 0, its complement for K < 0, grey at 0) with a gain set on
+the CPU from the 90th percentile of |K| over the surface, so any size of
+surface reads. On an `on(…)` panel `gaussian(x, y)` is K of the panel's
+surface, painted as a field with the same gain (docs/axis-maps.md).
+Deferred: geodesics.
 
 - `curvature(C)` and `torsion(C)` of a parametric curve in u, as a
   scalar along the curve (color the curve by it, or read out at a point).

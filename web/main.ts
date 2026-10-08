@@ -181,6 +181,7 @@ import {
 } from '../lib/surface-map.ts';
 import { toGLSL, uniformName } from '../lib/glsl.ts';
 import { onSurface, raySurface, surfacePixel } from '../lib/surface-pick.ts';
+import { type GeodesicOptions, defaultGeodesicLength, divergingGain, numericIn } from '../lib/surface-geometry.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1560,6 +1561,54 @@ function panelGridFields(p: Panel, plane?: PlaneMap): Array<GridField | 'x' | 'y
 /** Each cloud's scale (lib/volume.ts) and the view and sliders it was read under. */
 const volumeScales = new WeakMap<CpuPlan, { key: string; scale: number }>();
 
+/** The gain a field painted on a surface's panel (gaussian(x, y)) is shaded
+ *  with, kept until the surface or a value it reads (a slider, t) changes. */
+const fieldGains = new WeakMap<CpuPlan, { key: string; surface: SurfaceMap; gain: number }>();
+function surfaceFieldGain(
+  surface: SurfaceMap,
+  plot: Extract<CpuPlan, { type: 'scalar2d' }>,
+  env: Record<string, number>,
+): number {
+  const names = [...freeVars(plot.expr)].filter(n => n !== 'x' && n !== 'y');
+  const key = JSON.stringify(names.map(n => env[n]));
+  const last = fieldGains.get(plot);
+  if (last?.key === key && last.surface === surface) return last.gain;
+  const f = numericIn([plot.expr], ['x', 'y'], env);
+  const one = new Float64Array(1);
+  const size = defaultGeodesicLength((x, y) => surfacePoint(surface, x, y), [surface.x, surface.y]) / 2;
+  const gain = divergingGain(
+    (x, y) => (f(x, y, one), one[0]),
+    [surface.x, surface.y],
+    1e-9 * Math.min(1 / size, 1 / size ** 2),
+  );
+  fieldGains.set(plot, { key, surface, gain });
+  return gain;
+}
+
+/** The gain a surface coloured by its curvature (gaussian(S)) shades it
+ *  with, kept until a value it reads (a slider, t) changes. */
+const paintGains = new WeakMap<CpuPlan, { key: string; gain: number }>();
+function paintGain(plot: Extract<CpuPlan, { type: 'psurface' }>, env: Record<string, number>): number {
+  const paint = plot.paint!;
+  const names = [...freeVars({ kind: 'vec', items: [...plot.comps, paint] })].filter(n => n !== 'u' && n !== 'v');
+  const key = JSON.stringify(names.map(n => env[n]));
+  const last = paintGains.get(plot);
+  if (last?.key === key) return last.gain;
+  const unit: GeodesicOptions['domain'] = [
+    [0, 1],
+    [0, 1],
+  ];
+  const f = numericIn([paint], ['u', 'v'], env);
+  const P = numericIn(plot.comps, ['u', 'v'], env);
+  const out = new Float64Array(3);
+  // Rounding, not curvature, below 1e-9 of the surface's own size.
+  const size = defaultGeodesicLength((u, v) => (P(u, v, out), [...out]), unit) / 2;
+  const one = new Float64Array(1);
+  const gain = divergingGain((u, v) => (f(u, v, one), one[0]), unit, 1e-9 * Math.min(1 / size, 1 / size ** 2));
+  paintGains.set(plot, { key, gain });
+  return gain;
+}
+
 /** 2D-only plots (densities, flows, sequences, planar fields) a 3D scene leaves out. */
 const SKIPPED_IN_3D: ReadonlySet<CpuPlan['type']> = new Set([
   'scalar2d',
@@ -2115,7 +2164,13 @@ function render() {
       for (const eq of rows) {
         const on = surface && eq.cls && !eq.cls.needs3D ? surfaceMapping(eq.cls.object) : null;
         if (on === 'paint') {
-          const paint = paintOf(eq);
+          let paint = paintOf(eq);
+          // gaussian(x, y): shaded to its own size on the surface.
+          if (paint?.kind === 'scalar' && eq.cpu?.type === 'scalar2d' && eq.cpu.autoscale)
+            paint = {
+              ...paint,
+              gain: surfaceFieldGain(surface!, eq.cpu, { ...constEnv, ...eq.gpu?.uniforms, t: time }),
+            };
           if (paint) {
             const { comps, du, dv, xy } = surfaceGLSL(surface!);
             const { params, uniforms } = shaderBindings(eq.gpu);
@@ -2271,9 +2326,12 @@ function render() {
           }
           case 'psurface':
           // A filled planar region lies in z = 0 (compileGpu gives it as a surface).
-          case 'pregion':
-            scene.psurfaces.push({ ...gpuFor(eq, 'psurface'), color, params, uniforms });
+          case 'pregion': {
+            const gpu = gpuFor(eq, 'psurface');
+            const gain = plot.type === 'psurface' && plot.paint ? paintGain(plot, { ...constEnv, t: time }) : undefined;
+            scene.psurfaces.push({ ...gpu, color, params, uniforms, gain });
             break;
+          }
           case 'orbit': {
             let path: number[] = [];
             const flush = () => {
