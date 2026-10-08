@@ -174,6 +174,19 @@ export function planeJacobian(map: PlaneMap, X: number, Y: number): [number, num
   return compiled(map).j(X, Y);
 }
 
+/** The inverse of row-major 2×2 matrix m (non-finite where it is singular). */
+export function invert2([a, b, c, d]: readonly [number, number, number, number]): [number, number, number, number] {
+  const det = a * d - b * c;
+  return [d / det, -b / det, -c / det, a / det];
+}
+
+/** How far x and y move across one pixel at screen point (X, Y), a pixel
+ *  being ux by uy in screen units: the rows of the Jacobian, scaled. */
+export function pixelSpan(map: PlaneMap, X: number, Y: number, ux: number, uy: number): [number, number] {
+  const [a, b, c, d] = planeJacobian(map, X, Y);
+  return [Math.hypot(a * ux, b * uy), Math.hypot(c * ux, d * uy)];
+}
+
 /** The part of the plane screen window `box` shows, as a box in x and y
  *  (sampled), or null when it shows none. */
 export function planeWorldBox(map: PlaneMap, box: ScreenBox): ScreenBox | null {

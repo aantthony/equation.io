@@ -37,7 +37,7 @@ import { noteColor } from '../lib/statements.ts';
 import { type Analysis, type RowInfo, analyze } from './graph.ts';
 import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 import { type AxisMap, type AxisMaps, axisMapping, shownRange, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
-import { type ScreenBox, planeInverse, planeLines, planeShapes, planeWorldBox } from '../lib/plane-map.ts';
+import { type ScreenBox, invert2, planeInverse, planeLines, planeShapes, planeWorldBox } from '../lib/plane-map.ts';
 import { axisTicks } from '../lib/axis-ticks.ts';
 
 export const OG_WIDTH = 600;
@@ -114,14 +114,9 @@ function conjugate(
 ): [number, number, number, number] {
   if (!j) return m;
   const [a, b, c, d] = j;
-  const det = a * d - b * c;
   const mj = [m[0] * a + m[1] * c, m[0] * b + m[1] * d, m[2] * a + m[3] * c, m[2] * b + m[3] * d];
-  return [
-    (d * mj[0] - b * mj[2]) / det,
-    (d * mj[1] - b * mj[3]) / det,
-    (a * mj[2] - c * mj[0]) / det,
-    (a * mj[3] - c * mj[1]) / det,
-  ];
+  const [p, q, r, s] = invert2(j);
+  return [p * mj[0] + q * mj[2], p * mj[1] + q * mj[3], r * mj[0] + s * mj[2], r * mj[1] + s * mj[3]];
 }
 
 const toScreenX = (r: Raster, v: View2D, wx: number) =>
@@ -882,9 +877,7 @@ function renderRow2D(
       const jacs = cpu.jacobian?.map(compile);
       const jacInv = (): [number, number, number, number] => {
         if (!jacs) return [1, 0, 0, 1];
-        const [a, b, c, d] = jacs.map(p => run(p, env.vars, env.stack));
-        const det = a * d - b * c;
-        return [d / det, -b / det, -c / det, a / det];
+        return invert2(jacs.map(p => run(p, env.vars, env.stack)) as [number, number, number, number]);
       };
       if (cpu.streamlines) {
         // streamlines(M): short tensor lines through a grid of seeds, the
