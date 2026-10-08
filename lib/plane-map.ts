@@ -231,6 +231,9 @@ const PROBES = 32;
 /** A region's triangles search for copies of the plane at one in this many
  *  (PlaneInverse.triangles); the rest try the copies found. */
 const SEARCH_EVERY = 16;
+/** Seeds move onto one turn of a window holding at least this many
+ *  (PlaneInverse.reseed). */
+const RESEED = 16;
 /** How many searches a window remembers. */
 const MEMO = 1 << 17;
 
@@ -241,17 +244,17 @@ const MEMO = 1 << 17;
 export class PlaneInverse {
   private readonly c: Compiled;
   /** X, Y, x, y per seed. */
-  private readonly seeds: Float64Array;
-  private readonly count: number;
+  private seeds: Float64Array;
+  private count: number;
   /** Which of the BLOCKS² blocks of the window each seed is in. */
-  private readonly blocks: Int32Array;
+  private blocks: Int32Array;
   /** How far in x and y each seed's cell reaches (mayShow). */
-  private readonly reach: Float64Array;
+  private reach: Float64Array;
   /** The window with its margin. */
   private readonly lo: [number, number];
   private readonly hi: [number, number];
   /** How big the window looks in x and y, and on the screen. */
-  private readonly worldScale: number;
+  private worldScale: number;
   private readonly screenScale: number;
   private readonly center: [number, number];
   readonly box: ScreenBox;
@@ -265,23 +268,38 @@ export class PlaneInverse {
     this.hi = [box.hi[0] + MARGIN * w, box.hi[1] + MARGIN * h];
     this.center = [(box.lo[0] + box.hi[0]) / 2, (box.lo[1] + box.hi[1]) / 2];
     this.screenScale = Math.hypot(w, h);
+    [this.seeds, this.blocks, this.reach, this.count, this.worldScale] = this.plant(
+      this.lo,
+      [this.hi[0] - this.lo[0], 0],
+      [0, this.hi[1] - this.lo[1]],
+    );
+  }
+
+  /**
+   * Seeds on a grid over the parallelogram from `origin` along a and b:
+   * each seed's X, Y, x, y, its block, how far its cell reaches, how many
+   * there are, and how big what they show is in x and y.
+   */
+  private plant(
+    origin: readonly [number, number],
+    a: readonly [number, number],
+    b: readonly [number, number],
+  ): [Float64Array, Int32Array, Float64Array, number, number] {
     const seeds = new Float64Array(4 * (SEEDS + 1) ** 2);
     const blocks = new Int32Array((SEEDS + 1) ** 2);
     const reach = new Float64Array((SEEDS + 1) ** 2);
     const side = SEEDS + 1;
     const grid = new Float64Array(2 * side * side);
-    for (let i = 0; i < side; i++)
-      for (let j = 0; j < side; j++) {
-        const X = this.lo[0] + ((this.hi[0] - this.lo[0]) * (i + 0.5)) / side;
-        const Y = this.lo[1] + ((this.hi[1] - this.lo[1]) * (j + 0.5)) / side;
-        grid.set(this.c.f(X, Y), 2 * (i * side + j));
-      }
+    const at = (i: number, j: number): [number, number] => {
+      const [u, v] = [(i + 0.5) / side, (j + 0.5) / side];
+      return [origin[0] + a[0] * u + b[0] * v, origin[1] + a[1] * u + b[1] * v];
+    };
+    for (let i = 0; i < side; i++) for (let j = 0; j < side; j++) grid.set(this.c.f(...at(i, j)), 2 * (i * side + j));
     let n = 0;
     let [xlo, ylo, xhi, yhi] = [Infinity, Infinity, -Infinity, -Infinity];
     for (let i = 0; i < side; i++)
       for (let j = 0; j < side; j++) {
-        const X = this.lo[0] + ((this.hi[0] - this.lo[0]) * (i + 0.5)) / side;
-        const Y = this.lo[1] + ((this.hi[1] - this.lo[1]) * (j + 0.5)) / side;
+        const [X, Y] = at(i, j);
         const [x, y] = [grid[2 * (i * side + j)], grid[2 * (i * side + j) + 1]];
         if (!isFinite(x) || !isFinite(y)) continue;
         // How far the plane its cell shows reaches from it: to its
@@ -293,9 +311,9 @@ export class PlaneInverse {
           [0, 1],
           [0, -1],
         ]) {
-          const [a, b] = [i + di, j + dj];
-          if (a < 0 || b < 0 || a >= side || b >= side) continue;
-          const d = Math.hypot(grid[2 * (a * side + b)] - x, grid[2 * (a * side + b) + 1] - y);
+          const [p, q] = [i + di, j + dj];
+          if (p < 0 || q < 0 || p >= side || q >= side) continue;
+          const d = Math.hypot(grid[2 * (p * side + q)] - x, grid[2 * (p * side + q) + 1] - y);
           if (isFinite(d)) r = Math.max(r, d);
         }
         blocks[n] = Math.floor((i * BLOCKS) / side) * BLOCKS + Math.floor((j * BLOCKS) / side);
@@ -303,11 +321,7 @@ export class PlaneInverse {
         seeds.set([X, Y, x, y], 4 * n++);
         [xlo, ylo, xhi, yhi] = [Math.min(xlo, x), Math.min(ylo, y), Math.max(xhi, x), Math.max(yhi, y)];
       }
-    this.seeds = seeds;
-    this.blocks = blocks;
-    this.reach = reach;
-    this.count = n;
-    this.worldScale = n ? Math.hypot(xhi - xlo, yhi - ylo) : 1;
+    return [seeds, blocks, reach, n, n ? Math.hypot(xhi - xlo, yhi - ylo) : 1];
   }
 
   /** Whether the window (with its margin) may show (x, y): near the point
@@ -617,8 +631,9 @@ export class PlaneInverse {
   /** search, and every copy a turn of the map (turns) from what it found
    *  that the window shows. */
   private search(x: number, y: number): Array<[number, number]> {
-    const out = this.searchSeeds(x, y);
+    // The turns first: finding them may move the seeds (reseed).
     const turns = this.turns();
+    const out = this.searchSeeds(x, y);
     if (!turns.length) return out;
     const same = 1e-6 * this.screenScale;
     const known = (p: readonly [number, number]) => out.some(o => Math.abs(o[0] - p[0]) + Math.abs(o[1] - p[1]) < same);
@@ -699,9 +714,88 @@ export class PlaneInverse {
         }
       }
     }
+    this.primitive(found);
+    this.reseed(found);
     return found;
   }
   private turns_?: Array<[number, number]>;
+
+  /**
+   * The turns found, made the shortest that show the same plane: one found
+   * may be a whole number of the true turn (in a window many turns wide the
+   * copies found from its seeds can all lie that far apart: polar's 6π for
+   * 2π), and two may span only part of the lattice the map repeats on
+   * ((cos X, sin Y)'s (2π, ±2π) for 2π along each). Each is divided by a
+   * small prime while the map is the same a part on; two, by the p + 1 ways
+   * to add a p-th of them, then made short and square (Lagrange).
+   */
+  private primitive(found: Array<[number, number]>) {
+    const small = 1e-6 * this.screenScale;
+    const ok = (t: readonly [number, number]) => Math.hypot(...t) > small && this.symmetric(t);
+    if (found.length === 1)
+      for (let more = true; more;) {
+        more = false;
+        for (const p of [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]) {
+          const t: [number, number] = [found[0][0] / p, found[0][1] / p];
+          if (ok(t)) [found[0], more] = [t, true];
+        }
+      }
+    if (found.length !== 2) return;
+    for (let more = true; more;) {
+      more = false;
+      const [t1, t2] = found;
+      for (const p of [2, 3, 5, 7])
+        for (let a = 0; a <= p && !more; a++) {
+          // t1 / p, or (a t1 + t2) / p in place of t2.
+          const v: [number, number] =
+            a === p ? [t1[0] / p, t1[1] / p] : [(a * t1[0] + t2[0]) / p, (a * t1[1] + t2[1]) / p];
+          if (!ok(v)) continue;
+          found.splice(0, 2, ...(a === p ? [v, t2] : [t1, v]));
+          more = true;
+        }
+      // Lagrange: the shorter first, the other less a whole number of it.
+      for (let it = 0; it < 64; it++) {
+        const [u, w] = Math.hypot(...found[0]) <= Math.hypot(...found[1]) ? found : [found[1], found[0]];
+        const m = Math.round((u[0] * w[0] + u[1] * w[1]) / (u[0] ** 2 + u[1] ** 2));
+        const r: [number, number] = [w[0] - m * u[0], w[1] - m * u[1]];
+        found.splice(0, 2, u, r);
+        if (!m) break;
+      }
+    }
+  }
+
+  /**
+   * In a window many turns wide, its seeds moved onto one turn of it: a grid
+   * over the whole window can step a whole number of turns from seed to
+   * seed and so show the plane at only a few angles (polar's, across 200π),
+   * where one turn across shows all of it, as closely as one turn would.
+   * The turn's copies of what its seeds find are added by search.
+   */
+  private reseed(found: Array<[number, number]>) {
+    if (!found.length) return;
+    const [W, H] = [this.hi[0] - this.lo[0], this.hi[1] - this.lo[1]];
+    const [t1] = found;
+    // The other side: a second turn, or across the window the other way.
+    const t2: [number, number] =
+      found[1] ?? (Math.abs(t1[0]) / W >= Math.abs(t1[1]) / H ? [0, 0.999 * H] : [0.999 * W, 0]);
+    // Only where the window holds many of them, and one fits in it.
+    if (Math.abs(t1[0] * t2[1] - t1[1] * t2[0]) * RESEED > W * H) return;
+    const mid = [(this.lo[0] + this.hi[0]) / 2, (this.lo[1] + this.hi[1]) / 2];
+    const origin: [number, number] = [mid[0] - (t1[0] + t2[0]) / 2, mid[1] - (t1[1] + t2[1]) / 2];
+    for (const [u, v] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [1, 1],
+    ]) {
+      const [X, Y] = [origin[0] + u * t1[0] + v * t2[0], origin[1] + u * t1[1] + v * t2[1]];
+      if (X < this.lo[0] || X > this.hi[0] || Y < this.lo[1] || Y > this.hi[1]) return;
+    }
+    const scale = this.worldScale;
+    [this.seeds, this.blocks, this.reach, this.count, this.worldScale] = this.plant(origin, t1, t2);
+    this.worldScale = Math.max(scale, this.worldScale);
+    this.memo.clear();
+  }
 
   private searchSeeds(x: number, y: number): Array<[number, number]> {
     const near: Array<[number, number]> = [];

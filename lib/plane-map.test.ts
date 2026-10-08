@@ -521,6 +521,51 @@ describe('a plane map', () => {
     }
   });
 
+  it('finds the true turn, and draws a line, in a window hundreds of turns wide', () => {
+    const n = 150;
+    const flat = (k: number): [number, number] => [-7.5 + (15 * k) / n, 1];
+    // How long a polyline is in the window.
+    const drawn = (inverse: ReturnType<typeof planeInverse>, lines: number[][]) => {
+      let len = 0;
+      for (const l of lines)
+        for (let i = 0; i + 3 < l.length; i += 2)
+          if (inverse.inside(l[i], l[i + 1]) && inverse.inside(l[i + 2], l[i + 3]))
+            len += Math.hypot(l[i + 2] - l[i], l[i + 3] - l[i + 1]);
+      return len;
+    };
+    for (const [map, turns, y] of [
+      ['(Y cos(X), Y sin(X))', 400, [0, 5]],
+      ['(exp(Y) cos(X), exp(Y) sin(X))', 600, [-2, 2]],
+    ] as const) {
+      const plane = parsePlaneMap(map);
+      // One turn's worth, from a window a few turns wide.
+      const few = planeInverse(plane, { lo: [-5 * Math.PI, y[0]], hi: [5 * Math.PI, y[1]] });
+      const perTurn = drawn(few, planeLines(few, n + 1, flat, false)) / 5;
+      // A grid of seeds across it steps whole turns at a time: polar's 6π,
+      // or nothing on the screen at all.
+      const wide = planeInverse(plane, { lo: [(-turns / 2) * Math.PI, y[0]], hi: [(turns / 2) * Math.PI, y[1]] });
+      expect(Math.abs(wide.turns()[0][0]), map).toBeCloseTo(2 * Math.PI, 9);
+      expect(drawn(wide, planeLines(wide, n + 1, flat, false)) / (perTurn * (turns / 2)), map).toBeCloseTo(1, 2);
+    }
+  });
+
+  it('finds the whole lattice a map repeats on, not part of it', () => {
+    for (const map of ['(cos(X), sin(Y))', '(sin(X) + 0.3 sin(Y), sin(Y))', '(cos(X), sin(Y) + 0.2 cos(X))'])
+      for (const W of [10, 30]) {
+        const turns = planeInverse(parsePlaneMap(map), { lo: [-W, -W], hi: [W, W] }).turns();
+        expect(turns.length, `${map} ±${W}`).toBe(2);
+        // Two shortest: 2π along each axis.
+        const sorted = turns.map(t => t.map(v => Math.abs(v))).sort((p, q) => p[0] - q[0]);
+        [0, 2 * Math.PI, 2 * Math.PI, 0].forEach((v, i) =>
+          expect(sorted[i >> 1][i & 1], `${map} ±${W}`).toBeCloseTo(v, 6),
+        );
+      }
+    // Skewed: (2π, 0) and (π, 2π).
+    const skew = planeInverse(parsePlaneMap('(cos(X - Y/2), sin(Y))'), { lo: [-10, -10], hi: [10, 10] }).turns();
+    const det = Math.abs(skew[0][0] * skew[1][1] - skew[0][1] * skew[1][0]);
+    expect(det).toBeCloseTo(4 * Math.PI ** 2, 6);
+  });
+
   it('finds a branch point of z², and fills round it, wherever the window is', () => {
     const z2 = parsePlaneMap('(X^2 - Y^2, 2 X Y)');
     const square = [

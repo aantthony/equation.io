@@ -135,7 +135,16 @@ symlog (`y = sinh(Y)`) all come from one feature.
      copy a turn from one found is added, so a search that misses a copy
      finds it from another; the turn is taken as the longest difference
      between copies over the number of turns it spans, so it is good to
-     many places. A line is solved for on one copy per vertex: every copy
+     many places. A turn found that is a whole number of the true one
+     (copies found far apart) is divided by small primes while the map is
+     the same that far on, and two turns spanning only part of the lattice
+     the map repeats on ((cos X, sin Y)'s (2π, ±2π)) are filled out to it
+     and made short (PlaneInverse.primitive). In a window sixteen or more
+     turns across, the seeds move onto one turn of it in its middle
+     (PlaneInverse.reseed): a grid over the whole window can step whole
+     turns from seed to seed and see the plane at only a few angles
+     (polar across 200π drew nothing), and search adds each copy a turn
+     from what they find. A line is solved for on one copy per vertex: every copy
      a whole number of turns from it (or a turn from another carried) is
      that run moved, so a window many turns wide costs little more than one
      turn, and the copies are kept in typed arrays, found by a hash of
