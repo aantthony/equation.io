@@ -720,7 +720,7 @@ export const pointComponentNames = (defs: ValueDefinitions): Set<string> => {
  * graph that says `open(f) = f` keeps its function; only the quoted-file-name
  * shape belongs to the data syntax.
  */
-export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi', 'tau']);
+export const RESERVED = new Set(['x', 'y', 'z', 'u', 'v', 't', 'w', 'i', 'd', 'e', 'pi']);
 
 const FN_RE = new RegExp(
   String.raw`^\s*(${NAME_SRC})\s*\(\s*(${NAME_SRC}(?:\s*,\s*${NAME_SRC})*)\s*\)\s*=(?!=)([\s\S]+)$`,
@@ -874,21 +874,21 @@ export function takenBinder(text: string): string | null {
     ? 'names starting u_ are'
     : FUNCTIONS.has(n)
       ? `${m[1]} is a built-in function`
-      : 'x, y, z, t, u, v, w, d, e, i, pi and tau are';
+      : 'x, y, z, t, u, v, w, d, e, i and pi are';
   return `${m[1]} is taken by the language, so it cannot be drawn: ${why}. Draw with another name, like p ∈ A.`;
 }
 
 /**
  * The name a row tried to define when that name is taken by the language:
  * `e = 0.6` or `d(x) = …` look like a slider or a function but are not one,
- * since `d` starts `d/dx`, `e`, `pi` and `tau` are constants and `i` is the
+ * since `d` starts `d/dx`, `e` and `pi` are constants and `i` is the
  * imaginary unit. Such a row still means what it says (`e = 2` is a false
  * claim, and says so); this is only for explaining why no slider appeared.
  */
-export function takenDefinitionName(text: string): 'd' | 'e' | 'pi' | 'tau' | 'i' | null {
+export function takenDefinitionName(text: string): 'd' | 'e' | 'pi' | 'i' | null {
   const m = FN_RE.exec(text) ?? CONST_RE.exec(text);
   const n = m && canonicalName(m[1]);
-  return n === 'd' || n === 'e' || n === 'pi' || n === 'tau' || n === 'i' ? n : null;
+  return n === 'd' || n === 'e' || n === 'pi' || n === 'i' ? n : null;
 }
 
 /** Why a name from takenDefinitionName (other than `d`) names no value. */

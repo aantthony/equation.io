@@ -300,9 +300,8 @@ describe('solver extensions and comparison notes', () => {
   });
   it('explains a slider named after a constant or d', () => {
     // Still a claim about e, but one that says why no slider appeared.
-    const [e, tau, pi] = runRows(['e = 0.6', 'tau = 1', 'pi = pi']).rows;
+    const [e, pi] = runRows(['e = 0.6', 'pi = pi']).rows;
     expect(e.info).toBe('Never true (2.71828 ≠ 0.6) — e is a constant; name a slider something else');
-    expect(tau.info).toMatch(/— tau is a constant/);
     expect(pi.info).toBe('Always true (3.14159 = 3.14159)');
     // `i` is the imaginary unit: an index named i is a claim about it, as a
     // number, as a family of claims (once, not per member), or as a family
