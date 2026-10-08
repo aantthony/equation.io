@@ -12,7 +12,7 @@
  * point by point (surfacePoint). See docs/axis-maps.md.
  */
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
-import { expandMapSums } from './defs.ts';
+import { type MapDoc, expandMapSums } from './defs.ts';
 import { toGLSL } from './glsl.ts';
 import type { MathObject } from './math-object.ts';
 import { type Prog, compileProg, run } from './vm.ts';
@@ -46,6 +46,7 @@ export function parseSurfaceMap(
   x: [number, number],
   y: [number, number],
   env: Record<string, number> = {},
+  doc: MapDoc = {},
 ): SurfaceMap {
   let parsed: Expr;
   try {
@@ -54,7 +55,7 @@ export function parseSurfaceMap(
     throw new Error(USAGE);
   }
   if (parsed.kind !== 'vec' || parsed.items.length !== 3) throw new Error(USAGE);
-  const items = parsed.items.map(e => expandMapSums(e, ['x', 'y'], env));
+  const items = parsed.items.map(e => expandMapSums(e, ['x', 'y'], env, doc));
   const values: Record<string, Expr> = {};
   let uses = false;
   for (const name of freeVars({ kind: 'vec', items })) {

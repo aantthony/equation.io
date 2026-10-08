@@ -66,6 +66,31 @@ describe('a plane map', () => {
     expect(analyzeRows(['K = 2', `view((x, y) = (prod(k=1..K, 1 + Y/k) X, Y))`]).rows[1].error).toBeUndefined();
   });
 
+  it('writes out a header sum, and nested sums whose index shadows X', () => {
+    const header = parsePlaneMap('(2 sum[n=1..3] Y^n/n, X)');
+    expect(planeToWorld(header, 0, 1)[0]).toBeCloseTo(2 * (1 + 1 / 2 + 1 / 3), 12);
+    // The outer index is X: the inner bound is a number at each term.
+    const nested = parsePlaneMap('(sum(X=1..2, sum(k=1..X, k)) + X, Y)');
+    expect(planeToWorld(nested, 0.5, 0)[0]).toBeCloseTo(1 + 3 + 0.5, 12);
+    expect(() => parsePlaneMap('(sum(n=1..100, sum(k=1..100, k)) + X, Y)')).toThrow(/too many terms \(limit/);
+  });
+
+  it('snaps a slider used as a Σ bound to whole numbers, as a row does', () => {
+    const a = analyzeRows(['N = 2.5', 'view((x, y) = (sum(n=1..N, Y^n) + X, Y))']);
+    expect(a.rows[1].error).toBeUndefined();
+    expect([...a.document.sumBoundConsts]).toEqual(['N']);
+  });
+
+  it('reads a defined name that is also a function as a value, not as a missing parenthesis', () => {
+    // gamma changes with t, beta with x: neither has a fixed value, but both are defined.
+    for (const rows of [
+      ['gamma = t', 'view((x, y) = (gamma X, Y))'],
+      ['beta = x^2', 'view((x, y) = (beta X, Y))'],
+    ])
+      expect(analyzeRows(rows).rows[1].error).toMatch(/(gamma|beta) has no fixed value here/);
+    expect(analyzeRows(['view((x, y) = (gamma X, Y))']).rows[0].error).toMatch(/gamma is a function/);
+  });
+
   it('says what is wrong with a row it cannot use', () => {
     for (const [row, message] of [
       ['view((x, y) = (X, X))', /flattens the screen/],

@@ -14,7 +14,7 @@
  * angle range wider than 2π); a point is drawn at each, a line follows the
  * copy it started on.
  */
-import { expandMapSums } from './defs.ts';
+import { type MapDoc, expandMapSums } from './defs.ts';
 import { diff } from './diff.ts';
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { type Prog, compileProg, run } from './vm.ts';
@@ -38,7 +38,7 @@ const USAGE = 'A plane map writes x and y in terms of the screen’s X and Y: (x
 const CONSTANTS = new Set(['pi', 'e', 'tau']);
 
 /** Parse the right side of `(x, y) = (Y cos X, Y sin X)` in a view row. */
-export function parsePlaneMap(src: string, env: Record<string, number> = {}): PlaneMap {
+export function parsePlaneMap(src: string, env: Record<string, number> = {}, doc: MapDoc = {}): PlaneMap {
   let parsed: Expr;
   try {
     parsed = parseExpr(src);
@@ -46,7 +46,7 @@ export function parsePlaneMap(src: string, env: Record<string, number> = {}): Pl
     throw new Error(USAGE);
   }
   if (parsed.kind !== 'vec' || parsed.items.length !== 2) throw new Error(USAGE);
-  const items = parsed.items.map(e => expandMapSums(e, ['X', 'Y'], env));
+  const items = parsed.items.map(e => expandMapSums(e, ['X', 'Y'], env, doc));
   // Sliders are read at their value, as an axis map reads them.
   const values: Record<string, Expr> = {};
   let screen = false;

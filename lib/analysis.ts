@@ -718,7 +718,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (isDividerRow(row.text)) at++;
       else if (/^\s*(view|on)\s*\(/.exec(row.text) && !fnNames.has(/^\s*(\w+)/.exec(row.text)![1]))
         try {
-          const spec = parseViewRow(row.text, ropts.consts!);
+          const spec = parseViewRow(row.text, ropts.consts!, ropts);
           if (spec?.kind === 'view' && spec.maps) panelMaps[at] ??= spec.maps;
           if (spec?.kind === 'surface') panelSurfaces[at] ??= spec.surface;
         } catch {
@@ -742,7 +742,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (badRow) throw new Error(badRow);
       // A call to the user's own view/camera/grid function is theirs.
       const head = /^\s*(view|camera|grid|on)\s*\(/.exec(row.text);
-      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!);
+      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!, ropts);
       if (view) {
         // Each panel frames itself: a divider starts a fresh set.
         if (view.kind === 'split') {

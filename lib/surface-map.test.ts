@@ -40,6 +40,15 @@ describe('a surface map', () => {
     expect(surfacePoint(prod.surface, 0.5, 0)[2]).toBeCloseTo(1.5 * 1.25 * (1 + 0.5 / 3), 12);
   });
 
+  it('expands only the sums: a derivative is refused with a sum or without', () => {
+    for (const row of [
+      'on((X, Y, Z) = (x, y, d/dx(x^3)), x = 0..1, y = 0..1)',
+      'on((X, Y, Z) = (x, y, d/dx(x^3) + sum(n=1..2, y^n)), x = 0..1, y = 0..1)',
+      'on((X, Y, Z) = (x, y, sum(n=1..2, d/dx(x^n))), x = 0..1, y = 0..1)',
+    ])
+      expect(() => parseViewRow(row, {}), row).toThrow(/d has no fixed value/);
+  });
+
   it('says what is wrong with a row it cannot use', () => {
     for (const [row, message] of [
       ['on((X, Y, Z) = (x, y, 0))', /x = -pi..pi/],
