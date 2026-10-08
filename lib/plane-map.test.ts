@@ -4,7 +4,16 @@ import { axisMapping, mapRowExpr } from './axis-map.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
 import { regionSampler } from './path.ts';
 import type { Components } from './math-object.ts';
-import { type PlaneMap, parsePlaneMap, planeInverse, planeShapes, planeToWorld, planeWorldBox } from './plane-map.ts';
+import {
+  type PlaneMap,
+  invert2,
+  parsePlaneMap,
+  pixelSpan,
+  planeInverse,
+  planeShapes,
+  planeToWorld,
+  planeWorldBox,
+} from './plane-map.ts';
 import { type View2DSpec, formatViewSpec, parseViewRow } from './view.ts';
 
 const POLAR = 'view((x, y) = (Y cos(X), Y sin(X)), X = -pi..pi, Y = 0..5)';
@@ -188,6 +197,20 @@ describe('a plane map', () => {
     ];
     const fill = planeShapes(inverse, 4, k => square[k] as [number, number]);
     expect(fill.map(s => s.closed)).toEqual([true]);
+  });
+
+  it('inverts the Jacobian, and sizes a pixel in x and y', () => {
+    const m = [1, 2, 3, 4] as const;
+    const inv = invert2(m);
+    [-2, 1, 1.5, -0.5].forEach((v, k) => expect(inv[k]).toBeCloseTo(v, 12));
+    // inv · m is the identity.
+    const product = [0, 1, 2, 3].map(k => inv[k & 2] * m[k & 1] + inv[(k & 2) + 1] * m[(k & 1) + 2]);
+    product.forEach((v, k) => expect(v).toBeCloseTo(k === 0 || k === 3 ? 1 : 0, 12));
+    // At angle π/6, radius 2 the Jacobian is [−1, √3/2; √3, 1/2]: a pixel
+    // 0.01 by 0.04 spans √(0.01² + (0.02√3)²) in x and √((0.01√3)² + 0.02²) in y.
+    const [px, py] = pixelSpan(polar(), Math.PI / 6, 2, 0.01, 0.04);
+    expect(px).toBeCloseTo(Math.sqrt(0.0013), 9);
+    expect(py).toBeCloseTo(Math.sqrt(0.0007), 9);
   });
 
   it('takes a map defined only away from the origin', () => {

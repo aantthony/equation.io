@@ -380,8 +380,13 @@ export function axisMapping(object: MathObject, maps?: AxisMaps): AxisMapping | 
   return null;
 }
 
+/** Why a mapped panel refuses an object axisMapping has no way to draw. */
+export function unmappedReason(object: MathObject, maps: AxisMaps): string {
+  return maps.plane && object.kind === 'histogram' ? PLANE_BARS_MESSAGE : UNMAPPED_MESSAGE;
+}
+
 /** Why a plane-mapped panel draws no histogram. */
-export const PLANE_BARS_MESSAGE =
+const PLANE_BARS_MESSAGE =
   "This panel's view(…) maps (x, y) together, which bends the line y = 0 that histogram bars stand on: draw it in a panel without one.";
 
 export const UNMAPPED_MESSAGE =
