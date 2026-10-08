@@ -1258,6 +1258,9 @@ function renderRow3D(r: Raster, v: View3D, row: RowInfo, env: EvalEnv, color: [n
 export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   spacecurve: 'draws',
   note: 'draws',
+  // A panel's metric (a ds^2 row) draws nothing of its own, as a note does;
+  // its geodesics and light rays are geodesic rows, which fall back.
+  metric: 'draws',
   tuple: 'draws',
   family: 'draws',
   // Drawn member by member, like a family: their glyphs are figures.
@@ -1287,7 +1290,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   label: 'draws',
   // Integrated in the app's worker; the preview would have to integrate too.
   orbit: 'fallback',
-  // Integrated as the app draws it (lib/surface-geometry.ts); not here yet.
+  // Integrated as the app draws it (lib/surface-geometry.ts), on a surface
+  // or under a panel's metric (geodesic and lightray rows); not here yet.
   geodesic: 'fallback',
   pcurve: 'draws',
   psurface: 'draws',
@@ -1400,6 +1404,7 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
     case 'note':
     case 'tuple':
     case 'value':
+    case 'metric':
     // Its text is left out in 3D as in 2D (OG_COVERAGE); the app draws it in both.
     case 'label':
     case 'psurface':

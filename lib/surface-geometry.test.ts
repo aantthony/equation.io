@@ -449,7 +449,7 @@ describe('geodesic rows', () => {
     expect(arc(pts)).toBeCloseTo(30, 2);
   });
   it('says what it needs', () => {
-    expect(analyze(['geodesic((0.2, 0.3), (1, 1))']).r.error).toMatch(/this panel has none/);
+    expect(analyze(['geodesic((0.2, 0.3), (1, 1))']).r.error).toMatch(/this panel has neither/);
     expect(analyze([`S = ${SPHERE}`, 'geodesic(S, (0.2, x), (1, 1))']).r.error).toMatch(/found x/);
     expect(analyze([ON_TORUS, 'geodesic((0.2, y), (1, 1))']).r.error).toMatch(/, not y/);
     expect(analyze([`S = ${SPHERE}`, '2 geodesic(S, (0.2, 0.3), (1, 1))']).r.error).toMatch(/whole row/);

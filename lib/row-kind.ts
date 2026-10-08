@@ -80,7 +80,10 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
   label: 'text label at a point',
   trail: 'motion trail behind a moving point',
   orbit: 'path of a simulated state over a time range',
-  geodesic: 'geodesic of a parametric surface from a start point in a direction, integrated along the surface',
+  geodesic:
+    "geodesic from a start point in a direction, integrated along a parametric surface, or in the plane under its panel's ds^2 metric (a massive particle's path in a spacetime, or a light ray from lightray(…))",
+  metric:
+    'a panel’s own metric, ds^2 = … in the differentials of its coordinates: draws nothing; geodesic and lightray rows in the panel follow it',
   system: 'solutions of a system of equations (points or curves)',
   value:
     'number readout under the row; draws nothing on the graph, except a definite integral, which shades the area it measures',

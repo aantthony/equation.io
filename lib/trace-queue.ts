@@ -2,7 +2,7 @@ import { type Env } from './env.ts';
 import { exprKey } from './expr.ts';
 import type { Expr } from './expr.ts';
 import type { OrbitInput } from './orbit.ts';
-import type { GeodesicSpec } from './surface-geometry.ts';
+import type { GeodesicOptions, GeodesicSpec } from './surface-geometry.ts';
 import { animatedConstNames, definitionDependencies } from './defs.ts';
 
 /** Separate moving values from the definitions and fixed inputs of a trace.
@@ -30,7 +30,15 @@ export interface TraceInput {
   orbit?: OrbitInput;
   /** A geodesic to trace (lib/surface-geometry.ts geodesicPath), the values
    *  it reads, and how many steps and milliseconds it may take. */
-  geodesic?: { spec: GeodesicSpec; env: Record<string, number>; maxSteps: number; ms: number; maxPoints: number };
+  geodesic?: {
+    spec: GeodesicSpec;
+    env: Record<string, number>;
+    maxSteps: number;
+    ms: number;
+    maxPoints: number;
+    /** Where a metric's geodesic is traced: a box round its window. */
+    window?: GeodesicOptions['domain'];
+  };
 }
 export type TraceResult = {
   pts: number[][];

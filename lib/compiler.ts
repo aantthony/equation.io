@@ -10,6 +10,7 @@ import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
 import { FAMILY_NODES, countNodes } from './size.ts';
 import type { GeodesicSpec } from './surface-geometry.ts';
+import { metricSummary } from './metric.ts';
 
 export interface CpuGrid {
   name: string;
@@ -100,7 +101,9 @@ export type CpuPlan =
       flat?: { readonly dim: 2 | 3; readonly grade: number };
       length?: number;
     }
-  | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true };
+  | { type: 'note'; expr: Expr; variable: boolean; constant?: string; identity?: true }
+  /** A panel's metric (a ds^2 row): its readout, nothing drawn. */
+  | { type: 'metric'; text: string };
 
 export type GpuPlan = { params: string[]; uniforms?: Record<string, number> } & (
   | { type: 'none' }
@@ -408,6 +411,8 @@ export function compileCpu(classified: Classified): CpuPlan {
         ...(object.blades ? { blades: object.blades } : {}),
         ...(object.flat ? { flat: object.flat } : {}),
       };
+    case 'metric':
+      return { type: 'metric', text: metricSummary(object) };
     case 'note':
       return {
         type: 'note',
@@ -675,6 +680,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'value':
     case 'tuple':
     case 'note':
+    case 'metric':
     case 'automaton':
     case 'lattice':
     case 'graph':
@@ -796,6 +802,9 @@ export function cpuStructureKey(plan: CpuPlan): string {
     case 'note':
       structure = exprKey(plan.expr);
       break;
+    case 'metric':
+      structure = plan.text;
+      break;
     case 'fractal2d':
       structure = [exprKey(plan.step), plan.seed, plan.maxIter];
       break;
@@ -815,6 +824,11 @@ export function cpuStructureKey(plan: CpuPlan): string {
         plan.params,
         ...[plan.surface, plan.derivatives, plan.start, plan.direction, plan.domain].map(expressions),
         plan.length && exprKey(plan.length),
+        plan.metric && [
+          plan.metric.n,
+          plan.metric.motion,
+          ...[plan.metric.components, plan.metric.derivatives, plan.metric.jacobian ?? []].map(expressions),
+        ],
       ];
       break;
     case 'polygon':

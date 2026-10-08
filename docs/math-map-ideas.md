@@ -86,6 +86,78 @@ is traced in x and y; the worker places its points on the surface, so the
 panel need not carry them. Deferred: geodesic circles and the exponential
 map, parallel transport, and colouring a curve by κ.
 
+**Implemented (metrics on a plane panel).** A row `ds^2 = …` gives a plane
+panel a metric of its own, which need not come from an embedding
+(lib/metric.ts): a quadratic form in the differentials of the panel's two
+coordinates — x and y, or two coordinate fields such as
+`r = sqrt(x^2 + y^2)` and `phi = atan2(y, x)` — and of at most one more
+coordinate τ that no component depends on (a static or stationary
+spacetime's time). `d<name>` is a differential only in that row, so `d/dx`,
+`∫ … dx` and a slider named `dr` mean what they did. The components are
+taken as ½ ∂²Q/∂dᵢ∂dⱼ of the right side with the differentials renamed out of
+reach of the resolver, and checked at sample points (with sliders at their
+values) for being the whole form, for the coordinates' Jacobian, and for a
+signature a geodesic can be traced in. `geodesic(P, d)` then follows the
+metric (unit speed with no τ; a massive particle with coordinate velocity
+d(x, y)/dτ with one, refused faster than light), and `lightray(P, d)` is its
+null geodesic, affine parameter normalised to dτ/dλ = 1 at the start.
+
+The metric is pulled back to x and y through the Jacobian of the written
+coordinates rather than integrated in them and mapped back, which would need
+the inverse of r, phi(x, y) that the document never states; the pullback
+g_xy = Jᵀ g J and its derivatives are formed in numbers at each point
+(metricReader), several times cheaper than writing them out symbolically.
+The integrator is lib/surface-geometry.ts traceGeodesic, generalised to a
+GeodesicFlow (a surface's connection, or a metric's) whose state may carry
+more than position and velocity: a metric with τ carries U^τ (τ itself is
+never needed). After each step U is put back on g(U, U) = κ (1, −1 or 0):
+rescaled for unit speed or a massive particle, U^τ re-solved for light.
+Solving U^τ from the conserved energy E = −g_τμ U^μ instead (a first
+version) divides by g_ττ, so it stopped at a spinning hole's ergosurface,
+where g_ττ = 0, rather than its horizon. Orbits precess as they should (tests:
+2π((1 − 6M/r)^−½ − 1) per orbit near a circle, which is 6πM/r to first
+order; the photon sphere; 4M/b deflection; Poincaré geodesics on the unit
+circle; equatorial Kerr into its ergoregion and down to its horizon). It
+stops where the metric stops being Riemannian, or stops having x and y as
+space with det g < 0 — checked at every stage of a step, as a horizon is
+finite but wrong inside — or grows or shrinks 10⁸ times, where it makes no
+headway (a ray crawling into a horizon, toward y = 0 in the half-plane), at
+a box round the window (traceWindow: four times the window, on a lattice,
+so small pans and zooms keep the trace) grown to take in the start, and,
+with no length given, once it has drawn as far as that is across, or once
+32 steps move it less than a thousandth of the most any of the four
+stretches of 32 before did (a crawl into a horizon, whatever the zoom), or
+once dτ/dλ has grown 10³-fold while the metric degenerates (|det g|/size³
+down 10⁴-fold) — the coordinates freezing at a horizon, round which a ray
+falling into a spinning hole would otherwise creep for tens of thousands of
+steps; a rate that grows where the metric stays sound (a conformally flat
+metric's light ray far out) runs on — or once a whole turn of its velocity
+ends within a hundredth of the turn's length of where it began after the
+rate has grown tenfold (winding round a near-extremal hole's horizon; a
+stable orbit keeps its rate). The 10⁸ range is relative to the metric at
+the start, not to the window: the half-plane's geodesic from y = 1 ends at
+y ≈ 10⁻⁴, which shows only zoomed in close to the boundary. Inside
+the window's box steps are held to 1/400 of it, so none strides over a
+black hole between stages, and points are drawn finely; outside it, eight
+times coarser, and further off coarser still in proportion to the distance
+(steps a fiftieth of it), so a ray sent from 10⁵ away arrives in a few
+hundred steps. The reader allocates nothing per point. It runs in the trace
+worker; a metric's family member gets at least 150 ms, unless that would
+make the family take over 3 s. Its points are a real cap on the family
+(48 000, shared; a lone orbit may use them all), met by giving up points
+where the line runs straight: walking it, one is kept once the line has
+turned more than θ since the last kept, or run on a set length, with the
+smallest θ that fits (decimate) — so tight turns keep theirs. A metric is checked
+at sample points over scales from 0.001 to 100 000 round the origin, so a
+disc of radius 0.1 and a hole of mass 10 000 both pass; a small feature far
+from the origin could still be missed. Follow-ups: light
+cones and their tilt,
+tidal glyphs (the geodesic deviation tensor), painting a metric's
+curvature, time-dependent metrics (τ not cyclic: a third coordinate in the
+state, and t meaning both), more coordinates (3D slices, Kerr off the
+equator), metrics on mapped (`view`) panels, hover readouts along a
+geodesic, and the link preview, which falls back for these rows.
+
 - `curvature(C)` and `torsion(C)` of a parametric curve in u, as a
   scalar along the curve (color the curve by it, or read out at a point).
 - `osculating(C, u0)` draws the osculating circle; `frame(C, u0)` the
@@ -164,6 +236,9 @@ and larger matrices.
 - Hyperbolic tilings {p, q} as a follow-up.
 - Bigger than the others: it is a new metric on the plane, not only new
   functions. Interacts with docs/pga.md (the projective model).
+- Partly there: `ds^2 = (dx^2 + dy^2)/y^2` makes a panel the half-plane
+  model, and `geodesic(P, d)` draws its geodesics (see 1); segments,
+  circles and distances in the metric are not done.
 - Map nodes: Non-Euclidean Geometry, Hyperbolic, Riemannian.
 
 ### 7. Fourier analysis

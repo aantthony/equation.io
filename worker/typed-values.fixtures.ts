@@ -54,6 +54,7 @@ export const PUBLIC_KIND_ROWS = {
   action: ['action(((1, 1), (0, 1)))'],
   orbit: ["q' = -q", 'q(0) = 1', 'q(0..3)'],
   geodesic: ['S = (cos(v) cos(u), cos(v) sin(u), sin(v))', 'geodesic(S, (0.2, 0.3), (1, 0))'],
+  metric: ['ds^2 = (dx^2 + dy^2)/y^2'],
 } satisfies Record<Exclude<PublicKind, 'dlist' | 'dscatter'>, string[]>;
 
 /** Distribution rows deliberately retain MCP's descriptive presentation labels. */

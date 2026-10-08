@@ -9,7 +9,7 @@
  * honest, and that callers act on it.
  */
 import { describe, expect, it } from 'vitest';
-import { OG_COVERAGE, canRenderOg, previewGap } from './og.ts';
+import { OG_COVERAGE, canRenderOg, previewGap, renderRaster } from './og.ts';
 import { analyze } from './graph.ts';
 
 describe('og renderer coverage', () => {
@@ -152,6 +152,16 @@ describe('previewGap', () => {
 
   it('is null for a cobweb, which now draws', () => {
     expect(gap(['r = 1.9', 'a_{n+1} = r a_n (1 - a_n)'])).toBeNull();
+  });
+
+  it('passes over a metric row, and falls back for its geodesics', () => {
+    const metric = ['ds^2 = (dx^2 + dy^2)/y^2'];
+    expect(gap([...metric, 'y = 0'], 0)).toBeNull();
+    expect(canRenderOg([...metric, 'y = 0'])).toBe(true);
+    expect(renderRaster([...metric, 'y = 0']).w).toBeGreaterThan(0);
+    expect(gap([...metric, 'geodesic((0, 1), (1, 0))'], 1)).toContain('live app renders');
+    const black = ['r = sqrt(x^2 + y^2)', 'phi = atan2(y, x)', 'ds^2 = -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2'];
+    expect(canRenderOg([...black, 'lightray((-30, 2), (1, 0))'])).toBe(false);
   });
 
   it('blames the preview, not the row, for an orbit diagram', () => {

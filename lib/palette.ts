@@ -49,7 +49,7 @@ export interface ColorRow {
 export function takesColor(row: ColorRow): boolean {
   if (!row.text.trim() || row.comment || (row.def && !row.point) || row.view || noteColor(row.text)) return false;
   const plan = row.cpu;
-  return !(plan?.type === 'note' || (plan?.type === 'value' && !plan.shade));
+  return !(plan?.type === 'note' || plan?.type === 'metric' || (plan?.type === 'value' && !plan.shade));
 }
 
 /**
