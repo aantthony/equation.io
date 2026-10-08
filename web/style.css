@@ -147,7 +147,7 @@ body {
   white-space: pre;
   z-index: 20;
 }
-#tooltip::first-line {
+#tooltip .tip-head {
   color: var(--muted);
   font-size: 11px;
 }
