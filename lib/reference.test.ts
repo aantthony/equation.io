@@ -53,6 +53,29 @@ describe('the reference', () => {
     for (const name of ref.notes.keys()) expect(builtinHelp(name), name).not.toBeNull();
   });
 
+  it('draws every named shape: each form with its parameters set, and its instance, as the kind it names', () => {
+    expect(ref.shapes.length).toBeGreaterThan(25);
+    for (const shape of ref.shapes)
+      for (const form of shape.forms) {
+        const what = `${shape.name}: ${form.rows.join('; ')}`;
+        expect(Object.keys(KIND_MEANINGS), what).toContain(form.kind);
+        for (const [name] of form.params)
+          expect(form.rows.join(' '), what).toMatch(new RegExp(`(?<![A-Za-z_])${name}(?![A-Za-z0-9_])`));
+        const params = form.params.map(([name]) => `${name} = 2`);
+        expect(lastKind([...params, ...form.rows]), what).toEqual({ errors: [], kind: form.kind });
+        if (params.length)
+          expect(lastKind(form.rows).errors.length, `${what}, its parameters unset`).toBeGreaterThan(0);
+        const instance = `${shape.name}: ${form.example.rows.join('; ')}`;
+        expect(lastKind(form.example.rows), instance).toEqual({ errors: [], kind: form.kind });
+      }
+  });
+
+  it('gives every named shape names of its own', () => {
+    const key = (name: string) => name.toLowerCase();
+    const names = ref.shapes.flatMap(s => [s.name, ...s.aliases].map(key));
+    expect(names.filter((name, k) => names.indexOf(name) !== k)).toEqual([]);
+  });
+
   it('has written web/public/llms.txt and Instructions.swift (pnpm reference)', () => {
     expect(readFileSync(LLMS_TXT, 'utf8')).toBe(llmsTxt(ref));
     expect(readFileSync(SWIFT_INSTRUCTIONS, 'utf8')).toBe(swiftInstructions(kindNames(ref, CHARTED_GROUPS)));

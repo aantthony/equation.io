@@ -8,9 +8,10 @@
  *   /docs/<kind slug>/    one kind: what it draws, forms, examples, pitfalls
  *   /docs/<guide slug>/   the language in general, links, the MCP server
  *   /docs/functions/      every built-in function
+ *   /docs/shapes/         named curves and surfaces, each as rows to adapt
  */
 import { encodePayload } from '../../lib/link.ts';
-import { type KindPage, type Reference, functionEntries } from '../../lib/reference.ts';
+import { type KindPage, type Reference, type Shape, functionEntries, kindName } from '../../lib/reference.ts';
 import { splitStatements } from '../../lib/statements.ts';
 
 const escape = (text: string) =>
@@ -149,7 +150,11 @@ const kindNav = (ref: Reference, current?: string) =>
     .join('\n');
 
 const guideNav = (ref: Reference, current?: string) =>
-  [...ref.guides.values(), { slug: 'functions', title: 'Functions', site: true }]
+  [
+    ...ref.guides.values(),
+    { slug: 'functions', title: 'Functions', site: true },
+    { slug: 'shapes', title: ref.shapesPage.title, site: ref.shapes.length > 0 },
+  ]
     .filter(g => g.site)
     .map(
       g =>
@@ -281,6 +286,7 @@ function indexBody(ref: Reference): string {
         summary: 'Every built-in function, its signature and notes.',
         site: true,
       },
+      { slug: 'shapes', title: ref.shapesPage.title, summary: ref.shapesPage.summary, site: ref.shapes.length > 0 },
     ]
       .filter(g => g.site)
       .map(
@@ -305,6 +311,40 @@ function functionsBody(ref: Reference): string {
           }</dd></div>`,
       )
       .join('\n')}</dl>`,
+  ].join('\n');
+}
+
+/** A named shape: what it is, then each form, its parameters, and an instance to open. */
+function shapeSection(ref: Reference, shape: Shape): string {
+  const forms = shape.forms.map(form => {
+    const kind = ref.kinds.get(form.kind)!;
+    const kindLink = `<a href="${docsPath(kind.slug)}">${escape(kindName(kind.title))}</a> <code>${escape(form.kind)}</code>`;
+    const params = form.params.length
+      ? `<ul>${form.params.map(([name, meaning]) => `<li><code>${escape(name)}</code>: ${inline(meaning, ref)}</li>`).join('')}</ul>`
+      : '';
+    return `<li><p class="kind">${kindLink}${form.note ? ` — ${inline(form.note, ref)}` : ''}</p>
+<pre><code>${form.rows.map(escape).join('\n')}</code></pre>${params}
+<p class="label">For example${form.example.note ? ` — ${inline(form.example.note, ref)}` : ''}</p>${rowsBlock(
+      form.example.rows,
+      `${shape.name}, ${form.example.note ?? 'an example'}`,
+    )}</li>`;
+  });
+  return `<section id="${shape.slug}">
+<h2>${escape(shape.name)}</h2>
+${shape.aliases.length ? `<p class="note">Also: ${shape.aliases.map(escape).join(', ')}.</p>` : ''}
+${markdown(shape.intro, ref)}
+<ol class="examples">${forms.join('\n')}</ol>
+${shape.pitfall ? `<p class="note">Pitfall: ${inline(shape.pitfall, ref)}</p>` : ''}
+</section>`;
+}
+
+function shapesBody(ref: Reference): string {
+  return [
+    `<p class="crumb"><a href="/docs/">Reference</a></p>`,
+    `<h1>${escape(ref.shapesPage.title)}</h1>`,
+    markdown(ref.shapesPage.intro, ref),
+    `<p>${ref.shapes.map(s => `<a href="#${s.slug}">${escape(s.name)}</a>`).join(' · ')}</p>`,
+    ...ref.shapes.map(s => shapeSection(ref, s)),
   ].join('\n');
 }
 
@@ -350,5 +390,15 @@ export function docsPages(ref: Reference): Map<string, string> {
       body: functionsBody(ref),
     }),
   );
+  if (ref.shapes.length)
+    pages.set(
+      'docs/shapes/index.html',
+      shell(ref, {
+        slug: 'shapes',
+        title: ref.shapesPage.title,
+        description: `${ref.shapesPage.summary} Circles to tori, in Equation.io's language.`,
+        body: shapesBody(ref),
+      }),
+    );
   return pages;
 }

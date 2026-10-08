@@ -2,7 +2,7 @@
  * The language reference (docs/reference/), read into one structure that
  * three outputs are generated from: the site's docs pages (web/docs), the
  * single-file web/public/llms.txt, and the Apple app's lookup tools
- * (list_kinds, kind_examples, function_doc; lib/assistant-tools.ts).
+ * (list_kinds, kind_examples, function_doc, shape; lib/assistant-tools.ts).
  *
  * The source is Markdown, a page per file, each opening with `key: value`
  * front matter between `---` lines:
@@ -23,6 +23,13 @@
  *   one output.
  * - `functions.md`: notes on built-in functions, a `## name` heading each,
  *   added to their signatures (lib/syntax-help.ts).
+ * - `shapes.md`: named curves and surfaces (the shape tool), a `## Name`
+ *   heading each, then an `Also: alias, alias.` line, a paragraph on what it
+ *   is, its forms, and an optional `Pitfall: …` paragraph. A form is a
+ *   bullet, `- kind: \`rows\``, optionally ` — a note`, over nested bullets
+ *   naming each parameter (`` - `a`: what it sets ``) and one instance
+ *   (`- e.g. \`rows\` — a note`). reference.test.ts draws every form (its
+ *   parameters set) and instance as its kind.
  *
  * Text is Markdown's common core: paragraphs, `-` lists (two spaces indent a
  * continuation or a nested list), code indented four spaces, `inline code`,
@@ -71,6 +78,27 @@ export interface KindGroup {
   kinds: PublicKind[];
 }
 
+/** One form of a named shape: its rows in named parameters, and an instance with numbers. */
+export interface ShapeForm {
+  kind: PublicKind;
+  rows: string[];
+  note?: string;
+  /** Each parameter's name and what it sets. */
+  params: [name: string, meaning: string][];
+  example: { rows: string[]; note?: string };
+}
+
+/** A named curve or surface (shapes.md). */
+export interface Shape {
+  name: string;
+  slug: string;
+  aliases: string[];
+  /** What it is, in a sentence or two. */
+  intro: string;
+  forms: ShapeForm[];
+  pitfall?: string;
+}
+
 export interface Reference {
   blurb: string;
   intro: string;
@@ -80,6 +108,8 @@ export interface Reference {
   functionsIntro: string;
   /** Written notes on built-in functions, by name. */
   notes: Map<string, string>;
+  shapesPage: { title: string; summary: string; intro: string };
+  shapes: Shape[];
 }
 
 const KIND_SECTIONS = ['Forms', 'Examples', 'Pitfalls', 'Details'] as const;
@@ -116,6 +146,61 @@ function listItems(text: string): string[] {
 }
 
 const EXAMPLE = /^([^`:]+): `([^`]+)`(?:\s+—\s+(.+))?$/;
+
+const rowsOf = (text: string) =>
+  splitStatements(text)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+const slugOf = (name: string) =>
+  name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+
+const FORM = /^- (\w+): `([^`]+)`(?:\s+—\s+(.+))?$/;
+const PARAM = /^ {2}- `(\w+)`: (.+)$/;
+const INSTANCE = /^ {2}- e\.g\. `([^`]+)`(?:\s+—\s+(.+))?$/;
+
+/** shapes.md's `## Name` sections, each a shape. */
+function shapes(text: string): Shape[] {
+  return sections(text).sections.map(([name, body]) => {
+    const where = `shapes.md: ${name}`;
+    const shape: Shape = { name, slug: slugOf(name), aliases: [], intro: '', forms: [] };
+    const intro: string[] = [];
+    for (const block of body.split(/\n\s*\n/)) {
+      const flat = block.replace(/\s*\n\s*/g, ' ').trim();
+      if (flat.startsWith('Also: ')) shape.aliases = flat.slice(6).replace(/\.$/, '').split(/,\s*/);
+      else if (flat.startsWith('Pitfall: ')) shape.pitfall = flat.slice(9);
+      else if (!block.startsWith('- ')) intro.push(flat);
+      else
+        for (const line of block.split('\n')) {
+          const form = FORM.exec(line);
+          const param = PARAM.exec(line);
+          const instance = INSTANCE.exec(line);
+          const last = shape.forms.at(-1);
+          if (form)
+            shape.forms.push({
+              kind: form[1] as PublicKind,
+              rows: rowsOf(form[2]),
+              ...(form[3] ? { note: form[3] } : {}),
+              params: [],
+              example: { rows: [] },
+            });
+          else if (instance && last && !last.example.rows.length)
+            last.example = { rows: rowsOf(instance[1]), ...(instance[2] ? { note: instance[2] } : {}) };
+          else if (param && last && !last.example.rows.length) last.params.push([param[1], param[2]]);
+          else throw new Error(`${where}: ${JSON.stringify(line)} is not a form, a parameter or an e.g.`);
+        }
+    }
+    shape.intro = intro.join('\n\n');
+    if (!shape.intro || !shape.forms.length) throw new Error(`${where}: needs a paragraph and a form`);
+    for (const form of shape.forms) if (!form.example.rows.length) throw new Error(`${where}: a form with no e.g.`);
+    return shape;
+  });
+}
 
 function examples(path: string, text: string): ReferenceExample[] {
   return listItems(text).map(item => {
@@ -182,6 +267,7 @@ export function parseReference(files: Record<string, string>): Reference {
 
   const functions = files['functions.md'] ? frontMatter('functions.md', files['functions.md']).body : '';
   const fn = sections(functions);
+  const shapesFile = files['shapes.md'] ? frontMatter('shapes.md', files['shapes.md']) : undefined;
   return {
     blurb,
     intro: top.intro.slice(blurb.length).trim(),
@@ -190,6 +276,12 @@ export function parseReference(files: Record<string, string>): Reference {
     guides,
     functionsIntro: fn.intro,
     notes: new Map(fn.sections),
+    shapesPage: {
+      title: shapesFile?.meta.title ?? 'Named shapes',
+      summary: shapesFile?.meta.summary ?? '',
+      intro: shapesFile ? sections(shapesFile.body).intro : '',
+    },
+    shapes: shapesFile ? shapes(shapesFile.body) : [],
   };
 }
 
@@ -212,7 +304,7 @@ export function functionEntries(ref: Reference) {
 /** Text for a plain-text reader: a link to a kind reads as its words. */
 const plain = (md: string) => md.replace(/\[([^\]]+)\]\((?:#[\w-]+|\/docs\/[\w-/]*)\)/g, '$1');
 
-/** Guide pages in the order llms.txt prints them; ROW_TYPES and FUNCTIONS mark the generated sections. */
+/** Guide pages in the order llms.txt prints them; ROW_TYPES, FUNCTIONS and SHAPES mark the generated sections. */
 export const LLMS_ORDER = [
   'assistants',
   'links',
@@ -227,6 +319,7 @@ export const LLMS_ORDER = [
   'panels',
   'grid',
   'FUNCTIONS',
+  'SHAPES',
   'more',
 ] as const;
 
@@ -263,6 +356,27 @@ function kindSection(page: KindPage): string {
   return parts.join('\n\n');
 }
 
+/** Named shapes, as shapes.md writes them, a `###` heading each. */
+function shapesSection(ref: Reference): string {
+  const shape = (s: Shape) => {
+    const forms = s.forms.map(f =>
+      [
+        `- ${f.kind}: \`${f.rows.join('; ')}\`${f.note ? ` — ${f.note}` : ''}`,
+        ...f.params.map(([name, meaning]) => `  - \`${name}\`: ${meaning}`),
+        `  - e.g. \`${f.example.rows.join('; ')}\`${f.example.note ? ` — ${f.example.note}` : ''}`,
+      ].join('\n'),
+    );
+    return [
+      `### ${s.name}`,
+      ...(s.aliases.length ? [`Also: ${s.aliases.join(', ')}.`] : []),
+      plain(s.intro),
+      forms.join('\n'),
+      ...(s.pitfall ? [`Pitfall: ${plain(s.pitfall)}`] : []),
+    ].join('\n\n');
+  };
+  return [`## ${ref.shapesPage.title}`, plain(ref.shapesPage.intro), ...ref.shapes.map(shape)].join('\n\n');
+}
+
 /** web/public/llms.txt: the whole reference as one file, for MCP clients and other assistants. */
 export function llmsTxt(ref: Reference): string {
   const out = [`# equation.io\n\n${ref.blurb.trim()}`];
@@ -276,6 +390,8 @@ export function llmsTxt(ref: Reference): string {
       // Signatures only, to keep the file short: the sections above say what each does.
       const lines = functionEntries(ref).map(f => `- \`${f.signature}\``);
       out.push(`## Functions\n\n${plain(ref.functionsIntro)}\n\n${lines.join('\n')}`);
+    } else if (key === 'SHAPES') {
+      if (ref.shapes.length) out.push(shapesSection(ref));
     } else {
       const page = ref.guides.get(key);
       if (!page) throw new Error(`guide/${key}.md is missing`);
@@ -299,14 +415,16 @@ export interface LabelledRows {
 /**
  * What the Apple app's lookups answer from (lib/assistant-tools.ts),
  * bundled as assistant.json by `pnpm app:web`: the kinds by group with their
- * smallest forms, worked examples by kind and by function, and notes on
- * functions.
+ * smallest forms, worked examples by kind and by function, notes on
+ * functions, and named shapes.
  */
 export interface AssistantData {
   groups: { name: string; brief: boolean; kinds: { kind: PublicKind; title: string; form: string; short: string }[] }[];
   kinds: Record<string, LabelledRows[]>;
   functions: Record<string, LabelledRows[]>;
   notes: Record<string, string>;
+  /** Named curves and surfaces (shapes.md), for the shape tool. */
+  shapes: Omit<Shape, 'slug'>[];
 }
 
 /**
@@ -314,7 +432,8 @@ export interface AssistantData {
  * kind its own examples, written to show one shape each (the first `per`),
  * then examples from the menu (`menu`, lib/assistant-tools.ts examplesIndex)
  * to make up `per`.
- * Functions keep the menu's examples: those that call them.
+ * Functions keep the menu's examples: those that call them; shapes are the
+ * reference's.
  */
 export function assistantData(
   ref: Reference,
@@ -341,5 +460,6 @@ export function assistantData(
     kinds,
     functions: menu.functions,
     notes: Object.fromEntries([...ref.notes].map(([name, note]) => [name, plain(note).replace(/\s+/g, ' ')])),
+    shapes: ref.shapes.map(({ slug: _, ...shape }) => shape),
   };
 }
