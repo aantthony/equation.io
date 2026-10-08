@@ -914,3 +914,14 @@ before it (`2026-10-08T070319Z`): 37% ±3% → 34% ±3% (85 → 78 of 230), 23 r
 stopped by the cap, overflows 15 → 1, and the suite took **38 minutes instead
 of 58**. Nothing the model sees changed, so the 3-point drop is run-to-run
 noise: a useful reminder that two runs of identical code differ by that much.
+
+### Well-known shapes as equations
+
+`dac88c4c` adds one line to the instructions: a shape with a well-known
+equation (circle, ellipse, sphere, cone, hyperboloid, paraboloid) is written as
+that equation, e.g. an ellipse is x^2/9 + y^2/4 = 1. `results/2026-10-08T101038Z-on-device.json`:
+34% ±3% → 33% ±5%, noise. hyperboloid stayed 0/5: it stopped copying the
+helicoid, but 4 of 5 single-task runs copied the chart's placeholder `xy = 0`
+as a row (a constant named xy). color-red fell 5 → 0 because every run wrote
+`#ff`, a two-digit color the renderer silently ignores; nothing in this change
+touches colors.
