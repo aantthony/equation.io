@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { parametricGLSL } from './compiler.ts';
 import { evaluate } from './expr.ts';
-import { surfaceInUV, surfaceMapping, surfacePoint } from './surface-map.ts';
+import {
+  surfaceArrows,
+  surfaceInUV,
+  surfaceMapping,
+  surfaceOver,
+  surfacePoint,
+  surfaceTangents,
+} from './surface-map.ts';
 import { type SurfaceSpec, parseViewRow } from './view.ts';
 
 const SPHERE = 'on((X, Y, Z) = (cos(y) cos(x), cos(y) sin(x), sin(y)), x = -pi..pi, y = -pi/2..pi/2)';
@@ -67,23 +74,86 @@ describe('rows on a surface', () => {
       '(u, u/3)',
       'polygon((0, 0), (1, 0), (0, 1))',
       '(-y, x)',
+      '(u cos(2 pi v), u sin(2 pi v))',
+      'rgb(x, y, 0)',
       'z = x y',
     ];
     const a = analyzeRows(rows).rows;
     expect(a[0].view?.kind).toBe('surface');
-    expect(a.slice(1, 7).map(r => (r.cls ? surfaceMapping(r.cls.object) : r.error))).toEqual([
+    expect(a.slice(1, 9).map(r => (r.cls ? surfaceMapping(r.cls.object) : r.error))).toEqual([
       'paint',
       'paint',
       'paint',
+      'carry',
+      'carry',
       'carry',
       'carry',
       'carry',
     ]);
-    // A vector field has no picture on it yet.
-    expect(a[7].error).toMatch(/draws its rows on a surface/);
+    // A colour field has no picture on it yet.
+    expect(a[9].error).toMatch(/draws its rows on a surface/);
     // A row in space draws as in any 3D panel.
-    expect(a[8].error).toBeUndefined();
-    expect(a[8].cls!.needs3D).toBe(true);
+    expect(a[10].error).toBeUndefined();
+    expect(a[10].cls!.needs3D).toBe(true);
+  });
+
+  it('carries a vector field by the surface’s tangents', () => {
+    const map = sphere();
+    // At longitude x, latitude y the sphere moves east with x, north with y.
+    const [px, py] = surfaceTangents(map, 0.3, 0.5);
+    expect(px[0]).toBeCloseTo(-Math.cos(0.5) * Math.sin(0.3), 12);
+    expect(px[1]).toBeCloseTo(Math.cos(0.5) * Math.cos(0.3), 12);
+    expect(px[2]).toBeCloseTo(0, 12);
+    expect(py[2]).toBeCloseTo(Math.cos(0.5), 12);
+    // Due east everywhere: each arrow leaves the sphere at a tangent, east,
+    // as long as 0.7 of its cell there (shorter toward the poles).
+    const arrows = surfaceArrows(map, () => [1, 0]);
+    // 24 cells round, 19 from pole to pole: near square at mid latitudes.
+    expect(arrows.length / 9).toBe(24 * 19);
+    for (let k = 0; k < arrows.length; k += 9) {
+      const p = arrows.slice(k, k + 3);
+      const d = arrows.slice(k + 3, k + 6).map((v, i) => v - p[i]);
+      expect(Math.hypot(...p)).toBeCloseTo(1, 12);
+      expect(arrows.slice(k + 6, k + 9).every(Number.isNaN)).toBe(true);
+      const len = Math.hypot(...d);
+      // East is (-sin x, cos x, 0) at longitude x.
+      const x = Math.atan2(p[1], p[0]);
+      expect(d[0] / len).toBeCloseTo(-Math.sin(x), 9);
+      expect(d[1] / len).toBeCloseTo(Math.cos(x), 9);
+      expect(d[2]).toBeCloseTo(0, 12);
+      // 0.7 of a cell 2π/24 wide, shrunk with the circle of latitude.
+      expect(len / Math.hypot(p[0], p[1])).toBeCloseTo((0.7 * 2 * Math.PI) / 24, 9);
+    }
+  });
+
+  it('lays its arrows out near square on the surface, and skips where the field is not', () => {
+    // A torus 3 round and 1 thick: three times as many cells round as across.
+    const torus = (
+      parseViewRow(
+        'on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi)',
+        {},
+      ) as SurfaceSpec
+    ).surface;
+    expect(surfaceArrows(torus, () => [0, 1]).length / 9).toBe(24 * 8);
+    // A field undefined on half the surface draws on the other half.
+    const half = surfaceArrows(torus, x => [Math.sqrt(x), 1]);
+    expect(half.length / 9).toBe(12 * 8);
+    expect(surfaceArrows(torus, () => [0, 0])).toEqual([]);
+  });
+
+  it('carries a parametric region’s own mesh onto the surface', () => {
+    // The disc of radius 1/2 about (0, 0), round the sphere's (1, 0, 0).
+    const [, region] = analyzeRows([SPHERE, '(u cos(2 pi v) / 2, u sin(2 pi v) / 2)']).rows;
+    const obj = region.cls!.object;
+    if (obj.kind !== 'region' || obj.form !== 'parametric') throw new Error(obj.kind);
+    const comps = surfaceOver(sphere(), obj.coordinates);
+    const at = (u: number, v: number) => comps.map(c => evaluate(c, { u, v }));
+    expect(at(0, 0).map(c => +c.toFixed(12))).toEqual([1, 0, 0]);
+    // Its rim on the equator: longitude 1/2.
+    expect(at(1, 0)[0]).toBeCloseTo(Math.cos(0.5), 12);
+    expect(at(1, 0)[1]).toBeCloseTo(Math.sin(0.5), 12);
+    expect(Math.hypot(...at(0.7, 0.3))).toBeCloseTo(1, 12);
+    expect(parametricGLSL(comps).du).toBeDefined();
   });
 
   it('draws a family as its members', () => {
@@ -100,7 +170,7 @@ describe('rows on a surface', () => {
   });
 
   it('maps only its own panel', () => {
-    const a = analyzeRows([SPHERE, '(-y, x)', '---', '(-y, x)']).rows;
+    const a = analyzeRows([SPHERE, 'rgb(x, y, 0)', '---', 'rgb(x, y, 0)']).rows;
     expect(a[1].error).toMatch(/surface/);
     expect(a[3].error).toBeUndefined();
   });

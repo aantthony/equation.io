@@ -171,8 +171,15 @@ import {
   projectToScreen,
 } from './render3d.ts';
 import { assignColors, takesColor } from '../lib/palette.ts';
-import { type SurfaceMap, surfaceInUV, surfaceMapping, surfacePoint } from '../lib/surface-map.ts';
-import { toGLSL } from '../lib/glsl.ts';
+import {
+  type SurfaceMap,
+  surfaceArrows,
+  surfaceInUV,
+  surfaceMapping,
+  surfaceOver,
+  surfacePoint,
+} from '../lib/surface-map.ts';
+import { toGLSL, uniformName } from '../lib/glsl.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1029,13 +1036,8 @@ const SURFACE_PIECES = 24;
  * does not hide what lies exactly on it.
  */
 function carryOntoSurface(scene: Scene3D, mark: ReturnType<typeof markScene>, surface: SurfaceMap, cam: Camera3D) {
-  const eye = cameraEye(cam);
-  const lift = 0.004 * cam.radius;
-  const onto = (x: number, y: number): [number, number, number] => {
-    const p = surfacePoint(surface, x, y);
-    const d = Math.hypot(eye[0] - p[0], eye[1] - p[1], eye[2] - p[2]) || 1;
-    return [0, 1, 2].map(k => p[k] + (lift * (eye[k] - p[k])) / d) as [number, number, number];
-  };
+  const lifted = towardEye(cam);
+  const onto = (x: number, y: number) => lifted(surfacePoint(surface, x, y));
   const line = (pts: ArrayLike<number>, pieces: number): Float32Array => {
     const out: number[] = [];
     for (let i = 0; i + 2 < pts.length; i += 3) {
@@ -1074,6 +1076,41 @@ function carryOntoSurface(scene: Scene3D, mark: ReturnType<typeof markScene>, su
   placed(scene.points, mark.points);
   if (scene.texts) placed(scene.texts, mark.texts);
 }
+
+/** A point on a surface moved a hair toward the eye, so the surface does
+ *  not hide what lies exactly on it. */
+function towardEye(cam: Camera3D): (p: readonly number[]) => [number, number, number] {
+  const eye = cameraEye(cam);
+  const lift = 0.004 * cam.radius;
+  return p => {
+    const d = Math.hypot(eye[0] - p[0], eye[1] - p[1], eye[2] - p[2]) || 1;
+    return [0, 1, 2].map(k => p[k] + (lift * (eye[k] - p[k])) / d) as [number, number, number];
+  };
+}
+
+/** A parametric region carried onto a surface: the GLSL of its mesh there,
+ *  in the region's u and v, its sliders read as uniforms; null if the
+ *  shaders cannot take it. */
+const surfaceRegions = new WeakMap<SurfaceMap, WeakMap<readonly Expr[], ReturnType<typeof parametricGLSL> | null>>();
+function surfaceRegionGLSL(surface: SurfaceMap, comps: readonly [Expr, Expr], params: readonly string[]) {
+  let byRegion = surfaceRegions.get(surface);
+  if (!byRegion) surfaceRegions.set(surface, (byRegion = new WeakMap()));
+  let out = byRegion.get(comps);
+  if (out === undefined) {
+    const names = Object.fromEntries(params.map(p => [p, { kind: 'var', name: uniformName(p) } as Expr]));
+    try {
+      out = parametricGLSL(surfaceOver(surface, comps), e => substVars(e, names));
+    } catch {
+      out = null;
+    }
+    byRegion.set(comps, out);
+  }
+  return out;
+}
+
+/** A parametric region's fill on a surface: all of its mesh, as an
+ *  inequality's area is painted. */
+const REGION_FILL: SurfacePaint['paint'] = { kind: 'region', field: '-1.0', edges: [] };
 
 /** The axis maps of panel p's view(…) row (lib/axis-map.ts), if it has any. */
 function panelMaps(p: Panel | undefined): AxisMaps | undefined {
@@ -2040,6 +2077,28 @@ function render() {
         const color = rowColor(eq);
         const plot = eq.cpu!;
         const { params, uniforms } = shaderBindings(eq.gpu);
+        // A parametric region's own mesh, carried onto the surface whole;
+        // a vector field as arrows along the surface's tangents.
+        if (on === 'carry' && plot.type === 'pregion') {
+          const mesh = surfaceRegionGLSL(surface!, plot.comps, params);
+          if (mesh)
+            (scene.paints ??= []).push({ ...mesh, xy: ['u', 'v'], paint: REGION_FILL, color, params, uniforms });
+          continue;
+        }
+        if (on === 'carry' && plot.type === 'vfield2d') {
+          let field: (p: number[]) => number[];
+          try {
+            field = fieldEvaluator(plot.comps, { ...constEnv, ...eq.gpu?.uniforms, t: time });
+          } catch {
+            continue; // too large to trace
+          }
+          const lifted = towardEye(camera);
+          const arrows = surfaceArrows(surface!, (x, y) => field([x, y]));
+          const pts = new Float32Array(arrows.length);
+          for (let k = 0; k + 2 < arrows.length; k += 3) pts.set(lifted(arrows.slice(k, k + 3)), k);
+          if (pts.length) scene.curves.push({ pts, color, arrow: true });
+          continue;
+        }
         switch (plot.type) {
           case 'implicit2d': // extrudes to its true locus (a vertical sheet)
             scene.implicits.push({ field: gpuFor(eq, 'implicit2d').field, color, params, uniforms });
