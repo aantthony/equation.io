@@ -133,8 +133,13 @@ symlog (`y = sinh(Y)`) all come from one feature.
      plane (2π along X, on the polar screen) are found once per window
      (PlaneInverse.turns, checked by PlaneInverse.symmetric), and every
      copy a turn from one found is added, so a search that misses a copy
-     finds it from another. A line's copy a turn from one already carried
-     is that run moved. A fill round a fold is repeated a turn on only when
+     finds it from another; the turn is taken as the longest difference
+     between copies over the number of turns it spans, so it is good to
+     many places. A line is solved for on one copy per vertex: every copy
+     a whole number of turns from it (or a turn from another carried) is
+     that run moved, so a window many turns wide costs little more than one
+     turn, and the copies are kept in typed arrays, found by a hash of
+     their cell. A fill round a fold is repeated a turn on only when
      the map really shows the same plane there, and each other branch
      (polar's copy at (X + π, −Y)) is filled from its own start. The fold
      points are where the Jacobian's determinant changes sign, or touches

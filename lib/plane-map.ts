@@ -667,13 +667,18 @@ export class PlaneInverse {
       const u = [d[0] / len, d[1] / len];
       if (common.some(c => Math.abs(c[0] * u[1] - c[1] * u[0]) < 1e-6 * Math.hypot(...c))) continue;
       let g = len;
+      let far = 0;
       for (const e of apart) {
         const t = e[0] * u[0] + e[1] * u[1];
         if (Math.abs(e[0] * u[1] - e[1] * u[0]) > 1e-6 * Math.abs(t) || Math.abs(t) < small) continue;
         let [a, b] = [g, Math.abs(t)];
         for (let it = 0; it < 64 && b > small; it++) [a, b] = [b, Math.abs(a - Math.round(a / b) * b)];
         if (a > small) g = a;
+        far = Math.max(far, Math.abs(t));
       }
+      // As the longest over the number of turns it spans: its error shared
+      // among them, so a copy many turns off moved by it lands on its own.
+      if (far > g) g = far / Math.round(far / g);
       common.push([g * u[0], g * u[1]]);
     }
     for (const d of [...common, ...apart]) {
@@ -894,50 +899,77 @@ export class PlaneInverse {
         const pa = map(a[0], a[1], shown(from) ? from : undefined);
         return [[...pa], map(b[0], b[1], shown(pa) ? pa : undefined)];
       });
-    interface Node {
-      p: [number, number];
-      /** The run on to the next vertex, from p; `to` the copy it reaches
-       *  there, or −1 off the screen. */
-      pts?: number[];
-      to?: number;
-      into: boolean;
-    }
-    const nodes: Node[] = [];
+    // The copies of each vertex the screen shows, `size` of them, in typed
+    // arrays (one per field, not an object per copy: a wide window has tens
+    // of thousands), doubled when full. A copy is at (px, py), of vertex
+    // kOf. Its run on to the next vertex, once carried, is pts moved by (dX,
+    // dY): a run moved by a turn shares the one it was moved from. `to` is
+    // the copy that run reaches there, or −1 off the screen, (endX, endY)
+    // then where if it was moved; `into` whether a run reaches it.
+    let size = 0;
+    let [px, py, dX, dY, endX, endY] = Array.from({ length: 6 }, () => new Float64Array(1024));
+    let [kOf, to, into, link] = Array.from({ length: 4 }, () => new Int32Array(1024));
+    const pts: Array<number[] | undefined> = [];
+    const wider = <T extends Float64Array | Int32Array>(a: T, b: T): T => {
+      b.set(a);
+      return b;
+    };
     const at: number[][] = Array.from({ length: count }, () => []);
     const tol = 1e-6 * this.screenScale;
     // Each vertex's copies by cell, a thousand tolerances a side: one is
-    // found among its cell's and the neighbours'.
-    const cells: Array<Map<number, number[]> | undefined> = new Array(count);
+    // found among its cell's and the neighbours'. Each vertex has `slots`
+    // slots of `table` side by side (kept together in memory, as a vertex's
+    // copies are looked for together), a cell hashed to one of them: the
+    // first copy there, the rest a list through `link`, told apart by
+    // place. The slots double when a vertex fills half of them, up to 256
+    // a vertex: past that, its lists grow longer instead.
+    let slots = 4;
+    let table = new Int32Array(slots * count).fill(-1);
     const cell = 1000 * tol;
-    const key = (i: number, j: number) => i * 4194304 + j;
-    const find = (k: number, p: readonly [number, number]) => {
-      const map = cells[k];
-      if (!map) return -1;
-      const [u, v] = [p[0] / cell, p[1] / cell];
-      const [ci, cj] = [Math.floor(u), Math.floor(v)];
+    const slot = (k: number, i: number, j: number) => {
+      const h = Math.imul(i, 0x85ebca6b) ^ Math.imul(j, 0xc2b2ae35);
+      return k * slots + ((h ^ (h >>> 15)) & (slots - 1));
+    };
+    const enter = (id: number) => {
+      const c = slot(kOf[id], Math.floor(px[id] / cell), Math.floor(py[id] / cell));
+      link[id] = table[c];
+      table[c] = id;
+    };
+    const find = (k: number, x: number, y: number) => {
+      const u = x / cell;
+      const v = y / cell;
+      const ci = Math.floor(u);
+      const cj = Math.floor(v);
       // The neighbours only within a tolerance (a thousandth) of an edge.
-      const [i0, i1] = [u - ci < 0.01 ? ci - 1 : ci, u - ci > 0.99 ? ci + 1 : ci];
-      const [j0, j1] = [v - cj < 0.01 ? cj - 1 : cj, v - cj > 0.99 ? cj + 1 : cj];
-      for (let i = i0; i <= i1; i++)
-        for (let j = j0; j <= j1; j++) {
-          const list = map.get(key(i, j));
-          if (list)
-            for (const id of list)
-              if (Math.abs(nodes[id].p[0] - p[0]) + Math.abs(nodes[id].p[1] - p[1]) < tol) return id;
-        }
+      for (let i = u - ci < 0.01 ? ci - 1 : ci; i <= (u - ci > 0.99 ? ci + 1 : ci); i++)
+        for (let j = v - cj < 0.01 ? cj - 1 : cj; j <= (v - cj > 0.99 ? cj + 1 : cj); j++)
+          for (let id = table[slot(k, i, j)]; id >= 0; id = link[id])
+            if (Math.abs(px[id] - x) + Math.abs(py[id] - y) < tol) return id;
       return -1;
     };
-    const add = (k: number, p: [number, number]) => {
-      let id = find(k, p);
+    const add = (k: number, x: number, y: number) => {
+      let id = find(k, x, y);
       if (id < 0) {
-        id = nodes.length;
-        nodes.push({ p, into: false });
+        id = size++;
+        if (size > px.length) {
+          const n = 2 * px.length;
+          [px, py, dX, dY, endX, endY] = [px, py, dX, dY, endX, endY].map(a => wider(a, new Float64Array(n)));
+          [kOf, to, into, link] = [kOf, to, into, link].map(a => wider(a, new Int32Array(n)));
+        }
+        px[id] = x;
+        py[id] = y;
+        kOf[id] = k;
+        dX[id] = dY[id] = 0;
+        endX[id] = endY[id] = NaN;
+        to[id] = -1;
+        into[id] = 0;
+        pts.push(undefined);
         at[k].push(id);
-        const map = (cells[k] ??= new Map());
-        const c = key(Math.floor(p[0] / cell), Math.floor(p[1] / cell));
-        const list = map.get(c);
-        if (list) list.push(id);
-        else map.set(c, [id]);
+        if (2 * at[k].length > slots && slots < 256) {
+          table = new Int32Array(2 * table.length).fill(-1);
+          slots *= 2;
+          for (let i = 0; i < size; i++) enter(i);
+        } else enter(id);
       }
       return id;
     };
@@ -945,38 +977,72 @@ export class PlaneInverse {
     // short one (a polygon's edges are long).
     const every = Math.max(1, Math.floor(count / 96));
     const turns = this.turns();
+    const [t1, t2] = turns;
+    const det = t1 && t2 ? t1[0] * t2[1] - t1[1] * t2[0] : 0;
+    // Each vertex's first copy carried by solving with its end shown: the
+    // others are that run moved, however many turns from it they are.
+    const solved = new Int32Array(count).fill(-1);
+    const carried = (m: number) => m >= 0 && !!pts[m] && to[m] >= 0;
+    // The run from `id` reaches (x, y) of vertex k: set once that copy is
+    // added, as adding may move the arrays.
+    const reach = (id: number, k: number, x: number, y: number) => {
+      const j = add(k, x, y);
+      to[id] = j;
+      into[j] = 1;
+    };
     const step = (k: number, id: number) => {
-      const n = nodes[id];
-      if (n.pts) return;
+      if (pts[id]) return;
       const next = (k + 1) % count;
-      // A copy a turn from one carried whole is that run, moved.
-      for (const [dX, dY] of turns)
-        for (const sign of [1, -1]) {
-          const m = find(k, [n.p[0] - sign * dX, n.p[1] - sign * dY]);
-          const o = m >= 0 ? nodes[m] : undefined;
-          if (!o?.pts || o.to === undefined || o.to < 0) continue;
-          n.pts = o.pts.map((v, i) => v + sign * (i % 2 ? dY : dX));
-          const end: [number, number] = [nodes[o.to].p[0] + sign * dX, nodes[o.to].p[1] + sign * dY];
-          n.to = this.inside(end[0], end[1], margin) ? add(next, end) : -1;
-          if (n.to < 0) n.pts.push(...end);
-          else nodes[n.to].into = true;
-          return;
-        }
-      const [piece, end] = seg(vertex(k), vertex(next), carry, n.p);
-      n.pts = piece;
-      n.to = shown(end) ? add(next, end) : -1;
-      if (n.to >= 0) nodes[n.to].into = true;
-      else if (turns.length) {
+      // A copy a turn from one carried whole is that run, moved: any number
+      // of turns from the one solved, else a turn either way, found by its
+      // cell. The shift is rounded to whole turns, so the run moves exactly.
+      let from = -1;
+      let sX = 0;
+      let sY = 0;
+      const base = t1 ? solved[k] : -1;
+      if (carried(base)) {
+        const eX = px[id] - px[base];
+        const eY = py[id] - py[base];
+        const a = Math.round(
+          t2 ? (eX * t2[1] - eY * t2[0]) / det : (eX * t1[0] + eY * t1[1]) / (t1[0] ** 2 + t1[1] ** 2),
+        );
+        const b = t2 ? Math.round((t1[0] * eY - t1[1] * eX) / det) : 0;
+        sX = a * t1[0] + (t2 ? b * t2[0] : 0);
+        sY = a * t1[1] + (t2 ? b * t2[1] : 0);
+        if ((a || b) && Math.abs(eX - sX) + Math.abs(eY - sY) < tol) from = base;
+      }
+      for (let i = 0; from < 0 && i < 2 * turns.length; i++) {
+        const sign = i % 2 ? -1 : 1;
+        const [tX, tY] = turns[i >> 1];
+        const m = find(k, px[id] - sign * tX, py[id] - sign * tY);
+        if (carried(m)) [from, sX, sY] = [m, sign * tX, sign * tY];
+      }
+      if (from >= 0) {
+        pts[id] = pts[from];
+        dX[id] = dX[from] + sX;
+        dY[id] = dY[from] + sY;
+        const eX = px[to[from]] + sX;
+        const eY = py[to[from]] + sY;
+        if (this.inside(eX, eY, margin)) reach(id, next, eX, eY);
+        else [endX[id], endY[id]] = [eX, eY];
+        return;
+      }
+      const [piece, end] = seg(vertex(k), vertex(next), carry, [px[id], py[id]]);
+      pts[id] = piece;
+      if (shown(end)) {
+        reach(id, next, ...end);
+        if (solved[k] < 0) solved[k] = id;
+      } else if (turns.length) {
         // Off the screen across the seam of an angle: the copy a turn back
         // comes on at the other edge, traced back to there (lead).
-        const off = this.follow(...vertex(next), n.p, 1);
+        const off = this.follow(...vertex(next), [px[id], py[id]], 1);
         if (off)
-          for (const [dX, dY] of turns)
+          for (const [tX, tY] of turns)
             for (const sign of [1, -1]) {
-              const c: [number, number] = [off[0] + sign * dX, off[1] + sign * dY];
+              const c: [number, number] = [off[0] + sign * tX, off[1] + sign * tY];
               if (!this.inside(c[0], c[1], margin)) continue;
               const s = this.solve(...vertex(next), c, margin);
-              if (s) add(next, s);
+              if (s) add(next, ...s);
             }
       }
     };
@@ -990,7 +1056,7 @@ export class PlaneInverse {
       if (!near || (was && k % every !== 0 && k !== count - 1)) return;
       for (const p of this.all(...vertex(k)))
         // Not where the map folds: the polar origin is shown all along Y = 0.
-        if (this.inside(p[0], p[1], margin) && !this.folds(p[0], p[1])) add(k, p);
+        if (this.inside(p[0], p[1], margin) && !this.folds(p[0], p[1])) add(k, ...p);
     };
     for (let k = 0; k < runs; k++) {
       search(k);
@@ -1002,17 +1068,15 @@ export class PlaneInverse {
       more = false;
       for (let k = 0; k < runs; k++)
         for (let i = 0; i < at[k].length; i++)
-          if (!nodes[at[k][i]].pts) {
+          if (!pts[at[k][i]]) {
             step(k, at[k][i]);
             more = true;
           }
     }
     // Where each copy with nothing leading into it came onto the screen.
-    const kOf = new Int32Array(nodes.length);
-    at.forEach((ids, k) => ids.forEach(id => (kOf[id] = k)));
     const lead = (id: number): number[] => {
       const rev: number[] = [];
-      let [k, from] = [kOf[id], nodes[id].p];
+      let [k, from]: [number, [number, number]] = [kOf[id], [px[id], py[id]]];
       for (let steps = 0; steps < count && (closed || k > 0); steps++) {
         const prev = (k - 1 + count) % count;
         const [piece, end] = seg(vertex(k), vertex(prev), carry, from);
@@ -1020,32 +1084,33 @@ export class PlaneInverse {
         if (!shown(end)) break;
         rev.push(...end);
         // Into a copy already drawn: joined there.
-        if (find(prev, end) >= 0) break;
+        if (find(prev, ...end) >= 0) break;
         [k, from] = [prev, end];
       }
       const out: number[] = [];
       for (let i = rev.length - 2; i >= 0; i -= 2) out.push(rev[i], rev[i + 1]);
       return out;
     };
-    const done = new Uint8Array(nodes.length);
+    const done = new Uint8Array(size);
     const chains: number[][] = [];
     const walk = (id: number, out: number[]) => {
       for (let cur = id; cur >= 0 && !done[cur];) {
         done[cur] = 1;
-        const n = nodes[cur];
-        if (!n.pts) {
-          out.push(...n.p);
+        const run = pts[cur];
+        if (!run) {
+          out.push(px[cur], py[cur]);
           break;
         }
-        out.push(...n.pts);
-        cur = n.to ?? -1;
-        if (cur >= 0 && done[cur]) out.push(...nodes[cur].p);
+        for (let i = 0; i + 1 < run.length; i += 2) out.push(run[i] + dX[cur], run[i + 1] + dY[cur]);
+        if (isFinite(endX[cur])) out.push(endX[cur], endY[cur]);
+        cur = to[cur];
+        if (cur >= 0 && done[cur]) out.push(px[cur], py[cur]);
       }
       if (out.length >= 4) chains.push(out);
     };
-    for (let id = 0; id < nodes.length; id++) if (!nodes[id].into && !done[id]) walk(id, lead(id));
+    for (let id = 0; id < size; id++) if (!into[id] && !done[id]) walk(id, lead(id));
     // What is left goes round and round: a closed line on one copy.
-    for (let id = 0; id < nodes.length; id++) if (!done[id]) walk(id, []);
+    for (let id = 0; id < size; id++) if (!done[id]) walk(id, []);
     return chains;
   }
 

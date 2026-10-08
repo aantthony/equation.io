@@ -397,6 +397,58 @@ describe('a plane map', () => {
       expect(planeInverse(parsePlaneMap(map), { lo: [-3, -5], hi: [3, 5] }).foldPoints(), map).toEqual([]);
   });
 
+  it('draws a window many turns wide as each turn of it alone', () => {
+    // How long a polyline is on the screen between X = a and b, cut there.
+    const drawn = (lines: number[][], a: number, b: number) => {
+      let len = 0;
+      for (const l of lines)
+        for (let i = 0; i + 3 < l.length; i += 2) {
+          const [X0, Y0, X1, Y1] = l.slice(i, i + 4);
+          if (![X0, Y0, X1, Y1].every(Number.isFinite)) continue;
+          // Liang–Barsky: the part of the run in [a, b] × [0, 5].
+          let [t0, t1] = [0, 1];
+          for (const [p, q] of [
+            [X0 - X1, X0 - a],
+            [X1 - X0, b - X0],
+            [Y0 - Y1, Y0],
+            [Y1 - Y0, 5 - Y0],
+          ]) {
+            if (p === 0 && q < 0) t0 = 2;
+            else if (p < 0) t0 = Math.max(t0, q / p);
+            else if (p > 0) t1 = Math.min(t1, q / p);
+          }
+          if (t1 > t0) len += (t1 - t0) * Math.hypot(X1 - X0, Y1 - Y0);
+        }
+      return len;
+    };
+    const n = 600;
+    const curves: Array<[string, (k: number) => [number, number], (x: number, y: number) => number]> = [
+      ['y = 1', k => [-7.5 + (15 * k) / n, 1], (_, y) => y - 1],
+      [
+        'y = 3 sin 2x',
+        k => [-6 + (12 * k) / n, 3 * Math.sin(2 * (-6 + (12 * k) / n))],
+        (x, y) => y - 3 * Math.sin(2 * x),
+      ],
+    ];
+    const wide = planeInverse(polar(), { lo: [-7 * Math.PI, 0], hi: [7 * Math.PI, 5] });
+    for (const [name, curve, off] of curves) {
+      const lines = planeLines(wide, n + 1, curve, false);
+      // Every point drawn shows a point of the line, a run moved by turns
+      // as well as one solved for.
+      for (const l of lines)
+        for (let i = 0; i + 1 < l.length; i += 2)
+          if (wide.inside(l[i], l[i + 1]))
+            expect(Math.abs(off(...wide.world(l[i], l[i + 1]))), name).toBeLessThan(1e-6);
+      // And each turn of the window draws what a window of that turn alone
+      // does.
+      for (let k = -3; k <= 3; k++) {
+        const [a, b] = [(2 * k - 1) * Math.PI, (2 * k + 1) * Math.PI];
+        const one = planeLines(planeInverse(polar(), { lo: [a, 0], hi: [b, 5] }), n + 1, curve, false);
+        expect(drawn(lines, a, b) / drawn(one, a, b), `${name}, turn ${k}`).toBeCloseTo(1, 9);
+      }
+    }
+  });
+
   it('finds a branch point of z², and fills round it, wherever the window is', () => {
     const z2 = parsePlaneMap('(X^2 - Y^2, 2 X Y)');
     const square = [
