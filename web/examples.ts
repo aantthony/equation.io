@@ -977,7 +977,7 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       // A log frequency axis: a resonance peak of 20 log(Q) dB, then -40 dB a decade.
       [
         'Bode plot (slide Q)',
-        'view(x = 0.01..100, y = -65..25, x = 10^X, ratio = 0.05); Q = clamp(4, 0.5, 20); ' +
+        'view(x = 0.01..100, y = -65..30, x = 10^X, ratio = 0.03); Q = clamp(4, 0.5, 20); ' +
           'y = -10 log((1 - x^2)^2 + (x/Q)^2); y = {x < 1: 0, -40 log(x)}',
         'coordinates physics slider',
       ],
@@ -1051,11 +1051,12 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
     'drawing on surfaces',
     [
       // Longitude x, latitude y. A loxodrome crosses every meridian at one
-      // angle: x = 4 asinh(tan(y)), a straight line on a Mercator map.
+      // angle: x = 4 asinh(tan(y)), a straight line on a Mercator map. The cap
+      // holds the points within 0.35 radians of (-0.8, 0.5), by their dot product.
       [
         'globe: a field, a loxodrome and a cap',
         'camera(-pi/4, 0.4, 7, spin = 0.2); on((X, Y, Z) = (2cos(y) cos(x), 2cos(y) sin(x), 2sin(y)), x = -pi..pi, y = -pi/2..pi/2); ' +
-          'cos(y)^3 cos(3x); sin((x - 4 asinh(tan(y)))/2) = 0; (x + 0.8)^2 + (y - 0.5)^2 < 0.1',
+          '4cos(y)^3 cos(3x); sin((x - 4 asinh(tan(y)))/2) = 0; cos(y) cos(0.5) cos(x + 0.8) + sin(y) sin(0.5) > cos(0.35)',
         '3d surface scalar-field coordinates',
       ],
       // The great circle whose highest point is P.
@@ -1074,10 +1075,11 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         '3d vector-field slider',
       ],
       // The line of slope q/p, wrapped round both of the torus's circles, is
-      // the (p, q) torus knot: p y - q x is a multiple of 2π along it.
+      // the (p, q) torus knot: p y - q x is a multiple of 2π along it. With
+      // gcd(p, q) > 1 it is a torus link of gcd(p, q) loops instead.
       [
         'torus knot as a line (slide p, q)',
-        'camera(-pi/3, 0.8, 11); p = clamp(round(2), 1, 9); q = clamp(round(5), 1, 9); ' +
+        'camera(-pi/3, 0.8, 11); p = clamp(round(3), 1, 9); q = clamp(round(4), 1, 9); ' +
           'on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); sin((p y - q x)/2) = 0',
         '3d knot slider',
       ],
@@ -1310,7 +1312,7 @@ export const COVERS: Record<string, string> = {
   complex: 'domain coloring',
   'polar + plane coordinates': 'spiral traced in (r, θ)',
   'spherical + cylindrical': 'cylindrical chart',
-  'drawing on surfaces': 'torus knot as a line (slide p, q)',
+  'drawing on surfaces': 'globe: a field, a loxodrome and a cap',
   '3D surfaces': 'gyroid',
   'fields in space': 'hydrogen 2p orbital',
   solids: 'icosahedron',
