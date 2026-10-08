@@ -188,9 +188,11 @@ import {
   GEODESIC_MAX_POINTS,
   geodesicPlanKey,
   GEODESIC_MAX_STEPS,
+  metricValues,
   numericIn,
   traceWindow,
 } from '../lib/surface-geometry.ts';
+import { type ConeGlyphs, type ConeView, coneGlyphs, indicatrixScale } from '../lib/light-cone.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1642,6 +1644,65 @@ function geodesicNote(row: Equation, members: number) {
  * point — and never on this thread. The last one traced keeps drawing until
  * the next arrives, so dragging stays smooth while the worker catches up.
  */
+/** A light-cone row's reader of its metric and the names it reads, by plan. */
+const coneReaders = new WeakMap<
+  CpuPlan,
+  {
+    names: string[];
+    metricNames: string[];
+    key: string;
+    read: ReturnType<typeof metricValues> | null;
+    glyphs?: ConeGlyphs;
+    view?: string;
+  }
+>();
+/** The indicatrix scale of a panel's metric over a view, by its components
+ *  (shared by the panel's light-cone rows, so lightcones and lightcone(P)
+ *  agree): a lone lightcone(P) is drawn at the scale the lattice would be. */
+const coneScales = new WeakMap<readonly unknown[], { key: string; kappa: number }>();
+
+/**
+ * The light-cone glyphs a lightcones or lightcone(P) row draws over the
+ * view (lib/light-cone.ts), in x and y: worked out again only when the view
+ * or a value the metric or the point reads changes.
+ */
+function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView): ConeGlyphs {
+  const plot = eq.cpu as Extract<CpuPlan, { type: 'lightcone' }>;
+  let c = coneReaders.get(plot);
+  if (!c) {
+    const reads = (exprs: Expr[]) => [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
+    const metric = [...plot.components, ...(plot.jacobian ?? [])];
+    c = { names: reads([...metric, ...(plot.at ?? [])]), metricNames: reads(metric), key: '', read: null };
+    coneReaders.set(plot, c);
+  }
+  const key = JSON.stringify(c.metricNames.map(n => env[n]));
+  if (c.key !== key || !c.read) {
+    c.key = key;
+    c.read = metricValues(plot, env);
+  }
+  const where = `${JSON.stringify(c.names.map(n => env[n]))}\n${JSON.stringify(view)}`;
+  if (c.glyphs && c.view === where) return c.glyphs;
+  let kappa: number | undefined;
+  if (plot.n === 3) {
+    const scaleKey = `${key}\n${JSON.stringify(view)}`;
+    const scale = coneScales.get(plot.components);
+    if (scale?.key === scaleKey) kappa = scale.kappa;
+    else {
+      kappa = indicatrixScale(c.read, view);
+      coneScales.set(plot.components, { key: scaleKey, kappa });
+    }
+  }
+  let at: [number, number][] | undefined;
+  if (plot.at) {
+    const out = new Float64Array(2);
+    numericIn(plot.at, ['x', 'y'], env)(NaN, NaN, out);
+    at = [[out[0], out[1]]];
+  }
+  c.glyphs = coneGlyphs(c.read, view, { ...(at ? { at } : {}), ...(kappa !== undefined ? { kappa } : {}) });
+  c.view = where;
+  return c.glyphs;
+}
+
 function geodesicFor(
   eq: Equation,
   env: Record<string, number>,
@@ -2823,6 +2884,18 @@ function render() {
             const xy: number[] = [];
             for (let k = 0; k + 2 < pts.length; k += 3) xy.push(pts[k], pts[k + 1]);
             if (xy.length >= 4) extras.polylines.push({ pts: xy, color: css });
+            break;
+          }
+          // The light cones of the panel's metric, sized in CSS pixels.
+          case 'lightcone': {
+            const upp = view.upp * dpr;
+            const glyphs = lightConesFor(eq, env, {
+              lo: [xmin, view.cy - halfH],
+              hi: [xmax, view.cy + halfH],
+              upp,
+              uppY: upp / (view.ratio ?? 1),
+            });
+            (extras.glyphs ??= []).push({ ...glyphs, color: css, fill: cssColorA(color, 0.2) });
             break;
           }
           case 'automaton': {

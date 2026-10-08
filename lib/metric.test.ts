@@ -147,7 +147,7 @@ describe('ds^2 rows', () => {
     expect(errorOf(['ds^2 = dx^3 + dy^2'])).toMatch(/quadratic form/);
     expect(errorOf(['ds^2 = dx^2 + dy^2 + dx'])).toMatch(/quadratic form/);
     expect(errorOf(['ds^2 = dx^2 + dy^2 + 1'])).toMatch(/quadratic form/);
-    expect(errorOf(['ds^2 = -dx^2 + dy^2'])).toMatch(/positive for every direction/);
+    expect(errorOf(['ds^2 = -dx^2 - dy^2'])).toMatch(/negative for every direction/);
     expect(errorOf(['ds^2 = dt^2 + dx^2 + dy^2'])).toMatch(/t must be a time/);
     expect(errorOf(['ds^2 = -dt^2 - dx^2 + dy^2'])).toMatch(/one minus sign, for dt/);
     expect(errorOf(['r = sqrt(x^2 + y^2)', 's = 2r', 'ds^2 = dr^2 + ds^2'])).toBeDefined();

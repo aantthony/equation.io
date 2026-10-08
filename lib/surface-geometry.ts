@@ -41,6 +41,7 @@
 import { NonSmoothError, add, diff, div, mul, pow, sub } from './diff.ts';
 import { type Expr, evaluate, exprKey, freeVars, substVars } from './expr.ts';
 import { type Prog, compileProg, run } from './vm.ts';
+import { nearestNull } from './light-cone.ts';
 
 /** ∂e/∂v, as the resolver takes it (symbolic, with its fallbacks). */
 export type Partial = (e: Expr, v: string) => Expr;
@@ -831,7 +832,8 @@ export interface MetricSpec {
    */
   readonly jacobian?: readonly Expr[];
   /** Unit speed (a Riemannian metric), proper time (a massive particle) or
-   *  a light ray's affine parameter. */
+   *  a light ray's affine parameter. With n = 2, timelike or null makes x
+   *  and y a spacetime diagram (a Lorentzian metric in them alone). */
   readonly motion: Motion;
   /** τ's name, for what it says. */
   readonly time?: string;
@@ -1066,6 +1068,32 @@ export function metricAt(
   return { g: g.map(row => [...row]), d: d.map(m => m.map(row => [...row])) };
 }
 
+/**
+ * A metric's g alone in x and y at a point, read over and over (a light
+ * cone's glyphs): its components and Jacobian compiled, its derivatives not.
+ * The matrix returned is the reader's own and changes on the next read; null
+ * where it is not finite.
+ */
+export function metricValues(
+  metric: Pick<MetricSpec, 'n' | 'components' | 'jacobian'>,
+  env: Readonly<Record<string, number>>,
+): (x: number, y: number) => readonly (readonly number[])[] | null {
+  const m = metric.components.length;
+  const zero: Expr = { kind: 'num', value: 0 };
+  const J = metric.jacobian;
+  const exprs = [
+    ...metric.components,
+    ...Array.from({ length: 2 * m }, () => zero),
+    ...(J ? [...J.slice(0, 4), ...Array.from({ length: 8 }, () => zero)] : []),
+  ];
+  const read = metricReader(numericIn(exprs, ['x', 'y'], env), metric.n, !!J);
+  return (x, y) => {
+    const { g } = read(x, y);
+    for (const row of g) for (const v of row) if (!Number.isFinite(v)) return null;
+    return g;
+  };
+}
+
 /** z with g z = a, g symmetric 2 × 2 or 3 × 3, into `z`. */
 function solveSymmetric(g: readonly (readonly number[])[], a: readonly number[], z: number[]): void {
   if (g.length === 2) {
@@ -1149,6 +1177,13 @@ function positive(g: readonly (readonly number[])[], s = 0): boolean {
   return E > 0 && E * G - F * F > 1e-12 * scale * scale;
 }
 
+/** Whether a 2 × 2 metric is Lorentzian (det g < 0), against its size
+ *  here: a spacetime diagram's. */
+function lorentz2(g: readonly (readonly number[])[]): boolean {
+  const size = metricSize(g);
+  return g[0][0] * g[1][1] - g[0][1] * g[0][1] < -1e-12 * size * size;
+}
+
 /** det g of a 3 × 3 metric. */
 function det3(g: readonly (readonly number[])[]): number {
   const [[A, B, C], [, D, E], [, , F]] = g;
@@ -1178,6 +1213,8 @@ const short = (x: number) => Number(x.toPrecision(3));
  * - null: only the direction matters; U^τ = 1 at the start, so the affine
  *   parameter runs like τ there.
  *
+ * With no τ, timelike and null are a spacetime diagram's (diagramStart).
+ *
  * `sign` −1 runs it back (U reversed). Null when there is nothing to trace
  * (a light ray with no direction).
  */
@@ -1202,6 +1239,7 @@ export function metricStart(
   const U = new Array<number>(n).fill(0);
   const acc = new Array<number>(n).fill(0);
   const lower = new Array<number>(n).fill(0);
+  if (n === 2 && motion !== 'riemannian') return diagramStart(read, g, motion, [a, b], sign, inRange);
   if (n === 2) {
     if (!positive(g)) return { problem: 'the metric is not positive definite at the start' };
     const flow: GeodesicFlow = {
@@ -1361,6 +1399,97 @@ export function metricStart(
     },
   };
   return { flow, velocity: [sign * w[0], sign * w[1]] };
+}
+
+/**
+ * A geodesic of a spacetime diagram — a Lorentzian metric in x and y alone,
+ * like -dy^2 + dx^2 or Schwarzschild's r and t — from metricStart.
+ *
+ * - timelike: `direction` is the coordinate velocity, which must point
+ *   inside the light cone (g(v, v) < 0, either half: a past-pointing one
+ *   runs back in time); U = v/√(−g(v, v)), so the step is proper time.
+ * - null: the ray runs along the null half-line nearest `direction` by angle
+ *   in x and y (lib/light-cone.ts nearestNull): there are only four, the two
+ *   null lines each way, and they move with the point, so no direction is
+ *   asked to be null exactly. U is that half-line at unit length in x and y,
+ *   so the affine parameter runs like distance in the panel at the start.
+ *
+ * After each step U is put back on g(U, U) = −1 (rescaled) or on its null
+ * line (projected onto it). It stops where the metric stops being
+ * Lorentzian, grows or shrinks 10⁸-fold, or where U runs away (10³ times its
+ * start) as the metric degenerates — the coordinates freezing at a horizon
+ * they do not cover, as Schwarzschild's t does at r = 2M.
+ */
+function diagramStart(
+  read: ReturnType<typeof metricReader>,
+  g: readonly (readonly number[])[],
+  motion: Motion,
+  [a, b]: readonly [number, number],
+  sign: number,
+  inRange: (g: readonly (readonly number[])[]) => boolean,
+): { flow: GeodesicFlow; velocity: [number, number] } | { problem: string } | null {
+  if (!lorentz2(g)) return { problem: 'the metric is not Lorentzian at the start' };
+  const Q = (g: readonly (readonly number[])[], u: number, v: number) =>
+    g[0][0] * u * u + 2 * g[0][1] * u * v + g[1][1] * v * v;
+  let U: [number, number];
+  if (motion === 'null') {
+    if (a === 0 && b === 0) return null;
+    U = nearestNull(g[0][0], g[0][1], g[1][1], Math.atan2(b, a))!;
+  } else {
+    const s = Q(g, a, b);
+    if (!(s < 0)) return { problem: 'v must point inside the light cone here: a particle is slower than light' };
+    U = [a / Math.sqrt(-s), b / Math.sqrt(-s)];
+  }
+  const soundness = (g: readonly (readonly number[])[]) =>
+    Math.abs(g[0][0] * g[1][1] - g[0][1] * g[0][1]) / metricSize(g) ** 2;
+  const sound0 = soundness(g);
+  const speed0 = Math.hypot(...U);
+  const W = [0, 0];
+  const acc = [0, 0];
+  const lower = [0, 0];
+  const flow: GeodesicFlow = {
+    accel(y, out) {
+      const { g, d } = read(y[0], y[1]);
+      W[0] = y[2];
+      W[1] = y[3];
+      metricAcceleration(g, d, W, acc, lower);
+      out[0] = acc[0];
+      out[1] = acc[1];
+    },
+    holds(p, q) {
+      const { g } = read(p, q);
+      return inRange(g) && lorentz2(g);
+    },
+    normalize(y) {
+      const { g } = read(y[0], y[1]);
+      if (!inRange(g) || !lorentz2(g)) return false;
+      const [w1, w2] = [y[2], y[3]];
+      if (!(Math.hypot(w1, w2) < TIME_RUNAWAY * Math.max(1, speed0)) && soundness(g) < DEGENERATE * sound0)
+        return false;
+      if (motion === 'null') {
+        // Onto the null line it runs along, if it is still the nearest.
+        const n = nearestNull(g[0][0], g[0][1], g[1][1], Math.atan2(w2, w1));
+        if (n) {
+          const along = w1 * n[0] + w2 * n[1];
+          if (along > 0 && Math.abs(w1 * n[1] - w2 * n[0]) < 0.1 * along) {
+            y[2] = along * n[0];
+            y[3] = along * n[1];
+          }
+        }
+      } else {
+        const s = Q(g, w1, w2);
+        if (s < 0) {
+          const k = 1 / Math.sqrt(-s);
+          if (Math.abs(k - 1) < 0.1) {
+            y[2] = w1 * k;
+            y[3] = w2 * k;
+          }
+        }
+      }
+      return Number.isFinite(y[2]) && Number.isFinite(y[3]);
+    },
+  };
+  return { flow, velocity: [sign * U[0], sign * U[1]] };
 }
 
 /**

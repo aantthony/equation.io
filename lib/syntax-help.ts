@@ -156,9 +156,13 @@ const signatures: Record<string, [string, string]> = {
     'geodesic(S, (u0, v0), (du, dv)) or geodesic(S, P, d, length)',
     'The geodesic of a surface in u, v from a point in a direction; on an on(…) panel, or under a ds^2 = … metric row, geodesic(P, (dx, dy)) — in a spacetime (dx, dy) is the velocity d(x, y)/dt',
   ],
+  lightcone: [
+    'lightcone(P)',
+    'The light cone of the panel’s ds^2 metric at P: on a spacetime diagram the two null directions, a wedge opening to the future; with a time beside x and y the ellipse of the speeds light can have there. lightcones alone on a row draws them over the panel',
+  ],
   lightray: [
     'lightray(P, (dx, dy)) or lightray(P, d, length)',
-    'A light ray of the panel’s spacetime metric (a ds^2 = … row with a time, like -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2) from P in a direction',
+    'A light ray of the panel’s spacetime metric (a ds^2 = … row with a time, like -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2, or a spacetime diagram, like -dy^2 + dx^2, where it runs along the null direction nearest d) from P in a direction',
   ],
   meancurvature: [
     'meancurvature(S) or meancurvature(S, u0, v0)',
@@ -304,6 +308,10 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values(
     ['ds'],
     'ds^2 = …: the panel’s own metric, in differentials like dx, dr or dt; its geodesic and lightray rows follow it',
+  );
+  values(
+    ['lightcones'],
+    'lightcones alone on a row: the light cones of the panel’s ds^2 metric, drawn over the panel; lightcone(P) draws one at a point',
   );
   // (Not a named value's hidden coefficients, M#3: no row can write them.)
   values(

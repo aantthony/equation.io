@@ -1496,6 +1496,11 @@ export interface Overlay2D {
   nodes?: Array<{ x: number; y: number; text: string; color: string; mark?: boolean }>;
   /** Small text centred on a math point, haloed: a graph edge's labels. */
   tags?: Array<{ x: number; y: number; text: string; color: string }>;
+  /** Many small glyphs, each list one path (light cones, lib/light-cone.ts
+   *  coneGlyphs): `rings` closed, filled with `fill` and outlined; `lines`
+   *  stroked thinly; runs of both end with NaN, NaN. `dots` are x, y pairs,
+   *  drawn as discs. */
+  glyphs?: Array<{ rings: number[]; lines: number[]; dots: number[]; color: string; fill: string }>;
 }
 
 /** Where an overlay's lists end, so what one row adds can be told apart. */
@@ -1902,6 +1907,56 @@ export function drawLabels2D(
       }
       ctx.fillStyle = region.fill;
       ctx.fill(path, 'nonzero');
+    }
+    for (const glyph of extras.glyphs ?? []) {
+      // One path each, so a lattice of hundreds costs a fill and two strokes.
+      const trace = (pts: readonly number[], close: boolean) => {
+        const path = new Path2D();
+        let pen = false;
+        for (let i = 0; i + 1 < pts.length; i += 2) {
+          if (Number.isNaN(pts[i])) {
+            if (pen && close) path.closePath();
+            pen = false;
+            continue;
+          }
+          const sx = toScreenX(pts[i]);
+          const sy = toScreenY(pts[i + 1]);
+          if (pen) path.lineTo(sx, sy);
+          else path.moveTo(sx, sy);
+          pen = true;
+        }
+        if (pen && close) path.closePath();
+        return path;
+      };
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      if (glyph.rings.length) {
+        const rings = trace(glyph.rings, true);
+        ctx.fillStyle = glyph.fill;
+        ctx.fill(rings);
+        ctx.strokeStyle = glyph.color;
+        ctx.lineWidth = 1.25;
+        ctx.stroke(rings);
+      }
+      if (glyph.lines.length) {
+        ctx.globalAlpha = 0.55;
+        ctx.strokeStyle = glyph.color;
+        ctx.lineWidth = 1;
+        ctx.stroke(trace(glyph.lines, false));
+        ctx.globalAlpha = 1;
+      }
+      if (glyph.dots.length) {
+        const dots = new Path2D();
+        for (let i = 0; i + 1 < glyph.dots.length; i += 2) {
+          const sx = toScreenX(glyph.dots[i]);
+          const sy = toScreenY(glyph.dots[i + 1]);
+          dots.moveTo(sx + 1.75, sy);
+          dots.arc(sx, sy, 1.75, 0, Math.PI * 2);
+        }
+        ctx.fillStyle = glyph.color;
+        ctx.fill(dots);
+      }
+      ctx.lineCap = 'butt';
     }
     for (const line of extras.polylines) {
       ctx.strokeStyle = line.color;

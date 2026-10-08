@@ -164,6 +164,14 @@ describe('previewGap', () => {
     expect(canRenderOg([...black, 'lightray((-30, 2), (1, 0))'])).toBe(false);
   });
 
+  it('falls back for light cones, and passes over a spacetime diagram’s metric', () => {
+    const diagram = ['ds^2 = -dy^2 + dx^2'];
+    expect(gap([...diagram, 'y = x'], 0)).toBeNull();
+    expect(canRenderOg([...diagram, 'y = x'])).toBe(true);
+    expect(gap([...diagram, 'lightcones'], 1)).toContain('live app renders');
+    expect(canRenderOg([...diagram, 'lightcone((0, 0))'])).toBe(false);
+  });
+
   it('blames the preview, not the row, for an orbit diagram', () => {
     const why = gap(['a_{n+1} = x a_n (1 - a_n)'])!;
     expect(why).toContain('bifurcation');

@@ -8,6 +8,7 @@ import type { Column, Expr } from './expr.ts';
 import type { ProbBounds } from './dist.ts';
 import type { IntShade } from './intshade.ts';
 import type { GeodesicSpec } from './surface-geometry.ts';
+import type { LightConeSpec } from './light-cone.ts';
 
 export type ColorSpace = 'rgb' | 'hsl' | 'oklch';
 
@@ -256,7 +257,15 @@ export type MathObject =
   // in x, y, z or t whose sides agree everywhere (see holdsEverywhere).
   /** A plane panel's metric, a `ds^2 = …` row (lib/metric.ts): it draws
    *  nothing itself; geodesic and lightray rows in its panel trace it. */
-  | { readonly kind: 'metric'; readonly n: 2 | 3; readonly coords: readonly string[] }
+  | {
+      readonly kind: 'metric';
+      readonly n: 2 | 3;
+      readonly coords: readonly string[];
+      readonly lorentzian?: true;
+    }
+  /** Light cones of a panel's metric (lib/light-cone.ts): over the window,
+   *  a `lightcones` row, or at a point, lightcone(P). */
+  | ({ readonly kind: 'lightcone' } & LightConeSpec)
   | {
       readonly kind: 'note';
       readonly expr: Expr;
@@ -344,6 +353,7 @@ export function publicKind(object: MathObject) {
     case 'label':
     case 'orbit':
     case 'geodesic':
+    case 'lightcone':
     case 'system':
     case 'histogram':
     case 'value':
@@ -409,6 +419,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'tuple':
     case 'note':
     case 'metric':
+    case 'lightcone':
       return false;
   }
 }

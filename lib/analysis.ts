@@ -688,16 +688,16 @@ function classifyGeodesic(
   if (onMetric) {
     if ('error' in metricState!) throw new Error("This panel's metric (its ds^2 row) has an error.");
     const m = metricState!.metric;
-    if (name === 'lightray' && m.n === 2)
+    if (name === 'lightray' && m.n === 2 && !m.lorentzian)
       throw new Error(
-        `lightray needs a spacetime: a metric with a time coordinate, like ds^2 = -dt^2 + dx^2 + dy^2. This one, in ${m.coords.join(' and ')}, has no time; draw its geodesics with geodesic(P, d).`,
+        `lightray needs a spacetime: a metric with a time coordinate, like ds^2 = -dt^2 + dx^2 + dy^2, or a spacetime diagram, like ds^2 = -dy^2 + dx^2. This one, in ${m.coords.join(' and ')}, is positive definite; draw its geodesics with geodesic(P, d).`,
       );
     metric = {
       n: m.n,
       components: m.components,
       derivatives: m.derivatives,
       ...(m.jacobian ? { jacobian: m.jacobian } : {}),
-      motion: m.n === 2 ? 'riemannian' : name === 'lightray' ? 'null' : 'timelike',
+      motion: m.n === 2 && !m.lorentzian ? 'riemannian' : name === 'lightray' ? 'null' : 'timelike',
       ...(m.time !== undefined ? { time: m.time } : {}),
     };
   }
@@ -798,6 +798,74 @@ function classifyGeodesic(
     animated: members.some(m => m.animated),
     needs3D: !!operand,
     params: [...new Set(members.flatMap(m => m.params))].sort(),
+  };
+}
+
+const LIGHTCONE_USAGE =
+  'lightcone(P) draws the light cone at a point, in x and y: lightcone((4, 0)), or a list, lightcone(([3..8], 0)); lightcones alone on a row draws them over the panel.';
+
+/** A `lightcones` row: the light cones of its panel's metric on a lattice. */
+const LIGHTCONES_ROW = /^\s*lightcones\s*$/;
+
+/**
+ * A `lightcones` row (no `at`), or lightcone(P): the light cones of the
+ * panel's metric (lib/light-cone.ts), drawn as it is in view — a spacetime
+ * diagram's wedges, or with a time beside x and y, the ellipses of the
+ * speeds light can have. A list of points draws one each, a family.
+ */
+function classifyLightCone(
+  at: Expr | undefined,
+  surface: SurfaceMap | undefined,
+  metricState: PanelMetricState | undefined,
+  lower: (e: Expr) => Expr,
+  constNames: ReadonlySet<string>,
+  moving: ReadonlySet<string>,
+): Classified {
+  const what = at ? 'lightcone(P)' : 'lightcones';
+  if (!metricState || surface)
+    throw new Error(
+      `${what} draws the light cones of its panel's metric, a ds^2 row — a spacetime, like ds^2 = -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2, or a spacetime diagram, like ds^2 = -dy^2 + dx^2 — and this panel has none.`,
+    );
+  if ('error' in metricState) throw new Error("This panel's metric (its ds^2 row) has an error.");
+  const m = metricState.metric;
+  if (m.n === 2 && !m.lorentzian)
+    throw new Error(
+      `A Riemannian metric has no light cones: this one, in ${m.coords.join(' and ')}, is positive for every direction. A spacetime has a time, like -dt^2 + dx^2 + dy^2, or one minus sign, like -dy^2 + dx^2.`,
+    );
+  const metric = { n: m.n, components: m.components, ...(m.jacobian ? { jacobian: m.jacobian } : {}) };
+  const metricReads = new Set([...m.components, ...(m.jacobian ?? [])].flatMap(e => [...freeVars(e)]));
+  const member = (point: readonly Expr[] | undefined): Classified => {
+    const used = new Set(metricReads);
+    for (const e of point ?? []) for (const n of freeVars(e)) used.add(n);
+    return {
+      object: { kind: 'lightcone', ...metric, ...(point ? { at: point } : {}) },
+      animated: [...used].some(n => n === 't' || moving.has(n)),
+      needs3D: false,
+      params: [...used].filter(n => constNames.has(n)).sort(),
+    };
+  };
+  if (!at) return member(undefined);
+  const lowered = lower(at);
+  const each = lowered.kind === 'list' ? lowered.items : [lowered];
+  const points = each.map(item => {
+    if (item.kind !== 'vec' || item.items.length !== 2 || item.items.some(p => p.kind === 'vec' || p.kind === 'list'))
+      throw new Error(`lightcone: its point is a pair, like (4, 0). ${LIGHTCONE_USAGE}`);
+    for (const p of item.items)
+      for (const n of freeVars(p))
+        if (n !== 't' && !constNames.has(n))
+          throw new Error(
+            `lightcone: its point is numbers, sliders, t and named points${n === 'x' || n === 'y' ? `, not ${n}` : ` (found ${n})`}. ${LIGHTCONE_USAGE}`,
+          );
+    return item.items;
+  });
+  if (points.length > 256) throw new Error('A family of light cones has at most 256 members.');
+  const members = points.map(member);
+  if (members.length === 1) return members[0];
+  return {
+    object: { kind: 'family', members },
+    animated: members.some(c => c.animated),
+    needs3D: false,
+    params: [...new Set(members.flatMap(c => c.params))].sort(),
   };
 }
 
@@ -1021,8 +1089,20 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           throw new Error('This panel already has a metric: one ds^2 row a panel (a --- row starts a new panel).');
         const state = metricOf(panel)!;
         if ('error' in state) throw new Error(state.error);
-        const { n, coords } = state.metric;
-        row.cls = { object: { kind: 'metric', n, coords }, animated: false, needs3D: false, params: [] };
+        const { n, coords, lorentzian } = state.metric;
+        row.cls = {
+          object: { kind: 'metric', n, coords, ...(lorentzian ? { lorentzian } : {}) },
+          animated: false,
+          needs3D: false,
+          params: [],
+        };
+        continue;
+      }
+      // lightcones: the light cones of the panel's metric over the window.
+      if (LIGHTCONES_ROW.test(row.text) && !ropts.documentNames?.has('lightcones')) {
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
+        row.cls = classifyLightCone(undefined, panelSurfaces[panel], metricOf(panel), lower, constNames, moving);
         continue;
       }
       // `P(…)` shades an area under a declared density — unless the user has
@@ -1193,6 +1273,21 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           metricOf(panel),
           getFn,
           ropts,
+          lower,
+          constNames,
+          moving,
+        );
+        continue;
+      }
+      // lightcone(P): the light cone of the panel's metric at a point.
+      if (rawParsed.kind === 'call' && rawParsed.name === 'lightcone' && !fnNames.has('lightcone')) {
+        if (rawParsed.args.length !== 1) throw new Error(LIGHTCONE_USAGE);
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
+        row.cls = classifyLightCone(
+          rawParsed.args[0],
+          panelSurfaces[panel],
+          metricOf(panel),
           lower,
           constNames,
           moving,

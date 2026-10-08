@@ -2828,6 +2828,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
         );
       if (e.name === 'lightray')
         throw new Error('lightray(P, (dx, dy)) draws a light ray, so it must be the whole row.');
+      if (e.name === 'lightcone') throw new Error('lightcone(P) draws a light cone, so it must be the whole row.');
       if (e.name === 'fourier' || e.name === 'reconstruct') {
         const params = ctx.opts.params;
         const opts: ResolveOpts = params?.size
