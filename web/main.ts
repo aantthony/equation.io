@@ -67,7 +67,7 @@ import { compileSampler } from '../lib/vm.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
-import { DRAW_OP_SRC, type Expr, canonicalName, evaluate, freeVars, substVars } from '../lib/expr.ts';
+import { DRAW_OP_SRC, type Expr, canonicalName, evaluate, freeVars, parseExpr, substVars } from '../lib/expr.ts';
 import { gpuFor, shaderBindings } from './render-plan.ts';
 import { typedEscape } from '../lib/escapes.ts';
 import { fieldEvaluator, streamline, traceField } from '../lib/flow.ts';
@@ -180,7 +180,7 @@ import {
   surfacePoint,
 } from '../lib/surface-map.ts';
 import { toGLSL, uniformName } from '../lib/glsl.ts';
-import { raySurface, surfacePixel } from '../lib/surface-pick.ts';
+import { onSurface, raySurface, surfacePixel } from '../lib/surface-pick.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1681,6 +1681,7 @@ function render() {
   // States carry between frames, so they are integrated up to now before
   // anything reads them; the constants may then be formulas in those states.
   constEnv = currentConstEnv(time);
+  followSurfaceHover();
 
   // Readouts belong to the source row, even when its family has many draws.
   for (const eq of equations) {
@@ -2391,8 +2392,9 @@ function render() {
           const mark = markScene(scene);
           scene.points.push({ pos: [px, py, 0], color: baseColor(eq), label: eq.def.name, group: eq });
           carry(mark);
-          // Dragged along the surface, in x and y (see surfaceAt).
-          const set = defPointWriter(eq);
+          // Dragged along the surface, in x and y (see surfaceAt); not by a
+          // slider the surface itself reads, which would move it under the drag.
+          const set = defPointWriter(eq, surfaceReads(surface));
           if (set) grabs.push({ key: `def${eq.id}`, x: px, y: py, edits: true, set });
         }
       panel.surfaceDots = dots;
@@ -5120,15 +5122,32 @@ function coordinatePointWriter(eq: Equation, coords: Expr[] | undefined) {
   );
 }
 
-/** Writer for a named-point row `A = (…)`: rewrites the pair after the '='. */
-const defPointWriter = (eq: Equation) => {
+/** Writer for a named-point row `A = (…)`: rewrites the pair after the '='.
+ *  Names in `pinned` are held still. */
+const defPointWriter = (eq: Equation, pinned?: ReadonlySet<string>) => {
   const def = eq.def as Definition & { kind: 'const' };
   // A binder's row is `p ∈ …`, never an assignment to rewrite.
   if (def.draw) return null;
-  return makePairWriter(def.rhs, p => {
-    eq.text = keepNote(eq.text, `${def.name} = ${p}`);
-  });
+  return makePairWriter(
+    def.rhs,
+    p => {
+      eq.text = keepNote(eq.text, `${def.name} = ${p}`);
+    },
+    undefined,
+    pinned,
+  );
 };
+
+/** The names a surface reads (its sliders, and what they are made of). */
+const surfaceReadsOf = new WeakMap<SurfaceMap, Set<string>>();
+function surfaceReads(surface: SurfaceMap): Set<string> {
+  let reads = surfaceReadsOf.get(surface);
+  if (!reads) {
+    reads = definitionDependencies(freeVars(parseExpr(surface.text)), defs);
+    surfaceReadsOf.set(surface, reads);
+  }
+  return reads;
+}
 
 /** Push text a drag rewrote back into the editor lines. */
 function syncLineTexts() {
@@ -5396,7 +5415,8 @@ function setHover(next: Hover | null) {
   const same =
     hover?.pt === next?.pt ||
     (hover && next && hover.pt.x === next.pt.x && hover.pt.y === next.pt.y && hover.pt.lines[0] === next.pt.lines[0]);
-  if (same && hover?.color === next?.color && hover?.panel === next?.panel) return;
+  const still = hover?.at?.[0] === next?.at?.[0] && hover?.at?.[1] === next?.at?.[1];
+  if (same && still && hover?.color === next?.color && hover?.panel === next?.panel) return;
   hover = next;
   if (!hover) {
     tooltip.style.display = 'none';
@@ -5418,8 +5438,22 @@ function setHover(next: Hover | null) {
   requestRender();
 }
 
+/** The camera a surface's hover was last read under (see followSurfaceHover). */
+let hoverCamera = '';
+const cameraKey = (c: Camera3D) => `${c.theta},${c.phi},${c.radius},${c.target}`;
+
+/** A surface's hover read again under a still pointer when the camera
+ *  moves (a spin, a tween), so it stays on what is under the pointer. */
+function followSurfaceHover() {
+  if (!lastHoverAt || pointers.size) return;
+  const p = panelAtClient(lastHoverAt.x, lastHoverAt.y);
+  if (p.mode !== '3d' || !panelSurface(p) || cameraKey(p.camera) === hoverCamera) return;
+  withPanel(p, () => updateHover(lastHoverAt!.x, lastHoverAt!.y));
+}
+
 function updateHover(clientX: number, clientY: number) {
   if (mode !== '2d') {
+    hoverCamera = cameraKey(camera);
     setHover(surfaceHover(clientX, clientY));
     return;
   }
@@ -5522,7 +5556,8 @@ function surfaceAt(clientX: number, clientY: number) {
 /**
  * Hovering a surface: a dot there reads its x and y (and name); near a
  * painted curve, the point traced along it, as in 2D; anywhere else on the
- * surface, x and y there. Each with the painted scalar fields' values.
+ * surface, x and y there. Each with the scalar and vector fields' values
+ * there.
  */
 function surfaceHover(clientX: number, clientY: number): Hover | null {
   const on = surfaceAt(clientX, clientY);
@@ -5549,45 +5584,53 @@ function surfaceHover(clientX: number, clientY: number): Hover | null {
     const lines = [...(d.label ? [d.label] : []), ...read(d.x, d.y)];
     best = { pt: { x: d.x, y: d.y, lines }, color: cssColor(d.color), panel: cur, at: n.at };
   }
-  if (best) return best;
-  if (!hit) return null;
   const here = panels.indexOf(cur);
-  const painted = equations.filter(
-    eq => panelOf(eq) === here && !eq.error && eq.cls && !eq.cls.needs3D && surfaceMapping(eq.cls.object) === 'paint',
-  );
-  // A painted curve near: traced in x and y to the pixel there.
-  const [ux, uy] = units(hit.x, hit.y);
-  let bestT = 10; // CSS px: tighter than a dot, as in 2D
-  for (const eq of painted) {
-    const h = tracerFor(eq)?.(hit.x, hit.y, ux, uy);
-    const n = h && near(h.x, h.y);
-    if (!h || !n || n.dist >= bestT) continue;
-    bestT = n.dist;
-    best = {
-      pt: { x: h.x, y: h.y, lines: ['on curve', ...read(h.x, h.y)] },
-      color: cssColor(baseColor(eq)),
+  const drawn = equations.filter(eq => panelOf(eq) === here && !eq.error && eq.cls && !eq.cls.needs3D);
+  const painted = drawn.filter(eq => surfaceMapping(eq.cls!.object) === 'paint');
+  // A painted curve near: traced in x and y to the pixel there. The trace
+  // may step off the surface's ranges (near a pole a pixel spans much of
+  // x), where the surface repeats but nothing is painted.
+  if (!best && hit) {
+    const [ux, uy] = units(hit.x, hit.y);
+    let bestT = 10; // CSS px: tighter than a dot, as in 2D
+    for (const eq of painted) {
+      const h = tracerFor(eq)?.(hit.x, hit.y, ux, uy);
+      const n = h && onSurface(surface, h.x, h.y) && near(h.x, h.y);
+      if (!h || !n || n.dist >= bestT) continue;
+      bestT = n.dist;
+      best = {
+        pt: { x: h.x, y: h.y, lines: ['on curve', ...read(h.x, h.y)] },
+        color: cssColor(baseColor(eq)),
+        panel: cur,
+        at: n.at,
+      };
+    }
+    best ??= {
+      pt: { x: hit.x, y: hit.y, lines: ['on surface', ...read(hit.x, hit.y)] },
+      color: cssColor(theme.axis),
       panel: cur,
-      at: n.at,
+      at: toCanvas(hit.point) ?? [mx, my],
     };
   }
-  best ??= {
-    pt: { x: hit.x, y: hit.y, lines: ['on surface', ...read(hit.x, hit.y)] },
-    color: cssColor(theme.axis),
-    panel: cur,
-    at: toCanvas(hit.point) ?? [mx, my],
-  };
-  // Each scalar field's value there, named by its row.
+  if (!best) return null;
+  // Each scalar or vector field's value there, named by its row.
   const env = { ...constEnv, t: graphTime(), x: best.pt.x, y: best.pt.y };
-  for (const eq of painted) {
-    if (eq.cpu?.type !== 'scalar2d') continue;
-    let value: number;
+  const short = (v: number) => valueReadout(v).replace(/^[=≈] /, '');
+  for (const eq of drawn) {
+    const plot = eq.cpu;
+    if (plot?.type !== 'scalar2d' && plot?.type !== 'vfield2d') continue;
+    if (!surfaceMapping(eq.cls!.object)) continue;
+    let value: string;
     try {
-      value = evaluate(eq.cpu.expr, env);
+      value =
+        plot.type === 'scalar2d'
+          ? valueReadout(evaluate(plot.expr, env))
+          : `= (${plot.comps.map(c => short(evaluate(c, env))).join(', ')})`;
     } catch {
       continue;
     }
     const name = eq.text.length > 24 ? `${eq.text.slice(0, 23)}…` : eq.text;
-    best.pt.lines.push(`${name} ${valueReadout(value)}`);
+    best.pt.lines.push(`${name} ${value}`);
   }
   return best;
 }

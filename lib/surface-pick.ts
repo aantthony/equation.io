@@ -160,8 +160,7 @@ function refine(
     y += dy;
     t += dt;
     if (!isFinite(x) || !isFinite(y) || !isFinite(t)) return null;
-    if (x < map.x[0] - 1e-9 * spanX || x > map.x[1] + 1e-9 * spanX) return null;
-    if (y < map.y[0] - 1e-9 * spanY || y > map.y[1] + 1e-9 * spanY) return null;
+    if (!onSurface(map, x, y)) return null;
     if (Math.abs(dx) < 1e-12 * spanX && Math.abs(dy) < 1e-12 * spanY) {
       x = Math.min(Math.max(x, map.x[0]), map.x[1]);
       y = Math.min(Math.max(y, map.y[0]), map.y[1]);
@@ -169,6 +168,14 @@ function refine(
     }
   }
   return null;
+}
+
+/** Whether (x, y) is within the ranges the surface is drawn over (to a
+ *  hair): past them it may repeat in space, but nothing is drawn there. */
+export function onSurface(map: SurfaceMap, x: number, y: number): boolean {
+  const ex = 1e-9 * (map.x[1] - map.x[0]);
+  const ey = 1e-9 * (map.y[1] - map.y[0]);
+  return x >= map.x[0] - ex && x <= map.x[1] + ex && y >= map.y[0] - ey && y <= map.y[1] + ey;
 }
 
 const det3 = (a: readonly number[], b: readonly number[], c: readonly number[]) =>

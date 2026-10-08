@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { surfacePoint } from './surface-map.ts';
-import { raySurface, surfacePixel } from './surface-pick.ts';
+import { onSurface, raySurface, surfacePixel } from './surface-pick.ts';
 import { type SurfaceSpec, parseViewRow } from './view.ts';
 
 const surface = (row: string) => (parseViewRow(row, {}) as SurfaceSpec).surface;
@@ -57,6 +57,17 @@ describe('a ray met with a surface', () => {
     const top = raySurface(TORUS, [3, 0, 10], [0, 0, -1])!;
     expect(top.t).toBeCloseTo(9, 8);
     expect(top.y).toBeCloseTo(Math.PI / 2, 6);
+  });
+});
+
+describe('a point in x and y', () => {
+  it('is on the surface only within its ranges', () => {
+    expect(onSurface(SPHERE, Math.PI, -Math.PI / 2)).toBe(true);
+    expect(onSurface(SPHERE, 0, 0)).toBe(true);
+    // Past x = π the sphere repeats in space, but nothing is drawn there.
+    expect(onSurface(SPHERE, 4.47, 0.3)).toBe(false);
+    expect(onSurface(SPHERE, 0, 1.6)).toBe(false);
+    expect(onSurface(SPHERE, NaN, 0)).toBe(false);
   });
 });
 
