@@ -825,3 +825,18 @@ Verdict: on this one task the names send the device straight to the right
 kind, 0/5 → 5/5, for 221 tokens, and the session is shorter. Whether it
 costs elsewhere (a name in the list pulling the model to the wrong kind, as
 list_kinds' order did with pregion) needs the 46-task run on both models.
+
+### Kind names: the full on-device suite
+
+`results/2026-10-08T035827Z-on-device.json`, all 46 tasks, 5 runs each, against
+`2026-10-07T230237Z-on-device.json`: 32% ±3% → **36% ±3%** (72 → 82 of 175, 41% → 47%, on the
+first 35 tasks; the gain is within noise). Context overflows went from 10 to 17.
+Up: circle-and-line 0 → 4, parametric-circle 0 → 4, derivative 0 → 4. Down:
+honest-reply-helix 5 → 1, torus 5 → 3.
+
+motion-trail passed only 1/5 here (5/5 in the single-task test). Three runs
+called kind_examples("parametric region") rather than "motion trail", and four
+ended in a loop of 20–45 set_graph calls until the 8K context overflowed. In
+honest-reply-helix four runs called kind_examples("helix"), which isn't a kind
+name: the tool answered "No kind" with the list of ids, and the model then wrote
+rows like `u = 0` and `x = cos(u)` and called them a helix.
