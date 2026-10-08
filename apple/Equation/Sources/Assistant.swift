@@ -131,6 +131,14 @@ private func seconds(_ value: Double?, default fallback: Double) -> Double {
   return min(30, max(0, value))
 }
 
+/// A row as the model wrote it, tidied: no surrounding whitespace, and no
+/// trailing comma (it often ends a row as if it were an item in a list).
+private func tidy(_ row: String) -> String {
+  var row = row.trimmingCharacters(in: .whitespacesAndNewlines)
+  while row.hasSuffix(",") { row = row.dropLast().trimmingCharacters(in: .whitespacesAndNewlines) }
+  return row
+}
+
 // MARK: - Tools (the voice prototype's, lib/voice-agent.ts)
 
 struct GetGraph: Tool {
@@ -166,7 +174,7 @@ struct SetGraph: Tool {
   }
 
   func call(arguments: Arguments) async throws -> String {
-    let rows = arguments.equations.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    let rows = arguments.equations.map(tidy).filter { !$0.isEmpty }
     return await access.set(rows)
   }
 }
@@ -252,7 +260,7 @@ struct Check: Tool {
   }
 
   func call(arguments: Arguments) async throws -> String {
-    await access.check(arguments.equations.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+    await access.check(arguments.equations.map(tidy))
   }
 }
 
