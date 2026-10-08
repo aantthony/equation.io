@@ -479,11 +479,11 @@ export function motorPga(axis: Pga, turnIn: Expr, slideIn: Expr = ZERO): Flat {
     fromEntries(axis.dim, [[0, mul(size, call('cos', half))]]),
     scalePga(axis, axis.dim === 2 ? neg(sin) : sin),
   );
-  if (axis.dim === 2 || isZero(slide)) return { ...settlePga(turning), grade: MOTOR };
+  if (axis.dim === 2 || isZero(slide)) return { ...held(settlePga(turning)), grade: MOTOR };
   // Reflecting in dir·x = 0 and then in dir·x = slide |dir|/2 slides by slide along dir.
   const dir = lineDirection(axis);
   const sliding = geometricPga(hyperplane(dir, neg(div(mul(slide, size), num(2)))), hyperplane(dir, ZERO));
-  return { ...settlePga(turning), grade: MOTOR, slide: sliding.data.map(settle) };
+  return { ...held(settlePga(turning)), grade: MOTOR, slide: heldData(sliding.data.map(settle)) };
 }
 
 /** A motor as one element of the algebra: its turn times its slide. */
@@ -503,7 +503,7 @@ export function moveFlat(m: Flat, x: Pga): Pga {
       return addPga(acc, scalePga(image, c));
     }, zeroPga(r.dim));
   const slid = m.slide ? linear({ dim: m.dim, data: m.slide }, x) : x;
-  return linear(m, slid);
+  return held(linear(m, slid));
 }
 
 /** A motor scaled to M M̃ = 1. */
@@ -563,7 +563,7 @@ export function slerpMotor(a: Flat, b: Flat, u: Expr): Flat {
   const step = held(settlePga(logMotor(relative)));
   const out = settlePga(geometricPga(ma, expPga(scalePga(step, u))));
   if (exceedsNodes(out.data, SLERP_NODES)) throw new Error(SLERP_TOO_LARGE);
-  return { ...out, grade: MOTOR };
+  return { ...held(out), grade: MOTOR };
 }
 
 /**
@@ -648,11 +648,13 @@ export function movePoint(m: Flat, coords: readonly Expr[]): Expr[] {
   // The slide is a translation a + b_k e_k0 (motorPga's two planes): it
   // moves every point by 2 b / a.
   const slide = m.slide;
-  const offset = slide && coords.map((_, k) => div(mul(num(2), slide[(1 << k) | e0Bit(m.dim)]), slide[0]));
+  const offset = slide && heldData(coords.map((_, k) => div(mul(num(2), slide[(1 << k) | e0Bit(m.dim)]), slide[0])));
   const at = offset ? coords.map((c, k) => add(c, offset[k])) : coords;
-  const origin = pointParts(settlePga(sandwich(m, pointPga(zero))));
+  // The affine map's entries depend on m alone: shared by every point it moves.
+  const origin = pointParts(held(settlePga(sandwich(m, pointPga(zero)))));
   const columns = at.map(
-    (_, j) => pointParts(settlePga(sandwich(m, idealPointPga(zero.map((z, k) => (k === j ? num(1) : z)))))).coords,
+    (_, j) =>
+      pointParts(held(settlePga(sandwich(m, idealPointPga(zero.map((z, k) => (k === j ? num(1) : z))))))).coords,
   );
   // A motion keeps every point's weight, so all divide by the origin's.
   return origin.coords.map((o, i) =>
@@ -681,12 +683,13 @@ function settle(e: Expr): Expr {
 const settlePga = <T extends Pga>(a: T): T => ({ ...a, data: a.data.map(settle) });
 
 /**
- * While a named value is lowered, a frame-constant coefficient can become a
- * hidden constant of its own (lib/defs.ts, docs/frame-constants-plan.md):
- * slerp hands its intermediates — the unit motors, their relative motor and
- * its log — to it, so each step multiplies names rather than formulas.
- * Elsewhere they stay as they are. One lowering at a time, like the caches
- * in lib/geom.ts.
+ * While a named value or a row is lowered, a frame-constant coefficient can
+ * become a hidden constant of its own (lib/defs.ts, lib/analysis.ts,
+ * docs/frame-constants-plan.md): a motor, a moved line or plane, the affine
+ * map that moves points, and slerp's intermediates — the unit motors, their
+ * relative motor and its log — are handed to it, so each step multiplies
+ * names rather than formulas. Without a hoister they stay as they are. One
+ * lowering at a time, like the caches in lib/geom.ts.
  */
 let hoister: ((e: Expr) => Expr) | null = null;
 export function withHoisting<T>(hoist: (e: Expr) => Expr, run: () => T): T {
@@ -698,7 +701,10 @@ export function withHoisting<T>(hoist: (e: Expr) => Expr, run: () => T): T {
     hoister = outer;
   }
 }
-const held = <T extends Pga>(a: T): T => (hoister ? { ...a, data: a.data.map(hoister) } : a);
+/** One coefficient through the hoister, if one is set. */
+export const heldExpr = (e: Expr): Expr => (hoister ? hoister(e) : e);
+const heldData = (data: readonly Expr[]): readonly Expr[] => (hoister ? data.map(hoister) : data);
+const held = <T extends Pga>(a: T): T => (hoister ? { ...a, data: heldData(a.data) } : a);
 
 /** How large a slerp of motors may grow before it is refused: one about
  *  axes through draggable points, rather than fixed ones. */

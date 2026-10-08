@@ -18,6 +18,19 @@ function pixel(r: { w: number; px: Uint8ClampedArray }, x: number, y: number) {
 }
 
 describe('og raster renderer', () => {
+  it('draws a row through its own frame constants (docs/frame-constants-plan.md)', () => {
+    // The motor's coefficients and the map it moves the square by are
+    // hidden constants of the row: the preview evaluates them with the rest.
+    const base = ['A = (1, 0.5)', 'a = 1', 'view(x = -3..3, y = -3..3)'];
+    const inline = [...base, 'rotate(hull(([0, 1], [0, 1])), motor(A, a + sin(a) A_x))'];
+    expect([...analyze(inline).defs.consts.keys()].some(n => n.startsWith('#'))).toBe(true);
+    const drawn = renderRaster(inline, 100, 100);
+    expect(drawn.px).not.toEqual(renderRaster(base, 100, 100).px);
+    expect(drawn.px).toEqual(
+      renderRaster([...base, 'M = motor(A, a + sin(a) A_x)', 'rotate(hull(([0, 1], [0, 1])), M)'], 100, 100).px,
+    );
+  });
+
   it('draws each panel of a split view in its own box', () => {
     // Side by side: the left panel's line is the first panel alone, squeezed
     // into its half; the right half holds the second panel's rows.

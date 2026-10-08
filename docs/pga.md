@@ -226,8 +226,10 @@ could ship as one PR.
   the existing figure-transform push-down).
 - **slerp(M1, M2, s)**: M1 e^(s log(M̃1 M2)), with `logMotor` the
   closed-form inverse of the screw exp (shorter way round). Its log
-  repeats its argument many times, so slerp takes motors that stay fixed
-  (they fold to numbers) and refuses others with a message.
+  repeats its argument many times, so slerp took motors that stay fixed
+  (they fold to numbers) and refused others with a message. Since frame
+  constants (docs/frame-constants-plan.md) its steps are computed once per
+  frame, named or inline, and motors about moving axes are taken too.
 - **Drawing and readout.** A motor row draws its axis — read straight off
   its bivector part, with the slide's multiple of B_E I taken out, no log —
   and reads out what it does (`turn θ about the line through …, direction

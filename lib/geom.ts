@@ -80,6 +80,7 @@ import {
   motorPga,
   moveFlat,
   movePoint,
+  heldExpr,
   slerpMotor,
   outerPga,
   pointCoords,
@@ -1082,13 +1083,18 @@ function lowerMat(e: Expr, lo: (n: Expr) => LV, getMat: GetMat): MatValue | null
 }
 
 /** sandwichMatrix, built once per rotor: rotate(hull(…), R) turns each
- *  vertex by the same R, which mvSeen hands back as the same object. */
+ *  vertex by the same R, which mvSeen hands back as the same object. Its
+ *  entries are frame constants where R is (heldExpr, lib/pga.ts) — hoisted
+ *  outside the cache, which outlives one lowering. */
 const turnSeen = new WeakMap<Multivector, Partial<Record<2 | 3, Expr[][]>>>();
 function turnMatrix(r: Multivector, dim: 2 | 3): Expr[][] {
   let byDim = turnSeen.get(r);
   if (!byDim) turnSeen.set(r, (byDim = {}));
-  return (byDim[dim] ??= sandwichMatrix(r, dim));
+  return heldMat((byDim[dim] ??= sandwichMatrix(r, dim)));
 }
+/** A matrix about to move points, its entries frame constants where they
+ *  can be (heldExpr, lib/pga.ts): shared by every point it moves. */
+const heldMat = (m: readonly (readonly Expr[])[]): Expr[][] => m.map(row => row.map(heldExpr));
 
 function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV {
   const lo = (n: Expr): LV => lower(n, getComps, getMat, isList);
@@ -1199,7 +1205,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
               `${name} is ${m.length}×${m.length}, so it multiplies a ${m.length}-component vector: ${e.a.kind === 'var' ? e.a.name : 'M'} (x, y${m.length === 3 ? ', z' : ''}).`,
             );
           }
-          return vc(...matVec(m, v.items));
+          return vc(...matVec(heldMat(m), v.items));
         }
         if (!m && matOf(e.b) && lo(e.a).vec) {
           throw new Error(`Matrices multiply on the left — write ${e.b.kind === 'var' ? e.b.name : 'M'} v.`);
@@ -1338,7 +1344,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
         if (flat.length === 7) {
           const axis = flat.slice(4);
           const turn = expOf(matScale({ m: hatOf(axis) }, div(flat[3], lenOfN(axis))));
-          return vc(...matVec(turn, flat.slice(0, 3)));
+          return vc(...matVec(heldMat(turn), flat.slice(0, 3)));
         }
         if (flat.length !== 3 && flat.length !== 5) throw new Error(ROTATE_USAGE);
         const num0: Expr = { kind: 'num', value: 0 };
@@ -1354,7 +1360,7 @@ function lower(e: Expr, getComps: GetComps, getMat: GetMat, isList: IsList): LV 
             flat[2],
           ),
         );
-        return vc(...matVec(turn, [sub(flat[0], c[0]), sub(flat[1], c[1])]).map((p, k) => add(c[k], p)));
+        return vc(...matVec(heldMat(turn), [sub(flat[0], c[0]), sub(flat[1], c[1])]).map((p, k) => add(c[k], p)));
       }
       // A transpose lowered here stands where a number or point goes: matrix
       // algebra (lowerMat) takes every transpose of a matrix before this.

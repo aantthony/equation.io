@@ -9,6 +9,9 @@ import {
   buildDefs,
   compsOf,
   defKey,
+  frameHoister,
+  HOIST_NODES,
+  isHiddenName,
   listGetter,
   listNamesOf,
   indexNamesOf,
@@ -50,10 +53,11 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, MAP, childrenOf, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { PAINT_CALL, lowerGeom } from './geom.ts';
+import { withHoisting } from './pga.ts';
 import { lowerLists, reducesMembers, SCALAR_REDUCTIONS } from './list.ts';
 import { type Classified, checkSolid, classify, classifyRow, plotReadout } from './plot.ts';
 import { scanRegressions, formatFit } from './regression.ts';
@@ -757,21 +761,29 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   /** Rows whose calls apply per member in a way that reads like a wrapper (perMemberNote). */
   const memberNotes = new Map<(typeof rows)[number], string>();
   const { stateValues: stateVals = {}, time = 0, readouts = true, readoutPolicy = 'frame', backend = 'both' } = context;
+  // A row's own hidden constants (below) are this analysis's: a previous one
+  // of this document leaves none behind.
+  for (const name of [...defs.consts.keys()]) if (isRowHidden(name)) defs.drop(name);
+  for (const name of [...constNames]) if (isRowHidden(name)) constNames.delete(name);
   let constEnv: Record<string, number> = { ...stateVals };
-  try {
-    constEnv = evaluateFrame(defs, time, stateVals);
-  } catch {
-    /* definition diagnostics remain on rows */
-  }
   let readoutEnv: Record<string, number> = constEnv;
-  if (readoutPolicy === 'static') {
-    readoutEnv = {};
+  const frame = () => {
     try {
-      readoutEnv = evaluateFrame(defs, 0);
+      constEnv = evaluateFrame(defs, time, stateVals);
     } catch {
-      /* browser readouts omit unseeded state values */
+      /* definition diagnostics remain on rows */
     }
-  }
+    readoutEnv = constEnv;
+    if (readoutPolicy === 'static') {
+      readoutEnv = {};
+      try {
+        readoutEnv = evaluateFrame(defs, 0);
+      } catch {
+        /* browser readouts omit unseeded state values */
+      }
+    }
+  };
+  frame();
 
   // Random variables next, so P(…) and bare-expression rows can reference
   // them regardless of row order.
@@ -873,7 +885,33 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
   }
   const seenViewKinds = new Set<string>();
   let panel = 0;
+  // Frame-constant intermediates of a drawn row — an inline motor, a line
+  // it moves, slerp's relative motor, a matrix turning a hull — become hidden
+  // constants `#id.k` of the document, evaluated once per frame with the
+  // named ones (docs/frame-constants-plan.md, stage 2). They are held here
+  // and bound after the loop, those some row reads.
+  let owner = '';
+  const counts = new Map<string, number>();
+  const pending = new Map<string, Expr>();
+  const frameConsts = new Set([...defs.consts.keys(), ...defs.states.keys()]);
+  const hoistRow = frameHoister(
+    v => frameConsts.has(v) || pending.has(v),
+    (key, e) => {
+      const k = counts.get(key) ?? 0;
+      counts.set(key, k + 1);
+      const name = `#${key}.${k}`;
+      pending.set(name, e);
+      constNames.add(name);
+      return name;
+    },
+    HOIST_NODES,
+  );
+  const hiddenDefinition = (n: string) => pending.get(n) ?? defs.consts.get(n);
+  // A solid's fold check reads a hidden constant's value from what it is
+  // made of, so the sliders it reads still leave the runtime-uniform set.
+  const solidConsts = throughHidden(ropts.consts!, hiddenDefinition);
   for (const [ri, row] of rows.entries()) {
+    owner = `${row.id ?? ri}`;
     if (row.def && !row.error && defs.pointDims.get(row.def.name) === 3) {
       const comps = compsOf(defs, row.def.name)!;
       if (comps.every(c => constNames.has(c))) {
@@ -1151,7 +1189,11 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // Expand point arithmetic and geometry statements (segment, polygon, …)
       // into scalar expressions; a point name A becomes (A_x, A_y).
       // Lists then broadcast/reduce away (mirror of web/main.ts).
-      const lower = (e: Expr): Expr => lowerObjects(e, defs, ropts);
+      const lower = (e: Expr): Expr =>
+        withHoisting(
+          c => hoistRow(owner, c),
+          () => lowerObjects(e, defs, ropts),
+        );
       const maps = panelMaps[panel];
       // An integral's area stands on y = 0, which a plane map bends into a
       // curve: there it is a readout only.
@@ -1215,7 +1257,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         continue;
       }
       // A solid whose shape reads sliders is checked for folds at their values.
-      checkSolid(row.cls.object, ropts.consts!);
+      checkSolid(row.cls.object, solidConsts);
       const hint = curveHint(row.cls.object, row.text);
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
@@ -1243,6 +1285,14 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
     }
   }
+  // Bound at once, and only those a drawn row reads (a row that failed after
+  // lowering leaves its own behind): each binding rebuilds the Env's views.
+  const reached = pending.size ? hiddenReached(rows, hiddenDefinition) : new Set<string>();
+  for (const [name, e] of pending) {
+    if (reached.has(name)) defs.bind(name, { tag: 'scalar', role: 'const', expr: e });
+    else constNames.delete(name);
+  }
+  if (reached.size) frame();
 
   // Backend compilation is explicit and never changes the semantic object.
   // OG requests only CPU plans; readouts do not enter compilation identity.
@@ -1300,13 +1350,73 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       row.view = undefined;
     }
 
-  try {
-    constEnv = evaluateFrame(defs, time, stateVals);
-  } catch {
-    /* row errors already reported */
-  }
+  if (!reached.size)
+    try {
+      constEnv = evaluateFrame(defs, time, stateVals);
+    } catch {
+      /* row errors already reported */
+    }
   rvs.prune();
   return { rows, defs, constEnv, rvs, rvNames, gridFields, document };
+}
+
+/** A row's hidden constant (`#4.0`), as against a named value's (`M#3`). */
+const isRowHidden = (name: string): boolean => name.startsWith('#');
+
+/** The hidden constants the drawn rows read — their params, and what those
+ *  are made of in turn. */
+function hiddenReached(rows: readonly RowInfo[], definition: (n: string) => Expr | undefined): Set<string> {
+  const out = new Set<string>();
+  const visit = (name: string): void => {
+    if (!isHiddenName(name) || out.has(name)) return;
+    out.add(name);
+    const e = definition(name);
+    if (e) for (const v of freeVars(e)) visit(v);
+  };
+  for (const row of rows) if (row.cls && !row.error) row.cls.params.forEach(visit);
+  return out;
+}
+
+/**
+ * `consts` with each hidden constant valued from its definition, reading the
+ * names it is made of through `consts` — so a recording proxy sees the
+ * sliders themselves. One made of t, a state or an animated constant has no
+ * value, as those have none.
+ */
+function throughHidden(
+  consts: Readonly<Record<string, number>>,
+  definition: (n: string) => Expr | undefined,
+): Readonly<Record<string, number>> {
+  const memo = new Map<string, number | undefined>();
+  const value = (n: string): number | undefined => {
+    const e = isHiddenName(n) ? definition(n) : undefined;
+    if (!e) return Object.hasOwn(consts, n) ? consts[n] : undefined;
+    if (memo.has(n)) return memo.get(n);
+    memo.set(n, undefined);
+    let v: number | undefined;
+    const vars: Record<string, number> = {};
+    for (const f of freeVars(e)) {
+      const x = value(f);
+      if (x !== undefined) vars[f] = x;
+    }
+    try {
+      // (A name left out — t, say — throws: no value.)
+      v = evaluate(e, vars);
+    } catch {
+      /* no value */
+    }
+    memo.set(n, v);
+    return v;
+  };
+  return new Proxy(consts, {
+    get: (target, n, receiver) =>
+      typeof n === 'string' && isHiddenName(n) ? value(n) : Reflect.get(target, n, receiver),
+    getOwnPropertyDescriptor: (target, n) => {
+      if (typeof n !== 'string' || !isHiddenName(n)) return Reflect.getOwnPropertyDescriptor(target, n);
+      const v = value(n);
+      return v === undefined ? undefined : { value: v, writable: false, enumerable: true, configurable: true };
+    },
+  });
 }
 
 /** Worker/preview convenience: initial state at t=0, with a fresh sampler. */
