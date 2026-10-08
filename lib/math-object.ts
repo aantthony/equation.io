@@ -261,6 +261,10 @@ export interface Classified {
   readonly animated: boolean;
   readonly needs3D: boolean;
   readonly params: readonly string[];
+  /** On a plane-mapped panel (lib/plane-map.ts), the row as written, in x
+   *  and y, before the map was put in: what hover reads intercepts and
+   *  extrema from, placing them on the screen through the map. */
+  readonly world?: MathObject;
 }
 
 /** Stable public compatibility API; backend selection never changes it. */

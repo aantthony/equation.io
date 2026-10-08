@@ -1416,14 +1416,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   Any smooth map works, with sliders. Every row is drawn through it:
   curves, regions, fields, flows and matrix fields (carried by its
   Jacobian), real systems, and points, parametric curves, figures, labels
-  and complex roots, placed where the screen shows them (a point, a filled
-  shape or a region at each place, on an angle range wider than 2π; a line
-  on one, picking up at the other edge where it crosses the seam; a shape
-  round the origin, which unrolls into an open curve, as an outline). Named points drag in x and y. The
-  grid is the screen's; `grid(x, y)` or coordinate fields (r, theta) draw
-  their level lines through the map. Histograms are refused, integrals
-  are readouts without shading, and hovering shows no intercepts or extrema
-  (they are not features of the screen's curve).
+  and complex roots, placed wherever the screen shows them (every copy, on
+  an angle range wider than 2π; a line picks up at the other edge where it
+  crosses the seam; a shape round the origin unrolls into an open curve and
+  is filled down to Y = 0). Named points drag in x and y, and hovering shows
+  a curve's intercepts and extrema in x and y where the screen shows them.
+  The grid is the screen's; `grid(x, y)` or coordinate fields (r, theta)
+  draw their level lines through the map. Histograms are refused, and
+  integrals are readouts without shading.
 - `on((X, Y, Z) = (3cos(y) cos(x), 3cos(y) sin(x), 3sin(y)), x = -pi..pi,
   y = -pi/2..pi/2)` draws its panel's 2D rows on a surface in space — here
   the sphere, x as longitude and y as latitude. The panel is 3D (frame it

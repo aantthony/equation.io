@@ -17,6 +17,7 @@ import {
   type CpuPlan,
   type GpuPlan,
   compileGridCpu,
+  compileCpu,
   compileGridGpu,
   cpuStructureKey,
   parametricGLSL,
@@ -122,7 +123,7 @@ import {
   type ScreenBox,
   planeIn,
   planeInverse,
-  planeJacobian,
+  pixelSpan,
   planeToWorld,
   planeWorldBox,
 } from '../lib/plane-map.ts';
@@ -4893,14 +4894,13 @@ function dragTo(map: AxisMap | undefined, s: number, axis: number): number {
  *  map's Jacobian — as snapToPixel rounds on a plain panel. */
 function dragToPlane(plane: PlaneMap, sx: number, sy: number): [number, number] {
   const [x, y] = planeToWorld(plane, sx, sy);
-  const [a, b, c, d] = planeJacobian(plane, sx, sy);
-  const [ux, uy] = [view.upp, view.upp / (view.ratio ?? 1)];
+  const [px, py] = pixelSpan(plane, sx, sy, view.upp, view.upp / (view.ratio ?? 1));
   const round = (v: number, pixel: number) => {
     if (!(pixel > 0) || !isFinite(pixel)) return parseFloat(v.toPrecision(5));
     const step = Math.pow(10, Math.floor(Math.log10(pixel * 3)));
     return parseFloat((Math.round(v / step) * step).toPrecision(12));
   };
-  return [round(x, Math.hypot(a * ux, b * uy)), round(y, Math.hypot(c * ux, d * uy))];
+  return [round(x, px), round(y, py)];
 }
 
 // --- draggable points ---
@@ -5161,14 +5161,41 @@ function computeSpecialPoints(eq: Equation) {
   const ylo = view.cy - halfH * 1.5;
   const yhi = view.cy + halfH * 1.5;
   const maps = panelMaps(panels[panelOf(eq)]);
-  // Through a plane map no intercept or extremum of x and y is a feature
-  // of the screen's curve: none are shown there.
   const pts = maps?.plane
-    ? []
+    ? planeSpecialPoints(cls, maps.plane, halfW, halfH)
     : maps
       ? mappedSpecialPoints(expr, maps, xlo, xhi, ylo, yhi)
       : specialPoints(expr, xlo, xhi, ylo, yhi);
   eq.spCache = { text: eq.text, env: hoverEnvKey(cls), xlo, xhi, ylo, yhi, pts };
+}
+
+/**
+ * A curve's intercepts and extrema through a plane map: found in x and y, as
+ * the row is written (Classified.world), over the part of the plane the
+ * window shows, and placed wherever the screen shows each one. They read in
+ * x and y as anywhere else.
+ */
+function planeSpecialPoints(cls: Classified, plane: PlaneMap, halfW: number, halfH: number): SpecialPoint[] {
+  const world = cls.world && compileCpu({ ...cls, object: cls.world });
+  if (world?.type !== 'implicit2d') return [];
+  const expr = cls.params.length
+    ? substVars(
+        world.equation,
+        Object.fromEntries(cls.params.map(p => [p, { kind: 'num', value: constEnv[p] ?? 0 } as Expr])),
+      )
+    : world.equation;
+  // The window the overlay carries through, so the way back is shared.
+  const box: ScreenBox = { lo: [view.cx - halfW, view.cy - halfH], hi: [view.cx + halfW, view.cy + halfH] };
+  // Over the padded window the cache stands for, as anywhere else.
+  const shown = planeWorldBox(plane, {
+    lo: [view.cx - 1.5 * halfW, view.cy - 1.5 * halfH],
+    hi: [view.cx + 1.5 * halfW, view.cy + 1.5 * halfH],
+  });
+  if (!shown) return [];
+  const inverse = planeInverse(plane, box);
+  return specialPoints(expr, shown.lo[0], shown.hi[0], shown.lo[1], shown.hi[1]).flatMap(p =>
+    inverse.all(p.x, p.y).map(([x, y]) => ({ ...p, x, y })),
+  );
 }
 
 /**
@@ -5290,9 +5317,8 @@ function updateHover(clientX: number, clientY: number) {
  *  the pixel there (sx, sy screen units a pixel), from the map's Jacobian. */
 function readPlane(plane: PlaneMap, X: number, Y: number, sx: number, sy: number): string[] {
   const [x, y] = planeToWorld(plane, X, Y);
-  const [a, b, c, d] = planeJacobian(plane, X, Y);
-  const step = (p: number, q: number) => Math.hypot(p * sx, q * sy) || sx;
-  return [`x = ${fmtTraced(x, step(a, b))}`, `y = ${fmtTraced(y, step(c, d))}`];
+  const [px, py] = pixelSpan(plane, X, Y, sx, sy);
+  return [`x = ${fmtTraced(x, px || sx)}`, `y = ${fmtTraced(y, py || sx)}`];
 }
 
 /** Marker for the hovered point, drawn over the axis labels. */
@@ -5632,10 +5658,15 @@ function visiblePoints(eq: Equation): string[] {
   // Cached on the screen; a mapped panel's points read in x and y.
   const maps = panelMaps(panels[panelOf(eq)]);
   const world = (map: AxisMap | undefined, v: number) => (map ? toWorld(map, v) : v);
+  const read = (p: SpecialPoint): [number, number] =>
+    maps?.plane ? planeToWorld(maps.plane, p.x, p.y) : [world(maps?.x, p.x), world(maps?.y, p.y)];
   return (eq.spCache?.pts ?? [])
     .filter(p => Math.abs(p.x - view.cx) <= halfW && Math.abs(p.y - view.cy) <= halfH)
     .slice(0, MAX_VOICE_POINTS)
-    .map(p => `(${round6(world(maps?.x, p.x))}, ${round6(world(maps?.y, p.y))}): ${p.lines.join(', ')}`);
+    .map(p => {
+      const [x, y] = read(p);
+      return `(${round6(x)}, ${round6(y)}): ${p.lines.join(', ')}`;
+    });
 }
 
 /**
