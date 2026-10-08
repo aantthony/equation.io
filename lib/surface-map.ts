@@ -302,6 +302,9 @@ export function surfaceMapping(object: MathObject): SurfaceMapping | null {
     case 'trail':
     case 'label':
       return 'carry';
+    case 'geodesic':
+      // geodesic(P, d): traced in x and y, on this surface.
+      return object.dim === 2 ? 'carry' : null;
     case 'family': {
       // A family draws as its members, each drawn as it is.
       const each = object.members.map(m => surfaceMapping(m.object));

@@ -7,6 +7,7 @@
 import type { Column, Expr } from './expr.ts';
 import type { ProbBounds } from './dist.ts';
 import type { IntShade } from './intshade.ts';
+import type { GeodesicSpec } from './surface-geometry.ts';
 
 export type ColorSpace = 'rgb' | 'hsl' | 'oklch';
 
@@ -121,6 +122,9 @@ export type MathObject =
       readonly from: Expr;
       readonly to: Expr;
     }
+  /** A geodesic of a parametric surface from a start in a direction,
+   *  integrated as it is drawn (lib/surface-geometry.ts geodesicPath). */
+  | ({ readonly kind: 'geodesic' } & GeodesicSpec)
   /** `vertices` flat, or with `over` one vertex template run over the columns. */
   | {
       readonly kind: 'figure';
@@ -336,6 +340,7 @@ export function publicKind(object: MathObject) {
     case 'trail':
     case 'label':
     case 'orbit':
+    case 'geodesic':
     case 'system':
     case 'histogram':
     case 'value':
@@ -376,6 +381,8 @@ export function objectNeeds3D(object: MathObject): boolean {
       return object.coordinates.length === 3;
     case 'orbit':
       return !object.series && object.paths[0]?.length === 3;
+    case 'geodesic':
+      return object.dim === 3;
     case 'figure':
       return object.dimension === 3;
     case 'system':

@@ -475,3 +475,63 @@ export function divergingGain(
   const typical = sizes[Math.floor(0.9 * (sizes.length - 1))];
   return typical > floor ? 1.5 / typical : 1;
 }
+
+/** What a geodesic row draws (lib/analysis.ts classifyGeodesic). */
+export interface GeodesicSpec {
+  /** 3: on the surface, in space; 2: in the parameters themselves (a panel's
+   *  x and y), for an on(…) panel to carry onto its surface. */
+  readonly dim: 2 | 3;
+  readonly params: Params;
+  /** The surface in the parameters. */
+  readonly surface: readonly Expr[];
+  /** christoffelOf's symbols, and its metric E, F, G with their determinant. */
+  readonly symbols: readonly Expr[];
+  readonly metric: readonly Expr[];
+  readonly start: readonly Expr[];
+  readonly direction: readonly Expr[];
+  /** Arc length; when absent, defaultGeodesicLength. */
+  readonly length?: Expr;
+  /** The parameters' ranges: lo and hi of the first, then of the second. */
+  readonly domain: readonly Expr[];
+}
+
+const NAN: Expr = { kind: 'num', value: NaN };
+
+/**
+ * The geodesic a row draws, at the values in `env` (sliders, t, a named
+ * point's coordinates): its points in space, or (p, q, 0) for dim 2, flat.
+ * Empty when its domain cannot be had; the start alone when it has no
+ * direction.
+ */
+export function geodesicPath(spec: GeodesicSpec, env: Readonly<Record<string, number>>): number[] {
+  const values = new Float64Array(9);
+  numericIn([...spec.start, ...spec.direction, ...spec.domain, spec.length ?? NAN], spec.params, env)(NaN, NaN, values);
+  const v = [...values];
+  const domain: GeodesicOptions['domain'] = [
+    [v[4], v[5]],
+    [v[6], v[7]],
+  ];
+  if (!(v[5] > v[4]) || !(v[7] > v[6]) || !domain.flat().every(Number.isFinite)) return [];
+  const embed = numericIn(spec.surface, spec.params, env);
+  const out = new Float64Array(3);
+  const P = (p: number, q: number): number[] => (embed(p, q, out), [out[0], out[1], out[2]]);
+  const length = spec.length ? v[8] : defaultGeodesicLength(P, domain);
+  if (!Number.isFinite(length)) return [];
+  const sys: GeodesicSystem = {
+    symbols: numericIn(spec.symbols, spec.params, env),
+    metric: numericIn(spec.metric, spec.params, env),
+  };
+  const path = traceGeodesic(sys, {
+    start: [v[0], v[1]],
+    direction: [v[2], v[3]],
+    length,
+    domain,
+    periodic: periodicAxes(P, domain),
+  });
+  const pts: number[] = [];
+  for (const [p, q] of path) {
+    if (spec.dim === 2) pts.push(p, q, 0);
+    else pts.push(...P(p, q));
+  }
+  return pts;
+}

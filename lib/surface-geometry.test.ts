@@ -6,6 +6,7 @@ import {
   christoffelFromMetric,
   christoffelOf,
   defaultGeodesicLength,
+  geodesicPath,
   gaussianOf,
   geodesicSystem,
   meanCurvatureOf,
@@ -353,5 +354,100 @@ describe('gaussian and meancurvature rows', () => {
     expect(last(['C = (cos(u), sin(u), u)', 'gaussian(C)']).error).toMatch(/moves with both u and v/);
     expect(last(['gaussian(T)']).error).toMatch(/T is not a surface — define one first/);
     expect(last(['S = (u, v, u v)', 'gaussian(S, 1, 2, 3)']).error).toMatch(/takes a surface/);
+  });
+});
+
+/** geodesic rows (lib/analysis.ts classifyGeodesic), drawn by geodesicPath. */
+describe('geodesic rows', () => {
+  const analyze = (rows: string[]) => {
+    const analysis = analyzeRows(rows, { readouts: true });
+    const r = analysis.rows.at(-1)!;
+    return { r, env: { ...analysis.constEnv, t: 0 } };
+  };
+  /** The points one geodesic row draws, as [x, y, z]. */
+  const traced = (rows: string[], member?: number) => {
+    const { r, env } = analyze(rows);
+    if (r.error) throw new Error(r.error);
+    let o = r.cls!.object;
+    if (o.kind === 'family') o = o.members[member ?? 0].object;
+    if (o.kind !== 'geodesic') throw new Error(o.kind);
+    const flat = geodesicPath(o, env);
+    return Array.from({ length: flat.length / 3 }, (_, k) => flat.slice(3 * k, 3 * k + 3));
+  };
+  const SPHERE_UV = ['u = interval(-pi, pi)', 'v = interval(-pi/2, pi/2)', `S = ${SPHERE}`];
+  const ON_TORUS = 'on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi)';
+
+  it('draws a great circle on a sphere, in space', () => {
+    const { r } = analyze([...SPHERE_UV, 'geodesic(S, (0.2, 0.3), (1, 0.5))']);
+    expect(r.cls).toMatchObject({ needs3D: true, object: { kind: 'geodesic', dim: 3 } });
+    expect(r.cpu?.type).toBe('geodesic');
+    const pts = traced([...SPHERE_UV, 'geodesic(S, (0.2, 0.3), (1, 0.5))']);
+    const normal = cross3(pts[0], pts[30]);
+    for (const p of pts) {
+      expect(Math.hypot(...p)).toBeCloseTo(3, 8);
+      expect(Math.abs(dot3(p, normal)) / Math.hypot(...normal)).toBeLessThan(1e-6);
+    }
+    // Round the longitude's seam and on: a little more than once round.
+    expect(arc(pts)).toBeGreaterThan(6 * Math.PI);
+  });
+  it('runs as far as asked, and stops at the edge of u and v’s ranges', () => {
+    expect(arc(traced([...SPHERE_UV, 'geodesic(S, (0.2, 0.3), (1, 0.5), 2)']))).toBeCloseTo(2, 6);
+    // Without intervals u and v run over [0, 1]: a saddle patch, left at its edge.
+    const pts = traced(['S = (u, v, u^2 - v^2)', 'geodesic(S, (0.5, 0.5), (1, 0.2))']);
+    const end = pts.at(-1)!;
+    expect(end[0]).toBeCloseTo(1, 9);
+    expect(pts.every(p => p[0] <= 1 + 1e-12 && p[1] >= 0 && p[1] <= 1)).toBe(true);
+  });
+  it('reads sliders, t and named points', () => {
+    const rows = (P: string) => [...SPHERE_UV, `P = ${P}`, 'R = 2', 'geodesic(S, P, (cos(t), 1), R)'];
+    const { r } = analyze(rows('(0.2, 0.3)'));
+    expect(r.cls!.params).toEqual(['P_x', 'P_y', 'R']);
+    expect(r.cls!.animated).toBe(true);
+    const a = traced(rows('(0.2, 0.3)'));
+    const b = traced(rows('(0.4, 0.3)'));
+    expect(a[0]).not.toEqual(b[0]);
+    expect(a[0][0]).toBeCloseTo(3 * Math.cos(0.3) * Math.cos(0.2), 9);
+    expect(arc(a)).toBeCloseTo(2, 6);
+  });
+  it('draws a fan from a list of directions', () => {
+    const rows = [...SPHERE_UV, 'a = [0..5] pi/3', 'geodesic(S, (0, 0.4), (cos(a), sin(a)), 3)'];
+    const { r } = analyze(rows);
+    const o = r.cls!.object;
+    if (o.kind !== 'family') throw new Error(o.kind);
+    expect(o.members).toHaveLength(6);
+    const ends = o.members.map((_, k) => traced(rows, k).at(-1)!);
+    expect(new Set(ends.map(e => e.map(c => c.toFixed(6)).join())).size).toBe(6);
+    // Each 3 from the start, along the sphere: the angle 1 at the centre.
+    const start = traced(rows, 0)[0];
+    for (const e of ends) expect(Math.acos(dot3(e, start) / 9)).toBeCloseTo(1, 6);
+    expect(analyze([...SPHERE_UV, 'a = [1, 2]', 'b = [1, 2, 3]', 'geodesic(S, (0, a), (1, b))']).r.error).toMatch(
+      /as long/,
+    );
+  });
+  it('draws on a panel’s surface in its x and y, carried onto it', () => {
+    const rows = [ON_TORUS, 'P = (0.5, 0.3)', 'geodesic(P, (1, 0.3), 30)'];
+    const { r } = analyze(rows);
+    expect(r.cls).toMatchObject({ needs3D: false, object: { kind: 'geodesic', dim: 2, params: ['x', 'y'] } });
+    const pts = traced(rows);
+    expect(pts[0]).toEqual([0.5, 0.3, 0]);
+    // The torus repeats across its angles, so the geodesic runs on past the
+    // edge of x, round the hole.
+    expect(Math.max(...pts.map(p => p[0]))).toBeGreaterThan(Math.PI);
+    const embed = (x: number, y: number) => [
+      (3 + Math.cos(y)) * Math.cos(x),
+      (3 + Math.cos(y)) * Math.sin(x),
+      Math.sin(y),
+    ];
+    const onSurface = pts.map(([x, y]) => embed(x, y));
+    expect(arc(onSurface)).toBeCloseTo(30, 2);
+  });
+  it('says what it needs', () => {
+    expect(analyze(['geodesic((0.2, 0.3), (1, 1))']).r.error).toMatch(/this panel has none/);
+    expect(analyze([`S = ${SPHERE}`, 'geodesic(S, (0.2, x), (1, 1))']).r.error).toMatch(/found x/);
+    expect(analyze([ON_TORUS, 'geodesic((0.2, y), (1, 1))']).r.error).toMatch(/, not y/);
+    expect(analyze([`S = ${SPHERE}`, '2 geodesic(S, (0.2, 0.3), (1, 1))']).r.error).toMatch(/whole row/);
+    expect(analyze(['geodesic(T, (0.2, 0.3), (1, 1))']).r.error).toMatch(/T is not a surface/);
+    expect(analyze([`S = ${SPHERE}`, 'geodesic(S, (0.2, 0.3), 1)']).r.error).toMatch(/a pair/);
+    expect(analyze([ON_TORUS, 'geodesic(1, 2)']).r.error).toMatch(/a pair/);
   });
 });

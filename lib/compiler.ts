@@ -9,6 +9,7 @@ import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
 import { FAMILY_NODES, countNodes } from './size.ts';
+import type { GeodesicSpec } from './surface-geometry.ts';
 
 export interface CpuGrid {
   name: string;
@@ -43,6 +44,7 @@ export type CpuPlan =
   | { type: 'trail'; dim: 2 | 3; coords: Expr[] }
   | { type: 'label'; dim: 2 | 3; coords: Expr[]; text: string }
   | { type: 'orbit'; dim: 2 | 3; paths: Expr[][]; series: boolean; from: Expr; to: Expr }
+  | ({ type: 'geodesic' } & GeodesicSpec)
   /** `pts` flat, or with `over` one vertex template run over the columns. */
   | {
       type: 'polygon';
@@ -321,6 +323,10 @@ export function compileCpu(classified: Classified): CpuPlan {
         from: object.from,
         to: object.to,
       };
+    case 'geodesic': {
+      const { kind: _, ...spec } = object;
+      return { type: 'geodesic', ...spec };
+    }
     case 'figure':
       return {
         type: 'polygon',
@@ -660,6 +666,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'trail':
     case 'label':
     case 'orbit':
+    case 'geodesic':
     case 'figure':
     case 'system':
     case 'list':
@@ -753,7 +760,7 @@ function rowsKey(rows: readonly (readonly number[])[]): string {
 }
 
 export function cpuStructureKey(plan: CpuPlan): string {
-  const expressions = (values: Expr[]) => values.map(exprKey);
+  const expressions = (values: readonly Expr[]) => values.map(exprKey);
   let structure: unknown;
   switch (plan.type) {
     case 'family':
@@ -801,6 +808,14 @@ export function cpuStructureKey(plan: CpuPlan): string {
       break;
     case 'orbit':
       structure = [plan.series, plan.paths.map(expressions), exprKey(plan.from), exprKey(plan.to)];
+      break;
+    case 'geodesic':
+      structure = [
+        plan.dim,
+        plan.params,
+        ...[plan.surface, plan.symbols, plan.metric, plan.start, plan.direction, plan.domain].map(expressions),
+        plan.length && exprKey(plan.length),
+      ];
       break;
     case 'polygon':
       structure = [

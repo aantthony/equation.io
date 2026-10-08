@@ -2820,6 +2820,10 @@ function rx(e: Expr, ctx: Ctx): Expr {
       if (VECTOR_OPS.has(e.name)) return vectorCalculus(e.name, args, ctx);
       if (CURVE_OPS.has(e.name)) return curveGeometry(e.name, args, ctx);
       if (SURFACE_OPS.has(e.name)) return surfaceGeometry(e.name, args, ctx);
+      if (e.name === 'geodesic')
+        throw new Error(
+          'geodesic(S, (u0, v0), (du, dv)) draws a curve, so it must be the whole row — on a panel drawn on a surface, geodesic(P, (dx, dy)).',
+        );
       if (e.name === 'fourier' || e.name === 'reconstruct') {
         const params = ctx.opts.params;
         const opts: ResolveOpts = params?.size

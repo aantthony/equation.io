@@ -1083,6 +1083,15 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
           'on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); sin((p y - q x)/2) = 0',
         '3d knot slider',
       ],
+      // Geodesics fan out from P: the straightest curves on the torus, which
+      // swing round the hole where K < 0 (the complement colour) and pass
+      // over the top where K > 0. Drag P along the surface.
+      [
+        'geodesics from P on a torus (drag it)',
+        'camera(-0.3, 0.7, 11); on((X, Y, Z) = ((3 + cos(y)) cos(x), (3 + cos(y)) sin(x), sin(y)), x = -pi..pi, y = -pi..pi); ' +
+          'gaussian(x, y); P = (-0.5, 0.3); a = [0..7] pi/4; geodesic(P, (cos(a), sin(a)), 10)',
+        '3d draggable surface derivative',
+      ],
       // A Σ in the surface: the disk's height is r times a square wave's
       // Fourier partial sum in the angle, overshooting at each jump (Gibbs).
       [
@@ -1144,6 +1153,15 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
         'Gaussian curvature of a torus',
         'camera(-0.9, 0.7, 11); u = interval(0, 2pi); v = interval(0, 2pi); S = ((3 + cos(v)) cos(u), (3 + cos(v)) sin(u), sin(v)); gaussian(S); gaussian(S, 0, 0); gaussian(S, 0, pi)',
         '3d surface parametric derivative',
+      ],
+      // Flamm's paraboloid, the spatial slice of a Schwarzschild black hole
+      // (horizon radius 2): geodesics sent inward from the rim bend round the
+      // throat, or fall into it, by how far off-centre they are aimed.
+      [
+        'geodesics on Flamm’s paraboloid (slide b)',
+        'camera(-0.9, 0.6, 22); b = 0.1; S = ((2 + 6u) cos(2pi v), (2 + 6u) sin(2pi v), 2sqrt(2(6u))); S; ' +
+          'k = b ([0..8]/4 - 1); geodesic(S, (1, 0), (-1, k), 60)',
+        '3d surface parametric slider physics',
       ],
       // The tube radius swells and shrinks with t (shifting v by t would
       // only slide the same torus along itself).

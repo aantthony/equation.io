@@ -17,6 +17,9 @@ import {
   MissingDataError,
   resolveExpr,
   resolveRow,
+  type GetFn,
+  type ResolveOpts,
+  surfaceOperand,
   shadowedFnNames,
   scanDefinition,
   takenBinder,
@@ -64,6 +67,9 @@ import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
 import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
+import { type Params, christoffelOf, smoothPartial } from './surface-geometry.ts';
+import { FLOW_NODE_LIMIT } from './flow.ts';
+import { exceedsNodes } from './size.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -606,6 +612,137 @@ function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
   return bare(e);
 }
 
+const GEODESIC_USAGE =
+  'geodesic takes a surface, where to start on it and which way: geodesic(S, (0.5, 0.5), (1, 0)) with S = (u, v, u^2 - v^2), and optionally how far, geodesic(S, P, (1, 0), 4).';
+const PANEL_GEODESIC_USAGE =
+  'On a panel drawn on a surface, geodesic takes where to start and which way, in x and y: geodesic((0, 0.5), (1, 0)) or geodesic(P, (1, 1), 6).';
+
+/**
+ * A geodesic row: geodesic(S, (u0, v0), (du, dv)[, L]), or on a panel drawn
+ * on a surface (an on(…) row) geodesic((x0, y0), (dx, dy)[, L]) on that
+ * surface, in the panel's x and y. The Christoffel symbols are expanded
+ * here (lib/surface-geometry.ts christoffelOf); the curve is integrated as
+ * it is drawn, so the start, direction and length may move with sliders, t
+ * and named points. A list of starts, directions or lengths draws one
+ * geodesic per element, a family.
+ */
+function classifyGeodesic(
+  args: readonly Expr[],
+  surface: SurfaceMap | undefined,
+  getFn: GetFn,
+  ropts: ResolveOpts,
+  lower: (e: Expr) => Expr,
+  constNames: ReadonlySet<string>,
+  moving: ReadonlySet<string>,
+): Classified {
+  let operand: ReturnType<typeof surfaceOperand> | null = null;
+  let failure: unknown = null;
+  if (args.length >= 3) {
+    try {
+      // A named surface as the resolver writes it in (over u's and v's
+      // intervals, where they are ones); a function of two parameters as is.
+      const [arg] = args;
+      const named = arg.kind === 'var' && !getFn(arg.name) ? resolveRow(arg, getFn, ropts).expr : arg;
+      operand = surfaceOperand('geodesic', named, getFn, ropts);
+    } catch (err) {
+      failure = err;
+    }
+  }
+  const onPanel = !operand && !!surface && (args.length === 2 || args.length === 3);
+  if (!operand && !onPanel) {
+    if (args.length === 2 && !surface)
+      throw new Error(
+        `geodesic(P, d) draws on its panel's surface (an on(…) row), and this panel has none. ${GEODESIC_USAGE}`,
+      );
+    throw failure instanceof Error && args.length >= 3 ? failure : new Error(GEODESIC_USAGE);
+  }
+  if (operand && args.length > 4) throw new Error(GEODESIC_USAGE);
+  const usage = onPanel ? PANEL_GEODESIC_USAGE : GEODESIC_USAGE;
+  const params: Params = onPanel ? ['x', 'y'] : ['u', 'v'];
+  const items: readonly Expr[] = operand ? operand.items : surface!.embed;
+  const num = (value: number): Expr => ({ kind: 'num', value });
+  // The parameters' ranges: u's and v's intervals where they are defined as
+  // ones, else [0, 1]; the panel's x and y ranges.
+  const range = (over: Expr | undefined): Expr[] =>
+    over?.kind === 'call' ? [over.args[0], over.args[1]] : [num(0), num(1)];
+  const domain: Expr[] = operand
+    ? [...range(operand.over.u), ...range(operand.over.v)]
+    : [...surface!.x, ...surface!.y].map(num);
+  const connection = christoffelOf(items, smoothPartial, params);
+  const symbols = connection.symbols;
+  const metric = [...connection.metric, connection.det];
+  if (exceedsNodes([...symbols, ...metric], 4 * FLOW_NODE_LIMIT))
+    throw new Error('This surface is too large to trace geodesics on.');
+  // Where it starts, which way and how far, each one value or a list.
+  const rest = operand ? args.slice(1) : args;
+  const elements = (e: Expr, size: number, what: string): (readonly Expr[])[] => {
+    const lowered = lower(e);
+    const each = lowered.kind === 'list' ? lowered.items : [lowered];
+    return each.map(item => {
+      const parts = size === 1 ? [item] : item.kind === 'vec' ? item.items : [];
+      if (parts.length !== size || parts.some(p => p.kind === 'vec' || p.kind === 'list'))
+        throw new Error(`geodesic: ${what} is ${size === 1 ? 'one number' : 'a pair, like (1, 0)'}. ${usage}`);
+      for (const p of parts)
+        for (const n of freeVars(p))
+          if (n !== 't' && !constNames.has(n))
+            throw new Error(
+              `geodesic: ${what} is numbers, sliders, t and named points${n === params[0] || n === params[1] ? `, not ${n}` : ` (found ${n})`}. ${usage}`,
+            );
+      return parts;
+    });
+  };
+  const starts = elements(rest[0], 2, 'where it starts');
+  const directions = elements(rest[1], 2, 'its direction');
+  const lengths = rest[2] ? elements(rest[2], 1, 'its length') : [[]];
+  const n = Math.max(starts.length, directions.length, lengths.length);
+  for (const list of [starts, directions, lengths])
+    if (list.length !== 1 && list.length !== n)
+      throw new Error(
+        'geodesic: lists of starts, directions and lengths go element by element, so they must be as long.',
+      );
+  if (n > 64) throw new Error('A family of geodesics has at most 64 members.');
+  const member = (k: number): Classified => {
+    const pick = <T>(list: readonly T[]) => list[list.length === 1 ? 0 : k];
+    const object: MathObject = {
+      kind: 'geodesic',
+      dim: onPanel ? 2 : 3,
+      params,
+      surface: items,
+      symbols,
+      metric,
+      start: pick(starts),
+      direction: pick(directions),
+      ...(rest[2] ? { length: pick(lengths)[0] } : {}),
+      domain,
+    };
+    const used = new Set<string>();
+    for (const e of [
+      ...items,
+      ...symbols,
+      ...metric,
+      ...domain,
+      ...pick(starts),
+      ...pick(directions),
+      ...pick(lengths),
+    ])
+      for (const name of freeVars(e)) used.add(name);
+    return {
+      object,
+      animated: [...used].some(name => name === 't' || moving.has(name)),
+      needs3D: !onPanel,
+      params: [...used].filter(name => constNames.has(name)).sort(),
+    };
+  };
+  const members = Array.from({ length: n }, (_, k) => member(k));
+  if (n === 1) return members[0];
+  return {
+    object: { kind: 'family', members },
+    animated: members.some(m => m.animated),
+    needs3D: !onPanel,
+    params: [...new Set(members.flatMap(m => m.params))].sort(),
+  };
+}
+
 /**
  * The surface of a row that is gaussian(S) or meancurvature(S) alone — which
  * draws S coloured by it — or null: for any other row, for one of the
@@ -932,6 +1069,13 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (rawParsed.kind === 'bin' && rawParsed.op === '*' && rawParsed.b.kind === 'range') {
         const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
         row.cls = classifyOrbit(lower(rawParsed.a), rawParsed.b.args.map(lower) as [Expr, Expr], defs, constNames);
+        continue;
+      }
+      // geodesic(S, start, direction): traced as it is drawn.
+      if (rawParsed.kind === 'call' && rawParsed.name === 'geodesic' && !fnNames.has('geodesic')) {
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
+        row.cls = classifyGeodesic(rawParsed.args, panelSurfaces[panel], getFn, ropts, lower, constNames, moving);
         continue;
       }
       // A graph's vertices are whole numbers, so its cases may test equality,

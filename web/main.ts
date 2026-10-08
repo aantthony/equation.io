@@ -181,7 +181,13 @@ import {
 } from '../lib/surface-map.ts';
 import { toGLSL, uniformName } from '../lib/glsl.ts';
 import { onSurface, raySurface, surfacePixel } from '../lib/surface-pick.ts';
-import { type GeodesicOptions, defaultGeodesicLength, divergingGain, numericIn } from '../lib/surface-geometry.ts';
+import {
+  type GeodesicOptions,
+  defaultGeodesicLength,
+  divergingGain,
+  geodesicPath,
+  numericIn,
+} from '../lib/surface-geometry.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1561,6 +1567,26 @@ function panelGridFields(p: Panel, plane?: PlaneMap): Array<GridField | 'x' | 'y
 /** Each cloud's scale (lib/volume.ts) and the view and sliders it was read under. */
 const volumeScales = new WeakMap<CpuPlan, { key: string; scale: number }>();
 
+/** A geodesic's points (lib/surface-geometry.ts geodesicPath), traced again
+ *  only when a value it reads (a slider, t, a dragged point) changes. */
+const geodesics = new WeakMap<CpuPlan, { key: string; pts: Float32Array }>();
+function geodesicFor(plot: Extract<CpuPlan, { type: 'geodesic' }>, env: Record<string, number>): Float32Array {
+  const exprs = [...plot.surface, ...plot.symbols, ...plot.start, ...plot.direction, ...plot.domain];
+  if (plot.length) exprs.push(plot.length);
+  const names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => !plot.params.includes(n));
+  const key = JSON.stringify(names.map(n => env[n]));
+  const last = geodesics.get(plot);
+  if (last?.key === key) return last.pts;
+  let pts: Float32Array;
+  try {
+    pts = Float32Array.from(geodesicPath(plot, env));
+  } catch {
+    pts = new Float32Array();
+  }
+  geodesics.set(plot, { key, pts });
+  return pts;
+}
+
 /** The gain a field painted on a surface's panel (gaussian(x, y)) is shaded
  *  with, kept until the surface or a value it reads (a slider, t) changes. */
 const fieldGains = new WeakMap<CpuPlan, { key: string; surface: SurfaceMap; gain: number }>();
@@ -2330,6 +2356,19 @@ function render() {
             const gpu = gpuFor(eq, 'psurface');
             const gain = plot.type === 'psurface' && plot.paint ? paintGain(plot, { ...constEnv, t: time }) : undefined;
             scene.psurfaces.push({ ...gpu, color, params, uniforms, gain });
+            break;
+          }
+          case 'geodesic': {
+            let pts = geodesicFor(plot, { ...constEnv, t: time });
+            // On its surface: lifted a hair toward the eye so the surface
+            // does not hide it (a panel's surface carries it so already).
+            if (plot.dim === 3) {
+              const lifted = towardEye(camera);
+              const raised = new Float32Array(pts.length);
+              for (let k = 0; k + 2 < pts.length; k += 3) raised.set(lifted([pts[k], pts[k + 1], pts[k + 2]]), k);
+              pts = raised;
+            }
+            if (pts.length >= 6) scene.curves.push({ pts, color });
             break;
           }
           case 'orbit': {
