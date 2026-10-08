@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
-import { brioschi } from './metric-curvature.ts';
+import { brioschi, curvatureFloor, curvatureGain, isRealCurvature } from './metric-curvature.ts';
+import { divergingGain } from './surface-geometry.ts';
 import { plotReadout } from './plot.ts';
 
 /** gaussian(x, y) on a plane panel with a metric (lib/metric-curvature.ts). */
@@ -151,6 +152,8 @@ describe('gaussian(x, y) under a ds^2 metric', () => {
     expect(errorOf([HALF_PLANE, 'meancurvature(x, y)'])).toMatch(
       /needs a surface in space; a metric \(this panel's ds\^2 row\) has a Gaussian curvature, gaussian\(x, y\), and no meancurvature/,
     );
+    // Only a point is read under the metric: anything else is a surface.
+    expect(errorOf([HALF_PLANE, 'gaussian(T)'])).toMatch(/T is not a surface — define one first/);
     // A surface of its own still reads as one there.
     expect(value([HALF_PLANE, 'S = (u, v, u^2 - v^2)', 'gaussian(S, 0, 0)'])).toBe(-4);
   });
@@ -183,5 +186,85 @@ describe('Brioschi’s formula', () => {
     // Off-diagonal: de Sitter in null-ish coordinates u = t, v = x - t.
     // -dt^2 + cosh(t)^2 dx^2 with dx = du + dv: E = cosh^2 - 1, F = cosh^2, G = cosh^2.
     expect(K('cosh(u)^2 - 1', 'cosh(u)^2', 'cosh(u)^2', ['u', 'v'], { u: 0.4, v: 0 })).toBeCloseTo(1, 12);
+  });
+});
+
+const box = (half: number): [[number, number], [number, number]] => [
+  [-half, half],
+  [-half, half],
+];
+
+/** The gain gaussian(x, y) (or `row`) is shaded with over ±half, as the
+ *  app reads it, and its K and term size as functions. */
+function gainOf(rows: string[], half: number, row = 'gaussian(x, y)') {
+  const { r, env } = analyze([...rows, row]);
+  if (r.error) throw new Error(r.error);
+  const o = r.cls!.object;
+  if (o.kind !== 'scalar-field' || !o.rounding) throw new Error(o.kind);
+  const at = (e: Expr) => (x: number, y: number) => {
+    try {
+      return evaluate(e, { ...env, x, y });
+    } catch {
+      return NaN;
+    }
+  };
+  return { gain: curvatureGain(at(o.expr), at(o.rounding), box(half)), K: at(o.expr), size: at(o.rounding) };
+}
+
+describe('the gain gaussian(x, y) is shaded with', () => {
+  it('is 0 for a flat metric, however it is written', () => {
+    for (const rows of [
+      [...POLAR, 'ds^2 = dr^2 + r^2 dphi^2'],
+      // Pulled back to x and y: its terms are as small as its rounding.
+      [...POLAR, 'ds^2 = dr^2 + (x^2 + y^2) dphi^2'],
+      ['M = 0', ...POLAR, 'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/sqrt(x^2 + y^2)) + r^2 dphi^2'],
+    ]) {
+      const { gain, K, size } = gainOf(rows, 16);
+      expect(gain, rows.at(-1)).toBe(0);
+      // And hover reads 0 there (web/main.ts): rounding, not curvature.
+      expect(isRealCurvature(K(3, 4), size(3, 4), curvatureFloor(box(16)))).toBe(false);
+    }
+  });
+  it('brings the typical size of a real K to 1.5', () => {
+    expect(gainOf([HALF_PLANE], 4).gain).toBeCloseTo(1.5, 10);
+    expect(gainOf([DISK], 0.5).gain).toBeCloseTo(1.5, 10);
+    const { gain } = gainOf(SCHWARZSCHILD, 16);
+    expect(gain).toBeGreaterThan(10);
+    expect(gain).toBeLessThan(1000);
+  });
+  it('sees K where it is local, and does not saturate its tail', () => {
+    // K = −6 at the centre, gone within r ≈ 3: in a ±16 view most samples
+    // are its tail, real but tiny.
+    const { gain, K } = gainOf([...POLAR, 'ds^2 = dr^2 + (r + r^3 exp(-r^2))^2 dphi^2'], 16);
+    expect(K(1e-3, 1e-3)).toBeCloseTo(-6, 3);
+    expect(gain).toBeGreaterThan(0);
+    // At most 1.5 over a thousandth of the largest |K| sampled (≈ 5–6).
+    expect(gain).toBeLessThanOrEqual(1.5 / (1e-3 * 4));
+  });
+  it('counts real samples only, and falls back where almost none are', () => {
+    const domain = box(1);
+    // Real only where p > 0: the typical size is that half's.
+    const half = (p: number) => (p > 0 ? 2 : 1e-20);
+    expect(divergingGain(half, domain, 0, { real: k => k > 1e-10, fallback: 0 })).toBeCloseTo(0.75, 12);
+    // Real at a single sample (under 1% of them): the fallback.
+    const spike = (p: number, q: number) => (Math.abs(p) < 0.04 && Math.abs(q) < 0.04 ? 1 : 0);
+    expect(divergingGain(spike, domain, 0, { real: k => k > 0, fallback: 0 })).toBe(0);
+    // Without `real`, as before: 1 where f is nowhere above the floor.
+    expect(divergingGain(() => 1e-12, domain, 1e-9)).toBe(1);
+    expect(divergingGain(() => NaN, domain, 0, { fallback: 0 })).toBe(0);
+    // A thin tail: the typical size is at least a thousandth of the largest.
+    const tail = (p: number, q: number) => (p * p + q * q < 0.01 ? 100 : 1e-9);
+    expect(divergingGain(tail, domain)).toBeCloseTo(1.5 / 0.1, 10);
+  });
+  it('shades −gaussian(x, y) and c gaussian(x, y) to their own size', () => {
+    for (const row of ['-gaussian(x, y)', '3 gaussian(x, y)', 'gaussian(x, y) c', 'gaussian(x, y)/c']) {
+      const { r } = analyze(['c = 2', HALF_PLANE, row]);
+      expect(r.cls!.object, row).toMatchObject({ kind: 'scalar-field', autoscale: true });
+    }
+    expect(gainOf(['c = 2', HALF_PLANE], 4, '-gaussian(x, y)').gain).toBeCloseTo(1.5, 10);
+    expect(gainOf(['c = 2', HALF_PLANE], 4, 'c gaussian(x, y)').gain).toBeCloseTo(0.75, 10);
+    // Not a sum, nor a product with something in x and y.
+    expect(analyze([HALF_PLANE, 'gaussian(x, y) + 1']).r.cls!.object).not.toMatchObject({ autoscale: true });
+    expect(analyze([HALF_PLANE, 'gaussian(x, y) x']).r.cls!.object).not.toMatchObject({ autoscale: true });
   });
 });

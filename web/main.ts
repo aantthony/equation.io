@@ -63,7 +63,8 @@ import {
   shadeNames,
   shadeRuns,
 } from '../lib/intshade.ts';
-import { compileSampler } from '../lib/vm.ts';
+import { compileProg, compileSampler, run as runProg } from '../lib/vm.ts';
+import { curvatureFloor, curvatureGain, isRealCurvature } from '../lib/metric-curvature.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
@@ -1758,50 +1759,137 @@ function surfaceFieldGain(
   return gain;
 }
 
-/** The 90th percentile of |f| at the centres of a 25 × 25 grid over the
- *  box (as divergingGain samples), or 0 where f is nowhere finite. */
-function typicalSize(f: (x: number, y: number) => number, [[x0, x1], [y0, y1]]: GeodesicOptions['domain']): number {
-  const n = 24;
-  const sizes: number[] = [];
-  for (let i = 0; i <= n; i++)
-    for (let j = 0; j <= n; j++) {
-      const v = Math.abs(f(x0 + ((x1 - x0) * (i + 0.5)) / (n + 1), y0 + ((y1 - y0) * (j + 0.5)) / (n + 1)));
-      if (Number.isFinite(v)) sizes.push(v);
-    }
-  if (!sizes.length) return 0;
-  sizes.sort((a, b) => a - b);
-  return sizes[Math.floor(0.9 * (sizes.length - 1))];
+/** An expression in x, y and named values, compiled once (lib/vm.ts) and
+ *  read with the values of the moment; NaN where it cannot be had. */
+interface FieldReader {
+  set(env: Readonly<Record<string, number>>): void;
+  at(x: number, y: number): number;
 }
+function fieldReader(e: Expr): FieldReader {
+  const slots = new Map(['x', 'y', ...freeVars(e)].filter((n, k, all) => all.indexOf(n) === k).map((n, k) => [n, k]));
+  const vars = new Float64Array(slots.size);
+  let prog: ReturnType<typeof compileProg> | null = null;
+  try {
+    prog = compileProg(e, slots);
+  } catch {
+    /* evaluated */
+  }
+  const stack = new Float64Array(Math.max(1, prog?.depth ?? 1));
+  let values: Readonly<Record<string, number>> = {};
+  return {
+    set(env) {
+      values = env;
+      for (const [n, k] of slots) vars[k] = env[n] ?? NaN;
+    },
+    at(x, y) {
+      vars[0] = x;
+      vars[1] = y;
+      try {
+        return prog ? runProg(prog, vars, stack) : evaluate(e, { ...values, x, y });
+      } catch {
+        return NaN;
+      }
+    },
+  };
+}
+
+/** A view box as the gain is read over, [[x0, x1], [y0, y1]]. */
+type ViewBox = GeodesicOptions['domain'];
 
 /**
  * The gain gaussian(x, y) on a plane panel with a metric (a ds^2 row) is
- * shaded with: its typical size over the view brought to about 1, as on a
- * surface (divergingGain), kept until the view or a value it reads changes.
- * A field that is a tiny part of the terms it is the difference of
- * (`rounding`: a flat metric written in polar coordinates) is rounding, and
- * gets 0: nothing painted, as 0 is everywhere else.
+ * shaded with over the view (lib/metric-curvature.ts curvatureGain): 1.5
+ * over its typical size where it is real, 0 where it is rounding. Its
+ * evaluators are compiled once per plot. A slider or t moving reads it
+ * again at most every VIEW_GAIN_MS; the view moving, at once only when the
+ * box has moved or grown by more than a quarter, else once it has stood
+ * still for VIEW_GAIN_MS — so a pan does not re-sample every frame.
  */
-const viewGains = new WeakMap<CpuPlan, { key: string; gain: number }>();
+const VIEW_GAIN_MS = 120;
+const viewGains = new WeakMap<
+  CpuPlan,
+  {
+    names: string[];
+    K: FieldReader;
+    size: FieldReader;
+    values?: string;
+    box?: ViewBox;
+    gain: number;
+    at: number;
+    stale?: boolean;
+    timer?: ReturnType<typeof setTimeout>;
+  }
+>();
 function viewFieldGain(
   plot: Extract<CpuPlan, { type: 'scalar2d' }>,
   env: Record<string, number>,
-  box: GeodesicOptions['domain'],
+  box: ViewBox,
 ): number {
-  const exprs = plot.rounding ? [plot.expr, plot.rounding] : [plot.expr];
-  const names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
-  const key = JSON.stringify([box, names.map(n => env[n])]);
-  const last = viewGains.get(plot);
-  if (last?.key === key) return last.gain;
-  const one = new Float64Array(1);
-  const at = (e: Expr) => {
-    const f = numericIn([e], ['x', 'y'], env);
-    return (x: number, y: number) => (f(x, y, one), one[0]);
-  };
-  const typical = typicalSize(at(plot.expr), box);
-  const floor = plot.rounding ? 1e-6 * typicalSize(at(plot.rounding), box) : 0;
-  const gain = typical > floor ? 1.5 / typical : 0;
-  viewGains.set(plot, { key, gain });
-  return gain;
+  let c = viewGains.get(plot);
+  if (!c) {
+    const exprs = plot.rounding ? [plot.expr, plot.rounding] : [plot.expr];
+    const names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
+    const rounding = plot.rounding;
+    c = {
+      names,
+      K: fieldReader(plot.expr),
+      size: rounding ? fieldReader(rounding) : { set() {}, at: () => 0 },
+      gain: 0,
+      at: 0,
+    };
+    viewGains.set(plot, c);
+  }
+  const values = JSON.stringify(c.names.map(n => env[n]));
+  const now = performance.now();
+  const span = (b: ViewBox, k: 0 | 1) => b[k][1] - b[k][0];
+  const far = (a: ViewBox, b: ViewBox) =>
+    ([0, 1] as const).some(
+      k =>
+        Math.abs((a[k][0] + a[k][1]) / 2 - (b[k][0] + b[k][1]) / 2) > 0.25 * span(a, k) ||
+        Math.abs(Math.log(span(b, k) / span(a, k))) > Math.log(1.25),
+    );
+  const same = (a: ViewBox, b: ViewBox) => a.every((r, k) => r[0] === b[k][0] && r[1] === b[k][1]);
+  let read = !c.box || c.stale || far(c.box, box);
+  if (!read && (c.values !== values || !same(c.box!, box))) {
+    if (c.values !== values && now - c.at >= VIEW_GAIN_MS) read = true;
+    else {
+      // Read it once things stand still.
+      const entry = c;
+      clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => {
+        entry.stale = true;
+        requestRender();
+      }, VIEW_GAIN_MS);
+    }
+  }
+  if (!read) return c.gain;
+  clearTimeout(c.timer);
+  // Read finely when first drawn and once things stand still; coarsely
+  // (an eleventh as many samples) while they move, then finely after.
+  const fine = !c.box || !!c.stale;
+  if (!fine) {
+    const entry = c;
+    entry.timer = setTimeout(() => {
+      entry.stale = true;
+      requestRender();
+    }, VIEW_GAIN_MS);
+  }
+  c.K.set(env);
+  c.size.set(env);
+  const { K, size } = c;
+  const gain = curvatureGain(
+    (x, y) => K.at(x, y),
+    (x, y) => size.at(x, y),
+    box,
+    fine ? 24 : 6,
+  );
+  // A coarse read that misses a small patch of K keeps the last gain.
+  if (fine || gain > 0) c.gain = gain;
+  c.values = values;
+  c.box = box.map(r => [r[0], r[1]]) as unknown as ViewBox;
+  c.at = now;
+  c.stale = false;
+  return c.gain;
 }
 
 /** The gain a surface coloured by its curvature (gaussian(S)) shades it
@@ -5839,6 +5927,18 @@ function updateHover(clientX: number, clientY: number) {
         continue;
       }
       if (!Number.isFinite(value)) continue;
+      // Rounding (a flat metric written in fields of x and y) reads 0.
+      try {
+        const { halfW, halfH } = hoverHalfSpan();
+        const floor = curvatureFloor([
+          [view.cx - halfW, view.cx + halfW],
+          [view.cy - halfH, view.cy + halfH],
+        ]);
+        const size = plot.rounding ? evaluate(plot.rounding, env) : 0;
+        if (!isRealCurvature(value, size, floor)) value = 0;
+      } catch {
+        /* as it is */
+      }
       const name = eq.text.length > 24 ? `${eq.text.slice(0, 23)}…` : eq.text;
       best ??= {
         pt: {

@@ -35,7 +35,7 @@ import { type Expr, freeVars, substVars } from './expr.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { type PanelMetric, partial } from './metric.ts';
 import { exceedsNodes } from './size.ts';
-import { type Partial, type Params, smoothPartial } from './surface-geometry.ts';
+import { type GeodesicOptions, type Partial, type Params, divergingGain, smoothPartial } from './surface-geometry.ts';
 import { inlineFields } from './axis-map.ts';
 
 const num = (value: number): Expr => ({ kind: 'num', value });
@@ -176,4 +176,39 @@ function pulledBack(metric: PanelMetric): [Expr, Expr, Expr] {
     return sum;
   };
   return [pull(0, 0), pull(0, 1), pull(1, 1)];
+}
+
+/** A view's box, [[x0, x1], [y0, y1]]. */
+type Box = GeodesicOptions['domain'];
+
+/**
+ * Below this a K over the box is rounding whatever its terms say: 10⁻⁹ of
+ * 1/L and 1/L², L the box's half-size (as a surface's field is floored).
+ * A flat metric pulled back to x and y has terms as small as its K.
+ */
+export function curvatureFloor([[x0, x1], [y0, y1]]: Box): number {
+  const L = Math.max(x1 - x0, y1 - y0) / 2;
+  return 1e-9 * Math.min(1 / L, 1 / L ** 2);
+}
+
+/** Whether K, beside the size of the terms it is the difference of (Curvature.size),
+ *  is curvature rather than their rounding, over a box with this floor. */
+export function isRealCurvature(k: number, size: number, floor: number): boolean {
+  return Math.abs(k) > floor && Math.abs(k) > 1e-6 * Math.abs(size);
+}
+
+/**
+ * The gain gaussian(x, y) under a metric is shaded with over a box: 1.5
+ * over the typical |K| among the samples where it is real (divergingGain),
+ * and 0 — nothing painted — where almost none are (a flat metric). `n`:
+ * the lattice, coarser while things move.
+ */
+export function curvatureGain(
+  K: (x: number, y: number) => number,
+  size: (x: number, y: number) => number,
+  box: Box,
+  n?: number,
+): number {
+  const floor = curvatureFloor(box);
+  return divergingGain(K, box, 0, { real: (k, x, y) => isRealCurvature(k, size(x, y), floor), fallback: 0, n });
 }

@@ -173,14 +173,23 @@ third derivatives, and in float32 a flat `dr^2 + r^2 dphi^2` read that way
 is noise. Only a metric mixing x and y with fields of them is pulled back
 first. With a time it is K of the slice t = constant (g's spatial block),
 the curvature of space at one instant — Flamm's −M/r³ for Schwarzschild —
-masked where the slice is not positive definite (inside a horizon). A flat
-metric whose K is rounding (below 10⁻⁶ of the terms it is the difference
-of, carried as `rounding` beside the field) gets gain 0 rather than its
-noise amplified; a constant K is one even tint. Follow-ups: the Riemann
-and Ricci tensors for 3+ dimensions (a 3D slice, Kerr off the equator),
-tidal glyphs (the geodesic deviation tensor, from R^a_bcd), the scalar
-curvature of a 2D Lorentzian panel once those exist (the formula already
-holds), and a K readout in the link preview.
+masked where the slice is not positive definite (inside a horizon). The
+gain counts only samples where K is real: above 10⁻⁶ of the terms it is
+the difference of (carried as `rounding` beside the field) and above
+10⁻⁹·min(1/L, 1/L²) for a view of half-size L — a flat metric pulled back
+to x and y has terms as small as its K. Where under 1% of samples are real
+the gain is 0 (nothing painted, hover reads 0); the typical size is at
+least a thousandth of the largest, so a local bump's thin tail does not
+saturate (lib/surface-geometry.ts divergingGain, lib/metric-curvature.ts
+curvatureGain; the link preview uses the same). A constant K is one even
+tint. In the app the evaluators are compiled once per row, and the gain is
+read again when a value moves (at most every 120 ms) or the view has moved
+by a quarter, else once it stands still. `-gaussian(x, y)` and
+`c gaussian(x, y)` are shaded the same way. Follow-ups: the Riemann and
+Ricci tensors for 3+ dimensions (a 3D slice, Kerr off the equator), tidal
+glyphs (the geodesic deviation tensor, from R^a_bcd), and the scalar
+curvature of 2D Lorentzian panels once those exist (the formula already
+holds).
 
 - `curvature(C)` and `torsion(C)` of a parametric curve in u, as a
   scalar along the curve (color the curve by it, or read out at a point).

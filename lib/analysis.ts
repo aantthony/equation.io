@@ -816,6 +816,32 @@ function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (name: s
   return arg;
 }
 
+/**
+ * The constant factor a row multiplies a panel metric's gaussian(x, y) by —
+ * 1 for it alone, -1 for -gaussian(x, y), c for c gaussian(x, y) or
+ * gaussian(x, y)/(1/c) with c a number or slider — or null for any other row.
+ * Such a row is shaded to its own size, as gaussian(x, y) is.
+ */
+function gaussianFactor(e: Expr, fnNames: ReadonlySet<string>, constNames: ReadonlySet<string>): Expr | null {
+  const constant = (c: Expr) => c.kind === 'num' || (c.kind === 'var' && constNames.has(c.name));
+  const times = (a: Expr | null, b: Expr, op: '*' | '/'): Expr | null => a && { kind: 'bin', op, a, b };
+  switch (e.kind) {
+    case 'call':
+      return e.name === 'gaussian' && !fnNames.has('gaussian') ? { kind: 'num', value: 1 } : null;
+    case 'neg': {
+      const f = gaussianFactor(e.a, fnNames, constNames);
+      return f && { kind: 'neg', a: f };
+    }
+    case 'bin':
+      if (e.op === '*' && constant(e.a)) return times(gaussianFactor(e.b, fnNames, constNames), e.a, '*');
+      if (e.op === '*' && constant(e.b)) return times(gaussianFactor(e.a, fnNames, constNames), e.b, '*');
+      if (e.op === '/' && constant(e.b)) return times(gaussianFactor(e.a, fnNames, constNames), e.b, '/');
+      return null;
+    default:
+      return null;
+  }
+}
+
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
   // A map's Σ bounds are told the document's functions and lists, to refuse them.
@@ -1358,18 +1384,17 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // gaussian(x, y) on a panel with a metric: its curvature, shaded to
       // its own size over the view, and said what it is.
       let curvatureInfo: string | null = null;
-      if (
-        !surface &&
-        panelMetricRows[panel] &&
-        row.cls.object.kind === 'scalar-field' &&
-        rawParsed.kind === 'call' &&
-        rawParsed.name === 'gaussian' &&
-        !fnNames.has('gaussian')
-      ) {
-        row.cls = {
-          ...row.cls,
-          object: { ...row.cls.object, autoscale: true, rounding: curvatureOf(panel).size },
-        };
+      const factor =
+        !surface && panelMetricRows[panel] && row.cls.object.kind === 'scalar-field'
+          ? gaussianFactor(rawParsed, fnNames, constNames)
+          : null;
+      if (factor && row.cls.object.kind === 'scalar-field') {
+        const { size } = curvatureOf(panel);
+        const rounding: Expr =
+          factor.kind === 'num' && Math.abs(factor.value) === 1
+            ? size
+            : { kind: 'bin', op: '*', a: { kind: 'call', name: 'abs', args: [factor] }, b: size };
+        row.cls = { ...row.cls, object: { ...row.cls.object, autoscale: true, rounding } };
         const time = (metricOf(panel) as { metric: PanelMetric }).metric.time;
         curvatureInfo = `${time === undefined ? "the metric's Gaussian curvature K" : `the curvature of space at one instant (K of the slice ${time} = constant)`}: row colour where K > 0, its complement where K < 0`;
       }

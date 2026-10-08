@@ -833,4 +833,25 @@ describe('rows whose plan fails to compile', () => {
       renderRaster([rows[0], 'y = x'], 100, 100).px,
     );
   });
+
+  it('shades a metric’s gaussian(x, y) to its own size, as the app does', () => {
+    const hole = [
+      'view(x = -16..16, y = -16..16)',
+      'grid(off)',
+      'M = 1',
+      'r = sqrt(x^2 + y^2)',
+      'phi = atan2(y, x)',
+      'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2',
+      'gaussian(x, y)',
+    ];
+    expect(canRenderOg(hole)).toBe(true);
+    // K = −1/64 at r = 4: barely a tint at the plain 0.6, strong with the gain.
+    const near = pixel(renderRaster(hole, 200, 200), 125, 100);
+    expect(Math.min(...near)).toBeLessThan(200);
+    // A flat metric paints nothing.
+    const flat = ['view(x = -16..16, y = -16..16)', 'grid(off)', 'r = sqrt(x^2 + y^2)', 'phi = atan2(y, x)'];
+    expect(renderRaster([...flat, 'ds^2 = dr^2 + (x^2 + y^2) dphi^2', 'gaussian(x, y)'], 100, 100).px).toEqual(
+      renderRaster([...flat, 'ds^2 = dr^2 + (x^2 + y^2) dphi^2'], 100, 100).px,
+    );
+  });
 });

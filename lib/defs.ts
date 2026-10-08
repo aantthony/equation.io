@@ -1601,7 +1601,14 @@ function surfaceGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   const onPanel = !!panel && args.length > 0 && !surfaceLike(args[0], ctx);
   // A plane panel with a metric (a ds^2 row): K of that metric.
   const metric = panel ? undefined : ctx.opts.metric;
-  if (metric && args.length > 0 && !surfaceLike(args[0], ctx)) {
+  // Only for a point: two numbers, a pair or a named 2D point — anything
+  // else (gaussian(T), T undefined) is read as a surface, and says so.
+  const pointShaped =
+    (args.length === 2 && args.every(a => a.kind !== 'vec')) ||
+    (args.length === 1 &&
+      ((args[0].kind === 'vec' && args[0].items.length === 2) ||
+        (args[0].kind === 'var' && ctx.opts.comps?.(args[0].name)?.length === 2)));
+  if (metric && pointShaped && !surfaceLike(args[0], ctx)) {
     if (name !== 'gaussian')
       throw new Error(
         `${name}(x, y) needs a surface in space; a metric (this panel's ds^2 row) has a Gaussian curvature, gaussian(x, y), and no ${name}.`,

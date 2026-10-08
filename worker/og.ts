@@ -39,6 +39,7 @@ import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 import { type AxisMap, type AxisMaps, axisMapping, shownRange, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
 import { type ScreenBox, invert2, planeInverse, planeLines, planeShapes, planeWorldBox } from '../lib/plane-map.ts';
 import { axisTicks } from '../lib/axis-ticks.ts';
+import { curvatureGain } from '../lib/metric-curvature.ts';
 
 export const OG_WIDTH = 600;
 export const OG_HEIGHT = 315;
@@ -412,14 +413,14 @@ function projectedMask(
   return mask;
 }
 
-function shadeScalar(r: Raster, grid: Float64Array, c: [number, number, number]) {
+function shadeScalar(r: Raster, grid: Float64Array, c: [number, number, number], gain = 0.6) {
   const { w, h } = r;
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       const value = grid[j * (w + 1) + i];
       if (!Number.isFinite(value)) continue;
       // Signed shade: positive toward the row color, negative toward its complement.
-      const s = Math.tanh(value * 0.6);
+      const s = Math.tanh(value * gain);
       const tint: [number, number, number] = s >= 0 ? c : [1 - c[0], 1 - c[1], 1 - c[2]];
       blend(r, i, j, tint, Math.abs(s) * 0.55);
     }
@@ -769,9 +770,28 @@ function renderRow2D(
       }
       return;
     }
-    case 'scalar2d':
-      shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color);
+    case 'scalar2d': {
+      // gaussian(x, y) under a metric: shaded to its own size over the
+      // window, as the app shades it (lib/metric-curvature.ts).
+      let gain = 0.6;
+      if (cpu.autoscale) {
+        const K = compile(cpu.expr);
+        const size = cpu.rounding ? compile(cpu.rounding) : null;
+        const at = (p: Prog) => (x: number, y: number) => {
+          env.vars[env.slotX] = x;
+          env.vars[env.slotY] = y;
+          return run(p, env.vars, env.stack);
+        };
+        const halfW = (r.w / 2) * v.upp;
+        const halfH = (r.h / 2) * (v.upp / (v.ratio ?? 1));
+        gain = curvatureGain(at(K), size ? at(size) : () => 0, [
+          [v.cx - halfW, v.cx + halfW],
+          [v.cy - halfH, v.cy + halfH],
+        ]);
+      }
+      shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color, gain);
       return;
+    }
     case 'pregion': {
       // The app's fill (web/render2d.ts regions): the sampled triangles'
       // union, at the inequality fill's opacity, with no outline.
