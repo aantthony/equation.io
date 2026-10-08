@@ -188,11 +188,12 @@ import {
   GEODESIC_MAX_POINTS,
   geodesicPlanKey,
   GEODESIC_MAX_STEPS,
+  metricOrientation,
   metricValues,
   numericIn,
   traceWindow,
 } from '../lib/surface-geometry.ts';
-import { type ConeGlyphs, type ConeView, coneGlyphs, indicatrixScale } from '../lib/light-cone.ts';
+import { type ConeGlyphs, type ConeView, type Orient, coneGlyphs, indicatrixScale } from '../lib/light-cone.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1638,24 +1639,16 @@ function geodesicNote(row: Equation, members: number) {
   reconcile();
 }
 
-/**
- * A geodesic's points, traced in the trace worker (lib/surface-geometry.ts
- * geodesicPath) whenever a value it reads changes — a slider, t, a dragged
- * point — and never on this thread. The last one traced keeps drawing until
- * the next arrives, so dragging stays smooth while the worker catches up.
- */
-/** A light-cone row's reader of its metric and the names it reads, by plan. */
-const coneReaders = new WeakMap<
-  CpuPlan,
-  {
-    names: string[];
-    metricNames: string[];
-    key: string;
-    read: ReturnType<typeof metricValues> | null;
-    glyphs?: ConeGlyphs;
-    view?: string;
-  }
+/** A panel's metric as its light-cone rows read it — compiled once for all
+ *  of them (a family of 256 lightcone(P) included), by its components — and
+ *  the values it was compiled at. */
+const coneMetrics = new WeakMap<
+  readonly unknown[],
+  { names: string[]; key: string; read?: ReturnType<typeof metricValues>; orient?: Orient }
 >();
+/** A light-cone row's glyphs, the names it reads, and what they were drawn
+ *  at (its values and the view), by plan. */
+const coneRows = new WeakMap<CpuPlan, { names: string[]; glyphs?: ConeGlyphs; view?: string }>();
 /** The indicatrix scale of a panel's metric over a view, by its components
  *  (shared by the panel's light-cone rows, so lightcones and lightcone(P)
  *  agree): a lone lightcone(P) is drawn at the scale the lattice would be. */
@@ -1668,19 +1661,24 @@ const coneScales = new WeakMap<readonly unknown[], { key: string; kappa: number 
  */
 function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView): ConeGlyphs {
   const plot = eq.cpu as Extract<CpuPlan, { type: 'lightcone' }>;
-  let c = coneReaders.get(plot);
+  const reads = (exprs: Expr[]) => [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
+  let m = coneMetrics.get(plot.components);
+  if (!m) {
+    m = { names: reads([...plot.components, ...(plot.jacobian ?? []), ...(plot.future ?? [])]), key: '' };
+    coneMetrics.set(plot.components, m);
+  }
+  const key = JSON.stringify(m.names.map(n => env[n]));
+  if (m.key !== key || !m.read) {
+    m.key = key;
+    m.read = metricValues(plot, env);
+    m.orient = metricOrientation(plot.future, env);
+  }
+  let c = coneRows.get(plot);
   if (!c) {
-    const reads = (exprs: Expr[]) => [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
-    const metric = [...plot.components, ...(plot.jacobian ?? [])];
-    c = { names: reads([...metric, ...(plot.at ?? [])]), metricNames: reads(metric), key: '', read: null };
-    coneReaders.set(plot, c);
+    c = { names: reads(plot.at ? [...plot.at] : []) };
+    coneRows.set(plot, c);
   }
-  const key = JSON.stringify(c.metricNames.map(n => env[n]));
-  if (c.key !== key || !c.read) {
-    c.key = key;
-    c.read = metricValues(plot, env);
-  }
-  const where = `${JSON.stringify(c.names.map(n => env[n]))}\n${JSON.stringify(view)}`;
+  const where = `${key}\n${JSON.stringify(c.names.map(n => env[n]))}\n${JSON.stringify(view)}`;
   if (c.glyphs && c.view === where) return c.glyphs;
   let kappa: number | undefined;
   if (plot.n === 3) {
@@ -1688,7 +1686,7 @@ function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView
     const scale = coneScales.get(plot.components);
     if (scale?.key === scaleKey) kappa = scale.kappa;
     else {
-      kappa = indicatrixScale(c.read, view);
+      kappa = indicatrixScale(m.read, view);
       coneScales.set(plot.components, { key: scaleKey, kappa });
     }
   }
@@ -1698,11 +1696,21 @@ function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView
     numericIn(plot.at, ['x', 'y'], env)(NaN, NaN, out);
     at = [[out[0], out[1]]];
   }
-  c.glyphs = coneGlyphs(c.read, view, { ...(at ? { at } : {}), ...(kappa !== undefined ? { kappa } : {}) });
+  c.glyphs = coneGlyphs(m.read, view, {
+    ...(at ? { at } : {}),
+    ...(kappa !== undefined ? { kappa } : {}),
+    ...(m.orient ? { orient: m.orient } : {}),
+  });
   c.view = where;
   return c.glyphs;
 }
 
+/**
+ * A geodesic's points, traced in the trace worker (lib/surface-geometry.ts
+ * geodesicPath) whenever a value it reads changes — a slider, t, a dragged
+ * point — and never on this thread. The last one traced keeps drawing until
+ * the next arrives, so dragging stays smooth while the worker catches up.
+ */
 function geodesicFor(
   eq: Equation,
   env: Record<string, number>,

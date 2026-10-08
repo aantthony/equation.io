@@ -1094,6 +1094,18 @@ export function metricValues(
   };
 }
 
+/** A spacetime diagram's time orientation (lib/light-cone.ts Orient) from
+ *  its gradients (PanelMetric.future), or undefined with none. */
+export function metricOrientation(
+  future: readonly Expr[] | undefined,
+  env: Readonly<Record<string, number>>,
+): ((x: number, y: number) => ArrayLike<number>) | undefined {
+  if (!future) return undefined;
+  const at = numericIn(future, ['x', 'y'], env);
+  const out = new Float64Array(4);
+  return (x, y) => (at(x, y, out), out);
+}
+
 /** z with g z = a, g symmetric 2 × 2 or 3 × 3, into `z`. */
 function solveSymmetric(g: readonly (readonly number[])[], a: readonly number[], z: number[]): void {
   if (g.length === 2) {
@@ -1213,7 +1225,10 @@ const short = (x: number) => Number(x.toPrecision(3));
  * - null: only the direction matters; U^τ = 1 at the start, so the affine
  *   parameter runs like τ there.
  *
- * With no τ, timelike and null are a spacetime diagram's (diagramStart).
+ * With no τ, timelike and null are a spacetime diagram's (diagramStart)
+ * where the metric is Lorentzian at the start; a metric of mixed signature
+ * positive definite there traces a timelike geodesic as a plane's
+ * (riemannian), and has no light ray.
  *
  * `sign` −1 runs it back (U reversed). Null when there is nothing to trace
  * (a light ray with no direction).
@@ -1239,7 +1254,12 @@ export function metricStart(
   const U = new Array<number>(n).fill(0);
   const acc = new Array<number>(n).fill(0);
   const lower = new Array<number>(n).fill(0);
-  if (n === 2 && motion !== 'riemannian') return diagramStart(read, g, motion, [a, b], sign, inRange);
+  // A diagram's geodesic where the metric is Lorentzian at the start; where
+  // a metric of mixed signature is positive definite there, a particle's
+  // runs as a plane's, and light has none.
+  if (n === 2 && motion !== 'riemannian' && !positive(g)) return diagramStart(read, g, motion, [a, b], sign, inRange);
+  if (n === 2 && motion === 'null')
+    return { problem: 'no light here: the metric is positive definite at the start (a plane, not a spacetime, here)' };
   if (n === 2) {
     if (!positive(g)) return { problem: 'the metric is not positive definite at the start' };
     const flow: GeodesicFlow = {

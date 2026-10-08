@@ -690,13 +690,15 @@ function classifyGeodesic(
     const m = metricState!.metric;
     if (name === 'lightray' && m.n === 2 && !m.lorentzian)
       throw new Error(
-        `lightray needs a spacetime: a metric with a time coordinate, like ds^2 = -dt^2 + dx^2 + dy^2, or a spacetime diagram, like ds^2 = -dy^2 + dx^2. This one, in ${m.coords.join(' and ')}, is positive definite; draw its geodesics with geodesic(P, d).`,
+        `lightray needs a spacetime: a metric with a time coordinate, like ds^2 = -dt^2 + dx^2 + dy^2, or a spacetime diagram, like ds^2 = -dy^2 + dx^2. This one, in ${m.coords.join(' and ')}, is positive definite everywhere it was checked; draw its geodesics with geodesic(P, d).`,
       );
     metric = {
       n: m.n,
       components: m.components,
       derivatives: m.derivatives,
       ...(m.jacobian ? { jacobian: m.jacobian } : {}),
+      // With a diagram's signature anywhere, a geodesic takes the kind at
+      // its start (metricStart): mixed metrics are planes in places.
       motion: m.n === 2 && !m.lorentzian ? 'riemannian' : name === 'lightray' ? 'null' : 'timelike',
       ...(m.time !== undefined ? { time: m.time } : {}),
     };
@@ -830,10 +832,17 @@ function classifyLightCone(
   const m = metricState.metric;
   if (m.n === 2 && !m.lorentzian)
     throw new Error(
-      `A Riemannian metric has no light cones: this one, in ${m.coords.join(' and ')}, is positive for every direction. A spacetime has a time, like -dt^2 + dx^2 + dy^2, or one minus sign, like -dy^2 + dx^2.`,
+      `A Riemannian metric has no light cones: this one, in ${m.coords.join(' and ')}, is positive definite everywhere it was checked. A spacetime has a time, like -dt^2 + dx^2 + dy^2, or one minus sign, like -dy^2 + dx^2.`,
     );
-  const metric = { n: m.n, components: m.components, ...(m.jacobian ? { jacobian: m.jacobian } : {}) };
-  const metricReads = new Set([...m.components, ...(m.jacobian ?? [])].flatMap(e => [...freeVars(e)]));
+  const metric = {
+    n: m.n,
+    components: m.components,
+    ...(m.jacobian ? { jacobian: m.jacobian } : {}),
+    ...(m.future ? { future: m.future } : {}),
+  };
+  const metricReads = new Set(
+    [...m.components, ...(m.jacobian ?? []), ...(m.future ?? [])].flatMap(e => [...freeVars(e)]),
+  );
   const member = (point: readonly Expr[] | undefined): Classified => {
     const used = new Set(metricReads);
     for (const e of point ?? []) for (const n of freeVars(e)) used.add(n);
@@ -1089,9 +1098,9 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           throw new Error('This panel already has a metric: one ds^2 row a panel (a --- row starts a new panel).');
         const state = metricOf(panel)!;
         if ('error' in state) throw new Error(state.error);
-        const { n, coords, lorentzian } = state.metric;
+        const { n, coords, lorentzian, mixed } = state.metric;
         row.cls = {
-          object: { kind: 'metric', n, coords, ...(lorentzian ? { lorentzian } : {}) },
+          object: { kind: 'metric', n, coords, ...(lorentzian ? { lorentzian } : {}), ...(mixed ? { mixed } : {}) },
           animated: false,
           needs3D: false,
           params: [],

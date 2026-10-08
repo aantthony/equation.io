@@ -347,9 +347,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     extra coordinates, `dpi` or `de` (constants are no coordinates), a term
     not quadratic in the differentials, and a metric with no usable
     signature (checked over scales from 0.001 to 100 000 round the origin):
-    with no extra coordinate it must be positive definite somewhere (a
-    plane) or else Lorentzian, det g < 0, somewhere (a spacetime diagram,
-    below; negative for every direction is refused); with one, the panel's
+    with no extra coordinate it must be positive definite (a plane) or
+    Lorentzian, det g < 0 (a spacetime diagram, below), somewhere, and may
+    be both (mixed signature, read out as such: each geodesic takes the
+    kind at its start and stops where it changes; negative for every
+    direction is refused); with one, the panel's
     coordinates are space and det g < 0, so the other is a time.
     One ds² row a panel; not on an `on(…)` panel or one whose `view(…)` maps
     its axes. The row reads out its signature and coordinates and draws
@@ -383,7 +385,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   - A spacetime diagram: with no third coordinate, a Lorentzian metric in
     the panel's own two (one minus sign) makes the panel space against time,
     and the metric decides which is which: `ds^2 = -dy^2 + dx^2`
-    (Minkowski, y up as time), `M = 1` and
+    (Minkowski, y up as time), `g = 0.1` and `ds^2 = -(1 + 2 g x) dy^2 +
+    dx^2` (a uniform field: a plane where 1 + 2 g x < 0), `M = 1` and
     `ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)` (Schwarzschild's r and t
     as x and y), `ds^2 = -(1 - 2M/x) dy^2 + 2 dy dx` (ingoing
     Eddington–Finkelstein, r and v). Declared coordinates work as above.
@@ -405,9 +408,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   draws one each). Refused with no metric, or a Riemannian one.
   - On a spacetime diagram each is the two null directions, a filled wedge
     opening to the future and two strokes to the past, a fixed size on the
-    screen. The future is the half whose axis points up the panel (y
-    increasing), or, where the axis lies along x (inside Schwarzschild's
-    horizon in r and t), toward −x: smaller r. Round a horizon in
+    screen, only where the metric is Lorentzian. The future is the half
+    along which the time coordinate increases: of the two written, the one
+    whose own d²-term is negative at more of the points checked (t in
+    `-dt^2 + dx^2`, v in `-(1 - 2M/r) dv^2 + 2 dv dr`), else y. That is
+    continuous wherever that coordinate is a time, inside a horizon too.
+    Where the cone lies across it exactly (inside Schwarzschild's horizon in
+    r and t, where r is the time) the future is the other coordinate
+    decreasing: smaller r. Round a horizon in
     Schwarzschild's r and t the cones close up (half-angle
     atan(1 − 2M/r)); in Eddington–Finkelstein they tip over through it.
   - With a time besides the panel's coordinates (equatorial Schwarzschild
@@ -421,7 +429,10 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     toward the horizon (nothing inside it); round a spinning hole they are
     dragged in its sense of spin, and inside the ergoregion (g_tt > 0) an
     ellipse no longer holds its own dot. A lattice ellipse wider than its
-    cell is left out.
+    cell is left out, and so is one cut off from the outside by a horizon
+    (inside a spinning hole's inner horizon, where x and y are space
+    again). A lone `lightcone(P)` with no ellipse in view on the lattice is
+    drawn at its own such scale.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   The operand is every factor written after `dx`, with or without spaces,

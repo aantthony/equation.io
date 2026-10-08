@@ -7,11 +7,17 @@
  * coordinates, like -dy^2 + dx^2 — a light cone is two null lines through
  * the point, and is drawn as a filled wedge opening toward the future, with
  * the past half as two strokes. Which half is the future is the metric's
- * business, not y's: the future cone is the one whose axis points up the
- * panel (y increasing), and where the axis lies along x (inside
- * Schwarzschild's horizon in r and t, where r is the time) the one toward
- * −x, so that inside a black hole the future is smaller r. The glyph is a
- * fixed size in pixels.
+ * business, not y's. Its time coordinate τ is the one of the two written
+ * whose own d²-term is negative at more of the points checked (dt in
+ * -dt^2 + dx^2, v in Eddington–Finkelstein's -(1 - 2M/r) dv^2 + 2 dv dr),
+ * else y (lib/metric.ts), and the future half is the one along which τ
+ * increases: dτ(axis) > 0. That is continuous wherever τ is a time — even
+ * where ∂τ is not timelike, as inside Eddington–Finkelstein's horizon,
+ * where every future cone still has v increasing — and changes only where
+ * a cone straddles dτ = 0. Where dτ(axis) is 0 exactly (inside
+ * Schwarzschild's horizon in r and t, where r is the time and the cones lie
+ * along it) the future is the half along which the other coordinate
+ * decreases: smaller r, into the hole. The glyph is a fixed size in pixels.
  *
  * With a time besides the panel's two coordinates (Schwarzschild or Kerr in
  * their equatorial plane, in r and phi), the cone is drawn by its section at
@@ -40,7 +46,17 @@ export interface LightConeSpec {
   readonly jacobian?: readonly Expr[];
   /** The point of lightcone(P); without it, a lattice over the window. */
   readonly at?: readonly Expr[];
+  /** A diagram's time orientation (lib/metric.ts PanelMetric.future): dτ,
+   *  then the other coordinate's gradient, in x and y. */
+  readonly future?: readonly Expr[];
 }
+
+/** A diagram's time orientation at a point: the gradients of its time
+ *  coordinate and of the other, (τ_x, τ_y, σ_x, σ_y). */
+export type Orient = (x: number, y: number) => ArrayLike<number>;
+
+/** With no orientation of its own: τ = y, and σ = x. */
+const UP: readonly number[] = [0, 1, 1, 0];
 
 /** A metric's components in x and y at a point: 2 × 2 (x, y) or 3 × 3 (t,
  *  x, y) — null where it is not defined. */
@@ -70,18 +86,28 @@ export function nullAngles(gxx: number, gxy: number, gyy: number): [number, numb
  * The future half of a 2 × 2 Lorentzian metric's timelike cone: its axis's
  * angle in x and y and its half-width (the cone is axis ± half), or null
  * where the metric is not Lorentzian. The timelike axes are φ/2 + π/2 and
- * that + π (where Q is least); the future is the one pointing up the panel,
- * or, with the axis along x, toward −x (module comment).
+ * that + π (where Q is least); the future is the one along which the time
+ * coordinate increases, given by its gradient and the other's in `orient`
+ * (default τ = y, σ = x), or, where that is 0, the one along which the other
+ * decreases (module comment).
  */
-export function futureCone(gxx: number, gxy: number, gyy: number): { axis: number; half: number } | null {
+export function futureCone(
+  gxx: number,
+  gxy: number,
+  gyy: number,
+  orient: ArrayLike<number> = UP,
+): { axis: number; half: number } | null {
   const angles = nullAngles(gxx, gxy, gyy);
   if (!angles) return null;
   const [a1, a2] = angles;
   const phi = a1 + a2;
   const half = (Math.PI - (a1 - a2)) / 2;
   let axis = phi / 2 + Math.PI / 2;
-  const s = Math.sin(axis);
-  if (s < -1e-9 || (Math.abs(s) <= 1e-9 && Math.cos(axis) > 0)) axis += Math.PI;
+  const [c, s] = [Math.cos(axis), Math.sin(axis)];
+  const along = orient[0] * c + orient[1] * s;
+  const size = Math.hypot(orient[0], orient[1]);
+  const back = Math.abs(along) > 1e-9 * size ? along < 0 : orient[2] * c + orient[3] * s > 0;
+  if (back) axis += Math.PI;
   axis = Math.atan2(Math.sin(axis), Math.cos(axis));
   return { axis, half };
 }
@@ -215,17 +241,68 @@ export function indicatrixScale(read: MetricRead, view: ConeView): number {
   return 2 ** Math.round(Math.log2((ELLIPSE_REACH * cell) / median));
 }
 
+/** Whether x and y are space in a 3 × 3 metric (t, x, y): its x, y block
+ *  positive definite. Not so inside a horizon. */
+function spatial(g: readonly (readonly number[])[]): boolean {
+  const [hxx, hxy, hyy] = [g[1][1], g[1][2], g[2][2]];
+  return hxx > 0 && hxx * hyy - hxy * hxy > 0;
+}
+
+/**
+ * Whether a point is cut off from the outside by a horizon, as inside a
+ * spinning hole's inner horizon r₋, where x and y are space again and an
+ * ellipse could be drawn: the straight line from it, away from the middle
+ * of the horizon points on the view's lattice, crosses one (x and y not
+ * space) before the edge of a box twice the view's size. Stepped a quarter
+ * of a cell at a time, so a band thinner than that is missed (then the
+ * inner ellipses are a cell or two across the hole). False everywhere when
+ * no lattice point in view is inside a horizon.
+ */
+export function behindHorizon(read: MetricRead, view: ConeView): (x: number, y: number) => boolean {
+  let [sx, sy, count] = [0, 0, 0];
+  for (const [x, y] of coneLattice(view)) {
+    const g = read(x, y);
+    if (g && g.length === 3 && !spatial(g)) {
+      sx += x;
+      sy += y;
+      count++;
+    }
+  }
+  if (!count) return () => false;
+  const [cx, cy] = [sx / count, sy / count];
+  const step = coneCell(view.upp) / 4;
+  const reach = 2 * Math.hypot(view.hi[0] - view.lo[0], view.hi[1] - view.lo[1]);
+  return (x, y) => {
+    const d = Math.hypot(x - cx, y - cy);
+    if (!(d > 0)) return true;
+    const [ux, uy] = [(x - cx) / d, (y - cy) / d];
+    for (let s = step; s < reach; s += step) {
+      const g = read(x + s * ux, y + s * uy);
+      if (g && !spatial(g)) return true;
+    }
+    return false;
+  };
+}
+
 /**
  * The light-cone glyphs of a metric read through `read` (2 × 2: a spacetime
- * diagram's wedges; 3 × 3: indicatrices at scale κ) at `at`, or over the
- * view's lattice. Points where the metric gives no cone are left out. A
- * lattice's indicatrix reaching further than its cell is left out too
- * (`cap`), so one near a coordinate singularity does not cover the panel.
+ * diagram's wedges, oriented by `orient`; 3 × 3: indicatrices at scale κ) at
+ * `at`, or over the view's lattice. Points where the metric gives no cone
+ * are left out, and so are indicatrices cut off from the outside by a
+ * horizon (behindHorizon). A lattice's indicatrix reaching further than its
+ * cell is left out too, so one near a coordinate singularity does not cover
+ * the panel. A lone one with no κ (no indicatrix on the lattice in view) is
+ * drawn at its own scale, as the median would be.
  */
 export function coneGlyphs(
   read: MetricRead,
   view: ConeView,
-  { at, kappa, radius }: { at?: readonly (readonly [number, number])[]; kappa?: number; radius?: number } = {},
+  {
+    at,
+    kappa,
+    radius,
+    orient,
+  }: { at?: readonly (readonly [number, number])[]; kappa?: number; radius?: number; orient?: Orient } = {},
 ): ConeGlyphs {
   const out: ConeGlyphs = { rings: [], lines: [], dots: [] };
   const points = at ?? coneLattice(view);
@@ -233,12 +310,13 @@ export function coneGlyphs(
   const R = radius ?? (at ? LONE_CONE_RADIUS_PX : CONE_RADIUS_PX);
   const cell = coneCell(upp);
   let k = kappa;
+  let cut: ((x: number, y: number) => boolean) | undefined;
   for (const [x, y] of points) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     const g = read(x, y);
     if (!g) continue;
     if (g.length === 2) {
-      const cone = futureCone(g[0][0], g[0][1], g[1][1]);
+      const cone = futureCone(g[0][0], g[0][1], g[1][1], orient?.(x, y) ?? UP);
       if (!cone) continue;
       // The edges' angles on the screen, where a pixel is upp across and
       // uppY up; the cap is an arc between them, through the axis.
@@ -268,15 +346,19 @@ export function coneGlyphs(
     }
     const e = indicatrix(g);
     if (!e) continue;
+    cut ??= behindHorizon(read, view);
+    if (cut(x, y)) continue;
     k ??= indicatrixScale(read, view);
-    if (!Number.isFinite(k)) break;
-    if (!at && k * (Math.hypot(e.cx, e.cy) + Math.max(e.a, e.b)) > cell) continue;
+    const reach = Math.hypot(e.cx, e.cy) + Math.max(e.a, e.b);
+    const scale = Number.isFinite(k) ? k : at ? 2 ** Math.round(Math.log2((ELLIPSE_REACH * cell) / reach)) : NaN;
+    if (!Number.isFinite(scale)) break;
+    if (!at && scale * reach > cell) continue;
     const [c, s] = [Math.cos(e.angle), Math.sin(e.angle)];
     const steps = 48;
     for (let j = 0; j <= steps; j++) {
       const t = (2 * Math.PI * j) / steps;
       const [u, v] = [e.a * Math.cos(t), e.b * Math.sin(t)];
-      out.rings.push(x + k * (e.cx + c * u - s * v), y + k * (e.cy + s * u + c * v));
+      out.rings.push(x + scale * (e.cx + c * u - s * v), y + scale * (e.cy + s * u + c * v));
     }
     out.rings.push(NaN, NaN);
     out.dots.push(x, y);

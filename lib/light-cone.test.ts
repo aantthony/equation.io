@@ -5,6 +5,7 @@ import { plotReadout } from './plot.ts';
 import {
   type ConeView,
   type LightConeSpec,
+  behindHorizon,
   coneGlyphs,
   coneLattice,
   futureCone,
@@ -19,6 +20,7 @@ import {
   geodesicCutNote,
   geodesicPath,
   metricAt,
+  metricOrientation,
   metricValues,
 } from './surface-geometry.ts';
 
@@ -296,8 +298,10 @@ describe('spacetime diagrams', () => {
     expect(declared.error).toBeUndefined();
     // Negative for every direction: nothing to draw.
     expect(errorOf(['ds^2 = -dx^2 - dy^2'])).toMatch(/negative for every direction/);
-    // Positive definite somewhere: a plane, as before.
-    expect(last(['ds^2 = dx^2 + x dy^2']).cls!.object).not.toHaveProperty('lorentzian');
+    // Positive definite in places and Lorentzian in others: mixed.
+    expect(last(['ds^2 = dx^2 + x dy^2']).cls!.object).toMatchObject({ lorentzian: true, mixed: true });
+    // Positive definite everywhere: a plane, as before.
+    expect(last(['ds^2 = (dx^2 + dy^2)/y^2']).cls!.object).not.toHaveProperty('lorentzian');
   });
 
   it('pull a declared coordinate’s metric back to x and y', () => {
@@ -387,5 +391,125 @@ describe('spacetime diagrams', () => {
     const [x1, y1] = pts[2];
     expect(angle([x1 - x0, y1 - y0])).toBeCloseTo(Math.atan2(1, 1 - 2 / 2.5), 2);
     expect(pts.at(-1)![0]).toBeGreaterThan(10);
+  });
+});
+
+describe('review fixes', () => {
+  /** The future cone of a document's metric at a point. */
+  const futureAt = (rows: string[], x: number, y: number) => {
+    const { spec, env } = cones([...rows, 'lightcones']);
+    const g = metricValues(spec, env)(x, y)!;
+    return futureCone(g[0][0], g[0][1], g[1][1], metricOrientation(spec.future, env)!(x, y))!;
+  };
+
+  it('takes a 2D metric Lorentzian anywhere as a spacetime diagram, mixed where it is a plane too', () => {
+    const repros = [
+      ['g = 0.1', 'ds^2 = -(1 + 2 g x) dy^2 + dx^2'],
+      ['M = 1', 'ds^2 = -(1 - 2M/abs(x)) dy^2 + (1 + 2M/abs(x)) dx^2'],
+      ['M = 1', 'ds^2 = -(1 - 2M/x) dy^2 + dx^2'],
+      ['ds^2 = -(1 - x^2/100) dy^2 + dx^2'],
+      ['ds^2 = -x dy^2 + dx^2'],
+      ['ds^2 = -cos(x) dy^2 + dx^2'],
+    ];
+    for (const rows of repros) {
+      const row = last(rows);
+      expect(row.error, rows.join('; ')).toBeUndefined();
+      expect(row.cls!.object, rows.join('; ')).toMatchObject({ kind: 'metric', n: 2, lorentzian: true, mixed: true });
+      expect(plotReadout(row.cpu!, {})).toMatch(/^Metric of mixed signature in x, y/);
+      expect(errorOf([...rows, 'lightcones'])).toBeUndefined();
+      expect(errorOf([...rows, 'lightray((0.5, 0), (1, 1))'])).toBeUndefined();
+    }
+    // The uniform field: a particle at rest falls toward −x, a diagram's
+    // geodesic, stopping before 1 + 2 g x reaches 0 at x = −5.
+    const field = ['g = 0.1', 'ds^2 = -(1 + 2 g x) dy^2 + dx^2'];
+    const fall = traced([...field, 'geodesic((0, 0), (0, 1))'], box(-32, 32, -32, 32));
+    expect(fall.ended.problem).toBeUndefined();
+    expect(fall.pts.length).toBeGreaterThan(10);
+    expect(fall.pts.at(-1)![0]).toBeLessThan(-1);
+    for (const [x] of fall.pts) expect(x).toBeGreaterThan(-5);
+    const light = traced([...field, 'lightray((0, 0), (1, 1))'], box(-32, 32, -32, 32));
+    expect(light.pts.length).toBeGreaterThan(10);
+    // Where it is positive definite (x < −5), a geodesic runs as a plane's,
+    // straight here, and stops where the signature changes; light has none.
+    const plane = traced([...field, 'geodesic((-10, 0), (1, 0))'], box(-32, 32, -32, 32));
+    for (const [, y] of plane.pts) expect(Math.abs(y)).toBeLessThan(1e-9);
+    expect(plane.pts.at(-1)![0]).toBeLessThanOrEqual(-5 + 1e-6);
+    expect(plane.pts.at(-1)![0]).toBeGreaterThan(-5.01);
+    const none = traced([...field, 'lightray((-10, 0), (1, 1))'], box(-32, 32, -32, 32));
+    expect(geodesicCutNote(none.ended)).toMatch(/positive definite at the start/);
+    // Light cones only where it is Lorentzian.
+    const { spec, env } = cones([...field, 'lightcones']);
+    const glyphs = coneGlyphs(metricValues(spec, env), view(-12, 12, -8, 8), {
+      orient: metricOrientation(spec.future, env),
+    });
+    for (let i = 0; i < glyphs.rings.length; i += 2)
+      if (Number.isFinite(glyphs.rings[i])) expect(glyphs.rings[i]).toBeGreaterThan(-5.5);
+    expect(glyphs.rings.length).toBeGreaterThan(0);
+  });
+
+  it('orients cones by the metric’s own time, wherever it is drawn', () => {
+    // Time along x: the future is +x.
+    expect(futureAt(['ds^2 = -dx^2 + dy^2'], 1, 1).axis).toBeCloseTo(0, 12);
+    expect(futureAt(['ds^2 = -dy^2 + dx^2'], 1, 1).axis).toBeCloseTo(Math.PI / 2, 12);
+    // Schwarzschild with t along x and r along y: +x outside; inside, the
+    // cones lie along r and the future is smaller r.
+    const sideways = ['M = 1', 'ds^2 = -(1 - 2M/y) dx^2 + dy^2/(1 - 2M/y)'];
+    expect(futureAt(sideways, 0, 5).axis).toBeCloseTo(0, 9);
+    expect(futureAt(sideways, 0, 1).axis).toBeCloseTo(-Math.PI / 2, 9);
+    // Eddington–Finkelstein with v along x: v increases on every future
+    // cone, and the cones turn smoothly through the horizon y = 2M.
+    const ef = ['M = 1', 'ds^2 = -(1 - 2M/y) dx^2 + 2 dx dy'];
+    let before = NaN;
+    for (let r = 6; r > 0.05; r -= 0.05) {
+      const cone = futureAt(ef, 0, r);
+      const edges = [cone.axis - cone.half, cone.axis + cone.half];
+      // One edge is the ingoing ray, −y; the other has v increasing.
+      expect(Math.min(...edges.map(e => Math.abs(Math.sin(e) + 1)))).toBeLessThan(1e-9);
+      expect(Math.cos(cone.axis)).toBeGreaterThan(0);
+      if (Number.isFinite(before)) expect(Math.abs(cone.axis - before)).toBeLessThan(0.1);
+      before = cone.axis;
+    }
+    // The original orientations stay: Schwarzschild in r, t and EF in r, v.
+    expect(futureAt(SCHWARZSCHILD_RT, 4, 0).axis).toBeCloseTo(Math.PI / 2, 9);
+    expect(Math.abs(futureAt(SCHWARZSCHILD_RT, 1, 0).axis)).toBeCloseTo(Math.PI, 9);
+    expect(Math.sin(futureAt(EDDINGTON, 1, 0).axis)).toBeGreaterThan(0);
+    // Declared coordinates: time T = -x/2 runs toward −x.
+    expect(Math.abs(futureAt(['T = -x/2', 'X = y', 'ds^2 = -dT^2 + dX^2'], 1, 1).axis)).toBeCloseTo(Math.PI, 9);
+  });
+
+  it('leaves out the ellipses inside a spinning hole’s inner horizon', () => {
+    const { spec, env } = cones([...kerr(0.95), 'lightcones']);
+    const read = metricValues(spec, env);
+    // r₋ = 1 − √(1 − 0.95²) ≈ 0.688: inside it x and y are space again.
+    expect(indicatrix(read(0.25, 0.25)!)).not.toBeNull();
+    const v = view(-3.2, 3.2, -2.4, 2.4);
+    const cut = behindHorizon(read, v);
+    expect(cut(0.25, 0.25)).toBe(true);
+    expect(cut(2.5, 0.5)).toBe(false);
+    const glyphs = coneGlyphs(read, v);
+    expect(glyphs.dots.length).toBeGreaterThan(0);
+    for (let i = 0; i < glyphs.dots.length; i += 2)
+      expect(Math.hypot(glyphs.dots[i], glyphs.dots[i + 1])).toBeGreaterThan(1.3);
+    // Schwarzschild has no inside to cut off.
+    const s = cones([...SCHWARZSCHILD, 'lightcones']);
+    const plain = behindHorizon(metricValues(s.spec, s.env), v);
+    expect(plain(2.5, 0.5)).toBe(false);
+  });
+
+  it('draws a lone indicatrix at its own scale when none is in view, and shares a family’s metric', () => {
+    const { spec, env } = cones([...SCHWARZSCHILD, 'lightcone((10, 0))']);
+    const read = metricValues(spec, env);
+    // A window wholly inside the horizon: no lattice ellipse, no κ.
+    const inside = view(-1, 1, -0.75, 0.75);
+    expect(indicatrixScale(read, inside)).toBeNaN();
+    const lone = coneGlyphs(read, inside, { at: [[10, 0]], kappa: NaN });
+    expect(lone.dots).toEqual([10, 0]);
+    expect(lone.rings.length).toBeGreaterThan(0);
+    // The lattice draws nothing there.
+    expect(coneGlyphs(read, inside).rings).toEqual([]);
+    const fan = last([...SCHWARZSCHILD, 'lightcone(([3..8], 0))']).cls!.object;
+    if (fan.kind !== 'family') throw new Error(fan.kind);
+    const comps = fan.members.map(m => (m.object.kind === 'lightcone' ? m.object.components : null));
+    expect(new Set(comps).size).toBe(1);
   });
 });

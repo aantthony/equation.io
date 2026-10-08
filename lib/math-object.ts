@@ -262,6 +262,7 @@ export type MathObject =
       readonly n: 2 | 3;
       readonly coords: readonly string[];
       readonly lorentzian?: true;
+      readonly mixed?: true;
     }
   /** Light cones of a panel's metric (lib/light-cone.ts): over the window,
    *  a `lightcones` row, or at a point, lightcone(P). */

@@ -162,10 +162,13 @@ third coordinate may now be Lorentzian in the panel's own two, making the
 panel a spacetime diagram: `-dy^2 + dx^2`, Schwarzschild's r and t
 (`-(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)`), ingoing Eddington–Finkelstein
 (`-(1 - 2M/x) dy^2 + 2 dy dx`). The sample check counts positive definite
-and Lorentzian points; a metric positive definite anywhere stays a plane,
-as before (so no document that drew changes meaning), one that is neither
-anywhere (−dx² − dy²) is refused, and the rest are diagrams. Which
-coordinate is time is the metric's business. `geodesic(P, v)` is a
+and Lorentzian points; a metric Lorentzian anywhere is a diagram, one that
+is positive definite too is of mixed signature (a uniform field
+`-(1 + 2 g x) dy^2 + dx^2`, `-cos(x) dy^2 + dx^2`), and each geodesic takes
+the kind at its start, stopping where it changes — so a metric positive
+definite everywhere checked (Poincaré's) traces exactly as before. One that
+is neither anywhere (−dx² − dy²) is refused. Which coordinate is time is
+the metric's business. `geodesic(P, v)` is a
 particle with coordinate direction v, U = v/√(−g(v, v)) and proper time
 its length, refused as the row's note when v is not inside the cone;
 `lightray(P, d)` snaps d to the nearest of the four null half-lines by
@@ -183,17 +186,26 @@ cones on the CPU once per view change, as one Path2D per row (a fill and
 two strokes, however many glyphs), on a lattice anchored in the plane like
 the tensor-field glyphs (power of two nearest 56 px). On a diagram, the null
 angles are (φ ± α)/2 from g(e_θ, e_θ) = A + R cos(2θ − φ), and the future
-half is the one whose axis points up the panel, or toward −x when the axis
-is along x (inside Schwarzschild's horizon in r and t, where the future is
-smaller r) — a continuous time orientation wherever the axis does not
-cross the horizontal; a fixed 15 px wedge to the future and strokes to the
-past. With a time, the coordinate light-speed indicatrix: (v − c)ᵀ h
+half is the one along which the time coordinate τ increases, dτ(axis) > 0,
+τ being whichever written coordinate's own d²-term is negative at more of
+the Lorentzian sample points (else y). An orientation by the sign of
+g(axis, ∂τ) fails inside Eddington–Finkelstein's horizon, where ∂_v is
+spacelike; dτ does not, since v increases on every future cone there. It
+changes only where a cone straddles dτ = 0, and where the axis is exactly
+along it (inside Schwarzschild's horizon in r and t) the other coordinate
+decreasing is the future: smaller r. A fixed 15 px wedge to the future and
+strokes to the past. With a time, the coordinate light-speed indicatrix: (v − c)ᵀ h
 (v − c) = K with c = −h⁻¹β, K = βᵀh⁻¹β − g_tt, drawn round a dot at one
 power-of-two scale per panel from the median ellipse in view (a third of a
 cell), so sizes compare: light slows toward a horizon (1 − 2M/r across,
 √(1 − 2M/r) round, tested), Kerr's ellipses are dragged in +φ for a > 0
 and leave their dots inside the ergoregion. A lone lightcone(P) uses the
-same scale; a lattice ellipse wider than its cell is left out. Follow-ups:
+same scale (its own, when no lattice ellipse is in view); a lattice
+ellipse wider than its cell is left out, and so is one behind a horizon:
+the line from it away from the middle of the lattice's horizon points
+crosses one before twice the view's size (Kerr inside r₋; stepped a
+quarter cell, so a band thinner than that is missed). The metric is
+compiled once per panel for all its light-cone rows. Follow-ups:
 light cones in 3D panels (not drawn there yet) and on mapped panels, a
 time orientation the user can choose (`lightcones(T)` with a future
 direction), the cone's tilt as a readout on hover, the link preview
