@@ -143,8 +143,11 @@ times coarser, and further off coarser still in proportion to the distance
 (steps a fiftieth of it), so a ray sent from 10⁵ away arrives in a few
 hundred steps. The reader allocates nothing per point. It runs in the trace
 worker; a metric's family member gets at least 150 ms, unless that would
-make the family take over 3 s, and its points are a real cap: past it the
-path is thinned to every other point and drawn half as densely on. A metric is checked
+make the family take over 3 s. Its points are a real cap on the family
+(48 000, shared; a lone orbit may use them all), met by giving up points
+where the line runs straight: walking it, one is kept once the line has
+turned more than θ since the last kept, or run on a set length, with the
+smallest θ that fits (decimate) — so tight turns keep theirs. A metric is checked
 at sample points over scales from 0.001 to 100 000 round the origin, so a
 disc of radius 0.1 and a hole of mass 10 000 both pass; a small feature far
 from the origin could still be missed. Follow-ups: light

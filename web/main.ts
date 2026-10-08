@@ -1699,7 +1699,12 @@ function geodesicFor(
         ms: plot.metric
           ? Math.max(GEODESIC_FAMILY_MS / members, Math.min(150, (3 * GEODESIC_FAMILY_MS) / members))
           : GEODESIC_FAMILY_MS / members,
-        maxPoints: Math.min(GEODESIC_MAX_POINTS, Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members))),
+        // A metric's member may use the whole family's share; a surface's is
+        // carried onto it every frame, so held to GEODESIC_MAX_POINTS.
+        maxPoints: Math.min(
+          plot.metric ? GEODESIC_FAMILY_POINTS : GEODESIC_MAX_POINTS,
+          Math.max(300, Math.floor(GEODESIC_FAMILY_POINTS / members)),
+        ),
         ...(window ? { window } : {}),
       },
       residuals: [],

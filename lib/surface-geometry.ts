@@ -378,10 +378,9 @@ export function traceGeodesic(
   const { domain, spacing, deadline, drawSpacing, drawnLimit } = opts;
   const flow = typeof sys === 'function' ? surfaceFlow(sys) : sys;
   const maxSteps = opts.maxSteps ?? GEODESIC_MAX_STEPS;
-  // Past maxPoints, the points so far are thinned to every other one and
-  // later ones drawn half as densely, so it is a real cap.
-  const maxPoints = Math.max(opts.maxPoints ?? Infinity, 2);
-  let sparse = 1;
+  // A real cap, met by giving up points where the line runs straight
+  // (decimate), so tight turns keep theirs.
+  const maxPoints = Math.max(opts.maxPoints ?? Infinity, 3);
   const periodic = opts.periodic ?? [false, false];
   const back = opts.length < 0;
   const total = Math.abs(opts.length);
@@ -511,15 +510,14 @@ export function traceGeodesic(
             256,
             Math.ceil(
               Math.hypot(next[0] - y[0], next[1] - y[1]) /
-                (sparse *
-                  (!opts.fine || inBox(opts.fine, y) || inBox(opts.fine, next)
-                    ? drawSpacing
-                    : Math.max(8 * drawSpacing, fromBox(opts.fine, next) / 100))),
+                (!opts.fine || inBox(opts.fine, y) || inBox(opts.fine, next)
+                  ? drawSpacing
+                  : Math.max(8 * drawSpacing, fromBox(opts.fine, next) / 100)),
             ),
           ),
         )
       : spacing
-        ? Math.min(256, Math.ceil(h / (sparse * spacing)))
+        ? Math.min(256, Math.ceil(h / spacing))
         : 1;
     const from = y;
     const along = (t: number): [number, number] => [hermite(from, next, h, 0, t), hermite(from, next, h, 1, t)];
@@ -564,10 +562,8 @@ export function traceGeodesic(
     s += h;
     out.push([y[0], y[1]]);
     velocities?.push([y[2], y[3]]);
-    if (out.length > maxPoints && !velocities) {
-      thin(out);
-      sparse *= 2;
-    }
+    // Held to a few times its points as it goes, and to them at the end.
+    if (out.length > 8 * maxPoints && !velocities) decimate(out, 4 * maxPoints);
     if (drawnLimit !== undefined) {
       if (drawn >= drawnLimit) break;
       if (steps % 32 === 0) {
@@ -582,15 +578,61 @@ export function traceGeodesic(
     h = h * Math.min(5, 0.9 * Math.max(err, 1e-10) ** -0.2);
   }
   if (opts.ended) Object.assign(opts.ended, { length: s, asked: total, budget: outOfBudget });
-  while (out.length > maxPoints && !velocities) thin(out);
+  if (!velocities) decimate(out, maxPoints);
   return out;
 }
 
-/** Every other point of a path, its ends kept: one past its maxPoints. */
-function thin(out: [number, number][]): void {
-  const last = out.length - 1;
+/**
+ * A path cut down in place to at most `target` points, keeping its shape:
+ * walking along it, a point is kept once the line has turned more than θ
+ * since the last one kept, or run on a set length (the whole length over
+ * half the target), and θ is the smallest that fits — so tight turns keep
+ * their points and straight runs give theirs up. The ends stay.
+ */
+function decimate(out: [number, number][], target: number): void {
+  const n = out.length;
+  if (n <= target || n < 3) return;
+  const heading = new Float64Array(n - 1);
+  const seg = new Float64Array(n - 1);
+  let length = 0;
+  for (let i = 0; i + 1 < n; i++) {
+    const dx = out[i + 1][0] - out[i][0];
+    const dy = out[i + 1][1] - out[i][1];
+    heading[i] = Math.atan2(dy, dx);
+    seg[i] = Math.hypot(dx, dy);
+    length += seg[i];
+  }
+  const reach = length / Math.max(1, (target - 2) / 2);
+  /** The points kept with turn θ, written into `keep` when given. */
+  const run = (theta: number, keep?: Uint8Array): number => {
+    let count = 1;
+    let ref = heading[0];
+    let run = 0;
+    for (let i = 1; i < n - 1; i++) {
+      run += seg[i - 1];
+      let turn = heading[i] - ref;
+      turn -= 2 * Math.PI * Math.round(turn / (2 * Math.PI));
+      if (Math.abs(turn) > theta || run > reach) {
+        count++;
+        if (keep) keep[i] = 1;
+        ref = heading[i];
+        run = 0;
+      }
+    }
+    return count + 1;
+  };
+  let lo = 0;
+  let hi = Math.PI;
+  for (let k = 0; k < 30; k++) {
+    const mid = (lo + hi) / 2;
+    if (run(mid) > target) lo = mid;
+    else hi = mid;
+  }
+  const keep = new Uint8Array(n);
+  keep[0] = keep[n - 1] = 1;
+  run(hi, keep);
   let k = 0;
-  for (let i = 0; i <= last; i++) if (i % 2 === 0 || i === last) out[k++] = out[i];
+  for (let i = 0; i < n; i++) if (keep[i]) out[k++] = out[i];
   out.length = k;
 }
 
@@ -836,6 +878,9 @@ export function geodesicCutNote(end: GeodesicEnd): string | null {
 const DRAWN_ACROSS = 150;
 /** Points a geodesic is drawn with at most, unless its budget says fewer. */
 export const GEODESIC_MAX_POINTS = 4000;
+/** …and a metric's, which are drawn in the plane, not carried onto a
+ *  surface each frame: a long orbit alone may use a whole family's. */
+export const METRIC_MAX_POINTS = 48000;
 
 /**
  * The geodesic a row draws, at the values in `env` (sliders, t, a named
@@ -850,7 +895,7 @@ export function geodesicPath(
   spec: GeodesicSpec,
   env: Readonly<Record<string, number>>,
   {
-    maxPoints = GEODESIC_MAX_POINTS,
+    maxPoints,
     window,
     ms,
     ...budget
@@ -867,7 +912,9 @@ export function geodesicPath(
     window?: GeodesicOptions['domain'];
   } = {},
 ): number[] {
-  if (spec.metric) return metricPath(spec, spec.metric, env, { maxPoints, window, ms, ...budget });
+  if (spec.metric)
+    return metricPath(spec, spec.metric, env, { maxPoints: maxPoints ?? METRIC_MAX_POINTS, window, ms, ...budget });
+  maxPoints ??= GEODESIC_MAX_POINTS;
   const values = new Float64Array(9);
   numericIn([...spec.start, ...spec.direction, ...spec.domain, spec.length ?? NAN], spec.params, env)(NaN, NaN, values);
   const v = [...values];

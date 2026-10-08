@@ -526,3 +526,59 @@ describe('third review fixes', () => {
     expect(last(['ds^2 = dy^2 + dx^2']).cls!.object).toMatchObject({ coords: ['x', 'y'] });
   });
 });
+
+describe('fourth review fixes', () => {
+  /** The largest turn between consecutive segments of a path, in degrees. */
+  const sharpest = (flat: readonly number[]) => {
+    let most = 0;
+    for (let k = 6; k + 2 < flat.length; k += 3) {
+      const a = Math.atan2(flat[k - 2] - flat[k - 5], flat[k - 3] - flat[k - 6]);
+      const b = Math.atan2(flat[k + 1] - flat[k - 2], flat[k] - flat[k - 3]);
+      let d = b - a;
+      d -= 2 * Math.PI * Math.round(d / (2 * Math.PI));
+      if (Math.hypot(flat[k] - flat[k - 3], flat[k + 1] - flat[k - 2]) > 0) most = Math.max(most, Math.abs(d));
+    }
+    return (most * 180) / Math.PI;
+  };
+
+  it('draws a long lone orbit smoothly', () => {
+    const analysis = analyzeRows([...SCHWARZSCHILD, 'geodesic((20, 0), (0, 0.18), 20000)']);
+    const o = analysis.rows.at(-1)!.cls!.object;
+    if (o.kind !== 'geodesic') throw new Error(o.kind);
+    const window = traceWindow([-26, -20], [26, 20]);
+    const flat = geodesicPath(o, analysis.constEnv, { window });
+    expect(sharpest(flat)).toBeLessThan(5);
+    // Held to fewer points, it keeps its turns and drops the straight bits.
+    const held = geodesicPath(o, analysis.constEnv, { window, maxPoints: 3000 });
+    expect(held.length / 3).toBeLessThanOrEqual(3000);
+    expect(sharpest(held)).toBeLessThan(15);
+  });
+
+  it('keeps a near-extremal Kerr fan of 64 within the family’s points', { timeout: 30000 }, () => {
+    const analysis = analyzeRows([
+      'a = 0.998',
+      'r = sqrt(x^2 + y^2)',
+      'phi = atan2(y, x)',
+      'ds^2 = -(1 - 2/r) dt^2 - (4a/r) dt dphi + r^2/(r^2 - 2r + a^2) dr^2 + (r^2 + a^2 + 2a^2/r) dphi^2',
+      'b = [0..63]/8 - 4',
+      'lightray((-30, b), (1, 0))',
+    ]);
+    const o = analysis.rows.at(-1)!.cls!.object;
+    if (o.kind !== 'family') throw new Error(o.kind);
+    // As web/main.ts budgets a family of 64.
+    const window = traceWindow([-8, -6], [8, 6]);
+    let points = 0;
+    for (const m of o.members) {
+      if (m.object.kind !== 'geodesic') throw new Error(m.object.kind);
+      const flat = geodesicPath(m.object, analysis.constEnv, {
+        window,
+        maxPoints: 750,
+        maxSteps: Math.ceil(200000 / 64),
+        ms: Math.max(1000 / 64, Math.min(150, 3000 / 64)),
+      });
+      expect(flat.length / 3).toBeLessThanOrEqual(750);
+      points += flat.length / 3;
+    }
+    expect(points).toBeLessThanOrEqual(48000);
+  });
+});
