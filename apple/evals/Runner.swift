@@ -120,13 +120,58 @@ extension EvalModel {
   var timeout: Duration { .seconds(180) }
 }
 
+/// How many tool calls a run may make before it fails. The on-device model
+/// can retry a failing set_graph until its context overflows, which takes
+/// minutes; a passing run has needed 12 calls at most. Only the evals stop
+/// there: the app sets no limit.
+let toolCallLimit = 12
+
+struct TooManyToolCalls: Error, CustomStringConvertible {
+  var description: String { "more than \(toolCallLimit) tool calls" }
+}
+
+/// One run's tool calls so far.
+@MainActor final class ToolBudget {
+  private var used = 0
+
+  func spend() throws {
+    used += 1
+    if used > toolCallLimit { throw TooManyToolCalls() }
+  }
+}
+
+/// One of the app's tools, its calls counted against a run's budget.
+struct Capped<Base: Tool>: Tool {
+  typealias Arguments = Base.Arguments
+  typealias Output = Base.Output
+  let base: Base
+  let budget: ToolBudget
+
+  var name: String { base.name }
+  var description: String { base.description }
+  var parameters: GenerationSchema { base.parameters }
+  var includesSchemaInInstructions: Bool { base.includesSchemaInInstructions }
+
+  func call(arguments: Arguments) async throws -> Output {
+    try await budget.spend()
+    return try await base.call(arguments: arguments)
+  }
+}
+
+/// The app's tools for one run, sharing one budget.
+func cappedTools(_ graph: any GraphTools) -> [any Tool] {
+  let budget = ToolBudget()
+  func cap<T: Tool>(_ tool: T) -> any Tool { Capped(base: tool, budget: budget) }
+  return ChatModel.tools(graph).map { cap($0) }
+}
+
 /// Apple's on-device model, as the app's Ask uses it (never Private Cloud Compute here).
 struct OnDeviceModel: EvalModel {
   let name = "on-device"
 
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
     let session = LanguageModelSession(
-      model: SystemLanguageModel.default, tools: ChatModel.tools(graph), instructions: ChatModel.instructions)
+      model: SystemLanguageModel.default, tools: cappedTools(graph), instructions: ChatModel.instructions)
     let response = try await session.respond(to: prompt)
     return Turn(
       reply: response.content, inputTokens: session.usage.input.totalTokenCount,
@@ -153,7 +198,7 @@ struct OpenAIModel: EvalModel {
   let maxRounds = 20
 
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
-    let tools = ChatModel.tools(graph).filter { reference == nil || Self.referenceTools.contains($0.name) }
+    let tools = cappedTools(graph).filter { reference == nil || Self.referenceTools.contains($0.name) }
     let instructions = reference.map { "\(ChatModel.referenceInstructions)\n\n\($0)" } ?? ChatModel.instructions
     var messages: [[String: Any]] = [
       ["role": "system", "content": instructions], ["role": "user", "content": prompt],
@@ -184,7 +229,13 @@ struct OpenAIModel: EvalModel {
         let arguments = function["arguments"] as? String ?? "{}"
         var output: String
         if let tool = tools.first(where: { $0.name == name }) {
-          do { output = try await Self.call(tool, arguments) } catch { output = #"{"error":"\#(error)"}"# }
+          do {
+            output = try await Self.call(tool, arguments)
+          } catch let error as TooManyToolCalls {
+            throw error
+          } catch {
+            output = #"{"error":"\#(error)"}"#
+          }
         } else {
           output = #"{"error":"no tool named \#(name)"}"#
         }
@@ -395,6 +446,10 @@ struct Runner {
       }
     } catch LanguageModelError.contextSizeExceeded {
       failure = "context size exceeded"
+    } catch let error as LanguageModelSession.ToolCallError where error.underlyingError is TooManyToolCalls {
+      failure = "\(error.underlyingError)"
+    } catch let error as TooManyToolCalls {
+      failure = "\(error)"
     } catch let error as LanguageModelSession.ToolCallError {
       // The tool's whole description would push out why its call failed.
       failure = "tool call \(error.tool.name): \(error.underlyingError)".prefix(300).description
