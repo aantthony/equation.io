@@ -166,7 +166,9 @@ is the sphere with x as longitude and y as latitude, a sine wave round it
 and a filled ellipse on it. X, Y and Z are the scene's coordinates; x and y
 are the rows'. The panel is 3D and framed with `camera(…)` (a `view(…)` in
 it is refused); the surface itself is drawn as a parametric surface over
-the ranges given, and sliders in it are read at their value.
+the ranges given, and sliders in it are read at their value. A Σ or Π in
+it is written out term by term as a row's is (lib/defs.ts expandMapSums,
+which axis and plane maps share), so its bounds must be numbers or sliders.
 
 - **Painted**: what 2D draws per pixel from x and y — implicit curves,
   regions and scalar fields — is drawn per pixel on the surface's mesh: the
@@ -184,13 +186,33 @@ the ranges given, and sliders in it are read at their value.
   would cut through the surface rather than lie on it, and an inequality
   paints the same area exactly. Where the surface is undefined (1/x at
   x = 0) nothing carried is drawn.
+- **Parametric regions** come with their own parametrisation, so the
+  surface is composed with it (surfaceOver): X, Y and Z in the region's u
+  and v, a mesh that lies on the surface and is painted as a fill, like an
+  inequality's area. Its mesh is not the surface's, so its flat cells can
+  sag below the surface's between vertices; each vertex is raised toward
+  the eye along the normal by a quarter of the mesh's second differences
+  there (twice the sag), which the polygon offset alone does not cover. A
+  region that covers itself twice shows darker there.
+- **Vector fields** draw as arrows, as a 3D panel's arrows do: the field
+  (u, v) at (x, y) is the tangent u ∂P/∂x + v ∂P/∂y of the surface P
+  (surfaceTangents, from its derivatives; central differences where it has
+  none), drawn from P(x, y) at the centres of a lattice whose cells are
+  near square on the surface, 24 along its longer side (surfaceArrows).
+  Each arrow is the image of a 2D arrow 0.7 of its cell long in x and y, so
+  the arrows show direction, not size, and shrink where the surface crowds
+  the cells (toward a sphere's poles). There are no streamlines and no
+  click-to-trace curves on a surface, so a field there is still unless it
+  reads t (onSurface; in 2D every field's streaks move), and its arrows are
+  kept until the surface, the field or a value it reads changes. A field
+  too large to trace (over 8192 nodes a component) is refused at its row.
 - Families draw as their members.
 - Paints draw after the surface with a polygon offset and no depth writes,
   so they sit on it without fighting it.
 - Rows in space (3D) draw in the panel as in any 3D panel. Other 2D rows
-  have no picture on a surface yet (among them vector and matrix fields,
-  complex rows, colour fields, parametric and projected regions,
-  histograms, sequences and systems) and are refused with a
+  have no picture on a surface yet (among them matrix fields, complex
+  rows, colour fields, projected regions, histograms, sequences and
+  systems) and are refused with a
   message saying so.
 - The surface is drawn by the GPU, so it must be written in what the
   shaders take; a surface they cannot draw is refused at its row. Its

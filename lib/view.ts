@@ -19,6 +19,7 @@ import { type GridRowSpec, type SplitSpec, parseDividerRow, parseGridRow } from 
 import { type AxisMaps, SCREEN, parseAxisMap, screenWindowOk, toWorld, windowToScreen } from './axis-map.ts';
 import { parsePlaneMap } from './plane-map.ts';
 import { type SurfaceSpec, parseSurfaceMap } from './surface-map.ts';
+import type { MapDoc } from './defs.ts';
 
 export interface View2DSpec {
   kind: 'view';
@@ -121,7 +122,7 @@ function num(src: string, env: Record<string, number>, what: string): number {
 
 /** `on((X, Y, Z) = (…), x = lo..hi, y = lo..hi)`: the surface the panel's
  *  2D rows are drawn on (lib/surface-map.ts). */
-function parseSurfaceRow(args: string[], env: Record<string, number>): SurfaceSpec {
+function parseSurfaceRow(args: string[], env: Record<string, number>, doc: MapDoc): SurfaceSpec {
   const usage =
     'Expected on((X, Y, Z) = (cos(y) cos(x), cos(y) sin(x), sin(y)), x = -pi..pi, y = -pi/2..pi/2): the surface the panel’s rows are drawn on, and the x and y it spans.';
   let src: string | null = null;
@@ -144,7 +145,7 @@ function parseSurfaceRow(args: string[], env: Record<string, number>): SurfaceSp
     ranges[axis] = [lo, hi];
   }
   if (src === null || !ranges.x || !ranges.y) throw new Error(usage);
-  return { kind: 'surface', surface: parseSurfaceMap(src, ranges.x, ranges.y, env) };
+  return { kind: 'surface', surface: parseSurfaceMap(src, ranges.x, ranges.y, env, doc) };
 }
 
 /** A view row with a plane map: its window is the screen's, X and Y. */
@@ -171,9 +172,12 @@ function planeView(spec: View2DSpec, maps: AxisMaps, ranges: Array<[string, [num
 /**
  * Parse a viewport row. Returns null when the text is not one (so ordinary
  * rows fall through to the expression parser); throws a row-friendly error
- * when it is one but malformed. `env` supplies constant values (t = 0).
+ * when it is one but malformed. `env` supplies constant values (t = 0); `doc`
+ * what a map's Σ bounds and names need of the document (lib/defs.ts MapDoc).
  */
-export function parseViewRow(text: string, env: Record<string, number>): ViewSpec | null {
+export function parseViewRow(text: string, env: Record<string, number>, doc: MapDoc = {}): ViewSpec | null {
+  // The row's maps write out their sums under one limit, as a row's tuple does.
+  doc = { ...doc, budget: { terms: 0 } };
   const split = parseDividerRow(text);
   if (split) return split;
   const grid = parseGridRow(text);
@@ -188,7 +192,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
   if (m[1] === 'on') {
     // The camera frames the panel: lock it there.
     if (locked) throw new Error('on(…) takes no locked: put it on the panel’s camera(…) row.');
-    return parseSurfaceRow(args, env);
+    return parseSurfaceRow(args, env, doc);
   }
   if (m[1] === 'view') {
     const usage = 'Expected view(x = lo..hi, y = lo..hi, ratio = 1, locked) — either axis alone works.';
@@ -202,7 +206,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       const plane = /^\(\s*x\s*,\s*y\s*\)\s*=\s*([\s\S]+)$/.exec(arg);
       if (plane) {
         if (maps.plane) throw new Error('view(...) maps (x, y) twice.');
-        maps.plane = parsePlaneMap(plane[1], env);
+        maps.plane = parsePlaneMap(plane[1], env, doc);
         continue;
       }
       const named = /^([A-Za-z]\w*)\s*=\s*([\s\S]+)$/.exec(arg);
@@ -218,7 +222,7 @@ export function parseViewRow(text: string, env: Record<string, number>): ViewSpe
       // `x = 10^X`: no range, and the screen's X, so a map from the screen to x.
       if (!range && (axis === 'x' || axis === 'y') && new RegExp(`\\b${SCREEN[axis]}\\b`).test(named[2])) {
         if (maps[axis]) throw new Error(`view(...) maps ${axis} twice.`);
-        maps[axis] = parseAxisMap(axis, named[2], env);
+        maps[axis] = parseAxisMap(axis, named[2], env, doc);
         continue;
       }
       if (spec[axis as 'x'] || lattice.some(([a]) => a === axis)) throw new Error(`view(...) sets ${axis} twice.`);

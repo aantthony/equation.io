@@ -105,18 +105,22 @@ describe('graph rows', () => {
     expect(z.rows.at(-1)!.error).toMatch(/reads a coordinate that point does not have/);
   });
 
-  it('every step of the Collatz orbits of 1..50: recursion over two lists', () => {
+  it('every step of the Collatz orbits of 1..10: recursion over two lists', () => {
+    // Each (k, j) member inlines f's loop several times, so the cost grows
+    // with both lists (docs/shared-loop-bodies-plan.md): kept small here.
     const g = graphOf([
       'c(m) = {mod(m, 2) = 0: m/2, 3m + 1}',
       'f(m, j) = {m <= 1: 1, j <= 0: m, f(c(m), j - 1)}',
-      'k = [1..50]',
-      'j = [0..111]',
+      'k = [1..10]',
+      'j = [0..19]',
       'graph({f(k, j) > 1: f(k, j)}, c(f(k, j)))',
     ]);
-    // A tree into 1: every vertex but 1 has one arrow out. 27 peaks at 9232.
-    expect(g.vertices).toHaveLength(173);
-    expect(g.edges).toHaveLength(172);
-    expect(g.vertices.at(-1)).toBe(9232);
+    // A tree into 1: every vertex but 1 has one arrow out. 9 takes the
+    // longest, 19 steps, and peaks at 52.
+    expect(g.vertices).toHaveLength(22);
+    expect(g.edges).toHaveLength(21);
+    expect(new Set(g.edges.map(e => e.from))).toEqual(new Set(g.vertices.filter(v => v !== 1)));
+    expect(g.vertices.at(-1)).toBe(52);
   });
 
   it('refuses what is not vertices', () => {

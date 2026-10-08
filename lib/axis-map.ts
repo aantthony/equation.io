@@ -17,6 +17,7 @@
  */
 import { type Expr, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import type { MathObject } from './math-object.ts';
+import { type MapDoc, expandMapSums } from './defs.ts';
 import { diff } from './diff.ts';
 import { matchODE } from './ode.ts';
 import { type PlaneMap, planeIn } from './plane-map.ts';
@@ -93,7 +94,7 @@ function solveFor(f: Expr, s: string, target: Expr): Expr | null {
 }
 
 /** Parse the right side of `x = 10^X` in a view row. */
-export function parseAxisMap(axis: Axis, src: string, env: Record<string, number> = {}): AxisMap {
+export function parseAxisMap(axis: Axis, src: string, env: Record<string, number> = {}, doc: MapDoc = {}): AxisMap {
   const screen = SCREEN[axis];
   const usage = `An axis map writes ${axis} in terms of the screen's ${screen}, like ${axis} = 10^${screen}.`;
   let forward: Expr;
@@ -102,6 +103,7 @@ export function parseAxisMap(axis: Axis, src: string, env: Record<string, number
   } catch {
     throw new Error(usage);
   }
+  forward = expandMapSums(forward, [screen], env, doc);
   const free = [...freeVars(forward)].filter(n => n !== 'pi' && n !== 'e' && n !== 'tau');
   if (!free.includes(screen)) throw new Error(usage);
   // A slider (`x = b^X`) is read at its value, so the map is plain numbers

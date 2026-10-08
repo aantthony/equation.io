@@ -63,7 +63,7 @@ import { overParams, planarField } from './grid.ts';
 import { type ViewSpec, parseViewRow } from './view.ts';
 import { MAX_PANELS, gridCoordinateProblem, isDividerRow } from './panels.ts';
 import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, tensorJacobian } from './axis-map.ts';
-import { OFF_SURFACE_MESSAGE, type SurfaceMap, surfaceMapping } from './surface-map.ts';
+import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
 
 export interface RowSource {
@@ -608,6 +608,8 @@ function alongCurve(e: Expr, getFn: (name: string) => unknown): string | null {
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
   const { defs, constNames, fieldEnv, fnNames, listNames, valueNames, getFn, getList, ropts, gridFields } = document;
+  // A map's Σ bounds are told the document's functions and lists, to refuse them.
+  const viewDoc = { ...ropts, fnNames };
   const rows = document.rows.map(row => ({ ...row }));
   /** Rows whose calls apply per member in a way that reads like a wrapper (perMemberNote). */
   const memberNotes = new Map<(typeof rows)[number], string>();
@@ -718,7 +720,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (isDividerRow(row.text)) at++;
       else if (/^\s*(view|on)\s*\(/.exec(row.text) && !fnNames.has(/^\s*(\w+)/.exec(row.text)![1]))
         try {
-          const spec = parseViewRow(row.text, ropts.consts!);
+          const spec = parseViewRow(row.text, ropts.consts!, viewDoc);
           if (spec?.kind === 'view' && spec.maps) panelMaps[at] ??= spec.maps;
           if (spec?.kind === 'surface') panelSurfaces[at] ??= spec.surface;
         } catch {
@@ -742,7 +744,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       if (badRow) throw new Error(badRow);
       // A call to the user's own view/camera/grid function is theirs.
       const head = /^\s*(view|camera|grid|on)\s*\(/.exec(row.text);
-      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!);
+      const view = head && fnNames.has(head[1]) ? null : parseViewRow(row.text, ropts.consts!, viewDoc);
       if (view) {
         // Each panel frames itself: a divider starts a fresh set.
         if (view.kind === 'split') {
@@ -1028,8 +1030,10 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       // A panel on a surface paints or carries its 2D rows onto it; a row
       // in space draws as it would in any 3D panel.
-      if (panelSurfaces[panel] && !row.cls.needs3D && !surfaceMapping(row.cls.object))
-        throw new Error(OFF_SURFACE_MESSAGE);
+      if (panelSurfaces[panel] && !row.cls.needs3D) {
+        if (!surfaceMapping(row.cls.object)) throw new Error(OFF_SURFACE_MESSAGE);
+        row.cls = onSurface(row.cls);
+      }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;
