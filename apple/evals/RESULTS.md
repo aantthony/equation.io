@@ -773,3 +773,55 @@ reference this size: it doesn't fit 8K.
   the line is flat. The other four wrote the slope out, `(3a^2 - 3)`.
 - label-vertex, hyperboloid, piecewise and normal-probability failed
   only on the check fixes above, and all pass now.
+
+## Kind names in the instructions (2026-10-08)
+
+**A single-task test, not a suite measurement**: motion-trail only,
+on-device only, 5 runs. gpt-5.5 was not run.
+
+The change (bd43f888): the instructions name every kind, a line per
+reference group, generated from docs/reference/ (lib/reference.ts
+kindNames), and the lookup line now reads "call kind_examples for the kind
+you need (listed below; list_kinds gives each one's smallest form)".
+kind_examples also takes a kind's name ("motion trail"): most names didn't
+resolve before. Tools and every other line unchanged. Instructions 885 →
+1,106 tokens (+221; tools 1,218).
+
+```
+Kinds:
+- 2D curves and regions: curve, region, parametric curve, parametric region, swept region, system of equations
+- Points, figures and labels: point, geometric figure, label, motion trail
+- Readouts and families: value readout, true/false readout, family
+- 3D: surface, parametric surface, parametric solid, curve of intersection
+- Fields: vector field, vector field in space, scalar field, scalar field in space
+- Sequences and simulations: sequence, cobweb diagram, bifurcation diagram, orbit, cellular automaton
+- Lists and data: number list, point list, histogram, data column, data scatter, tuple readout
+- Probability: random variable, discrete random variable, probability, expectation
+- Complex functions: complex function, domain colouring, conformal map, escape-time fractal
+- Colour fields: RGB colour field, HSL colour field, OKLCH colour field
+- Algebra: matrix field, multivector, line or plane, matrix action, graph (network), table
+```
+
+`results/2026-10-08T032737Z-on-device.json` against motion-trail in
+`results/2026-10-07T230237Z-on-device.json`:
+
+| | before | kind names |
+| --- | --- | --- |
+| pass | 0/5 | 5/5 |
+| tool calls a run | 2.6 | 2.4 |
+| input tokens a session | 8,774 | 7,514 |
+| seconds a run | 6.3 | 5.6 |
+| overflows | 0 | 0 |
+
+Before, 3 runs never looked a kind up or looked up the wrong one
+(kind_examples "parametric" twice, "psurface" once) and left the point
+alone or added `y = 2cos(t)`, `z = sin(2t)`; one found `trail` through
+list_kinds but copied the example's point, `A = (2cos(3t), 2sin(2t))`,
+over the user's. After, all 5 runs called kind_examples("motion trail")
+first and wrote `A = (2cos(t), sin(2t))`, `trail(A)`, replying e.g. "I
+drew a point moving in a looping path, with its motion trail behind it."
+
+Verdict: on this one task the names send the device straight to the right
+kind, 0/5 → 5/5, for 221 tokens, and the session is shorter. Whether it
+costs elsewhere (a name in the list pulling the model to the wrong kind, as
+list_kinds' order did with pregion) needs the 46-task run on both models.
