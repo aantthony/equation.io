@@ -957,3 +957,12 @@ directions" → `z = x^2 - y^2`, `x = 0`, `y = 0`, `z = 0`), and rows often
 contradict them ("Add two curves: the cubic and its derivative" →
 `f(x) = x^3 - x`, `y = d/dx f(x)`, one curve). unit-cube 4 → 1, derivative
 5 → 1; parametric-circle 1 → 4.
+
+### No intent; z = x y in the primer; trailing commas trimmed
+
+`d50cb7d3` removes set_graph's intent (and a kindReason variant: 3/10 on
+unit-cube, the same as without it). `3bd0e7b6` changes the primer's 3D surface
+from `z = x^2 - y^2` to `z = x y`, and `da191b86` drops a trailing comma from a
+row. `results/2026-10-08T210936Z-on-device.json`: 42% ±2% → **44% ±5%**, noise,
+but the best so far. parametric-circle 1 → 5, zoom-zero 0 → 3; sphere 3 → 0,
+motion-trail 2 → 0. saddle still passes (its request gives the equation).
