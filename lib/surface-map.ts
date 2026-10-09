@@ -293,6 +293,7 @@ export function surfaceMapping(object: MathObject): SurfaceMapping | null {
     // A panel drawn on a surface has that surface's metric: no ds^2 row
     // (lib/analysis.ts refuses one there).
     case 'metric':
+    case 'lightcone':
       return null;
     case 'curve':
       return object.form === 'parametric' ? 'carry' : 'paint';

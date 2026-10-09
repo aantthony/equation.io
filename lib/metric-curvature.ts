@@ -24,6 +24,11 @@
  * (r^2 dphi^2 + dr^2/(1 - 2M/sqrt(x^2 + y^2))) has no such coordinates to
  * differentiate in, and is pulled back to x and y first instead.
  *
+ * A spacetime diagram (a 2D Lorentzian metric, lib/metric.ts) is painted
+ * with K = R/2 where it is Lorentzian: 2M/r³ for Schwarzschild's (r, t)
+ * plane, 0 for Rindler's, +1/L² for de Sitter's static patch and −1/L² for
+ * anti-de Sitter's.
+ *
  * With a time (a 3D metric in t and the panel's two coordinates), it is the
  * curvature of space at one instant: of the metric g_ij of a slice t =
  * constant, which is the spatial block of g (cross terms dt dphi do not
@@ -99,14 +104,17 @@ const where = (l: Expr, value: Expr): Expr => ({
 /**
  * K of a panel's metric — or, with a time, of its slice at one instant — in
  * the panel's x and y, from the ds^2 row's right side `rhs` as parsed and
- * the metric parseMetric made of it. A Riemannian K (no time, or a slice) is
- * left undefined where the metric is not positive definite: inside a
- * horizon, where the slice is no longer space.
+ * the metric parseMetric made of it. A Riemannian K (a plane, or a slice)
+ * is left undefined where the metric is not positive definite: inside a
+ * horizon, where the slice is no longer space. A spacetime diagram's (no
+ * time, Lorentzian somewhere) is K = R/2 where it is Lorentzian, and — of
+ * mixed signature — the plane's K where it is positive definite too;
+ * undefined where it degenerates (det g = 0) or is negative definite.
  */
 export function metricCurvature(rhs: Expr, metric: PanelMetric, ctx: CurvatureContext): Curvature {
   const { n, coords } = metric;
   const spatial = coords.slice(n - 2) as unknown as Params;
-  const riemannian = n === 3 || metric.time === undefined;
+  const riemannian = n === 3 || !metric.lorentzian;
   const written = writtenForm(rhs, metric, ctx);
   let E: Expr, F: Expr, G: Expr;
   let curvature: Curvature;
@@ -118,7 +126,18 @@ export function metricCurvature(rhs: Expr, metric: PanelMetric, ctx: CurvatureCo
     curvature = brioschi(E, F, G, ['x', 'y']);
   }
   let { K, size } = curvature;
-  if (riemannian) K = where(E, where(sub(mul(E, G), mul(F, F)), K));
+  const det = sub(mul(E, G), mul(F, F));
+  if (riemannian) K = where(E, where(det, K));
+  else
+    K = {
+      kind: 'piecewise',
+      cases: [
+        { cond: { kind: 'ineq', op: '<', l: det, r: num(0) }, value: K },
+        ...(metric.mixed
+          ? [{ cond: { kind: 'ineq' as const, op: '>' as const, l: E, r: num(0) }, value: where(det, K) }]
+          : []),
+      ],
+    };
   // Into x and y, through the coordinate fields.
   K = inlineFields(K, ctx.fields);
   size = inlineFields(size, ctx.fields);

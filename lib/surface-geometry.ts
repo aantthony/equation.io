@@ -41,6 +41,7 @@
 import { NonSmoothError, add, diff, div, mul, pow, sub } from './diff.ts';
 import { type Expr, evaluate, exprKey, freeVars, substVars } from './expr.ts';
 import { type Prog, compileProg, run } from './vm.ts';
+import { nearestNull } from './light-cone.ts';
 
 /** ∂e/∂v, as the resolver takes it (symbolic, with its fallbacks). */
 export type Partial = (e: Expr, v: string) => Expr;
@@ -230,6 +231,9 @@ export interface GeodesicFlow {
    *  checked at each stage of a step, when the metric can stay finite past
    *  where it stops being one (a horizon). */
   holds?(p: number, q: number): boolean;
+  /** Why it stopped, when that is worth a note: where it last failed to
+   *  hold, if no step has been put back on its constraint since. */
+  stopped?(): string | undefined;
 }
 
 /** A surface's geodesic flow, at unit speed in its metric. */
@@ -317,6 +321,8 @@ export interface GeodesicEnd {
   budget: boolean;
   /** Why it could not start at all (faster than light there, say). */
   problem?: string;
+  /** Where it stopped, worth saying (a metric's signature changing). */
+  note?: string;
 }
 
 /** Steps a geodesic takes at most. */
@@ -849,7 +855,8 @@ export interface MetricSpec {
    */
   readonly jacobian?: readonly Expr[];
   /** Unit speed (a Riemannian metric), proper time (a massive particle) or
-   *  a light ray's affine parameter. */
+   *  a light ray's affine parameter. With n = 2, timelike or null makes x
+   *  and y a spacetime diagram (a Lorentzian metric in them alone). */
   readonly motion: Motion;
   /** τ's name, for what it says. */
   readonly time?: string;
@@ -885,8 +892,9 @@ export function geodesicCutNote(end: GeodesicEnd): string | null {
   if (end.problem) return end.problem;
   // One run with no length of its own (a metric's, to the window's edge)
   // has no length to fall short of, only a place.
-  if (!Number.isFinite(end.asked)) return end.budget ? `cut short at L ≈ ${Number(end.length.toPrecision(3))}` : null;
-  if (!end.budget || !(end.length < end.asked)) return null;
+  if (!Number.isFinite(end.asked))
+    return end.budget ? `cut short at L ≈ ${Number(end.length.toPrecision(3))}` : (end.note ?? null);
+  if (!end.budget || !(end.length < end.asked)) return end.note ?? null;
   const n = (x: number) => Number(x.toPrecision(3));
   return `cut short at L ≈ ${n(end.length)} of ${n(end.asked)}`;
 }
@@ -1084,6 +1092,65 @@ export function metricAt(
   return { g: g.map(row => [...row]), d: d.map(m => m.map(row => [...row])) };
 }
 
+/**
+ * A metric's g alone in x and y at a point, read over and over (a light
+ * cone's glyphs): its components and Jacobian compiled, its derivatives not.
+ * The matrix returned is the reader's own and changes on the next read; null
+ * where it is not finite.
+ */
+export function metricValues(
+  metric: Pick<MetricSpec, 'n' | 'components' | 'jacobian'>,
+  env: Readonly<Record<string, number>>,
+): (x: number, y: number) => readonly (readonly number[])[] | null {
+  const n = metric.n;
+  const m = metric.components.length;
+  const J = metric.jacobian;
+  // Only g as written and the Jacobian itself: a lattice and its horizon
+  // check read thousands of points a view.
+  const at = numericIn([...metric.components, ...(J ? J.slice(0, 4) : [])], ['x', 'y'], env);
+  const buf = new Float64Array(m + (J ? 4 : 0));
+  const gw = square(n);
+  const g = J ? square(n) : gw;
+  const s0 = n - 2;
+  const Jm = square(n);
+  if (s0) Jm[0][0] = 1;
+  const t = square(n);
+  return (x, y) => {
+    at(x, y, buf);
+    for (let k = 0; k < buf.length; k++) if (!Number.isFinite(buf[k])) return null;
+    let k = 0;
+    for (let i = 0; i < n; i++) for (let j = i; j < n; j++, k++) gw[i][j] = gw[j][i] = buf[k];
+    if (!J) return g;
+    for (let a = 0; a < 2; a++) for (let i = 0; i < 2; i++) Jm[s0 + a][s0 + i] = buf[m + 2 * a + i];
+    // g = Jᵀ g_written J, as metricReader forms it.
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        let sum = 0;
+        for (let c = 0; c < n; c++) sum += gw[i][c] * Jm[c][j];
+        t[i][j] = sum;
+      }
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        let sum = 0;
+        for (let c = 0; c < n; c++) sum += Jm[c][i] * t[c][j];
+        g[i][j] = sum;
+      }
+    return g;
+  };
+}
+
+/** A spacetime diagram's time orientation (lib/light-cone.ts Orient) from
+ *  its gradients (PanelMetric.future), or undefined with none. */
+export function metricOrientation(
+  future: readonly Expr[] | undefined,
+  env: Readonly<Record<string, number>>,
+): ((x: number, y: number) => ArrayLike<number>) | undefined {
+  if (!future) return undefined;
+  const at = numericIn(future, ['x', 'y'], env);
+  const out = new Float64Array(4);
+  return (x, y) => (at(x, y, out), out);
+}
+
 /** z with g z = a, g symmetric 2 × 2 or 3 × 3, into `z`. */
 function solveSymmetric(g: readonly (readonly number[])[], a: readonly number[], z: number[]): void {
   if (g.length === 2) {
@@ -1167,6 +1234,13 @@ function positive(g: readonly (readonly number[])[], s = 0): boolean {
   return E > 0 && E * G - F * F > 1e-12 * scale * scale;
 }
 
+/** Whether a 2 × 2 metric is Lorentzian (det g < 0), against its size
+ *  here: a spacetime diagram's. */
+function lorentz2(g: readonly (readonly number[])[]): boolean {
+  const size = metricSize(g);
+  return g[0][0] * g[1][1] - g[0][1] * g[0][1] < -1e-12 * size * size;
+}
+
 /** det g of a 3 × 3 metric. */
 function det3(g: readonly (readonly number[])[]): number {
   const [[A, B, C], [, D, E], [, , F]] = g;
@@ -1196,6 +1270,11 @@ const short = (x: number) => Number(x.toPrecision(3));
  * - null: only the direction matters; U^τ = 1 at the start, so the affine
  *   parameter runs like τ there.
  *
+ * With no τ, timelike and null are a spacetime diagram's (diagramStart)
+ * where the metric is Lorentzian at the start; a metric of mixed signature
+ * positive definite there traces a timelike geodesic as a plane's
+ * (riemannian), and has no light ray.
+ *
  * `sign` −1 runs it back (U reversed). Null when there is nothing to trace
  * (a light ray with no direction).
  */
@@ -1220,8 +1299,22 @@ export function metricStart(
   const U = new Array<number>(n).fill(0);
   const acc = new Array<number>(n).fill(0);
   const lower = new Array<number>(n).fill(0);
+  // A diagram's geodesic where the metric is Lorentzian at the start; where
+  // a metric of mixed signature is positive definite there, a particle's
+  // runs as a plane's, and light has none.
+  if (n === 2 && motion !== 'riemannian' && !positive(g)) return diagramStart(read, g, motion, [a, b], sign, inRange);
+  if (n === 2 && motion === 'null')
+    return { problem: 'no light here: the metric is positive definite at the start (a plane, not a spacetime, here)' };
   if (n === 2) {
     if (!positive(g)) return { problem: 'the metric is not positive definite at the start' };
+    // Where it stops being positive definite and is Lorentzian instead (a
+    // metric of mixed signature), the row's note says so.
+    let why: string | undefined;
+    const sound = (g: readonly (readonly number[])[]) => {
+      if (inRange(g) && positive(g)) return true;
+      if (inRange(g) && lorentz2(g)) why = 'stops where the metric stops being positive definite (a spacetime beyond)';
+      return false;
+    };
     const flow: GeodesicFlow = {
       accel(y, out) {
         const { g, d } = read(y[0], y[1]);
@@ -1233,11 +1326,12 @@ export function metricStart(
       },
       holds(p, q) {
         const { g } = read(p, q);
-        return inRange(g) && positive(g);
+        return sound(g);
       },
       normalize(y) {
         const { g } = read(y[0], y[1]);
-        if (!inRange(g) || !positive(g)) return false;
+        if (!sound(g)) return false;
+        why = undefined;
         const [w1, w2] = [y[2], y[3]];
         const s2 = g[0][0] * w1 * w1 + 2 * g[0][1] * w1 * w2 + g[1][1] * w2 * w2;
         if (!(s2 > 0) || !Number.isFinite(s2)) return false;
@@ -1246,6 +1340,7 @@ export function metricStart(
         y[3] = w2 / s;
         return true;
       },
+      stopped: () => why,
     };
     return { flow, velocity: [sign * a, sign * b] };
   }
@@ -1382,6 +1477,121 @@ export function metricStart(
 }
 
 /**
+ * A geodesic of a spacetime diagram — a Lorentzian metric in x and y alone,
+ * like -dy^2 + dx^2 or Schwarzschild's r and t — from metricStart.
+ *
+ * - timelike: `direction` is the coordinate velocity, which must point
+ *   inside the light cone (g(v, v) < 0, either half: a past-pointing one
+ *   runs back in time); U = v/√(−g(v, v)), so the step is proper time.
+ * - null: the ray runs along the null half-line nearest `direction` by angle
+ *   in x and y (lib/light-cone.ts nearestNull): there are only four, the two
+ *   null lines each way, and they move with the point, so no direction is
+ *   asked to be null exactly. U is that half-line at unit length in x and y,
+ *   so the affine parameter runs like distance in the panel at the start.
+ *
+ * After each step U is put back on g(U, U) = −1 (rescaled) or on its null
+ * line (projected onto it). It stops where the metric stops being
+ * Lorentzian, grows or shrinks 10⁸-fold, or where U runs away (10³ times its
+ * start) as the metric degenerates — the coordinates freezing at a horizon
+ * they do not cover, as Schwarzschild's t does at r = 2M.
+ */
+function diagramStart(
+  read: ReturnType<typeof metricReader>,
+  g: readonly (readonly number[])[],
+  motion: Motion,
+  [a, b]: readonly [number, number],
+  sign: number,
+  inRange: (g: readonly (readonly number[])[]) => boolean,
+): { flow: GeodesicFlow; velocity: [number, number] } | { problem: string } | null {
+  if (!lorentz2(g)) return { problem: 'the metric is not Lorentzian at the start' };
+  const Q = (g: readonly (readonly number[])[], u: number, v: number) =>
+    g[0][0] * u * u + 2 * g[0][1] * u * v + g[1][1] * v * v;
+  let U: [number, number];
+  if (motion === 'null') {
+    if (a === 0 && b === 0) return null;
+    U = nearestNull(g[0][0], g[0][1], g[1][1], Math.atan2(b, a))!;
+  } else {
+    const s = Q(g, a, b);
+    if (!(s < 0)) return { problem: 'v must point inside the light cone here: a particle is slower than light' };
+    U = [a / Math.sqrt(-s), b / Math.sqrt(-s)];
+  }
+  const soundness = (g: readonly (readonly number[])[]) =>
+    Math.abs(g[0][0] * g[1][1] - g[0][1] * g[0][1]) / metricSize(g) ** 2;
+  const sound0 = soundness(g);
+  const speed0 = Math.hypot(...U);
+  const W = [0, 0];
+  const acc = [0, 0];
+  const lower = [0, 0];
+  // Where it stops being Lorentzian and is positive definite instead (a
+  // metric of mixed signature), the row's note says so.
+  let why: string | undefined;
+  const sound = (g: readonly (readonly number[])[]) => {
+    if (inRange(g) && lorentz2(g)) return true;
+    if (inRange(g) && positive(g)) why = 'stops where the metric stops being Lorentzian (a plane beyond)';
+    return false;
+  };
+  const flow: GeodesicFlow = {
+    accel(y, out) {
+      const { g, d } = read(y[0], y[1]);
+      W[0] = y[2];
+      W[1] = y[3];
+      metricAcceleration(g, d, W, acc, lower);
+      out[0] = acc[0];
+      out[1] = acc[1];
+    },
+    holds(p, q) {
+      const { g } = read(p, q);
+      return sound(g);
+    },
+    normalize(y) {
+      const { g } = read(y[0], y[1]);
+      if (!sound(g)) return false;
+      why = undefined;
+      const [w1, w2] = [y[2], y[3]];
+      if (!(Math.hypot(w1, w2) < TIME_RUNAWAY * Math.max(1, speed0)) && soundness(g) < DEGENERATE * sound0) {
+        // Running away where det g falls to 0: a plane just ahead is a
+        // change of signature (a uniform field's 1 + 2 g x = 0), not a
+        // horizon these coordinates freeze at.
+        const [p, q] = [y[0], y[1]];
+        const [ux, uy] = [w1 / Math.hypot(w1, w2), w2 / Math.hypot(w1, w2)];
+        const reach = Math.max(1, Math.hypot(p, q));
+        for (const f of [1e-9, 1e-7, 1e-5, 1e-3]) {
+          const ahead = read(p + ux * f * reach, q + uy * f * reach).g;
+          if (inRange(ahead) && positive(ahead)) {
+            why = 'stops where the metric stops being Lorentzian (a plane beyond)';
+            break;
+          }
+        }
+        return false;
+      }
+      if (motion === 'null') {
+        // Onto the null line it runs along, if it is still the nearest.
+        const n = nearestNull(g[0][0], g[0][1], g[1][1], Math.atan2(w2, w1));
+        if (n) {
+          const along = w1 * n[0] + w2 * n[1];
+          if (along > 0 && Math.abs(w1 * n[1] - w2 * n[0]) < 0.1 * along) {
+            y[2] = along * n[0];
+            y[3] = along * n[1];
+          }
+        }
+      } else {
+        const s = Q(g, w1, w2);
+        if (s < 0) {
+          const k = 1 / Math.sqrt(-s);
+          if (Math.abs(k - 1) < 0.1) {
+            y[2] = w1 * k;
+            y[3] = w2 * k;
+          }
+        }
+      }
+      return Number.isFinite(y[2]) && Number.isFinite(y[3]);
+    },
+    stopped: () => why,
+  };
+  return { flow, velocity: [sign * U[0], sign * U[1]] };
+}
+
+/**
  * The box a metric's geodesics are traced over for a window [lo, hi]: four
  * times the power of two at least as large as the window's larger side, on
  * a lattice of half that, so panning and zooming within a factor of two keep
@@ -1445,7 +1655,8 @@ function metricPath(
     metric.time,
     !!metric.jacobian,
   );
-  if (ended) Object.assign(ended, { length: 0, asked: Math.abs(length), budget: false, problem: undefined });
+  if (ended)
+    Object.assign(ended, { length: 0, asked: Math.abs(length), budget: false, problem: undefined, note: undefined });
   if (!start) return [x0, y0, 0];
   if ('problem' in start) {
     if (ended) ended.problem = start.problem;
@@ -1469,6 +1680,30 @@ function metricPath(
     ...budget,
     deadline: budget.deadline ?? (ms === undefined ? undefined : performance.now() + ms),
   });
+  // Stopped short of the domain's edge where the signature changes — on
+  // a failed step, or crawling up to the line where it does (a uniform
+  // field's light ray, like a horizon's) — say so.
+  let why = start.flow.stopped?.();
+  const [pe, qe] = path[path.length - 1];
+  const onEdge = pe <= domain[0][0] || pe >= domain[0][1] || qe <= domain[1][0] || qe >= domain[1][1];
+  if (!why && metric.n === 2 && path.length > 1 && !onEdge && !ended?.budget) {
+    // The other signature within a hair of where it stopped, any way round.
+    const read = metricReader(sys, 2, !!metric.jacobian);
+    const plane = metric.motion === 'riemannian' || positive(read(pe, qe).g);
+    const reach = Math.max(1, Math.hypot(pe, qe));
+    search: for (const f of [1e-9, 1e-7, 1e-5, 1e-3])
+      for (let k = 0; k < 8; k++) {
+        const a = (k * Math.PI) / 4;
+        const { g } = read(pe + Math.cos(a) * f * reach, qe + Math.sin(a) * f * reach);
+        if (plane ? lorentz2(g) : positive(g)) {
+          why = plane
+            ? 'stops where the metric stops being positive definite (a spacetime beyond)'
+            : 'stops where the metric stops being Lorentzian (a plane beyond)';
+          break search;
+        }
+      }
+  }
+  if (ended && why && !onEdge && !ended.budget) ended.note = why;
   const pts: number[] = [];
   for (const [p, q] of path) pts.push(p, q, 0);
   return pts;

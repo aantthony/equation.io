@@ -1369,6 +1369,9 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // Integrated as the app draws it (lib/surface-geometry.ts), on a surface
   // or under a panel's metric (geodesic and lightray rows); not here yet.
   geodesic: 'fallback',
+  // Glyphs sized in screen pixels over the window (lib/light-cone.ts); the
+  // preview does not draw them yet.
+  lightcone: 'fallback',
   pcurve: 'draws',
   psurface: 'draws',
   implicit3d: 'draws',

@@ -196,9 +196,20 @@ import {
   GEODESIC_MAX_POINTS,
   geodesicPlanKey,
   GEODESIC_MAX_STEPS,
+  metricOrientation,
+  metricValues,
   numericIn,
   traceWindow,
 } from '../lib/surface-geometry.ts';
+import {
+  type ConeGlyphs,
+  type ConeView,
+  type Orient,
+  behindHorizon,
+  coneGlyphs,
+  coneViewKey,
+  indicatrixScale,
+} from '../lib/light-cone.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1644,6 +1655,80 @@ function geodesicNote(row: Equation, members: number) {
   reconcile();
 }
 
+/** A panel's metric as its light-cone rows read it — compiled once for all
+ *  of them (a family of 256 lightcone(P) included), by its components — and
+ *  the values it was compiled at. */
+const coneMetrics = new WeakMap<
+  readonly unknown[],
+  { names: string[]; key: string; read?: ReturnType<typeof metricValues>; orient?: Orient }
+>();
+/** A light-cone row's glyphs, the names it reads, and what they were drawn
+ *  at (its values and the view), by plan. */
+const coneRows = new WeakMap<CpuPlan, { names: string[]; glyphs?: ConeGlyphs; view?: string }>();
+/** The indicatrix scale of a panel's metric over a view, and which points
+ *  a horizon cuts off (behindHorizon), by its components: worked out once a
+ *  view for all the panel's light-cone rows (a family of 256 too), so
+ *  lightcones and lightcone(P) agree — a lone lightcone(P) is drawn at the
+ *  scale the lattice would be. */
+const coneScales = new WeakMap<
+  readonly unknown[],
+  { key: string; kappa: number; cut: (x: number, y: number) => boolean }
+>();
+
+/**
+ * The light-cone glyphs a lightcones or lightcone(P) row draws over the
+ * view (lib/light-cone.ts), in x and y: worked out again only when the view
+ * or a value the metric or the point reads changes.
+ */
+function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView): ConeGlyphs {
+  const plot = eq.cpu as Extract<CpuPlan, { type: 'lightcone' }>;
+  const reads = (exprs: Expr[]) => [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
+  let m = coneMetrics.get(plot.components);
+  if (!m) {
+    m = { names: reads([...plot.components, ...(plot.jacobian ?? []), ...(plot.future ?? [])]), key: '' };
+    coneMetrics.set(plot.components, m);
+  }
+  const key = JSON.stringify(m.names.map(n => env[n]));
+  if (m.key !== key || !m.read) {
+    m.key = key;
+    m.read = metricValues(plot, env);
+    m.orient = metricOrientation(plot.future, env);
+  }
+  let c = coneRows.get(plot);
+  if (!c) {
+    c = { names: reads(plot.at ? [...plot.at] : []) };
+    coneRows.set(plot, c);
+  }
+  // The view as far as the glyphs see it: which lattice cells, at what
+  // scale; a pan within a cell redraws the same glyphs.
+  const viewKey = coneViewKey(view);
+  const where = `${key}\n${JSON.stringify(c.names.map(n => env[n]))}\n${viewKey}`;
+  if (c.glyphs && c.view === where) return c.glyphs;
+  let scale: { kappa: number; cut: (x: number, y: number) => boolean } | undefined;
+  if (plot.n === 3) {
+    const scaleKey = `${key}\n${viewKey}`;
+    const known = coneScales.get(plot.components);
+    if (known?.key === scaleKey) scale = known;
+    else {
+      scale = { kappa: indicatrixScale(m.read, view), cut: behindHorizon(m.read, view) };
+      coneScales.set(plot.components, { key: scaleKey, ...scale });
+    }
+  }
+  let at: [number, number][] | undefined;
+  if (plot.at) {
+    const out = new Float64Array(2);
+    numericIn(plot.at, ['x', 'y'], env)(NaN, NaN, out);
+    at = [[out[0], out[1]]];
+  }
+  c.glyphs = coneGlyphs(m.read, view, {
+    ...(at ? { at } : {}),
+    ...(scale ? { kappa: scale.kappa, cut: scale.cut } : {}),
+    ...(m.orient ? { orient: m.orient } : {}),
+  });
+  c.view = where;
+  return c.glyphs;
+}
+
 /**
  * A geodesic's points, traced in the trace worker (lib/surface-geometry.ts
  * geodesicPath) whenever a value it reads changes — a slider, t, a dragged
@@ -2961,6 +3046,18 @@ function render() {
             const xy: number[] = [];
             for (let k = 0; k + 2 < pts.length; k += 3) xy.push(pts[k], pts[k + 1]);
             if (xy.length >= 4) extras.polylines.push({ pts: xy, color: css });
+            break;
+          }
+          // The light cones of the panel's metric, sized in CSS pixels.
+          case 'lightcone': {
+            const upp = view.upp * dpr;
+            const glyphs = lightConesFor(eq, env, {
+              lo: [xmin, view.cy - halfH],
+              hi: [xmax, view.cy + halfH],
+              upp,
+              uppY: upp / (view.ratio ?? 1),
+            });
+            (extras.glyphs ??= []).push({ ...glyphs, color: css, fill: cssColorA(color, 0.2) });
             break;
           }
           case 'automaton': {

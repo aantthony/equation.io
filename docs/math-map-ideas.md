@@ -150,12 +150,93 @@ turned more than θ since the last kept, or run on a set length, with the
 smallest θ that fits (decimate) — so tight turns keep theirs. A metric is checked
 at sample points over scales from 0.001 to 100 000 round the origin, so a
 disc of radius 0.1 and a hole of mass 10 000 both pass; a small feature far
-from the origin could still be missed. Follow-ups: light
-cones and their tilt,
-tidal glyphs (the geodesic deviation tensor), time-dependent metrics (τ not cyclic: a third coordinate in the
+from the origin could still be missed. Follow-ups: tidal glyphs (the
+geodesic deviation tensor), time-dependent metrics (τ not cyclic: a third coordinate in the
 state, and t meaning both), more coordinates (3D slices, Kerr off the
 equator), metrics on mapped (`view`) panels, hover readouts along a
 geodesic, and the link preview, which falls back for these rows.
+
+**Implemented (spacetime diagrams and light cones).** A ds² row with no
+third coordinate may now be Lorentzian in the panel's own two, making the
+panel a spacetime diagram: `-dy^2 + dx^2`, Schwarzschild's r and t
+(`-(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)`), ingoing Eddington–Finkelstein
+(`-(1 - 2M/x) dy^2 + 2 dy dx`). The sample check counts positive definite
+and Lorentzian points; a metric Lorentzian anywhere is a diagram, one that
+is positive definite too is of mixed signature (a uniform field
+`-(1 + 2 g x) dy^2 + dx^2`, `-cos(x) dy^2 + dx^2`), and each geodesic takes
+the kind at its start, stopping where it changes — so a metric positive
+definite everywhere checked (Poincaré's) traces exactly as before. One that
+is neither anywhere (−dx² − dy²) is refused. Which coordinate is time is
+the metric's business. `geodesic(P, v)` is a
+particle with coordinate direction v, U = v/√(−g(v, v)) and proper time
+its length, refused as the row's note when v is not inside the cone;
+`lightray(P, d)` snaps d to the nearest of the four null half-lines by
+angle in x and y (rather than asking for d near null: the null lines move
+as P is dragged, and any tolerance would make a row fail somewhere), with U
+of unit length in the panel at the start. After each step U is rescaled to
+g(U, U) = −1 or projected onto its null line. It stops where det g ≥ 0, the
+metric grows 10⁸-fold, or U runs 10³-fold while |det g|/size² falls
+10⁴-fold — Schwarzschild's t freezing at r = 2M (the particle creeps up the
+line x = 2M to the box's edge); EF carries it through to r → 0 in proper
+time π(r³/8M)^½ from rest (tested).
+
+`lightcones` (a row) and `lightcone(P)` (lib/light-cone.ts) draw light
+cones on the CPU once per view change, as one Path2D per row (a fill and
+two strokes, however many glyphs), on a lattice anchored in the plane like
+the tensor-field glyphs (power of two nearest 56 px). On a diagram, the null
+angles are (φ ± α)/2 from g(e_θ, e_θ) = A + R cos(2θ − φ), and the future
+half is the one along which the time coordinate τ increases, dτ(axis) > 0,
+τ being the coordinate of the first term written as a squared
+differential with a minus sign (subtracted, or a unary minus or negative
+number among its factors), the row expanded through products and
+quotients — a sum factor holding differentials is split into terms
+(`s (-dx^2 + dy^2)`, `(dy^2 - dx^2)/x^2`), one without, like (1 − 2M/x),
+is a value whose signs do not count — and d<c> d<c> and (d<c>/k)^2 are
+squares; with no such term, the coordinate whose own d²-term is negative
+at every Lorentzian sample point while the other's is not, else y.
+Inferring τ from the metric's values failed: a vote by counts turned with a
+slider's scale (de Sitter's static patch), and a flatness score could not
+decide `-k x dy^2 + dx^2/(k x)` (two equally flat points) — the values
+cannot tell -f dt² + dr²/f from the same metric with f → −1/f. How the row
+is written can, and is the physics convention. An orientation by the sign of
+g(axis, ∂τ) fails inside Eddington–Finkelstein's horizon, where ∂_v is
+spacelike; dτ does not, since v increases on every future cone there. It
+changes only where a cone straddles dτ = 0, and where the axis is exactly
+along it (inside Schwarzschild's horizon in r and t) the other coordinate
+decreasing is the future: smaller r. A fixed 15 px wedge to the future and
+strokes to the past. With a time, the coordinate light-speed indicatrix: (v − c)ᵀ h
+(v − c) = K with c = −h⁻¹β, K = βᵀh⁻¹β − g_tt, drawn round a dot at one
+power-of-two scale per panel from the median ellipse in view (a third of a
+cell), so sizes compare: light slows toward a horizon (1 − 2M/r across,
+√(1 − 2M/r) round, tested), Kerr's ellipses are dragged in +φ for a > 0
+and leave their dots inside the ergoregion. A lone lightcone(P) uses the
+same scale (its own, when no lattice ellipse is in view); a lattice
+ellipse wider than its cell is left out, and so is one behind a horizon:
+a grid at half the lattice spacing (at most 2000 nodes) is flood-filled
+from seeds known to be outside — its corners and side middles from which a
+ray out to a thousand times the view, in steps growing 30%, meets no
+horizon — through nodes where x and y are space and along edges with no
+horizon inside them: an edge where x and y's metric is large (4× the
+grid's median) or doubles is checked at 31 points between, so a nearly
+extremal hole's band (a = 0.9999: 0.03 wide) is not leaked through. When
+no seed's ray escapes — a cosmological horizon round every point (de
+Sitter, Schwarzschild–de Sitter), or a view wholly inside r₋ — nothing is
+cut: there is no outside to be cut off from. A sweep of 180 views (pans and
+zooms from ±0.8 to ±12 at 400–1920 px) at a = 0.9 … 0.9999 drew no
+ellipse inside r₋; the cut-off takes 6–8 ms (median, 13–17 at the 90th
+percentile) in Node and is recomputed only when the lattice cells in view
+change. The metric is compiled once per panel for all its light-cone
+rows, and the scale, the cut-off and a lattice's glyphs are kept while the
+zoom and the lattice cells in view stay, so a pan within a cell recomputes
+nothing (a pan across one: ~5 ms of metric reads in Node for 1080p Kerr,
+from ~1.2 s with a march per point). A geodesic that stops where a mixed
+metric's signature changes (by a failed step, or crawling up to the line
+where it degenerates, as a uniform field's light ray does) says so in the
+row's note. Follow-ups:
+light cones in 3D panels (not drawn there yet) and on mapped panels, a
+time orientation the user can choose (`lightcones(T)` with a future
+direction), the cone's tilt as a readout on hover, the link preview
+(falls back), and drawing the past half of an indicatrix's cone.
 
 **Implemented (curvature of a metric).** On a panel with a ds^2 row,
 `gaussian(x, y)` alone on a row paints the metric's Gaussian curvature K on
@@ -197,9 +278,12 @@ pixel where a cell meets an undefined part, like a horizon's disc), and
 falls back for a pulled-back K. `-gaussian(x, y)` and `c gaussian(x, y)`
 are shaded the same way, the row's note saying which colour is which. Follow-ups: the Riemann and
 Ricci tensors for 3+ dimensions (a 3D slice, Kerr off the equator), tidal
-glyphs (the geodesic deviation tensor, from R^a_bcd), and the scalar
-curvature of 2D Lorentzian panels once those exist (the formula already
-holds).
+glyphs (the geodesic deviation tensor, from R^a_bcd). On a spacetime
+diagram (a 2D Lorentzian panel) `gaussian(x, y)` is K = R/2 where the
+metric is Lorentzian, the plane's K where a mixed metric is positive
+definite, and undefined where it degenerates (tested: 2M/r³ in
+Schwarzschild's r and t and in Eddington–Finkelstein's, 0 for Rindler,
+±1/L² for de Sitter and anti-de Sitter).
 
 - `curvature(C)` and `torsion(C)` of a parametric curve in u, as a
   scalar along the curve (color the curve by it, or read out at a point).

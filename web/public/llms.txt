@@ -347,8 +347,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     extra coordinates, `dpi` or `de` (constants are no coordinates), a term
     not quadratic in the differentials, and a metric with no usable
     signature (checked over scales from 0.001 to 100 000 round the origin):
-    with no extra coordinate it must be positive definite; with one, the
-    panel's coordinates are space and det g < 0, so the other is a time.
+    with no extra coordinate it must be positive definite (a plane) or
+    Lorentzian, det g < 0 (a spacetime diagram, below), somewhere, and may
+    be both (mixed signature, read out as such: each geodesic takes the
+    kind at its start and stops where it changes, the row's note saying
+    "stops where the metric stops being Lorentzian (a plane beyond)" or
+    the reverse; negative for every
+    direction is refused); with one, the panel's
+    coordinates are space and det g < 0, so the other is a time.
     One ds² row a panel; not on an `on(…)` panel or one whose `view(…)` maps
     its axes. The row reads out its signature and coordinates and draws
     nothing.
@@ -378,6 +384,25 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     degenerates or blows up — a horizon (r = 2M), an ideal boundary
     (y = 0) — and lists fan out as for surfaces. Orbits precess as they
     should: 2π((1 − 6M/r)^−½ − 1) an orbit near a circle of radius r.
+  - A spacetime diagram: with no third coordinate, a Lorentzian metric in
+    the panel's own two (one minus sign) makes the panel space against time,
+    and the metric decides which is which: `ds^2 = -dy^2 + dx^2`
+    (Minkowski, y up as time), `g = 0.1` and `ds^2 = -(1 + 2 g x) dy^2 +
+    dx^2` (a uniform field: a plane where 1 + 2 g x < 0), `M = 1` and
+    `ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)` (Schwarzschild's r and t
+    as x and y), `ds^2 = -(1 - 2M/x) dy^2 + 2 dy dx` (ingoing
+    Eddington–Finkelstein, r and v). Declared coordinates work as above.
+    `geodesic(P, (vx, vy))` is a particle whose coordinate direction is
+    (vx, vy), normalised to proper time (the length); it must point inside
+    the light cone, else the note says "v must point inside the light cone
+    here". `lightray(P, (dx, dy))` runs along the null direction nearest
+    (dx, dy) by angle in x and y — one of four, the two null lines either
+    way, so `(1, 1)` and `(-1, 1)` are the two future rays in Minkowski
+    and any direction picks one wherever P is dragged; its length is an
+    affine parameter, distance in the panel at the start. They stop where
+    the metric degenerates or blows up, or the coordinates freeze (a
+    particle falling toward r = 2M in Schwarzschild's t only creeps up the
+    line x = 2M; in Eddington–Finkelstein it crosses and stops at r → 0).
   - `gaussian(x, y)` alone on a row is the metric's Gaussian curvature K,
     painted over the panel on the diverging scale of a surface's (row colour
     where K > 0, its complement where K < 0, nothing at 0), scaled to the
@@ -399,11 +424,56 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     terms like dt dphi do not reach it). Schwarzschild's slice
     `dr^2/(1 - 2M/r) + r^2 dphi^2` is Flamm's paraboloid's: K = −M/r³. It
     is left unpainted where the slice is not space (inside the horizon).
-    (A property of the formula only, as panels stand: Brioschi's K is
-    R₁₂₁₂/det g for any signature, so for a 2D Lorentzian metric it would
-    be R/2, positive for de Sitter-like and negative for anti-de Sitter-like
-    spacetimes. A ds² row without a time must still be Riemannian; 2D
-    spacetime panels are not supported yet.)
+  - On a spacetime diagram (a Lorentzian ds² in x and y alone),
+    `gaussian(x, y)` is K = R/2, half the scalar curvature (Brioschi's K is
+    R₁₂₁₂/det g for any signature): `-(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)`
+    has K = 2M/r³, Rindler `-x^2 dy^2 + dx^2` 0, de Sitter's static patch
+    `-(1 - x^2/L^2) dy^2 + dx^2/(1 - x^2/L^2)` +1/L², anti-de Sitter's
+    −1/L². It is painted where the metric is Lorentzian (and, of mixed
+    signature, where it is positive definite: the plane's K there), and
+    left out where it degenerates.
+- Light cones: `lightcones` alone on a row draws the light cones of its
+  panel's ds² metric on a lattice over the window (spaced like a tensor
+  field's glyphs, a power of two near 56 px, and fixed in the plane as it
+  pans); `lightcone(P)` draws one at a point (P drags; a list of points
+  draws one each). Refused with no metric, or a Riemannian one.
+  - On a spacetime diagram each is the two null directions, a filled wedge
+    opening to the future and two strokes to the past, a fixed size on the
+    screen, only where the metric is Lorentzian. The future is the half
+    along which the time coordinate increases, and the time coordinate is
+    the one the row writes as such: that of the first term (left to right)
+    that is a squared differential carrying a minus sign — subtracted, or
+    with a unary minus or negative number among its factors; a sum factor
+    holding differentials is split into its terms (`s (-dx^2 + dy^2)`,
+    `(dy^2 - dx^2)/x^2`), and `dx dx` and `(dx/c)^2` are squares, while a
+    sign inside a factor that is a plain value, like (1 - 2M/x), does not
+    count. With no such term, the coordinate whose own d²-term is negative
+    wherever the metric is Lorentzian, else y. So
+    `-(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)` and `dx^2 - f dy^2` have time y,
+    `-dx^2 + dy^2` and `-(1 - 2M/y) dx^2 + 2 dx dy` have time x, and
+    `2 dx dy` alone has y; it never changes as sliders move. That is
+    continuous wherever that coordinate is a time, inside a horizon too.
+    Where the cone lies across it exactly (inside Schwarzschild's horizon in
+    r and t, where r is the time) the future is the other coordinate
+    decreasing: smaller r. Round a horizon in
+    Schwarzschild's r and t the cones close up (half-angle
+    atan(1 − 2M/r)); in Eddington–Finkelstein they tip over through it.
+  - With a time besides the panel's coordinates (equatorial Schwarzschild
+    or Kerr in r and phi) each is the light-speed ellipse: the coordinate
+    velocities v = d(x, y)/dt light can have, g_tt + 2 g_ti vⁱ + g_ij vⁱ vʲ
+    = 0, drawn round a dot at its point at one scale for the whole panel
+    (a power of two, so that the median ellipse in view reaches about a
+    third of a lattice cell): each is where light from its dot gets in the
+    same short time. Flat space gives circles centred on their dots; round
+    Schwarzschild at r, 1 − 2M/r across and √(1 − 2M/r) round, shrinking
+    toward the horizon (nothing inside it); round a spinning hole they are
+    dragged in its sense of spin, and inside the ergoregion (g_tt > 0) an
+    ellipse no longer holds its own dot. A lattice ellipse wider than its
+    cell is left out, and so is one cut off from the outside by a horizon
+    (inside a spinning hole's inner horizon, where x and y are space
+    again) — unless every way out meets a horizon (de Sitter's cosmological
+    one), when none is. A lone `lightcone(P)` with no ellipse in view on the lattice is
+    drawn at its own such scale.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   The operand is every factor written after `dx`, with or without spaces,

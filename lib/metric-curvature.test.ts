@@ -157,7 +157,7 @@ describe('gaussian(x, y) under a ds^2 metric', () => {
     expect(errorOf(['gaussian(x, y)'])).toMatch(/or its metric \(a ds\^2 row\), and this panel has neither/);
     expect(errorOf(['gaussian(P)'])).toBeDefined();
     expect(errorOf(['ds^2 = dx^2 + dz', 'gaussian(x, y)'])).toBe("This panel's metric (its ds^2 row) has an error.");
-    expect(errorOf(['ds^2 = dx^2 - dy^2', 'gaussian(1, 2)'])).toBe("This panel's metric (its ds^2 row) has an error.");
+    expect(errorOf(['ds^2 = -dx^2 - dy^2', 'gaussian(1, 2)'])).toBe("This panel's metric (its ds^2 row) has an error.");
     expect(errorOf([HALF_PLANE, 'meancurvature(x, y)'])).toMatch(
       /needs a surface in space; a metric \(this panel's ds\^2 row\) has a Gaussian curvature, gaussian\(x, y\), and no meancurvature/,
     );
@@ -165,6 +165,52 @@ describe('gaussian(x, y) under a ds^2 metric', () => {
     expect(errorOf([HALF_PLANE, 'gaussian(T)'])).toMatch(/T is not a surface — define one first/);
     // A surface of its own still reads as one there.
     expect(value([HALF_PLANE, 'S = (u, v, u^2 - v^2)', 'gaussian(S, 0, 0)'])).toBe(-4);
+  });
+});
+
+describe('gaussian(x, y) on a spacetime diagram', () => {
+  it('is K = R/2 where it is Lorentzian', () => {
+    // Schwarzschild's (r, t) plane: 2M/r³.
+    for (const M of [1, 3]) {
+      const { K, cpu } = field([`M = ${M}`, 'ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)']);
+      expect(cpu).toMatchObject({ type: 'scalar2d' });
+      for (const [x, y] of [
+        [3 * M, 0],
+        [10 * M, 4],
+        [M, -2],
+      ])
+        expect(K(x, y)).toBeCloseTo((2 * M) / x ** 3, 10);
+    }
+    // In Eddington–Finkelstein's r and v too.
+    expect(field(['M = 1', 'ds^2 = -(1 - 2M/x) dy^2 + 2 dy dx']).K(4, 1)).toBeCloseTo(2 / 64, 10);
+    // Rindler is flat; de Sitter's static patch +1/L², anti-de Sitter's −1/L².
+    expect(field(['ds^2 = -x^2 dy^2 + dx^2']).K(2, 1)).toBeCloseTo(0, 10);
+    for (const L of [0.5, 2]) {
+      const dS = field([`L = ${L}`, 'ds^2 = -(1 - x^2/L^2) dy^2 + dx^2/(1 - x^2/L^2)']).K;
+      expect(dS(0.3 * L, 1)).toBeCloseTo(1 / L ** 2, 9);
+      const AdS = field([`L = ${L}`, 'ds^2 = -(1 + x^2/L^2) dy^2 + dx^2/(1 + x^2/L^2)']).K;
+      expect(AdS(1.7 * L, 1)).toBeCloseTo(-1 / L ** 2, 9);
+    }
+    expect(analyze(['ds^2 = -x^2 dy^2 + dx^2', 'gaussian(x, y)']).r.info).toMatch(
+      /^the spacetime's curvature K = R\/2/,
+    );
+    expect(value(['M = 1', 'ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)', 'gaussian(4, 0)'])).toBeCloseTo(2 / 64, 10);
+  });
+
+  it('is undefined where it degenerates, and the plane’s K where a mixed metric is positive definite', () => {
+    // The weak-field uniform field -(1 + 2 g x) dy^2 + dx^2: Lorentzian for
+    // x > −5, a plane beyond, degenerate at −5; K = g²/(1 + 2 g x)² on both
+    // sides (it is not quite Rindler's -x^2 dy^2 + dx^2, which is flat).
+    const { K } = field(['g = 0.1', 'ds^2 = -(1 + 2 g x) dy^2 + dx^2']);
+    expect(K(0, 0)).toBeCloseTo(0.01, 10);
+    expect(K(3, 0)).toBeCloseTo(0.01 / 1.6 ** 2, 10);
+    expect(K(-10, 0)).toBeCloseTo(0.01, 10);
+    expect(K(-5, 0)).toBeNaN();
+    // -x dy^2 + dx^2: K = 1/(4x²), Lorentzian for x > 0 and a plane for x < 0.
+    const mixed = field(['ds^2 = -x dy^2 + dx^2']).K;
+    expect(mixed(2, 0)).toBeCloseTo(1 / 16, 10);
+    expect(mixed(-2, 0)).toBeCloseTo(1 / 16, 10);
+    expect(mixed(0, 0)).toBeNaN();
   });
 });
 

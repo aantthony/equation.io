@@ -1135,6 +1135,41 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
           'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; r < 2M; r = 3M; b = [-16..16]/2; lightray((-30, b), (1, 0))',
         'slider coordinates physics',
       ],
+      // Schwarzschild's r and t as a spacetime diagram: x is r, y is t. The
+      // light cones close up toward the horizon r = 2M (half-angle
+      // atan(1 − 2M/r)), and inside it they lie on their side: r is the time
+      // there, running inward. Particles dropped from rest, and light from
+      // r = 3 either way, only creep up the horizon as t runs on — these
+      // coordinates never reach it.
+      [
+        'light cones closing at a horizon',
+        'view(x = 0..12, y = -1..13); M = 1; ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x); x < 2M; lightcones; ' +
+          'geodesic(([2..5] 2, 0), (0, 1)); lightray((3, 0), ([-1, 1], 1))',
+        'physics coordinates',
+      ],
+      // The same black hole in ingoing Eddington–Finkelstein coordinates (x
+      // is r, y is v = t + r*): the metric is regular at r = 2M, the cones
+      // tip over smoothly as they cross it, and the particles fall through
+      // to r = 0. Light sent outward from inside the horizon still falls in;
+      // from outside it escapes.
+      [
+        'Eddington–Finkelstein: through the horizon',
+        'view(x = -0.5..8, y = -1..9); M = 1; ds^2 = -(1 - 2M/x) dy^2 + 2 dy dx; x < 2M; lightcones; ' +
+          'geodesic(([3..6], 0), (0, 1)); lightray(([2..12]/4, 0), (0, 1))',
+        'physics coordinates',
+      ],
+      // A spinning (Kerr) black hole in its equatorial plane. Each ellipse is
+      // where light from its dot gets in the same short time: smaller near
+      // the hole, and dragged round with its spin. Inside the ergosurface
+      // r = 2M (red) the ellipse leaves its dot behind: nothing can stand
+      // still there. Slide a; the shaded disc is the horizon.
+      [
+        'light-speed ellipses around a spinning black hole',
+        'view(x = -3.2..3.2, y = -2.4..2.4); M = 1; a = clamp(0.95, -1, 1); r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
+          'ds^2 = -(1 - 2M/r) dt^2 - 4 M a/r dt dphi + r^2/(r^2 - 2M r + a^2) dr^2 + (r^2 + a^2 + 2M a^2/r) dphi^2; ' +
+          'r < M + sqrt(M^2 - a^2); r = 2M; lightcones',
+        'slider coordinates physics',
+      ],
       // The Poincaré disk's metric, painted by its Gaussian curvature: −1
       // everywhere, so one even tint (its row colour's complement, for K < 0),
       // however crowded the geodesics fanning from P look near the edge.

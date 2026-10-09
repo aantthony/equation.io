@@ -7,10 +7,15 @@
  *   ds^2 = (dx^2 + dy^2)/y^2                                (Poincaré)
  *   ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2  (Schwarzschild)
  *
+ * With no τ it may be Lorentzian in the panel's own two coordinates, a
+ * spacetime diagram (ds^2 = -dy^2 + dx^2, or Schwarzschild's r and t as x
+ * and y): which of them is time is the metric's business.
+ *
  * Only in this row is `dr` the differential of r: elsewhere a name starting
  * with d means what it always has (d/dx, ∫ … dx, a slider named dr). The row
  * draws nothing; `geodesic(P, v)` and `lightray(P, d)` rows in its panel
- * trace its geodesics (lib/surface-geometry.ts metricStart).
+ * trace its geodesics (lib/surface-geometry.ts metricStart), and
+ * `lightcones` and `lightcone(P)` draw its light cones (lib/light-cone.ts).
  *
  * The metric is pulled back to x and y through the Jacobian of the
  * coordinates it is written in, g_xy = Jᵀ g J, so a geodesic is integrated
@@ -42,6 +47,18 @@ export interface PanelMetric {
   readonly jacobian?: readonly Expr[];
   /** τ's name. */
   readonly time?: string;
+  /** With no τ: whether it is Lorentzian anywhere checked, so that x and y
+   *  make a spacetime diagram there (like -dy^2 + dx^2)… */
+  readonly lorentzian?: true;
+  /** …and whether it is also positive definite somewhere: a Riemannian
+   *  plane there, a diagram elsewhere. Each geodesic takes the signature at
+   *  its start, and stops where it changes. */
+  readonly mixed?: true;
+  /** A diagram's time orientation (lib/light-cone.ts futureCone): the
+   *  gradient in x and y of its time coordinate — the one of the first term
+   *  written as a squared differential with a minus sign (writtenTime),
+   *  else the second (y) — then of the other, for ties. */
+  readonly future?: readonly Expr[];
 }
 
 /** What parseMetric needs of its document. */
@@ -102,6 +119,78 @@ const SAMPLES: readonly [number, number][] = Array.from({ length: 33 }, (_, i) =
   }),
 );
 
+/** A term of a ds^2 row as written, expanded: whether it carries a minus
+ *  sign, and the coordinates whose differentials it multiplies. */
+interface WrittenTerm {
+  negative: boolean;
+  differentials: string[];
+}
+
+/** Terms past this many are not expanded further (a product of sums). */
+const MAX_WRITTEN_TERMS = 64;
+
+/**
+ * The row's terms as written, expanded through products and quotients:
+ * a sum inside a factor is split into terms when it holds differentials
+ * (s (-dx^2 + dy^2), (dy^2 - dx^2)/x^2), and is a value otherwise
+ * ((1 - 2M/x): its signs are the metric's values, which move with a
+ * slider). A term's sign is its own as written: subtracted, or a unary
+ * minus or a negative number among its factors. d<c>^2, d<c> d<c> and
+ * (d<c>/k)^2 are each d<c> twice.
+ */
+function writtenTerms(e: Expr, names: ReadonlyMap<string, string>): WrittenTerm[] {
+  const holds = (e: Expr) => [...freeVars(e)].some(n => names.has(n));
+  const value = (negative = false): WrittenTerm[] => [{ negative, differentials: [] }];
+  const times = (A: WrittenTerm[], B: WrittenTerm[]): WrittenTerm[] =>
+    A.flatMap(a =>
+      B.map(b => ({ negative: a.negative !== b.negative, differentials: [...a.differentials, ...b.differentials] })),
+    ).slice(0, MAX_WRITTEN_TERMS);
+  if (e.kind === 'var') return names.has(e.name) ? [{ negative: false, differentials: [names.get(e.name)!] }] : value();
+  if (e.kind === 'num') return value(e.value < 0);
+  if (e.kind === 'neg') return writtenTerms(e.a, names).map(t => ({ ...t, negative: !t.negative }));
+  if (e.kind !== 'bin' || !holds(e)) return value();
+  switch (e.op) {
+    case '+':
+    case '-':
+      return [
+        ...writtenTerms(e.a, names),
+        ...writtenTerms(e.b, names).map(t => (e.op === '-' ? { ...t, negative: !t.negative } : t)),
+      ].slice(0, MAX_WRITTEN_TERMS);
+    case '*':
+      return times(writtenTerms(e.a, names), writtenTerms(e.b, names));
+    case '/': {
+      // Over a value: its sign if it is one term, none if a sum.
+      const below = writtenTerms(e.b, names);
+      return times(writtenTerms(e.a, names), below.length === 1 ? below : value());
+    }
+    case '^': {
+      const base = writtenTerms(e.a, names);
+      if (e.b.kind === 'num' && e.b.value === 2 && base.length === 1)
+        return [{ negative: false, differentials: [...base[0].differentials, ...base[0].differentials] }];
+      return value();
+    }
+  }
+  return value();
+}
+
+/**
+ * The coordinate a spacetime diagram's row writes as its time: that of the
+ * first term, in written order (writtenTerms), that is a squared
+ * differential, d<c>^2 with any factors, carrying a minus sign. How the row
+ * is written does not move with a slider, as the metric's values do.
+ * Undefined when no term does.
+ *
+ *   -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)  → y      dx^2 - f dy^2   → y
+ *   -dx^2 + dy^2, (dy^2 - dx^2)/x^2      → x      2 dx dy         → none
+ */
+function writtenTime(rhs: Expr, names: ReadonlyMap<string, string>): string | undefined {
+  for (const term of writtenTerms(rhs, names)) {
+    const [a, b, ...rest] = term.differentials;
+    if (term.negative && a !== undefined && a === b && !rest.length) return a;
+  }
+  return undefined;
+}
+
 /** What sampled found, by the metric's structure and the values it reads:
  *  a reanalysis (a slider elsewhere moving) does not check it again. */
 const sampleCache = new Map<string, ReturnType<typeof sampleCounts>>();
@@ -110,8 +199,9 @@ const sampleCache = new Map<string, ReturnType<typeof sampleCounts>>();
  * A metric checked at the sample points, with its sliders at their values:
  * whether the form is g's everywhere it is defined (`quadratic`), and at how
  * many points it is defined, its coordinates are independent, it can be
- * traced in (positive definite, or x and y space with det g < 0), the
- * panel's coordinates are space, and det g < 0.
+ * traced in (positive definite, or x and y space with det g < 0; with no
+ * time, positive definite or Lorentzian), the panel's coordinates are space,
+ * det g < 0, and (with no time) it is positive definite.
  */
 function sampled(
   Q: Expr,
@@ -147,7 +237,20 @@ function sampleCounts(
       return NaN;
     }
   };
-  const counts = { quadratic: true, defined: 0, independent: 0, traceable: 0, space: 0, lorentz: 0 };
+  const counts = {
+    quadratic: true,
+    defined: 0,
+    independent: 0,
+    traceable: 0,
+    space: 0,
+    lorentz: 0,
+    riemann: 0,
+    // With no τ, Lorentzian points where the first (second) coordinate's
+    // own d²-term is negative: the time when the row writes none (every
+    // such point's, of one of them).
+    timeA: 0,
+    timeB: 0,
+  };
   for (const [k, [x, y]] of SAMPLES.entries()) {
     const w = vars.map((_, i) => Math.sin(1.7 * k + 2.3 * i + 0.4));
     const env: Record<string, number> = { x, y };
@@ -168,7 +271,16 @@ function sampleCounts(
     if (Math.abs(j[0][0] * j[1][1] - j[0][1] * j[1][0]) > 1e-12 * Math.max(...j.flat().map(Math.abs)))
       counts.independent++;
     if (n === 2) {
-      if (G[0][0] > 0 && G[0][0] * G[1][1] - G[0][1] ** 2 > 0) counts.traceable++;
+      // Positive definite (a Riemannian plane) or Lorentzian (a spacetime
+      // diagram): either can be traced.
+      const det = G[0][0] * G[1][1] - G[0][1] ** 2;
+      if (G[0][0] > 0 && det > 0) counts.riemann++;
+      if (det < 0) {
+        counts.lorentz++;
+        if (G[0][0] < 0) counts.timeA++;
+        if (G[1][1] < 0) counts.timeB++;
+      }
+      if ((G[0][0] > 0 && det > 0) || det < 0) counts.traceable++;
       continue;
     }
     const det =
@@ -199,8 +311,11 @@ const NOT_COORDINATES: ReadonlySet<string> = new Set(['pi', 'e', 'i', 'inf']);
  * coordinate, a component that reads that coordinate (it must be cyclic: a
  * static or stationary spacetime) or t, a term that is not quadratic in the
  * differentials, coordinates whose Jacobian vanishes, or a signature it
- * cannot trace (not positive definite with no time; no time direction with
- * one).
+ * cannot trace (with no time, neither positive definite nor Lorentzian
+ * anywhere; no time direction with one). With no time it is a spacetime
+ * diagram where it is Lorentzian (`lorentzian`), a plane where it is
+ * positive definite, and may be both (`mixed`): which, a geodesic takes from
+ * its start.
  */
 export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   // The differentials: d<name> for x, y, coordinate fields and t (τ)
@@ -319,7 +434,13 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   // Checked at sample points (with the sliders at their values): the form is
   // g's, the coordinates are independent, and the signature is one a
   // geodesic can be traced in somewhere.
-  const { defined, independent, traceable, space, lorentz, quadratic } = sampled(Q, g, J, vars, ctx.values);
+  const { defined, independent, traceable, space, lorentz, riemann, quadratic, timeA, timeB } = sampled(
+    Q,
+    g,
+    J,
+    vars,
+    ctx.values,
+  );
   if (!quadratic) throw notQuadratic;
   if (defined && !independent && !spatial.every(c => PANEL.has(c)))
     throw new Error(
@@ -328,13 +449,28 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   if (defined && !traceable)
     throw new Error(
       n === 2
-        ? 'ds^2 with no time must be positive for every direction (a Riemannian metric, like (dx^2 + dy^2)/y^2); a spacetime has a time coordinate too, like -dt^2 + dx^2 + dy^2.'
+        ? 'ds^2 in two coordinates must be positive for every direction (a Riemannian metric, like (dx^2 + dy^2)/y^2) or have one minus sign (a spacetime diagram, like -dy^2 + dx^2) somewhere; this one is negative for every direction wherever it was checked.'
         : space
           ? `ds^2: ${time} must be a time, with one minus sign, like -dt^2 + dx^2 + dy^2.`
           : lorentz
             ? `ds^2: the panel's coordinates are not space anywhere it was checked, at distances from 0.001 to 100 000 from the origin — inside a horizon everywhere there?`
             : `ds^2 must have one minus sign, for d${time}: the panel's coordinates are space.`,
     );
+
+  // With no time: a spacetime diagram if it is Lorentzian anywhere checked
+  // (a plane where it is positive definite, if that too). Its time is the
+  // one the row writes with a minus sign first (writtenTime), else the
+  // second (y): from how the row is written, not the metric's values,
+  // which no rule can read a time from without turning with a slider.
+  const lorentzian = n === 2 && lorentz > 0;
+  const mixed = lorentzian && riemann > 0;
+  // When no term is written with a minus sign, the coordinate whose own
+  // d²-term is negative at every Lorentzian point checked, while the
+  // other's is not; else y.
+  const written = writtenTime(rhs, names);
+  const timeIndex =
+    written !== undefined ? (spatial.indexOf(written) === 0 ? 0 : 1) : timeA === lorentz && timeB < lorentz ? 0 : 1;
+  const future = lorentzian ? [...J[timeIndex], ...J[1 - timeIndex]] : undefined;
 
   // g as written, its x and y derivatives, and — unless it is written in x
   // and y — the Jacobian it is pulled back to x and y with as it is traced
@@ -354,13 +490,19 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
     derivatives,
     ...(jacobian ? { jacobian } : {}),
     ...(time !== undefined ? { time } : {}),
+    ...(lorentzian ? { lorentzian: true as const, future: future! } : {}),
+    ...(mixed ? { mixed: true as const } : {}),
   };
 }
 
 /** What a metric row reads out: its signature and coordinates. */
-export function metricSummary(metric: Pick<PanelMetric, 'n' | 'coords'>): string {
+export function metricSummary(metric: Pick<PanelMetric, 'n' | 'coords' | 'lorentzian' | 'mixed'>): string {
   const [first, ...rest] = metric.coords;
   return metric.n === 2
-    ? `Riemannian metric in ${metric.coords.join(', ')}: geodesic(P, d) traces it`
-    : `Lorentzian metric in ${first}; ${rest.join(', ')}: geodesic(P, v) for a particle, lightray(P, d) for light`;
+    ? metric.mixed
+      ? `Metric of mixed signature in ${metric.coords.join(', ')}: Riemannian where positive definite, a spacetime diagram where Lorentzian — geodesic(P, v) takes the kind at P, lightray(P, d) and lightcones where it is Lorentzian`
+      : metric.lorentzian
+        ? `Lorentzian metric in ${metric.coords.join(', ')} (a spacetime diagram): geodesic(P, v) for a particle, lightray(P, d) for light, lightcones for its cones`
+        : `Riemannian metric in ${metric.coords.join(', ')}: geodesic(P, d) traces it`
+    : `Lorentzian metric in ${first}; ${rest.join(', ')}: geodesic(P, v) for a particle, lightray(P, d) for light, lightcones for its cones`;
 }

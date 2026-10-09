@@ -352,6 +352,7 @@ export function axisMapping(object: MathObject, maps?: AxisMaps): AxisMapping | 
     // Its geodesics are traced in x and y over the window, which a mapped
     // panel does not show as a rectangle: not yet.
     case 'metric':
+    case 'lightcone':
       return null;
     case 'color-field':
       return 'substitute';

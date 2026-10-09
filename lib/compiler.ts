@@ -10,6 +10,7 @@ import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
 import { FAMILY_NODES, countNodes } from './size.ts';
 import type { GeodesicSpec } from './surface-geometry.ts';
+import type { LightConeSpec } from './light-cone.ts';
 import { metricSummary } from './metric.ts';
 
 export interface CpuGrid {
@@ -46,6 +47,9 @@ export type CpuPlan =
   | { type: 'label'; dim: 2 | 3; coords: Expr[]; text: string }
   | { type: 'orbit'; dim: 2 | 3; paths: Expr[][]; series: boolean; from: Expr; to: Expr }
   | ({ type: 'geodesic' } & GeodesicSpec)
+  /** Light cones of a panel's metric, drawn on the CPU as the view changes
+   *  (lib/light-cone.ts coneGlyphs). */
+  | ({ type: 'lightcone' } & LightConeSpec)
   /** `pts` flat, or with `over` one vertex template run over the columns. */
   | {
       type: 'polygon';
@@ -335,6 +339,10 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'geodesic': {
       const { kind: _, ...spec } = object;
       return { type: 'geodesic', ...spec };
+    }
+    case 'lightcone': {
+      const { kind: _, ...spec } = object;
+      return { type: 'lightcone', ...spec };
     }
     case 'figure':
       return {
@@ -678,6 +686,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'label':
     case 'orbit':
     case 'geodesic':
+    case 'lightcone':
     case 'figure':
     case 'system':
     case 'list':
@@ -836,6 +845,9 @@ export function cpuStructureKey(plan: CpuPlan): string {
           ...[plan.metric.components, plan.metric.derivatives, plan.metric.jacobian ?? []].map(expressions),
         ],
       ];
+      break;
+    case 'lightcone':
+      structure = [plan.n, ...[plan.components, plan.jacobian ?? [], plan.at ?? []].map(expressions)];
       break;
     case 'polygon':
       structure = [
