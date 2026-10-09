@@ -1312,3 +1312,34 @@ values run (`2026-10-09T063021Z`): **49% ±4% (225/460) → 47% ±4%
 Verdict: worse overall (216 against 225), so reverted as agreed. The loss
 is mostly in runs that never saw a pitfall, i.e. run-to-run noise, while the
 named-shape tasks gained (54 → 60): this change is worth measuring again.
+
+## Greedy sampling (2026-10-10)
+
+`f1aef07`: `ChatModel.options` (Assistant.swift) is
+`GenerationOptions(samplingMode: .greedy)`, used by the app's
+`streamResponse` and the runner's `respond`; results files now record the
+options. Nothing else changed (the instance-with-values tool, 1,556
+instruction and 1,309 tool tokens).
+
+`results/2026-10-09T155351Z-on-device.json`, **3 runs a task**:
+
+- **Deterministic.** All 46 tasks gave the same tool calls (arguments
+  included), rows and reply in all 3 runs; 23 tasks passed in each
+  repetition.
+- **50% (69/138), i.e. 23 of 46**, against the sampled baseline
+  (`2026-10-09T063021Z`, 10 runs) at 49% (225/460), 22.5 tasks a repetition
+  on average. Named-shape tasks 6 of 10 (54 of 100 sampled), the other 36
+  17 of 36 (171 of 360).
+- Greedy picks one answer per task, so a task is now pass or fail, not a
+  rate. Against the sampled pass rates it mostly takes the likelier side:
+  passes where the baseline passed 8–9 of 10 (helix, cardioid, cone,
+  hyperboloid), fails where it passed 0–3. Two exceptions: area-under-sin
+  fails (baseline 10/10; greedy writes `y < cos(x)`) and label-vertex passes
+  (baseline 3/10). torus (5/10) and lissajous (3/10) fail.
+
+Verdict: kept; no worse, and the app now answers a request the same way
+every time. Since repeated runs are identical, later measurements in this
+batch use **3 runs a task** (the extra runs only confirm determinism), and
+compare overall counts out of 46 and the tasks that flip. One flip is one
+task, about 2 points: differences of a task or two are within what a single
+greedy sample can show.
