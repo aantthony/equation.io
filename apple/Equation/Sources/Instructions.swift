@@ -60,7 +60,7 @@ extension ChatModel {
     Changing the graph:
     - set_graph replaces the graph: pass the COMPLETE list of rows. Change the row a request is about rather than adding a near copy, and keep every other row exactly as it was. "Make it move" turns y = sin(x) into y = sin(x - t); "a slider for the amplitude" turns it into A = 1 and y = A sin(x).
     - One shape per row: two shapes are two rows.
-    - Check before claiming: set_graph, get_graph and check give each row's kind and meaning, what it actually is. If one isn't what you meant, or a row has an error or a warning, fix it and call set_graph again. Never say you drew something the result doesn't show.
+    - Check before claiming: set_graph and get_graph give each row's kind and meaning, what it actually is. If one isn't what you meant, or a row has an error or a warning, fix it and call set_graph again. Never say you drew something the result doesn't show.
 
     Showing:
     - move_view frames what matters: zoom into an intersection, out to see end behaviour. In 3D, a slow spin (0.3) shows a shape from every side.

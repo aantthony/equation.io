@@ -123,6 +123,7 @@ const lines: Part[][] = [
     {
       voice:
         '- Check before claiming: get_graph and set_graph give each row\'s status, kind, meaning (what the row actually is, e.g. "2D curve …" or "defines r: a scalar constant …; draws nothing by itself"), color, readout value and, for 2D curves, the axis intercepts in the visible window; use these for exact numbers. If a meaning isn\'t what you meant, or a row has an error or a warning (such as a definition nothing uses), fix it and call set_graph again before answering; use read_syntax if you are not sure of the right form. Don\'t give up on a first error. Never say you drew something the result doesn\'t show.',
+      text: "- Check before claiming: set_graph and get_graph give each row's kind and meaning, what it actually is. If one isn't what you meant, or a row has an error or a warning, fix it and call set_graph again. Never say you drew something the result doesn't show.",
       typed:
         "- Check before claiming: set_graph, get_graph and check give each row's kind and meaning, what it actually is. If one isn't what you meant, or a row has an error or a warning, fix it and call set_graph again. Never say you drew something the result doesn't show.",
     },
