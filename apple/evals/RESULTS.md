@@ -1343,3 +1343,46 @@ batch use **3 runs a task** (the extra runs only confirm determinism), and
 compare overall counts out of 46 and the tasks that flip. One flip is one
 task, about 2 points: differences of a task or two are within what a single
 greedy sample can show.
+
+## Tools that earn their tokens (2026-10-10)
+
+How often each tool was called in the last three sampled runs (`063021Z`,
+`084622Z`, `095343Z`: 1,380 runs, 47% passing), and how the runs that called
+it did:
+
+| tool | calls | runs | passing | failing | pass rate |
+| --- | --- | --- | --- | --- | --- |
+| set_graph | 2,042 | 1,354 | 632 | 722 | 47% |
+| shape | 546 | 519 | 207 | 312 | 40% |
+| check | 358 | 304 | 103 | 201 | 34% |
+| animate_slider | 288 | 159 | 52 | 107 | 33% |
+| get_graph | 250 | 208 | 109 | 99 | 52% |
+| move_view | 151 | 84 | 34 | 50 | 40% |
+| kind_examples | 85 | 80 | 34 | 46 | 42% |
+| search_functions | 53 | 52 | 5 | 47 | 10% |
+| function_doc | 50 | 48 | 5 | 43 | 10% |
+| list_kinds | 11 | 11 | 3 | 8 | 27% |
+
+(A low pass rate partly reflects when a tool is called: on hard requests.)
+
+### No function_doc or search_functions, reverted
+
+`f65122d` takes both out of the tool list; the instructions say "Never
+invent a function." in place of naming them, and a call to a missing
+function hints at kind_examples or shape. Instructions 1,556 → 1,543 tokens,
+tools 1,309 → 1,123 (−186).
+
+`results/2026-10-09T161025Z-on-device.json`, greedy, 3 runs a task (all
+identical but one reply): **39% (18 of 46)** against 23 of 46 with the
+tools. 11 tasks flipped, 3 up and 8 down, few near the functions:
+- up: area-under-sin (`int[0..π] sin(x) dx`), zoom-zero, shift-up;
+- down: derivative (`y = x^2 - 1` written out for `y = d/dx f(x)`),
+  tangent-line (`y = 2x + 1`), hyperboloid (`x^2/9 + y^2/4 - z^2/4 = 1`),
+  cardioid (the `a x` term dropped again), unit-cube-beside-sphere (`solid:`
+  copied into a row), label-vertex (the parabola dropped), zoom-out,
+  function-draws (reply).
+
+Verdict: worse (−5 tasks), so reverted. The flips are scattered, which is
+what greedy decoding does with a changed prompt: every answer can move. A
+single greedy sample a task makes a tool removal hard to judge; a 5-task
+drop is still the largest move seen with greedy so far.
