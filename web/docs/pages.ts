@@ -324,7 +324,7 @@ function shapeSection(ref: Reference, shape: Shape): string {
       : '';
     return `<li><p class="kind">${kindLink}${form.note ? ` — ${inline(form.note, ref)}` : ''}</p>
 <pre><code>${form.rows.map(escape).join('\n')}</code></pre>${params}
-<p class="label">For example${form.example.note ? ` — ${inline(form.example.note, ref)}` : ''}</p>${rowsBlock(
+<p class="label">For example${form.example.values ? `, ${escape(form.example.values)}` : ''}${form.example.note ? ` — ${inline(form.example.note, ref)}` : ''}</p>${rowsBlock(
       form.example.rows,
       `${shape.name}, ${form.example.note ?? 'an example'}`,
     )}</li>`;

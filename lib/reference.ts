@@ -28,8 +28,9 @@
  *   is, its forms, and an optional `Pitfall: …` paragraph. A form is a
  *   bullet, `- kind: \`rows\``, optionally ` — a note`, over nested bullets
  *   naming each parameter (`` - `a`: what it sets ``) and one instance
- *   (`- e.g. \`rows\` — a note`). reference.test.ts draws every form (its
- *   parameters set) and instance as its kind.
+ *   (`- e.g. a = 3, c = 2: \`rows\` — a note`, its parameters' values first).
+ *   reference.test.ts draws every form (its parameters set) and instance as
+ *   its kind.
  *
  * Text is Markdown's common core: paragraphs, `-` lists (two spaces indent a
  * continuation or a nested list), code indented four spaces, `inline code`,
@@ -85,7 +86,8 @@ export interface ShapeForm {
   note?: string;
   /** Each parameter's name and what it sets. */
   params: [name: string, meaning: string][];
-  example: { rows: string[]; note?: string };
+  /** The instance: its parameters' values (`a = 3, c = 2`), its rows and a note. */
+  example: { values?: string; rows: string[]; note?: string };
 }
 
 /** A named curve or surface (shapes.md). */
@@ -162,7 +164,7 @@ const slugOf = (name: string) =>
 
 const FORM = /^- (\w+): `([^`]+)`(?:\s+—\s+(.+))?$/;
 const PARAM = /^ {2}- `(\w+)`: (.+)$/;
-const INSTANCE = /^ {2}- e\.g\. `([^`]+)`(?:\s+—\s+(.+))?$/;
+const INSTANCE = /^ {2}- e\.g\. (?:([^`]+): )?`([^`]+)`(?:\s+—\s+(.+))?$/;
 
 /** shapes.md's `## Name` sections, each a shape. */
 function shapes(text: string): Shape[] {
@@ -190,7 +192,11 @@ function shapes(text: string): Shape[] {
               example: { rows: [] },
             });
           else if (instance && last && !last.example.rows.length)
-            last.example = { rows: rowsOf(instance[1]), ...(instance[2] ? { note: instance[2] } : {}) };
+            last.example = {
+              ...(instance[1] ? { values: instance[1] } : {}),
+              rows: rowsOf(instance[2]),
+              ...(instance[3] ? { note: instance[3] } : {}),
+            };
           else if (param && last && !last.example.rows.length) last.params.push([param[1], param[2]]);
           else throw new Error(`${where}: ${JSON.stringify(line)} is not a form, a parameter or an e.g.`);
         }
@@ -363,7 +369,7 @@ function shapesSection(ref: Reference): string {
       [
         `- ${f.kind}: \`${f.rows.join('; ')}\`${f.note ? ` — ${f.note}` : ''}`,
         ...f.params.map(([name, meaning]) => `  - \`${name}\`: ${meaning}`),
-        `  - e.g. \`${f.example.rows.join('; ')}\`${f.example.note ? ` — ${f.example.note}` : ''}`,
+        `  - e.g. ${f.example.values ? `${f.example.values}: ` : ''}\`${f.example.rows.join('; ')}\`${f.example.note ? ` — ${f.example.note}` : ''}`,
       ].join('\n'),
     );
     return [

@@ -127,7 +127,7 @@ describe('shape', () => {
     expect(answer).toContain('- ["(x^2 + y^2 - a x)^2 = a^2(x^2 + y^2)"] (implicit2d)');
     expect(answer).not.toContain('(pcurve)');
     expect(answer).toContain('  a: ');
-    expect(answer).toContain('  e.g. ["(x^2 + y^2 - 2x)^2 = 4(x^2 + y^2)"]');
+    expect(answer).toContain('  e.g. a = 2 → ["(x^2 + y^2 - 2x)^2 = 4(x^2 + y^2)"]');
     expect(shape(data, 'helix')).toContain('(pcurve)');
     expect(answer.split('\n').length).toBeLessThan(8);
     expect(answer).toMatch(/Nothing is drawn yet: .*set_graph\.$/);

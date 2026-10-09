@@ -66,6 +66,12 @@ describe('the reference', () => {
         if (params.length)
           expect(lastKind(form.rows).errors.length, `${what}, its parameters unset`).toBeGreaterThan(0);
         const instance = `${shape.name}: ${form.example.rows.join('; ')}`;
+        // The instance names each parameter's value, as `a = 3, c = 2`.
+        const values = (form.example.values ?? '').split(', ').filter(Boolean);
+        expect(
+          values.map(v => /^(\w+) = -?[\d.]+$/.exec(v)?.[1]),
+          instance,
+        ).toEqual(form.params.map(([name]) => name));
         expect(lastKind(form.example.rows), instance).toEqual({ errors: [], kind: form.kind });
       }
   });

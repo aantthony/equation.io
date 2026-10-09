@@ -481,7 +481,7 @@ export function shape(data: AssistantData, name: string): string {
     `${found.name}${found.aliases.length ? ` (also ${found.aliases.join(', ')})` : ''}: ${found.intro.replace(/\s+/g, ' ')}`,
     `- ${rows(form.rows)} (${form.kind})${form.note ? ` — ${form.note}` : ''}`,
     ...form.params.map(([param, meaning]) => `  ${param}: ${meaning}`),
-    `  e.g. ${rows(form.example.rows)}${form.example.note ? ` — ${form.example.note}` : ''}`,
+    `  e.g. ${form.example.values ? `${form.example.values} → ` : ''}${rows(form.example.rows)}${form.example.note ? ` — ${form.example.note}` : ''}`,
     ...(found.pitfall ? [`Pitfall: ${found.pitfall}`] : []),
     'Nothing is drawn yet: adapt this form to the request and pass its rows to set_graph.',
   ].join('\n');
