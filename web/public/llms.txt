@@ -443,8 +443,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     along which the time coordinate increases, and the time coordinate is
     the one the row writes as such: that of the first term (left to right)
     that is a squared differential carrying a minus sign — subtracted, or
-    with a unary minus or negative number among its factors; a sign inside
-    a factor that is a sum, like (1 - 2M/x), does not count — else y. So
+    with a unary minus or negative number among its factors; a sum factor
+    holding differentials is split into its terms (`s (-dx^2 + dy^2)`,
+    `(dy^2 - dx^2)/x^2`), and `dx dx` and `(dx/c)^2` are squares, while a
+    sign inside a factor that is a plain value, like (1 - 2M/x), does not
+    count. With no such term, the coordinate whose own d²-term is negative
+    wherever the metric is Lorentzian, else y. So
     `-(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)` and `dx^2 - f dy^2` have time y,
     `-dx^2 + dy^2` and `-(1 - 2M/y) dx^2 + 2 dx dy` have time x, and
     `2 dx dy` alone has y; it never changes as sliders move. That is
@@ -467,7 +471,8 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     ellipse no longer holds its own dot. A lattice ellipse wider than its
     cell is left out, and so is one cut off from the outside by a horizon
     (inside a spinning hole's inner horizon, where x and y are space
-    again). A lone `lightcone(P)` with no ellipse in view on the lattice is
+    again) — unless every way out meets a horizon (de Sitter's cosmological
+    one), when none is. A lone `lightcone(P)` with no ellipse in view on the lattice is
     drawn at its own such scale.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.

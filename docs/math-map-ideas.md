@@ -188,7 +188,12 @@ angles are (φ ± α)/2 from g(e_θ, e_θ) = A + R cos(2θ − φ), and the futu
 half is the one along which the time coordinate τ increases, dτ(axis) > 0,
 τ being the coordinate of the first term written as a squared
 differential with a minus sign (subtracted, or a unary minus or negative
-number among its factors; signs inside a sum factor do not count), else y.
+number among its factors), the row expanded through products and
+quotients — a sum factor holding differentials is split into terms
+(`s (-dx^2 + dy^2)`, `(dy^2 - dx^2)/x^2`), one without, like (1 − 2M/x),
+is a value whose signs do not count — and d<c> d<c> and (d<c>/k)^2 are
+squares; with no such term, the coordinate whose own d²-term is negative
+at every Lorentzian sample point while the other's is not, else y.
 Inferring τ from the metric's values failed: a vote by counts turned with a
 slider's scale (de Sitter's static patch), and a flatness score could not
 decide `-k x dy^2 + dx^2/(k x)` (two equally flat points) — the values
@@ -213,8 +218,10 @@ ray out to a thousand times the view, in steps growing 30%, meets no
 horizon — through nodes where x and y are space and along edges with no
 horizon inside them: an edge where x and y's metric is large (4× the
 grid's median) or doubles is checked at 31 points between, so a nearly
-extremal hole's band (a = 0.9999: 0.03 wide) is not leaked through, and a
-view wholly inside r₋ is cut off whole. A sweep of 180 views (pans and
+extremal hole's band (a = 0.9999: 0.03 wide) is not leaked through. When
+no seed's ray escapes — a cosmological horizon round every point (de
+Sitter, Schwarzschild–de Sitter), or a view wholly inside r₋ — nothing is
+cut: there is no outside to be cut off from. A sweep of 180 views (pans and
 zooms from ±0.8 to ±12 at 400–1920 px) at a = 0.9 … 0.9999 drew no
 ellipse inside r₋; the cut-off takes 6–8 ms (median, 13–17 at the 90th
 percentile) in Node and is recomputed only when the lattice cells in view

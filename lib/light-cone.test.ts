@@ -536,6 +536,20 @@ describe('review fixes', () => {
     }
     // EF with v along x: v increases on the future cone.
     expect(Math.cos(futureAt(['M = 1', 'ds^2 = -(1 - 2M/y) dx^2 + 2 dx dy'], 0, 4).axis)).toBeGreaterThan(0);
+    // Sums nested as factors are split into their terms, and d<c> d<c> and
+    // (d<c>/k)^2 are squares: time along x in each.
+    for (const rows of [
+      ['ds^2 = (-dx^2 + dy^2)/x^2'],
+      ['ds^2 = (dy^2 - dx^2)/x^2'],
+      ['s = 2', 'ds^2 = s (-dx^2 + dy^2)'],
+      ['ds^2 = e^y (-dx^2 + dy^2)'],
+      ['c = 3', 'ds^2 = -(dx/c)^2 + dy^2'],
+      ['ds^2 = -dx dx + dy^2'],
+    ])
+      expect(futureAt(rows, 1.5, 0.5).axis, rows.at(-1)).toBeCloseTo(0, 9);
+    // With no term written with a minus sign (the sign is a slider's), the
+    // coordinate whose d²-term is negative at every Lorentzian point.
+    expect(futureAt(['k = -1', 'ds^2 = k dx^2 + dy^2'], 1, 1).axis).toBeCloseTo(0, 9);
     // No flips as a slider moves the values.
     for (const k of [0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100]) {
       expect(futureAt([`k = ${k}`, 'ds^2 = -k x dy^2 + dx^2/(k x)'], 2, 0).axis, `k = ${k}`).toBeCloseTo(up, 9);
@@ -579,6 +593,25 @@ describe('review fixes', () => {
         for (let i = 0; i < drawn.dots.length; i += 2)
           expect(Math.hypot(drawn.dots[i], drawn.dots[i + 1]), `a = ${spin} at (${cx}, ${cy})`).toBeGreaterThan(inner);
       }
+    }
+    // A cosmological horizon round every point (de Sitter's static patch
+    // in r and phi, and Schwarzschild–de Sitter's) cuts nothing off: there
+    // is no outside, and the cones in the patch draw.
+    const deSitter = cones([...EQUATORIAL, 'ds^2 = -(1 - r^2) dt^2 + dr^2/(1 - r^2) + r^2 dphi^2', 'lightcones']);
+    const sds = cones([
+      ...EQUATORIAL,
+      'l = 0.01',
+      'ds^2 = -(1 - 2M/r - l r^2) dt^2 + dr^2/(1 - 2M/r - l r^2) + r^2 dphi^2',
+      'lightcones',
+    ]);
+    for (const [hole, w] of [
+      [deSitter, view(-0.8, 0.8, -0.6, 0.6)],
+      [deSitter, view(-3, 3, -2.25, 2.25)],
+      [sds, view(3, 5, -0.75, 0.75)],
+      [sds, view(-16, 16, -12, 12)],
+    ] as const) {
+      const drawn = coneGlyphs(metricValues(hole.spec, hole.env), w);
+      expect(drawn.dots.length).toBeGreaterThan(0);
     }
     // Schwarzschild has no inside to cut off.
     const s = cones([...SCHWARZSCHILD, 'lightcones']);

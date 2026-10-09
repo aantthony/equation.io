@@ -286,8 +286,9 @@ function spatial(g: readonly (readonly number[])[]): boolean {
  * along an edge with a horizon inside it (crosses: a nearly extremal hole's
  * band, thinner than the grid); a point is cut off when neither its nearest
  * node nor any of that node's four neighbours was reached. One read a node,
- * and 31 more along each edge near a horizon, and eight rays. A view
- * wholly inside r₋ is cut off whole. Worked out once per view and metric values (web/main.ts shares it
+ * and 31 more along each edge near a horizon, and eight rays. When no
+ * seed's ray escapes (de Sitter's cosmological horizon is round every
+ * point; a view wholly inside r₋) nothing is cut. Worked out once per view and metric values (web/main.ts shares it
  * between a panel's light-cone rows).
  */
 export function behindHorizon(read: MetricRead, view: ConeView): (x: number, y: number) => boolean {
@@ -326,8 +327,6 @@ export function behindHorizon(read: MetricRead, view: ConeView): (x: number, y: 
       if (!spatial(g)) state[j] = 1;
     }
   if (!defined) return () => false;
-  // With no node inside a horizon the seeds below still decide: a view
-  // wholly inside r₋ has none outside, and is cut off whole.
   norms.sort((a, b) => a - b);
   const typical = norms[Math.floor(norms.length / 2)];
   // A horizon thinner than the grid between two nodes (a nearly extremal
@@ -400,6 +399,10 @@ export function behindHorizon(read: MetricRead, view: ConeView): (x: number, y: 
     [nx - 1, ck],
   ])
     if (state[k * nx + i] !== 1 && outside(k * nx + i)) visit(i, k);
+  // No seed escapes — a cosmological horizon round everything (de Sitter),
+  // or a view wholly inside r₋: there is no outside to be cut off from,
+  // and nothing is cut.
+  if (!tail) return () => false;
   while (head < tail) {
     const j = queue[head++];
     const [i, k] = [j % nx, Math.floor(j / nx)];

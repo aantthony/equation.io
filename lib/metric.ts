@@ -119,52 +119,74 @@ const SAMPLES: readonly [number, number][] = Array.from({ length: 33 }, (_, i) =
   }),
 );
 
+/** A term of a ds^2 row as written, expanded: whether it carries a minus
+ *  sign, and the coordinates whose differentials it multiplies. */
+interface WrittenTerm {
+  negative: boolean;
+  differentials: string[];
+}
+
+/** Terms past this many are not expanded further (a product of sums). */
+const MAX_WRITTEN_TERMS = 64;
+
+/**
+ * The row's terms as written, expanded through products and quotients:
+ * a sum inside a factor is split into terms when it holds differentials
+ * (s (-dx^2 + dy^2), (dy^2 - dx^2)/x^2), and is a value otherwise
+ * ((1 - 2M/x): its signs are the metric's values, which move with a
+ * slider). A term's sign is its own as written: subtracted, or a unary
+ * minus or a negative number among its factors. d<c>^2, d<c> d<c> and
+ * (d<c>/k)^2 are each d<c> twice.
+ */
+function writtenTerms(e: Expr, names: ReadonlyMap<string, string>): WrittenTerm[] {
+  const holds = (e: Expr) => [...freeVars(e)].some(n => names.has(n));
+  const value = (negative = false): WrittenTerm[] => [{ negative, differentials: [] }];
+  const times = (A: WrittenTerm[], B: WrittenTerm[]): WrittenTerm[] =>
+    A.flatMap(a =>
+      B.map(b => ({ negative: a.negative !== b.negative, differentials: [...a.differentials, ...b.differentials] })),
+    ).slice(0, MAX_WRITTEN_TERMS);
+  if (e.kind === 'var') return names.has(e.name) ? [{ negative: false, differentials: [names.get(e.name)!] }] : value();
+  if (e.kind === 'num') return value(e.value < 0);
+  if (e.kind === 'neg') return writtenTerms(e.a, names).map(t => ({ ...t, negative: !t.negative }));
+  if (e.kind !== 'bin' || !holds(e)) return value();
+  switch (e.op) {
+    case '+':
+    case '-':
+      return [
+        ...writtenTerms(e.a, names),
+        ...writtenTerms(e.b, names).map(t => (e.op === '-' ? { ...t, negative: !t.negative } : t)),
+      ].slice(0, MAX_WRITTEN_TERMS);
+    case '*':
+      return times(writtenTerms(e.a, names), writtenTerms(e.b, names));
+    case '/': {
+      // Over a value: its sign if it is one term, none if a sum.
+      const below = writtenTerms(e.b, names);
+      return times(writtenTerms(e.a, names), below.length === 1 ? below : value());
+    }
+    case '^': {
+      const base = writtenTerms(e.a, names);
+      if (e.b.kind === 'num' && e.b.value === 2 && base.length === 1)
+        return [{ negative: false, differentials: [...base[0].differentials, ...base[0].differentials] }];
+      return value();
+    }
+  }
+  return value();
+}
+
 /**
  * The coordinate a spacetime diagram's row writes as its time: that of the
- * first term, in written order, that holds a squared differential (d<c>^2,
- * with any factors) and carries a minus sign as written — subtracted, or
- * with a unary minus or a negative number among its factors (an odd count
- * of them). Signs inside a factor that is itself a sum, like (1 - 2M/x),
- * do not count: they are the metric's values, which change with a slider,
- * while how the row is written does not. Undefined when no term does.
+ * first term, in written order (writtenTerms), that is a squared
+ * differential, d<c>^2 with any factors, carrying a minus sign. How the row
+ * is written does not move with a slider, as the metric's values do.
+ * Undefined when no term does.
  *
- *   -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)  → y      dx^2 - f dy^2  → y
- *   -dx^2 + dy^2                        → x      2 dx dy        → none
+ *   -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)  → y      dx^2 - f dy^2   → y
+ *   -dx^2 + dy^2, (dy^2 - dx^2)/x^2      → x      2 dx dy         → none
  */
 function writtenTime(rhs: Expr, names: ReadonlyMap<string, string>): string | undefined {
-  const terms: [Expr, boolean][] = [];
-  const flatten = (e: Expr, minus: boolean) => {
-    if (e.kind === 'bin' && (e.op === '+' || e.op === '-')) {
-      flatten(e.a, minus);
-      flatten(e.b, e.op === '-' ? !minus : minus);
-    } else if (e.kind === 'neg' && e.a.kind === 'bin' && (e.a.op === '+' || e.a.op === '-')) flatten(e.a, !minus);
-    else terms.push([e, minus]);
-  };
-  flatten(rhs, false);
-  for (const [term, minus] of terms) {
-    let negative = minus;
-    let squared: string | undefined;
-    const factors = (e: Expr) => {
-      if (e.kind === 'neg') {
-        negative = !negative;
-        factors(e.a);
-      } else if (e.kind === 'num') {
-        if (e.value < 0) negative = !negative;
-      } else if (e.kind === 'bin' && (e.op === '*' || e.op === '/')) {
-        factors(e.a);
-        factors(e.b);
-      } else if (
-        e.kind === 'bin' &&
-        e.op === '^' &&
-        e.a.kind === 'var' &&
-        names.has(e.a.name) &&
-        e.b.kind === 'num' &&
-        e.b.value === 2
-      )
-        squared ??= names.get(e.a.name);
-    };
-    factors(term);
-    if (squared !== undefined && negative) return squared;
+  for (const term of writtenTerms(rhs, names)) {
+    const [a, b, ...rest] = term.differentials;
+    if (term.negative && a !== undefined && a === b && !rest.length) return a;
   }
   return undefined;
 }
@@ -223,6 +245,11 @@ function sampleCounts(
     space: 0,
     lorentz: 0,
     riemann: 0,
+    // With no τ, Lorentzian points where the first (second) coordinate's
+    // own d²-term is negative: the time when the row writes none (every
+    // such point's, of one of them).
+    timeA: 0,
+    timeB: 0,
   };
   for (const [k, [x, y]] of SAMPLES.entries()) {
     const w = vars.map((_, i) => Math.sin(1.7 * k + 2.3 * i + 0.4));
@@ -250,6 +277,8 @@ function sampleCounts(
       if (G[0][0] > 0 && det > 0) counts.riemann++;
       if (det < 0) {
         counts.lorentz++;
+        if (G[0][0] < 0) counts.timeA++;
+        if (G[1][1] < 0) counts.timeB++;
       }
       if ((G[0][0] > 0 && det > 0) || det < 0) counts.traceable++;
       continue;
@@ -405,7 +434,13 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   // Checked at sample points (with the sliders at their values): the form is
   // g's, the coordinates are independent, and the signature is one a
   // geodesic can be traced in somewhere.
-  const { defined, independent, traceable, space, lorentz, riemann, quadratic } = sampled(Q, g, J, vars, ctx.values);
+  const { defined, independent, traceable, space, lorentz, riemann, quadratic, timeA, timeB } = sampled(
+    Q,
+    g,
+    J,
+    vars,
+    ctx.values,
+  );
   if (!quadratic) throw notQuadratic;
   if (defined && !independent && !spatial.every(c => PANEL.has(c)))
     throw new Error(
@@ -429,8 +464,12 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   // which no rule can read a time from without turning with a slider.
   const lorentzian = n === 2 && lorentz > 0;
   const mixed = lorentzian && riemann > 0;
+  // When no term is written with a minus sign, the coordinate whose own
+  // d²-term is negative at every Lorentzian point checked, while the
+  // other's is not; else y.
   const written = writtenTime(rhs, names);
-  const timeIndex = written !== undefined && spatial.indexOf(written) === 0 ? 0 : 1;
+  const timeIndex =
+    written !== undefined ? (spatial.indexOf(written) === 0 ? 0 : 1) : timeA === lorentz && timeB < lorentz ? 0 : 1;
   const future = lorentzian ? [...J[timeIndex], ...J[1 - timeIndex]] : undefined;
 
   // g as written, its x and y derivatives, and — unless it is written in x
