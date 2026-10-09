@@ -1219,3 +1219,38 @@ moved without shape calls.
 Verdict: a gain. Showing the values next to the instance turned copying into
 substitution on cube, hyperboloid, sphere and cardioid (named-shape tasks
 36 → 54), with the rest flat.
+
+## No instance (2026-10-09), reverted
+
+`2acb2e58`: shape answers the form and what each parameter sets, with no
+instance. The answer for "hyperboloid":
+
+```
+Hyperboloid of one sheet (also hyperboloid, one-sheeted hyperboloid, cooling tower): A connected surface with a narrow circular waist that flares out above and below.
+- ["x^2/a^2 + y^2/a^2 - z^2/c^2 = 1"] (implicit3d) — about the z-axis
+  a: the radius of the waist, the circle at z = 0
+  c: the height scale: larger c flares more slowly
+Pitfall: one minus sign gives one sheet; two minus signs give two sheets. With no z term it is a cylinder.
+Nothing is drawn yet: adapt this form to the request and pass its rows to set_graph.
+```
+
+`results/2026-10-09T073554Z-on-device.json`, 10 runs a task, against the
+values run (`2026-10-09T063021Z`): **49% ±4% (225/460) → 47% ±4%
+(217/460)**; named-shape tasks 54 → 45 of 100, the other 36 tasks 171 → 172.
+shape called in 176 runs, every one followed by set_graph.
+
+- Where the request gives the value, the bare form is enough: unit-cube 7 → 9,
+  sphere 6 → 8 (`x^2 + y^2 + z^2 = 4` 8 times), cone 8 → 9 (`x^2 + y^2 =
+  z^2`), torus 5 → 7 (often the form itself with `R = 1`, `a = 1` defined as
+  sliders, which draws), hyperboloid 9 → 8.
+- Where it doesn't, the model has nothing to work from: honest-reply-helix
+  8 → 0 (`(cos(2pi u), sin(2pi u), u)` beside an unused `A = 1`, `(u, u^2,
+  u^3)`, `(1, 1, 0)`), and cardioid 8 → 0: without "a = 2 → …" beside it the
+  substitution breaks again (`(x^2 + y^2 - 1)^2 = 1*(x^2 + y^2)`, the a x
+  term dropped, as in the one-form step).
+- polar-rose 0/10 now copies the pitfall's own example: "r = sin(5θ) is
+  `sin(10pi u)`" became `(sin(10pi u) cos(10pi u), …)` 4 times. A pitfall's
+  example is copied like any other.
+
+Verdict: worse than the step before (named shapes 54 → 45), so reverted: the
+instance with its values stays in shape's answer.
