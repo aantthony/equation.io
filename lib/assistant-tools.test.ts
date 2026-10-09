@@ -124,10 +124,11 @@ describe('shape', () => {
   });
   it('answers with the forms, their parameters and an instance; on a miss, every name', () => {
     const answer = shape(data, 'cardioid');
-    expect(answer).toContain('pcurve: ["(a(1 + cos(2pi u)) cos(2pi u), a(1 + cos(2pi u)) sin(2pi u))"]');
+    expect(answer).toContain('- ["(a(1 + cos(2pi u)) cos(2pi u), a(1 + cos(2pi u)) sin(2pi u))"] (pcurve)');
     expect(answer).toContain('  a: ');
     expect(answer).toContain('  e.g. ["(2(1 + cos(2pi u)) cos(2pi u), 2(1 + cos(2pi u)) sin(2pi u))"]');
     expect(answer.split('\n').length).toBeLessThan(12);
+    expect(answer).toMatch(/Nothing is drawn yet: .*set_graph\.$/);
     const miss = shape(data, 'kidney bean');
     expect(miss).toMatch(/^No shape "kidney bean"\. Shapes: circle, /);
     expect(miss).toContain('torus');

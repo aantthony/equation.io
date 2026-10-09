@@ -307,7 +307,7 @@ struct ShapeLookup: Tool {
   let name = "shape"
   let description = """
     The equation of a named curve or surface (cardioid, hyperboloid, torus, …), \
-    in this language's syntax, with its parameters.
+    in this language's syntax, with its parameters. It draws nothing: set_graph draws.
     """
 
   @Generable
