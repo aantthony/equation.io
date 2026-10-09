@@ -1498,3 +1498,40 @@ standard errors (each greedy step was one sample a task). Movers:
 - polar-rose 0 and parametric-circle 0, as before.
 
 This run is the reference for the next step.
+
+## shape refuses coordinates; the rose with sin (2026-10-10)
+
+`1616092`: values named x, y, z, u, v, r, θ or theta (unless exactly a
+parameter's name) are refused: the answer opens "Not parameters: r, θ are
+coordinates or variables. Its parameters: a (the size; …)." and goes on as
+with no values. The rose's form is now r = a sin(kθ) (instance a = 2, k = 3),
+with r = a cos(kθ) as its second form, and its pitfall states the `2pi k u`
+rule in words. Tool and instruction tokens unchanged (1,205 and 1,544).
+
+`results/2026-10-09T221644Z-on-device.json`, sampled, 10 runs a task, against
+HEAD sampled (`2026-10-09T210630Z`): **45% ±4% (206/460) → 46% ±7%
+(210/460)**; tasks passed per repetition 16–26, the widest spread yet.
+Named-shape tasks 44 → 40 of 100, the other 36 tasks 162 → 170.
+
+- cardioid 0 → 1. The model still passes `r = 1, θ = 2.5` (all 10 runs, never
+  a), and after the refusal substitutes a = 1 by hand, dropping the a x term
+  again: `(x^2 + y^2 - 1)^2 = 1(x^2 + y^2)` 3 times; the one pass is
+  `(x^2 + y^2 - 1*x)^2 = 1*(x^2 + y^2)`.
+- polar-rose 0 → 0. Values `r = 1, θ = 2.58` (once also `sin = 1`, `cos = 1`),
+  refused; the rows are now the sine form but with k = 1:
+  `(2sin(2pi u) cos(2pi u), 2sin(2pi u) sin(2pi u))` 4 times, or the name
+  itself as a row.
+- lissajous 9 → 1: it passes u, v, x, y as values in every run; ignored
+  before, so the instance was drawn; refused now, the answer leads with the
+  parameter list and the model picks a = b = 1 or similar (an ellipse or a
+  line).
+- Up: hyperboloid 2 → 6, unit-cube-beside-sphere 2 → 6, unit-cube 3 → 5,
+  zoom-out 4 → 8, motion-trail 2 → 5. Down: animate-existing-slider 9 → 5,
+  tangent-line 7 → 4.
+
+Verdict: kept as not worse (+4 runs), but a close call with a wide spread:
+the refusal neither fixes the cardioid (the model never names a) nor the rose
+(k never passed), and it costs lissajous. The request's own numbers (r = 1 +
+cos θ, sin(4θ)) are not parameter values the model can map; parsing the
+request's equation, or a cardioid entry written r = b + a cos θ in the
+request's terms, would be the next thing to try.
