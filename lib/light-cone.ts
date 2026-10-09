@@ -7,10 +7,12 @@
  * coordinates, like -dy^2 + dx^2 — a light cone is two null lines through
  * the point, and is drawn as a filled wedge opening toward the future, with
  * the past half as two strokes. Which half is the future is the metric's
- * business, not y's. Its time coordinate τ is the one of the two written
- * whose own d²-term is negative at more of the points checked (dt in
- * -dt^2 + dx^2, v in Eddington–Finkelstein's -(1 - 2M/r) dv^2 + 2 dv dr),
- * else y (lib/metric.ts), and the future half is the one along which τ
+ * business, not y's. Its time coordinate τ is the second of the two written
+ * (y), unless that one's own d²-term is negative at no point checked while
+ * the first's is somewhere (dt in -dt^2 + dy^2, v in Eddington–Finkelstein's
+ * -(1 - 2M/y) dv^2 + 2 dv dy with v along x) (lib/metric.ts) — not a vote
+ * by counts, which would turn as a slider changes the metric's scale — and
+ * the future half is the one along which τ
  * increases: dτ(axis) > 0. That is continuous wherever τ is a time — even
  * where ∂τ is not timelike, as inside Eddington–Finkelstein's horizon,
  * where every future cone still has v increasing — and changes only where
@@ -194,23 +196,45 @@ export const ELLIPSE_REACH = 0.36;
 /** The lattice's cell across, in x, at `upp` units a CSS px. */
 export const coneCell = (upp: number) => 2 ** Math.round(Math.log2(CONE_CELL_PX * upp));
 
+/** Nodes behindHorizon's grid has at most: a few milliseconds. */
+const HORIZON_NODES = 3000;
 /** Glyphs a lattice has at most. */
 const MAX_GLYPHS = 6000;
 
 /** The lattice's points over the view: cell centres (i + ½) w, a cell beyond
  *  each edge so a glyph half in view still draws. */
 export function coneLattice(view: ConeView): [number, number][] {
+  const out: [number, number][] = [];
+  const b = latticeBounds(view);
+  if (!b || (b.i1 - b.i0 + 1) * (b.k1 - b.k0 + 1) > MAX_GLYPHS) return out;
+  for (let i = b.i0; i <= b.i1; i++) for (let k = b.k0; k <= b.k1; k++) out.push([(i + 0.5) * b.wx, (k + 0.5) * b.wy]);
+  return out;
+}
+
+/** The lattice's cells across and up, and the range of its cells' indices
+ *  over the view, or null. */
+function latticeBounds(view: ConeView) {
   const wx = coneCell(view.upp);
   const wy = (wx * view.uppY) / view.upp;
-  const out: [number, number][] = [];
-  if (!(wx > 0) || !(wy > 0) || !Number.isFinite(wx) || !Number.isFinite(wy)) return out;
-  const i0 = Math.floor(view.lo[0] / wx) - 1;
-  const i1 = Math.ceil(view.hi[0] / wx);
-  const k0 = Math.floor(view.lo[1] / wy) - 1;
-  const k1 = Math.ceil(view.hi[1] / wy);
-  if ((i1 - i0 + 1) * (k1 - k0 + 1) > MAX_GLYPHS) return out;
-  for (let i = i0; i <= i1; i++) for (let k = k0; k <= k1; k++) out.push([(i + 0.5) * wx, (k + 0.5) * wy]);
-  return out;
+  if (!(wx > 0) || !(wy > 0) || !Number.isFinite(wx) || !Number.isFinite(wy)) return null;
+  return {
+    wx,
+    wy,
+    i0: Math.floor(view.lo[0] / wx) - 1,
+    i1: Math.ceil(view.hi[0] / wx),
+    k0: Math.floor(view.lo[1] / wy) - 1,
+    k1: Math.ceil(view.hi[1] / wy),
+  };
+}
+
+/**
+ * What a lattice's glyphs, the panel's indicatrix scale and its horizon
+ * cut-off depend on in a view: the scale (pixels to units) and which cells
+ * are in it — so a pan within a cell reuses them all (web/main.ts).
+ */
+export function coneViewKey(view: ConeView): string {
+  const b = latticeBounds(view);
+  return JSON.stringify([view.upp, view.uppY, b && [b.i0, b.i1, b.k0, b.k1]]);
 }
 
 /** What glyphs draw, in x and y: closed rings filled lightly and outlined,
@@ -249,38 +273,86 @@ function spatial(g: readonly (readonly number[])[]): boolean {
 }
 
 /**
- * Whether a point is cut off from the outside by a horizon, as inside a
+ * Which points are cut off from the outside by a horizon, as inside a
  * spinning hole's inner horizon r₋, where x and y are space again and an
- * ellipse could be drawn: the straight line from it, away from the middle
- * of the horizon points on the view's lattice, crosses one (x and y not
- * space) before the edge of a box twice the view's size. Stepped a quarter
- * of a cell at a time, so a band thinner than that is missed (then the
- * inner ellipses are a cell or two across the hole). False everywhere when
- * no lattice point in view is inside a horizon.
+ * ellipse could be drawn. A grid at half the lattice's spacing (coarser, to
+ * hold it to HORIZON_NODES) over the view and a cell round it is flood-filled from its edge through the nodes where
+ * x and y are space (or the metric is undefined), never through one where
+ * they are not; a point is cut off when neither its nearest node nor any of
+ * that node's four neighbours was reached. O(the grid): one read a node.
+ * A band thinner than the grid's spacing may be leaked through, and a view
+ * with no horizon in it cuts nothing (zoomed in inside r₋, those ellipses
+ * draw). Worked out once per view and metric values (web/main.ts shares it
+ * between a panel's light-cone rows).
  */
 export function behindHorizon(read: MetricRead, view: ConeView): (x: number, y: number) => boolean {
-  let [sx, sy, count] = [0, 0, 0];
-  for (const [x, y] of coneLattice(view)) {
-    const g = read(x, y);
-    if (g && g.length === 3 && !spatial(g)) {
-      sx += x;
-      sy += y;
-      count++;
+  // Over the lattice's cells and one more round them, so the grid stays put
+  // as long as they do.
+  const b = latticeBounds(view);
+  if (!b) return () => false;
+  const [cell, cellY] = [b.wx, b.wy];
+  const x0 = (b.i0 - 1) * cell;
+  const y0 = (b.k0 - 1) * cellY;
+  const [w, h] = [(b.i1 + 2) * cell - x0, (b.k1 + 2) * cellY - y0];
+  // Half a cell, or coarser to hold the grid to HORIZON_NODES (a lattice
+  // of tiny cells on a large screen).
+  const grow = Math.max(1, Math.sqrt(((w / (cell / 2)) * (h / (cellY / 2))) / HORIZON_NODES));
+  const [hx, hy] = [(cell / 2) * grow, (cellY / 2) * grow];
+  const nx = Math.ceil(w / hx) + 1;
+  const ny = Math.ceil(h / hy) + 1;
+  if (!(nx > 1 && ny > 1) || !Number.isFinite(nx * ny)) return () => false;
+  // 1: a horizon's (x and y not space); 2: reached from the edge.
+  const state = new Uint8Array(nx * ny);
+  let blocked = false;
+  for (let k = 0; k < ny; k++)
+    for (let i = 0; i < nx; i++) {
+      const g = read(x0 + i * hx, y0 + k * hy);
+      if (g && g.length === 3 && !spatial(g)) {
+        state[k * nx + i] = 1;
+        blocked = true;
+      }
     }
+  if (!blocked) return () => false;
+  const queue = new Int32Array(nx * ny);
+  let head = 0;
+  let tail = 0;
+  const visit = (i: number, k: number) => {
+    const j = k * nx + i;
+    if (state[j]) return;
+    state[j] = 2;
+    queue[tail++] = j;
+  };
+  for (let i = 0; i < nx; i++) {
+    visit(i, 0);
+    visit(i, ny - 1);
   }
-  if (!count) return () => false;
-  const [cx, cy] = [sx / count, sy / count];
-  const step = coneCell(view.upp) / 4;
-  const reach = 2 * Math.hypot(view.hi[0] - view.lo[0], view.hi[1] - view.lo[1]);
+  for (let k = 0; k < ny; k++) {
+    visit(0, k);
+    visit(nx - 1, k);
+  }
+  while (head < tail) {
+    const j = queue[head++];
+    const [i, k] = [j % nx, Math.floor(j / nx)];
+    if (i > 0) visit(i - 1, k);
+    if (i + 1 < nx) visit(i + 1, k);
+    if (k > 0) visit(i, k - 1);
+    if (k + 1 < ny) visit(i, k + 1);
+  }
   return (x, y) => {
-    const d = Math.hypot(x - cx, y - cy);
-    if (!(d > 0)) return true;
-    const [ux, uy] = [(x - cx) / d, (y - cy) / d];
-    for (let s = step; s < reach; s += step) {
-      const g = read(x + s * ux, y + s * uy);
-      if (g && !spatial(g)) return true;
+    const i = Math.round((x - x0) / hx);
+    const k = Math.round((y - y0) / hy);
+    if (!(i >= 0 && i < nx && k >= 0 && k < ny)) return false;
+    for (const [di, dk] of [
+      [0, 0],
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ]) {
+      const [a, b] = [i + di, k + dk];
+      if (a >= 0 && a < nx && b >= 0 && b < ny && state[b * nx + a] === 2) return false;
     }
-    return false;
+    return true;
   };
 }
 
@@ -302,7 +374,15 @@ export function coneGlyphs(
     kappa,
     radius,
     orient,
-  }: { at?: readonly (readonly [number, number])[]; kappa?: number; radius?: number; orient?: Orient } = {},
+    cut: cutOff,
+  }: {
+    at?: readonly (readonly [number, number])[];
+    kappa?: number;
+    radius?: number;
+    orient?: Orient;
+    /** behindHorizon over this view, when the caller has it. */
+    cut?: (x: number, y: number) => boolean;
+  } = {},
 ): ConeGlyphs {
   const out: ConeGlyphs = { rings: [], lines: [], dots: [] };
   const points = at ?? coneLattice(view);
@@ -310,7 +390,7 @@ export function coneGlyphs(
   const R = radius ?? (at ? LONE_CONE_RADIUS_PX : CONE_RADIUS_PX);
   const cell = coneCell(upp);
   let k = kappa;
-  let cut: ((x: number, y: number) => boolean) | undefined;
+  let cut = cutOff;
   for (const [x, y] of points) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     const g = read(x, y);
@@ -354,7 +434,7 @@ export function coneGlyphs(
     if (!Number.isFinite(scale)) break;
     if (!at && scale * reach > cell) continue;
     const [c, s] = [Math.cos(e.angle), Math.sin(e.angle)];
-    const steps = 48;
+    const steps = 32;
     for (let j = 0; j <= steps; j++) {
       const t = (2 * Math.PI * j) / steps;
       const [u, v] = [e.a * Math.cos(t), e.b * Math.sin(t)];

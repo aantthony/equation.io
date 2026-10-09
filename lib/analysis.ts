@@ -751,7 +751,18 @@ function classifyGeodesic(
     });
   };
   const starts = elements(rest[0], 2, 'where it starts');
-  const directions = elements(rest[1], 2, metric?.motion === 'timelike' ? 'its velocity' : 'its direction');
+  // A particle's velocity in a spacetime; in a metric of mixed signature, a
+  // plane's direction where it starts positive definite.
+  const mixed = !!metricState && 'metric' in metricState && !!metricState.metric.mixed;
+  const directions = elements(
+    rest[1],
+    2,
+    metric?.motion !== 'timelike'
+      ? 'its direction'
+      : mixed
+        ? 'its velocity (or direction, in a plane)'
+        : 'its velocity',
+  );
   const lengths = rest[2] ? elements(rest[2], 1, 'its length') : [[]];
   const n = Math.max(starts.length, directions.length, lengths.length);
   for (const list of [starts, directions, lengths])

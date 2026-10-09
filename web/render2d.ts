@@ -1910,22 +1910,29 @@ export function drawLabels2D(
     }
     for (const glyph of extras.glyphs ?? []) {
       // One path each, so a lattice of hundreds costs a fill and two strokes.
+      // A ring is closed by a line back to its start, not closePath, which
+      // costs Chromium time in proportion to the path so far (quadratic over
+      // a lattice of rings).
       const trace = (pts: readonly number[], close: boolean) => {
         const path = new Path2D();
         let pen = false;
+        let [x0, y0] = [0, 0];
         for (let i = 0; i + 1 < pts.length; i += 2) {
           if (Number.isNaN(pts[i])) {
-            if (pen && close) path.closePath();
+            if (pen && close) path.lineTo(x0, y0);
             pen = false;
             continue;
           }
           const sx = toScreenX(pts[i]);
           const sy = toScreenY(pts[i + 1]);
           if (pen) path.lineTo(sx, sy);
-          else path.moveTo(sx, sy);
+          else {
+            path.moveTo(sx, sy);
+            [x0, y0] = [sx, sy];
+          }
           pen = true;
         }
-        if (pen && close) path.closePath();
+        if (pen && close) path.lineTo(x0, y0);
         return path;
       };
       ctx.lineJoin = 'round';

@@ -193,7 +193,15 @@ import {
   numericIn,
   traceWindow,
 } from '../lib/surface-geometry.ts';
-import { type ConeGlyphs, type ConeView, type Orient, coneGlyphs, indicatrixScale } from '../lib/light-cone.ts';
+import {
+  type ConeGlyphs,
+  type ConeView,
+  type Orient,
+  behindHorizon,
+  coneGlyphs,
+  coneViewKey,
+  indicatrixScale,
+} from '../lib/light-cone.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1649,10 +1657,15 @@ const coneMetrics = new WeakMap<
 /** A light-cone row's glyphs, the names it reads, and what they were drawn
  *  at (its values and the view), by plan. */
 const coneRows = new WeakMap<CpuPlan, { names: string[]; glyphs?: ConeGlyphs; view?: string }>();
-/** The indicatrix scale of a panel's metric over a view, by its components
- *  (shared by the panel's light-cone rows, so lightcones and lightcone(P)
- *  agree): a lone lightcone(P) is drawn at the scale the lattice would be. */
-const coneScales = new WeakMap<readonly unknown[], { key: string; kappa: number }>();
+/** The indicatrix scale of a panel's metric over a view, and which points
+ *  a horizon cuts off (behindHorizon), by its components: worked out once a
+ *  view for all the panel's light-cone rows (a family of 256 too), so
+ *  lightcones and lightcone(P) agree — a lone lightcone(P) is drawn at the
+ *  scale the lattice would be. */
+const coneScales = new WeakMap<
+  readonly unknown[],
+  { key: string; kappa: number; cut: (x: number, y: number) => boolean }
+>();
 
 /**
  * The light-cone glyphs a lightcones or lightcone(P) row draws over the
@@ -1678,16 +1691,19 @@ function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView
     c = { names: reads(plot.at ? [...plot.at] : []) };
     coneRows.set(plot, c);
   }
-  const where = `${key}\n${JSON.stringify(c.names.map(n => env[n]))}\n${JSON.stringify(view)}`;
+  // The view as far as the glyphs see it: which lattice cells, at what
+  // scale; a pan within a cell redraws the same glyphs.
+  const viewKey = coneViewKey(view);
+  const where = `${key}\n${JSON.stringify(c.names.map(n => env[n]))}\n${viewKey}`;
   if (c.glyphs && c.view === where) return c.glyphs;
-  let kappa: number | undefined;
+  let scale: { kappa: number; cut: (x: number, y: number) => boolean } | undefined;
   if (plot.n === 3) {
-    const scaleKey = `${key}\n${JSON.stringify(view)}`;
-    const scale = coneScales.get(plot.components);
-    if (scale?.key === scaleKey) kappa = scale.kappa;
+    const scaleKey = `${key}\n${viewKey}`;
+    const known = coneScales.get(plot.components);
+    if (known?.key === scaleKey) scale = known;
     else {
-      kappa = indicatrixScale(m.read, view);
-      coneScales.set(plot.components, { key: scaleKey, kappa });
+      scale = { kappa: indicatrixScale(m.read, view), cut: behindHorizon(m.read, view) };
+      coneScales.set(plot.components, { key: scaleKey, ...scale });
     }
   }
   let at: [number, number][] | undefined;
@@ -1698,7 +1714,7 @@ function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView
   }
   c.glyphs = coneGlyphs(m.read, view, {
     ...(at ? { at } : {}),
-    ...(kappa !== undefined ? { kappa } : {}),
+    ...(scale ? { kappa: scale.kappa, cut: scale.cut } : {}),
     ...(m.orient ? { orient: m.orient } : {}),
   });
   c.view = where;

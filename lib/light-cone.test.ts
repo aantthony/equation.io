@@ -435,6 +435,21 @@ describe('review fixes', () => {
     for (const [, y] of plane.pts) expect(Math.abs(y)).toBeLessThan(1e-9);
     expect(plane.pts.at(-1)![0]).toBeLessThanOrEqual(-5 + 1e-6);
     expect(plane.pts.at(-1)![0]).toBeGreaterThan(-5.01);
+    expect(geodesicCutNote(plane.ended)).toBe(
+      'stops where the metric stops being positive definite (a spacetime beyond)',
+    );
+    // …and the other way: light sent toward −x stops where it is a plane.
+    const across = traced([...field, 'lightray((0, 0), (-1, 1))'], box(-32, 32, -32, 32));
+    expect(across.pts.at(-1)![0]).toBeLessThan(-4.9);
+    expect(geodesicCutNote(across.ended)).toBe('stops where the metric stops being Lorentzian (a plane beyond)');
+    // A trace that runs to the box's edge has no note; nor has Poincaré's.
+    expect(geodesicCutNote(light.ended)).toBeNull();
+    expect(
+      geodesicCutNote(traced(['ds^2 = (dx^2 + dy^2)/y^2', 'geodesic((0, 1), (1, 0))'], box(-4, 4, -4, 4)).ended),
+    ).toBeNull();
+    // The wording of a mixed metric's geodesic.
+    expect(errorOf([...field, 'geodesic((0, 0), 1)'])).toMatch(/its velocity \(or direction, in a plane\) is a pair/);
+    expect(errorOf(['ds^2 = -dy^2 + dx^2', 'geodesic((0, 0), 1)'])).toMatch(/its velocity is a pair/);
     const none = traced([...field, 'lightray((-10, 0), (1, 1))'], box(-32, 32, -32, 32));
     expect(geodesicCutNote(none.ended)).toMatch(/positive definite at the start/);
     // Light cones only where it is Lorentzian.
@@ -473,6 +488,22 @@ describe('review fixes', () => {
     expect(futureAt(SCHWARZSCHILD_RT, 4, 0).axis).toBeCloseTo(Math.PI / 2, 9);
     expect(Math.abs(futureAt(SCHWARZSCHILD_RT, 1, 0).axis)).toBeCloseTo(Math.PI, 9);
     expect(Math.sin(futureAt(EDDINGTON, 1, 0).axis)).toBeGreaterThan(0);
+    // Not by a scale a slider moves: de Sitter's static patch keeps y as
+    // its time at every L, and so does a hole of any mass written in |x|.
+    for (const L of [0.1, 0.3, 1, 3, 10, 100, 1000]) {
+      const deSitter = [`L = ${L}`, 'ds^2 = -(1 - x^2/L^2) dy^2 + dx^2/(1 - x^2/L^2)'];
+      for (const at of [0, 0.3, 0.9])
+        expect(futureAt(deSitter, at * L, 1).axis, `L = ${L}`).toBeCloseTo(Math.PI / 2, 9);
+    }
+    for (const M of [0.05, 0.5, 1, 5, 50, 500]) {
+      const hole = [`M = ${M}`, 'ds^2 = -(1 - 2M/abs(x)) dy^2 + dx^2/(1 - 2M/abs(x))'];
+      for (const at of [-8, -3, 3, 8]) expect(futureAt(hole, at * M, 1).axis, `M = ${M}`).toBeCloseTo(Math.PI / 2, 9);
+      // Inside, |x| is the time, and the future is toward x = 0 on the
+      // right (the tie-break: the other coordinate decreasing).
+      expect(Math.abs(futureAt(hole, M, 1).axis), `M = ${M}`).toBeCloseTo(Math.PI, 9);
+      const sideways = [`M = ${M}`, 'ds^2 = -(1 - 2M/y) dx^2 + dy^2/(1 - 2M/y)'];
+      expect(futureAt(sideways, 1, 5 * M).axis, `M = ${M}`).toBeCloseTo(0, 9);
+    }
     // Declared coordinates: time T = -x/2 runs toward −x.
     expect(Math.abs(futureAt(['T = -x/2', 'X = y', 'ds^2 = -dT^2 + dX^2'], 1, 1).axis)).toBeCloseTo(Math.PI, 9);
   });

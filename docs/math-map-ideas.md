@@ -187,8 +187,10 @@ two strokes, however many glyphs), on a lattice anchored in the plane like
 the tensor-field glyphs (power of two nearest 56 px). On a diagram, the null
 angles are (φ ± α)/2 from g(e_θ, e_θ) = A + R cos(2θ − φ), and the future
 half is the one along which the time coordinate τ increases, dτ(axis) > 0,
-τ being whichever written coordinate's own d²-term is negative at more of
-the Lorentzian sample points (else y). An orientation by the sign of
+τ being the second written coordinate (y) unless its own d²-term is
+negative at no Lorentzian sample point while the first's is somewhere (a
+vote by counts turned with the scale: de Sitter's static patch with a small
+L has most samples outside its horizon, |x| > L, where x is the time). An orientation by the sign of
 g(axis, ∂τ) fails inside Eddington–Finkelstein's horizon, where ∂_v is
 spacelike; dτ does not, since v increases on every future cone there. It
 changes only where a cone straddles dτ = 0, and where the axis is exactly
@@ -202,10 +204,18 @@ cell), so sizes compare: light slows toward a horizon (1 − 2M/r across,
 and leave their dots inside the ergoregion. A lone lightcone(P) uses the
 same scale (its own, when no lattice ellipse is in view); a lattice
 ellipse wider than its cell is left out, and so is one behind a horizon:
-the line from it away from the middle of the lattice's horizon points
-crosses one before twice the view's size (Kerr inside r₋; stepped a
-quarter cell, so a band thinner than that is missed). The metric is
-compiled once per panel for all its light-cone rows. Follow-ups:
+a grid at half the lattice spacing (at most 3000 nodes) is flood-filled
+from its edge through nodes where x and y are space, and a point none of
+whose nearest nodes was reached is cut off (Kerr inside r₋; a band thinner
+than the grid's spacing can leak, and a view with no horizon in it cuts
+nothing). The metric is compiled once per panel for all its light-cone
+rows, and the scale, the cut-off and a lattice's glyphs are kept while the
+zoom and the lattice cells in view stay, so a pan within a cell recomputes
+nothing (a pan across one: ~5 ms of metric reads in Node for 1080p Kerr,
+from ~1.2 s with a march per point). A geodesic that stops where a mixed
+metric's signature changes (by a failed step, or crawling up to the line
+where it degenerates, as a uniform field's light ray does) says so in the
+row's note. Follow-ups:
 light cones in 3D panels (not drawn there yet) and on mapped panels, a
 time orientation the user can choose (`lightcones(T)` with a future
 direction), the cone's tilt as a readout on hover, the link preview

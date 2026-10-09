@@ -231,6 +231,9 @@ export interface GeodesicFlow {
    *  checked at each stage of a step, when the metric can stay finite past
    *  where it stops being one (a horizon). */
   holds?(p: number, q: number): boolean;
+  /** Why it stopped, when that is worth a note: where it last failed to
+   *  hold, if no step has been put back on its constraint since. */
+  stopped?(): string | undefined;
 }
 
 /** A surface's geodesic flow, at unit speed in its metric. */
@@ -318,6 +321,8 @@ export interface GeodesicEnd {
   budget: boolean;
   /** Why it could not start at all (faster than light there, say). */
   problem?: string;
+  /** Where it stopped, worth saying (a metric's signature changing). */
+  note?: string;
 }
 
 /** Steps a geodesic takes at most. */
@@ -869,8 +874,9 @@ export function geodesicCutNote(end: GeodesicEnd): string | null {
   if (end.problem) return end.problem;
   // One run with no length of its own (a metric's, to the window's edge)
   // has no length to fall short of, only a place.
-  if (!Number.isFinite(end.asked)) return end.budget ? `cut short at L ≈ ${Number(end.length.toPrecision(3))}` : null;
-  if (!end.budget || !(end.length < end.asked)) return null;
+  if (!Number.isFinite(end.asked))
+    return end.budget ? `cut short at L ≈ ${Number(end.length.toPrecision(3))}` : (end.note ?? null);
+  if (!end.budget || !(end.length < end.asked)) return end.note ?? null;
   const n = (x: number) => Number(x.toPrecision(3));
   return `cut short at L ≈ ${n(end.length)} of ${n(end.asked)}`;
 }
@@ -1078,18 +1084,39 @@ export function metricValues(
   metric: Pick<MetricSpec, 'n' | 'components' | 'jacobian'>,
   env: Readonly<Record<string, number>>,
 ): (x: number, y: number) => readonly (readonly number[])[] | null {
+  const n = metric.n;
   const m = metric.components.length;
-  const zero: Expr = { kind: 'num', value: 0 };
   const J = metric.jacobian;
-  const exprs = [
-    ...metric.components,
-    ...Array.from({ length: 2 * m }, () => zero),
-    ...(J ? [...J.slice(0, 4), ...Array.from({ length: 8 }, () => zero)] : []),
-  ];
-  const read = metricReader(numericIn(exprs, ['x', 'y'], env), metric.n, !!J);
+  // Only g as written and the Jacobian itself: a lattice and its horizon
+  // check read thousands of points a view.
+  const at = numericIn([...metric.components, ...(J ? J.slice(0, 4) : [])], ['x', 'y'], env);
+  const buf = new Float64Array(m + (J ? 4 : 0));
+  const gw = square(n);
+  const g = J ? square(n) : gw;
+  const s0 = n - 2;
+  const Jm = square(n);
+  if (s0) Jm[0][0] = 1;
+  const t = square(n);
   return (x, y) => {
-    const { g } = read(x, y);
-    for (const row of g) for (const v of row) if (!Number.isFinite(v)) return null;
+    at(x, y, buf);
+    for (let k = 0; k < buf.length; k++) if (!Number.isFinite(buf[k])) return null;
+    let k = 0;
+    for (let i = 0; i < n; i++) for (let j = i; j < n; j++, k++) gw[i][j] = gw[j][i] = buf[k];
+    if (!J) return g;
+    for (let a = 0; a < 2; a++) for (let i = 0; i < 2; i++) Jm[s0 + a][s0 + i] = buf[m + 2 * a + i];
+    // g = Jᵀ g_written J, as metricReader forms it.
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        let sum = 0;
+        for (let c = 0; c < n; c++) sum += gw[i][c] * Jm[c][j];
+        t[i][j] = sum;
+      }
+    for (let i = 0; i < n; i++)
+      for (let j = 0; j < n; j++) {
+        let sum = 0;
+        for (let c = 0; c < n; c++) sum += Jm[c][i] * t[c][j];
+        g[i][j] = sum;
+      }
     return g;
   };
 }
@@ -1262,6 +1289,14 @@ export function metricStart(
     return { problem: 'no light here: the metric is positive definite at the start (a plane, not a spacetime, here)' };
   if (n === 2) {
     if (!positive(g)) return { problem: 'the metric is not positive definite at the start' };
+    // Where it stops being positive definite and is Lorentzian instead (a
+    // metric of mixed signature), the row's note says so.
+    let why: string | undefined;
+    const sound = (g: readonly (readonly number[])[]) => {
+      if (inRange(g) && positive(g)) return true;
+      if (inRange(g) && lorentz2(g)) why = 'stops where the metric stops being positive definite (a spacetime beyond)';
+      return false;
+    };
     const flow: GeodesicFlow = {
       accel(y, out) {
         const { g, d } = read(y[0], y[1]);
@@ -1273,11 +1308,12 @@ export function metricStart(
       },
       holds(p, q) {
         const { g } = read(p, q);
-        return inRange(g) && positive(g);
+        return sound(g);
       },
       normalize(y) {
         const { g } = read(y[0], y[1]);
-        if (!inRange(g) || !positive(g)) return false;
+        if (!sound(g)) return false;
+        why = undefined;
         const [w1, w2] = [y[2], y[3]];
         const s2 = g[0][0] * w1 * w1 + 2 * g[0][1] * w1 * w2 + g[1][1] * w2 * w2;
         if (!(s2 > 0) || !Number.isFinite(s2)) return false;
@@ -1286,6 +1322,7 @@ export function metricStart(
         y[3] = w2 / s;
         return true;
       },
+      stopped: () => why,
     };
     return { flow, velocity: [sign * a, sign * b] };
   }
@@ -1467,6 +1504,14 @@ function diagramStart(
   const W = [0, 0];
   const acc = [0, 0];
   const lower = [0, 0];
+  // Where it stops being Lorentzian and is positive definite instead (a
+  // metric of mixed signature), the row's note says so.
+  let why: string | undefined;
+  const sound = (g: readonly (readonly number[])[]) => {
+    if (inRange(g) && lorentz2(g)) return true;
+    if (inRange(g) && positive(g)) why = 'stops where the metric stops being Lorentzian (a plane beyond)';
+    return false;
+  };
   const flow: GeodesicFlow = {
     accel(y, out) {
       const { g, d } = read(y[0], y[1]);
@@ -1478,14 +1523,29 @@ function diagramStart(
     },
     holds(p, q) {
       const { g } = read(p, q);
-      return inRange(g) && lorentz2(g);
+      return sound(g);
     },
     normalize(y) {
       const { g } = read(y[0], y[1]);
-      if (!inRange(g) || !lorentz2(g)) return false;
+      if (!sound(g)) return false;
+      why = undefined;
       const [w1, w2] = [y[2], y[3]];
-      if (!(Math.hypot(w1, w2) < TIME_RUNAWAY * Math.max(1, speed0)) && soundness(g) < DEGENERATE * sound0)
+      if (!(Math.hypot(w1, w2) < TIME_RUNAWAY * Math.max(1, speed0)) && soundness(g) < DEGENERATE * sound0) {
+        // Running away where det g falls to 0: a plane just ahead is a
+        // change of signature (a uniform field's 1 + 2 g x = 0), not a
+        // horizon these coordinates freeze at.
+        const [p, q] = [y[0], y[1]];
+        const [ux, uy] = [w1 / Math.hypot(w1, w2), w2 / Math.hypot(w1, w2)];
+        const reach = Math.max(1, Math.hypot(p, q));
+        for (const f of [1e-9, 1e-7, 1e-5, 1e-3]) {
+          const ahead = read(p + ux * f * reach, q + uy * f * reach).g;
+          if (inRange(ahead) && positive(ahead)) {
+            why = 'stops where the metric stops being Lorentzian (a plane beyond)';
+            break;
+          }
+        }
         return false;
+      }
       if (motion === 'null') {
         // Onto the null line it runs along, if it is still the nearest.
         const n = nearestNull(g[0][0], g[0][1], g[1][1], Math.atan2(w2, w1));
@@ -1508,6 +1568,7 @@ function diagramStart(
       }
       return Number.isFinite(y[2]) && Number.isFinite(y[3]);
     },
+    stopped: () => why,
   };
   return { flow, velocity: [sign * U[0], sign * U[1]] };
 }
@@ -1576,7 +1637,8 @@ function metricPath(
     metric.time,
     !!metric.jacobian,
   );
-  if (ended) Object.assign(ended, { length: 0, asked: Math.abs(length), budget: false, problem: undefined });
+  if (ended)
+    Object.assign(ended, { length: 0, asked: Math.abs(length), budget: false, problem: undefined, note: undefined });
   if (!start) return [x0, y0, 0];
   if ('problem' in start) {
     if (ended) ended.problem = start.problem;
@@ -1600,6 +1662,30 @@ function metricPath(
     ...budget,
     deadline: budget.deadline ?? (ms === undefined ? undefined : performance.now() + ms),
   });
+  // Stopped short of the domain's edge where the signature changes — on
+  // a failed step, or crawling up to the line where it does (a uniform
+  // field's light ray, like a horizon's) — say so.
+  let why = start.flow.stopped?.();
+  const [pe, qe] = path[path.length - 1];
+  const onEdge = pe <= domain[0][0] || pe >= domain[0][1] || qe <= domain[1][0] || qe >= domain[1][1];
+  if (!why && metric.n === 2 && path.length > 1 && !onEdge && !ended?.budget) {
+    // The other signature within a hair of where it stopped, any way round.
+    const read = metricReader(sys, 2, !!metric.jacobian);
+    const plane = metric.motion === 'riemannian' || positive(read(pe, qe).g);
+    const reach = Math.max(1, Math.hypot(pe, qe));
+    search: for (const f of [1e-9, 1e-7, 1e-5, 1e-3])
+      for (let k = 0; k < 8; k++) {
+        const a = (k * Math.PI) / 4;
+        const { g } = read(pe + Math.cos(a) * f * reach, qe + Math.sin(a) * f * reach);
+        if (plane ? lorentz2(g) : positive(g)) {
+          why = plane
+            ? 'stops where the metric stops being positive definite (a spacetime beyond)'
+            : 'stops where the metric stops being Lorentzian (a plane beyond)';
+          break search;
+        }
+      }
+  }
+  if (ended && why && !onEdge && !ended.budget) ended.note = why;
   const pts: number[] = [];
   for (const [p, q] of path) pts.push(p, q, 0);
   return pts;
