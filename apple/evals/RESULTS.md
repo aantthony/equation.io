@@ -989,3 +989,61 @@ sphere 1/10, honest-reply-helix 2/10.
 
 Verdict: removing the answers cost nothing, and this run is the baseline (10
 runs a task) for the next change.
+
+## Named shapes: a catalogue and a shape tool (2026-10-09)
+
+`5c434305` adds `docs/reference/shapes.md`, 35 named curves and surfaces
+(circle, disc, ellipse, parabola, hyperbola, cardioid, limaçon, rose,
+lemniscate, Archimedean and logarithmic spirals, astroid, cycloid, Lissajous
+curve, catenary, folium of Descartes, helix, trefoil knot, plane, sphere, ball,
+ellipsoid, cylinder, cone, paraboloid, hyperbolic paraboloid, both
+hyperboloids, torus, Möbius strip, catenoid, helicoid, cube, tetrahedron,
+octahedron), each with aliases, forms in named parameters, the kind each draws
+and one instance with neutral numbers (tasks.test.ts checks none is a task's
+answer). It is generated into /docs/shapes/, llms.txt and assistant.json.
+`326a53e1` adds the `shape(name)` tool (the entry, a few lines; on a miss,
+every name) and one instruction line: "For a named curve or surface, call shape
+with its name first, and adapt its form to the request." Instructions 1,526 →
+1,549 tokens (+23), tools 1,214 → 1,300 (+86).
+
+`results/2026-10-08T231719Z-on-device.json`, 10 runs a task, against the
+primer run above (`2026-10-08T220125Z`): **44% ±5% (203/460) → 37% ±3%
+(171/460)**, tasks passed per repetition 15–20 (17–25). 2.7 tool calls a run
+(3.2), 8,357 input tokens a session (9,389).
+
+shape was called in 148 of 460 runs (159 calls), always with a sensible name:
+sphere 22, cardioid 16, cube 11, circle 11, helix, polar rose, saddle, torus,
+cone and "hyperboloid of one sheet" 10 each, plane 8, solid 7, domain colouring
+7 (a miss), Lissajous 5. It never missed a named-shape task.
+
+**The tool's answer reads as done.** In 78 of the 148 runs the model called
+shape and then replied without calling set_graph: "I drew a torus, a
+doughnut-shaped ring" over an empty graph. That is every run of saddle 10 → 0
+and torus 10 → 0, cone 10/10, cardioid 9/10, hyperboloid 8/10, sphere 7/10,
+unit-cube 6/10, parametric-circle 5/10. Its reply often paraphrases the entry
+("two nappes sharing a common apex").
+
+**It copies the kind label.** The answer's `kind: ["rows"]` lines were written
+into rows: `solid: (interval(0,1), interval(0,1), interval(0,1))` in
+unit-cube (4/10), `pcurve: [(1.5*cos(10*pi*u), …)]` and the helix's whole
+heading in honest-reply-helix, `solid: (…)` in solid-of-revolution. kind_examples
+learned the same lesson (rows first, then the label).
+
+**Where it drew, it mostly adapted.** sphere 1 → 3 (all three `x^2 + y^2 + z^2 =
+4`, from the entry's `= 9`), honest-reply-helix 2 → 8 (the instance verbatim 5
+times, with the turns changed 3 times), lissajous 0 → 3 (the instance, the
+form with its parameters defined, and once a = b, an ellipse that fails),
+hyperboloid 0 → 1. cardioid's one drawing copied the instance (r = 2(1 + cos θ)
+for r = 1 + cos θ).
+
+Elsewhere: motion-trail 3 → 0 (6 runs called shape("cardioid") for "the path
+the point leaves behind" and stopped), slider-radius 0 → 9 (`a = 2`,
+`x^2 + y^2 = a`, a slider on r², which the check accepts; nothing in this change
+explains it), label-vertex 6 → 0 (points at (2, ±1) and (2, 0), no shape call)
+and color-red 9 → 4 (`#ff` again, no shape call): run-to-run noise or a shift
+from the new line, not the catalogue.
+
+Verdict: a loss, 7 points, from one cause: the model treats shape's answer as
+having drawn the shape. The lookup itself works (right names, right entries,
+adaptation where it drew). Next: rows first in the answer, and say it draws
+nothing.
