@@ -4,7 +4,7 @@ import { compileTyped, usesComplex, type Typed } from './complex.ts';
 import { diff } from './diff.ts';
 import type { ProbBounds } from './dist.ts';
 import { type Column, type Expr, evaluate, exprKey, freeVars, mapChildren, substVars } from './expr.ts';
-import { fourierGraphGLSL, toGLSL, uniformName } from './glsl.ts';
+import { fourierGraphGLSL, sharedGLSL, toGLSL, uniformName } from './glsl.ts';
 import { hasAtan2 } from './grid.ts';
 import type { IntShade } from './intshade.ts';
 import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-object.ts';
@@ -618,8 +618,22 @@ export function compileGpu(classified: Classified): GpuPlan {
       const field = fields.slice(1).reduce((combined, f) => `max(${combined}, ${f.code})`, fields[0].code);
       return { type: 'ineq2d', params, field, edges: fields.filter(f => f.edge).map(f => f.code) };
     }
-    case 'scalar-field':
-      return { type: object.dimension === 3 ? 'scalar3d' : 'scalar2d', params, field: scalar(object.expr) };
+    case 'scalar-field': {
+      // Its repeated pieces computed once (sharedGLSL) when it is plain real
+      // arithmetic: a metric's curvature through a field repeats it a lot.
+      // (A recursive function, or anything only compileTyped compiles, is
+      // left as it is.)
+      let field = scalar(object.expr);
+      if (object.dimension !== 3) {
+        const plain = sub(object.expr);
+        try {
+          if (field === toGLSL(plain)) field = sharedGLSL(plain);
+        } catch {
+          /* as compiled */
+        }
+      }
+      return { type: object.dimension === 3 ? 'scalar3d' : 'scalar2d', params, field };
+    }
     case 'tensor-field':
       return {
         type: 'tfield2d',

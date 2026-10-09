@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
-import { compileCpu, cpuStructureKey } from './compiler.ts';
+import { compileCpu, compileGpu, cpuStructureKey } from './compiler.ts';
+import { GLSL_PRELUDE, withHelpers } from './glsl.ts';
+import { compileProg, run as runProg } from './vm.ts';
 import { evaluate } from './expr.ts';
 import { plotReadout } from './plot.ts';
 import { lambertw } from './specfn.ts';
@@ -679,6 +681,45 @@ describe('Kruskal–Szekeres diagrams', () => {
     expect(ye * ye - xe * xe).toBeCloseTo(1, 4);
     expect(ended.length).toBeCloseTo(Math.PI * Math.sqrt(r0 ** 3 / 8), 6);
     expect(ended.problem).toBeUndefined();
+  });
+
+  it('say so when M = 0 leaves the metric 0/0 everywhere', () => {
+    expect(errorOf(['M = 0', ...KRUSKAL.slice(1)])).toMatch(/no value anywhere it was checked/);
+  });
+
+  it('compute each repeated lambertw once for the curvature, on the CPU and in GLSL', () => {
+    const r = last([...KRUSKAL, 'gaussian(x, y)']);
+    const o = r.cls!.object;
+    if (o.kind !== 'scalar-field') throw new Error(o.kind);
+    const gpu = compileGpu(r.cls!);
+    if (gpu.type !== 'scalar2d') throw new Error(gpu.type);
+    const shader = withHelpers(`${GLSL_PRELUDE}\nfloat F(float x, float y) { return ${gpu.field}; }`);
+    // The definition in the prelude, and one call: inlined, it was 179.
+    expect(shader.match(/eq_lambertw\(/g)).toHaveLength(2);
+    const slots = new Map(['x', 'y', 'M'].map((n, k) => [n, k]));
+    const prog = compileProg(o.expr, slots);
+    expect(prog.code.length / 2).toBeLessThan(600);
+    const stack = new Float64Array(prog.depth);
+    for (const [x, y] of [
+      [2, 0.5],
+      [0.2, 0.9],
+    ])
+      expect(runProg(prog, [x, y, 1], stack)).toBeCloseTo(2 / rAt(x, y) ** 3, 9);
+  });
+
+  it('stop at the singularity however wide the box, never turning back into the past', () => {
+    // A box 8192 across (the window zoomed out to ±200) once took a step
+    // that turned the ray right round as r → 0: it ran back down x + y = 0.4.
+    for (const s of [64, 256, 1024, 4096, 8192, 16384, 65536]) {
+      const ray = traced([...KRUSKAL, 'lightray((1.6, -1.2), (-1, 1))'], box(-s, s, -s, s)).pts;
+      for (let k = 1; k < ray.length; k++) expect(ray[k][1], `${s}`).toBeGreaterThan(ray[k - 1][1] - 1e-6);
+      expect(ray.at(-1)![0], `${s}`).toBeCloseTo(-1.05, 3);
+      expect(ray.at(-1)![1], `${s}`).toBeCloseTo(1.45, 3);
+      const fall = traced([...KRUSKAL, 'geodesic((1.6, -1.2), (-1.2, 1.6))'], box(-s, s, -s, s)).pts;
+      for (let k = 1; k < fall.length; k++) expect(fall[k][1], `${s}`).toBeGreaterThan(fall[k - 1][1] - 1e-6);
+      const [xe, ye] = fall.at(-1)!;
+      expect(ye * ye - xe * xe, `${s}`).toBeCloseTo(1, 2);
+    }
   });
 
   it('send radial light along 45° lines, through the horizons', () => {

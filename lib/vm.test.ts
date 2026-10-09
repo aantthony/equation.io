@@ -3,6 +3,29 @@ import { evaluate, parseExpr } from './expr.ts';
 import { compileProg, compileSampler, run } from './vm.ts';
 
 describe('expression stack machine', () => {
+  it('computes a repeated subtree once, and still as the AST evaluator does', () => {
+    const e = parseExpr(
+      '{x > 0: sin(x y)^2 + exp(sin(x y)) sin(x y), y < 1 < x: 1, sin(x y)} + (x y + 1)/(x y + 1)^2 - exp(sin(x y))',
+    );
+    const prog = compileProg(
+      e,
+      new Map([
+        ['x', 0],
+        ['y', 1],
+      ]),
+    );
+    // Kept: x y, sin(x y), exp(sin(x y)) and x y + 1.
+    expect(prog.temps).toHaveLength(4);
+    const stack = new Float64Array(prog.depth);
+    for (const [x, y] of [
+      [0.5, -1.2],
+      [3, 4],
+      [-2.5, 0.1],
+      [0, 0],
+    ])
+      expect(run(prog, [x, y], stack)).toBeCloseTo(evaluate(e, { x, y }), 12);
+  });
+
   it('runs lambertw as the AST evaluator does', () => {
     const e = parseExpr('lambertw((x^2 - y^2)/e)');
     const prog = compileProg(

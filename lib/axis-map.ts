@@ -63,6 +63,8 @@ const INVERSE_FN: Record<string, (target: Expr) => Expr> = {
   asinh: w => call('sinh', w),
   tanh: w => call('atanh', w),
   atanh: w => call('tanh', w),
+  // The principal branch's inverse: w eʷ, for w ≥ −1.
+  lambertw: w => bin('*', w, call('exp', w)),
 };
 
 /** s such that f(s) = target, peeling f from the outside in; null when some

@@ -430,6 +430,9 @@ function tableCall(name: string, u: Expr): Expr | null {
       return add(mul(u, call('atanh', u)), div(ln(sub(num(1), pow(u, num(2)))), num(2)));
     case 'erf':
       return add(mul(u, call('erf', u)), div(call('exp', neg(pow(u, num(2)))), num(Math.sqrt(Math.PI))));
+    case 'lambertw':
+      // u(W − 1) + e^W: u(W − 1 + 1/W) with u/W = e^W, so no 0/0 at u = 0.
+      return add(mul(u, sub(call('lambertw', u), num(1))), call('exp', call('lambertw', u)));
     default:
       return null;
   }

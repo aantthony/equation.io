@@ -32,6 +32,7 @@ import {
   plainFnName,
   realPow,
   sincFn,
+  subtreeCounts,
 } from './expr.ts';
 import {
   betaPdf,
@@ -64,6 +65,8 @@ const enum Op {
   Sel,
   Fn4,
   Loop,
+  Store,
+  Load,
 }
 
 const FN1: Record<string, (x: number) => number> = {
@@ -143,6 +146,8 @@ export interface Prog {
   depth: number;
   /** The loops this program runs (Op.Loop's argument indexes them). */
   loops?: LoopProg[];
+  /** Values of repeated subtrees, kept by Op.Store and read by Op.Load. */
+  temps?: Float64Array;
 }
 
 /**
@@ -179,7 +184,30 @@ export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
     depth += n;
     if (depth > maxDepth) maxDepth = depth;
   };
+  // A subtree that occurs more than once is computed where it first runs
+  // and kept (Op.Store), then read back (Op.Load): an inlined definition
+  // differentiated again and again (a metric's curvature) holds the same
+  // lambertw(…) a hundred times. Every node runs, in order, with no jumps,
+  // so the first is always run before the rest are read.
+  const shared = subtreeCounts(e);
+  const stored = new Map<number, number>();
   const emit = (node: Expr): void => {
+    if (node.kind === 'num' || node.kind === 'var' || node.kind === 'ineq' || shared.count(node) < 2) {
+      emitNode(node);
+      return;
+    }
+    const id = shared.id(node);
+    const temp = stored.get(id);
+    if (temp !== undefined) {
+      code.push(Op.Load, temp);
+      push(1);
+      return;
+    }
+    emitNode(node);
+    stored.set(id, stored.size);
+    code.push(Op.Store, stored.size - 1);
+  };
+  const emitNode = (node: Expr): void => {
     switch (node.kind) {
       case 'num':
         code.push(Op.Const, consts.length);
@@ -299,7 +327,13 @@ export function compileProg(e: Expr, slots: ReadonlyMap<string, number>): Prog {
     }
   };
   emit(e);
-  return { code, consts, depth: maxDepth, ...(loops.length ? { loops } : {}) };
+  return {
+    code,
+    consts,
+    depth: maxDepth,
+    ...(loops.length ? { loops } : {}),
+    ...(stored.size ? { temps: new Float64Array(stored.size) } : {}),
+  };
 }
 
 function runLoop(loop: LoopProg, seeds: Float64Array, at: number, outer: ArrayLike<number>): number {
@@ -396,6 +430,12 @@ export function run(p: Prog, vars: ArrayLike<number>, stack: Float64Array): numb
       case Op.Sel:
         sp -= 2;
         stack[sp - 1] = stack[sp - 1] === 1 ? stack[sp] : stack[sp + 1];
+        break;
+      case Op.Store:
+        p.temps![arg] = stack[sp - 1];
+        break;
+      case Op.Load:
+        stack[sp++] = p.temps![arg];
         break;
       case Op.Loop: {
         const loop = p.loops![arg];

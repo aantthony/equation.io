@@ -1163,24 +1163,27 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
       // the horizons r = 2M are the diagonals, and the singularity r = 0 the
       // hyperbolas, shaded beyond. Our exterior is on the right, another on
       // the left; the black hole is above, the white hole below. The grid is
-      // Schwarzschild's r (hyperbolas) and t (lines through the middle). A
-      // particle let go at rest at P falls through the horizon without a
-      // pause and reaches r = 0; light from P escapes one way and falls in
-      // the other. Drag P.
+      // Schwarzschild's r (hyperbolas) and t (lines through the middle,
+      // y/x = tanh(t/4M)). A particle let go at rest at P falls through the
+      // horizon without a pause and reaches r = 0; light from P escapes one
+      // way and falls in the other. Drag P, into the other exterior too
+      // (inside the holes nothing can be at rest). Slide M: X and T have no
+      // scale, so only the r and t of the grid change.
       [
         'Kruskal–Szekeres: the whole black hole (drag P)',
-        'view(x = -3..3, y = -2.25..2.25); M = 1; r = 2M(1 + lambertw((x^2 - y^2)/e)); ' +
-          't_s = M ln(abs((x + y)/(x - y))); ds^2 = (32 M^3/r) exp(-r/(2M)) (-dy^2 + dx^2); ' +
-          'y^2 - x^2 > 1; r = 2M; lightcones; P = (1.6, -1.2); geodesic(P, (P.y, P.x)); lightray(P, ([-1, 1], 1))',
+        'view(x = -3..3, y = -2.25..2.25); M = clamp(1, 0.1, 5); r = 2M(1 + lambertw((x^2 - y^2)/e)); ' +
+          't_s = {y^2 - x^2 < 1: 2M ln(abs((x + y)/(x - y)))}; ds^2 = (32 M^3/r) exp(-r/(2M)) (-dy^2 + dx^2); ' +
+          'y^2 - x^2 > 1; r = 2M; lightcones; P = (1.6, -1.2); geodesic(P, sign(P.x) (P.y, P.x)); ' +
+          'lightray(P, ([-1, 1], 1))',
         'draggable coordinates physics',
       ],
       // The same diagram painted by its curvature, K = 2M/r³, strongest at
-      // the singularity. Light sent inward from both exteriors, and
+      // the singularity (slide M: it scales as 1/M²). Light sent inward from both exteriors, and
       // particles let go at rest in each, meet inside the black hole —
       // though no signal can pass from one exterior to the other.
       [
         'Kruskal–Szekeres: two exteriors meet inside',
-        'view(x = -3..3, y = -2.25..2.25); M = 1; r = 2M(1 + lambertw((x^2 - y^2)/e)); ' +
+        'view(x = -3..3, y = -2.25..2.25); M = clamp(1, 0.1, 5); r = 2M(1 + lambertw((x^2 - y^2)/e)); ' +
           'ds^2 = (32 M^3/r) exp(-r/(2M)) (-dy^2 + dx^2); gaussian(x, y); y^2 - x^2 > 1; r = 2M; ' +
           's = [-1, 1]; lightray((2.4 s, -1.6), (-s, 1)); geodesic((1.6 s, -1.2), (-1.2 s, 1.6))',
         'scalar-field coordinates physics',

@@ -1477,6 +1477,68 @@ export function mapChildren(e: Expr, map: (child: Expr) => Expr): Expr {
 export const exprReplacer = (key: string, value: unknown): unknown =>
   key === 'axes' || key === 'origin' ? undefined : value;
 export const exprKey = (value: unknown): string => JSON.stringify(value, exprReplacer);
+
+/**
+ * Structural ids for e's subtrees, built bottom-up (linear in e's size,
+ * where exprKey on every subtree would be quadratic), and how often each
+ * occurs: what a compiler shares (lib/vm.ts, lib/glsl.ts sharedGLSL), so an
+ * expression whose definitions were inlined and then differentiated — a
+ * metric's curvature, with r = 2M(1 + lambertw(…)) at every use of r —
+ * evaluates each repeated piece once. A node that binds a variable (a
+ * loop, a Σ/Π) is one unit: keyed whole, never entered.
+ */
+export function subtreeCounts(e: Expr): { id: (node: Expr) => number; count: (node: Expr) => number } {
+  const ids = new WeakMap<Expr, number>();
+  const intern = new Map<string, number>();
+  const counts: number[] = [];
+  const visit = (node: Expr): number => {
+    const seen = ids.get(node);
+    if (seen !== undefined) {
+      counts[seen]++;
+      return seen;
+    }
+    let key: string;
+    switch (node.kind) {
+      case 'num':
+        key = Object.is(node.value, -0) ? 'n-0' : `n${node.value}`;
+        break;
+      case 'var':
+        key = `v${node.name}`;
+        break;
+      case 'neg':
+        key = `-${visit(node.a)}`;
+        break;
+      case 'bin':
+        key = `${node.op}${visit(node.a)},${visit(node.b)}`;
+        break;
+      case 'call':
+        key =
+          (node.name === 'sum' || node.name === 'prod') && node.args.length >= 4
+            ? `k${exprKey(node)}`
+            : `c${node.name}(${node.args.map(visit).join(',')})`;
+        break;
+      case 'ineq':
+        key = `i${node.op}${visit(node.l)},${visit(node.r)}${node.grouped ? 'g' : ''}`;
+        break;
+      case 'piecewise':
+        key = `p${node.cases.map(c => `${visit(c.cond)}:${visit(c.value)}${c.bare ? 'b' : ''}`).join(';')}|${node.otherwise ? visit(node.otherwise) : ''}`;
+        break;
+      default:
+        key = `k${exprKey(node)}`;
+    }
+    let id = intern.get(key);
+    if (id === undefined) {
+      id = counts.length;
+      intern.set(key, id);
+      counts.push(0);
+    }
+    ids.set(node, id);
+    counts[id]++;
+    return id;
+  };
+  visit(e);
+  return { id: node => ids.get(node) ?? -1, count: node => counts[ids.get(node) ?? -1] ?? 0 };
+}
 let origins = 0;
 export const originOf = (e: Expr): number | undefined => e.origin;
 export function markOrigins(root: Expr): void {

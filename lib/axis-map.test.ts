@@ -25,6 +25,7 @@ describe('axis maps', () => {
       ['sinh(X)', -4],
       ['3X + 1', 7],
       ['1/(1 + exp(-X))', 0.25],
+      ['lambertw(X)', 2],
     ]) {
       const map = parseAxisMap('x', src as string);
       expect(toWorld(map, toScreen(map, world as number)), src as string).toBeCloseTo(world as number, 9);
