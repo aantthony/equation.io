@@ -212,8 +212,10 @@ float gridLine(float c, float lg, float spacing, float halfWidthPx) {
 }
 `;
 
-/** The Cartesian pair: linear, so the distance estimate to a level is exact. */
-const linear = (s: GridSpec) => s.glsl === 'x' || s.glsl === 'y';
+/** A constant gradient — x and y, a lattice's x + 1/2 — is a linear field,
+ *  whose distance estimate to a level is exact. */
+const linear = (s: GridSpec) =>
+  !!s.gradGlsl && s.gradGlsl.every(g => /^\(?-?\d+(\.\d*)?(e[-+]?\d+)?\)?$/.test(g.trim()));
 
 /**
  * Whether the level c = L of family k really passes near p, and not only by
@@ -221,29 +223,44 @@ const linear = (s: GridSpec) => s.glsl === 'x' || s.glsl === 'y';
  * without reaching it — the tail of exp(-x^2 - y^2) toward 0, whose estimate
  * is 1/(2r) everywhere, a pixel or so when zoomed out — would otherwise draw
  * that level over its whole tail, and where c and ∇c underflow to 0 the
- * estimate is 0 and paints it solid. So a Newton step toward L is taken twice
- * over: where c there has moved toward L but still falls short of it, there
- * is no line. Landing past L is a crossing, and so is jumping away from it,
- * as atan2 does over its branch cut, where angular grids put a line. Exactly
- * on L (or underflowed to it), the field a pixel either way must straddle L.
- * The gradient is scaled to its largest component so a tiny one is not
- * squared to 0.
+ * estimate is 0 and paints it solid.
+ *
+ * A Newton step toward L, taken twice over, is compared with where it
+ * started, both less L: landing past L or (nearly) on it, a ratio ≤ 1e-3,
+ * is a crossing — double roots and saddles (x^2, x y) land on it, and so
+ * does rounding on a real line — and so is jumping away (≥ 0.9), as atan2
+ * does over its branch cut, where angular grids put a line. In between, c
+ * moved toward L and fell short: no line, unless c turns back within four
+ * pixels either way along ∇c (pr, the field there), by at least how far it
+ * is from L — an extreme value, sin(x) = 1 or the root of x^10. Exactly on L,
+ * pr must straddle L or jump. Differences within 1e-30 of L are underflow,
+ * not roots; zoomed to float's last digits the estimate is kept. The gradient
+ * is scaled to its largest component so a tiny one is not squared to 0.
  */
-const reachesGlsl = (k: number) => `bool reaches${k}(vec2 p, float c, vec2 g, float L) {
+const reachesGlsl = (k: number) => `vec2 probe${k}(vec2 p, vec2 g) {
   float m = max(abs(g.x), abs(g.y));
-  if (m == 0.0) return false;
+  vec2 u = m > 0.0 && !isinf(m) ? normalize(g / m) : vec2(1.0, 0.0);
+  vec2 d = 4.0 * min(uUpp.x, uUpp.y) * u;
+  return vec2(coord${k}(p.x + d.x, p.y + d.y), coord${k}(p.x - d.x, p.y - d.y));
+}
+bool reaches${k}(vec2 p, float c, vec2 g, float L, vec2 pr) {
+  float m = max(abs(g.x), abs(g.y));
   if (isinf(m) || isnan(m)) return true;
-  vec2 n = g / m;
+  float px = min(uUpp.x, uUpp.y);
+  if (px < 1e-6 * max(abs(p.x), abs(p.y)) || abs(c - L) < 1e-6 * abs(c)) return true;
+  vec2 v = pr - L;
   if (c == L) {
-    // On it, or underflowed to it: a pixel either way must straddle it.
-    vec2 d = normalize(n) * min(uUpp.x, uUpp.y);
-    float a = coord${k}(p.x + d.x, p.y + d.y) - L;
-    float b = coord${k}(p.x - d.x, p.y - d.y) - L;
-    return (a > 0.0 && b < 0.0) || (a < 0.0 && b > 0.0);
+    float jump = max(16.0 * m * px, 1e-30);
+    return (v.x > 0.0 && v.y < 0.0) || (v.x < 0.0 && v.y > 0.0) || max(abs(v.x), abs(v.y)) > jump;
   }
-  vec2 q = p - 2.0 * ((c - L) / m) * n / dot(n, n);
-  float c2 = coord${k}(q.x, q.y);
-  return c > L ? !(c2 >= L && c2 < c) : !(c2 <= L && c2 > c);
+  if (m > 0.0 && abs(c - L) > 1e-30) {
+    vec2 n = g / m;
+    vec2 q = p - 2.0 * ((c - L) / m) * n / dot(n, n);
+    float r = (coord${k}(q.x, q.y) - L) / (c - L);
+    if (!(r > 1e-3 && r < 0.9)) return true;
+  }
+  vec2 w = pr - c;
+  return ((w.x > 0.0 && w.y > 0.0) || (w.x < 0.0 && w.y < 0.0)) && abs(c - L) <= abs(w.x + w.y);
 }
 `;
 
@@ -279,9 +296,16 @@ function gridFrag(specs: GridSpec[], axesOnly = false): string {
 ${
   linear(s)
     ? ''
-    : `      if (minor > 0.0 && !reaches${k}(p, c, g, round(c / uMinor${k}) * uMinor${k})) minor = 0.0;
-      if (major > 0.0 && !reaches${k}(p, c, g, round(c / uMajor${k}) * uMajor${k})) major = 0.0;
-      if (axis > 0.0 && !reaches${k}(p, c, g, 0.0)) axis = 0.0;
+    : // One check for both line kinds, at the nearest minor level (a major
+      // level is one), and one for the axis only when that is not 0.
+      `      float L = round(c / uMinor${k}) * uMinor${k};
+      bool lines = max(minor, major) > 0.0;
+      bool axis0 = axis > 0.0 && !(lines && L == 0.0);
+      if (lines || axis0) {
+        vec2 pr = probe${k}(p, g);
+        if (lines && !reaches${k}(p, c, g, L, pr)) { minor = 0.0; major = 0.0; }
+        if (axis > 0.0 && (lines && L == 0.0 ? max(minor, major) == 0.0 : !reaches${k}(p, c, g, 0.0, pr))) axis = 0.0;
+      }
 `
 }      minorA = max(minorA, minor);
       majorA = max(majorA, major);
