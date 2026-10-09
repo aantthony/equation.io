@@ -294,6 +294,7 @@ export function surfaceMapping(object: MathObject): SurfaceMapping | null {
     // (lib/analysis.ts refuses one there).
     case 'metric':
     case 'lightcone':
+    case 'tidal':
       return null;
     case 'curve':
       return object.form === 'parametric' ? 'carry' : 'paint';

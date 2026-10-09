@@ -1505,8 +1505,17 @@ export interface Overlay2D {
   /** Many small glyphs, each list one path (light cones, lib/light-cone.ts
    *  coneGlyphs): `rings` closed, filled with `fill` and outlined; `lines`
    *  stroked thinly; runs of both end with NaN, NaN. `dots` are x, y pairs,
-   *  drawn as discs. */
-  glyphs?: Array<{ rings: number[]; lines: number[]; dots: number[]; color: string; fill: string }>;
+   *  drawn as discs. `lineWidth` and `lineAlpha` make the strokes bolder
+   *  (tidal glyphs, lib/tidal.ts: solid bars). */
+  glyphs?: Array<{
+    rings: number[];
+    lines: number[];
+    dots: number[];
+    color: string;
+    fill: string;
+    lineWidth?: number;
+    lineAlpha?: number;
+  }>;
 }
 
 /** Where an overlay's lists end, so what one row adds can be told apart. */
@@ -1952,9 +1961,9 @@ export function drawLabels2D(
         ctx.stroke(rings);
       }
       if (glyph.lines.length) {
-        ctx.globalAlpha = 0.55;
+        ctx.globalAlpha = glyph.lineAlpha ?? 0.55;
         ctx.strokeStyle = glyph.color;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = glyph.lineWidth ?? 1;
         ctx.stroke(trace(glyph.lines, false));
         ctx.globalAlpha = 1;
       }
