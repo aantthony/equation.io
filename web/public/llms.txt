@@ -411,10 +411,14 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   - On a spacetime diagram each is the two null directions, a filled wedge
     opening to the future and two strokes to the past, a fixed size on the
     screen, only where the metric is Lorentzian. The future is the half
-    along which the time coordinate increases: the second of the two
-    written (y), unless its own d²-term is negative nowhere checked while
-    the first's is somewhere (`-dx^2 + dy^2`, Eddington–Finkelstein with v
-    along x, `-(1 - 2M/y) dx^2 + 2 dx dy`): then the first. That is
+    along which the time coordinate increases, and the time coordinate is
+    the one the row writes as such: that of the first term (left to right)
+    that is a squared differential carrying a minus sign — subtracted, or
+    with a unary minus or negative number among its factors; a sign inside
+    a factor that is a sum, like (1 - 2M/x), does not count — else y. So
+    `-(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)` and `dx^2 - f dy^2` have time y,
+    `-dx^2 + dy^2` and `-(1 - 2M/y) dx^2 + 2 dx dy` have time x, and
+    `2 dx dy` alone has y; it never changes as sliders move. That is
     continuous wherever that coordinate is a time, inside a horizon too.
     Where the cone lies across it exactly (inside Schwarzschild's horizon in
     r and t, where r is the time) the future is the other coordinate

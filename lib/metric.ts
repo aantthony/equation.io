@@ -55,9 +55,9 @@ export interface PanelMetric {
    *  its start, and stops where it changes. */
   readonly mixed?: true;
   /** A diagram's time orientation (lib/light-cone.ts futureCone): the
-   *  gradient in x and y of its time coordinate — the written one whose own
-   *  d²-term is negative where the metric is flattest, else the second (y)
-   *  — then of the other, for ties. */
+   *  gradient in x and y of its time coordinate — the one of the first term
+   *  written as a squared differential with a minus sign (writtenTime),
+   *  else the second (y) — then of the other, for ties. */
   readonly future?: readonly Expr[];
 }
 
@@ -120,41 +120,53 @@ const SAMPLES: readonly [number, number][] = Array.from({ length: 33 }, (_, i) =
 );
 
 /**
- * How far a 2 × 2 Lorentzian metric G at (x, y) is from Minkowski space, as
- * a number free of the metric's scale and of where the point is: G over
- * √|det G| against diag(±1, ∓1), plus how fast G changes over the point's
- * distance from the origin (relative central differences). A spacetime
- * diagram's time is the coordinate whose own d²-term is negative at the
- * flattest point checked: far out round a hole, at the middle of de
- * Sitter's static patch — which coordinate is negative at more points
- * would turn as a slider changes the scale, and a single point cannot tell
- * -f dt^2 + dr^2/f from the same metric with f = −1/f (Schwarzschild's
- * inside at r = M is diag(1, −1) too, but changing fast).
+ * The coordinate a spacetime diagram's row writes as its time: that of the
+ * first term, in written order, that holds a squared differential (d<c>^2,
+ * with any factors) and carries a minus sign as written — subtracted, or
+ * with a unary minus or a negative number among its factors (an odd count
+ * of them). Signs inside a factor that is itself a sum, like (1 - 2M/x),
+ * do not count: they are the metric's values, which change with a slider,
+ * while how the row is written does not. Undefined when no term does.
+ *
+ *   -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)  → y      dx^2 - f dy^2  → y
+ *   -dx^2 + dy^2                        → x      2 dx dy        → none
  */
-function flatness(
-  G: readonly (readonly number[])[],
-  g: readonly (readonly Expr[])[],
-  x: number,
-  y: number,
-  env: Readonly<Record<string, number>>,
-  at: (e: Expr, env: Record<string, number>) => number,
-): number {
-  const scale = Math.sqrt(Math.abs(G[0][0] * G[1][1] - G[0][1] ** 2));
-  const [a, b, c] = [G[0][0] / scale, G[1][1] / scale, G[0][1] / scale];
-  let off = (Math.abs(a) - 1) ** 2 + (Math.abs(b) - 1) ** 2 + c * c;
-  const r = Math.hypot(x, y);
-  const h = 1e-4 * r;
-  for (const [dx, dy] of [
-    [h, 0],
-    [0, h],
-  ]) {
-    const plus = g.map(row => row.map(e => at(e, { ...env, x: x + dx, y: y + dy })));
-    const minus = g.map(row => row.map(e => at(e, { ...env, x: x - dx, y: y - dy })));
-    let change = 0;
-    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) change += Math.abs(plus[i][j] - minus[i][j]) / (2 * h);
-    off += (r * change) / scale;
+function writtenTime(rhs: Expr, names: ReadonlyMap<string, string>): string | undefined {
+  const terms: [Expr, boolean][] = [];
+  const flatten = (e: Expr, minus: boolean) => {
+    if (e.kind === 'bin' && (e.op === '+' || e.op === '-')) {
+      flatten(e.a, minus);
+      flatten(e.b, e.op === '-' ? !minus : minus);
+    } else if (e.kind === 'neg' && e.a.kind === 'bin' && (e.a.op === '+' || e.a.op === '-')) flatten(e.a, !minus);
+    else terms.push([e, minus]);
+  };
+  flatten(rhs, false);
+  for (const [term, minus] of terms) {
+    let negative = minus;
+    let squared: string | undefined;
+    const factors = (e: Expr) => {
+      if (e.kind === 'neg') {
+        negative = !negative;
+        factors(e.a);
+      } else if (e.kind === 'num') {
+        if (e.value < 0) negative = !negative;
+      } else if (e.kind === 'bin' && (e.op === '*' || e.op === '/')) {
+        factors(e.a);
+        factors(e.b);
+      } else if (
+        e.kind === 'bin' &&
+        e.op === '^' &&
+        e.a.kind === 'var' &&
+        names.has(e.a.name) &&
+        e.b.kind === 'num' &&
+        e.b.value === 2
+      )
+        squared ??= names.get(e.a.name);
+    };
+    factors(term);
+    if (squared !== undefined && negative) return squared;
   }
-  return Number.isFinite(off) ? off : Infinity;
+  return undefined;
 }
 
 /** What sampled found, by the metric's structure and the values it reads:
@@ -211,11 +223,6 @@ function sampleCounts(
     space: 0,
     lorentz: 0,
     riemann: 0,
-    // With no τ: of the Lorentzian points where one coordinate's own
-    // d²-term is negative and the other's not, the flattest (flatness), and
-    // which coordinate that is there (time: 0 or 1; −1 with none).
-    flatness: Infinity,
-    time: -1,
   };
   for (const [k, [x, y]] of SAMPLES.entries()) {
     const w = vars.map((_, i) => Math.sin(1.7 * k + 2.3 * i + 0.4));
@@ -243,13 +250,6 @@ function sampleCounts(
       if (G[0][0] > 0 && det > 0) counts.riemann++;
       if (det < 0) {
         counts.lorentz++;
-        if (G[0][0] < 0 !== G[1][1] < 0) {
-          const flat = flatness(G, g, x, y, env, at);
-          if (flat < counts.flatness) {
-            counts.flatness = flat;
-            counts.time = G[0][0] < 0 ? 0 : 1;
-          }
-        }
       }
       if ((G[0][0] > 0 && det > 0) || det < 0) counts.traceable++;
       continue;
@@ -405,16 +405,7 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
   // Checked at sample points (with the sliders at their values): the form is
   // g's, the coordinates are independent, and the signature is one a
   // geodesic can be traced in somewhere.
-  const {
-    defined,
-    independent,
-    traceable,
-    space,
-    lorentz,
-    riemann,
-    quadratic,
-    time: timeAt,
-  } = sampled(Q, g, J, vars, ctx.values);
+  const { defined, independent, traceable, space, lorentz, riemann, quadratic } = sampled(Q, g, J, vars, ctx.values);
   if (!quadratic) throw notQuadratic;
   if (defined && !independent && !spatial.every(c => PANEL.has(c)))
     throw new Error(
@@ -433,11 +424,13 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
 
   // With no time: a spacetime diagram if it is Lorentzian anywhere checked
   // (a plane where it is positive definite, if that too). Its time is the
-  // coordinate whose own d²-term is negative where it is flattest (flatness),
-  // else the second (y).
+  // one the row writes with a minus sign first (writtenTime), else the
+  // second (y): from how the row is written, not the metric's values,
+  // which no rule can read a time from without turning with a slider.
   const lorentzian = n === 2 && lorentz > 0;
   const mixed = lorentzian && riemann > 0;
-  const timeIndex = timeAt === 0 ? 0 : 1;
+  const written = writtenTime(rhs, names);
+  const timeIndex = written !== undefined && spatial.indexOf(written) === 0 ? 0 : 1;
   const future = lorentzian ? [...J[timeIndex], ...J[1 - timeIndex]] : undefined;
 
   // g as written, its x and y derivatives, and — unless it is written in x

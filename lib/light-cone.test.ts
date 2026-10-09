@@ -508,6 +508,44 @@ describe('review fixes', () => {
     expect(Math.abs(futureAt(['T = -x/2', 'X = y', 'ds^2 = -dT^2 + dX^2'], 1, 1).axis)).toBeCloseTo(Math.PI, 9);
   });
 
+  it('takes the time a row writes with a minus sign first, whatever its sliders', () => {
+    const up = Math.PI / 2;
+    const cases: [string[], number, number, number][] = [
+      // [rows, x, y, the future's angle]
+      [SCHWARZSCHILD_RT, 4, 0, up],
+      [['M = 1', 'ds^2 = -(1 - 2M/y) dx^2 + dy^2/(1 - 2M/y)'], 0, 4, 0],
+      [EDDINGTON, 4, 0, NaN],
+      // Painlevé–Gullstrand, Reissner–Nordström, anti-de Sitter, Rindler,
+      // Milne (y the time, x the rapidity), de Sitter.
+      [['M = 1', 'ds^2 = -(1 - 2M/x) dy^2 + 2 sqrt(2M/x) dx dy + dx^2'], 4, 0, NaN],
+      [['M = 1', 'Q = 0.5', 'ds^2 = -(1 - 2M/x + Q^2/x^2) dy^2 + dx^2/(1 - 2M/x + Q^2/x^2)'], 4, 0, up],
+      [['ds^2 = -(1 + x^2) dy^2 + dx^2/(1 + x^2)'], 3, 0, up],
+      [['ds^2 = -x^2 dy^2 + dx^2'], 2, 0, up],
+      [['ds^2 = -dy^2 + y^2 dx^2'], 0.5, 2, up],
+      [['L = 3', 'ds^2 = -(1 - x^2/L^2) dy^2 + dx^2/(1 - x^2/L^2)'], 1, 0, up],
+      [['ds^2 = -dx^2 + dy^2'], 1, 1, 0],
+      [['f = 2', 'ds^2 = dx^2 - f dy^2'], 1, 1, up],
+      [['ds^2 = -2dy^2 + dx^2'], 1, 1, up],
+      // No term with a minus sign: y, and 2 dx dy's future is up and left.
+      [['ds^2 = 2 dx dy'], 1, 1, (3 * Math.PI) / 4],
+    ];
+    for (const [rows, x, y, angle] of cases) {
+      const cone = futureAt(rows, x, y);
+      if (Number.isNaN(angle)) expect(Math.sin(cone.axis), rows.at(-1)).toBeGreaterThan(0);
+      else expect(cone.axis, rows.at(-1)).toBeCloseTo(angle, 9);
+    }
+    // EF with v along x: v increases on the future cone.
+    expect(Math.cos(futureAt(['M = 1', 'ds^2 = -(1 - 2M/y) dx^2 + 2 dx dy'], 0, 4).axis)).toBeGreaterThan(0);
+    // No flips as a slider moves the values.
+    for (const k of [0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100]) {
+      expect(futureAt([`k = ${k}`, 'ds^2 = -k x dy^2 + dx^2/(k x)'], 2, 0).axis, `k = ${k}`).toBeCloseTo(up, 9);
+      expect(futureAt([`k = ${k}`, 'ds^2 = -(1 - x^2) k dy^2 + dx^2/(1 - x^2)'], 0.5, 0).axis, `k = ${k}`).toBeCloseTo(
+        up,
+        9,
+      );
+    }
+  });
+
   it('leaves out the ellipses inside a spinning hole’s inner horizon', () => {
     const { spec, env } = cones([...kerr(0.95), 'lightcones']);
     const read = metricValues(spec, env);
@@ -521,6 +559,27 @@ describe('review fixes', () => {
     expect(glyphs.dots.length).toBeGreaterThan(0);
     for (let i = 0; i < glyphs.dots.length; i += 2)
       expect(Math.hypot(glyphs.dots[i], glyphs.dots[i + 1])).toBeGreaterThan(1.3);
+    // A nearly extremal hole's band (r₋ ≈ 0.955 < r < r₊ ≈ 1.045) is
+    // thinner than the grid, and still cuts the inside off, wherever the
+    // view is panned.
+    for (const [spin, inner] of [
+      [0.999, 1 - Math.sqrt(1 - 0.999 ** 2)],
+      [0.99, 1 - Math.sqrt(1 - 0.99 ** 2)],
+    ]) {
+      const hole = cones([...kerr(spin), 'lightcones']);
+      const near = metricValues(hole.spec, hole.env);
+      for (const [cx, cy, half] of [
+        [0, 0, 3.2],
+        [3, 1, 3.2],
+        [0.4, -0.3, 1.6],
+        [0, 0, 8],
+      ]) {
+        const w = view(cx - half, cx + half, cy - 0.75 * half, cy + 0.75 * half);
+        const drawn = coneGlyphs(near, w);
+        for (let i = 0; i < drawn.dots.length; i += 2)
+          expect(Math.hypot(drawn.dots[i], drawn.dots[i + 1]), `a = ${spin} at (${cx}, ${cy})`).toBeGreaterThan(inner);
+      }
+    }
     // Schwarzschild has no inside to cut off.
     const s = cones([...SCHWARZSCHILD, 'lightcones']);
     const plain = behindHorizon(metricValues(s.spec, s.env), v);

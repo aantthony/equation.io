@@ -187,10 +187,14 @@ two strokes, however many glyphs), on a lattice anchored in the plane like
 the tensor-field glyphs (power of two nearest 56 px). On a diagram, the null
 angles are (φ ± α)/2 from g(e_θ, e_θ) = A + R cos(2θ − φ), and the future
 half is the one along which the time coordinate τ increases, dτ(axis) > 0,
-τ being the second written coordinate (y) unless its own d²-term is
-negative at no Lorentzian sample point while the first's is somewhere (a
-vote by counts turned with the scale: de Sitter's static patch with a small
-L has most samples outside its horizon, |x| > L, where x is the time). An orientation by the sign of
+τ being the coordinate of the first term written as a squared
+differential with a minus sign (subtracted, or a unary minus or negative
+number among its factors; signs inside a sum factor do not count), else y.
+Inferring τ from the metric's values failed: a vote by counts turned with a
+slider's scale (de Sitter's static patch), and a flatness score could not
+decide `-k x dy^2 + dx^2/(k x)` (two equally flat points) — the values
+cannot tell -f dt² + dr²/f from the same metric with f → −1/f. How the row
+is written can, and is the physics convention. An orientation by the sign of
 g(axis, ∂τ) fails inside Eddington–Finkelstein's horizon, where ∂_v is
 spacelike; dτ does not, since v increases on every future cone there. It
 changes only where a cone straddles dτ = 0, and where the axis is exactly
@@ -204,11 +208,18 @@ cell), so sizes compare: light slows toward a horizon (1 − 2M/r across,
 and leave their dots inside the ergoregion. A lone lightcone(P) uses the
 same scale (its own, when no lattice ellipse is in view); a lattice
 ellipse wider than its cell is left out, and so is one behind a horizon:
-a grid at half the lattice spacing (at most 3000 nodes) is flood-filled
-from its edge through nodes where x and y are space, and a point none of
-whose nearest nodes was reached is cut off (Kerr inside r₋; a band thinner
-than the grid's spacing can leak, and a view with no horizon in it cuts
-nothing). The metric is compiled once per panel for all its light-cone
+a grid at half the lattice spacing (at most 2000 nodes) is flood-filled
+from seeds known to be outside — its corners and side middles from which a
+ray out to a thousand times the view, in steps growing 30%, meets no
+horizon — through nodes where x and y are space and along edges with no
+horizon inside them: an edge where x and y's metric is large (4× the
+grid's median) or doubles is checked at 31 points between, so a nearly
+extremal hole's band (a = 0.9999: 0.03 wide) is not leaked through, and a
+view wholly inside r₋ is cut off whole. A sweep of 180 views (pans and
+zooms from ±0.8 to ±12 at 400–1920 px) at a = 0.9 … 0.9999 drew no
+ellipse inside r₋; the cut-off takes 6–8 ms (median, 13–17 at the 90th
+percentile) in Node and is recomputed only when the lattice cells in view
+change. The metric is compiled once per panel for all its light-cone
 rows, and the scale, the cut-off and a lattice's glyphs are kept while the
 zoom and the lattice cells in view stay, so a pan within a cell recomputes
 nothing (a pan across one: ~5 ms of metric reads in Node for 1080p Kerr,

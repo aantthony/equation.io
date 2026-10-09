@@ -7,19 +7,19 @@
  * coordinates, like -dy^2 + dx^2 — a light cone is two null lines through
  * the point, and is drawn as a filled wedge opening toward the future, with
  * the past half as two strokes. Which half is the future is the metric's
- * business, not y's. Its time coordinate τ is the second of the two written
- * (y), unless that one's own d²-term is negative at no point checked while
- * the first's is somewhere (dt in -dt^2 + dy^2, v in Eddington–Finkelstein's
- * -(1 - 2M/y) dv^2 + 2 dv dy with v along x) (lib/metric.ts) — not a vote
- * by counts, which would turn as a slider changes the metric's scale — and
- * the future half is the one along which τ
- * increases: dτ(axis) > 0. That is continuous wherever τ is a time — even
- * where ∂τ is not timelike, as inside Eddington–Finkelstein's horizon,
- * where every future cone still has v increasing — and changes only where
- * a cone straddles dτ = 0. Where dτ(axis) is 0 exactly (inside
- * Schwarzschild's horizon in r and t, where r is the time and the cones lie
- * along it) the future is the half along which the other coordinate
- * decreases: smaller r, into the hole. The glyph is a fixed size in pixels.
+ * business, not y's, and the row's: its time coordinate τ is that of the
+ * first term written as a squared differential with a minus sign (−dt^2,
+ * -(1 - 2M/r) dt^2, dx^2 - f dy^2 for y), else y (lib/metric.ts
+ * writtenTime) — as physics writes it, and fixed however a slider moves
+ * the metric's values, which no rule could read a time from without
+ * turning. The future half is the one along which τ increases,
+ * dτ(axis) > 0: continuous wherever τ is a time, even where ∂τ is not
+ * timelike (inside Eddington–Finkelstein's horizon every future cone still
+ * has v increasing), and changing only where a cone straddles dτ = 0.
+ * Where dτ(axis) is 0 exactly (inside Schwarzschild's horizon in r and t,
+ * where r is the time and the cones lie along it) the future is the half
+ * along which the other coordinate decreases: smaller r, into the hole.
+ * The glyph is a fixed size in pixels.
  *
  * With a time besides the panel's two coordinates (Schwarzschild or Kerr in
  * their equatorial plane, in r and phi), the cone is drawn by its section at
@@ -197,7 +197,10 @@ export const ELLIPSE_REACH = 0.36;
 export const coneCell = (upp: number) => 2 ** Math.round(Math.log2(CONE_CELL_PX * upp));
 
 /** Nodes behindHorizon's grid has at most: a few milliseconds. */
-const HORIZON_NODES = 3000;
+const HORIZON_NODES = 2000;
+/** Pieces an edge near a horizon is checked in: a nearly extremal hole's
+ *  band (a = 0.9999: 0.03 wide) between two nodes is not missed. */
+const EDGE_SAMPLES = 32;
 /** Glyphs a lattice has at most. */
 const MAX_GLYPHS = 6000;
 
@@ -276,13 +279,15 @@ function spatial(g: readonly (readonly number[])[]): boolean {
  * Which points are cut off from the outside by a horizon, as inside a
  * spinning hole's inner horizon r₋, where x and y are space again and an
  * ellipse could be drawn. A grid at half the lattice's spacing (coarser, to
- * hold it to HORIZON_NODES) over the view and a cell round it is flood-filled from its edge through the nodes where
- * x and y are space (or the metric is undefined), never through one where
- * they are not; a point is cut off when neither its nearest node nor any of
- * that node's four neighbours was reached. O(the grid): one read a node.
- * A band thinner than the grid's spacing may be leaked through, and a view
- * with no horizon in it cuts nothing (zoomed in inside r₋, those ellipses
- * draw). Worked out once per view and metric values (web/main.ts shares it
+ * hold it to HORIZON_NODES) over the view and a cell round it is
+ * flood-filled from the outside (seeds at its corners and sides checked by a
+ * ray out to a thousand times the view) through the nodes where x and y are space (or
+ * the metric is undefined), never through one where they are not, nor
+ * along an edge with a horizon inside it (crosses: a nearly extremal hole's
+ * band, thinner than the grid); a point is cut off when neither its nearest
+ * node nor any of that node's four neighbours was reached. One read a node,
+ * and 31 more along each edge near a horizon, and eight rays. A view
+ * wholly inside r₋ is cut off whole. Worked out once per view and metric values (web/main.ts shares it
  * between a panel's light-cone rows).
  */
 export function behindHorizon(read: MetricRead, view: ConeView): (x: number, y: number) => boolean {
@@ -301,42 +306,107 @@ export function behindHorizon(read: MetricRead, view: ConeView): (x: number, y: 
   const nx = Math.ceil(w / hx) + 1;
   const ny = Math.ceil(h / hy) + 1;
   if (!(nx > 1 && ny > 1) || !Number.isFinite(nx * ny)) return () => false;
-  // 1: a horizon's (x and y not space); 2: reached from the edge.
+  // 1: a horizon's (x and y not space); 2: reached from the edge. And at
+  // each node its x, y block and that block's size (NaN where undefined).
   const state = new Uint8Array(nx * ny);
-  let blocked = false;
+  const block = new Float64Array(3 * nx * ny);
+  const norms: number[] = [];
+  let defined = false;
   for (let k = 0; k < ny; k++)
     for (let i = 0; i < nx; i++) {
+      const j = k * nx + i;
       const g = read(x0 + i * hx, y0 + k * hy);
-      if (g && g.length === 3 && !spatial(g)) {
-        state[k * nx + i] = 1;
-        blocked = true;
+      if (!g || g.length !== 3) {
+        block.fill(NaN, 3 * j, 3 * j + 3);
+        continue;
       }
+      defined = true;
+      [block[3 * j], block[3 * j + 1], block[3 * j + 2]] = [g[1][1], g[1][2], g[2][2]];
+      norms.push(Math.max(Math.abs(g[1][1]), Math.abs(g[1][2]), Math.abs(g[2][2])));
+      if (!spatial(g)) state[j] = 1;
     }
-  if (!blocked) return () => false;
+  if (!defined) return () => false;
+  // With no node inside a horizon the seeds below still decide: a view
+  // wholly inside r₋ has none outside, and is cut off whole.
+  norms.sort((a, b) => a - b);
+  const typical = norms[Math.floor(norms.length / 2)];
+  // A horizon thinner than the grid between two nodes (a nearly extremal
+  // hole's r₋ < r < r₊) shows as x and y's metric growing large, or
+  // changing fast, across the edge: those edges are checked at seven points
+  // between, and closed if one is not space. Others are not read again.
+  const between = (xa: number, ya: number, A: ArrayLike<number>, xb: number, yb: number, B: ArrayLike<number>) => {
+    let big = 0;
+    let change = 0;
+    for (let c = 0; c < 3; c++) {
+      const [p, q] = [A[c], B[c]];
+      if (!Number.isFinite(p) || !Number.isFinite(q)) return false;
+      big = Math.max(big, Math.abs(p), Math.abs(q));
+      change = Math.max(change, Math.abs(p - q) / Math.max(Math.abs(p), Math.abs(q), 1e-300));
+    }
+    if (!(big > 4 * typical) && !(change > 0.5)) return false;
+    for (let t = 1; t < EDGE_SAMPLES; t++) {
+      const g = read(xa + ((xb - xa) * t) / EDGE_SAMPLES, ya + ((yb - ya) * t) / EDGE_SAMPLES);
+      if (g && g.length === 3 && !spatial(g)) return true;
+    }
+    return false;
+  };
+  const at = (j: number): [number, number] => [x0 + (j % nx) * hx, y0 + Math.floor(j / nx) * hy];
+  const crosses = (j: number, j2: number) =>
+    between(...at(j), block.subarray(3 * j, 3 * j + 3), ...at(j2), block.subarray(3 * j2, 3 * j2 + 3));
   const queue = new Int32Array(nx * ny);
   let head = 0;
   let tail = 0;
-  const visit = (i: number, k: number) => {
+  const visit = (i: number, k: number, from = -1) => {
     const j = k * nx + i;
     if (state[j]) return;
+    if (from >= 0 && crosses(from, j)) return;
     state[j] = 2;
     queue[tail++] = j;
   };
-  for (let i = 0; i < nx; i++) {
-    visit(i, 0);
-    visit(i, ny - 1);
-  }
-  for (let k = 0; k < ny; k++) {
-    visit(0, k);
-    visit(nx - 1, k);
-  }
+  // Seeds: the grid's corners and the middles of its sides that are
+  // outside — a ray from each away from the view's middle, out to a
+  // thousand times the view's size in steps growing 30% a time, meets no
+  // point where x and y are not space (stepping finer where their metric
+  // grows large, as it does at a horizon). The edge of the view alone is
+  // no sure outside: zoomed in on a spinning hole it can run inside r₋.
+  const [mx, my] = [(view.lo[0] + view.hi[0]) / 2, (view.lo[1] + view.hi[1]) / 2];
+  const far = 1000 * Math.hypot(view.hi[0] - view.lo[0], view.hi[1] - view.lo[1]);
+  const outside = (j: number) => {
+    const [px, py] = at(j);
+    const d = Math.hypot(px - mx, py - my);
+    if (!(d > 0)) return false;
+    const [ux, uy] = [(px - mx) / d, (py - my) / d];
+    let [lx, ly] = [px, py];
+    let last: ArrayLike<number> = block.subarray(3 * j, 3 * j + 3);
+    for (let step = Math.min(hx, hy); step < far; step *= 1.3) {
+      const [qx, qy] = [lx + ux * step, ly + uy * step];
+      const g = read(qx, qy);
+      if (g && g.length === 3 && !spatial(g)) return false;
+      const here = g && g.length === 3 ? [g[1][1], g[1][2], g[2][2]] : [NaN, NaN, NaN];
+      if (between(lx, ly, last, qx, qy, here)) return false;
+      [lx, ly, last] = [qx, qy, here];
+    }
+    return true;
+  };
+  const [ci, ck] = [Math.floor(nx / 2), Math.floor(ny / 2)];
+  for (const [i, k] of [
+    [0, 0],
+    [nx - 1, 0],
+    [0, ny - 1],
+    [nx - 1, ny - 1],
+    [ci, 0],
+    [ci, ny - 1],
+    [0, ck],
+    [nx - 1, ck],
+  ])
+    if (state[k * nx + i] !== 1 && outside(k * nx + i)) visit(i, k);
   while (head < tail) {
     const j = queue[head++];
     const [i, k] = [j % nx, Math.floor(j / nx)];
-    if (i > 0) visit(i - 1, k);
-    if (i + 1 < nx) visit(i + 1, k);
-    if (k > 0) visit(i, k - 1);
-    if (k + 1 < ny) visit(i, k + 1);
+    if (i > 0) visit(i - 1, k, j);
+    if (i + 1 < nx) visit(i + 1, k, j);
+    if (k > 0) visit(i, k - 1, j);
+    if (k + 1 < ny) visit(i, k + 1, j);
   }
   return (x, y) => {
     const i = Math.round((x - x0) / hx);
@@ -350,7 +420,12 @@ export function behindHorizon(read: MetricRead, view: ConeView): (x: number, y: 
       [0, -1],
     ]) {
       const [a, b] = [i + di, k + dk];
-      if (a >= 0 && a < nx && b >= 0 && b < ny && state[b * nx + a] === 2) return false;
+      if (!(a >= 0 && a < nx && b >= 0 && b < ny && state[b * nx + a] === 2)) continue;
+      // Reached, and no horizon between it and the point.
+      const g = read(x, y);
+      const here = g && g.length === 3 ? [g[1][1], g[1][2], g[2][2]] : [NaN, NaN, NaN];
+      const j = b * nx + a;
+      if (!between(x, y, here, ...at(j), block.subarray(3 * j, 3 * j + 3))) return false;
     }
     return true;
   };
