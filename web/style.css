@@ -592,6 +592,17 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* A sweep across the rows selects only equation text: copy/cut already skip
+   widgets (main.ts selectionAsText), so don't paint them as selected either —
+   not the slider, nor its bound fields, which opt back into user-select. A
+   bound's own selection, made while editing it, still shows. */
+.eq-widget::selection,
+.eq-widget *::selection {
+  background: transparent;
+}
+.eq-slider-bound:focus::selection {
+  background: highlight;
+}
 .eq-slider {
   display: flex;
   align-items: center;
