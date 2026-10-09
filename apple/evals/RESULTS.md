@@ -1254,3 +1254,27 @@ shape called in 176 runs, every one followed by set_graph.
 
 Verdict: worse than the step before (named shapes 54 → 45), so reverted: the
 instance with its values stays in shape's answer.
+
+## The parametric form on request (2026-10-09), reverted
+
+`4761bba7`: shape gives an entry's parametric form, with its instance and
+values, when the name asks for one ("parametric circle", "… as a parametric
+curve"); otherwise the equation, as before, plus a line where the entry has
+both: `For its parametric form, call shape with "parametric circle".`
+
+`results/2026-10-09T084622Z-on-device.json`, 10 runs a task, against the
+values run (`2026-10-09T063021Z`): **49% ±4% (225/460) → 45% ±4%
+(209/460)**; named-shape tasks 54 → 40 of 100, the other 36 tasks 171 → 169.
+
+- The model never asked for it: parametric-circle called shape("circle") in
+  all 10 runs and never followed the new line; 0 → 1 (`x^2 + y^2 = 9` 4 times).
+  "parametric cardioid" was asked once in the whole run.
+- It didn't bring back drawing every form (torus 5 → 5, all one row), but the
+  extra line cost the substitution: hyperboloid 9 → 1 (the instance
+  `x^2/9 + y^2/9 - z^2/4 = 1` copied 6 times), cardioid 8 → 1 (`a x` dropped
+  again, or the a = 2 instance), unit-cube 7 → 4 and unit-cube-beside-sphere
+  6 → 1. sphere 6 → 8, cone 8 → 9.
+
+Verdict: worse, and the parametric form is never requested, so reverted.
+The model names the shape from the request's noun ("circle"); "as a
+parametric curve" doesn't reach the argument.
