@@ -1170,6 +1170,26 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
           'r < M + sqrt(M^2 - a^2); r = 2M; lightcones',
         'slider coordinates physics',
       ],
+      // The Poincaré disk's metric, painted by its Gaussian curvature: −1
+      // everywhere, so one even tint (its row colour's complement, for K < 0),
+      // however crowded the geodesics fanning from P look near the edge.
+      // Hover the disk to read K.
+      [
+        'curvature of the Poincaré disk (drag P)',
+        'view(x = -1.6..1.6, y = -1.2..1.2); ds^2 = 4(dx^2 + dy^2)/(1 - x^2 - y^2)^2; gaussian(x, y); x^2 + y^2 = 1; ' +
+          'P = (0.3, 0.2); a = [0..17] pi/9; geodesic(P, (cos(a), sin(a)))',
+        'draggable scalar-field geometry',
+      ],
+      // gaussian(x, y) under a spacetime metric is the curvature of space at
+      // one instant: of Schwarzschild's slice t = constant, Flamm's
+      // paraboloid, K = −M/r³, strongest at the horizon r = 2M (shaded,
+      // where the slice stops being space). Slide M; hover to read K.
+      [
+        'space around a black hole is curved',
+        'view(x = -16..16, y = -12..12); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
+          'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; gaussian(x, y); r < 2M',
+        'slider scalar-field coordinates physics',
+      ],
     ],
   ],
   [

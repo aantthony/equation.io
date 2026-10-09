@@ -403,6 +403,35 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     the metric degenerates or blows up, or the coordinates freeze (a
     particle falling toward r = 2M in Schwarzschild's t only creeps up the
     line x = 2M; in Eddington–Finkelstein it crosses and stops at r → 0).
+  - `gaussian(x, y)` alone on a row is the metric's Gaussian curvature K,
+    painted over the panel on the diverging scale of a surface's (row colour
+    where K > 0, its complement where K < 0, nothing at 0), scaled to the
+    90th percentile of |K| over the view (but at least a thousandth of its
+    largest), and read on hover where no curve or point is near. Where K is
+    only rounding (a flat metric) nothing is painted and hover reads 0.
+    `-gaussian(x, y)` and `c gaussian(x, y)` (c a number or slider) are
+    shaded to their own size too. `gaussian(P)` or `gaussian(0.3, 2)` is the
+    number at a point. K comes from the metric alone (Brioschi's formula, from g and its
+    first and second derivatives), taken in the coordinates it is written
+    in — r and phi, say — and then written in x and y (K is a scalar). The
+    Poincaré half-plane `(dx^2 + dy^2)/y^2` and disk
+    `4(dx^2 + dy^2)/(1 - x^2 - y^2)^2` have K = −1 everywhere, the
+    stereographic sphere `4(dx^2 + dy^2)/(1 + x^2 + y^2)^2` +1,
+    `dr^2 + sin(r)^2 dphi^2` +1, `dr^2 + r^2 dphi^2` 0 (painted nothing).
+    `meancurvature` needs a surface in space and is refused here.
+  - With a time, `gaussian(x, y)` is the curvature of space at one instant:
+    K of the slice t = constant, whose metric is g's spatial block (cross
+    terms like dt dphi do not reach it). Schwarzschild's slice
+    `dr^2/(1 - 2M/r) + r^2 dphi^2` is Flamm's paraboloid's: K = −M/r³. It
+    is left unpainted where the slice is not space (inside the horizon).
+  - On a spacetime diagram (a Lorentzian ds² in x and y alone),
+    `gaussian(x, y)` is K = R/2, half the scalar curvature (Brioschi's K is
+    R₁₂₁₂/det g for any signature): `-(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x)`
+    has K = 2M/r³, Rindler `-x^2 dy^2 + dx^2` 0, de Sitter's static patch
+    `-(1 - x^2/L^2) dy^2 + dx^2/(1 - x^2/L^2)` +1/L², anti-de Sitter's
+    −1/L². It is painted where the metric is Lorentzian (and, of mixed
+    signature, where it is positive definite: the plane's K there), and
+    left out where it degenerates.
 - Light cones: `lightcones` alone on a row draws the light cones of its
   panel's ds² metric on a lattice over the window (spaced like a tensor
   field's glyphs, a power of two near 56 px, and fixed in the plane as it

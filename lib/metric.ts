@@ -86,7 +86,7 @@ const placeholder = (k: number) => `[d${k}]`;
 
 /** ∂e/∂v, 0 for a part that does not read v (so abs(y) beside dx^2 is no
  *  obstacle), the derivative's rules otherwise. */
-function partial(e: Expr, v: string): Expr {
+export function partial(e: Expr, v: string): Expr {
   if (!freeVars(e).has(v)) return ZERO;
   if (e.kind === 'neg') return neg(partial(e.a, v));
   if (e.kind === 'bin') {

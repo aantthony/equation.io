@@ -50,7 +50,7 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, MAP, childrenOf, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { PAINT_CALL, lowerGeom } from './geom.ts';
@@ -69,6 +69,7 @@ import { type AxisMaps, unmappedReason, axisMapping, inlineFields, mapRowExpr, t
 import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from './surface-map.ts';
 import { type MetricSpec, type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
 import { METRIC_ROW, type PanelMetric, parseMetric } from './metric.ts';
+import { type Curvature, metricCurvature } from './metric-curvature.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { exceedsNodes } from './size.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
@@ -893,14 +894,40 @@ function classifyLightCone(
  * The surface of a row that is gaussian(S) or meancurvature(S) alone — which
  * draws S coloured by it — or null: for any other row, for one of the
  * document's own functions of those names, and for a point of a panel's
- * surface, gaussian(P), which is a number.
+ * surface or metric, gaussian(P) or gaussian(P + (0, 1)), which is a number.
  */
-function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (name: string) => boolean): Expr | null {
+function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (arg: Expr) => boolean): Expr | null {
   if (e.kind !== 'call' || (e.name !== 'gaussian' && e.name !== 'meancurvature') || fnNames.has(e.name)) return null;
   if (e.args.length !== 1) return null;
   const [arg] = e.args;
-  if ((arg.kind === 'vec' && arg.items.length === 2) || (arg.kind === 'var' && isPoint(arg.name))) return null;
+  if ((arg.kind === 'vec' && arg.items.length === 2) || isPoint(arg)) return null;
   return arg;
+}
+
+/**
+ * The constant factor a row multiplies a panel metric's gaussian(x, y) by —
+ * 1 for it alone, -1 for -gaussian(x, y), c for c gaussian(x, y) or
+ * gaussian(x, y)/(1/c) with c a number or slider — or null for any other row.
+ * Such a row is shaded to its own size, as gaussian(x, y) is.
+ */
+function gaussianFactor(e: Expr, fnNames: ReadonlySet<string>, constNames: ReadonlySet<string>): Expr | null {
+  const constant = (c: Expr) => c.kind === 'num' || (c.kind === 'var' && constNames.has(c.name));
+  const times = (a: Expr | null, b: Expr, op: '*' | '/'): Expr | null => a && { kind: 'bin', op, a, b };
+  switch (e.kind) {
+    case 'call':
+      return e.name === 'gaussian' && !fnNames.has('gaussian') ? { kind: 'num', value: 1 } : null;
+    case 'neg': {
+      const f = gaussianFactor(e.a, fnNames, constNames);
+      return f && { kind: 'neg', a: f };
+    }
+    case 'bin':
+      if (e.op === '*' && constant(e.a)) return times(gaussianFactor(e.b, fnNames, constNames), e.a, '*');
+      if (e.op === '*' && constant(e.b)) return times(gaussianFactor(e.a, fnNames, constNames), e.b, '*');
+      if (e.op === '/' && constant(e.b)) return times(gaussianFactor(e.a, fnNames, constNames), e.b, '/');
+      return null;
+    default:
+      return null;
+  }
 }
 
 export function analyzePrepared(document: PreparedDocument, context: AnalysisContext = {}): Analysis {
@@ -1061,6 +1088,21 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       state = { error: err instanceof Error ? err.message : String(err) };
     }
     return (panelMetrics[at] = state);
+  };
+  // And its curvature, gaussian(x, y) there, worked out when first read.
+  const panelCurvatures: (Curvature | undefined)[] = [];
+  const curvatureOf = (at: number): Curvature => {
+    const state = metricOf(at);
+    if (!state) throw new Error('This panel has no metric.');
+    if ('error' in state) throw new Error("This panel's metric (its ds^2 row) has an error.");
+    const known = panelCurvatures[at];
+    if (known) return known;
+    const parsed = parseExpr(rows[panelMetricRows[at]![0]].text, fnNames, listNames, valueNames);
+    if (parsed.kind !== 'eq') throw new Error('A metric row is ds^2 = … in the differentials of its coordinates.');
+    return (panelCurvatures[at] = metricCurvature(parsed.r, state.metric, {
+      written: e => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts),
+      fields: fieldEnv,
+    }));
   };
   const seenViewKinds = new Set<string>();
   let panel = 0;
@@ -1320,11 +1362,27 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       // (it would be a curve's sliver), here on the row that draws it.
       const plane = (e: Expr) => ['x', 'y', 'z'].some(v => freeVars(e).has(v));
       const exact = graphArgs !== null || !plane(rawParsed);
-      // On a panel drawn on a surface, gaussian(x, y) reads that surface.
+      // On a panel drawn on a surface, gaussian(x, y) reads that surface;
+      // on one with a metric (a ds^2 row), that metric.
       const surface = panelSurfaces[panel];
-      const rowOpts = surface ? { ...ropts, surface } : ropts;
+      const at = panel;
+      const rowOpts = surface
+        ? { ...ropts, surface }
+        : panelMetricRows[panel]
+          ? { ...ropts, metric: { gaussian: () => curvatureOf(at).K } }
+          : ropts;
       // gaussian(S) alone: S coloured by its curvature (lib/plot.ts PAINT_CALL).
-      const painted = curvaturePaint(rawParsed, fnNames, n => defs.pointDims.get(n) === 2);
+      const painted = curvaturePaint(rawParsed, fnNames, arg => {
+        if (arg.kind === 'var') return defs.pointDims.get(arg.name) === 2;
+        // An expression of points, P + (0, 1): two components.
+        if (!ropts.comps || arg.kind === 'vec') return false;
+        try {
+          const lowered = lowerGeom(arg, ropts.comps, () => null, ropts.isList);
+          return lowered.kind === 'vec' && lowered.items.length === 2;
+        } catch {
+          return false;
+        }
+      });
       const resolved = resolveRow(
         graphArgs !== null
           ? exactCases(rawParsed)
@@ -1448,6 +1506,35 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         )
           row.cls = { ...row.cls, object: { ...object, autoscale: true } };
       }
+      // gaussian(x, y) on a panel with a metric: its curvature, shaded to
+      // its own size over the view, and said what it is.
+      let curvatureInfo: string | null = null;
+      const factor =
+        !surface && panelMetricRows[panel] && row.cls.object.kind === 'scalar-field'
+          ? gaussianFactor(rawParsed, fnNames, constNames)
+          : null;
+      if (factor && row.cls.object.kind === 'scalar-field') {
+        const { size, pulled } = curvatureOf(panel);
+        const rounding: Expr =
+          factor.kind === 'num' && Math.abs(factor.value) === 1
+            ? size
+            : { kind: 'bin', op: '*', a: { kind: 'call', name: 'abs', args: [factor] }, b: size };
+        row.cls = {
+          ...row.cls,
+          object: { ...row.cls.object, autoscale: true, rounding, ...(pulled ? { pulled } : {}) },
+        };
+        const { time, lorentzian } = (metricOf(panel) as { metric: PanelMetric }).metric;
+        // The row's colour is where the row is positive: where K is
+        // negative under a negative factor (-gaussian(x, y)).
+        let sign = 1;
+        try {
+          sign = Math.sign(evaluate(factor, constEnv)) || 1;
+        } catch {
+          /* as written */
+        }
+        const [up, down] = sign < 0 ? ['<', '>'] : ['>', '<'];
+        curvatureInfo = `${time !== undefined ? `the curvature of space at one instant (K of the slice ${time} = constant)` : lorentzian ? "the spacetime's curvature K = R/2, half its scalar curvature" : "the metric's Gaussian curvature K"}: row colour where K ${up} 0, its complement where K ${down} 0`;
+      }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);
         continue;
@@ -1460,7 +1547,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       }
       // A solid whose shape reads sliders is checked for folds at their values.
       checkSolid(row.cls.object, ropts.consts!);
-      const hint = curveHint(row.cls.object, row.text);
+      const hint = curvatureInfo ?? curveHint(row.cls.object, row.text);
       if (hint) row.info = hint;
       // `e = 0.6` parsed with e already a number; only the text still says e.
       // `i = [0..9]` is a family of such claims, one per member.

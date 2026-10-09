@@ -132,7 +132,8 @@ export interface Layers2D {
   ineqs?: Ineq2D[];
   projections?: Projected2D[];
   bifs?: Bif2D[];
-  scalars?: Curve2D[];
+  /** `gain` multiplies F before it is shaded (0.6 without). */
+  scalars?: (Curve2D & { gain?: number })[];
   complexes?: Curve2D[];
   curves?: Curve2D[];
 }
@@ -461,6 +462,7 @@ uniform vec2 uUpp;
 uniform vec2 uRes;
 uniform vec2 uOrigin;
 uniform vec3 uColor;
+uniform float uGain;
 uniform float t;
 ${paramDecls(params)}
 out vec4 outColor;
@@ -473,7 +475,8 @@ void main() {
   // Signed shade, as in the static preview (worker/og.ts shadeScalar):
   // positive toward the row color, negative toward its complement, so a
   // field that changes sign (sin(x), or plain x) reads on both sides of 0.
-  float s = eq_tanh(v * 0.6);
+  // uGain is 0.6, or what brings gaussian(x, y)'s typical size to ~1.
+  float s = eq_tanh(v * uGain);
   float a = 0.55 * abs(s);
   if (a < 0.004) discard;
   outColor = vec4(s >= 0.0 ? uColor : vec3(1.0) - uColor, a);
@@ -1354,7 +1357,10 @@ export class Renderer2D {
     for (const q of layers.ineqs ?? []) drawField(q, (f, ps) => ineqFrag(f, q.edges, ps));
     for (const q of layers.projections ?? []) drawField(q, (f, ps) => projFrag(f, q.relation, q.slope, ps));
     for (const b of layers.bifs ?? []) drawField(b, bifFrag);
-    for (const s of layers.scalars ?? []) drawField(s, scalarFrag);
+    for (const s of layers.scalars ?? [])
+      drawProgram(scalarFrag(s.field, s.params), s.color, s.params, s.uniforms, prog =>
+        gl.uniform1f(gl.getUniformLocation(prog, 'uGain'), s.gain ?? 0.6),
+      );
     for (const c of layers.complexes ?? []) drawField(c, complexFrag);
     for (const c of layers.curves ?? []) drawField(c, (field, params) => curveFrag(field, params, c.graphEval));
   }

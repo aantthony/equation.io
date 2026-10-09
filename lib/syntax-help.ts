@@ -150,7 +150,7 @@ const signatures: Record<string, [string, string]> = {
   frame: ['frame(C, u0)', 'The Frenet frame of a curve in u at u = u0: unit T and N, and B in 3D'],
   gaussian: [
     'gaussian(S) or gaussian(S, u0, v0)',
-    'Gaussian curvature K of a surface in u, v; alone on a row it colours S by K. On an on(…) panel: gaussian(x, y)',
+    'Gaussian curvature K of a surface in u, v; alone on a row it colours S by K. On an on(…) panel, or under a ds^2 = … metric row, gaussian(x, y) paints K (with a time, of space at one instant)',
   ],
   geodesic: [
     'geodesic(S, (u0, v0), (du, dv)) or geodesic(S, P, d, length)',

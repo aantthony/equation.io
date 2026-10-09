@@ -244,6 +244,8 @@
   "curved-space-spacetime/light-cones-closing-at-a-horizon": "view(x = 0..12, y = -1..13); M = 1; ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x); x < 2M; lightcones; geodesic(([2..5] 2, 0), (0, 1)); lightray((3, 0), ([-1, 1], 1))",
   "curved-space-spacetime/eddington-finkelstein-through-the-horizon": "view(x = -0.5..8, y = -1..9); M = 1; ds^2 = -(1 - 2M/x) dy^2 + 2 dy dx; x < 2M; lightcones; geodesic(([3..6], 0), (0, 1)); lightray(([2..12]/4, 0), (0, 1))",
   "curved-space-spacetime/light-speed-ellipses-around-a-spinning-black-hole": "view(x = -3.2..3.2, y = -2.4..2.4); M = 1; a = clamp(0.95, -1, 1); r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 - 4 M a/r dt dphi + r^2/(r^2 - 2M r + a^2) dr^2 + (r^2 + a^2 + 2M a^2/r) dphi^2; r < M + sqrt(M^2 - a^2); r = 2M; lightcones",
+  "curved-space-spacetime/curvature-of-the-poincare-disk-drag-p": "view(x = -1.6..1.6, y = -1.2..1.2); ds^2 = 4(dx^2 + dy^2)/(1 - x^2 - y^2)^2; gaussian(x, y); x^2 + y^2 = 1; P = (0.3, 0.2); a = [0..17] pi/9; geodesic(P, (cos(a), sin(a)))",
+  "curved-space-spacetime/space-around-a-black-hole-is-curved": "view(x = -16..16, y = -12..12); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; gaussian(x, y); r < 2M",
   "systems/curve-intersection": "x^2 + y^2 = 4; x y = 1; (x^2 + y^2 - 4, x y - 1) = (0, 0); count({x^2 + y^2 = 4, x y = 1})",
   "systems/three-planes": "within = (x - 1.5)^2 + (y + 0.5)^2 + (z - 3)^2 < 4; x + y = {within: 1}; x - y = {within: 2}; z = {within: 3}; (x + y, x - y, z) = (1, 2, 3)",
   "systems/sphere-meets-plane": "(x^2 + y^2 + z^2, z) = (9, 1)",

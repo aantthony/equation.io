@@ -39,6 +39,7 @@ import { type Prog, compileProg, compileSampler, run } from '../lib/vm.ts';
 import { type AxisMap, type AxisMaps, axisMapping, shownRange, toScreen, toScreenOrEdge } from '../lib/axis-map.ts';
 import { type ScreenBox, invert2, planeInverse, planeLines, planeShapes, planeWorldBox } from '../lib/plane-map.ts';
 import { axisTicks } from '../lib/axis-ticks.ts';
+import { curvatureGain } from '../lib/metric-curvature.ts';
 
 export const OG_WIDTH = 600;
 export const OG_HEIGHT = 315;
@@ -243,6 +244,54 @@ function sampleField(r: Raster, v: View2D, prog: Prog, env: EvalEnv): Float64Arr
   return grid;
 }
 
+/** The pixels between samples of a metric's curvature in the preview. */
+const CURVATURE_STEP = 4;
+
+/**
+ * A field sampled as sampleField does, but only every `step` pixels, the
+ * rest filled in bilinearly — or, in a cell with an undefined corner, read
+ * pixel by pixel: for a smooth field whose every sample is costly,
+ * gaussian(x, y) under a metric.
+ */
+function sampleFieldCoarse(r: Raster, v: View2D, prog: Prog, env: EvalEnv, step: number): Float64Array {
+  const { w, h } = r;
+  const cw = Math.ceil(w / step) + 1;
+  const ch = Math.ceil(h / step) + 1;
+  const coarse = new Float64Array(cw * ch);
+  const { vars, stack, slotX, slotY } = env;
+  for (let J = 0; J < ch; J++) {
+    vars[slotY] = v.cy + (h / 2 - J * step) * (v.upp / (v.ratio ?? 1));
+    for (let I = 0; I < cw; I++) {
+      vars[slotX] = v.cx + (I * step - w / 2) * v.upp;
+      coarse[J * cw + I] = run(prog, vars, stack);
+    }
+  }
+  const grid = new Float64Array((w + 1) * (h + 1));
+  for (let j = 0; j <= h; j++) {
+    const J = Math.min(Math.floor(j / step), ch - 2);
+    const fy = j / step - J;
+    for (let i = 0; i <= w; i++) {
+      const I = Math.min(Math.floor(i / step), cw - 2);
+      const fx = i / step - I;
+      const a = coarse[J * cw + I],
+        b = coarse[J * cw + I + 1],
+        c = coarse[(J + 1) * cw + I],
+        d = coarse[(J + 1) * cw + I + 1];
+      const filled = (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+      if (Number.isFinite(filled)) {
+        grid[j * (w + 1) + i] = filled;
+        continue;
+      }
+      // A cell at the field's edge (a horizon's disc): each pixel of it
+      // read on its own, so the edge stays sharp rather than stepped.
+      vars[slotY] = v.cy + (h / 2 - j) * (v.upp / (v.ratio ?? 1));
+      vars[slotX] = v.cx + (i - w / 2) * v.upp;
+      grid[j * (w + 1) + i] = run(prog, vars, stack);
+    }
+  }
+  return grid;
+}
+
 /** Paint the zero set of a sampled field using a distance estimate. */
 function strokeZeroSet(r: Raster, grid: Float64Array, c: [number, number, number]) {
   const { w, h } = r;
@@ -412,14 +461,14 @@ function projectedMask(
   return mask;
 }
 
-function shadeScalar(r: Raster, grid: Float64Array, c: [number, number, number]) {
+function shadeScalar(r: Raster, grid: Float64Array, c: [number, number, number], gain = 0.6) {
   const { w, h } = r;
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       const value = grid[j * (w + 1) + i];
       if (!Number.isFinite(value)) continue;
       // Signed shade: positive toward the row color, negative toward its complement.
-      const s = Math.tanh(value * 0.6);
+      const s = Math.tanh(value * gain);
       const tint: [number, number, number] = s >= 0 ? c : [1 - c[0], 1 - c[1], 1 - c[2]];
       blend(r, i, j, tint, Math.abs(s) * 0.55);
     }
@@ -769,9 +818,36 @@ function renderRow2D(
       }
       return;
     }
-    case 'scalar2d':
-      shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color);
+    case 'scalar2d': {
+      // gaussian(x, y) under a metric: shaded to its own size over the
+      // window, as the app shades it (lib/metric-curvature.ts).
+      let gain = 0.6;
+      // (Pulled back to x and y it is too costly a pixel: previewGap falls back.)
+      if (cpu.pulled) return;
+      if (cpu.autoscale) {
+        const K = compile(cpu.expr);
+        const size = cpu.rounding ? compile(cpu.rounding) : null;
+        const at = (p: Prog) => (x: number, y: number) => {
+          env.vars[env.slotX] = x;
+          env.vars[env.slotY] = y;
+          return run(p, env.vars, env.stack);
+        };
+        const halfW = (r.w / 2) * v.upp;
+        const halfH = (r.h / 2) * (v.upp / (v.ratio ?? 1));
+        gain = curvatureGain(at(K), size ? at(size) : () => 0, [
+          [v.cx - halfW, v.cx + halfW],
+          [v.cy - halfH, v.cy + halfH],
+        ]);
+        // Rounding everywhere: nothing to paint.
+        if (gain === 0) return;
+        // A smooth field built of many terms: sampled every CURVATURE_STEP
+        // pixels and filled in between.
+        shadeScalar(r, sampleFieldCoarse(r, v, K, env, CURVATURE_STEP), color, gain);
+        return;
+      }
+      shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color, gain);
       return;
+    }
     case 'pregion': {
       // The app's fill (web/render2d.ts regions): the sampled triangles'
       // union, at the inequality fill's opacity, with no outline.
@@ -1396,6 +1472,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   }
   const type = cpu.type;
   if (type === 'trail') return 'trail(point) accumulates live motion history; no static preview is available';
+  if (cpu.type === 'scalar2d' && cpu.pulled)
+    return 'this metric mixes x and y with coordinates defined from them, so its curvature is too costly to shade for a static preview; the live app paints it on the GPU';
   if (loopPasses(cpu) > OG_LOOP_PASSES)
     return 'a recursive function here may run thousands of passes per pixel, too slow for a static preview; the live app runs them on the GPU';
   if (!needs3D) {

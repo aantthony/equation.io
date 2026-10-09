@@ -151,8 +151,7 @@ smallest θ that fits (decimate) — so tight turns keep theirs. A metric is che
 at sample points over scales from 0.001 to 100 000 round the origin, so a
 disc of radius 0.1 and a hole of mass 10 000 both pass; a small feature far
 from the origin could still be missed. Follow-ups: tidal glyphs (the
-geodesic deviation tensor), painting a metric's
-curvature, time-dependent metrics (τ not cyclic: a third coordinate in the
+geodesic deviation tensor), time-dependent metrics (τ not cyclic: a third coordinate in the
 state, and t meaning both), more coordinates (3D slices, Kerr off the
 equator), metrics on mapped (`view`) panels, hover readouts along a
 geodesic, and the link preview, which falls back for these rows.
@@ -231,6 +230,53 @@ light cones in 3D panels (not drawn there yet) and on mapped panels, a
 time orientation the user can choose (`lightcones(T)` with a future
 direction), the cone's tilt as a readout on hover, the link preview
 (falls back), and drawing the past half of an indicatrix's cone.
+
+**Implemented (curvature of a metric).** On a panel with a ds^2 row,
+`gaussian(x, y)` alone on a row paints the metric's Gaussian curvature K on
+the diverging scale of #255's surfaces, per pixel, with a gain from the
+90th percentile of |K| over the view (kept until the view or a value it
+reads changes); hovering where no curve is near reads K. `gaussian(P)` is
+the number at a point (lib/metric-curvature.ts). K is Brioschi's formula,
+from E, F, G and their first and second derivatives with no square root,
+which is R₁₂₁₂/det g for any signature: for a 2D Lorentzian metric K = R/2
+(de Sitter-like positive, 2M/r³ for Schwarzschild's (t, r) plane). It is
+taken in the coordinates the metric is written in (r and phi, with other
+coordinate fields written in them) and then composed with the coordinate
+map, since K is a scalar: the pull-back to x and y would need the map's
+third derivatives, and in float32 a flat `dr^2 + r^2 dphi^2` read that way
+is noise. Only a metric mixing x and y with fields of them is pulled back
+first. With a time it is K of the slice t = constant (g's spatial block),
+the curvature of space at one instant — Flamm's −M/r³ for Schwarzschild —
+masked where the slice is not positive definite (inside a horizon). The
+gain counts only samples where K is real: above 10⁻⁶ of the terms it is
+the difference of (carried as `rounding` beside the field), and — for a K
+pulled back to x and y, whose terms can be as small as its K — above
+10⁻⁹·min(1/R, 1/R²), R the view's half-size or its distance from the
+origin if more (so zooming in at r = 1000 still shows K = −10⁻⁹). Known
+limit: below R ≈ 10⁻⁶ a pulled-back K's rounding beats that floor (a flat
+mixed metric at ±10⁻⁶ reads K ≈ −0.001 on hover, though nothing visible is
+painted); a fix would take the terms' size from the written g and J. Where
+under 1% of samples are real the gain is 0 (nothing painted, hover reads
+0); the typical size is at least a thousandth of the largest, so a local
+bump's thin tail does not saturate (lib/metric-curvature.ts curvatureGain;
+divergingGain applies that cap only to a metric's K, so #255's surfaces
+are as they were). A constant K is one even tint. In the app the
+evaluators are compiled once per row and gainRead schedules reads: a K in
+its own coordinates is read finely (25 × 25, ~5 ms) at most every 120 ms
+as things move; a pulled-back one on 13 × 13 then, finely at least every
+500 ms, or ten times a fine read's cost if more (so t-animated metrics
+settle without taking over the main thread), and once things stand still. The
+link preview shades with the same gain, sampling K every 4 pixels (each
+pixel where a cell meets an undefined part, like a horizon's disc), and
+falls back for a pulled-back K. `-gaussian(x, y)` and `c gaussian(x, y)`
+are shaded the same way, the row's note saying which colour is which. Follow-ups: the Riemann and
+Ricci tensors for 3+ dimensions (a 3D slice, Kerr off the equator), tidal
+glyphs (the geodesic deviation tensor, from R^a_bcd). On a spacetime
+diagram (a 2D Lorentzian panel) `gaussian(x, y)` is K = R/2 where the
+metric is Lorentzian, the plane's K where a mixed metric is positive
+definite, and undefined where it degenerates (tested: 2M/r³ in
+Schwarzschild's r and t and in Eddington–Finkelstein's, 0 for Rindler,
+±1/L² for de Sitter and anti-de Sitter).
 
 - `curvature(C)` and `torsion(C)` of a parametric curve in u, as a
   scalar along the curve (color the curve by it, or read out at a point).

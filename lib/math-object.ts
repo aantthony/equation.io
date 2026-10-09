@@ -84,8 +84,16 @@ export type MathObject =
       readonly expr: Expr;
       readonly dimension?: 3;
       /** Shaded with a gain that brings its typical size on the panel's
-       *  surface to about 1, rather than as it stands: gaussian(x, y). */
+       *  surface (or over the view) to about 1, rather than as it stands:
+       *  gaussian(x, y). */
       readonly autoscale?: true;
+      /** The size of the terms an autoscaled field is the difference of
+       *  (lib/metric-curvature.ts): where the field is a tiny part of it, it
+       *  is rounding, and is not scaled up. */
+      readonly rounding?: Expr;
+      /** The field was pulled back to x and y (lib/metric-curvature.ts
+       *  Curvature.pulled): its rounding is floored by the view too. */
+      readonly pulled?: true;
     }
   | { readonly kind: 'color-field'; readonly space: ColorSpace; readonly channels: readonly Expr[] }
   | { readonly kind: 'vector-field'; readonly components: Components }
