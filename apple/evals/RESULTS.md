@@ -1404,3 +1404,24 @@ down unit-cube-beside-sphere (points for the cube's corners), cardioid
 
 Verdict: kept: no worse, for 122 fewer tool tokens. (Close: the same count,
 with 8 flips, is all a single greedy sample can say.)
+
+### No list_kinds tool, kept
+
+`27f3950` takes list_kinds out of the app's tools (called in 11 of 1,380
+runs); the lookup line drops "list_kinds gives each one's smallest form",
+and kind_examples' description says "one kind from the instructions' list".
+Instructions 1,554 → 1,543 tokens, tools 1,187 → 1,086 (−101; −223 with
+check, against 1,309).
+
+`results/2026-10-09T165854Z-on-device.json`, greedy, 3 runs a task (identical
+but two replies): **50% (23 of 46)**, the same again. 6 tasks flipped, 3 each
+way: up unit-cube-beside-sphere, zoom-zero, points; down circle-and-line
+(`circle: circle((0,0),2)`, a label copied into the row), spin-3d (a sphere
+added), derivative (the function's own curve dropped). Named-shape tasks 6
+of 10.
+
+Verdict: kept, no worse for 101 fewer tokens (close: same count, 6 flips).
+function_doc and search_functions stay (their removal measured 5 tasks
+worse); check and list_kinds are gone from the app. Their code (lib, the
+bridge, the eval service) stays: the voice prototype, the reference
+variant's check and the tests use it.
