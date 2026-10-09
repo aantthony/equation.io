@@ -11,7 +11,7 @@
  *
  * The app's chat calls the voice prototype's graph tools here too (graph,
  * moveView, animateSlider), and its own (check, searchFunctions,
- * functionDoc, listKinds, kindExamples, shape, from lib/assistant-tools.ts), and
+ * functionDoc, kindExamples, shape, from lib/assistant-tools.ts), and
  * awaits what they return.
  */
 
@@ -20,7 +20,6 @@ import {
   checkRows,
   functionDoc,
   kindExamples,
-  listKinds,
   searchFunctions,
   shape,
   type ShapeValue,
@@ -85,7 +84,6 @@ declare global {
       check(rows: string[]): CheckedRow[];
       searchFunctions(query: string): string;
       functionDoc(name: string): Promise<string>;
-      listKinds(): Promise<string>;
       kindExamples(kind: string): Promise<string>;
       shape(name: string, values?: ShapeValue[]): Promise<string>;
     };
@@ -108,7 +106,6 @@ export function connectNativeApp(graph: NativeGraph): void {
     check: rows => checkRows(rows),
     searchFunctions: query => searchFunctions(query),
     functionDoc: async name => functionDoc(await assistantData(), name),
-    listKinds: async () => listKinds(await assistantData()),
     kindExamples: async kind => kindExamples(await assistantData(), kind),
     shape: async (name, values) => shape(await assistantData(), name, values ?? []),
   };

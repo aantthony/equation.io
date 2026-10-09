@@ -87,7 +87,6 @@ struct RunnerError: Error, CustomStringConvertible {
     return tool("animate_slider", args)
   }
   func check(_ rows: [String]) async -> String { tool("check", ["equations": rows]) }
-  func listKinds() async -> String { tool("list_kinds", [:]) }
   func kindExamples(_ kind: String) async -> String { tool("kind_examples", ["kind": kind]) }
   func shape(_ name: String, values: [[String: Any]]) async -> String {
     tool("shape", ["name": name, "values": values])

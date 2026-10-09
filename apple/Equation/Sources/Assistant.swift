@@ -123,7 +123,6 @@ enum ChatModel {
   /// What rows would draw, without drawing them (lib/assistant-tools.ts checkRows).
   func check(_ rows: [String]) async -> String
   // What the language has (lib/assistant-tools.ts), as text.
-  func listKinds() async -> String
   func kindExamples(_ kind: String) async -> String
   /// `values`: each a parameter's name and value, as `{"name", "value"}`.
   func shape(_ name: String, values: [[String: Any]]) async -> String
@@ -269,24 +268,6 @@ struct Check: Tool {
   func call(arguments: Arguments) async throws -> String {
     await access.check(arguments.equations.map(tidy))
   }
-}
-
-struct ListKinds: Tool {
-  let access: any GraphTools
-  let name = "list_kinds"
-  let description = """
-    List every kind of shape a row can draw (curve, region, surface, solid, \
-    point, …), each with its smallest form. Read it before writing a kind of \
-    row you haven't written in this conversation.
-    """
-
-  @Generable
-  struct Arguments {
-    @Guide(description: "Why you are reading it, in a few words.")
-    var reason: String
-  }
-
-  func call(arguments: Arguments) async throws -> String { await access.listKinds() }
 }
 
 struct KindExamples: Tool {
