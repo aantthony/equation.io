@@ -467,7 +467,8 @@ function findShape(shapes: readonly ShapeData[], query: string): ShapeData | und
 /**
  * shape(name): a named curve or surface's forms in this language, each with
  * its parameters and one instance, from the reference (docs/reference/shapes.md);
- * on a miss, every name. Rows come before their kind (a `kind: rows` line was
+ * on a miss, every name. One form only, the equation where there is one (the
+ * model drew every form it was shown, as separate rows). Rows come before their kind (a `kind: rows` line was
  * copied into a row whole), and the answer ends by saying it drew nothing: the
  * model took the entry for a drawing and replied without set_graph.
  */
@@ -475,14 +476,13 @@ export function shape(data: AssistantData, name: string): string {
   const found = findShape(data.shapes, name);
   if (!found) return `No shape "${name.trim()}". Shapes: ${data.shapes.map(s => s.name.toLowerCase()).join(', ')}.`;
   const rows = (list: string[]) => JSON.stringify(list);
+  const form = found.forms.find(f => f.kind.startsWith('implicit')) ?? found.forms[0];
   return [
     `${found.name}${found.aliases.length ? ` (also ${found.aliases.join(', ')})` : ''}: ${found.intro.replace(/\s+/g, ' ')}`,
-    ...found.forms.flatMap(form => [
-      `- ${rows(form.rows)} (${form.kind})${form.note ? ` — ${form.note}` : ''}`,
-      ...form.params.map(([param, meaning]) => `  ${param}: ${meaning}`),
-      `  e.g. ${rows(form.example.rows)}${form.example.note ? ` — ${form.example.note}` : ''}`,
-    ]),
+    `- ${rows(form.rows)} (${form.kind})${form.note ? ` — ${form.note}` : ''}`,
+    ...form.params.map(([param, meaning]) => `  ${param}: ${meaning}`),
+    `  e.g. ${rows(form.example.rows)}${form.example.note ? ` — ${form.example.note}` : ''}`,
     ...(found.pitfall ? [`Pitfall: ${found.pitfall}`] : []),
-    'Nothing is drawn yet: adapt a form to the request and pass its rows to set_graph.',
+    'Nothing is drawn yet: adapt this form to the request and pass its rows to set_graph.',
   ].join('\n');
 }

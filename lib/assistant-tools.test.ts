@@ -122,12 +122,14 @@ describe('shape', () => {
     expect(first('lissajous')).toBe('Lissajous curve');
     expect(first('limacon')).toBe('Limaçon');
   });
-  it('answers with the forms, their parameters and an instance; on a miss, every name', () => {
+  it('answers with one form, the equation first, its parameters and an instance; on a miss, every name', () => {
     const answer = shape(data, 'cardioid');
-    expect(answer).toContain('- ["(a(1 + cos(2pi u)) cos(2pi u), a(1 + cos(2pi u)) sin(2pi u))"] (pcurve)');
+    expect(answer).toContain('- ["(x^2 + y^2 - a x)^2 = a^2(x^2 + y^2)"] (implicit2d)');
+    expect(answer).not.toContain('(pcurve)');
     expect(answer).toContain('  a: ');
-    expect(answer).toContain('  e.g. ["(2(1 + cos(2pi u)) cos(2pi u), 2(1 + cos(2pi u)) sin(2pi u))"]');
-    expect(answer.split('\n').length).toBeLessThan(12);
+    expect(answer).toContain('  e.g. ["(x^2 + y^2 - 2x)^2 = 4(x^2 + y^2)"]');
+    expect(shape(data, 'helix')).toContain('(pcurve)');
+    expect(answer.split('\n').length).toBeLessThan(8);
     expect(answer).toMatch(/Nothing is drawn yet: .*set_graph\.$/);
     const miss = shape(data, 'kidney bean');
     expect(miss).toMatch(/^No shape "kidney bean"\. Shapes: circle, /);
