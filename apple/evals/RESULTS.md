@@ -1470,3 +1470,31 @@ model also passes coordinates and the request's own variables as values, which
 fall back to the example. Next candidates: refuse values named x, y, z, u, v,
 r or θ outright (they are never parameters), and a sine rose in the
 catalogue.
+
+## Sampled again: the runner's own sampling mode (2026-10-10)
+
+`af92fbf`: the runner takes `--sampling default|greedy` and samples by
+default; the app stays greedy (`ChatModel.options`). Results record
+`sampling`, and report.ts prints it (older greedy files are recognised by
+their `options`). `c099a4e` then deletes the unused ListKinds struct and its
+bridge (no effect on what the model sees).
+
+`results/2026-10-09T210630Z-on-device.json`: HEAD's tools and knowledge (no
+check, no list_kinds, shape with values), **sampled, 10 runs a task**, against
+the last sampled run (`2026-10-09T063021Z`, with check, list_kinds and shape
+without values): **49% ±4% (225/460) → 45% ±4% (206/460)**, tasks passed per
+repetition 17–23. Named-shape tasks 54 → 44 of 100, the other 36 tasks
+171 → 162. Instructions 1,556 → 1,544 tokens, tools 1,309 → 1,205.
+
+So the greedy runs' "no worse" steps add up to a loss here, about two
+standard errors (each greedy step was one sample a task). Movers:
+- Down: cardioid 8 → 0 (the request's r = 1 + cos θ passed as values `r = 1,
+  θ = 2.5`; neither is a parameter, so a = 2 from the example, 9 times),
+  hyperboloid 9 → 2 (`radius = 2` gives the right rows, but runs add an unused
+  `a = 2` row or the instance), unit-cube 7 → 3 and unit-cube-beside-sphere
+  6 → 2 (`side = 1` is right; failures add rows), saddle 10 → 7, label-vertex
+  3 → 0, zoom-out 7 → 4.
+- Up: lissajous 3 → 9 (the instance, 9 times), torus 5 → 9, shift-up 5 → 9.
+- polar-rose 0 and parametric-circle 0, as before.
+
+This run is the reference for the next step.
