@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { type Expr, evaluate, parseExpr } from './expr.ts';
-import { brioschi, curvatureFloor, curvatureGain, isRealCurvature } from './metric-curvature.ts';
+import {
+  type GainClock,
+  GAIN_FINE_MS,
+  brioschi,
+  curvatureFloor,
+  curvatureGain,
+  gainRead,
+  isRealCurvature,
+} from './metric-curvature.ts';
 import { divergingGain } from './surface-geometry.ts';
 import { plotReadout } from './plot.ts';
 
@@ -189,14 +197,16 @@ describe('Brioschi’s formula', () => {
   });
 });
 
-const box = (half: number): [[number, number], [number, number]] => [
+type Box = [[number, number], [number, number]];
+const box = (half: number): Box => [
   [-half, half],
   [-half, half],
 ];
 
 /** The gain gaussian(x, y) (or `row`) is shaded with over ±half, as the
  *  app reads it, and its K and term size as functions. */
-function gainOf(rows: string[], half: number, row = 'gaussian(x, y)') {
+function gainOf(rows: string[], view: number | Box, row = 'gaussian(x, y)') {
+  const window = typeof view === 'number' ? box(view) : view;
   const { r, env } = analyze([...rows, row]);
   if (r.error) throw new Error(r.error);
   const o = r.cls!.object;
@@ -208,7 +218,17 @@ function gainOf(rows: string[], half: number, row = 'gaussian(x, y)') {
       return NaN;
     }
   };
-  return { gain: curvatureGain(at(o.expr), at(o.rounding), box(half)), K: at(o.expr), size: at(o.rounding) };
+  const pulled = !!o.pulled;
+  const K = at(o.expr);
+  const size = at(o.rounding);
+  return {
+    gain: curvatureGain(K, size, window, { pulled }),
+    K,
+    size,
+    /** Whether hover reads K at (x, y), or 0 (web/main.ts). */
+    real: (x: number, y: number) => isRealCurvature(K(x, y), size(x, y), curvatureFloor(window, pulled)),
+    pulled,
+  };
 }
 
 describe('the gain gaussian(x, y) is shaded with', () => {
@@ -219,10 +239,10 @@ describe('the gain gaussian(x, y) is shaded with', () => {
       [...POLAR, 'ds^2 = dr^2 + (x^2 + y^2) dphi^2'],
       ['M = 0', ...POLAR, 'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/sqrt(x^2 + y^2)) + r^2 dphi^2'],
     ]) {
-      const { gain, K, size } = gainOf(rows, 16);
+      const { gain, real } = gainOf(rows, 16);
       expect(gain, rows.at(-1)).toBe(0);
       // And hover reads 0 there (web/main.ts): rounding, not curvature.
-      expect(isRealCurvature(K(3, 4), size(3, 4), curvatureFloor(box(16)))).toBe(false);
+      expect(real(3, 4)).toBe(false);
     }
   });
   it('brings the typical size of a real K to 1.5', () => {
@@ -252,9 +272,12 @@ describe('the gain gaussian(x, y) is shaded with', () => {
     // Without `real`, as before: 1 where f is nowhere above the floor.
     expect(divergingGain(() => 1e-12, domain, 1e-9)).toBe(1);
     expect(divergingGain(() => NaN, domain, 0, { fallback: 0 })).toBe(0);
-    // A thin tail: the typical size is at least a thousandth of the largest.
+    // A thin tail: with `real` (a metric's K) the typical size is at least
+    // a thousandth of the largest; a surface's gain (no `real`) is as #255
+    // made it, the 90th percentile alone.
     const tail = (p: number, q: number) => (p * p + q * q < 0.01 ? 100 : 1e-9);
-    expect(divergingGain(tail, domain)).toBeCloseTo(1.5 / 0.1, 10);
+    expect(divergingGain(tail, domain, 0, { real: () => true })).toBeCloseTo(1.5 / 0.1, 10);
+    expect(divergingGain(tail, domain) / 1.5e9).toBeCloseTo(1, 12);
   });
   it('shades −gaussian(x, y) and c gaussian(x, y) to their own size', () => {
     for (const row of ['-gaussian(x, y)', '3 gaussian(x, y)', 'gaussian(x, y) c', 'gaussian(x, y)/c']) {
@@ -266,5 +289,102 @@ describe('the gain gaussian(x, y) is shaded with', () => {
     // Not a sum, nor a product with something in x and y.
     expect(analyze([HALF_PLANE, 'gaussian(x, y) + 1']).r.cls!.object).not.toMatchObject({ autoscale: true });
     expect(analyze([HALF_PLANE, 'gaussian(x, y) x']).r.cls!.object).not.toMatchObject({ autoscale: true });
+  });
+});
+
+describe('the gain gaussian(x, y) is shaded with, further', () => {
+  it('sees small K zoomed in far from the origin', () => {
+    // K = −1e-9 at r = 1000, in a 0.2-wide window there.
+    const far: Box = [
+      [999.9, 1000.1],
+      [-0.1, 0.1],
+    ];
+    const hole = gainOf(SCHWARZSCHILD, far);
+    expect(hole.K(1000, 0) / -1e-9).toBeCloseTo(1, 6);
+    expect(hole.gain).toBeGreaterThan(1e8);
+    expect(hole.real(1000, 0.05)).toBe(true);
+    // Pulled back to x and y, floored by the distance from the origin, not
+    // the window's size.
+    const mixed = gainOf(
+      ['M = 1', ...POLAR, 'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/sqrt(x^2 + y^2)) + r^2 dphi^2'],
+      far,
+    );
+    expect(mixed.pulled).toBe(true);
+    expect(mixed.gain).toBeGreaterThan(1e8);
+    expect(mixed.real(1000, 0.05)).toBe(true);
+    // A sphere of radius 2000 (K = 2.5e-7) in a window 0.002 wide.
+    const sphere = gainOf(['R = 2000', 'ds^2 = 4R^2 (dx^2 + dy^2)/(1 + x^2 + y^2)^2'], 1e-3);
+    expect(sphere.K(0, 0) / 2.5e-7).toBeCloseTo(1, 10);
+    expect(sphere.gain * 2.5e-7).toBeCloseTo(1.5, 6);
+    expect(sphere.real(5e-4, 0)).toBe(true);
+    // In its own coordinates a K has no view floor; pulled back it has.
+    expect(curvatureFloor(far, false)).toBe(0);
+    expect(curvatureFloor(far) / 1e-15).toBeCloseTo(1, 3);
+    expect(curvatureFloor(box(16)) / (1e-9 / 256)).toBeCloseTo(1, 10);
+  });
+  it('is read finely at least twice a second, even while t runs', () => {
+    const clock: GainClock = { at: 0, fine: 0 };
+    const view = box(16);
+    // The first read is fine; then a costly metric (a fine read 60 ms)…
+    expect(gainRead(clock, view, '0', 0)).toEqual({ read: true, fine: true, settle: false });
+    Object.assign(clock, { box: view, values: '0', at: 0, fine: 0, cost: 60 });
+    // …is not read again unchanged; as a value moves it is read coarsely,
+    // at most every GAIN_THROTTLE_MS, and asks for a fine read once it
+    // stands still.
+    expect(gainRead(clock, view, '0', 50)).toEqual({ read: false, fine: false, settle: false });
+    expect(gainRead(clock, view, '1', 50)).toEqual({ read: false, fine: false, settle: true });
+    expect(gainRead(clock, view, '1', 130)).toEqual({ read: true, fine: false, settle: true });
+    expect(gainRead({ ...clock, stale: true }, view, '1', 140).fine).toBe(true);
+    // t moving every frame: fine reads still come every GAIN_FINE_MS.
+    const c: GainClock = { box: view, values: '0', at: 0, fine: 0, cost: 60 };
+    const fines: number[] = [];
+    for (let now = 16; now <= 2000; now += 16) {
+      const { read, fine } = gainRead(c, view, `${now}`, now);
+      if (!read) continue;
+      Object.assign(c, { values: `${now}`, at: now });
+      if (fine) {
+        c.fine = now;
+        fines.push(now);
+      }
+    }
+    expect(fines.length).toBeGreaterThanOrEqual(3);
+    for (let k = 1; k < fines.length; k++) expect(fines[k] - fines[k - 1]).toBeLessThanOrEqual(GAIN_FINE_MS + 16);
+    // A cheap metric (a fine read 5 ms) is read finely every time.
+    const cheap: GainClock = { box: view, values: '0', at: 0, fine: 0, cost: 5 };
+    expect(gainRead(cheap, view, '1', 130)).toEqual({ read: true, fine: true, settle: false });
+    // The view moved by over a quarter: read at once.
+    const moved: Box = [
+      [-6, 26],
+      [-16, 16],
+    ];
+    expect(gainRead({ ...clock, at: 100 }, moved, '1', 110).read).toBe(true);
+  });
+  it('says which colour is which under a negative factor', () => {
+    expect(analyze([HALF_PLANE, '-gaussian(x, y)']).r.info).toBe(
+      "the metric's Gaussian curvature K: row colour where K < 0, its complement where K > 0",
+    );
+    expect(analyze(['c = -2', HALF_PLANE, 'c gaussian(x, y)']).r.info).toMatch(/row colour where K < 0/);
+    expect(analyze(['c = 2', HALF_PLANE, 'c gaussian(x, y)']).r.info).toMatch(/row colour where K > 0/);
+  });
+  it('leaves a surface’s gain (#255) as it was: the 90th percentile alone', () => {
+    // A near-cone: its K is all at the tip, so the 90th percentile is far
+    // below a thousandth of the largest — a broad wash, as on main.
+    const { r, env } = analyze(['S = (u, v, sqrt(u^2 + v^2 + 0.0001))', 'gaussian(S)']);
+    const o = r.cls!.object as { paint: Expr };
+    const f = (u: number, v: number) => evaluate(o.paint, { ...env, u, v });
+    const unit: Box = [
+      [0, 1],
+      [0, 1],
+    ];
+    const sizes: number[] = [];
+    for (let i = 0; i <= 24; i++) for (let j = 0; j <= 24; j++) sizes.push(Math.abs(f((i + 0.5) / 25, (j + 0.5) / 25)));
+    sizes.sort((a, b) => a - b);
+    const p90 = sizes[Math.floor(0.9 * (sizes.length - 1))];
+    expect(p90).toBeLessThan(1e-3 * sizes.at(-1)!);
+    expect(divergingGain(f, unit) * p90).toBeCloseTo(1.5, 12);
+  });
+  it('reads K at any point-valued expression', () => {
+    expect(value([HALF_PLANE, 'P = (0.3, 1)', 'gaussian(P + (0, 1))'])).toBeCloseTo(-1, 12);
+    expect(value([SPHERE, 'P = (0.3, 1)', 'gaussian(2P)'])).toBeCloseTo(1, 10);
   });
 });

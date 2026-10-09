@@ -47,6 +47,10 @@ const abs = (e: Expr): Expr => ({ kind: 'call', name: 'abs', args: [e] });
 export interface Curvature {
   readonly K: Expr;
   readonly size: Expr;
+  /** Pulled back to x and y (writtenForm found no coordinates to
+   *  differentiate in): there `size` can be as small as its rounding, and
+   *  K is also floored by the view (curvatureFloor). */
+  readonly pulled?: true;
 }
 
 const det3 = (m: readonly (readonly Expr[])[]): Expr =>
@@ -119,7 +123,7 @@ export function metricCurvature(rhs: Expr, metric: PanelMetric, ctx: CurvatureCo
   K = inlineFields(K, ctx.fields);
   size = inlineFields(size, ctx.fields);
   if (exceedsNodes(K, 4 * FLOW_NODE_LIMIT)) throw new Error('This metric is too large to take the curvature of.');
-  return { K, size };
+  return { K, size, ...(written ? {} : { pulled: true as const }) };
 }
 
 /**
@@ -182,13 +186,18 @@ function pulledBack(metric: PanelMetric): [Expr, Expr, Expr] {
 type Box = GeodesicOptions['domain'];
 
 /**
- * Below this a K over the box is rounding whatever its terms say: 10⁻⁹ of
- * 1/L and 1/L², L the box's half-size (as a surface's field is floored).
- * A flat metric pulled back to x and y has terms as small as its K.
+ * Below this a K pulled back to x and y over the box is rounding whatever
+ * its terms say: 10⁻⁹ of 1/R and 1/R², R the box's half-size or its
+ * distance from the origin if that is more — a flat metric pulled back has
+ * terms as small as its K, and a field of x and y (r = sqrt(x^2 + y^2))
+ * varies on the scale of that distance, not of the window, so zooming in
+ * far from the origin does not raise it. A K in the coordinates the metric
+ * is written in needs no floor (0): its terms' size says what is rounding.
  */
-export function curvatureFloor([[x0, x1], [y0, y1]]: Box): number {
-  const L = Math.max(x1 - x0, y1 - y0) / 2;
-  return 1e-9 * Math.min(1 / L, 1 / L ** 2);
+export function curvatureFloor([[x0, x1], [y0, y1]]: Box, pulled = true): number {
+  if (!pulled) return 0;
+  const R = Math.max((x1 - x0) / 2, (y1 - y0) / 2, Math.hypot((x0 + x1) / 2, (y0 + y1) / 2));
+  return 1e-9 * Math.min(1 / R, 1 / R ** 2);
 }
 
 /** Whether K, beside the size of the terms it is the difference of (Curvature.size),
@@ -200,15 +209,78 @@ export function isRealCurvature(k: number, size: number, floor: number): boolean
 /**
  * The gain gaussian(x, y) under a metric is shaded with over a box: 1.5
  * over the typical |K| among the samples where it is real (divergingGain),
- * and 0 — nothing painted — where almost none are (a flat metric). `n`:
+ * at most 1.5 over a thousandth of the largest so a thin tail does not
+ * saturate, and 0 — nothing painted — where almost none are real (a flat
+ * metric). `pulled`: K was pulled back to x and y (Curvature.pulled); `n`:
  * the lattice, coarser while things move.
  */
 export function curvatureGain(
   K: (x: number, y: number) => number,
   size: (x: number, y: number) => number,
   box: Box,
-  n?: number,
+  { pulled = false, n }: { pulled?: boolean; n?: number } = {},
 ): number {
-  const floor = curvatureFloor(box);
+  const floor = curvatureFloor(box, pulled);
   return divergingGain(K, box, 0, { real: (k, x, y) => isRealCurvature(k, size(x, y), floor), fallback: 0, n });
+}
+
+/** When the app reads a gain again (gainRead), and what it last read. */
+export interface GainClock {
+  /** The box and values (a key) of the last read; none before the first. */
+  box?: Box;
+  values?: string;
+  /** When the last read, and the last fine one, were (ms). */
+  at: number;
+  fine: number;
+  /** Set once things have stood still since a coarse read. */
+  stale?: boolean;
+  /** What a fine read cost (ms), once one has been made. */
+  cost?: number;
+}
+
+/** A fine read under this many ms is made every time. */
+export const GAIN_CHEAP_MS = 12;
+/** Reads while something moves are this far apart at least… */
+export const GAIN_THROTTLE_MS = 120;
+/** …and a fine one comes at least this often, even while it never stops (t). */
+export const GAIN_FINE_MS = 500;
+
+const same = (a: Box, b: Box) => a.every((r, k) => r[0] === b[k][0] && r[1] === b[k][1]);
+const span = (b: Box, k: 0 | 1) => b[k][1] - b[k][0];
+/** Moved by more than a quarter of the box, or grown or shrunk by a quarter. */
+const far = (a: Box, b: Box) =>
+  ([0, 1] as const).some(
+    k =>
+      Math.abs((a[k][0] + a[k][1]) / 2 - (b[k][0] + b[k][1]) / 2) > 0.25 * span(a, k) ||
+      Math.abs(Math.log(span(b, k) / span(a, k))) > Math.log(1.25),
+  );
+
+/**
+ * Whether to read the gain again now, finely (the full lattice) or not,
+ * and whether to ask for a fine read once things stand still (`settle`).
+ * The first read, and one after things have stood still, are fine. While a
+ * slider or t moves, a read comes at most every GAIN_THROTTLE_MS; while the
+ * view moves, at once when it has moved by a quarter (and every
+ * GAIN_THROTTLE_MS when reads are cheap). A read is fine when fine reads
+ * are cheap, or when values keep changing and none has come for
+ * GAIN_FINE_MS — so a metric animated by t is read finely twice a second,
+ * not never.
+ */
+export function gainRead(
+  c: GainClock,
+  box: Box,
+  values: string,
+  now: number,
+): { read: boolean; fine: boolean; settle: boolean } {
+  if (!c.box || c.stale) return { read: true, fine: true, settle: false };
+  const moved = !same(c.box, box);
+  const changed = c.values !== values;
+  if (!moved && !changed) return { read: false, fine: false, settle: false };
+  const cheap = c.cost !== undefined && c.cost < GAIN_CHEAP_MS;
+  // A value that keeps changing (t) is read finely now and then anyway.
+  const due = changed && now - c.fine >= GAIN_FINE_MS;
+  const read = far(c.box, box) || ((changed || cheap) && now - c.at >= GAIN_THROTTLE_MS) || due;
+  if (!read) return { read: false, fine: false, settle: true };
+  const fine = cheap || due;
+  return { read, fine, settle: !fine };
 }

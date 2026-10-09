@@ -50,7 +50,7 @@ import {
   toProbability,
   variableRow,
 } from './dist.ts';
-import { type Expr, MAP, childrenOf, freeVars, parseExpr, substVars } from './expr.ts';
+import { type Expr, MAP, childrenOf, evaluate, freeVars, parseExpr, substVars } from './expr.ts';
 import { usesComplex } from './complex.ts';
 import { intervalsIn, lengthOf, replaceIntervals } from './interval.ts';
 import { PAINT_CALL, lowerGeom } from './geom.ts';
@@ -806,13 +806,13 @@ function classifyGeodesic(
  * The surface of a row that is gaussian(S) or meancurvature(S) alone — which
  * draws S coloured by it — or null: for any other row, for one of the
  * document's own functions of those names, and for a point of a panel's
- * surface, gaussian(P), which is a number.
+ * surface or metric, gaussian(P) or gaussian(P + (0, 1)), which is a number.
  */
-function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (name: string) => boolean): Expr | null {
+function curvaturePaint(e: Expr, fnNames: ReadonlySet<string>, isPoint: (arg: Expr) => boolean): Expr | null {
   if (e.kind !== 'call' || (e.name !== 'gaussian' && e.name !== 'meancurvature') || fnNames.has(e.name)) return null;
   if (e.args.length !== 1) return null;
   const [arg] = e.args;
-  if ((arg.kind === 'vec' && arg.items.length === 2) || (arg.kind === 'var' && isPoint(arg.name))) return null;
+  if ((arg.kind === 'vec' && arg.items.length === 2) || isPoint(arg)) return null;
   return arg;
 }
 
@@ -1257,7 +1257,17 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           ? { ...ropts, metric: { gaussian: () => curvatureOf(at).K } }
           : ropts;
       // gaussian(S) alone: S coloured by its curvature (lib/plot.ts PAINT_CALL).
-      const painted = curvaturePaint(rawParsed, fnNames, n => defs.pointDims.get(n) === 2);
+      const painted = curvaturePaint(rawParsed, fnNames, arg => {
+        if (arg.kind === 'var') return defs.pointDims.get(arg.name) === 2;
+        // An expression of points, P + (0, 1): two components.
+        if (!ropts.comps || arg.kind === 'vec') return false;
+        try {
+          const lowered = lowerGeom(arg, ropts.comps, () => null, ropts.isList);
+          return lowered.kind === 'vec' && lowered.items.length === 2;
+        } catch {
+          return false;
+        }
+      });
       const resolved = resolveRow(
         graphArgs !== null
           ? exactCases(rawParsed)
@@ -1389,14 +1399,26 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           ? gaussianFactor(rawParsed, fnNames, constNames)
           : null;
       if (factor && row.cls.object.kind === 'scalar-field') {
-        const { size } = curvatureOf(panel);
+        const { size, pulled } = curvatureOf(panel);
         const rounding: Expr =
           factor.kind === 'num' && Math.abs(factor.value) === 1
             ? size
             : { kind: 'bin', op: '*', a: { kind: 'call', name: 'abs', args: [factor] }, b: size };
-        row.cls = { ...row.cls, object: { ...row.cls.object, autoscale: true, rounding } };
+        row.cls = {
+          ...row.cls,
+          object: { ...row.cls.object, autoscale: true, rounding, ...(pulled ? { pulled } : {}) },
+        };
         const time = (metricOf(panel) as { metric: PanelMetric }).metric.time;
-        curvatureInfo = `${time === undefined ? "the metric's Gaussian curvature K" : `the curvature of space at one instant (K of the slice ${time} = constant)`}: row colour where K > 0, its complement where K < 0`;
+        // The row's colour is where the row is positive: where K is
+        // negative under a negative factor (-gaussian(x, y)).
+        let sign = 1;
+        try {
+          sign = Math.sign(evaluate(factor, constEnv)) || 1;
+        } catch {
+          /* as written */
+        }
+        const [up, down] = sign < 0 ? ['<', '>'] : ['>', '<'];
+        curvatureInfo = `${time === undefined ? "the metric's Gaussian curvature K" : `the curvature of space at one instant (K of the slice ${time} = constant)`}: row colour where K ${up} 0, its complement where K ${down} 0`;
       }
       if (graphArgs !== null) {
         row.cls = graphObject(row.cls);

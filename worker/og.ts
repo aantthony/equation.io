@@ -244,6 +244,44 @@ function sampleField(r: Raster, v: View2D, prog: Prog, env: EvalEnv): Float64Arr
   return grid;
 }
 
+/** The pixels between samples of a metric's curvature in the preview. */
+const CURVATURE_STEP = 4;
+
+/**
+ * A field sampled as sampleField does, but only every `step` pixels, the
+ * rest filled in bilinearly (NaN where a corner is): for a smooth field
+ * whose every sample is costly, gaussian(x, y) under a metric.
+ */
+function sampleFieldCoarse(r: Raster, v: View2D, prog: Prog, env: EvalEnv, step: number): Float64Array {
+  const { w, h } = r;
+  const cw = Math.ceil(w / step) + 1;
+  const ch = Math.ceil(h / step) + 1;
+  const coarse = new Float64Array(cw * ch);
+  const { vars, stack, slotX, slotY } = env;
+  for (let J = 0; J < ch; J++) {
+    vars[slotY] = v.cy + (h / 2 - J * step) * (v.upp / (v.ratio ?? 1));
+    for (let I = 0; I < cw; I++) {
+      vars[slotX] = v.cx + (I * step - w / 2) * v.upp;
+      coarse[J * cw + I] = run(prog, vars, stack);
+    }
+  }
+  const grid = new Float64Array((w + 1) * (h + 1));
+  for (let j = 0; j <= h; j++) {
+    const J = Math.min(Math.floor(j / step), ch - 2);
+    const fy = j / step - J;
+    for (let i = 0; i <= w; i++) {
+      const I = Math.min(Math.floor(i / step), cw - 2);
+      const fx = i / step - I;
+      const a = coarse[J * cw + I],
+        b = coarse[J * cw + I + 1],
+        c = coarse[(J + 1) * cw + I],
+        d = coarse[(J + 1) * cw + I + 1];
+      grid[j * (w + 1) + i] = (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+    }
+  }
+  return grid;
+}
+
 /** Paint the zero set of a sampled field using a distance estimate. */
 function strokeZeroSet(r: Raster, grid: Float64Array, c: [number, number, number]) {
   const { w, h } = r;
@@ -774,6 +812,8 @@ function renderRow2D(
       // gaussian(x, y) under a metric: shaded to its own size over the
       // window, as the app shades it (lib/metric-curvature.ts).
       let gain = 0.6;
+      // (Pulled back to x and y it is too costly a pixel: previewGap falls back.)
+      if (cpu.pulled) return;
       if (cpu.autoscale) {
         const K = compile(cpu.expr);
         const size = cpu.rounding ? compile(cpu.rounding) : null;
@@ -788,6 +828,12 @@ function renderRow2D(
           [v.cx - halfW, v.cx + halfW],
           [v.cy - halfH, v.cy + halfH],
         ]);
+        // Rounding everywhere: nothing to paint.
+        if (gain === 0) return;
+        // A smooth field built of many terms: sampled every CURVATURE_STEP
+        // pixels and filled in between.
+        shadeScalar(r, sampleFieldCoarse(r, v, K, env, CURVATURE_STEP), color, gain);
+        return;
       }
       shadeScalar(r, sampleField(r, v, compile(cpu.expr), env), color, gain);
       return;
@@ -1413,6 +1459,8 @@ export function previewGap(row: RowInfo, needs3D: boolean): string | null {
   }
   const type = cpu.type;
   if (type === 'trail') return 'trail(point) accumulates live motion history; no static preview is available';
+  if (cpu.type === 'scalar2d' && cpu.pulled)
+    return 'this metric mixes x and y with coordinates defined from them, so its curvature is too costly to shade for a static preview; the live app paints it on the GPU';
   if (loopPasses(cpu) > OG_LOOP_PASSES)
     return 'a recursive function here may run thousands of passes per pixel, too slow for a static preview; the live app runs them on the GPU';
   if (!needs3D) {

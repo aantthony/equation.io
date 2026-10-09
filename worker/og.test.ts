@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ENUM_STATS } from '../lib/dist.ts';
 import { analyze } from './graph.ts';
-import { OG_HEIGHT, OG_WIDTH, canRenderOg, encodePng, renderRaster } from './og.ts';
+import { OG_HEIGHT, OG_WIDTH, canRenderOg, encodePng, previewGap, renderRaster } from './og.ts';
 
 /** Fraction of pixels in a raster that differ from the white background. */
 function inkFraction(r: { w: number; h: number; px: Uint8ClampedArray }): number {
@@ -850,8 +850,41 @@ describe('rows whose plan fails to compile', () => {
     expect(Math.min(...near)).toBeLessThan(200);
     // A flat metric paints nothing.
     const flat = ['view(x = -16..16, y = -16..16)', 'grid(off)', 'r = sqrt(x^2 + y^2)', 'phi = atan2(y, x)'];
-    expect(renderRaster([...flat, 'ds^2 = dr^2 + (x^2 + y^2) dphi^2', 'gaussian(x, y)'], 100, 100).px).toEqual(
-      renderRaster([...flat, 'ds^2 = dr^2 + (x^2 + y^2) dphi^2'], 100, 100).px,
+    expect(renderRaster([...flat, 'ds^2 = dr^2 + r^2 dphi^2', 'gaussian(x, y)'], 100, 100).px).toEqual(
+      renderRaster([...flat, 'ds^2 = dr^2 + r^2 dphi^2'], 100, 100).px,
     );
+    // One pulled back to x and y (mixing them with r and phi) costs too much
+    // a pixel: the generic card, with a reason.
+    const mixed = [...flat, 'ds^2 = dr^2 + (x^2 + y^2) dphi^2', 'gaussian(x, y)'];
+    expect(canRenderOg(mixed)).toBe(false);
+    const row = analyze(mixed, { readouts: false, backend: 'cpu' }).rows.at(-1)!;
+    expect(previewGap(row, false)).toMatch(/too costly to shade for a static preview/);
+  });
+
+  it('draws the curvature examples quickly', () => {
+    for (const rows of [
+      [
+        'view(x = -16..16, y = -12..12)',
+        'M = 1',
+        'r = sqrt(x^2 + y^2)',
+        'phi = atan2(y, x)',
+        'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2',
+        'gaussian(x, y)',
+        'r < 2M',
+      ],
+      [
+        'view(x = -1.6..1.6, y = -1.2..1.2)',
+        'ds^2 = 4(dx^2 + dy^2)/(1 - x^2 - y^2)^2',
+        'gaussian(x, y)',
+        'x^2 + y^2 = 1',
+      ],
+      ['ds^2 = (dx^2 + dy^2)/y^2', 'gaussian(x, y)'],
+    ]) {
+      renderRaster(rows); // compiled once
+      const t0 = performance.now();
+      renderRaster(rows);
+      // ~30-60 ms here; a slow runner gets room.
+      expect(performance.now() - t0, rows.join('; ')).toBeLessThan(600);
+    }
   });
 });

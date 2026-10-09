@@ -64,7 +64,14 @@ import {
   shadeRuns,
 } from '../lib/intshade.ts';
 import { compileProg, compileSampler, run as runProg } from '../lib/vm.ts';
-import { curvatureFloor, curvatureGain, isRealCurvature } from '../lib/metric-curvature.ts';
+import {
+  type GainClock,
+  GAIN_THROTTLE_MS,
+  curvatureFloor,
+  curvatureGain,
+  gainRead,
+  isRealCurvature,
+} from '../lib/metric-curvature.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
@@ -1800,23 +1807,19 @@ type ViewBox = GeodesicOptions['domain'];
  * The gain gaussian(x, y) on a plane panel with a metric (a ds^2 row) is
  * shaded with over the view (lib/metric-curvature.ts curvatureGain): 1.5
  * over its typical size where it is real, 0 where it is rounding. Its
- * evaluators are compiled once per plot. A slider or t moving reads it
- * again at most every VIEW_GAIN_MS; the view moving, at once only when the
- * box has moved or grown by more than a quarter, else once it has stood
- * still for VIEW_GAIN_MS — so a pan does not re-sample every frame.
+ * evaluators are compiled once per plot, and gainRead says when to read it
+ * again: a fine read (25 × 25) costs ~5 ms for a metric in its own
+ * coordinates, and is made every time; one pulled back to x and y can cost
+ * ten times that, and is read on 13 × 13 while things move, finely at least
+ * twice a second and once they stand still.
  */
-const VIEW_GAIN_MS = 120;
 const viewGains = new WeakMap<
   CpuPlan,
-  {
+  GainClock & {
     names: string[];
     K: FieldReader;
     size: FieldReader;
-    values?: string;
-    box?: ViewBox;
     gain: number;
-    at: number;
-    stale?: boolean;
     timer?: ReturnType<typeof setTimeout>;
   }
 >();
@@ -1836,44 +1839,24 @@ function viewFieldGain(
       size: rounding ? fieldReader(rounding) : { set() {}, at: () => 0 },
       gain: 0,
       at: 0,
+      fine: 0,
     };
     viewGains.set(plot, c);
   }
   const values = JSON.stringify(c.names.map(n => env[n]));
   const now = performance.now();
-  const span = (b: ViewBox, k: 0 | 1) => b[k][1] - b[k][0];
-  const far = (a: ViewBox, b: ViewBox) =>
-    ([0, 1] as const).some(
-      k =>
-        Math.abs((a[k][0] + a[k][1]) / 2 - (b[k][0] + b[k][1]) / 2) > 0.25 * span(a, k) ||
-        Math.abs(Math.log(span(b, k) / span(a, k))) > Math.log(1.25),
-    );
-  const same = (a: ViewBox, b: ViewBox) => a.every((r, k) => r[0] === b[k][0] && r[1] === b[k][1]);
-  let read = !c.box || c.stale || far(c.box, box);
-  if (!read && (c.values !== values || !same(c.box!, box))) {
-    if (c.values !== values && now - c.at >= VIEW_GAIN_MS) read = true;
-    else {
-      // Read it once things stand still.
-      const entry = c;
-      clearTimeout(entry.timer);
-      entry.timer = setTimeout(() => {
-        entry.stale = true;
-        requestRender();
-      }, VIEW_GAIN_MS);
-    }
-  }
-  if (!read) return c.gain;
-  clearTimeout(c.timer);
-  // Read finely when first drawn and once things stand still; coarsely
-  // (an eleventh as many samples) while they move, then finely after.
-  const fine = !c.box || !!c.stale;
-  if (!fine) {
+  const { read, fine, settle } = gainRead(c, box, values, now);
+  if (settle) {
+    // A fine read once things stand still.
     const entry = c;
+    clearTimeout(entry.timer);
     entry.timer = setTimeout(() => {
       entry.stale = true;
       requestRender();
-    }, VIEW_GAIN_MS);
+    }, GAIN_THROTTLE_MS);
   }
+  if (!read) return c.gain;
+  if (fine) clearTimeout(c.timer);
   c.K.set(env);
   c.size.set(env);
   const { K, size } = c;
@@ -1881,13 +1864,18 @@ function viewFieldGain(
     (x, y) => K.at(x, y),
     (x, y) => size.at(x, y),
     box,
-    fine ? 24 : 6,
+    { pulled: !!plot.pulled, n: fine ? 24 : 12 },
   );
   // A coarse read that misses a small patch of K keeps the last gain.
   if (fine || gain > 0) c.gain = gain;
+  const done = performance.now();
+  if (fine) {
+    c.cost = done - now;
+    c.fine = done;
+  }
   c.values = values;
   c.box = box.map(r => [r[0], r[1]]) as unknown as ViewBox;
-  c.at = now;
+  c.at = done;
   c.stale = false;
   return c.gain;
 }
@@ -5930,10 +5918,13 @@ function updateHover(clientX: number, clientY: number) {
       // Rounding (a flat metric written in fields of x and y) reads 0.
       try {
         const { halfW, halfH } = hoverHalfSpan();
-        const floor = curvatureFloor([
-          [view.cx - halfW, view.cx + halfW],
-          [view.cy - halfH, view.cy + halfH],
-        ]);
+        const floor = curvatureFloor(
+          [
+            [view.cx - halfW, view.cx + halfW],
+            [view.cy - halfH, view.cy + halfH],
+          ],
+          !!plot.pulled,
+        );
         const size = plot.rounding ? evaluate(plot.rounding, env) : 0;
         if (!isRealCurvature(value, size, floor)) value = 0;
       } catch {

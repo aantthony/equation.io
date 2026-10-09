@@ -1601,20 +1601,27 @@ function surfaceGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   const onPanel = !!panel && args.length > 0 && !surfaceLike(args[0], ctx);
   // A plane panel with a metric (a ds^2 row): K of that metric.
   const metric = panel ? undefined : ctx.opts.metric;
-  // Only for a point: two numbers, a pair or a named 2D point — anything
-  // else (gaussian(T), T undefined) is read as a surface, and says so.
-  const pointShaped =
-    (args.length === 2 && args.every(a => a.kind !== 'vec')) ||
-    (args.length === 1 &&
-      ((args[0].kind === 'vec' && args[0].items.length === 2) ||
-        (args[0].kind === 'var' && ctx.opts.comps?.(args[0].name)?.length === 2)));
-  if (metric && pointShaped && !surfaceLike(args[0], ctx)) {
+  // Only for a point: two numbers, or one argument with two components (a
+  // pair, a named 2D point, P + (0, 1)) — anything else (gaussian(T), T
+  // undefined) is read as a surface, and says so.
+  let at: [Expr, Expr] | null = null;
+  if (metric && args.length === 2 && args.every(a => a.kind !== 'vec') && !surfaceLike(args[0], ctx))
+    at = [args[0], args[1]];
+  else if (metric && args.length === 1 && !surfaceLike(args[0], ctx)) {
+    let lowered: Expr | null = null;
+    try {
+      lowered = ctx.opts.comps ? lowerGeom(args[0], ctx.opts.comps, () => null, ctx.opts.isList) : args[0];
+    } catch {
+      /* not a at */
+    }
+    if (lowered?.kind === 'vec' && lowered.items.length === 2) at = [lowered.items[0], lowered.items[1]];
+  }
+  if (metric && at) {
     if (name !== 'gaussian')
       throw new Error(
         `${name}(x, y) needs a surface in space; a metric (this panel's ds^2 row) has a Gaussian curvature, gaussian(x, y), and no ${name}.`,
       );
-    const point = pointArgs(name, args, ctx, `${name}(x, y) or ${name}(P)`);
-    return substVars(metric.gaussian(), { x: point[0], y: point[1] });
+    return substVars(metric.gaussian(), { x: at[0], y: at[1] });
   }
   const example = onPanel ? `${name}(x, y) or ${name}(P)` : `${name}(S) or ${name}(S, 0.5, 0.25)`;
   if (!args.length) throw new Error(`${name} takes a surface, and optionally where on it: ${example}.`);

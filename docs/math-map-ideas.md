@@ -175,17 +175,22 @@ first. With a time it is K of the slice t = constant (g's spatial block),
 the curvature of space at one instant — Flamm's −M/r³ for Schwarzschild —
 masked where the slice is not positive definite (inside a horizon). The
 gain counts only samples where K is real: above 10⁻⁶ of the terms it is
-the difference of (carried as `rounding` beside the field) and above
-10⁻⁹·min(1/L, 1/L²) for a view of half-size L — a flat metric pulled back
-to x and y has terms as small as its K. Where under 1% of samples are real
-the gain is 0 (nothing painted, hover reads 0); the typical size is at
-least a thousandth of the largest, so a local bump's thin tail does not
-saturate (lib/surface-geometry.ts divergingGain, lib/metric-curvature.ts
-curvatureGain; the link preview uses the same). A constant K is one even
-tint. In the app the evaluators are compiled once per row, and the gain is
-read again when a value moves (at most every 120 ms) or the view has moved
-by a quarter, else once it stands still. `-gaussian(x, y)` and
-`c gaussian(x, y)` are shaded the same way. Follow-ups: the Riemann and
+the difference of (carried as `rounding` beside the field), and — for a K
+pulled back to x and y, whose terms can be as small as its K — above
+10⁻⁹·min(1/R, 1/R²), R the view's half-size or its distance from the
+origin if more (so zooming in at r = 1000 still shows K = −10⁻⁹). Where
+under 1% of samples are real the gain is 0 (nothing painted, hover reads
+0); the typical size is at least a thousandth of the largest, so a local
+bump's thin tail does not saturate (lib/metric-curvature.ts curvatureGain;
+divergingGain applies that cap only to a metric's K, so #255's surfaces
+are as they were). A constant K is one even tint. In the app the
+evaluators are compiled once per row and gainRead schedules reads: a K in
+its own coordinates is read finely (25 × 25, ~5 ms) at most every 120 ms
+as things move; a pulled-back one on 13 × 13 then, finely at least every
+500 ms (so t-animated metrics settle) and once things stand still. The
+link preview shades with the same gain, sampling K every 4 pixels, and
+falls back for a pulled-back K. `-gaussian(x, y)` and `c gaussian(x, y)`
+are shaded the same way, the row's note saying which colour is which. Follow-ups: the Riemann and
 Ricci tensors for 3+ dimensions (a 3D slice, Kerr off the equator), tidal
 glyphs (the geodesic deviation tensor, from R^a_bcd), and the scalar
 curvature of 2D Lorentzian panels once those exist (the formula already

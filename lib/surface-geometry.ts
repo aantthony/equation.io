@@ -760,15 +760,16 @@ export function geodesicSystem(
  * The gain a diverging colouring multiplies a scalar on a surface by before
  * tanh, so its typical size reads as strong colour: 1.5 over the 90th
  * percentile of |f| at a lattice of points (the largest few are left out, as
- * curvature runs off to infinity at a cusp), but at most 1.5 over a
- * thousandth of the largest, so a thin tail does not saturate. `fallback`
- * (1 unless given) when f is no larger than `floor` (rounding: a plane's K)
- * everywhere, or nowhere defined.
+ * curvature runs off to infinity at a cusp). `fallback` (1 unless given)
+ * when f is no larger than `floor` (rounding: a plane's K) everywhere, or
+ * nowhere defined.
  *
  * With `real`, only the samples it accepts count (a metric's K where it is
  * more than the rounding of the terms it is taken from: lib/metric-curvature.ts
- * curvatureGain), and `fallback` is also the gain when almost none (under
- * 1%) are. `n` + 1 is the lattice's side (25 unless given).
+ * curvatureGain), `fallback` is also the gain when almost none (under 1%)
+ * are, and the gain is at most 1.5 over a thousandth of the largest, so a
+ * thin tail does not saturate. `n` + 1 is the lattice's side (25 unless
+ * given).
  */
 export function divergingGain(
   f: (p: number, q: number) => number,
@@ -793,7 +794,8 @@ export function divergingGain(
     }
   if (!sizes.length || sizes.length < 0.01 * finite) return fallback;
   sizes.sort((a, b) => a - b);
-  const typical = Math.max(sizes[Math.floor(0.9 * (sizes.length - 1))], 1e-3 * sizes[sizes.length - 1]);
+  const p90 = sizes[Math.floor(0.9 * (sizes.length - 1))];
+  const typical = real ? Math.max(p90, 1e-3 * sizes[sizes.length - 1]) : p90;
   return typical > floor ? 1.5 / typical : fallback;
 }
 

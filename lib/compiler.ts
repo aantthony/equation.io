@@ -34,7 +34,7 @@ export type CpuPlan =
   | { type: 'pregion'; comps: [Expr, Expr] }
   /** The region a family over u ∈ [0, 1] sweeps (see MathObject). */
   | { type: 'projected2d'; relation: 'eq' | 'ineq'; constraints: Array<{ residual: Expr; strict: boolean }> }
-  | { type: 'scalar2d'; expr: Expr; autoscale?: true; rounding?: Expr }
+  | { type: 'scalar2d'; expr: Expr; autoscale?: true; rounding?: Expr; pulled?: true }
   | { type: 'scalar3d'; expr: Expr }
   | { type: `${ColorSpace}2d`; channels: Expr[] }
   | { type: 'complex2d'; expr: Expr }
@@ -287,6 +287,7 @@ export function compileCpu(classified: Classified): CpuPlan {
             expr: real(object.expr),
             ...(object.autoscale ? { autoscale: true as const } : {}),
             ...(object.rounding ? { rounding: object.rounding } : {}),
+            ...(object.pulled ? { pulled: true as const } : {}),
           };
     // Like domain coloring, these expressions are rendered per pixel on the GPU.
     case 'color-field':
