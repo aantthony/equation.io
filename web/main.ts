@@ -210,6 +210,14 @@ import {
   coneViewKey,
   indicatrixScale,
 } from '../lib/light-cone.ts';
+import {
+  type TidalRead,
+  type TidalScaleMemory,
+  heldTidalScale,
+  memoTides,
+  tidalGlyphs,
+  tidalReader,
+} from '../lib/tidal.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1710,7 +1718,7 @@ function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView
     const known = coneScales.get(plot.components);
     if (known?.key === scaleKey) scale = known;
     else {
-      scale = { kappa: indicatrixScale(m.read, view), cut: behindHorizon(m.read, view) };
+      scale = { kappa: indicatrixScale(m.read, view), cut: horizonCut(plot, m.read, env, view) };
       coneScales.set(plot.components, { key: scaleKey, ...scale });
     }
   }
@@ -1725,6 +1733,104 @@ function lightConesFor(eq: Equation, env: Record<string, number>, view: ConeView
     ...(scale ? { kappa: scale.kappa, cut: scale.cut } : {}),
     ...(m.orient ? { orient: m.orient } : {}),
   });
+  c.view = where;
+  return c.glyphs;
+}
+
+/** The names a panel's metric reads (its components and Jacobian), and
+ *  which points a horizon cuts off from the outside over a view at their
+ *  values (lib/light-cone.ts behindHorizon), by its components: shared by
+ *  the panel's light-cone and tidal rows. */
+const horizonCuts = new WeakMap<
+  readonly unknown[],
+  { names: string[]; key?: string; cut?: (x: number, y: number) => boolean }
+>();
+
+/** behindHorizon of a panel's metric over a view, worked out once for its
+ *  values and the lattice cells in view (coneViewKey). */
+function horizonCut(
+  metric: { components: readonly Expr[]; jacobian?: readonly Expr[] },
+  read: ReturnType<typeof metricValues>,
+  env: Record<string, number>,
+  view: ConeView,
+): (x: number, y: number) => boolean {
+  let h = horizonCuts.get(metric.components);
+  if (!h) {
+    const items = [...metric.components, ...(metric.jacobian ?? [])];
+    h = { names: [...freeVars({ kind: 'vec', items })].filter(n => n !== 'x' && n !== 'y') };
+    horizonCuts.set(metric.components, h);
+  }
+  const key = `${JSON.stringify(h.names.map(n => env[n]))}\n${coneViewKey(view)}`;
+  if (h.key !== key || !h.cut) {
+    h.key = key;
+    h.cut = behindHorizon(read, view);
+  }
+  return h.cut;
+}
+
+/** A panel's tides as its tidal rows read them — compiled once for all of
+ *  them (a family of 256 tidal(P) included), by its curvature expressions,
+ *  each point remembered (memoTides) while the values stay — with its
+ *  metric for the horizon cut-off. */
+const tidalMetrics = new WeakMap<
+  readonly unknown[],
+  { names: string[]; key: string; read?: TidalRead; metric?: ReturnType<typeof metricValues> }
+>();
+/** A tidal row's glyphs, the names its point reads, and what they were
+ *  drawn at, by plan. */
+const tidalRows = new WeakMap<CpuPlan, { names: string[]; glyphs?: ConeGlyphs; view?: string }>();
+/** The panel's tidal scale over a view (lib/tidal.ts tidalScale), shared by
+ *  its tidal rows so tidal and tidal(P) agree, and kept through pans while
+ *  the median allows. */
+const tidalScales = new WeakMap<readonly unknown[], { memory: TidalScaleMemory; scale: number; view?: string }>();
+
+/**
+ * The tidal glyphs a tidal or tidal(P) row draws over the view
+ * (lib/tidal.ts), in x and y: worked out again only when the view's lattice
+ * cells or a value the metric or the point reads changes.
+ */
+function tidesFor(eq: Equation, env: Record<string, number>, view: ConeView): ConeGlyphs {
+  const plot = eq.cpu as Extract<CpuPlan, { type: 'tidal' }>;
+  const reads = (exprs: readonly Expr[]) =>
+    [...freeVars({ kind: 'vec', items: [...exprs] })].filter(n => n !== 'x' && n !== 'y' && !plot.params.includes(n));
+  let m = tidalMetrics.get(plot.curvature);
+  if (!m) {
+    m = {
+      names: reads([...plot.curvature, ...(plot.chart ?? []), ...plot.components, ...(plot.jacobian ?? [])]),
+      key: '',
+    };
+    tidalMetrics.set(plot.curvature, m);
+  }
+  const key = JSON.stringify(m.names.map(n => env[n]));
+  if (m.key !== key || !m.read) {
+    m.key = key;
+    m.read = memoTides(tidalReader(plot, env));
+    m.metric = plot.n === 3 ? metricValues(plot, env) : undefined;
+  }
+  let c = tidalRows.get(plot);
+  if (!c) {
+    c = { names: reads(plot.at ? [...plot.at] : []) };
+    tidalRows.set(plot, c);
+  }
+  const viewKey = coneViewKey(view);
+  const where = `${key}\n${JSON.stringify(c.names.map(n => env[n]))}\n${viewKey}`;
+  if (c.glyphs && c.view === where) return c.glyphs;
+  const cut = m.metric ? horizonCut(plot, m.metric, env, view) : undefined;
+  // Held through pans and zooms while the values stay; afresh when they
+  // change, so a slider's history does not set the scale.
+  let known = tidalScales.get(plot.curvature);
+  if (!known) tidalScales.set(plot.curvature, (known = { memory: {}, scale: NaN }));
+  if (known.view !== viewKey || known.memory.values !== key) {
+    known.scale = heldTidalScale(known.memory, m.read, view, key, cut);
+    known.view = viewKey;
+  }
+  let at: [number, number][] | undefined;
+  if (plot.at) {
+    const out = new Float64Array(2);
+    numericIn(plot.at, ['x', 'y'], env)(NaN, NaN, out);
+    at = [[out[0], out[1]]];
+  }
+  c.glyphs = tidalGlyphs(m.read, view, { ...(at ? { at } : {}), scale: known.scale, ...(cut ? { cut } : {}) });
   c.view = where;
   return c.glyphs;
 }
@@ -3058,6 +3164,19 @@ function render() {
               uppY: upp / (view.ratio ?? 1),
             });
             (extras.glyphs ??= []).push({ ...glyphs, color: css, fill: cssColorA(color, 0.2) });
+            break;
+          }
+          // The tidal forces of the panel's metric on an observer at rest:
+          // solid bars and arrowheads, sized in CSS pixels.
+          case 'tidal': {
+            const upp = view.upp * dpr;
+            const glyphs = tidesFor(eq, env, {
+              lo: [xmin, view.cy - halfH],
+              hi: [xmax, view.cy + halfH],
+              upp,
+              uppY: upp / (view.ratio ?? 1),
+            });
+            (extras.glyphs ??= []).push({ ...glyphs, color: css, fill: css, lineWidth: 1.5, lineAlpha: 1 });
             break;
           }
           case 'automaton': {

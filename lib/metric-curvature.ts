@@ -151,6 +151,30 @@ export function metricCurvature(rhs: Expr, metric: PanelMetric, ctx: CurvatureCo
  * null where a component still reads x or y that are not those coordinates.
  */
 function writtenForm(rhs: Expr, metric: PanelMetric, ctx: CurvatureContext): [Expr, Expr, Expr] | null {
+  const [i, j] = [metric.n - 2, metric.n - 1];
+  return writtenComponents(rhs, metric, ctx, [
+    [i, i],
+    [i, j],
+    [j, j],
+  ]) as [Expr, Expr, Expr] | null;
+}
+
+/**
+ * Components g_ab of the metric, for the index pairs asked (into
+ * PanelMetric.coords), in the coordinates it is written in, other
+ * coordinate fields (f = 1 - 2M/r) written in them — or null where one
+ * still reads x or y that are not those coordinates, or a differential.
+ * The tidal tensor (lib/tidal.ts) asks for all of them, and with `panel`
+ * takes them reading x and y too (a metric mixing them with fields of
+ * them), the coordinates still names.
+ */
+export function writtenComponents(
+  rhs: Expr,
+  metric: PanelMetric,
+  ctx: CurvatureContext,
+  pairs: readonly (readonly [number, number])[],
+  panel = false,
+): Expr[] | null {
   const { n, coords } = metric;
   const spatial = coords.slice(n - 2);
   // d<c> for each coordinate c is its differential (parseMetric decided so).
@@ -165,10 +189,9 @@ function writtenForm(rhs: Expr, metric: PanelMetric, ctx: CurvatureContext): [Ex
     Q = substVars(Q, others);
   }
   const vars = freeVars(Q);
-  if (['x', 'y', 'z', 't'].some(v => vars.has(v) && !spatial.includes(v))) return null;
-  const [i, j] = [n - 2, n - 1].map(slot);
+  if ((panel ? ['z', 't'] : ['x', 'y', 'z', 't']).some(v => vars.has(v) && !spatial.includes(v))) return null;
   const g = (a: string, b: string) => mul(num(0.5), partial(partial(Q, a), b));
-  const form: [Expr, Expr, Expr] = [g(i, i), g(i, j), g(j, j)];
+  const form = pairs.map(([a, b]) => g(slot(a), slot(b)));
   for (const e of form) for (const name of freeVars(e)) if (name.startsWith('[d')) return null;
   return form;
 }

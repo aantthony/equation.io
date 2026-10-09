@@ -86,6 +86,8 @@ export const KIND_MEANINGS: Record<PublicKind, string> = {
     'a panel’s own metric, ds^2 = … in the differentials of its coordinates: draws nothing; geodesic and lightray rows in the panel follow it',
   lightcone:
     'light cones of the panel’s ds^2 metric: lightcones draws them over the panel, lightcone(P) one at a point — on a spacetime diagram the two null directions as a wedge opening to the future, with a time beside x and y the ellipse of the coordinate velocities light can have',
+  tidal:
+    'tidal forces of the panel’s ds^2 metric on an observer held at rest: tidal draws them over the panel, tidal(P) at a point — crossed bars along the directions a small cloud of free particles is stretched (arrowheads out) or squeezed (arrowheads in), as long as the tide is strong',
   system: 'solutions of a system of equations (points or curves)',
   value:
     'number readout under the row; draws nothing on the graph, except a definite integral, which shades the area it measures',

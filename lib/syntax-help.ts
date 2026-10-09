@@ -164,6 +164,10 @@ const signatures: Record<string, [string, string]> = {
     'lightray(P, (dx, dy)) or lightray(P, d, length)',
     'A light ray of the panel’s spacetime metric (a ds^2 = … row with a time, like -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2, or a spacetime diagram, like -dy^2 + dx^2, where it runs along the null direction nearest d) from P in a direction',
   ],
+  tidal: [
+    'tidal(P)',
+    'The tidal forces of the panel’s ds^2 metric at P on an observer held at rest: crossed bars along the directions a small cloud of free particles is stretched (arrowheads out) or squeezed (in), as long as the tide is strong. tidal alone on a row draws them over the panel',
+  ],
   meancurvature: [
     'meancurvature(S) or meancurvature(S, u0, v0)',
     'Mean curvature H of a surface in u, v, with normal ∂S/∂u × ∂S/∂v; alone on a row it colours S by H',
@@ -312,6 +316,10 @@ export function syntaxHelp(text: string, offset: number, defs: Env, declared?: R
   values(
     ['lightcones'],
     'lightcones alone on a row: the light cones of the panel’s ds^2 metric, drawn over the panel; lightcone(P) draws one at a point',
+  );
+  values(
+    ['tidal'],
+    'tidal alone on a row: the tidal forces of the panel’s ds^2 metric on observers held at rest, drawn over the panel; tidal(P) draws them at a point',
   );
   // (Not a named value's hidden coefficients, M#3: no row can write them.)
   values(

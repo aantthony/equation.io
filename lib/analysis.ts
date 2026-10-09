@@ -70,6 +70,7 @@ import { OFF_SURFACE_MESSAGE, type SurfaceMap, onSurface, surfaceMapping } from 
 import { type MetricSpec, type Params, smoothPartial, surfaceDerivatives } from './surface-geometry.ts';
 import { METRIC_ROW, type PanelMetric, parseMetric } from './metric.ts';
 import { type Curvature, metricCurvature } from './metric-curvature.ts';
+import { type TidalSpec, tidalSpec } from './tidal.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { exceedsNodes } from './size.ts';
 import { lowerCoordinateFlow } from './coordinate.ts';
@@ -890,6 +891,81 @@ function classifyLightCone(
   };
 }
 
+const TIDAL_USAGE =
+  'tidal(P) draws the tidal forces at a point, in x and y: tidal((6, 0)), or a list, tidal(([4..9], 0)); tidal alone on a row draws them over the panel.';
+
+/** A `tidal` row: the tidal forces of its panel's metric on a lattice. */
+const TIDAL_ROW = /^\s*tidal\s*$/;
+
+/**
+ * A `tidal` row (no `at`), or tidal(P): the tidal forces of the panel's
+ * metric on an observer held at rest (lib/tidal.ts), drawn as glyphs as
+ * it is in view. It needs a time: a metric with one beside the panel's two
+ * coordinates, or a spacetime diagram. A list of points draws one each, a
+ * family. `spec` makes the panel's curvature expressions, once.
+ */
+function classifyTidal(
+  at: Expr | undefined,
+  surface: SurfaceMap | undefined,
+  metricState: PanelMetricState | undefined,
+  spec: () => Omit<TidalSpec, 'at'>,
+  lower: (e: Expr) => Expr,
+  constNames: ReadonlySet<string>,
+  moving: ReadonlySet<string>,
+): Classified {
+  const what = at ? 'tidal(P)' : 'tidal';
+  if (!metricState || surface)
+    throw new Error(
+      `${what} draws the tidal forces of its panel's metric, a ds^2 row with a time — like ds^2 = -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2 — and this panel has none.`,
+    );
+  if ('error' in metricState) throw new Error("This panel's metric (its ds^2 row) has an error.");
+  const m = metricState.metric;
+  if (m.n === 2 && !m.lorentzian)
+    throw new Error(
+      `Tidal forces need a time: write the ds^2 with a dt term, like -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2. This one, in ${m.coords.join(' and ')}, is a Riemannian plane.`,
+    );
+  const tides = spec();
+  const metricReads = new Set(
+    [...tides.curvature, ...(tides.chart ?? []), ...tides.components, ...(tides.jacobian ?? [])].flatMap(e => [
+      ...freeVars(e),
+    ]),
+  );
+  for (const p of tides.params) metricReads.delete(p);
+  const member = (point: readonly Expr[] | undefined): Classified => {
+    const used = new Set(metricReads);
+    for (const e of point ?? []) for (const n of freeVars(e)) used.add(n);
+    return {
+      object: { kind: 'tidal', ...tides, ...(point ? { at: point } : {}) },
+      animated: [...used].some(n => n === 't' || moving.has(n)),
+      needs3D: false,
+      params: [...used].filter(n => constNames.has(n)).sort(),
+    };
+  };
+  if (!at) return member(undefined);
+  const lowered = lower(at);
+  const each = lowered.kind === 'list' ? lowered.items : [lowered];
+  const points = each.map(item => {
+    if (item.kind !== 'vec' || item.items.length !== 2 || item.items.some(p => p.kind === 'vec' || p.kind === 'list'))
+      throw new Error(`tidal: its point is a pair, like (6, 0). ${TIDAL_USAGE}`);
+    for (const p of item.items)
+      for (const n of freeVars(p))
+        if (n !== 't' && !constNames.has(n))
+          throw new Error(
+            `tidal: its point is numbers, sliders, t and named points${n === 'x' || n === 'y' ? `, not ${n}` : ` (found ${n})`}. ${TIDAL_USAGE}`,
+          );
+    return item.items;
+  });
+  if (points.length > 256) throw new Error('A family of tidal glyphs has at most 256 members.');
+  const members = points.map(member);
+  if (members.length === 1) return members[0];
+  return {
+    object: { kind: 'family', members },
+    animated: members.some(c => c.animated),
+    needs3D: false,
+    params: [...new Set(members.flatMap(c => c.params))].sort(),
+  };
+}
+
 /**
  * The surface of a row that is gaussian(S) or meancurvature(S) alone — which
  * draws S coloured by it — or null: for any other row, for one of the
@@ -1104,6 +1180,21 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
       fields: fieldEnv,
     }));
   };
+  // And what its tidal glyphs read (lib/tidal.ts), made when first asked.
+  const panelTides: (Omit<TidalSpec, 'at'> | undefined)[] = [];
+  const tidesOf = (at: number) => (): Omit<TidalSpec, 'at'> => {
+    const state = metricOf(at);
+    if (!state || 'error' in state) throw new Error("This panel's metric (its ds^2 row) has an error.");
+    const known = panelTides[at];
+    if (known) return known;
+    const parsed = parseExpr(rows[panelMetricRows[at]![0]].text, fnNames, listNames, valueNames);
+    if (parsed.kind !== 'eq') throw new Error('A metric row is ds^2 = … in the differentials of its coordinates.');
+    return (panelTides[at] = tidalSpec(parsed.r, state.metric, {
+      written: e => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts),
+      fields: fieldEnv,
+      inXY: e => inlineFields(e, fieldEnv),
+    }));
+  };
   const seenViewKinds = new Set<string>();
   let panel = 0;
   for (const [ri, row] of rows.entries()) {
@@ -1165,6 +1256,21 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
         const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
         row.cls = classifyLightCone(undefined, panelSurfaces[panel], metricOf(panel), lower, constNames, moving);
+        continue;
+      }
+      // tidal: the tidal forces of the panel's metric over the window.
+      if (TIDAL_ROW.test(row.text) && !ropts.documentNames?.has('tidal')) {
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
+        row.cls = classifyTidal(
+          undefined,
+          panelSurfaces[panel],
+          metricOf(panel),
+          tidesOf(panel),
+          lower,
+          constNames,
+          moving,
+        );
         continue;
       }
       // `P(…)` shades an area under a declared density — unless the user has
@@ -1350,6 +1456,22 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
           rawParsed.args[0],
           panelSurfaces[panel],
           metricOf(panel),
+          lower,
+          constNames,
+          moving,
+        );
+        continue;
+      }
+      // tidal(P): the tidal forces of the panel's metric at a point.
+      if (rawParsed.kind === 'call' && rawParsed.name === 'tidal' && !fnNames.has('tidal')) {
+        if (rawParsed.args.length !== 1) throw new Error(TIDAL_USAGE);
+        const lower = (e: Expr): Expr => lowerObjects(resolveRow(e, getFn, ropts).expr, defs, ropts);
+        const moving = new Set([...animatedConstNames(defs), ...defs.states.keys()]);
+        row.cls = classifyTidal(
+          rawParsed.args[0],
+          panelSurfaces[panel],
+          metricOf(panel),
+          tidesOf(panel),
           lower,
           constNames,
           moving,

@@ -353,6 +353,7 @@ export function axisMapping(object: MathObject, maps?: AxisMaps): AxisMapping | 
     // panel does not show as a rectangle: not yet.
     case 'metric':
     case 'lightcone':
+    case 'tidal':
       return null;
     case 'color-field':
       return 'substitute';

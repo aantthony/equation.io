@@ -151,7 +151,7 @@ smallest θ that fits (decimate) — so tight turns keep theirs. A metric is che
 at sample points over scales from 0.001 to 100 000 round the origin, so a
 disc of radius 0.1 and a hole of mass 10 000 both pass; a small feature far
 from the origin could still be missed. Follow-ups: tidal glyphs (the
-geodesic deviation tensor), time-dependent metrics (τ not cyclic: a third coordinate in the
+geodesic deviation tensor; done, below), time-dependent metrics (τ not cyclic: a third coordinate in the
 state, and t meaning both), more coordinates (3D slices, Kerr off the
 equator), metrics on mapped (`view`) panels, hover readouts along a
 geodesic, and the link preview, which falls back for these rows.
@@ -278,12 +278,57 @@ pixel where a cell meets an undefined part, like a horizon's disc), and
 falls back for a pulled-back K. `-gaussian(x, y)` and `c gaussian(x, y)`
 are shaded the same way, the row's note saying which colour is which. Follow-ups: the Riemann and
 Ricci tensors for 3+ dimensions (a 3D slice, Kerr off the equator), tidal
-glyphs (the geodesic deviation tensor, from R^a_bcd). On a spacetime
+glyphs (the geodesic deviation tensor, from R^a_bcd; done, below). On a spacetime
 diagram (a 2D Lorentzian panel) `gaussian(x, y)` is K = R/2 where the
 metric is Lorentzian, the plane's K where a mixed metric is positive
 definite, and undefined where it degenerates (tested: 2M/r³ in
 Schwarzschild's r and t and in Eddington–Finkelstein's, 0 for Rindler,
 ±1/L² for de Sitter and anti-de Sitter).
+
+**Implemented (tidal glyphs).** `tidal` (a row) and `tidal(P)` (lists fan
+out, P drags; lib/tidal.ts) draw what a ds² metric does to a small cloud of
+free particles held at rest: the tidal tensor E_ij = R_iαjβ u^α u^β of the
+static observer u = ∂τ/√(−g_ττ), whose eigenvalues λ (against the
+observer's space h_ij = g_ij − g_τi g_τj/g_ττ, so Kerr's dt dphi term is
+accounted for) give ξ'' = −λ ξ along each eigenvector. Riemann is formed in
+numbers at each point, R_abcd = ½(g_ad,bc + g_bc,ad − g_ac,bd − g_bd,ac) +
+Γ^e_bc Γ_e,ad − Γ^e_bd Γ_e,ac, from g and its first and second derivatives
+taken symbolically once per plot in the coordinates the row is written in
+(writtenComponents, shared with #258's K), so a metric flat in polar
+coordinates is exactly flat; the eigenvectors go back to x and y through
+the inverse Jacobian. A metric mixing x and y with fields of them stays in
+the written basis: a coordinate spelled out in x and y (sqrt(x^2 + y^2) for
+r) is folded back into its name, and what still reads x and y is
+differentiated in x, y and the coordinates as separate names, the
+derivatives in the coordinates following by the chain rule through J⁻¹
+and ∂J (∂J⁻¹ = −J⁻¹ ∂J J⁻¹; no third derivatives of the coordinates). A
+first version pulled the metric back to x and y symbolically (Jᵀ g J and
+its second derivatives: 18-29k nodes, ~20× the written path's time); the
+chain rule is 2-4× it, and matches it to 10⁻⁹. An eigenvalue under 10⁻⁹ of the
+terms it is the sum of is dropped as rounding. No glyph where g_ττ ≥ 0
+(inside a horizon or an ergoregion: no static observer) nor behind a
+horizon (behindHorizon, now shared with the light cones per panel and
+view). On a spacetime diagram E = −K h for any observer in 1 + 1
+dimensions, so one bar of λ = −K along the direction orthogonal to the
+written time's ∂τ. Riemannian panels are refused ("tidal forces need a
+time"). Glyphs: two crossed bars, half-length |λ| times a per-panel power of
+two in px per unit λ from the median glyph on the light cones' lattice (a
+fifth of a cell), kept through pans and zooms while the median glyph stays
+within 2^−1.5 and 2^1 of that (so held glyphs stay under the cap) and the
+metric's values stay — taken afresh when a slider moves, so the same values
+give the same scale whatever came before (heldTidalScale); arrowheads out where it stretches, in where it squeezes; a glyph
+longer than 0.46 of its cell (60 px for a lone one) is shrunk whole,
+keeping its shape. Constant derivatives are not compiled, and each lattice
+point is read once and remembered (memoTides) for the metric's values, so
+the scale and the glyphs share a pass and a pan reads only the new column:
+a 1080p Kerr lattice is ~6-10 ms warm in Node. Tested exactly: Schwarzschild
+−2M/r³ and M/r³ (written in r, phi; in x and y; mixed), Reissner–Nordström
+−2M/r³ + 3Q²/r⁴ and M/r³ − Q²/r⁴, de Sitter −1/L² isotropic, flat space
+nothing, Kerr against an independent finite-difference Riemann (from
+∂Γ, not the formula above) and nothing in its ergoregion, diagrams −2M/r³
+in r-t and EF. Follow-ups: glyphs in 3D panels and the link preview (falls
+back), observers other than static (a ZAMO inside the ergoregion, a
+falling one), a readout of λ on hover, and a deformed-circle mode.
 
 - `curvature(C)` and `torsion(C)` of a parametric curve in u, as a
   scalar along the curve (color the curve by it, or read out at a point).

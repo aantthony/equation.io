@@ -1190,6 +1190,27 @@ export const EXAMPLES: Array<[string, Array<[string, string, string]>]> = [
           'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; gaussian(x, y); r < 2M',
         'slider scalar-field coordinates physics',
       ],
+      // What a black hole does to a small cloud of particles held at rest:
+      // pulled apart along the radius (arrowheads out, 2M/r³) and squeezed
+      // round it (in, M/r³) — spaghettified. The tides grow as 1/r³; the
+      // strongest glyphs are shrunk to fit. Drag P: a particle let go there
+      // falls in through the horizon (shaded).
+      [
+        'tidal stretching near a black hole (drag P)',
+        'view(x = -16..16, y = -12..12); M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
+          'ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; r < 2M; tidal; P = (11, 6); geodesic(P, (0, 0))',
+        'draggable coordinates physics',
+      ],
+      // The tides of a spinning black hole, for observers held still against
+      // its drag: none can be inside the ergosurface r = 2M (the circle), so
+      // no glyph is drawn there. Slide a; the shaded disc is the horizon.
+      [
+        'tides around a spinning black hole (slide a)',
+        'view(x = -8..8, y = -6..6); M = 1; a = clamp(0.9, -1, 1); r = sqrt(x^2 + y^2); phi = atan2(y, x); ' +
+          'ds^2 = -(1 - 2M/r) dt^2 - 4 M a/r dt dphi + r^2/(r^2 - 2M r + a^2) dr^2 + (r^2 + a^2 + 2M a^2/r) dphi^2; ' +
+          'r < M + sqrt(M^2 - a^2); r = 2M; tidal',
+        'slider coordinates physics',
+      ],
     ],
   ],
   [
