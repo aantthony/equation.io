@@ -380,17 +380,37 @@ export const TASKS: EvalTask[] = [
         samples => {
           const a = Math.max(...samples.map(([x]) => Math.abs(x)));
           const b = Math.max(...samples.map(([, y]) => Math.abs(y)));
-          return a > 0 && b > 0 && samples.some(([x, y]) => Math.abs((x / a) ** 2 + (y / b) ** 2 - 1) > 0.05);
+          // x and y turn back a different number of times: equal frequencies
+          // draw an ellipse, tilted by a phase, or a segment.
+          const turns = (vs: number[]) => {
+            const steps = vs
+              .slice(1)
+              .map((v, k) => v - vs[k])
+              .filter(d => Math.abs(d) > 1e-9);
+            return steps.filter((d, k) => Math.sign(d) !== Math.sign(steps[(k + 1) % steps.length])).length;
+          };
+          return (
+            a > 0 &&
+            b > 0 &&
+            samples.some(([x, y]) => Math.abs((x / a) ** 2 + (y / b) ** 2 - 1) > 0.05) &&
+            turns(samples.map(([x]) => x)) !== turns(samples.map(([, y]) => y))
+          );
         },
         2,
       ),
     ],
-    good: [answer('A 3:2 Lissajous figure.', set('(sin(6pi u), sin(4pi u))'))],
+    good: [
+      answer('A 3:2 Lissajous figure.', set('(sin(6pi u), sin(4pi u))')),
+      answer('A 3:2 Lissajous figure.', set('(sin(6pi u + 0.5), 2sin(4pi u))')),
+    ],
     bad: [
       answer('A Lissajous figure.', set('y = sin(3x)')),
       // Observed: a circle and an ellipse.
       answer('A Lissajous figure.', set('(2cos(2pi u), 2sin(2pi u))')),
       answer('A Lissajous figure.', set('(2cos(2pi u), sin(2pi u))')),
+      // Observed: equal frequencies, a tilted ellipse and a segment.
+      answer('A Lissajous figure.', set('(sin(2pi u + 0.5), sin(2pi u))')),
+      answer('A Lissajous figure.', set('(sin(2pi u), sin(2pi u))')),
     ],
   },
   {

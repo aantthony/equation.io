@@ -6577,12 +6577,13 @@
             },
             {
               "name": "a 2D curve that is not an ellipse (its frequencies differ)",
-              "pass": true
+              "pass": false,
+              "why": "no parametric curve fits"
             }
           ],
           "inputTokens": 7503,
           "outputTokens": 140,
-          "pass": true,
+          "pass": false,
           "reply": "I drew a Lissajous curve by tracing (sin(8πu) cos(2πu), sin(8πu) sin(2πu)), a rose shape. It spins smoothly from left to right.",
           "rows": [
             "(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))"
@@ -19124,5 +19125,5 @@
     }
   ],
   "toolsTokens": 1218,
-  "regraded": "2026-10-08T11:29:39.929Z"
+  "regraded": "2026-10-09T06:25:17.333Z"
 }

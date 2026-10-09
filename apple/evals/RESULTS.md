@@ -1103,3 +1103,55 @@ form per entry in the answer (the one the request's word implies, implicit
 first), instances that state their numbers next to the parameters ("R = 3:
 x^2 + y^2 + z^2 = 9"), and checking arithmetic like R^2 with check's value
 readout.
+
+**Check fix, all files regraded (2026-10-09).** lissajous wanted "a 2D curve
+that is not an ellipse (its frequencies differ)", but tested only for an
+ellipse with its axes along x and y: a tilted ellipse, `(sin(2pi u + 0.5),
+sin(2pi u))`, and the segment `(sin(2pi u), sin(2pi u))` passed, both with
+equal frequencies, copied from the shape entry's form with a = b = 1. It now
+also requires x and y to turn back a different number of times; both are
+known-bad answers, and `(sin(6pi u + 0.5), 2sin(4pi u))` a known-good one.
+Regraded with regrade.ts, only lissajous changed, in four files:
+`2026-10-08T035827Z` 83 → 82, `2026-10-08T231719Z` (the first shape run)
+171 → 170 (37%), `2026-10-09T002200Z` (the run above) 209 → 206 (45% ±4%;
+lissajous 6 → 3, the named-shape tasks 36 → 33) and the step below.
+
+## One form per shape (2026-10-09)
+
+`a621d013`: shape answers one form per entry, the equation (implicit2d or
+implicit3d) where the entry has one, else its first; /docs/ and llms.txt keep
+every form. Instructions and tools unchanged (1,556 and 1,309 tokens). The
+answer for "hyperboloid":
+
+```
+Hyperboloid of one sheet (also hyperboloid, one-sheeted hyperboloid, cooling tower): A connected surface with a narrow circular waist that flares out above and below.
+- ["x^2/a^2 + y^2/a^2 - z^2/c^2 = 1"] (implicit3d) — about the z-axis
+  a: the radius of the waist, the circle at z = 0
+  c: the height scale: larger c flares more slowly
+  e.g. ["x^2/9 + y^2/9 - z^2/4 = 1"] — waist radius 3
+Pitfall: one minus sign gives one sheet; two minus signs give two sheets. With no z term it is a cylinder.
+Nothing is drawn yet: adapt this form to the request and pass its rows to set_graph.
+```
+
+`results/2026-10-09T052258Z-on-device.json`, 10 runs a task, against
+`2026-10-09T002200Z` (regraded): **45% ±4% (206/460) → 45% ±3% (205/460)**;
+named-shape tasks 33 → 31 of 100, the other 36 tasks 173 → 174 of 360. shape
+called in 182 runs, 2 without a set_graph after.
+
+- Up: torus 4 → 7 (`(sqrt(x^2 + y^2) - 3)^2 + z^2 = 1`, the instance: one row
+  now, where both forms broke it before), hyperboloid 2 → 5 (5 ×
+  `x^2/4 + y^2/4 - z^2/4 = 1`, adapted; 4 × the instance), sphere 0 → 4
+  (`x^2 + y^2 + z^2 = 4`; still 5 × `= 8`).
+- Down: parametric-circle 9 → 1. The request asks for a parametric curve and
+  the answer now shows only the equation: `circle((0, 0), 3)` 5 times,
+  `x^2 + y^2 = 9` 3 times. honest-reply-helix 9 → 7, unit-cube 1 → 0 (8 × the
+  side-2 instance).
+- cardioid stays 0/10, now from the equation: 8 ×
+  `(x^2 + y^2 - 1)^2 = 1(x^2 + y^2)`, a = 1 substituted but the `- a x` term
+  dropped. (The check wants a parametric curve; a correct equation would fail
+  it too, but none was written.) lissajous 3/10: a = b = 1 in 6 runs despite
+  "equal to a, it is only an ellipse".
+
+Verdict: no change overall. One form ends the both-forms rows (torus,
+hyperboloid up) but costs requests that name the other form
+(parametric-circle). Copying the instance's numbers is unchanged.
