@@ -63,7 +63,15 @@ import {
   shadeNames,
   shadeRuns,
 } from '../lib/intshade.ts';
-import { compileSampler } from '../lib/vm.ts';
+import { compileProg, compileSampler, run as runProg } from '../lib/vm.ts';
+import {
+  type GainClock,
+  GAIN_THROTTLE_MS,
+  curvatureFloor,
+  curvatureGain,
+  gainRead,
+  isRealCurvature,
+} from '../lib/metric-curvature.ts';
 import { fieldScale } from '../lib/volume.ts';
 import { coordinateDragWriter, dragAxes } from '../lib/drag.ts';
 import { type SliderForm, sliderBounds, sliderForm, sliderValue, withBounds, writeSlider } from '../lib/slider.ts';
@@ -1758,6 +1766,120 @@ function surfaceFieldGain(
   return gain;
 }
 
+/** An expression in x, y and named values, compiled once (lib/vm.ts) and
+ *  read with the values of the moment; NaN where it cannot be had. */
+interface FieldReader {
+  set(env: Readonly<Record<string, number>>): void;
+  at(x: number, y: number): number;
+}
+function fieldReader(e: Expr): FieldReader {
+  const slots = new Map(['x', 'y', ...freeVars(e)].filter((n, k, all) => all.indexOf(n) === k).map((n, k) => [n, k]));
+  const vars = new Float64Array(slots.size);
+  let prog: ReturnType<typeof compileProg> | null = null;
+  try {
+    prog = compileProg(e, slots);
+  } catch {
+    /* evaluated */
+  }
+  const stack = new Float64Array(Math.max(1, prog?.depth ?? 1));
+  let values: Readonly<Record<string, number>> = {};
+  return {
+    set(env) {
+      values = env;
+      for (const [n, k] of slots) vars[k] = env[n] ?? NaN;
+    },
+    at(x, y) {
+      vars[0] = x;
+      vars[1] = y;
+      try {
+        return prog ? runProg(prog, vars, stack) : evaluate(e, { ...values, x, y });
+      } catch {
+        return NaN;
+      }
+    },
+  };
+}
+
+/** A view box as the gain is read over, [[x0, x1], [y0, y1]]. */
+type ViewBox = GeodesicOptions['domain'];
+
+/**
+ * The gain gaussian(x, y) on a plane panel with a metric (a ds^2 row) is
+ * shaded with over the view (lib/metric-curvature.ts curvatureGain): 1.5
+ * over its typical size where it is real, 0 where it is rounding. Its
+ * evaluators are compiled once per plot, and gainRead says when to read it
+ * again: a fine read (25 × 25) costs ~5 ms for a metric in its own
+ * coordinates, and is made every time; one pulled back to x and y can cost
+ * ten times that, and is read on 13 × 13 while things move, finely at least
+ * twice a second and once they stand still.
+ */
+const viewGains = new WeakMap<
+  CpuPlan,
+  GainClock & {
+    names: string[];
+    K: FieldReader;
+    size: FieldReader;
+    gain: number;
+    timer?: ReturnType<typeof setTimeout>;
+  }
+>();
+function viewFieldGain(
+  plot: Extract<CpuPlan, { type: 'scalar2d' }>,
+  env: Record<string, number>,
+  box: ViewBox,
+): number {
+  let c = viewGains.get(plot);
+  if (!c) {
+    const exprs = plot.rounding ? [plot.expr, plot.rounding] : [plot.expr];
+    const names = [...freeVars({ kind: 'vec', items: exprs })].filter(n => n !== 'x' && n !== 'y');
+    const rounding = plot.rounding;
+    c = {
+      names,
+      K: fieldReader(plot.expr),
+      size: rounding ? fieldReader(rounding) : { set() {}, at: () => 0 },
+      gain: 0,
+      at: 0,
+      fine: 0,
+    };
+    viewGains.set(plot, c);
+  }
+  const values = JSON.stringify(c.names.map(n => env[n]));
+  const now = performance.now();
+  const { read, fine, settle } = gainRead(c, box, values, now);
+  if (settle) {
+    // A fine read once things stand still.
+    const entry = c;
+    clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => {
+      entry.stale = true;
+      requestRender();
+    }, GAIN_THROTTLE_MS);
+  }
+  if (!read) return c.gain;
+  if (fine) clearTimeout(c.timer);
+  c.K.set(env);
+  c.size.set(env);
+  const { K, size } = c;
+  const gain = curvatureGain(
+    (x, y) => K.at(x, y),
+    (x, y) => size.at(x, y),
+    box,
+    { pulled: !!plot.pulled, n: fine ? 24 : 12 },
+  );
+  // A coarse read that misses a small patch of K keeps the last gain.
+  if (fine || gain > 0) c.gain = gain;
+  const done = performance.now();
+  if (fine) {
+    c.cost = done - now;
+    c.fine = done;
+  }
+  c.values = values;
+  c.box = box.map(r => [r[0], r[1]]) as unknown as ViewBox;
+  c.at = done;
+  c.stale = false;
+  return c.gain;
+}
+
 /** The gain a surface coloured by its curvature (gaussian(S)) shades it
  *  with, kept until a value it reads (a slider, t) changes. */
 const paintGains = new WeakMap<CpuPlan, { key: string; gain: number }>();
@@ -2773,9 +2895,25 @@ function render() {
           case 'pregion':
             (extras.regions ??= []).push({ tris: sampleRegion(eq, plot.comps), fill: cssColorA(color, 0.22) });
             break;
-          case 'scalar2d':
-            layers.scalars.push({ ...gpuFor(eq, 'scalar2d'), color, params, uniforms });
+          case 'scalar2d': {
+            // gaussian(x, y) under a metric: shaded to its own size in view.
+            let gain: number | undefined;
+            if (plot.autoscale) {
+              const { halfW, halfH } = hoverHalfSpan();
+              gain = viewFieldGain(plot, { ...constEnv, ...eq.gpu?.uniforms, t: time }, [
+                [view.cx - halfW, view.cx + halfW],
+                [view.cy - halfH, view.cy + halfH],
+              ]);
+            }
+            layers.scalars.push({
+              ...gpuFor(eq, 'scalar2d'),
+              color,
+              params,
+              uniforms,
+              ...(gain !== undefined ? { gain } : {}),
+            });
             break;
+          }
           case 'complex2d':
             layers.complexes.push({ ...gpuFor(eq, 'complex2d'), color, params, uniforms });
             break;
@@ -5759,6 +5897,50 @@ function updateHover(clientX: number, clientY: number) {
           : ['on curve', `x = ${read(maps?.x, hit.x, sx)}`, `y = ${read(maps?.y, hit.y, sy)}`];
         best = { pt: { x: hit.x, y: hit.y, lines }, color: cssColor(baseColor(eq)), panel: cur };
       }
+    }
+  }
+  // Nor a curve: over a panel painted by its metric's curvature
+  // (gaussian(x, y)), K under the pointer.
+  if (!best && !panelMaps(cur)) {
+    const [wx, wy] = toMath(clientX, clientY);
+    const env = { ...constEnv, t: graphTime(), x: wx, y: wy };
+    const uppCss = view.upp * (window.devicePixelRatio || 1);
+    for (const eq of equations) {
+      const plot = eq.cpu;
+      if (panelOf(eq) !== here || eq.error || plot?.type !== 'scalar2d' || !plot.autoscale) continue;
+      let value: number;
+      try {
+        value = evaluate(plot.expr, env);
+      } catch {
+        continue;
+      }
+      if (!Number.isFinite(value)) continue;
+      // Rounding (a flat metric written in fields of x and y) reads 0.
+      try {
+        const { halfW, halfH } = hoverHalfSpan();
+        const floor = curvatureFloor(
+          [
+            [view.cx - halfW, view.cx + halfW],
+            [view.cy - halfH, view.cy + halfH],
+          ],
+          !!plot.pulled,
+        );
+        const size = plot.rounding ? evaluate(plot.rounding, env) : 0;
+        if (!isRealCurvature(value, size, floor)) value = 0;
+      } catch {
+        /* as it is */
+      }
+      const name = eq.text.length > 24 ? `${eq.text.slice(0, 23)}…` : eq.text;
+      best ??= {
+        pt: {
+          x: wx,
+          y: wy,
+          lines: ['curvature', `x = ${fmtTraced(wx, uppCss)}`, `y = ${fmtTraced(wy, uppCss / (view.ratio ?? 1))}`],
+        },
+        color: cssColor(baseColor(eq)),
+        panel: cur,
+      };
+      best.pt.lines.push(`${name} ${valueReadout(value)}`);
     }
   }
   setHover(best);

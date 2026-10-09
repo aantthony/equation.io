@@ -1146,6 +1146,12 @@ export interface ResolveOpts {
    * and y.
    */
   surface?: { readonly embed: readonly [Expr, Expr, Expr] };
+  /**
+   * A plane panel's own metric (a ds^2 row, lib/metric-curvature.ts): there
+   * gaussian(x, y) is its curvature, K in x and y, which `gaussian` writes
+   * out (or throws why the panel has none to read).
+   */
+  metric?: { readonly gaussian: () => Expr };
 }
 
 /**
@@ -1593,6 +1599,30 @@ function pointArgs(name: string, args: readonly Expr[], ctx: Ctx, example: strin
 function surfaceGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
   const panel = ctx.opts.surface;
   const onPanel = !!panel && args.length > 0 && !surfaceLike(args[0], ctx);
+  // A plane panel with a metric (a ds^2 row): K of that metric.
+  const metric = panel ? undefined : ctx.opts.metric;
+  // Only for a point: two numbers, or one argument with two components (a
+  // pair, a named 2D point, P + (0, 1)) — anything else (gaussian(T), T
+  // undefined) is read as a surface, and says so.
+  let at: [Expr, Expr] | null = null;
+  if (metric && args.length === 2 && args.every(a => a.kind !== 'vec') && !surfaceLike(args[0], ctx))
+    at = [args[0], args[1]];
+  else if (metric && args.length === 1 && !surfaceLike(args[0], ctx)) {
+    let lowered: Expr | null = null;
+    try {
+      lowered = ctx.opts.comps ? lowerGeom(args[0], ctx.opts.comps, () => null, ctx.opts.isList) : args[0];
+    } catch {
+      /* not a at */
+    }
+    if (lowered?.kind === 'vec' && lowered.items.length === 2) at = [lowered.items[0], lowered.items[1]];
+  }
+  if (metric && at) {
+    if (name !== 'gaussian')
+      throw new Error(
+        `${name}(x, y) needs a surface in space; a metric (this panel's ds^2 row) has a Gaussian curvature, gaussian(x, y), and no ${name}.`,
+      );
+    return substVars(metric.gaussian(), { x: at[0], y: at[1] });
+  }
   const example = onPanel ? `${name}(x, y) or ${name}(P)` : `${name}(S) or ${name}(S, 0.5, 0.25)`;
   if (!args.length) throw new Error(`${name} takes a surface, and optionally where on it: ${example}.`);
   let r: readonly Expr[];
@@ -1612,7 +1642,7 @@ function surfaceGeometry(name: string, args: readonly Expr[], ctx: Ctx): Expr {
       (args[0].kind === 'vec' && args[0].items.length === 2);
     if (!panel && pointOnly)
       throw new Error(
-        `${name}(x, y) reads the surface of its panel's on(…) row, and this panel has none: write ${name}(S) with S = (u, v, u^2 - v^2).`,
+        `${name}(x, y) reads the surface of its panel's on(…) row, or its metric (a ds^2 row), and this panel has neither: write ${name}(S) with S = (u, v, u^2 - v^2).`,
       );
     ({ items: r, over } = surfaceOperand(name, args[0], ctx.getFn, ctx.opts));
     params = ['u', 'v'];

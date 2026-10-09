@@ -760,25 +760,43 @@ export function geodesicSystem(
  * The gain a diverging colouring multiplies a scalar on a surface by before
  * tanh, so its typical size reads as strong colour: 1.5 over the 90th
  * percentile of |f| at a lattice of points (the largest few are left out, as
- * curvature runs off to infinity at a cusp). 1 when f is no larger than
- * `floor` (rounding: a plane's K) everywhere, or nowhere defined.
+ * curvature runs off to infinity at a cusp). `fallback` (1 unless given)
+ * when f is no larger than `floor` (rounding: a plane's K) everywhere, or
+ * nowhere defined.
+ *
+ * With `real`, only the samples it accepts count (a metric's K where it is
+ * more than the rounding of the terms it is taken from: lib/metric-curvature.ts
+ * curvatureGain), `fallback` is also the gain when almost none (under 1%)
+ * are, and the gain is at most 1.5 over a thousandth of the largest, so a
+ * thin tail does not saturate. `n` + 1 is the lattice's side (25 unless
+ * given).
  */
 export function divergingGain(
   f: (p: number, q: number) => number,
   [[p0, p1], [q0, q1]]: GeodesicOptions['domain'],
   floor = 0,
+  {
+    real,
+    fallback = 1,
+    n = 24,
+  }: { real?: (k: number, p: number, q: number) => boolean; fallback?: number; n?: number } = {},
 ): number {
-  const n = 24;
   const sizes: number[] = [];
+  let finite = 0;
   for (let i = 0; i <= n; i++)
     for (let j = 0; j <= n; j++) {
-      const k = Math.abs(f(p0 + ((p1 - p0) * (i + 0.5)) / (n + 1), q0 + ((q1 - q0) * (j + 0.5)) / (n + 1)));
-      if (Number.isFinite(k)) sizes.push(k);
+      const p = p0 + ((p1 - p0) * (i + 0.5)) / (n + 1);
+      const q = q0 + ((q1 - q0) * (j + 0.5)) / (n + 1);
+      const k = Math.abs(f(p, q));
+      if (!Number.isFinite(k)) continue;
+      finite++;
+      if (!real || real(k, p, q)) sizes.push(k);
     }
-  if (!sizes.length) return 1;
+  if (!sizes.length || sizes.length < 0.01 * finite) return fallback;
   sizes.sort((a, b) => a - b);
-  const typical = sizes[Math.floor(0.9 * (sizes.length - 1))];
-  return typical > floor ? 1.5 / typical : 1;
+  const p90 = sizes[Math.floor(0.9 * (sizes.length - 1))];
+  const typical = real ? Math.max(p90, 1e-3 * sizes[sizes.length - 1]) : p90;
+  return typical > floor ? 1.5 / typical : fallback;
 }
 
 /** What a geodesic row draws (lib/analysis.ts classifyGeodesic). */
