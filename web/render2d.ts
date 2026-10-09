@@ -230,7 +230,10 @@ const linear = (s: GridSpec) =>
  * is a crossing — double roots and saddles (x^2, x y) land on it, and so
  * does rounding on a real line — and so is jumping away (≥ 0.9), as atan2
  * does over its branch cut, where angular grids put a line. In between, c
- * moved toward L and fell short: no line, unless c turns back within four
+ * moved toward L and fell short: no line, unless pr straddles L with c
+ * nearer it than either and within a quarter pixel by the estimate (beside
+ * a saddle, as of cos(x) + cos(y), where the step goes astray), or c turns
+ * back within four
  * pixels either way along ∇c (pr, the field there), by at least how far it
  * is from L — an extreme value, sin(x) = 1 or the root of x^10. Exactly on L,
  * pr must straddle L or jump. Differences within 1e-30 of L are underflow,
@@ -259,6 +262,11 @@ bool reaches${k}(vec2 p, float c, vec2 g, float L, vec2 pr) {
     float r = (coord${k}(q.x, q.y) - L) / (c - L);
     if (!(r > 1e-3 && r < 0.9)) return true;
   }
+  // Beside a saddle, where Newton's step goes astray: the probes straddle L,
+  // the estimate puts L within a quarter pixel, and c is nearer L than
+  // either probe (beside a pole, c is far larger than they are).
+  if (((v.x > 0.0 && v.y < 0.0) || (v.x < 0.0 && v.y > 0.0)) && abs(c - L) <= 0.25 * length(g) * px &&
+      abs(c - L) <= min(abs(v.x), abs(v.y))) return true;
   vec2 w = pr - c;
   return ((w.x > 0.0 && w.y > 0.0) || (w.x < 0.0 && w.y < 0.0)) && abs(c - L) <= abs(w.x + w.y);
 }
@@ -296,15 +304,15 @@ function gridFrag(specs: GridSpec[], axesOnly = false): string {
 ${
   linear(s)
     ? ''
-    : // One check for both line kinds, at the nearest minor level (a major
-      // level is one), and one for the axis only when that is not 0.
-      `      float L = round(c / uMinor${k}) * uMinor${k};
-      bool lines = max(minor, major) > 0.0;
-      bool axis0 = axis > 0.0 && !(lines && L == 0.0);
-      if (lines || axis0) {
-        vec2 pr = probe${k}(p, g);
-        if (lines && !reaches${k}(p, c, g, L, pr)) { minor = 0.0; major = 0.0; }
-        if (axis > 0.0 && (lines && L == 0.0 ? max(minor, major) == 0.0 : !reaches${k}(p, c, g, 0.0, pr))) axis = 0.0;
+    : // One check, inlined once: at the nearest minor level when a line is
+      // near (a major level is one), else at 0 for the axis. An axis beside a
+      // line at another level — lines crowded to a pixel or two — is left as
+      // the estimate has it.
+      `      bool lines = max(minor, major) > 0.0;
+      float L = lines ? round(c / uMinor${k}) * uMinor${k} : 0.0;
+      if ((lines || axis > 0.0) && !reaches${k}(p, c, g, L, probe${k}(p, g))) {
+        minor = 0.0; major = 0.0;
+        if (L == 0.0) axis = 0.0;
       }
 `
 }      minorA = max(minorA, minor);
