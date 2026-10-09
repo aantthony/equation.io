@@ -846,8 +846,20 @@ describe('rows whose plan fails to compile', () => {
     ];
     expect(canRenderOg(hole)).toBe(true);
     // K = −1/64 at r = 4: barely a tint at the plain 0.6, strong with the gain.
-    const near = pixel(renderRaster(hole, 200, 200), 125, 100);
-    expect(Math.min(...near)).toBeLessThan(200);
+    const raster = renderRaster(hole, 200, 200);
+    expect(Math.min(...pixel(raster, 125, 100))).toBeLessThan(200);
+    // The horizon's edge is sharp, not stepped by the 4-pixel sampling: K
+    // just outside r = 2 (pixel 113, x ≈ 2.08) is painted, inside (x ≈ 1.92)
+    // is not, all round.
+    for (const [dx, dy] of [
+      [1, 0],
+      [0, 1],
+      [-1, 0],
+      [0, -1],
+    ]) {
+      expect(Math.min(...pixel(raster, 100 + 13 * dx, 100 + 13 * dy)), `${dx}, ${dy}`).toBeLessThan(230);
+      expect(pixel(raster, 100 + 12 * dx, 100 + 12 * dy)).toEqual([255, 255, 255]);
+    }
     // A flat metric paints nothing.
     const flat = ['view(x = -16..16, y = -16..16)', 'grid(off)', 'r = sqrt(x^2 + y^2)', 'phi = atan2(y, x)'];
     expect(renderRaster([...flat, 'ds^2 = dr^2 + r^2 dphi^2', 'gaussian(x, y)'], 100, 100).px).toEqual(

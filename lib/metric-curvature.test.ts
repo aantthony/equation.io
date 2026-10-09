@@ -4,6 +4,7 @@ import { type Expr, evaluate, parseExpr } from './expr.ts';
 import {
   type GainClock,
   GAIN_FINE_MS,
+  fineInterval,
   brioschi,
   curvatureFloor,
   curvatureGain,
@@ -335,7 +336,10 @@ describe('the gain gaussian(x, y) is shaded with, further', () => {
     expect(gainRead(clock, view, '1', 50)).toEqual({ read: false, fine: false, settle: true });
     expect(gainRead(clock, view, '1', 130)).toEqual({ read: true, fine: false, settle: true });
     expect(gainRead({ ...clock, stale: true }, view, '1', 140).fine).toBe(true);
-    // t moving every frame: fine reads still come every GAIN_FINE_MS.
+    // t moving every frame: fine reads still come every GAIN_FINE_MS (or
+    // ten times their cost, if more).
+    expect(fineInterval(60)).toBe(600);
+    expect(fineInterval(5)).toBe(GAIN_FINE_MS);
     const c: GainClock = { box: view, values: '0', at: 0, fine: 0, cost: 60 };
     const fines: number[] = [];
     for (let now = 16; now <= 2000; now += 16) {
@@ -348,7 +352,8 @@ describe('the gain gaussian(x, y) is shaded with, further', () => {
       }
     }
     expect(fines.length).toBeGreaterThanOrEqual(3);
-    for (let k = 1; k < fines.length; k++) expect(fines[k] - fines[k - 1]).toBeLessThanOrEqual(GAIN_FINE_MS + 16);
+    for (let k = 1; k < fines.length; k++) expect(fines[k] - fines[k - 1]).toBeLessThanOrEqual(fineInterval(60) + 16);
+    for (let k = 1; k < fines.length; k++) expect(fines[k] - fines[k - 1]).toBeGreaterThanOrEqual(fineInterval(60));
     // A cheap metric (a fine read 5 ms) is read finely every time.
     const cheap: GainClock = { box: view, values: '0', at: 0, fine: 0, cost: 5 };
     expect(gainRead(cheap, view, '1', 130)).toEqual({ read: true, fine: true, settle: false });

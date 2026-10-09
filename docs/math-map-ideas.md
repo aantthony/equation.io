@@ -178,7 +178,10 @@ gain counts only samples where K is real: above 10⁻⁶ of the terms it is
 the difference of (carried as `rounding` beside the field), and — for a K
 pulled back to x and y, whose terms can be as small as its K — above
 10⁻⁹·min(1/R, 1/R²), R the view's half-size or its distance from the
-origin if more (so zooming in at r = 1000 still shows K = −10⁻⁹). Where
+origin if more (so zooming in at r = 1000 still shows K = −10⁻⁹). Known
+limit: below R ≈ 10⁻⁶ a pulled-back K's rounding beats that floor (a flat
+mixed metric at ±10⁻⁶ reads K ≈ −0.001 on hover, though nothing visible is
+painted); a fix would take the terms' size from the written g and J. Where
 under 1% of samples are real the gain is 0 (nothing painted, hover reads
 0); the typical size is at least a thousandth of the largest, so a local
 bump's thin tail does not saturate (lib/metric-curvature.ts curvatureGain;
@@ -187,8 +190,10 @@ are as they were). A constant K is one even tint. In the app the
 evaluators are compiled once per row and gainRead schedules reads: a K in
 its own coordinates is read finely (25 × 25, ~5 ms) at most every 120 ms
 as things move; a pulled-back one on 13 × 13 then, finely at least every
-500 ms (so t-animated metrics settle) and once things stand still. The
-link preview shades with the same gain, sampling K every 4 pixels, and
+500 ms, or ten times a fine read's cost if more (so t-animated metrics
+settle without taking over the main thread), and once things stand still. The
+link preview shades with the same gain, sampling K every 4 pixels (each
+pixel where a cell meets an undefined part, like a horizon's disc), and
 falls back for a pulled-back K. `-gaussian(x, y)` and `c gaussian(x, y)`
 are shaded the same way, the row's note saying which colour is which. Follow-ups: the Riemann and
 Ricci tensors for 3+ dimensions (a 3D slice, Kerr off the equator), tidal

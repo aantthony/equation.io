@@ -245,6 +245,11 @@ export const GAIN_THROTTLE_MS = 120;
 /** …and a fine one comes at least this often, even while it never stops (t). */
 export const GAIN_FINE_MS = 500;
 
+/** How often a value that keeps changing forces a fine read: GAIN_FINE_MS,
+ *  or ten times what one costs if more, so they take at most a tenth of
+ *  the main thread (a pulled-back metric animated by t: ~130 ms each). */
+export const fineInterval = (cost = 0) => Math.max(GAIN_FINE_MS, 10 * cost);
+
 const same = (a: Box, b: Box) => a.every((r, k) => r[0] === b[k][0] && r[1] === b[k][1]);
 const span = (b: Box, k: 0 | 1) => b[k][1] - b[k][0];
 /** Moved by more than a quarter of the box, or grown or shrunk by a quarter. */
@@ -263,7 +268,8 @@ const far = (a: Box, b: Box) =>
  * view moves, at once when it has moved by a quarter (and every
  * GAIN_THROTTLE_MS when reads are cheap). A read is fine when fine reads
  * are cheap, or when values keep changing and none has come for
- * GAIN_FINE_MS — so a metric animated by t is read finely twice a second,
+ * fineInterval (GAIN_FINE_MS, longer for a costly read) — so a metric
+ * animated by t is read finely now and then,
  * not never.
  */
 export function gainRead(
@@ -278,7 +284,7 @@ export function gainRead(
   if (!moved && !changed) return { read: false, fine: false, settle: false };
   const cheap = c.cost !== undefined && c.cost < GAIN_CHEAP_MS;
   // A value that keeps changing (t) is read finely now and then anyway.
-  const due = changed && now - c.fine >= GAIN_FINE_MS;
+  const due = changed && now - c.fine >= fineInterval(c.cost);
   const read = far(c.box, box) || ((changed || cheap) && now - c.at >= GAIN_THROTTLE_MS) || due;
   if (!read) return { read: false, fine: false, settle: true };
   const fine = cheap || due;

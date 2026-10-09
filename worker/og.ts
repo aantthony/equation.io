@@ -249,8 +249,9 @@ const CURVATURE_STEP = 4;
 
 /**
  * A field sampled as sampleField does, but only every `step` pixels, the
- * rest filled in bilinearly (NaN where a corner is): for a smooth field
- * whose every sample is costly, gaussian(x, y) under a metric.
+ * rest filled in bilinearly — or, in a cell with an undefined corner, read
+ * pixel by pixel: for a smooth field whose every sample is costly,
+ * gaussian(x, y) under a metric.
  */
 function sampleFieldCoarse(r: Raster, v: View2D, prog: Prog, env: EvalEnv, step: number): Float64Array {
   const { w, h } = r;
@@ -276,7 +277,16 @@ function sampleFieldCoarse(r: Raster, v: View2D, prog: Prog, env: EvalEnv, step:
         b = coarse[J * cw + I + 1],
         c = coarse[(J + 1) * cw + I],
         d = coarse[(J + 1) * cw + I + 1];
-      grid[j * (w + 1) + i] = (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+      const filled = (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+      if (Number.isFinite(filled)) {
+        grid[j * (w + 1) + i] = filled;
+        continue;
+      }
+      // A cell at the field's edge (a horizon's disc): each pixel of it
+      // read on its own, so the edge stays sharp rather than stepped.
+      vars[slotY] = v.cy + (h / 2 - j) * (v.upp / (v.ratio ?? 1));
+      vars[slotX] = v.cx + (i - w / 2) * v.upp;
+      grid[j * (w + 1) + i] = run(prog, vars, stack);
     }
   }
   return grid;
