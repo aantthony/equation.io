@@ -159,11 +159,11 @@ struct Capped<Base: Tool>: Tool {
   }
 }
 
-/// The app's tools for one run, sharing one budget.
-func cappedTools(_ graph: any GraphTools) -> [any Tool] {
+/// The app's tools for one run, and any `extra`, sharing one budget.
+func cappedTools(_ graph: any GraphTools, extra: [any Tool] = []) -> [any Tool] {
   let budget = ToolBudget()
   func cap<T: Tool>(_ tool: T) -> any Tool { Capped(base: tool, budget: budget) }
-  return ChatModel.tools(graph).map { cap($0) }
+  return (ChatModel.tools(graph) + extra).map { cap($0) }
 }
 
 /// Apple's on-device model, as the app's Ask uses it (never Private Cloud Compute here).
@@ -199,7 +199,9 @@ struct OpenAIModel: EvalModel {
   let maxRounds = 20
 
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
-    let tools = cappedTools(graph).filter { reference == nil || Self.referenceTools.contains($0.name) }
+    // The app no longer offers check; the reference variant's instructions still do.
+    let tools = (reference == nil ? cappedTools(graph) : cappedTools(graph, extra: [Check(access: graph)]))
+      .filter { reference == nil || Self.referenceTools.contains($0.name) }
     let instructions = reference.map { "\(ChatModel.referenceInstructions)\n\n\($0)" } ?? ChatModel.instructions
     var messages: [[String: Any]] = [
       ["role": "system", "content": instructions], ["role": "user", "content": prompt],

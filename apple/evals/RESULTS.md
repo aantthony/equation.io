@@ -1386,3 +1386,21 @@ Verdict: worse (−5 tasks), so reverted. The flips are scattered, which is
 what greedy decoding does with a changed prompt: every answer can move. A
 single greedy sample a task makes a tool removal hard to judge; a 5-task
 drop is still the largest move seen with greedy so far.
+
+### No check tool, kept
+
+`a754786` takes check out of the app's tools; the text instructions' line
+now reads "set_graph and get_graph give each row's kind and meaning". The
+reference variant keeps check (its instructions name it, and the runner adds
+it back for `--reference` runs). Instructions 1,556 → 1,554 tokens, tools
+1,309 → 1,187 (−122).
+
+`results/2026-10-09T162852Z-on-device.json`, greedy, 3 runs a task
+(identical but two replies): **50% (23 of 46)**, the same as with check.
+8 tasks flipped, 4 each way: up area-under-sin, spin-3d, torus, shift-up;
+down unit-cube-beside-sphere (points for the cube's corners), cardioid
+(`- cos(1)` in the equation), points (one point dropped), label-vertex
+(vertex at (2, 1)). Named-shape tasks 6 of 10.
+
+Verdict: kept: no worse, for 122 fewer tool tokens. (Close: the same count,
+with 8 flips, is all a single greedy sample can say.)
