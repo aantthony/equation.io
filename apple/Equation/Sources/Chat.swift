@@ -120,7 +120,7 @@ final class GraphChat {
     messages.append(Message(role: .assistant, text: ""))
     let reply = messages.count - 1
     do {
-      for try await snapshot in session.streamResponse(to: prompt) {
+      for try await snapshot in session.streamResponse(to: prompt, options: ChatModel.options) {
         messages[reply].text = snapshot.content
         if !snapshot.content.isEmpty { activity = nil }
       }

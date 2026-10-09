@@ -173,7 +173,7 @@ struct OnDeviceModel: EvalModel {
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
     let session = LanguageModelSession(
       model: SystemLanguageModel.default, tools: cappedTools(graph), instructions: ChatModel.instructions)
-    let response = try await session.respond(to: prompt)
+    let response = try await session.respond(to: prompt, options: ChatModel.options)
     return Turn(
       reply: response.content, inputTokens: session.usage.input.totalTokenCount,
       outputTokens: session.usage.output.totalTokenCount)
@@ -384,6 +384,7 @@ struct Runner {
       results["contextSize"] = system.contextSize
       results["instructionsTokens"] = try? await system.tokenCount(for: Instructions(ChatModel.instructions))
       results["toolsTokens"] = try? await system.tokenCount(for: ChatModel.tools(graph))
+      results["options"] = String(describing: ChatModel.options)
     }
 
     // Saved after every task, so a run cut short keeps what it finished ("partial": true until the end).

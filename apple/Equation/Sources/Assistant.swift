@@ -71,6 +71,10 @@ enum ChatModel {
   // Instructions.swift, generated from lib/assistant-instructions.ts, which
   // the web voice prototype shares.
 
+  /// How every reply is generated, in the app and the evals: greedy, the
+  /// likeliest token each time, so a request gets the same answer each time.
+  static let options = GenerationOptions(samplingMode: .greedy)
+
   /// The chat's tools, over whatever graph they act on.
   static func tools(_ graph: any GraphTools) -> [any Tool] {
     [
