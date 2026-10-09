@@ -79,7 +79,7 @@ enum ChatModel {
   static func tools(_ graph: any GraphTools) -> [any Tool] {
     [
       GetGraph(access: graph), SetGraph(access: graph), MoveView(access: graph),
-      AnimateSlider(access: graph), ListKinds(access: graph),
+      AnimateSlider(access: graph),
       KindExamples(access: graph), ShapeLookup(access: graph), SearchFunctions(access: graph),
       FunctionDoc(access: graph),
     ]
@@ -292,7 +292,7 @@ struct KindExamples: Tool {
   let access: any GraphTools
   let name = "kind_examples"
   let description = """
-    Worked examples of one kind from list_kinds: what it draws, its smallest \
+    Worked examples of one kind from the instructions' list: what it draws, its smallest \
     form, and whole graphs that draw it, one entry per row.
     """
 
