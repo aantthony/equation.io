@@ -129,16 +129,6 @@ describe('shape', () => {
     expect(answer).toContain('  a: ');
     expect(answer).toContain('  e.g. a = 2 → ["(x^2 + y^2 - 2x)^2 = 4(x^2 + y^2)"]');
     expect(shape(data, 'helix')).toContain('(pcurve)');
-    expect(shape(data, 'helix')).not.toContain('parametric form');
-    // The parametric form when the name asks for one, and how to ask where there is one.
-    expect(answer).toContain('For its parametric form, call shape with "parametric cardioid".');
-    const circle = shape(data, 'a circle as a parametric curve');
-    expect(circle).toMatch(/^Circle/);
-    expect(circle).toContain('- ["(R cos(2pi u), R sin(2pi u))"] (pcurve)');
-    expect(circle).toContain('  e.g. R = 1.5 → ["(1.5cos(2pi u), 1.5sin(2pi u))"]');
-    expect(circle).not.toContain('(implicit2d)');
-    expect(circle).not.toContain('For its parametric form');
-    expect(shape(data, 'parametric torus')).toContain('(psurface)');
     expect(answer.split('\n').length).toBeLessThan(8);
     expect(answer).toMatch(/Nothing is drawn yet: .*set_graph\.$/);
     const miss = shape(data, 'kidney bean');

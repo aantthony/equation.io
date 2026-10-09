@@ -440,7 +440,7 @@ type ShapeData = AssistantData['shapes'][number];
  * ("cardiod"); else a word of a name ("lissajous", "knot").
  */
 function findShape(shapes: readonly ShapeData[], query: string): ShapeData | undefined {
-  const q = shapeKey(query.replace(PARAMETRIC, ' '));
+  const q = shapeKey(query);
   if (!q) return undefined;
   const names = shapes.flatMap(shape => [shape.name, ...shape.aliases].map(name => ({ shape, key: shapeKey(name) })));
   const exact = names.find(n => n.key === q);
@@ -464,18 +464,11 @@ function findShape(shapes: readonly ShapeData[], query: string): ShapeData | und
   return names.find(n => n.key.split(' ').some(w => w.length > 3 && words.includes(w)))?.shape;
 }
 
-/** A request for a parametric form: "parametric circle", "a sphere as a parametric surface". */
-const PARAMETRIC = /\b(?:as an? )?parametric(?:ally)?(?: (?:curve|surface|form))?\b/gi;
-
-const isEquation = (form: ShapeData['forms'][number]) => form.kind.startsWith('implicit');
-
 /**
  * shape(name): a named curve or surface's forms in this language, each with
  * its parameters and one instance, from the reference (docs/reference/shapes.md);
  * on a miss, every name. One form only, the equation where there is one (the
- * model drew every form it was shown, as separate rows), or its parametric form
- * when the name asks for one; an entry with both says how to ask for the
- * other. Rows come before their kind (a `kind: rows` line was
+ * model drew every form it was shown, as separate rows). Rows come before their kind (a `kind: rows` line was
  * copied into a row whole), and the answer ends by saying it drew nothing: the
  * model took the entry for a drawing and replied without set_graph.
  */
@@ -483,21 +476,13 @@ export function shape(data: AssistantData, name: string): string {
   const found = findShape(data.shapes, name);
   if (!found) return `No shape "${name.trim()}". Shapes: ${data.shapes.map(s => s.name.toLowerCase()).join(', ')}.`;
   const rows = (list: string[]) => JSON.stringify(list);
-  const parametric = found.forms.find(f => !isEquation(f) && f.kind !== 'ineq2d');
-  const equation = found.forms.find(isEquation);
-  const wantsParametric = new RegExp(PARAMETRIC.source, 'i').test(name);
-  const form = (wantsParametric ? parametric : equation) ?? found.forms[0];
-  const other =
-    form === equation && parametric
-      ? `For its parametric form, call shape with "parametric ${found.name.toLowerCase()}".`
-      : undefined;
+  const form = found.forms.find(f => f.kind.startsWith('implicit')) ?? found.forms[0];
   return [
     `${found.name}${found.aliases.length ? ` (also ${found.aliases.join(', ')})` : ''}: ${found.intro.replace(/\s+/g, ' ')}`,
     `- ${rows(form.rows)} (${form.kind})${form.note ? ` — ${form.note}` : ''}`,
     ...form.params.map(([param, meaning]) => `  ${param}: ${meaning}`),
     `  e.g. ${form.example.values ? `${form.example.values} → ` : ''}${rows(form.example.rows)}${form.example.note ? ` — ${form.example.note}` : ''}`,
     ...(found.pitfall ? [`Pitfall: ${found.pitfall}`] : []),
-    ...(other ? [other] : []),
     'Nothing is drawn yet: adapt this form to the request and pass its rows to set_graph.',
   ].join('\n');
 }
