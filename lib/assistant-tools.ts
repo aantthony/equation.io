@@ -512,6 +512,9 @@ export function substitute(rows: readonly string[], values: Readonly<Record<stri
   });
 }
 
+/** Coordinates and variables, never a shape's parameters: the model passed a request's r = 1 + cos θ as r = 1, θ = 2.5. */
+const VARIABLES = new Set(['x', 'y', 'z', 'u', 'v', 'r', 'θ', 'theta']);
+
 /** Which of a form's parameters a given value is for: by name, in any case, or by a word of what it sets ("radius"). */
 function parameterFor(params: readonly [string, string][], given: string): string | undefined {
   const g = given.trim();
@@ -550,7 +553,18 @@ export function shape(data: AssistantData, name: string, values: readonly ShapeV
   if (!found) return `No shape "${name.trim()}". Shapes: ${data.shapes.map(s => s.name.toLowerCase()).join(', ')}.`;
   const rows = (list: string[]) => JSON.stringify(list);
   const form = found.forms.find(f => f.kind.startsWith('implicit')) ?? found.forms[0];
-  const given = values.filter(v => Number.isFinite(v.value));
+  const finite = values.filter(v => Number.isFinite(v.value));
+  // A coordinate or variable is refused unless it is exactly a parameter's name.
+  const refused = finite.filter(
+    v => VARIABLES.has(v.name.trim().toLowerCase()) && !form.params.some(([p]) => p === v.name.trim()),
+  );
+  const given = finite.filter(v => !refused.includes(v));
+  const parameters = form.params.map(([p, m]) => `${p} (${m})`).join('; ');
+  const refusal = refused.length
+    ? [
+        `Not parameters: ${refused.map(v => v.name.trim()).join(', ')} ${refused.length > 1 ? 'are coordinates or variables' : 'is a coordinate or variable'}.${form.params.length ? ` Its parameters: ${parameters}.` : ''}`,
+      ]
+    : [];
   if (given.length && form.params.length) {
     const chosen: Record<string, number> = {};
     const unknown: string[] = [];
@@ -574,15 +588,13 @@ export function shape(data: AssistantData, name: string, values: readonly ShapeV
             `Not given, so from the example: ${kept.map(([p, meaning]) => `${p} (${meaning}) = ${num(chosen[p])}`).join('; ')}.`,
           ]
         : []),
-      ...(unknown.length
-        ? [
-            `Not a parameter here: ${unknown.join(', ')}. Its parameters: ${form.params.map(([p, m]) => `${p} (${m})`).join('; ')}.`,
-          ]
-        : []),
+      ...(unknown.length ? [`Not a parameter here: ${unknown.join(', ')}. Its parameters: ${parameters}.`] : []),
+      ...refusal,
       'Nothing is drawn yet: pass these rows to set_graph.',
     ].join('\n');
   }
   return [
+    ...refusal,
     `${found.name}${found.aliases.length ? ` (also ${found.aliases.join(', ')})` : ''}: ${found.intro.replace(/\s+/g, ' ')}`,
     `- ${rows(form.rows)} (${form.kind})${form.note ? ` — ${form.note}` : ''}`,
     ...form.params.map(([param, meaning]) => `  ${param}: ${meaning}`),

@@ -196,4 +196,32 @@ describe('shape with values', () => {
     expect(hyperboloid).toContain('Not given, so from the example: c (');
     expect(shape(data, 'torus', [{ name: 'q', value: 1 }])).toContain('Not a parameter here: q.');
   });
+
+  it('refuses coordinates and variables as values, naming the parameters', () => {
+    // The request's r = 1 + cos θ, passed as values.
+    const cardioid = shape(data, 'cardioid', [
+      { name: 'r', value: 1 },
+      { name: 'θ', value: 2.5 },
+    ]);
+    expect(cardioid).toMatch(/^Not parameters: r, θ are coordinates or variables\. Its parameters: a \(the size/);
+    // Then the form and its instance, as with no values.
+    expect(cardioid).toContain('  e.g. a = 2 → ');
+    const sphere = shape(data, 'sphere', [
+      { name: 'x', value: 0 },
+      { name: 'radius', value: 2 },
+    ]);
+    expect(sphere).toContain('["x^2 + y^2 + z^2 = 4"]');
+    expect(sphere).toContain('Not parameters: x is a coordinate or variable.');
+    // A parameter's own name is never refused.
+    expect(shape(data, 'sphere', [{ name: 'R', value: 2 }])).not.toContain('Not parameters');
+  });
+
+  it('draws the rose with sin, k in the petal factor', () => {
+    const rose = shape(data, 'polar rose', [
+      { name: 'a', value: 1 },
+      { name: 'k', value: 4 },
+    ]);
+    expect(rose).toContain('["(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))"]');
+    expect(shape(data, 'rose')).toContain('(a sin(2pi k u) cos(2pi u), a sin(2pi k u) sin(2pi u))');
+  });
 });
