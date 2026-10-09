@@ -1047,3 +1047,59 @@ Verdict: a loss, 7 points, from one cause: the model treats shape's answer as
 having drawn the shape. The lookup itself works (right names, right entries,
 adaptation where it drew). Next: rows first in the answer, and say it draws
 nothing.
+
+### shape's answer says it draws nothing
+
+`1d698120`: each form's rows come first, its kind after (`- ["…"] (psurface)`),
+the answer ends "Nothing is drawn yet: adapt a form to the request and pass its
+rows to set_graph.", the tool description adds "It draws nothing: set_graph
+draws.", and the instruction line now reads "…call shape with its name first,
+then draw its form, adapted to the request, with set_graph." Instructions 1,556
+tokens (+30 over the primer run), tools 1,309 (+95).
+
+`results/2026-10-09T002200Z-on-device.json`, 10 runs a task: **45% ±3%
+(209/460)**, against 44% ±5% (203/460) for the primer run and 37% for the first
+shape run; tasks passed per repetition 19–23. 2.7 tool calls a run, 8,851 input
+tokens a session, three context overflows (one before). Mean seconds a run
+are 27 because of one 1,038 s run (the machine slept); the median is 6.3 s.
+
+| | primer (220125Z) | shape (231719Z) | shape, draws nothing (002200Z) |
+| --- | --- | --- | --- |
+| pass | 44% ±5% (203) | 37% ±3% (171) | 45% ±3% (209) |
+| 10 named-shape tasks | 25/100 | 17/100 | 36/100 |
+| the other 36 tasks | 178/360 | 154/360 | 173/360 |
+| runs calling shape | – | 148 | 172 |
+| of those, no set_graph after | – | 78 | 7 |
+
+Named-shape tasks, primer → this run: honest-reply-helix 2 → 9, lissajous
+0 → 6, cone 0 → 5, parametric-circle 7 → 9, hyperboloid 0 → 2, torus 10 → 4,
+unit-cube 4 → 1, sphere 1 → 0, cardioid 1 → 0, polar-rose 0 → 0. shape was
+called with the right name every time (sphere 19, circle 17, cardioid 12, cube
+11, helix, polar rose, saddle, torus, cone, "hyperboloid of one sheet" 10 each);
+it was also asked for "solid" 10 times (solid-of-revolution, a miss) and for
+"path" and "cardioid" in motion-trail, which stays 0/10.
+
+**Adapt or copy:** it adapts a parameter the request names as a word and copies
+the instance when the request gives numbers.
+- Adapted: parametric-circle 8 × `(3 cos(2pi u), 3 sin(2pi u))` from the
+  entry's radius 1.5; lissajous `(sin(2pi u + 0.5), sin(4pi u))` (a = 1, b = 2);
+  cone 5 × `x^2 + y^2 = z^2` with `z = sqrt(x^2 + y^2)` (k = 1, both forms).
+- Copied: cardioid 10/10 drew the instance, r = 2(1 + cos θ), for "r = 1 + cos
+  θ"; unit-cube 5 × `(interval(-1, 1), …)`, a cube of side 2; hyperboloid 3 ×
+  both waist-3 instances; helix 9 × the instance (passes: any helix does).
+- Adapted wrongly: sphere 10/10 wrote `x^2 + y^2 + z^2 = 8` for radius 2 (R^2
+  squared as 2 × 2 × 2, or the entry's 9 minus 1), replying "radius 2".
+  polar-rose kept θ's factor in both components, `(sin(4*2pi*u) cos(4*2pi*u),
+  …)`, despite the pitfall.
+- Drew every form: torus, cone and hyperboloid runs often set both of the
+  entry's forms as two rows; torus lost 6 of 10 to a broken second row (`a
+  sin(2pi v)` with `a` undefined, `cos(2pi u), sin(2pi u)`).
+
+Verdict: with the fix, no loss overall (45% against 44%, within noise) and a
+gain on named shapes (25 → 36 of 100), with the other tasks flat (178 → 173 of
+360, noise). Not the step change hoped for: the model now finds the right entry
+and draws, but copies its numbers or draws every form. Next candidates: one
+form per entry in the answer (the one the request's word implies, implicit
+first), instances that state their numbers next to the parameters ("R = 3:
+x^2 + y^2 + z^2 = 9"), and checking arithmetic like R^2 with check's value
+readout.
