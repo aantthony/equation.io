@@ -1425,3 +1425,48 @@ function_doc and search_functions stay (their removal measured 5 tasks
 worse); check and list_kinds are gone from the app. Their code (lib, the
 bridge, the eval service) stays: the voice prototype, the reference
 variant's check and the tests use it.
+
+## shape takes the request's values (2026-10-10)
+
+`b2e9141`: shape takes an optional `values` argument, each a name (a
+parameter's, or a word of what it sets, like "radius") and a number, and
+answers the form's rows with the numbers put in, worked out in code (squares,
+products, a factor of 1 dropped, kθ as `2pi k u`; lib/assistant-tools.ts
+`substitute`, tested on every catalogue instance). A parameter not given keeps
+the instance's value, and the answer says so; a name that is no parameter is
+listed with the parameters. Without values it answers as before. The tool
+description and the instruction line now say to pass the request's values.
+Instructions 1,544 tokens, tools 1,205 (+119 for the argument).
+
+`results/2026-10-09T172322Z-on-device.json`, greedy, 3 runs a task
+(identical but four replies): **52% (24 of 46)**, against 23 of 46 for the
+run before (no check, no list_kinds). Named-shape tasks 6 of 10, the same;
+the other 36, 18 (17).
+
+The model passes values on every shape call, and on 9 named-shape tasks:
+- right and used: sphere `radius = 2` → `x^2 + y^2 + z^2 = 4`; unit-cube and
+  unit-cube-beside-sphere `side = 1` → `(interval(0, 1), …)`; hyperboloid
+  `radius = 2` → `x^2/4 + y^2/4 - z^2/4 = 1` (c from the example);
+  circle-and-line `radius = 2` → `x^2 + y^2 = 4` (up: it wrote
+  `circle: circle((0,0),2)` before).
+- not parameters, so ignored and the example used: cardioid `r = 1, θ = 2.5`
+  (the request's r = 1 + cos θ read as values; "r" is no parameter, so a = 2
+  from the example, which fails); polar-rose `r = 1, θ = 2.58` (and the
+  catalogue's rose is r = a cos(kθ), never sin); helix and lissajous `u`, `v`,
+  `x`, `y` (both pass on the instance: lissajous up, from a circle).
+- loosely matched: cone `height = 3, base_radius = 2`, both words in k's
+  meaning, so k = 2 (still a cone, passes); torus `radius = 1, height = 1`
+  (the tube radius a = 1; the rows are right, the reply fails).
+- shape was also called for things that aren't shapes, with coordinates as
+  values: tangent, line, path, solid, domain colouring, sphere for the
+  intersection.
+
+Other flips: derivative up, motion-trail up; tangent-line down (`y = 2x - 2`),
+color-red down (reply).
+
+Verdict: kept (+1 task, a close call). The values are right when the request
+names a size (radius, side), and the substitution can't be got wrong; but the
+model also passes coordinates and the request's own variables as values, which
+fall back to the example. Next candidates: refuse values named x, y, z, u, v,
+r or θ outright (they are never parameters), and a sine rose in the
+catalogue.
