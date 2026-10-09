@@ -10138,7 +10138,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9159,
@@ -10187,7 +10187,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -10236,7 +10236,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -10285,7 +10285,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -10334,7 +10334,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -10383,7 +10383,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -10432,7 +10432,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -10481,7 +10481,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -10530,7 +10530,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -10579,7 +10579,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 9155,
@@ -13309,13 +13309,12 @@
             },
             {
               "name": "a cone",
-              "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: implicit3d"
+              "pass": true
             }
           ],
           "inputTokens": 9048,
           "outputTokens": 79,
-          "pass": false,
+          "pass": true,
           "reply": "I drew a cone with radius growing as height in 3D, centered at the origin.",
           "rows": [
             "x^2 + y^2 = z^2/4"
@@ -13462,13 +13461,12 @@
             },
             {
               "name": "a cone",
-              "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: implicit3d"
+              "pass": true
             }
           ],
           "inputTokens": 9232,
           "outputTokens": 102,
-          "pass": false,
+          "pass": true,
           "reply": "I drew a cone as a 3D surface, showing its curved shape from the origin. It’s a symmetrical curve where height and radius match.",
           "rows": [
             "x^2 + y^2 = z^2/4"
@@ -13575,13 +13573,12 @@
             },
             {
               "name": "a cone",
-              "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: implicit3d"
+              "pass": true
             }
           ],
           "inputTokens": 9236,
           "outputTokens": 110,
-          "pass": false,
+          "pass": true,
           "reply": "I drew a cone, a 3D surface where the radius grows with height, centered at the origin. The graph now shows this cone in 3D space.",
           "rows": [
             "x^2 + y^2 = z^2/4"
@@ -13685,13 +13682,12 @@
             },
             {
               "name": "a cone",
-              "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: implicit3d"
+              "pass": true
             }
           ],
           "inputTokens": 9048,
           "outputTokens": 77,
-          "pass": false,
+          "pass": true,
           "reply": "I drew a cone from the equation x² + y² = z²/4, showing its two nappes.",
           "rows": [
             "x^2 + y^2 = z^2/4"
@@ -13782,13 +13778,12 @@
             },
             {
               "name": "a cone",
-              "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: implicit3d"
+              "pass": true
             }
           ],
           "inputTokens": 9048,
           "outputTokens": 83,
-          "pass": false,
+          "pass": true,
           "reply": "I drew a cone—its surface grows from a point, the apex, with radius tied to height. The graph shows one nappe of the cone.",
           "rows": [
             "x^2 + y^2 = z^2/4"
@@ -29491,5 +29486,5 @@
     }
   ],
   "toolsTokens": 1309,
-  "regraded": "2026-10-09T06:25:31.458Z"
+  "regraded": "2026-10-09T07:34:38.375Z"
 }

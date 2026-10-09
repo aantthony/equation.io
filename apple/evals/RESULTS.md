@@ -1155,3 +1155,67 @@ called in 182 runs, 2 without a set_graph after.
 Verdict: no change overall. One form ends the both-forms rows (torus,
 hyperboloid up) but costs requests that name the other form
 (parametric-circle). Copying the instance's numbers is unchanged.
+
+## Instances that name their values (2026-10-09)
+
+`22cd1fe5`: every instance in shapes.md names its parameters' values, and
+shape shows them before the rows, so the substitution is visible:
+`e.g. a = 3, c = 2 → ["x^2/9 + y^2/9 - z^2/4 = 1"]`. Instances that weren't the
+form with values put in now are (the cube's side-2 box is `(interval(0, 2), …)`,
+the cylinder's `4v`, the ellipsoid's c = 1.5, the cone's `(0.5z)^2`; a script
+checked every substitution numerically). Instructions and tools unchanged.
+The answer for "hyperboloid":
+
+```
+Hyperboloid of one sheet (also hyperboloid, one-sheeted hyperboloid, cooling tower): A connected surface with a narrow circular waist that flares out above and below.
+- ["x^2/a^2 + y^2/a^2 - z^2/c^2 = 1"] (implicit3d) — about the z-axis
+  a: the radius of the waist, the circle at z = 0
+  c: the height scale: larger c flares more slowly
+  e.g. a = 3, c = 2 → ["x^2/9 + y^2/9 - z^2/4 = 1"]
+Pitfall: one minus sign gives one sheet; two minus signs give two sheets. With no z term it is a cylinder.
+Nothing is drawn yet: adapt this form to the request and pass its rows to set_graph.
+```
+
+**Two check fixes, all files regraded.** Both rejected right answers the shape
+entries led to:
+- cone passed an equation only through (1, 0, 1), (0, 2, 2) and (3, 4, 5),
+  so only a 45° cone: `x^2 + y^2 = (0.5z)^2` and `z = sqrt(x^2 + y^2)/2` are
+  cones too. It now finds the slope along x at z = 1 and wants the surface
+  crossed at that slope times z all the way round, at three heights; the
+  saddle, `z = sqrt(x^2 - y^2)` and the other known-bad answers still fail,
+  `x^2 + y^2 = (0.4z)^2` is a new known-good one.
+- cardioid wanted a parametric curve, but the request ("plot the cardioid
+  r = 1 + cos θ") is met by its equation, `(x^2 + y^2 - x)^2 = x^2 + y^2`,
+  now a known-good answer: an implicit curve passes when it is crossed at
+  r = 1 + cos θ in six directions and nowhere between. The device's
+  `(x^2 + y^2 - 1)^2 = 1(x^2 + y^2)` and the a = 2 instance are known-bad.
+Regraded with regrade.ts: only these two tasks changed, in two files. One
+form per shape (`2026-10-09T052258Z`) 205 → 210 (46% ±3%; cone 4 → 9, the
+named-shape tasks 31 → 36), and this step's run below (cone 0 → 8, cardioid
+0 → 8). No earlier file changed.
+
+`results/2026-10-09T063021Z-on-device.json`, 10 runs a task, against
+`2026-10-09T052258Z` (regraded): **46% ±3% (210/460) → 49% ±4% (225/460)**,
+the best on-device result so far; tasks passed per repetition 20–26.
+Named-shape tasks 36 → 54 of 100; the other 36 tasks 174 → 171 of 360.
+shape called in 180 runs, 1 without a set_graph after.
+
+Adapted, the substitution done as shown:
+- unit-cube 0 → 7: `(interval(0, 1), interval(0, 1), interval(0, 1))` from
+  "a = 2 → (interval(0, 2), …)" (unit-cube-beside-sphere 2 → 6 too).
+- hyperboloid 5 → 9: `x^2/4 + y^2/4 - z^2/4 = 1` (a = 2, c = 2), 9 runs.
+- sphere 4 → 6: `x^2 + y^2 + z^2 = 4` 6 times; `= 8` only once now (5 before).
+- cardioid 0 → 8: `(x^2 + y^2 - 1x)^2 = 1(x^2 + y^2)`, a = 1 put in
+  everywhere (the a x term was dropped in step 1).
+
+Copied: cone 9/10 drew the instance, `x^2 + y^2 = (0.5z)^2` (a cone, so it
+passes); helix 7 × the instance; torus 5/10, all the instance (the failures
+are the same rows with a reply that misnames them). Not helped: polar-rose
+0/10 (`(sin(4pi u) cos(4pi u), …)`: θ's factor in both components),
+parametric-circle 0/10 (`x^2 + y^2 = 9`: the one form shown is the equation),
+lissajous 3/10. Elsewhere, shift-up 9 → 5 and color-red 10 → 7 (`#ff` again)
+moved without shape calls.
+
+Verdict: a gain. Showing the values next to the instance turned copying into
+substitution on cube, hyperboloid, sphere and cardioid (named-shape tasks
+36 → 54), with the rest flat.

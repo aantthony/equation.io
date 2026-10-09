@@ -10661,7 +10661,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -10701,7 +10701,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -10741,7 +10741,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -10781,7 +10781,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -10821,7 +10821,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -10887,7 +10887,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 13068,
@@ -10930,7 +10930,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -10970,7 +10970,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -11010,7 +11010,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -11050,7 +11050,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 6008,
@@ -13605,7 +13605,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13645,7 +13645,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13685,7 +13685,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13724,7 +13724,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13763,7 +13763,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13803,7 +13803,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13843,7 +13843,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13882,7 +13882,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13922,7 +13922,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -13961,7 +13961,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: no rows"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: no rows"
             }
           ],
           "inputTokens": 5961,
@@ -28714,5 +28714,5 @@
     }
   ],
   "toolsTokens": 1300,
-  "regraded": "2026-10-09T06:25:29.166Z"
+  "regraded": "2026-10-09T07:34:36.002Z"
 }

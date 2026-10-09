@@ -6032,7 +6032,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 36489,
@@ -6151,7 +6151,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "error": "more than 12 tool calls",
@@ -6304,7 +6304,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "error": "more than 12 tool calls",
@@ -6372,7 +6372,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 14746,
@@ -6431,7 +6431,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 11517,
@@ -8248,7 +8248,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: A \"condition: value\" pair is only valid inside {…}., A \"condition: value\" pair is only valid inside {…}."
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: A \"condition: value\" pair is only valid inside {…}., A \"condition: value\" pair is only valid inside {…}."
             }
           ],
           "error": "more than 12 tool calls",
@@ -8298,7 +8298,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: implicit2d, implicit3d"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: implicit2d, implicit3d"
             }
           ],
           "inputTokens": 8584,
@@ -8409,7 +8409,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: A \"condition: value\" pair is only valid inside {…}."
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: A \"condition: value\" pair is only valid inside {…}."
             }
           ],
           "error": "more than 12 tool calls",
@@ -8529,7 +8529,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: A \"condition: value\" pair is only valid inside {…}., ∈ draws a name from a list on a row of its own, like p ∈ A."
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: A \"condition: value\" pair is only valid inside {…}., ∈ draws a name from a list on a row of its own, like p ∈ A."
             }
           ],
           "error": "more than 12 tool calls",
@@ -8584,7 +8584,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: A \"condition: value\" pair is only valid inside {…}."
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: A \"condition: value\" pair is only valid inside {…}."
             }
           ],
           "inputTokens": 8551,
@@ -17275,5 +17275,5 @@
     }
   ],
   "toolsTokens": 1214,
-  "regraded": "2026-10-09T06:25:23.638Z"
+  "regraded": "2026-10-09T07:34:30.361Z"
 }

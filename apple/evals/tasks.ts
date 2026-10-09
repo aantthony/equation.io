@@ -351,14 +351,51 @@ export const TASKS: EvalTask[] = [
     rows: [],
     request: 'Plot the cardioid r = 1 + cos θ',
     checks: [
-      parametric(
+      anyOf(
         'the cardioid r = 1 + cos θ',
-        ([x, y]) => Math.hypot(x, y) < 1e-9 || Math.abs(Math.hypot(x, y) - (1 + Math.cos(Math.atan2(y, x)))) < 1e-6,
-        2,
+        parametric(
+          'as a parametric curve',
+          ([x, y]) => Math.hypot(x, y) < 1e-9 || Math.abs(Math.hypot(x, y) - (1 + Math.cos(Math.atan2(y, x)))) < 1e-6,
+          2,
+        ),
+        // As an equation in x and y: crossed at r = 1 + cos θ in every direction
+        // tried, and not between, near the origin or out past it.
+        {
+          name: 'as an equation',
+          test: o =>
+            o.graph.analysis.rows.some(r => {
+              if (r.cpu?.type !== 'implicit2d') return false;
+              const cpu = r.cpu;
+              const sign = (q: number, theta: number) =>
+                Math.sign(
+                  evaluate(cpu.residual, {
+                    ...o.graph.analysis.constEnv,
+                    t: 0,
+                    x: q * Math.cos(theta),
+                    y: q * Math.sin(theta),
+                  }),
+                );
+              return [0.3, 1, 2, 2.6, -1, -2].every(theta => {
+                const rad = 1 + Math.cos(theta);
+                const [a, b, c, d] = [0.5, 0.999, 1.001, 1.5].map(k => sign(k * rad, theta));
+                return a === b && c === d && b !== c;
+              });
+            })
+              ? true
+              : 'no such curve',
+        },
       ),
     ],
-    good: [answer('The cardioid r = 1 + cos θ.', set('((1 + cos(2pi u)) cos(2pi u), (1 + cos(2pi u)) sin(2pi u))'))],
-    bad: [answer('The cardioid.', set('((1 + cos(2pi u)) cos(2pi u), (1 + cos(2pi u)) sin(4pi u))'))],
+    good: [
+      answer('The cardioid r = 1 + cos θ.', set('((1 + cos(2pi u)) cos(2pi u), (1 + cos(2pi u)) sin(2pi u))')),
+      answer('The cardioid r = 1 + cos θ, as an equation.', set('(x^2 + y^2 - x)^2 = x^2 + y^2')),
+    ],
+    bad: [
+      answer('The cardioid.', set('((1 + cos(2pi u)) cos(2pi u), (1 + cos(2pi u)) sin(4pi u))')),
+      // Observed: the shape entry's a = 1 with the a x term dropped, and its a = 2 instance.
+      answer('The cardioid r = 1 + cos θ.', set('(x^2 + y^2 - 1)^2 = 1(x^2 + y^2)')),
+      answer('The cardioid.', set('(x^2 + y^2 - 2x)^2 = 4(x^2 + y^2)')),
+    ],
   },
   {
     id: 'parametric-circle',
@@ -487,15 +524,38 @@ export const TASKS: EvalTask[] = [
     checks: [
       anyOf(
         'a cone',
-        surfaceThrough(
-          'a cone about the z-axis',
-          [
-            [1, 0, 1],
-            [0, 2, 2],
-            [3, 4, 5],
-          ],
-          [0, 0, 1],
-        ),
+        // As an equation, of any slope: the surface crosses the line from the
+        // apex at the origin, at a radius k z that grows in step with z, all
+        // the way round. (Only k = 1 passed before: x^2 + y^2 = z^2/4 is a cone too.)
+        {
+          name: 'a cone about the z-axis',
+          test: o =>
+            o.graph.analysis.rows.some(r => {
+              if (r.cpu?.type !== 'implicit3d') return false;
+              const cpu = r.cpu;
+              const f = (x: number, y: number, z: number) =>
+                evaluate(cpu.residual, { ...o.graph.analysis.constEnv, t: 0, x, y, z });
+              const crosses = (rad: number, phi: number, z: number) => {
+                const [a, b] = [rad * 0.999, rad * 1.001].map(q => f(q * Math.cos(phi), q * Math.sin(phi), z));
+                return (
+                  Number.isFinite(a) && Number.isFinite(b) && (a === 0 || b === 0 || Math.sign(a) !== Math.sign(b))
+                );
+              };
+              const rs = Array.from({ length: 400 }, (_, k) => 0.05 + k * 0.025);
+              const k = rs.find((q, i) => i > 0 && Math.sign(f(rs[i - 1], 0, 1)) !== Math.sign(f(q, 0, 1)));
+              if (k === undefined) return false;
+              let [lo, hi] = [k - 0.025, k];
+              for (let i = 0; i < 50; i++) {
+                const mid = (lo + hi) / 2;
+                if (Math.sign(f(lo, 0, 1)) === Math.sign(f(mid, 0, 1))) lo = mid;
+                else hi = mid;
+              }
+              const slope = (lo + hi) / 2;
+              return [0.5, 2, 3].every(z => [0.7, 2, 4].every(phi => crosses(slope * z, phi, z)));
+            })
+              ? true
+              : 'no cone about the z-axis',
+        },
         // A parametric cone about a vertical axis: the distance from the axis
         // grows in step with z (r = a + b z, b not 0), or with |z| (a double
         // cone). A solid isn't checked for its shape.
@@ -518,6 +578,7 @@ export const TASKS: EvalTask[] = [
     good: [
       answer('A double cone, z² = x² + y².', set('z^2 = x^2 + y^2')),
       answer('A cone opening upward.', set('z = sqrt(x^2 + y^2)')),
+      answer('A narrower cone.', set('x^2 + y^2 = (0.4z)^2')),
       answer('A cone.', set('(2v cos(2pi u), 2v sin(2pi u), 3v)')),
       answer('A double cone.', set('((2v - 1) cos(2pi u), (2v - 1) sin(2pi u), 2v - 1)')),
     ],

@@ -5431,7 +5431,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 11405,
@@ -5765,7 +5765,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "error": "Provided 8,270 tokens, but the maximum allowed is 8,192.::Provided 8,270 tokens, but the maximum allowed is 8,192.: The operation couldn’t be completed. (TokenGenerationInference.DecoderModelError error 3.)::inferenceFailed::The operation couldn’t be completed. (TokenGenerationInference.DecoderModel",
@@ -5822,7 +5822,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 11425,
@@ -5880,7 +5880,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 11426,
@@ -5938,7 +5938,7 @@
             {
               "name": "the cardioid r = 1 + cos θ",
               "pass": false,
-              "why": "no parametric curve fits"
+              "why": "no parametric curve fits; no such curve"
             }
           ],
           "inputTokens": 11422,
@@ -7393,7 +7393,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: psurface"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: psurface"
             }
           ],
           "inputTokens": 11209,
@@ -7446,7 +7446,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: psurface"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: psurface"
             }
           ],
           "inputTokens": 11206,
@@ -7499,7 +7499,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: psurface"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: psurface"
             }
           ],
           "inputTokens": 11203,
@@ -7552,7 +7552,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: psurface"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: psurface"
             }
           ],
           "inputTokens": 11200,
@@ -7605,7 +7605,7 @@
             {
               "name": "a cone",
               "pass": false,
-              "why": "no surface through [[1,0,1],[0,2,2],[3,4,5]]; no parametric surface fits; kinds: psurface"
+              "why": "no cone about the z-axis; no parametric surface fits; kinds: psurface"
             }
           ],
           "inputTokens": 11203,
@@ -11591,5 +11591,5 @@
     }
   ],
   "toolsTokens": 1218,
-  "regraded": "2026-10-09T06:25:10.393Z"
+  "regraded": "2026-10-09T07:34:16.588Z"
 }
