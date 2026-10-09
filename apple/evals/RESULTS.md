@@ -1278,3 +1278,37 @@ values run (`2026-10-09T063021Z`): **49% ±4% (225/460) → 45% ±4%
 Verdict: worse, and the parametric form is never requested, so reverted.
 The model names the shape from the request's noun ("circle"); "as a
 parametric curve" doesn't reach the argument.
+
+## Pitfalls in words (2026-10-09), reverted
+
+`6f42e5d`: pitfalls with a formula in numbers now state the rule in words or
+with the entry's own parameters: the rose's "r = sin(5θ) is `sin(10pi u)`"
+(copied as `(sin(10pi u) cos(10pi u), …)` in the no-instance run) became "θ is
+2πu, so kθ is `2pi k u`, and k goes only in the petal factor at the front of
+each component, never in the `cos(2pi u)` and `sin(2pi u)` that turn it";
+likewise the cardioid, Lissajous, helix, plane, sphere, ball, cylinder, saddle
+and cube. Tool and instructions unchanged.
+
+**Check fix, all files regraded.** lissajous passed `(sin(2pi u), sin(2pi))`,
+a segment along x (its second component is the constant sin 2π ≈ 0, which the
+check took for a swing). Both components must now swing; the answer is a
+known-bad one. Regraded with regrade.ts: only this step's run changed, 217 →
+216 (lissajous 5 → 4).
+
+`results/2026-10-09T095343Z-on-device.json`, 10 runs a task, against the
+values run (`2026-10-09T063021Z`): **49% ±4% (225/460) → 47% ±4%
+(216/460)**; named-shape tasks 54 → 60 of 100, the other 36 tasks 171 → 156.
+
+- Named shapes: sphere 6 → 10, torus 5 → 8, hyperboloid 9 → 10 (all
+  `x^2/4 + y^2/4 - z^2/4 = 1`), lissajous 3 → 4, parametric-circle 0 → 2;
+  cardioid 8 → 2 (`(x^2 + y^2 - 1 + cos(1))^2 = x^2 + y^2`: θ written into
+  the equation). polar-rose stays 0/10: the pitfall's `sin(10pi u)` is gone,
+  but 5 runs now copy the instance, r = 2cos(3θ).
+- The other 36 tasks fell 15 runs, but mostly where the change can't reach:
+  runs that never called shape passed 147 of 280 before and 140 of 288 now
+  (zoom-out 7 → 3, derivative 10 → 6, no shape call); runs that did, 24 of 80
+  and 16 of 72.
+
+Verdict: worse overall (216 against 225), so reverted as agreed. The loss
+is mostly in runs that never saw a pitfall, i.e. run-to-run noise, while the
+named-shape tasks gained (54 → 60): this change is worth measuring again.

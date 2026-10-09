@@ -426,9 +426,10 @@ export const TASKS: EvalTask[] = [
               .filter(d => Math.abs(d) > 1e-9);
             return steps.filter((d, k) => Math.sign(d) !== Math.sign(steps[(k + 1) % steps.length])).length;
           };
+          // Both swing: a constant component (sin(2pi) is 0) draws a segment.
           return (
-            a > 0 &&
-            b > 0 &&
+            a > 1e-6 &&
+            b > 1e-6 &&
             samples.some(([x, y]) => Math.abs((x / a) ** 2 + (y / b) ** 2 - 1) > 0.05) &&
             turns(samples.map(([x]) => x)) !== turns(samples.map(([, y]) => y))
           );
@@ -448,6 +449,7 @@ export const TASKS: EvalTask[] = [
       // Observed: equal frequencies, a tilted ellipse and a segment.
       answer('A Lissajous figure.', set('(sin(2pi u + 0.5), sin(2pi u))')),
       answer('A Lissajous figure.', set('(sin(2pi u), sin(2pi u))')),
+      answer('A Lissajous figure.', set('(sin(2pi u), sin(2pi))')),
     ],
   },
   {
