@@ -445,12 +445,6 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
     ctx.values,
   );
   if (!quadratic) throw notQuadratic;
-  // Undefined at every point checked (a slider at 0 making it 0/0, as
-  // Kruskal's 32 M^3/r at M = 0): there is no signature to read out.
-  if (!defined)
-    throw new Error(
-      'ds^2 has no value anywhere it was checked, at distances from 0.001 to 100 000 from the origin — is a slider at a value that makes it 0/0?',
-    );
   if (defined && !independent && !spatial.every(c => PANEL.has(c)))
     throw new Error(
       `ds^2: ${spatial.join(' and ')} do not make coordinates on the plane — their Jacobian in x and y vanishes.`,

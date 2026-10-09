@@ -1523,8 +1523,13 @@ export function subtreeCounts(e: Expr): { id: (node: Expr) => number; count: (no
       case 'piecewise':
         key = `p${node.cases.map(c => `${visit(c.cond)}:${visit(c.value)}${c.bare ? 'b' : ''}`).join(';')}|${node.otherwise ? visit(node.otherwise) : ''}`;
         break;
-      default:
+      case 'loop':
         key = `k${exprKey(node)}`;
+        break;
+      default:
+        // Anything else (a list, a data column, an index) is its own: never
+        // shared, and never serialized — a million-row column would be.
+        key = `u${counts.length}`;
     }
     let id = intern.get(key);
     if (id === undefined) {

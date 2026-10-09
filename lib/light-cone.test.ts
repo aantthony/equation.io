@@ -683,8 +683,25 @@ describe('Kruskal–Szekeres diagrams', () => {
     expect(ended.problem).toBeUndefined();
   });
 
-  it('say so when M = 0 leaves the metric 0/0 everywhere', () => {
-    expect(errorOf(['M = 0', ...KRUSKAL.slice(1)])).toMatch(/no value anywhere it was checked/);
+  it('leave a metric alone that is defined only where the samples miss it', () => {
+    for (const rows of [
+      ['ds^2 = (dx^2 + dy^2)/sqrt(0.09 - (x - 2.2)^2 - y^2)', 'geodesic((2.2, 0), (0, 1))'],
+      ['ds^2 = (dx^2 + dy^2)/sqrt(0.25 - (x - 2)^2 - (y - 2)^2)', 'geodesic((2, 2), (0, 1))'],
+      ['ds^2 = (dx^2 + dy^2)/sqrt((x - 3)(3.05 - x))', 'geodesic((3.02, 0), (0, 1))'],
+      ['ds^2 = (-dy^2 + dx^2)/sqrt((x - 3)(3.05 - x))', 'lightcones'],
+    ]) {
+      // As before the M = 0 check came and went: the row stands. (With no
+      // point checked Lorentzian, the strip's lightcones are refused, as
+      // they always were.)
+      const analysis = analyzeRows(rows, { readouts: true });
+      expect(analysis.rows[0].error, rows[0]).toBeUndefined();
+      if (rows[1] !== 'lightcones') expect(analysis.rows[1].error, rows[1]).toBeUndefined();
+    }
+    const { pts } = traced(
+      ['ds^2 = (dx^2 + dy^2)/sqrt(0.09 - (x - 2.2)^2 - y^2)', 'geodesic((2.2, 0), (0, 1))'],
+      box(-8, 8, -8, 8),
+    );
+    expect(pts.length).toBeGreaterThan(2);
   });
 
   it('compute each repeated lambertw once for the curvature, on the CPU and in GLSL', () => {
