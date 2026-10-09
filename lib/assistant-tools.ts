@@ -464,137 +464,20 @@ function findShape(shapes: readonly ShapeData[], query: string): ShapeData | und
   return names.find(n => n.key.split(' ').some(w => w.length > 3 && words.includes(w)))?.shape;
 }
 
-/** A parameter's value, as the shape tool takes it. */
-export interface ShapeValue {
-  name: string;
-  value: number;
-}
-
-const num = (v: number) => String(parseFloat(v.toPrecision(10)));
-
 /**
- * A form's rows with numbers for its parameters, written as a person would:
- * `a^2` → `9`, `3a` → `6`, `2pi k u` → `6pi u`, a factor of 1 dropped.
+ * shape(name): a named curve or surface's forms in this language, each with
+ * its parameters and one instance, from the reference (docs/reference/shapes.md);
+ * on a miss, every name. One form only, the equation where there is one (the
+ * model drew every form it was shown, as separate rows). Rows come before their kind (a `kind: rows` line was
+ * copied into a row whole), and the answer ends by saying it drew nothing: the
+ * model took the entry for a drawing and replied without set_graph.
  */
-export function substitute(rows: readonly string[], values: Readonly<Record<string, number>>): string[] {
-  const names = Object.keys(values).sort((a, b) => b.length - a.length);
-  if (!names.length) return [...rows];
-  const name = `(?<![A-Za-z_])(${names.join('|')})(?![A-Za-z0-9_])`;
-  const lit = (v: number) => (v < 0 ? `(${num(v)})` : num(v));
-  return rows.map(row => {
-    let out = row
-      // A power of a parameter: its value, worked out where the power is a whole number.
-      .replace(new RegExp(`${name}\\^(\\d+)`, 'g'), (_, p: string, k: string) => lit(values[p] ** Number(k)))
-      // A number written against a parameter: their product.
-      .replace(new RegExp(`(?<![\\w.])(\\d+(?:\\.\\d+)?)${name}`, 'g'), (_, c: string, p: string) =>
-        lit(Number(c) * values[p]),
-      )
-      .replace(new RegExp(name, 'g'), (_, p: string) => lit(values[p]));
-    // Numbers side by side multiply: `0.15 3` → `0.45`, then `2pi 3` → `6pi`.
-    const pair = /(?<![\w.])(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)(?![\w.])/;
-    while (pair.test(out)) out = out.replace(pair, (_, a: string, b: string) => num(Number(a) * Number(b)));
-    out = out.replace(
-      /(?<![\w.])(\d+(?:\.\d+)?)pi (\d+(?:\.\d+)?)(?![\w.])/g,
-      (_, a: string, b: string) => `${num(Number(a) * Number(b))}pi`,
-    );
-    return (
-      out
-        // A negative value after a sign: `+ (-2)` → `- 2`, `- (-2)` → `+ 2`.
-        .replace(/\+ \(-(\d+(?:\.\d+)?)\)/g, '- $1')
-        .replace(/- \(-(\d+(?:\.\d+)?)\)/g, '+ $1')
-        // Dividing by 1 is nothing.
-        .replace(/\/1(?![\d.])/g, '')
-        // A factor of 1 is no factor: `1 x` → `x`, `1(…)` → `(…)`, `1sin(…)` → `sin(…)`.
-        .replace(/(?<![\w.)])1 ?(?=[A-Za-z(])/g, '')
-        // A number then a name or bracket: written together, `2 cos` → `2cos`.
-        .replace(/(?<![\w.])(\d+(?:\.\d+)?) (?=[A-Za-z(])/g, '$1')
-    );
-  });
-}
-
-/** Coordinates and variables, never a shape's parameters: the model passed a request's r = 1 + cos θ as r = 1, θ = 2.5. */
-const VARIABLES = new Set(['x', 'y', 'z', 'u', 'v', 'r', 'θ', 'theta']);
-
-/** Which of a form's parameters a given value is for: by name, in any case, or by a word of what it sets ("radius"). */
-function parameterFor(params: readonly [string, string][], given: string): string | undefined {
-  const g = given.trim();
-  const words = g
-    .toLowerCase()
-    .split(/[^a-z]+/)
-    .filter(w => w.length > 2);
-  return (
-    params.find(([p]) => p === g)?.[0] ??
-    params.find(([p]) => p.toLowerCase() === g.toLowerCase())?.[0] ??
-    params.find(([, meaning]) =>
-      words.some(w =>
-        meaning
-          .toLowerCase()
-          .split(/[^a-z]+/)
-          .includes(w),
-      ),
-    )?.[0]
-  );
-}
-
-/**
- * shape(name, values): a named curve or surface's form in this language,
- * from the reference (docs/reference/shapes.md); on a miss, every name. One
- * form only, the equation where there is one (the model drew every form it
- * was shown, as separate rows). Without values: the form, what each parameter
- * sets, and an instance with its values. With values: the form's rows with
- * them put in, worked out exactly (the model squared 2 to 8, and dropped
- * terms), ready for set_graph; a parameter not given keeps the instance's
- * value, and says so. Rows come before their kind (a `kind: rows` line was
- * copied into a row whole), and the answer ends by saying it drew nothing:
- * the model took the entry for a drawing and replied without set_graph.
- */
-export function shape(data: AssistantData, name: string, values: readonly ShapeValue[] = []): string {
+export function shape(data: AssistantData, name: string): string {
   const found = findShape(data.shapes, name);
   if (!found) return `No shape "${name.trim()}". Shapes: ${data.shapes.map(s => s.name.toLowerCase()).join(', ')}.`;
   const rows = (list: string[]) => JSON.stringify(list);
   const form = found.forms.find(f => f.kind.startsWith('implicit')) ?? found.forms[0];
-  const finite = values.filter(v => Number.isFinite(v.value));
-  // A coordinate or variable is refused unless it is exactly a parameter's name.
-  const refused = finite.filter(
-    v => VARIABLES.has(v.name.trim().toLowerCase()) && !form.params.some(([p]) => p === v.name.trim()),
-  );
-  const given = finite.filter(v => !refused.includes(v));
-  const parameters = form.params.map(([p, m]) => `${p} (${m})`).join('; ');
-  const refusal = refused.length
-    ? [
-        `Not parameters: ${refused.map(v => v.name.trim()).join(', ')} ${refused.length > 1 ? 'are coordinates or variables' : 'is a coordinate or variable'}.${form.params.length ? ` Its parameters: ${parameters}.` : ''}`,
-      ]
-    : [];
-  if (given.length && form.params.length) {
-    const chosen: Record<string, number> = {};
-    const unknown: string[] = [];
-    for (const v of given) {
-      const p = parameterFor(form.params, v.name);
-      if (p) chosen[p] = v.value;
-      else unknown.push(v.name);
-    }
-    // The rest keep the instance's values.
-    const instance = Object.fromEntries(
-      (form.example.values ?? '').split(', ').map(v => v.split(' = ') as [string, string]),
-    );
-    const kept = form.params.filter(([p]) => !(p in chosen));
-    for (const [p] of kept) chosen[p] = Number(instance[p]);
-    const used = form.params.map(([p]) => `${p} = ${num(chosen[p])}`).join(', ');
-    return [
-      `${found.name}, ${used}:`,
-      `- ${rows(substitute(form.rows, chosen))} (${form.kind})${form.note ? ` — ${form.note}` : ''}`,
-      ...(kept.length
-        ? [
-            `Not given, so from the example: ${kept.map(([p, meaning]) => `${p} (${meaning}) = ${num(chosen[p])}`).join('; ')}.`,
-          ]
-        : []),
-      ...(unknown.length ? [`Not a parameter here: ${unknown.join(', ')}. Its parameters: ${parameters}.`] : []),
-      ...refusal,
-      'Nothing is drawn yet: pass these rows to set_graph.',
-    ].join('\n');
-  }
   return [
-    ...refusal,
     `${found.name}${found.aliases.length ? ` (also ${found.aliases.join(', ')})` : ''}: ${found.intro.replace(/\s+/g, ' ')}`,
     `- ${rows(form.rows)} (${form.kind})${form.note ? ` — ${form.note}` : ''}`,
     ...form.params.map(([param, meaning]) => `  ${param}: ${meaning}`),

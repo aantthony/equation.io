@@ -42,11 +42,12 @@ import SwiftUI
       ?? #"{"error":"the graph isn't ready"}"#
   }
 
+  func listKinds() async -> String { await text("return window.equationApp.listKinds()") }
   func kindExamples(_ kind: String) async -> String {
     await text("return window.equationApp.kindExamples(kind)", ["kind": kind])
   }
-  func shape(_ name: String, values: [[String: Any]]) async -> String {
-    await text("return window.equationApp.shape(name, values)", ["name": name, "values": values])
+  func shape(_ name: String) async -> String {
+    await text("return window.equationApp.shape(name)", ["name": name])
   }
   func searchFunctions(_ query: String) async -> String {
     await text("return window.equationApp.searchFunctions(query)", ["query": query])

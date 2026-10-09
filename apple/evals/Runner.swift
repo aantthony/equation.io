@@ -87,10 +87,9 @@ struct RunnerError: Error, CustomStringConvertible {
     return tool("animate_slider", args)
   }
   func check(_ rows: [String]) async -> String { tool("check", ["equations": rows]) }
+  func listKinds() async -> String { tool("list_kinds", [:]) }
   func kindExamples(_ kind: String) async -> String { tool("kind_examples", ["kind": kind]) }
-  func shape(_ name: String, values: [[String: Any]]) async -> String {
-    tool("shape", ["name": name, "values": values])
-  }
+  func shape(_ name: String) async -> String { tool("shape", ["name": name]) }
   func searchFunctions(_ query: String) async -> String { tool("search_functions", ["query": query]) }
   func functionDoc(_ name: String) async -> String { tool("function_doc", ["name": name]) }
 }
@@ -161,11 +160,11 @@ struct Capped<Base: Tool>: Tool {
   }
 }
 
-/// The app's tools for one run, and any `extra`, sharing one budget.
-func cappedTools(_ graph: any GraphTools, extra: [any Tool] = []) -> [any Tool] {
+/// The app's tools for one run, sharing one budget.
+func cappedTools(_ graph: any GraphTools) -> [any Tool] {
   let budget = ToolBudget()
   func cap<T: Tool>(_ tool: T) -> any Tool { Capped(base: tool, budget: budget) }
-  return (ChatModel.tools(graph) + extra).map { cap($0) }
+  return ChatModel.tools(graph).map { cap($0) }
 }
 
 /// How the on-device model picks tokens in the evals. The app is greedy
@@ -216,9 +215,7 @@ struct OpenAIModel: EvalModel {
   let maxRounds = 20
 
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
-    // The app no longer offers check; the reference variant's instructions still do.
-    let tools = (reference == nil ? cappedTools(graph) : cappedTools(graph, extra: [Check(access: graph)]))
-      .filter { reference == nil || Self.referenceTools.contains($0.name) }
+    let tools = cappedTools(graph).filter { reference == nil || Self.referenceTools.contains($0.name) }
     let instructions = reference.map { "\(ChatModel.referenceInstructions)\n\n\($0)" } ?? ChatModel.instructions
     var messages: [[String: Any]] = [
       ["role": "system", "content": instructions], ["role": "user", "content": prompt],

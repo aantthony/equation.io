@@ -111,7 +111,7 @@ const lines: Part[][] = [
     {
       voice:
         'Anything beyond these forms (vector fields, complex functions, probability, ODEs, geometry, …): call read_syntax first. Never invent function names; "surface(…)" or "plot(…)" do not exist.',
-      text: 'A shape with a well-known equation (circle, ellipse, sphere, cone, hyperboloid, paraboloid) is simplest written as that equation, an implicit curve or surface: an ellipse is x^2/9 + y^2/4 = 1. Use a parametric form only when asked for one, or when the shape has no equation.\nFor a named curve or surface, call shape with its name and the values the request gives, then pass the rows it answers to set_graph.\nWhat to write: for any other shape, call kind_examples for the kind you need (listed below), and adapt an example. function_doc and search_functions look up built-in functions; never invent one.\n{kinds}',
+      text: "A shape with a well-known equation (circle, ellipse, sphere, cone, hyperboloid, paraboloid) is simplest written as that equation, an implicit curve or surface: an ellipse is x^2/9 + y^2/4 = 1. Use a parametric form only when asked for one, or when the shape has no equation.\nFor a named curve or surface, call shape with its name first, then draw its form, adapted to the request, with set_graph.\nWhat to write: for any other shape, call kind_examples for the kind you need (listed below; list_kinds gives each one's smallest form), and adapt an example. function_doc and search_functions look up built-in functions; never invent one.\n{kinds}",
       reference:
         'What to write: the reference after these instructions documents the language, with a section on each kind of row (its forms, examples and pitfalls). For any other shape, find the section on the kind you need and adapt an example. Never invent a function; "surface(…)" and "plot(…)" do not exist.',
     },
@@ -123,7 +123,6 @@ const lines: Part[][] = [
     {
       voice:
         '- Check before claiming: get_graph and set_graph give each row\'s status, kind, meaning (what the row actually is, e.g. "2D curve …" or "defines r: a scalar constant …; draws nothing by itself"), color, readout value and, for 2D curves, the axis intercepts in the visible window; use these for exact numbers. If a meaning isn\'t what you meant, or a row has an error or a warning (such as a definition nothing uses), fix it and call set_graph again before answering; use read_syntax if you are not sure of the right form. Don\'t give up on a first error. Never say you drew something the result doesn\'t show.',
-      text: "- Check before claiming: set_graph and get_graph give each row's kind and meaning, what it actually is. If one isn't what you meant, or a row has an error or a warning, fix it and call set_graph again. Never say you drew something the result doesn't show.",
       typed:
         "- Check before claiming: set_graph, get_graph and check give each row's kind and meaning, what it actually is. If one isn't what you meant, or a row has an error or a warning, fix it and call set_graph again. Never say you drew something the result doesn't show.",
     },
@@ -201,7 +200,7 @@ export function swiftInstructions(kinds: string): string {
 
 extension ChatModel {
   /// The app's instructions: a short primer and the hard-won rules; the
-  /// lookup tools (kind_examples and the rest) carry the rest of the language.
+  /// lookup tools (list_kinds and the rest) carry the rest of the language.
   static let instructions = ${swiftString(instructions('text', kinds))}
 
   /// The evals' --knowledge reference: the same, with the whole reference

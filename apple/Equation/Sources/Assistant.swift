@@ -79,7 +79,7 @@ enum ChatModel {
   static func tools(_ graph: any GraphTools) -> [any Tool] {
     [
       GetGraph(access: graph), SetGraph(access: graph), MoveView(access: graph),
-      AnimateSlider(access: graph),
+      AnimateSlider(access: graph), Check(access: graph), ListKinds(access: graph),
       KindExamples(access: graph), ShapeLookup(access: graph), SearchFunctions(access: graph),
       FunctionDoc(access: graph),
     ]
@@ -123,9 +123,9 @@ enum ChatModel {
   /// What rows would draw, without drawing them (lib/assistant-tools.ts checkRows).
   func check(_ rows: [String]) async -> String
   // What the language has (lib/assistant-tools.ts), as text.
+  func listKinds() async -> String
   func kindExamples(_ kind: String) async -> String
-  /// `values`: each a parameter's name and value, as `{"name", "value"}`.
-  func shape(_ name: String, values: [[String: Any]]) async -> String
+  func shape(_ name: String) async -> String
   func searchFunctions(_ query: String) async -> String
   func functionDoc(_ name: String) async -> String
 }
@@ -270,11 +270,29 @@ struct Check: Tool {
   }
 }
 
+struct ListKinds: Tool {
+  let access: any GraphTools
+  let name = "list_kinds"
+  let description = """
+    List every kind of shape a row can draw (curve, region, surface, solid, \
+    point, …), each with its smallest form. Read it before writing a kind of \
+    row you haven't written in this conversation.
+    """
+
+  @Generable
+  struct Arguments {
+    @Guide(description: "Why you are reading it, in a few words.")
+    var reason: String
+  }
+
+  func call(arguments: Arguments) async throws -> String { await access.listKinds() }
+}
+
 struct KindExamples: Tool {
   let access: any GraphTools
   let name = "kind_examples"
   let description = """
-    Worked examples of one kind from the instructions' list: what it draws, its smallest \
+    Worked examples of one kind from list_kinds: what it draws, its smallest \
     form, and whole graphs that draw it, one entry per row.
     """
 
@@ -293,30 +311,17 @@ struct ShapeLookup: Tool {
   let name = "shape"
   let description = """
     The equation of a named curve or surface (cardioid, hyperboloid, torus, …), \
-    in this language's syntax. Given the request's values, it answers the finished \
-    rows; without them, the form and its parameters. It draws nothing: set_graph draws.
+    in this language's syntax, with its parameters. It draws nothing: set_graph draws.
     """
 
-  // No example values: an example in an argument's description gets copied (apple/evals/RESULTS.md).
   @Generable
   struct Arguments {
+    // No example value: an example in an argument's description gets copied (apple/evals/RESULTS.md).
     @Guide(description: "The shape's name, as the request gives it.")
     var name: String
-    @Guide(description: "The numbers the request gives for the shape, each with what it is.")
-    var values: [Value]?
   }
 
-  @Generable
-  struct Value {
-    @Guide(description: "What the number is, a parameter's name or a word for it.")
-    var name: String
-    var value: Double
-  }
-
-  func call(arguments: Arguments) async throws -> String {
-    let values = (arguments.values ?? []).map { ["name": $0.name, "value": $0.value] as [String: Any] }
-    return await access.shape(arguments.name, values: values)
-  }
+  func call(arguments: Arguments) async throws -> String { await access.shape(arguments.name) }
 }
 
 struct SearchFunctions: Tool {

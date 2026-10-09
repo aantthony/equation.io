@@ -11,9 +11,7 @@ import {
   listKinds,
   searchFunctions,
   shape,
-  substitute,
 } from './assistant-tools.ts';
-import { evaluate } from './expr.ts';
 import { assistantData } from './reference.ts';
 import { KIND_MEANINGS } from './row-kind.ts';
 
@@ -136,92 +134,5 @@ describe('shape', () => {
     const miss = shape(data, 'kidney bean');
     expect(miss).toMatch(/^No shape "kidney bean"\. Shapes: circle, /);
     expect(miss).toContain('torus');
-  });
-});
-
-describe('shape with values', () => {
-  it('puts numbers in for parameters, worked out', () => {
-    // Squares, and fractions of squares.
-    expect(substitute(['x^2 + y^2 + z^2 = R^2'], { R: 2 })).toEqual(['x^2 + y^2 + z^2 = 4']);
-    expect(substitute(['x^2/a^2 + y^2/a^2 - z^2/c^2 = 1'], { a: 2, c: 1.5 })).toEqual(['x^2/4 + y^2/4 - z^2/2.25 = 1']);
-    // The cardioid's a x term kept, a factor of 1 dropped.
-    expect(substitute(['(x^2 + y^2 - a x)^2 = a^2(x^2 + y^2)'], { a: 1 })).toEqual(['(x^2 + y^2 - x)^2 = (x^2 + y^2)']);
-    expect(substitute(['(x^2 + y^2 - a x)^2 = a^2(x^2 + y^2)'], { a: 3 })).toEqual([
-      '(x^2 + y^2 - 3x)^2 = 9(x^2 + y^2)',
-    ]);
-    // Polar via u: kθ is 2pi k u.
-    expect(substitute(['(a cos(2pi k u) cos(2pi u), a cos(2pi k u) sin(2pi u))'], { a: 1, k: 4 })).toEqual([
-      '(cos(8pi u) cos(2pi u), cos(8pi u) sin(2pi u))',
-    ]);
-    // A number against a parameter, and negatives after a sign.
-    expect(substitute(['x^3 + y^3 = 3a x y'], { a: 2 })).toEqual(['x^3 + y^3 = 6x y']);
-    expect(substitute(['a x + b y + c z = k'], { a: 2, b: -1, c: 1, k: 3 })).toEqual(['2x - y + z = 3']);
-  });
-
-  it("gives each form's instance from its values, the same curve or surface", () => {
-    const at = (rows: string[], vars: Record<string, number>) => {
-      const analysis = analyzeRows(rows);
-      const cpu = analysis.rows.at(-1)!.cpu!;
-      const env = { ...analysis.constEnv, t: 0, ...vars };
-      if (cpu.type === 'pcurve' || cpu.type === 'psurface') return cpu.comps.map(c => evaluate(c, env));
-      if (cpu.type === 'implicit2d' || cpu.type === 'implicit3d') return [Math.sign(evaluate(cpu.residual, env))];
-      return [];
-    };
-    for (const entry of readReference().shapes)
-      for (const form of entry.forms) {
-        if (!form.example.values) continue;
-        const values = Object.fromEntries(form.example.values.split(', ').map(v => v.split(' = '))) as Record<
-          string,
-          string
-        >;
-        const rows = substitute(form.rows, Object.fromEntries(Object.entries(values).map(([k, v]) => [k, Number(v)])));
-        const what = `${entry.name}: ${rows.join('; ')}`;
-        expect(checkRows(rows).map(r => r.error)).toEqual(rows.map(() => undefined));
-        for (const k of [0.13, 0.37, 0.61, 0.89]) {
-          const vars = { u: k, v: 1 - k, x: 3 * k - 1, y: 1.7 - 2 * k, z: k - 0.4 };
-          const got = at(rows, vars);
-          const want = at(form.example.rows, vars);
-          expect(got.length, what).toBe(want.length);
-          got.forEach((g, i) => expect(g, what).toBeCloseTo(want[i], 6));
-        }
-      }
-  });
-
-  it('answers the rows with the values put in, by name or by what a parameter sets', () => {
-    const sphere = shape(data, 'sphere', [{ name: 'radius', value: 2 }]);
-    expect(sphere).toContain('- ["x^2 + y^2 + z^2 = 4"] (implicit3d)');
-    expect(sphere).toMatch(/pass these rows to set_graph\.$/);
-    const hyperboloid = shape(data, 'hyperboloid', [{ name: 'a', value: 2 }]);
-    expect(hyperboloid).toContain('x^2/4 + y^2/4 - z^2/4 = 1');
-    expect(hyperboloid).toContain('Not given, so from the example: c (');
-    expect(shape(data, 'torus', [{ name: 'q', value: 1 }])).toContain('Not a parameter here: q.');
-  });
-
-  it('refuses coordinates and variables as values, naming the parameters', () => {
-    // The request's r = 1 + cos θ, passed as values.
-    const cardioid = shape(data, 'cardioid', [
-      { name: 'r', value: 1 },
-      { name: 'θ', value: 2.5 },
-    ]);
-    expect(cardioid).toMatch(/^Not parameters: r, θ are coordinates or variables\. Its parameters: a \(the size/);
-    // Then the form and its instance, as with no values.
-    expect(cardioid).toContain('  e.g. a = 2 → ');
-    const sphere = shape(data, 'sphere', [
-      { name: 'x', value: 0 },
-      { name: 'radius', value: 2 },
-    ]);
-    expect(sphere).toContain('["x^2 + y^2 + z^2 = 4"]');
-    expect(sphere).toContain('Not parameters: x is a coordinate or variable.');
-    // A parameter's own name is never refused.
-    expect(shape(data, 'sphere', [{ name: 'R', value: 2 }])).not.toContain('Not parameters');
-  });
-
-  it('draws the rose with sin, k in the petal factor', () => {
-    const rose = shape(data, 'polar rose', [
-      { name: 'a', value: 1 },
-      { name: 'k', value: 4 },
-    ]);
-    expect(rose).toContain('["(sin(8pi u) cos(2pi u), sin(8pi u) sin(2pi u))"]');
-    expect(shape(data, 'rose')).toContain('(a sin(2pi k u) cos(2pi u), a sin(2pi k u) sin(2pi u))');
   });
 });

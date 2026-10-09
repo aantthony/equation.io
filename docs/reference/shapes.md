@@ -112,22 +112,16 @@ a > b. With a = b it is the cardioid.
 
 Also: rose curve, polar rose, rhodonea.
 
-Petals round the origin: the polar curve r = a sin(kθ) or r = a cos(kθ). An
+Petals round the origin: the polar curve r = a cos(kθ) or r = a sin(kθ). An
 odd k gives k petals, an even k gives 2k.
 
-- pcurve: `(a sin(2pi k u) cos(2pi u), a sin(2pi k u) sin(2pi u))` — polar r = a sin(kθ), with θ = 2πu
-  - `a`: the petal length
-  - `k`: a whole number setting the petals
-  - e.g. a = 2, k = 3: `(2sin(6pi u) cos(2pi u), 2sin(6pi u) sin(2pi u))` — r = 2sin(3θ), 3 petals
-- pcurve: `(a cos(2pi k u) cos(2pi u), a cos(2pi k u) sin(2pi u))` — polar r = a cos(kθ), the same rose turned
+- pcurve: `(a cos(2pi k u) cos(2pi u), a cos(2pi k u) sin(2pi u))` — polar r = a cos(kθ), with θ = 2πu
   - `a`: the petal length
   - `k`: a whole number setting the petals
   - e.g. a = 2, k = 3: `(2cos(6pi u) cos(2pi u), 2cos(6pi u) sin(2pi u))` — r = 2cos(3θ), 3 petals
 
-Pitfall: θ is 2πu, so kθ is `2pi k u`, and k goes only in the petal factor
-at the front of each component, never in the `cos(2pi u)` and `sin(2pi u)`
-that turn it. For r = a cos(kθ), the petal factor is a cos. Polar is never a
-bare `r = …` row.
+Pitfall: kθ becomes 2πku, so r = sin(5θ) is `sin(10pi u)` inside both
+components. Polar is never a bare `r = …` row.
 
 ## Lemniscate
 
