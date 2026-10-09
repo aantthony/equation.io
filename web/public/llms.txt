@@ -474,6 +474,34 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     again) — unless every way out meets a horizon (de Sitter's cosmological
     one), when none is. A lone `lightcone(P)` with no ellipse in view on the lattice is
     drawn at its own such scale.
+- Tidal forces: `tidal` alone on a row draws what the panel's ds² metric
+  does to a small cloud of free particles held at rest, on the same lattice
+  as light cones; `tidal(P)` draws it at a point (P drags; a list of points
+  draws one each). The observer is static, moving along the time
+  coordinate (u = ∂t/√(−g_tt)), and its tidal tensor E_ij = R_iαjβ u^α u^β
+  gives the separation ξ of two nearby particles ξ'' = −E ξ. Each glyph is
+  two crossed bars along E's eigenvectors (in the panel's x and y), half as
+  long as |λ| times one scale for the panel (a power of two, so the median
+  glyph in view reaches about a fifth of a lattice cell; kept as you pan
+  while the median allows), with arrowheads pointing out where it stretches
+  (λ < 0) and in where it squeezes (λ > 0). One stronger than its cell
+  allows is shrunk whole, keeping its shape. Round Schwarzschild
+  (`-(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2`) λ = −2M/r³ along the
+  radius and +M/r³ round, exactly; Reissner–Nordström −2M/r³ + 3Q²/r⁴ and
+  M/r³ − Q²/r⁴; de Sitter's static patch −1/L² both ways; flat space draws
+  nothing. There is no glyph where no observer can stand still (g_tt ≥ 0:
+  inside a horizon, or a spinning hole's ergoregion, where g_tφ drags
+  everything round), nor behind a horizon (as for light cones). Cross terms
+  are taken into account: space is h_ij = g_ij − g_ti g_tj/g_tt. Riemann
+  comes from symbolic first and second derivatives of g in the coordinates
+  it is written in (r and phi), so a metric flat in polar coordinates is
+  exactly flat.
+  - On a spacetime diagram (a Lorentzian ds² in x and y alone) there is one
+    direction of space and one bar: λ = −K = −R/2 for any observer, along
+    the direction orthogonal to the written time coordinate's ∂τ (the one
+    light cones take as time) — −2M/r³ in Schwarzschild's r and t.
+  - Refused with no metric, or a Riemannian one: tidal forces need a time,
+    so write the ds² with a dt term.
 - Derivatives: `d/dx (x^3)` differentiates symbolically; higher order
   `d^2/dx^2 (...)`; works for any single-letter variable, e.g. `d/dq (q^2)`.
   The operand is every factor written after `dx`, with or without spaces,

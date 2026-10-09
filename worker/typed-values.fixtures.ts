@@ -56,6 +56,7 @@ export const PUBLIC_KIND_ROWS = {
   geodesic: ['S = (cos(v) cos(u), cos(v) sin(u), sin(v))', 'geodesic(S, (0.2, 0.3), (1, 0))'],
   metric: ['ds^2 = (dx^2 + dy^2)/y^2'],
   lightcone: ['ds^2 = -dy^2 + dx^2', 'lightcones'],
+  tidal: ['ds^2 = -(1 - 2/x) dt^2 + dx^2/(1 - 2/x) + x^2 dy^2', 'tidal'],
 } satisfies Record<Exclude<PublicKind, 'dlist' | 'dscatter'>, string[]>;
 
 /** Distribution rows deliberately retain MCP's descriptive presentation labels. */

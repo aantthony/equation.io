@@ -9,6 +9,7 @@ import type { ProbBounds } from './dist.ts';
 import type { IntShade } from './intshade.ts';
 import type { GeodesicSpec } from './surface-geometry.ts';
 import type { LightConeSpec } from './light-cone.ts';
+import type { TidalSpec } from './tidal.ts';
 
 export type ColorSpace = 'rgb' | 'hsl' | 'oklch';
 
@@ -275,6 +276,9 @@ export type MathObject =
   /** Light cones of a panel's metric (lib/light-cone.ts): over the window,
    *  a `lightcones` row, or at a point, lightcone(P). */
   | ({ readonly kind: 'lightcone' } & LightConeSpec)
+  /** Tidal forces of a panel's metric on a static observer (lib/tidal.ts):
+   *  over the window, a `tidal` row, or at a point, tidal(P). */
+  | ({ readonly kind: 'tidal' } & TidalSpec)
   | {
       readonly kind: 'note';
       readonly expr: Expr;
@@ -363,6 +367,7 @@ export function publicKind(object: MathObject) {
     case 'orbit':
     case 'geodesic':
     case 'lightcone':
+    case 'tidal':
     case 'system':
     case 'histogram':
     case 'value':
@@ -429,6 +434,7 @@ export function objectNeeds3D(object: MathObject): boolean {
     case 'note':
     case 'metric':
     case 'lightcone':
+    case 'tidal':
       return false;
   }
 }

@@ -11,6 +11,7 @@ import type { Classified, ColorSpace, LevelSetSpec, PointSource } from './math-o
 import { FAMILY_NODES, countNodes } from './size.ts';
 import type { GeodesicSpec } from './surface-geometry.ts';
 import type { LightConeSpec } from './light-cone.ts';
+import type { TidalSpec } from './tidal.ts';
 import { metricSummary } from './metric.ts';
 
 export interface CpuGrid {
@@ -50,6 +51,9 @@ export type CpuPlan =
   /** Light cones of a panel's metric, drawn on the CPU as the view changes
    *  (lib/light-cone.ts coneGlyphs). */
   | ({ type: 'lightcone' } & LightConeSpec)
+  /** Tidal glyphs of a panel's metric, drawn on the CPU as the view changes
+   *  (lib/tidal.ts tidalGlyphs). */
+  | ({ type: 'tidal' } & TidalSpec)
   /** `pts` flat, or with `over` one vertex template run over the columns. */
   | {
       type: 'polygon';
@@ -343,6 +347,10 @@ export function compileCpu(classified: Classified): CpuPlan {
     case 'lightcone': {
       const { kind: _, ...spec } = object;
       return { type: 'lightcone', ...spec };
+    }
+    case 'tidal': {
+      const { kind: _, ...spec } = object;
+      return { type: 'tidal', ...spec };
     }
     case 'figure':
       return {
@@ -687,6 +695,7 @@ export function compileGpu(classified: Classified): GpuPlan {
     case 'orbit':
     case 'geodesic':
     case 'lightcone':
+    case 'tidal':
     case 'figure':
     case 'system':
     case 'list':
@@ -848,6 +857,14 @@ export function cpuStructureKey(plan: CpuPlan): string {
       break;
     case 'lightcone':
       structure = [plan.n, ...[plan.components, plan.jacobian ?? [], plan.at ?? []].map(expressions)];
+      break;
+    case 'tidal':
+      structure = [
+        plan.n,
+        plan.time,
+        ...plan.params,
+        ...[plan.curvature, plan.chart ?? [], plan.at ?? []].map(expressions),
+      ];
       break;
     case 'polygon':
       structure = [

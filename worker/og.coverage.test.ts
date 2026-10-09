@@ -172,6 +172,12 @@ describe('previewGap', () => {
     expect(canRenderOg([...diagram, 'lightcone((0, 0))'])).toBe(false);
   });
 
+  it('falls back for tidal glyphs', () => {
+    const hole = ['r = sqrt(x^2 + y^2)', 'phi = atan2(y, x)', 'ds^2 = -(1 - 2/r) dt^2 + dr^2/(1 - 2/r) + r^2 dphi^2'];
+    expect(gap([...hole, 'tidal'], 1)).toContain('live app renders');
+    expect(canRenderOg([...hole, 'tidal((6, 0))'])).toBe(false);
+  });
+
   it('blames the preview, not the row, for an orbit diagram', () => {
     const why = gap(['a_{n+1} = x a_n (1 - a_n)'])!;
     expect(why).toContain('bifurcation');

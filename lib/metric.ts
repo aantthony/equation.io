@@ -59,6 +59,9 @@ export interface PanelMetric {
    *  written as a squared differential with a minus sign (writtenTime),
    *  else the second (y) — then of the other, for ties. */
   readonly future?: readonly Expr[];
+  /** That time coordinate, as an index into coords: a diagram's static
+   *  observer moves along it (lib/tidal.ts). */
+  readonly timeAxis?: 0 | 1;
 }
 
 /** What parseMetric needs of its document. */
@@ -490,7 +493,7 @@ export function parseMetric(rhs: Expr, ctx: MetricContext): PanelMetric {
     derivatives,
     ...(jacobian ? { jacobian } : {}),
     ...(time !== undefined ? { time } : {}),
-    ...(lorentzian ? { lorentzian: true as const, future: future! } : {}),
+    ...(lorentzian ? { lorentzian: true as const, future: future!, timeAxis: timeIndex as 0 | 1 } : {}),
     ...(mixed ? { mixed: true as const } : {}),
   };
 }

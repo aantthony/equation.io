@@ -1372,6 +1372,8 @@ export const OG_COVERAGE: Record<PublicKind, 'draws' | 'fallback'> = {
   // Glyphs sized in screen pixels over the window (lib/light-cone.ts); the
   // preview does not draw them yet.
   lightcone: 'fallback',
+  // Glyphs sized in screen pixels over the window too (lib/tidal.ts).
+  tidal: 'fallback',
   pcurve: 'draws',
   psurface: 'draws',
   implicit3d: 'draws',
