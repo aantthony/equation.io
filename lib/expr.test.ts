@@ -249,11 +249,20 @@ describe('factorial and special functions', () => {
     expect(ev('coth(1)')).toBeCloseTo(1 / Math.tanh(1), 12);
   });
 
+  it('evaluates lambertw, the principal branch', () => {
+    expect(ev('lambertw(e)')).toBe(1);
+    expect(ev('lambertw(1)')).toBeCloseTo(0.5671432904097838, 15);
+    expect(ev('lambertw(-1/e)')).toBe(-1);
+    expect(ev('lambertw(2) exp(lambertw(2))')).toBeCloseTo(2, 14);
+    expect(ev('lambertw(-1)')).toBeNaN();
+  });
+
   it('compiles to the GLSL twins', () => {
     expect(toGLSL(parseExpr('gamma(x)'))).toBe('eq_gamma(x)');
     expect(toGLSL(parseExpr('x!'))).toBe('eq_factorial(x)');
     expect(toGLSL(parseExpr('sinc(x)'))).toBe('eq_sinc(x)');
     expect(toGLSL(parseExpr('coth(x)'))).toBe('eq_coth(x)');
+    expect(toGLSL(parseExpr('lambertw(x)'))).toBe('eq_lambertw(x)');
   });
 
   it('feeds the one LANCZOS array into the GLSL prelude', () => {

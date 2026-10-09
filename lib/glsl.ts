@@ -1,5 +1,6 @@
 import { notACondition, structuralDiagnostic } from './expr.ts';
 import { diff } from './diff.ts';
+import { LAMBERTW_SERIES } from './specfn.ts';
 /**
  * Compile a symbolic Expr to a GLSL expression (float-valued).
  *
@@ -38,6 +39,7 @@ export const FN_GLSL: Record<string, string> = {
   factorial: 'eq_factorial',
   sinc: 'eq_sinc',
   coth: 'eq_coth',
+  lambertw: 'eq_lambertw',
   tanh: 'eq_tanh',
   [ANGLE_FN]: 'eq_angle',
   [ANGLE_RATE_FN]: 'eq_angle_rate',
@@ -191,6 +193,38 @@ float eq_tanh(float x) { return tanh(clamp(x, -20.0, 20.0)); }
 // 1/tanh, not cosh/sinh, which overflow the same way; coth is ±1 there too
 // (and the cothFn() CPU twin says so).
 float eq_coth(float x) { return 1.0 / eq_tanh(x); }
+// lambertw() in lib/specfn.ts, to float: the branch-point series in
+// p = sqrt(2(1 + e x)) (LAMBERTW_SERIES, 13 terms) near -1/e, else three
+// Halley steps on w - x e^(-w), which overflows for no finite x.
+float eq_lambertw(float x) {
+  if (!(x >= -0.36787945)) return EQ_NAN;
+  if (isinf(x)) return x;
+  float p = sqrt(5.43656365691809 * max(0.0, x + 0.36787944117144233));
+  if (p < 0.5) {
+    float s = 0.0;
+${LAMBERTW_SERIES.slice(0, 13)
+  .map(c => `    s = s * p + ${c.toPrecision(9)};`)
+  .reverse()
+  .join('\n')}
+    return s;
+  }
+  float w;
+  if (x < 0.0) w = -1.0 + p - p * p / 3.0 + 0.152777778 * p * p * p;
+  else if (x < 3.0) {
+    float l = log(1.0 + x);
+    w = l * (1.0 - log(1.0 + l) / (2.0 + l));
+  } else {
+    float l1 = log(x);
+    float l2 = log(l1);
+    w = l1 - l2 + l2 / l1;
+  }
+  for (int k = 0; k < 3; k++) {
+    float t = x * exp(-w);
+    float f = w - t;
+    w -= f / (1.0 + t + t * f / (2.0 * (1.0 + t)));
+  }
+  return w;
+}
 // angleFn in lib/expr.ts: the signed angle from arm u to arm v in (-pi, pi],
 // NaN for a zero-length arm. Arms are scaled by their largest component so
 // float32 products cannot underflow near the vertex, and the straight angle

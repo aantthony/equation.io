@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { compileCpu, cpuStructureKey } from './compiler.ts';
+import { evaluate } from './expr.ts';
 import { plotReadout } from './plot.ts';
+import { lambertw } from './specfn.ts';
 import {
   type ConeView,
   type LightConeSpec,
@@ -634,5 +636,78 @@ describe('review fixes', () => {
     if (fan.kind !== 'family') throw new Error(fan.kind);
     const comps = fan.members.map(m => (m.object.kind === 'lightcone' ? m.object.components : null));
     expect(new Set(comps).size).toBe(1);
+  });
+});
+
+describe('Kruskal–Szekeres diagrams', () => {
+  /** Schwarzschild in Kruskal's X and T, as x and y: r from lambertw. */
+  const KRUSKAL = ['M = 1', 'r = 2M(1 + lambertw((x^2 - y^2)/e))', 'ds^2 = (32 M^3/r) exp(-r/(2M)) (-dy^2 + dx^2)'];
+  /** r at (X, T), M = 1. */
+  const rAt = (x: number, y: number) => 2 * (1 + lambertw((x * x - y * y) / Math.E));
+  const futureAt = (x: number, y: number) => {
+    const { spec, env } = cones([...KRUSKAL, 'lightcones']);
+    const g = metricValues(spec, env)(x, y);
+    return g && futureCone(g[0][0], g[0][1], g[1][1], metricOrientation(spec.future, env)!(x, y));
+  };
+
+  it('draw every cone at 45°, future up, in both exteriors and both holes', () => {
+    for (const [x, y] of [
+      [2, 0.5],
+      [-2, -1],
+      [0, 0.8],
+      [0.3, -0.9],
+      [0.5, 0.5],
+      [0, 0],
+    ]) {
+      const cone = futureAt(x, y)!;
+      expect(cone.axis, `${x}, ${y}`).toBeCloseTo(Math.PI / 2, 9);
+      expect(cone.half, `${x}, ${y}`).toBeCloseTo(Math.PI / 4, 9);
+    }
+    // Past the singularity, T² − X² > 1, there is no metric and no cone.
+    expect(futureAt(0, 1.2)).toBeNull();
+    expect(futureAt(1, -1.6)).toBeNull();
+  });
+
+  it('carry a particle dropped from rest through the horizon to r = 0', () => {
+    // At rest at T = 0, X = 1.2, where ∂T is the static Killing direction:
+    // its proper time to r = 0 is π (r₀³/8M)^½.
+    const r0 = rAt(1.2, 0);
+    const { pts, ended } = traced([...KRUSKAL, 'geodesic((1.2, 0), (0, 1), 100)'], box(-8, 8, -8, 8));
+    expect(pts.some(([x, y]) => y > x)).toBe(true);
+    for (const [x, y] of pts) expect(Number.isFinite(x) && Number.isFinite(y) && y * y - x * x <= 1).toBe(true);
+    const [xe, ye] = pts.at(-1)!;
+    expect(ye * ye - xe * xe).toBeCloseTo(1, 4);
+    expect(ended.length).toBeCloseTo(Math.PI * Math.sqrt(r0 ** 3 / 8), 6);
+    expect(ended.problem).toBeUndefined();
+  });
+
+  it('send radial light along 45° lines, through the horizons', () => {
+    const { pts } = traced([...KRUSKAL, 'lightray((2, -1.5), (-1, 1))'], box(-8, 8, -8, 8));
+    for (const [x, y] of pts) expect(Math.abs(x + y - 0.5)).toBeLessThan(1e-6);
+    // From the right exterior across T = X into the hole, to the
+    // singularity T² − X² = 1 at X = −0.75.
+    const [xe, ye] = pts.at(-1)!;
+    expect(xe).toBeCloseTo(-0.75, 2);
+    expect(ye).toBeCloseTo(1.25, 2);
+    // Out of the white hole into the left exterior, and on.
+    const out = traced([...KRUSKAL, 'lightray((0, -0.5), (-1, 1))'], box(-8, 8, -8, 8));
+    for (const [x, y] of out.pts) expect(Math.abs(x + y + 0.5)).toBeLessThan(1e-6);
+    expect(out.pts.at(-1)![0]).toBeLessThan(-7.9);
+  });
+
+  it('paint the curvature K = R/2 = 2M/r³, the same as in r and t', () => {
+    const analysis = analyzeRows([...KRUSKAL, 'gaussian(x, y)'], { readouts: true });
+    const r = analysis.rows.at(-1)!;
+    expect(r.error).toBeUndefined();
+    const o = r.cls!.object;
+    if (o.kind !== 'scalar-field') throw new Error(o.kind);
+    for (const [x, y] of [
+      [2, 0.5],
+      [-1.3, 0],
+      [0, 0],
+      [0.2, 0.9],
+      [-0.4, -0.7],
+    ])
+      expect(evaluate(o.expr, { ...analysis.constEnv, t: 0, x, y }) / (2 / rAt(x, y) ** 3)).toBeCloseTo(1, 6);
   });
 });

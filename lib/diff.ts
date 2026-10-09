@@ -248,6 +248,10 @@ export function diff(e: Expr, v: string): Expr {
           });
         case 'coth':
           return chain(sub(ONE, pow(call('coth', a), num(2))));
+        case 'lambertw':
+          // W/(x(1 + W)), written e^(−W)/(1 + W) (W eʷ = x) so it has no
+          // 0/0 at x = 0; infinite at the branch point −1/e.
+          return chain(div(call('exp', neg(call('lambertw', a))), add(ONE, call('lambertw', a))));
         default:
           // floor/mod/… (and gamma: digamma isn't in the language):
           // no smooth derivative; caller falls back to FD.

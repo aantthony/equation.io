@@ -38,6 +38,7 @@ import {
   binomPmf,
   discreteUniformPmf,
   gammaPdf,
+  lambertw,
   negBinomPmf,
   poissonPmf,
   studentTPdf,
@@ -98,6 +99,7 @@ const FN1: Record<string, (x: number) => number> = {
   factorial: factorialFn,
   sinc: sincFn,
   coth: cothFn,
+  lambertw,
   isprime: EVAL_FNS.isprime,
 };
 

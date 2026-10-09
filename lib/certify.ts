@@ -5,6 +5,7 @@
 import type { Expr } from './expr.ts';
 import { solveLinear, solveSystem } from './solve.ts';
 import { exceedsNodes } from './size.ts';
+import { lambertw } from './specfn.ts';
 export type Interval = [number, number];
 const whole = (): Interval => [-Infinity, Infinity];
 // The float's bits as two 32-bit words (low word first on little-endian
@@ -310,6 +311,14 @@ function unary(name: string): ((a: Interval) => Interval) | null {
     }
     case 'atan':
       return a => rising(Math.atan, a);
+    case 'lambertw':
+      // Rising from −1/e; good to a few ulps, so widened by a few more.
+      return a => {
+        const c = inDomain(a, -1 / Math.E, Infinity);
+        if (!c) return whole();
+        const [lo, hi] = rising(lambertw, c);
+        return [lo - 1e-15 * Math.abs(lo), hi + 1e-15 * Math.abs(hi)];
+      };
     // Steps rise too, and exactly: no rounding to widen.
     case 'floor':
       return a => [Math.floor(a[0]), Math.floor(a[1])];
@@ -362,6 +371,7 @@ const KNOWN_CALLS = new Set([
   'ln',
   'log',
   'atan',
+  'lambertw',
   'floor',
   'ceil',
   'round',

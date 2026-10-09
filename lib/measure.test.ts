@@ -28,6 +28,22 @@ describe('intervalValue', () => {
     ]);
     expect(lo).toBeGreaterThan(0);
   });
+  it('encloses lambertw, rising from −1/e', () => {
+    const [lo, hi] = at('lambertw(x)', [
+      [0, Math.E],
+      [0, 0],
+    ]);
+    expect(lo).toBeLessThanOrEqual(0);
+    expect(lo).toBeGreaterThan(-1e-15);
+    expect(hi).toBeGreaterThanOrEqual(1);
+    expect(hi).toBeLessThan(1 + 1e-14);
+    expect(
+      at('lambertw(x)', [
+        [-1, 0],
+        [0, 0],
+      ])[0],
+    ).toBeLessThanOrEqual(-1);
+  });
   it('bounds sin and cos by their peaks', () => {
     const [lo, hi] = at('sin(x)', [
       [0, Math.PI],

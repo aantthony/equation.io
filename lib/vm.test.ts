@@ -3,6 +3,25 @@ import { evaluate, parseExpr } from './expr.ts';
 import { compileProg, compileSampler, run } from './vm.ts';
 
 describe('expression stack machine', () => {
+  it('runs lambertw as the AST evaluator does', () => {
+    const e = parseExpr('lambertw((x^2 - y^2)/e)');
+    const prog = compileProg(
+      e,
+      new Map([
+        ['x', 0],
+        ['y', 1],
+      ]),
+    );
+    const stack = new Float64Array(prog.depth);
+    for (const [x, y] of [
+      [2, 0.5],
+      [0.2, 0.9],
+      [0, 0],
+    ])
+      expect(run(prog, [x, y], stack)).toBe(evaluate(e, { x, y }));
+    expect(run(prog, [0, 1.1], stack)).toBeNaN();
+  });
+
   it('matches the AST evaluator on a typical field', () => {
     const e = parseExpr('sin(x)cos(y) + x^2/4 - atan2(y, x)');
     const prog = compileProg(

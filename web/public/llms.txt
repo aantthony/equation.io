@@ -143,9 +143,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   `normalpdf(x, mean, sd)` and `normalcdf(x, mean, sd)`; `gcd(a, b)`, the
   greatest common divisor of whole numbers (other arguments round to the
   nearest one), so `1/gcd(floor(x), floor(y))` is 1 on the coprime cells of
-  the grid; and `isprime(n)`, 1 for a prime and 0 otherwise
+  the grid; `isprime(n)`, 1 for a prime and 0 otherwise
   (`a_n = isprime(n)`), which gives no value past 2048² − 1 rather than
-  guess. Vector calculus has `grad`, `div`, `curl`, `laplacian`, `jacobian`
+  guess; and `lambertw(x)`, the principal branch of the Lambert W function:
+  the w ≥ −1 with w eʷ = x, for x ≥ −1/e (no value below), so
+  `lambertw(x e^x) = x` for x ≥ −1 (Kruskal–Szekeres's r, below, uses it). Vector calculus has `grad`, `div`, `curl`, `laplacian`, `jacobian`
   and `hessian`, and the geometry of a curve `curvature`, `torsion`,
   `osculating` and `frame` (all below).
   Function names are
@@ -432,6 +434,20 @@ or link-only requests. Clients without MCP Apps support can open share_url.
     −1/L². It is painted where the metric is Lorentzian (and, of mixed
     signature, where it is positive definite: the plane's K there), and
     left out where it degenerates.
+  - Kruskal–Szekeres: all of Schwarzschild's spacetime — both exteriors,
+    the black hole and the white hole — in Kruskal's X and T as x and y, r
+    from `lambertw`: `M = 1`, `r = 2M(1 + lambertw((x^2 - y^2)/e))`,
+    `ds^2 = (32 M^3/r) exp(-r/(2M)) (-dy^2 + dx^2)`. Its light cones are at
+    45° everywhere, future up; the horizons r = 2M are the diagonals
+    y = ±x (`r = 2M` draws them), which geodesics and light rays cross
+    without a pause; the singularity r = 0 is the hyperbola y^2 - x^2 = 1,
+    past which r and the metric have no value, so nothing is traced or
+    drawn there (`y^2 - x^2 > 1` shades it). A particle dropped from rest
+    at r₀ (`geodesic((1.2, 0), (0, 1))`) reaches r = 0 in proper time
+    π (r₀³/8M)^½. r, and `t_s = M ln(abs((x + y)/(x - y)))` (Schwarzschild's
+    t, 2M artanh(y/x) outside the hole), are coordinate fields, so the
+    panel is gridded by r's hyperbolas and t's lines through the origin.
+    `gaussian(x, y)` is 2M/r³ here too.
 - Light cones: `lightcones` alone on a row draws the light cones of its
   panel's ds² metric on a lattice over the window (spaced like a tensor
   field's glyphs, a power of two near 56 px, and fixed in the plane as it
