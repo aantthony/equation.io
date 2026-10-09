@@ -9,6 +9,7 @@ import FoundationModels
 //
 //   pnpm app:eval                          # every task, 5 runs each
 //   pnpm app:eval --runs 1 --task unit-cube --task slider-amplitude
+//   pnpm app:eval --sampling greedy        # as the app answers (ChatModel.options); default: sampled
 //
 //   pnpm app:eval --model openai          # a hosted baseline (gpt-5.5; --openai-model to change)
 //   pnpm app:eval --model openai --reference web/public/llms.txt
@@ -168,14 +169,29 @@ func cappedTools(_ graph: any GraphTools, extra: [any Tool] = []) -> [any Tool] 
   return (ChatModel.tools(graph) + extra).map { cap($0) }
 }
 
+/// How the on-device model picks tokens in the evals. The app is greedy
+/// (ChatModel.options), so a request always gets the same answer; sampled
+/// runs differ, which turns a task's pass into a rate over its runs.
+enum Sampling: String {
+  case `default`, greedy
+
+  var options: GenerationOptions {
+    switch self {
+    case .default: GenerationOptions()
+    case .greedy: ChatModel.options
+    }
+  }
+}
+
 /// Apple's on-device model, as the app's Ask uses it (never Private Cloud Compute here).
 struct OnDeviceModel: EvalModel {
   let name = "on-device"
+  var sampling = Sampling.default
 
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
     let session = LanguageModelSession(
       model: SystemLanguageModel.default, tools: cappedTools(graph), instructions: ChatModel.instructions)
-    let response = try await session.respond(to: prompt, options: ChatModel.options)
+    let response = try await session.respond(to: prompt, options: sampling.options)
     return Turn(
       reply: response.content, inputTokens: session.usage.input.totalTokenCount,
       outputTokens: session.usage.output.totalTokenCount)
@@ -325,11 +341,11 @@ enum ModelChoice: String {
   case onDevice = "on-device"
   case openAI = "openai"
 
-  func make(openAIModel: String, reference: String?) throws -> any EvalModel {
+  func make(openAIModel: String, reference: String?, sampling: Sampling) throws -> any EvalModel {
     switch self {
     case .onDevice:
       guard reference == nil else { throw RunnerError("the reference doesn't fit the on-device model's 8K context") }
-      return OnDeviceModel()
+      return OnDeviceModel(sampling: sampling)
     case .openAI: return OpenAIModel(model: openAIModel, key: try OpenAIModel.key(), reference: reference)
     }
   }
@@ -356,6 +372,7 @@ struct Runner {
     var choice = ModelChoice.onDevice
     var openAIModel = "gpt-5.5"
     var referencePath: String?
+    var sampling = Sampling.default
     var arguments = CommandLine.arguments.dropFirst()
     while let flag = arguments.popFirst() {
       switch flag {
@@ -366,13 +383,17 @@ struct Runner {
         choice = model
       case "--openai-model": openAIModel = arguments.popFirst() ?? openAIModel
       case "--reference": referencePath = arguments.popFirst()
+      case "--sampling":
+        guard let mode = Sampling(rawValue: arguments.popFirst() ?? "") else { throw RunnerError("unknown sampling") }
+        sampling = mode
       default:
         throw RunnerError(
-          "usage: runner [--runs N] [--task id]… [--model on-device|openai] [--openai-model id] [--reference llms.txt]")
+          "usage: runner [--runs N] [--task id]… [--model on-device|openai] [--openai-model id] [--reference llms.txt] [--sampling default|greedy]"
+        )
       }
     }
     let reference = try referencePath.map { try String(contentsOfFile: $0, encoding: .utf8) }
-    let model = try choice.make(openAIModel: openAIModel, reference: reference)
+    let model = try choice.make(openAIModel: openAIModel, reference: reference, sampling: sampling)
     let service = try Service()
     let graph = ServiceGraph(service)
     let all = try service.request(["cmd": "tasks"])["tasks"] as? [[String: Any]] ?? []
@@ -388,7 +409,7 @@ struct Runner {
       results["contextSize"] = system.contextSize
       results["instructionsTokens"] = try? await system.tokenCount(for: Instructions(ChatModel.instructions))
       results["toolsTokens"] = try? await system.tokenCount(for: ChatModel.tools(graph))
-      results["options"] = String(describing: ChatModel.options)
+      results["sampling"] = sampling.rawValue
     }
 
     // Saved after every task, so a run cut short keeps what it finished ("partial": true until the end).

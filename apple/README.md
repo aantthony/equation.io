@@ -44,6 +44,7 @@ pnpm swift:test    # re-record the corpus from the TypeScript suite, then swift 
 ```sh
 pnpm app:eval                     # every task in apple/evals/tasks.ts, 5 runs each, on-device
 pnpm app:eval --runs 1 --task unit-cube
+pnpm app:eval --sampling greedy   # as the app answers; evals sample by default
 pnpm app:eval --model openai              # hosted baseline, gpt-5.5 (--openai-model to change)
 pnpm app:eval --model openai --reference web/public/llms.txt   # the whole reference in context, no lookups
 node --experimental-transform-types apple/evals/report.ts apple/evals/results/a.json apple/evals/results/b.json

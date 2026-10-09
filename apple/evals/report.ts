@@ -35,6 +35,10 @@ export interface Results {
   toolsTokens?: number;
   /** What the model knew the language from: the app's lookup tools, or a whole reference in its instructions (Runner.swift --reference). */
   knowledge?: 'tools' | 'reference';
+  /** On-device: how tokens were picked (Runner.swift --sampling). */
+  sampling?: 'default' | 'greedy';
+  /** Greedy runs from before `sampling` was recorded name their GenerationOptions here. */
+  options?: string;
   /** Saved before the run finished: some tasks are missing. */
   partial?: boolean;
   reference?: { path: string; bytes: number };
@@ -95,12 +99,19 @@ function commonFailure(runs: RunResult[]): string {
   return top ? `${top[0].replaceAll('|', '\\|')} (${top[1]}/${runs.length})` : '';
 }
 
+/** How an on-device run sampled, for older files too (default until 2026-10-10's greedy runs). */
+export const samplingOf = (results: Results) =>
+  results.model !== 'on-device'
+    ? undefined
+    : (results.sampling ?? (results.options?.includes('greedy') ? 'greedy' : 'default'));
+
 export function report(results: Results): string {
   const { rate, sd: spread, runs } = overall(results);
   const all = results.tasks.flatMap(t => t.runs);
   const spent = cost(all);
   const lines = [
     `${results.modelId ?? results.model}, ${results.date}: ${results.tasks.length} tasks × ${results.runs} runs` +
+      (samplingOf(results) ? `, ${samplingOf(results)} sampling` : '') +
       (results.knowledge === 'reference'
         ? `, the reference in context (${results.reference?.path}, ${results.reference?.bytes} bytes)`
         : ''),
@@ -138,6 +149,9 @@ export function compare(before: Results, after: Results): string {
   const runsOf = (r: Results) => r.tasks.flatMap(t => t.runs);
   const lines = [
     `${before.model} ${before.date} → ${after.model} ${after.date}`,
+    ...(samplingOf(before) || samplingOf(after)
+      ? [`Sampling ${samplingOf(before) ?? '–'} → ${samplingOf(after) ?? '–'}`]
+      : []),
     `Pass rate ${pct(a.rate)} ±${pct(a.sd)} → ${pct(b.rate)} ±${pct(b.sd)}`,
     `Context overflows ${runsOf(before).filter(overflowed).length} → ${runsOf(after).filter(overflowed).length}`,
     '',
