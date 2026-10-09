@@ -80,8 +80,7 @@ enum ChatModel {
     [
       GetGraph(access: graph), SetGraph(access: graph), MoveView(access: graph),
       AnimateSlider(access: graph), Check(access: graph), ListKinds(access: graph),
-      KindExamples(access: graph), ShapeLookup(access: graph), SearchFunctions(access: graph),
-      FunctionDoc(access: graph),
+      KindExamples(access: graph), ShapeLookup(access: graph),
     ]
   }
 
