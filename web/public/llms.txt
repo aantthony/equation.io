@@ -483,8 +483,9 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   two crossed bars along E's eigenvectors (in the panel's x and y), half as
   long as |λ| times one scale for the panel (a power of two, so the median
   glyph in view reaches about a fifth of a lattice cell; kept as you pan
-  while the median allows), with arrowheads pointing out where it stretches
-  (λ < 0) and in where it squeezes (λ > 0). One stronger than its cell
+  while the median allows, taken afresh when a slider moves), with
+  arrowheads pointing out where it stretches (λ < 0) and in where it
+  squeezes (λ > 0). One stronger than its cell
   allows is shrunk whole, keeping its shape. Round Schwarzschild
   (`-(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2`) λ = −2M/r³ along the
   radius and +M/r³ round, exactly; Reissner–Nordström −2M/r³ + 3Q²/r⁴ and

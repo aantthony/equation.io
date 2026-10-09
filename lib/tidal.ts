@@ -39,8 +39,12 @@
  * fields such as f = 1 - 2M/r written in them) — as #258's K, so a metric
  * flat in polar coordinates is exactly flat — and the eigenvectors are
  * carried to x and y through the inverse of the coordinates' Jacobian. A
- * metric mixing x and y with fields of them is pulled back to x and y
- * first (symbolically, Jᵀ g J). τ is cyclic: nothing is differentiated in it.
+ * metric mixing x and y with fields of them is still taken in the written
+ * basis: a coordinate spelled out (sqrt(x^2 + y^2) for r) is folded back
+ * into its name, and what still reads x and y is differentiated in x, y
+ * and the coordinates as separate names, the total derivatives in the
+ * coordinates following by the chain rule through J⁻¹ and ∂J (tidalSpec).
+ * τ is cyclic: nothing is differentiated in it.
  *
  * Each glyph is two crossed bars along the eigenvectors (one on a diagram),
  * half as long as |λ| times one scale for the panel — a power of two in
@@ -51,14 +55,14 @@
  * as 1/r³ toward a hole.
  */
 
-import { add, mul } from './diff.ts';
-import type { Expr } from './expr.ts';
+import { type Expr, evaluate, exprKey, freeVars, mapChildren } from './expr.ts';
 import { FLOW_NODE_LIMIT } from './flow.ts';
 import { type ConeGlyphs, type ConeView, coneCell, coneLattice } from './light-cone.ts';
 import { type CurvatureContext, writtenComponents } from './metric-curvature.ts';
 import type { PanelMetric } from './metric.ts';
 import { exceedsNodes } from './size.ts';
 import { numericIn, smoothPartial } from './surface-geometry.ts';
+import { type Prog, compileProg, run } from './vm.ts';
 
 /** What a tidal or tidal(P) row draws (lib/analysis.ts classifyTidal). */
 export interface TidalSpec {
@@ -69,14 +73,24 @@ export interface TidalSpec {
    *  index into the metric's coordinates: 0 with a time, 0 or 1 on a
    *  diagram). */
   readonly time: 0 | 1;
-  /** The two coordinates the curvature is taken in: the panel's two as the
-   *  metric is written (r, phi), or x and y. */
+  /** The panel's two coordinates as the metric is written (r, phi; or x
+   *  and y): the curvature is taken in them. */
   readonly params: readonly [string, string];
   /** g's upper triangle in `params`, then its derivatives in them: ∂p, ∂q,
-   *  ∂pp, ∂pq, ∂qq, each the whole triangle. */
+   *  ∂pp, ∂pq, ∂qq, each the whole triangle. With `symbols`, instead g's
+   *  upper triangle reading all of them, then its partial derivative in
+   *  each symbol, then in each pair of them (s ≤ t, in order), each the
+   *  whole triangle. */
   readonly curvature: readonly Expr[];
+  /** A metric mixing x and y with fields of them (r^2 dphi^2 +
+   *  dr^2/(1 - 2M/sqrt(x^2 + y^2))) is not a function of `params` alone:
+   *  then the names it reads — x, y and `params` — each its own variable
+   *  (curvature), the reader taking the total derivatives by the chain
+   *  rule through the chart. */
+  readonly symbols?: readonly string[];
   /** When `params` are not x and y: they as fields of x and y, then their
-   *  Jacobian ∂(p, q)/∂(x, y) row by row. */
+   *  Jacobian ∂(p, q)/∂(x, y) row by row — and, with `symbols`, its ∂x
+   *  and ∂y. */
   readonly chart?: readonly Expr[];
   /** The metric as written, in x and y, and its Jacobian (lib/metric.ts
    *  PanelMetric): what the horizon cut-off reads, shared with the panel's
@@ -87,22 +101,19 @@ export interface TidalSpec {
   readonly at?: readonly Expr[];
 }
 
-const num = (value: number): Expr => ({ kind: 'num', value });
 const PANEL = new Set(['x', 'y']);
-
-/** Index of g_ij (i ≤ j) in an n × n upper triangle, row by row. */
-const tri = (n: number, i: number, j: number) => {
-  if (i > j) [i, j] = [j, i];
-  return i * n - (i * (i - 1)) / 2 + (j - i);
-};
 
 /**
  * The expressions a panel's tidal glyphs are read from, made once per
  * metric: g in the coordinates it is written in (writtenComponents) and its
- * first and second derivatives there, with the chart from x and y to them;
- * or, for a metric mixing x and y with fields of them, all pulled back to x
- * and y first. `rhs` is the ds^2 row's right side as parsed; `inXY` writes
- * a coordinate field in x and y.
+ * first and second derivatives there, with the chart from x and y to them.
+ * A metric mixing x and y with fields of them is still taken in the
+ * written coordinates, but as a function of x, y and them as separate
+ * names: its partial derivatives in each, which the reader combines by the
+ * chain rule (through the Jacobian and its derivatives) — far smaller than
+ * the symbolic second derivatives of the metric pulled back to x and y,
+ * and no third derivatives of the coordinates. `rhs` is the ds^2 row's
+ * right side as parsed; `inXY` writes a coordinate field in x and y.
  */
 export function tidalSpec(
   rhs: Expr,
@@ -112,36 +123,48 @@ export function tidalSpec(
   const { n, coords } = metric;
   const pairs: [number, number][] = [];
   for (let i = 0; i < n; i++) for (let j = i; j < n; j++) pairs.push([i, j]);
-  const spatial = coords.slice(n - 2) as unknown as [string, string];
+  const params = coords.slice(n - 2) as unknown as [string, string];
   const time: 0 | 1 = n === 3 ? 0 : (metric.timeAxis ?? 1);
-  const written = writtenComponents(rhs, metric, ctx, pairs);
-  let g: Expr[];
-  let params: readonly [string, string];
-  let chart: Expr[] | undefined;
-  if (written) {
-    g = written;
-    params = spatial;
-    // Not x and y: the coordinates as fields of them, and their Jacobian.
-    if (metric.jacobian)
-      chart = [
-        ...spatial.map(c => (PANEL.has(c) ? { kind: 'var' as const, name: c } : ctx.inXY({ kind: 'var', name: c }))),
-        ...metric.jacobian.slice(0, 4),
-      ];
-  } else {
-    g = pulledBack(metric);
-    params = ['x', 'y'];
-  }
-  const [p, q] = params;
-  const dp = g.map(e => smoothPartial(e, p));
-  const dq = g.map(e => smoothPartial(e, q));
-  const curvature = [
-    ...g,
-    ...dp,
-    ...dq,
-    ...dp.map(e => smoothPartial(e, p)),
-    ...dp.map(e => smoothPartial(e, q)),
-    ...dq.map(e => smoothPartial(e, q)),
+  // A component reading x and y may only spell out a coordinate (dr^2/(1 -
+  // 2M/r) beside -(1 - 2M/sqrt(x^2 + y^2)) dt^2): folded back into its
+  // name, it is written in the coordinates after all.
+  const folds = new Map<string, Expr>();
+  for (const c of params)
+    if (!PANEL.has(c)) folds.set(exprKey(ctx.inXY({ kind: 'var', name: c })), { kind: 'var', name: c });
+  const fold = (e: Expr): Expr => folds.get(exprKey(e)) ?? mapChildren(e, fold);
+  const mixed = writtenComponents(rhs, metric, ctx, pairs, true)?.map(fold);
+  const reads = (e: Expr) => [...freeVars(e)].some(v => PANEL.has(v) && !params.includes(v));
+  const written = writtenComponents(rhs, metric, ctx, pairs) ?? (mixed?.some(reads) ? null : mixed);
+  const g = written ?? mixed;
+  if (!g) throw new Error('This metric is too complex to take its tidal forces.');
+  // Not x and y: the coordinates as fields of them, and their Jacobian (and
+  // for a mixed metric its derivatives).
+  const J = metric.jacobian;
+  const chart = J && [
+    ...params.map(c => (PANEL.has(c) ? { kind: 'var' as const, name: c } : ctx.inXY({ kind: 'var', name: c }))),
+    ...J.slice(0, written ? 4 : 12),
   ];
+  let curvature: Expr[];
+  let symbols: string[] | undefined;
+  if (written) {
+    const [p, q] = params;
+    const dp = g.map(e => smoothPartial(e, p));
+    const dq = g.map(e => smoothPartial(e, q));
+    curvature = [
+      ...g,
+      ...dp,
+      ...dq,
+      ...dp.map(e => smoothPartial(e, p)),
+      ...dp.map(e => smoothPartial(e, q)),
+      ...dq.map(e => smoothPartial(e, q)),
+    ];
+  } else {
+    symbols = [...new Set(['x', 'y', ...params])];
+    const first = symbols.map(s => g.map(e => smoothPartial(e, s)));
+    curvature = [...g, ...first.flat()];
+    for (let s = 0; s < symbols.length; s++)
+      for (let t = s; t < symbols.length; t++) curvature.push(...first[s].map(e => smoothPartial(e, symbols![t])));
+  }
   if (exceedsNodes([...curvature, ...(chart ?? [])], 6 * FLOW_NODE_LIMIT))
     throw new Error('This metric is too large to take its tidal forces.');
   return {
@@ -149,39 +172,11 @@ export function tidalSpec(
     time,
     params,
     curvature,
+    ...(symbols ? { symbols } : {}),
     ...(chart ? { chart } : {}),
     components: metric.components,
-    ...(metric.jacobian ? { jacobian: metric.jacobian } : {}),
+    ...(J ? { jacobian: J } : {}),
   };
-}
-
-/** The whole metric pulled back to x and y, Jᵀ g J (the time's row through
- *  J alone), its upper triangle, from parseMetric's components and
- *  Jacobian. */
-function pulledBack(metric: PanelMetric): Expr[] {
-  const { n, components, jacobian } = metric;
-  if (!jacobian) return [...components];
-  const at = (a: number, b: number) => components[tri(n, a, b)];
-  const o = n - 2;
-  // J[c][k] = ∂(coordinate c)/∂(x, y)[k]; the full one, with τ to itself.
-  const J = (c: number, k: number): Expr => {
-    if (c < o || k < o) return num(c === k ? 1 : 0);
-    return jacobian[2 * (c - o) + (k - o)];
-  };
-  const out: Expr[] = [];
-  for (let i = 0; i < n; i++)
-    for (let j = i; j < n; j++) {
-      let sum: Expr = num(0);
-      for (let a = 0; a < n; a++)
-        for (let b = 0; b < n; b++) {
-          const ja = J(a, i);
-          const jb = J(b, j);
-          if ((ja.kind === 'num' && ja.value === 0) || (jb.kind === 'num' && jb.value === 0)) continue;
-          sum = add(sum, mul(mul(ja, jb), at(a, b)));
-        }
-      out.push(sum);
-    }
-  return out;
 }
 
 /** The tides at a point, as read: one or two eigenvalues λ (per unit
@@ -205,25 +200,91 @@ export type TidalRead = (x: number, y: number) => Tides | null;
 const ROUNDING = 1e-9;
 
 /**
+ * Expressions in several names (`names`, set per call from `vals`) and in
+ * `env`'s, at their values, as one function: compiled to stack programs,
+ * or evaluated where a program cannot be made. NaN where a value cannot be
+ * had.
+ */
+function numericMany(
+  exprs: readonly Expr[],
+  names: readonly string[],
+  env: Readonly<Record<string, number>>,
+): (vals: ArrayLike<number>, out: Float64Array) => void {
+  const all = new Set(names);
+  for (const e of exprs) for (const v of freeVars(e)) all.add(v);
+  const slots = new Map([...all].map((v, k) => [v, k]));
+  const vars = new Float64Array(slots.size);
+  for (const [v, k] of slots) vars[k] = env[v] ?? NaN;
+  const fns = exprs.map(e => {
+    let prog: Prog | null = null;
+    try {
+      prog = compileProg(e, slots);
+    } catch {
+      /* evaluated */
+    }
+    if (prog) {
+      const stack = new Float64Array(Math.max(1, prog.depth));
+      const p = prog;
+      return () => {
+        try {
+          return run(p, vars, stack);
+        } catch {
+          return NaN;
+        }
+      };
+    }
+    return () => {
+      try {
+        return evaluate(e, { ...env, ...Object.fromEntries(names.map((v, k) => [v, vars[k]])) });
+      } catch {
+        return NaN;
+      }
+    };
+  });
+  return (vals, out) => {
+    for (let k = 0; k < names.length; k++) vars[k] = vals[k];
+    for (let k = 0; k < fns.length; k++) out[k] = fns[k]();
+  };
+}
+
+/**
  * The tides of a TidalSpec, its sliders read from `env`: compiled once, then
  * read point by point with no allocation.
  */
 export function tidalReader(spec: Omit<TidalSpec, 'at'>, env: Readonly<Record<string, number>>): TidalRead {
-  const { n, time: ti } = spec;
+  const { n, time: ti, symbols } = spec;
   const m = (n * (n + 1)) / 2;
   // Only what is not a constant is compiled (most second derivatives are
-  // 0): it is read into its place in `buf`, the rest filled in once.
+  // 0): it is read into its place in `raw`, the rest filled in once.
   const live = spec.curvature.flatMap((e, k) => (e.kind === 'num' ? [] : [k]));
-  const curv = numericIn(
+  const names = symbols ?? spec.params;
+  const curv = numericMany(
     live.map(k => spec.curvature[k]),
-    spec.params,
+    names,
     env,
   );
   const chart = spec.chart ? numericIn(spec.chart, ['x', 'y'], env) : null;
-  const buf = new Float64Array(6 * m);
+  const raw = new Float64Array(spec.curvature.length);
   const lbuf = new Float64Array(live.length);
-  spec.curvature.forEach((e, k) => e.kind === 'num' && (buf[k] = e.value));
-  const cbuf = new Float64Array(6);
+  spec.curvature.forEach((e, k) => e.kind === 'num' && (raw[k] = e.value));
+  const cbuf = new Float64Array(spec.chart?.length ?? 0);
+  const vals = new Float64Array(names.length);
+  // g and its derivatives in `params`: g, ∂p, ∂q, ∂pp, ∂pq, ∂qq.
+  const buf = symbols ? new Float64Array(6 * m) : raw;
+  // A mixed metric's chain rule: each symbol's gradient in x and y and its
+  // second derivatives (xx, xy, yy), and the pairs (s ≤ t) in order.
+  const ns = symbols?.length ?? 0;
+  const grad = new Float64Array(2 * ns);
+  const hess = new Float64Array(3 * ns);
+  const pairIndex: number[][] = Array.from({ length: ns }, () => new Array<number>(ns).fill(0));
+  for (let s = 0, k = 0; s < ns; s++) for (let t = s; t < ns; t++, k++) pairIndex[s][t] = pairIndex[t][s] = k;
+  const field = (symbols ?? []).map(s => spec.params.indexOf(s));
+  // Scratch: J⁻¹, its x and y derivatives, and a component's total
+  // first and second derivatives in x and y.
+  const Ji = new Float64Array(4);
+  const dI = new Float64Array(8);
+  const f1 = new Float64Array(2);
+  const f2 = new Float64Array(4);
   // The first coordinate differentiated: τ (index 0) is not, with a time.
   const o = n - 2;
   const sq = () => Array.from({ length: n }, () => new Float64Array(n));
@@ -264,6 +325,7 @@ export function tidalReader(spec: Omit<TidalSpec, 'at'>, env: Readonly<Record<st
     let j11 = 1;
     if (chart) {
       chart(x, y, cbuf);
+      for (let k = 0; k < cbuf.length; k++) if (!Number.isFinite(cbuf[k])) return null;
       p = cbuf[0];
       q = cbuf[1];
       j00 = cbuf[2];
@@ -271,9 +333,108 @@ export function tidalReader(spec: Omit<TidalSpec, 'at'>, env: Readonly<Record<st
       j10 = cbuf[4];
       j11 = cbuf[5];
     }
-    curv(p, q, lbuf);
-    for (let k = 0; k < live.length; k++) buf[live[k]] = lbuf[k];
-    for (let k = 0; k < buf.length; k++) if (!Number.isFinite(buf[k])) return null;
+    const jd = j00 * j11 - j01 * j10;
+    if (!(Math.abs(jd) > 0)) return null;
+    if (symbols) {
+      for (let s = 0; s < ns; s++) {
+        const name = symbols[s];
+        const a = field[s];
+        vals[s] = name === 'x' ? x : name === 'y' ? y : a === 0 ? p : q;
+        if (name === 'x' || name === 'y') {
+          grad[2 * s] = name === 'x' ? 1 : 0;
+          grad[2 * s + 1] = name === 'y' ? 1 : 0;
+          hess.fill(0, 3 * s, 3 * s + 3);
+        } else {
+          // Row a of J, and its ∂x (cbuf 6..9) and ∂y (cbuf 10..13).
+          grad[2 * s] = cbuf[2 + 2 * a];
+          grad[2 * s + 1] = cbuf[3 + 2 * a];
+          hess[3 * s] = cbuf[6 + 2 * a];
+          hess[3 * s + 1] = cbuf[7 + 2 * a];
+          hess[3 * s + 2] = cbuf[11 + 2 * a];
+        }
+      }
+    } else {
+      vals[0] = p;
+      vals[1] = q;
+    }
+    curv(vals, lbuf);
+    for (let k = 0; k < live.length; k++) raw[live[k]] = lbuf[k];
+    for (let k = 0; k < raw.length; k++) if (!Number.isFinite(raw[k])) return null;
+    if (symbols) {
+      // Total derivatives in x and y by the chain rule, then in p and q
+      // through J⁻¹ (Ji[k][A] = ∂x_k/∂c_A) and its derivatives,
+      // ∂_k J⁻¹ = −J⁻¹ (∂_k J) J⁻¹:
+      //   ∂_A f = Ji[k][A] f_k,
+      //   ∂_A ∂_B f = Ji[k][A] Ji[l][B] f_kl + Ji[k][A] (∂_k Ji)[l][B] f_l.
+      const i00 = j11 / jd;
+      const i01 = -j01 / jd;
+      const i10 = -j10 / jd;
+      const i11 = j00 / jd;
+      // ∂_k Ji = −Ji dJ_k Ji, with dJ_k from cbuf (6.. for x, 10.. for y).
+      for (let kk = 0; kk < 2; kk++) {
+        const b = 6 + 4 * kk;
+        const d00 = cbuf[b];
+        const d01 = cbuf[b + 1];
+        const d10 = cbuf[b + 2];
+        const d11 = cbuf[b + 3];
+        // M = dJ Ji, then −Ji M.
+        const m00 = d00 * i00 + d01 * i10;
+        const m01 = d00 * i01 + d01 * i11;
+        const m10 = d10 * i00 + d11 * i10;
+        const m11 = d10 * i01 + d11 * i11;
+        dI[4 * kk] = -(i00 * m00 + i01 * m10);
+        dI[4 * kk + 1] = -(i00 * m01 + i01 * m11);
+        dI[4 * kk + 2] = -(i10 * m00 + i11 * m10);
+        dI[4 * kk + 3] = -(i10 * m01 + i11 * m11);
+      }
+      Ji[0] = i00;
+      Ji[1] = i01;
+      Ji[2] = i10;
+      Ji[3] = i11;
+      for (let c = 0; c < m; c++) {
+        let fx = 0;
+        let fy = 0;
+        let fxx = 0;
+        let fxy = 0;
+        let fyy = 0;
+        for (let s = 0; s < ns; s++) {
+          const fs = raw[m + s * m + c];
+          const gx = grad[2 * s];
+          const gy = grad[2 * s + 1];
+          fx += fs * gx;
+          fy += fs * gy;
+          fxx += fs * hess[3 * s];
+          fxy += fs * hess[3 * s + 1];
+          fyy += fs * hess[3 * s + 2];
+          for (let t = 0; t < ns; t++) {
+            const fst = raw[m + ns * m + pairIndex[s][t] * m + c];
+            const hx = grad[2 * t];
+            const hy = grad[2 * t + 1];
+            fxx += fst * gx * hx;
+            fxy += fst * gx * hy;
+            fyy += fst * gy * hy;
+          }
+        }
+        f1[0] = fx;
+        f1[1] = fy;
+        f2[0] = fxx;
+        f2[1] = f2[2] = fxy;
+        f2[3] = fyy;
+        buf[c] = raw[c];
+        for (let A = 0; A < 2; A++) buf[(1 + A) * m + c] = Ji[A] * fx + Ji[2 + A] * fy;
+        for (let w = 0; w < 3; w++) {
+          const A = w === 2 ? 1 : 0;
+          const B = w === 0 ? 0 : 1;
+          const slot = 3 + w;
+          let v = 0;
+          for (let k = 0; k < 2; k++) {
+            const jkA = Ji[2 * k + A];
+            for (let l = 0; l < 2; l++) v += jkA * (Ji[2 * l + B] * f2[2 * k + l] + dI[4 * k + 2 * l + B] * f1[l]);
+          }
+          buf[slot * m + c] = v;
+        }
+      }
+    }
     let k = 0;
     for (let i = 0; i < n; i++)
       for (let j = i; j < n; j++, k++) {
@@ -286,7 +447,10 @@ export function tidalReader(spec: Omit<TidalSpec, 'at'>, env: Readonly<Record<st
         dd[o + 1][o][i][j] = dd[o + 1][o][j][i] = buf[4 * m + k];
         dd[o + 1][o + 1][i][j] = dd[o + 1][o + 1][j][i] = buf[5 * m + k];
       }
-    const gtt = g[ti][ti];
+    // The static observer's direction ∂τ, in the written basis.
+    const v0 = ti === 0 ? 1 : 0;
+    const v1 = 1 - v0;
+    const gtt = n === 2 ? g[ti][ti] : g[0][0];
     // A static observer: ∂τ timelike.
     if (!(gtt < 0)) return null;
     // g⁻¹ by cofactors.
@@ -321,8 +485,6 @@ export function tidalReader(spec: Omit<TidalSpec, 'at'>, env: Readonly<Record<st
           G2[c][i][j] = G2[c][j][i] = s;
         }
     // Inverse Jacobian, to carry a vector in (p, q) to x and y.
-    const jd = j00 * j11 - j01 * j10;
-    if (!(Math.abs(jd) > 0)) return null;
     const toXY = (vp: number, vq: number, at: number) => {
       out.dir[at] = (j11 * vp - j01 * vq) / jd;
       out.dir[at + 1] = (-j10 * vp + j00 * vq) / jd;
@@ -332,11 +494,10 @@ export function tidalReader(spec: Omit<TidalSpec, 'at'>, env: Readonly<Record<st
       const det = g[0][0] * g[1][1] - g[0][1] * g[0][1];
       const lam = -riemann(0, 1, 0, 1) / det;
       const noise = size[0] / Math.abs(det);
-      const s = 1 - ti;
-      const w = [0, 0];
-      w[ti] = -g[ti][s];
-      w[s] = gtt;
-      toXY(w[0], w[1], 0);
+      // w = (−(g v)₁, (g v)₀): g(w, v) = 0.
+      const gv0 = g[0][0] * v0 + g[0][1] * v1;
+      const gv1 = g[1][0] * v0 + g[1][1] * v1;
+      toXY(-gv1, gv0, 0);
       out.lambda[0] = lam;
       out.count = Math.abs(lam) > ROUNDING * noise && Number.isFinite(lam) ? 1 : 0;
       return out;
@@ -421,9 +582,11 @@ export const TIDAL_HEAD_PX = 6;
 const MIN_BAR_PX = 1.5;
 
 /** How far (in powers of two) the median may drift before a panel's scale
- *  changes: the median glyph's longer bar stays within 2^±1.5 of
- *  TIDAL_REACH of a cell. */
-const HOLD = 1.5;
+ *  changes: down to 2^−1.5 of TIDAL_REACH of a cell for the median glyph's
+ *  longer bar, and up to 2^1 (0.4 of a cell, under TIDAL_CAP), so a held
+ *  scale never has most glyphs shrunk to the cap. */
+const HOLD_DOWN = 1.5;
+const HOLD_UP = 1;
 
 /** The size of the strongest tide at a point, or NaN with none. */
 const strongest = (t: Tides | null) =>
@@ -434,10 +597,12 @@ const strongest = (t: Tides | null) =>
  * two, so the median glyph's longer bar reaches TIDAL_REACH of a lattice
  * cell — or NaN when no glyph is in view. `skip` leaves out points the
  * caller cuts (behind a horizon). With the scale it had before
- * (`previous`), it keeps it while that is within 2^HOLD of the one the
- * median asks for, so a median near the edge between two powers of two
- * does not flip it to and fro as the view pans (the median moves in steps,
- * as lattice rows come into view, by up to ~1.5× round a hole).
+ * (`previous`), it keeps it while the median glyph's bar stays within
+ * HOLD_DOWN and HOLD_UP of where the median asks, so a median near the edge
+ * between two powers of two does not flip it to and fro as the view pans
+ * (the median moves in steps, as lattice rows come into view, by up to
+ * ~1.5× round a hole). heldTidalScale passes `previous` only while the
+ * metric's values stay.
  */
 export function tidalScale(
   read: TidalRead,
@@ -454,8 +619,38 @@ export function tidalScale(
   const median = sizes[Math.floor(sizes.length / 2)];
   const cellPx = coneCell(view.upp) / view.upp;
   const ideal = Math.log2((TIDAL_REACH * cellPx) / median);
-  if (previous !== undefined && previous > 0 && Math.abs(ideal - Math.log2(previous)) <= HOLD) return previous;
+  if (previous !== undefined && previous > 0) {
+    const drift = Math.log2(previous) - ideal;
+    if (drift <= HOLD_UP && drift >= -HOLD_DOWN) return previous;
+  }
   return 2 ** Math.round(ideal);
+}
+
+/** What heldTidalScale remembers of a panel: the metric's values its scale
+ *  was taken at, and the scale. */
+export interface TidalScaleMemory {
+  values?: string;
+  scale?: number;
+}
+
+/**
+ * The panel's scale over a view (tidalScale), held through pans and zooms
+ * while the metric's values (`values`, a key) stay the same — and taken
+ * afresh when they change, so the same values give the same scale for the
+ * same view whatever the sliders did before.
+ */
+export function heldTidalScale(
+  memory: TidalScaleMemory,
+  read: TidalRead,
+  view: ConeView,
+  values: string,
+  skip?: (x: number, y: number) => boolean,
+): number {
+  const previous = memory.values === values ? memory.scale : undefined;
+  const scale = tidalScale(read, view, { ...(skip ? { skip } : {}), ...(previous !== undefined ? { previous } : {}) });
+  memory.values = values;
+  memory.scale = scale;
+  return scale;
 }
 
 /**

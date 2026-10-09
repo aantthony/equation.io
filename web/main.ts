@@ -210,7 +210,14 @@ import {
   coneViewKey,
   indicatrixScale,
 } from '../lib/light-cone.ts';
-import { type TidalRead, memoTides, tidalGlyphs, tidalReader, tidalScale } from '../lib/tidal.ts';
+import {
+  type TidalRead,
+  type TidalScaleMemory,
+  heldTidalScale,
+  memoTides,
+  tidalGlyphs,
+  tidalReader,
+} from '../lib/tidal.ts';
 import { initPanelResize } from './panel-resize.ts';
 import { initPanelSwipe } from './panel-swipe.ts';
 import { initTheme, onThemeChange, theme, toggleTheme } from './theme.ts';
@@ -1775,7 +1782,7 @@ const tidalRows = new WeakMap<CpuPlan, { names: string[]; glyphs?: ConeGlyphs; v
 /** The panel's tidal scale over a view (lib/tidal.ts tidalScale), shared by
  *  its tidal rows so tidal and tidal(P) agree, and kept through pans while
  *  the median allows. */
-const tidalScales = new WeakMap<readonly unknown[], { key: string; scale: number }>();
+const tidalScales = new WeakMap<readonly unknown[], { memory: TidalScaleMemory; scale: number; view?: string }>();
 
 /**
  * The tidal glyphs a tidal or tidal(P) row draws over the view
@@ -1809,12 +1816,13 @@ function tidesFor(eq: Equation, env: Record<string, number>, view: ConeView): Co
   const where = `${key}\n${JSON.stringify(c.names.map(n => env[n]))}\n${viewKey}`;
   if (c.glyphs && c.view === where) return c.glyphs;
   const cut = m.metric ? horizonCut(plot, m.metric, env, view) : undefined;
-  const scaleKey = `${key}\n${viewKey}`;
+  // Held through pans and zooms while the values stay; afresh when they
+  // change, so a slider's history does not set the scale.
   let known = tidalScales.get(plot.curvature);
-  if (known?.key !== scaleKey) {
-    const scale = tidalScale(m.read, view, { skip: cut, previous: known?.scale });
-    known = { key: scaleKey, scale };
-    tidalScales.set(plot.curvature, known);
+  if (!known) tidalScales.set(plot.curvature, (known = { memory: {}, scale: NaN }));
+  if (known.view !== viewKey || known.memory.values !== key) {
+    known.scale = heldTidalScale(known.memory, m.read, view, key, cut);
+    known.view = viewKey;
   }
   let at: [number, number][] | undefined;
   if (plot.at) {

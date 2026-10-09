@@ -296,8 +296,15 @@ numbers at each point, R_abcd = ½(g_ad,bc + g_bc,ad − g_ac,bd − g_bd,ac) +
 taken symbolically once per plot in the coordinates the row is written in
 (writtenComponents, shared with #258's K), so a metric flat in polar
 coordinates is exactly flat; the eigenvectors go back to x and y through
-the inverse Jacobian. A metric mixing x and y with fields of them is pulled
-back to x and y symbolically first, and an eigenvalue under 10⁻⁹ of the
+the inverse Jacobian. A metric mixing x and y with fields of them stays in
+the written basis: a coordinate spelled out in x and y (sqrt(x^2 + y^2) for
+r) is folded back into its name, and what still reads x and y is
+differentiated in x, y and the coordinates as separate names, the
+derivatives in the coordinates following by the chain rule through J⁻¹
+and ∂J (∂J⁻¹ = −J⁻¹ ∂J J⁻¹; no third derivatives of the coordinates). A
+first version pulled the metric back to x and y symbolically (Jᵀ g J and
+its second derivatives: 18-29k nodes, ~20× the written path's time); the
+chain rule is 2-4× it, and matches it to 10⁻⁹. An eigenvalue under 10⁻⁹ of the
 terms it is the sum of is dropped as rounding. No glyph where g_ττ ≥ 0
 (inside a horizon or an ergoregion: no static observer) nor behind a
 horizon (behindHorizon, now shared with the light cones per panel and
@@ -306,8 +313,10 @@ dimensions, so one bar of λ = −K along the direction orthogonal to the
 written time's ∂τ. Riemannian panels are refused ("tidal forces need a
 time"). Glyphs: two crossed bars, half-length |λ| times a per-panel power of
 two in px per unit λ from the median glyph on the light cones' lattice (a
-fifth of a cell), kept while the median stays within 2^±1.5 so pans do not
-flip it; arrowheads out where it stretches, in where it squeezes; a glyph
+fifth of a cell), kept through pans and zooms while the median glyph stays
+within 2^−1.5 and 2^1 of that (so held glyphs stay under the cap) and the
+metric's values stay — taken afresh when a slider moves, so the same values
+give the same scale whatever came before (heldTidalScale); arrowheads out where it stretches, in where it squeezes; a glyph
 longer than 0.46 of its cell (60 px for a lone one) is shrunk whole,
 keeping its shape. Constant derivatives are not compiled, and each lattice
 point is read once and remembered (memoTides) for the metric's values, so

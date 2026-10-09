@@ -863,6 +863,7 @@ export function cpuStructureKey(plan: CpuPlan): string {
         plan.n,
         plan.time,
         ...plan.params,
+        ...(plan.symbols ?? []),
         ...[plan.curvature, plan.chart ?? [], plan.at ?? []].map(expressions),
       ];
       break;

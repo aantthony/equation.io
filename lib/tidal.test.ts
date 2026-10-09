@@ -2,7 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { analyzeRows } from './analysis.ts';
 import { compileCpu, cpuStructureKey } from './compiler.ts';
 import { type ConeView, coneCell, coneLattice } from './light-cone.ts';
-import { type TidalSpec, TIDAL_CAP, TIDAL_REACH, memoTides, tidalGlyphs, tidalReader, tidalScale } from './tidal.ts';
+import { add, mul } from './diff.ts';
+import type { Expr } from './expr.ts';
+import { countNodes } from './size.ts';
+import { smoothPartial } from './surface-geometry.ts';
+import {
+  type TidalScaleMemory,
+  type TidalSpec,
+  TIDAL_CAP,
+  TIDAL_REACH,
+  heldTidalScale,
+  memoTides,
+  tidalGlyphs,
+  tidalReader,
+  tidalScale,
+} from './tidal.ts';
 
 /** Tidal forces of a panel's metric on a static observer (lib/tidal.ts). */
 
@@ -40,6 +54,13 @@ const kerr = (M: number, a: number) => [
   `a = ${a}`,
   ...EQUATORIAL,
   'ds^2 = -(1 - 2M/r) dt^2 - 4 M a/r dt dphi + r^2/(r^2 - 2M r + a^2) dr^2 + (r^2 + a^2 + 2M a^2/r) dphi^2',
+];
+/** Kerr with its g_tt read from x and y: pulled back. */
+const kerrMixed = (M: number, a: number) => [
+  `M = ${M}`,
+  `a = ${a}`,
+  ...EQUATORIAL,
+  'ds^2 = -(1 - 2M/sqrt(x^2 + y^2)) dt^2 - 4 M a/r dt dphi + r^2/(r^2 - 2M r + a^2) dr^2 + (r^2 + a^2 + 2M a^2/r) dphi^2',
 ];
 
 const last = (rows: string[]) => analyzeRows(rows, { readouts: true }).rows.at(-1)!;
@@ -462,6 +483,142 @@ describe('tidal glyphs', () => {
     expect(a.lambda[0]).not.toBe(b.lambda[0]);
     expect([...a.lambda]).toEqual([...plain(5, 1)!.lambda]);
     expect(read(0.5, 0)).toBeNull();
+  });
+});
+
+/** The old way of pulling a mixed metric back to x and y, symbolically
+ *  (Jᵀ g J, then its second derivatives): a reference for the reader's
+ *  numeric chain rule. */
+function symbolicPullback(spec: TidalSpec): TidalSpec {
+  const { n, components, jacobian } = spec;
+  const num = (value: number): Expr => ({ kind: 'num', value });
+  const o = n - 2;
+  const at = (a: number, b: number) => {
+    const [i, j] = a <= b ? [a, b] : [b, a];
+    return components[i * n - (i * (i - 1)) / 2 + (j - i)];
+  };
+  const J = (c: number, k: number): Expr => (c < o || k < o ? num(c === k ? 1 : 0) : jacobian![2 * (c - o) + (k - o)]);
+  const g: Expr[] = [];
+  for (let i = 0; i < n; i++)
+    for (let j = i; j < n; j++) {
+      let sum: Expr = num(0);
+      for (let a = 0; a < n; a++) for (let b = 0; b < n; b++) sum = add(sum, mul(mul(J(a, i), J(b, j)), at(a, b)));
+      g.push(sum);
+    }
+  const d = smoothPartial;
+  const dx = g.map(e => d(e, 'x'));
+  const dy = g.map(e => d(e, 'y'));
+  const curvature = [
+    ...g,
+    ...dx,
+    ...dy,
+    ...dx.map(e => d(e, 'x')),
+    ...dx.map(e => d(e, 'y')),
+    ...dy.map(e => d(e, 'y')),
+  ];
+  return { n, time: spec.time, params: ['x', 'y'], curvature, components, ...(jacobian ? { jacobian } : {}) };
+}
+
+describe('a metric mixing x and y with fields of them', () => {
+  /** g_tt read from x and y in a form that is not r's definition. */
+  const unfolded = (rows: string[]) =>
+    rows.map(r => r.replace('-(1 - 2M/sqrt(x^2 + y^2)) dt^2', '-(1 - 2M (x^2 + y^2)^(-1/2)) dt^2'));
+
+  it('reads as its symbolic pull-back to x and y does, by the chain rule, and stays small', () => {
+    for (const rows of [unfolded(schwarzschildMixed(1.5)), unfolded(kerrMixed(1, 0.8))]) {
+      const { spec, env, read } = tides([...rows, 'tidal']);
+      expect(spec.symbols).toEqual(['x', 'y', 'r', 'phi']);
+      expect(spec.chart).toHaveLength(14);
+      const ref = tidalReader(symbolicPullback(spec), env);
+      for (const [x, y] of [
+        [4, 1],
+        [-6, 3],
+        [2, -9],
+        [15, 15],
+      ]) {
+        const a = at(read, x, y)!;
+        const b = at(ref, x, y)!;
+        expect(a.map(e => e.lambda)).toEqual(b.map(e => expect.closeTo(e.lambda, Math.abs(e.lambda) * 1e-9)));
+        a.forEach((e, k) => expect(along(e.dir, b[k].dir)).toBeCloseTo(1, 9));
+      }
+      // The symbolic pull-back is many times the nodes.
+      const nodes = (s: TidalSpec) => countNodes({ kind: 'vec', items: [...s.curvature, ...(s.chart ?? [])] });
+      expect(nodes(spec) * 4).toBeLessThan(nodes(symbolicPullback(spec)));
+    }
+  });
+
+  it('folds a coordinate spelled out in x and y back into its name', () => {
+    for (const rows of [schwarzschildMixed(1.5), kerrMixed(1, 0.8)]) {
+      const { spec } = tides([...rows, 'tidal']);
+      expect(spec.symbols).toBeUndefined();
+      expect(spec.params).toEqual(['r', 'phi']);
+    }
+  });
+
+  it('takes a diagram’s time from the written coordinates, carried to x and y', () => {
+    // T and R are y and x, the metric reading x as well as R (folded).
+    const plain = tides(['T = y', 'R = x', 'ds^2 = -(1 - 2/x) dT^2 + dR^2/(1 - 2/R)', 'tidal']);
+    for (const r of [3, 5, 9]) {
+      const p = at(plain.read, r, 1)!;
+      expect(p[0].lambda / (-2 / r ** 3)).toBeCloseTo(1, 8);
+      expect(along(p[0].dir, [1, 0])).toBeCloseTo(1, 10);
+    }
+    expect(plain.read(1.5, 0)).toBeNull();
+    // A sheared time, T = y + x/2, and R = 2x, defined either way round, the
+    // metric reading x itself (Schwarzschild, M = 1, in T and R): ∂T at
+    // fixed R is (0, 1) in x and y, and space (∂R at fixed T) is (2, −1).
+    for (const fields of [
+      ['T = y + 0.5 x', 'R = 2x'],
+      ['R = 2x', 'T = y + 0.5 x'],
+    ]) {
+      const { spec, read } = tides([...fields, 'ds^2 = -(1 - 1/x) dT^2 + dR^2/(1 - 2/R)', 'tidal']);
+      expect(spec.symbols).toBeDefined();
+      for (const R of [3, 6]) {
+        const p = at(read, R / 2, -2)!;
+        expect(p[0].lambda / (-2 / R ** 3)).toBeCloseTo(1, 8);
+        expect(along(p[0].dir, [2 / Math.sqrt(5), -1 / Math.sqrt(5)])).toBeCloseTo(1, 10);
+      }
+      expect(read(0.75, 0)).toBeNull();
+    }
+  });
+});
+
+describe('the panel’s tidal scale', () => {
+  it('is the same for the same values and view, whatever the sliders did before', () => {
+    const v = view(-8, 8, -6, 6);
+    const scaleAt = (M: number) => {
+      const { read } = tides([...kerr(M, 0.9), 'tidal']);
+      return read;
+    };
+    const fresh = heldTidalScale({}, scaleAt(2), v, 'M=2');
+    const memory: TidalScaleMemory = {};
+    heldTidalScale(memory, scaleAt(1), v, 'M=1');
+    expect(heldTidalScale(memory, scaleAt(2), v, 'M=2')).toBe(fresh);
+    // Through a pan, at the same values, it is held.
+    const panned = view(-7.5, 8.5, -6, 6);
+    const held = heldTidalScale(memory, scaleAt(2), panned, 'M=2');
+    expect(held).toBe(fresh);
+  });
+
+  it('holds a scale down by at most 2^1.5 and up by at most 2^1, so held glyphs stay under the cap', () => {
+    const { read } = tides([...schwarzschild(1), 'tidal']);
+    const v = view(-16, 16, -10, 10);
+    const s = tidalScale(read, v);
+    const cellPx = coneCell(v.upp) / v.upp;
+    const sizes: number[] = [];
+    for (const [x, y] of coneLattice(v)) {
+      const t = read(x, y);
+      if (t && t.count) sizes.push(Math.max(Math.abs(t.lambda[0]), Math.abs(t.lambda[1])));
+    }
+    sizes.sort((p, q) => p - q);
+    const median = sizes[Math.floor(sizes.length / 2)];
+    for (let k = -4; k <= 4; k++) {
+      const held = tidalScale(read, v, { previous: s * 2 ** k });
+      const reach = (held * median) / (TIDAL_REACH * cellPx);
+      expect(reach).toBeLessThanOrEqual(2 + 1e-9);
+      expect(reach).toBeGreaterThanOrEqual(2 ** -1.5 - 1e-9);
+    }
+    expect(TIDAL_REACH * 2).toBeLessThan(TIDAL_CAP);
   });
 });
 
