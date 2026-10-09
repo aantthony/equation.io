@@ -67,8 +67,18 @@ export class Episode {
     else if (tool === 'function_doc') result = functionDoc(lookups(), text(args.name));
     else if (tool === 'list_kinds') result = listKinds(lookups());
     else if (tool === 'kind_examples') result = kindExamples(lookups(), text(args.kind));
-    else if (tool === 'shape') result = shape(lookups(), text(args.name));
-    else if (tool === 'read_syntax') result = readSyntax(text(args.query));
+    else if (tool === 'shape') {
+      const values = Array.isArray(args.values) ? args.values : [];
+      result = shape(
+        lookups(),
+        text(args.name),
+        values.flatMap(v =>
+          v && typeof v === 'object' && typeof v.name === 'string' && num(v.value)
+            ? [{ name: v.name, value: v.value }]
+            : [],
+        ),
+      );
+    } else if (tool === 'read_syntax') result = readSyntax(text(args.query));
     else result = { error: `unknown tool ${tool}` };
     this.calls.push({ tool, args, result });
     return typeof result === 'string' ? result : JSON.stringify(result);

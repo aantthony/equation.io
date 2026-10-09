@@ -23,6 +23,7 @@ import {
   listKinds,
   searchFunctions,
   shape,
+  type ShapeValue,
 } from '../lib/assistant-tools.ts';
 import type { SpanClass } from '../lib/highlight.ts';
 import type { AssistantData } from '../lib/reference.ts';
@@ -86,7 +87,7 @@ declare global {
       functionDoc(name: string): Promise<string>;
       listKinds(): Promise<string>;
       kindExamples(kind: string): Promise<string>;
-      shape(name: string): Promise<string>;
+      shape(name: string, values?: ShapeValue[]): Promise<string>;
     };
   }
 }
@@ -109,7 +110,7 @@ export function connectNativeApp(graph: NativeGraph): void {
     functionDoc: async name => functionDoc(await assistantData(), name),
     listKinds: async () => listKinds(await assistantData()),
     kindExamples: async kind => kindExamples(await assistantData(), kind),
-    shape: async name => shape(await assistantData(), name),
+    shape: async (name, values) => shape(await assistantData(), name, values ?? []),
   };
   post({ type: 'ready' });
 }

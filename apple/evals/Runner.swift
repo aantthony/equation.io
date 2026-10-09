@@ -88,7 +88,9 @@ struct RunnerError: Error, CustomStringConvertible {
   func check(_ rows: [String]) async -> String { tool("check", ["equations": rows]) }
   func listKinds() async -> String { tool("list_kinds", [:]) }
   func kindExamples(_ kind: String) async -> String { tool("kind_examples", ["kind": kind]) }
-  func shape(_ name: String) async -> String { tool("shape", ["name": name]) }
+  func shape(_ name: String, values: [[String: Any]]) async -> String {
+    tool("shape", ["name": name, "values": values])
+  }
   func searchFunctions(_ query: String) async -> String { tool("search_functions", ["query": query]) }
   func functionDoc(_ name: String) async -> String { tool("function_doc", ["name": name]) }
 }

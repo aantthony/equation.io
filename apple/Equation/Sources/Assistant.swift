@@ -125,7 +125,8 @@ enum ChatModel {
   // What the language has (lib/assistant-tools.ts), as text.
   func listKinds() async -> String
   func kindExamples(_ kind: String) async -> String
-  func shape(_ name: String) async -> String
+  /// `values`: each a parameter's name and value, as `{"name", "value"}`.
+  func shape(_ name: String, values: [[String: Any]]) async -> String
   func searchFunctions(_ query: String) async -> String
   func functionDoc(_ name: String) async -> String
 }
@@ -311,17 +312,30 @@ struct ShapeLookup: Tool {
   let name = "shape"
   let description = """
     The equation of a named curve or surface (cardioid, hyperboloid, torus, …), \
-    in this language's syntax, with its parameters. It draws nothing: set_graph draws.
+    in this language's syntax. Given the request's values, it answers the finished \
+    rows; without them, the form and its parameters. It draws nothing: set_graph draws.
     """
 
+  // No example values: an example in an argument's description gets copied (apple/evals/RESULTS.md).
   @Generable
   struct Arguments {
-    // No example value: an example in an argument's description gets copied (apple/evals/RESULTS.md).
     @Guide(description: "The shape's name, as the request gives it.")
     var name: String
+    @Guide(description: "The numbers the request gives for the shape, each with what it is.")
+    var values: [Value]?
   }
 
-  func call(arguments: Arguments) async throws -> String { await access.shape(arguments.name) }
+  @Generable
+  struct Value {
+    @Guide(description: "What the number is, a parameter's name or a word for it.")
+    var name: String
+    var value: Double
+  }
+
+  func call(arguments: Arguments) async throws -> String {
+    let values = (arguments.values ?? []).map { ["name": $0.name, "value": $0.value] as [String: Any] }
+    return await access.shape(arguments.name, values: values)
+  }
 }
 
 struct SearchFunctions: Tool {
