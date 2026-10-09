@@ -93,8 +93,8 @@ another circle of the same size.
   - `a`: the size, as above
   - e.g. a = 2: `(x^2 + y^2 - 2x)^2 = 4(x^2 + y^2)` — r = 2(1 + cos θ)
 
-Pitfall: polar r = f(θ) is never a bare `r = …` row. With sin in place of
-cos the heart points up: r = a(1 + sin θ).
+Pitfall: polar r = f(θ) is never a bare `r = …` row. Swap cos for sin in
+the size factor to point the heart up instead of right.
 
 ## Limaçon
 
@@ -120,8 +120,9 @@ odd k gives k petals, an even k gives 2k.
   - `k`: a whole number setting the petals
   - e.g. a = 2, k = 3: `(2cos(6pi u) cos(2pi u), 2cos(6pi u) sin(2pi u))` — r = 2cos(3θ), 3 petals
 
-Pitfall: kθ becomes 2πku, so r = sin(5θ) is `sin(10pi u)` inside both
-components. Polar is never a bare `r = …` row.
+Pitfall: θ is 2πu, so kθ is `2pi k u`, and k goes only in the petal
+factor at the front of each component, never in the `cos(2pi u)` and
+`sin(2pi u)` that turn it. Polar is never a bare `r = …` row.
 
 ## Lemniscate
 
@@ -197,8 +198,8 @@ The path of a point swinging along x and y at two different frequencies.
   - `p`: a phase shift
   - e.g. a = 3, b = 5, p = 0.5: `(sin(6pi u + 0.5), sin(10pi u))`
 
-Pitfall: multiply a component to stretch it: `(2sin(6pi u + 0.5), sin(10pi u))`
-is twice as wide.
+Pitfall: a and b must differ, or it is only an ellipse or a line. Multiply
+a component by a number to stretch the figure that way.
 
 ## Catenary
 
@@ -229,8 +230,8 @@ A curve winding round a cylinder as it climbs.
   - `h`: the height it climbs
   - e.g. R = 1.5, n = 5, h = 5: `(1.5cos(10pi u), 1.5sin(10pi u), 5u)`
 
-Pitfall: the third component must climb with u; `(cos(2pi u), sin(2pi u), 0)`
-is a flat circle.
+Pitfall: the third component must climb with u; a constant there makes a
+flat circle.
 
 ## Trefoil knot
 
@@ -255,8 +256,8 @@ A flat surface in 3D.
   - `k`: where it sits: 0 passes through the origin
   - e.g. a = 2, b = -1, c = 1, k = 3: `2x - y + z = 3`
 
-Pitfall: a horizontal plane is `z = k`. In a 2D graph `x = 1` is a line,
-not a plane: some row must use z.
+Pitfall: a horizontal plane is z equal to a number. An equation in x and y
+alone is a 2D line unless some row uses z.
 
 ## Sphere
 
@@ -270,7 +271,7 @@ The points at one distance, the radius, from a centre in space.
   - e.g. R = 1.5: `(1.5sin(pi v) cos(2pi u), 1.5sin(pi v) sin(2pi u), 1.5cos(pi v))`
 
 Pitfall: centred elsewhere, `(x - h)^2 + (y - k)^2 + (z - m)^2 = R^2`.
-`x^2 + y^2 = R^2` alone is a 2D circle.
+An equation in x and y alone is a 2D circle.
 
 ## Ball
 
@@ -282,8 +283,8 @@ The solid inside a sphere.
   - `R`: the radius
   - e.g. R = 1.5: `s = interval(0, 1.5); (s sin(pi v) cos(2pi u), s sin(pi v) sin(2pi u), s cos(pi v))`
 
-Pitfall: `x^2 + y^2 + z^2 <= R^2` is an error: inequalities are 2D only.
-For the surface alone, see sphere.
+Pitfall: an inequality in x, y and z is an error: inequalities are 2D
+only. For the surface alone, see sphere.
 
 ## Ellipsoid
 
@@ -312,8 +313,8 @@ A tube of one radius around the z-axis.
   - `R`: the radius
   - e.g. R = 1.5: `x^2 + y^2 + 0z = 2.25`
 
-Pitfall: without a z term, `x^2 + y^2 = R^2` is a 2D circle; `0z` makes it
-a surface.
+Pitfall: without a z term the equation is a 2D circle; `0z` makes it a
+surface.
 
 ## Cone
 
@@ -359,7 +360,7 @@ A saddle: up along one axis, down along the other.
   - `b`: how slowly it falls along y
   - e.g. a = 2, b = 3: `z = x^2/4 - y^2/9`
 
-Pitfall: `z = c x y` is the same saddle turned 45°.
+Pitfall: a multiple of x y is the same saddle turned 45°.
 
 ## Hyperboloid of one sheet
 
@@ -455,8 +456,8 @@ A solid box, or with equal sides, a cube.
   - `a`: the side
   - e.g. a = 2: `hull(([0,2],[0,2],[0,2]))`
 
-Pitfall: a box has its own interval per axis, e.g. `(interval(0, 1),
-interval(0, 2), interval(0, 3))`. `polygon` in 3D fills only triangles.
+Pitfall: a box gives each axis its own interval. `polygon` in 3D fills
+only triangles.
 
 ## Tetrahedron
 
