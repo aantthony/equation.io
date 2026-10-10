@@ -71,7 +71,7 @@ describe('mcp endpoint', () => {
   it('reports t = 3 as reserved for time instead of a silent note', async () => {
     const { body } = await rpc('tools/call', {
       name: 'encode_graph_url',
-      arguments: { equations: ['t = 3', '(cos(t u), sin(t u))', 'k = 3'] },
+      arguments: { equations: ['t = 3', '(cos(2pi u), sin(2pi t u))', 'k = 3'] },
     });
     const rows = body.result.structuredContent.rows;
     expect(rows[0]).toMatchObject({ status: 'error', error: expect.stringMatching(/t is reserved for time.*k = 3/) });

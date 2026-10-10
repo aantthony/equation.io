@@ -166,7 +166,7 @@ describe('llms.txt', () => {
   it("documents t as reserved, and the parser agrees with the do/don't example", () => {
     expect(llms).toMatch(/`t` is animation time/);
     expect(analyzeRows(['t = 3']).rows[0].error).toMatch(/t is reserved for time/);
-    const ok = analyzeRows(['k = 3', '(cos(k u), sin(k u))']);
+    const ok = analyzeRows(['k = 3', '(cos(2pi u), sin(2pi k u))']);
     expect(ok.rows.map(r => r.error)).toEqual([undefined, undefined]);
   });
 });
