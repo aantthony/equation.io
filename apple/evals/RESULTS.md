@@ -1658,3 +1658,12 @@ loss is in runs the change never touched, and it rescued no task. What it
 would add is the app's note under a reply that claims success over an error,
 which the evals don't score. It is worth keeping for the app on that ground
 alone (re-apply with `git revert` of this revert), and not for the score.
+
+### The error follow-up, restored for the app
+
+The revert above is itself reverted: the follow-up (`e1414dd`'s behaviour) is
+back, on purpose, for the app's honesty note ("The graph still has an
+error." under a reply that claims success over an error). Its 46% run doesn't
+argue against it: it fired in 14 of 480 runs, none of which passed with or
+without it, so that drop was in runs it never touched. Not re-measured on its
+own; the next step's run has it on.
