@@ -14,7 +14,8 @@ const INSTANCES: [string, string[], string][] = [
   ['named, draggable: A = (1, 2)', ['A = (1, 2)'], 'definition (point)'],
   ['label: label((1, 2), "text")', ['label((1, 2), "text")'], 'label'],
   ['implicit2d, an equation in x and y: x + y = 1', ['x + y = 1'], 'implicit2d'],
-  ['circle((2, 1), 3) is one too', ['circle((2, 1), 3)'], 'implicit2d'],
+  // Named in prose, no numbers: an example circle was copied whole (apple/evals/RESULTS.md).
+  ['the function circle, given a centre point and a radius, draws one too', ['circle((1, -2), 2)'], 'implicit2d'],
   ['ineq2d, an inequality in x and y: y > x + 1', ['y > x + 1'], 'ineq2d'],
   ['pcurve: (u, u^2)', ['(u, u^2)'], 'pcurve'],
   ['pregion: (u, v u)', ['(u, v u)'], 'pregion'],
