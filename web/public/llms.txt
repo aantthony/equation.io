@@ -1277,10 +1277,12 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 
 - Reserved names — never define these, use them as a constant, or put a
   slider on them: `t` is animation time in seconds (it plays on its own; any
-  row using t animates), `x`, `y`, `z` are the plot axes, `u` and `v` are
-  curve/surface parameters, `w` is the complex variable x + iy, `i` is the
-  imaginary unit, `e` is Euler's number, `pi` is π, and `d` is the
-  derivative operator. Pick any other name for your own numbers:
+  row using t animates), `x`, `y`, `z` are the plot axes, `w` is the
+  complex variable x + iy, `i` is the imaginary unit, `e` is Euler's
+  number, `pi` is π, and `d` is the derivative operator. `u` and `v` are
+  the curve/surface parameters: they can't be numbers either, but they can
+  be redefined as another interval (`u = interval(0, 2pi)`; the default is
+  `interval(0, 1)`). Pick any other name for your own numbers:
   - Don't: `t = 3` then `(cos(2pi u), sin(2pi t u))` — t is time, so
     `t = 3` is rejected ("t is reserved for time") and the curve would keep
     changing as t counts up.
