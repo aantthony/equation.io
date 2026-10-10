@@ -1566,3 +1566,30 @@ run is one sample per task: a change to the prompt flips 6–11 tasks either
 way, and a tie in the count says nothing. Decide on sampled measurements at
 10 runs a task (the app may still answer greedily); use greedy only to
 check that a run is deterministic.
+
+## Off-origin circles (2026-10-10)
+
+In the app, "show a circle at (4,1)" drew `circle((0, 0), 1)` (the kind
+chart's example), then `(4,1), x^2 + y^2 = 16` (an error: "A point cannot be
+a component of a vector"), and each reply said it had drawn the circle at
+(4, 1). `d5dd2c0` adds two tasks (48 in all):
+- circle-at-point: "Show a circle at (4, 1)", any radius;
+- circle-off-origin: "Draw a circle of radius 2 centred at (-3, 1)".
+Both check the centre (an equation crossed at one distance from it in every
+direction tried, or a parametric curve whose samples all lie at that
+distance), with the app's two answers and origin-centred circles as
+known-bad. No catalogue, chart or primer row is one of their answers.
+
+Baseline on the 48 tasks, the reproduced 49% setup unchanged:
+`results/2026-10-10T035632Z-on-device.json`, sampled, 10 runs a task:
+**48% ±4% (230/480)**, tasks passed per repetition 19–25. Named-shape tasks
+54/100, the two circle tasks 10/20, the other 36 tasks 166/360 (the same as
+the 46-task run, 219/460 then).
+- circle-at-point 3/10: `circle((4, 1), 1)` 6 times, but 3 of those replies
+  call it "a shaded curve" or "a shaded region" (the reply check fails them,
+  rightly); `circle((4, 0.5), 1)` 3 times; `x^2 + y^2 = 16` once ("centred at
+  the origin with radius 4").
+- circle-off-origin 7/10: `circle((-3, 1), 2)` 7 times; `x^2 + y^2 = 4` twice
+  and `x^2 + (y - 1)^2 = 4` once, each replying "centred at (-3, 1)".
+
+This run is the baseline for the steps below.
