@@ -71,6 +71,62 @@ const width = (r: unknown) => (Array.isArray(r) && r.length === 2 ? (r[1] as num
 const contains = (r: unknown, v: number) => Array.isArray(r) && r.length === 2 && r[0] < v && v < r[1];
 const START_WIDTH = START_WINDOW.x[1] - START_WINDOW.x[0];
 
+/**
+ * A circle centred at (cx, cy), of radius `radius` or any positive one: an
+ * equation in x and y crossed at that distance from the centre in every
+ * direction tried, and nowhere nearer or farther; or a parametric curve whose
+ * samples all lie at that distance and go all the way round.
+ */
+const circleAt = (cx: number, cy: number, radius?: number): Check =>
+  anyOf(
+    `a circle centred at (${cx}, ${cy})${radius ? ` of radius ${radius}` : ''}`,
+    {
+      name: 'as an equation',
+      test: o =>
+        o.graph.analysis.rows.some(r => {
+          if (r.cpu?.type !== 'implicit2d') return false;
+          const cpu = r.cpu;
+          const sign = (q: number, theta: number) =>
+            Math.sign(
+              evaluate(cpu.residual, {
+                ...o.graph.analysis.constEnv,
+                t: 0,
+                x: cx + q * Math.cos(theta),
+                y: cy + q * Math.sin(theta),
+              }),
+            );
+          // The radius along +x: where the sign first changes going out from the centre.
+          const qs = Array.from({ length: 2000 }, (_, k) => 0.01 + k * 0.01);
+          const found = qs.find((q, i) => i > 0 && sign(qs[i - 1], 0) !== sign(q, 0));
+          if (found === undefined) return false;
+          let [lo, hi] = [found - 0.01, found];
+          for (let i = 0; i < 40; i++) {
+            const mid = (lo + hi) / 2;
+            if (sign(lo, 0) === sign(mid, 0)) lo = mid;
+            else hi = mid;
+          }
+          const rad = (lo + hi) / 2;
+          if (radius !== undefined && Math.abs(rad - radius) > 1e-3) return false;
+          return [0, 1, 2, 3, 4, 5].every(theta => {
+            const [a, b, c, d] = [0.5, 0.999, 1.001, 1.5].map(k => sign(k * rad, theta));
+            return a === b && c === d && b !== c;
+          });
+        })
+          ? true
+          : 'no such curve',
+    },
+    parametricCurve(
+      'as a parametric curve',
+      samples => {
+        const ds = samples.map(([x, y]) => Math.hypot(x - cx, y - cy));
+        const r0 = radius ?? ds[0];
+        const angles = new Set(samples.map(([x, y]) => Math.round((Math.atan2(y - cy, x - cx) + Math.PI) * 2)));
+        return r0 > 0.01 && ds.every(d => Math.abs(d - r0) < 1e-6) && angles.size >= 12;
+      },
+      2,
+    ),
+  );
+
 /** Points that no plane holds: their covariance matrix is not singular. */
 const notPlanar = (samples: number[][]) => {
   const n = samples.length;
@@ -395,6 +451,42 @@ export const TASKS: EvalTask[] = [
       // Observed: the shape entry's a = 1 with the a x term dropped, and its a = 2 instance.
       answer('The cardioid r = 1 + cos θ.', set('(x^2 + y^2 - 1)^2 = 1(x^2 + y^2)')),
       answer('The cardioid.', set('(x^2 + y^2 - 2x)^2 = 4(x^2 + y^2)')),
+    ],
+  },
+  {
+    id: 'circle-at-point',
+    tags: ['2d', 'observed'],
+    rows: [],
+    request: 'Show a circle at (4, 1)',
+    checks: [circleAt(4, 1), drawnCount(1, 2)],
+    good: [
+      answer('A circle of radius 2 centred at (4, 1).', set('circle((4, 1), 2)')),
+      answer('A circle of radius 1 centred at (4, 1).', set('(x - 4)^2 + (y - 1)^2 = 1')),
+      answer('A circle centred at (4, 1), with its centre marked.', set('(4, 1)', '(x - 4)^2 + (y - 1)^2 = 9')),
+    ],
+    bad: [
+      // Observed in the app: the chart's circle((0, 0), 1), then a point inside a vector.
+      answer('I drew a circle centered at (4, 1).', set('circle((0, 0), 1)')),
+      answer('I drew a circle centered at (4, 1).', set('(4,1), x^2 + y^2 = 16')),
+      answer('A circle at (4, 1).', set('x^2 + y^2 = 16')),
+      answer('A circle at (4, 1).', set('(x + 4)^2 + (y + 1)^2 = 4')),
+    ],
+  },
+  {
+    id: 'circle-off-origin',
+    tags: ['2d'],
+    rows: [],
+    request: 'Draw a circle of radius 2 centred at (-3, 1)',
+    checks: [circleAt(-3, 1, 2), drawnCount(1, 2)],
+    good: [
+      answer('A circle of radius 2 centred at (−3, 1).', set('(x + 3)^2 + (y - 1)^2 = 4')),
+      answer('A circle of radius 2 centred at (−3, 1).', set('circle((-3, 1), 2)')),
+      answer('A circle of radius 2 centred at (−3, 1).', set('(2cos(2pi u) - 3, 2sin(2pi u) + 1)')),
+    ],
+    bad: [
+      answer('A circle of radius 2 centred at (−3, 1).', set('x^2 + y^2 = 4')),
+      answer('A circle of radius 2 centred at (−3, 1).', set('(x - 3)^2 + (y - 1)^2 = 4')),
+      answer('A circle of radius 2 centred at (−3, 1).', set('(x + 3)^2 + (y - 1)^2 = 2')),
     ],
   },
   {
