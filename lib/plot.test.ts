@@ -376,3 +376,16 @@ describe('lists and piecewise plots', () => {
     expect(cls('{x < 0: -x, x^2}').cpu.type).toBe('scalar2d'); // bare: a field
   });
 });
+
+describe('t is reserved for time', () => {
+  it('rejects defining t as a constant or slider, naming another name', () => {
+    for (const s of ['t = 3', 't = 2pi', 't = clamp(1, 0, 5)', 't = round(3)']) {
+      expect(() => cls(s), s).toThrow(/t is reserved for time.*like k = 3/);
+    }
+  });
+
+  it('still reads conditions and equations in t', () => {
+    expect(cls('t < 3').object.kind).toBe('note');
+    expect(cls('y = sin(x - t)').object.kind).toBe('curve');
+  });
+});

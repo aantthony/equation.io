@@ -1275,6 +1275,16 @@ or link-only requests. Clients without MCP Apps support can open share_url.
 
 ## Definitions (extra rows that set up the others)
 
+- Reserved names — never define these, use them as a constant, or put a
+  slider on them: `t` is animation time in seconds (it plays on its own; any
+  row using t animates), `x`, `y`, `z` are the plot axes, `u` and `v` are
+  curve/surface parameters, `w` is the complex variable x + iy, `i` is the
+  imaginary unit, `e` is Euler's number, `pi` is π, and `d` is the
+  derivative operator. Pick any other name for your own numbers:
+  - Don't: `t = 3` then `(cos(t u), sin(t u))` — t is time, so `t = 3` is
+    rejected ("t is reserved for time") and the twist would spin forever.
+  - Do: `k = 3` then `(cos(k u), sin(k u))` — k becomes a draggable slider.
+    (Good names: k, n, m, a, b, c, s, r, or a word like `twist`.)
 - Constant: `a = 2` — the UI shows a draggable slider for it. Computed
   constants allowed: `b = a^2 + t`.
 - Slider range and step: `a = clamp(0.4, 0, 1)` is a slider over [0, 1],

@@ -38,6 +38,8 @@ describe('llms.txt', () => {
       'grid(off)', // grid rows
       '## Row types',
       '## Definitions',
+      'Reserved names', // t is time, not a constant
+      'Do: `k = 3`',
       'https://equation.io/implicit/',
       'https://equation.io/slope-field/',
       'https://equation.io/complex/',
@@ -159,5 +161,12 @@ describe('llms.txt', () => {
     expect(llms).toContain('`mean({y = x^2, 0 < x < 1: y})`');
     expect(readout(['mean({y = x^2, 0 < x < 1: y})'])).toBe('≈ 0.40998');
     expect(analyzeRows(['count(sin(x) = 0)']).rows[0].error).toMatch(/could not all be found/);
+  });
+
+  it("documents t as reserved, and the parser agrees with the do/don't example", () => {
+    expect(llms).toMatch(/`t` is animation time/);
+    expect(analyzeRows(['t = 3']).rows[0].error).toMatch(/t is reserved for time/);
+    const ok = analyzeRows(['k = 3', '(cos(k u), sin(k u))']);
+    expect(ok.rows.map(r => r.error)).toEqual([undefined, undefined]);
   });
 });
