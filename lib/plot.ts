@@ -47,6 +47,10 @@ import { FAMILY_NODES, exceedsNodes } from './size.ts';
 import { FIGURE_FAMILY_MAX } from './object-lists.ts';
 import { type Prog, compileProg, run } from './vm.ts';
 
+/** The message for a row that tries to define t, which is animation time. */
+export const T_RESERVED =
+  't is reserved for time (it animates, counting seconds); use another name for a constant, like k = 3, and write k where you meant t.';
+
 export { publicKind } from './math-object.ts';
 export type { Classified, MathObject } from './math-object.ts';
 import {
@@ -968,6 +972,18 @@ function classifyLowered(
     });
   }
 
+  // `t = 3` reads like a constant (a twist count, say), but t is time: the
+  // row would be a silent claim about the clock and every other use of t
+  // would still animate. Say so instead of drawing nothing.
+  if (
+    expr.kind === 'eq' &&
+    expr.l.kind === 'var' &&
+    expr.l.name === 't' &&
+    !freeVars(expr.r).has('t') &&
+    !hasSpace &&
+    !hasParam
+  )
+    throw new Error(T_RESERVED);
   if (
     (expr.kind === 'eq' || expr.kind === 'ineq') &&
     expr.l.kind !== 'vec' &&
