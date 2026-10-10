@@ -1593,3 +1593,27 @@ the 46-task run, 219/460 then).
   and `x^2 + (y - 1)^2 = 4` once, each replying "centred at (-3, 1)".
 
 This run is the baseline for the steps below.
+
+### The chart's circle off the origin, kept (close)
+
+`7a79afa`: the kind chart's `circle((0, 0), 1) is one too` became
+`circle((2, 1), 3) is one too`. Token counts unchanged (1,556 and 1,309).
+
+`results/2026-10-10T050225Z-on-device.json`, sampled, 10 runs a task, against
+the 48-task baseline (`2026-10-10T035632Z`): **48% ±4% (230/480) → 49% ±5%
+(233/480)**; named-shape tasks 54 → 52, circle tasks 10 → 14 of 20, the other
+36 tasks 166 → 167.
+- circle-at-point 3 → 7: `circle((4, 1), 3)`, the chart's form with the
+  request's centre and the chart's radius (one reply still says "shaded").
+- circle-off-origin 7 → 7: `circle((-3, 1), 2)` 6 times; `x^2 + y^2 = 4` and
+  `x^2/4 + y^2/1 = 1` once each, both replying "centred at (-3, 1)".
+- But circle-and-line 10 → 2: "a circle of radius 2" became the chart's
+  `circle((2, 1), 3)` verbatim in 8 runs. The old example, `circle((0, 0), 1)`,
+  was copied into its centre and right for this task.
+- Also: derivative 10 → 5, label-vertex 6 → 2 (away from the chart);
+  unit-cube 5 → 8, spin-3d 2 → 7, color-red 7 → 10.
+
+Verdict: kept, as not worse (+3 runs, within noise), but a close call that
+moves the copying rather than ending it: whatever circle the chart shows is
+copied whole when a request is near it. An example whose numbers are visibly
+placeholders, or no circle example, is the alternative to measure.
