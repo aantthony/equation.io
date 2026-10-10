@@ -124,6 +124,19 @@ final class GraphChat {
         messages[reply].text = snapshot.content
         if !snapshot.content.isEmpty { activity = nil }
       }
+      // A row with an error: ask once to fix it, and the fixed reply replaces the first.
+      if let followUp = ChatModel.followUp(rows: access.rows(), status: await currentStatus()) {
+        activity = "Fixing…"
+        for try await snapshot in session.streamResponse(to: followUp, options: ChatModel.options) {
+          if !snapshot.content.isEmpty {
+            messages[reply].text = snapshot.content
+            activity = nil
+          }
+        }
+        if ChatModel.followUp(rows: access.rows(), status: await currentStatus()) != nil {
+          messages.append(Message(role: .note, text: ChatModel.stillAnError))
+        }
+      }
     } catch LanguageModelError.contextSizeExceeded {
       self.session = nil
       messages[reply] = Message(role: .note, text: "That conversation got too long, so it starts afresh. Ask again.")
@@ -132,6 +145,11 @@ final class GraphChat {
     }
     if messages[reply].role == .assistant && messages[reply].text.isEmpty { messages.remove(at: reply) }
     if access.rows() != before { undoRows = before }
+  }
+
+  /// Every row's status once the renderer has drawn the rows as they are now.
+  private func currentStatus() async -> [RowStatus] {
+    await access.model?.status(after: access.rows()) ?? []
   }
 
   /// Show the reply over the graph: for good while `stay`, else for a few

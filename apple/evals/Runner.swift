@@ -87,6 +87,12 @@ struct RunnerError: Error, CustomStringConvertible {
     return tool("animate_slider", args)
   }
   func check(_ rows: [String]) async -> String { tool("check", ["equations": rows]) }
+  /// The rows now, and each one's status as the app's renderer reports it.
+  func state() throws -> (rows: [String], status: [RowStatus]) {
+    let answer = try service.request(["cmd": "status"])
+    let data = try JSONSerialization.data(withJSONObject: answer["status"] ?? [])
+    return (answer["rows"] as? [String] ?? [], try JSONDecoder().decode([RowStatus].self, from: data))
+  }
   func listKinds() async -> String { tool("list_kinds", [:]) }
   func kindExamples(_ kind: String) async -> String { tool("kind_examples", ["kind": kind]) }
   func shape(_ name: String) async -> String { tool("shape", ["name": name]) }
@@ -107,6 +113,10 @@ struct Turn {
   var reasoningTokens: Int?
   /// The model's exact id, where the API names it (e.g. a dated snapshot).
   var modelID: String?
+  /// The follow-up about rows with an error (ChatModel.followUp), if one was
+  /// sent, and whether the rows were free of errors after it.
+  var followUp: String?
+  var followUpFixed: Bool?
 }
 
 /// A model the evals can run: the app's (on-device), or a hosted baseline.
@@ -189,10 +199,21 @@ struct OnDeviceModel: EvalModel {
   func respond(to prompt: String, graph: any GraphTools) async throws -> Turn {
     let session = LanguageModelSession(
       model: SystemLanguageModel.default, tools: cappedTools(graph), instructions: ChatModel.instructions)
-    let response = try await session.respond(to: prompt, options: sampling.options)
-    return Turn(
-      reply: response.content, inputTokens: session.usage.input.totalTokenCount,
-      outputTokens: session.usage.output.totalTokenCount)
+    var turn = Turn(reply: try await session.respond(to: prompt, options: sampling.options).content)
+    // As the app does (Chat.swift): one follow-up, in the same session, if a row has an error.
+    // The session's tools share one budget, so the call cap covers both requests.
+    if let service = graph as? ServiceGraph {
+      let (rows, status) = try await service.state()
+      if let followUp = ChatModel.followUp(rows: rows, status: status) {
+        turn.followUp = followUp
+        turn.reply = try await session.respond(to: followUp, options: sampling.options).content
+        let after = try await service.state()
+        turn.followUpFixed = ChatModel.followUp(rows: after.rows, status: after.status) == nil
+      }
+    }
+    turn.inputTokens = session.usage.input.totalTokenCount
+    turn.outputTokens = session.usage.output.totalTokenCount
+    return turn
   }
 }
 
@@ -488,6 +509,11 @@ struct Runner {
     if let tokens = turn.cachedInputTokens { result["cachedInputTokens"] = tokens }
     if let tokens = turn.reasoningTokens { result["reasoningTokens"] = tokens }
     if let id = turn.modelID { result["modelId"] = id }
+    if let followUp = turn.followUp {
+      var record: [String: Any] = ["message": followUp]
+      if let fixed = turn.followUpFixed { record["fixed"] = fixed }
+      result["followUp"] = record
+    }
     if let failure {
       // The person sees an error instead of an answer: a failed run, whatever the graph shows.
       result["error"] = failure

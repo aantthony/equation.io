@@ -90,6 +90,27 @@ enum ChatModel {
     "The graph's rows now:\n\(report(rows, status))\n\n\(request)"
   }
 
+  /// After a reply, one message asking the model to fix the rows that have an
+  /// error, naming each; nil when no row has one. Errors only: a warning (a
+  /// definition nothing uses yet) can be meant, and an error never is. The
+  /// on-device model claims success over broken rows ("I drew a circle
+  /// centered at (4, 1)" over an error), so the app asks once, in the same
+  /// session (Chat.swift), as do the evals (apple/evals/Runner.swift).
+  static func followUp(rows: [String], status: [RowStatus]) -> String? {
+    let problems = rows.indices.compactMap { k -> String? in
+      guard k < status.count, let error = status[k].error else { return nil }
+      return "Row \(k + 1), `\(rows[k])`: \(error)"
+    }
+    guard !problems.isEmpty else { return nil }
+    let one = problems.count == 1
+    return (["The graph has \(one ? "an error" : "errors"):"] + problems + [
+      "Fix \(one ? "it" : "them") with set_graph, then reply."
+    ]).joined(separator: "\n")
+  }
+
+  /// Shown under a reply when a row still has an error after the follow-up.
+  static let stillAnError = "The graph still has an error."
+
   /// The rows, numbered, each with its error or readout: what each message starts with.
   static func report(_ rows: [String], _ status: [RowStatus]) -> String {
     if rows.isEmpty { return "The graph is empty." }
