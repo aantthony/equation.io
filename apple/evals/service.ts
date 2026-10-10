@@ -6,7 +6,6 @@
  *   {"cmd": "start", "task": id, "variant"?}  → {rows, status}: the starting graph, as the app's editor reports it
  *                                               (variant: whose instructions, lib/assistant-instructions.ts)
  *   {"cmd": "tool", "name": …, "args": {…}}   → {output}: the tool's answer, as the app's bridge returns it
- *   {"cmd": "status"}                         → {rows, status}: the graph now, as "start" reports it
  *   {"cmd": "grade", "reply": …}              → {pass, checks, rows, calls}
  *   {"cmd": "report", "path": …}              → {text}: the summary of a results file (report.ts)
  *
@@ -19,12 +18,6 @@ import { report } from './report.ts';
 import { TASKS } from './tasks.ts';
 
 let task = TASKS[0];
-
-/** The rows and Chat.swift's RowStatus for each: the fields the prompt's row report and the follow-up read, and the rest it decodes. */
-const nativeState = (episode: Episode) => ({
-  rows: episode.graph.rows,
-  status: episode.graph.nativeStatus().map(s => ({ ...s, color: null, note: null, spans: [], slider: null })),
-});
 let episode: Episode | undefined;
 
 function answer(request: Record<string, unknown>): unknown {
@@ -36,10 +29,12 @@ function answer(request: Record<string, unknown>): unknown {
       if (!found) return { error: `no task ${String(request.task)}` };
       task = found;
       episode = new Episode(task.rows, request.variant === 'reference' ? 'reference' : 'text');
-      return nativeState(episode);
+      // Chat.swift's RowStatus: the fields the prompt's row report reads, and the rest it decodes.
+      const status = episode.graph
+        .nativeStatus()
+        .map(s => ({ ...s, color: null, note: null, spans: [], slider: null }));
+      return { rows: episode.graph.rows, status };
     }
-    case 'status':
-      return episode ? nativeState(episode) : { error: 'no task started' };
     case 'tool': {
       if (!episode) return { error: 'no task started' };
       const args = request.args && typeof request.args === 'object' ? (request.args as Record<string, unknown>) : {};

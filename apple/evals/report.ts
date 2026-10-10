@@ -21,8 +21,6 @@ export interface RunResult {
   seconds: number;
   /** The model failed (context overflow, guardrail, timeout) before replying. */
   error?: string;
-  /** The follow-up about rows with an error (Assistant.swift ChatModel.followUp), and whether it left none. */
-  followUp?: { message: string; fixed?: boolean };
 }
 
 export interface Results {
@@ -129,11 +127,6 @@ export function report(results: Results): string {
         : ''),
     `Context overflows: ${all.filter(overflowed).length}. Calls per run by tool: ${callsByTool(all)}` +
       (spent === undefined ? '' : `. Cost about $${spent.toFixed(2)}`),
-    ...(all.some(r => r.followUp)
-      ? [
-          `Follow-ups about errors: ${all.filter(r => r.followUp).length} runs, ${all.filter(r => r.followUp?.fixed).length} left no error, ${all.filter(r => r.followUp && r.pass).length} passed`,
-        ]
-      : []),
     '',
     '| task | pass | calls | tokens in/out | most common failure |',
     '| --- | --- | --- | --- | --- |',
