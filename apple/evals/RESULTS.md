@@ -1535,3 +1535,34 @@ the refusal neither fixes the cardioid (the model never names a) nor the rose
 cos θ, sin(4θ)) are not parameter values the model can map; parsing the
 request's equation, or a cardioid entry written r = b + a cos θ in the
 request's terms, would be the next thing to try.
+
+## Back to the 49% setup (2026-10-10)
+
+`f3d41d2` reverts, together, the shape refusal and sine rose (1616092; the
+sine rose changes shape's answer for polar-rose, so it went too), the
+ListKinds deletion (432e147), shape with values (b2e9141), no list_kinds
+(27f3950) and no check (a754786). What the model sees (Instructions.swift,
+the tool list and descriptions in Assistant.swift, shape's answer,
+shapes.md, llms.txt, the bridge and the eval service) is now byte for byte
+what it was at ffa39473, the sampled 49% run's commit; the only difference
+is the app's greedy `ChatModel.options`, which the runner doesn't use when
+it samples. Kept from since: the runner's `--sampling` (sampled by default),
+the 12-call cap, `tidy()`, the lissajous check (both components must swing)
+and report.ts's sampling line.
+
+`results/2026-10-09T235028Z-on-device.json`, sampled, 10 runs a task,
+against `2026-10-09T063021Z`: **49% ±4% (225/460) → 48% ±6% (219/460)**,
+tasks passed per repetition 18–26 (20–26). Named-shape tasks 54 → 53 of
+100, the other 36 tasks 171 → 166. Instructions 1,556 tokens and tools
+1,309, as then. The 49% reproduces within noise (6 runs, about one
+standard error of the difference). Per task the two runs differ by up to 4
+of 10 (honest-reply-helix 8 → 4, zoom-out 7 → 3, cardioid 8 → 5, sphere
+6 → 9, torus 5 → 8), the run-to-run noise of identical code.
+
+**The lesson.** Each step of the greedy batch (no check, no list_kinds,
+shape with values) measured "no worse" on one greedy sample a task, and
+together they cost 4 points sampled (45%, `2026-10-09T210630Z`). A greedy
+run is one sample per task: a change to the prompt flips 6–11 tasks either
+way, and a tie in the count says nothing. Decide on sampled measurements at
+10 runs a task (the app may still answer greedily); use greedy only to
+check that a run is deterministic.
