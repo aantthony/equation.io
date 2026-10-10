@@ -1,5 +1,6 @@
 import { notACondition, structuralDiagnostic } from './expr.ts';
 import { diff } from './diff.ts';
+import { LAMBERTW_SERIES } from './specfn.ts';
 /**
  * Compile a symbolic Expr to a GLSL expression (float-valued).
  *
@@ -20,6 +21,8 @@ import {
   exprKey,
   freeVars,
   ineqComparisons,
+  mapChildren,
+  subtreeCounts,
 } from './expr.ts';
 
 export const FN_GLSL: Record<string, string> = {
@@ -38,6 +41,7 @@ export const FN_GLSL: Record<string, string> = {
   factorial: 'eq_factorial',
   sinc: 'eq_sinc',
   coth: 'eq_coth',
+  lambertw: 'eq_lambertw',
   tanh: 'eq_tanh',
   [ANGLE_FN]: 'eq_angle',
   [ANGLE_RATE_FN]: 'eq_angle_rate',
@@ -191,6 +195,41 @@ float eq_tanh(float x) { return tanh(clamp(x, -20.0, 20.0)); }
 // 1/tanh, not cosh/sinh, which overflow the same way; coth is ±1 there too
 // (and the cothFn() CPU twin says so).
 float eq_coth(float x) { return 1.0 / eq_tanh(x); }
+// lambertw() in lib/specfn.ts, to float: the branch-point series in
+// p = sqrt(2(1 + e x)) (LAMBERTW_SERIES, 13 terms) near -1/e, else three
+// Halley steps on w - x e^(-w), which overflows for no finite x.
+float eq_lambertw(float x) {
+  if (isnan(x) || !(x >= -0.36787945)) return EQ_NAN;
+  if (isinf(x)) return x;
+  // x + 1/e in two pieces, as the CPU twin: 1/e to float is 9.15e-9 high,
+  // and x + 1/e near -1/e (exact, by Sterbenz) is then off by as much,
+  // which the square root turns into ~3e-5 of W.
+  float p = sqrt(5.43656365691809 * max(0.0, (x + 0.36787945032119751) - 9.1497556e-9));
+  if (p < 0.5) {
+    float s = 0.0;
+${LAMBERTW_SERIES.slice(0, 13)
+  .map(c => `    s = s * p + ${c.toPrecision(9)};`)
+  .reverse()
+  .join('\n')}
+    return s;
+  }
+  float w;
+  if (x < 0.0) w = -1.0 + p - p * p / 3.0 + 0.152777778 * p * p * p;
+  else if (x < 3.0) {
+    float l = log(1.0 + x);
+    w = l * (1.0 - log(1.0 + l) / (2.0 + l));
+  } else {
+    float l1 = log(x);
+    float l2 = log(l1);
+    w = l1 - l2 + l2 / l1;
+  }
+  for (int k = 0; k < 3; k++) {
+    float t = x * exp(-w);
+    float f = w - t;
+    w -= f / (1.0 + t + t * f / (2.0 * (1.0 + t)));
+  }
+  return w;
+}
 // angleFn in lib/expr.ts: the signed angle from arm u to arm v in (-pi, pi],
 // NaN for a zero-length arm. Arms are scaled by their largest component so
 // float32 products cannot underflow near the vertex, and the straight angle
@@ -331,6 +370,54 @@ export function declareHelper(source: string, table?: Float32Array): string {
   return name;
 }
 export const HELPER_SELF = '@self';
+
+/**
+ * toGLSL with each repeated subtree computed once: a helper function
+ * (declareHelper) that keeps them in locals, taking the expression's free
+ * variables as its arguments, and a call of it — or plain toGLSL when
+ * nothing repeats. A metric's curvature written in x and y through a field
+ * (Kruskal's r = 2M(1 + lambertw(…))) differentiates that field over and
+ * over: inlined, its gaussian(x, y) called eq_lambertw 179 times a pixel.
+ * Real-valued expressions only; a Σ/Π or loop is one unit, never entered.
+ */
+export function sharedGLSL(e: Expr): string {
+  const shared = subtreeCounts(e);
+  const names = new Map<number, string>();
+  const lines: string[] = [];
+  const memo = new WeakMap<Expr, Expr>();
+  const visit = (node: Expr): Expr => {
+    const known = memo.get(node);
+    if (known) return known;
+    let out: Expr = node;
+    const binder =
+      node.kind === 'loop' ||
+      (node.kind === 'call' && (node.name === 'sum' || node.name === 'prod') && node.args.length >= 4);
+    if (node.kind !== 'num' && node.kind !== 'var' && !binder) {
+      // Children first: a bin keeps its own shape (fourierLoop reads it).
+      const lowered = mapChildren(node, visit);
+      out = lowered;
+      if (node.kind !== 'ineq' && node.kind !== 'eq' && shared.count(node) >= 2) {
+        const id = shared.id(node);
+        let name = names.get(id);
+        if (!name) {
+          name = `eq_s${names.size}`;
+          lines.push(`float ${name} = ${toGLSL(lowered)};`);
+          names.set(id, name);
+        }
+        out = { kind: 'var', name };
+      }
+    }
+    memo.set(node, out);
+    return out;
+  };
+  const body = toGLSL(visit(e));
+  if (!lines.length) return body;
+  const args = [...freeVars(e)].sort();
+  const name = declareHelper(
+    `float ${HELPER_SELF}(${args.map(a => `float ${a}`).join(', ')}) {\n  ${lines.join('\n  ')}\n  return ${body};\n}`,
+  );
+  return `${name}(${args.join(', ')})`;
+}
 export function withHelpers(shader: string, tableBudget = Infinity): string {
   if (!shader.includes('eq_loop_')) return shader;
   const order: string[] = [];

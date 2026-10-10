@@ -2,7 +2,8 @@
  * Special functions behind the distributions (lib/dist.ts): ln Γ, the
  * regularized incomplete gamma and beta functions (the cdfs of the continuous
  * zoo AND of Binomial, Poisson and NegativeBinomial), the densities that need
- * them, and the discrete laws' mass functions. Everything here is plain double arithmetic with no imports,
+ * them, and the discrete laws' mass functions — and the Lambert W function,
+ * the `lambertw` builtin. Everything here is plain double arithmetic with no imports,
  * so expr.ts can register the densities as builtins.
  *
  * The incomplete functions return BOTH tails, `[lower, upper]`, each computed
@@ -430,4 +431,70 @@ export function discreteUniformPmf(k: number, a: number, b: number): number {
   b = wholeNumber(b);
   if (!(a <= b) || !Number.isInteger(k) || k < a || k > b) return 0;
   return 1 / (b - a + 1);
+}
+
+/** 1/e as the double nearest it plus the rest, so x + 1/e keeps its digits
+ *  near the branch point (x + EM1_HI is exact there, by Sterbenz). */
+const EM1_HI = 0.36787944117144233;
+const EM1_LO = -1.2428753672788363e-17;
+
+/** W's series about its branch point in p = √(2(1 + e x)):
+ *  W = Σ μ_k p^k = −1 + p − p²/3 + 11p³/72 − …, by the recurrence of
+ *  Corless, Gonnet, Hare, Jeffrey & Knuth (1996, eq. 4.23). Its radius is
+ *  √2; below p = 0.3 the 30 terms are within 1e-20 of W. */
+export const LAMBERTW_SERIES: readonly number[] = (() => {
+  const mu = [-1, 1];
+  const alpha = [2, -1];
+  for (let k = 2; k < 30; k++) {
+    let a = 0;
+    for (let j = 2; j <= k - 1; j++) a += mu[j] * mu[k + 1 - j];
+    alpha[k] = a;
+    mu[k] = ((k - 1) / (k + 1)) * (mu[k - 2] / 2 + alpha[k - 2] / 4) - alpha[k] / 2 - mu[k - 1] / (k + 1);
+  }
+  return mu;
+})();
+
+/** Where the branch-point series takes over from Halley's iteration. */
+const BRANCH_SERIES_BELOW = 0.3;
+
+/**
+ * The principal branch of the Lambert W function: the w ≥ −1 with
+ * w eʷ = x, for x ≥ −1/e (NaN below; at the double nearest −1/e it is −1).
+ *
+ * Near the branch point, where W turns on a square root and Halley's
+ * iteration would lose digits to it, the series in p = √(2(1 + e x)), with
+ * 1 + e x from x + 1/e in two pieces so its digits survive. Elsewhere
+ * Halley's iteration on f(w) = w − x e^(−w), which overflows for no finite
+ * x, from the series, ln(1 + x) or the asymptotic ln x − ln ln x: about
+ * 1e-16 relative. The GLSL twin is eq_lambertw.
+ */
+export function lambertw(x: number): number {
+  if (!(x >= -EM1_HI)) return NaN;
+  if (x === Infinity) return Infinity;
+  if (Math.abs(x) < 1e-9) return x * (1 - x);
+  const p = Math.sqrt(2 * Math.E * Math.max(0, x + EM1_HI + EM1_LO));
+  if (p < BRANCH_SERIES_BELOW) {
+    let w = 0;
+    for (let k = LAMBERTW_SERIES.length - 1; k >= 0; k--) w = w * p + LAMBERTW_SERIES[k];
+    return w;
+  }
+  let w: number;
+  if (x < 0) w = -1 + p - (p * p) / 3 + (11 / 72) * p * p * p;
+  else if (x < 3) {
+    const l = Math.log1p(x);
+    w = l * (1 - Math.log1p(l) / (2 + l));
+  } else {
+    const l1 = Math.log(x);
+    const l2 = Math.log(l1);
+    w = l1 - l2 + l2 / l1;
+  }
+  for (let k = 0; k < 12; k++) {
+    // f′ = 1 + t and f″ = −t, with t = x e^(−w).
+    const t = x * Math.exp(-w);
+    const f = w - t;
+    const d = f / (1 + t + (t * f) / (2 * (1 + t)));
+    w -= d;
+    if (!(Math.abs(d) > 1e-16 * Math.abs(w))) break;
+  }
+  return w;
 }

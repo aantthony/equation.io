@@ -6,6 +6,7 @@ import {
   betaPdf,
   gammaPQ,
   gammaPdf,
+  lambertw,
   lgamma,
   lgammaHalfDiff,
   log1pmx,
@@ -301,6 +302,57 @@ describe('astronomically large parameters', () => {
         expect(Math.abs(above[1] - below[1]), `${a}, ${b} at ${x}`).toBeLessThan(2e-5);
         close(above[0] + above[1], 1, 1e-12);
       }
+    }
+  });
+});
+
+describe('the Lambert W function', () => {
+  it('is the principal branch to a few ulps (mpmath at each double, rounded)', () => {
+    for (const [x, w] of [
+      [1, 0.5671432904097838],
+      [-0.1, -0.11183255915896297],
+      [10, 1.7455280027406994],
+      [100, 3.38563014029005],
+      [-0.3, -0.4894022271802149],
+      [0.001, 0.0009990014973385308],
+      [1e100, 224.8431064451185],
+      [1e-300, 1e-300],
+      [-1e-12, -1.000000000001e-12],
+      [-0.36787944117144233, -1],
+      [-0.3678794411, -0.999980292242033],
+      [-0.36787944, -0.9999201984841515],
+      [-0.367, -0.9323991847479283],
+      [-0.35, -0.7166388164560736],
+      [-0.2, -0.25917110181907377],
+      [0.5, 0.35173371124919584],
+      [3, 1.04990889496404],
+      [1e5, 9.284571428622108],
+      [Number.MAX_VALUE, 703.2270331047702],
+    ])
+      close(lambertw(x), w, 4e-16);
+    expect(lambertw(0)).toBe(0);
+    expect(lambertw(Math.E)).toBe(1);
+    expect(lambertw(-1 / Math.E)).toBe(-1);
+    expect(lambertw(Infinity)).toBe(Infinity);
+  });
+
+  it('is undefined below −1/e', () => {
+    for (const x of [-0.3678794411714424, -0.4, -1, -Infinity, NaN]) expect(lambertw(x)).toBeNaN();
+  });
+
+  it('solves w eʷ = x across the whole range, and rises', () => {
+    let last = -Infinity;
+    for (let k = 0; k <= 4000; k++) {
+      // Densest at the branch point, then out to 1e300.
+      const x = k < 2000 ? -1 / Math.E + 1e-14 * 1.015 ** k : 10 ** (-300 + (600 * (k - 2000)) / 2000);
+      const w = lambertw(x);
+      expect(w).toBeGreaterThanOrEqual(last);
+      last = w;
+      // The residual, in units of how far a rounding of x moves W.
+      const slope = 1 / (Math.exp(w) * (1 + w));
+      expect(Math.abs(w * Math.exp(w) - x) * slope).toBeLessThanOrEqual(
+        8e-16 * Math.max(Math.abs(w), Math.abs(x) * slope),
+      );
     }
   });
 });
