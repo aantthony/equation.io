@@ -1667,3 +1667,32 @@ error." under a reply that claims success over an error). Its 46% run doesn't
 argue against it: it fired in 14 of 480 runs, none of which passed with or
 without it, so that drop was in runs it never touched. Not re-measured on its
 own; the next step's run has it on.
+
+### The chart's circle in prose, reverted
+
+`07738b7`: the chart's implicit2d line named circle without numbers, "the
+function circle, given a centre point and a radius, draws one too", since
+both numbered examples were copied whole. The error follow-up is on.
+Instructions 1,558 tokens.
+
+`results/2026-10-10T071451Z-on-device.json`, sampled, 10 runs a task:
+**43% ±4% (208/480)**, against 49% ±5% (233/480) for `circle((2, 1), 3)`
+without the follow-up (`050225Z`) and 46% ±4% (223/480) with it (`060158Z`,
+the better-matched baseline). Named-shape tasks 48 (52, 56), circle tasks
+**0 of 20** (14, 11), the other 36 tasks 160 (167, 156).
+
+- The model never wrote `circle(` again. circle-at-point 6 → 0:
+  `x^2 + y^2 = 16` 6 times ("centred at the origin with radius 4, shown at
+  (4, 1)"), `x^2/9 + y^2/4 = 1` twice. circle-off-origin 5 → 0:
+  `x^2 + (y - 1)^2 = 4` 7 times (y shifted, x not) and `x^2 + y^2 = 4` 3
+  times, each replying "centred at (-3, 1)".
+- circle-and-line 0 → 5: `x^2 + y^2 = 4` again, with no example to copy.
+- cardioid 9 → 1 (unrelated to the chart; noise or a knock-on).
+- The follow-up fired in 24 runs (solid-of-revolution 5, piecewise 5, …),
+  left no error in 7, and turned one into a pass (lissajous: `p` undefined,
+  fixed by putting numbers in).
+
+Verdict: worse, so reverted. Without a written instance the model doesn't
+use circle() at all, and it can't shift x^2 + y^2 = r^2 to a centre by
+itself; with one, it copies the instance's numbers. The numbered example
+stays (`circle((2, 1), 3)`), the better of the two measured.
