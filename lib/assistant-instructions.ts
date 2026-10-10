@@ -33,7 +33,7 @@ Any graph:
 2D (in a 3D graph, ineq2d, scalar2d and vfield2d are not drawn):
 - point: (1, 2); named, draggable: A = (1, 2)
 - label: label((1, 2), "text")
-- implicit2d, an equation in x and y: x + y = 1; the function circle, given a centre point and a radius, draws one too
+- implicit2d, an equation in x and y: x + y = 1; circle((2, 1), 3) is one too
 - ineq2d, an inequality in x and y: y > x + 1
 - pcurve: (u, u^2)
 - pregion: (u, v u)
