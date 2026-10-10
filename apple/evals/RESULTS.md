@@ -1617,3 +1617,44 @@ Verdict: kept, as not worse (+3 runs, within noise), but a close call that
 moves the copying rather than ending it: whatever circle the chart shows is
 copied whole when a request is near it. An example whose numbers are visibly
 placeholders, or no circle example, is the alternative to measure.
+
+### One follow-up about errors, reverted (close; flagged)
+
+`e1414dd`: after a reply, if any row has an error, the same session gets one
+more message naming each such row and its error, and asking for a fix with
+set_graph; if an error is left, the app shows "The graph still has an error."
+under the reply. Errors only, not warnings: an unused definition can be meant
+(a slider before its use), and RowStatus, what the app sees, carries no
+warnings. The logic and text are `ChatModel.followUp` in Assistant.swift,
+used by Chat.swift and the runner's on-device model (the OpenAI path does
+not use it); the 12-call cap covers both requests, because the session's
+tools share one budget. Results record `followUp: {message, fixed}`, and
+report.ts counts them.
+
+`results/2026-10-10T060158Z-on-device.json`, sampled, 10 runs a task, against
+the chart run (`2026-10-10T050225Z`): **49% ±5% (233/480) → 46% ±4%
+(223/480)**; named-shape tasks 52 → 56, circle tasks 14 → 11, the other 36
+tasks 167 → 156.
+
+- The follow-up was sent in only **14 of 480 runs**: few runs end with an
+  error, most failures being well-formed wrong rows. It left no error in 3,
+  and **none of the 14 passed** (each failed before it too, so it can't have
+  cost a pass). Unchanged runs were the other 466, so the 10-run drop is
+  run-to-run noise there (zoom-out 4 → 0, label-crossing 3 → 0 never saw a
+  follow-up).
+- An exchange: unit-cube wrote `x ∈ [0, 1], y ∈ [0, 1], z ∈ [0, 1]`; the
+  follow-up said "Row 2, `x ∈ [0, 1], y ∈ [0, 1], z ∈ [0, 1]`: x is taken by
+  the language, so it cannot be drawn: … Draw with another name, like
+  p ∈ A. Fix it with set_graph, then reply."; the model set
+  `A = (0, 0, 0), p ∈ [0, 1]` and replied "I drew a point and a row with
+  repeated bounds, but the graph still shows errors." Fixed: vector-field
+  (`vfield2d` as a row, fixed by defining it, but the field is (y, x)),
+  vector-field-slider, tangent-slider, each by removing the broken row.
+- Replies after the follow-up were honest about the remaining error in 4 of
+  the 11 left broken; 7 still said "I fixed …".
+
+Verdict: measured worse overall, so reverted as agreed, but flagged: the
+loss is in runs the change never touched, and it rescued no task. What it
+would add is the app's note under a reply that claims success over an error,
+which the evals don't score. It is worth keeping for the app on that ground
+alone (re-apply with `git revert` of this revert), and not for the score.
