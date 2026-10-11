@@ -12,7 +12,7 @@ it('tools/list is frozen while the ChatGPT review is pending', async () => {
   const url = 'https://equation.io/mcp';
   const request = new Request(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
   });
   const res = await handleMcp(request, new URL(url), {} as Env);

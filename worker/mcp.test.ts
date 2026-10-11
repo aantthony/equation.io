@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import Ajv from 'ajv';
+import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/server';
 import { handleMcp } from './mcp.ts';
 import { GRAPH_UI_URI } from './mcp-app.ts';
 import { clientName } from './mcp-usage.ts';
@@ -7,6 +8,8 @@ import { DISTRIBUTION_MCP_KINDS, PUBLIC_KIND_ROWS } from './typed-values.fixture
 import plugin from '../plugin/plugin.json' with { type: 'json' };
 
 const URL_BASE = 'https://equation.io/mcp';
+// What a Streamable HTTP client sends with every POST; the SDK refuses requests without it.
+const MCP_HEADERS = { 'content-type': 'application/json', accept: 'application/json, text/event-stream' };
 const ajv = new Ajv({ strict: true });
 const outputValidators = new Map<string, ReturnType<typeof ajv.compile>>();
 
@@ -30,16 +33,16 @@ const env = {
   },
 } as unknown as Env;
 
-async function rpc(method: string, params?: object, id: number | null = 1) {
+async function rpc(method: string, params?: object, id = 1) {
   const request = new Request(URL_BASE, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: MCP_HEADERS,
     body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
   });
   const res = await handleMcp(request, new URL(URL_BASE), env);
   const body = (res.status === 202 ? null : await res.json()) as any;
   // Validate real outputs throughout this suite, including invalid equations,
-  // device-local data, animation, preview omissions, and compatibility aliases.
+  // device-local data, animation, and preview omissions.
   if (method === 'tools/call' && body.result?.structuredContent) {
     if (!outputValidators.size) {
       const listed = await rpc('tools/list');
@@ -48,13 +51,14 @@ async function rpc(method: string, params?: object, id: number | null = 1) {
         outputValidators.set(tool.name, ajv.compile(tool.outputSchema));
       }
     }
-    const name = (params as { name: string }).name;
-    const canonical = name === 'create_graph' ? 'encode_graph_url' : name === 'read_graph' ? 'decode_graph_url' : name;
-    const validate = outputValidators.get(canonical)!;
+    const validate = outputValidators.get((params as { name: string }).name)!;
     expect(validate(body.result.structuredContent), JSON.stringify(validate.errors)).toBe(true);
   }
   return { res, body };
 }
+
+const initialize = (protocolVersion: string) =>
+  rpc('initialize', { protocolVersion, capabilities: {}, clientInfo: { name: 'test', version: '0' } });
 
 describe('mcp endpoint', () => {
   it.each(Object.entries(PUBLIC_KIND_ROWS))('preserves the %s kind at the MCP boundary', async (kind, equations) => {
@@ -97,11 +101,7 @@ describe('mcp endpoint', () => {
   });
 
   it('initializes with a supported protocol version', async () => {
-    const { body } = await rpc('initialize', {
-      protocolVersion: '2025-06-18',
-      capabilities: {},
-      clientInfo: { name: 'test', version: '0' },
-    });
+    const { body } = await initialize('2025-06-18');
     expect(body.result.protocolVersion).toBe('2025-06-18');
     expect(body.result.capabilities.tools).toBeDefined();
     expect(body.result.serverInfo.name).toBe('equation');
@@ -109,7 +109,7 @@ describe('mcp endpoint', () => {
 
   it('matches the plugin package uploaded to the OpenAI Plugins dashboard', async () => {
     const { interface: listing, review } = plugin.extensions['com.openai'];
-    const init = await rpc('initialize', { protocolVersion: '2025-06-18' });
+    const init = await initialize('2025-06-18');
     expect(init.body.result.serverInfo.title).toBe(listing.displayName);
     // Submission limits the dashboard enforces only after upload.
     expect(listing.displayName.length).toBeLessThanOrEqual(30);
@@ -142,18 +142,14 @@ describe('mcp endpoint', () => {
   });
 
   it('falls back to its latest version for unknown requested versions', async () => {
-    const { body } = await rpc('initialize', { protocolVersion: '9999-01-01' });
-    expect(body.result.protocolVersion).toBe('2025-06-18');
-  });
-
-  it('answers requests with id: null (only an ABSENT id is a notification)', async () => {
-    const { body } = await rpc('ping', undefined, null);
-    expect(body).toEqual({ jsonrpc: '2.0', id: null, result: {} });
+    const { body } = await initialize('9999-01-01');
+    expect(body.result.protocolVersion).toBe(LATEST_PROTOCOL_VERSION);
   });
 
   it('accepts notifications with a 202 and no body', async () => {
     const request = new Request(URL_BASE, {
       method: 'POST',
+      headers: MCP_HEADERS,
       body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
     });
     const res = await handleMcp(request, new URL(URL_BASE), env);
@@ -179,15 +175,6 @@ describe('mcp endpoint', () => {
         idempotentHint: true,
       });
     }
-  });
-
-  it.each([
-    ['encode_graph_url', 'create_graph', { equations: ['y = x'] }],
-    ['decode_graph_url', 'read_graph', { url: 'https://equation.io/#y=x' }],
-  ])('keeps %s compatible with %s', async (name, legacyName, args) => {
-    const current = await rpc('tools/call', { name, arguments: args });
-    const legacy = await rpc('tools/call', { name: legacyName, arguments: args });
-    expect(legacy.body.result).toEqual(current.body.result);
   });
 
   it('creates a validated graph link (tangent-line editing example)', async () => {
@@ -808,7 +795,7 @@ describe('viewport rows', () => {
 
 describe('syntax resource', () => {
   it('declares the resources capability and lists the syntax resource', async () => {
-    const { body: init } = await rpc('initialize', { protocolVersion: '2025-06-18' });
+    const { body: init } = await initialize('2025-06-18');
     expect(init.result.capabilities.resources).toBeDefined();
     const { body } = await rpc('resources/list');
     expect(body.result.resources).toHaveLength(2);
@@ -856,6 +843,7 @@ describe('syntax resource', () => {
   it('reports missing UI assets instead of returning the website fallback as a widget', async () => {
     const request = new Request(URL_BASE, {
       method: 'POST',
+      headers: MCP_HEADERS,
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
@@ -870,10 +858,10 @@ describe('syntax resource', () => {
     });
   });
 
-  it('names the valid uri when asked for an unknown one', async () => {
+  it('names the unknown uri it was asked for', async () => {
     const { body } = await rpc('resources/read', { uri: 'https://equation.io/nope' });
-    expect(body.error.code).toBe(-32002);
-    expect(body.error.message).toContain('https://equation.io/llms.txt');
+    expect(body.error.code).toBe(-32602);
+    expect(body.error.data).toEqual({ uri: 'https://equation.io/nope' });
   });
 
   it('keeps tool descriptions short enough to survive client truncation', async () => {
@@ -908,10 +896,10 @@ describe('usage counts', () => {
     for (const text of ['sin', 'cos', 'a = 2', 'florb']) expect(stored).not.toContain(text);
   });
 
-  it('counts former tool names as the tools they became, and rejected calls as failed', async () => {
+  it('counts rejected calls as failed, and unknown tools not at all', async () => {
     usage.length = 0;
-    await call('create_graph', { equations: ['y = x'] });
-    await call('read_graph', { url: 'https://equation.io/g/y%3Dx;y%3D2x' });
+    await call('encode_graph_url', { equations: ['y = x'] });
+    await call('decode_graph_url', { url: 'https://equation.io/g/y%3Dx;y%3D2x' });
     await call('encode_graph_url', { rows: ['y = x'] });
     await call('no_such_tool', {});
     expect(points().filter(p => p.blobs![0] === 'call')).toEqual([
@@ -930,11 +918,7 @@ describe('usage counts', () => {
       method: 'tools/call',
       params: { name: 'encode_graph_url', arguments: { equations: ['y = x'] } },
     });
-    const res = await handleMcp(
-      new Request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body }),
-      new URL(url),
-      env,
-    );
+    const res = await handleMcp(new Request(url, { method: 'POST', headers: MCP_HEADERS, body }), new URL(url), env);
     expect(res.status).toBe(200);
     expect(usage).toEqual([]);
   });
