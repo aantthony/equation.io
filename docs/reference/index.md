@@ -50,13 +50,6 @@ nothing themselves.
 - solid
 - spacecurve
 
-## Curvature and spacetime
-
-- geodesic
-- metric
-- lightcone
-- tidal
-
 ## Fields
 
 - vfield2d
@@ -109,3 +102,10 @@ nothing themselves.
 - action
 - graph
 - lattice
+
+## Curvature and spacetime (brief)
+
+- geodesic
+- metric
+- lightcone
+- tidal

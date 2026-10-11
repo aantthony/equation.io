@@ -118,6 +118,7 @@ export function describeRow(
             camera: 'sets the 3D camera',
             grid: "sets what draws behind its panel's plots",
             split: 'starts a new panel; the rows below it draw there',
+            surface: "draws its panel's 2D rows on a surface in space",
           }[eq.view.kind]
         : eq.dist
           ? row.kind

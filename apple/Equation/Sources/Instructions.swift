@@ -16,7 +16,7 @@ extension ChatModel {
     - Polar r = f(theta): never a bare "r = …" row (alone, it defines a constant r and draws nothing). Write it with theta = 2pi u: (f(2pi u) cos(2pi u), f(2pi u) sin(2pi u)), which also draws where r is negative.
     - t is time in seconds and makes things move: "y = sin(x - t)".
     - Use ^ for powers; "2x" and "a sin(x)" multiply. Color a row by ending it with a hex color: "y = x^2 #e24". Labels: label((2, 4), "text").
-    - Don't name anything i, e, pi, tau or d: they are taken.
+    - Don't name anything i, e, pi or d: they are taken.
 
     A shape with a well-known equation (circle, ellipse, sphere, cone, hyperboloid, paraboloid) is simplest written as that equation, an implicit curve or surface: an ellipse is x^2/9 + y^2/4 = 1. Use a parametric form only when asked for one, or when the shape has no equation.
     For a named curve or surface, call shape with its name first, then draw its form, adapted to the request, with set_graph.
@@ -56,6 +56,7 @@ extension ChatModel {
     - Complex functions: complex function, domain colouring, conformal map, escape-time fractal
     - Colour fields: RGB colour field, HSL colour field, OKLCH colour field
     - Algebra: matrix field, multivector, line or plane, matrix action, graph (network), table
+    - Curvature and spacetime: geodesic, metric, light cone, tidal forces
 
     Changing the graph:
     - set_graph replaces the graph: pass the COMPLETE list of rows. Change the row a request is about rather than adding a near copy, and keep every other row exactly as it was. "Make it move" turns y = sin(x) into y = sin(x - t); "a slider for the amplitude" turns it into A = 1 and y = A sin(x).
@@ -82,7 +83,7 @@ extension ChatModel {
     - Polar r = f(theta): never a bare "r = …" row (alone, it defines a constant r and draws nothing). Write it with theta = 2pi u: (f(2pi u) cos(2pi u), f(2pi u) sin(2pi u)), which also draws where r is negative.
     - t is time in seconds and makes things move: "y = sin(x - t)".
     - Use ^ for powers; "2x" and "a sin(x)" multiply. Color a row by ending it with a hex color: "y = x^2 #e24". Labels: label((2, 4), "text").
-    - Don't name anything i, e, pi, tau or d: they are taken.
+    - Don't name anything i, e, pi or d: they are taken.
 
     What to write: the reference after these instructions documents the language, with a section on each kind of row (its forms, examples and pitfalls). For any other shape, find the section on the kind you need and adapt an example. Never invent a function; "surface(…)" and "plot(…)" do not exist.
 

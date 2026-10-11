@@ -105,7 +105,7 @@ const lines: Part[][] = [
       voice:
         '- Colors: end a row with a hex color, e.g. "y = x^2 #e24" or "y = 2x #1f77b4 tangent" (no space after the #). Use color to connect ideas (a curve and its label in the same color) or to contrast (the original in grey #999, the new one bright). Rows without one take the palette.',
     },
-    "- Don't name anything i, e, pi, tau or d: they are taken.",
+    "- Don't name anything i, e, pi or d: they are taken.",
   ],
   [
     {

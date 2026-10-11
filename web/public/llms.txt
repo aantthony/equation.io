@@ -802,13 +802,6 @@ Readouts and families:
 - Parametric solid (`solid`): `(interval(0, 1), interval(0, 2), interval(0, 3))` — solid in 3D filled by three parameters or intervals
 - Curve of intersection (`spacecurve`): `(x^2 + y^2 + z^2, z) = (9, 1)` — 3D curve where two surfaces meet
 
-Curvature and spacetime:
-
-- Geodesic (`geodesic`): `S = (cos(u), sin(u), v); geodesic(S, (0, 0.5), (1, 1))` — straightest path on a surface, or under a ds² metric
-- Metric (`metric`): `ds^2 = (dx^2 + dy^2)/y^2` — a panel's own ds² metric; draws nothing
-- Light cone (`lightcone`): `ds^2 = -dy^2 + dx^2; lightcones` — light cones of the panel's ds² metric
-- Tidal forces (`tidal`): `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; tidal` — tidal stretch and squeeze of the panel's ds² metric
-
 Fields:
 
 - Vector field (`vfield2d`): `(x, -y)` — 2D vector field, as streamlines
@@ -861,6 +854,13 @@ Algebra:
 - Matrix action (`action`): `action(((1, 1), (0, 1)))` — what a matrix does to the unit square
 - Graph (network) (`graph`): `k = [0..5]; graph(k, mod(k + 1, 6))` — node-link graph of (from, to) edges
 - Table (`lattice`): `T[i, j] = {i > 0: {j > 0: gcd(i, j)}}` — table of values on the integer lattice
+
+Curvature and spacetime:
+
+- Geodesic (`geodesic`): `S = (cos(u), sin(u), v); geodesic(S, (0, 0.5), (1, 1))` — straightest path on a surface, or under a ds² metric
+- Metric (`metric`): `ds^2 = (dx^2 + dy^2)/y^2` — a panel's own ds² metric; draws nothing
+- Light cone (`lightcone`): `ds^2 = -dy^2 + dx^2; lightcones` — light cones of the panel's ds² metric
+- Tidal forces (`tidal`): `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; tidal` — tidal stretch and squeeze of the panel's ds² metric
 
 ### Curve (`implicit2d`)
 
@@ -1539,98 +1539,6 @@ Details:
   follows the Jacobian null space, with at most 24 branches and 512 steps
   per direction. Singularities stop a trace; tiny or isolated branches may
   be missed. This numerical tracing does not certify branch completeness.
-
-### Geodesic (`geodesic`)
-
-A geodesic from a start point in a direction: integrated along a parametric
-surface, or in the plane under its panel's `ds^2` metric (a massive
-particle's path in a spacetime, or a light ray from `lightray(…)`).
-
-Forms:
-
-- `geodesic(S, (u0, v0), (du, dv))` on a surface S, with an optional length.
-- `geodesic(P, (dx, dy))` and `lightray(P, (dx, dy))` in a panel with a
-  `ds^2` row (Metric), or on an `on(…)` panel.
-
-Examples:
-
-- Helix on a cylinder: `S = (cos(u), sin(u), v); geodesic(S, (0, 0.5), (1, 1))`
-- Great circle on a sphere: `S = (cos(v) cos(u), cos(v) sin(u), sin(v)); geodesic(S, (0, 0), (1, 1))`
-- Poincaré half-plane: `ds^2 = (dx^2 + dy^2)/y^2; geodesic((0, 1), (1, 0))` — the unit circle
-- Orbit round a black hole: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; geodesic((10, 0), (0, sqrt(1/10)))` — a circular orbit
-- Bent light: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; lightray((-30, 6), (1, 0))` — passes the hole, bent
-
-Details:
-
-See Surfaces and Metrics, under Syntax.
-
-### Metric (`metric`)
-
-A panel's own metric, `ds^2 = …` in the differentials of its coordinates. It
-draws nothing; geodesic, light cone and
-tidal rows in the panel follow it, and `gaussian(x, y)` paints its
-curvature.
-
-Examples:
-
-- Poincaré half-plane: `ds^2 = (dx^2 + dy^2)/y^2`
-- Schwarzschild, equatorial: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2`
-- Minkowski spacetime diagram: `ds^2 = -dy^2 + dx^2` — y up as time
-
-Pitfalls:
-
-- Define the coordinates first: `dr` and `dphi` with no `r = …` and
-  `phi = …` rows are refused.
-- One `ds^2` row a panel; a metric using t is refused (time-dependent
-  metrics are not supported yet).
-
-Details:
-
-See Metrics, under Syntax.
-
-### Light cone (`lightcone`)
-
-Light cones of the panel's `ds^2` metric (Metric): `lightcones`
-draws them over the panel, `lightcone(P)` one at a point. On a spacetime
-diagram each is the two null directions, a wedge opening to the future; with
-a time beside x and y, the ellipse of the coordinate velocities light can
-have.
-
-Examples:
-
-- Minkowski: `ds^2 = -dy^2 + dx^2; lightcones`
-- Closing up at a horizon: `M = 1; ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x); lightcones`
-- One cone at a point: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; P = (4, 0); lightcone(P)`
-
-Pitfalls:
-
-- Refused with no metric, or a Riemannian one.
-
-Details:
-
-See Light cones, under Syntax.
-
-### Tidal forces (`tidal`)
-
-Tidal forces of the panel's `ds^2` metric (Metric) on an observer
-held at rest: `tidal` draws them over the panel, `tidal(P)` at a point —
-crossed bars along the directions a small cloud of free particles is
-stretched (arrowheads out) or squeezed (arrowheads in), as long as the tide
-is strong.
-
-Examples:
-
-- Round a black hole: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; tidal`
-- At a point: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; P = (5, 0); tidal(P)`
-
-Pitfalls:
-
-- Refused with no metric, or a Riemannian one: tidal forces need a time, so
-  write the ds² with a dt term.
-
-Details:
-
-See Tidal forces, under Syntax.
 
 ### Vector field (`vfield2d`)
 
@@ -2590,6 +2498,98 @@ Details:
   edges are numbered by index (whole numbers only), and zoomed in far enough
   each cell prints its value. `view(i = -60..60, n = 0..80)` frames one by
   its index names, in either order; panning rewrites it in those names.
+
+### Geodesic (`geodesic`)
+
+A geodesic from a start point in a direction: integrated along a parametric
+surface, or in the plane under its panel's `ds^2` metric (a massive
+particle's path in a spacetime, or a light ray from `lightray(…)`).
+
+Forms:
+
+- `geodesic(S, (u0, v0), (du, dv))` on a surface S, with an optional length.
+- `geodesic(P, (dx, dy))` and `lightray(P, (dx, dy))` in a panel with a
+  `ds^2` row (Metric), or on an `on(…)` panel.
+
+Examples:
+
+- Helix on a cylinder: `S = (cos(u), sin(u), v); geodesic(S, (0, 0.5), (1, 1))`
+- Great circle on a sphere: `S = (cos(v) cos(u), cos(v) sin(u), sin(v)); geodesic(S, (0, 0), (1, 1))`
+- Poincaré half-plane: `ds^2 = (dx^2 + dy^2)/y^2; geodesic((0, 1), (1, 0))` — the unit circle
+- Orbit round a black hole: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; geodesic((10, 0), (0, sqrt(1/10)))` — a circular orbit
+- Bent light: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; lightray((-30, 6), (1, 0))` — passes the hole, bent
+
+Details:
+
+See Surfaces and Metrics, under Syntax.
+
+### Metric (`metric`)
+
+A panel's own metric, `ds^2 = …` in the differentials of its coordinates. It
+draws nothing; geodesic, light cone and
+tidal rows in the panel follow it, and `gaussian(x, y)` paints its
+curvature.
+
+Examples:
+
+- Poincaré half-plane: `ds^2 = (dx^2 + dy^2)/y^2`
+- Schwarzschild, equatorial: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2`
+- Minkowski spacetime diagram: `ds^2 = -dy^2 + dx^2` — y up as time
+
+Pitfalls:
+
+- Define the coordinates first: `dr` and `dphi` with no `r = …` and
+  `phi = …` rows are refused.
+- One `ds^2` row a panel; a metric using t is refused (time-dependent
+  metrics are not supported yet).
+
+Details:
+
+See Metrics, under Syntax.
+
+### Light cone (`lightcone`)
+
+Light cones of the panel's `ds^2` metric (Metric): `lightcones`
+draws them over the panel, `lightcone(P)` one at a point. On a spacetime
+diagram each is the two null directions, a wedge opening to the future; with
+a time beside x and y, the ellipse of the coordinate velocities light can
+have.
+
+Examples:
+
+- Minkowski: `ds^2 = -dy^2 + dx^2; lightcones`
+- Closing up at a horizon: `M = 1; ds^2 = -(1 - 2M/x) dy^2 + dx^2/(1 - 2M/x); lightcones`
+- One cone at a point: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; P = (4, 0); lightcone(P)`
+
+Pitfalls:
+
+- Refused with no metric, or a Riemannian one.
+
+Details:
+
+See Light cones, under Syntax.
+
+### Tidal forces (`tidal`)
+
+Tidal forces of the panel's `ds^2` metric (Metric) on an observer
+held at rest: `tidal` draws them over the panel, `tidal(P)` at a point —
+crossed bars along the directions a small cloud of free particles is
+stretched (arrowheads out) or squeezed (arrowheads in), as long as the tide
+is strong.
+
+Examples:
+
+- Round a black hole: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; tidal`
+- At a point: `M = 1; r = sqrt(x^2 + y^2); phi = atan2(y, x); ds^2 = -(1 - 2M/r) dt^2 + dr^2/(1 - 2M/r) + r^2 dphi^2; P = (5, 0); tidal(P)`
+
+Pitfalls:
+
+- Refused with no metric, or a Riemannian one: tidal forces need a time, so
+  write the ds² with a dt term.
+
+Details:
+
+See Tidal forces, under Syntax.
 
 ## Definitions (extra rows that set up the others)
 
