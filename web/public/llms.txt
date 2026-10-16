@@ -1282,7 +1282,11 @@ or link-only requests. Clients without MCP Apps support can open share_url.
   number, `pi` is π, and `d` is the derivative operator. `u` and `v` are
   the curve/surface parameters: they can't be numbers either, but they can
   be redefined as another interval (`u = interval(0, 2pi)`; the default is
-  `interval(0, 1)`). Pick any other name for your own numbers:
+  `interval(0, 1)`). None of these can name a function either: a reserved
+  name followed by `(…)` multiplies, so `x(y - 1) = 1` is x·(y − 1) = 1,
+  and `u(x, y) = x^2 + y^2` is u times a point ("u(x, y) reads as u times
+  (x, y)"). Name your own functions f, g, h or a word, write
+  `f(x, y) = …` and call f. Pick any other name for your own numbers:
   - Don't: `t = 3` then `(cos(2pi u), sin(2pi t u))` — t is time, so
     `t = 3` is rejected ("t is reserved for time") and the curve would keep
     changing as t counts up.

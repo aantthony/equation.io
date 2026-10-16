@@ -78,6 +78,24 @@ describe('mcp endpoint', () => {
     expect(rows[2]).toMatchObject({ status: 'ok' });
   });
 
+  it('explains a function named after a reserved variable instead of a point/number mismatch', async () => {
+    const { body } = await rpc('tools/call', {
+      name: 'encode_graph_url',
+      arguments: { equations: ['u(x,y) = x^2 + y^2', 'w(x,y) = x + y', 'f(x,y) = x^2 + y^2', 'y = sin(x)'] },
+    });
+    const rows = body.result.structuredContent.rows;
+    expect(rows[0]).toMatchObject({
+      status: 'error',
+      error: expect.stringMatching(/^u\(x,y\) reads as u times \(x,y\).*f\(x,y\) = /),
+    });
+    expect(rows[1]).toMatchObject({
+      status: 'error',
+      error: expect.stringMatching(/w is the complex variable/),
+    });
+    expect(rows[2]).toMatchObject({ status: 'ok' });
+    expect(rows[3]).toMatchObject({ status: 'ok' });
+  });
+
   it('initializes with a supported protocol version', async () => {
     const { body } = await rpc('initialize', {
       protocolVersion: '2025-06-18',

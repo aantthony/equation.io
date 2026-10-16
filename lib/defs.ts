@@ -892,6 +892,34 @@ export function takenDefinitionName(text: string): 'd' | 'e' | 'pi' | 'i' | null
   return n === 'd' || n === 'e' || n === 'pi' || n === 'i' ? n : null;
 }
 
+/** What each name a function row cannot claim already means. */
+const RESERVED_FN_MEANING: Record<string, string> = {
+  x: 'a plot axis',
+  y: 'a plot axis',
+  z: 'a plot axis',
+  t: 'animation time',
+  u: 'a curve/surface parameter',
+  v: 'a curve/surface parameter, like u',
+  w: 'the complex variable x + iy',
+};
+
+/**
+ * Why a row shaped like a function definition on a reserved name failed:
+ * `u(x, y) = x^2 + y^2` is not a definition (u is a parameter), so the
+ * parser reads u·(x, y) and reports "One side is a point and the other is a
+ * number". AI assistants reach for u, v and w as helper names. The product
+ * reading is legitimate — `x(y - 1) = 1` is x·(y − 1) = 1 — so the hint
+ * states that reading rather than assuming a definition was meant, and is
+ * only consulted for a row that already failed: no working graph changes.
+ */
+export function reservedFnHint(text: string): string | null {
+  const m = FN_RE.exec(text);
+  const n = m && canonicalName(m[1]);
+  if (!n || !(n in RESERVED_FN_MEANING)) return null;
+  const args = m![2];
+  return `${n}(${args}) reads as ${n} times (${args}), since ${n} is ${RESERVED_FN_MEANING[n]}. To define a function, use another name, like f(${args}) = …`;
+}
+
 /** Why a name from takenDefinitionName (other than `d`) names no value. */
 export function takenNameHint(name: string): string {
   return name === 'i'

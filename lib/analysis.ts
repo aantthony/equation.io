@@ -25,6 +25,7 @@ import {
   takenBinder,
   takenDefinitionName,
   takenNameHint,
+  reservedFnHint,
   timeDifferentiator,
   type Definition,
   type TableSource,
@@ -1688,7 +1689,7 @@ export function analyzePrepared(document: PreparedDocument, context: AnalysisCon
         row.dataLocal = e.message;
         row.needsFile = true;
       } else {
-        row.error = e instanceof Error ? e.message : String(e);
+        row.error = reservedFnHint(row.text) ?? (e instanceof Error ? e.message : String(e));
         // `i = [0..239]` fails as a claim about i (too many members); the
         // author meant a definition, so say why it is not one.
         const taken = takenDefinitionName(row.text);
