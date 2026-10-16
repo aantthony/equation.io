@@ -1986,21 +1986,23 @@ function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
     });
     return withAxes<Expr>({ kind: 'list', items }, namedAxes(name, seq));
   }
-  // A bound that uses an open name (the sequence index) cannot be expanded
-  // here: the sum stays a call and evaluate() runs it once that name is a number.
+  // A bound that uses an open name (the sequence index, or a function's
+  // parameter) cannot be expanded here: the sum stays a call and evaluate() runs it once that name is a number.
   const bound = (b: Expr): { expr: Expr; value?: number } => {
     const r = rx(b, ctx);
     const env: Record<string, number> = {};
     let open = false;
     for (const fv of freeVars(r)) {
+      // A function's parameter is its argument, never the document's name of
+      // the same spelling: the bound stays open until the call substitutes it.
+      if (ctx.opts.params?.has(fv) || ctx.opts.openVars?.has(fv)) {
+        open = true;
+        continue;
+      }
       const v = ctx.opts.consts?.[fv];
       if (v !== undefined) {
         ctx.opts.boundConsts?.add(fv);
         env[fv] = v;
-        continue;
-      }
-      if (ctx.opts.openVars?.has(fv)) {
-        open = true;
         continue;
       }
       if (fv === 't' || RESERVED.has(fv)) throw new Error(`${sym} bounds cannot depend on ${fv}.`);
@@ -2041,6 +2043,21 @@ function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
     acc = acc === null ? term : combine(acc, term);
   }
   return acc ?? num(header.name === 'sum' ? 0 : 1);
+}
+
+/**
+ * Expand the Σ/Π a function's body left open on its parameters, now that a
+ * call has substituted its arguments: `f(N) = sum(k=1..N, k)` keeps the sum a
+ * call (expandSum), and `f(100)` expands it to 100. A bound still open here —
+ * on an enclosing function's parameter or a sequence index — waits as before.
+ */
+function expandClosedSums(e: Expr, ctx: Ctx): Expr {
+  if (e.kind === 'call' && (e.name === 'sum' || e.name === 'prod') && e.args.length === 4) {
+    const open = (b: Expr) => [...freeVars(b)].some(v => ctx.opts.params?.has(v) || ctx.opts.openVars?.has(v));
+    if (open(e.args[1]) || open(e.args[2])) return e;
+    return expandSum(e as SumCall, e.args[3], ctx);
+  }
+  return mapChildren(e, x => expandClosedSums(x, ctx));
 }
 
 /**
@@ -2876,7 +2893,7 @@ function rx(e: Expr, ctx: Ctx): Expr {
           }
           const comp = (k: number): Expr =>
             arg.kind === 'vec' ? arg.items[k] : { kind: 'comp', value: arg, index: k, arity: n, functionName: e.name };
-          return substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, comp(k)])));
+          return expandClosedSums(substVars(fn.body, Object.fromEntries(fn.params.map((p, k) => [p, comp(k)]))), ctx);
         }
         if (args.length !== n) {
           throw new Error(`${e.name} takes ${n} argument${n === 1 ? '' : 's'}.`);
@@ -2912,10 +2929,13 @@ function rx(e: Expr, ctx: Ctx): Expr {
           });
           return { kind: 'call', name: MAP, args: [{ kind: 'str', value: e.name }, substVars(fn.body, env), ...pairs] };
         }
-        const inlined = substVars(fn.body, {
-          ...Object.fromEntries(fn.params.map((p, k) => [p, args[k]])),
-          ...coordParams(fn, args, e.name, ctx.opts),
-        });
+        const inlined = expandClosedSums(
+          substVars(fn.body, {
+            ...Object.fromEntries(fn.params.map((p, k) => [p, args[k]])),
+            ...coordParams(fn, args, e.name, ctx.opts),
+          }),
+          ctx,
+        );
         // The body's named conditions, now that its parameters are its
         // arguments and cannot capture their variables (namedCondition). In
         // another function's body they wait for that function's call.

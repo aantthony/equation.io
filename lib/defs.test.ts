@@ -223,6 +223,19 @@ describe('Σ sums and Π products', () => {
     expect(evaluate(e, { x: 7 })).toBe(0);
   });
 
+  it('bounds a sum in a function body by its parameter, not a constant of that name', () => {
+    const rhs = (rows: string[], env: Record<string, number> = {}) => {
+      const row = analyzeRows(rows).rows.at(-1)!;
+      expect(row.error).toBeUndefined();
+      const object = row.cls?.object;
+      return object?.kind === 'curve' ? evaluate(object.rhs, env) : NaN;
+    };
+    expect(rhs(['N = 3', 'f(N) = sum(k=1..N, k)', 'y = f(100)'])).toBe(5050);
+    expect(rhs(['N = 3', 'f(N) = sum(k=1..N, k)', 'y = f(2)'])).toBe(3);
+    expect(rhs(['f(N) = prod(k=1..N, k)', 'y = f(4)'])).toBe(24);
+    expect(rhs(['N = 3', 'g(M) = sum(k=1..M, k N)', 'y = g(2)'], { N: 3 })).toBe(9);
+  });
+
   it('leaves a sum open when its bound is an open variable', () => {
     const e = resolveExpr(parseExpr('Σ(s=1..n, s)'), noFns, { openVars: new Set(['n']) });
     expect(e).toMatchObject({ kind: 'call', name: 'sum' });
