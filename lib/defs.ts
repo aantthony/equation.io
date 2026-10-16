@@ -57,6 +57,7 @@ import {
 import { HASH_TOKEN_LEN, shortHash } from './hash.ts';
 import { hasInterval, hiddenInterval, intervalsIn, replaceIntervals } from './interval.ts';
 import { isReductionCall, reduceOverSet } from './measure.ts';
+import { fourierSeries } from './glsl.ts';
 import { QUAD_TERMS, antiderivative, improperSum, quadratureSum, verifyDefinite } from './integrate.ts';
 import type { IntShade, ResolvedRow } from './intshade.ts';
 import {
@@ -2043,58 +2044,72 @@ function expandSum(header: SumCall, body: Expr, ctx: Ctx): Expr {
 }
 
 /**
- * A Σ/Π up to a clamped slider, `N = round(clamp(19, 1, 50))`, expands to the
- * slider's maximum, each term gated on `N >= k`. N is then
- * read at runtime rather than baked into the expansion (it never reaches the
- * consts proxy, so it stays off structuralConsts): a drag keeps the shader
- * and only moves a uniform, as reconstructSeries does for harmonics. Null
- * when the bound is anything else, or the full range is over the term limit
- * (the current value then expands as usual).
+ * A Σ up to a clamped whole-number slider, `N = round(clamp(19, 1, 50))`,
+ * whose terms form a sine/cosine series expands to the slider's maximum, each
+ * term gated on `N >= k`. N is then read at runtime rather than baked into
+ * the expansion (it never reaches the consts proxy, so it stays off
+ * structuralConsts): a drag keeps the shader and only moves a uniform, and
+ * glsl.ts's fourierLoop runs the series only up to N, as for reconstruct.
+ * Null for anything else — another bound or body, a range fourierLoop cannot
+ * loop over — which then expands at the current value as usual: gating a
+ * general body would evaluate every term up to the maximum at every N.
  */
 function sliderGated(header: SumCall, body: Expr, lo: number, ctx: Ctx): Expr | null {
   const [idxE, , hiE] = header.args;
-  if (idxE.kind !== 'var' || hiE.kind !== 'var') return null;
+  if (header.name !== 'sum' || idxE.kind !== 'var' || hiE.kind !== 'var') return null;
+  const name = hiE.name;
+  // A parameter or open index named like a slider is its own value.
+  if (ctx.opts.params?.has(name) || ctx.opts.openVars?.has(name)) return null;
   const consts = ctx.opts.consts;
   // `in`, not a read: the analysis proxy records reads as structural.
-  if (!consts || !(hiE.name in consts)) return null;
-  const range = clampRange(ctx.opts.definition?.(hiE.name));
+  if (!consts || !(name in consts)) return null;
+  const range = wholeClampRange(ctx.opts.definition?.(name));
   if (!range) return null;
   const start = Math.ceil(lo - 1e-9);
-  const end = Math.floor(range.hi + 1e-9);
-  const count = end - start + 1;
-  if (count > SUM_MAX_TERMS || ctx.terms + Math.max(count, 0) > SUM_MAX_TOTAL) return null;
-  ctx.terms += Math.max(count, 0);
-  ctx.opts.boundConsts?.add(hiE.name);
-  const isSum = header.name === 'sum';
-  const combine = isSum ? add : mul;
-  const unit = num(isSum ? 0 : 1);
+  const count = range.hi - start + 1;
+  if (start < 1 || count > SUM_MAX_TERMS || ctx.terms + count > SUM_MAX_TOTAL) return null;
   let acc: Expr | null = null;
-  for (let k = start; k <= end; k++) {
-    const term = foldNums(rx(substIdx(body, idxE.name, num(k)), ctx));
+  for (let k = start; k <= range.hi; k++) {
     // Even the terms the slider's minimum always keeps are gated: a uniform
-    // run of gates is the shape glsl.ts's fourierLoop turns into a loop.
+    // run of gates is the shape fourierLoop reads.
     const value: Expr = {
       kind: 'piecewise',
-      cases: [{ cond: { kind: 'ineq', op: '>=', l: hiE, r: num(k) }, value: term }],
-      otherwise: unit,
+      cases: [
+        {
+          cond: { kind: 'ineq', op: '>=', l: hiE, r: num(k) },
+          value: foldNums(rx(substIdx(body, idxE.name, num(k)), ctx)),
+        },
+      ],
+      otherwise: num(0),
     };
-    acc = acc === null ? value : combine(acc, value);
+    acc = acc === null ? value : add(acc, value);
   }
-  return acc ?? unit;
+  if (!acc || !fourierSeries(acc)) return null;
+  ctx.terms += count;
+  ctx.opts.boundConsts?.add(name);
+  return acc;
 }
 
-/** The finite [lo, hi] of a `clamp(v, lo, hi)` definition (min(max(v, lo), hi),
- *  optionally rounded), or null for any other definition. */
-function clampRange(definition: Expr | undefined): { lo: number; hi: number } | null {
+/** The whole-number [lo, hi] of a rounded clamp slider — round(clamp(v, lo,
+ *  hi)) or clamp(round(v), lo, hi), i.e. min(max(…)) with a round, floor or
+ *  ceil outside or around v and integer ends — or null. Its value is then
+ *  always a whole number in [lo, hi], so `N >= k` gates exactly. */
+function wholeClampRange(definition: Expr | undefined): { lo: number; hi: number } | null {
+  const isRounding = (e: Expr | undefined): e is Expr & { kind: 'call' } =>
+    e?.kind === 'call' && ['round', 'floor', 'ceil'].includes(e.name) && e.args.length === 1;
   let e = definition;
-  while (e?.kind === 'call' && ['round', 'floor', 'ceil'].includes(e.name) && e.args.length === 1) e = e.args[0];
+  let rounded = false;
+  while (isRounding(e)) {
+    rounded = true;
+    e = e.args[0];
+  }
   if (e?.kind !== 'call' || e.name !== 'min' || e.args.length !== 2) return null;
   const inside = e.args[0];
   if (inside.kind !== 'call' || inside.name !== 'max' || inside.args.length !== 2) return null;
   const [lo, hi] = [inside.args[1], e.args[1]];
-  if (lo.kind !== 'num' || hi.kind !== 'num' || !(hi.value > lo.value)) return null;
-  if (!Number.isFinite(lo.value) || !Number.isFinite(hi.value)) return null;
-  return { lo: lo.value, hi: hi.value };
+  if (!rounded && !isRounding(inside.args[0])) return null;
+  if (lo.kind !== 'num' || hi.kind !== 'num' || !Number.isInteger(lo.value) || !Number.isInteger(hi.value)) return null;
+  return hi.value > lo.value ? { lo: lo.value, hi: hi.value } : null;
 }
 
 const containsListLiteral = (e: Expr): boolean => e.kind === 'list' || childrenOf(e).some(containsListLiteral);
@@ -2108,8 +2123,8 @@ function boundList(loE: Expr, hiE: Expr, sym: string, ctx: Ctx): { name: string;
   const get = ctx.opts.getList;
   if (!get) return null;
   const names = [...new Set([...freeVars(loE), ...freeVars(hiE)])].filter(
-    // `in`, not a read: reading a slider here would mark it structural.
-    n => !(ctx.opts.consts && n in ctx.opts.consts) && !ctx.opts.openVars?.has(n) && ctx.opts.isList?.(n),
+    // isList first: reading a slider's value would mark it structural.
+    n => ctx.opts.isList?.(n) && !ctx.opts.openVars?.has(n) && ctx.opts.consts?.[n] === undefined,
   );
   if (!names.length) return null;
   if (names.length > 1) throw new Error(`${sym} bounds can use one list at a time (found ${names.join(' and ')}).`);

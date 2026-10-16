@@ -46,9 +46,39 @@ describe('Σ up to a clamped slider', () => {
 
   it('keeps the bound live: a drag moves a uniform rather than re-expanding', () => {
     expect(names(['N = round(clamp(19, 1, 50))', series])).toEqual(['N']);
-    expect(names(['N = clamp(round(3), 0, 8)', 'y = prod(k=1..N, 1 + x/k)'])).toEqual(['N']);
+    expect(names(['N = clamp(round(3), 0, 16)', 'y = sum(k=1..N, cos(k x)/k^2)'])).toEqual(['N']);
     // Without a declared range there is no last term to expand to.
     expect(names(['N = 19', series])).toEqual([]);
+  });
+
+  it('expands the current value for anything the shader cannot loop over', () => {
+    for (const rows of [
+      // A general body would evaluate every term up to the maximum at every N.
+      ['N = round(clamp(3, 1, 50))', 'y = sum(k=1..N, x^k/k)'],
+      ['N = round(clamp(3, 1, 50))', 'y = prod(k=1..N, 1 + x/k)'],
+      // Past fourierLoop's 128 harmonics.
+      ['N = round(clamp(3, 1, 500))', 'y = sum(k=1..N, sin(k x)/k)'],
+      // Not a whole number: rounding can pass the declared end, or a float N
+      // land just under one.
+      ['N = ceil(clamp(8.2, 1, 8.2))', 'y = sum(k=1..N, sin(k x)/k)'],
+      ['N = clamp(3, 1, 50)', series],
+    ]) {
+      const a = analyzeRows(rows);
+      expect(a.rows.map(row => row.error).filter(Boolean), rows[1]).toEqual([]);
+      expect(runtimeSliderNames(a).has('N'), rows[1]).toBe(false);
+    }
+  });
+
+  it('leaves points, and a parameter named like the slider, to the plain expansion', () => {
+    const point = analyzeRows(['N = round(clamp(3, 1, 50))', 'P = sum(k=1..N, (k, 1))', 'P']);
+    expect(point.rows.map(row => row.error).filter(Boolean)).toEqual([]);
+    // Whatever a parameter's bound reads, it must not take the slider's range.
+    const value = (n: string) => {
+      const object = analyzeRows([n, 'f(N) = sum(k=1..N, k)', 'y = f(100)']).rows[2].cls!.object;
+      if (object.kind !== 'curve' || object.form !== 'graph') throw new Error(object.kind);
+      return evaluate(object.rhs, { x: 0 });
+    };
+    expect(value('N = round(clamp(3, 1, 50))')).toBe(value('N = 3'));
   });
 
   it('gates each term on the slider, matching the plain expansion at every value', () => {

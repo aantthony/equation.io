@@ -395,6 +395,43 @@ function fmt(value: number): string {
  * its shader spelling becomes a coefficient table and a runtime loop.
  */
 function fourierLoop(e: Expr): { call: (reach: string) => string; position: Expr; count: Expr } | null {
+  const series = fourierSeries(e);
+  if (!series) return null;
+  const { base, table, position, count } = series;
+  // (value, slope, lower, upper): the series and its derivative at the
+  // position, and the band it stays in within `reach` of it. Each harmonic
+  // moves at most its amplitude times its rate times the reach, and never
+  // past its amplitude, so a harmonic too fast to resolve at that scale
+  // spans its whole range while a slow one stays near its value.
+  const name = declareHelper(
+    `uniform vec4 ${HELPER_SELF}_terms[${table.length}];
+vec4 ${HELPER_SELF}(float position, float count, float reach) {
+  vec4 result = vec4(${fmt(base)}, 0.0, ${fmt(base)}, ${fmt(base)});
+  for (int j = 0; j < ${table.length} && count >= ${HELPER_SELF}_terms[j].x; ++j) {
+    vec4 term = ${HELPER_SELF}_terms[j];
+    float angle = term.y * position;
+    vec2 phase = vec2(cos(angle), sin(angle));
+    float value = dot(term.zw, phase);
+    float amplitude = length(term.zw);
+    float travel = amplitude * abs(term.y) * reach;
+    result += vec4(
+      value,
+      term.y * dot(term.zw, vec2(-phase.y, phase.x)),
+      max(value - travel, -amplitude),
+      min(value + travel, amplitude));
+  }
+  return result;
+}`,
+    Float32Array.from(table.flat()),
+  );
+  const call = (reach: string) => `${name}(${toGLSL(position)}, ${toGLSL(count)}, ${reach})`;
+  return { call, position, count };
+}
+
+/** The constant, per-harmonic (gate, rate, cos, sin) rows, position and count
+ * of a gated sine/cosine sum fourierLoop can loop over, or null. Pure, so
+ * defs.ts can ask before choosing to gate a Σ. */
+export function fourierSeries(e: Expr): { base: number; table: number[][]; position: Expr; count: Expr } | null {
   if (e.kind !== 'bin' || e.op !== '+' || e.b.kind !== 'piecewise') return null;
   const terms: Expr[] = [];
   let base: Expr = e;
@@ -474,34 +511,7 @@ function fourierLoop(e: Expr): { call: (reach: string) => string; position: Expr
     }
     table.push([last, frequency!, cosine, sine]);
   }
-  // (value, slope, lower, upper): the series and its derivative at the
-  // position, and the band it stays in within `reach` of it. Each harmonic
-  // moves at most its amplitude times its rate times the reach, and never
-  // past its amplitude, so a harmonic too fast to resolve at that scale
-  // spans its whole range while a slow one stays near its value.
-  const name = declareHelper(
-    `uniform vec4 ${HELPER_SELF}_terms[${table.length}];
-vec4 ${HELPER_SELF}(float position, float count, float reach) {
-  vec4 result = vec4(${fmt(base.value)}, 0.0, ${fmt(base.value)}, ${fmt(base.value)});
-  for (int j = 0; j < ${table.length} && count >= ${HELPER_SELF}_terms[j].x; ++j) {
-    vec4 term = ${HELPER_SELF}_terms[j];
-    float angle = term.y * position;
-    vec2 phase = vec2(cos(angle), sin(angle));
-    float value = dot(term.zw, phase);
-    float amplitude = length(term.zw);
-    float travel = amplitude * abs(term.y) * reach;
-    result += vec4(
-      value,
-      term.y * dot(term.zw, vec2(-phase.y, phase.x)),
-      max(value - travel, -amplitude),
-      min(value + travel, amplitude));
-  }
-  return result;
-}`,
-    Float32Array.from(table.flat()),
-  );
-  const call = (reach: string) => `${name}(${toGLSL(position!)}, ${toGLSL(count!)}, ${reach})`;
-  return { call, position: position!, count: count! };
+  return { base: base.value, table, position: position!, count: count! };
 }
 
 /** Only a complete series at an affine position with a spatially constant
@@ -512,11 +522,11 @@ vec4 ${HELPER_SELF}(float position, float count, float reach) {
  * the position, and the band the curve stays in within reach of x.
  */
 export function fourierGraphGLSL(e: Expr): { glsl: string; slopeScale: number } | undefined {
-  const { inner, scale, offset } = affineOf(e);
-  if (!Number.isFinite(scale) || !Number.isFinite(offset) || scale === 0) return;
-  const loop = fourierLoop(inner);
-  if (!loop || freeVars(loop.count).has('x')) return;
   try {
+    const { inner, scale, offset } = affineOf(e);
+    if (!Number.isFinite(scale) || !Number.isFinite(offset) || scale === 0) return;
+    const loop = fourierLoop(inner);
+    if (!loop || freeVars(loop.count).has('x')) return;
     const derivative = diff(loop.position, 'x');
     if (derivative.kind === 'num' && Number.isFinite(derivative.value)) {
       let glsl = loop.call(`${fmt(Math.abs(derivative.value))} * reach`);
@@ -532,7 +542,8 @@ export function fourierGraphGLSL(e: Expr): { glsl: string; slopeScale: number } 
       return { glsl, slopeScale: derivative.value };
     }
   } catch {
-    // A discontinuous or nonlinear position uses the general curve shader.
+    // A discontinuous or nonlinear position, or a constant factor evaluate()
+    // cannot reduce, uses the general curve shader.
   }
 }
 
